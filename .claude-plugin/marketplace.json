@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Spec-Driven Development - AI collaborative development process with GitHub integration",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "plugins": [
     {
@@ -15,7 +15,7 @@
         "repo": "dev-yakuza/sdd-plugin"
       },
       "description": "SDD process: analyze → design → implement (TDD) → test",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": {
         "name": "dev-yakuza"
       },
