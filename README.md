@@ -5,7 +5,8 @@ AI collaborative development process for Claude Code. Manages the full developme
 ## Installation
 
 ```bash
-claude /plugin install --from github:dev-yakuza/sdd-plugin
+claude /plugin marketplace add dev-yakuza/sdd-plugin
+claude /plugin install sdd-plugin@sdd-plugin
 ```
 
 ## Quick Start
