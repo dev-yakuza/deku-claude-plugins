@@ -10,7 +10,10 @@
   "plugins": [
     {
       "name": "sdd-plugin",
-      "source": ".",
+      "source": {
+        "source": "github",
+        "repo": "dev-yakuza/sdd-plugin"
+      },
       "description": "SDD process: analyze → design → implement (TDD) → test",
       "version": "0.1.0",
       "author": {
