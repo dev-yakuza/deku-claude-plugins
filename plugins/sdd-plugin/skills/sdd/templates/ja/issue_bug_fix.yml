@@ -11,7 +11,7 @@ body:
     attributes:
       label: "背景"
       description: "このバグをどのように再現できますか？"
-      placeholder: |
+      value: |
         - 再現手順:
         - 現在の動作 (バグ):
         - 期待される動作:
@@ -23,7 +23,7 @@ body:
     attributes:
       label: "バグ詳細"
       description: "バグに関する追加情報"
-      placeholder: |
+      value: |
         - 概要:
         - エラーログ / スタックトレース: (あれば)
         - スクリーンショット: (あれば)
@@ -37,7 +37,7 @@ body:
     attributes:
       label: "完了基準 (Definition of Done)"
       description: "このバグが修正されたとみなされる基準は？"
-      placeholder: |
+      value: |
         - [ ] バグが再現されないこと
         - [ ] 既存テストが通過すること
         - [ ] 基準 3:

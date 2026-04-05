@@ -11,7 +11,7 @@ body:
     attributes:
       label: "背景"
       description: "なぜこの機能が必要ですか？"
-      placeholder: |
+      value: |
         - 問題 / 動機:
         - ユーザーフィードバック: (あれば)
     validations:
@@ -22,7 +22,7 @@ body:
     attributes:
       label: "機能説明"
       description: "何を作る必要がありますか？"
-      placeholder: |
+      value: |
         - 概要:
         - 詳細説明: (具体的な動作フロー、使用シナリオ)
         - 対象画面: (どの画面に追加？新しい画面？)
@@ -35,7 +35,7 @@ body:
     attributes:
       label: "完了基準 (Definition of Done)"
       description: "この機能が完了とみなされる基準は？"
-      placeholder: |
+      value: |
         - [ ] 基準 1:
         - [ ] 基準 2:
         - [ ] 基準 3:

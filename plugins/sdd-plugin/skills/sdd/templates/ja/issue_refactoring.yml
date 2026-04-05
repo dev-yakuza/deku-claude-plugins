@@ -11,7 +11,7 @@ body:
     attributes:
       label: "背景"
       description: "現在のコードのどこが問題ですか？"
-      placeholder: |
+      value: |
         - 問題 / 動機:
         - 改善方向:
     validations:
@@ -22,7 +22,7 @@ body:
     attributes:
       label: "リファクタリング説明"
       description: "何をリファクタリングする必要がありますか？"
-      placeholder: |
+      value: |
         - 概要:
         - 対象コードパス:
         - 動作変更の有無: (変更なし / あり — ありの場合は詳細記述)
@@ -35,7 +35,7 @@ body:
     attributes:
       label: "完了基準 (Definition of Done)"
       description: "このリファクタリングが完了とみなされる基準は？"
-      placeholder: |
+      value: |
         - [ ] 既存テスト全て通過
         - [ ] 外部動作の変更なし
         - [ ] 基準 3:

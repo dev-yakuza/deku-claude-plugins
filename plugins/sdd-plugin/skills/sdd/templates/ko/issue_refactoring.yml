@@ -11,7 +11,7 @@ body:
     attributes:
       label: "요청 배경"
       description: "현재 코드의 어떤 점이 문제인가요?"
-      placeholder: |
+      value: |
         - 문제 / 동기:
         - 개선 방향:
     validations:
@@ -22,7 +22,7 @@ body:
     attributes:
       label: "리팩터링 설명"
       description: "무엇을 리팩터링해야 하나요?"
-      placeholder: |
+      value: |
         - 한 줄 요약:
         - 대상 코드 경로:
         - 동작 변경 여부: (변경 없음 / 있음 — 있다면 상세 기술)
@@ -35,7 +35,7 @@ body:
     attributes:
       label: "완료 기준 (Definition of Done)"
       description: "이 리팩터링이 완료된 것으로 간주되는 기준은?"
-      placeholder: |
+      value: |
         - [ ] 기존 테스트 전체 통과
         - [ ] 외부 동작 변경 없음
         - [ ] 기준 3:

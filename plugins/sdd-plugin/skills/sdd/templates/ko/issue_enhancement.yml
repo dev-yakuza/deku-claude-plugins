@@ -11,7 +11,7 @@ body:
     attributes:
       label: "요청 배경"
       description: "현재 기능의 어떤 점이 부족한가요?"
-      placeholder: |
+      value: |
         - 문제 / 동기:
         - 사용자 피드백: (있다면)
     validations:
@@ -22,7 +22,7 @@ body:
     attributes:
       label: "기능 설명"
       description: "무엇을 변경해야 하나요?"
-      placeholder: |
+      value: |
         - 한 줄 요약:
         - 현재 동작:
         - 원하는 동작:
@@ -36,7 +36,7 @@ body:
     attributes:
       label: "완료 기준 (Definition of Done)"
       description: "이 개선이 완료된 것으로 간주되는 기준은?"
-      placeholder: |
+      value: |
         - [ ] 기준 1:
         - [ ] 기준 2:
         - [ ] 기준 3:

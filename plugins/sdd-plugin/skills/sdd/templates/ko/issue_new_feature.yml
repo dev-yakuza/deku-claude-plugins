@@ -11,7 +11,7 @@ body:
     attributes:
       label: "요청 배경"
       description: "이 기능이 왜 필요한가요?"
-      placeholder: |
+      value: |
         - 문제 / 동기:
         - 사용자 피드백: (있다면)
     validations:
@@ -22,7 +22,7 @@ body:
     attributes:
       label: "기능 설명"
       description: "무엇을 만들어야 하나요?"
-      placeholder: |
+      value: |
         - 한 줄 요약:
         - 상세 설명: (구체적인 동작 흐름, 사용 시나리오)
         - 대상 화면: (어떤 화면에 추가? 새 화면?)
@@ -35,7 +35,7 @@ body:
     attributes:
       label: "완료 기준 (Definition of Done)"
       description: "이 기능이 완료된 것으로 간주되는 기준은?"
-      placeholder: |
+      value: |
         - [ ] 기준 1:
         - [ ] 기준 2:
         - [ ] 기준 3:

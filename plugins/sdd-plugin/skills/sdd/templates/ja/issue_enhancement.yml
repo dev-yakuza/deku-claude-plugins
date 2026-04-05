@@ -11,7 +11,7 @@ body:
     attributes:
       label: "背景"
       description: "現在の機能のどこが不十分ですか？"
-      placeholder: |
+      value: |
         - 問題 / 動機:
         - ユーザーフィードバック: (あれば)
     validations:
@@ -22,7 +22,7 @@ body:
     attributes:
       label: "機能説明"
       description: "何を変更する必要がありますか？"
-      placeholder: |
+      value: |
         - 概要:
         - 現在の動作:
         - 望ましい動作:
@@ -36,7 +36,7 @@ body:
     attributes:
       label: "完了基準 (Definition of Done)"
       description: "この改善が完了とみなされる基準は？"
-      placeholder: |
+      value: |
         - [ ] 基準 1:
         - [ ] 基準 2:
         - [ ] 基準 3:

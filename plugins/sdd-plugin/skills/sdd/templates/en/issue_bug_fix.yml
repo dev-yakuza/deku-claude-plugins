@@ -11,7 +11,7 @@ body:
     attributes:
       label: "Background"
       description: "How to reproduce this bug?"
-      placeholder: |
+      value: |
         - Steps to reproduce:
         - Current behavior (bug):
         - Expected behavior:
@@ -23,7 +23,7 @@ body:
     attributes:
       label: "Bug Details"
       description: "Additional information about the bug"
-      placeholder: |
+      value: |
         - Summary:
         - Error log / Stack trace: (if any)
         - Screenshots: (if any)
@@ -37,7 +37,7 @@ body:
     attributes:
       label: "Definition of Done"
       description: "When is this bug considered fixed?"
-      placeholder: |
+      value: |
         - [ ] Bug is no longer reproducible
         - [ ] Existing tests pass
         - [ ] Criteria 3:

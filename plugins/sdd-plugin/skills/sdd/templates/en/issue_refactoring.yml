@@ -11,7 +11,7 @@ body:
     attributes:
       label: "Background"
       description: "What is the problem with the current code?"
-      placeholder: |
+      value: |
         - Problem / Motivation:
         - Improvement direction:
     validations:
@@ -22,7 +22,7 @@ body:
     attributes:
       label: "Refactoring Description"
       description: "What should be refactored?"
-      placeholder: |
+      value: |
         - Summary:
         - Target code path:
         - Behavior change: (no change / change - describe if changed)
@@ -35,7 +35,7 @@ body:
     attributes:
       label: "Definition of Done"
       description: "When is this refactoring considered complete?"
-      placeholder: |
+      value: |
         - [ ] All existing tests pass
         - [ ] No external behavior change
         - [ ] Criteria 3:

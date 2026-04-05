@@ -11,7 +11,7 @@ body:
     attributes:
       label: "요청 배경"
       description: "이 버그를 어떻게 재현할 수 있나요?"
-      placeholder: |
+      value: |
         - 재현 조건:
         - 현재 동작 (버그):
         - 기대 동작:
@@ -23,7 +23,7 @@ body:
     attributes:
       label: "버그 상세"
       description: "버그에 대한 추가 정보"
-      placeholder: |
+      value: |
         - 한 줄 요약:
         - 에러 로그 / 스택 트레이스: (있다면)
         - 스크린샷: (있다면)
@@ -37,7 +37,7 @@ body:
     attributes:
       label: "완료 기준 (Definition of Done)"
       description: "이 버그가 수정된 것으로 간주되는 기준은?"
-      placeholder: |
+      value: |
         - [ ] 버그가 재현되지 않음
         - [ ] 기존 테스트 통과
         - [ ] 기준 3:

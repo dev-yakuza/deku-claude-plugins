@@ -11,7 +11,7 @@ body:
     attributes:
       label: "Background"
       description: "Why is this feature needed?"
-      placeholder: |
+      value: |
         - Problem / Motivation:
         - User feedback: (if any)
     validations:
@@ -22,7 +22,7 @@ body:
     attributes:
       label: "Feature Description"
       description: "What should be built?"
-      placeholder: |
+      value: |
         - Summary:
         - Detailed description: (specific behavior, user scenario)
         - Target screen: (which screen? new screen?)
@@ -35,7 +35,7 @@ body:
     attributes:
       label: "Definition of Done"
       description: "When is this feature considered complete?"
-      placeholder: |
+      value: |
         - [ ] Criteria 1:
         - [ ] Criteria 2:
         - [ ] Criteria 3:
