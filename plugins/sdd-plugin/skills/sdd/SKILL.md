@@ -42,6 +42,7 @@ Set up SDD for the current GitHub repository.
    gh label create "sdd:implement" --color "e4e669" --description "SDD: Implementation" --force
    gh label create "sdd:test" --color "f9d0c4" --description "SDD: Testing" --force
    gh label create "sdd:done" --color "0075ca" --description "SDD: Done" --force
+   gh label create "sdd:child" --color "d4c5f9" --description "SDD: Child Issue" --force
    ```
 4. Report completion with a summary of what was installed.
 
@@ -55,12 +56,18 @@ Focus ONLY on What and Why. Do NOT discuss How (technical implementation).
 
 ### Process:
 1. Read the Issue: `gh issue view $1`
-2. Classify the request type (new feature / enhancement / bug fix / refactoring)
-3. Analyze What (feature list) and Why (background, motivation)
-4. If information is missing, ask the user (do NOT ask How questions)
-5. Split into feature list with priorities
-6. Read the language setting from `.github/.sdd-lang` (default: en)
-7. Format output using the template in `${CLAUDE_SKILL_DIR}/templates/{lang}/output_analyze.md`
+2. Check if this is a child Issue (body contains `Parent Issue: #<number>`):
+   - If yes: read the parent Issue's analyze and design outputs for context
+     ```bash
+     gh api repos/{owner}/{repo}/issues/<parent>/comments --jq '.[].body'
+     ```
+   - Use parent context to understand the broader scope, but focus analysis on this child's sub-feature only
+3. Classify the request type (new feature / enhancement / bug fix / refactoring)
+4. Analyze What (feature list) and Why (background, motivation)
+5. If information is missing, ask the user (do NOT ask How questions)
+6. Split into feature list with priorities
+7. Read the language setting from `.github/.sdd-lang` (default: en)
+8. Format output using the template in `${CLAUDE_SKILL_DIR}/templates/{lang}/output_analyze.md`
 
 ### Self-Review:
 - Check for missing features, ambiguous descriptions
@@ -96,7 +103,14 @@ Define HOW to implement based on the requirements.
    ```bash
    gh api repos/{owner}/{repo}/issues/$1/comments --jq '.[].body' | grep -A 1000 'sdd:analyze:output' | grep -B 1000 '/sdd:analyze:output'
    ```
-2. Explore the codebase — analyze existing architecture and patterns
+2. Check if this is a child Issue (body contains `Parent Issue: #<number>`):
+   - If yes: read the parent Issue's design output for context (architecture decisions, PR split rationale, constraints)
+     ```bash
+     gh api repos/{owner}/{repo}/issues/<parent>/comments --jq '.[].body' | grep -A 1000 'sdd:design:output' | grep -B 1000 '/sdd:design:output'
+     ```
+   - The child's design must be consistent with the parent's overall architecture and design decisions
+   - Focus on the detailed design for this child's sub-feature only
+3. Explore the codebase — analyze existing architecture and patterns
 3. Identify impact scope (related files, screens, data)
 4. Design file structure changes
 5. Design data model changes (if applicable)
@@ -127,7 +141,7 @@ When the design identifies 2 or more PRs, create a child Issue for each sub-feat
    - Replace `{{parent_issue}}` with `$1`, `{{sub_feature_description}}` and `{{criteria}}` with design content
    ```bash
    gh issue create --title "[SDD Child] <parent title> - <sub-feature name>" \
-     --body "<formatted body from template>" --label "sdd:analyze"
+     --body "<formatted body from template>" --label "sdd:analyze" --label "sdd:child"
    ```
 3. Post the child Issue list as a comment on the parent Issue using the template in `${CLAUDE_SKILL_DIR}/templates/{lang}/output_children.md`
    - Add a row for each created child Issue to the table
@@ -159,7 +173,9 @@ Test scope: Unit tests / UI tests (widget tests, golden tests, etc.)
 
 #### 3-0. PR Kickoff: Plan
 1. Read design output from Issue comments
-2. Create feature branch (`feat/feature-name`)
+2. Create feature branch:
+   - Single Issue: `feat/<feature-name>`
+   - Child Issue: `feat/<parent-feature>/<child-feature>` (e.g. `feat/user-profile/avatar-upload`)
 3. Write test plan for this PR
 4. Write implementation plan based on test plan
 5. **Self-review**: verify test coverage and feasibility
@@ -185,7 +201,9 @@ Test scope: Unit tests / UI tests (widget tests, golden tests, etc.)
 
 #### 3-4. PR Creation & Code Review
 1. Summarize changes
-2. Create PR: `gh pr create --title "..." --body "Closes #$1\n\n..."`
+2. Create PR:
+   - Single Issue: `gh pr create --title "..." --body "Closes #$1\n\n..."`
+   - Child Issue: `gh pr create --title "..." --body "Closes #$1\nParent Issue: #<parent>\n\n..."`
 3. Re-run all tests → confirm pass
 4. **Self-review**: check code consistency, verify no missing features
 5. **User review**: final confirmation
