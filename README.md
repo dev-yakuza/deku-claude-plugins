@@ -35,6 +35,7 @@ claude /plugin install sdd-plugin@sdd-plugin
 | `/sdd design <issue>` | Stage 2: Design (How) |
 | `/sdd implement <issue>` | Stage 3: TDD Implementation |
 | `/sdd test <issue>` | Stage 4: E2E/QA Testing |
+| `/sdd resume <issue>` | Auto-detect stage and continue from where it left off |
 | `/sdd status <issue>` | Check current progress |
 | `/sdd review <issue>` | AI review of current output |
 | `/sdd help` | Show usage |

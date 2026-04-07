@@ -16,6 +16,7 @@ You are executing the SDD process. Route to the appropriate command based on `$0
 - If `$0` is "design" → execute **DESIGN** with issue `$1`
 - If `$0` is "implement" → execute **IMPLEMENT** with issue `$1`
 - If `$0` is "test" → execute **TEST** with issue `$1`
+- If `$0` is "resume" → execute **RESUME** with issue `$1`
 - If `$0` is "status" → execute **STATUS** with issue `$1`
 - If `$0` is "review" → execute **REVIEW** with issue `$1`
 - If `$0` is "help" or empty → execute **HELP**
@@ -194,6 +195,51 @@ gh issue edit $1 --remove-label "sdd:test" --add-label "sdd:done"
 
 ---
 
+## RESUME
+
+**Resume work on an Issue from where it left off.**
+
+Automatically detect the current stage and continue the process.
+
+### Process:
+1. Read Issue labels to determine current stage:
+   ```bash
+   gh issue view $1 --json labels,title --jq '{title: .title, labels: [.labels[].name]}'
+   ```
+2. Check Issue comments for existing stage outputs:
+   ```bash
+   gh api repos/{owner}/{repo}/issues/$1/comments --jq '.[].body'
+   ```
+   - Check for `<!-- sdd:analyze:output -->` marker
+   - Check for `<!-- sdd:design:output -->` marker
+3. Check related PRs and their status:
+   ```bash
+   gh pr list --search "issue:$1" --json number,title,state
+   ```
+4. Determine resume point based on findings:
+
+   | Label | Output exists? | Action |
+   |-------|---------------|--------|
+   | `sdd:analyze` | No analyze output | Execute **ANALYZE** |
+   | `sdd:design` | Analyze output exists, no design output | Execute **DESIGN** |
+   | `sdd:implement` | Design output exists | Execute **IMPLEMENT** (check PR progress to determine sub-step) |
+   | `sdd:test` | Implementation PRs merged | Execute **TEST** |
+   | `sdd:done` | All complete | Report: Issue is already complete |
+   | No SDD label | — | Add `sdd:analyze` label and execute **ANALYZE** |
+
+5. For `sdd:implement` stage, further check sub-step:
+   - If no open PRs and remaining features in design → start next PR (3-0)
+   - If open PR exists → check branch, read PR diff, and continue TDD cycle
+6. Report current status to user before continuing:
+   ```
+   Issue #$1: <title>
+   Current stage: <stage>
+   Resuming from: <specific point>
+   ```
+7. Ask user for confirmation, then execute the appropriate stage command
+
+---
+
 ## STATUS
 
 Check the current progress of an Issue.
@@ -246,6 +292,7 @@ Commands:
   /sdd design <issue>    Stage 2: Design (How)
   /sdd implement <issue> Stage 3: Implementation with TDD (Red → Green → Refactor)
   /sdd test <issue>      Stage 4: E2E and QA Testing
+  /sdd resume <issue>    Auto-detect current stage and continue from where it left off
   /sdd status <issue>    Check current progress
   /sdd review <issue>    AI review of current stage output
   /sdd help              Show this help message
@@ -257,4 +304,6 @@ Workflow:
   4. /sdd design <issue>    → designs How, posts output to Issue
   5. /sdd implement <issue> → TDD cycle per PR
   6. /sdd test <issue>      → E2E tests and QA
+
+  Interrupted? Run: /sdd resume <issue> → auto-detects stage and continues
 ```
