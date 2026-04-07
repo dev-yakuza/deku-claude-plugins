@@ -80,6 +80,27 @@ Test scope: Unit tests / UI tests
 - QA checklist (AI creates, human executes)
 - Regression testing
 
+### Multi-PR Workflow (Parent/Child Issues)
+
+When the design stage identifies multiple PRs, SDD automatically creates child Issues:
+
+```bash
+/sdd analyze 100    # Analyze parent Issue
+/sdd design 100     # Design splits into 3 sub-features → creates #101, #102, #103
+
+# Work on each child Issue independently
+/sdd analyze 101    # Child inherits parent context
+/sdd design 101
+/sdd implement 101
+/sdd test 101       # Child #101 done → parent status updated
+
+/sdd resume 100     # Check parent: shows #101 ✓, #102 pending, #103 pending
+/sdd analyze 102    # Continue with next child...
+
+# After all children are done
+/sdd test 100       # Parent-level E2E/QA testing
+```
+
 ## GitHub Integration
 
 All outputs are stored in GitHub — no separate file management needed.

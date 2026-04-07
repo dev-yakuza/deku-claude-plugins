@@ -139,7 +139,7 @@ When the design identifies 2 or more PRs, create a child Issue for each sub-feat
 1. Read the language setting from `.github/.sdd-lang` (default: en)
 2. For each sub-feature in the design:
    - Format the child Issue body using the template in `${CLAUDE_SKILL_DIR}/templates/{lang}/output_child_issue.md`
-   - Replace `{{parent_issue}}` with `$1`, `{{sub_feature_description}}` and `{{criteria}}` with design content
+   - Replace `{{parent_issue}}` with `$1`, `{{sub_feature_description}}` with design content, and `{{#each criteria}}` with the list of Definition of Done items from the design
    ```bash
    gh issue create --title "[SDD Child] <parent title> - <sub-feature name>" \
      --body "<formatted body from template>" --label "sdd:analyze" --label "sdd:child"
@@ -252,11 +252,22 @@ Unit/UI tests are already done in Stage 3. This stage focuses on E2E and QA.
    - If ALL child Issues are `sdd:done` → proceed with parent-level E2E/QA below
 2. **Single Issue or Child Issue**: proceed with E2E/QA below
 
+### 4-0. Test Setup:
+1. Explore the codebase to detect the project's existing test setup:
+   - Test framework (e.g. Jest, Pytest, Go test, Playwright, Cypress, etc.)
+   - Test directory structure (e.g. `tests/`, `__tests__/`, `e2e/`, etc.)
+   - Test run command (e.g. `npm test`, `pytest`, `go test ./...`, etc.)
+   - Test configuration files (e.g. `jest.config.js`, `playwright.config.ts`, etc.)
+2. If no existing E2E test setup is found:
+   - Recommend a framework based on the project's tech stack
+   - Ask user for confirmation before setting up
+3. Report detected test setup to user
+
 ### 4-1. E2E Test (AI writes and runs):
 1. Read analyze/design outputs from Issue comments
 2. If parent Issue: read all child Issues' implementation PRs to understand what was built
 3. If single/child Issue: read implementation PR
-4. Write E2E test code (integration tests)
+4. Write E2E test code using the detected framework, following existing test patterns and directory structure
 5. Start test environment → run E2E tests → check results
 6. **Self-review**: analyze test logs, verify coverage, estimate bug causes
    - If E2E tests fail → fix test code or identify bugs
@@ -340,8 +351,11 @@ Determine resume point based on findings:
    | No SDD label | — | Add `sdd:analyze` label and execute **ANALYZE** |
 
 For `sdd:implement` stage, further check sub-step:
-   - If no open PRs → start PR (3-0)
+   - If no open PRs and no merged PRs → start PR (3-0)
    - If open PR exists → check branch, read PR diff, and continue TDD cycle
+   - If PR was closed (not merged) → warn user, ask whether to reopen or start a new PR
+   - If branch exists but no PR → ask user whether to create PR from existing branch or start fresh
+   - If PR exists but branch was deleted → start a new branch and PR (3-0)
 
 Report current status to user before continuing:
    ```

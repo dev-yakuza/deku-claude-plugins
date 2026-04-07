@@ -8,5 +8,7 @@ This is a child Issue created from the SDD design phase of #{{parent_issue}}.
 {{sub_feature_description}}
 
 ## Definition of Done
-- [ ] {{criteria}}
+{{#each criteria}}
+- [ ] {{this}}
+{{/each}}
 <!-- /sdd:child-issue -->
