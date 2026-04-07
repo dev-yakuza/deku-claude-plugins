@@ -252,27 +252,32 @@ Unit/UI tests are already done in Stage 3. This stage focuses on E2E and QA.
    - If ALL child Issues are `sdd:done` → proceed with parent-level E2E/QA below
 2. **Single Issue or Child Issue**: proceed with E2E/QA below
 
-### Process:
+### 4-1. E2E Test (AI writes and runs):
 1. Read analyze/design outputs from Issue comments
 2. If parent Issue: read all child Issues' implementation PRs to understand what was built
 3. If single/child Issue: read implementation PR
 4. Write E2E test code (integration tests)
 5. Start test environment → run E2E tests → check results
-6. Create QA checklist based on requirements
-7. Identify regression test targets
+6. **Self-review**: analyze test logs, verify coverage, estimate bug causes
+   - If E2E tests fail → fix test code or identify bugs
+   - If bugs found → go back to Stage 3 for TDD bug fix cycle
+7. **User review**: confirm E2E test code and results
 
-### User Tasks:
-1. Manual QA testing based on checklist
-2. Run regression tests
+### 4-2. QA Checklist (AI creates, AI + User review):
+1. Create QA checklist based on requirements
+2. Identify regression test targets
+3. **Self-review**: check for missing test scenarios, edge cases, and regression risks
+4. **User review**: confirm QA checklist is complete and correct
+   - User may add/remove/modify checklist items
 
-### Self-Review:
-- Analyze test logs, estimate bug causes
-- If E2E tests fail, fix test code or identify bugs
-- If bugs found → go back to Stage 3 for TDD bug fix cycle
+### 4-3. Manual QA (User executes):
+1. User performs manual QA testing based on the approved checklist
+2. User runs regression tests
+3. User reports results (pass/fail per checklist item)
 
-### User Review:
-- Confirm all test results
-- All tests pass → update label to `sdd:done`
+### 4-4. Results Review:
+1. If any QA item fails → analyze cause, go back to Stage 3 for TDD bug fix cycle
+2. All tests pass → update label to `sdd:done`
 
 ```bash
 gh issue edit $1 --remove-label "sdd:test" --add-label "sdd:done"
