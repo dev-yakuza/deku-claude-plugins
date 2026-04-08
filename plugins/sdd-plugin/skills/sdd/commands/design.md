@@ -17,8 +17,15 @@ Define HOW to implement based on the requirements.
      ```
    - The child's design must be consistent with the parent's overall architecture and design decisions
    - Focus on the detailed design for this child's sub-feature only
-3. Explore the codebase — analyze existing architecture and patterns
-4. Identify impact scope (related files, screens, data)
+3. Explore the codebase using a **dedicated Explore agent** (Agent tool with `subagent_type: Explore`):
+   - Provide the agent with the analyze output and ask it to investigate:
+     - Existing architecture and patterns relevant to the requirements
+     - Files, modules, and dependencies that would be affected
+     - Existing test structure and conventions
+     - Similar implementations in the codebase that can be referenced
+   - Do **NOT** share design ideas with the agent — let it explore objectively
+   - Use the agent's findings as input for the design steps below
+4. Identify impact scope (related files, screens, data) based on exploration results
 5. Design file structure changes
 6. Design data model changes (if applicable)
 7. Identify constraints and risks
