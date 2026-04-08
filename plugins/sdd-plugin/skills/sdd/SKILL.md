@@ -49,6 +49,9 @@ Read `${CLAUDE_SKILL_DIR}/commands/$0.md` and execute. Pass `$1` as issue number
 - Set by `/sdd init [lang]`
 - Languages: `en` (default), `ko`/`korean`/`한국어`, `ja`/`japanese`/`日本語`
 
+### Repository Owner/Repo
+Commands using `gh api` need `{owner}/{repo}`. Obtain via: `gh repo view --json nameWithOwner -q .nameWithOwner`
+
 ### Duplicate Output Prevention
 Before posting a stage output, search Issue comments for the matching marker. If found → update that comment. If not → create new comment.
 
