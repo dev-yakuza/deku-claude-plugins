@@ -13,17 +13,10 @@ You are executing the SDD process. Route to the appropriate command based on `$0
 
 ## Command Routing
 
-- If `$0` is "init" → read `${CLAUDE_SKILL_DIR}/commands/init.md` and execute with language `$1` (default: en)
-- If `$0` is "analyze" → read `${CLAUDE_SKILL_DIR}/commands/analyze.md` and execute with issue `$1`
-- If `$0` is "design" → read `${CLAUDE_SKILL_DIR}/commands/design.md` and execute with issue `$1`
-- If `$0` is "implement" → read `${CLAUDE_SKILL_DIR}/commands/implement.md` and execute with issue `$1`
-- If `$0` is "test" → read `${CLAUDE_SKILL_DIR}/commands/test.md` and execute with issue `$1`
-- If `$0` is "resume" → read `${CLAUDE_SKILL_DIR}/commands/resume.md` and execute with issue `$1`
-- If `$0` is "status" → read `${CLAUDE_SKILL_DIR}/commands/status.md` and execute with issue `$1`
-- If `$0` is "review" → read `${CLAUDE_SKILL_DIR}/commands/review.md` and execute with issue `$1`
-- If `$0` is "rollback" → read `${CLAUDE_SKILL_DIR}/commands/rollback.md` and execute with issue `$1` and target stage `$2`
-- If `$0` is "help" or empty → read `${CLAUDE_SKILL_DIR}/commands/help.md` and display
-- If `$0` is anything else → report unknown command, then read `${CLAUDE_SKILL_DIR}/commands/help.md` and display
+Read `${CLAUDE_SKILL_DIR}/commands/$0.md` and execute. Pass `$1` as issue number (or language for init), `$2` as target stage for rollback.
+- Valid commands: `init`, `analyze`, `design`, `implement`, `test`, `resume`, `status`, `review`, `rollback`, `help`
+- If `$0` is empty → route to `help`
+- If `$0` is not in the list above → report unknown command, then route to `help`
 
 ---
 
