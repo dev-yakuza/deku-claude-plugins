@@ -13,7 +13,7 @@ claude /plugin install deku-claude-plugins@<plugin-name>
 
 | Plugin | Description | Docs |
 |--------|-------------|------|
-| [sdd-plugin](./plugins/sdd-plugin) | Spec-Driven Development - AI collaborative development process with GitHub integration | [docs](./docs/sdd-plugin.md) |
+| [sdd-plugin](./plugins/sdd-plugin) | Spec-Driven Development - AI collaborative development process with GitHub integration | [docs](./plugins/sdd-plugin/README.md) |
 
 ## License
 
