@@ -26,7 +26,10 @@ Focus ONLY on What and Why. Do NOT discuss How (technical implementation).
 - Verify What/Why are sufficient
 - If issues found, go back and improve
 
+## AI Review:
+Read `${CLAUDE_SKILL_DIR}/commands/ai-review.md` and execute with the output above (stage: **analyze**).
+
 ## User Review:
-- Present the output to the user
+- Present the output to the user with self-review and AI review results
 - Ask for confirmation on direction and priorities
 - On approval: post as Issue comment (using duplicate prevention from Common Definitions) and update label to `sdd:design`

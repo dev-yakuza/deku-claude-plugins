@@ -33,7 +33,8 @@ Unit/UI tests are already done in Stage 3. This stage focuses on E2E and QA.
 6. **Self-review**: analyze test logs, verify coverage, estimate bug causes
    - If E2E tests fail → fix test code or identify bugs
    - If bugs found → go back to Stage 3 for TDD bug fix cycle
-7. **User review**: confirm E2E test code and results
+7. **AI Review**: Read `${CLAUDE_SKILL_DIR}/commands/ai-review.md` and execute with E2E test results (stage: **test**)
+8. **User review**: present self-review and AI review results, confirm E2E test code and results
 
 ## 4-2. QA Checklist (AI creates, AI + User review):
 1. Create QA checklist based on requirements

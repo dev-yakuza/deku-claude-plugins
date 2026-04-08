@@ -31,8 +31,11 @@ Define HOW to implement based on the requirements.
 - Check for missing impact scope
 - Assess feasibility
 
+## AI Review:
+Read `${CLAUDE_SKILL_DIR}/commands/ai-review.md` and execute with the output above (stage: **design**).
+
 ## User Review:
-- Present the output to the user
+- Present the output to the user with self-review and AI review results
 - Ask for confirmation on technical approach and PR split
 - On approval:
   - Post as Issue comment (using duplicate prevention from Common Definitions)
