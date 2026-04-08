@@ -17,7 +17,7 @@ Define HOW to implement based on the requirements.
      ```
    - The child's design must be consistent with the parent's overall architecture and design decisions
    - Focus on the detailed design for this child's sub-feature only
-3. Explore the codebase using a **dedicated Explore agent** (Agent tool with `subagent_type: Explore`):
+3. Explore the codebase using a **dedicated Explore agent** (Agent tool with `subagent_type: Explore`, `model: "sonnet"`):
    - Provide the agent with the analyze output and ask it to investigate:
      - Existing architecture and patterns relevant to the requirements
      - Files, modules, and dependencies that would be affected
