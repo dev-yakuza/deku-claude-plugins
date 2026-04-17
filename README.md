@@ -1,6 +1,8 @@
+[English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md)
+
 # deku-claude-plugins
 
-A collection of Claude Code plugins by [dev-yakuza](https://github.com/dev-yakuza).
+A marketplace of Claude Code plugins for development.
 
 ## Installation
 

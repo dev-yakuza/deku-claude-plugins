@@ -1,3 +1,5 @@
+[English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md)
+
 # SDD Plugin (Spec-Driven Development)
 
 AI collaborative development process for Claude Code. Manages the full development lifecycle through GitHub Issues with a structured process.
