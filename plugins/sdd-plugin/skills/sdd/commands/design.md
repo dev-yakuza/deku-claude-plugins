@@ -42,7 +42,7 @@ Read `${CLAUDE_SKILL_DIR}/commands/ai-review.md` and execute with the output abo
    - Log: "User review skipped (skip-review: design)"
    - Auto-approve:
      - Post as Issue comment (using duplicate prevention from Common Definitions)
-     - If **single PR** → update label to `sdd:implement`
+     - If **single PR** → update label to `sdd:implement`, then **auto-proceed**: read `${CLAUDE_SKILL_DIR}/commands/implement.md` and execute immediately with the same issue number
      - If **multiple PRs** → execute **Child Issue Creation** below
 3. If `design` is NOT in skip-review:
    - Present the output to the user with review loop results (rounds, issues fixed, verdict)

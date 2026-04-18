@@ -73,6 +73,7 @@ Test scope: Unit tests / UI tests (widget tests, golden tests, etc.)
    - If `pr` is in skip-review → log "User review skipped (skip-review: pr)" and proceed
    - Otherwise → present review loop results (rounds, issues fixed, verdict), final confirmation
 7. Update label to `sdd:test`
+8. If `pr` is in skip-review → **auto-proceed**: read `${CLAUDE_SKILL_DIR}/commands/test.md` and execute immediately with the same issue number
 
 ## After child Issue reaches `sdd:done`:
 

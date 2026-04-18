@@ -53,7 +53,7 @@ Read `${CLAUDE_SKILL_DIR}/commands/$0.md` and execute. Pass `$1` as issue number
 - Stored in `.github/.sdd-config` as `skip-review: <values>`
 - Set by `/sdd config --skip-review=<values>`
 - Values: `analyze`, `design`, `implement`, `pr`, `qa` (comma-separated)
-- When a stage's review is skipped, AI review still runs but user review is auto-approved
+- When a stage's review is skipped, AI review still runs but user review is auto-approved and the next stage is automatically executed
 - To check: read `.github/.sdd-config` and parse `skip-review` line. If file missing or no `skip-review` line → no reviews are skipped
 
 ### Repository Owner/Repo
