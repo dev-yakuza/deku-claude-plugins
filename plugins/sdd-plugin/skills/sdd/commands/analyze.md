@@ -34,3 +34,6 @@ Read `${CLAUDE_SKILL_DIR}/commands/ai-review.md` and execute with the output abo
    - Present the output to the user with review loop results (rounds, issues fixed, verdict)
    - Ask for confirmation on direction and priorities
    - On approval: post as Issue comment (using duplicate prevention from Common Definitions) and update label to `sdd:design`
+
+## After Completion:
+Suggest to the user: "Run `/clear` before the next stage to save tokens. All outputs are saved to GitHub."

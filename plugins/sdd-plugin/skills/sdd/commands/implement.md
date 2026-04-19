@@ -100,3 +100,6 @@ If this Issue is a child Issue (Issue body contains `Parent Issue: #<number>`):
    - Read each child Issue's labels directly (do NOT rely only on the comment table)
    - If all `sdd:done` → add a comment to the parent Issue notifying all children are complete, and suggest running `/sdd test <parent>` or `/sdd resume <parent>`
    - If not → report remaining children to the user and ask which child to work on next
+
+## After Completion:
+Suggest to the user: "Run `/clear` before the next stage to save tokens. All outputs are saved to GitHub."

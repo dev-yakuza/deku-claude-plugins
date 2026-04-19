@@ -25,4 +25,7 @@ Workflow:
   6. /sdd test <issue>      → E2E tests and QA
 
   Interrupted? Run: /sdd resume <issue> → auto-detects stage and continues
+
+Tips:
+  - Run /clear between stages to save tokens (outputs are saved to GitHub)
 ```

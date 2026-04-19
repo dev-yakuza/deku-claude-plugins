@@ -72,3 +72,6 @@ When the design identifies 2 or more PRs, create a child Issue for each sub-feat
 4. Post design output as Issue comment on parent Issue
 5. Update parent Issue label to `sdd:implement`
 6. Ask user which child Issue to start with, then execute **ANALYZE** on that child Issue
+
+## After Completion:
+Suggest to the user: "Run `/clear` before the next stage to save tokens. All outputs are saved to GitHub."
