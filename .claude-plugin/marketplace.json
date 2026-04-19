@@ -8,7 +8,7 @@
       "name": "sdd-plugin",
       "source": "./plugins/sdd-plugin",
       "description": "Spec-Driven Development (SDD) - AI collaborative development process",
-      "version": "0.9.7"
+      "version": "0.9.8"
     }
   ]
 }

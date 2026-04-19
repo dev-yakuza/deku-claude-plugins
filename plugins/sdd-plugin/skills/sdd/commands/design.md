@@ -30,7 +30,7 @@ Define HOW to implement based on the requirements.
 6. Design data model changes (if applicable)
 7. Identify constraints and risks
 8. Create feature list with PR split
-9. Read the language setting from `.github/.sdd-lang` (default: en)
+9. Read the language setting from `.github/.sdd-lang`. If the file does not exist, detect the primary language of the Issue body and map to the closest supported language (`en`, `ko`, `ja`). If unsupported, default to `en`.
 10. Format output using the template in `${CLAUDE_SKILL_DIR}/templates/{lang}/output_design.md`
 
 ## Review Loop:
@@ -56,7 +56,7 @@ Read `${CLAUDE_SKILL_DIR}/commands/ai-review.md` and execute with the output abo
 
 When the design identifies 2 or more PRs, create a child Issue for each sub-feature:
 
-1. Read the language setting from `.github/.sdd-lang` (default: en)
+1. Read the language setting from `.github/.sdd-lang`. If the file does not exist, detect the primary language of the Issue body and map to the closest supported language (`en`, `ko`, `ja`). If unsupported, default to `en`.
 2. For each sub-feature in the design:
    - Format the child Issue body using the template in `${CLAUDE_SKILL_DIR}/templates/{lang}/output_child_issue.md`
    - Placeholders are NOT processed by a template engine. AI must manually replace them:

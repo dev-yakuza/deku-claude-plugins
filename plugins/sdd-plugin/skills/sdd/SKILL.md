@@ -45,9 +45,10 @@ Read `${CLAUDE_SKILL_DIR}/commands/$0.md` and execute. Pass `$1` as issue number
 - **Single Issue**: neither parent nor child
 
 ### Language Setting
-- Stored in `.github/.sdd-lang` (default: en)
+- Stored in `.github/.sdd-lang`
 - Set by `/sdd init [lang]`
-- Languages: `en` (default), `ko`/`korean`/`한국어`, `ja`/`japanese`/`日本語`
+- Languages: `en`, `ko`/`korean`/`한국어`, `ja`/`japanese`/`日本語`
+- Fallback when `.github/.sdd-lang` does not exist: detect the primary language of the Issue body and map to the closest supported language (`en`, `ko`, `ja`). If the language is not one of the supported languages, default to `en`.
 
 ### Skip Review Setting
 - Stored in `.github/.sdd-config` as `skip-review: <values>`

@@ -18,7 +18,7 @@ Focus ONLY on What and Why. Do NOT discuss How (technical implementation).
 4. Analyze What (feature list) and Why (background, motivation)
 5. If information is missing, ask the user (do NOT ask How questions)
 6. Split into feature list with priorities
-7. Read the language setting from `.github/.sdd-lang` (default: en)
+7. Read the language setting from `.github/.sdd-lang`. If the file does not exist, detect the primary language of the Issue body and map to the closest supported language (`en`, `ko`, `ja`). If unsupported, default to `en`.
 8. Format output using the template in `${CLAUDE_SKILL_DIR}/templates/{lang}/output_analyze.md`
 
 ## Review Loop:
