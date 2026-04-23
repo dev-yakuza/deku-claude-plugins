@@ -147,7 +147,7 @@ for i in "${!ISSUES[@]}"; do
   echo "[$SEQ/$TOTAL] Processing Issue #$ISSUE..."
   echo "  Log: $LOG_FILE"
 
-  if claude -p "/sdd resume $ISSUE" > "$LOG_FILE" 2>&1; then
+  if claude -p --verbose --output-format stream-json "/sdd resume $ISSUE" > "$LOG_FILE" 2>&1; then
     echo "  ✓ Issue #$ISSUE completed"
     SUCCEEDED=$((SUCCEEDED + 1))
   else
@@ -195,7 +195,16 @@ After writing the script:
      3. Delete itself after completion
 
    You will be notified when the batch finishes.
-   You can check progress in .github/.sdd-batch-logs/
+
+   Monitor real-time progress (in another terminal):
+     tail -f .github/.sdd-batch-logs/issue-<N>-*.log | \
+       jq -r 'if .type == "assistant" then
+         (.message.content[] |
+           if .type == "tool_use" then "🔧 \(.name): \(.input.command // .input.file_path // .input.pattern // "")"
+           elif .type == "text" then "💬 \(.text[0:120])"
+           else empty end)
+       elif .type == "result" then "✅ Done (\(.duration_ms/1000)s, $\(.total_cost_usd))"
+       else empty end' 2>/dev/null
    ```
 5. When the background execution completes, read the log files and report results:
    ```
