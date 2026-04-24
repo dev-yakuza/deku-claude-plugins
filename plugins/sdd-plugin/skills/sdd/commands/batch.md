@@ -60,22 +60,51 @@ Ask user for confirmation before proceeding.
 `claude -p` sessions need tool permissions pre-configured in `.claude/settings.local.json`.
 
 1. Read `.claude/settings.local.json` if it exists
-2. Check if the `permissions.allow` array includes at minimum:
-   - `Bash(gh:*)` — GitHub CLI for Issue/PR operations
-   - `Bash(git:*)` — git operations for branching, commits, push
-3. If file does not exist or missing required permissions:
-   - Show which permissions need to be added:
-     ```
-     Tool permissions required for batch mode (claude -p sessions):
+2. Check which permissions from the groups below are already present
+3. Show the permission selection UI with three groups:
 
-       Bash(gh:*)   — GitHub CLI (Issue, PR, label operations)
-       Bash(git:*)  — Git (branch, commit, push)
+```
+Tool permissions for batch mode (claude -p sessions)
+════════════════════════════════════════════════════
 
-     These will be added to .claude/settings.local.json
-     ```
-   - Ask: "Add these permissions to .claude/settings.local.json?"
-   - On approval: create or merge into `.claude/settings.local.json` preserving existing entries
-   - On rejection: warn that batch script may fail without permissions, but continue with script generation
+[Required] — SDD pipeline will fail without these
+  ✓ Read           — Read files (source code, config, plugin cache)
+  ✓ Edit           — Modify existing files
+  ✓ Write          — Create new files
+  ✓ Bash(gh:*)     — GitHub CLI (Issue, PR, label operations)
+  ✓ Bash(git:*)    — Git (branch, commit, push)
+
+[Recommended] — Needed for full pipeline functionality
+  ✓ Grep           — Search code content
+  ✓ Glob           — Search files by pattern
+  ✓ Agent          — Subagent spawning (AI review, code exploration)
+  ◻ WebSearch      — Web search (for research during analysis)
+
+[Test Runners] — Select the ones matching your project
+  ◻ Bash(npm:*)    — npm test, npm run
+  ◻ Bash(npx:*)    — npx jest, npx playwright
+  ◻ Bash(yarn:*)   — yarn test, yarn run
+  ◻ Bash(pnpm:*)   — pnpm test, pnpm run
+  ◻ Bash(pytest:*) — Python pytest
+  ◻ Bash(go:*)     — go test
+  ◻ Bash(make:*)   — make test, make build
+  ◻ Bash(cargo:*)  — cargo test (Rust)
+  ◻ Bash           — All shell commands (includes all above)
+```
+
+Display rules:
+- `✓` = selected by default, `◻` = not selected by default
+- Permissions already in `settings.local.json` → show as `✓ (already set)` and skip
+- If `Bash` (unscoped) is already set → skip all `Bash(...)` entries and show `Bash ✓ (already set)`
+
+4. Ask user which items to change:
+   ```
+   Enter items to toggle (e.g. "WebSearch, Bash(npm:*)")
+   or press Enter to continue with current selection:
+   ```
+
+5. On confirmation: create or merge into `.claude/settings.local.json` preserving existing entries
+6. On "none" or rejection: warn that batch script may fail without permissions, but continue with script generation
 
 ## Phase 3: Generate Batch Script
 
@@ -129,6 +158,7 @@ trap cleanup EXIT INT TERM
 
 # --- Process Issues ---
 BATCH_START=$(date +%s)
+ERROR_LOG="$LOG_DIR/errors-${TIMESTAMP}.log"
 TOTAL=${#ISSUES[@]}
 SUCCEEDED=0
 FAILED=0
@@ -183,6 +213,31 @@ for i in "${!ISSUES[@]}"; do
     echo "  ✗ Issue #$ISSUE failed (exit code: $EXIT_CODE)"
     FAILED=$((FAILED + 1))
     FAILED_ISSUES+=("$ISSUE")
+
+    # Extract error details to error log
+    {
+      echo "════════════════════════════════════════"
+      echo "Issue #$ISSUE — $(date '+%Y-%m-%d %H:%M:%S')"
+      echo "════════════════════════════════════════"
+      echo "Exit code: $EXIT_CODE"
+
+      DENIALS=$(jq -r 'select(.type == "result") | .permission_denials[]?' "$LOG_FILE" 2>/dev/null)
+      if [ -n "$DENIALS" ]; then
+        echo ""
+        echo "Permission denied:"
+        echo "$DENIALS" | while read -r D; do echo "  - $D"; done
+      fi
+
+      ERRMSG=$(jq -r 'select(.type == "result") | select(.is_error == true) | .result // empty' "$LOG_FILE" 2>/dev/null | tail -1)
+      if [ -n "$ERRMSG" ]; then
+        echo ""
+        echo "Error message:"
+        echo "  $ERRMSG"
+      fi
+
+      echo ""
+    } >> "$ERROR_LOG"
+
     break
   done
 
@@ -225,6 +280,7 @@ echo "  Succeeded: $SUCCEEDED"
 echo "  Failed:    $FAILED"
 if [ ${#FAILED_ISSUES[@]} -gt 0 ]; then
   echo "  Failed:    ${FAILED_ISSUES[*]}"
+  echo "  Error log: $ERROR_LOG"
 fi
 echo ""
 echo "  Time:      ${BATCH_MIN}m ${BATCH_SEC}s"
