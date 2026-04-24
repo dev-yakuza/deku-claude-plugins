@@ -148,14 +148,43 @@ for i in "${!ISSUES[@]}"; do
   echo "[$SEQ/$TOTAL] Processing Issue #$ISSUE..."
   echo "  Log: $LOG_FILE"
 
-  if claude -p --verbose --output-format stream-json "/sdd resume $ISSUE" > "$LOG_FILE" 2>&1; then
-    echo "  ✓ Issue #$ISSUE completed"
-    SUCCEEDED=$((SUCCEEDED + 1))
-  else
-    echo "  ✗ Issue #$ISSUE failed (exit code: $?)"
+  while true; do
+    EXIT_CODE=0
+    claude -p --verbose --output-format stream-json "/sdd resume $ISSUE" > "$LOG_FILE" 2>&1 || EXIT_CODE=$?
+
+    if [ "$EXIT_CODE" -eq 0 ]; then
+      echo "  ✓ Issue #$ISSUE completed"
+      SUCCEEDED=$((SUCCEEDED + 1))
+      break
+    fi
+
+    # Check for rate limit
+    RESET_AT=$(jq -r 'select(.type == "rate_limit_event") | .rate_limit_info | select(.status != "allowed") | .resetsAt // empty' "$LOG_FILE" 2>/dev/null | tail -1)
+
+    if [ -z "$RESET_AT" ] && grep -qi "rate.limit\|overloaded\|too many requests" "$LOG_FILE" 2>/dev/null; then
+      RESET_AT=$(jq -r 'select(.type == "rate_limit_event") | .rate_limit_info.resetsAt // empty' "$LOG_FILE" 2>/dev/null | tail -1)
+    fi
+
+    if [ -n "$RESET_AT" ]; then
+      NOW=$(date +%s)
+      WAIT=$((RESET_AT - NOW + 30))
+      if [ "$WAIT" -gt 0 ]; then
+        WAIT_MIN=$((WAIT / 60))
+        WAIT_SEC=$((WAIT % 60))
+        RESET_TIME=$(date -r "$RESET_AT" +%H:%M:%S 2>/dev/null || date -d "@$RESET_AT" +%H:%M:%S 2>/dev/null)
+        echo "  ⏳ Rate limited. Waiting until ~$RESET_TIME (${WAIT_MIN}m ${WAIT_SEC}s)..."
+        sleep "$WAIT"
+        echo "  🔄 Retrying Issue #$ISSUE..."
+        continue
+      fi
+    fi
+
+    # Not rate limited — genuine failure
+    echo "  ✗ Issue #$ISSUE failed (exit code: $EXIT_CODE)"
     FAILED=$((FAILED + 1))
     FAILED_ISSUES+=("$ISSUE")
-  fi
+    break
+  done
 
   echo ""
 done
