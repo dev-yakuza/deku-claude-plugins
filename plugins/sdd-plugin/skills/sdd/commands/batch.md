@@ -2,7 +2,7 @@
 
 **Batch process multiple Issues through the SDD pipeline in separate sessions.**
 
-Each Issue runs in an independent `claude -p` session with full skip-review enabled, minimizing token consumption.
+Each Issue runs in an independent `claude -p` session with skip-review enabled (analyze through PR creation), minimizing token consumption. Human reviews PRs and runs QA after batch completes.
 
 ## Argument Parsing:
 
@@ -46,7 +46,7 @@ Issues to process (in order):
 
 Total: 3 issues
 Mode: Sequential (each in a separate claude -p session)
-Skip-review: analyze, design, implement, pr, qa (auto-enabled)
+Skip-review: analyze, design, implement, pr (auto-enabled — stops after PR creation)
 ```
 
 Determine stage label for display:
@@ -135,7 +135,7 @@ else
   echo "[batch] No existing $CONFIG_FILE"
 fi
 
-echo "skip-review: analyze,design,implement,pr,qa" > "$CONFIG_FILE"
+echo "skip-review: analyze,design,implement,pr" > "$CONFIG_FILE"
 echo "[batch] Set skip-review for batch mode"
 
 # --- Cleanup trap ---

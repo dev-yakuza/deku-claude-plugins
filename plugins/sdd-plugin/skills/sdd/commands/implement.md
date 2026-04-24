@@ -81,7 +81,9 @@ Use the **Agent tool** to spawn a subagent with the following instructions:
 > 6. Return the PR URL, change summary, and review loop results (rounds, issues fixed, verdict)
 
 **User review**: Check skip-review setting (see Common Definitions → Skip Review Setting)
-- If `pr` is in skip-review → log "User review skipped (skip-review: pr)", update label to `sdd:test`, then **auto-proceed**: use the **Agent tool** to spawn a subagent that executes `/sdd test $1`
+- If `pr` is in skip-review → log "User review skipped (skip-review: pr)", update label to `sdd:test`, then:
+  - If `qa` is also in skip-review → **auto-proceed**: use the **Agent tool** to spawn a subagent that executes `/sdd test $1`
+  - Otherwise → **stop here** (PR created, label updated — human reviews PR and runs QA)
 - Otherwise → present the subagent's results (PR URL, change summary, review loop results), final confirmation. On approval: update label to `sdd:test`
 
 ## After child Issue reaches `sdd:done`:
