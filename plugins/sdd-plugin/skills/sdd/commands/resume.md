@@ -64,4 +64,6 @@ Report current status to user before continuing:
    Current stage: <stage>
    Resuming from: <specific point>
    ```
-Ask user for confirmation, then read the appropriate command file from `${CLAUDE_SKILL_DIR}/commands/` and execute.
+Check skip-review setting (see Common Definitions → Skip Review Setting):
+- If the determined stage (e.g. `analyze`, `design`, `implement`) is in skip-review → **skip confirmation** and immediately read the appropriate command file from `${CLAUDE_SKILL_DIR}/commands/` and execute.
+- If NOT in skip-review → ask user for confirmation, then read the appropriate command file from `${CLAUDE_SKILL_DIR}/commands/` and execute.
