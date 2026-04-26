@@ -74,8 +74,8 @@ Use the **Agent tool** to spawn a subagent with the following instructions:
 >    - Focus on UI behavior, user flows, edge cases that automated tests don't cover
 >    - Format as a markdown checklist (e.g. `- [ ] Verify button click navigates to...`)
 > 3. Create PR with manual test checklist included:
->    - Single Issue: `gh pr create --title "..." --body "Closes #$1\n\n...\n\n## Manual Test Checklist\n<checklist>"`
->    - Child Issue: `gh pr create --title "..." --body "Closes #$1\nParent Issue: #<parent>\n\n...\n\n## Manual Test Checklist\n<checklist>"`
+>    - Single Issue: `gh pr create --title "..." --body "Refs #$1\n\n...\n\n## Manual Test Checklist\n<checklist>"`
+>    - Child Issue: `gh pr create --title "..." --body "Refs #$1\nParent Issue: #<parent>\n\n...\n\n## Manual Test Checklist\n<checklist>"`
 > 4. Re-run all tests → confirm pass
 > 5. **AI Review**: Read `${CLAUDE_SKILL_DIR}/commands/ai-review.md` and execute with the implementation changes (stage: **implement**, review point: **PR Final (3-4)**)
 > 6. Return the PR URL, change summary, and review loop results (rounds, issues fixed, verdict)

@@ -63,4 +63,8 @@ Use the **Agent tool** to spawn a subagent with the following instructions. This
 
 ## Results Review (4-4):
 1. If any QA item fails → analyze cause, go back to Stage 3 for TDD bug fix cycle
-2. All tests pass → update label to `sdd:done`
+2. All tests pass → update label to `sdd:done` and close the Issue:
+   ```bash
+   gh issue edit $1 --remove-label "sdd:test" --add-label "sdd:done"
+   gh issue close $1
+   ```
