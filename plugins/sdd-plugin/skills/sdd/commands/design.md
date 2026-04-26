@@ -4,6 +4,9 @@
 
 Define HOW to implement based on the requirements.
 
+## Input Validation
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+
 ## Phase 1: Design (via subagent)
 
 Use the **Agent tool** to spawn a subagent with the following instructions. This isolates the heavy work from the main context to save tokens.

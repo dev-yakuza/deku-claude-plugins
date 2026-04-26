@@ -4,6 +4,9 @@
 
 Unit/UI tests and E2E tests are already done in Stage 3 (for single/child Issues). This stage focuses on QA verification, and integration E2E for parent Issues.
 
+## Input Validation
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+
 ## Determine Issue type:
 
 1. **Parent Issue (has children)**: Check all child Issues

@@ -63,3 +63,16 @@ Commands using `gh api` need `{owner}/{repo}`. Obtain via: `gh repo view --json 
 ### Duplicate Output Prevention
 Before posting a stage output, search Issue comments for the matching marker. If found → update that comment. If not → create new comment.
 
+### Issue Validation
+SDD commands operate **only on GitHub Issues**, not Pull Requests. Before executing the main logic of any command that takes an Issue number (`analyze`, `design`, `implement`, `test`, `resume`, `rollback`, `status`, `review`), validate the input:
+
+```bash
+gh api repos/{owner}/{repo}/issues/$1 --jq '.pull_request'
+```
+
+- If the result is `null` → `$1` is an Issue. Proceed.
+- If the result is **non-null** → `$1` is a Pull Request. Stop immediately:
+  - Do NOT modify labels, post comments, create branches, or make any other state changes.
+  - Report to the user:
+    > Error: #$1 is a Pull Request, not an Issue. SDD commands operate on Issues only. Please pass an Issue number.
+

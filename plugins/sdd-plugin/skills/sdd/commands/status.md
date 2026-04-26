@@ -2,6 +2,11 @@
 
 Check the current progress of an Issue.
 
+## Input Validation
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+
+## Process:
+
 1. Read Issue labels: `gh issue view $1 --json labels`
 2. Check Issue comments for each stage output:
    - `<!-- sdd:analyze:output -->` exists?

@@ -6,6 +6,9 @@
 - Do NOT set Claude as co-author in git commits.
 - Check existing git history for branch naming and commit message conventions, and follow the same format.
 
+## Input Validation
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+
 ## Determine Issue type:
 
 1. Check if this Issue has child Issues:

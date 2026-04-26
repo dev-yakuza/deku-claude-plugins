@@ -2,6 +2,9 @@
 
 Review the current stage output of an Issue.
 
+## Input Validation
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+
 ## Determine Issue type:
 
 1. Check if this is a parent Issue (has `<!-- sdd:children:output -->` marker in comments)
