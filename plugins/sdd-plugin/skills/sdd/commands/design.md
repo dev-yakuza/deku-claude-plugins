@@ -81,4 +81,6 @@ When the design identifies 2 or more PRs, create a child Issue for each sub-feat
    - Add a row for each created child Issue to the table
 4. Post design output as Issue comment on parent Issue
 5. Update parent Issue label to `sdd:implement`
-6. Ask user which child Issue to start with, then execute **ANALYZE** on that child Issue
+6. Determine next action — check skip-review setting (see Common Definitions → Skip Review Setting):
+   - If `design` is in skip-review → **stop here**. The parent reaches `sdd:implement` with children at `sdd:analyze`. The surrounding flow (e.g. `/sdd batch`) is responsible for picking up the children. Log: "Children created (#A, #B, ...). Parent stopped at sdd:implement for batch/orchestrator to queue children."
+   - Otherwise → ask user which child Issue to start with, then execute **ANALYZE** on that child Issue

@@ -39,7 +39,10 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
    - If all children `sdd:done`:
      - Update parent label: `gh issue edit $1 --remove-label "sdd:implement" --add-label "sdd:test"`
      - Execute **TEST** on parent (read `${CLAUDE_SKILL_DIR}/commands/test.md`)
-   - If any child is incomplete → ask user which child to resume, then execute **RESUME** on that child
+   - If any child is incomplete:
+     - Check skip-review setting (see Common Definitions → Skip Review Setting)
+     - If skip-review contains any of `analyze`, `design`, `implement`, `pr` → **stop here** without asking. Report pending children and exit cleanly. The surrounding flow (e.g. `/sdd batch`) is responsible for queuing the pending children for processing.
+     - Otherwise → ask user which child to resume, then execute **RESUME** on that child
 
 ## If Single Issue or Child Issue:
 
