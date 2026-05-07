@@ -6,6 +6,34 @@ Each Issue runs in an independent `claude -p` session with skip-review enabled (
 
 > ⚠️ **Security note**: The generated batch script invokes each child session with `--dangerously-skip-permissions`. This bypasses **all** permission prompts and sandbox boundaries in the child session, so test runners (e.g. `flutter test`), commit hooks, and `git push` / `gh pr create` can execute unattended. Use `/sdd batch` only when you accept that the child sessions may run any tool without prompting. All tool calls are recorded in `.github/.sdd-batch-logs/<issue>-<timestamp>.log` for audit.
 
+## Recommended: run in a git worktree
+
+Because the child sessions execute with elevated permissions and may switch branches, stash, or run pre-commit hooks, **strongly consider running `/sdd batch` from a dedicated git worktree** rather than your main checkout. A separate worktree gives the batch its own working tree, index, HEAD, and stash stack, so any mishaps (mis-stashed config, dirty working tree carried across Issues, accidental file deletion) stay isolated and recoverable by simply removing the worktree.
+
+```bash
+# From your main checkout (assumed at .../<repo>):
+git worktree add ../<repo>-batch main      # or any base branch
+cd ../<repo>-batch
+# ... run /sdd batch from here ...
+# When the batch is finished and PRs are reviewed:
+cd ../<repo>
+git worktree remove ../<repo>-batch
+```
+
+Branches created by the batch are still pushed to the same remote (so PRs work normally), but the local repository state is isolated. If a batch goes wrong, the recovery is `git worktree remove --force ../<repo>-batch` — your main checkout is untouched. Before running the script, the batch flow should detect whether the current directory is a worktree and **suggest creating one if it is not**:
+
+```bash
+# Detection (during Phase 1 confirmation):
+if [ "$(git rev-parse --git-common-dir)" = "$(git rev-parse --git-dir)" ]; then
+  # Not in a worktree — same dir is the main repo
+  echo "[batch] You are about to run in the main checkout. Consider:"
+  echo "  git worktree add ../<repo>-batch <base-branch>"
+  echo "  cd ../<repo>-batch"
+fi
+```
+
+This is a recommendation, not a hard requirement; the user can decline and proceed in the main checkout.
+
 ## Argument Parsing:
 
 Parse `$1`:
@@ -66,7 +94,26 @@ Determine stage label for display:
 - No SDD label → `[new]`
 - Has SDD label → show the label (e.g. `[sdd:analyze]`)
 
-Ask user for confirmation before proceeding.
+**Workspace check** — before asking for confirmation, detect whether the current directory is a dedicated git worktree:
+
+```bash
+COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+```
+
+If `COMMON_DIR` equals `GIT_DIR` (or both resolve to the same absolute path), the user is in the **main checkout**, not a worktree. In that case, append the following warning to the confirmation summary:
+
+```
+⚠ Workspace: main checkout detected (not a worktree).
+  Recommended: run this batch from a worktree to isolate the working tree.
+
+      git worktree add ../<repo>-batch <base-branch>
+      cd ../<repo>-batch
+
+  Proceed in the main checkout anyway? [y/N]
+```
+
+If the user answers no, stop without generating the script. If yes, continue. Otherwise (already in a worktree) skip the warning and ask the standard confirmation.
 
 ## Phase 2: Verify Tool Permissions
 
