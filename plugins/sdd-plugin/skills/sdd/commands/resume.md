@@ -48,11 +48,11 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
 4. **Determine the action**:
    - **If all children are `sdd:done`**:
      - Update parent label: `gh issue edit $1 --remove-label "sdd:implement" --add-label "sdd:test"` (label transitions only — do NOT spawn subagents).
-     - Read `${CLAUDE_SKILL_DIR}/commands/test.md` and execute its instructions for Issue #$1. The test orchestrator handles the parent path internally.
+     - **Read + execute inline (do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/test.md` and execute its instructions for Issue #$1 in this main session. The test orchestrator handles the parent path internally.
    - **If any child is incomplete**:
      - Check skip-review setting (Common Definitions → Skip Review Setting).
      - If skip-review contains any of `analyze`, `design`, `implement`, `pr` → **stop here** without asking. Report pending children and exit cleanly. The surrounding flow (e.g., `/sdd batch` or `/sdd auto`) is responsible for queuing the pending children for processing.
-     - Otherwise → ask user which child to resume; then read `${CLAUDE_SKILL_DIR}/commands/resume.md` and execute for the chosen child Issue.
+     - Otherwise → ask user which child to resume; then **read + execute inline (do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/resume.md` and execute for the chosen child Issue in this main session.
 
 ## Dispatch: Single Issue or Child Issue
 
@@ -88,7 +88,7 @@ Resuming from: <specific point>
 
 Check skip-review setting (Common Definitions → Skip Review Setting):
 
-- If the determined stage (the key resume routes to: `analyze` / `design` / `implement` / `test`) is in skip-review → **skip user confirmation** and immediately read + execute the target orchestrator. (Note: `pr` and `qa` are skip-review keys consumed inside `implement.md` / `test.md` respectively, not dispatch targets of resume — they don't appear in this list.) This allows `/sdd auto` and `/sdd batch` to chain stages without prompting.
+- If the determined stage's skip-review key (`analyze` / `design` / `implement`) is set in `.github/.sdd-config` → **skip user confirmation** and immediately read + execute the target orchestrator. This allows `/sdd auto` and `/sdd batch` to chain stages without prompting. (Note: `pr` and `qa` are skip-review keys consumed inside `implement.md` / `test.md` respectively, not dispatch targets of resume. The test stage's user gate is `qa`, not `test` — `test` is not a valid skip-review value.)
 - If NOT in skip-review → ask the user for confirmation ("Resume from <stage>? [y/N]"), then read + execute the target orchestrator.
 
 ## Notes

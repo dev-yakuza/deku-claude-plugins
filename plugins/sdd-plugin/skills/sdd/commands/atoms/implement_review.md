@@ -78,6 +78,10 @@ The orchestrator invokes this atom **twice in parallel** in a single message —
 8. **Post a review comment on the PR** (not the Issue) with the marker `<!-- sdd:review:implement:<role> -->`. Use duplicate prevention:
 
    ```bash
+   # Variable assignments (atom inputs $1 = Issue, $2 = role; PR_NUM resolved earlier)
+   ROLE=$2
+   REVIEW_BODY=<rendered comment body — see format below>
+
    # PR comments share the issue-comments API in GitHub — use $PR_NUM as the issue id
    EXISTING_ID=$(gh api repos/$OWNER_REPO/issues/$PR_NUM/comments \
      --jq ".[] | select(.body | contains(\"<!-- sdd:review:implement:$ROLE -->\")) | .id" \

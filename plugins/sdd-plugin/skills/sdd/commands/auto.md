@@ -105,7 +105,7 @@ Apply the **same Phase 2 logic as `/sdd batch`** — see `${CLAUDE_SKILL_DIR}/co
 
 ### Difference from `/sdd batch`
 
-- The preamble note about `--dangerously-skip-permissions` does **not** apply. In `/sdd auto`, normal main-session permission gates run for every tool call. The allowlist below is a recommendation; if missing, you will see permission prompts during the loop (which breaks "unattended within session").
+- The preamble note about `--dangerously-skip-permissions` does **not** apply. In `/sdd auto`, normal main-session permission gates run for every tool call. The allowlist reused from `batch.md` Phase 2 is a recommendation; if missing, you will see permission prompts during the loop (which breaks "unattended within session").
 
 - Display header changes to:
   ```

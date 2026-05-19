@@ -133,10 +133,15 @@ git push -u origin <branch>
      ## Manual Test Checklist
      <checklist>"
      ```
-   - **Child Issue** body adds parent line:
+   - **Child Issue** body adds a localized parent line. Use the language from `.github/.sdd-lang` (same fallback rules as work atoms) to choose the keyword:
+     - `en` → `Parent Issue: #<parent>`
+     - `ko` → `상위 Issue: #<parent>`
+     - `ja` → `親Issue: #<parent>`
+
+     PR body:
      ```
      Refs #$1
-     Parent Issue: #<parent>
+     <localized parent line per above>
 
      <change summary>
 
