@@ -75,9 +75,25 @@ The orchestrator invokes this atom **twice in parallel** in a single message —
    - Only `minor` → `PASS` (suggestions included in the comment)
    - No issues → `PASS`
 
-8. **Post a review comment on the PR** (not the Issue) with the marker `<!-- sdd:review:implement:<role> -->`. Use duplicate prevention: search PR comments for the marker; if found → update via `gh api repos/{owner}/{repo}/issues/comments/<id> -X PATCH`; if not → create via `gh pr comment $PR_NUM`.
+8. **Post a review comment on the PR** (not the Issue) with the marker `<!-- sdd:review:implement:<role> -->`. Use duplicate prevention:
 
-   (Note: PR comments in GitHub are issue-comments under the hood — same API as Issue comments. Use `gh pr comment` to post; use `gh api repos/{owner}/{repo}/issues/<PR_NUM>/comments` to list/find.)
+   ```bash
+   # PR comments share the issue-comments API in GitHub — use $PR_NUM as the issue id
+   EXISTING_ID=$(gh api repos/$OWNER_REPO/issues/$PR_NUM/comments \
+     --jq ".[] | select(.body | contains(\"<!-- sdd:review:implement:$ROLE -->\")) | .id" \
+     | tail -1)
+
+   if [ -n "$EXISTING_ID" ]; then
+     # Update in place — preserves review history across retry rounds
+     gh api repos/$OWNER_REPO/issues/comments/$EXISTING_ID -X PATCH \
+       -f body="$REVIEW_BODY"
+   else
+     # First post on this PR for this role
+     gh pr comment $PR_NUM --body "$REVIEW_BODY"
+   fi
+   ```
+
+   This is the SAME marker check used by the analyze/design/test review atoms (they search Issue comments instead of PR comments, but the duplicate-prevention pattern is identical). On retry rounds, the prior round's comment is updated in place rather than appended, so the PR's review state always reflects the latest diff.
 
    Comment body format:
    ```

@@ -27,7 +27,7 @@ Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub
      --jq '.[] | select(.body | contains("sdd:analyze:output")) | .body'
    ```
 
-3. Detect child Issue: if the body contains `Parent Issue: #<number>`, read the parent's design output:
+3. Detect child Issue per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md` (multi-language regex `(Parent|상위 |親)Issue: #<number>`). If a parent reference is found, read the parent's design output:
    ```bash
    gh api repos/$OWNER_REPO/issues/<parent>/comments \
      --jq '.[] | select(.body | contains("sdd:design:output")) | .body'

@@ -88,7 +88,7 @@ The review atom prompts are unchanged between rounds — reviewers always evalua
 2. If `analyze` is in skip-review:
    - Log: "User review skipped (skip-review: analyze). AI review already ran."
    - Update label to `sdd:design`.
-   - **Auto-proceed**: use the Agent tool to spawn a subagent that executes `/sdd design $1`. This isolates the next stage's context.
+   - **Auto-proceed (read + execute inline, do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/design.md` and execute its instructions for Issue #$1 in this same main session. (Spawning a subagent here would create nested-subagent spawning when the design orchestrator itself spawns atoms — Claude Code blocks that.)
 3. If `analyze` is NOT in skip-review:
    - Summarize for the user: which round reviews passed in, any minor suggestions still on the Issue, where the analysis comment is.
    - Ask for confirmation on direction and priorities.

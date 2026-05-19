@@ -28,10 +28,9 @@ The orchestrator invokes this atom **twice in parallel** in a single message —
 4. Apply the criteria according to your role (`$2`):
 
    ### If `$2` is `completeness`:
-   Focus on **requirements coverage and cross-stage consistency**.
+   Focus on **requirements coverage**. (Cross-stage Check is N/A for analyze — it is the first stage, no prior stage to cross-check against.)
    - Apply the **Required Checklist** from `ai-review-analyze.md`. Mark each item pass/fail with severity.
-   - Apply the **Cross-stage Check** from `ai-review-analyze.md` (for analyze stage, this is N/A — skip).
-   - Report any consistency issues found.
+   - Report any consistency issues found within the analyze output itself.
 
    ### If `$2` is `quality`:
    Focus on **quality, risks, and issues beyond the checklist**.

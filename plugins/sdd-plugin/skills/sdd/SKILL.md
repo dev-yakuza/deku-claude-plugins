@@ -38,11 +38,23 @@ Read `${CLAUDE_SKILL_DIR}/commands/$0.md` and execute. Pass `$1` as issue number
 | `<!-- sdd:children:output -->` | Issue comment | Child Issue list (parent only) |
 | `<!-- sdd:child-issue -->` | Issue body | Child Issue identifier |
 | `<!-- sdd:rollback -->` | Issue comment | Rollback notice |
+| `<!-- sdd:implement:plan -->` | Issue comment | TDD plan from `implement_plan` atom |
+| `<!-- sdd:test:output -->` | Issue comment | Test results + QA checklist |
+| `<!-- sdd:review:<stage>:<role> -->` | Issue comment (or PR for implement) | AI review per stage; `<stage>` ∈ {analyze, design, implement, test}, `<role>` ∈ {completeness, quality} |
+| `<!-- sdd:review:parent -->` | Issue comment (parent) | Cross-child parent review summary |
 
 ### Parent/Child Issue Detection
 - **Parent Issue**: has `<!-- sdd:children:output -->` marker in comments
 - **Child Issue**: body contains `Parent Issue: #<number>` inside `<!-- sdd:child-issue -->` block
 - **Single Issue**: neither parent nor child
+
+**Multi-language parent reference**: child Issues created from non-English templates use translated keywords. To detect a child Issue's parent reference across all supported languages, use the regex:
+
+```
+(Parent|상위 |親)Issue: #<n>
+```
+
+Where `<n>` is the parent number. Use this regex in any atom/orchestrator that needs to detect parent references in Issue bodies — see the `gh issue list --label sdd:child ... --jq 'test("(Parent|상위 |親)Issue: #<n>([^0-9]|$)")'` pattern in `batch.md` / `auto.md` for child auto-discovery.
 
 ### Language Setting
 - Stored in `.github/.sdd-lang`

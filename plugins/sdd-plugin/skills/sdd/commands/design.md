@@ -81,7 +81,7 @@ The review atom prompts are unchanged between rounds.
 2. If `design` is in skip-review:
    - Log: "User review skipped (skip-review: design). AI review already ran."
    - Update label to `sdd:implement`.
-   - **Auto-proceed**: use the Agent tool to spawn a subagent that executes `/sdd implement $1`.
+   - **Auto-proceed (read + execute inline, do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/implement.md` and execute its instructions for Issue #$1 in this same main session.
 3. If `design` is NOT in skip-review:
    - Summarize for the user: which round passed, any minor suggestions still on the Issue, the design comment location.
    - Ask for confirmation on technical approach and PR split.
@@ -104,7 +104,7 @@ The orchestrator now:
 4. If `design` is NOT in skip-review:
    - Summarize: design posted, children #A, #B, ... created, parent now at `sdd:implement`.
    - Ask: "Which child Issue would you like to start with?"
-   - On selection: invoke `/sdd analyze <selected-child>`.
+   - On selection (read + execute inline, do NOT spawn a subagent): read `${CLAUDE_SKILL_DIR}/commands/analyze.md` and execute its instructions for the selected child Issue in this same main session.
 
 ## Notes
 

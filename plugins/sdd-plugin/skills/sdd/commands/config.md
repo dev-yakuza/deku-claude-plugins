@@ -24,11 +24,11 @@ Parse the arguments from `$1` onwards:
 3. Show a summary of what each skipped review means:
    | Value | Skipped Review |
    |-------|---------------|
-   | `analyze` | User review after analysis |
-   | `design` | User review after design |
-   | `implement` | User review at TDD substeps (3-0 ~ 3-3) |
-   | `pr` | User review at PR code review (3-4) |
-   | `qa` | Manual QA execution (4-2 ~ 4-3) |
+   | `analyze` | User confirmation after analyze stage (AI review still runs) |
+   | `design` | User confirmation after design stage (AI review still runs) |
+   | `implement` | User confirmation at the implement plan stage (3-0). Steps 3-1 through 3-4 are `self_only` and have no user prompt to skip. |
+   | `pr` | User confirmation at PR Final review (3-5) |
+   | `qa` | Manual QA execution after the test stage |
 
 ## Set skip-review:
 

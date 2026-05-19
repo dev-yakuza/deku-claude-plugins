@@ -49,7 +49,7 @@ EXISTING_PR=$(gh pr list --head $2 --state open --json number --jq '.[0].number'
      --jq '.[] | select(.body | contains("sdd:design:output") or contains("sdd:implement:plan")) | .body'
    ```
 
-3. Detect parent reference for child Issue (needed for PR body).
+3. Detect parent reference for child Issue (needed for PR body) per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md` (multi-language regex `(Parent|상위 |親)Issue: #<number>`).
 
 ### 3-1. Red — Write Failing Tests
 
@@ -196,7 +196,7 @@ Make **new commits** (do NOT amend, do NOT force-push) following the repo's comm
 ```bash
 git add <files>
 git commit -m "..."
-git push origin $2   # regular push, no --force
+git push -u origin $2   # regular push, no --force; -u is defensive in case upstream is missing
 ```
 
 The PR is automatically updated by the push — review comments on prior commits remain attached for audit.

@@ -124,11 +124,11 @@ By default, every stage requires user review. You can skip user review for speci
 
 | Value | Skipped Review |
 |-------|---------------|
-| `analyze` | User review after requirements analysis |
-| `design` | User review after design |
-| `implement` | User review at TDD substeps (3-0 ~ 3-3) |
-| `pr` | User review at PR code review (3-4) |
-| `qa` | Manual QA execution (4-2 ~ 4-3) |
+| `analyze` | User confirmation after analyze stage (AI review still runs) |
+| `design` | User confirmation after design stage (AI review still runs) |
+| `implement` | User confirmation at the implement plan stage (3-0). 3-1 through 3-4 are `self_only` and have no user prompt to skip. |
+| `pr` | User confirmation at PR Final review (3-5) |
+| `qa` | Manual QA execution after the test stage |
 
 Settings are saved to `.github/.sdd-config`. AI review always runs regardless of this setting.
 

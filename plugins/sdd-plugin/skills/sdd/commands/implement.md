@@ -141,7 +141,7 @@ Check skip-review setting.
 - If `pr` is in skip-review:
   - Log "User review skipped (skip-review: pr)".
   - Update label to `sdd:test`.
-  - If `qa` is also in skip-review → **auto-proceed**: use the Agent tool to spawn a subagent that executes `/sdd test $1`.
+  - If `qa` is also in skip-review → **auto-proceed (read + execute inline, do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/test.md` and execute its instructions for Issue #$1 in this same main session.
   - Otherwise → **stop here**. PR created, label updated; human reviews PR and runs QA.
 
 - Otherwise:

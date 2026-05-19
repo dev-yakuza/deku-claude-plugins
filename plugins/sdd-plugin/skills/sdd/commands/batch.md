@@ -4,6 +4,8 @@
 
 Each Issue runs in an independent `claude -p` session with skip-review enabled (analyze through PR creation), minimizing token consumption. Human reviews PRs and runs QA after batch completes.
 
+> **0.24.0 architecture note**: each `claude -p` child session is a fresh main thread. Inside the child, `/sdd resume <N>` dispatches to a stage orchestrator (analyze.md / design.md / implement.md / test.md), which spawns single-level atom subagents. The spawning is single-nesting-level (orchestrator → atom) within each child session, so the new atom architecture works inside `/sdd batch` unchanged. The `--dangerously-skip-permissions` flag is still required because the atom subagents make tool calls that would otherwise prompt in unattended runs.
+
 > ⚠️ **Security note**: The generated batch script invokes each child session with `--dangerously-skip-permissions`. This bypasses **all** permission prompts and sandbox boundaries in the child session, so test runners (e.g. `flutter test`), commit hooks, and `git push` / `gh pr create` can execute unattended. Use `/sdd batch` only when you accept that the child sessions may run any tool without prompting. All tool calls are recorded in `.github/.sdd-batch-logs/<issue>-<timestamp>.log` for audit.
 
 ## Recommended: run in a git worktree

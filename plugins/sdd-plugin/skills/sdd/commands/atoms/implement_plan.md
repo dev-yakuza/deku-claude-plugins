@@ -24,7 +24,7 @@ Produces the test plan + implementation plan for SDD Stage 3, posts it to the Is
    ```
    Read ONLY the design output and the Issue body's Definition of Done. Do NOT read the analyze output — the design has already incorporated those requirements.
 
-2. Detect child Issue: if the body contains `Parent Issue: #<number>` (inside `<!-- sdd:child-issue -->`), capture the parent number for branch naming.
+2. Detect child Issue per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md` (multi-language regex `(Parent|상위 |親)Issue: #<number>` inside `<!-- sdd:child-issue -->`). If a parent reference is found, capture the parent number for branch naming.
 
 3. **Create the feature branch**:
    - Single Issue: `feat/<feature-name>` (derive `<feature-name>` from Issue title, kebab-cased)

@@ -16,7 +16,7 @@ Produces the SDD Stage 1 (Analyze) output for one Issue. Reads inputs from GitHu
    gh issue view $1
    ```
 
-2. Detect child Issue: if the body contains `Parent Issue: #<number>`, read the parent's analyze and design outputs for context:
+2. Detect child Issue per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md` (use the multi-language regex `(Parent|상위 |親)Issue: #<number>` to support en/ko/ja templates). If a parent reference is found, read the parent's analyze and design outputs for context:
    ```bash
    OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
    gh api repos/$OWNER_REPO/issues/<parent>/comments \

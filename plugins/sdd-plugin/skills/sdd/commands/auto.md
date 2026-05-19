@@ -40,6 +40,20 @@ Parse `$1`:
 
 Apply the **same Phase 1 logic as `/sdd batch`** — see `${CLAUDE_SKILL_DIR}/commands/batch.md` "Phase 1: Collect and Filter Issues" (the All-open vs Specific-Issues filter rules, the `sdd:done` / `sdd:child` exclusion semantics, sort order, the "No qualifying Issues" early exit). Apply identical rules; the only differences are display strings and the worktree warning.
 
+### Per-Issue validation (Specific-Issues mode only)
+
+When the user provides `1,2,3` (Specific-Issues mode), validate each number per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. For each:
+
+```bash
+gh issue view <n> --json url --jq .url
+```
+
+- Empty/error → number does not exist; warn and exclude.
+- URL contains `/pull/` → number is a PR, not an Issue; warn the user and exclude. SDD commands operate on Issues only.
+- URL contains `/issues/` → valid Issue; include for filtering.
+
+(All-open-Issues mode uses `gh issue list --state open`, which already returns only Issues, so this step is implicit there.)
+
 ### Display: Confirmation block
 
 Show the filtered Issue list with current stage:
