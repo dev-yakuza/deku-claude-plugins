@@ -20,6 +20,7 @@ Commands:
   /sdd batch [issues]    Unattended shell processing via separate claude -p sessions
                          (uses Agent SDK Credit pool from 2026-06-15)
                          No args = all open; "1,2,3" = specific issues
+  /sdd config            Show or update SDD settings (e.g., skip-review)
   /sdd help              Show this help message
 
 Workflow:

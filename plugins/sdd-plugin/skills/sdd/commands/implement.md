@@ -23,8 +23,8 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
 2. **Parent Issue (has children)**: Do NOT implement directly. Instead:
    - List child Issues and their current status (from the `<!-- sdd:children:output -->` table + each child's actual label)
    - Ask user which child Issue to work on
-   - Execute `/sdd analyze <child>` or `/sdd resume <child>` via Agent-tool spawn
-   - Stop the orchestrator here.
+   - On selection (read + execute inline, do NOT spawn a subagent): read `${CLAUDE_SKILL_DIR}/commands/resume.md` and execute its instructions for the selected child Issue in this same main session. The resume dispatcher will detect the child's current state (label + comments) and dispatch to the correct stage orchestrator.
+   - Stop this orchestrator here once the child is dispatched.
 3. **Single Issue or Child Issue (no children)**: Proceed to Phase A below.
 
 ## Phase A: Plan
@@ -151,9 +151,9 @@ Check skip-review setting.
 
 ## Phase C: Child completion notification (if this is a child Issue)
 
-This phase runs **only if the Issue body contains `Parent Issue: #<number>` inside the `<!-- sdd:child-issue -->` block** AND the Issue's label has just transitioned to `sdd:done` (typically after `/sdd test <child>` completes — but if the orchestrator hits this point with the child already `sdd:done`, run the notification).
+This phase runs **only if the Issue body matches the multi-language parent regex `(Parent|상위 |親)Issue: #<n>` (Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md`) inside the `<!-- sdd:child-issue -->` block** AND the Issue's label has just transitioned to `sdd:done` (typically after `/sdd test <child>` completes — but if the orchestrator hits this point with the child already `sdd:done`, run the notification).
 
-1. Find the parent Issue number from `<!-- sdd:child-issue -->`.
+1. Find the parent Issue number from `<!-- sdd:child-issue -->` using the same multi-language regex (en/ko/ja child Issues all share the `<!-- sdd:child-issue -->` marker; only the literal label keyword differs).
 2. Find the **most recent** children comment on the parent containing BOTH `<!-- sdd:children:output -->` and `<!-- /sdd:children:output -->`:
    ```bash
    gh api repos/$OWNER_REPO/issues/<parent>/comments \

@@ -113,10 +113,18 @@ Child Issues have individual tests; cross-child integration tests may be needed 
      - Create test branch: `test/<parent-feature-name>`.
      - Write E2E test code following existing framework patterns.
      - Run E2E tests → record results.
-     - Create a PR for the integration tests:
+     - Create a PR for the integration tests (use a heredoc without quoting `EOF` so `$1` expands; newlines must be real, not literal `\n`):
        ```bash
        gh pr create --title "test: <parent feature> integration tests" \
-         --body "Refs #$1\n\n<summary>\n\n## Manual Test Checklist\n<items>"
+         --body "$(cat <<EOF
+       Refs #$1
+
+       <summary>
+
+       ## Manual Test Checklist
+       <items>
+       EOF
+       )"
        ```
    - If no integration tests are needed (children's tests already cover all scenarios): document the reasoning in the report.
 

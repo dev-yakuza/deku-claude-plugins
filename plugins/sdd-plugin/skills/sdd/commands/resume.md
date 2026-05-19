@@ -88,7 +88,7 @@ Resuming from: <specific point>
 
 Check skip-review setting (Common Definitions → Skip Review Setting):
 
-- If the determined stage (e.g., `analyze`, `design`, `implement`, `pr`, `qa`) is in skip-review → **skip user confirmation** and immediately read + execute the target orchestrator. This allows `/sdd auto` and `/sdd batch` to chain stages without prompting.
+- If the determined stage (the key resume routes to: `analyze` / `design` / `implement` / `test`) is in skip-review → **skip user confirmation** and immediately read + execute the target orchestrator. (Note: `pr` and `qa` are skip-review keys consumed inside `implement.md` / `test.md` respectively, not dispatch targets of resume — they don't appear in this list.) This allows `/sdd auto` and `/sdd batch` to chain stages without prompting.
 - If NOT in skip-review → ask the user for confirmation ("Resume from <stage>? [y/N]"), then read + execute the target orchestrator.
 
 ## Notes

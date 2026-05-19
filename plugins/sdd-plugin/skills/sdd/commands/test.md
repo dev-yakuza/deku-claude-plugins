@@ -123,9 +123,9 @@ Based on the user's manual QA report (or auto-approval under skip-review):
 
 ## Phase 4: Child completion notification (if this Issue is a child)
 
-Same logic as `implement.md` Phase C: when a child Issue just transitioned to `sdd:done`, update the parent's `<!-- sdd:children:output -->` table row, check whether all children are now done, and notify the user on the parent Issue accordingly.
+Same logic as `implement.md` Phase C: when a child Issue (detected via the multi-language parent regex `(Parent|상위 |親)Issue: #<n>` per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md`) just transitioned to `sdd:done`, update the parent's `<!-- sdd:children:output -->` table row, check whether all children are now done, and notify the user on the parent Issue accordingly.
 
-(See `implement.md` Phase C for the detailed steps — they apply verbatim here.)
+(See `implement.md` Phase C for the detailed steps — they apply verbatim here, including the multi-language parent reference.)
 
 ## Notes
 
