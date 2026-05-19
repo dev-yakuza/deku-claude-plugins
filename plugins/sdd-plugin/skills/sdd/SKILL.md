@@ -14,7 +14,7 @@ You are executing the SDD process. Route to the appropriate command based on `$0
 ## Command Routing
 
 Read `${CLAUDE_SKILL_DIR}/commands/$0.md` and execute. Pass `$1` as issue number (or language for init), `$2` as target stage for rollback.
-- Valid commands: `init`, `analyze`, `design`, `implement`, `test`, `resume`, `status`, `review`, `rollback`, `config`, `batch`, `help`
+- Valid commands: `init`, `analyze`, `design`, `implement`, `test`, `resume`, `status`, `review`, `rollback`, `config`, `batch`, `auto`, `help`
 - If `$0` is empty → route to `help`
 - If `$0` is not in the list above → report unknown command, then route to `help`
 
