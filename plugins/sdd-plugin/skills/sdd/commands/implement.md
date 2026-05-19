@@ -51,9 +51,13 @@ Check skip-review setting (Common Definitions → Skip Review Setting).
 - If `implement` is in skip-review → log "User review skipped (skip-review: implement). Proceeding to TDD." → Phase B.
 - Otherwise → present the plan comment (now on the Issue with marker `<!-- sdd:implement:plan -->`) and ask the user to confirm the plan direction before proceeding. On approval → Phase B. On rejection → stop.
 
-## Phase B: TDD + PR
+## Phase B: TDD + Review Loop (up to 3 rounds)
 
-### B.1 — Spawn the TDD atom
+Each round = TDD atom (first-round or retry) → parallel review atoms → verdict check.
+
+### Round 1
+
+#### B.1.1 — Spawn the TDD atom (first-round)
 
 - `subagent_type`: `general-purpose`
 - `description`: `implement TDD for #$1`
@@ -63,12 +67,12 @@ Check skip-review setting (Common Definitions → Skip Review Setting).
 
 Parse the `>>> RESULT <<<` line:
 - `FAIL: <reason>` → report failure to user, stop.
-- `OK PR: #N` → TDD complete, PR created or updated. Continue.
+- `OK PR: #N` → TDD complete, PR created. Continue.
 - `OK PR: #N E2E_SKIPPED` → same, but E2E was skipped (no setup detected). Note for the user; continue.
 
-Remember the PR number `#N` for Phase B.2.
+Remember the PR number `#N` for the review step.
 
-### B.2 — Spawn the two review atoms in parallel
+#### B.1.2 — Spawn the two review atoms in parallel
 
 Single message, two Agent tool calls (concurrent):
 
@@ -88,18 +92,49 @@ Agent B:
 
 Parse both `>>> RESULT <<<` lines:
 - If either is `FAIL: <reason>` (atom error) → report, stop.
-- Both `OK PASS PR: #N` → reviews passed.
-- Either `OK FAIL PR: #N: <summary>` → reviews failed; combine summaries.
+- Both `OK PASS PR: #N` → reviews passed; **exit the round loop, proceed to B.2**.
+- Either `OK FAIL PR: #N: <summary>` → reviews failed.
 
-### B.3 — Review-failure handling (no orchestrator retry in v0.24.0)
+#### B.1.3 — Round decision
 
-If reviews failed: do **not** automatically re-spawn the TDD atom (PR-amend retries add complexity around force-push semantics that are out of scope for v0.24.0). Instead:
-- Surface the combined critical/major issues to the user.
-- Let the user decide: (a) accept the PR as-is and proceed to `sdd:test`, (b) manually push fix commits to the branch, or (c) abort.
+- Reviews passed → exit loop → B.2.
+- Reviews failed AND round < 3 → fetch the full review comment bodies from the PR for combined critical/major issue text:
+  ```bash
+  gh api repos/$OWNER_REPO/issues/<PR_NUM>/comments \
+    --jq '.[] | select(.body | test("sdd:review:implement:(completeness|quality)")) | .body'
+  ```
+  Summarize the critical and major items into a single feedback string (max ~50 lines). Proceed to Round 2 (retry).
+- Reviews failed AND round == 3 → exit loop. Report the remaining unfixed critical/major issues to the user. Proceed to B.2 anyway (user makes the final call).
 
-This is a documented regression from v0.23's 3-round implement loop. Tracked for a follow-up patch.
+### Round 2 and Round 3 (retry)
 
-### B.4 — User confirmation and label transition
+Same structure as Round 1 with one critical difference: the TDD atom is invoked in **retry mode** by passing the feedback as `$3`. Retry mode = the atom detects the existing PR, adds new commits (regular `git push`, no force-push, no amend), and pushes — preserving the PR's review history.
+
+#### B.N.1 — Spawn the TDD atom (retry)
+
+- `subagent_type`: `general-purpose`
+- `description`: `implement TDD retry round N for #$1`
+- `prompt`:
+  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/implement_tdd.md` and execute its instructions for Issue #$1 on branch `<branch-name>` in retry mode.
+  > Previous round review feedback (address each critical/major item with new commits — do NOT force-push, do NOT amend):
+  >
+  > <combined critical/major issues from prior reviews, verbatim or summarized>
+  >
+  > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
+
+Parse the return:
+- `FAIL: <reason>` → report failure, stop. (Retry-mode preconditions may have failed; e.g., the PR was closed externally.)
+- `OK PR: #N` / `OK PR: #N E2E_SKIPPED` → fix-up applied, PR updated. Continue to B.N.2.
+
+#### B.N.2 — Re-spawn the review atoms in parallel
+
+Same as B.1.2. The review atoms re-diff the (now updated) PR and post fresh review comments. Because they use duplicate-prevention markers (`<!-- sdd:review:implement:<role> -->`), the prior round's review comments are **updated in place** rather than appended — the reviewer's verdict reflects the latest PR state.
+
+#### B.N.3 — Round decision
+
+Same as B.1.3.
+
+### B.2 — User confirmation and label transition
 
 Check skip-review setting.
 
@@ -137,5 +172,6 @@ This phase runs **only if the Issue body contains `Parent Issue: #<number>` insi
 
 - **Atoms never spawn other atoms.** All Agent-tool spawning happens here in the orchestrator. The TDD atom does sequential self-reviews within itself (3-1, 3-2, 3-3, 3-4 are `self_only`); the orchestrator handles only the PR Final review (3-5, `full`).
 - **PR Final reviews are independent.** Two `implement_review` atoms run in parallel with independent contexts, reading the PR diff fresh from GitHub.
-- **No PR retry loop in v0.24.0.** A retry would require the TDD atom to support amend/append commits and re-trigger reviews, adding force-push complexity. Deferred.
+- **Retry limit is 3 rounds total** (initial + 2 retries). On retry, the TDD atom runs in retry mode: it detects the existing PR, addresses the prior round's feedback by adding new commits, and pushes regularly (no `--force`, no `--amend`). Prior PR review comments stay attached to their original commits for audit.
+- **Review comments are updated in place across rounds** via the duplicate-prevention markers (`<!-- sdd:review:implement:<role> -->`). The reviewer's verdict on the PR always reflects the latest diff, not historical state.
 - **Reviews go on the PR, not the Issue** (via `gh pr comment`). The `<!-- sdd:review:implement:<role> -->` markers identify them on the PR.

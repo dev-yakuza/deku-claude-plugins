@@ -10,13 +10,28 @@ This is the **largest atom**. If its subagent context becomes saturated for comp
 
 - `$1` — Issue number
 - `$2` — feature branch name (from `implement_plan` atom's `OK BRANCH: <name>` return)
+- Optional `$3` — review feedback from a prior round (retry mode). When provided, this atom operates in **retry mode** (see "Retry mode" section below).
 
 ## Preconditions
 
 - The Issue must have `<!-- sdd:design:output -->` and `<!-- sdd:implement:plan -->` comments.
 - The feature branch (`$2`) must exist and be checked out (the plan atom does this).
+- In retry mode (`$3` provided): the branch is expected to have commits and an open PR. The atom verifies and proceeds to fix-up rather than initial TDD.
 
-## Work
+## Mode detection
+
+Run this **before** Setup to determine which flow to execute:
+
+```bash
+git rev-parse --abbrev-ref HEAD                                 # current branch
+EXISTING_PR=$(gh pr list --head $2 --state open --json number --jq '.[0].number' 2>/dev/null)
+```
+
+- **First-round mode**: `$3` not provided AND `$EXISTING_PR` is empty → execute the full TDD cycle (Setup → 3-1 → 3-2 → 3-3 → 3-4 → 3-5 PR creation).
+- **Retry mode**: `$3` provided (review feedback from a prior round). `$EXISTING_PR` should be present; if not, that is an error.
+- **Mixed (defensive)**: `$3` provided but no PR found → return `FAIL: retry mode requested but no open PR found for branch $2`. The orchestrator should not have invoked retry without a prior round having created a PR.
+
+## Work — first-round mode
 
 ### Setup
 
@@ -93,11 +108,11 @@ git push -u origin <branch>
 
 ### 3-5. PR Creation
 
-1. **Check for existing PR for this branch** (retry scenario):
+1. **Sanity check — PR must not already exist for this branch in first-round mode**:
    ```bash
    gh pr list --head $2 --json number,url --jq '.[0]'
    ```
-   - If a PR exists → push additional commits; do NOT create a new PR.
+   - If a PR exists in first-round mode → return `FAIL: PR for branch $2 already exists in first-round mode; orchestrator should have invoked retry mode`.
    - If no PR → continue to step 2.
 
 2. Summarize changes (3-5 lines).
@@ -135,6 +150,61 @@ git push -u origin <branch>
 
 7. Capture the PR number (`gh pr view --json number -q .number` against the branch, or from the create command's output).
 
+## Work — retry mode
+
+Triggered when `$3` (review feedback) is provided. The branch and PR already exist.
+
+### Setup (retry)
+
+1. Resolve owner/repo, verify branch and PR:
+   ```bash
+   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+   PR_NUM=$(gh pr list --head $2 --state open --json number --jq '.[0].number')
+   ```
+   If `PR_NUM` is empty → return `FAIL: retry mode requested but no open PR found for branch $2`.
+
+2. Ensure `$2` is the current branch:
+   ```bash
+   git checkout $2 && git pull --ff-only origin $2 || true
+   ```
+
+3. Read the same context as first-round (design + plan from Issue), plus the current PR diff:
+   ```bash
+   gh pr diff $PR_NUM
+   ```
+
+4. Parse `$3` review feedback. It contains the combined critical/major issues from the previous round's `implement_review` atoms. Each item should be addressed.
+
+### Fix-up steps (retry)
+
+For each critical/major issue in `$3`:
+
+1. **Decide the fix kind**:
+   - Code defect → modify production code
+   - Missing test → add a failing test first (mini Red), then implement (mini Green)
+   - Test defect → modify the existing test
+   - Refactoring nit → adjust the implementation
+
+2. **Apply the fix** and run the full test suite (unit + E2E if applicable) → confirm all tests pass. If a fix causes regressions, address them before continuing.
+
+3. **Self-review the fix** against the relevant `ai-review-implement.md` section for the kind of change (3-1 for tests, 3-2/3-3 for implementation, 3-4 for E2E). Fix self-review issues inline.
+
+### Commit and push (retry)
+
+Make **new commits** (do NOT amend, do NOT force-push) following the repo's commit-message convention. Suggested message form: `fix: address review (round N) - <short summary>`.
+
+```bash
+git add <files>
+git commit -m "..."
+git push origin $2   # regular push, no --force
+```
+
+The PR is automatically updated by the push — review comments on prior commits remain attached for audit.
+
+### No new PR (retry)
+
+Do NOT create a new PR. The orchestrator will re-spawn `implement_review` atoms after this atom returns; they will re-diff the updated PR and post fresh review comments using duplicate-prevention markers (so prior review comments are updated in place).
+
 ## Return contract
 
 Return EXACTLY ONE LINE on its own, prefixed by `>>> RESULT <<<`:
@@ -154,9 +224,9 @@ or
 FAIL: <one-line reason, max 200 chars, no newlines>
 ```
 
-- `OK PR: #N` — TDD cycle completed, PR created (or updated), all tests pass.
+- `OK PR: #N` — TDD cycle completed (first round) or fix-up applied (retry round); PR is up to date and all tests pass.
 - `OK PR: #N E2E_SKIPPED` — same, but E2E setup did not exist; flagged for `/sdd test` stage.
-- `FAIL: <reason>` — could not complete (tests don't pass, push failed, gh pr create failed, etc.).
+- `FAIL: <reason>` — could not complete (tests don't pass, push failed, gh pr create failed, retry-mode preconditions unmet, etc.).
 
 Do NOT return code diffs or test output. The PR is the artifact.
 
@@ -169,4 +239,5 @@ Do NOT return code diffs or test output. The PR is the artifact.
 - Do NOT set Claude as co-author in any commit (rule from `implement.md`).
 - Check `git log --oneline -20` for the repo's branch and commit message conventions before making commits.
 - Follow existing codebase patterns observed during the TDD cycle.
-- On retry (PR already exists), push new commits to the existing PR; do NOT force-push (preserves PR review history).
+- **Never force-push.** Retry mode adds new commits (regular `git push`) — this preserves the PR review history so reviewers can see what was changed between rounds.
+- **Never amend prior commits** in retry mode.
