@@ -100,4 +100,4 @@ The review atom prompts are unchanged between rounds — reviewers always evalua
 - **AI review always runs.** `skip-review: analyze` skips only the **user confirmation** between stages — the AI review loop (Phase 1) always executes.
 - **Atoms never spawn other atoms.** All Agent-tool spawning happens here in the orchestrator (this file). Atoms run as terminal subagents.
 - **Reviews are independent.** The two review atoms run in parallel with independent contexts — they do not see each other's verdicts.
-- **Retry limit is 3 rounds total** (initial + 2 retries), matching the legacy `ai-review.md` behavior.
+- **Retry limit is 3 rounds total** (initial + 2 retries).
