@@ -12,7 +12,9 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
    - `<!-- sdd:analyze:output -->` exists?
    - `<!-- sdd:design:output -->` exists?
    - `<!-- sdd:children:output -->` exists? (parent Issue)
-3. Check related PRs: `gh pr list --search "issue:$1"`
+   - `<!-- sdd:implement:plan -->` exists? (implement plan posted)
+   - `<!-- sdd:test:output -->` exists? (test results posted)
+3. Check related PRs: `gh pr list --search "Refs #$1"` (matches the PR body convention written by `implement_tdd.md`)
 4. If parent Issue, check all child Issue statuses
 5. Summarize current stage and progress
 

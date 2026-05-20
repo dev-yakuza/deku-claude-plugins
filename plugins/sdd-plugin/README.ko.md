@@ -40,7 +40,9 @@ claude /plugin install deku-claude-plugins@sdd-plugin
 | `/sdd resume <issue>` | 단계 자동 감지 후 중단된 곳부터 재개 |
 | `/sdd rollback <issue> <stage>` | 이전 단계로 롤백 (analyze, design, implement) |
 | `/sdd status <issue>` | 현재 진행 상황 확인 |
-| `/sdd review <issue>` | 현재 산출물 AI 리뷰 |
+| `/sdd review <issue>` | 현재 산출물 AI 리뷰 재실행 |
+| `/sdd auto [issues]` | 세션 내 순차 처리 (Interactive 구독 풀 사용, 세션 유지 필요) |
+| `/sdd batch [issues]` | `claude -p`를 통한 셸 비대기형 처리 (2026-06-15부터 Agent SDK Credit 풀 사용) |
 | `/sdd config` | SDD 설정 확인 또는 변경 |
 | `/sdd help` | 사용법 표시 |
 
@@ -122,13 +124,37 @@ PR에는 리뷰어가 UI 동작, 사용자 흐름, 엣지 케이스를 검증할
 
 | 값 | 건너뛰는 리뷰 |
 |----|---------------|
-| `analyze` | 요구사항 분석 후 사용자 리뷰 |
-| `design` | 설계 후 사용자 리뷰 |
-| `implement` | TDD 하위 단계(3-0 ~ 3-3)의 사용자 리뷰 |
-| `pr` | PR 코드 리뷰(3-4)의 사용자 리뷰 |
-| `qa` | 수동 QA 실행 (4-2 ~ 4-3) |
+| `analyze` | analyze 단계 후 사용자 확인 (AI 리뷰는 계속 실행) |
+| `design` | design 단계 후 사용자 확인 (AI 리뷰는 계속 실행) |
+| `implement` | implement 계획 단계(3-0)의 사용자 확인. 3-1 ~ 3-4는 `self_only`이며 건너뛸 사용자 프롬프트가 없음 |
+| `pr` | PR Final 리뷰(3-5)의 사용자 확인 |
+| `qa` | test 단계 후 수동 QA 실행 |
 
 설정은 `.github/.sdd-config`에 저장됩니다. AI 리뷰는 이 설정과 관계없이 항상 실행됩니다.
+
+### 일괄 처리
+
+여러 Issue를 전체 파이프라인으로 처리하는 두 가지 명령어가 있습니다. 두 명령어는 Phase 1 (Issue 수집/필터링)과 Phase 2 (권한 확인)을 공유하며, 부모 설계 단계에서 생성된 자식 Issue도 자동으로 큐에 추가합니다.
+
+| 항목 | `/sdd auto` | `/sdd batch` |
+|---|---|---|
+| 실행 모델 | 메인 Claude Code 세션이 in-process로 Issue를 루프 | `.sdd-batch.sh` 생성, 각 Issue가 별도 `claude -p` 자식 세션에서 실행 |
+| 빌링 풀 (2026-06-15 이후) | Interactive 구독 풀 (변경 없음) | Agent SDK Credit 풀 (API 정가 종량 과금, 이월 없음) |
+| Claude Code 세션 유지 필요? | 필요 | 불필요 — 종료해도 셸 스크립트가 비대기로 실행 |
+| 실행 중 권한 프롬프트 | 일반 메인 세션 프롬프트 | `--dangerously-skip-permissions`로 우회 |
+| Ctrl-C 시 cleanup | 약함 (세션 내 try/finally; hard kill은 cleanup 불가) | 강함 (셸 `trap` EXIT/INT/TERM) |
+| 로그 | Claude Code 트랜스크립트 내 인라인 | Issue별 stream-json 로그 파일 |
+
+**가이드**: 큰 큐, 자리 비울 예정 → `/sdd batch`. Interactive 빌링 유지 + 진행 관찰 → `/sdd auto`.
+
+### 아키텍처 (0.24.0 이후)
+
+모든 단계는 두 계층으로 분해됩니다:
+
+- **Atoms** (`commands/atoms/<stage>_<step>.md`) — 단일 서브에이전트 워커. 각 atom은 orchestrator가 호출하며, GitHub(Issue 본문, 코멘트, PR diff)에서 직접 입력을 읽고, 결과를 GitHub에 다시 기록한 후, 메인 세션에 한 줄 요약을 반환합니다. atom은 다른 서브에이전트를 spawn하지 않습니다.
+- **Orchestrators** (사용자가 사용하는 `commands/<stage>.md`) — 메인 Claude Code 세션에서 실행되며, Agent 도구로 atom을 조합(work + 병렬 reviewer)하고, 3-round retry 루프를 관리하며, `skip-review`를 확인하고, 사용자 확인을 처리합니다.
+
+이 분리로 메인 세션이 얇은 상태 머신이 되고 모든 spawn이 단일 nesting 레벨에 머무릅니다 — Claude Code가 nested 서브에이전트를 차단하므로 필수적인 설계입니다. AI 리뷰는 독립 컨텍스트의 두 병렬 reviewer atom (completeness + quality)으로 실행됩니다.
 
 ### 언어 설정
 

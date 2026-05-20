@@ -40,7 +40,9 @@ claude /plugin install deku-claude-plugins@sdd-plugin
 | `/sdd resume <issue>` | Auto-detect stage and continue from where it left off |
 | `/sdd rollback <issue> <stage>` | Roll back to a previous stage (analyze, design, implement) |
 | `/sdd status <issue>` | Check current progress |
-| `/sdd review <issue>` | AI review of current output |
+| `/sdd review <issue>` | Re-run AI review on current output |
+| `/sdd auto [issues]` | In-session sequential processing (Interactive billing; keep session open) |
+| `/sdd batch [issues]` | Unattended shell processing via `claude -p` (Agent SDK Credit pool from 2026-06-15) |
 | `/sdd config` | Show or update SDD settings |
 | `/sdd help` | Show usage |
 
@@ -122,13 +124,37 @@ By default, every stage requires user review. You can skip user review for speci
 
 | Value | Skipped Review |
 |-------|---------------|
-| `analyze` | User review after requirements analysis |
-| `design` | User review after design |
-| `implement` | User review at TDD substeps (3-0 ~ 3-3) |
-| `pr` | User review at PR code review (3-4) |
-| `qa` | Manual QA execution (4-2 ~ 4-3) |
+| `analyze` | User confirmation after analyze stage (AI review still runs) |
+| `design` | User confirmation after design stage (AI review still runs) |
+| `implement` | User confirmation at the implement plan stage (3-0). 3-1 through 3-4 are `self_only` and have no user prompt to skip. |
+| `pr` | User confirmation at PR Final review (3-5) |
+| `qa` | Manual QA execution after the test stage |
 
 Settings are saved to `.github/.sdd-config`. AI review always runs regardless of this setting.
+
+### Batch Processing
+
+Two commands process multiple Issues through the full pipeline. Both share Phase 1 (Issue collection/filtering) and Phase 2 (permission verification), and both auto-discover child Issues created during a parent's design stage.
+
+| Aspect | `/sdd auto` | `/sdd batch` |
+|---|---|---|
+| Execution model | Main Claude Code session loops over Issues in-process | Generates `.sdd-batch.sh`; each Issue runs in a fresh `claude -p` child session |
+| Billing pool (post 2026-06-15) | Interactive subscription pool (unchanged) | Agent SDK Credit pool (metered at API list prices, no rollover) |
+| Claude Code session required to stay open | Yes | No — close it; the shell script runs unattended |
+| Permission prompts during run | Normal main-session prompts apply | Bypassed via `--dangerously-skip-permissions` |
+| Cleanup on Ctrl-C | Weak (in-session try/finally; hard kill loses cleanup) | Strong (shell `trap` on EXIT/INT/TERM) |
+| Logs | Inline in the Claude Code transcript | Per-Issue stream-json log files |
+
+**Heuristic**: large queue, want to walk away → `/sdd batch`. Want to stay on Interactive billing and watch progress → `/sdd auto`.
+
+### Architecture (since 0.24.0)
+
+Every stage is decomposed into two layers:
+
+- **Atoms** (`commands/atoms/<stage>_<step>.md`) — single-subagent workers. Each atom is invoked by an orchestrator, reads its inputs directly from GitHub (Issue body, comments, PR diff), writes results back to GitHub, and returns a one-line summary to the main session. Atoms never spawn other subagents.
+- **Orchestrators** (the user-facing `commands/<stage>.md` files) — run in the main Claude Code session, compose atoms via the Agent tool (work + parallel reviewers), manage the 3-round retry loop, check `skip-review`, and handle user confirmation.
+
+This split makes the main session a thin state machine and keeps every spawn at a single nesting level — required because Claude Code blocks nested subagents. AI reviews run as two parallel reviewer atoms (completeness + quality) with independent contexts.
 
 ### Language Configuration
 

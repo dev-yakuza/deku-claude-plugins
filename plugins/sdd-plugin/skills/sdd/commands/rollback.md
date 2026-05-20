@@ -4,7 +4,10 @@
 
 Usage: `/sdd rollback <issue> <target-stage>`
 
-Target stages: `analyze`, `design`, `implement`
+## Inputs
+
+- `$1` — Issue number
+- `$2` — target stage: `analyze` | `design` | `implement` (cannot roll back to `test` or `done`)
 
 ## Input Validation
 Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
@@ -30,7 +33,7 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
    Reason: <user's reason or "requested by user">
    <!-- /sdd:rollback -->
    ```
-6. Execute the target stage command (read the appropriate file from `${CLAUDE_SKILL_DIR}/commands/`)
+6. **Read + execute inline (do NOT spawn a subagent)** the target stage command: read `${CLAUDE_SKILL_DIR}/commands/$2.md` and execute its instructions for Issue #$1 in this same main session. Spawning a subagent here would create nested-subagent spawning when the target orchestrator spawns atoms.
 
 ## Parent Issue rollback:
 - Rolling back a parent Issue to `design` does NOT delete child Issues
