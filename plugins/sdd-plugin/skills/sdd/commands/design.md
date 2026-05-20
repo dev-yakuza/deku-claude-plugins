@@ -1,86 +1,115 @@
 # DESIGN
 
-**Stage 2: Design (How)**
+**Stage 2: Design (How) — Orchestrator**
 
 Define HOW to implement based on the requirements.
 
+This file is an **orchestrator**. It runs in the main session and composes atomic operations via the Agent tool. The atoms (`atoms/design_work.md`, `atoms/design_review.md`) do the actual work; this file manages state, retries, and user interaction.
+
 ## Input Validation
+
 Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
-## Phase 1: Design (via subagent)
+## Precondition
 
-Use the **Agent tool** to spawn a subagent with the following instructions. This isolates the heavy work from the main context to save tokens.
+The Issue must have an `<!-- sdd:analyze:output -->` comment. If missing → report "Run `/sdd analyze $1` first" and stop. The work atom will also check this, but failing fast here avoids a wasted subagent invocation.
 
-> **Subagent instructions:**
->
-> You are executing SDD Stage 2 (Design) for Issue $1.
->
-> 1. Read analyze output from Issue comments:
->    ```bash
->    gh api repos/{owner}/{repo}/issues/$1/comments --jq '.[] | select(.body | contains("sdd:analyze:output")) | .body'
->    ```
->    - If no analyze output found → report error: "Run `/sdd analyze $1` first" and stop
-> 2. Check if this is a child Issue (body contains `Parent Issue: #<number>`):
->    - If yes: read the parent Issue's design output for context (architecture decisions, PR split rationale, constraints)
->      ```bash
->      gh api repos/{owner}/{repo}/issues/<parent>/comments --jq '.[] | select(.body | contains("sdd:design:output")) | .body'
->      ```
->    - The child's design must be consistent with the parent's overall architecture and design decisions
->    - Focus on the detailed design for this child's sub-feature only
-> 3. Explore the codebase using a **dedicated Explore agent** (Agent tool with `subagent_type: Explore`, `model: "sonnet"`):
->    - Provide the agent with the analyze output and ask it to investigate:
->      - Existing architecture and patterns relevant to the requirements
->      - Files, modules, and dependencies that would be affected
->      - Existing test structure and conventions
->      - Similar implementations in the codebase that can be referenced
->    - Do **NOT** share design ideas with the agent — let it explore objectively
->    - Use the agent's findings as input for the design steps below
-> 4. Identify impact scope (related files, screens, data) based on exploration results
-> 5. Design file structure changes
-> 6. Design data model changes (if applicable)
-> 7. Identify constraints and risks
-> 8. Create feature list with PR split
-> 9. Read the language setting from `.github/.sdd-lang`. If the file does not exist, detect the primary language of the Issue body and map to the closest supported language (`en`, `ko`, `ja`). If unsupported, default to `en`.
-> 10. Format output using the template in `${CLAUDE_SKILL_DIR}/templates/{lang}/output_design.md`
-> 11. **AI Review**: Read `${CLAUDE_SKILL_DIR}/commands/ai-review.md` and execute with the output above (stage: **design**)
-> 12. Return the final output along with review loop results (rounds, issues fixed, verdict)
+## Phase 1: Design + AI Review Loop
 
-## Phase 2: User Review (in main context)
+Up to **3 rounds** maximum. Each round = work atom → parallel review atoms → verdict check.
 
-1. Check skip-review setting (see Common Definitions → Skip Review Setting)
+### Round 1
+
+**Step 1.1 — Spawn the work atom** via the Agent tool:
+
+- `subagent_type`: `general-purpose`
+- `description`: `design work for #$1`
+- `prompt`:
+  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_work.md` and execute its instructions for Issue #$1.
+  > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
+
+Parse the subagent's `>>> RESULT <<<` line:
+- `FAIL: <reason>` → report failure to the user and stop. Do not proceed to reviews.
+- `OK SINGLE` → single-PR design posted. Continue to Step 1.2. **Remember the path = SINGLE** for Phase 2.
+- `OK CHILDREN: #A,#B,#C` → multi-PR design posted, children created. Continue to Step 1.2. **Remember the path = CHILDREN with the listed numbers** for Phase 2.
+
+**Step 1.2 — Spawn the two review atoms in parallel** via the Agent tool. Single message, two Agent tool calls (concurrent execution):
+
+Agent A:
+- `subagent_type`: `general-purpose`
+- `description`: `design review (completeness) for #$1`
+- `prompt`:
+  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_review.md` and execute its instructions for Issue #$1 with role `completeness`.
+  > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
+
+Agent B:
+- `subagent_type`: `general-purpose`
+- `description`: `design review (quality) for #$1`
+- `prompt`:
+  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_review.md` and execute its instructions for Issue #$1 with role `quality`.
+  > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
+
+Parse both `>>> RESULT <<<` lines:
+- If either is `FAIL: <reason>` (atom error) → report failure, stop.
+- Combine verdicts:
+  - Both `OK PASS` → reviews passed.
+  - Either `OK FAIL: <summary>` → reviews failed. Combine the summaries.
+
+**Step 1.3 — Round decision:**
+- Reviews passed → exit loop; proceed to Phase 2.
+- Reviews failed, round < 3 → fetch review comments from the Issue for full issue details, summarize combined critical/major issues, re-spawn work atom with `$2` = combined-issues string.
+- Reviews failed, round == 3 → exit loop. Report remaining unfixed issues (severity-summarized) to the user; proceed to Phase 2 anyway.
+
+### Round 2 and Round 3 (retry)
+
+Same as Round 1 Steps 1.1–1.3, but the work atom prompt **must include previous round's review feedback** as `$2`:
+
+- `prompt`:
+  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_work.md` and execute its instructions for Issue #$1.
+  > Previous round review feedback (address each item): <combined critical/major issues from prior reviews>
+  > Return EXACTLY one line in the contract specified by that file.
+
+The review atom prompts are unchanged between rounds.
+
+**Note on retry with `OK CHILDREN`**: if Round 1 returned `OK CHILDREN: #A,#B,#C` and reviews failed, the work atom's idempotency rule (do NOT re-create children if `<!-- sdd:children:output -->` exists) keeps the same children across retries. The retry only updates the design output comment, not the child set.
+
+## Phase 2: Branching on path (SINGLE vs CHILDREN)
+
+### Path: SINGLE (from `OK SINGLE`)
+
+1. Check skip-review setting (Common Definitions → Skip Review Setting).
 2. If `design` is in skip-review:
-   - Log: "User review skipped (skip-review: design)"
-   - Auto-approve:
-     - Post as Issue comment (using duplicate prevention from Common Definitions)
-     - If **single PR** → update label to `sdd:implement`, then **auto-proceed**: use the **Agent tool** to spawn a subagent that executes `/sdd implement $1`. This isolates the next stage's context and prevents token accumulation.
-     - If **multiple PRs** → execute **Child Issue Creation** below
+   - Log: "User review skipped (skip-review: design). AI review already ran."
+   - Update label to `sdd:implement`.
+   - **Auto-proceed (read + execute inline, do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/implement.md` and execute its instructions for Issue #$1 in this same main session.
 3. If `design` is NOT in skip-review:
-   - Present the subagent's output to the user with review loop results (rounds, issues fixed, verdict)
-   - Ask for confirmation on technical approach and PR split
-   - On approval:
-     - Post as Issue comment (using duplicate prevention from Common Definitions)
-     - If **single PR** → update label to `sdd:implement`
-     - If **multiple PRs** → execute **Child Issue Creation** below
+   - Summarize for the user: which round passed, any minor suggestions still on the Issue, the design comment location.
+   - Ask for confirmation on technical approach and PR split.
+   - On approval: update label to `sdd:implement`. (User invokes `/sdd implement $1` themselves or runs `/sdd resume $1`.)
 
-## Child Issue Creation (when multiple PRs are needed):
+### Path: CHILDREN (from `OK CHILDREN: #A,#B,...`)
 
-When the design identifies 2 or more PRs, create a child Issue for each sub-feature:
+The work atom has already:
+- Posted the design output comment on the parent
+- Created the child Issues with labels `sdd:analyze` + `sdd:child`
+- Posted the `<!-- sdd:children:output -->` comment on the parent
 
-1. Read the language setting from `.github/.sdd-lang`. If the file does not exist, detect the primary language of the Issue body and map to the closest supported language (`en`, `ko`, `ja`). If unsupported, default to `en`.
-2. For each sub-feature in the design:
-   - Format the child Issue body using the template in `${CLAUDE_SKILL_DIR}/templates/{lang}/output_child_issue.md`
-   - Placeholders are NOT processed by a template engine. AI must manually replace them:
-     - `{{parent_issue}}` → replace with `$1`
-     - `{{sub_feature_description}}` → replace with the sub-feature description from design
-     - `{{criteria_list}}` → replace with a markdown checkbox list from design (e.g. `- [ ] Criterion 1\n- [ ] Criterion 2`)
-   ```bash
-   gh issue create --title "[SDD Child] <parent title> - <sub-feature name>" \
-     --body "<formatted body from template>" --label "sdd:analyze" --label "sdd:child"
-   ```
-3. Post the child Issue list as a comment on the parent Issue using the template in `${CLAUDE_SKILL_DIR}/templates/{lang}/output_children.md`
-   - Add a row for each created child Issue to the table
-4. Post design output as Issue comment on parent Issue
-5. Update parent Issue label to `sdd:implement`
-6. Determine next action — check skip-review setting (see Common Definitions → Skip Review Setting):
-   - If `design` is in skip-review → **stop here**. The parent reaches `sdd:implement` with children at `sdd:analyze`. The surrounding flow (e.g. `/sdd batch`) is responsible for picking up the children. Log: "Children created (#A, #B, ...). Parent stopped at sdd:implement for batch/orchestrator to queue children."
-   - Otherwise → ask user which child Issue to start with, then execute **ANALYZE** on that child Issue
+The orchestrator now:
+
+1. Check skip-review setting.
+2. Update parent label to `sdd:implement`.
+3. If `design` is in skip-review:
+   - **Stop here.** The parent reaches `sdd:implement` with children at `sdd:analyze`. The surrounding flow (e.g. `/sdd batch` or `/sdd auto`) picks up the children.
+   - Log: "Children created (#A, #B, ...). Parent stopped at sdd:implement for batch/orchestrator to queue children."
+4. If `design` is NOT in skip-review:
+   - Summarize: design posted, children #A, #B, ... created, parent now at `sdd:implement`.
+   - Ask: "Which child Issue would you like to start with?"
+   - On selection (read + execute inline, do NOT spawn a subagent): read `${CLAUDE_SKILL_DIR}/commands/analyze.md` and execute its instructions for the selected child Issue in this same main session.
+
+## Notes
+
+- **AI review always runs.** `skip-review: design` skips only the user confirmation — the AI review loop (Phase 1) always executes.
+- **Atoms never spawn other atoms.** All Agent-tool spawning happens here. The work atom does its own codebase exploration via Read/Grep/Glob (no Explore subagent).
+- **Reviews are independent.** Two review atoms run in parallel with independent contexts.
+- **Retry limit is 3 rounds total** (initial + 2 retries).
+- **Child creation is idempotent** across retries — work atom skips re-creation if `<!-- sdd:children:output -->` already exists on the parent.

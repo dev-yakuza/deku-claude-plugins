@@ -1,33 +1,43 @@
 # RESUME
 
-**Resume work on an Issue from where it left off.**
+**Resume work on an Issue from where it left off. Pure dispatcher.**
 
-Automatically detect the current stage and continue the process.
+This file is a **dispatcher**. It runs in the main session, reads Issue state from GitHub (labels + comments + PRs), determines which stage orchestrator to invoke, and then reads + executes that orchestrator. It does **NOT** itself spawn subagents — the orchestrators it routes to are responsible for atom spawning.
 
 ## Input Validation
+
 Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
-## Process:
-1. Read Issue labels to determine current stage:
+## Process
+
+1. **Read Issue labels** to determine the nominal stage:
    ```bash
    gh issue view $1 --json labels,title --jq '{title: .title, labels: [.labels[].name]}'
    ```
-2. Check Issue comments for existing stage outputs:
+
+2. **Check Issue comments for existing stage outputs** (use a single API call):
    ```bash
-   gh api repos/{owner}/{repo}/issues/$1/comments --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output") or contains("sdd:children:output")) | .body'
+   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+   gh api repos/$OWNER_REPO/issues/$1/comments \
+     --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output") or contains("sdd:children:output") or contains("sdd:implement:plan") or contains("sdd:test:output")) | .body'
    ```
-   - Check for `<!-- sdd:analyze:output -->` marker
-   - Check for `<!-- sdd:design:output -->` marker
-   - Check for `<!-- sdd:children:output -->` marker (parent Issue with children)
-3. Check related PRs and their status:
+   Note presence/absence of:
+   - `<!-- sdd:analyze:output -->`
+   - `<!-- sdd:design:output -->`
+   - `<!-- sdd:children:output -->` (parent Issue indicator)
+   - `<!-- sdd:implement:plan -->`
+   - `<!-- sdd:test:output -->`
+
+3. **Check related PRs**:
    ```bash
-   gh pr list --search "issue:$1" --json number,title,state
+   gh pr list --search "Refs #$1" --json number,title,state,headRefName
    ```
 
-## If Parent Issue (has `<!-- sdd:children:output -->` marker):
-1. Read child Issue numbers from the children comment
-2. Check each child Issue's current label
-3. Report overall progress:
+## Dispatch: Parent Issue (has `<!-- sdd:children:output -->`)
+
+1. Read child Issue numbers from the children comment.
+2. Check each child's current label.
+3. Report progress to the user:
    ```
    Issue #$1: <title> (Parent)
    Child Issues:
@@ -35,41 +45,54 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
    - #125: <name> → sdd:implement (in progress)
    - #126: <name> → sdd:analyze (not started)
    ```
-4. Determine action:
-   - If all children `sdd:done`:
-     - Update parent label: `gh issue edit $1 --remove-label "sdd:implement" --add-label "sdd:test"`
-     - Execute **TEST** on parent (read `${CLAUDE_SKILL_DIR}/commands/test.md`)
-   - If any child is incomplete:
-     - Check skip-review setting (see Common Definitions → Skip Review Setting)
-     - If skip-review contains any of `analyze`, `design`, `implement`, `pr` → **stop here** without asking. Report pending children and exit cleanly. The surrounding flow (e.g. `/sdd batch`) is responsible for queuing the pending children for processing.
-     - Otherwise → ask user which child to resume, then execute **RESUME** on that child
+4. **Determine the action**:
+   - **If all children are `sdd:done`**:
+     - Update parent label: `gh issue edit $1 --remove-label "sdd:implement" --add-label "sdd:test"` (label transitions only — do NOT spawn subagents).
+     - **Read + execute inline (do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/test.md` and execute its instructions for Issue #$1 in this main session. The test orchestrator handles the parent path internally.
+   - **If any child is incomplete**:
+     - Check skip-review setting (Common Definitions → Skip Review Setting).
+     - If skip-review contains any of `analyze`, `design`, `implement`, `pr` → **stop here** without asking. Report pending children and exit cleanly. The surrounding flow (e.g., `/sdd batch` or `/sdd auto`) is responsible for queuing the pending children for processing.
+     - Otherwise → ask user which child to resume; then **read + execute inline (do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/resume.md` and execute for the chosen child Issue in this main session.
 
-## If Single Issue or Child Issue:
+## Dispatch: Single Issue or Child Issue
 
-Determine resume point based on findings:
+Determine the resume point based on findings:
 
-   | Label | Output exists? | Action |
-   |-------|---------------|--------|
-   | `sdd:analyze` | No analyze output | Execute **ANALYZE** |
-   | `sdd:design` | Analyze output exists, no design output | Execute **DESIGN** |
-   | `sdd:implement` | Design output exists | Execute **IMPLEMENT** |
-   | `sdd:test` | Implementation PRs merged | Execute **TEST** |
-   | `sdd:done` | All complete | Report: Issue is already complete |
-   | No SDD label | — | Add `sdd:analyze` label and execute **ANALYZE** |
+| Label                  | Output exists                                  | Dispatch target                                                  |
+|------------------------|------------------------------------------------|------------------------------------------------------------------|
+| (no SDD label)         | —                                              | Add `sdd:analyze` label, then `analyze.md`                       |
+| `sdd:analyze`          | No `analyze:output`                            | `analyze.md`                                                     |
+| `sdd:analyze`          | `analyze:output` exists                        | User completed analyze but label not advanced — `analyze.md` re-confirms (it will detect the existing output via duplicate prevention) |
+| `sdd:design`           | `analyze:output` present, no `design:output`   | `design.md`                                                      |
+| `sdd:design`           | `design:output` exists                         | `design.md` (re-confirm pattern, same as above)                  |
+| `sdd:implement`        | `design:output` exists, no PR                  | `implement.md` (will run plan + TDD from scratch)                |
+| `sdd:implement`        | open PR exists                                 | `implement.md` (the TDD atom's mode detection will continue from the existing PR) |
+| `sdd:implement`        | PR closed (not merged)                         | Ask user: reopen or start a new PR; then `implement.md`          |
+| `sdd:implement`        | branch exists, no PR                           | Ask user: create PR from existing branch or start fresh; then `implement.md` |
+| `sdd:test`             | PR(s) present                                  | `test.md`                                                        |
+| `sdd:done`             | —                                              | Report: "Issue is already complete." Stop.                       |
 
-For `sdd:implement` stage, further check sub-step:
-   - If no open PRs and no merged PRs → start PR (3-0)
-   - If open PR exists → check branch, read PR diff, and continue TDD cycle
-   - If PR was closed (not merged) → warn user, ask whether to reopen or start a new PR
-   - If branch exists but no PR → ask user whether to create PR from existing branch or start fresh
-   - If PR exists but branch was deleted → start a new branch and PR (3-0)
+For the dispatch action, read the target orchestrator file and execute its instructions. **resume.md itself does not spawn subagents.**
 
-Report current status to user before continuing:
-   ```
-   Issue #$1: <title>
-   Current stage: <stage>
-   Resuming from: <specific point>
-   ```
-Check skip-review setting (see Common Definitions → Skip Review Setting):
-- If the determined stage (e.g. `analyze`, `design`, `implement`) is in skip-review → **skip confirmation** and immediately read the appropriate command file from `${CLAUDE_SKILL_DIR}/commands/` and execute.
-- If NOT in skip-review → ask user for confirmation, then read the appropriate command file from `${CLAUDE_SKILL_DIR}/commands/` and execute.
+## Reporting
+
+Before dispatching, report current status to the user:
+
+```
+Issue #$1: <title>
+Current stage: <stage>
+Resuming from: <specific point>
+```
+
+## skip-review handling
+
+Check skip-review setting (Common Definitions → Skip Review Setting):
+
+- If the determined stage's skip-review key (`analyze` / `design` / `implement`) is set in `.github/.sdd-config` → **skip user confirmation** and immediately read + execute the target orchestrator. This allows `/sdd auto` and `/sdd batch` to chain stages without prompting. (Note: `pr` and `qa` are skip-review keys consumed inside `implement.md` / `test.md` respectively, not dispatch targets of resume. The test stage's user gate is `qa`, not `test` — `test` is not a valid skip-review value.)
+- If NOT in skip-review → ask the user for confirmation ("Resume from <stage>? [y/N]"), then read + execute the target orchestrator.
+
+## Notes
+
+- **resume.md is a dispatcher, not a worker.** It determines the target stage based on Issue state and reads + executes the corresponding orchestrator. All atom spawning happens inside those orchestrators (analyze.md, design.md, implement.md, test.md).
+- **Idempotent re-entry.** Calling `/sdd resume <N>` multiple times on the same Issue produces the same dispatch decision based on the current state. If the previous run reached a partial state, the target orchestrator's atom-level duplicate prevention (markers) ensures comments are updated in place rather than duplicated.
+- **Safe within `/sdd auto` loops.** Because resume.md does not itself spawn subagents, the orchestrators it dispatches to are the ONLY layer that spawns. The atoms inside those orchestrators are leaves. There is no nesting risk.

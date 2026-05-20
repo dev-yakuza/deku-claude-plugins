@@ -1,144 +1,135 @@
 # TEST
 
-**Stage 4: Testing**
+**Stage 4: Testing — Orchestrator**
 
-Unit/UI tests and E2E tests are already done in Stage 3 (for single/child Issues). This stage focuses on QA verification, and integration E2E for parent Issues.
+QA verification + integration E2E for parent Issues. Unit/UI tests and E2E tests for single/child Issues were already done in Stage 3 (implement); this stage validates them and adds the QA gate.
+
+This file is an **orchestrator**. It runs in the main session and composes atomic operations via the Agent tool. The atoms (`atoms/test_work.md`, `atoms/test_review.md`) do the actual work; this file manages state, retries, manual QA interaction, and the final label transition to `sdd:done`.
 
 ## Input Validation
+
 Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
-## Determine Issue type:
+## Determine Issue type
 
-1. **Parent Issue (has children)**: Check all child Issues
-   - Read child Issue numbers from the children comment
-   - Check each child Issue's label
-   - If any child Issue is NOT `sdd:done` → report which children are incomplete, ask user to complete them first
-   - If ALL child Issues are `sdd:done` → proceed with **Parent Issue Flow** below
-2. **Single Issue or Child Issue**: proceed with **Single/Child Issue Flow** below
+1. Check for children comment:
+   ```bash
+   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+   HAS_CHILDREN=$(gh api repos/$OWNER_REPO/issues/$1/comments \
+     --jq '.[] | select(.body | contains("<!-- sdd:children:output -->")) | .body' | head -1)
+   ```
 
----
+2. **Parent Issue (has children)**: Verify all child Issues are `sdd:done` before proceeding:
+   - Read child Issue numbers from the children comment.
+   - Check each child's label.
+   - If any child is NOT `sdd:done` → report which children are incomplete; ask user to complete them first; stop.
+   - If ALL children are `sdd:done` → proceed to Phase 1 (work atom will run in parent path).
+3. **Single/Child Issue**: proceed directly to Phase 1.
 
-## Single/Child Issue Flow
+## Phase 1: Test + AI Review Loop
 
-E2E tests were already written in Stage 3 (implement) and included in the PR. This flow focuses on QA verification only.
+Up to **3 rounds** maximum. Each round = work atom → parallel review atoms → verdict check.
 
-### Phase 1: QA Checklist (via subagent)
+### Round 1
 
-Use the **Agent tool** to spawn a subagent with the following instructions. This isolates the heavy work from the main context to save tokens.
+#### 1.1 — Spawn the work atom
 
-> **Subagent instructions:**
->
-> You are executing SDD Stage 4 (Test) for Issue $1. This is a single/child Issue — E2E tests are already in the PR.
->
-> **Context to read** (only these — do NOT read analyze/design outputs):
-> - Implementation PR for this Issue (find via `gh pr list --search "Refs #$1"`)
-> - Definition of Done from the Issue body
->
-> ### 4-1. Verify Existing Tests
-> 1. Read the implementation PR to understand what was built and what tests exist
-> 3. Run existing tests (unit, widget, E2E) → confirm all pass
-> 4. Evaluate test coverage: check if E2E tests adequately cover the requirements
->    - If E2E tests were skipped in Stage 3 (no E2E setup): report it
->    - If E2E tests exist but have gaps: report specific missing scenarios
->
-> ### 4-2. QA Checklist
-> 1. Create QA checklist based on requirements (separate automated vs manual items)
-> 2. Identify regression test targets
-> 3. **Self-review**: check for missing test scenarios, edge cases, and regression risks
->
-> Return: test run results, coverage evaluation, and QA checklist.
+- `subagent_type`: `general-purpose`
+- `description`: `test work for #$1`
+- `prompt`:
+  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/test_work.md` and execute its instructions for Issue #$1.
+  > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
 
-### Phase 2: User Review + Manual QA (in main context)
+Parse the `>>> RESULT <<<` line:
+- `FAIL: <reason>` → report failure to the user, stop. (Special case: if reason starts with `no E2E test setup detected; recommended framework:` → surface to user, ask for framework choice, re-spawn with the chosen framework noted in the prompt as `Framework: <name>`.)
+- `OK SINGLE PR: #N` → single/child path; existing PR validated. Continue.
+- `OK PARENT INTEGRATION_PR: #M` → parent path; integration test PR created. Continue. Note PR `#M` for the user.
+- `OK PARENT NO_INTEGRATION` → parent path; children's tests sufficient. Continue.
 
-1. If the subagent reported E2E tests were skipped in Stage 3 → ask user for framework confirmation, write E2E tests, and push to the PR branch
-2. If the subagent reported E2E coverage gaps → ask user whether to add more tests or proceed
+#### 1.2 — Spawn the two review atoms in parallel
 
-**User review**: Check skip-review setting (see Common Definitions → Skip Review Setting)
-- If `qa` is in skip-review:
-  - Log: "User review skipped (skip-review: qa)"
-  - Auto-approve test results and QA checklist, skip to **Results Review**
-- If `qa` is NOT in skip-review:
-  - Present test results and coverage evaluation
-  - Present QA checklist, user may add/remove/modify items
-  - **Manual QA (4-3)**: User performs manual QA testing based on the approved checklist, runs regression tests, and reports results (pass/fail per checklist item)
+Single message, two Agent tool calls (concurrent):
 
-### Results Review (4-4):
-1. If any QA item fails → analyze cause, go back to Stage 3 for TDD bug fix cycle
-2. All tests pass → update label to `sdd:done` and close the Issue:
+Agent A:
+- `subagent_type`: `general-purpose`
+- `description`: `test review (completeness) for #$1`
+- `prompt`:
+  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/test_review.md` and execute its instructions for Issue #$1 with role `completeness`.
+  > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
+
+Agent B:
+- `subagent_type`: `general-purpose`
+- `description`: `test review (quality) for #$1`
+- `prompt`:
+  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/test_review.md` and execute its instructions for Issue #$1 with role `quality`.
+  > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
+
+Parse both `>>> RESULT <<<` lines:
+- Either `FAIL: <reason>` (atom error) → report, stop.
+- Both `OK PASS` → reviews passed; exit loop → Phase 2.
+- Either `OK FAIL: <summary>` → reviews failed. Combine summaries.
+
+#### 1.3 — Round decision
+
+- Reviews passed → exit loop → Phase 2.
+- Reviews failed, round < 3 → fetch the review comments for full issue details, summarize combined critical/major, re-spawn the work atom with `$2` = combined feedback string. (Test work atom updates its existing `<!-- sdd:test:output -->` comment via duplicate prevention.)
+- Reviews failed, round == 3 → exit loop. Report remaining unfixed issues to the user; proceed to Phase 2.
+
+### Round 2 and Round 3 (retry)
+
+Same as Round 1 Steps 1.1–1.3, but the work atom prompt **must include previous round's review feedback** as a follow-on instruction in the prompt:
+
+- `prompt`:
+  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/test_work.md` and execute its instructions for Issue #$1.
+  > Previous round review feedback (address each item — fix gaps in the test report or QA checklist): <combined critical/major issues from prior reviews>
+  > Return EXACTLY one line in the contract specified by that file.
+
+## Phase 2: User Review + Manual QA
+
+This phase requires main-session interaction with the user for manual QA, unless `qa` is in skip-review.
+
+### 2.1 — User-facing context
+
+Present to the user:
+- Test work atom's result (which path, PR numbers, integration PR if any)
+- Review verdicts (PASS/FAIL with summaries)
+- Link to the Issue's test output comment for the full QA checklist
+
+If the work atom flagged "E2E was skipped in Stage 3" for single/child path → ask the user whether to add E2E tests now (push to the PR branch) or proceed without.
+
+### 2.2 — skip-review check
+
+Check skip-review setting (Common Definitions → Skip Review Setting).
+
+- **If `qa` is in skip-review**:
+  - Log: "User review skipped (skip-review: qa)". Auto-approve test results and QA checklist.
+  - Skip to **Phase 3** (Results Review).
+
+- **If `qa` is NOT in skip-review**:
+  - The user may add/remove/modify QA checklist items (the work atom posted the checklist; the user edits the Issue comment directly if needed).
+  - **Manual QA (4-3)**: ask the user to perform manual QA based on the approved checklist and report pass/fail per item. Wait for the user's response.
+
+## Phase 3: Results Review (4-4)
+
+Based on the user's manual QA report (or auto-approval under skip-review):
+
+1. **If any QA item failed** → analyze cause with the user, and go back to Stage 3 (`/sdd implement $1`) for a TDD bug-fix cycle. Stop this orchestrator.
+
+2. **All tests pass** → update label and close:
    ```bash
    gh issue edit $1 --remove-label "sdd:test" --add-label "sdd:done"
    gh issue close $1
    ```
 
----
+## Phase 4: Child completion notification (if this Issue is a child)
 
-## Parent Issue Flow
+Same logic as `implement.md` Phase C: when a child Issue (detected via the multi-language parent regex `(Parent|상위 |親)Issue: #<n>` per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md`) just transitioned to `sdd:done`, update the parent's `<!-- sdd:children:output -->` table row, check whether all children are now done, and notify the user on the parent Issue accordingly.
 
-Child Issues have individual tests, but cross-child integration E2E tests may be needed at the parent level.
+(See `implement.md` Phase C for the detailed steps — they apply verbatim here, including the multi-language parent reference.)
 
-### Phase 1: Integration E2E Test + QA Checklist (via subagent)
+## Notes
 
-Use the **Agent tool** to spawn a subagent with the following instructions.
-
-> **Subagent instructions:**
->
-> You are executing SDD Stage 4 (Test) for Parent Issue $1.
->
-> **Context to read** (only these — minimize token usage):
-> - Design output from Issue comments (the `<!-- sdd:design:output -->` comment) — for understanding the overall architecture
-> - Child Issues' implementation PRs (find via children comment)
-> - Definition of Done from the Issue body
->
-> ### 4-0. Test Setup
-> 1. Explore the codebase to detect the project's existing test setup:
->    - Test framework (e.g. Jest, Pytest, Go test, Playwright, Cypress, etc.)
->    - Test directory structure (e.g. `tests/`, `__tests__/`, `e2e/`, etc.)
->    - Test run command (e.g. `npm test`, `pytest`, `go test ./...`, etc.)
->    - Test configuration files (e.g. `jest.config.js`, `playwright.config.ts`, etc.)
-> 2. If no existing E2E test setup is found:
->    - Recommend a framework based on the project's tech stack and report it (do NOT set up without user confirmation)
->
-> ### 4-1. Integration E2E Test
-> 1. Read the context specified above
-> 2. Read all child Issues' implementation PRs to understand what was built
-> 3. Identify integration points between child Issues that need cross-child testing
-> 4. If integration tests are needed:
->    - Create a test branch: `test/<parent-feature-name>`
->    - Write integration E2E test code using the detected framework, following existing patterns
->    - Run E2E tests → check results
->    - Create a PR for the integration tests:
->      `gh pr create --title "test: <parent feature> integration tests" --body "Refs #$1\n\n..."`
-> 5. If no integration tests are needed (child tests already cover all scenarios): report the reasoning
-> 6. **AI Review**: Read `${CLAUDE_SKILL_DIR}/commands/ai-review.md` and execute with E2E test results (stage: **test**)
->    - If E2E tests fail → fix test code or identify bugs
->    - If bugs found → report them (will need to go back to Stage 3)
->
-> ### 4-2. QA Checklist
-> 1. Create QA checklist based on parent-level requirements (cross-child integration scenarios)
-> 2. Identify regression test targets
-> 3. **Self-review**: check for missing test scenarios, edge cases, and regression risks
->
-> Return: detected test setup, integration E2E test results (or skip reasoning), PR URL (if created), AI review loop results (rounds, issues fixed, verdict), and QA checklist.
-
-### Phase 2: User Review + Manual QA (in main context)
-
-1. If the subagent reported no existing E2E test setup → ask user for framework confirmation, then re-run subagent with the chosen framework
-2. If the subagent reported bugs → go back to Stage 3 for TDD bug fix cycle
-3. If the subagent created an integration test PR → present it for review
-
-**User review**: Check skip-review setting (see Common Definitions → Skip Review Setting)
-- If `qa` is in skip-review:
-  - Log: "User review skipped (skip-review: qa)"
-  - Auto-approve E2E test results and QA checklist, skip to **Results Review**
-- If `qa` is NOT in skip-review:
-  - Present integration E2E test results and AI review loop results, confirm E2E test code
-  - Present QA checklist, user may add/remove/modify items
-  - **Manual QA (4-3)**: User performs manual QA testing based on the approved checklist, runs regression tests, and reports results (pass/fail per checklist item)
-
-### Results Review (4-4):
-1. If any QA item fails → analyze cause, go back to Stage 3 for TDD bug fix cycle
-2. All tests pass → update label to `sdd:done` and close the Issue:
-   ```bash
-   gh issue edit $1 --remove-label "sdd:test" --add-label "sdd:done"
-   gh issue close $1
-   ```
+- **Atoms never spawn other atoms.** All Agent-tool spawning happens here. The test work atom handles both single/child and parent paths internally and self-reviews inline; the orchestrator handles only the PR Final-equivalent review (`full` type for the test stage).
+- **Reviews go on the Issue**, not the PR (the test output and QA checklist live on the Issue).
+- **Manual QA stays in the main session.** It is inherently human-in-the-loop and cannot be automated by an atom.
+- **Retry limit is 3 rounds total** (initial + 2 retries) for the AI review phase. Manual QA failures route back to Stage 3, not to a retry loop here.
