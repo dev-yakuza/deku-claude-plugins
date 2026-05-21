@@ -11,7 +11,7 @@ Each Issue runs end-to-end (analyze → design → implement → PR) in the **cu
 | Execution model | Generates `.sdd-batch.sh`; each Issue runs in a fresh `claude -p` child session | Main Claude Code session loops over Issues in-process |
 | Billing pool (post 2026-06-15) | Agent SDK Credit pool (metered at API list prices, no rollover) | Interactive subscription pool (unchanged) |
 | Claude Code app required after start | No — close it; the shell script runs unattended | **Yes** — keep this session open until the loop completes |
-| Permission prompts during run | Bypassed (`--dangerously-skip-permissions`) | Normal main-session prompts apply; optional temporary `sandbox.enabled = false` removes per-command sandbox-bypass confirmations |
+| Permission prompts during run | Bypassed (`--dangerously-skip-permissions`) | Normal main-session prompts apply; opting into the sandbox toggle (`sandbox.enabled = false`) eliminates per-command bypass confirmations from the *next* session onward — the toggle path exits and asks the user to restart Claude Code |
 | Cleanup robustness on Ctrl-C | Strong (shell `trap`) | Weak (in-session try/finally; hard kill loses cleanup) |
 | Logs | Per-Issue stream-json log files | Inline in the Claude Code transcript |
 | Child Issue auto-discovery | Yes | Yes |
@@ -25,7 +25,9 @@ Each Issue runs end-to-end (analyze → design → implement → PR) in the **cu
   ```bash
   # If you had an original .sdd-config before the run:
   mv .github/.sdd-config.bak .github/.sdd-config
-  # If you opted to temporarily disable sandbox (Phase 3.1 step 5):
+  ```
+  The sandbox toggle (Phase 3.1 step 5) is now **persistent by design** — the toggle path exits before the loop and leaves `sandbox.enabled = false` on disk along with a `<SETTINGS_PATH>.sdd-auto.bak` snapshot of the original setting. The backup is *intentionally* not auto-restored; you can revert any time with:
+  ```bash
   mv .claude/settings.local.json.sdd-auto.bak .claude/settings.local.json
   # (replace path with whichever settings file the sandbox toggle modified)
   ```
@@ -147,9 +149,11 @@ The main session itself runs the loop. **No shell script is generated. No `claud
 
 4. Append `.github/.sdd-config` and `.github/.sdd-config.bak` to `.git/info/exclude` if not already present (idempotent check), so subagents' `git stash -u` does not stash these files mid-run.
 
-5. **Sandbox temporary disable (optional, prompted)**:
+5. **Sandbox disable (optional, prompted — toggle requires Claude Code restart, so /sdd auto exits afterwards)**:
 
-   The main session honors permission gates per tool call. In projects whose `gh` / `git push` paths require `dangerouslyDisableSandbox: true` per call (e.g. corporate TLS proxy environments), every such call triggers a sandbox-bypass confirmation that **cannot be auto-approved via `settings.json`'s `permissions.allow`** — it is a separate Claude Code safeguard. To make `/sdd auto` truly unattended in those environments, the user can opt to **temporarily disable the sandbox** for the duration of the loop.
+   The main session honors permission gates per tool call. In projects whose `gh` / `git push` paths require `dangerouslyDisableSandbox: true` per call (e.g. corporate TLS proxy environments), every such call triggers a sandbox-bypass confirmation that **cannot be auto-approved via `settings.json`'s `permissions.allow`** — it is a separate Claude Code safeguard. To make `/sdd auto` truly unattended in those environments, the user can opt to **disable the sandbox** in their settings file.
+
+   ⚠ **Important — sandbox changes require a Claude Code restart to take effect.** Mid-session toggling does not silence the bypass prompts in the *current* session — the runtime is still using the sandbox state from session start. Therefore, when the user approves the toggle, `/sdd auto` writes the new setting, **rolls back its other pre-loop changes, and exits with a restart instruction** instead of entering the loop. The user then restarts Claude Code and re-runs `/sdd auto`, at which point the new sandbox state is honored from session start (step 5c path) and the loop runs without bypass prompts.
 
    a. **Locate the settings file** that holds (or will hold) the `sandbox` config. Check in priority order:
       - `.claude/settings.local.json` (project-local, gitignored)
@@ -175,30 +179,58 @@ The main session itself runs the loop. **No shell script is generated. No `claud
       in projects with TLS-proxy conflicts) each trigger a confirmation prompt that
       cannot be auto-approved via settings.json.
 
-      /sdd auto can temporarily set `sandbox.enabled = false` in:
+      /sdd auto can set `sandbox.enabled = false` in:
         <SETTINGS_PATH>
 
-      The original value will be restored when the loop completes (or aborts cleanly).
+      ⚠ Sandbox changes require a Claude Code restart to take effect.
+        If you approve, /sdd auto will write the new setting, save a backup
+        of the original value, AND THEN EXIT — it will NOT enter the loop in
+        this session. You will need to:
+
+          1. Quit Claude Code (Cmd-Q on macOS).
+          2. Re-launch Claude Code.
+          3. Re-run /sdd auto.
+
+        After restart, the loop runs without sandbox-bypass prompts.
 
       ⚠ Warning: while sandbox is disabled, all Bash commands run without sandbox
         isolation. Only proceed if you trust the project's allowlisted commands.
 
-      ⚠ Note: depending on the Claude Code version, sandbox changes may require a
-        Claude Code restart to fully take effect. If you still see bypass prompts
-        mid-run, abort (Ctrl-C), restart Claude Code, and re-run `/sdd auto` — the
-        new sandbox setting will be honored at the next session start.
+        If you ever want to revert, restore the backup:
+          mv <SETTINGS_PATH>.sdd-auto.bak <SETTINGS_PATH>
 
-      Temporarily disable sandbox for this run? [y/N]
+      Disable sandbox and exit (so you can restart and re-run)? [y/N]
       ```
 
    e. **On approval**:
       - Read `SETTINGS_PATH` via the Read tool (or treat as empty `{}` if the file does not exist).
-      - Write its verbatim contents to `<SETTINGS_PATH>.sdd-auto.bak` via the Write tool. If the file did not exist, write the literal string `__SDD_AUTO_NO_ORIGINAL__\n` to the `.bak` file as a sentinel so cleanup knows to delete (not restore) the file. Remember this sentinel rule.
+      - Write its verbatim contents to `<SETTINGS_PATH>.sdd-auto.bak` via the Write tool. If the file did not exist, write the literal string `__SDD_AUTO_NO_ORIGINAL__\n` to the `.bak` file as a sentinel so a future restore-from-bak knows to delete (not restore) the file. Remember this sentinel rule.
       - In memory, set `sandbox.enabled = false`. Preserve all other keys at every level (e.g. `permissions`, `sandbox.autoAllowBashIfSandboxed`). If the `sandbox` key did not exist, create it as `{ "enabled": false }`.
       - Write the modified JSON back to `SETTINGS_PATH` via the Write tool (2-space indentation; preserve existing key order where reasonable).
       - If `SETTINGS_PATH` is **inside the repo** (e.g. `.claude/settings.local.json`), append `<SETTINGS_PATH>.sdd-auto.bak` to `.git/info/exclude` if not already present (idempotent).
-      - Log: `Sandbox temporarily disabled. Backup: <SETTINGS_PATH>.sdd-auto.bak`
-      - Record `SETTINGS_PATH` in the main session's in-memory state for use in Phase 3.4.
+      - **Roll back the pre-loop changes from steps 1–4 (sandbox setting stays at `false`):**
+        - If `.github/.sdd-config.bak` was created in step 2: restore it to `.github/.sdd-config` (read + write), then delete the `.bak`.
+        - Else (no original config existed): delete `.github/.sdd-config`.
+        - The `.git/info/exclude` entries added in step 4 are harmless to leave (idempotent on next run).
+      - Show the user:
+        ```
+        ✓ Sandbox has been set to false in <SETTINGS_PATH>.
+          Backup of the original setting: <SETTINGS_PATH>.sdd-auto.bak
+
+        ⚠ The change requires a Claude Code restart to take effect.
+          /sdd auto cannot proceed correctly in this session because the
+          runtime is still using the old (enabled) sandbox state.
+
+          Next steps:
+            1. Quit Claude Code (Cmd-Q on macOS).
+            2. Re-launch Claude Code.
+            3. Re-run /sdd auto. The new sandbox state is honored from
+               session start, so subagents' `gh` / `git push` calls will
+               no longer trigger sandbox-bypass prompts.
+
+          To revert later:  mv <SETTINGS_PATH>.sdd-auto.bak <SETTINGS_PATH>
+        ```
+      - **Terminate /sdd auto** — do NOT continue to step 6 or Phase 3.2.
 
    f. **On rejection**: continue without the toggle. Do NOT create any backup. Log: `Sandbox left enabled — sandbox-bypass prompts will occur for `gh` / `git push` calls during the loop.`
 
@@ -206,9 +238,8 @@ The main session itself runs the loop. **No shell script is generated. No `claud
    ```
    If this session is interrupted, restore your state with:
      mv .github/.sdd-config.bak .github/.sdd-config            # if .sdd-config.bak exists
-     mv <SETTINGS_PATH>.sdd-auto.bak <SETTINGS_PATH>           # if sandbox was toggled
    ```
-   (Omit the `.sdd-config` line if no `.sdd-config.bak` was created in step 2. Omit the sandbox line if step 5 was skipped or rejected.)
+   (Omit the `.sdd-config` line if no `.sdd-config.bak` was created in step 2. The sandbox toggle path now exits immediately in step 5e, so there is no in-loop sandbox state to recover.)
 
 ### 3.2 Loop body (main session)
 
@@ -256,18 +287,21 @@ Run at the end of the loop **and** on any abort (user types "cancel" during a su
    - Write them back to `.github/.sdd-config` (via Write tool)
    - Delete `.github/.sdd-config.bak` (via Bash `rm`)
 2. Else (no original config existed): delete `.github/.sdd-config` (via Bash `rm`).
-3. **Restore sandbox** (only if Phase 3.1 step 5e ran):
-   - If a backup exists at `<SETTINGS_PATH>.sdd-auto.bak` (recorded in 3.1 step 5e):
-     - Read the backup contents (via Read tool).
-     - If the contents are the sentinel `__SDD_AUTO_NO_ORIGINAL__` (the settings file did not exist before the toggle):
-       - Delete `<SETTINGS_PATH>` (via Bash `rm`).
-     - Else:
-       - Write the backup contents back to `<SETTINGS_PATH>` (via Write tool).
-     - Delete `<SETTINGS_PATH>.sdd-auto.bak` (via Bash `rm`).
-     - Log: `Sandbox setting restored in <SETTINGS_PATH>`
-   - If no backup was recorded (3.1 step 5c skipped or 5f rejected): nothing to do for sandbox.
+3. **Sandbox post-loop status check** (cleanup does NOT modify the sandbox setting — step 5e is the only path that writes it, and that path exits before the loop):
+   - Re-read the settings file at the priority order from Phase 3.1 step 5a (`.claude/settings.local.json`, `.claude/settings.json`, `~/.claude/settings.json` — the first one that has a `sandbox` key).
+   - If `sandbox.enabled == false` in that file:
+     - Show:
+       ```
+       ⚠ Sandbox is currently disabled in <SETTINGS_PATH>.
+         For correctness and safety, ensure Claude Code is running with this
+         setting from session start. If you have not restarted Claude Code
+         since the toggle, please do so before running /sdd auto again.
 
-> **Cleanup limitation**: If the user **hard-kills** Claude Code (Cmd-Q, terminal close, kernel kill) mid-loop, this cleanup cannot run. The on-disk `.sdd-config.bak` and `<SETTINGS_PATH>.sdd-auto.bak` are left behind. The recovery hint printed at 3.1 step 6 tells the user how to manually restore both.
+         (Restoring sandbox: mv <SETTINGS_PATH>.sdd-auto.bak <SETTINGS_PATH>)
+       ```
+   - If `sandbox.enabled == true` (or unset): nothing to show.
+
+> **Cleanup limitation**: If the user **hard-kills** Claude Code (Cmd-Q, terminal close, kernel kill) mid-loop, this cleanup cannot run. The on-disk `.sdd-config.bak` is left behind. The recovery hint printed at 3.1 step 6 tells the user how to manually restore it. The `.sdd-auto.bak`, when present, is the sandbox-pre-toggle snapshot from step 5e and is *intentionally* persistent — only the user decides when (or whether) to restore it.
 
 ### 3.5 Final summary
 
@@ -283,11 +317,11 @@ Failed:          <FAILED>
 
 Time:            <minutes>m <seconds>s
 Config restored: .github/.sdd-config
-Sandbox:         <restored in <SETTINGS_PATH> | left unchanged>
+Sandbox:         <enabled | disabled — restart Claude Code recommended | unchanged>
 Next steps:      review PRs, run /sdd test <N> for QA if 'qa' was not in your prior skip-review
 ```
 
-(Show the `Sandbox: restored in <SETTINGS_PATH>` line only if Phase 3.1 step 5e ran. Show `Sandbox: left unchanged` if the user declined the toggle. Omit the line entirely if 5c skipped — sandbox was already disabled before the run.)
+(Sandbox status: show `disabled — restart Claude Code recommended` if step 3 of 3.4 found `sandbox.enabled == false`. Show `enabled` if it is true. Step 5e never reaches Phase 3.5 because it exits before the loop, so the "restored" wording is no longer used.)
 
 Token / cost aggregation is **not** included — the main session does not have access to per-subagent usage data the way `/sdd batch`'s stream-json logs do. Users wanting cost visibility can check `/cost` in this Claude Code session.
 
@@ -295,7 +329,7 @@ Token / cost aggregation is **not** included — the main session does not have 
 
 - **In-session execution.** Every orchestrator (`analyze.md`, `design.md`, `implement.md`, `test.md`, `resume.md`) and every atom runs in this same Claude Code session. Atoms are spawned via the Agent tool by orchestrators; the spawning layer is single-level (orchestrator → atoms), so there are no nested-subagent issues.
 - **Skip-review override is temporary.** The pre-loop step writes `skip-review: analyze,design,implement,pr`; cleanup restores the original config. AI review still runs in every stage (skip-review only suppresses user-confirmation prompts).
-- **Sandbox toggle is opt-in and temporary.** When the user approves the Phase 3.1 step 5 prompt, `sandbox.enabled` is flipped to `false` in the chosen settings file with a backup; cleanup (Phase 3.4) restores the original value. The toggle is the only way to eliminate per-command `dangerouslyDisableSandbox` confirmations in projects that need sandbox bypass for `gh` / `git push` (e.g. TLS-proxy environments) — those confirmations are a Claude Code safeguard that `permissions.allow` cannot auto-approve. If the toggle is rejected (or sandbox was already disabled), `/sdd auto` still runs but the user will accept bypass prompts manually.
+- **Sandbox toggle is opt-in and persistent — and forces a restart.** When the user approves the Phase 3.1 step 5 prompt, `sandbox.enabled` is flipped to `false` in the chosen settings file with a backup, the pre-loop changes (skip-review config) are rolled back, and `/sdd auto` **exits without entering the loop**. This is because Claude Code only honors `sandbox.enabled` at session start; toggling mid-session does not silence the bypass prompts in the current session. The user restarts Claude Code and re-runs `/sdd auto`, at which point sandbox is already disabled at session start (step 5c path) and the loop proceeds without `gh` / `git push` bypass prompts. Cleanup (Phase 3.4) does **not** automatically restore sandbox — that decision is left to the user via `mv <SETTINGS_PATH>.sdd-auto.bak <SETTINGS_PATH>`. The toggle is the only way to eliminate per-command `dangerouslyDisableSandbox` confirmations in projects that need sandbox bypass (e.g. TLS-proxy environments) — those confirmations are a Claude Code safeguard that `permissions.allow` cannot auto-approve. If the user rejects the toggle (or sandbox was already disabled), `/sdd auto` runs as normal.
 - **Sequential only.** Parallel processing of Issues is intentionally not supported — official Claude Code docs warn that parallel subagents consume the subscription quota N× faster, which would defeat the in-session advantage.
 - **Child Issue handling.** Parents stop at `sdd:implement` after design creates children (per `design.md`); the auto-discovery in 3.3 queues the children, which then progress through the full pipeline themselves.
 - **Failures are tolerated.** A failure on one Issue does not abort the loop. The orchestrator records the failure and continues. The user can re-run `/sdd auto <failed-numbers>` after the run to retry.
