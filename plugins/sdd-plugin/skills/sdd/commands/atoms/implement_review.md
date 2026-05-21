@@ -17,25 +17,25 @@ The orchestrator invokes this atom **twice in parallel** in a single message —
 
 1. Resolve owner/repo:
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
    ```
 
 2. Find the PR for this Issue:
    ```bash
-   PR_NUM=$(gh pr list --search "Refs #$1" --state open --json number --jq '.[0].number')
+   gh pr list --search "Refs #$1" --state open --json number --jq '.[0].number'   # Bash call: observe PR number; inline as <PR_NUM> below
    ```
    If no PR found → return `FAIL: PR for Issue #$1 not found (no open PR with Refs #$1 in body)`.
 
 3. Read the PR diff and body:
    ```bash
-   gh pr view $PR_NUM
-   gh pr diff $PR_NUM
+   gh pr view <PR_NUM>
+   gh pr diff <PR_NUM>
    ```
 
 4. Read the Issue + design + plan comments:
    ```bash
    gh issue view $1
-   gh api repos/$OWNER_REPO/issues/$1/comments \
+   gh api repos/<owner>/<repo>/issues/$1/comments \
      --jq '.[] | select(.body | contains("sdd:design:output") or contains("sdd:implement:plan")) | .body'
    ```
 
@@ -75,26 +75,30 @@ The orchestrator invokes this atom **twice in parallel** in a single message —
    - Only `minor` → `PASS` (suggestions included in the comment)
    - No issues → `PASS`
 
-8. **Post a review comment on the PR** (not the Issue) with the marker `<!-- sdd:review:implement:<role> -->`. Use duplicate prevention:
+8. **Post a review comment on the PR** (not the Issue) with the marker `<!-- sdd:review:implement:<role> -->`. Use duplicate prevention.
+
+   Per the **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`, each Bash invocation below must be its own tool call — do NOT chain with `&&`/`;`/`|`, do NOT wrap in `if`/`then`/`fi`, do NOT use shell variables. Inline literal `<owner>/<repo>` (from step 1), `<PR_NUM>` (from step 2), and `<role>` (from `$2`) wherever they appear. Use the **Write** tool to put the rendered review body into a temp file first (e.g. `/tmp/sdd-review-implement-<role>.md`), so the Bash call needs no shell expansion or heredoc.
 
    ```bash
-   # Variable assignments (atom inputs $1 = Issue, $2 = role; PR_NUM resolved earlier)
-   ROLE=$2
-   REVIEW_BODY=<rendered comment body — see format below>
+   # Bash call A — search for an existing review comment of this role on the PR.
+   # (PR comments share the issue-comments API in GitHub.)
+   gh api repos/<owner>/<repo>/issues/<PR_NUM>/comments \
+     --jq '.[] | select(.body | contains("<!-- sdd:review:implement:<role> -->")) | .id'
+   ```
 
-   # PR comments share the issue-comments API in GitHub — use $PR_NUM as the issue id
-   EXISTING_ID=$(gh api repos/$OWNER_REPO/issues/$PR_NUM/comments \
-     --jq ".[] | select(.body | contains(\"<!-- sdd:review:implement:$ROLE -->\")) | .id" \
-     | tail -1)
+   Branch on Bash call A's output (orchestrator-side, NOT in shell):
+   - **Empty output** → no prior comment; run Bash call B-new (create).
+   - **One or more IDs** → take the **last** as `<EXISTING_ID>` and run Bash call B-update (update in place — preserves review history across retry rounds).
 
-   if [ -n "$EXISTING_ID" ]; then
-     # Update in place — preserves review history across retry rounds
-     gh api repos/$OWNER_REPO/issues/comments/$EXISTING_ID -X PATCH \
-       -f body="$REVIEW_BODY"
-   else
-     # First post on this PR for this role
-     gh pr comment $PR_NUM --body "$REVIEW_BODY"
-   fi
+   ```bash
+   # Bash call B-new — create a fresh review comment on the PR:
+   gh pr comment <PR_NUM> --body-file /tmp/sdd-review-implement-<role>.md
+   ```
+
+   ```bash
+   # Bash call B-update — patch the existing review comment in place:
+   gh api repos/<owner>/<repo>/issues/comments/<EXISTING_ID> -X PATCH \
+     -F body=@/tmp/sdd-review-implement-<role>.md
    ```
 
    This is the SAME marker check used by the analyze/design/test review atoms (they search Issue comments instead of PR comments, but the duplicate-prevention pattern is identical). On retry rounds, the prior round's comment is updated in place rather than appended, so the PR's review state always reflects the latest diff.

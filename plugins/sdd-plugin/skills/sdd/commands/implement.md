@@ -2,6 +2,8 @@
 
 **Stage 3: Implementation — TDD Cycle (Red → Green → Refactor) — Orchestrator**
 
+> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+
 ## Rules
 - Do NOT set Claude as co-author in git commits.
 - Check existing git history for branch naming and commit message conventions, and follow the same format.
@@ -16,8 +18,8 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
 
 1. Check if this Issue has child Issues:
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-   gh api repos/$OWNER_REPO/issues/$1/comments \
+   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
+   gh api repos/<owner>/<repo>/issues/$1/comments \
      --jq '.[] | select(.body | contains("sdd:children:output")) | .body' | head -1
    ```
 2. **Parent Issue (has children)**: Do NOT implement directly. Instead:
@@ -98,9 +100,9 @@ Parse both `>>> RESULT <<<` lines:
 #### B.1.3 — Round decision
 
 - Reviews passed → exit loop → B.2.
-- Reviews failed AND round < 3 → fetch the full review comment bodies from the PR for combined critical/major issue text (reuse `$OWNER_REPO` from "Determine Issue type" step 1, or re-resolve via `gh repo view --json nameWithOwner -q .nameWithOwner` if the variable is not in scope):
+- Reviews failed AND round < 3 → fetch the full review comment bodies from the PR for combined critical/major issue text (re-run `gh repo view --json nameWithOwner -q .nameWithOwner` as its own Bash call if you no longer have the literal `<owner>/<repo>` on hand — do NOT use a shell variable):
   ```bash
-  gh api repos/$OWNER_REPO/issues/<PR_NUM>/comments \
+  gh api repos/<owner>/<repo>/issues/<PR_NUM>/comments \
     --jq '.[] | select(.body | test("sdd:review:implement:(completeness|quality)")) | .body'
   ```
   Summarize the critical and major items into a single feedback string (max ~50 lines). Proceed to Round 2 (retry).
@@ -154,9 +156,9 @@ Check skip-review setting.
 This phase runs **only if the Issue body matches the multi-language parent regex `(Parent|상위 |親)Issue: #<n>` (Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md`) inside the `<!-- sdd:child-issue -->` block** AND the Issue's label has just transitioned to `sdd:done` (typically after `/sdd test <child>` completes — but if the orchestrator hits this point with the child already `sdd:done`, run the notification).
 
 1. Find the parent Issue number from `<!-- sdd:child-issue -->` using the same multi-language regex (en/ko/ja child Issues all share the `<!-- sdd:child-issue -->` marker; only the literal label keyword differs).
-2. Find the **most recent** children comment on the parent containing BOTH `<!-- sdd:children:output -->` and `<!-- /sdd:children:output -->` (reuse `$OWNER_REPO` from earlier, or re-resolve via `gh repo view --json nameWithOwner -q .nameWithOwner`):
+2. Find the **most recent** children comment on the parent containing BOTH `<!-- sdd:children:output -->` and `<!-- /sdd:children:output -->` (re-run `gh repo view --json nameWithOwner -q .nameWithOwner` as its own Bash call to recover the literal `<owner>/<repo>` if needed — do NOT use a shell variable):
    ```bash
-   gh api repos/$OWNER_REPO/issues/<parent>/comments \
+   gh api repos/<owner>/<repo>/issues/<parent>/comments \
      --jq '.[] | select((.body | contains("<!-- sdd:children:output -->")) and (.body | contains("<!-- /sdd:children:output -->"))) | {id, body}'
    ```
    - If no matching comment → warn and skip update.

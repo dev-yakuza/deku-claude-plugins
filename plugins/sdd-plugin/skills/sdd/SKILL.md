@@ -69,6 +69,43 @@ Where `<n>` is the parent number. Use this regex in any atom/orchestrator that n
 - When a stage's review is skipped, AI review still runs but user review is auto-approved and the next stage is automatically executed
 - To check: read `.github/.sdd-config` and parse `skip-review` line. If file missing or no `skip-review` line → no reviews are skipped
 
+### Bash Command Execution Rules
+
+To keep automated runs (`/sdd auto`, `/sdd batch`) unattended, every Bash tool invocation inside an atom or orchestrator MUST be a **simple command** that matches the project's `permissions.allow` patterns (typically `Bash(gh:*)`, `Bash(git:*)`, `Bash(jq:*)`, etc.).
+
+**FORBIDDEN inside a single Bash tool call**:
+- Variable assignment with command substitution: `VAR=$(command)`
+- Compound commands: `cmd1 && cmd2`, `cmd1 || cmd2`, `cmd1; cmd2`, `cmd1 | cmd2`
+- Subshells / groups: `(...)`, `{...}`
+- Process substitution: `<(...)`, `>(...)`
+- Heredocs that wrap multiple commands (`<<EOF ... EOF` containing more than the body of one tool call)
+
+**Why**: Claude Code's permission matcher evaluates the above as compound expressions and cannot match single-token allow patterns like `Bash(gh:*)`. Each such call therefore raises a permission prompt, breaking unattended runs.
+
+**How to chain results between commands**:
+1. Run the first simple command in its own Bash tool call.
+2. Read the output yourself from the tool result.
+3. Substitute the **literal** value (not a shell variable, not a `$(...)`) into the next simple Bash tool call.
+
+Example:
+```bash
+# ❌ Forbidden — single Bash call with command substitution + variable use:
+OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+gh api repos/$OWNER_REPO/issues/$1/comments
+
+# ✅ Correct — two separate Bash tool calls, value inlined as literal:
+# (Bash call 1)
+gh repo view --json nameWithOwner -q .nameWithOwner
+# Output observed by you: deku-word-app/word_app
+
+# (Bash call 2 — inline the literal observed above)
+gh api repos/deku-word-app/word_app/issues/$1/comments
+```
+
+Parallel-independent commands (e.g. `gh issue view ...` and `git status ...`) should be issued as **multiple Bash tool calls in a single message**, not chained with `&&`. Cleanup steps that need ordering should be issued as **separate sequential Bash tool calls**, not chained with `&&` or `;`.
+
+This rule applies to every Bash tool invocation inside any atom or orchestrator, including snippets shown in this skill's Markdown files — those snippets are templates for tool calls, not literal shell scripts to paste.
+
 ### Repository Owner/Repo
 Commands using `gh api` need `{owner}/{repo}`. **Always** obtain it by running:
 
@@ -76,9 +113,11 @@ Commands using `gh api` need `{owner}/{repo}`. **Always** obtain it by running:
 gh repo view --json nameWithOwner -q .nameWithOwner
 ```
 
+as its own isolated Bash tool call (per the **Bash Command Execution Rules** above — do NOT wrap this in `VAR=$(...)`, do NOT chain it with `&&`). Read the output (e.g. `deku-word-app/word_app`) and inline that **literal** value into subsequent `gh api repos/<owner>/<repo>/...` calls.
+
 **Do NOT infer `{owner}/{repo}` from any other source** — not from `git config user.name`, not from the system prompt's "Git user" field, not from commit authors, not from environment variables. Those values are the *user identity*, not the *repository owner*, and using them will hit a wrong repository (potentially returning unrelated data with the same Issue/PR number).
 
-If you need `{owner}/{repo}` for multiple `gh api` calls in the same flow, run the command above once and reuse the result.
+If you need `{owner}/{repo}` for multiple `gh api` calls in the same flow, run `gh repo view` once at the start, remember the literal value, and inline it everywhere.
 
 ### Duplicate Output Prevention
 Before posting a stage output, search Issue comments for the matching marker. If found → update that comment. If not → create new comment.

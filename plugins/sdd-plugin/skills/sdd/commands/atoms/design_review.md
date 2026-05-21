@@ -4,6 +4,8 @@
 
 Independently reviews the design output that was posted to an Issue. Reads the analyze + design comments from GitHub, applies the criteria from `ai-review-design.md`, posts a review comment, returns a one-line verdict.
 
+> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+
 ## Inputs
 
 - `$1` — Issue number
@@ -15,9 +17,9 @@ The orchestrator invokes this atom **twice in parallel** in a single message —
 
 1. Resolve owner/repo and read the Issue + analyze + design comments:
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
    gh issue view $1
-   gh api repos/$OWNER_REPO/issues/$1/comments \
+   gh api repos/<owner>/<repo>/issues/$1/comments \
      --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output")) | .body'
    ```
 
@@ -25,7 +27,7 @@ The orchestrator invokes this atom **twice in parallel** in a single message —
 
 3. If this is a child Issue, also read the parent's design output for consistency check:
    ```bash
-   gh api repos/$OWNER_REPO/issues/<parent>/comments \
+   gh api repos/<owner>/<repo>/issues/<parent>/comments \
      --jq '.[] | select(.body | contains("sdd:design:output")) | .body'
    ```
 

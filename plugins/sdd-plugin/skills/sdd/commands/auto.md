@@ -4,6 +4,8 @@
 
 Each Issue runs end-to-end (analyze → design → implement → PR) in the **current Claude Code session** via the orchestrator/atom architecture. Unlike `/sdd batch` (which spawns separate `claude -p` subprocesses), `/sdd auto` stays entirely on the Interactive subscription pool — unchanged by the 2026-06-15 billing split that moved `claude -p` to the new metered Agent SDK Credit pool.
 
+> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+
 ## When to use /sdd auto vs /sdd batch
 
 | Axis | `/sdd batch` | `/sdd auto` |
@@ -132,7 +134,7 @@ The main session itself runs the loop. **No shell script is generated. No `claud
 
 1. Resolve owner/repo once for child Issue discovery:
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
    ```
    If empty → warn the user; continue but disable child auto-discovery.
 
@@ -266,7 +268,7 @@ While `QUEUE` is non-empty:
 After each successful Issue, run the same `gh issue list --label sdd:child` query as `/sdd batch`'s Phase 3 logic. Use the multi-language parent-reference regex from `batch.md`:
 
 ```bash
-gh issue list --repo "$OWNER_REPO" \
+gh issue list --repo "<owner>/<repo>" \
   --label sdd:child --state open --limit 200 \
   --json number,body \
   --jq "[.[] | select(.body | test(\"(Parent|상위 |親)Issue: #${ISSUE}([^0-9]|\$)\"))] | .[] | .number"

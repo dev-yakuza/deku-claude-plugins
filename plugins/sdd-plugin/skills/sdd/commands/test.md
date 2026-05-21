@@ -6,6 +6,8 @@ QA verification + integration E2E for parent Issues. Unit/UI tests and E2E tests
 
 This file is an **orchestrator**. It runs in the main session and composes atomic operations via the Agent tool. The atoms (`atoms/test_work.md`, `atoms/test_review.md`) do the actual work; this file manages state, retries, manual QA interaction, and the final label transition to `sdd:done`.
 
+> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+
 ## Input Validation
 
 Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
@@ -14,9 +16,9 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
 
 1. Check for children comment:
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-   HAS_CHILDREN=$(gh api repos/$OWNER_REPO/issues/$1/comments \
-     --jq '.[] | select(.body | contains("<!-- sdd:children:output -->")) | .body' | head -1)
+   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
+   gh api repos/<owner>/<repo>/issues/$1/comments \
+     --jq '.[] | select(.body | contains("<!-- sdd:children:output -->")) | .body'
    ```
 
 2. **Parent Issue (has children)**: Verify all child Issues are `sdd:done` before proceeding:

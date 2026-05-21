@@ -4,6 +4,8 @@
 
 Produces the test plan + implementation plan for SDD Stage 3, posts it to the Issue, and creates the feature branch. Self-reviews inline (the implement-plan review point 3-0 is `self_only`).
 
+> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+
 ## Inputs
 
 - `$1` — Issue number (already validated by the orchestrator as an Issue, not a PR)
@@ -17,9 +19,9 @@ Produces the test plan + implementation plan for SDD Stage 3, posts it to the Is
 
 1. Resolve owner/repo and read context:
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
    gh issue view $1
-   gh api repos/$OWNER_REPO/issues/$1/comments \
+   gh api repos/<owner>/<repo>/issues/$1/comments \
      --jq '.[] | select(.body | contains("sdd:design:output")) | .body'
    ```
    Read ONLY the design output and the Issue body's Definition of Done. Do NOT read the analyze output — the design has already incorporated those requirements.

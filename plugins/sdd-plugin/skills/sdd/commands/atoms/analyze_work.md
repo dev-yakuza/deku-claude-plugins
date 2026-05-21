@@ -4,6 +4,8 @@
 
 Produces the SDD Stage 1 (Analyze) output for one Issue. Reads inputs from GitHub, writes the analysis as an Issue comment, returns a one-line result string.
 
+> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+
 ## Inputs
 
 - `$1` — Issue number (already validated by the orchestrator as an Issue, not a PR)
@@ -18,8 +20,8 @@ Produces the SDD Stage 1 (Analyze) output for one Issue. Reads inputs from GitHu
 
 2. Detect child Issue per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md` (use the multi-language regex `(Parent|상위 |親)Issue: #<number>` to support en/ko/ja templates). If a parent reference is found, read the parent's analyze and design outputs for context:
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-   gh api repos/$OWNER_REPO/issues/<parent>/comments \
+   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
+   gh api repos/<owner>/<repo>/issues/<parent>/comments \
      --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output")) | .body'
    ```
    Use parent context to understand broader scope. Focus this analysis on the child's sub-feature only.

@@ -4,6 +4,8 @@
 
 Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub (analyze comment + parent context if child), explores the codebase directly via Read/Grep/Glob, posts the design as an Issue comment, and — if the design splits into multiple PRs — creates child Issues. Returns a one-line result.
 
+> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+
 ## Inputs
 
 - `$1` — Issue number (already validated by the orchestrator as an Issue, not a PR)
@@ -17,19 +19,19 @@ Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub
 
 1. Resolve owner/repo:
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
    ```
 
 2. Read the Issue body and the analyze output:
    ```bash
    gh issue view $1
-   gh api repos/$OWNER_REPO/issues/$1/comments \
+   gh api repos/<owner>/<repo>/issues/$1/comments \
      --jq '.[] | select(.body | contains("sdd:analyze:output")) | .body'
    ```
 
 3. Detect child Issue per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md` (multi-language regex `(Parent|상위 |親)Issue: #<number>`). If a parent reference is found, read the parent's design output:
    ```bash
-   gh api repos/$OWNER_REPO/issues/<parent>/comments \
+   gh api repos/<owner>/<repo>/issues/<parent>/comments \
      --jq '.[] | select(.body | contains("sdd:design:output")) | .body'
    ```
    The child's design must be consistent with the parent's overall architecture and PR-split rationale. Focus on the detailed design for this child's sub-feature only.

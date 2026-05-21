@@ -4,6 +4,8 @@
 
 This file is a **dispatcher**. It runs in the main session, reads Issue state from GitHub (labels + comments + PRs), determines which stage orchestrator to invoke, and then reads + executes that orchestrator. It does **NOT** itself spawn subagents — the orchestrators it routes to are responsible for atom spawning.
 
+> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+
 ## Input Validation
 
 Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
@@ -17,8 +19,8 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
 
 2. **Check Issue comments for existing stage outputs** (use a single API call):
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-   gh api repos/$OWNER_REPO/issues/$1/comments \
+   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
+   gh api repos/<owner>/<repo>/issues/$1/comments \
      --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output") or contains("sdd:children:output") or contains("sdd:implement:plan") or contains("sdd:test:output")) | .body'
    ```
    Note presence/absence of:

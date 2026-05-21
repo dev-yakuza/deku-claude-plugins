@@ -6,6 +6,8 @@ Executes the full TDD cycle for one Issue: Red → Green → Refactor → E2E �
 
 This is the **largest atom**. If its subagent context becomes saturated for complex Issues, the orchestrator may need to split into separate `implement_red_green`, `implement_refactor`, `implement_e2e`, `implement_pr` atoms — but for typical Issues a single atom is intended.
 
+> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+
 ## Inputs
 
 - `$1` — Issue number
@@ -20,32 +22,40 @@ This is the **largest atom**. If its subagent context becomes saturated for comp
 
 ## Mode detection
 
-Run this **before** Setup to determine which flow to execute:
+Run this **before** Setup to determine which flow to execute. Each line is its own Bash tool call:
 
 ```bash
-git rev-parse --abbrev-ref HEAD                                 # current branch
-EXISTING_PR=$(gh pr list --head $2 --state open --json number --jq '.[0].number' 2>/dev/null)
+# Bash call 1 — current branch (just observe the output):
+git rev-parse --abbrev-ref HEAD
+
+# Bash call 2 — open PR number for branch $2 (empty output = no open PR):
+gh pr list --head $2 --state open --json number --jq '.[0].number'
 ```
 
-- **First-round mode**: `$3` not provided AND `$EXISTING_PR` is empty → execute the full TDD cycle (Setup → 3-1 → 3-2 → 3-3 → 3-4 → 3-5 PR creation).
-- **Retry mode**: `$3` provided (review feedback from a prior round). `$EXISTING_PR` should be present; if not, that is an error.
+Let the literal output of Bash call 2 be `<EXISTING_PR>` (or empty).
+
+- **First-round mode**: `$3` not provided AND `<EXISTING_PR>` is empty → execute the full TDD cycle (Setup → 3-1 → 3-2 → 3-3 → 3-4 → 3-5 PR creation).
+- **Retry mode**: `$3` provided (review feedback from a prior round). `<EXISTING_PR>` should be present; if not, that is an error.
 - **Mixed (defensive)**: `$3` provided but no PR found → return `FAIL: retry mode requested but no open PR found for branch $2`. The orchestrator should not have invoked retry without a prior round having created a PR.
 
 ## Work — first-round mode
 
 ### Setup
 
-1. Resolve owner/repo, verify branch:
+1. Resolve owner/repo, verify branch (each line is its own Bash call; inline `<owner>/<repo>` literally below):
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-   git rev-parse --abbrev-ref HEAD   # confirm we are on $2
-   ```
-   If not on `$2`, checkout it.
+   # Bash call 1 — observe literal owner/repo (e.g. acme/widget):
+   gh repo view --json nameWithOwner -q .nameWithOwner
 
-2. Read context (only these — do NOT read analyze):
+   # Bash call 2 — confirm we are on $2:
+   git rev-parse --abbrev-ref HEAD
+   ```
+   If not on `$2`, checkout it (`git checkout $2` as its own Bash call).
+
+2. Read context (only these — do NOT read analyze; each line is its own Bash call):
    ```bash
    gh issue view $1
-   gh api repos/$OWNER_REPO/issues/$1/comments \
+   gh api repos/<owner>/<repo>/issues/$1/comments \
      --jq '.[] | select(.body | contains("sdd:design:output") or contains("sdd:implement:plan")) | .body'
    ```
 
@@ -161,21 +171,26 @@ Triggered when `$3` (review feedback) is provided. The branch and PR already exi
 
 ### Setup (retry)
 
-1. Resolve owner/repo, verify branch and PR:
+1. Resolve owner/repo, verify branch and PR (each line is its own Bash call; inline literal `<owner>/<repo>` and `<PR_NUM>` below):
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-   PR_NUM=$(gh pr list --head $2 --state open --json number --jq '.[0].number')
-   ```
-   If `PR_NUM` is empty → return `FAIL: retry mode requested but no open PR found for branch $2`.
+   # Bash call 1 — observe literal owner/repo (e.g. acme/widget):
+   gh repo view --json nameWithOwner -q .nameWithOwner
 
-2. Ensure `$2` is the current branch:
-   ```bash
-   git checkout $2 && git pull --ff-only origin $2 || true
+   # Bash call 2 — observe the open PR number for branch $2:
+   gh pr list --head $2 --state open --json number --jq '.[0].number'
    ```
+   If Bash call 2's output is empty → return `FAIL: retry mode requested but no open PR found for branch $2`.
 
-3. Read the same context as first-round (design + plan from Issue), plus the current PR diff:
+2. Ensure `$2` is the current branch (each line is its own Bash call; do NOT chain with `&&`):
    ```bash
-   gh pr diff $PR_NUM
+   git checkout $2
+   git pull --ff-only origin $2
+   ```
+   If `git pull` fails (e.g. network), continue anyway — the local branch state is still usable for retry fix-ups.
+
+3. Read the same context as first-round (design + plan from Issue), plus the current PR diff (inline the literal PR number observed above):
+   ```bash
+   gh pr diff <PR_NUM>
    ```
 
 4. Parse `$3` review feedback. It contains the combined critical/major issues from the previous round's `implement_review` atoms. Each item should be addressed.
