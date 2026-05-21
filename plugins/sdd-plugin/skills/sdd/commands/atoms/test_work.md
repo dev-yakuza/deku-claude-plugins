@@ -13,9 +13,9 @@ Produces the SDD Stage 4 (Test) output for one Issue: verifies existing tests pa
 Run before any work:
 
 ```bash
-OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-HAS_CHILDREN=$(gh api repos/$OWNER_REPO/issues/$1/comments \
-  --jq '.[] | select(.body | contains("<!-- sdd:children:output -->")) | .body' | head -1)
+gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
+gh api repos/<owner>/<repo>/issues/$1/comments \
+  --jq '.[] | select(.body | contains("<!-- sdd:children:output -->")) | .body'
 ```
 
 - If `HAS_CHILDREN` is non-empty → **Parent Issue path**.
@@ -29,19 +29,19 @@ E2E tests were already written in Stage 3 (implement) and included in the PR. Th
 
 1. Find the implementation PR:
    ```bash
-   PR_NUM=$(gh pr list --search "Refs #$1" --state open --json number --jq '.[0].number')
+   gh pr list --search "Refs #$1" --state open --json number --jq '.[0].number'   # Bash call: observe PR number; inline as <PR_NUM> below
    ```
    If empty → `FAIL: no open PR found for Issue #$1`.
 
 2. Read the PR + Issue body (for DoD). Do NOT read analyze/design outputs.
    ```bash
-   gh pr view $PR_NUM
-   gh pr diff $PR_NUM
+   gh pr view <PR_NUM>
+   gh pr diff <PR_NUM>
    gh issue view $1
    ```
 
 3. **4-1. Verify existing tests**:
-   - Check out the PR's branch locally (`gh pr checkout $PR_NUM`).
+   - Check out the PR's branch locally (`gh pr checkout <PR_NUM>`).
    - Detect the test command from the repo (`package.json` scripts, `Makefile`, `flutter test`, `pytest`, etc.). Use `git log -20` / repo file inspection.
    - Run all tests (unit, widget, E2E) → record pass/fail per test.
    - If tests fail → return `FAIL: tests fail on PR #<PR_NUM>: <short summary>`.
@@ -95,7 +95,7 @@ Child Issues have individual tests; cross-child integration tests may be needed 
 1. Read the parent Issue body + design output + children PRs:
    ```bash
    gh issue view $1
-   gh api repos/$OWNER_REPO/issues/$1/comments \
+   gh api repos/<owner>/<repo>/issues/$1/comments \
      --jq '.[] | select(.body | contains("sdd:design:output") or contains("sdd:children:output")) | .body'
    # Then for each child: gh pr list --search "Refs #<child>"; gh pr view <PR_NUM>
    ```
@@ -113,18 +113,17 @@ Child Issues have individual tests; cross-child integration tests may be needed 
      - Create test branch: `test/<parent-feature-name>`.
      - Write E2E test code following existing framework patterns.
      - Run E2E tests → record results.
-     - Create a PR for the integration tests (use a heredoc without quoting `EOF` so `$1` expands; newlines must be real, not literal `\n`):
+     - Create a PR for the integration tests. Per the **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`, do NOT use heredoc or `$(cat <<EOF ...)` inside the Bash call. Instead, write the PR body to a temp file via the **Write** tool first, then pass it via `--body-file`:
+       ```
+       # Step 1 (Write tool, not Bash) — render body into /tmp/sdd-test-parent-<Issue>.md:
+       #   Line 1: Refs #<Issue>           (inline the literal Issue number from $1)
+       #   Line 2: (blank)
+       #   Then:   <summary>, then blank, then `## Manual Test Checklist` and items
+       ```
        ```bash
+       # Step 2 (Bash tool — single simple gh call):
        gh pr create --title "test: <parent feature> integration tests" \
-         --body "$(cat <<EOF
-       Refs #$1
-
-       <summary>
-
-       ## Manual Test Checklist
-       <items>
-       EOF
-       )"
+         --body-file /tmp/sdd-test-parent-<Issue>.md
        ```
    - If no integration tests are needed (children's tests already cover all scenarios): document the reasoning in the report.
 

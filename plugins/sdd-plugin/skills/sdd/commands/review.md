@@ -9,6 +9,8 @@ Use cases:
 - Spot-check a stage's review quality mid-pipeline.
 - Re-trigger the parallel completeness/quality reviewers without invoking the full stage orchestrator (which would also re-spawn the work atom).
 
+> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+
 ## Input Validation
 
 Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
@@ -17,9 +19,9 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
 
 1. Check for `<!-- sdd:children:output -->` marker:
    ```bash
-   OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-   HAS_CHILDREN=$(gh api repos/$OWNER_REPO/issues/$1/comments \
-     --jq '.[] | select(.body | contains("<!-- sdd:children:output -->")) | .body' | head -1)
+   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
+   gh api repos/<owner>/<repo>/issues/$1/comments \
+     --jq '.[] | select(.body | contains("<!-- sdd:children:output -->")) | .body'
    ```
 2. **Parent Issue** (has children marker) → execute **Parent Review** below.
 3. **Single Issue or Child Issue** → execute **Standard Review** below.
@@ -31,7 +33,7 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
 Read all stage output markers present on the Issue:
 
 ```bash
-gh api repos/$OWNER_REPO/issues/$1/comments \
+gh api repos/<owner>/<repo>/issues/$1/comments \
   --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output") or contains("sdd:implement:plan") or contains("sdd:test:output")) | .body' \
   | grep -oE 'sdd:(analyze:output|design:output|implement:plan|test:output)'
 ```
@@ -84,7 +86,7 @@ Parent reviews are aggregate, not per-stage. They do not use review atoms — th
 
 1. Read child Issue numbers from the children comment:
    ```bash
-   gh api repos/$OWNER_REPO/issues/$1/comments \
+   gh api repos/<owner>/<repo>/issues/$1/comments \
      --jq '.[] | select(.body | contains("<!-- sdd:children:output -->")) | .body'
    ```
 2. For each child Issue:
