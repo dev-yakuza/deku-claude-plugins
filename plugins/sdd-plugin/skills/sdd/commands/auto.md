@@ -225,12 +225,29 @@ The main session itself runs the loop. **No shell script is generated. No `claud
 
           Next steps:
             1. Quit Claude Code (Cmd-Q on macOS).
-            2. Re-launch Claude Code.
-            3. Re-run /sdd auto. The new sandbox state is honored from
-               session start, so subagents' `gh` / `git push` calls will
-               no longer trigger sandbox-bypass prompts.
+            2. Re-launch Claude Code WITH the --dangerously-skip-permissions
+               flag so that, in addition to honoring the new sandbox state,
+               built-in heuristic safety prompts (find -exec, heredocs,
+               multi-line `# ...` in CLI args, recursive `find /`, etc.)
+               are also bypassed for the duration of /sdd auto:
 
-          To revert later:  mv <SETTINGS_PATH>.sdd-auto.bak <SETTINGS_PATH>
+                 claude --dangerously-skip-permissions
+
+               ⚠ The flag disables ALL in-session safety prompts for the
+                 ENTIRE session — not just /sdd auto. Any accidental
+                 dangerous command (rm -rf, credential file access, etc.)
+                 will run without confirmation. Only use it for the
+                 duration of /sdd auto; restart in normal mode afterwards.
+            3. Re-run /sdd auto. The new sandbox state is honored from
+               session start, so subagents' `gh` / `git push` calls no
+               longer trigger sandbox-bypass prompts, AND the flag
+               eliminates the remaining heuristic prompts.
+
+          After /sdd auto finishes, quit Claude Code and re-launch in
+          NORMAL mode (without --dangerously-skip-permissions) to restore
+          per-call safety prompts. The cleanup phase (3.4) will remind you.
+
+          To revert sandbox later:  mv <SETTINGS_PATH>.sdd-auto.bak <SETTINGS_PATH>
         ```
       - **Terminate /sdd auto** — do NOT continue to step 6 or Phase 3.2.
 
@@ -289,7 +306,7 @@ Run at the end of the loop **and** on any abort (user types "cancel" during a su
    - Write them back to `.github/.sdd-config` (via Write tool)
    - Delete `.github/.sdd-config.bak` (via Bash `rm`)
 2. Else (no original config existed): delete `.github/.sdd-config` (via Bash `rm`).
-3. **Sandbox post-loop status check** (cleanup does NOT modify the sandbox setting — step 5e is the only path that writes it, and that path exits before the loop):
+3. **Sandbox & permission-flag post-loop status check** (cleanup does NOT modify the sandbox setting — step 5e is the only path that writes it, and that path exits before the loop):
    - Re-read the settings file at the priority order from Phase 3.1 step 5a (`.claude/settings.local.json`, `.claude/settings.json`, `~/.claude/settings.json` — the first one that has a `sandbox` key).
    - If `sandbox.enabled == false` in that file:
      - Show:
@@ -300,6 +317,17 @@ Run at the end of the loop **and** on any abort (user types "cancel" during a su
          since the toggle, please do so before running /sdd auto again.
 
          (Restoring sandbox: mv <SETTINGS_PATH>.sdd-auto.bak <SETTINGS_PATH>)
+
+       ⚠ If you launched Claude Code with --dangerously-skip-permissions
+         for this /sdd auto run (as recommended by step 5e of Phase 3.1),
+         the flag is STILL ACTIVE for the rest of this session. The flag
+         disables ALL in-session permission prompts — including the
+         built-in heuristic safety checks for `find -exec`, heredocs,
+         multi-line `# ...` in CLI args, recursive `find /`, etc.
+
+         RECOMMENDED: quit Claude Code now and re-launch in NORMAL mode
+         (without --dangerously-skip-permissions) for any further work in
+         this project. Normal mode restores per-call safety prompts.
        ```
    - If `sandbox.enabled == true` (or unset): nothing to show.
 
@@ -319,11 +347,11 @@ Failed:          <FAILED>
 
 Time:            <minutes>m <seconds>s
 Config restored: .github/.sdd-config
-Sandbox:         <enabled | disabled — restart Claude Code recommended | unchanged>
+Sandbox:         <enabled | disabled — restart in NORMAL mode (no --dangerously-skip-permissions) recommended | unchanged>
 Next steps:      review PRs, run /sdd test <N> for QA if 'qa' was not in your prior skip-review
 ```
 
-(Sandbox status: show `disabled — restart Claude Code recommended` if step 3 of 3.4 found `sandbox.enabled == false`. Show `enabled` if it is true. Step 5e never reaches Phase 3.5 because it exits before the loop, so the "restored" wording is no longer used.)
+(Sandbox status: show `disabled — restart in NORMAL mode (no --dangerously-skip-permissions) recommended` if step 3 of 3.4 found `sandbox.enabled == false`. Show `enabled` if it is true. Step 5e never reaches Phase 3.5 because it exits before the loop, so the "restored" wording is no longer used. The "restart in NORMAL mode" wording is intentional — the user is likely running with `--dangerously-skip-permissions` per the step 5e re-launch guidance, and that flag should not persist beyond /sdd auto.)
 
 Token / cost aggregation is **not** included — the main session does not have access to per-subagent usage data the way `/sdd batch`'s stream-json logs do. Users wanting cost visibility can check `/cost` in this Claude Code session.
 
@@ -332,6 +360,7 @@ Token / cost aggregation is **not** included — the main session does not have 
 - **In-session execution.** Every orchestrator (`analyze.md`, `design.md`, `implement.md`, `test.md`, `resume.md`) and every atom runs in this same Claude Code session. Atoms are spawned via the Agent tool by orchestrators; the spawning layer is single-level (orchestrator → atoms), so there are no nested-subagent issues.
 - **Skip-review override is temporary.** The pre-loop step writes `skip-review: analyze,design,implement,pr`; cleanup restores the original config. AI review still runs in every stage (skip-review only suppresses user-confirmation prompts).
 - **Sandbox toggle is opt-in and persistent — and forces a restart.** When the user approves the Phase 3.1 step 5 prompt, `sandbox.enabled` is flipped to `false` in the chosen settings file with a backup, the pre-loop changes (skip-review config) are rolled back, and `/sdd auto` **exits without entering the loop**. This is because Claude Code only honors `sandbox.enabled` at session start; toggling mid-session does not silence the bypass prompts in the current session. The user restarts Claude Code and re-runs `/sdd auto`, at which point sandbox is already disabled at session start (step 5c path) and the loop proceeds without `gh` / `git push` bypass prompts. Cleanup (Phase 3.4) does **not** automatically restore sandbox — that decision is left to the user via `mv <SETTINGS_PATH>.sdd-auto.bak <SETTINGS_PATH>`. The toggle is the only way to eliminate per-command `dangerouslyDisableSandbox` confirmations in projects that need sandbox bypass (e.g. TLS-proxy environments) — those confirmations are a Claude Code safeguard that `permissions.allow` cannot auto-approve. If the user rejects the toggle (or sandbox was already disabled), `/sdd auto` runs as normal.
+- **`--dangerously-skip-permissions` is the companion flag.** Step 5e (Phase 3.1) instructs the user to re-launch Claude Code with `--dangerously-skip-permissions` because, even after `sandbox.enabled` is `false`, the main session still applies built-in heuristic safety prompts (e.g. `find -exec`, heredocs with quoted braces, multi-line `# …` in CLI args, recursive `find /`) that `permissions.allow` cannot auto-approve. The flag bypasses all of these for the session and is the only way to make `/sdd auto` fully unattended in the main session. Because the flag applies to ALL tool calls in the session (not just /sdd auto), the cleanup phase (3.4 step 3) explicitly instructs the user to quit and re-launch in NORMAL mode after /sdd auto completes, so per-call safety prompts are restored for the rest of their work in the project.
 - **Sequential only.** Parallel processing of Issues is intentionally not supported — official Claude Code docs warn that parallel subagents consume the subscription quota N× faster, which would defeat the in-session advantage.
 - **Child Issue handling.** Parents stop at `sdd:implement` after design creates children (per `design.md`); the auto-discovery in 3.3 queues the children, which then progress through the full pipeline themselves.
 - **Failures are tolerated.** A failure on one Issue does not abort the loop. The orchestrator records the failure and continues. The user can re-run `/sdd auto <failed-numbers>` after the run to retry.
