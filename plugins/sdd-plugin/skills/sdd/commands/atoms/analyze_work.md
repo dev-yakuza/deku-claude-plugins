@@ -44,18 +44,36 @@ Produces the SDD Stage 1 (Analyze) output for one Issue. Reads inputs from GitHu
 
 8. Format output using the template `${CLAUDE_SKILL_DIR}/templates/{lang}/output_analyze.md`. For no-action, use a brief no-action explanation inside the same `<!-- sdd:analyze:output -->` marker.
 
-9. **Self-review** (quick, in-context): before posting, verify your output satisfies:
-   - Every feature has both What and Why
-   - Dependencies/conflicts between features are identified
-   - Priorities have clear rationale
-   - Ambiguous terms are defined
-   - Out-of-scope items are explicit
+9. **Self-review (blockers only)**: before posting, verify the output passes these *posting-blocking* checks:
+   - [ ] Marker is present (`<!-- sdd:analyze:output -->`)
+   - [ ] Template's required sections are filled (Summary, Feature List, Priority — for normal path; no-action explanation for no-action path)
+   - [ ] No `<empty>` / TODO / placeholder text left in
+   - [ ] Type classification (`new feature` / `enhancement` / `bug fix` / `refactoring`) is set
+   - [ ] Cross-stage refs valid (if child Issue, parent reference is correct)
 
-   If issues found → fix inline before posting.
+   If a blocker fails → fix inline. Track any blocker that was fixed for the `<details>` trace below.
 
-10. **If `$2` (retry feedback) is provided**: explicitly address each issue listed in `$2` before posting. Mention in the output how each was resolved (or why it cannot be).
+   *Quality, completeness, risk evaluation are NOT done here — they are the Agent reviewers' job. Keep self-review minimal.*
 
-11. **Post to Issue** (with duplicate prevention per Common Definitions in `${CLAUDE_SKILL_DIR}/SKILL.md`):
+10. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B). Parse it and address each finding individually. Mention in the output how each finding was resolved (or why it cannot be).
+
+11. **Append self-review trace** to the output. Inside the same `<!-- sdd:analyze:output -->` block, before the closing marker, embed:
+
+    ```markdown
+    <details>
+    <summary>Self-review trace (blockers only)</summary>
+
+    - [x] Template required sections filled
+    - [x] Type classification set
+    - [x] Cross-stage references valid
+    - [ ] Cross-stage ref to parent #N was misspelled — fixed inline
+
+    </details>
+    ```
+
+    List only the blockers actually checked; mark `[x]` for clean, `[ ]` with inline note for fixed. Skip the `<details>` block entirely if there is nothing to record.
+
+12. **Post to Issue** (with duplicate prevention per Common Definitions in `${CLAUDE_SKILL_DIR}/SKILL.md`):
     - Search Issue comments for `<!-- sdd:analyze:output -->` marker
     - If found → update that comment via `gh api ... -X PATCH`
     - If not → create new comment via `gh issue comment $1 --body ...`

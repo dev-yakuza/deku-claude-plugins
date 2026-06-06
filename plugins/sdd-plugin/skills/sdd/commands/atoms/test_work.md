@@ -56,7 +56,16 @@ E2E tests were already written in Stage 3 (implement) and included in the PR. Th
    - Separate automated (already covered by tests) from manual (needs human verification).
    - Identify regression test targets.
 
-6. **Self-review** the test report and QA checklist against `${CLAUDE_SKILL_DIR}/commands/ai-review-test.md` "Additional Review" criteria. Fix gaps inline.
+6. **Self-review (blockers only)**: before posting, verify posting-blocking checks:
+   - [ ] Marker is present (`<!-- sdd:test:output -->`)
+   - [ ] Test results section is filled with actual pass/fail counts (no `<empty>` / TODO)
+   - [ ] QA checklist sections (Automated / Manual / Regression) are filled
+   - [ ] PR number is referenced if Single/Child path
+   - [ ] Path label (`Single/Child Issue` vs `Parent Issue`) is set
+
+   If a blocker fails → fix inline. Track for the `<details>` trace below.
+
+   *Quality, completeness, risk evaluation are NOT done here — Agent reviewers' job.*
 
 7. Determine language from `.github/.sdd-lang` (same fallback rules).
 
@@ -83,10 +92,18 @@ E2E tests were already written in Stage 3 (implement) and included in the PR. Th
    #### Regression
    - [ ] <item>
 
-   ### Self-Review
-   - <issues noted, or "No gaps">
+   <details>
+   <summary>Self-review trace (blockers only)</summary>
+
+   - [x] Test results filled
+   - [x] QA checklist sections filled
+   - [x] PR referenced
+
+   </details>
    <!-- /sdd:test:output -->
    ```
+
+   Skip the `<details>` block if nothing to record.
 
 ## Work — Parent Issue path
 
@@ -131,9 +148,17 @@ Child Issues have individual tests; cross-child integration tests may be needed 
    - Cross-child integration scenarios
    - Regression test targets across the whole parent feature
 
-5. **Self-review** against `ai-review-test.md` "Additional Review". Fix gaps inline.
+5. **Self-review (blockers only)**: before posting, verify posting-blocking checks:
+   - [ ] Marker is present
+   - [ ] Path label is `Parent Issue`
+   - [ ] Integration PR URL is included (if `OK PARENT INTEGRATION_PR`) OR rationale for no-integration is documented (if `OK PARENT NO_INTEGRATION`)
+   - [ ] QA checklist at parent level filled
 
-6. **Post to Issue** with `<!-- sdd:test:output -->` marker (parent variant of the body — include the integration PR URL if created).
+   If a blocker fails → fix inline. Track for the `<details>` trace.
+
+   *Cross-stage / cross-child integration analysis is NOT done here — the orchestrator spawns `parent_integration_review.md` for that.*
+
+6. **Post to Issue** with `<!-- sdd:test:output -->` marker (parent variant of the body — include the integration PR URL if created). Append a `<details>`-block self-review trace before the closing marker, in the same style as the single/child path.
 
 ## Return contract
 

@@ -2,88 +2,50 @@
 
 **Single-subagent worker. MUST NOT spawn subagents. MUST NOT call the Agent tool.**
 
-Independently reviews the test output that was posted to an Issue. Reads the analyze + design + test comments from GitHub, applies the criteria from `ai-review-test.md`, posts a review comment, returns a one-line verdict.
+Independently reviews the test output. Reads analyze + design + test comments, applies role-specific criteria, posts a review comment, returns a one-line verdict.
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
 
 ## Inputs
 
 - `$1` — Issue number
 - `$2` — review role: `completeness` or `quality`
 
-The orchestrator invokes this atom **twice in parallel** in a single message — once with `$2=completeness`, once with `$2=quality`.
+The orchestrator invokes this atom **twice in parallel** in a single message. The `adversarial` role is handled by `test_adversarial.md`. The cross-stage parent integration role is handled by `parent_integration_review.md` (parent path only).
 
 ## Work
 
 1. Resolve owner/repo and read the Issue + relevant stage outputs:
    ```bash
-   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
+   gh repo view --json nameWithOwner -q .nameWithOwner
    gh issue view $1
    gh api repos/<owner>/<repo>/issues/$1/comments \
      --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output") or contains("sdd:test:output")) | .body'
    ```
 
-2. If the test output is missing → return `FAIL: test output not found on Issue #$1`.
+2. If test output missing → return `FAIL: test output not found on Issue #$1`.
 
-3. Detect parent vs single/child from the test output body (`Path:` line) and from the presence of `<!-- sdd:children:output -->`.
-   - **Parent path**: also read children's PRs for cross-reference (find via children comment numbers).
-   - **Single/Child path**: also read the implementation PR diff for cross-reference (find via `gh pr list --search "Refs #$1"`).
+3. Detect path (single/child vs parent) from the test output body (`Path:` line) and from the presence of `<!-- sdd:children:output -->`.
+   - **Parent path**: also read children's PRs (find via children comment numbers).
+   - **Single/Child path**: also read the implementation PR diff (find via `gh pr list --search "Refs #$1"`).
 
-4. Read the stage-specific criteria from `${CLAUDE_SKILL_DIR}/commands/ai-review-test.md`.
+4. Read the role-specific criteria:
+   - `$2=completeness` → `${CLAUDE_SKILL_DIR}/commands/ai-review-test-completeness.md`
+   - `$2=quality` → `${CLAUDE_SKILL_DIR}/commands/ai-review-test-quality.md`
 
-5. Apply criteria according to your role (`$2`):
+5. **Codebase exploration** per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section D. Budget: 15 Read / 10 Grep / 5 Glob. Read PR test files and verify the test output's claims match actual test code.
 
-   ### If `$2` is `completeness`:
-   Focus on **requirements coverage and cross-stage consistency**.
-   - **Required Checklist** from `ai-review-test.md`:
-     - E2E tests cover the main user flows from the requirements
-     - Edge cases identified in analyze/design are tested
-     - Regression risks for existing functionality are addressed
-     - Test assertions are specific and meaningful
-   - **Cross-stage Check**: compare against analyze + design outputs — are all requirements and risk areas covered by tests?
-   - Report issues with severity.
+6. Apply criteria. Standard severity definitions.
 
-   ### If `$2` is `quality`:
-   Focus on **quality, risks, and issues beyond the checklist**.
-   - **Additional Review** from `ai-review-test.md`:
-     - Test reliability (flakiness risk, timing dependencies, external state assumptions)
-     - Coverage gaps not enumerated in the design
-     - Missing scenarios (concurrency, error paths, boundary)
-     - QA checklist completeness for manual items
-   - Report issues with severity.
+7. Determine verdict: critical/major → FAIL; only minor or none → PASS.
 
-   Severity definitions:
-   - **critical**: Must fix — missing requirement, broken test, security gap not covered
-   - **major**: Should fix — significant coverage gap, unreliable test, inconsistency with design
-   - **minor**: Nice to fix — naming, style, additional suggestion
+8. **Post a review comment**. Location:
+   - Single/Child path: post on the **PR** (`gh pr comment <PR_NUM>`) with marker `<!-- sdd:review:test:<role> -->`
+   - Parent path: post on the **Issue** with marker `<!-- sdd:review:test:<role> -->`
 
-6. Determine verdict:
-   - Any `critical` or `major` issue → `FAIL` (with summary)
-   - Only `minor` issues → `PASS` (suggestions in the comment)
-   - No issues → `PASS`
-
-7. **Post a review comment on the Issue** with the marker `<!-- sdd:review:test:<role> -->`. Use duplicate prevention.
-
-   Comment body format:
-   ```
-   <!-- sdd:review:test:<role> -->
-   ## AI Review (test / <role>)
-
-   **Verdict:** PASS | FAIL
-
-   ### Issues
-   - **[critical]** <description>
-   - **[major]** <description>
-   - **[minor]** <description>
-
-   ### Suggestions
-   <if any>
-   <!-- /sdd:review:test:<role> -->
-   ```
+   Standard format with `<!-- sdd:findings:json -->` block per `_review_helpers.md` Section B. Use temp file + `--body-file` for PR comments.
 
 ## Return contract
-
-Return EXACTLY ONE LINE on its own, prefixed by `>>> RESULT <<<`:
 
 ```
 >>> RESULT <<<
@@ -92,17 +54,18 @@ OK PASS
 or
 ```
 >>> RESULT <<<
-OK FAIL: <one-line severity summary, e.g. "1 major, 2 minor">
+OK FAIL: <one-line severity summary>
 ```
 or
 ```
 >>> RESULT <<<
-FAIL: <one-line reason — only for atom errors, not review verdicts>
+FAIL: <one-line reason — only for atom errors>
 ```
 
 ## Hard rules
 
-- You are a single-subagent atom. Do NOT invoke the Agent tool. Do NOT spawn subagents.
-- Do NOT invoke `/sdd <command>` or the Skill tool.
-- Do NOT modify the test output comment. Only post your own review comment.
-- Be independent: evaluate test coverage on its own merits against the criteria.
+- Single-subagent atom. Do NOT invoke the Agent tool or Skill tool.
+- Do NOT modify the test output comment or PR files.
+- You **MAY** use Read/Grep/Glob (Section D budget).
+- Do NOT use Edit/Write/NotebookEdit except for the temp PR-comment body file.
+- Be independent.

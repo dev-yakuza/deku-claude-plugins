@@ -2,60 +2,46 @@
 
 **Single-subagent worker. MUST NOT spawn subagents. MUST NOT call the Agent tool.**
 
-Independently reviews the analyze output that was posted to an Issue. Reads the analyze comment from GitHub, applies the criteria from `ai-review-analyze.md`, posts a review comment, returns a one-line verdict.
+Independently reviews the analyze output. Reads the Issue + analyze comment, applies the role-specific criteria, posts a review comment, returns a one-line verdict.
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
 
 ## Inputs
 
 - `$1` — Issue number
 - `$2` — review role: `completeness` or `quality`
 
-The orchestrator invokes this atom **twice in parallel** in a single message — once with `$2=completeness`, once with `$2=quality`.
+The orchestrator invokes this atom **twice in parallel** in a single message. The `adversarial` role is handled by `analyze_adversarial.md`.
 
 ## Work
 
-1. Read the Issue body and the analyze output comment:
+1. Read owner/repo + Issue + analyze output:
    ```bash
-   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
+   gh repo view --json nameWithOwner -q .nameWithOwner
    gh issue view $1
    gh api repos/<owner>/<repo>/issues/$1/comments \
      --jq '.[] | select(.body | contains("sdd:analyze:output")) | .body'
    ```
 
-2. If the analyze output is missing → return `FAIL: analyze output not found on Issue #$1`.
+2. If analyze output is missing → return `FAIL: analyze output not found on Issue #$1`.
 
-3. Read the stage-specific criteria from `${CLAUDE_SKILL_DIR}/commands/ai-review-analyze.md`.
+3. Read the role-specific criteria file based on `$2`:
+   - `$2=completeness` → `${CLAUDE_SKILL_DIR}/commands/ai-review-analyze-completeness.md`
+   - `$2=quality` → `${CLAUDE_SKILL_DIR}/commands/ai-review-analyze-quality.md`
 
-4. Apply the criteria according to your role (`$2`):
+4. **Codebase exploration (optional, within budget)** per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section D. Verify any code references in the analyze output exist as described.
 
-   ### If `$2` is `completeness`:
-   Focus on **requirements coverage**. (Cross-stage Check is N/A for analyze — it is the first stage, no prior stage to cross-check against.)
-   - Apply the **Required Checklist** from `ai-review-analyze.md`. Mark each item pass/fail with severity.
-   - Report any consistency issues found within the analyze output itself.
-
-   ### If `$2` is `quality`:
-   Focus on **quality, risks, and issues beyond the checklist**.
-   - Apply the **Additional Review** criteria from `ai-review-analyze.md`.
-   - Look for risks, edge cases, ambiguities, pattern violations, unstated assumptions.
-   - Report issues with severity.
-
-   Use the following severity definitions:
+5. Apply the criteria. Standard severity definitions:
    - **critical**: Must fix — incorrect logic, missing requirement, security risk
    - **major**: Should fix — inconsistency, poor coverage, unclear specification
-   - **minor**: Nice to fix — style, naming, minor improvement suggestions
+   - **minor**: Nice to fix — style, naming, minor improvement
 
-5. Determine your verdict:
-   - Any `critical` or `major` issue → `FAIL` (with summary)
-   - Only `minor` issues → `PASS` (include suggestions in the comment)
-   - No issues → `PASS`
+6. Determine verdict:
+   - Any `critical` or `major` → **FAIL** (with summary)
+   - Only `minor` or none → **PASS** (suggestions included)
+   - Do NOT combine with other reviewers — the orchestrator merges verdicts.
 
-   Do NOT include a combined verdict — the orchestrator merges your verdict with the other reviewer's.
-
-6. **Post a review comment** to the Issue with the marker `<!-- sdd:review:analyze:<role> -->` (where `<role>` is `completeness` or `quality`). Use duplicate prevention per Common Definitions:
-   - Search for the matching marker
-   - If found → update that comment
-   - If not → create new comment
+7. **Post a review comment** to the Issue with marker `<!-- sdd:review:analyze:<role> -->`. Standard duplicate-prevention: search for marker, update if found, else create.
 
    Comment body format:
    ```
@@ -63,6 +49,7 @@ The orchestrator invokes this atom **twice in parallel** in a single message —
    ## AI Review (analyze / <role>)
 
    **Verdict:** PASS | FAIL
+   **Model:** <opus|sonnet|haiku>
 
    ### Issues
    - **[critical]** <description>
@@ -71,12 +58,18 @@ The orchestrator invokes this atom **twice in parallel** in a single message —
 
    ### Suggestions
    <if any>
+
+   <!-- sdd:findings:json -->
+   ```json
+   {<structured findings per _review_helpers.md Section B>}
+   ```
+   <!-- /sdd:findings:json -->
    <!-- /sdd:review:analyze:<role> -->
    ```
 
 ## Return contract
 
-Return EXACTLY ONE LINE on its own, prefixed by the marker `>>> RESULT <<<` on the preceding line. Format:
+Return EXACTLY ONE LINE on its own, prefixed by `>>> RESULT <<<`:
 
 ```
 >>> RESULT <<<
@@ -85,23 +78,18 @@ OK PASS
 or
 ```
 >>> RESULT <<<
-OK FAIL: <one-line severity summary, e.g. "2 critical, 1 major">
+OK FAIL: <one-line severity summary>
 ```
 or
 ```
 >>> RESULT <<<
-FAIL: <one-line reason — only for atom errors, not review verdicts>
+FAIL: <one-line reason — only for atom errors>
 ```
-
-- `OK PASS` — review completed, no critical/major issues.
-- `OK FAIL: <summary>` — review completed, critical/major issues found. The orchestrator will combine with the other reviewer's verdict and decide whether to retry.
-- `FAIL: <reason>` — the atom itself errored (could not read analyze output, gh CLI error, etc.).
-
-Do NOT return the full review body — it's already in the Issue comment.
 
 ## Hard rules
 
-- You are a single-subagent atom. Do NOT invoke the Agent tool. Do NOT spawn subagents.
+- Single-subagent atom. Do NOT invoke the Agent tool or Skill tool.
 - Do NOT modify the analyze output comment. Only post your own review comment.
-- Do NOT invoke `/sdd <command>` or the Skill tool.
-- Be independent: do not assume the analyze output is correct just because it exists. Evaluate it on its own merits against the criteria.
+- You **MAY** use Read/Grep/Glob to verify references against actual code (Section D budget: 15 Read / 10 Grep / 5 Glob).
+- Do NOT use Edit/Write/NotebookEdit.
+- Be independent: do not assume the analyze output is correct just because it exists. Evaluate it on its own merits.
