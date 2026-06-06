@@ -48,14 +48,15 @@ Produces the test plan + implementation plan for SDD Stage 3, posts it to the Is
    - Order of operations
    - Any setup/teardown required
 
-6. **Self-review** the plan against `${CLAUDE_SKILL_DIR}/commands/ai-review-implement.md` "Plan (3-0)" section (review type: self_only):
-   - Test plan covers all design items for this PR scope
-   - Test plan classifies cases by behavioral path
-   - Implementation plan is consistent with the test plan
-   - Plan follows the architecture decisions from the design
-   - Additional self-review: feasibility, approach, risk; compare against design output
+6. **Self-review (blockers only)**: before posting, verify posting-blocking checks:
+   - [ ] Marker is present (`<!-- sdd:implement:plan -->`)
+   - [ ] Test plan and implementation plan sections are filled (no `<empty>` / TODO placeholders)
+   - [ ] Branch name is set and valid for the repo's convention
+   - [ ] Design output is referenced (file paths from design appear in implementation plan)
 
-   If issues found → fix inline before posting. Self-review is non-retriable at this layer.
+   If a blocker fails → fix inline before posting. Track for the `<details>` trace.
+
+   *Quality, completeness, risk evaluation are NOT done here. The orchestrator does not spawn a separate review for the plan stage (review type: self_only), so user confirmation in Phase 2.2 of `implement.md` is the human gate.*
 
 7. Determine language from `.github/.sdd-lang` (same fallback rules as other atoms).
 
@@ -82,10 +83,18 @@ Produces the test plan + implementation plan for SDD Stage 3, posts it to the Is
    1. <ordered steps>
    2. ...
 
-   ### Self-Review
-   - Verdict: PASS (after self-review and fixes)
+   <details>
+   <summary>Self-review trace (blockers only)</summary>
+
+   - [x] Template required sections filled
+   - [x] Branch name valid
+   - [x] Design references appear in implementation plan
+
+   </details>
    <!-- /sdd:implement:plan -->
    ```
+
+   Skip the `<details>` block entirely if nothing to record.
 
 ## Return contract
 

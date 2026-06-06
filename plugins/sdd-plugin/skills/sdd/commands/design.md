@@ -4,7 +4,7 @@
 
 Define HOW to implement based on the requirements.
 
-This file is an **orchestrator**. It runs in the main session and composes atomic operations via the Agent tool. The atoms (`atoms/design_work.md`, `atoms/design_review.md`) do the actual work; this file manages state, retries, and user interaction.
+This file is an **orchestrator**. It runs in the main session and composes atomic operations via the Agent tool. The atoms (`atoms/design_work.md`, `atoms/design_review.md`, `atoms/design_adversarial.md`) do the actual work; this file manages state, retries, and user interaction.
 
 > **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
 
@@ -16,15 +16,35 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
 
 The Issue must have an `<!-- sdd:analyze:output -->` comment. If missing → report "Run `/sdd analyze $1` first" and stop. The work atom will also check this, but failing fast here avoids a wasted subagent invocation.
 
+## Phase 0: Depth label detection
+
+Per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section C:
+
+```bash
+gh issue view $1 --json labels --jq '[.labels[].name]'
+```
+
+Determine depth (`default` / `deep` / `shallow`).
+
+**Model resolution for design stage**:
+
+| Atom | default | deep | shallow |
+|---|---|---|---|
+| `design_work` | opus | opus | opus |
+| `design_review` (completeness) | sonnet | opus | sonnet |
+| `design_review` (quality) | sonnet | opus | sonnet |
+| `design_adversarial` | opus | opus | sonnet |
+
 ## Phase 1: Design + AI Review Loop
 
-Up to **3 rounds** maximum. Each round = work atom → parallel review atoms → verdict check.
+Up to **3 rounds** maximum. Each round = work atom → 3 parallel review atoms → verdict check.
 
 ### Round 1
 
 **Step 1.1 — Spawn the work atom** via the Agent tool:
 
 - `subagent_type`: `general-purpose`
+- `model`: `opus`
 - `description`: `design work for #$1`
 - `prompt`:
   > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_work.md` and execute its instructions for Issue #$1.
@@ -35,45 +55,78 @@ Parse the subagent's `>>> RESULT <<<` line:
 - `OK SINGLE` → single-PR design posted. Continue to Step 1.2. **Remember the path = SINGLE** for Phase 2.
 - `OK CHILDREN: #A,#B,#C` → multi-PR design posted, children created. Continue to Step 1.2. **Remember the path = CHILDREN with the listed numbers** for Phase 2.
 
-**Step 1.2 — Spawn the two review atoms in parallel** via the Agent tool. Single message, two Agent tool calls (concurrent execution):
+**Step 1.2 — Spawn the three review atoms in parallel** via the Agent tool. Single message, three Agent tool calls (concurrent execution):
 
-Agent A:
+Agent A (completeness):
 - `subagent_type`: `general-purpose`
+- `model`: per Phase 0 table
 - `description`: `design review (completeness) for #$1`
 - `prompt`:
   > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_review.md` and execute its instructions for Issue #$1 with role `completeness`.
-  > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
+  > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
-Agent B:
+Agent B (quality):
 - `subagent_type`: `general-purpose`
+- `model`: per Phase 0 table
 - `description`: `design review (quality) for #$1`
 - `prompt`:
   > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_review.md` and execute its instructions for Issue #$1 with role `quality`.
-  > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
+  > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
-Parse both `>>> RESULT <<<` lines:
-- If either is `FAIL: <reason>` (atom error) → report failure, stop.
+Agent C (adversarial):
+- `subagent_type`: `general-purpose`
+- `model`: per Phase 0 table
+- `description`: `design adversarial for #$1`
+- `prompt`:
+  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_adversarial.md` and execute its instructions for Issue #$1.
+  > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
+
+Parse all three `>>> RESULT <<<` lines:
+- If any is `FAIL: <reason>` (atom error) → report failure, stop.
 - Combine verdicts:
-  - Both `OK PASS` → reviews passed.
-  - Either `OK FAIL: <summary>` → reviews failed. Combine the summaries.
+  - All three `OK PASS` → reviews passed.
+  - Any `OK FAIL: <summary>` → reviews failed. Combine summaries.
+  - **Adversarial single-FAIL escalation**: if `OK FAIL` came only from adversarial, log to user: "⚠ Adversarial reviewer alone identified critical/major issues. Surfacing for awareness." Then continue Step 1.3 as normal.
 
 **Step 1.3 — Round decision:**
 - Reviews passed → exit loop; proceed to Phase 2.
-- Reviews failed, round < 3 → fetch review comments from the Issue for full issue details, summarize combined critical/major issues, re-spawn work atom with `$2` = combined-issues string.
-- Reviews failed, round == 3 → exit loop. Report remaining unfixed issues (severity-summarized) to the user; proceed to Phase 2 anyway.
+- Reviews failed, round < 3 → build **structured retry feedback** per `_review_helpers.md` Section C:
+  1. Fetch review comments from the Issue.
+  2. Extract `<!-- sdd:findings:json -->` JSON block from each FAILed reviewer.
+  3. Combine findings arrays, filter to severity ∈ {critical, major}.
+  4. Pass combined JSON array as `$2` in the next round's work atom prompt.
+- Reviews failed, round == 3 → exit loop. Proceed to **Phase 1.5**.
 
 ### Round 2 and Round 3 (retry)
 
-Same as Round 1 Steps 1.1–1.3, but the work atom prompt **must include previous round's review feedback** as `$2`:
+Same as Round 1 Steps 1.1–1.3, but the work atom prompt **must include structured retry feedback** as `$2`:
 
 - `prompt`:
   > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_work.md` and execute its instructions for Issue #$1.
-  > Previous round review feedback (address each item): <combined critical/major issues from prior reviews>
-  > Return EXACTLY one line in the contract specified by that file.
+  > Previous round structured findings (address each item): <inlined JSON array>
+  > Return EXACTLY one line in the contract.
 
 The review atom prompts are unchanged between rounds.
 
 **Note on retry with `OK CHILDREN`**: if Round 1 returned `OK CHILDREN: #A,#B,#C` and reviews failed, the work atom's idempotency rule (do NOT re-create children if `<!-- sdd:children:output -->` exists) keeps the same children across retries. The retry only updates the design output comment, not the child set.
+
+## Phase 1.5: Round 3 Escalation Gate
+
+Runs only if round 3 failed.
+
+1. Fetch latest review findings.
+2. Render summary to user:
+   ```
+   ⚠ Design stage: 3 review rounds failed.
+   Remaining critical/major findings:
+     - [critical] ... (design/<role>)
+     - [major] ... (design/<role>)
+   ```
+3. **Override skip-review** — ask the user regardless of skip-review setting:
+   - Continue to Phase 2 / Pause for manual intervention / Stop?
+   - On "Continue" → proceed.
+   - On "Pause" → stop. User resumes via `/sdd resume <N>` after manual fixes.
+   - On "Stop" → exit cleanly.
 
 ## Phase 2: Branching on path (SINGLE vs CHILDREN)
 
@@ -110,8 +163,10 @@ The orchestrator now:
 
 ## Notes
 
-- **AI review always runs.** `skip-review: design` skips only the user confirmation — the AI review loop (Phase 1) always executes.
+- **AI review always runs.** `skip-review: design` skips only the user confirmation — the AI review loop (Phase 1) and Phase 1.5 escalation always execute.
 - **Atoms never spawn other atoms.** All Agent-tool spawning happens here. The work atom does its own codebase exploration via Read/Grep/Glob (no Explore subagent).
-- **Reviews are independent.** Two review atoms run in parallel with independent contexts.
-- **Retry limit is 3 rounds total** (initial + 2 retries).
+- **Reviews are independent.** Three review atoms run in parallel with independent contexts.
+- **Retry feedback is structured JSON.** Lossless handoff to work atom.
+- **Retry limit is 3 rounds total** (initial + 2 retries), then escalation gate.
 - **Child creation is idempotent** across retries — work atom skips re-creation if `<!-- sdd:children:output -->` already exists on the parent.
+- **Depth label override**: `sdd:review:deep`/`sdd:review:shallow` shifts model assignments per `_review_helpers.md` Section C.

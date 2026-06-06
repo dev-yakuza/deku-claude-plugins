@@ -40,8 +40,28 @@ Read `${CLAUDE_SKILL_DIR}/commands/$0.md` and execute. Pass `$1` as issue number
 | `<!-- sdd:rollback -->` | Issue comment | Rollback notice |
 | `<!-- sdd:implement:plan -->` | Issue comment | TDD plan from `implement_plan` atom |
 | `<!-- sdd:test:output -->` | Issue comment | Test results + QA checklist |
-| `<!-- sdd:review:<stage>:<role> -->` | Issue comment (or PR for implement) | AI review per stage; `<stage>` ∈ {analyze, design, implement, test}, `<role>` ∈ {completeness, quality} |
-| `<!-- sdd:review:parent -->` | Issue comment (parent) | Cross-child parent review summary |
+| `<!-- sdd:review:<stage>:<role> -->` | Issue comment (or PR for implement / test single-child) | AI review per stage; `<stage>` ∈ {analyze, design, implement, test}, `<role>` ∈ {completeness, quality, adversarial} |
+| `<!-- sdd:review:implement:step-<n> -->` | Issue comment | TDD step review per step; `<n>` ∈ {1, 2, 3, 4} (Red/Green/Refactor/E2E) |
+| `<!-- sdd:review:parent -->` | Issue comment (parent) | Cross-stage parent integration review (posted by `parent_integration_review.md`) |
+| `<!-- sdd:findings:json -->` | Inside any review comment | Structured findings JSON block (machine-parseable; schema in `commands/atoms/_review_helpers.md` Section B) |
+
+### Review Model Assignment
+
+Reviewers run on different models per atom and depth label. See `commands/atoms/_review_helpers.md` Section A for the authoritative table and rationale. Quick reference:
+
+| Atom | default | `sdd:review:deep` label | `sdd:review:shallow` label |
+|---|---|---|---|
+| Work atoms (`*_work`, `implement_plan`, `implement_red/green/refactor/e2e/pr`) | opus | opus | opus |
+| Review atoms `*_completeness`, `*_quality` | sonnet | opus | sonnet |
+| `*_adversarial` (4 stages) | opus | opus | sonnet |
+| `parent_integration_review` | opus | opus | sonnet |
+| `tdd_step_review` (step 1, 4) | sonnet | opus | haiku |
+| `tdd_step_review` (step 2, 3) | haiku | opus | haiku |
+| `implement_review` (PR Final completeness/quality) | sonnet | opus | sonnet |
+
+`/code-review` effort by depth: `high` (default), `max` (deep), `medium` (shallow).
+
+orchestrators MUST pass the chosen model via the Agent tool's `model` parameter. Set per-Issue dial via `gh issue edit <N> --add-label "sdd:review:deep"` (or `:shallow`).
 
 ### Parent/Child Issue Detection
 - **Parent Issue**: has `<!-- sdd:children:output -->` marker in comments

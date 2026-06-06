@@ -58,23 +58,40 @@ Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub
 
 11. Format design output using the template `${CLAUDE_SKILL_DIR}/templates/{lang}/output_design.md`.
 
-12. **Self-review** (quick, in-context): before posting, verify:
-    - Every feature from analyze output is addressed
-    - Impact scope covers all affected files/modules/data
-    - Constraints and risks are identified with mitigations
-    - PR split is logical and each PR is independently deliverable
-    - Architecture decisions are consistent with existing patterns
+12. **Self-review (blockers only)**: before posting, verify posting-blocking checks:
+    - [ ] Marker is present (`<!-- sdd:design:output -->`)
+    - [ ] Template's required sections are filled (file structure changes, PR split rationale, constraints)
+    - [ ] No `<empty>` / TODO / placeholder text left in
+    - [ ] PR split count (single vs ≥2) is explicitly stated
+    - [ ] File paths cited in the design are syntactically valid (no obvious typos)
 
-    Fix inline before posting.
+    If a blocker fails → fix inline. Track for the `<details>` trace below.
 
-13. **If `$2` (retry feedback) is provided**: explicitly address each issue in `$2` before posting. Mention how each was resolved in the design.
+    *Quality, completeness, risk evaluation are NOT done here — Agent reviewers' job.*
 
-14. **Post the design comment** to the Issue with duplicate prevention:
+13. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B). Parse it and address each finding individually. Mention how each was resolved in the design.
+
+14. **Append self-review trace** to the design output. Inside the `<!-- sdd:design:output -->` block, before the closing marker, embed:
+
+    ```markdown
+    <details>
+    <summary>Self-review trace (blockers only)</summary>
+
+    - [x] Template required sections filled
+    - [x] PR split count stated
+    - [ ] File path `src/auths.ts` was a typo — fixed to `src/auth.ts`
+
+    </details>
+    ```
+
+    Skip the block entirely if there is nothing to record.
+
+15. **Post the design comment** to the Issue with duplicate prevention:
     - Search for `<!-- sdd:design:output -->` marker; update if exists, else create.
 
-15. **If PR split ≥ 2 — Child Issue creation**:
+16. **If PR split ≥ 2 — Child Issue creation**:
 
-    a. Check if `<!-- sdd:children:output -->` already exists on this Issue. If yes (retry case), do NOT re-create children — keep existing children and skip to step 16. If no, proceed to (b).
+    a. Check if `<!-- sdd:children:output -->` already exists on this Issue. If yes (retry case), do NOT re-create children — keep existing children and skip to step 17. If no, proceed to (b).
 
     b. For each sub-feature in the design:
        - Format child Issue body using `${CLAUDE_SKILL_DIR}/templates/{lang}/output_child_issue.md` with manual placeholder substitution:
@@ -90,7 +107,7 @@ Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub
 
     c. Post the parent's children list comment using `${CLAUDE_SKILL_DIR}/templates/{lang}/output_children.md` with a row per child Issue.
 
-16. **If single PR**: no child creation. Done.
+17. **If single PR**: no child creation. Done.
 
 ## Return contract
 

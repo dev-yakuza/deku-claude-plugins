@@ -36,8 +36,17 @@ Workflow:
 Tips:
   - Each stage decomposes into work + parallel review atoms; main session
     stays small so /sdd auto can handle many Issues in one session
+  - 3 reviewer lenses per full stage: completeness, quality, adversarial
+  - TDD steps (Red/Green/Refactor/E2E) each get their own lightweight
+    review atom for early bug detection
+  - Reviewers can Read/Grep the codebase to verify references
   - In skip-review mode, stages auto-proceed within an orchestrator
     (AI review still runs; only the user-confirmation prompt is skipped)
+  - Round 3 review failure triggers a user gate even in skip-review mode
+  - Per-Issue depth dials: `sdd:review:deep` (all Opus, /code-review max)
+    or `sdd:review:shallow` (cheaper models, /code-review medium)
+  - /sdd implement automatically invokes /code-review at PR Final stage
+    if available (Claude Code v2.1.147+); skips gracefully otherwise
   - Batch processing options:
       /sdd auto   — runs in this session; full AI review fidelity;
                     stays on Interactive billing
