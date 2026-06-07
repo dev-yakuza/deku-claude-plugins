@@ -50,19 +50,7 @@ Each work atom begins with a `Step 0: Pre-flight context discovery` that reads p
 
 ### Review Model Assignment
 
-Reviewers run on different models per atom and depth label. See `commands/atoms/_review_helpers.md` Section A for the authoritative table and rationale. Quick reference:
-
-| Atom | default | `sdd:review:deep` label | `sdd:review:shallow` label |
-|---|---|---|---|
-| Work atoms (`*_work`, `implement_plan`, `implement_red/green/refactor/e2e/pr`) | opus | opus | opus |
-| Review atoms `*_completeness`, `*_quality` | sonnet | opus | sonnet |
-| `*_adversarial` (4 stages) | opus | opus | sonnet |
-| `parent_integration_review` | opus | opus | sonnet |
-| `tdd_step_review` (step 1, 4) | sonnet | opus | haiku |
-| `tdd_step_review` (step 2, 3) | haiku | opus | haiku |
-| `implement_review` (PR Final completeness/quality) | sonnet | opus | sonnet |
-
-`/code-review` effort by depth: `high` (default), `max` (deep), `medium` (shallow).
+See `commands/atoms/_review_helpers.md` Section A for the model assignment table and `/code-review` depth-to-effort mapping.
 
 orchestrators MUST pass the chosen model via the Agent tool's `model` parameter. Set per-Issue dial via `gh issue edit <N> --add-label "sdd:review:deep"` (or `:shallow`).
 
@@ -111,19 +99,8 @@ To keep automated runs (`/sdd auto`, `/sdd batch`) unattended, every Bash tool i
 3. Substitute the **literal** value (not a shell variable, not a `$(...)`) into the next simple Bash tool call.
 
 Example:
-```bash
-# ❌ Forbidden — single Bash call with command substitution + variable use:
-OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-gh api repos/$OWNER_REPO/issues/$1/comments
-
-# ✅ Correct — two separate Bash tool calls, value inlined as literal:
-# (Bash call 1)
-gh repo view --json nameWithOwner -q .nameWithOwner
-# Output observed by you: deku-word-app/word_app
-
-# (Bash call 2 — inline the literal observed above)
-gh api repos/deku-word-app/word_app/issues/$1/comments
-```
+- ❌ Forbidden: `VAR=$(gh repo view ...); gh api repos/$VAR/...` — compound disables `Bash(gh:*)` matching.
+- ✅ Correct: run `gh repo view --json nameWithOwner -q .nameWithOwner` as Bash call 1; observe the literal output (e.g. `owner/repo`); inline that literal into `gh api repos/owner/repo/...` as Bash call 2.
 
 Parallel-independent commands (e.g. `gh issue view ...` and `git status ...`) should be issued as **multiple Bash tool calls in a single message**, not chained with `&&`. Cleanup steps that need ordering should be issued as **separate sequential Bash tool calls**, not chained with `&&` or `;`.
 
