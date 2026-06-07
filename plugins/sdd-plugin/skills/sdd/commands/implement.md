@@ -189,6 +189,10 @@ Attempt to invoke `/code-review` via the Skill tool:
 
 **Graceful skip**: if the Skill tool reports `/code-review` is unavailable (e.g., Claude Code v2.1.146 or earlier, Skill disabled), log a warning and skip. Do NOT fail the round on this.
 
+Track outcome for the round-level tools summary (Step 5.1.4):
+- Tool invoked successfully → add `"code-review"` to this round's `tools_run`.
+- Tool unavailable → add `{"name": "code-review", "reason": "skill-unavailable"}` to this round's `tools_skipped`.
+
 If invoked successfully, after `/code-review` completes:
 - Read the PR comments via `gh api`:
   ```bash
@@ -216,6 +220,11 @@ Attempt to invoke `/security-review` via the Skill tool:
 
 **Shallow label skip**: if `sdd:review:shallow` label is set on the Issue, skip `/security-review` to keep cost low.
 
+Track outcome for the round-level tools summary (Step 5.1.4):
+- Tool invoked successfully → add `"security-review"` to this round's `tools_run`.
+- Tool unavailable → add `{"name": "security-review", "reason": "skill-unavailable"}` to this round's `tools_skipped`.
+- Skipped due to shallow label → add `{"name": "security-review", "reason": "shallow-label-skip"}` to this round's `tools_skipped`.
+
 After `/security-review` completes, read PR comments authored by the Skill:
 - Each finding has a severity tag (security categories — typically High / Medium / Low or similar).
 - Severity mapping:
@@ -227,7 +236,60 @@ After `/security-review` completes, read PR comments authored by the Skill:
 - Round = FAIL if ANY of these conditions: SDD reviewers FAILed, `/code-review` produced 🔴 Important, `/security-review` produced High or Medium.
 - Round = PASS only if ALL of these: all 3 SDD reviewers PASSed, `/code-review` found no Important, `/security-review` found no High/Medium.
 
-#### 5.1.4 — Round decision
+#### 5.1.4 — Post round-level tools summary comment
+
+Before the round decision, post a structured summary to the PR recording which external Skills ran or were skipped this round. This makes graceful-skip observable — downstream consumers (auditors, future automation) can tell apart "tool ran and found nothing" from "tool never ran".
+
+Build the comment body using the literal `tools_run` and `tools_skipped` arrays tracked in Steps 5.1.2 and 5.1.3. Marker: `<!-- sdd:review:implement:tools -->`.
+
+```
+<!-- sdd:review:implement:tools -->
+## SDD External Tools (round <N>)
+
+**Round:** <N>
+**/code-review:** ran | skipped (<reason>)
+**/security-review:** ran | skipped (<reason>)
+
+<!-- sdd:findings:json -->
+\`\`\`json
+{
+  "stage": "implement",
+  "role": "tools-summary",
+  "issue": $1,
+  "pr": <PR_NUM>,
+  "round": <N>,
+  "verdict": null,
+  "model": null,
+  "findings": [],
+  "suggestions": [],
+  "tools_run": ["code-review", "security-review"],
+  "tools_skipped": [{"name": "security-review", "reason": "shallow-label-skip"}]
+}
+\`\`\`
+<!-- /sdd:findings:json -->
+<!-- /sdd:review:implement:tools -->
+```
+
+(Replace `<N>` with the actual round number. The two example arrays show field shape only — emit the literal arrays tracked this round.)
+
+Use the Write tool to write the body to `/tmp/sdd-implement-tools-$1-round-<N>.md`, then duplicate-prevention post via `gh api`:
+
+```bash
+gh api repos/<owner>/<repo>/issues/<PR_NUM>/comments --jq '.[] | select(.body | contains("<!-- sdd:review:implement:tools -->")) | .id'
+```
+
+- If a comment id is returned → update in place:
+  ```bash
+  gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-implement-tools-$1-round-<N>.md
+  ```
+- Otherwise → create:
+  ```bash
+  gh pr comment <PR_NUM> --body-file /tmp/sdd-implement-tools-$1-round-<N>.md
+  ```
+
+This comment is informational; the round decision is unchanged by it.
+
+#### 5.1.5 — Round decision
 
 - Reviews passed → exit loop; proceed to Phase 6.
 - Reviews failed, round < 3 → build **structured retry feedback**:
@@ -251,9 +313,9 @@ Same structure with one change: spawn `implement_pr` in **retry mode** by passin
   > <inlined JSON array>
   > Return EXACTLY one line in the contract.
 
-Then proceed to 5.N.1 (same as 5.1.1), 5.N.2, 5.N.3, 5.N.4.
+Then proceed to 5.N.1 (same as 5.1.1), 5.N.2, 5.N.3, 5.N.4, 5.N.5.
 
-The review atoms re-diff the (now updated) PR and post fresh review comments via duplicate-prevention markers.
+The review atoms re-diff the (now updated) PR and post fresh review comments via duplicate-prevention markers. The 5.N.4 tools-summary comment is updated in place with this round's `tools_run` / `tools_skipped`.
 
 ## Phase 5.5: Round 3 Escalation Gate
 

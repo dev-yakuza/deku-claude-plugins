@@ -69,11 +69,12 @@ Every review atom embeds a JSON block inside its posted comment using the marker
 ```
 {
   "stage":        "analyze" | "design" | "implement" | "test" | "parent",
-  "role":         "completeness" | "quality" | "adversarial" | "step-<N>" | "parent-integration",
+  "role":         "completeness" | "quality" | "adversarial" | "step-<N>" | "parent-integration" | "tools-summary",
   "issue":        <number>,
   "pr":           <number> | null,
-  "verdict":      "PASS" | "FAIL",
-  "model":        "opus" | "sonnet" | "haiku",
+  "round":        <number> | null,
+  "verdict":      "PASS" | "FAIL" | null,
+  "model":        "opus" | "sonnet" | "haiku" | null,
   "findings": [
     {
       "severity":       "critical" | "major" | "minor",
@@ -86,9 +87,18 @@ Every review atom embeds a JSON block inside its posted comment using the marker
   ],
   "suggestions": [
     "<one-line suggestion>", ...
-  ]
+  ],
+  "tools_run":     ["<skill-name>", ...] | null,
+  "tools_skipped": [{"name": "<skill-name>", "reason": "skill-unavailable" | "shallow-label-skip" | "<other>"}] | null
 }
 ```
+
+**Role-specific field usage**:
+
+- `completeness` / `quality` / `adversarial` / `step-<N>` / `parent-integration` — use `verdict`, `model`, `findings`, `suggestions`. Omit (or `null`) `round`, `tools_run`, `tools_skipped`.
+- `tools-summary` — posted by `implement.md` Phase 5 (PR Final) per round. Use `round`, `tools_run`, `tools_skipped`. Set `verdict` and `model` to `null`. `findings` is empty `[]`.
+
+**Why `tools-summary` matters**: `/code-review` and `/security-review` Skills can be unavailable (older Claude Code version, plugin not installed) or intentionally skipped (`sdd:review:shallow` skips `/security-review`). The orchestrator's graceful-skip writes only a transient log. Without a structured marker on the PR, downstream consumers (auditors, future automation) cannot distinguish "tool ran, found nothing" from "tool never ran". Recording `tools_run` / `tools_skipped` makes graceful-skip observable.
 
 ### B.3 Verdict rules (per atom)
 

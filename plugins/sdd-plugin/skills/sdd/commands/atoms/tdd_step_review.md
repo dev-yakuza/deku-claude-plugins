@@ -26,6 +26,17 @@ Lightweight diff-only review between TDD steps (3-1 Red, 3-2 Green, 3-3 Refactor
    git show $4
    ```
 
+2a. **Read the test-evidence comment** posted by the work atom per `${CLAUDE_SKILL_DIR}/commands/atoms/_test_evidence.md`:
+
+   ```bash
+   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:test-evidence:step-$2 -->")) | .body'
+   ```
+
+   (Inline the literal `<owner>/<repo>` and `$2` value.)
+
+   - If the search returns empty AND `$4 != EMPTY` AND `$5 != NONE` → finding `[major] rule_id: test-evidence-log-missing` ("work atom did not post raw test runner output; reported counts are unverifiable"). Continue to step 3 — do not return early; other checks still apply.
+   - If the search returns a body → remember it as `<evidence-log>` for step 5a.
+
 3. Read the criteria: `${CLAUDE_SKILL_DIR}/commands/ai-review-implement-step.md`. Use the section matching `$2`:
    - `$2=1` → "Step 3-1: Red"
    - `$2=2` → "Step 3-2: Green"
@@ -39,7 +50,7 @@ Lightweight diff-only review between TDD steps (3-1 Red, 3-2 Green, 3-3 Refactor
    - **major**: Significant issue in this step that should be fixed before proceeding
    - **minor**: Improvement suggestion (does not block)
 
-5a. **Test-evidence consistency check** (uses `$5`). You cannot re-run tests in this atom — instead, verify the work atom's reported numbers are present and consistent with the step:
+5a. **Test-evidence consistency check** (uses `$5` and the `<evidence-log>` from step 2a). You cannot re-run tests in this atom — instead, verify the work atom's reported numbers are present, consistent with the step, and corroborated by the raw runner output:
 
    - If `$5 == "NONE"` and `$4 == "EMPTY"` → skip this check (refactor produced no diff, nothing to verify).
    - If `$5` is missing, empty, or not parseable as `TESTS: <int>/<int> FAILED: <int>` → finding `[major] rule_id: test-evidence-missing` ("work atom did not report test counts; cannot verify the step's test claim from the diff alone").
@@ -47,6 +58,14 @@ Lightweight diff-only review between TDD steps (3-1 Red, 3-2 Green, 3-3 Refactor
    - For `$2 ∈ {2, 3, 4}` (Green / Refactor / E2E): if `FAILED` is non-zero → finding `[critical] rule_id: tests-not-green` ("step claims pass but evidence shows N failures").
    - For `$2 == 3` (Refactor only): if the diff in `$4` does NOT touch any file under a test directory (no `*test*` / `*spec*` paths), but `TESTS: <p>/<t>` differs from the immediately preceding Green commit's reported counts → finding `[critical] rule_id: refactor-changed-test-counts` ("test count drift on a refactor that did not edit tests — behavior may have changed silently"). To check the prior Green counts, search Issue comments for the latest `<!-- sdd:review:implement:step-2 -->` block and parse the `Tests` field from its body. If unavailable, downgrade to `[major]`.
    - Sanity bound: if `<total>` is `0` and `$4 != "EMPTY"` → finding `[major] rule_id: zero-tests-executed` ("work atom reported zero tests executed despite committing changes").
+
+   **Raw-log cross-check** (applies only if `<evidence-log>` was found in step 2a; otherwise the `test-evidence-log-missing` finding from 2a already covers this gap):
+
+   - Inspect the fenced code block inside the test-evidence comment. Look for the runner's own summary line — formats vary by framework, common patterns include `Tests: <p> passed, <f> failed`, `<f> failed, <p> passed` (jest), `passed=<p> failed=<f>` (pytest summary), `<total> tests ... <failed> failures` (junit-style), `PASS`/`FAIL` lines per test file (vitest, mocha), `ok <n> - <name>` / `not ok <n>` (TAP), etc. Do not require a specific format — read the log and judge.
+   - **Count mismatch**: if you can identify a summary line and its numbers disagree with `$5` (e.g. `$5` says `42/42 FAILED: 0` but the log summary line shows `12 passed, 0 failed`) → finding `[critical] rule_id: test-evidence-mismatch` ("self-reported counts contradict raw log: reported <$5>, log shows <observed>"). Include the observed log line in the finding description.
+   - **Failure-line presence check (Red only)**: for `$2 == 1`, the log MUST contain at least one indicator that a test actually failed — an assertion error message, a `FAIL` marker, a stack trace, a `not ok` line, or equivalent. If none is present → finding `[critical] rule_id: red-log-shows-no-failure` ("Red step's evidence log contains no failure indicator").
+   - **Authenticity check**: if the evidence log is suspiciously short (under 200 characters), lacks any file path or test name, or lacks any framework-specific marker (test runner banner, timing line, framework name) → finding `[major] rule_id: test-evidence-implausible` ("evidence log lacks structural markers expected from a real test runner; counts cannot be corroborated"). Apply judgment: tiny test suites may legitimately produce short output, but they should still show at least one identifiable runner artifact.
+   - If you cannot identify a summary line in the log at all (despite the log being present and plausibly authentic) → finding `[minor] rule_id: test-evidence-summary-unparseable` ("could not locate a summary line in the runner output; counts assumed accurate"). Do not block on this — runners differ widely.
 
    Record any findings from this check in the same Issues array used by the step-specific criteria.
 

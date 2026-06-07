@@ -45,6 +45,8 @@ Each work atom begins with a `Step 0: Pre-flight context discovery` that reads p
 | `<!-- sdd:test:output -->` | Issue comment | Test results + QA checklist |
 | `<!-- sdd:review:<stage>:<role> -->` | Issue comment (or PR for implement / test single-child) | AI review per stage; `<stage>` ∈ {analyze, design, implement, test}, `<role>` ∈ {completeness, quality, adversarial} |
 | `<!-- sdd:review:implement:step-<n> -->` | Issue comment | TDD step review per step; `<n>` ∈ {1, 2, 3, 4} (Red/Green/Refactor/E2E) |
+| `<!-- sdd:test-evidence:step-<n> -->` | Issue comment | Raw test runner output captured by `implement_<step>` work atom; verified by `tdd_step_review` against the self-reported `TESTS: <p>/<t> FAILED: <f>` counts |
+| `<!-- sdd:review:implement:tools -->` | PR comment | Per-round summary of which external Skills (`/code-review`, `/security-review`) ran or were skipped during PR Final; posted by `implement.md` Phase 5 with duplicate-prevention |
 | `<!-- sdd:review:parent -->` | Issue comment (parent) | Cross-stage parent integration review (posted by `parent_integration_review.md`) |
 | `<!-- sdd:findings:json -->` | Inside any review comment | Structured findings JSON block (machine-parseable; schema in `commands/atoms/_review_helpers.md` Section B) |
 
