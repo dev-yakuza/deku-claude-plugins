@@ -49,8 +49,10 @@ Tips:
   - Round 3 review failure triggers a user gate even in skip-review mode
   - Per-Issue depth dials: `sdd:review:deep` (all Opus, /code-review max)
     or `sdd:review:shallow` (cheaper models, /code-review medium)
-  - /sdd implement automatically invokes /code-review at PR Final stage
-    if available (Claude Code v2.1.147+); skips gracefully otherwise
+  - /sdd implement automatically invokes /code-review + /security-review
+    at PR Final stage if available; skips gracefully otherwise
+  - /sdd test automatically invokes /verify (behavioral verification)
+    after AI review; complements manual QA
   - Batch processing options:
       /sdd auto   — runs in this session; full AI review fidelity;
                     stays on Interactive billing

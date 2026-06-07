@@ -207,9 +207,33 @@ If invoked successfully, after `/code-review` completes:
 - Combine into SDD verdict:
   - If `/code-review` produced 1+ Important → treat as a FAIL (in addition to any SDD FAIL)
   - If only Nit → no effect on verdict
-- **Verdict combination logic**: if EITHER SDD reviewers FAILed OR `/code-review` produced Important findings → round = FAIL. If all three SDD reviewers PASSed AND `/code-review` found no Important → round = PASS.
+- **Verdict combination logic** (with `/code-review` only): if EITHER SDD reviewers FAILed OR `/code-review` produced Important findings → round = FAIL. If all three SDD reviewers PASSed AND `/code-review` found no Important → round = PASS.
 
-#### 5.1.3 — Round decision
+#### 5.1.3 — Invoke `/security-review` (after `/code-review`)
+
+Same Skill tool invocation pattern as 5.1.2. Issue serially after `/code-review` completes.
+
+Attempt to invoke `/security-review` via the Skill tool:
+- No effort argument (the Skill runs with its own internal effort calibration).
+- Target: the current branch (the Skill auto-detects pending changes; if needed, pass `<PR_NUM>` explicitly).
+- Output: the Skill posts inline PR comments on lines where it identifies security issues, and a summary block.
+
+**Graceful skip**: if the Skill is unavailable, log a warning and proceed. Do NOT fail the round on this.
+
+**Shallow label skip**: if `sdd:review:shallow` label is set on the Issue, skip `/security-review` to keep cost low.
+
+After `/security-review` completes, read PR comments authored by the Skill:
+- Each finding has a severity tag (security categories — typically High / Medium / Low or similar).
+- Severity mapping:
+  - High security findings → counted as `critical`
+  - Medium → counted as `major`
+  - Low / informational → counted as `minor`
+
+**Verdict combination logic (final, with both Skills)**:
+- Round = FAIL if ANY of these conditions: SDD reviewers FAILed, `/code-review` produced 🔴 Important, `/security-review` produced High or Medium.
+- Round = PASS only if ALL of these: all 3 SDD reviewers PASSed, `/code-review` found no Important, `/security-review` found no High/Medium.
+
+#### 5.1.4 — Round decision
 
 - Reviews passed → exit loop; proceed to Phase 6.
 - Reviews failed, round < 3 → build **structured retry feedback**:
@@ -217,7 +241,8 @@ If invoked successfully, after `/code-review` completes:
   2. Extract `<!-- sdd:findings:json -->` JSON blocks from each SDD reviewer's comment.
   3. Combine findings arrays, filter to severity ∈ {critical, major}.
   4. Append `/code-review` Important findings (translated to JSON: `{severity: "critical", ...}` with `rule_id: "code-review-important"`).
-  5. Pass combined JSON array as `$3` to the next round's `implement_pr` atom in **retry mode**.
+  5. Append `/security-review` High and Medium findings (translated to JSON: `{severity: "critical" | "major", ...}` with `rule_id: "security-review-<category>"`).
+  6. Pass combined JSON array as `$3` to the next round's `implement_pr` atom in **retry mode**.
 - Reviews failed, round == 3 → exit loop. Proceed to **Phase 5.5 (escalation)**.
 
 ### Round 2 and Round 3 (retry)
@@ -231,7 +256,7 @@ Same structure with one change: spawn `implement_pr` in **retry mode** by passin
   > Previous round structured findings (address each item with new commits — do NOT force-push, do NOT amend): <inlined JSON array>
   > Return EXACTLY one line in the contract.
 
-Then proceed to 5.N.1 (same as 5.1.1), 5.N.2, 5.N.3.
+Then proceed to 5.N.1 (same as 5.1.1), 5.N.2, 5.N.3, 5.N.4.
 
 The review atoms re-diff the (now updated) PR and post fresh review comments via duplicate-prevention markers.
 

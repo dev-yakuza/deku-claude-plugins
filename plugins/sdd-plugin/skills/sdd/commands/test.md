@@ -138,7 +138,37 @@ Runs only if round 3 failed.
 
 1. Render summary to user.
 2. **Override skip-review** — ask regardless of skip-review setting:
-   - Continue to Phase 3 / Pause / Stop?
+   - Continue to Phase 2.7 / Pause / Stop?
+
+## Phase 2.7: Behavioral verification (`/verify` Skill)
+
+Runs **only on single/child path** (parent path uses children's verify results indirectly through E2E integration PR).
+
+Skip if `sdd:review:shallow` label is set on the Issue (low-confidence runs).
+
+Invoke the `/verify` Skill via the Skill tool to **launch the project's app and observe behavior** for the implemented feature. This complements the AI review (which checks code) and the manual QA (which checks user perception) — `/verify` answers "does the app actually run and behave as expected?"
+
+**Graceful skip**: if the `/verify` Skill is unavailable (Claude Code v2.1.145 or earlier, Skill disabled, no app-launch capability detected for the project type), log a warning and proceed to Phase 3 without behavioral verification.
+
+After `/verify` returns:
+- Parse its output (transcript-based; the Skill reports what it observed).
+- Map to SDD verdict:
+  - "feature works as expected" → record as PASS evidence for Phase 3
+  - "feature does not work" or "crash/error observed" → record as FAIL evidence; surface in Phase 3 user context
+
+This phase **does not block** Phase 3 by itself — manual QA (or `skip-review: qa` auto-approval) decides final outcome. `/verify`'s result is *additional context* for that decision.
+
+Record the verify outcome for the test output comment's self-review trace (Section F of `_preflight.md`):
+
+```markdown
+- [x] /verify ran: feature launches and matches description
+```
+
+or
+
+```markdown
+- [ ] /verify reported: error on login screen — see transcript
+```
 
 ## Phase 3: User Review + Manual QA
 
@@ -150,6 +180,7 @@ Present to the user:
 - Test work atom's result (which path, PR numbers, integration PR if any)
 - Review verdicts (PASS/FAIL with summaries)
 - For parent path: parent_integration_review's summary, particularly any cross-stage gaps it surfaced
+- **Behavioral verification result from Phase 2.7** (if `/verify` ran): whether the app actually launched and the feature worked
 - Link to the Issue's test output comment for the full QA checklist
 
 If the work atom flagged "E2E was skipped in Stage 3" for single/child path → ask the user whether to add E2E tests now (push to the PR branch) or proceed without.
