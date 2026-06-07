@@ -17,6 +17,18 @@ Produces the test plan + implementation plan for SDD Stage 3, posts it to the Is
 
 ## Work
 
+### Step 0: Pre-flight context discovery
+
+(implement_plan has no retry mode; always run.)
+
+Follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Heavy** tier. Execute Section B items 1 + 2 + 3 + 4 (project conventions + commit message style + similar past PRs + target directory survey).
+
+The target directory for item 4 comes from the design output's File Structure section.
+
+Apply Section D failure handling. Record findings for the Section F self-review trace.
+
+### Main work (numbered steps below)
+
 1. Resolve owner/repo and read context:
    ```bash
    gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
@@ -37,11 +49,17 @@ Produces the test plan + implementation plan for SDD Stage 3, posts it to the Is
    ```
    - If the branch already exists from a prior implement attempt, check it out instead of creating (`git checkout <branch-name>`). The TDD atom will continue from existing state.
 
-4. Write the **test plan** for this PR. Classify each test case by behavioral path:
+4. Write the **test plan** for this PR. **Reference design's Testability section** (from `<!-- sdd:design:output -->` comment) — extract mock/stub strategies and hard-to-test concerns. Do NOT re-derive them; design decided them already.
+
+   Your test plan elaborates: which test paths cover each strategy. Classify each test case by behavioral path:
    - **Happy path**: Normal expected flows
    - **Error path**: Invalid input, failure scenarios, error handling
    - **Boundary conditions**: Edge values, empty/null, limits, overflow
    - **Concurrent/State**: Race conditions, state transitions (if applicable)
+
+   **If design's Testability section = `N/A`**: write the test plan without mocking — the PR has no external dependencies to isolate.
+
+   **If design's Testability section has 1+ entries**: each entry's mock/stub strategy must appear in the test plan's setup section (e.g., "Mock the Clock injection point per design row 1").
 
 5. Write the **implementation plan** based on the test plan. Outline:
    - Which files to add/modify (consistent with design's File Structure section)

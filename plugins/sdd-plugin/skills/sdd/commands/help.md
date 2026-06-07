@@ -36,6 +36,10 @@ Workflow:
 Tips:
   - Each stage decomposes into work + parallel review atoms; main session
     stays small so /sdd auto can handle many Issues in one session
+  - Each work atom runs Step 0 pre-flight context discovery first
+    (CLAUDE.md, git log, similar PRs, target dir) — shift-left prevention
+  - Design's Testability section drives implement's test plan (no
+    re-derivation; mock strategies inherited from design)
   - 3 reviewer lenses per full stage: completeness, quality, adversarial
   - TDD steps (Red/Green/Refactor/E2E) each get their own lightweight
     review atom for early bug detection

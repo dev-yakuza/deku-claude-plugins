@@ -23,6 +23,20 @@ gh api repos/<owner>/<repo>/issues/$1/comments \
 
 For Parent Issue path, also verify all children are `sdd:done` before running (read child numbers from the children comment, check each child's labels). If any child is not done → return `FAIL: parent has incomplete children: #X, #Y, ...`.
 
+## Step 0: Pre-flight context discovery (both paths)
+
+If `$2` (retry feedback) is provided → **skip this step entirely**.
+
+Otherwise, follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Light** tier. Execute Section B items 1 + 2 (project conventions + commit message style).
+
+For `test_work` specifically: item 1's convention reading should pay attention to **testing conventions** (test framework, test directory layout, assertion style).
+
+Apply Section D failure handling. Record findings for the Section F self-review trace.
+
+After Step 0, proceed to the path-specific work below (Single/Child or Parent).
+
+---
+
 ## Work — Single/Child Issue path
 
 E2E tests were already written in Stage 3 (implement) and included in the PR. This path validates them and produces a QA checklist.

@@ -19,6 +19,18 @@ Executes TDD step 3-1: write failing test(s) for the next implementation increme
 
 ## Work
 
+### Step 0: Pre-flight context discovery
+
+If `$3` (retry feedback) is provided → **skip this step entirely**.
+
+Otherwise, follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Code-focused** tier. Execute Section B item 4 only (target directory survey).
+
+For Red specifically: the target dir comes from the design's File Structure (test files). Focus the directory read on existing test patterns — fixtures, assertion style, mock setup.
+
+Apply Section D failure handling. Record findings for the Section F self-review trace.
+
+### Main work (numbered steps below)
+
 1. Resolve owner/repo + verify branch:
    ```bash
    gh repo view --json nameWithOwner -q .nameWithOwner    # observe owner/repo

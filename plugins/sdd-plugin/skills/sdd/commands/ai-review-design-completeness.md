@@ -11,6 +11,8 @@
 - [ ] Constraints and risks are identified with mitigation strategies
 - [ ] PR split is logical and each PR is independently deliverable
 - [ ] Architecture decisions are consistent with existing codebase patterns
+- [ ] **Testability section is present**: either `N/A (no external dependencies)` or a complete table covering each external dependency
+- [ ] If `N/A`, verify by Read/Grep that the PR truly has no external dependencies (DB, network, time, randomness, file I/O, env, external services, browser APIs); flag false `N/A` as **critical**
 
 ## Cross-stage Check (analyze → design)
 - Are all features and requirements from analyze reflected in the design?

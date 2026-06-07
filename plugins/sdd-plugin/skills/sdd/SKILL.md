@@ -27,6 +27,9 @@ Read `${CLAUDE_SKILL_DIR}/commands/$0.md` and execute. Pass `$1` as issue number
 1. analyze (What/Why) → 2. design (How) → 3. implement (TDD) → 4. test (E2E/QA) → done
 ```
 
+### Pre-flight Context Discovery (Step 0 of work atoms)
+Each work atom begins with a `Step 0: Pre-flight context discovery` that reads project conventions (CLAUDE.md/AGENTS.md/README.md), commit message style (`git log`), and — for some tiers — similar past PRs and target directory contents. See `commands/atoms/_preflight.md` for the authoritative tier table, items, budgets, failure handling, and retry behavior. Step 0 is **skipped on retry rounds** (when `$2` or `$3` is provided).
+
 ### Labels
 `sdd:analyze` → `sdd:design` → `sdd:implement` → `sdd:test` → `sdd:done` | `sdd:child` (child Issue)
 
