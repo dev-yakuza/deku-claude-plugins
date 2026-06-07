@@ -119,7 +119,7 @@ Parse all (3 or 4) `>>> RESULT <<<` lines:
 - Reviews failed, round < 3 → build **structured retry feedback**:
   1. Fetch review comments from the Issue and (for single/child path) the PR.
   2. Extract `<!-- sdd:findings:json -->` JSON blocks from each FAILed reviewer.
-  3. Combine findings, filter to severity ∈ {critical, major}.
+  3. Combine findings, **keep all severities**, sort `critical → major → minor` (per `_review_helpers.md` Section C.1).
   4. Pass combined JSON array as `$2` in the next round's work atom prompt.
 - Reviews failed, round == 3 → exit loop → **Phase 2.5 (escalation)**.
 
@@ -129,7 +129,8 @@ Same as Round 1 Steps 2.1.1–2.1.3, with structured retry feedback as `$2`:
 
 - `prompt`:
   > Read `${CLAUDE_SKILL_DIR}/commands/atoms/test_work.md` and execute its instructions for Issue #$1.
-  > Previous round structured findings (address each item): <inlined JSON array>
+  > Previous round structured findings — sorted by severity (critical → major → minor). Address every critical and major finding; read minor findings as supporting context (often the specific test/file/line a higher-severity finding referenced abstractly). Do not skip minor findings tied to the same area.
+  > <inlined JSON array>
   > Return EXACTLY one line in the contract.
 
 ## Phase 2.5: Round 3 Escalation Gate

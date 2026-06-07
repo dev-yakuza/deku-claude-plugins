@@ -92,26 +92,25 @@ Up to **2 retries per step**. Each iteration:
    - `description`: `implement step-X for #$1`
    - `prompt`:
      > Read `${CLAUDE_SKILL_DIR}/commands/atoms/implement_<step>.md` and execute its instructions for Issue #$1 on branch `<branch-name>`.
-     > <if retry: include `Previous step review findings (address each item): <inlined JSON array>`>
+     > <if retry: include `Previous step review findings — sorted by severity (critical → major → minor). Address every critical and major finding; read minor findings as supporting context. Do not skip minor findings tied to the same area: <inlined JSON array>`>
      > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
    Where `<step>` is one of: `red`, `green`, `refactor`, `e2e`.
 
    Parse the return:
    - `FAIL: <reason>` → report failure, stop.
-   - `OK <STEP_TYPE> COMMIT: <sha>` (or `OK REFACTOR EMPTY` or `OK E2E_SKIPPED`) → continue to step 2.
-
-   Remember the commit sha (or `EMPTY` for refactor-empty, or skip step review for E2E_SKIPPED).
+   - `OK <STEP_TYPE> COMMIT: <sha> TESTS: <p>/<t> FAILED: <f>` → continue to step 2. Remember `<sha>` and the substring `TESTS: <p>/<t> FAILED: <f>` (call this `<test-evidence>`).
+   - `OK REFACTOR EMPTY` → continue to step 2. `<sha>` = `EMPTY`, `<test-evidence>` = `NONE`.
+   - `OK E2E_SKIPPED` → skip step 2 entirely (nothing committed, nothing to review).
 
 2. **Spawn tdd_step_review**:
    - `subagent_type`: `general-purpose`
    - `model`: per Phase 0 table for this step
    - `description`: `tdd step-X review for #$1`
    - `prompt`:
-     > Read `${CLAUDE_SKILL_DIR}/commands/atoms/tdd_step_review.md` and execute its instructions for Issue #$1, step X, branch `<branch-name>`, commit `<sha>` (or `EMPTY`).
+     > Read `${CLAUDE_SKILL_DIR}/commands/atoms/tdd_step_review.md` and execute its instructions for Issue #$1, step X, branch `<branch-name>`, commit `<sha>` (or `EMPTY`), test evidence `<test-evidence>` (or `NONE`).
      > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
-   For E2E_SKIPPED: skip the step review (nothing to evaluate).
 
    Parse:
    - `FAIL: <reason>` (atom error) → report, stop.
@@ -239,9 +238,9 @@ After `/security-review` completes, read PR comments authored by the Skill:
 - Reviews failed, round < 3 → build **structured retry feedback**:
   1. Fetch review comments from the PR.
   2. Extract `<!-- sdd:findings:json -->` JSON blocks from each SDD reviewer's comment.
-  3. Combine findings arrays, filter to severity ∈ {critical, major}.
-  4. Append `/code-review` Important findings (translated to JSON: `{severity: "critical", ...}` with `rule_id: "code-review-important"`).
-  5. Append `/security-review` High and Medium findings (translated to JSON: `{severity: "critical" | "major", ...}` with `rule_id: "security-review-<category>"`).
+  3. Combine findings arrays, **keep all severities**, sort `critical → major → minor` (per `_review_helpers.md` Section C.1).
+  4. Append `/code-review` Important findings (translated to JSON: `{severity: "critical", ...}` with `rule_id: "code-review-important"`). Also append Nit findings as `{severity: "minor", ...}` so the work atom has the specific call-out lines as context.
+  5. Append `/security-review` High and Medium findings (translated to JSON: `{severity: "critical" | "major", ...}` with `rule_id: "security-review-<category>"`). Also append Low/informational findings as `{severity: "minor", ...}`.
   6. Pass combined JSON array as `$3` to the next round's `implement_pr` atom in **retry mode**.
 - Reviews failed, round == 3 → exit loop. Proceed to **Phase 5.5 (escalation)**.
 
@@ -253,7 +252,8 @@ Same structure with one change: spawn `implement_pr` in **retry mode** by passin
 
 - `prompt`:
   > Read `${CLAUDE_SKILL_DIR}/commands/atoms/implement_pr.md` and execute its instructions for Issue #$1 on branch `<branch-name>` in retry mode.
-  > Previous round structured findings (address each item with new commits — do NOT force-push, do NOT amend): <inlined JSON array>
+  > Previous round structured findings — sorted by severity (critical → major → minor). Address every critical and major finding with new commits (do NOT force-push, do NOT amend). Read minor findings as supporting context (often the specific file/line/symbol a higher-severity finding referenced abstractly).
+  > <inlined JSON array>
   > Return EXACTLY one line in the contract.
 
 Then proceed to 5.N.1 (same as 5.1.1), 5.N.2, 5.N.3, 5.N.4.

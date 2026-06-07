@@ -92,7 +92,7 @@ The similar past PRs (item 3) inform: file organization patterns, naming convent
 
     *Quality, completeness, risk evaluation are NOT done here — Agent reviewers' job.*
 
-13. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B). Parse it and address each finding individually. Mention how each was resolved in the design.
+13. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B), sorted `critical → major → minor` (Section C.1). Parse it and address every `critical` and `major` finding individually. Read `minor` findings as supporting context — they often pinpoint the specific design row, file path, or symbol that a higher-severity finding only described abstractly. Mention in the design how each `critical`/`major` finding was resolved.
 
 14. **Append self-review trace** to the design output. Inside the `<!-- sdd:design:output -->` block, before the closing marker, embed:
 

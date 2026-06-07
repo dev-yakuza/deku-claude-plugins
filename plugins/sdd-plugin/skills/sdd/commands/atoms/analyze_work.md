@@ -63,7 +63,7 @@ Otherwise, follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A f
 
    *Quality, completeness, risk evaluation are NOT done here — they are the Agent reviewers' job. Keep self-review minimal.*
 
-10. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B). Parse it and address each finding individually. Mention in the output how each finding was resolved (or why it cannot be).
+10. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B), sorted `critical → major → minor` (Section C.1). Parse it and address every `critical` and `major` finding individually. Read `minor` findings as supporting context — they often pinpoint the specific wording or section that a higher-severity finding only described abstractly; do not skip them when they reference the same area you are revising. Mention in the output how each `critical`/`major` finding was resolved (or why it cannot be).
 
 11. **Append self-review trace** to the output. Inside the same `<!-- sdd:analyze:output -->` block, before the closing marker, embed:
 

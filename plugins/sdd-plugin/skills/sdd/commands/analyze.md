@@ -93,7 +93,7 @@ Parse all three `>>> RESULT <<<` lines:
 - If reviews failed and round < 3 → build **structured retry feedback** per `_review_helpers.md` Section C:
   1. Fetch the latest review comments from the Issue (`gh api .../comments`)
   2. Extract the `<!-- sdd:findings:json -->` JSON block from each FAILed reviewer's comment
-  3. Combine the `findings` arrays, filter to severity ∈ {critical, major}
+  3. Combine the `findings` arrays, **keep all severities**, sort `critical → major → minor` (per `_review_helpers.md` Section C.1)
   4. Pass the combined JSON array as `$2` in the next round's work atom prompt
 - If reviews failed and round == 3 → exit the loop. Proceed to **Phase 1.5 (Escalation gate)**.
 
@@ -103,7 +103,8 @@ Same as Round 1 Steps 1.1–1.3, but the work atom's prompt **must include the s
 
 - `prompt`:
   > Read `${CLAUDE_SKILL_DIR}/commands/atoms/analyze_work.md` and execute its instructions for Issue #$1.
-  > Previous round structured findings (address each item): <inlined JSON array>
+  > Previous round structured findings — sorted by severity (critical → major → minor). Address every critical and major finding; read minor findings as supporting context (often the specific line/symbol a higher-severity finding referenced abstractly). Do not skip minor findings tied to the same area.
+  > <inlined JSON array>
   > Return EXACTLY one line in the contract specified by that file.
 
 The review atom prompts are unchanged between rounds — reviewers always evaluate the **current** analyze output on the Issue.

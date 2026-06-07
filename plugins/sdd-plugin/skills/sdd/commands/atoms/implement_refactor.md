@@ -49,6 +49,15 @@ Apply Section D failure handling. Record findings for the Section F self-review 
 
 4. Run tests → **confirm still passing** (Green retained). If any test fails, the refactor changed behavior; back out and try again or accept the test change as a separate decision.
 
+   Capture from the test runner output:
+   - `<passed>` — number of passing tests
+   - `<failed>` — number of failing tests (MUST be 0 to keep Green)
+   - `<total>` — total tests executed
+
+   `<passed>` and `<total>` MUST match the values reported by the prior `implement_green` step. A change in `<total>` (without a corresponding test-file edit in this refactor's diff) signals that tests were silently added/removed — fix before committing.
+
+   These numbers are reported in the return contract (step 7) and used by `tdd_step_review` to verify the refactor preserved behavior.
+
 5. If `$3` (retry feedback) is provided: address each finding.
 
 6. **Self-review (blockers only)**:
@@ -75,7 +84,7 @@ Apply Section D failure handling. Record findings for the Section F self-review 
 
 ```
 >>> RESULT <<<
-OK REFACTOR COMMIT: <sha>
+OK REFACTOR COMMIT: <sha> TESTS: <passed>/<total> FAILED: 0
 ```
 or
 ```
@@ -88,8 +97,8 @@ or
 FAIL: <one-line reason>
 ```
 
-- `OK REFACTOR COMMIT: <sha>` — refactor applied and committed.
-- `OK REFACTOR EMPTY` — no refactor needed (code was already clean).
+- `OK REFACTOR COMMIT: <sha> TESTS: <p>/<t> FAILED: 0` — refactor applied and committed; tests still passing with the same `<p>`/`<t>` as the prior Green step. `FAILED` MUST be `0`. The orchestrator forwards this evidence to `tdd_step_review` so the reviewer can verify behavior was preserved without re-running tests.
+- `OK REFACTOR EMPTY` — no refactor needed (code was already clean). No test evidence required.
 - `FAIL: <reason>` — could not complete (e.g., refactor broke tests and couldn't be salvaged).
 
 ## Hard rules

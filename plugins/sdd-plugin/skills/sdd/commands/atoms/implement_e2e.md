@@ -49,6 +49,11 @@ Apply Section D failure handling. Record findings for the Section F self-review 
    - Write E2E tests for the implemented feature, following existing patterns and naming.
    - Match the existing E2E test framework's conventions (page objects, fixtures, etc.).
    - Run the E2E tests → **confirm pass**.
+   - Capture from the E2E runner output:
+     - `<passed>` — number of passing E2E tests
+     - `<failed>` — number of failing E2E tests (MUST be 0)
+     - `<total>` — total E2E tests executed
+     These numbers are reported in the return contract and used by `tdd_step_review` to verify the E2E claim.
 
    ### 3b. If no E2E setup exists
    - Skip E2E entirely. Note this for the result return.
@@ -74,7 +79,7 @@ Apply Section D failure handling. Record findings for the Section F self-review 
 
 ```
 >>> RESULT <<<
-OK E2E COMMIT: <sha>
+OK E2E COMMIT: <sha> TESTS: <passed>/<total> FAILED: 0
 ```
 or
 ```
@@ -87,8 +92,8 @@ or
 FAIL: <one-line reason>
 ```
 
-- `OK E2E COMMIT: <sha>` — E2E written and committed.
-- `OK E2E_SKIPPED` — no E2E setup in the repo; flagged for `/sdd test`.
+- `OK E2E COMMIT: <sha> TESTS: <p>/<t> FAILED: 0` — E2E written and committed; E2E suite passing. `FAILED` MUST be `0`. The orchestrator forwards this evidence to `tdd_step_review`.
+- `OK E2E_SKIPPED` — no E2E setup in the repo; flagged for `/sdd test`. No test evidence required.
 - `FAIL: <reason>` — could not complete.
 
 ## Hard rules

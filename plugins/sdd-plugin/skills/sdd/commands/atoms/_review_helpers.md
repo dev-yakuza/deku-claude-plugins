@@ -118,7 +118,7 @@ When an orchestrator retries a work atom after a failed review round, it passes 
 
 1. Collect the parsed JSON objects from all review atoms in the failed round (Section B.4).
 2. Concatenate the `findings` arrays from each (preserve all fields).
-3. Filter: keep only entries with `severity == "critical"` or `severity == "major"`.
+3. **Keep all severities** — do NOT drop `minor`. `minor` findings frequently carry the specifics (variable names, file lines, suggestive wording) that make a `critical` or `major` finding actionable. Sort the combined array by severity: `critical` first, then `major`, then `minor`. Stable order within each group.
 4. Serialize the combined array as compact JSON.
 
 ### C.2 Pass to work atom
@@ -126,11 +126,15 @@ When an orchestrator retries a work atom after a failed review round, it passes 
 In the work atom Agent prompt, include:
 
 ```
-Previous round structured findings (address each item):
+Previous round structured findings — sorted by severity (critical → major → minor).
+Address every critical and major finding. Read minor findings as context that may
+clarify what to change; do not skip them when they cite specific lines/symbols
+referenced by a higher-severity finding.
+
 <inlined JSON array>
 ```
 
-The work atom parses this JSON and addresses each finding individually before posting its next output.
+The work atom parses this JSON and addresses critical/major findings individually before posting its next output, using the minor entries as supporting context.
 
 ---
 
