@@ -132,7 +132,7 @@ Apply Section D failure handling. Record findings for the Section F self-review 
    gh pr diff <PR_NUM>
    ```
 
-4. Parse `$3` (JSON array of findings) per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B.
+4. Parse `$3` (JSON array of findings) per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B. Per Section C.1, `$3` now contains all severities sorted `critical → major → minor`.
 
 5. For each `critical` or `major` finding in `$3`:
    - **Decide the fix kind**:
@@ -141,6 +141,7 @@ Apply Section D failure handling. Record findings for the Section F self-review 
      - Test defect → modify the existing test
      - Refactoring nit → adjust the implementation
    - **Apply the fix** and run all tests → confirm pass.
+   - **Use the `minor` entries as context**: if a `minor` finding cites the same `file`/`line`/`rule_id` as the critical/major you are fixing, read its `description` and `fix_suggestion` — they often pinpoint the exact line or symbol the higher-severity finding only referenced abstractly. Do not skip `minor` findings; just don't promote them to standalone fixes unless trivial to address while in the same file.
 
 6. **Commit** fix-up changes (**do NOT amend; do NOT force-push**):
    ```bash

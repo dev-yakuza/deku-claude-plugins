@@ -6,9 +6,10 @@ Used by `tdd_step_review.md` atom. Step-specific section below is selected by th
 
 ## Common rules
 
-- Input: the git diff produced by the corresponding TDD step (single-step delta from a fresh branch).
+- Input: the git diff produced by the corresponding TDD step (single-step delta from a fresh branch), plus the work atom's reported test evidence (`$5` of `tdd_step_review`).
 - Scope: this step's diff only — do NOT re-review prior steps' diffs.
 - Goal: catch obvious step-specific issues before the next step compounds the mistake.
+- **You cannot run tests.** Wherever a checklist below says "tests pass" or "tests fail", read it as "the work atom's reported `TESTS: <p>/<t> FAILED: <f>` evidence is consistent with the step." The evidence-consistency check in `tdd_step_review.md` step 5a is the authoritative gate; this rubric is the diff-level companion.
 
 ---
 
@@ -18,7 +19,7 @@ Used by `tdd_step_review.md` atom. Step-specific section below is selected by th
 - [ ] Tests cover main scenarios from the implementation plan
 - [ ] Tests cover edge cases identified in the design (boundary, error, concurrent)
 - [ ] Test assertions are specific and meaningful (not just "no throw")
-- [ ] Tests actually fail when run (the Red state was verified)
+- [ ] Reported evidence shows `FAILED ≥ 1` (the Red state was verified by the work atom)
 - [ ] Test names communicate the scenario clearly
 
 ### Common failure modes to flag
@@ -39,7 +40,7 @@ Used by `tdd_step_review.md` atom. Step-specific section below is selected by th
 ### Checklist
 - [ ] Implementation is **minimal** — only what's needed to pass the tests
 - [ ] Code follows existing patterns
-- [ ] All tests pass (Green state verified)
+- [ ] Reported evidence shows `FAILED: 0` (Green state verified by the work atom)
 - [ ] No new debug artifacts (console.log, dbg!, print)
 
 ### Common failure modes
@@ -60,7 +61,7 @@ Used by `tdd_step_review.md` atom. Step-specific section below is selected by th
 - [ ] Duplication removed
 - [ ] Readability improved (clearer naming, simpler structure)
 - [ ] No unnecessary code, comments, or debug artifacts remain
-- [ ] All tests still pass
+- [ ] Reported evidence shows `FAILED: 0` AND `<p>/<t>` matches the prior Green step's counts (no silent test count drift)
 
 ### Common failure modes
 - Refactor changes behavior (tests still pass but feature subtly differs)
@@ -79,7 +80,7 @@ Used by `tdd_step_review.md` atom. Step-specific section below is selected by th
 ### Checklist
 - [ ] E2E tests cover the key user flows for this feature
 - [ ] E2E tests follow existing test framework patterns and directory structure
-- [ ] E2E tests pass successfully
+- [ ] Reported evidence shows `FAILED: 0` for the E2E suite (work atom verified)
 - [ ] No flakiness markers (retry: 3, etc.) added to mask flaky tests
 
 ### Common failure modes

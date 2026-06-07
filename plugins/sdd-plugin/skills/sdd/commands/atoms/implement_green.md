@@ -55,6 +55,13 @@ Apply Section D failure handling. Record findings for the Section F self-review 
 
 5. Run tests → **confirm pass** (Green state). All tests must pass; if regressions occur in pre-existing tests, fix them before continuing.
 
+   Capture from the test runner output:
+   - `<passed>` — number of passing tests (MUST equal total for Green)
+   - `<failed>` — number of failing tests (MUST be 0 for Green)
+   - `<total>` — total tests executed
+
+   These numbers are reported in the return contract (step 8) and used by `tdd_step_review` to verify the Green claim. If the runner's output format makes any of these unobtainable, use `0` for that field — the reviewer will flag the missing evidence.
+
 6. If `$3` (retry feedback) is provided: address each finding. Parse `$3` as JSON.
 
 7. **Self-review (blockers only)**:
@@ -75,13 +82,16 @@ Apply Section D failure handling. Record findings for the Section F self-review 
 
 ```
 >>> RESULT <<<
-OK GREEN COMMIT: <sha>
+OK GREEN COMMIT: <sha> TESTS: <passed>/<total> FAILED: 0
 ```
 or
 ```
 >>> RESULT <<<
 FAIL: <one-line reason>
 ```
+
+- `OK GREEN COMMIT: <sha> TESTS: <p>/<t> FAILED: 0` — minimal implementation committed, tests now passing. Inline the literal commit sha and observed counts. `FAILED` MUST be `0`. The orchestrator forwards this evidence to `tdd_step_review` so the reviewer can verify the Green claim it cannot re-run tests for.
+- `FAIL: <reason>` — could not complete.
 
 ## Hard rules
 

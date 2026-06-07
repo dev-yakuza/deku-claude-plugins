@@ -54,6 +54,13 @@ Apply Section D failure handling. Record findings for the Section F self-review 
 
 5. Run the test command (auto-detect from repo: `npm test`, `flutter test`, `pytest`, `cargo test`, `go test`, etc.) → **confirm tests fail** (Red state). Inspect output to confirm the failures are for the **right reasons** (assertion failures, not import errors).
 
+   Capture from the test runner output:
+   - `<passed>` — number of passing tests
+   - `<failed>` — number of failing tests (MUST be ≥ 1 for Red)
+   - `<total>` — total tests executed (= passed + failed + skipped if any)
+
+   These numbers are reported in the return contract (step 8) and used by `tdd_step_review` to verify the Red claim. If the runner's output format makes any of these unobtainable, use `0` for that field — the reviewer will flag the missing evidence.
+
 6. If `$3` (retry feedback) is provided: address each finding before proceeding. Parse `$3` as JSON per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B.
 
 7. **Self-review (blockers only)**:
@@ -73,7 +80,7 @@ Apply Section D failure handling. Record findings for the Section F self-review 
 
 ```
 >>> RESULT <<<
-OK RED COMMIT: <sha>
+OK RED COMMIT: <sha> TESTS: <passed>/<total> FAILED: <failed>
 ```
 or
 ```
@@ -81,7 +88,7 @@ or
 FAIL: <one-line reason, max 200 chars, no newlines>
 ```
 
-- `OK RED COMMIT: <sha>` — failing tests committed; ready for `implement_green`. Inline the literal commit sha from `git rev-parse HEAD`.
+- `OK RED COMMIT: <sha> TESTS: <p>/<t> FAILED: <f>` — failing tests committed; ready for `implement_green`. Inline the literal commit sha from `git rev-parse HEAD`. `<f>` MUST be ≥ 1 (Red state). The orchestrator forwards this evidence to `tdd_step_review` so the reviewer can verify the Red claim it cannot re-run tests for.
 - `FAIL: <reason>` — could not complete.
 
 ## Hard rules
