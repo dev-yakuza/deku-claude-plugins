@@ -19,6 +19,18 @@ Executes TDD step 3-2: write minimal production code to make the failing tests p
 
 ## Work
 
+### Step 0: Pre-flight context discovery
+
+If `$3` (retry feedback) is provided → **skip this step entirely**.
+
+Otherwise, follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Code-focused** tier. Execute Section B item 4 only (target directory survey).
+
+For Green specifically: focus the directory read on existing implementation patterns — error handling style, import conventions, naming.
+
+Apply Section D failure handling. Record findings for the Section F self-review trace.
+
+### Main work (numbered steps below)
+
 1. Verify branch and Red state:
    ```bash
    git rev-parse --abbrev-ref HEAD

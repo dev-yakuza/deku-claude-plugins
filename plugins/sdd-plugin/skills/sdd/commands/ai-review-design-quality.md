@@ -31,6 +31,11 @@
 - Implicit coupling that will hurt later (shared mutable state, circular deps)
 - Premature abstractions (interfaces for things with single implementation)
 
+### Testability quality
+- Mock/stub strategies are realistic — the proposed injection point should actually exist in the codebase. Use Read/Grep to verify the cited DI/seam point.
+- Hard-to-test concerns (timing, randomness, async) are addressed in the design — not deferred with "we'll figure out testing later".
+- If Testability is marked `N/A`, verify the PR genuinely has no external dependencies. Hidden dependencies (e.g., a util that calls `Date.now()` internally) should be surfaced as **major**.
+
 ## Codebase verification
 Use Read/Grep (Section D of `_review_helpers.md`) to confirm pattern claims. If the design says "follow the existing X pattern", verify the existing X pattern by reading it.
 

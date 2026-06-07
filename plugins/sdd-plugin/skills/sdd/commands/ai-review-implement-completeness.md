@@ -18,6 +18,10 @@
 - Are the planned changes fully implemented as designed?
 - Did any design item get silently dropped or changed in implementation?
 - Did the implementation introduce changes that were NOT in the design? If so, are they justified?
+- **Testability adherence**: Does the implementation follow design's Testability section?
+  - For each row in design's Testability table: verify the implementation uses the same mock/stub strategy.
+  - If design specified `mock the Clock`, the test code should mock it — no real `Date.now()` calls in the test path.
+  - If design's Testability = `N/A`, verify the PR does not introduce hidden external dependencies (time/network/IO/random) that should have been declared.
 
 ## Codebase verification
 Use Read/Grep (Section D of `_review_helpers.md`) on:

@@ -17,6 +17,16 @@ Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub
 
 ## Work
 
+### Step 0: Pre-flight context discovery
+
+If retry mode (`$2` provided) → **skip this step entirely**.
+
+Otherwise, follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Medium** tier. Execute Section B items 1 + 2 + 3 (project conventions + commit message style + similar past PRs via `gh pr list --search`). Apply Section D failure handling. Record findings for the Section F self-review trace.
+
+The similar past PRs (item 3) inform: file organization patterns, naming conventions, architectural choices in this codebase. Use the discovered patterns to guide steps 4–9 below.
+
+### Main work (numbered steps below)
+
 1. Resolve owner/repo:
    ```bash
    gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
@@ -51,6 +61,19 @@ Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub
 7. Design data model changes if applicable.
 
 8. Identify constraints and risks with mitigations.
+
+8.5. **Testability constraints** (new — informs design decisions before PR split):
+
+    a. **List external dependencies** in this PR's scope. Examples: DB, network, time, randomness, file I/O, environment variables, external services, browser APIs.
+
+    b. **If 0 external dependencies** → Testability section in the design output will be `N/A (no external dependencies in scope)`. Skip to step 9.
+
+    c. **If 1+ external dependencies** → for each, design:
+       - **Mock/stub strategy** — how will tests isolate this dependency?
+       - **Injection/seam point** — verify it exists (use Read/Grep to confirm the codebase has the DI hook). If absent, the design must introduce one (add to the File Structure section as a Modify/Add).
+       - **Hard-to-test concerns** — timing, randomness, async ordering. Note how the design accommodates them.
+
+    d. Testability decisions made here **must influence** the file structure (step 6) and constraints (step 8). If a dependency forces a new seam, update step 6's file list.
 
 9. Create the feature list with PR split. **Determine if the design splits into multiple PRs (≥ 2) or is a single PR.**
 

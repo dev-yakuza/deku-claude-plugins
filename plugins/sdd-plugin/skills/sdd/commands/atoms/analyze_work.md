@@ -13,6 +13,14 @@ Produces the SDD Stage 1 (Analyze) output for one Issue. Reads inputs from GitHu
 
 ## Work
 
+### Step 0: Pre-flight context discovery
+
+If retry mode (`$2` provided) → **skip this step entirely**.
+
+Otherwise, follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Light** tier. Execute Section B items 1 + 2 (project conventions + commit message style). Apply Section D failure handling. Record findings for the Section F self-review trace.
+
+### Main work (numbered steps below)
+
 1. Read the Issue:
    ```bash
    gh issue view $1

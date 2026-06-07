@@ -23,7 +23,18 @@
 |---|------|-------------|------------|
 | 1 | | | |
 
-### 5. Feature List with PR Split
+### 5. Testability
+<!-- If 0 external dependencies in scope, write a single line: "N/A (no external dependencies)" and omit the tables. -->
+<!-- External dependencies = DB, network, time, randomness, file I/O, env, external service, browser API, etc. -->
+
+| Component | External Dependency | Mock/Stub Strategy | Injection Point | Notes |
+|-----------|---------------------|---------------------|-----------------|-------|
+| | | | | |
+
+#### Hard-to-test concerns
+- <list timing/randomness/IO concerns and how design addresses them>
+
+### 6. Feature List with PR Split
 | PR | Feature | Description | Dependencies |
 |----|---------|-------------|--------------|
 | 1 | | | |

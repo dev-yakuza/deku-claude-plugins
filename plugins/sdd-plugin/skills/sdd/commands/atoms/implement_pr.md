@@ -29,6 +29,18 @@ Let the literal output of the second command be `<EXISTING_PR>` (or empty).
 
 ## Work — first-round mode
 
+### Step 0: Pre-flight context discovery
+
+(Retry mode skips this — see "Work — retry mode" section.)
+
+Follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Light** tier. Execute Section B items 1 + 2 (project conventions + commit message style).
+
+The commit message style is critical for `implement_pr`: PR title and body should match the conventions discovered here (e.g., `feat: …`, `fix: …`, em-dash separator).
+
+Apply Section D failure handling. Record findings for the Section F self-review trace.
+
+### Main work (numbered steps below)
+
 1. Resolve owner/repo + read context:
    ```bash
    gh repo view --json nameWithOwner -q .nameWithOwner

@@ -19,6 +19,18 @@ Executes TDD step 3-3: refactor the implementation for clarity and structure whi
 
 ## Work
 
+### Step 0: Pre-flight context discovery
+
+If `$3` (retry feedback) is provided → **skip this step entirely**.
+
+Otherwise, follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Code-focused** tier. Execute Section B item 4 only (target directory survey).
+
+For Refactor specifically: focus the directory read on existing structural patterns — extraction style, helper organization, naming conventions. Refactor should bring the new code closer to *these* patterns, not impose foreign ones.
+
+Apply Section D failure handling. Record findings for the Section F self-review trace.
+
+### Main work (numbered steps below)
+
 1. Verify branch and Green state:
    ```bash
    git rev-parse --abbrev-ref HEAD

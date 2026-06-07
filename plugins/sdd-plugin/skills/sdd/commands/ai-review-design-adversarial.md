@@ -31,6 +31,13 @@ See `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section E for the ge
    - Are there steps the design glosses over ("the migration is straightforward")?
    - Are external integrations underspecified ("call the API")?
 
+7. **Testability claims are plausible but not actually achievable**
+   - The Testability section names mock/stub strategies — but are they realistic given the codebase's *actual* DI patterns?
+   - Mocking a third-party SDK that the codebase imports at module-load level — does the seam point really exist?
+   - "We'll inject Clock for testability" — is there evidence of similar Clock injection elsewhere in this repo?
+   - Use Read/Grep to verify at least 1 cited injection/seam point. Mismatch is a **major** finding.
+   - If Testability = `N/A`, search the actual changed files for time/network/IO calls. False `N/A` = **critical**.
+
 ## Codebase verification (mandatory)
 Use Read/Grep (Section D of `_review_helpers.md`). At minimum:
 - Verify 1-2 file paths cited in the design exist

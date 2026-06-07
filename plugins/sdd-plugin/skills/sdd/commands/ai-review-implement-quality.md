@@ -38,6 +38,12 @@
 - Naming conventions consistent with repo
 - File organization follows existing structure
 
+### Testability violations (cross-stage)
+- Design specified mock/stub for X → implementation actually mocks X (not real call)?
+- Design specified injection point → implementation uses it (not bypassing the seam)?
+- Tests that hit real network/DB/filesystem where design said `mock` = **major** finding.
+- Test that intentionally bypasses the design's mock strategy (with no justification) = **major**.
+
 ## Codebase verification
 Use Read/Grep (Section D of `_review_helpers.md`). Look at 1-2 similar existing implementations to compare patterns.
 
