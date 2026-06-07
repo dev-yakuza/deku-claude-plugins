@@ -50,6 +50,7 @@ For E2E specifically: focus the directory read on existing E2E test files — th
      - `<failed>` — number of failing E2E tests (MUST be 0)
      - `<total>` — total E2E tests executed
      These numbers are reported in the return contract and used by `tdd_step_review` to verify the E2E claim.
+   - **Also remember the full E2E runner output text** — it is posted in step 7 as evidence the reviewer can cross-check against the reported counts.
 
    ### 3b. If no E2E setup exists
    - Skip E2E entirely. Note this for the result return.
@@ -70,6 +71,8 @@ For E2E specifically: focus the directory read on existing E2E test files — th
    ```
 
    If E2E was skipped, no commit. No Claude co-author.
+
+7. **Post test evidence comment** per `${CLAUDE_SKILL_DIR}/commands/atoms/_test_evidence.md`. Inputs: `<n>=4`, `<sha>` from `git rev-parse HEAD`, the captured `<passed>/<total>/<failed>`, and the full E2E runner output from step 3a. Skip this step entirely when returning `OK E2E_SKIPPED` (no commit, no test claim to verify). If the procedure returns the failure described in its Step 5, return that `FAIL:` from this atom.
 
 ## Return contract
 

@@ -54,6 +54,8 @@ For Refactor specifically: focus the directory read on existing structural patte
 
    These numbers are reported in the return contract (step 7) and used by `tdd_step_review` to verify the refactor preserved behavior.
 
+   **Also remember the full test runner output text** — it is posted in step 8 as evidence the reviewer can cross-check against the reported counts (skipped when the refactor produces no commit).
+
 5. If `$3` (retry feedback) is provided: address each finding.
 
 6. **Self-review (blockers only)**:
@@ -66,7 +68,7 @@ For Refactor specifically: focus the directory read on existing structural patte
    ```bash
    git diff --staged --quiet
    ```
-   If exit code 0 (no staged changes) — skip commit; return `OK REFACTOR EMPTY`.
+   If exit code 0 (no staged changes) — skip commit; return `OK REFACTOR EMPTY`. Do NOT run step 8 in this case.
 
    Otherwise:
    ```bash
@@ -75,6 +77,8 @@ For Refactor specifically: focus the directory read on existing structural patte
    ```
 
    No Claude co-author.
+
+8. **Post test evidence comment** per `${CLAUDE_SKILL_DIR}/commands/atoms/_test_evidence.md`. Inputs: `<n>=3`, `<sha>` from `git rev-parse HEAD`, the captured `<passed>/<total>/<failed>`, and the full test runner output from step 4. Skip this step entirely when returning `OK REFACTOR EMPTY` (no commit, no test claim to verify). If the procedure returns the failure described in its Step 5, return that `FAIL:` from this atom.
 
 ## Return contract
 

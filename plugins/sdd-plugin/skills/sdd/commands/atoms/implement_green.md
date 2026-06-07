@@ -58,6 +58,8 @@ For Green specifically: focus the directory read on existing implementation patt
 
    These numbers are reported in the return contract (step 8) and used by `tdd_step_review` to verify the Green claim. If the runner's output format makes any of these unobtainable, use `0` for that field — the reviewer will flag the missing evidence.
 
+   **Also remember the full test runner output text** — it is posted in step 9 as evidence the reviewer can cross-check against the reported counts.
+
 6. If `$3` (retry feedback) is provided: address each finding. Parse `$3` as JSON.
 
 7. **Self-review (blockers only)**:
@@ -73,6 +75,8 @@ For Green specifically: focus the directory read on existing implementation patt
    ```
 
    Match repo's convention. No Claude co-author.
+
+9. **Post test evidence comment** per `${CLAUDE_SKILL_DIR}/commands/atoms/_test_evidence.md`. Inputs: `<n>=2`, `<sha>` from `git rev-parse HEAD`, the captured `<passed>/<total>/<failed>`, and the full test runner output from step 5. If the procedure returns the failure described in its Step 5, return that `FAIL:` from this atom.
 
 ## Return contract
 
