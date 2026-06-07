@@ -21,13 +21,9 @@ Executes TDD step 3-4: write E2E tests for the implemented feature, if the repo 
 
 ### Step 0: Pre-flight context discovery
 
-If `$3` (retry feedback) is provided → **skip this step entirely**.
-
-Otherwise, follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Code-focused** tier. Execute Section B item 4 only (target directory survey).
+If `$3` (retry) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` — tier **Code-focused**, Section B item 4 only (target directory survey).
 
 For E2E specifically: focus the directory read on existing E2E test files — the framework used (Playwright/Cypress/Puppeteer/Flutter integration_test/etc.), test fixture patterns, page-object usage, waiting strategy.
-
-Apply Section D failure handling. Record findings for the Section F self-review trace.
 
 ### Main work (numbered steps below)
 

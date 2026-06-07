@@ -36,29 +36,7 @@ The role is fixed as `adversarial` for this atom (no `$2`).
 
 7. **Post a review comment** with marker `<!-- sdd:review:analyze:adversarial -->`. Duplicate-prevention: search for existing marker, update if found, else create.
 
-   Comment body format:
-   ```
-   <!-- sdd:review:analyze:adversarial -->
-   ## AI Review (analyze / adversarial)
-
-   **Verdict:** PASS | FAIL
-   **Model:** <opus|sonnet|haiku>
-
-   ### Issues
-   - **[critical]** <description>
-   - **[major]** <description>
-   - **[minor]** <description>
-
-   ### Suggestions
-   <if any>
-
-   <!-- sdd:findings:json -->
-   ```json
-   {<structured findings per _review_helpers.md Section B>}
-   ```
-   <!-- /sdd:findings:json -->
-   <!-- /sdd:review:analyze:adversarial -->
-   ```
+   Comment body follows the standard format (see `analyze_review.md` template) with stage=analyze and role=adversarial. Include the `<!-- sdd:findings:json -->` block per `_review_helpers.md` Section B.
 
 ## Return contract
 

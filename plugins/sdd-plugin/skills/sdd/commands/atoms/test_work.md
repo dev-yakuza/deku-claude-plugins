@@ -25,13 +25,9 @@ For Parent Issue path, also verify all children are `sdd:done` before running (r
 
 ## Step 0: Pre-flight context discovery (both paths)
 
-If `$2` (retry feedback) is provided → **skip this step entirely**.
-
-Otherwise, follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Light** tier. Execute Section B items 1 + 2 (project conventions + commit message style).
+If `$2` (retry) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` — tier **Light**, Section B items 1 + 2 (project conventions + commit message style).
 
 For `test_work` specifically: item 1's convention reading should pay attention to **testing conventions** (test framework, test directory layout, assertion style).
-
-Apply Section D failure handling. Record findings for the Section F self-review trace.
 
 After Step 0, proceed to the path-specific work below (Single/Child or Parent).
 

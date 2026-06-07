@@ -19,13 +19,9 @@ Produces the test plan + implementation plan for SDD Stage 3, posts it to the Is
 
 ### Step 0: Pre-flight context discovery
 
-(implement_plan has no retry mode; always run.)
-
-Follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Heavy** tier. Execute Section B items 1 + 2 + 3 + 4 (project conventions + commit message style + similar past PRs + target directory survey).
+(implement_plan has no retry mode; always run.) Follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` — tier **Heavy**, Section B items 1 + 2 + 3 + 4 (project conventions + commit message style + similar past PRs + target directory survey).
 
 The target directory for item 4 comes from the design output's File Structure section.
-
-Apply Section D failure handling. Record findings for the Section F self-review trace.
 
 ### Main work (numbered steps below)
 

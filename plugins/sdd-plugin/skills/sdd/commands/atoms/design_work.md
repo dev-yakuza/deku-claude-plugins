@@ -19,9 +19,7 @@ Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub
 
 ### Step 0: Pre-flight context discovery
 
-If retry mode (`$2` provided) → **skip this step entirely**.
-
-Otherwise, follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` Section A for the **Medium** tier. Execute Section B items 1 + 2 + 3 (project conventions + commit message style + similar past PRs via `gh pr list --search`). Apply Section D failure handling. Record findings for the Section F self-review trace.
+If retry (`$2` provided) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` — tier **Medium**, Section B items 1 + 2 + 3 (project conventions + commit message style + similar past PRs via `gh pr list --search`).
 
 The similar past PRs (item 3) inform: file organization patterns, naming conventions, architectural choices in this codebase. Use the discovered patterns to guide steps 4–9 below.
 

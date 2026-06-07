@@ -44,7 +44,7 @@ The role is fixed as `adversarial` (no `$2`).
 
 8. **Post a review comment** with marker `<!-- sdd:review:design:adversarial -->`. Duplicate-prevention as standard.
 
-   Comment body format follows the standard pattern (see `analyze_adversarial.md` template) with stage=design and role=adversarial. Include the `<!-- sdd:findings:json -->` block per `_review_helpers.md` Section B.
+   Comment body follows the standard format (see `analyze_review.md` template) with stage=design and role=adversarial. Include the `<!-- sdd:findings:json -->` block per `_review_helpers.md` Section B.
 
 ## Return contract
 

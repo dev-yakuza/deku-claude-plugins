@@ -35,12 +35,7 @@ Determine depth (`default` / `deep` / `shallow`).
 | `implement_review` (PR Final completeness/quality) | sonnet | opus | sonnet |
 | `implement_adversarial` (PR Final) | opus | opus | sonnet |
 
-**`/code-review` effort by depth**:
-| depth | effort |
-|---|---|
-| default | `high` |
-| deep | `max` |
-| shallow | `medium` |
+**`/code-review` effort by depth**: see `_review_helpers.md` Section A.3.
 
 ## Phase 1: Determine Issue type
 
