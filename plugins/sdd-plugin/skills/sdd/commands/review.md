@@ -93,7 +93,19 @@ Parent reviews are aggregate, not per-stage. They do not use review atoms — th
    - Read its current label
    - Read the latest stage-output comment (via the same marker detection as Standard Review)
    - If in `sdd:implement` or `sdd:test`: check PR status (`gh pr list --search "Refs #<child>"`)
-3. Generate a summary review and post as a comment on the parent Issue with the marker `<!-- sdd:review:parent -->` (use duplicate prevention):
+3. Generate a summary review and post on the parent Issue — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+   - **Marker**: `<!-- sdd:review:parent -->`
+   - **Temp file path**: `/tmp/sdd-review-parent-$1.md`
+   - **Step 1** (Write tool): render the body below into the temp file.
+   - **Step 2** (Bash): search for an existing comment id:
+     ```bash
+     gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:review:parent -->")) | .id'
+     ```
+   - **Step 3** (Bash):
+     - Empty → `gh issue comment $1 --body-file /tmp/sdd-review-parent-$1.md`
+     - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-review-parent-$1.md`
+
+   Body format:
 
    ```
    <!-- sdd:review:parent -->
@@ -115,7 +127,7 @@ Parent reviews are aggregate, not per-stage. They do not use review atoms — th
    <!-- /sdd:review:parent -->
    ```
 
-The cross-cutting concerns are produced by the main session reading the children's design + implementation comments and identifying inconsistencies — no review atom is involved (this is a unique cross-child operation, not a per-stage review).
+The cross-cutting concerns are produced by the main session reading the children's design + implementation comments and identifying inconsistencies — no review atom is involved (this is a unique cross-child operation, not a per-stage review). The `/tmp/sdd-review-parent-$1.md` path is shared with `parent_integration_review.md` (auto-triggered in `/sdd test` parent path); both atoms post under the same `<!-- sdd:review:parent -->` marker so one overwrites the other as expected.
 
 ## Notes
 
