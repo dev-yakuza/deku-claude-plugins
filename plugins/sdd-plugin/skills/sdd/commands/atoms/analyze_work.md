@@ -79,10 +79,17 @@ If retry (`$2` provided) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/at
 
     List only the blockers actually checked; mark `[x]` for clean, `[ ]` with inline note for fixed. Skip the `<details>` block entirely if there is nothing to record.
 
-12. **Post to Issue** (with duplicate prevention per Common Definitions in `${CLAUDE_SKILL_DIR}/SKILL.md`):
-    - Search Issue comments for `<!-- sdd:analyze:output -->` marker
-    - If found → update that comment via `gh api ... -X PATCH`
-    - If not → create new comment via `gh issue comment $1 --body ...`
+12. **Post to Issue** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). Inline `--body` is forbidden because the body contains `\n#` patterns that trip a non-bypassable Claude Code heuristic.
+    - **Marker**: `<!-- sdd:analyze:output -->`
+    - **Temp file path**: `/tmp/sdd-analyze-output-$1.md`
+    - **Step 1** (Write tool): render the analysis body with marker into the temp file.
+    - **Step 2** (Bash): search for an existing comment id:
+      ```bash
+      gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:analyze:output -->")) | .id'
+      ```
+    - **Step 3** (Bash): branch on the result.
+      - Empty → `gh issue comment $1 --body-file /tmp/sdd-analyze-output-$1.md`
+      - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-analyze-output-$1.md`
 
 ## Return contract
 

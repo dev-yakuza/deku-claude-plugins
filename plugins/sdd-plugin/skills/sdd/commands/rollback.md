@@ -26,13 +26,20 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
    - Previous stage outputs in Issue comments will be preserved for reference
    ```
 4. On user confirmation, update labels
-5. Post a rollback notice as Issue comment:
-   ```markdown
-   <!-- sdd:rollback -->
-   **Rolled back** from `<current stage>` to `<target stage>`.
-   Reason: <user's reason or "requested by user">
-   <!-- /sdd:rollback -->
-   ```
+5. Post a rollback notice as Issue comment — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+   - **Marker**: `<!-- sdd:rollback -->`
+   - **Temp file path**: `/tmp/sdd-rollback-$1.md`
+   - **Step 1** (Write tool): render the body into the temp file:
+     ```markdown
+     <!-- sdd:rollback -->
+     **Rolled back** from `<current stage>` to `<target stage>`.
+     Reason: <user's reason or "requested by user">
+     <!-- /sdd:rollback -->
+     ```
+   - **Step 2** (Bash): create a new rollback notice (no duplicate prevention — every rollback is a new event):
+     ```bash
+     gh issue comment $1 --body-file /tmp/sdd-rollback-$1.md
+     ```
 6. **Read + execute inline (do NOT spawn a subagent)** the target stage command: read `${CLAUDE_SKILL_DIR}/commands/$2.md` and execute its instructions for Issue #$1 in this same main session. Spawning a subagent here would create nested-subagent spawning when the target orchestrator spawns atoms.
 
 ## Parent Issue rollback:

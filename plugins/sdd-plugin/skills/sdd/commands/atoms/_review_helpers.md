@@ -204,3 +204,81 @@ You are an adversarial reviewer. Your job is to REFUTE the work output, not vali
 ```
 
 Independence: like other reviewers, do NOT read other reviewers' verdicts before forming yours.
+
+---
+
+## Section F — Posting Issue/PR comments (mandatory pattern)
+
+Every SDD comment body is multi-line Markdown containing `#` headers (`## ...`, `### ...`), HTML comment markers (`<!-- ... -->`), and triple-backtick code fences. When passed to `gh` via inline `--body "..."`, Claude Code's argument heuristics intercept patterns like "newline followed by `#` inside a quoted argument" and prompt for user confirmation. **The prompts cannot be suppressed by `permissions.allow`, `--dangerously-skip-permissions`, or `sandbox.enabled = false`** — they are a separate static safeguard.
+
+Use the **temp-file pattern** below for every comment body the atom posts. Do NOT pass multi-line bodies inline.
+
+### F.1 Deterministic temp file path
+
+For each atom that posts a comment, pick a deterministic path under `/tmp/` that encodes the SDD marker stub, `$1` (Issue number), and any role/step/PR distinguisher. Recommended naming:
+
+| Marker | Path |
+|---|---|
+| `<!-- sdd:analyze:output -->` | `/tmp/sdd-analyze-output-$1.md` |
+| `<!-- sdd:design:output -->` | `/tmp/sdd-design-output-$1.md` |
+| `<!-- sdd:children:output -->` | `/tmp/sdd-children-output-$1.md` |
+| `<!-- sdd:child-issue -->` (new child Issue body) | `/tmp/sdd-child-issue-$1-<seq>.md` |
+| `<!-- sdd:implement:plan -->` | `/tmp/sdd-implement-plan-$1.md` |
+| `<!-- sdd:test:output -->` | `/tmp/sdd-test-output-$1.md` |
+| `<!-- sdd:review:<stage>:<role> -->` (Issue-scoped) | `/tmp/sdd-review-<stage>-<role>-$1.md` |
+| `<!-- sdd:review:<stage>:<role> -->` (PR-scoped) | `/tmp/sdd-review-<stage>-<role>-pr<PR_NUM>.md` |
+| `<!-- sdd:review:implement:step-<n> -->` | `/tmp/sdd-review-implement-step-<n>-$1.md` |
+| `<!-- sdd:review:parent -->` | `/tmp/sdd-review-parent-$1.md` |
+| `<!-- sdd:test-evidence:step-<n> -->` | `/tmp/sdd-test-evidence-$1-step-<n>.md` (see `_test_evidence.md`) |
+
+### F.2 Procedure
+
+#### Step 1 — Render body to temp file (Write tool)
+
+Use the **Write tool** — not Bash heredoc, not `echo`, not `printf` — to write the comment body to the path from F.1. Include the SDD marker(s), the rendered content, and the closing marker.
+
+#### Step 2 — Search for an existing comment (duplicate prevention)
+
+Resolve owner/repo first if not already known (per **Repository Owner/Repo** in `SKILL.md`), then:
+
+```bash
+gh api repos/<owner>/<repo>/issues/<N>/comments --jq '.[] | select(.body | contains("<MARKER>")) | .id'
+```
+
+Substitute the **literal** `<owner>/<repo>`, target number `<N>`, and marker string. For PR comments, `<N>` is the PR number (PR comments share the GitHub Issues comments API).
+
+#### Step 3 — Branch on the search result (decided in atom-side narrative, not shell)
+
+- **Empty** → create a new comment:
+  - Issue-scoped: `gh issue comment <N> --body-file <path>`
+  - PR-scoped: `gh pr comment <PR_NUM> --body-file <path>`
+- **Has id** → update the existing comment in place:
+  ```bash
+  gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@<path>
+  ```
+
+The PATCH endpoint is shared by Issue and PR comments — both live under `/issues/comments/<id>`.
+
+#### Step 4 — Verify the post (optional but recommended)
+
+Re-run the F.2 Step 2 query. If the result is empty after a successful post, return `FAIL: <marker> comment not found after posting` from the calling atom.
+
+### F.3 Forbidden alternatives
+
+- ❌ `gh issue comment <N> --body "<multi-line content>"`
+- ❌ `gh api ... -X PATCH --field body="<multi-line content>"`
+- ❌ Heredocs: `--body "$(cat <<EOF ... EOF)"`
+- ❌ `echo "..." | gh ...` (pipe is a compound; violates `SKILL.md` rules)
+- ❌ `printf '...' > /tmp/foo.md && gh ...` (compound)
+
+All of the above either trip the multi-line-`#` heuristic or violate the simple-Bash rule in `SKILL.md`. The only sanctioned flow is: Write tool → simple `gh ... --body-file` / `... --field body=@<path>`.
+
+### F.4 Creating new Issues with multi-line bodies
+
+The same constraint applies to `gh issue create`: do not pass the body inline. Write to a temp file (e.g. `/tmp/sdd-child-issue-<parent>-<seq>.md`) and pass it via `--body-file`:
+
+```bash
+gh issue create --title "<title>" --body-file <path> --label <label-1> --label <label-2>
+```
+
+Multi-line titles are not required by SDD, so `--title "<title>"` remains a single-line argument and is safe.

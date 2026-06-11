@@ -121,8 +121,21 @@ as its own isolated Bash tool call (per the **Bash Command Execution Rules** abo
 
 If you need `{owner}/{repo}` for multiple `gh api` calls in the same flow, run `gh repo view` once at the start, remember the literal value, and inline it everywhere.
 
+### Posting multi-line comment bodies
+
+The simple-Bash rules above are necessary but not sufficient. SDD also posts Markdown comment bodies to GitHub Issues and PRs, and inline multi-line bodies trip an **additional** Claude Code heuristic — "newline followed by `#` inside a quoted argument can hide arguments from path validation". `permissions.allow`, `--dangerously-skip-permissions`, and `sandbox.enabled = false` do **not** suppress it; the prompt cannot be auto-approved.
+
+For every comment-posting step in any atom or orchestrator, follow the **temp-file pattern** documented in `commands/atoms/_review_helpers.md` Section F:
+
+1. Use the **Write tool** to render the body to a deterministic `/tmp/sdd-...md` path (see Section F.1 for the path table).
+2. Create a comment via `gh issue comment <N> --body-file <path>` (or `gh pr comment <PR_NUM> --body-file <path>`).
+3. Update an existing comment via `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@<path>`.
+4. Create a new Issue with `gh issue create --title "<title>" --body-file <path> ...`.
+
+Inline `--body "<multi-line content>"` is **forbidden** whenever the content contains markdown headers, code fences, or HTML comment markers — i.e. essentially every SDD comment.
+
 ### Duplicate Output Prevention
-Before posting a stage output, search Issue comments for the matching marker. If found → update that comment. If not → create new comment.
+Before posting a stage output, search Issue comments for the matching marker. If found → update that comment via `gh api ... -X PATCH --field body=@<path>`. If not → create a new comment via `gh issue comment <N> --body-file <path>`. See `commands/atoms/_review_helpers.md` Section F.2 for the full procedure.
 
 ### Issue Validation
 SDD commands operate **only on GitHub Issues**, not Pull Requests. Before executing the main logic of any command that takes an Issue number (`analyze`, `design`, `implement`, `test`, `resume`, `rollback`, `status`, `review`), validate the input.

@@ -34,9 +34,17 @@ The role is fixed as `adversarial` for this atom (no `$2`).
    - Any `critical` or `major` finding → **FAIL** (with summary)
    - Only `minor` findings or none → **PASS** (include in suggestions)
 
-7. **Post a review comment** with marker `<!-- sdd:review:analyze:adversarial -->`. Duplicate-prevention: search for existing marker, update if found, else create.
-
-   Comment body follows the standard format (see `analyze_review.md` template) with stage=analyze and role=adversarial. Include the `<!-- sdd:findings:json -->` block per `_review_helpers.md` Section B.
+7. **Post a review comment** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+   - **Marker**: `<!-- sdd:review:analyze:adversarial -->`
+   - **Temp file path**: `/tmp/sdd-review-analyze-adversarial-$1.md`
+   - **Step 1** (Write tool): render the body using the standard format (see `analyze_review.md` template) with stage=analyze and role=adversarial. Include the `<!-- sdd:findings:json -->` block per `_review_helpers.md` Section B.
+   - **Step 2** (Bash): search for existing comment id:
+     ```bash
+     gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:review:analyze:adversarial -->")) | .id'
+     ```
+   - **Step 3** (Bash):
+     - Empty → `gh issue comment $1 --body-file /tmp/sdd-review-analyze-adversarial-$1.md`
+     - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-review-analyze-adversarial-$1.md`
 
 ## Return contract
 
@@ -60,5 +68,5 @@ FAIL: <one-line reason — only for atom errors>
 - Single-subagent atom. Do NOT invoke the Agent tool or Skill tool.
 - Do NOT modify the analyze output comment. Only post your own review comment.
 - You **MAY** use Read/Grep/Glob (Section D budget: 15 Read / 10 Grep / 5 Glob).
-- Do NOT use Edit/Write/NotebookEdit.
+- Do NOT use Edit/NotebookEdit. The Write tool is permitted **only** for rendering the comment body to `/tmp/sdd-review-analyze-adversarial-$1.md` per Section F of `_review_helpers.md`.
 - Be independent.
