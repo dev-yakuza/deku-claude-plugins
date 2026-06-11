@@ -73,7 +73,17 @@ Lightweight diff-only review between TDD steps (3-1 Red, 3-2 Green, 3-3 Refactor
    - critical/major → **FAIL** (the orchestrator will re-spawn this step's atom)
    - only minor or none → **PASS** (proceed to next step)
 
-7. **Post a review comment** to the **Issue** (not the PR — PR may not exist yet) with marker `<!-- sdd:review:implement:step-$2 -->`. Standard duplicate-prevention.
+7. **Post a review comment** to the **Issue** (not the PR — PR may not exist yet) — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+   - **Marker**: `<!-- sdd:review:implement:step-$2 -->` (substitute `$2` literally — e.g. `<!-- sdd:review:implement:step-1 -->`)
+   - **Temp file path**: `/tmp/sdd-review-implement-step-$2-$1.md`
+   - **Step 1** (Write tool): render the body below into the temp file.
+   - **Step 2** (Bash): search for existing comment id:
+     ```bash
+     gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:review:implement:step-$2 -->")) | .id'
+     ```
+   - **Step 3** (Bash):
+     - Empty → `gh issue comment $1 --body-file /tmp/sdd-review-implement-step-$2-$1.md`
+     - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-review-implement-step-$2-$1.md`
 
    Comment body format:
    ```
@@ -123,5 +133,5 @@ FAIL: <one-line reason — only for atom errors>
 - Single-subagent atom. Do NOT invoke the Agent tool or Skill tool.
 - Do NOT modify any commit, file, or PR. Read-only except for the review comment.
 - You **MAY** use Read/Grep (Section D lighter budget: 5 Read / 3 Grep / 0 Glob).
-- Do NOT use Edit/Write/NotebookEdit.
+- Do NOT use Edit/NotebookEdit. The Write tool is permitted **only** for rendering the step review body to `/tmp/sdd-review-implement-step-$2-$1.md` per Section F of `_review_helpers.md`.
 - Be independent.

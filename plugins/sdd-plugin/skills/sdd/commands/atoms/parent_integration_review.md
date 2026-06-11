@@ -49,7 +49,17 @@ Runs only on **parent Issues** during the test stage. Invoked by `test.md` orche
 
 8. Determine verdict: critical/major → FAIL; only minor or none → PASS.
 
-9. **Post a review comment on the parent Issue** with marker `<!-- sdd:review:parent -->` (the marker is defined in SKILL.md). Standard duplicate-prevention.
+9. **Post a review comment on the parent Issue** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). The marker is defined in `SKILL.md`.
+    - **Marker**: `<!-- sdd:review:parent -->`
+    - **Temp file path**: `/tmp/sdd-review-parent-$1.md`
+    - **Step 1** (Write tool): render the body (format below) into the temp file.
+    - **Step 2** (Bash): search for existing comment id:
+      ```bash
+      gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:review:parent -->")) | .id'
+      ```
+    - **Step 3** (Bash):
+      - Empty → `gh issue comment $1 --body-file /tmp/sdd-review-parent-$1.md`
+      - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-review-parent-$1.md`
 
     Comment body format:
     ```
@@ -98,5 +108,5 @@ FAIL: <one-line reason — only for atom errors>
 - Single-subagent atom. Do NOT invoke the Agent tool or Skill tool.
 - Do NOT modify any code, child Issues, or PRs.
 - You **MAY** use Read/Grep/Glob (Section D budget).
-- Do NOT use Edit/Write/NotebookEdit.
+- Do NOT use Edit/NotebookEdit. The Write tool is permitted **only** for rendering the parent integration review body to `/tmp/sdd-review-parent-$1.md` per Section F of `_review_helpers.md`.
 - Be independent: do not read other reviewers' verdicts before forming yours.

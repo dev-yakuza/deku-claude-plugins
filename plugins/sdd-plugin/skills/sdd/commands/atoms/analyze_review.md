@@ -41,7 +41,17 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
    - Only `minor` or none → **PASS** (suggestions included)
    - Do NOT combine with other reviewers — the orchestrator merges verdicts.
 
-7. **Post a review comment** to the Issue with marker `<!-- sdd:review:analyze:<role> -->`. Standard duplicate-prevention: search for marker, update if found, else create.
+7. **Post a review comment** to the Issue — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+   - **Marker**: `<!-- sdd:review:analyze:<role> -->` (substitute `<role>` = `$2`)
+   - **Temp file path**: `/tmp/sdd-review-analyze-<role>-$1.md`
+   - **Step 1** (Write tool): render the body below into the temp file.
+   - **Step 2** (Bash): search for existing comment id:
+     ```bash
+     gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:review:analyze:<role> -->")) | .id'
+     ```
+   - **Step 3** (Bash):
+     - Empty → `gh issue comment $1 --body-file /tmp/sdd-review-analyze-<role>-$1.md`
+     - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-review-analyze-<role>-$1.md`
 
    Comment body format:
    ```
@@ -91,5 +101,5 @@ FAIL: <one-line reason — only for atom errors>
 - Single-subagent atom. Do NOT invoke the Agent tool or Skill tool.
 - Do NOT modify the analyze output comment. Only post your own review comment.
 - You **MAY** use Read/Grep/Glob to verify references against actual code (Section D budget: 15 Read / 10 Grep / 5 Glob).
-- Do NOT use Edit/Write/NotebookEdit.
+- Do NOT use Edit/NotebookEdit. The Write tool is permitted **only** for rendering the comment body to `/tmp/sdd-review-analyze-<role>-$1.md` per Section F of `_review_helpers.md`.
 - Be independent: do not assume the analyze output is correct just because it exists. Evaluate it on its own merits.

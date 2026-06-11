@@ -107,26 +107,45 @@ The similar past PRs (item 3) inform: file organization patterns, naming convent
 
     Skip the block entirely if there is nothing to record.
 
-15. **Post the design comment** to the Issue with duplicate prevention:
-    - Search for `<!-- sdd:design:output -->` marker; update if exists, else create.
+15. **Post the design comment** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+    - **Marker**: `<!-- sdd:design:output -->`
+    - **Temp file path**: `/tmp/sdd-design-output-$1.md`
+    - **Step 1** (Write tool): render the formatted design body into the temp file.
+    - **Step 2** (Bash): search for existing comment id:
+      ```bash
+      gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:design:output -->")) | .id'
+      ```
+    - **Step 3** (Bash):
+      - Empty → `gh issue comment $1 --body-file /tmp/sdd-design-output-$1.md`
+      - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-design-output-$1.md`
 
 16. **If PR split ≥ 2 — Child Issue creation**:
 
     a. Check if `<!-- sdd:children:output -->` already exists on this Issue. If yes (retry case), do NOT re-create children — keep existing children and skip to step 17. If no, proceed to (b).
 
-    b. For each sub-feature in the design:
+    b. For each sub-feature in the design (let `<seq>` be the 1-based sub-feature index):
        - Format child Issue body using `${CLAUDE_SKILL_DIR}/templates/{lang}/output_child_issue.md` with manual placeholder substitution:
          - `{{parent_issue}}` → `$1`
          - `{{sub_feature_description}}` → sub-feature description from design
          - `{{criteria_list}}` → markdown checkbox list from design
-       - Create the child:
+       - **Step 1** (Write tool): render the formatted body to `/tmp/sdd-child-issue-$1-<seq>.md` (Section F.4 — inline `--body` is forbidden because the body contains `\n#` patterns).
+       - **Step 2** (Bash): create the child via `--body-file`:
          ```bash
-         gh issue create --title "[SDD Child] <parent title> - <sub-feature name>" \
-           --body "<formatted body>" --label "sdd:analyze" --label "sdd:child"
+         gh issue create --title "[SDD Child] <parent title> - <sub-feature name>" --body-file /tmp/sdd-child-issue-$1-<seq>.md --label "sdd:analyze" --label "sdd:child"
          ```
-       - Capture the new Issue number.
+       - Capture the new Issue number from the command's output URL.
 
-    c. Post the parent's children list comment using `${CLAUDE_SKILL_DIR}/templates/{lang}/output_children.md` with a row per child Issue.
+    c. Post the parent's children list comment using `${CLAUDE_SKILL_DIR}/templates/{lang}/output_children.md` with a row per child Issue, again via the Section F pattern:
+       - **Marker**: `<!-- sdd:children:output -->`
+       - **Temp file path**: `/tmp/sdd-children-output-$1.md`
+       - **Step 1** (Write tool): render the children table into the temp file.
+       - **Step 2** (Bash): search for existing children comment id:
+         ```bash
+         gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:children:output -->")) | .id'
+         ```
+       - **Step 3** (Bash):
+         - Empty → `gh issue comment $1 --body-file /tmp/sdd-children-output-$1.md`
+         - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-children-output-$1.md`
 
 17. **If single PR**: no child creation. Done.
 

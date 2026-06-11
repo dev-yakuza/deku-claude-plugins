@@ -37,11 +37,21 @@ Role is fixed as `adversarial`.
 
 7. Determine verdict: critical/major → FAIL; only minor or none → PASS.
 
-8. **Post a review comment**. Location:
-   - Single/Child path: post on the **PR** with marker `<!-- sdd:review:test:adversarial -->`
-   - Parent path: post on the **Issue** with marker `<!-- sdd:review:test:adversarial -->`
+8. **Post a review comment** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). Location depends on path:
+   - **Single/Child path** (post on the **PR**):
+     - Marker: `<!-- sdd:review:test:adversarial -->`
+     - Temp file path: `/tmp/sdd-review-test-adversarial-pr<PR_NUM>.md`
+     - Search: `gh api repos/<owner>/<repo>/issues/<PR_NUM>/comments --jq '.[] | select(.body | contains("<!-- sdd:review:test:adversarial -->")) | .id'`
+     - Create: `gh pr comment <PR_NUM> --body-file /tmp/sdd-review-test-adversarial-pr<PR_NUM>.md`
+     - Update: `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-review-test-adversarial-pr<PR_NUM>.md`
+   - **Parent path** (post on the **Issue**):
+     - Marker: `<!-- sdd:review:test:adversarial -->`
+     - Temp file path: `/tmp/sdd-review-test-adversarial-$1.md`
+     - Search: `gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:review:test:adversarial -->")) | .id'`
+     - Create: `gh issue comment $1 --body-file /tmp/sdd-review-test-adversarial-$1.md`
+     - Update: `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-review-test-adversarial-$1.md`
 
-   Standard format with `<!-- sdd:findings:json -->` block per `_review_helpers.md` Section B. Use temp file + `--body-file` for PR comments.
+   Body uses the standard format with `<!-- sdd:findings:json -->` block per `_review_helpers.md` Section B.
 
 ## Return contract
 
@@ -65,5 +75,5 @@ FAIL: <one-line reason — only for atom errors>
 - Single-subagent atom. Do NOT invoke the Agent tool or Skill tool.
 - Do NOT modify any code, tests, or PR.
 - You **MAY** use Read/Grep/Glob (Section D budget).
-- Do NOT use Edit/Write/NotebookEdit except for the temp PR-comment body file.
+- Do NOT use Edit/NotebookEdit. The Write tool is permitted **only** for rendering the comment body to the temp file path per Section F of `_review_helpers.md`.
 - Be independent.

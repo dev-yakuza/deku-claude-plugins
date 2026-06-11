@@ -74,7 +74,17 @@ The target directory for item 4 comes from the design output's File Structure se
 
 7. Determine language from `.github/.sdd-lang` (same fallback rules as other atoms).
 
-8. **Post the plan** to the Issue with the marker `<!-- sdd:implement:plan -->`. Use duplicate prevention.
+8. **Post the plan** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+   - **Marker**: `<!-- sdd:implement:plan -->`
+   - **Temp file path**: `/tmp/sdd-implement-plan-$1.md`
+   - **Step 1** (Write tool): render the plan body (format below) into the temp file.
+   - **Step 2** (Bash): search for existing comment id:
+     ```bash
+     gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:implement:plan -->")) | .id'
+     ```
+   - **Step 3** (Bash):
+     - Empty → `gh issue comment $1 --body-file /tmp/sdd-implement-plan-$1.md`
+     - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-implement-plan-$1.md`
 
    Comment body format:
    ```

@@ -79,7 +79,17 @@ E2E tests were already written in Stage 3 (implement) and included in the PR. Th
 
 7. Determine language from `.github/.sdd-lang` (same fallback rules).
 
-8. **Post to Issue** with the marker `<!-- sdd:test:output -->`. Duplicate-prevention.
+8. **Post to Issue** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+   - **Marker**: `<!-- sdd:test:output -->`
+   - **Temp file path**: `/tmp/sdd-test-output-$1.md`
+   - **Step 1** (Write tool): render the body (format below) into the temp file.
+   - **Step 2** (Bash): search for existing comment id:
+     ```bash
+     gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:test:output -->")) | .id'
+     ```
+   - **Step 3** (Bash):
+     - Empty → `gh issue comment $1 --body-file /tmp/sdd-test-output-$1.md`
+     - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-test-output-$1.md`
 
    Comment body format:
    ```
@@ -168,7 +178,11 @@ Child Issues have individual tests; cross-child integration tests may be needed 
 
    *Cross-stage / cross-child integration analysis is NOT done here — the orchestrator spawns `parent_integration_review.md` for that.*
 
-6. **Post to Issue** with `<!-- sdd:test:output -->` marker (parent variant of the body — include the integration PR URL if created). Append a `<details>`-block self-review trace before the closing marker, in the same style as the single/child path.
+6. **Post to Issue** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). Same procedure as the single/child path step 8 above:
+   - **Marker**: `<!-- sdd:test:output -->`
+   - **Temp file path**: `/tmp/sdd-test-output-$1.md`
+   - Render the parent variant of the body (include the integration PR URL if created, and the `<details>`-block self-review trace before the closing marker, in the same style as the single/child path).
+   - Search for existing id, then `gh issue comment $1 --body-file /tmp/sdd-test-output-$1.md` (create) OR `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-test-output-$1.md` (update).
 
 ## Return contract
 
