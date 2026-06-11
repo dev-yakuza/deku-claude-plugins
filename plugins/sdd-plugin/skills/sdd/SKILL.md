@@ -92,8 +92,11 @@ To keep automated runs (`/sdd auto`, `/sdd batch`) unattended, every Bash tool i
 - Subshells / groups: `(...)`, `{...}`
 - Process substitution: `<(...)`, `>(...)`
 - Heredocs that wrap multiple commands (`<<EOF ... EOF` containing more than the body of one tool call)
+- **Shell variable substitution inside double-quoted arguments**: `"...${VAR}..."` or `"...$VAR..."`. Substitute the literal value before invoking Bash instead.
 
-**Why**: Claude Code's permission matcher evaluates the above as compound expressions and cannot match single-token allow patterns like `Bash(gh:*)`. Each such call therefore raises a permission prompt, breaking unattended runs.
+**Why**:
+- Items 1–5 above: Claude Code's permission matcher evaluates compound expressions and cannot match single-token allow patterns like `Bash(gh:*)`. Each such call therefore raises a permission prompt, breaking unattended runs.
+- Item 6 (quoted variable substitution): triggers Claude Code's "brace with quote character (expansion obfuscation)" argument heuristic, which is a **separate** safeguard that `permissions.allow`, `--dangerously-skip-permissions`, and `sandbox.enabled = false` cannot suppress. Even with all permission gates bypassed, this prompt still fires and breaks unattended runs.
 
 **How to chain results between commands**:
 1. Run the first simple command in its own Bash tool call.

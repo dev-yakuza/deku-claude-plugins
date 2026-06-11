@@ -282,14 +282,17 @@ While `QUEUE` is non-empty:
 
 ### 3.3 Child auto-discovery
 
-After each successful Issue, run the same `gh issue list --label sdd:child` query as `/sdd batch`'s Phase 3 logic. Use the multi-language parent-reference regex from `batch.md`:
+After each successful Issue, run the same `gh issue list --label sdd:child` query as `/sdd batch`'s Phase 3 logic. Use the multi-language parent-reference regex from `batch.md`.
+
+**Important — substitute literal values before invoking Bash.** Per the **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`, do NOT pass shell variable substitutions like `${ISSUE}` inside a quoted argument. The combination of `${...}` and surrounding quotes trips a Claude Code argument heuristic ("brace with quote character — expansion obfuscation") that cannot be suppressed by `permissions.allow`, `--dangerously-skip-permissions`, or `sandbox.enabled = false`.
+
+Instead, the main-session narrative substitutes the literal issue number and literal `<owner>/<repo>` (already resolved in Phase 3.1 step 1) into the command, producing a single simple line:
 
 ```bash
-gh issue list --repo "<owner>/<repo>" \
-  --label sdd:child --state open --limit 200 \
-  --json number,body \
-  --jq "[.[] | select(.body | test(\"(Parent|상위 |親)Issue: #${ISSUE}([^0-9]|\$)\"))] | .[] | .number"
+gh issue list --repo deku-word-app/word_app --label sdd:child --state open --limit 200 --json number,body --jq '[.[] | select(.body | test("(Parent|상위 |親)Issue: #838([^0-9]|$)"))] | .[] | .number'
 ```
+
+(Example shows the literal `deku-word-app/word_app` and `#838` — substitute the actual repo and current `ISSUE` value before the Bash tool call. No `\` line continuations, no shell variables. The outer single-quote `'...'` keeps everything inside literal, so jq receives the regex unchanged. The `$` at the end of the character class is jq's end-of-string anchor; do NOT escape or wrap it.)
 
 For each discovered child number not in `SEEN`:
 - Append to `QUEUE`
