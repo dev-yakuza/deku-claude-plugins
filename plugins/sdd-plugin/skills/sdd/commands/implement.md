@@ -359,12 +359,17 @@ Runs **only if the Issue body matches the multi-language parent regex `(Parent|�
    ```
    - If no matching comment → warn and skip update.
    - If multiple → use the last one.
-3. Update the children comment: replace this child Issue's row with the new status. Use `gh api repos/{owner}/{repo}/issues/comments/<id> -X PATCH`.
-4. Verify the update by re-reading the comment.
+3. Update the children comment — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern):
+   - Take the existing body from step 2, replace this child Issue's row with the new status in narrative (not in shell).
+   - **Write tool**: render the updated body into `/tmp/sdd-children-output-<parent>.md` (overwrites the original temp file from `design_work` — that's fine; the original is no longer needed).
+   - **Bash**: `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-children-output-<parent>.md`
+4. Verify the update by re-reading the comment via the same search as step 2.
 5. Check if ALL child Issues are `sdd:done`:
    - Read each child's actual label.
-   - If all `sdd:done` → post completion notification on the parent suggesting `/sdd test <parent>` or `/sdd resume <parent>`.
-   - If not → report remaining children, ask which to work on next.
+   - If all `sdd:done` → post completion notification on the parent suggesting `/sdd test <parent>` or `/sdd resume <parent>`. Use Section F:
+     - **Write tool**: render the notification body (e.g. `All children done. Run /sdd test <parent>.`) into `/tmp/sdd-children-complete-<parent>.md`.
+     - **Bash**: `gh issue comment <parent> --body-file /tmp/sdd-children-complete-<parent>.md` (no duplicate-prevention needed — each completion event is a new comment).
+   - If not → report remaining children to the user in chat, ask which to work on next. (No comment posted in this branch.)
 
 ## Notes
 
