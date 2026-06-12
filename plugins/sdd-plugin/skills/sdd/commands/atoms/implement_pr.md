@@ -4,7 +4,7 @@
 
 Executes TDD step 3-5: push the branch and create the PR. Handles both first-round mode (initial PR) and retry mode (push fix-up commits without creating a new PR).
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -31,7 +31,7 @@ Let the literal output of the second command be `<EXISTING_PR>` (or empty).
 
 ### Step 0: Pre-flight context discovery
 
-(Retry mode skips this — see "Work — retry mode" section.) Follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` — tier **Light**, Section B items 1 + 2 (project conventions + commit message style).
+(Retry mode skips this — see "Work — retry mode" section.) Follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Light**, Section B items 1 + 2 (project conventions + commit message style).
 
 The commit message style is critical for `implement_pr`: PR title and body should match the conventions discovered here (e.g., `feat: …`, `fix: …`, em-dash separator).
 
@@ -45,7 +45,7 @@ The commit message style is critical for `implement_pr`: PR title and body shoul
      --jq '.[] | select(.body | contains("sdd:design:output") or contains("sdd:implement:plan")) | .body'
    ```
 
-2. Detect parent reference for child Issue PR body per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md` (multi-language regex `(Parent|상위 |親)Issue: #<number>`).
+2. Detect parent reference for child Issue PR body per Common Definitions → Parent/Child Issue Detection in `<<SKILL_DIR>>/SKILL.md` (multi-language regex `(Parent|상위 |親)Issue: #<number>`).
 
 3. **Re-run all tests** (unit + E2E if applicable) → confirm pass. If anything fails, return `FAIL: tests fail before PR creation`.
 
@@ -128,7 +128,7 @@ The commit message style is critical for `implement_pr`: PR title and body shoul
    gh pr diff <PR_NUM>
    ```
 
-4. Parse `$3` (JSON array of findings) per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B. Per Section C.1, `$3` now contains all severities sorted `critical → major → minor`.
+4. Parse `$3` (JSON array of findings) per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section B. Per Section C.1, `$3` now contains all severities sorted `critical → major → minor`.
 
 5. For each `critical` or `major` finding in `$3`:
    - **Decide the fix kind**:

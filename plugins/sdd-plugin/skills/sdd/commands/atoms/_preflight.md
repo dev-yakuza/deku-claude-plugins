@@ -2,7 +2,7 @@
 
 **Not an atom.** This file documents the pre-flight context discovery procedure called at **Step 0** of every work atom (analyze/design/implement/test). Read the section matching the atom's tier when the calling atom instructs you to.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ---
 
@@ -168,7 +168,7 @@ Each work atom's `Work` section begins with:
 
 If retry mode (`$2` or `$3` provided) → **skip this step entirely**.
 
-Otherwise, follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md`
+Otherwise, follow `<<SKILL_DIR>>/commands/atoms/_preflight.md`
 Section A for the tier matching this atom (<TIER>). Execute Section B
 items per the tier; apply Section D failure handling.
 

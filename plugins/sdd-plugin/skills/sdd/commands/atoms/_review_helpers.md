@@ -2,7 +2,7 @@
 
 **Not an atom.** This file documents shared procedures referenced by review atoms and orchestrators. Read the relevant section when the calling atom instructs you to.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ---
 
@@ -158,6 +158,10 @@ When a review atom needs to verify that the work output references actual code:
 - **Grep tool** to search for symbols/identifiers claimed by the work output.
 - **Glob tool** to enumerate matching files.
 
+**Use these dedicated tools — NOT Bash equivalents.** Do NOT use Bash `find`, `grep`, `cat`, `head`, `tail`, `awk`, or `sed` for codebase exploration. Those Bash invocations frequently trip Claude Code's argument heuristics — `find` against absolute paths like `/Users`, `~`, `~/fvm`, or `/` is flagged as a recursive-broad-search safeguard prompt that cannot be auto-approved via `permissions.allow`. Compound forms (`a ; b`, `a | head`, `cmd 2>/dev/null`, `cmd && cmd2`) trip a separate compound-command safeguard. Both prompts break unattended `/sdd auto` / `/sdd batch` runs. The Grep / Glob / Read tools achieve the same exploration without triggering any of these heuristics.
+
+If you absolutely must shell out (e.g. running a project script the work output references), the Bash call must be a **single simple command** with no `;`, `|`, `&&`, `||`, `>`, `2>`, `2>&1`, subshells, or process substitution, and any path argument must be **relative to the repo root** or an absolute path you have already validated lives inside the repo root. Searches that traverse `/`, `~`, `~/fvm`, `/Users`, or any path outside the current working tree are forbidden — use Grep / Glob bound to the repo root instead.
+
 ### D.2 Budget
 
 Hard caps to prevent runaway exploration:
@@ -175,6 +179,8 @@ Track your own counts. If a cap is reached, stop exploration, note the limit in 
 - Do NOT run tests, builds, or any Bash command except those explicitly listed in this skill.
 - Do NOT use the Edit, Write, or NotebookEdit tools.
 - Stay within the repository — do not Read absolute paths outside the working tree.
+- Do NOT use Bash `find /`, `find /Users`, `find ~`, `find ~/<anything>`, or any `find` with an absolute path that crosses out of the repo root — those trigger Claude Code's recursive-broad-search safeguard which cannot be bypassed via permission settings, and the resulting prompt breaks unattended runs.
+- Do NOT chain commands with `;`, `|`, `&&`, `||`, `>`, `2>`, `2>&1`, subshells, or process substitution. Use multiple separate Bash tool calls instead — but for exploration, prefer Grep / Glob / Read tools and avoid Bash entirely.
 
 ---
 

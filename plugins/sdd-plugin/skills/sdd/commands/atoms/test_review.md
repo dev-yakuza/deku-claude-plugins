@@ -4,7 +4,7 @@
 
 Independently reviews the test output. Reads analyze + design + test comments, applies role-specific criteria, posts a review comment, returns a one-line verdict.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -30,16 +30,16 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
    - **Single/Child path**: also read the implementation PR diff (find via `gh pr list --search "Refs #$1"`).
 
 4. Read the role-specific criteria:
-   - `$2=completeness` → `${CLAUDE_SKILL_DIR}/commands/ai-review-test-completeness.md`
-   - `$2=quality` → `${CLAUDE_SKILL_DIR}/commands/ai-review-test-quality.md`
+   - `$2=completeness` → `<<SKILL_DIR>>/commands/ai-review-test-completeness.md`
+   - `$2=quality` → `<<SKILL_DIR>>/commands/ai-review-test-quality.md`
 
-5. **Codebase exploration** per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section D. Budget: 15 Read / 10 Grep / 5 Glob. Read PR test files and verify the test output's claims match actual test code.
+5. **Codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Budget: 15 Read / 10 Grep / 5 Glob. Read PR test files and verify the test output's claims match actual test code.
 
 6. Apply criteria. Standard severity definitions.
 
 7. Determine verdict: critical/major → FAIL; only minor or none → PASS.
 
-8. **Post a review comment** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). Location depends on path:
+8. **Post a review comment** — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). Location depends on path:
    - **Single/Child path** (post on the **PR**):
      - Marker: `<!-- sdd:review:test:<role> -->` (substitute `<role>` = `$2`)
      - Temp file path: `/tmp/sdd-review-test-<role>-pr<PR_NUM>.md`

@@ -4,7 +4,7 @@
 
 Independently reviews the design output. Reads analyze + design comments, applies role-specific criteria, posts a review comment, returns a one-line verdict.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -32,10 +32,10 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
    ```
 
 4. Read the role-specific criteria file:
-   - `$2=completeness` → `${CLAUDE_SKILL_DIR}/commands/ai-review-design-completeness.md`
-   - `$2=quality` → `${CLAUDE_SKILL_DIR}/commands/ai-review-design-quality.md`
+   - `$2=completeness` → `<<SKILL_DIR>>/commands/ai-review-design-completeness.md`
+   - `$2=quality` → `<<SKILL_DIR>>/commands/ai-review-design-quality.md`
 
-5. **Codebase exploration** per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section D. Both roles benefit from verifying design's file/symbol references actually exist. Budget: 15 Read / 10 Grep / 5 Glob.
+5. **Codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Both roles benefit from verifying design's file/symbol references actually exist. Budget: 15 Read / 10 Grep / 5 Glob.
 
 6. Apply the criteria. Standard severity definitions:
    - **critical**: Must fix — incorrect approach, missing requirement, will not work
@@ -44,7 +44,7 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
 
 7. Determine verdict: critical/major → FAIL; only minor or none → PASS.
 
-8. **Post a review comment** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+8. **Post a review comment** — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
    - **Marker**: `<!-- sdd:review:design:<role> -->` (substitute `<role>` = `$2`)
    - **Temp file path**: `/tmp/sdd-review-design-<role>-$1.md`
    - **Step 1** (Write tool): render body using the standard format (see `analyze_review.md` template) with stage=design and role=`<role>`. Include the `<!-- sdd:findings:json -->` block per `_review_helpers.md` Section B.

@@ -4,7 +4,7 @@
 
 Independently reviews the analyze output. Reads the Issue + analyze comment, applies the role-specific criteria, posts a review comment, returns a one-line verdict.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -26,10 +26,10 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
 2. If analyze output is missing → return `FAIL: analyze output not found on Issue #$1`.
 
 3. Read the role-specific criteria file based on `$2`:
-   - `$2=completeness` → `${CLAUDE_SKILL_DIR}/commands/ai-review-analyze-completeness.md`
-   - `$2=quality` → `${CLAUDE_SKILL_DIR}/commands/ai-review-analyze-quality.md`
+   - `$2=completeness` → `<<SKILL_DIR>>/commands/ai-review-analyze-completeness.md`
+   - `$2=quality` → `<<SKILL_DIR>>/commands/ai-review-analyze-quality.md`
 
-4. **Codebase exploration (optional, within budget)** per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section D. Verify any code references in the analyze output exist as described.
+4. **Codebase exploration (optional, within budget)** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Verify any code references in the analyze output exist as described.
 
 5. Apply the criteria. Standard severity definitions:
    - **critical**: Must fix — incorrect logic, missing requirement, security risk
@@ -41,7 +41,7 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
    - Only `minor` or none → **PASS** (suggestions included)
    - Do NOT combine with other reviewers — the orchestrator merges verdicts.
 
-7. **Post a review comment** to the Issue — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+7. **Post a review comment** to the Issue — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
    - **Marker**: `<!-- sdd:review:analyze:<role> -->` (substitute `<role>` = `$2`)
    - **Temp file path**: `/tmp/sdd-review-analyze-<role>-$1.md`
    - **Step 1** (Write tool): render the body below into the temp file.

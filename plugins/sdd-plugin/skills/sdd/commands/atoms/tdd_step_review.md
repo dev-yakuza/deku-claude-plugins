@@ -4,7 +4,7 @@
 
 Lightweight diff-only review between TDD steps (3-1 Red, 3-2 Green, 3-3 Refactor, 3-4 E2E). Reads the last step's git commit diff, applies step-specific criteria, posts a review comment to the Issue, returns a one-line verdict.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -26,7 +26,7 @@ Lightweight diff-only review between TDD steps (3-1 Red, 3-2 Green, 3-3 Refactor
    git show $4
    ```
 
-2a. **Read the test-evidence comment** posted by the work atom per `${CLAUDE_SKILL_DIR}/commands/atoms/_test_evidence.md`:
+2a. **Read the test-evidence comment** posted by the work atom per `<<SKILL_DIR>>/commands/atoms/_test_evidence.md`:
 
    ```bash
    gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:test-evidence:step-$2 -->")) | .body'
@@ -37,13 +37,13 @@ Lightweight diff-only review between TDD steps (3-1 Red, 3-2 Green, 3-3 Refactor
    - If the search returns empty AND `$4 != EMPTY` AND `$5 != NONE` → finding `[major] rule_id: test-evidence-log-missing` ("work atom did not post raw test runner output; reported counts are unverifiable"). Continue to step 3 — do not return early; other checks still apply.
    - If the search returns a body → remember it as `<evidence-log>` for step 5a.
 
-3. Read the criteria: `${CLAUDE_SKILL_DIR}/commands/ai-review-implement-step.md`. Use the section matching `$2`:
+3. Read the criteria: `<<SKILL_DIR>>/commands/ai-review-implement-step.md`. Use the section matching `$2`:
    - `$2=1` → "Step 3-1: Red"
    - `$2=2` → "Step 3-2: Green"
    - `$2=3` → "Step 3-3: Refactor"
    - `$2=4` → "Step 3-4: E2E"
 
-4. **Codebase exploration (lighter budget)** per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section D: max **5 Read / 3 Grep / 0 Glob**. Use sparingly — this is a quick step review, not a full audit.
+4. **Codebase exploration (lighter budget)** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D: max **5 Read / 3 Grep / 0 Glob**. Use sparingly — this is a quick step review, not a full audit.
 
 5. Apply the step-specific criteria to the diff. Severity definitions:
    - **critical**: This step is broken in a way that compounds into the next step
@@ -73,7 +73,7 @@ Lightweight diff-only review between TDD steps (3-1 Red, 3-2 Green, 3-3 Refactor
    - critical/major → **FAIL** (the orchestrator will re-spawn this step's atom)
    - only minor or none → **PASS** (proceed to next step)
 
-7. **Post a review comment** to the **Issue** (not the PR — PR may not exist yet) — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+7. **Post a review comment** to the **Issue** (not the PR — PR may not exist yet) — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
    - **Marker**: `<!-- sdd:review:implement:step-$2 -->` (substitute `$2` literally — e.g. `<!-- sdd:review:implement:step-1 -->`)
    - **Temp file path**: `/tmp/sdd-review-implement-step-$2-$1.md`
    - **Step 1** (Write tool): render the body below into the temp file.

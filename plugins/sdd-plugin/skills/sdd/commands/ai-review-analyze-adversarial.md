@@ -2,7 +2,7 @@
 
 **Role lens**: REFUTE the analyze output. Find at least one weakness. Default to skepticism.
 
-See also `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section E for the general adversarial reviewer prompt.
+See also `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section E for the general adversarial reviewer prompt.
 
 ## Stage-specific refutation angles
 

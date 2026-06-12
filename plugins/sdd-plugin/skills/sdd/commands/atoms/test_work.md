@@ -25,7 +25,7 @@ For Parent Issue path, also verify all children are `sdd:done` before running (r
 
 ## Step 0: Pre-flight context discovery (both paths)
 
-If `$2` (retry) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` — tier **Light**, Section B items 1 + 2 (project conventions + commit message style).
+If `$2` (retry) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Light**, Section B items 1 + 2 (project conventions + commit message style).
 
 For `test_work` specifically: item 1's convention reading should pay attention to **testing conventions** (test framework, test directory layout, assertion style).
 
@@ -79,7 +79,7 @@ E2E tests were already written in Stage 3 (implement) and included in the PR. Th
 
 7. Determine language from `.github/.sdd-lang` (same fallback rules).
 
-8. **Post to Issue** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+8. **Post to Issue** — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
    - **Marker**: `<!-- sdd:test:output -->`
    - **Temp file path**: `/tmp/sdd-test-output-$1.md`
    - **Step 1** (Write tool): render the body (format below) into the temp file.
@@ -150,7 +150,7 @@ Child Issues have individual tests; cross-child integration tests may be needed 
      - Create test branch: `test/<parent-feature-name>`.
      - Write E2E test code following existing framework patterns.
      - Run E2E tests → record results.
-     - Create a PR for the integration tests. Per the **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`, do NOT use heredoc or `$(cat <<EOF ...)` inside the Bash call. Instead, write the PR body to a temp file via the **Write** tool first, then pass it via `--body-file`:
+     - Create a PR for the integration tests. Per the **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`, do NOT use heredoc or `$(cat <<EOF ...)` inside the Bash call. Instead, write the PR body to a temp file via the **Write** tool first, then pass it via `--body-file`:
        ```
        # Step 1 (Write tool, not Bash) — render body into /tmp/sdd-test-parent-<Issue>.md:
        #   Line 1: Refs #<Issue>           (inline the literal Issue number from $1)
@@ -178,7 +178,7 @@ Child Issues have individual tests; cross-child integration tests may be needed 
 
    *Cross-stage / cross-child integration analysis is NOT done here — the orchestrator spawns `parent_integration_review.md` for that.*
 
-6. **Post to Issue** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). Same procedure as the single/child path step 8 above:
+6. **Post to Issue** — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). Same procedure as the single/child path step 8 above:
    - **Marker**: `<!-- sdd:test:output -->`
    - **Temp file path**: `/tmp/sdd-test-output-$1.md`
    - Render the parent variant of the body (include the integration PR URL if created, and the `<details>`-block self-review trace before the closing marker, in the same style as the single/child path).

@@ -4,11 +4,11 @@
 
 This file is a **dispatcher**. It runs in the main session, reads Issue state from GitHub (labels + comments + PRs), determines which stage orchestrator to invoke, and then reads + executes that orchestrator. It does **NOT** itself spawn subagents — the orchestrators it routes to are responsible for atom spawning.
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Input Validation
 
-Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
 ## Process
 
@@ -50,11 +50,11 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
 4. **Determine the action**:
    - **If all children are `sdd:done`**:
      - Update parent label: `gh issue edit $1 --remove-label "sdd:implement" --add-label "sdd:test"` (label transitions only — do NOT spawn subagents).
-     - **Read + execute inline (do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/test.md` and execute its instructions for Issue #$1 in this main session. The test orchestrator handles the parent path internally.
+     - **Read + execute inline (do NOT spawn a subagent)**: read `<<SKILL_DIR>>/commands/test.md` and execute its instructions for Issue #$1 in this main session. The test orchestrator handles the parent path internally.
    - **If any child is incomplete**:
      - Check skip-review setting (Common Definitions → Skip Review Setting).
      - If skip-review contains any of `analyze`, `design`, `implement`, `pr` → **stop here** without asking. Report pending children and exit cleanly. The surrounding flow (e.g., `/sdd batch` or `/sdd auto`) is responsible for queuing the pending children for processing.
-     - Otherwise → ask user which child to resume; then **read + execute inline (do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/resume.md` and execute for the chosen child Issue in this main session.
+     - Otherwise → ask user which child to resume; then **read + execute inline (do NOT spawn a subagent)**: read `<<SKILL_DIR>>/commands/resume.md` and execute for the chosen child Issue in this main session.
 
 ## Dispatch: Single Issue or Child Issue
 
@@ -69,8 +69,8 @@ Determine the resume point based on findings:
 | `sdd:design`           | `design:output` exists                         | `design.md` (re-confirm pattern, same as above)                  |
 | `sdd:implement`        | `design:output` exists, no PR                  | `implement.md` (will run plan + TDD from scratch)                |
 | `sdd:implement`        | open PR exists                                 | `implement.md` (the TDD atom's mode detection will continue from the existing PR) |
-| `sdd:implement`        | PR closed (not merged)                         | Ask user: reopen or start a new PR; then `implement.md`          |
-| `sdd:implement`        | branch exists, no PR                           | Ask user: create PR from existing branch or start fresh; then `implement.md` |
+| `sdd:implement`        | PR closed (not merged)                         | In skip-review (`implement`) mode: **start a new PR automatically** (do NOT ask). In interactive mode: ask user reopen vs new PR. Then `implement.md` |
+| `sdd:implement`        | branch exists, no PR                           | In skip-review (`implement`) mode: **create PR from the existing branch automatically** (do NOT ask). In interactive mode: ask user. Then `implement.md` |
 | `sdd:test`             | PR(s) present                                  | `test.md`                                                        |
 | `sdd:done`             | —                                              | Report: "Issue is already complete." Stop.                       |
 

@@ -4,7 +4,7 @@
 
 Produces the SDD Stage 1 (Analyze) output for one Issue. Reads inputs from GitHub, writes the analysis as an Issue comment, returns a one-line result string.
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -15,7 +15,7 @@ Produces the SDD Stage 1 (Analyze) output for one Issue. Reads inputs from GitHu
 
 ### Step 0: Pre-flight context discovery
 
-If retry (`$2` provided) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` — tier **Light**, Section B items 1 + 2 (project conventions + commit message style).
+If retry (`$2` provided) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Light**, Section B items 1 + 2 (project conventions + commit message style).
 
 ### Main work (numbered steps below)
 
@@ -24,7 +24,7 @@ If retry (`$2` provided) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/at
    gh issue view $1
    ```
 
-2. Detect child Issue per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md` (use the multi-language regex `(Parent|상위 |親)Issue: #<number>` to support en/ko/ja templates). If a parent reference is found, read the parent's analyze and design outputs for context:
+2. Detect child Issue per Common Definitions → Parent/Child Issue Detection in `<<SKILL_DIR>>/SKILL.md` (use the multi-language regex `(Parent|상위 |親)Issue: #<number>` to support en/ko/ja templates). If a parent reference is found, read the parent's analyze and design outputs for context:
    ```bash
    gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
    gh api repos/<owner>/<repo>/issues/<parent>/comments \
@@ -48,7 +48,7 @@ If retry (`$2` provided) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/at
 
 7. Determine language: read `.github/.sdd-lang`. If the file does not exist, detect the primary language of the Issue body and map to the closest supported language (`en`, `ko`, `ja`). If unsupported, default to `en`.
 
-8. Format output using the template `${CLAUDE_SKILL_DIR}/templates/{lang}/output_analyze.md`. For no-action, use a brief no-action explanation inside the same `<!-- sdd:analyze:output -->` marker.
+8. Format output using the template `<<SKILL_DIR>>/templates/{lang}/output_analyze.md`. For no-action, use a brief no-action explanation inside the same `<!-- sdd:analyze:output -->` marker.
 
 9. **Self-review (blockers only)**: before posting, verify the output passes these *posting-blocking* checks:
    - [ ] Marker is present (`<!-- sdd:analyze:output -->`)
@@ -61,7 +61,7 @@ If retry (`$2` provided) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/at
 
    *Quality, completeness, risk evaluation are NOT done here — they are the Agent reviewers' job. Keep self-review minimal.*
 
-10. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B), sorted `critical → major → minor` (Section C.1). Parse it and address every `critical` and `major` finding individually. Read `minor` findings as supporting context — they often pinpoint the specific wording or section that a higher-severity finding only described abstractly; do not skip them when they reference the same area you are revising. Mention in the output how each `critical`/`major` finding was resolved (or why it cannot be).
+10. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section B), sorted `critical → major → minor` (Section C.1). Parse it and address every `critical` and `major` finding individually. Read `minor` findings as supporting context — they often pinpoint the specific wording or section that a higher-severity finding only described abstractly; do not skip them when they reference the same area you are revising. Mention in the output how each `critical`/`major` finding was resolved (or why it cannot be).
 
 11. **Append self-review trace** to the output. Inside the same `<!-- sdd:analyze:output -->` block, before the closing marker, embed:
 
@@ -79,7 +79,7 @@ If retry (`$2` provided) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/at
 
     List only the blockers actually checked; mark `[x]` for clean, `[ ]` with inline note for fixed. Skip the `<details>` block entirely if there is nothing to record.
 
-12. **Post to Issue** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). Inline `--body` is forbidden because the body contains `\n#` patterns that trip a non-bypassable Claude Code heuristic.
+12. **Post to Issue** — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). Inline `--body` is forbidden because the body contains `\n#` patterns that trip a non-bypassable Claude Code heuristic.
     - **Marker**: `<!-- sdd:analyze:output -->`
     - **Temp file path**: `/tmp/sdd-analyze-output-$1.md`
     - **Step 1** (Write tool): render the analysis body with marker into the temp file.

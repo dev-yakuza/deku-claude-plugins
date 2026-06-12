@@ -6,11 +6,11 @@ Define HOW to implement based on the requirements.
 
 This file is an **orchestrator**. It runs in the main session and composes atomic operations via the Agent tool. The atoms (`atoms/design_work.md`, `atoms/design_review.md`, `atoms/design_adversarial.md`) do the actual work; this file manages state, retries, and user interaction.
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Input Validation
 
-Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
 ## Precondition
 
@@ -18,7 +18,7 @@ The Issue must have an `<!-- sdd:analyze:output -->` comment. If missing → rep
 
 ## Phase 0: Depth label detection
 
-Per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section C:
+Per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C:
 
 ```bash
 gh issue view $1 --json labels --jq '[.labels[].name]'
@@ -47,7 +47,7 @@ Up to **3 rounds** maximum. Each round = work atom → 3 parallel review atoms �
 - `model`: `opus`
 - `description`: `design work for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_work.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/design_work.md` and execute its instructions for Issue #$1.
   > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
 
 Parse the subagent's `>>> RESULT <<<` line:
@@ -62,7 +62,7 @@ Agent A (completeness):
 - `model`: per Phase 0 table
 - `description`: `design review (completeness) for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_review.md` and execute its instructions for Issue #$1 with role `completeness`.
+  > Read `<<SKILL_DIR>>/commands/atoms/design_review.md` and execute its instructions for Issue #$1 with role `completeness`.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Agent B (quality):
@@ -70,7 +70,7 @@ Agent B (quality):
 - `model`: per Phase 0 table
 - `description`: `design review (quality) for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_review.md` and execute its instructions for Issue #$1 with role `quality`.
+  > Read `<<SKILL_DIR>>/commands/atoms/design_review.md` and execute its instructions for Issue #$1 with role `quality`.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Agent C (adversarial):
@@ -78,7 +78,7 @@ Agent C (adversarial):
 - `model`: per Phase 0 table
 - `description`: `design adversarial for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_adversarial.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/design_adversarial.md` and execute its instructions for Issue #$1.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Parse all three `>>> RESULT <<<` lines:
@@ -102,7 +102,7 @@ Parse all three `>>> RESULT <<<` lines:
 Same as Round 1 Steps 1.1–1.3, but the work atom prompt **must include structured retry feedback** as `$2`:
 
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/design_work.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/design_work.md` and execute its instructions for Issue #$1.
   > Previous round structured findings — sorted by severity (critical → major → minor). Address every critical and major finding; read minor findings as supporting context (often the specific design row/file/symbol a higher-severity finding referenced abstractly). Do not skip minor findings tied to the same area.
   > <inlined JSON array>
   > Return EXACTLY one line in the contract.
@@ -123,11 +123,15 @@ Runs only if round 3 failed.
      - [critical] ... (design/<role>)
      - [major] ... (design/<role>)
    ```
-3. **Override skip-review** — ask the user regardless of skip-review setting:
-   - Continue to Phase 2 / Pause for manual intervention / Stop?
-   - On "Continue" → proceed.
-   - On "Pause" → stop. User resumes via `/sdd resume <N>` after manual fixes.
-   - On "Stop" → exit cleanly.
+3. **Honor skip-review** (auto-decide in unattended runs):
+   - If `design` is in skip-review (e.g. `/sdd auto`, `/sdd batch`):
+     - Log to the Issue (via comment) and to the orchestrator output: "⚠ Round 3 escalation: review still has critical/major findings, but `skip-review: design` is set — auto-continuing to Phase 2. Findings remain on the Issue for human follow-up."
+     - Proceed to **Phase 2** immediately without asking. Do NOT call AskUserQuestion or any interactive prompt.
+   - Else (interactive mode):
+     - Ask the user: "Continue to Phase 2 / Pause for manual intervention / Stop?"
+     - On "Continue" → proceed.
+     - On "Pause" → stop. User resumes via `/sdd resume <N>` after manual fixes.
+     - On "Stop" → exit cleanly.
 
 ## Phase 2: Branching on path (SINGLE vs CHILDREN)
 
@@ -137,7 +141,7 @@ Runs only if round 3 failed.
 2. If `design` is in skip-review:
    - Log: "User review skipped (skip-review: design). AI review already ran."
    - Update label to `sdd:implement`.
-   - **Auto-proceed (read + execute inline, do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/implement.md` and execute its instructions for Issue #$1 in this same main session.
+   - **Auto-proceed (read + execute inline, do NOT spawn a subagent)**: read `<<SKILL_DIR>>/commands/implement.md` and execute its instructions for Issue #$1 in this same main session.
 3. If `design` is NOT in skip-review:
    - Summarize for the user: which round passed, any minor suggestions still on the Issue, the design comment location.
    - Ask for confirmation on technical approach and PR split.
@@ -160,11 +164,11 @@ The orchestrator now:
 4. If `design` is NOT in skip-review:
    - Summarize: design posted, children #A, #B, ... created, parent now at `sdd:implement`.
    - Ask: "Which child Issue would you like to start with?"
-   - On selection (read + execute inline, do NOT spawn a subagent): read `${CLAUDE_SKILL_DIR}/commands/analyze.md` and execute its instructions for the selected child Issue in this same main session.
+   - On selection (read + execute inline, do NOT spawn a subagent): read `<<SKILL_DIR>>/commands/analyze.md` and execute its instructions for the selected child Issue in this same main session.
 
 ## Notes
 
-- **AI review always runs.** `skip-review: design` skips only the user confirmation — the AI review loop (Phase 1) and Phase 1.5 escalation always execute.
+- **AI review always runs.** `skip-review: design` skips only the user confirmation — the AI review loop (Phase 1) still executes. The Phase 1.5 escalation gate still triggers on Round 3 failure, but in skip-review mode it auto-continues to Phase 2 (findings stay on the Issue); in interactive mode it asks the user.
 - **Atoms never spawn other atoms.** All Agent-tool spawning happens here. The work atom does its own codebase exploration via Read/Grep/Glob (no Explore subagent).
 - **Reviews are independent.** Three review atoms run in parallel with independent contexts.
 - **Retry feedback is structured JSON.** Lossless handoff to work atom.

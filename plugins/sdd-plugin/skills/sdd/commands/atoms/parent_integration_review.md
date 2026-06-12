@@ -6,7 +6,7 @@ Cross-stage synthesis review at the **parent Issue level**. Reads parent's analy
 
 Runs only on **parent Issues** during the test stage. Invoked by `test.md` orchestrator when `test_work.md` returns `OK PARENT ...`.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -33,9 +33,9 @@ Runs only on **parent Issues** during the test stage. Invoked by `test.md` orche
    ```
    Extract the `<!-- sdd:findings:json -->` blocks. Also fetch each child's PR diff (find via `gh pr list --search "Refs #<child>"`).
 
-5. Read the criteria: `${CLAUDE_SKILL_DIR}/commands/ai-review-parent-integration.md`.
+5. Read the criteria: `<<SKILL_DIR>>/commands/ai-review-parent-integration.md`.
 
-6. **Codebase exploration (mandatory)** per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section D:
+6. **Codebase exploration (mandatory)** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D:
    - Read the interface/contract files where children connect
    - Verify cross-child invariants hold in the actual code
    - Budget: 15 Read / 10 Grep / 5 Glob
@@ -49,7 +49,7 @@ Runs only on **parent Issues** during the test stage. Invoked by `test.md` orche
 
 8. Determine verdict: critical/major → FAIL; only minor or none → PASS.
 
-9. **Post a review comment on the parent Issue** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). The marker is defined in `SKILL.md`.
+9. **Post a review comment on the parent Issue** — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). The marker is defined in `SKILL.md`.
     - **Marker**: `<!-- sdd:review:parent -->`
     - **Temp file path**: `/tmp/sdd-review-parent-$1.md`
     - **Step 1** (Write tool): render the body (format below) into the temp file.

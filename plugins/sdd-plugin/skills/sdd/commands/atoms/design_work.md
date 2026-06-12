@@ -4,7 +4,7 @@
 
 Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub (analyze comment + parent context if child), explores the codebase directly via Read/Grep/Glob, posts the design as an Issue comment, and — if the design splits into multiple PRs — creates child Issues. Returns a one-line result.
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -19,7 +19,7 @@ Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub
 
 ### Step 0: Pre-flight context discovery
 
-If retry (`$2` provided) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` — tier **Medium**, Section B items 1 + 2 + 3 (project conventions + commit message style + similar past PRs via `gh pr list --search`).
+If retry (`$2` provided) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Medium**, Section B items 1 + 2 + 3 (project conventions + commit message style + similar past PRs via `gh pr list --search`).
 
 The similar past PRs (item 3) inform: file organization patterns, naming conventions, architectural choices in this codebase. Use the discovered patterns to guide steps 4–9 below.
 
@@ -37,7 +37,7 @@ The similar past PRs (item 3) inform: file organization patterns, naming convent
      --jq '.[] | select(.body | contains("sdd:analyze:output")) | .body'
    ```
 
-3. Detect child Issue per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md` (multi-language regex `(Parent|상위 |親)Issue: #<number>`). If a parent reference is found, read the parent's design output:
+3. Detect child Issue per Common Definitions → Parent/Child Issue Detection in `<<SKILL_DIR>>/SKILL.md` (multi-language regex `(Parent|상위 |親)Issue: #<number>`). If a parent reference is found, read the parent's design output:
    ```bash
    gh api repos/<owner>/<repo>/issues/<parent>/comments \
      --jq '.[] | select(.body | contains("sdd:design:output")) | .body'
@@ -77,7 +77,7 @@ The similar past PRs (item 3) inform: file organization patterns, naming convent
 
 10. Determine language: read `.github/.sdd-lang`. If the file does not exist, detect from Issue body and map to `en`/`ko`/`ja`. Default `en`.
 
-11. Format design output using the template `${CLAUDE_SKILL_DIR}/templates/{lang}/output_design.md`.
+11. Format design output using the template `<<SKILL_DIR>>/templates/{lang}/output_design.md`.
 
 12. **Self-review (blockers only)**: before posting, verify posting-blocking checks:
     - [ ] Marker is present (`<!-- sdd:design:output -->`)
@@ -90,7 +90,7 @@ The similar past PRs (item 3) inform: file organization patterns, naming convent
 
     *Quality, completeness, risk evaluation are NOT done here — Agent reviewers' job.*
 
-13. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section B), sorted `critical → major → minor` (Section C.1). Parse it and address every `critical` and `major` finding individually. Read `minor` findings as supporting context — they often pinpoint the specific design row, file path, or symbol that a higher-severity finding only described abstractly. Mention in the design how each `critical`/`major` finding was resolved.
+13. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section B), sorted `critical → major → minor` (Section C.1). Parse it and address every `critical` and `major` finding individually. Read `minor` findings as supporting context — they often pinpoint the specific design row, file path, or symbol that a higher-severity finding only described abstractly. Mention in the design how each `critical`/`major` finding was resolved.
 
 14. **Append self-review trace** to the design output. Inside the `<!-- sdd:design:output -->` block, before the closing marker, embed:
 
@@ -107,7 +107,7 @@ The similar past PRs (item 3) inform: file organization patterns, naming convent
 
     Skip the block entirely if there is nothing to record.
 
-15. **Post the design comment** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+15. **Post the design comment** — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
     - **Marker**: `<!-- sdd:design:output -->`
     - **Temp file path**: `/tmp/sdd-design-output-$1.md`
     - **Step 1** (Write tool): render the formatted design body into the temp file.
@@ -124,7 +124,7 @@ The similar past PRs (item 3) inform: file organization patterns, naming convent
     a. Check if `<!-- sdd:children:output -->` already exists on this Issue. If yes (retry case), do NOT re-create children — keep existing children and skip to step 17. If no, proceed to (b).
 
     b. For each sub-feature in the design (let `<seq>` be the 1-based sub-feature index):
-       - Format child Issue body using `${CLAUDE_SKILL_DIR}/templates/{lang}/output_child_issue.md` with manual placeholder substitution:
+       - Format child Issue body using `<<SKILL_DIR>>/templates/{lang}/output_child_issue.md` with manual placeholder substitution:
          - `{{parent_issue}}` → `$1`
          - `{{sub_feature_description}}` → sub-feature description from design
          - `{{criteria_list}}` → markdown checkbox list from design
@@ -135,7 +135,7 @@ The similar past PRs (item 3) inform: file organization patterns, naming convent
          ```
        - Capture the new Issue number from the command's output URL.
 
-    c. Post the parent's children list comment using `${CLAUDE_SKILL_DIR}/templates/{lang}/output_children.md` with a row per child Issue, again via the Section F pattern:
+    c. Post the parent's children list comment using `<<SKILL_DIR>>/templates/{lang}/output_children.md` with a row per child Issue, again via the Section F pattern:
        - **Marker**: `<!-- sdd:children:output -->`
        - **Temp file path**: `/tmp/sdd-children-output-$1.md`
        - **Step 1** (Write tool): render the children table into the temp file.

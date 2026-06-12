@@ -4,7 +4,7 @@
 
 Executes TDD step 3-2: write minimal production code to make the failing tests pass. Must end in confirmed Green state.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -21,7 +21,7 @@ Executes TDD step 3-2: write minimal production code to make the failing tests p
 
 ### Step 0: Pre-flight context discovery
 
-If `$3` (retry) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` — tier **Code-focused**, Section B item 4 only (target directory survey).
+If `$3` (retry) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Code-focused**, Section B item 4 only (target directory survey).
 
 For Green specifically: focus the directory read on existing implementation patterns — error handling style, import conventions, naming.
 
@@ -76,7 +76,7 @@ For Green specifically: focus the directory read on existing implementation patt
 
    Match repo's convention. No Claude co-author.
 
-9. **Post test evidence comment** per `${CLAUDE_SKILL_DIR}/commands/atoms/_test_evidence.md`. Inputs: `<n>=2`, `<sha>` from `git rev-parse HEAD`, the captured `<passed>/<total>/<failed>`, and the full test runner output from step 5. If the procedure returns the failure described in its Step 5, return that `FAIL:` from this atom.
+9. **Post test evidence comment** per `<<SKILL_DIR>>/commands/atoms/_test_evidence.md`. Inputs: `<n>=2`, `<sha>` from `git rev-parse HEAD`, the captured `<passed>/<total>/<failed>`, and the full test runner output from step 5. If the procedure returns the failure described in its Step 5, return that `FAIL:` from this atom.
 
 ## Return contract
 

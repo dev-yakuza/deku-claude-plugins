@@ -9,11 +9,11 @@ Use cases:
 - Spot-check a stage's review quality mid-pipeline.
 - Re-trigger the parallel completeness/quality reviewers without invoking the full stage orchestrator (which would also re-spawn the work atom).
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Input Validation
 
-Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
 ## Determine Issue type
 
@@ -50,10 +50,10 @@ Map the detected stage to its review atom:
 
 | Detected stage     | Atom file                                                    |
 |--------------------|--------------------------------------------------------------|
-| `analyze:output`   | `${CLAUDE_SKILL_DIR}/commands/atoms/analyze_review.md`       |
-| `design:output`    | `${CLAUDE_SKILL_DIR}/commands/atoms/design_review.md`        |
-| `implement:plan`   | `${CLAUDE_SKILL_DIR}/commands/atoms/implement_review.md`     |
-| `test:output`      | `${CLAUDE_SKILL_DIR}/commands/atoms/test_review.md`          |
+| `analyze:output`   | `<<SKILL_DIR>>/commands/atoms/analyze_review.md`       |
+| `design:output`    | `<<SKILL_DIR>>/commands/atoms/design_review.md`        |
+| `implement:plan`   | `<<SKILL_DIR>>/commands/atoms/implement_review.md`     |
+| `test:output`      | `<<SKILL_DIR>>/commands/atoms/test_review.md`          |
 
 Spawn two Agent tool calls in a **single message** for concurrent execution:
 
@@ -61,14 +61,14 @@ Agent A:
 - `subagent_type`: `general-purpose`
 - `description`: `<stage> review (completeness) for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/<stage>_review.md` and execute its instructions for Issue #$1 with role `completeness`.
+  > Read `<<SKILL_DIR>>/commands/atoms/<stage>_review.md` and execute its instructions for Issue #$1 with role `completeness`.
   > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
 
 Agent B:
 - `subagent_type`: `general-purpose`
 - `description`: `<stage> review (quality) for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/<stage>_review.md` and execute its instructions for Issue #$1 with role `quality`.
+  > Read `<<SKILL_DIR>>/commands/atoms/<stage>_review.md` and execute its instructions for Issue #$1 with role `quality`.
   > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
 
 ### 3. Parse and report
@@ -93,7 +93,7 @@ Parent reviews are aggregate, not per-stage. They do not use review atoms — th
    - Read its current label
    - Read the latest stage-output comment (via the same marker detection as Standard Review)
    - If in `sdd:implement` or `sdd:test`: check PR status (`gh pr list --search "Refs #<child>"`)
-3. Generate a summary review and post on the parent Issue — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+3. Generate a summary review and post on the parent Issue — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
    - **Marker**: `<!-- sdd:review:parent -->`
    - **Temp file path**: `/tmp/sdd-review-parent-$1.md`
    - **Step 1** (Write tool): render the body below into the temp file.

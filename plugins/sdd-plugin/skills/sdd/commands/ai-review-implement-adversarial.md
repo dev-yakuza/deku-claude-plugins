@@ -2,7 +2,7 @@
 
 **Role lens**: REFUTE the PR. Find at least one weakness.
 
-See `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section E for the general adversarial prompt.
+See `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section E for the general adversarial prompt.
 
 ## Stage-specific refutation angles
 
