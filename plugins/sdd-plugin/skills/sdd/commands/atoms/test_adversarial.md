@@ -4,7 +4,7 @@
 
 Independently REFUTES the test output. Applies the adversarial lens, posts a review comment, returns a one-line verdict.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -26,7 +26,7 @@ Role is fixed as `adversarial`.
 
 3. Detect path (single/child vs parent) by inspecting the test output body (`Path: Single/Child Issue` vs `Path: Parent Issue`).
 
-4. Read the adversarial criteria: `${CLAUDE_SKILL_DIR}/commands/ai-review-test-adversarial.md`. Also Section E of `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md`.
+4. Read the adversarial criteria: `<<SKILL_DIR>>/commands/ai-review-test-adversarial.md`. Also Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md`.
 
 5. **Codebase exploration** per `_review_helpers.md` Section D:
    - Read the PR's test files referenced in the test output
@@ -37,7 +37,7 @@ Role is fixed as `adversarial`.
 
 7. Determine verdict: critical/major → FAIL; only minor or none → PASS.
 
-8. **Post a review comment** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). Location depends on path:
+8. **Post a review comment** — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern). Location depends on path:
    - **Single/Child path** (post on the **PR**):
      - Marker: `<!-- sdd:review:test:adversarial -->`
      - Temp file path: `/tmp/sdd-review-test-adversarial-pr<PR_NUM>.md`

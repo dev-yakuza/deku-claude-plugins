@@ -4,7 +4,7 @@
 
 Executes TDD step 3-4: write E2E tests for the implemented feature, if the repo has an E2E setup.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -21,7 +21,7 @@ Executes TDD step 3-4: write E2E tests for the implemented feature, if the repo 
 
 ### Step 0: Pre-flight context discovery
 
-If `$3` (retry) → skip. Else: follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` — tier **Code-focused**, Section B item 4 only (target directory survey).
+If `$3` (retry) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Code-focused**, Section B item 4 only (target directory survey).
 
 For E2E specifically: focus the directory read on existing E2E test files — the framework used (Playwright/Cypress/Puppeteer/Flutter integration_test/etc.), test fixture patterns, page-object usage, waiting strategy.
 
@@ -72,7 +72,7 @@ For E2E specifically: focus the directory read on existing E2E test files — th
 
    If E2E was skipped, no commit. No Claude co-author.
 
-7. **Post test evidence comment** per `${CLAUDE_SKILL_DIR}/commands/atoms/_test_evidence.md`. Inputs: `<n>=4`, `<sha>` from `git rev-parse HEAD`, the captured `<passed>/<total>/<failed>`, and the full E2E runner output from step 3a. Skip this step entirely when returning `OK E2E_SKIPPED` (no commit, no test claim to verify). If the procedure returns the failure described in its Step 5, return that `FAIL:` from this atom.
+7. **Post test evidence comment** per `<<SKILL_DIR>>/commands/atoms/_test_evidence.md`. Inputs: `<n>=4`, `<sha>` from `git rev-parse HEAD`, the captured `<passed>/<total>/<failed>`, and the full E2E runner output from step 3a. Skip this step entirely when returning `OK E2E_SKIPPED` (no commit, no test claim to verify). If the procedure returns the failure described in its Step 5, return that `FAIL:` from this atom.
 
 ## Return contract
 

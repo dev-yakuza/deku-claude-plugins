@@ -6,15 +6,15 @@ Focus ONLY on What and Why. Do NOT discuss How (technical implementation).
 
 This file is an **orchestrator**. It runs in the main session and composes atomic operations via the Agent tool. The atoms (`atoms/analyze_work.md`, `atoms/analyze_review.md`, `atoms/analyze_adversarial.md`) do the actual work; this file manages state, retries, and user interaction.
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Input Validation
 
-Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
 ## Phase 0: Depth label detection
 
-Read the Issue's labels to determine review depth (per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section C):
+Read the Issue's labels to determine review depth (per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C):
 
 ```bash
 gh issue view $1 --json labels --jq '[.labels[].name]'
@@ -47,7 +47,7 @@ Up to **3 rounds** maximum. Each round = work atom → 3 parallel review atoms �
 - `model`: `opus` (per Phase 0 table)
 - `description`: `analyze work for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/analyze_work.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/analyze_work.md` and execute its instructions for Issue #$1.
   > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
 
 Parse the subagent's `>>> RESULT <<<` line:
@@ -62,7 +62,7 @@ Agent A (completeness):
 - `model`: per Phase 0 table for analyze_review/completeness
 - `description`: `analyze review (completeness) for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/analyze_review.md` and execute its instructions for Issue #$1 with role `completeness`.
+  > Read `<<SKILL_DIR>>/commands/atoms/analyze_review.md` and execute its instructions for Issue #$1 with role `completeness`.
   > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
 
 Agent B (quality):
@@ -70,7 +70,7 @@ Agent B (quality):
 - `model`: per Phase 0 table for analyze_review/quality
 - `description`: `analyze review (quality) for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/analyze_review.md` and execute its instructions for Issue #$1 with role `quality`.
+  > Read `<<SKILL_DIR>>/commands/atoms/analyze_review.md` and execute its instructions for Issue #$1 with role `quality`.
   > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
 
 Agent C (adversarial):
@@ -78,7 +78,7 @@ Agent C (adversarial):
 - `model`: per Phase 0 table for analyze_adversarial
 - `description`: `analyze adversarial for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/analyze_adversarial.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/analyze_adversarial.md` and execute its instructions for Issue #$1.
   > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
 
 Parse all three `>>> RESULT <<<` lines:
@@ -102,7 +102,7 @@ Parse all three `>>> RESULT <<<` lines:
 Same as Round 1 Steps 1.1–1.3, but the work atom's prompt **must include the structured retry feedback** as `$2`:
 
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/analyze_work.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/analyze_work.md` and execute its instructions for Issue #$1.
   > Previous round structured findings — sorted by severity (critical → major → minor). Address every critical and major finding; read minor findings as supporting context (often the specific line/symbol a higher-severity finding referenced abstractly). Do not skip minor findings tied to the same area.
   > <inlined JSON array>
   > Return EXACTLY one line in the contract specified by that file.
@@ -122,11 +122,15 @@ This phase runs only if round 3 also failed.
      - [major] <description> (analyze/<role>)
      ...
    ```
-3. **Override skip-review** (even if `analyze` is in skip-review, this gate ALWAYS asks):
-   - Ask the user: "Continue to Phase 2 anyway / Pause for manual intervention / Stop?"
-   - On "Continue" → proceed to Phase 2.
-   - On "Pause" → stop the orchestrator. User will resume via `/sdd resume <N>` after manual fixes.
-   - On "Stop" → exit cleanly.
+3. **Honor skip-review** (auto-decide in unattended runs):
+   - If `analyze` is in skip-review (e.g. `/sdd auto`, `/sdd batch`):
+     - Log to the Issue (via comment) and to the orchestrator output: "⚠ Round 3 escalation: review still has critical/major findings, but `skip-review: analyze` is set — auto-continuing to Phase 2. Findings remain on the Issue for human follow-up."
+     - Proceed to **Phase 2** immediately without asking. Do NOT call AskUserQuestion or any interactive prompt.
+   - Else (interactive mode, no skip-review):
+     - Ask the user: "Continue to Phase 2 anyway / Pause for manual intervention / Stop?"
+     - On "Continue" → proceed to Phase 2.
+     - On "Pause" → stop the orchestrator. User will resume via `/sdd resume <N>` after manual fixes.
+     - On "Stop" → exit cleanly.
 
 ## Phase 2: User Review
 
@@ -149,7 +153,7 @@ This phase runs only if round 3 also failed.
 2. If `analyze` is in skip-review:
    - Log: "User review skipped (skip-review: analyze). AI review already ran."
    - Update label to `sdd:design`.
-   - **Auto-proceed (read + execute inline, do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/design.md` and execute its instructions for Issue #$1 in this same main session. (Spawning a subagent here would create nested-subagent spawning when the design orchestrator itself spawns atoms — Claude Code blocks that.)
+   - **Auto-proceed (read + execute inline, do NOT spawn a subagent)**: read `<<SKILL_DIR>>/commands/design.md` and execute its instructions for Issue #$1 in this same main session. (Spawning a subagent here would create nested-subagent spawning when the design orchestrator itself spawns atoms — Claude Code blocks that.)
 3. If `analyze` is NOT in skip-review:
    - Summarize for the user: which round reviews passed in, any minor suggestions still on the Issue, where the analysis comment is.
    - Ask for confirmation on direction and priorities.
@@ -158,7 +162,7 @@ This phase runs only if round 3 also failed.
 
 ## Notes
 
-- **AI review always runs.** `skip-review: analyze` skips only the **user confirmation** between stages — the AI review loop (Phase 1) always executes. The Phase 1.5 escalation gate also runs regardless of skip-review.
+- **AI review always runs.** `skip-review: analyze` skips only the **user confirmation** between stages — the AI review loop (Phase 1) always executes. The Phase 1.5 escalation gate still runs after Round 3 failure, but its decision branch is automatic in skip-review mode: it auto-continues to Phase 2 and leaves findings on the Issue for human follow-up. In interactive mode (no skip-review) it asks the user.
 - **Atoms never spawn other atoms.** All Agent-tool spawning happens here in the orchestrator (this file). Atoms run as terminal subagents.
 - **Reviews are independent.** The three review atoms run in parallel with independent contexts — they do not see each other's verdicts.
 - **Retry feedback is structured JSON**, not summarized text. Lossless handoff to work atom for retry rounds.

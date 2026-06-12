@@ -4,7 +4,7 @@
 
 Each Issue runs end-to-end (analyze → design → implement → PR) in the **current Claude Code session** via the orchestrator/atom architecture. Unlike `/sdd batch` (which spawns separate `claude -p` subprocesses), `/sdd auto` stays entirely on the Interactive subscription pool — unchanged by the 2026-06-15 billing split that moved `claude -p` to the new metered Agent SDK Credit pool.
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## When to use /sdd auto vs /sdd batch
 
@@ -36,7 +36,7 @@ Each Issue runs end-to-end (analyze → design → implement → PR) in the **cu
 
 ## Input Validation
 
-Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. (For `/sdd auto`, the validation is per-Issue inside the loop — the argument here is the **list** of Issue numbers, not a single number.)
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. (For `/sdd auto`, the validation is per-Issue inside the loop — the argument here is the **list** of Issue numbers, not a single number.)
 
 ## Argument Parsing
 
@@ -46,11 +46,11 @@ Parse `$1`:
 
 ## Phase 1: Collect and Filter Issues
 
-Apply the **same Phase 1 logic as `/sdd batch`** — see `${CLAUDE_SKILL_DIR}/commands/batch.md` "Phase 1: Collect and Filter Issues" (the All-open vs Specific-Issues filter rules, the `sdd:done` / `sdd:child` exclusion semantics, sort order, the "No qualifying Issues" early exit). Apply identical rules; the only differences are display strings and the worktree warning.
+Apply the **same Phase 1 logic as `/sdd batch`** — see `<<SKILL_DIR>>/commands/batch.md` "Phase 1: Collect and Filter Issues" (the All-open vs Specific-Issues filter rules, the `sdd:done` / `sdd:child` exclusion semantics, sort order, the "No qualifying Issues" early exit). Apply identical rules; the only differences are display strings and the worktree warning.
 
 ### Per-Issue validation (Specific-Issues mode only)
 
-When the user provides `1,2,3` (Specific-Issues mode), validate each number per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. For each:
+When the user provides `1,2,3` (Specific-Issues mode), validate each number per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. For each:
 
 ```bash
 gh issue view <n> --json url --jq .url
@@ -76,7 +76,7 @@ Issues to process (in order):
 
 Total: 3 issues (queue may grow as parent Issues spawn children)
 Mode: Sequential (each in the current main session)
-Skip-review: analyze, design, implement, pr (auto-enabled — restored when loop ends)
+Skip-review: analyze, design, implement, pr, qa (auto-enabled — restored when loop ends)
 Child auto-queue: enabled (children created by a parent are appended to the queue)
 Sandbox toggle: you will be prompted before the loop (optional — temporarily disables sandbox to skip per-command bypass confirmations; restored at cleanup)
 ```
@@ -110,7 +110,7 @@ After the Issue list (and dirty-tree warning if applicable), ask "Proceed? [y/N]
 
 ## Phase 2: Verify Tool Permissions
 
-Apply the **same Phase 2 logic as `/sdd batch`** — see `${CLAUDE_SKILL_DIR}/commands/batch.md` "Phase 2: Verify Tool Permissions" (project marker detection, the three permission groups: Required / Recommended / Test Runners, the merge-into-settings logic on confirmation). The recommended baseline allowlist is identical because the SDD pipeline needs the same tools whether the orchestrator runs in `claude -p` or in this main session.
+Apply the **same Phase 2 logic as `/sdd batch`** — see `<<SKILL_DIR>>/commands/batch.md` "Phase 2: Verify Tool Permissions" (project marker detection, the three permission groups: Required / Recommended / Test Runners, the merge-into-settings logic on confirmation). The recommended baseline allowlist is identical because the SDD pipeline needs the same tools whether the orchestrator runs in `claude -p` or in this main session.
 
 ### Difference from `/sdd batch`
 
@@ -145,9 +145,9 @@ The main session itself runs the loop. **No shell script is generated. No `claud
 
 3. Write temporary skip-review:
    ```
-   skip-review: analyze,design,implement,pr
+   skip-review: analyze,design,implement,pr,qa
    ```
-   to `.github/.sdd-config` (via the Write tool). This makes every per-Issue stage orchestrator auto-proceed without user confirmation. `qa` is intentionally NOT included — manual QA at the end of `/sdd test` still asks the user for QA pass/fail.
+   to `.github/.sdd-config` (via the Write tool). This makes every per-Issue stage orchestrator auto-proceed without user confirmation — including manual QA at the end of `/sdd test` (which would otherwise block the loop indefinitely waiting for human input). `/sdd auto` is by design **unattended**; the user reviews PRs and QA evidence on GitHub after the loop completes.
 
 4. Append `.github/.sdd-config` and `.github/.sdd-config.bak` to `.git/info/exclude` if not already present (idempotent check), so subagents' `git stash -u` does not stash these files mid-run.
 
@@ -276,7 +276,7 @@ While `QUEUE` is non-empty:
 
 1. Pop `ISSUE` from front; increment `PROCESSED_COUNT`.
 2. Print: `[$PROCESSED_COUNT/$TOTAL_TARGETS] Processing Issue #<ISSUE>...`
-3. **Dispatch via resume.md** — read `${CLAUDE_SKILL_DIR}/commands/resume.md` and execute its instructions for Issue `<ISSUE>`. The dispatcher inspects Issue labels + comments + PRs, then reads + executes the appropriate stage orchestrator (`analyze.md` / `design.md` / `implement.md` / `test.md`). Because the temporary skip-review setting includes `analyze,design,implement,pr`, each orchestrator auto-advances label-by-label until the stage chain stops at `sdd:test` (post-PR) or `sdd:done` (no-action analyze, or finished test).
+3. **Dispatch via resume.md** — read `<<SKILL_DIR>>/commands/resume.md` and execute its instructions for Issue `<ISSUE>`. The dispatcher inspects Issue labels + comments + PRs, then reads + executes the appropriate stage orchestrator (`analyze.md` / `design.md` / `implement.md` / `test.md`). Because the temporary skip-review setting includes `analyze,design,implement,pr`, each orchestrator auto-advances label-by-label until the stage chain stops at `sdd:test` (post-PR) or `sdd:done` (no-action analyze, or finished test).
 4. On success → mark `SUCCEEDED += 1`. Run **child auto-discovery** (3.3 below).
 5. On unrecoverable failure → mark `FAILED += 1`, append `(ISSUE, <one-line reason>)` to `FAILED_ISSUES`. Continue to the next Issue — do **not** abort the entire queue.
 
@@ -284,7 +284,7 @@ While `QUEUE` is non-empty:
 
 After each successful Issue, run the same `gh issue list --label sdd:child` query as `/sdd batch`'s Phase 3 logic. Use the multi-language parent-reference regex from `batch.md`.
 
-**Important — substitute literal values before invoking Bash.** Per the **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`, do NOT pass shell variable substitutions like `${ISSUE}` inside a quoted argument. The combination of `${...}` and surrounding quotes trips a Claude Code argument heuristic ("brace with quote character — expansion obfuscation") that cannot be suppressed by `permissions.allow`, `--dangerously-skip-permissions`, or `sandbox.enabled = false`.
+**Important — substitute literal values before invoking Bash.** Per the **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`, do NOT pass shell variable substitutions like `${ISSUE}` inside a quoted argument. The combination of `${...}` and surrounding quotes trips a Claude Code argument heuristic ("brace with quote character — expansion obfuscation") that cannot be suppressed by `permissions.allow`, `--dangerously-skip-permissions`, or `sandbox.enabled = false`.
 
 Instead, the main-session narrative substitutes the literal issue number and literal `<owner>/<repo>` (already resolved in Phase 3.1 step 1) into the command, producing a single simple line:
 
@@ -351,7 +351,7 @@ Failed:          <FAILED>
 Time:            <minutes>m <seconds>s
 Config restored: .github/.sdd-config
 Sandbox:         <enabled | disabled — restart in NORMAL mode (no --dangerously-skip-permissions) recommended | unchanged>
-Next steps:      review PRs, run /sdd test <N> for QA if 'qa' was not in your prior skip-review
+Next steps:      review PRs and QA evidence on GitHub (manual QA was auto-skipped because /sdd auto runs unattended)
 ```
 
 (Sandbox status: show `disabled — restart in NORMAL mode (no --dangerously-skip-permissions) recommended` if step 3 of 3.4 found `sandbox.enabled == false`. Show `enabled` if it is true. Step 5e never reaches Phase 3.5 because it exits before the loop, so the "restored" wording is no longer used. The "restart in NORMAL mode" wording is intentional — the user is likely running with `--dangerously-skip-permissions` per the step 5e re-launch guidance, and that flag should not persist beyond /sdd auto.)

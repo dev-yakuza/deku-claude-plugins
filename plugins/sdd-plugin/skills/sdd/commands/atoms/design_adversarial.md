@@ -4,7 +4,7 @@
 
 Independently REFUTES the design output. Reads Issue + analyze + design comments, applies the adversarial lens, posts a review comment, returns a one-line verdict.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -30,7 +30,7 @@ The role is fixed as `adversarial` (no `$2`).
      --jq '.[] | select(.body | contains("sdd:design:output")) | .body'
    ```
 
-4. Read the adversarial criteria: `${CLAUDE_SKILL_DIR}/commands/ai-review-design-adversarial.md`. Also Section E of `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md`.
+4. Read the adversarial criteria: `<<SKILL_DIR>>/commands/ai-review-design-adversarial.md`. Also Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md`.
 
 5. **Codebase exploration (mandatory for design adversarial)** per `_review_helpers.md` Section D. Verify at least:
    - 1-2 file paths cited in the design exist
@@ -42,7 +42,7 @@ The role is fixed as `adversarial` (no `$2`).
    - Any `critical` or `major` → **FAIL**
    - Only `minor` or none → **PASS**
 
-8. **Post a review comment** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+8. **Post a review comment** — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
    - **Marker**: `<!-- sdd:review:design:adversarial -->`
    - **Temp file path**: `/tmp/sdd-review-design-adversarial-$1.md`
    - **Step 1** (Write tool): render body using the standard format (see `analyze_review.md` template) with stage=design and role=adversarial. Include the `<!-- sdd:findings:json -->` block per `_review_helpers.md` Section B.

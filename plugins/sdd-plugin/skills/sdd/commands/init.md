@@ -9,7 +9,7 @@ Set up SDD for the current GitHub repository.
 
 ## Steps
 
-1. **Copy Issue templates** from `${CLAUDE_SKILL_DIR}/templates/{lang}/issue_*.yml` to `.github/ISSUE_TEMPLATE/`.
+1. **Copy Issue templates** from `<<SKILL_DIR>>/templates/{lang}/issue_*.yml` to `.github/ISSUE_TEMPLATE/`.
    - Select the template directory based on the language argument.
 
 2. **Save the selected language** to `.github/.sdd-lang` for other commands to reference.
@@ -26,7 +26,7 @@ Set up SDD for the current GitHub repository.
    gh label create "sdd:review:shallow" --color "c5def5" --description "SDD: Use cheaper models for reviewers on this Issue" --force
    ```
 
-   The two `sdd:review:*` labels are optional overrides for token/quality dial per Issue (see `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section A).
+   The two `sdd:review:*` labels are optional overrides for token/quality dial per Issue (see `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section A).
 
 4. **Report completion** with a summary of what was installed:
    - Number of Issue templates copied

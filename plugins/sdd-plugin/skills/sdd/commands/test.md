@@ -6,15 +6,15 @@ QA verification + integration E2E for parent Issues. Unit/UI tests and E2E tests
 
 This file is an **orchestrator**. It runs in the main session and composes atomic operations via the Agent tool. The atoms (`atoms/test_work.md`, `atoms/test_review.md`, `atoms/test_adversarial.md`, `atoms/parent_integration_review.md`) do the actual work; this file manages state, retries, manual QA interaction, and the final label transition to `sdd:done`.
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Input Validation
 
-Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
 ## Phase 0: Depth label detection
 
-Per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section C:
+Per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C:
 
 ```bash
 gh issue view $1 --json labels --jq '[.labels[].name]'
@@ -60,7 +60,7 @@ Up to **3 rounds** maximum. Each round = work atom → parallel review atoms →
 - `model`: `opus`
 - `description`: `test work for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/test_work.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/test_work.md` and execute its instructions for Issue #$1.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Parse the `>>> RESULT <<<` line:
@@ -78,7 +78,7 @@ Agent A (completeness):
 - `model`: per Phase 0 table
 - `description`: `test review (completeness) for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/test_review.md` and execute its instructions for Issue #$1 with role `completeness`.
+  > Read `<<SKILL_DIR>>/commands/atoms/test_review.md` and execute its instructions for Issue #$1 with role `completeness`.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Agent B (quality):
@@ -86,7 +86,7 @@ Agent B (quality):
 - `model`: per Phase 0 table
 - `description`: `test review (quality) for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/test_review.md` and execute its instructions for Issue #$1 with role `quality`.
+  > Read `<<SKILL_DIR>>/commands/atoms/test_review.md` and execute its instructions for Issue #$1 with role `quality`.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Agent C (adversarial):
@@ -94,7 +94,7 @@ Agent C (adversarial):
 - `model`: per Phase 0 table
 - `description`: `test adversarial for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/test_adversarial.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/test_adversarial.md` and execute its instructions for Issue #$1.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 **If `path == PARENT`**, also include Agent D in the same parallel batch:
@@ -104,7 +104,7 @@ Agent D (parent integration):
 - `model`: per Phase 0 table
 - `description`: `parent integration review for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/parent_integration_review.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/parent_integration_review.md` and execute its instructions for Issue #$1.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Parse all (3 or 4) `>>> RESULT <<<` lines:
@@ -128,7 +128,7 @@ Parse all (3 or 4) `>>> RESULT <<<` lines:
 Same as Round 1 Steps 2.1.1–2.1.3, with structured retry feedback as `$2`:
 
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/test_work.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/test_work.md` and execute its instructions for Issue #$1.
   > Previous round structured findings — sorted by severity (critical → major → minor). Address every critical and major finding; read minor findings as supporting context (often the specific test/file/line a higher-severity finding referenced abstractly). Do not skip minor findings tied to the same area.
   > <inlined JSON array>
   > Return EXACTLY one line in the contract.
@@ -138,8 +138,15 @@ Same as Round 1 Steps 2.1.1–2.1.3, with structured retry feedback as `$2`:
 Runs only if round 3 failed.
 
 1. Render summary to user.
-2. **Override skip-review** — ask regardless of skip-review setting:
-   - Continue to Phase 2.7 / Pause / Stop?
+2. **Honor skip-review** (auto-decide in unattended runs):
+   - If `qa` is in skip-review (`/sdd auto` / `/sdd batch`):
+     - Log to the Issue/PR (via comment) and to the orchestrator output: "⚠ Round 3 escalation: tests still failing after 3 rounds, but `skip-review: qa` is set — auto-continuing to Phase 2.7. Findings remain on the Issue/PR for human follow-up."
+     - Proceed to **Phase 2.7** immediately without asking. Do NOT call AskUserQuestion or any interactive prompt.
+   - Else (interactive mode, no skip-review):
+     - Ask the user: "Continue to Phase 2.7 / Pause for manual intervention / Stop?"
+     - On "Continue" → proceed to Phase 2.7.
+     - On "Pause" → stop the orchestrator. User will resume via `/sdd resume <N>` after manual fixes.
+     - On "Stop" → exit cleanly.
 
 ## Phase 2.7: Behavioral verification (`/verify` Skill)
 
@@ -184,7 +191,9 @@ Present to the user:
 - **Behavioral verification result from Phase 2.7** (if `/verify` ran): whether the app actually launched and the feature worked
 - Link to the Issue's test output comment for the full QA checklist
 
-If the work atom flagged "E2E was skipped in Stage 3" for single/child path → ask the user whether to add E2E tests now (push to the PR branch) or proceed without.
+If the work atom flagged "E2E was skipped in Stage 3" for single/child path:
+- If `qa` is in skip-review (`/sdd auto` / `/sdd batch`): log "E2E was skipped in Stage 3; auto-proceeding without E2E because `skip-review: qa` is set." and continue **without asking**. (The E2E gap is documented on the Issue/PR for human follow-up.)
+- Else (interactive mode): ask the user whether to add E2E tests now (push to the PR branch) or proceed without.
 
 ### 3.2 — skip-review check
 
@@ -212,7 +221,7 @@ Based on the user's manual QA report (or auto-approval under skip-review):
 
 ## Phase 5: Child completion notification (if this Issue is a child)
 
-Same logic as `implement.md` Phase 7: when a child Issue (detected via the multi-language parent regex `(Parent|상위 |親)Issue: #<n>` per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md`) just transitioned to `sdd:done`, update the parent's `<!-- sdd:children:output -->` table row, check whether all children are now done, and notify the user on the parent Issue accordingly.
+Same logic as `implement.md` Phase 7: when a child Issue (detected via the multi-language parent regex `(Parent|상위 |親)Issue: #<n>` per Common Definitions → Parent/Child Issue Detection in `<<SKILL_DIR>>/SKILL.md`) just transitioned to `sdd:done`, update the parent's `<!-- sdd:children:output -->` table row, check whether all children are now done, and notify the user on the parent Issue accordingly.
 
 (See `implement.md` Phase 7 for the detailed steps — they apply verbatim here, including the multi-language parent reference.)
 

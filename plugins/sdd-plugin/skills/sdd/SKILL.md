@@ -9,11 +9,11 @@ user-invocable: true
 
 You are executing the SDD process. Route to the appropriate command based on `$0`.
 
-**IMPORTANT:** After routing, read the command detail file from `${CLAUDE_SKILL_DIR}/commands/<command>.md` and execute the instructions in it.
+**IMPORTANT:** After routing, read the command detail file from `<<SKILL_DIR>>/commands/<command>.md` and execute the instructions in it.
 
 ## Command Routing
 
-Read `${CLAUDE_SKILL_DIR}/commands/$0.md` and execute. Pass `$1` as issue number (or language for init), `$2` as target stage for rollback.
+Read `<<SKILL_DIR>>/commands/$0.md` and execute. Pass `$1` as issue number (or language for init), `$2` as target stage for rollback.
 - Valid commands: `init`, `analyze`, `design`, `implement`, `test`, `resume`, `status`, `review`, `rollback`, `config`, `batch`, `auto`, `help`
 - If `$0` is empty → route to `help`
 - If `$0` is not in the list above → report unknown command, then route to `help`
@@ -93,10 +93,16 @@ To keep automated runs (`/sdd auto`, `/sdd batch`) unattended, every Bash tool i
 - Process substitution: `<(...)`, `>(...)`
 - Heredocs that wrap multiple commands (`<<EOF ... EOF` containing more than the body of one tool call)
 - **Shell variable substitution inside double-quoted arguments**: `"...${VAR}..."` or `"...$VAR..."`. Substitute the literal value before invoking Bash instead.
+- **Output redirection / discard**: `> file`, `2>/dev/null`, `2>&1`, `&>file`. These count as compound shell syntax under Claude Code's argument heuristic and trigger the same safeguard prompt. If you need to ignore stderr, just run the command and parse the tool result yourself.
+- **Recursive / broad `find` searches outside the repo root**: `find /`, `find /Users`, `find /private`, `find ~`, `find ~/<anything>`, or any `find` whose start path is not the repo root (`.`) or a subdirectory of it. These trigger Claude Code's recursive-broad-search safeguard, which is a **separate** prompt that `permissions.allow`, `--dangerously-skip-permissions`, and `sandbox.enabled = false` cannot suppress. For symbol/file discovery, use the **Grep tool** or **Glob tool** (bound to the working tree) instead of `find` — those don't trip the safeguard and don't shell out.
+- **Documentation placeholders in command arguments**: tokens like `<<SKILL_DIR>>`, `<owner>/<repo>`, `<branch-name>`, `<N>`, or `$1` / `$2` shown in this skill's docs are *reference syntax*, not values. They must be replaced with the literal value **before** the Bash tool call. Never pass them through unresolved (e.g. `gh issue view $1` as a literal `$1`) — that will fail or trigger an argument-parsing prompt.
 
 **Why**:
 - Items 1–5 above: Claude Code's permission matcher evaluates compound expressions and cannot match single-token allow patterns like `Bash(gh:*)`. Each such call therefore raises a permission prompt, breaking unattended runs.
 - Item 6 (quoted variable substitution): triggers Claude Code's "brace with quote character (expansion obfuscation)" argument heuristic, which is a **separate** safeguard that `permissions.allow`, `--dangerously-skip-permissions`, and `sandbox.enabled = false` cannot suppress. Even with all permission gates bypassed, this prompt still fires and breaks unattended runs.
+- Item 7 (output redirection): redirections like `2>/dev/null` and `2>&1` are flagged by the same compound-shell-syntax heuristic that catches `;` and `|`; they cannot be auto-approved.
+- Item 8 (broad `find`): Claude Code applies a recursive-broad-search safeguard whenever `find` is given an absolute start path that crosses out of the working tree (or `/`, `~`). The prompt is independent of permission settings.
+- Item 9 (unresolved doc placeholders): tokens like `<<SKILL_DIR>>` or `$1` reach the shell as literal text, which usually fails — and `${VAR}` patterns specifically also trip the "expansion obfuscation" heuristic (item 6).
 
 **How to chain results between commands**:
 1. Run the first simple command in its own Bash tool call.

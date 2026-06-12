@@ -4,7 +4,7 @@
 
 Independently reviews the PR Final state (step 3-5) for an implement Issue. Reads PR diff + Issue context, applies role-specific criteria from `ai-review-implement-<role>.md`, posts a review comment on the PR, returns a one-line verdict.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -40,10 +40,10 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
    ```
 
 5. Read the role-specific criteria:
-   - `$2=completeness` → `${CLAUDE_SKILL_DIR}/commands/ai-review-implement-completeness.md`
-   - `$2=quality` → `${CLAUDE_SKILL_DIR}/commands/ai-review-implement-quality.md`
+   - `$2=completeness` → `<<SKILL_DIR>>/commands/ai-review-implement-completeness.md`
+   - `$2=quality` → `<<SKILL_DIR>>/commands/ai-review-implement-quality.md`
 
-6. **Codebase exploration** per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section D. Budget: 15 Read / 10 Grep / 5 Glob. Verify file references in design vs actual PR diff; read similar existing implementations to compare patterns.
+6. **Codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Budget: 15 Read / 10 Grep / 5 Glob. Verify file references in design vs actual PR diff; read similar existing implementations to compare patterns.
 
 7. Apply criteria. Standard severity:
    - **critical**: broken functionality, security vulnerability, missing requirement

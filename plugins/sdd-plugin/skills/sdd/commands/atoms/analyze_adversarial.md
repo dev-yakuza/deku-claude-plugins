@@ -4,7 +4,7 @@
 
 Independently REFUTES the analyze output. Reads Issue + analyze comment from GitHub, applies the adversarial lens, posts a review comment, returns a one-line verdict.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -24,7 +24,7 @@ The role is fixed as `adversarial` for this atom (no `$2`).
 
 2. If analyze output is missing → return `FAIL: analyze output not found on Issue #$1`.
 
-3. Read the adversarial criteria: `${CLAUDE_SKILL_DIR}/commands/ai-review-analyze-adversarial.md`. Also read Section E of `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` for the general adversarial prompt.
+3. Read the adversarial criteria: `<<SKILL_DIR>>/commands/ai-review-analyze-adversarial.md`. Also read Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` for the general adversarial prompt.
 
 4. **Codebase exploration (optional, within budget)** per `_review_helpers.md` Section D. Verify any code references in the analyze output exist as described.
 
@@ -34,7 +34,7 @@ The role is fixed as `adversarial` for this atom (no `$2`).
    - Any `critical` or `major` finding → **FAIL** (with summary)
    - Only `minor` findings or none → **PASS** (include in suggestions)
 
-7. **Post a review comment** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+7. **Post a review comment** — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
    - **Marker**: `<!-- sdd:review:analyze:adversarial -->`
    - **Temp file path**: `/tmp/sdd-review-analyze-adversarial-$1.md`
    - **Step 1** (Write tool): render the body using the standard format (see `analyze_review.md` template) with stage=analyze and role=adversarial. Include the `<!-- sdd:findings:json -->` block per `_review_helpers.md` Section B.

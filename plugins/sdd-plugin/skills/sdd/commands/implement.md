@@ -2,7 +2,7 @@
 
 **Stage 3: Implementation — TDD Cycle (Red → Green → Refactor → E2E → PR) — Orchestrator**
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Rules
 - Do NOT set Claude as co-author in git commits.
@@ -12,11 +12,11 @@ This file is an **orchestrator**. It runs in the main session and composes atomi
 
 ## Input Validation
 
-Before any other step: validate `$1` per Common Definitions → Issue Validation in `${CLAUDE_SKILL_DIR}/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+Before any other step: validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
 ## Phase 0: Depth label detection
 
-Per `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section C:
+Per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C:
 
 ```bash
 gh issue view $1 --json labels --jq '[.labels[].name]'
@@ -47,9 +47,9 @@ Determine depth (`default` / `deep` / `shallow`).
    ```
 2. **Parent Issue (has children)**: Do NOT implement directly. Instead:
    - List child Issues and their current status (from `<!-- sdd:children:output -->` table + each child's actual label)
-   - Ask user which child Issue to work on
-   - On selection (read + execute inline, do NOT spawn a subagent): read `${CLAUDE_SKILL_DIR}/commands/resume.md` and execute its instructions for the selected child Issue in this same main session. The resume dispatcher routes to the correct stage orchestrator.
-   - Stop this orchestrator once the child is dispatched.
+   - Check skip-review setting (Common Definitions → Skip Review Setting):
+     - If `implement` is in skip-review (`/sdd auto` / `/sdd batch`): log "Parent has children; stopping for outer orchestrator to queue children." and stop **without asking**. The surrounding flow (`/sdd auto`'s child auto-discovery or `/sdd batch`) will pick up each child Issue.
+     - Else (interactive mode): ask user which child Issue to work on. On selection (read + execute inline, do NOT spawn a subagent): read `<<SKILL_DIR>>/commands/resume.md` and execute its instructions for the selected child Issue in this same main session. The resume dispatcher routes to the correct stage orchestrator. Stop this orchestrator once the child is dispatched.
 3. **Single Issue or Child Issue (no children)**: Proceed to Phase 2.
 
 ## Phase 2: Plan
@@ -60,7 +60,7 @@ Determine depth (`default` / `deep` / `shallow`).
 - `model`: `opus`
 - `description`: `implement plan for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/implement_plan.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/implement_plan.md` and execute its instructions for Issue #$1.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Parse the `>>> RESULT <<<` line:
@@ -86,7 +86,7 @@ Up to **2 retries per step**. Each iteration:
    - `model`: `opus` (per Phase 0 table)
    - `description`: `implement step-X for #$1`
    - `prompt`:
-     > Read `${CLAUDE_SKILL_DIR}/commands/atoms/implement_<step>.md` and execute its instructions for Issue #$1 on branch `<branch-name>`.
+     > Read `<<SKILL_DIR>>/commands/atoms/implement_<step>.md` and execute its instructions for Issue #$1 on branch `<branch-name>`.
      > <if retry: include `Previous step review findings — sorted by severity (critical → major → minor). Address every critical and major finding; read minor findings as supporting context. Do not skip minor findings tied to the same area: <inlined JSON array>`>
      > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
@@ -103,7 +103,7 @@ Up to **2 retries per step**. Each iteration:
    - `model`: per Phase 0 table for this step
    - `description`: `tdd step-X review for #$1`
    - `prompt`:
-     > Read `${CLAUDE_SKILL_DIR}/commands/atoms/tdd_step_review.md` and execute its instructions for Issue #$1, step X, branch `<branch-name>`, commit `<sha>` (or `EMPTY`), test evidence `<test-evidence>` (or `NONE`).
+     > Read `<<SKILL_DIR>>/commands/atoms/tdd_step_review.md` and execute its instructions for Issue #$1, step X, branch `<branch-name>`, commit `<sha>` (or `EMPTY`), test evidence `<test-evidence>` (or `NONE`).
      > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 
@@ -113,11 +113,14 @@ Up to **2 retries per step**. Each iteration:
    - `OK FAIL: <summary>` → re-spawn this step's atom in retry mode with the structured findings as `$3`. Repeat up to 2 retries.
 
 3. **Step exhaustion**: if the step's retry budget (2 retries) is consumed without PASS, **escalate**:
-   - Render to user: "⚠ TDD step-X (`<step>`) failed review 3 times for Issue #$1. Remaining findings: <list critical/major>. Continue to next step / Pause / Stop?"
-   - This gate runs regardless of skip-review.
-   - On "Continue" → proceed to next step (carry forward the unresolved findings to PR Final review).
-   - On "Pause" → stop orchestrator. User resumes via `/sdd resume <N>`.
-   - On "Stop" → exit.
+   - Post a comment to the Issue with the remaining critical/major findings (use the temp-file pattern per `_review_helpers.md` Section F).
+   - Check skip-review setting (Common Definitions → Skip Review Setting):
+     - If `implement` is in skip-review (`/sdd auto` / `/sdd batch`): log "⚠ TDD step-X (`<step>`) failed review 3 times. Auto-continuing to next step because `skip-review: implement` is set; unresolved findings carry forward to PR Final review." Proceed to the next step **without asking**.
+     - Else (interactive mode):
+       - Render to user: "⚠ TDD step-X (`<step>`) failed review 3 times for Issue #$1. Remaining findings: <list critical/major>. Continue to next step / Pause / Stop?"
+       - On "Continue" → proceed to next step (carry forward the unresolved findings to PR Final review).
+       - On "Pause" → stop orchestrator. User resumes via `/sdd resume <N>`.
+       - On "Stop" → exit.
 
 After all 4 steps complete (or were carried forward with user approval), proceed to Phase 4.
 
@@ -129,7 +132,7 @@ After all 4 steps complete (or were carried forward with user approval), proceed
 - `model`: `opus`
 - `description`: `implement PR creation for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/implement_pr.md` and execute its instructions for Issue #$1 on branch `<branch-name>` (first-round mode, no `$3`).
+  > Read `<<SKILL_DIR>>/commands/atoms/implement_pr.md` and execute its instructions for Issue #$1 on branch `<branch-name>` (first-round mode, no `$3`).
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Parse:
@@ -152,7 +155,7 @@ Agent A (completeness):
 - `model`: per Phase 0 table
 - `description`: `implement review (completeness) for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/implement_review.md` and execute its instructions for Issue #$1 with role `completeness`.
+  > Read `<<SKILL_DIR>>/commands/atoms/implement_review.md` and execute its instructions for Issue #$1 with role `completeness`.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Agent B (quality):
@@ -160,7 +163,7 @@ Agent B (quality):
 - `model`: per Phase 0 table
 - `description`: `implement review (quality) for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/implement_review.md` and execute its instructions for Issue #$1 with role `quality`.
+  > Read `<<SKILL_DIR>>/commands/atoms/implement_review.md` and execute its instructions for Issue #$1 with role `quality`.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Agent C (adversarial):
@@ -168,7 +171,7 @@ Agent C (adversarial):
 - `model`: per Phase 0 table
 - `description`: `implement adversarial for #$1`
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/implement_adversarial.md` and execute its instructions for Issue #$1.
+  > Read `<<SKILL_DIR>>/commands/atoms/implement_adversarial.md` and execute its instructions for Issue #$1.
   > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
 Parse all three:
@@ -308,7 +311,7 @@ Same structure with one change: spawn `implement_pr` in **retry mode** by passin
 #### 5.N.0 — Spawn implement_pr in retry mode
 
 - `prompt`:
-  > Read `${CLAUDE_SKILL_DIR}/commands/atoms/implement_pr.md` and execute its instructions for Issue #$1 on branch `<branch-name>` in retry mode.
+  > Read `<<SKILL_DIR>>/commands/atoms/implement_pr.md` and execute its instructions for Issue #$1 on branch `<branch-name>` in retry mode.
   > Previous round structured findings — sorted by severity (critical → major → minor). Address every critical and major finding with new commits (do NOT force-push, do NOT amend). Read minor findings as supporting context (often the specific file/line/symbol a higher-severity finding referenced abstractly).
   > <inlined JSON array>
   > Return EXACTLY one line in the contract.
@@ -329,8 +332,15 @@ Runs only if round 3 failed.
      - [major] ... (implement/<role>)
      - [critical] ... (code-review)
    ```
-2. **Override skip-review** — ask user regardless of `skip-review: pr`:
-   - Continue to Phase 6 / Pause for manual intervention / Stop?
+2. **Honor skip-review** (auto-decide in unattended runs):
+   - If `pr` is in skip-review (`/sdd auto` / `/sdd batch`):
+     - Log to the Issue/PR (via comment) and to the orchestrator output: "⚠ Round 3 PR Final escalation: review still has critical/major findings, but `skip-review: pr` is set — auto-continuing to Phase 6. Findings remain on the PR for human follow-up."
+     - Proceed to **Phase 6** immediately without asking. Do NOT call AskUserQuestion or any interactive prompt.
+   - Else (interactive mode):
+     - Ask the user: "Continue to Phase 6 / Pause for manual intervention / Stop?"
+     - On "Continue" → proceed.
+     - On "Pause" → stop. User resumes via `/sdd resume <N>` after manual fixes.
+     - On "Stop" → exit cleanly.
 
 ## Phase 6: User confirmation and label transition
 
@@ -339,7 +349,7 @@ Check skip-review setting.
 - If `pr` is in skip-review:
   - Log "User review skipped (skip-review: pr)".
   - Update label to `sdd:test`.
-  - If `qa` is also in skip-review → **auto-proceed (read + execute inline, do NOT spawn a subagent)**: read `${CLAUDE_SKILL_DIR}/commands/test.md` and execute its instructions for Issue #$1 in this same main session.
+  - If `qa` is also in skip-review → **auto-proceed (read + execute inline, do NOT spawn a subagent)**: read `<<SKILL_DIR>>/commands/test.md` and execute its instructions for Issue #$1 in this same main session.
   - Otherwise → stop. PR created, label updated; human reviews PR and runs QA.
 
 - Otherwise:
@@ -359,7 +369,7 @@ Runs **only if the Issue body matches the multi-language parent regex `(Parent|�
    ```
    - If no matching comment → warn and skip update.
    - If multiple → use the last one.
-3. Update the children comment — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern):
+3. Update the children comment — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern):
    - Take the existing body from step 2, replace this child Issue's row with the new status in narrative (not in shell).
    - **Write tool**: render the updated body into `/tmp/sdd-children-output-<parent>.md` (overwrites the original temp file from `design_work` — that's fine; the original is no longer needed).
    - **Bash**: `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-children-output-<parent>.md`
@@ -369,7 +379,7 @@ Runs **only if the Issue body matches the multi-language parent regex `(Parent|�
    - If all `sdd:done` → post completion notification on the parent suggesting `/sdd test <parent>` or `/sdd resume <parent>`. Use Section F:
      - **Write tool**: render the notification body (e.g. `All children done. Run /sdd test <parent>.`) into `/tmp/sdd-children-complete-<parent>.md`.
      - **Bash**: `gh issue comment <parent> --body-file /tmp/sdd-children-complete-<parent>.md` (no duplicate-prevention needed — each completion event is a new comment).
-   - If not → report remaining children to the user in chat, ask which to work on next. (No comment posted in this branch.)
+   - If not → report remaining children to the user in chat. In skip-review mode (`/sdd auto` / `/sdd batch`), do NOT ask which to work on next — stop here so the outer orchestrator's child auto-discovery picks up remaining children. In interactive mode, you may ask the user which child to work on next. (No comment posted in this branch.)
 
 ## Notes
 

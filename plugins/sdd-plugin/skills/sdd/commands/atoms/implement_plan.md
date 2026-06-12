@@ -4,7 +4,7 @@
 
 Produces the test plan + implementation plan for SDD Stage 3, posts it to the Issue, and creates the feature branch. Self-reviews inline (the implement-plan review point 3-0 is `self_only`).
 
-> **Bash Command Execution**: run every shell snippet below as its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, or heredocs. Inline literal values; do not use shell variables. See **Bash Command Execution Rules** in `${CLAUDE_SKILL_DIR}/SKILL.md`.
+> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
 
 ## Inputs
 
@@ -19,7 +19,7 @@ Produces the test plan + implementation plan for SDD Stage 3, posts it to the Is
 
 ### Step 0: Pre-flight context discovery
 
-(implement_plan has no retry mode; always run.) Follow `${CLAUDE_SKILL_DIR}/commands/atoms/_preflight.md` — tier **Heavy**, Section B items 1 + 2 + 3 + 4 (project conventions + commit message style + similar past PRs + target directory survey).
+(implement_plan has no retry mode; always run.) Follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Heavy**, Section B items 1 + 2 + 3 + 4 (project conventions + commit message style + similar past PRs + target directory survey).
 
 The target directory for item 4 comes from the design output's File Structure section.
 
@@ -34,7 +34,7 @@ The target directory for item 4 comes from the design output's File Structure se
    ```
    Read ONLY the design output and the Issue body's Definition of Done. Do NOT read the analyze output — the design has already incorporated those requirements.
 
-2. Detect child Issue per Common Definitions → Parent/Child Issue Detection in `${CLAUDE_SKILL_DIR}/SKILL.md` (multi-language regex `(Parent|상위 |親)Issue: #<number>` inside `<!-- sdd:child-issue -->`). If a parent reference is found, capture the parent number for branch naming.
+2. Detect child Issue per Common Definitions → Parent/Child Issue Detection in `<<SKILL_DIR>>/SKILL.md` (multi-language regex `(Parent|상위 |親)Issue: #<number>` inside `<!-- sdd:child-issue -->`). If a parent reference is found, capture the parent number for branch naming.
 
 3. **Create the feature branch**:
    - Single Issue: `feat/<feature-name>` (derive `<feature-name>` from Issue title, kebab-cased)
@@ -74,7 +74,7 @@ The target directory for item 4 comes from the design output's File Structure se
 
 7. Determine language from `.github/.sdd-lang` (same fallback rules as other atoms).
 
-8. **Post the plan** — follow `${CLAUDE_SKILL_DIR}/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
+8. **Post the plan** — follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F (mandatory temp-file pattern).
    - **Marker**: `<!-- sdd:implement:plan -->`
    - **Temp file path**: `/tmp/sdd-implement-plan-$1.md`
    - **Step 1** (Write tool): render the plan body (format below) into the temp file.
