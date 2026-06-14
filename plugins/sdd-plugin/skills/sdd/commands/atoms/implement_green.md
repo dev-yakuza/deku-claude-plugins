@@ -10,7 +10,7 @@ Executes TDD step 3-2: write minimal production code to make the failing tests p
 
 - `$1` — Issue number
 - `$2` — feature branch name
-- Optional `$3` — retry feedback (JSON array)
+- Optional `$3` — retry signal. When the orchestrator invokes this atom in retry mode it passes the literal string `"retry"`. The atom self-fetches the previous round's step-2 review findings per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C (marker `<!-- sdd:review:implement:step-2 -->`).
 
 ## Preconditions
 
@@ -19,9 +19,15 @@ Executes TDD step 3-2: write minimal production code to make the failing tests p
 
 ## Work
 
-### Step 0: Pre-flight context discovery
+### Step 0: Pre-flight context discovery + retry context fetch
 
-If `$3` (retry) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Code-focused**, Section B item 4 only (target directory survey).
+If `$3` (retry signal — non-empty, expected literal `"retry"`):
+- Skip the preflight items below.
+- **Execute `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C** to self-fetch the previous round's step-2 review findings (marker `<!-- sdd:review:implement:step-2 -->` on Issue `$1`).
+- Hold the sorted array as `<retry-findings>` for use throughout the Main work below: before writing or revising production code, prioritize addressing every `critical` and `major` finding; read `minor` entries as supporting context.
+- If Section C returns `FAIL: ...` → propagate it as this atom's return value before starting Main work.
+
+Else (first round): follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Code-focused**, Section B item 4 only (target directory survey).
 
 For Green specifically: focus the directory read on existing implementation patterns — error handling style, import conventions, naming.
 
@@ -60,7 +66,7 @@ For Green specifically: focus the directory read on existing implementation patt
 
    **Also remember the full test runner output text** — it is posted in step 9 as evidence the reviewer can cross-check against the reported counts.
 
-6. If `$3` (retry feedback) is provided: address each finding. Parse `$3` as JSON.
+6. **Retry resolution check**: if Step 0 fetched `<retry-findings>`, before committing verify that every `critical` and `major` finding has been addressed in the production code change.
 
 7. **Self-review (blockers only)**:
    - [ ] All tests pass

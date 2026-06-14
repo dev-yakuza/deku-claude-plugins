@@ -7,6 +7,7 @@ Produces the SDD Stage 4 (Test) output for one Issue: verifies existing tests pa
 ## Inputs
 
 - `$1` — Issue number (already validated by the orchestrator)
+- Optional `$2` — retry signal. When the orchestrator invokes this atom in retry mode it passes the literal string `"retry"`. The atom self-fetches the previous round's review findings per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C (single/child path: 3 stage markers; parent path: 3 stage markers + `<!-- sdd:review:parent -->`).
 
 ## Mode detection
 
@@ -25,7 +26,15 @@ For Parent Issue path, also verify all children are `sdd:done` before running (r
 
 ## Step 0: Pre-flight context discovery (both paths)
 
-If `$2` (retry) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Light**, Section B items 1 + 2 (project conventions + commit message style).
+If `$2` (retry signal — non-empty, expected literal `"retry"`):
+- Skip the preflight items below.
+- **Execute `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C** to self-fetch the previous round's review findings before path-specific work. Markers (use Mode detection above to decide which set):
+  - **Single/Child path** (`HAS_CHILDREN` empty): `<!-- sdd:review:test:completeness -->`, `<!-- sdd:review:test:quality -->`, `<!-- sdd:review:test:adversarial -->`
+  - **Parent path** (`HAS_CHILDREN` non-empty): the 3 single/child markers **plus** `<!-- sdd:review:parent -->` (cross-child integration review)
+- Hold the sorted array as `<retry-findings>` for use throughout the path-specific work below: prioritize addressing every `critical` and `major` finding; read `minor` as supporting context.
+- If Section C returns `FAIL: ...` → propagate it as this atom's return value.
+
+Else (first round, `$2` empty): follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Light**, Section B items 1 + 2 (project conventions + commit message style).
 
 For `test_work` specifically: item 1's convention reading should pay attention to **testing conventions** (test framework, test directory layout, assertion style).
 

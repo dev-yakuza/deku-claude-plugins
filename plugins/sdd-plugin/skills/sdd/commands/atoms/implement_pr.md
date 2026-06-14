@@ -10,7 +10,7 @@ Executes TDD step 3-5: push the branch and create the PR. Handles both first-rou
 
 - `$1` — Issue number
 - `$2` — feature branch name
-- Optional `$3` — retry feedback (JSON array; if provided, operates in **retry mode**)
+- Optional `$3` — retry signal. When the orchestrator invokes this atom in retry mode it passes the literal string `"retry"`, which switches the atom into **retry mode**. The atom self-fetches the previous round's PR Final review findings per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C (3 SDD markers `<!-- sdd:review:implement:completeness/quality/adversarial -->`). It also reads `/code-review` and `/security-review` inline PR review comments directly via `gh api repos/<owner>/<repo>/pulls/<PR_NUM>/comments`.
 
 ## Mode detection
 
@@ -23,8 +23,8 @@ gh pr list --head $2 --state open --json number --jq '.[0].number'
 
 Let the literal output of the second command be `<EXISTING_PR>` (or empty).
 
-- **First-round mode**: `$3` not provided AND `<EXISTING_PR>` is empty → push + create PR.
-- **Retry mode**: `$3` provided → push fix-up commits to existing PR (do NOT create a new PR).
+- **First-round mode**: `$3` not provided (empty) AND `<EXISTING_PR>` is empty → push + create PR.
+- **Retry mode**: `$3` provided (non-empty, expected literal `"retry"`) → self-fetch review findings, push fix-up commits to existing PR (do NOT create a new PR).
 - **Mixed (defensive)**: `$3` provided but no PR found → return `FAIL: retry mode requested but no open PR for branch $2`.
 
 ## Work — first-round mode
@@ -128,9 +128,36 @@ The commit message style is critical for `implement_pr`: PR title and body shoul
    gh pr diff <PR_NUM>
    ```
 
-4. Parse `$3` (JSON array of findings) per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section B. Per Section C.1, `$3` now contains all severities sorted `critical → major → minor`.
+4. **Self-fetch previous round's review findings** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C:
 
-5. For each `critical` or `major` finding in `$3`:
+   a. Use `<EXISTING_PR>` (from Mode detection) as `<PR_NUM>` for all PR-scoped fetches below.
+   b. Execute Section C with the 3 SDD markers (`<!-- sdd:review:implement:completeness -->`, `:quality`, `:adversarial`) scoped to `<PR_NUM>`. The procedure returns a sorted findings array (`critical → major → minor`).
+   c. **Also fetch `/code-review` and `/security-review` inline PR comments** (these are line-anchored review comments, posted via `pulls/<PR_NUM>/comments`, not regular issue comments):
+      ```bash
+      gh api repos/<owner>/<repo>/pulls/<PR_NUM>/comments --jq '.[] | {body: .body, path: .path, line: .line, created_at: .created_at, user_login: .user.login}'
+      ```
+      **Filter to Skill-authored comments only** before classification. Skill comments are recognizable by:
+      - Body starting with `🔴` or `🟡` (the `/code-review` Important / Nit markers) — these are the first non-whitespace characters of the comment body, NOT in the middle of a sentence.
+      - Body explicitly mentioning `Severity: High`, `Severity: Medium`, `Severity: Low` (the `/security-review` markers).
+      - Comments authored by `github-actions[bot]` (when Skills run via GitHub Actions). In direct-CLI mode the author is the orchestrator's identity — author filtering is a secondary signal only.
+
+      Comments **without** any of these recognizable markers are skipped as human / informational input (out of scope for the automated retry — human review comments are addressed via the normal PR workflow, not via this atom's retry loop).
+
+      Translate the filtered findings into the same JSON shape (per Section B):
+      - `/code-review` 🔴 Important → `{severity: "critical", rule_id: "code-review-important", ...}`
+      - `/code-review` 🟡 Nit → `{severity: "minor", rule_id: "code-review-nit", ...}`
+      - `/security-review` Severity: High → `{severity: "critical", rule_id: "security-review-high", ...}`
+      - `/security-review` Severity: Medium → `{severity: "major", rule_id: "security-review-medium", ...}`
+      - `/security-review` Severity: Low / informational → `{severity: "minor", rule_id: "security-review-low", ...}`
+      Append these into the sorted findings array from step (b), then re-sort `critical → major → minor`.
+
+      **Forward compatibility**: if a Skill changes its output emoji / severity vocabulary (e.g. `/code-review` adds 🟠 Medium), the filter above may miss those findings — they fall through to "informational". This is a known limit; recovery is a `_review_helpers.md` update, not a runtime decision.
+
+      **Idempotency across retry rounds**: the same Skill comment may surface in multiple retry rounds (it remains on the PR). Treat each retry round as a fresh evaluation of the current PR state — fixes already applied in commits from prior rounds will cause the Skill's finding to no longer be reproducible during the work in step 5, which is the natural deduplication signal.
+
+   d. If the SDD-marker fetch (step b) returns `FAIL: ...` from Section C, propagate it as this atom's return value. (Missing `/code-review` or `/security-review` comments are NOT a failure — those Skills may have been gracefully skipped or produced no findings.)
+
+5. For each `critical` or `major` finding in the combined findings array (from step 4):
    - **Decide the fix kind**:
      - Code defect → modify production code
      - Missing test → add a failing test first (mini Red), then implement (mini Green)

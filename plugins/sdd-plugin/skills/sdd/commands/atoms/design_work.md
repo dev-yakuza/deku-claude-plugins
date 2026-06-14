@@ -9,7 +9,7 @@ Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub
 ## Inputs
 
 - `$1` — Issue number (already validated by the orchestrator as an Issue, not a PR)
-- Optional `$2` — previous-round review feedback (retry round)
+- Optional `$2` — retry signal. When the orchestrator invokes this atom in retry mode it passes the literal string `"retry"`. The atom self-fetches the previous round's review findings per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C.
 
 ## Preconditions
 
@@ -17,9 +17,15 @@ Produces the SDD Stage 2 (Design) output for one Issue. Reads inputs from GitHub
 
 ## Work
 
-### Step 0: Pre-flight context discovery
+### Step 0: Pre-flight context discovery + retry context fetch
 
-If retry (`$2` provided) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Medium**, Section B items 1 + 2 + 3 (project conventions + commit message style + similar past PRs via `gh pr list --search`).
+If retry (`$2` provided and non-empty, expected literal `"retry"`):
+- Skip the preflight items below.
+- **Execute `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C** to self-fetch the previous round's review findings from Issue `$1` (3 markers: `<!-- sdd:review:design:completeness -->`, `:quality`, `:adversarial`). The procedure returns a sorted findings array (`critical → major → minor`).
+- Hold this array as `<retry-findings>` for use throughout the Main work below: when revisiting any step (file structure, PR split, testability, constraints), prioritize addressing every `critical` and `major` finding, and read `minor` entries as supporting context.
+- If Section C returns `FAIL: ...` → propagate it as this atom's return value before starting Main work.
+
+Else (first round, `$2` empty): follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Medium**, Section B items 1 + 2 + 3 (project conventions + commit message style + similar past PRs via `gh pr list --search`).
 
 The similar past PRs (item 3) inform: file organization patterns, naming conventions, architectural choices in this codebase. Use the discovered patterns to guide steps 4–9 below.
 
@@ -90,7 +96,7 @@ The similar past PRs (item 3) inform: file organization patterns, naming convent
 
     *Quality, completeness, risk evaluation are NOT done here — Agent reviewers' job.*
 
-13. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section B), sorted `critical → major → minor` (Section C.1). Parse it and address every `critical` and `major` finding individually. Read `minor` findings as supporting context — they often pinpoint the specific design row, file path, or symbol that a higher-severity finding only described abstractly. Mention in the design how each `critical`/`major` finding was resolved.
+13. **Retry resolution check**: if Step 0 fetched `<retry-findings>`, before posting verify that every `critical` and `major` finding has been addressed in the design (file structure, PR split, testability, etc.), and mention how. Treat `minor` entries as supporting context to pinpoint specific rows / files / symbols already revised.
 
 14. **Append self-review trace** to the design output. Inside the `<!-- sdd:design:output -->` block, before the closing marker, embed:
 

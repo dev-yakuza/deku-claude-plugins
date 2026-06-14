@@ -90,21 +90,16 @@ Parse all three `>>> RESULT <<<` lines:
 
 **Step 1.3 — Round decision:**
 - If reviews passed → break out of the loop; proceed to **Phase 2**.
-- If reviews failed and round < 3 → build **structured retry feedback** per `_review_helpers.md` Section C:
-  1. Fetch the latest review comments from the Issue (`gh api .../comments`)
-  2. Extract the `<!-- sdd:findings:json -->` JSON block from each FAILed reviewer's comment
-  3. Combine the `findings` arrays, **keep all severities**, sort `critical → major → minor` (per `_review_helpers.md` Section C.1)
-  4. Pass the combined JSON array as `$2` in the next round's work atom prompt
+- If reviews failed and round < 3 → spawn the next round's work atom in **retry mode** (see Round 2/3 below). Do NOT fetch review comments or extract JSON in the orchestrator — the atom self-fetches per `_review_helpers.md` Section C, which keeps the main session context light.
 - If reviews failed and round == 3 → exit the loop. Proceed to **Phase 1.5 (Escalation gate)**.
 
 ### Round 2 and Round 3 (retry)
 
-Same as Round 1 Steps 1.1–1.3, but the work atom's prompt **must include the structured retry feedback** as `$2`:
+Same as Round 1 Steps 1.1–1.3, but the work atom is invoked in **retry mode** by passing the literal string `"retry"` as `$2`:
 
 - `prompt`:
   > Read `<<SKILL_DIR>>/commands/atoms/analyze_work.md` and execute its instructions for Issue #$1.
-  > Previous round structured findings — sorted by severity (critical → major → minor). Address every critical and major finding; read minor findings as supporting context (often the specific line/symbol a higher-severity finding referenced abstractly). Do not skip minor findings tied to the same area.
-  > <inlined JSON array>
+  > Retry mode (`$2 = "retry"`): self-fetch previous round's review findings per `_review_helpers.md` Section C, then address every critical and major finding (use minor as supporting context).
   > Return EXACTLY one line in the contract specified by that file.
 
 The review atom prompts are unchanged between rounds — reviewers always evaluate the **current** analyze output on the Issue.

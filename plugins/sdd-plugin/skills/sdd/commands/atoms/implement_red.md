@@ -10,7 +10,7 @@ Executes TDD step 3-1: write failing test(s) for the next implementation increme
 
 - `$1` — Issue number
 - `$2` — feature branch name (from `implement_plan` atom)
-- Optional `$3` — retry feedback (JSON array of findings) from a prior round's step review
+- Optional `$3` — retry signal. When the orchestrator invokes this atom in retry mode it passes the literal string `"retry"`. The atom self-fetches the previous round's step-1 review findings per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C (marker `<!-- sdd:review:implement:step-1 -->`).
 
 ## Preconditions
 
@@ -19,9 +19,15 @@ Executes TDD step 3-1: write failing test(s) for the next implementation increme
 
 ## Work
 
-### Step 0: Pre-flight context discovery
+### Step 0: Pre-flight context discovery + retry context fetch
 
-If `$3` (retry) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Code-focused**, Section B item 4 only (target directory survey).
+If `$3` (retry signal — non-empty, expected literal `"retry"`):
+- Skip the preflight items below.
+- **Execute `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C** to self-fetch the previous round's step-1 review findings (marker `<!-- sdd:review:implement:step-1 -->` on Issue `$1`).
+- Hold the sorted array as `<retry-findings>` for use throughout the Main work below: before writing or revising failing tests, prioritize addressing every `critical` and `major` finding (e.g. fix GetX setup pollution, sharpen branch-entry assertions); read `minor` entries as supporting context.
+- If Section C returns `FAIL: ...` → propagate it as this atom's return value before starting Main work.
+
+Else (first round): follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Code-focused**, Section B item 4 only (target directory survey).
 
 For Red specifically: the target dir comes from the design's File Structure (test files). Focus the directory read on existing test patterns — fixtures, assertion style, mock setup.
 
@@ -59,7 +65,7 @@ For Red specifically: the target dir comes from the design's File Structure (tes
 
    **Also remember the full test runner output text** — it is posted in step 9 as evidence the reviewer can cross-check against the reported counts.
 
-6. If `$3` (retry feedback) is provided: address each finding before proceeding. Parse `$3` as JSON per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section B.
+6. **Retry resolution check**: if Step 0 fetched `<retry-findings>`, before committing verify that every `critical` and `major` finding has been addressed in the failing tests (e.g. correct branch entry assertion, fixed setup pollution).
 
 7. **Self-review (blockers only)**:
    - [ ] Tests file syntactically valid (test runner can parse)

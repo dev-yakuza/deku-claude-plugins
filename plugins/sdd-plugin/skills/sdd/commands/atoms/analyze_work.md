@@ -9,13 +9,19 @@ Produces the SDD Stage 1 (Analyze) output for one Issue. Reads inputs from GitHu
 ## Inputs
 
 - `$1` — Issue number (already validated by the orchestrator as an Issue, not a PR)
-- Optional `$2` — previous-round review feedback (when invoked as part of a retry; orchestrator passes the combined critical/major issues from prior reviews so this round can address them)
+- Optional `$2` — retry signal. When the orchestrator invokes this atom in retry mode it passes the literal string `"retry"`. The atom self-fetches the previous round's review findings per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C — the orchestrator does NOT inline JSON.
 
 ## Work
 
-### Step 0: Pre-flight context discovery
+### Step 0: Pre-flight context discovery + retry context fetch
 
-If retry (`$2` provided) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Light**, Section B items 1 + 2 (project conventions + commit message style).
+If retry (`$2` provided and non-empty, expected literal `"retry"`):
+- Skip the preflight items below.
+- **Execute `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C** to self-fetch the previous round's review findings from Issue `$1` (3 markers: `<!-- sdd:review:analyze:completeness -->`, `:quality`, `:adversarial`). The procedure returns a sorted findings array (`critical → major → minor`).
+- Hold this array as `<retry-findings>` for use throughout the Main work below: when revisiting any step (analysis, feature split, priorities), prioritize addressing every `critical` and `major` finding, and read `minor` entries as supporting context (often pinpoints specific wording/sections referenced abstractly by higher-severity items).
+- If Section C returns `FAIL: ...` (no review comments found, unrecognized retry slot value, etc.) → propagate it as this atom's return value before starting Main work.
+
+Else (first round, `$2` empty): follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Light**, Section B items 1 + 2 (project conventions + commit message style).
 
 ### Main work (numbered steps below)
 
@@ -61,7 +67,7 @@ If retry (`$2` provided) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_p
 
    *Quality, completeness, risk evaluation are NOT done here — they are the Agent reviewers' job. Keep self-review minimal.*
 
-10. **If `$2` (retry feedback) is provided**: `$2` is a JSON array of structured findings (per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section B), sorted `critical → major → minor` (Section C.1). Parse it and address every `critical` and `major` finding individually. Read `minor` findings as supporting context — they often pinpoint the specific wording or section that a higher-severity finding only described abstractly; do not skip them when they reference the same area you are revising. Mention in the output how each `critical`/`major` finding was resolved (or why it cannot be).
+10. **Retry resolution check**: if Step 0 fetched `<retry-findings>`, before posting verify that every `critical` and `major` finding has been addressed in the output, and mention how (or — only if genuinely infeasible — why it could not be). Treat `minor` entries as supporting context to clarify wording.
 
 11. **Append self-review trace** to the output. Inside the same `<!-- sdd:analyze:output -->` block, before the closing marker, embed:
 
