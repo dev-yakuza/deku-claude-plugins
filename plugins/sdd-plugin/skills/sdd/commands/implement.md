@@ -87,7 +87,7 @@ Up to **2 retries per step**. Each iteration:
    - `description`: `implement step-X for #$1`
    - `prompt`:
      > Read `<<SKILL_DIR>>/commands/atoms/implement_<step>.md` and execute its instructions for Issue #$1 on branch `<branch-name>`.
-     > <if retry: include `Previous step review findings — sorted by severity (critical → major → minor). Address every critical and major finding; read minor findings as supporting context. Do not skip minor findings tied to the same area: <inlined JSON array>`>
+     > <if retry: include `Retry mode ($3 = "retry"): self-fetch previous step review findings per _review_helpers.md Section C, then address every critical and major finding (use minor as supporting context).`>
      > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
 
    Where `<step>` is one of: `red`, `green`, `refactor`, `e2e`.
@@ -110,7 +110,7 @@ Up to **2 retries per step**. Each iteration:
    Parse:
    - `FAIL: <reason>` (atom error) → report, stop.
    - `OK PASS` → proceed to next step in the pipeline.
-   - `OK FAIL: <summary>` → re-spawn this step's atom in retry mode with the structured findings as `$3`. Repeat up to 2 retries.
+   - `OK FAIL: <summary>` → re-spawn this step's atom in **retry mode** (`$3 = "retry"`) — the atom self-fetches the step-X review comment per `_review_helpers.md` Section C. Repeat up to 2 retries.
 
 3. **Step exhaustion**: if the step's retry budget (2 retries) is consumed without PASS, **escalate**:
    - Post a comment to the Issue with the remaining critical/major findings (use the temp-file pattern per `_review_helpers.md` Section F).
@@ -295,25 +295,18 @@ This comment is informational; the round decision is unchanged by it.
 #### 5.1.5 — Round decision
 
 - Reviews passed → exit loop; proceed to Phase 6.
-- Reviews failed, round < 3 → build **structured retry feedback**:
-  1. Fetch review comments from the PR.
-  2. Extract `<!-- sdd:findings:json -->` JSON blocks from each SDD reviewer's comment.
-  3. Combine findings arrays, **keep all severities**, sort `critical → major → minor` (per `_review_helpers.md` Section C.1).
-  4. Append `/code-review` Important findings (translated to JSON: `{severity: "critical", ...}` with `rule_id: "code-review-important"`). Also append Nit findings as `{severity: "minor", ...}` so the work atom has the specific call-out lines as context.
-  5. Append `/security-review` High and Medium findings (translated to JSON: `{severity: "critical" | "major", ...}` with `rule_id: "security-review-<category>"`). Also append Low/informational findings as `{severity: "minor", ...}`.
-  6. Pass combined JSON array as `$3` to the next round's `implement_pr` atom in **retry mode**.
+- Reviews failed, round < 3 → spawn `implement_pr` in **retry mode** (see Round 2/3 below). Do NOT fetch PR comments or extract JSON in the orchestrator — `implement_pr` self-fetches the 3 SDD review markers per `_review_helpers.md` Section C, and also reads `/code-review` and `/security-review` inline PR comments directly (`gh api repos/<owner>/<repo>/pulls/<PR_NUM>/comments`) inside its retry-mode body.
 - Reviews failed, round == 3 → exit loop. Proceed to **Phase 5.5 (escalation)**.
 
 ### Round 2 and Round 3 (retry)
 
-Same structure with one change: spawn `implement_pr` in **retry mode** by passing the structured findings as `$3`. Retry mode pushes new commits to the existing PR (no force-push, no amend) and does NOT create a new PR.
+Same structure with one change: spawn `implement_pr` in **retry mode** by passing the literal `"retry"` as `$3`. Retry mode self-fetches review findings, pushes new commits to the existing PR (no force-push, no amend), and does NOT create a new PR.
 
 #### 5.N.0 — Spawn implement_pr in retry mode
 
 - `prompt`:
   > Read `<<SKILL_DIR>>/commands/atoms/implement_pr.md` and execute its instructions for Issue #$1 on branch `<branch-name>` in retry mode.
-  > Previous round structured findings — sorted by severity (critical → major → minor). Address every critical and major finding with new commits (do NOT force-push, do NOT amend). Read minor findings as supporting context (often the specific file/line/symbol a higher-severity finding referenced abstractly).
-  > <inlined JSON array>
+  > Retry mode (`$3 = "retry"`): self-fetch previous round's PR review findings per `_review_helpers.md` Section C (3 SDD reviewer markers on the PR; plus `/code-review` Important/Nit and `/security-review` High/Medium/Low from inline PR review comments). Address every critical and major finding with new commits (do NOT force-push, do NOT amend). Read minor findings as supporting context.
   > Return EXACTLY one line in the contract.
 
 Then proceed to 5.N.1 (same as 5.1.1), 5.N.2, 5.N.3, 5.N.4, 5.N.5.

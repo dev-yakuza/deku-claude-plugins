@@ -10,7 +10,7 @@ Executes TDD step 3-4: write E2E tests for the implemented feature, if the repo 
 
 - `$1` — Issue number
 - `$2` — feature branch name
-- Optional `$3` — retry feedback (JSON array)
+- Optional `$3` — retry signal. When the orchestrator invokes this atom in retry mode it passes the literal string `"retry"`. The atom self-fetches the previous round's step-4 review findings per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C (marker `<!-- sdd:review:implement:step-4 -->`).
 
 ## Preconditions
 
@@ -19,9 +19,16 @@ Executes TDD step 3-4: write E2E tests for the implemented feature, if the repo 
 
 ## Work
 
-### Step 0: Pre-flight context discovery
+### Step 0: Pre-flight context discovery + retry context fetch
 
-If `$3` (retry) → skip. Else: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Code-focused**, Section B item 4 only (target directory survey).
+If `$3` (retry signal — non-empty, expected literal `"retry"`):
+- Skip the preflight items below.
+- **Execute `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C** to self-fetch the previous round's step-4 review findings (marker `<!-- sdd:review:implement:step-4 -->` on Issue `$1`).
+- Hold the sorted array as `<retry-findings>` for use during E2E test writing in step 3a (if E2E setup exists): prioritize addressing every `critical` and `major` finding; read `minor` as supporting context.
+- If Section C returns `FAIL: ...` → propagate it as this atom's return value before starting Main work.
+- If step 3b is taken (no E2E setup), `<retry-findings>` is irrelevant — the atom returns `OK E2E_SKIPPED` without applying retry changes.
+
+Else (first round): follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` — tier **Code-focused**, Section B item 4 only (target directory survey).
 
 For E2E specifically: focus the directory read on existing E2E test files — the framework used (Playwright/Cypress/Puppeteer/Flutter integration_test/etc.), test fixture patterns, page-object usage, waiting strategy.
 
@@ -56,7 +63,7 @@ For E2E specifically: focus the directory read on existing E2E test files — th
    - Skip E2E entirely. Note this for the result return.
    - Do NOT install new E2E frameworks — that's a `/sdd test` stage decision with user confirmation.
 
-4. If `$3` (retry feedback) is provided (and E2E was run): address each finding.
+4. **Retry resolution check** (E2E path only): if Step 0 fetched `<retry-findings>` and step 3a was taken, before committing verify that every `critical` and `major` finding has been addressed in the E2E tests.
 
 5. **Self-review (blockers only — E2E path only)**:
    - [ ] E2E tests follow existing framework patterns

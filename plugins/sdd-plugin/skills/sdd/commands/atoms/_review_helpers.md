@@ -105,46 +105,93 @@ Every review atom embeds a JSON block inside its posted comment using the marker
 - Any `critical` or `major` finding → `verdict: "FAIL"`
 - Only `minor` findings or none → `verdict: "PASS"`
 
-### B.4 Parsing on orchestrator side
+### B.4 Parsing the JSON block
 
-When an orchestrator needs the JSON for retry feedback (Section C), extract:
+To extract a review atom's findings from its posted comment:
 
 ```bash
 gh repo view --json nameWithOwner -q .nameWithOwner
-gh api repos/<owner>/<repo>/issues/<N>/comments --jq '.[].body'
+gh api repos/<owner>/<repo>/issues/<N>/comments --jq '[.[] | select(.body | contains("<EXACT_MARKER>"))] | sort_by(.id) | last | .body'
 ```
 
-Inside the comment body text, find the substring between `<!-- sdd:findings:json -->` and `<!-- /sdd:findings:json -->`, strip the surrounding fenced code block markers, and treat as JSON.
+Inside the comment body text, find the substring between `<!-- sdd:findings:json -->` and `<!-- /sdd:findings:json -->`, strip the surrounding fenced code block markers, and treat as JSON per Section B.2.
 
-For PR-scoped reviews (implement PR Final), replace `<N>` with the PR number and use `gh api repos/<owner>/<repo>/issues/<PR_NUM>/comments` (PR comments share the Issues API in GitHub).
+For PR-scoped reviews (implement PR Final), `<N>` is the PR number — PR comments share the Issues API in GitHub.
+
+This procedure is invoked by **retry-mode work atoms** (Section C) to reconstruct previous-round findings. It is read-only and does not modify any comment.
 
 ---
 
-## Section C — Retry feedback structuring
+## Section C — Retry feedback (atom-side self-fetch)
 
-When an orchestrator retries a work atom after a failed review round, it passes the failing findings as **`$2`** (work atoms) or **`$3`** (implement_pr retry mode). Do NOT summarize.
+When a work atom is invoked in retry mode, it self-fetches the previous round's review comments from the target Issue / PR. The orchestrator no longer pre-extracts and inlines the JSON — this keeps the main session context light and ensures the atom always sees the latest review state.
 
-### C.1 Build retry input
+### C.1 Trigger
 
-1. Collect the parsed JSON objects from all review atoms in the failed round (Section B.4).
-2. Concatenate the `findings` arrays from each (preserve all fields).
-3. **Keep all severities** — do NOT drop `minor`. `minor` findings frequently carry the specifics (variable names, file lines, suggestive wording) that make a `critical` or `major` finding actionable. Sort the combined array by severity: `critical` first, then `major`, then `minor`. Stable order within each group.
-4. Serialize the combined array as compact JSON.
+The orchestrator signals retry mode by passing the **literal string `"retry"`** as the relevant slot:
 
-### C.2 Pass to work atom
+- analyze / design / test work atoms: `$2 = "retry"`
+- `implement_red` / `green` / `refactor` / `e2e`: `$3 = "retry"`
+- `implement_pr` retry mode: `$3 = "retry"`
 
-In the work atom Agent prompt, include:
+Slot value handling:
+- **Empty / absent** → first round; do NOT execute this section.
+- **Literal `"retry"`** → retry mode; execute C.2 → C.3.
+- **Anything else** (legacy JSON arrays from external callers, typos, accidental shell expansion, etc.) → the atom MUST return `FAIL: unrecognized retry slot value: <first 80 chars of the slot>` instead of silently falling back to first-round. This prevents silent context loss when callers use the pre-v0.36 calling convention.
 
-```
-Previous round structured findings — sorted by severity (critical → major → minor).
-Address every critical and major finding. Read minor findings as context that may
-clarify what to change; do not skip them when they cite specific lines/symbols
-referenced by a higher-severity finding.
+### C.2 Stage → marker resolution
 
-<inlined JSON array>
-```
+The marker substrings below are matched **including the trailing ` -->`** (and the leading `<!-- `) to avoid prefix collisions — e.g. `sdd:review:implement:step-1` must not match `:step-10` or `:tools`.
 
-The work atom parses this JSON and addresses critical/major findings individually before posting its next output, using the minor entries as supporting context.
+| Stage / atom | Comment scope | Markers to fetch |
+|---|---|---|
+| `analyze_work` | Issue `$1` | `<!-- sdd:review:analyze:completeness -->`, `<!-- sdd:review:analyze:quality -->`, `<!-- sdd:review:analyze:adversarial -->` |
+| `design_work` | Issue `$1` | `<!-- sdd:review:design:completeness -->`, `<!-- sdd:review:design:quality -->`, `<!-- sdd:review:design:adversarial -->` |
+| `test_work` (single / child path) | Issue `$1` | `<!-- sdd:review:test:completeness -->`, `<!-- sdd:review:test:quality -->`, `<!-- sdd:review:test:adversarial -->` |
+| `test_work` (parent path) | Issue `$1` | Above 3 markers **plus** `<!-- sdd:review:parent -->` (cross-child integration review) |
+| `implement_red` | Issue `$1` | `<!-- sdd:review:implement:step-1 -->` |
+| `implement_green` | Issue `$1` | `<!-- sdd:review:implement:step-2 -->` |
+| `implement_refactor` | Issue `$1` | `<!-- sdd:review:implement:step-3 -->` |
+| `implement_e2e` | Issue `$1` | `<!-- sdd:review:implement:step-4 -->` |
+| `implement_pr` retry mode | PR (self-derived) | `<!-- sdd:review:implement:completeness -->`, `<!-- sdd:review:implement:quality -->`, `<!-- sdd:review:implement:adversarial -->` (3 markers; `<!-- sdd:review:implement:tools -->` and `<!-- sdd:review:implement:step-* -->` excluded by exact match on trailing ` -->`) |
+
+PR-scoped fetches use the GitHub Issues comments API with the PR number (PR comments live under `/issues/<PR_NUM>/comments`).
+
+### C.3 Fetch + merge procedure
+
+Each Bash call below is its own simple Bash tool invocation. Do NOT chain (`&&`, `;`, `|`, `$(...)`, `VAR=$(...)`).
+
+1. Resolve owner/repo:
+   ```bash
+   gh repo view --json nameWithOwner -q .nameWithOwner
+   ```
+   Observe the literal `<owner>/<repo>`. For `implement_pr` retry, additionally derive `<PR_NUM>`:
+   ```bash
+   gh pr list --head $2 --state open --json number --jq '.[0].number'
+   ```
+   If `<PR_NUM>` is empty → return `FAIL: retry mode requested but no open PR for branch $2`.
+
+2. For each marker in the table row above, query the **most recent** matching comment:
+   ```bash
+   gh api repos/<owner>/<repo>/issues/<N>/comments --jq '[.[] | select(.body | contains("<MARKER>"))] | sort_by(.id) | last | .body'
+   ```
+   - `<N>` = `$1` (Issue-scoped) or `<PR_NUM>` (PR-scoped).
+   - `<MARKER>` = exact substring from the table (includes leading `<!-- ` and trailing ` -->`).
+   - `sort_by(.id) | last` picks the highest-id comment when duplicates exist (update-in-place rotates the body, so this is the canonical latest version).
+   - Empty result for a required marker → return `FAIL: retry requested but review comment for <MARKER> not found on <N>`.
+
+3. From each body, extract the JSON between `<!-- sdd:findings:json -->\n\`\`\`json` and `\`\`\`\n<!-- /sdd:findings:json -->`. Parse it as a JSON object per Section B.2.
+
+4. Concatenate every reviewer's `findings` array. **Keep all severities** — do NOT drop `minor`. Sort the combined array by severity: `critical → major → minor`. Stable order within each group.
+
+5. Use the sorted array as the retry input: address every `critical` and `major` finding individually, read `minor` entries as supporting context (they often pinpoint the specific line/symbol a higher-severity finding only referenced abstractly).
+
+### C.4 Notes
+
+- **Self-fetch is read-only.** This is an idempotent reconstruction of retry context, **not** a license for work atoms to spawn sub-tasks or expand scope. The "atoms never spawn other atoms" rule still applies.
+- **Marker exact match with trailing ` -->`** — prevents prefix collisions across `step-1` vs `step-10`, `implement:completeness` vs `implement:completeness-extra`, etc.
+- **GitHub API eventual consistency**: in the rare case where a reviewer's PATCH has not yet propagated when the atom fetches, the atom may see a stale body. The orchestrator waits for all reviewer atoms' `>>> RESULT <<<` to land in the main session before spawning the retry work atom — by then GitHub's eventual-consistency window has elapsed in practice. No active retry-on-stale is required.
+- **Why atom-side instead of orchestrator-side**: the orchestrator runs in the main session, so any review-comment fetch and JSON inline accumulates main-session context. atom-side fetch confines that token weight to the atom's own (separate) context. Net result: main session only sees the atom's short `>>> RESULT <<<` line.
 
 ---
 
