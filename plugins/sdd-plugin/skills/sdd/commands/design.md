@@ -1,172 +1,148 @@
 # DESIGN
 
-**Stage 2: Design (How) — Orchestrator**
+**Stage 2: Design (How) — thin wrapper.**
 
-Define HOW to implement based on the requirements.
+Arch B (v1.0.0): this file runs in the **main session** and spawns ONE `stage_design` sub-agent that does all the work (design body + child Issue creation + 3 reviewers serial + retry loop + escalation). Main session parses the sub-agent's `>>> RESULT <<<` line and handles label transitions + user prompts.
 
-This file is an **orchestrator**. It runs in the main session and composes atomic operations via the Agent tool. The atoms (`atoms/design_work.md`, `atoms/design_review.md`, `atoms/design_adversarial.md`) do the actual work; this file manages state, retries, and user interaction.
+Define HOW based on the analyze stage's What/Why output. Two output paths: SINGLE-PR or CHILDREN (multi-PR with child Issues, parent paused).
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
+> **Bash Command Execution**: see `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`.
 
 ## Input Validation
 
-Before any other step: validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+Validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
-## Precondition
+## Direct-invocation label check (per `design/01-sub-agent-contract.md` §11)
 
-The Issue must have an `<!-- sdd:analyze:output -->` comment. If missing → report "Run `/sdd analyze $1` first" and stop. The work atom will also check this, but failing fast here avoids a wasted subagent invocation.
-
-## Phase 0: Depth label detection
-
-Per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C:
+For direct `/sdd design <N>` invocation (not via `/sdd resume` / `/sdd auto` / `/sdd batch`), verify the Issue's current SDD lifecycle label matches this stage. Read labels:
 
 ```bash
 gh issue view $1 --json labels --jq '[.labels[].name]'
 ```
 
-Determine depth (`default` / `deep` / `shallow`).
+- Labels contain no `sdd:*` lifecycle label OR contain `sdd:design` → continue.
+- Labels contain `sdd:analyze` → refuse (analyze hasn't finished):
+  > Issue #$1 is currently at `sdd:analyze`. Run `/sdd analyze $1` first, or `/sdd resume $1`.
 
-**Model resolution for design stage**:
+  Stop without making changes.
+- Labels contain `sdd:implement` / `sdd:test` / `sdd:done` → refuse:
+  > Issue #$1 is currently at `sdd:<current>`. Use `/sdd resume $1` for correct stage dispatch.
 
-| Atom | default | deep | shallow |
-|---|---|---|---|
-| `design_work` | opus | opus | opus |
-| `design_review` (completeness) | sonnet | opus | sonnet |
-| `design_review` (quality) | sonnet | opus | sonnet |
-| `design_adversarial` | opus | opus | sonnet |
+  Stop without making changes.
 
-## Phase 1: Design + AI Review Loop
+(When this file is read-and-executed inline from `/sdd resume` or from analyze.md's skip-review.design auto-advance, bootstrap / the prior stage has already validated the stage — but the label check above is idempotent and cheap, so it stays.)
 
-Up to **3 rounds** maximum. Each round = work atom → 3 parallel review atoms → verdict check.
+## Precondition check (defense in depth)
 
-### Round 1
+Confirm the analyze output exists on the Issue before spawning the sub-agent (`stage_design` also checks, but failing fast here avoids a wasted Agent spawn):
 
-**Step 1.1 — Spawn the work atom** via the Agent tool:
+```bash
+gh repo view --json nameWithOwner -q .nameWithOwner
+```
+
+Observe `<owner>/<repo>`. Then:
+
+```bash
+gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:analyze:output -->")) | .id'
+```
+
+If empty → report "Run `/sdd analyze $1` first." Stop.
+
+## Phase 0: Depth detection (for sub-agent prompt)
+
+From the same labels read in the direct-invocation check, derive the depth dial:
+- Contains `sdd:review:deep` → `depth = deep`
+- Contains `sdd:review:shallow` → `depth = shallow`
+- Otherwise → `depth = default`
+
+## Phase 1: Spawn stage_design
+
+Spawn ONE sub-agent via the Agent tool:
 
 - `subagent_type`: `general-purpose`
-- `model`: `opus`
-- `description`: `design work for #$1`
+- `model`: `opus` (the stage's work logic runs in the sub-agent context; reviewer logic also inlined there)
+- `description`: `stage_design for #$1`
 - `prompt`:
-  > Read `<<SKILL_DIR>>/commands/atoms/design_work.md` and execute its instructions for Issue #$1.
-  > Return EXACTLY one line in the contract specified by that file, prefixed by the `>>> RESULT <<<` marker line.
+  > Read `<<SKILL_DIR>>/commands/atoms/stage_design.md` and execute its instructions for Issue #$1.
+  >
+  > Inputs:
+  >   Issue: #$1
+  >   Depth: <dial>      (substitute the literal value from Phase 0: `default` / `deep` / `shallow`)
+  >   Resume: none
+  >
+  > Return EXACTLY one line per the contract in stage_design.md, prefixed by the `>>> RESULT <<<` marker line.
 
-Parse the subagent's `>>> RESULT <<<` line:
-- `FAIL: <reason>` → report failure to the user and stop. Do not proceed to reviews.
-- `OK SINGLE` → single-PR design posted. Continue to Step 1.2. **Remember the path = SINGLE** for Phase 2.
-- `OK CHILDREN: #A,#B,#C` → multi-PR design posted, children created. Continue to Step 1.2. **Remember the path = CHILDREN with the listed numbers** for Phase 2.
+(Substitute `<dial>` with the literal Phase 0 value. Do NOT pass through the literal placeholder.)
 
-**Step 1.2 — Spawn the three review atoms in parallel** via the Agent tool. Single message, three Agent tool calls (concurrent execution):
+## Phase 2: Parse sub-agent return
 
-Agent A (completeness):
-- `subagent_type`: `general-purpose`
-- `model`: per Phase 0 table
-- `description`: `design review (completeness) for #$1`
-- `prompt`:
-  > Read `<<SKILL_DIR>>/commands/atoms/design_review.md` and execute its instructions for Issue #$1 with role `completeness`.
-  > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
+Parse the `>>> RESULT <<<` line. Branch on status:
 
-Agent B (quality):
-- `subagent_type`: `general-purpose`
-- `model`: per Phase 0 table
-- `description`: `design review (quality) for #$1`
-- `prompt`:
-  > Read `<<SKILL_DIR>>/commands/atoms/design_review.md` and execute its instructions for Issue #$1 with role `quality`.
-  > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
-
-Agent C (adversarial):
-- `subagent_type`: `general-purpose`
-- `model`: per Phase 0 table
-- `description`: `design adversarial for #$1`
-- `prompt`:
-  > Read `<<SKILL_DIR>>/commands/atoms/design_adversarial.md` and execute its instructions for Issue #$1.
-  > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
-
-Parse all three `>>> RESULT <<<` lines:
-- If any is `FAIL: <reason>` (atom error) → report failure, stop.
-- Combine verdicts:
-  - All three `OK PASS` → reviews passed.
-  - Any `OK FAIL: <summary>` → reviews failed. Combine summaries.
-  - **Adversarial single-FAIL escalation**: if `OK FAIL` came only from adversarial, log to user: "⚠ Adversarial reviewer alone identified critical/major issues. Surfacing for awareness." Then continue Step 1.3 as normal.
-
-**Step 1.3 — Round decision:**
-- Reviews passed → exit loop; proceed to Phase 2.
-- Reviews failed, round < 3 → spawn the next round's work atom in **retry mode** (see Round 2/3 below). Do NOT fetch review comments or extract JSON in the orchestrator — the atom self-fetches per `_review_helpers.md` Section C.
-- Reviews failed, round == 3 → exit loop. Proceed to **Phase 1.5**.
-
-### Round 2 and Round 3 (retry)
-
-Same as Round 1 Steps 1.1–1.3, but the work atom is invoked in **retry mode** by passing the literal string `"retry"` as `$2`:
-
-- `prompt`:
-  > Read `<<SKILL_DIR>>/commands/atoms/design_work.md` and execute its instructions for Issue #$1.
-  > Retry mode (`$2 = "retry"`): self-fetch previous round's review findings per `_review_helpers.md` Section C, then address every critical and major finding (use minor as supporting context).
-  > Return EXACTLY one line in the contract.
-
-The review atom prompts are unchanged between rounds.
-
-**Note on retry with `OK CHILDREN`**: if Round 1 returned `OK CHILDREN: #A,#B,#C` and reviews failed, the work atom's idempotency rule (do NOT re-create children if `<!-- sdd:children:output -->` exists) keeps the same children across retries. The retry only updates the design output comment, not the child set.
-
-## Phase 1.5: Round 3 Escalation Gate
-
-Runs only if round 3 failed.
-
-1. Fetch latest review findings.
-2. Render summary to user:
+### `OK ADVANCE: implement SINGLE`
+1. Update label:
+   ```bash
+   gh issue edit $1 --remove-label "sdd:design" --add-label "sdd:implement"
    ```
-   ⚠ Design stage: 3 review rounds failed.
-   Remaining critical/major findings:
-     - [critical] ... (design/<role>)
-     - [major] ... (design/<role>)
-   ```
-3. **Honor skip-review** (auto-decide in unattended runs):
-   - If `design` is in skip-review (e.g. `/sdd auto`, `/sdd batch`):
-     - Log to the Issue (via comment) and to the orchestrator output: "⚠ Round 3 escalation: review still has critical/major findings, but `skip-review: design` is set — auto-continuing to Phase 2. Findings remain on the Issue for human follow-up."
-     - Proceed to **Phase 2** immediately without asking. Do NOT call AskUserQuestion or any interactive prompt.
-   - Else (interactive mode):
-     - Ask the user: "Continue to Phase 2 / Pause for manual intervention / Stop?"
-     - On "Continue" → proceed.
-     - On "Pause" → stop. User resumes via `/sdd resume <N>` after manual fixes.
-     - On "Stop" → exit cleanly.
-
-## Phase 2: Branching on path (SINGLE vs CHILDREN)
-
-### Path: SINGLE (from `OK SINGLE`)
-
-1. Check skip-review setting (Common Definitions → Skip Review Setting).
-2. If `design` is in skip-review:
-   - Log: "User review skipped (skip-review: design). AI review already ran."
-   - Update label to `sdd:implement`.
-   - **Auto-proceed (read + execute inline, do NOT spawn a subagent)**: read `<<SKILL_DIR>>/commands/implement.md` and execute its instructions for Issue #$1 in this same main session.
-3. If `design` is NOT in skip-review:
-   - Summarize for the user: which round passed, any minor suggestions still on the Issue, the design comment location.
+   (If the Issue had no `sdd:design` label yet — fresh entry via analyze auto-advance — the `--remove-label` is a no-op; that's fine.)
+2. Check skip-review setting (Common Definitions → Skip Review Setting in `SKILL.md`). Read `.github/.sdd-config` and parse the `skip-review:` line.
+3. If `implement` is in skip-review:
+   - **Read + execute inline** (do NOT spawn a sub-agent here — `implement.md` itself spawns `stage_implement`, which would be nested): read `<<SKILL_DIR>>/commands/implement.md` and execute its instructions for Issue #$1 in this same main session.
+4. If `implement` is NOT in skip-review:
+   - Summarize for the user: design comment location, PR split = SINGLE.
    - Ask for confirmation on technical approach and PR split.
-   - On approval: update label to `sdd:implement`. (User invokes `/sdd implement $1` themselves or runs `/sdd resume $1`.)
+   - On approval: report "Run `/sdd implement $1` to continue, or `/sdd resume $1`." Stop.
 
-### Path: CHILDREN (from `OK CHILDREN: #A,#B,...`)
+### `OK ADVANCE: implement CHILDREN: #A,#B,#C`
+The sub-agent has already posted the design output, created the child Issues with `sdd:analyze` + `sdd:child` labels, and posted the `<!-- sdd:children:output -->` comment on the parent.
 
-The work atom has already:
-- Posted the design output comment on the parent
-- Created the child Issues with labels `sdd:analyze` + `sdd:child`
-- Posted the `<!-- sdd:children:output -->` comment on the parent
-
-The orchestrator now:
-
-1. Check skip-review setting.
-2. Update parent label to `sdd:implement`.
-3. If `design` is in skip-review:
-   - **Stop here.** The parent reaches `sdd:implement` with children at `sdd:analyze`. The surrounding flow (e.g. `/sdd batch` or `/sdd auto`) picks up the children.
+1. Update parent label (parent reaches `sdd:implement` but pauses there — parent-pause invariant per Common Contracts §1):
+   ```bash
+   gh issue edit $1 --remove-label "sdd:design" --add-label "sdd:implement"
+   ```
+2. Check skip-review setting.
+3. If `design` is in skip-review (e.g. running under `/sdd auto` or `/sdd batch`):
+   - **Stop here.** Parent is at `sdd:implement` (paused). Children are at `sdd:analyze` + `sdd:child`. The surrounding flow (`/sdd auto` or `/sdd batch`) picks up the children.
    - Log: "Children created (#A, #B, ...). Parent stopped at sdd:implement for batch/orchestrator to queue children."
-4. If `design` is NOT in skip-review:
-   - Summarize: design posted, children #A, #B, ... created, parent now at `sdd:implement`.
-   - Ask: "Which child Issue would you like to start with?"
-   - On selection (read + execute inline, do NOT spawn a subagent): read `<<SKILL_DIR>>/commands/analyze.md` and execute its instructions for the selected child Issue in this same main session.
+4. If `design` is NOT in skip-review (interactive mode):
+   - Summarize: design posted, children `#A`, `#B`, ... created, parent now at `sdd:implement` (paused).
+   - Ask the user (`AskUserQuestion`): "Which child Issue would you like to start with?" (Options: each child number, plus a Skip option to defer.)
+   - On selection: **read + execute inline** (do NOT spawn a sub-agent — `analyze.md` itself spawns `stage_analyze`, which would be nested): read `<<SKILL_DIR>>/commands/analyze.md` and execute its instructions for the selected child Issue `#<child>` in this same main session.
+   - On Skip: report "Resume any child later with `/sdd analyze #<child>` or `/sdd resume #<child>`." Stop.
+
+### `OK PAUSE`
+Report to user: "Paused. Resume with `/sdd resume $1`." Stop.
+
+### `ESCALATE: <summary>`
+1. Render `<summary>` verbatim to the user.
+2. Call `AskUserQuestion` with 3 options: `Continue`, `Pause`, `Stop`.
+3. Branch on user choice:
+   - **Continue** → re-spawn `stage_design` with `Resume: continue-after-escalation`:
+     - `subagent_type`: `general-purpose`, `model`: `opus`, `description`: `stage_design resume for #$1`
+     - `prompt`:
+       > Read `<<SKILL_DIR>>/commands/atoms/stage_design.md` and execute its instructions for Issue #$1.
+       >
+       > Inputs:
+       >   Issue: #$1
+       >   Depth: <dial>
+       >   Resume: continue-after-escalation
+       >
+       > Return EXACTLY one line per the contract, prefixed by `>>> RESULT <<<`.
+     - Parse the re-spawn's return (should be `OK ADVANCE: implement SINGLE`, `OK ADVANCE: implement CHILDREN: #A,#B,#C`, or `FAIL:`). Loop into the corresponding branch above. If `OK ADVANCE: ...`, handle the label + skip-review steps again. **Note**: re-running the label transition is idempotent on a clean Issue, but if the user manually changed labels between escalate and resume, the `--remove-label "sdd:design"` is a no-op and `--add-label "sdd:implement"` overwrites the user's manipulation — this is intentional (the resume continues the SDD flow).
+   - **Pause** → report "Resume later with `/sdd resume $1`." Stop.
+   - **Stop** → exit cleanly.
+
+### `FAIL: <reason>`
+Report `<reason>` to the user. Stop.
+
+### Unknown / malformed
+Treat as `FAIL: unexpected return: <line>` and stop. (Defensive per `design/01-sub-agent-contract.md` §9.)
 
 ## Notes
 
-- **AI review always runs.** `skip-review: design` skips only the user confirmation — the AI review loop (Phase 1) still executes. The Phase 1.5 escalation gate still triggers on Round 3 failure, but in skip-review mode it auto-continues to Phase 2 (findings stay on the Issue); in interactive mode it asks the user.
-- **Atoms never spawn other atoms.** All Agent-tool spawning happens here. The work atom does its own codebase exploration via Read/Grep/Glob (no Explore subagent).
-- **Reviews are independent.** Three review atoms run in parallel with independent contexts.
-- **Retry feedback is structured JSON.** Lossless handoff to work atom.
-- **Retry limit is 3 rounds total** (initial + 2 retries), then escalation gate.
-- **Child creation is idempotent** across retries — work atom skips re-creation if `<!-- sdd:children:output -->` already exists on the parent.
-- **Depth label override**: `sdd:review:deep`/`sdd:review:shallow` shifts model assignments per `_review_helpers.md` Section C.
+- **AI review always runs.** `skip-review: design` skips only the user confirmation between stages — `stage_design` always executes Phases 1-4 internally. The Phase 5 escalation gate (inside the sub-agent) still triggers on Round 3 FAIL, but skip-review auto-continues it (sub-agent returns `OK ADVANCE: implement <path>` instead of `ESCALATE`). Findings remain on the Issue for human follow-up.
+- **Single sub-agent spawn per invocation** (or two, if a `continue-after-escalation` resume is needed). All reviewer + retry loop logic, plus SINGLE/CHILDREN decision + child Issue creation + children-list comment, lives inside `stage_design.md` — main session stays thin.
+- **Reviewers run serially inside the sub-agent.** Reviewer independence is preserved by the sub-agent's internal narrative structure (re-fetch the design output for each reviewer; no cross-visibility of verdicts).
+- **Label transitions are main session's responsibility.** `stage_design` never sets parent labels itself. Children's `sdd:analyze` + `sdd:child` labels are applied at `gh issue create --label` time inside the sub-agent — that is NOT a parent-label transition.
+- **Children idempotency is load-bearing.** If the sub-agent is re-invoked (retry rounds, or `continue-after-escalation` resume), child Issues are NOT re-created — the existing children-list comment is detected via `<!-- sdd:children:output -->` and preserved (`spec/stage/design.md` §5 / §8).
+- **Parent pauses at `sdd:implement` on CHILDREN path.** Parent does NOT advance through implement/test by itself. It waits until all children reach `sdd:done`, then the test stage's parent-integration logic advances it (Common Contracts §1 parent-pause invariant).
+- **Depth label override**: `sdd:review:deep` / `sdd:review:shallow` selects the depth dial, which the sub-agent uses for model selection internally per `_review_helpers.md` Section A.2.
