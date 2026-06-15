@@ -1,12 +1,15 @@
 # Migration Guide — 0.x → v1.0.0
 
-> Status: **DRAFT (Phase C M0)**. This document is finalized at M12 just before v1.0.0 release. Sections below are placeholders to be filled as Phase C milestones complete.
-
 ## What changed
 
-v1.0.0 is a major architectural rewrite (Arch B: stage-as-subagent). Main session becomes a thin FSM dispatcher; each pipeline stage runs as a single sub-agent.
+v1.0.0 is a major architectural rewrite (Arch B: stage-as-subagent). Main session becomes a thin FSM dispatcher; each pipeline stage runs as a single sub-agent that inlines work + reviews + Skills.
 
-See `design/00-architecture.md` for full architecture, `design/05-rethink-decisions.md` for the 10 RETHINK decisions.
+**Headline numbers** (per design/00-architecture.md §5):
+- Main session per-Issue token budget: ~19,715 → ~2,610 (~87% drop)
+- Total system tokens: roughly flat (sub-agent context grows; main shrinks)
+- Wall-clock per stage: slightly longer (~+60s per review round, serial reviewers)
+
+See `design/00-architecture.md` for full architecture, `design/05-rethink-decisions.md` for the 10 RETHINK decisions, `design/SYNTHESIS-v2.md` for review-driven refinements.
 
 ## What is identical (zero migration steps needed for typical users)
 
