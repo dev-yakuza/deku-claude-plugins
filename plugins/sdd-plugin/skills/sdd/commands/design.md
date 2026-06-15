@@ -132,7 +132,27 @@ Report to user: "Paused. Resume with `/sdd resume $1`." Stop.
    - **Stop** → exit cleanly.
 
 ### `FAIL: <reason>`
-Report `<reason>` to the user. Stop.
+
+Parse `<reason>` for an optional subtype prefix (`<subtype>: <detail>`) per `spec/00-common-contracts.md` §6 "FAIL reason prefix convention". Branch:
+
+- **`no-action: <detail>`** — design concluded the requested change is not warranted. Render:
+  > Issue #$1 design concluded no-action: `<detail>`.
+  > Close-as-not-planned recommended:
+  > ```bash
+  > gh issue edit $1 --remove-label "sdd:design" --add-label "sdd:done"
+  > gh issue close $1 --reason "not planned" --comment "<detail>"
+  > ```
+  > Design comment remains on the Issue for reference.
+
+  Stop without changing labels.
+
+- **`precondition-missing: <detail>`** — required `<!-- sdd:analyze:output -->` absent. Render:
+  > Issue #$1 design precondition missing: `<detail>`.
+  > Run `/sdd analyze $1` first, or `/sdd resume $1`.
+
+  Stop.
+
+- **No recognized prefix** — render `<reason>` verbatim to the user. Stop.
 
 ### Unknown / malformed
 Treat as `FAIL: unexpected return: <line>` and stop. (Defensive per `design/01-sub-agent-contract.md` §9.)

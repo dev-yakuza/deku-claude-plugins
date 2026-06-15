@@ -166,11 +166,65 @@ Round 3 AI review FAIL with skip-review.qa OFF.
 
 ### `FAIL: <reason>`
 
-Report `<reason>` to the user. Stop.
+Parse `<reason>` for an optional subtype prefix (`<subtype>: <detail>`) per `spec/00-common-contracts.md` §6 "FAIL reason prefix convention". Branch:
+
+- **`gate-pending: <ISO-8601-date>: <detail>`** — a manual QA / integration gate cannot be evaluated yet (e.g. parent path awaits a child release). Render:
+  > Issue #$1 test gate-pending: `<detail>`.
+  > Earliest resume date: `<ISO-8601-date>`. Post the required validation data as a comment on Issue #$1, then run `/sdd resume $1`. Label remains at `sdd:test`.
+
+  Stop without changing labels.
+
+- **`precondition-missing: <detail>`** — required prior-stage artifact absent. Render:
+  > Issue #$1 test precondition missing: `<detail>`.
+  > Run `/sdd implement $1` first, or `/sdd resume $1`.
+
+  Stop.
+
+- **No recognized prefix** — render `<reason>` verbatim to the user. Stop.
 
 ### Unknown / malformed
 
-Treat as `FAIL: unexpected return: <line>` and stop. (Defensive per `design/01-sub-agent-contract.md` §9.)
+Defensive auto-recovery for sub-agent contract-line drop (`design/01-sub-agent-contract.md` §9):
+
+The sub-agent's `>>> RESULT <<<` line is absent or unparseable. Before failing, **probe GitHub state** to detect the pattern where the sub-agent completed all substantive work (test:output marker + 3 SDD reviewers + `/verify` Skill) but silently dropped the closing contract line — observed when the heavy reviewer + Skill chain consumed the sub-agent's remaining output budget.
+
+1. Resolve `<owner>/<repo>` per Common Contracts §11.
+2. Find the PR for this Issue:
+   ```bash
+   gh pr list --search "Refs #$1" --state open --json number,headRefName --jq '.[] | {number, headRefName}'
+   ```
+   - Empty → fall through to step 7.
+   - Else → observe `<PR_NUM>` (single/child or parent-integration; both post test reviewers on the PR).
+3. Check whether `<!-- sdd:test:output -->` exists on Issue #$1:
+   ```bash
+   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:test:output -->")) | .id'
+   ```
+   - Absent → fall through to step 7.
+4. Check whether all three SDD test reviewer comments exist on the PR AND each `verdict` is `PASS`:
+   ```bash
+   gh api repos/<owner>/<repo>/issues/<PR_NUM>/comments --jq '[.[] | select(.body | contains("<!-- sdd:review:test:completeness -->") or contains("<!-- sdd:review:test:quality -->") or contains("<!-- sdd:review:test:adversarial -->"))] | length'
+   ```
+   - Result < 3 → fall through to step 7.
+   - Result == 3 → re-fetch each comment body and verify the verdict line (`**Verdict:** PASS`) for all three. Any FAIL → fall through to step 7.
+5. Auto-recovery preconditions met. Read `.github/.sdd-config` for `skip-review:`.
+   - If `qa` is in skip-review → main session performs the label transition that `stage_test.md` §9 normally does inside the sub-agent:
+     ```bash
+     gh issue edit $1 --remove-label "sdd:test" --add-label "sdd:done"
+     gh issue close $1 --reason "completed" --comment "SDD pipeline completed via main-session auto-recovery: test:output + 3 reviewer PASS verdicts confirmed. PR #<PR_NUM> awaiting user merge."
+     ```
+     Log:
+     > ⚠ Sub-agent dropped the `>>> RESULT <<<` contract line. Main session auto-recovered: detected complete test work + PASS verdicts. Issue transitioned to `sdd:done` and closed. Treating as `OK DONE`.
+     
+     Stop. (Equivalent to the `OK DONE` branch above.)
+   - If `qa` is NOT in skip-review → cannot bypass the manual QA gate. Log:
+     > ⚠ Sub-agent dropped the `>>> RESULT <<<` contract line, but test work + reviewer PASS verdicts are present. Manual QA gate is still pending (skip-review.qa OFF). Re-run `/sdd test $1` or `/sdd resume $1` to resolve the QA gate cleanly.
+     
+     Stop.
+6. (Reserved for future auto-recovery extensions.)
+7. **Fall-through**: report
+   > FAIL: unexpected return from stage_test (auto-recovery probed Issue/PR state and could not confirm successful test completion): `<line>`.
+   
+   Stop. (Defensive per `design/01-sub-agent-contract.md` §9 — equivalent to legacy behavior.)
 
 ## Notes
 
@@ -182,3 +236,5 @@ Treat as `FAIL: unexpected return: <line>` and stop. (Defensive per `design/01-s
 - **Child completion notification runs inside the sub-agent** (`stage_test.md` §10 Phase 5). Multilingual parent regex per `_multilingual.md`. Same logic as `implement.md` Phase 7.
 - **Depth label override**: `sdd:review:deep` / `sdd:review:shallow` selects the depth dial, which the sub-agent uses for model selection internally per `_review_helpers.md` Section A.2. `test_work`-style reasoning is always opus regardless of depth.
 - **Test is the terminal stage.** There is no next-stage skip-review to consult in this wrapper; `skip-review: qa` is consumed entirely by the sub-agent.
+- **FAIL reason subtype convention (additive)** — `stage_test` MAY prefix its FAIL reason with `gate-pending: <date>: ` or `precondition-missing: ` per `spec/00-common-contracts.md` §6. This wrapper renders subtype-specific user guidance. Legacy unstructured FAIL reasons still render verbatim.
+- **Auto-recovery on contract-line drop (additive)** — if the sub-agent's `>>> RESULT <<<` line is absent / malformed, the wrapper probes GitHub state (`<!-- sdd:test:output -->` + 3 PR Final reviewer PASS verdicts) and, when `skip-review.qa` is set, performs the label transition + Issue close that `stage_test.md` §9 normally does inside the sub-agent. Falls through to legacy `FAIL: unexpected return` behavior when probe fails OR when `skip-review.qa` is off (manual QA gate cannot be bypassed from main). Mitigates the **B1 pattern** (`spec/edge-cases.md` §25) — sub-agent's `stop_reason=end_turn` after `/verify` Skill output, empirically observed 7/7 times. Auto-recovery is the sole effective mitigation in v1.1.0.
