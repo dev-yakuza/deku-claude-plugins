@@ -1,231 +1,184 @@
 # TEST
 
-**Stage 4: Testing — Orchestrator**
+**Stage 4: Testing — thin wrapper.**
 
-QA verification + integration E2E for parent Issues. Unit/UI tests and E2E tests for single/child Issues were already done in Stage 3 (implement); this stage validates them and adds the QA gate.
+Arch B (v1.0.0): this file runs in the **main session** and spawns ONE `stage_test` sub-agent that does all the work (test work + 3-or-4 reviewers serial + retry loop + `/verify` Skill + escalation gates). Main session parses the sub-agent's `>>> RESULT <<<` line, handles label transitions, and runs the user-interactive prompts (Continue/Pause/Stop on escalation; Pass/Fail on manual QA; framework choice on missing E2E setup).
 
-This file is an **orchestrator**. It runs in the main session and composes atomic operations via the Agent tool. The atoms (`atoms/test_work.md`, `atoms/test_review.md`, `atoms/test_adversarial.md`, `atoms/parent_integration_review.md`) do the actual work; this file manages state, retries, manual QA interaction, and the final label transition to `sdd:done`.
+QA verification + integration E2E for parent Issues. Unit/UI tests and E2E tests for single/child Issues were already done in Stage 3 (implement); this stage validates them, adds the QA gate, and triggers final label transition to `sdd:done`.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
+> **Bash Command Execution**: see `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`.
 
 ## Input Validation
 
-Before any other step: validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+Validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
-## Phase 0: Depth label detection
+## Direct-invocation label check (per `design/01-sub-agent-contract.md` §11)
 
-Per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C:
+For direct `/sdd test <N>` invocation (not via `/sdd resume` / `/sdd auto` / `/sdd batch`), verify the Issue's current SDD lifecycle label matches this stage. Read labels:
 
 ```bash
 gh issue view $1 --json labels --jq '[.labels[].name]'
 ```
 
-Determine depth (`default` / `deep` / `shallow`).
+- Labels contain `sdd:test` → continue.
+- Labels contain `sdd:analyze` / `sdd:design` / `sdd:implement` / `sdd:done` → refuse:
+  > Issue #$1 is currently at `sdd:<current>`. Use `/sdd resume $1` for correct stage dispatch.
 
-**Model resolution for test stage**:
+  Stop without making changes.
+- Labels contain no `sdd:*` lifecycle label → refuse with the same message (Issue must have reached `sdd:test` via implement to enter test stage).
 
-| Atom | default | deep | shallow |
-|---|---|---|---|
-| `test_work` | opus | opus | opus |
-| `test_review` (completeness) | sonnet | opus | sonnet |
-| `test_review` (quality) | sonnet | opus | sonnet |
-| `test_adversarial` | opus | opus | sonnet |
-| `parent_integration_review` | opus | opus | sonnet |
+(When this file is read-and-executed inline from `/sdd resume`, bootstrap has already validated the stage — but the label check above is idempotent and cheap, so it stays.)
 
-## Phase 1: Determine Issue type
+## Phase 0: Depth detection (for sub-agent prompt)
 
-1. Check for children comment:
-   ```bash
-   gh repo view --json nameWithOwner -q .nameWithOwner
-   gh api repos/<owner>/<repo>/issues/$1/comments \
-     --jq '.[] | select(.body | contains("<!-- sdd:children:output -->")) | .body'
-   ```
+From the same labels read above, derive the depth dial:
+- Contains `sdd:review:deep` → `depth = deep`
+- Contains `sdd:review:shallow` → `depth = shallow`
+- Otherwise → `depth = default`
 
-2. **Parent Issue (has children)**: Verify all child Issues are `sdd:done` before proceeding:
-   - Read child Issue numbers from the children comment.
-   - Check each child's label.
-   - If any child is NOT `sdd:done` → report which children are incomplete; ask user to complete them first; stop.
-   - If ALL children are `sdd:done` → proceed to Phase 2 (work atom will run in parent path).
-3. **Single/Child Issue**: proceed directly to Phase 2.
+## Phase 1: Spawn stage_test
 
-## Phase 2: Test + AI Review Loop
-
-Up to **3 rounds** maximum. Each round = work atom → parallel review atoms → verdict check.
-
-### Round 1
-
-#### 2.1.1 — Spawn the work atom
+Spawn ONE sub-agent via the Agent tool:
 
 - `subagent_type`: `general-purpose`
-- `model`: `opus`
-- `description`: `test work for #$1`
+- `model`: `opus` (the stage's work logic + all reviewers run in this single sub-agent context)
+- `description`: `stage_test for #$1`
 - `prompt`:
-  > Read `<<SKILL_DIR>>/commands/atoms/test_work.md` and execute its instructions for Issue #$1.
-  > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
+  > Read `<<SKILL_DIR>>/commands/atoms/stage_test.md` and execute its instructions for Issue #$1.
+  >
+  > Inputs:
+  >   Issue: #$1
+  >   Depth: <dial>      (substitute the literal value from Phase 0: `default` / `deep` / `shallow`)
+  >   Resume: none
+  >
+  > Return EXACTLY one line per the contract in stage_test.md, prefixed by the `>>> RESULT <<<` marker line.
 
-Parse the `>>> RESULT <<<` line:
-- `FAIL: <reason>` → report failure, stop. (Special case: if reason starts with `no E2E test setup detected; recommended framework:` → surface to user, ask for framework choice, re-spawn with the chosen framework noted in the prompt as `Framework: <name>`.)
-- `OK SINGLE PR: #N` → single/child path; existing PR validated. Continue. Remember `path=SINGLE`.
-- `OK PARENT INTEGRATION_PR: #M` → parent path; integration test PR created. Continue. Remember `path=PARENT, integration_pr=#M`.
-- `OK PARENT NO_INTEGRATION` → parent path; children's tests sufficient. Continue. Remember `path=PARENT, integration_pr=null`.
+(Substitute `<dial>` with the literal Phase 0 value. Do NOT pass through the literal placeholder.)
 
-#### 2.1.2 — Spawn the review atoms in parallel
+## Phase 2: Parse sub-agent return
 
-Single message, three Agent tool calls (concurrent) for single/child path, four for parent path:
+Parse the `>>> RESULT <<<` line. Branch on status:
 
-Agent A (completeness):
-- `subagent_type`: `general-purpose`
-- `model`: per Phase 0 table
-- `description`: `test review (completeness) for #$1`
-- `prompt`:
-  > Read `<<SKILL_DIR>>/commands/atoms/test_review.md` and execute its instructions for Issue #$1 with role `completeness`.
-  > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
+### `OK DONE`
 
-Agent B (quality):
-- `subagent_type`: `general-purpose`
-- `model`: per Phase 0 table
-- `description`: `test review (quality) for #$1`
-- `prompt`:
-  > Read `<<SKILL_DIR>>/commands/atoms/test_review.md` and execute its instructions for Issue #$1 with role `quality`.
-  > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
+Sub-agent already transitioned label to `sdd:done` and closed the Issue (and ran child completion notification if applicable). Report to user:
+> Issue #$1 complete. Labelled `sdd:done` and closed. Test output + reviews remain on the Issue/PR for reference.
 
-Agent C (adversarial):
-- `subagent_type`: `general-purpose`
-- `model`: per Phase 0 table
-- `description`: `test adversarial for #$1`
-- `prompt`:
-  > Read `<<SKILL_DIR>>/commands/atoms/test_adversarial.md` and execute its instructions for Issue #$1.
-  > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
+Stop. (No further stage — test is the terminal stage.)
 
-**If `path == PARENT`**, also include Agent D in the same parallel batch:
+### `OK BACK_TO_IMPLEMENT`
 
-Agent D (parent integration):
-- `subagent_type`: `general-purpose`
-- `model`: per Phase 0 table
-- `description`: `parent integration review for #$1`
-- `prompt`:
-  > Read `<<SKILL_DIR>>/commands/atoms/parent_integration_review.md` and execute its instructions for Issue #$1.
-  > Return EXACTLY one line in the contract, prefixed by `>>> RESULT <<<`.
+QA failure: user reported manual QA item(s) failed. Sub-agent left label as `sdd:test` (no transition). Report to user:
+> Manual QA failed. Run `/sdd implement $1` for a TDD bug-fix cycle, then re-run `/sdd test $1` (or `/sdd resume $1`).
 
-Parse all (3 or 4) `>>> RESULT <<<` lines:
-- Any is `FAIL: <reason>` (atom error) → report, stop.
-- All `OK PASS` → reviews passed; exit loop → Phase 3.
-- Any `OK FAIL: <summary>` → reviews failed. Combine summaries.
-- **Adversarial single-FAIL escalation**: if `OK FAIL` came only from adversarial, log to user.
+Stop.
 
-#### 2.1.3 — Round decision
+### `OK NEEDS_MANUAL_QA: <summary>`
 
-- Reviews passed → exit loop → Phase 3.
-- Reviews failed, round < 3 → spawn the next round's work atom in **retry mode** (see Round 2/3 below). Do NOT fetch review comments or extract JSON in the orchestrator — the atom self-fetches per `_review_helpers.md` Section C.
-- Reviews failed, round == 3 → exit loop → **Phase 2.5 (escalation)**.
+Sub-agent finished AI reviews + `/verify` and is waiting on the user manual-QA gate (skip-review.qa is OFF).
 
-### Round 2 and Round 3 (retry)
+1. Render `<summary>` verbatim to the user (includes path, reviewer verdicts, /verify evidence, E2E_SKIPPED flag if any, link to the QA checklist comment).
 
-Same as Round 1 Steps 2.1.1–2.1.3, but the work atom is invoked in **retry mode** by passing the literal string `"retry"` as `$2`:
+2. Call `AskUserQuestion` with 3 options:
+   - **Yes** — all manual QA items passed.
+   - **No** — at least one manual QA item failed.
+   - **Skip** — treat as Yes (user opts to skip manual verification).
 
-- `prompt`:
-  > Read `<<SKILL_DIR>>/commands/atoms/test_work.md` and execute its instructions for Issue #$1.
-  > Retry mode (`$2 = "retry"`): self-fetch previous round's review findings per `_review_helpers.md` Section C (parent path also fetches `<!-- sdd:review:parent -->`), then address every critical and major finding (use minor as supporting context).
-  > Return EXACTLY one line in the contract.
+3. Branch on user choice:
+   - **Yes** or **Skip** → re-spawn `stage_test` with `Resume: qa-approved`:
+     - `subagent_type`: `general-purpose`, `model`: `opus`, `description`: `stage_test qa-approved for #$1`
+     - `prompt`:
+       > Read `<<SKILL_DIR>>/commands/atoms/stage_test.md` and execute its instructions for Issue #$1.
+       >
+       > Inputs:
+       >   Issue: #$1
+       >   Depth: <dial>
+       >   Resume: qa-approved
+       >
+       > Return EXACTLY one line per the contract, prefixed by `>>> RESULT <<<`.
+     - Parse the re-spawn's return — should be `OK DONE` (success branch) or `FAIL:` (label transition error). Loop into the corresponding branch above.
+   - **No** → re-spawn `stage_test` with `Resume: qa-failed`:
+     - Same prompt shape with `Resume: qa-failed`.
+     - Parse the re-spawn's return — should be `OK BACK_TO_IMPLEMENT` or `FAIL:`. Loop into the corresponding branch.
 
-## Phase 2.5: Round 3 Escalation Gate
+### `OK NEEDS_FRAMEWORK_CHOICE: recommended=<name>`
 
-Runs only if round 3 failed.
+Sub-agent (PARENT path) detected no E2E test setup and is surfacing a framework recommendation.
 
-1. Render summary to user.
-2. **Honor skip-review** (auto-decide in unattended runs):
-   - If `qa` is in skip-review (`/sdd auto` / `/sdd batch`):
-     - Log to the Issue/PR (via comment) and to the orchestrator output: "⚠ Round 3 escalation: tests still failing after 3 rounds, but `skip-review: qa` is set — auto-continuing to Phase 2.7. Findings remain on the Issue/PR for human follow-up."
-     - Proceed to **Phase 2.7** immediately without asking. Do NOT call AskUserQuestion or any interactive prompt.
-   - Else (interactive mode, no skip-review):
-     - Ask the user: "Continue to Phase 2.7 / Pause for manual intervention / Stop?"
-     - On "Continue" → proceed to Phase 2.7.
-     - On "Pause" → stop the orchestrator. User will resume via `/sdd resume <N>` after manual fixes.
-     - On "Stop" → exit cleanly.
+1. Surface the recommendation verbatim to the user:
+   > No E2E test setup detected. Recommended framework: `<name>`.
 
-## Phase 2.7: Behavioral verification (`/verify` Skill)
+2. Call `AskUserQuestion` with 3 options:
+   - **Yes** — use the recommended framework `<name>`.
+   - **Choose other** — open-ended; ask the user to type a framework name (e.g. `cypress`, `playwright`, `pytest-bdd`, `jest`, etc.).
+   - **Skip** — abort integration testing (treated as `FAIL: user declined to choose a framework`; stop).
 
-Runs **only on single/child path** (parent path uses children's verify results indirectly through E2E integration PR).
+3. Branch on user choice:
+   - **Yes** → re-spawn with `Framework: <name>`.
+   - **Choose other** → ask user for the literal framework name, then re-spawn with `Framework: <user-supplied-name>`.
+   - **Skip** → report "User declined framework choice; cannot proceed with PARENT integration testing." Stop.
 
-Skip if `sdd:review:shallow` label is set on the Issue (low-confidence runs).
+4. Re-spawn prompt:
+   - `subagent_type`: `general-purpose`, `model`: `opus`, `description`: `stage_test framework=<choice> for #$1`
+   - `prompt`:
+     > Read `<<SKILL_DIR>>/commands/atoms/stage_test.md` and execute its instructions for Issue #$1.
+     >
+     > Inputs:
+     >   Issue: #$1
+     >   Depth: <dial>
+     >   Resume: none
+     >   Framework: <choice>
+     >
+     > Return EXACTLY one line per the contract, prefixed by `>>> RESULT <<<`.
 
-Invoke the `/verify` Skill via the Skill tool to **launch the project's app and observe behavior** for the implemented feature. This complements the AI review (which checks code) and the manual QA (which checks user perception) — `/verify` answers "does the app actually run and behave as expected?"
+5. Parse the re-spawn's return — should be one of `OK DONE`, `OK BACK_TO_IMPLEMENT`, `OK NEEDS_MANUAL_QA: <summary>`, `ESCALATE: <summary>`, or `FAIL:`. Loop into the corresponding branch above.
 
-**Graceful skip**: if the `/verify` Skill is unavailable (Claude Code v2.1.145 or earlier, Skill disabled, no app-launch capability detected for the project type), log a warning and proceed to Phase 3 without behavioral verification.
+### `OK PAUSE`
 
-After `/verify` returns:
-- Parse its output (transcript-based; the Skill reports what it observed).
-- Map to SDD verdict:
-  - "feature works as expected" → record as PASS evidence for Phase 3
-  - "feature does not work" or "crash/error observed" → record as FAIL evidence; surface in Phase 3 user context
+(Rare — emitted only after a Pause-then-Resume cycle.) Report to user:
+> Paused. Resume with `/sdd resume $1`.
 
-This phase **does not block** Phase 3 by itself — manual QA (or `skip-review: qa` auto-approval) decides final outcome. `/verify`'s result is *additional context* for that decision.
+Stop.
 
-Record the verify outcome for the test output comment's self-review trace (Section F of `_preflight.md`):
+### `ESCALATE: <summary>`
 
-```markdown
-- [x] /verify ran: feature launches and matches description
-```
+Round 3 AI review FAIL with skip-review.qa OFF.
 
-or
+1. Render `<summary>` verbatim to the user.
 
-```markdown
-- [ ] /verify reported: error on login screen — see transcript
-```
+2. Call `AskUserQuestion` with 3 options: `Continue`, `Pause`, `Stop`.
 
-## Phase 3: User Review + Manual QA
+3. Branch on user choice:
+   - **Continue** → re-spawn `stage_test` with `Resume: continue-after-escalation`:
+     - `subagent_type`: `general-purpose`, `model`: `opus`, `description`: `stage_test resume for #$1`
+     - `prompt`:
+       > Read `<<SKILL_DIR>>/commands/atoms/stage_test.md` and execute its instructions for Issue #$1.
+       >
+       > Inputs:
+       >   Issue: #$1
+       >   Depth: <dial>
+       >   Resume: continue-after-escalation
+       >
+       > Return EXACTLY one line per the contract, prefixed by `>>> RESULT <<<`.
+     - Parse the re-spawn's return (typically `OK NEEDS_MANUAL_QA: <summary>` for SINGLE/CHILD, or `OK DONE` if PARENT path auto-approved under skip-review.qa, or `FAIL:`). Loop into the corresponding branch.
+   - **Pause** → report "Resume later with `/sdd resume $1`." Stop.
+   - **Stop** → exit cleanly.
 
-This phase requires main-session interaction with the user for manual QA, unless `qa` is in skip-review.
+### `FAIL: <reason>`
 
-### 3.1 — User-facing context
+Report `<reason>` to the user. Stop.
 
-Present to the user:
-- Test work atom's result (which path, PR numbers, integration PR if any)
-- Review verdicts (PASS/FAIL with summaries)
-- For parent path: parent_integration_review's summary, particularly any cross-stage gaps it surfaced
-- **Behavioral verification result from Phase 2.7** (if `/verify` ran): whether the app actually launched and the feature worked
-- Link to the Issue's test output comment for the full QA checklist
+### Unknown / malformed
 
-If the work atom flagged "E2E was skipped in Stage 3" for single/child path:
-- If `qa` is in skip-review (`/sdd auto` / `/sdd batch`): log "E2E was skipped in Stage 3; auto-proceeding without E2E because `skip-review: qa` is set." and continue **without asking**. (The E2E gap is documented on the Issue/PR for human follow-up.)
-- Else (interactive mode): ask the user whether to add E2E tests now (push to the PR branch) or proceed without.
-
-### 3.2 — skip-review check
-
-Check skip-review setting (Common Definitions → Skip Review Setting).
-
-- **If `qa` is in skip-review**:
-  - Log: "User review skipped (skip-review: qa)". Auto-approve test results and QA checklist.
-  - Skip to **Phase 4** (Results Review).
-
-- **If `qa` is NOT in skip-review**:
-  - The user may add/remove/modify QA checklist items (the work atom posted the checklist; the user edits the Issue comment directly if needed).
-  - **Manual QA (4-3)**: ask the user to perform manual QA based on the approved checklist and report pass/fail per item. Wait for the user's response.
-
-## Phase 4: Results Review (4-4)
-
-Based on the user's manual QA report (or auto-approval under skip-review):
-
-1. **If any QA item failed** → analyze cause with the user, and go back to Stage 3 (`/sdd implement $1`) for a TDD bug-fix cycle. Stop this orchestrator.
-
-2. **All tests pass** → update label and close:
-   ```bash
-   gh issue edit $1 --remove-label "sdd:test" --add-label "sdd:done"
-   gh issue close $1
-   ```
-
-## Phase 5: Child completion notification (if this Issue is a child)
-
-Same logic as `implement.md` Phase 7: when a child Issue (detected via the multi-language parent regex `(Parent|상위 |親)Issue: #<n>` per Common Definitions → Parent/Child Issue Detection in `<<SKILL_DIR>>/SKILL.md`) just transitioned to `sdd:done`, update the parent's `<!-- sdd:children:output -->` table row, check whether all children are now done, and notify the user on the parent Issue accordingly.
-
-(See `implement.md` Phase 7 for the detailed steps — they apply verbatim here, including the multi-language parent reference.)
+Treat as `FAIL: unexpected return: <line>` and stop. (Defensive per `design/01-sub-agent-contract.md` §9.)
 
 ## Notes
 
-- **Atoms never spawn other atoms.** All Agent-tool spawning happens here.
-- **3 parallel reviewers for single/child path; 4 parallel for parent path** (parent integration adds cross-stage synthesis).
-- **Reviews location varies by path**: single/child → PR comments (review atoms decide based on path detection); parent → Issue comments. Parent integration review is always on the parent Issue with marker `<!-- sdd:review:parent -->`.
-- **Manual QA stays in the main session.** It is inherently human-in-the-loop.
-- **Retry feedback is structured JSON.** Lossless handoff.
-- **Retry limit is 3 rounds total** (initial + 2 retries) for the AI review phase, then escalation gate. Manual QA failures route back to Stage 3.
-- **Depth label override**: `sdd:review:deep`/`sdd:review:shallow` shifts model assignments per `_review_helpers.md` Section C.
+- **AI review always runs.** `skip-review: qa` skips only the user-facing manual QA gate and the Round 3 interactive escalation — `stage_test` always executes Phases 1-2 internally. Phase 2.5 escalation (inside the sub-agent) still triggers on Round 3 FAIL, but skip-review auto-continues it (sub-agent proceeds to Phase 2.7 / Phase 3 instead of returning `ESCALATE`). Findings remain on the Issue/PR for human follow-up.
+- **At most 2 sub-agent spawns per invocation under normal flow** (1 initial + 1 for QA resolution OR escalation continue OR framework choice). A pathological case combining escalation → manual-QA → framework re-spawn could reach 3 spawns; each return is independent and main loops through the corresponding branch.
+- **`/verify` Skill runs inside the sub-agent.** Main session does NOT invoke `/verify` directly — it lives in `stage_test.md` §7 Phase 2.7. Graceful-skip on Skill unavailability is handled inside the sub-agent.
+- **Reviewers run serially inside the sub-agent.** Reviewer independence is preserved by the sub-agent's internal narrative structure (re-fetch the test output for each reviewer; no cross-visibility of verdicts). PARENT path runs 4 reviewers (3 SDD + `parent_integration_review`); SINGLE/CHILD runs 3.
+- **Label transitions and Issue close are sub-agent responsibilities** (different from analyze/design/implement). `stage_test` §9 success branch transitions `sdd:test → sdd:done` and runs `gh issue close $1` directly inside the sub-agent context — main does NOT re-transition. This is the only stage where the sub-agent sets labels.
+- **Child completion notification runs inside the sub-agent** (`stage_test.md` §10 Phase 5). Multilingual parent regex per `_multilingual.md`. Same logic as `implement.md` Phase 7.
+- **Depth label override**: `sdd:review:deep` / `sdd:review:shallow` selects the depth dial, which the sub-agent uses for model selection internally per `_review_helpers.md` Section A.2. `test_work`-style reasoning is always opus regardless of depth.
+- **Test is the terminal stage.** There is no next-stage skip-review to consult in this wrapper; `skip-review: qa` is consumed entirely by the sub-agent.

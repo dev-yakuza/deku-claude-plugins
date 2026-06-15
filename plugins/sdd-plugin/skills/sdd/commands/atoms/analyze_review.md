@@ -26,8 +26,8 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
 2. If analyze output is missing → return `FAIL: analyze output not found on Issue #$1`.
 
 3. Read the role-specific criteria file based on `$2`:
-   - `$2=completeness` → `<<SKILL_DIR>>/commands/ai-review-analyze-completeness.md`
-   - `$2=quality` → `<<SKILL_DIR>>/commands/ai-review-analyze-quality.md`
+   - `$2=completeness` → `<<SKILL_DIR>>/commands/atoms/rubrics/analyze-completeness.md`
+   - `$2=quality` → `<<SKILL_DIR>>/commands/atoms/rubrics/analyze-quality.md`
 
 4. **Codebase exploration (optional, within budget)** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Verify any code references in the analyze output exist as described.
 

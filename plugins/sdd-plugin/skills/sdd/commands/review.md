@@ -30,13 +30,13 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
 
 ### 1. Detect the latest stage with output
 
-Read all stage output markers present on the Issue:
+Read all stage output markers present on the Issue. Single simple Bash call (no compound shell syntax per `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`):
 
 ```bash
-gh api repos/<owner>/<repo>/issues/$1/comments \
-  --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output") or contains("sdd:implement:plan") or contains("sdd:test:output")) | .body' \
-  | grep -oE 'sdd:(analyze:output|design:output|implement:plan|test:output)'
+gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output") or contains("sdd:implement:plan") or contains("sdd:test:output")) | .body'
 ```
+
+Observe the tool output: scan the returned comment bodies in main-session narrative (NOT in shell). Note which of the 4 marker substrings appear: `sdd:analyze:output`, `sdd:design:output`, `sdd:implement:plan`, `sdd:test:output`.
 
 Determine the latest stage by precedence (latest-stage wins): `test:output` > `implement:plan` (+ open PR for the implement review) > `design:output` > `analyze:output`.
 
@@ -134,3 +134,4 @@ The cross-cutting concerns are produced by the main session reading the children
 - **review.md only re-runs AI reviews; it does not advance the pipeline.** To progress a stage after a successful review, run the appropriate `/sdd <stage>` command or `/sdd resume`.
 - **Review atoms use duplicate-prevention markers.** Re-running `/sdd review` updates the existing review comments in place rather than appending — the Issue's review state always reflects the latest review pass.
 - **Parent review is special** — it aggregates child state and does not use the per-stage review atoms. The output marker `<!-- sdd:review:parent -->` is distinct from per-stage review markers.
+- **Adversarial review re-spawn deferred to v1.1+** — file an issue if you need it sooner. v1.0.0 keeps the 2-reviewer (completeness + quality) behavior for `/sdd review`. The adversarial reviewer still runs inside the full stage orchestrators (analyze/design/implement/test); only the standalone re-review path is limited to 2 reviewers.
