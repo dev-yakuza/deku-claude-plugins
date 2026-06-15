@@ -164,11 +164,72 @@ Detection: if `skip-review:` contains `pr` — we are in unattended mode. (This 
 
 ### `FAIL: <reason>`
 
-Report `<reason>` to the user. Stop.
+Parse `<reason>` for an optional subtype prefix (`<subtype>: <detail>`) per `spec/00-common-contracts.md` §6 "FAIL reason prefix convention". Branch:
+
+- **`no-action: <detail>`** — design specifies zero `lib/` code changes (operational / documentation-only workflow); implement's TDD pipeline cannot produce a Red signal. Render:
+  > Issue #$1 implement no-action: `<detail>`.
+  > Implement stage cannot produce a PR for a zero-code-change design. Close-as-not-planned recommended:
+  > ```bash
+  > gh issue edit $1 --remove-label "sdd:implement" --add-label "sdd:done"
+  > gh issue close $1 --reason "not planned" --comment "<detail>"
+  > ```
+  > Analyze / design comments remain on the Issue for reference (e.g. operational thresholds, observation procedure, DoD).
+
+  Stop without changing labels.
+
+- **`gate-pending: <ISO-8601-date>: <detail>`** — a measurement / time gate has not been reached; implement's first-step gate evaluation cannot decide between branches. Render:
+  > Issue #$1 implement gate-pending: `<detail>`.
+  > Earliest resume date: `<ISO-8601-date>`. After that date, post the required measurement data as a comment on Issue #$1, then run `/sdd resume $1`.
+  > Label remains at `sdd:implement` so resume picks up correctly.
+
+  Stop without changing labels.
+
+  (Interactive context: MAY additionally offer `/schedule /sdd resume $1` for `<ISO-8601-date>` via `AskUserQuestion`. Under `/sdd auto` / `/sdd batch`, do NOT prompt — the outer loop continues to the next Issue.)
+
+- **`precondition-missing: <detail>`** — required prior-stage artifact (e.g. design output) absent. Render:
+  > Issue #$1 implement precondition missing: `<detail>`.
+  > Run `/sdd design $1` first, or `/sdd resume $1`.
+
+  Stop.
+
+- **No recognized prefix** — render `<reason>` verbatim to the user. Stop.
 
 ### Unknown / malformed
 
-Treat as `FAIL: unexpected return: <line>` and stop. (Defensive per `design/01-sub-agent-contract.md` §9.)
+Defensive auto-recovery for sub-agent contract-line drop (`design/01-sub-agent-contract.md` §9):
+
+The sub-agent's `>>> RESULT <<<` line is absent or unparseable. Before failing outright, **probe GitHub state** to see if the sub-agent completed all substantive work but silently dropped the closing contract line — this pattern was observed when the heavy PR Final reviewer + Skill chain consumed the sub-agent's remaining output budget after `/security-review` or after a verdict was implicitly reached.
+
+1. Resolve `<owner>/<repo>` per Common Contracts §11.
+2. Find the PR for this Issue:
+   ```bash
+   gh pr list --search "Refs #$1" --state open --json number,headRefName --jq '.[] | {number, headRefName}'
+   ```
+   - If empty → fall through to step 6 (no PR exists; cannot recover; fail).
+   - Else → observe `<PR_NUM>` and `<branch_name>`.
+3. Check whether all three SDD PR Final reviewer comments exist on the PR AND each `verdict` is `PASS`:
+   ```bash
+   gh api repos/<owner>/<repo>/issues/<PR_NUM>/comments --jq '[.[] | select(.body | contains("<!-- sdd:review:implement:completeness -->") or contains("<!-- sdd:review:implement:quality -->") or contains("<!-- sdd:review:implement:adversarial -->"))] | length'
+   ```
+   - Result < 3 → not all reviewers completed; fall through to step 6.
+   - Result == 3 → re-fetch each comment body and verify the verdict line (`**Verdict:** PASS`) for all three. If any FAIL → fall through to step 6.
+4. Check whether the tools-summary marker is present:
+   ```bash
+   gh api repos/<owner>/<repo>/issues/<PR_NUM>/comments --jq '.[] | select(.body | contains("<!-- sdd:review:implement:tools -->")) | .id'
+   ```
+   - Present → skip step 5a.
+   - Absent → step 5a: post a minimal tools-summary marker per `commands/atoms/stage_implement/_pr_final.md` §4.6 template. Use the comment-posting pattern (Section F.2). Fields:
+     - `round`: 1 (auto-recovery assumes the absence of a prior tools marker means round 1)
+     - `/code-review`: `ran (effort: <high|max|medium>)` derived from depth dial, OR `skipped (skill-unavailable)` if not detectable. Counts default to `0 / 0 / 0` — auto-recovery cannot reconstruct Skill counts; the marker is informational only and verdict is unaffected (Common Contracts §6 + `_pr_final.md` §4.7 explicitly state Skill counts are informational).
+     - `/security-review`: same pattern; `0 / 0 / 0`.
+5. Log to the user:
+   > ⚠ Sub-agent dropped the `>>> RESULT <<<` contract line, but PR Final reviewers all PASSed on PR #<PR_NUM>. Main session auto-recovered: posted tools-summary marker (if missing) and is treating this as `OK ADVANCE: test PR: #<PR_NUM> BRANCH: <branch_name>`. Continue to label transition + test stage.
+   
+   Then proceed exactly as the `OK ADVANCE: test PR: #N BRANCH: <name>` branch above (label transition + skip-review.qa chain).
+6. **Fall-through**: report
+   > FAIL: unexpected return from stage_implement (auto-recovery probed PR state and could not confirm successful PR Final completion): `<line>`.
+   
+   Stop. (Defensive per `design/01-sub-agent-contract.md` §9 — equivalent to legacy behavior.)
 
 ## Notes
 
@@ -188,3 +249,5 @@ Treat as `FAIL: unexpected return: <line>` and stop. (Defensive per `design/01-s
 - **No force-push, no `git commit --amend`** — retry mode appends new fix-up commits to preserve PR review history (`spec/edge-cases.md` §23).
 - **Depth label override**: `sdd:review:deep` / `sdd:review:shallow` selects the depth dial, which the sub-agent uses for `/code-review --effort` (default=high / deep=max / shallow=medium) and to shallow-skip `/security-review`. Per-reviewer model dial is informational only inside the sub-agent (single sub-agent context runs at one model — typically `opus`).
 - **3-round PR Final budget, per-step 2-retry budget (3 attempts) for TDD steps** per `spec/edge-cases.md` §22.
+- **FAIL reason subtype convention (additive)** — `stage_implement` MAY prefix its FAIL reason with `no-action: `, `gate-pending: <date>: `, or `precondition-missing: ` per `spec/00-common-contracts.md` §6. This wrapper renders subtype-specific user guidance (close-as-not-planned command, resume-after-date hint, etc.) instead of an opaque error string. Legacy unstructured FAIL reasons still render verbatim.
+- **Auto-recovery on contract-line drop (additive)** — if the sub-agent's `>>> RESULT <<<` line is absent / malformed, the wrapper probes GitHub state (PR existence + 3 PR Final reviewer PASS verdicts) and synthesizes the missing tools-summary marker + treats as `OK ADVANCE: test` when the probe succeeds. Falls through to legacy `FAIL: unexpected return` behavior when the probe fails. Mitigates the **B1 pattern** (`spec/edge-cases.md` §25) — sub-agent's `stop_reason=end_turn` after Skill output, empirically observed 7/7 times under both natural and prompt-guard-augmented conditions. Auto-recovery is the sole effective mitigation in v1.1.0; expected to activate near-100% for PR Final.

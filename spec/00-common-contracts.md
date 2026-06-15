@@ -154,6 +154,31 @@ Examples observed in source:
 - `OK PASS PR: #N` / `OK FAIL PR: #N: <summary>` — implement review on PR
 - `FAIL: <reason>` — atom-level error (orchestrator stops on this)
 
+### FAIL reason prefix convention [IMPROVE — optional, additive]
+
+Atoms MAY (and are encouraged to) prefix the `<reason>` with a canonical subtype tag so wrappers can render stage-appropriate user guidance instead of an opaque error string. Wrappers parse the subtype optimistically: unrecognized or absent tag → render reason verbatim (legacy behavior).
+
+| Subtype prefix | Meaning | Recommended emitter |
+|---|---|---|
+| `no-action: <detail>` | Stage cannot proceed because the design legitimately specifies zero code changes (operational / documentation-only workflow). Recommend close-as-not-planned. | `stage_implement` after design content review |
+| `gate-pending: <ISO-8601-date>: <detail>` | Stage cannot proceed until an external time / measurement gate is reached. `<ISO-8601-date>` is the earliest resume date. | `stage_implement` / `stage_test` on time-gated designs |
+| `precondition-missing: <detail>` | A required prior-stage artifact (e.g. `<!-- sdd:analyze:output -->`) is absent. | Any stage atom on precondition check failure |
+| (no prefix) | Generic / unstructured failure (legacy). | Default |
+
+Format rule: subtype is a `[a-z-]+` token followed by `: `. Body after the prefix MUST remain a single-line human-readable detail string (per the existing `<reason>` contract). Wrappers SHOULD NOT introduce new subtypes without updating this table.
+
+Example emissions:
+```
+>>> RESULT <<<
+FAIL: no-action: design specifies zero lib/ code changes (operational telemetry workflow); close-as-not-planned recommended
+```
+```
+>>> RESULT <<<
+FAIL: gate-pending: 2026-06-21: stage A measurement gate (PR #827 merge + 2-week accumulation) not yet reached; provide measurement data via /sdd resume after the date
+```
+
+**Wrapper consumer pattern**: see `commands/{analyze,design,implement,test}.md` Phase 2 `FAIL: <reason>` branches.
+
 [PRESERVE — load-bearing]: the `>>> RESULT <<<` sentinel + literal status strings (`OK CHILDREN: #...`, `OK E2E_SKIPPED`, `OK PR: #N`, etc.) are parsed verbatim by orchestrators in dozens of call sites. Reformatting to JSON is a breaking change for every parser.
 
 [RETHINK — for rewrite design]: candidate is single-line JSON after sentinel (`>>> RESULT <<<\n{"status":"OK","kind":"...","fields":{...}}`). Keeps grep-resistance; makes parsing deterministic. Requires concurrent migration of all parsers OR a parallel `>>> RESULT JSON <<<` sentinel during transition. (Was [IMPROVE] in v1; corrected per Reviewer C TAG-C4.)

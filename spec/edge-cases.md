@@ -444,6 +444,56 @@ After max → escalation gate (skip-review auto-continues, else user gate).
 
 ---
 
+## 25. Skill-induced Premature end_turn (B1) [PRESERVE — load-bearing]
+
+### Pattern
+
+Sub-agents (`stage_implement`, `stage_test`) reliably stop with `stop_reason=end_turn` immediately after a Skill invocation (`/code-review`, `/security-review`, `/verify`), BEFORE emitting the remaining substantive steps (tools-summary marker, verdict, `>>> RESULT <<<` contract line).
+
+### Empirical evidence (word_app 2026-06-15 session)
+
+**Phase 1 — natural runs (4/4 failure):**
+
+| Sub-agent | Tokens | Last assistant text | stop_reason |
+|---|---|---|---|
+| stage_implement #832 | 146k | `## Security Review / # No Security Findings` | `end_turn` |
+| stage_test #832 | 111k | `/verify` skill preamble (Base directory + how-to text) | `end_turn` |
+| stage_implement #836 | 196k | `# Security Review Report / ## Scope` | `end_turn` |
+| stage_implement #866 | 151k | `/code-review` result text (deletion-only diff analysis) | `end_turn` |
+
+Successful agents (e.g. #836 stage_test, 112k tokens) wrote an explicit summary + `>>> RESULT <<<` line after the Skill returned and stopped only AFTER emitting the contract.
+
+**Phase 2 — controlled A/B against modified atom (with prompt-level guard inserted in §4.5.1 / §7.1):**
+
+| Verification run | Tokens | Last assistant text | stop_reason | RESULT emitted |
+|---|---|---|---|---|
+| verify-1 (PR #869 dry-run) | 80k | `# Security Review — PR #869 / ## Analysis ...` | `end_turn` | No |
+| verify-2 (PR #869 dry-run) | 71k | `/code-review` multi-angle finder + `findings: []` | `end_turn` | No |
+
+Combined: **N=7/7 failure** under both natural and guard-augmented conditions. Token-budget exhaustion ruled out (all stops voluntary `end_turn` at 71k-196k, well below limits and overlapping with successful-agent distribution at 78k-135k).
+
+### Root cause
+
+Skill output is "report-style" — comprehensive, terminal-looking. The model interprets the Skill's deliverable as the stage's deliverable and emits `end_turn` rather than continuing the workflow. The interpretation triggers regardless of Skill output size (verify-2 stopped after a 1-line `findings: []` from `/code-review`) and regardless of explicit in-prompt reminders that further steps remain.
+
+### Mitigation evaluation
+
+| Layer | Approach | Empirical result | Status |
+|---|---|---|---|
+| 1 — Atom-level prompt guard (`_pr_final.md` §4.5.1, `stage_test.md` §7.1) | Explicit post-Skill checklist reminding the agent that Skill output is input data | 0/2 efficacy in verify-1/2 (same failure pattern as natural runs) | **Removed in v1.1.0 post-verification** |
+| 2 — Wrapper-level auto-recovery (`commands/implement.md` and `commands/test.md` Unknown / malformed branches) | Probe GitHub state (PR existence + reviewer PASS verdicts + test:output marker) and synthesize the missing closing steps when probe succeeds | Works deterministically — main session is not subject to B1 | **Active in v1.1.0 — sole effective mitigation** |
+| 3 (future) — Atom structural split | Split PR Final into two sub-agent invocations: `_pr_final_reviewers.md` (Skills + verdict input collection) → main session synthesizes `_pr_final_verdict.md` invocation with explicit "you have NO Skills left to run, only emit marker + verdict + RESULT" context | Untested | **Recommended next iteration if v1.1.0 auto-recovery activation rate is high** |
+
+### Recommended monitoring
+
+If wrapper auto-recovery activates (logged as `⚠ Sub-agent dropped the >>> RESULT <<< contract line`), surface this in operator telemetry. Under v1.1.0 the activation rate is expected to be high — Phase 1+2 evidence projects ~100% activation for PR Final and ~50%+ for test stage. Repeated activations are an observability signal of a known, mitigated condition — not an error to triage per occurrence. Aggregate activation count over time to detect drift in either direction (model improvement → lower rate, or regression → consider layer 3).
+
+**Cross-reference**: `commands/implement.md` Phase 2 Unknown branch (auto-recovery), `commands/test.md` Phase 2 Unknown branch (auto-recovery), `spec/00-common-contracts.md` §6 FAIL reason prefix convention.
+
+[PRESERVE — empirically characterized; layer 2 mitigation in place per sdd-plugin v1.1.0.]
+
+---
+
 ## Notes on RETHINK items
 
 The following items are candidates for design-phase discussion (not Phase A decisions):
