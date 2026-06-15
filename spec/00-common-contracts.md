@@ -214,15 +214,18 @@ Every Bash tool invocation MUST be a **single simple command** with NO:
 
 | Forbidden | Reason |
 |---|---|
-| `&&`, `\|\|`, `;`, `\|` | compound — breaks `Bash(gh:*)` allow-pattern matching |
+| `&&`, `\|\|`, `;`, `\|` | compound — breaks `Bash(gh:*)` allow-pattern matching; **UNSUPPRESSIBLE** by `permissions.allow`, `--dangerously-skip-permissions`, or `sandbox.enabled = false` (verified empirically v1.1.0 — see `spec/edge-cases.md` §26) |
 | `VAR=$(...)` / inline `$(...)` | command substitution — same as above |
 | Subshells `(...)`, groups `{...}` | compound |
 | Process substitution `<(...)`, `>(...)` | compound |
-| `> file`, `2>/dev/null`, `2>&1`, `&> file` | output redirection heuristic |
+| `> file`, `2>/dev/null`, `2>&1`, `&> file` | output redirection heuristic ("redirect has multiple targets — post-redirect args swallowed") — **UNSUPPRESSIBLE** by `permissions.allow`, `--dangerously-skip-permissions`, or `sandbox.enabled = false` (verified empirically v1.1.0 — see `spec/edge-cases.md` §26) |
+| `for ... do ... done`, `while ... do ... done`, `if ... fi`, `case ... esac` | compound shell syntax ("contains shell syntax (string) that cannot be statically analyzed") — **UNSUPPRESSIBLE** (verified empirically v1.1.0) |
 | Multi-line heredoc wrapping multiple commands | compound |
 | `"...${VAR}..."` or `"...$VAR..."` inside quoted args | "expansion obfuscation" heuristic — UNSUPPRESSIBLE by `permissions.allow`, `--dangerously-skip-permissions`, or `sandbox.enabled = false` |
 | `find` against `/`, `/Users`, `/private`, `~`, `~/<anything>`, or any absolute path outside repo root | recursive-broad-search safeguard — UNSUPPRESSIBLE |
 | Unresolved doc placeholders (`<<SKILL_DIR>>`, `<owner>/<repo>`, `<branch-name>`, `<N>`, `$1`, `$2`) | reach shell as literal text; fails or prompts |
+
+> **UNSUPPRESSIBLE caveat**: this list reflects heuristics empirically verified as of sdd-plugin v1.1.x. Claude Code may add additional unsuppressible patterns in future versions. Sub-agent compliance with this section is the only stable defense — no flag combination bypasses the marked rows. See `spec/edge-cases.md` §26 for the empirical observation log.
 
 ### Chaining results between commands [PRESERVE]
 1. Run first command → observe literal output from tool result.

@@ -202,21 +202,34 @@ The main session itself runs the loop. **No shell script is generated. No `claud
             1. Quit Claude Code (Cmd-Q on macOS).
             2. Re-launch Claude Code WITH the --dangerously-skip-permissions
                flag so that, in addition to honoring the new sandbox state,
-               built-in heuristic safety prompts (find -exec, heredocs,
+               SOME built-in heuristic safety prompts (find -exec, heredocs,
                multi-line `# ...` in CLI args, recursive `find /`, etc.)
-               are also bypassed for the duration of /sdd auto:
+               are bypassed for the duration of /sdd auto:
 
                  claude --dangerously-skip-permissions
 
-               ⚠ The flag disables ALL in-session safety prompts for the
+               ⚠ The flag disables MANY in-session safety prompts for the
                  ENTIRE session — not just /sdd auto. Any accidental
                  dangerous command (rm -rf, credential file access, etc.)
                  will run without confirmation. Only use it for the
                  duration of /sdd auto; restart in normal mode afterwards.
+
+               ⚠ Some Bash heuristics remain UNSUPPRESSIBLE even with the
+                 flag (verified empirically v1.1.x — see
+                 `spec/edge-cases.md` §26 + `spec/00-common-contracts.md`
+                 §8 UNSUPPRESSIBLE rows): compound shell syntax (`;`, `|`,
+                 `&&`, `||`, `for ... do ... done`), output redirection
+                 (`2>/dev/null`, `> file`, `&> file`), `${VAR}` inside
+                 quoted args, and `find` against absolute paths outside
+                 repo root. Sub-agent compliance with §8 is the only
+                 complete defense. Expect occasional user prompts for
+                 safe read-only operations even under the flag — answer
+                 'Yes' to proceed.
             3. Re-run /sdd auto. The new sandbox state is honored from
                session start, so subagents' `gh` / `git push` calls no
-               longer trigger sandbox-bypass prompts, AND the flag
-               eliminates the remaining heuristic prompts.
+               longer trigger sandbox-bypass prompts. The flag eliminates
+               most (not all) heuristic prompts — see §26 for the
+               residual set.
 
           After /sdd auto finishes, quit Claude Code and re-launch in
           NORMAL mode (without --dangerously-skip-permissions) to restore
