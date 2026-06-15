@@ -1,7 +1,11 @@
 # HELP
 
+> **Source of truth**: the canonical command list is the `Valid commands` line in `<<SKILL_DIR>>/SKILL.md` (Routing). Keep the list below in sync with it. For v1.0.0 this is documented (not auto-generated); a release-time CI check is planned.
+
 ```
 SDD (Spec-Driven Development) - AI Collaborative Development Process
+
+Generated from SKILL.md command routing.
 
 Commands:
   /sdd init [lang]       Set up SDD for the current repository (Issue templates, labels)
@@ -11,16 +15,16 @@ Commands:
   /sdd implement <issue> Stage 3: Implementation with TDD (Red → Green → Refactor)
   /sdd test <issue>      Stage 4: E2E and QA Testing
   /sdd resume <issue>    Auto-detect current stage and continue from where it left off
+  /sdd status <issue>    Check current progress                            (read-only)
+  /sdd review <issue>    Re-run AI review on current stage output          (read-only)
   /sdd rollback <issue> <stage>  Roll back to a previous stage (analyze, design, implement)
-  /sdd status <issue>    Check current progress
-  /sdd review <issue>    Re-run AI review on current stage output
+  /sdd config            Show or update SDD settings (e.g., skip-review)
   /sdd auto [issues]     In-session sequential processing (Interactive billing pool;
                          keep this Claude Code session open during the run)
                          No args = all open; "1,2,3" = specific issues
   /sdd batch [issues]    Unattended shell processing via separate claude -p sessions
                          (uses Agent SDK Credit pool from 2026-06-15)
                          No args = all open; "1,2,3" = specific issues
-  /sdd config            Show or update SDD settings (e.g., skip-review)
   /sdd help              Show this help message
 
 Workflow:
@@ -40,7 +44,8 @@ Tips:
     (CLAUDE.md, git log, similar PRs, target dir) — shift-left prevention
   - Design's Testability section drives implement's test plan (no
     re-derivation; mock strategies inherited from design)
-  - 3 reviewer lenses per full stage: completeness, quality, adversarial
+  - 2 reviewer lenses per full stage: completeness, quality
+    (adversarial re-spawn deferred to v1.1+; see /sdd review note)
   - TDD steps (Red/Green/Refactor/E2E) each get their own lightweight
     review atom for early bug detection
   - Reviewers can Read/Grep the codebase to verify references
