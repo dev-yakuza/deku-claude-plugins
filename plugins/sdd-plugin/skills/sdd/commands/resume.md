@@ -1,100 +1,94 @@
 # RESUME
 
-**Resume work on an Issue from where it left off. Pure dispatcher.**
+**Resume work on an Issue from where it left off. Thin dispatcher.**
 
-This file is a **dispatcher**. It runs in the main session, reads Issue state from GitHub (labels + comments + PRs), determines which stage orchestrator to invoke, and then reads + executes that orchestrator. It does **NOT** itself spawn subagents — the orchestrators it routes to are responsible for atom spawning.
+Spawns the `bootstrap` sub-agent to determine the current stage (label + comments + PR inspection in a separate sub-agent context). Then reads + executes the corresponding stage orchestrator inline in main session.
 
-> **Bash Command Execution**: every shell snippet below is its own simple Bash tool call — no `&&`, `||`, `;`, `|`, `2>/dev/null`, `2>&1`, `>file`, `$(...)`, `VAR=$(...)`, or heredocs. For codebase exploration use the **Grep / Glob / Read** tools — do NOT use Bash `find` against `/`, `~`, `/Users`, or any path outside the repo root. See **Bash Command Execution Rules** in `<<SKILL_DIR>>/SKILL.md`.
+In Arch B (v1.0.0): future milestones (M4-M7) replace the inline orchestrator reads with `stage_<X>` sub-agent spawns. Until then, this file uses bootstrap for state detection but still inline-reads the legacy orchestrators for stage execution.
+
+> **Bash Command Execution**: see `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`.
 
 ## Input Validation
 
-Before any other step: validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
+Validate `$1` per Common Definitions → Issue Validation in `<<SKILL_DIR>>/SKILL.md`. If `$1` is a Pull Request, stop without making changes.
 
 ## Process
 
-1. **Read Issue labels** to determine the nominal stage:
-   ```bash
-   gh issue view $1 --json labels,title --jq '{title: .title, labels: [.labels[].name]}'
-   ```
+### Step 1: Spawn bootstrap
 
-2. **Check Issue comments for existing stage outputs** (use a single API call):
-   ```bash
-   gh repo view --json nameWithOwner -q .nameWithOwner    # Bash call 1: observe owner/repo from output; inline as <owner>/<repo> below (no shell variables)
-   gh api repos/<owner>/<repo>/issues/$1/comments \
-     --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output") or contains("sdd:children:output") or contains("sdd:implement:plan") or contains("sdd:test:output")) | .body'
-   ```
-   Note presence/absence of:
-   - `<!-- sdd:analyze:output -->`
-   - `<!-- sdd:design:output -->`
-   - `<!-- sdd:children:output -->` (parent Issue indicator)
-   - `<!-- sdd:implement:plan -->`
-   - `<!-- sdd:test:output -->`
+Spawn one sub-agent via the Agent tool:
+- `subagent_type`: `general-purpose`
+- `model`: `haiku` (bootstrap is lightweight)
+- `description`: `bootstrap dispatch for #$1`
+- `prompt`:
+  > Read `<<SKILL_DIR>>/commands/atoms/bootstrap.md` and execute its instructions for Issue #$1.
+  > Return EXACTLY one line in the contract specified by that file (the `>>> RESULT <<<` BOOTSTRAP: line).
 
-3. **Check related PRs**:
-   ```bash
-   gh pr list --search "Refs #$1" --json number,title,state,headRefName
-   ```
+Parse the `>>> RESULT <<<` line:
+- `FAIL: <reason>` → report failure to the user and stop.
+- `BOOTSTRAP: stage=<X> depth=<dial> branch=<...> pr=<...> parent=<bool> children=<...>` → continue to Step 2.
 
-## Dispatch: Parent Issue (has `<!-- sdd:children:output -->`)
+Remember the parsed fields (`stage`, `depth`, `branch`, `pr`, `parent`, `children`) for the rest of this file.
 
-1. Read child Issue numbers from the children comment.
-2. Check each child's current label.
-3. Report progress to the user:
-   ```
-   Issue #$1: <title> (Parent)
-   Child Issues:
-   - #124: <name> → sdd:done ✓
-   - #125: <name> → sdd:implement (in progress)
-   - #126: <name> → sdd:analyze (not started)
-   ```
-4. **Determine the action**:
-   - **If all children are `sdd:done`**:
-     - Update parent label: `gh issue edit $1 --remove-label "sdd:implement" --add-label "sdd:test"` (label transitions only — do NOT spawn subagents).
-     - **Read + execute inline (do NOT spawn a subagent)**: read `<<SKILL_DIR>>/commands/test.md` and execute its instructions for Issue #$1 in this main session. The test orchestrator handles the parent path internally.
-   - **If any child is incomplete**:
-     - Check skip-review setting (Common Definitions → Skip Review Setting).
-     - If skip-review contains any of `analyze`, `design`, `implement`, `pr` → **stop here** without asking. Report pending children and exit cleanly. The surrounding flow (e.g., `/sdd batch` or `/sdd auto`) is responsible for queuing the pending children for processing.
-     - Otherwise → ask user which child to resume; then **read + execute inline (do NOT spawn a subagent)**: read `<<SKILL_DIR>>/commands/resume.md` and execute for the chosen child Issue in this main session.
-
-## Dispatch: Single Issue or Child Issue
-
-Determine the resume point based on findings:
-
-| Label                  | Output exists                                  | Dispatch target                                                  |
-|------------------------|------------------------------------------------|------------------------------------------------------------------|
-| (no SDD label)         | —                                              | Add `sdd:analyze` label, then `analyze.md`                       |
-| `sdd:analyze`          | No `analyze:output`                            | `analyze.md`                                                     |
-| `sdd:analyze`          | `analyze:output` exists                        | User completed analyze but label not advanced — `analyze.md` re-confirms (it will detect the existing output via duplicate prevention) |
-| `sdd:design`           | `analyze:output` present, no `design:output`   | `design.md`                                                      |
-| `sdd:design`           | `design:output` exists                         | `design.md` (re-confirm pattern, same as above)                  |
-| `sdd:implement`        | `design:output` exists, no PR                  | `implement.md` (will run plan + TDD from scratch)                |
-| `sdd:implement`        | open PR exists                                 | `implement.md` (the TDD atom's mode detection will continue from the existing PR) |
-| `sdd:implement`        | PR closed (not merged)                         | In skip-review (`implement`) mode: **start a new PR automatically** (do NOT ask). In interactive mode: ask user reopen vs new PR. Then `implement.md` |
-| `sdd:implement`        | branch exists, no PR                           | In skip-review (`implement`) mode: **create PR from the existing branch automatically** (do NOT ask). In interactive mode: ask user. Then `implement.md` |
-| `sdd:test`             | PR(s) present                                  | `test.md`                                                        |
-| `sdd:done`             | —                                              | Report: "Issue is already complete." Stop.                       |
-
-For the dispatch action, read the target orchestrator file and execute its instructions. **resume.md itself does not spawn subagents.**
-
-## Reporting
-
-Before dispatching, report current status to the user:
+### Step 2: Report status to user
 
 ```
-Issue #$1: <title>
+Issue #$1
 Current stage: <stage>
-Resuming from: <specific point>
+Depth: <depth>
+Branch: <branch|none>
+PR: <pr|none>
+<if parent>Children: <children-list></if>
 ```
 
-## skip-review handling
+## Dispatch
 
-Check skip-review setting (Common Definitions → Skip Review Setting):
+Based on `stage` from BOOTSTRAP:
 
-- If the determined stage's skip-review key (`analyze` / `design` / `implement`) is set in `.github/.sdd-config` → **skip user confirmation** and immediately read + execute the target orchestrator. This allows `/sdd auto` and `/sdd batch` to chain stages without prompting. (Note: `pr` and `qa` are skip-review keys consumed inside `implement.md` / `test.md` respectively, not dispatch targets of resume. The test stage's user gate is `qa`, not `test` — `test` is not a valid skip-review value.)
-- If NOT in skip-review → ask the user for confirmation ("Resume from <stage>? [y/N]"), then read + execute the target orchestrator.
+### `done`
+Report: "Issue is already complete." Stop.
+
+### `implement-parent` (parent paused at sdd:implement)
+1. For each child Issue number in the `children` field, check its current label:
+   ```bash
+   gh issue view <child-N> --json labels --jq '[.labels[].name]'
+   ```
+2. Report progress to user:
+   ```
+   Child Issues:
+   - #<N>: → sdd:<stage>
+   ...
+   ```
+3. **If all children are `sdd:done`**:
+   - Update parent label:
+     ```bash
+     gh issue edit $1 --remove-label "sdd:implement" --add-label "sdd:test"
+     ```
+   - **Read + execute inline**: read `<<SKILL_DIR>>/commands/test.md` and execute its instructions for Issue #$1 in this main session. The test orchestrator handles the parent path internally.
+4. **If any child is incomplete**:
+   - Check skip-review setting (Common Definitions → Skip Review Setting in `SKILL.md`).
+   - If skip-review contains any of `analyze`, `design`, `implement`, `pr` → **stop here** without asking. Report pending children. The surrounding flow (`/sdd batch` or `/sdd auto`) queues pending children.
+   - Otherwise → ask user which child to resume; then **read + execute inline**: read `<<SKILL_DIR>>/commands/resume.md` and execute for the chosen child Issue.
+
+### `analyze` / `design` / `implement` / `test` (single or child Issue)
+
+Apply skip-review handling (Common Definitions → Skip Review Setting):
+- If the stage's skip-review key (`analyze` / `design` / `implement`) is set in `.github/.sdd-config` → skip user confirmation; immediately dispatch.
+- Otherwise → ask user "Resume from <stage>? [y/N]". On rejection → stop.
+
+Then dispatch by reading + executing the appropriate orchestrator inline:
+- `analyze` → `<<SKILL_DIR>>/commands/analyze.md`
+- `design` → `<<SKILL_DIR>>/commands/design.md`
+- `implement` → `<<SKILL_DIR>>/commands/implement.md`
+- `test` → `<<SKILL_DIR>>/commands/test.md`
+
+The target orchestrator handles all stage-specific logic (Phase 0 depth detection, work + reviews, escalation gates, label transitions). Its atom-level duplicate prevention ensures comments are updated in place if the stage was partially complete.
+
+**Note (M3 transient state)**: In v1.0.0 final architecture (M4-M7), these inline reads are replaced by `stage_<X>` sub-agent spawns. Until those stage sub-agents exist, the legacy orchestrators continue to drive each stage's execution. The bootstrap dispatch is what's new in M3.
 
 ## Notes
 
-- **resume.md is a dispatcher, not a worker.** It determines the target stage based on Issue state and reads + executes the corresponding orchestrator. All atom spawning happens inside those orchestrators (analyze.md, design.md, implement.md, test.md).
-- **Idempotent re-entry.** Calling `/sdd resume <N>` multiple times on the same Issue produces the same dispatch decision based on the current state. If the previous run reached a partial state, the target orchestrator's atom-level duplicate prevention (markers) ensures comments are updated in place rather than duplicated.
-- **Safe within `/sdd auto` loops.** Because resume.md does not itself spawn subagents, the orchestrators it dispatches to are the ONLY layer that spawns. The atoms inside those orchestrators are leaves. There is no nesting risk.
+- **resume.md is a thin dispatcher.** It spawns bootstrap (1 sub-agent call) and then inline-reads the target orchestrator. Atom spawning still happens inside those orchestrators (transient — to be replaced by stage_X sub-agents in M4-M7).
+- **Idempotent re-entry.** Multiple `/sdd resume <N>` calls produce the same dispatch decision based on the current GitHub state.
+- **Safe within `/sdd auto` loops.** Bootstrap is a leaf sub-agent; the inline orchestrator reads continue to be the layer that spawns atoms (until M4-M7). No nesting risk.
+- **Main-session token impact (M3 transient)**: bootstrap saves the ~100 lines of inline label/comment/PR fetch logic. Orchestrator reads remain a main-session cost until M4-M7.
