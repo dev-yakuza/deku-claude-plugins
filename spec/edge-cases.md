@@ -494,6 +494,43 @@ If wrapper auto-recovery activates (logged as `⚠ Sub-agent dropped the >>> RES
 
 ---
 
+## 26. Unsuppressible Bash Heuristics (Empirical) [PRESERVE — load-bearing]
+
+### Pattern
+
+Some Claude Code Bash safety heuristics fire UNSUPPRESSIBLY — neither `permissions.allow`, `sandbox.enabled = false`, nor `--dangerously-skip-permissions` (alone or in combination) bypasses them. When a sub-agent or main session emits a Bash command containing one of these patterns, the user receives an interactive `"Do you want to proceed? [1. Yes 2. No]"` prompt regardless of session configuration.
+
+### Empirically verified unsuppressible patterns (as of v1.1.x)
+
+| Pattern | Heuristic message | Verification |
+|---|---|---|
+| Compound shell syntax: `;`, `\|`, `&&`, `\|\|`, `for ... do ... done`, `while`, `if`, `case` | `"Contains shell syntax (string) that cannot be statically analyzed"` | word_app 2026-06-15 session — `for f in <13 files>; do echo "=== $f ==="; grep ... done` triggered prompt under `--dangerously-skip-permissions` + `sandbox.enabled = false` |
+| Output redirection: `2>/dev/null`, `> file`, `2>&1`, `&> file` (especially when followed by additional args) | `"Redirect has multiple targets — post-redirect args swallowed"` | Same session — `grep -n "pat1\|pat2" /abs/path 2>/dev/null -r \| head -10` triggered prompt under the same flag combination |
+| `${VAR}` / `$VAR` inside quoted args | "expansion obfuscation" heuristic | `spec/00-common-contracts.md` §8 (pre-existing) |
+| `find` against `/`, `~`, or any absolute path outside repo root | "recursive-broad-search safeguard" | §8 (pre-existing) |
+
+### Verification protocol
+
+Each row was confirmed by direct user observation: Claude Code was launched with `--dangerously-skip-permissions` AND `sandbox.enabled = false`, then a sub-agent (running inside `/sdd auto`) emitted the listed command via the Bash tool, and an interactive permission prompt appeared. This pattern is reproducible across multiple sub-agent invocations within the same session.
+
+### Mitigation
+
+There is **no platform-level escape** for unsuppressible heuristics. The only stable defense is **sub-agent compliance with `spec/00-common-contracts.md` §8** — sub-agents must NOT emit commands containing the forbidden patterns. When they do, the user-side reality is:
+
+- **Frequency observed**: 2 prompts across a 5-issue `/sdd auto` batch (word_app 2026-06-15) — i.e. roughly one prompt per 2-3 stage invocations on this codebase under current sdd-plugin v1.1.0 atom compliance levels.
+- **Safety profile**: both observed prompts were for read-only commands (`grep`, `for f in ...; grep ...`). No destructive operations. Answer `1. Yes` to proceed; the command is safe.
+- **Practical workflow**: `/sdd auto` is **"nearly unattended"** in v1.1.x — expect occasional Yes prompts for safe read-only sub-agent commands. Treat this as a known limitation, not an error.
+
+### Future work
+
+If atom-level §8 compliance can be improved to reduce prompt frequency to ~0, this section should be updated. Attempts at prompt-level §8 reminders should be A/B-tested against the existing atom prompts before adoption — `spec/edge-cases.md` §25 documents a parallel attempt at prompt-level B1 prevention that failed empirically (7/7 in-prompt guards), so the prior probability of prompt-level §8 reminders succeeding is **low**. A more promising direction may be a wrapper-level pre-flight that intercepts a sub-agent's Bash command, detects §8 violation, and re-prompts the sub-agent to refactor — though this adds round-trip latency.
+
+**Cross-reference**: `spec/00-common-contracts.md` §8 (UNSUPPRESSIBLE rows), `commands/auto.md` Phase 3.1 step 5e (re-launch instructions clarified for residual prompts), `spec/edge-cases.md` §25 (parallel B1 sub-agent compliance gap — auto-recovery instead of prevention).
+
+[PRESERVE — empirically characterized; documents a known platform limitation, not a sdd-plugin bug.]
+
+---
+
 ## Notes on RETHINK items
 
 The following items are candidates for design-phase discussion (not Phase A decisions):
