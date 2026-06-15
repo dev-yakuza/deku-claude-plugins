@@ -32,8 +32,8 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
    ```
 
 4. Read the role-specific criteria file:
-   - `$2=completeness` → `<<SKILL_DIR>>/commands/ai-review-design-completeness.md`
-   - `$2=quality` → `<<SKILL_DIR>>/commands/ai-review-design-quality.md`
+   - `$2=completeness` → `<<SKILL_DIR>>/commands/atoms/rubrics/design-completeness.md`
+   - `$2=quality` → `<<SKILL_DIR>>/commands/atoms/rubrics/design-quality.md`
 
 5. **Codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Both roles benefit from verifying design's file/symbol references actually exist. Budget: 15 Read / 10 Grep / 5 Glob.
 

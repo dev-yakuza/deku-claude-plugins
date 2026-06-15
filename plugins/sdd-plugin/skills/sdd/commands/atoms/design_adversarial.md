@@ -30,7 +30,7 @@ The role is fixed as `adversarial` (no `$2`).
      --jq '.[] | select(.body | contains("sdd:design:output")) | .body'
    ```
 
-4. Read the adversarial criteria: `<<SKILL_DIR>>/commands/ai-review-design-adversarial.md`. Also Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md`.
+4. Read the adversarial criteria: `<<SKILL_DIR>>/commands/atoms/rubrics/design-adversarial.md`. Also Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md`.
 
 5. **Codebase exploration (mandatory for design adversarial)** per `_review_helpers.md` Section D. Verify at least:
    - 1-2 file paths cited in the design exist

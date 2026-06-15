@@ -30,8 +30,8 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
    - **Single/Child path**: also read the implementation PR diff (find via `gh pr list --search "Refs #$1"`).
 
 4. Read the role-specific criteria:
-   - `$2=completeness` → `<<SKILL_DIR>>/commands/ai-review-test-completeness.md`
-   - `$2=quality` → `<<SKILL_DIR>>/commands/ai-review-test-quality.md`
+   - `$2=completeness` → `<<SKILL_DIR>>/commands/atoms/rubrics/test-completeness.md`
+   - `$2=quality` → `<<SKILL_DIR>>/commands/atoms/rubrics/test-quality.md`
 
 5. **Codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Budget: 15 Read / 10 Grep / 5 Glob. Read PR test files and verify the test output's claims match actual test code.
 

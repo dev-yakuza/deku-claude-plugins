@@ -2,7 +2,7 @@
 
 **Single-subagent worker. MUST NOT spawn subagents. MUST NOT call the Agent tool.**
 
-Cross-stage synthesis review at the **parent Issue level**. Reads parent's analyze + design + children:output + each child's analyze/design/implement review summaries, applies the criteria from `ai-review-parent-integration.md`, posts a review comment on the parent Issue, returns a one-line verdict.
+Cross-stage synthesis review at the **parent Issue level**. Reads parent's analyze + design + children:output + each child's analyze/design/implement review summaries, applies the criteria from `atoms/rubrics/parent-integration.md`, posts a review comment on the parent Issue, returns a one-line verdict.
 
 Runs only on **parent Issues** during the test stage. Invoked by `test.md` orchestrator when `test_work.md` returns `OK PARENT ...`.
 
@@ -33,7 +33,7 @@ Runs only on **parent Issues** during the test stage. Invoked by `test.md` orche
    ```
    Extract the `<!-- sdd:findings:json -->` blocks. Also fetch each child's PR diff (find via `gh pr list --search "Refs #<child>"`).
 
-5. Read the criteria: `<<SKILL_DIR>>/commands/ai-review-parent-integration.md`.
+5. Read the criteria: `<<SKILL_DIR>>/commands/atoms/rubrics/parent-integration.md`.
 
 6. **Codebase exploration (mandatory)** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D:
    - Read the interface/contract files where children connect

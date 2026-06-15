@@ -37,7 +37,7 @@ Lightweight diff-only review between TDD steps (3-1 Red, 3-2 Green, 3-3 Refactor
    - If the search returns empty AND `$4 != EMPTY` AND `$5 != NONE` → finding `[major] rule_id: test-evidence-log-missing` ("work atom did not post raw test runner output; reported counts are unverifiable"). Continue to step 3 — do not return early; other checks still apply.
    - If the search returns a body → remember it as `<evidence-log>` for step 5a.
 
-3. Read the criteria: `<<SKILL_DIR>>/commands/ai-review-implement-step.md`. Use the section matching `$2`:
+3. Read the criteria: `<<SKILL_DIR>>/commands/atoms/rubrics/implement-step.md`. Use the section matching `$2`:
    - `$2=1` → "Step 3-1: Red"
    - `$2=2` → "Step 3-2: Green"
    - `$2=3` → "Step 3-3: Refactor"
