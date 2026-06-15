@@ -2,9 +2,9 @@
 
 **Resume work on an Issue from where it left off. Thin dispatcher.**
 
-Spawns the `bootstrap` sub-agent to determine the current stage (label + comments + PR inspection in a separate sub-agent context). Then reads + executes the corresponding stage orchestrator inline in main session.
+Spawns the `bootstrap` sub-agent to determine the current stage (label + comments + PR inspection in a separate sub-agent context). Then inline-reads the corresponding stage wrapper command (`analyze.md` / `design.md` / `implement.md` / `test.md`), which itself spawns a single `stage_<X>` sub-agent.
 
-In Arch B (v1.0.0): future milestones (M4-M7) replace the inline orchestrator reads with `stage_<X>` sub-agent spawns. Until then, this file uses bootstrap for state detection but still inline-reads the legacy orchestrators for stage execution.
+In Arch B (v1.0.0): bootstrap + stage wrapper chain replaces the v0.x main-session orchestrator inline. Each wrapper is thin (~100-200 lines) and delegates work to its `stage_<X>` sub-agent.
 
 > **Bash Command Execution**: see `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`.
 
@@ -82,13 +82,11 @@ Then dispatch by reading + executing the appropriate orchestrator inline:
 - `implement` → `<<SKILL_DIR>>/commands/implement.md`
 - `test` → `<<SKILL_DIR>>/commands/test.md`
 
-The target orchestrator handles all stage-specific logic (Phase 0 depth detection, work + reviews, escalation gates, label transitions). Its atom-level duplicate prevention ensures comments are updated in place if the stage was partially complete.
-
-**Note (M3 transient state)**: In v1.0.0 final architecture (M4-M7), these inline reads are replaced by `stage_<X>` sub-agent spawns. Until those stage sub-agents exist, the legacy orchestrators continue to drive each stage's execution. The bootstrap dispatch is what's new in M3.
+The target wrapper handles its Phase 0 depth detection + direct-invocation label check (T1.11), then spawns the single `stage_<X>` sub-agent that runs work + reviews + escalation internally. Sub-agent-level duplicate prevention ensures comments are updated in place if the stage was partially complete.
 
 ## Notes
 
-- **resume.md is a thin dispatcher.** It spawns bootstrap (1 sub-agent call) and then inline-reads the target orchestrator. Atom spawning still happens inside those orchestrators (transient — to be replaced by stage_X sub-agents in M4-M7).
+- **resume.md is a thin dispatcher.** It spawns bootstrap (1 sub-agent call) and then inline-reads the target wrapper command, which spawns one `stage_<X>` sub-agent.
 - **Idempotent re-entry.** Multiple `/sdd resume <N>` calls produce the same dispatch decision based on the current GitHub state.
-- **Safe within `/sdd auto` loops.** Bootstrap is a leaf sub-agent; the inline orchestrator reads continue to be the layer that spawns atoms (until M4-M7). No nesting risk.
-- **Main-session token impact (M3 transient)**: bootstrap saves the ~100 lines of inline label/comment/PR fetch logic. Orchestrator reads remain a main-session cost until M4-M7.
+- **Safe within `/sdd auto` loops.** Bootstrap is a leaf sub-agent; each stage wrapper spawns exactly one stage sub-agent (single-level spawn rule preserved).
+- **Main-session token impact**: bootstrap moves the ~100 lines of label/comment/PR inspection out of main session into its own sub-agent context. Wrapper inline reads are ~100-200 lines each but only one stage runs per resume call.
