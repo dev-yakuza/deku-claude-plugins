@@ -24,7 +24,7 @@ The role is fixed as `adversarial` for this atom (no `$2`).
 
 2. If analyze output is missing → return `FAIL: analyze output not found on Issue #$1`.
 
-3. Read the adversarial criteria: `<<SKILL_DIR>>/commands/ai-review-analyze-adversarial.md`. Also read Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` for the general adversarial prompt.
+3. Read the adversarial criteria: `<<SKILL_DIR>>/commands/atoms/rubrics/analyze-adversarial.md`. Also read Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` for the general adversarial prompt.
 
 4. **Codebase exploration (optional, within budget)** per `_review_helpers.md` Section D. Verify any code references in the analyze output exist as described.
 

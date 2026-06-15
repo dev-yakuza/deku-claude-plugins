@@ -26,7 +26,7 @@ Role is fixed as `adversarial`.
 
 3. Detect path (single/child vs parent) by inspecting the test output body (`Path: Single/Child Issue` vs `Path: Parent Issue`).
 
-4. Read the adversarial criteria: `<<SKILL_DIR>>/commands/ai-review-test-adversarial.md`. Also Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md`.
+4. Read the adversarial criteria: `<<SKILL_DIR>>/commands/atoms/rubrics/test-adversarial.md`. Also Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md`.
 
 5. **Codebase exploration** per `_review_helpers.md` Section D:
    - Read the PR's test files referenced in the test output

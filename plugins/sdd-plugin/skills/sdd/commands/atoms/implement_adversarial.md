@@ -38,7 +38,7 @@ Role is fixed as `adversarial` (no `$2`).
      --jq '.[] | select(.body | contains("sdd:design:output") or contains("sdd:implement:plan")) | .body'
    ```
 
-5. Read the adversarial criteria: `<<SKILL_DIR>>/commands/ai-review-implement-adversarial.md`. Also Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md`.
+5. Read the adversarial criteria: `<<SKILL_DIR>>/commands/atoms/rubrics/implement-adversarial.md`. Also Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md`.
 
 6. **Codebase exploration (mandatory)** per `_review_helpers.md` Section D. For an implement adversarial review:
    - Read at least 1 similar pattern in the codebase, compare against the new implementation
