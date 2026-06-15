@@ -1,0 +1,31 @@
+name: Version Sync Check
+
+on:
+  pull_request:
+    paths:
+      - 'plugins/sdd-plugin/.claude-plugin/plugin.json'
+      - '.claude-plugin/marketplace.json'
+  push:
+    branches:
+      - main
+      - 'rewrite/**'
+
+jobs:
+  version-sync:
+    runs-on: ubuntu-latest
+    # Skip on legacy/0.x branch (preserves the historical drift for reference)
+    if: ${{ !startsWith(github.ref, 'refs/heads/legacy/') && !startsWith(github.head_ref, 'legacy/') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check plugin.json and marketplace.json versions match
+        run: |
+          PLUGIN_V=$(jq -r .version plugins/sdd-plugin/.claude-plugin/plugin.json)
+          MARKET_V=$(jq -r '.plugins[] | select(.name=="sdd-plugin") | .version' .claude-plugin/marketplace.json)
+          echo "plugin.json version:      $PLUGIN_V"
+          echo "marketplace.json version: $MARKET_V"
+          if [ "$PLUGIN_V" != "$MARKET_V" ]; then
+            echo "::error::Version mismatch — plugin.json ($PLUGIN_V) and marketplace.json ($MARKET_V) must match. See CLAUDE.md."
+            exit 1
+          fi
+          echo "Versions match: $PLUGIN_V"
