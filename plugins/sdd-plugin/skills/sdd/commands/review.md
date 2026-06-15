@@ -30,13 +30,13 @@ Before any other step: validate `$1` per Common Definitions → Issue Validation
 
 ### 1. Detect the latest stage with output
 
-Read all stage output markers present on the Issue:
+Read all stage output markers present on the Issue. Single simple Bash call (no compound shell syntax per `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`):
 
 ```bash
-gh api repos/<owner>/<repo>/issues/$1/comments \
-  --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output") or contains("sdd:implement:plan") or contains("sdd:test:output")) | .body' \
-  | grep -oE 'sdd:(analyze:output|design:output|implement:plan|test:output)'
+gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output") or contains("sdd:implement:plan") or contains("sdd:test:output")) | .body'
 ```
+
+Observe the tool output: scan the returned comment bodies in main-session narrative (NOT in shell). Note which of the 4 marker substrings appear: `sdd:analyze:output`, `sdd:design:output`, `sdd:implement:plan`, `sdd:test:output`.
 
 Determine the latest stage by precedence (latest-stage wins): `test:output` > `implement:plan` (+ open PR for the implement review) > `design:output` > `analyze:output`.
 

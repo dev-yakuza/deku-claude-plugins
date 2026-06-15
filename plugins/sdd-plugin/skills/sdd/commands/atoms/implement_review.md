@@ -61,7 +61,7 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
 
     Branch on output (orchestrator-side, NOT in shell):
     - Empty → create with `gh pr comment <PR_NUM> --body-file /tmp/sdd-review-implement-<role>.md`
-    - Has ID → update with `gh api repos/<owner>/<repo>/issues/comments/<EXISTING_ID> -X PATCH -F body=@/tmp/sdd-review-implement-<role>.md`
+    - Has ID → update with `gh api repos/<owner>/<repo>/issues/comments/<EXISTING_ID> -X PATCH --field body=@/tmp/sdd-review-implement-<role>.md`
 
     Comment body format:
     ```
