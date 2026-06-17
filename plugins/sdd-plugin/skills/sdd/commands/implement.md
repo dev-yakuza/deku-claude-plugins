@@ -196,6 +196,8 @@ Parse `<reason>` for an optional subtype prefix (`<subtype>: <detail>`) per `spe
 
 ### Unknown / malformed
 
+> **CRITICAL — MAIN SESSION INVARIANT (do not skip):** When the sub-agent's return text does not contain a parseable `>>> RESULT <<<` line, the main session **MUST** execute the auto-recovery probe below **before** spawning any new agent and **before** reporting failure. Do NOT shortcut by re-spawning `stage_implement` with `Resume: continue-after-escalation`, do NOT manually craft finalize agents — the auto-recovery probe IS the contract-restoration path. Skipping it leads to duplicate work, malformed PR markers, and (in `/sdd auto`) wrong queue accounting.
+
 Defensive auto-recovery for sub-agent contract-line drop (`design/01-sub-agent-contract.md` §9):
 
 The sub-agent's `>>> RESULT <<<` line is absent or unparseable. Before failing outright, **probe GitHub state** to see if the sub-agent completed all substantive work but silently dropped the closing contract line — this pattern was observed when the heavy PR Final reviewer + Skill chain consumed the sub-agent's remaining output budget after `/security-review` or after a verdict was implicitly reached.
