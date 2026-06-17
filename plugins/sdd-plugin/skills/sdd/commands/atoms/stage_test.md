@@ -731,11 +731,15 @@ The `/verify` outcome is **additional context** for §8's user gate. It does NOT
 
 ## §8. Phase 3 — User review + manual QA gate
 
+> **CRITICAL — SUB-AGENT INVARIANT (do not skip Steps 1+3):** Before composing the manual-QA summary or returning anything, you MUST execute **Step 1 (read `.github/.sdd-config`)** and then **Step 3 (branch on `skip-review: qa`)**. Returning `OK NEEDS_MANUAL_QA` while `qa` is in `skip-review` is a contract violation — `/sdd auto` (and any other unattended mode) cannot collect user input and depends on Case A auto-approval. The order is: **Step 1 → Step 3 → Step 2 (summary, only if Case B fires)**, NOT Step 2 → Step 3.
+
 This phase is the only mid-stage interactive gate (sub-agent CANNOT call `AskUserQuestion` per `design/01-sub-agent-contract.md` §4). Split into a skip-review auto-approve branch (Case A) and an interactive return branch (Case B).
 
-### Step 1: Read `.github/.sdd-config` for skip-review
+### Step 1: Read `.github/.sdd-config` for skip-review  ⚠ MUST run first
 
 Use the Read tool on `.github/.sdd-config`. Parse `skip-review:` list. Token `qa` triggers the auto-approve branch.
+
+If the file does not exist, treat as empty (`qa` absent → Case B). Do NOT skip this read; do NOT assume any value.
 
 ### Step 2: Compose manual-QA summary (used in both branches)
 

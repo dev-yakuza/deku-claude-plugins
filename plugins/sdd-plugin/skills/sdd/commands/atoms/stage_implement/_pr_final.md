@@ -105,11 +105,28 @@ From `.github/.sdd-lang` per `<<SKILL_DIR>>/commands/atoms/_multilingual.md` (fa
 
 Auto-generate from `git log --oneline -20` (already in context from §3.1 Item 2). Read Manual Test Checklist items from the `<!-- sdd:implement:plan -->` test plan (already on Issue).
 
+**The PR body MUST be self-contained — a reviewer reading ONLY this PR (without opening parent / referenced Issues) must understand**:
+1. **What** the PR changes (concrete scope, not just a category label).
+2. **Why** the change is needed (the underlying problem, in 1-3 sentences — do not assume the reader has the Issue context).
+3. **How** the change is made (approach / breakdown — table if there are multiple distinct policies / cases).
+
+If the parent Issue uses an ad-hoc taxonomy term (e.g. `"C 그룹"`, `"the boilerplate"`, `"the old pattern"`) **do not paste the term as-is** into the PR title or first paragraph. Either re-define it inline in one sentence, or replace it with a self-explanatory description. The `Refs #$1` link is sufficient for traceability; standalone readability is the standalone PR's responsibility.
+
+Examples:
+- ❌ Bad title: `refactor: C 그룹 본문 Get.reset() 을 좁히기`
+- ✅ Good title: `refactor: 테스트 본문 내 Get.reset() 10개 호출을 의도별로 좁히기 (helper 재등록 누락 회귀 방지)`
+- ❌ Bad first line: `Refs #872. C 그룹 본문 처리.`
+- ✅ Good first line: `Refs #872. 테스트 본문에서 호출되는 Get.reset() 은 permanent helper 까지 제거하기 때문에 직후 재등록이 누락되면 회귀가 발생한다. 본 PR 은 호출 10곳을 의도별로 좁힌다.`
+
 Body shape (single Issue):
 ```
 Refs #$1
 
-<change summary — 3-5 lines>
+## Background (standalone)
+<1-3 sentences stating the underlying problem — self-contained; assumes the reader has NOT opened the Issue>
+
+## Changes
+<change summary — table or bullets, 3-10 lines covering what · why · how per the rule above>
 
 ## Manual Test Checklist
 - [ ] <item>

@@ -12,6 +12,7 @@
 - [ ] Code follows existing codebase patterns and conventions
 - [ ] No unnecessary code, comments, or debug artifacts remain
 - [ ] PR description accurately reflects the changes
+- [ ] **PR description is self-contained** — a reviewer reading ONLY the PR (without opening the parent Issue / referenced Issues) can understand WHAT changes, WHY they are needed, and HOW they are done. Ad-hoc taxonomy terms from upstream Issues (e.g. `"C group"`, `"the boilerplate"`) are either re-defined inline or replaced with self-explanatory wording. Treat violation as `major`.
 - [ ] Manual test checklist covers UI behavior and edge cases not in automated tests
 
 ## Cross-stage Check (design → implement)
