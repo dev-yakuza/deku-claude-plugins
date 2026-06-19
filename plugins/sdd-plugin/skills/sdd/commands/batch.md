@@ -252,11 +252,10 @@ fi
 echo "skip-review: analyze,design,implement,pr" > "$CONFIG_FILE"
 echo "[batch] Set skip-review for batch mode"
 
-# --- Cleanup trap ---
-SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-cleanup() {
-  echo ""
-  echo "[batch] Cleaning up..."
+# --- Config restore (GAP-A6 core — called explicitly before stats/summary) ---
+# Separating config restore from script deletion keeps the "[batch] Restored" message
+# before stats output, while "[batch] Removed batch script" appears after summary via trap.
+restore_config() {
   if [ -f "$CONFIG_BACKUP" ]; then
     cp "$CONFIG_BACKUP" "$CONFIG_FILE"
     rm -f "$CONFIG_BACKUP"
@@ -265,6 +264,16 @@ cleanup() {
     rm -f "$CONFIG_FILE"
     echo "[batch] Removed temporary $CONFIG_FILE"
   fi
+}
+
+# --- Cleanup trap (script deletion only — fires via trap EXIT after summary) ---
+SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+CLEANUP_DONE=0
+cleanup() {
+  if [ "$CLEANUP_DONE" -eq 1 ]; then return; fi
+  CLEANUP_DONE=1
+  echo ""
+  echo "[batch] Cleaning up..."
   rm -f "$SCRIPT_PATH"
   echo "[batch] Removed batch script"
 }
@@ -284,6 +293,14 @@ SEEN=""
 for n in "${ISSUES[@]}"; do SEEN="$SEEN #$n "; done
 TOTAL_TARGETS=${#ISSUES[@]}
 PROCESSED_COUNT=0
+
+# --- Recovery hint (SIGKILL cannot be trapped) ---
+if [ -f "$CONFIG_BACKUP" ]; then
+  echo "[batch] Recovery hint (if killed with SIGKILL):"
+  echo "  mv .github/.sdd-config.bak .github/.sdd-config"
+  echo "  rm -f .github/.sdd-batch.sh"
+  echo ""
+fi
 
 echo ""
 echo "============================================================"
@@ -371,7 +388,11 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     # Not rate limited — genuine failure
     echo "  ✗ Issue #$ISSUE failed (exit code: $EXIT_CODE)"
     FAILED=$((FAILED + 1))
-    FAILED_ISSUES+=("$ISSUE")
+    FAIL_REASON=$(jq -r 'select(.type == "result") | select(.is_error == true) | .result // empty' "$LOG_FILE" 2>/dev/null | tail -1 | cut -c1-80)
+    if [ -z "$FAIL_REASON" ]; then
+      FAIL_REASON="exit code $EXIT_CODE"
+    fi
+    FAILED_ISSUES+=("#${ISSUE} (${FAIL_REASON})")
 
     # Extract error details to error log
     {
@@ -404,6 +425,11 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
 done
 
 TOTAL=$PROCESSED_COUNT
+
+# --- Config restore (GAP-A6: must precede stats/summary) ---
+# Explicit call ensures .sdd-config is restored even if stats aggregation errors out
+# under set -e before trap EXIT can fire.
+restore_config
 
 # --- Aggregate stats from stream-json logs ---
 BATCH_END=$(date +%s)
@@ -440,7 +466,10 @@ echo "  Total:     $TOTAL"
 echo "  Succeeded: $SUCCEEDED"
 echo "  Failed:    $FAILED"
 if [ ${#FAILED_ISSUES[@]} -gt 0 ]; then
-  echo "  Failed:    ${FAILED_ISSUES[*]}"
+  echo "  Failed Issues:"
+  for FI in "${FAILED_ISSUES[@]}"; do
+    echo "    $FI"
+  done
   echo "  Error log: $ERROR_LOG"
 fi
 echo ""
@@ -496,3 +525,21 @@ After writing the script:
 
    Succeeded: 2/3
    ```
+
+## Notes
+
+- **Setup — `.git/info/exclude` idempotent**: `grep -qxF` ensures each entry is added at most once, so re-running the script or running multiple batches concurrently does not duplicate entries. This protects `.sdd-batch.sh`, `.sdd-config`, and `.sdd-config.bak` from being stashed by subagents' `git stash -u` mid-run. `.git/info/exclude` (not `.gitignore`) is used to avoid modifying the tracked ignore file.
+
+- **Setup — config backup semantics**: `restore_config()` is only created when `.sdd-config` already existed before the batch. If the file did not exist, no `.sdd-config.bak` is created and `restore_config()` removes the temporary file on completion. The `[ -f "$CONFIG_BACKUP" ]` guard in `restore_config()` encodes this invariant.
+
+- **GAP-A6 ordering invariant**: `restore_config()` is called explicitly after the loop and *before* stats aggregation. This ensures `.sdd-config` is restored even if the `jq`-based stats code errors under `set -e` before `trap EXIT` fires. Script deletion (`rm -f "$SCRIPT_PATH"`) is kept in `cleanup()` which runs via `trap EXIT` after summary output — this way the `[batch] Removed batch script` message does not appear before the stats and summary.
+
+- **SIGKILL limitation**: `trap` cannot catch SIGKILL (`kill -9`). The recovery hint printed before the loop tells the user how to manually restore `.sdd-config` and remove the stale `.sdd-batch.sh` if the script is hard-killed. The `CLEANUP_DONE` guard in `cleanup()` prevents double-execution when `cleanup()` is called explicitly (for any future refactoring) and then again via `trap EXIT`.
+
+- **`${ISSUE}` in shell script vs `_bash_rules.md` §6**: Shell variable expansion inside the generated `.sdd-batch.sh` is allowed. `_bash_rules.md` §6 (no `${...}` inside quoted args to the Bash tool) applies only when Claude invokes the Bash tool directly — not to OS-level bash processes running a generated script. `/sdd auto` §3.3's literal substitution requirement does not apply here.
+
+- **`implement-parent` handling**: When a parent Issue is paused at `sdd:implement` waiting for child Issues, `/sdd resume` detects the `implement-parent` state, prints child progress, and exits with code 0. The batch script counts this as SUCCEEDED. Child Issues are discovered and queued in the child auto-discovery step that follows immediately.
+
+- **4-key skip-review** (`analyze,design,implement,pr` — `qa` intentionally absent): Each child session's `stage_test` returns `OK PAUSE` when it reaches manual QA, stopping the child session cleanly after PR creation. The human runs QA after the batch completes. Compare with `/sdd auto` which uses 5 keys (including `qa`) because it runs unattended in-session.
+
+- **FAILED_ISSUES reason**: The failure reason is extracted from the stream-json log's last `result` entry with `is_error == true`. If no such entry exists (process killed, tool failure without structured output), the fallback is `"exit code $EXIT_CODE"`. Rate-limit retries overwrite the same log file, so only the final attempt's reason is captured — this is intentional.

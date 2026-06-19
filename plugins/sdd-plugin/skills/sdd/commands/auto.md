@@ -4,7 +4,7 @@
 
 Arch B (v1.0.0): this file runs in the **main session** and acts as the FSM that drives the per-Issue stage chain. For each Issue: spawn ONE `bootstrap` sub-agent (state detection) → read + execute the appropriate stage wrapper command (`analyze.md` / `design.md` / `implement.md` / `test.md`) inline → repeat until the Issue reaches `sdd:done`. The stage wrappers themselves spawn ONE `stage_<X>` sub-agent each per `design/01-sub-agent-contract.md` §1.
 
-Unlike `/sdd batch` (which spawns separate `claude -p` subprocesses), `/sdd auto` stays entirely on the Interactive subscription pool — unchanged by the 2026-06-15 billing split that moved `claude -p` to the new metered Agent SDK Credit pool.
+Unlike `/sdd batch` (which spawns separate `claude -p` subprocesses), `/sdd auto` stays entirely within the main Claude Code session — no child processes are spawned.
 
 > **Bash Command Execution**: see `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`.
 
@@ -13,14 +13,14 @@ Unlike `/sdd batch` (which spawns separate `claude -p` subprocesses), `/sdd auto
 | Axis | `/sdd batch` | `/sdd auto` |
 |---|---|---|
 | Execution model | Generates `.sdd-batch.sh`; each Issue runs in a fresh `claude -p` child session | Main Claude Code session loops over Issues in-process |
-| Billing pool (post 2026-06-15) | Agent SDK Credit pool (metered at API list prices, no rollover) | Interactive subscription pool (unchanged) |
+| Billing | Same — both draw from the Interactive subscription pool (`claude -p` is no longer separately metered as of Anthropic's June 2026 policy reversal) | Same |
 | Claude Code app required after start | No — close it; the shell script runs unattended | **Yes** — keep this session open until the loop completes |
 | Permission prompts during run | Bypassed (`--dangerously-skip-permissions`) | Normal main-session prompts apply; opting into the sandbox toggle (`sandbox.enabled = false`) eliminates per-command bypass confirmations from the *next* session onward — the toggle path exits and asks the user to restart Claude Code |
 | Cleanup robustness on Ctrl-C | Strong (shell `trap`) | Weak (in-session try/finally; hard kill loses cleanup) |
 | Logs | Per-Issue stream-json log files | Inline in the Claude Code transcript |
 | Child Issue auto-discovery | Yes | Yes |
 
-**Heuristic**: large queue or want to walk away → `/sdd batch`. Watching progress, want to stay on Interactive billing → `/sdd auto`. Rationale per `design/03-flow-design.md` §1.1.
+**Heuristic**: large queue or want to walk away unattended → `/sdd batch`. Watching progress or want inline transcript → `/sdd auto`. Rationale per `design/03-flow-design.md` §1.1.
 
 ### Practical limits
 
