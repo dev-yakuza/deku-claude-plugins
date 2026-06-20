@@ -134,13 +134,13 @@ Stage label: no SDD label → `[new]`; SDD label → show it.
 
 Then run the Workspace check (§3) and append the worktree warning if applicable.
 
-### Skip-review difference vs auto [PRESERVE — critical]
+### Skip-review alignment with auto [PRESERVE — critical]
 
-Batch writes `skip-review: analyze,design,implement,pr` (4 keys). It does **NOT** include `qa`. Rationale: batch's design is "process up to PR creation, then human reviews PRs and runs QA manually."
+Batch writes `skip-review: analyze,design,implement,pr,qa` (5 keys — same as `/sdd auto`). Rationale: batch runs unattended through QA to `sdd:done`; the human reviews PRs and QA evidence on GitHub after the batch completes.
 
-`/sdd auto` writes 5 keys (`analyze,design,implement,pr,qa`) because it must not block on manual QA mid-loop.
+`/sdd auto` also writes 5 keys (`analyze,design,implement,pr,qa`) for the same reason — both commands are designed to run fully unattended.
 
-[PRESERVE: the 4-vs-5-keys difference is the contract gap between the two commands.]
+[PRESERVE: batch and auto now use the same 5-key skip-review. There is no longer a 4-vs-5-key distinction between the two commands.]
 
 ---
 
@@ -217,7 +217,7 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 - Resolve `OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner ...)`. Empty → warn, disable child auto-discovery.
 - **`.git/info/exclude` protection** (idempotent): append `.github/.sdd-batch.sh`, `.github/.sdd-config`, `.github/.sdd-config.bak` if not already present. Rationale: subagents may stash untracked files when switching branches; without these entries, the batch infrastructure can disappear into a stash mid-run, breaking skip-review detection.
 - Back up `.sdd-config` to `.sdd-config.bak` if it exists.
-- Write `skip-review: analyze,design,implement,pr` to `.sdd-config`.
+- Write `skip-review: analyze,design,implement,pr,qa` to `.sdd-config`.
 
 [PRESERVE: stash-protection rationale and the use of `.git/info/exclude` (not `.gitignore`) so the user's tracked `.gitignore` is unmodified.]
 
@@ -449,7 +449,7 @@ Handled by the inner retry loop §7.4.b. Mechanism:
 - **0.24.0 architecture invariant**: each `claude -p` child session is a fresh main thread. Inside the child, `/sdd resume <N>` dispatches to a stage orchestrator, which spawns single-level atom subagents. Spawning is single-level per `00-common-contracts.md` §12.
 - **Cleanup robustness on Ctrl-C is the killer feature**. The shell `trap` covers EXIT/INT/TERM; `/sdd auto` has nothing equivalent (in-session try/finally only).
 - **Per-Issue stream-json logs enable observability** (`/cost`-style aggregation, tool-call audit, permission-denial extraction). `/sdd auto` has no equivalent.
-- **Skip-review stops at `pr`**, not `qa`. Human reviews PRs and runs QA after batch completes. This is the contractual difference vs `/sdd auto`.
+- **Skip-review includes `qa`** — batch runs through `sdd:done` unattended, same as `/sdd auto`. Human reviews PRs and QA evidence on GitHub after batch completes.
 - **Worktree recommendation** is shown but not enforced; users can decline and proceed in the main checkout.
 
 ---
