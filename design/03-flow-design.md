@@ -97,7 +97,7 @@ Per `spec/flow/auto.md` §6, all six steps preserved verbatim:
 
 1. **Resolve owner/repo** via `gh repo view --json nameWithOwner -q .nameWithOwner`; inline literal `<owner>/<repo>` per `00-common-contracts.md` §11.
 2. **Back up `.github/.sdd-config`** to `.sdd-config.bak` (Read + Write tools, only if it exists).
-3. **Write temporary skip-review** `skip-review: analyze,design,implement,pr,qa` (five keys — `qa` is what differentiates auto from batch and lets manual QA inside `stage_test` auto-pass).
+3. **Write temporary skip-review** `skip-review: analyze,design,implement,pr,qa` (five keys — same as `/sdd batch`; both commands run unattended through QA to `sdd:done`).
 4. **Append `.git/info/exclude` entries** for `.sdd-config`, `.sdd-config.bak`, and (later) `<SETTINGS_PATH>.sdd-auto.bak`.
 5. **Sandbox disable** (optional, prompted, exits before loop) — **R4: external behavior unchanged**.
    - Locate settings file: `.claude/settings.local.json` → `.claude/settings.json` → `~/.claude/settings.json`.
@@ -415,18 +415,18 @@ Differences vs `/sdd auto` iteration:
 | Axis | `/sdd auto` per-Issue | `/sdd batch` child |
 |---|---|---|
 | Process | In-session iteration | Fresh `claude -p` subprocess |
-| Skip-review | 5 keys (`analyze,design,implement,pr,qa`) | 4 keys (no `qa`) — batch script writes this |
+| Skip-review | 5 keys (`analyze,design,implement,pr,qa`) | 5 keys (`analyze,design,implement,pr,qa`) — same as auto |
 | User prompts | Possible (sandbox pre-loop) | Never (`--dangerously-skip-permissions` + skip-review) |
 | Cleanup on Ctrl-C | Weak (try/finally) | Strong (shell `trap`) |
 | Logs | In-transcript | Per-Issue stream-json files |
 
-### 7.3 Batch skip-review (4 keys, not 5)
+### 7.3 Batch skip-review (5 keys — same as auto)
 
-Per `spec/flow/batch.md` §5: shell template writes `skip-review: analyze,design,implement,pr` — **no `qa`**. Rationale: batch stops at PR creation; human reviews PRs and runs QA manually after.
+Per `spec/flow/batch.md` §5: shell template writes `skip-review: analyze,design,implement,pr,qa` — **all 5 keys**. Rationale: batch runs unattended through QA to `sdd:done`; human reviews PRs and QA evidence on GitHub after batch completes.
 
-In Arch B: when bootstrap routes to `stage_test`, the child's `qa` gate inside `stage_test` is NOT in skip-review. `stage_test` returns `OK PAUSE` (manual QA would normally ask user; `--dangerously-skip-permissions` is for tool permissions, not skip-review). Main session in child sees `OK PAUSE`, exits FSM, child exits cleanly. Next Issue in queue gets fresh `claude -p`.
+In Arch B: when bootstrap routes to `stage_test`, the child's `qa` gate inside `stage_test` IS in skip-review. `stage_test` auto-advances through QA without user confirmation and returns `OK ADVANCE`, transitioning the Issue to `sdd:done`. The child exits cleanly. Next Issue in queue gets fresh `claude -p`.
 
-[PRESERVE]: 4-vs-5-keys contract gap is the contractual difference between auto and batch.
+[PRESERVE]: batch and auto now use the same 5-key skip-review. There is no longer a 4-vs-5-key contract distinction between the two commands.
 
 ### 7.4 Phases that are unchanged
 

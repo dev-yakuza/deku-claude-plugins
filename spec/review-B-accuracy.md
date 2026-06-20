@@ -76,7 +76,7 @@
 - Spec `stage/implement.md` Phase 5.1.2 / 5.1.3 `/code-review` effort by depth (default=high, deep=max, shallow=medium) — confirmed against `_review_helpers.md` Section A.3 lines 43–47 and `implement.md` line 189. ✓
 - Spec `stage/implement.md` line 137: `OK E2E_SKIPPED → skip step 2 entirely` (no tdd_step_review spawn) — confirmed against `commands/implement.md` line 99. ✓
 - Spec `stage/test.md` line 88: `test_work` always opus regardless of depth — confirmed against `_review_helpers.md` line 28 (`*_work (analyze/design/test) | opus | opus | opus`) and source `test.md` line 29. ✓
-- Spec `flow/batch.md` §5 (skip-review difference): batch writes 4 keys `analyze,design,implement,pr` whereas auto writes 5 `analyze,design,implement,pr,qa` — confirmed against `commands/batch.md` line 248 and `commands/auto.md` line 148. ✓
+- Spec `flow/batch.md` §5 (skip-review): batch writes 5 keys `analyze,design,implement,pr,qa` — same as auto; both commands run unattended through QA to `sdd:done`. Updated: batch previously used 4 keys (no `qa`); changed so batch also completes through QA unattended.
 - Spec `flow/resume.md` §2 dispatch table: `sdd:done → "Issue is already complete."` — confirmed against `commands/resume.md` line 75. ✓
 - Spec `flow/auto.md` §10 Final Summary "manual QA was auto-skipped because /sdd auto runs unattended" — confirmed against `commands/auto.md` line 354. ✓
 

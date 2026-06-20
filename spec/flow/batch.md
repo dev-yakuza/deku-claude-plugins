@@ -126,7 +126,7 @@ Issues to process (in order):
 
 Total: 3 issues (queue may grow as parent Issues spawn children)
 Mode: Sequential (each in a separate claude -p session)
-Skip-review: analyze, design, implement, pr (auto-enabled — stops after PR creation)
+Skip-review: analyze, design, implement, pr, qa (auto-enabled — runs through sdd:done)
 Child auto-queue: enabled
 ```
 
