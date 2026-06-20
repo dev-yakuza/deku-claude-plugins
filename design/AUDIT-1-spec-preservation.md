@@ -98,7 +98,7 @@
 - **ITEM-46** — 5 keys `analyze`, `design`, `implement`, `pr`, `qa` — `spec/01-config.md:33` → `commands/atoms/stage_implement/main.md:147` ("Valid: `analyze`, `design`, `implement`, `pr`, `qa`"), `commands/atoms/stage_implement/_pr_final.md:610`, `commands/config.md:11-22`. ✓
 - **ITEM-47** — Critical invariant: skip-review skips USER GATE only, AI review always runs — `spec/01-config.md:46`, `spec/edge-cases.md:170` → `commands/atoms/stage_implement/main.md:437` documents the consumption per key; the AI review loops in `stage_*.md` always execute regardless of skip-review. ✓
 - **ITEM-48** — Cascade: skipped `analyze` auto-proceeds to design.md inline (no nested spawn) — `spec/01-config.md:48`, `spec/edge-cases.md:172-178` → Main-session FSM in `commands/auto.md` reads each stage wrapper inline; analyze sub-agent returns `OK ADVANCE: design` (`stage_analyze.md:457`) and main acts. ✓
-- **ITEM-49** — `auto` adds `qa` to skip-review (vs batch stops at `pr`) — `spec/flow/auto.md:162` → `commands/auto.md:123` (`skip-review: analyze,design,implement,pr,qa`). ✓
+- **ITEM-49** — both `auto` and `batch` use 5-key skip-review including `qa` — `spec/flow/auto.md:157`, `spec/flow/batch.md:139` → `commands/auto.md:123`, `commands/batch.md:251` (both write `skip-review: analyze,design,implement,pr,qa`). ✓
 
 #### Issue Validation gate
 

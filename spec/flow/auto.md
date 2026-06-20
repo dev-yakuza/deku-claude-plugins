@@ -159,7 +159,7 @@ skip-review: analyze,design,implement,pr,qa
 
 This makes every per-Issue stage orchestrator auto-proceed without user confirmation — **including manual QA at the end of `/sdd test`** (which would otherwise block the loop indefinitely waiting for human input). `/sdd auto` is by design **unattended**; the user reviews PRs and QA evidence on GitHub after the loop completes.
 
-[PRESERVE: writing `qa` into skip-review is what differentiates auto's skip-review from batch's. Batch stops at `pr`; auto goes through `qa` because the loop must not block.]
+[PRESERVE: writing `qa` into skip-review makes the loop run unattended through QA to `sdd:done`. Both `/sdd auto` and `/sdd batch` now use 5-key skip-review including `qa` — both run fully unattended.]
 
 ### Step 4: Append `.git/info/exclude` entries [PRESERVE — idempotent]
 
