@@ -118,7 +118,7 @@ The main session itself runs the loop. **No shell script is generated. No `claud
    - Copy its contents to `.github/.sdd-config.bak` via the Write tool (so the file exists on disk for the recovery hint).
    - If no existing `.sdd-config`, do NOT create `.sdd-config.bak`.
 
-3. Write temporary skip-review (5 keys — the `qa` key is what differentiates auto from batch):
+3. Write temporary skip-review (5 keys — same as `/sdd batch`):
    ```
    skip-review: analyze,design,implement,pr,qa
    ```
@@ -384,7 +384,7 @@ Token / cost aggregation is **not** included — the main session does not have 
 ## Notes
 
 - **Thin FSM dispatcher.** Per `design/03-flow-design.md` §1.1, auto.md is a main-session FSM body. Each Issue iteration spawns ONE bootstrap sub-agent + reads + executes ONE stage wrapper command inline (which spawns ONE `stage_<X>` sub-agent). The orchestrator-reads-orchestrator pattern is gone in Arch B v1.0.0.
-- **Skip-review override is temporary and 5-key.** Pre-loop writes `analyze,design,implement,pr,qa`; cleanup restores the original config. The `qa` key is what differentiates auto's skip-review from batch's (4 keys) — auto must skip the manual QA gate to remain unattended. AI review still runs in every stage sub-agent (skip-review only suppresses user-confirmation gates per `spec/01-config.md` §2).
+- **Skip-review override is temporary and 5-key.** Pre-loop writes `analyze,design,implement,pr,qa`; cleanup restores the original config. Both `/sdd auto` and `/sdd batch` use 5-key skip-review — skipping the manual QA gate so the run completes unattended. AI review still runs in every stage sub-agent (skip-review only suppresses user-confirmation gates per `spec/01-config.md` §2).
 - **Sandbox toggle is opt-in and persistent — forces a restart.** §3.1 step 5e exits before the loop on approval; cleanup does NOT auto-restore the sandbox snapshot. Per `spec/edge-cases.md` §3, sandbox-bypass prompts are an UNSUPPRESSIBLE Claude Code safeguard that `permissions.allow` cannot auto-approve — the toggle is the only way to silence them.
 - **`--dangerously-skip-permissions` is the companion flag.** Step 5e instructs the user to re-launch with this flag because, even after `sandbox.enabled = false`, the main session still applies built-in heuristic safety prompts (e.g. `find -exec`, heredocs, multi-line `# …` in CLI args, recursive `find /`) that `permissions.allow` cannot auto-approve. Cleanup explicitly reminds the user to quit and re-launch in NORMAL mode after `/sdd auto` completes.
 - **Sequential only.** Parallel Issue processing is intentionally unsupported — parallel subagents consume the subscription quota N× faster, defeating the in-session billing advantage.

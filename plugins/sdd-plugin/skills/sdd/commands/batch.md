@@ -2,7 +2,7 @@
 
 **Batch process multiple Issues through the SDD pipeline in separate sessions.**
 
-Each Issue runs in an independent `claude -p` session with skip-review enabled (analyze through PR creation), minimizing token consumption. Human reviews PRs and runs QA after batch completes.
+Each Issue runs in an independent `claude -p` session with skip-review enabled (analyze through QA), minimizing token consumption. Human reviews PRs and QA evidence on GitHub after batch completes.
 
 > **v1.0.0 architecture note**: each `claude -p` child session is a fresh main thread. Inside the child, `/sdd resume <N>` spawns a single bootstrap sub-agent which spawns a single `stage_<X>` sub-agent per FSM transition (analyze → design → implement → test). The single-nesting-level invariant (main → bootstrap, main → stage) is preserved within each child session, so the v1.0.0 stage sub-agent architecture works inside `/sdd batch` unchanged. The `--dangerously-skip-permissions` flag is still required because the stage sub-agents make tool calls that would otherwise prompt in unattended runs.
 
@@ -88,7 +88,7 @@ Issues to process (in order):
 
 Total: 3 issues (queue may grow as parent Issues spawn children)
 Mode: Sequential (each in a separate claude -p session)
-Skip-review: analyze, design, implement, pr (auto-enabled — stops after PR creation)
+Skip-review: analyze, design, implement, pr, qa (auto-enabled — runs through sdd:done)
 Child auto-queue: enabled (children created by a parent are appended to the queue)
 ```
 
@@ -246,10 +246,9 @@ else
   echo "[batch] No existing $CONFIG_FILE"
 fi
 
-# 4 keys — NOT 5. Batch stops after PR creation; `qa` is intentionally
-# omitted so each child's `stage_test` returns OK PAUSE and the human runs
-# QA manually after the batch completes (per spec/flow/batch.md §5).
-echo "skip-review: analyze,design,implement,pr" > "$CONFIG_FILE"
+# 5 keys — same as /sdd auto. Batch runs through QA to sdd:done unattended.
+# Human reviews PRs and QA evidence on GitHub after batch completes.
+echo "skip-review: analyze,design,implement,pr,qa" > "$CONFIG_FILE"
 echo "[batch] Set skip-review for batch mode"
 
 # --- Config restore (GAP-A6 core — called explicitly before stats/summary) ---
@@ -540,6 +539,6 @@ After writing the script:
 
 - **`implement-parent` handling**: When a parent Issue is paused at `sdd:implement` waiting for child Issues, `/sdd resume` detects the `implement-parent` state, prints child progress, and exits with code 0. The batch script counts this as SUCCEEDED. Child Issues are discovered and queued in the child auto-discovery step that follows immediately.
 
-- **4-key skip-review** (`analyze,design,implement,pr` — `qa` intentionally absent): Each child session's `stage_test` returns `OK PAUSE` when it reaches manual QA, stopping the child session cleanly after PR creation. The human runs QA after the batch completes. Compare with `/sdd auto` which uses 5 keys (including `qa`) because it runs unattended in-session.
+- **5-key skip-review** (`analyze,design,implement,pr,qa`): Each child session runs through QA to `sdd:done` unattended — same as `/sdd auto`. The human reviews PRs and QA evidence on GitHub after the batch completes.
 
 - **FAILED_ISSUES reason**: The failure reason is extracted from the stream-json log's last `result` entry with `is_error == true`. If no such entry exists (process killed, tool failure without structured output), the fallback is `"exit code $EXIT_CODE"`. Rate-limit retries overwrite the same log file, so only the final attempt's reason is captured — this is intentional.
