@@ -162,7 +162,7 @@ Skip to §8 Return — emit `OK PARENT_STOP`.
 
 ### §6.1 Step 0 — Preflight (Heavy tier)
 
-Follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` Section A — tier **Heavy**, Section B items 1 + 2 + 3 + 4 (project conventions + commit message style + similar past PRs + target directory survey). Apply Section D failure handling. Record findings for the §6.6 self-review trace.
+Follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` Section A — tier **Heavy**, Section B items 1 + 2 + 3 + 4 + 5 (project conventions + commit message style + similar past PRs + target directory survey + project-specific stage rules). Apply Section D failure handling. Record findings for the §6.6 self-review trace.
 
 Item 4 target directory comes from the design output's File Structure section (read in §6.2).
 

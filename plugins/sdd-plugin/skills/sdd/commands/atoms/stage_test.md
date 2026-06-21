@@ -164,7 +164,7 @@ This phase produces the test output and posts it under `<!-- sdd:test:output -->
 
 #### Step 0: Preflight (Light tier) or retry self-fetch
 
-- **Round 1** (`round == 1`): follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` Section A — tier **Light**, Section B items 1 + 2 (project conventions + commit message style). For `test_work`-style reasoning, item 1's convention reading should pay attention to **testing conventions** (test framework, test directory layout, assertion style). Apply Section D failure handling. Record findings for the §4.1 self-review trace.
+- **Round 1** (`round == 1`): follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` Section A — tier **Medium**, Section B items 1 + 2 + 3 + 5 (project conventions + commit message style + similar past PRs + project-specific stage rules). For `test_work`-style reasoning, item 1's convention reading should pay attention to **testing conventions** (test framework, test directory layout, assertion style). Apply Section D failure handling. Record findings for the §4.1 self-review trace.
 - **Rounds 2 / 3** (`round > 1`): SKIP the preflight items above. Instead, execute `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C to self-fetch the previous round's review comments. Markers per path:
   - **SINGLE/CHILD** (`path == SINGLE`): `<!-- sdd:review:test:completeness -->`, `<!-- sdd:review:test:quality -->`, `<!-- sdd:review:test:adversarial -->`.
   - **PARENT** (`path == PARENT`): the 3 SINGLE markers PLUS `<!-- sdd:review:parent -->`.

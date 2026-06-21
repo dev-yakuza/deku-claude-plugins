@@ -141,7 +141,7 @@ Inspect the literal subject line and apply the heuristic:
 
 ### §3.1 Step 0 — Preflight (Code-focused) OR retry self-fetch
 
-- **Attempt 1**: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` Section A — tier **Code-focused**, Section B item 4 only (target directory survey). For Red specifically, focus directory read on existing test patterns — fixtures, assertion style, mock setup. Apply Section D failure handling.
+- **Attempt 1**: follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` Section A — tier **Code-focused**, Section B items 4 + 5 (target directory survey + project-specific stage rules). For Red specifically, focus directory read on existing test patterns — fixtures, assertion style, mock setup. Apply Section D failure handling.
 - **Attempts 2 / 3 (retry)**: SKIP the preflight item. Instead, execute `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C with marker `<!-- sdd:review:implement:step-1 -->` on Issue `$1`. Hold the sorted findings array (`critical → major → minor`) as `<retry-findings>` for §3.5 retry resolution. (Per `spec/edge-cases.md` §13 — saves ~30K tokens per retry round.)
   - If Section C returns `FAIL: ...` → return that line as this `_tdd.md` execution's result (`main.md` propagates).
 
@@ -237,7 +237,7 @@ Atom-level failure during §3.2–§3.7 → return `FAIL: <reason>` from this pi
 Same structure as §3 with substitutions:
 
 - **Retry marker**: `<!-- sdd:review:implement:step-2 -->`.
-- **Step 0 retry**: identical pattern; preflight item 4 (Code-focused) on attempt 1; Section C self-fetch on retries.
+- **Step 0 retry**: identical pattern; preflight items 4 + 5 (Code-focused) on attempt 1; Section C self-fetch on retries.
 - **Sanity step** (before writing code): run tests once to **confirm current Red state**.
 - **Step 2 — Write minimal production code**:
   - **Minimal** — only what's needed to pass the tests; no speculative features.
@@ -265,7 +265,7 @@ Step result on success: `OK GREEN COMMIT: <sha> TESTS: <p>/<t> FAILED: 0`. Conti
 
 ### §5.1 Step 0 — Preflight or retry self-fetch
 
-- Attempt 1: preflight item 4 (Code-focused) — focus directory read on structural patterns (extraction style, helper organization, naming).
+- Attempt 1: preflight items 4 + 5 (Code-focused) — focus directory read on structural patterns (extraction style, helper organization, naming).
 - Retries: Section C self-fetch with marker `<!-- sdd:review:implement:step-3 -->`.
 
 ### §5.2 Steps 1–2 — Verify Green + refactor
@@ -340,7 +340,7 @@ Step result on success: `OK REFACTOR COMMIT: <sha> TESTS: <p>/<t> FAILED: 0`. Co
 
 ### §6.1 Step 0 — Preflight or retry self-fetch
 
-- Attempt 1: preflight item 4 (Code-focused) — focus directory read on existing E2E test files (framework: Playwright/Cypress/Puppeteer/Flutter integration_test/etc., fixture patterns, page-object usage, waiting strategy).
+- Attempt 1: preflight items 4 + 5 (Code-focused) — focus directory read on existing E2E test files (framework: Playwright/Cypress/Puppeteer/Flutter integration_test/etc., fixture patterns, page-object usage, waiting strategy).
 - Retries (only relevant if §6.2 took the E2E path on attempt 1): Section C self-fetch with marker `<!-- sdd:review:implement:step-4 -->`.
 
 ### §6.2 Step 2 — Detect existing E2E setup

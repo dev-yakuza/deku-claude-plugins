@@ -94,7 +94,7 @@ Local state: a counter `round` starting at 1. Rounds 2 and 3 enter this phase vi
 
 ### Step 0: Preflight (Medium tier) or retry self-fetch
 
-- **Round 1** (`round == 1`): follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` Section A — tier **Medium**, Section B items 1 + 2 + 3 (project conventions + commit message style + similar past PRs via `gh pr list --search`). Apply Section D failure handling. The similar past PRs (item 3) inform file organization, naming, and architectural choices for steps 4–9 below. Record findings for the §3.11 self-review trace.
+- **Round 1** (`round == 1`): follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` Section A — tier **Medium**, Section B items 1 + 2 + 3 + 5 (project conventions + commit message style + similar past PRs via `gh pr list --search` + project-specific stage rules). Apply Section D failure handling. The similar past PRs (item 3) inform file organization, naming, and architectural choices for steps 4–9 below. Record findings for the §3.11 self-review trace.
 - **Rounds 2 / 3** (`round > 1`): SKIP the preflight items above. Instead, execute `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C to self-fetch the previous round's three review comments (markers: `<!-- sdd:review:design:completeness -->`, `<!-- sdd:review:design:quality -->`, `<!-- sdd:review:design:adversarial -->`) from Issue `$1`. The procedure returns a sorted findings array (`critical → major → minor`). Hold this array as `<retry-findings>` for use throughout the steps below.
   - If Section C returns `FAIL: ...` (no review comments found, unrecognized retry slot value, etc.) → propagate it as this sub-agent's return value before doing any further work.
 
