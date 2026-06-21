@@ -4,7 +4,7 @@ Topic file read inline by `main.md` §8. Executes inside the same single sub-age
 
 Covers:
 - **Phase 4** (§3) — PR creation in first-round mode, with R8 (empty-`$3` + existing-PR) auto-route to soft retry per SYNTHESIS-v2 T1.1 (no `strict-pr-creation` config key).
-- **Phase 5** (§4) — 3-round PR Final review loop: 3 SDD reviewers serial (`5.N.1.a` completeness → `5.N.1.b` quality → `5.N.1.c` adversarial) → `/code-review` (`5.N.2`) → `/security-review` (`5.N.3`) → tools-summary marker (`5.N.4`) → round verdict (`5.N.5`).
+- **Phase 5** (§4) — `/review` Skill once after PR creation (`§4.0`), then 3-round PR Final review loop: 3 SDD reviewers serial (`5.N.1.a` completeness → `5.N.1.b` quality → `5.N.1.c` adversarial) → `/code-review` (`5.N.2`) → `/security-review` (`5.N.3`) → tools-summary marker (`5.N.4`) → round verdict (`5.N.5`).
 - **Phase 5.5** (§5) — Round 3 escalation gate on FAIL: `skip-review: pr` set → auto-continue; else `ESCALATE: ...`.
 
 > **Bash Command Execution**: every shell snippet below is its own simple Bash tool call. See `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`.
@@ -189,6 +189,7 @@ Local state:
 - Per round verdict combiner — tracked through §4.6.
 
 ```
+§4.0 /review Skill (once, pre-loop, round 1 only)  # holistic PR overview; informational
 For round in [1, 2, 3]:
     if round > 1:
         run §4.2 retry mode (inlined implement_pr retry mode)
@@ -203,6 +204,37 @@ For round in [1, 2, 3]:
     if FAIL and round < 3: continue loop
     if FAIL and round == 3: §5 Phase 5.5 escalation gate
 ```
+
+### §4.0 `/review` Skill (pre-loop, round 1 only)
+
+Invoked once immediately after `<PR_NUM>` is confirmed (§3.8), before the 3-round loop begins. Provides a holistic human-readable overview of the PR to inform the SDD reviewers.
+
+#### §4.0.1 Invoke Skill
+
+```
+Skill tool call:
+  skill: /review
+  args: <PR_NUM>
+```
+
+(Substitute the literal `<PR_NUM>` value.)
+
+#### §4.0.2 Graceful skip
+
+Same pattern as §4.4.3:
+- **Skill unavailable** → log warning to sub-agent narrative. Record for tools-summary (§4.6): `{"name": "review", "reason": "skill-unavailable"}`. Neutral for verdict.
+- **Skill errored** → record `{"name": "review", "reason": "skill-errored: <first 80 chars of error>"}`. Neutral.
+- **Successful** → output remains in sub-agent narrative (no PR comment posted — `/review` writes to conversation only).
+
+#### §4.0.3 Verdict impact
+
+**Informational only.** `/review` output does NOT contribute to round verdict. It is included in the tools-summary marker (§4.6) for audit purposes only.
+
+#### §4.0.4 Round guard
+
+Run §4.0 ONLY when entering the loop for the first time (`round == 1`). On rounds 2 and 3 (retry mode), skip §4.0 entirely — record `{"name": "review", "reason": "round>1"}` for the tools-summary if needed for consistency.
+
+---
 
 ### §4.1 [PRESERVE — load-bearing serial ordering]
 
@@ -525,12 +557,14 @@ Body shape (per `spec/stage/implement.md` §7 5.1.4 + `design/stage-designs/impl
 ## SDD External Tools (round <N>)
 
 **Round:** <N>
+**/review:** ran (round 1, overview in narrative) | skipped (skill-unavailable | skill-errored: <truncated> | round>1)
 **/code-review:** ran (effort: <high|max|medium>) | skipped (skill-unavailable | shallow-label-skip | skill-errored: <truncated>)
 **/security-review:** ran | skipped (shallow-label-skip | skill-unavailable | skill-errored: <truncated>)
 
 <details>
 <summary>Tools details</summary>
 
+- /review: ran (overview in narrative) | skipped (<reason>)
 - /code-review: X 🔴 Important, Y 🟡 Nit, Z 🟣 Pre-existing
 - /security-review: A High, B Medium, C Low
 
@@ -652,8 +686,8 @@ Parse the comma-separated list at the `skip-review:` key. Trim whitespace per en
 ## §6. Hard rules (this topic file)
 
 - **No Agent spawns.** Single sub-agent invariant.
-- **MAY use Skill tool** for `/code-review` and `/security-review`. Graceful skip on `skill-unavailable` / `skill-errored` / `shallow-label-skip` (the last only for `/security-review`).
-- **Serial ordering**: `5.N.1.a → 5.N.1.b → 5.N.1.c → 5.N.2 → 5.N.3 → 5.N.4 → 5.N.5`. Sub-agent convention; preserved for verdict determinism + token economy. [PRESERVE — `spec/edge-cases.md` §24.]
+- **MAY use Skill tool** for `/review` (§4.0, once pre-loop, round 1 only), `/code-review`, and `/security-review`. Graceful skip on `skill-unavailable` / `skill-errored` / `shallow-label-skip` (the last only for `/security-review`). `/review` is **informational only** — does NOT contribute to FAIL verdict.
+- **Serial ordering**: `/review` (§4.0, pre-loop, round 1 only) → per-round: `5.N.1.a → 5.N.1.b → 5.N.1.c → 5.N.2 → 5.N.3 → 5.N.4 → 5.N.5`. Sub-agent convention; preserved for verdict determinism + token economy. [PRESERVE — `spec/edge-cases.md` §24.]
 - **Independence invariant** for 3 SDD reviewers: each does a **fresh re-fetch** of PR diff + body + Issue context. Do NOT carry prior reviewer's verdict into next reviewer's reasoning.
 - **No force-push, no `--amend`.** Retry mode appends new commits.
 - **No Claude as co-author.**
