@@ -1,5 +1,9 @@
 # BATCH
 
+## Language
+
+Read `.github/.sdd-lang` as the very first step. If it exists and contains `ko`, respond to the user in Korean for all messages, confirmations, and UI output throughout this entire command. If it contains `ja`, respond in Japanese. If absent or `en`, respond in English (default).
+
 **Batch process multiple Issues through the SDD pipeline in separate sessions.**
 
 Each Issue runs in an independent `claude -p` session with skip-review enabled (analyze through QA), minimizing token consumption. Human reviews PRs and QA evidence on GitHub after batch completes.
