@@ -224,15 +224,19 @@ Skill tool call:
 Same pattern as §4.4.3:
 - **Skill unavailable** → log warning to sub-agent narrative. Record for tools-summary (§4.6): `{"name": "review", "reason": "skill-unavailable"}`. Neutral for verdict.
 - **Skill errored** → record `{"name": "review", "reason": "skill-errored: <first 80 chars of error>"}`. Neutral.
-- **Successful** → output remains in sub-agent narrative (no PR comment posted — `/review` writes to conversation only).
+- **Successful** → output remains in sub-agent narrative (no PR comment posted — `/review` writes to conversation only). Record `{"name": "review"}` in `tools_run` for §4.6.
 
 #### §4.0.3 Verdict impact
 
 **Informational only.** `/review` output does NOT contribute to round verdict. It is included in the tools-summary marker (§4.6) for audit purposes only.
 
-#### §4.0.4 Round guard
+#### §4.0.4 Depth gate
 
-Run §4.0 ONLY when entering the loop for the first time (`round == 1`). On rounds 2 and 3 (retry mode), skip §4.0 entirely — record `{"name": "review", "reason": "round>1"}` for the tools-summary if needed for consistency.
+`/review` runs regardless of `depth` (`default` / `deep` / `shallow`). No shallow-skip gate — unlike `/security-review`, it posts nothing to GitHub and incurs minimal cost at any depth.
+
+#### §4.0.5 Round guard
+
+Run §4.0 ONLY when entering the loop for the first time (`round == 1`). On rounds 2 and 3 (retry mode), skip §4.0 entirely. Always record `{"name": "review", "reason": "round>1"}` in `tools_skipped` for the tools-summary (same unconditional pattern as all other graceful-skip paths).
 
 ---
 
@@ -243,7 +247,7 @@ Run §4.0 ONLY when entering the loop for the first time (`round == 1`). On roun
 2. **Code clarity** — round structure easier to reason about serially.
 3. **Token economy** — outputs processed incrementally, not held simultaneously.
 
-Order is: `5.N.1.a → 5.N.1.b → 5.N.1.c → 5.N.2 → 5.N.3 → 5.N.4 → 5.N.5`.
+Full Phase 5 sequence: `§4.0` (pre-loop, round 1 only) → per-round: `5.N.1.a → 5.N.1.b → 5.N.1.c → 5.N.2 → 5.N.3 → 5.N.4 → 5.N.5`.
 
 ### §4.2 Retry mode — inlined `implement_pr` retry mode (rounds 2, 3)
 
@@ -590,7 +594,7 @@ Body shape (per `spec/stage/implement.md` §7 5.1.4 + `design/stage-designs/impl
 <!-- /sdd:review:implement:tools -->
 ```
 
-(Substitute literal `<N>`, `<PR_NUM>`, counts, effort, and the `tools_run` / `tools_skipped` arrays tracked in §4.4 / §4.5.)
+(Substitute literal `<N>`, `<PR_NUM>`, counts, effort, and the `tools_run` / `tools_skipped` arrays tracked in §4.0 / §4.4 / §4.5.)
 
 Procedure (Section F):
 1. **Write tool** → `/tmp/sdd-implement-tools-$1-round-<N>.md`.
