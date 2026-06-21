@@ -25,6 +25,9 @@ Commands:
   /sdd batch [issues]    Unattended shell processing via separate claude -p sessions
                          (uses Agent SDK Credit pool from 2026-06-15)
                          No args = all open; "1,2,3" = specific issues
+  /sdd rule [stage] [content]  Save a project-specific rule to .claude/sdd/rules/
+                         Stage: implement, design, test
+                         Prompts interactively if args are missing
   /sdd help              Show this help message
 
 Workflow:
