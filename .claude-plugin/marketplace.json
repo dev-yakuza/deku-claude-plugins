@@ -14,7 +14,7 @@
       "name": "skill-quality-plugin",
       "source": "./plugins/skill-quality-plugin",
       "description": "Evaluate Claude Code skill quality with a structured 38-item rubric",
-      "version": "1.0.0"
+      "version": "1.0.1"
     }
   ]
 }
