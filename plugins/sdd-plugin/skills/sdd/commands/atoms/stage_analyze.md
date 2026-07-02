@@ -227,6 +227,69 @@ Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F — the manda
 
 [PRESERVE — `spec/00-common-contracts.md` §9 Comment Posting Pattern (Section F mandatory); `spec/00-common-contracts.md` §4 Update-in-place invariant; deterministic temp path `/tmp/sdd-analyze-output-$1.md`.]
 
+### Step 12.5: Coverage Ledger — initial creation
+
+Create the shared coverage ledger that downstream stages (design / implement / test) accumulate into. Runs AFTER Step 12 posted the analyze output.
+
+**No-action path**: if Step 4 classified the Issue as no-action → SKIP this step entirely (no ledger is posted; there are no features to track).
+
+**Normal path**:
+
+1. Build the initial ledger JSON in context from the Step 5 Feature List:
+   - Assign each feature a sequential id `F1`, `F2`, … in Feature List order.
+   - `title` — the feature title exactly as it appears in the Feature List.
+   - `acceptance` — one verifiable completion criterion per feature, derived from the Issue's DoD / the feature's What+Why. Must be checkable (a reviewer can answer yes/no), not aspirational.
+   - `e2e_required: false`, `e2e_reason: null` for every feature (the design stage decides E2E in Step 8e).
+   - `scenarios: []` (the implement stage fills scenarios).
+   - `summary` — all counters `0`.
+
+2. **Write tool** — render the ledger comment to `/tmp/sdd-coverage-ledger-$1.md`:
+
+   ```
+   <!-- sdd:coverage:ledger -->
+   ## Coverage Ledger
+
+   **Updated by:** analyze
+   **Issue:** #<N>
+
+   <!-- sdd:coverage:json -->
+   ```json
+   {
+     "version": "1",
+     "issue": <N>,
+     "pr": null,
+     "updated_by": "analyze",
+     "features": [
+       {
+         "id": "F1",
+         "title": "<feature title from Feature List>",
+         "acceptance": "<verifiable completion criterion>",
+         "e2e_required": false,
+         "e2e_reason": null
+       }
+     ],
+     "scenarios": [],
+     "summary": { "total": 0, "automated": 0, "manual": 0, "skipped": 0, "pending": 0 }
+   }
+   ```
+   <!-- /sdd:coverage:json -->
+   <!-- /sdd:coverage:ledger -->
+   ```
+
+   Substitute the literal Issue number for `<N>`. One `features` entry per Feature List row.
+
+3. **Bash** — duplicate-prevention search:
+
+   ```bash
+   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:coverage:ledger -->")) | .id'
+   ```
+
+4. **Bash** — branch on the result:
+   - **Empty** → create: `gh issue comment $1 --body-file /tmp/sdd-coverage-ledger-$1.md`
+   - **Has id `<id>`** → update in place: `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-coverage-ledger-$1.md`
+
+Ledger posting failure is non-blocking: if the `gh` call fails, log a warning to the sub-agent narrative and continue — the ledger is supporting metadata; downstream stages fall back to re-deriving coverage from stage markers when it is absent.
+
 ### Work return-value handling (internal to this sub-agent)
 
 After Step 12 completes, branch on the work outcome:
@@ -504,6 +567,7 @@ FAIL: #42 is a Pull Request, not an Issue
 ## Markers posted (must match `spec/stage/analyze.md` §2)
 
 - `<!-- sdd:analyze:output -->` on Issue — work output (or no-action explanation). Posted by §3 Step 12.
+- `<!-- sdd:coverage:ledger -->` on Issue — initial coverage ledger with features + acceptance criteria. Posted by §3 Step 12.5 (skipped on no-action path).
 - `<!-- sdd:review:analyze:completeness -->` on Issue — Reviewer 1 verdict. Posted by §4.1.
 - `<!-- sdd:review:analyze:quality -->` on Issue — Reviewer 2 verdict. Posted by §4.2.
 - `<!-- sdd:review:analyze:adversarial -->` on Issue — Reviewer 3 verdict. Posted by §4.3.

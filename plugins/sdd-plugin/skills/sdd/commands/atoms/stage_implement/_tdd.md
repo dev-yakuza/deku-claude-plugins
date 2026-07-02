@@ -162,10 +162,16 @@ Do NOT read the analyze output (`implement_red.md` Hard rules — design already
 
 ### §3.3 Step 2 — Write failing test code
 
-Edit / Write tool as needed. Cover:
-- Main scenarios from the plan.
-- Edge cases identified in the design.
-- Specific, meaningful assertions (not just "no throw").
+Use the `<!-- sdd:implement:plan -->` Test Plan (already read in §3.2) as the authoritative test list. For each category:
+
+- **Happy path**: write one failing test per scenario listed.
+- **Error path**: write one failing test per error scenario listed.
+- **Boundary conditions**: write one failing test per boundary case listed. If the plan lists none, infer at least one obvious boundary (empty input, zero, max value, nil/null) and add it — do not leave this category empty without justification.
+- **Concurrent / State** (if not `N/A`): write tests for race conditions or state transitions listed.
+
+If a category is `N/A` in the plan → skip it. If a specific scenario cannot be unit-tested (requires a live external service, UI rendering, or browser interaction) → note the reason as an inline comment in the test file (`// MANUAL: <reason>`) rather than silently omitting the test.
+
+Assertions must be specific and meaningful — not just `expect(x).toBeDefined()` or "no throw". Each test name must communicate the scenario clearly (e.g. `"returns 401 when token is expired"`, not `"test error case"`).
 
 ### §3.4 Step 3 — Run tests + capture evidence
 
@@ -193,6 +199,7 @@ Self-review (blockers only):
 - [ ] Tests fail (Red confirmed: `<failed>` ≥ 1)
 - [ ] No `skip` / `only` / `focus` markers left in
 - [ ] No `console.log` / `print` / `dbg!` debug artifacts
+- [ ] Every non-`N/A` Test Plan category (Happy path / Error path / Boundary conditions / Concurrent/State) has ≥ 1 corresponding test, or has an inline `// MANUAL: <reason>` note explaining the omission
 
 Inspect repo convention from preflight item 2; commit:
 
@@ -367,7 +374,29 @@ Use Read / Grep / Glob (not Bash `find`) to look for:
 ### §6.4 Branch 3b — No E2E setup
 
 - Do NOT install new E2E frameworks — that's a stage_test decision with user confirmation (`implement_e2e.md` Hard rules).
-- No commit. Record `e2e_skipped = true` and `sha_step_4 = EMPTY`, `test_evidence_step_4 = NONE`.
+
+**Compensating coverage** — before marking skipped, reduce the E2E gap using the existing test runner:
+
+1. Read the Test Plan (`<!-- sdd:implement:plan -->` already in narrative context) and identify user-flow scenarios that belong in E2E (full data-flow paths, multi-step interactions, system boundary crossings).
+
+2. For each scenario, classify:
+   - **Expressible as integration / controller-level unit test** (e.g. HTTP handler invocation, service-layer orchestration, CLI command, in-memory DB round-trip using the existing test runner) → write the test. Production code is already implemented (Green step complete), so the test must PASS immediately. Run all tests and confirm `FAILED: 0`. Commit: `git commit -m "test: integration coverage for <scenario> (E2E_SKIPPED)"`.
+   - **Genuinely requires browser / device / live-network** (visual rendering, OAuth redirect flow, real payment gateway, device sensor) → record as a skipped-scenario entry (step 3).
+
+3. If any genuinely un-testable scenarios remain, post them on the Issue via Section F:
+   - **Write tool** → `/tmp/sdd-e2e-skipped-scenarios-$1.md`. Body:
+     ```
+     <!-- sdd:e2e-skipped-scenario -->
+     E2E framework not detected. The following scenarios require manual verification:
+     - <scenario 1> — <reason it cannot be expressed as a unit test>
+     - <scenario 2> — <reason>
+     <!-- /sdd:e2e-skipped-scenario -->
+     ```
+   - **Bash**: `gh issue comment $1 --body-file /tmp/sdd-e2e-skipped-scenarios-$1.md`
+
+4. If the test plan has no E2E-level scenarios at all (fully unit-testable feature) → skip steps 2–3 and log to narrative: "No E2E scenarios in test plan; compensating coverage not needed."
+
+- Record `e2e_skipped = true` and `sha_step_4 = EMPTY`, `test_evidence_step_4 = NONE`.
 - Step result: `OK E2E_SKIPPED`. **DO NOT** post test-evidence. **DO NOT** run step review for this step (entirely skipped per `spec/stage/implement.md` §4 Phase 3 step 1; `design/stage-designs/implement.md` §10.6).
 - After §6.4 the pipeline continues directly to §1's loop exit / Return: `OK PROCEED e2e_skipped=true`.
 
@@ -403,6 +432,14 @@ gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contai
 
 - Empty AND `<sha> != EMPTY` AND `<test-evidence> != NONE` → record finding `[major] rule_id: test-evidence-log-missing` ("work atom did not post raw test runner output; reported counts are unverifiable"). **Continue to §7.4 — do NOT return early.** This is a load-bearing nuance: `spec/stage/implement.md` §5 Step 5a from Reviewer A GAP-A1 — a "fail fast" rewrite would silently lose post-detection criteria evaluations.
 - Has body → hold as `<evidence-log>` for §7.5.
+
+**For `step_n == 1` (Red) only** — additionally fetch the implement plan to enable coverage cross-check in §7.5:
+
+```bash
+gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:implement:plan -->")) | .body'
+```
+
+Hold as `<plan-body>`. If empty → record `[minor] rule_id: plan-not-found` and continue without coverage cross-check (graceful degradation). If present → parse the Test Plan categories (Happy path / Error path / Boundary conditions / Concurrent/State) and hold for §7.5 coverage cross-check.
 
 ### §7.3 Read rubric
 

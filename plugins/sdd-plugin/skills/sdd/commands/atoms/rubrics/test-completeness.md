@@ -12,6 +12,8 @@
 - [ ] Regression risks for existing functionality are addressed
 - [ ] Test assertions are specific and meaningful (not just "no error")
 - [ ] QA checklist separates automated coverage from manual verification needs
+- [ ] Each item in the Manual section falls into a genuinely-manual category: UI/UX appearance, accessibility, performance, unmockable external integration, or E2E-skipped scenario — items that could be automated → `[major] manual-item-may-be-automatable`
+- [ ] If `<!-- sdd:e2e-skipped-scenario -->` exists on the Issue: each scenario listed there appears in the Manual section of the QA checklist (or is demonstrably covered by a compensating integration test in the PR diff)
 
 ## Cross-stage Check
 - Compare against analyze + design outputs: are all requirements and risk areas covered by tests?

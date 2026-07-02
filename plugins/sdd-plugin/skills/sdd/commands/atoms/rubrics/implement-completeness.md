@@ -13,7 +13,8 @@
 - [ ] No unnecessary code, comments, or debug artifacts remain
 - [ ] PR description accurately reflects the changes
 - [ ] **PR description is self-contained** — a reviewer reading ONLY the PR (without opening the parent Issue / referenced Issues) can understand WHAT changes, WHY they are needed, and HOW they are done. Ad-hoc taxonomy terms from upstream Issues (e.g. `"C group"`, `"the boilerplate"`) are either re-defined inline or replaced with self-explanatory wording. Treat violation as `major`.
-- [ ] Manual test checklist covers UI behavior and edge cases not in automated tests
+- [ ] **PR body structure**: contains `## Automated Test Coverage` section listing what was automated (unit Red→Green + Refactor + E2E) AND a `## Manual Test Checklist` section that either lists ONLY genuinely-manual items or contains "All scenarios are covered by automated tests above" — an all-automated outcome is correct and valid when no category applies; do NOT flag its absence as a finding
+- [ ] **Manual items are genuinely manual**: each item in the `## Manual Test Checklist` falls into one of: UI/UX appearance, accessibility, performance, unmockable external integration, or E2E-skipped scenario — automatable items listed as manual → `[major] manual-item-may-be-automatable`
 
 ## Cross-stage Check (design → implement)
 - Are the planned changes fully implemented as designed?

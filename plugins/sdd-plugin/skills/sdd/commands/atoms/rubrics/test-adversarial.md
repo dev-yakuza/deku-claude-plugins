@@ -16,6 +16,11 @@ See `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section E for the general 
    - Are there device/browser/locale variants ignored?
    - Are there accessibility checks (screen reader, keyboard nav)?
 
+2b. **The Manual checklist is suspiciously long**
+   - Are items listed as Manual that could be written as unit tests, integration tests, or E2E tests with the existing test framework?
+   - If `<!-- sdd:e2e-skipped-scenario -->` exists on the Issue, are those exact scenarios in the Manual list — or were they silently dropped?
+   - Are there items carried over from the implement stage's `## Manual Test Checklist` that should have been automated by the TDD pipeline instead?
+
 3. **The coverage report is misleading**
    - "All tests pass" — were they run on a clean checkout, or did stale build artifacts mask a failure?
    - Are some tests skipped (`.skip`, `xfail`) without justification?

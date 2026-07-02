@@ -187,6 +187,8 @@ c. **If 1+ external dependencies** → for each, design:
 
 d. Testability decisions made here **must influence** Step 5's file list and Step 7's constraints. If a dependency forces a new seam, update Step 5's file list.
 
+e. **Test level for user-facing scenarios**: review the Feature List (Step 9) and identify any scenarios that require E2E-level verification — multi-step user flows, browser/device interaction, real external service calls that cannot be mocked. List them explicitly in the Testability section output as `E2E required: <scenario>`. If none apply, add the line `No E2E scenarios — all scenarios are expressible as unit or integration tests`. This list is consumed by `_tdd.md` §6.4 (E2E_SKIPPED compensating coverage decision) and `stage_test.md` (Manual QA checklist).
+
 [PRESERVE — `design_work.md` Step 8.5; `design/stage-designs/design.md` §3.3 (8.5 testability flow load-bearing — reviewers flag false `N/A` as critical via rule `testability-na-but-side-effects-present`).]
 
 ### Step 9: Feature list + PR split decision (SINGLE vs CHILDREN)
@@ -292,6 +294,43 @@ Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F — the manda
    - **Has id `<id>`** → update in place: `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-design-output-$1.md`
 
 [PRESERVE — `spec/00-common-contracts.md` §9 Comment Posting Pattern (Section F mandatory); `spec/00-common-contracts.md` §4 Update-in-place invariant; deterministic temp path `/tmp/sdd-design-output-$1.md`.]
+
+### Step 15.5: Coverage Ledger — E2E flag update
+
+Update the shared coverage ledger with the Step 8e E2E decisions. Runs AFTER Step 15 posted the design output.
+
+1. **Bash** — fetch the existing ledger (created by analyze Step 12.5):
+
+   ```bash
+   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:coverage:ledger -->")) | .body'
+   ```
+
+   Parse the JSON between `<!-- sdd:coverage:json -->` and `<!-- /sdd:coverage:json -->` in context.
+
+   - **Found** → hold the parsed object; continue to item 2.
+   - **Empty** (analyze stage was skipped) → build an initial ledger in context from THIS design's Feature List (Step 9): ids `F1`, `F2`, … in order, `title` from the Feature List row, `acceptance` derived from the row's description / Issue DoD, `scenarios: []`, `summary` all `0`, `pr: null`. Then continue to item 2.
+
+2. Update the `features` array from Step 8e's Testability output:
+   - For each `E2E required: <scenario>` line → match the scenario to its feature (by title / Feature List reference) and set that feature's `e2e_required: true`, `e2e_reason: "<why E2E-level verification is needed — from the Step 8e scenario text>"`.
+   - All other features → `e2e_required: false`, `e2e_reason: null`.
+   - If Step 8e produced the `No E2E scenarios — …` line → every feature keeps `e2e_required: false`.
+   - Do NOT touch `scenarios` or `summary` (implement stage owns those).
+
+3. Set `updated_by: "design"`. Keep `issue`, `pr`, `version` unchanged.
+
+4. **Write tool** — render the updated ledger comment to `/tmp/sdd-coverage-ledger-$1.md`. Same body shape as analyze Step 12.5: opening `<!-- sdd:coverage:ledger -->`, `## Coverage Ledger` heading, `**Updated by:** design`, `**Issue:** #<N>`, then the `<!-- sdd:coverage:json -->` fenced block, then closing markers.
+
+5. **Bash** — duplicate-prevention search:
+
+   ```bash
+   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:coverage:ledger -->")) | .id'
+   ```
+
+6. **Bash** — branch on the result:
+   - **Has id `<id>`** (expected — analyze created it) → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-coverage-ledger-$1.md`
+   - **Empty** (analyze skipped) → `gh issue comment $1 --body-file /tmp/sdd-coverage-ledger-$1.md`
+
+Non-blocking on failure: log a warning to the narrative and continue to Step 16 — downstream stages fall back to the `E2E required:` lines in the design output when the ledger is absent.
 
 ### Step 16: SINGLE path short-circuit
 
@@ -660,6 +699,7 @@ FAIL: analyze output not found on Issue #42
 ## Markers posted (must match `spec/stage/design.md` §2)
 
 - `<!-- sdd:design:output -->` on parent Issue — work output (design body). Posted by §3 Step 15.
+- `<!-- sdd:coverage:ledger -->` on Issue — updated with `e2e_required` per feature from Step 8e. PATCHED in place by §3 Step 15.5.
 - `<!-- sdd:children:output -->` on parent Issue (CHILDREN path only) — children-list table. Posted by §3 Step 17c on first-time CHILDREN; preserved across retries by §3 Step 17a idempotency guard.
 - `<!-- sdd:child-issue -->` inside each child Issue body (CHILDREN path only) — multilingual `Parent Issue: #<parent>` line. Posted by §3 Step 17b via `gh issue create --body-file`.
 - `<!-- sdd:review:design:completeness -->` on parent Issue — Reviewer 1 verdict. Posted by §4.1.
