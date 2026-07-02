@@ -55,10 +55,23 @@ Map the detected stage to its review atom:
 | `implement:plan`   | `<<SKILL_DIR>>/commands/atoms/implement_review.md`     |
 | `test:output`      | `<<SKILL_DIR>>/commands/atoms/test_review.md`          |
 
-Spawn two Agent tool calls in a **single message** for concurrent execution:
+**Depth detection (for the reviewer model).** Read the Issue's labels and derive the depth dial, then pick the model per `_review_helpers.md` Section A.2 (`completeness` / `quality` rows):
+
+```bash
+gh issue view $1 --json labels --jq '[.labels[].name]'
+```
+
+- Contains `sdd:review:deep` → `depth = deep` → `reviewer_model = opus`
+- Contains `sdd:review:shallow` → `depth = shallow` → `reviewer_model = sonnet`
+- Otherwise → `depth = default` → `reviewer_model = sonnet`
+
+(completeness/quality never use `fable` — `fable` applies only to the `design` stage spawn per Section A.2.1, not to these standalone review atoms.)
+
+Spawn two Agent tool calls in a **single message** for concurrent execution. Substitute `<reviewer_model>` below with the literal value derived above:
 
 Agent A:
 - `subagent_type`: `general-purpose`
+- `model`: `<reviewer_model>`
 - `description`: `<stage> review (completeness) for #$1`
 - `prompt`:
   > Read `<<SKILL_DIR>>/commands/atoms/<stage>_review.md` and execute its instructions for Issue #$1 with role `completeness`.
@@ -66,6 +79,7 @@ Agent A:
 
 Agent B:
 - `subagent_type`: `general-purpose`
+- `model`: `<reviewer_model>`
 - `description`: `<stage> review (quality) for #$1`
 - `prompt`:
   > Read `<<SKILL_DIR>>/commands/atoms/<stage>_review.md` and execute its instructions for Issue #$1 with role `quality`.
