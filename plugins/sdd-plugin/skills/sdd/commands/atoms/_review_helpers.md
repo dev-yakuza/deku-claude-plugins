@@ -36,7 +36,21 @@ Look for one of:
 | `tdd_step_review` (step 3-2, 3-3) | haiku | opus | haiku |
 | `implement_review` (PR Final completeness/quality) | sonnet | opus | sonnet |
 
-The orchestrator passes the chosen model to each Agent spawn via the `model` parameter (lowercase `opus`/`sonnet`/`haiku`).
+The orchestrator passes the chosen model to each Agent spawn via the `model` parameter (lowercase `opus`/`sonnet`/`haiku`/`fable`).
+
+### A.2.1 Model granularity is per-stage, not per-atom (Arch B) — and the `fable` override
+
+**Read this before using the table above.** Under Arch B (v1.0.0), each stage wrapper (`analyze`/`design`/`implement`/`test`) spawns exactly ONE `stage_<X>` sub-agent, and **all work + all reviewers for that stage run inside that single sub-agent at one model** — the model fixed by the wrapper's Agent-spawn `model:` value. The per-atom columns above are therefore **informational only for the stage flows**: they describe the intended reasoning style / findings-JSON `model` field, not separate spawns. The columns DO drive real model selection only where an atom is spawned as its own Agent — currently just `/sdd review` (completeness + quality), which reads this table.
+
+**`fable` (Claude Fable 5)** is Anthropic's most capable model — best at long-horizon implementation, first-shot generation, bug finding, and cross-stage reasoning (~2× opus cost). Because model granularity is per-stage, `fable` can only be applied to a whole stage, and only where that stage has no in-context security analysis:
+
+- **`design` stage at `depth=deep` spawns with `model: fable`.** Design runs no `/security-review` / `/code-review` in-context, so the whole design stage (design work + completeness/quality/adversarial reviewers, all in one sub-agent) may run at `fable` under the deep dial. All other depths spawn `opus`. This override lives in `commands/design.md` Phase 1 (and its escalation resume), NOT in this table.
+- **`implement` stays `opus` at every depth.** Its sub-agent runs `/security-review` + `/code-review` in the same context (`implement.md` §Notes); Arch B cannot split the model within one sub-agent, so making implement `fable` would run security analysis on `fable` — which is excluded from Fable's bug-finding gains and can hit `stop_reason: "refusal"` on cyber-adjacent code. Do not route implement (or any security-analysis atom) to `fable`.
+- **`analyze` / `test` stay `opus`.** No fable override (test additionally has a `test_work`-always-opus preserve rule). Revisit only if design's deep-tier fable proves worthwhile.
+
+Constraints an orchestrator MUST respect:
+- **Agent-tool support required.** `fable` is only usable if this Claude Code build accepts `fable` as an Agent `model` value. If a spawn rejects `fable`, fall back to `opus` and continue.
+- **Prompting.** Fable underperforms on over-prescriptive prompts; SDD atoms are deliberately prescriptive. Treat the design deep→fable override as tunable — if deep-tier design output regresses versus opus, set `design.md`'s deep spawn back to `opus`.
 
 ### A.3 `/code-review` effort per depth
 
@@ -74,7 +88,7 @@ Every review atom embeds a JSON block inside its posted comment using the marker
   "pr":           <number> | null,
   "round":        <number> | null,
   "verdict":      "PASS" | "FAIL" | null,
-  "model":        "opus" | "sonnet" | "haiku" | null,
+  "model":        "opus" | "sonnet" | "haiku" | "fable" | null,
   "findings": [
     {
       "severity":       "critical" | "major" | "minor",
