@@ -40,7 +40,7 @@ From the same labels read above, derive the depth dial:
 Spawn ONE sub-agent via the Agent tool:
 
 - `subagent_type`: `general-purpose`
-- `model`: `opus` (the stage's work logic runs in the sub-agent context; reviewer logic also inlined here)
+- `model`: `fable` when `depth = deep` (from Phase 0), `sonnet` when `depth = shallow`, otherwise `opus`. The whole stage (analysis work + inlined reviewers) runs in this one sub-agent; analyze has no in-context `/security-review` / `/code-review`, so `fable` at the deep dial raises What/Why + ambiguity reasoning quality, and `sonnet` at the shallow dial cuts cost on explicitly low-stakes Issues (per `_review_helpers.md` Section A.2.1). If this build's Agent tool rejects `fable`, fall back to `opus`.
 - `description`: `stage_analyze for #$1`
 - `prompt`:
   > Read `<<SKILL_DIR>>/commands/atoms/stage_analyze.md` and execute its instructions for Issue #$1.
@@ -90,7 +90,7 @@ Report to user: "Paused. Resume with `/sdd resume $1`." Stop.
 2. Call `AskUserQuestion` with 3 options: `Continue`, `Pause`, `Stop`.
 3. Branch on user choice:
    - **Continue** → re-spawn `stage_analyze` with `Resume: continue-after-escalation`:
-     - `subagent_type`: `general-purpose`, `model`: `opus`, `description`: `stage_analyze resume for #$1`
+     - `subagent_type`: `general-purpose`, `model`: `fable` when `depth = deep`, `sonnet` when `depth = shallow`, else `opus` (same rule as Phase 1), `description`: `stage_analyze resume for #$1`
      - `prompt`:
        > Read `<<SKILL_DIR>>/commands/atoms/stage_analyze.md` and execute its instructions for Issue #$1.
        >
@@ -135,4 +135,4 @@ Treat as `FAIL: unexpected return: <line>` and stop. (Defensive per `design/01-s
 - **Single sub-agent spawn per invocation** (or two, if a `continue-after-escalation` resume is needed). All reviewer + retry loop logic lives inside `stage_analyze.md` — main session stays thin.
 - **Reviewers run serially inside the sub-agent.** Reviewer independence is preserved by the sub-agent's internal narrative structure (re-fetch the analyze output for each reviewer; no cross-visibility of verdicts).
 - **Label transitions are main session's responsibility.** `stage_analyze` never sets labels itself.
-- **Depth label override**: `sdd:review:deep` / `sdd:review:shallow` selects the depth dial, which the sub-agent uses for model selection internally per `_review_helpers.md` Section A.2.
+- **Depth label override**: `sdd:review:deep` / `sdd:review:shallow` selects the depth dial, which sets this stage's spawn model — `deep → fable`, `shallow → sonnet`, `default → opus` (analyze has no in-context security analysis; `fable` falls back to `opus` if the Agent tool rejects it) per `_review_helpers.md` Section A.2.1. The dial also informs the sub-agent's reasoning style per Section A.2.

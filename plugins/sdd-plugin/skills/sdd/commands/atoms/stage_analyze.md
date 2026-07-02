@@ -49,7 +49,7 @@ Decision (overrides `$2` if labels disagree):
 - Labels contain `sdd:review:shallow` → `depth = shallow`
 - Otherwise → `depth = default`
 
-The depth dial selects models used internally for the inlined work and review reasoning per `spec/00-common-contracts.md` §3 / `_review_helpers.md` Section A.2. Since this entire stage runs inside ONE sub-agent context (no inner Agent spawns), the model dial is informational for the sub-agent's reasoning style — the actual model is fixed by the Agent spawn's `model` parameter from main session. Record the dial for the `<details>` self-review trace.
+The depth dial selects models used internally for the inlined work and review reasoning per `spec/00-common-contracts.md` §3 / `_review_helpers.md` Section A.2. Since this entire stage runs inside ONE sub-agent context (no inner Agent spawns), the model dial is informational for the sub-agent's reasoning style — the actual model is fixed by the Agent spawn's `model` parameter from main session. **Note (per `_review_helpers.md` Section A.2.1): `analyze.md` spawns this stage with `model: fable` when `depth = deep`, `sonnet` when `depth = shallow`, otherwise `opus` (analyze has no in-context security analysis).** Record the dial for the `<details>` self-review trace, and record the actual model accurately in the findings JSON.
 
 ### Resume short-circuit (T1.5)
 
@@ -276,7 +276,7 @@ Each reviewer's reasoning context cannot see other reviewers' verdicts during it
    ## AI Review (analyze / completeness)
 
    **Verdict:** PASS | FAIL
-   **Model:** <opus|sonnet|haiku>
+   **Model:** <opus|sonnet|haiku|fable>
 
    ### Issues
    - **[critical]** <description>
@@ -294,7 +294,7 @@ Each reviewer's reasoning context cannot see other reviewers' verdicts during it
    <!-- /sdd:review:analyze:completeness -->
    ```
 
-   Set `stage: "analyze"`, `role: "completeness"`, `issue: <N>`, `pr: null`, `round: <current round>`, `verdict`, `model` (the sub-agent's actual model — usually `opus` since main session spawns this stage with `model: opus`; record what's accurate), `findings` array, `suggestions` array.
+   Set `stage: "analyze"`, `role: "completeness"`, `issue: <N>`, `pr: null`, `round: <current round>`, `verdict`, `model` (the sub-agent's actual model — `fable` at `depth = deep`, `sonnet` at `depth = shallow`, otherwise `opus`; record what's accurate), `findings` array, `suggestions` array.
 
 7. **Post via Section F** (mandatory temp-file pattern):
    - **Write tool** → `/tmp/sdd-review-analyze-completeness-$1.md`
