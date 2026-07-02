@@ -101,3 +101,27 @@ Temp file paths:
 ### Stateless Operation
 
 All commands are stateless and idempotent — no GitHub, no config files, no external state written. Safe to run multiple times.
+
+### Example
+
+```
+/skill-quality check ./plugins/my-plugin/skills/my-skill
+```
+
+```
+/skill-quality check: plugins/my-plugin/skills/my-skill
+══════════════════════════════════════════════════════════════════════
+Grade: A  (rubric v1.0)
+
+MAJOR (2)
+  [T1] WHAT not in description — "helps with tasks" is too vague
+       Fix: Add what the skill does: "Generates unit tests for..."
+  [C1] No org-specific knowledge — body reads as generic instructions
+       Fix: Add project-specific constraints or examples
+
+Suggestions (1)
+  [R7] SKILL.md is 312 lines — consider moving content to references/
+
+══════════════════════════════════════════════════════════════════════
+BLOCKER: 0  MAJOR: 2  MINOR: 1
+```
