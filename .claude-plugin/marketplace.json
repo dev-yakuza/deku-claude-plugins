@@ -9,6 +9,12 @@
       "source": "./plugins/sdd-plugin",
       "description": "Spec-Driven Development (SDD) - AI collaborative development process",
       "version": "1.4.5"
+    },
+    {
+      "name": "skill-quality-plugin",
+      "source": "./plugins/skill-quality-plugin",
+      "description": "Evaluate Claude Code skill quality with a structured 38-item rubric",
+      "version": "1.0.0"
     }
   ]
 }

@@ -1,0 +1,12 @@
+{
+  "name": "skill-quality-plugin",
+  "description": "Evaluate Claude Code skill quality with a structured 38-item rubric",
+  "version": "1.0.0",
+  "rubric_version": "1.0",
+  "author": {
+    "name": "dev-yakuza"
+  },
+  "homepage": "https://github.com/dev-yakuza/deku-claude-plugins",
+  "repository": "https://github.com/dev-yakuza/deku-claude-plugins",
+  "license": "MIT"
+}
