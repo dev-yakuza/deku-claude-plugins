@@ -188,6 +188,26 @@ For BOTH paths, also re-read the analyze + design outputs (review atoms re-fetch
 gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output")) | .body'
 ```
 
+For **SINGLE/CHILD** path, additionally fetch the implement plan and E2E-skipped scenarios — used in Step 2 items 3 and 4:
+
+```bash
+gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:implement:plan -->")) | .body'
+```
+
+```bash
+gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:e2e-skipped-scenario -->")) | .body'
+```
+
+Hold as `<implement-plan-body>` and `<e2e-skipped-body>`.
+
+For **SINGLE/CHILD** path, also fetch the shared coverage ledger:
+
+```bash
+gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:coverage:ledger -->")) | .body'
+```
+
+Hold as `<ledger-body>`. Parse the JSON between `<!-- sdd:coverage:json -->` and `<!-- /sdd:coverage:json -->` in context. If present, the ledger is the **primary source** for QA-checklist composition in Step 2 item 4 (it carries per-scenario status, sha, and reason accumulated by analyze → design → implement); `<implement-plan-body>` and `<e2e-skipped-body>` remain as cross-check inputs and as the fallback when the ledger is absent.
+
 For **PARENT** path, additionally fetch the children marker body:
 
 ```bash
@@ -209,10 +229,20 @@ gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contai
    - Read the PR's test files referenced in the diff.
    - Compare existing tests against the Issue's DoD and analyze/design requirements.
    - Note any gaps (missing scenarios, missing edge cases, regression risks).
-3. **Check E2E_SKIPPED flag**: search the PR's `<!-- sdd:review:implement:tools -->` comment and the Issue's `<!-- sdd:test-evidence:step-4 -->` comment (Common Contracts §4). If Stage 3 reported E2E was skipped, set `E2E_SKIPPED = true` for inclusion in the test:output body (surfaced to user in §8).
-4. **4-2. Compose QA checklist**:
-   - Build a markdown checklist from the Issue's DoD and the PR's manual test checklist (read from PR body).
-   - Separate **Automated** (already covered by tests), **Manual** (needs human verification — UI behavior, visual states, locale-dependent flows), **Regression** (prior fragility areas).
+3. **Check E2E_SKIPPED flag**: use `<e2e-skipped-body>` (fetched in Step 1) as the primary signal — if `<!-- sdd:e2e-skipped-scenario -->` comment exists on the Issue → `E2E_SKIPPED = true`. Hold the listed scenarios as `<e2e-skipped-scenarios>`. As a secondary fallback, check the PR body's `## Automated Test Coverage` E2E line for the word "skipped". Note: `<!-- sdd:test-evidence:step-4 -->` is **absent** when E2E is skipped (the implement pipeline does not post it — `_tdd.md` §6.4), so its absence is NOT a reliable signal.
+4. **4-2. Compose QA checklist** — if `<ledger-body>` was parsed successfully in Step 1 and the `scenarios` array is non-empty, skip the **Automated** and **Manual** sub-bullets below and proceed directly to item 5's ledger-first rule (the **Regression** section and the **Cross-check** still apply regardless):
+   - **Automated**: list scenarios covered by the TDD pipeline. Cross-reference `<implement-plan-body>` Test Plan categories (Happy path / Error path / Boundary conditions / Concurrent/State) to confirm completeness. Note any non-`N/A` category with no corresponding automated test as a coverage gap.
+   - **Manual**: include ONLY items that fall into one of these 5 categories — (1) UI/UX appearance (visual rendering, animation, hover states not expressible as assertions), (2) accessibility (screen reader, keyboard navigation, focus management), (3) performance (response times, memory usage, load behavior), (4) unmockable external integrations (payment processors, SMS, live OAuth), (5) E2E-skipped scenarios — if `E2E_SKIPPED == true`, use `<e2e-skipped-scenarios>` from `<!-- sdd:e2e-skipped-scenario -->` directly as Manual items. If no items qualify for any category, write "No manual verification required — all scenarios are covered by automated tests."
+   - **Regression**: prior fragility areas; note whether each has an automated test or needs manual re-check.
+   - Cross-check: read the PR body's `## Manual Test Checklist` section and verify each item falls into one of the 5 categories above. Items that do not → note as `manual-item-may-be-automatable` for the reviewer to flag.
+
+5. **Ledger-first rule for 4-2**: if `<ledger-body>` parsed successfully in Step 1 and the `scenarios` array is non-empty, compose the QA checklist directly from the ledger's `scenarios` array instead of re-deriving coverage from `<implement-plan-body>`:
+   - `status == "automated"` → list in the **Automated** section (group by `category`; include the scenario `description` and its `sha` as evidence).
+   - `status == "manual"` → list in the **Manual** section, including the `reason`.
+   - `status == "skipped"` → list under a **Skipped (E2E)** subsection of Manual, including the `reason`.
+   - `status == "pending"` → flag as a **coverage gap** in the Automated section (scenario planned but never automated or dispositioned) — note as a `[major]` coverage gap for reviewers.
+   - Cross-check the ledger's `summary` counters against the listed items; a mismatch is itself a coverage-gap note.
+   - The `<implement-plan-body>` cross-reference in item 4 then serves only as a sanity check (a plan category with no ledger scenario at all → coverage gap). When the ledger is absent, item 4's original derivation applies unchanged.
 
 **PARENT path** (`path == PARENT`):
 

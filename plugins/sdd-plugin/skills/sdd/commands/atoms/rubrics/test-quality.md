@@ -60,6 +60,7 @@ Applies to all platforms — adapt lifecycle hooks to the framework (afterEach/a
 - Is the manual checklist actually testable (specific, measurable steps)?
 - Does it cover UI behavior that automated tests can't (animations, gestures, platform-specific rendering)?
 - Does it explicitly include known fragile cases?
+- Is each Manual item genuinely impossible to automate with the project's current test framework and design's Testability seams? If an item could be expressed as a unit, integration, or E2E test → `[major] manual-item-may-be-automatable`.
 
 ## Codebase verification
 Use Read/Grep (Section D of `_review_helpers.md`) on:

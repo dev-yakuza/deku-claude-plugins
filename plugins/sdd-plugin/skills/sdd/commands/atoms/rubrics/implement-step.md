@@ -28,10 +28,17 @@ Used by `tdd_step_review.md` atom. Step-specific section below is selected by th
 - Test fixture data that doesn't reflect real input shape
 - Skip/only/focus markers left in (`it.only`, `xit`)
 
+### Coverage cross-check (applies when `<plan-body>` is available from `_tdd.md` §7.2)
+
+For each non-`N/A` category in the Test Plan (Happy path / Error path / Boundary conditions / Concurrent/State):
+- Verify the commit diff contains ≥ 1 test addressing that category.
+- Zero tests AND no `// MANUAL: ...` inline note in the diff → `[major] rule_id: test-plan-category-uncovered` (cite the category name, e.g. `"Error path has no test"`).
+- `// MANUAL: ...` note present → record `[minor] rule_id: manual-gap-acknowledged` (intentional omission noted by author; does not block).
+
 ### Severity guidance
 - **critical**: Tests are tautologies, or do not actually fail; cannot serve as Red
-- **major**: Significant scenario or edge case missing
-- **minor**: Naming/assertion improvement
+- **major**: A non-`N/A` Test Plan category has no test and no `// MANUAL:` note (`rule_id: test-plan-category-uncovered`); or a significant scenario clearly implied by the design is absent with no explanation
+- **minor**: Naming/assertion improvement; `// MANUAL:` note present (acknowledged gap)
 
 ---
 

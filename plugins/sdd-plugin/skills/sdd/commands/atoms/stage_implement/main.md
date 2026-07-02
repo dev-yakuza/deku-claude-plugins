@@ -173,7 +173,7 @@ gh issue view $1
 gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("sdd:design:output")) | .body'
 ```
 
-Capture the design output's File Structure (target dir), Testability (mock strategy + hard-to-test concerns), Test Strategy. **Do NOT read the `<!-- sdd:analyze:output -->` comment** — design already incorporated those requirements (`implement_plan.md` Hard rules).
+Capture the design output's File Structure (target dir) and Testability (mock/stub strategies, injection points, hard-to-test concerns, and any E2E-level scenario notes). **Do NOT read the `<!-- sdd:analyze:output -->` comment** — design already incorporated those requirements (`implement_plan.md` Hard rules).
 
 ### §6.3 Step 2 — Detect parent reference (multilingual regex)
 
@@ -282,6 +282,48 @@ Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F — mandatory
    - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-implement-plan-$1.md`
 
 [PRESERVE — Common Contracts §9 Comment Posting Pattern (Section F mandatory); §4 Update-in-place invariant; deterministic path `/tmp/sdd-implement-plan-$1.md`.]
+
+### §6.7.5 Coverage Ledger — Test Plan scenarios
+
+Register the §6.5 Test Plan cases as tracked scenarios in the shared coverage ledger. Runs AFTER §6.7 posted the plan.
+
+1. **Bash** — fetch the existing ledger:
+
+   ```bash
+   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:coverage:ledger -->")) | .body'
+   ```
+
+   Parse the JSON between `<!-- sdd:coverage:json -->` and `<!-- /sdd:coverage:json -->` in context.
+   - **Found** → hold the parsed object.
+   - **Empty** (analyze + design skipped) → build an initial ledger in context from the design output's Feature List (already in narrative from §6.2): ids `F1`, `F2`, …, `e2e_required` per the design's `E2E required:` lines, `scenarios: []`, `pr: null`.
+
+2. Populate the `scenarios` array from the §6.5 Test Plan:
+   - One entry per test case, ids `S1`, `S2`, … sequential.
+   - `feature_id` — match the case to a feature by title / Feature List wording; if a case spans features, pick the primary one.
+   - `description` — the test case text from the plan (specific, not the category name).
+   - `category` — `happy_path` / `error_path` / `boundary` / `concurrent` per its Test Plan section; skip `N/A` sections.
+   - Additionally, one entry per design-flagged E2E scenario (`e2e_required: true` features): `category: "e2e"`, `test_level: "e2e"`, `description` from the design's `E2E required: <scenario>` text.
+   - `test_level` — `unit` for isolated logic, `integration` for cases exercising the mock/stub seams from the design's Testability section.
+   - `status: "pending"`, `sha: null`, `reason: null` for every entry.
+   - **Retry idempotency**: first remove all existing `"pending"` scenarios (uncommitted plan items), then add the fresh plan-derived set. Assign new ids starting from `S<M+1>` where M is the largest numeric suffix among all remaining non-pending scenario ids (e.g. if S1–S3 are automated, fresh pending set starts from S4). If no non-pending scenarios exist, start from S1. This prevents id collision with previously automated/manual/skipped scenarios.
+
+3. Recompute `summary`: `total` = scenarios length; `pending` = count of `"pending"`; other counters from their statuses (normally `automated`/`manual`/`skipped` are `0` here).
+
+4. Set `updated_by: "implement"`. Keep `issue`, `pr`, `features`, `version` unchanged.
+
+5. **Write tool** — render to `/tmp/sdd-coverage-ledger-$1.md` (same body shape as the analyze/design ledger steps; `**Updated by:** implement`).
+
+6. **Bash** — duplicate-prevention search:
+
+   ```bash
+   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:coverage:ledger -->")) | .id'
+   ```
+
+7. **Bash** — branch on the result:
+   - **Has id `<id>`** → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-coverage-ledger-$1.md`
+   - **Empty** → `gh issue comment $1 --body-file /tmp/sdd-coverage-ledger-$1.md`
+
+Non-blocking on failure: log a warning and continue — `_pr_final.md` §3.4.5 and `stage_test.md` fall back to plan/marker re-derivation when the ledger is absent. Hold the ledger comment `<id>` in narrative for `_pr_final.md`.
 
 ### §6.8 Phase 2 atom-level failure
 
@@ -397,6 +439,7 @@ FAIL: design output not found on Issue #$1
 ## Markers posted (must match `spec/stage/implement.md` §2)
 
 - `<!-- sdd:implement:plan -->` on Issue — §6 Phase 2 (this file).
+- `<!-- sdd:coverage:ledger -->` on Issue — updated with Test Plan scenarios (status: pending). PATCHED in place by §6.7.5. Further updated by `_pr_final.md` §3.4.5 (statuses finalized) and §3.8.5 (PR number recorded).
 - `<!-- sdd:test-evidence:step-<n> -->` (n ∈ 1..4) on Issue — `_tdd.md` Phase 3 (via `_test_evidence.md`).
 - `<!-- sdd:review:implement:step-<n> -->` (n ∈ 1..4) on Issue — `_tdd.md` Phase 3 step reviews.
 - `<!-- sdd:review:implement:completeness -->` on PR — `_pr_final.md` Phase 5.

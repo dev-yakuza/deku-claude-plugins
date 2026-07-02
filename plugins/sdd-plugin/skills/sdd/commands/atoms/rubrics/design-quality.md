@@ -23,8 +23,9 @@
 - Are downstream consumers (other teams, external integrations) affected?
 
 ### Test strategy realism
-- Is the proposed test plan adequate (unit + integration + E2E coverage)?
-- Are difficult-to-test areas (timing, external services) addressed?
+- Does the Testability section cover all external dependencies with concrete mock/stub strategies and verified injection points?
+- Are difficult-to-test concerns (timing, randomness, async, external services) addressed with specific mitigations — not deferred with "we'll figure out testing later"?
+- If the Feature List contains user-facing flows that require multi-step interaction or browser/device behavior, are these acknowledged as E2E-level scenarios in the Testability section?
 
 ### Architectural anti-patterns
 - Layer violations (UI calling repo directly, repo calling UI)

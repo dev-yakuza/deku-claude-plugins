@@ -58,6 +58,55 @@ git push -u origin <branch_name>
 
 (Single simple Bash call; never `--force`; per `spec/edge-cases.md` §23 force-push prohibition.)
 
+### §3.4.5 Coverage Ledger Finalization
+
+Finalize scenario statuses in the shared coverage ledger using the TDD outcomes held in narrative (`sha_step_1..4`, `e2e_skipped` from `_tdd.md`). Runs on BOTH the true first-round path and the R8 soft-retry path (it precedes the §3.5 branch point).
+
+1. **Bash** — fetch the ledger:
+
+   ```bash
+   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:coverage:ledger -->")) | .body'
+   ```
+
+   Parse the `<!-- sdd:coverage:json -->` block in context. **Empty or `scenarios` array has length 0** → log "coverage ledger missing or has no scenarios; skipping finalization" to the narrative and continue to §3.5 (non-blocking; §3.7.2 then uses its plan-based fallback).
+
+2. **Bash** — locate `MANUAL:`-annotated test scenarios (single call; a non-zero exit with no output means no matches — that is fine, read the tool result):
+
+   ```bash
+   git grep -n "MANUAL:" -- "*.test.*" "*.spec.*" "*_test.*" "test_*" "*/test_*"
+   ```
+
+   From each matching line extract the reason text after `MANUAL:` (covers `// MANUAL:`, `# MANUAL:`, `<!-- MANUAL:` comment styles per `_tdd.md` §3.3) and match it to a ledger scenario by description wording.
+
+3. If `e2e_skipped == true` — **Bash** — fetch the skipped-scenario list:
+
+   ```bash
+   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:e2e-skipped-scenario -->")) | .body'
+   ```
+
+4. Update each scenario currently `"pending"`, in this order (later rules win where they overlap):
+   - `category` ∈ {`happy_path`, `error_path`, `boundary`, `concurrent`} → `status: "automated"`, `sha: "<sha_step_2 literal value>"` (the Green commit).
+   - `category == "e2e"` AND `sha_step_4 != EMPTY` → `status: "automated"`, `sha: "<sha_step_4 literal value>"`.
+   - `category == "e2e"` AND `e2e_skipped == true` → if the scenario appears in the `<!-- sdd:e2e-skipped-scenario -->` list → `status: "skipped"`, `reason: "<the listed skip reason>"`; if it does NOT appear (compensating integration test covered it — `_tdd.md` §6.4) → `status: "automated"`, `sha: null` (compensating test SHA is not tracked in pipeline state; see git log for commits containing "E2E_SKIPPED" message).
+   - Any scenario matched by an item-2 `MANUAL:` annotation → `status: "manual"`, `reason: "MANUAL: <extracted reason>"`, `sha: null` (overrides the automated rules above).
+   - Any scenario still `"pending"` after applying rules 1–4 → `status: "manual"`, `reason: "disposition undetermined — manual verification required"`.
+
+5. Leave `pr: null` for now — the PR does not exist yet on the first-round path; §3.8.5 records it after creation.
+
+6. Recompute `summary` (`total` / `automated` / `manual` / `skipped` / `pending` from the scenarios array). Set `updated_by: "implement"`.
+
+7. **Write tool** — render to `/tmp/sdd-coverage-ledger-$1.md` (same body shape as §6.7.5; `**Updated by:** implement`).
+
+8. **Bash** — duplicate-prevention search:
+
+   ```bash
+   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:coverage:ledger -->")) | .id'
+   ```
+
+9. **Bash** — PATCH in place (the id exists — item 1 found the ledger): `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-coverage-ledger-$1.md`
+
+Hold the finalized ledger object and comment `<id>` in narrative for §3.7.2 and §3.8.5.
+
 ### §3.5 Step 4 — Detect existing PR (R8 BRANCH POINT)
 
 ```bash
@@ -103,7 +152,9 @@ From `.github/.sdd-lang` per `<<SKILL_DIR>>/commands/atoms/_multilingual.md` (fa
 
 #### §3.7.2 Build PR body
 
-Auto-generate from `git log --oneline -20` (already in context from §3.1 Item 2). Read Manual Test Checklist items from the `<!-- sdd:implement:plan -->` test plan (already on Issue).
+Auto-generate from `git log --oneline -20` (already in context from §3.1 Item 2). Read the `<!-- sdd:implement:plan -->` test plan from the Issue (already in narrative context from Phase 2).
+
+**Ledger-first rule**: if §3.4.5 finalized the coverage ledger (held in narrative) AND the `scenarios` array is non-empty, build the `## Automated Test Coverage` section and the `## Manual Test Checklist` directly from the ledger's `scenarios` array instead of re-deriving them — `status == "automated"` entries become the Automated bullets (group by `category`; cite the scenario `description`), `status == "manual"` entries become Manual checklist items (include `reason`), `status == "skipped"` entries (E2E-skipped) become Manual checklist items under "E2E-skipped" (include `reason`). The `<!-- sdd:e2e-skipped-scenario -->` fetch and the `git grep "MANUAL:"` scan described below are then SKIPPED (already folded into the ledger in §3.4.5). The `- E2E:` line in `## Automated Test Coverage` is still determined from `sha_step_4` and `e2e_skipped` per the rules below; when `e2e_skipped == true`, use the count of `status == "skipped"` scenarios with `category == "e2e"` from the ledger as N in `"N scenario(s) require manual verification"`. Use the derivation steps below ONLY when the ledger is absent or has no scenarios.
 
 **The PR body MUST be self-contained — a reviewer reading ONLY this PR (without opening parent / referenced Issues) must understand**:
 1. **What** the PR changes (concrete scope, not just a category label).
@@ -118,6 +169,38 @@ Examples:
 - ❌ Bad first line: `Refs #872. C 그룹 본문 처리.`
 - ✅ Good first line: `Refs #872. 테스트 본문에서 호출되는 Get.reset() 은 permanent helper 까지 제거하기 때문에 직후 재등록이 누락되면 회귀가 발생한다. 본 PR 은 호출 10곳을 의도별로 좁힌다.`
 
+**Automated Test Coverage section** — derive from the implement plan's test categories and TDD step SHAs (all available in narrative context from `_tdd.md`):
+
+- **Unit (Red → Green)**: list the concrete scenarios that were automated — use the test plan's Happy path / Error path / Boundary / Concurrent entries as-is, but be specific enough for a reviewer to understand coverage (e.g. `"login flow, invalid credentials, empty input"` not just `"Happy path"`). These correspond to `sha_step_1` (Red) and `sha_step_2` (Green) commits.
+- **Refactor**: `"applied"` if `sha_step_3 != EMPTY`; `"no changes needed"` if `sha_step_3 == EMPTY`.
+- **E2E**: `"covered (<framework name>)"` if `sha_step_4 != EMPTY`; if `e2e_skipped == true` → fetch `<!-- sdd:e2e-skipped-scenario -->` from the Issue:
+  ```bash
+  gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("<!-- sdd:e2e-skipped-scenario -->")) | .body'
+  ```
+  - Comment found with scenarios listed → `"skipped — integration-level coverage added where possible; <N> scenario(s) require manual verification (see Manual Test Checklist below)"`.
+  - Comment found but empty scenario list → `"skipped — no E2E framework detected; all user-flow scenarios were expressible as integration-level unit tests"`.
+  - Comment not found → `"skipped — no E2E framework detected"`.
+
+**Manual Test Checklist** — include ONLY items that fall into one or more of these categories. If none apply, write the "all automated" note instead (see body shapes below).
+
+| Category | Include when |
+|---|---|
+| UI/UX appearance | Visual rendering, responsive layout, animation, hover states — not expressible as assertions |
+| Accessibility | Screen reader behavior, keyboard navigation, focus management |
+| Performance | Response times, memory usage, behavior under load |
+| Unmockable external integrations | Payment processors, SMS gateways, OAuth flows requiring a live provider |
+| E2E scenarios | `e2e_skipped == true` — use the bullets from `<!-- sdd:e2e-skipped-scenario -->` directly; if comment absent, infer from the test plan what user flows would need E2E coverage |
+
+Additionally, scan the PR diff for `// MANUAL:` inline comments added by `_tdd.md` §3.3 (test scenarios excluded from unit tests with an explanation). Include each as a Manual Test Checklist item:
+
+```bash
+gh pr diff <PR_NUM>
+```
+
+Search the diff for lines matching `// MANUAL:` (JavaScript/TypeScript/Go/Dart), `# MANUAL:` (Python/Ruby/Shell), or `<!-- MANUAL:` (HTML/template files) and extract the reason text as a checklist item. If none found, skip this step.
+
+Do NOT echo back test plan items that are already covered by unit or E2E tests. The TDD pipeline automated those; listing them here as manual items creates noise and causes reviewers to re-verify what CI already verifies.
+
 Body shape (single Issue):
 ```
 Refs #$1
@@ -128,9 +211,16 @@ Refs #$1
 ## Changes
 <change summary — table or bullets, 3-10 lines covering what · why · how per the rule above>
 
+## Automated Test Coverage
+- Unit (Red → Green): <specific scenario list from test plan — e.g. "happy path: X, error: Y, boundary: Z">
+- Refactor: <"applied" | "no changes needed">
+- E2E: <"covered (Playwright)" | "covered (Cypress)" | "skipped — integration-level coverage added where possible; N scenario(s) require manual verification" | "skipped — no E2E framework detected">
+
 ## Manual Test Checklist
+<If genuinely manual items exist (UI/UX, accessibility, performance, unmockable integrations, E2E-skipped scenarios from <!-- sdd:e2e-skipped-scenario -->):>
 - [ ] <item>
-- [ ] <item>
+<If ALL scenarios are covered by automated tests above and e2e_skipped == false:>
+> All scenarios are covered by automated tests above. No manual verification required.
 ```
 
 Body shape (child Issue — add localized parent line BEFORE the change summary):
@@ -144,8 +234,13 @@ Refs #$1
 
 <change summary>
 
+## Automated Test Coverage
+- Unit (Red → Green): <specific scenario list>
+- Refactor: <"applied" | "no changes needed">
+- E2E: <"covered (<framework>)" | "skipped — integration-level coverage added; N scenario(s) require manual verification" | "skipped — no E2E framework detected">
+
 ## Manual Test Checklist
-- [ ] ...
+<genuinely manual items only (including E2E-skipped scenarios), or "> All scenarios are covered by automated tests above.">
 ```
 
 #### §3.7.3 Write body to temp file
@@ -177,6 +272,20 @@ Observe the literal number. Hold as `<PR_NUM>`.
 Whether via §3.6 (R8 soft retry) or §3.7 (true first-round), `<PR_NUM>` is now known. Proceed to §4 PR Final round 1.
 
 Atom-level failure anywhere in §3 → return `FAIL: <reason>` from this `_pr_final.md` execution.
+
+### §3.8.5 Coverage Ledger — record PR number
+
+If §3.4.5 finalized the ledger (skip this section if the ledger was absent):
+
+1. In the ledger object held in narrative, set `pr: <PR_NUM>` (literal number; applies on both the §3.7 first-round path and the §3.6 R8 path).
+2. **Write tool** — re-render to `/tmp/sdd-coverage-ledger-$1.md` (body otherwise unchanged from §3.4.5).
+3. **Bash** — PATCH using the comment `<id>` held from §3.4.5 (re-run the duplicate-prevention search from §3.4.5 item 8 first if the id is no longer in context):
+
+   ```bash
+   gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-coverage-ledger-$1.md
+   ```
+
+Non-blocking on failure: log a warning and proceed to §4.
 
 ---
 
