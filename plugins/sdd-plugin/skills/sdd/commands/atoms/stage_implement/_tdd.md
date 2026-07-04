@@ -131,8 +131,6 @@ Inspect the literal subject line and apply the heuristic:
 - **REFACTOR EMPTY resumed** — no evidence marker exists (atom skips evidence post on EMPTY per `_test_evidence.md` "When to run"). §2.1 returns Empty → not idempotent → rerun step 3 which will re-detect EMPTY or produce a new refactor. Acceptable. Defer the sentinel-marker optimization to v1.1 (`design/stage-designs/implement.md` §14.3).
 - **E2E_SKIPPED resumed** — no evidence marker. §2.1 returns Empty → not idempotent → rerun step 4 detection (cheap; artifact detection only). If still no E2E framework → re-skip. Self-idempotent without an explicit marker.
 
-[PRESERVE per `design/stage-designs/implement.md` §14 — safety invariant: never skip if state uncertain. Re-running idempotent step costs ~5–15K tokens; running with stale state risks corruption.]
-
 ---
 
 ## §3. Step 3-1 — Red (inlined `implement_red` logic)
@@ -413,7 +411,7 @@ Inputs (held in narrative):
 
 ### §7.1 Handle empty / skipped cases
 
-- `<sha> == EMPTY` AND `<test-evidence> == NONE` → step review immediately returns `OK PASS` per `tdd_step_review.md` step 1 (REFACTOR EMPTY short-circuit). No comment posted. **Distinction**: REFACTOR EMPTY → review returns PASS (this case). E2E_SKIPPED → review is **entirely skipped** at the pipeline level (§6.4 — no `tdd_step_review` call at all). [PRESERVE — load-bearing per `design/stage-designs/implement.md` §10.5 + §10.6.]
+- `<sha> == EMPTY` AND `<test-evidence> == NONE` → step review immediately returns `OK PASS` per `tdd_step_review.md` step 1 (REFACTOR EMPTY short-circuit). No comment posted. **Distinction**: REFACTOR EMPTY → review returns PASS (this case). E2E_SKIPPED → review is **entirely skipped** at the pipeline level (§6.4 — no `tdd_step_review` call at all).
 
 ### §7.2 Read commit diff + test evidence
 
@@ -460,7 +458,7 @@ Severity definitions:
 - **major** — significant issue in this step that should be fixed before proceeding
 - **minor** — improvement suggestion (does not block)
 
-**Test-evidence consistency check (Step 5a) — load-bearing trust boundary** [PRESERVE — `spec/stage/implement.md` §5 — system's only defense against an LLM work atom hallucinating "tests pass"]:
+**Test-evidence consistency check (Step 5a) — load-bearing trust boundary**:
 
 You cannot re-run tests in this review. Verify the work atom's self-reported counts against the captured raw log:
 
@@ -469,7 +467,7 @@ You cannot re-run tests in this review. Verify the work atom's self-reported cou
 - `step_n == 1` (Red): if `FAILED` is `0` → finding `[critical] rule_id: red-tests-did-not-fail`.
 - `step_n ∈ {2, 3, 4}` (Green / Refactor / E2E): if `FAILED` is non-zero → finding `[critical] rule_id: tests-not-green`.
 - `step_n == 3` (Refactor only): if the diff does NOT touch any file under a test directory (no `*test*` / `*spec*` paths) but `TESTS: <p>/<t>` differs from the prior Green's reported counts → finding `[critical] rule_id: refactor-changed-test-counts`.
-  - **Graceful fallback (GAP-A3)**: to verify drift, search Issue comments for the latest `<!-- sdd:review:implement:step-2 -->` block and parse the `Tests:` field. If unavailable → **downgrade to `[major]`**. [PRESERVE — preserves recovery when round-1 step-2 review was rotated out.]
+  - **Graceful fallback (GAP-A3)**: to verify drift, search Issue comments for the latest `<!-- sdd:review:implement:step-2 -->` block and parse the `Tests:` field. If unavailable → **downgrade to `[major]`**.
 - Sanity bound: `<total> == 0` AND `<sha> != EMPTY` → finding `[major] rule_id: zero-tests-executed`.
 
 **Raw-log cross-check** (applies only when `<evidence-log>` was found in §7.2):
@@ -477,7 +475,7 @@ You cannot re-run tests in this review. Verify the work atom's self-reported cou
 - **Count mismatch**: identifiable summary line disagrees with `<test-evidence>` → finding `[critical] rule_id: test-evidence-mismatch`. Include observed log line in description.
 - **Failure-line presence (Red only)**: `step_n == 1` — log MUST contain at least one failure indicator (assertion error, `FAIL` marker, stack trace, `not ok`). If absent → finding `[critical] rule_id: red-log-shows-no-failure`.
 - **Authenticity check**: log under 200 chars / lacks any file path or test name / lacks any framework marker → finding `[major] rule_id: test-evidence-implausible`.
-- **Summary unparseable**: log present and plausibly authentic but no summary line locatable → finding `[minor] rule_id: test-evidence-summary-unparseable`. **Explicit non-blocking escape hatch — DO NOT BLOCK ON THIS** [PRESERVE — GAP-A2, per `spec/stage/implement.md` §5: "runners differ widely"; a rewrite that ignores this preserve would mis-classify when summary detection fails on a legitimate run.].
+- **Summary unparseable**: log present and plausibly authentic but no summary line locatable → finding `[minor] rule_id: test-evidence-summary-unparseable`. **Explicit non-blocking escape hatch — DO NOT BLOCK ON THIS**.
 
 ### §7.6 Verdict
 
@@ -551,8 +549,6 @@ Read `.github/.sdd-config` (Read tool — file or key absent → empty). Parse c
 - **`implement` IS in skip-review** → log to sub-agent narrative: "⚠ TDD step-<n> failed review 3 times. Auto-continuing because `skip-review: implement` is set; unresolved findings carry forward to PR Final." Continue pipeline to next step (Arch B Option 2 — soft step exhaustion).
 - **`implement` is NOT in skip-review** → Arch B Option 2 default: same auto-continue with a logged warning. Sub-agent cannot ask user (`design/01-sub-agent-contract.md` §4); PR Final (the harder gate) is reserved for the ESCALATE return.
 
-[PRESERVE — behavior shift documented in `spec/stage/implement.md` §20.5: spec says interactive → ask user; Arch B can't ask. The hard gate moves entirely to PR Final round 3.]
-
 ---
 
 ## §9. Pipeline-level early return
@@ -582,7 +578,7 @@ Stage-internal state held in narrative for `_pr_final.md` (read by `main.md` §8
 
 - **No Agent spawns, no Skill calls** in this file. (Skills are reserved for `_pr_final.md`'s Phase 5 reviewers; `_tdd.md` only commits + posts evidence/reviews.)
 - **No `git push`.** Pushing is `_pr_final.md`'s job. `_tdd.md` commits only.
-- **No force-push, no `--amend`.** Retry mode = new commit on the failed step (the prior failed commit stays; `git reset` to clean is NOT used because review history is preserved). However, on a retry attempt the work atom MAY overwrite the prior attempt's commit by addressing findings then `git commit --amend`? **NO** — explicit invariant. The retry pattern adds a NEW commit (the test/code/refactor file is edited again, then a fresh commit). If the prior commit's diff was wrong, the new commit either reverts + corrects or supersedes; the prior commit stays on the branch. [PRESERVE per `spec/stage/implement.md` §9.]
+- **No force-push, no `--amend`.** Retry mode = new commit on the failed step (the prior failed commit stays; `git reset` to clean is NOT used because review history is preserved). However, on a retry attempt the work atom MAY overwrite the prior attempt's commit by addressing findings then `git commit --amend`? **NO** — explicit invariant. The retry pattern adds a NEW commit (the test/code/refactor file is edited again, then a fresh commit). If the prior commit's diff was wrong, the new commit either reverts + corrects or supersedes; the prior commit stays on the branch.
 - **No Claude as co-author** in any commit.
 - **All Bash per `_bash_rules.md`.** All comment posting per `_review_helpers.md` Section F. Test-evidence per `_test_evidence.md`.
 - **Edit / Write tool permitted** here for writing test code, production code, and refactors (to working tree files); also for the deterministic `/tmp/sdd-*.md` temp paths. NEVER modify files outside the working tree.

@@ -126,7 +126,7 @@ When an existing OPEN PR is detected on `<branch_name>` despite no explicit Resu
 gh pr view <EXISTING_PR> --json body --jq .body
 ```
 
-Inspect the literal output. If the body does NOT contain `Refs #$1` → return `FAIL: existing open PR #<EXISTING_PR> on branch <branch_name> does not reference Issue #$1`. (Prevents accidentally overwriting an unrelated PR.) [PRESERVE — load-bearing safety per `design/stage-designs/implement.md` §11.3.]
+Inspect the literal output. If the body does NOT contain `Refs #$1` → return `FAIL: existing open PR #<EXISTING_PR> on branch <branch_name> does not reference Issue #$1`. (Prevents accidentally overwriting an unrelated PR.)
 
 If body contains `Refs #$1` → continue §3.6.2.
 
@@ -349,7 +349,7 @@ Run §4.0 ONLY when entering the loop for the first time (`round == 1`). On roun
 
 ---
 
-### §4.1 [PRESERVE — load-bearing serial ordering]
+### §4.1 Serial ordering
 
 `spec/edge-cases.md` §24 + `design/stage-designs/implement.md` §13.1: inside a sub-agent the platform constraint "Skill cannot share parallel batch with Agent" is moot (no Agent calls here). However, sub-agent convention preserves the serial ordering for:
 1. **Verdict determinism** — SDD reviewer verdicts known before Skill verdicts.
@@ -369,7 +369,7 @@ git rev-parse --abbrev-ref HEAD
 gh pr list --head <branch_name> --state open --json number --jq '.[0].number'
 ```
 
-Confirm number matches `<PR_NUM>`. If empty → return `FAIL: retry mode requested but no open PR for branch <branch_name>` (defensive — should never happen after Phase 4 succeeded). [PRESERVE — `spec/stage/implement.md` §6 Mode detection matrix.]
+Confirm number matches `<PR_NUM>`. If empty → return `FAIL: retry mode requested but no open PR for branch <branch_name>` (defensive — should never happen after Phase 4 succeeded).
 
 #### §4.2.2 Update branch (best-effort)
 
@@ -410,7 +410,7 @@ b. Fetch `/code-review` + `/security-review` inline PR comments (line-anchored, 
    Translate by severity:
    - 🔴 Important → `{severity: "critical", rule_id: "code-review-important", ...}`
    - 🟡 Nit → `{severity: "minor", rule_id: "code-review-nit", ...}`
-   - 🟣 Pre-existing → **SKIP** [PRESERVE — Reviewer A GAP-A4 per `spec/stage/implement.md` §6: orchestrator already ignores 🟣 for verdict; atom-side retry MUST also skip — otherwise work cycles wasted on pre-existing issues].
+   - 🟣 Pre-existing → **SKIP**.
    - Severity: High → `{severity: "critical", rule_id: "security-review-high", ...}`
    - Severity: Medium → `{severity: "major", rule_id: "security-review-medium", ...}`
    - Severity: Low / informational → `{severity: "minor", rule_id: "security-review-low", ...}`
@@ -440,7 +440,7 @@ git commit -m "fix: address review (round <N>) - <short summary>"
 
 (Substitute literal round number and summary. No Claude co-author.)
 
-**NEVER `--amend`. NEVER `--force-push`.** [PRESERVE — load-bearing per `spec/edge-cases.md` §23 — preserves PR review history.]
+**NEVER `--amend`. NEVER `--force-push`.**
 
 #### §4.2.7 Push regular
 
@@ -456,7 +456,7 @@ Existing PR auto-updates on push.
 
 ### §4.3 SDD reviewers — serial (5.N.1.a / 5.N.1.b / 5.N.1.c)
 
-[PRESERVE — load-bearing independence invariant per `spec/stage/implement.md` §7 + `design/stage-designs/implement.md` §12.3]: 3 SDD reviewers reason with **independent contexts** — no cross-visibility of each other's verdicts. In Arch B with serial execution inside one sub-agent, independence is enforced by **prose discipline**:
+3 SDD reviewers reason with **independent contexts** — no cross-visibility of each other's verdicts. In Arch B with serial execution inside one sub-agent, independence is enforced by **prose discipline**:
 - Each reviewer reads ONLY its rubric + the shared PR diff + PR body from §4.3.a.2 — PR diff and Issue context are shared ground truth and are reused without re-fetching.
 - Each reviewer does NOT read the other 2 reviewers' just-posted comments (even though those markers may exist on the PR from this round or prior).
 - The sub-agent's narrative MUST treat each reviewer as a fresh logical pass — do NOT carry the prior reviewer's verdict into the next reviewer's reasoning.
@@ -528,7 +528,7 @@ Procedure (Section F):
    - Empty → `gh pr comment <PR_NUM> --body-file /tmp/sdd-review-implement-completeness-pr<PR_NUM>.md`
    - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-review-implement-completeness-pr<PR_NUM>.md`
 
-NOTE: `--field` (NOT `-F`) per Common Contracts §9 and `design/stage-designs/implement.md` §12.2 [PRESERVE — Reviewer A GAP-A5 fix; spec standardizes on `--field`].
+NOTE: `--field` (NOT `-F`) per Common Contracts §9 and `design/stage-designs/implement.md` §12.2.
 
 ##### §4.3.a.6 Record verdict
 
@@ -552,7 +552,7 @@ Record `quality_verdict = PASS | FAIL`. Move to §4.3.c.
 
 Same structure with substitutions:
 - Rubric: `<<SKILL_DIR>>/commands/atoms/rubrics/implement-adversarial.md`.
-- Also read Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` for the general adversarial reviewer prompt.
+- Apply the adversarial lens from Section E of `_review_helpers.md` — already in context from the Section D exploration step above; no separate Read needed.
 - Marker: `<!-- sdd:review:implement:adversarial -->`.
 - Temp path: `/tmp/sdd-review-implement-adversarial-pr<PR_NUM>.md`.
 - Findings JSON `role`: `"adversarial"`.
@@ -565,8 +565,6 @@ Record `adversarial_verdict = PASS | FAIL`. Proceed to §4.4.
 
 ### §4.4 `/code-review` Skill (5.N.2)
 
-[PRESERVE — load-bearing serial-after-SDD ordering per §4.1.]
-
 #### §4.4.1 Determine effort by depth
 
 | `depth` | `--effort` |
@@ -574,8 +572,6 @@ Record `adversarial_verdict = PASS | FAIL`. Proceed to §4.4.
 | `default` | `high` |
 | `deep` | `max` |
 | `shallow` | `medium` |
-
-[PRESERVE — `spec/stage/implement.md` §8 + `_review_helpers.md` Section A.3.]
 
 #### §4.4.2 Invoke Skill
 
@@ -587,7 +583,7 @@ Skill tool call:
 
 (Substitute literal effort value and `<PR_NUM>`.)
 
-#### §4.4.3 Graceful skip [PRESERVE]
+#### §4.4.3 Graceful skip
 
 Detect outcome:
 - **Skill unavailable** (semantic error from Skill tool — older Claude Code, Skill disabled) → log warning to sub-agent narrative. Record for tools-summary (§4.6): `{"name": "code-review", "reason": "skill-unavailable"}`. Skipped Skills are **neutral** for verdict (do NOT contribute to FAIL).
@@ -607,7 +603,7 @@ gh api repos/<owner>/<repo>/pulls/<PR_NUM>/comments --jq '.[] | select((.body | 
 Count by severity:
 - 🔴 Important → critical (contributes FAIL).
 - 🟡 Nit → minor (does NOT contribute to FAIL).
-- 🟣 Pre-existing → **IGNORED for verdict** [PRESERVE — Reviewer A GAP-A4].
+- 🟣 Pre-existing → **IGNORED for verdict**.
 
 If `code-review` produced **1+ 🔴 Important** → record `code_review_verdict = FAIL`. Else `code_review_verdict = PASS`.
 
@@ -615,11 +611,9 @@ Record the counts (X 🔴 / Y 🟡 / Z 🟣) for the tools-summary body in §4.6
 
 ### §4.5 `/security-review` Skill (5.N.3)
 
-[PRESERVE — load-bearing serial-after-/code-review ordering.]
-
 #### §4.5.1 Shallow-skip gate
 
-If `depth == shallow` → SKIP `/security-review`. Record for tools-summary: `{"name": "security-review", "reason": "shallow-label-skip"}`. Neutral for verdict. [PRESERVE — `spec/stage/implement.md` §7 + `design/stage-designs/implement.md` §12.5.]
+If `depth == shallow` → SKIP `/security-review`. Record for tools-summary: `{"name": "security-review", "reason": "shallow-label-skip"}`. Neutral for verdict.
 
 Skip to §4.6.
 
@@ -713,11 +707,9 @@ Procedure (Section F):
    - Empty → `gh pr comment <PR_NUM> --body-file /tmp/sdd-implement-tools-$1-round-<N>.md`
    - Has id `<id>` → `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-implement-tools-$1-round-<N>.md`
 
-**Informational only** — does NOT affect verdict. Verdict logic in §4.7 reads `completeness_verdict`, `quality_verdict`, `adversarial_verdict`, `code_review_verdict`, `security_review_verdict` directly (not this marker). [PRESERVE — observability rationale per `design/stage-designs/implement.md` §12.6: distinguishes "shallow-skip" from "ran with no findings".]
+**Informational only** — does NOT affect verdict. Verdict logic in §4.7 reads `completeness_verdict`, `quality_verdict`, `adversarial_verdict`, `code_review_verdict`, `security_review_verdict` directly (not this marker).
 
 ### §4.7 Round verdict (5.N.5)
-
-[PRESERVE — load-bearing per `spec/stage/implement.md` §7 + `design/stage-designs/implement.md` §12.7.]
 
 Round combiner:
 
@@ -730,7 +722,7 @@ Round combiner:
 
 Skipped Skills are NEUTRAL — they do NOT make the round fail. `tools_skipped` tracks the reason for audit.
 
-#### §4.7.1 Adversarial-only FAIL warning [PRESERVE — edge-cases §19]
+#### §4.7.1 Adversarial-only FAIL warning
 
 For R6 text and semantics, follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section G — treat combined verdict as FAIL, no auto-pass.
 
@@ -749,7 +741,7 @@ For R6 text and semantics, follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.
 
 Triggered when `round == 3` AND §4.7 verdict was FAIL. Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section H:
 - Summary format: `implement round 3 FAIL — findings: [critical] <X>, [major] <Y> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>, code-review=<P/F/skipped>, security-review=<P/F/skipped>). PR: #<PR_NUM> BRANCH: <branch_name>` — counts include all 3 SDD reviewers + `/code-review` 🔴 + `/security-review` High/Medium; write `skipped` for unavailable/shallow-skipped Skills.
-- skip-review key: `pr` [PRESERVE — load-bearing: key is `pr`, NOT `implement`, per `spec/stage/implement.md` §10.]
+- skip-review key: `pr`
 - Auto-continue: return `OK ADVANCE PR: #<PR_NUM>` from this `_pr_final.md`. `main.md` §9 composes the final `OK ADVANCE: test` line (+ ` E2E_SKIPPED` if applicable).
 - On ESCALATE: `main.md` returns the line verbatim. On user Continue, main re-spawns with `Resume: continue-after-escalation` — `main.md` §4.2 short-circuit returns `OK ADVANCE` directly.
 
@@ -759,15 +751,15 @@ Triggered when `round == 3` AND §4.7 verdict was FAIL. Follow `<<SKILL_DIR>>/co
 
 - **No Agent spawns.** Single sub-agent invariant.
 - **MAY use Skill tool** for `/review` (§4.0, once pre-loop, round 1 only), `/code-review`, and `/security-review`. Graceful skip on `skill-unavailable` / `skill-errored` / `shallow-label-skip` (the last only for `/security-review`). `/review` is **informational only** — does NOT contribute to FAIL verdict.
-- **Serial ordering**: `/review` (§4.0, pre-loop, round 1 only) → per-round: `5.N.1.a → 5.N.1.b → 5.N.1.c → 5.N.2 → 5.N.3 → 5.N.4 → 5.N.5`. Sub-agent convention; preserved for verdict determinism + token economy. [PRESERVE — `spec/edge-cases.md` §24.]
+- **Serial ordering**: `/review` (§4.0, pre-loop, round 1 only) → per-round: `5.N.1.a → 5.N.1.b → 5.N.1.c → 5.N.2 → 5.N.3 → 5.N.4 → 5.N.5`. Sub-agent convention; preserved for verdict determinism + token economy.
 - **Independence invariant** for 3 SDD reviewers: each uses the same PR diff + body + Issue context from §4.3.a.2 — no re-fetch. Do NOT carry prior reviewer's verdict into next reviewer's reasoning.
 - **No force-push, no `--amend`.** Retry mode appends new commits.
 - **No Claude as co-author.**
 - **R8 auto-route is always on** — no `strict-pr-creation` config key per SYNTHESIS-v2 T1.1.
-- **R8 safety**: existing PR body MUST contain `Refs #$1` or return `FAIL: existing PR ...does not reference Issue #$1`. [PRESERVE — `design/stage-designs/implement.md` §11.3.]
-- **`--field`, NOT `-F`** for `gh api ... -X PATCH` per Common Contracts §9. [PRESERVE — Reviewer A GAP-A5.]
+- **R8 safety**: existing PR body MUST contain `Refs #$1` or return `FAIL: existing PR ...does not reference Issue #$1`.
+- **`--field`, NOT `-F`** for `gh api ... -X PATCH` per Common Contracts §9.
 - **🟣 Pre-existing → SKIP for verdict AND retry** per Reviewer A GAP-A4. Including them as `minor` retry findings would waste cycles addressing pre-existing issues.
 - **`skip-review: pr` consumed here** (Phase 5.5 escalation). `skip-review: implement` is consumed by `_tdd.md` §8.2 and `main.md` §5.2. `skip-review: qa` is consumed by main session AFTER `OK ADVANCE`.
 - **All Bash per `_bash_rules.md`. All comment posting per `_review_helpers.md` Section F.**
-- **Round-to-round overwrites** all 4 PR Final markers (3 reviewers + tools-summary). Prior-round bodies are lost. Findings JSON `round` field IS updated per PATCH. [PRESERVE — Common Contracts §4.]
+- **Round-to-round overwrites** all 4 PR Final markers (3 reviewers + tools-summary). Prior-round bodies are lost. Findings JSON `round` field IS updated per PATCH.
 - **Edit / Write tool permitted** only for the working tree (fix-up code in §4.2.5) and deterministic `/tmp/sdd-*.md` temp paths. NEVER touch files outside the working tree.

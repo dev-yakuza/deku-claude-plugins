@@ -32,8 +32,6 @@ gh issue view $1 --json url --jq .url
 - URL contains `/pull/` → return `FAIL: #$1 is a Pull Request, not an Issue. SDD commands operate on Issues only.` Do NOT modify labels, do NOT post comments.
 - URL contains `/issues/` → continue.
 
-[PRESERVE — `spec/stage/design.md` §11.1 Issue Validation; `spec/00-common-contracts.md` §10.]
-
 ### Precondition: analyze output present (fail-fast)
 
 Before any work, confirm the analyze output exists on the Issue (`spec/stage/design.md` §1 / §11.2 / `design_work.md` line 16):
@@ -50,8 +48,6 @@ gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contai
 
 - Empty result → return `FAIL: analyze output not found on Issue #$1`. Do NOT modify labels, do NOT post comments.
 - Non-empty → continue.
-
-[PRESERVE — `spec/stage/design.md` §1 Precondition; `design/stage-designs/design.md` §1 (defense in depth even though main pre-checks).]
 
 ---
 
@@ -82,8 +78,6 @@ If `$3 == "continue-after-escalation"`:
 - Skip directly to **§8 Phase 6** with Normal path (`OK ADVANCE: implement SINGLE` or `OK ADVANCE: implement CHILDREN: #A,#B,#C`). Work + reviews were already done in the prior spawn; findings remain on GitHub for human follow-up.
 - If the three review markers OR the design output marker are NOT all present → return `FAIL: continue-after-escalation requested but prior round's markers missing on #$1`.
 
-[PRESERVE — `design/stage-designs/design.md` §8.5 Resume-after-escalation fast-path; M4.5 review §3 (carry verbatim with CHILDREN detection).]
-
 ---
 
 ## §3. Phase 1 — Work (inlined `design_work` logic)
@@ -109,8 +103,6 @@ This relaxes only the *ordering and narration* of Steps 3–9. It does NOT relax
 - **Round 1** (`round == 1`): follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` Section A — tier **Medium**, Section B items 1 + 2 + 3 + 5 (project conventions + commit message style + similar past PRs via `gh pr list --search` + project-specific stage rules). Apply Section D failure handling. The similar past PRs (item 3) inform file organization, naming, and architectural choices for steps 4–9 below. Record findings for the §3.11 self-review trace.
 - **Rounds 2 / 3** (`round > 1`): SKIP the preflight items above. Instead, execute `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C to self-fetch the previous round's three review comments (markers: `<!-- sdd:review:design:completeness -->`, `<!-- sdd:review:design:quality -->`, `<!-- sdd:review:design:adversarial -->`) from Issue `$1`. The procedure returns a sorted findings array (`critical → major → minor`). Hold this array as `<retry-findings>` for use throughout the steps below.
   - If Section C returns `FAIL: ...` (no review comments found, unrecognized retry slot value, etc.) → propagate it as this sub-agent's return value before doing any further work.
-
-[PRESERVE — `spec/stage/design.md` §4 Phase 1 retry semantics; `spec/00-common-contracts.md` §7 Retry Mode Trigger; v0.36 atom-side self-fetch invariant.]
 
 ### Step 1: Read the Issue + analyze output
 
@@ -144,8 +136,6 @@ gh api repos/<owner>/<repo>/issues/<parent>/comments --jq '.[] | select(.body | 
 
 Substitute the literal parent number. Use parent context to keep this child's design consistent with the parent's overall architecture and PR-split rationale. Focus the detailed design on this child's sub-feature only.
 
-[PRESERVE — `design_work.md` Step 3 / `spec/stage/design.md` §5 multilingual parent reference; `spec/02-multilingual.md` §3 regex.]
-
 ### Step 3: Codebase exploration
 
 Use Read / Grep / Glob aggressively (no Explore sub-agent — single-level spawn rule):
@@ -155,8 +145,6 @@ Use Read / Grep / Glob aggressively (no Explore sub-agent — single-level spawn
 - Similar implementations in the codebase that can be referenced
 
 Be systematic: start with repo root listing, identify relevant directories, search for related symbols, read at least one similar implementation. Budget: keep within reasonable bounds for work-phase exploration (not subject to reviewer Section D cap — but stop when context is sufficient).
-
-[PRESERVE — `design_work.md` Step 4 lines 53–59.]
 
 ### Step 4: Impact scope
 
@@ -189,8 +177,6 @@ d. Testability decisions made here **must influence** Step 5's file list and Ste
 
 e. **Test level for user-facing scenarios**: review the Feature List (Step 9) and identify any scenarios that require E2E-level verification — multi-step user flows, browser/device interaction, real external service calls that cannot be mocked. List them explicitly in the Testability section output as `E2E required: <scenario>`. If none apply, add the line `No E2E scenarios — all scenarios are expressible as unit or integration tests`. This list is consumed by `_tdd.md` §6.4 (E2E_SKIPPED compensating coverage decision) and `stage_test.md` (Manual QA checklist).
 
-[PRESERVE — `design_work.md` Step 8.5; `design/stage-designs/design.md` §3.3 (8.5 testability flow load-bearing — reviewers flag false `N/A` as critical via rule `testability-na-but-side-effects-present`).]
-
 ### Step 9: Feature list + PR split decision (SINGLE vs CHILDREN)
 
 Create the feature list. **Determine if the design splits into multiple PRs (≥ 2) or is a single PR.** This is the SINGLE-vs-CHILDREN narrative decision — record it explicitly:
@@ -199,8 +185,6 @@ Create the feature list. **Determine if the design splits into multiple PRs (≥
 - **≥ 2 PRs** → `path = CHILDREN`; enumerate sub-feature names with brief descriptions. Each sub-feature will become a child Issue in §3.12.
 
 The decision must be explicit in the design body (Step 11 template field `pr_split`). Reviewers will flag missing rationale (rule `pr-boundary-by-convenience`, `pr-order-hidden`).
-
-[PRESERVE — `spec/stage/design.md` §6 SINGLE vs CHILDREN trigger; `design_work.md` Step 9; `design/stage-designs/design.md` §3.3 Step 9.]
 
 ### Step 10: Language template selection
 
@@ -216,8 +200,6 @@ Load the templates needed:
 ```
 
 (`<lang>` is one of `en`, `ko`, `ja`.) Read the file via the Read tool. Hold the path also for `output_children.md` and `output_child_issue.md` — needed in §3.12 if `path == CHILDREN`.
-
-[PRESERVE — `spec/02-multilingual.md` §2 Language Detection; §5 Output Template Files; `design_work.md` Step 10.]
 
 ### Step 11: Format design output via template
 
@@ -246,15 +228,13 @@ Before posting, verify:
 
 If a blocker fails → fix inline. Track which blockers were fixed for the §3.14 trace.
 
-**Quality / completeness / risk evaluation are NOT done here** — that is the reviewer phase's job (§4). Keep self-review minimal. [PRESERVE — `design_work.md` Step 12 lines 88–97; `spec/stage/design.md` §8 Self-review.]
+**Quality / completeness / risk evaluation are NOT done here** — that is the reviewer phase's job (§4). Keep self-review minimal.
 
 ### Step 13: Retry resolution check (rounds 2 / 3 only)
 
 If Step 0 fetched `<retry-findings>`, verify before posting that every `critical` and `major` finding has been addressed in the updated design (file structure, PR split, testability, constraints, etc.). Mention how (in the body or in the trace block) — or, only if genuinely infeasible, why it could not be. Treat `minor` entries as supporting context to pinpoint specific rows / files / symbols already revised.
 
 If addressing critical/major findings would force the PR split count to change (e.g., reviewer says "split this into 2 PRs" when round 1 was SINGLE, or vice versa), the work atom MUST work within the constraint of §3.12's idempotency guard — once children exist on this Issue, the child set is fixed (see §3.12 step a). Surface this tension in the body if relevant; do NOT re-create children.
-
-[PRESERVE — `design_work.md` Step 13; `spec/stage/design.md` §8 Retry resolution; `design/stage-designs/design.md` §10.5 RETHINK (idempotency vs split change).]
 
 ### Step 14: Append self-review trace
 
@@ -273,8 +253,6 @@ If any blocker was fixed inline in Step 12, OR if Step 0 ran preflight items, ap
 
 List only blockers actually checked. `[x]` for clean, `[ ]` with inline note for fixed. Skip the block entirely if there is nothing to record. On retry rounds where Step 0 was skipped, omit the preflight section of the trace.
 
-[PRESERVE — `design_work.md` Step 14.]
-
 ### Step 15: Post design comment via Section F temp-file pattern
 
 Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F — the mandatory temp-file pattern. Inline `--body` is forbidden because the body contains `\n#` patterns that trip a non-bypassable Claude Code heuristic.
@@ -292,8 +270,6 @@ Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F — the manda
 3. **Bash** — branch on the result:
    - **Empty** → create a new comment: `gh issue comment $1 --body-file /tmp/sdd-design-output-$1.md`
    - **Has id `<id>`** → update in place: `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-design-output-$1.md`
-
-[PRESERVE — `spec/00-common-contracts.md` §9 Comment Posting Pattern (Section F mandatory); `spec/00-common-contracts.md` §4 Update-in-place invariant; deterministic temp path `/tmp/sdd-design-output-$1.md`.]
 
 ### Step 15.5: Coverage Ledger — E2E flag update
 
@@ -361,8 +337,6 @@ gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contai
   - Continue to §4 reviews.
 - **Empty result** → no prior children. Proceed with Step 17b and Step 17c (first-time creation).
 
-[PRESERVE — load-bearing: `spec/stage/design.md` §5 Idempotency / §8 Edge Cases; `design_work.md` Step 16a line 130; `design/stage-designs/design.md` §10.5. Children would otherwise multiply per retry round.]
-
 #### Step 17b: Create one child Issue per sub-feature
 
 For each sub-feature in Step 9's enumeration (let `<seq>` be the 1-based sub-feature index):
@@ -377,7 +351,7 @@ For each sub-feature in Step 9's enumeration (let `<seq>` be the 1-based sub-fea
    - `ko`: line `상위 Issue: #<parent>` (note the space after `상위`)
    - `ja`: line `親Issue: #<parent>` (no space after `親`)
    
-   These render automatically when the template file is loaded — substitution only fills the placeholders. [PRESERVE — `spec/02-multilingual.md` §3 multilingual regex; load-bearing across 5+ call sites.]
+   These render automatically when the template file is loaded — substitution only fills the placeholders.
 
 2. **Bash** — create the Issue via `--body-file` (Section F.4 mandatory because the body contains `\n#` patterns):
 
@@ -393,8 +367,6 @@ For each sub-feature in Step 9's enumeration (let `<seq>` be the 1-based sub-fea
 3. **Observe** the command's output URL (e.g. `https://github.com/<owner>/<repo>/issues/123`). Extract the trailing integer (`123`) as the new child Issue number. Append to a running list `<children-list>` (comma-separated, e.g. `#101,#102,#103`).
 
 Repeat Step 17b for every sub-feature in Step 9's enumeration.
-
-[PRESERVE — `spec/stage/design.md` §5 (title format, label set, body-file path scheme); `design_work.md` Step 16b lines 132–142; `design/stage-designs/design.md` §10.2.]
 
 #### Step 17c: Post children-list comment on parent
 
@@ -416,8 +388,6 @@ Section F flow:
 
 Internal work-phase signal: `WORK CHILDREN: <children-list>` (with the freshly-created list). Continue to §4 reviews.
 
-[PRESERVE — `spec/stage/design.md` §5 Children list comment; `design_work.md` Step 16c lines 144–154; `design/stage-designs/design.md` §10.3.]
-
 ### Work return-value handling (internal to this sub-agent)
 
 After Step 15 (and Step 17 if CHILDREN path) completes, branch on the work outcome:
@@ -432,10 +402,9 @@ After Step 15 (and Step 17 if CHILDREN path) completes, branch on the work outco
 
 Three reviewers execute **one after another**. Each reviewer reads ONLY its role-specific rubric, optionally performs bounded codebase exploration, posts under its marker, and produces a PASS/FAIL verdict + findings JSON.
 
-[PRESERVE — independence invariant from `design/stage-designs/design.md` §4.4]:
 Each reviewer's reasoning context cannot see other reviewers' verdicts during its own evaluation. Even though execution is serial, structure each reviewer's work as a **fresh logical pass** — do NOT feed Reviewer 2 the comment body that Reviewer 1 just posted; do NOT let Reviewer 3 see Reviewers 1+2's verdicts. The only shared inputs are the analyze output and the design output under their respective markers.
 
-[PRESERVE — `design_review.md` line 81 / `design_adversarial.md` line 79]: Write tool permitted only for rendering the comment body to the deterministic temp path. Edit / NotebookEdit forbidden inside reviewer logic.
+Write tool permitted only for rendering the comment body to the deterministic temp path. Edit / NotebookEdit forbidden inside reviewer logic.
 
 ### §4.1. Reviewer 1: completeness
 
@@ -443,7 +412,7 @@ Each reviewer's reasoning context cannot see other reviewers' verdicts during it
 
 2. Use the design and analyze outputs already in context — read them from temp files via the **Read tool** (`/tmp/sdd-design-output-$1.md` written by §3 Step 15; analyze output from `/tmp/sdd-analyze-output-$1.md` if still available, or from context). No GitHub API call needed. If temp files are unavailable, fall back to fetching from GitHub.
 
-3. If this is a child Issue (per §3 Step 2 parent detection), re-fetch the parent's design output (this always requires an API call since it lives on a different Issue):
+3. If this is a child Issue (per §3 Step 2 parent detection), use the parent's design output already in context from §3 Step 2 — it was fetched there and is available in context or temp file. No additional API call needed. If unavailable (e.g. sub-agent restart), fall back to:
 
    ```bash
    gh api repos/<owner>/<repo>/issues/<parent>/comments --jq '.[] | select(.body | contains("sdd:design:output")) | .body'
@@ -521,7 +490,7 @@ Record `quality_verdict = PASS | FAIL`. Proceed to §4.3.
 
 Repeat §4.1 with these substitutions:
 - Rubric file: `<<SKILL_DIR>>/commands/atoms/rubrics/design-adversarial.md`
-- Also read Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` for the general adversarial reviewer prompt.
+- Apply the adversarial lens from Section E of `_review_helpers.md` — already in context from the Section D exploration step above; no separate Read needed.
 - Marker: `<!-- sdd:review:design:adversarial -->` (open + close)
 - Temp file: `/tmp/sdd-review-design-adversarial-$1.md`
 - Lens: **REFUTE** the design. Apply the 8 stage-specific refutation angles from the rubric with explicit `rule_id`s (`no-alternative-considered`, `parallel-structure-unjustified`, `pr-order-hidden`, `pr-leaves-master-inconsistent`, `pr-boundary-by-convenience`, `critical-risk-deferred`, `fallback-defeats-mitigation`, `pattern-not-found`, `pattern-misdescribed`, `layout-claim-incorrect`, `high-priority-feature-dropped`, `out-of-scope-silently-reintroduced`, `nfr-silently-dropped`, `complexity-glossed`, `external-integration-underspecified`, `testability-seam-missing`, `testability-seam-brittle`, `testability-na-but-side-effects-present`, `contract-drift`, `schema-migration-unspecified`). Must find ≥ 1 weakness OR explicitly justify why none.
@@ -546,8 +515,6 @@ After all three reviewers have posted, follow `<<SKILL_DIR>>/commands/atoms/_rev
 
 Round decision: All PASS → §8 Phase 6; FAIL and `round < max_rounds` → §6 Phase 4; FAIL and `round == max_rounds` → §7 Phase 5.
 
-[PRESERVE — `spec/stage/design.md` §6 / §7; `design/stage-designs/design.md` §5; R6 keep-current-behavior decision.]
-
 ---
 
 ## §6. Phase 4 — Retry loop (up to round `max_rounds`)
@@ -556,13 +523,11 @@ Increment `round`. Re-enter §3 with retry semantics:
 
 1. Step 0 collapses to `_review_helpers.md` Section C self-fetch (no preflight items). Per `spec/00-common-contracts.md` §7 + `_preflight.md` Section E.
 2. Steps 1–15 re-execute, addressing every `critical` and `major` finding from `<retry-findings>`.
-3. Step 15's duplicate-prevention search WILL find the existing `<!-- sdd:design:output -->` comment id and PATCH it in place (round-to-round overwrites, not appends). [PRESERVE — Common Contracts §4 Update-in-place invariant.]
-4. **CHILDREN idempotency guard (Step 17a) is load-bearing across retry rounds.** If round 1 was CHILDREN, the prior round's `<!-- sdd:children:output -->` and child Issues persist. Step 17a detects this and skips Step 17b + 17c. The same `<children-list>` propagates into the §8 Phase 6 return value. [PRESERVE — `spec/stage/design.md` §8 Edge Case "Retry mode with OK CHILDREN"; `design/stage-designs/design.md` §6 "Children idempotency note" load-bearing; `design_work.md` line 188.]
-5. Re-run all 3 reviewers (§4.1 → §4.2 → §4.3) against the UPDATED `<!-- sdd:design:output -->`. Reviewer prompts are unchanged across rounds — reviewers always evaluate the CURRENT state of the output marker. Each reviewer's comment is PATCHed in place under its marker.
+3. Step 15's duplicate-prevention search WILL find the existing `<!-- sdd:design:output -->` comment id and PATCH it in place (round-to-round overwrites, not appends).
+4. **CHILDREN idempotency guard (Step 17a) is load-bearing across retry rounds.** If round 1 was CHILDREN, the prior round's `<!-- sdd:children:output -->` and child Issues persist. Step 17a detects this and skips Step 17b + 17c. The same `<children-list>` propagates into the §8 Phase 6 return value.
+5. Re-run all 3 reviewers (§4.1 → §4.2 → §4.3) against the UPDATED `<!-- sdd:design:output -->`. Reviewer prompts are unchanged across rounds — reviewers always evaluate the CURRENT state of the output marker. Each reviewer's comment is PATCHed in place under its marker. **Rubric files and `_review_helpers.md` loaded in round 1 are already in context — do not re-Read them in retry rounds.**
 6. Re-combine verdicts (§5).
 7. If still FAIL on round `max_rounds` → §7. If PASS at any round → exit loop → §8.
-
-[PRESERVE — `spec/stage/design.md` §4 Rounds 2 & 3 retry; `_review_helpers.md` Section C; v0.36 atom-side self-fetch.]
 
 ---
 
@@ -572,9 +537,6 @@ Triggered when `round == max_rounds` AND the combined verdict from §5 is FAIL. 
 - Summary format: `design round <round> FAIL — findings: [critical] <N>, [major] <M> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>) (path: SINGLE|CHILDREN: #A,#B,#C)` — include the `path` field so the user has full context.
 - skip-review key: `design`
 - Auto-continue proceeds to §8 Phase 6 Normal path.
-
-[PRESERVE — `spec/stage/design.md` §4 Phase 1.5 Skip-review semantics: gate skip only; AI review always ran. Findings remain on GitHub for human follow-up.]
-[PRESERVE — `design/stage-designs/design.md` §7.3: ESCALATE does NOT roll back posted artifacts — design comment + children list + child Issues persist. On Continue, Phase 6 simply transitions the parent label.]
 
 ---
 
@@ -604,9 +566,6 @@ Return based on `path`:
   (Substitute the literal `<children-list>` captured in §3 Step 17b or §3 Step 17a re-derivation or §2 Resume short-circuit re-derivation.)
 
 The main session will set the parent's label `sdd:design` → `sdd:implement` after parsing this return. On CHILDREN path, the parent **pauses** at `sdd:implement` — the surrounding flow (`/sdd auto`, `/sdd batch`, or interactive selection) queues children for analyze. The parent does NOT auto-advance through implement/test until all children reach `sdd:done` (parent-pause invariant per Common Contracts §1).
-
-[PRESERVE — `design/stage-designs/design.md` §8.1 / §8.3 / §8.4; `01-sub-agent-contract.md` §4: this sub-agent NEVER sets labels itself. Label transitions are the main session's sole responsibility.]
-[PRESERVE — `spec/stage/design.md` §9 Cross-Stage Invariant #4: parent stops at `sdd:implement` after CHILDREN creation.]
 
 ---
 
@@ -643,8 +602,6 @@ ESCALATE: design round 3 FAIL — findings: [critical] 2, [major] 1 (completenes
 >>> RESULT <<<
 FAIL: analyze output not found on Issue #42
 ```
-
-[PRESERVE — load-bearing: sentinel + literal status strings are parsed by main FSM. Do NOT reformat to JSON.]
 
 ---
 

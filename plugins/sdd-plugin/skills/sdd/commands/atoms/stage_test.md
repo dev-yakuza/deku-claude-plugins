@@ -39,8 +39,6 @@ gh issue view $1 --json url --jq .url
 - URL contains `/pull/` → return `FAIL: #$1 is a Pull Request, not an Issue. SDD commands operate on Issues only.` Do NOT modify labels, do NOT post comments.
 - URL contains `/issues/` → continue.
 
-[PRESERVE — `spec/stage/test.md` §1 Entry conditions; `spec/00-common-contracts.md` §10.]
-
 ### Entry-condition precheck
 
 - **SINGLE/CHILD path precondition** (verified in §3): an open PR matching `Refs #$1` must exist. Empty → `FAIL: no open PR found for Issue #$1`.
@@ -63,7 +61,7 @@ Decision (overrides `$2` if labels disagree):
 - Labels contain `sdd:review:shallow` → `depth = shallow`
 - Otherwise → `depth = default`
 
-The depth dial selects models used internally for the inlined work and review reasoning per `spec/00-common-contracts.md` §3 / `_review_helpers.md` Section A.2. Since this entire stage runs inside ONE sub-agent context (no inner Agent spawns), the model dial is informational for the sub-agent's reasoning style — the actual model is fixed by the Agent spawn's `model` parameter from main session. `test_work`-style reasoning is always opus per `spec/stage/test.md` Phase 0 [PRESERVE]. Record the dial for the `<details>` self-review trace.
+The depth dial selects models used internally for the inlined work and review reasoning per `spec/00-common-contracts.md` §3 / `_review_helpers.md` Section A.2. Since this entire stage runs inside ONE sub-agent context (no inner Agent spawns), the model dial is informational for the sub-agent's reasoning style — the actual model is fixed by the Agent spawn's `model` parameter from main session. `test_work`-style reasoning is always opus per `spec/stage/test.md` Phase 0. Record the dial for the `<details>` self-review trace.
 
 ### Resume short-circuits (T1.4, T1.5)
 
@@ -90,8 +88,6 @@ Before path detection, branch on `$3`:
 - **`$3 == "none"`** (or empty) → continue to §3 Phase 1.
 
 - **Any other `$3` value** → return `FAIL: unrecognized Resume value: <truncated to 80 chars>` per the same defensive convention used for retry slot values (Common Contracts §7).
-
-[PRESERVE — SYNTHESIS-v2 T1.4 / T1.5; `design/stage-designs/test.md` §2 + §12.]
 
 ---
 
@@ -135,8 +131,6 @@ If `path == PARENT`:
 4. If ANY child does NOT have label `sdd:done` → return `FAIL: parent has incomplete children: #X, #Y, ...` (list all incomplete children, comma-separated, max 200 chars).
 5. If all children are `sdd:done` → proceed to §4 Phase 2 with `path = PARENT`.
 
-[PRESERVE — `spec/stage/test.md` Phase 1 step 2; `design/stage-designs/test.md` §3; double-check defensive pattern with `test_work` Mode detection.]
-
 ### Step 3: SINGLE/CHILD path — verify PR exists
 
 If `path == SINGLE`:
@@ -149,8 +143,6 @@ gh pr list --search "Refs #$1" --state open --json number --jq '.[0].number'
 - Non-empty → record the literal PR number as `<PR_NUM>` for use throughout §4 (reviewer post location) and Phase 2.7 (`/verify` context).
 
 Proceed to §4 Phase 2 with `path = SINGLE` and the cached `<PR_NUM>`.
-
-[PRESERVE — `spec/stage/test.md` §1 Entry conditions: PR must exist; `test_work.md` lines 49–54.]
 
 ---
 
@@ -171,8 +163,6 @@ This phase produces the test output and posts it under `<!-- sdd:test:output -->
 
   Section C returns a sorted findings array (`critical → major → minor`). Hold this array as `<retry-findings>` for use throughout the steps below.
   - If Section C returns `FAIL: ...` (no review comments found, etc.) → propagate it as this sub-agent's return value before doing any further work.
-
-[PRESERVE — `spec/stage/test.md` §4 Phase 2 retry semantics; `spec/00-common-contracts.md` §7; v0.36 atom-side self-fetch invariant.]
 
 #### Step 1: Read the Issue + relevant cross-stage outputs
 
@@ -272,8 +262,6 @@ gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contai
      - Return `OK NEEDS_FRAMEWORK_CHOICE: recommended=<name>` (NOT `FAIL:`).
      - Main session asks the user, then re-spawns this sub-agent with `Framework: <chosen-name>` set as `$4`.
 
-   [PRESERVE — `spec/stage/test.md` §9; `design/stage-designs/test.md` §13; SYNTHESIS-v2 T1.4 — the special-prefix is now an explicit return keyword, not a `FAIL:` prefix.]
-
 3. **4-1. Integration E2E** (parent only):
    - Identify cross-child integration scenarios from the design output + children's PRs.
    - **If integration tests are needed**:
@@ -319,8 +307,6 @@ gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contai
 
 If Step 0 fetched `<retry-findings>`, verify before posting that every `critical` and `major` finding has been addressed in the updated test output. Mention how (in the body or in the trace block) — or, only if genuinely infeasible, why it could not be. Treat `minor` entries as supporting context.
 
-[PRESERVE — `test_work.md` retry-finding handling; Common Contracts §7.]
-
 #### Step 4: Language template + self-review (blockers only)
 
 Determine output language:
@@ -342,7 +328,7 @@ Before posting, verify posting-blocking checks:
 
 If a blocker fails → fix inline. Track which blockers were fixed for the Step 7 self-review trace.
 
-*Quality, completeness, risk evaluation are NOT done here — that is the reviewer phase's job (§4.2). Keep self-review minimal.* [PRESERVE — `test_work.md` lines 78–87.]
+*Quality, completeness, risk evaluation are NOT done here — that is the reviewer phase's job (§4.2). Keep self-review minimal.*
 
 #### Step 5: Compose test:output body
 
@@ -413,8 +399,6 @@ Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F — the manda
    - **Empty** → create: `gh issue comment $1 --body-file /tmp/sdd-test-output-$1.md`
    - **Has id `<id>`** → update in place: `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-test-output-$1.md`
 
-[PRESERVE — `spec/00-common-contracts.md` §9; deterministic temp path `/tmp/sdd-test-output-$1.md`; round-to-round PATCHes overwrite (Common Contracts §4).]
-
 #### Step 8: Internal work outcome
 
 Record the work outcome for the §4.3 verdict combiner and §7/§8 path branching:
@@ -431,10 +415,9 @@ Special case: PARENT path with no E2E setup detected and `$4` empty → return `
 
 Three reviewers (SINGLE/CHILD) or four reviewers (PARENT) execute **one after another**. Each reviewer reads ONLY its role-specific rubric, optionally performs bounded codebase exploration, posts under its marker, and produces a PASS/FAIL verdict + findings JSON.
 
-[PRESERVE — independence invariant from `design/stage-designs/test.md` §4 and Common Contracts §12]:
 Each reviewer's reasoning context cannot see other reviewers' verdicts during its own evaluation. Even though execution is serial, structure each reviewer's work as a **fresh logical pass** — do NOT feed Reviewer N+1 the comment body Reviewer N just posted; do NOT let later reviewers see earlier reviewers' verdicts. Work outputs (test output, analyze/design outputs) are shared ground truth and are reused from context without re-fetching.
 
-[PRESERVE — `test_review.md` line 80 / `test_adversarial.md` line 78 / `parent_integration_review.md` line 111]: Write tool permitted only for rendering the comment body to the deterministic temp path. Edit / NotebookEdit forbidden inside reviewer logic.
+Write tool permitted only for rendering the comment body to the deterministic temp path. Edit / NotebookEdit forbidden inside reviewer logic.
 
 ### §4.2.1 Reviewer 1: completeness
 
@@ -527,7 +510,7 @@ Record `quality_verdict = PASS | FAIL`. Proceed to §4.2.3.
 
 Repeat §4.2.1 with these substitutions:
 - Rubric file: `<<SKILL_DIR>>/commands/atoms/rubrics/test-adversarial.md`
-- Also read Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` for the general adversarial reviewer prompt.
+- Apply the adversarial lens from Section E of `_review_helpers.md` — already in context from the Section D exploration step above; no separate Read needed.
 - Marker: `<!-- sdd:review:test:adversarial -->` (open + close)
 - Temp file (SINGLE): `/tmp/sdd-review-test-adversarial-pr<PR_NUM>.md`
 - Temp file (PARENT): `/tmp/sdd-review-test-adversarial-$1.md`
@@ -631,8 +614,6 @@ For R6 warning text and round-decision behavior, follow `<<SKILL_DIR>>/commands/
 
 Round decision: All PASS → §7 (SINGLE/CHILD) or §8 (PARENT); FAIL and `round < 3` → §5; FAIL and `round == 3` → §6.
 
-[PRESERVE — `spec/stage/test.md` §10 adversarial-only-FAIL escalation; `spec/edge-cases.md` §19.]
-
 ---
 
 ## §5. Phase 4 — Retry loop (rounds 2 and 3)
@@ -641,12 +622,10 @@ Increment `round` (now 2 or 3). Re-enter §4.1 with retry semantics:
 
 1. Step 0 collapses to `_review_helpers.md` Section C self-fetch (no preflight items). Per `spec/00-common-contracts.md` §7 + `_preflight.md` Section E. Markers fetched depend on `path` (3 for SINGLE/CHILD; 4 for PARENT — adds `<!-- sdd:review:parent -->`).
 2. Steps 1–7 re-execute, addressing every `critical` and `major` finding from `<retry-findings>`.
-3. Step 7's duplicate-prevention search WILL find the existing `<!-- sdd:test:output -->` comment id and PATCH it in place (round-to-round overwrites, not appends). [PRESERVE — Common Contracts §4 Update-in-place invariant.]
-4. Re-run all reviewers (§4.2.1 → §4.2.2 → §4.2.3 → §4.2.4 if PARENT) against the UPDATED `<!-- sdd:test:output -->`. Reviewer prompts are unchanged across rounds — reviewers always evaluate the CURRENT state of the test:output marker. Each reviewer's comment is PATCHed in place under its marker.
+3. Step 7's duplicate-prevention search WILL find the existing `<!-- sdd:test:output -->` comment id and PATCH it in place (round-to-round overwrites, not appends).
+4. Re-run all reviewers (§4.2.1 → §4.2.2 → §4.2.3 → §4.2.4 if PARENT) against the UPDATED `<!-- sdd:test:output -->`. Reviewer prompts are unchanged across rounds — reviewers always evaluate the CURRENT state of the test:output marker. Each reviewer's comment is PATCHed in place under its marker. **Rubric files and `_review_helpers.md` loaded in round 1 are already in context — do not re-Read them in retry rounds.**
 5. Re-combine verdicts (§4.3).
 6. If still FAIL on round 3 → §6. If PASS at any round → exit loop → §7 (SINGLE/CHILD) or §8 (PARENT).
-
-[PRESERVE — `spec/stage/test.md` §4 Rounds 2 & 3 retry; `_review_helpers.md` Section C.]
 
 ---
 
@@ -656,8 +635,6 @@ Triggered when `round == 3` AND the combined verdict from §4.3 is FAIL. Follow 
 - Summary format: `test round 3 FAIL — findings: [critical] <N>, [major] <M> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>[, parent=<P/F>])` — include `, parent=<P/F>` only when `path == PARENT`.
 - skip-review key: `qa`
 - Auto-continue proceeds to **§7 Phase 2.7** (SINGLE/CHILD) or **§8 Phase 3** (PARENT). Additionally append a self-review-trace addendum to `<!-- sdd:test:output -->` (update-in-place via Section F): "⚠ Round 3 escalation: tests still failing after 3 rounds, but `skip-review: qa` is set — auto-continuing. Findings remain on Issue/PR for human follow-up."
-
-[PRESERVE — `spec/stage/test.md` Phase 2.5; gate skip only; AI review always ran. Findings remain on GitHub for human follow-up.]
 
 ---
 
@@ -707,8 +684,6 @@ Update `<!-- sdd:test:output -->` self-review trace (update-in-place via Section
 Re-render the full body to `/tmp/sdd-test-output-$1.md` via the Write tool; PATCH the existing comment per Section F.
 
 The `/verify` outcome is **additional context** for §8's user gate. It does NOT by itself decide PASS/FAIL. Manual QA — or `skip-review: qa` auto-approval — is the final gate.
-
-[PRESERVE — `spec/stage/test.md` Phase 2.7 + §6; non-blocking semantics.]
 
 ---
 
@@ -767,7 +742,6 @@ Main session will:
 
 The re-spawn re-enters via §2 Resume short-circuit and jumps directly to §9 success branch (qa-approved) or §9 failure branch (qa-failed). All prior phases (work, reviews, /verify) are NOT re-run.
 
-[PRESERVE — `spec/stage/test.md` Phase 3; SYNTHESIS-v2 T1.4; `design/stage-designs/test.md` §6/§12.]
 [RETHINK — vs current arch]: v0.x's orchestrator handled this dialog directly. Arch B's split costs an extra spawn but preserves the "sub-agents non-interactive" invariant.
 
 ---
@@ -821,8 +795,6 @@ Steps:
 
 Main session then surfaces `/sdd implement <N>` to the user (or auto-invokes for `/sdd auto`). On a future test stage re-entry (after fixes), §3 Phase 1 re-evaluates the (updated) PR and runs the AI review loop from scratch — the 3-round budget RESETS, not a continuation.
 
-[PRESERVE — `spec/stage/test.md` Phase 4; label is authoritative state.]
-
 ---
 
 ## §10. Phase 5 — Child completion notification
@@ -844,8 +816,6 @@ Triggered inside §9 success branch step 3 when the just-completed Issue is a **
 
 3. If a match is found → this Issue is a child; capture parent's `<n>` as `<PARENT_N>`.
 4. If no match → not a child; skip §10 entirely.
-
-[PRESERVE — `spec/02-multilingual.md` §3; `_multilingual.md`.]
 
 ### Step 2: Update parent's children:output table row
 
@@ -893,8 +863,6 @@ If ALL children are now `sdd:done`:
 
 If not all children done: report remaining children to the sub-agent narrative; do NOT post a comment. (`/sdd auto` outer loop's child auto-discovery picks up remaining children.)
 
-[PRESERVE — `spec/stage/test.md` Phase 5; `design/stage-designs/test.md` §14; canonical implementation referenced from `implement.md` Phase 7.]
-
 ### Ordering
 
 Within §9 success branch, §10 runs AFTER successful label transition + close:
@@ -921,7 +889,7 @@ Final `>>> RESULT <<<` line. One of:
 | `ESCALATE: <summary>` | §6 Phase 2.5 — Round 3 FAIL with skip-review.qa OFF |
 | `FAIL: <reason>` | §1 / §3 / §4 / §7 / §9 atom-level error — main stops |
 
-### Sentinel format [PRESERVE]
+### Sentinel format
 
 Every return ends with:
 ```
@@ -963,7 +931,6 @@ ESCALATE: test round 3 FAIL — findings: [critical] 1, [major] 2 (completeness=
 FAIL: #42 is a Pull Request, not an Issue
 ```
 
-[PRESERVE — load-bearing: sentinel + literal status strings are parsed by main FSM. Do NOT reformat to JSON.]
 [NEW — Arch B / SYNTHESIS-v2 T1.4]: `OK NEEDS_MANUAL_QA` and `OK NEEDS_FRAMEWORK_CHOICE` are stage_test-specific additions. Main-session contract validation (`design/01-sub-agent-contract.md` §9) accepts them for stage_test only.
 
 ---
@@ -998,7 +965,7 @@ All review updates are in-place (duplicate-prevention search → PATCH if id fou
 - **No label changes outside §9.** This sub-agent does NOT call `gh issue edit ... --add-label` or `--remove-label` outside the §9 success branch (which transitions `sdd:test → sdd:done`). The failure branch (§9 qa-failed) makes NO label changes. The `<!-- sdd:children:output -->` PATCH in §10 is a comment update, not a label change.
 - **No `AskUserQuestion`.** Sub-agents are non-interactive. The manual QA gate (§8) and Round 3 FAIL (§6) are surfaced via `OK NEEDS_MANUAL_QA:` and `ESCALATE:` respectively for main to handle.
 - **No code commits on SINGLE path.** Test stage does not modify production code on the implementation PR; code changes for failing QA flow back to `implement` via the `qa-failed` branch. On PARENT INTEGRATION_PR path, the sub-agent MAY create a new `test/<parent-feature-name>` branch + commit + push + open a NEW PR for integration tests only (`spec/stage/test.md` §2 side effects).
-- **Do NOT set Claude as co-author** in any git commit (PARENT integration PR creation). [PRESERVE — `test_work.md` line 231.]
+- **Do NOT set Claude as co-author** in any git commit (PARENT integration PR creation).
 - **All Bash calls follow `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`.** No `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, redirections, or quoted variable expansion. No `find` against `/`, `~`, `/Users`, or paths outside the repo root.
 - **All comment posting follows `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F.** Write tool → temp file → `gh issue comment --body-file <path>` / `gh pr comment --body-file <path>` / `gh api ... -X PATCH --field body=@<path>`. Inline `--body` with multi-line content is forbidden (Common Contracts §9). Integration PR body via `--body-file`, NEVER heredoc.
 - **Independence invariant for reviewers.** Each reviewer (§4.2.1, §4.2.2, §4.2.3, §4.2.4) reasons from a fresh logical pass — only the work output + analyze/design outputs are shared inputs; no cross-visibility of verdicts. Work outputs are shared ground truth — no re-fetch (Reviewer 1 loads from temp file; Reviewers 2 and 3 reuse from context; §4.2.4 parent integration reviewer always fetches across Issues).
