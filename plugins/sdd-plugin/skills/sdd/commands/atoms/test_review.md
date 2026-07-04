@@ -33,7 +33,7 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
    - `$2=completeness` → `<<SKILL_DIR>>/commands/atoms/rubrics/test-completeness.md`
    - `$2=quality` → `<<SKILL_DIR>>/commands/atoms/rubrics/test-quality.md`
 
-5. **Codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Budget: 15 Read / 10 Grep / 5 Glob. Read PR test files and verify the test output's claims match actual test code.
+5. **Codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Apply the Section D budget for the current `depth`. Read PR test files and verify the test output's claims match actual test code.
 
 6. Apply criteria. Standard severity definitions.
 

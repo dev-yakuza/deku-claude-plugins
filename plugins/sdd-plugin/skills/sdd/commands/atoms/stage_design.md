@@ -4,7 +4,7 @@
 
 This file is the Arch B stage sub-agent body for the **Design** stage. The main session (or `resume.md` after bootstrap) spawns this sub-agent once per Issue per stage invocation. Internally it inlines the logic of the legacy `design_work`, `design_review` (completeness + quality), and `design_adversarial` atoms — runs them **serially** because the single-level spawn rule (`spec/00-common-contracts.md` §12) forbids nested Agent calls.
 
-The sub-agent owns the entire AI-review retry loop (max 3 rounds), the adversarial-only FAIL warning (R6), the SINGLE-vs-CHILDREN path decision, child Issue creation (idempotent across retry rounds), and posting of all marker comments via Section F. It does NOT call `AskUserQuestion`, does NOT change labels, and does NOT auto-proceed to implement — those are main-session responsibilities. On Round 3 FAIL with skip-review OFF the sub-agent returns an `ESCALATE:` line so main can interactively prompt the user.
+The sub-agent owns the entire AI-review retry loop (up to 2 rounds at `depth=deep` / 3 rounds otherwise), the adversarial-only FAIL warning (R6), the SINGLE-vs-CHILDREN path decision, child Issue creation (idempotent across retry rounds), and posting of all marker comments via Section F. It does NOT call `AskUserQuestion`, does NOT change labels, and does NOT auto-proceed to implement — those are main-session responsibilities. On max-round FAIL with skip-review OFF the sub-agent returns an `ESCALATE:` line so main can interactively prompt the user.
 
 > **Bash Command Execution**: every shell snippet below is its own simple Bash tool call. See canonical rules in `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. Codebase exploration uses **Grep / Glob / Read** tools, not Bash equivalents.
 
@@ -441,21 +441,15 @@ Each reviewer's reasoning context cannot see other reviewers' verdicts during it
 
 1. Read `<<SKILL_DIR>>/commands/atoms/rubrics/design-completeness.md`.
 
-2. Read the current design output and the analyze output from the Issue (fresh fetch — do NOT reuse the in-memory body from §3):
+2. Use the design and analyze outputs already in context — read them from temp files via the **Read tool** (`/tmp/sdd-design-output-$1.md` written by §3 Step 15; analyze output from `/tmp/sdd-analyze-output-$1.md` if still available, or from context). No GitHub API call needed. If temp files are unavailable, fall back to fetching from GitHub.
 
-   ```bash
-   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output")) | .body'
-   ```
-
-   If the design output substring is empty → return `FAIL: design output not found on Issue #$1` from this sub-agent.
-
-3. If this is a child Issue (per §3 Step 2 parent detection), also re-fetch the parent's design output for architectural consistency:
+3. If this is a child Issue (per §3 Step 2 parent detection), re-fetch the parent's design output (this always requires an API call since it lives on a different Issue):
 
    ```bash
    gh api repos/<owner>/<repo>/issues/<parent>/comments --jq '.[] | select(.body | contains("sdd:design:output")) | .body'
    ```
 
-4. **Optional codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Verify any code references in the design output against actual files. Budget: **15 Read / 10 Grep / 5 Glob** per reviewer. Track your own counts; if a cap is reached, stop exploration, note `rule_id: exploration-budget-exceeded` severity `minor`, and proceed to verdict.
+4. **Optional codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Verify any code references in the design output against actual files. Apply the Section D budget for the current `depth`. Track your own counts; if a cap is reached, stop exploration, note `rule_id: exploration-budget-exceeded` severity `minor`, and proceed to verdict.
 
 5. Apply the completeness rubric — analyze→design coverage, impact scope, constraints + mitigations, PR split logical/independently-deliverable, architecture consistent with codebase patterns, **Testability section present** (false `N/A` → critical), cross-stage analyze→design checks, child consistency (if child), and codebase verification of file/symbol references. Severity definitions:
    - **critical** — missing required item that prevents downstream implement; false Testability `N/A`
@@ -519,7 +513,7 @@ Repeat §4.1 with these substitutions:
   - **minor** — wording improvement, additional suggestion
 - Findings JSON `role`: `"quality"`
 
-Re-fetch the design + analyze outputs fresh (do NOT reuse §4.1's fetch). Independence invariant: do NOT incorporate completeness reviewer's verdict into this reviewer's reasoning.
+Reuse the design + analyze outputs already in context from §4.1 step 2 — no re-fetch. Independence invariant: do NOT incorporate completeness reviewer's verdict into this reviewer's reasoning.
 
 Record `quality_verdict = PASS | FAIL`. Proceed to §4.3.
 
@@ -538,7 +532,7 @@ Repeat §4.1 with these substitutions:
   - **minor** — worthwhile question that does not block (e.g. `pr-boundary-by-convenience`, `complexity-glossed` on pure-function changes)
 - Findings JSON `role`: `"adversarial"`
 
-Re-fetch the design + analyze outputs fresh. Independence invariant: do NOT incorporate completeness or quality verdicts into this reviewer's reasoning.
+Reuse the design + analyze outputs already in context — no re-fetch. Independence invariant: do NOT incorporate completeness or quality verdicts into this reviewer's reasoning.
 
 Record `adversarial_verdict = PASS | FAIL`. Proceed to §5.
 
@@ -546,38 +540,19 @@ Record `adversarial_verdict = PASS | FAIL`. Proceed to §5.
 
 ## §5. Phase 3 — Verdict combination
 
-After all three reviewers have posted, combine per `spec/stage/design.md` §6 / `design/stage-designs/design.md` §5:
+After all three reviewers have posted, follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section G (3-reviewer standard case).
 
-| completeness | quality | adversarial | Combined |
-|---|---|---|---|
-| PASS | PASS | PASS | **PASS** — exit loop, go to §8 Phase 6 |
-| PASS | PASS | FAIL | **Adversarial-only FAIL** — log warning, treat as FAIL (R6) |
-| FAIL | * | * | **FAIL** — retry or escalate |
-| * | FAIL | * | **FAIL** — retry or escalate |
+**`max_rounds`**: `2` when `depth == deep` (Fable — higher first-pass quality; round 3 is rarely needed and costly); `3` for `default` / `shallow`.
 
-Atom-level `FAIL: <reason>` from any reviewer (NOT a verdict — an error) is already handled in §4 (the sub-agent returned immediately). It does not reach this combiner.
+Round decision: All PASS → §8 Phase 6; FAIL and `round < max_rounds` → §6 Phase 4; FAIL and `round == max_rounds` → §7 Phase 5.
 
-### Adversarial-only FAIL warning (R6)
-
-If `completeness_verdict == PASS && quality_verdict == PASS && adversarial_verdict == FAIL`, log to the sub-agent's narrative (which becomes part of stdout the main session may show):
-
-> ⚠ Adversarial reviewer alone identified critical/major issues. Other reviewers passed. Surfacing for user awareness.
-
-Then treat the combined verdict as **FAIL** for round-decision purposes. R6 keeps current behavior — retry not auto-pass.
-
-[PRESERVE — `spec/stage/design.md` §7 Adversarial-only FAIL escalation; `design/stage-designs/design.md` §5; R6 keep-current-behavior decision.]
-
-### Round decision
-
-- All 3 PASS → exit loop → §8 Phase 6 (Normal path).
-- FAIL and `round < 3` → §6 Phase 4 (retry).
-- FAIL and `round == 3` → §7 Phase 5 (escalation gate).
+[PRESERVE — `spec/stage/design.md` §6 / §7; `design/stage-designs/design.md` §5; R6 keep-current-behavior decision.]
 
 ---
 
-## §6. Phase 4 — Retry loop (rounds 2 and 3)
+## §6. Phase 4 — Retry loop (up to round `max_rounds`)
 
-Increment `round` (now 2 or 3). Re-enter §3 with retry semantics:
+Increment `round`. Re-enter §3 with retry semantics:
 
 1. Step 0 collapses to `_review_helpers.md` Section C self-fetch (no preflight items). Per `spec/00-common-contracts.md` §7 + `_preflight.md` Section E.
 2. Steps 1–15 re-execute, addressing every `critical` and `major` finding from `<retry-findings>`.
@@ -585,44 +560,21 @@ Increment `round` (now 2 or 3). Re-enter §3 with retry semantics:
 4. **CHILDREN idempotency guard (Step 17a) is load-bearing across retry rounds.** If round 1 was CHILDREN, the prior round's `<!-- sdd:children:output -->` and child Issues persist. Step 17a detects this and skips Step 17b + 17c. The same `<children-list>` propagates into the §8 Phase 6 return value. [PRESERVE — `spec/stage/design.md` §8 Edge Case "Retry mode with OK CHILDREN"; `design/stage-designs/design.md` §6 "Children idempotency note" load-bearing; `design_work.md` line 188.]
 5. Re-run all 3 reviewers (§4.1 → §4.2 → §4.3) against the UPDATED `<!-- sdd:design:output -->`. Reviewer prompts are unchanged across rounds — reviewers always evaluate the CURRENT state of the output marker. Each reviewer's comment is PATCHed in place under its marker.
 6. Re-combine verdicts (§5).
-7. If still FAIL on round 3 → §7. If PASS at any round → exit loop → §8.
+7. If still FAIL on round `max_rounds` → §7. If PASS at any round → exit loop → §8.
 
 [PRESERVE — `spec/stage/design.md` §4 Rounds 2 & 3 retry; `_review_helpers.md` Section C; v0.36 atom-side self-fetch.]
 
 ---
 
-## §7. Phase 5 — Escalation gate (Round 3 FAIL only)
+## §7. Phase 5 — Escalation gate (max-round FAIL only)
 
-Triggered when `round == 3` AND the combined verdict from §5 is FAIL.
+Triggered when `round == max_rounds` AND the combined verdict from §5 is FAIL. Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section H:
+- Summary format: `design round <round> FAIL — findings: [critical] <N>, [major] <M> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>) (path: SINGLE|CHILDREN: #A,#B,#C)` — include the `path` field so the user has full context.
+- skip-review key: `design`
+- Auto-continue proceeds to §8 Phase 6 Normal path.
 
-### Step 1: Compose escalation summary
-
-Build a one-line summary listing remaining `critical` and `major` findings with role labels, plus the path:
-
-```
-design round 3 FAIL — findings: [critical] <N>, [major] <M> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>) (path: SINGLE|CHILDREN: #A,#B,#C)
-```
-
-Where `<N>` and `<M>` are the counts across all three reviewers' findings arrays (re-derived by reading the latest three review comment JSON blocks if needed — use the Section B.4 parsing pattern). `path` carries SINGLE or CHILDREN with the child list so the user has full context.
-
-### Step 2: Read `.github/.sdd-config` for skip-review
-
-Use the Read tool on `.github/.sdd-config`. If the file does not exist or has no `skip-review:` line → treat as empty.
-
-Parse the comma-separated list at the `skip-review:` key. Trim whitespace per entry. Valid entries: `analyze`, `design`, `implement`, `pr`, `qa`.
-
-### Step 3: Branch on skip-review for `design`
-
-- **`design` IS in skip-review** → log to the sub-agent narrative:
-  > ⚠ Round 3 FAIL; `skip-review: design` is set — auto-continuing with findings persisted on Issue. No user prompt.
-
-  Proceed to §8 Phase 6 **Normal path**. Do NOT return `ESCALATE`.
-
-- **`design` is NOT in skip-review** → return `ESCALATE: <summary from Step 1>` from this sub-agent. Main session handles `AskUserQuestion` per `design/01-sub-agent-contract.md` §3 + §6.
-
-[PRESERVE — `spec/stage/design.md` §4 Phase 1.5 Skip-review semantics: gate skip only; AI review always ran (it just failed). Findings remain on GitHub for human follow-up.]
-[PRESERVE — `design/01-sub-agent-contract.md` §4: sub-agent NEVER calls `AskUserQuestion`. Sub-agent surfaces decision to main via `ESCALATE:`; main handles the interactive prompt.]
-[PRESERVE — `design/stage-designs/design.md` §7.3: ESCALATE does NOT roll back posted artifacts — design comment + (if applicable) children list + child Issues persist. On Continue, Phase 6 simply transitions the parent label.]
+[PRESERVE — `spec/stage/design.md` §4 Phase 1.5 Skip-review semantics: gate skip only; AI review always ran. Findings remain on GitHub for human follow-up.]
+[PRESERVE — `design/stage-designs/design.md` §7.3: ESCALATE does NOT roll back posted artifacts — design comment + children list + child Issues persist. On Continue, Phase 6 simply transitions the parent label.]
 
 ---
 
@@ -730,7 +682,7 @@ All updates are in-place (duplicate-prevention search → PATCH if id found, els
 - **CHILDREN idempotency is load-bearing.** If `<!-- sdd:children:output -->` already exists on the Issue (retry case), do NOT re-create children — preserve the existing children-list and child Issues, only update the design output. Across retry rounds 2 and 3, the same set of children persists. (`spec/stage/design.md` §5 / §8; `design/stage-designs/design.md` §10.5; `design_work.md` Step 16a line 130 and Hard rule line 188.)
 - **All Bash calls follow `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`.** No `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, redirections, or quoted variable expansion. No `find` against `/`, `~`, `/Users`, or paths outside the repo root.
 - **All comment posting follows `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F.** Write tool → temp file → `gh issue comment --body-file <path>` or `gh api ... -X PATCH --field body=@<path>`. Inline `--body` with multi-line content is forbidden (Common Contracts §9). The same Section F.4 constraint applies to `gh issue create --body-file` for child Issue creation.
-- **Independence invariant for reviewers.** Each reviewer (§4.1, §4.2, §4.3) reasons from a fresh logical pass — only the design + analyze outputs are shared input; no cross-visibility of verdicts. Re-fetch the design output for each reviewer.
+- **Independence invariant for reviewers.** Each reviewer (§4.1, §4.2, §4.3) reasons from a fresh logical pass — only the design + analyze outputs are shared input; no cross-visibility of verdicts. Work outputs are shared ground truth — no re-fetch (Reviewer 1 loads from temp files; Reviewers 2 and 3 reuse from context).
 - **Retry rounds overwrite.** Per-marker comments are PATCHed in place across rounds (Common Contracts §4 Update-in-place invariant). Child Issues themselves are NOT recreated.
 - **Stay within the repository.** Do not Read absolute paths outside the working tree. Do not modify files outside `.github/` or the working tree. Edit / NotebookEdit are forbidden. The Write tool is permitted ONLY for rendering comment bodies and child Issue bodies to the deterministic `/tmp/sdd-*-$1*.md` paths.
 
@@ -738,13 +690,5 @@ All updates are in-place (duplicate-prevention search → PATCH if id found, els
 
 ## Cross-references
 
-- Spec contract: `spec/stage/design.md`
-- Cross-cutting rules: `spec/00-common-contracts.md`
-- Multilingual: `spec/02-multilingual.md`
-- Architecture: `design/00-architecture.md`
-- Sub-agent contract: `design/01-sub-agent-contract.md`
-- Per-stage design: `design/stage-designs/design.md`
-- Companion stage: `<<SKILL_DIR>>/commands/atoms/stage_analyze.md` (precondition source)
-- Rubric files: `<<SKILL_DIR>>/commands/atoms/rubrics/design-{completeness,quality,adversarial}.md`
-- Shared helpers: `<<SKILL_DIR>>/commands/atoms/_preflight.md` (Medium tier Step 0), `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` (Sections B/C/D/E/F), `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`, `<<SKILL_DIR>>/commands/atoms/_multilingual.md`
+Specs: `spec/stage/design.md`, `spec/00-common-contracts.md`, `spec/02-multilingual.md`, `design/00-architecture.md`, `design/01-sub-agent-contract.md`, `design/stage-designs/design.md`. Companion: `stage_analyze.md`. Rubrics: `design-{completeness,quality,adversarial}.md`. Helpers: `_preflight.md` (Medium tier), `_review_helpers.md`, `_bash_rules.md`, `_multilingual.md`.
 - Output templates: `<<SKILL_DIR>>/templates/<lang>/output_design.md`, `output_children.md`, `output_child_issue.md`

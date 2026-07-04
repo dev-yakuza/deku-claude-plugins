@@ -4,7 +4,7 @@
 
 This file is the Arch B stage sub-agent body for the **Analyze** stage. The main session (or `resume.md` after bootstrap) spawns this sub-agent once per Issue per stage invocation. Internally it inlines the logic of the legacy `analyze_work`, `analyze_review` (completeness + quality), and `analyze_adversarial` atoms — runs them **serially** because the single-level spawn rule (`spec/00-common-contracts.md` §12) forbids nested Agent calls.
 
-The sub-agent owns the entire AI-review retry loop (max 3 rounds), the adversarial-only FAIL warning (R6), the no-action shortcut, and posting all five marker comments via Section F. It does NOT call `AskUserQuestion`, does NOT change labels, and does NOT auto-proceed to design — those are main-session responsibilities. On Round 3 FAIL with skip-review OFF the sub-agent returns an `ESCALATE:` line so main can interactively prompt the user.
+The sub-agent owns the entire AI-review retry loop (up to 2 rounds at `depth=deep` / 3 rounds otherwise), the adversarial-only FAIL warning (R6), the no-action shortcut, and posting all five marker comments via Section F. It does NOT call `AskUserQuestion`, does NOT change labels, and does NOT auto-proceed to design — those are main-session responsibilities. On max-round FAIL with skip-review OFF the sub-agent returns an `ESCALATE:` line so main can interactively prompt the user.
 
 > **Bash Command Execution**: every shell snippet below is its own simple Bash tool call. See canonical rules in `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. Codebase exploration uses **Grep / Glob / Read** tools, not Bash equivalents.
 
@@ -313,15 +313,9 @@ Each reviewer's reasoning context cannot see other reviewers' verdicts during it
 
 1. Read `<<SKILL_DIR>>/commands/atoms/rubrics/analyze-completeness.md`.
 
-2. Read the current analyze output from the Issue (fresh fetch — do NOT reuse the in-memory body from §3):
+2. Read the analyze output from the temp file written in §3 Step 12 — use the **Read tool** on `/tmp/sdd-analyze-output-$1.md`. This is identical to the posted GitHub comment body and requires no API call. If the temp file is unavailable (e.g. sub-agent restart), fall back to fetching from GitHub.
 
-   ```bash
-   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("sdd:analyze:output")) | .body'
-   ```
-
-   If empty → return `FAIL: analyze output not found on Issue #$1` from this sub-agent.
-
-3. **Optional codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Verify any code references in the analyze output against actual files. Budget: **15 Read / 10 Grep / 5 Glob** per reviewer. Track your own counts; if a cap is reached, stop exploration, note `rule_id: exploration-budget-exceeded` severity `minor`, and proceed to verdict.
+3. **Optional codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Verify any code references in the analyze output against actual files. Apply the Section D budget for the current `depth`. Track your own counts; if a cap is reached, stop exploration, note `rule_id: exploration-budget-exceeded` severity `minor`, and proceed to verdict.
 
 4. Apply the completeness rubric — requirements coverage and internal consistency. Severity definitions:
    - **critical** — missing required checklist item that prevents downstream design
@@ -385,7 +379,7 @@ Repeat §4.1 with these substitutions:
   - **minor** — wording improvement, additional suggestion
 - Findings JSON `role`: `"quality"`
 
-Re-fetch the analyze output fresh (do NOT reuse §4.1's fetch). Independence invariant: do NOT incorporate completeness reviewer's verdict into this reviewer's reasoning.
+Reuse the analyze output already in context from §4.1 step 2 — no re-fetch. Independence invariant: do NOT incorporate completeness reviewer's verdict into this reviewer's reasoning.
 
 Record `quality_verdict = PASS | FAIL`. Proceed to §4.3.
 
@@ -403,7 +397,7 @@ Repeat §4.1 with these substitutions:
   - **minor** — worthwhile question that does not block (priority swap-test, implicit device assumption)
 - Findings JSON `role`: `"adversarial"`
 
-Re-fetch the analyze output fresh. Independence invariant: do NOT incorporate completeness or quality verdicts into this reviewer's reasoning.
+Reuse the analyze output already in context — no re-fetch. Independence invariant: do NOT incorporate completeness or quality verdicts into this reviewer's reasoning.
 
 Record `adversarial_verdict = PASS | FAIL`. Proceed to §5.
 
@@ -411,81 +405,39 @@ Record `adversarial_verdict = PASS | FAIL`. Proceed to §5.
 
 ## §5. Phase 3 — Verdict combination
 
-After all three reviewers have posted, combine per `spec/stage/analyze.md` §5 and `design/stage-designs/analyze.md` §5:
+After all three reviewers have posted, follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section G (3-reviewer standard case).
 
-| completeness | quality | adversarial | Combined |
-|---|---|---|---|
-| PASS | PASS | PASS | **PASS** — exit loop, go to §8 Phase 6 |
-| PASS | PASS | FAIL | **Adversarial-only FAIL** — log warning, treat as FAIL (R6) |
-| FAIL | * | * | **FAIL** — retry or escalate |
-| * | FAIL | * | **FAIL** — retry or escalate |
+**`max_rounds`**: `2` when `depth == deep` (Fable — higher first-pass quality; round 3 is rarely needed and costly); `3` for `default` / `shallow`.
 
-Atom-level `FAIL: <reason>` from any reviewer (NOT a verdict — an error) is already handled in §4 (the sub-agent returned immediately). It does not reach this combiner.
+Round decision: All PASS → §8 Phase 6; FAIL and `round < max_rounds` → §6 Phase 4; FAIL and `round == max_rounds` → §7 Phase 5.
 
-### Adversarial-only FAIL warning (R6)
-
-If `completeness_verdict == PASS && quality_verdict == PASS && adversarial_verdict == FAIL`, log to the sub-agent's narrative (which becomes part of stdout the main session may show):
-
-> ⚠ Adversarial reviewer alone identified critical/major issues. Other reviewers passed. Surfacing for user awareness.
-
-Then treat the combined verdict as **FAIL** for round-decision purposes. R6 keeps current behavior — retry not auto-pass.
-
-[PRESERVE — `spec/stage/analyze.md` §6 Adversarial-only FAIL escalation; `analyze.md` line 89.]
-
-### Round decision
-
-- All 3 PASS → exit loop → §8 Phase 6 (Normal path).
-- FAIL and `round < 3` → §6 Phase 4 (retry).
-- FAIL and `round == 3` → §7 Phase 5 (escalation gate).
+[PRESERVE — `spec/stage/analyze.md` §5 and §6; `design/stage-designs/analyze.md` §5; `analyze.md` line 89.]
 
 ---
 
-## §6. Phase 4 — Retry loop (rounds 2 and 3)
+## §6. Phase 4 — Retry loop (up to round `max_rounds`)
 
-Increment `round` (now 2 or 3). Re-enter §3 with retry semantics:
+Increment `round`. Re-enter §3 with retry semantics:
 
 1. Step 0 collapses to `_review_helpers.md` Section C self-fetch (no preflight items). Per `spec/00-common-contracts.md` §7 + `_preflight.md` Section E.
 2. Steps 1–12 re-execute, addressing every `critical` and `major` finding from `<retry-findings>`.
 3. Step 12's duplicate-prevention search WILL find the existing `<!-- sdd:analyze:output -->` comment id and PATCH it in place (round-to-round overwrites, not appends). [PRESERVE — Common Contracts §4 Update-in-place invariant.]
 4. Re-run all 3 reviewers (§4.1 → §4.2 → §4.3) against the UPDATED `<!-- sdd:analyze:output -->`. Reviewer prompts are unchanged across rounds — reviewers always evaluate the CURRENT state of the output marker. Each reviewer's comment is PATCHed in place under its marker.
 5. Re-combine verdicts (§5).
-6. If still FAIL on round 3 → §7. If PASS at any round → exit loop → §8.
+6. If still FAIL on round `max_rounds` → §7. If PASS at any round → exit loop → §8.
 
 [PRESERVE — `spec/stage/analyze.md` §6 Rounds 2 & 3 retry; `_review_helpers.md` Section C; v0.36 atom-side self-fetch.]
 
 ---
 
-## §7. Phase 5 — Escalation gate (Round 3 FAIL only)
+## §7. Phase 5 — Escalation gate (max-round FAIL only)
 
-Triggered when `round == 3` AND the combined verdict from §5 is FAIL.
+Triggered when `round == max_rounds` AND the combined verdict from §5 is FAIL. Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section H:
+- Summary format: `analyze round <round> FAIL — findings: [critical] <N>, [major] <M> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>)`
+- skip-review key: `analyze`
+- Auto-continue proceeds to §8 Phase 6 Normal path.
 
-### Step 1: Compose escalation summary
-
-Build a one-line summary listing remaining `critical` and `major` findings with role labels:
-
-```
-analyze round 3 FAIL — findings: [critical] <N>, [major] <M> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>)
-```
-
-Where `<N>` and `<M>` are the counts across all three reviewers' findings arrays (re-derived by reading the latest three review comment JSON blocks if needed — use the Section B.4 parsing pattern).
-
-### Step 2: Read `.github/.sdd-config` for skip-review
-
-Use the Read tool on `.github/.sdd-config`. If the file does not exist or has no `skip-review:` line → treat as empty.
-
-Parse the comma-separated list at the `skip-review:` key. Trim whitespace per entry. Valid entries: `analyze`, `design`, `implement`, `pr`, `qa`.
-
-### Step 3: Branch on skip-review for `analyze`
-
-- **`analyze` IS in skip-review** → log to the sub-agent narrative:
-  > ⚠ Round 3 FAIL; `skip-review: analyze` is set — auto-continuing with findings persisted on Issue. No user prompt.
-
-  Proceed to §8 Phase 6 **Normal path**. Do NOT return `ESCALATE`.
-
-- **`analyze` is NOT in skip-review** → return `ESCALATE: <summary from Step 1>` from this sub-agent. Main session handles `AskUserQuestion` per `design/01-sub-agent-contract.md` §3 + §6.
-
-[PRESERVE — `spec/stage/analyze.md` §7 Skip-review semantics: gate skip only; AI review always ran (it just failed). Findings remain on GitHub for human follow-up.]
-[PRESERVE — `design/01-sub-agent-contract.md` §4: sub-agent NEVER calls `AskUserQuestion`. Sub-agent surfaces decision to main via `ESCALATE:`; main handles the interactive prompt.]
+[PRESERVE — `spec/stage/analyze.md` §7 Skip-review semantics: gate skip only; AI review always ran. Findings remain on GitHub for human follow-up.]
 
 ---
 
@@ -592,7 +544,7 @@ All updates are in-place (duplicate-prevention search → PATCH if id found, els
 - **No branches / commits / PRs.** Analyze is read-only against the working tree (`analyze_work.md` line 129; `spec/stage/analyze.md` §2).
 - **All Bash calls follow `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`.** No `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, redirections, or quoted variable expansion. No `find` against `/`, `~`, `/Users`, or paths outside the repo root.
 - **All comment posting follows `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F.** Write tool → temp file → `gh issue comment --body-file <path>` or `gh api ... -X PATCH --field body=@<path>`. Inline `--body` with multi-line content is forbidden (Common Contracts §9).
-- **Independence invariant for reviewers.** Each reviewer (§4.1, §4.2, §4.3) reasons from a fresh logical pass — only the work output is shared input; no cross-visibility of verdicts. Re-fetch the analyze output for each reviewer.
+- **Independence invariant for reviewers.** Each reviewer (§4.1, §4.2, §4.3) reasons from a fresh logical pass — only the work output is shared input; no cross-visibility of verdicts. Work output is shared ground truth — no re-fetch (Reviewer 1 loads from temp file; Reviewers 2 and 3 reuse from context).
 - **Retry rounds overwrite.** Per-marker comments are PATCHed in place across rounds (Common Contracts §4 Update-in-place invariant).
 - **Stay within the repository.** Do not Read absolute paths outside the working tree. Do not modify files outside `.github/` or the working tree. Edit / NotebookEdit are forbidden. The Write tool is permitted ONLY for rendering comment bodies to the deterministic `/tmp/sdd-*-$1.md` paths.
 
@@ -600,12 +552,4 @@ All updates are in-place (duplicate-prevention search → PATCH if id found, els
 
 ## Cross-references
 
-- Spec contract: `spec/stage/analyze.md`
-- Cross-cutting rules: `spec/00-common-contracts.md`
-- Multilingual: `spec/02-multilingual.md`
-- Architecture: `design/00-architecture.md`
-- Sub-agent contract: `design/01-sub-agent-contract.md`
-- Per-stage design: `design/stage-designs/analyze.md`
-- Rubric files: `<<SKILL_DIR>>/commands/atoms/rubrics/analyze-{completeness,quality,adversarial}.md`
-- Shared helpers: `<<SKILL_DIR>>/commands/atoms/_preflight.md` (Light tier Step 0), `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` (Sections B/C/D/E/F), `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`, `<<SKILL_DIR>>/commands/atoms/_multilingual.md`
-- Output template: `<<SKILL_DIR>>/templates/<lang>/output_analyze.md`
+Specs: `spec/stage/analyze.md`, `spec/00-common-contracts.md`, `spec/02-multilingual.md`, `design/00-architecture.md`, `design/01-sub-agent-contract.md`, `design/stage-designs/analyze.md`. Rubrics: `analyze-{completeness,quality,adversarial}.md`. Helpers: `_preflight.md` (Light tier), `_review_helpers.md`, `_bash_rules.md`, `_multilingual.md`. Template: `templates/<lang>/output_analyze.md`.

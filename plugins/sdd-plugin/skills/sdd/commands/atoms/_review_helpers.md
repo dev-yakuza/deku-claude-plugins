@@ -239,14 +239,17 @@ If you absolutely must shell out (e.g. running a project script the work output 
 
 ### D.2 Budget
 
-Hard caps to prevent runaway exploration:
-- Max **15 Read tool calls** per review atom invocation.
-- Max **10 Grep tool calls** per review atom invocation.
-- Max **5 Glob tool calls** per review atom invocation.
+Hard caps vary by `depth` dial — apply to every reviewer in the stage:
 
-For lighter atoms (`tdd_step_review`): **5 Read / 3 Grep / 0 Glob**.
+| Depth | Read | Grep | Glob | Notes |
+|---|---|---|---|---|
+| `shallow` | 3 | 1 | 0 | Light verification only |
+| `default` | 8 | 5 | 2 | Targeted exploration |
+| `deep` | 12 | 7 | 3 | Thorough but bounded |
 
-Track your own counts. If a cap is reached, stop exploration, note the limit in your findings (`rule_id: exploration-budget-exceeded`, severity `minor`), and proceed to verdict based on what you found.
+For lighter atoms (`tdd_step_review`): **5 Read / 3 Grep / 0 Glob** (depth-independent).
+
+Track your own counts. If a cap is reached, stop exploration, note `rule_id: exploration-budget-exceeded` severity `minor`, and proceed to verdict.
 
 ### D.3 What NOT to do
 
@@ -363,3 +366,23 @@ gh issue create --title "<title>" --body-file <path> --label <label-1> --label <
 ```
 
 Multi-line titles are not required by SDD, so `--title "<title>"` remains a single-line argument and is safe.
+
+---
+
+## Section G — Shared verdict combiner (3-reviewer stages)
+
+PASS+PASS+PASS → **PASS** (exit loop, Phase 6). PASS+PASS+FAIL → **Adversarial-only FAIL (R6)**: log "⚠ Adversarial reviewer alone identified critical/major issues. Other reviewers passed. Surfacing for user awareness." → treat as FAIL, no auto-pass. Any other FAIL combination → **FAIL**. Atom-level `FAIL:` errors are returned before this point.
+
+Round decision: All PASS → Phase 6. FAIL + round < 3 → Phase 4. FAIL + round == 3 → Phase 5.
+
+---
+
+## Section H — Shared escalation gate (Round 3 FAIL)
+
+When `round == 3` AND combined verdict is FAIL:
+
+1. Build summary: `<stage> round 3 FAIL — findings: [critical] <N>, [major] <M> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>)` — re-derive N/M via Section B.4 if needed; stages append extra fields (design: `(path: SINGLE|CHILDREN: ...)`, test: `, parent=<P/F>`, PR Final: `, code-review=<P/F/skipped>, security-review=<P/F/skipped>`).
+2. Read `.github/.sdd-config`; parse `skip-review:` list (valid: analyze, design, implement, pr, qa).
+3. Stage key (analyze→`analyze`, design→`design`, test→`qa`, PR Final→`pr`): key in list → log "⚠ Round 3 FAIL; skip-review: <key> set — auto-continuing. Findings remain for human follow-up." → Normal path; NOT in list → return `ESCALATE: <summary>`.
+
+[PRESERVE — sub-agent NEVER calls `AskUserQuestion`. Return `ESCALATE:` to main; main handles the interactive prompt.]

@@ -371,7 +371,7 @@ If `FAIL:` → return that line as this sub-agent's result. If `OK PROCEED` → 
 `_pr_final.md` covers:
 - Phase 4: first-round PR creation with R8 auto-route (existing-PR detected → soft retry; per SYNTHESIS-v2 T1.1 no `strict-pr-creation` config key).
 - Phase 5: 3-round PR Final review loop — for each round N ∈ {1, 2, 3}:
-  - 5.N.1 — 3 SDD reviewers serial (completeness → quality → adversarial; each re-fetches PR diff fresh).
+  - 5.N.1 — 3 SDD reviewers serial (completeness → quality → adversarial; all share PR diff from §4.3.a.2 — no re-fetch per Change B).
   - 5.N.2 — `/code-review` Skill (after 5.N.1; effort by depth).
   - 5.N.3 — `/security-review` Skill (after 5.N.2; shallow-skip).
   - 5.N.4 — `<!-- sdd:review:implement:tools -->` summary marker on PR.

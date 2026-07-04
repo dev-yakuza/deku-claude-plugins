@@ -35,7 +35,7 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
    - `$2=completeness` → `<<SKILL_DIR>>/commands/atoms/rubrics/design-completeness.md`
    - `$2=quality` → `<<SKILL_DIR>>/commands/atoms/rubrics/design-quality.md`
 
-5. **Codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Both roles benefit from verifying design's file/symbol references actually exist. Budget: 15 Read / 10 Grep / 5 Glob.
+5. **Codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Both roles benefit from verifying design's file/symbol references actually exist. Apply the Section D budget for the current `depth`.
 
 6. Apply the criteria. Standard severity definitions:
    - **critical**: Must fix — incorrect approach, missing requirement, will not work

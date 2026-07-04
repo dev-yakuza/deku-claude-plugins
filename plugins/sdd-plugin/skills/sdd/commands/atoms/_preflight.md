@@ -131,7 +131,7 @@ Check for a project-maintained rules index for the current SDD stage. Load only 
 
 ## Section C — Budget interaction with review atoms
 
-Step 0 budgets (this file) are **SEPARATE** from review atoms' codebase exploration budgets (15 Read / 10 Grep / 5 Glob per `_review_helpers.md` Section D).
+Step 0 budgets (this file) are **SEPARATE** from review atoms' codebase exploration budgets (depth-stratified per `_review_helpers.md` Section D.2).
 
 - Step 0 runs in **work atoms** only.
 - Codebase exploration runs in **review atoms** only.
