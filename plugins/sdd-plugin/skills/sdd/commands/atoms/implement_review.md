@@ -43,7 +43,7 @@ The orchestrator invokes this atom **twice in parallel** in a single message. Th
    - `$2=completeness` → `<<SKILL_DIR>>/commands/atoms/rubrics/implement-completeness.md`
    - `$2=quality` → `<<SKILL_DIR>>/commands/atoms/rubrics/implement-quality.md`
 
-6. **Codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Budget: 15 Read / 10 Grep / 5 Glob. Verify file references in design vs actual PR diff; read similar existing implementations to compare patterns.
+6. **Codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Apply the Section D budget for the current `depth`. Verify file references in design vs actual PR diff; read similar existing implementations to compare patterns.
 
 7. Apply criteria. Standard severity:
    - **critical**: broken functionality, security vulnerability, missing requirement

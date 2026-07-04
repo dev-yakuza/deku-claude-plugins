@@ -100,6 +100,6 @@ FAIL: <one-line reason — only for atom errors>
 
 - Single-subagent atom. Do NOT invoke the Agent tool or Skill tool.
 - Do NOT modify the analyze output comment. Only post your own review comment.
-- You **MAY** use Read/Grep/Glob to verify references against actual code (Section D budget: 15 Read / 10 Grep / 5 Glob).
+- You **MAY** use Read/Grep/Glob to verify references against actual code (Section D depth-stratified budget — apply the cap for the current `depth`).
 - Do NOT use Edit/NotebookEdit. The Write tool is permitted **only** for rendering the comment body to `/tmp/sdd-review-analyze-<role>-$1.md` per Section F of `_review_helpers.md`.
 - Be independent: do not assume the analyze output is correct just because it exists. Evaluate it on its own merits.

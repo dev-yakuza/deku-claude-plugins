@@ -432,7 +432,7 @@ Special case: PARENT path with no E2E setup detected and `$4` empty → return `
 Three reviewers (SINGLE/CHILD) or four reviewers (PARENT) execute **one after another**. Each reviewer reads ONLY its role-specific rubric, optionally performs bounded codebase exploration, posts under its marker, and produces a PASS/FAIL verdict + findings JSON.
 
 [PRESERVE — independence invariant from `design/stage-designs/test.md` §4 and Common Contracts §12]:
-Each reviewer's reasoning context cannot see other reviewers' verdicts during its own evaluation. Even though execution is serial, structure each reviewer's work as a **fresh logical pass** — do NOT feed Reviewer N+1 the comment body Reviewer N just posted; do NOT let later reviewers see earlier reviewers' verdicts. The only shared input is the test output under `<!-- sdd:test:output -->` plus the analyze/design outputs, which each reviewer re-fetches.
+Each reviewer's reasoning context cannot see other reviewers' verdicts during its own evaluation. Even though execution is serial, structure each reviewer's work as a **fresh logical pass** — do NOT feed Reviewer N+1 the comment body Reviewer N just posted; do NOT let later reviewers see earlier reviewers' verdicts. Work outputs (test output, analyze/design outputs) are shared ground truth and are reused from context without re-fetching.
 
 [PRESERVE — `test_review.md` line 80 / `test_adversarial.md` line 78 / `parent_integration_review.md` line 111]: Write tool permitted only for rendering the comment body to the deterministic temp path. Edit / NotebookEdit forbidden inside reviewer logic.
 
@@ -440,21 +440,9 @@ Each reviewer's reasoning context cannot see other reviewers' verdicts during it
 
 1. Read `<<SKILL_DIR>>/commands/atoms/rubrics/test-completeness.md`.
 
-2. Re-fetch the test output from the Issue (fresh fetch — do NOT reuse the in-memory body from §4.1):
+2. Use the test output from the temp file written in §4.1 Step 7 — **Read tool** on `/tmp/sdd-test-output-$1.md`. Also use the analyze + design outputs already in context (fetched during §4.1 Steps 1–2). No GitHub API call needed for these. Fall back to GitHub fetch only if temp files are unavailable.
 
-   ```bash
-   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("sdd:test:output")) | .body'
-   ```
-
-   If empty → return `FAIL: test output not found on Issue #$1` from this sub-agent.
-
-   Also re-fetch the analyze + design outputs from the Issue for cross-stage coverage checks:
-
-   ```bash
-   gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("sdd:analyze:output") or contains("sdd:design:output")) | .body'
-   ```
-
-3. **Optional codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Budget: **15 Read / 10 Grep / 5 Glob**. Read the PR's test files (SINGLE) or integration PR's test files + at least one child's test file (PARENT). Verify the test output's claims match actual test code. Reviewers MAY also Read the `<!-- sdd:test-evidence:step-<n> -->` comments on the Issue to cross-check `TESTS: <p>/<t> FAILED: <f>` claims against captured runner output (`_test_evidence.md` lines 113–115; `spec/stage/test.md` §8). Track your own counts; if a cap is reached, stop exploration, note `rule_id: exploration-budget-exceeded` severity `minor`, and proceed to verdict.
+3. **Optional codebase exploration** per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Apply the Section D budget for the current `depth`. Read the PR's test files (SINGLE) or integration PR's test files + at least one child's test file (PARENT). Verify the test output's claims match actual test code. Reviewers MAY also Read the `<!-- sdd:test-evidence:step-<n> -->` comments on the Issue to cross-check `TESTS: <p>/<t> FAILED: <f>` claims against captured runner output (`_test_evidence.md` lines 113–115; `spec/stage/test.md` §8). Track your own counts; if a cap is reached, stop exploration, note `rule_id: exploration-budget-exceeded` severity `minor`, and proceed to verdict.
 
 4. Apply the completeness rubric — test coverage against analyze/design requirements + DoD. Severity definitions (per `rubrics/test-completeness.md`):
    - **critical** — a required user flow has no test coverage.
@@ -531,7 +519,7 @@ Repeat §4.2.1 with these substitutions:
   - **minor** — wording, suggestion for additional boundary case, etc.
 - Findings JSON `role`: `"quality"`
 
-Re-fetch the test output + analyze/design outputs fresh (do NOT reuse §4.2.1's fetch). Independence invariant: do NOT incorporate completeness reviewer's verdict into this reviewer's reasoning.
+Reuse the test output + analyze/design outputs already in context from §4.2.1 — no re-fetch. Independence invariant: do NOT incorporate completeness reviewer's verdict into this reviewer's reasoning.
 
 Record `quality_verdict = PASS | FAIL`. Proceed to §4.2.3.
 
@@ -550,7 +538,7 @@ Repeat §4.2.1 with these substitutions:
   - **minor** — worthwhile question that does not block.
 - Findings JSON `role`: `"adversarial"`
 
-Re-fetch the test output + analyze/design outputs fresh. Independence invariant: do NOT incorporate completeness or quality verdicts into this reviewer's reasoning.
+Reuse the test output + analyze/design outputs already in context — no re-fetch. Independence invariant: do NOT incorporate completeness or quality verdicts into this reviewer's reasoning.
 
 Record `adversarial_verdict = PASS | FAIL`. Proceed to §4.2.4 (PARENT only) or §4.3 (SINGLE).
 
@@ -576,7 +564,7 @@ Record `adversarial_verdict = PASS | FAIL`. Proceed to §4.2.4 (PARENT only) or 
 
    (One Bash call per child; substitute the literal child number.) Also re-derive each child's PR (`gh pr list --search "Refs #<child>" --state merged --json number --jq '.[0].number'`) and read its diff if needed for cross-child invariants.
 
-4. **Codebase exploration (mandatory)** per `_review_helpers.md` Section D: read the interface/contract files where children connect; verify cross-child invariants hold in actual code. Budget: 15 Read / 10 Grep / 5 Glob.
+4. **Codebase exploration (mandatory)** per `_review_helpers.md` Section D: read the interface/contract files where children connect; verify cross-child invariants hold in actual code. Apply the Section D budget for the current `depth`.
 
 5. Apply the synthesis criteria from the rubric:
    - Feature distribution coverage across children.
@@ -632,28 +620,18 @@ After all reviewers (3 for SINGLE/CHILD; 4 for PARENT) have posted, combine per 
 | completeness | quality | adversarial | parent_integration (PARENT only) | Combined |
 |---|---|---|---|---|
 | PASS | PASS | PASS | PASS | **PASS** — exit loop |
-| PASS | PASS | FAIL | * | **Adversarial-only FAIL** (R6 — see below) — treat as FAIL |
+| PASS | PASS | FAIL | * | **Adversarial-only FAIL** (R6) — treat as FAIL |
 | FAIL | * | * | * | **FAIL** — retry or escalate |
 | * | FAIL | * | * | **FAIL** — retry or escalate |
 | * | * | * | FAIL (PARENT) | **FAIL** — retry or escalate |
 
-Atom-level `FAIL: <reason>` from any reviewer (NOT a verdict — an error) is already handled in §4.2 (the sub-agent returned immediately). It does not reach this combiner.
+Atom-level `FAIL: <reason>` from any reviewer (an error, not a verdict) is handled before this combiner.
 
-#### Adversarial-only FAIL warning (R6)
+For R6 warning text and round-decision behavior, follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section G — R6 applies when adversarial FAIL and all others PASS; for PARENT also verify `parent_integration_verdict == PASS`.
 
-If `completeness_verdict == PASS && quality_verdict == PASS && adversarial_verdict == FAIL` (and for PARENT also `parent_integration_verdict == PASS`), log to the sub-agent's narrative (which becomes part of stdout the main session may show):
-
-> ⚠ Adversarial reviewer alone identified critical/major issues. Other reviewers passed. Surfacing for user awareness.
-
-Then treat the combined verdict as **FAIL** for round-decision purposes. R6 keeps current behavior — retry not auto-pass.
+Round decision: All PASS → §7 (SINGLE/CHILD) or §8 (PARENT); FAIL and `round < 3` → §5; FAIL and `round == 3` → §6.
 
 [PRESERVE — `spec/stage/test.md` §10 adversarial-only-FAIL escalation; `spec/edge-cases.md` §19.]
-
-#### Round decision
-
-- All reviewers PASS → exit loop → §7 Phase 2.7 (SINGLE/CHILD) or §8 Phase 3 (PARENT).
-- FAIL and `round < 3` → §5 Phase 4 retry (increment `round`, re-enter §4.1).
-- FAIL and `round == 3` → §6 Phase 2.5 escalation gate.
 
 ---
 
@@ -674,37 +652,12 @@ Increment `round` (now 2 or 3). Re-enter §4.1 with retry semantics:
 
 ## §6. Phase 2.5 — Escalation gate (Round 3 FAIL only)
 
-Triggered when `round == 3` AND the combined verdict from §4.3 is FAIL.
-
-### Step 1: Compose escalation summary
-
-Build a one-line summary listing remaining `critical` and `major` findings with role labels:
-
-```
-test round 3 FAIL — findings: [critical] <N>, [major] <M> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>[, parent=<P/F>])
-```
-
-Where `<N>` and `<M>` are the counts across all reviewers' findings arrays (re-derived by reading the latest review comment JSON blocks if needed — use the Section B.4 parsing pattern). Include the `parent=` field only when `path == PARENT`.
-
-### Step 2: Read `.github/.sdd-config` for skip-review
-
-Use the Read tool on `.github/.sdd-config`. If the file does not exist or has no `skip-review:` line → treat as empty.
-
-Parse the comma-separated list at the `skip-review:` key. Trim whitespace per entry. Valid entries: `analyze`, `design`, `implement`, `pr`, `qa`.
-
-### Step 3: Branch on skip-review for `qa`
-
-- **`qa` IS in skip-review** → log to the sub-agent narrative:
-  > ⚠ Round 3 FAIL; `skip-review: qa` is set — auto-continuing with findings persisted on Issue/PR. No user prompt.
-
-  Also append a self-review-trace addendum to `<!-- sdd:test:output -->` (update-in-place via Section F): "⚠ Round 3 escalation: tests still failing after 3 rounds, but `skip-review: qa` is set — auto-continuing. Findings remain on Issue/PR for human follow-up."
-
-  Proceed to **§7 Phase 2.7** (SINGLE/CHILD) or **§8 Phase 3** (PARENT). Do NOT return `ESCALATE`.
-
-- **`qa` is NOT in skip-review** → return `ESCALATE: <summary from Step 1>` from this sub-agent. Main session handles `AskUserQuestion` per `design/01-sub-agent-contract.md` §3 + §6.
+Triggered when `round == 3` AND the combined verdict from §4.3 is FAIL. Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section H:
+- Summary format: `test round 3 FAIL — findings: [critical] <N>, [major] <M> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>[, parent=<P/F>])` — include `, parent=<P/F>` only when `path == PARENT`.
+- skip-review key: `qa`
+- Auto-continue proceeds to **§7 Phase 2.7** (SINGLE/CHILD) or **§8 Phase 3** (PARENT). Additionally append a self-review-trace addendum to `<!-- sdd:test:output -->` (update-in-place via Section F): "⚠ Round 3 escalation: tests still failing after 3 rounds, but `skip-review: qa` is set — auto-continuing. Findings remain on Issue/PR for human follow-up."
 
 [PRESERVE — `spec/stage/test.md` Phase 2.5; gate skip only; AI review always ran. Findings remain on GitHub for human follow-up.]
-[PRESERVE — `design/01-sub-agent-contract.md` §4: sub-agent NEVER calls `AskUserQuestion`. Sub-agent surfaces decision to main via `ESCALATE:`; main handles the interactive prompt.]
 
 ---
 
@@ -1048,7 +1001,7 @@ All review updates are in-place (duplicate-prevention search → PATCH if id fou
 - **Do NOT set Claude as co-author** in any git commit (PARENT integration PR creation). [PRESERVE — `test_work.md` line 231.]
 - **All Bash calls follow `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`.** No `&&`, `||`, `;`, `|`, `$(...)`, `VAR=$(...)`, redirections, or quoted variable expansion. No `find` against `/`, `~`, `/Users`, or paths outside the repo root.
 - **All comment posting follows `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F.** Write tool → temp file → `gh issue comment --body-file <path>` / `gh pr comment --body-file <path>` / `gh api ... -X PATCH --field body=@<path>`. Inline `--body` with multi-line content is forbidden (Common Contracts §9). Integration PR body via `--body-file`, NEVER heredoc.
-- **Independence invariant for reviewers.** Each reviewer (§4.2.1, §4.2.2, §4.2.3, §4.2.4) reasons from a fresh logical pass — only the work output + analyze/design outputs are shared inputs; no cross-visibility of verdicts. Re-fetch the test output for each reviewer.
+- **Independence invariant for reviewers.** Each reviewer (§4.2.1, §4.2.2, §4.2.3, §4.2.4) reasons from a fresh logical pass — only the work output + analyze/design outputs are shared inputs; no cross-visibility of verdicts. Work outputs are shared ground truth — no re-fetch (Reviewer 1 loads from temp file; Reviewers 2 and 3 reuse from context; §4.2.4 parent integration reviewer always fetches across Issues).
 - **Retry rounds overwrite.** Per-marker comments are PATCHed in place across rounds (Common Contracts §4 Update-in-place invariant).
 - **Stay within the repository.** Do not Read absolute paths outside the working tree. Do not modify files outside `.github/` or the working tree on SINGLE path. On PARENT INTEGRATION_PR path, Write/Edit are permitted for the integration test branch's new test files only. The Write tool is otherwise permitted ONLY for rendering comment bodies to the deterministic `/tmp/sdd-*-$1.md` paths.
 - **Manual QA stays out of the sub-agent.** It is inherently human-in-the-loop and routed through main session via `OK NEEDS_MANUAL_QA` + `Resume: qa-approved` / `qa-failed`.
@@ -1057,14 +1010,5 @@ All review updates are in-place (duplicate-prevention search → PATCH if id fou
 
 ## §14. Cross-references
 
-- Spec contract: `spec/stage/test.md`
-- Cross-cutting rules: `spec/00-common-contracts.md`
-- Multilingual: `spec/02-multilingual.md`
-- Architecture: `design/00-architecture.md`
-- Sub-agent contract: `design/01-sub-agent-contract.md`
-- Per-stage design: `design/stage-designs/test.md`
-- SYNTHESIS-v2: T1.4 (test return values), T1.5 (Resume canonical behavior)
-- Rubric files: `<<SKILL_DIR>>/commands/atoms/rubrics/test-{completeness,quality,adversarial}.md`, `<<SKILL_DIR>>/commands/atoms/rubrics/parent-integration.md`
-- Shared helpers: `<<SKILL_DIR>>/commands/atoms/_preflight.md` (Light tier Step 0), `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` (Sections B/C/D/E/F), `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`, `<<SKILL_DIR>>/commands/atoms/_multilingual.md`
-- Test-evidence procedure (consumed by reviewers, not invoked here): `<<SKILL_DIR>>/commands/atoms/_test_evidence.md`
+Specs: `spec/stage/test.md`, `spec/00-common-contracts.md`, `spec/02-multilingual.md`, `design/00-architecture.md`, `design/01-sub-agent-contract.md`, `design/stage-designs/test.md`, SYNTHESIS-v2 T1.4/T1.5. Rubrics: `test-{completeness,quality,adversarial}.md`, `parent-integration.md`. Helpers: `_preflight.md` (Light tier), `_review_helpers.md`, `_bash_rules.md`, `_multilingual.md`, `_test_evidence.md`.
 - Phase 5 canonical implementation (referenced): `<<SKILL_DIR>>/commands/implement.md` Phase 7

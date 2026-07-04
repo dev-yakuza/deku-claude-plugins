@@ -457,7 +457,7 @@ Existing PR auto-updates on push.
 ### §4.3 SDD reviewers — serial (5.N.1.a / 5.N.1.b / 5.N.1.c)
 
 [PRESERVE — load-bearing independence invariant per `spec/stage/implement.md` §7 + `design/stage-designs/implement.md` §12.3]: 3 SDD reviewers reason with **independent contexts** — no cross-visibility of each other's verdicts. In Arch B with serial execution inside one sub-agent, independence is enforced by **prose discipline**:
-- Each reviewer reads ONLY its rubric + a **fresh re-fetch** of the PR diff + PR body.
+- Each reviewer reads ONLY its rubric + the shared PR diff + PR body from §4.3.a.2 — PR diff and Issue context are shared ground truth and are reused without re-fetching.
 - Each reviewer does NOT read the other 2 reviewers' just-posted comments (even though those markers may exist on the PR from this round or prior).
 - The sub-agent's narrative MUST treat each reviewer as a fresh logical pass — do NOT carry the prior reviewer's verdict into the next reviewer's reasoning.
 
@@ -467,20 +467,18 @@ Existing PR auto-updates on push.
 
 Read `<<SKILL_DIR>>/commands/atoms/rubrics/implement-completeness.md`. Read also `<<SKILL_DIR>>/commands/atoms/implement_review.md` source for reference if needed — but the rubric file holds the criteria.
 
-##### §4.3.a.2 Fresh re-fetch — PR diff + PR body + Issue context
+##### §4.3.a.2 Load PR diff + context
 
 ```bash
 gh pr view <PR_NUM>
 gh pr diff <PR_NUM>
-gh issue view $1
-gh api repos/<owner>/<repo>/issues/$1/comments --jq '.[] | select(.body | contains("sdd:design:output") or contains("sdd:implement:plan")) | .body'
 ```
 
-(Re-fetch even though `_tdd.md` already read these — independence invariant.)
+For round > 1, the PR diff is already in context from §4.2.3 — skip `gh pr diff` and reuse. Issue context (design output, implement plan) is already in narrative context from earlier in the stage — do NOT re-fetch.
 
 ##### §4.3.a.3 Codebase exploration
 
-Per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Budget: **15 Read / 10 Grep / 5 Glob**. Verify file references in design against actual PR diff; read similar existing implementations to compare patterns.
+Per `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section D. Apply the Section D budget for the current `depth`. Verify file references in design against actual PR diff; read similar existing implementations to compare patterns.
 
 ##### §4.3.a.4 Apply criteria + verdict
 
@@ -546,7 +544,7 @@ Same structure as §4.3.a with substitutions:
 - Temp path: `/tmp/sdd-review-implement-quality-pr<PR_NUM>.md`.
 - Findings JSON `role`: `"quality"`.
 
-**Re-fetch the PR diff fresh** (independence invariant — do NOT reuse §4.3.a's fetch).
+Reuse the PR diff and Issue context already in context from §4.3.a.2 — no re-fetch. Independence invariant: do NOT incorporate completeness verdict into this reviewer's reasoning.
 
 Record `quality_verdict = PASS | FAIL`. Move to §4.3.c.
 
@@ -561,7 +559,7 @@ Same structure with substitutions:
 - **Codebase exploration (mandatory)** per `implement_adversarial.md` step 6 — read 1+ similar pattern, compare against new implementation; Grep for TODO/FIXME introduced in the PR; check `Refs #$1` traceability.
 - Lens: **REFUTE** the PR. Mentally mutate the implementation, find edge cases the author missed, surface hidden coupling.
 
-**Re-fetch the PR diff fresh.** Independence invariant.
+Reuse the PR diff and Issue context already in context — no re-fetch. Independence invariant: do NOT incorporate completeness or quality verdicts into this reviewer's reasoning.
 
 Record `adversarial_verdict = PASS | FAIL`. Proceed to §4.4.
 
@@ -734,11 +732,7 @@ Skipped Skills are NEUTRAL — they do NOT make the round fail. `tools_skipped` 
 
 #### §4.7.1 Adversarial-only FAIL warning [PRESERVE — edge-cases §19]
 
-If `completeness_verdict == PASS && quality_verdict == PASS && adversarial_verdict == FAIL`, log to sub-agent narrative:
-
-> ⚠ Adversarial reviewer alone identified critical/major issues. Other reviewers passed. Surfacing for user awareness.
-
-Then treat the combined verdict as **FAIL** for round-decision purposes (R6 semantics — keep current behavior, do NOT auto-pass).
+For R6 text and semantics, follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section G — treat combined verdict as FAIL, no auto-pass.
 
 #### §4.7.2 Round decision
 
@@ -753,46 +747,11 @@ Then treat the combined verdict as **FAIL** for round-decision purposes (R6 sema
 
 ## §5. Phase 5.5 — Round 3 escalation gate
 
-Triggered when `round == 3` AND §4.7 verdict was FAIL.
-
-### §5.1 Compose escalation summary
-
-Build a one-line summary listing remaining critical and major findings with role labels:
-
-```
-implement round 3 FAIL — findings: [critical] <X>, [major] <Y> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>, code-review=<P/F/skipped>, security-review=<P/F/skipped>). PR: #<PR_NUM> BRANCH: <branch_name>
-```
-
-Where:
-- `<X>` and `<Y>` are counts across all 3 SDD reviewers' findings arrays + `/code-review` 🔴 + `/security-review` High/Medium for round 3 (re-derive by reading the latest 3 SDD review comment JSON blocks + the Skill inline comments per §4.2.4 filter logic).
-- Skill verdicts: write `skipped` when the Skill was unavailable / shallow-skipped / errored.
-
-### §5.2 Read `.github/.sdd-config` for skip-review
-
-Use the Read tool on `.github/.sdd-config`. If the file does not exist or has no `skip-review:` line → treat as empty.
-
-Parse the comma-separated list at the `skip-review:` key. Trim whitespace per entry. Valid entries: `analyze`, `design`, `implement`, `pr`, `qa`.
-
-### §5.3 Branch on skip-review for `pr`
-
-[PRESERVE — load-bearing distinction per `spec/stage/implement.md` §10 Edge Cases skip-review table: key is `pr`, NOT `implement`.]
-
-- **`pr` IS in skip-review** → log to sub-agent narrative:
-  > ⚠ Round 3 PR Final escalation — `skip-review: pr` is set; auto-continuing. Findings remain on the PR for human follow-up.
-
-  Return `OK ADVANCE PR: #<PR_NUM>` from this `_pr_final.md`. `main.md` §9 composes `OK ADVANCE: test PR: #<PR_NUM> BRANCH: <branch_name>` (+ ` E2E_SKIPPED` if applicable).
-
-- **`pr` is NOT in skip-review** → return:
-
-  ```
-  ESCALATE: <summary from §5.1>
-  ```
-
-  (from this `_pr_final.md`; `main.md` returns the line verbatim with the sentinel.)
-
-  Main session handles `AskUserQuestion` per `design/01-sub-agent-contract.md` §3 + §6. On user Continue, main re-spawns this stage with `Resume: continue-after-escalation` — `main.md` §4.2 short-circuit then returns the `OK ADVANCE` directly without re-running Phase 4 / 5.
-
-[PRESERVE — `design/01-sub-agent-contract.md` §4: sub-agent NEVER calls `AskUserQuestion`. Sub-agent surfaces decision to main via `ESCALATE:`; main handles the interactive prompt.]
+Triggered when `round == 3` AND §4.7 verdict was FAIL. Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section H:
+- Summary format: `implement round 3 FAIL — findings: [critical] <X>, [major] <Y> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>, code-review=<P/F/skipped>, security-review=<P/F/skipped>). PR: #<PR_NUM> BRANCH: <branch_name>` — counts include all 3 SDD reviewers + `/code-review` 🔴 + `/security-review` High/Medium; write `skipped` for unavailable/shallow-skipped Skills.
+- skip-review key: `pr` [PRESERVE — load-bearing: key is `pr`, NOT `implement`, per `spec/stage/implement.md` §10.]
+- Auto-continue: return `OK ADVANCE PR: #<PR_NUM>` from this `_pr_final.md`. `main.md` §9 composes the final `OK ADVANCE: test` line (+ ` E2E_SKIPPED` if applicable).
+- On ESCALATE: `main.md` returns the line verbatim. On user Continue, main re-spawns with `Resume: continue-after-escalation` — `main.md` §4.2 short-circuit returns `OK ADVANCE` directly.
 
 ---
 
@@ -801,7 +760,7 @@ Parse the comma-separated list at the `skip-review:` key. Trim whitespace per en
 - **No Agent spawns.** Single sub-agent invariant.
 - **MAY use Skill tool** for `/review` (§4.0, once pre-loop, round 1 only), `/code-review`, and `/security-review`. Graceful skip on `skill-unavailable` / `skill-errored` / `shallow-label-skip` (the last only for `/security-review`). `/review` is **informational only** — does NOT contribute to FAIL verdict.
 - **Serial ordering**: `/review` (§4.0, pre-loop, round 1 only) → per-round: `5.N.1.a → 5.N.1.b → 5.N.1.c → 5.N.2 → 5.N.3 → 5.N.4 → 5.N.5`. Sub-agent convention; preserved for verdict determinism + token economy. [PRESERVE — `spec/edge-cases.md` §24.]
-- **Independence invariant** for 3 SDD reviewers: each does a **fresh re-fetch** of PR diff + body + Issue context. Do NOT carry prior reviewer's verdict into next reviewer's reasoning.
+- **Independence invariant** for 3 SDD reviewers: each uses the same PR diff + body + Issue context from §4.3.a.2 — no re-fetch. Do NOT carry prior reviewer's verdict into next reviewer's reasoning.
 - **No force-push, no `--amend`.** Retry mode appends new commits.
 - **No Claude as co-author.**
 - **R8 auto-route is always on** — no `strict-pr-creation` config key per SYNTHESIS-v2 T1.1.
