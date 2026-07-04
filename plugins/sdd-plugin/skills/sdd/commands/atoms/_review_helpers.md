@@ -210,7 +210,7 @@ Each Bash call below is its own simple Bash tool invocation. Do NOT chain (`&&`,
 
 3. From each body, extract the JSON between `<!-- sdd:findings:json -->\n\`\`\`json` and `\`\`\`\n<!-- /sdd:findings:json -->`. Parse it as a JSON object per Section B.2.
 
-4. Concatenate every reviewer's `findings` array. **Keep all severities** — do NOT drop `minor`. Sort the combined array by severity: `critical → major → minor`. Stable order within each group.
+4. **PASS-skip filter**: If a reviewer's parsed JSON has `"verdict": "PASS"`, discard it entirely — a PASS reviewer has no actionable findings for retry. Only accumulate findings from FAIL reviewers (`"verdict": "FAIL"`). Sort the combined FAIL findings by severity: `critical → major → minor`. Stable order within each group.
 
 5. Use the sorted array as the retry input: address every `critical` and `major` finding individually, read `minor` entries as supporting context (they often pinpoint the specific line/symbol a higher-severity finding only referenced abstractly).
 

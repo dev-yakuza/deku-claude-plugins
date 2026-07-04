@@ -32,8 +32,6 @@ gh issue view $1 --json url --jq .url
 - URL contains `/pull/` → return `FAIL: #$1 is a Pull Request, not an Issue. SDD commands operate on Issues only.` Do NOT modify labels, do NOT post comments.
 - URL contains `/issues/` → continue.
 
-[PRESERVE — `spec/stage/analyze.md` §7 Issue Validation; `spec/00-common-contracts.md` §10.]
-
 ---
 
 ## §2. Phase 0 — Depth detection
@@ -73,8 +71,6 @@ Local state: a counter `round` starting at 1. Rounds 2 and 3 enter this phase vi
 - **Rounds 2 / 3** (`round > 1`): SKIP the preflight items above. Instead, execute `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section C to self-fetch the previous round's three review comments (markers: `<!-- sdd:review:analyze:completeness -->`, `<!-- sdd:review:analyze:quality -->`, `<!-- sdd:review:analyze:adversarial -->`) from Issue `$1`. The procedure returns a sorted findings array (`critical → major → minor`). Hold this array as `<retry-findings>` for use throughout the steps below.
   - If Section C returns `FAIL: ...` (no review comments found, unrecognized retry slot value, etc.) → propagate it as this sub-agent's return value before doing any further work.
 
-[PRESERVE — `spec/stage/analyze.md` §7 Retry semantics; `spec/00-common-contracts.md` §7 Retry Mode Trigger; v0.36 atom-side self-fetch invariant.]
-
 ### Step 1: Read the Issue
 
 ```bash
@@ -107,8 +103,6 @@ gh api repos/<owner>/<repo>/issues/<parent>/comments --jq '.[] | select(.body | 
 
 Substitute the literal `<owner>/<repo>` and the literal parent number (e.g. `#42` → `42`). Use parent context to understand broader scope. Focus this analysis on the child's sub-feature only.
 
-[PRESERVE — `spec/stage/analyze.md` §7 Child/parent Issue handling; `spec/02-multilingual.md` §3 multilingual regex.]
-
 ### Step 3: Classify request type
 
 From Issue title + body, classify into exactly one of:
@@ -116,8 +110,6 @@ From Issue title + body, classify into exactly one of:
 - `enhancement`
 - `bug fix`
 - `refactoring`
-
-[PRESERVE — `spec/stage/analyze.md` §9 Cross-Stage Invariant #2: downstream stages depend on this Type classification being present in the output marker.]
 
 ### Step 4: No-action assessment
 
@@ -129,13 +121,9 @@ Classify the Issue as **no-action** if ANY of the following holds:
 
 If no-action → SKIP Steps 5–7 entirely; prepare a brief explanation of why no code change is needed; jump to Step 8 with the no-action body.
 
-[PRESERVE — `spec/stage/analyze.md` §5 No-action detection; `analyze_work.md` Step 4 lines 43–48.]
-
 ### Step 5: Feature list (normal path only)
 
 Enumerate the requested features / changes. Focus on **What** and **Why** — no implementation details (no **How**).
-
-[PRESERVE — `spec/stage/analyze.md` Phase 1 Step 5; `analyze_work.md` Step 5 lines 51.]
 
 ### Step 6: Priorities (normal path only)
 
@@ -155,8 +143,6 @@ Load the template:
 ```
 
 (`<lang>` is one of `en`, `ko`, `ja`.) Read the file via the Read tool.
-
-[PRESERVE — `spec/02-multilingual.md` §2 Language Detection; §5 Output Template Files.]
 
 ### Step 8: Format output via template
 
@@ -179,15 +165,13 @@ Before posting, verify:
 
 If a blocker fails → fix inline. Track which blockers were fixed for the §3.11 trace.
 
-**Quality / completeness / risk evaluation are NOT done here** — that is the reviewer phase's job (§4). Keep self-review minimal. [PRESERVE — `analyze_work.md` lines 59–68.]
+**Quality / completeness / risk evaluation are NOT done here** — that is the reviewer phase's job (§4). Keep self-review minimal.
 
 ### Step 10: Retry resolution check (rounds 2 / 3 only)
 
 If Step 0 fetched `<retry-findings>`, verify before posting that every `critical` and `major` finding has been addressed in the updated output. Mention how (in the body or in the trace block) — or, only if genuinely infeasible, why it could not be. Treat `minor` entries as supporting context to clarify wording.
 
 If addressing critical/major findings forces a no-action reclassification (rare), follow Step 4's no-action path.
-
-[PRESERVE — `analyze_work.md` Step 10 line 70.]
 
 ### Step 11: Append self-review trace
 
@@ -224,8 +208,6 @@ Follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section F — the manda
 3. **Bash** — branch on the result:
    - **Empty** → create a new comment: `gh issue comment $1 --body-file /tmp/sdd-analyze-output-$1.md`
    - **Has id `<id>`** → update in place: `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@/tmp/sdd-analyze-output-$1.md`
-
-[PRESERVE — `spec/00-common-contracts.md` §9 Comment Posting Pattern (Section F mandatory); `spec/00-common-contracts.md` §4 Update-in-place invariant; deterministic temp path `/tmp/sdd-analyze-output-$1.md`.]
 
 ### Step 12.5: Coverage Ledger — initial creation
 
@@ -304,10 +286,9 @@ After Step 12 completes, branch on the work outcome:
 
 Three reviewers execute **one after another**. Each reviewer reads ONLY its role-specific rubric, optionally performs bounded codebase exploration, posts under its marker, and produces a PASS/FAIL verdict + findings JSON.
 
-[PRESERVE — independence invariant from `design/stage-designs/analyze.md` §4]:
 Each reviewer's reasoning context cannot see other reviewers' verdicts during its own evaluation. Even though execution is serial, structure each reviewer's work as a **fresh logical pass** — do NOT feed Reviewer 2 the comment body that Reviewer 1 just posted; do NOT let Reviewer 3 see Reviewers 1+2's verdicts. The only shared input is the work output under `<!-- sdd:analyze:output -->`.
 
-[PRESERVE — `analyze_review.md` line 104 / `analyze_adversarial.md` line 71]: Write tool permitted only for rendering the comment body to the deterministic temp path. Edit / NotebookEdit forbidden inside reviewer logic.
+Write tool permitted only for rendering the comment body to the deterministic temp path. Edit / NotebookEdit forbidden inside reviewer logic.
 
 ### §4.1. Reviewer 1: completeness
 
@@ -387,7 +368,7 @@ Record `quality_verdict = PASS | FAIL`. Proceed to §4.3.
 
 Repeat §4.1 with these substitutions:
 - Rubric file: `<<SKILL_DIR>>/commands/atoms/rubrics/analyze-adversarial.md`
-- Also read Section E of `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` for the general adversarial reviewer prompt.
+- Apply the adversarial lens from Section E of `_review_helpers.md` — already in context from the Section D exploration step above; no separate Read needed.
 - Marker: `<!-- sdd:review:analyze:adversarial -->` (open + close)
 - Temp file: `/tmp/sdd-review-analyze-adversarial-$1.md`
 - Lens: **REFUTE** the analyze output. Apply the 14 `rule_id` registry from the rubric (`requirement-without-evidence`, `dependency-claim-unverified`, `persona-not-served`, `crud-pair-missing`, `unreconciled-tradeoff`, `contradictory-nfr`, `locale-assumption`, `device-assumption`, `priority-unjustified`, `priority-arbitrary`, `out-of-scope-evasion`, `dod-not-measurable`, `dod-no-verification`, `codebase-claim-unverified`). Must find ≥1 weakness OR explicitly justify why none.
@@ -411,8 +392,6 @@ After all three reviewers have posted, follow `<<SKILL_DIR>>/commands/atoms/_rev
 
 Round decision: All PASS → §8 Phase 6; FAIL and `round < max_rounds` → §6 Phase 4; FAIL and `round == max_rounds` → §7 Phase 5.
 
-[PRESERVE — `spec/stage/analyze.md` §5 and §6; `design/stage-designs/analyze.md` §5; `analyze.md` line 89.]
-
 ---
 
 ## §6. Phase 4 — Retry loop (up to round `max_rounds`)
@@ -421,12 +400,10 @@ Increment `round`. Re-enter §3 with retry semantics:
 
 1. Step 0 collapses to `_review_helpers.md` Section C self-fetch (no preflight items). Per `spec/00-common-contracts.md` §7 + `_preflight.md` Section E.
 2. Steps 1–12 re-execute, addressing every `critical` and `major` finding from `<retry-findings>`.
-3. Step 12's duplicate-prevention search WILL find the existing `<!-- sdd:analyze:output -->` comment id and PATCH it in place (round-to-round overwrites, not appends). [PRESERVE — Common Contracts §4 Update-in-place invariant.]
-4. Re-run all 3 reviewers (§4.1 → §4.2 → §4.3) against the UPDATED `<!-- sdd:analyze:output -->`. Reviewer prompts are unchanged across rounds — reviewers always evaluate the CURRENT state of the output marker. Each reviewer's comment is PATCHed in place under its marker.
+3. Step 12's duplicate-prevention search WILL find the existing `<!-- sdd:analyze:output -->` comment id and PATCH it in place (round-to-round overwrites, not appends).
+4. Re-run all 3 reviewers (§4.1 → §4.2 → §4.3) against the UPDATED `<!-- sdd:analyze:output -->`. Reviewer prompts are unchanged across rounds — reviewers always evaluate the CURRENT state of the output marker. Each reviewer's comment is PATCHed in place under its marker. **Rubric files and `_review_helpers.md` loaded in round 1 are already in context — do not re-Read them in retry rounds.**
 5. Re-combine verdicts (§5).
 6. If still FAIL on round `max_rounds` → §7. If PASS at any round → exit loop → §8.
-
-[PRESERVE — `spec/stage/analyze.md` §6 Rounds 2 & 3 retry; `_review_helpers.md` Section C; v0.36 atom-side self-fetch.]
 
 ---
 
@@ -436,8 +413,6 @@ Triggered when `round == max_rounds` AND the combined verdict from §5 is FAIL. 
 - Summary format: `analyze round <round> FAIL — findings: [critical] <N>, [major] <M> (completeness=<P/F>, quality=<P/F>, adversarial=<P/F>)`
 - skip-review key: `analyze`
 - Auto-continue proceeds to §8 Phase 6 Normal path.
-
-[PRESERVE — `spec/stage/analyze.md` §7 Skip-review semantics: gate skip only; AI review always ran. Findings remain on GitHub for human follow-up.]
 
 ---
 
@@ -474,8 +449,6 @@ OK ADVANCE: design
 
 The main session will set the label `sdd:design` after parsing this return.
 
-[PRESERVE — `design/stage-designs/analyze.md` §4.§8; `01-sub-agent-contract.md` §4: this sub-agent NEVER sets labels itself. Label transitions are the main session's sole responsibility.]
-
 ---
 
 ## Return contract (verbatim from `design/01-sub-agent-contract.md` §2)
@@ -511,8 +484,6 @@ ESCALATE: analyze round 3 FAIL — findings: [critical] 1, [major] 2 (completene
 >>> RESULT <<<
 FAIL: #42 is a Pull Request, not an Issue
 ```
-
-[PRESERVE — load-bearing: sentinel + literal status strings are parsed by main FSM. Do NOT reformat to JSON.]
 
 ---
 
