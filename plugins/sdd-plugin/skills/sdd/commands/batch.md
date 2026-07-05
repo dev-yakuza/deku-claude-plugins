@@ -328,7 +328,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     # the sandbox boundary in the child session. Required for unattended runs
     # because subagents otherwise hit "Run outside of the sandbox" on
     # `flutter test`, pre-commit hooks invoking the toolchain, `git push`, etc.
-    claude -p --verbose --output-format stream-json --dangerously-skip-permissions "/sdd resume $ISSUE" > "$LOG_FILE" 2>&1 || EXIT_CODE=$?
+    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude -p --verbose --output-format stream-json --dangerously-skip-permissions "/sdd resume $ISSUE" > "$LOG_FILE" 2>&1 || EXIT_CODE=$?
 
     if [ "$EXIT_CODE" -eq 0 ]; then
       echo "  ✓ Issue #$ISSUE completed"
@@ -444,18 +444,18 @@ TOTAL_INPUT=0
 TOTAL_OUTPUT=0
 TOTAL_CACHE_READ=0
 TOTAL_CACHE_CREATE=0
-TOTAL_COST=0
+TOTAL_COST="0"
 
 for LOG in "$LOG_DIR"/issue-*-"${TIMESTAMP}".log; do
   [ -f "$LOG" ] || continue
   STATS=$(jq -r 'select(.type == "result") | "\(.usage.input_tokens // 0) \(.usage.output_tokens // 0) \(.usage.cache_read_input_tokens // 0) \(.usage.cache_creation_input_tokens // 0) \(.total_cost_usd // 0)"' "$LOG" 2>/dev/null | tail -1)
   if [ -n "$STATS" ]; then
     read -r IN OUT CR CC COST <<< "$STATS"
-    TOTAL_INPUT=$((TOTAL_INPUT + IN))
-    TOTAL_OUTPUT=$((TOTAL_OUTPUT + OUT))
-    TOTAL_CACHE_READ=$((TOTAL_CACHE_READ + CR))
-    TOTAL_CACHE_CREATE=$((TOTAL_CACHE_CREATE + CC))
-    TOTAL_COST=$(echo "$TOTAL_COST + $COST" | bc)
+    TOTAL_INPUT=$((TOTAL_INPUT + ${IN:-0}))
+    TOTAL_OUTPUT=$((TOTAL_OUTPUT + ${OUT:-0}))
+    TOTAL_CACHE_READ=$((TOTAL_CACHE_READ + ${CR:-0}))
+    TOTAL_CACHE_CREATE=$((TOTAL_CACHE_CREATE + ${CC:-0}))
+    TOTAL_COST=$(echo "$TOTAL_COST + ${COST:-0}" | bc 2>/dev/null || echo "$TOTAL_COST")
   fi
 done
 
@@ -478,9 +478,9 @@ fi
 echo ""
 echo "  Time:      ${BATCH_MIN}m ${BATCH_SEC}s"
 echo "  Cost:      \$${TOTAL_COST}"
-echo "  Tokens:    $(printf "%'d" $TOTAL_CONTEXT) total"
-echo "               in: $(printf "%'d" $TOTAL_INPUT)  out: $(printf "%'d" $TOTAL_OUTPUT)"
-echo "               cache read: $(printf "%'d" $TOTAL_CACHE_READ)  cache create: $(printf "%'d" $TOTAL_CACHE_CREATE)"
+echo "  Tokens:    $TOTAL_CONTEXT total"
+echo "               in: $TOTAL_INPUT  out: $TOTAL_OUTPUT"
+echo "               cache read: $TOTAL_CACHE_READ  cache create: $TOTAL_CACHE_CREATE"
 echo ""
 echo "  Logs: $LOG_DIR/"
 echo "============================================================"
