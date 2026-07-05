@@ -65,8 +65,6 @@ gh issue view $1 --json labels --jq '[.labels[].name]'
 - Contains `sdd:review:shallow` → `depth = shallow` → `reviewer_model = sonnet`
 - Otherwise → `depth = default` → `reviewer_model = sonnet`
 
-(completeness/quality never use `fable` — `fable` applies only to the `design` stage spawn per Section A.2.1, not to these standalone review atoms.)
-
 Spawn two Agent tool calls in a **single message** for concurrent execution. Substitute `<reviewer_model>` below with the literal value derived above:
 
 Agent A:

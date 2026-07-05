@@ -60,7 +60,7 @@ From the same labels read in the direct-invocation check, derive the depth dial:
 Spawn ONE sub-agent via the Agent tool:
 
 - `subagent_type`: `general-purpose`
-- `model`: `fable` when `depth = deep` (from Phase 0), `sonnet` when `depth = shallow`, otherwise `opus`. The whole stage (design work + inlined reviewers) runs in this one sub-agent; design has no in-context `/security-review` / `/code-review`, so `fable` at the deep dial raises design + review reasoning quality, and `sonnet` at the shallow dial cuts cost on explicitly low-stakes Issues (per `_review_helpers.md` Section A.2.1). If this build's Agent tool rejects `fable`, fall back to `opus`.
+- `model`: `sonnet` when `depth = shallow`, otherwise `opus` (both `deep` and `default` resolve to `opus`). The whole stage (design work + inlined reviewers) runs in this one sub-agent; design has no in-context `/security-review` / `/code-review`, so `opus` at the deep dial handles design + review reasoning, and `sonnet` at the shallow dial cuts cost on explicitly low-stakes Issues (per `_review_helpers.md` Section A.2.1).
 - `description`: `stage_design for #$1`
 - `prompt`:
   > Read `<<SKILL_DIR>>/commands/atoms/stage_design.md` and execute its instructions for Issue #$1.
@@ -117,7 +117,7 @@ Report to user: "Paused. Resume with `/sdd resume $1`." Stop.
 2. Call `AskUserQuestion` with 3 options: `Continue`, `Pause`, `Stop`.
 3. Branch on user choice:
    - **Continue** → re-spawn `stage_design` with `Resume: continue-after-escalation`:
-     - `subagent_type`: `general-purpose`, `model`: `fable` when `depth = deep`, `sonnet` when `depth = shallow`, else `opus` (same rule as Phase 1), `description`: `stage_design resume for #$1`
+     - `subagent_type`: `general-purpose`, `model`: `sonnet` when `depth = shallow`, else `opus` (same rule as Phase 1), `description`: `stage_design resume for #$1`
      - `prompt`:
        > Read `<<SKILL_DIR>>/commands/atoms/stage_design.md` and execute its instructions for Issue #$1.
        >
@@ -165,4 +165,4 @@ Treat as `FAIL: unexpected return: <line>` and stop. (Defensive per `design/01-s
 - **Label transitions are main session's responsibility.** `stage_design` never sets parent labels itself. Children's `sdd:analyze` + `sdd:child` labels are applied at `gh issue create --label` time inside the sub-agent — that is NOT a parent-label transition.
 - **Children idempotency is load-bearing.** If the sub-agent is re-invoked (retry rounds, or `continue-after-escalation` resume), child Issues are NOT re-created — the existing children-list comment is detected via `<!-- sdd:children:output -->` and preserved (`spec/stage/design.md` §5 / §8).
 - **Parent pauses at `sdd:implement` on CHILDREN path.** Parent does NOT advance through implement/test by itself. It waits until all children reach `sdd:done`, then the test stage's parent-integration logic advances it (Common Contracts §1 parent-pause invariant).
-- **Depth label override**: `sdd:review:deep` / `sdd:review:shallow` selects the depth dial, which sets this stage's spawn model — `deep → fable`, `shallow → sonnet`, `default → opus` (the design stage has no in-context security analysis; `fable` falls back to `opus` if the Agent tool rejects it) per `_review_helpers.md` Section A.2.1. The dial also informs the sub-agent's reasoning style per Section A.2.
+- **Depth label override**: `sdd:review:deep` / `sdd:review:shallow` selects the depth dial, which sets this stage's spawn model — `deep → opus`, `shallow → sonnet`, `default → opus` per `_review_helpers.md` Section A.2.1. The dial also informs the sub-agent's reasoning style per Section A.2.
