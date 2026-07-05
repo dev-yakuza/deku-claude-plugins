@@ -25,7 +25,7 @@ Look for one of:
 
 | Atom role | depth=default | depth=deep | depth=shallow |
 |---|---|---|---|
-| `analyze_work` / `design_work` | opus | fable | sonnet |
+| `analyze_work` / `design_work` | opus | opus | sonnet |
 | `test_work` | opus | opus | opus |
 | `implement_plan` | opus | opus | opus |
 | `implement_red`/`green`/`refactor`/`e2e`/`pr` | opus | opus | opus |
@@ -37,9 +37,9 @@ Look for one of:
 | `tdd_step_review` (step 3-2, 3-3) | haiku | opus | haiku |
 | `implement_review` (PR Final completeness/quality) | sonnet | opus | sonnet |
 
-The orchestrator passes the chosen model to each Agent spawn via the `model` parameter (lowercase `opus`/`sonnet`/`haiku`/`fable`).
+The orchestrator passes the chosen model to each Agent spawn via the `model` parameter (lowercase `opus`/`sonnet`/`haiku`).
 
-### A.2.1 Model granularity is per-stage, not per-atom (Arch B) — and the `fable` override
+### A.2.1 Model granularity is per-stage, not per-atom (Arch B)
 
 **Read this before using the table above.** Under Arch B (v1.0.0), each stage wrapper (`analyze`/`design`/`implement`/`test`) spawns exactly ONE `stage_<X>` sub-agent, and **all work + all reviewers for that stage run inside that single sub-agent at one model** — the model fixed by the wrapper's Agent-spawn `model:` value. The per-atom columns above are therefore **informational only for the stage flows**: they describe the intended reasoning style / findings-JSON `model` field, not separate spawns. The columns DO drive real model selection only where an atom is spawned as its own Agent — currently just `/sdd review` (completeness + quality), which reads this table.
 
@@ -47,24 +47,23 @@ The orchestrator passes the chosen model to each Agent spawn via the `model` par
 
 | Spawn | depth=default | depth=deep | depth=shallow | Set in |
 |---|---|---|---|---|
-| `analyze` stage | opus | **fable** | **sonnet** | `commands/analyze.md` |
-| `design` stage | opus | **fable** | **sonnet** | `commands/design.md` |
+| `analyze` stage | opus | **opus** | **sonnet** | `commands/analyze.md` |
+| `design` stage | opus | **opus** | **sonnet** | `commands/design.md` |
 | `implement` stage | opus | opus | opus | `commands/implement.md` |
 | `test` stage | opus | opus | opus | `commands/test.md` |
 | `bootstrap` | haiku | haiku | haiku | `resume.md` / `auto.md` |
 | `/sdd review` (completeness + quality) | sonnet | opus | sonnet | `commands/review.md` |
 
-When a stage spawns at `fable` / `sonnet`, **every atom in that stage runs at that model** — the per-atom columns in A.2 are overridden by this matrix for actual execution.
+When a stage spawns at `sonnet` (`depth=shallow`), **every atom in that stage runs at that model** — the per-atom columns in A.2 are overridden by this matrix for actual execution.
 
-**`fable` (Claude Fable 5)** is Anthropic's most capable model — best at long-horizon implementation, first-shot generation, bug finding, and cross-stage reasoning (~2× opus cost). It is applied at `depth=deep` to the two stages with **no in-context security analysis** (`analyze`, `design`) — Fable's bug-finding gains exclude security work and its classifiers can decline cyber-adjacent code (`stop_reason: "refusal"`). **`sonnet`** (~0.6× opus cost) is applied at `depth=shallow` to those same two stages to cut cost on explicitly low-stakes Issues. Rationale per stage:
+**`opus` (Claude Opus)** is the default tier for all stages, and the deep tier for `analyze` / `design` — deep and default resolve to the same model, differing only in the sub-agent's reasoning style (Section A.2) and retry `max_rounds`. **`sonnet`** (~0.6× opus cost) is applied at `depth=shallow` to `analyze` / `design` to cut cost on explicitly low-stakes Issues. Rationale per stage:
 
-- **`analyze` / `design`: `deep → fable`, `shallow → sonnet`, `default → opus`.** No `/security-review` / `/code-review` in-context, so the whole stage (work + completeness/quality/adversarial reviewers, one sub-agent) rides the dial safely. Overrides live in `analyze.md` / `design.md` Phase 1 + escalation resume, NOT in this table.
-- **`implement` stays `opus` at every depth.** Its sub-agent runs `/security-review` + `/code-review` in the same context (`implement.md` §Notes); Arch B cannot split the model within one sub-agent, so `fable` would run security analysis on `fable` (refusal risk) and `sonnet` would weaken TDD coding + security review. Do not route implement (or any security-analysis atom) to `fable`.
+- **`analyze` / `design`: `deep → opus`, `shallow → sonnet`, `default → opus`.** No `/security-review` / `/code-review` in-context, so the whole stage (work + completeness/quality/adversarial reviewers, one sub-agent) rides the dial safely. Only shallow deviates from opus; overrides live in `analyze.md` / `design.md` Phase 1 + escalation resume, NOT in this table.
+- **`implement` stays `opus` at every depth.** Its sub-agent runs `/security-review` + `/code-review` in the same context (`implement.md` §Notes); Arch B cannot split the model within one sub-agent, so `sonnet` would weaken TDD coding + security review. Do not route implement (or any security-analysis atom) below `opus`.
 - **`test` stays `opus` at every depth.** `test_work` is opus by a preserve rule (`spec/stage/test.md` Phase 0); shallow does not downgrade it.
 
 Constraints an orchestrator MUST respect:
-- **Agent-tool support required.** `fable` is only usable if this Claude Code build accepts `fable` as an Agent `model` value. If a spawn rejects `fable`, fall back to `opus` and continue.
-- **Prompting.** Fable underperforms on over-prescriptive prompts; SDD atoms are deliberately prescriptive. Treat the deep→fable and shallow→sonnet overrides as tunable — if deep output regresses versus opus, set the stage's deep spawn back to `opus`; if shallow sonnet output is too weak, set it back to `opus`.
+- **Tunable.** Treat the shallow→sonnet override as tunable — if shallow sonnet output is too weak on a given project, set it back to `opus`. The deep tier deliberately reuses `opus` (Opus is already the most capable widely available tier for the reasoning + design work these stages perform); it can be raised to a more capable model later if one is warranted, but do not route these stages to a model whose safety classifiers may decline benign work.
 
 ### A.3 `/code-review` effort per depth
 
@@ -102,7 +101,7 @@ Every review atom embeds a JSON block inside its posted comment using the marker
   "pr":           <number> | null,
   "round":        <number> | null,
   "verdict":      "PASS" | "FAIL" | null,
-  "model":        "opus" | "sonnet" | "haiku" | "fable" | null,
+  "model":        "opus" | "sonnet" | "haiku" | null,
   "findings": [
     {
       "severity":       "critical" | "major" | "minor",

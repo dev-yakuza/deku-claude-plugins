@@ -64,7 +64,7 @@ Decision (overrides `$2` if labels disagree):
 - Labels contain `sdd:review:shallow` → `depth = shallow`
 - Otherwise → `depth = default`
 
-The depth dial selects models used internally for the inlined work and review reasoning per `spec/00-common-contracts.md` §3 / `_review_helpers.md` Section A.2. Since this entire stage runs inside ONE sub-agent context (no inner Agent spawns), the model dial is informational for the sub-agent's reasoning style — the actual model is fixed by the Agent spawn's `model` parameter from main session. **Note (per `_review_helpers.md` Section A.2.1): `design.md` spawns this stage with `model: fable` when `depth = deep`, `sonnet` when `depth = shallow`, otherwise `opus` (design has no in-context security analysis).** Record the dial for the `<details>` self-review trace, and record the actual model accurately in the findings JSON.
+The depth dial selects models used internally for the inlined work and review reasoning per `spec/00-common-contracts.md` §3 / `_review_helpers.md` Section A.2. Since this entire stage runs inside ONE sub-agent context (no inner Agent spawns), the model dial is informational for the sub-agent's reasoning style — the actual model is fixed by the Agent spawn's `model` parameter from main session. **Note (per `_review_helpers.md` Section A.2.1): `design.md` spawns this stage with `model: sonnet` when `depth = shallow`, otherwise `opus` (both `deep` and `default` resolve to `opus`; design has no in-context security analysis).** Record the dial for the `<details>` self-review trace, and record the actual model accurately in the findings JSON.
 
 ### Resume short-circuit (T1.5)
 
@@ -85,18 +85,6 @@ If `$3 == "continue-after-escalation"`:
 This phase produces the design output, decides SINGLE vs CHILDREN, and (on first-time CHILDREN path) creates child Issues and posts the children-list comment.
 
 Local state: a counter `round` starting at 1. Rounds 2 and 3 enter this phase via §6.
-
-### Autonomy mode (depth == deep / Fable only)
-
-If `depth == deep`, this stage runs on Fable (per `_review_helpers.md` Section A.2.1). Fable produces better designs when given a goal and constraints rather than a step-by-step recipe, so **treat Steps 3–9 below as goals your design must satisfy, not a fixed sequence to execute or narrate.** Explore and design in whatever order is most effective; only the final output matters.
-
-Working principles (apply only at `depth == deep`):
-- When you have enough information to act, act. Don't re-derive facts already in the Issue / analyze output, and don't enumerate options you won't pursue — give a recommendation, not an exhaustive survey.
-- Design the simplest thing that meets the requirements. No speculative abstractions, extra files, or future-proofing the Issue didn't ask for.
-
-This relaxes only the *ordering and narration* of Steps 3–9. It does NOT relax any hard constraint — you still MUST: run Step 0 preflight (or retry self-fetch) and Steps 1–2 as written, fill every required Step 11 template field, give ≥1 rejected alternative with reasoning, produce a REAL Step 8 testability section (no false `N/A` when side effects exist), state the Step 9 PR-split count with rationale, select the correct language template (Step 10), and pass Step 12's self-review blockers. At `depth == default` / `shallow` (opus), ignore this block and follow Steps 3–9 in order.
-
-> **Tunable — rollback if it regresses.** This autonomy framing is an A/B-tunable Fable adaptation (`_review_helpers.md` Section A.2.1). If deep-tier design output degrades versus opus, delete this block; the numbered steps below are the opus-tuned fallback.
 
 ### Step 0: Preflight (Medium tier) or retry self-fetch
 
@@ -436,7 +424,7 @@ Write tool permitted only for rendering the comment body to the deterministic te
    ## AI Review (design / completeness)
 
    **Verdict:** PASS | FAIL
-   **Model:** <opus|sonnet|haiku|fable>
+   **Model:** <opus|sonnet|haiku>
 
    ### Issues
    - **[critical]** <description>
@@ -454,7 +442,7 @@ Write tool permitted only for rendering the comment body to the deterministic te
    <!-- /sdd:review:design:completeness -->
    ```
 
-   Set `stage: "design"`, `role: "completeness"`, `issue: <N>`, `pr: null`, `round: <current round>`, `verdict`, `model` (the sub-agent's actual model — `fable` at `depth = deep`, `sonnet` at `depth = shallow`, otherwise `opus`; record what's accurate), `findings` array, `suggestions` array.
+   Set `stage: "design"`, `role: "completeness"`, `issue: <N>`, `pr: null`, `round: <current round>`, `verdict`, `model` (the sub-agent's actual model — `sonnet` at `depth = shallow`, otherwise `opus`; record what's accurate), `findings` array, `suggestions` array.
 
 8. **Post via Section F** (mandatory temp-file pattern):
    - **Write tool** → `/tmp/sdd-review-design-completeness-$1.md`
@@ -511,7 +499,7 @@ Record `adversarial_verdict = PASS | FAIL`. Proceed to §5.
 
 After all three reviewers have posted, follow `<<SKILL_DIR>>/commands/atoms/_review_helpers.md` Section G (3-reviewer standard case).
 
-**`max_rounds`**: `2` when `depth == deep` (Fable — higher first-pass quality; round 3 is rarely needed and costly); `3` for `default` / `shallow`.
+**`max_rounds`**: `3` for all depths.
 
 Round decision: All PASS → §8 Phase 6; FAIL and `round < max_rounds` → §6 Phase 4; FAIL and `round == max_rounds` → §7 Phase 5.
 
