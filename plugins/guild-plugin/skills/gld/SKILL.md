@@ -1,0 +1,63 @@
+---
+name: gld
+description: "Guild builds a Claude Code operating environment (harness) into a repository and runs a spec-driven development flow (analyze -> design -> execute -> test) performed by a per-repo organization of specialized agent roles (leader, architect, developer, tester) that co-evolve with the codebase. Use to set up Guild in a repo (init), develop a GitHub Issue end-to-end (dev), run an individual stage, or check/continue progress."
+argument-hint: "<command> [issue-number|args]"
+user-invocable: true
+---
+
+# Guild (`/gld`)
+
+Route to the appropriate command based on `$0`. Read `<<SKILL_DIR>>/commands/$0.md` and execute its instructions. Pass `$1`, `$2`… to the command file (meanings vary per command; typical `$1` = issue number, or language for `init`).
+
+## Command Routing
+
+- Valid commands: `init`, `dev`, `analyze`, `design`, `implement`, `test`, `review`, `config`, `resume`, `status`, `help`
+- If `$0` is empty → route to `help`.
+- If `$0` is not in the list → report unknown command, then route to `help`.
+- Planned (not in this version — report "planned, not yet available" if invoked): `debug`, `refactor`, `evolve`, `audit`, `rollback`, `ask`, `monitoring`, `update`, `contribute`, `sprint`.
+
+---
+
+## Common Definitions
+
+### What Guild is
+Guild installs a **harness** into the target repo and grows a per-repo agent organization — **the Guild** — of role agents that develop the codebase. The codebase (**결과물**) and the Guild (**개발자**) co-evolve. This version (0.1.0 / M1) is a **walking skeleton**: bootstrap + development flow with an **advisory** harness. Enforcement gates, the `evolve` growth loop, and autonomy are later milestones.
+
+### The Guild (per-repo agent organization)
+- **Terminology (user-facing)**: in all output and GitHub comments, call the per-repo agent organization the **Guild** (길드) — the brand. Do NOT surface the internal shorthand "org" to the user (e.g. write "Guild 내부 검증", not "내부 org verify").
+- Role agents live in `.claude/agents/` (native Claude Code project agents), specialized to this repo. Founding roles: **leader, architect, developer, tester**.
+- The **leader** is not a separate spawned subagent — the main session **embodies** the leader role (loaded from `.claude/agents/leader.md`): it assembles the team for a task, delegates to roles, arbitrates, and judges completion.
+- Roles collaborate across stages (not a 1-role-per-stage pipeline): architect drafts the skeleton and later checks conformance; tester writes test cases from acceptance criteria before implementation; developer fills the skeleton.
+
+### The spine (invariant)
+```
+analyze → design → execute → test
+                    └ execute variant by work type: implement (feature) | debug (bug) | refactor (refactor)
+```
+- Work type comes from the issue's `type:` label; `analyze` may reclassify. In M1, execute = **implement** only (debug/refactor are later).
+- `/gld dev <issue>` runs the whole spine and auto-selects the execute variant. Individual stages are also invocable (`/gld analyze`, `design`, `implement`, `test`).
+
+### Repo layout Guild manages
+```
+CLAUDE.md                      # advisory: repo map + verification commands + knowledge routing
+.claude/settings.json          # permission allowlist (+ hooks in later milestones)
+.claude/agents/                # role agents (the Guild)
+.claude/guild/
+  config.json                  # Guild settings (managed by /gld config)
+  knowledge/                   # project knowledge base (index.md + facts/) — grows later
+  memory/<agent>/              # raw episodic memory (gitignored) — used by evolve later
+  evolution-log.md             # evolution ledger — used by evolve later
+docs/standards/                # charter, architecture, conventions, quality-bar, verification (init drafts; status: draft|confirmed)
+docs/adr/ , docs/specs/
+```
+- **commit** everything under `.claude/agents/`, `.claude/guild/` (except `memory/`), `docs/`, `CLAUDE.md`, `.claude/settings.json`. **gitignore** `.claude/guild/memory/`.
+
+### Bash & GitHub conventions
+- Run each shell command as its own isolated Bash call. Avoid compound commands (`&&`, `$(...)`), variable substitution, and inline multi-line `--body` for GitHub comments — render bodies to a temp file and use `--body-file`. Full rules: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/label/handoff contract: `<<SKILL_DIR>>/commands/atoms/_handoff.md`. Stage pre-flight: `<<SKILL_DIR>>/commands/atoms/_preflight.md`.
+- Obtain `{owner}/{repo}` via `gh repo view --json nameWithOwner -q .nameWithOwner` as its own call; inline the literal value. Never infer it from git user or the system prompt.
+
+### Model tiering
+Assign models by task cost: mechanical scans / rule checks → **Haiku**; stage execution and most orchestration → **Sonnet**; hard judgments (deep review) → **Opus**.
+
+### State & idempotency
+`init` is one-time (re-running reports "already initialized"). Development state lives in GitHub Issues/PRs; durable knowledge in `docs/` and `.claude/guild/`.
