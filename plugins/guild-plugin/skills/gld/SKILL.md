@@ -1,6 +1,6 @@
 ---
 name: gld
-description: "Guild builds a Claude Code operating environment (harness) into a repository and runs a spec-driven development flow (analyze -> design -> execute -> test) performed by a per-repo organization of specialized agent roles (leader, architect, developer, tester) that co-evolve with the codebase. Use to set up Guild in a repo (init), develop a GitHub Issue end-to-end (dev), run an individual stage, or check/continue progress."
+description: "Guild builds a Claude Code operating environment (harness) into a repository and runs a spec-driven development flow (analyze -> design -> execute -> test -> qa) performed by a per-repo organization of specialized agent roles (spine: leader, tech-lead, developer, tester, qa; plus conditional specialists like designer, security, i18n, dba) that co-evolve with the codebase. Use to set up Guild in a repo (init), develop a GitHub Issue end-to-end (dev), run an individual stage, or check/continue progress."
 argument-hint: "<command> [issue-number|args]"
 user-invocable: true
 ---
@@ -11,7 +11,7 @@ Route to the appropriate command based on `$0`. Read `<<SKILL_DIR>>/commands/$0.
 
 ## Command Routing
 
-- Valid commands: `init`, `dev`, `analyze`, `design`, `implement`, `test`, `review`, `config`, `resume`, `status`, `help`
+- Valid commands: `init`, `dev`, `analyze`, `design`, `implement`, `test`, `qa`, `review`, `config`, `resume`, `status`, `help`
 - If `$0` is empty → route to `help`.
 - If `$0` is not in the list → report unknown command, then route to `help`.
 - Planned (not in this version — report "planned, not yet available" if invoked): `debug`, `refactor`, `evolve`, `audit`, `rollback`, `ask`, `monitoring`, `update`, `contribute`, `sprint`.
@@ -25,15 +25,17 @@ Guild installs a **harness** into the target repo and grows a per-repo agent org
 
 ### The Guild (per-repo agent organization)
 - **Terminology (user-facing)**: in all output and GitHub comments, call the per-repo agent organization the **Guild** (길드) — the brand. Do NOT surface the internal shorthand "org" to the user (e.g. write "Guild 내부 검증", not "내부 org verify").
-- Role agents live in `.claude/agents/` (native Claude Code project agents), specialized to this repo. Founding roles: **leader, architect, developer, tester**.
+- Role agents live in `.claude/agents/` (native Claude Code project agents), specialized to this repo. `init` installs the **full roster (16)**: spine roles **leader, tech-lead, developer, tester, qa** (always in the flow) + conditional specialists **product-owner, designer, infra, dba, security, performance, i18n, analytics, tech-writer, release-manager, support-triage** (the leader convenes these per task by work-type/risk — participation model in `commands/atoms/_handoff.md` Section G).
 - The **leader** is not a separate spawned subagent — the main session **embodies** the leader role (loaded from `.claude/agents/leader.md`): it assembles the team for a task, delegates to roles, arbitrates, and judges completion.
-- Roles collaborate across stages (not a 1-role-per-stage pipeline): architect drafts the skeleton and later checks conformance; tester writes test cases from acceptance criteria before implementation; developer fills the skeleton.
+- Roles collaborate across stages (not a 1-role-per-stage pipeline): the tech-lead sets technical direction, drafts the skeleton, and later checks conformance; tester writes test cases from acceptance criteria before implementation; developer fills the skeleton.
 
 ### The spine (invariant)
 ```
-analyze → design → execute → test
+analyze → design → execute → test → qa
                     └ execute variant by work type: implement (feature) | debug (bug) | refactor (refactor)
 ```
+- `test` = automated correctness (tester, verify gate). `qa` = holistic quality (qa role, exploratory/E2E/user-flow, risk-based). `qa` marks `guild:done`.
+- Conditional participants + gates (leader assembles per task/risk): designer (UI → design + UI/UX review gate), security (→ security review gate), infra, dba, i18n, analytics, performance, tech-writer, release-manager, support-triage. See `commands/atoms/_handoff.md`.
 - Work type comes from the issue's `type:` label; `analyze` may reclassify. In M1, execute = **implement** only (debug/refactor are later).
 - `/gld dev <issue>` runs the whole spine and auto-selects the execute variant. Individual stages are also invocable (`/gld analyze`, `design`, `implement`, `test`).
 

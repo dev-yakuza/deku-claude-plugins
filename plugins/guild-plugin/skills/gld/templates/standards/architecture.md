@@ -5,7 +5,7 @@ updated: {{DATE}}
 ---
 # Architecture — {{PROJECT_NAME}}
 
-> 아키텍트·개발자가 참조하는 구조 기준. init이 structure-scan으로 초안을 작성. `confirmed` 시 경계 게이트의 기준이 된다.
+> 테크리드·개발자가 참조하는 구조 기준. init이 structure-scan으로 초안을 작성. `confirmed` 시 경계 게이트의 기준이 된다.
 
 ## 개요 (Overview)
 {{ARCHITECTURE}}

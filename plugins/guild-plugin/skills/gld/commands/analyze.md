@@ -40,6 +40,16 @@ If the request is unambiguous, record the single interpretation explicitly and p
 - Derive **acceptance criteria (AC)** — verifiable, checkable statements. These are the contract the tester will design against (design stage) without seeing the implementation.
 - Assign priorities where multiple items exist.
 
+## Step 2.5 — Conditional participation (leader assembles)
+As the leader, decide whether this Issue needs a **product-owner** for value-alignment / AC ownership / scope calls (assembly rules in `.claude/agents/leader.md`; model in `_handoff.md` Section G). Convene it when requirements are non-trivial, value/priority is contested, or AC needs a firm owner — skip for a small unambiguous change (you own the AC yourself). If convened:
+- `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `product-owner #$1`
+- `prompt`:
+  > Adopt the persona in `.claude/agents/product-owner.md`. For Issue #$1, align the requirements to user value against `docs/standards/charter.md`, own/sharpen the **acceptance criteria** (make them verifiable), set priorities, and state non-goals. Return one `>>> RESULT <<<` line per `_handoff.md` Section C; surface AC ambiguity as `DONE_WITH_CONCERNS`.
+
+Fold the PO's aligned AC/priorities into Step 4's output; a `DONE_WITH_CONCERNS` AC ambiguity feeds the discuss gate (surface to the human).
+
+(**support-triage** is an *intake* role — it runs **before** analyze to refine raw feedback into an Issue, so it is not convened here; it is used when creating the Issue in the first place.)
+
 ## Step 3 — Work-type classification / reclassification
 - Read the Issue's `type:` label if present (`feature`/`bug`/`refactor`).
 - Reclassify if reality differs (plan §4) — e.g. "labeled feature but needs a refactor first." Note the mismatch and, if it implies splitting, flag it for design (child-issue split is decided in design). In M1, execute is always `implement`, but record the true type for the humans.

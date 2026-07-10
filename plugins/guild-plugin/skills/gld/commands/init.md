@@ -109,7 +109,7 @@ Create via Write tool:
 {
   "version": "0.1.0",
   "language": "<lang from $1>",
-  "roles": ["leader", "architect", "developer", "tester"],
+  "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
   "automation": { "evolve_nudge": false },
   "gates": {}
@@ -117,19 +117,26 @@ Create via Write tool:
 ```
 - `commands.*` values are the **normalized, simple-bash-safe** forms from command-scan (see `scan_repo.md` Section 2): each is either a single simple command string, or an **array** of simple commands run in sequence. They MUST NOT contain `$(...)`, `&&`, `|`, `;`, or redirections — Guild runs them one per Bash call. (e.g. `flutter test --fail-fast --concurrency=$(nproc --all)` → store `"flutter test --fail-fast"`; `flutter analyze && npx remark . --quiet --frail` → store `["flutter analyze", "npx remark . --quiet --frail"]`.) A missing category → `null`.
 - `commands.e2e` records the detected integration/E2E command (e.g. `flutter test integration_test`). **M1 detects and records it but does NOT auto-run E2E** (test stage runs unit/existing tests only — plan §18 B; E2E auto-run is a later milestone). Recording it here keeps the info from being lost and lets a human run it manually.
+- `roles` lists the **full installed roster** (16) — the spine roles plus every participation/gate specialist. It records who is *available*; the leader decides who *participates* per task (`_handoff.md` Section G). Keep it in sync with the agents actually written in step 2.
 - (`automation`/`gates` are placeholders — evolve/gate dials arrive in M2/M3.)
 
-### 2. Role agents (the Guild's founding members)
-For each of `leader`, `architect`, `developer`, `tester`:
+### 2. Role agents (the Guild's full roster — 16)
+Install the **entire roster** so the leader can assemble any of them per task (plan §18 D — "전 역할 활성화; init이 로스터 전체 설치, 리더가 태스크별 조건부 참여"). The roster has three participation kinds (documented in `_handoff.md` Section G):
+- **Spine roles (always in the flow)**: `leader`, `tech-lead`, `developer`, `tester`, `qa`.
+- **Participation roles (leader convenes conditionally)**: `product-owner`, `designer`, `infra`, `dba`, `security`, `performance`, `i18n`, `analytics`, `tech-writer`, `release-manager`, `support-triage`.
+- **Gate roles (conditional review checks)**: `designer` (UI/UX review), `security` (security review) — same files as their participation entry.
+
+For **each of the 16** roles (`leader`, `tech-lead`, `developer`, `tester`, `product-owner`, `qa`, `designer`, `infra`, `dba`, `security`, `performance`, `i18n`, `analytics`, `tech-writer`, `release-manager`, `support-triage`):
 - Read `<<SKILL_DIR>>/templates/agents/<role>.md`.
 - Fill the `{{...}}` placeholders from the P1 scans + P1.5 interview:
-  - `{{PROJECT_NAME}}`, `{{DOMAIN}}`, `{{STACK}}`, `{{TEST_CMD}}`, `{{E2E_CMD}}`, `{{E2E_SETUP}}`, `{{LINT_CMD}}`, `{{TYPECHECK_CMD}}`, `{{BUILD_CMD}}`, `{{CONVENTIONS}}`, `{{ARCHITECTURE}}`, `{{BOUNDARIES}}`, `{{TEST_FRAMEWORK}}`, `{{TEST_LOCATION}}`, `{{LEADER_NOTES}}`.
+  - `{{PROJECT_NAME}}`, `{{DOMAIN}}`, `{{STACK}}`, `{{TEST_CMD}}`, `{{E2E_CMD}}`, `{{E2E_SETUP}}`, `{{LINT_CMD}}`, `{{TYPECHECK_CMD}}`, `{{BUILD_CMD}}`, `{{CONVENTIONS}}`, `{{ARCHITECTURE}}`, `{{BOUNDARIES}}`, `{{TEST_FRAMEWORK}}`, `{{TEST_LOCATION}}`, `{{LEADER_NOTES}}`, `{{VALUES}}` (each template uses only the subset it needs).
   - `{{TEST_CMD}}`/`{{LINT_CMD}}`/`{{TYPECHECK_CMD}}` use the **normalized** commands from config (no `$(...)`/`&&`; render an array as a comma- or slash-separated list of the simple steps).
-  - **The "주의(핫스팟·함정)" line MUST incorporate the hotspot-scan (scan 6) findings** — list the concrete top bug-hotspot files/areas (with their approximate `fix:` frequency) and any strong co-change groups, for `architect`/`developer`/`tester`. This is evidence from git history, not a guess — do NOT reduce this line to "규칙 미정". (Hidden *rules/intent* may be "(미정 — evolve가 채움)", but **hotspots are known and must appear.**) Example: "핫스팟: `db_helper.dart`(fix 최다)·`sync_data_controller`·`iap_controller`·`tts_controller` — 변경 시 회귀 주의".
+  - **The "주의(핫스팟·함정)" line MUST incorporate the hotspot-scan (scan 6) findings** — list the concrete top bug-hotspot files/areas (with their approximate `fix:` frequency) and any strong co-change groups, for `tech-lead`/`developer`/`tester`/`qa`/`performance`. This is evidence from git history, not a guess — do NOT reduce this line to "규칙 미정". (Hidden *rules/intent* may be "(미정 — evolve가 채움)", but **hotspots are known and must appear.**) Example: "핫스팟: `db_helper.dart`(fix 최다)·`sync_data_controller`·`iap_controller`·`tts_controller` — 변경 시 회귀 주의".
   - Fill the specialization section concretely — this is what makes the role *this repo's* senior, not a generic shell. Apply the **Output conventions** above: no raw `{{...}}` (use a localized "(미정)" note if unknown), structure enumerations as nested sub-bullets, and localize the heading (the template's `프로젝트 특화` heading stays localized — never emit `[PROJECT SPECIALIZATION]`).
+  - **Not-applicable specialists**: a participation role the repo genuinely never needs (e.g. `dba`/`i18n`/`designer` for a single-language headless library) still gets **installed**, but its 프로젝트 특화 section is filled with a localized "(해당 없음 — 이 레포에 <해당 영역> 없음)" per that template's authoring hint. Installing it is cheap and lets `evolve` promote it later; the leader simply won't convene it. Do NOT skip creating the file.
 - Write the result to `.claude/agents/<role>.md` (create; if a same-named agent already exists, see Merge rules below).
 
-Static copy + specialization only — no roster/HR in M1 (plan §14 M1, §18 C).
+Static copy + specialization only — no HR (hire/retire/promote) in M1. The roster is installed as-is; growing/pruning it is `evolve` (plan §14 M1, §18 C/D).
 
 ### 3. Standards drafts
 For each of `charter`, `architecture`, `conventions`, `quality-bar`, `verification`:
@@ -156,7 +163,8 @@ Create the six `guild:*` labels. Run each as its own Bash call; if any fails, re
 gh label create "guild:analyze" --color "1d76db" --description "Guild: Analyze stage" --force
 gh label create "guild:design" --color "0e8a16" --description "Guild: Design stage" --force
 gh label create "guild:execute" --color "e4e669" --description "Guild: Execute stage" --force
-gh label create "guild:test" --color "f9d0c4" --description "Guild: Test stage" --force
+gh label create "guild:test" --color "f9d0c4" --description "Guild: Test stage (automated)" --force
+gh label create "guild:qa" --color "fbca9e" --description "Guild: QA stage (holistic)" --force
 gh label create "guild:done" --color "0075ca" --description "Guild: Done" --force
 gh label create "guild:child" --color "d4c5f9" --description "Guild: Child Issue" --force
 gh label create "guild:harness" --color "5319e7" --description "Guild: Harness readiness gap (from readiness audit)" --force
@@ -210,10 +218,10 @@ Batch the questions where possible (one grouped prompt listing gaps → user pic
 ## P4 — Summary
 
 Report what was installed:
-- Org: 4 role agents at `.claude/agents/` (leader, architect, developer, tester).
+- Guild: 16 role agents at `.claude/agents/` — spine (leader, tech-lead, developer, tester, qa) + participation/gate specialists (product-owner, designer, infra, dba, security, performance, i18n, analytics, tech-writer, release-manager, support-triage). Note that the leader convenes the specialists **conditionally** per task (spine roles always run; specialists join by work-type/risk — see `_handoff.md` Section G).
 - Standards: 5 drafts at `docs/standards/` (note which are `draft` vs `confirmed`).
 - Harness: `CLAUDE.md` (created or merged), `.claude/settings.json` (created or merged), `.claude/guild/` state skeleton. Note whether `.gitignore` was reconciled (P2 step 0) so `.claude/` harness is committable — and confirm the harness is visible to git (`git status` shows it), since ignored files silently look "not created".
-- Labels: 7 `guild:*` (incl. `guild:harness`) (or "skipped — no GitHub repo").
+- Labels: 8 `guild:*` (analyze, design, execute, test, qa, done, child, harness) (or "skipped — no GitHub repo").
 - Readiness audit (P3.5): report at `.claude/guild/readiness-report.md` — summarize the gap counts (BLOCKER/MAJOR/MINOR) and list any `guild:harness` issues created.
 - Next steps: "`/gld dev <issue>` to develop a GitHub Issue end-to-end (including any `guild:harness` remediation issues). `/gld status <issue>` to check progress. Day-1 agents are intentionally rough — they improve as you work (evolve, a later milestone)."
 
@@ -221,7 +229,7 @@ Report what was installed:
 
 ## Partial-failure repair (not a hard dead-end)
 
-`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is: `config.json` + 4 role agents + 5 standards + CLAUDE.md guild block + settings.json allowlist + 6 labels. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
+`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is: `config.json` + 16 role agents (full roster) + 5 standards + CLAUDE.md guild block + settings.json allowlist + 8 labels. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
 
 ## Hard rules (safety)
 - **Additive only** (INV4): existing files are merged/preserved, never clobbered. CLAUDE.md via markers; settings.json via key union; existing `docs/standards/*` and `.claude/agents/*` are not overwritten.

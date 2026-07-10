@@ -24,6 +24,7 @@ Show the current progress of an Issue. **Read-only**: never posts comments, neve
    - `<!-- guild:design:output -->`
    - `<!-- guild:test-evidence:step-1 -->` (execute produced evidence)
    - `<!-- guild:test:output -->`
+   - `<!-- guild:qa:output -->`
 5. Find the related PR:
    ```bash
    gh pr list --search "Refs #$1" --json number,url,state
@@ -37,6 +38,7 @@ Show the current progress of an Issue. **Read-only**: never posts comments, neve
 | `guild:design` | design |
 | `guild:execute` | execute |
 | `guild:test` | test |
+| `guild:qa` | qa |
 | `guild:done` | done |
 | (none) | not started |
 
@@ -46,9 +48,10 @@ Show the current progress of an Issue. **Read-only**: never posts comments, neve
 | Analyze | analyze marker present AND label ≥ design | label == analyze | not started |
 | Design | design marker present AND label ≥ execute | label == design | not started |
 | Execute | evidence marker present AND label ≥ test (or PR open) | label == execute | not started |
-| Test | test output present AND label == done | label == test | not started |
+| Test | test output present AND label ≥ qa | label == test | not started |
+| QA | qa output present AND label == done | label == qa | not started |
 
-(Label order: analyze < design < execute < test < done.)
+(Label order: analyze < design < execute < test < qa < done.)
 
 ## Output example
 ```
@@ -58,6 +61,7 @@ Stage: execute
 - [x] Design: completed
 - [ ] Execute: in progress
 - [ ] Test: not started
+- [ ] QA: not started
 PR: https://github.com/<owner>/<repo>/pull/456 (open)   (or "none")
 ```
 
