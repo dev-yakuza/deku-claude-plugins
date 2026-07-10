@@ -10,12 +10,13 @@ Setup
   /gld init [lang]        Analyze & onboard → harness + Guild (agents) + standards + readiness audit (gaps → guild:harness issues) (one-time)
   /gld config             Show / adjust Guild settings
 
-Develop (spine: analyze → design → execute → test)
-  /gld dev <issue>        Run the full flow on a GitHub Issue (auto-selects execute variant)
+Develop (spine: analyze → design → execute → test → qa)
+  /gld dev <issue>        Run the full flow on a GitHub Issue (auto-selects execute variant; leader convenes specialists by risk)
   /gld analyze <issue>    Stage 1: requirements (What/Why)
-  /gld design <issue>     Stage 2: design (How) — architect skeleton, tester drafts test cases
+  /gld design <issue>     Stage 2: design (How) — tech-lead skeleton, tester drafts test cases
   /gld implement <issue>  Stage 3: TDD implementation (execute variant: feature)
-  /gld test <issue>       Stage 4: verify with fresh evidence
+  /gld test <issue>       Stage 4: automated correctness (verify gate)
+  /gld qa <issue>         Stage 5: holistic quality (exploratory/E2E/user-flow, risk-based)
   /gld review <issue>     Guided pair-programming walkthrough of the PR — one change-unit at a time, explains why, pauses to discuss
   /gld resume <issue>     Auto-detect stage and continue
   /gld status <issue>     Show current progress

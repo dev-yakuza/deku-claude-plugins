@@ -16,7 +16,8 @@ The single source of truth for "what stage is this Issue in" is its GitHub label
 | `guild:design` | design stage active / done | analyze produced `OK ADVANCE: design` |
 | `guild:execute` | execute (implement) stage active / done | design produced `OK ADVANCE: execute` |
 | `guild:test` | test stage active / done | execute produced `OK ADVANCE: test` |
-| `guild:done` | Issue complete | test's verify gate passed |
+| `guild:qa` | QA stage active / done | test's verify gate passed → `OK ADVANCE: qa` |
+| `guild:done` | Issue complete | QA gate passed |
 | `guild:child` | this Issue is a child of a parent Issue | design split work into multiple PRs |
 
 **Label transitions are the main session's responsibility only.** Stage sub-agents NEVER add/remove labels — they return a status line (Section C) and the main session (dev.md / the stage wrapper) applies the label. This keeps state changes centralized and auditable.
@@ -32,7 +33,7 @@ Each stage persists its output as a GitHub Issue comment wrapped in a marker pai
 | Marker | Produced by | Contents |
 |---|---|---|
 | `<!-- guild:analyze:output -->` … `<!-- /guild:analyze:output -->` | analyze (leader) | requirement analysis, work-type classification, assumptions/interpretations chosen at discuss gate |
-| `<!-- guild:design:output -->` … `<!-- /guild:design:output -->` | design (architect ∥ tester) | design summary, skeleton pointer, test-case pointer, PR split decision |
+| `<!-- guild:design:output -->` … `<!-- /guild:design:output -->` | design (tech-lead ∥ tester) | design summary, skeleton pointer, test-case pointer, PR split decision |
 | `<!-- guild:test:output -->` … `<!-- /guild:test:output -->` | test (tester) | test run summary + verify gate outcome |
 | `<!-- guild:test-evidence:step-<n> -->` … `<!-- /guild:test-evidence:step-<n> -->` | execute/test | raw test-runner output captured as verify evidence (Section E) |
 | `<!-- guild:review:output -->` … `<!-- /guild:review:output -->` | review (fresh reviewer) | guided pair-review walkthrough (risk-weighted, rationale-backed). Posted to the PR only with `/gld review … --comment`; default is session-only. Also written to `docs/specs/<issue>/review.md`. |
@@ -46,7 +47,7 @@ This split follows plan §5: GitHub holds ephemeral stage state (①); `docs/` h
 
 ## Section C — Role handoff (within a stage) = status enum + RESULT line
 
-When one role hands off to another inside a stage — architect → developer, tester → developer, developer → architect for conformance — the handoff is a **file** (the artifact) plus a **return status**. A sub-agent spawned for a role returns EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. The line(s) before the sentinel may be narrative; the caller ignores everything until the sentinel.
+When one role hands off to another inside a stage — tech-lead → developer, tester → developer, developer → tech-lead for conformance — the handoff is a **file** (the artifact) plus a **return status**. A sub-agent spawned for a role returns EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. The line(s) before the sentinel may be narrative; the caller ignores everything until the sentinel.
 
 **Status enum** (plan §18 A):
 
@@ -90,12 +91,12 @@ A stage wrapper (analyze/design/implement/test) returns one line to the main ses
 | Return | Meaning | Main session action |
 |---|---|---|
 | `OK ADVANCE: <next-stage>` | stage complete, advance | transition label to `guild:<next-stage>` |
-| `OK DONE` | test's verify gate passed | transition to `guild:done`, close if appropriate |
+| `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done`, close if appropriate |
 | `OK PAUSE: <one-line>` | leader/human chose to stop here | leave label as-is; report |
 | `NEEDS_HUMAN: <one-line>` | a discuss/verify gate needs a human decision | main session prompts the human (`AskUserQuestion`), then resumes |
 | `FAIL: <reason>` | hard error | stop; report |
 
-`<next-stage>` values: `analyze → design → execute → test → done`.
+`<next-stage>` values: `analyze → design → execute → test → qa → done`.
 
 **Sub-agents never call `AskUserQuestion`** (they are non-interactive). A gate that needs a human decision returns `NEEDS_HUMAN:` and the main session runs the interactive prompt. In M1, the human is also the external reviewer (plan §18 A: "M1의 독립 리뷰어 = 사람"), so `NEEDS_HUMAN` at the discuss/verify gates is the primary human-in-the-loop point.
 
@@ -125,3 +126,40 @@ gh repo view --json nameWithOwner -q .nameWithOwner
 ```
 
 Never infer owner/repo from the git user, the system prompt, or path names. If the command fails (non-GitHub remote), Guild's GitHub-backed state is unavailable — report and stop (M1 requires a GitHub repo).
+
+---
+
+## Section G — Roster & participation model (who works on a task)
+
+`/gld init` installs the **full roster of 16 roles** into `.claude/agents/` (plan §18 D). Installing everyone is cheap; what varies per task is **who participates**. The leader (embodied by the main session — `leader.md`) assembles the cast from the roster using work-type + risk + charter. There are **three participation kinds**:
+
+- **Stage role (always)** — lives on the spine; present in every task. Depth scales with the work (a one-line fix still passes through them, lightly). Never conditional.
+- **Participation role (conditional join)** — the leader convenes it **only when the task's nature warrants** (e.g. a designer on a UI change). Not warranted → never spawned → zero token cost. This is how a 16-role roster stays cheap.
+- **Gate role (conditional review)** — a **review check** the leader inserts *before advancing past a stage* when risk warrants (e.g. security review on auth/exposure changes). A gate role reviews **someone else's** output (external-auditor stance — it never self-reviews its own artifact; plan §9/§16). Some roles are both a participation role and a gate role (designer, security): they help build during the stage **and** provide the review check.
+
+**The roster (16):**
+
+| Role | Kind | Joins when | Stage(s) | Produces |
+|---|---|---|---|---|
+| leader | stage (embodied) | always | all | assembly, arbitration, gate rulings, completion judgment |
+| tech-lead | stage | always | design (skeleton + tech direction) · execute (conformance check + loop-back) | skeleton, technical approach + architecture decisions, conformance verdict |
+| developer | stage | always | execute | implementation |
+| tester | stage | always | design (cases from AC) · test | test cases, verify-gate result |
+| qa | stage | always (risk-based depth) | qa | holistic quality plan + result (exploratory/E2E/user-flow) |
+| product-owner | participation | requirements need value-alignment / AC ownership / scope calls | analyze | aligned requirements, AC, priorities, non-goals |
+| designer | participation **+ gate** | the change has UI/UX surface | design (UX design) · **UI/UX review gate** (built UI vs intent) | `docs/specs/<issue>/ux.md`; UI/UX review verdict |
+| security | participation **+ gate** | auth / external exposure / secrets / sensitive data / input validation | design (threat modeling) · execute (review) · **security review gate** (adversarial diff review) | threat-model notes; security findings (with severity); gate verdict |
+| infra | participation | CI/CD · deploy · env · IaC changes | execute | infra diff + rollback/verify notes |
+| dba | participation | schema · migration · data-model · queries | design/execute | schema/migration change + integrity/rollback notes |
+| i18n | participation | user-facing strings · multi-language · flavor/brand variants | design/execute | i18n keys · translations · sync notes |
+| analytics | participation | event tracking · metrics · A/B · instrumentation | design/execute | instrumentation design · event definitions |
+| performance | participation | hot path · rendering · memory · load · cost | design/execute | performance notes/measurements; regression guard |
+| tech-writer | participation | doc-worthy change: ADR · README · user docs | design (ADR / doc plan) · execute (write docs vs implemented change) | ADR; doc draft/update (file) |
+| release-manager | participation · **out of spine** | version bump · store/deploy · release notes · tagging | **after `done`** — a release event bundling many issues (not a `/gld dev` stage) | release prep (version · notes · tag) + checklist result |
+| support-triage | participation · **out of spine** | raw user feedback/report needs refining into an issue | **before `analyze`** — intake (not a `/gld dev` stage) | refined issue draft (symptom · repro · AC · type label) |
+
+**Out-of-spine roles** (`support-triage`, `release-manager`): these two are convened *around* the per-issue flow, not *inside* it. `support-triage` runs **before** `analyze` — it refines raw feedback into a well-formed Issue (intake), which then enters the spine normally. `release-manager` runs **after** `done` — at a **release event** that bundles many already-`done` Issues (version bump, notes, tagging). Neither is a stage in `/gld dev`; they have no wrapper step and are invoked by the leader/human at those boundary moments. They are in the roster so the leader *can* convene them, but they never appear inside the `analyze→…→qa→done` sequence.
+
+**How roles hand off** is unchanged (Section C — status enum + `>>> RESULT <<<`, artifacts as files). Section G only answers *which* roles are in the cast; once convened, every role uses the same handoff contract. **A conditional role that is not convened produces nothing and is not spawned** — its absence is normal, not a gap.
+
+**Leader assembly (authoritative logic lives in `leader.md` + `dev.md`)**: the leader reads the task (work-type label, diff/AC surface, hotspots) against charter priorities and (1) always runs the spine, (2) convenes the participation roles whose trigger matches, (3) inserts the gate reviews whose risk matches — then delegates via the Section C contract. Assembly decisions on large/risky tasks are surfaced to the human (HITL).

@@ -1,6 +1,6 @@
 # TEST (stage)
 
-**Stage: test.** Role: **tester** (leader judges completion). Runs the tests, enforces the **verify gate** (raw evidence, not self-report), and the leader judges done. Invocable directly (`/gld test <issue>`) or via `/gld dev`.
+**Stage: test.** Role: **tester** (leader judges completion). Runs the tests, enforces the **verify gate** (raw evidence, not self-report); the leader judges automated-correctness completion and **advances to the QA stage** (test no longer marks `done` — QA does). Invocable directly (`/gld test <issue>`) or via `/gld dev`.
 
 `$1` = Issue number. Returns a Section D line.
 
@@ -29,14 +29,14 @@ As the leader, enforce the verify gate (`_handoff.md` Section E, plan §4):
 - Check the Definition of Done from `docs/standards/verification.md`.
 
 ## Step 3 — Judge completion + return
-- **Verify passed** (raw evidence green + AC covered + DoD met) → transition to done:
+- **Verify passed** (raw evidence green + AC covered + DoD met) → advance to the **QA stage** (holistic quality follows automated correctness):
   ```bash
-  gh issue edit $1 --remove-label "guild:test" --add-label "guild:done"
+  gh issue edit $1 --remove-label "guild:test" --add-label "guild:qa"
   ```
   Return:
   ```
   >>> RESULT <<<
-  OK DONE
+  OK ADVANCE: qa
   ```
 - **Verify failed** (tests red, or evidence contradicts claim, or AC gap) → do NOT mark done. Return:
   ```
@@ -46,8 +46,8 @@ As the leader, enforce the verify gate (`_handoff.md` Section E, plan §4):
   (The leader/human decides whether to loop back to `/gld implement $1`.)
 - Hard error → `FAIL: <reason>`.
 
-## Note on the human reviewer + QA scope
-In M1, `guild:done` means **automated-test verification passed** (unit/existing + golden + analyze, cross-checked against raw evidence) and the written AC are test-covered — it does **NOT** mean fully QA'd. **E2E (`commands.e2e`) is detected but not auto-run, and manual/visual QA is the human's step** (plan §18 B: "test = 유닛/기존 테스트 + verify (E2E/QA 후속)"). So `guild:done` = "automated-verified, awaiting the human's E2E/visual QA + PR approval," not "merged" and not "fully QA'd." Report it that way — never imply full QA. When reporting done (direct `/gld test` invocation), **nudge the guided pair review**: "PR 리뷰 준비됨 — `/gld review $1`로 리스크 가중 가이드 리뷰를 받을 수 있습니다."
+## Note — test hands off to QA
+`test` proves **automated correctness** (unit/existing + golden + analyze, cross-checked against raw evidence); it then advances to the **QA stage** (`guild:qa`) for holistic quality. `test` no longer marks `done` — the QA stage does, after its risk-based quality pass. So the `test` output should be scoped as "automated correctness verified; holistic QA follows" — never imply full QA here. The guided-review nudge fires at `done` (QA stage / `dev`), not here. When reporting done (direct `/gld test` invocation), **nudge the guided pair review**: "PR 리뷰 준비됨 — `/gld review $1`로 리스크 가중 가이드 리뷰를 받을 수 있습니다."
 
 ## Hard rules
 - **Verify gate is the concrete `_handoff.md` Section E check** — raw runner output is the only accepted proof of green.

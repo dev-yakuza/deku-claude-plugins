@@ -21,11 +21,14 @@ Parse `$1` onward:
    ────────────────────────────────────────
    version:    0.1.0
    language:   ko
-   roles:      leader, architect, developer, tester
+   roles:      16 — spine: leader, tech-lead, developer, tester, qa
+               specialists: product-owner, designer, infra, dba, security,
+               performance, i18n, analytics, tech-writer, release-manager, support-triage
    commands:   test=<...> lint=<...> typecheck=<...> build=<...>
    automation: evolve_nudge=off
    gates:      (none in M1)
    ```
+   (Render the `roles` array from config; the spine roles always run, specialists are convened per task by the leader.)
 
 ## Set a value
 1. Read `.claude/guild/config.json` (parse as JSON in context).
