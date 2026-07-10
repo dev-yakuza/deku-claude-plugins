@@ -1,0 +1,29 @@
+<!-- guild:start -->
+## Guild
+
+이 레포는 [Guild](https://github.com/dev-yakuza/deku-claude-plugins)(`/gld`)가 관리한다. Guild는 척추 흐름(`analyze → design → execute → test`)을 레포 전용 역할 에이전트 조직이 수행하며, 코드베이스와 에이전트 조직이 함께 성장(공진화)한다.
+
+### 지도
+- **조직(역할 에이전트)**: `.claude/agents/` — `leader`, `architect`, `developer`, `tester`. 메인 세션이 `leader`를 체현한다.
+- **표준(권위, 사람 큐레이션)**: `docs/standards/` — `charter`(북극성), `architecture`, `conventions`, `quality-bar`, `verification`. `status: confirmed`는 하드 제약으로 준수한다.
+- **스펙(이슈별 설계 산출물)**: `docs/specs/<issue>/`.
+- **Guild 상태**: `.claude/guild/` — `config.json`(설정), `knowledge/`(프로젝트 사실, 추후 성장), `evolution-log.md`(진화 원장, 추후).
+
+### 검증 커맨드
+<!-- init: 아래 표를 command-scan의 정규화된 커맨드로 채운다. 배열(여러 스텝)이면 한 셀에 스텝을 줄바꿈으로 나열한다. `$(...)`·`&&`는 넣지 않는다. -->
+| 목적 | 커맨드 |
+|---|---|
+| 테스트 | `{{TEST_CMD}}` |
+| 린트 | `{{LINT_CMD}}` |
+| 타입체크 | `{{TYPECHECK_CMD}}` |
+| 빌드 | `{{BUILD_CMD}}` |
+
+### 개발 방식
+- `/gld dev <issue>`가 GitHub 이슈에 대해 척추 전체를 구동한다. 스테이지 상태는 `guild:*` 라벨로 추적하고, 스테이지 산출물은 이슈 댓글(마커) + `docs/specs/<issue>/`에 남는다.
+- 개별 스테이지: `/gld analyze|design|implement|test <issue>`. 진행 확인: `/gld status <issue>`, 재개: `/gld resume <issue>`.
+- 게이트: **discuss**(analyze/design 전 — 가정 명시·2~3안 제시), **verify**(done 전 — 러너 원문 증거로만 완료 인정). M1에서는 사람이 외부 리뷰어다(PR 승인).
+
+### 지식 라우팅
+- 이 코드베이스의 지속 사실은 `docs/standards/`(큐레이션)와 `.claude/guild/knowledge/`(evolve로 축적, 추후)에 둔다.
+- 이슈 작업 시, 먼저 관련 표준 + 그 이슈의 이전 스테이지 산출물을 읽고 착수한다.
+<!-- guild:end -->
