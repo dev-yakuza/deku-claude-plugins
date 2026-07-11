@@ -20,6 +20,7 @@ Develop (spine: analyze → design → execute → test → qa)
   /gld review <issue>     Guided pair-programming walkthrough of the PR — one change-unit at a time, explains why, pauses to discuss
   /gld resume <issue>     Auto-detect stage and continue
   /gld status <issue>     Show current progress
+  /gld batch [issues]     Run many Issues unattended to guild:done (PR open), auto-resumes on rate limit; leader stands in at gates, human reviews PRs after
 
   /gld help               This help
 

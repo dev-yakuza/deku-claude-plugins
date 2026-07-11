@@ -31,9 +31,11 @@ gh issue view $1
 Before analyzing, as the leader:
 1. State the **assumptions** and interpretations you're making about the request.
 2. Offer **2–3 substantively different interpretations/approaches** where the request is ambiguous (not one "obvious" reading).
-3. If any material ambiguity affects scope/approach → return `NEEDS_HUMAN: <the choice needed>` so the main session prompts the user. Do not proceed past a real ambiguity on your own.
+3. If any material ambiguity affects scope/approach → **attended**: return `NEEDS_HUMAN: <the choice needed>` so the main session prompts the user (do not proceed past a real ambiguity on your own). **Unattended (`GLD_UNATTENDED=1`, `_handoff.md` Section H)**: the leader stands in — classify the ambiguity's stakes (charter-anchored). Low/medium → pick the most charter-aligned interpretation and **record it as an explicit assumption** (feeds the PR decision log), proceed. High/scope-defining → do NOT guess: post `<!-- guild:needs-human -->` with the options and return `OK PAUSE: needs-human — <one-line>` (no transition).
 
 If the request is unambiguous, record the single interpretation explicitly and proceed (note in the output that discuss found no material ambiguity).
+
+**Detect mode first** (its own Bash call): `printenv GLD_UNATTENDED` — `1` selects the unattended branch above.
 
 ## Step 2 — Requirement analysis
 - Enumerate the requested features/changes (What + Why, not How).

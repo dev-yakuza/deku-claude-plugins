@@ -26,6 +26,8 @@
 
 4. **Resolve owner/repo** once (`_handoff.md` Section F); hold the literal value.
 
+5. **Detect run mode** (its own Bash call): `printenv GLD_UNATTENDED`. If `1` → **unattended mode** (invoked by `/gld batch`·`/gld sprint` supervisor): the leader stands in for the human at gates and never calls `AskUserQuestion` (`_handoff.md` Section H). Otherwise attended (default).
+
 ---
 
 ## Phase 1 — Determine current stage (from label)
@@ -69,8 +71,8 @@ Each wrapper **owns its own label transition** on success (single source — `_h
 
 - **`OK ADVANCE: <next>`** → the wrapper has already set `guild:<next>`. Continue by running `<next>`'s wrapper.
 - **`OK DONE`** (from qa) → the wrapper has set `guild:done`. Report completion. Stop.
-- **`NEEDS_HUMAN: <one-line>`** → a discuss/verify gate needs a human decision. As the leader, surface the options and ask the user (`AskUserQuestion`). Feed the choice back by re-running the same stage wrapper with the decision in context. Do NOT auto-decide gate questions — plan §4: discuss refuses to proceed until the user chooses.
-- **`OK PAUSE: <one-line>`** → leave label as-is; report where it paused and how to resume (`/gld resume $1`). Stop.
+- **`NEEDS_HUMAN: <one-line>`** → a discuss/verify gate needs a human decision. **Attended**: as the leader, surface the options and ask the user (`AskUserQuestion`), then re-run the same stage wrapper with the decision. Do NOT auto-decide — plan §4: discuss refuses to proceed until the user chooses. **Unattended (`GLD_UNATTENDED=1`)**: there is no human — stages already self-resolve low/medium gates and return `OK PAUSE: needs-human` for high-stakes ones (`_handoff.md` Section H), so a `NEEDS_HUMAN` should not normally arrive here; if it does, treat it as `OK PAUSE: needs-human` (do NOT call `AskUserQuestion`).
+- **`OK PAUSE: <one-line>`** → leave label as-is; report where it paused and how to resume (`/gld resume $1`). **Unattended**: a `needs-human` pause has already marked the Issue (`guild:needs-human` label + `<!-- guild:needs-human -->` comment, Section H); stop **cleanly** so the supervisor moves to the next Issue. Stop.
 - **`FAIL: <reason>`** → stop; report the reason.
 
 **Leader judgment between stages**: after each `OK ADVANCE`, briefly confirm the produced output is coherent enough to feed the next stage (completion judged by downstream consumability — plan §18 A). If a gap is obvious, loop back rather than advancing.

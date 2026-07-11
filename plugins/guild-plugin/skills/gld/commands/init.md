@@ -168,8 +168,9 @@ gh label create "guild:qa" --color "fbca9e" --description "Guild: QA stage (holi
 gh label create "guild:done" --color "0075ca" --description "Guild: Done" --force
 gh label create "guild:child" --color "d4c5f9" --description "Guild: Child Issue" --force
 gh label create "guild:harness" --color "5319e7" --description "Guild: Harness readiness gap (from readiness audit)" --force
+gh label create "guild:needs-human" --color "b60205" --description "Guild: Paused — needs a human decision (unattended run)" --force
 ```
-(`guild:harness` labels the remediation issues that P3.5's readiness audit proposes.)
+(`guild:harness` labels the remediation issues that P3.5's readiness audit proposes. `guild:needs-human` marks an Issue an unattended `/gld batch`·`sprint` run paused at a high-stakes gate — the human resolves it, then re-runs `/gld dev`/`resume`.)
 
 ---
 
@@ -221,7 +222,7 @@ Report what was installed:
 - Guild: 16 role agents at `.claude/agents/` — spine (leader, tech-lead, developer, tester, qa) + participation/gate specialists (product-owner, designer, infra, dba, security, performance, i18n, analytics, tech-writer, release-manager, support-triage). Note that the leader convenes the specialists **conditionally** per task (spine roles always run; specialists join by work-type/risk — see `_handoff.md` Section G).
 - Standards: 5 drafts at `docs/standards/` (note which are `draft` vs `confirmed`).
 - Harness: `CLAUDE.md` (created or merged), `.claude/settings.json` (created or merged), `.claude/guild/` state skeleton. Note whether `.gitignore` was reconciled (P2 step 0) so `.claude/` harness is committable — and confirm the harness is visible to git (`git status` shows it), since ignored files silently look "not created".
-- Labels: 8 `guild:*` (analyze, design, execute, test, qa, done, child, harness) (or "skipped — no GitHub repo").
+- Labels: 9 `guild:*` (analyze, design, execute, test, qa, done, child, harness, needs-human) (or "skipped — no GitHub repo").
 - Readiness audit (P3.5): report at `.claude/guild/readiness-report.md` — summarize the gap counts (BLOCKER/MAJOR/MINOR) and list any `guild:harness` issues created.
 - Next steps: "`/gld dev <issue>` to develop a GitHub Issue end-to-end (including any `guild:harness` remediation issues). `/gld status <issue>` to check progress. Day-1 agents are intentionally rough — they improve as you work (evolve, a later milestone)."
 
@@ -229,7 +230,7 @@ Report what was installed:
 
 ## Partial-failure repair (not a hard dead-end)
 
-`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is: `config.json` + 16 role agents (full roster) + 5 standards + CLAUDE.md guild block + settings.json allowlist + 8 labels. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
+`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is: `config.json` + 16 role agents (full roster) + 5 standards + CLAUDE.md guild block + settings.json allowlist + 9 labels. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
 
 ## Hard rules (safety)
 - **Additive only** (INV4): existing files are merged/preserved, never clobbered. CLAUDE.md via markers; settings.json via key union; existing `docs/standards/*` and `.claude/agents/*` are not overwritten.

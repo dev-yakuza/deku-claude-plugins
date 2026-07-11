@@ -52,7 +52,7 @@ Spawn only the matched roles (none matched → skip this step entirely; that is 
 ## Step 2 — Collect handoff, arbitrate
 Read every RESULT line (tech-lead, tester, and any conditional participants):
 - All `DONE`/`DONE_WITH_CONCERNS` → proceed. Record any concerns (esp. a specialist's — e.g. designer a11y concern, i18n sync concern) in the design output.
-- Any `BLOCKED`/`NEEDS_CONTEXT` → as the leader, intervene: supply the missing context and re-invoke that role, or if unresolvable return `NEEDS_HUMAN: <one-line>`.
+- Any `BLOCKED`/`NEEDS_CONTEXT` → as the leader, intervene: supply the missing context and re-invoke that role, or if unresolvable → **attended**: `NEEDS_HUMAN: <one-line>` · **unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): low/medium design ambiguity → decide charter-anchored + record assumption; high/scope-defining or genuinely blocked → `OK PAUSE: needs-human — <one-line>` (no transition).
 - Any `FAIL` → return `FAIL: <reason>`.
 
 If the tech-lead flagged a **multi-PR split**: in M1, note it in the design output and (optionally) create child Issues labeled `guild:child` with a `Parent Issue: #$1` reference (temp-file `gh issue create --body-file`). Full child orchestration is light in M1 — record the split for the humans; the primary path is single-PR.
