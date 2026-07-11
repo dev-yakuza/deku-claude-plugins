@@ -11,17 +11,17 @@ Route to the appropriate command based on `$0`. Read `<<SKILL_DIR>>/commands/$0.
 
 ## Command Routing
 
-- Valid commands: `init`, `dev`, `analyze`, `design`, `implement`, `test`, `qa`, `review`, `batch`, `config`, `resume`, `status`, `help`
+- Valid commands: `init`, `dev`, `analyze`, `design`, `implement`, `test`, `qa`, `review`, `batch`, `evolve`, `config`, `resume`, `status`, `help`
 - If `$0` is empty → route to `help`.
 - If `$0` is not in the list → report unknown command, then route to `help`.
-- Planned (not in this version — report "planned, not yet available" if invoked): `debug`, `refactor`, `evolve`, `audit`, `rollback`, `ask`, `monitoring`, `update`, `contribute`, `sprint`.
+- Planned (not in this version — report "planned, not yet available" if invoked): `debug`, `refactor`, `audit`, `rollback`, `ask`, `monitoring`, `update`, `contribute`, `sprint`.
 
 ---
 
 ## Common Definitions
 
 ### What Guild is
-Guild installs a **harness** into the target repo and grows a per-repo agent organization — **the Guild** — of role agents that develop the codebase. The codebase (**결과물**) and the Guild (**개발자**) co-evolve. This version (0.1.0 / M1) is a **walking skeleton**: bootstrap + development flow with an **advisory** harness. Enforcement gates, the `evolve` growth loop, and autonomy are later milestones.
+Guild installs a **harness** into the target repo and grows a per-repo agent organization — **the Guild** — of role agents that develop the codebase. The codebase (**결과물**) and the Guild (**개발자**) co-evolve. This version is a **walking skeleton** (M1: bootstrap + development flow with an **advisory** harness) plus a **proposal-only `evolve` growth loop** (M2): evolve reads traces and proposes how the Guild should grow, but the human applies the changes — no auto-apply yet. Enforcement gates and autonomy are later milestones.
 
 ### The Guild (per-repo agent organization)
 - **Terminology (user-facing)**: in all output and GitHub comments, call the per-repo agent organization the **Guild** (길드) — the brand. Do NOT surface the internal shorthand "org" to the user (e.g. write "Guild 내부 검증", not "내부 org verify").
