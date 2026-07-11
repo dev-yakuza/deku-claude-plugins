@@ -22,9 +22,12 @@ Develop (spine: analyze → design → execute → test → qa)
   /gld status <issue>     Show current progress
   /gld batch [issues]     Run many Issues unattended to guild:done (PR open), auto-resumes on rate limit; leader stands in at gates, human reviews PRs after
 
+Grow (Outer Loop)
+  /gld evolve [days]      Scan traces (git · CI · corrections · transcript) → ranked proposals for how the Guild should grow. Proposal-only: you edit the files (no auto-apply)
+
   /gld help               This help
 
-Planned (later milestones): debug, refactor, evolve (growth loop), audit,
+Planned (later milestones): debug, refactor, audit,
 rollback, ask, monitoring, update, contribute, sprint.
 ```
 
