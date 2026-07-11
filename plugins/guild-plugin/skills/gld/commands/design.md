@@ -57,6 +57,12 @@ Read every RESULT line (tech-lead, tester, and any conditional participants):
 
 If the tech-lead flagged a **multi-PR split**: in M1, note it in the design output and (optionally) create child Issues labeled `guild:child` with a `Parent Issue: #$1` reference (temp-file `gh issue create --body-file`). Full child orchestration is light in M1 — record the split for the humans; the primary path is single-PR.
 
+**Ground-truth capture (①, `_signals.md` Section C):** if a human **overrides the design approach** at this gate — rejects the tech-lead's approach for a different one, or the design is found **superseded / a duplicate** of prior work (e.g. #893 turned out to duplicate #891) — append one entry (its own Bash call), `--surprise` when it reverses a confident design choice:
+```bash
+python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage design --role tech-lead --summary "<design approach → override/supersede>" --evidence "<1 line: chosen alt / duplicate ref>" --surprise
+```
+Do **not** capture routine acceptance of the design (agreement ≠ correction).
+
 ## Step 3 — Post design output + durable spec
 Post the design summary comment (temp-file pattern):
 - Marker: `<!-- guild:design:output -->` … `<!-- /guild:design:output -->`.

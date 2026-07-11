@@ -27,6 +27,11 @@ As the leader, enforce the verify gate (`_handoff.md` Section E, plan §4):
 - **Verification scope declaration (mandatory, honesty-of-scope)**: the output MUST have an explicit **검증 범위** block stating (a) what ran with evidence (e.g. `flutter test` unit, `flutter analyze`, golden), (b) **what did NOT run — `commands.e2e` (integration/E2E) and manual/visual QA** (deferred / the human in M1), and (c) the **risk-based E2E judgment** — either "E2E 불요: <reason>" (justified skip for a contained change) or "**E2E 회귀 권장: `<suite>`** (사람 실행)" (change touches flows/integration). A blanket silent skip is NOT acceptable — there must be a judgment. This makes "verify 통과" clearly mean *automated-test verification with a stated E2E risk call*, never "fully QA'd". Reject any output missing this block.
 - Cross-check the tester's claim against the raw output. **Complete only on matching raw evidence.** If they disagree → the raw output wins; this is not done.
 - Check the Definition of Done from `docs/standards/verification.md`.
+- **Ground-truth capture (①, `_signals.md` Section C):** if the tester's claim **disagreed** with the raw output (a verify-gap), OR verify failed (tests red / AC gap), append one entry (its own Bash call). `--surprise` when a claimed pass was actually red (a confident self-report contradicted by evidence — the strongest ranking lever, plan §8-A):
+  ```bash
+  python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind verify-gap --issue $1 --stage test --role tester --summary "<claimed vs raw / AC gap, 1 line>" --evidence "<raw runner summary line>" --surprise
+  ```
+  **Skip** when raw evidence matched the claim and was green — no gap means nothing to learn (agreement ≠ signal).
 
 ## Step 3 — Judge completion + return
 - **Verify passed** (raw evidence green + AC covered + DoD met) → advance to the **QA stage** (holistic quality follows automated correctness):
