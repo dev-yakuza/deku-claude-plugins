@@ -13,7 +13,7 @@ As the leader, follow `_preflight.md` **Heavy tier** (items 1–5, including tar
 
 Validate `$1` is an Issue. Ensure entry label `guild:execute` if invoked directly.
 
-Create/switch to a feature branch for this Issue (follow the repo's branch convention from conventions.md; e.g. `feature/#$1-<slug>`). Do this as the leader before spawning the developer, so the developer works on the branch.
+Create/switch to a feature branch for this Issue (follow the repo's branch convention from conventions.md; e.g. `feature/#$1-<slug>`). Do this as the leader before spawning the developer, so the developer works on the branch. **Resume-safe (rate-limit/interruption)**: if a branch for this Issue **already exists** (a prior interrupted execute), switch to it and inspect existing commits (`git log`) — the developer **continues from the partial work**, not from scratch. Only create the branch if absent. (Plan §부록 B "중단 내성" — mid-execute resume.)
 
 ## Step 1 — Spawn developer (TDD red→green→refactor)
 Spawn the developer sub-agent:
@@ -53,7 +53,7 @@ As the leader, over the developer + tech-lead + any conditional specialist/gate 
 - Any `FAIL` → return `FAIL: <reason>`.
 
 ## Step 5 — Open PR
-As the leader, push the branch and open a PR referencing the Issue (temp-file body via `--body-file`; body references `Refs #$1` and summarizes the change + test evidence). The PR is where the **human reviewer** (M1's external reviewer, plan §18 A) approves.
+As the leader, push the branch and open a PR referencing the Issue (temp-file body via `--body-file`; body references `Refs #$1` and summarizes the change + test evidence). The PR is where the **human reviewer** (M1's external reviewer, plan §18 A) approves. **Resume-safe**: if a PR for this branch already exists (interrupted prior run), PATCH it rather than opening a duplicate. **Unattended (`GLD_UNATTENDED=1`)**: append a `## 무인 결정 로그 (GLD_UNATTENDED)` section to the PR body aggregating the leader-proxy gate decisions recorded in the analyze/design outputs (chosen interpretation · charter rationale · "사람 확인 요") — `_handoff.md` Section H — so the deferred human gate (PR review) is informed, not blind.
 
 ## Step 6 — Transition + return
 ```bash

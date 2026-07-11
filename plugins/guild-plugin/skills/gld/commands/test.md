@@ -38,12 +38,13 @@ As the leader, enforce the verify gate (`_handoff.md` Section E, plan §4):
   >>> RESULT <<<
   OK ADVANCE: qa
   ```
-- **Verify failed** (tests red, or evidence contradicts claim, or AC gap) → do NOT mark done. Return:
+- **Verify failed** (tests red, or evidence contradicts claim, or AC gap) → do NOT mark done.
+  - **Attended**: return `NEEDS_HUMAN: tests not green / AC gap — <one-line>; loop back to execute?` (the leader/human decides whether to loop back to `/gld implement $1`).
+  - **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): the leader auto-decides — bounded loop-back to execute (≤2 attempts); if still failing, return `OK PAUSE: needs-human — tests not green / AC gap`. **Never weaken/skip tests to pass** (INV2). Detect mode via `printenv GLD_UNATTENDED`.
   ```
   >>> RESULT <<<
   NEEDS_HUMAN: tests not green / AC gap — <one-line>; loop back to execute?
   ```
-  (The leader/human decides whether to loop back to `/gld implement $1`.)
 - Hard error → `FAIL: <reason>`.
 
 ## Note — test hands off to QA

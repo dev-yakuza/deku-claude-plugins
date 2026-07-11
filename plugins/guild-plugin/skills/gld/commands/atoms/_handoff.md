@@ -163,3 +163,27 @@ Never infer owner/repo from the git user, the system prompt, or path names. If t
 **How roles hand off** is unchanged (Section C — status enum + `>>> RESULT <<<`, artifacts as files). Section G only answers *which* roles are in the cast; once convened, every role uses the same handoff contract. **A conditional role that is not convened produces nothing and is not spawned** — its absence is normal, not a gap.
 
 **Leader assembly (authoritative logic lives in `leader.md` + `dev.md`)**: the leader reads the task (work-type label, diff/AC surface, hotspots) against charter priorities and (1) always runs the spine, (2) convenes the participation roles whose trigger matches, (3) inserts the gate reviews whose risk matches — then delegates via the Section C contract. Assembly decisions on large/risky tasks are surfaced to the human (HITL).
+
+---
+
+## Section H — Unattended mode (`GLD_UNATTENDED`, used by `/gld batch`·`/gld sprint`)
+
+When Guild runs unattended (a supervisor invokes `claude -p "/gld resume <n>"` with `GLD_UNATTENDED=1` set), no human is present to answer a gate. **The leader stands in for the human at in-flow gates — but the human's real authority is deferred to PR review + merge, never removed** (INV1: nothing merges unattended). This is the plan's sprint principle ("사람 리뷰를 뒤로 미룰 뿐 없애지 않음"). Attended runs are unchanged.
+
+**Detection** — at stage start (its own Bash call):
+```bash
+printenv GLD_UNATTENDED
+```
+Value `1` → unattended. Anything else / empty → attended (default; behave exactly as before).
+
+**Gate policy when unattended:**
+
+| Gate | Attended (default) | Unattended (leader stands in) |
+|---|---|---|
+| **discuss** (analyze/design) | return `NEEDS_HUMAN` → main session `AskUserQuestion` | leader classifies the ambiguity's stakes, **charter-anchored**: **low/medium** (local, reversible) → pick the most charter/standards-aligned interpretation, **record it as an explicit assumption** in the stage output (for the decision log), proceed. **high** (scope-defining / materially different product / hard to reverse) → do NOT guess: post a `<!-- guild:needs-human -->` comment listing the options, **add the `guild:needs-human` label**, and return `OK PAUSE: needs-human — <one-line>` (do NOT transition the stage label). |
+| **verify** (test) | `NEEDS_HUMAN` on red/AC-gap | **deterministic**: raw evidence green + AC covered + DoD → advance. Else bounded loop-back to execute (≤2 attempts). Still failing → `OK PAUSE: needs-human — tests not green / AC gap`. **Never weaken/skip tests to pass** (INV2). |
+| **qa** (blocking defect) | `NEEDS_HUMAN` | record the concern; bounded loop-back to execute if fixable, else `OK PAUSE: needs-human — QA defect`. Never force `done`. |
+
+**Decision log (mandatory when unattended)**: every gate the leader auto-resolved is recorded — analyze/design write each assumption into their output comment; the execute stage's **PR body** aggregates them under a `## 무인 결정 로그 (GLD_UNATTENDED)` heading (chosen interpretation · rationale/charter anchor · "사람 확인 요"). This makes the human's PR review **informed, not blind** — the deferred human gate lands here.
+
+**Hard rules (unchanged under unattended)**: INV1 (never merge — stop at `guild:done` = PR open) · INV2 (never weaken verification) · never fabricate a pass. `OK PAUSE: needs-human` is the honest escape hatch: mark the Issue with the **`guild:needs-human` label** (+ comment) so it is discoverable (`gh issue list --label guild:needs-human`), then stop **cleanly** (exit 0) so the supervisor counts it and moves to the next Issue.
