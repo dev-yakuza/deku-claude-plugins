@@ -89,4 +89,4 @@ On `OK DONE`: summarize what was built (stages run, PR link if any, test evidenc
 - **Single Issue, in-session.** For multi-issue or unattended runs, that's a later milestone (sprint, gated). `/gld dev` is the everyday driver.
 - **Leader is embodied, not spawned.** No separate leader sub-agent (avoids nesting). The main session IS the leader; only the stage roles (tech-lead/developer/tester) are spawned as sub-agents by the wrappers.
 - **Labels are the state.** If interrupted, `/gld resume $1` or a fresh `/gld dev $1` re-reads the label and continues from there — no local state file to corrupt.
-- **M1 review = human.** There is no agent-based independent/adversarial review in M1; the human approving the PR is the external reviewer (plan §18 A). Org collaboration (tech-lead conformance, tester-first) provides internal review.
+- **M1 review = human.** There is no agent-based independent/adversarial review in M1; the human approving the PR is the external reviewer (plan §18 A). Guild collaboration (tech-lead conformance, tester-first) provides internal review.
