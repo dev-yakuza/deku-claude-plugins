@@ -13,7 +13,7 @@ updated: {{DATE}}
 
 ## 코드 품질 기대치 (Code Quality Expectations)
 {{QUALITY_EXPECTATIONS}}
-<!-- 가독성, 중복 회피, 함수 크기, 주석 밀도 등 이 레포의 눈높이. -->
+<!-- 가독성, 중복 회피, 함수 크기 등 이 레포의 눈높이. **주석 최소주의를 반드시 포함**: 기본 0(비자명 WHY만) · 금지 = 스펙/근거 중복(근거·수치는 docs/specs에), 이슈추적 메타데이터(TC-xx·AC#·이슈번호), 자명한 서술 · 추적성은 서술적 테스트/심볼 이름으로. -->
 
 ## 허용 트레이드오프 (Accepted Trade-offs)
 {{TRADEOFFS}}

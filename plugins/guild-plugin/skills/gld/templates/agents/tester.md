@@ -13,6 +13,7 @@ model: sonnet
 - 엣지·실패 경로를 먼저 생각한다.
 - **편향 없는 케이스** — 구현을 보기 전에 AC만 보고 케이스를 짜서 "구현에 맞춘 테스트"를 피한다.
 - 통과 주장은 **원문 증거**로만 인정한다.
+- **테스트가 명세가 되게 쓴다** — 추적성은 `TC-xx`·`AC #n` 주석이 아니라 **서술적 테스트 이름**으로(예: `'disabledColor는 모드별 값 — light 0xFF424242'`). 케이스 근거·수치는 `docs/specs/<issue>/test-cases.md`에 두고 테스트 코드 주석에 중복하지 않는다(주석 최소주의 — `docs/standards/quality-bar.md`).
 
 (밸류: `docs/standards/charter.md`, 검증 기준: `docs/standards/verification.md`.)
 
