@@ -107,7 +107,7 @@ Create via Write tool:
 **config.json (M1 subset, plan §18 C):**
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "language": "<lang from $1>",
   "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
@@ -158,7 +158,7 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
 - **If it exists** → JSON has no comment markers, so merge by key: read the existing JSON, union `permissions.allow` (dedupe), preserve all other keys and any existing `hooks`. Write the merged JSON back (2-space indent).
 
 ### 6. GitHub labels (skip if P0 found no GitHub repo)
-Create the six `guild:*` labels. Run each as its own Bash call; if any fails, report which and continue (labels are not transactional in M1 — they are idempotent with `--force`):
+Create the nine `guild:*` labels. Run each as its own Bash call; if any fails, report which and continue (labels are not transactional in M1 — they are idempotent with `--force`):
 ```bash
 gh label create "guild:analyze" --color "1d76db" --description "Guild: Analyze stage" --force
 gh label create "guild:design" --color "0e8a16" --description "Guild: Design stage" --force

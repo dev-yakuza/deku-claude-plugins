@@ -8,7 +8,7 @@
 
 `$1` (optional) = history window in **days** for the transcript scan (default: 30). Git scans use a commit-count window regardless.
 
-> **Bash**: simple calls only (`<<SKILL_DIR>>/commands/atoms/_bash_rules.md`) — **except** the two bundled Python tools (`scan_transcript.py`), run as ONE `python3` call each (atomic-bash exception, plan §8 정정). Signal contract: `<<SKILL_DIR>>/commands/atoms/_signals.md`. Handoff/RESULT + owner/repo: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
+> **Bash**: simple calls only (`<<SKILL_DIR>>/commands/atoms/_bash_rules.md`) — **except** the bundled Python tool (`scan_transcript.py`), run as ONE `python3` call (atomic-bash exception, plan §8 정정). Signal contract: `<<SKILL_DIR>>/commands/atoms/_signals.md`. Handoff/RESULT + owner/repo: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
 
 ---
 
@@ -67,7 +67,7 @@ Converge the scan outputs into ranked themes. This is inline leader judgment (no
 2. **Cluster into themes** and route each to its evolution target (plan §8 P2):
    - **agent friction** (rediscovery, repeated tool-error, rework) → ③ habit (a role's `.claude/agents/<role>.md`) or ⑥ fact (`.claude/guild/knowledge/`).
    - **gate friction** (repeated lint/type failure, committed secret, a correction that recurs) → **fail-to-rule** → a gate/standards rule.
-   - **flow friction** (the spine itself was awkward) → **contribute candidate** (upstream — do NOT apply locally; just flag).
+   - **flow friction** (the spine itself was awkward) → **upstream-contribution candidate** (flag only — do NOT apply locally; not a runnable command yet).
    - **convention drift** → `docs/standards/conventions.md`.
 
 3. **Rank** each theme by **frequency × impact × surprise** (plan §8-A — the ranking lever the kill-gate validated):
@@ -75,7 +75,7 @@ Converge the scan outputs into ranked themes. This is inline leader judgment (no
    - **impact** — a human correction (overturned work) > a structural coupling fact > a convention nit; BLOCKER/MAJOR readiness gaps outrank MINOR. Anchor impact to charter priorities when known.
    - **surprise** — boost items where a **confident choice was overturned** or a **guard was pierced** (§8-A). Sources, in order of strength:
      1. `surprise:true` flags in the ground-truth log (verify self-report ↔ runner gap; human overturned a confident choice).
-     2. **Derived from durable signals when the log is empty** (the kill-gate case): a revert, an immediate fix-on-fix, a PR closed-unmerged, or a duplicate-issue discovery are all inherently surprising (confident work undone) — treat them as surprise-positive even with no ground-truth entry. *(This is why A1 "guard existed yet bug escaped" and A3 "confident work reversed" ranked top at the kill-gate without any transcript.)*
+     2. **Derived from durable signals when the log is empty** (the kill-gate case): a revert, an immediate fix-on-fix, a PR closed-unmerged, or a duplicate-issue discovery are all inherently surprising (confident work undone) — treat them as surprise-positive even with no ground-truth entry. *(This is why A1 "guard existed yet bug escaped" and A3 "confident work reversed" ranked top at the kill-gate without any transcript.)* ⚠ **Caveat**: *derived* surprise overlaps with the correction signal itself (not a fully independent third factor) — use it as a tie-breaker that lifts overturns, not as independent evidence. Only ground-truth `surprise:true` flags (source 1) are truly independent.
 
 4. Assign each theme a **tier** for human triage: **A** (accept — clear, anchored, high rank), **B** (worth considering), **C** (noise / not actionable — surface anyway, as the discriminating power *is* the signal quality). Drop anything the ledger already rejected (P0) unless new evidence crossed the threshold.
 
@@ -98,7 +98,7 @@ Each proposal states, in ≤ ~500 chars (plan §6 context budget):
 - End with the **explicit hand-off**: *"이것은 제안 목록입니다 (proposal-only). Guild는 파일을 수정하지 않았습니다 — 위 target 파일을 직접 편집하세요. 자동 적용·백업/롤백·문서-TDD·패널 검증은 v2+입니다."*
 - **Optionally** offer to write the full ranked list to a session-scratchpad digest (`<scratchpad>/gld-evolve-<repo>.md`) for the human to work from — **scratchpad only, never the repo** (session-ephemeral; not an application).
 
-**Nudge (read-only)**: if synthesis found the friction *trend* worsening or a signal that reads like a diagnostic gap rather than a single fix, suggest `/gld audit` (plan §9 evolve↔audit mutual nudge) — a nudge only, never auto-run.
+**Nudge (read-only)**: if synthesis found the friction *trend* worsening or a signal that reads like a diagnostic gap rather than a single fix, **note that a future `/gld audit` pass would help** (plan §9 evolve↔audit mutual nudge) — **audit is a later milestone, not yet runnable**; this is a flag for the human, not an invocation.
 
 ---
 

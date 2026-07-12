@@ -5,7 +5,7 @@
 Parse `$1` onward:
 - No arguments → **show current config**.
 - `--language=<code>` → set `language` (`en`/`ko`/`ja`).
-- `--evolve-nudge=<on|off>` → set `automation.evolve_nudge` (placeholder in M1 — evolve is a later milestone; the dial exists so the off-switch is available early).
+- `--evolve-nudge=<on|off>` → set `automation.evolve_nudge`. The `/gld evolve` command exists (M2, proposal-only) but the **automatic** nudge is not yet wired — evolve is run manually; the dial exists so the off-switch is available early.
 - Other keys → in M1, report "unknown/unsupported config key for M1" and list the supported ones. (Gate/evolve dials arrive in M2/M3.)
 
 > **Bash**: `_bash_rules.md`. Read/write JSON via the Read/Write tools (not `jq -i`).
@@ -19,7 +19,7 @@ Parse `$1` onward:
    ```
    Guild config (.claude/guild/config.json)
    ────────────────────────────────────────
-   version:    0.1.0
+   version:    0.2.0
    language:   ko
    roles:      16 — spine: leader, tech-lead, developer, tester, qa
                specialists: product-owner, designer, infra, dba, security,
