@@ -18,7 +18,7 @@ claude /plugin install deku-claude-plugins@guild-plugin
 ## Quick Start
 
 ```bash
-/gld init            # Analyze & onboard the repo → harness + founding agent org + standards drafts (one-time)
+/gld init            # Analyze & onboard the repo → harness + founding Guild agents + standards drafts (one-time)
 /gld dev 123         # Develop GitHub Issue #123 end-to-end (analyze → design → execute → test)
 ```
 
@@ -26,7 +26,7 @@ claude /plugin install deku-claude-plugins@guild-plugin
 
 - **Harness** — the operating environment Guild installs (CLAUDE.md, settings, agents, verification map).
 - **Organization** — a per-repo team of role agents (leader, architect, developer, tester) that collaborate across the spine and are specialized to your project.
-- **Co-evolution** — both the codebase and the agent org grow from usage; `evolve` (later milestone) distills traces into improved agents, knowledge, and gates.
+- **Co-evolution** — both the codebase and the Guild grow from usage; `evolve` (M2, proposal-only) distills traces into proposed improvements to agents, knowledge, and gates.
 
 ## Commands
 
