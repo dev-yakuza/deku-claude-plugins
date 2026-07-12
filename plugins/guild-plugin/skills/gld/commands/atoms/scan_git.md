@@ -15,7 +15,7 @@ Four durable git-derived signal classes (`_signals.md` Section A · plan §8 sca
 | Class | What | Maps to |
 |---|---|---|
 | **co-change** | files that repeatedly change *together* (hidden coupling X→Y) | ⑥ fact |
-| **hotspot** | where `fix:` commits cluster + high churn (fragile / bug-prone) | ⑥ fact / role 주의 |
+| **hotspot** | where `fix:` commits cluster + high churn — **`fix:`-label & churn correlation, NOT proven fragility** (a disciplined `fix:`-prefixer looks buggy; a central well-tested file looks fragile) | ⑥ fact / role 주의 |
 | **convention** | commit-message convention coverage + violations | `conventions.md` |
 | **revert / re-fix** | reverts + fix-on-fix churn = a change that was undone/redone | correction (strong) |
 

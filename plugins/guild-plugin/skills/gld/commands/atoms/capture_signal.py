@@ -24,6 +24,21 @@ LOG_REL = os.path.join(".claude", "guild", "memory", "ground-truth.jsonl")
 KINDS = ("correction", "verify-gap", "revert")
 
 
+def repo_root():
+    """Resolve the repo root by walking up for a .git entry, so the log lands at
+    the repo-local memory dir even when a stage runs from a subdir or worktree
+    (a worktree's .git is a file, which os.path.exists still matches). Falls back
+    to cwd if no .git is found — prevents a silent per-subdir log split."""
+    d = start = os.getcwd()
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return start
+        d = parent
+
+
 def now_iso():
     try:
         import datetime
@@ -62,7 +77,7 @@ def main():
         "surprise": bool(args.surprise),
     }
 
-    log_path = args.log or os.path.join(os.getcwd(), LOG_REL)
+    log_path = args.log or os.path.join(repo_root(), LOG_REL)
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as fh:
