@@ -25,7 +25,8 @@ Four signal classes (plan §8 P1 scan atoms). Each has a SOURCE and a DURABILITY
 ## Section B — Ground-truth anchor (⚠ hard rule — back-patting prevention)
 
 Every signal that will drive a change MUST be anchored to **real ground truth**: an objective outcome (test / gate / CI result) or a **real human action** (correction, revert, PR reject). (plan §8 back-patting 방지.)
-- **AI self-review is NOT ground truth.** Kill-gate finding C7: the word_app PR "reviews" (#869–874) were all AI-authored self-reviews (`viewerDidAuthor=true`, `<!-- sdd:review -->` markers). A correction signal must come from a **human** overturning/rejecting — not from an agent critiquing its own output. When reading PR-review corrections, **exclude self-authored reviews** (author = acting agent identity, or `viewerDidAuthor`).
+- **AI self-review is NOT ground truth.** Kill-gate finding C7: the word_app PR "reviews" (#869–874) were all AI-authored self-reviews (`viewerDidAuthor=true`, `<!-- sdd:review -->` markers). A correction signal must not come from an agent critiquing its **own** output. When reading PR-review corrections, **exclude self-authored reviews** (author = acting agent identity, or `viewerDidAuthor`).
+- **Cross-role reversal ≠ self-review (the agent↔agent capture — plan §16 C1 insider/outsider · 부록 D P0).** A *different* role overturning another role's confident output — a **design-stage specialist `BLOCKED`** reversing a decided approach (designer WCAG, dba integrity, security threat), tech-lead/gate `BLOCKED` on the developer's diff, or QA/designer finding a defect the test stage passed — **is** legitimate ground truth **when anchored to an objective outcome** (a measured ratio, a concrete non-conformance, a real security/a11y defect, or raw runner output contradicting a claimed green). That anchor is what separates it from self-review; external cross-role review is exactly what §16 C1 relies on. Weight it **below** a real human correction, above an unanchored opinion. This is where the "몸통" of the correction distribution lives (the human-override capture only sees the "꼬리" — plan 부록 D P0).
 - **"귀찮아서 기각" ≠ "틀려서 기각".** A rejection is a strong signal only with a stated reason, or a subsequent real defect in that area (plan 부록 B rule-loop anchor). Record the reason when known; absent a reason, weight low.
 
 ## Section C — Capture points (ephemeral → ground-truth log)
@@ -36,6 +37,9 @@ Ephemeral signals are appended to the ground-truth log **at the moment they occu
 |---|---|---|
 | Human rejects/overrides a discuss-gate option | discuss gate (analyze/design) — main session, after `NEEDS_HUMAN` → `AskUserQuestion` | `correction` — options offered · human's choice · reason (if given) |
 | verify self-report ↔ raw-runner gap | verify gate (`_handoff.md` Section E) | `verify-gap` — claimed vs raw · `surprise` (plan §8-A) |
+| Design-stage specialist `BLOCKED` reverses a decided approach (designer WCAG, dba integrity, security threat) | design Step 2 (`design.md`) | `correction` agent↔agent (role = specialist) · `surprise` |
+| Role overturns another role's output at execute (tech-lead/gate `BLOCKED`, or dev claimed-green contradicted by raw) | implement Step 4 loop-back (`implement.md`) | `correction` agent↔agent (role = overturner) · `surprise` — or `verify-gap`/dev for claimed-green↔raw |
+| QA/designer finds a blocking defect the test stage passed | qa Step 2 defect / UI-UX gate `BLOCKED` (`qa.md`) | `correction` agent↔agent (role = qa\|designer) · `surprise` |
 | Unattended auto-decision overturned by human at PR review | *(deferred — needs PR-review read-back)* | `correction` (unattended) |
 | git revert of a Guild-authored commit | on-demand via scan_git — **not** captured | — (durable) |
 
@@ -46,7 +50,9 @@ python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction|verify-
 ```
 It appends one line to `.claude/guild/memory/ground-truth.jsonl` (Section D), creating the dir if missing, and never crashes the caller (a logging failure warns and exits non-zero without blocking the spine).
 
-**Wired (increment 2):** `analyze.md`/`design.md` discuss gates append a `correction` **only when the human overrides** the agent's recommendation (agreement is not a correction; anchor per Section B); `test.md` verify gate appends a `verify-gap` **only when the tester's claim disagreed with raw output or verify failed** (green-with-no-gap = nothing to learn). Section E of `_handoff.md` already **computes** the verify gap — this only *logs* it, the minimal extension the plan calls for ("verify 게이트의 원문-증거 패턴을 교정·revert 로깅으로 확장"). Unattended auto-assumptions are **not** captured (deferred — the third row above needs PR-review read-back).
+**Wired (increment 2 — human/verify):** `analyze.md`/`design.md` discuss gates append a `correction` **only when the human overrides** the agent's recommendation (agreement is not a correction; anchor per Section B); `test.md` verify gate appends a `verify-gap` **only when the tester's claim disagreed with raw output or verify failed** (green-with-no-gap = nothing to learn). Section E of `_handoff.md` already **computes** the verify gap — this only *logs* it, the minimal extension the plan calls for ("verify 게이트의 원문-증거 패턴을 교정·revert 로깅으로 확장"). Unattended auto-assumptions are **not** captured (deferred — the last row above needs PR-review read-back).
+
+**Wired (increment 3 — agent↔agent):** `design.md` Step 2 appends a `correction` **when a design-stage specialist `BLOCKED` reverses a decided approach** (designer WCAG / dba integrity / security threat); `implement.md` Step 4 appends a `correction` (or `verify-gap` for the claimed-green↔raw case) **only when a loop-back fires on a real reversal** — a tech-lead/gate `BLOCKED` or raw evidence contradicting a claimed green, never a `DONE_WITH_CONCERNS`; `qa.md` Step 2 appends a `correction` **only when QA or the UI/UX gate finds a blocking defect the test stage passed**. These capture the *body* of the correction distribution (cross-role reversals) that the increment-2 human-override capture cannot see — legitimate because each is anchored to an objective outcome (Section B). Role = the overturner. `--surprise` always (confident work reversed — plan §8-A). *(The design-stage hook was added after #898 live-verification showed the designer catching a WCAG trap at design — a real reversal the execute/qa hooks alone would miss.)*
 
 ## Section D — Ground-truth log (format & location)
 
@@ -74,8 +80,9 @@ Frequency discipline (all readers, plan §8): repeated ≥K only (drop 1-offs), 
 
 Fragile source → one bundled command (not atomic-bash pipes — plan §8 정정). Invoked as a single Bash call:
 ```bash
-python3 <<SKILL_DIR>>/commands/atoms/scan_transcript.py --repo-cwd <abs-repo-path> --since-days <N>
+python3 <<SKILL_DIR>>/commands/atoms/scan_transcript.py --repo-cwd <abs-repo-path>
 ```
+- **No time-window flag** — frequency = distinct **session count** (≥K), not recency; a `--since-days` filter over the fragile transcript timestamps was error-prone (undated sessions, mixed ISO formats) for no benefit, so staleness is left to the evolve ledger skip-list (plan 부록 D 3중 리뷰 P3).
 - **cwd resolution by probing, not string assembly** — the encoded dir name is lossy (`/` and `_` both collapse toward `-`; kill-gate: `/Users/j-kim/projects/word_app` → dir `-Users-j-kim-projects-word-app`). The parser lists `~/.claude/projects/*/` and matches by the **in-record `cwd` field** (records carry the true path even when the dir name is lossy — kill-gate confirmed).
 - **Best-effort + graceful degrade** — unparseable lines are skipped; if the dir/format cannot be read at all, exit non-zero with a one-line reason → the caller drops transcript signals and proceeds on the durable backbone.
 - **Robustness rules learned in the kill-gate**: dedupe duplicate records; report **session-count** (how many distinct transcripts) as the frequency metric, not raw hit-count; `is_error` is unreliable → regex the tool_result bodies; **discount `Cancelled: parallel tool call` cascades** (one real failure aborts its batch-mates — a symptom, not an independent signal).

@@ -39,6 +39,7 @@ Show the current progress of an Issue. **Read-only**: never posts comments, neve
 | `guild:execute` | execute |
 | `guild:test` | test |
 | `guild:qa` | qa |
+| `guild:children` | orchestrating (split parent) |
 | `guild:done` | done |
 | (none) | not started |
 
@@ -65,7 +66,25 @@ Stage: execute
 PR: https://github.com/<owner>/<repo>/pull/456 (open)   (or "none")
 ```
 
-If the Issue has a `guild:child` label, note it (`(child)`) and, if the analyze/design output references a parent, show `Parent: #<n>`.
+If the Issue has a `guild:child` label, note it (`(child)`) and, if the body references a parent (`Parent Issue: #<n>`), show `Parent: #<n>`.
+
+### Split parent (`guild:children`)
+If the Issue is a split parent, render a **children checklist** instead of the single-Issue stage checklist (`_handoff.md` Section I):
+1. Discover its children (its own read-only Bash call — substitute the **literal** parent number for `<parent>`; no shell `$1` inside the jq string, per `_bash_rules.md` / `_handoff.md` Section I):
+   ```bash
+   gh issue list --label guild:child --state all --limit 200 --json number,title,body,labels --jq '[.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)"))] | sort_by(.number) | .[] | {number, title, stage: ([.labels[].name] | map(select(startswith("guild:"))) | join(","))}'
+   ```
+2. For each child, derive its stage from its `guild:*` label (same table above). Mark `[x]` when the child is `guild:done`.
+3. Render `Children: <done>/<total> done` + one line per child. If a `<!-- guild:integration:output -->` comment exists, show integration = done; else pending.
+```
+Issue #838: Word detail screen  (split parent)
+Stage: orchestrating (split parent)
+Children: 1/3 done
+- [x] #841 DB schema slice — done
+- [ ] #842 detail view slice — execute
+- [ ] #843 entry-point slice — not started
+Integration: pending
+```
 
 ## Invariants
 - **Read-only.** Label/marker mismatches are reported as-is (no reconciliation, no auto-fix) — same discipline as sdd's status.

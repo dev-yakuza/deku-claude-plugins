@@ -55,13 +55,31 @@ Read every RESULT line (tech-lead, tester, and any conditional participants):
 - Any `BLOCKED`/`NEEDS_CONTEXT` → as the leader, intervene: supply the missing context and re-invoke that role, or if unresolvable → **attended**: `NEEDS_HUMAN: <one-line>` · **unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): low/medium design ambiguity → decide charter-anchored + record assumption; high/scope-defining or genuinely blocked → `OK PAUSE: needs-human — <one-line>` (no transition).
 - Any `FAIL` → return `FAIL: <reason>`.
 
-If the tech-lead flagged a **multi-PR split**: in M1, note it in the design output and (optionally) create child Issues labeled `guild:child` with a `Parent Issue: #$1` reference (temp-file `gh issue create --body-file`). Full child orchestration is light in M1 — record the split for the humans; the primary path is single-PR.
+**Multi-PR split (parent/child — `_handoff.md` Section I):** the single-PR path is the common case. Only if the tech-lead flagged a genuine **multi-PR split** (independently deliverable slices, each with its own PR + tests) do the following, as the leader:
+- **Leaf-only guard first**: if `$1` is itself a child (its labels include `guild:child`), a child must not be re-split — return `NEEDS_HUMAN: child #$1 cannot be re-split — re-scope the parent` and do NOT proceed to Step 4.
+- **Idempotency guard** (its own Bash call): check whether children already exist before creating any —
+  ```bash
+  gh issue view $1 --json comments --jq '[.comments[].body | select(contains("<!-- guild:children:output -->"))] | length'
+  ```
+  `> 0` → children already created (a prior interrupted design); re-derive them via the Section I discovery query and skip creation. `0` → create them now.
+- **Create each child** in intended dependency order (temp-file body per `_bash_rules.md`); body = slice scope + AC + a `Parent Issue: #$1` line:
+  ```bash
+  gh issue create --title "[Guild子] <slice name>" --body-file <temp> --label "guild:child" --label "guild:analyze"
+  ```
+- **Post the roster** on the parent under `<!-- guild:children:output -->` … `<!-- /guild:children:output -->` (temp-file pattern): one row per child (`#<n>` · slice · one-line scope). Static index — not PATCHed per child (Section I).
+- Note the split decision + child numbers in the design output too, then go to **Step 4b** (split transition) instead of Step 4.
 
 **Ground-truth capture (①, `_signals.md` Section C):** if a human **overrides the design approach** at this gate — rejects the tech-lead's approach for a different one, or the design is found **superseded / a duplicate** of prior work (e.g. #893 turned out to duplicate #891) — append one entry (its own Bash call), `--surprise` when it reverses a confident design choice:
 ```bash
 python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage design --role tech-lead --summary "<design approach → override/supersede>" --evidence "<1 line: chosen alt / duplicate ref>" --surprise
 ```
 Do **not** capture routine acceptance of the design (agreement ≠ correction).
+
+**Ground-truth capture (①, agent↔agent — `_signals.md` Sections B & C):** if a design-stage **participation specialist** (designer/dba/security/performance/i18n/…) returns a `BLOCKED` whose **concrete objective finding reverses a decided or proposed approach** — e.g. the designer's WCAG measurement overturns a chosen color, dba finds a schema-integrity violation in the proposed model, security finds a threat in the approach — append one entry (its own Bash call, best-effort — never blocks). The objective finding (the measured ratio / integrity rule / vuln) **is** the anchor — one role overturning another's decided output, not self-review (Section B). `--surprise` always (a decided approach reversed — §8-A):
+```bash
+python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage design --role <designer|dba|security|…> --summary "<what was reversed, 1 line>" --evidence "<the objective finding, e.g. #CCCCCC vs #9E9E9E = 1.67:1 < 4.5:1 WCAG>" --surprise
+```
+**Skip** a mere `DONE_WITH_CONCERNS` (a flagged concern is not a reversal), a `NEEDS_CONTEXT` (missing input, not a defect), and any subjective preference not anchored to an objective finding.
 
 ## Step 3 — Post design output + durable spec
 Post the design summary comment (temp-file pattern):
@@ -70,7 +88,7 @@ Post the design summary comment (temp-file pattern):
 
 The durable artifacts already live in `docs/specs/$1/` (written by the roles) and are committed with the PR.
 
-## Step 4 — Transition + return
+## Step 4 — Transition + return (single-PR path)
 ```bash
 gh issue edit $1 --remove-label "guild:design" --add-label "guild:execute"
 ```
@@ -80,6 +98,18 @@ Return:
 OK ADVANCE: execute
 ```
 Other returns: `NEEDS_HUMAN`, `NEEDS_CONTEXT`, `FAIL` (do NOT transition on these).
+
+## Step 4b — Split transition + return (multi-PR path only)
+When children were created (or re-derived) above, the parent does **not** advance to execute — it enters orchestration (`_handoff.md` Section I):
+```bash
+gh issue edit $1 --remove-label "guild:design" --add-label "guild:children"
+```
+Return (`N` = number of children):
+```
+>>> RESULT <<<
+OK SPLIT: N children
+```
+This routes `/gld dev` into child orchestration (dev Phase 2b). The parent's execute/test/qa are the sum of its children + a parent-integration check.
 
 ## Hard rules
 - **Tester independence**: the tester MUST NOT see the skeleton (spawn prompt enforces this). This is the anti-bias core of design.

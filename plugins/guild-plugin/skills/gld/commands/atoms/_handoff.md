@@ -19,6 +19,9 @@ The single source of truth for "what stage is this Issue in" is its GitHub label
 | `guild:qa` | QA stage active / done | test's verify gate passed → `OK ADVANCE: qa` |
 | `guild:done` | Issue complete | QA gate passed |
 | `guild:child` | this Issue is a child of a parent Issue | design split work into multiple PRs |
+| `guild:children` | this (parent) Issue is split; its children are being driven sequentially | design decided a multi-PR split (Section I) |
+
+**Split parents do not run the spine themselves.** When design splits an Issue, the parent leaves the normal `analyze→…→done` track and enters `guild:children` — it is an *orchestration* state, not a stage. Its "execute/test/qa" is the sum of its children plus a final parent-integration check (Section I). A parent never carries both `guild:children` and a stage label at once.
 
 **Label transitions are the main session's responsibility only.** Stage sub-agents NEVER add/remove labels — they return a status line (Section C) and the main session (dev.md / the stage wrapper) applies the label. This keeps state changes centralized and auditable.
 
@@ -91,6 +94,7 @@ A stage wrapper (analyze/design/implement/test) returns one line to the main ses
 | Return | Meaning | Main session action |
 |---|---|---|
 | `OK ADVANCE: <next-stage>` | stage complete, advance | transition label to `guild:<next-stage>` |
+| `OK SPLIT: <N> children` | design split the Issue into `N` child Issues | transition the **parent** to `guild:children` and enter child orchestration (dev Phase 2b — Section I) |
 | `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done`, close if appropriate |
 | `OK PAUSE: <one-line>` | leader/human chose to stop here | leave label as-is; report |
 | `NEEDS_HUMAN: <one-line>` | a discuss/verify gate needs a human decision | main session prompts the human (`AskUserQuestion`), then resumes |
@@ -187,3 +191,31 @@ Value `1` → unattended. Anything else / empty → attended (default; behave ex
 **Decision log (mandatory when unattended)**: every gate the leader auto-resolved is recorded — analyze/design write each assumption into their output comment; the execute stage's **PR body** aggregates them under a `## 무인 결정 로그 (GLD_UNATTENDED)` heading (chosen interpretation · rationale/charter anchor · "사람 확인 요"). This makes the human's PR review **informed, not blind** — the deferred human gate lands here.
 
 **Hard rules (unchanged under unattended)**: INV1 (never merge — stop at `guild:done` = PR open) · INV2 (never weaken verification) · never fabricate a pass. `OK PAUSE: needs-human` is the honest escape hatch: mark the Issue with the **`guild:needs-human` label** (+ comment) so it is discoverable (`gh issue list --label guild:needs-human`), then stop **cleanly** (exit 0) so the supervisor counts it and moves to the next Issue.
+
+---
+
+## Section I — Parent/child orchestration (multi-PR split)
+
+When a task is too large for one PR, design splits it into **child Issues** that are developed **sequentially**, one full spine each, then integrated back into the parent. Lifted and simplified from sdd's parent/child model (labels are the state — no temp-file crash-recovery, no multilingual regex; guild is EN-canonical). Read by `design.md` (creates children), `dev.md` (orchestrates — Phase 2b/2c), `resume.md` and `status.md`.
+
+**The parent↔child link (two records):**
+- **In each child's body**: a line `Parent Issue: #<parent>` (canonical, single-language). This is the discovery key.
+- **On the parent**: one `<!-- guild:children:output -->` … `<!-- /guild:children:output -->` comment — a static roster of the children (`#<n>` · slice · one-line scope). It is the **idempotency guard** (its presence means children already exist — never re-create) and a human-readable index. **Not** a live status board: per-child status is always derived fresh from each child's label, so this comment is posted once and not PATCHed per child.
+
+**Child creation format** (design, its own Bash calls — temp-file body per `_bash_rules.md`):
+```bash
+gh issue create --title "[Guild子] <slice name>" --body-file <temp> --label "guild:child" --label "guild:analyze"
+```
+The body states the slice's scope + acceptance criteria + a `Parent Issue: #<parent>` line. Create children in **intended dependency order** (ascending Issue number then = execution order).
+
+**Child discovery** (its own Bash call — literal parent number substituted, no shell vars in the jq string per `_bash_rules.md`):
+```bash
+gh issue list --label guild:child --state all --limit 200 --json number,title,labels --jq '[.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)"))] | sort_by(.number)'
+```
+If `--json` cannot include `body` together with the filter in your `gh` version, list `number,body,labels,title` and filter in jq as above. The boundary class `([^0-9]|$)` is **load-bearing** — without it `#68` matches `#680`.
+
+**Ordering & execution (sequential, in-session):** process children in ascending-number order (creation = intended order). For each child **not yet `guild:done`**, drive it through the **full spine** (analyze→design→execute→test→qa→done) exactly as a normal single Issue. A child pausing (`NEEDS_HUMAN`/`OK PAUSE`/`FAIL`) stops orchestration where it is; a later `/gld dev`/`/gld resume` on the parent re-discovers children and continues from the first not-done one (labels are the checkpoint — nothing local to corrupt).
+
+**Leaf-only invariant:** a child is a leaf — it is **not** re-split. If a `guild:child` Issue's design flags a further split, that is a scoping error: return `NEEDS_HUMAN: child #<n> cannot be re-split — re-scope the parent #<parent>` rather than recursing.
+
+**Parent integration & completion:** the parent stays at `guild:children` while any child is open. When **every** child is `guild:done`, the leader runs a **parent-integration** check (dev Phase 2c): does the union of children satisfy every parent acceptance criterion? are the children mutually consistent (no seam/data-shape mismatch, no duplicated or orphaned work)? are all parent DoD items closed? Post the result under `<!-- guild:integration:output -->` on the parent. A gap → `NEEDS_HUMAN` (or a targeted loop-back to the relevant child); clean → transition the parent `guild:children` → `guild:done`.

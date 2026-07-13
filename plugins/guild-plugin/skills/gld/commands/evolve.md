@@ -44,10 +44,11 @@ Run the four scans. The three Markdown scan atoms are **spawned as sub-agents in
 
 Prompt each sub-agent: *"Read `<atom-path>` and execute it for this repo (owner/repo = `<literal>`). Return exactly one `>>> RESULT <<<` line with the findings JSON."*
 
-**Transcript scan** (best-effort, its own Bash call — replace `<abs-repo-path>` with `pwd`'s literal value and `<N>` with `$1` or 30):
+**Transcript scan** (best-effort, its own Bash call — replace `<abs-repo-path>` with `pwd`'s literal value):
 ```bash
-python3 <<SKILL_DIR>>/commands/atoms/scan_transcript.py --repo-cwd <abs-repo-path> --since-days <N>
+python3 <<SKILL_DIR>>/commands/atoms/scan_transcript.py --repo-cwd <abs-repo-path>
 ```
+(No time-window flag: frequency = distinct session count, and staleness is handled by the ledger skip-list, not a recency cutoff — plan 부록 D 3중 리뷰 P3.)
 - Exit 0 → parse its `>>> RESULT <<<` JSON (`signals[]`).
 - **Exit non-zero → degrade silently**: the transcript source is fragile (undocumented format, lossy cwd encoding — `_signals.md` Section F). Note "transcript signals unavailable — proceeding on durable backbone" and continue. **The durable backbone (git/CI/corrections) stands alone** (plan §8 정정, kill-gate confirmed: the top signals came from git+PR without transcripts).
 
@@ -72,9 +73,9 @@ Converge the scan outputs into ranked themes. This is inline leader judgment (no
 
 3. **Rank** each theme by **frequency × impact × surprise** (plan §8-A — the ranking lever the kill-gate validated):
    - **frequency** — recurrence count / distinct sessions (apply the ≥K discipline: drop 1-offs *unless* anchored+high-impact).
-   - **impact** — a human correction (overturned work) > a structural coupling fact > a convention nit; BLOCKER/MAJOR readiness gaps outrank MINOR. Anchor impact to charter priorities when known.
+   - **impact** — a human correction (overturned work) > a **cross-role reversal** (one role's confident output overturned by another, anchored to a `BLOCKED`/defect — `scan_corrections` tags the source) > a structural coupling fact > a convention nit; BLOCKER/MAJOR readiness gaps outrank MINOR. Anchor impact to charter priorities when known.
    - **surprise** — boost items where a **confident choice was overturned** or a **guard was pierced** (§8-A). Sources, in order of strength:
-     1. `surprise:true` flags in the ground-truth log (verify self-report ↔ runner gap; human overturned a confident choice).
+     1. `surprise:true` flags in the ground-truth log — a human overturning a confident choice (discuss-override), a verify self-report ↔ runner gap, OR a **cross-role reversal** (a design-stage specialist `BLOCKED` reversing a decided approach, tech-lead/gate `BLOCKED`, or a QA/designer defect the test stage passed). All carry the flag; rank them human > cross-role > verify-gap per their anchor (`_signals.md` Section B).
      2. **Derived from durable signals when the log is empty** (the kill-gate case): a revert, an immediate fix-on-fix, a PR closed-unmerged, or a duplicate-issue discovery are all inherently surprising (confident work undone) — treat them as surprise-positive even with no ground-truth entry. *(This is why A1 "guard existed yet bug escaped" and A3 "confident work reversed" ranked top at the kill-gate without any transcript.)* ⚠ **Caveat**: *derived* surprise overlaps with the correction signal itself (not a fully independent third factor) — use it as a tie-breaker that lifts overturns, not as independent evidence. Only ground-truth `surprise:true` flags (source 1) are truly independent.
 
 4. Assign each theme a **tier** for human triage: **A** (accept — clear, anchored, high rank), **B** (worth considering), **C** (noise / not actionable — surface anyway, as the discriminating power *is* the signal quality). Drop anything the ledger already rejected (P0) unless new evidence crossed the threshold.

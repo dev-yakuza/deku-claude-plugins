@@ -39,6 +39,7 @@ gh issue view $1 --json labels --jq '[.labels[].name]'
 
 Map to the current stage (`_handoff.md` Section A):
 - contains `guild:done` → already complete; report and stop (or, if the user wants to re-run test, they invoke `/gld test` directly).
+- contains `guild:children` → this is a **split parent** already in orchestration → skip the normal spine and go straight to **Phase 2b** (child orchestration). Do not run analyze/design on it again.
 - contains `guild:qa` → resume at **qa**.
 - contains `guild:test` → resume at **test**.
 - contains `guild:execute` → resume at **execute**.
@@ -70,6 +71,7 @@ From the current stage, run each stage in order until `guild:done` or a stop con
 Each wrapper **owns its own label transition** on success (single source — `_handoff.md` Section A) and returns a stage-level line (`_handoff.md` Section D). dev reads the returned line only to sequence the next stage:
 
 - **`OK ADVANCE: <next>`** → the wrapper has already set `guild:<next>`. Continue by running `<next>`'s wrapper.
+- **`OK SPLIT: <N> children`** (from design) → design created `N` child Issues and set the parent to `guild:children` (`_handoff.md` Section I). **Go to Phase 2b** (child orchestration) — do not run execute on the parent.
 - **`OK DONE`** (from qa) → the wrapper has set `guild:done`. Report completion. Stop.
 - **`NEEDS_HUMAN: <one-line>`** → a discuss/verify gate needs a human decision. **Attended**: as the leader, surface the options and ask the user (`AskUserQuestion`), then re-run the same stage wrapper with the decision. Do NOT auto-decide — plan §4: discuss refuses to proceed until the user chooses. **Unattended (`GLD_UNATTENDED=1`)**: there is no human — stages already self-resolve low/medium gates and return `OK PAUSE: needs-human` for high-stakes ones (`_handoff.md` Section H), so a `NEEDS_HUMAN` should not normally arrive here; if it does, treat it as `OK PAUSE: needs-human` (do NOT call `AskUserQuestion`).
 - **`OK PAUSE: <one-line>`** → leave label as-is; report where it paused and how to resume (`/gld resume $1`). **Unattended**: a `needs-human` pause has already marked the Issue (`guild:needs-human` label + `<!-- guild:needs-human -->` comment, Section H); stop **cleanly** so the supervisor moves to the next Issue. Stop.
@@ -79,14 +81,58 @@ Each wrapper **owns its own label transition** on success (single source — `_h
 
 ---
 
+## Phase 2b — Child orchestration (split parents only)
+
+Reached when the parent Issue `$1` is at `guild:children` (Phase 1) or design just returned `OK SPLIT` (Phase 2). The parent's work is the sum of its children, run **sequentially, one full spine each** (`_handoff.md` Section I).
+
+1. **Discover children** (its own Bash call — substitute the **literal** parent number for `<parent>`; do NOT splice a shell `$1` into the jq string, per `_bash_rules.md` / Section I. Ascending order = execution order):
+   ```bash
+   gh issue list --label guild:child --state all --limit 200 --json number,title,body,labels --jq '[.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)"))] | sort_by(.number) | .[] | {number, title, labels: [.labels[].name]}'
+   ```
+   None found → `FAIL: parent #$1 is at guild:children but no child Issues reference it` (state inconsistency — report, do not guess).
+
+2. **Drive each pending child through the full spine.** For each child `C` in order whose labels do **not** include `guild:done`:
+   - Announce which child is starting (of how many).
+   - Run the spine on `C` exactly as a normal single Issue: from `C`'s current label, run each stage wrapper inline (the Phase 2 table) for issue `C` until `C` reaches `guild:done` or a stop condition. A freshly-created child starts at `guild:analyze`. The **leaf-only** invariant holds — a child's design must not re-split (its design returns `NEEDS_HUMAN` if it tries; Section I).
+   - **On child stop before done**:
+     - `OK PAUSE` / `NEEDS_HUMAN` (attended) → surface it and **stop orchestration here**; report which child paused and that `/gld resume $1` (or `/gld dev $1`) will continue from it. Do not proceed to later children (they may depend on it).
+     - `FAIL` → stop; report the child and reason.
+     - **Unattended** (`GLD_UNATTENDED=1`): a child that needs a human has already marked itself (`guild:needs-human` + comment, Section H); stop cleanly so the supervisor moves on.
+   - On child `guild:done` → continue to the next pending child.
+
+3. When **every** child is `guild:done`, go to **Phase 2c**.
+
+---
+
+## Phase 2c — Parent integration
+
+All children are `guild:done`; verify they combine into a correct whole before closing the parent (`_handoff.md` Section I).
+
+1. As the leader (convene the **tech-lead** for a conformance view), read the parent's analyze/design outputs and each child's PR + test output. Check:
+   - **Coverage** — every parent acceptance criterion is satisfied by some child (nothing dropped in the split).
+   - **Cross-child consistency** — shared seams/data shapes/interfaces agree across children; no duplicated or orphaned work.
+   - **DoD closure** — the parent's Definition of Done items are all addressed.
+2. Post the result on the parent under `<!-- guild:integration:output -->` … `<!-- /guild:integration:output -->` (temp-file pattern): what was checked, coverage map (parent AC → child), any gap.
+3. **Judge**:
+   - Gap found → do NOT close. Attended: `NEEDS_HUMAN: integration gap — <one-line>` (a targeted loop-back to the responsible child, or a new child). Unattended: mark `guild:needs-human` + comment, stop cleanly.
+   - Clean → transition the parent:
+     ```bash
+     gh issue edit $1 --remove-label "guild:children" --add-label "guild:done"
+     ```
+     Report parent completion (Phase 3).
+
+---
+
 ## Phase 3 — Report
 
 On `OK DONE`: summarize what was built (stages run, PR link if any, test evidence). **Nudge the human review** — the PR now awaits the human reviewer (M1 external reviewer, INV1); suggest the guided pair review to make it lighter: "PR #<n> 리뷰 준비됨 — `/gld review $1`로 리스크 가중 가이드 리뷰를 받을 수 있습니다." On pause/fail: state the stage reached and the resume command. Never claim completion without the test stage's verify evidence (plan §18 B / `_handoff.md` Section E).
 
+**Split parent (Phase 2c closed the parent):** summarize the children (each `#<n>` + its PR) and the integration check, then nudge review on the child PRs. **Stopped mid-orchestration** (a child paused): report which child paused (of how many), what it needs, and that `/gld resume $1` continues from it — the remaining children have not run yet.
+
 ---
 
 ## Notes
-- **Single Issue, in-session.** For multi-issue or unattended runs, that's a later milestone (sprint, gated). `/gld dev` is the everyday driver.
+- **One Issue tree, in-session.** `/gld dev` drives a single Issue — or, if design splits it, that parent and its children **sequentially** in one session (Phase 2b/2c, `_handoff.md` Section I). Driving *many unrelated* Issues unattended is still a later milestone (sprint, gated).
 - **Leader is embodied, not spawned.** No separate leader sub-agent (avoids nesting). The main session IS the leader; only the stage roles (tech-lead/developer/tester) are spawned as sub-agents by the wrappers.
 - **Labels are the state.** If interrupted, `/gld resume $1` or a fresh `/gld dev $1` re-reads the label and continues from there — no local state file to corrupt.
 - **M1 review = human.** There is no agent-based independent/adversarial review in M1; the human approving the PR is the external reviewer (plan §18 A). Guild collaboration (tech-lead conformance, tester-first) provides internal review.
