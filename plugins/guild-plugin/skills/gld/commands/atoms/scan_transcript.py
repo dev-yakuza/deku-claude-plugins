@@ -12,7 +12,12 @@ unparseable lines, and exits non-zero with a one-line reason if it cannot read a
 caller then degrades to the durable git/CI/gate backbone.
 
 Invoked as ONE bash call (atomic-bash exception, plan §8 정정):
-    python3 <SKILL_DIR>/commands/atoms/scan_transcript.py --repo-cwd <abs-repo-path> [--since-days N]
+    python3 <SKILL_DIR>/commands/atoms/scan_transcript.py --repo-cwd <abs-repo-path>
+
+Frequency is measured by DISTINCT session count (>=K), not recency, so there is no time-window
+flag: a --since-days filter over the fragile, undocumented transcript timestamps was error-prone
+(undated sessions, mixed ISO formats) for no real benefit — the evolve ledger skip-list and the
+"already in init/knowledge" filter handle staleness instead (plan 부록 D 3중 리뷰 P3 결정).
 
 Read-only. Never writes transcripts. Prints a `>>> RESULT <<<` line then a JSON object.
 """
@@ -93,10 +98,9 @@ def file_matches_repo(path, repo_cwd):
     return False
 
 
-def scan_file(path, since_ts):
-    """Return per-session friction: (perms:set, errors:list, cmds:set) or None if empty/old."""
+def scan_file(path):
+    """Return per-session friction: (perms:set, errors:list, cmds:set) or None if unreadable."""
     perms, errors, cmds = set(), [], set()
-    newest = ""
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -107,9 +111,6 @@ def scan_file(path, since_ts):
                     d = json.loads(line)
                 except Exception:
                     continue
-                ts = d.get("timestamp") or ""
-                if ts:
-                    newest = max(newest, ts)
                 msg = d.get("message") or {}
                 txt = text_of(msg)
                 if txt:
@@ -125,8 +126,6 @@ def scan_file(path, since_ts):
                     cmds.add(cmd[:80])
     except OSError:
         return None
-    if since_ts and newest and newest < since_ts:
-        return None
     return perms, errors, cmds
 
 
@@ -141,18 +140,9 @@ def rank(sessions):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo-cwd", required=True)
-    ap.add_argument("--since-days", type=int, default=0)
     args = ap.parse_args()
 
     repo_cwd = os.path.abspath(os.path.expanduser(args.repo_cwd))
-    since_ts = ""
-    if args.since_days > 0:
-        try:
-            import datetime
-            since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=args.since_days)
-            since_ts = since.strftime("%Y-%m-%dT%H:%M:%SZ")
-        except Exception:
-            since_ts = ""
 
     if not os.path.isdir(PROJECTS_DIR):
         sys.stderr.write("no ~/.claude/projects dir — transcript source unavailable\n")
@@ -170,7 +160,7 @@ def main():
     cmd_sessions = defaultdict(int)
     scanned = 0
     for f in matched:
-        r = scan_file(f, since_ts)
+        r = scan_file(f)
         if r is None:
             continue
         scanned += 1

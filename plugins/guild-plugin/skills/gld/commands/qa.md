@@ -39,6 +39,11 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
 - **UI/UX 게이트**: if Step 1.5 ran, record the designer's verdict (pass / concerns / blocking a11y-usability defect).
 - **honesty of scope**: automated-QA vs human-QA clearly separated (same discipline as the verify gate). "QA 통과" means *the automated/agent-doable quality checks passed + a human-QA plan is stated* — never "fully QA'd by a human."
 - If QA **or** the UI/UX gate surfaces a real defect → do NOT advance; return `NEEDS_HUMAN` (loop back to execute) or record the concern.
+- **Ground-truth capture (①, `_signals.md` Section C — agent↔agent correction):** when QA or the UI/UX gate surfaces a **real blocking defect** (the test stage proved correctness-green, yet QA/designer found a defect it missed), append one entry (its own Bash call, best-effort — never blocks). The concrete defect **is** the objective anchor — one role overturning the test-stage pass, not self-review (`_signals.md` Section B). `--surprise` always (a confident pass overturned — plan §8-A):
+  ```bash
+  python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage qa --role <qa|designer> --summary "<the defect QA/UX found that test missed, 1 line>" --evidence "<user flow / a11y measure, 1 line>" --surprise
+  ```
+  **Skip** on a clean QA pass, and skip human-QA *recommendations* that are not defects (a deferred manual/visual check ≠ a correction).
 
 ## Step 3 — Judge + return
 - **QA passed** (agent-doable checks green + UI/UX gate passed or not applicable + human-QA items clearly flagged + quality-bar met) → transition to done:

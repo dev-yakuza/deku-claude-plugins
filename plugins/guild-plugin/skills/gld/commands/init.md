@@ -107,7 +107,7 @@ Create via Write tool:
 **config.json (M1 subset, plan §18 C):**
 ```json
 {
-  "version": "0.2.0",
+  "version": "0.5.0",
   "language": "<lang from $1>",
   "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
@@ -158,7 +158,7 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
 - **If it exists** → JSON has no comment markers, so merge by key: read the existing JSON, union `permissions.allow` (dedupe), preserve all other keys and any existing `hooks`. Write the merged JSON back (2-space indent).
 
 ### 6. GitHub labels (skip if P0 found no GitHub repo)
-Create the nine `guild:*` labels. Run each as its own Bash call; if any fails, report which and continue (labels are not transactional in M1 — they are idempotent with `--force`):
+Create the ten `guild:*` labels. Run each as its own Bash call; if any fails, report which and continue (labels are not transactional in M1 — they are idempotent with `--force`):
 ```bash
 gh label create "guild:analyze" --color "1d76db" --description "Guild: Analyze stage" --force
 gh label create "guild:design" --color "0e8a16" --description "Guild: Design stage" --force
@@ -167,6 +167,7 @@ gh label create "guild:test" --color "f9d0c4" --description "Guild: Test stage (
 gh label create "guild:qa" --color "fbca9e" --description "Guild: QA stage (holistic)" --force
 gh label create "guild:done" --color "0075ca" --description "Guild: Done" --force
 gh label create "guild:child" --color "d4c5f9" --description "Guild: Child Issue" --force
+gh label create "guild:children" --color "c5def5" --description "Guild: Split parent — children being driven" --force
 gh label create "guild:harness" --color "5319e7" --description "Guild: Harness readiness gap (from readiness audit)" --force
 gh label create "guild:needs-human" --color "b60205" --description "Guild: Paused — needs a human decision (unattended run)" --force
 ```
@@ -222,7 +223,7 @@ Report what was installed:
 - Guild: 16 role agents at `.claude/agents/` — spine (leader, tech-lead, developer, tester, qa) + participation/gate specialists (product-owner, designer, infra, dba, security, performance, i18n, analytics, tech-writer, release-manager, support-triage). Note that the leader convenes the specialists **conditionally** per task (spine roles always run; specialists join by work-type/risk — see `_handoff.md` Section G).
 - Standards: 5 drafts at `docs/standards/` (note which are `draft` vs `confirmed`).
 - Harness: `CLAUDE.md` (created or merged), `.claude/settings.json` (created or merged), `.claude/guild/` state skeleton. Note whether `.gitignore` was reconciled (P2 step 0) so `.claude/` harness is committable — and confirm the harness is visible to git (`git status` shows it), since ignored files silently look "not created".
-- Labels: 9 `guild:*` (analyze, design, execute, test, qa, done, child, harness, needs-human) (or "skipped — no GitHub repo").
+- Labels: 10 `guild:*` (analyze, design, execute, test, qa, done, child, children, harness, needs-human) (or "skipped — no GitHub repo").
 - Readiness audit (P3.5): report at `.claude/guild/readiness-report.md` — summarize the gap counts (BLOCKER/MAJOR/MINOR) and list any `guild:harness` issues created.
 - Next steps: "`/gld dev <issue>` to develop a GitHub Issue end-to-end (including any `guild:harness` remediation issues). `/gld status <issue>` to check progress. Day-1 agents are intentionally rough — they improve as you work (evolve, a later milestone)."
 

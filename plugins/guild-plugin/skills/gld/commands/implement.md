@@ -50,6 +50,11 @@ Fold these verdicts into Step 4. A gate role's `BLOCKED` (e.g. security finds a 
 As the leader, over the developer + tech-lead + any conditional specialist/gate verdicts:
 - Developer `DONE`/`DONE_WITH_CONCERNS` + tech-lead `DONE`/`DONE_WITH_CONCERNS` + all gate/specialist verdicts `DONE`/`DONE_WITH_CONCERNS` + raw evidence green → proceed to Step 5. Record specialist concerns in the PR body.
 - Tech Lead `BLOCKED` (non-conformance), a **gate `BLOCKED`** (e.g. security vulnerability), OR evidence contradicts green → **defined loop back to execute**: re-invoke the developer (Step 1) with the specific concern. Bounded — after ~2 loops without resolution, return `NEEDS_HUMAN: <one-line>`.
+  - **Ground-truth capture (①, `_signals.md` Section C — agent↔agent correction):** when this loop-back fires on a **real reversal** (a `BLOCKED`, or raw evidence contradicting a claimed green — **not** a mere `DONE_WITH_CONCERNS`), append one entry (its own Bash call, best-effort — never blocks the loop). The `BLOCKED` non-conformance/finding (or the contradicting raw line) **is** the objective anchor — a role overturning *another* role's confident output, not self-review (`_signals.md` Section B). `--surprise` always (confident work reversed — plan §8-A):
+    ```bash
+    python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage execute --role <tech-lead|security|infra|…> --summary "<what was reversed, 1 line>" --evidence "<the BLOCKED non-conformance/finding, 1 line>" --surprise
+    ```
+    For the **evidence-contradicts-green** case (developer claimed green, the raw runner disagreed) use `--kind verify-gap --role developer` instead — the same claimed↔raw shape as the test stage, caught earlier at execute. **Skip** when no loop-back occurred (all `DONE`/green) — a passed conformance check is not a signal (agreement ≠ correction).
 - Any `FAIL` → return `FAIL: <reason>`.
 
 ## Step 5 — Open PR
