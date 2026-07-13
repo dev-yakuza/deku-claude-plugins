@@ -46,7 +46,7 @@ CLAUDE.md                      # advisory: repo map + verification commands + kn
 .claude/agents/                # role agents (the Guild)
 .claude/guild/
   config.json                  # Guild settings (managed by /gld config)
-  knowledge/                   # project knowledge base (index.md + facts/) — grows later
+  knowledge/                   # ⑥ codebase facts: index.md (always loaded) + facts/ (retrieved relevant-only). init seeds a baseline; evolve grows it
   memory/<agent>/              # raw episodic memory (gitignored) — used by evolve later
   evolution-log.md             # evolution ledger — used by evolve later
 docs/standards/                # charter, architecture, conventions, quality-bar, verification (init drafts; status: draft|confirmed)
@@ -55,7 +55,7 @@ docs/adr/ , docs/specs/
 - **commit** everything under `.claude/agents/`, `.claude/guild/` (except `memory/`), `docs/`, `CLAUDE.md`, `.claude/settings.json`. **gitignore** `.claude/guild/memory/`.
 
 ### Bash & GitHub conventions
-- Run each shell command as its own isolated Bash call. Avoid compound commands (`&&`, `$(...)`), variable substitution, and inline multi-line `--body` for GitHub comments — render bodies to a temp file and use `--body-file`. Full rules: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/label/handoff contract: `<<SKILL_DIR>>/commands/atoms/_handoff.md`. Stage pre-flight: `<<SKILL_DIR>>/commands/atoms/_preflight.md`.
+- Run each shell command as its own isolated Bash call. Avoid compound commands (`&&`, `$(...)`), variable substitution, and inline multi-line `--body` for GitHub comments — render bodies to a temp file and use `--body-file`. Full rules: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/label/handoff contract: `<<SKILL_DIR>>/commands/atoms/_handoff.md`. Stage pre-flight: `<<SKILL_DIR>>/commands/atoms/_preflight.md`. ⑥ knowledge contract: `<<SKILL_DIR>>/commands/atoms/_knowledge.md`. Growth-loop signal contract: `<<SKILL_DIR>>/commands/atoms/_signals.md`.
 - Obtain `{owner}/{repo}` via `gh repo view --json nameWithOwner -q .nameWithOwner` as its own call; inline the literal value. Never infer it from git user or the system prompt.
 
 ### Model tiering

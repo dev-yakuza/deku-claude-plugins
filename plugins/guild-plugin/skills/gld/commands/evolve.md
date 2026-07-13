@@ -6,9 +6,10 @@
 >
 > **Why proposal-only**: the co-evolution premise ("can a human tell a good proposal from noise?") was validated manually at the kill-gate; this command codifies that manual pipeline. Building the apply machinery before the signals earn trust would be "미검증 위에 성당 짓기" (plan §14).
 
-`$1` (optional) = history window in **days** for the transcript scan (default: 30). Git scans use a commit-count window regardless.
+Takes no arguments — evolve reads all available signals on demand (git uses a commit-count window; the transcript scan measures distinct-session frequency, not recency — no time window).
 
 > **Bash**: simple calls only (`<<SKILL_DIR>>/commands/atoms/_bash_rules.md`) — **except** the bundled Python tool (`scan_transcript.py`), run as ONE `python3` call (atomic-bash exception, plan §8 정정). Signal contract: `<<SKILL_DIR>>/commands/atoms/_signals.md`. Handoff/RESULT + owner/repo: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
+> **Output language**: present the ranked proposal list, hand-off text, and nudges in `config.language` (`_handoff.md` Section K). Target file paths, `RESULT` tokens, and evidence refs (SHA/PR#) stay ASCII.
 
 ---
 
@@ -89,10 +90,13 @@ Present a **ranked proposal list** to the human. For each Tier A/B theme, propos
 > **patch** (tweak an existing line/section) **> umbrella-extend** (widen an existing rule/habit to cover the case) **> reference-add** (add a fact/pointer) **> new** (create a new rule/role — last resort).
 
 Each proposal states, in ≤ ~500 chars (plan §6 context budget):
-- **Target file** the human should edit (e.g. `.claude/agents/developer.md`, `docs/standards/conventions.md`, `.claude/guild/knowledge/facts/<area>.md`).
+- **Target file** the human should edit — a role habit → `.claude/agents/<role>.md` (③); a decided rule → `docs/standards/…` (②); a **discovered code fact** → `.claude/guild/knowledge/facts/<area>.md` (⑥). Pick the store by kind (`_knowledge.md` Section A).
 - **Ladder rung** + the concrete proposed edit (a habit line, a fact, a convention, a gate-rule candidate).
+- **⑥-fact proposals** (`_knowledge.md`): specify **both** the `facts/<area>.md` fact (statement · evidence · relation · provenance `evolve #<n>`) **and** its `index.md` pointer (key = path/area) — a fact with no index entry is unreachable at retrieval. Prefer patching an existing slice over a new one (ladder).
 - **Evidence** — the concrete artifact(s) (SHA / PR# / issue# / ground-truth entry / session count). No bulk paste.
 - **Mapping + rank + tier** (why it ranks where it does; surprise noted if it drove the rank).
+
+**Densify (⑥, invariant 3 — growth = density):** also scan the existing `knowledge/` for **duplicate facts to merge, stale facts to remove** (evidence no longer reproduces against current code), and **over-specific facts to generalize** — propose these as first-class items too. ⑥ should get *denser*, not just bigger.
 
 **Presentation**:
 - Print the Tier A list first (most-severe first), then B, then C (C shown compactly — "surfaced, not recommended", with the one-line reason each is noise; this transparency is the anchor discipline, kill-gate C-tier).

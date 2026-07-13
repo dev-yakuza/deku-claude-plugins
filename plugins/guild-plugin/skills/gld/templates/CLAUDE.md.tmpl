@@ -7,7 +7,7 @@
 - **조직(역할 에이전트)**: `.claude/agents/` — 스파인 `leader`·`tech-lead`·`developer`·`tester`·`qa`(항상) + 스페셜리스트 `product-owner`·`designer`·`infra`·`dba`·`security`·`performance`·`i18n`·`analytics`·`tech-writer`·`release-manager`·`support-triage`(리더가 태스크별 조건부 소집). 메인 세션이 `leader`를 체현한다.
 - **표준(권위, 사람 큐레이션)**: `docs/standards/` — `charter`(북극성), `architecture`, `conventions`, `quality-bar`, `verification`. `status: confirmed`는 하드 제약으로 준수한다.
 - **스펙(이슈별 설계 산출물)**: `docs/specs/<issue>/`.
-- **Guild 상태**: `.claude/guild/` — `config.json`(설정), `knowledge/`(프로젝트 사실, 추후 성장), `evolution-log.md`(진화 원장, 추후).
+- **Guild 상태**: `.claude/guild/` — `config.json`(설정), `knowledge/`(⑥ 코드베이스 사실 — `index.md` 항상 로드 + `facts/` 관련분만 검색), `evolution-log.md`(진화 원장, 추후).
 
 ### 검증 커맨드
 <!-- init: 아래 표를 command-scan의 정규화된 커맨드로 채운다. 배열(여러 스텝)이면 한 셀에 스텝을 줄바꿈으로 나열한다. `$(...)`·`&&`는 넣지 않는다. -->
@@ -24,6 +24,6 @@
 - 게이트: **discuss**(analyze/design 전 — 가정 명시·2~3안 제시), **verify**(done 전 — 러너 원문 증거로만 완료 인정). M1에서는 사람이 외부 리뷰어다(PR 승인).
 
 ### 지식 라우팅
-- 이 코드베이스의 지속 사실은 `docs/standards/`(큐레이션)와 `.claude/guild/knowledge/`(evolve로 축적, 추후)에 둔다.
-- 이슈 작업 시, 먼저 관련 표준 + 그 이슈의 이전 스테이지 산출물을 읽고 착수한다.
+- 이 코드베이스의 지속 사실은 `docs/standards/`(사람 큐레이션·권위)와 `.claude/guild/knowledge/`(⑥ — init 시드 + evolve 축적)에 둔다.
+- 이슈 작업 시, 먼저 관련 표준 + `knowledge/index.md`(항상)에서 그 이슈가 건드리는 경로/영역의 `facts/` 슬라이스 + 이전 스테이지 산출물을 읽고 착수한다. ⑥ 사실은 **참고용**(현재 코드와 대조 후 신뢰).
 <!-- guild:end -->

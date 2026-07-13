@@ -219,3 +219,15 @@ If `--json` cannot include `body` together with the filter in your `gh` version,
 **Leaf-only invariant:** a child is a leaf — it is **not** re-split. If a `guild:child` Issue's design flags a further split, that is a scoping error: return `NEEDS_HUMAN: child #<n> cannot be re-split — re-scope the parent #<parent>` rather than recursing.
 
 **Parent integration & completion:** the parent stays at `guild:children` while any child is open. When **every** child is `guild:done`, the leader runs a **parent-integration** check (dev Phase 2c): does the union of children satisfy every parent acceptance criterion? are the children mutually consistent (no seam/data-shape mismatch, no duplicated or orphaned work)? are all parent DoD items closed? Post the result under `<!-- guild:integration:output -->` on the parent. A gap → `NEEDS_HUMAN` (or a targeted loop-back to the relevant child); clean → transition the parent `guild:children` → `guild:done`.
+
+---
+
+## Section K — Output language
+
+Every **human-readable string Guild emits is written in the repo's `config.language`** (`.claude/guild/config.json`; default `en` when absent) — Issue/PR comments, discuss `AskUserQuestion` questions/options, stage narration to the user, `>>> RESULT <<<` one-line summaries, and the **prose inside artifact files** (`docs/specs/<issue>/*`). This is the same language `/gld init` wrote the agents and standards in.
+
+**Never localized — stays ASCII/English (machine tokens):** the `RESULT`/return keywords (`DONE`, `BLOCKED`, `NEEDS_CONTEXT`, `OK ADVANCE`, `OK SPLIT`, …), HTML markers (`<!-- guild:* -->`), `guild:*` label names, file paths, code identifiers, and git branch/commit conventions. Localizing these would break parsing.
+
+**Two emission points, both must comply:**
+1. **The leader (main session)** localizes its own output — every comment it posts, every `AskUserQuestion`, every narration line. It learns the language at pre-flight (`_preflight.md` Item 1).
+2. **Spawned role sub-agents** — the persona file is already in the target language, but the persona alone does not guarantee the *response* language. So when the leader spawns a role, its prompt **must append**: *"모든 사람이 읽는 산출물(코멘트·파일 산문·RESULT 요약)은 이 레포의 `config.language`로 작성한다 (기계 토큰·코드·경로·마커는 영어 유지)."* — rendered in that language. A sub-agent's RESULT summary and any prose it writes then match.
