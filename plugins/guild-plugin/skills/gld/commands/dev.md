@@ -5,6 +5,7 @@
 `$1` = Issue number.
 
 > **Bash**: simple calls only (`<<SKILL_DIR>>/commands/atoms/_bash_rules.md`). State model + labels + handoff: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
+> **Output language**: all human-readable output (comments, discuss questions, narration, RESULT summaries) is in `config.language`; sub-agent prompts carry that instruction (`_handoff.md` Section K). Machine tokens stay ASCII.
 
 ---
 

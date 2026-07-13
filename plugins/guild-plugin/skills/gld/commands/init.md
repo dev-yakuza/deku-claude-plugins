@@ -99,7 +99,9 @@ Guild's harness under `.claude/` (agents, guild state, settings.json) is **meant
 ### 1. Guild state skeleton
 Create via Write tool:
 - `.claude/guild/config.json` — the M1 config (see schema below).
-- `.claude/guild/knowledge/index.md` — empty index with a header (grows via evolve later).
+- `.claude/guild/knowledge/` — the ⑥ semantic-memory **baseline** (`<<SKILL_DIR>>/commands/atoms/_knowledge.md` format), seeded from the P1 scans — **not** a blank header:
+  - `index.md` — a finite pointer map keyed by path/area (one line per seeded slice → its `facts/` file + a one-line hook).
+  - `facts/<area>.md` — seed a **solid baseline** (plan §7 — not exhaustive): the top bug-**hotspot** files (with approx `fix:` frequency), the strongest **co-change** groups (X↔Y), and the main **layer/coupling** boundaries from structure-scan. Each fact evidence-anchored to git history, provenance `init-scan`. **Reuse the same scan findings** that fill the agent specialization's hotspot line (step 2) so ③ and ⑥ agree. `evolve` grows the rest.
 - `.claude/guild/evolution-log.md` — ledger header (used by evolve later).
 - `.claude/guild/.gitignore` — containing `memory/` (episodic memory is gitignored per plan §6).
 - `.claude/guild/memory/.gitkeep`.
@@ -107,7 +109,7 @@ Create via Write tool:
 **config.json (M1 subset, plan §18 C):**
 ```json
 {
-  "version": "0.5.0",
+  "version": "0.6.1",
   "language": "<lang from $1>",
   "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
@@ -223,6 +225,7 @@ Report what was installed:
 - Guild: 16 role agents at `.claude/agents/` — spine (leader, tech-lead, developer, tester, qa) + participation/gate specialists (product-owner, designer, infra, dba, security, performance, i18n, analytics, tech-writer, release-manager, support-triage). Note that the leader convenes the specialists **conditionally** per task (spine roles always run; specialists join by work-type/risk — see `_handoff.md` Section G).
 - Standards: 5 drafts at `docs/standards/` (note which are `draft` vs `confirmed`).
 - Harness: `CLAUDE.md` (created or merged), `.claude/settings.json` (created or merged), `.claude/guild/` state skeleton. Note whether `.gitignore` was reconciled (P2 step 0) so `.claude/` harness is committable — and confirm the harness is visible to git (`git status` shows it), since ignored files silently look "not created".
+- ⑥ Knowledge baseline: `.claude/guild/knowledge/index.md` + `facts/` seeded from the scans (hotspots · co-change · coupling). Note the seeded slice count; `evolve` grows it from here.
 - Labels: 10 `guild:*` (analyze, design, execute, test, qa, done, child, children, harness, needs-human) (or "skipped — no GitHub repo").
 - Readiness audit (P3.5): report at `.claude/guild/readiness-report.md` — summarize the gap counts (BLOCKER/MAJOR/MINOR) and list any `guild:harness` issues created.
 - Next steps: "`/gld dev <issue>` to develop a GitHub Issue end-to-end (including any `guild:harness` remediation issues). `/gld status <issue>` to check progress. Day-1 agents are intentionally rough — they improve as you work (evolve, a later milestone)."
@@ -231,7 +234,7 @@ Report what was installed:
 
 ## Partial-failure repair (not a hard dead-end)
 
-`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is: `config.json` + 16 role agents (full roster) + 5 standards + CLAUDE.md guild block + settings.json allowlist + 9 labels. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
+`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is: `config.json` + 16 role agents (full roster) + 5 standards + CLAUDE.md guild block + settings.json allowlist + 10 labels + `knowledge/` baseline (index.md + facts/). Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
 
 ## Hard rules (safety)
 - **Additive only** (INV4): existing files are merged/preserved, never clobbered. CLAUDE.md via markers; settings.json via key union; existing `docs/standards/*` and `.claude/agents/*` are not overwritten.
