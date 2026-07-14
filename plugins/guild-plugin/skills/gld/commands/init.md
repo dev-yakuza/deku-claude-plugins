@@ -29,7 +29,7 @@ These govern every file init writes — role agents, standards, CLAUDE.md, confi
    ```bash
    ls .claude/guild/config.json
    ```
-2. **If it exists** → Guild is already initialized. Report: "Guild is already initialized in this repo. Use `/gld update` to adopt central improvements (update is a later milestone), or edit `.claude/guild/config.json` / `docs/standards/` directly." **Stop.** (Do not re-scan or overwrite.)
+2. **If it exists** → Guild is already initialized. Report: "Guild is already initialized in this repo. Use `/gld update` to adopt central improvements, or edit `.claude/guild/config.json` / `docs/standards/` directly." **Stop.** (Do not re-scan or overwrite.)
 3. **If absent** → proceed to P1.
 4. Verify this is a GitHub repo (needed for the dev flow's state model):
    ```bash
@@ -115,7 +115,7 @@ Create via Write tool:
 **config.json (M1 subset, plan §18 C):**
 ```json
 {
-  "version": "0.13.0",
+  "version": "0.14.0",
   "language": "<lang from $1>",
   "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },

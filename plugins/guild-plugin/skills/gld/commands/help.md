@@ -24,6 +24,7 @@ Develop (spine: analyze → design → execute → test → qa)
   /gld resume <issue>     Auto-detect stage and continue
   /gld status <issue>     Show current progress
   /gld batch [issues]     Run many Issues unattended to guild:done (PR open), auto-resumes on rate limit; leader stands in at gates, human reviews PRs after
+  /gld sprint [issues]    Autonomous Inner+Outer loop — LOCKED until readiness is earned by measurement (use batch until then). --readiness shows the score
 
 Diagnose & grow (Outer Loop)
   /gld audit [dim]        Read-only health check — grades harness+team+codebase, routes to evolve (dev weakness) / refactor (codebase). Makes no changes
@@ -36,8 +37,6 @@ On-demand & observe
   /gld monitoring         Terminal snapshot: org · ⑥/④ status · evolution history · gates · active work
 
   /gld help               This help
-
-Planned (later milestone): sprint.
 ```
 
 After printing, if the current repo has no `.claude/guild/` directory, add one line: "This repo is not initialized yet — run `/gld init` to set up Guild."
