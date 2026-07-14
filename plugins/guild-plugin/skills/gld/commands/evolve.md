@@ -62,6 +62,8 @@ python3 <<SKILL_DIR>>/commands/atoms/scan_transcript.py --repo-cwd <abs-repo-pat
 
 **Collect** all available scan RESULTs. Any single scan may return empty/degraded — proceed with whatever succeeded. evolve must produce output even if only `scan_git` succeeded.
 
+**docs/specs mining (⑥-fact source — plan 부록 D #894 "금광")**: also skim `docs/specs/<recent-issue>/` (skeleton · ux · test-cases · qa notes) from the last few dev runs — they are a rich source of ⑥ facts (theme-token pitfalls, verified contrast pairs, call-site geography) and cross-role corrections. ⚠ **Mining discipline**: specs are long narrative → do NOT whole-load; extract only the **final adopted values · leader arbitrations (§10) · qa정정** (high-trust), never the tentative §3 proposals (back-patting anchor). Feed extracted facts into P3 as ⑥-fact proposals.
+
 ---
 
 ## Phase 2 — Synthesize (leader step — dedup · cluster · rank)

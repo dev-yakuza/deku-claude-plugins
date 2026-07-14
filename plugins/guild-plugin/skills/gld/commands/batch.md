@@ -92,7 +92,10 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     # --dangerously-skip-permissions: unattended tool calls (tests, hooks, push, PR).
     GLD_UNATTENDED=1 CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
       claude -p --verbose --output-format stream-json --dangerously-skip-permissions \
-      "/gld resume $ISSUE" > "$LOG" 2>&1 || EXIT_CODE=$?
+      "/gld dev $ISSUE" > "$LOG" 2>&1 || EXIT_CODE=$?
+    # /gld dev (not resume): dev Phase 1 reads the label and STARTS FRESH (analyze) on a
+    # no-label Issue OR resumes from a mid-spine label — a superset of resume. This fixes
+    # the batch gap where `/gld resume` punted fresh Issues to "run /gld dev" (no-op exit 0).
 
     if [ "$EXIT_CODE" -eq 0 ]; then
       # ⚠ exit 0 is NOT proof of completion — a headless `claude -p` turn can end while a
