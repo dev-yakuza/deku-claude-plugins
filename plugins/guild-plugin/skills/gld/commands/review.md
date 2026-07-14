@@ -1,6 +1,6 @@
 # REVIEW (guided pair-programming walkthrough)
 
-**Walk the human through the change one logical unit at a time — like the author pair-driving a review.** Not a one-shot report: an **interactive, paced** walkthrough that presents ONE change-unit, explains what + why, **pauses for discussion**, then moves to the next. M1's external reviewer is the human (PR approval, INV1); this makes that review a guided conversation instead of a raw-diff slog.
+**Walk the human through the change one logical unit at a time — like the author pair-driving a review.** Not a one-shot report: an **interactive, paced** walkthrough that presents ONE change-unit, explains what + why, **pauses for discussion**, then moves to the next. M1's external reviewer is the human (PR approval, INV1); this makes that review a guided conversation instead of a raw-diff slog. **As of M3**, a fresh **adversarial pre-scan** (Step 2.5 — independent external auditor on the Standards/Spec axes) sharpens each unit's scrutiny; it is advisory (the human still approves).
 
 `$1` = Issue number (preferred) or PR number. Optional `$2 = --comment` to post a recap to the PR at the end.
 
@@ -33,6 +33,18 @@ gh pr diff <PR_NUM> --repo <owner>/<repo>
 ```
 (Or `git diff <base>...<head>`.) Note every changed file + its hunks.
 
+## Step 2.5 — Adversarial pre-scan (M3 — independent 2nd opinion)
+Get a **fresh, adversarial** read of the diff before planning units — the independent/external-auditor layer (plan §4 "독립/적대 2차 의견", §18 외부 감사자). Spawn reviewer sub-agent(s) whose job is to find what's **wrong**, on **two axes**:
+- **Standards axis** — does the diff violate `docs/standards/` (architecture · conventions · quality-bar) or a Guild gate rule?
+- **Spec axis** — does it satisfy the Issue's AC / design intent (analyze/design output), or miss/contradict a requirement?
+
+As the leader, spawn in one parallel message:
+- **External auditor (always — fresh eyes, no Guild persona → unbiased, plan §16 C1 외부자)**: `subagent_type: general-purpose`, `model: sonnet`, `description: adversarial review #$1`, prompt:
+  > You are an **independent, adversarial** code reviewer with NO prior context — fresh eyes. Read the diff (`gh pr diff <PR> --repo <owner>/<repo>`), `docs/standards/`, and the Issue AC/design if present (`docs/specs/$1/`, the `guild:*:output` comments). Hunt for **real defects**: correctness bugs, security/exposure, missing error/null handling, **blast radius** beyond the reported scope, convention/standard violations, AC gaps, and **weakened or vacuous tests** (pass-but-verify-nothing — INV2 spirit). Be skeptical; do NOT rubber-stamp. Return findings as JSON: `[{"severity":"BLOCKER|MAJOR|MINOR","axis":"standards|spec","file":"...","line":<n>,"finding":"<1 line>","why":"<1 line, concrete evidence>"}]` — no vague nits; every finding anchored to a concrete line + reason.
+- **Conditional role lenses (leader convenes by diff surface, `_handoff.md` Section G)**: security (auth/exposure/secrets/input), performance (hot path/query), dba (schema), designer (UI a11y). Each reviews **its slice** adversarially as an **external gate** (reviewing the developer's diff, never self-review). Skip any not warranted (the common case).
+
+Collect + dedup the findings (by file+line). They feed the walkthrough's "확인할 점" (Step 4). **Advisory, not a gate** — the human still approves (INV1); the auditor sharpens scrutiny, it doesn't block. If a `--comment` run, the deduped adversarial findings also go into the posted recap.
+
 ## Step 3 — Plan the change-units, then present the plan (and pause)
 Group the diff into **logical change-units**, not just per-file:
 - **Group related changes together** — a source change with its directly-related test(s); files that implement one behavior.
@@ -56,7 +68,7 @@ For the current unit:
 2. **어디**: the hunk(s), each as a clickable `file:line` ref (e.g. `lib/widgets/check_box.dart:27`). Show the key changed lines briefly (not the whole file).
 3. **무엇을**: what changed, concretely.
 4. **왜**: the rationale — from analyze/design/PR (root cause → why this fix). This is the heart of the pair-walkthrough.
-5. **확인할 점** (only if there is one): a genuine scrutiny note — null-safety/force-unwrap, blast radius (shared code affecting more than the reported scope), hotspot proximity, convention/AC gaps. One or two lines, not a lecture.
+5. **확인할 점**: surface the **Step 2.5 adversarial findings that map to this unit** (by file:line) — lead with the highest severity, tagged by axis (`[standards]`/`[spec]`) — plus any leader scrutiny note (null-safety/force-unwrap, blast radius, hotspot proximity, convention/AC gaps). If the pre-scan found nothing for this unit and there's no genuine concern, say so briefly and move on. One or two lines per point, not a lecture.
 6. **Pause**: `질문이나 이견 있으세요? 없으면 '다음'이라고 하시면 ②로 갑니다.` → **STOP and wait.**
 
 Rules for the loop:
@@ -65,7 +77,7 @@ Rules for the loop:
 - Advance only when the human signals (e.g. "다음") — respect their pace; they may linger or skip.
 
 ## Step 5 — Recap + decision (after the last unit)
-- Recap: units covered, any **open concerns** (recorded `DONE_WITH_CONCERNS` + points raised during the walk), any **change requests** the human made.
+- Recap: units covered, any **open concerns** (recorded `DONE_WITH_CONCERNS` + points raised during the walk), any **change requests** the human made, and **any adversarial findings (Step 2.5) still unaddressed** — grouped by severity (BLOCKER/MAJOR first). A BLOCKER-level unaddressed finding should be called out explicitly before the approve prompt (advisory — the human still decides).
 - Decision prompt: **approve the PR** (M1 external reviewer gate), or request changes → re-loop via `/gld dev $1` or fix directly in the PR.
 - If `$2 == --comment`: post the recap to the PR (temp-file pattern, `<!-- guild:review:output -->` marker) as an async record. Default = session-only.
 
@@ -74,4 +86,4 @@ Rules for the loop:
 - **Author-explains-to-reviewer, interactively** — the value is the paced WHY per unit + your ability to interject, not a static findings dump.
 - **Assist, not replace** — the human still approves the PR (INV1). Scrutiny notes ("확인할 점") help; they don't gate.
 - **On-demand + nudged** — `/gld dev` nudges this at completion; also standalone on any open PR.
-- **M3 extension** — an independent/adversarial agent panel (multi-lens + external auditor) can pre-scan and feed each unit's "확인할 점"; M1 is the human + this guided walk.
+- **Adversarial layer (M3 — Step 2.5)** — a fresh external auditor (+ conditional role lenses) pre-scans the diff on 2 axes (Standards/Spec) and feeds each unit's "확인할 점". This is the agent-based independent/adversarial 2nd opinion (plan §4/§18); it is **advisory**, the human still approves (INV1). The guided human walk remains the spine.
