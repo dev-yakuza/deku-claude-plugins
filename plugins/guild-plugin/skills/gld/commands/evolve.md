@@ -76,8 +76,9 @@ Converge the scan outputs into ranked themes. This is inline leader judgment (no
 2. **Cluster into themes** and route each to its evolution target (plan §8 P2):
    - **agent friction** (rediscovery, repeated tool-error, rework) → ③ habit (a role's `.claude/agents/<role>.md`) or ⑥ fact (`.claude/guild/knowledge/`).
    - **gate friction** (repeated lint/type failure, committed secret, a correction that recurs) → **fail-to-rule** → a gate/standards rule.
-   - **flow friction** (the spine itself was awkward) → **upstream-contribution candidate** (flag only — do NOT apply locally; not a runnable command yet).
+   - **flow friction** (the spine itself was awkward) → **upstream-contribution candidate** (flag for `/gld contribute`; do NOT apply locally).
    - **convention drift** → `docs/standards/conventions.md`.
+   - **role performance** (from the Phase 2.5 scorecard) → **HR proposal (C3, §16)**: **promote** a consistently ground-truth-successful habit (→ a stronger habit, or a gate rule — §8-C 기술 자동화) · **hire** a recurring unmet-need specialist (activate a roster role) · **retire** a never-convened role · **replace** a consistently-overturned one. HR needs a *trend* (Phase 2.5) — never propose off one run.
 
 3. **Rank** each theme by **frequency × impact × surprise** (plan §8-A — the ranking lever the kill-gate validated):
    - **frequency** — recurrence count / distinct sessions (apply the ≥K discipline: drop 1-offs *unless* anchored+high-impact).
@@ -90,14 +91,23 @@ Converge the scan outputs into ranked themes. This is inline leader judgment (no
 
 ---
 
-## Phase 3 — Propose (proposal-only list · distillation ladder)
+## Phase 2.5 — Per-agent scorecard (360° · ground-truth-anchored) — C3 HR basis
+
+Score each **active role's** recent performance — the basis for HR proposals (Phase 3) and sprint's readiness gate (§8 per-agent 성적표 · §16 C3). **Ground truth is highest-weight; agent opinion counts only when it anchors to ground truth (back-patting guard).**
+- **Ground truth (per role — highest weight)**: objective outcomes tied to the role's own work — its stage's test/gate/CI pass↔fail, reverts of its commits, human corrections/acceptances (`scan_corrections.role`), and the **agent↔agent captures** (was this role *overturned* [−] or did it *do the overturning* on solid grounds [+]?).
+- **Agent opinion (lower — only if corroborated)**: self / peer (sibling role) / leader / external-auditor views. An unanchored "동료가 좋다고 함" does **not** move the score (§8 back-patting; the external auditor guards this). No promotion on opinion alone.
+- **Trend**: compare to prior-run scorecards in the ledger — improving / flat / declining per role. A single run is a **weak sample** — advisory until corroborated across runs.
+
+Carry the scorecard into Phase 3 (HR) and record it in Phase 7. On a repo with no history yet, note "성적표 데이터 부족 (초기)" and skip HR proposals — HR needs a trend, not one run.
+
+## Phase 3 — Propose (proposal list · distillation ladder)
 
 Present a **ranked proposal list** to the human. For each Tier A/B theme, propose the **smallest sufficient change** via the distillation ladder (plan §8 P3 · §5 "성장=밀도, not 단조증가"):
 
 > **patch** (tweak an existing line/section) **> umbrella-extend** (widen an existing rule/habit to cover the case) **> reference-add** (add a fact/pointer) **> new** (create a new rule/role — last resort).
 
 Each proposal states, in ≤ ~500 chars (plan §6 context budget):
-- **Target file** the human should edit — a role habit → `.claude/agents/<role>.md` (③); a decided rule → `docs/standards/…` (②); a **discovered code fact** → `.claude/guild/knowledge/facts/<area>.md` (⑥). Pick the store by kind (`_knowledge.md` Section A).
+- **Target file** the human should edit — a role habit → `.claude/agents/<role>.md` (③); a decided rule → `docs/standards/…` (②); a **discovered code fact** → `.claude/guild/knowledge/facts/<area>.md` (⑥); an **HR change** → `config.json` `roles` + add/remove/rename a `.claude/agents/<role>.md` (hire/retire/replace — a canonical descriptive name; `leader` is never touched). Pick the store by kind (`_knowledge.md` Section A).
 - **Ladder rung** + the concrete proposed edit (a habit line, a fact, a convention, a gate-rule candidate).
 - **⑥-fact proposals** (`_knowledge.md`): specify **both** the `facts/<area>.md` fact (statement · evidence · relation · provenance `evolve #<n>`) **and** its `index.md` pointer (key = path/area) — a fact with no index entry is unreachable at retrieval. Prefer patching an existing slice over a new one (ladder).
 - **Evidence** — the concrete artifact(s) (SHA / PR# / issue# / ground-truth entry / session count). No bulk paste.
@@ -152,6 +162,7 @@ Append a run entry to `.claude/guild/evolution-log.md` (the format in plan §8):
 - **Run header** — date · evolve #N · signal counts (by scan) · **friction snapshot** (permission/rework/gate-violation counts vs the prior run — the trend that measures "did evolution help?").
 - **Per accepted item** — `[applied]` theme · target · class · evidence · panel verdicts · commit SHA · provenance.
 - **Per rejected item** — `[rejected]` reason + evidence → **skip-list** (declined-stays-declined; re-propose only when new evidence crosses the threshold, with an offset).
+- **Per-agent scorecard (360°)** — each active role's ground-truth-anchored score + trend this run (Phase 2.5). This is the **time-series** the next run's HR read (Phase 2.5 trend) and **sprint's readiness gate** consume. Keep it compact (role · score · trend · anchor evidence).
 - **Archive** the ④ episodic entries this run distilled (they've been consolidated into ③/⑥/gates now — plan §5 "consolidation").
 
 Report: applied N, rolled-back M (with reasons), rejected K, ledger updated, the commit SHA, and how to undo (`/gld rollback <sha>`).
