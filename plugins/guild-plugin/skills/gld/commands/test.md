@@ -43,6 +43,7 @@ As the leader, enforce the verify gate (`_handoff.md` Section E, plan §4):
   >>> RESULT <<<
   OK ADVANCE: qa
   ```
+- **Vacuous-test guard (INV2 spirit — #894 lesson)**: before accepting "AC covered", confirm the covering tests are **effective** — a test that passes but asserts nothing meaningful, or whose assertion does **not** react when the code-under-test breaks (the #894 disabled-contrast pattern: `meetsGuideline` skipped its check in the disabled path, so it passed regardless), is **not** coverage. If verify leans on a vacuous test, treat that AC as **uncovered** → loop back for a real assertion. A green suite of vacuous tests is not a pass.
 - **Verify failed** (tests red, or evidence contradicts claim, or AC gap) → do NOT mark done.
   - **Attended**: return `NEEDS_HUMAN: tests not green / AC gap — <one-line>; loop back to execute?` (the leader/human decides whether to loop back to `/gld implement $1`).
   - **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): the leader auto-decides — bounded loop-back to execute (≤2 attempts); if still failing, return `OK PAUSE: needs-human — tests not green / AC gap`. **Never weaken/skip tests to pass** (INV2). Detect mode via `printenv GLD_UNATTENDED`.

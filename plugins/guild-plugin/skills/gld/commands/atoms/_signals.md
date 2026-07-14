@@ -40,6 +40,7 @@ Ephemeral signals are appended to the ground-truth log **at the moment they occu
 | Design-stage specialist `BLOCKED` reverses a decided approach (designer WCAG, dba integrity, security threat) | design Step 2 (`design.md`) | `correction` agent↔agent (role = specialist) · `surprise` |
 | Role overturns another role's output at execute (tech-lead/gate `BLOCKED`, or dev claimed-green contradicted by raw) | implement Step 4 loop-back (`implement.md`) | `correction` agent↔agent (role = overturner) · `surprise` — or `verify-gap`/dev for claimed-green↔raw |
 | QA/designer finds a blocking defect the test stage passed | qa Step 2 defect / UI-UX gate `BLOCKED` (`qa.md`) | `correction` agent↔agent (role = qa\|designer) · `surprise` |
+| A role **measured a real defect the human knowingly ACCEPTED** (kept the risky choice / locked it at discuss) | discuss-lock or gate-dismiss (analyze/design/qa) — human chooses the flagged-risky option | `accepted-risk` — the measured defect + acceptance reason (not `surprise`; it was a conscious trade-off) |
 | Unattended auto-decision overturned by human at PR review | *(deferred — needs PR-review read-back)* | `correction` (unattended) |
 | git revert of a Guild-authored commit | on-demand via scan_git — **not** captured | — (durable) |
 
@@ -60,11 +61,12 @@ It appends one line to `.claude/guild/memory/ground-truth.jsonl` (Section D), cr
 - **Commit vs gitignore is still open** (plan 부록 B ⓐ — team-share benefit vs leak/noise risk). ① keeps it gitignored (matches init default = lowest risk); revisit when the working-tier read is built.
 - **Entry schema** (one line each):
   ```json
-  {"ts":"<iso8601>","kind":"correction|verify-gap|revert","issue":<n|null>,"stage":"<stage>","role":"<role|null>","summary":"<=1 line","evidence":"<=1 line, concrete","surprise":true|false}
+  {"ts":"<iso8601>","kind":"correction|verify-gap|revert|accepted-risk","issue":<n|null>,"stage":"<stage>","role":"<role|null>","summary":"<=1 line","evidence":"<=1 line, concrete","surprise":true|false}
   ```
   - `surprise:true` when the human overturned a choice the agent was confident in, **or** a claimed-pass was actually red (plan §8-A — this is the ranking lever the kill-gate validated: A1 "guard existed yet bug escaped", A3 "confident work reversed" ranked top).
   - `evidence` names the concrete artifact (commit / comment / runner line); never paste bulk.
 - **Read** on-demand by evolve/audit alongside the durable signals. It is the **only** persisted trace — everything else is re-derived. Treated as **advisory, low-weight** until evolve promotes an item with corroborating ground truth (plan §5 2-tier safety; a wrong entry perturbs at most the next single run, never the authority store).
+- **`accepted-risk` treatment (evolve/audit)**: NOT a correction (no habit change, no `surprise` ranking boost). evolve reads it as **(a)** a ⑥-fact candidate — the *measured* risk is durable knowledge worth recording (e.g. "`#CCCCCC` on dark disabledColor = 1.67:1, WCAG-fail, **accepted trade-off**"); **(b)** a **skip-list** entry — do NOT re-propose fixing it (the human consciously accepted it; re-proposing = noise). This closes the gap where a role *measured* a real defect (designer WCAG #898, dba sync #900) but the human kept the choice — previously captured nowhere. Optionally also recorded in `gates/dismissed.md` (the accepted-risk registry).
 
 ## Section E — On-demand readers (durable backbone)
 
