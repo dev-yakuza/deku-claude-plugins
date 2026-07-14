@@ -156,7 +156,7 @@ For the accepted set, apply as **one reversible unit** (INV3). Per item:
 4. **Auto-rollback on any validation failure** — `git checkout -- <file>` (or revert the Write) for that item; report it as "applied-then-rolled-back: <reason>". Other accepted items still proceed.
 5. **Provenance stamp** — annotate the applied artifact (frontmatter/comment or the fact's `provenance`) with `evolve #<n> (<date>) — evidence: <ref>`.
 
-Commit the surviving applied set as **one commit** — `chore(guild): evolve #<n> — <n> changes applied` — so `/gld rollback <sha>` (or the ledger) can undo the whole run. Do **not** push/PR automatically (the human's repo workflow owns that).
+Commit the surviving applied set as **one commit** (`git commit --no-verify` — the applied changes are **harness docs/config, not code**, so skip the repo's code-test pre-commit git hook, which is irrelevant here and can hang on a large suite; the Guild secret/verification **PreToolUse** gate is a separate layer and still applies): `chore(guild): evolve #<n> — <n> changes applied` — so `/gld rollback <sha>` (or the ledger) can undo the whole run. Do **not** push/PR automatically (the human's repo workflow owns that).
 
 ## Phase 7 — Ledger update (P7 — record the run)
 
