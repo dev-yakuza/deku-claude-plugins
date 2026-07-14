@@ -4,7 +4,7 @@ Print the following usage overview to the user (adapt formatting to the terminal
 
 ```
 Guild (/gld) — a self-evolving agent organization for your repo.
-Codebase and agent team co-evolve. This version (0.11.0): M1 + M2 (evolve · ⑥ knowledge · agent↔agent capture) + M3 (audit · commit gate · adversarial review) + M4 (debug · refactor · rollback · ask · monitoring) + multi-PR child orchestration.
+Codebase and agent team co-evolve. This version (0.12.0): M1–M4 + evolve HITL apply (adversarial panel · backup/rollback · provenance · ledger) + ⑥ knowledge · agent↔agent capture · audit · commit gate · adversarial review · multi-PR child orchestration.
 
 Setup
   /gld init [lang]        Analyze & onboard → harness + Guild (agents) + standards + readiness audit (gaps → guild:harness issues) (one-time)
@@ -26,7 +26,7 @@ Develop (spine: analyze → design → execute → test → qa)
 
 Diagnose & grow (Outer Loop)
   /gld audit [dim]        Read-only health check — grades harness+team+codebase, routes to evolve (dev weakness) / refactor (codebase). Makes no changes
-  /gld evolve            Scan traces (git · CI · corrections · transcript) → ranked proposals for how the Guild should grow. Proposal-only: you edit the files (no auto-apply)
+  /gld evolve [--dry-run|--apply]  Grow the Guild: scan traces → rank → adversarial panel → per-item approval → apply (backup·auto-rollback·provenance·ledger). --dry-run = propose only (no changes)
 
 On-demand & observe
   /gld rollback <target>  Safely undo a Guild change (git revert / close PR / reset stage) — non-destructive, confirms first
