@@ -103,24 +103,29 @@ Create via Write tool:
   - `index.md` — a finite pointer map keyed by path/area (one line per seeded slice → its `facts/` file + a one-line hook).
   - `facts/<area>.md` — seed a **solid baseline** (plan §7 — not exhaustive): the top bug-**hotspot** files (with approx `fix:` frequency), the strongest **co-change** groups (X↔Y), and the main **layer/coupling** boundaries from structure-scan. Each fact evidence-anchored to git history, provenance `init-scan`. **Reuse the same scan findings** that fill the agent specialization's hotspot line (step 2) so ③ and ⑥ agree. `evolve` grows the rest.
 - `.claude/guild/evolution-log.md` — ledger header (used by evolve later).
+- `.claude/guild/gates/` — the **강제층 (enforcement layer, M3 minimal set — plan §11/§14)**:
+  - `scripts/gate_precommit.py` — **copy** the bundled gate verbatim from `<<SKILL_DIR>>/gates/gate_precommit.py` (Read it, Write it to the repo path). It is the `PreToolUse(Bash: git commit)` hook (wired in settings.json, step 5) that blocks a commit carrying a **secret** (keystore/.p12/.jks/.pem/serviceAccount/.env — public identifiers like `google-services.json` excluded) or **weakening verification** (INV2 — deleted test file / net-removed assertions / added skips). Off-switch = config `gates.enabled`.
+  - `rules/secrets.md` + `rules/verification.md` — one-line rule statements, frontmatter `status: confirmed` (these two are universal + non-hallucinated → they **block**; stack-specific structure/boundary rules are draft/v2 — INV6).
+  - `dismissed.md` — accepted-risk registry (header only; `- <path/pattern> — <reason>` downgrades that item to a warning).
+  - `findings.json` — `{ "open": [] }` (the gate writes open violations here).
 - `.claude/guild/.gitignore` — containing `memory/` (episodic memory is gitignored per plan §6).
 - `.claude/guild/memory/.gitkeep`.
 
 **config.json (M1 subset, plan §18 C):**
 ```json
 {
-  "version": "0.7.0",
+  "version": "0.8.0",
   "language": "<lang from $1>",
   "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
   "automation": { "evolve_nudge": false },
-  "gates": {}
+  "gates": { "enabled": true }
 }
 ```
 - `commands.*` values are the **normalized, simple-bash-safe** forms from command-scan (see `scan_repo.md` Section 2): each is either a single simple command string, or an **array** of simple commands run in sequence. They MUST NOT contain `$(...)`, `&&`, `|`, `;`, or redirections — Guild runs them one per Bash call. (e.g. `flutter test --fail-fast --concurrency=$(nproc --all)` → store `"flutter test --fail-fast"`; `flutter analyze && npx remark . --quiet --frail` → store `["flutter analyze", "npx remark . --quiet --frail"]`.) A missing category → `null`.
 - `commands.e2e` records the detected integration/E2E command (e.g. `flutter test integration_test`). **M1 detects and records it but does NOT auto-run E2E** (test stage runs unit/existing tests only — plan §18 B; E2E auto-run is a later milestone). Recording it here keeps the info from being lost and lets a human run it manually.
 - `roles` lists the **full installed roster** (16) — the spine roles plus every participation/gate specialist. It records who is *available*; the leader decides who *participates* per task (`_handoff.md` Section G). Keep it in sync with the agents actually written in step 2.
-- (`automation`/`gates` are placeholders — evolve/gate dials arrive in M2/M3.)
+- `gates.enabled` (M3) is the **off-switch** for the enforcement layer — `true` = the pre-commit gate blocks (secret / verification-weakening); `false` = advisory only (plan §11 off-switch). `automation.evolve_nudge` is still a placeholder.
 
 ### 2. Role agents (the Guild's full roster — 16)
 Install the **entire roster** so the leader can assemble any of them per task (plan §18 D — "전 역할 활성화; init이 로스터 전체 설치, 리더가 태스크별 조건부 참여"). The roster has three participation kinds (documented in `_handoff.md` Section G):
@@ -155,9 +160,9 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
   - Else → append the filled Guild block (with markers) to the end, preserving all existing content.
 
 ### 5. settings.json (key-level merge — preserve existing)
-- Read `<<SKILL_DIR>>/templates/settings.json.tmpl`; fill `{{TEST_BIN}}`/`{{LINT_BIN}}` (the executable names, e.g. `yarn`, `npm`, `pytest`).
+- Read `<<SKILL_DIR>>/templates/settings.json.tmpl`; fill `{{TEST_BIN}}`/`{{LINT_BIN}}` (the executable names, e.g. `yarn`, `npm`, `pytest`). The template includes the **`PreToolUse(Bash: git commit)` gate hook** (M3 강제층 — runs `.claude/guild/gates/scripts/gate_precommit.py`).
 - **If `.claude/settings.json` does not exist** → Write the filled template.
-- **If it exists** → JSON has no comment markers, so merge by key: read the existing JSON, union `permissions.allow` (dedupe), preserve all other keys and any existing `hooks`. Write the merged JSON back (2-space indent).
+- **If it exists** → JSON has no comment markers, so merge by key: read the existing JSON, union `permissions.allow` (dedupe), and **union the Guild gate hook into `hooks.PreToolUse`** — append the Guild `{matcher:"Bash", hooks:[{... gate_precommit.py}]}` entry only if an equivalent one is not already present (dedupe by command path); **preserve all other existing hooks and keys**. Write the merged JSON back (2-space indent).
 
 ### 6. GitHub labels (skip if P0 found no GitHub repo)
 Create the ten `guild:*` labels. Run each as its own Bash call; if any fails, report which and continue (labels are not transactional in M1 — they are idempotent with `--force`):
@@ -226,6 +231,7 @@ Report what was installed:
 - Standards: 5 drafts at `docs/standards/` (note which are `draft` vs `confirmed`).
 - Harness: `CLAUDE.md` (created or merged), `.claude/settings.json` (created or merged), `.claude/guild/` state skeleton. Note whether `.gitignore` was reconciled (P2 step 0) so `.claude/` harness is committable — and confirm the harness is visible to git (`git status` shows it), since ignored files silently look "not created".
 - ⑥ Knowledge baseline: `.claude/guild/knowledge/index.md` + `facts/` seeded from the scans (hotspots · co-change · coupling). Note the seeded slice count; `evolve` grows it from here.
+- 강제층 게이트 (M3): `.claude/guild/gates/scripts/gate_precommit.py` + `PreToolUse` hook wired — blocks committing secrets / weakening verification. Off-switch: config `gates.enabled` (or `/gld config`).
 - Labels: 10 `guild:*` (analyze, design, execute, test, qa, done, child, children, harness, needs-human) (or "skipped — no GitHub repo").
 - Readiness audit (P3.5): report at `.claude/guild/readiness-report.md` — summarize the gap counts (BLOCKER/MAJOR/MINOR) and list any `guild:harness` issues created.
 - Next steps: "`/gld dev <issue>` to develop a GitHub Issue end-to-end (including any `guild:harness` remediation issues). `/gld status <issue>` to check progress. Day-1 agents are intentionally rough — they improve as you work (evolve, a later milestone)."
@@ -234,7 +240,7 @@ Report what was installed:
 
 ## Partial-failure repair (not a hard dead-end)
 
-`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is: `config.json` + 16 role agents (full roster) + 5 standards + CLAUDE.md guild block + settings.json allowlist + 10 labels + `knowledge/` baseline (index.md + facts/). Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
+`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is: `config.json` + 16 role agents (full roster) + 5 standards + CLAUDE.md guild block + settings.json allowlist **+ PreToolUse gate hook** + 10 labels + `knowledge/` baseline (index.md + facts/) + `gates/` (gate_precommit.py + rules + dismissed.md). Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
 
 ## Hard rules (safety)
 - **Additive only** (INV4): existing files are merged/preserved, never clobbered. CLAUDE.md via markers; settings.json via key union; existing `docs/standards/*` and `.claude/agents/*` are not overwritten.
