@@ -51,7 +51,12 @@ Map to the current stage (`_handoff.md` Section A):
   gh issue edit $1 --add-label "guild:analyze"
   ```
 
-Determine work type from the Issue's `type:` label (`type:feature|bug|refactor`) if present; default to feature. In M1, execute = **implement** only regardless of type (debug/refactor variants are a later milestone) — but analyze may still note the true type for the humans.
+Determine work type from the Issue's `type:` label (`type:feature|bug|refactor`) if present; default to feature. **Analyze may reclassify** (§4 — reality differs from the label; it can also split off a `type:refactor` sub-issue first). The confirmed work type selects the **execute variant** (Phase 2):
+- `type:bug` → **debug** (reproduce → root-cause → fix + regression test)
+- `type:refactor` → **refactor** (behavior-preserving transform; existing tests green)
+- otherwise (feature) → **implement** (TDD red→green→refactor)
+
+Hold the selected variant; Phase 2 runs its wrapper at the execute stage.
 
 **Assemble the cast (as the leader).** With the work-type known, size up the change surface (Issue body + AC + hotspots) and decide which roster specialists this task needs — following the assembly rules in `leader.md` ("팀 조립 규칙") and the participation model in `_handoff.md` Section G. The **spine roles always run**; **participation roles** (designer/i18n/analytics/performance/dba/infra/security/product-owner/tech-writer/release-manager/support-triage) join only when their trigger matches; **gate reviews** (designer UI/UX, security) are inserted before advancing when risk matches. Hold this cast decision — each stage wrapper convenes the roles it owns (e.g. design convenes designer when the change is UI). When in doubt, convene minimally and let a downstream gap pull a specialist in later. Surface non-obvious/risky assembly choices to the human.
 
@@ -65,7 +70,7 @@ From the current stage, run each stage in order until `guild:done` or a stop con
 |---|---|
 | analyze | `<<SKILL_DIR>>/commands/analyze.md` |
 | design | `<<SKILL_DIR>>/commands/design.md` |
-| execute | `<<SKILL_DIR>>/commands/implement.md` |
+| execute | the selected variant: `implement.md` (feature) · `debug.md` (`type:bug`) · `refactor.md` (`type:refactor`) — chosen in Phase 1 |
 | test | `<<SKILL_DIR>>/commands/test.md` |
 | qa | `<<SKILL_DIR>>/commands/qa.md` |
 
