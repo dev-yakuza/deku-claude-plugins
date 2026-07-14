@@ -179,3 +179,14 @@ Report: applied N, rolled-back M (with reasons), rejected K, ledger updated, the
 - **Anchor everything to ground truth** (`_signals.md` Section B): AI self-review ≠ signal; a reasonless rejection weights low.
 - **Durable-first, degrade gracefully**: a missing ground-truth log / unreadable transcript never blocks evolve — it proceeds on git/CI/corrections.
 - **Read-only scans, bounded output**: scans return compact JSON; synthesis keeps leader context thin (no transcript/diff dumps — §12).
+
+---
+
+## Design note — biological enhancements (§8 A–D): embodied where earned, deferred where not
+
+The plan's bio-inspired ideas are adopted **only when they beat the simple baseline** (bio-mimicry-trap guard — §8). Status:
+- **A. Surprise-weighted consolidation** — **embodied**: Phase 2 ranks `frequency × impact × surprise` (§8-A); the `surprise` flag drives it.
+- **B. Interleaved replay (CLS — avoid catastrophic forgetting)** — **embodied** in ⑥ densify (Phase 3 / `_knowledge.md` invariant 3): merging a new fact checks it against existing ⑥ + the ledger so still-valid knowledge isn't silently overwritten.
+- **C. Skill automation (habit → gate)** — **embodied** in the HR **promote** action (Phase 3, §8-C) + the boundary-rule `draft → confirmed` promotion (ground-truth-successful habit compiles into a deterministic gate).
+- **D. Variation–selection–inheritance** — **selection** is embodied (Phase 4 adversarial panel + HR replace/retire pick winners on ground truth); full **population variation** (competing agent-def variants) is **deferred** — token-expensive, adopt only when scale/signal justify it (§8-D). Trigger: a repo large enough that N-variant judging pays for itself.
+
