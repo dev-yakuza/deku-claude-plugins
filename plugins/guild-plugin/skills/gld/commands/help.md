@@ -4,7 +4,7 @@ Print the following usage overview to the user (adapt formatting to the terminal
 
 ```
 Guild (/gld) — a self-evolving agent organization for your repo.
-Codebase and agent team co-evolve. This version (0.12.0): M1–M4 + evolve HITL apply (adversarial panel · backup/rollback · provenance · ledger) + ⑥ knowledge · agent↔agent capture · audit · commit gate · adversarial review · multi-PR child orchestration.
+Codebase and agent team co-evolve. This version (0.15.0): all §3 commands — M1–M4 + evolve HITL apply + contribute/update (central↔repo) + sprint (readiness-gated) + ⑥ knowledge · agent↔agent capture · audit · commit gate · adversarial review · multi-PR child orchestration.
 
 Setup
   /gld init [lang]        Analyze & onboard → harness + Guild (agents) + standards + readiness audit (gaps → guild:harness issues) (one-time)
