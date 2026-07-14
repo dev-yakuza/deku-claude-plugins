@@ -32,7 +32,7 @@ from the checks succeeding; a broken gate degrades to advisory, matching the off
 Block mechanism: prints the PreToolUse deny JSON on stdout AND exits 2 (belt-and-suspenders;
 see _handoff/gates wiring). Allow: exit 0, no output.
 """
-import json, os, re, subprocess, sys
+import fnmatch, json, os, re, subprocess, sys
 
 # --- sensitive file patterns (BLOCK) — the "진짜 위험" set (audit 뉘앙스: 공개 식별자 제외) ---
 SECRET_PATH_RE = re.compile(
@@ -164,6 +164,42 @@ def check_verification(root, dismiss):
     return findings
 
 
+def check_boundaries(root, dismiss):
+    """Structure/boundary gate (v2, rule-driven). Read gates/rules/boundaries.md; return
+    (block, warn). A whole-file `status: confirmed` makes its rules BLOCK; otherwise (draft)
+    they only WARN (T3/INV6 — hallucinated structure rules never block until confirmed).
+    Rule line: `- forbid: <path-glob> imports <substr>` — a staged file matching <path-glob>
+    whose ADDED lines contain <substr> violates it. Best-effort (grep-level, not a real parser)."""
+    block, warn = [], []
+    try:
+        text = open(os.path.join(root, ".claude", "guild", "gates", "rules", "boundaries.md"),
+                    encoding="utf-8").read()
+    except Exception:
+        return block, warn
+    confirmed = bool(re.search(r"status:\s*confirmed", text, re.I))
+    rules = [(m.group(1).strip(), m.group(2).strip())
+             for m in (re.match(r"\s*-\s*forbid:\s*(\S+)\s+imports?\s+(.+)", ln, re.I)
+                       for ln in text.splitlines()) if m]
+    if not rules:
+        return block, warn
+    diff = sh(["git", "-C", root, "diff", "--cached", "--unified=0"])
+    cur, added = "?", {}
+    for ln in diff.splitlines():
+        if ln.startswith("+++ b/"):
+            cur = ln[6:]
+        elif ln.startswith("+") and not ln.startswith("+++"):
+            added.setdefault(cur, []).append(ln[1:])
+    for glob, forb in rules:
+        for f, lines in added.items():
+            if any(d and d in f for d in dismiss):
+                continue
+            if fnmatch.fnmatch(f, glob) or fnmatch.fnmatch(f, glob.rstrip("*") + "*"):
+                if any(forb in l for l in lines):
+                    msg = f"경계 위반: {f} → 금지 참조 '{forb}' (rule: {glob} imports {forb})"
+                    (block if confirmed else warn).append(msg)
+    return block, warn
+
+
 def write_findings(root, findings):
     try:
         p = os.path.join(root, ".claude", "guild", "gates")
@@ -202,10 +238,16 @@ def main():
     if not gates_enabled(root):
         return 0  # off-switch
     dismiss = dismissed(root)
-    findings = check_secrets(root, dismiss) + check_verification(root, dismiss)
-    if findings:
-        write_findings(root, findings)
-        deny(findings)  # exits 2
+    block = check_secrets(root, dismiss) + check_verification(root, dismiss)
+    b_block, b_warn = check_boundaries(root, dismiss)
+    block += b_block
+    if block:
+        write_findings(root, block)
+        deny(block)  # exits 2
+    if b_warn:
+        # draft boundary rules WARN only (do not block) — advisory until confirmed
+        sys.stderr.write("⚠ Guild 게이트 경고 (draft 경계 규칙 — 차단 안 함, confirm 시 차단):\n- "
+                         + "\n- ".join(b_warn) + "\n")
     return 0
 
 
