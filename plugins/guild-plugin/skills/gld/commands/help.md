@@ -4,7 +4,7 @@ Print the following usage overview to the user (adapt formatting to the terminal
 
 ```
 Guild (/gld) — a self-evolving agent organization for your repo.
-Codebase and agent team co-evolve. This version (0.6.1): M1 bootstrap + dev flow (advisory harness) + multi-PR child orchestration + ⑥ knowledge base (init baseline + runtime retrieval) + M2 proposal-only evolve (agent↔agent capture).
+Codebase and agent team co-evolve. This version (0.6.2): M1 bootstrap + dev flow (advisory harness) + multi-PR child orchestration + ⑥ knowledge base (init baseline + runtime retrieval) + M2 proposal-only evolve (agent↔agent capture).
 
 Setup
   /gld init [lang]        Analyze & onboard → harness + Guild (agents) + standards + readiness audit (gaps → guild:harness issues) (one-time)

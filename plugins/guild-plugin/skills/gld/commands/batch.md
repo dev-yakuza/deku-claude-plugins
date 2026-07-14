@@ -2,7 +2,7 @@
 
 **Run multiple Issues through the Guild spine unattended, with rate-limit auto-resume.** Each Issue runs in its own headless `claude -p` child session driven by `/gld resume`; a background supervisor loop **detects token rate limits and automatically waits until reset, then re-runs** — no human interaction. Ported from `sdd-plugin` `batch.md` (the verified rate-limit-resilient runner), adapted to Guild.
 
-> **Status: newly wired (untested).** The rate-limit auto-resume supervisor **and** the unattended-gate companion are now implemented: each child runs with `GLD_UNATTENDED=1`, and the flow's gates behave per `_handoff.md` **Section H** (leader stands in — low/medium gates auto-resolved + logged, high-stakes → `guild:needs-human` pause). Wired across `_handoff.md` (Section H), `analyze.md`/`design.md`/`test.md`/`qa.md` (gate branches), `dev.md` (mode detect + PAUSE handling), `implement.md` (decision log + branch/PR resume), `init.md` (`guild:needs-human` label). **Not yet run end-to-end** — validate on a real batch before relying on it.
+> **Status: live-validated (2026-07-14, 1 real batch of 2 issues).** ✅ **rate-limit auto-resume** confirmed (a real limit hit → auto-waited ~115m → resumed, no lost work) · ✅ **`guild:needs-human` pause** confirmed (a scope-defining high-stakes discuss ambiguity → leader paused without guessing) · 🐛 **found + fixed a false-positive**: the supervisor trusted `claude -p` **exit 0** as "completed," but a headless turn can exit 0 while a backgrounded pre-commit hook leaves the Issue mid-spine (no commit/PR). Completion is now judged by the **GitHub label** (`guild:done` / `guild:children`), with `guild:needs-human` counted as PAUSED and a mid-spine exit-0 re-resumed (bounded) then surfaced as INCOMPLETE — never silently "succeeded." Wired across `_handoff.md` (Section H), `analyze.md`/`design.md`/`test.md`/`qa.md` (gate branches), `dev.md` (mode detect + PAUSE handling), `implement.md` (decision log + branch/PR resume), `init.md` (`guild:needs-human` label).
 
 `$1` = comma-separated Issue numbers (e.g. `837,840`), or empty = all open qualifying Issues.
 
@@ -22,6 +22,8 @@ cd ../<repo>-batch
 git worktree remove ../<repo>-batch
 ```
 Detect during Phase 1 (`git rev-parse --git-common-dir` == `--git-dir` → main checkout) and suggest a worktree; the user may decline.
+
+> ⚠️ **Worktree needs a *committed* harness.** A fresh worktree materializes only **tracked** files at the base commit — so if `.claude/guild/`, `.claude/agents/`, `CLAUDE.md`, `docs/standards/` are **untracked** (a dev/unverified harness, or a repo that hasn't committed its Guild setup), they will **not** exist in the worktree and every child fails "Guild not initialized." In that case either commit the harness first, or **run in the main checkout** (accept the branch-switch/stash caveat). Observed 2026-07-14 (word_app dev harness was untracked → main-checkout required).
 
 ---
 
@@ -68,7 +70,7 @@ cleanup() { rm -f "$SCRIPT_PATH"; echo "[batch] Removed batch script"; }
 trap cleanup EXIT INT TERM
 
 BATCH_START=$(date +%s)
-SUCCEEDED=0; FAILED=0; FAILED_ISSUES=()
+SUCCEEDED=0; FAILED=0; PAUSED=0; INCOMPLETE=0; FAILED_ISSUES=(); INCOMPLETE_ISSUES=()
 QUEUE=("${ISSUES[@]}"); SEEN=""
 for n in "${ISSUES[@]}"; do SEEN="$SEEN #$n "; done
 TOTAL=${#ISSUES[@]}; PROCESSED=0
@@ -83,6 +85,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   LOG="$LOG_DIR/issue-${ISSUE}-${TIMESTAMP}.log"
   echo "[$PROCESSED/$TOTAL] Issue #$ISSUE → $LOG"
 
+  RESUME_TRIES=0
   while true; do
     EXIT_CODE=0
     # GLD_UNATTENDED=1: flow auto-proceeds discuss/verify gates (records assumptions) — see Notes.
@@ -92,20 +95,53 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       "/gld resume $ISSUE" > "$LOG" 2>&1 || EXIT_CODE=$?
 
     if [ "$EXIT_CODE" -eq 0 ]; then
-      echo "  ✓ Issue #$ISSUE completed"; SUCCEEDED=$((SUCCEEDED + 1))
-      # Auto-discover child Issues (design split → guild:child + "Parent Issue: #N")
-      if [ -n "$OWNER_REPO" ]; then
-        CHILDREN=$(gh issue list --repo "$OWNER_REPO" --label guild:child --state open --limit 200 \
-          --json number,body \
-          --jq "[.[] | select(.body | test(\"Parent Issue: #${ISSUE}([^0-9]|\$)\"))] | .[].number" 2>/dev/null || true)
-        for C in $CHILDREN; do
-          case "$SEEN" in *" #$C "*) ;; *)
-            SEEN="$SEEN #$C "; QUEUE+=("$C"); TOTAL=$((TOTAL + 1))
-            echo "  + Discovered child #$C → queued (total $TOTAL)" ;;
-          esac
-        done
+      # ⚠ exit 0 is NOT proof of completion — a headless `claude -p` turn can end while a
+      # backgrounded pre-commit hook is still running, leaving the Issue mid-spine with no
+      # commit/PR. Truth = the GitHub label (_handoff.md Section A: "labels are the state").
+      if [ -z "$OWNER_REPO" ]; then
+        echo "  ✓ Issue #$ISSUE (exit 0; state UNVERIFIED — no repo)"; SUCCEEDED=$((SUCCEEDED + 1)); break
       fi
-      break
+      STATE=$(gh issue view "$ISSUE" --repo "$OWNER_REPO" --json labels \
+        --jq '[.labels[].name] | map(select(startswith("guild:"))) | join(",")' 2>/dev/null || true)
+      case "$STATE" in
+        *guild:done*)
+          echo "  ✓ Issue #$ISSUE done"; SUCCEEDED=$((SUCCEEDED + 1))
+          # Auto-discover child Issues (design split → guild:child + "Parent Issue: #N")
+          CHILDREN=$(gh issue list --repo "$OWNER_REPO" --label guild:child --state open --limit 200 \
+            --json number,body \
+            --jq "[.[] | select(.body | test(\"Parent Issue: #${ISSUE}([^0-9]|\$)\"))] | .[].number" 2>/dev/null || true)
+          for C in $CHILDREN; do
+            case "$SEEN" in *" #$C "*) ;; *)
+              SEEN="$SEEN #$C "; QUEUE+=("$C"); TOTAL=$((TOTAL + 1))
+              echo "  + Discovered child #$C → queued (total $TOTAL)" ;;
+            esac
+          done
+          break ;;
+        *guild:children*)
+          echo "  ✓ Issue #$ISSUE split (parent orchestration) — discovering children"; SUCCEEDED=$((SUCCEEDED + 1))
+          CHILDREN=$(gh issue list --repo "$OWNER_REPO" --label guild:child --state open --limit 200 \
+            --json number,body \
+            --jq "[.[] | select(.body | test(\"Parent Issue: #${ISSUE}([^0-9]|\$)\"))] | .[].number" 2>/dev/null || true)
+          for C in $CHILDREN; do
+            case "$SEEN" in *" #$C "*) ;; *)
+              SEEN="$SEEN #$C "; QUEUE+=("$C"); TOTAL=$((TOTAL + 1))
+              echo "  + Discovered child #$C → queued (total $TOTAL)" ;;
+            esac
+          done
+          break ;;
+        *guild:needs-human*)
+          echo "  ⏸ Issue #$ISSUE paused (needs-human)"; PAUSED=$((PAUSED + 1)); break ;;
+        *)
+          # exited 0 but still mid-spine (or state unreadable) = NOT finished. Re-resume,
+          # bounded (resume is state-safe — continues from the label). Then surface honestly.
+          RESUME_TRIES=$((RESUME_TRIES + 1))
+          if [ "$RESUME_TRIES" -lt 3 ]; then
+            echo "  ↻ Issue #$ISSUE exited at [${STATE:-unknown}] without finishing — re-resuming ($RESUME_TRIES/2)"
+            continue
+          fi
+          echo "  ⚠ Issue #$ISSUE INCOMPLETE (stuck at ${STATE:-unknown} after re-resume)"
+          INCOMPLETE=$((INCOMPLETE + 1)); INCOMPLETE_ISSUES+=("#$ISSUE (${STATE:-unknown})"); break ;;
+      esac
     fi
 
     # --- Rate-limit detection → wait until reset → auto-retry (the core) ---
@@ -147,7 +183,11 @@ done
 
 echo "============================================================"
 echo "  Guild Batch Complete"
-echo "  Total: $PROCESSED  Succeeded: $SUCCEEDED  Failed: $FAILED"
+echo "  Total: $PROCESSED  Done: $SUCCEEDED  Paused(needs-human): $PAUSED  Incomplete: $INCOMPLETE  Failed: $FAILED"
+if [ ${#INCOMPLETE_ISSUES[@]} -gt 0 ]; then
+  echo "  Incomplete (exited without reaching guild:done — resume to finish):"
+  for II in "${INCOMPLETE_ISSUES[@]}"; do echo "    $II"; done
+fi
 if [ ${#FAILED_ISSUES[@]} -gt 0 ]; then
   echo "  Failed:"; for FI in "${FAILED_ISSUES[@]}"; do echo "    $FI"; done
 fi
@@ -162,7 +202,7 @@ echo "============================================================"
 2. Ensure `.claude/guild/.batch-logs/` won't be committed (the script already adds it to `.git/info/exclude`; the parent `.claude/guild/.gitignore` may also cover it).
 3. Execute via the **Bash tool with `run_in_background: true`**: `bash .claude/guild/.gld-batch.sh`.
 4. Report: "Guild batch started (background). Issues: <N>. Logs: .claude/guild/.batch-logs/. Rate limits auto-wait+resume. You'll be notified on completion." Give the `tail -f … | jq …` monitor hint.
-5. On completion (harness re-invokes when the background task exits): read the logs, report per-Issue ✓/✗ + the summary block. **Also list Issues paused for a human decision**: `gh issue list --label guild:needs-human --state open` — these hit a high-stakes gate and await the human (resolve, then re-run `/gld dev`/`resume`).
+5. On completion (harness re-invokes when the background task exits): read the logs, report per-Issue outcome + the summary block. Outcomes are **label-truthful** (Done / Paused-needs-human / Incomplete / Failed), not exit-code-based. **List paused Issues** (`gh issue list --label guild:needs-human --state open`) — resolve, then re-run `/gld dev`/`resume`. **List Incomplete Issues** (exited 0 mid-spine — a backgrounded hook or turn-end) — `/gld resume <n>` continues them from the label; their partial work is on the feature branch.
 
 ---
 
@@ -178,7 +218,7 @@ echo "============================================================"
   - **Net**: leader decides low/medium judgments (anchored + logged), escalates high-stakes ones, and the human gate lands at **PR review + merge** after the batch.
   - **Wiring (done)**: `_handoff.md` Section H (policy + detection) · `analyze.md`/`design.md` (discuss classify+record vs pause) · `test.md`/`qa.md` (verify/QA deterministic + pause) · `dev.md` (mode detect; no `AskUserQuestion` when unattended; clean PAUSE) · `implement.md` (PR decision log + resume-safe branch/PR) · `init.md` (`guild:needs-human` label). Authoritative policy = Section H.
 - **Resume granularity**: cross-stage is safe (labels). Mid-`execute` interruption re-enters execute — `implement.md` should detect an existing feature branch/partial commits and continue (see plan §부록 B "중단 내성"). Until hardened, a mid-execute retry may redo work.
-- **Child auto-discovery**: matches `guild:child` Issues whose body has `Parent Issue: #<n>` (created by `design.md`'s multi-PR split). Keep the regex in sync if that reference string changes.
+- **Child auto-discovery**: matches `guild:child` Issues whose body has `Parent Issue: #<n>` (created by `design.md`'s multi-PR split). Keep the regex in sync if that reference string changes. ⚠ **Split-parent limitation (untested edge)**: when a parent splits, the supervisor counts the split as done and **queues the children** (they get developed unattended), but it does **not** re-queue the parent for its final **Phase 2c parent-integration** after the children finish — so a batched split parent is left at `guild:children`. Finish it with a manual `/gld dev <parent>` (re-enters Phase 2b, sees all children `guild:done`, runs integration → parent `guild:done`). Full batch↔orchestration nesting is v2.
 - **`_bash_rules.md` exception**: variable expansion inside the generated `.sh` is fine — the atomic-bash rule governs direct Bash-tool calls, not OS-level scripts. The script is one background Bash-tool invocation.
 - **SIGKILL**: `trap` can't catch `kill -9`; then remove `.claude/guild/.gld-batch.sh` manually. No config backup/restore is needed (Guild uses `GLD_UNATTENDED` env, not a config-file toggle — simpler than sdd's `.sdd-config` swap).
 
@@ -187,4 +227,4 @@ echo "============================================================"
 2. ✅ **`GLD_UNATTENDED` companion** wired in `_handoff.md` Section H + `analyze/design/test/qa/dev` gate branches (+ `implement.md` decision log).
 3. ✅ `implement.md` mid-execute resume hardened (existing-branch/PR detection).
 4. ⬜ **Gating decision** (open): `batch` is lower-risk than full autonomous `sprint` (human still reviews every PR), so it can ship before `sprint`'s readiness gate — but keep the security note prominent. Confirm with the user.
-5. ⬜ **End-to-end validation** (open): run a real 1–2 issue batch, confirm rate-limit auto-resume + gate stand-in + `guild:needs-human` pause all behave. Not yet done.
+5. ✅ **End-to-end validation** (2026-07-14): real 2-issue batch confirmed rate-limit auto-resume + `guild:needs-human` pause; found + fixed the exit-0 false-positive (now label-based completion). **Untested edges**: happy-path *unattended* completion to `guild:done` was blocked by the false-positive (re-verify after the fix); split-parent under batch (nested orchestration); worktree path assumes a **committed** harness (an untracked/dev harness needs main-checkout — see Phase 1).
