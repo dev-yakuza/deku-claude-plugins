@@ -9,6 +9,7 @@ Codebase and agent team co-evolve. This version (0.12.0): M1–M4 + evolve HITL 
 Setup
   /gld init [lang]        Analyze & onboard → harness + Guild (agents) + standards + readiness audit (gaps → guild:harness issues) (one-time)
   /gld config             Show / adjust Guild settings
+  /gld update [--check]   Adopt newer central Guild improvements, preserving local evolution
 
 Develop (spine: analyze → design → execute → test → qa)
   /gld dev <issue>        Run the full flow on a GitHub Issue (auto-selects execute variant; leader convenes specialists by risk)
@@ -27,6 +28,7 @@ Develop (spine: analyze → design → execute → test → qa)
 Diagnose & grow (Outer Loop)
   /gld audit [dim]        Read-only health check — grades harness+team+codebase, routes to evolve (dev weakness) / refactor (codebase). Makes no changes
   /gld evolve [--dry-run|--apply]  Grow the Guild: scan traces → rank → adversarial panel → per-item approval → apply (backup·auto-rollback·provenance·ledger). --dry-run = propose only (no changes)
+  /gld contribute         Upstream a proven flow improvement to the central plugin (sanitize · dedup · human review before send)
 
 On-demand & observe
   /gld rollback <target>  Safely undo a Guild change (git revert / close PR / reset stage) — non-destructive, confirms first
@@ -35,7 +37,7 @@ On-demand & observe
 
   /gld help               This help
 
-Planned (later milestones): update, contribute, sprint.
+Planned (later milestone): sprint.
 ```
 
 After printing, if the current repo has no `.claude/guild/` directory, add one line: "This repo is not initialized yet — run `/gld init` to set up Guild."

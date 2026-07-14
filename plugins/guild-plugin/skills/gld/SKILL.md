@@ -11,10 +11,10 @@ Route to the appropriate command based on `$0`. Read `<<SKILL_DIR>>/commands/$0.
 
 ## Command Routing
 
-- Valid commands: `init`, `dev`, `analyze`, `design`, `implement`, `debug`, `refactor`, `test`, `qa`, `review`, `audit`, `batch`, `evolve`, `rollback`, `ask`, `monitoring`, `config`, `resume`, `status`, `help`
+- Valid commands: `init`, `dev`, `analyze`, `design`, `implement`, `debug`, `refactor`, `test`, `qa`, `review`, `audit`, `batch`, `evolve`, `rollback`, `ask`, `monitoring`, `update`, `contribute`, `config`, `resume`, `status`, `help`
 - If `$0` is empty → route to `help`.
 - If `$0` is not in the list → report unknown command, then route to `help`.
-- Planned (not in this version — report "planned, not yet available" if invoked): `update`, `contribute`, `sprint`.
+- Planned (not in this version — report "planned, not yet available" if invoked): `sprint`.
 
 ---
 

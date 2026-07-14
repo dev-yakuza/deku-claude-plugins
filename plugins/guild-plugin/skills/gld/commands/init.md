@@ -108,13 +108,14 @@ Create via Write tool:
   - `rules/secrets.md` + `rules/verification.md` — one-line rule statements, frontmatter `status: confirmed` (these two are universal + non-hallucinated → they **block**; stack-specific structure/boundary rules are draft/v2 — INV6).
   - `dismissed.md` — accepted-risk registry (header only; `- <path/pattern> — <reason>` downgrades that item to a warning).
   - `findings.json` — `{ "open": [] }` (the gate writes open violations here).
+- `.claude/guild/overlay/.gitkeep` — flow-policy override surface (empty; `/gld contribute` upstreams diffs here — plan §10).
 - `.claude/guild/.gitignore` — containing `memory/` (episodic memory is gitignored per plan §6).
 - `.claude/guild/memory/.gitkeep`.
 
 **config.json (M1 subset, plan §18 C):**
 ```json
 {
-  "version": "0.12.0",
+  "version": "0.13.0",
   "language": "<lang from $1>",
   "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
