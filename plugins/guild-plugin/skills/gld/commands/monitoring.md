@@ -2,7 +2,7 @@
 
 **A near-real-time snapshot of the Guild's state, rendered from git-local files (read-only).** Shows the organization, knowledge/memory status, evolution history, gates, friction trend, and active work. **Terminal output** — the HTML artifact is v2 (plan §3). Honest framing: this is a **snapshot at read time**, not a live dashboard.
 
-`$1` (optional) = a focus section (`org|knowledge|gates|work|evolution`); empty = full snapshot.
+`$1` (optional) = a focus section (`org|knowledge|gates|work|evolution`) · `--html` = also write a self-contained HTML dashboard · empty = full terminal snapshot.
 
 > **Bash**: `_bash_rules.md`. Handoff + owner/repo: `_handoff.md`.
 > **Output language**: render labels/prose in `config.language` (`_handoff.md` Section K); counts/paths/IDs stay ASCII.
@@ -22,7 +22,9 @@
 
 **2. Render** a compact terminal snapshot — sections with counts + one-line status each, most-actionable first (open gate violations, `needs-human` pauses, worsening friction trend). End with the snapshot timestamp note.
 
-**3. Read-only** — renders only; writes nothing.
+**2b. `--html` (optional)** — additionally render the same gathered data as a **self-contained HTML dashboard** (inline CSS, **no external assets** — offline/CSP-safe): an org table, status cards (⑥/④ · gates · standards), the evolution/friction trend, and an active-work board by `guild:*` label. Write it to `.claude/guild/monitoring.html` (a snapshot artifact — gitignored or scratch, **not committed**) and report the path for the human to open. Same data as the terminal snapshot, richer layout.
+
+**3. Read-only against the repo** — reads git-local + `gh`; the only write is the optional `--html` artifact (a rendered snapshot, not repo state).
 
 ## Hard rules
 - **Read-only snapshot** — reads git-local + `gh`; renders; never writes. Terminal only (HTML = v2).

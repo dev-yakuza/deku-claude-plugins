@@ -105,7 +105,8 @@ Create via Write tool:
 - `.claude/guild/evolution-log.md` — ledger header (used by evolve later).
 - `.claude/guild/gates/` — the **강제층 (enforcement layer, M3 minimal set — plan §11/§14)**:
   - `scripts/gate_precommit.py` — **copy** the bundled gate verbatim from `<<SKILL_DIR>>/gates/gate_precommit.py` (Read it, Write it to the repo path). It is the `PreToolUse(Bash: git commit)` hook (wired in settings.json, step 5) that blocks a commit carrying a **secret** (keystore/.p12/.jks/.pem/serviceAccount/.env — public identifiers like `google-services.json` excluded) or **weakening verification** (INV2 — deleted test file / net-removed assertions / added skips). Off-switch = config `gates.enabled`.
-  - `rules/secrets.md` + `rules/verification.md` — one-line rule statements, frontmatter `status: confirmed` (these two are universal + non-hallucinated → they **block**; stack-specific structure/boundary rules are draft/v2 — INV6).
+  - `rules/secrets.md` + `rules/verification.md` — one-line rule statements, `status: confirmed` (universal + non-hallucinated → they **block**).
+  - `rules/boundaries.md` — **structure/boundary rules, `status: draft` (= WARN only, never blocks until the human confirms — INV6/T3)**. Seed 0–2 `- forbid: <layer-glob> imports <path-substr>` rules from the structure-scan's layer boundaries (e.g. `- forbid: lib/ui/** imports lib/db/`); if the layers are unclear, write the `status: draft` header + a commented example + a note that `evolve`/`audit` grow it. Draft rules warn; confirming a rule (`status: confirmed`) promotes it to a block.
   - `dismissed.md` — accepted-risk registry (header only; `- <path/pattern> — <reason>` downgrades that item to a warning).
   - `findings.json` — `{ "open": [] }` (the gate writes open violations here).
 - `.claude/guild/overlay/.gitkeep` — flow-policy override surface (empty; `/gld contribute` upstreams diffs here — plan §10).
@@ -115,7 +116,7 @@ Create via Write tool:
 **config.json (M1 subset, plan §18 C):**
 ```json
 {
-  "version": "0.15.0",
+  "version": "0.16.0",
   "language": "<lang from $1>",
   "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
