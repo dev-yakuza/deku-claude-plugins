@@ -116,7 +116,7 @@ Create via Write tool:
 **config.json (M1 subset, plan §18 C):**
 ```json
 {
-  "version": "0.18.1",
+  "version": "0.18.2",
   "language": "<lang from $1>",
   "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },

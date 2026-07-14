@@ -14,7 +14,7 @@
 Args: `--dry-run` (propose only) | `--apply` (run the approval+apply pipeline). Default: propose, then ask.
 
 > **Bash**: simple calls only (`<<SKILL_DIR>>/commands/atoms/_bash_rules.md`) — **except** the bundled Python tool (`scan_transcript.py`), run as ONE `python3` call (atomic-bash exception, plan §8 정정). Signal contract: `<<SKILL_DIR>>/commands/atoms/_signals.md`. Handoff/RESULT + owner/repo: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
-> **Output language**: present the ranked proposal list, hand-off text, and nudges in `config.language` (`_handoff.md` Section K). Target file paths, `RESULT` tokens, and evidence refs (SHA/PR#) stay ASCII.
+> **Output language (all phases — this is a long, multi-phase command; do NOT drift to English after Phase 1)**: EVERY human-readable output — proposals (P3), **panel verdicts (P4), approval-gate questions (P5), apply/ledger report (P6/P7)**, and nudges — MUST be in `config.language` (`_handoff.md` Section K). **The Phase 4 panel sub-agents must be told to return their verdicts + reasons in `config.language`** (a spawned agent defaults to English otherwise, and the leader would relay it in English). Only machine tokens stay ASCII: file paths, `RESULT`/verdict enums (`keep`/`drop`/`edit`), SHA/PR#.
 
 ---
 
@@ -132,7 +132,7 @@ For each Tier A/B proposal, run an **isolated multi-lens panel** that tries to *
 - **Agent-def (③) / gate / standard (②) changes** = higher risk (they alter how every future task runs) → **3 lenses**, each a separate agent: **correctness** ("is the change factually right + does it actually address the evidence?"), **degradation** ("does it over-constrain, contradict an existing rule, or **weaken verification**? — INV2"), **redundancy** ("is this already covered by an existing rule/habit/fact?").
 - **⑥-fact / convention (low-risk additive) changes** → **1 lens** (correctness + redundancy combined) is enough.
 
-Each lens returns `{verdict: keep|drop|edit, reason, (edit: suggested change)}`. **Drop rule**: a proposal a **majority of its lenses reject** is dropped (recorded to the skip-list, P7). A **degradation-lens veto on an INV2 grounds is absolute** — any hint of verification-weakening drops the item regardless of the other lenses. Surviving proposals (some possibly edited by a lens) go to Phase 5.
+Each lens returns `{verdict: keep|drop|edit, reason, (edit: suggested change)}` — **its `reason`/`edit` prose in `config.language`** (tell the spawned lens explicitly; the `verdict` enum stays ASCII). **Drop rule**: a proposal a **majority of its lenses reject** is dropped (recorded to the skip-list, P7). A **degradation-lens veto on an INV2 grounds is absolute** — any hint of verification-weakening drops the item regardless of the other lenses. Surviving proposals (some possibly edited by a lens) go to Phase 5.
 
 ## Phase 5 — Approval gate (P5 — per-item HITL · INV1)
 
