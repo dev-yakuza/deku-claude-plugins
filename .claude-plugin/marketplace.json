@@ -15,6 +15,12 @@
       "source": "./plugins/skill-quality-plugin",
       "description": "Evaluate Claude Code skill quality with a structured 38-item rubric",
       "version": "1.0.1"
+    },
+    {
+      "name": "guild-plugin",
+      "source": "./plugins/guild-plugin",
+      "description": "Guild - self-evolving agent organization: builds a harness, develops via a spec-driven flow, and co-evolves codebase and agent team",
+      "version": "0.18.2"
     }
   ]
 }
