@@ -38,7 +38,7 @@ As the leader, over the verdicts:
 - Tech-lead `BLOCKED` (structure not improved, behavior changed, or a test weakened), a gate `BLOCKED`, or a test went red → **defined loop back to execute**. Bounded — ~2 loops → `NEEDS_HUMAN`.
   - **Ground-truth capture (①, `_signals.md` Section C — agent↔agent correction):** on a **real reversal** (`BLOCKED` / a red test contradicting claimed-green — not a mere `DONE_WITH_CONCERNS`), append one entry (own Bash call, best-effort). Anchor = the `BLOCKED` reason / red line. `--surprise` always:
     ```bash
-    python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage execute --role <tech-lead|performance|…> --summary "<what was reversed, 1 line>" --evidence "<finding / red line>" --surprise
+    python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage execute --role <tech-lead|performance|…> --area "<the refactored file/area>" --summary "<what was reversed, 1 line>" --evidence "<finding / red line>" --surprise
     ```
     A **weakened-verification** reversal (a refactor that quietly removed/weakened a test, caught here) is exactly the INV2 signal worth capturing. **Skip** when no loop-back (agreement ≠ correction).
 - Any `FAIL` → `FAIL: <reason>`.

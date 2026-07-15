@@ -47,9 +47,11 @@ Ephemeral signals are appended to the ground-truth log **at the moment they occu
 **Append mechanism** = `capture_signal.py`, run as ONE bash call (atomic-bash forbids `>>` — same bundled-command exception as the parser):
 ```bash
 python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction|verify-gap|revert \
-  --issue <n> --stage <stage> --role <role> --summary "<=1 line" --evidence "<=1 line" [--surprise]
+  --issue <n> --stage <stage> --role <role> [--area "<path/keyword>"] --summary "<=1 line" --evidence "<=1 line" [--surprise]
 ```
 It appends one line to `.claude/guild/memory/ground-truth.jsonl` (Section D), creating the dir if missing, and never crashes the caller (a logging failure warns and exits non-zero without blocking the spine).
+
+**`--area` (optional but recommended)** = the path-prefix or short area keyword the signal touches (e.g. `lib/theme`, `auth`, `db/schema`). It is the **retrieval key for runtime working-memory** (`_preflight.md` Item 8 — the ④ episodic tier is read back at pre-flight and matched by area, mirroring ⑥ knowledge retrieval). Each capture point should pass the area it already knows (the Issue's area / target dir / changed file). Absent → the entry still logs; runtime retrieval falls back to role+recency matching.
 
 **Wired (increment 2 — human/verify):** `analyze.md`/`design.md` discuss gates append a `correction` **only when the human overrides** the agent's recommendation (agreement is not a correction; anchor per Section B); `test.md` verify gate appends a `verify-gap` **only when the tester's claim disagreed with raw output or verify failed** (green-with-no-gap = nothing to learn). Section E of `_handoff.md` already **computes** the verify gap — this only *logs* it, the minimal extension the plan calls for ("verify 게이트의 원문-증거 패턴을 교정·revert 로깅으로 확장"). Unattended auto-assumptions are **not** captured (deferred — the last row above needs PR-review read-back).
 
@@ -61,8 +63,9 @@ It appends one line to `.claude/guild/memory/ground-truth.jsonl` (Section D), cr
 - **Commit vs gitignore is still open** (plan 부록 B ⓐ — team-share benefit vs leak/noise risk). ① keeps it gitignored (matches init default = lowest risk); revisit when the working-tier read is built.
 - **Entry schema** (one line each):
   ```json
-  {"ts":"<iso8601>","kind":"correction|verify-gap|revert|accepted-risk","issue":<n|null>,"stage":"<stage>","role":"<role|null>","summary":"<=1 line","evidence":"<=1 line, concrete","surprise":true|false}
+  {"ts":"<iso8601>","kind":"correction|verify-gap|revert|accepted-risk","issue":<n|null>,"stage":"<stage>","role":"<role|null>","area":"<path/keyword|null>","summary":"<=1 line","evidence":"<=1 line, concrete","surprise":true|false}
   ```
+  - `area` = the retrieval key for runtime working-memory (Item 1 / `_preflight.md` Item 8). Optional; null when the signal isn't tied to a path (e.g. a scope-interpretation correction).
   - `surprise:true` when the human overturned a choice the agent was confident in, **or** a claimed-pass was actually red (plan §8-A — this is the ranking lever the kill-gate validated: A1 "guard existed yet bug escaped", A3 "confident work reversed" ranked top).
   - `evidence` names the concrete artifact (commit / comment / runner line); never paste bulk.
 - **Read** on-demand by evolve/audit alongside the durable signals. It is the **only** persisted trace — everything else is re-derived. Treated as **advisory, low-weight** until evolve promotes an item with corroborating ground truth (plan §5 2-tier safety; a wrong entry perturbs at most the next single run, never the authority store).

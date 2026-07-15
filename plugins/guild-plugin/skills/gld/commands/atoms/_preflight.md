@@ -12,9 +12,11 @@ Each stage runs only the items matching its tier. Lower tiers are subsets of hig
 
 | Tier | Items | Applies to (default) |
 |---|---|---|
-| Light | 1 + 2 + 3 + 6 | analyze |
-| Medium | 1 + 2 + 3 + 4 + 6 | design, test |
-| Heavy | 1 + 2 + 3 + 4 + 5 + 6 | execute (implement) |
+| Light | 1 + 2 + 3 + 6 + 8 | analyze |
+| Medium | 1 + 2 + 3 + 4 + 6 + 8 | design, test |
+| Heavy | 1 + 2 + 3 + 4 + 5 + 6 + 8 | execute (implement) |
+
+(Item 7 = the ③ just-in-time overseer reminder — attended/optional, not tier-gated. Item 8 = the ④ episodic working-memory read — the runtime half of the growth loop.)
 
 All items are **best-effort**. No individual failure blocks the stage — log and proceed.
 
@@ -71,6 +73,15 @@ Semantic memory — discovered codebase facts (`_knowledge.md`). **Retrieve, do 
 ### Item 7: ③ Just-in-time overseer reminder (E — attended, optional — `_learning.md`)
 If the ledger's **overseer scorecard** (evolve Phase 2.5) records a **recurring blind spot** whose area matches what this stage touches, surface **that one lesson at this moment of relevance** — right before the human might repeat it. E.g. touching theming with a "WCAG 대비 위험 반복 수용" pattern on file → *"참고: 이 영역에서 대비 함정을 반복하셨습니다 — 모드 분기 확인."* **Rules (`_learning.md` Section B)**: ground-truth-anchored, one line, advisory/non-condescending, opt-in. **Skip** if no scorecard/blind-spot data (early — the common case), unattended, or no area match. Timing (just-in-time) is the point — do not dump the full periodic reflection here (that's evolve's 감독자 회고).
 
+### Item 8: ④ episodic working-memory read (always — relevant slice only — runtime learning)
+The **runtime half of the growth loop** (plan 부록 B "2-tier 메모리" · 항목 1). ⑥ (Item 6) is *consolidated* semantic memory that evolve has already distilled; this is the **un-consolidated working tier** — the recent ground-truth *events* captured since the last evolve run, so the agent learns **between** evolve runs instead of staying static. **Low-trust, advisory, bounded, area-matched** — read, do not act blindly.
+1. Read the recent tail of `.claude/guild/memory/ground-truth.jsonl` (the team-shared working tier — `_signals.md` Section D). **Bounded**: the last ~20 entries, or those newer than the last evolve run recorded in `evolution-log.md`, whichever is smaller. Absent/empty → this repo hasn't captured events yet; skip (normal early).
+2. **Match** each entry's `area` (and `role`/`stage`) against what this stage touches (same touched-area derivation as Item 6). No `area` on an entry → fall back to a role+recency match. Keep only matched entries (typically 0–3).
+3. Surface matched entries as **explicitly low-trust advisory** — *"지난 흔적 (미검증·조언): 이 영역에서 <kind> — <summary>. 확인해 보세요."* Never as fact, never enforced.
+4. **Weight below Item 6** (⑥ facts are evolve-verified; working-tier events are raw). A working-tier note **must not** override a `confirmed` standard or a verified ⑥ fact — on conflict, the consolidated source wins and the raw note is dropped.
+
+**Budget**: one bounded tail read (never whole-load a large log — tail only). **Safety** (plan §5 2-tier): the working tier is *always* low-weight; a wrong note perturbs at most **this one stage**, never the authority store (③/⑥) — promotion to authority happens **only** through evolve's HITL gate (the consolidation bridge, evolve Phase 7). **Failure**: read fails → log and proceed on Items 1–6.
+
 ---
 
 ## Section C — Self-review trace
@@ -86,6 +97,7 @@ After Step 0, record a short trace for the stage output's `<details>` block:
 - [x] git log -20 (prefix: `feat:`/`fix:`)
 - [ ] prior design output: N/A (analyze stage)
 - [x] ⑥ knowledge: index.md loaded; retrieved facts/ui.md (touches lib/screen/)
+- [x] ④ working memory: 2 recent traces in lib/theme (low-trust advisory)
 
 </details>
 ```

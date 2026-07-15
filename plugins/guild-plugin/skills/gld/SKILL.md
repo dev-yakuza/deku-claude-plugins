@@ -47,7 +47,7 @@ CLAUDE.md                      # advisory: repo map + verification commands + kn
 .claude/guild/
   config.json                  # Guild settings (managed by /gld config)
   knowledge/                   # ⑥ codebase facts: index.md (always loaded) + facts/ (retrieved relevant-only). init seeds a baseline; evolve grows it
-  memory/<agent>/              # raw episodic memory (gitignored) — used by evolve later
+  memory/                      # ④ episodic working tier (gitignored): ground-truth.jsonl (team-shared, low-trust, read at runtime by pre-flight Item 8) + consolidated.jsonl (archive of entries evolve has grown into ③/⑥)
   evolution-log.md             # evolution ledger — used by evolve later
 docs/standards/                # charter, architecture, conventions, quality-bar, verification (init drafts; status: draft|confirmed)
 docs/adr/ , docs/specs/

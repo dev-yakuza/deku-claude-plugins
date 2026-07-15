@@ -54,6 +54,10 @@ def main():
     ap.add_argument("--issue", default=None)
     ap.add_argument("--stage", default=None)
     ap.add_argument("--role", default=None)
+    ap.add_argument("--area", default=None,
+                    help="path-prefix or short area keyword the signal touches "
+                         "(e.g. 'lib/theme' or 'auth') — used for runtime working-memory "
+                         "retrieval at pre-flight (_preflight.md Item 8). Optional.")
     ap.add_argument("--evidence", default=None)
     ap.add_argument("--surprise", action="store_true")
     ap.add_argument("--log", default=None, help="override log path (default: <cwd>/" + LOG_REL + ")")
@@ -72,6 +76,7 @@ def main():
         "issue": issue,
         "stage": args.stage,
         "role": args.role,
+        "area": (args.area or "").strip()[:80] or None,
         "summary": args.summary.strip()[:200],
         "evidence": (args.evidence or "").strip()[:200] or None,
         "surprise": bool(args.surprise),

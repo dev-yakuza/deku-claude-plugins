@@ -39,7 +39,7 @@ If the request is unambiguous, record the single interpretation explicitly and p
 
 **Ground-truth capture (①, `_signals.md` Section C):** if the attended human's discuss choice **overrides** your recommended interpretation (they pick a different option, choose "Other", or correct your framing), append one entry *after the choice is known* (its own Bash call — a real human correction is the strongest signal):
 ```bash
-python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage analyze --role leader --summary "<recommended → what the human chose>" --evidence "<option/reason, 1 line>" --surprise
+python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage analyze --role leader --area "<the Issue's area — path-prefix or feature keyword>" --summary "<recommended → what the human chose>" --evidence "<option/reason, 1 line>" --surprise
 ```
 Do **not** capture when the human accepts your recommendation (agreement ≠ correction), nor for unattended auto-assumptions (deferred — Section C).
 

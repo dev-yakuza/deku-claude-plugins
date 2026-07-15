@@ -71,7 +71,7 @@ Read every RESULT line (tech-lead, tester, and any conditional participants):
 
 **Ground-truth capture (①, `_signals.md` Section C):** if a human **overrides the design approach** at this gate — rejects the tech-lead's approach for a different one, or the design is found **superseded / a duplicate** of prior work (e.g. #893 turned out to duplicate #891) — append one entry (its own Bash call), `--surprise` when it reverses a confident design choice:
 ```bash
-python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage design --role tech-lead --summary "<design approach → override/supersede>" --evidence "<1 line: chosen alt / duplicate ref>" --surprise
+python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage design --role tech-lead --area "<the changed area — path-prefix/module>" --summary "<design approach → override/supersede>" --evidence "<1 line: chosen alt / duplicate ref>" --surprise
 ```
 Do **not** capture routine acceptance of the design (agreement ≠ correction).
 
@@ -79,7 +79,7 @@ Do **not** capture routine acceptance of the design (agreement ≠ correction).
 
 **Ground-truth capture (①, agent↔agent — `_signals.md` Sections B & C):** if a design-stage **participation specialist** (designer/dba/security/performance/i18n/…) returns a `BLOCKED` whose **concrete objective finding reverses a decided or proposed approach** — e.g. the designer's WCAG measurement overturns a chosen color, dba finds a schema-integrity violation in the proposed model, security finds a threat in the approach — append one entry (its own Bash call, best-effort — never blocks). The objective finding (the measured ratio / integrity rule / vuln) **is** the anchor — one role overturning another's decided output, not self-review (Section B). `--surprise` always (a decided approach reversed — §8-A):
 ```bash
-python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage design --role <designer|dba|security|…> --summary "<what was reversed, 1 line>" --evidence "<the objective finding, e.g. #CCCCCC vs #9E9E9E = 1.67:1 < 4.5:1 WCAG>" --surprise
+python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage design --role <designer|dba|security|…> --area "<the area the finding concerns — e.g. lib/theme, db/schema>" --summary "<what was reversed, 1 line>" --evidence "<the objective finding, e.g. #CCCCCC vs #9E9E9E = 1.67:1 < 4.5:1 WCAG>" --surprise
 ```
 **Skip** a mere `DONE_WITH_CONCERNS` (a flagged concern is not a reversal), a `NEEDS_CONTEXT` (missing input, not a defect), and any subjective preference not anchored to an objective finding.
 
