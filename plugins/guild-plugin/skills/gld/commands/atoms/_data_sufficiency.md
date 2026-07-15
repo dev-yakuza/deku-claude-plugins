@@ -3,9 +3,9 @@
 **Not a stage.** The single source of truth for **"how much growth-signal has accumulated,"** consumed **three ways** so the growth commands work organically together:
 - **evolve → GATE** — blocks / downgrades to dry-run when signal is thin (evolve *mutates* the org/rules/knowledge → shallow data would inject wrong growth).
 - **audit → BANNER** — reports the state at the top of its report; **never blocks** (audit is read-only diagnosis — the very tool that tells you you're thin).
-- **review → NUDGE** — suggests `/gld evolve` **only when signal is 충분** (so review never nudges evolve to run when evolve would refuse it).
+- **review → NUDGE** — suggests `/gld evolve` **only when signal is 충분** (using the same deduped count as evolve, so the advisory nudge closely tracks when evolve would actually proceed).
 
-> **Why one atom.** The same accumulation truth drives the gate, the banner, and the nudge. Keeping it in one contract guarantees they stay consistent — review's "evolve 적기입니다" fires on exactly the condition under which evolve will actually proceed (plan 부록 D 항목0).
+> **Why one atom.** The same accumulation truth drives the gate, the banner, and the nudge, computed the same way, so they stay consistent. The review nudge is **advisory** — evolve's own Phase 1.5 gate is the authority that actually blocks/permits apply; the shared count just keeps the nudge from pointing at an evolve that would clearly refuse.
 
 > **Bash**: simple calls only (`_bash_rules.md`). All reads here are cheap and read-only.
 
@@ -29,12 +29,14 @@ Count = **distinct anchored themes**, deduped by evidence identity (`_signals.md
 | **충분** | ≥5 | enough to rank above noise |
 
 ### Axis 2 — 추세 깊이 (trend depth): *can we tell whether evolution helps (thrashing guard)?*
-Source: **prior completed evolve runs** in `.claude/guild/evolution-log.md` (count the run headers). A trend needs ≥2 points.
+Source: **prior completed evolve runs** in `.claude/guild/evolution-log.md` (count the run headers). A trend needs **≥2 data points = this run + ≥1 prior run** (evolve writes its own ledger entry only in Phase 7, *after* the Phase 1.5 gate, so at gate time the ledger holds only the prior runs).
 
-| Tier | Prior runs | Meaning |
+| Tier | Prior runs (in ledger at gate time) | Meaning |
 |---|---|---|
-| **추세없음** | <2 | no time-series — cannot judge improving/declining |
-| **추세있음** | ≥2 | trend is meaningful |
+| **추세없음** | 0 | first run — no earlier point to compare against |
+| **추세있음** | ≥1 | this run + ≥1 prior = a 2-point trend |
+
+*(So the trend-dependent outputs first unlock on the **2nd** run — its 1 prior run + itself = 2 points. This is the "unlock at run 2" the bootstrap narrative in Section C refers to.)*
 
 > **The two axes are orthogonal.** A first-ever run can have Axis 1 = 충분 (10 anchored signals) but Axis 2 = 추세없음 (0 prior runs). They gate *different* things (Section C) — do not collapse them into one "얕음."
 
@@ -42,7 +44,7 @@ Source: **prior completed evolve runs** in `.claude/guild/evolution-log.md` (cou
 
 - **evolve** — compute **Axis 1 after Phase 1 scans** (the accurate full count, incl. durable git/CI signals — a repo rich in reverts but empty of captured log is **not** 없음). Axis 2 from the ledger (Phase 0). This is the **authoritative** measure.
 - **audit** — cheap proxy: `ground-truth.jsonl` line count + the reverts/CI-gaps it already reads (dimensions E/F) + ledger runs. Label it a proxy.
-- **review** — cheapest: `ground-truth.jsonl` line count + ledger runs. A **lower-bound** proxy (may undercount durable) → nudge **conservatively** (under-counting only makes it nudge less, never falsely).
+- **review** — cheapest: `ground-truth.jsonl` **deduped** by area/evidence (collapse repeat lines of one theme — same rule as evolve's Axis 1, since it already reads the lines) + ledger runs. ⚠ A **raw** line count would *over*-count vs evolve's deduped Axis 1 (recurring same-area corrections = many lines, one theme), so the nudge could fire when evolve would still refuse — dedup avoids that. Even so the review nudge is **advisory, not a proceed-guarantee**: evolve's own Phase 1.5 gate is the authority (it re-counts, incl. durable signals, and blocks apply on thin data). review may still under-count durable git/CI signals — that only makes it nudge *less*, which is safe.
 
 **Budget**: one line-count read of the jsonl + one ledger read. **Never spawn new scans just to compute the banner** — reuse what the caller already has, or the cheap log+ledger proxy.
 
@@ -71,10 +73,10 @@ cat .claude/guild/memory/ground-truth.jsonl
 ## Section D — Banner format (config.language, top of output, ≤3 lines)
 ```
 📊 데이터 충분도: <없음|얕음|충분> · 추세: <없음|있음>
-   · 신호 <N> (교정<a>·verify-gap<b>·revert<c>·수용위험<d>) · run 이력 <M>회
+   · 신호 <N> (captured 교정<a>·verify-gap<b> + durable<e>) · run 이력 <M>회
    · 영향: <gated actions — e.g. "--apply 거부(dry-run) · HR·성적표·감독자회고 skip">
 ```
-Machine tokens (counts, flags) stay ASCII; prose in `config.language`.
+Machine tokens (counts, flags) stay ASCII; prose in `config.language`. **Breakdown = what actually feeds the count**: `교정`/`verify-gap` are the captured `ground-truth.jsonl` kinds; `durable<e>` is the git/CI signals folded into evolve's N (reverts, CI-failure patterns — Section B). `N = a + b + e`. **Not shown as auto-buckets**: `revert` (a durable signal, counted under `durable`, never a captured jsonl kind) and `수용위험`/accepted-risk (its home is the human-edited `gates/dismissed.md` registry — `_signals.md` Section D — not the auto-captured log). review's cheap proxy shows only `captured` (no `durable` term — it doesn't scan).
 
 ## Hard rules
 - **Count only ANCHORED signals** (`_signals.md` Section B) — exclude AI self-reviews (back-patting guard).

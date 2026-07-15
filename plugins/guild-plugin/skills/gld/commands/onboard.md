@@ -51,7 +51,7 @@ For the current stop:
 5. **예측 먼저 (D 예측-후-공개 · optional)**: for a stop with a non-obvious answer, **first ask the human to reason** — *"이 구조라면 X는 어디서 처리될까요?"* / *"여기서 뭐가 위험해 보이세요?"* — then reveal. The predict→compare gap is where the model sticks (§8-A applied to the human). Skip for purely descriptive stops.
 6. **Pause**: `질문 있으세요? 없으면 '다음'이라고 하시면 다음 스톱으로 갑니다.` → **STOP and wait.**
 
-**Adaptive depth (F 페이딩 · `_learning.md`)**: scale each stop to the human's competence trend (Step 0.5). Strong in this area → **fade** to a one-line pointer + the predict prompt (don't re-teach what they know); weak/new → full worked explanation. Absent scorecard → moderate. Opt-in, non-condescending — the human can always say "더 깊게" / "건너뛰어요".
+**Adaptive depth (F 페이딩 · `_learning.md`)**: scale each stop to the human's competence trend (the ③ competence signal gathered in **Step 0, item 5**). ⚠ **The overseer scorecard is a single authority-tier row not keyed by human identity (`_learning.md` Section D)** — so if *this* human is a **new** maintainer (onboard's whole purpose, Step 0), do **NOT** fade based on a *previous* overseer's trend; default to **full depth** regardless of scorecard. Only fade for a demonstrably **returning** overseer. Strong (returning, high-competence area) → **fade** to a one-line pointer + the predict prompt; weak/new → full worked explanation. Absent scorecard → moderate. Opt-in, non-condescending — the human can always say "더 깊게" / "건너뛰어요".
 
 Rules for the loop:
 - **One stop per turn.** Never dump the whole tour at once — that defeats the paced ramp-up.
