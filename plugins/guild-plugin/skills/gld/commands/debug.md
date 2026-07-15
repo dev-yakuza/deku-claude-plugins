@@ -12,11 +12,11 @@
 ## Step 0 — Preflight
 As the leader, follow `_preflight.md` **Heavy tier** (incl. ⑥ knowledge retrieval — a hotspot fact often names the culprit). Load the design output (`<!-- guild:design:output -->`) — for a bug the design is **light** (§4): a **reproduction + root-cause hypothesis** rather than a full skeleton. Load `docs/specs/$1/` (repro steps, hypothesis, test cases) if present. Missing analyze/design output → `NEEDS_CONTEXT: analyze/design not found for #$1`.
 
-Validate `$1` is an Issue. Ensure entry label `guild:execute` if invoked directly. Create/switch to a fix branch (repo convention, e.g. `fix/#$1-<slug>`). **Resume-safe**: existing branch → continue from partial work.
+Validate `$1` is an Issue. Ensure entry label `guild:execute` if invoked directly. Create/switch to a fix branch (repo convention, e.g. `fix/#$1-<slug>`). **Resume-safe (항목 4)**: existing branch → build a partial-work summary (`git log <base>..HEAD --oneline` + one test run: does the repro exist yet? is it red or already green?) and pass it into the developer prompt (Step 1) → continue, don't restart. Fresh branch → no summary.
 
 ## Step 1 — Spawn developer (reproduce → root-cause → fix)
 Spawn the developer sub-agent (`subagent_type: general-purpose`, `model: sonnet`, `description: developer debug #$1`):
-> Adopt the persona in `.claude/agents/developer.md`. Fix bug #$1 on the current branch. Work in this order:
+> Adopt the persona in `.claude/agents/developer.md`. Fix bug #$1 on the current branch. **Resume (항목 4)**: if Step 0 supplied a partial-work summary here — `<summary, or "none — fresh branch">` — a prior run was interrupted; CONTINUE from it (keep a correct repro/fix already committed; complete the rest), do not redo correct work. Work in this order:
 > 1. **Reproduce** — write a **failing test that captures the bug** (red; it must fail *for the reason the bug describes*, proving the bug exists). Capture the raw red output as evidence.
 > 2. **Root cause** — find the *actual* cause, not a symptom. State it in one line. (Use ⑥ knowledge / hotspot facts + the repro.)
 > 3. **Fix** — the smallest change that makes the regression test go green **and keeps all existing tests green** (no new regressions). Do NOT patch the symptom while leaving the cause.
