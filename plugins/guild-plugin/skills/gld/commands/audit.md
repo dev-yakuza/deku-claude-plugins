@@ -16,6 +16,8 @@ audit ──┬─ developer (team · harness) weak → evolve 권장 (nudge, no
 ## Phase 0 — Preflight
 As the leader (`_preflight.md` Item 1 — read `config.json` incl. `language`), confirm Guild is initialized (`ls .claude/guild/config.json`; absent → "run `/gld init` first", stop). Resolve `<owner>/<repo>` once (`_handoff.md` Section F). Load `docs/standards/` for the authority baseline. **This whole command is read-only** — no Edit/Write (except the report artifact), no issue creation without confirmation, no git mutations.
 
+**Data-sufficiency banner** (`<<SKILL_DIR>>/commands/atoms/_data_sufficiency.md`): compute the **cheap proxy** (Section B — `ground-truth.jsonl` line count + ledger run count; folds in the reverts/CI-gaps read in dimensions E/F) and print the banner (Section D) at the **top of the report**. ⚠ **audit never blocks on it** — a low tier is surfaced as a finding (*"evolve는 아직 이릅니다 — 신호 N개·run M회"*) but the full diagnosis continues; audit is precisely how the human learns they are thin and what to do next.
+
 ## Phase 1 — Diagnose (read-only; reuse atoms, fan out where independent)
 Assess each dimension. Emit findings with **severity** (`BLOCKER|MAJOR|MINOR`, same rubric as `audit_readiness.md`) and a per-dimension **grade** (`S`/`A`/`B`/`C`/`D`/`F`). Dimensions A–E = the **developer** (team+harness); F = the **product** (codebase).
 
@@ -27,7 +29,7 @@ Assess each dimension. Emit findings with **severity** (`BLOCKER|MAJOR|MINOR`, s
 
 **D. Standards (② docs/standards)** — count `status: draft` vs `confirmed` in `docs/standards/*`. Many unconfirmed → MINOR ("게이트가 warn에 머묾 — 확정하면 block 승격"). Missing a core standard (charter/architecture/conventions/quality-bar/verification) → MAJOR.
 
-**E. 진화 위생 (⑤ evolution hygiene)** — is `.claude/guild/evolution-log.md` present and used (any runs recorded)? **Friction trend**: if the ledger has per-run friction snapshots, judge improving / flat / worsening (plan §8 — "공진화가 돕나" meta-signal). Empty ledger is normal early (MINOR note); a **worsening** trend → surface prominently (→ the evolve→audit reverse nudge fired for a reason).
+**E. 진화 위생 (⑤ evolution hygiene)** — is `.claude/guild/evolution-log.md` present and used (any runs recorded)? The run count here is the Phase 0 banner's **Axis 2** (trend depth — `_data_sufficiency.md`). **Friction trend**: if the ledger has per-run friction snapshots, judge improving / flat / worsening (plan §8 — "공진화가 돕나" meta-signal). Empty ledger is normal early (MINOR note — the banner already flags 추세없음); a **worsening** trend → surface prominently (→ the evolve→audit reverse nudge fired for a reason).
 
 **F. 코드베이스 품질 (codebase)** — the product side. Reuse `<<SKILL_DIR>>/commands/atoms/scan_git.md` signals (hotspots · co-change · churn) as the spine, plus a **bounded** structural read:
 - **hotspots** — top `fix:`-frequency files (fragility). High + rising → MAJOR refactor candidate.

@@ -83,6 +83,8 @@ Rules for the loop:
 - Decision prompt: **approve the PR** (M1 external reviewer gate), or request changes → re-loop via `/gld dev $1` or fix directly in the PR.
 - If `$2 == --comment`: post the recap to the PR (temp-file pattern, `<!-- guild:review:output -->` marker) as an async record. Default = session-only.
 
+**Outer-loop nudge (organic — `_data_sufficiency.md`)**: after the decision, compute the **cheap proxy** (Section B — `ground-truth.jsonl` line count + ledger run count; one read each, read-only). **Only if Axis 1 = 충분** (≥5 anchored signals), nudge once: *"이번 PR까지 신호가 충분히 쌓였습니다 (교정 N·run M) — `/gld evolve`로 조직을 성장시킬 적기입니다."* At **없음/얕음 → stay silent** (no evolve nudge — nagging "아직 부족" every review is noise; `/gld audit`'s banner covers the accumulation question). This fires on exactly the condition under which evolve will actually proceed, so review never points at an evolve that would refuse to run.
+
 ## Notes
 - **Works on any open PR — agent-authored or human-authored.** Pass the PR number. For human PRs the "왜" is inferred (PR description/commits/diff) or asked; the AC table is skipped. The paced walkthrough + scrutiny is identical.
 - **Author-explains-to-reviewer, interactively** — the value is the paced WHY per unit + your ability to interject, not a static findings dump.
