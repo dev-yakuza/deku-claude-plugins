@@ -21,7 +21,7 @@ As the leader (`_preflight.md` Item 1 — read `config.json` incl. `language`), 
 ## Phase 1 — Diagnose (read-only; reuse atoms, fan out where independent)
 Assess each dimension. Emit findings with **severity** (`BLOCKER|MAJOR|MINOR`, same rubric as `audit_readiness.md`) and a per-dimension **grade** (`S`/`A`/`B`/`C`/`D`/`F`). Dimensions A–E = the **developer** (team+harness); F = the **product** (codebase).
 
-**A. 하네스 준비도 (harness)** — run the shared diagnostic: read `<<SKILL_DIR>>/commands/atoms/audit_readiness.md` and execute it (verify signal · static gates · CI · GitHub workflow · hygiene). Fold its findings JSON in as dimension A.
+**A. 하네스 준비도 (harness)** — run the shared diagnostic: read `<<SKILL_DIR>>/commands/atoms/audit_readiness.md` and execute it (verify signal · static gates · CI · GitHub workflow · hygiene). Fold its findings JSON in as dimension A. **Rule health (항목 3)**: if `.claude/guild/memory/gate-firings.jsonl` exists, skim it + `gates/dismissed.md` for a **noisy rule** (fires often, mostly dismissed) or a **stale rule** (never fires, guarded area unchanged) → MINOR, routed to `/gld evolve` for rule HR (demote/retire). Never flag the secret/verification gates this way (INV2-exempt).
 
 **B. 팀 (③ agents)** — read `.claude/agents/*.md`. Are the spine roles present and **specialized to this repo** (the `[PROJECT SPECIALIZATION]` / 프로젝트 특화 section filled with real stack/convention/hotspot facts, not placeholders)? A role still at day-1 boilerplate → MINOR (evolve should grow it). Missing a spine role → MAJOR. *(Per-agent scorecard trend is v2/360 — not scored here.)*
 
