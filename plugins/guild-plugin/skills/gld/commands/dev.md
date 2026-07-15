@@ -131,7 +131,7 @@ All children are `guild:done`; verify they combine into a correct whole before c
 
 ## Phase 3 — Report
 
-On `OK DONE`: summarize what was built (stages run, PR link if any, test evidence). **Nudge the human review** — the PR now awaits the human reviewer (M1 external reviewer, INV1); suggest the guided pair review to make it lighter: "PR #<n> 리뷰 준비됨 — `/gld review $1`로 리스크 가중 가이드 리뷰를 받을 수 있습니다." On pause/fail: state the stage reached and the resume command. Never claim completion without the test stage's verify evidence (plan §18 B / `_handoff.md` Section E).
+On `OK DONE`: summarize what was built (stages run, PR link if any, test evidence). **Nudge the human review** — the PR now awaits the human reviewer (M1 external reviewer, INV1); suggest the guided pair review to make it lighter: "이슈 #$1 완료 (PR #<n> 오픈) — `/gld review $1`로 리스크 가중 가이드 리뷰를 받을 수 있습니다 (이슈 번호를 넣으면 연결된 PR을 자동으로 찾습니다; PR 번호를 직접 넣어도 됩니다)." On pause/fail: state the stage reached and the resume command. Never claim completion without the test stage's verify evidence (plan §18 B / `_handoff.md` Section E).
 
 **Split parent (Phase 2c closed the parent):** summarize the children (each `#<n>` + its PR) and the integration check, then nudge review on the child PRs. **Stopped mid-orchestration** (a child paused): report which child paused (of how many), what it needs, and that `/gld resume $1` continues from it — the remaining children have not run yet.
 
