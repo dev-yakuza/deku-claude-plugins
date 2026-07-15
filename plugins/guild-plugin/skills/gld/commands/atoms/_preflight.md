@@ -68,6 +68,9 @@ Semantic memory — discovered codebase facts (`_knowledge.md`). **Retrieve, do 
 
 **Budget**: index + ≤3 slice Reads. **Never** Read all of `facts/` (invariant 1 — no whole-load). **Failure**: any read fails → log and proceed on the durable context (Items 1–5).
 
+### Item 7: ③ Just-in-time overseer reminder (E — attended, optional — `_learning.md`)
+If the ledger's **overseer scorecard** (evolve Phase 2.5) records a **recurring blind spot** whose area matches what this stage touches, surface **that one lesson at this moment of relevance** — right before the human might repeat it. E.g. touching theming with a "WCAG 대비 위험 반복 수용" pattern on file → *"참고: 이 영역에서 대비 함정을 반복하셨습니다 — 모드 분기 확인."* **Rules (`_learning.md` Section B)**: ground-truth-anchored, one line, advisory/non-condescending, opt-in. **Skip** if no scorecard/blind-spot data (early — the common case), unattended, or no area match. Timing (just-in-time) is the point — do not dump the full periodic reflection here (that's evolve's 감독자 회고).
+
 ---
 
 ## Section C — Self-review trace

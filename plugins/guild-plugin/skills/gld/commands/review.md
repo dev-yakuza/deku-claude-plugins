@@ -67,9 +67,11 @@ For the current unit:
 1. **Header**: `[단위 i/N] <제목>`.
 2. **어디**: the hunk(s), each as a clickable `file:line` ref (e.g. `lib/widgets/check_box.dart:27`). Show the key changed lines briefly (not the whole file).
 3. **무엇을**: what changed, concretely.
-4. **왜**: the rationale — from analyze/design/PR (root cause → why this fix). This is the heart of the pair-walkthrough.
-5. **확인할 점**: surface the **Step 2.5 adversarial findings that map to this unit** (by file:line) — lead with the highest severity, tagged by axis (`[standards]`/`[spec]`) — plus any leader scrutiny note (null-safety/force-unwrap, blast radius, hotspot proximity, convention/AC gaps). If the pre-scan found nothing for this unit and there's no genuine concern, say so briefly and move on. One or two lines per point, not a lecture.
+4. **왜 (③ 크래프트 전수 — A · `_learning.md`)**: the rationale — root cause → why this fix — AND **name the underlying principle** so the human learns transferably (not just "we branched the token" but "테마 토큰은 모드별 분기 필수 — WCAG 대비 원칙"). Ground-truth-anchored (a verified outcome / ⑥ fact / confirmed standard), never AI opinion.
+5. **확인할 점 (D 예측-후-공개 옵션)**: for a risky unit, first **invite the human to predict** — *"이 유닛에서 뭐가 위험해 보이세요?"* — then reveal the **Step 2.5 adversarial findings that map to this unit** (by file:line, highest severity first, axis-tagged `[standards]`/`[spec]`) + any leader scrutiny note. The predict→compare gap is where learning happens (§8-A). Nothing found + no concern → say so and move on.
 6. **Pause**: `질문이나 이견 있으세요? 없으면 '다음'이라고 하시면 ②로 갑니다.` → **STOP and wait.**
+
+**③ Overseer learning depth (F 적응형 페이딩 — `_learning.md`)**: scale the WHY (item 4) + predict-prompt (item 5) to the human's competence trend (evolve 360 overseer scorecard). Low competence in this area → full worked explanation + predict prompt. Rising competence → **fade** to a one-line pointer (don't lecture a skilled reviewer). Absent scorecard data (early) → default to moderate. Opt-in, non-condescending, advisory (the human is the approver — INV1).
 
 Rules for the loop:
 - **One unit per turn.** Never dump all units at once — that defeats the paced pair-review.

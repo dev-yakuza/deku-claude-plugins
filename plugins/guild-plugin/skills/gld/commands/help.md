@@ -4,7 +4,7 @@ Print the following usage overview to the user (adapt formatting to the terminal
 
 ```
 Guild (/gld) — a self-evolving agent organization for your repo.
-Codebase and agent team co-evolve. This version (0.18.2): all §3 commands — M1–M4 + evolve HITL apply + contribute/update (central↔repo) + sprint (readiness-gated) + ⑥ knowledge · agent↔agent capture · audit · commit gate · adversarial review · multi-PR child orchestration.
+Codebase, agent team, AND you (the overseer) co-evolve. This version (0.19.0): all §3 commands — M1–M4 + evolve HITL apply + contribute/update (central↔repo) + sprint (readiness-gated) + ⑥ knowledge · agent↔agent capture · audit · commit gate · adversarial review · multi-PR child orchestration · ③ human-growth engine (onboard + WHY-teaching embedded in review/evolve/dev).
 
 Setup
   /gld init [lang]        Analyze & onboard → harness + Guild (agents) + standards + readiness audit (gaps → guild:harness issues) (one-time)
@@ -34,6 +34,7 @@ Diagnose & grow (Outer Loop)
 On-demand & observe
   /gld rollback <target>  Safely undo a Guild change (git revert / close PR / reset stage) — non-destructive, confirms first
   /gld ask <question>     Cited Q&A over standards + ⑥ knowledge (no guessing)
+  /gld onboard [area]     Guided, paced tour of the codebase for a human — teaches the WHY/principles from standards + ⑥ knowledge + hotspots, one stop per turn (ramps a new maintainer)
   /gld monitoring         Terminal snapshot: org · ⑥/④ status · evolution history · gates · active work
 
   /gld help               This help

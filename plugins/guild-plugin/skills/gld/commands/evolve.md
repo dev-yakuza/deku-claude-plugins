@@ -102,6 +102,8 @@ Score each **active role's** recent performance — the basis for HR proposals (
 
 Carry the scorecard into Phase 3 (HR) and record it in Phase 7. On a repo with no history yet, note "성적표 데이터 부족 (초기)" and skip HR proposals — HR needs a trend, not one run.
 
+**Overseer row (③ human-growth engine — `_learning.md` Section D)**: also score the **human overseer** as a distinguished, authority-tier member (NOT HR-able) — their **decision patterns** (recurring discuss-overrides by theme, accepted-risks = measured defects knowingly kept, PR-rejection reasons), **blind spots** (a decision later contradicted by an *objective* outcome — a kept risk that became a real defect; anchor to the outcome, not "an agent disagreed"), and **per-area competence trend**. Ground-truth-anchored (higher bar — `_learning.md` Section B); advisory until corroborated.
+
 ## Phase 3 — Propose (proposal list · distillation ladder)
 
 Present a **ranked proposal list** to the human. For each Tier A/B theme, propose the **smallest sufficient change** via the distillation ladder (plan §8 P3 · §5 "성장=밀도, not 단조증가"):
@@ -123,6 +125,8 @@ Each proposal states, in ≤ ~500 chars (plan §6 context budget):
 - **Otherwise (apply mode / default-then-ask)** → carry the Tier A/B proposals into **Phase 4**.
 
 **Nudge (read-only)**: if the friction *trend* is worsening or a signal reads like a diagnostic gap rather than a single fix, **note that a `/gld audit` pass would help** (plan §9 evolve↔audit mutual nudge).
+
+**감독자 회고 (③ overseer growth — B, `_learning.md`)**: after the proposal list, present a short **overseer reflection** from the Phase 2.5 overseer row — the human's recurring decision patterns / blind spots + **the principle behind each** (A). E.g. *"WCAG 대비 위험을 3회 수용하셨습니다(#891/#893/#894) — 근본 원리: 모드 의존 토큰은 isLightMode 분기 필수."* **Hard rules (`_learning.md` Section B)**: every reflection **ground-truth-anchored** (a verified outcome / ⑥ fact / confirmed standard — never AI opinion; unanchored → "인사이트 후보(미검증)"); **advisory · opt-in · non-condescending** ("이런 인사이트가 있습니다", not "틀렸습니다"); read-only toward the human (INV1 authority intact). Skip on no-trend (첫 run). Fade with competence (F).
 
 ---
 
