@@ -11,7 +11,7 @@ Route to the appropriate command based on `$0`. Read `<<SKILL_DIR>>/commands/$0.
 
 ## Command Routing
 
-- Valid commands: `init`, `dev`, `analyze`, `design`, `implement`, `debug`, `refactor`, `test`, `qa`, `review`, `audit`, `batch`, `evolve`, `sprint`, `rollback`, `ask`, `monitoring`, `update`, `contribute`, `config`, `resume`, `status`, `help`
+- Valid commands: `init`, `dev`, `analyze`, `design`, `implement`, `debug`, `refactor`, `test`, `qa`, `review`, `audit`, `batch`, `evolve`, `sprint`, `rollback`, `ask`, `onboard`, `monitoring`, `update`, `contribute`, `config`, `resume`, `status`, `help`
 - If `$0` is empty → route to `help`.
 - If `$0` is not in the list → report unknown command, then route to `help`.
 - All §3 commands are implemented. (`sprint` is built but **readiness-gated** — it refuses to run autonomously until measured prerequisites pass; see `sprint.md`.)

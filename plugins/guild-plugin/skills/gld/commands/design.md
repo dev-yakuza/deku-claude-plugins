@@ -75,6 +75,8 @@ python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue
 ```
 Do **not** capture routine acceptance of the design (agreement ≠ correction).
 
+**③ Overseer learning (D 예측-후-공개 + 자기설명 — `_learning.md`)**: for a material design fork (attended), before revealing the tech-lead's approach or a specialist's finding, **first invite the human's prediction** — *"이 설계에서 뭐가 걸릴까요?" / "어떤 접근이 맞을까요?"* — then reveal, and **name the principle** behind it (A — e.g. "테마 토큰 모드 분기", "동작보존 리팩터"). On an override, optionally capture the human's one-line *"왜?"* (self-explanation). Opt-in, non-condescending; fade with competence (F).
+
 **Ground-truth capture (①, agent↔agent — `_signals.md` Sections B & C):** if a design-stage **participation specialist** (designer/dba/security/performance/i18n/…) returns a `BLOCKED` whose **concrete objective finding reverses a decided or proposed approach** — e.g. the designer's WCAG measurement overturns a chosen color, dba finds a schema-integrity violation in the proposed model, security finds a threat in the approach — append one entry (its own Bash call, best-effort — never blocks). The objective finding (the measured ratio / integrity rule / vuln) **is** the anchor — one role overturning another's decided output, not self-review (Section B). `--surprise` always (a decided approach reversed — §8-A):
 ```bash
 python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage design --role <designer|dba|security|…> --summary "<what was reversed, 1 line>" --evidence "<the objective finding, e.g. #CCCCCC vs #9E9E9E = 1.67:1 < 4.5:1 WCAG>" --surprise

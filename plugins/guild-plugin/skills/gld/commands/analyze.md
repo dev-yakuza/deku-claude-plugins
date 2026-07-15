@@ -43,6 +43,8 @@ python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue
 ```
 Do **not** capture when the human accepts your recommendation (agreement ≠ correction), nor for unattended auto-assumptions (deferred — Section C).
 
+**③ Overseer learning (D 예측-후-공개 + 자기설명 — `_learning.md`)**: for a **material** discuss decision (attended), before presenting your recommended interpretation, **first invite the human's take** — *"이 부분 어떻게 접근하시겠어요?"* — then reveal your analysis/recommendation. The predict→compare gap teaches (§8-A). And when they choose (esp. an override), optionally invite a one-line *"왜 그 선택을?"* — articulating solidifies their learning **and** enriches the captured signal. Optional, non-condescending, opt-in; skip on trivial/unambiguous decisions. Fade with the human's competence trend (F, 360 overseer scorecard).
+
 ## Step 2 — Requirement analysis
 - Enumerate the requested features/changes (What + Why, not How).
 - Derive **acceptance criteria (AC)** — verifiable, checkable statements. These are the contract the tester will design against (design stage) without seeing the implementation.
