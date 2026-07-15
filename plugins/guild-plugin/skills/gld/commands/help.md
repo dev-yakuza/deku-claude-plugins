@@ -4,7 +4,7 @@ Print the following usage overview to the user (adapt formatting to the terminal
 
 ```
 Guild (/gld) — a self-evolving agent organization for your repo.
-Codebase, agent team, AND you (the overseer) co-evolve. This version (0.20.0): all §3 commands — M1–M4 + evolve HITL apply + contribute/update (central↔repo) + sprint (readiness-gated) + ⑥ knowledge · agent↔agent capture · audit · commit gate · adversarial review · multi-PR child orchestration · ③ human-growth engine (onboard + WHY-teaching embedded in review/evolve/dev) · data-sufficiency gate (evolve blocks on thin data · audit banner · review→evolve nudge) · ④ runtime working memory (pre-flight reads recent traces; evolve consolidates).
+Codebase, agent team, AND you (the overseer) co-evolve. This version (0.20.0): all §3 commands — M1–M4 + evolve HITL apply + contribute/update (central↔repo) + sprint (readiness-gated) + ⑥ knowledge · agent↔agent capture · audit · commit gate · adversarial review · multi-PR child orchestration · ③ human-growth engine (onboard + WHY-teaching embedded in review/evolve/dev) · data-sufficiency gate (evolve blocks on thin data · audit banner · review→evolve nudge) · ④ runtime working memory (pre-flight reads recent traces; evolve consolidates) · ② standards lifecycle (execute syncs architecture.md drift · evolve confirms held-up drafts).
 
 Setup
   /gld init [lang]        Analyze & onboard → harness + Guild (agents) + standards + readiness audit (gaps → guild:harness issues) (one-time)
