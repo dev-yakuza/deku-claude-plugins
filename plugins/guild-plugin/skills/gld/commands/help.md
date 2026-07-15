@@ -4,7 +4,7 @@ Print the following usage overview to the user (adapt formatting to the terminal
 
 ```
 Guild (/gld) — a self-evolving agent organization for your repo.
-Codebase, agent team, AND you (the overseer) co-evolve. This version (0.28.0): all §3 commands — M1–M4 + evolve HITL apply + contribute/update (central↔repo) + sprint (readiness-gated) + ⑥ knowledge · agent↔agent capture · audit · commit gate · adversarial review · multi-PR child orchestration · ③ human-growth engine (onboard + WHY-teaching embedded in review/evolve/dev) · data-sufficiency gate (evolve blocks on thin data · audit banner · review→evolve nudge) · ④ runtime working memory (pre-flight reads recent traces; evolve consolidates) · ② standards lifecycle (execute syncs architecture.md drift · evolve confirms held-up drafts) · rule lifecycle (gate firing-log → evolve rule scorecard + demote/retire, INV2-exempt core gates · quality-tool rule generation) · mid-execute resume (partial-work summary carried into the worker so an interrupted run continues, not restarts) · biological consolidation sharpened (CLS forgetting-guard in densify · explicit N-cycle habit→gate threshold).
+Codebase, agent team, AND you (the overseer) co-evolve. This version (0.29.0): all §3 commands + `plan` intake (design-doc/epic → dev-unit backlog) — M1–M4 + evolve HITL apply + contribute/update (central↔repo) + sprint (readiness-gated) + ⑥ knowledge · agent↔agent capture · audit · commit gate · adversarial review · multi-PR child orchestration · ③ human-growth engine (onboard + WHY-teaching embedded in review/evolve/dev) · data-sufficiency gate (evolve blocks on thin data · audit banner · review→evolve nudge) · ④ runtime working memory (pre-flight reads recent traces; evolve consolidates) · ② standards lifecycle (execute syncs architecture.md drift · evolve confirms held-up drafts) · rule lifecycle (gate firing-log → evolve rule scorecard + demote/retire, INV2-exempt core gates · quality-tool rule generation) · mid-execute resume (partial-work summary carried into the worker so an interrupted run continues, not restarts) · biological consolidation sharpened (CLS forgetting-guard in densify · explicit N-cycle habit→gate threshold).
 
 Setup
   /gld init [lang]        Analyze & onboard → harness + Guild (agents) + standards + readiness audit (gaps → guild:harness issues) (one-time)
@@ -12,6 +12,7 @@ Setup
   /gld update [--check]   Adopt newer central Guild improvements, preserving local evolution
 
 Develop (spine: analyze → design → execute → test → qa)
+  /gld plan <doc|issue>   Intake (upstream of the spine): decompose a design-doc FILE or an epic ISSUE into a dependency-ordered dev-unit backlog. Default dry-run; --create to make the issues (file → flat + area labels; issue → children under it for /gld dev orchestration)
   /gld dev <issue>        Run the full flow on a GitHub Issue (auto-selects execute variant; leader convenes specialists by risk)
   /gld analyze <issue>    Stage 1: requirements (What/Why)
   /gld design <issue>     Stage 2: design (How) — tech-lead skeleton, tester drafts test cases
