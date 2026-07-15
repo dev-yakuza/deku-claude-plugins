@@ -34,6 +34,41 @@ see _handoff/gates wiring). Allow: exit 0, no output.
 """
 import fnmatch, json, os, re, subprocess, sys
 
+# --- rule-firing log (항목 3a) — episodic tier, gitignored, best-effort append ---
+# Feeds the evolve rule scorecard (3b) + rule HR demote/retire (3c). Each firing is one line.
+FIRINGS_REL = os.path.join(".claude", "guild", "memory", "gate-firings.jsonl")
+_FIRINGS = []  # collected during the run, flushed once in main()
+
+
+def record_firing(rule, action, path):
+    """Queue one rule-firing for the log. rule = 'secret' | 'verification' |
+    'boundary:<glob> imports <forb>'; action = 'block' | 'warn'."""
+    _FIRINGS.append({"rule": rule, "action": action, "file": path or "?"})
+
+
+def now_iso():
+    try:
+        import datetime
+        return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return ""
+
+
+def flush_firings(root):
+    """Append the queued firings to the gitignored episodic log. Best-effort — a
+    logging failure never affects the gate verdict (fail-open spirit)."""
+    if not _FIRINGS:
+        return
+    try:
+        p = os.path.join(root, FIRINGS_REL)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        ts = now_iso()
+        with open(p, "a", encoding="utf-8") as fh:
+            for f in _FIRINGS:
+                fh.write(json.dumps({"ts": ts, **f}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
 # --- sensitive file patterns (BLOCK) — the "진짜 위험" set (audit 뉘앙스: 공개 식별자 제외) ---
 SECRET_PATH_RE = re.compile(
     r"(^|/)("
@@ -118,6 +153,7 @@ def check_secrets(root, dismiss):
             continue
         if SECRET_PATH_RE.search(n):
             findings.append(f"민감 파일 staged: {n}")
+            record_firing("secret", "block", n)
     # inline: scan the staged diff added lines only
     diff = sh(["git", "-C", root, "diff", "--cached", "--unified=0"])
     line_no = 0
@@ -129,6 +165,7 @@ def check_secrets(root, dismiss):
             for rx in INLINE_SECRET_RES:
                 if rx.search(ln):
                     findings.append(f"인라인 시크릿 추정: {cur_file} (값 미표시)")
+                    record_firing("secret", "block", cur_file)
                     break
     return findings
 
@@ -139,6 +176,7 @@ def check_verification(root, dismiss):
     for n in staged_deleted_names(root):
         if TEST_PATH_RE.search(n) and not any(d and d in n for d in dismiss):
             findings.append(f"테스트 파일 삭제: {n} (INV2 — 검증 약화)")
+            record_firing("verification", "block", n)
     # (B2/B3) net assertion removal / skip additions in staged test diffs
     diff = sh(["git", "-C", root, "diff", "--cached", "--unified=0"])
     cur = "?"
@@ -159,8 +197,10 @@ def check_verification(root, dismiss):
                 rm_assert += 1
     if add_skip:
         findings.append(f"테스트 skip 추가 {add_skip}건 (INV2 — 검증 약화 의심)")
+        record_firing("verification", "block", "test-skip")
     if rm_assert - add_assert >= 3:
         findings.append(f"테스트 assertion 순감소 (~{rm_assert - add_assert}줄, INV2 — 검증 약화 의심)")
+        record_firing("verification", "block", "assertion-drop")
     return findings
 
 
@@ -197,6 +237,7 @@ def check_boundaries(root, dismiss):
                 if any(forb in l for l in lines):
                     msg = f"경계 위반: {f} → 금지 참조 '{forb}' (rule: {glob} imports {forb})"
                     (block if confirmed else warn).append(msg)
+                    record_firing(f"boundary:{glob} imports {forb}", "block" if confirmed else "warn", f)
     return block, warn
 
 
@@ -241,6 +282,7 @@ def main():
     block = check_secrets(root, dismiss) + check_verification(root, dismiss)
     b_block, b_warn = check_boundaries(root, dismiss)
     block += b_block
+    flush_firings(root)  # log all firings (block + warn) before any deny-exit (항목 3a)
     if block:
         write_findings(root, block)
         deny(block)  # exits 2
