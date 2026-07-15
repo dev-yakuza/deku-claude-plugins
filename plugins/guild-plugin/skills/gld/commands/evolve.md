@@ -128,7 +128,12 @@ Present a **ranked proposal list** to the human. For each Tier A/B theme, propos
 > **patch** (tweak an existing line/section) **> umbrella-extend** (widen an existing rule/habit to cover the case) **> reference-add** (add a fact/pointer) **> new** (create a new rule/role — last resort).
 
 Each proposal states, in ≤ ~500 chars (plan §6 context budget):
-- **Target file** the human should edit — a role habit → `.claude/agents/<role>.md` (③); a decided rule → `docs/standards/…` (②); a **discovered code fact** → `.claude/guild/knowledge/facts/<area>.md` (⑥); an **HR change** → `config.json` `roles` + add/remove/rename a `.claude/agents/<role>.md` (hire/retire/replace — a canonical descriptive name; `leader` is never touched). Pick the store by kind (`_knowledge.md` Section A).
+- **Target file** the human should edit — a role habit → `.claude/agents/<role>.md` (③); a decided rule → `docs/standards/…` (②); a **discovered code fact** → `.claude/guild/knowledge/facts/<area>.md` (⑥); an **HR change** → `config.json` `roles` + the agent file. **HR mechanics (§16 C3):**
+  - **hire** = add a `.claude/agents/<role>.md` (canonical descriptive name) + add to `roles`.
+  - **retire** = **reversible archive, NOT delete** — move `.claude/agents/<role>.md` → `.claude/guild/archive/agents/<role>.md` (committed, so it is auditable and **restorable**) and drop the name from `config.json roles`.
+  - **replace** = archive the old role + hire the new.
+  - ⚠ **Knowledge survives retirement**: ⑥ facts are **org-shared** (`.claude/guild/knowledge/`) and are **never removed** when a role retires — a retiring role takes only its own ③ habit (its agent file, now archived) and ④ episodes; the discovered code knowledge stays for the remaining org (this is why retirement is safe — no knowledge loss). **Restore** = move the file back from `archive/agents/` + re-add to `roles`.
+  - `leader` is **never** hired/retired/replaced. Pick the store by kind (`_knowledge.md` Section A).
 - **Ladder rung** + the concrete proposed edit (a habit line, a fact, a convention, a gate-rule candidate).
 - **⑥-fact proposals** (`_knowledge.md`): specify **both** the `facts/<area>.md` fact (statement · evidence · relation · provenance `evolve #<n>`) **and** its `index.md` pointer (key = path/area) — a fact with no index entry is unreachable at retrieval. Prefer patching an existing slice over a new one (ladder).
 - **Evidence** — the concrete artifact(s) (SHA / PR# / issue# / ground-truth entry / session count). No bulk paste.
@@ -197,6 +202,7 @@ Report: applied N, rolled-back M (with reasons), rejected K, ledger updated, the
 - **INV1 — application is always per-item human-approved** (Phase 5). Dry-run never writes; apply never proceeds without an accept; unattended never auto-applies harness changes.
 - **INV2 — never weakens verification.** A test/gate/verify-weakening change is inadmissible at Phase 4 (degradation-lens absolute veto) and hard-blocked + rolled back at Phase 6. No override.
 - **INV3 — every applied run is reversible** — clean-tree baseline, one commit per run, auto-rollback on validation failure, `/gld rollback` undoes it.
+- **HR retirement is a reversible archive, never a delete (§16 C3)** — a retired role's agent file moves to `.claude/guild/archive/agents/` (committed, restorable); ⑥ knowledge is org-shared and is preserved across retirement (only the role's ③ habit + ④ episodes leave). `leader` is never HR-touched.
 - **Adversarial panel before apply** — a change that doesn't survive isolated refutation is dropped (no rubber-stamping self-modifications).
 - **Anchor everything to ground truth** (`_signals.md` Section B): AI self-review ≠ signal; a reasonless rejection weights low.
 - **INV2 rule-HR exemption (항목 3c)**: rule demotion/retirement applies **only** to stack-specific/boundary rules. The **secret** and **verification-weakening** gates are universal and are **never** demoted/disabled/retired by evolve, whatever their firing stats — a lifecycle that could weaken core verification is inadmissible.
