@@ -45,6 +45,25 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
   ```
   **Skip** on a clean QA pass, and skip human-QA *recommendations* that are not defects (a deferred manual/visual check ≠ a correction).
 
+## Step 2.5 — Manual Test Checklist → PR 본문 (사람 QA를 리뷰 자리로)
+Surface the **human-only** QA items where the human actually reviews/merges — PATCH the open PR's body with a checklist. (The qa output comment records the full plan; this puts the *actionable human items* in the PR body, like `sdd`.)
+- **⚠ Scope — automated-IMPOSSIBLE only.** Include **only** what neither the `test` stage (automated correctness) nor the qa agent could verify: manual/visual judgment, real-device behavior, external integrations, interactive flows needing human perception. **Exclude anything an automated test already covers** — `test` proved it, so listing it is redundant noise — and anything the qa agent already ran with evidence. The checklist is the human's *irreducible* manual surface, nothing more.
+- **Empty → skip entirely.** If everything was automatable / agent-doable (no genuine human-only item), do **not** add an empty section; the qa output's "자동 검증으로 충분" note suffices.
+- Find the open PR (`gh pr list --repo <owner>/<repo> --search "Refs #$1" --state open --json number`). None open → skip (the human-QA plan still lives in the qa output).
+- PATCH the body via the temp-file **marker** pattern (`_handoff.md` Section B, applied to the PR body): the section is bounded by `<!-- guild:manual-qa -->` … `<!-- /guild:manual-qa -->` and is **updated in place** on re-run (idempotent — never duplicated). Preserve everything outside the markers (INV4). Body via temp file:
+  ```bash
+  gh pr edit <PR_NUM> --repo <owner>/<repo> --body-file <temp>
+  ```
+- Format — a checkbox list, each item = **WHAT to verify + WHERE/HOW**:
+  ```markdown
+  <!-- guild:manual-qa -->
+  ## 사람 QA 체크리스트 (Manual Test Checklist)
+  자동 테스트로 검증 불가능한 항목만 (test 스테이지가 커버하는 것은 제외):
+  - [ ] <무엇을 확인하는가> — <어디서 / 어떻게>
+  - [ ] …
+  <!-- /guild:manual-qa -->
+  ```
+
 ## Step 3 — Judge + return
 - **QA passed** (agent-doable checks green + UI/UX gate passed or not applicable + human-QA items clearly flagged + quality-bar met) → transition to done:
   ```bash
