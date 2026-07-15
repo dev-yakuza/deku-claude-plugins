@@ -12,11 +12,11 @@
 ## Step 0 — Preflight
 As the leader, follow `_preflight.md` **Heavy tier** (incl. ⑥ knowledge + target-dir survey). Load the design output — for a refactor the design **is the target structure** (§4: design = 목표 구조). Load `docs/specs/$1/skeleton.md` (the target shape). Missing → `NEEDS_CONTEXT: design/target-structure not found for #$1`.
 
-Validate `$1` is an Issue. Ensure entry label `guild:execute` if invoked directly. Create/switch to a refactor branch (e.g. `refactor/#$1-<slug>`). **Resume-safe**.
+Validate `$1` is an Issue. Ensure entry label `guild:execute` if invoked directly. Create/switch to a refactor branch (e.g. `refactor/#$1-<slug>`). **Resume-safe (항목 4)**: existing branch → build a partial-work summary (`git log <base>..HEAD --oneline` + one test run confirming all existing tests are still green on the partial work) and pass it into the developer prompt (Step 1) → continue the transform, don't restart. Fresh branch → no summary.
 
 ## Step 1 — Spawn developer (behavior-preserving transform)
 Spawn the developer (`description: developer refactor #$1`):
-> Adopt the persona in `.claude/agents/developer.md`. Refactor Issue #$1 on the current branch toward the target structure (`docs/specs/$1/skeleton.md`). **Behavior-preserving — this is the core constraint**:
+> Adopt the persona in `.claude/agents/developer.md`. Refactor Issue #$1 on the current branch toward the target structure (`docs/specs/$1/skeleton.md`). **Resume (항목 4)**: if Step 0 supplied a partial-work summary here — `<summary, or "none — fresh branch">` — a prior run was interrupted; CONTINUE the transform from the committed partial state (tests green), do not restart. **Behavior-preserving — this is the core constraint**:
 > - The **existing tests MUST stay green throughout** — run them before and after; behavior does not change. They are your safety net.
 > - Do **NOT** add features, change observable behavior, or **weaken/delete/skip tests** (INV2). If a test asserted an *implementation detail* that the refactor legitimately removes, surface it **explicitly with justification** in your RESULT — never silently drop it.
 > - Prefer many small behavior-preserving steps, tests green at each.
