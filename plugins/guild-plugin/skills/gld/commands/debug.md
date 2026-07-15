@@ -38,7 +38,7 @@ As the leader, over developer + tech-lead + specialist verdicts:
 - Tech-lead `BLOCKED` (symptom-patch / wrong root cause), a gate `BLOCKED`, or evidence contradicts green → **defined loop back to execute** (re-spawn developer with the specific concern). Bounded — ~2 loops → `NEEDS_HUMAN: <one-line>`.
   - **Ground-truth capture (①, `_signals.md` Section C — agent↔agent correction):** on a **real reversal** (a `BLOCKED`, or raw evidence contradicting claimed green — not a mere `DONE_WITH_CONCERNS`), append one entry (its own Bash call, best-effort — never blocks). The `BLOCKED` reason / contradicting raw line **is** the objective anchor. `--surprise` always (§8-A):
     ```bash
-    python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage execute --role <tech-lead|security|…> --summary "<what was reversed, 1 line>" --evidence "<the BLOCKED finding / raw line>" --surprise
+    python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage execute --role <tech-lead|security|…> --area "<the file/area of the bug>" --summary "<what was reversed, 1 line>" --evidence "<the BLOCKED finding / raw line>" --surprise
     ```
     Claimed-green-but-red → use `--kind verify-gap --role developer`. **Skip** when no loop-back occurred (agreement ≠ correction).
 - Any `FAIL` → `FAIL: <reason>`.

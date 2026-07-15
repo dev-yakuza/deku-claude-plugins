@@ -29,7 +29,7 @@ As the leader, enforce the verify gate (`_handoff.md` Section E, plan §4):
 - Check the Definition of Done from `docs/standards/verification.md`.
 - **Ground-truth capture (①, `_signals.md` Section C):** if the tester's claim **disagreed** with the raw output (a verify-gap), OR verify failed (tests red / AC gap), append one entry (its own Bash call). `--surprise` when a claimed pass was actually red (a confident self-report contradicted by evidence — the strongest ranking lever, plan §8-A):
   ```bash
-  python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind verify-gap --issue $1 --stage test --role tester --summary "<claimed vs raw / AC gap, 1 line>" --evidence "<raw runner summary line>" --surprise
+  python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind verify-gap --issue $1 --stage test --role tester --area "<the area under test>" --summary "<claimed vs raw / AC gap, 1 line>" --evidence "<raw runner summary line>" --surprise
   ```
   **Skip** when raw evidence matched the claim and was green — no gap means nothing to learn (agreement ≠ signal).
 
