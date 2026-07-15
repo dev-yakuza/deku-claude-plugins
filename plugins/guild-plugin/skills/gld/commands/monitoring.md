@@ -27,6 +27,7 @@
 **3. Read-only against the repo** — reads git-local + `gh`; the only write is the optional `--html` artifact (a rendered snapshot, not repo state).
 
 ## Hard rules
-- **Read-only snapshot** — reads git-local + `gh`; renders; never writes. Terminal only (HTML = v2).
+- **Read-only snapshot** — reads git-local + `gh`; renders (terminal, + optional `--html` artifact); never writes repo state.
+- **Deferred option — live observability (Langfuse etc.)**: this command is a **snapshot at read time**, not a live dashboard. A streaming/live backend (per-call token·latency·eval tracing) is adopted **only when** that granularity is actually needed (a scale/debugging trigger), as an optional observability layer over the same git-local data — not a data-ownership change. Until then the snapshot is the correct baseline. Not a gap; a watched trigger.
 - **Honest** — a snapshot at read time, not real-time; a missing/empty source is normal early (render "없음").
 - **Actionable-first** — surface open gate findings, `guild:needs-human` Issues, and worsening friction before the static counts.

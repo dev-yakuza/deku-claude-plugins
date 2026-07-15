@@ -32,6 +32,8 @@ A ⑥ fact is a **discovered property of the code** an agent would otherwise red
 # Knowledge Index (⑥ codebase facts)
 > Always-loaded map. For a task, retrieve ONLY the linked slice(s) whose key matches a path/area the task touches — never load all of facts/. Verify a fact against current code before relying on it (facts can go stale; evolve densifies).
 
+> **Retrieval = deterministic key match (path/area/symbol string+glob).** *Deferred option — embedding/semantic search*: adopt **only if** the key-match is shown to miss relevant facts in real use (a task whose facts existed under a different key). Until that evidence appears, the deterministic index is the correct baseline — it is cheap, transparent, and needs no vector store. Not a gap; a watched trigger.
+
 ## Facts by area
 - `lib/db/**` · `db_helper.dart` → [db.md](facts/db.md) — DB lifecycle · migration · sync coupling
 - `lib/screen/**` · theming · widgets → [ui.md](facts/ui.md) — theme tokens · a11y · disabled-state contrast
