@@ -66,6 +66,17 @@ python3 <<SKILL_DIR>>/commands/atoms/scan_transcript.py --repo-cwd <abs-repo-pat
 
 ---
 
+## Phase 1.5 — Data-sufficiency gate (⚠ evolve is the only consumer that blocks — it mutates)
+
+Compute data-sufficiency per `<<SKILL_DIR>>/commands/atoms/_data_sufficiency.md` — this is the **authoritative** measure (Section B: **Axis 1 counted after the Phase 1 scans**, so durable git/CI signals count, not just the captured log; **Axis 2** from the ledger's prior-run count, Phase 0). Emit the **banner** (Section D) at the top of this run's output, then gate:
+
+- **Axis 1 없음 (0 signals)** → **HARD BLOCK.** Present the banner + *"성장시킬 ground-truth가 없습니다 — 먼저 `/gld dev`(또는 `batch`)로 흔적을 쌓으세요."* and **stop** (no Phase 2+). Shallow-data growth injects wrong habits/rules; refusing is the safe act.
+- **Axis 1 얕음 (1–4)** → **DRY-RUN ONLY.** If `--apply`/approval was requested, **refuse it** → downgrade to dry-run with the reason; stamp every Phase 3 proposal **`미검증 후보 — 적용 보류`**. Proceed to propose (the human sees what is accumulating) but nothing applies.
+- **Axis 1 충분 (≥5)** → proceed normally (apply still per-item HITL — INV1).
+- **Axis 2 추세없음 (<2 prior runs)** → skip the **trend-dependent** outputs (HR proposals, 360 scorecard *verdicts*, 감독자 회고). **Low-risk applies still proceed** if Axis 1 충분 (⑥ facts, small habit refinements — anchored + reversible) so the ledger accrues runs and HR/scorecard unlock at run 2. *(Gating all apply on run≥2 would make run 2 unreachable — the bootstrap deadlock, `_data_sufficiency.md` Section C.)*
+
+---
+
 ## Phase 2 — Synthesize (leader step — dedup · cluster · rank)
 
 Converge the scan outputs into ranked themes. This is inline leader judgment (not spawned — it needs all scan JSON in context; the outputs are compact).
@@ -100,7 +111,7 @@ Score each **active role's** recent performance — the basis for HR proposals (
 - **Agent opinion (lower — only if corroborated)**: self / peer (sibling role) / leader / external-auditor views. An unanchored "동료가 좋다고 함" does **not** move the score (§8 back-patting; the external auditor guards this). No promotion on opinion alone.
 - **Trend**: compare to prior-run scorecards in the ledger — improving / flat / declining per role. A single run is a **weak sample** — advisory until corroborated across runs.
 
-Carry the scorecard into Phase 3 (HR) and record it in Phase 7. On a repo with no history yet, note "성적표 데이터 부족 (초기)" and skip HR proposals — HR needs a trend, not one run.
+Carry the scorecard into Phase 3 (HR) and record it in Phase 7. **Trend-gated by Phase 1.5 Axis 2** (`_data_sufficiency.md`): at 추세없음 (<2 prior runs) the scorecard *verdicts* and HR proposals are skipped — HR needs a trend, not one run (the banner already stated this; do not re-explain).
 
 **Overseer row (③ human-growth engine — `_learning.md` Section D)**: also score the **human overseer** as a distinguished, authority-tier member (NOT HR-able) — their **decision patterns** (recurring discuss-overrides by theme, accepted-risks = measured defects knowingly kept, PR-rejection reasons), **blind spots** (a decision later contradicted by an *objective* outcome — a kept risk that became a real defect; anchor to the outcome, not "an agent disagreed"), and **per-area competence trend**. Ground-truth-anchored (higher bar — `_learning.md` Section B); advisory until corroborated.
 
@@ -126,7 +137,7 @@ Each proposal states, in ≤ ~500 chars (plan §6 context budget):
 
 **Nudge (read-only)**: if the friction *trend* is worsening or a signal reads like a diagnostic gap rather than a single fix, **note that a `/gld audit` pass would help** (plan §9 evolve↔audit mutual nudge).
 
-**감독자 회고 (③ overseer growth — B, `_learning.md`)**: after the proposal list, present a short **overseer reflection** from the Phase 2.5 overseer row — the human's recurring decision patterns / blind spots + **the principle behind each** (A). E.g. *"WCAG 대비 위험을 3회 수용하셨습니다(#891/#893/#894) — 근본 원리: 모드 의존 토큰은 isLightMode 분기 필수."* **Hard rules (`_learning.md` Section B)**: every reflection **ground-truth-anchored** (a verified outcome / ⑥ fact / confirmed standard — never AI opinion; unanchored → "인사이트 후보(미검증)"); **advisory · opt-in · non-condescending** ("이런 인사이트가 있습니다", not "틀렸습니다"); read-only toward the human (INV1 authority intact). Skip on no-trend (첫 run). Fade with competence (F).
+**감독자 회고 (③ overseer growth — B, `_learning.md`)**: after the proposal list, present a short **overseer reflection** from the Phase 2.5 overseer row — the human's recurring decision patterns / blind spots + **the principle behind each** (A). E.g. *"WCAG 대비 위험을 3회 수용하셨습니다(#891/#893/#894) — 근본 원리: 모드 의존 토큰은 isLightMode 분기 필수."* **Hard rules (`_learning.md` Section B)**: every reflection **ground-truth-anchored** (a verified outcome / ⑥ fact / confirmed standard — never AI opinion; unanchored → "인사이트 후보(미검증)"); **advisory · opt-in · non-condescending** ("이런 인사이트가 있습니다", not "틀렸습니다"); read-only toward the human (INV1 authority intact). **Skip at 추세없음** (Phase 1.5 Axis 2 — `_data_sufficiency.md`; needs a trend). Fade with competence (F).
 
 ---
 
