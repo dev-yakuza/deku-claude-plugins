@@ -11,6 +11,8 @@
 
 > **VSCode limit (be honest)**: Claude cannot open/navigate/highlight files in the editor. Present each unit with **clickable `file:line` references** (the human clicks to open) and invite the human to **select the region** in the editor to discuss it (Claude sees the selection). Claude narrates; the human navigates.
 
+> **⚠ READ-ONLY / advisory — review NEVER modifies code.** Its only job is to (1) split the diff into logical units, (2) guide the human through them, and (3) **present Claude's review opinions** (the Step 2.5 findings) as *suggestions*. It does **not** edit, fix, or commit anything, and its sub-agents **only report, never fix**. The human decides what to change and applies it themselves (or re-loops via `/gld dev`). The human is the approver (INV1). *(If the human, mid-walk, explicitly asks you to draft a fix, you may propose one edit for their accept/reject — but never proactively, and never during the adversarial scan.)*
+
 ---
 
 ## Step 0 — Resolve the change
@@ -40,8 +42,8 @@ Get a **fresh, adversarial** read of the diff before planning units — the inde
 
 As the leader, spawn in one parallel message:
 - **External auditor (always — fresh eyes, no Guild persona → unbiased, plan §16 C1 외부자)**: `subagent_type: general-purpose`, `model: sonnet`, `description: adversarial review #$1`, prompt:
-  > You are an **independent, adversarial** code reviewer with NO prior context — fresh eyes. Read the diff (`gh pr diff <PR> --repo <owner>/<repo>`), `docs/standards/`, and the Issue AC/design if present (`docs/specs/$1/`, the `guild:*:output` comments). Hunt for **real defects**: correctness bugs, security/exposure, missing error/null handling, **blast radius** beyond the reported scope, convention/standard violations, AC gaps, and **weakened or vacuous tests** (pass-but-verify-nothing — INV2 spirit). Be skeptical; do NOT rubber-stamp. Return findings as JSON: `[{"severity":"BLOCKER|MAJOR|MINOR","axis":"standards|spec","file":"...","line":<n>,"finding":"<1 line>","why":"<1 line, concrete evidence>"}]` — no vague nits; every finding anchored to a concrete line + reason.
-- **Conditional role lenses (leader convenes by diff surface, `_handoff.md` Section G)**: security (auth/exposure/secrets/input), performance (hot path/query), dba (schema), designer (UI a11y). Each reviews **its slice** adversarially as an **external gate** (reviewing the developer's diff, never self-review). Skip any not warranted (the common case).
+  > You are an **independent, adversarial** code reviewer with NO prior context — fresh eyes. **⚠ READ-ONLY: you MUST NOT edit, write, create, delete, fix, or commit ANY file — you only READ and report.** Do not "fix" the defects you find; report them. Read the diff (`gh pr diff <PR> --repo <owner>/<repo>`), `docs/standards/`, and the Issue AC/design if present (`docs/specs/$1/`, the `guild:*:output` comments). Hunt for **real defects**: correctness bugs, security/exposure, missing error/null handling, **blast radius** beyond the reported scope, convention/standard violations, AC gaps, and **weakened or vacuous tests** (pass-but-verify-nothing — INV2 spirit). Be skeptical; do NOT rubber-stamp. Return findings as JSON: `[{"severity":"BLOCKER|MAJOR|MINOR","axis":"standards|spec","file":"...","line":<n>,"finding":"<1 line>","why":"<1 line, concrete evidence>"}]` — no vague nits; every finding anchored to a concrete line + reason.
+- **Conditional role lenses (leader convenes by diff surface, `_handoff.md` Section G)**: security (auth/exposure/secrets/input), performance (hot path/query), dba (schema), designer (UI a11y). Each reviews **its slice** adversarially as an **external gate** (reviewing the developer's diff, never self-review). **Each is READ-ONLY — only reads and reports findings (same JSON shape); it MUST NOT edit or fix any file.** Skip any not warranted (the common case).
 
 Collect + dedup the findings (by file+line). They feed the walkthrough's "확인할 점" (Step 4). **Advisory, not a gate** — the human still approves (INV1); the auditor sharpens scrutiny, it doesn't block. If a `--comment` run, the deduped adversarial findings also go into the posted recap.
 
@@ -75,7 +77,7 @@ For the current unit:
 
 Rules for the loop:
 - **One unit per turn.** Never dump all units at once — that defeats the paced pair-review.
-- Handle the human's response: answer questions using the loaded rationale; if they select a region in the editor, discuss that; if they request a change, note it (and, if agreed, propose an edit — shown in VSCode's native diff for accept/reject).
+- Handle the human's response: answer questions using the loaded rationale; if they select a region in the editor, discuss that. If they **request a change**, **record it as a change-request** (for the Step 5 recap) — **do NOT edit the code yourself.** review is read-only; the human applies changes (directly, or by re-looping `/gld dev $1`). Only if the human **explicitly asks you to draft a fix** may you propose a single edit for their accept/reject — never proactively, and never while presenting adversarial findings.
 - Advance only when the human signals (e.g. "다음") — respect their pace; they may linger or skip.
 
 ## Step 5 — Recap + decision (after the last unit)
@@ -89,6 +91,6 @@ Rules for the loop:
 ## Notes
 - **Works on any open PR — agent-authored or human-authored.** Pass the PR number. For human PRs the "왜" is inferred (PR description/commits/diff) or asked; the AC table is skipped. The paced walkthrough + scrutiny is identical.
 - **Author-explains-to-reviewer, interactively** — the value is the paced WHY per unit + your ability to interject, not a static findings dump.
-- **Assist, not replace** — the human still approves the PR (INV1). Scrutiny notes ("확인할 점") help; they don't gate.
+- **Assist, not replace — and strictly READ-ONLY.** review splits the diff, guides the walk, and **presents Claude's review opinions** (the Step 2.5 findings) as suggestions. It **never modifies code** — not in the adversarial scan, not in the walkthrough. The human approves the PR (INV1) and owns/applies any change. Scrutiny notes ("확인할 점") help; they don't gate and they don't get auto-fixed.
 - **On-demand + nudged** — `/gld dev` nudges this at completion; also standalone on any open PR.
 - **Adversarial layer (M3 — Step 2.5)** — a fresh external auditor (+ conditional role lenses) pre-scans the diff on 2 axes (Standards/Spec) and feeds each unit's "확인할 점". This is the agent-based independent/adversarial 2nd opinion (plan §4/§18); it is **advisory**, the human still approves (INV1). The guided human walk remains the spine.
