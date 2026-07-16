@@ -45,10 +45,14 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
   ```
   **Skip** on a clean QA pass, and skip human-QA *recommendations* that are not defects (a deferred manual/visual check ≠ a correction).
 
-## Step 2.5 — Manual Test Checklist → PR 본문 (사람 QA를 리뷰 자리로)
-Surface the **human-only** QA items where the human actually reviews/merges — PATCH the open PR's body with a checklist. (The qa output comment records the full plan; this puts the *actionable human items* in the PR body, like `sdd`.)
-- **⚠ Scope — automated-IMPOSSIBLE only.** Include **only** what neither the `test` stage (automated correctness) nor the qa agent could verify: manual/visual judgment, real-device behavior, external integrations, interactive flows needing human perception. **Exclude anything an automated test already covers** — `test` proved it, so listing it is redundant noise — and anything the qa agent already ran with evidence. The checklist is the human's *irreducible* manual surface, nothing more.
-- **Empty → skip entirely.** If everything was automatable / agent-doable (no genuine human-only item), do **not** add an empty section; the qa output's "자동 검증으로 충분" note suffices.
+## Step 2.5 — Manual Test Checklist → PR 본문 (사람 QA를 리뷰 자리로) — **MANDATORY when human items exist**
+**You MUST run this step whenever the qa output flagged ≥1 human-QA item — including on a re-run with no new findings** (it *surfaces* existing human items to the PR; it does not depend on finding anything new). Recording the items only in the `guild:qa:output` comment is **NOT sufficient** — the human reviews/merges at the **PR**, so the items MUST land in the PR body. `sdd`'s parity feature.
+- **What goes in — every human-flagged item from Step 1/Step 2.** Take each item the qa plan marked as recommended/needed for human QA and make it a checklist entry. This explicitly **INCLUDES**:
+  - anything the agent **could not run because of an environment/platform constraint** (e.g. "Windows 실기기 기동" verified only on macOS, real-device, external service) — this is the *canonical* automation-impossible item and **belongs in the checklist**;
+  - manual/visual judgment, interactive flows needing human perception.
+  - ⚠ **A "권장(recommended)" or "미검증(환경 제약)" framing does NOT downgrade it to a skippable caveat** — if a human needs to do it and the agent couldn't, it IS a checklist item.
+- **What stays out** — only what an automated test already proves (`test` covered it → redundant) or what the qa agent already ran with evidence.
+- **Skip the section ONLY if the human-QA item count is literally zero** (everything was automated/agent-doable). "화면이 없어 exploratory 불요" does not by itself make it zero — a platform/real-device item still counts.
 - Find the open PR (`gh pr list --repo <owner>/<repo> --search "Refs #$1" --state open --json number`). None open → skip (the human-QA plan still lives in the qa output).
 - PATCH the body via the temp-file **marker** pattern (`_handoff.md` Section B, applied to the PR body): the section is bounded by `<!-- guild:manual-qa -->` … `<!-- /guild:manual-qa -->` and is **updated in place** on re-run (idempotent — never duplicated). Preserve everything outside the markers (INV4). Body via temp file:
   ```bash
@@ -91,4 +95,5 @@ Surface the **human-only** QA items where the human actually reviews/merges — 
 - **Distinct from test** — do not re-run/duplicate the tester's automated suite; add the user-perspective layer.
 - **Risk-based depth, never blanket skip** — always a judgment with a reason.
 - **Honesty of scope** (both directions: results + coverage), per `_handoff.md` Section E.
-- Read-only against source (QA observes; fixes go back through execute).
+- **Manual Test Checklist → PR body is mandatory when ≥1 human-QA item exists** (Step 2.5) — including on a no-new-findings re-run. A platform/real-device/manual item flagged "권장/미검증" still counts; the qa comment alone does not satisfy this — the item MUST be in the PR body where the human merges.
+- Read-only against source (QA observes; fixes go back through execute). *(The one exception: Step 2.5 edits the open PR **body** — a doc surface, not source — to carry the human checklist.)*

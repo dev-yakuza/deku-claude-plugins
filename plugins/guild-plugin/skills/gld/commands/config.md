@@ -20,7 +20,7 @@ Parse `$1` onward:
    ```
    Guild config (.claude/guild/config.json)
    ────────────────────────────────────────
-   version:    0.30.1
+   version:    0.30.2
    language:   ko
    roles:      16 — spine: leader, tech-lead, developer, tester, qa
                specialists: product-owner, designer, infra, dba, security,
