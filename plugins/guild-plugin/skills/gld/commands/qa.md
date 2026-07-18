@@ -53,7 +53,7 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
   - ⚠ **A "권장(recommended)" or "미검증(환경 제약)" framing does NOT downgrade it to a skippable caveat** — if a human needs to do it and the agent couldn't, it IS a checklist item.
 - **What stays out** — only what an automated test already proves (`test` covered it → redundant) or what the qa agent already ran with evidence.
 - **Skip the section ONLY if the human-QA item count is literally zero** (everything was automated/agent-doable). "화면이 없어 exploratory 불요" does not by itself make it zero — a platform/real-device item still counts.
-- Find the open PR (`gh pr list --repo <owner>/<repo> --search "Refs #$1" --state open --json number`). None open → skip (the human-QA plan still lives in the qa output).
+- Find the open PR (`gh pr list --repo <owner>/<repo> --search "Closes #$1" --state open --json number`). None open → skip (the human-QA plan still lives in the qa output).
 - PATCH the body via the temp-file **marker** pattern (`_handoff.md` Section B, applied to the PR body): the section is bounded by `<!-- guild:manual-qa -->` … `<!-- /guild:manual-qa -->` and is **updated in place** on re-run (idempotent — never duplicated). Preserve everything outside the markers (INV4). Body via temp file:
   ```bash
   gh pr edit <PR_NUM> --repo <owner>/<repo> --body-file <temp>

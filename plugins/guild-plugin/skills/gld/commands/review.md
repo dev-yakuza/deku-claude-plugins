@@ -17,7 +17,7 @@
 
 ## Step 0 — Resolve the change
 1. Resolve owner/repo (`_handoff.md` Section F).
-2. If `$1` is an Issue → find its open PR (`gh pr list --repo <owner>/<repo> --search "Refs #$1" --state open --json number,headRefName,url`). If `$1` is a PR number, use directly. No PR → "no open PR for #$1 — run `/gld dev $1` first."
+2. If `$1` is an Issue → find its open PR (`gh pr list --repo <owner>/<repo> --search "Closes #$1" --state open --json number,headRefName,url`). If `$1` is a PR number, use directly. No PR → "no open PR for #$1 — run `/gld dev $1` first."
 
 ## Step 1 — Load rationale (light — so you can explain the WHY, not just the what)
 

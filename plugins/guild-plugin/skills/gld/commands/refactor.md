@@ -44,7 +44,7 @@ As the leader, over the verdicts:
 - Any `FAIL` → `FAIL: <reason>`.
 
 ## Step 5 — Open PR
-Push + open a PR (`Refs #$1`, body: what structure improved, behavior-preserved statement, existing-tests-green evidence). Resume-safe. Unattended → `## 무인 결정 로그` (Section H).
+Push + open a PR (`Closes #$1`, body: what structure improved, behavior-preserved statement, existing-tests-green evidence). Resume-safe. Unattended → `## 무인 결정 로그` (Section H).
 
 ## Step 6 — Transition + return
 ```bash
