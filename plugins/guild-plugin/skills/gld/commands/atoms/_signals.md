@@ -41,6 +41,7 @@ Ephemeral signals are appended to the ground-truth log **at the moment they occu
 | Role overturns another role's output at execute (tech-lead/gate `BLOCKED`, or dev claimed-green contradicted by raw) | implement Step 4 loop-back (`implement.md`) | `correction` agent↔agent (role = overturner) · `surprise` — or `verify-gap`/dev for claimed-green↔raw |
 | QA/designer finds a blocking defect the test stage passed | qa Step 2 defect / UI-UX gate `BLOCKED` (`qa.md`) | `correction` agent↔agent (role = qa\|designer) · `surprise` |
 | A role **measured a real defect the human knowingly ACCEPTED** (kept the risky choice / locked it at discuss) | discuss-lock or gate-dismiss (analyze/design/qa) — human chooses the flagged-risky option | recorded in **`gates/dismissed.md`** (the accepted-risk registry, human-edited), **not** auto-appended to the jsonl — evolve reads it from there. *(`--kind accepted-risk` exists in `capture_signal.py` for future auto-capture but is not wired at the spine.)* |
+| A loop-back's blocking reason **repeats identically** on the next attempt (stalled retry) | stagnation guard (`_stagnation.md` Section B) — `implement.md`/`debug.md`/`refactor.md` Step 4, `test.md`/`qa.md` Step 3 | `stagnation` — the recurring reason · attempt-1↔2 evidence |
 | Unattended auto-decision overturned by human at PR review | *(deferred — needs PR-review read-back)* | `correction` (unattended) |
 | git revert of a Guild-authored commit | on-demand via scan_git — **not** captured | — (durable) |
 
@@ -57,13 +58,15 @@ It appends one line to `.claude/guild/memory/ground-truth.jsonl` (Section D), cr
 
 **Wired (increment 3 — agent↔agent):** `design.md` Step 2 appends a `correction` **when a design-stage specialist `BLOCKED` reverses a decided approach** (designer WCAG / dba integrity / security threat); `implement.md` Step 4 appends a `correction` (or `verify-gap` for the claimed-green↔raw case) **only when a loop-back fires on a real reversal** — a tech-lead/gate `BLOCKED` or raw evidence contradicting a claimed green, never a `DONE_WITH_CONCERNS`; `qa.md` Step 2 appends a `correction` **only when QA or the UI/UX gate finds a blocking defect the test stage passed**. These capture the *body* of the correction distribution (cross-role reversals) that the increment-2 human-override capture cannot see — legitimate because each is anchored to an objective outcome (Section B). Role = the overturner. `--surprise` always (confident work reversed — plan §8-A). *(The design-stage hook was added after #898 live-verification showed the designer catching a WCAG trap at design — a real reversal the execute/qa hooks alone would miss.)*
 
+**Wired (stagnation guard — `_stagnation.md`):** `implement.md`/`debug.md`/`refactor.md` Step 4 and `test.md`/`qa.md` Step 3 compare a loop-back's blocking reason against the immediately-prior attempt's before consuming another retry; an identical-reason repeat appends `--kind stagnation` and escalates immediately rather than exhausting the numeric cap. This is orthogonal to increment 2/3 above — it fires on *recurrence*, not on a single reversal.
+
 ## Section D — Ground-truth log (format & location)
 
 - **Location**: `.claude/guild/memory/ground-truth.jsonl` — episodic tier (plan §5 ④), **gitignored** (init already gitignores `memory/`). Append-only; one JSON object per line (machine-parseable; human-scannable with `tail`).
 - **Commit vs gitignore is still open** (plan 부록 B ⓐ — team-share benefit vs leak/noise risk). ① keeps it gitignored (matches init default = lowest risk); revisit when the working-tier read is built.
 - **Entry schema** (one line each):
   ```json
-  {"ts":"<iso8601>","kind":"correction|verify-gap|revert|accepted-risk","issue":<n|null>,"stage":"<stage>","role":"<role|null>","area":"<path/keyword|null>","summary":"<=1 line","evidence":"<=1 line, concrete","surprise":true|false}
+  {"ts":"<iso8601>","kind":"correction|verify-gap|revert|accepted-risk|stagnation","issue":<n|null>,"stage":"<stage>","role":"<role|null>","area":"<path/keyword|null>","summary":"<=1 line","evidence":"<=1 line, concrete","surprise":true|false}
   ```
   - `area` = the retrieval key for runtime working-memory (항목 1 / `_preflight.md` Item 8). Optional; null when the signal isn't tied to a path (e.g. a scope-interpretation correction).
   - `surprise:true` when the human overturned a choice the agent was confident in, **or** a claimed-pass was actually red (plan §8-A — this is the ranking lever the kill-gate validated: A1 "guard existed yet bug escaped", A3 "confident work reversed" ranked top).

@@ -35,12 +35,12 @@ Same as `implement.md` Step 3.5 (`_handoff.md` Section G). A refactor touching a
 ## Step 4 — Arbitrate (defined feedback loop)
 As the leader, over the verdicts:
 - All `DONE`/`DONE_WITH_CONCERNS` + all existing tests green + behavior preserved → Step 5.
-- Tech-lead `BLOCKED` (structure not improved, behavior changed, or a test weakened), a gate `BLOCKED`, or a test went red → **defined loop back to execute**. Bounded — ~2 loops → `NEEDS_HUMAN`.
+- Tech-lead `BLOCKED` (structure not improved, behavior changed, or a test weakened), a gate `BLOCKED`, or a test went red → before looping back, apply the **stagnation guard** (`_stagnation.md`): same root cause as the immediately-prior attempt → escalate immediately instead of retrying. Different concern → **defined loop back to execute**. Bounded — ~2 loops → `NEEDS_HUMAN`.
   - **Ground-truth capture (①, `_signals.md` Section C — agent↔agent correction):** on a **real reversal** (`BLOCKED` / a red test contradicting claimed-green — not a mere `DONE_WITH_CONCERNS`), append one entry (own Bash call, best-effort). Anchor = the `BLOCKED` reason / red line. `--surprise` always:
     ```bash
     python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage execute --role <tech-lead|performance|…> --area "<the refactored file/area>" --summary "<what was reversed, 1 line>" --evidence "<finding / red line>" --surprise
     ```
-    A **weakened-verification** reversal (a refactor that quietly removed/weakened a test, caught here) is exactly the INV2 signal worth capturing. **Skip** when no loop-back (agreement ≠ correction).
+    A **weakened-verification** reversal (a refactor that quietly removed/weakened a test, caught here) is exactly the INV2 signal worth capturing. **Skip** when no loop-back (agreement ≠ correction). **Stagnation guard fired** (identical reason repeated) → `--kind stagnation` instead (`_stagnation.md` Section C).
 - Any `FAIL` → `FAIL: <reason>`.
 
 ## Step 5 — Open PR

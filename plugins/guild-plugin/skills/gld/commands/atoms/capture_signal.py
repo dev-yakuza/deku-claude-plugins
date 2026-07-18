@@ -21,7 +21,7 @@ and exits non-zero WITHOUT raising, so a logging problem never blocks the spine.
 import argparse, json, os, sys
 
 LOG_REL = os.path.join(".claude", "guild", "memory", "ground-truth.jsonl")
-KINDS = ("correction", "verify-gap", "revert", "accepted-risk")
+KINDS = ("correction", "verify-gap", "revert", "accepted-risk", "stagnation")
 
 
 def repo_root():

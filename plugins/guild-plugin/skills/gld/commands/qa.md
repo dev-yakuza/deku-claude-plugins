@@ -81,7 +81,7 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
   **Nudge the guided review** (the Issue is now `done` and the PR awaits the human reviewer — M1 external reviewer, INV1). When invoked directly (`/gld qa`), surface it here; under `/gld dev`, Phase 3 surfaces it: "이슈 #$1 리뷰 준비됨 (연결된 PR) — `/gld review $1`로 리스크 가중 가이드 리뷰를 받을 수 있습니다 (이슈 번호로 PR을 자동으로 찾습니다)." Do not force it on a trivial change.
 - **QA found a blocking defect** → do NOT mark done.
   - **Attended**: return `NEEDS_HUMAN: QA found <one-line>; loop back to execute?`.
-  - **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): record the concern; bounded loop-back to execute if fixable, else return `OK PAUSE: needs-human — QA defect: <one-line>`. Never force `done`. Detect via `printenv GLD_UNATTENDED`.
+  - **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): before looping back, apply the **stagnation guard** (`_stagnation.md`) — the same defect recurring after a loop-back → escalate immediately (`OK PAUSE: needs-human — stagnant loop-back — <reason>`, `--kind stagnation` capture) rather than consuming another attempt. Otherwise: record the concern; bounded loop-back to execute if fixable, else return `OK PAUSE: needs-human — QA defect: <one-line>`. Never force `done`. Detect via `printenv GLD_UNATTENDED`.
   ```
   >>> RESULT <<<
   NEEDS_HUMAN: QA found <one-line>; loop back to execute?
