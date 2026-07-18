@@ -20,7 +20,7 @@
       "name": "guild-plugin",
       "source": "./plugins/guild-plugin",
       "description": "Guild - self-evolving agent organization: builds a harness, develops via a spec-driven flow, and co-evolves codebase and agent team",
-      "version": "0.30.3"
+      "version": "0.31.0"
     }
   ]
 }

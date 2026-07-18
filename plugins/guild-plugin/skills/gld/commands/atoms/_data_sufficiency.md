@@ -17,7 +17,7 @@ Growth readiness has **two independent axes** — conflating them is the mistake
 
 ### Axis 1 — 성장 신호량 (growth signal volume): *is there enough to grow from?*
 Count of **distinct anchored** growth-signals available. Sources (all already collected — **no new instrumentation**):
-- **Captured ground-truth log** — lines in `.claude/guild/memory/ground-truth.jsonl` (by kind: correction · verify-gap · revert · accepted-risk).
+- **Captured ground-truth log** — lines in `.claude/guild/memory/ground-truth.jsonl` (by kind: correction · verify-gap · revert · accepted-risk · stagnation).
 - **Durable signals** — reverts / PR-rejects / recurring CI-failure patterns, from git + `gh` (the same signals `_signals.md` Section E readers surface).
 
 Count = **distinct anchored themes**, deduped by evidence identity (`_signals.md` Section B anchor rule; **exclude AI self-reviews**). Tiers (conservative defaults):

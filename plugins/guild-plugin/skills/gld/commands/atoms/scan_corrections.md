@@ -11,7 +11,7 @@
 
 | Source | Durability | What |
 |---|---|---|
-| **ground-truth log** (`.claude/guild/memory/ground-truth.jsonl`) | ephemeral, **captured at occurrence** (① — `capture_signal.py`) | in-session `correction` / `verify-gap` / `revert` entries with a `surprise` flag |
+| **ground-truth log** (`.claude/guild/memory/ground-truth.jsonl`) | ephemeral, **captured at occurrence** (① — `capture_signal.py`) | in-session `correction` / `verify-gap` / `revert` / `stagnation` entries with a `surprise` flag |
 | **PR reject / close** (`gh pr list --state closed`) | durable | PRs closed **unmerged** = rejected work; human review corrections |
 | **git revert** (`git log --grep=revert`) | durable | a Guild-authored commit that was reverted (overlaps `scan_git` — P2 dedups by SHA) |
 
@@ -32,7 +32,7 @@ Every correction MUST be anchored to a **real human action or objective outcome*
 
 1. **Ground-truth log** — Read `.claude/guild/memory/ground-truth.jsonl` (Read tool):
    - Present → parse each line (one JSON object: `kind`, `issue`, `stage`, `role`, `summary`, `evidence`, `surprise`). Group by theme; carry the `surprise` flag through (it is the ranking lever — `_signals.md` Section D / plan §8-A).
-   - **Weight by anchor source (`role` discriminates — `_signals.md` Section B):** a discuss-override (`role: leader`, a real human overturning the recommendation) is the **strongest**; a **cross-role reversal** (`role: tech-lead|qa|designer|security|…`, one role overturning another's confident output, anchored to a `BLOCKED`/defect) is the *body* of the distribution but weighs **below** a human correction and **above** an unanchored opinion; a `verify-gap` is anchored to raw runner output. Set `anchored: true` for all three (each carries an objective anchor by construction) but tag the source so P2 can rank human > cross-role > verify-gap. This is **not** self-review — the log only ever holds sanctioned captures (`_signals.md` Section C), never an agent grading its own work.
+   - **Weight by anchor source (`role` discriminates — `_signals.md` Section B):** a discuss-override (`role: leader`, a real human overturning the recommendation) is the **strongest**; a `stagnation` entry (the same blocking reason recurring across loop-back attempts — `_stagnation.md`) ranks next, above a single **cross-role reversal** (`role: tech-lead|qa|designer|security|…`, one role overturning another's confident output, anchored to a `BLOCKED`/defect) — the *body* of the distribution, weighing **below** a human correction and **above** an unanchored opinion; a `verify-gap` is anchored to raw runner output. Set `anchored: true` for all four (each carries an objective anchor by construction) but tag the source so P2 can rank human > stagnation > cross-role > verify-gap. This is **not** self-review — the log only ever holds sanctioned captures (`_signals.md` Section C), never an agent grading its own work.
    - **Missing or empty → this is normal, not a failure.** The log is gitignored and only fills once a live `/gld dev` run hits a discuss-override or verify-gap (① dogfooding may not have run yet). Set `gt_log_status: "missing"` / `"empty"` and continue on the durable sources. **Do not block or warn loudly.**
    - The log is **advisory / low-weight** until P2 corroborates it with a durable signal (plan §5 2-tier safety).
 
