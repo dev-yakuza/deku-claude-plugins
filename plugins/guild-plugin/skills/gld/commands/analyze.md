@@ -31,9 +31,9 @@ gh issue view $1
 Before analyzing, as the leader:
 1. State the **assumptions** and interpretations you're making about the request.
 2. Offer **2–3 substantively different interpretations/approaches** where the request is ambiguous (not one "obvious" reading).
-3. If any material ambiguity affects scope/approach → **attended**: return `NEEDS_HUMAN: <the choice needed>` so the main session prompts the user (do not proceed past a real ambiguity on your own). **Unattended (`GLD_UNATTENDED=1`, `_handoff.md` Section H)**: the leader stands in — classify the ambiguity's stakes (charter-anchored). Low/medium → pick the most charter-aligned interpretation and **record it as an explicit assumption** (feeds the PR decision log), proceed. High/scope-defining → do NOT guess: post `<!-- guild:needs-human -->` with the options and return `OK PAUSE: needs-human — <one-line>` (no transition).
+3. **Readiness check (`_readiness.md`)**: rate the Issue on the three dimensions (Goal / Constraint / Success-criteria clarity) — 명확/부분/불명확. Any dimension **불명확** → material ambiguity, naming which dimension(s): **attended**: return `NEEDS_HUMAN: <dimension> unclear — <the choice needed>` so the main session prompts the user (do not proceed past a real ambiguity on your own). **Unattended (`GLD_UNATTENDED=1`, `_handoff.md` Section H)**: the leader stands in — classify the ambiguity's stakes (charter-anchored). Low/medium → pick the most charter-aligned interpretation and **record it as an explicit assumption** (feeds the PR decision log), proceed. High/scope-defining → do NOT guess: post `<!-- guild:needs-human -->` with the options and return `OK PAUSE: needs-human — <one-line>` (no transition).
 
-If the request is unambiguous, record the single interpretation explicitly and proceed (note in the output that discuss found no material ambiguity).
+If every dimension is 명확/부분 (none 불명확), proceed — any **부분** dimension MUST be recorded as an explicit assumption (`_readiness.md` Section C). If all three are 명확, note in the output that readiness found no gap.
 
 **Detect mode first** (its own Bash call): `printenv GLD_UNATTENDED` — `1` selects the unattended branch above.
 
@@ -67,7 +67,7 @@ Fold the PO's aligned AC/priorities into Step 4's output; a `DONE_WITH_CONCERNS`
 ## Step 4 — Post analysis output
 Write the analysis body to a temp file with the marker pair, then post via the temp-file pattern (`_bash_rules.md` → temp-file section / `_handoff.md` Section B):
 - Marker: `<!-- guild:analyze:output -->` … `<!-- /guild:analyze:output -->`.
-- Contents: interpretation chosen (discuss), feature list, **acceptance criteria**, work-type classification, priorities. Append a `<details>` pre-flight trace (`_preflight.md` Section C).
+- Contents: interpretation chosen (discuss), **readiness line** (`_readiness.md` Section D — e.g. `Readiness: Goal=명확 · Constraint=명확 · Success=부분 (가정: ...)`), feature list, **acceptance criteria**, work-type classification, priorities. Append a `<details>` pre-flight trace (`_preflight.md` Section C).
 - Duplicate-prevention search + POST (new) or PATCH (existing) per the temp-file pattern.
 
 ## Step 5 — Transition + return
