@@ -44,7 +44,7 @@ As the leader, over developer + tech-lead + specialist verdicts:
 - Any `FAIL` → `FAIL: <reason>`.
 
 ## Step 5 — Open PR
-As the leader, push + open a PR (`Refs #$1`, body summarizes root cause + fix + the regression-test evidence). **Resume-safe** (PATCH existing PR). **Unattended (`GLD_UNATTENDED=1`)**: append the `## 무인 결정 로그` section (`_handoff.md` Section H).
+As the leader, push + open a PR (`Closes #$1`, body summarizes root cause + fix + the regression-test evidence). **Resume-safe** (PATCH existing PR). **Unattended (`GLD_UNATTENDED=1`)**: append the `## 무인 결정 로그` section (`_handoff.md` Section H).
 
 ## Step 6 — Transition + return
 ```bash

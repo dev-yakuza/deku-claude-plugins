@@ -58,7 +58,7 @@ As the leader, over the developer + tech-lead + any conditional specialist/gate 
 - Any `FAIL` → return `FAIL: <reason>`.
 
 ## Step 5 — Open PR
-As the leader, push the branch and open a PR referencing the Issue (temp-file body via `--body-file`; body references `Refs #$1` and summarizes the change + test evidence). The PR is where the **human reviewer** (M1's external reviewer, plan §18 A) approves. **Resume-safe**: if a PR for this branch already exists (interrupted prior run), PATCH it rather than opening a duplicate. **Unattended (`GLD_UNATTENDED=1`)**: append a `## 무인 결정 로그 (GLD_UNATTENDED)` section to the PR body aggregating the leader-proxy gate decisions recorded in the analyze/design outputs (chosen interpretation · charter rationale · "사람 확인 요") — `_handoff.md` Section H — so the deferred human gate (PR review) is informed, not blind.
+As the leader, push the branch and open a PR referencing the Issue (temp-file body via `--body-file`; body references `Closes #$1` and summarizes the change + test evidence). The PR is where the **human reviewer** (M1's external reviewer, plan §18 A) approves. **Resume-safe**: if a PR for this branch already exists (interrupted prior run), PATCH it rather than opening a duplicate. **Unattended (`GLD_UNATTENDED=1`)**: append a `## 무인 결정 로그 (GLD_UNATTENDED)` section to the PR body aggregating the leader-proxy gate decisions recorded in the analyze/design outputs (chosen interpretation · charter rationale · "사람 확인 요") — `_handoff.md` Section H — so the deferred human gate (PR review) is informed, not blind.
 
 ## Step 6 — Transition + return
 ```bash

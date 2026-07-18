@@ -27,7 +27,7 @@ Show the current progress of an Issue. **Read-only**: never posts comments, neve
    - `<!-- guild:qa:output -->`
 5. Find the related PR:
    ```bash
-   gh pr list --search "Refs #$1" --json number,url,state
+   gh pr list --search "Closes #$1" --json number,url,state
    ```
 6. Render (below).
 
