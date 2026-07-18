@@ -31,7 +31,7 @@ Every correction MUST be anchored to a **real human action or objective outcome*
 ## Procedure (each step its own read-only Bash call / Read)
 
 1. **Ground-truth log** — Read `.claude/guild/memory/ground-truth.jsonl` (Read tool):
-   - Present → parse each line (one JSON object: `kind`, `issue`, `stage`, `role`, `summary`, `evidence`, `surprise`). Group by theme; carry the `surprise` flag through (it is the ranking lever — `_signals.md` Section D / plan §8-A).
+   - Present → parse each line (one JSON object: `kind`, `issue`, `stage`, `role`, `summary`, `evidence`, `surprise`, `escalated`). Group by theme; carry the `surprise` flag through (it is the ranking lever — `_signals.md` Section D / plan §8-A) and carry `escalated` through too (feeds evolve's Phase 2.5 model-tier scorecard — `_model_tiering.md` Section C — so it doesn't need a second read of the log).
    - **Weight by anchor source (`role` discriminates — `_signals.md` Section B):** a discuss-override (`role: leader`, a real human overturning the recommendation) is the **strongest**; a `stagnation` entry (the same blocking reason recurring across loop-back attempts — `_stagnation.md`) ranks next, above a single **cross-role reversal** (`role: tech-lead|qa|designer|security|…`, one role overturning another's confident output, anchored to a `BLOCKED`/defect) — the *body* of the distribution, weighing **below** a human correction and **above** an unanchored opinion; a `verify-gap` is anchored to raw runner output. Set `anchored: true` for all four (each carries an objective anchor by construction) but tag the source so P2 can rank human > stagnation > cross-role > verify-gap. This is **not** self-review — the log only ever holds sanctioned captures (`_signals.md` Section C), never an agent grading its own work.
    - **Missing or empty → this is normal, not a failure.** The log is gitignored and only fills once a live `/gld dev` run hits a discuss-override or verify-gap (① dogfooding may not have run yet). Set `gt_log_status: "missing"` / `"empty"` and continue on the durable sources. **Do not block or warn loudly.**
    - The log is **advisory / low-weight** until P2 corroborates it with a durable signal (plan §5 2-tier safety).
@@ -61,7 +61,7 @@ Exactly one `>>> RESULT <<<` line + compact JSON.
 ```
 ```json
 { "scan": "corrections", "findings": {
-  "ground_truth": [ { "kind": "correction", "issue": 893, "summary": "설계 override: 전역 토큰 → 위젯 레벨", "surprise": true, "anchored": true } ],
+  "ground_truth": [ { "kind": "correction", "issue": 893, "role": "tech-lead", "stage": "execute", "summary": "설계 override: 전역 토큰 → 위젯 레벨", "surprise": true, "escalated": false, "anchored": true } ],
   "pr_rejections": [ { "pr": 892, "reason": "wrong base branch", "anchored": true } ],
   "reverts": [ { "commit": "abc1234", "summary": "Revert \"feat: X\"", "anchored": true } ],
   "gt_log_status": "present",

@@ -55,11 +55,11 @@ docs/adr/ , docs/specs/
 - **commit** everything under `.claude/agents/`, `.claude/guild/` (except `memory/`), `docs/`, `CLAUDE.md`, `.claude/settings.json`. **gitignore** `.claude/guild/memory/`.
 
 ### Bash & GitHub conventions
-- Run each shell command as its own isolated Bash call. Avoid compound commands (`&&`, `$(...)`), variable substitution, and inline multi-line `--body` for GitHub comments — render bodies to a temp file and use `--body-file`. Full rules: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/label/handoff contract: `<<SKILL_DIR>>/commands/atoms/_handoff.md`. Stage pre-flight: `<<SKILL_DIR>>/commands/atoms/_preflight.md`. ⑥ knowledge contract: `<<SKILL_DIR>>/commands/atoms/_knowledge.md`. Growth-loop signal contract: `<<SKILL_DIR>>/commands/atoms/_signals.md`. Loop-back stagnation guard: `<<SKILL_DIR>>/commands/atoms/_stagnation.md`.
+- Run each shell command as its own isolated Bash call. Avoid compound commands (`&&`, `$(...)`), variable substitution, and inline multi-line `--body` for GitHub comments — render bodies to a temp file and use `--body-file`. Full rules: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/label/handoff contract: `<<SKILL_DIR>>/commands/atoms/_handoff.md`. Stage pre-flight: `<<SKILL_DIR>>/commands/atoms/_preflight.md`. ⑥ knowledge contract: `<<SKILL_DIR>>/commands/atoms/_knowledge.md`. Growth-loop signal contract: `<<SKILL_DIR>>/commands/atoms/_signals.md`. Loop-back stagnation guard: `<<SKILL_DIR>>/commands/atoms/_stagnation.md`. Dynamic model-tier escalation: `<<SKILL_DIR>>/commands/atoms/_model_tiering.md`.
 - Obtain `{owner}/{repo}` via `gh repo view --json nameWithOwner -q .nameWithOwner` as its own call; inline the literal value. Never infer it from git user or the system prompt.
 
 ### Model tiering
-Assign models by task cost: mechanical scans / rule checks → **Haiku**; stage execution and most orchestration → **Sonnet**; hard judgments (deep review) → **Opus**.
+Assign models by task cost: mechanical scans / rule checks → **Haiku**; stage execution and most orchestration → **Sonnet**; hard judgments (deep review) → **Opus**. On top of these static defaults, execute-stage loop-backs dynamically escalate a genuine retry one tier up, and evolve periodically reviews whether a role/stage's default should move — see `<<SKILL_DIR>>/commands/atoms/_model_tiering.md`.
 
 ### State & idempotency
 `init` is one-time (re-running reports "already initialized"). Development state lives in GitHub Issues/PRs; durable knowledge in `docs/` and `.claude/guild/`.

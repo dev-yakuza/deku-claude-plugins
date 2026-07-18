@@ -60,6 +60,10 @@ def main():
                          "retrieval at pre-flight (_preflight.md Item 8). Optional.")
     ap.add_argument("--evidence", default=None)
     ap.add_argument("--surprise", action="store_true")
+    ap.add_argument("--escalated", action="store_true",
+                     help="this loop-back's retry ran at a bumped model tier "
+                          "(_model_tiering.md Section A/B) — read by evolve's "
+                          "model-tier scorecard (_model_tiering.md Section C).")
     ap.add_argument("--log", default=None, help="override log path (default: <cwd>/" + LOG_REL + ")")
     args = ap.parse_args()
 
@@ -80,6 +84,7 @@ def main():
         "summary": args.summary.strip()[:200],
         "evidence": (args.evidence or "").strip()[:200] or None,
         "surprise": bool(args.surprise),
+        "escalated": bool(args.escalated),
     }
 
     log_path = args.log or os.path.join(repo_root(), LOG_REL)
@@ -91,7 +96,8 @@ def main():
         sys.stderr.write(f"capture_signal: could not append ({e}) — spine continues\n")
         return 1
 
-    print(f"captured {entry['kind']}" + (" [surprise]" if entry["surprise"] else "") + f" → {LOG_REL}")
+    print(f"captured {entry['kind']}" + (" [surprise]" if entry["surprise"] else "")
+          + (" [escalated]" if entry["escalated"] else "") + f" → {LOG_REL}")
     return 0
 
 
