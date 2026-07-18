@@ -73,10 +73,10 @@ cat .claude/guild/memory/ground-truth.jsonl
 ## Section D — Banner format (config.language, top of output, ≤3 lines)
 ```
 📊 데이터 충분도: <없음|얕음|충분> · 추세: <없음|있음>
-   · 신호 <N> (captured 교정<a>·verify-gap<b> + durable<e>) · run 이력 <M>회
+   · 신호 <N> (captured 교정<a>·verify-gap<b>·stagnation<c> + durable<e>) · run 이력 <M>회
    · 영향: <gated actions — e.g. "--apply 거부(dry-run) · HR·성적표·감독자회고 skip">
 ```
-Machine tokens (counts, flags) stay ASCII; prose in `config.language`. **Breakdown = what actually feeds the count**: `교정`/`verify-gap` are the captured `ground-truth.jsonl` kinds; `durable<e>` is the git/CI signals folded into evolve's N (reverts, CI-failure patterns — Section B). `N = a + b + e`. **Not shown as auto-buckets**: `revert` (a durable signal, counted under `durable`, never a captured jsonl kind) and `수용위험`/accepted-risk (its home is the human-edited `gates/dismissed.md` registry — `_signals.md` Section D — not the auto-captured log). review's cheap proxy shows only `captured` (no `durable` term — it doesn't scan).
+Machine tokens (counts, flags) stay ASCII; prose in `config.language`. **Breakdown = what actually feeds the count**: `교정`/`verify-gap`/`stagnation` are the captured `ground-truth.jsonl` kinds (`_stagnation.md` Section C); `durable<e>` is the git/CI signals folded into evolve's N (reverts, CI-failure patterns — Section B). `N = a + b + c + e`. **Not shown as auto-buckets**: `revert` (a durable signal, counted under `durable`, never a captured jsonl kind) and `수용위험`/accepted-risk (its home is the human-edited `gates/dismissed.md` registry — `_signals.md` Section D — not the auto-captured log; the `--kind accepted-risk` capture path is unwired at the spine, so it never actually contributes to N today). review's cheap proxy shows only `captured` (no `durable` term — it doesn't scan).
 
 ## Hard rules
 - **Count only ANCHORED signals** (`_signals.md` Section B) — exclude AI self-reviews (back-patting guard).
