@@ -11,7 +11,7 @@
 
 > **VSCode limit (be honest)**: Claude cannot open/navigate/highlight files in the editor. Present each unit with **clickable `file:line` references** (the human clicks to open) and invite the human to **select the region** in the editor to discuss it (Claude sees the selection). Claude narrates; the human navigates.
 
-> **⚠ READ-ONLY / advisory — review NEVER modifies code.** Its only job is to (1) split the diff into logical units, (2) guide the human through them, and (3) **present Claude's review opinions** (the Step 2.5 findings) as *suggestions*. It does **not** edit, fix, or commit anything, and its sub-agents **only report, never fix**. The human decides what to change and applies it themselves (or re-loops via `/gld dev`). The human is the approver (INV1). *(If the human, mid-walk, explicitly asks you to draft a fix, you may propose one edit for their accept/reject — but never proactively, and never during the adversarial scan.)*
+> **⚠ Advisory by default, editable on request — review never modifies code unprompted.** Its core job is to (1) split the diff into logical units, (2) guide the human through them, and (3) **present Claude's review opinions** (the Step 2.5 findings) as *suggestions*. Claude does **not** edit, fix, or commit anything on its own initiative, and the Step 2.5 sub-agents **only report, never fix** (their independence as a 2nd opinion must stay intact — always read-only). But **if the human, mid-walk, explicitly asks Claude to fix something, Claude applies the edit directly** (not merely a proposal) — the human remains the approver (INV1) and can review/undo the change before continuing. Without an explicit request, review stays hands-off and the human applies changes themselves (or re-loops via `/gld dev`).
 
 ---
 
@@ -77,7 +77,7 @@ For the current unit:
 
 Rules for the loop:
 - **One unit per turn.** Never dump all units at once — that defeats the paced pair-review.
-- Handle the human's response: answer questions using the loaded rationale; if they select a region in the editor, discuss that. If they **request a change**, **record it as a change-request** (for the Step 5 recap) — **do NOT edit the code yourself.** review is read-only; the human applies changes (directly, or by re-looping `/gld dev $1`). Only if the human **explicitly asks you to draft a fix** may you propose a single edit for their accept/reject — never proactively, and never while presenting adversarial findings.
+- Handle the human's response: answer questions using the loaded rationale; if they select a region in the editor, discuss that. If they **request a change**, **record it as a change-request** (for the Step 5 recap). By default **do NOT edit the code yourself** — the human applies changes (directly, or by re-looping `/gld dev $1`). **If the human explicitly asks you to make the fix**, apply the edit directly (not just a proposal) — show what changed, let the human review/undo, then continue the walkthrough. Never edit proactively, and never during the Step 2.5 adversarial scan (that stays independently read-only).
 - Advance only when the human signals (e.g. "다음") — respect their pace; they may linger or skip.
 
 ## Step 5 — Recap + decision (after the last unit)
@@ -91,6 +91,6 @@ Rules for the loop:
 ## Notes
 - **Works on any open PR — agent-authored or human-authored.** Pass the PR number. For human PRs the "왜" is inferred (PR description/commits/diff) or asked; the AC table is skipped. The paced walkthrough + scrutiny is identical.
 - **Author-explains-to-reviewer, interactively** — the value is the paced WHY per unit + your ability to interject, not a static findings dump.
-- **Assist, not replace — and strictly READ-ONLY.** review splits the diff, guides the walk, and **presents Claude's review opinions** (the Step 2.5 findings) as suggestions. It **never modifies code** — not in the adversarial scan, not in the walkthrough. The human approves the PR (INV1) and owns/applies any change. Scrutiny notes ("확인할 점") help; they don't gate and they don't get auto-fixed.
+- **Assist, not replace — advisory by default, editable on explicit request.** review splits the diff, guides the walk, and **presents Claude's review opinions** (the Step 2.5 findings) as suggestions. It never modifies code **unprompted** — the adversarial scan stays strictly read-only always (to keep the 2nd opinion independent). In the walkthrough, if the human **explicitly asks for a fix**, Claude applies it directly instead of just describing it. The human approves the PR (INV1) and remains in control of what changes. Scrutiny notes ("확인할 점") help; they don't gate and they don't get auto-fixed unless asked.
 - **On-demand + nudged** — `/gld dev` nudges this at completion; also standalone on any open PR.
 - **Adversarial layer (M3 — Step 2.5)** — a fresh external auditor (+ conditional role lenses) pre-scans the diff on 2 axes (Standards/Spec) and feeds each unit's "확인할 점". This is the agent-based independent/adversarial 2nd opinion (plan §4/§18); it is **advisory**, the human still approves (INV1). The guided human walk remains the spine.
