@@ -283,8 +283,13 @@ def main():
     b_block, b_warn = check_boundaries(root, dismiss)
     block += b_block
     flush_firings(root)  # log all firings (block + warn) before any deny-exit (항목 3a)
+    # Always rewrite findings.json so it reflects THIS commit's gate state, not a stale
+    # snapshot: when a previously-blocked item is later dismissed (or fixed), block is now
+    # empty and this clears it to {"open": []}. Writing only inside `if block:` left the
+    # last-blocked findings fossilised — a phantom open item other readers (evolve/audit)
+    # misread as unresolved.
+    write_findings(root, block)
     if block:
-        write_findings(root, block)
         deny(block)  # exits 2
     if b_warn:
         # draft boundary rules WARN only (do not block) — advisory until confirmed
