@@ -22,6 +22,7 @@
 - `/gld dev <issue>`가 GitHub 이슈에 대해 척추 전체를 구동한다. 스테이지 상태는 `guild:*` 라벨로 추적하고, 스테이지 산출물은 이슈 댓글(마커) + `docs/specs/<issue>/`에 남는다.
 - 개별 스테이지: `/gld analyze|design|implement|test|qa <issue>`. 진행 확인: `/gld status <issue>`, 재개: `/gld resume <issue>`.
 - 게이트: **discuss**(analyze/design 전 — 가정 명시·2~3안 제시), **verify**(done 전 — 러너 원문 증거로만 완료 인정). M1에서는 사람이 외부 리뷰어다(PR 승인).
+- **review**(수정 검토 게이트): `/gld` 없이 세션에서 직접 요청된 수정이라도 non-trivial하면, 리더가 관련 스페셜리스트(최소 `tech-lead`, 위험 영역이면 `security`·`tester` 등)를 소집해 검토받은 뒤 done 판정한다. 사소한 기계적 수정(오타·포매팅 등)은 예외.
 
 ### 지식 라우팅
 - 이 코드베이스의 지속 사실은 `docs/standards/`(사람 큐레이션·권위)와 `.claude/guild/knowledge/`(⑥ — init 시드 + evolve 축적)에 둔다.
