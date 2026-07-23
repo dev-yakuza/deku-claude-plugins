@@ -145,9 +145,8 @@ Each proposal states, in ≤ ~500 chars (plan §6 context budget):
 **Densify (⑥, invariant 3 — growth = density):** also scan the existing `knowledge/` for **duplicate facts to merge, stale facts to remove** (evidence no longer reproduces against current code), and **over-specific facts to generalize** — propose these as first-class items too. ⑥ should get *denser*, not just bigger.
 
 **Presentation**:
-- Print the Tier A list first (most-severe first), then B, then C (C shown compactly — "surfaced, not recommended", with the one-line reason each is noise; this transparency is the anchor discipline, kill-gate C-tier).
-- **`--dry-run`** → **stop here** with the hand-off: *"제안 목록입니다 (dry-run). 파일 미수정 — 직접 편집하거나 `/gld evolve --apply`로 승인·적용 파이프라인을 도세요."* Optionally write the full list to a session-scratchpad digest (`<scratchpad>/gld-evolve-<repo>.md`) — **scratchpad only, never the repo**.
-- **Otherwise (apply mode / default-then-ask)** → carry the Tier A/B proposals into **Phase 4**.
+- **`--dry-run`** → print the full Tier A list first (most-severe first), then B, then C (C shown compactly — "surfaced, not recommended", with the one-line reason each is noise; this transparency is the anchor discipline, kill-gate C-tier). **Stop here** with the hand-off: *"제안 목록입니다 (dry-run). 파일 미수정 — 직접 편집하거나 `/gld evolve --apply`로 승인·적용 파이프라인을 도세요."* Optionally write the full list to a session-scratchpad digest (`<scratchpad>/gld-evolve-<repo>.md`) — **scratchpad only, never the repo**.
+- **Otherwise (apply mode / default-then-ask)** → **do NOT dump the full detailed list up front** (that produces a wall of items the human has to hold in their head before the real per-item decision even starts). Print only a **one-line tally** — *"제안 N건 (Tier A: a, B: b, C: c) — 패널 검토 후 하나씩 함께 살펴보겠습니다."* — then carry the Tier A/B proposals into **Phase 4**. C-tier items are not carried forward (noise) but stay in this run's record for Phase 7. The detailed per-item content (target file, ladder rung, evidence, mapping/rank) is what Phase 5 shows, one item at a time — do not repeat it here.
 
 **Nudge (read-only)**: if the friction *trend* is worsening or a signal reads like a diagnostic gap rather than a single fix, **note that a `/gld audit` pass would help** (plan §9 evolve↔audit mutual nudge).
 
@@ -165,10 +164,13 @@ Each lens returns `{verdict: keep|drop|edit, reason, (edit: suggested change)}` 
 
 ## Phase 5 — Approval gate (P5 — per-item HITL · INV1)
 
-Present the **panel-surviving** proposals to the human, **one at a time**, with: the change, its target file, evidence, rank/tier, and the panel verdicts (incl. any drop reasons for transparency). For each, the human chooses **accept / reject / edit**:
-- **accept** → queued for Phase 6.
-- **edit** → the human's revised version is queued.
-- **reject** → recorded to the skip-list with the reason (P7; declined-stays-declined + offset).
+Walk the **panel-surviving** proposals **one item per turn** — this is a sequential conversation, not a batch listing. For each item, in order (Tier A first):
+1. Present **only that one item**: the change, its target file, evidence, rank/tier, and its panel verdicts (incl. any drop reasons for transparency, e.g. an edit a lens suggested).
+2. Ask the human to choose **accept / reject / edit** for *this item alone* and **wait for the reply** before showing the next item — never list several items in the same message and ask for a combined decision, and never move to item N+1 until item N is resolved.
+3. Record the decision and move to the next item:
+   - **accept** → queued for Phase 6.
+   - **edit** → the human's revised version is queued.
+   - **reject** → recorded to the skip-list with the reason (P7; declined-stays-declined + offset).
 
 **Nothing proceeds to apply without an explicit accept** (INV1). Unattended (`GLD_UNATTENDED`): evolve does **not** auto-accept harness changes — it stops here and marks the run "needs-human" (self-modification is never unattended; plan §8/§11).
 
