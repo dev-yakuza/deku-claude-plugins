@@ -42,7 +42,8 @@ Ephemeral signals are appended to the ground-truth log **at the moment they occu
 | QA/designer finds a blocking defect the test stage passed | qa Step 2 defect / UI-UX gate `BLOCKED` (`qa.md`) | `correction` agent↔agent (role = qa\|designer) · `surprise` |
 | A role **measured a real defect the human knowingly ACCEPTED** (kept the risky choice / locked it at discuss) | discuss-lock or gate-dismiss (analyze/design/qa) — human chooses the flagged-risky option | recorded in **`gates/dismissed.md`** (the accepted-risk registry, human-edited), **not** auto-appended to the jsonl — evolve reads it from there. *(`--kind accepted-risk` exists in `capture_signal.py` for future auto-capture but is not wired at the spine.)* |
 | A loop-back's blocking reason **repeats identically** on the next attempt (stalled retry) | stagnation guard (`_stagnation.md` Section B) — `implement.md`/`debug.md`/`refactor.md` Step 4, `test.md`/`qa.md` Step 3 | `stagnation` — the recurring reason · attempt-1↔2 evidence |
-| Unattended auto-decision overturned by human at PR review | *(deferred — needs PR-review read-back)* | `correction` (unattended) |
+| Human acts on a Step 2.5 adversarial finding at PR review (fix request / change-request / request-changes because of it) | review Step 4 loop / Step 5 decision (`review.md`) | `correction` agent↔agent (role = auditor lens) · `surprise` if BLOCKER/MAJOR |
+| Unattended auto-decision overturned by human at PR review | *(deferred — needs PR-review read-back of the auto-decision's own trail; narrower than the row above)* | `correction` (unattended) |
 | git revert of a Guild-authored commit | on-demand via scan_git — **not** captured | — (durable) |
 
 **Append mechanism** = `capture_signal.py`, run as ONE bash call (atomic-bash forbids `>>` — same bundled-command exception as the parser):
