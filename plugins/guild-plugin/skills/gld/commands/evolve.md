@@ -170,15 +170,20 @@ For each Tier A/B proposal, run an **isolated multi-lens panel** that tries to *
 - **Agent-def (③) / gate / standard (②) changes** = higher risk (they alter how every future task runs) → **3 lenses**, each a separate agent: **correctness** ("is the change factually right + does it actually address the evidence?"), **degradation** ("does it over-constrain, contradict an existing rule, or **weaken verification**? — INV2"), **redundancy** ("is this already covered by an existing rule/habit/fact?").
 - **⑥-fact / convention (low-risk additive) changes** → **1 lens** (correctness + redundancy combined) is enough.
 
-Each lens returns `{verdict: keep|drop|edit, reason, (edit: suggested change)}` — **its `reason`/`edit` prose in `config.language`** (tell the spawned lens explicitly; the `verdict` enum stays ASCII). **Drop rule**: a proposal a **majority of its lenses reject** is dropped (recorded to the skip-list, P7). A **degradation-lens veto on an INV2 grounds is absolute** — any hint of verification-weakening drops the item regardless of the other lenses. Surviving proposals (some possibly edited by a lens) go to Phase 5.
+Each lens returns `{verdict: keep|drop|edit, reason, (edit: suggested change)}` — **its `reason`/`edit` prose in `config.language`** (tell the spawned lens explicitly; the `verdict` enum stays ASCII). **Drop rule**: a proposal a **majority of its lenses reject** is dropped (recorded to the skip-list, P7). A **degradation-lens veto on an INV2 grounds is absolute** — any hint of verification-weakening drops the item regardless of the other lenses. Surviving proposals (some possibly edited by a lens) go to Phase 5, carrying the **per-lens verdict mix** with them — Phase 5 turns that mix into the human-facing recommendation label (승인 / 수정 후 승인 / 신중히 검토).
 
 ## Phase 5 — Approval gate (P5 — per-item HITL · INV1)
 
 Walk the **panel-surviving** proposals **one item per turn** — this is a sequential conversation, not a batch listing. For each item, in order (highest-priority first):
-1. Present **only that one item**, in **plain language** (per the rule at the top of this file — no "Tier", "ladder rung", "INV", "Phase", or bare `evidence:`/`lens:` fields). A good shape:
+1. Present **only that one item**, in **plain language** (per the rule at the top of this file — no "Tier", "ladder rung", "INV", "Phase", or bare `evidence:`/`lens:` fields). Lead with an explicit, standardized **recommendation label** derived from the lens verdicts — do not bury it in prose:
+   - all lenses `keep` → **`패널 권장: 승인`**
+   - any lens `edit` (and none dissenting) → **`패널 권장: 수정 후 승인`** — fold the suggested edit into the 왜/무엇을 lines.
+   - a lens `drop`ped but was outvoted (survived only because it wasn't a majority) → **`패널 권장: 신중히 검토 (우려 있음)`** — this is the one case where the human is choosing against a real dissent, so surface it clearly.
+   Then the plain-language body:
    - **무엇을**: one plain sentence — what would change and where (name the file/role in ordinary words, e.g. "테스터 역할의 습관에 한 줄 추가").
    - **왜**: one plain sentence with the evidence woven in as a story, not a field (e.g. "최근 PR #123, #145에서 같은 실수가 반복됐어요").
-   - **검토 결과**: one plain sentence summarizing the panel's sanity-check (e.g. "안전하고 실제 문제를 해결한다고 확인했습니다" / "패널에서 우려가 있었어요: ...").
+   - **우려** (only when the label is `신중히 검토`): one plain sentence naming the dissenting lens's concern, so the human's accept/reject/edit choice is informed (e.g. "우려: 기존 규칙과 살짝 겹칠 수 있다는 의견이 있었어요").
+   - **변경 내용 (diff)**: right after the plain-language body, show the actual proposed edit as a small unified-diff snippet (fenced ` ```diff ` block, `-`/`+` lines, minimal surrounding context — not the whole file). This is the **one exception** to the plain-language rule: a diff is the ground truth of what will happen to the file, so show it as-is rather than paraphrasing it. Build it from the concrete edit already drafted in Phase 3 (target file's current content vs. the proposed replacement) — nothing is written to disk yet, this is a preview. If a lens suggested an `edit`, the diff reflects the lens's revised version, not the original draft.
 2. Ask the human to choose **accept / reject / edit** for *this item alone* and **wait for the reply** before showing the next item — never list several items in the same message and ask for a combined decision, and never move to item N+1 until item N is resolved.
 3. Record the decision and move to the next item:
    - **accept** → queued for Phase 6.
