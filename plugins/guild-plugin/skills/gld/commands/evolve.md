@@ -15,6 +15,12 @@ Args: `--dry-run` (propose only) | `--apply` (run the approval+apply pipeline). 
 
 > **Bash**: simple calls only (`<<SKILL_DIR>>/commands/atoms/_bash_rules.md`) — **except** the bundled Python tool (`scan_transcript.py`), run as ONE `python3` call (atomic-bash exception, plan §8 정정). Signal contract: `<<SKILL_DIR>>/commands/atoms/_signals.md`. Handoff/RESULT + owner/repo: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
 > **Output language (all phases — this is a long, multi-phase command; do NOT drift to English after Phase 1)**: EVERY human-readable output — proposals (P3), **panel verdicts (P4), approval-gate questions (P5), apply/ledger report (P6/P7)**, and nudges — MUST be in `config.language` (`_handoff.md` Section K). **The Phase 4 panel sub-agents must be told to return their verdicts + reasons in `config.language`** (a spawned agent defaults to English otherwise, and the leader would relay it in English). Only machine tokens stay ASCII: file paths, `RESULT`/verdict enums (`keep`/`drop`/`edit`), SHA/PR#.
+> **Plain language for the human reader (P3/P5/P7 — separate from the language rule above)**: this document's own vocabulary — `Phase N`, `P1–P7`, `INV1/2/3`, `Tier A/B/C`, `Axis 1/2`, ladder-rung terms (patch/umbrella-extend/reference-add/new), lens names (correctness/degradation/redundancy) — is **internal authoring shorthand for whoever edits this skill file. None of it may appear verbatim in what the human actually reads.** Every proposal, panel-verdict summary, and report line shown to the human must read like something a non-specialist colleague would say out loud, in one pass, with no glossary needed:
+> - **Tier** → say the priority in plain words ("우선순위 높음: 바로 확인해 주세요" / "참고용: 급하지 않음"), never the bare letter.
+> - **Ladder rung** → describe the edit itself in one plain clause ("기존 규칙 문구를 한 줄 조정" / "완전히 새로운 규칙을 신설"), never the rung name.
+> - **Evidence** → weave the reference into a short plain sentence ("최근 PR #123, #145에서 같은 문제가 반복됐어요"), never a bare `evidence:` field or a raw SHA list with no story.
+> - **Panel verdict** → give the plain-language reason as a short sanity-check sentence ("검토 결과 이 변경은 안전하고 실제 문제를 고칩니다"), never `lens: correctness → keep`.
+> - Never print the words "Phase", "INV", "P3/P4/P5", "Axis", "Tier" themselves, or panel/lens jargon, to the human — those stay in this file only. When in doubt, read the line back and ask "would a teammate who has never seen this document understand this sentence unaided?" — if not, rewrite it.
 
 ---
 
@@ -142,11 +148,15 @@ Each proposal states, in ≤ ~500 chars (plan §6 context budget):
 - **Evidence** — the concrete artifact(s) (SHA / PR# / issue# / ground-truth entry / session count). No bulk paste.
 - **Mapping + rank + tier** (why it ranks where it does; surprise noted if it drove the rank).
 
+The four fields above (target file · ladder rung · evidence · mapping/rank/tier) are the **internal bookkeeping** for this proposal — keep them, they drive Phase 4/6/7. But whenever this proposal is actually **shown to the human** (Phase 5), translate it through the plain-language rule (top of file) into something like:
+> *"제안: OO 파일에 이런 내용을 추가/수정하려고 합니다. 이유: 최근 PR #123, #145에서 같은 문제가 반복됐어요. 검토 결과: 안전하고 실제로 도움이 됩니다."*
+No "Tier A", no "ladder rung: patch", no bare `evidence:` field, no `INV`/`Phase` labels.
+
 **Densify (⑥, invariant 3 — growth = density):** also scan the existing `knowledge/` for **duplicate facts to merge, stale facts to remove** (evidence no longer reproduces against current code), and **over-specific facts to generalize** — propose these as first-class items too. ⑥ should get *denser*, not just bigger.
 
-**Presentation**:
-- **`--dry-run`** → print the full Tier A list first (most-severe first), then B, then C (C shown compactly — "surfaced, not recommended", with the one-line reason each is noise; this transparency is the anchor discipline, kill-gate C-tier). **Stop here** with the hand-off: *"제안 목록입니다 (dry-run). 파일 미수정 — 직접 편집하거나 `/gld evolve --apply`로 승인·적용 파이프라인을 도세요."* Optionally write the full list to a session-scratchpad digest (`<scratchpad>/gld-evolve-<repo>.md`) — **scratchpad only, never the repo**.
-- **Otherwise (apply mode / default-then-ask)** → **do NOT dump the full detailed list up front** (that produces a wall of items the human has to hold in their head before the real per-item decision even starts). Print only a **one-line tally** — *"제안 N건 (Tier A: a, B: b, C: c) — 패널 검토 후 하나씩 함께 살펴보겠습니다."* — then carry the Tier A/B proposals into **Phase 4**. C-tier items are not carried forward (noise) but stay in this run's record for Phase 7. The detailed per-item content (target file, ladder rung, evidence, mapping/rank) is what Phase 5 shows, one item at a time — do not repeat it here.
+**Presentation** (plain language throughout — per the top-of-file rule; group/order internally by tier, but never print the word "Tier" or a bare letter grade to the human):
+- **`--dry-run`** → print the full list, most-important first, each item in the plain "무엇을 / 왜 / (아직 패널 검토 전이므로 검토 결과는 생략)" shape from Phase 5's template. Group with plain headers — "먼저 확인해 주세요" (priority items) / "참고해 보세요" (worth considering) / "이런 것도 있어요, 급하진 않아요" (noise-leaning, shown for transparency, one-line reason each). **Stop here** with the hand-off: *"제안 목록입니다 (dry-run). 파일 미수정 — 직접 편집하거나 `/gld evolve --apply`로 승인·적용 파이프라인을 도세요."* Optionally write the full list to a session-scratchpad digest (`<scratchpad>/gld-evolve-<repo>.md`) — **scratchpad only, never the repo**.
+- **Otherwise (apply mode / default-then-ask)** → **do NOT dump the full detailed list up front** (that produces a wall of items the human has to hold in their head before the real per-item decision even starts). Print only a **one-line tally** in plain words — *"제안 N건을 찾았어요 — 검토 후 하나씩 함께 살펴보겠습니다."* (no letter grades) — then carry the priority items into **Phase 4**. The lowest-priority ("noise-leaning") items are not carried forward but stay in this run's record for Phase 7. The detailed per-item content is what Phase 5 shows, one item at a time, in plain language — do not repeat it here.
 
 **Nudge (read-only)**: if the friction *trend* is worsening or a signal reads like a diagnostic gap rather than a single fix, **note that a `/gld audit` pass would help** (plan §9 evolve↔audit mutual nudge).
 
@@ -164,8 +174,11 @@ Each lens returns `{verdict: keep|drop|edit, reason, (edit: suggested change)}` 
 
 ## Phase 5 — Approval gate (P5 — per-item HITL · INV1)
 
-Walk the **panel-surviving** proposals **one item per turn** — this is a sequential conversation, not a batch listing. For each item, in order (Tier A first):
-1. Present **only that one item**: the change, its target file, evidence, rank/tier, and its panel verdicts (incl. any drop reasons for transparency, e.g. an edit a lens suggested).
+Walk the **panel-surviving** proposals **one item per turn** — this is a sequential conversation, not a batch listing. For each item, in order (highest-priority first):
+1. Present **only that one item**, in **plain language** (per the rule at the top of this file — no "Tier", "ladder rung", "INV", "Phase", or bare `evidence:`/`lens:` fields). A good shape:
+   - **무엇을**: one plain sentence — what would change and where (name the file/role in ordinary words, e.g. "테스터 역할의 습관에 한 줄 추가").
+   - **왜**: one plain sentence with the evidence woven in as a story, not a field (e.g. "최근 PR #123, #145에서 같은 실수가 반복됐어요").
+   - **검토 결과**: one plain sentence summarizing the panel's sanity-check (e.g. "안전하고 실제 문제를 해결한다고 확인했습니다" / "패널에서 우려가 있었어요: ...").
 2. Ask the human to choose **accept / reject / edit** for *this item alone* and **wait for the reply** before showing the next item — never list several items in the same message and ask for a combined decision, and never move to item N+1 until item N is resolved.
 3. Record the decision and move to the next item:
    - **accept** → queued for Phase 6.
@@ -199,7 +212,7 @@ Append a run entry to `.claude/guild/evolution-log.md` (the format in plan §8):
 - **Rule scorecard (항목 3b)** — each stack-specific/boundary rule's firing count · dismissal rate · real-hits vs false-positives · area churn + trend (Phase 2.5). The time-series the next run's **rule HR** (demote/retire) reads. Secret/verification gates are not listed (INV2-exempt).
 - **Consolidation bridge — move, don't copy (④ → ③/⑥, plan §5 · 항목 1)**: for each **applied** item, the ground-truth entries that were its source (match by evidence identity, best-effort) are now durable in ③/⑥/gates, so **move them out of the active working tier**: append them to `.claude/guild/memory/consolidated.jsonl` (archive — preserves history), then rewrite `ground-truth.jsonl` without them. This keeps the working tier (read at runtime by `_preflight.md` Item 8) a **bounded, un-consolidated tail** and keeps the data-sufficiency count (`_data_sufficiency.md`) meaning "signal *not yet* grown from." **Leave un-applied / rejected-as-noise entries** in the active tier (still pending — a recurrence re-earns them; the ledger skip-list separately prevents re-*proposing* rejected themes). **Only on an apply run** that promoted ≥1 item — a dry-run consolidates nothing. Best-effort: if the evidence match is uncertain, **leave the entry** (erring toward keeping signal over losing it). Both files are gitignored (`memory/`).
 
-Report: applied N, rolled-back M (with reasons), rejected K, ledger updated, the commit SHA, and how to undo (`/gld rollback <sha>`).
+**Report to the human** — plain language (per the top-of-file rule), not the raw ledger schema: how many changes were made and applied, how many were rolled back and why (in a plain sentence per item, not a code), how many were declined, that the log was updated, the commit to look at, and the one-line undo instruction (`/gld rollback <sha>`). The `.claude/guild/evolution-log.md` entry itself (Phase 7 above) can stay in the structured/technical format — it's an internal record, not the chat reply.
 
 ---
 
