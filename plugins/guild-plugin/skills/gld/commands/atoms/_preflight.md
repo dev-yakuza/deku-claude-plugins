@@ -33,7 +33,7 @@ All items are **best-effort**. No individual failure blocks the stage — log an
 ### Item 2: Project conventions (always)
 1. Check for convention files: `ls CLAUDE.md AGENTS.md README.md`
 2. Read each present file. Extract code style, naming, architecture rules, testing conventions.
-3. Read `docs/standards/` if present (charter, architecture, conventions, quality-bar, verification) — these are the authoritative standards Guild's init drafted. Honor `status: confirmed` entries as hard constraints; treat `status: draft` as strong guidance.
+3. Read `docs/standards/` if present (charter, architecture, conventions, quality-bar, verification) — these are the authoritative standards Guild's init drafted. Honor `status: confirmed` entries as **hard constraints** and `status: draft` as strong guidance — and **surface the confirmed-vs-draft split explicitly in the pre-flight trace (Section C)** so the stage never silently treats a confirmed standard as merely advisory.
 
 **Budget**: ~5 Read calls max.
 
@@ -93,7 +93,7 @@ After Step 0, record a short trace for the stage output's `<details>` block:
 <summary>Pre-flight context (Step 0)</summary>
 
 - [x] config.json + role defs loaded
-- [x] CLAUDE.md read; docs/standards/ (charter confirmed)
+- [x] CLAUDE.md read; docs/standards/: verification confirmed (hard) · charter/architecture/conventions/quality-bar draft (advisory)
 - [x] git log -20 (prefix: `feat:`/`fix:`)
 - [ ] prior design output: N/A (analyze stage)
 - [x] ⑥ knowledge: index.md loaded; retrieved facts/ui.md (touches lib/screen/)
