@@ -103,11 +103,11 @@ python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue
 ```bash
 cat .claude/guild/memory/review-nudge-state.json
 ```
-**Nudge iff 충분 AND** any of: **(a)** no state file (first time), **(b)** `runs > state.runs` (an evolve ran since the last nudge → new cycle, re-arm), **(c)** `count > state.count` (fresh signals piled up beyond the last nudge). Otherwise **stay silent** (same cycle, no new material — already nudged). On firing, write the current `{count, runs}` back (its own Bash call, best-effort — never blocks the recap):
+**Nudge iff 충분 AND** any of: **(a)** no state file (first time), **(b)** `runs > state.runs` (an evolve ran since the last nudge → new cycle, re-arm), **(c)** `count >= state.count + 5` (a full 충분-worth of *net-new* signal piled up since the last nudge). Otherwise **stay silent** (same cycle, no new material — already nudged). ⚠ **(c) uses `+5`, not a bare `count > state.count`**: when **resolved-elsewhere residuals** (signals closed by a human edit / test fix / refutation rather than an evolve apply) keep the count pinned at 충분, a bare `>` re-fires the nudge on the *very first* new correction after every evolve — the naggy case the human reported. Requiring a full 충분-worth of growth restores the intended "re-fire only on real accumulation." On firing, write the current `{count, runs}` back (its own Bash call, best-effort — never blocks the recap):
 ```bash
 python3 -c "import json,sys; json.dump({'count':int(sys.argv[1]),'runs':int(sys.argv[2])}, open('.claude/guild/memory/review-nudge-state.json','w'))" <count> <runs>
 ```
-(After the human runs `/gld evolve`, consolidation drops `count` below 5 anyway; when it later climbs back to 충분, `runs` has advanced so the nudge re-arms.)
+(After `/gld evolve`, `runs` advances so the next review re-arms once via (b). Consolidation *usually* drops `count`, but **resolved-elsewhere residuals** can keep it pinned at 충분 — the `+5` threshold in (c) prevents that floor from re-firing on every subsequent correction, and evolve's Phase 7 residual-hygiene archives those residuals so the floor itself shrinks over time.)
 
 Nudge text: *"이번 PR까지 신호가 충분히 쌓였습니다 (교정 N·run M) — `/gld evolve`로 조직을 성장시킬 적기입니다."* This is **advisory** — evolve's own Phase 1.5 gate is the authority; the shared deduped count just keeps the nudge from pointing at an evolve that would clearly refuse.
 
