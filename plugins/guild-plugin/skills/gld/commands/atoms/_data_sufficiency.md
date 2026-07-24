@@ -67,8 +67,9 @@ cat .claude/guild/memory/ground-truth.jsonl
 - Print the banner at the **top** of the report. When an axis is low, surface it as a **finding** (*"evolve는 아직 이릅니다 — 신호 N개·run M회"*) but **continue the full diagnosis** — audit is exactly how the human discovers they are thin and what to do about it. Blocking audit would be self-defeating.
 
 ### review (NUDGE — advisory, opt-in)
-- **Axis 1 충분** → at Step 5 (recap), nudge once: *"이번 PR까지 신호가 충분히 쌓였습니다 (교정 N·run M) — `/gld evolve`로 조직을 성장시킬 적기입니다."*
+- **Axis 1 충분** → at Step 5 (recap), nudge: *"이번 PR까지 신호가 충분히 쌓였습니다 (교정 N·run M) — `/gld evolve`로 조직을 성장시킬 적기입니다."*
 - **Axis 1 없음/얕음** → **SILENT** (no evolve nudge). Nagging "아직 부족" every review is noise; the audit banner already covers the accumulation question.
+- **Cooldown (nudge once per evolve cycle)** → the 충분 state persists across many reviews, so even at 충분 **suppress** the nudge if it already fired this cycle with no new material since. Gate on `.claude/guild/memory/review-nudge-state.json` (`{count, runs}` captured at the last nudge, gitignored working tier); re-fire only when an evolve ran (`runs` advanced → new cycle) or the deduped count grew past the last nudge. Keeps the persistent 충분 state from nudging on every single review. Mechanics + Bash: `review.md` Step 5. (audit's banner has no cooldown — it *always* prints its read-only state; only review's actionable nudge needs the throttle.)
 
 ## Section D — Banner format (config.language, top of output, ≤3 lines)
 ```
