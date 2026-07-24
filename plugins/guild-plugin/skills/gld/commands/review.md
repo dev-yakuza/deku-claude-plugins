@@ -97,7 +97,19 @@ python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue
 - Decision prompt: **approve the PR** (M1 external reviewer gate), or request changes → re-loop via `/gld dev $1` or fix directly in the PR.
 - If `$2 == --comment`: post the recap to the PR (temp-file pattern, `<!-- guild:review:output -->` marker) as an async record. Default = session-only.
 
-**Outer-loop nudge (organic — `_data_sufficiency.md`)**: after the decision, compute the **cheap proxy** (Section B — `ground-truth.jsonl` **deduped by area/evidence** + ledger run count; one read each, read-only — dedup so it tracks evolve's count, not a raw line tally). **Only if Axis 1 = 충분** (≥5 anchored signals), nudge once: *"이번 PR까지 신호가 충분히 쌓였습니다 (교정 N·run M) — `/gld evolve`로 조직을 성장시킬 적기입니다."* At **없음/얕음 → stay silent** (no evolve nudge — nagging "아직 부족" every review is noise; `/gld audit`'s banner covers the accumulation question). This is **advisory** — evolve's own Phase 1.5 gate is the authority; the shared deduped count just keeps the nudge from pointing at an evolve that would clearly refuse.
+**Outer-loop nudge (organic — `_data_sufficiency.md`)**: after the decision, compute the **cheap proxy** (Section B — `ground-truth.jsonl` **deduped by area/evidence** + ledger run count; one read each, read-only — dedup so it tracks evolve's count, not a raw line tally). **Only if Axis 1 = 충분** (≥5 anchored signals) do you *consider* nudging; at **없음/얕음 → stay silent** (no evolve nudge — nagging "아직 부족" every review is noise; `/gld audit`'s banner covers the accumulation question).
+
+**Cooldown — nudge once per evolve cycle (re-fire only on growth).** The 충분 state persists across many reviews, so an unconditional nudge fires *every* review until the human runs evolve — naggy. Gate it on a tiny local state file `.claude/guild/memory/review-nudge-state.json` (gitignored working tier — same tier as `ground-truth.jsonl`) holding `{"count": <deduped count at last nudge>, "runs": <ledger run count at last nudge>}`. Read it as its own Bash call (absent file → no prior nudge):
+```bash
+cat .claude/guild/memory/review-nudge-state.json
+```
+**Nudge iff 충분 AND** any of: **(a)** no state file (first time), **(b)** `runs > state.runs` (an evolve ran since the last nudge → new cycle, re-arm), **(c)** `count > state.count` (fresh signals piled up beyond the last nudge). Otherwise **stay silent** (same cycle, no new material — already nudged). On firing, write the current `{count, runs}` back (its own Bash call, best-effort — never blocks the recap):
+```bash
+python3 -c "import json,sys; json.dump({'count':int(sys.argv[1]),'runs':int(sys.argv[2])}, open('.claude/guild/memory/review-nudge-state.json','w'))" <count> <runs>
+```
+(After the human runs `/gld evolve`, consolidation drops `count` below 5 anyway; when it later climbs back to 충분, `runs` has advanced so the nudge re-arms.)
+
+Nudge text: *"이번 PR까지 신호가 충분히 쌓였습니다 (교정 N·run M) — `/gld evolve`로 조직을 성장시킬 적기입니다."* This is **advisory** — evolve's own Phase 1.5 gate is the authority; the shared deduped count just keeps the nudge from pointing at an evolve that would clearly refuse.
 
 ## Notes
 - **Works on any open PR — agent-authored or human-authored.** Pass the PR number. For human PRs the "왜" is inferred (PR description/commits/diff) or asked; the AC table is skipped. The paced walkthrough + scrutiny is identical.

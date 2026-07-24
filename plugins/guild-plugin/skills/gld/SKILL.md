@@ -47,7 +47,7 @@ CLAUDE.md                      # advisory: repo map + verification commands + kn
 .claude/guild/
   config.json                  # Guild settings (managed by /gld config)
   knowledge/                   # ⑥ codebase facts: index.md (always loaded) + facts/ (retrieved relevant-only). init seeds a baseline; evolve grows it
-  memory/                      # ④ episodic working tier (gitignored → local per-clone, low-trust): ground-truth.jsonl (captured signals, read at runtime by pre-flight Item 8) + consolidated.jsonl (archive of entries evolve grew into ③/⑥) + gate-firings.jsonl (gate firing log feeding the evolve rule scorecard)
+  memory/                      # ④ episodic working tier (gitignored → local per-clone, low-trust): ground-truth.jsonl (captured signals, read at runtime by pre-flight Item 8) + consolidated.jsonl (archive of entries evolve grew into ③/⑥) + gate-firings.jsonl (gate firing log feeding the evolve rule scorecard) + review-nudge-state.json (review's evolve-nudge cooldown — {count, runs} at last nudge, so the 충분 state doesn't nudge every review)
   evolution-log.md             # evolution ledger — used by evolve later
 docs/standards/                # charter, architecture, conventions, quality-bar, verification (init drafts; status: draft|confirmed)
 docs/adr/ , docs/specs/
