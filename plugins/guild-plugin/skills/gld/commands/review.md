@@ -97,7 +97,11 @@ python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue
 - Decision prompt: **approve the PR** (M1 external reviewer gate), or request changes → re-loop via `/gld dev $1` or fix directly in the PR.
 - If `$2 == --comment`: post the recap to the PR (temp-file pattern, `<!-- guild:review:output -->` marker) as an async record. Default = session-only.
 
-**Outer-loop nudge (organic — `_data_sufficiency.md`)**: after the decision, compute the **cheap proxy** (Section B — `ground-truth.jsonl` **deduped by area/evidence** + ledger run count; one read each, read-only — dedup so it tracks evolve's count, not a raw line tally). **Only if Axis 1 = 충분** (≥5 anchored signals) do you *consider* nudging; at **없음/얕음 → stay silent** (no evolve nudge — nagging "아직 부족" every review is noise; `/gld audit`'s banner covers the accumulation question).
+**Outer-loop nudge (organic — `_data_sufficiency.md`)**: after the decision, **first check the off-switch** — read `.claude/guild/config.json` (its own Bash call) and if `automation.evolve_nudge` is **`false`, stay silent entirely** (the human turned the evolve nudge off — re-enable with `/gld config --evolve-nudge=on`; do **not** read the state file, compute the proxy, or evaluate the cooldown). Only if it is **`true`** (or the key is absent → default-on) proceed:
+```bash
+cat .claude/guild/config.json
+```
+compute the **cheap proxy** (Section B — `ground-truth.jsonl` **deduped by area/evidence** + ledger run count; one read each, read-only — dedup so it tracks evolve's count, not a raw line tally). **Only if Axis 1 = 충분** (≥5 anchored signals) do you *consider* nudging; at **없음/얕음 → stay silent** (no evolve nudge — nagging "아직 부족" every review is noise; `/gld audit`'s banner covers the accumulation question).
 
 **Cooldown — nudge once per evolve cycle (re-fire only on growth).** The 충분 state persists across many reviews, so an unconditional nudge fires *every* review until the human runs evolve — naggy. Gate it on a tiny local state file `.claude/guild/memory/review-nudge-state.json` (gitignored working tier — same tier as `ground-truth.jsonl`) holding `{"count": <deduped count at last nudge>, "runs": <ledger run count at last nudge>}`. Read it as its own Bash call (absent file → no prior nudge):
 ```bash

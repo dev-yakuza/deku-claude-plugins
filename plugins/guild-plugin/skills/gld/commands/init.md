@@ -120,14 +120,14 @@ Create via Write tool:
   "language": "<lang from $1>",
   "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
-  "automation": { "evolve_nudge": false },
+  "automation": { "evolve_nudge": true },
   "gates": { "enabled": true }
 }
 ```
 - `commands.*` values are the **normalized, simple-bash-safe** forms from command-scan (see `scan_repo.md` Section 2): each is either a single simple command string, or an **array** of simple commands run in sequence. They MUST NOT contain `$(...)`, `&&`, `|`, `;`, or redirections — Guild runs them one per Bash call. (e.g. `flutter test --fail-fast --concurrency=$(nproc --all)` → store `"flutter test --fail-fast"`; `flutter analyze && npx remark . --quiet --frail` → store `["flutter analyze", "npx remark . --quiet --frail"]`.) A missing category → `null`.
 - `commands.e2e` records the detected integration/E2E command (e.g. `flutter test integration_test`). **M1 detects and records it but does NOT auto-run E2E** (test stage runs unit/existing tests only — plan §18 B; E2E auto-run is a later milestone). Recording it here keeps the info from being lost and lets a human run it manually.
 - `roles` lists the **full installed roster** (16) — the spine roles plus every participation/gate specialist. It records who is *available*; the leader decides who *participates* per task (`_handoff.md` Section G). Keep it in sync with the agents actually written in step 2.
-- `gates.enabled` (M3) is the **off-switch** for the enforcement layer — `true` = the pre-commit gate blocks (secret / verification-weakening); `false` = advisory only (plan §11 off-switch). `automation.evolve_nudge` is still a placeholder.
+- `gates.enabled` (M3) is the **off-switch** for the enforcement layer — `true` = the pre-commit gate blocks (secret / verification-weakening); `false` = advisory only (plan §11 off-switch). `automation.evolve_nudge` (default `true`) is the **off-switch for the review-stage evolve nudge** (`review.md` Step 5) — `false` silences it entirely; toggle via `/gld config --evolve-nudge=<on|off>`.
 
 ### 2. Role agents (the Guild's full roster — 16)
 Install the **entire roster** so the leader can assemble any of them per task (plan §18 D — "전 역할 활성화; init이 로스터 전체 설치, 리더가 태스크별 조건부 참여"). The roster has three participation kinds (documented in `_handoff.md` Section G):

@@ -5,7 +5,7 @@
 Parse `$1` onward:
 - No arguments → **show current config**.
 - `--language=<code>` → set `language` (`en`/`ko`/`ja`).
-- `--evolve-nudge=<on|off>` → set `automation.evolve_nudge`. The `/gld evolve` command exists (M2, proposal-only) but the **automatic** nudge is not yet wired — evolve is run manually; the dial exists so the off-switch is available early.
+- `--evolve-nudge=<on|off>` → set `automation.evolve_nudge` (default `on`). This dial gates the **review-stage evolve nudge** (`review.md` Step 5 — the advisory "신호가 충분히 쌓였습니다, `/gld evolve` 적기" reminder). `off` silences it entirely; the review nudge reads this flag before evaluating its 충분/cooldown gate. (evolve itself is always run manually — there is no *automatic* evolve trigger; this switch only controls the reminder.)
 - `--gates=<on|off>` → set `gates.enabled` (M3 강제층 off-switch). `off` makes the pre-commit gate advisory (no blocking) — the escape hatch (plan §11). `on` (default) blocks secret / verification-weakening commits.
 - Other keys → report "unknown/unsupported config key" and list the supported ones.
 
@@ -26,7 +26,7 @@ Parse `$1` onward:
                specialists: product-owner, designer, infra, dba, security,
                performance, i18n, analytics, tech-writer, release-manager, support-triage
    commands:   test=<...> lint=<...> typecheck=<...> build=<...>
-   automation: evolve_nudge=off
+   automation: evolve_nudge=on
    gates:      enabled=on (pre-commit: secret + verification-weakening block)
    ```
    (Render the `roles` array from config; the spine roles always run, specialists are convened per task by the leader.)
