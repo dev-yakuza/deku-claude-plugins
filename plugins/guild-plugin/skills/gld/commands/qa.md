@@ -68,6 +68,19 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
   <!-- /guild:manual-qa -->
   ```
 
+## Step 2.6 — Deferred follow-up scan (design docs → tracked issues) — MANDATORY when design artifacts exist
+**Design docs self-flag out-of-scope work as deferred/follow-up** (e.g. tech-lead's skeleton.md "기술 부채 / 의식적 유예" section, a DBA/designer note proposing a later issue). Without this step nothing ensures those notes become **trackable** work — they can sit in `docs/specs/$1/` indefinitely, invisible past the PR that introduced them. (This gap was surfaced by a human catching it manually during `/gld review` — the exact failure mode this step exists to close.)
+
+- **Applies only if `docs/specs/$1/` has design artifacts** (an analyze-only issue with no design docs skips this step).
+- As the leader, read the design artifacts and identify items the authoring role explicitly deferred as **real, wanted work, deliberately not done in this issue**. This is a **judgment read, not a fixed-string grep** (`config.language` phrasing varies — a Korean repo might say "후속 이슈 제안", an English one "follow-up issue" or "out of scope for now, revisit later").
+- **Do NOT count**: conditional/triggered deferrals with no concrete next action yet ("extract a shared helper if a 2nd similar case appears" — nothing to file until the trigger fires), items already resolved later in the same flow (design worried about X, execute/test proved it fine), or the AC's own stated non-goals (already the issue's explicit scope boundary, not a gap).
+- For each real deferred item, **search existing issues** (`gh issue list --repo <owner>/<repo> --search "<keywords>" --state all`) for one that already covers it — dedupe by intent, not exact title match.
+- **Unfiled items found** → do not auto-create (issue creation is visible/durable — the human decides, same posture as `init.md`'s harness-gap remediation). Instead:
+  - **Attended**: list them to the human in one batched prompt — "설계 산출물이 남긴 후속 항목 N개, 아직 이슈 없음: ① … ② … — 지금 이슈로 만들까요?" (localized per `config.language`). On confirmation, create via the temp-file `gh issue create --body-file` pattern — title = the gap, body = 배경·AC(안)·근거(design doc file + section), `Depends on: #$1` — labeling with the repo's existing `type:*`/`area:*` labels where a clear match exists.
+  - **Unattended** (`GLD_UNATTENDED=1`): never auto-create — append the list to the `<!-- guild:qa:output -->` comment under a `### 미등록 후속 항목` heading so the deferred human review (PR + merge, INV1) sees it; do not block `done` on it.
+- **No unfiled items** (all covered, or none real) → say so in one line, no further action. Cheap when clean — do not force ceremony on a change with no design docs or no real deferrals.
+- This runs **once per issue, at QA** — not repeated at `review`. QA is the mandatory spine stop every `/gld dev` run passes through; `review` is on-demand (nudged, not forced) and would miss unattended/batch runs entirely if this lived there instead.
+
 ## Step 3 — Judge + return
 - **QA passed** (agent-doable checks green + UI/UX gate passed or not applicable + human-QA items clearly flagged + quality-bar met) → transition to done:
   ```bash
@@ -96,4 +109,5 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
 - **Risk-based depth, never blanket skip** — always a judgment with a reason.
 - **Honesty of scope** (both directions: results + coverage), per `_handoff.md` Section E.
 - **Manual Test Checklist → PR body is mandatory when ≥1 human-QA item exists** (Step 2.5) — including on a no-new-findings re-run. A platform/real-device/manual item flagged "권장/미검증" still counts; the qa comment alone does not satisfy this — the item MUST be in the PR body where the human merges.
+- **Deferred follow-up scan is mandatory when design artifacts exist** (Step 2.6) — a design doc's self-flagged tech-debt/deferred-work note is not "handled" until it's either matched to an existing issue or surfaced for filing; it must not silently rot in `docs/specs/$1/`.
 - Read-only against source (QA observes; fixes go back through execute). *(The one exception: Step 2.5 edits the open PR **body** — a doc surface, not source — to carry the human checklist.)*
