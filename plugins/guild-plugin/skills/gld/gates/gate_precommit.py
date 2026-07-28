@@ -89,7 +89,10 @@ INLINE_SECRET_RES = [
 ]
 TEST_PATH_RE = re.compile(r"(^|/)(test|tests|__tests__|spec)/|_test\.|\.test\.|\.spec\.", re.IGNORECASE)
 ASSERT_RE = re.compile(r"\b(assert|expect|verify|should|test|it)\b\s*\(", re.IGNORECASE)
-SKIP_RE = re.compile(r"\b(xit|xdescribe|\.skip|@Skip|@Ignore|@Disabled|pytest\.mark\.skip|todo!\()", re.IGNORECASE)
+SKIP_RE = re.compile(
+    r"\b(xit|xdescribe|\.skip|pytest\.mark\.skip|todo!\()"
+    r"|(?<![\w.])@(Skip|Ignore|Disabled)\b",  # IGNORECASE 의도적 — @skip 등 소문자/혼용도 차단
+    re.IGNORECASE)
 
 
 def sh(args):
