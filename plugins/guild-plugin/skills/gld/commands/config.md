@@ -20,12 +20,14 @@ Parse `$1` onward:
    ```
    Guild config (.claude/guild/config.json)
    ────────────────────────────────────────
-   version:    0.30.3
+   version:    <config.json's actual "version" field — never a literal copied from this doc>
    language:   ko
    roles:      16 — spine: leader, tech-lead, developer, tester, qa
                specialists: product-owner, designer, infra, dba, security,
                performance, i18n, analytics, tech-writer, release-manager, support-triage
-   commands:   test=<...> lint=<...> typecheck=<...> build=<...>
+   commands:   test=<...> lint=<...> typecheck=<...> build=<...> e2e=<...>
+               (e2e is auto-run by the qa stage when available/warranted; the test
+               stage's own automated-correctness pass never runs it — test.md's scope)
    automation: evolve_nudge=on
    gates:      enabled=on (pre-commit: secret + verification-weakening block)
    ```
@@ -45,3 +47,4 @@ Parse `$1` onward:
 ## Notes
 - M1 config schema is a **versioned subset** (plan §18 C): `{ version, language, roles[], commands{}, automation{evolve_nudge}, gates{} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
 - `roles` is edited by init (and by evolve HR later), not by `config` in M1 — editing the active roster manually is possible but unsupported as a config command yet.
+- `commands` (test/lint/typecheck/build/e2e) has the **same gap**: it's part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for it — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.

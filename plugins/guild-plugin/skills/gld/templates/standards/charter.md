@@ -5,7 +5,7 @@ updated: {{DATE}}
 ---
 # Charter — {{PROJECT_NAME}}
 
-> 에이전트 판단의 **북극성**. 갈림길에서 밸류로 정렬한다. init의 인터뷰(P1.5)가 캡처하고, 역할 에이전트·discuss·verify가 참조한다. `status: confirmed`가 되면 게이트의 기준이 된다.
+> 에이전트 판단의 **북극성**. 갈림길에서 밸류로 정렬한다. init의 인터뷰(P1.5)가 캡처하고, 역할 에이전트·discuss·verify가 판단 근거로 참조한다. ⚠️ `status: confirmed`는 이 문서를 판단의 권위 있는 근거로 격상시킬 뿐, 그 자체로 어떤 기계적 게이트를 켜지는 않는다 — 실제로 강제되는 게이트는 `gate_precommit.py`의 시크릿·검증약화 체크와 `.claude/guild/gates/rules/boundaries.md` 자체의 `status`뿐이며, 둘 다 이 charter.md의 상태와 무관하게 독립적으로 동작한다.
 
 ## 미션 (Mission)
 {{MISSION}}

@@ -31,7 +31,7 @@ Two durable failure sources (`_signals.md` Section A · plan §8 scan_failures r
    - Extract the gap findings with their severity (BLOCKER / MAJOR / MINOR) and map each: verification gaps (no tests / no coverage) → ⑥ / gate · static-gate gaps (no linter / typecheck) → gate (fail-to-rule) · committed-secret → gate / security · label/CI gaps → routing.
    - Absent → `readiness_gaps: []` (the report is written by `/gld init` P3.5; a repo may predate it). Not a failure.
 
-3. *(optional, bounded)* **Gate findings** — if `.claude/guild/gates/findings.json` exists (later milestone), read open violations and fold them in. Absent in M1/M2 → skip silently.
+3. *(optional, bounded)* **Gate findings** — `.claude/guild/gates/findings.json` is seeded by every `/gld init` and kept current by `gate_precommit.py` (rewritten on every commit, cleared to `{"open": []}` once a prior violation is resolved) — read open violations and fold them in. If genuinely absent (e.g. a pre-init repo state) → skip silently.
 
 ---
 

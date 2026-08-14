@@ -1,6 +1,6 @@
 # AUDIT: readiness (shared diagnostic)
 
-**Read-only harness-readiness diagnostic.** Checks whether the repo has what `/gld` needs to work well, and returns structured findings with severity + remediation. **Reused by**: `init` P3.5 (first run at onboarding) and the future `/gld audit` command (re-run with scoring/trend). This atom does **not** modify anything, install tools, or create issues — those are the caller's HITL actions.
+**Read-only harness-readiness diagnostic.** Checks whether the repo has what `/gld` needs to work well, and returns structured findings with severity + remediation. **Reused by**: `init` P3.5 (first run at onboarding) and `/gld audit` (re-run with scoring/trend). This atom does **not** modify anything, install tools, or create issues — those are the caller's HITL actions.
 
 > **Bash**: simple calls only (`_bash_rules.md`). Codebase discovery via Grep/Glob/Read. **Read-only**: no Edit/Write (except the caller's report file), no installs, no git mutations.
 
@@ -22,8 +22,8 @@ Return one `>>> RESULT <<<` line followed by a findings JSON:
 Keep each field to one line. `present: true` = the thing exists (not a gap — omit or mark ok); only emit gap findings.
 
 ## Severity rubric (plan §9)
-- **BLOCKER** — breaks Guild's core loop (e.g. no test command at all → verify gate cannot function).
-- **MAJOR** — significantly weakens the harness (no CI, no E2E for an app that needs it, no `type:` labels, linter absent, committed secret).
+- **BLOCKER** — breaks Guild's core loop or exposes a real secret (e.g. no test command at all → verify gate cannot function; a committed/inline secret → active leak, INV5).
+- **MAJOR** — significantly weakens the harness (no CI, no E2E for an app that needs it, no `type:` labels, linter absent).
 - **MINOR** — nice-to-have (coverage tooling, formatter, .gitignore gaps).
 
 ---
@@ -31,6 +31,7 @@ Keep each field to one line. `present: true` = the thing exists (not a gap — o
 ## Group 1 — 검증 신호 (verification signal)
 The verify gate judges completion by real test evidence — without tests it is toothless.
 - **Unit tests present?** Glob the test dir(s) (`test/`, `tests/`, `__tests__/`, `*_test.*`, `*.test.*`). None → `id: no-unit-tests`, **BLOCKER** (feature repos) / MAJOR (libs). why: "verify 게이트가 검증할 테스트가 없음".
+  - **feature-repo vs lib classification** (from the P1 structure/stack scan — no new reads): a repo is a **lib** when its package manifest declares a publishable library with no runnable app target — e.g. a `package.json` with no `"scripts".start`/no `bin` and a `main`/`exports` field, a Python `pyproject.toml`/`setup.py` with no console-script/CLI entrypoint, a `pubspec.yaml` with no `flutter` app section (a pure Dart package). **Everything else — anything with a runnable app/binary/service target — is a feature repo** (the default when the manifest is ambiguous or absent, since an unrunnable-but-untested repo is the higher-risk case). State which one was detected and why in the finding's `why` field so the severity choice is auditable.
 - **`test` command valid?** config `commands.test` present and points at a real runner? Missing → `id: no-test-command`, BLOCKER.
 - **E2E / integration present?** From command-scan `e2e` / `integration_test/`·`e2e/`·cypress·playwright. Absent → `id: no-e2e`, MAJOR (surface it; do NOT run — M1 records only).
 - **Coverage tooling?** lcov/coverage config, `--coverage` flag usage. Absent → `id: no-coverage`, MINOR.
@@ -51,17 +52,17 @@ Guild's work-type routing needs labels; `dev` operates on Issues.
 - **Issue templates?** `.github/ISSUE_TEMPLATE/`. Absent → `id: no-issue-templates`, MINOR.
 - **`type:` labels?** Query labels:
   ```bash
-  gh label list --limit 200 --json name --jq '[.labels[]?.name] // [.[].name]'
+  gh label list --limit 200 --json name --jq '[.[].name]'
   ```
-  (Adjust to the available shape.) Missing `type:feature`/`type:bug`/`type:refactor` → `id: no-type-labels`, MAJOR. why: "작업종류 라우팅(analyze의 재분류)이 라벨에 의존".
+  `gh label list --json name` already returns a flat top-level array of `{"name":...}` objects — indexing it as `.labels[]` (an earlier version of this doc did) errors out (`jq: error ... Cannot index array with string`, exit 5) before the whole command produces any output; verified against the real `jq` binary. Missing `type:feature`/`type:bug`/`type:refactor` → `id: no-type-labels`, MAJOR. why: "작업종류 라우팅(analyze의 재분류)이 라벨에 의존".
 
 ## Group 5 — 위생 (hygiene) — light heuristic (read-only)
 ⚠ This is a **light heuristic**, not a full secret scan (real scanning = gitleaks/trufflehog/Semgrep, offered as an opt-in deep step by the caller — plan §11 later milestone). State this limitation in findings.
-- **Committed sensitive files?** Check whether git *tracks* sensitive paths (each its own Bash call, read-only):
+- **Committed sensitive files?** Check whether git *tracks* sensitive paths (each its own Bash call, read-only). **Quote every pattern** — unquoted globs are expanded by the shell before `git ls-files` ever sees them, and under zsh's default `NOMATCH` option an unquoted pattern that matches nothing **aborts the whole command with an error** (verified: `git ls-files .env.*` with no `.env.*` file present exits 1 with "no matches found," not an empty/clean result) — since this environment's shell may be zsh, an unquoted call here can silently skip this BLOCKER-severity check entirely on any repo where even one of these globs happens to match zero files, exactly the failure mode a security-relevant check must not have:
   ```bash
-  git ls-files .env .env.* *.pem *.p12 *.keystore *.jks serviceAccount*.json google-services.json
+  git ls-files '.env' '.env.*' '*.pem' '*.p12' '*.keystore' '*.jks' 'serviceAccount*.json'
   ```
-  Any tracked → `id: committed-secret-file`, **BLOCKER**, why: "레포/히스토리 시크릿 = 유출 경로(T4/INV5)". remediation: "gitignore+`git rm --cached`(향후), 키 회전·히스토리 정리는 사람이 수행".
+  ⚠ **Do NOT include `google-services.json`/`GoogleService-Info.plist`/`firebase_options.dart` in this check** — these are Flutter/Firebase **public client identifiers**, conventionally committed, and `gate_precommit.py`'s own `SECRET_PATH_ALLOW_RE` explicitly excludes them from the equivalent commit-time check; flagging them here would contradict that and train the human to distrust/dismiss this finding. Any hit (from the query above) → `id: committed-secret-file`, **BLOCKER**, why: "레포/히스토리 시크릿 = 유출 경로(T4/INV5)". remediation: "gitignore+`git rm --cached`(향후), 키 회전·히스토리 정리는 사람이 수행".
 - **Obvious in-source tokens?** Bounded Grep for high-signal patterns (`AKIA[0-9A-Z]{16}`, `-----BEGIN * PRIVATE KEY-----`, `AIza[0-9A-Za-z_-]{35}`). Hits → `id: inline-secret`, BLOCKER (flag file+line; do NOT print the secret value). Keep bounded (≤ a few Grep calls).
 - **.gitignore coverage?** Read root `.gitignore`. Missing coverage for `.env`, build artifacts, or `.claude/guild/memory/` → `id: gitignore-gap`, MINOR. (Note: init already writes `.claude/guild/.gitignore` for `memory/`; this checks the project root file.)
 

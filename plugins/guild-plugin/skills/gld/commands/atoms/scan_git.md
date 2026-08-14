@@ -33,9 +33,9 @@ Default window ≈ last 80–120 commits (keep it modest); the caller may pass a
 
 Generated-asset paths (`assets/`, `*.svg`, `*.png`, golden dirs, `*.g.dart`/`*.freezed.dart`, lockfiles) are churn-*noise*, not bug hotspots — the kill-gate explicitly distinguished this. Never let them dominate the ranking.
 
-1. **Fix concentration** — where `fix:` commits cluster (conventional `fix:` = a past bug). Scoped to the source dir from Step 0 (substitute the literal, e.g. `lib`):
+1. **Fix concentration** — where `fix:` commits cluster (conventional `fix:` = a past bug). Scoped to the source dir from Step 0 (substitute the literal, e.g. `lib`). ⚠ `--grep` matches anywhere in the full commit message (subject + body), not just the subject start — a bare `--grep=^fix` false-positives on any commit whose *body* happens to contain a line starting with "fix" (e.g. a body line "Fixture data…" or "fixing the typo…" on an otherwise unrelated `feat:`/`docs:` commit). Anchor to the conventional-commit prefix shape (`fix:` or `fix(scope):`) instead, which the body rarely reproduces by coincidence:
    ```bash
-   git log --name-only --pretty=format: --grep=^fix -i -80 -- lib
+   git log --name-only --pretty=format: --grep='^fix[(:]' -i -80 -- lib
    ```
    Identify the ~8 most-frequently-appearing source paths (approximate ranking by eye). Group nearby files into their area/layer.
 
@@ -52,9 +52,9 @@ Generated-asset paths (`assets/`, `*.svg`, `*.png`, golden dirs, `*.g.dart`/`*.f
    ```
    Determine the prevailing convention (prefix scheme, language, em-dash, version-bump format) and roughly what fraction of recent subjects follow it. List a few concrete violators if the convention is otherwise near-universal (a small violation set = a `conventions.md` candidate; near-100% coverage = no signal).
 
-4. **Reverts** — explicit reverts (a change that was undone = a correction):
+4. **Reverts** — explicit reverts (a change that was undone = a correction). ⚠ A bare case-insensitive `--grep=revert` false-positives heavily — `--grep` searches the full message including the body, so any commit whose body merely *discusses* revert-related work (e.g. this very plugin's own commits documenting a revert feature) matches even though it isn't itself a revert. Anchor to `git revert`'s actual auto-generated subject prefix instead (`Revert "<original subject>"`, always this exact capitalization):
    ```bash
-   git log --grep=revert -i --oneline -100
+   git log --grep='^Revert ' --oneline -100
    ```
    Report each revert's short SHA + subject. If a `fix:` commit lands on the *same paths* immediately after another `fix:` (fix-on-fix), note it as a weaker revert-like signal.
 

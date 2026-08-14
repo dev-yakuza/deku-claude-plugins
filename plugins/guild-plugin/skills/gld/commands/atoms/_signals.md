@@ -1,6 +1,6 @@
 # SIGNALS: capture & ground-truth (shared contract)
 
-**Not a stage.** Foundation for the growth loop (plan §8 evolve · 부록 B "성장 엔진 ① 토대"). Defines (1) the signal taxonomy evolve/audit read from, (2) which signals are read **on-demand** vs **captured at occurrence**, (3) the ground-truth log format + location, (4) graceful degradation + the ground-truth **anchor** rule. Read by the future `/gld evolve`·`/gld audit` and by the gate-capture points wired into the spine. **① 토대 = 흔적·ground-truth 포착** — validated by the M2 kill-gate on real word_app data (2026-07-11, PASS).
+**Not a stage.** Foundation for the growth loop (plan §8 evolve · 부록 B "성장 엔진 ① 토대"). Defines (1) the signal taxonomy evolve/audit read from, (2) which signals are read **on-demand** vs **captured at occurrence**, (3) the ground-truth log format + location, (4) graceful degradation + the ground-truth **anchor** rule. Read by `/gld evolve`·`/gld audit` and by the gate-capture points wired into the spine. **① 토대 = 흔적·ground-truth 포착** — validated by the M2 kill-gate on real word_app data (2026-07-11, PASS).
 
 > **Bash**: simple calls only (`_bash_rules.md`) — **except** the bundled transcript parser (`scan_transcript.py`), which runs as ONE `python3` command (its jq-like parsing would otherwise violate atomic-bash — plan §8 정정). Read-only everywhere it reads; the only sanctioned writes are append-to-ground-truth-log at the Section C capture points.
 
@@ -48,9 +48,10 @@ Ephemeral signals are appended to the ground-truth log **at the moment they occu
 
 **Append mechanism** = `capture_signal.py`, run as ONE bash call (atomic-bash forbids `>>` — same bundled-command exception as the parser):
 ```bash
-python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction|verify-gap|revert \
+python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind <correction|verify-gap|stagnation|accepted-risk> \
   --issue <n> --stage <stage> --role <role> [--area "<path/keyword>"] --summary "<=1 line" --evidence "<=1 line" [--surprise]
 ```
+(`--kind` is a single value, one of the four listed — the `<...|...>` is this doc's placeholder notation for "pick one," not literal syntax; do not pass a raw `|` to the script. `revert` is deliberately not a valid value here — see the table row below.)
 It appends one line to `.claude/guild/memory/ground-truth.jsonl` (Section D), creating the dir if missing, and never crashes the caller (a logging failure warns and exits non-zero without blocking the spine).
 
 **`--area` (optional but recommended)** = the path-prefix or short area keyword the signal touches (e.g. `lib/theme`, `auth`, `db/schema`). It is the **retrieval key for runtime working-memory** (`_preflight.md` Item 8 — the ④ episodic tier is read back at pre-flight and matched by area, mirroring ⑥ knowledge retrieval). Each capture point should pass the area it already knows (the Issue's area / target dir / changed file). Absent → the entry still logs; runtime retrieval falls back to role+recency matching.
@@ -67,10 +68,11 @@ It appends one line to `.claude/guild/memory/ground-truth.jsonl` (Section D), cr
 - **Commit vs gitignore is still open** (plan 부록 B ⓐ — team-share benefit vs leak/noise risk). ① keeps it gitignored (matches init default = lowest risk); revisit when the working-tier read is built.
 - **Entry schema** (one line each):
   ```json
-  {"ts":"<iso8601>","kind":"correction|verify-gap|revert|accepted-risk|stagnation","issue":<n|null>,"stage":"<stage>","role":"<role|null>","area":"<path/keyword|null>","summary":"<=1 line","evidence":"<=1 line, concrete","surprise":true|false,"escalated":true|false}
+  {"ts":"<iso8601>","kind":"correction|verify-gap|accepted-risk|stagnation","issue":<n|null>,"stage":"<stage>","role":"<role|null>","area":"<path/keyword|null>","summary":"<=1 line","evidence":"<=1 line, concrete","surprise":true|false,"escalated":true|false}
   ```
   - `area` = the retrieval key for runtime working-memory (항목 1 / `_preflight.md` Item 8). Optional; null when the signal isn't tied to a path (e.g. a scope-interpretation correction).
   - `surprise:true` when the human overturned a choice the agent was confident in, **or** a claimed-pass was actually red (plan §8-A — this is the ranking lever the kill-gate validated: A1 "guard existed yet bug escaped", A3 "confident work reversed" ranked top).
+  - **Ranking precedence when both apply (reconciles this section with `scan_corrections.md`'s `human > stagnation > cross-role > verify-gap` kind-hierarchy)**: `surprise` is the **primary** sort key (it is what the kill-gate actually validated); the kind-hierarchy is a **secondary tiebreaker used only among entries that tie on `surprise`** — i.e. rank all `surprise:true` entries above all `surprise:false` entries first, then within each of those two groups, order by `human > stagnation > cross-role > verify-gap`. This resolves the previously-undocumented case of a low-confidence human override (`surprise:false`) vs. an agent↔agent reversal (`surprise:true` — true for the design/implement/qa agent↔agent captures, which set it unconditionally per Section C's table; **not** true for every Section C row — the review-stage adversarial-finding capture is conditional, `surprise` only when the acted-on finding was BLOCKER/MAJOR, per Section C's own table above) — under this rule the surprise:true cross-role entry ranks above the surprise:false human entry, since surprise is primary.
   - `escalated:true` when this loop-back's retry ran at a bumped model tier (`_model_tiering.md` Section A/B) — read by evolve's model-tier scorecard (`_model_tiering.md` Section C) to gauge how often a role/stage combo needed more than its default tier. Defaults `false`; unrelated to `surprise`.
   - `evidence` names the concrete artifact (commit / comment / runner line); never paste bulk.
 - **Read** on-demand by evolve/audit alongside the durable signals. It is the **only** persisted trace — everything else is re-derived. Treated as **advisory, low-weight** until evolve promotes an item with corroborating ground truth (plan §5 2-tier safety; a wrong entry perturbs at most the next single run, never the authority store).
@@ -107,6 +109,6 @@ python3 <<SKILL_DIR>>/commands/atoms/scan_transcript.py --repo-cwd <abs-repo-pat
 ## Hard rules
 - **Durable-first**: a transcript failure never blocks the growth loop — degrade to git/CI/gate.
 - **Anchor everything** to an objective outcome or a real human action (Section B). Self-review ≠ ground truth.
-- **Capture is append-only, minimal, at-occurrence** (Section C) — never a heavy inline scan on the spine.
+- **Capture is append-only, minimal, at-occurrence** (Section C) — never a heavy inline scan on the spine. ⚠ **One sanctioned exception**: `evolve`'s Phase 7 consolidation bridge (`evolve.md`) periodically moves entries out of `ground-truth.jsonl` into `consolidated.jsonl` once they're durably captured elsewhere (③/⑥/gates) — this is a rewrite, not an append, but it's the one place outside the Section C capture points allowed to touch this file, and only evolve (an occasional, human-supervised run) does it.
 - The ground-truth log is **advisory / low-weight** until evolve promotes with corroboration (HITL — INV1: application always needs human approval).
 - **Nothing here weakens verification** (INV2): the verify gate's behavior (`_handoff.md` Section E) is unchanged; ① only *logs* the gap it already computes.

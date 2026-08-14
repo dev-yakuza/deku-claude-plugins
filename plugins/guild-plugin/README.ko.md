@@ -23,7 +23,7 @@ claude /plugin install deku-claude-plugins@guild-plugin
 ## 빠른 시작
 
 ```bash
-/gld init            # 레포 분석·온보딩 → 하네스 + 창립 Guild 에이전트 + standards + ⑥ 베이스라인 (일회성)
+/gld init            # 레포 분석·온보딩 → 하네스 + 창립 Guild 에이전트 + standards + ⑥ 베이스라인 + 준비도 감사 → guild:harness 이슈 (일회성)
 /gld dev 123         # GitHub 이슈 #123 전체 개발 (feature/bug/refactor 자동 선택)
 /gld status 123      # 진행 확인   ·   /gld resume 123 이어하기
 /gld audit           # 하네스+팀+코드베이스 read-only 건강검진
@@ -32,9 +32,9 @@ claude /plugin install deku-claude-plugins@guild-plugin
 
 ## 커맨드
 
-**설정** — `init [lang]`(일회성 온보딩) · `config`(다이얼·오프스위치) · `update [--check]`(중앙 개선 채택, 로컬 진화 보존)
+**설정** — `init [lang]`(일회성 온보딩, 하네스 구축 + 준비도 감사) · `onboard [area]`(사람 유지보수자를 위한 가이드 코드베이스 투어) · `config`(다이얼·오프스위치) · `update [--check]`(중앙 개선 채택, 로컬 진화 보존)
 
-**개발** (척추: analyze → design → execute → test → qa) — `dev <issue>`(전체 흐름, execute 변종 자동 선택) · `analyze` · `design` · `implement`(기능) · `debug`(버그: 재현→근본원인→수정) · `refactor`(동작 보존) · `test` · `qa` · `review <issue>`(가이드 페어리뷰 + 적대적 프리스캔) · `resume` · `status` · `batch [issues]`(무인, rate-limit 자동재개)
+**개발** (척추: analyze → design → execute → test → qa) — `plan <doc|epic-issue> [--create]`(에픽/설계 문서를 의존성 순서의 이슈 백로그로 분해) · `dev <issue>`(전체 흐름, execute 변종 자동 선택) · `analyze` · `design` · `implement`(기능) · `debug`(버그: 재현→근본원인→수정) · `refactor`(동작 보존) · `test` · `qa` · `review <issue|PR>`(가이드 페어리뷰 + 적대적 프리스캔, 이슈 번호뿐 아니라 PR 번호도 직접 지원) · `resume` · `status` · `batch [issues]`(무인, rate-limit 자동재개)
 
 **진단·성장** — `audit`(read-only, evolve/refactor로 라우팅) · `evolve [--dry-run|--apply]`(스캔 → 적대적 패널 → 항목별 승인 → 백업/롤백/provenance/ledger로 적용) · `contribute`(흐름 개선 업스트림)
 
@@ -51,6 +51,7 @@ Guild는 자기수정 시스템이므로 안전은 권고가 아니라 결정적
 - **INV3 — 모든 것은 가역**(git · `/gld rollback` · evolve 검증 실패 시 자동 롤백).
 - **INV4 — additive, 로컬 진화를 덮지 않음**(에이전트·지식·standards·overlay).
 - **INV5 — sanitize 없이 기기 밖으로 안 나감**(`contribute`는 sanitize + dedup + 사람 리뷰 후 전송).
+- **INV6 — draft→confirm→enforce.** 자동 생성된 게이트 규칙(예: 구조/경계 규칙)은 `status: draft`(WARN만)로 시작하며 사람이 확인(`status: confirmed`)해야 비로소 차단으로 승격됩니다. 시크릿·검증 게이트 둘은 hallucination 여지가 없는 보편 규칙이라 `init`이 처음부터 confirmed 상태로 설치합니다.
 - **오프스위치** — `/gld config`로 자동화·게이트 차단 일시 정지.
 
 **결정적 커밋 게이트**(`PreToolUse` 훅)가 시크릿 커밋·검증 약화를 차단하며, permission mode로 우회 불가.

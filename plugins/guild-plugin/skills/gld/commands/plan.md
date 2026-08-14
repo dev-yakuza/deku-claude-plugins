@@ -20,14 +20,16 @@
 3. **Detect mode** (its own Bash call — inspect `$1`): a bare integer or a URL containing `/issues/` → **issue mode**; otherwise → **file mode**.
 4. **Load the source + context**:
    - **file mode**: Read the file at `$1` (the design doc). Absent/unreadable → `FAIL: design doc not found at $1`. Also read `CLAUDE.md` + `docs/standards/` (charter/architecture/conventions) for the decomposition's grounding.
-   - **issue mode**: `gh issue view $1` — validate it is an Issue, not a PR (`/pull/` in URL → `FAIL`). Its body is the source. **Leaf guard**: if the Issue's labels include `guild:child`, refuse — a child cannot be planned/re-split → `NEEDS_HUMAN: #$1 is a child issue — re-scope its parent instead`. Read `CLAUDE.md` + `docs/standards/` too.
+   - **issue mode**: `gh issue view $1 --json state,url,labels,body` — validate it is an Issue, not a PR (`/pull/` in URL → `FAIL`). Its body is the source. **Leaf guard**: if the Issue's labels include `guild:child`, refuse — a child cannot be planned/re-split → `NEEDS_HUMAN: #$1 is a child issue — re-scope its parent instead`. **Stage-label guard**: if `$1` already carries a spine stage label (`guild:analyze`/`design`/`execute`/`test`/`qa`/`done`) — e.g. someone ran `/gld dev #$1` directly on what turns out to be an epic-sized Issue — surface this to the human before proceeding (*"이 이슈는 이미 `guild:<stage>` 단계입니다 — 지금 분해하면 Phase 3에서 `guild:children`이 함께 붙어 두 라벨이 공존하게 됩니다(`_handoff.md`: parent는 절대 스테이지 라벨과 `guild:children`을 동시에 가지면 안 됨). 계속할까요?"*), and if they confirm, **remove that stage label** (and `guild:needs-human` too, if present — same rule as every stage transition, `_handoff.md` Section A) before Phase 3 adds `guild:children` (do not leave either behind). Read `CLAUDE.md` + `docs/standards/` too.
 5. **Idempotency check**:
    - **file mode**: look for an existing manifest `docs/specs/PLAN-<doc-slug>.md`. Present → this doc was already planned; re-derive the created set and offer to add **only new** issues (do not duplicate).
-   - **issue mode**: if `#$1` already has the `guild:children` label (already planned/split), re-derive the roster from its `<!-- guild:children:output -->` comment and offer to add only new children.
+   - **issue mode**: whether or not `#$1` already has the `guild:children` label, first re-derive the actual child set from the Section I discovery query (`gh issue list --label guild:child ... --jq '... test("Parent Issue: #<parent>...")'`, `_handoff.md` Section I) rather than trusting the `<!-- guild:children:output -->` comment alone — the comment is posted last (Phase 3), so it may be stale or absent if a prior run was interrupted after creating some children but before posting it or relabeling the parent. Non-empty result → already planned (fully or partially); offer to add only children still missing from that query's result, then apply whichever of the label/roster is still missing (Phase 3). Empty result (regardless of the label) → nothing created yet; proceed to Phase 1 normally.
 
 ## Phase 1 — Decompose (product-owner ∥ tech-lead, parallel)
 
 As the leader, spawn BOTH role sub-agents in one message (independent, concurrent):
+
+**If Phase 0's idempotency check found existing items** (a file-mode manifest, or issue-mode children from the discovery query), append the same note to **both** prompts below: <the existing set — for file mode, the manifest's issue list (`#<n>` · title · scope); for issue mode, the discovered children's number/title/body>. These are ALREADY COMMITTED (real GitHub Issues) — do NOT redecide/reorder/resize/rename them. Treat them as fixed and decompose/order ONLY the remaining work needed to complete the same backlog, consistent with what already exists. If the existing items don't make sense on reflection, that's a real conflict — return `BLOCKED: existing backlog items conflict with — <reason>` instead of silently redeciding differently. (Same fix pattern as `design.md` Step 1's tech-lead prompt for a resumed multi-PR split — this file had the identical gap: Phase 1 used to always redecompose from scratch even when Phase 0 had already found a partial prior run, risking duplicate/inconsistent re-creation in Phase 3.)
 
 **Product Owner** (value slicing):
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `product-owner plan`
@@ -39,11 +41,11 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
 - `prompt`:
   > Adopt the persona in `.claude/agents/tech-lead.md`. From the same SOURCE (below) and `docs/standards/architecture.md`, produce a **dependency ordering** of the work: **foundations first** (data model / schema / core state / shared modules) before the features that depend on them. Flag each **foundational** issue, note **cross-cutting** concerns, and **size** each candidate (single dev-unit ✅, or ⚠ likely to child-split at design). Do NOT read the product-owner's output (order independently from the source). Write to a FILE `docs/specs/plan-<slug>/sequence.md`. Return one `>>> RESULT <<<` line per `_handoff.md` Section C. SOURCE: <same as above>.
 
-Collect both RESULTs. As the leader, **arbitrate into one unified proposed issue set**: PO's value slices + AC, ordered/sized by the tech-lead's sequence, foundations first. Note any disagreement (PO wants a slice the tech-lead says must wait on a foundation → order accordingly).
+Collect both RESULTs. As the leader, **arbitrate into one unified proposed issue set**: PO's value slices + AC, ordered/sized by the tech-lead's sequence, foundations first (on a resume, this unified set should already exclude the existing items per the prompts above). Note any disagreement (PO wants a slice the tech-lead says must wait on a foundation → order accordingly).
 
 ## Phase 2 — Discuss & refine (attended) + STOP
 
-Present the proposed backlog and **stop for the human**:
+Present the proposed backlog and **stop for the human**. **On a resume** (Phase 0 found existing items), lead with a one-line note of what already exists (`"#61, #62는 이미 생성됨 — 나머지 <N>개만 새로 만듭니다."`) before the list, so the human isn't confused about why the count looks smaller than expected:
 ```
 <source>를 <K>개 dev-unit 이슈로 분해했습니다 (에픽·의존성 순서):
 
@@ -60,26 +62,33 @@ Handle the human's edits (drop / merge / re-scope / reorder / adjust AC) and re-
 
 ## Phase 3 — Create the backlog (only on `--create` or explicit approval)
 
+**Check which labels actually exist first** (its own Bash call) — `init.md` only ever creates the 10 `guild:*` labels (never `type:*`/`area:*`), and `gh issue create --label <name>` **errors** on a label that doesn't exist in the repo yet (unlike `gh label create`, it does not auto-create one). A fresh `/gld init`'d repo has no `type:*`/`area:*` labels at all, so using them unconditionally below would make every `gh issue create` call in this phase fail outright:
+```bash
+gh label list --limit 200 --json name --jq '[.[].name]'
+```
+Only attach `--label "type:<...>"` / `--label "area:<...>"` below when that exact label name is present in this result (same guard `init.md`'s own harness-remediation issue creation uses: *"`+ type:refactor/type:chore if those labels exist`"*). When a needed one is missing, either skip attaching it (the issue still gets created, just without that label) or offer to `gh label create` it first if the human wants the taxonomy — but never assume it exists.
+
 Create issues in **dependency order** (temp-file body per `_bash_rules.md`; each `gh issue create` its own Bash call). Label by mode:
 
 - **file mode** — top-level backlog issues:
   ```bash
   gh issue create --title "<title>" --body-file <temp> --label "guild:analyze" --label "type:<feature|bug|refactor>" --label "area:<epic>"
   ```
-  Body = scope + acceptance criteria + a `Planned from: <doc path>` line + any `Depends on: #<n>` notes.
-- **issue mode** — children under the epic `#$1` (reuses the parent/child model — `_handoff.md` Section I):
+  (Omit the `type:*`/`area:*` labels above per the existence check if they're not in the repo's label set.) Body = scope + acceptance criteria + a `Planned from: <doc path>` line + any `Depends on: #<n>` notes.
+- **issue mode** — children under the epic `#$1` (reuses the parent/child model — `_handoff.md` Section I). **Create every child first**, THEN label the parent, THEN post the roster — in that order:
   ```bash
   gh issue create --title "[Guild子] <title>" --body-file <temp> --label "guild:child" --label "guild:analyze" --label "type:<...>"
   ```
-  Body = scope + AC + a `Parent Issue: #$1` line.
-
-**Record the manifest (idempotency + humans):**
-- **file mode**: write `docs/specs/PLAN-<doc-slug>.md` — the created issues (`#<n>` · epic · title · one-line scope · order · depends-on). Committed with the work.
-- **issue mode**: post the roster on the parent under `<!-- guild:children:output -->` … `<!-- /guild:children:output -->` (one row per child), then label the parent:
+  (Same `type:*` existence guard as file mode.)
+  Body = scope + AC + a `Parent Issue: #$1` line. Once every child exists, relabel the parent:
   ```bash
   gh issue edit $1 --add-label "guild:children"
   ```
-  This routes `/gld dev $1` into child orchestration (dev Phase 2b).
+  Ordering matters in both directions. Relabeling only after posting the roster (an earlier version of this doc did that) leaves a race window where a concurrent `/gld resume $1`/`/gld dev $1` still sees the epic's plain issue state and fails to route into child orchestration. But relabeling *before any child is created* is also wrong (a version of this fix briefly tried that): an interruption between the relabel and the first `gh issue create` leaves the parent labeled `guild:children` with **zero** children, and `dev.md` Phase 2b's discovery step treats that as an unrecoverable state-inconsistency `FAIL` rather than waiting — worse than the race being fixed. Relabeling **after every child exists but before the roster** gets the benefit without that risk — the label is never set while the child count is provably zero.
+
+**Record the manifest (idempotency + humans):**
+- **file mode**: write `docs/specs/PLAN-<doc-slug>.md` — the created issues (`#<n>` · epic · title · one-line scope · order · depends-on). Committed with the work.
+- **issue mode**: post the roster on the parent under `<!-- guild:children:output -->` … `<!-- /guild:children:output -->` (one row per child) — the label was already set above, right after the last child was created. This routes `/gld dev $1` into child orchestration (dev Phase 2b).
 
 ## Phase 4 — Return + next steps
 

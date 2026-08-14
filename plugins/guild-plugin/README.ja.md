@@ -23,7 +23,7 @@ claude /plugin install deku-claude-plugins@guild-plugin
 ## クイックスタート
 
 ```bash
-/gld init            # リポジトリ分析・オンボーディング → ハーネス + 創設 Guild エージェント + standards + ⑥ ベースライン（一度きり）
+/gld init            # リポジトリ分析・オンボーディング → ハーネス + 創設 Guild エージェント + standards + ⑥ ベースライン + 準備度監査 → guild:harness Issue（一度きり）
 /gld dev 123         # GitHub Issue #123 をエンドツーエンド開発（feature/bug/refactor 自動選択）
 /gld status 123      # 進捗確認   ·   /gld resume 123 で継続
 /gld audit           # ハーネス+チーム+コードベースの読み取り専用ヘルスチェック
@@ -32,9 +32,9 @@ claude /plugin install deku-claude-plugins@guild-plugin
 
 ## コマンド
 
-**セットアップ** — `init [lang]`（一度きりのオンボーディング）· `config`（ダイヤル・オフスイッチ）· `update [--check]`（中央の改善を採用、ローカル進化を保存）
+**セットアップ** — `init [lang]`（一度きりのオンボーディング、ハーネス構築 + 準備度監査）· `onboard [area]`（人間のメンテナーのためのガイド付きコードベースツアー）· `config`（ダイヤル・オフスイッチ）· `update [--check]`（中央の改善を採用、ローカル進化を保存）
 
-**開発**（背骨：analyze → design → execute → test → qa）— `dev <issue>`（フル、execute バリアント自動選択）· `analyze` · `design` · `implement`（機能）· `debug`（バグ：再現→根本原因→修正）· `refactor`（振る舞い保存）· `test` · `qa` · `review <issue>`（ガイド付きペアレビュー + 敵対的プリスキャン）· `resume` · `status` · `batch [issues]`（無人、レート制限自動再開）
+**開発**（背骨：analyze → design → execute → test → qa）— `plan <doc|epic-issue> [--create]`（エピック/設計文書を依存順の Issue バックログに分解）· `dev <issue>`（フル、execute バリアント自動選択）· `analyze` · `design` · `implement`（機能）· `debug`（バグ：再現→根本原因→修正）· `refactor`（振る舞い保存）· `test` · `qa` · `review <issue|PR>`（ガイド付きペアレビュー + 敵対的プリスキャン、Issue 番号だけでなく PR 番号も直接指定可）· `resume` · `status` · `batch [issues]`（無人、レート制限自動再開）
 
 **診断・成長** — `audit`（読み取り専用、evolve/refactor へルーティング）· `evolve [--dry-run|--apply]`（スキャン → 敵対的パネル → 項目別承認 → バックアップ/ロールバック/provenance/台帳で適用）· `contribute`（フロー改善をアップストリーム）
 
@@ -51,6 +51,7 @@ Guild は自己修正システムなので、安全性は助言ではなく決�
 - **INV3 — すべて可逆**（git · `/gld rollback` · evolve 検証失敗時の自動ロールバック）。
 - **INV4 — 加算的、ローカル進化を上書きしない**（エージェント・知識・standards・overlay）。
 - **INV5 — サニタイズなしにマシン外へ出ない**（`contribute` はサニタイズ + 重複検査 + 人間レビュー後に送信）。
+- **INV6 — draft→confirm→enforce。** 自動生成されたゲートルール（例：構造/境界ルール）は `status: draft`（WARN のみ）で始まり、人間が確認（`status: confirmed`）して初めてブロックへ昇格します。シークレット・検証ゲートの2つは幻覚の余地がない普遍的ルールなので、`init` は最初から confirmed 状態でインストールします。
 - **オフスイッチ** — `/gld config` で自動化・ゲートブロックを一時停止。
 
 **決定的コミットゲート**（`PreToolUse` フック）がシークレットのコミットや検証の弱体化をブロックし、permission mode で回避不可。

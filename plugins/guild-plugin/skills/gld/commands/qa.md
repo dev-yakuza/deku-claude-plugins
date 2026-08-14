@@ -13,7 +13,7 @@
 ## Step 0 — Preflight
 As the leader, follow `_preflight.md` **Medium tier**. Load: `<!-- guild:test:output -->` (verify result + AC coverage + the tester's risk-based E2E judgment), the PR, design/UX outputs (`docs/specs/$1/`), and the hotspot list. Load `docs/standards/quality-bar.md` + `verification.md`.
 
-Validate `$1` is an Issue. Ensure entry label `guild:qa` if invoked directly.
+Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`. Empty → add `guild:qa`. Non-empty → do not add on top (Step 3's transition removes whatever **stage** label was actually found here, not necessarily `guild:qa` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A).
 
 ## Step 1 — Spawn qa (risk-based quality plan + execution)
 Spawn the qa sub-agent:
@@ -28,7 +28,7 @@ Spawn the qa sub-agent:
   > Return one `>>> RESULT <<<` line per `_handoff.md` Section C, with a QA summary (include any step-3 test recommendations and step-4 smoke evidence even when the issue still ends up looping back — they should not be silently dropped).
 
 ## Step 1.5 — UI/UX review gate (conditional — designer)
-As the leader, if this change had a **UI/UX surface** (a `docs/specs/$1/ux.md` exists, or the designer participated in design, or the diff touches UI), convene the **designer** to run the **UI/UX review gate**: the built UI vs the design intent (`ux.md`) — interaction, visual, usability, accessibility. This is a **gate** (reviewing the built result, not self-review of the designer's own spec is acceptable here because the artifact under review is the *implementation*, not the ux.md). No UI surface → skip this step.
+As the leader, if this change had a **UI/UX surface** (a `docs/specs/$1/ux.md` exists, or the designer participated in design, or the diff touches UI), convene the **designer** to run the **UI/UX review gate**: the built UI vs the design intent (`ux.md`) — interaction, visual, usability, accessibility. This is a **gate, not self-review**: the designer authored `ux.md` at design time, but here reviews the **built implementation** against it — a different artifact than the one they wrote, produced by the developer, which is what keeps this from being self-review (contrast: it would be self-review if the designer were re-checking `ux.md` itself). No UI surface → skip this step.
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `designer ui/ux review #$1`
 - `prompt`:
   > Adopt the persona in `.claude/agents/designer.md`. Run the **UI/UX review gate** for Issue #$1 on the current branch. Compare the built UI against the design intent in `docs/specs/$1/ux.md` (if present) and the AC — interaction, visual, usability, accessibility (contrast, touch targets, states). You review the built result, not design anew. Return one `>>> RESULT <<<` line per `_handoff.md` Section C — `DONE`, `DONE_WITH_CONCERNS: <one-line>`, or `BLOCKED: <a11y/usability defect>`.
@@ -84,9 +84,9 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
 - This runs **once per issue, at QA** — not repeated at `review`. QA is the mandatory spine stop every `/gld dev` run passes through; `review` is on-demand (nudged, not forced) and would miss unattended/batch runs entirely if this lived there instead.
 
 ## Step 3 — Judge + return
-- **QA passed** (agent-doable checks green + UI/UX gate passed or not applicable + human-QA items clearly flagged + quality-bar met) → transition to done:
+- **QA passed** (agent-doable checks green + UI/UX gate passed or not applicable + human-QA items clearly flagged + quality-bar met) → transition to done. Remove **whatever `guild:*` stage label Step 0 actually found** (substitute in place of `guild:qa` below if it was something else; **never remove `guild:child`** if present). **Also remove `guild:needs-human` in this same call if Step 0's label read found it present** (`_handoff.md` Section A):
   ```bash
-  gh issue edit $1 --remove-label "guild:qa" --add-label "guild:done"
+  gh issue edit $1 --remove-label "guild:qa" --add-label "guild:done" --remove-label "guild:needs-human"
   ```
   Return:
   ```
@@ -96,7 +96,7 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
   **Nudge the guided review** (the Issue is now `done` and the PR awaits the human reviewer — M1 external reviewer, INV1). When invoked directly (`/gld qa`), surface it here; under `/gld dev`, Phase 3 surfaces it: "이슈 #$1 리뷰 준비됨 (연결된 PR) — `/gld review $1`로 리스크 가중 가이드 리뷰를 받을 수 있습니다 (이슈 번호로 PR을 자동으로 찾습니다)." Do not force it on a trivial change.
 - **QA found a blocking defect** → do NOT mark done.
   - **Attended**: return `NEEDS_HUMAN: QA found <one-line>; loop back to execute?`.
-  - **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): before looping back, apply the **stagnation guard** (`_stagnation.md`) — the same defect recurring after a loop-back → escalate immediately (`OK PAUSE: needs-human — stagnant loop-back — <reason>`, `--kind stagnation` capture) rather than consuming another attempt. Otherwise: record the concern; bounded loop-back to execute if fixable, else return `OK PAUSE: needs-human — QA defect: <one-line>`. Never force `done`. Detect via `printenv GLD_UNATTENDED`.
+  - **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): before looping back, apply the **stagnation guard** (`_stagnation.md`) — the same defect recurring after a loop-back → escalate immediately (`OK PAUSE: needs-human — stagnant loop-back — <reason>`, `--kind stagnation` capture) rather than consuming another attempt. Otherwise: record the concern; bounded loop-back to execute if fixable, else add the **`guild:needs-human` label** + a `<!-- guild:needs-human -->` comment stating the defect, and return `OK PAUSE: needs-human — QA defect: <one-line>` (do NOT transition the stage label). Never force `done`. Detect via `printenv GLD_UNATTENDED`.
   ```
   >>> RESULT <<<
   NEEDS_HUMAN: QA found <one-line>; loop back to execute?

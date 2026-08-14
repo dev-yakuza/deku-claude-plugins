@@ -21,7 +21,10 @@ and exits non-zero WITHOUT raising, so a logging problem never blocks the spine.
 import argparse, json, os, sys
 
 LOG_REL = os.path.join(".claude", "guild", "memory", "ground-truth.jsonl")
-KINDS = ("correction", "verify-gap", "revert", "accepted-risk", "stagnation")
+# "revert" is intentionally NOT a kind: a git revert is a durable signal, read on-demand
+# via scan_git at evolve time (_signals.md Section A/C) — it is never captured to this
+# log. Accepting it here would silently contradict that contract.
+KINDS = ("correction", "verify-gap", "accepted-risk", "stagnation")
 
 
 def repo_root():
@@ -97,7 +100,7 @@ def main():
         return 1
 
     print(f"captured {entry['kind']}" + (" [surprise]" if entry["surprise"] else "")
-          + (" [escalated]" if entry["escalated"] else "") + f" → {LOG_REL}")
+          + (" [escalated]" if entry["escalated"] else "") + f" → {log_path}")
     return 0
 
 

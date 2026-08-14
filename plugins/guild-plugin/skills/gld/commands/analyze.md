@@ -9,7 +9,7 @@
 ---
 
 ## Step 0 — Preflight
-Follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` **Light tier** (items 1–3: config + role defs, conventions + standards, commit style). If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`.
+Follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` **Light tier** (per its Section A table: items **1 + 2 + 3 + 6 + 8** — config + role defs, conventions + standards, commit style, ⑥ knowledge retrieval, ④ working-memory read; not just 1–3). If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`.
 
 Validate `$1` is an Issue (not a PR):
 ```bash
@@ -17,10 +17,15 @@ gh issue view $1 --json url --jq .url
 ```
 URL contains `/pull/` → `FAIL: #$1 is a Pull Request, not an Issue`.
 
-Ensure the entry label (direct invocation): if the Issue has no `guild:*` stage label, add `guild:analyze`:
+**Ensure the entry label (direct invocation) — read current labels FIRST**, its own Bash call:
+```bash
+gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'
+```
+Empty result (no `guild:*` label yet — a fresh Issue) → add `guild:analyze`:
 ```bash
 gh issue edit $1 --add-label "guild:analyze"
 ```
+**Non-empty result → do NOT add `guild:analyze`** — the Issue already carries a stage label from a prior run (e.g. `guild:design`), and adding `guild:analyze` on top would leave it labeled with two stages at once, confusing `status.md`/`dev.md`'s label-derivation logic. This case means `/gld analyze` was invoked directly on an Issue that's already past analyze — proceed with analyze anyway (the human explicitly asked for it), but leave the existing label alone; Step 5's transition will remove whatever `guild:*` **stage** label is actually present before adding `guild:design` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label and no stage ever removes (`_handoff.md` Section A). A child Issue's Step 0 read here always returns both, since `guild:child` never disqualifies it from this non-empty branch.
 
 Read the Issue:
 ```bash
@@ -31,7 +36,7 @@ gh issue view $1
 Before analyzing, as the leader:
 1. State the **assumptions** and interpretations you're making about the request.
 2. Offer **2–3 substantively different interpretations/approaches** where the request is ambiguous (not one "obvious" reading).
-3. **Readiness check (`_readiness.md`)**: rate the Issue on the three dimensions (Goal / Constraint / Success-criteria clarity) — 명확/부분/불명확. Any dimension **불명확** → material ambiguity, naming which dimension(s): **attended**: return `NEEDS_HUMAN: <dimension> unclear — <the choice needed>` so the main session prompts the user (do not proceed past a real ambiguity on your own). **Unattended (`GLD_UNATTENDED=1`, `_handoff.md` Section H)**: the leader stands in — classify the ambiguity's stakes (charter-anchored). Low/medium → pick the most charter-aligned interpretation and **record it as an explicit assumption** (feeds the PR decision log), proceed. High/scope-defining → do NOT guess: post `<!-- guild:needs-human -->` with the options and return `OK PAUSE: needs-human — <one-line>` (no transition).
+3. **Readiness check (`_readiness.md`)**: rate the Issue on the three dimensions (Goal / Constraint / Success-criteria clarity) — 명확/부분/불명확. Any dimension **불명확** → material ambiguity, naming which dimension(s): **attended**: return `NEEDS_HUMAN: <dimension> unclear — <the choice needed>` so the main session prompts the user (do not proceed past a real ambiguity on your own). **Unattended (`GLD_UNATTENDED=1`, `_handoff.md` Section H)**: the leader stands in — classify the ambiguity's stakes (charter-anchored). Low/medium → pick the most charter-aligned interpretation and **record it as an explicit assumption** (feeds the PR decision log), proceed. High/scope-defining → do NOT guess: add the **`guild:needs-human` label** + post a `<!-- guild:needs-human -->` comment with the options, and return `OK PAUSE: needs-human — <one-line>` (do NOT transition the stage label).
 
 If every dimension is 명확/부분 (none 불명확), proceed — any **부분** dimension MUST be recorded as an explicit assumption (`_readiness.md` Section C). If all three are 명확, note in the output that readiness found no gap.
 
@@ -62,7 +67,8 @@ Fold the PO's aligned AC/priorities into Step 4's output; a `DONE_WITH_CONCERNS`
 
 ## Step 3 — Work-type classification / reclassification
 - Read the Issue's `type:` label if present (`feature`/`bug`/`refactor`).
-- Reclassify if reality differs (plan §4) — e.g. "labeled feature but needs a refactor first." Note the mismatch and, if it implies splitting, flag it for design (child-issue split is decided in design). In M1, execute is always `implement`, but record the true type for the humans.
+- Reclassify if reality differs (plan §4) — e.g. "labeled feature but needs a refactor first." Note the mismatch in the analysis output (Step 4), and if it implies splitting, flag it for design (child-issue split is decided in design).
+- **If reclassifying, update the `type:` label on GitHub now** (its own Bash call, e.g. `gh issue edit $1 --remove-label "type:feature" --add-label "type:refactor"`) — this is what makes the reclassification durable and visible to `dev.md` Phase 2's execute-variant selection (`implement.md` for feature / `debug.md` for `type:bug` / `refactor.md` for `type:refactor`, all fully implemented — a stale draft of this doc once said "in M1, execute is always implement," which is no longer true and contradicted `dev.md`/`debug.md`/`refactor.md`'s actual routing; that line is removed). Without this label update, a reclassification is just prose in the analysis comment and has no effect on which execute wrapper actually runs.
 
 ## Step 4 — Post analysis output
 Write the analysis body to a temp file with the marker pair, then post via the temp-file pattern (`_bash_rules.md` → temp-file section / `_handoff.md` Section B):
@@ -71,9 +77,9 @@ Write the analysis body to a temp file with the marker pair, then post via the t
 - Duplicate-prevention search + POST (new) or PATCH (existing) per the temp-file pattern.
 
 ## Step 5 — Transition + return
-On success, transition the label (this stage owns it):
+On success, transition the label (this stage owns it). Remove **whatever `guild:*` stage label Step 0 actually found** (normally `guild:analyze`, but a direct `/gld analyze` invocation on an Issue already past analyze — Step 0 — leaves its real stage label, e.g. `guild:execute`, in place instead; removing a hardcoded `guild:analyze` here would silently leave that stale label behind alongside the new `guild:design`; **never remove `guild:child`** if present — substitute the actual pre-existing label from Step 0's read in place of `guild:analyze` below when it was something else). **Also remove `guild:needs-human` in this same call if Step 0's label read found it present** (`_handoff.md` Section A — the advance itself is evidence a prior pause was resolved; a stale `guild:needs-human` would otherwise persist forever, since no other stage removes it either):
 ```bash
-gh issue edit $1 --remove-label "guild:analyze" --add-label "guild:design"
+gh issue edit $1 --remove-label "guild:analyze" --add-label "guild:design" --remove-label "guild:needs-human"
 ```
 Return:
 ```

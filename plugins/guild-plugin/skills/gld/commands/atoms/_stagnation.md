@@ -11,7 +11,7 @@ Every loop-back already carries a one-line blocking reason (the tech-lead's `BLO
 - **Same root cause** (same file/AC/concern restated, even if reworded) → **stagnation**: the previous loop-back did not actually address it.
 - **Different concern** (a new/different reason, even if in the same area) → genuine progress — one issue surfaced another. Not stagnation; continue under the normal bounded cap.
 
-This is a judgment call by the leader over two short strings it already has in context — no hashing, no new infra, no persistence beyond the current stage invocation.
+This is a judgment call by the leader over two short strings it already has in context — no hashing, no new infra, no persistence beyond the current stage invocation. **Calibration**: same *file* + same underlying *defect* = same root cause even if the wording differs entirely (e.g. "widget test asserts nothing in the disabled path" vs. "disabled-state contrast check is a no-op" — same #894-class bug, restated); a genuinely different file, a different AC, or a different mechanism within the same file (e.g. the fix for a null-check bug then exposes a separate off-by-one) = different concern, not stagnation. When genuinely unsure, err toward **not** flagging stagnation — the bounded numeric cap (≤2) still catches a truly stuck loop-back even if one ambiguous retry gets miscounted as progress, whereas prematurely escalating a retry that was actually about to succeed costs a human interruption for nothing.
 
 ## Section B — On stagnation detected
 

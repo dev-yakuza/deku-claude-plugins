@@ -17,7 +17,7 @@
 Follow `_preflight.md` **Light tier** (config + role defs, conventions + standards). If `.claude/guild/config.json` is absent → "This repo isn't initialized — run `/gld init` first (onboarding needs the Guild's ⑥ knowledge + standards)."
 
 Gather what the tour teaches from (best-effort — degrade gracefully on any miss):
-1. **⑥ knowledge** — `.claude/guild/knowledge/index.md` (the always-loaded map of accumulated codebase facts). Empty/absent → say so; the tour leans on standards + structure instead.
+1. **⑥ knowledge** — `.claude/guild/knowledge/index.md` (the always-loaded map of accumulated codebase facts), **then read the matched `facts/<area>.md` slice(s) too** (match the index keys against `$1`'s focus area, or — for a whole-system tour — the areas the planned stops below will actually cover; same retrieval contract as `_preflight.md` Item 6 / `_knowledge.md` Section C: index alone is only keys + a one-line hook, **not** the fact content itself, and Step 2 below promises to anchor stops in "a ⑥ fact" — that promise needs the slice, not just the index). Empty/absent index → say so; the tour leans on standards + structure instead.
 2. **Standards** — `docs/standards/charter.md` (why the system exists), `architecture.md` (shape), `conventions.md`, `quality-bar.md`. Honor `confirmed` as authoritative; note `draft` as provisional.
 3. **Hotspots / traps** — the "주의(핫스팟·함정)" section of `.claude/agents/tech-lead.md` (the risky/subtle areas the Guild has learned).
 4. **Structure** — top-level layout (`ls`), and for a focused `$1`, `ls <area>` + the entry-point file(s).

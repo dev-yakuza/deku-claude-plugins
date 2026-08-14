@@ -26,6 +26,7 @@ Continue an in-progress Issue from where it left off. Guild's state lives in Git
    - `guild:done` → report "Issue #$1 is already done." Stop.
    - `guild:children` → this is a **split parent** mid-orchestration → **hand off to `/gld dev`**: dev's Phase 1 detects `guild:children` and re-enters child orchestration (Phase 2b), re-discovering the children and continuing from the first not-done one (`_handoff.md` Section I).
    - `guild:analyze` / `guild:design` / `guild:execute` / `guild:test` / `guild:qa` → **hand off to `/gld dev`**: read `<<SKILL_DIR>>/commands/dev.md` and execute it for `$1`. dev's Phase 1 reads the same label and starts at the matching stage — so resume and dev share one code path (no divergence).
+   - `guild:harness` (no spine stage label yet) → a harness-remediation issue `init.md`'s readiness audit created (labeled `guild:harness` only, not yet started) — same outcome as "no `guild:*` label" below: **hand off to `/gld dev $1`** to start it fresh (dev's Phase 1 adds `guild:analyze` and begins normally; `guild:harness` itself is not a stage and is left alone throughout, same treatment as `guild:child`).
    - no `guild:*` label → nothing to resume; suggest `/gld dev $1` to start fresh.
 
 ## Notes

@@ -1,6 +1,6 @@
 ---
 name: tech-writer
-description: "이 프로젝트의 테크라이터 역할. 사용자/개발자 문서·README·ADR·릴리스노트 산출이 필요한 작업에 소집한다."
+description: "이 프로젝트의 테크라이터 역할. 사용자/개발자 문서·README·ADR 산출이 필요한 작업에 소집한다 (릴리스노트는 release-manager의 몫 — 스파인 밖)."
 model: sonnet
 ---
 # Technical Writer — {{PROJECT_NAME}}

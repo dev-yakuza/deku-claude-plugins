@@ -17,7 +17,7 @@ Growth readiness has **two independent axes** — conflating them is the mistake
 
 ### Axis 1 — 성장 신호량 (growth signal volume): *is there enough to grow from?*
 Count of **distinct anchored** growth-signals available. Sources (all already collected — **no new instrumentation**):
-- **Captured ground-truth log** — lines in `.claude/guild/memory/ground-truth.jsonl` (by kind: correction · verify-gap · revert · accepted-risk · stagnation).
+- **Captured ground-truth log** — lines in `.claude/guild/memory/ground-truth.jsonl` (by kind: correction · verify-gap · accepted-risk · stagnation — `revert` is never a captured kind, see Section D below; it's counted under durable signals instead).
 - **Durable signals** — reverts / PR-rejects / recurring CI-failure patterns, from git + `gh` (the same signals `_signals.md` Section E readers surface).
 
 Count = **distinct anchored themes**, deduped by evidence identity (`_signals.md` Section B anchor rule; **exclude AI self-reviews**). Tiers (conservative defaults):
@@ -43,7 +43,7 @@ Source: **prior completed evolve runs** in `.claude/guild/evolution-log.md` (cou
 ## Section B — How each consumer computes it (cost-appropriate)
 
 - **evolve** — compute **Axis 1 after Phase 1 scans** (the accurate full count, incl. durable git/CI signals — a repo rich in reverts but empty of captured log is **not** 없음). Axis 2 from the ledger (Phase 0). This is the **authoritative** measure.
-- **audit** — cheap proxy: `ground-truth.jsonl` line count + the reverts/CI-gaps it already reads (dimensions E/F) + ledger runs. Label it a proxy.
+- **audit** — cheap proxy: `ground-truth.jsonl` line count + ledger runs at Phase 0; **refined only once dimension F actually runs** (a full audit, or `$1=codebase`) by folding in the reverts it surfaces. ⚠ **Not** CI-gaps — neither dimension E (evolution-log/ground-truth friction) nor F (`scan_git` — hotspots/co-change/churn) reads CI data; CI signal is `scan_failures`'s job, which `audit.md` never invokes. A scoped run to `harness`/`team`/`knowledge`/`standards`/`evolution` never reaches F, so its proxy stays at the Phase-0 value the whole run. Label it a proxy.
 - **review** — cheapest: `ground-truth.jsonl` **deduped** by area/evidence (collapse repeat lines of one theme — same rule as evolve's Axis 1, since it already reads the lines) + ledger runs. ⚠ A **raw** line count would *over*-count vs evolve's deduped Axis 1 (recurring same-area corrections = many lines, one theme), so the nudge could fire when evolve would still refuse — dedup avoids that. Even so the review nudge is **advisory, not a proceed-guarantee**: evolve's own Phase 1.5 gate is the authority (it re-counts, incl. durable signals, and blocks apply on thin data). review may still under-count durable git/CI signals — that only makes it nudge *less*, which is safe.
 
 **Budget**: one line-count read of the jsonl + one ledger read. **Never spawn new scans just to compute the banner** — reuse what the caller already has, or the cheap log+ledger proxy.
@@ -69,7 +69,7 @@ cat .claude/guild/memory/ground-truth.jsonl
 ### review (NUDGE — advisory, opt-in)
 - **Axis 1 충분** → at Step 5 (recap), nudge: *"이번 PR까지 신호가 충분히 쌓였습니다 (교정 N·run M) — `/gld evolve`로 조직을 성장시킬 적기입니다."*
 - **Axis 1 없음/얕음** → **SILENT** (no evolve nudge). Nagging "아직 부족" every review is noise; the audit banner already covers the accumulation question.
-- **Cooldown (nudge once per evolve cycle)** → the 충분 state persists across many reviews, so even at 충분 **suppress** the nudge if it already fired this cycle with no new material since. Gate on `.claude/guild/memory/review-nudge-state.json` (`{count, runs}` captured at the last nudge, gitignored working tier); re-fire only when an evolve ran (`runs` advanced → new cycle) or the deduped count grew past the last nudge. Keeps the persistent 충분 state from nudging on every single review. Mechanics + Bash: `review.md` Step 5. (audit's banner has no cooldown — it *always* prints its read-only state; only review's actionable nudge needs the throttle.)
+- **Cooldown (nudge once per evolve cycle)** → the 충분 state persists across many reviews, so even at 충분 **suppress** the nudge if it already fired this cycle with no new material since. Gate on `.claude/guild/memory/review-nudge-state.json`, **keyed by PR number** — `{"<pr>": {"count": <deduped count at last nudge for this PR>, "runs": <ledger run count at last nudge>}}` (gitignored working tier). Per-PR keying matters because two `/gld review` runs on **different** PRs can run close together in the same clone; a flat single `{count, runs}` (an earlier version of this doc used) lets one PR's read-then-write race with the other's and silently lose or wrongly suppress a nudge. Re-fire only when an evolve ran (`runs` advanced → new cycle) or the deduped count grew past the last nudge **for that PR's own key**. Mechanics + Bash: `review.md` Step 5. (audit's banner has no cooldown — it *always* prints its read-only state; only review's actionable nudge needs the throttle.)
 
 ## Section D — Banner format (config.language, top of output, ≤3 lines)
 ```

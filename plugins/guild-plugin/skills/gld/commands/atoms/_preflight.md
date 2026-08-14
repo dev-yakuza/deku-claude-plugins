@@ -1,6 +1,6 @@
 # PRE-FLIGHT (shared procedure)
 
-**Not a stage.** This file documents the pre-flight context discovery run at **Step 0** of every stage (analyze/design/implement/test). A stage reads the section for its tier when instructed. (Adapted from sdd-plugin's `_preflight.md`, trimmed for Guild M1 — no depth labels, no AI-review tiers.)
+**Not a stage.** This file documents the pre-flight context discovery run at **Step 0** of every stage (analyze/design/implement/debug/refactor/test/qa) plus `onboard`. A stage reads the section for its tier when instructed. (Adapted from sdd-plugin's `_preflight.md`, trimmed for Guild M1 — no depth labels, no AI-review tiers.)
 
 > **Bash Command Execution**: every snippet is its own simple Bash tool call — no `&&`, `|`, `;`, redirections, `$(...)`, or quoted `$VAR`. For codebase exploration use Grep/Glob/Read, never Bash `find` outside the repo root. See `_bash_rules.md`.
 
@@ -12,9 +12,9 @@ Each stage runs only the items matching its tier. Lower tiers are subsets of hig
 
 | Tier | Items | Applies to (default) |
 |---|---|---|
-| Light | 1 + 2 + 3 + 6 + 8 | analyze |
-| Medium | 1 + 2 + 3 + 4 + 6 + 8 | design, test |
-| Heavy | 1 + 2 + 3 + 4 + 5 + 6 + 8 | execute (implement) |
+| Light | 1 + 2 + 3 + 6 + 8 | analyze, onboard |
+| Medium | 1 + 2 + 3 + 4 + 6 + 8 | design, test, qa |
+| Heavy | 1 + 2 + 3 + 4 + 5 + 6 + 8 | execute (implement, debug, refactor) |
 
 (Item 7 = the ③ just-in-time overseer reminder — attended/optional, not tier-gated. Item 8 = the ④ episodic working-memory read — the runtime half of the growth loop.)
 

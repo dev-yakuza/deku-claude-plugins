@@ -56,9 +56,16 @@ mkdir -p "$LOG_DIR"
 OWNER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)
 [ -z "$OWNER_REPO" ] && echo "[batch] WARNING: repo unresolved — child auto-discovery disabled."
 
-# Protect batch infra from subagents' `git stash -u` (local-only exclude, not .gitignore)
-if [ -d ".git/info" ]; then
-  EXCLUDE=".git/info/exclude"; touch "$EXCLUDE"
+# Protect batch infra from subagents' `git stash -u` (local-only exclude, not .gitignore).
+# Resolve the real exclude path via git itself rather than assuming ".git/info/exclude" —
+# inside a git worktree (the setup this doc's own "Recommended" section pushes users toward),
+# .git is a FILE (a `gitdir:` pointer), not a directory, so `.git/info` never exists there and
+# an `[ -d ".git/info" ]` guard silently skips this whole block, leaving batch infra unprotected
+# exactly where subagent stashing is expected. `git rev-parse --git-path` resolves correctly
+# from both a normal checkout and a worktree (worktrees share the main checkout's info/exclude).
+EXCLUDE="$(git rev-parse --git-path info/exclude 2>/dev/null || true)"
+if [ -n "$EXCLUDE" ]; then
+  mkdir -p "$(dirname "$EXCLUDE")"; touch "$EXCLUDE"
   for E in ".claude/guild/.gld-batch.sh" ".claude/guild/.batch-logs"; do
     grep -qxF "$E" "$EXCLUDE" || echo "$E" >> "$EXCLUDE"
   done
@@ -82,11 +89,19 @@ echo "============================================================"
 while [ ${#QUEUE[@]} -gt 0 ]; do
   ISSUE=${QUEUE[0]}; QUEUE=("${QUEUE[@]:1}")
   PROCESSED=$((PROCESSED + 1))
-  LOG="$LOG_DIR/issue-${ISSUE}-${TIMESTAMP}.log"
-  echo "[$PROCESSED/$TOTAL] Issue #$ISSUE → $LOG"
+  ATTEMPT=0
+  echo "[$PROCESSED/$TOTAL] Issue #$ISSUE → $LOG_DIR/issue-${ISSUE}-${TIMESTAMP}-attempt*.log"
 
   RESUME_TRIES=0
   while true; do
+    ATTEMPT=$((ATTEMPT + 1))
+    # Each attempt gets its OWN file (not overwritten by a retry) — a rate-limit wait or a
+    # bounded re-resume both loop back to here, and `> "$LOG"` on a single shared filename
+    # (an earlier version of this script did that) truncates the previous attempt's evidence
+    # on every retry: the final cost/token summary below then only reflects the LAST attempt,
+    # silently undercounting a multi-retry Issue, and Phase 4's "read the logs" report loses
+    # what actually happened during the earlier rate-limited/incomplete attempts.
+    LOG="$LOG_DIR/issue-${ISSUE}-${TIMESTAMP}-attempt${ATTEMPT}.log"
     EXIT_CODE=0
     # GLD_UNATTENDED=1: flow auto-proceeds discuss/verify gates (records assumptions) — see Notes.
     # --dangerously-skip-permissions: unattended tool calls (tests, hooks, push, PR).
@@ -107,12 +122,21 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       STATE=$(gh issue view "$ISSUE" --repo "$OWNER_REPO" --json labels \
         --jq '[.labels[].name] | map(select(startswith("guild:"))) | join(",")' 2>/dev/null || true)
       case "$STATE" in
+        *guild:needs-human*)
+          # MUST be checked before *guild:done*/*guild:children* below: guild:needs-human is
+          # ADDITIVE (_handoff.md Section A) and can coexist with guild:children specifically
+          # (dev.md Phase 2c: an integration gap found unattended marks needs-human but leaves
+          # the parent at guild:children, still mid-orchestration). A bash `case` fires the
+          # FIRST matching arm, not the most specific one — checking guild:children first (an
+          # earlier version of this script did) would silently miscount a genuinely-stuck
+          # split-parent as SUCCEEDED, since its STATE string contains both substrings.
+          echo "  ⏸ Issue #$ISSUE paused (needs-human)"; PAUSED=$((PAUSED + 1)); break ;;
         *guild:done*)
           echo "  ✓ Issue #$ISSUE done"; SUCCEEDED=$((SUCCEEDED + 1))
           # Auto-discover child Issues (design split → guild:child + "Parent Issue: #N")
-          CHILDREN=$(gh issue list --repo "$OWNER_REPO" --label guild:child --state open --limit 200 \
-            --json number,body \
-            --jq "[.[] | select(.body | test(\"Parent Issue: #${ISSUE}([^0-9]|\$)\"))] | .[].number" 2>/dev/null || true)
+          CHILDREN=$(gh issue list --repo "$OWNER_REPO" --label guild:child --state all --limit 200 \
+            --json number,body,labels \
+            --jq "[.[] | select(.body | test(\"Parent Issue: #${ISSUE}([^0-9]|\$)\")) | select((.labels // []) | map(.name) | index(\"guild:done\") | not)] | .[].number" 2>/dev/null || true)
           for C in $CHILDREN; do
             case "$SEEN" in *" #$C "*) ;; *)
               SEEN="$SEEN #$C "; QUEUE+=("$C"); TOTAL=$((TOTAL + 1))
@@ -122,9 +146,9 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
           break ;;
         *guild:children*)
           echo "  ✓ Issue #$ISSUE split (parent orchestration) — discovering children"; SUCCEEDED=$((SUCCEEDED + 1))
-          CHILDREN=$(gh issue list --repo "$OWNER_REPO" --label guild:child --state open --limit 200 \
-            --json number,body \
-            --jq "[.[] | select(.body | test(\"Parent Issue: #${ISSUE}([^0-9]|\$)\"))] | .[].number" 2>/dev/null || true)
+          CHILDREN=$(gh issue list --repo "$OWNER_REPO" --label guild:child --state all --limit 200 \
+            --json number,body,labels \
+            --jq "[.[] | select(.body | test(\"Parent Issue: #${ISSUE}([^0-9]|\$)\")) | select((.labels // []) | map(.name) | index(\"guild:done\") | not)] | .[].number" 2>/dev/null || true)
           for C in $CHILDREN; do
             case "$SEEN" in *" #$C "*) ;; *)
               SEEN="$SEEN #$C "; QUEUE+=("$C"); TOTAL=$((TOTAL + 1))
@@ -132,8 +156,6 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
             esac
           done
           break ;;
-        *guild:needs-human*)
-          echo "  ⏸ Issue #$ISSUE paused (needs-human)"; PAUSED=$((PAUSED + 1)); break ;;
         *)
           # exited 0 but still mid-spine (or state unreadable) = NOT finished. Re-resume,
           # bounded (resume is state-safe — continues from the label). Then surface honestly.
@@ -149,8 +171,15 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
 
     # --- Rate-limit detection → wait until reset → auto-retry (the core) ---
     RESET_AT=$(jq -r 'select(.type == "rate_limit_event") | .rate_limit_info | select(.status != "allowed") | .resetsAt // empty' "$LOG" 2>/dev/null | tail -1)
-    if [ -z "$RESET_AT" ] && grep -qi "rate.limit\|overloaded\|too many requests" "$LOG" 2>/dev/null; then
-      RESET_AT=$(jq -r 'select(.type == "rate_limit_event") | .rate_limit_info.resetsAt // empty' "$LOG" 2>/dev/null | tail -1)
+    # Fallback text scan: only for a genuinely rate-limited log the structured check above
+    # missed (a plain-text message, not a structured rate_limit_event). "rate.limit" (unescaped
+    # dot = any char) previously also matched the literal JSON field name "rate_limit_event"
+    # itself, which appears on EVERY log that had a routine status:"allowed" telemetry event —
+    # verified this false-matched a genuine unrelated crash, sending it into an uncapped
+    # rate-limit retry loop instead of being counted FAILED. "rate[ -]limit" (space/hyphen only)
+    # matches real human-readable rate-limit text without matching the underscored field name.
+    if [ -z "$RESET_AT" ] && grep -qi "rate[ -]limit\|overloaded\|too many requests" "$LOG" 2>/dev/null; then
+      RESET_AT=$(jq -r 'select(.type == "rate_limit_event") | .rate_limit_info | select(.status != "allowed") | .resetsAt // empty' "$LOG" 2>/dev/null | tail -1)
     fi
     if [ -n "$RESET_AT" ]; then
       NOW=$(date +%s); WAIT=$((RESET_AT - NOW + 30))
@@ -174,7 +203,7 @@ done
 # --- Summary + token/cost aggregation from stream-json ---
 BATCH_ELAPSED=$(( $(date +%s) - BATCH_START ))
 TOTAL_IN=0; TOTAL_OUT=0; TOTAL_CR=0; TOTAL_CC=0; TOTAL_COST="0"
-for L in "$LOG_DIR"/issue-*-"${TIMESTAMP}".log; do
+for L in "$LOG_DIR"/issue-*-"${TIMESTAMP}"-attempt*.log; do
   [ -f "$L" ] || continue
   S=$(jq -r 'select(.type=="result") | "\(.usage.input_tokens // 0) \(.usage.output_tokens // 0) \(.usage.cache_read_input_tokens // 0) \(.usage.cache_creation_input_tokens // 0) \(.total_cost_usd // 0)"' "$L" 2>/dev/null | tail -1)
   [ -n "$S" ] && read -r IN OUT CR CC COST <<< "$S" && {
@@ -202,7 +231,7 @@ echo "============================================================"
 
 ## Phase 4 — Run in background + report
 1. `chmod +x .claude/guild/.gld-batch.sh`.
-2. Ensure `.claude/guild/.batch-logs/` won't be committed (the script already adds it to `.git/info/exclude`; the parent `.claude/guild/.gitignore` may also cover it).
+2. Ensure `.claude/guild/.batch-logs/` won't be committed (the script already adds it to `.git/info/exclude` — that's the actual mechanism; `.claude/guild/.gitignore` only covers `memory/`, per `init.md`, so it does **not** also cover `.batch-logs/` — don't rely on it as a fallback here).
 3. Execute via the **Bash tool with `run_in_background: true`**: `bash .claude/guild/.gld-batch.sh`.
 4. Report: "Guild batch started (background). Issues: <N>. Logs: .claude/guild/.batch-logs/. Rate limits auto-wait+resume. You'll be notified on completion." Give the `tail -f … | jq …` monitor hint.
 5. On completion (harness re-invokes when the background task exits): read the logs, report per-Issue outcome + the summary block. Outcomes are **label-truthful** (Done / Paused-needs-human / Incomplete / Failed), not exit-code-based. **List paused Issues** (`gh issue list --label guild:needs-human --state open`) — resolve, then re-run `/gld dev`/`resume`. **List Incomplete Issues** (exited 0 mid-spine — a backgrounded hook or turn-end) — `/gld resume <n>` continues them from the label; their partial work is on the feature branch.
@@ -217,11 +246,13 @@ echo "============================================================"
     - *low/medium* (local, reversible interpretation) → pick the most charter/standards-aligned option, **record it as an explicit assumption** in the analyze/design output + PR body (`가정: … · 근거: … · 사람 확인 요`), then proceed.
     - *high* (scope-defining / materially different product) → **do NOT guess.** Pause: keep the label at the current stage, post a `<!-- guild:needs-human -->` comment listing the options, return a paused status; the supervisor counts it as PAUSED and moves to the next Issue.
   - **verify gate (test)** — deterministic: raw evidence green + AC covered → proceed; else bounded loop-back to execute (≤2); still failing → **pause (needs-human), never fake-pass** (INV2: no test weakening).
+  - **qa gate (qa)** — same shape as verify: record the concern, bounded loop-back to execute if fixable, else **pause (needs-human)**; never force `done` on a blocking defect.
   - **Decision log** — every gate the leader auto-resolved is aggregated into the PR body ("무인 결정 로그") so the human's PR review is **informed, not blind**.
   - **Net**: leader decides low/medium judgments (anchored + logged), escalates high-stakes ones, and the human gate lands at **PR review + merge** after the batch.
-  - **Wiring (done)**: `_handoff.md` Section H (policy + detection) · `analyze.md`/`design.md` (discuss classify+record vs pause) · `test.md`/`qa.md` (verify/QA deterministic + pause) · `dev.md` (mode detect; no `AskUserQuestion` when unattended; clean PAUSE) · `implement.md` (PR decision log + resume-safe branch/PR) · `init.md` (`guild:needs-human` label). Authoritative policy = Section H.
+  - **Wiring (done)**: `_handoff.md` Section H (policy + detection) · `analyze.md`/`design.md` (discuss classify+record vs pause) · `test.md`/`qa.md` (verify/QA deterministic + pause) · `dev.md` (mode detect; no `AskUserQuestion` when unattended; clean PAUSE) · `implement.md`/`debug.md`/`refactor.md` (PR decision log + resume-safe branch/PR) · `init.md` (`guild:needs-human` label). Authoritative policy = Section H.
 - **Resume granularity**: cross-stage is safe (labels). Mid-`execute` interruption re-enters execute — `implement.md`/`debug.md`/`refactor.md` Step 0 detect an existing feature branch + build a **partial-work summary** (git log + one test run) passed into the worker, so it **continues from partial state rather than redoing work** (항목 4, hardened).
-- **Child auto-discovery**: matches `guild:child` Issues whose body has `Parent Issue: #<n>` (created by `design.md`'s multi-PR split). Keep the regex in sync if that reference string changes. ⚠ **Split-parent limitation (untested edge)**: when a parent splits, the supervisor counts the split as done and **queues the children** (they get developed unattended), but it does **not** re-queue the parent for its final **Phase 2c parent-integration** after the children finish — so a batched split parent is left at `guild:children`. Finish it with a manual `/gld dev <parent>` (re-enters Phase 2b, sees all children `guild:done`, runs integration → parent `guild:done`). Full batch↔orchestration nesting is v2.
+- **Child auto-discovery**: matches `guild:child` Issues whose body has `Parent Issue: #<n>` (created by `design.md`'s multi-PR split). Keep the regex in sync if that reference string changes. ⚠ **Correction — the normal case does NOT need a manual follow-up.** `dev.md` Phase 2 routes `OK SPLIT` straight into Phase 2b **in the same session** (`dev.md` Notes: *"that parent and its children sequentially in one session (Phase 2b/2c)"*), and Phase 2b/2c drive every child, then run parent-integration automatically, closing the parent to `guild:done` — all within the **same** `claude -p "/gld dev <parent>"` invocation batch already runs. So in the uninterrupted case, batch sees the parent arrive at `guild:done` directly, with the split already fully resolved; **no manual `/gld dev <parent>` follow-up is needed.** The only case that still needs one is if orchestration was genuinely **interrupted mid-split** (a child paused/failed, or a Phase 2c integration gap) — then the parent is left at `guild:children` (possibly plus `guild:needs-human`, see the case-order note above) and a later `/gld dev <parent>`/`/gld resume <parent>` picks up where it stopped.
+  - **Double-counting (fixed)**: both the `*guild:done*` and `*guild:children*` case arms' child auto-discovery queries filter on `,labels` and `select((.labels // []) | map(.name) | index("guild:done") | not)`, so a child already finished automatically during the parent's own in-session Phase 2b is never re-queued/re-invoked.
 - **`_bash_rules.md` exception**: variable expansion inside the generated `.sh` is fine — the atomic-bash rule governs direct Bash-tool calls, not OS-level scripts. The script is one background Bash-tool invocation.
 - **SIGKILL**: `trap` can't catch `kill -9`; then remove `.claude/guild/.gld-batch.sh` manually. No config backup/restore is needed (Guild uses `GLD_UNATTENDED` env, not a config-file toggle — simpler than sdd's `.sdd-config` swap).
 

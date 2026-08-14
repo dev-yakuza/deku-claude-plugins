@@ -68,13 +68,14 @@ Findings (note `test` normalized from `$(...)`, `lint` split into an array, `e2e
 1. Read linter/formatter config (`.eslintrc*`, `biome.json`, `.prettierrc*`, `ruff.toml`, `.editorconfig`).
 2. `git log --oneline -30` → commit message convention (prefixes, language, em-dash, version-bump format).
 3. Sample 2–3 representative source files (Grep/Read) → naming style, import ordering, error handling, test file placement.
+4. **Branch naming** (feeds `conventions.md`'s `{{PR_CONVENTION}}`, which otherwise has no evidence source anywhere in init — this is it): `git branch -a --format='%(refname:short)'` (local + remote branch names) → identify the prevailing pattern if one exists (e.g. `feature/#<n>-<slug>`, `feat/<slug>`, `<user>/<slug>`) from the non-`main`/`master`/`HEAD` entries. Sparse/no pattern (a fresh or trunk-only repo) → report `"unclear"`, do not guess. PR-size norms and review-rule conventions are **not** derivable from git history alone (they live in team practice / branch-protection settings, not the repo tree) — leave those to init's `{{PR_CONVENTION}}` fill-in as an honest "(미정 — 팀 규칙 확인 필요)" rather than inventing them from this scan.
 
 Findings:
 ```json
 { "scan": "convention", "findings": {
   "commit_style": "conventional (feat:/fix:), Japanese subject",
   "lint": "eslint + prettier", "naming": "camelCase, PascalCase components",
-  "test_location": "colocated *.test.tsx" } }
+  "test_location": "colocated *.test.tsx", "branch_naming": "feature/#<n>-<slug>" } }
 ```
 
 ## Section 4 — structure-scan
@@ -115,20 +116,22 @@ Findings:
 
 ⚠ **This scan is analytical, not mechanical** — it must tally frequencies across many commits. Spawn it at **Sonnet** (not Haiku). `_bash_rules` forbids pipes, so the sub-agent reads the raw `git log` output and ranks it **by reading** — exact counts are NOT required; an approximate "which paths repeat most" is the goal. Keep windows modest so the output stays readable.
 
+⚠ **Generated-asset flood (robustness — observed on real data, MUST handle, same as `scan_git.md` Section 0)**: a single commit that regenerates assets (SVG/PNG icons, golden images, minified bundles, lockfiles) can dump **thousands** of file paths into `--name-only` output — enough to blow this sub-agent's context. Measured on word_app: an unscoped `-120` name-only log = **6675 lines**; the same log **scoped to the source dir = 719 lines**. **Detect the main source dir first** (Glob, not Bash — `lib/`, `src/`, `app/`, `packages/*/src`), then scope every `git log --name-only` call below to it with a pathspec (` -- lib`) — a pathspec is not a pipe, stays atomic-bash-safe, and is the **default**, not a fallback. Only run unscoped if no clear source dir exists (then keep the window small and ignore asset paths by eye).
+
 All read-only, each its own Bash call (`_bash_rules.md`; no `|`, `&&`, `$(...)`, redirections — read the tool output and rank by inspection):
 
-1. **Bug-fix concentration** — where `fix:` commits cluster (conventional-commit `fix:` = a past bug). One call:
+1. **Bug-fix concentration** — where `fix:` commits cluster (conventional-commit `fix:` = a past bug). ⚠ `--grep` matches anywhere in the full commit message (subject + body), not just the subject start — a bare `--grep=^fix` false-positives on any commit whose *body* happens to contain a line starting with "fix". Anchor to the conventional-commit prefix shape instead. One call (substitute the source-dir pathspec from above, e.g. `-- lib`):
    ```bash
-   git log --name-only --pretty=format: --grep=^fix -i -150
+   git log --name-only --pretty=format: --grep='^fix[(:]' -i -150 -- lib
    ```
    Read the output and identify the **~8 most-frequently-appearing paths** (approximate ranking by eye is fine). Those = bug hotspots. Group nearby files into their area/layer.
-2. **Churn** — most-frequently-changed files overall (instability signal). One call:
+2. **Churn** — most-frequently-changed files overall (instability signal). One call (same source-dir pathspec):
    ```bash
-   git log --name-only --pretty=format: -200
+   git log --name-only --pretty=format: -200 -- lib
    ```
    Identify the top repeated paths. High churn = area that keeps needing change. (i18n/string files often top churn without being *bug* hotspots — note the distinction.)
 3. **Co-change** — files that repeatedly change *together* (hidden coupling): from the same output, note pairs/groups that recur across commits. Report the strongest recurring groups.
-4. Cross-reference with structure-scan layers to describe hotspots by area (e.g. "sync/ 계층", "db_helper", not just single files).
+4. **Group by directory/path prefix** (from the same `git log` output alone — e.g. every hotspot path under `lib/sync/` groups as "sync/ 계층") to describe hotspots by area, not just single files. ⚠ Do **not** assume access to the structure-scan's own output here — `init.md` spawns all six `scan_repo.md` sections as **isolated, parallel** sub-agents with no shared context, so this section cannot literally read what Section 4 (structure-scan) found in the same run. Directory-prefix grouping from this section's own `git log` output is the self-contained approximation; the deeper, structure-scan-informed cross-reference happens later, when the main session (`init.md` P2) has both scans' results together.
 
 **MUST return concrete paths with an approximate rank** (e.g. `db_helper.dart` appears in most fix commits) — an empty/vague result when the history clearly has hotspots is a scan failure. Keep to top-N; do not dump the full log. If git history is genuinely shallow/unavailable → return empty lists (best-effort; never block).
 

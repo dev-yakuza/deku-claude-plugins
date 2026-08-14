@@ -23,9 +23,17 @@ The single source of truth for "what stage is this Issue in" is its GitHub label
 
 **Split parents do not run the spine themselves.** When design splits an Issue, the parent leaves the normal `analyze→…→done` track and enters `guild:children` — it is an *orchestration* state, not a stage. Its "execute/test/qa" is the sum of its children plus a final parent-integration check (Section I). A parent never carries both `guild:children` and a stage label at once.
 
+**`guild:child` is a permanent identity marker, never removed.** Unlike every other row in the table above, `guild:child` is not itself a stage — it marks a child Issue's identity for its entire lifetime (added once at creation by `design.md`/`plan.md`, alongside its starting stage label `guild:analyze`; never removed by any later stage). A child Issue therefore always carries **two** `guild:*` labels at once: `guild:child` plus its actual current stage label — so "read current labels" at any stage's Step 0 returns a 2-element (not 1-element) array for a child. Every stage's transition ("remove whatever `guild:*` label Step 0 found, add the next one") must operate on the **stage** label only; stripping `guild:child` would silently drop the Issue out of Section I's `gh issue list --label guild:child` discovery query, breaking its parent's ability to find it. `design.md` additionally tracks this as `IS_LEAF` for its own leaf-only-split guard (Section I) — every other stage file just needs to leave the label untouched.
+
 **Label transitions are the main session's responsibility only.** Stage sub-agents NEVER add/remove labels — they return a status line (Section C) and the main session (dev.md / the stage wrapper) applies the label. This keeps state changes centralized and auditable.
 
 Transition rule: when a stage returns `OK ADVANCE: <next>`, the main session removes the current `guild:<stage>` label and adds `guild:<next>`. Labels are created by `/gld init`.
+
+**`guild:needs-human` removal.** This label is *additive* to whatever `guild:<stage>` label the Issue already carries (Section H) — a paused Issue keeps its stage label and gains this one on top. It is added by the unattended-mode pause path; it must also be **removed** somewhere, or a resolved pause stays permanently mis-reported to `batch`/`monitoring`/`status`, which all poll it as a first-class state. There is exactly one removal point: **whenever the main session performs ANY successful forward-progress label transition on an Issue that currently carries `guild:needs-human`** — an `OK ADVANCE`/`OK SPLIT`/`OK DONE` after the human resolved the pause and a re-run/`resume` made real progress, whether the transition is between two spine stages (`guild:<stage>` → `guild:<next-stage>`) or into/out of the `guild:children` orchestration state (which Section A above already notes is *not itself* a stage, but still counts as forward progress) — remove `guild:needs-human` as part of that same transition. The advance itself is the evidence the pause was resolved:
+```bash
+gh issue edit <n> --remove-label "guild:execute" --add-label "guild:test" --remove-label "guild:needs-human"
+```
+Check the Issue's current labels first (already read at Step 0 of every stage — analyze/design/implement/debug/refactor/qa/test all read labels before deciding whether to add their entry label) and only include `--remove-label "guild:needs-human"` when it's actually present — `gh issue edit` can error removing a label the Issue doesn't carry, so don't include it speculatively.
 
 ---
 
@@ -38,8 +46,9 @@ Each stage persists its output as a GitHub Issue comment wrapped in a marker pai
 | `<!-- guild:analyze:output -->` … `<!-- /guild:analyze:output -->` | analyze (leader) | requirement analysis, work-type classification, assumptions/interpretations chosen at discuss gate |
 | `<!-- guild:design:output -->` … `<!-- /guild:design:output -->` | design (tech-lead ∥ tester) | design summary, skeleton pointer, test-case pointer, PR split decision |
 | `<!-- guild:test:output -->` … `<!-- /guild:test:output -->` | test (tester) | test run summary + verify gate outcome |
-| `<!-- guild:test-evidence:step-<n> -->` … `<!-- /guild:test-evidence:step-<n> -->` | execute/test | raw test-runner output captured as verify evidence (Section E) |
-| `<!-- guild:review:output -->` … `<!-- /guild:review:output -->` | review (fresh reviewer) | guided pair-review walkthrough (risk-weighted, rationale-backed). Posted to the PR only with `/gld review … --comment`; default is session-only. Also written to `docs/specs/<issue>/review.md`. |
+| `<!-- guild:test-evidence:step-<n> -->` … `<!-- /guild:test-evidence:step-<n> -->` | **execute only** (`implement.md`/`debug.md`/`refactor.md` Step 2, as `step-1`) | raw test-runner output captured as verify evidence (Section E). ⚠ `test.md` does **not** also write this marker — its own raw evidence goes under `<!-- guild:test:output -->` above instead (an earlier version of this table said "execute/test," which `status.md`'s own marker list correctly never claimed). |
+| `<!-- guild:qa:output -->` … `<!-- /guild:qa:output -->` | qa | holistic QA plan + result (exploratory/E2E/user-flow) + UI/UX gate verdict when applicable. Read by `status.md` and `review.md` (Step 1's agent-authored-PR rationale load). |
+| `<!-- guild:review:output -->` … `<!-- /guild:review:output -->` | review (fresh reviewer) | guided pair-review walkthrough (risk-weighted, rationale-backed). Posted to the PR only with `/gld review … --comment`; default is **session-only, nothing persisted to disk** (unlike the other stages, `review.md` never writes a `docs/specs/<issue>/` file for its own recap). |
 
 **Durable design artifacts** (skeleton, architecture decisions, test cases) that outlive the Issue thread are also written to the working tree:
 - `docs/specs/<issue>/` — design skeleton, notes, test-case list (committed with the PR).
@@ -112,8 +121,8 @@ The **verify gate** (plan §4, §18 B) is implemented as evidence capture: whene
 
 Procedure:
 1. Run the project's test command (from `config.json` `commands.test` / conventions) as a simple Bash call. **Commands are pre-normalized** (`scan_repo.md` Section 2): a value is either a simple string or an **array** of simple steps. Run each array element as its **own** Bash call in order — never join them with `&&`. The stored form never contains `$(...)`/`&&`/`|`; if you encounter a raw compound command from an older install, split it yourself and drop any `$(...)` flag before running.
-2. Capture the raw tail of the output (the runner's own summary line, e.g. `Tests: 12 passed, 0 failed`).
-3. Write it to an Issue comment under `<!-- guild:test-evidence:step-<n> -->` via the temp-file pattern.
+2. Capture the raw tail of the output (the runner's own summary line, e.g. `Tests: 12 passed, 0 failed`). ⚠ **INV5 — scrub before posting, never paste blindly**: this is raw process output pasted into a public/shared GitHub comment — a crashing runner can print environment-variable dumps, connection strings, or tokens in its stack trace. Before writing it in step 3, scan the captured tail for the same high-signal secret patterns the commit gate uses (`gate_precommit.py`'s `INLINE_SECRET_RES` — AWS/PEM/Google/Slack/GitHub/Stripe keys) and redact any hit (`[REDACTED]`) rather than posting it verbatim. This mirrors `audit_readiness.md`'s "never print secret values" rule, which this exact raw-output path was missing until now.
+3. Write it to an Issue comment via the temp-file pattern — **the marker depends on which stage is running this procedure**: execute (`implement.md`/`debug.md`/`refactor.md` Step 2) uses `<!-- guild:test-evidence:step-<n> -->`; test (`test.md` Step 2) uses `<!-- guild:test:output -->` instead (not the `step-<n>` marker — see the marker table above).
 4. In any narrative claim ("all tests green"), the claim MUST be backed by the captured raw line. If the self-report and the raw output disagree, the raw output wins and the stage returns `BLOCKED`/`FAIL`. **When they disagree (a verify-gap), the enforcing stage also logs it as a ground-truth signal for the growth loop** (`_signals.md` Section C — `capture_signal.py --kind verify-gap`; this is the plan's "verify 증거패턴을 교정·revert 로깅으로 확장"). Logging is observational only and never changes the gate verdict (INV2).
 5. **Honesty of scope**: the verify output must also state what was **NOT** run — in M1, `commands.e2e` (integration/E2E) is detected but not auto-run, and manual/visual QA is the human's step (plan §18 B). "verify passed" means *automated-test verification*, never "fully QA'd." Do not imply full QA.
 
@@ -139,7 +148,7 @@ Never infer owner/repo from the git user, the system prompt, or path names. If t
 
 - **Stage role (always)** — lives on the spine; present in every task. Depth scales with the work (a one-line fix still passes through them, lightly). Never conditional.
 - **Participation role (conditional join)** — the leader convenes it **only when the task's nature warrants** (e.g. a designer on a UI change). Not warranted → never spawned → zero token cost. This is how a 16-role roster stays cheap.
-- **Gate role (conditional review)** — a **review check** the leader inserts *before advancing past a stage* when risk warrants (e.g. security review on auth/exposure changes). A gate role reviews **someone else's** output (external-auditor stance — it never self-reviews its own artifact; plan §9/§16). Some roles are both a participation role and a gate role (designer, security): they help build during the stage **and** provide the review check.
+- **Gate role (conditional review)** — a **review check** the leader inserts *before advancing past a stage* when risk warrants (e.g. security review on auth/exposure changes). A gate role reviews **someone else's** output (external-auditor stance — it never self-reviews its own artifact; plan §9/§16). Three roles carry gate capability on top of conditional participation, but not identically: designer/security **build during the stage and also provide the review check** (e.g. designer authors the UX design in `design`, then separately reviews the built UI at the `qa` gate); infra, by contrast, **never builds** — it conditionally joins `execute` purely to review the developer's already-produced CI/deploy/env/IaC diff (external-auditor stance from the start, per its own persona, not a build-then-review split like designer/security).
 
 **The roster (16):**
 
@@ -153,7 +162,7 @@ Never infer owner/repo from the git user, the system prompt, or path names. If t
 | product-owner | participation | requirements need value-alignment / AC ownership / scope calls | analyze | aligned requirements, AC, priorities, non-goals |
 | designer | participation **+ gate** | the change has UI/UX surface | design (UX design) · **UI/UX review gate** (built UI vs intent) | `docs/specs/<issue>/ux.md`; UI/UX review verdict |
 | security | participation **+ gate** | auth / external exposure / secrets / sensitive data / input validation | design (threat modeling) · execute (review) · **security review gate** (adversarial diff review) | threat-model notes; security findings (with severity); gate verdict |
-| infra | participation | CI/CD · deploy · env · IaC changes | execute | infra diff + rollback/verify notes |
+| infra | participation **+ gate** | CI/CD · deploy · env · IaC changes | execute (**infra review gate** — reviews the developer's already-produced CI/deploy/env/IaC diff, never authors its own; external-auditor stance, same as designer/security) | review verdict + rollback/verify notes (not a diff) |
 | dba | participation | schema · migration · data-model · queries | design/execute | schema/migration change + integrity/rollback notes |
 | i18n | participation | user-facing strings · multi-language · flavor/brand variants | design/execute | i18n keys · translations · sync notes |
 | analytics | participation | event tracking · metrics · A/B · instrumentation | design/execute | instrumentation design · event definitions |
@@ -200,7 +209,7 @@ When a task is too large for one PR, design splits it into **child Issues** that
 
 **The parent↔child link (two records):**
 - **In each child's body**: a line `Parent Issue: #<parent>` (canonical, single-language). This is the discovery key.
-- **On the parent**: one `<!-- guild:children:output -->` … `<!-- /guild:children:output -->` comment — a static roster of the children (`#<n>` · slice · one-line scope). It is the **idempotency guard** (its presence means children already exist — never re-create) and a human-readable index. **Not** a live status board: per-child status is always derived fresh from each child's label, so this comment is posted once and not PATCHed per child.
+- **On the parent**: one `<!-- guild:children:output -->` … `<!-- /guild:children:output -->` comment — a static roster of the children (`#<n>` · slice · one-line scope), and a human-readable index. **Not** a live status board: per-child status is always derived fresh from each child's label, so this comment is posted once and not PATCHed per child. ⚠ **Not the idempotency guard** — it's posted *last*, after every child already exists (`design.md`/`plan.md` Step-ordering), so an interruption before it's posted would make a presence-only check blind to already-created children and cause duplicates on retry. The actual idempotency guard is the **discovery query** below (re-derive the real child set every time, before creating anything) — the roster comment is written once creation is already known-complete, purely for humans, never read back as a completeness signal.
 
 **Child creation format** (design, its own Bash calls — temp-file body per `_bash_rules.md`):
 ```bash
@@ -210,9 +219,9 @@ The body states the slice's scope + acceptance criteria + a `Parent Issue: #<par
 
 **Child discovery** (its own Bash call — literal parent number substituted, no shell vars in the jq string per `_bash_rules.md`):
 ```bash
-gh issue list --label guild:child --state all --limit 200 --json number,title,labels --jq '[.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)"))] | sort_by(.number)'
+gh issue list --label guild:child --state all --limit 200 --json number,title,labels,body --jq '[.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)"))] | sort_by(.number)'
 ```
-If `--json` cannot include `body` together with the filter in your `gh` version, list `number,body,labels,title` and filter in jq as above. The boundary class `([^0-9]|$)` is **load-bearing** — without it `#68` matches `#680`.
+⚠ **`body` MUST be in `--json`** — the `--jq` filter tests `.body`; omitting it from `--json` (as an earlier version of this doc did) makes `.body` always `null`, the regex never matches, and the query silently returns `[]` **every time regardless of how many children actually exist** — orchestration would never discover any child and a split parent would stay at `guild:children` forever. Verified against the real `jq` binary: with `body` present the filter matches correctly; without it, it does not. The boundary class `([^0-9]|$)` is also **load-bearing** — without it `#68` matches `#680`.
 
 **Ordering & execution (sequential, in-session):** process children in ascending-number order (creation = intended order). For each child **not yet `guild:done`**, drive it through the **full spine** (analyze→design→execute→test→qa→done) exactly as a normal single Issue. A child pausing (`NEEDS_HUMAN`/`OK PAUSE`/`FAIL`) stops orchestration where it is; a later `/gld dev`/`/gld resume` on the parent re-discovers children and continues from the first not-done one (labels are the checkpoint — nothing local to corrupt).
 

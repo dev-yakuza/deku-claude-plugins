@@ -71,7 +71,7 @@ Deterministic, no embeddings (v1 — invariant 1). At a stage's pre-flight (`_pr
 ## Section E — Write discipline (who writes, when)
 
 - **init** seeds a **baseline** from the P1 scans (hotspots, strong co-change groups, layer/coupling boundaries) — a solid starting map, not an exhaustive dump (plan §7). Direct write (bootstrap).
-- **evolve** (M2 = **proposal-only**) proposes ⑥ facts and their `index.md` pointer; the **human applies** the edit (no auto-write in M2 — application machinery is v2+, plan §8). An `agent-friction`/`tool-error`/`co-change` signal that maps to a *fact* (not a habit or a decided rule) routes here.
+- **evolve** proposes ⑥ facts and their `index.md` pointer; **evolve writes the approved edit directly** (Phase 6 Apply — Edit/Write, schema-validated, auto-rollback on failure, provenance-stamped, committed), but only **per-item after explicit human approval** (Phase 5 — never auto-applied unattended, INV1). An `agent-friction`/`tool-error`/`co-change` signal that maps to a *fact* (not a habit or a decided rule) routes here.
 - **No stage writes ⑥ inline.** Stages only *read* it (Section C). Facts are committed (semantic, team-shared).
 
 ## Hard rules

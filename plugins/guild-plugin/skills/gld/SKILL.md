@@ -21,7 +21,7 @@ Route to the appropriate command based on `$0`. Read `<<SKILL_DIR>>/commands/$0.
 ## Common Definitions
 
 ### What Guild is
-Guild installs a **harness** into the target repo and grows a per-repo agent organization — **the Guild** — of role agents that develop the codebase. The codebase (**결과물**) and the Guild (**개발자**) co-evolve. This version is a **walking skeleton** (M1: bootstrap + development flow with an **advisory** harness) plus a **proposal-only `evolve` growth loop** (M2): evolve reads traces and proposes how the Guild should grow, but the human applies the changes — no auto-apply yet. Enforcement gates and autonomy are later milestones.
+Guild installs a **harness** into the target repo and grows a per-repo agent organization — **the Guild** — of role agents that develop the codebase. The codebase (**결과물**) and the Guild (**개발자**) co-evolve. The harness combines an **advisory** layer (standards, knowledge, agent roster) with a **deterministic enforcement layer**: `init` installs a `PreToolUse` commit gate, confirmed = block on secrets/verification-weakening from day one (further, stack-specific rules start `status: draft` = WARN-only until a human confirms them — INV6 draft→confirm→enforce). The `evolve` growth loop reads traces and proposes how the Guild should grow; the human reviews and applies changes per item — never auto-applied (INV1). Full unattended autonomy (`sprint`) is built but **readiness-gated** — it earns the right to run unattended only once measured prerequisites pass.
 
 ### The Guild (per-repo agent organization)
 - **Terminology (user-facing)**: in all output and GitHub comments, call the per-repo agent organization the **Guild** (길드) — the brand. Do NOT surface the internal shorthand "org" to the user (e.g. write "Guild 내부 검증", not "내부 org verify").
@@ -35,19 +35,21 @@ analyze → design → execute → test → qa
                     └ execute variant by work type: implement (feature) | debug (bug) | refactor (refactor)
 ```
 - `test` = automated correctness (tester, verify gate). `qa` = holistic quality (qa role, exploratory/E2E/user-flow, risk-based). `qa` marks `guild:done`.
-- Conditional participants + gates (leader assembles per task/risk): designer (UI → design + UI/UX review gate), security (→ security review gate), infra, dba, i18n, analytics, performance, tech-writer, release-manager, support-triage. See `commands/atoms/_handoff.md`.
-- Work type comes from the issue's `type:` label; `analyze` may reclassify. In M1, execute = **implement** only (debug/refactor are later).
+- Conditional participants + gates (leader assembles per task/risk): designer (UI → design + UI/UX review gate), security (→ security review gate), infra (CI/CD·deploy·env·IaC → execute review gate, review-only — never authors its own diff), dba, i18n, analytics, performance, tech-writer, release-manager, support-triage. See `commands/atoms/_handoff.md`.
+- Work type comes from the issue's `type:` label; `analyze` may reclassify. The execute variant is chosen accordingly — `implement` (feature), `debug` (bug), or `refactor` (refactor) — see the spine diagram above.
 - `/gld dev <issue>` runs the whole spine and auto-selects the execute variant. Individual stages are also invocable (`/gld analyze`, `design`, `implement`, `test`).
 
 ### Repo layout Guild manages
 ```
 CLAUDE.md                      # advisory: repo map + verification commands + knowledge routing
-.claude/settings.json          # permission allowlist (+ hooks in later milestones)
+.claude/settings.json          # permission allowlist + PreToolUse commit-gate hook
 .claude/agents/                # role agents (the Guild)
 .claude/guild/
   config.json                  # Guild settings (managed by /gld config)
   knowledge/                   # ⑥ codebase facts: index.md (always loaded) + facts/ (retrieved relevant-only). init seeds a baseline; evolve grows it
-  memory/                      # ④ episodic working tier (gitignored → local per-clone, low-trust): ground-truth.jsonl (captured signals, read at runtime by pre-flight Item 8) + consolidated.jsonl (archive of entries evolve grew into ③/⑥) + gate-firings.jsonl (gate firing log feeding the evolve rule scorecard) + review-nudge-state.json (review's evolve-nudge cooldown — {count, runs} at last nudge, so the 충분 state doesn't nudge every review)
+  memory/                      # ④ episodic working tier (gitignored → local per-clone, low-trust): ground-truth.jsonl (captured signals, read at runtime by pre-flight Item 8) + consolidated.jsonl (archive of entries evolve grew into ③/⑥) + gate-firings.jsonl (gate firing log feeding the evolve rule scorecard) + review-nudge-state.json (review's evolve-nudge cooldown, keyed by PR number — {"<pr>": {count, runs}} at that PR's last nudge, so the 충분 state doesn't nudge every review, and two PRs reviewed close together don't race on a shared counter)
+  gates/                       # 강제층 (enforcement layer): scripts/gate_precommit.py (the commit gate) + rules/secrets.md, rules/verification.md (status: confirmed → block) + rules/boundaries.md (status: draft → WARN-only until confirmed — INV6) + dismissed.md (accepted-risk registry) + findings.json (open violations)
+  overlay/                     # flow-policy override surface (empty by default; /gld contribute upstreams diffs here)
   evolution-log.md             # evolution ledger — used by evolve later
 docs/standards/                # charter, architecture, conventions, quality-bar, verification (init drafts; status: draft|confirmed)
 docs/adr/ , docs/specs/

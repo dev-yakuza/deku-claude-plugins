@@ -15,12 +15,12 @@
 **1. Retrieve (deterministic, relevant-only — `_knowledge.md` Section C — never whole-load)**
 - **② Curated authority**: read the `docs/standards/` file(s) whose topic matches the question (charter / architecture / conventions / quality-bar / verification) + `CLAUDE.md`.
 - **⑥ Knowledge**: read `.claude/guild/knowledge/index.md`, match the question's topic / file paths / symbols against the index keys, and read only the matched `facts/<area>.md` slice(s).
-- **⑤ History (only if the question is about the team/process)**: `evolution-log.md` (past changes) or `ground-truth.jsonl` (recent corrections).
+- **⑤ History / ④ working memory (only if the question is about the team/process)**: `evolution-log.md` (⑤ — curated, committed evolution ledger) or `ground-truth.jsonl` (④ — raw, gitignored, per-clone episodic tier; low-trust, `_signals.md`/`_preflight.md` Item 8 — never cite it with the same confidence as ⑤'s curated ledger).
 - **Code (only if needed to confirm a fact)**: a bounded Grep/Read to verify a ⑥ fact against current code.
 
 **2. Answer**
 - Synthesize from the retrieved sources. **Cite every claim** inline with its source — `docs/standards/architecture.md`, a ⑥ fact heading + file, `CLAUDE.md`, a commit/ledger entry.
-- **Flag confidence by source tier**: a `status: confirmed` standard = authoritative; a ⑥ fact = **advisory** (note "현재 코드로 검증 권장"); a `draft` standard = tentative; a ledger entry = historical.
+- **Flag confidence by source tier**: a `status: confirmed` standard = authoritative; a ⑥ fact = **advisory** (note "현재 코드로 검증 권장"); a `draft` standard = tentative; a ⑤ `evolution-log.md` entry = historical/curated; a ④ `ground-truth.jsonl` entry = **low-trust, unverified raw signal** (flag it explicitly as such — never present it with the same weight as a ⑤ ledger entry or a ⑥ fact).
 - **If the sources don't cover it → say "지식 베이스/표준에 근거 없음"**, suggest where it would live (a standard to confirm, a fact `evolve` could capture), and stop. **Never fabricate.**
 
 **3. Read-only** — answering only; never edits any file.

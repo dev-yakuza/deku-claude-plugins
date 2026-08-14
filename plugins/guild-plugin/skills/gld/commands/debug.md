@@ -12,7 +12,7 @@
 ## Step 0 — Preflight
 As the leader, follow `_preflight.md` **Heavy tier** (incl. ⑥ knowledge retrieval — a hotspot fact often names the culprit). Load the design output (`<!-- guild:design:output -->`) — for a bug the design is **light** (§4): a **reproduction + root-cause hypothesis** rather than a full skeleton. Load `docs/specs/$1/` (repro steps, hypothesis, test cases) if present. Missing analyze/design output → `NEEDS_CONTEXT: analyze/design not found for #$1`.
 
-Validate `$1` is an Issue. Ensure entry label `guild:execute` if invoked directly. Create/switch to a fix branch (repo convention, e.g. `fix/#$1-<slug>`). **Resume-safe (항목 4)**: existing branch → build a partial-work summary (`git log <base>..HEAD --oneline` + one test run: does the repro exist yet? is it red or already green?) and pass it into the developer prompt (Step 1) → continue, don't restart. Fresh branch → no summary.
+Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`. Empty → add `guild:execute`. Non-empty → do not add on top (Step 6's transition removes whatever **stage** label was actually found here, not necessarily `guild:execute` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A). Create/switch to a fix branch (repo convention, e.g. `fix/#$1-<slug>`). **Resume-safe (항목 4)**: existing branch → build a partial-work summary (`git log <base>..HEAD --oneline` + one test run: does the repro exist yet? is it red or already green?) and pass it into the developer prompt (Step 1) → continue, don't restart. Fresh branch → no summary.
 
 ## Step 1 — Spawn developer (reproduce → root-cause → fix)
 Spawn the developer sub-agent (`subagent_type: general-purpose`, `model: sonnet`, `description: developer debug #$1`):
@@ -35,7 +35,7 @@ Same as `implement.md` Step 3.5 — convene the execute-stage specialists / gate
 ## Step 4 — Arbitrate (defined feedback loop)
 As the leader, over developer + tech-lead + specialist verdicts:
 - All `DONE`/`DONE_WITH_CONCERNS` + raw evidence green (regression test red→green, existing green) → Step 5.
-- Tech-lead `BLOCKED` (symptom-patch / wrong root cause), a gate `BLOCKED`, or evidence contradicts green → before looping back, apply the **stagnation guard** (`_stagnation.md`): same root cause as the immediately-prior attempt → escalate immediately instead of retrying. Different concern → **defined loop back to execute** (re-spawn developer — and the tech-lead/gate role whose `BLOCKED` triggered this — **at one model tier above their default**, `_model_tiering.md` Section A: sonnet → opus, the one bounded retry) with the specific concern. Bounded — ~2 loops → `NEEDS_HUMAN: <one-line>`.
+- Tech-lead `BLOCKED` (symptom-patch / wrong root cause), a gate `BLOCKED`, or evidence contradicts green → before looping back, apply the **stagnation guard** (`_stagnation.md`): same root cause as the immediately-prior attempt → escalate immediately instead of retrying. Different concern → **defined loop back to execute** (re-spawn developer — and the tech-lead/gate role whose `BLOCKED` triggered this — **at one model tier above their default**, `_model_tiering.md` Section A: sonnet → opus, the one bounded retry) with the specific concern. Bounded — after ~2 loops without resolution: **Attended** → return `NEEDS_HUMAN: <one-line>`. **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H — detect via `printenv GLD_UNATTENDED`): treat bounded-retry exhaustion the same as a stagnation escalation — add the **`guild:needs-human` label** + a `<!-- guild:needs-human -->` comment, and return `OK PAUSE: needs-human — <one-line>` (do NOT transition the stage label). Mirrors `test.md`/`qa.md`'s unattended handling.
   - **Ground-truth capture (①, `_signals.md` Section C — agent↔agent correction):** on a **real reversal** (a `BLOCKED`, or raw evidence contradicting claimed green — not a mere `DONE_WITH_CONCERNS`), append one entry (its own Bash call, best-effort — never blocks). The `BLOCKED` reason / contradicting raw line **is** the objective anchor. `--surprise` always (§8-A); add `--escalated` since the retry's model tier was just bumped (`_model_tiering.md` Section B):
     ```bash
     python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage execute --role <tech-lead|security|…> --area "<the file/area of the bug>" --summary "<what was reversed, 1 line>" --evidence "<the BLOCKED finding / raw line>" --surprise --escalated
@@ -47,8 +47,9 @@ As the leader, over developer + tech-lead + specialist verdicts:
 As the leader, push + open a PR (`Closes #$1`, body summarizes root cause + fix + the regression-test evidence). **Resume-safe** (PATCH existing PR). **Unattended (`GLD_UNATTENDED=1`)**: append the `## 무인 결정 로그` section (`_handoff.md` Section H).
 
 ## Step 6 — Transition + return
+Remove **whatever `guild:*` stage label Step 0 actually found** (substitute in place of `guild:execute` below if it was something else; **never remove `guild:child`** if present). **Also remove `guild:needs-human` in this same call if Step 0's label read found it present** (`_handoff.md` Section A):
 ```bash
-gh issue edit $1 --remove-label "guild:execute" --add-label "guild:test"
+gh issue edit $1 --remove-label "guild:execute" --add-label "guild:test" --remove-label "guild:needs-human"
 ```
 Return `>>> RESULT <<<` / `OK ADVANCE: test`. Other: `NEEDS_HUMAN`/`NEEDS_CONTEXT`/`FAIL` (no transition).
 

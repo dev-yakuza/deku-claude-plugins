@@ -5,7 +5,7 @@ updated: {{DATE}}
 ---
 # Architecture — {{PROJECT_NAME}}
 
-> 테크리드·개발자가 참조하는 구조 기준. init이 structure-scan으로 초안을 작성. `confirmed` 시 경계 게이트의 기준이 된다.
+> 테크리드·개발자가 참조하는 구조 기준. init이 structure-scan으로 초안을 작성. ⚠️ 이 문서 자신의 `confirmed`는 경계 게이트를 직접 켜지 않는다 — 실제 경계 게이트는 별도 파일 `.claude/guild/gates/rules/boundaries.md`의 자체 `status`가 결정한다(`gate_precommit.py`의 `check_boundaries()`가 읽는 곳). 이 architecture.md는 그 규칙을 만들 때 evolve/audit이 참고하는 근거일 뿐, 이 문서를 확정한다고 게이트가 바뀌지 않는다.
 >
 > ⚠️ **상위 골격만 (drift 방지 — 항목 2a)**: 이 문서는 **느리게 변하는 상위 골격**(레이어·경계·확장점)만 담는다. 빠르게 변하는 **세부 결합 사실**(어떤 파일이 함께 바뀌는지, 특정 함정)은 여기 나열하지 말고 **⑥ 지식(`.claude/guild/knowledge/`)**에 둔다 — evolve가 자동 갱신하는 곳. 세부를 여기 적으면 기능마다 낡는다. execute의 tech-writer가 아키텍처 영향 변경 시 이 골격을 동기화한다(`draft`→즉시, `confirmed`→제안).
 

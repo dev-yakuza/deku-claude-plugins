@@ -5,7 +5,7 @@ updated: {{DATE}}
 ---
 # Quality Bar — {{PROJECT_NAME}}
 
-> "충분히 좋다"의 정의. review·verify가 참조하는 2축(Standards/Spec) 중 Standards 축의 기준. init이 초안, 사용자가 확정.
+> "충분히 좋다"의 정의. `/gld review`의 적대적 프리스캔이 쓰는 2축(Standards/Spec) 중 Standards 축의 기준 — verify(test 스테이지)는 이 2축 프레이밍을 쓰지 않고 `docs/standards/verification.md`의 DoD/verify 규칙만 참조한다(원문 증거 vs 자기보고 대조가 전부). init이 초안, 사용자가 확정.
 
 ## 반드시 통과 (Must Pass)
 {{MUST_PASS}}

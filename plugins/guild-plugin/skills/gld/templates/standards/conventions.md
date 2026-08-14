@@ -21,4 +21,6 @@ updated: {{DATE}}
 
 ## PR 규칙 (PR Convention)
 {{PR_CONVENTION}}
-<!-- 브랜치 네이밍, PR 크기, 리뷰 규칙, 이슈 링크 방식. -->
+<!-- init: 브랜치 네이밍은 scan_repo.md Section 3(convention-scan)의 branch_naming 결과로 채운다(증거 기반).
+     PR 크기·리뷰 규칙·이슈 링크 방식은 git 히스토리만으로 도출 불가(팀 관례/브랜치 보호 설정 영역) —
+     추측해서 채우지 말고 "(미정 — 팀 규칙 확인 필요)"로 정직하게 남긴다. evolve/사람이 나중에 채운다. -->

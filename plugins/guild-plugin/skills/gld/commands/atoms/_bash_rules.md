@@ -77,6 +77,17 @@ The same constraint applies to `gh issue create` — write the body to a temp fi
 
 ---
 
+## Sanctioned exceptions (the only two)
+
+Several files (`batch.md`, `evolve.md`, `_signals.md`, `scan_transcript.py`'s and `capture_signal.py`'s own docstrings) describe themselves as an "atomic-bash exception" — this section is the list those claims point back to, so a claimed exception can actually be checked against something instead of asserting itself unilaterally. There are exactly two:
+
+1. **A single bundled Python invocation** — `python3 <script>.py --flag value ...` as ONE Bash tool call. The script itself may internally do whatever multi-step logic it needs (git parsing, jq-like filtering) — that's Python code, not shell compounding, so it never trips the compound-command heuristics above. Used by: `capture_signal.py` (ground-truth append), `scan_transcript.py` (transcript friction scan). This isn't really an "exception" to the FORBIDDEN list at all — a single `python3 script.py <args>` call already satisfies "simple command" on its own; the label exists to reassure a reader who might otherwise assume a Python script implies hidden shell chaining.
+2. **A generated OS-level `.sh` script, run once as a single backgrounded Bash tool call** (`bash path/to/generated-script.sh`, `run_in_background: true`) — `batch.md`'s supervisor script is the only current instance. The **script's own contents** (loops, `&&`, `$(...)`, variable substitution) are ordinary shell code the OS interprets when the script runs — they are not subject to this file's rules, which govern **the Bash tool call itself** (one call: `bash <path>`), not what a script file does once it's executing outside Claude Code's per-call heuristics. This is a narrow, deliberate carve-out for exactly this shape (a single generated script file, invoked once) — it does not license writing arbitrary compound commands directly in a Bash tool call's `command` argument.
+
+No other pattern is a sanctioned exception. Any other file claiming one should be checked against this list — if it doesn't match either shape above, the claim is wrong, not the rule.
+
+---
+
 ## Scope
 
-This rule set applies to every Bash tool invocation inside any Guild command, atom, stage, or role agent — including snippets shown in Guild's Markdown files. Those snippets are templates for tool calls, not literal shell scripts to paste.
+This rule set applies to every Bash tool invocation inside any Guild command, atom, stage, or role agent — including snippets shown in Guild's Markdown files. Those snippets are templates for tool calls, not literal shell scripts to paste. See "Sanctioned exceptions" above for the only two carve-outs.

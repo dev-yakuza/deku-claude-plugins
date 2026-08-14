@@ -83,7 +83,7 @@ Guild's harness under `.claude/` (agents, guild state, settings.json) is **meant
    ```bash
    git check-ignore .claude/agents .claude/guild .claude/settings.json
    ```
-   (Any path echoed back = it is ignored. If the tool errors because a path doesn't exist yet, treat as "will be created under .claude/" and proceed to inspect `.gitignore`.)
+   (Any path echoed back = it is ignored. A nonexistent path doesn't error — `git check-ignore` just exits 1 with no output for it, identical to a real path that isn't ignored; verified empirically. Either way, no output for a given path = proceed to inspect `.gitignore` for it as "not ignored / will be created under `.claude/`.")
 2. If any is ignored, read the root `.gitignore` and **append negation exceptions** (Edit tool, additive — preserve everything else), after the line that ignores `.claude`:
    ```
    !.claude/agents/
@@ -97,6 +97,8 @@ Guild's harness under `.claude/` (agents, guild state, settings.json) is **meant
 (INV4: this is an additive edit to `.gitignore`; existing rules are preserved.)
 
 ### 1. Guild state skeleton
+**Resolve the installed plugin version first** (its own Read call — do NOT hardcode a version string): Read `<<SKILL_DIR>>/../../.claude-plugin/plugin.json` and take its `version` field. Use that literal value for `config.json`'s `version` below. (A hardcoded literal here goes stale the moment the plugin ships a new version — every fresh `init` would then falsely report itself as behind via `/gld update --check`.)
+
 Create via Write tool:
 - `.claude/guild/config.json` — the M1 config (see schema below).
 - `.claude/guild/knowledge/` — the ⑥ semantic-memory **baseline** (`<<SKILL_DIR>>/commands/atoms/_knowledge.md` format), seeded from the P1 scans — **not** a blank header:
@@ -104,7 +106,7 @@ Create via Write tool:
   - `facts/<area>.md` — seed a **solid baseline** (plan §7 — not exhaustive): the top bug-**hotspot** files (with approx `fix:` frequency), the strongest **co-change** groups (X↔Y), and the main **layer/coupling** boundaries from structure-scan. Each fact evidence-anchored to git history, provenance `init-scan`. **Reuse the same scan findings** that fill the agent specialization's hotspot line (step 2) so ③ and ⑥ agree. `evolve` grows the rest.
 - `.claude/guild/evolution-log.md` — ledger header (used by evolve later).
 - `.claude/guild/gates/` — the **강제층 (enforcement layer, M3 minimal set — plan §11/§14)**:
-  - `scripts/gate_precommit.py` — **copy** the bundled gate verbatim from `<<SKILL_DIR>>/gates/gate_precommit.py` (Read it, Write it to the repo path). It is the `PreToolUse(Bash: git commit)` hook (wired in settings.json, step 5) that blocks a commit carrying a **secret** (keystore/.p12/.jks/.pem/serviceAccount/.env — public identifiers like `google-services.json` excluded) or **weakening verification** (INV2 — deleted test file / net-removed assertions / added skips). Off-switch = config `gates.enabled`.
+  - `scripts/gate_precommit.py` — **copy** the bundled gate verbatim from `<<SKILL_DIR>>/gates/gate_precommit.py` (Read it, Write it to the repo path). It is the `PreToolUse(Bash)` hook (wired in settings.json, step 5, fires on **every** Bash call — the script's own `is_git_commit()` self-filters to commits, since Claude Code's hook-level `if` pattern matching is documented as best-effort and not reliable enough to gate a security-critical check on) that blocks a commit carrying a **secret** (keystore/.p12/.jks/.pem/serviceAccount/.env — public identifiers like `google-services.json` excluded) or **weakening verification** (INV2 — deleted test file / net-removed assertions / added skips). Off-switch = config `gates.enabled`.
   - `rules/secrets.md` + `rules/verification.md` — one-line rule statements, `status: confirmed` (universal + non-hallucinated → they **block**).
   - `rules/boundaries.md` — **structure/boundary rules, `status: draft` (= WARN only, never blocks until the human confirms — INV6/T3)**. Seed 0–2 `- forbid: <layer-glob> imports <path-substr>` rules from the structure-scan's layer boundaries (e.g. `- forbid: lib/ui/** imports lib/db/`); if the layers are unclear, write the `status: draft` header + a commented example + a note that `evolve`/`audit` grow it. Draft rules warn; confirming a rule (`status: confirmed`) promotes it to a block.
   - `dismissed.md` — accepted-risk registry (header only; `- <path/pattern> — <reason>` downgrades that item to a warning).
@@ -116,7 +118,7 @@ Create via Write tool:
 **config.json (M1 subset, plan §18 C):**
 ```json
 {
-  "version": "0.30.3",
+  "version": "<the plugin.json version resolved above — e.g. 0.40.0, NOT a literal copied from this doc>",
   "language": "<lang from $1>",
   "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
@@ -133,12 +135,12 @@ Create via Write tool:
 Install the **entire roster** so the leader can assemble any of them per task (plan §18 D — "전 역할 활성화; init이 로스터 전체 설치, 리더가 태스크별 조건부 참여"). The roster has three participation kinds (documented in `_handoff.md` Section G):
 - **Spine roles (always in the flow)**: `leader`, `tech-lead`, `developer`, `tester`, `qa`.
 - **Participation roles (leader convenes conditionally)**: `product-owner`, `designer`, `infra`, `dba`, `security`, `performance`, `i18n`, `analytics`, `tech-writer`, `release-manager`, `support-triage`.
-- **Gate roles (conditional review checks)**: `designer` (UI/UX review), `security` (security review) — same files as their participation entry.
+- **Gate roles (conditional review checks)**: `designer` (UI/UX review), `security` (security review), `infra` (CI/CD·deploy·env·IaC review — gate-only, never authors its own diff) — same files as their participation entry.
 
 For **each of the 16** roles (`leader`, `tech-lead`, `developer`, `tester`, `product-owner`, `qa`, `designer`, `infra`, `dba`, `security`, `performance`, `i18n`, `analytics`, `tech-writer`, `release-manager`, `support-triage`):
 - Read `<<SKILL_DIR>>/templates/agents/<role>.md`.
 - Fill the `{{...}}` placeholders from the P1 scans + P1.5 interview:
-  - `{{PROJECT_NAME}}`, `{{DOMAIN}}`, `{{STACK}}`, `{{TEST_CMD}}`, `{{E2E_CMD}}`, `{{E2E_SETUP}}`, `{{LINT_CMD}}`, `{{TYPECHECK_CMD}}`, `{{BUILD_CMD}}`, `{{CONVENTIONS}}`, `{{ARCHITECTURE}}`, `{{BOUNDARIES}}`, `{{TEST_FRAMEWORK}}`, `{{TEST_LOCATION}}`, `{{LEADER_NOTES}}`, `{{VALUES}}` (each template uses only the subset it needs).
+  - `{{PROJECT_NAME}}`, `{{DOMAIN}}`, `{{STACK}}`, `{{TEST_CMD}}`, `{{E2E_CMD}}`, `{{E2E_SETUP}}`, `{{LINT_CMD}}`, `{{TYPECHECK_CMD}}`, `{{BUILD_CMD}}`, `{{CONVENTIONS}}`, `{{ARCHITECTURE}}`, `{{BOUNDARIES}}`, `{{TEST_FRAMEWORK}}`, `{{TEST_LOCATION}}`, `{{LEADER_NOTES}}`, `{{VALUES}}` (each of the **16 agent templates** uses only the subset it needs from this list — none of them actually use `{{E2E_CMD}}`/`{{BUILD_CMD}}` today, those two only appear in `verification.md`/`CLAUDE.md.tmpl`). ⚠ **This list covers the 16 agent templates only, NOT the 5 standards templates** (step 3 below) — those introduce their own, separate placeholder set (`{{MISSION}}`, `{{VISION}}`, `{{VALUES}}`, `{{GOALS}}`, `{{NON_GOALS}}`, `{{CODE_STYLE}}`, `{{COMMIT_STYLE}}`, `{{TEST_CONVENTION}}`, `{{PR_CONVENTION}}`, `{{MUST_PASS}}`, `{{QUALITY_EXPECTATIONS}}`, `{{TRADEOFFS}}`, `{{VERIFY_RULES}}`, `{{DOD}}`, `{{DIRECTORY_MAP}}`, `{{SEAMS}}`, `{{PITFALLS}}`), filled per step 3's own generic "content placeholders from scans + interview" instruction — do not assume this list is exhaustive across every templated file init writes.
   - `{{TEST_CMD}}`/`{{LINT_CMD}}`/`{{TYPECHECK_CMD}}` use the **normalized** commands from config (no `$(...)`/`&&`; render an array as a comma- or slash-separated list of the simple steps).
   - **The "주의(핫스팟·함정)" line MUST incorporate the hotspot-scan (scan 6) findings** — list the concrete top bug-hotspot files/areas (with their approximate `fix:` frequency) and any strong co-change groups, for `tech-lead`/`developer`/`tester`/`qa`/`performance`. This is evidence from git history, not a guess — do NOT reduce this line to "규칙 미정". (Hidden *rules/intent* may be "(미정 — evolve가 채움)", but **hotspots are known and must appear.**) Example: "핫스팟: `db_helper.dart`(fix 최다)·`sync_data_controller`·`iap_controller`·`tts_controller` — 변경 시 회귀 주의".
   - Fill the specialization section concretely — this is what makes the role *this repo's* senior, not a generic shell. Apply the **Output conventions** above: no raw `{{...}}` (use a localized "(미정)" note if unknown), structure enumerations as nested sub-bullets, and localize the heading (the template's `프로젝트 특화` heading stays localized — never emit `[PROJECT SPECIALIZATION]`).
@@ -162,7 +164,7 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
   - Else → append the filled Guild block (with markers) to the end, preserving all existing content.
 
 ### 5. settings.json (key-level merge — preserve existing)
-- Read `<<SKILL_DIR>>/templates/settings.json.tmpl`; fill `{{TEST_BIN}}`/`{{LINT_BIN}}` (the executable names, e.g. `yarn`, `npm`, `pytest`). The template includes the **`PreToolUse(Bash: git commit)` gate hook** (M3 강제층 — runs `.claude/guild/gates/scripts/gate_precommit.py`).
+- Read `<<SKILL_DIR>>/templates/settings.json.tmpl`; fill `{{TEST_BIN}}`/`{{LINT_BIN}}` with the FIRST/primary executable name for each (e.g. `yarn`, `npm`, `pytest`). ⚠ **`commands.lint` (and `commands.test`) can be a normalized **array** of steps** (Section 2's own normalization rule — e.g. `["flutter analyze", "npx remark . --quiet --frail"]` uses two distinct binaries, `flutter` and `npx`), and a single `{{LINT_BIN}}`/`{{TEST_BIN}}` slot can only hold one — an array with a second, different binary would otherwise leave it entirely unlisted in `permissions.allow`, causing an avoidable permission prompt on every lint/test run. **Extract every distinct binary name** across the array (the first word of each step, before its first space) and fill `{{ADDITIONAL_BIN_ENTRIES}}` with one `,\n      "Bash(<bin>:*)"` line per binary beyond the first (empty string if there's only one binary total — never leave the literal `{{ADDITIONAL_BIN_ENTRIES}}` token in the written file, an empty fill is fine here since the trailing entry list already has no dangling comma either way). The template includes the **`PreToolUse(Bash)` gate hook** (M3 강제층 — runs `.claude/guild/gates/scripts/gate_precommit.py` on every Bash call; the script itself decides whether it's a commit).
 - **If `.claude/settings.json` does not exist** → Write the filled template.
 - **If it exists** → JSON has no comment markers, so merge by key: read the existing JSON, union `permissions.allow` (dedupe), and **union the Guild gate hook into `hooks.PreToolUse`** — append the Guild `{matcher:"Bash", hooks:[{... gate_precommit.py}]}` entry only if an equivalent one is not already present (dedupe by command path); **preserve all other existing hooks and keys**. Write the merged JSON back (2-space indent).
 
@@ -190,7 +192,7 @@ Offer to confirm the drafted standards now (plan §7 P3, §6 draft→confirm→e
 - Show the user each `docs/standards/*.md` draft summary.
 - For each, ask: keep as `draft`, or flip to `confirmed`? (Skippable — "confirm later with a manual edit or a future audit.")
 - On confirm: change the file's frontmatter `status: draft` → `status: confirmed`.
-- Enforcement is not wired in M1 (advisory harness), so this only sets intent — but it is the honest place to lock standards while the human is in the loop.
+- Confirming a *standards doc* (`charter.md`, `architecture.md`, etc.) never itself toggles any gate — these are advisory, read by roles as judgment context, not mechanically enforced. (The gates that *do* mechanically block — `gate_precommit.py`'s secret/verification checks — are wired separately in P2 §1 above and are already `status: confirmed` from day one, independent of this pass.) So this step only sets intent — but it is the honest place to lock standards while the human is in the loop.
 
 Default if the user skips: everything stays `draft`.
 
@@ -242,7 +244,7 @@ Report what was installed:
 
 ## Partial-failure repair (not a hard dead-end)
 
-`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is: `config.json` + 16 role agents (full roster) + 5 standards + CLAUDE.md guild block + settings.json allowlist **+ PreToolUse gate hook** + 10 labels + `knowledge/` baseline (index.md + facts/) + `gates/` (gate_precommit.py + rules + dismissed.md). Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
+`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is everything P2 creates: `config.json` + 16 role agents (full roster) + 5 standards + `docs/adr/0000-template.md` + `docs/specs/.gitkeep` + CLAUDE.md guild block + settings.json allowlist **+ PreToolUse gate hook** + 10 labels + `knowledge/` baseline (index.md + facts/) + `gates/` (gate_precommit.py + rules + dismissed.md + findings.json) + `evolution-log.md` + `overlay/.gitkeep` + `.claude/guild/.gitignore` + `memory/.gitkeep`. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
 
 ## Hard rules (safety)
 - **Additive only** (INV4): existing files are merged/preserved, never clobbered. CLAUDE.md via markers; settings.json via key union; existing `docs/standards/*` and `.claude/agents/*` are not overwritten.

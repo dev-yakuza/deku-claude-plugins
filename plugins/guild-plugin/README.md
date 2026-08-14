@@ -23,7 +23,7 @@ claude /plugin install deku-claude-plugins@guild-plugin
 ## Quick Start
 
 ```bash
-/gld init            # Analyze & onboard the repo → harness + founding Guild agents + standards + ⑥ baseline (one-time)
+/gld init            # Analyze & onboard the repo → harness + founding Guild agents + standards + ⑥ baseline + readiness audit → guild:harness issues (one-time)
 /gld dev 123         # Develop GitHub Issue #123 end-to-end (auto-selects feature/bug/refactor)
 /gld status 123      # Inspect progress   ·   /gld resume 123 to continue
 /gld audit           # Read-only health check of harness + team + codebase
@@ -32,9 +32,9 @@ claude /plugin install deku-claude-plugins@guild-plugin
 
 ## Commands
 
-**Setup** — `init [lang]` (one-time onboarding) · `config` (dials, off-switches) · `update [--check]` (adopt central improvements, preserve local evolution)
+**Setup** — `init [lang]` (one-time onboarding, harness build + readiness audit) · `onboard [area]` (guided codebase tour for a human maintainer) · `config` (dials, off-switches) · `update [--check]` (adopt central improvements, preserve local evolution)
 
-**Develop** (spine: analyze → design → execute → test → qa) — `dev <issue>` (full flow, auto-selects the execute variant) · `analyze` · `design` · `implement` (feature) · `debug` (bug: reproduce→root-cause→fix) · `refactor` (behavior-preserving) · `test` · `qa` · `review <issue>` (guided pair-review + adversarial pre-scan) · `resume` · `status` · `batch [issues]` (unattended, rate-limit resilient)
+**Develop** (spine: analyze → design → execute → test → qa) — `plan <doc|epic-issue> [--create]` (decompose an epic/design doc into a dependency-ordered Issue backlog) · `dev <issue>` (full flow, auto-selects the execute variant) · `analyze` · `design` · `implement` (feature) · `debug` (bug: reproduce→root-cause→fix) · `refactor` (behavior-preserving) · `test` · `qa` · `review <issue|PR>` (guided pair-review + adversarial pre-scan, accepts an Issue or a PR number directly) · `resume` · `status` · `batch [issues]` (unattended, rate-limit resilient)
 
 **Diagnose & grow** — `audit` (read-only, routes to evolve/refactor) · `evolve [--dry-run|--apply]` (scan → adversarial panel → per-item approval → apply with backup/rollback/provenance/ledger) · `contribute` (upstream a flow improvement)
 
@@ -51,6 +51,7 @@ Guild is a self-modifying system, so safety is deterministic, not advisory:
 - **INV3 — everything is reversible** (git · `/gld rollback` · evolve auto-rollback on validation failure).
 - **INV4 — additive, never clobbers** local evolution (agents, knowledge, standards, overlay).
 - **INV5 — nothing leaves the machine un-sanitized** (`contribute` sanitizes + dedups + human-reviews before any upstream send).
+- **INV6 — draft→confirm→enforce.** Auto-generated gate rules (e.g. structure/boundary rules) start `status: draft` (WARN-only) and only start blocking once a human confirms them (`status: confirmed`); the two universal secret/verification gates are non-hallucinated so `init` installs them pre-confirmed.
 - **Off-switch** — `/gld config` pauses automation and gate blocking.
 
 A **deterministic commit gate** (a `PreToolUse` hook) blocks committing secrets or weakening verification, and can't be bypassed by permission mode.

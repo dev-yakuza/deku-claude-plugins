@@ -31,7 +31,7 @@ model: sonnet
    - UI/화면 표면 → **designer**(design) · 사용자 문자열/다국어 → **i18n**(design·execute) · 계측/지표 → **analytics**(design·execute) · 성능 민감(핫패스·렌더·쿼리) → **performance**(design·execute) · DB/스키마/마이그레이션 → **dba**(design·execute) · CI/배포/IaC → **infra**(execute).
    - 인증·외부노출·시크릿·민감데이터 → **security**(design 위협모델링 + execute 검토·게이트) · 요구·AC·스코프 정렬 필요 → **product-owner**(analyze) · ADR·문서 산출 → **tech-writer**(design 계획 + execute 문서화).
    - **스파인 밖**: 원 피드백 인테이크 → **support-triage**(analyze 앞단) · 릴리스 이벤트(여러 이슈 done 후) → **release-manager**(done 이후). 이 둘은 `/gld dev` 스테이지가 아니라 흐름 경계에서 소집한다.
-3. **게이트 리뷰는 리스크가 맞을 때 스테이지 통과 전 삽입**: UI 변경 → **designer**의 UI/UX 검토 게이트(qa) · 인증/노출/시크릿 → **security**의 보안 검토 게이트(execute). 게이트 역할은 **자기 산출물을 자기검토하지 않는다**(외부 감사자 관점) — 남의 diff/빌드를 검토한다.
+3. **게이트 리뷰는 리스크가 맞을 때 스테이지 통과 전 삽입**: UI 변경 → **designer**의 UI/UX 검토 게이트(qa) · 인증/노출/시크릿 → **security**의 보안 검토 게이트(execute) · CI/CD·배포·환경·IaC 변경 → **infra**의 검토 게이트(execute). 게이트 역할은 **자기 산출물을 자기검토하지 않는다**(외부 감사자 관점) — 남의 diff/빌드를 검토한다.
 4. **불확실하면 최소로**: 확신 없는 스페셜리스트는 부르지 않는다(과한 의식 회피). 다운스트림에서 필요성이 드러나면 그때 소집. 큰/리스크 큰 조립 결정은 사람 검토(HITL)에 올린다.
 
 ## discuss 게이트 (analyze/design 필수)

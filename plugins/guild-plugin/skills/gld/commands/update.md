@@ -13,18 +13,20 @@
 **0. Preflight** — read `.claude/guild/config.json` `version` (the repo harness version, stamped at init/last-update) and the **installed plugin version** (`<<SKILL_DIR>>/../../.claude-plugin/plugin.json`, or the marketplace-installed manifest). Guild not initialized → "run `/gld init` first".
 
 **1. Version gap**
+Compare the two versions **semver-numerically** (major.minor.patch, each component as a number — e.g. `0.9.0 < 0.10.0`, not a lexicographic string compare where "0.9.0" would wrongly sort above "0.10.0"):
 - `config.version` ≥ plugin → "최신입니다 (v<config.version>)." Stop.
 - `config.version` < plugin → show the gap and what an update brings (new/changed **commands** are already available plugin-side; the **repo-side** update refreshes gate scripts, settings hooks, the CLAUDE.md guild block, the label set, and the config schema). `--check` → stop here (nudge only).
 
 **2. Adopt central-owned repo artifacts (each shown + confirmed — INV1)**
 Preserving local content throughout:
 - **Gate scripts** → copy the latest `<<SKILL_DIR>>/gates/gate_precommit.py` → `.claude/guild/gates/scripts/` (central-owned; overwrite).
+- **Universal gate rules** → refresh `.claude/guild/gates/rules/secrets.md` and `rules/verification.md` from the latest central templates (central-owned, `status: confirmed`, non-hallucinated — same rationale as the gate script; overwrite).
 - **settings.json hooks** → union the latest central `PreToolUse` gate hook, **preserving local `permissions.allow` and any local hooks** (dedupe by command path).
 - **CLAUDE.md guild block** → update only the content between `<!-- guild:start -->`…`<!-- guild:end -->` to the latest template shape, **preserving everything outside the markers** and any local knowledge-routing lines you can carry forward.
 - **Labels** → ensure the current `guild:*` label set (add any new ones idempotently, `--force`).
 - **Config** → bump `version` to the plugin version; add any **new** config keys with defaults, **preserving existing local values** (language, roles, commands, gate/automation dials).
 
-**3. PRESERVE — never touched** (local evolution, INV4): `.claude/agents/*` specialization · `.claude/guild/knowledge/*` (⑥) · `docs/standards/*` (②) · `.claude/guild/overlay/*` (flow overrides) · `.claude/guild/evolution-log.md` (⑤).
+**3. PRESERVE — never touched** (local evolution, INV4): `.claude/agents/*` specialization · `.claude/guild/knowledge/*` (⑥) · `docs/standards/*` (②) · `.claude/guild/overlay/*` (flow overrides) · `.claude/guild/evolution-log.md` (⑤) · `.claude/guild/gates/rules/boundaries.md` (locally grown by `/gld evolve` — `- forbid:` rules, `status: draft`/`confirmed`) · `.claude/guild/gates/dismissed.md` (human-curated accepted-risk registry).
 
 **4. Report** — what updated, what was preserved, the new version, and any newly-available commands. Reversible (git — the update is uncommitted working-tree changes the human reviews + commits).
 
