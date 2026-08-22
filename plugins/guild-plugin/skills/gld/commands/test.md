@@ -10,7 +10,7 @@
 ---
 
 ## Step 0 — Preflight
-As the leader, follow `_preflight.md` **Medium tier**. Load the test cases (`docs/specs/$1/test-cases.md`), the design output, and any execute-stage evidence (`<!-- guild:test-evidence:step-1 -->`). Load `docs/standards/verification.md` for the verify rules + DoD.
+As the leader, follow `_preflight.md` **Medium tier**. If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Load the test cases (`docs/specs/$1/test-cases.md`), the design output, and any execute-stage evidence (`<!-- guild:test-evidence:step-1 -->`). Load `docs/standards/verification.md` for the verify rules + DoD.
 
 Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
 

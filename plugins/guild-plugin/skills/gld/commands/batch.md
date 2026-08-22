@@ -1,8 +1,8 @@
 # BATCH (draft)
 
-**Run multiple Issues through the Guild spine unattended, with rate-limit auto-resume.** Each Issue runs in its own headless `claude -p` child session driven by `/gld resume`; a background supervisor loop **detects token rate limits and automatically waits until reset, then re-runs** — no human interaction. Ported from `sdd-plugin` `batch.md` (the verified rate-limit-resilient runner), adapted to Guild.
+**Run multiple Issues through the Guild spine unattended, with rate-limit auto-resume.** Each Issue runs in its own headless `claude -p` child session driven by `/gld dev` (**not** `/gld resume` — see the inline note in the generated script: `dev` reads the label and either starts fresh or resumes mid-spine, a superset of `resume`); a background supervisor loop **detects token rate limits and automatically waits until reset, then re-runs** — no human interaction. Ported from `sdd-plugin` `batch.md` (the verified rate-limit-resilient runner), adapted to Guild.
 
-> **Status: live-validated (2026-07-14, 1 real batch of 2 issues).** ✅ **rate-limit auto-resume** confirmed (a real limit hit → auto-waited ~115m → resumed, no lost work) · ✅ **`guild:needs-human` pause** confirmed (a scope-defining high-stakes discuss ambiguity → leader paused without guessing) · 🐛 **found + fixed a false-positive**: the supervisor trusted `claude -p` **exit 0** as "completed," but a headless turn can exit 0 while a backgrounded pre-commit hook leaves the Issue mid-spine (no commit/PR). Completion is now judged by the **GitHub label** (`guild:done` / `guild:children`), with `guild:needs-human` counted as PAUSED and a mid-spine exit-0 re-resumed (bounded) then surfaced as INCOMPLETE — never silently "succeeded." Wired across `_handoff.md` (Section H), `analyze.md`/`design.md`/`test.md`/`qa.md` (gate branches), `dev.md` (mode detect + PAUSE handling), `implement.md` (decision log + branch/PR resume), `init.md` (`guild:needs-human` label).
+> **Status: partially live-validated (2026-07-14, 1 real batch of 2 issues) — shipped, with untested edges (Activation checklist item 5).** The two mechanisms below were confirmed on real traffic; **happy-path unattended completion to `guild:done` has not been re-verified since the exit-0 fix**, and split-parent-under-batch and the worktree path are still unexercised — so this does **not** read as fully validated. ✅ **rate-limit auto-resume** confirmed (a real limit hit → auto-waited ~115m → resumed, no lost work) · ✅ **`guild:needs-human` pause** confirmed (a scope-defining high-stakes discuss ambiguity → leader paused without guessing) · 🐛 **found + fixed a false-positive**: the supervisor trusted `claude -p` **exit 0** as "completed," but a headless turn can exit 0 while a backgrounded pre-commit hook leaves the Issue mid-spine (no commit/PR). Completion is now judged by the **GitHub label** (`guild:done` / `guild:children`), with `guild:needs-human` counted as PAUSED and a mid-spine exit-0 re-resumed (bounded) then surfaced as INCOMPLETE — never silently "succeeded." Wired across `_handoff.md` (Section H), `analyze.md`/`design.md`/`test.md`/`qa.md` (gate branches), `dev.md` (mode detect + PAUSE handling), `implement.md` (decision log + branch/PR resume), `init.md` (`guild:needs-human` label).
 
 `$1` = comma-separated Issue numbers (e.g. `837,840`), or empty = all open qualifying Issues.
 
@@ -186,8 +186,13 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
         *)
           # exited 0 but still mid-spine (or state unreadable) = NOT finished. Re-resume,
           # bounded (resume is state-safe — continues from the label). Then surface honestly.
+          # The bound is TWO re-resumes: the counter is incremented BEFORE the test, so tries 1
+          # and 2 loop back and try 3 falls through to INCOMPLETE. Written `-le 2` so the bound's
+          # literal matches the `($RESUME_TRIES/2)` the message prints — the equivalent `-lt 3`
+          # this used to say reads like a third re-resume that never actually happens (the same
+          # literal-matches-message shape the RL_TRIES `-gt 6` / `($RL_TRIES/6)` pair already has).
           RESUME_TRIES=$((RESUME_TRIES + 1))
-          if [ "$RESUME_TRIES" -lt 3 ]; then
+          if [ "$RESUME_TRIES" -le 2 ]; then
             echo "  ↻ Issue #$ISSUE exited at [${STATE:-unknown}] without finishing — re-resuming ($RESUME_TRIES/2)"
             continue
           fi
@@ -290,7 +295,7 @@ COMPLETED=1
 
 ## Notes
 - **How far each child goes (scope)**: each Issue runs the full spine to **`guild:done`** = code implemented + automated tests (verify) + agent-doable QA + **PR opened**. It does **NOT** merge the PR (human, INV1), does **NOT** do manual/visual QA (flagged for the human), and does not run guided `review` (on-demand). The deferred human gate lands at **PR review + merge** after the batch; the PR body carries the leader's "무인 결정 로그". High-stakes discuss ambiguity or unresolved verify failure → the Issue is **paused (needs-human)**, not forced to done.
-- **Rate-limit auto-resume (the point)**: the inner `while true` loop re-runs `/gld resume $ISSUE` after `sleep`ing until `rate_limit_info.resetsAt` (+30s). Because `resume` reads state from GitHub labels/comments/git (`_handoff.md` Sections A/B), each retry continues from the last completed stage — no lost work, no human interaction.
+- **Rate-limit auto-resume (the point)**: the inner `while true` loop re-runs `/gld dev $ISSUE` after `sleep`ing until `rate_limit_info.resetsAt` (+30s). Because `dev` Phase 1 reads state from GitHub labels/comments/git (`_handoff.md` Sections A/B) — starting fresh on a no-label Issue and resuming from a mid-spine label otherwise — each retry continues from the last completed stage — no lost work, no human interaction. (The script invokes `dev`, not `resume`; the prose used to say `resume` and disagreed with the script it describes.)
 - **★Companion — the leader stands in for the human at gates (`GLD_UNATTENDED`)**: unattended, the leader exercises *power of attorney* for in-flow gate decisions, but the human's real authority is **deferred to PR review, not removed** — nothing merges unattended (INV1). This is the plan's sprint principle ("사람 리뷰를 뒤로 미룰 뿐 없애지 않음") applied to batch. Rules:
   - **discuss gate (analyze/design)** — the leader classifies the ambiguity's stakes, **charter-anchored**:
     - *low/medium* (local, reversible interpretation) → pick the most charter/standards-aligned option, **record it as an explicit assumption** in the analyze/design output + PR body (`가정: … · 근거: … · 사람 확인 요`), then proceed.
@@ -310,5 +315,5 @@ COMPLETED=1
 1. ✅ `batch` added to `SKILL.md` valid commands + `help.md` line.
 2. ✅ **`GLD_UNATTENDED` companion** wired in `_handoff.md` Section H + `analyze/design/test/qa/dev` gate branches (+ `implement.md` decision log).
 3. ✅ `implement.md` mid-execute resume hardened (existing-branch/PR detection).
-4. ⬜ **Gating decision** (open): `batch` is lower-risk than full autonomous `sprint` (human still reviews every PR), so it can ship before `sprint`'s readiness gate — but keep the security note prominent. Confirm with the user.
+4. ✅ **Gating decision** (settled): `batch` **ships ahead of `sprint`'s readiness gate** — it is lower-risk than full autonomous `sprint` because the human still reviews and merges every PR (INV1), while `sprint` additionally runs the Outer/evolve loop. The condition attached to that decision is that the **security note stays prominent** (the `--dangerously-skip-permissions` warning above, which it does). The decision is already in force, not pending: `batch` is a routed command in `SKILL.md`'s valid-command list and `help.md`, and it was run live on 2026-07-14 — this item was a stale open checkbox for a call that shipping had already made.
 5. ✅ **End-to-end validation** (2026-07-14): real 2-issue batch confirmed rate-limit auto-resume + `guild:needs-human` pause; found + fixed the exit-0 false-positive (now label-based completion). **Untested edges**: happy-path *unattended* completion to `guild:done` was blocked by the false-positive (re-verify after the fix); split-parent under batch (nested orchestration); worktree path assumes a **committed** harness (an untracked/dev harness needs main-checkout — see Phase 1).

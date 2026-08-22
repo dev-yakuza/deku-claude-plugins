@@ -12,7 +12,7 @@
 ---
 
 ## Step 0 — Preflight
-As the leader, follow `_preflight.md` **Medium tier**. Load: `<!-- guild:test:output -->` (verify result + AC coverage + the tester's risk-based E2E judgment), the PR, design/UX outputs (`docs/specs/$1/`), and the hotspot list. Load `docs/standards/quality-bar.md` + `verification.md`.
+As the leader, follow `_preflight.md` **Medium tier**. If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Load: `<!-- guild:test:output -->` (verify result + AC coverage + the tester's risk-based E2E judgment), the PR, design/UX outputs (`docs/specs/$1/`), and the hotspot list. Load `docs/standards/quality-bar.md` + `verification.md`.
 
 Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
 

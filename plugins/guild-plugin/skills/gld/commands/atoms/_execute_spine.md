@@ -29,7 +29,7 @@ Every slot is mandatory — a variant that leaves one unstated is not runnable. 
 
 ## Step 0 — Preflight
 
-As the leader, follow `_preflight.md` **Heavy tier** (per its Section A table: items **1 + 2 + 3 + 4 + 5 + 6 + 8** — not just 1–5; item 5 is the target-dir survey, items 6/8 are the ⑥ knowledge-slice retrieval and ④ working-memory read, both needed to honestly populate the Section C self-review trace). Load the design output (`<!-- guild:design:output -->`) plus the variant's **DESIGN INPUT**; if it is missing → return that slot's `NEEDS_CONTEXT:` line.
+As the leader, follow `_preflight.md` **Heavy tier** (per its Section A table: items **1 + 2 + 3 + 4 + 5 + 6 + 8** — not just 1–5; item 5 is the target-dir survey, items 6/8 are the ⑥ knowledge-slice retrieval and ④ working-memory read, both needed to honestly populate the Section C self-review trace). If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)` — the same hard check `analyze.md`/`design.md`/`test.md`/`qa.md` make at their own Step 0, so every spine stage behaves identically on an uninitialized repo regardless of which one the human invoked directly. Load the design output (`<!-- guild:design:output -->`) plus the variant's **DESIGN INPUT**; if it is missing → return that slot's `NEEDS_CONTEXT:` line.
 
 Validate `<N>` is an Issue. **Read current labels first** (its own Bash call):
 

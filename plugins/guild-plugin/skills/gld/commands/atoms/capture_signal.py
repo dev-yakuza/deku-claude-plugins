@@ -14,7 +14,7 @@ Invoked as ONE bash call from a gate handler:
         --summary "전역 테마 토큰 수정안을 사람이 위젯 레벨로 override" \
         --evidence "discuss 3안 중 A안(위젯) 선택; PR #895" --surprise
 
-Writes to  <cwd>/.claude/guild/memory/ground-truth.jsonl  (append-only, one JSON per line,
+Writes to  <repo-root>/.claude/guild/memory/ground-truth.jsonl  (append-only, one JSON per line,
 gitignored). Creates the dir/file if missing. Best-effort: on any failure it warns to stderr
 and exits non-zero WITHOUT raising, so a logging problem never blocks the spine.
 """
@@ -75,7 +75,8 @@ def main():
                      help="this loop-back's retry ran at a bumped model tier "
                           "(_model_tiering.md Section A/B) — read by evolve's "
                           "model-tier scorecard (_model_tiering.md Section C).")
-    ap.add_argument("--log", default=None, help="override log path (default: <cwd>/" + LOG_REL + ")")
+    ap.add_argument("--log", default=None,
+                    help="override log path (default: <repo-root>/" + LOG_REL + ")")
     args = ap.parse_args()
 
     issue = None

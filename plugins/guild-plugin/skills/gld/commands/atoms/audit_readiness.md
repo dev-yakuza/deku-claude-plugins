@@ -43,16 +43,31 @@ The verify gate judges completion by real test evidence — without tests it is 
 it can be silently absent in a repo that otherwise looks fully set up. Skip this whole block
 when `.claude/guild/config.json` is absent (Guild not initialized — `init` will install it).
 
-- **Is the authoritative hook installed and executable?** (its own Bash call — the output is
-  the permission string, or nothing if the file is missing):
+- **Who owns the hook, and is the gate actually wired?** ⚠ There are **two valid wirings**, and
+  checking only one produces a false BLOCKER on every repo that uses a hook manager. Resolve the
+  path first (never hardcode `.git/hooks/`, absent in a worktree), then ask the detector:
   ```bash
-  ls -l .git/hooks/pre-commit
+  git rev-parse --git-path hooks/pre-commit
   ```
-  Missing, or present without an execute bit → `id: gate-hook-missing`, **BLOCKER**.
-  Remediation: `/gld update` (reinstalls and `chmod +x`). This is the **normal state of a
-  fresh clone** — `.git/hooks/` is not tracked, so every clone of a Guild-enabled repo starts
-  without it while every committed harness file is present. Without it, only the advisory
-  `PreToolUse` layer runs, and a compound `create-and-commit` in one Bash call is unchecked.
+  Read that file (absent → treat as empty text) and pipe its text to (its own Bash call):
+  ```bash
+  python3 .claude/guild/gates/scripts/gate_precommit.py --detect-hook-manager
+  ```
+  - Prints **`guild`** → Guild owns the hook. Confirm it is **executable** (`ls -l <path>`) —
+    git silently ignores a non-executable hook, so this is installed-but-inert and
+    indistinguishable from working. Not executable → `id: gate-hook-not-executable`, **BLOCKER**.
+  - Prints **`none`** with the file absent → `id: gate-hook-missing`, **BLOCKER**. Remediation:
+    `/gld update`. This is the **normal state of a fresh clone** — `.git/hooks/` is not tracked,
+    so every clone starts without it while every committed harness file is present. Until then
+    only the advisory `PreToolUse` layer runs and a compound `create-and-commit` in one Bash call
+    is unchecked.
+  - Prints a **manager name** (`lefthook`/`husky`/…) → the hook file is *supposed* to be theirs
+    (`init` step 2b). **Do not flag its absence.** Instead grep that manager's committed config
+    for `gate_precommit.py`; present → wired correctly, no finding. Absent →
+    `id: gate-not-registered-in-hook-manager`, **BLOCKER**, why: "훅 매니저가 훅 파일을 소유하는데
+    Guild 게이트가 그 설정에 등록돼 있지 않음 — 커밋 게이트가 전혀 실행되지 않음".
+    Remediation: `/gld update` re-registers it. ⚠ This is the failure mode a `lefthook install`
+    (or any config rewrite) causes **silently**, which is exactly why it is checked here.
 - **Do hooks even fire from `.git/hooks/`?** (its own Bash call; empty output is the good case):
   ```bash
   git config --get core.hooksPath

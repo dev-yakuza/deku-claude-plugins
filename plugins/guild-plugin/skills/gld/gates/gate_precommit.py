@@ -82,18 +82,37 @@ def now_iso():
         return ""
 
 
+# The log feeds evolve's rule scorecard, so it must keep enough history for a multi-cycle trend
+# — and no more. It is gitignored, so nothing prunes it and nothing recovers it either: left
+# alone it grows for the life of the repo, on every commit, from three wirings. Cap it by line
+# count and keep the NEWEST, since the scorecard reads recent cycles.
+FIRINGS_MAX = 5000
+FIRINGS_KEEP = 4000
+
+
 def flush_firings(root, mode):
-    """Append the queued firings to the gitignored episodic log. Best-effort — a
-    logging failure never affects the gate verdict."""
+    """Append the queued firings to the gitignored episodic log, trimming it when it outgrows
+    FIRINGS_MAX. Best-effort throughout — a logging or trimming failure never affects the gate
+    verdict, which is why the trim is wrapped separately from the append."""
     if not _FIRINGS:
         return
+    p = os.path.join(root, FIRINGS_REL)
     try:
-        p = os.path.join(root, FIRINGS_REL)
         os.makedirs(os.path.dirname(p), exist_ok=True)
         ts = now_iso()
         with open(p, "a", encoding="utf-8") as fh:
             for f in _FIRINGS:
                 fh.write(json.dumps({"ts": ts, "mode": mode, **f}, ensure_ascii=False) + "\n")
+    except Exception:
+        return
+    # Trim in a separate try: a failure here must not lose the append that already succeeded.
+    try:
+        with open(p, encoding="utf-8") as fh:
+            lines = fh.readlines()
+        if len(lines) <= FIRINGS_MAX:
+            return
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.writelines(lines[-FIRINGS_KEEP:])
     except Exception:
         pass
 
@@ -655,8 +674,43 @@ def main_scan_text():
     return 1 if hits else 0
 
 
+# --- mode 6: who owns .git/hooks/pre-commit? -------------------------------------------
+# Taking over an existing pre-commit hook is right when a human wrote it, and WRONG when a hook
+# manager generates it. lefthook/husky/pre-commit/overcommit all regenerate that file on their
+# own `install`, so a Guild shim placed there survives only until the next one — and then the
+# enforcement layer is gone with no signal, which is the exact failure mode this gate exists to
+# avoid. In a managed repo the gate must be registered as one of the manager's own commands
+# instead: the manager keeps owning the hook file, and (because its config is committed) the gate
+# then travels with a clone, which the .git/hooks path never does.
+#
+# stdin = the existing hook's text. Prints the manager's name, or `none` for a hand-written or
+# absent hook. Exit 0 always — this is a question, not a verdict.
+HOOK_MANAGERS = [
+    ("lefthook", re.compile(r"\blefthook\b", re.I)),
+    ("husky", re.compile(r"\bhusky\b", re.I)),
+    ("pre-commit", re.compile(r"pre-commit\.com|INSTALL_PYTHON|pre_commit\b", re.I)),
+    ("overcommit", re.compile(r"\bovercommit\b", re.I)),
+    ("simple-git-hooks", re.compile(r"simple-git-hooks", re.I)),
+]
+
+
+def main_detect_manager():
+    text = sys.stdin.read() if not sys.stdin.isatty() else ""
+    if "gate_precommit.py" in text:
+        print("guild")          # already ours — safe to overwrite in place
+        return 0
+    for name, rx in HOOK_MANAGERS:
+        if rx.search(text):
+            print(name)
+            return 0
+    print("none")               # absent, or hand-written: the chain-to-.local path applies
+    return 0
+
+
 def main():
     args = sys.argv[1:]
+    if "--detect-hook-manager" in args:
+        return main_detect_manager()
     if "--git-hook" in args:
         return main_git_hook()
     if "--guard-config" in args:

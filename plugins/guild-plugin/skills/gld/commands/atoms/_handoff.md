@@ -313,7 +313,7 @@ mutation: label edit, comment create/PATCH, `gh issue create`, `gh pr create` / 
 
 ## Section H — Unattended mode (`GLD_UNATTENDED`, used by `/gld batch`·`/gld sprint`)
 
-When Guild runs unattended (a supervisor invokes `claude -p "/gld resume <n>"` with `GLD_UNATTENDED=1` set), no human is present to answer a gate. **The leader stands in for the human at in-flow gates — but the human's real authority is deferred to PR review + merge, never removed** (INV1: nothing merges unattended). This is the plan's sprint principle ("사람 리뷰를 뒤로 미룰 뿐 없애지 않음"). Attended runs are unchanged.
+When Guild runs unattended (a supervisor invokes `claude -p "/gld dev <n>"` with `GLD_UNATTENDED=1` set — `batch.md`'s generated script uses `dev`, not `resume`, because `dev` Phase 1 both starts a fresh Issue and resumes a mid-spine one), no human is present to answer a gate. **The leader stands in for the human at in-flow gates — but the human's real authority is deferred to PR review + merge, never removed** (INV1: nothing merges unattended). This is the plan's sprint principle ("사람 리뷰를 뒤로 미룰 뿐 없애지 않음"). Attended runs are unchanged.
 
 **Detection** — at stage start (its own Bash call):
 ```bash

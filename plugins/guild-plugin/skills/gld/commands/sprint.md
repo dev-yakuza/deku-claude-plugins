@@ -1,6 +1,6 @@
-# SPRINT (autonomous Inner+Outer — built, readiness-gated · LOCKED by default)
+# SPRINT (autonomous Inner+Outer — specified, not separately built · readiness-gated · LOCKED by default)
 
-**Run the full loop (dev spine + evolve) with no human intervention — but only once autonomy is *earned by measurement*.** The mechanism is built; a **readiness gate keeps it locked by default**. INV1 is *relaxed, not removed*: human review is **deferred to PR + merge**, never eliminated — nothing merges unattended.
+**Run the full loop (dev spine + evolve) with no human intervention — but only once autonomy is *earned by measurement*.** **Sprint has no supervisor or safety mechanism of its own**: Phase 0's readiness gate is a real computed check, but Phase 1 is a *written procedure* over `batch.md`'s existing supervisor plus `evolve --dry-run` — which is why the three safety mechanisms Phase 1's honest gap retracts (branch isolation, checkpointing, regression auto-halt) exist nowhere in this plugin. Read this header as "the gate is built and sprint is locked behind it," **not** "an autonomous runner with a safety net was built." A **readiness gate keeps it locked by default**. INV1 is *relaxed, not removed*: human review is **deferred to PR + merge**, never eliminated — nothing merges unattended.
 
 `$1` = comma-separated Issues (like `batch`) · empty = all open qualifying · `--readiness` = show the readiness score only (never runs).
 

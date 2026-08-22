@@ -10,7 +10,7 @@
 ---
 
 ## Step 0 — Preflight
-As the leader, follow `_preflight.md` **Medium tier** (per its Section A table: items **1 + 2 + 3 + 4 + 6 + 8** — not just 1–4; items 6/8 are the ⑥ knowledge-slice retrieval and ④ working-memory read, both needed to honestly populate the Section C self-review trace). Item 4 loads the `<!-- guild:analyze:output -->` comment (feature list + **acceptance criteria**). If analyze output is missing → the stage is out of order; return `NEEDS_CONTEXT: analyze output not found for #$1` (leader should run analyze first).
+As the leader, follow `_preflight.md` **Medium tier** (per its Section A table: items **1 + 2 + 3 + 4 + 6 + 8** — not just 1–4; items 6/8 are the ⑥ knowledge-slice retrieval and ④ working-memory read, both needed to honestly populate the Section C self-review trace). If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Item 4 loads the `<!-- guild:analyze:output -->` comment (feature list + **acceptance criteria**). If analyze output is missing → the stage is out of order; return `NEEDS_CONTEXT: analyze output not found for #$1` (leader should run analyze first).
 
 Validate `$1` is an Issue (not a PR). **Read current labels first** (its own Bash call, same pattern as `analyze.md`):
 ```bash

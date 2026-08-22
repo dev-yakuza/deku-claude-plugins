@@ -185,14 +185,44 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
    git rev-parse --git-path hooks/pre-commit
    ```
    Hold the literal it prints and use it for every step below. In a **git worktree** `.git` is a *file* (a `gitdir:` pointer), not a directory, so a literal `.git/hooks/…` path does not exist there and every step would silently target nothing — `batch.md` hit exactly this with `info/exclude`. `--git-path` resolves correctly from a normal checkout and a worktree alike (worktrees share the main checkout's hooks, which is what we want: one gate for all of them).
-2. **Preserve any existing hook** (INV4 — additive, never clobbers). Read the resolved path.
-   - Absent → proceed to step 3.
-   - Present **and already Guild's** (its content contains `gate_precommit.py`) → overwrite in place at step 3.
-   - Present **and not Guild's** → move it aside so the shim can chain to it (its own Bash call, substituting the literal resolved path and the same path with `.local` appended):
+2. **Ask who owns the existing hook** — this decides everything below. Read the resolved path (absent → `none`), then pipe its text to the gate's detector. Two calls: Read the file with the Read tool, Write its text to a temp file, then (its own Bash call, stdin = that file):
+   ```bash
+   python3 .claude/guild/gates/scripts/gate_precommit.py --detect-hook-manager
+   ```
+   It prints one word: `guild` · `none` · or a manager name (`lefthook` / `husky` / `pre-commit` / `overcommit` / `simple-git-hooks`).
+
+   - **`guild`** → already ours; overwrite in place at step 3.
+   - **`none`** (absent, or a hand-written hook) → if a hand-written hook is present, move it aside so the shim can chain to it (its own Bash call, substituting the literal resolved path):
      ```bash
      mv <resolved-path> <resolved-path>.local
      ```
-     ⚠ Use a plain `mv`, **not** `git mv`: hook files are inside `.git/` and therefore not version-controlled, so `git mv` always fails here with `fatal: not under version control` — verified. Note the rename for the P4 summary; the repo's own hook still runs **first**, before Guild's checks.
+     ⚠ Use a plain `mv`, **not** `git mv`: hook files live inside `.git/` and are therefore not version-controlled, so `git mv` always fails here with `fatal: not under version control` — verified. Note the rename for the P4 summary; the repo's own hook still runs **first**, before Guild's checks. Then continue to step 3.
+   - **A manager name** → **do NOT take the hook file over. Skip steps 3–4 entirely** and register the gate as one of that manager's commands instead (step 2b).
+
+### 2b. Managed repo — register, don't take over
+
+`lefthook`, `husky`, `pre-commit` and friends **generate** `.git/hooks/pre-commit` and rewrite it on their next `install`. A Guild shim placed there survives exactly until then, and afterwards the enforcement layer is gone **with no signal** — the worst shape of failure this gate can have. Registering as one of the manager's commands is strictly better: the manager keeps owning the hook file as it expects, and because its config **is committed**, the gate then travels with a clone — which the `.git/hooks/` path never does, so the fresh-clone caveat below does not apply on this path.
+
+Editing the repo's hook config is a change to the human's own tooling, so **show the exact diff and get confirmation** (INV1) before writing. The command to register, in every manager, is:
+
+```
+python3 .claude/guild/gates/scripts/gate_precommit.py --git-hook
+```
+
+A non-zero exit must fail the commit — that is the default in every manager below; do not add flags that swallow it.
+
+- **lefthook** → add a command under `pre-commit.commands` in `lefthook.yml` (or `.lefthook.yml`). Additive: preserve every existing command and the file's `parallel:` setting. The gate is read-only, so it is safe under `parallel: true`.
+  ```yaml
+  pre-commit:
+    commands:
+      guild-gate:
+        run: python3 .claude/guild/gates/scripts/gate_precommit.py --git-hook
+  ```
+- **husky** → append the command as a new line to `.husky/pre-commit`, preserving what is there.
+- **pre-commit** (the Python framework) → add a `repo: local` hook to `.pre-commit-config.yaml` with `language: system` and `always_run: true` (it must run even when no matching file changed — the gate scans the whole staged set).
+- **simple-git-hooks / overcommit / anything else** → do not guess the schema. Report the manager, print the command above, and ask the human to add it; record it in P4 as a readiness gap until they confirm.
+
+After registering, still run step 5's `core.hooksPath` check — a manager may set it, and that is fine here (the manager's own hook lives there and now carries Guild's command).
 3. **Copy the bundled shim verbatim**: Read `<<SKILL_DIR>>/gates/pre-commit.sh`, Write it to the resolved path.
 4. **Make it executable** (its own Bash call, substituting the literal path — git **silently ignores** a non-executable hook, which leaves the enforcement layer installed-but-inert and indistinguishable from installed-and-working):
    ```bash
@@ -204,7 +234,9 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
    ```
    A non-empty value means the repo redirects hooks elsewhere (husky and similar do this) — Guild's hook will **never run**, wherever it was installed. Do not fight it: report this in P4 as a readiness gap ("`core.hooksPath` is set to `<value>`; copy the Guild hook there, or chain to it from the hook already there, to enable the commit gate"), and note that until then only the advisory `PreToolUse` layer is active.
 
-⚠ **`.git/hooks/` is not tracked by git**, so this install is per-clone: a fresh clone has the harness files but no hook until someone runs `/gld update`. Say so in P4. And `git commit --no-verify` skips it, as it skips every git hook — Guild's gate raises the cost of a mistake, it is not a boundary against a determined bypass.
+⚠ **On the step-3 path only (`none`/`guild`), `.git/hooks/` is not tracked by git**, so that install is per-clone: a fresh clone has the harness files but no hook until someone runs `/gld update`. Say so in P4. **On the 2b managed path this does not apply** — the manager's config is committed, so the gate travels with the clone; say *that* in P4 instead, rather than warning about a limitation this repo does not have.
+
+⚠ Either way, `git commit --no-verify` skips it, as it skips every git hook — Guild's gate raises the cost of a mistake, it is not a boundary against a determined bypass.
 
 ### 7. GitHub labels (skip if P0 found no GitHub repo)
 Create the ten `guild:*` labels. Run each as its own Bash call; if any fails, report which and continue (labels are not transactional in M1 — they are idempotent with `--force`):
