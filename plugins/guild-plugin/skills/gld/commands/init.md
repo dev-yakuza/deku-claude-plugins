@@ -167,7 +167,10 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
   - Else → append the filled Guild block (with markers) to the end, preserving all existing content.
 
 ### 5. settings.json (key-level merge — preserve existing)
-- Read `<<SKILL_DIR>>/templates/settings.json.tmpl`; fill `{{TEST_BIN}}`/`{{LINT_BIN}}` with the FIRST/primary executable name for each (e.g. `yarn`, `npm`, `pytest`). ⚠ **`commands.lint` (and `commands.test`) can be a normalized **array** of steps** (Section 2's own normalization rule — e.g. `["flutter analyze", "npx remark . --quiet --frail"]` uses two distinct binaries, `flutter` and `npx`), and a single `{{LINT_BIN}}`/`{{TEST_BIN}}` slot can only hold one — an array with a second, different binary would otherwise leave it entirely unlisted in `permissions.allow`, causing an avoidable permission prompt on every lint/test run. **Extract every distinct binary name** across the array (the first word of each step, before its first space) and fill `{{ADDITIONAL_BIN_ENTRIES}}` with one `,\n      "Bash(<bin>:*)"` line per binary beyond the first (empty string if there's only one binary total — never leave the literal `{{ADDITIONAL_BIN_ENTRIES}}` token in the written file, an empty fill is fine here since the trailing entry list already has no dangling comma either way). The template includes the **`PreToolUse(Bash)` gate hook** (M3 강제층 — runs `.claude/guild/gates/scripts/gate_precommit.py` on every Bash call; the script itself decides whether it's a commit).
+- Read `<<SKILL_DIR>>/templates/settings.json.tmpl`. **It contains no placeholders and is already valid JSON as shipped** — its `permissions.allow` lists only the four commands Guild itself always needs (`gh`, `git`, `jq`, `ls`).
+- **Append one `"Bash(<bin>:*)"` element to `permissions.allow` per distinct binary this repo's verification commands use.** Collect them from config `commands.test`/`lint`/`typecheck`/`build`: each value is either a single command string or a normalized **array** of steps (Section 2's rule — e.g. `["flutter analyze", "npx remark . --quiet --frail"]` uses **two** distinct binaries, `flutter` and `npx`). Take the first word of each step, dedupe against what is already listed, and add the rest. Missing one only costs a permission prompt on every lint/test run — not a broken file.
+  - ⚠ Earlier versions of this template carried a `{{ADDITIONAL_BIN_ENTRIES}}` slot that the model had to fill with a **raw JSON fragment including its own leading comma** (`,\n      "Bash(npx:*)"`). Getting that wrong produced an unparseable `settings.json`, which silently took the gate hooks down with it — the whole enforcement layer, lost to a comma. Adding array elements to an already-valid document has no such failure mode. Do not reintroduce a fragment placeholder here.
+- The template also wires the two **`PreToolUse` gate hooks** (step 6 covers the third, authoritative wiring): `Bash` → `gate_precommit.py` early warning (fires on every Bash call; the script's own `is_git_commit()` decides whether it is a commit), and `Edit|Write|MultiEdit` → `--guard-config` (asks before the gate's own off-switch or rule files are edited). Both carry a `timeout`.
 - **If `.claude/settings.json` does not exist** → Write the filled template.
 - **If it exists** → JSON has no comment markers, so merge by key: read the existing JSON, union `permissions.allow` and `permissions.ask` (dedupe), and **union both Guild gate hook entries into `hooks.PreToolUse`** — the `{matcher:"Bash", … gate_precommit.py}` early-warning entry and the `{matcher:"Edit|Write|MultiEdit", … --guard-config}` control-file guard — appending each only if an equivalent is not already present (dedupe by command string, which includes the mode flag); **preserve all other existing hooks and keys**. Write the merged JSON back (2-space indent).
 - The template's `permissions.ask` list makes two invariants mechanical rather than advisory: `gh pr merge` (INV1 — a human, never an automated run, merges) and the destructive `git push --force` / `reset --hard` / `clean` family (INV3 — everything reversible). Claude Code evaluates `deny > ask > allow`, so these override the broad `Bash(git:*)` / `Bash(gh:*)` allowances above them.
@@ -176,27 +179,29 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
 
 `PreToolUse` fires *before* a command runs, so a compound `echo <secret> > f && git add f && git commit -m x` commits content that does not exist yet at hook time — no `git diff`/`git status` can see it. **Verified: that shape, and `sed -i '' 's/assert//g' t_test.py && git commit -am x`, both bypassed the pre-`0.41` gate entirely.** The git hook closes it because git runs it with the index final. Install it here:
 
-1. **Preserve any existing hook** (INV4 — additive, never clobbers). Check first (its own Bash call):
+1. **Resolve the hook path — do NOT hardcode `.git/hooks/`** (its own Bash call):
    ```bash
-   ls .git/hooks/pre-commit
+   git rev-parse --git-path hooks/pre-commit
    ```
-   - Present **and not already Guild's** (Read it — Guild's shim contains the string `gate_precommit.py`) → move it aside so the shim can chain to it:
+   Hold the literal it prints and use it for every step below. In a **git worktree** `.git` is a *file* (a `gitdir:` pointer), not a directory, so a literal `.git/hooks/…` path does not exist there and every step would silently target nothing — `batch.md` hit exactly this with `info/exclude`. `--git-path` resolves correctly from a normal checkout and a worktree alike (worktrees share the main checkout's hooks, which is what we want: one gate for all of them).
+2. **Preserve any existing hook** (INV4 — additive, never clobbers). Read the resolved path.
+   - Absent → proceed to step 3.
+   - Present **and already Guild's** (its content contains `gate_precommit.py`) → overwrite in place at step 3.
+   - Present **and not Guild's** → move it aside so the shim can chain to it (its own Bash call, substituting the literal resolved path and the same path with `.local` appended):
      ```bash
-     git mv --force .git/hooks/pre-commit .git/hooks/pre-commit.local
+     mv <resolved-path> <resolved-path>.local
      ```
-     (`.git/` is not tracked, so use a plain `mv` if `git mv` errors.) Note the rename for the P4 summary — the repo's own hook still runs, first, before Guild's checks.
-   - Present **and already Guild's** → overwrite in place (step 2).
-   - Absent → proceed.
-2. **Copy the bundled shim verbatim**: Read `<<SKILL_DIR>>/gates/pre-commit.sh`, Write it to `.git/hooks/pre-commit`.
-3. **Make it executable** (its own Bash call — git silently ignores a non-executable hook, which would leave the enforcement layer installed-but-inert):
+     ⚠ Use a plain `mv`, **not** `git mv`: hook files are inside `.git/` and therefore not version-controlled, so `git mv` always fails here with `fatal: not under version control` — verified. Note the rename for the P4 summary; the repo's own hook still runs **first**, before Guild's checks.
+3. **Copy the bundled shim verbatim**: Read `<<SKILL_DIR>>/gates/pre-commit.sh`, Write it to the resolved path.
+4. **Make it executable** (its own Bash call, substituting the literal path — git **silently ignores** a non-executable hook, which leaves the enforcement layer installed-but-inert and indistinguishable from installed-and-working):
    ```bash
-   chmod +x .git/hooks/pre-commit
+   chmod +x <resolved-path>
    ```
-4. **Verify it is live** (its own Bash call); the output must be empty:
+5. **Verify it is live** (its own Bash call); the output must be empty:
    ```bash
    git config --get core.hooksPath
    ```
-   A non-empty value means the repo redirects hooks elsewhere (husky and similar do this) — Guild's hook at `.git/hooks/` will **never run**. Do not fight it: report this in P4 as a readiness gap ("`core.hooksPath` is set to `<value>`; copy `.git/hooks/pre-commit` there to enable Guild's commit gate"), and note that until then only the advisory `PreToolUse` layer is active.
+   A non-empty value means the repo redirects hooks elsewhere (husky and similar do this) — Guild's hook will **never run**, wherever it was installed. Do not fight it: report this in P4 as a readiness gap ("`core.hooksPath` is set to `<value>`; copy the Guild hook there, or chain to it from the hook already there, to enable the commit gate"), and note that until then only the advisory `PreToolUse` layer is active.
 
 ⚠ **`.git/hooks/` is not tracked by git**, so this install is per-clone: a fresh clone has the harness files but no hook until someone runs `/gld update`. Say so in P4. And `git commit --no-verify` skips it, as it skips every git hook — Guild's gate raises the cost of a mistake, it is not a boundary against a determined bypass.
 
@@ -257,6 +262,34 @@ For each **BLOCKER/MAJOR** gap (offer MINOR too, but default to skip), ask the u
 - **Guide-only for destructive/external actions** (committed/inline secrets): print the steps for git-history purge and key rotation — **NEVER auto-run** history rewrite (`git filter-branch`/filter-repo) or rotate keys. These are irreversible (INV3) / external. The tracking issue captures the follow-up.
 
 Batch the questions where possible (one grouped prompt listing gaps → user picks which to file). If the user skips remediation entirely, the report on disk still records everything.
+
+---
+
+## P3.9 — Placeholder sweep (deterministic, before reporting success)
+
+Output convention 2 says never to leave a literal `{{TOKEN}}` in a generated file, but nothing
+verified it. A surviving `{{CONVENTIONS}}` in a role agent is not cosmetic: that agent is loaded
+as a persona on every task it joins, and it teaches the model that the repo's conventions are the
+literal string `{{CONVENTIONS}}`. Check, don't assume — one Bash call:
+
+```bash
+grep -rn "{{" .claude/agents docs/standards CLAUDE.md .claude/settings.json
+```
+
+- **No output** → clean; proceed to P4.
+- **Any hit** → for each, fill it now from the P1 scans / P1.5 interview, or replace it with an
+  explicit localized note (`(미정 — 추후 확정)` / `(TBD)`). Re-run the grep until it is empty.
+  Report in P4 which files needed a second pass — a token that survived the first write is a
+  signal about that template, worth a `/gld contribute` flag if it keeps happening.
+
+Also confirm the settings file actually parses (its own Bash call — a malformed `settings.json`
+silently disables the gate hooks it carries):
+
+```bash
+python3 -m json.tool .claude/settings.json
+```
+
+Non-zero exit → fix it before reporting success; the harness is not installed until this parses.
 
 ---
 
