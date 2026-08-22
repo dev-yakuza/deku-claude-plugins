@@ -10,7 +10,7 @@
 
 ## Goal
 
-Four durable git-derived signal classes (`_signals.md` Section A · plan §8 scan_git row):
+Four durable git-derived signal classes (`_signals.md` Section A):
 
 | Class | What | Maps to |
 |---|---|---|

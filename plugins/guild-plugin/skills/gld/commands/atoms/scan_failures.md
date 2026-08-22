@@ -9,7 +9,7 @@
 
 ## Goal
 
-Two durable failure sources (`_signals.md` Section A · plan §8 scan_failures row). **This scan does NOT run the test/lint suite** — running it is expensive and is the verify gate's job at dev-time (the resulting verify-gaps are captured to the ground-truth log and read by `scan_corrections`). Here we read *already-persisted* outcomes only.
+Two durable failure sources (`_signals.md` Section A). **This scan does NOT run the test/lint suite** — running it is expensive and is the verify gate's job at dev-time (the resulting verify-gaps are captured to the ground-truth log and read by `scan_corrections`). Here we read *already-persisted* outcomes only.
 
 | Source | What | Maps to |
 |---|---|---|

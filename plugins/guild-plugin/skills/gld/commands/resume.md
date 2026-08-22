@@ -30,5 +30,5 @@ Continue an in-progress Issue from where it left off. Guild's state lives in Git
    - no `guild:*` label → nothing to resume; suggest `/gld dev $1` to start fresh.
 
 ## Notes
-- **Resume == dev from a mid-spine label.** There is no separate resume state — the label is the checkpoint. This is why interruption is safe (plan §12: labels are the state; no local file to corrupt).
+- **Resume == dev from a mid-spine label.** There is no separate resume state — the label is the checkpoint. This is why interruption is safe (labels are the state; no local file to corrupt).
 - If a stage previously returned `NEEDS_HUMAN` or `OK PAUSE`, resume re-enters that stage; the leader re-runs the gate and prompts the human again as needed.

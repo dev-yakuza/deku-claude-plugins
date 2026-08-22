@@ -30,7 +30,7 @@ A stagnant loop-back is itself a growth-loop signal — it suggests the *design/
 python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind stagnation --issue $1 --stage <execute|test|qa> --role <role whose BLOCKED/defect recurred> --area "<the file/area>" --summary "<the recurring reason, 1 line>" --evidence "<attempt 1 reason> == <attempt 2 reason>" --surprise
 ```
 
-`--surprise` always — a repeated identical blocker is exactly the "confident work reversed twice" case plan §8-A ranks highest. Read on-demand by evolve/audit alongside the other signal classes (`_signals.md` Section A); a **cluster** of stagnation entries in the same area across issues is a stronger systemic-fix signal (e.g. a misleading skeleton template, an unclear standard) than a single one-off.
+`--surprise` always — a repeated identical blocker is exactly the "confident work reversed twice" case. Read on-demand by evolve/audit alongside the other signal classes (`_signals.md` Section A); a **cluster** of stagnation entries in the same area across issues is a stronger systemic-fix signal (e.g. a misleading skeleton template, an unclear standard) than a single one-off.
 
 ## Hard rules
 

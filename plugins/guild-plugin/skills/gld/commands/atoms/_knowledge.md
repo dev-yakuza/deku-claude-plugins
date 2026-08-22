@@ -1,6 +1,6 @@
 # KNOWLEDGE (⑥ — semantic memory, shared contract)
 
-**Not a stage.** The authoritative contract for Guild's **semantic memory** — durable codebase *facts* (structure, coupling, pitfalls) that agents need at runtime but that are neither curated docs (`docs/standards/`, ②) nor agent habits (`.claude/agents/`, ③) nor raw episodes (`memory/`, ④). Plan §5 ⑥. Read by `_preflight.md` (retrieval), `init.md` (baseline seed), and `/gld evolve` (write proposals + densify).
+**Not a stage.** The authoritative contract for Guild's **semantic memory** — durable codebase *facts* (structure, coupling, pitfalls) that agents need at runtime but that are neither curated docs (`docs/standards/`, ②) nor agent habits (`.claude/agents/`, ③) nor raw episodes (`memory/`, ④). Read by `_preflight.md` (retrieval), `init.md` (baseline seed), and `/gld evolve` (write proposals + densify).
 
 > **Bash**: read-only exploration via Grep/Glob/Read (`_bash_rules.md`). The only writes are init's baseline seed and a human applying an evolve proposal — never an inline stage write.
 
@@ -52,7 +52,7 @@ A ⑥ fact is a **discovered property of the code** an agent would otherwise red
 - **Provenance**: init-scan | evolve #<n> (<yyyy-mm-dd>).
 ```
 
-## Section C — Retrieval (runtime read — the crux, plan §5 "검색이 최난도")
+## Section C — Retrieval (runtime read — the crux, "검색이 최난도")
 
 Deterministic, no embeddings (v1 — invariant 1). At a stage's pre-flight (`_preflight.md` Item 6):
 1. **Always Read `index.md`** — it is finite, so this is cheap and gives the map of what's known.
@@ -61,16 +61,16 @@ Deterministic, no embeddings (v1 — invariant 1). At a stage's pre-flight (`_pr
 4. **Never Read all of `facts/`** (invariant 1: no whole-load). No key match → load nothing beyond the index; that is normal for a well-scoped task.
 5. **Verify before relying** — a fact is advisory; confirm it still holds against current code (facts can go stale between evolve runs).
 
-## Section D — Scaling invariants (overflow prevention — plan §5, hard rules)
+## Section D — Scaling invariants (overflow prevention — hard rules)
 
 1. **No whole-load.** Fetch only the slices for the files/areas the task touches. Storage size ≠ context size. v1 key = **path/symbol index** (deterministic); semantic search is a later option.
 2. **Finite always-loaded index.** `index.md` is a compressed pointer list. If it outgrows a screenful, **split by module** — move an area's pointers into a nested index loaded only when that area is touched (the nested-CLAUDE.md principle). The always-loaded set stays bounded.
 3. **evolve densifies (growth = density, not monotonic).** On each evolve run, ⑥ proposals **merge duplicates, clean stale facts (contradicted by current code), and generalize** — so ⑥ gets *denser*, not just bigger. A fact whose evidence no longer reproduces is a removal candidate.
-   - **⚠ Interleaved-replay guard (CLS — avoid catastrophic forgetting · 생물학 B, 항목 5).** Densifying must not let a new fact **silently overwrite a still-valid old one**. A fact is dropped/replaced **only when it is genuinely stale** — its evidence no longer reproduces against *current code* — **never merely because it differs from the incoming fact**. On a conflict between a new fact and an existing one, **re-verify both against current code** (interleaved replay) and keep whichever reproduces; if both do, they are not duplicates — keep both. The **ledger is the forgetting-prevention record**: a fact evolve previously promoted with corroboration is not quietly erased by a later run without evidence it went stale.
+   - **⚠ Interleaved-replay guard (CLS — avoid catastrophic forgetting).** Densifying must not let a new fact **silently overwrite a still-valid old one**. A fact is dropped/replaced **only when it is genuinely stale** — its evidence no longer reproduces against *current code* — **never merely because it differs from the incoming fact**. On a conflict between a new fact and an existing one, **re-verify both against current code** (interleaved replay) and keep whichever reproduces; if both do, they are not duplicates — keep both. The **ledger is the forgetting-prevention record**: a fact evolve previously promoted with corroboration is not quietly erased by a later run without evidence it went stale.
 
 ## Section E — Write discipline (who writes, when)
 
-- **init** seeds a **baseline** from the P1 scans (hotspots, strong co-change groups, layer/coupling boundaries) — a solid starting map, not an exhaustive dump (plan §7). Direct write (bootstrap).
+- **init** seeds a **baseline** from the P1 scans (hotspots, strong co-change groups, layer/coupling boundaries) — a solid starting map, not an exhaustive dump. Direct write (bootstrap).
 - **evolve** proposes ⑥ facts and their `index.md` pointer; **evolve writes the approved edit directly** (Phase 6 Apply — Edit/Write, schema-validated, auto-rollback on failure, provenance-stamped, committed), but only **per-item after explicit human approval** (Phase 5 — never auto-applied unattended, INV1). An `agent-friction`/`tool-error`/`co-change` signal that maps to a *fact* (not a habit or a decided rule) routes here.
 - **No stage writes ⑥ inline.** Stages only *read* it (Section C). Facts are committed (semantic, team-shared).
 

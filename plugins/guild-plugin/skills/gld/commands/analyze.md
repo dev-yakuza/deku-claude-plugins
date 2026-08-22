@@ -32,7 +32,7 @@ Read the Issue:
 gh issue view $1
 ```
 
-## Step 1 — discuss gate (required, plan §4)
+## Step 1 — discuss gate (required)
 Before analyzing, as the leader:
 1. State the **assumptions** and interpretations you're making about the request.
 2. Offer **2–3 substantively different interpretations/approaches** where the request is ambiguous (not one "obvious" reading).
@@ -48,7 +48,7 @@ python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue
 ```
 Do **not** capture when the human accepts your recommendation (agreement ≠ correction), nor for unattended auto-assumptions (deferred — Section C).
 
-**③ Overseer learning (D 예측-후-공개 + 자기설명 — `_learning.md`)**: for a **material** discuss decision (attended), before presenting your recommended interpretation, **first invite the human's take** — *"이 부분 어떻게 접근하시겠어요?"* — then reveal your analysis/recommendation. The predict→compare gap teaches (§8-A). And when they choose (esp. an override), optionally invite a one-line *"왜 그 선택을?"* — articulating solidifies their learning **and** enriches the captured signal. Optional, non-condescending, opt-in; skip on trivial/unambiguous decisions. Fade with the human's competence trend (F, 360 overseer scorecard).
+**③ Overseer learning (D 예측-후-공개 + 자기설명 — `_learning.md`)**: for a **material** discuss decision (attended), before presenting your recommended interpretation, **first invite the human's take** — *"이 부분 어떻게 접근하시겠어요?"* — then reveal your analysis/recommendation. The predict→compare gap teaches. And when they choose (esp. an override), optionally invite a one-line *"왜 그 선택을?"* — articulating solidifies their learning **and** enriches the captured signal. Optional, non-condescending, opt-in; skip on trivial/unambiguous decisions. Fade with the human's competence trend (F, 360 overseer scorecard).
 
 ## Step 2 — Requirement analysis
 - Enumerate the requested features/changes (What + Why, not How).
@@ -67,7 +67,7 @@ Fold the PO's aligned AC/priorities into Step 4's output; a `DONE_WITH_CONCERNS`
 
 ## Step 3 — Work-type classification / reclassification
 - Read the Issue's `type:` label if present (`feature`/`bug`/`refactor`).
-- Reclassify if reality differs (plan §4) — e.g. "labeled feature but needs a refactor first." Note the mismatch in the analysis output (Step 4), and if it implies splitting, flag it for design (child-issue split is decided in design).
+- Reclassify if reality differs — e.g. "labeled feature but needs a refactor first." Note the mismatch in the analysis output (Step 4), and if it implies splitting, flag it for design (child-issue split is decided in design).
 - **If reclassifying, update the `type:` label on GitHub now** (its own Bash call, e.g. `gh issue edit $1 --remove-label "type:feature" --add-label "type:refactor"`) — this is what makes the reclassification durable and visible to `dev.md` Phase 2's execute-variant selection (`implement.md` for feature / `debug.md` for `type:bug` / `refactor.md` for `type:refactor`, all fully implemented — a stale draft of this doc once said "in M1, execute is always implement," which is no longer true and contradicted `dev.md`/`debug.md`/`refactor.md`'s actual routing; that line is removed). Without this label update, a reclassification is just prose in the analysis comment and has no effect on which execute wrapper actually runs.
 
 ## Step 4 — Post analysis output

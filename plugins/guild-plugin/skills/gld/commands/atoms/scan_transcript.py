@@ -11,13 +11,13 @@ it matches transcripts by the in-record `cwd` field (which carries the true path
 unparseable lines, and exits non-zero with a one-line reason if it cannot read at all — the
 caller then degrades to the durable git/CI/gate backbone.
 
-Invoked as ONE bash call (atomic-bash exception, plan §8 정정):
+Invoked as ONE bash call (atomic-bash exception):
     python3 <SKILL_DIR>/commands/atoms/scan_transcript.py --repo-cwd <abs-repo-path>
 
 Frequency is measured by DISTINCT session count (>=K), not recency, so there is no time-window
 flag: a --since-days filter over the fragile, undocumented transcript timestamps was error-prone
 (undated sessions, mixed ISO formats) for no real benefit — the evolve ledger skip-list and the
-"already in init/knowledge" filter handle staleness instead (plan 부록 D 3중 리뷰 P3 결정).
+"already in init/knowledge" filter handle staleness instead.
 
 Read-only. Never writes transcripts. Prints a `>>> RESULT <<<` line then a JSON object.
 """

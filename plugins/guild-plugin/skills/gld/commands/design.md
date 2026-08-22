@@ -1,6 +1,6 @@
 # DESIGN (stage)
 
-**Stage: design.** Core roles: **tech-lead ∥ tester** (leader orchestrates), **plus any conditional participation specialists the leader convenes** (designer/i18n/dba/analytics/performance — Step 1.5). The tech-lead drafts the skeleton; the tester writes test cases from the acceptance criteria **without seeing the skeleton** (bias-free — plan §4, §16 C4). They run in parallel. Invocable directly (`/gld design <issue>`) or via `/gld dev`.
+**Stage: design.** Core roles: **tech-lead ∥ tester** (leader orchestrates), **plus any conditional participation specialists the leader convenes** (designer/i18n/dba/analytics/performance — Step 1.5). The tech-lead drafts the skeleton; the tester writes test cases from the acceptance criteria **without seeing the skeleton** (bias-free). They run in parallel. Invocable directly (`/gld design <issue>`) or via `/gld dev`.
 
 `$1` = Issue number. Returns a Section D line.
 
@@ -32,7 +32,7 @@ ls docs/specs/$1
 (If absent, the role sub-agents create `docs/specs/$1/` when writing their artifacts.)
 
 ## Step 1 — Spawn tech-lead and tester in parallel
-As the leader, spawn BOTH role sub-agents in a single message (two Agent tool calls) so they run concurrently and independently (`claude -p`-style isolation is unnecessary in M1 — in-process Agent is fine, plan §12):
+As the leader, spawn BOTH role sub-agents in a single message (two Agent tool calls) so they run concurrently and independently (`claude -p`-style isolation is unnecessary in M1 — in-process Agent is fine):
 
 **Tech Lead** (skeleton first):
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `tech-lead design #$1`
@@ -90,7 +90,7 @@ Do **not** capture routine acceptance of the design (agreement ≠ correction).
 
 **③ Overseer learning (D 예측-후-공개 + 자기설명 — `_learning.md`)**: for a material design fork (attended), before revealing the tech-lead's approach or a specialist's finding, **first invite the human's prediction** — *"이 설계에서 뭐가 걸릴까요?" / "어떤 접근이 맞을까요?"* — then reveal, and **name the principle** behind it (A — e.g. "테마 토큰 모드 분기", "동작보존 리팩터"). On an override, optionally capture the human's one-line *"왜?"* (self-explanation). Opt-in, non-condescending; fade with competence (F).
 
-**Ground-truth capture (①, agent↔agent — `_signals.md` Sections B & C):** if a design-stage **participation specialist** (designer/dba/security/performance/i18n/…) returns a `BLOCKED` whose **concrete objective finding reverses a decided or proposed approach** — e.g. the designer's WCAG measurement overturns a chosen color, dba finds a schema-integrity violation in the proposed model, security finds a threat in the approach — append one entry (its own Bash call, best-effort — never blocks). The objective finding (the measured ratio / integrity rule / vuln) **is** the anchor — one role overturning another's decided output, not self-review (Section B). `--surprise` always (a decided approach reversed — §8-A):
+**Ground-truth capture (①, agent↔agent — `_signals.md` Sections B & C):** if a design-stage **participation specialist** (designer/dba/security/performance/i18n/…) returns a `BLOCKED` whose **concrete objective finding reverses a decided or proposed approach** — e.g. the designer's WCAG measurement overturns a chosen color, dba finds a schema-integrity violation in the proposed model, security finds a threat in the approach — append one entry (its own Bash call, best-effort — never blocks). The objective finding (the measured ratio / integrity rule / vuln) **is** the anchor — one role overturning another's decided output, not self-review (Section B). `--surprise` always (a decided approach reversed):
 ```bash
 python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage design --role <designer|dba|security|…> --area "<the area the finding concerns — e.g. lib/theme, db/schema>" --summary "<what was reversed, 1 line>" --evidence "<the objective finding, e.g. #CCCCCC vs #9E9E9E = 1.67:1 < 4.5:1 WCAG>" --surprise
 ```

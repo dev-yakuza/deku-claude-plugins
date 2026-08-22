@@ -36,7 +36,7 @@ Findings:
 
 ## Section 2 — command-scan
 
-**Goal**: the verification commands the harness needs (plan §18 P1 example), **normalized to simple-bash-safe form** so Guild can run them directly.
+**Goal**: the verification commands the harness needs, **normalized to simple-bash-safe form** so Guild can run them directly.
 
 1. Read `package.json` `scripts` (or Makefile / justfile / pyproject `[tool.*]` / CI config / `dart_test.yaml` / `scripts/` / language-native runner).
 2. Map to the canonical categories: `test` (unit), `lint`, `typecheck`, `build`, **`e2e`** (integration / end-to-end). Prefer the repo's actual invocation (e.g. `yarn test`, `flutter test`, `pytest`).
@@ -96,7 +96,7 @@ Findings:
 
 ## Section 5 — existing-scan
 
-**Goal**: existing harness so init merges instead of clobbering (plan §6 — init is additive).
+**Goal**: existing harness so init merges instead of clobbering (init is additive).
 
 1. Check for and read (if present): `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/agents/`, `.github/workflows/` (CI), `docs/`.
 2. Note whether a Guild install already exists (`.claude/guild/config.json`) — P0 concern, but report here too.

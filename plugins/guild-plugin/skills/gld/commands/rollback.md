@@ -1,6 +1,6 @@
 # ROLLBACK (on-demand — safe revert of a Guild-authored change)
 
-**Undo a Guild change with git — never destructively.** The human's escape hatch (plan §3 · T6 · INV3). Reverts are **additive** (`git revert` creates an undo commit; unmerged work is closed; a stage is relabeled) — **never** `reset --hard`, force-push, or history rewrite. Everything stays recoverable.
+**Undo a Guild change with git — never destructively.** The human's escape hatch (INV3). Reverts are **additive** (`git revert` creates an undo commit; unmerged work is closed; a stage is relabeled) — **never** `reset --hard`, force-push, or history rewrite. Everything stays recoverable.
 
 `$1` = what to undo: a **PR number**, a **commit SHA**, or the literal word `stage` (move an Issue back one stage). When `$1 == "stage"`, `$2` = the **Issue number** to move back — per `SKILL.md`'s routing (`$1`, `$2`… are space-separated tokens passed positionally), `/gld rollback stage 42` arrives as `$1="stage"`, `$2="42"`; there is no single two-word `$1`.
 
@@ -32,6 +32,6 @@ Execute the confirmed method. For a `git revert`, push + open the revert PR (`Re
 **4. Report** — what was reverted, the undo commit/PR link, and how to **redo** if this was a mistake (revert the revert / reopen the PR / relabel forward). Everything is reversible.
 
 ## Hard rules
-- **Never destructive** (INV3/INV4/T6): `git revert` (additive) only — never `reset --hard`, `push --force`, `rebase`, `branch -D` of merged work, or history rewrite.
+- **Never destructive** (INV3/INV4): `git revert` (additive) only — never `reset --hard`, `push --force`, `rebase`, `branch -D` of merged work, or history rewrite.
 - **Confirm before acting** (INV1): show target + method, wait for the human. Read-only until confirmed.
 - **Conflicts surface, never force** — a revert that conflicts is handed to the human.

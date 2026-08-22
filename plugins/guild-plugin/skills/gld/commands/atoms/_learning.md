@@ -1,17 +1,17 @@
 # LEARNING (③ growth engine — the human overseer, shared contract)
 
-**Not a stage.** The contract for Guild's **third co-evolution engine: growing the human overseer.** Guild's heart co-evolves the **product** (Inner loop → codebase) and the **developer** (Outer loop → agent org). This adds the **overseer** (the human) as a third growth target (plan §1 three-way co-evolution · §16 overseer member). Read by `review` (A/D/F), `evolve` (A/B/F), `design` (A/D/F + self-explanation), `analyze` (D/F + self-explanation — **not** A; only `design`'s discuss step names the underlying principle), `onboard` (A/C/D/F), and `_preflight` (E — analyze/design/implement/test/qa/debug/refactor/onboard; **not** `review`, which never invokes `_preflight.md`).
+**Not a stage.** The contract for Guild's **third co-evolution engine: growing the human overseer.** Guild's heart co-evolves the **product** (Inner loop → codebase) and the **developer** (Outer loop → agent org). This adds the **overseer** (the human) as a third growth target (three-way co-evolution · overseer member). Read by `review` (A/D/F), `evolve` (A/B/F), `design` (A/D/F + self-explanation), `analyze` (D/F + self-explanation — **not** A; only `design`'s discuss step names the underlying principle), `onboard` (A/C/D/F), and `_preflight` (E — analyze/design/implement/test/qa/debug/refactor/onboard; **not** `review`, which never invokes `_preflight.md`).
 
 > **Design principle — embed, don't ceremony.** Human growth must be a **side effect of normal usage** (review, evolve, dev), not a separate ritual — a dedicated-only command would never get run and the overseer would never grow. Only `onboard` (C) is a standalone (a new maintainer *intends* to ramp up). Everything else rides inside commands the human already runs.
 
 ---
 
-## Section A — The overseer as a distinguished org member (§16 extension)
+## Section A — The overseer as a distinguished org member
 
 Model the human as a member of the org — but an **authority-tier** one, categorically different from agents:
 - **Tracked in the 360° scorecard** (evolve Phase 2.5) — the overseer's *decision patterns* (discuss overrides, accepted-risks, PR approvals/rejections, recurring blind spots, competence trend) are recorded alongside agents. This unifies the data (the human is already the highest-weight ground-truth source; now their patterns are a first-class row).
 - **NOT file-defined** — agents are `.claude/agents/*.md` that evolve rewrites; a human is not a file. So the overseer's growth is **teaching/insight the human internalizes**, never a git-committed patch.
-- **NOT HR-able** — no hire/retire/replace/promote (§16 C3 is for agents). The overseer is the top authority (INV1), the *source* of ground truth, not a subordinate to performance-manage.
+- **NOT HR-able** — no hire/retire/replace/promote (that is for agents). The overseer is the top authority (INV1), the *source* of ground truth, not a subordinate to performance-manage.
 
 ## Section B — Safety (the hard rules — a HIGHER bar than agent-facing)
 
@@ -27,7 +27,7 @@ Teaching a human is more dangerous than teaching an agent: the human **trusts, g
 | **A** | **Craft transfer** (didactic — the WHY) | `review`, `design` discuss (**not** `analyze` — only design's discuss step names the principle), `onboard`, `evolve` (감독자 회고 names the principle behind each pattern) | Explain not just the local *what* but **name the underlying principle** ("this is the WCAG-contrast principle", "the panel dropped P3 because it duplicated an existing rule") → the human learns spec-driven / verification / a11y / architecture. |
 | **B** | **Pattern reflection** (metacognition) | `evolve` (감독자 회고 report) | From the 360 overseer scorecard, reflect recurring decisions/blind spots + the principle behind them ("WCAG 위험을 3회 수용 — 근본 원리는…"). The human sees their own patterns. |
 | **C** | **Codebase mastery** (onboarding) | `onboard` (standalone) | Guided tour of *the human's own system* — ⑥ knowledge, hotspots, charter, architecture. Ramps a new maintainer. |
-| **D** | **Predict-before-reveal** (active recall / prediction-error) | `review`, `analyze`/`design` discuss, `onboard` | **Before** revealing the answer, ask the human to predict/reason ("이 diff에서 뭐가 위험해 보이세요?" before the adversarial findings; "어떻게 하시겠어요?" before the leader recommendation). The **gap** is where learning happens (surprise drives it — §8-A applied to the human). Turns A's passive telling into active learning. |
+| **D** | **Predict-before-reveal** (active recall / prediction-error) | `review`, `analyze`/`design` discuss, `onboard` | **Before** revealing the answer, ask the human to predict/reason ("이 diff에서 뭐가 위험해 보이세요?" before the adversarial findings; "어떻게 하시겠어요?" before the leader recommendation). The **gap** is where learning happens (surprise drives it). Turns A's passive telling into active learning. |
 | **E** | **Just-in-time reinforcement** (spaced, timely) | `_preflight` Item 7 (analyze/design/implement/test/qa/debug/refactor/onboard — **not** `review`, which never invokes `_preflight.md`) | When the touched area matches a **recurring overseer blind spot** (from the scorecard/ledger), surface that one lesson **at the moment of relevance** — right before they'd repeat it — not buried in a periodic report. |
 | **F** | **Adaptive fading** (scaffolding → fading) | `review`, `analyze`/`design`, `onboard`, `evolve` | Scale teaching **depth to the overseer's competence trend** (360). Early / low-competence-in-area → full worked explanation. Rising competence → **fade** the hand-holding (a one-line pointer, or silence) so the human takes over. Prevents both over- and under-explaining. |
 

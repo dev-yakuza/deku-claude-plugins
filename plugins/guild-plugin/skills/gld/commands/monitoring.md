@@ -1,6 +1,6 @@
 # MONITORING (on-demand — terminal status snapshot)
 
-**A near-real-time snapshot of the Guild's state, rendered from git-local files (read-only).** Shows the organization, knowledge/memory status, evolution history, gates, friction trend, and active work. **Terminal output** — the HTML artifact is v2 (plan §3). Honest framing: this is a **snapshot at read time**, not a live dashboard.
+**A near-real-time snapshot of the Guild's state, rendered from git-local files (read-only).** Shows the organization, knowledge/memory status, evolution history, gates, friction trend, and active work. **Terminal output** — the HTML artifact is v2. Honest framing: this is a **snapshot at read time**, not a live dashboard.
 
 `$1` (optional) = a focus section (`org|knowledge|gates|work|evolution|standards`) · `--html` = also write a self-contained HTML dashboard · empty = full terminal snapshot.
 
