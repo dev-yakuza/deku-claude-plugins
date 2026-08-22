@@ -82,6 +82,7 @@ Read every RESULT line (tech-lead, tester, and any conditional participants):
   ```bash
   gh issue create --title "[Guild子] <slice name>" --body-file <temp> --label "guild:child" --label "guild:analyze"
   ```
+  ⚠ **Verify each create landed before starting the next** (`_handoff.md` Section F — `gh` write failures): `gh issue create` prints the new Issue's URL; an empty/absent URL or an error line means that child does **not** exist, whatever the narrative says. Transient (rate limit / 5xx / network) → one retry of that same create; terminal (auth / permission / 422 — e.g. the `guild:child` label missing because `/gld init` never ran) → **stop here, before the label flip below**, and return `FAIL: child creation failed after <k>/<total> — <gh error>`. A half-created split must be left labeled `guild:design`: that is the recoverable state — Step 0's discovery query re-derives the existing children on the next run and creates only the missing ones. Never flip the parent to `guild:children` or post the roster over a partial set.
 - **Flip the label right after the LAST child exists** (before posting the roster) — skip this if the idempotency guard above already found `guild:children` present. **Also strip `guild:needs-human` in this same call if present** (same rule as every other stage transition — `_handoff.md` Section A):
   ```bash
   gh issue edit $1 --remove-label "guild:design" --add-label "guild:children" --remove-label "guild:needs-human"

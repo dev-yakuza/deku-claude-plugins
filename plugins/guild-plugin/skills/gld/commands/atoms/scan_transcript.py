@@ -216,6 +216,10 @@ def main():
             cmd_sessions[c] += 1
 
     signals = []
+    # `summary`/`mapping` are ASCII English on purpose: this script has no access to the repo's
+    # config.language, and its RESULT JSON is consumed by evolve, which renders the human-facing
+    # text in config.language (_handoff.md Section K). Emitting a fixed Korean literal here would
+    # hardcode one language into a machine payload on an en/ja repo.
     for cmd, n in perm_sessions.items():
         if n >= 2:
             # A generic veto with no captured command is heterogeneous and not mappable to one
@@ -223,22 +227,24 @@ def main():
             # a specific, actionable signal.
             if cmd == "user-vetoed-edit":
                 signals.append({"confidence": "low", "class": "permission",
-                                "summary": "일반 편집 거부(명령 특정 안 됨)", "evidence": f"{n} sessions",
-                                "sessions": n, "mapping": "노이즈 후보 — 이질적, 단일 룰 매핑 불가"})
+                                "summary": "generic edit denial (no specific command captured)",
+                                "evidence": f"{n} sessions",
+                                "sessions": n,
+                                "mapping": "noise candidate - heterogeneous, not mappable to a single rule"})
             else:
                 signals.append({"confidence": rank(n), "class": "permission",
-                                "summary": f"반복 거부된 명령: {cmd}", "evidence": f"{n} sessions",
-                                "sessions": n, "mapping": "allow-rule (위험 명령이면 기각)"})
+                                "summary": f"repeatedly denied command: {cmd}", "evidence": f"{n} sessions",
+                                "sessions": n, "mapping": "allow-rule (reject if the command is risky)"})
     for label, (n, mapping) in err_sessions.items():
         if n >= 2:
             signals.append({"confidence": rank(n), "class": "tool-error",
-                            "summary": f"반복 툴 에러: {label}", "evidence": f"{n} sessions",
+                            "summary": f"recurring tool error: {label}", "evidence": f"{n} sessions",
                             "sessions": n, "mapping": mapping})
     for cmd, n in cmd_sessions.items():
         if n >= 3:
             cls = "rediscovery" if REDISCOVERY_RE.match(cmd) else "repeated-cmd"
             signals.append({"confidence": rank(n), "class": cls,
-                            "summary": f"반복 명령: {cmd[:80]}", "evidence": f"{n} sessions",
+                            "summary": f"repeated command: {cmd[:80]}", "evidence": f"{n} sessions",
                             "sessions": n, "mapping": "⑥ fact / allow-rule"})
 
     conf_rank = {"high": 3, "med": 2, "low": 1}

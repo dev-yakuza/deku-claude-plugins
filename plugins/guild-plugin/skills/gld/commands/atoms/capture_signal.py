@@ -24,6 +24,14 @@ LOG_REL = os.path.join(".claude", "guild", "memory", "ground-truth.jsonl")
 # "revert" is intentionally NOT a kind: a git revert is a durable signal, read on-demand
 # via scan_git at evolve time (_signals.md Section A/C) — it is never captured to this
 # log. Accepting it here would silently contradict that contract.
+#
+# "accepted-risk" IS accepted here but nothing in the spine calls it — that is deliberate, not
+# an oversight. The source of record for an accepted risk is the human-edited
+# `.claude/guild/gates/dismissed.md` registry (_signals.md Section C): the human made the call,
+# so the human's own file is the anchor, and auto-appending a second copy here would double-count
+# it in the data-sufficiency volume. The kind is kept so a future auto-capture path has a stable
+# name to use. ⚠ If you wire it, also update `_data_sufficiency.md` — its Axis-1 breakdown
+# deliberately omits accepted-risk from the counted set today.
 KINDS = ("correction", "verify-gap", "accepted-risk", "stagnation")
 
 

@@ -5,7 +5,8 @@
 > **Bash Command Execution**: every shell snippet below is its own simple Bash tool call. See `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. Codebase exploration uses Grep/Glob/Read.
 >
 > **Sections**: A labels · B markers · C role handoff · D stage return · E verify evidence ·
-> F owner/repo · G roster · H unattended · I parent/child · **(no J)** · K output language.
+> F owner/repo + `gh` write failures · G roster · H unattended · I parent/child · **(no J)** ·
+> K output language.
 > There is deliberately **no Section J** — the letter was skipped, and callers are numerous
 > enough that renaming K would be a worse fix than recording the gap. A pointer to "Section J"
 > anywhere is a typo for one of the sections above; nothing was deleted.
@@ -169,6 +170,27 @@ DONE_WITH_CONCERNS: tests written to docs/specs/42/test-cases.md; AC #3 is ambig
 BLOCKED: design output references an auth module that does not exist in this repo
 ```
 
+### When the RESULT line is missing or malformed (contract violation)
+
+A reply that does not carry **exactly one** `>>> RESULT <<<` followed by **one** enum status is a
+**failed invocation**, never a pass. Three shapes, one rule:
+
+- **No sentinel at all** — the reply is narrative only.
+- **More than one sentinel** — do NOT pick one (not the last, not the "best"); the contract is one.
+- **Sentinel present, but the next non-empty line is not** `DONE` / `DONE_WITH_CONCERNS:` /
+  `BLOCKED:` / `NEEDS_CONTEXT:` / `FAIL:`.
+
+**Never infer a verdict from the prose** — reading "looks like it passed" out of narrative text is
+exactly the self-report-over-evidence failure the verify gate (Section E) exists to prevent.
+
+Handling: re-invoke that role **exactly once**, same task plus one line naming the violation
+("your previous reply had no/duplicate/invalid `>>> RESULT <<<` — return EXACTLY one sentinel and
+one status from the enum"). Still malformed → escalate exactly as an exhausted bounded retry does:
+**attended** → `NEEDS_HUMAN: <role> returned no valid RESULT line for #<n>`; **unattended**
+(Section H) → add the `guild:needs-human` label + a `<!-- guild:needs-human -->` comment and return
+`OK PAUSE: needs-human — <role> returned no valid RESULT line` (do NOT transition the stage label).
+A failed invocation satisfies no gate: the stage must not return `OK ADVANCE` on it.
+
 ---
 
 ## Section D — Stage-level return (stage → main session)
@@ -179,7 +201,7 @@ A stage wrapper (analyze/design/implement/test) returns one line to the main ses
 |---|---|---|
 | `OK ADVANCE: <next-stage>` | stage complete, advance | transition label to `guild:<next-stage>` |
 | `OK SPLIT: <N> children` | design split the Issue into `N` child Issues | transition the **parent** to `guild:children` and enter child orchestration (dev Phase 2b — Section I) |
-| `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done`, close if appropriate |
+| `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done` — **Guild's work is complete; the PR is open awaiting human review + merge**. Do **not** close the Issue: the PR body carries `Closes #<N>`, so **GitHub** closes it when the human merges — INV1 (nothing merges unattended; the human is the external reviewer of record). No Guild command closes an Issue deliberately. |
 | `OK PAUSE: <one-line>` | leader/human chose to stop here | leave label as-is; report |
 | `NEEDS_HUMAN: <one-line>` | a discuss/verify gate needs a human decision | main session prompts the human (`AskUserQuestion`), then resumes |
 | `NEEDS_CONTEXT: <one-line>` | a **required upstream artifact is missing** — design without analyze output, execute without a design skeleton | do **not** advance and do **not** treat as a hard error: the fix is to run the missing stage. Report which artifact is absent and re-enter the spine at the stage that produces it; if that stage's label is already set (so it "ran" but left nothing), surface it as `NEEDS_HUMAN` — a silent no-op upstream is a state inconsistency a human should see. |
@@ -224,6 +246,31 @@ gh repo view --json nameWithOwner -q .nameWithOwner
 ```
 
 Never infer owner/repo from the git user, the system prompt, or path names. If the command fails (non-GitHub remote), Guild's GitHub-backed state is unavailable — report and stop (M1 requires a GitHub repo).
+
+### Section F — `gh` write failures (any state-mutating call)
+
+Expired auth, rate limits and network errors are ordinary, and the spine's **only** persisted
+state is the label — so a silently-failed `gh issue edit` desynchronises the state model: the
+stage believes it advanced while GitHub still shows the old stage. Applies to every state
+mutation: label edit, comment create/PATCH, `gh issue create`, `gh pr create` / `gh pr edit`.
+
+- **Verify it landed — never assume.** After a label edit, re-read the labels (Section A's
+  derivation) and confirm the new set; after a create, confirm the returned URL/number is
+  non-empty. A non-zero exit, an error line, or an empty URL/number **is** a failure.
+- **Transient** — rate limit (429 / "API rate limit exceeded"), network/DNS, 5xx → **one** bounded
+  retry of the same call, then verify again.
+- **Terminal** — auth (401 / "gh auth login"), permission (403), not-found (404), validation (422,
+  e.g. a label that doesn't exist) → do **not** retry, it will not help: stop and return
+  `FAIL: gh <operation> failed for #<n> — <gh error, 1 line>`.
+- **A failed state mutation is never reported as success.** The stage does not return
+  `OK ADVANCE`/`OK SPLIT`/`OK DONE` on it, and no narrative may claim a transition, PR, or comment
+  that did not land. (Read-only `gh` reads are out of scope — they fail loudly and are re-runnable.)
+- **Scope: Issue/PR *state*, not repo setup.** "Label edit" here means `gh issue edit --add-label`
+  / `--remove-label` — mutating one Issue's stage. `init`'s `gh label create … --force` is repo
+  setup: idempotent, deliberately non-transactional, and documented to report-and-continue on a
+  per-label failure (`init.md` P2 step 7). Do not apply the stop-and-`FAIL` rule there; a missing
+  label surfaces later as a terminal 422 on the first `gh issue edit` that needs it, which this
+  contract already covers.
 
 ---
 

@@ -29,10 +29,11 @@ Show the current progress of an Issue. **Read-only**: never posts comments, neve
    - `<!-- guild:test-evidence:step-1 -->` (execute produced evidence)
    - `<!-- guild:test:output -->`
    - `<!-- guild:qa:output -->`
-5. Find the related PR:
+5. Find the related PR — **resolve it broadly, the same way `review.md` Step 0 does.** A literal `"Closes #$1"` search is too narrow: a PR may use `Fixes`/`Fixed`/`Resolves`/`Resolved`/`Close`/`Closed` (all of GitHub's closing keywords, case-insensitive), or link the Issue purely through the PR sidebar's "Development" feature with no closing keyword in the body at all — so `status` would report "PR: none" for a PR `/gld review $1` finds:
    ```bash
-   gh pr list --search "Closes #$1" --json number,url,state
+   gh pr list --search "#$1 in:body" --json number,url,state,body
    ```
+   Then keep only PRs whose body contains `$1` as a closing/fixing reference (`\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s*:?\s*#$1\b`, case-insensitive), or whose title/body otherwise makes the link obvious. Nothing matched → render `PR: none` (status is read-only — it never asks or edits; a sidebar-only link stays invisible to this search).
 6. Render (below).
 
 ### Stage rendering (from the derived `stage`)

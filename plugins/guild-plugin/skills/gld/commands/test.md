@@ -49,6 +49,7 @@ As the leader, enforce the verify gate (`_handoff.md` Section E):
   ```bash
   gh issue edit $1 --remove-label "guild:test" --add-label "guild:qa" --remove-label "guild:needs-human"
   ```
+  **Verify this edit landed** before returning (`_handoff.md` Section F — `gh` write failures): re-read the labels; a failed edit means the Issue is still at `guild:test`, so returning `OK ADVANCE: qa` would desynchronise the state model.
   Return:
   ```
   >>> RESULT <<<

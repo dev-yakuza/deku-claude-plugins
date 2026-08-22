@@ -111,6 +111,16 @@ As the leader, over the developer + tech-lead + any conditional specialist/gate 
 
 As the leader, push the branch and open a PR referencing the Issue (temp-file body via `--body-file`; body references `Closes #<N>` and carries the variant's **PR SUMMARY**). The PR is where the **human reviewer** (M1's external reviewer) approves. **Resume-safe**: if a PR for this branch already exists (interrupted prior run), PATCH it rather than opening a duplicate. **Unattended (`GLD_UNATTENDED=1`)**: append a `## 무인 결정 로그 (GLD_UNATTENDED)` section to the PR body aggregating the leader-proxy gate decisions recorded in the analyze/design outputs (chosen interpretation · charter rationale · "사람 확인 요") — `_handoff.md` Section H — so the deferred human gate (PR review) is informed, not blind.
 
+**Both the push and the PR call are state mutations — `_handoff.md` Section F (`gh` write failures) governs them**: verify each landed (the push's remote ref exists; `gh pr create` returned a non-empty PR URL), one retry only if transient, and **never report a failed push/PR as success**. Failure paths:
+
+- **No remote configured** (`git remote -v` empty) → terminal: `FAIL: no git remote — the PR step requires one; the work is committed on branch <branch>`.
+- **Push rejected (non-fast-forward)** — the remote branch diverged. **Do NOT force-push and do NOT rewrite history** (INV3). Re-read the divergence (`git fetch`, then `git log --oneline origin/<branch>..<branch>` / the reverse) and escalate: **attended** → `NEEDS_HUMAN: branch <branch> diverged from origin — resolve before the PR`; **unattended** → `guild:needs-human` label + comment, `OK PAUSE: needs-human — branch diverged from origin` (do NOT transition).
+- **Protected branch / push permission denied** → terminal `FAIL:` (a retry cannot help — `_handoff.md` Section F).
+- **A PR already exists for this branch** — not an error: this is the resume-safe case above. Find it (`gh pr list --head <branch> --state open`) and PATCH its body instead of creating a second PR.
+- **PR creation fails otherwise** — template/validation (422) or insufficient permission (403) → terminal `FAIL: gh pr create failed for #<N> — <gh error>`; rate limit / 5xx / network → one retry, then the same `FAIL`.
+
+In every failure case the branch still holds the committed work — say so, and do **not** return `OK ADVANCE: test`: work with no open PR has no human reviewer (INV1), so the stage has not advanced.
+
 ## Step 6 — Transition + return
 
 Remove **whatever `guild:*` stage label Step 0 actually found** (substitute in place of `guild:execute` below if it was something else — `gh issue edit --remove-label` on a label the Issue doesn't carry can error; **never remove `guild:child`** if present — `_handoff.md` Section A). **Also remove `guild:needs-human` in this same call if Step 0's label read found it present** (`_handoff.md` Section A):
