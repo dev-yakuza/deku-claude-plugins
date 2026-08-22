@@ -5,13 +5,23 @@
 `$1` = Issue number. Returns a Section D line.
 
 > **Bash**: `_bash_rules.md`. State/handoff: `_handoff.md`.
+> **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K); sub-agent prompts carry that instruction.
 
 ---
 
 ## Step 0 — Preflight
 As the leader, follow `_preflight.md` **Medium tier**. Load the test cases (`docs/specs/$1/test-cases.md`), the design output, and any execute-stage evidence (`<!-- guild:test-evidence:step-1 -->`). Load `docs/standards/verification.md` for the verify rules + DoD.
 
-Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`. Empty → add `guild:test`. Non-empty → do not add on top (Step 3's transition removes whatever **stage** label was actually found here, not necessarily `guild:test` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A). Ensure the Issue's branch is checked out (the one implement created).
+Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
+
+**Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so Step 3's transition would destroy the link `dev.md` Phase 2b uses to drive the children:
+```
+>>> RESULT <<<
+FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
+```
+(`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
+
+Empty → add `guild:test`. Non-empty → do not add on top (Step 3's transition removes whatever **stage** label was actually found here, not necessarily `guild:test` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A). Ensure the Issue's branch is checked out (the one implement created).
 
 ## Step 1 — Spawn tester (run + verify)
 Spawn the tester sub-agent:
@@ -19,7 +29,7 @@ Spawn the tester sub-agent:
 - `prompt`:
   > Adopt the persona in `.claude/agents/tester.md`. Execute the tests for Issue #$1 on the current branch — run the project's test command (unit + existing suites; E2E/manual QA are later milestones in M1). **Capture the raw runner output**. Confirm every acceptance-criterion test case from `docs/specs/$1/test-cases.md` is covered and passing. Verify gate: your pass claim MUST match the raw output — if they disagree, the raw output wins and you report the failure honestly. Do NOT weaken/skip tests to pass (INV2). **Honesty-of-scope (mandatory)**: explicitly declare WHAT you ran (with raw evidence) AND WHAT you did NOT run — specifically `commands.e2e` (integration/E2E) and manual/visual QA are NOT executed in M1. Never phrase your result as "fully QA'd" or "all problems verified" — the accurate claim is "automated tests (what you ran) pass and the written AC are test-covered."
   > **Risk-based E2E judgment (mandatory — not a blanket skip)**: M1 does not auto-run E2E, but you MUST still JUDGE whether this change warrants E2E regression, and state it: (a) **contained / low-risk** (local widget/util fix, no cross-screen flow or integration change) → "E2E 불요: <one-line reason>" — a *justified* skip; (b) **touches flows / navigation / integration / data sync** → "**E2E 회귀 권장: `<suite>`** — M1 자동 미실행, 사람이 실행 권장" — hand it to the human. Base the judgment on the diff's scope + the hotspot list, not on convenience.
-  > Return one `>>> RESULT <<<` line per `_handoff.md` Section C, with the raw test summary line.
+  > Return one `>>> RESULT <<<` line per `_handoff.md` Section C, with the raw test summary line. Write output in `config.language`.
 
 ## Step 2 — verify gate (leader, mandatory)
 As the leader, enforce the verify gate (`_handoff.md` Section E):

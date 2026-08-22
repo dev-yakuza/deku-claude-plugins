@@ -27,10 +27,12 @@ This **composes with, not replaces**, each stage's existing numeric cap ("~2 loo
 A stagnant loop-back is itself a growth-loop signal — it suggests the *design/skeleton/standard* the loop keeps bouncing off of may be the actual problem, not the developer's individual attempt. Capture it (its own Bash call, best-effort — never blocks the loop):
 
 ```bash
-python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind stagnation --issue $1 --stage <execute|test|qa> --role <role whose BLOCKED/defect recurred> --area "<the file/area>" --summary "<the recurring reason, 1 line>" --evidence "<attempt 1 reason> == <attempt 2 reason>" --surprise
+python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind stagnation --issue <N> --stage <execute|test|qa> --role <role whose BLOCKED/defect recurred> --area "<the file/area>" --summary "<the recurring reason, 1 line>" --evidence "<attempt 1 reason> == <attempt 2 reason>" --surprise
 ```
 
-`--surprise` always — a repeated identical blocker is exactly the "confident work reversed twice" case. Read on-demand by evolve/audit alongside the other signal classes (`_signals.md` Section A); a **cluster** of stagnation entries in the same area across issues is a stronger systemic-fix signal (e.g. a misleading skeleton template, an unclear standard) than a single one-off.
+Substitute the **literal** Issue number for `<N>` (and the literal values for every other `<…>`) before the Bash call — `_bash_rules.md` item 9 forbids passing `$1`/`<N>` through unresolved, and `capture_signal.py` accepts a non-numeric `--issue` silently rather than erroring, so an unresolved `$1` would land in the ground-truth log as `"issue": "$1"` and quietly poison the record evolve reads.
+
+**No `--escalated` here** — this capture fires on the *stagnation* path, which does not retry at all, so no model tier was ever bumped (`_model_tiering.md` Section A/B, `implement.md` Step 4). `--surprise` always — a repeated identical blocker is exactly the "confident work reversed twice" case. Read on-demand by evolve/audit alongside the other signal classes (`_signals.md` Section A); a **cluster** of stagnation entries in the same area across issues is a stronger systemic-fix signal (e.g. a misleading skeleton template, an unclear standard) than a single one-off.
 
 ## Hard rules
 

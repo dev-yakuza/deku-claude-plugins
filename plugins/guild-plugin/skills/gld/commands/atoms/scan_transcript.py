@@ -157,6 +157,21 @@ def rank(sessions):
     return "low"
 
 
+def emit(feasibility, degraded, signals, reason=None):
+    """Print the one sanctioned RESULT block.
+
+    Emitted on EVERY path, including the ones that find no usable source. `degraded` used to be
+    hardcoded False with no code path that could set it True — degradation was signalled only by
+    the exit code, which the signal contract never documented, so a caller reading stdout could
+    not tell "this repo genuinely has no friction" from "this scan could not see anything."
+    Exit codes are unchanged, so a caller that only checks them is unaffected."""
+    out = {"feasibility": feasibility, "degraded": degraded, "signals": signals}
+    if reason:
+        out["reason"] = reason
+    print(">>> RESULT <<<")
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo-cwd", required=True)
@@ -166,12 +181,19 @@ def main():
 
     if not os.path.isdir(PROJECTS_DIR):
         sys.stderr.write("no ~/.claude/projects dir — transcript source unavailable\n")
+        emit("0/0 transcripts parsed", True, [],
+             "no ~/.claude/projects directory — transcript source unavailable")
         return 2
 
     files = glob.glob(os.path.join(PROJECTS_DIR, "*", "*.jsonl"))
     matched = [f for f in files if file_matches_repo(f, repo_cwd)]
     if not matched:
         sys.stderr.write(f"no transcripts matched cwd={repo_cwd} (lossy encoding / none this repo)\n")
+        # Not the same as "no friction": a session started in a subdirectory, through a symlinked
+        # path, or in a worktree records a different `cwd` and is dropped here silently.
+        emit(f"0/{len(files)} transcripts parsed for {repo_cwd}", True, [],
+             f"no transcript recorded cwd={repo_cwd} — sessions started from a subdirectory, "
+             f"a symlinked path, or a worktree record a different cwd and are not matched")
         return 3
 
     # aggregate DISTINCT sessions per signal key
@@ -221,13 +243,16 @@ def main():
 
     conf_rank = {"high": 3, "med": 2, "low": 1}
     signals.sort(key=lambda s: (conf_rank.get(s["confidence"], 0), s["sessions"]), reverse=True)
-    out = {
-        "feasibility": f"{scanned}/{len(matched)} transcripts parsed for {repo_cwd}",
-        "degraded": False,
-        "signals": signals,
-    }
-    print(">>> RESULT <<<")
-    print(json.dumps(out, ensure_ascii=False, indent=2))
+    # Partial parse is real degradation: scan_file returns None for a transcript it cannot read,
+    # so the signal counts below are computed over fewer sessions than were matched, and every
+    # frequency threshold (≥2 / ≥3 sessions) is correspondingly under-counted.
+    unreadable = len(matched) - scanned
+    reason = None
+    if unreadable > 0:
+        reason = (f"{unreadable} of {len(matched)} matched transcripts were unreadable — "
+                  f"session counts are a lower bound, so a real signal may sit below threshold")
+    emit(f"{scanned}/{len(matched)} transcripts parsed for {repo_cwd}",
+         unreadable > 0, signals, reason)
     return 0
 
 
@@ -236,4 +261,8 @@ if __name__ == "__main__":
         sys.exit(main())
     except Exception as e:                       # never crash the caller; degrade
         sys.stderr.write(f"scan_transcript failed: {e}\n")
+        try:
+            emit("0/0 transcripts parsed", True, [], f"scan aborted: {e}")
+        except Exception:
+            pass
         sys.exit(1)

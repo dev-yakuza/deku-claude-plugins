@@ -5,13 +5,23 @@
 `$1` = Issue number. Returns a Section D line.
 
 > **Bash**: `_bash_rules.md`. State/handoff: `_handoff.md`.
+> **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K); sub-agent prompts carry that instruction.
 
 ---
 
 ## Step 0 — Preflight
 As the leader, follow `_preflight.md` **Heavy tier** (per its Section A table: items **1 + 2 + 3 + 4 + 5 + 6 + 8** — not just 1–5; item 5 is the target-dir survey, items 6/8 are the ⑥ knowledge-slice retrieval and ④ working-memory read, both needed to honestly populate the Section C self-review trace). Load the design output (`<!-- guild:design:output -->`), the skeleton (`docs/specs/$1/skeleton.md`), and the test cases (`docs/specs/$1/test-cases.md`). If design output or skeleton is missing → `NEEDS_CONTEXT: design/skeleton not found for #$1`.
 
-Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`. Empty → add `guild:execute`. Non-empty → do not add on top (Step 6's transition removes whatever **stage** label was actually found here, not necessarily `guild:execute` — never `guild:child`, which is a permanent identity marker a child Issue also carries alongside its stage label and no stage ever removes; `_handoff.md` Section A).
+Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
+
+**Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so Step 6's transition would destroy the link `dev.md` Phase 2b uses to drive the children:
+```
+>>> RESULT <<<
+FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
+```
+(`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
+
+Empty → add `guild:execute`. Non-empty → do not add on top (Step 6's transition removes whatever **stage** label was actually found here, not necessarily `guild:execute` — never `guild:child`, which is a permanent identity marker a child Issue also carries alongside its stage label and no stage ever removes; `_handoff.md` Section A).
 
 Create/switch to a feature branch for this Issue (follow the repo's branch convention from conventions.md; e.g. `feature/#$1-<slug>`). Do this as the leader before spawning the developer, so the developer works on the branch. **Resume-safe (rate-limit/interruption)**: if a branch for this Issue **already exists** (a prior interrupted execute), switch to it and build a concise **partial-work summary** — `git log <base>..HEAD --oneline` (what's committed) **plus one run of the test command** to see which cases already pass vs still fail (where TDD left off). This summary is passed into the developer prompt (Step 1) so it **continues from the partial state, not from scratch**. Only create the branch (no summary) if absent. ("중단 내성" — mid-execute resume.)
 
@@ -19,7 +29,7 @@ Create/switch to a feature branch for this Issue (follow the repo's branch conve
 Spawn the developer sub-agent:
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `developer implement #$1`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/developer.md`. Implement Issue #$1 on the current branch. Read the skeleton (`docs/specs/$1/skeleton.md`) and test cases (`docs/specs/$1/test-cases.md`) — these are your inputs, passed as files. Do TDD: make the tester's cases fail (red), implement to green, then refactor. **Resume**: if Step 0 supplied a partial-work summary below, a prior run was interrupted mid-execute — **CONTINUE from it**: keep the already-green work, pick up the TDD cycle where it stopped, complete the rest; redo only what is wrong. Do NOT rewrite correct existing work from scratch. `<partial-work summary from Step 0, or "none — fresh branch">`. Run the project's test command and **capture the raw runner output** as verify evidence — do NOT claim green without it (`_handoff.md` Section E). slopcheck: verify every import/dependency exists (no hallucinated packages). Commit with the repo's convention. Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C, including the raw test summary line and the branch name.
+  > Adopt the persona in `.claude/agents/developer.md`. Implement Issue #$1 on the current branch. Read the skeleton (`docs/specs/$1/skeleton.md`) and test cases (`docs/specs/$1/test-cases.md`) — these are your inputs, passed as files. Do TDD: make the tester's cases fail (red), implement to green, then refactor. **Resume**: if Step 0 supplied a partial-work summary below, a prior run was interrupted mid-execute — **CONTINUE from it**: keep the already-green work, pick up the TDD cycle where it stopped, complete the rest; redo only what is wrong. Do NOT rewrite correct existing work from scratch. `<partial-work summary from Step 0, or "none — fresh branch">`. Run the project's test command and **capture the raw runner output** as verify evidence — do NOT claim green without it (`_handoff.md` Section E). slopcheck: verify every import/dependency exists (no hallucinated packages). Commit with the repo's convention. Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C, including the raw test summary line and the branch name. Write output in `config.language`.
 
 ## Step 2 — Capture verify evidence
 When the developer reports green, post the raw test-runner output to the Issue as evidence (temp-file pattern):
@@ -30,7 +40,7 @@ When the developer reports green, post the raw test-runner output to the Issue a
 Spawn the tech-lead sub-agent to check the implementation against the design (separate eyes — anti-confirmation-bias):
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `tech-lead conformance #$1`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/tech-lead.md`. Review the implementation on the current branch against your skeleton (`docs/specs/$1/skeleton.md`) and `docs/standards/architecture.md`. Check: did it honor the module boundaries, seams, technical direction, and design intent? You are reviewing the DEVELOPER's output, not your own. Return one `>>> RESULT <<<` line: `DONE` (conformant), `DONE_WITH_CONCERNS: <one-line>`, or `BLOCKED: <non-conformance>` (requires an execute loop).
+  > Adopt the persona in `.claude/agents/tech-lead.md`. Review the implementation on the current branch against your skeleton (`docs/specs/$1/skeleton.md`) and `docs/standards/architecture.md`. Check: did it honor the module boundaries, seams, technical direction, and design intent? You are reviewing the DEVELOPER's output, not your own. Return one `>>> RESULT <<<` line: `DONE` (conformant), `DONE_WITH_CONCERNS: <one-line>`, or `BLOCKED: <non-conformance>` (requires an execute loop). Write output in `config.language`.
 
 ## Step 3.5 — Conditional specialists + gate reviews (leader)
 As the leader, convene the **execute-stage participation specialists** and **gate reviews** this change warrants (assembly rules in `.claude/agents/leader.md`; participation model in `_handoff.md` Section G). Match the diff surface against triggers; spawn only what matches (none matched → skip). Run the independent reviews in parallel:
@@ -42,7 +52,7 @@ As the leader, convene the **execute-stage participation specialists** and **gat
 For each matched role:
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `<role> review #$1`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/<role>.md`. Review the implementation on the current branch for Issue #$1 from your specialty. You are reviewing the DEVELOPER's diff, not your own work (external, adversarial). Read `docs/specs/$1/` for design/intent. Return one `>>> RESULT <<<` line per `_handoff.md` Section C — `DONE`, `DONE_WITH_CONCERNS: <one-line>`, or `BLOCKED: <blocking finding>`.
+  > Adopt the persona in `.claude/agents/<role>.md`. Review the implementation on the current branch for Issue #$1 from your specialty. You are reviewing the DEVELOPER's diff, not your own work (external, adversarial). Read `docs/specs/$1/` for design/intent. Return one `>>> RESULT <<<` line per `_handoff.md` Section C — `DONE`, `DONE_WITH_CONCERNS: <one-line>`, or `BLOCKED: <blocking finding>`. Write output in `config.language`.
 
 Fold these verdicts into Step 4. A gate role's `BLOCKED` (e.g. security finds a real vulnerability) blocks advancement the same as a tech-lead non-conformance.
 

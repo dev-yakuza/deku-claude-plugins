@@ -76,6 +76,18 @@ def main():
             issue = int(args.issue)
         except (TypeError, ValueError):
             issue = args.issue  # keep non-numeric as-is rather than dropping the signal
+            # An UNSUBSTITUTED doc placeholder is the one non-numeric value that is never
+            # legitimate: `_bash_rules.md` item 9 requires `$1`/`<N>`/`<issue>` to be replaced
+            # with the literal before the call, and every caller writes one of those forms.
+            # Silently accepting it wrote `"issue": "$1"` into the ground-truth log, where it
+            # survives as a permanent un-joinable row — evolve dedups and ranks by issue, so the
+            # signal is not just wrong, it is invisible. Warn loudly; still record it (dropping
+            # the signal would lose the observation entirely), but make the mistake findable.
+            if str(args.issue).startswith(("$", "<")):
+                sys.stderr.write(
+                    f"capture_signal: WARNING — --issue {args.issue!r} looks like an "
+                    f"unsubstituted placeholder. Substitute the literal issue number before "
+                    f"the Bash call (_bash_rules.md item 9). Recording it as-is.\n")
 
     entry = {
         "ts": now_iso(),

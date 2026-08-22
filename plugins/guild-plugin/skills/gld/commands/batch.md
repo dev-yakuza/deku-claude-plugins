@@ -71,13 +71,35 @@ if [ -n "$EXCLUDE" ]; then
   done
 fi
 
-# Self-delete on exit (trap can't catch SIGKILL — then remove .gld-batch.sh manually)
+# Self-delete on a COMPLETED run only (trap can't catch SIGKILL — then remove .gld-batch.sh
+# manually). An earlier version deleted unconditionally on EXIT, so a batch that died — crash,
+# Ctrl-C, a genuine failure — destroyed the very script needed to re-run it and to see what it
+# was going to do. A run that did not finish keeps its script.
 SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-cleanup() { rm -f "$SCRIPT_PATH"; echo "[batch] Removed batch script"; }
+COMPLETED=0
+cleanup() {
+  if [ "$COMPLETED" -eq 1 ]; then
+    rm -f "$SCRIPT_PATH"; echo "[batch] Removed batch script"
+  else
+    echo "[batch] Run did not complete — script kept at $SCRIPT_PATH"
+    echo "[batch] Re-run it to continue; each Issue resumes from its GitHub label."
+  fi
+}
 trap cleanup EXIT INT TERM
 
 BATCH_START=$(date +%s)
 SUCCEEDED=0; FAILED=0; PAUSED=0; INCOMPLETE=0; FAILED_ISSUES=(); INCOMPLETE_ISSUES=()
+# `set -u` + an EMPTY array: bash 3.2 (the macOS default /bin/bash) aborts an unguarded
+# "${ISSUES[@]}" expansion with `ISSUES[@]: unbound variable` — verified. Phase 1 can
+# legitimately select nothing (e.g. every open Issue is already guild:done), so exit cleanly
+# rather than dying with a confusing bash error. The guarded `${#ARR[@]}` counts and the
+# `"${QUEUE[@]:1}"` slice-to-empty below are both fine in 3.2 — also verified — so they need
+# no such guard.
+if [ ${#ISSUES[@]} -eq 0 ]; then
+  echo "[batch] No qualifying issues — nothing to do."
+  COMPLETED=1
+  exit 0
+fi
 QUEUE=("${ISSUES[@]}"); SEEN=""
 for n in "${ISSUES[@]}"; do SEEN="$SEEN #$n "; done
 TOTAL=${#ISSUES[@]}; PROCESSED=0
@@ -92,7 +114,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   ATTEMPT=0
   echo "[$PROCESSED/$TOTAL] Issue #$ISSUE → $LOG_DIR/issue-${ISSUE}-${TIMESTAMP}-attempt*.log"
 
-  RESUME_TRIES=0
+  RESUME_TRIES=0; RL_TRIES=0
   while true; do
     ATTEMPT=$((ATTEMPT + 1))
     # Each attempt gets its OWN file (not overwritten by a retry) — a rate-limit wait or a
@@ -171,25 +193,46 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
 
     # --- Rate-limit detection → wait until reset → auto-retry (the core) ---
     RESET_AT=$(jq -r 'select(.type == "rate_limit_event") | .rate_limit_info | select(.status != "allowed") | .resetsAt // empty' "$LOG" 2>/dev/null | tail -1)
-    # Fallback text scan: only for a genuinely rate-limited log the structured check above
-    # missed (a plain-text message, not a structured rate_limit_event). "rate.limit" (unescaped
-    # dot = any char) previously also matched the literal JSON field name "rate_limit_event"
-    # itself, which appears on EVERY log that had a routine status:"allowed" telemetry event —
-    # verified this false-matched a genuine unrelated crash, sending it into an uncapped
-    # rate-limit retry loop instead of being counted FAILED. "rate[ -]limit" (space/hyphen only)
-    # matches real human-readable rate-limit text without matching the underscored field name.
-    if [ -z "$RESET_AT" ] && grep -qi "rate[ -]limit\|overloaded\|too many requests" "$LOG" 2>/dev/null; then
-      RESET_AT=$(jq -r 'select(.type == "rate_limit_event") | .rate_limit_info | select(.status != "allowed") | .resetsAt // empty' "$LOG" 2>/dev/null | tail -1)
+    RATE_LIMITED=0
+    if [ -n "$RESET_AT" ]; then RATE_LIMITED=1; fi
+    # Fallback text scan: a genuinely rate-limited log that carried NO structured
+    # rate_limit_event (a plain-text message). ⚠ An earlier version re-ran the *identical* jq
+    # here, which by construction returns empty a second time — so the exact case this fallback
+    # exists for fell straight through to "genuine failure" and was counted FAILED. Mark it
+    # rate-limited and back off on a schedule instead, since no resetsAt is available.
+    # "rate[ -]limit" (space/hyphen only, not an unescaped dot) avoids matching the literal JSON
+    # field name "rate_limit_event", which appears on every log carrying a routine
+    # status:"allowed" telemetry event — that false match once sent a genuine unrelated crash
+    # into an uncapped retry loop.
+    if [ "$RATE_LIMITED" -eq 0 ] && grep -qi "rate[ -]limit\|overloaded\|too many requests" "$LOG" 2>/dev/null; then
+      RATE_LIMITED=1
     fi
-    if [ -n "$RESET_AT" ]; then
-      NOW=$(date +%s); WAIT=$((RESET_AT - NOW + 30))
-      if [ "$WAIT" -gt 0 ]; then
-        RESET_TIME=$(date -r "$RESET_AT" +%H:%M:%S 2>/dev/null || date -d "@$RESET_AT" +%H:%M:%S 2>/dev/null)
+    if [ "$RATE_LIMITED" -eq 1 ]; then
+      WAIT=""
+      # resetsAt is not guaranteed to be epoch seconds. An ISO-8601 value would make the
+      # arithmetic below fail (or silently evaluate to nonsense), so only trust an all-digit
+      # value and fall back to the backoff otherwise.
+      case "$RESET_AT" in
+        ''|*[!0-9]*) ;;
+        *) NOW=$(date +%s); WAIT=$((RESET_AT - NOW + 30)) ;;
+      esac
+      if [ -z "$WAIT" ] || [ "$WAIT" -le 0 ]; then
+        # No usable reset time (absent, non-numeric, or already past) → escalating capped
+        # backoff, so a persistent limit waits instead of spinning or being mislabelled FAILED.
+        RL_TRIES=$((RL_TRIES + 1))
+        if [ "$RL_TRIES" -gt 6 ]; then
+          echo "  ✗ Issue #$ISSUE still rate limited after $RL_TRIES waits — giving up this run"
+          FAILED=$((FAILED + 1)); FAILED_ISSUES+=("#$ISSUE (rate limited, no reset time)"); break
+        fi
+        WAIT=$((RL_TRIES * 300))
+        echo "  ⏳ Rate limited, no reset time reported. Backing off ${WAIT}s ($RL_TRIES/6)..."
+      else
+        RESET_TIME=$(date -r "$RESET_AT" +%H:%M:%S 2>/dev/null || date -d "@$RESET_AT" +%H:%M:%S 2>/dev/null || echo "?")
         echo "  ⏳ Rate limited. Waiting until ~$RESET_TIME ($((WAIT/60))m $((WAIT%60))s)..."
-        sleep "$WAIT"
-        echo "  🔄 Retrying Issue #$ISSUE (resume from GitHub state)..."
-        continue
       fi
+      sleep "$WAIT"
+      echo "  🔄 Retrying Issue #$ISSUE (resume from GitHub state)..."
+      continue
     fi
 
     # Genuine failure (not rate limit)
@@ -227,6 +270,8 @@ echo "  Time: $((BATCH_ELAPSED/60))m $((BATCH_ELAPSED%60))s  Cost: \$${TOTAL_COS
 echo "  Tokens: in $TOTAL_IN · out $TOTAL_OUT · cache read $TOTAL_CR · create $TOTAL_CC"
 echo "  Logs: $LOG_DIR/"
 echo "============================================================"
+# The run reached its own end — only now may the EXIT trap remove this script.
+COMPLETED=1
 ```
 
 ## Phase 4 — Run in background + report

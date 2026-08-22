@@ -114,17 +114,21 @@ Findings:
 
 **Goal**: fragile / bug-prone areas from **git history** — evidence-driven, so init does NOT have to ask the human "where are the risky areas?" (that question is un-answerable on the spot; the history knows). Feeds the roles' "주의(핫스팟·함정)" and the readiness audit.
 
-⚠ **This scan is analytical, not mechanical** — it must tally frequencies across many commits. Spawn it at **Sonnet** (not Haiku). `_bash_rules` forbids pipes, so the sub-agent reads the raw `git log` output and ranks it **by reading** — exact counts are NOT required; an approximate "which paths repeat most" is the goal. Keep windows modest so the output stays readable.
+⚠ **This scan is analytical, not mechanical** — it must tally frequencies across many commits. Spawn it at **Sonnet** (not Haiku). `_bash_rules` forbids pipes, so the sub-agent reads the raw `git log` output and ranks it **by reading** — exact counts are NOT required; an approximate "which paths repeat most" is the goal. Keep windows modest so the output stays readable. ⚠ The windows below (`-150`/`-200`) are **deliberately wider** than `scan_git.md`'s near-identically-worded steps (`-80`/`-120`): this is init-time *baseline* profiling (one deep read of the whole history's shape), that one is evolve-time *incremental* re-reading — the prose is shared, the numbers are not, so do not "sync" them.
 
 ⚠ **Generated-asset flood (robustness — observed on real data, MUST handle, same as `scan_git.md` Section 0)**: a single commit that regenerates assets (SVG/PNG icons, golden images, minified bundles, lockfiles) can dump **thousands** of file paths into `--name-only` output — enough to blow this sub-agent's context. Measured on word_app: an unscoped `-120` name-only log = **6675 lines**; the same log **scoped to the source dir = 719 lines**. **Detect the main source dir first** (Glob, not Bash — `lib/`, `src/`, `app/`, `packages/*/src`), then scope every `git log --name-only` call below to it with a pathspec (` -- lib`) — a pathspec is not a pipe, stays atomic-bash-safe, and is the **default**, not a fallback. Only run unscoped if no clear source dir exists (then keep the window small and ignore asset paths by eye).
 
 All read-only, each its own Bash call (`_bash_rules.md`; no `|`, `&&`, `$(...)`, redirections — read the tool output and rank by inspection):
 
-1. **Bug-fix concentration** — where `fix:` commits cluster (conventional-commit `fix:` = a past bug). ⚠ `--grep` matches anywhere in the full commit message (subject + body), not just the subject start — a bare `--grep=^fix` false-positives on any commit whose *body* happens to contain a line starting with "fix". Anchor to the conventional-commit prefix shape instead. One call (substitute the source-dir pathspec from above, e.g. `-- lib`):
+1. **Bug-fix concentration** — where `fix:` commits cluster (conventional-commit `fix:` = a past bug).
+
+   ⚠ **`--grep` cannot be restricted to the subject line — the `^` anchor does NOT fix body false-positives.** Git matches the pattern **line by line** against the whole commit message, so `^` anchors at the start of *every* line, body included (PCRE `\A` under `-P` behaves identically). **Verified on git 2.50.1**: a `feat:` commit whose body carries a line `fix: also handle X` still matches `--grep='^fix[(:]'`. Git offers **no** subject-only grep option, and the construction that would filter properly (`git log --pretty=%s` piped into a filter) is forbidden here (`_bash_rules.md`). The anchor is a **prefilter, not a filter**: it removes mid-line noise ("…a fixture…"), not a body line that itself starts with `fix:`.
+
+   **Account for the residue by printing the subject** and discarding, by eye, any block whose *subject* does not itself start with `fix:` / `fix(` — hence `%h %s` in the format rather than an empty one. One call (substitute the source-dir pathspec from above, e.g. `-- lib`):
    ```bash
-   git log --name-only --pretty=format: --grep='^fix[(:]' -i -150 -- lib
+   git log --name-only --pretty=format:'%h %s' --grep='^fix[(:]' -i -150 -- lib
    ```
-   Read the output and identify the **~8 most-frequently-appearing paths** (approximate ranking by eye is fine). Those = bug hotspots. Group nearby files into their area/layer.
+   Output is one `<sha> <subject>` header line per commit followed by its paths; skip a commit's whole path block when its subject fails the check. Read the surviving output and identify the **~8 most-frequently-appearing paths** (approximate ranking by eye is fine). Those = bug hotspots. Group nearby files into their area/layer.
 2. **Churn** — most-frequently-changed files overall (instability signal). One call (same source-dir pathspec):
    ```bash
    git log --name-only --pretty=format: -200 -- lib

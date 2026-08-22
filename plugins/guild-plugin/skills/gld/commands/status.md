@@ -18,7 +18,7 @@ Show the current progress of an Issue. **Read-only**: never posts comments, neve
    ```bash
    gh issue view $1 --json labels,title,comments
    ```
-3. Derive the current **stage** from the `guild:*` label (Section A table below). **Also check for `guild:needs-human`** — this label is *additive* on top of the stage label (an unattended run paused mid-stage, `_handoff.md` Section H), so an Issue can simultaneously show e.g. `guild:execute` AND `guild:needs-human`. If present, render it prominently (see the output example) — do not let it hide behind the plain stage line, since `batch`/`monitoring`/`sprint` all treat it as first-class and a human relying on `status` alone should see it too.
+3. Derive the current **stage** from the `guild:*` label (Section A table below). ⚠ `_handoff.md` Section A's table has **four kinds of row** and an Issue routinely carries more than one `guild:*` label, so pick the stage from the **stage/orchestration** labels only (`guild:analyze`/`design`/`execute`/`test`/`qa`/`done`/`guild:children`) and treat the rest as annotations rendered alongside it: `guild:child` (permanent identity marker — every child carries it *plus* its real stage label), `guild:needs-human` (additive pause), `guild:harness` (provenance — a readiness-gap Issue). Taking "the first `guild:*` label" instead would mis-read a child as having no stage and a not-yet-started harness Issue as `harness`-the-stage. **Also check for `guild:needs-human`** — this label is *additive* on top of the stage label (an unattended run paused mid-stage, `_handoff.md` Section H), so an Issue can simultaneously show e.g. `guild:execute` AND `guild:needs-human`. If present, render it prominently (see the output example) — do not let it hide behind the plain stage line, since `batch`/`monitoring`/`sprint` all treat it as first-class and a human relying on `status` alone should see it too.
 4. Scan comments for stage-output markers to build the checklist:
    - `<!-- guild:analyze:output -->`
    - `<!-- guild:design:output -->`
@@ -41,7 +41,10 @@ Show the current progress of an Issue. **Read-only**: never posts comments, neve
 | `guild:qa` | qa |
 | `guild:children` | orchestrating (split parent) |
 | `guild:done` | done |
+| `guild:harness` **and no stage label** | harness remediation — not started |
 | (none) | not started |
+
+`guild:harness` is **not a stage** — it marks a harness readiness gap that `init` P3.5 / `/gld audit` filed as a developable Issue. Alone (no `guild:analyze`…`guild:done` alongside), it means the gap has been filed but no spine stage has begun; render the stage as `harness remediation — not started` and say what to run next: **`/gld dev <n>` to start it** (dev's Phase 1 adds `guild:analyze` and it proceeds as a normal Issue) — the same routing `resume.md` gives it. Once a stage label exists, that stage label wins and `guild:harness` is just a `(harness)` annotation on the title line, exactly like `(child)` below. Without this row a filed remediation Issue renders as a bare "not started", indistinguishable from an Issue Guild has never seen.
 
 ### Checklist rules
 | Row | completed | in progress | else |
@@ -77,7 +80,7 @@ Stage: execute (paused here)
 ...
 ```
 
-If the Issue has a `guild:child` label, note it (`(child)`) and, if the body references a parent (`Parent Issue: #<n>`), show `Parent: #<n>`.
+If the Issue has a `guild:child` label, note it (`(child)`) and, if the body references a parent (`Parent Issue: #<n>`), show `Parent: #<n>`. Likewise annotate `(harness)` when `guild:harness` accompanies a stage label — neither annotation is the stage.
 
 ### Split parent (`guild:children`)
 If the Issue is a split parent, render a **children checklist** instead of the single-Issue stage checklist (`_handoff.md` Section I):

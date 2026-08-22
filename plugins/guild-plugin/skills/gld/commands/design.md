@@ -5,6 +5,7 @@
 `$1` = Issue number. Returns a Section D line.
 
 > **Bash**: `_bash_rules.md`. State/handoff: `_handoff.md`.
+> **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K); sub-agent prompts carry that instruction.
 
 ---
 
@@ -15,9 +16,16 @@ Validate `$1` is an Issue (not a PR). **Read current labels first** (its own Bas
 ```bash
 gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'
 ```
+**Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so Step 4's transition would destroy the link `dev.md` Phase 2b uses to drive the children:
+```
+>>> RESULT <<<
+FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
+```
+(`guild:child` is **not** this case — see the next bullet; a child legitimately carries two labels.)
+
 - Empty (no `guild:*` label — fresh, direct invocation) → add `guild:design`: `gh issue edit $1 --add-label "guild:design"`.
 - Contains `guild:child` → **note this as `IS_LEAF = true` and carry it to Step 2 — do NOT refuse here.** ⚠ A `guild:child` label is **permanent** on a child Issue (nothing ever removes it — it's an identity marker, not a stage label) and every child of every split carries it, so refusing here unconditionally (an earlier version of this fix did exactly that) would make `NEEDS_HUMAN: child #$1 cannot be re-split` fire on **every single child's own ordinary design stage**, permanently breaking the multi-PR-split feature — `_handoff.md` Section I's actual invariant is conditional ("**if** a `guild:child` Issue's design **flags a further split**, that is a scoping error"), not "a child may never pass design at all." The refusal belongs in Step 2, gated on whether *this issue's own* tech-lead actually proposes another split — see below. A leaf child with no further split proposed goes through the single-PR path exactly like any other Issue.
-- Non-empty otherwise (any other `guild:*` label, including `guild:design` itself or `guild:children`) → do **not** add `guild:design` on top (would dual-label).
+- Non-empty otherwise (any other `guild:*` label, including `guild:design` itself) → do **not** add `guild:design` on top (would dual-label).
 
 **Then ALWAYS run the Section I discovery query** (its own Bash call — cheap and read-only) to check whether children already exist for `$1`:
 ```bash
@@ -37,12 +45,12 @@ As the leader, spawn BOTH role sub-agents in a single message (two Agent tool ca
 **Tech Lead** (skeleton first):
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `tech-lead design #$1`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/tech-lead.md`. You are designing Issue #$1 for this repo. Read the analyze output (`<!-- guild:analyze:output -->` on the Issue) and `docs/standards/`. Produce the **skeleton**: module boundaries, data flow, extension seams, file structure. Write it as a FILE to `docs/specs/$1/skeleton.md` (do not paste it back). Decide whether this needs a **multi-PR split** (child issues) and note it. **If Step 0's discovery query found existing children**: <for each, in dependency order: its issue number, title, and body text — the body already states its scope + AC per the creation format below, there is no separate "scope" field to look up>. These slices are ALREADY COMMITTED (real GitHub Issues exist for them) — do NOT redecide the split from scratch or reorder/resize/rename these existing slices. Treat them as fixed and decide ONLY the remaining slice(s) needed to complete the same split, in a way that's consistent with what already exists (same dependency ordering, no scope overlap/gap with the committed ones). If on reflection the already-committed slices don't make sense to you, that's a real design conflict — return `BLOCKED: existing split slices #<n> conflict with — <reason>` instead of silently re-splitting differently. Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C (`DONE: skeleton at docs/specs/$1/skeleton.md — <one-line>`), or `BLOCKED:`/`NEEDS_CONTEXT:`/`FAIL:`.
+  > Adopt the persona in `.claude/agents/tech-lead.md`. You are designing Issue #$1 for this repo. Read the analyze output (`<!-- guild:analyze:output -->` on the Issue) and `docs/standards/`. Produce the **skeleton**: module boundaries, data flow, extension seams, file structure. Write it as a FILE to `docs/specs/$1/skeleton.md` (do not paste it back). Decide whether this needs a **multi-PR split** (child issues) and note it. **If Step 0's discovery query found existing children**: <for each, in dependency order: its issue number, title, and body text — the body already states its scope + AC per the creation format below, there is no separate "scope" field to look up>. These slices are ALREADY COMMITTED (real GitHub Issues exist for them) — do NOT redecide the split from scratch or reorder/resize/rename these existing slices. Treat them as fixed and decide ONLY the remaining slice(s) needed to complete the same split, in a way that's consistent with what already exists (same dependency ordering, no scope overlap/gap with the committed ones). If on reflection the already-committed slices don't make sense to you, that's a real design conflict — return `BLOCKED: existing split slices #<n> conflict with — <reason>` instead of silently re-splitting differently. Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C (`DONE: skeleton at docs/specs/$1/skeleton.md — <one-line>`), or `BLOCKED:`/`NEEDS_CONTEXT:`/`FAIL:`. Write output in `config.language`.
 
 **Tester** (test cases from AC only — do NOT read the skeleton):
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `tester cases #$1`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/tester.md`. Read ONLY the acceptance criteria from the analyze output (`<!-- guild:analyze:output -->`) — do NOT read the tech-lead's skeleton (bias-free test design). Write test cases (normal + edge + failure paths) as a FILE to `docs/specs/$1/test-cases.md`. Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C.
+  > Adopt the persona in `.claude/agents/tester.md`. Read ONLY the acceptance criteria from the analyze output (`<!-- guild:analyze:output -->`) — do NOT read the tech-lead's skeleton (bias-free test design). Write test cases (normal + edge + failure paths) as a FILE to `docs/specs/$1/test-cases.md`. Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C. Write output in `config.language`.
 
 ## Step 1.5 — Conditional participants (leader assembles)
 As the leader, decide which **participation specialists** this design needs, using the assembly rules in `.claude/agents/leader.md` ("팀 조립 규칙") and `_handoff.md` Section G. Match the change surface (Issue body + AC + hotspots) against triggers:
@@ -57,7 +65,7 @@ As the leader, decide which **participation specialists** this design needs, usi
 Spawn only the matched roles (none matched → skip this step entirely; that is the common case and costs nothing). Spawn them **in the same parallel message as tech-lead+tester when possible** (all design-stage work is independent). For each matched role:
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `<role> design #$1`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/<role>.md`. Contribute to the **design** of Issue #$1 for this repo. Read the analyze output (`<!-- guild:analyze:output -->`) and `docs/standards/`. Do NOT read the tech-lead's skeleton (design in parallel, from AC). Write your design contribution as a FILE to `docs/specs/$1/<role>.md` (e.g. `ux.md` for designer). Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C.
+  > Adopt the persona in `.claude/agents/<role>.md`. Contribute to the **design** of Issue #$1 for this repo. Read the analyze output (`<!-- guild:analyze:output -->`) and `docs/standards/`. Do NOT read the tech-lead's skeleton (design in parallel, from AC). Write your design contribution as a FILE to `docs/specs/$1/<role>.md` (e.g. `ux.md` for designer). Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C. Write output in `config.language`.
 
 (The designer writes `docs/specs/$1/ux.md` per its template. If a specialist reports the area is not applicable to this change, it returns `DONE` with a one-line "해당 없음" note and no file — that is fine.)
 

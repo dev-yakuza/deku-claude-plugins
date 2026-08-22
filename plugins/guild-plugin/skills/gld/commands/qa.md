@@ -7,13 +7,23 @@
 > **Test vs QA (distinct)**: `test` = tester, automated correctness proof (white-box, AC-driven, verify gate). **QA** = qa role, holistic quality (black-box, user flows, exploratory, E2E, usability). QA builds on test's coverage; it does not repeat it.
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/handoff: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
+> **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K); sub-agent prompts carry that instruction.
 
 ---
 
 ## Step 0 — Preflight
 As the leader, follow `_preflight.md` **Medium tier**. Load: `<!-- guild:test:output -->` (verify result + AC coverage + the tester's risk-based E2E judgment), the PR, design/UX outputs (`docs/specs/$1/`), and the hotspot list. Load `docs/standards/quality-bar.md` + `verification.md`.
 
-Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`. Empty → add `guild:qa`. Non-empty → do not add on top (Step 3's transition removes whatever **stage** label was actually found here, not necessarily `guild:qa` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A).
+Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
+
+**Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so letting this stage run would transition the parent onto a stage label and destroy the link `dev.md` Phase 2b uses to drive its children:
+```
+>>> RESULT <<<
+FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
+```
+(`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
+
+Empty → add `guild:qa`. Non-empty → do not add on top (Step 3's transition removes whatever **stage** label was actually found here, not necessarily `guild:qa` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A).
 
 ## Step 1 — Spawn qa (risk-based quality plan + execution)
 Spawn the qa sub-agent:
@@ -25,13 +35,13 @@ Spawn the qa sub-agent:
   > 3. **Prefer automating over deferring (mandatory check before flagging anything human-QA)**: for each check the plan calls for, first ask "can the project's OWN test framework — unit/widget/component level, not just `commands.e2e` — prove this?" Structural/behavioral claims (accessibility-tree grouping, focus/tab order, keyboard shortcuts, state-transition guards, error-message presence) are usually provable this way even when a full E2E run isn't warranted or available. If yes, **recommend the concrete test to write** (which API, what it asserts) instead of deferring it — this feeds the loop-back to test/execute, not the human checklist. Only what's left after this check proceeds to step 4.
   > 4. **Real-dependency one-off smoke (attended only) — a second escape hatch before deferring**: a check may need a real external dependency (a binary/API/service — install+auth+cost, so it can't go in `commands.e2e` or a repeatable CI gate) that *this execution environment already has working credentials/access to*. Don't default straight to human-QA for that. In an **attended session only** (never under `GLD_UNATTENDED` — a batch/unattended run always falls through to step 5 instead), and only if side effects can be safely isolated — ephemeral/temp state instead of the project's real persisted data, a scratch artifact that stays uncommitted and is deleted right after, no new ad hoc test entry point (respect whatever single-entry-point/runner convention the repo's own verification standard already has), and — if the dependency happens to be the same tool/runtime this agent itself is running under — spawned as a separate process/session so it can't collide with the agent's own state — run it yourself once and capture the raw evidence in the QA output (`_handoff.md` Section E; it's not reproducible later, so this is the only record). One successful real call per checklist item is enough — don't repeat it because the result is inconvenient (retries needed only to fix a broken harness, before any real call has succeeded, don't count against this). Any defect this smoke surfaces is a QA defect like any other (loop back / `NEEDS_HUMAN`) — never softened because it came from a throwaway harness. Isolation not achievable, or no working credentials → this bullet doesn't apply, fall through to step 5.
   > 5. **Flag human QA**: anything left after steps 3–4 that M1 still can't auto-run → state clearly WHAT to check and WHERE, for the human. Justified skip vs recommended-human-QA — never a blanket silent skip.
-  > Return one `>>> RESULT <<<` line per `_handoff.md` Section C, with a QA summary (include any step-3 test recommendations and step-4 smoke evidence even when the issue still ends up looping back — they should not be silently dropped).
+  > Return one `>>> RESULT <<<` line per `_handoff.md` Section C, with a QA summary (include any step-3 test recommendations and step-4 smoke evidence even when the issue still ends up looping back — they should not be silently dropped). Write output in `config.language`.
 
 ## Step 1.5 — UI/UX review gate (conditional — designer)
 As the leader, if this change had a **UI/UX surface** (a `docs/specs/$1/ux.md` exists, or the designer participated in design, or the diff touches UI), convene the **designer** to run the **UI/UX review gate**: the built UI vs the design intent (`ux.md`) — interaction, visual, usability, accessibility. This is a **gate, not self-review**: the designer authored `ux.md` at design time, but here reviews the **built implementation** against it — a different artifact than the one they wrote, produced by the developer, which is what keeps this from being self-review (contrast: it would be self-review if the designer were re-checking `ux.md` itself). No UI surface → skip this step.
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `designer ui/ux review #$1`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/designer.md`. Run the **UI/UX review gate** for Issue #$1 on the current branch. Compare the built UI against the design intent in `docs/specs/$1/ux.md` (if present) and the AC — interaction, visual, usability, accessibility (contrast, touch targets, states). You review the built result, not design anew. Return one `>>> RESULT <<<` line per `_handoff.md` Section C — `DONE`, `DONE_WITH_CONCERNS: <one-line>`, or `BLOCKED: <a11y/usability defect>`.
+  > Adopt the persona in `.claude/agents/designer.md`. Run the **UI/UX review gate** for Issue #$1 on the current branch. Compare the built UI against the design intent in `docs/specs/$1/ux.md` (if present) and the AC — interaction, visual, usability, accessibility (contrast, touch targets, states). You review the built result, not design anew. Return one `>>> RESULT <<<` line per `_handoff.md` Section C — `DONE`, `DONE_WITH_CONCERNS: <one-line>`, or `BLOCKED: <a11y/usability defect>`. Write output in `config.language`.
 
 Fold the verdict into Step 2: a designer `BLOCKED` (real a11y/usability defect) blocks `done` the same as a QA defect.
 
@@ -55,11 +65,22 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
   - ⚠ **A "권장(recommended)" or "미검증(환경 제약)" framing does NOT downgrade it to a skippable caveat** — if a human needs to do it and the agent couldn't, it IS a checklist item.
 - **What stays out** — what an automated test already proves (`test` covered it → redundant), what the qa agent already ran with evidence (**including a bullet-4 real-dependency smoke** — a successful one-off run with raw evidence closes the item, it does not become a checklist entry just because it wasn't repeatable/CI-gated), **and what Step 1's automatability check (bullet 3) identified as test-writable even if the test doesn't exist yet** — that's a coverage gap for the loop-back, not a human-QA item. Don't let "nobody wrote the test" get relabeled as "a human must check this."
 - **Skip the section ONLY if the human-QA item count is literally zero** (everything was automated/agent-doable). "화면이 없어 exploratory 불요" does not by itself make it zero — a platform/real-device item still counts.
-- Find the open PR (`gh pr list --repo <owner>/<repo> --search "Closes #$1" --state open --json number`). None open → skip (the human-QA plan still lives in the qa output).
-- PATCH the body via the temp-file **marker** pattern (`_handoff.md` Section B, applied to the PR body): the section is bounded by `<!-- guild:manual-qa -->` … `<!-- /guild:manual-qa -->` and is **updated in place** on re-run (idempotent — never duplicated). Preserve everything outside the markers (INV4). Body via temp file:
+- **Find the open PR — resolve it broadly, the same way `review.md` Step 0 does.** A literal `"Closes #$1"` search is too narrow: a PR may use `Fixes`/`Fixed`/`Resolves`/`Resolved`/`Close`/`Closed` (all of GitHub's recognized closing keywords, case-insensitive), or link the Issue purely through the PR sidebar's "Development" feature with no closing keyword in the body text at all — so a PR that `/gld review $1` finds, this *mandatory* step would silently miss. Search broadly instead:
   ```bash
-  gh pr edit <PR_NUM> --repo <owner>/<repo> --body-file <temp>
+  gh pr list --repo <owner>/<repo> --search "#$1 in:body" --state open --json number,url,body
   ```
+  Then, from the results, keep only PRs whose body actually contains `$1` as a closing/fixing reference (`\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s*:?\s*#$1\b`, case-insensitive) **or** where the body/title otherwise makes the link obvious.
+- **Nothing found → do NOT silently skip a mandatory step.** Say so in the qa output: the checklist items still get reported in the `<!-- guild:qa:output -->` Issue comment, plus one line stating the PR could not be located (it may exist but be sidebar-linked, which `gh pr list --search` cannot see) so the human can paste them into the PR themselves.
+- PATCH the body via the temp-file **marker** pattern (`_handoff.md` Section B, applied to the PR body): the section is bounded by `<!-- guild:manual-qa -->` … `<!-- /guild:manual-qa -->` and is **updated in place** on re-run (idempotent — never duplicated). Preserve everything outside the markers (INV4). ⚠ **`gh pr edit --body-file` REPLACES the entire PR body — it does not patch it**, which is why step 1 below is mandatory and not optional. In this order:
+  1. **Read the current body first** (its own Bash call):
+     ```bash
+     gh pr view <PR_NUM> --repo <owner>/<repo> --json body --jq .body
+     ```
+  2. **Render the FULL new body to a temp file** (Write tool): the body fetched in step 1, verbatim, with the `<!-- guild:manual-qa -->` … `<!-- /guild:manual-qa -->` block replaced in place — or, if those markers are absent, the fetched body verbatim with the block appended at the end. Everything outside the markers is carried over unchanged (INV4).
+  3. **Write it back**:
+     ```bash
+     gh pr edit <PR_NUM> --repo <owner>/<repo> --body-file <temp>
+     ```
 - Format — a checkbox list, each item = **WHAT to verify + WHERE/HOW**:
   ```markdown
   <!-- guild:manual-qa -->

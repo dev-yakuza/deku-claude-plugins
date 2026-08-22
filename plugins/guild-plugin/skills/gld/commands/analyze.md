@@ -5,6 +5,7 @@
 `$1` = Issue number. Returns a Section D line (`_handoff.md`).
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/handoff: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
+> **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K); sub-agent prompts carry that instruction.
 
 ---
 
@@ -21,6 +22,13 @@ URL contains `/pull/` → `FAIL: #$1 is a Pull Request, not an Issue`.
 ```bash
 gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'
 ```
+**Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so the "non-empty → proceed anyway" branch below must never swallow it: Step 5's transition would remove `guild:children` and destroy the link `dev.md` Phase 2b uses to drive the children.
+```
+>>> RESULT <<<
+FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
+```
+(`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
+
 Empty result (no `guild:*` label yet — a fresh Issue) → add `guild:analyze`:
 ```bash
 gh issue edit $1 --add-label "guild:analyze"
@@ -59,7 +67,7 @@ Do **not** capture when the human accepts your recommendation (agreement ≠ cor
 As the leader, decide whether this Issue needs a **product-owner** for value-alignment / AC ownership / scope calls (assembly rules in `.claude/agents/leader.md`; model in `_handoff.md` Section G). Convene it when requirements are non-trivial, value/priority is contested, or AC needs a firm owner — skip for a small unambiguous change (you own the AC yourself). If convened:
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `product-owner #$1`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/product-owner.md`. For Issue #$1, align the requirements to user value against `docs/standards/charter.md`, own/sharpen the **acceptance criteria** (make them verifiable), set priorities, and state non-goals. Return one `>>> RESULT <<<` line per `_handoff.md` Section C; surface AC ambiguity as `DONE_WITH_CONCERNS`.
+  > Adopt the persona in `.claude/agents/product-owner.md`. For Issue #$1, align the requirements to user value against `docs/standards/charter.md`, own/sharpen the **acceptance criteria** (make them verifiable), set priorities, and state non-goals. Return one `>>> RESULT <<<` line per `_handoff.md` Section C; surface AC ambiguity as `DONE_WITH_CONCERNS`. Write output in `config.language`.
 
 Fold the PO's aligned AC/priorities into Step 4's output; a `DONE_WITH_CONCERNS` AC ambiguity feeds the discuss gate (surface to the human).
 

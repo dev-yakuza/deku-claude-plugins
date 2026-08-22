@@ -25,7 +25,7 @@ Four durable git-derived signal classes (`_signals.md` Section A):
 
 ## Procedure (each step its own read-only Bash call)
 
-Default window ≈ last 80–120 commits (keep it modest); the caller may pass a narrower window. All calls read the raw output; **rank by reading** (no pipes).
+Default window ≈ last 80–120 commits (keep it modest); the caller may pass a narrower window. All calls read the raw output; **rank by reading** (no pipes). ⚠ These windows (`-80`/`-120`) are **deliberately narrower** than `scan_repo.md` Section 6's near-identically-worded steps (`-150`/`-200`): that one is init-time *baseline* profiling, this one is evolve-time *incremental* re-reading — the prose is shared, the numbers are not, so do not "sync" them.
 
 ⚠ **Generated-asset flood (robustness — observed on real data, MUST handle)**: a single commit that regenerates assets (SVG/PNG icons, golden images, minified bundles, lockfiles) can dump **thousands** of file paths into `--name-only` output — enough to blow this sub-agent's context. Measured on word_app: an unscoped `-120` name-only log = **6675 lines** (mostly SVG assets from one regen commit); the same log **scoped to the source dir = 719 lines**. So:
 
@@ -33,11 +33,15 @@ Default window ≈ last 80–120 commits (keep it modest); the caller may pass a
 
 Generated-asset paths (`assets/`, `*.svg`, `*.png`, golden dirs, `*.g.dart`/`*.freezed.dart`, lockfiles) are churn-*noise*, not bug hotspots — the kill-gate explicitly distinguished this. Never let them dominate the ranking.
 
-1. **Fix concentration** — where `fix:` commits cluster (conventional `fix:` = a past bug). Scoped to the source dir from Step 0 (substitute the literal, e.g. `lib`). ⚠ `--grep` matches anywhere in the full commit message (subject + body), not just the subject start — a bare `--grep=^fix` false-positives on any commit whose *body* happens to contain a line starting with "fix" (e.g. a body line "Fixture data…" or "fixing the typo…" on an otherwise unrelated `feat:`/`docs:` commit). Anchor to the conventional-commit prefix shape (`fix:` or `fix(scope):`) instead, which the body rarely reproduces by coincidence:
+1. **Fix concentration** — where `fix:` commits cluster (conventional `fix:` = a past bug). Scoped to the source dir from Step 0 (substitute the literal, e.g. `lib`).
+
+   ⚠ **`--grep` cannot be restricted to the subject line — the `^` anchor does NOT fix body false-positives.** Git matches the pattern **line by line** against the whole commit message, so `^` anchors at the start of *every* line, body included (PCRE `\A` under `-P` behaves identically — git never hands the regex the message as one string). **Verified on git 2.50.1**: a `feat:` commit whose body carries a line `fix: also handle X` still matches `--grep='^fix[(:]'`. Git offers **no** subject-only grep option, and the one construction that would filter properly (`git log --pretty=%s` piped into a filter) is forbidden here (`_bash_rules.md`). So treat the anchor as a **prefilter, not a filter**: `^fix[(:]` still removes mid-line noise ("…a fixture…", "…while fixing the typo…"), which is the bulk of it, but a body line that itself starts with `fix:`/`fix(` still gets through.
+
+   **Account for the residue by printing the subject** and discarding, by eye, any block whose *subject* does not itself start with `fix:` / `fix(` — that is why the format below carries `%h %s` instead of being empty:
    ```bash
-   git log --name-only --pretty=format: --grep='^fix[(:]' -i -80 -- lib
+   git log --name-only --pretty=format:'%h %s' --grep='^fix[(:]' -i -80 -- lib
    ```
-   Identify the ~8 most-frequently-appearing source paths (approximate ranking by eye). Group nearby files into their area/layer.
+   Output is one `<sha> <subject>` header line per commit followed by its paths; skip a commit's whole path block when its subject fails the check. Then identify the ~8 most-frequently-appearing source paths among the surviving blocks (approximate ranking by eye). Group nearby files into their area/layer.
 
 2. **Churn + co-change** — most-frequently-changed files, and files that recur *together* (same source-dir pathspec):
    ```bash
@@ -52,11 +56,11 @@ Generated-asset paths (`assets/`, `*.svg`, `*.png`, golden dirs, `*.g.dart`/`*.f
    ```
    Determine the prevailing convention (prefix scheme, language, em-dash, version-bump format) and roughly what fraction of recent subjects follow it. List a few concrete violators if the convention is otherwise near-universal (a small violation set = a `conventions.md` candidate; near-100% coverage = no signal).
 
-4. **Reverts** — explicit reverts (a change that was undone = a correction). ⚠ A bare case-insensitive `--grep=revert` false-positives heavily — `--grep` searches the full message including the body, so any commit whose body merely *discusses* revert-related work (e.g. this very plugin's own commits documenting a revert feature) matches even though it isn't itself a revert. Anchor to `git revert`'s actual auto-generated subject prefix instead (`Revert "<original subject>"`, always this exact capitalization):
+4. **Reverts** — explicit reverts (a change that was undone = a correction). A bare case-insensitive `--grep=revert` false-positives heavily, so anchor to `git revert`'s auto-generated subject prefix (`Revert "<original subject>"`, always this exact capitalization) — but ⚠ **the same line-by-line caveat as step 1 applies**: `^Revert ` still matches a commit whose *body* has a line starting with `Revert ` (e.g. this very plugin's own commits documenting a revert feature). **Verified on git 2.50.1.** It does drop the mid-line mentions ("…we should revert…"), which is most of the noise:
    ```bash
    git log --grep='^Revert ' --oneline -100
    ```
-   Report each revert's short SHA + subject. If a `fix:` commit lands on the *same paths* immediately after another `fix:` (fix-on-fix), note it as a weaker revert-like signal.
+   `--oneline` already prints each hit's subject — **keep only the hits whose subject itself begins with `Revert "`** and discard the rest as body-line matches. Report each surviving revert's short SHA + subject. If a `fix:` commit lands on the *same paths* immediately after another `fix:` (fix-on-fix), note it as a weaker revert-like signal.
 
 Cross-reference co-change/hotspot with the repo's layers to describe signals by **area** (e.g. "sync/ 계층", "i18n triad") not just single files.
 

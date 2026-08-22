@@ -12,7 +12,16 @@
 ## Step 0 — Preflight
 As the leader, follow `_preflight.md` **Heavy tier** (incl. ⑥ knowledge + target-dir survey). Load the design output — for a refactor the design **is the target structure** (design = 목표 구조). Load `docs/specs/$1/skeleton.md` (the target shape). Missing → `NEEDS_CONTEXT: design/target-structure not found for #$1`.
 
-Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`. Empty → add `guild:execute`. Non-empty → do not add on top (Step 6's transition removes whatever **stage** label was actually found here, not necessarily `guild:execute` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A). Create/switch to a refactor branch (e.g. `refactor/#$1-<slug>`). **Resume-safe**: existing branch → build a partial-work summary (`git log <base>..HEAD --oneline` + one test run confirming all existing tests are still green on the partial work) and pass it into the developer prompt (Step 1) → continue the transform, don't restart. Fresh branch → no summary.
+Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
+
+**Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so Step 6's transition would destroy the link `dev.md` Phase 2b uses to drive the children:
+```
+>>> RESULT <<<
+FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
+```
+(`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
+
+Empty → add `guild:execute`. Non-empty → do not add on top (Step 6's transition removes whatever **stage** label was actually found here, not necessarily `guild:execute` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A). Create/switch to a refactor branch (e.g. `refactor/#$1-<slug>`). **Resume-safe**: existing branch → build a partial-work summary (`git log <base>..HEAD --oneline` + one test run confirming all existing tests are still green on the partial work) and pass it into the developer prompt (Step 1) → continue the transform, don't restart. Fresh branch → no summary.
 
 ## Step 1 — Spawn developer (behavior-preserving transform)
 Spawn the developer (`description: developer refactor #$1`):
@@ -27,7 +36,7 @@ Post the raw runner output under `<!-- guild:test-evidence:step-1 -->` (temp-fil
 
 ## Step 3 — Tech-lead conformance check
 Spawn the tech-lead (`description: tech-lead conformance #$1`):
-> Adopt `.claude/agents/tech-lead.md`. Review the refactor on the current branch against the target structure (`docs/specs/$1/skeleton.md`) + `docs/standards/architecture.md`. Check TWO things: (1) is the **structure genuinely improved** toward the target (not churn)? (2) is **behavior preserved** — no functional change, and **no test weakened/removed** except a justified implementation-detail test? You are reviewing the DEVELOPER's output. Return one `>>> RESULT <<<`: `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <non-conformance or behavior/verification change>`.
+> Adopt `.claude/agents/tech-lead.md`. Review the refactor on the current branch against the target structure (`docs/specs/$1/skeleton.md`) + `docs/standards/architecture.md`. Check TWO things: (1) is the **structure genuinely improved** toward the target (not churn)? (2) is **behavior preserved** — no functional change, and **no test weakened/removed** except a justified implementation-detail test? You are reviewing the DEVELOPER's output. Return one `>>> RESULT <<<`: `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <non-conformance or behavior/verification change>`. Write output in `config.language`.
 
 ## Step 3.5 — Conditional specialists + gate reviews (leader)
 Same as `implement.md` Step 3.5 (`_handoff.md` Section G). A refactor touching a hot path → performance; schema → dba; etc. A gate `BLOCKED` blocks advancement.

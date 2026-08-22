@@ -12,7 +12,16 @@
 ## Step 0 — Preflight
 As the leader, follow `_preflight.md` **Heavy tier** (incl. ⑥ knowledge retrieval — a hotspot fact often names the culprit). Load the design output (`<!-- guild:design:output -->`) — for a bug the design is **light**: a **reproduction + root-cause hypothesis** rather than a full skeleton. Load `docs/specs/$1/` (repro steps, hypothesis, test cases) if present. Missing analyze/design output → `NEEDS_CONTEXT: analyze/design not found for #$1`.
 
-Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`. Empty → add `guild:execute`. Non-empty → do not add on top (Step 6's transition removes whatever **stage** label was actually found here, not necessarily `guild:execute` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A). Create/switch to a fix branch (repo convention, e.g. `fix/#$1-<slug>`). **Resume-safe**: existing branch → build a partial-work summary (`git log <base>..HEAD --oneline` + one test run: does the repro exist yet? is it red or already green?) and pass it into the developer prompt (Step 1) → continue, don't restart. Fresh branch → no summary.
+Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
+
+**Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so Step 6's transition would destroy the link `dev.md` Phase 2b uses to drive the children:
+```
+>>> RESULT <<<
+FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
+```
+(`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
+
+Empty → add `guild:execute`. Non-empty → do not add on top (Step 6's transition removes whatever **stage** label was actually found here, not necessarily `guild:execute` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A). Create/switch to a fix branch (repo convention, e.g. `fix/#$1-<slug>`). **Resume-safe**: existing branch → build a partial-work summary (`git log <base>..HEAD --oneline` + one test run: does the repro exist yet? is it red or already green?) and pass it into the developer prompt (Step 1) → continue, don't restart. Fresh branch → no summary.
 
 ## Step 1 — Spawn developer (reproduce → root-cause → fix)
 Spawn the developer sub-agent (`subagent_type: general-purpose`, `model: sonnet`, `description: developer debug #$1`):
@@ -27,7 +36,7 @@ When the developer reports green, post the raw runner output under `<!-- guild:t
 
 ## Step 3 — Tech-lead conformance check
 Spawn the tech-lead (`description: tech-lead conformance #$1`):
-> Adopt `.claude/agents/tech-lead.md`. Review the fix on the current branch. Check: is the **root cause** addressed (not a symptom)? Does the **regression test genuinely capture the bug** (would it fail without the fix)? Blast radius — does the fix touch shared code beyond the reported scope safely? You are reviewing the DEVELOPER's output. Return one `>>> RESULT <<<`: `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <non-conformance>`.
+> Adopt `.claude/agents/tech-lead.md`. Review the fix on the current branch. Check: is the **root cause** addressed (not a symptom)? Does the **regression test genuinely capture the bug** (would it fail without the fix)? Blast radius — does the fix touch shared code beyond the reported scope safely? You are reviewing the DEVELOPER's output. Return one `>>> RESULT <<<`: `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <non-conformance>`. Write output in `config.language`.
 
 ## Step 3.5 — Conditional specialists + gate reviews (leader)
 Same as `implement.md` Step 3.5 — convene the execute-stage specialists / gate reviews the diff surface warrants (security on auth/exposure, dba on schema, etc.; `_handoff.md` Section G). Run in parallel; a gate `BLOCKED` blocks advancement.
