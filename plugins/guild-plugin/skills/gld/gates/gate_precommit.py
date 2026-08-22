@@ -617,12 +617,54 @@ def main_guard_config():
     return 0
 
 
+# --- mode 4/5: reusable secret scan (the patterns as a CLI) -----------------------------
+# `SECRET_PATH_RE`/`INLINE_SECRET_RES` are the repo's single definition of "what counts as a
+# secret", but until now they were reachable only from a hook payload — main() parsed stdin and
+# self-filtered to `git commit`. So every other consumer that needed the same judgement
+# hand-copied the patterns into its own grep: `audit_readiness.md` re-implemented three of them
+# inline for its hygiene check, and `contribute.md` was told to "reuse INLINE_SECRET_RES" from a
+# script that offered no way to do so. Two copies of a security-critical pattern set, free to
+# drift, with the drift invisible until something leaks. These two modes close that by exposing
+# the same objects the commit gate uses.
+#
+#   --scan-paths   stdin = newline-separated paths (e.g. from `git ls-files`)
+#                  → one `SECRET-PATH <path>` line per sensitive name, allowlist applied
+#   --scan-text    stdin = arbitrary text (e.g. a draft contribution body)
+#                  → one `SECRET-TEXT <line-no>` per line containing an inline secret
+#
+# Exit 1 if anything was found, 0 if clean, so a caller can branch on the status alone.
+# Neither mode ever prints the matched value — only a path or a line number (INV5).
+def main_scan_paths():
+    hits = 0
+    for raw in sys.stdin:
+        name = raw.strip().replace("\\", "/")
+        if not name or SECRET_PATH_ALLOW_RE.search(name):
+            continue
+        if SECRET_PATH_RE.search(name):
+            print(f"SECRET-PATH {name}")
+            hits += 1
+    return 1 if hits else 0
+
+
+def main_scan_text():
+    hits = 0
+    for i, line in enumerate(sys.stdin, 1):
+        if any(rx.search(line) for rx in INLINE_SECRET_RES):
+            print(f"SECRET-TEXT {i}")
+            hits += 1
+    return 1 if hits else 0
+
+
 def main():
     args = sys.argv[1:]
     if "--git-hook" in args:
         return main_git_hook()
     if "--guard-config" in args:
         return main_guard_config()
+    if "--scan-paths" in args:
+        return main_scan_paths()
+    if "--scan-text" in args:
+        return main_scan_text()
     return main_pretooluse()
 
 

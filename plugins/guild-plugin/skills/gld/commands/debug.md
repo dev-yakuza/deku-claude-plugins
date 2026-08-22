@@ -9,60 +9,42 @@
 
 ---
 
-## Step 0 — Preflight
-As the leader, follow `_preflight.md` **Heavy tier** (incl. ⑥ knowledge retrieval — a hotspot fact often names the culprit). Load the design output (`<!-- guild:design:output -->`) — for a bug the design is **light**: a **reproduction + root-cause hypothesis** rather than a full skeleton. Load `docs/specs/$1/` (repro steps, hypothesis, test cases) if present. Missing analyze/design output → `NEEDS_CONTEXT: analyze/design not found for #$1`.
+## How to run this stage
 
-Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
+Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the label read and the **`guild:children`** split-parent guard) · Step 1 spawn developer · Step 2 verify evidence · Step 3 tech-lead conformance · Step 3.5 conditional specialists/gates (security on auth/exposure, dba on schema, etc.; `_handoff.md` Section G — a gate `BLOCKED` blocks advancement) · Step 4 arbitrate · Step 5 PR · Step 6 transition + return — filling its Section A slots with the values below. Nothing about the spine changes for this variant.
 
-**Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so Step 6's transition would destroy the link `dev.md` Phase 2b uses to drive the children:
-```
->>> RESULT <<<
-FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
-```
-(`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
+## Slot values (`type:bug`)
 
-Empty → add `guild:execute`. Non-empty → do not add on top (Step 6's transition removes whatever **stage** label was actually found here, not necessarily `guild:execute` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A). Create/switch to a fix branch (repo convention, e.g. `fix/#$1-<slug>`). **Resume-safe**: existing branch → build a partial-work summary (`git log <base>..HEAD --oneline` + one test run: does the repro exist yet? is it red or already green?) and pass it into the developer prompt (Step 1) → continue, don't restart. Fresh branch → no summary.
+**DESIGN INPUT** — load the design output (`<!-- guild:design:output -->`) — for a bug the design is **light**: a **reproduction + root-cause hypothesis** rather than a full skeleton. Load `docs/specs/$1/` (repro steps, hypothesis, test cases) if present. Missing analyze/design output → `NEEDS_CONTEXT: analyze/design not found for #$1`. (The spine's Heavy-tier preflight matters here especially for **⑥ knowledge retrieval** — a hotspot fact often names the culprit.)
 
-## Step 1 — Spawn developer (reproduce → root-cause → fix)
-Spawn the developer sub-agent (`subagent_type: general-purpose`, `model: sonnet`, `description: developer debug #$1`):
-> Adopt the persona in `.claude/agents/developer.md`. Fix bug #$1 on the current branch. **Resume**: if Step 0 supplied a partial-work summary here — `<summary, or "none — fresh branch">` — a prior run was interrupted; CONTINUE from it (keep a correct repro/fix already committed; complete the rest), do not redo correct work. Work in this order:
+**BRANCH + RESUME PROBE** — a **fix** branch (repo convention, e.g. `fix/#$1-<slug>`). The resume test-run probes: **does the repro exist yet? is it red or already green?**
+
+**DEVELOPER TASK SHAPE** — `description`: `developer debug #$1`. Body inserted into the spine's Step 1 prompt:
+
+> Fix bug #$1 on the current branch. **Resume**: keep a correct repro/fix already committed and complete the rest; do not redo correct work. Work in this order:
 > 1. **Reproduce** — write a **failing test that captures the bug** (red; it must fail *for the reason the bug describes*, proving the bug exists). Capture the raw red output as evidence.
 > 2. **Root cause** — find the *actual* cause, not a symptom. State it in one line. (Use ⑥ knowledge / hotspot facts + the repro.)
 > 3. **Fix** — the smallest change that makes the regression test go green **and keeps all existing tests green** (no new regressions). Do NOT patch the symptom while leaving the cause.
-> Capture the raw runner output (red→green) as verify evidence — no "fixed" claim without it (`_handoff.md` Section E). slopcheck (no hallucinated deps). Commit with the repo convention. Return EXACTLY one `>>> RESULT <<<` line (Section C) incl. the raw test summary, the one-line root cause, and the branch. Write output in `config.language`.
+> Capture the raw runner output (red→green) as verify evidence — no "fixed" claim without it.
 
-## Step 2 — Capture verify evidence
-When the developer reports green, post the raw runner output under `<!-- guild:test-evidence:step-1 -->` (temp-file). As the leader, cross-check the self-report vs raw output — disagreement → raw wins, treat as not-green, loop back (Step 4). **The regression test must have been red before the fix** — a fix with no failing-then-passing test is a symptom patch; send it back.
+RESULT extras: the raw test summary, the **one-line root cause**, and the branch.
 
-## Step 3 — Tech-lead conformance check
-Spawn the tech-lead (`description: tech-lead conformance #$1`):
-> Adopt `.claude/agents/tech-lead.md`. Review the fix on the current branch. Check: is the **root cause** addressed (not a symptom)? Does the **regression test genuinely capture the bug** (would it fail without the fix)? Blast radius — does the fix touch shared code beyond the reported scope safely? You are reviewing the DEVELOPER's output. Return one `>>> RESULT <<<`: `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <non-conformance>`. Write output in `config.language`.
+**EVIDENCE RULE** — **the regression test must have been red before the fix** (red→green; existing tests stay green). A fix with no failing-then-passing test is a **symptom patch** — send it back.
 
-## Step 3.5 — Conditional specialists + gate reviews (leader)
-Same as `implement.md` Step 3.5 — convene the execute-stage specialists / gate reviews the diff surface warrants (security on auth/exposure, dba on schema, etc.; `_handoff.md` Section G). Run in parallel; a gate `BLOCKED` blocks advancement.
+**CONFORMANCE CHECKS** — inserted into the spine's Step 3 prompt:
 
-## Step 4 — Arbitrate (defined feedback loop)
-As the leader, over developer + tech-lead + specialist verdicts:
-- All `DONE`/`DONE_WITH_CONCERNS` + raw evidence green (regression test red→green, existing green) → Step 5.
-- Tech-lead `BLOCKED` (symptom-patch / wrong root cause), a gate `BLOCKED`, or evidence contradicts green → before looping back, apply the **stagnation guard** (`_stagnation.md`): same root cause as the immediately-prior attempt → escalate immediately instead of retrying. Different concern → **defined loop back to execute** (re-spawn developer — and the tech-lead/gate role whose `BLOCKED` triggered this — **at one model tier above their default**, `_model_tiering.md` Section A: sonnet → opus, the one bounded retry) with the specific concern. Bounded — after ~2 loops without resolution: **Attended** → return `NEEDS_HUMAN: <one-line>`. **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H — detect via `printenv GLD_UNATTENDED`): treat bounded-retry exhaustion the same as a stagnation escalation — add the **`guild:needs-human` label** + a `<!-- guild:needs-human -->` comment, and return `OK PAUSE: needs-human — <one-line>` (do NOT transition the stage label). Mirrors `test.md`/`qa.md`'s unattended handling.
-  - **Ground-truth capture (①, `_signals.md` Section C — agent↔agent correction):** on a **real reversal** (a `BLOCKED`, or raw evidence contradicting claimed green — not a mere `DONE_WITH_CONCERNS`), append one entry (its own Bash call, best-effort — never blocks). The `BLOCKED` reason / contradicting raw line **is** the objective anchor. `--surprise` always; add `--escalated` since the retry's model tier was just bumped (`_model_tiering.md` Section B):
-    ```bash
-    python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage execute --role <tech-lead|security|…> --area "<the file/area of the bug>" --summary "<what was reversed, 1 line>" --evidence "<the BLOCKED finding / raw line>" --surprise --escalated
-    ```
-    Claimed-green-but-red → use `--kind verify-gap --role developer`. **Skip** when no loop-back occurred (agreement ≠ correction). **Stagnation guard fired** (identical reason repeated) → `--kind stagnation` instead (`_stagnation.md` Section C), and drop `--escalated` (a stagnant loop-back does not retry, so no tier was bumped).
-- Any `FAIL` → `FAIL: <reason>`.
+> Review the fix on the current branch. Check: is the **root cause** addressed (not a symptom)? Does the **regression test genuinely capture the bug** (would it fail without the fix)? Blast radius — does the fix touch shared code beyond the reported scope safely?
 
-## Step 5 — Open PR
-As the leader, push + open a PR (`Closes #$1`, body summarizes root cause + fix + the regression-test evidence). **Resume-safe** (PATCH existing PR). **Unattended (`GLD_UNATTENDED=1`)**: append the `## 무인 결정 로그` section (`_handoff.md` Section H).
+A tech-lead `BLOCKED` here means **symptom-patch / wrong root cause** — that is the Step 4 loop-back trigger for this variant.
 
-## Step 6 — Transition + return
-Remove **whatever `guild:*` stage label Step 0 actually found** (substitute in place of `guild:execute` below if it was something else; **never remove `guild:child`** if present). **Also remove `guild:needs-human` in this same call if Step 0's label read found it present** (`_handoff.md` Section A):
-```bash
-gh issue edit $1 --remove-label "guild:execute" --add-label "guild:test" --remove-label "guild:needs-human"
-```
-Return `>>> RESULT <<<` / `OK ADVANCE: test`. Other: `NEEDS_HUMAN`/`NEEDS_CONTEXT`/`FAIL` (no transition).
+**SIGNAL AREA** — `--area "<the file/area of the bug>"`; typical `--role` set `<tech-lead|security|…>`.
+
+**PR SUMMARY** — root cause + fix + the **regression-test evidence**.
 
 ## Hard rules
+
+Spine-common rules apply (`_execute_spine.md`): verify evidence mandatory · no verification weakening (INV2) · conformance by the tech-lead, not self-review · artifacts as files, one-line RESULT. Bug-specific, on top:
+
 - **Reproduce first** — a bug fix MUST carry a regression test that was **red before the fix, green after** (proves the bug + prevents recurrence). No red-then-green test = symptom patch = reject.
 - **Root cause, not symptom** — the tech-lead conformance check enforces this.
-- **No verification weakening** (INV2); **no regressions** (existing tests stay green); conformance by tech-lead, not self-review.
+- **No regressions** — existing tests stay green.

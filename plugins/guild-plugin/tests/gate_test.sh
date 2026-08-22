@@ -149,7 +149,44 @@ expect_guard "일반 소스 파일 수정 → 통과" pass \
   '{"tool_name":"Write","tool_input":{"file_path":"/r/lib/main.dart","content":"void main(){}"}}'
 
 note ""
-note "== G. 기존 훅 체이닝 =="
+note "== G. 재사용 스캔 CLI (--scan-paths / --scan-text) =="
+# audit_readiness 와 contribute 가 게이트의 패턴을 손으로 베끼지 않고 호출하도록 하는 모드.
+# 두 소비자와 커밋 게이트가 "무엇이 시크릿인가" 에 대해 절대 어긋나지 않는 것이 요점.
+expect_scan() { # $1=label $2=mode $3=expected-exit $4=stdin $5=expected-substring(또는 "")
+  local out rc
+  out="$(printf '%s' "$4" | python3 .claude/guild/gates/scripts/gate_precommit.py "$2" 2>&1)"; rc=$?
+  if [ "$rc" != "$3" ]; then bad "$1" "exit $3" "exit $rc"; return; fi
+  if [ -n "$5" ]; then
+    case "$out" in *"$5"*) ok "$1" ;; *) bad "$1" "$5" "$(printf '%s' "$out" | tr '\n' ' ')" ;; esac
+  else
+    ok "$1"
+  fi
+}
+fresh_repo
+expect_scan "--scan-paths 가 실제 시크릿 경로를 잡음" --scan-paths 1 \
+  '.env
+lib/main.dart
+id_rsa
+' "SECRET-PATH id_rsa"
+expect_scan "--scan-paths 가 허용 목록을 존중 (.env.example)" --scan-paths 0 \
+  '.env.example
+google-services.json
+lib/main.dart
+' ""
+expect_scan "--scan-text 가 줄번호만 보고 (값 미출력)" --scan-text 1 \
+  'ordinary
+KEY = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAA"
+' "SECRET-TEXT 2"
+expect_scan "--scan-text 깨끗한 본문은 통과" --scan-text 0 \
+  'just prose
+no keys here
+' ""
+# 값이 새어나가지 않는지 명시적으로 확인 (INV5)
+LEAK="$(printf 'K="sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAA"\n' | python3 .claude/guild/gates/scripts/gate_precommit.py --scan-text 2>&1)"
+case "$LEAK" in *sk-ant*) bad "스캔 출력에 시크릿 값이 없음" "no value" "value leaked" ;; *) ok "스캔 출력에 시크릿 값이 없음 (INV5)" ;; esac
+
+note ""
+note "== H. 기존 훅 체이닝 =="
 fresh_repo
 printf '#!/bin/sh\necho local-hook-ran >&2\nexit 0\n' > .git/hooks/pre-commit.local
 chmod +x .git/hooks/pre-commit.local

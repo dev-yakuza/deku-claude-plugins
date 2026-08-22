@@ -86,12 +86,26 @@ Guild's work-type routing needs labels; `dev` operates on Issues.
 
 ## Group 5 — 위생 (hygiene) — light heuristic (read-only)
 ⚠ This is a **light heuristic**, not a full secret scan (real scanning = gitleaks/trufflehog/Semgrep, offered as an opt-in deep step by the caller — later milestone). State this limitation in findings.
-- **Committed sensitive files?** Check whether git *tracks* sensitive paths (each its own Bash call, read-only). **Quote every pattern** — unquoted globs are expanded by the shell before `git ls-files` ever sees them, and under zsh's default `NOMATCH` option an unquoted pattern that matches nothing **aborts the whole command with an error** (verified: `git ls-files .env.*` with no `.env.*` file present exits 1 with "no matches found," not an empty/clean result) — since this environment's shell may be zsh, an unquoted call here can silently skip this BLOCKER-severity check entirely on any repo where even one of these globs happens to match zero files, exactly the failure mode a security-relevant check must not have:
+- **Committed sensitive files?** Ask the **commit gate itself** rather than re-implementing its judgement (its own Bash call — a bundled `python3 script.py` invocation is a sanctioned `_bash_rules.md` exception):
+  ```bash
+  git ls-files
+  ```
+  Pipe is forbidden, so run that first, then feed the file list to the gate's path scanner as its own call:
+  ```bash
+  python3 .claude/guild/gates/scripts/gate_precommit.py --scan-paths
+  ```
+  (stdin = the `git ls-files` output you just read.) It prints one `SECRET-PATH <path>` line per sensitive tracked file and exits 1 if any, 0 if clean; it never prints a value.
+  ⚠ **Use this instead of a hand-written glob list.** An earlier version re-implemented the gate's pattern set inline as `git ls-files '.env' '*.pem' …` plus its own allowlist caveat — two copies of a security-critical definition, free to drift apart, with the drift invisible until something leaks. `--scan-paths` uses the same `SECRET_PATH_RE` and `SECRET_PATH_ALLOW_RE` the commit gate blocks on, so this check and commit-time enforcement can never disagree. (That allowlist is why `google-services.json` / `GoogleService-Info.plist` / `firebase_options.dart` are **not** flagged — public Flutter/Firebase client identifiers, conventionally committed; flagging them would train the human to dismiss this finding.)
+  Any `SECRET-PATH` hit → `id: committed-secret-file`, **BLOCKER**, why: "레포/히스토리 시크릿 = 유출 경로(INV5)". remediation: "gitignore+`git rm --cached`(향후), 키 회전·히스토리 정리는 사람이 수행".
+  If the gate script is absent (Guild not initialized), fall back to a **quoted** glob query — quote every pattern, because unquoted globs are expanded by the shell before `git ls-files` sees them, and under zsh's default `NOMATCH` an unquoted pattern matching nothing **aborts the whole command** (verified: `git ls-files .env.*` with no such file exits 1 with "no matches found", not a clean empty result), silently skipping this BLOCKER-severity check:
   ```bash
   git ls-files '.env' '.env.*' '*.pem' '*.p12' '*.keystore' '*.jks' 'serviceAccount*.json'
   ```
-  ⚠ **Do NOT include `google-services.json`/`GoogleService-Info.plist`/`firebase_options.dart` in this check** — these are Flutter/Firebase **public client identifiers**, conventionally committed, and `gate_precommit.py`'s own `SECRET_PATH_ALLOW_RE` explicitly excludes them from the equivalent commit-time check; flagging them here would contradict that and train the human to distrust/dismiss this finding. Any hit (from the query above) → `id: committed-secret-file`, **BLOCKER**, why: "레포/히스토리 시크릿 = 유출 경로(INV5)". remediation: "gitignore+`git rm --cached`(향후), 키 회전·히스토리 정리는 사람이 수행".
-- **Obvious in-source tokens?** Bounded Grep for high-signal patterns (`AKIA[0-9A-Z]{16}`, `-----BEGIN * PRIVATE KEY-----`, `AIza[0-9A-Za-z_-]{35}`). Hits → `id: inline-secret`, BLOCKER (flag file+line; do NOT print the secret value). Keep bounded (≤ a few Grep calls).
+- **Obvious in-source tokens?** Same principle — use the gate's own inline pattern set rather than a copy. For each candidate source file (keep it bounded), its own Bash call:
+  ```bash
+  python3 .claude/guild/gates/scripts/gate_precommit.py --scan-text
+  ```
+  (stdin = the file's text.) It prints `SECRET-TEXT <line-no>` per hit and never the value. Hits → `id: inline-secret`, BLOCKER (report file + line only). Gate script absent → bounded Grep for `AKIA[0-9A-Z]{16}`, `-----BEGIN * PRIVATE KEY-----`, `AIza[0-9A-Za-z_-]{35}` as a degraded fallback, and say in the finding that it was the degraded path.
 - **.gitignore coverage?** Read root `.gitignore`. Missing coverage for `.env`, build artifacts, or `.claude/guild/memory/` → `id: gitignore-gap`, MINOR. (Note: init already writes `.claude/guild/.gitignore` for `memory/`; this checks the project root file.)
 
 ---

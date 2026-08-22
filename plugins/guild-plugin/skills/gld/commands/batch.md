@@ -136,6 +136,11 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
 
     if [ "$EXIT_CODE" -eq 0 ]; then
       # ⚠ exit 0 is NOT proof of completion — a headless `claude -p` turn can end while a
+      # ⚠ Arm order below is the shell-side twin of `_handoff.md` Section A — canonical stage
+      # derivation. A generated .sh cannot use that jq projection, so the same rule appears here
+      # as `case` ordering: `guild:needs-human` must be tested BEFORE `guild:done`/`guild:children`
+      # because bash `case` fires the first matching arm and those labels coexist on one Issue.
+      # A new label kind therefore has to be reflected in TWO places — Section A and here.
       # backgrounded pre-commit hook is still running, leaving the Issue mid-spine with no
       # commit/PR. Truth = the GitHub label (_handoff.md Section A: "labels are the state").
       if [ -z "$OWNER_REPO" ]; then

@@ -34,9 +34,55 @@ The table has **four kinds of row**, and every consumer that derives "the curren
 filter accordingly: stage labels (`analyze`/`design`/`execute`/`test`/`qa`/`done`), the
 identity marker (`guild:child`), the orchestration state (`guild:children`), and the two
 non-stage annotations (`guild:needs-human`, `guild:harness`). A bare
-`select(startswith("guild:"))` returns all of them — `status.md`, `monitoring.md`,
-`rollback.md` and `batch.md` each re-derive this exclusion by hand, so a new label kind has
-to be reflected in all of them.
+`select(startswith("guild:"))` returns all of them. The exclusion is derived **once**, below;
+consumers cite it instead of re-deriving it.
+
+### Section A — canonical stage derivation
+
+**The one expression that answers "which `guild:*` label is this Issue's current stage".**
+Cite this subsection by name (`_handoff.md` Section A — canonical stage derivation) rather than
+restating the exclusion list; a new label kind is added here, not in each consumer. Its own
+Bash call, applied to the `labels` field of `gh issue view` (an array of `{"name": …}` objects —
+note `gh label list --json name` returns a *flat* array of such objects instead and is a
+different shape; see `audit_readiness.md`):
+
+```bash
+gh issue view <n> --json labels --jq '{stage: ([.labels[].name] | map(select(startswith("guild:") and . != "guild:child" and . != "guild:needs-human" and . != "guild:harness")) | .[0] // "none"), paused: ([.labels[].name] | any(. == "guild:needs-human")), harness: ([.labels[].name] | any(. == "guild:harness")), child: ([.labels[].name] | any(. == "guild:child"))}'
+```
+
+It yields the stage plus one flag per non-stage kind (add `state` — or any other field — to `--json` and the projection when the caller also needs it; `rollback.md` does):
+
+- **`stage`** — the Issue's current stage label: `guild:analyze` · `guild:design` · `guild:execute` · `guild:test` · `guild:qa` · `guild:done`, or `guild:children` for a split parent — or the literal string `"none"` when the Issue carries no stage label at all (not started).
+- **`paused`** — `guild:needs-human` is present. **Additive, never a stage**: it sits *on top of* the stage label (Section H), so a paused Issue still has its real `stage`. Render/count it alongside the stage, never instead of it.
+- **`harness`** — `guild:harness` is present. **Provenance, never a stage**: a readiness gap filed as a developable Issue. `stage == "none"` **and** `harness == true` = filed but not started; once a stage label exists, the stage wins and `harness` is a mere annotation.
+- **`child`** — `guild:child` is present. **Identity, never a stage**: a permanent marker every child carries *alongside* its real stage label (see below), which is why it is excluded from `stage`. Exposed as its own flag purely so consumers that annotate with it (`status.md`'s `(child)`, `rollback.md`'s parent-consistency check) don't re-derive it.
+
+**Split parent**: `stage == "guild:children"` (equivalently `[.labels[].name] | any(. == "guild:children")`). This is an orchestration state, **not** a spine stage — it has no predecessor or successor in the ordinal chain `analyze < design < execute < test < qa < done`, so nothing may compute "one stage back/forward" from it.
+
+Why the exclusions must be explicit (**this reasoning lives here only**): a bare
+`select(startswith("guild:"))` returns all four kinds at once, so taking `.[0]` picks whatever
+label GitHub happened to return first — a child reads as `guild:child`, a paused Issue can read
+as `guild:needs-human`, a started harness Issue as `guild:harness` — while `join(",")` instead
+yields a comma-joined string like `"guild:child,guild:execute"` that matches **no** stage row.
+Verified against the real `jq` binary: `["guild:child","guild:test"]` → `guild:test`;
+`["guild:children"]` → `guild:children`; `["guild:qa","guild:needs-human"]` → `guild:qa` +
+`paused: true`; `["guild:harness"]` → `"none"` + `harness: true`.
+
+**In a list query** (`gh issue list … --json …,labels`), apply the same projection per element —
+`stage` + `paused` is the usual pair (add `harness`/`child` only if that caller renders them).
+This is exactly what `status.md`'s child discovery and `monitoring.md`'s bucketing do:
+
+```
+{number, stage: ([.labels[].name] | map(select(startswith("guild:") and . != "guild:child" and . != "guild:needs-human" and . != "guild:harness")) | .[0] // "none"), paused: ([.labels[].name] | any(. == "guild:needs-human"))}
+```
+
+**The shell-side equivalent — `batch.md`.** batch's supervisor is a generated `.sh` script (the
+sanctioned `_bash_rules.md` exception), so it cannot use this projection: it flattens the labels
+to a comma-joined string and matches them with a bash `case`. The same rule appears there as
+**arm ordering** — `*guild:needs-human*` MUST be tested **before** `*guild:done*` and
+`*guild:children*`, because a bash `case` fires the **first** matching arm rather than the most
+specific one, and these labels coexist on one Issue. So a future label kind has to be reflected
+in **two** places: this derivation, and batch's `case` arms.
 
 **Split parents do not run the spine themselves.** When design splits an Issue, the parent leaves the normal `analyze→…→done` track and enters `guild:children` — it is an *orchestration* state, not a stage. Its "execute/test/qa" is the sum of its children plus a final parent-integration check (Section I). A parent never carries both `guild:children` and a stage label at once.
 

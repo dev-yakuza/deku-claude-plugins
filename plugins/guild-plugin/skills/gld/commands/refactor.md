@@ -9,60 +9,42 @@
 
 ---
 
-## Step 0 — Preflight
-As the leader, follow `_preflight.md` **Heavy tier** (incl. ⑥ knowledge + target-dir survey). Load the design output — for a refactor the design **is the target structure** (design = 목표 구조). Load `docs/specs/$1/skeleton.md` (the target shape). Missing → `NEEDS_CONTEXT: design/target-structure not found for #$1`.
+## How to run this stage
 
-Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
+Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the label read and the **`guild:children`** split-parent guard) · Step 1 spawn developer · Step 2 verify evidence · Step 3 tech-lead conformance · Step 3.5 conditional specialists/gates (`_handoff.md` Section G — a refactor touching a hot path → performance; schema → dba; etc. A gate `BLOCKED` blocks advancement) · Step 4 arbitrate · Step 5 PR · Step 6 transition + return — filling its Section A slots with the values below. Nothing about the spine changes for this variant.
 
-**Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so Step 6's transition would destroy the link `dev.md` Phase 2b uses to drive the children:
-```
->>> RESULT <<<
-FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
-```
-(`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
+## Slot values (`type:refactor`)
 
-Empty → add `guild:execute`. Non-empty → do not add on top (Step 6's transition removes whatever **stage** label was actually found here, not necessarily `guild:execute` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A). Create/switch to a refactor branch (e.g. `refactor/#$1-<slug>`). **Resume-safe**: existing branch → build a partial-work summary (`git log <base>..HEAD --oneline` + one test run confirming all existing tests are still green on the partial work) and pass it into the developer prompt (Step 1) → continue the transform, don't restart. Fresh branch → no summary.
+**DESIGN INPUT** — load the design output — for a refactor the design **is the target structure** (design = 목표 구조). Load `docs/specs/$1/skeleton.md` (the target shape). Missing → `NEEDS_CONTEXT: design/target-structure not found for #$1`. (The spine's Heavy-tier preflight covers ⑥ knowledge + the target-dir survey.)
 
-## Step 1 — Spawn developer (behavior-preserving transform)
-Spawn the developer (`description: developer refactor #$1`):
-> Adopt the persona in `.claude/agents/developer.md`. Refactor Issue #$1 on the current branch toward the target structure (`docs/specs/$1/skeleton.md`). **Resume**: if Step 0 supplied a partial-work summary here — `<summary, or "none — fresh branch">` — a prior run was interrupted; CONTINUE the transform from the committed partial state (tests green), do not restart. **Behavior-preserving — this is the core constraint**:
+**BRANCH + RESUME PROBE** — a **refactor** branch, e.g. `refactor/#$1-<slug>`. The resume test-run confirms **all existing tests are still green on the partial work** → continue the transform, don't restart.
+
+**DEVELOPER TASK SHAPE** — `description`: `developer refactor #$1`. Body inserted into the spine's Step 1 prompt:
+
+> Refactor Issue #$1 on the current branch toward the target structure (`docs/specs/$1/skeleton.md`). **Resume**: CONTINUE the transform from the committed partial state (tests green), do not restart. **Behavior-preserving — this is the core constraint**:
 > - The **existing tests MUST stay green throughout** — run them before and after; behavior does not change. They are your safety net.
 > - Do **NOT** add features, change observable behavior, or **weaken/delete/skip tests** (INV2). If a test asserted an *implementation detail* that the refactor legitimately removes, surface it **explicitly with justification** in your RESULT — never silently drop it.
 > - Prefer many small behavior-preserving steps, tests green at each.
-> Capture the raw runner output (all green) as evidence (`_handoff.md` Section E). slopcheck. Commit with the repo convention. Return EXACTLY one `>>> RESULT <<<` line (Section C) incl. the raw test summary (all green), what structural improvement was made, and the branch. Write output in `config.language`.
+> Capture the raw runner output (all green) as evidence.
 
-## Step 2 — Capture verify evidence
-Post the raw runner output under `<!-- guild:test-evidence:step-1 -->` (temp-file). As the leader, cross-check self-report vs raw. **All existing tests must be green** — a refactor that turns a test red has changed behavior (or broke something); that is not-done, loop back. If the developer changed any test, verify the justification is real (implementation-detail only, not a weakened assertion).
+RESULT extras: the raw test summary (all green), **what structural improvement was made**, and the branch.
 
-## Step 3 — Tech-lead conformance check
-Spawn the tech-lead (`description: tech-lead conformance #$1`):
-> Adopt `.claude/agents/tech-lead.md`. Review the refactor on the current branch against the target structure (`docs/specs/$1/skeleton.md`) + `docs/standards/architecture.md`. Check TWO things: (1) is the **structure genuinely improved** toward the target (not churn)? (2) is **behavior preserved** — no functional change, and **no test weakened/removed** except a justified implementation-detail test? You are reviewing the DEVELOPER's output. Return one `>>> RESULT <<<`: `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <non-conformance or behavior/verification change>`. Write output in `config.language`.
+**EVIDENCE RULE** — **all existing tests must be green** (there is no new feature test). A refactor that turns a test red has changed behavior (or broke something); that is not-done, loop back. If the developer changed any test, verify the justification is real — **implementation-detail only, not a weakened assertion**.
 
-## Step 3.5 — Conditional specialists + gate reviews (leader)
-Same as `implement.md` Step 3.5 (`_handoff.md` Section G). A refactor touching a hot path → performance; schema → dba; etc. A gate `BLOCKED` blocks advancement.
+**CONFORMANCE CHECKS** — inserted into the spine's Step 3 prompt:
 
-## Step 4 — Arbitrate (defined feedback loop)
-As the leader, over the verdicts:
-- All `DONE`/`DONE_WITH_CONCERNS` + all existing tests green + behavior preserved → Step 5.
-- Tech-lead `BLOCKED` (structure not improved, behavior changed, or a test weakened), a gate `BLOCKED`, or a test went red → before looping back, apply the **stagnation guard** (`_stagnation.md`): same root cause as the immediately-prior attempt → escalate immediately instead of retrying. Different concern → **defined loop back to execute**, re-invoking the developer — and the tech-lead/gate role whose `BLOCKED` triggered this — **at one model tier above their default** (`_model_tiering.md` Section A: sonnet → opus, the one bounded retry). Bounded — after ~2 loops without resolution: **Attended** → return `NEEDS_HUMAN: <one-line>`. **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H — detect via `printenv GLD_UNATTENDED`): treat bounded-retry exhaustion the same as a stagnation escalation — add the **`guild:needs-human` label** + a `<!-- guild:needs-human -->` comment, and return `OK PAUSE: needs-human — <one-line>` (do NOT transition the stage label). Mirrors `test.md`/`qa.md`'s unattended handling.
-  - **Ground-truth capture (①, `_signals.md` Section C — agent↔agent correction):** on a **real reversal** (`BLOCKED` / a red test contradicting claimed-green — not a mere `DONE_WITH_CONCERNS`), append one entry (own Bash call, best-effort). Anchor = the `BLOCKED` reason / red line. `--surprise` always; add `--escalated` since the retry's model tier was just bumped (`_model_tiering.md` Section B):
-    ```bash
-    python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage execute --role <tech-lead|performance|…> --area "<the refactored file/area>" --summary "<what was reversed, 1 line>" --evidence "<finding / red line>" --surprise --escalated
-    ```
-    A **weakened-verification** reversal (a refactor that quietly removed/weakened a test, caught here) is exactly the INV2 signal worth capturing. **Skip** when no loop-back (agreement ≠ correction). **Stagnation guard fired** (identical reason repeated) → `--kind stagnation` instead (`_stagnation.md` Section C), and drop `--escalated` (no tier was bumped).
-- Any `FAIL` → `FAIL: <reason>`.
+> Review the refactor on the current branch against the target structure (`docs/specs/$1/skeleton.md`) + `docs/standards/architecture.md`. Check TWO things: (1) is the **structure genuinely improved** toward the target (not churn)? (2) is **behavior preserved** — no functional change, and **no test weakened/removed** except a justified implementation-detail test? Your `BLOCKED` line names the non-conformance *or* the behavior/verification change.
 
-## Step 5 — Open PR
-Push + open a PR (`Closes #$1`, body: what structure improved, behavior-preserved statement, existing-tests-green evidence). Resume-safe. Unattended → `## 무인 결정 로그` (Section H).
+A tech-lead `BLOCKED` here means **structure not improved, behavior changed, or a test weakened** — that, or a test going red, is the Step 4 loop-back trigger for this variant.
 
-## Step 6 — Transition + return
-Remove **whatever `guild:*` stage label Step 0 actually found** (substitute in place of `guild:execute` below if it was something else; **never remove `guild:child`** if present). **Also remove `guild:needs-human` in this same call if Step 0's label read found it present** (`_handoff.md` Section A):
-```bash
-gh issue edit $1 --remove-label "guild:execute" --add-label "guild:test" --remove-label "guild:needs-human"
-```
-Return `OK ADVANCE: test`. Other: `NEEDS_HUMAN`/`NEEDS_CONTEXT`/`FAIL`.
+**SIGNAL AREA** — `--area "<the refactored file/area>"`; typical `--role` set `<tech-lead|performance|…>`. A **weakened-verification** reversal (a refactor that quietly removed/weakened a test, caught here) is exactly the INV2 signal worth capturing.
+
+**PR SUMMARY** — what structure improved, the behavior-preserved statement, and the existing-tests-green evidence.
 
 ## Hard rules
+
+Spine-common rules apply (`_execute_spine.md`): verify evidence mandatory · no verification weakening (INV2) · conformance by the tech-lead, not self-review · artifacts as files, one-line RESULT. Refactor-specific, on top:
+
 - **Behavior preservation is the contract** — existing tests green **before and after**; a red test = behavior changed = not a refactor.
 - **No verification weakening** (INV2 — *especially* critical for refactor, where "cleaning up" can quietly drop tests). A changed test needs an explicit, justified, implementation-detail-only reason surfaced to the human.
-- **Structure must actually improve** (tech-lead judges — not churn for its own sake). No new features. Conformance by tech-lead, not self-review.
+- **Structure must actually improve** (tech-lead judges — not churn for its own sake). **No new features.**
