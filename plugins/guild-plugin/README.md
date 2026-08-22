@@ -54,7 +54,18 @@ Guild is a self-modifying system, so safety is deterministic, not advisory:
 - **INV6 — draft→confirm→enforce.** Auto-generated gate rules (e.g. structure/boundary rules) start `status: draft` (WARN-only) and only start blocking once a human confirms them (`status: confirmed`); the two universal secret/verification gates are non-hallucinated so `init` installs them pre-confirmed.
 - **Off-switch** — `/gld config` pauses automation and gate blocking.
 
-A **deterministic commit gate** (a `PreToolUse` hook) blocks committing secrets or weakening verification, and can't be bypassed by permission mode.
+A **deterministic commit gate** blocks committing secrets or weakening verification. It runs
+as a `.git/hooks/pre-commit` (authoritative — git runs it with the index final, so a compound
+`create-and-commit` in one call is caught) plus a `PreToolUse` early-warning pass that gives
+the agent a specific reason before it spends a turn.
+
+**Its honest limits**, because a gate described as more than it is hides a real gap:
+`git commit --no-verify` skips it, as it skips every git hook; `.git/hooks/` is untracked, so
+a fresh clone needs `/gld update` to reinstall it; it never fires if the repo sets
+`core.hooksPath`; and it does not inspect history already written. Editing the gate's own
+off-switch or rule files prompts for human confirmation rather than being blocked outright —
+turning the gate off is a legitimate action, it just should not be a side effect. The gate
+raises the cost of a mistake; it is not a boundary against a determined bypass.
 
 ## How it stores state
 

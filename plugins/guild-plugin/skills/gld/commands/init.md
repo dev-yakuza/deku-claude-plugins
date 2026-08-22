@@ -1,6 +1,6 @@
 # INIT
 
-**One-time bootstrap + onboarding.** Sets up Guild's harness in the current repo, founds the role organization (the Guild), and drafts standards. Goal: build the environment where Guild works best (plan §7). Growth is `evolve` (later); structural upgrades are `update` (later). `init` is NOT a growth path — re-running reports "already initialized."
+**One-time bootstrap + onboarding.** Sets up Guild's harness in the current repo, founds the role organization (the Guild), and drafts standards. Goal: build the environment where Guild works best. Growth is `evolve` (later); structural upgrades are `update` (later). `init` is NOT a growth path — re-running reports "already initialized."
 
 `$1` = language for interviews/standards/labels display: `ko`/`korean`/`한국어` → Korean, `ja`/`japanese`/`日本語` → Japanese, `en`/`english`/empty → English (default). This is stored in `config.json` `language`.
 
@@ -35,7 +35,7 @@ These govern every file init writes — role agents, standards, CLAUDE.md, confi
    ```bash
    gh repo view --json nameWithOwner -q .nameWithOwner
    ```
-   Observe the literal `<owner>/<repo>`. If it fails → warn that Guild's development flow requires a GitHub repo; ask whether to continue with harness-only setup (agents + standards, no labels). Default: continue and skip label creation (P2 step 6).
+   Observe the literal `<owner>/<repo>`. If it fails → warn that Guild's development flow requires a GitHub repo; ask whether to continue with harness-only setup (agents + standards, no labels). Default: continue and skip label creation (P2 step 7).
 
 ---
 
@@ -52,13 +52,13 @@ For each scan, spawn with the Agent tool:
 
 The six: (1) stack, (2) command, (3) convention, (4) structure, (5) existing, (6) **hotspot** (git-history bug/churn/co-change — the evidence-driven answer to "what's fragile?", so the interview never has to ask it).
 
-Collect the six findings objects. These feed P1.5 and P2. Feed hotspot findings into every role's "주의(핫스팟·함정)" section and the P3.5 readiness audit. If a scan returns partial/null findings, proceed — init must not block on incomplete analysis (plan §7: baseline, not exhaustive).
+Collect the six findings objects. These feed P1.5 and P2. Feed hotspot findings into every role's "주의(핫스팟·함정)" section and the P3.5 readiness audit. If a scan returns partial/null findings, proceed — init must not block on incomplete analysis (baseline, not exhaustive).
 
 ---
 
 ## P1.5 — Short interview
 
-**Principle (evidence-first, grow-later)**: **detect from evidence; ask only what evidence genuinely cannot reveal; let `evolve` grow the rest.** Do NOT pose blank-page essay questions ("what architecture rules aren't in the code?", "where are the fragile areas?", "what's your testing philosophy?") — those ask the user to do the agent's introspection work and are answered by evidence anyway (hotspots ← hotspot-scan, conventions ← convention-scan, coverage ← command/config). Rules and intent that stay hidden are **not** extracted by interrogation at init; they surface later when an agent violates them → the user corrects → `evolve` learns them. Day-1 agents are intentionally rough (plan §7). Use `AskUserQuestion` in the `$1` language.
+**Principle (evidence-first, grow-later)**: **detect from evidence; ask only what evidence genuinely cannot reveal; let `evolve` grow the rest.** Do NOT pose blank-page essay questions ("what architecture rules aren't in the code?", "where are the fragile areas?", "what's your testing philosophy?") — those ask the user to do the agent's introspection work and are answered by evidence anyway (hotspots ← hotspot-scan, conventions ← convention-scan, coverage ← command/config). Rules and intent that stay hidden are **not** extracted by interrogation at init; they surface later when an agent violates them → the user corrects → `evolve` learns them. Day-1 agents are intentionally rough. Use `AskUserQuestion` in the `$1` language.
 
 **Ask only these (genuinely un-inferable — the charter):**
 1. **Domain / what is this?** (e.g. "Flutter Japanese-learning app") — seeds `{{DOMAIN}}`, `{{PROJECT_NAME}}`.
@@ -77,7 +77,7 @@ If the user skips any field, fill it with a scan-derived best guess and mark it 
 Create the harness. **Track every file created/merged** for the P4 summary and partial-failure repair.
 
 ### 0. Ensure the harness will be committable (`.gitignore` reconciliation — DETERMINISTIC, do this FIRST)
-Guild's harness under `.claude/` (agents, guild state, settings.json) is **meant to be committed** (plan §6). Many repos have a root `.gitignore` that ignores `.claude/` wholesale (e.g. `.claude/*` with only `!.claude/skills/`), which would make the harness **invisible to git / un-committable** — it looks like "the files weren't created" even though they exist on disk. Fix this **deterministically here** — do NOT leave it to the probabilistic P3.5 readiness audit.
+Guild's harness under `.claude/` (agents, guild state, settings.json) is **meant to be committed**. Many repos have a root `.gitignore` that ignores `.claude/` wholesale (e.g. `.claude/*` with only `!.claude/skills/`), which would make the harness **invisible to git / un-committable** — it looks like "the files weren't created" even though they exist on disk. Fix this **deterministically here** — do NOT leave it to the probabilistic P3.5 readiness audit.
 
 1. Check whether the harness paths would be git-ignored (each its own Bash call):
    ```bash
@@ -103,19 +103,22 @@ Create via Write tool:
 - `.claude/guild/config.json` — the M1 config (see schema below).
 - `.claude/guild/knowledge/` — the ⑥ semantic-memory **baseline** (`<<SKILL_DIR>>/commands/atoms/_knowledge.md` format), seeded from the P1 scans — **not** a blank header:
   - `index.md` — a finite pointer map keyed by path/area (one line per seeded slice → its `facts/` file + a one-line hook).
-  - `facts/<area>.md` — seed a **solid baseline** (plan §7 — not exhaustive): the top bug-**hotspot** files (with approx `fix:` frequency), the strongest **co-change** groups (X↔Y), and the main **layer/coupling** boundaries from structure-scan. Each fact evidence-anchored to git history, provenance `init-scan`. **Reuse the same scan findings** that fill the agent specialization's hotspot line (step 2) so ③ and ⑥ agree. `evolve` grows the rest.
+  - `facts/<area>.md` — seed a **solid baseline** (not exhaustive): the top bug-**hotspot** files (with approx `fix:` frequency), the strongest **co-change** groups (X↔Y), and the main **layer/coupling** boundaries from structure-scan. Each fact evidence-anchored to git history, provenance `init-scan`. **Reuse the same scan findings** that fill the agent specialization's hotspot line (step 2) so ③ and ⑥ agree. `evolve` grows the rest.
 - `.claude/guild/evolution-log.md` — ledger header (used by evolve later).
-- `.claude/guild/gates/` — the **강제층 (enforcement layer, M3 minimal set — plan §11/§14)**:
-  - `scripts/gate_precommit.py` — **copy** the bundled gate verbatim from `<<SKILL_DIR>>/gates/gate_precommit.py` (Read it, Write it to the repo path). It is the `PreToolUse(Bash)` hook (wired in settings.json, step 5, fires on **every** Bash call — the script's own `is_git_commit()` self-filters to commits, since Claude Code's hook-level `if` pattern matching is documented as best-effort and not reliable enough to gate a security-critical check on) that blocks a commit carrying a **secret** (keystore/.p12/.jks/.pem/serviceAccount/.env — public identifiers like `google-services.json` excluded) or **weakening verification** (INV2 — deleted test file / net-removed assertions / added skips). Off-switch = config `gates.enabled`.
+- `.claude/guild/gates/` — the **강제층 (enforcement layer, M3 minimal set)**:
+  - `scripts/gate_precommit.py` — **copy** the bundled gate verbatim from `<<SKILL_DIR>>/gates/gate_precommit.py` (Read it, Write it to the repo path). It blocks a commit carrying a **secret** (keystore/.p12/.jks/.pem/.key/serviceAccount/.env/key material — public identifiers like `google-services.json` and `.env.example` excluded) or **weakening verification** (INV2 — deleted test file / net-removed assertions / added skip·focus directives). Off-switch = config `gates.enabled`. It runs in **three modes** (step 6 installs the git hook; step 5 wires the two settings hooks):
+    - `--git-hook` → **the authoritative layer.** Only here is the index final, so this is the only layer that sees a compound `create-and-commit` in one Bash call.
+    - no args → `PreToolUse(Bash)` **early warning**, so the agent gets a specific reason before spending a turn. It self-filters to commits via `is_git_commit()` (Claude Code's hook-level `if` matching is documented as best-effort, too weak to gate a security check on) and scopes its scan to what the command being run will actually commit.
+    - `--guard-config` → `PreToolUse(Edit|Write|MultiEdit)`. The commit gate only ever sees Bash, so its own off-switch, rule files and `dismissed.md` are editable with no hook firing. This mode does **not** block (`/gld config --gates=off` is legitimate) — it returns `ask`, so disabling the gate is a human decision on the record rather than a side effect.
   - `rules/secrets.md` + `rules/verification.md` — one-line rule statements, `status: confirmed` (universal + non-hallucinated → they **block**).
-  - `rules/boundaries.md` — **structure/boundary rules, `status: draft` (= WARN only, never blocks until the human confirms — INV6/T3)**. Seed 0–2 `- forbid: <layer-glob> imports <path-substr>` rules from the structure-scan's layer boundaries (e.g. `- forbid: lib/ui/** imports lib/db/`); if the layers are unclear, write the `status: draft` header + a commented example + a note that `evolve`/`audit` grow it. Draft rules warn; confirming a rule (`status: confirmed`) promotes it to a block.
+  - `rules/boundaries.md` — **structure/boundary rules, `status: draft` (= WARN only, never blocks until the human confirms — INV6)**. Seed 0–2 `- forbid: <layer-glob> imports <path-substr>` rules from the structure-scan's layer boundaries (e.g. `- forbid: lib/ui/** imports lib/db/`); if the layers are unclear, write the `status: draft` header + a commented example + a note that `evolve`/`audit` grow it. Draft rules warn; confirming a rule (`status: confirmed`) promotes it to a block.
   - `dismissed.md` — accepted-risk registry (header only; `- <path/pattern> — <reason>` downgrades that item to a warning).
   - `findings.json` — `{ "open": [] }` (the gate writes open violations here).
-- `.claude/guild/overlay/.gitkeep` — flow-policy override surface (empty; `/gld contribute` upstreams diffs here — plan §10).
-- `.claude/guild/.gitignore` — containing `memory/` (episodic memory is gitignored per plan §6).
+- `.claude/guild/overlay/.gitkeep` — flow-policy override surface (empty; `/gld contribute` upstreams diffs here).
+- `.claude/guild/.gitignore` — containing `memory/` (episodic memory is gitignored).
 - `.claude/guild/memory/.gitkeep`.
 
-**config.json (M1 subset, plan §18 C):**
+**config.json (M1 subset):**
 ```json
 {
   "version": "<the plugin.json version resolved above — e.g. 0.40.0, NOT a literal copied from this doc>",
@@ -127,12 +130,12 @@ Create via Write tool:
 }
 ```
 - `commands.*` values are the **normalized, simple-bash-safe** forms from command-scan (see `scan_repo.md` Section 2): each is either a single simple command string, or an **array** of simple commands run in sequence. They MUST NOT contain `$(...)`, `&&`, `|`, `;`, or redirections — Guild runs them one per Bash call. (e.g. `flutter test --fail-fast --concurrency=$(nproc --all)` → store `"flutter test --fail-fast"`; `flutter analyze && npx remark . --quiet --frail` → store `["flutter analyze", "npx remark . --quiet --frail"]`.) A missing category → `null`.
-- `commands.e2e` records the detected integration/E2E command (e.g. `flutter test integration_test`). **M1 detects and records it but does NOT auto-run E2E** (test stage runs unit/existing tests only — plan §18 B; E2E auto-run is a later milestone). Recording it here keeps the info from being lost and lets a human run it manually.
+- `commands.e2e` records the detected integration/E2E command (e.g. `flutter test integration_test`). **M1 detects and records it but does NOT auto-run E2E** (test stage runs unit/existing tests only; E2E auto-run is a later milestone). Recording it here keeps the info from being lost and lets a human run it manually.
 - `roles` lists the **full installed roster** (16) — the spine roles plus every participation/gate specialist. It records who is *available*; the leader decides who *participates* per task (`_handoff.md` Section G). Keep it in sync with the agents actually written in step 2.
-- `gates.enabled` (M3) is the **off-switch** for the enforcement layer — `true` = the pre-commit gate blocks (secret / verification-weakening); `false` = advisory only (plan §11 off-switch). `automation.evolve_nudge` (default `true`) is the **off-switch for the review-stage evolve nudge** (`review.md` Step 5) — `false` silences it entirely; toggle via `/gld config --evolve-nudge=<on|off>`.
+- `gates.enabled` (M3) is the **off-switch** for the enforcement layer — `true` = the pre-commit gate blocks (secret / verification-weakening); `false` = advisory only (off-switch). `automation.evolve_nudge` (default `true`) is the **off-switch for the review-stage evolve nudge** (`review.md` Step 5) — `false` silences it entirely; toggle via `/gld config --evolve-nudge=<on|off>`.
 
 ### 2. Role agents (the Guild's full roster — 16)
-Install the **entire roster** so the leader can assemble any of them per task (plan §18 D — "전 역할 활성화; init이 로스터 전체 설치, 리더가 태스크별 조건부 참여"). The roster has three participation kinds (documented in `_handoff.md` Section G):
+Install the **entire roster** so the leader can assemble any of them per task ("전 역할 활성화; init이 로스터 전체 설치, 리더가 태스크별 조건부 참여"). The roster has three participation kinds (documented in `_handoff.md` Section G):
 - **Spine roles (always in the flow)**: `leader`, `tech-lead`, `developer`, `tester`, `qa`.
 - **Participation roles (leader convenes conditionally)**: `product-owner`, `designer`, `infra`, `dba`, `security`, `performance`, `i18n`, `analytics`, `tech-writer`, `release-manager`, `support-triage`.
 - **Gate roles (conditional review checks)**: `designer` (UI/UX review), `security` (security review), `infra` (CI/CD·deploy·env·IaC review — gate-only, never authors its own diff) — same files as their participation entry.
@@ -147,7 +150,7 @@ For **each of the 16** roles (`leader`, `tech-lead`, `developer`, `tester`, `pro
   - **Not-applicable specialists**: a participation role the repo genuinely never needs (e.g. `dba`/`i18n`/`designer` for a single-language headless library) still gets **installed**, but its 프로젝트 특화 section is filled with a localized "(해당 없음 — 이 레포에 <해당 영역> 없음)" per that template's authoring hint. Installing it is cheap and lets `evolve` promote it later; the leader simply won't convene it. Do NOT skip creating the file.
 - Write the result to `.claude/agents/<role>.md` (create; if a same-named agent already exists, see Merge rules below).
 
-Static copy + specialization only — no HR (hire/retire/promote) in M1. The roster is installed as-is; growing/pruning it is `evolve` (plan §14 M1, §18 C/D).
+Static copy + specialization only — no HR (hire/retire/promote) in M1. The roster is installed as-is; growing/pruning it is `evolve`.
 
 ### 3. Standards drafts
 For each of `charter`, `architecture`, `conventions`, `quality-bar`, `verification`:
@@ -166,9 +169,38 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
 ### 5. settings.json (key-level merge — preserve existing)
 - Read `<<SKILL_DIR>>/templates/settings.json.tmpl`; fill `{{TEST_BIN}}`/`{{LINT_BIN}}` with the FIRST/primary executable name for each (e.g. `yarn`, `npm`, `pytest`). ⚠ **`commands.lint` (and `commands.test`) can be a normalized **array** of steps** (Section 2's own normalization rule — e.g. `["flutter analyze", "npx remark . --quiet --frail"]` uses two distinct binaries, `flutter` and `npx`), and a single `{{LINT_BIN}}`/`{{TEST_BIN}}` slot can only hold one — an array with a second, different binary would otherwise leave it entirely unlisted in `permissions.allow`, causing an avoidable permission prompt on every lint/test run. **Extract every distinct binary name** across the array (the first word of each step, before its first space) and fill `{{ADDITIONAL_BIN_ENTRIES}}` with one `,\n      "Bash(<bin>:*)"` line per binary beyond the first (empty string if there's only one binary total — never leave the literal `{{ADDITIONAL_BIN_ENTRIES}}` token in the written file, an empty fill is fine here since the trailing entry list already has no dangling comma either way). The template includes the **`PreToolUse(Bash)` gate hook** (M3 강제층 — runs `.claude/guild/gates/scripts/gate_precommit.py` on every Bash call; the script itself decides whether it's a commit).
 - **If `.claude/settings.json` does not exist** → Write the filled template.
-- **If it exists** → JSON has no comment markers, so merge by key: read the existing JSON, union `permissions.allow` (dedupe), and **union the Guild gate hook into `hooks.PreToolUse`** — append the Guild `{matcher:"Bash", hooks:[{... gate_precommit.py}]}` entry only if an equivalent one is not already present (dedupe by command path); **preserve all other existing hooks and keys**. Write the merged JSON back (2-space indent).
+- **If it exists** → JSON has no comment markers, so merge by key: read the existing JSON, union `permissions.allow` and `permissions.ask` (dedupe), and **union both Guild gate hook entries into `hooks.PreToolUse`** — the `{matcher:"Bash", … gate_precommit.py}` early-warning entry and the `{matcher:"Edit|Write|MultiEdit", … --guard-config}` control-file guard — appending each only if an equivalent is not already present (dedupe by command string, which includes the mode flag); **preserve all other existing hooks and keys**. Write the merged JSON back (2-space indent).
+- The template's `permissions.ask` list makes two invariants mechanical rather than advisory: `gh pr merge` (INV1 — a human, never an automated run, merges) and the destructive `git push --force` / `reset --hard` / `clean` family (INV3 — everything reversible). Claude Code evaluates `deny > ask > allow`, so these override the broad `Bash(git:*)` / `Bash(gh:*)` allowances above them.
 
-### 6. GitHub labels (skip if P0 found no GitHub repo)
+### 6. git pre-commit hook (the authoritative enforcement layer)
+
+`PreToolUse` fires *before* a command runs, so a compound `echo <secret> > f && git add f && git commit -m x` commits content that does not exist yet at hook time — no `git diff`/`git status` can see it. **Verified: that shape, and `sed -i '' 's/assert//g' t_test.py && git commit -am x`, both bypassed the pre-`0.41` gate entirely.** The git hook closes it because git runs it with the index final. Install it here:
+
+1. **Preserve any existing hook** (INV4 — additive, never clobbers). Check first (its own Bash call):
+   ```bash
+   ls .git/hooks/pre-commit
+   ```
+   - Present **and not already Guild's** (Read it — Guild's shim contains the string `gate_precommit.py`) → move it aside so the shim can chain to it:
+     ```bash
+     git mv --force .git/hooks/pre-commit .git/hooks/pre-commit.local
+     ```
+     (`.git/` is not tracked, so use a plain `mv` if `git mv` errors.) Note the rename for the P4 summary — the repo's own hook still runs, first, before Guild's checks.
+   - Present **and already Guild's** → overwrite in place (step 2).
+   - Absent → proceed.
+2. **Copy the bundled shim verbatim**: Read `<<SKILL_DIR>>/gates/pre-commit.sh`, Write it to `.git/hooks/pre-commit`.
+3. **Make it executable** (its own Bash call — git silently ignores a non-executable hook, which would leave the enforcement layer installed-but-inert):
+   ```bash
+   chmod +x .git/hooks/pre-commit
+   ```
+4. **Verify it is live** (its own Bash call); the output must be empty:
+   ```bash
+   git config --get core.hooksPath
+   ```
+   A non-empty value means the repo redirects hooks elsewhere (husky and similar do this) — Guild's hook at `.git/hooks/` will **never run**. Do not fight it: report this in P4 as a readiness gap ("`core.hooksPath` is set to `<value>`; copy `.git/hooks/pre-commit` there to enable Guild's commit gate"), and note that until then only the advisory `PreToolUse` layer is active.
+
+⚠ **`.git/hooks/` is not tracked by git**, so this install is per-clone: a fresh clone has the harness files but no hook until someone runs `/gld update`. Say so in P4. And `git commit --no-verify` skips it, as it skips every git hook — Guild's gate raises the cost of a mistake, it is not a boundary against a determined bypass.
+
+### 7. GitHub labels (skip if P0 found no GitHub repo)
 Create the ten `guild:*` labels. Run each as its own Bash call; if any fails, report which and continue (labels are not transactional in M1 — they are idempotent with `--force`):
 ```bash
 gh label create "guild:analyze" --color "1d76db" --description "Guild: Analyze stage" --force
@@ -188,11 +220,11 @@ gh label create "guild:needs-human" --color "b60205" --description "Guild: Pause
 
 ## P3 — Confirm pass (optional, skippable)
 
-Offer to confirm the drafted standards now (plan §7 P3, §6 draft→confirm→enforce):
+Offer to confirm the drafted standards now (draft→confirm→enforce):
 - Show the user each `docs/standards/*.md` draft summary.
 - For each, ask: keep as `draft`, or flip to `confirmed`? (Skippable — "confirm later with a manual edit or a future audit.")
 - On confirm: change the file's frontmatter `status: draft` → `status: confirmed`.
-- Confirming a *standards doc* (`charter.md`, `architecture.md`, etc.) never itself toggles any gate — these are advisory, read by roles as judgment context, not mechanically enforced. (The gates that *do* mechanically block — `gate_precommit.py`'s secret/verification checks — are wired separately in P2 §1 above and are already `status: confirmed` from day one, independent of this pass.) So this step only sets intent — but it is the honest place to lock standards while the human is in the loop.
+- Confirming a *standards doc* (`charter.md`, `architecture.md`, etc.) never itself toggles any gate — these are advisory, read by roles as judgment context, not mechanically enforced. (The gates that *do* mechanically block — `gate_precommit.py`'s secret/verification checks — are wired separately in P2 steps 1/5/6 above and are already `status: confirmed` from day one, independent of this pass.) So this step only sets intent — but it is the honest place to lock standards while the human is in the loop.
 
 Default if the user skips: everything stays `draft`.
 
@@ -218,11 +250,11 @@ If the hygiene group ran only the light heuristic, offer: "전용 시크릿 스�
 - On yes + not installed → ask explicit consent to install (system change), then install via the platform's package manager as its own simple Bash call (e.g. `brew install gitleaks`). If the user declines the install → skip deep scan, keep light findings.
 - Run `gitleaks detect` (read-only, its own Bash call) and fold new findings into the report. **Never print secret values** — reference file/line only.
 
-### 4. Remediation (opt-in, per gap — plan INV1)
+### 4. Remediation (opt-in, per gap — INV1)
 For each **BLOCKER/MAJOR** gap (offer MINOR too, but default to skip), ask the user how to handle it. Offer only **safe, reversible** actions:
 - **Create a tracking issue** (default): via the temp-file pattern, `gh issue create --body-file <path> --label guild:harness` (+ `type:refactor`/`type:chore` if those labels exist). Title = the gap; body = gap · why it helps Guild · acceptance criteria. **Dedup**: first search open issues for an existing `guild:harness` issue with the same gap `id` marker (`<!-- guild:harness:<id> -->`) — PATCH/skip if found. These issues are then developable with `/gld dev`.
 - **Safe local fix** where applicable: e.g. gitignore gap → append the missing entries; committed-secret-file → add to `.gitignore` + `git rm --cached <file>` **(confirm first)**.
-- **Guide-only for destructive/external actions** (committed/inline secrets): print the steps for git-history purge and key rotation — **NEVER auto-run** history rewrite (`git filter-branch`/filter-repo) or rotate keys. These are irreversible (T6/INV3) / external. The tracking issue captures the follow-up.
+- **Guide-only for destructive/external actions** (committed/inline secrets): print the steps for git-history purge and key rotation — **NEVER auto-run** history rewrite (`git filter-branch`/filter-repo) or rotate keys. These are irreversible (INV3) / external. The tracking issue captures the follow-up.
 
 Batch the questions where possible (one grouped prompt listing gaps → user picks which to file). If the user skips remediation entirely, the report on disk still records everything.
 
@@ -235,7 +267,7 @@ Report what was installed:
 - Standards: 5 drafts at `docs/standards/` (note which are `draft` vs `confirmed`).
 - Harness: `CLAUDE.md` (created or merged), `.claude/settings.json` (created or merged), `.claude/guild/` state skeleton. Note whether `.gitignore` was reconciled (P2 step 0) so `.claude/` harness is committable — and confirm the harness is visible to git (`git status` shows it), since ignored files silently look "not created".
 - ⑥ Knowledge baseline: `.claude/guild/knowledge/index.md` + `facts/` seeded from the scans (hotspots · co-change · coupling). Note the seeded slice count; `evolve` grows it from here.
-- 강제층 게이트 (M3): `.claude/guild/gates/scripts/gate_precommit.py` + `PreToolUse` hook wired — blocks committing secrets / weakening verification. Off-switch: config `gates.enabled` (or `/gld config`).
+- 강제층 게이트 (M3): `.claude/guild/gates/scripts/gate_precommit.py`, wired three ways — `.git/hooks/pre-commit` (**authoritative**), `PreToolUse(Bash)` (early warning), `PreToolUse(Edit|Write)` (control-file guard). Blocks committing secrets / weakening verification. Off-switch: config `gates.enabled` (or `/gld config`). **State the two honest limits**: `.git/hooks/` is not tracked, so a fresh clone needs `/gld update` to reinstall the hook; and `git commit --no-verify` skips it. If step 6 found a non-empty `core.hooksPath`, say that the authoritative layer is **not** active and what to do about it.
 - Labels: 10 `guild:*` (analyze, design, execute, test, qa, done, child, children, harness, needs-human) (or "skipped — no GitHub repo").
 - Readiness audit (P3.5): report at `.claude/guild/readiness-report.md` — summarize the gap counts (BLOCKER/MAJOR/MINOR) and list any `guild:harness` issues created.
 - Next steps: "`/gld dev <issue>` to develop a GitHub Issue end-to-end (including any `guild:harness` remediation issues). `/gld status <issue>` to check progress. Day-1 agents are intentionally rough — they improve as you work (evolve, a later milestone)."
@@ -244,7 +276,7 @@ Report what was installed:
 
 ## Partial-failure repair (not a hard dead-end)
 
-`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is everything P2 creates: `config.json` + 16 role agents (full roster) + 5 standards + `docs/adr/0000-template.md` + `docs/specs/.gitkeep` + CLAUDE.md guild block + settings.json allowlist **+ PreToolUse gate hook** + 10 labels + `knowledge/` baseline (index.md + facts/) + `gates/` (gate_precommit.py + rules + dismissed.md + findings.json) + `evolution-log.md` + `overlay/.gitkeep` + `.claude/guild/.gitignore` + `memory/.gitkeep`. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
+`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is everything P2 creates: `config.json` + 16 role agents (full roster) + 5 standards + `docs/adr/0000-template.md` + `docs/specs/.gitkeep` + CLAUDE.md guild block + settings.json allowlist **+ both PreToolUse gate hooks + an executable `.git/hooks/pre-commit`** + 10 labels + `knowledge/` baseline (index.md + facts/) + `gates/` (gate_precommit.py + rules + dismissed.md + findings.json) + `evolution-log.md` + `overlay/.gitkeep` + `.claude/guild/.gitignore` + `memory/.gitkeep`. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
 
 ## Hard rules (safety)
 - **Additive only** (INV4): existing files are merged/preserved, never clobbered. CLAUDE.md via markers; settings.json via key union; existing `docs/standards/*` and `.claude/agents/*` are not overwritten.

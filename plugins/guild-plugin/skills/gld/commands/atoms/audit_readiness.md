@@ -21,7 +21,7 @@ Return one `>>> RESULT <<<` line followed by a findings JSON:
 ```
 Keep each field to one line. `present: true` = the thing exists (not a gap — omit or mark ok); only emit gap findings.
 
-## Severity rubric (plan §9)
+## Severity rubric
 - **BLOCKER** — breaks Guild's core loop or exposes a real secret (e.g. no test command at all → verify gate cannot function; a committed/inline secret → active leak, INV5).
 - **MAJOR** — significantly weakens the harness (no CI, no E2E for an app that needs it, no `type:` labels, linter absent).
 - **MINOR** — nice-to-have (coverage tooling, formatter, .gitignore gaps).
@@ -35,9 +35,37 @@ The verify gate judges completion by real test evidence — without tests it is 
 - **`test` command valid?** config `commands.test` present and points at a real runner? Missing → `id: no-test-command`, BLOCKER.
 - **E2E / integration present?** From command-scan `e2e` / `integration_test/`·`e2e/`·cypress·playwright. Absent → `id: no-e2e`, MAJOR (surface it; do NOT run — M1 records only).
 - **Coverage tooling?** lcov/coverage config, `--coverage` flag usage. Absent → `id: no-coverage`, MINOR.
-- **(check only; do NOT execute the suite — plan decision #1=A.)** Note in `remediation` that the user can run the command to confirm green.
+- **(check only; do NOT execute the suite.)** Note in `remediation` that the user can run the command to confirm green.
 
 ## Group 2 — 정적 게이트 (static gates)
+
+**Guild's own commit gate — check this first.** It is the only enforcement Guild installs, and
+it can be silently absent in a repo that otherwise looks fully set up. Skip this whole block
+when `.claude/guild/config.json` is absent (Guild not initialized — `init` will install it).
+
+- **Is the authoritative hook installed and executable?** (its own Bash call — the output is
+  the permission string, or nothing if the file is missing):
+  ```bash
+  ls -l .git/hooks/pre-commit
+  ```
+  Missing, or present without an execute bit → `id: gate-hook-missing`, **BLOCKER**.
+  Remediation: `/gld update` (reinstalls and `chmod +x`). This is the **normal state of a
+  fresh clone** — `.git/hooks/` is not tracked, so every clone of a Guild-enabled repo starts
+  without it while every committed harness file is present. Without it, only the advisory
+  `PreToolUse` layer runs, and a compound `create-and-commit` in one Bash call is unchecked.
+- **Do hooks even fire from `.git/hooks/`?** (its own Bash call; empty output is the good case):
+  ```bash
+  git config --get core.hooksPath
+  ```
+  Non-empty → `id: gate-hookspath-redirect`, **BLOCKER**. The repo redirects git hooks
+  elsewhere (husky and similar do this), so Guild's hook never runs no matter how it is
+  installed. Remediation: copy `.git/hooks/pre-commit` into that directory, or chain to it
+  from the existing hook there. Report the literal path so the fix is actionable.
+- **Is the gate switched off?** Read `.claude/guild/config.json` → `gates.enabled`. `false` →
+  `id: gate-disabled`, MAJOR — legitimate (it is a documented escape hatch), but it should be
+  a deliberate state, not one nobody remembers choosing. Note it and move on.
+
+Then the repo's own static tooling:
 - **Linter configured?** eslint/biome/ruff/flutter_lints/analysis_options etc. Absent → `id: no-linter`, MAJOR.
 - **Typecheck available?** tsc/mypy/`flutter analyze`/etc. Absent (for a typed stack) → `id: no-typecheck`, MAJOR; N/A stacks → skip.
 - **Formatter?** prettier/biome/black/dart format. Absent → `id: no-formatter`, MINOR.
@@ -57,12 +85,12 @@ Guild's work-type routing needs labels; `dev` operates on Issues.
   `gh label list --json name` already returns a flat top-level array of `{"name":...}` objects — indexing it as `.labels[]` (an earlier version of this doc did) errors out (`jq: error ... Cannot index array with string`, exit 5) before the whole command produces any output; verified against the real `jq` binary. Missing `type:feature`/`type:bug`/`type:refactor` → `id: no-type-labels`, MAJOR. why: "작업종류 라우팅(analyze의 재분류)이 라벨에 의존".
 
 ## Group 5 — 위생 (hygiene) — light heuristic (read-only)
-⚠ This is a **light heuristic**, not a full secret scan (real scanning = gitleaks/trufflehog/Semgrep, offered as an opt-in deep step by the caller — plan §11 later milestone). State this limitation in findings.
+⚠ This is a **light heuristic**, not a full secret scan (real scanning = gitleaks/trufflehog/Semgrep, offered as an opt-in deep step by the caller — later milestone). State this limitation in findings.
 - **Committed sensitive files?** Check whether git *tracks* sensitive paths (each its own Bash call, read-only). **Quote every pattern** — unquoted globs are expanded by the shell before `git ls-files` ever sees them, and under zsh's default `NOMATCH` option an unquoted pattern that matches nothing **aborts the whole command with an error** (verified: `git ls-files .env.*` with no `.env.*` file present exits 1 with "no matches found," not an empty/clean result) — since this environment's shell may be zsh, an unquoted call here can silently skip this BLOCKER-severity check entirely on any repo where even one of these globs happens to match zero files, exactly the failure mode a security-relevant check must not have:
   ```bash
   git ls-files '.env' '.env.*' '*.pem' '*.p12' '*.keystore' '*.jks' 'serviceAccount*.json'
   ```
-  ⚠ **Do NOT include `google-services.json`/`GoogleService-Info.plist`/`firebase_options.dart` in this check** — these are Flutter/Firebase **public client identifiers**, conventionally committed, and `gate_precommit.py`'s own `SECRET_PATH_ALLOW_RE` explicitly excludes them from the equivalent commit-time check; flagging them here would contradict that and train the human to distrust/dismiss this finding. Any hit (from the query above) → `id: committed-secret-file`, **BLOCKER**, why: "레포/히스토리 시크릿 = 유출 경로(T4/INV5)". remediation: "gitignore+`git rm --cached`(향후), 키 회전·히스토리 정리는 사람이 수행".
+  ⚠ **Do NOT include `google-services.json`/`GoogleService-Info.plist`/`firebase_options.dart` in this check** — these are Flutter/Firebase **public client identifiers**, conventionally committed, and `gate_precommit.py`'s own `SECRET_PATH_ALLOW_RE` explicitly excludes them from the equivalent commit-time check; flagging them here would contradict that and train the human to distrust/dismiss this finding. Any hit (from the query above) → `id: committed-secret-file`, **BLOCKER**, why: "레포/히스토리 시크릿 = 유출 경로(INV5)". remediation: "gitignore+`git rm --cached`(향후), 키 회전·히스토리 정리는 사람이 수행".
 - **Obvious in-source tokens?** Bounded Grep for high-signal patterns (`AKIA[0-9A-Z]{16}`, `-----BEGIN * PRIVATE KEY-----`, `AIza[0-9A-Za-z_-]{35}`). Hits → `id: inline-secret`, BLOCKER (flag file+line; do NOT print the secret value). Keep bounded (≤ a few Grep calls).
 - **.gitignore coverage?** Read root `.gitignore`. Missing coverage for `.env`, build artifacts, or `.claude/guild/memory/` → `id: gitignore-gap`, MINOR. (Note: init already writes `.claude/guild/.gitignore` for `memory/`; this checks the project root file.)
 

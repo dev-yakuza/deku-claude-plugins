@@ -8,6 +8,13 @@
       "Bash({{TEST_BIN}}:*)",
       "Bash({{LINT_BIN}}:*)"
       {{ADDITIONAL_BIN_ENTRIES}}
+    ],
+    "ask": [
+      "Bash(gh pr merge:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean:*)"
     ]
   },
   "hooks": {
@@ -17,7 +24,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PROJECT_DIR}/.claude/guild/gates/scripts/gate_precommit.py\""
+            "command": "python3 \"${CLAUDE_PROJECT_DIR}/.claude/guild/gates/scripts/gate_precommit.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR}/.claude/guild/gates/scripts/gate_precommit.py\" --guard-config",
+            "timeout": 15
           }
         ]
       }

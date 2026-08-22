@@ -1,6 +1,6 @@
 # DEV
 
-**Drive the full spine on one GitHub Issue: `analyze → design → execute → test → qa → done`.** Main-session FSM. The main session **embodies the leader** (plan §12, §16 C2) — it loads `.claude/agents/leader.md` and uses that persona to assemble the team, run gates, arbitrate, and judge completion. Each stage is executed by reading its wrapper command inline; the wrapper spawns the role sub-agents for that stage.
+**Drive the full spine on one GitHub Issue: `analyze → design → execute → test → qa → done`.** Main-session FSM. The main session **embodies the leader** — it loads `.claude/agents/leader.md` and uses that persona to assemble the team, run gates, arbitrate, and judge completion. Each stage is executed by reading its wrapper command inline; the wrapper spawns the role sub-agents for that stage.
 
 `$1` = Issue number.
 
@@ -51,7 +51,7 @@ Map to the current stage (`_handoff.md` Section A):
   gh issue edit $1 --add-label "guild:analyze"
   ```
 
-Determine work type from the Issue's `type:` label (`type:feature|bug|refactor`) if present; default to feature. **This is provisional, not final** — **analyze may reclassify** (§4 — reality differs from the label; it can also split off a `type:refactor` sub-issue first), and when it does, `analyze.md` Step 3 updates the `type:` label on GitHub as part of reclassifying (so the change is durable, not just prose in the analysis comment). The work type selects the **execute variant** (Phase 2):
+Determine work type from the Issue's `type:` label (`type:feature|bug|refactor`) if present; default to feature. **This is provisional, not final** — **analyze may reclassify** (reality differs from the label; it can also split off a `type:refactor` sub-issue first), and when it does, `analyze.md` Step 3 updates the `type:` label on GitHub as part of reclassifying (so the change is durable, not just prose in the analysis comment). The work type selects the **execute variant** (Phase 2):
 - `type:bug` → **debug** (reproduce → root-cause → fix + regression test)
 - `type:refactor` → **refactor** (behavior-preserving transform; existing tests green)
 - otherwise (feature) → **implement** (TDD red→green→refactor)
@@ -79,11 +79,12 @@ Each wrapper **owns its own label transition** on success (single source — `_h
 - **`OK ADVANCE: <next>`** → the wrapper has already set `guild:<next>`. Continue by running `<next>`'s wrapper.
 - **`OK SPLIT: <N> children`** (from design) → design set the parent to `guild:children` with `N` children now existing in total (`N` isn't necessarily how many design just created this run — a resumed split may have created only the remaining few; Phase 2b re-derives the actual set independently regardless, so `N` is informational only). (`_handoff.md` Section I). **Go to Phase 2b** (child orchestration) — do not run execute on the parent.
 - **`OK DONE`** (from qa) → the wrapper has set `guild:done`. Report completion. Stop.
-- **`NEEDS_HUMAN: <one-line>`** → a discuss/verify gate needs a human decision. **Attended**: as the leader, surface the options and ask the user (`AskUserQuestion`), then re-run the same stage wrapper with the decision. Do NOT auto-decide — plan §4: discuss refuses to proceed until the user chooses. **Unattended (`GLD_UNATTENDED=1`)**: there is no human — stages already self-resolve low/medium gates and return `OK PAUSE: needs-human` for high-stakes ones (`_handoff.md` Section H), so a `NEEDS_HUMAN` should not normally arrive here; if it does, treat it as `OK PAUSE: needs-human` (do NOT call `AskUserQuestion`).
+- **`NEEDS_HUMAN: <one-line>`** → a discuss/verify gate needs a human decision. **Attended**: as the leader, surface the options and ask the user (`AskUserQuestion`), then re-run the same stage wrapper with the decision. Do NOT auto-decide — discuss refuses to proceed until the user chooses. **Unattended (`GLD_UNATTENDED=1`)**: there is no human — stages already self-resolve low/medium gates and return `OK PAUSE: needs-human` for high-stakes ones (`_handoff.md` Section H), so a `NEEDS_HUMAN` should not normally arrive here; if it does, treat it as `OK PAUSE: needs-human` (do NOT call `AskUserQuestion`).
+- **`NEEDS_CONTEXT: <one-line>`** → a required upstream artifact is missing (design without analyze output, execute without a design skeleton). The wrapper has **not** advanced the label. Do not treat this as `FAIL`: re-enter the spine at the stage that produces the missing artifact and run forward from there. If that stage's label is already set — it ran but left nothing behind — stop and surface it as a state inconsistency the human should see (`NEEDS_HUMAN` handling above, attended; `guild:needs-human` + clean stop, unattended). Do not re-run the same wrapper unchanged; it will return the same line.
 - **`OK PAUSE: <one-line>`** → leave label as-is; report where it paused and how to resume (`/gld resume $1`). **Unattended**: a `needs-human` pause has already marked the Issue (`guild:needs-human` label + `<!-- guild:needs-human -->` comment, Section H); stop **cleanly** so the supervisor moves to the next Issue. Stop.
 - **`FAIL: <reason>`** → stop; report the reason.
 
-**Leader judgment between stages**: after each `OK ADVANCE`, briefly confirm the produced output is coherent enough to feed the next stage (completion judged by downstream consumability — plan §18 A). If a gap is obvious, loop back rather than advancing.
+**Leader judgment between stages**: after each `OK ADVANCE`, briefly confirm the produced output is coherent enough to feed the next stage (completion judged by downstream consumability). If a gap is obvious, loop back rather than advancing.
 
 ---
 
@@ -132,7 +133,7 @@ All children are `guild:done`; verify they combine into a correct whole before c
 
 ## Phase 3 — Report
 
-On `OK DONE`: summarize what was built (stages run, PR link if any, test evidence). **Nudge the human review** — the PR now awaits the human reviewer (M1 external reviewer, INV1); suggest the guided pair review to make it lighter: "이슈 #$1 완료 (PR #<n> 오픈) — `/gld review $1`로 리스크 가중 가이드 리뷰를 받을 수 있습니다 (이슈 번호를 넣으면 연결된 PR을 자동으로 찾습니다; PR 번호를 직접 넣어도 됩니다)." On pause/fail: state the stage reached and the resume command. Never claim completion without the test stage's verify evidence (plan §18 B / `_handoff.md` Section E).
+On `OK DONE`: summarize what was built (stages run, PR link if any, test evidence). **Nudge the human review** — the PR now awaits the human reviewer (M1 external reviewer, INV1); suggest the guided pair review to make it lighter: "이슈 #$1 완료 (PR #<n> 오픈) — `/gld review $1`로 리스크 가중 가이드 리뷰를 받을 수 있습니다 (이슈 번호를 넣으면 연결된 PR을 자동으로 찾습니다; PR 번호를 직접 넣어도 됩니다)." On pause/fail: state the stage reached and the resume command. Never claim completion without the test stage's verify evidence (`_handoff.md` Section E).
 
 **Split parent (Phase 2c closed the parent):** summarize the children (each `#<n>` + its PR) and the integration check, then nudge review on the child PRs. **Stopped mid-orchestration** (a child paused): report which child paused (of how many), what it needs, and that `/gld resume $1` continues from it — the remaining children have not run yet.
 
