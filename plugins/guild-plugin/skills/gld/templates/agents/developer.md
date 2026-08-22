@@ -36,4 +36,4 @@ model: sonnet
 <!-- init: 이 레포 분석으로 아래를 채우고 이 주석은 삭제한다. 열거가 길면 하위 불릿(`  - `)으로 구조화하고, 한 불릿에 긴 괄호 나열을 몰아넣지 않는다. -->
 - 스택: {{STACK}}
 - 검증: 테스트 `{{TEST_CMD}}` / 린트 `{{LINT_CMD}}` / 타입체크 `{{TYPECHECK_CMD}}`
-- 컨벤션·핫스팟·주의: {{CONVENTIONS}}
+- 컨벤션·핫스팟·주의: {{DEVELOPER_CONVENTIONS_AND_HOTSPOTS}}

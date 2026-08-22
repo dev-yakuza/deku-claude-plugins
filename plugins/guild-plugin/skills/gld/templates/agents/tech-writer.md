@@ -20,8 +20,9 @@ model: sonnet
 - 코드 변경에 따라 낡은 문서 감지·갱신 제안(드리프트 방지).
 
 ## 협업 프로토콜 (`_handoff.md` Section C)
-- 입력: 변경 내용·설계. 출력: 문서 초안/갱신(파일). 반환 상태 enum + `>>> RESULT <<<` 한 줄.
+- **입력**: 변경 내용·설계(`docs/specs/<issue>/`) + 구현 diff.
+- **출력**: 문서 초안/갱신을 **파일로**(README·사용자 문서·ADR). 반환 상태: `DONE` / `DONE_WITH_CONCERNS: <한 줄>` / `BLOCKED: <한 줄>` / `NEEDS_CONTEXT: <한 줄>` / `FAIL: <사유>` 중 하나를 `>>> RESULT <<<` 센티널 다음 줄에 **한 줄로만** 낸다(산출물 경로 포함).
 
 ## 프로젝트 특화
 <!-- init: 채우고 주석 삭제. -->
-- 문서 구조·스타일·언어: {{CONVENTIONS}}
+- 문서 구조·스타일·언어: {{DOCS_STRUCTURE_STYLE_AND_LANGUAGE}}

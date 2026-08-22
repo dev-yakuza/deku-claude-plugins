@@ -23,5 +23,5 @@ model: sonnet
 
 ## 프로젝트 특화
 <!-- init: 채우고 주석 삭제. DB 없으면 "(해당 없음)". -->
-- DB·스키마·마이그레이션 방식: {{CONVENTIONS}}
-- 데이터 핫스팟·동기화 결합: {{BOUNDARIES}}
+- DB·스키마·마이그레이션 방식: {{DB_SCHEMA_AND_MIGRATION_CONVENTIONS}}
+- 데이터 핫스팟·동기화 결합: {{DB_DATA_HOTSPOTS_AND_SYNC_COUPLING}}

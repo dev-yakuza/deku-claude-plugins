@@ -30,6 +30,6 @@ model: sonnet
 ## 프로젝트 특화
 <!-- init: 이 레포 분석으로 아래를 채우고 이 주석은 삭제한다. 열거가 길면 하위 불릿(`  - `)으로 구조화하고, 한 불릿에 긴 괄호 나열을 몰아넣지 않는다. -->
 - 아키텍처·레이어: {{ARCHITECTURE}}
-- 경계·핵심 결합: {{BOUNDARIES}}
+- 경계·핵심 결합: {{ARCHITECTURE_BOUNDARIES_AND_KEY_COUPLING}}
 - 기술 스택·주요 기술 선택: {{STACK}}
-- 주의(핫스팟·함정): {{CONVENTIONS}}
+- 주의(핫스팟·함정): {{TECH_LEAD_TRAPS_AND_HOTSPOTS}}

@@ -29,4 +29,4 @@ model: sonnet
 ## 프로젝트 특화
 <!-- init: 채우고 주석 삭제. 모르면 "(미정)". -->
 - E2E/수동 QA 환경: {{E2E_SETUP}}
-- 사용자 흐름·핵심 시나리오·플래키 영역: {{CONVENTIONS}}
+- 사용자 흐름·핵심 시나리오·플래키 영역: {{QA_FLOWS_AND_FLAKY_HOTSPOTS}}

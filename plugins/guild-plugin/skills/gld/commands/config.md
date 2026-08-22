@@ -18,22 +18,21 @@ Parse `$1` onward:
 ## Show current config
 1. Read `.claude/guild/config.json`.
    - Absent → "Guild is not initialized (run `/gld init`)." Stop.
-2. Display readably:
+2. Display readably. ⚠ **Every value below comes from the file you just read — none of it is a literal to copy from this doc.** The shape is the example; the content never is. A doc-copied value here is worse than a missing one, because it reads as a real reading of the user's config:
    ```
    Guild config (.claude/guild/config.json)
    ────────────────────────────────────────
-   version:    <config.json's actual "version" field — never a literal copied from this doc>
-   language:   ko
-   roles:      16 — spine: leader, tech-lead, developer, tester, qa
-               specialists: product-owner, designer, infra, dba, security,
-               performance, i18n, analytics, tech-writer, release-manager, support-triage
+   version:    <config.json's "version">
+   language:   <config.json's "language">
+   roles:      <count of config.json's "roles"> — spine: <the spine roles present in that array>
+               specialists: <the remaining roles in that array>
    commands:   test=<...> lint=<...> typecheck=<...> build=<...> e2e=<...>
                (e2e is auto-run by the qa stage when available/warranted; the test
                stage's own automated-correctness pass never runs it — test.md's scope)
-   automation: evolve_nudge=on
-   gates:      enabled=on (pre-commit: secret + verification-weakening block)
+   automation: evolve_nudge=<on|off>
+   gates:      enabled=<on|off> (commit gate: secret + verification-weakening block)
    ```
-   (Render the `roles` array from config; the spine roles always run, specialists are convened per task by the leader.)
+   Render `roles` from the array in the file — **do not enumerate the roster from memory or from this document.** The installed roster is whatever `.claude/guild/config.json` lists and `.claude/agents/` contains; a repo may have grown or pruned it via `evolve` HR, so a hardcoded 16-name list would silently misreport it. Spine roles always run; specialists are convened per task by the leader (participation model: `_handoff.md` Section G).
 
 ## Set a value
 1. Read `.claude/guild/config.json` (parse as JSON in context).

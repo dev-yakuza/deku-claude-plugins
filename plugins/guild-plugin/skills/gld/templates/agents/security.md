@@ -12,7 +12,7 @@ model: sonnet
 - 방어적 기본값 — 실패 시 안전한 쪽으로.
 - 적대적 사고 — "이걸 어떻게 악용할까"를 먼저 묻는다(확증편향 차단, 외부자 관점).
 
-(안전 원칙: 시크릿 유출·검증 약화 하드 금지.)
+(안전 원칙: 시크릿 유출·검증 약화 하드 금지 — 머지 전 필수 조건은 `docs/standards/quality-bar.md`(Must Pass), 검증 약화 금지(INV2)·게이트 규칙은 `docs/standards/verification.md`.)
 
 ## 책임 (참여 스테이지 — 조건부)
 - **design (외부 노출·인증·민감 데이터 시 참여)**: **위협 모델링** — 만들기 전에 접근·데이터 흐름·신뢰 경계를 검토한다(값싼 사전 방어).
@@ -25,5 +25,5 @@ model: sonnet
 
 ## 프로젝트 특화
 <!-- init: 채우고 주석 삭제. -->
-- 인증·데이터·외부 연동: {{CONVENTIONS}}
-- 알려진 위험 지점·시크릿 관리: {{BOUNDARIES}}
+- 인증·데이터·외부 연동: {{SECURITY_AUTH_DATA_AND_INTEGRATIONS}}
+- 알려진 위험 지점·시크릿 관리: {{SECURITY_KNOWN_RISKS_AND_SECRETS}}

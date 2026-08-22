@@ -25,5 +25,5 @@ model: sonnet
 
 ## 프로젝트 특화
 <!-- init: 채우고 주석 삭제. 인프라 없으면 "(해당 없음)". -->
-- CI/CD·배포·환경: {{CONVENTIONS}}
-- 주의(파괴적 지점·마이그레이션): {{BOUNDARIES}}
+- CI/CD·배포·환경: {{CICD_AND_DEPLOY_ENV_CONVENTIONS}}
+- 주의(파괴적 지점·마이그레이션): {{INFRA_DESTRUCTIVE_POINTS_AND_MIGRATIONS}}

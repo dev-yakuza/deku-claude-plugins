@@ -26,5 +26,5 @@ model: sonnet
 
 ## 프로젝트 특화
 <!-- init: 채우고 주석 삭제. UI 없는 앱이면 "(해당 없음)". -->
-- 디자인 시스템·테마·컴포넌트: {{CONVENTIONS}}
-- 접근성·플랫폼 가이드라인 주의: {{BOUNDARIES}}
+- 디자인 시스템·테마·컴포넌트: {{DESIGN_SYSTEM_AND_THEME_CONVENTIONS}}
+- 접근성·플랫폼 가이드라인 주의: {{A11Y_AND_PLATFORM_GUIDELINE_CAUTIONS}}

@@ -33,4 +33,4 @@ model: sonnet
 - 테스트 프레임워크·실행: {{TEST_FRAMEWORK}} — `{{TEST_CMD}}`
 - E2E/통합 테스트: {{E2E_SETUP}}  <!-- init: integration_test/·e2e/ 등이 있으면 프레임워크·디렉터리·실행 커맨드를 기록. 없으면 "없음". M1은 자동 실행하지 않고 기록만 한다. -->
 - 테스트 위치·컨벤션: {{TEST_LOCATION}}
-- 주의(플래키·커버리지 공백): {{CONVENTIONS}}
+- 주의(플래키·커버리지 공백): {{TESTER_FLAKY_AND_COVERAGE_HOTSPOTS}}
