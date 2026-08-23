@@ -226,16 +226,40 @@ def gates_enabled(root):
         return True  # no config / unreadable → gate stays on (safe default)
 
 
+DISMISS_BACKTICK_RE = re.compile(r"`([^`]+)`")
+
+
 def dismissed(root):
     """Accepted-risk registry: entries in dismissed.md are downgraded to warn (matched as a
     whole path-segment via dismiss_matches, not an arbitrary substring — a short entry like
-    "config" must not silently exempt every file whose name contains "config")."""
+    "config" must not silently exempt every file whose name contains "config").
+
+    ⚠ This file is **Markdown**, and the natural way to write a path in Markdown is in
+    backticks — the file's own format line and every human-written entry observed in a real
+    repo do exactly that. The original parser only stripped `-*` and split on the em dash, so
+    `` - `env` — reason `` yielded the literal `` `env` `` *including the backticks*, which
+    matches no path. The registry therefore silently did nothing: a human wrote down an
+    accepted risk, the gate kept blocking on it, and nothing indicated why. Take the first
+    backtick-quoted token when there is one; fall back to the pre-em-dash text otherwise.
+    A trailing parenthetical (`` `path` (`symbol` …) — reason ``) is dropped with it."""
+    entries = []
     try:
-        with open(os.path.join(root, ".claude", "guild", "gates", "dismissed.md"), encoding="utf-8") as fh:
-            return [ln.strip("-* \t").split("—")[0].split("#")[0].strip()
-                    for ln in fh if ln.strip().startswith(("-", "*"))]
+        with open(os.path.join(root, ".claude", "guild", "gates", "dismissed.md"),
+                  encoding="utf-8") as fh:
+            lines = fh.readlines()
     except Exception:
-        return []
+        return entries
+    for ln in lines:
+        if not ln.strip().startswith(("-", "*")):
+            continue
+        m = DISMISS_BACKTICK_RE.search(ln)
+        if m:
+            entries.append(m.group(1).strip())
+            continue
+        raw = ln.strip("-* \t").split("—")[0].split("#")[0].strip()
+        if raw:
+            entries.append(raw)
+    return entries
 
 
 def dismiss_matches(path, entries):

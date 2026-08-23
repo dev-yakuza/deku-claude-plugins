@@ -185,8 +185,22 @@ no keys here
 # 보고하면 두 소비자가 어긋난다. 실제 저장소(21개 flavor의 iOS 배포 인증서 63개 +
 # 릴리스 keystore)에서 이 불일치가 드러났다: 사람이 이미 수용한 위험을 매 audit 마다
 # 다시 기각해야 했고, 그건 검사 자체를 무시하게 만든다.
+# ⚠ 항목은 마크다운 백틱으로 감싸는 것이 이 파일의 자연스러운 표기이며, 파일 자신의 형식
+# 예시와 실제 레포의 사람 작성 항목이 모두 그렇게 쓴다. 백틱을 못 벗기던 시절 이 레지스트리는
+# 조용히 아무 일도 하지 않았다 — 사람은 수용 위험을 적었는데 게이트는 계속 차단했고, 왜인지
+# 알려주는 신호가 없었다. 두 표기 모두 회귀 케이스로 고정한다.
+printf '# accepted\n- `env` — flavor별 배포 인증서 (비공개 레포 정책)\n' > .claude/guild/gates/dismissed.md
+expect_scan "--scan-paths 가 백틱 표기 dismissed 를 존중" --scan-paths 0 \
+  'env/koreanwords/ios/distribution.p12
+lib/main.dart
+' ""
+# 괄호 부연이 붙은 형태 (실제 레포에서 관측된 형태)
+printf '# accepted\n- `env` (`distribution.p12` 등) — 사유\n' > .claude/guild/gates/dismissed.md
+expect_scan "--scan-paths 가 괄호 부연이 붙어도 경로만 추출" --scan-paths 0 \
+  'env/koreanwords/ios/distribution.p12
+' ""
 printf '# accepted\n- env — flavor별 배포 인증서 (비공개 레포 정책)\n' > .claude/guild/gates/dismissed.md
-expect_scan "--scan-paths 가 dismissed.md 를 존중" --scan-paths 0 \
+expect_scan "--scan-paths 가 백틱 없는 표기도 존중" --scan-paths 0 \
   'env/koreanwords/ios/distribution.p12
 lib/main.dart
 ' ""
