@@ -112,7 +112,7 @@ def flush_firings(root, mode):
     try:
         os.makedirs(os.path.dirname(p), exist_ok=True)
         ts = now_iso()
-        with open(p, "a", encoding="utf-8") as fh:
+        with open(p, "a", encoding="utf-8", errors="backslashreplace") as fh:
             for f in _FIRINGS:
                 fh.write(json.dumps({"ts": ts, "mode": mode, **f}, ensure_ascii=False) + "\n")
     except Exception:
@@ -353,7 +353,8 @@ def changed_names(root, diff_filter=None, include_unstaged=False):
         args = ["git", "diff"] + extra + ["--name-only"]
         if diff_filter:
             args += [f"--diff-filter={diff_filter}"]
-        names.update(n for n in sh(args, root=root).splitlines() if n.strip())
+        names.update(unquote_git_path(n.strip()) for n in sh(args, root=root).splitlines()
+                     if n.strip())
     return names
 
 
@@ -365,13 +366,24 @@ def untracked_names(root, enabled):
     if not enabled:
         return set()
     out = sh(["git", "status", "--porcelain", "--untracked-files=all"], root=root)
-    return {ln[3:].strip() for ln in out.splitlines() if ln.startswith("??") and ln[3:].strip()}
+    return {unquote_git_path(ln[3:].strip()) for ln in out.splitlines()
+            if ln.startswith("??") and ln[3:].strip()}
 
 
 def changed_diff(root, include_unstaged=False):
-    """Diff content in scope, unified=0. Same scoping rationale as changed_names."""
+    """Diff content in scope, unified=0. Same scoping rationale as changed_names.
+
+    ⚠ `--src-prefix`/`--dst-prefix` are pinned, not left to the repo's config. A repo that sets
+    `diff.noprefix = true` (or `diff.mnemonicPrefix`) gets headers like
+    `diff --git test/x.py test/x.py` with no `a/`…`b/` at all — `DIFF_GIT_RE` then matches
+    nothing, every line falls back to the `"?"` path, and **every path-based check silently
+    stops working**: verified, a four-assertion removal exited 0. The gate must not depend on a
+    repo-level display preference for its parsing to hold."""
     scopes = [["--cached"]] + ([[]] if include_unstaged else [])
-    return "\n".join(sh(["git", "diff"] + extra + ["--unified=0"], root=root) for extra in scopes)
+    return "\n".join(
+        sh(["git", "diff"] + extra + ["--unified=0", "--src-prefix=a/", "--dst-prefix=b/"],
+           root=root)
+        for extra in scopes)
 
 
 C_QUOTE_ESCAPES = {"a": "\a", "b": "\b", "f": "\f", "n": "\n", "r": "\r",
@@ -671,13 +683,24 @@ HUMAN_NOTE = ("이 판단을 되돌리는 것은 사람의 몫입니다 — 수�
               "시크릿이 이미 커밋된 적이 있다면 키 회전과 히스토리 정리가 필요합니다.")
 
 
-def block_message(reasons):
-    return ("🚫 Guild 게이트 차단 (커밋 거부):\n- "
-            + "\n- ".join(as_message(r) for r in reasons) + "\n\n" + HUMAN_NOTE)
+WARN_HEADER = "⚠ Guild 게이트 경고 (draft 규칙 — 차단 안 함, confirm 시 차단):"
 
 
-def deny_pre_tool_use(reasons):
-    msg = block_message(reasons)
+def block_message(reasons, warn=()):
+    """⚠ Warnings must be folded into the block message, not printed after it. `deny_pre_tool_use`
+    exits the process, so any `if warn:` that follows the deny call is **dead code** — on a
+    blocking run the human saw the block and never the warnings, which are exactly the draft
+    rules one step away from blocking too. They are most worth reading on the run that already
+    stopped you."""
+    out = ("🚫 Guild 게이트 차단 (커밋 거부):\n- "
+           + "\n- ".join(as_message(r) for r in reasons))
+    if warn:
+        out += "\n\n" + WARN_HEADER + "\n- " + "\n- ".join(as_message(w) for w in warn)
+    return out + "\n\n" + HUMAN_NOTE
+
+
+def deny_pre_tool_use(reasons, warn=()):
+    msg = block_message(reasons, warn)
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
@@ -843,10 +866,10 @@ def main_git_hook():
     flush_firings(root, "git-hook")
     write_findings(root, block)
     if block:
-        sys.stderr.write(block_message(block) + "\n")
+        sys.stderr.write(block_message(block, warn) + "\n")
         return 1
     if warn:
-        sys.stderr.write("⚠ Guild 게이트 경고 (draft 경계 규칙 — 차단 안 함, confirm 시 차단):\n- "
+        sys.stderr.write(WARN_HEADER + "\n- "
                          + "\n- ".join(as_message(w) for w in warn) + "\n")
     return 0
 
@@ -880,9 +903,9 @@ def main_pre_tool_use():
     flush_firings(root, "pre-tool-use")
     write_findings(root, block)
     if block:
-        deny_pre_tool_use(block)  # exits 2
+        deny_pre_tool_use(block, warn)  # exits 2
     if warn:
-        sys.stderr.write("⚠ Guild 게이트 경고 (draft 경계 규칙 — 차단 안 함, confirm 시 차단):\n- "
+        sys.stderr.write(WARN_HEADER + "\n- "
                          + "\n- ".join(as_message(w) for w in warn) + "\n")
     return 0
 

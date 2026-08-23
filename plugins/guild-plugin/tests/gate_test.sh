@@ -92,6 +92,32 @@ expect_commit "헤더 스푸핑으로 시크릿 귀속을 못 바꿈" block \
   "printf 'x = 1\n++ b/docs/safe.md\nAKIAIOSFODNN7EXAMPLE\n' > s.py && git add s.py && git commit -m x"
 
 note ""
+note "== A3. 역델타 — one-man-company 포크가 상류보다 앞서 있던 4건 =="
+# 그 레포의 게이트 이관을 analyze 하다 발견됐다. 넷 다 상류의 실제 결함이고, H4 는
+# 0.49.0 의 surrogateescape 도입이 직접 만든 것이다.
+fresh_repo
+# H1: name-only 계열도 C-quote 된다. '$' 앵커가 닫는 따옴표에 막혀 한글 이름 .env 가 통과했다.
+expect_commit "한글 이름 .env 를 시크릿으로 잡음" block \
+  "printf 'SECRET=abc\n' > '한글설정.env' && git add -A && git commit -m x"
+fresh_repo
+# H2: diff.noprefix=true 면 헤더에 a//b/ 가 없어 DIFF_GIT_RE 가 전멸 → 경로 기반 검사 전부 사망.
+expect_commit "diff.noprefix=true 에서도 assertion 삭제를 잡음" block \
+  "git config diff.noprefix true && printf 'def test_a():\n    pass\n' > test/t_test.py && git commit -am x"
+fresh_repo
+# H3: deny 는 exit 하므로 뒤의 warn 출력이 죽은 코드였다 — 차단 시 draft 경고가 통째로 사라졌다.
+mkdir -p lib
+printf '# Rule\n- forbid: lib/** imports package:banned/ [status: draft]\n' > .claude/guild/gates/rules/boundaries.md
+printf 'SECRET=abc\n' > .env
+printf "import 'package:banned/x.dart';\n" > lib/a.dart
+git add -A >/dev/null 2>&1
+OUT="$(python3 .claude/guild/gates/scripts/gate_precommit.py --git-hook 2>&1)"
+case "$OUT" in
+  *차단*경고*) ok "차단 시에도 draft 경고가 함께 보임" ;;
+  *) bad "차단 시에도 draft 경고가 함께 보임" "차단+경고" "$(printf '%s' "$OUT" | head -1)" ;;
+esac
+git reset -q >/dev/null 2>&1; rm -f .env lib/a.dart
+
+note ""
 note "== B. 오탐 회귀 (반드시 통과해야 함) =="
 fresh_repo
 expect_commit ".env.example 커밋 허용" allow \
