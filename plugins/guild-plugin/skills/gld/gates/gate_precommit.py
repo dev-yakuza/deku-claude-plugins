@@ -685,8 +685,22 @@ def check_boundaries(root, dismiss, scope):
             # "lib/data/*" (path-segment bounded), NOT "lib/data*" (bare string prefix),
             # which would also match an unrelated sibling like "lib/database_helper.dart".
             if fnmatch.fnmatch(f, glob) or fnmatch.fnmatch(f, glob.rstrip("/") + "/*"):
-                if any(forb in l for l in lines):
+                matched = [l for l in lines if forb in l]
+                if matched:
                     msg = f"경계 위반: {f} → 금지 참조 '{forb}' (rule: {glob} imports {forb})"
+                    # ⚠ This check is deliberately a line-level string match, not a real import
+                    # parser (see the docstring above) — a comment or a string literal that merely
+                    # *mentions* the forbidden text fires it too. Someone blocked by that, not
+                    # knowing it, reads it as the gate being broken and goes to narrow the rule or
+                    # the parser instead — observed for real in a repo running this gate (a
+                    # proposal to do exactly that was raised and rejected). So when NONE of the
+                    # matched lines is an actual import/export directive, say so in the message.
+                    # The verdict (block/warn) is unchanged — this only adds an explanation, and
+                    # only when every match is comment/string noise, so a real import violation
+                    # never carries this line (that would be noise on the common case instead).
+                    if not any(re.match(r"\s*(?:import|export)\b", l) for l in matched):
+                        msg += ("\n  ※ 실제 import 문이 아니라 주석/문자열에서 매치됐습니다 — 이 검사는 "
+                                "줄 단위 문자열 매칭이라 문구만 언급해도 걸립니다(의도된 동작).")
                     item = finding(f"boundary:{glob} imports {forb}", f, msg)
                     (block if confirmed else warn).append(item)
                     record_firing(f"boundary:{glob} imports {forb}",

@@ -348,6 +348,31 @@ status: confirmed
 - forbid: lib/features/*/domain/** imports package:flutter/'
 expect_commit "접미 없으면 frontmatter status 로 폴백" block \
   "printf \"import 'package:flutter/material.dart';\n\" > lib/features/a/domain/w.dart && git add -A && git commit -m x"
+# U7: 경계 검사는 진짜 import 파서가 아니라 줄 단위 문자열 매칭이다(docstring — grep-level).
+# 그래서 주석/문자열만 금지 문구를 언급해도 발화한다 — 의도된 동작이지만, 모르는 사람은
+# 게이트 고장으로 오인해 규칙/파서를 좁히려 든다(레포에서 실제 관측, evolve #20 반려).
+# 매치된 줄이 하나도 import/export 가 아닐 때만 사유에 안내를 덧붙인다 — 판정은 그대로.
+fresh_repo
+mkdir -p lib/features/a/domain
+bnd '# Rule: boundaries
+- forbid: lib/features/*/domain/** imports package:banned/ [status: confirmed]'
+printf "// see package:banned/ for context\n" > lib/features/a/domain/note.dart
+git add -A >/dev/null 2>&1
+OUT="$(python3 .claude/guild/gates/scripts/gate_precommit.py --git-hook 2>&1)"
+case "$OUT" in
+  *"주석/문자열에서 매치"*) ok "주석/문자열만 매치된 경계 위반 → 안내 문구 부착" ;;
+  *) bad "주석/문자열만 매치된 경계 위반 → 안내 문구 부착" "안내 문구 포함" "$(printf '%s' "$OUT" | head -3)" ;;
+esac
+git reset -q >/dev/null 2>&1; rm -f lib/features/a/domain/note.dart
+# 대조군: 진짜 import 줄이 섞이면 안내 문구를 붙이지 않는다(진짜 위반마다 노이즈가 되면 안 됨).
+printf "import 'package:banned/x.dart';\n// see package:banned/ for context\n" > lib/features/a/domain/note2.dart
+git add -A >/dev/null 2>&1
+OUT="$(python3 .claude/guild/gates/scripts/gate_precommit.py --git-hook 2>&1)"
+case "$OUT" in
+  *"주석/문자열에서 매치"*) bad "진짜 import 가 섞이면 안내 문구를 안 붙임" "안내 문구 없음" "$(printf '%s' "$OUT" | head -3)" ;;
+  *) ok "진짜 import 가 섞이면 안내 문구를 안 붙임" ;;
+esac
+git reset -q >/dev/null 2>&1; rm -f lib/features/a/domain/note2.dart
 
 note ""
 note "== K. 원장 인코딩 =="
