@@ -328,6 +328,8 @@ Non-zero exit → fix it before reporting success; the harness is not installed 
 
 ## P4 — Summary
 
+**Report what verification shows, never what was intended.** Each line below states that something exists on disk — so check it before writing it (P3.9 already confirmed the generated files carry no leftover placeholders and that `settings.json` parses; `git status` confirms the harness is visible to git). An install reported as complete when a step silently failed is worse than an obvious failure: the human then believes the enforcement layer is in place when it is not. If anything from the completeness set is missing, say which, and that init is **partial** — do not round up to success.
+
 Report what was installed:
 - Guild: 16 role agents at `.claude/agents/` — spine (leader, tech-lead, developer, tester, qa) + participation/gate specialists (product-owner, designer, infra, dba, security, performance, i18n, analytics, tech-writer, release-manager, support-triage). Note that the leader convenes the specialists **conditionally** per task (spine roles always run; specialists join by work-type/risk — see `_handoff.md` Section G).
 - Standards: 5 drafts at `docs/standards/` (note which are `draft` vs `confirmed`).

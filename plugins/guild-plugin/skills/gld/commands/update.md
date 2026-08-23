@@ -32,9 +32,32 @@ Preserving local content throughout:
 
 **3. PRESERVE — never touched** (local evolution, INV4): `.claude/agents/*` specialization · `.claude/guild/knowledge/*` (⑥) · `docs/standards/*` (②) · `.claude/guild/overlay/*` (flow overrides) · `.claude/guild/evolution-log.md` (⑤) · `.claude/guild/gates/rules/boundaries.md` (locally grown by `/gld evolve` — `- forbid:` rules, `status: draft`/`confirmed`) · `.claude/guild/gates/dismissed.md` (human-curated accepted-risk registry) · `.claude/guild/gates/findings.json` and `.claude/guild/memory/*` (**runtime state, not structure** — the gate rewrites `findings.json` on its next run and the memory tier is gitignored episodic data; update neither refreshes nor deletes them).
 
-**4. Report** — what updated, what was preserved, the new version, and any newly-available commands. Reversible (git — the update is uncommitted working-tree changes the human reviews + commits).
+**4. Verify it actually landed — before reporting anything** (its own Bash calls; do not skip, and do not report from what you *intended* to write):
+
+```bash
+git status --short
+```
+```bash
+jq -r .version .claude/guild/config.json
+```
+
+- **Working tree unchanged AND `config.version` still the old value** → **nothing was applied.** Say exactly that and why (the human declined at the confirm gate · the run was cancelled · every artifact was already current). Do **not** report success. Then state what to run to actually apply it.
+- **`config.version` still the old value but files did change** → a partial apply: name which artifacts landed and which did not, and that the version was deliberately not bumped. This is a state to surface, not to smooth over.
+- **`config.version` == plugin version and the tree shows the expected changes** → applied; report normally.
+
+Spot-check the two artifacts whose *content* matters most, rather than trusting that a copy happened — the gate script is the enforcement layer and the hook wiring is what makes it run:
+
+```bash
+grep -c "^def main_" .claude/guild/gates/scripts/gate_precommit.py
+```
+On the **managed** path, also confirm the gate is registered in the manager's config (grep it for `gate_precommit.py`); on the **unmanaged** path, that `.git/hooks/pre-commit` exists and is executable.
+
+⚠ **"The plugin updated" ≠ "this repo updated."** These are two different things and conflating them produces a false success report — observed: a run that applied nothing still told the human "Guild 플러그인 업데이트가 적용됐네요", because the *plugin* had indeed reached a new version while the *repo harness* sat untouched at its old one. Step 1 already draws this distinction; the report must keep it. Always name the repo-side version explicitly (`v<old> → v<new>`), never just "updated".
+
+**5. Report** — what updated, what was preserved, the repo-side version transition, and any newly-available commands. Reversible (git — the update is uncommitted working-tree changes the human reviews + commits). If step 4 found nothing applied, the report is that finding.
 
 ## Hard rules
 - **Preserve local evolution** (INV4 additive/merge) — agents · knowledge · standards · overlay · ledger are LOCAL-owned and never overwritten. Only central-owned *structure* is refreshed.
 - **Confirm structural changes** before applying (INV1); leave them uncommitted for the human to review + commit (reversible, INV3).
 - **Never downgrade** (`config.version` ≥ plugin → no-op).
+- **Never claim an update that did not happen.** Report from step 4's verification of the working tree and `config.version`, never from intent. A declined or cancelled confirm gate is a normal outcome — say so plainly; an unchanged repo reported as "적용됐다" is worse than an obvious failure, because the human then believes the enforcement layer is current when it is still the old one.
