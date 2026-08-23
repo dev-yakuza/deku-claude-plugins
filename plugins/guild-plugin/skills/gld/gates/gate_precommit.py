@@ -199,7 +199,17 @@ def sh(args, root=None):
             raise cached
         return cached
     try:
-        out = subprocess.run(full, capture_output=True, text=True, timeout=20).stdout
+        # Decode ourselves with surrogateescape rather than passing text=True. ⚠ `text=True`
+        # decodes strictly, so ONE byte that is not valid UTF-8 anywhere in the output raises
+        # UnicodeDecodeError — which the except below turns into "", i.e. an EMPTY diff, i.e.
+        # the verification and inline-secret checks see nothing and the commit sails through.
+        # Verified: a Latin-1 encoded source file with no NUL byte (git treats it as *text*, so
+        # its content goes into the diff) silently disabled gate B entirely — assertion removal
+        # exited 0. Any repo carrying one EUC-KR/Shift-JIS/Latin-1 file was permanently exposed.
+        # surrogateescape round-trips undecodable bytes instead of raising; the patterns simply
+        # do not match those bytes, which is the correct outcome.
+        out = subprocess.run(full, capture_output=True, timeout=20).stdout.decode(
+            "utf-8", errors="surrogateescape")
     except subprocess.TimeoutExpired:
         exc = GateUnavailable(" ".join(full))
         _SH_CACHE[full] = exc
@@ -352,6 +362,74 @@ def changed_diff(root, include_unstaged=False):
     return "\n".join(sh(["git", "diff"] + extra + ["--unified=0"], root=root) for extra in scopes)
 
 
+C_QUOTE_ESCAPES = {"a": "\a", "b": "\b", "f": "\f", "n": "\n", "r": "\r",
+                   "t": "\t", "v": "\v", "\\": "\\", '"': '"'}
+
+
+def unquote_git_path(p):
+    """Decode git's C-style quoting of a path.
+
+    ⚠ With `core.quotepath` on (git's DEFAULT), any path containing a non-ASCII byte is
+    emitted **quoted and octal-escaped**: `test/한글_test.py` becomes
+    `"test/\\355\\225\\234\\352\\270\\200_test.py"`. So a diff header for such a file reads
+    `+++ "b/test/\\355..."` — which does not even start with `+++ b/`, so the parser never
+    updated the current file, and every added/removed line in it was attributed to whatever
+    file came before. Verified: removing five assertions from a Korean-named test file exited
+    0. `TEST_PATH_RE`/`SECRET_PATH_RE` would also never match the escaped form. Non-ASCII
+    filenames are ordinary in this plugin's own user base, so this was a live bypass."""
+    if len(p) >= 2 and p.startswith('"') and p.endswith('"'):
+        p = p[1:-1]
+    else:
+        return p
+    out, i = [], 0
+    while i < len(p):
+        c = p[i]
+        if c != "\\":
+            out.append(c.encode("utf-8", "surrogateescape"))
+            i += 1
+            continue
+        nxt = p[i + 1] if i + 1 < len(p) else ""
+        if nxt in C_QUOTE_ESCAPES:
+            out.append(C_QUOTE_ESCAPES[nxt].encode("utf-8", "surrogateescape"))
+            i += 2
+        elif nxt.isdigit() and i + 3 < len(p):
+            try:
+                out.append(bytes([int(p[i + 1:i + 4], 8)]))
+                i += 4
+            except ValueError:
+                out.append(c.encode()); i += 1
+        else:
+            out.append(c.encode()); i += 1
+    return b"".join(out).decode("utf-8", errors="surrogateescape")
+
+
+DIFF_GIT_RE = re.compile(r'^diff --git (?:"?a/.*?"?) ("?b/.*"?)$')
+
+
+def iter_diff_lines(diff):
+    """Yield `(path, sign, body)` for each added/removed line, with `path` unquoted.
+
+    File boundaries come from the `diff --git a/X b/Y` header, **not** from `+++ b/`.
+    ⚠ `+++ b/` is spoofable: with `--unified=0` every content line is prefixed with `+` or
+    `-`, so a source line that itself begins with `++ b/evil` arrives as `+++ b/evil` and the
+    old parser accepted it as a header — every following added line was then attributed to a
+    file of the attacker's choosing (verified). A `diff --git ` line cannot be produced that
+    way, because a content line always carries its `+`/`-` prefix at column 0."""
+    path = "?"
+    for ln in diff.splitlines():
+        m = DIFF_GIT_RE.match(ln)
+        if m:
+            b = m.group(1)
+            path = unquote_git_path(b)
+            if path.startswith("b/"):
+                path = path[2:]
+            continue
+        if ln.startswith("+++") or ln.startswith("---"):
+            continue          # real headers carry no content; spoofs are ignored outright
+        if ln[:1] in ("+", "-"):
+            yield path, ln[0], ln[1:]
+
+
 def read_untracked_lines(root, names):
     """Read each in-scope untracked file's content, for scans that need to see it directly
     (it appears in no `git diff`). Best-effort per file: unreadable/binary/huge files are
@@ -383,17 +461,15 @@ def check_secrets(root, dismiss, scope):
         if SECRET_PATH_RE.search(n):
             findings.append(f"민감 파일 커밋 시도: {n}")
             record_firing("secret", "block", n)
-    # inline: added lines
-    cur_file = "?"
-    for ln in changed_diff(root, include_unstaged).splitlines():
-        if ln.startswith("+++ b/"):
-            cur_file = ln[6:]
-        elif ln.startswith("+") and not ln.startswith("+++"):
-            for rx in INLINE_SECRET_RES:
-                if rx.search(ln):
-                    findings.append(f"인라인 시크릿 추정: {cur_file} (값 미표시)")
-                    record_firing("secret", "block", cur_file)
-                    break
+    # inline: added lines (iter_diff_lines — spoof-proof headers, unquoted paths)
+    for cur_file, sign, body in iter_diff_lines(changed_diff(root, include_unstaged)):
+        if sign != "+":
+            continue
+        for rx in INLINE_SECRET_RES:
+            if rx.search(body):
+                findings.append(f"인라인 시크릿 추정: {cur_file} (값 미표시)")
+                record_firing("secret", "block", cur_file)
+                break
     # inline, untracked: never appears in any git diff — read directly.
     for n, lines in read_untracked_lines(root, untracked).items():
         if dismiss_matches(n, dismiss):
@@ -415,29 +491,22 @@ def check_verification(root, dismiss, scope):
             findings.append(f"테스트 파일 삭제: {n} (INV2 — 검증 약화)")
             record_firing("verification", "block", n)
     # (B2/B3) net assertion removal / skip additions
-    cur = "?"
     add_assert = rm_assert = add_skip = 0
     skip_files = set()
-    for ln in changed_diff(root, include_unstaged).splitlines():
-        if ln.startswith("+++ b/"):
-            cur = ln[6:]
-        elif ln.startswith("--- a/"):
-            # a fully-deleted file has no "+++ b/..." header (its new-side header is
-            # "+++ /dev/null"), so without this branch `cur` stays stuck on the previous
-            # file, so this file's removed assertions are counted against it.
-            cur = ln[6:]
-        elif ln.startswith("+") and not ln.startswith("+++"):
-            body = ln[1:]
-            if TEST_PATH_RE.search(cur) and not COMMENT_LINE_RE.match(body):
-                if ASSERT_RE.search(body):
-                    add_assert += 1
-                if SKIP_RE.search(body):
-                    add_skip += 1
-                    skip_files.add(cur)
-        elif ln.startswith("-") and not ln.startswith("---"):
-            body = ln[1:]
-            if TEST_PATH_RE.search(cur) and not COMMENT_LINE_RE.match(body) and ASSERT_RE.search(body):
-                rm_assert += 1
+    # `diff --git` carries BOTH sides, so a fully-deleted file (whose new-side header is
+    # "+++ /dev/null") still resolves to its real path — the old parser needed a special
+    # "--- a/" branch for that, and got the attribution wrong whenever one was missing.
+    for cur, sign, body in iter_diff_lines(changed_diff(root, include_unstaged)):
+        if not TEST_PATH_RE.search(cur) or COMMENT_LINE_RE.match(body):
+            continue
+        if sign == "+":
+            if ASSERT_RE.search(body):
+                add_assert += 1
+            if SKIP_RE.search(body):
+                add_skip += 1
+                skip_files.add(cur)
+        elif ASSERT_RE.search(body):
+            rm_assert += 1
     if add_skip:
         where = ", ".join(sorted(skip_files)) or "test"
         findings.append(f"테스트 skip/focus 지시자 추가 {add_skip}건: {where} (INV2 — 검증 약화)")
@@ -497,12 +566,10 @@ def check_boundaries(root, dismiss, scope):
     if not rules:
         return block, warn
     confirmed = rule_file_confirmed(text)
-    cur, added = "?", {}
-    for ln in changed_diff(root, include_unstaged).splitlines():
-        if ln.startswith("+++ b/"):
-            cur = ln[6:]
-        elif ln.startswith("+") and not ln.startswith("+++"):
-            added.setdefault(cur, []).append(ln[1:])
+    added = {}
+    for cur, sign, body in iter_diff_lines(changed_diff(root, include_unstaged)):
+        if sign == "+":
+            added.setdefault(cur, []).append(body)
     for n, lines in read_untracked_lines(root, untracked_names(root, include_untracked)).items():
         added.setdefault(n, []).extend(lines)
     for glob, forb in rules:

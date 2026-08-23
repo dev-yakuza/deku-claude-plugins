@@ -74,6 +74,24 @@ expect_commit "focus 지시자(it.only) 추가" block \
   "mkdir -p spec && printf 'it.only(\"x\", () => { expect(1).toBe(1) })\n' > spec/a.spec.js && git add spec/a.spec.js && git commit -m x"
 
 note ""
+note "== A2. diff 파싱 우회 (one-man-company 로컬 포크가 이미 막고 있던 것) =="
+# 셋 다 중앙 스크립트의 실제 버그였고, 전부 검증 게이트를 **조용히** 무력화했다.
+# 로컬 포크를 병합하려 그 저장소를 들여다보다 발견했다.
+fresh_repo
+# (1) 잘못된 UTF-8: text=True 가 UnicodeDecodeError 를 내고 sh() 가 ''를 반환 → diff 전체 소실.
+#     NUL 이 없어야 git 이 텍스트로 취급해 내용이 diff 에 들어간다.
+expect_commit "Latin-1 바이트가 있어도 assertion 삭제를 잡음" block \
+  "printf 'def test_a():\n    pass\n' > test/t_test.py && printf '# caf\xe9\nx = 1\n' > legacy.py && git add -A && git commit -m x"
+fresh_repo
+# (2) core.quotepath(git 기본)로 비ASCII 경로는 C-quote 되어 '+++ b/' 로 시작하지 않는다.
+expect_commit "한글 경로 테스트 파일의 assertion 삭제를 잡음" block \
+  "cp test/t_test.py 'test/한글_test.py' && git add -A && git commit -qm k && printf 'def test_x():\n    pass\n' > 'test/한글_test.py' && git commit -am x"
+fresh_repo
+# (3) 내용 줄 '++ b/...' 가 diff 에서 '+++ b/...' 가 되어 헤더로 오인 → 이후 줄이 엉뚱한 파일로 귀속.
+expect_commit "헤더 스푸핑으로 시크릿 귀속을 못 바꿈" block \
+  "printf 'x = 1\n++ b/docs/safe.md\nAKIAIOSFODNN7EXAMPLE\n' > s.py && git add s.py && git commit -m x"
+
+note ""
 note "== B. 오탐 회귀 (반드시 통과해야 함) =="
 fresh_repo
 expect_commit ".env.example 커밋 허용" allow \
