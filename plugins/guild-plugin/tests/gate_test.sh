@@ -233,6 +233,40 @@ LEAK="$(printf 'K="sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAA"\n' | python3 .claude
 case "$LEAK" in *sk-ant*) bad "스캔 출력에 시크릿 값이 없음" "no value" "value leaked" ;; *) ok "스캔 출력에 시크릿 값이 없음 (INV5)" ;; esac
 
 note ""
+note "== J. 경계 규칙의 규칙별 status =="
+# 파일 단위 status 는 설계 결함이었다: 헤더 한 줄이 파일의 모든 규칙을 지배해, 무오탐으로
+# 검증된 규칙 하나를 승격하면 미검증 규칙까지 함께 BLOCK 으로 끌려 올라갔다. 그래서 어떤
+# 레포는 이 파일을 포크해야 했다. 접미를 못 벗기면 <substr> 에 "[status: ...]" 가 붙어
+# 규칙 전체가 조용한 no-op 이 된다 — 설치된 것처럼 보이면서 아무것도 막지 않는다.
+bnd() { printf '%s\n' "$1" > .claude/guild/gates/rules/boundaries.md; }
+fresh_repo
+mkdir -p lib/features/a/domain
+bnd '# Rule: boundaries
+- forbid: lib/features/*/domain/** imports package:flutter/ [status: confirmed]
+- forbid: lib/features/*/domain/** imports package:get/ [status: draft]'
+expect_commit "confirmed 접미가 붙은 규칙은 차단" block \
+  "printf \"import 'package:flutter/material.dart';\n\" > lib/features/a/domain/x.dart && git add -A && git commit -m x"
+git reset -q >/dev/null 2>&1; rm -f lib/features/a/domain/x.dart
+expect_commit "같은 파일의 draft 규칙은 통과 (동반 승격 없음)" allow \
+  "printf \"import 'package:get/get.dart';\n\" > lib/features/a/domain/y.dart && git add -A && git commit -m x"
+git reset -q >/dev/null 2>&1; rm -f lib/features/a/domain/y.dart
+bnd '# Rule: boundaries
+- forbid: lib/features/*/domain/** imports package:flutter/ [status: darft]'
+expect_commit "오타 status 는 draft 로 강등 (BLOCK 아님)" allow \
+  "printf \"import 'package:flutter/material.dart';\n\" > lib/features/a/domain/z.dart && git add -A && git commit -m x"
+git reset -q >/dev/null 2>&1; rm -f lib/features/a/domain/z.dart
+# 접미가 없으면 파일 frontmatter 로 폴백 (하위호환)
+fresh_repo
+mkdir -p lib/features/a/domain
+bnd '---
+status: confirmed
+---
+# Rule
+- forbid: lib/features/*/domain/** imports package:flutter/'
+expect_commit "접미 없으면 frontmatter status 로 폴백" block \
+  "printf \"import 'package:flutter/material.dart';\n\" > lib/features/a/domain/w.dart && git add -A && git commit -m x"
+
+note ""
 note "== I. 레포 로컬 게이트 확장 (scripts/local/*.py) =="
 # update 가 중앙 스크립트를 덮어써도 살아남아야 하는 자리. 이 메커니즘이 없어서 어떤
 # 레포는 중앙 파일을 직접 확장했고, update 가 그 검사를 조용히 지워 confirmed 규칙이

@@ -529,6 +529,7 @@ def check_verification(root, dismiss, scope):
     return findings
 
 
+RULE_STATUS_SUFFIX_RE = re.compile(r"\[\s*status\s*:\s*([^\]]*)\]\s*$", re.I)
 FRONTMATTER_RE = re.compile(r"\A\s*---\s*\n(.*?)\n---\s*(\n|\Z)", re.S)
 
 
@@ -561,9 +562,26 @@ def rule_file_confirmed(text):
 
 def check_boundaries(root, dismiss, scope):
     """Structure/boundary gate (v2, rule-driven). Read gates/rules/boundaries.md; return
-    (block, warn). Frontmatter `status: confirmed` makes its rules BLOCK; otherwise (draft)
-    they only WARN (INV6 — hallucinated structure rules never block until confirmed).
-    Rule line: `- forbid: <path-glob> imports <substr>`. Best-effort (grep-level)."""
+    (block, warn). Rule line: `- forbid: <path-glob> imports <substr> [status: <value>]`.
+    Best-effort (grep-level, not a real import parser).
+
+    **Status is per rule**, with the file's frontmatter `status:` as the fallback for lines
+    that carry no suffix. Only the exact value `confirmed` promotes a rule to BLOCK; anything
+    else — a typo (`darft`), a future value (`pending`), or nothing — leaves it at WARN (INV6:
+    a structure rule the tooling inferred never blocks until a human confirms it).
+
+    ⚠ File-level-only status was a design flaw, not just a missing feature: one header line
+    governed every rule in the file, so promoting a single rule that had been observed
+    false-positive-free dragged every *unvalidated* rule in the same file up to BLOCK with it.
+    That is the opposite of what draft→confirm→enforce is for, and it made the safe move
+    (promote one proven rule) the risky one. Observed in a repo carrying seven boundary rules
+    at mixed maturity, which had to fork this file to express it.
+
+    The suffix is stripped from `<substr>` before matching. Without that, a rule line ending in
+    `[status: confirmed]` silently matched nothing at all — `<substr>` became
+    `package:flutter/ [status: confirmed]`, which appears in no import line — so overwriting
+    such a file with a parser that ignores the suffix turns every rule into a **silent no-op**
+    while still reading as installed."""
     include_unstaged, include_untracked = scope
     block, warn = [], []
     try:
@@ -572,19 +590,31 @@ def check_boundaries(root, dismiss, scope):
             text = fh.read()
     except Exception:
         return block, warn
-    rules = [(m.group(1).strip(), m.group(2).strip())
-             for m in (re.match(r"\s*-\s*forbid:\s*(\S+)\s+imports?\s+(.+)", ln, re.I)
-                       for ln in text.splitlines()) if m]
+    file_confirmed = rule_file_confirmed(text)
+    rules = []
+    for ln in text.splitlines():
+        m = re.match(r"\s*-\s*forbid:\s*(\S+)\s+imports?\s+(.+)", ln, re.I)
+        if not m:
+            continue
+        glob, forb = m.group(1).strip(), m.group(2).strip()
+        # Optional PER-RULE status suffix, anchored at end of line.
+        sm = RULE_STATUS_SUFFIX_RE.search(forb)
+        if sm:
+            forb = forb[:sm.start()].strip()
+            rule_confirmed = sm.group(1).strip().lower() == "confirmed"
+        else:
+            rule_confirmed = file_confirmed
+        if forb:
+            rules.append((glob, forb, rule_confirmed))
     if not rules:
         return block, warn
-    confirmed = rule_file_confirmed(text)
     added = {}
     for cur, sign, body in iter_diff_lines(changed_diff(root, include_unstaged)):
         if sign == "+":
             added.setdefault(cur, []).append(body)
     for n, lines in read_untracked_lines(root, untracked_names(root, include_untracked)).items():
         added.setdefault(n, []).extend(lines)
-    for glob, forb in rules:
+    for glob, forb, confirmed in rules:
         for f, lines in added.items():
             if dismiss_matches(f, dismiss):
                 continue
