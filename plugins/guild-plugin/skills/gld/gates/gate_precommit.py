@@ -68,6 +68,18 @@ class GateUnavailable(Exception):
     Distinct from a crash: unverified is not the same as verified-clean."""
 
 
+def finding(rule, path, message):
+    """One gate finding. Structured rather than a bare string so a repo-local extension can
+    *narrow* a central rule (see `refine`) — a plain message gives it nothing to match on."""
+    return {"rule": rule, "file": path or "?", "message": message}
+
+
+def as_message(f):
+    """Render a finding for a human. Accepts a plain string for backward compatibility with a
+    local `check()` that returns strings."""
+    return f["message"] if isinstance(f, dict) else str(f)
+
+
 def record_firing(rule, action, path):
     """Queue one rule-firing for the log. rule = 'secret' | 'verification' |
     'boundary:<glob> imports <forb>'; action = 'block' | 'warn'."""
@@ -459,7 +471,7 @@ def check_secrets(root, dismiss, scope):
         if SECRET_PATH_ALLOW_RE.search(n) or dismiss_matches(n, dismiss):
             continue
         if SECRET_PATH_RE.search(n):
-            findings.append(f"민감 파일 커밋 시도: {n}")
+            findings.append(finding("secret", n, f"민감 파일 커밋 시도: {n}"))
             record_firing("secret", "block", n)
     # inline: added lines (iter_diff_lines — spoof-proof headers, unquoted paths)
     for cur_file, sign, body in iter_diff_lines(changed_diff(root, include_unstaged)):
@@ -467,7 +479,7 @@ def check_secrets(root, dismiss, scope):
             continue
         for rx in INLINE_SECRET_RES:
             if rx.search(body):
-                findings.append(f"인라인 시크릿 추정: {cur_file} (값 미표시)")
+                findings.append(finding("secret", cur_file, f"인라인 시크릿 추정: {cur_file} (값 미표시)"))
                 record_firing("secret", "block", cur_file)
                 break
     # inline, untracked: never appears in any git diff — read directly.
@@ -476,7 +488,7 @@ def check_secrets(root, dismiss, scope):
             continue
         for ln in lines:
             if any(rx.search(ln) for rx in INLINE_SECRET_RES):
-                findings.append(f"인라인 시크릿 추정: {n} (값 미표시)")
+                findings.append(finding("secret", n, f"인라인 시크릿 추정: {n} (값 미표시)"))
                 record_firing("secret", "block", n)
                 break
     return findings
@@ -488,7 +500,7 @@ def check_verification(root, dismiss, scope):
     # (B1) deleted test files
     for n in changed_names(root, diff_filter="D", include_unstaged=include_unstaged):
         if TEST_PATH_RE.search(n) and not dismiss_matches(n, dismiss):
-            findings.append(f"테스트 파일 삭제: {n} (INV2 — 검증 약화)")
+            findings.append(finding("verification:test-deleted", n, f"테스트 파일 삭제: {n} (INV2 — 검증 약화)"))
             record_firing("verification", "block", n)
     # (B2/B3) net assertion removal / skip additions
     add_assert = rm_assert = add_skip = 0
@@ -509,10 +521,10 @@ def check_verification(root, dismiss, scope):
             rm_assert += 1
     if add_skip:
         where = ", ".join(sorted(skip_files)) or "test"
-        findings.append(f"테스트 skip/focus 지시자 추가 {add_skip}건: {where} (INV2 — 검증 약화)")
+        findings.append(finding("verification:test-skip", where, f"테스트 skip/focus 지시자 추가 {add_skip}건: {where} (INV2 — 검증 약화)"))
         record_firing("verification", "block", "test-skip")
     if rm_assert - add_assert >= 3:
-        findings.append(f"테스트 assertion 순감소 (~{rm_assert - add_assert}줄, INV2 — 검증 약화 의심)")
+        findings.append(finding("verification:assertion-drop", "?", f"테스트 assertion 순감소 (~{rm_assert - add_assert}줄, INV2 — 검증 약화 의심)"))
         record_firing("verification", "block", "assertion-drop")
     return findings
 
@@ -582,7 +594,8 @@ def check_boundaries(root, dismiss, scope):
             if fnmatch.fnmatch(f, glob) or fnmatch.fnmatch(f, glob.rstrip("/") + "/*"):
                 if any(forb in l for l in lines):
                     msg = f"경계 위반: {f} → 금지 참조 '{forb}' (rule: {glob} imports {forb})"
-                    (block if confirmed else warn).append(msg)
+                    item = finding(f"boundary:{glob} imports {forb}", f, msg)
+                    (block if confirmed else warn).append(item)
                     record_firing(f"boundary:{glob} imports {forb}",
                                   "block" if confirmed else "warn", f)
     return block, warn
@@ -596,7 +609,8 @@ def write_findings(root, findings):
         p = os.path.join(root, ".claude", "guild", "gates")
         os.makedirs(p, exist_ok=True)
         with open(os.path.join(p, "findings.json"), "w", encoding="utf-8") as fh:
-            json.dump({"open": findings}, fh, ensure_ascii=False, indent=2)
+            json.dump({"open": [as_message(f) for f in findings]}, fh,
+                      ensure_ascii=False, indent=2)
     except Exception:
         pass
 
@@ -613,7 +627,8 @@ HUMAN_NOTE = ("이 판단을 되돌리는 것은 사람의 몫입니다 — 수�
 
 
 def block_message(reasons):
-    return "🚫 Guild 게이트 차단 (커밋 거부):\n- " + "\n- ".join(reasons) + "\n\n" + HUMAN_NOTE
+    return ("🚫 Guild 게이트 차단 (커밋 거부):\n- "
+            + "\n- ".join(as_message(r) for r in reasons) + "\n\n" + HUMAN_NOTE)
 
 
 def deny_pre_tool_use(reasons):
@@ -681,14 +696,14 @@ class LocalGateContext:
 
 def run_local_checks(root, dismiss, scope):
     d = os.path.join(root, ".claude", "guild", "gates", "scripts", "local")
-    block, warn = [], []
+    block, warn, refiners = [], [], []
     if not os.path.isdir(d):
-        return block, warn
+        return block, warn, refiners
     try:
         import importlib.util
         names = sorted(n for n in os.listdir(d) if n.endswith(".py") and not n.startswith("_"))
     except Exception:
-        return block, warn
+        return block, warn, refiners
     # Do not leave a `__pycache__` beside the extension. This directory is inside the repo and
     # Guild-owned, so bytecode dropped here becomes an untracked artifact the human then has to
     # notice and ignore — in a repo whose .gitignore does not already cover it, it lands in the
@@ -703,23 +718,67 @@ def run_local_checks(root, dismiss, scope):
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             fn = getattr(mod, "check", None)
-            if fn is None:
-                continue
-            b, w = fn(ctx)
-            block.extend(b or [])
-            warn.extend(w or [])
+            if fn is not None:
+                b, w = fn(ctx)
+                block.extend(b or [])
+                warn.extend(w or [])
+            rf = getattr(mod, "refine", None)
+            if rf is not None:
+                refiners.append((name, rf))
         except Exception as e:
             warn.append(f"로컬 게이트 확장 '{name}' 실행 실패 — 이 검사는 건너뜁니다 ({e})")
     sys.dont_write_bytecode = prev_dont_write
-    return block, warn
+    return block, warn, refiners
+
+
+# A repo may need to NARROW a central rule, not just add its own. Real cases, both from a repo
+# whose gate had been forked precisely because this was impossible: "deleting a non-entry-point
+# integration test is not a weakening — our architecture has one entry point, so removing the
+# others *restores* it", and "this dismissal was too broad and let later unrelated commits strip
+# verification permanently, so narrow when it applies". Neither is expressible as an added
+# finding, and neither is a static path (so `dismissed.md` cannot carry it) — without this hook
+# they stay in a maintained fork forever, which is exactly the failure this whole mechanism
+# exists to end.
+#
+# Guard rails, because suppression is the dangerous direction:
+#   - **A `secret` finding can never be suppressed.** INV5 is not a repo-local policy question,
+#     and `dismissed.md` (human-written, reviewable) is the sanctioned path for an accepted
+#     secret risk. A refiner that returns fewer secret findings is ignored for those.
+#   - **Every suppression is logged** as a firing with `action: "suppressed-by-<module>"`, so it
+#     reaches evolve's rule scorecard and `/gld audit` rather than vanishing. A silent narrowing
+#     would be indistinguishable from the gate being broken.
+#   - A refiner that raises leaves the findings untouched (fail-closed for suppression).
+def apply_refiners(refiners, findings, ctx):
+    for name, rf in refiners:
+        try:
+            kept = rf(ctx, list(findings))
+        except Exception:
+            continue                      # a broken refiner suppresses nothing
+        if kept is None:
+            continue
+        kept_ids = {id(f) for f in kept}
+        survivors, dropped = [], []
+        for f in findings:
+            rule = f.get("rule", "") if isinstance(f, dict) else ""
+            if id(f) in kept_ids or rule.startswith("secret"):
+                survivors.append(f)
+            else:
+                dropped.append(f)
+        for f in dropped:
+            record_firing(f.get("rule", "?"), f"suppressed-by-{name}", f.get("file", "?"))
+        findings = survivors
+    return findings
 
 
 def run_checks(root, scope):
     dismiss = dismissed(root)
     block = check_secrets(root, dismiss, scope) + check_verification(root, dismiss, scope)
     b_block, b_warn = check_boundaries(root, dismiss, scope)
-    l_block, l_warn = run_local_checks(root, dismiss, scope)
-    return block + b_block + l_block, b_warn + l_warn
+    l_block, l_warn, refiners = run_local_checks(root, dismiss, scope)
+    all_block = block + b_block + l_block
+    if refiners:
+        all_block = apply_refiners(refiners, all_block, LocalGateContext(root, dismiss, scope))
+    return all_block, b_warn + l_warn
 
 
 def main_git_hook():
@@ -743,7 +802,7 @@ def main_git_hook():
         return 1
     if warn:
         sys.stderr.write("⚠ Guild 게이트 경고 (draft 경계 규칙 — 차단 안 함, confirm 시 차단):\n- "
-                         + "\n- ".join(warn) + "\n")
+                         + "\n- ".join(as_message(w) for w in warn) + "\n")
     return 0
 
 
@@ -779,7 +838,7 @@ def main_pre_tool_use():
         deny_pre_tool_use(block)  # exits 2
     if warn:
         sys.stderr.write("⚠ Guild 게이트 경고 (draft 경계 규칙 — 차단 안 함, confirm 시 차단):\n- "
-                         + "\n- ".join(warn) + "\n")
+                         + "\n- ".join(as_message(w) for w in warn) + "\n")
     return 0
 
 

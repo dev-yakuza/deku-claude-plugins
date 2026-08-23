@@ -282,6 +282,50 @@ git reset -q >/dev/null 2>&1; rm -f lib/*.dart
 printf '# Rule\nstatus: draft\n' > .claude/guild/gates/rules/test-naming.md
 expect_commit "규칙이 draft 면 통과 (경고만)" allow \
   "mkdir -p lib && printf 'void g() { /* see Issue #99 */ }\n' > lib/b.dart && git add lib/b.dart && git commit -m x"
+# refine(ctx, findings) — 중앙 규칙을 레포 조건에 맞게 *좁히는* 훅.
+# 이게 없어서 어떤 레포는 "비-진입점 통합테스트 삭제는 예외" 같은 정책을 표현할 수 없었고,
+# 결국 중앙 스크립트를 포크로 유지해야 했다 — 영구 포크 표면이 곧 update 사고의 원인이다.
+fresh_repo
+mkdir -p .claude/guild/gates/scripts/local
+cat > .claude/guild/gates/scripts/local/narrow.py <<'LOCAL'
+EXEMPT = "test/exempt_test.py"
+
+
+def refine(ctx, findings):
+    """이 레포 정책: EXEMPT 파일의 삭제는 검증 약화가 아니다.
+
+    ⚠ 파일 하나를 지우면 finding 이 둘 난다 — test-deleted 와, 그 파일의 assertion 이
+    3개 이상이면 assertion-drop 까지. 앞의 것만 면제하면 뒤의 것이 그대로 막으므로
+    면제가 성립하지 않는다. 삭제 대상이 이 파일뿐일 때만 둘 다 면제한다."""
+    deleted = {f.get("file") for f in findings if f.get("rule") == "verification:test-deleted"}
+    if deleted != {EXEMPT}:
+        return findings          # 다른 테스트도 함께 지워졌다면 면제하지 않는다
+    return [f for f in findings if not f.get("rule", "").startswith("verification:")]
+LOCAL
+cp test/t_test.py test/exempt_test.py; git add -A >/dev/null 2>&1; git commit -qm add >/dev/null 2>&1
+expect_commit "refine 이 지정한 verification finding 을 면제" allow \
+  "git rm -q test/exempt_test.py && git commit -m x"
+git reset -q >/dev/null 2>&1; git checkout -q -- . 2>/dev/null
+expect_commit "refine 대상 밖 테스트 삭제는 그대로 차단" block \
+  "git rm -q test/t_test.py && git commit -m x"
+git reset -q >/dev/null 2>&1; git checkout -q -- . 2>/dev/null
+# ⚠ 안전장치: secret 은 어떤 refine 으로도 억제되지 않는다 (INV5).
+cat > .claude/guild/gates/scripts/local/narrow.py <<'LOCAL'
+def refine(ctx, findings):
+    return []          # 전부 억제 시도
+LOCAL
+expect_commit "refine 은 secret finding 을 억제하지 못함 (INV5)" block \
+  "printf 'SECRET=abc\n' > .env && git add .env && git commit -m x"
+git reset -q >/dev/null 2>&1; rm -f .env
+# 깨진 refiner 는 아무것도 억제하지 않는다 (fail-closed)
+cat > .claude/guild/gates/scripts/local/narrow.py <<'LOCAL'
+def refine(ctx, findings):
+    raise RuntimeError("boom")
+LOCAL
+expect_commit "깨진 refine 은 억제 없이 차단 유지" block \
+  "printf 'SECRET=abc\n' > .env && git add .env && git commit -m x"
+git reset -q >/dev/null 2>&1; rm -f .env .claude/guild/gates/scripts/local/narrow.py
+
 # 깨진 확장은 게이트를 막지 않아야 한다 (fail-open)
 fresh_repo
 mkdir -p .claude/guild/gates/scripts/local
