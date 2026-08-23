@@ -435,11 +435,21 @@ def iter_diff_lines(diff):
 
     File boundaries come from the `diff --git a/X b/Y` header, **not** from `+++ b/`.
     ⚠ `+++ b/` is spoofable: with `--unified=0` every content line is prefixed with `+` or
-    `-`, so a source line that itself begins with `++ b/evil` arrives as `+++ b/evil` and the
-    old parser accepted it as a header — every following added line was then attributed to a
-    file of the attacker's choosing (verified). A `diff --git ` line cannot be produced that
-    way, because a content line always carries its `+`/`-` prefix at column 0."""
-    path = "?"
+    `-`, so a source line that itself begins with `++ b/evil` arrives as `+++ b/evil`. It is
+    never parsed for a path — `diff --git` is the only path authority — so the spoof cannot
+    redirect attribution.
+
+    ⚠ But it must still be SCANNED. Skipping every `+++`/`---` line outright (the previous
+    shape) meant a source line written as `++ <secret>` or `-- <assertion>` reached no check
+    at all: the inline-secret scan, the assertion tally and the boundary rules all never saw
+    it. Verified: a one-line file whose only content began with `++ ` yielded nothing.
+
+    So use the markers that a content line CANNOT forge as the frame. `diff --git` and `@@`
+    appear at column 0 with no `+`/`-` prefix (a source `@@ x` shows up as `+@@ x`), so they
+    are trustworthy; `---`/`+++` are not. `diff --git` opens a header region, `@@` closes it,
+    and everything inside the region is header (index/mode/similarity/rename/---/+++) and is
+    consumed. Outside it, a `+`/`-` line is content — including one shaped like a header."""
+    path, in_header = "?", False
     for ln in diff.splitlines():
         m = DIFF_GIT_RE.match(ln)
         if m:
@@ -447,9 +457,14 @@ def iter_diff_lines(diff):
             path = unquote_git_path(b)
             if path.startswith("b/"):
                 path = path[2:]
+            in_header = True
             continue
-        if ln.startswith("+++") or ln.startswith("---"):
-            continue          # real headers carry no content; spoofs are ignored outright
+        if in_header:
+            if ln.startswith("@@"):
+                in_header = False
+            continue          # index/mode/similarity/rename/binary/---/+++ — no content here
+        if ln.startswith("@@"):
+            continue          # next hunk of the same file
         if ln[:1] in ("+", "-"):
             yield path, ln[0], ln[1:]
 
@@ -509,8 +524,9 @@ def check_secrets(root, dismiss, scope):
 def check_verification(root, dismiss, scope):
     include_unstaged, _ = scope
     findings = []
+    deleted = changed_names(root, diff_filter="D", include_unstaged=include_unstaged)
     # (B1) deleted test files
-    for n in changed_names(root, diff_filter="D", include_unstaged=include_unstaged):
+    for n in deleted:
         if TEST_PATH_RE.search(n) and not dismiss_matches(n, dismiss):
             findings.append(finding("verification:test-deleted", n, f"테스트 파일 삭제: {n} (INV2 — 검증 약화)"))
             record_firing("verification", "block", n)
@@ -537,6 +553,26 @@ def check_verification(root, dismiss, scope):
                 add_skip += 1
                 skip_files.add(cur)
         elif ASSERT_RE.search(body):
+            # A dismissal must not be overturned by the very next check. Deleting a test file
+            # a human already accepted (B1, above) removes all of its assertions, which B2
+            # then counts as a net drop — so the registry silently does nothing for exactly
+            # the case it exists for.
+            #
+            # Both halves of the condition are load-bearing, and both must stay NARROW:
+            #  - `cur in deleted`: without it, a dismissal becomes a STANDING LICENCE to strip
+            #    assertions from that file forever, in unrelated later commits, while the file
+            #    stays in the tree. (Observed in the repo that first shipped this: registry
+            #    entry + 6→3 assertions in a later commit → exit 0.)
+            #  - the `-` branch only: widening this to the `+` side would turn off B3 (skip
+            #    additions) for the path, and since add_skip/add_assert are COMMIT-WIDE
+            #    counters, one entry would erase that file's contribution to the whole
+            #    commit's tally — one registration becoming a commit-wide off-switch.
+            #
+            # A legitimate MOVE of assertions to another file needs no exemption: B2 measures
+            # the commit-wide net, so the removal and the addition cancel out. Only a whole
+            # deletion — which has no addition to cancel it — reaches here.
+            if cur in deleted and dismiss_matches(cur, dismiss):
+                continue
             rm_assert += 1
             per_file[cur] = per_file.get(cur, 0) + 1
     if add_skip:
@@ -665,7 +701,14 @@ def write_findings(root, findings):
     try:
         p = os.path.join(root, ".claude", "guild", "gates")
         os.makedirs(p, exist_ok=True)
-        with open(os.path.join(p, "findings.json"), "w", encoding="utf-8") as fh:
+        # errors="backslashreplace" 는 ensure_ascii=False 와 짝이다. 경로는 unquote_git_path 의
+        # surrogateescape 디코드를 거치므로 진짜로 잘못된 UTF-8 바이트는 짝 없는 서로게이트로
+        # 살아남고, strict 인코드는 그것을 거부한다 — 쓰기가 중간에 끊긴 채 blanket except 가
+        # 삼켜, 이 원장이 "파싱 불가 파일"로 남는다. findings.json 은 evolve/audit 이
+        # "미해결 위반 목록" 으로 읽는 파일이라, 조용히 빈/깨진 원장은 "로깅 실패" 가 아니라
+        # "위반 없음" 으로 오독된다. flush_firings 가 같은 이유로 같은 처리를 한다(L115).
+        with open(os.path.join(p, "findings.json"), "w", encoding="utf-8",
+                  errors="backslashreplace") as fh:
             json.dump({"open": [as_message(f) for f in findings]}, fh,
                       ensure_ascii=False, indent=2)
     except Exception:
@@ -793,7 +836,13 @@ def run_local_checks(root, dismiss, scope):
             rf = getattr(mod, "refine", None)
             if rf is not None:
                 refiners.append((name, rf))
-        except Exception as e:
+        # ⚠ SystemExit is not an Exception (it derives from BaseException), so `sys.exit()`
+        # inside a local module — deliberate or a stray `exit(0)` in copy-pasted code — walked
+        # straight through this handler and ended the whole gate process with that status,
+        # before any finding was reported. Verified: a local check calling sys.exit(0) let a
+        # staged key file through. A broken extension must degrade to a warning, never decide
+        # the verdict. KeyboardInterrupt is deliberately NOT caught (Ctrl-C must still work).
+        except (Exception, SystemExit) as e:
             warn.append(f"로컬 게이트 확장 '{name}' 실행 실패 — 이 검사는 건너뜁니다 ({e})")
     sys.dont_write_bytecode = prev_dont_write
     return block, warn, refiners
@@ -818,6 +867,13 @@ def run_local_checks(root, dismiss, scope):
 #   - A refiner that raises leaves the findings untouched (fail-closed for suppression).
 def apply_refiners(refiners, findings, ctx):
     for name, rf in refiners:
+        # ⚠ Decide what is a secret BEFORE handing the findings over. `list(findings)` is a
+        # SHALLOW copy, so the refiner holds the same dict objects this loop will judge — and
+        # reading `f["rule"]` afterwards lets `f["rule"] = "harmless"` turn the INV5 guard off.
+        # Verified: a refiner that rewrote every rule and returned [] suppressed the secret
+        # finding too. The snapshot cannot break an honest refiner: a refiner's job is to CHOOSE
+        # which elements survive, and `rule` is an input to that choice, never its output.
+        rules = [(f.get("rule", "") if isinstance(f, dict) else "") for f in findings]
         try:
             kept = rf(ctx, list(findings))
         except Exception:
@@ -826,14 +882,18 @@ def apply_refiners(refiners, findings, ctx):
             continue
         kept_ids = {id(f) for f in kept}
         survivors, dropped = [], []
-        for f in findings:
-            rule = f.get("rule", "") if isinstance(f, dict) else ""
-            if id(f) in kept_ids or rule.startswith("secret"):
+        for i, f in enumerate(findings):
+            if id(f) in kept_ids or rules[i].startswith("secret"):
                 survivors.append(f)
             else:
                 dropped.append(f)
         for f in dropped:
-            record_firing(f.get("rule", "?"), f"suppressed-by-{name}", f.get("file", "?"))
+            # a local `check()` may return plain strings (see as_message) — those have no
+            # .get, and an AttributeError here escapes to the module-level fail-open, i.e. a
+            # suppression attempt would ALLOW the commit outright.
+            record_firing(f.get("rule", "?") if isinstance(f, dict) else "?",
+                          f"suppressed-by-{name}",
+                          f.get("file", "?") if isinstance(f, dict) else "?")
         findings = survivors
     return findings
 
@@ -926,6 +986,27 @@ GATE_CONTROL_RE = re.compile(
 CONFIG_PATH_RE = re.compile(r"\.claude/guild/config\.json$")
 GATES_KEY_RE = re.compile(r"\"gates\"|gates\.enabled|\"enabled\"")
 
+# The gate's own WIRING: the files that decide whether it runs at all. Distinct from
+# GATE_CONTROL_RE (what it checks) because the remediation and the message differ.
+#
+# ⚠ `.git/hooks/pre-commit` is only the authoritative layer's home in an UNMANAGED repo. In a
+# repo running lefthook/husky/pre-commit/overcommit/simple-git-hooks — the case `init` step 2b
+# exists for — the gate is registered as one of the manager's commands, in its COMMITTED config.
+# Deleting that one line removes the enforcement layer entirely and leaves no other trace, and
+# nothing asked. `.claude/settings.json` is the same class of file: it carries the PreToolUse
+# wirings, including this guard's own.
+#
+# Deliberately NOT included: `package.json`. husky/simple-git-hooks can be configured there,
+# but it is edited on nearly every dependency change — asking on it would train click-through,
+# which costs more than the case it covers. Recorded as a known gap rather than papered over.
+GATE_WIRING_RE = re.compile(
+    r"(^|/)\.claude/settings(\.local)?\.json$|"
+    r"(^|/)\.?lefthook\.(ya?ml|toml|json)$|"
+    r"(^|/)\.husky/|"
+    r"(^|/)\.pre-commit-config\.ya?ml$|"
+    r"(^|/)\.overcommit\.yml$|"
+    r"(^|/)\.simple-git-hooks\.(json|js|cjs)$")
+
 
 def main_guard_config():
     raw = sys.stdin.read() if not sys.stdin.isatty() else ""
@@ -940,6 +1021,8 @@ def main_guard_config():
     body = " ".join(str(ti.get(k, "")) for k in ("content", "new_string", "edits"))
     if GATE_CONTROL_RE.search(path):
         what = "게이트 규칙/스크립트"
+    elif GATE_WIRING_RE.search(path):
+        what = "게이트 배선 (훅 등록·훅 설정)"
     elif CONFIG_PATH_RE.search(path) and GATES_KEY_RE.search(body):
         what = "게이트 off-switch (gates.enabled)"
     else:

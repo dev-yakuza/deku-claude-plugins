@@ -90,6 +90,34 @@ fresh_repo
 # (3) 내용 줄 '++ b/...' 가 diff 에서 '+++ b/...' 가 되어 헤더로 오인 → 이후 줄이 엉뚱한 파일로 귀속.
 expect_commit "헤더 스푸핑으로 시크릿 귀속을 못 바꿈" block \
   "printf 'x = 1\n++ b/docs/safe.md\nAKIAIOSFODNN7EXAMPLE\n' > s.py && git add s.py && git commit -m x"
+fresh_repo
+# (4) U2: '++ '/'-- ' 로 시작하는 소스 줄은 헤더가 아니라 콘텐츠다 — 무조건 skip 하면 그
+#     줄 자체의 인라인 시크릿이 스캔을 통째로 벗어난다.
+expect_commit "'++ ' 로 시작하는 소스 줄의 인라인 시크릿도 스캔됨" block \
+  "printf '++ AKIAIOSFODNN7EXAMPLE\n' > k.py && git add k.py && git commit -m x"
+fresh_repo
+# (5) U2, delete 방향: 소스 줄이 '-- ' 로 시작하면 삭제 시 diff 줄이 '---' 가 되어, 예전엔
+# 헤더로 오인돼 스캔에서 통째로 빠졌다 — iter_diff_lines 유닛 레벨로 직접 검증한다.
+# (check_verification 의 B2 는 COMMENT_LINE_RE 가 '--' 접두를 SQL/Lua 주석으로 별도
+# 취급해 항상 assertion 집계에서 제외하므로, 그 경로로는 이 사실이 관찰되지 않는다.)
+printf -- '-- x = 1\n' > test/dashcontent_test.py
+git add -A && git commit -qm add_dashcontent >/dev/null 2>&1
+printf 'y = 2\n' > test/dashcontent_test.py
+git add -A
+OUT="$(python3 - <<'PY'
+import sys
+sys.path.insert(0, ".claude/guild/gates/scripts")
+import gate_precommit as g
+diff = g.changed_diff(".", False)
+removed = [b for p, s, b in g.iter_diff_lines(diff) if s == "-"]
+print("OK" if "-- x = 1" in removed else "FAIL:" + repr(removed))
+PY
+)"
+case "$OUT" in
+  *OK*) ok "'-- ' 접두 소스 줄도 삭제 시 콘텐츠로 스캔됨 (iter_diff_lines)" ;;
+  *) bad "'-- ' 접두 소스 줄도 삭제 시 콘텐츠로 스캔됨 (iter_diff_lines)" "OK" "$OUT" ;;
+esac
+git reset -q >/dev/null 2>&1; git checkout -q -- . 2>/dev/null
 
 note ""
 note "== A3. 역델타 — one-man-company 포크가 상류보다 앞서 있던 4건 =="
@@ -134,6 +162,27 @@ expect_commit "주석 처리된 assertion 삭제는 허용" allow \
 fresh_repo
 expect_commit "Dart Iterable.skip(3) 은 skip 지시자 아님" allow \
   "printf 'void main(){ var x = [1,2,3].skip(2); expect(x, isNotNull); }\n' > test/w_test.dart && git add test/w_test.dart && git commit -m x"
+
+note ""
+note "== B2. dismiss 축소 정밀도 (등록된 테스트 파일 삭제만 면제, #345) =="
+# B1(테스트 파일 삭제)만 dismiss 를 보고 B2(assertion 순감)는 안 봤다면, dismissed.md 에
+# 등록한 테스트 파일을 통째로 지워도 B2 가 그 면제를 뒤집는다. 아래 4방향으로 좁게 고정한다.
+fresh_repo
+printf '# accepted\n- `test/t_test.py` — 레거시 스위트 폐기\n' > .claude/guild/gates/dismissed.md
+expect_commit "dismissed 등록 파일을 통째로 삭제하면 통과" allow \
+  "git rm -q test/t_test.py && git commit -m x"
+fresh_repo
+printf '# accepted\n- `test/t_test.py` — 레거시 스위트 폐기\n' > .claude/guild/gates/dismissed.md
+expect_commit "dismissed 등록 파일이라도 남긴 채 assertion만 제거하면 차단 (상시 면허 아님)" block \
+  "sed -i.bak 's/    assert.*//g' test/t_test.py && rm -f test/t_test.py.bak && git commit -am x"
+fresh_repo
+printf '# accepted\n- `test/other.md` — 무관 항목\n' > .claude/guild/gates/dismissed.md
+expect_commit "미등록 파일 삭제는 여전히 차단" block \
+  "git rm -q test/t_test.py && git commit -m x"
+fresh_repo
+printf '# accepted\n- `test/t_test.py` — 레거시 스위트 폐기\n' > .claude/guild/gates/dismissed.md
+expect_commit "dismissed 등록 파일에 skip 추가는 여전히 차단 (B3 는 면제 없음)" block \
+  "printf 'import pytest\n@pytest.mark.skip\ndef test_z(): assert 1\n' >> test/t_test.py && git commit -am x"
 
 note ""
 note "== C. 진짜 시크릿은 계속 차단 =="
@@ -189,6 +238,14 @@ expect_guard "게이트 스크립트 수정 → 확인 요구" ask \
   '{"tool_name":"Write","tool_input":{"file_path":"/r/.claude/guild/gates/scripts/gate_precommit.py","content":"pass"}}'
 expect_guard "config.json 의 language 변경 → 통과" pass \
   '{"tool_name":"Write","tool_input":{"file_path":"/r/.claude/guild/config.json","content":"{\"language\":\"ko\"}"}}'
+expect_guard "lefthook.yml 수정 → 확인 요구 (게이트 배선)" ask \
+  '{"tool_name":"Write","tool_input":{"file_path":"/r/lefthook.yml","content":"pre-commit:\n  commands:\n    guild-gate:\n      run: python3 x"}}'
+expect_guard ".claude/settings.json 수정 → 확인 요구 (게이트 배선)" ask \
+  '{"tool_name":"Write","tool_input":{"file_path":"/r/.claude/settings.json","content":"{}"}}'
+expect_guard ".husky/pre-commit 수정 → 확인 요구 (게이트 배선)" ask \
+  '{"tool_name":"Write","tool_input":{"file_path":"/r/.husky/pre-commit","content":"npx guild gate"}}'
+expect_guard "package.json 수정 → 통과 (알려진 갭, 의도적 제외)" pass \
+  '{"tool_name":"Write","tool_input":{"file_path":"/r/package.json","content":"{\"scripts\":{}}"}}'
 expect_guard "일반 소스 파일 수정 → 통과" pass \
   '{"tool_name":"Write","tool_input":{"file_path":"/r/lib/main.dart","content":"void main(){}"}}'
 
@@ -291,6 +348,36 @@ status: confirmed
 - forbid: lib/features/*/domain/** imports package:flutter/'
 expect_commit "접미 없으면 frontmatter status 로 폴백" block \
   "printf \"import 'package:flutter/material.dart';\n\" > lib/features/a/domain/w.dart && git add -A && git commit -m x"
+
+note ""
+note "== K. 원장 인코딩 =="
+# write_findings 는 ensure_ascii=False 로 한글을 그대로 남기지만, 경로가 surrogateescape 를
+# 거친 짝 없는 서로게이트를 담고 있으면 strict UTF-8 인코드가 실패하고 blanket except 가
+# 그것을 삼켜 findings.json 이 파싱 불가 파일로 남는다. errors="backslashreplace" 로 닫는다.
+fresh_repo
+OUT="$(python3 - <<'PY'
+import sys, json, os
+sys.path.insert(0, ".claude/guild/gates/scripts")
+import gate_precommit as g
+root = os.getcwd()
+bad_name = "test/\udcff_test.py"
+findings = [g.finding("verification:test-deleted", bad_name,
+                       f"테스트 파일 삭제: {bad_name} (한글 확인용 메시지)")]
+g.write_findings(root, findings)
+try:
+    with open(os.path.join(root, ".claude", "guild", "gates", "findings.json"),
+              encoding="utf-8") as fh:
+        data = json.load(fh)
+    good = bool(data.get("open")) and "한글 확인용 메시지" in data["open"][0]
+except Exception:
+    good = False
+print("OK" if good else "FAIL")
+PY
+)"
+case "$OUT" in
+  *OK*) ok "surrogate 경로 finding 도 findings.json 이 유효한 JSON으로 저장됨" ;;
+  *) bad "surrogate 경로 finding 도 findings.json 이 유효한 JSON으로 저장됨" "OK" "$OUT" ;;
+esac
 
 note ""
 note "== I. 레포 로컬 게이트 확장 (scripts/local/*.py) =="
@@ -404,6 +491,43 @@ mkdir -p .claude/guild/gates/scripts/local
 printf 'this is not valid python(\n' > .claude/guild/gates/scripts/local/broken.py
 expect_commit "깨진 로컬 확장이 커밋을 막지 않음" allow \
   "printf 'x\n' >> README.md && git add README.md && git commit -m x"
+# U4: apply_refiners 가 secret 판정을 refiner 호출 이후에 읽으면, refiner 가 finding dict 를
+# 제자리 변형(f["rule"] = ...)해서 INV5 가드를 우회할 수 있다 — 호출 전 스냅샷으로 막는다.
+fresh_repo
+mkdir -p .claude/guild/gates/scripts/local
+cat > .claude/guild/gates/scripts/local/narrow.py <<'LOCAL'
+def refine(ctx, findings):
+    for f in findings:
+        if isinstance(f, dict):
+            f["rule"] = "harmless"       # 제자리 변형으로 secret 판정을 피하려는 시도
+    return []
+LOCAL
+expect_commit "refiner 가 rule 을 제자리 변형해도 secret 은 생존 (INV5, 호출 전 스냅샷)" block \
+  "printf 'SECRET=abc\n' > .env && git add .env && git commit -m x"
+git reset -q >/dev/null 2>&1; rm -f .env .claude/guild/gates/scripts/local/narrow.py
+# U4b: 로컬 check() 는 하위호환으로 문자열 finding 을 낼 수 있다(as_message) — 그것이
+# 억제 대상이 되었을 때 record_firing 이 isinstance 가드 없이 .get 을 부르면 AttributeError 가
+# 모듈 최상위 fail-open 으로 새어 나가, 같은 커밋의 진짜 secret 까지 통과시킨다.
+fresh_repo
+mkdir -p .claude/guild/gates/scripts/local
+cat > .claude/guild/gates/scripts/local/str_and_refine.py <<'LOCAL'
+def check(ctx):
+    return (["문자열 finding — 하위호환 로컬 체크"], [])
+def refine(ctx, findings):
+    return []          # 전부 억제 시도 — 문자열 finding 포함
+LOCAL
+expect_commit "문자열 finding 이 억제 대상이 되어도 크래시 없이 secret 은 차단 유지" block \
+  "printf 'SECRET=abc\n' > .env && git add .env && git commit -m x"
+git reset -q >/dev/null 2>&1; rm -f .env .claude/guild/gates/scripts/local/str_and_refine.py
+# U5: SystemExit 은 Exception 의 하위가 아니다 — 로컬 모듈의 sys.exit(0) 이 run_local_checks 의
+# except Exception 을 통과해 프로세스 전체를 exit 0 으로 끝내면, staged 된 진짜 시크릿도
+# 보고 전에 새어 나간다.
+fresh_repo
+mkdir -p .claude/guild/gates/scripts/local
+printf 'import sys\ndef check(ctx):\n    sys.exit(0)\n' > .claude/guild/gates/scripts/local/boom.py
+expect_commit "로컬 확장의 sys.exit(0) 이 게이트 전체를 통과시키지 못함" block \
+  "printf 'SECRET=abc\n' > .env && git add .env && git commit -m x"
+git reset -q >/dev/null 2>&1; rm -f .env .claude/guild/gates/scripts/local/boom.py
 
 note ""
 note "== H. 기존 훅 체이닝 =="
