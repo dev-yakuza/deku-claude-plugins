@@ -19,7 +19,7 @@ compound command that creates or mutates content and commits it in one call
 `sed -i '' 's/assert//g' t_test.py && git commit -am x`) is, at hook-fire time, a commit of
 content that **does not exist yet**. No `git diff`/`git status` can see it. This is a
 property of the hook model, not a bug that regex work can close — an earlier version of
-this file tried to close it by unioning untracked files and unstaged changes into every
+this file tried to close it by merging untracked files and unstaged changes into every
 scan, which did **not** catch the compound case (the file is created inside the same
 command) and did cause two guaranteed day-one false positives: a single untracked `.env`
 anywhere in the repo blocked *every* commit, and any dirty test file in the working tree
@@ -259,7 +259,7 @@ GIT_COMMIT_RE = re.compile(
     # `commit` — that excludes the original false positive (`git log ... | grep -i commit`,
     # where `commit` never directly follows `git`).
     # `\s+` (not a single space) between a flag and its argument: `git  -C  .  commit` was
-    # silently unrecognised when the separator was double-spaced.
+    # silently missed when the separator was double-spaced.
     r"\bgit\s+"
     r"(?:-{1,2}[A-Za-z][A-Za-z0-9-]*(?:[=\s]+\S+)?\s+)*"  # global flags (-C dir, -c k=v, --no-pager)
     r"commit\b")
@@ -400,7 +400,7 @@ def check_verification(root, dismiss, scope):
         elif ln.startswith("--- a/"):
             # a fully-deleted file has no "+++ b/..." header (its new-side header is
             # "+++ /dev/null"), so without this branch `cur` stays stuck on the previous
-            # file and misattributes this file's removed assertions to it.
+            # file, so this file's removed assertions are counted against it.
             cur = ln[6:]
         elif ln.startswith("+") and not ln.startswith("+++"):
             body = ln[1:]
@@ -430,10 +430,10 @@ FRONTMATTER_RE = re.compile(r"\A\s*---\s*\n(.*?)\n---\s*(\n|\Z)", re.S)
 def rule_file_confirmed(text):
     """True only if the **frontmatter** says `status: confirmed`.
 
-    Scanning the whole document (the earlier behaviour) meant any prose that merely mentions
+    Scanning the whole document (the earlier behavior) meant any prose that merely mentions
     the string armed every rule in the file. That is not hypothetical: the bundled
     charter.md / architecture.md templates contain the literal `status: confirmed` inside
-    explanatory blockquotes, and that house style migrating into a rules file would have
+    explanatory quote blocks, and that house style migrating into a rules file would have
     silently promoted draft rules to blocking — precisely the INV6 violation the
     draft→confirm→enforce design exists to prevent."""
     m = FRONTMATTER_RE.match(text)
@@ -512,7 +512,7 @@ def block_message(reasons):
     return "🚫 Guild 게이트 차단 (커밋 거부):\n- " + "\n- ".join(reasons) + "\n\n" + HUMAN_NOTE
 
 
-def deny_pretooluse(reasons):
+def deny_pre_tool_use(reasons):
     msg = block_message(reasons)
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
@@ -531,7 +531,7 @@ def run_checks(root, scope):
 
 
 def main_git_hook():
-    """Mode 1 — authoritative. Git has already finalised the index; scan exactly it."""
+    """Mode 1 — authoritative. Git has already fixed the index; scan exactly it."""
     root = repo_root()
     if not gates_enabled(root):
         return 0
@@ -555,7 +555,7 @@ def main_git_hook():
     return 0
 
 
-def main_pretooluse():
+def main_pre_tool_use():
     """Mode 2 — early warning. Catches the common single-command case before the turn is
     spent. The git hook is the backstop for everything this cannot see."""
     raw = sys.stdin.read() if not sys.stdin.isatty() else ""
@@ -581,10 +581,10 @@ def main_pretooluse():
         sys.stderr.write("⚠ Guild 게이트: 사전 점검을 완료하지 못했습니다 (타임아웃). "
                          "커밋 시점의 git 훅이 다시 검사합니다.\n")
         return 0
-    flush_firings(root, "pretooluse")
+    flush_firings(root, "pre-tool-use")
     write_findings(root, block)
     if block:
-        deny_pretooluse(block)  # exits 2
+        deny_pre_tool_use(block)  # exits 2
     if warn:
         sys.stderr.write("⚠ Guild 게이트 경고 (draft 경계 규칙 — 차단 안 함, confirm 시 차단):\n- "
                          + "\n- ".join(warn) + "\n")
@@ -727,7 +727,7 @@ def main():
         return main_scan_paths()
     if "--scan-text" in args:
         return main_scan_text()
-    return main_pretooluse()
+    return main_pre_tool_use()
 
 
 if __name__ == "__main__":

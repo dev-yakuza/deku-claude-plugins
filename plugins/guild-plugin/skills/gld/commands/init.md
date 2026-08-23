@@ -76,6 +76,35 @@ If the user skips any field, fill it with a scan-derived best guess and mark it 
 
 Create the harness. **Track every file created/merged** for the P4 summary and partial-failure repair.
 
+### 0b. Ensure the harness will not break the repo's own linters (DETERMINISTIC, do this with step 0)
+
+Guild writes files **into the user's repo** — `gate_precommit.py`, 16 agent definitions, the
+`CLAUDE.md` block, `docs/standards/*` — and those files then fall under whatever linting the repo
+already runs on commit. Guild does not control that tooling, and a Guild-authored file that trips
+it **blocks the human's commits**, which is a far worse first impression than a missing feature.
+
+Observed: a Flutter repo ran `cspell` over staged files with no `.claude` exclusion. Committing the
+harness produced 22 unknown-word errors from `gate_precommit.py` alone — `kubeconfig`, `tfvars`,
+`pgpass`, `fdescribe`, `xoxe` and friends are **secret and test-skip pattern literals**, so they
+cannot be spelled differently. Worse, that repo ran its hooks with `parallel: true`, so the spell
+failure killed the in-flight `flutter analyze` too and the commit died with `signal: killed` — a
+failure whose surface cause looked nothing like its actual cause. That same repo *already*
+excluded `.claude/**` from its markdown linter, so the pattern was established; only the spell
+checker had been missed.
+
+1. Detect linters that would see the harness — read the repo root for the configs the stack scan
+   already found (`.cspell.json` / `cspell.json` · `.markdownlint*` / `.remarkrc*` · `.flake8` /
+   `ruff.toml` / `setup.cfg` · `.eslintrc*`) plus any hook-runner config (`lefthook.yml`,
+   `.husky/`, `.pre-commit-config.yaml`) that invokes them.
+2. For each, check whether Guild-managed paths are already out of scope (an `ignorePaths`,
+   `exclude`, or glob that covers `.claude/**`).
+3. Where they are not, **propose the exclusion and confirm before editing** (INV1 — this is the
+   human's tooling). Additive only: append `.claude/**` to the existing ignore list, never rewrite
+   it. Prefer excluding the Guild-managed subtree over adding words to a dictionary — the word
+   list would need extending on every plugin update, the path exclusion holds.
+4. Record what was reconciled (or declined) for the P4 summary. If the human declines, say plainly
+   that their next commit may fail on Guild-authored files and how to undo it.
+
 ### 0. Ensure the harness will be committable (`.gitignore` reconciliation — DETERMINISTIC, do this FIRST)
 Guild's harness under `.claude/` (agents, guild state, settings.json) is **meant to be committed**. Many repos have a root `.gitignore` that ignores `.claude/` wholesale (e.g. `.claude/*` with only `!.claude/skills/`), which would make the harness **invisible to git / un-committable** — it looks like "the files weren't created" even though they exist on disk. Fix this **deterministically here** — do NOT leave it to the probabilistic P3.5 readiness audit.
 
