@@ -329,12 +329,18 @@ def refine(ctx, findings):
     """이 레포 정책: EXEMPT 파일의 삭제는 검증 약화가 아니다.
 
     ⚠ 파일 하나를 지우면 finding 이 둘 난다 — test-deleted 와, 그 파일의 assertion 이
-    3개 이상이면 assertion-drop 까지. 앞의 것만 면제하면 뒤의 것이 그대로 막으므로
-    면제가 성립하지 않는다. 삭제 대상이 이 파일뿐일 때만 둘 다 면제한다."""
-    deleted = {f.get("file") for f in findings if f.get("rule") == "verification:test-deleted"}
-    if deleted != {EXEMPT}:
-        return findings          # 다른 테스트도 함께 지워졌다면 면제하지 않는다
-    return [f for f in findings if not f.get("rule", "").startswith("verification:")]
+    3개 이상이면 assertion-drop 까지. 앞의 것만 면제하면 뒤의 것이 그대로 막는다.
+    assertion-drop 은 `files` 로 기여 파일을 알려주므로, **그 감소가 전부 EXEMPT
+    때문일 때만** 면제한다 — 같은 커밋의 다른 파일이 섞이면 면제하지 않는다."""
+    keep = []
+    for f in findings:
+        rule = f.get("rule", "")
+        if rule == "verification:test-deleted" and f.get("file") == EXEMPT:
+            continue
+        if rule == "verification:assertion-drop" and f.get("files") == [EXEMPT]:
+            continue
+        keep.append(f)
+    return keep
 LOCAL
 cp test/t_test.py test/exempt_test.py; git add -A >/dev/null 2>&1; git commit -qm add >/dev/null 2>&1
 expect_commit "refine 이 지정한 verification finding 을 면제" allow \
@@ -342,6 +348,12 @@ expect_commit "refine 이 지정한 verification finding 을 면제" allow \
 git reset -q >/dev/null 2>&1; git checkout -q -- . 2>/dev/null
 expect_commit "refine 대상 밖 테스트 삭제는 그대로 차단" block \
   "git rm -q test/t_test.py && git commit -m x"
+git reset -q >/dev/null 2>&1; git checkout -q -- . 2>/dev/null
+# 정밀도: 같은 커밋에 무관한 테스트의 assertion 감소가 섞이면 면제하지 않는다.
+cp test/t_test.py test/exempt_test.py; cp test/t_test.py test/other_test.py
+git add -A >/dev/null 2>&1; git commit -qm add2 >/dev/null 2>&1
+expect_commit "무관한 파일의 감소가 섞이면 면제 안 됨" block \
+  "git rm -q test/exempt_test.py && printf 'def test_o():\n    pass\n' > test/other_test.py && git add -A && git commit -m x"
 git reset -q >/dev/null 2>&1; git checkout -q -- . 2>/dev/null
 # ⚠ 안전장치: secret 은 어떤 refine 으로도 억제되지 않는다 (INV5).
 cat > .claude/guild/gates/scripts/local/narrow.py <<'LOCAL'

@@ -505,6 +505,12 @@ def check_verification(root, dismiss, scope):
     # (B2/B3) net assertion removal / skip additions
     add_assert = rm_assert = add_skip = 0
     skip_files = set()
+    # Per-file assertion deltas as well as the total. The aggregate alone left the
+    # assertion-drop finding with `file: "?"`, so a repo-local `refine()` could not tell whether
+    # a drop was attributable to the one deletion it means to exempt or to an unrelated file in
+    # the same commit — forcing it to suppress every verification finding at once, which is far
+    # broader than any exemption should be.
+    per_file = {}
     # `diff --git` carries BOTH sides, so a fully-deleted file (whose new-side header is
     # "+++ /dev/null") still resolves to its real path — the old parser needed a special
     # "--- a/" branch for that, and got the attribution wrong whenever one was missing.
@@ -514,17 +520,26 @@ def check_verification(root, dismiss, scope):
         if sign == "+":
             if ASSERT_RE.search(body):
                 add_assert += 1
+                per_file[cur] = per_file.get(cur, 0) - 1
             if SKIP_RE.search(body):
                 add_skip += 1
                 skip_files.add(cur)
         elif ASSERT_RE.search(body):
             rm_assert += 1
+            per_file[cur] = per_file.get(cur, 0) + 1
     if add_skip:
         where = ", ".join(sorted(skip_files)) or "test"
         findings.append(finding("verification:test-skip", where, f"테스트 skip/focus 지시자 추가 {add_skip}건: {where} (INV2 — 검증 약화)"))
         record_firing("verification", "block", "test-skip")
     if rm_assert - add_assert >= 3:
-        findings.append(finding("verification:assertion-drop", "?", f"테스트 assertion 순감소 (~{rm_assert - add_assert}줄, INV2 — 검증 약화 의심)"))
+        droppers = sorted(f for f, n in per_file.items() if n > 0)
+        # `file` names the single contributing file when there is one, so the common case is
+        # matchable; `files` always carries the full set for a refiner that needs it.
+        item = finding("verification:assertion-drop",
+                       droppers[0] if len(droppers) == 1 else "?",
+                       f"테스트 assertion 순감소 (~{rm_assert - add_assert}줄, INV2 — 검증 약화 의심)")
+        item["files"] = droppers
+        findings.append(item)
         record_firing("verification", "block", "assertion-drop")
     return findings
 
