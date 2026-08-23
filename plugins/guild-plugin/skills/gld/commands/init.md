@@ -144,7 +144,7 @@ Create via Write tool:
   - `dismissed.md` — accepted-risk registry (header only; `- <path/pattern> — <reason>` downgrades that item to a warning).
   - `findings.json` — `{ "open": [] }` (the gate writes open violations here).
 - `.claude/guild/overlay/.gitkeep` — flow-policy override surface (empty; `/gld contribute` upstreams diffs here).
-- `.claude/guild/.gitignore` — containing `memory/` (episodic memory is gitignored).
+- `.claude/guild/.gitignore` — containing `memory/` (episodic memory is gitignored) and `gates/scripts/local/__pycache__/` (a repo-local gate extension is imported at commit time; the gate sets `sys.dont_write_bytecode` so none should appear, but a repo whose own `.gitignore` does not cover `__pycache__` would otherwise commit any that slipped through — Guild owns this file, so it should not depend on the repo's).
 - `.claude/guild/memory/.gitkeep`.
 
 **config.json (M1 subset):**

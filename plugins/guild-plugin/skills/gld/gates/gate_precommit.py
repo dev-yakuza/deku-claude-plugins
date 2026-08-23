@@ -598,6 +598,12 @@ def run_local_checks(root, dismiss, scope):
         names = sorted(n for n in os.listdir(d) if n.endswith(".py") and not n.startswith("_"))
     except Exception:
         return block, warn
+    # Do not leave a `__pycache__` beside the extension. This directory is inside the repo and
+    # Guild-owned, so bytecode dropped here becomes an untracked artifact the human then has to
+    # notice and ignore — in a repo whose .gitignore does not already cover it, it lands in the
+    # next commit. The gate runs once per commit; caching buys nothing worth that.
+    prev_dont_write = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     ctx = LocalGateContext(root, dismiss, scope)
     for name in names:
         try:
@@ -613,6 +619,7 @@ def run_local_checks(root, dismiss, scope):
             warn.extend(w or [])
         except Exception as e:
             warn.append(f"로컬 게이트 확장 '{name}' 실행 실패 — 이 검사는 건너뜁니다 ({e})")
+    sys.dont_write_bytecode = prev_dont_write
     return block, warn
 
 
