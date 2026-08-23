@@ -427,17 +427,30 @@ def check_verification(root, dismiss, scope):
 FRONTMATTER_RE = re.compile(r"\A\s*---\s*\n(.*?)\n---\s*(\n|\Z)", re.S)
 
 
-def rule_file_confirmed(text):
-    """True only if the **frontmatter** says `status: confirmed`.
+HEADER_LINES = 5
 
-    Scanning the whole document (the earlier behavior) meant any prose that merely mentions
-    the string armed every rule in the file. That is not hypothetical: the bundled
-    charter.md / architecture.md templates contain the literal `status: confirmed` inside
-    explanatory quote blocks, and that house style migrating into a rules file would have
-    silently promoted draft rules to blocking — precisely the INV6 violation the
-    draft→confirm→enforce design exists to prevent."""
+
+def rule_file_confirmed(text):
+    """True only if the file's **header** declares `status: confirmed` on its own line.
+
+    Two failure modes, one on each side, and this sits between them:
+
+    - Scanning the **whole document** (the original behavior) let any prose that merely
+      mentions the string arm every rule in the file. Not hypothetical: the bundled
+      charter.md / architecture.md templates carry the literal `status: confirmed` inside
+      explanatory quote blocks, and that house style migrating into a rules file would
+      silently promote draft rules to blocking — the exact INV6 violation draft→confirm→enforce
+      exists to prevent.
+    - Requiring **YAML frontmatter** (the first fix) over-corrected: `init` writes rule files
+      as a `# Title` line followed by a bare `status:` line, with no `---` delimiters at all.
+      Under that rule *no* rule file could ever be confirmed — every existing repo's confirmed
+      rules would have gone silently inert on update, which is strictly worse than arming too
+      eagerly. Caught by a test written against a real repo's file shape.
+
+    So: accept frontmatter when present, otherwise the first few lines — and in both cases the
+    declaration must be a **standalone line**, which a sentence or a quoted mention is not."""
     m = FRONTMATTER_RE.match(text)
-    head = m.group(1) if m else ""
+    head = m.group(1) if m else "\n".join(text.splitlines()[:HEADER_LINES])
     return bool(re.search(r"^\s*status:\s*confirmed\s*$", head, re.I | re.M))
 
 
@@ -523,11 +536,92 @@ def deny_pre_tool_use(reasons):
     sys.exit(2)
 
 
+# --- repo-local gate extensions ---------------------------------------------------------
+# This file is central-owned: `/gld update` overwrites it. That is fine for the universal
+# checks, and fatal for anything a repo added to it — observed: a repo had hand-extended this
+# script with a `test-naming` check reading its own `rules/test-naming.md` at
+# `status: confirmed`. The rule was actively blocking commits; an update replaced the script
+# and the rule went inert, still on disk, enforcing nothing, with no warning. That is an INV4
+# violation, and the root cause is that there was nowhere else to put it.
+#
+# So: repo-local checks live in `.claude/guild/gates/scripts/local/*.py`, which update
+# preserves. Each module defines `check(ctx)` returning `(block, warn)` — two lists of
+# one-line human-readable findings. `ctx` exposes what a check needs without importing this
+# file (which update may replace under it).
+#
+# A broken local check must never wedge the repo: an import or runtime failure degrades to a
+# warning, exactly like the fail-open rule for this script's own crashes.
+class LocalGateContext:
+    """The API a repo-local check may rely on. Kept deliberately small and stable."""
+
+    def __init__(self, root, dismiss, scope):
+        self.root = root
+        self.scope = scope          # (include_unstaged, include_untracked)
+        self._dismiss = dismiss
+
+    def changed_names(self, diff_filter=None):
+        """Paths in scope for this commit."""
+        return changed_names(self.root, diff_filter=diff_filter,
+                             include_unstaged=self.scope[0])
+
+    def changed_diff(self):
+        """Unified=0 diff text in scope for this commit."""
+        return changed_diff(self.root, self.scope[0])
+
+    def is_dismissed(self, path):
+        """True if the human registered this path in gates/dismissed.md."""
+        return dismiss_matches(path, self._dismiss)
+
+    def rule_file(self, name):
+        """Read gates/rules/<name>; returns (text, confirmed). Missing file → ('', False).
+        `confirmed` follows the same frontmatter-only rule the boundary gate uses (INV6)."""
+        try:
+            with open(os.path.join(self.root, ".claude", "guild", "gates", "rules", name),
+                      encoding="utf-8") as fh:
+                text = fh.read()
+        except Exception:
+            return "", False
+        return text, rule_file_confirmed(text)
+
+    def record(self, rule, action, path):
+        """Log a firing so it reaches evolve's rule scorecard like any built-in rule."""
+        record_firing(rule, action, path)
+
+
+def run_local_checks(root, dismiss, scope):
+    d = os.path.join(root, ".claude", "guild", "gates", "scripts", "local")
+    block, warn = [], []
+    if not os.path.isdir(d):
+        return block, warn
+    try:
+        import importlib.util
+        names = sorted(n for n in os.listdir(d) if n.endswith(".py") and not n.startswith("_"))
+    except Exception:
+        return block, warn
+    ctx = LocalGateContext(root, dismiss, scope)
+    for name in names:
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "guild_local_" + name[:-3], os.path.join(d, name))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            fn = getattr(mod, "check", None)
+            if fn is None:
+                continue
+            b, w = fn(ctx)
+            block.extend(b or [])
+            warn.extend(w or [])
+        except Exception as e:
+            warn.append(f"로컬 게이트 확장 '{name}' 실행 실패 — 이 검사는 건너뜁니다 ({e})")
+    return block, warn
+
+
 def run_checks(root, scope):
     dismiss = dismissed(root)
     block = check_secrets(root, dismiss, scope) + check_verification(root, dismiss, scope)
     b_block, b_warn = check_boundaries(root, dismiss, scope)
-    return block + b_block, b_warn
+    l_block, l_warn = run_local_checks(root, dismiss, scope)
+    return block + b_block + l_block, b_warn + l_warn
 
 
 def main_git_hook():

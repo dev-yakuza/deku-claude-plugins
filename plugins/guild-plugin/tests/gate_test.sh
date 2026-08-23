@@ -201,6 +201,63 @@ LEAK="$(printf 'K="sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAA"\n' | python3 .claude
 case "$LEAK" in *sk-ant*) bad "스캔 출력에 시크릿 값이 없음" "no value" "value leaked" ;; *) ok "스캔 출력에 시크릿 값이 없음 (INV5)" ;; esac
 
 note ""
+note "== I. 레포 로컬 게이트 확장 (scripts/local/*.py) =="
+# update 가 중앙 스크립트를 덮어써도 살아남아야 하는 자리. 이 메커니즘이 없어서 어떤
+# 레포는 중앙 파일을 직접 확장했고, update 가 그 검사를 조용히 지워 confirmed 규칙이
+# 무력화됐다 — 파일은 남아 있는데 아무도 읽지 않는 상태.
+fresh_repo
+mkdir -p .claude/guild/gates/scripts/local .claude/guild/gates/rules
+printf '# Rule: 테스트명에 이슈번호 금지\nstatus: confirmed\n' > .claude/guild/gates/rules/test-naming.md
+cat > .claude/guild/gates/scripts/local/test_naming.py <<'LOCAL'
+import re
+PAT = re.compile(r"(Issue|PR|이슈)\s*#\d+")
+def check(ctx):
+    text, confirmed = ctx.rule_file("test-naming.md")
+    if not text:
+        return [], []
+    block, warn, cur = [], [], "?"
+    for ln in ctx.changed_diff().splitlines():
+        if ln.startswith("+++ b/"):
+            cur = ln[6:]
+        elif ln.startswith("+") and not ln.startswith("+++"):
+            if cur.endswith(".dart") and PAT.search(ln) and not ctx.is_dismissed(cur):
+                msg = f"테스트/주석의 외부 참조: {cur}"
+                (block if confirmed else warn).append(msg)
+                ctx.record("test-naming:issue-ref", "block" if confirmed else "warn", cur)
+    return block, warn
+LOCAL
+expect_commit "로컬 확장이 confirmed 규칙으로 차단" block \
+  "mkdir -p lib && printf 'void f() { /* see Issue #123 */ }\n' > lib/a.dart && git add lib/a.dart && git commit -m x"
+# ⚠ 차단된 커밋의 파일은 인덱스에 남는다 — 다음 케이스가 그걸 물려받으면 무엇을 검증하는지
+# 알 수 없게 된다. 케이스마다 인덱스를 비운다.
+git reset -q >/dev/null 2>&1; rm -f lib/a.dart
+expect_commit "로컬 확장에 안 걸리는 변경은 통과" allow \
+  "printf 'more\n' >> README.md && git add README.md && git commit -m x"
+git reset -q >/dev/null 2>&1
+# status 판정은 양쪽으로 틀릴 수 있다. init 이 쓰는 형태(--- 없는 헤더)는 인정해야 하고,
+# 산문 속 언급은 인정하면 안 된다 — 전자를 놓치면 모든 기존 레포의 confirmed 규칙이 조용히
+# 죽고, 후자를 잡으면 draft 규칙이 멋대로 차단을 시작한다.
+printf -- '---\nstatus: confirmed\n---\n# Rule\n' > .claude/guild/gates/rules/test-naming.md
+git reset -q >/dev/null 2>&1; rm -f lib/*.dart
+expect_commit "frontmatter 형태의 confirmed 인정" block \
+  "mkdir -p lib && printf 'void h() { /* Issue #7 */ }\n' > lib/c.dart && git add lib/c.dart && git commit -m x"
+git reset -q >/dev/null 2>&1; rm -f lib/*.dart
+printf '# Rule\nstatus: draft\n\n이 문서는 `status: confirmed` 가 되면 차단으로 승격된다.\n' > .claude/guild/gates/rules/test-naming.md
+expect_commit "산문 속 status: confirmed 언급은 무시" allow \
+  "mkdir -p lib && printf 'void i() { /* Issue #8 */ }\n' > lib/d.dart && git add lib/d.dart && git commit -m x"
+# draft 로 내리면 경고만 (INV6)
+git reset -q >/dev/null 2>&1; rm -f lib/*.dart
+printf '# Rule\nstatus: draft\n' > .claude/guild/gates/rules/test-naming.md
+expect_commit "규칙이 draft 면 통과 (경고만)" allow \
+  "mkdir -p lib && printf 'void g() { /* see Issue #99 */ }\n' > lib/b.dart && git add lib/b.dart && git commit -m x"
+# 깨진 확장은 게이트를 막지 않아야 한다 (fail-open)
+fresh_repo
+mkdir -p .claude/guild/gates/scripts/local
+printf 'this is not valid python(\n' > .claude/guild/gates/scripts/local/broken.py
+expect_commit "깨진 로컬 확장이 커밋을 막지 않음" allow \
+  "printf 'x\n' >> README.md && git add README.md && git commit -m x"
+
+note ""
 note "== H. 기존 훅 체이닝 =="
 fresh_repo
 printf '#!/bin/sh\necho local-hook-ran >&2\nexit 0\n' > .git/hooks/pre-commit.local
