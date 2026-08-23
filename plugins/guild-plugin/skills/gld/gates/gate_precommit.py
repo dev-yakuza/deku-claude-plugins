@@ -654,10 +654,18 @@ def main_guard_config():
 # Exit 1 if anything was found, 0 if clean, so a caller can branch on the status alone.
 # Neither mode ever prints the matched value — only a path or a line number (INV5).
 def main_scan_paths():
+    # Honour the accepted-risk registry, exactly as check_secrets does. Without this the two
+    # consumers disagree with the gate they were built to share a definition with: `audit` would
+    # report a BLOCKER for every path a human already registered in dismissed.md and the commit
+    # gate already lets through. On a repo that deliberately commits signing material (an iOS
+    # multi-flavour app tracks a .p12/.p8/.mobileprovision set per flavour) that is dozens of
+    # findings the human has to re-dismiss by hand, every audit — which trains them to ignore the
+    # check. A dismissal is a decision, and it belongs to every reader of these patterns.
+    dismiss = dismissed(repo_root())
     hits = 0
     for raw in sys.stdin:
         name = raw.strip().replace("\\", "/")
-        if not name or SECRET_PATH_ALLOW_RE.search(name):
+        if not name or SECRET_PATH_ALLOW_RE.search(name) or dismiss_matches(name, dismiss):
             continue
         if SECRET_PATH_RE.search(name):
             print(f"SECRET-PATH {name}")

@@ -181,6 +181,21 @@ expect_scan "--scan-text 깨끗한 본문은 통과" --scan-text 0 \
   'just prose
 no keys here
 ' ""
+# dismissed.md 를 존중해야 한다 — 커밋 게이트가 통과시키는 항목을 audit 이 BLOCKER 로
+# 보고하면 두 소비자가 어긋난다. 실제 저장소(21개 flavor의 iOS 배포 인증서 63개 +
+# 릴리스 keystore)에서 이 불일치가 드러났다: 사람이 이미 수용한 위험을 매 audit 마다
+# 다시 기각해야 했고, 그건 검사 자체를 무시하게 만든다.
+printf '# accepted\n- env — flavor별 배포 인증서 (비공개 레포 정책)\n' > .claude/guild/gates/dismissed.md
+expect_scan "--scan-paths 가 dismissed.md 를 존중" --scan-paths 0 \
+  'env/koreanwords/ios/distribution.p12
+lib/main.dart
+' ""
+expect_scan "dismissed 밖의 시크릿은 계속 잡음" --scan-paths 1 \
+  'env/koreanwords/ios/distribution.p12
+.env
+' "SECRET-PATH .env"
+printf '' > .claude/guild/gates/dismissed.md
+
 # 값이 새어나가지 않는지 명시적으로 확인 (INV5)
 LEAK="$(printf 'K="sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAA"\n' | python3 .claude/guild/gates/scripts/gate_precommit.py --scan-text 2>&1)"
 case "$LEAK" in *sk-ant*) bad "스캔 출력에 시크릿 값이 없음" "no value" "value leaked" ;; *) ok "스캔 출력에 시크릿 값이 없음 (INV5)" ;; esac
