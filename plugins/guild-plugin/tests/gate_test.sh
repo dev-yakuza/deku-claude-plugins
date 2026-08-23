@@ -244,6 +244,13 @@ expect_guard ".claude/settings.json 수정 → 확인 요구 (게이트 배선)"
   '{"tool_name":"Write","tool_input":{"file_path":"/r/.claude/settings.json","content":"{}"}}'
 expect_guard ".husky/pre-commit 수정 → 확인 요구 (게이트 배선)" ask \
   '{"tool_name":"Write","tool_input":{"file_path":"/r/.husky/pre-commit","content":"npx guild gate"}}'
+# U8: lefthook-local.yml 은 lefthook 자신의 로컬 오버라이드 파일이다(보통 gitignore 되어
+# 리뷰에 안 보인다) — 여기에 `guild-gate: {skip: true}` 를 넣으면 lefthook.yml 을 건드리지
+# 않고도 게이트가 조용히 사라진다(실측: lefthook 2.1.11, "guild-gate (skip) by condition").
+expect_guard "lefthook-local.yml 수정 → 확인 요구 (게이트 배선)" ask \
+  '{"tool_name":"Write","tool_input":{"file_path":"/r/lefthook-local.yml","content":"guild-gate:\n  skip: true\n"}}'
+expect_guard "세그먼트 중간에 낀 이름(mylefthook-local.yml)은 무반응" pass \
+  '{"tool_name":"Write","tool_input":{"file_path":"/r/mylefthook-local.yml","content":"guild-gate:\n  skip: true\n"}}'
 expect_guard "package.json 수정 → 통과 (알려진 갭, 의도적 제외)" pass \
   '{"tool_name":"Write","tool_input":{"file_path":"/r/package.json","content":"{\"scripts\":{}}"}}'
 expect_guard "일반 소스 파일 수정 → 통과" pass \

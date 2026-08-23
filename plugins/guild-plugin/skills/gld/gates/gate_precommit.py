@@ -1013,9 +1013,21 @@ GATES_KEY_RE = re.compile(r"\"gates\"|gates\.enabled|\"enabled\"")
 # Deliberately NOT included: `package.json`. husky/simple-git-hooks can be configured there,
 # but it is edited on nearly every dependency change — asking on it would train click-through,
 # which costs more than the case it covers. Recorded as a known gap rather than papered over.
+#
+# ⚠ `lefthook-local.yml` / `.lefthook/` are lefthook's own LOCAL-OVERRIDE mechanism, and they
+# are as dangerous as `lefthook.yml` itself, not less — arguably more. Verified: lefthook
+# 2.1.11, a `lefthook-local.yml` containing `guild-gate: {skip: true}` makes the command
+# disappear from the run with `guild-gate (skip) by condition`, exit 0, no trace in
+# `lefthook.yml`. The file is also the shape lefthook's own docs recommend for `.gitignore`
+# (it exists so a developer can carry a personal override), so it is invisible to code review
+# by design — a `git diff` over the committed tree never shows it, and `lefthook.yml` staying
+# untouched gives no signal that enforcement changed. Anchored the same way as `lefthook.yml`
+# (`(^|/)`, segment-start only) so `mylefthook-local.yml` still does not match.
 GATE_WIRING_RE = re.compile(
     r"(^|/)\.claude/settings(\.local)?\.json$|"
     r"(^|/)\.?lefthook\.(ya?ml|toml|json)$|"
+    r"(^|/)\.?lefthook-local\.(ya?ml|toml|json)$|"
+    r"(^|/)\.lefthook/|"
     r"(^|/)\.husky/|"
     r"(^|/)\.pre-commit-config\.ya?ml$|"
     r"(^|/)\.overcommit\.yml$|"
