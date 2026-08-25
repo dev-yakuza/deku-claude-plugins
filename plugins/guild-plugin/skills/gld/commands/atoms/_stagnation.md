@@ -6,7 +6,7 @@
 
 ## Section A — The signature
 
-Every loop-back already carries a one-line blocking reason (the tech-lead's `BLOCKED: <non-conformance>`, a gate's finding, **the leader's own one-line reason when it acts on an adversarial-audit finding** — the auditor issues no `BLOCKED`, so the leader's stated reason is the comparison input — the verify-gap description, the QA defect). Before consuming another loop-back attempt (attempt #2+) for the same Issue/stage, the leader compares the **current** reason against the **immediately prior** attempt's reason:
+Every loop-back already carries a one-line blocking reason (the tech-lead's `BLOCKED: <non-conformance>`, a gate's finding, the verify-gap description, the QA defect). Before consuming another loop-back attempt (attempt #2+) for the same Issue/stage, the leader compares the **current** reason against the **immediately prior** attempt's reason:
 
 - **Same root cause** (same file/AC/concern restated, even if reworded) → **stagnation**: the previous loop-back did not actually address it.
 - **Different concern** (a new/different reason, even if in the same area) → genuine progress — one issue surfaced another. Not stagnation; continue under the normal bounded cap.
@@ -31,8 +31,6 @@ python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind stagnation --issue
 ```
 
 Substitute the **literal** Issue number for `<N>` (and the literal values for every other `<…>`) before the Bash call — `_bash_rules.md` item 9 forbids passing `$1`/`<N>` through unresolved, and `capture_signal.py` accepts a non-numeric `--issue` silently rather than erroring, so an unresolved `$1` would land in the ground-truth log as `"issue": "$1"` and quietly poison the record evolve reads.
-
-⚠ **Do not capture when the recurring reason came from execute Step 3.5a's adversarial auditor.** `_signals.md` **Section B**'s anchor rule requires an objective outcome (test / gate / CI result) or a real human action; a leader repeating its own one-line reason for acting on an LLM finding is neither, and a `--surprise` entry derived from a hallucinated defect would rank *above* a real cross-role reversal in `scan_corrections.md`. There is also no valid `--role` on that path — no role issued a `BLOCKED`. Escalate per Section B as usual; just skip the capture.
 
 **No `--escalated` here** — this capture fires on the *stagnation* path, which does not retry at all, so no model tier was ever bumped (`_model_tiering.md` Section A/B, `implement.md` Step 4). `--surprise` always — a repeated identical blocker is exactly the "confident work reversed twice" case. Read on-demand by evolve/audit alongside the other signal classes (`_signals.md` Section A); a **cluster** of stagnation entries in the same area across issues is a stronger systemic-fix signal (e.g. a misleading skeleton template, an unclear standard) than a single one-off.
 

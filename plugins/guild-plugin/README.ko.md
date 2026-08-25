@@ -9,7 +9,7 @@ Claude Code를 위한 **자기진화 에이전트 조직**. Guild는 레포에 �
 ## 개념
 
 - **하네스** — Guild가 설치하는 작동 환경: `CLAUDE.md`, settings, 역할 에이전트 로스터, ⑥ 지식 베이스, standards 초안, 결정적 커밋 게이트.
-- **조직** — 레포 전용 **16 역할 에이전트**(척추: leader · tech-lead · developer · tester · qa + 조건부 스페셜리스트 — designer, security, dba, i18n …)가 척추를 넘나들며 협업하고 *당신의* 프로젝트에 특화됩니다. 여기에 더해 execute마다 **상시 적대적 감사**가 diff를 읽습니다.
+- **조직** — 레포 전용 **16 역할 에이전트**(척추: leader · tech-lead · developer · tester · qa + 조건부 스페셜리스트 — designer, security, dba, i18n …)가 척추를 넘나들며 협업하고 *당신의* 프로젝트에 특화됩니다.
 - **두 루프** — **Inner 루프**는 코드를 개발(`analyze → design → execute → test → qa`), **Outer 루프**(`evolve`)는 실제 흔적을 읽어 에이전트·지식·게이트를 성장시킵니다.
 - **공진화** — 코드베이스(결과물)와 Guild(개발자)가 사용에서 함께 개선됩니다. `evolve`가 흔적을 리뷰·사람 승인된 개선으로 증류합니다.
 

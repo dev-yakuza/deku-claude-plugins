@@ -32,7 +32,7 @@ Parse `$1` onward:
    automation: evolve_nudge=<on|off>
    gates:      enabled=<on|off> (commit gate: secret + verification-weakening block)
    ```
-   Render `roles` from the array in the file — **do not enumerate the roster from memory or from this document.** The installed roster is whatever `.claude/guild/config.json` lists and `.claude/agents/` contains; a repo may have grown or pruned it via `evolve` HR, so a hardcoded 16-name list would silently misreport it. Spine roles always run; specialists are convened per task by the leader (participation model: `_handoff.md` Section G). Execute's always-on adversarial auditor is outside the roster and so never appears here.
+   Render `roles` from the array in the file — **do not enumerate the roster from memory or from this document.** The installed roster is whatever `.claude/guild/config.json` lists and `.claude/agents/` contains; a repo may have grown or pruned it via `evolve` HR, so a hardcoded 16-name list would silently misreport it. Spine roles always run; specialists are convened per task by the leader (participation model: `_handoff.md` Section G).
 
 ## Set a value
 1. Read `.claude/guild/config.json` (parse as JSON in context).

@@ -126,16 +126,6 @@ Each stage persists its output as a GitHub Issue comment wrapped in a marker pai
 | `<!-- guild:integration:output -->` … `<!-- /guild:integration:output -->` | dev Phase 2c (leader ∥ tech-lead) | parent-integration check once all children are `guild:done`: parent-AC → child coverage map, cross-child consistency, DoD closure, any gap found. |
 | `<!-- guild:review:output -->` … `<!-- /guild:review:output -->` | review (fresh reviewer) | guided pair-review walkthrough (risk-weighted, rationale-backed). Posted to the PR only with `/gld review … --comment`; default is **session-only, nothing persisted to disk** (unlike the other stages, `review.md` never writes a `docs/specs/<issue>/` file for its own recap) — this row documents the marker's shape for that opt-in case, not a durable output. |
 
-**PR-body markers** — a separate kind. These are **not Issue comments**: they live in the **PR body**, so the comment-dedup lookup above does not apply to them (running it finds nothing and would post the PR body as a new comment on every pass). The procedure is **read the current body first, then replace the marked block in place** — never `--body-file` the whole body from scratch, which destroys the other markers. Each writing step also states its own procedure inline at the point of writing.
-
-| Marker | Produced by | Contents |
-|---|---|---|
-| `<!-- guild:execute:pr-body -->` … `<!-- /guild:execute:pr-body -->` | execute (`_execute_spine.md` Step 5) | PR SUMMARY + specialist concerns + **audit summary** (Step 3.5a's adversarial auditor, incl. its `verification` block) |
-| `<!-- guild:execute:unattended-log -->` … `<!-- /guild:execute:unattended-log -->` | execute (`_execute_spine.md` Step 5, unattended runs) | decisions taken without a human |
-| `<!-- guild:manual-qa -->` … `<!-- /guild:manual-qa -->` | qa (`qa.md`) | human-QA checklist |
-
-⚠ **`Closes #<N>` stays *outside* every marker.** It is INV1's auto-close linchpin (Section D's `OK DONE` row: *"the PR body carries `Closes #<N>`, so GitHub closes it when the human merges"*) and must be written once at PR creation and left alone — inside a marker it becomes content that each execute pass re-renders, and one omission leaves the Issue permanently open on merge with no consumer to notice.
-
 **Durable design artifacts** (skeleton, architecture decisions, test cases) that outlive the Issue thread are also written to the working tree:
 - `docs/specs/<issue>/` — design skeleton, notes, test-case list (committed with the PR).
 
@@ -153,9 +143,9 @@ When one role hands off to another inside a stage — tech-lead → developer, t
 |---|---|---|
 | `DONE` | work complete, artifact written, no concerns | proceed to next role / stage |
 | `DONE_WITH_CONCERNS: <one-line>` | complete but the role flags a risk worth surfacing | proceed, but record the concern in the stage output and surface to the human |
-| `BLOCKED: <one-line>` | cannot proceed (missing dependency, contradiction) | leader intervenes: gather context, reassign, or escalate to human. **Exception — execute Step 3.5a's adversarial auditor**: it is offered only three tokens and holds no gate, so a `BLOCKED:` from it is a contract slip; demote it to `DONE_WITH_CONCERNS` in place and continue |
+| `BLOCKED: <one-line>` | cannot proceed (missing dependency, contradiction) | leader intervenes: gather context, reassign, or escalate to human |
 | `NEEDS_CONTEXT: <one-line>` | needs an input that should exist but wasn't found | leader supplies the missing artifact/pointer, then re-invokes the role |
-| `FAIL: <reason>` | hard error (gh failure, Issue is a PR, etc.) | stop the stage; report to human. **Same exception** for execute Step 3.5a's auditor — demote, don't stop |
+| `FAIL: <reason>` | hard error (gh failure, Issue is a PR, etc.) | stop the stage; report to human |
 
 **Artifacts are passed as files, not pasted** (context protection). The producer writes to the working tree or `docs/specs/<issue>/`; the RESULT line names the path. The consumer reads that path. Never inline a skeleton or full test-case list into a RESULT line — keep RESULT to one summary line.
 
@@ -200,12 +190,6 @@ one status from the enum"). Still malformed → escalate exactly as an exhausted
 (Section H) → add the `guild:needs-human` label + a `<!-- guild:needs-human -->` comment and return
 `OK PAUSE: needs-human — <role> returned no valid RESULT line` (do NOT transition the stage label).
 A failed invocation satisfies no gate: the stage must not return `OK ADVANCE` on it.
-
-⚠ **Exception — a role that holds no gate.** The sentence above is scoped to gates. Execute Step 3.5a's
-adversarial auditor is registered (Section G) as non-gate: it cannot block advancement, so there is no
-gate for its failure to leave unsatisfied. A second malformed reply from it is **recorded as the auditor
-being absent, and the stage advances** — escalating instead would let a formatting slip in an always-on
-role stall every execute run, which is strictly worse than the advisory finding being lost.
 
 ---
 
@@ -292,12 +276,11 @@ mutation: label edit, comment create/PATCH, `gh issue create`, `gh pr create` / 
 
 ## Section G — Roster & participation model (who works on a task)
 
-`/gld init` installs the **full roster of 16 roles** into `.claude/agents/`. Installing everyone is cheap; what varies per task is **who participates**. The leader (embodied by the main session — `leader.md`) assembles the cast from the roster using work-type + risk + charter. There are **three participation kinds** in the roster, plus one always-on reviewer that sits outside it:
+`/gld init` installs the **full roster of 16 roles** into `.claude/agents/`. Installing everyone is cheap; what varies per task is **who participates**. The leader (embodied by the main session — `leader.md`) assembles the cast from the roster using work-type + risk + charter. There are **three participation kinds**:
 
 - **Stage role (always)** — lives on the spine; present in every task. Depth scales with the work (a one-line fix still passes through them, lightly). Never conditional.
 - **Participation role (conditional join)** — the leader convenes it **only when the task's nature warrants** (e.g. a designer on a UI change). Not warranted → never spawned → zero token cost. This is how a 16-role roster stays cheap.
 - **Gate role (conditional review)** — a **review check** the leader inserts *before advancing past a stage* when risk warrants (e.g. security review on auth/exposure changes). A gate role reviews **someone else's** output (external-auditor stance — it never self-reviews its own artifact). Three roles carry gate capability on top of conditional participation, but not identically: designer/security **build during the stage and also provide the review check** (e.g. designer authors the UX design in `design`, then separately reviews the built UI at the `qa` gate); infra, by contrast, **never builds** — it conditionally joins `execute` purely to review the developer's already-produced CI/deploy/env/IaC diff (external-auditor stance from the start, per its own persona, not a build-then-review split like designer/security).
-- **Adversarial auditor (always, outside the roster)** — execute Step 3.5a spawns one unconditionally on every run: no persona file, no roster entry, no scorecard, and **no gate** (it cannot block advancement — its findings are data and the leader disposes of them). It exists because the three kinds above are all *conditional or slice-scoped*: on a change matching no trigger, the tech-lead is the only reviewer, and it checks the work against the design rather than reading the finished change as a diff. Being outside the roster is deliberate — `.claude/agents/` **is** the roster, and nothing installs or scores a file for this one.
 
 **The roster (16):**
 
@@ -324,7 +307,7 @@ mutation: label edit, comment create/PATCH, `gh issue create`, `gh pr create` / 
 
 **How roles hand off** is unchanged (Section C — status enum + `>>> RESULT <<<`, artifacts as files). Section G only answers *which* roles are in the cast; once convened, every role uses the same handoff contract. **A conditional role that is not convened produces nothing and is not spawned** — its absence is normal, not a gap.
 
-**Leader assembly (authoritative logic lives in `leader.md` + `dev.md`)**: the leader reads the task (work-type label, diff/AC surface, hotspots) against charter priorities and (1) always runs the spine, (2) convenes the participation roles whose trigger matches, (3) inserts the gate reviews whose risk matches, and (4) at execute Step 3.5a spawns the always-on adversarial auditor regardless of any trigger — then delegates via the Section C contract. Assembly decisions on large/risky tasks are surfaced to the human (HITL).
+**Leader assembly (authoritative logic lives in `leader.md` + `dev.md`)**: the leader reads the task (work-type label, diff/AC surface, hotspots) against charter priorities and (1) always runs the spine, (2) convenes the participation roles whose trigger matches, (3) inserts the gate reviews whose risk matches — then delegates via the Section C contract. Assembly decisions on large/risky tasks are surfaced to the human (HITL).
 
 ---
 

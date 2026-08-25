@@ -1,6 +1,6 @@
 # DEBUG (stage: execute variant — bugs)
 
-**Stage: execute, variant for `type:bug`.** Roles: **developer** (reproduce → root-cause → fix) with **tech-lead conformance**, plus an always-on adversarial audit of the diff (Step 3.5a) and conditional specialists / gate reviews the leader convenes (Step 3.5b). Invocable directly (`/gld debug <issue>`) or via `/gld dev` (auto-selected when the Issue is `type:bug`). The spine is identical to `implement` (execute → test); only the *developer's task shape* differs — a bug is **reproduced and root-caused**, not built.
+**Stage: execute, variant for `type:bug`.** Roles: **developer** (reproduce → root-cause → fix) with **tech-lead conformance**, plus conditional specialists / gate reviews the leader convenes (Step 3.5). Invocable directly (`/gld debug <issue>`) or via `/gld dev` (auto-selected when the Issue is `type:bug`). The spine is identical to `implement` (execute → test); only the *developer's task shape* differs — a bug is **reproduced and root-caused**, not built.
 
 `$1` = Issue number. Returns a Section D line.
 
@@ -11,7 +11,7 @@
 
 ## How to run this stage
 
-Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the label read and the **`guild:children`** split-parent guard) · Step 1 spawn developer · Step 2 verify evidence · Step 3 tech-lead conformance · Step 3.5 adversarial audit (always) + conditional specialists/gates (security on auth/exposure, dba on schema, etc.; `_handoff.md` Section G — a gate `BLOCKED` blocks advancement) · Step 4 arbitrate · Step 5 PR · Step 6 transition + return — filling its Section A slots with the values below. Nothing about the spine changes for this variant.
+Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the label read and the **`guild:children`** split-parent guard) · Step 1 spawn developer · Step 2 verify evidence · Step 3 tech-lead conformance · Step 3.5 conditional specialists/gates (security on auth/exposure, dba on schema, etc.; `_handoff.md` Section G — a gate `BLOCKED` blocks advancement) · Step 4 arbitrate · Step 5 PR · Step 6 transition + return — filling its Section A slots with the values below. Nothing about the spine changes for this variant.
 
 ## Slot values (`type:bug`)
 

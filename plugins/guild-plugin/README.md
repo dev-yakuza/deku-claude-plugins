@@ -9,7 +9,7 @@ A self-evolving **agent organization** for Claude Code. Guild builds an operatin
 ## Concept
 
 - **Harness** — the operating environment Guild installs: `CLAUDE.md`, settings, a roster of role agents, a ⑥ knowledge base, standards drafts, and a deterministic commit gate.
-- **Organization** — a per-repo team of **16 role agents** (spine: leader · tech-lead · developer · tester · qa; plus conditional specialists — designer, security, dba, i18n, …) that collaborate across the spine, with an **always-on adversarial audit** of every diff at execute, and are specialized to *your* project.
+- **Organization** — a per-repo team of **16 role agents** (spine: leader · tech-lead · developer · tester · qa; plus conditional specialists — designer, security, dba, i18n, …) that collaborate across the spine and are specialized to *your* project.
 - **Two loops** — the **Inner loop** develops code (`analyze → design → execute → test → qa`); the **Outer loop** (`evolve`) reads real traces and grows the agents, knowledge, and gates.
 - **Co-evolution** — both the codebase (the product) and the Guild (the developer) improve from usage. `evolve` distills traces into reviewed, human-approved improvements.
 

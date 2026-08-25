@@ -164,12 +164,10 @@ Create via Write tool:
 - `gates.enabled` (M3) is the **off-switch** for the enforcement layer — `true` = the pre-commit gate blocks (secret / verification-weakening); `false` = advisory only (off-switch). `automation.evolve_nudge` (default `true`) is the **off-switch for the review-stage evolve nudge** (`review.md` Step 5) — `false` silences it entirely; toggle via `/gld config --evolve-nudge=<on|off>`.
 
 ### 2. Role agents (the Guild's full roster — 16)
-Install the **entire roster** so the leader can assemble any of them per task ("전 역할 활성화; init이 로스터 전체 설치, 리더가 태스크별 조건부 참여"). The roster has three participation kinds (documented in `_handoff.md` Section G) — plus one always-on reviewer that is deliberately **not** in the roster (see below):
+Install the **entire roster** so the leader can assemble any of them per task ("전 역할 활성화; init이 로스터 전체 설치, 리더가 태스크별 조건부 참여"). The roster has three participation kinds (documented in `_handoff.md` Section G):
 - **Spine roles (always in the flow)**: `leader`, `tech-lead`, `developer`, `tester`, `qa`.
 - **Participation roles (leader convenes conditionally)**: `product-owner`, `designer`, `infra`, `dba`, `security`, `performance`, `i18n`, `analytics`, `tech-writer`, `release-manager`, `support-triage`.
 - **Gate roles (conditional review checks)**: `designer` (UI/UX review), `security` (security review), `infra` (CI/CD·deploy·env·IaC review — gate-only, never authors its own diff) — same files as their participation entry.
-
-⚠ **Do not install a file for the adversarial auditor.** Execute Step 3.5a spawns an always-on adversarial reviewer, but it has **no persona file, no roster entry, and no gate** — `.claude/agents/` *is* the roster, so adding one would make it scoreable and convenable, which it is not. Its absence from `.claude/agents/` is correct, not a gap.
 
 For **each of the 16** roles (`leader`, `tech-lead`, `developer`, `tester`, `product-owner`, `qa`, `designer`, `infra`, `dba`, `security`, `performance`, `i18n`, `analytics`, `tech-writer`, `release-manager`, `support-triage`):
 - Read `<<SKILL_DIR>>/templates/agents/<role>.md`.
@@ -362,7 +360,7 @@ Non-zero exit → fix it before reporting success; the harness is not installed 
 **Report what verification shows, never what was intended.** Each line below states that something exists on disk — so check it before writing it (P3.9 already confirmed the generated files carry no leftover placeholders and that `settings.json` parses; `git status` confirms the harness is visible to git). An install reported as complete when a step silently failed is worse than an obvious failure: the human then believes the enforcement layer is in place when it is not. If anything from the completeness set is missing, say which, and that init is **partial** — do not round up to success.
 
 Report what was installed:
-- Guild: 16 role agents at `.claude/agents/` — spine (leader, tech-lead, developer, tester, qa) + participation/gate specialists (product-owner, designer, infra, dba, security, performance, i18n, analytics, tech-writer, release-manager, support-triage). Note that the leader convenes the roster specialists **conditionally** per task — spine roles always run, specialists join by work-type/risk, and execute additionally runs an always-on adversarial auditor from outside the roster (see `_handoff.md` Section G).
+- Guild: 16 role agents at `.claude/agents/` — spine (leader, tech-lead, developer, tester, qa) + participation/gate specialists (product-owner, designer, infra, dba, security, performance, i18n, analytics, tech-writer, release-manager, support-triage). Note that the leader convenes the specialists **conditionally** per task (spine roles always run; specialists join by work-type/risk — see `_handoff.md` Section G).
 - Standards: 5 drafts at `docs/standards/` (note which are `draft` vs `confirmed`).
 - Harness: `CLAUDE.md` (created or merged), `.claude/settings.json` (created or merged), `.claude/guild/` state skeleton. Note whether `.gitignore` was reconciled (P2 step 0) so `.claude/` harness is committable — and confirm the harness is visible to git (`git status` shows it), since ignored files silently look "not created".
 - ⑥ Knowledge baseline: `.claude/guild/knowledge/index.md` + `facts/` seeded from the scans (hotspots · co-change · coupling). Note the seeded slice count; `evolve` grows it from here.

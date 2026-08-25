@@ -9,7 +9,7 @@ Claude Code のための**自己進化するエージェント組織**。Guild �
 ## コンセプト
 
 - **ハーネス** — Guild がインストールする作動環境：`CLAUDE.md`、settings、ロールエージェントのロスター、⑥ ナレッジベース、standards ドラフト、決定的コミットゲート。
-- **組織** — リポジトリ専用の **16 ロールエージェント**（背骨：leader · tech-lead · developer · tester · qa ＋ 条件付きスペシャリスト — designer, security, dba, i18n …）が背骨をまたいで協働し、*あなたの*プロジェクトに特化します。さらに execute では**常時の敵対的監査**が差分を読みます。
+- **組織** — リポジトリ専用の **16 ロールエージェント**（背骨：leader · tech-lead · developer · tester · qa ＋ 条件付きスペシャリスト — designer, security, dba, i18n …）が背骨をまたいで協働し、*あなたの*プロジェクトに特化します。
 - **2つのループ** — **Inner ループ**はコードを開発（`analyze → design → execute → test → qa`）、**Outer ループ**（`evolve`）は実トレースを読みエージェント・知識・ゲートを成長させます。
 - **共進化** — コードベース（成果物）と Guild（開発者）が使用から共に改善。`evolve` がトレースをレビュー済み・人間承認済みの改善へ蒸留します。
 
