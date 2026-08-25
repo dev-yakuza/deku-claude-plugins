@@ -46,6 +46,8 @@ Ephemeral signals are appended to the ground-truth log **at the moment they occu
 | Unattended auto-decision overturned by human at PR review | *(deferred — needs PR-review read-back of the auto-decision's own trail; narrower than the row above)* | `correction` (unattended) |
 | git revert of a Guild-authored commit | on-demand via scan_git — **not** captured | — (durable) |
 
+⚠ **Execute Step 3.5a's adversarial auditor is deliberately not a source in this table.** Its findings are LLM output, so a leader choosing to act on one is neither an objective outcome nor a real human action — it fails the anchor rule above. An auditor-driven loop-back is therefore **not** captured, and neither is a stagnation on one (`_stagnation.md` Section C carries the same carve-out); logging either would let a hallucinated defect drive an evolve proposal. The `review`-stage row above fires on a **human acting** on such a finding — that *is* a real human action, and it does qualify.
+
 **Append mechanism** = `capture_signal.py`, run as ONE bash call (atomic-bash forbids `>>` — same bundled-command exception as the parser):
 ```bash
 python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind <correction|verify-gap|stagnation|accepted-risk> \

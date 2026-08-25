@@ -10,7 +10,7 @@ Codebase, agent team, AND you (the overseer) co-evolve.
 
 In this version (<PLUGIN_VERSION>)
   Spine        analyze → design → execute → test → qa, run by per-repo role agents
-               (leader convenes specialists by risk) + mid-execute resume
+               (risk-based specialists; execute audits the diff) + mid-execute resume
   Intake       plan: a design-doc or epic → a dependency-ordered dev-unit backlog
   Outer loop   evolve (HITL apply) · audit · contribute/update (central↔repo)
                · sprint (readiness-gated) · multi-PR child orchestration
@@ -42,7 +42,7 @@ Setup
 
 Develop (spine: analyze → design → execute → test → qa)
   /gld plan <doc|issue>   Intake (upstream of the spine): decompose a design-doc FILE or an epic ISSUE into a dependency-ordered dev-unit backlog. Default dry-run; --create to make the issues (file → flat + area labels; issue → children under it for /gld dev orchestration)
-  /gld dev <issue>        Run the full flow on a GitHub Issue (auto-selects execute variant; leader convenes specialists by risk)
+  /gld dev <issue>        Run the full flow on a GitHub Issue (auto-selects execute variant; always-on adversarial audit at execute)
   /gld analyze <issue>    Stage 1: requirements (What/Why)
   /gld design <issue>     Stage 2: design (How) — tech-lead skeleton, tester drafts test cases
   /gld implement <issue>  Stage 3 execute variant (feature): TDD red→green→refactor

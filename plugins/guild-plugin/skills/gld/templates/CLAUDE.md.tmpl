@@ -4,7 +4,7 @@
 이 레포는 [Guild](https://github.com/dev-yakuza/deku-claude-plugins)(`/gld`)가 관리한다. Guild는 척추 흐름(`analyze → design → execute → test → qa`)을 레포 전용 역할 에이전트 조직이 수행하며, 코드베이스와 에이전트 조직이 함께 성장(공진화)한다.
 
 ### 지도
-- **조직(역할 에이전트)**: `.claude/agents/` — 파일 하나가 역할 하나이고, **그 디렉터리가 로스터의 실제 목록**이다. 스파인 `leader`·`tech-lead`·`developer`·`tester`·`qa`는 항상 참여하고, 나머지는 리더가 태스크별로 조건부 소집한다(참여 조건은 각 역할 파일에 있다). 메인 세션이 `leader`를 체현한다.
+- **조직(역할 에이전트)**: `.claude/agents/` — 파일 하나가 역할 하나이고, **그 디렉터리가 로스터의 실제 목록**이다. 스파인 `leader`·`tech-lead`·`developer`·`tester`·`qa`는 항상 참여하고, 나머지 **로스터 역할**은 리더가 태스크별로 조건부 소집한다(참여 조건은 각 역할 파일에 있다). 로스터 **밖**에서 상시로 도는 것이 하나 있다 — execute Step 3.5a의 **적대적 감사자**(페르소나 파일 없음, 게이트 아님). 메인 세션이 `leader`를 체현한다.
 - **표준(권위, 사람 큐레이션)**: `docs/standards/` — `charter`(북극성), `architecture`, `conventions`, `quality-bar`, `verification`. `status: confirmed`는 하드 제약으로 준수한다.
 - **스펙(이슈별 설계 산출물)**: `docs/specs/<issue>/`.
 - **Guild 상태**: `.claude/guild/` — `config.json`(설정), `knowledge/`(⑥ 코드베이스 사실 — `index.md` 항상 로드 + `facts/` 관련분만 검색), `evolution-log.md`(진화 원장, 추후).

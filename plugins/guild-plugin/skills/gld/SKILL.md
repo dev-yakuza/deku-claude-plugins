@@ -1,6 +1,6 @@
 ---
 name: gld
-description: "Guild builds a Claude Code operating environment (harness) into a repository and runs a spec-driven development flow (analyze -> design -> execute -> test -> qa) performed by a per-repo organization of specialized agent roles (spine: leader, tech-lead, developer, tester, qa; plus conditional specialists like designer, security, i18n, dba) that co-evolve with the codebase. Use to set up Guild in a repo (init), develop a GitHub Issue end-to-end (dev), run an individual stage, or check/continue progress."
+description: "Guild builds a Claude Code operating environment (harness) into a repository and runs a spec-driven development flow (analyze -> design -> execute -> test -> qa) performed by a per-repo organization of specialized agent roles (spine: leader, tech-lead, developer, tester, qa; plus an always-on adversarial auditor and conditional specialists like designer, security, i18n, dba) that co-evolve with the codebase. Use to set up Guild in a repo (init), develop a GitHub Issue end-to-end (dev), run an individual stage, or check/continue progress."
 argument-hint: "<command> [issue-number|args]"
 user-invocable: true
 ---
@@ -25,7 +25,7 @@ Guild installs a **harness** into the target repo and grows a per-repo agent org
 
 ### The Guild (per-repo agent organization)
 - **Terminology (user-facing)**: in all output and GitHub comments, call the per-repo agent organization the **Guild** (길드) — the brand. Do NOT surface the internal shorthand "org" to the user (e.g. write "Guild 내부 검증", not "내부 org verify").
-- Role agents live in `.claude/agents/` (native Claude Code project agents), specialized to this repo — **one file per role, and that directory is the roster**. `init` installs the full roster (16); a repo may grow or prune it later via `evolve` HR, so read the directory rather than assuming a fixed list. Spine roles **leader, tech-lead, developer, tester, qa** always run; every other role is a conditional specialist the leader convenes per task by work-type/risk. The roster and the participation model are defined once in `commands/atoms/_handoff.md` **Section G** — do not re-enumerate them elsewhere.
+- Role agents live in `.claude/agents/` (native Claude Code project agents), specialized to this repo — **one file per role, and that directory is the roster**. `init` installs the full roster (16); a repo may grow or prune it later via `evolve` HR, so read the directory rather than assuming a fixed list. Spine roles **leader, tech-lead, developer, tester, qa** always run; every other *roster* role is a conditional specialist the leader convenes per task by work-type/risk. One reviewer runs unconditionally from outside the roster: execute Step 3.5a's **adversarial auditor** (no persona file, no gate). The roster and the participation model are defined once in `commands/atoms/_handoff.md` **Section G** — do not re-enumerate them elsewhere.
 - The **leader** is not a separate spawned subagent — the main session **embodies** the leader role (loaded from `.claude/agents/leader.md`): it assembles the team for a task, delegates to roles, arbitrates, and judges completion.
 - Roles collaborate across stages (not a 1-role-per-stage pipeline): the tech-lead sets technical direction, drafts the skeleton, and later checks conformance; tester writes test cases from acceptance criteria before implementation; developer fills the skeleton.
 
@@ -35,7 +35,7 @@ analyze → design → execute → test → qa
                     └ execute variant by work type: implement (feature) | debug (bug) | refactor (refactor)
 ```
 - `test` = automated correctness (tester, verify gate). `qa` = holistic quality (qa role, exploratory/E2E/user-flow, risk-based). `qa` marks `guild:done`.
-- Conditional participants + **gate reviews** the leader inserts before advancing when risk matches: designer (UI → design + a UI/UX review gate), security (→ a security review gate), infra (CI/CD·deploy·env·IaC → an execute review gate; **review-only — never authors its own diff**). Those three gate roles are the ones that can block a stage; the remaining specialists participate without a gate. Full roster and triggers: `commands/atoms/_handoff.md` Section G.
+- Conditional participants + **gate reviews** the leader inserts before advancing when risk matches: designer (UI → design + a UI/UX review gate), security (→ a security review gate), infra (CI/CD·deploy·env·IaC → an execute review gate; **review-only — never authors its own diff**). Those three gate roles are the ones that can block a stage; the remaining specialists — and the always-on adversarial auditor at execute Step 3.5a — participate without a gate. Full roster and triggers: `commands/atoms/_handoff.md` Section G.
 - Work type comes from the issue's `type:` label; `analyze` may reclassify. The execute variant is chosen accordingly — `implement` (feature), `debug` (bug), or `refactor` (refactor) — see the spine diagram above.
 - `/gld dev <issue>` runs the whole spine and auto-selects the execute variant. Individual stages are also invocable (`/gld analyze`, `design`, `implement`, `test`).
 
