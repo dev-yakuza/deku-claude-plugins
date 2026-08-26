@@ -22,6 +22,19 @@ No fourth "codebase-context" dimension (ouroboros-style brownfield axis) — Gui
 
 Each dimension gets one of three levels: **`clear`** (proceed) / **`partial`** (proceed, but the gap MUST be recorded as an explicit assumption) / **`unclear`** (material ambiguity, same as today's holistic trigger).
 
+Boundary between `partial` and `unclear`. `clear` means the Issue already
+answers the dimension outright. Below that:
+- **partial** — the gap is real, but you can narrow it to one assumption a
+  reader could challenge, because something in reach points at one reading:
+  the charter, the Issue's own AC, existing code, or — when the Issue is simply
+  silent — the repo's established default for this kind of decision.
+- **unclear** — the readings are defensible enough that picking one is a
+  product decision only the requester can make, and nothing in reach breaks
+  the tie.
+When a gap sits between the two, rate it **partial** and record the assumption;
+Section C already requires that assumption to appear in Step 1's list, which is
+where a reader challenges it.
+
 > **These three level values are MACHINE TOKENS** — ASCII, never localized, exactly like the `RESULT` keywords and `guild:*` labels in `_handoff.md` Section K. The gate below and every consumer (`analyze.md`) branch on `clear`/`partial`/`unclear` verbatim, so they must read the same on an `en`, `ko`, or `ja` repo. What the **human reads** — the one-line readiness summary (Section D), the `NEEDS_HUMAN` explanation, the recorded assumption prose — is written in `config.language` like all other human-readable output (Section K). Token ≠ rendered text: the token is what the logic tests, the surrounding sentence is what gets translated.
 
 This is the **same leader that is already making the qualitative call** in Step 1 today — the dimension breakdown does not add a second opinion or a ground-truth claim, it only forces the *existing* judgment to be itemized instead of holistic, so a specific gap can't be smoothed over by an otherwise-confident overall impression. **Self-scoring is not ground truth** (`_signals.md` Section B) — it never by itself produces a `correction`/`surprise` capture; it only shapes whether/how the human is asked, exactly as the pre-existing discuss gate already did.
