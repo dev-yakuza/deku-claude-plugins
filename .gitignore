@@ -1,3 +1,6 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+
+# Guild design notes — kept out of the repo deliberately
+design/guild/
