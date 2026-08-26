@@ -1,6 +1,6 @@
 # DEBUG (stage: execute variant — bugs)
 
-**Stage: execute, variant for `type:bug`.** Roles: **developer** (reproduce → root-cause → fix) with **tech-lead conformance**, plus conditional specialists / gate reviews the leader convenes (Step 3.5). Invocable directly (`/gld debug <issue>`) or via `/gld dev` (auto-selected when the Issue is `type:bug`). The spine is identical to `implement` (execute → test); only the *developer's task shape* differs — a bug is **reproduced and root-caused**, not built.
+**Stage: execute, variant for `type:bug`.** Roles: **developer** (reproduce → root-cause → fix) with **tech-lead conformance**, plus the always-on external auditor and any conditional specialists / gate reviews the leader convenes (Step 3.5). Invocable directly (`/gld debug <issue>`) or via `/gld dev` (auto-selected when the Issue is `type:bug`). The spine is identical to `implement` (execute → test); only the *developer's task shape* differs — a bug is **reproduced and root-caused**, not built.
 
 `$1` = Issue number. Returns a Section D line.
 
@@ -11,7 +11,7 @@
 
 ## How to run this stage
 
-Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the label read and the **`guild:children`** split-parent guard) · Step 1 spawn developer · Step 2 verify evidence · Step 3 tech-lead conformance · Step 3.5 conditional specialists/gates (security on auth/exposure, dba on schema, etc.; `_handoff.md` Section G — a gate `BLOCKED` blocks advancement) · Step 4 arbitrate · Step 5 PR · Step 6 transition + return — filling its Section A slots with the values below. Nothing about the spine changes for this variant.
+Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the label read and the **`guild:children`** split-parent guard) · Step 1 spawn developer · Step 2 verify evidence · Step 3 tech-lead conformance · Step 3.5 external auditor (**always**) + conditional specialists/gates (security on auth/exposure, dba on schema, etc.; `_handoff.md` Section G — a gate `BLOCKED` blocks advancement, as does an auditor `BLOCKER`) · Step 4 arbitrate · Step 5 PR · Step 6 transition + return — filling its Section A slots with the values below. Nothing about the spine changes for this variant.
 
 ## Slot values (`type:bug`)
 
@@ -43,7 +43,7 @@ A tech-lead `BLOCKED` here means **symptom-patch / wrong root cause** — that i
 
 ## Hard rules
 
-Spine-common rules apply (`_execute_spine.md`): verify evidence mandatory · no verification weakening (INV2) · conformance by the tech-lead, not self-review · artifacts as files, one-line RESULT. Bug-specific, on top:
+Spine-common rules apply — **read `_execute_spine.md`'s "Hard rules" section directly; it is the authority and it is longer than this summary**, notably the auditor rules (3.5a never gates by itself and never edits, and the mutation check around it — `git diff --numstat --no-renames <mb>` + `git status --porcelain -uall`, compared before/after — is mandatory on **every** path — a standalone run of this variant that skips them loses the mutation check entirely). The most-cited ones, for orientation: verify evidence mandatory · no verification weakening (INV2) · conformance by the tech-lead, not self-review · artifacts as files, one-line RESULT. Bug-specific, on top:
 
 - **Reproduce first** — a bug fix MUST carry a regression test that was **red before the fix, green after** (proves the bug + prevents recurrence). No red-then-green test = symptom patch = reject.
 - **Root cause, not symptom** — the tech-lead conformance check enforces this.

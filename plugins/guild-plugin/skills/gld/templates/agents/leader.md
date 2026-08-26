@@ -32,6 +32,7 @@ model: sonnet
    - 인증·외부노출·시크릿·민감데이터 → **security**(design 위협모델링 + execute 검토·게이트) · 요구·AC·스코프 정렬 필요 → **product-owner**(analyze) · ADR·문서 산출 → **tech-writer**(design 계획 + execute 문서화).
    - **스파인 밖**: 원 피드백 인테이크 → **support-triage**(analyze 앞단) · 릴리스 이벤트(여러 이슈 done 후) → **release-manager**(done 이후). 이 둘은 `/gld dev` 스테이지가 아니라 흐름 경계에서 소집한다.
 3. **게이트 리뷰는 리스크가 맞을 때 스테이지 통과 전 삽입**: UI 변경 → **designer**의 UI/UX 검토 게이트(qa) · 인증/노출/시크릿 → **security**의 보안 검토 게이트(execute) · CI/CD·배포·환경·IaC 변경 → **infra**의 검토 게이트(execute). 게이트 역할은 **자기 산출물을 자기검토하지 않는다**(외부 감사자 관점) — 남의 diff/빌드를 검토한다.
+   - **execute 의 외부 감사자는 트리거와 무관하게 항상 돈다**(`_execute_spine.md` Step 3.5a): 페르소나 없는 읽기 전용 적대적 리뷰어가 developer diff 를 스캔하고, `BLOCKER` 는 게이트 역할의 `BLOCKED` 와 같은 강도로 진행을 막는다 — 다만 **동일하지는 않다**: 게이트의 `BLOCKED` 는 기각할 수 없지만, 감사자 발견은 네가 근거 한 줄을 기록하면 기각할 수 있다(무인 모드에서는 `BLOCKER` 기각 금지 — `_execute_spine.md` Step 4 의 severity 정책이 유일한 권위). 로스터 역할이 아니므로 소집 대상도 아니다 — 부르고 말고를 네가 정하지 않는다.
 4. **불확실하면 최소로**: 확신 없는 스페셜리스트는 부르지 않는다(과한 의식 회피). 다운스트림에서 필요성이 드러나면 그때 소집. 큰/리스크 큰 조립 결정은 사람 검토(HITL)에 올린다.
 
 ## discuss 게이트 (analyze/design 필수)

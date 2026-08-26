@@ -1,6 +1,6 @@
 # IMPLEMENT (stage: execute variant)
 
-**Stage: execute, variant for `type:feature`.** Roles: **developer** (fills the skeleton via TDD) with **tech-lead conformance check**, plus any **conditional specialists / gate reviews** the leader convenes (security/infra/i18n/dba/analytics/performance — Step 3.5). Invocable directly (`/gld implement <issue>`) or via `/gld dev` (auto-selected when the Issue is `type:feature`, or has no `type:` label — see `dev.md`'s default-to-feature rule). The spine is identical to `debug`/`refactor` (execute → test); only the *developer's task shape* differs — a feature is **built via TDD from the tech-lead's skeleton**.
+**Stage: execute, variant for `type:feature`.** Roles: **developer** (fills the skeleton via TDD) with **tech-lead conformance check**, plus the **always-on external auditor** and any **conditional specialists / gate reviews** the leader convenes (security/infra/i18n/dba/analytics/performance — Step 3.5). Invocable directly (`/gld implement <issue>`) or via `/gld dev` (auto-selected when the Issue is `type:feature`, or has no `type:` label — see `dev.md`'s default-to-feature rule). The spine is identical to `debug`/`refactor` (execute → test); only the *developer's task shape* differs — a feature is **built via TDD from the tech-lead's skeleton**.
 
 `$1` = Issue number. Returns a Section D line.
 
@@ -11,7 +11,7 @@
 
 ## How to run this stage
 
-Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the label read and the **`guild:children`** split-parent guard) · Step 1 spawn developer · Step 2 verify evidence · Step 3 tech-lead conformance · Step 3.5 conditional specialists/gates · Step 4 arbitrate · Step 5 PR · Step 6 transition + return — filling its Section A slots with the values below. Nothing about the spine changes for this variant; everything that *is* feature-specific is in this file.
+Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the label read and the **`guild:children`** split-parent guard) · Step 1 spawn developer · Step 2 verify evidence · Step 3 tech-lead conformance · Step 3.5 external auditor (**always**) + conditional specialists/gates · Step 4 arbitrate · Step 5 PR · Step 6 transition + return — filling its Section A slots with the values below. Nothing about the spine changes for this variant; everything that *is* feature-specific is in this file.
 
 ## Slot values (`type:feature`)
 
@@ -37,7 +37,7 @@ RESULT extras: the raw test summary line and the branch name.
 
 ## Hard rules
 
-This variant adds none of its own — the four spine-common hard rules in `_execute_spine.md` are exactly this stage's rules:
+This variant adds none of its own — this stage's rules are exactly the spine-common hard rules in `_execute_spine.md`. ⚠ **That list is the authority and it is longer than the summary below**: read `_execute_spine.md`'s "Hard rules" section directly, especially the auditor rules (3.5a never gates by itself and never edits; the mutation check around it — `git diff --numstat --no-renames <mb>` + `git status --porcelain -uall`, compared before/after — is mandatory on **every** path) — a standalone `/gld implement <issue>` run that skips them loses the mutation check entirely. The four most-cited ones, for orientation:
 
 - **Verify evidence is mandatory** (`_handoff.md` Section E): no "green" claim without the raw runner output; raw output wins over self-report.
 - **No verification weakening** (INV2): the developer must not delete/skip/weaken tests to pass. If a test must change, it requires an explicit, justified reason surfaced to the human.

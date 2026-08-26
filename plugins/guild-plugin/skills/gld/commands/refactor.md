@@ -1,6 +1,6 @@
 # REFACTOR (stage: execute variant — refactor)
 
-**Stage: execute, variant for `type:refactor`.** Roles: **developer** (behavior-preserving transform) with **tech-lead conformance** (structure improved *and* behavior preserved), plus conditional specialists (Step 3.5). Invocable directly (`/gld refactor <issue>`) or via `/gld dev` (auto-selected when the Issue is `type:refactor`). Same spine as `implement` (execute → test); the developer's task shape differs — code is **transformed without changing behavior**, so the **existing tests are the safety net** (no new feature test).
+**Stage: execute, variant for `type:refactor`.** Roles: **developer** (behavior-preserving transform) with **tech-lead conformance** (structure improved *and* behavior preserved), plus the always-on external auditor and any conditional specialists (Step 3.5). Invocable directly (`/gld refactor <issue>`) or via `/gld dev` (auto-selected when the Issue is `type:refactor`). Same spine as `implement` (execute → test); the developer's task shape differs — code is **transformed without changing behavior**, so the **existing tests are the safety net** (no new feature test).
 
 `$1` = Issue number. Returns a Section D line.
 
@@ -11,7 +11,7 @@
 
 ## How to run this stage
 
-Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the label read and the **`guild:children`** split-parent guard) · Step 1 spawn developer · Step 2 verify evidence · Step 3 tech-lead conformance · Step 3.5 conditional specialists/gates (`_handoff.md` Section G — a refactor touching a hot path → performance; schema → dba; etc. A gate `BLOCKED` blocks advancement) · Step 4 arbitrate · Step 5 PR · Step 6 transition + return — filling its Section A slots with the values below. Nothing about the spine changes for this variant.
+Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the label read and the **`guild:children`** split-parent guard) · Step 1 spawn developer · Step 2 verify evidence · Step 3 tech-lead conformance · Step 3.5 external auditor (**always**) + conditional specialists/gates (`_handoff.md` Section G — a refactor touching a hot path → performance; schema → dba; etc. A gate `BLOCKED` blocks advancement, as does an auditor `BLOCKER`) · Step 4 arbitrate · Step 5 PR · Step 6 transition + return — filling its Section A slots with the values below. Nothing about the spine changes for this variant.
 
 ## Slot values (`type:refactor`)
 
@@ -43,7 +43,7 @@ A tech-lead `BLOCKED` here means **structure not improved, behavior changed, or 
 
 ## Hard rules
 
-Spine-common rules apply (`_execute_spine.md`): verify evidence mandatory · no verification weakening (INV2) · conformance by the tech-lead, not self-review · artifacts as files, one-line RESULT. Refactor-specific, on top:
+Spine-common rules apply — **read `_execute_spine.md`'s "Hard rules" section directly; it is the authority and it is longer than this summary**, notably the auditor rules (3.5a never gates by itself and never edits, and the mutation check around it — `git diff --numstat --no-renames <mb>` + `git status --porcelain -uall`, compared before/after — is mandatory on **every** path — a standalone run of this variant that skips them loses the mutation check entirely). The most-cited ones, for orientation: verify evidence mandatory · no verification weakening (INV2) · conformance by the tech-lead, not self-review · artifacts as files, one-line RESULT. Refactor-specific, on top:
 
 - **Behavior preservation is the contract** — existing tests green **before and after**; a red test = behavior changed = not a refactor.
 - **No verification weakening** (INV2 — *especially* critical for refactor, where "cleaning up" can quietly drop tests). A changed test needs an explicit, justified, implementation-detail-only reason surfaced to the human.

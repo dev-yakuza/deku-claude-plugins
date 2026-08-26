@@ -34,7 +34,7 @@ claude /plugin install deku-claude-plugins@guild-plugin
 
 **セットアップ** — `init [lang]`（一度きりのオンボーディング、ハーネス構築 + 準備度監査）· `onboard [area]`（人間のメンテナーのためのガイド付きコードベースツアー）· `config`（ダイヤル・オフスイッチ）· `update [--check]`（中央の改善を採用、ローカル進化を保存）
 
-**開発**（背骨：analyze → design → execute → test → qa）— `plan <doc|epic-issue> [--create]`（エピック/設計文書を依存順の Issue バックログに分解）· `dev <issue>`（フル、execute バリアント自動選択）· `analyze` · `design` · `implement`（機能）· `debug`（バグ：再現→根本原因→修正）· `refactor`（振る舞い保存）· `test` · `qa` · `review <issue|PR>`（ガイド付きペアレビュー + 敵対的プリスキャン、Issue 番号だけでなく PR 番号も直接指定可）· `resume` · `status` · `batch [issues]`（無人、レート制限自動再開）
+**開発**（背骨：analyze → design → execute → test → qa — `execute` は PR を開く前に開発者の diff に対して読み取り専用の**外部監査者**を常時実行します。`BLOCKER` はループバックされ、修正は `test`/`qa` で再検証されます。`review` は同じ監査者をフローの**外**で再実行し、内側の監査者が実際に機能しているかを測る独立した計測器として働きます）— `plan <doc|epic-issue> [--create]`（エピック/設計文書を依存順の Issue バックログに分解）· `dev <issue>`（フル、execute バリアント自動選択）· `analyze` · `design` · `implement`（機能）· `debug`（バグ：再現→根本原因→修正）· `refactor`（振る舞い保存）· `test` · `qa` · `review <issue|PR>`（ガイド付きペアレビュー + 敵対的プリスキャン、Issue 番号だけでなく PR 番号も直接指定可）· `resume` · `status` · `batch [issues]`（無人、レート制限自動再開）
 
 **診断・成長** — `audit`（読み取り専用、evolve/refactor へルーティング）· `evolve [--dry-run|--apply]`（スキャン → 敵対的パネル → 項目別承認 → バックアップ/ロールバック/provenance/台帳で適用）· `contribute`（フロー改善をアップストリーム）
 

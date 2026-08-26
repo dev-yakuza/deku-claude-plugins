@@ -20,8 +20,10 @@ In this version (<PLUGIN_VERSION>)
                scorecard → demote/retire (core secret/verification gates exempt)
   For you      ③ human-growth engine (onboard + WHY-teaching in review/evolve/dev)
                · qa Manual Test Checklist in the PR body (automation-impossible only)
-  Guards       adversarial review · data-sufficiency gate (evolve blocks on thin
-               data · audit banner · review→evolve nudge)
+  Guards       adversarial review — always-on external auditor at execute, and
+               the same auditor again at /gld review (the outside yardstick)
+               · data-sufficiency gate (evolve blocks on thin data · audit
+               banner · review→evolve nudge)
 
 Commit gate (deterministic enforcement layer)
   Authoritative  .git/hooks/pre-commit — blocks a commit carrying a secret or
@@ -50,7 +52,7 @@ Develop (spine: analyze → design → execute → test → qa)
   /gld refactor <issue>   Stage 3 execute variant (refactor): behavior-preserving transform (existing tests stay green)
   /gld test <issue>       Stage 4: automated correctness (verify gate)
   /gld qa <issue>         Stage 5: holistic quality (exploratory/E2E/user-flow, risk-based)
-  /gld review <issue|pr>  Guided pair-programming walkthrough of the PR (pass the issue number — auto-resolves its PR — or a PR number directly) (+ adversarial pre-scan: fresh external auditor on Standards/Spec axes) — one change-unit at a time, explains why, pauses to discuss
+  /gld review <issue|pr>  Guided pair-programming walkthrough of the PR (pass the issue number — auto-resolves its PR — or a PR number directly) (+ adversarial pre-scan: fresh external auditor on Standards/Spec axes — the same auditor execute already ran, re-run here as the independent measure of whether dev is improving) — one change-unit at a time, explains why, pauses to discuss
   /gld resume <issue>     Auto-detect stage and continue
   /gld status <issue>     Show current progress
   /gld batch [issues]     Run many Issues unattended to guild:done (PR open), auto-resumes on rate limit; leader stands in at gates, human reviews PRs after
