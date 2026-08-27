@@ -13,7 +13,8 @@ In this version (<PLUGIN_VERSION>)
                (leader convenes specialists by risk) + mid-execute resume
   Intake       plan: a design-doc or epic → a dependency-ordered dev-unit backlog
   Outer loop   evolve (HITL apply) · audit · contribute/update (central↔repo)
-               · sprint (readiness-gated) · multi-PR child orchestration
+               · sprint (plan/run/daily — an iteration container, PR stacks, worktree
+               isolation) · multi-PR child orchestration
   Memory       ⑥ knowledge · ④ working memory (evolve consolidates) · agent↔agent
                capture · ② standards lifecycle (drift sync + draft→confirmed)
   Enforcement  commit gate (below) · rule lifecycle: gate firing-log → evolve rule
@@ -56,7 +57,10 @@ Develop (spine: analyze → design → execute → test → qa)
   /gld resume <issue>     Auto-detect stage and continue
   /gld status <issue>     Show current progress
   /gld batch [issues]     Run many Issues unattended to guild:done (PR open), auto-resumes on rate limit; leader stands in at gates, human reviews PRs after
-  /gld sprint [issues]    Autonomous Inner+Outer loop — LOCKED until readiness is earned by measurement (use batch until then). --readiness shows the score
+  /gld sprint plan        Choose this sprint's issues, order them by dependency, open the tracking Issue (dry-run; --create to commit)
+  /gld sprint run         Develop the members unattended to PRs — dependency-ordered, PR-stacked, one git worktree per issue, rate-limit resilient. No args = resume the active sprint. --readiness shows the preflight
+  /gld sprint daily       Status: what to merge and in what order, what's waiting on you, what broke (read-only; also where a bare `/gld sprint` goes)
+  /gld sprint retro       Metrics, capacity calibration, evolve, close the sprint
 
 Diagnose & grow (Outer Loop)
   /gld audit [dim]        Read-only health check — grades harness+team+codebase, routes to evolve (dev weakness) / refactor (codebase). Makes no changes. dim = harness | team | knowledge | standards | evolution | codebase (empty = all)

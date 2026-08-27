@@ -75,7 +75,17 @@ Unattended → `guild:needs-human` label **+ a `<!-- guild:needs-human -->` comm
 
 ⚠ **Stated limit — this guard is per-Issue, and a shared checkout is wider than that.** `/gld batch` drives every Issue through **one working copy**, so a mutation left unreverted on Issue #10 is physically present while #11 runs, and #11's own labels and comments say nothing about it. **Nothing catches it at branch-creation time on any path** — (b) below explains why no path-keyed working-tree check can work here, and this step does not pretend to have one. What *does* happen is that the leftover ends up in the audit: Step 3.5a discounts only `docs/specs/…`, so a sibling's stranded file is handed to the auditor and reported. That is noise on an attended run and a non-dismissible pause on an unattended one — visible either way, which is the point. The mitigation is deliberately placed where a human can act rather than in cross-Issue label bookkeeping — a repo-wide `guild:*` annotation would have to be understood by every stage-derivation consumer in the plugin (`status`, `resume`, `rollback`, `monitoring`, and `_handoff.md`'s own two jq forms), and a single missed copy turns an annotation into a bogus "current stage". Instead, the violation note's protocol (Step 3.5a) tells the human to **revert before resuming anything else in that checkout**. Do not restate this guard as checkout-wide; it is not.
 
-**Resolve `<base>` now** (its own Bash call) — the branch this Issue's work is diffed against and the branch Step 5's PR targets. It is used by the resume probe below and by Step 3.5a's audit:
+**Resolve `<base>` now** — the ref this Issue's work is diffed against and the branch Step 5's PR targets. It is used by the resume probe below and by Step 3.5a's audit. **Two steps, in this order**, each its own Bash call:
+
+**(1) An injected base wins.** `/gld sprint` stacks a dependent Issue's work on the branch its dependency is still reviewing in, so it hands the base in rather than letting this stage guess it:
+
+```bash
+printenv GLD_SPRINT_BASE
+```
+
+Non-empty → validate it before use (all three, each its own call): it resolves as a ref (`git rev-parse --verify <v>`); it is either `origin/<default branch>` or matches this repo's branch-naming convention; and it is not the current HEAD. Any check failing → `FAIL: injected base <v> is not usable for #<N>` (unattended: add the `guild:needs-human` label + comment alongside). ⚠ This validation catches a typo or an accident, **not an adversary** — the caller already runs with `--dangerously-skip-permissions`, so describing it as a security boundary would overstate it.
+
+**(2) Empty → the repo's default branch** (every invocation outside `/gld sprint` takes this path, unchanged):
 
 ```bash
 gh repo view --json defaultBranchRef --jq .defaultBranchRef.name
@@ -130,7 +140,7 @@ Keep it otherwise — in particular, **empty log on the current branch is the ju
 
 If dropping leaves none, that is the fresh path — correctly, because no branch of this Issue's work exists.
 
-⚠ **`<base>` must resolve locally for this command.** It is the first use of the bare `<base>` in the stage, and a shallow or `--single-branch` clone may not have it: if `git log` errors with an unknown revision, run the `git fetch origin <base>:<base>` recovery that (c) describes and retry. Do **not** read that error as "empty" — that would drop every candidate and send a resumable run down the fresh path. Then decide — **the current branch never decides on its own**:
+⚠ **`<base>` must resolve locally for this command.** It is the first use of the bare `<base>` in the stage, and a shallow or `--single-branch` clone may not have it: if `git log` errors with an unknown revision, run **the recovery (c) describes for the shape `<base>` actually has** — the plain `git fetch origin <base>:<base>` refspec is correct only when `<base>` is a local branch name, and is *wrong* for both injected shapes (see (c)'s ⚠ on injected bases) — and retry. Do **not** read that error as "empty" — that would drop every candidate and send a resumable run down the fresh path. Then decide — **the current branch never decides on its own**:
 
 - **Exactly one candidate** → **resume** on it. Bind that exact string as the literal `<branch>` for the whole stage (the resume probe below, and Step 5's push, its `gh pr list --head <branch>` duplicate-PR guard and its failure messages all consume it). Do not re-derive it anywhere.
 - **No candidates** → **fresh**. This is the correct answer even though `git rev-parse --abbrev-ref HEAD` printed something: it always does — the current branch name, or the literal `HEAD` when detached — so a rule keyed on *that* being non-empty would make every run a "resume", onto `main` on a plain `/gld dev`, onto the previous Issue's branch under `/gld batch` (which (c) warns about), or onto a branch literally named `HEAD`.
@@ -143,10 +153,22 @@ If dropping leaves none, that is the fresh path — correctly, because no branch
 *Fresh path* — cut it from `<base>` **explicitly**, never from whatever HEAD happens to be checked out (its own Bash call; literal branch names substituted):
 
 ```bash
-git switch -c <branch> <base>
+git switch --no-track -c <branch> <base>
 ```
 
-Use `switch -c` (or `checkout -b <branch> <base>`), **never `checkout -B`** — `-B` resets an existing branch onto `<base>` and would destroy committed partial work.
+⚠ **The flag goes BEFORE `-c`, and that is not cosmetic.** `-c` takes the new branch name as
+its argument, so `git switch -c --no-track <branch> <base>` makes git read `--no-track` **as the
+branch name**, leaves `<branch>` and `<base>` as two positional refs, and dies with
+`fatal: only one reference expected` (exit 128, no branch created — measured on git 2.50.1).
+Because that error string matches neither of (c)'s expected shapes, the Issue then **pauses**
+instead of failing loudly. Any of `--no-track -c <branch> <base>`, `-c <branch> --no-track <base>`
+or `-c <branch> <base> --no-track` works; the one broken arrangement is the flag directly after
+`-c`. Do not "fix" a failure here by dropping `--no-track` — see why it is required next.
+
+⚠ **`--no-track` is not optional.** When `<base>` is a **remote-tracking ref** (the injected form, step (1) above), `git switch -c` would set the new branch's upstream to it — and then a bare `git push` in this step's own "push the branch" below is one `push.default=upstream` away from **pushing this Issue's commits straight onto the base branch, with no PR** (measured: git even prints `git push origin HEAD:<base>` as its suggested fix). That would breach INV1's "nothing merges unattended". When `<base>` is a local branch — every non-sprint invocation — no upstream is set either way, so the flag is a **no-op** and costs nothing.
+
+Use `switch --no-track -c` (or `checkout --no-track -b <branch> <base>` — carry the flag over,
+it is required for the same reason), **never `checkout -B`** — `-B` resets an existing branch onto `<base>` and would destroy committed partial work.
 
 Why explicit: `batch.md` has no branch isolation, so the previous Issue's branch is routinely still checked out when the next one starts. Branching off it would make `git merge-base <base> HEAD` (Step 3.5a) return *that* Issue's divergence point, handing the auditor the previous Issue's commits to review — `BLOCKER`s on work this Issue never touched, which no redo can clear and which unattended cannot be dismissed.
 
@@ -156,13 +178,17 @@ Why explicit: `batch.md` has no branch isolation, so the previous Issue's branch
 git fetch origin <base>:<base>
 ```
 
-Then retry `git switch -c <branch> <base>`. Still failing **for that reason** → `FAIL: base branch <base> is not available locally for #<N> — fetch it and re-run` (attended) / same `FAIL` plus the `guild:needs-human` label + comment when unattended.
+Then retry `git switch --no-track -c <branch> <base>`. Still failing **for that reason** → `FAIL: base branch <base> is not available locally for #<N> — fetch it and re-run` (attended) / same `FAIL` plus the `guild:needs-human` label + comment when unattended.
+
+⚠ **The refspec form above assumes `<base>` is a local branch name — with an injected base it is not, and the command as written fails.** Two cases, and neither is the plain form:
+- `<base>` is `origin/<default>` → the correct recovery is `git fetch origin <default>:refs/remotes/origin/<default>`. `git fetch origin origin/<default>:origin/<default>` fails with `couldn't find remote ref origin/<default>`. In practice this recovery is unreachable under `/gld sprint`: the supervisor refreshes that ref before every Issue.
+- `<base>` is a **dependency's branch** → do **not** fetch. That branch was created by a previous Issue in this same repo, so its absence is a state inconsistency, not a missing fetch: `FAIL: base branch <base> is not available locally for #<N>`. The supervisor should have caught it as a blocked dependency first.
 
 ⚠ **Read the error before assuming that is the reason.** This step has no working-tree precondition ((b) explains why), so a dirty tree is allowed and routine — so `git switch -c` can also refuse with "Your local changes to the following files would be overwritten by checkout" when a tracked file differs between the currently checked-out branch (under `batch.md`, the previous Issue's) and `<base>`. Reporting *that* as "base branch not available" sends the human to fetch a branch they already have. Surface the real cause instead: `NEEDS_HUMAN: cannot create #<N>'s branch from <base> — <the git error>` (attended) / `guild:needs-human` label + a `<!-- guild:needs-human -->` comment carrying the git error + `OK PAUSE: needs-human — branch creation blocked` (unattended — `_handoff.md` Section H requires the comment). Do not proceed with an unresolved base: the resume probe, Step 3.5a's merge base, and the audit itself all use the bare `<base>` name.
 
 *Resume path* — switch to the existing branch and build a concise **partial-work summary** from two readings: `git log <base>..HEAD --oneline` (what's committed) **plus one run of the test command**, read per the variant's RESUME PROBE (where the work left off). Both are required — the commit log alone tells the developer what exists but not where it stopped, and RESUME PROBE is a mandatory Section A slot precisely because this is its only consumption point.
 
-⚠ The `git log` reading uses the bare `<base>` too, so if it errors because `<base>` is unknown locally, run the same `git fetch origin <base>:<base>` recovery the fresh path describes above and retry — the resume path is not exempt just because it skipped the branch creation that would normally have surfaced the problem. This summary goes into the developer prompt (Step 1) so it **continues from the partial state, not from scratch**. ("중단 내성" — mid-execute resume.)
+⚠ The `git log` reading uses the bare `<base>` too, so if it errors because `<base>` is unknown locally, run **the same shape-dependent recovery the fresh path describes above** and retry — the resume path is not exempt just because it skipped the branch creation that would normally have surfaced the problem. ⚠ Under `/gld sprint` the resume path is the **common** one and `<base>` is **always** an injected value, so the plain `git fetch origin <base>:<base>` form would fail here every time: for `origin/<default>` fetch `<default>:refs/remotes/origin/<default>`, and for a dependency branch do **not** fetch at all — report it, as (c) says. This summary goes into the developer prompt (Step 1) so it **continues from the partial state, not from scratch**. ("중단 내성" — mid-execute resume.)
 
 ## Step 1 — Spawn developer
 
@@ -491,7 +517,34 @@ python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue
 
 ## Step 5 — Open PR
 
-As the leader, push the branch and open a PR referencing the Issue (temp-file body via `--body-file`; body references `Closes #<N>` and carries the variant's **PR SUMMARY**). The PR is where the **human reviewer** (M1's external reviewer) approves. **Resume-safe**: if a PR for this branch already exists (interrupted prior run), PATCH it rather than opening a duplicate. **Unattended (`GLD_UNATTENDED=1`)**: append a `## 무인 결정 로그 (GLD_UNATTENDED)` section to the PR body aggregating the leader-proxy gate decisions recorded in the analyze/design outputs (chosen interpretation · charter rationale · "사람 확인 요") — `_handoff.md` Section H — so the deferred human gate (PR review) is informed, not blind.
+As the leader, push the branch and open a PR referencing the Issue (temp-file body via `--body-file`; body references `Closes #<N>` and carries the variant's **PR SUMMARY**). **Push with an explicit refspec** — `git push -u origin <branch>` — never a bare `git push`: with an injected remote-tracking base the branch may carry an upstream pointing at the base (Step 0 sets `--no-track` to prevent it, and this makes the push safe even if that flag is ever lost).
+
+**Target the PR at `<base>`** — pass `--base <base-branch-name>` to `gh pr create`. Two details:
+- **Strip a remote-tracking prefix.** `--base` takes a *branch name*, so `origin/develop` must be passed as `develop`.
+- **Re-verify the base exists ON THE REMOTE, now.** `<base>` was resolved at Step 0 and this step can run hours later; a human may have merged the dependency's PR and deleted its branch in between. `git rev-parse --verify` is not enough — the local branch survives that deletion and the check would pass while `gh pr create` returns **422**, which the failure table below classifies as terminal. Its own Bash call:
+  ```bash
+  git ls-remote --heads origin <base-branch-name>
+  ```
+  **Judge the exit code before the output.** A network or auth failure prints nothing on stdout either (measured: no remote → `fatal: 'origin' does not appear to be a git repository`, exit 128, stdout empty), and this file's own rule at (c) — *"Read the error before assuming that is the reason"* — applies here:
+  - **exit 0 + non-empty** → the base is still there; pass it to `--base`.
+  - **exit 0 + empty** → the branch really is gone. Fall back to the repo's default branch and **say so in the PR body**; the dependency has landed, so targeting the default branch is now correct.
+  - **non-zero exit** → the remote could not be reached. Do **not** claim the dependency landed: keep `<base>` and let `gh pr create` report the truth, or if that also fails, surface the git error itself. Writing "the dependency has landed" into a PR body on a transient network error is a false statement in a permanent record.
+
+⚠ Until this step, PRs were always opened against the repo's default branch even though Step 0 called `<base>` "the branch Step 5's PR targets" — `--base` was simply never passed. With no injection `<base>` is *derived from* `defaultBranchRef`, so the two agreed and nothing was broken; passing `--base` explicitly is what makes the injected case work, and it leaves the non-sprint case unchanged.
+
+**Stack notice (only when `<base>` is not the default branch)** — add a marker-delimited block so the reviewer learns the ordering *in the PR*, where they actually arrive from a GitHub notification rather than from a terminal:
+
+```markdown
+<!-- guild:sprint:stack -->
+## 스택 PR (스프린트 #<tracker>)
+- 이 PR은 **#<하단 PR> 위에 쌓여** 있습니다 (스택 <n>단 중 <i>번째).
+- **먼저 머지**: #<하단 PR> → … → 이 PR
+- 이 diff는 base 브랜치 위의 변경만 담습니다 — 하단 PR들의 변경은 포함되지 않습니다.
+- 전체 순서: `/gld sprint daily`
+<!-- /guild:sprint:stack -->
+```
+
+Same in-place-replacement rule as the auditor block below (markers are the anchor, heading text in `config.language`). ⚠ Merging out of order is not prevented by GitHub's UI — this notice and `daily`'s ordered list are the only defences. The PR is where the **human reviewer** (M1's external reviewer) approves. **Resume-safe**: if a PR for this branch already exists (interrupted prior run), PATCH it rather than opening a duplicate. **Unattended (`GLD_UNATTENDED=1`)**: append a `## 무인 결정 로그 (GLD_UNATTENDED)` section to the PR body aggregating the leader-proxy gate decisions recorded in the analyze/design outputs (chosen interpretation · charter rationale · "사람 확인 요") — `_handoff.md` Section H — so the deferred human gate (PR review) is informed, not blind.
 
 **Auditor section (a reviewer-facing copy of the Step 4 Issue record; mandatory whenever that record is non-empty — NOT keyed to whether *this* invocation's auditor found anything)** — add a marker-delimited **"external auditor (execute)" section** to the PR body — the heading text itself in `config.language` (`## 외부 감사자 (execute)` on a `ko` repo), since the stable anchor is the HTML marker, not the words — wrapped in `<!-- guild:auditor:pr -->` … `<!-- /guild:auditor:pr -->` so a later write replaces that block in place instead of leaving two contradictory copies (Step 5 already PATCHes an existing PR rather than opening a duplicate, and execute can be re-entered from test/qa).
 

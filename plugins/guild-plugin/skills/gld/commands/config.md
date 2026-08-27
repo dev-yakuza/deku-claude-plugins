@@ -9,6 +9,7 @@ Parse `$1` onward:
 - `--gates=<on|off>` → set `gates.enabled` (M3 강제층 off-switch). `off` makes the commit gate advisory (no blocking) — the escape hatch. `on` (default) blocks secret / verification-weakening commits, in **all three** of its wirings (`.git/hooks/pre-commit`, the `PreToolUse(Bash)` early warning, and the `--guard-config` control-file guard).
   - ⚠ **Scope**: this dial governs the *commit gate* only. It is **not** an override for INV2 — `/gld evolve`'s apply-time hard-block on a verification-weakening change is non-negotiable and ignores this flag (`_invariants.md` INV2). Turning gates off is for a repo the gate misjudges, not permission to weaken tests.
   - Writing this key trips the gate's own `--guard-config` guard, so the change surfaces as an explicit confirmation prompt. That is intended: disabling the enforcement layer should be a decision on the record.
+- `--max-stack-depth=<n>` → set `sprint.max_stack_depth` (default `3`). See the section below.
 - Other keys → report "unknown/unsupported config key" and list the supported ones.
 
 > **Bash**: `_bash_rules.md`. Read/write JSON via the Read/Write tools (not `jq -i`).
@@ -31,6 +32,7 @@ Parse `$1` onward:
                stage's own automated-correctness pass never runs it — test.md's scope)
    automation: evolve_nudge=<on|off>
    gates:      enabled=<on|off> (commit gate: secret + verification-weakening block)
+   sprint:     capacity=<n|미설정> max_stack_depth=<n> history=<count> runs
    ```
    Render `roles` from the array in the file — **do not enumerate the roster from memory or from this document.** The installed roster is whatever `.claude/guild/config.json` lists and `.claude/agents/` contains; a repo may have grown or pruned it via `evolve` HR, so a hardcoded 16-name list would silently misreport it. Spine roles always run; specialists are convened per task by the leader (participation model: `_handoff.md` Section G).
 
@@ -40,12 +42,26 @@ Parse `$1` onward:
    - `language` ∈ {en, ko, ja}.
    - `evolve_nudge` ∈ {on→true, off→false} (sets `automation.evolve_nudge`).
    - `gates` ∈ {on→true, off→false} (sets `gates.enabled`).
+   - `max_stack_depth` — an integer ≥ 1 (sets `sprint.max_stack_depth`). Reject `0` and
+     non-integers: a cap of 0 would block every dependent Issue in every sprint. A value of 1
+     is meaningful — it means "no stacking, every PR targets the default branch", which is what
+     `sprint plan` proposes when the repo forbids merge commits.
    - Invalid → report the allowed values; do not write.
 3. Update the key in the in-context object, preserving all other keys.
 4. Write the full JSON back via the Write tool (2-space indent).
 5. Confirm what changed.
 
+### `--max-stack-depth=<n>`
+
+The sprint PR-stack cap (`sprint.max_stack_depth`, default 3).
+`/gld sprint plan` warns and proposes cutting a chain that exceeds it. Raising it is legitimate
+but each extra level means one more PR that a change request on the bottom of the stack forces
+to catch up — and `retro` measures how often that happened before recommending a change.
+`sprint.capacity` and `sprint.history` are **written by `/gld sprint retro`** after per-item
+human approval, not set here — they are shown by "Show current config" and have no setter, the
+same gap `commands` has (see Notes).
+
 ## Notes
-- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, automation{evolve_nudge}, gates{} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
+- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, history[]} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
 - `roles` is edited by init (and by evolve HR later), not by `config` in M1 — editing the active roster manually is possible but unsupported as a config command yet.
-- `commands` (test/lint/typecheck/build/e2e) has the **same gap**: it's part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for it — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.
+- `commands` (test/lint/typecheck/build/e2e) and `sprint.capacity`/`sprint.history` have the **same gap**: they are part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for them (`sprint.max_stack_depth` does have one) — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.

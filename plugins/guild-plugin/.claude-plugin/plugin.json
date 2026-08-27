@@ -1,7 +1,7 @@
 {
   "name": "guild-plugin",
   "description": "Guild - a self-evolving agent organization that sets up a Claude Code harness, develops via a spec-driven flow (analyze -> design -> execute -> test -> qa), and co-evolves your codebase and your agent team",
-  "version": "0.54.0",
+  "version": "0.61.0",
   "author": {
     "name": "dev-yakuza"
   },

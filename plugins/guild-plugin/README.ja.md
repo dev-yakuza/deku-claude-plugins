@@ -40,7 +40,7 @@ claude /plugin install deku-claude-plugins@guild-plugin
 
 **オンデマンド・観察** — `rollback <target>`（非破壊アンドゥ）· `ask <question>`（standards+⑥ に基づく引用付き Q&A）· `monitoring [--html]`（状態スナップショット）
 
-**自律** — `sprint [issues]`（Inner+Outer、**準備度ゲート** — 自律は計測で獲得）
+**イテレーション** — `sprint plan`（今回のスプリントに入れる Issue の選別 + 依存順序 + 追跡 Issue 作成）· `sprint run`（依存順に無人開発 → **PR スタック**、Issue ごとの git worktree 隔離、レート制限は自動待機・再開 — その間に人間がレビュー・マージ）· `sprint daily`（何をどの順にマージするか · 人間待ち · 失敗）· `sprint retro`（指標 → キャパシティ較正 → evolve → スプリントのクローズ）
 
 ## 安全性（不変条件）
 

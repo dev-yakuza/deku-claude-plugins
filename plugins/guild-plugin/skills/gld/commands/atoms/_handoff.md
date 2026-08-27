@@ -30,12 +30,15 @@ The single source of truth for "what stage is this Issue in" is its GitHub label
 | `guild:children` | this (parent) Issue is split; its children are being driven sequentially | design decided a multi-PR split (Section I) |
 | `guild:needs-human` | **additive, not a stage** — an unattended run paused here at a high-stakes gate | Section H's pause path; removed on the next forward transition (below) |
 | `guild:harness` | **not a stage** — a harness readiness gap filed as a developable Issue | `init` P3.5 / `/gld audit` remediation. `resume.md` routes it to a fresh `dev` run |
+| `guild:sprint` | **identity, never a stage** — this Issue IS a sprint container (`_sprint_dag.md` Section A). It never runs the spine; `dev`/`resume`/`batch` refuse to develop it | `/gld sprint plan --create` |
 
 The table has **four kinds of row**, and every consumer that derives "the current stage" must
 filter accordingly: stage labels (`analyze`/`design`/`execute`/`test`/`qa`/`done`), the
-identity marker (`guild:child`), the orchestration state (`guild:children`), and the two
-non-stage annotations (`guild:needs-human`, `guild:harness`). A bare
-`select(startswith("guild:"))` returns all of them. The exclusion is derived **once**, below;
+**two** identity markers (`guild:child`, `guild:sprint`), the orchestration state
+(`guild:children`), and the two non-stage annotations (`guild:needs-human`, `guild:harness`).
+⚠ `guild:sprint` **joined** the second kind rather than adding a fifth — the count is of kinds,
+and the enumeration that follows it is the definition. Keep them in step.
+A bare `select(startswith("guild:"))` returns all of them. The exclusion is derived **once**, below;
 consumers cite it instead of re-deriving it.
 
 ### Section A — canonical stage derivation
@@ -48,7 +51,7 @@ note `gh label list --json name` returns a *flat* array of such objects instead 
 different shape; see `audit_readiness.md`):
 
 ```bash
-gh issue view <n> --json labels --jq '{stage: ([.labels[].name] | map(select(startswith("guild:") and . != "guild:child" and . != "guild:needs-human" and . != "guild:harness")) | .[0] // "none"), paused: ([.labels[].name] | any(. == "guild:needs-human")), harness: ([.labels[].name] | any(. == "guild:harness")), child: ([.labels[].name] | any(. == "guild:child"))}'
+gh issue view <n> --json labels --jq '{stage: ([.labels[].name] | map(select(startswith("guild:") and . != "guild:child" and . != "guild:needs-human" and . != "guild:harness" and . != "guild:sprint")) | .[0] // "none"), paused: ([.labels[].name] | any(. == "guild:needs-human")), harness: ([.labels[].name] | any(. == "guild:harness")), child: ([.labels[].name] | any(. == "guild:child")), sprint: ([.labels[].name] | any(. == "guild:sprint"))}'
 ```
 
 It yields the stage plus one flag per non-stage kind (add `state` — or any other field — to `--json` and the projection when the caller also needs it; `rollback.md` does):
@@ -56,14 +59,16 @@ It yields the stage plus one flag per non-stage kind (add `state` — or any oth
 - **`stage`** — the Issue's current stage label: `guild:analyze` · `guild:design` · `guild:execute` · `guild:test` · `guild:qa` · `guild:done`, or `guild:children` for a split parent — or the literal string `"none"` when the Issue carries no stage label at all (not started).
 - **`paused`** — `guild:needs-human` is present. **Additive, never a stage**: it sits *on top of* the stage label (Section H), so a paused Issue still has its real `stage`. Render/count it alongside the stage, never instead of it.
 - **`harness`** — `guild:harness` is present. **Provenance, never a stage**: a readiness gap filed as a developable Issue. `stage == "none"` **and** `harness == true` = filed but not started; once a stage label exists, the stage wins and `harness` is a mere annotation.
+- **`sprint`** — `guild:sprint` is present. **Identity, never a stage**: this Issue is a sprint container, not work. `stage` is always `"none"` for it, so a consumer that renders `"none"` as "not started" MUST check this flag or a tracking Issue is indistinguishable from an Issue Guild has never seen (`status.md` has the row; the same argument as `guild:harness`). `dev`/`resume`/`batch` refuse to develop it — see their own guards.
 - **`child`** — `guild:child` is present. **Identity, never a stage**: a permanent marker every child carries *alongside* its real stage label (see below), which is why it is excluded from `stage`. Exposed as its own flag purely so consumers that annotate with it (`status.md`'s `(child)`, `rollback.md`'s parent-consistency check) don't re-derive it.
 
 **Split parent**: `stage == "guild:children"` (equivalently `[.labels[].name] | any(. == "guild:children")`). This is an orchestration state, **not** a spine stage — it has no predecessor or successor in the ordinal chain `analyze < design < execute < test < qa < done`, so nothing may compute "one stage back/forward" from it.
 
 Why the exclusions must be explicit (**this reasoning lives here only**): a bare
 `select(startswith("guild:"))` returns all four kinds at once, so taking `.[0]` picks whatever
-label GitHub happened to return first — a child reads as `guild:child`, a paused Issue can read
-as `guild:needs-human`, a started harness Issue as `guild:harness` — while `join(",")` instead
+label GitHub happened to return first — a child reads as `guild:child`, a sprint tracker as
+`guild:sprint`, a paused Issue can read as `guild:needs-human`, a started harness Issue as
+`guild:harness` — while `join(",")` instead
 yields a comma-joined string like `"guild:child,guild:execute"` that matches **no** stage row.
 Verified against the real `jq` binary: `["guild:child","guild:test"]` → `guild:test`;
 `["guild:children"]` → `guild:children`; `["guild:qa","guild:needs-human"]` → `guild:qa` +
@@ -74,8 +79,19 @@ Verified against the real `jq` binary: `["guild:child","guild:test"]` → `guild
 This is exactly what `status.md`'s child discovery and `monitoring.md`'s bucketing do:
 
 ```
-{number, stage: ([.labels[].name] | map(select(startswith("guild:") and . != "guild:child" and . != "guild:needs-human" and . != "guild:harness")) | .[0] // "none"), paused: ([.labels[].name] | any(. == "guild:needs-human"))}
+{number, stage: ([.labels[].name] | map(select(startswith("guild:") and . != "guild:child" and . != "guild:needs-human" and . != "guild:harness" and . != "guild:sprint")) | .[0] // "none"), paused: ([.labels[].name] | any(. == "guild:needs-human"))}
 ```
+
+⚠ **A new label kind now has to be reflected in THREE places**, not two: this derivation,
+`batch.md`'s `case` arms, and — since `/gld sprint` ships its own supervisor (design decision
+D10: batch's script is deliberately duplicated, not shared) — `templates/sprint-supervisor.sh`'s
+`case` arms. `guild:sprint` itself is the exception that proves the rule: it never enters either queue, so
+neither `case` needed a new arm for it — but for two *different* reasons, and neither is "both
+supervisors exclude it". `batch.md`'s **all-open** collection excludes it (`batch.md` Phase 1);
+its *specific* mode deliberately takes what the user named, and the refusal there lives in
+`dev.md` Phase 1 instead. The sprint supervisor has no collection step at all — its queue is
+injected as `ORDER=(…)` from `sprint_dag.py --mode order`, over members that by construction
+exclude the tracker. The next label kind will not necessarily be so lucky.
 
 **The shell-side equivalent — `batch.md`.** batch's supervisor is a generated `.sh` script (the
 sanctioned `_bash_rules.md` exception), so it cannot use this projection: it flattens the labels
@@ -83,7 +99,8 @@ to a comma-joined string and matches them with a bash `case`. The same rule appe
 **arm ordering** — `*guild:needs-human*` MUST be tested **before** `*guild:done*` and
 `*guild:children*`, because a bash `case` fires the **first** matching arm rather than the most
 specific one, and these labels coexist on one Issue. So a future label kind has to be reflected
-in **two** places: this derivation, and batch's `case` arms.
+in **three** places: this derivation, batch's `case` arms, and the sprint supervisor's
+(see the note above).
 
 **Split parents do not run the spine themselves.** When design splits an Issue, the parent leaves the normal `analyze→…→done` track and enters `guild:children` — it is an *orchestration* state, not a stage. Its "execute/test/qa" is the sum of its children plus a final parent-integration check (Section I). A parent never carries both `guild:children` and a stage label at once.
 
@@ -113,7 +130,9 @@ Check the Issue's current labels first (already read at Step 0 of every stage �
 
 ## Section B — Stage outputs = Issue comments + markers
 
-Each stage persists its output as a GitHub Issue comment wrapped in a marker pair, so later stages (and `/gld resume`) can find it. Update-in-place: if a comment with the marker already exists, PATCH it rather than appending (per `_bash_rules.md` temp-file pattern) — **two documented exceptions, both auditor records below**: `<!-- guild:auditor:execute -->` is a **cumulative single comment** whose PATCH re-writes the *previous body plus* a new block inserted inside the marker pair; `<!-- guild:auditor-violation -->` is **one new comment per occurrence, never PATCHed**. Both exist because losing an earlier attempt's dismissal — or an earlier violation's evidence — is the specific failure those records exist to prevent. Every other marker is replace-in-place.
+Each stage persists its output as a GitHub Issue comment wrapped in a marker pair, so later stages (and `/gld resume`) can find it. Update-in-place: if a comment with the marker already exists, PATCH it rather than appending (per `_bash_rules.md` temp-file pattern) — **three documented exceptions**: `<!-- guild:auditor:execute -->` is a **cumulative single comment** whose PATCH re-writes the *previous body plus* a new block inserted inside the marker pair; `<!-- guild:auditor-violation -->` is **one new comment per occurrence, never PATCHed**; and `<!-- guild:sprint:retro -->` is **appended once per sprint** (a sprint's history is the sequence of its retros, so replacing would erase the previous one). The first two exist because losing an earlier attempt's dismissal — or an earlier violation's evidence — is the specific failure those records exist to prevent. Every other marker is replace-in-place.
+
+⚠ One further shape this section did not previously cover: `<!-- guild:sprint:plan -->` lives in an **Issue BODY**, not a comment, and is immutable after creation (guarded by `plan-hash`). Rewriting a body is read → splice → full replace, and `gh issue edit` has no append — so it carries a **mandatory truncation check** (`_sprint_dag.md` Section A). The rest of this section assumes a comment; that row does not.
 
 | Marker | Produced by | Contents |
 |---|---|---|
@@ -126,6 +145,10 @@ Each stage persists its output as a GitHub Issue comment wrapped in a marker pai
 | `<!-- guild:qa:output -->` … `<!-- /guild:qa:output -->` | qa | holistic QA plan + result (exploratory/E2E/user-flow) + UI/UX gate verdict when applicable. Read by `status.md` and `review.md` (Step 1's agent-authored-PR rationale load). |
 | `<!-- guild:children:output -->` … `<!-- /guild:children:output -->` | design / plan (leader) | the child roster of a split parent — one line per child Issue. Written **once**, after every child already exists. ⚠ Informational only: it is **never** the split-idempotency guard (Section I) — the discovery query is. |
 | `<!-- guild:integration:output -->` … `<!-- /guild:integration:output -->` | dev Phase 2c (leader ∥ tech-lead) | parent-integration check once all children are `guild:done`: parent-AC → child coverage map, cross-child consistency, DoD closure, any gap found. |
+| `<!-- guild:sprint:plan -->` … `<!-- /guild:sprint:plan -->` | `sprint plan` (leader) | the sprint's goal, capacity reasoning and the **member table** — the canonical dependency source at run time. ⚠ In the tracking Issue's **BODY**, and **immutable** after creation: `plan-hash` over this block is what `sprint run` verifies before starting (`_sprint_dag.md` Section A · sprint design §4.6). |
+| `<!-- guild:sprint:run -->` … `<!-- /guild:sprint:run -->` | `sprint run` **supervisor (shell, not an LLM)** | the run ledger: `state`, `heartbeat`, `host`/`pid`, per-issue retries, discovered children. Replace-in-place. ⚠ A shell writer cannot perform the truncation recovery an LLM writer does; it also cannot be truncated, since it fetches the comment body via `gh api --paginate` rather than a previewed read. |
+| `<!-- guild:sprint:daily -->` … `<!-- /guild:sprint:daily -->` | `sprint daily` (leader) | the latest status snapshot, so the human can read it on GitHub. Replace-in-place. The **one** exception to `daily`'s read-only contract. |
+| `<!-- guild:sprint:retro -->` … `<!-- /guild:sprint:retro -->` | `sprint retro` (leader) | the sprint's metrics, capacity verdict and the evolve hand-off. ⚠ **Appended once per sprint** (the third Section B exception) — a repo's sprint history is the sequence of these. |
 | `<!-- guild:review:output -->` … `<!-- /guild:review:output -->` | review (fresh reviewer) | guided pair-review walkthrough (risk-weighted, rationale-backed). Posted to the PR only with `/gld review … --comment`; default is **session-only, nothing persisted to disk** (unlike the other stages, `review.md` never writes a `docs/specs/<issue>/` file for its own recap) — this row documents the marker's shape for that opt-in case, not a durable output. |
 
 **Durable design artifacts** (skeleton, architecture decisions, test cases) that outlive the Issue thread are also written to the working tree:
@@ -203,7 +226,7 @@ A stage wrapper (analyze/design/implement/test) returns one line to the main ses
 |---|---|---|
 | `OK ADVANCE: <next-stage>` | stage complete, advance | transition label to `guild:<next-stage>` |
 | `OK SPLIT: <N> children` | design split the Issue into `N` child Issues | transition the **parent** to `guild:children` and enter child orchestration (dev Phase 2b — Section I) |
-| `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done` — **Guild's work is complete; the PR is open awaiting human review + merge**. Do **not** close the Issue: the PR body carries `Closes #<N>`, so **GitHub** closes it when the human merges — INV1 (nothing merges unattended; the human is the external reviewer of record). No Guild command closes an Issue deliberately. |
+| `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done` — **Guild's work is complete; the PR is open awaiting human review + merge**. Do **not** close the Issue: the PR body carries `Closes #<N>`, so **GitHub** closes it when the human merges — INV1 (nothing merges unattended; the human is the external reviewer of record). No Guild command closes a **stage** Issue deliberately. ⚠ **One exception, and it is not a stage Issue**: `/gld sprint retro` closes the sprint **tracking Issue** (`guild:sprint`). That Issue never runs the spine and has no PR of its own, so nothing else can ever close it — leaving it open would make every later `sprint plan` report an active sprint that finished weeks ago. The rule above is about work whose completion GitHub records through a merge; a container's completion is recorded by the retro that closed it. |
 | `OK PAUSE: <one-line>` | leader/human chose to stop here | leave label as-is; report |
 | `NEEDS_HUMAN: <one-line>` | a discuss/verify gate needs a human decision | main session prompts the human (`AskUserQuestion`), then resumes |
 | `NEEDS_CONTEXT: <one-line>` | a **required upstream artifact is missing** — design without analyze output, execute without a design skeleton | do **not** advance and do **not** treat as a hard error: the fix is to run the missing stage. Report which artifact is absent and re-enter the spine at the stage that produces it; if that stage's label is already set (so it "ran" but left nothing), surface it as `NEEDS_HUMAN` — a silent no-op upstream is a state inconsistency a human should see. |
@@ -372,7 +395,11 @@ gh issue list --label guild:child --state all --limit 200 --json number,title,la
 
 Every **human-readable string Guild emits is written in the repo's `config.language`** (`.claude/guild/config.json`; default `en` when absent) — Issue/PR comments, discuss `AskUserQuestion` questions/options, stage narration to the user, `>>> RESULT <<<` one-line summaries, and the **prose inside artifact files** (`docs/specs/<issue>/*`). This is the same language `/gld init` wrote the agents and standards in.
 
-**Never localized — stays ASCII/English (machine tokens):** the `RESULT`/return keywords (`DONE`, `BLOCKED`, `NEEDS_CONTEXT`, `OK ADVANCE`, `OK SPLIT`, …), HTML markers (`<!-- guild:* -->`), `guild:*` label names, file paths, code identifiers, git branch/commit conventions, and **any token a later run reads back out of a record it wrote** — currently the auditor record's `### audit-record <n>` block headings and its four disposition tokens (`looped-back`/`fixed`/`recorded`/`dismissed`, `_execute_spine.md` Step 4), which the next invocation counts and re-states. Localizing these would break parsing.
+**Never localized — stays ASCII/English (machine tokens):** the `RESULT`/return keywords (`DONE`, `BLOCKED`, `NEEDS_CONTEXT`, `OK ADVANCE`, `OK SPLIT`, …), HTML markers (`<!-- guild:* -->`), `guild:*` label names, file paths, code identifiers, git branch/commit conventions, and **any token a later run reads back out of a record it wrote**. That class currently has two members:
+- the auditor record's `### audit-record <n>` block headings and its four disposition tokens (`looped-back`/`fixed`/`recorded`/`dismissed`, `_execute_spine.md` Step 4), which the next invocation counts and re-states;
+- the sprint run ledger's `state:` values (`running` · `installing-deps` · `rate-limited-until-<epoch>` · `rate-limited-remaining-<n>s` · `finished` · `halted:<reason>`), its `retries`/`discovered` keys, the failure classes in `.sprint-logs/<tracker>/failures.jsonl`, and `sprint_dag.py`'s `DEFAULT` / `BLOCKED:<reason>` tokens — all read back by `sprint run`'s duplicate-run guard and by `sprint daily` (`sprint/run.md`, `sprint/daily.md`).
+
+Localizing any of these would break parsing.
 
 **Two emission points, both must comply:**
 1. **The leader (main session)** localizes its own output — every comment it posts, every `AskUserQuestion`, every narration line. It learns the language at pre-flight (`_preflight.md` Item 1).

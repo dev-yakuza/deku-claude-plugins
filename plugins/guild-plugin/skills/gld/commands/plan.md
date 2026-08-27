@@ -62,7 +62,7 @@ Handle the human's edits (drop / merge / re-scope / reorder / adjust AC) and re-
 
 ## Phase 3 — Create the backlog (only on `--create` or explicit approval)
 
-**Check which labels actually exist first** (its own Bash call) — `init.md` only ever creates the 10 `guild:*` labels (never `type:*`/`area:*`), and `gh issue create --label <name>` **errors** on a label that doesn't exist in the repo yet (unlike `gh label create`, it does not auto-create one). A fresh `/gld init`'d repo has no `type:*`/`area:*` labels at all, so using them unconditionally below would make every `gh issue create` call in this phase fail outright:
+**Check which labels actually exist first** (its own Bash call) — `init.md` only ever creates the `guild:*` labels of its P2 §7 block (never `type:*`/`area:*`), and `gh issue create --label <name>` **errors** on a label that doesn't exist in the repo yet (unlike `gh label create`, it does not auto-create one). A fresh `/gld init`'d repo has no `type:*`/`area:*` labels at all, so using them unconditionally below would make every `gh issue create` call in this phase fail outright:
 ```bash
 gh label list --limit 200 --json name --jq '[.[].name]'
 ```

@@ -39,6 +39,7 @@ gh issue view $1 --json labels --jq '[.labels[].name]'
 ```
 
 Map to the current stage (`_handoff.md` Section A):
+- contains **`guild:sprint`** → this Issue is a **sprint container**, not work: `FAIL: #$1 is a sprint tracking Issue — use /gld sprint daily`. Stop. (It carries no stage label, so without this branch the next row would treat it as a fresh Issue, add `guild:analyze`, and analyze the sprint plan as a requirement.)
 - contains `guild:done` → already complete; report and stop (or, if the user wants to re-run test, they invoke `/gld test` directly).
 - contains `guild:children` → this is a **split parent** already in orchestration → skip the normal spine and go straight to **Phase 2b** (child orchestration). Do not run analyze/design on it again.
 - contains `guild:qa` → resume at **qa**.
@@ -140,7 +141,7 @@ On `OK DONE`: summarize what was built (stages run, PR link if any, test evidenc
 ---
 
 ## Notes
-- **One Issue tree, in-session.** `/gld dev` drives a single Issue — or, if design splits it, that parent and its children **sequentially** in one session (Phase 2b/2c, `_handoff.md` Section I). Driving *many unrelated* Issues in one run is `/gld batch`/`/gld sprint`'s job (unattended, `sprint` additionally readiness-gated), not `dev`'s.
+- **One Issue tree, in-session.** `/gld dev` drives a single Issue — or, if design splits it, that parent and its children **sequentially** in one session (Phase 2b/2c, `_handoff.md` Section I). Driving *many unrelated* Issues in one run is `/gld batch`/`/gld sprint`'s job (both unattended; `sprint` additionally isolates each Issue in its own worktree and stacks dependent PRs), not `dev`'s.
 - **Leader is embodied, not spawned.** No separate leader sub-agent (avoids nesting). The main session IS the leader; only the stage roles (tech-lead/developer/tester) are spawned as sub-agents by the wrappers.
 - **Labels are the state.** If interrupted, `/gld resume $1` or a fresh `/gld dev $1` re-reads the label and continues from there — no local state file to corrupt.
 - **Human approval is always the final gate.** The human approving the PR is the external reviewer of record (INV1) — Guild collaboration (tech-lead conformance, tester-first) provides internal review throughout; the **execute stage runs an always-on external auditor** (`_execute_spine.md` Step 3.5a) so `BLOCKER`-level defects are fixed *before* `test`/`qa` verify the result; and `/gld review`'s Step 2.5 runs that **same auditor again, outside `dev`** — a further advisory 2nd opinion before human approval (never a replacement for it), and the only place from which "did `dev` actually get better?" can be measured, since a scan inside `dev` cannot measure `dev`.

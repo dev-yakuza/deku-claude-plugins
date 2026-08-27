@@ -155,7 +155,8 @@ Create via Write tool:
   "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
   "automation": { "evolve_nudge": true },
-  "gates": { "enabled": true }
+  "gates": { "enabled": true },
+  "sprint": { "capacity": null, "max_stack_depth": 3, "history": [] }
 }
 ```
 - `commands.*` values are the **normalized, simple-bash-safe** forms from command-scan (see `scan_repo.md` Section 2): each is either a single simple command string, or an **array** of simple commands run in sequence. They MUST NOT contain `$(...)`, `&&`, `|`, `;`, or redirections — Guild runs them one per Bash call. (e.g. `flutter test --fail-fast --concurrency=$(nproc --all)` → store `"flutter test --fail-fast"`; `flutter analyze && npx remark . --quiet --frail` → store `["flutter analyze", "npx remark . --quiet --frail"]`.) A missing category → `null`.
@@ -268,7 +269,7 @@ After registering, still run step 5's `core.hooksPath` check — a manager may s
 ⚠ Either way, `git commit --no-verify` skips it, as it skips every git hook — Guild's gate raises the cost of a mistake, it is not a boundary against a determined bypass.
 
 ### 7. GitHub labels (skip if P0 found no GitHub repo)
-Create the ten `guild:*` labels. Run each as its own Bash call; if any fails, report which and continue (labels are not transactional in M1 — they are idempotent with `--force`):
+Create the eleven `guild:*` labels. Run each as its own Bash call; if any fails, report which and continue (labels are not transactional in M1 — they are idempotent with `--force`):
 ```bash
 gh label create "guild:analyze" --color "1d76db" --description "Guild: Analyze stage" --force
 gh label create "guild:design" --color "0e8a16" --description "Guild: Design stage" --force
@@ -280,6 +281,7 @@ gh label create "guild:child" --color "d4c5f9" --description "Guild: Child Issue
 gh label create "guild:children" --color "c5def5" --description "Guild: Split parent — children being driven" --force
 gh label create "guild:harness" --color "5319e7" --description "Guild: Harness readiness gap (from readiness audit)" --force
 gh label create "guild:needs-human" --color "b60205" --description "Guild: Paused — needs a human decision (unattended run)" --force
+gh label create "guild:sprint" --color "0052cc" --description "Guild: Sprint tracking Issue" --force
 ```
 (`guild:harness` labels the remediation issues that P3.5's readiness audit proposes. `guild:needs-human` marks an Issue an unattended `/gld batch`·`sprint` run paused at a high-stakes gate — the human resolves it, then re-runs `/gld dev`/`resume`.)
 
@@ -373,7 +375,7 @@ Report what was installed:
 
 ## Partial-failure repair (not a hard dead-end)
 
-`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is everything P2 creates: `config.json` + 16 role agents (full roster) + 5 standards + `docs/adr/0000-template.md` + `docs/specs/.gitkeep` + CLAUDE.md guild block + settings.json allowlist **+ both PreToolUse gate hooks + an executable `.git/hooks/pre-commit`** + 10 labels + `knowledge/` baseline (index.md + facts/) + `gates/` (gate_precommit.py + rules + dismissed.md + findings.json) + `evolution-log.md` + `overlay/.gitkeep` + `.claude/guild/.gitignore` + `memory/.gitkeep`. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
+`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is everything P2 creates: `config.json` + 16 role agents (full roster) + 5 standards + `docs/adr/0000-template.md` + `docs/specs/.gitkeep` + CLAUDE.md guild block + settings.json allowlist **+ both PreToolUse gate hooks + an executable `.git/hooks/pre-commit`** + the `guild:*` labels created by P2 §7 (currently 11) + `knowledge/` baseline (index.md + facts/) + `gates/` (gate_precommit.py + rules + dismissed.md + findings.json) + `evolution-log.md` + `overlay/.gitkeep` + `.claude/guild/.gitignore` + `memory/.gitkeep`. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
 
 ## Hard rules (safety)
 - **Additive only** (INV4): existing files are merged/preserved, never clobbered. CLAUDE.md via markers; settings.json via key union; existing `docs/standards/*` and `.claude/agents/*` are not overwritten.

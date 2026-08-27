@@ -1,37 +1,85 @@
-# SPRINT (autonomous Inner+Outer — specified, not separately built · readiness-gated · LOCKED by default)
+# SPRINT (router)
 
-**Run the full loop (dev spine + evolve) with no human intervention — but only once autonomy is *earned by measurement*.** **Sprint has no supervisor or safety mechanism of its own**: Phase 0's readiness gate is a real computed check, but Phase 1 is a *written procedure* over `batch.md`'s existing supervisor plus `evolve --dry-run` — which is why the three safety mechanisms Phase 1's honest gap retracts (branch isolation, checkpointing, regression auto-halt) exist nowhere in this plugin. Read this header as "the gate is built and sprint is locked behind it," **not** "an autonomous runner with a safety net was built." A **readiness gate keeps it locked by default**. INV1 is *relaxed, not removed*: human review is **deferred to PR + merge**, never eliminated — nothing merges unattended.
+**Run a sprint: plan what to take, develop it unattended, watch it, close it with a retro.**
+A sprint is an *iteration container* — an issue set with a goal, an execution order and a
+capacity — not a mode of autonomy. This file only routes; each subcommand is its own file.
 
-`$1` = comma-separated Issues (like `batch`) · empty = all open qualifying · `--readiness` = show the readiness score only (never runs).
+`$1` = subcommand · `$2…` = that subcommand's own arguments.
 
-> **Bash**: `_bash_rules.md`. Mechanism reuses `<<SKILL_DIR>>/commands/batch.md` (unattended dev) + `<<SKILL_DIR>>/commands/evolve.md` (Outer loop). Handoff: `_handoff.md`.
+> **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/labels: `_handoff.md`.
+> Membership · dependency graph · base decision: `<<SKILL_DIR>>/commands/atoms/_sprint_dag.md`.
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K).
-> ⚠️ **Security**: a passed gate runs unattended tool execution (inherits batch's `--dangerously-skip-permissions`). Only reachable when the readiness gate + explicit opt-in both pass.
+> Machine tokens (`guild:*` labels, marker names, `state:` values, failure classes) stay ASCII.
 
 ---
 
-## Phase 0 — Readiness gate (the lock — always checked FIRST)
-**Check whether `$1 == "--readiness"` first, before anything else in this phase** (per the header: `$1` is either a comma-separated Issue list, empty, or the literal `--readiness`). Compute the score below regardless, but if `$1 == "--readiness"`, **report the score and stop unconditionally right after** — do not fall through to the `< 100%`/`100%` branching below, and do not enter Phase 1 even if the score happens to read 100% (the flag means "show me the number," never "run"). Otherwise (`$1` is an Issue list or empty), proceed to the normal branching below.
+## Routing
 
-Compute a readiness score from **measured** signals (never self-assessment — "자율은 측정으로 벌어서 얻는다"):
-- **Autonomy prerequisites (hard)** — test automation present + CI runs tests on PRs (both from `audit`/readiness data + config `commands`) + **a review path exists**, measured directly (its own read-only Bash call — `atoms/audit_readiness.md`'s 5 groups don't check this, so it can't be folded into that scan): `gh pr list --repo <owner>/<repo> --state merged --limit 20 --json reviews --jq '[.[] | select((.reviews | length) > 0)] | length'` — **> 0** (at least one recent merged PR carried a real review) means the repo actually has a working review path; `0` (or no merged PRs yet) → not measurable as present, treat as missing. **Any missing → NOT ready** (can't run unattended safely).
-- **Per-agent scorecard trend (360/HR — depends on `evolution-log` scorecard)** — roles' ground-truth-anchored performance stable/improving. **No scorecard data yet → NOT ready** (insufficient basis; this is the common early case).
-- **Human-correction-rate trend (⑤ ledger friction snapshots)** — corrections/overrides **declining** across recent evolve runs. **Rising, flat, or no data → NOT ready.**
+Read `<<SKILL_DIR>>/commands/sprint/$1.md` and execute its instructions, passing `$2, $3, …`
+as **that file's** `$1, $2, …` (shift by one).
 
-Score = fraction of thresholds met.
-- **< 100% (the default state)** → **DO NOT RUN.** Report: *"자율 실행 준비 <X>%. 남은 조건: <미충족 목록>. 지금은 `/gld batch`(무인 dev + 사람이 PR 리뷰)를 쓰세요."* **Stop.** Building sprint locked is safe — the data must permit it.
-- **100% AND explicit user opt-in** (a `--readiness`-shown score of 100% + a confirmed "yes, run autonomously") → Phase 1.
+| `$1` | Action |
+|---|---|
+| `plan` | `commands/sprint/plan.md` — choose this sprint's issues, order them, create the tracking Issue |
+| `run` | `commands/sprint/run.md` — develop the members unattended to PRs |
+| `daily` | `commands/sprint/daily.md` — read-only status; merge order; what is stuck |
+| `retro` | `commands/sprint/retro.md` — metrics, capacity calibration, evolve, close the sprint |
+| *(empty)* | route to **`daily`** — the most-used read-only action. A bare invocation must never start something destructive |
+| a number or comma-list (e.g. `837,840`) | do **not** run. Report: *"`/gld sprint run 837,840`으로 실행하세요"* — this was the pre-sprint-subcommand form (`help.md`), and silently mapping it to `run` would start an unattended run the user did not ask for |
+| `--readiness` | do **not** run. Report: *"`/gld sprint run --readiness`"* — the flag moved onto `run` |
+| anything else | report the unknown subcommand and print the valid list above |
 
-## Phase 1 — Autonomous run (only past the gate + opt-in)
-- **Inner loop** — drive the queue through the spine unattended to `guild:done` + PR, reusing `batch.md`'s supervisor exactly as it exists today: rate-limit resume, `GLD_UNATTENDED` leader-proxy gates, label-based completion, `guild:needs-human` pauses. ⚠ **Honest gap**: `batch.md` has **no branch isolation** (children of one Issue process sequentially in the same checkout — the "run in a git worktree" advice is a manual human mitigation, not automated per-Issue isolation), **no checkpointing**, and **no regression-detection/auto-halt mechanism** — an earlier version of this doc claimed all three ("Branch isolation + checkpoints; stop on a regression (T2)"), but none of them exist anywhere in this plugin (`T2` was never defined either). A `FAILED` Issue in the queue does not stop the run; the supervisor just moves to the next Issue. Until one of these is actually built, sprint's Phase 0 readiness gate should be read as "measured autonomy prerequisites are met," **not** "a regression-safety net exists" — the two are currently different claims, and only the first is true.
-- **Outer loop** — run `evolve` after the Inner pass, **`--dry-run` only** — self-modification is **never** unattended; evolve *proposals* are queued for the human, not applied.
-- All **6 invariants** hold, as defined in `<<SKILL_DIR>>/commands/atoms/_invariants.md`: INV1 (PR gate — nothing merges; the deferral below is the only relaxation) · INV2 (no verification weakening) · INV3 (reversible) · INV4 (additive) · INV5 (nothing leaves un-sanitized — sprint sends nothing outbound at all) · INV6 (draft→confirm→enforce; an unattended run never confirms a draft rule). Enumerate all six or none — an earlier revision claimed "all 6" while listing three, which is exactly the kind of unchecked claim the readiness gate exists to prevent.
+---
 
-## Phase 2 — Report
-What ran (done / paused-needs-human / incomplete / failed — label-truthful, per batch), PRs opened (awaiting human review + merge), evolve proposals queued (`--dry-run` output), and the readiness score at run time.
+## Common definitions (all subcommands)
 
-## Hard rules
-- **Locked by default; autonomy is earned** — the gate refuses until prerequisites + scorecard-trend + declining-correction-rate all pass. Never bypass the gate.
-- **Nothing merges unattended** (INV1) — PR gate; the human reviews + merges after. The deferral is the *only* INV1 relaxation.
-- **evolve apply is never unattended** (self-mod is always HITL) — sprint runs evolve `--dry-run` and queues proposals.
-- **Off-switch + all 6 invariants** apply. **No regression-auto-halt exists** (see Phase 1's honest-gap note above — "T2" was a fabricated reference, never implemented anywhere in this plugin); a `FAILED` Issue does not stop the queue today.
+### The sprint container
+- **One sprint = one GitHub Issue** labelled `guild:sprint` (the *tracking Issue*). Its body
+  holds the goal, the capacity judgment and the **member table**; comments hold everything that
+  changes. Full contract: `_sprint_dag.md` Section A.
+- **Sprint state = that Issue's open/closed.** Open = active, closed = retro done. No new state
+  vocabulary.
+- **The tracking Issue never runs the spine.** `guild:sprint` is an identity marker like
+  `guild:child`, not a stage — it is excluded from the canonical stage derivation
+  (`_handoff.md` Section A), and `dev`/`resume`/`batch` refuse to develop it.
+- At most one sprint is expected to be open. Two or more → ask the human which one; concurrent
+  sprints are not supported (a member in two sprints has no defined base).
+
+### Markers on the tracking Issue
+| Marker | Written by | How |
+|---|---|---|
+| `<!-- guild:sprint:plan -->` | `plan` | body, **immutable** after creation (guarded by `plan-hash`) |
+| `<!-- guild:sprint:run -->` | `run` supervisor (**shell**) | comment, in-place replace — the run ledger |
+| `<!-- guild:sprint:daily -->` | `daily` (**LLM**) | comment, in-place replace |
+| `<!-- guild:sprint:retro -->` | `retro` (**LLM**) | comment, appended once per sprint |
+
+⚠ **LLM and shell writers follow different procedures.** An LLM writer inherits the
+read-then-splice pattern *and its truncation check* (`_execute_spine.md` Step 4): a preview-
+truncated read must not be written back. A shell writer cannot be truncated but also cannot
+perform that recovery — its procedure is in `sprint/run.md`.
+
+### Two termination axes
+- **run finished** — the queue is empty. Every member ended as done, needs-human, failed or
+  blocked. **Not all of them have to be done.**
+- **sprint finished** — run finished **and** no member PR is `OPEN`, and none is `CLOSED`
+  unmerged. Only then is a retro meaningful; `daily` judges both.
+
+### What the human does
+Guild plans, develops and reports. **The human reviews and merges every PR** — nothing merges
+unattended (INV1). During a run the human reviews concurrently in their own checkout; the
+supervisor never touches it. The command for that is **`/gld review <PR>`**, and `daily` names it
+on the merge-order line — reviewing is not a side activity here, it is the half of the loop
+Guild does not do.
+
+### Return (this router's own)
+`plan`/`run`/`daily`/`retro` each define their own return line; the router passes it through
+unchanged. Its own returns are for the paths that never reach a subcommand:
+`FAIL: unknown subcommand <$1> — valid: plan | run | daily | retro` ·
+`OK: use \`/gld sprint run <issues>\`` (the legacy number-list and `--readiness` forms).
+⚠ None of these is a spine token: this file never returns `OK ADVANCE` or `OK PAUSE`
+(`_handoff.md` Section D — those belong to stage commands).
+
+### Capacity is judged, then calibrated
+`plan`'s leader decides how many issues to take (it does **not** ask the human), and `retro`
+compares plan against outcome and recommends the next number, which is stored in
+`config.json` → `sprint.capacity` after per-item human approval.

@@ -40,7 +40,7 @@ claude /plugin install deku-claude-plugins@guild-plugin
 
 **온디맨드·관찰** — `rollback <target>`(비파괴 되돌림) · `ask <question>`(standards+⑥ 기반 인용 Q&A) · `monitoring [--html]`(상태 스냅샷)
 
-**자율** — `sprint [issues]`(Inner+Outer, **준비도 게이트** — 자율은 측정으로 벌어서 얻음)
+**반복 구간** — `sprint plan`(이번 스프린트에 담을 이슈 선별 + 의존성 순서 + 추적 이슈 생성) · `sprint run`(의존성 순서대로 무인 개발 → **PR 스택**, 이슈별 git 워크트리 격리, rate limit 자동 대기·재개 — 사장님은 그 사이에 리뷰·머지) · `sprint daily`(무엇을 어떤 순서로 머지할지 · 사람 대기 · 실패) · `sprint retro`(지표 → 용량 보정 → evolve → 스프린트 종료)
 
 ## 안전 (불변식)
 

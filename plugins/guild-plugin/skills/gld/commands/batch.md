@@ -32,7 +32,7 @@ As the leader, confirm Guild is initialized (`ls .claude/guild/config.json`; abs
 
 ## Phase 1 — Collect & filter Issues
 - **Specific mode** (`$1` = `N,M,…`): `gh issue view <n> --json number,title,labels,state` each; exclude closed/missing (warn); **include** `guild:child` (explicit user intent).
-- **All-open mode** (`$1` empty): `gh issue list --state open --json number,title,labels --limit 200`; **exclude** `guild:done` (complete) and `guild:child` (auto-discovered after parent). 
+- **All-open mode** (`$1` empty): `gh issue list --state open --json number,title,labels --limit 200`; **exclude** `guild:done` (complete), `guild:child` (auto-discovered after parent) and **`guild:sprint`** (a sprint *container*, not work — developing it would analyze the sprint plan as a requirement and could open a PR for it; `_handoff.md` Section A). 
 - Sort ascending. If none remain → "No qualifying Issues found." stop.
 - Show the filtered list with each Issue's current stage label (`[new]` if none) and confirm with the user (+ worktree warning if in main checkout). Note: "queue may grow as parents spawn children."
 
@@ -140,7 +140,8 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       # derivation. A generated .sh cannot use that jq projection, so the same rule appears here
       # as `case` ordering: `guild:needs-human` must be tested BEFORE `guild:done`/`guild:children`
       # because bash `case` fires the first matching arm and those labels coexist on one Issue.
-      # A new label kind therefore has to be reflected in TWO places — Section A and here.
+      # A new label kind therefore has to be reflected in THREE places — Section A, here, and
+      # templates/sprint-supervisor.sh's arms (/gld sprint duplicates this script by design).
       # backgrounded pre-commit hook is still running, leaving the Issue mid-spine with no
       # commit/PR. Truth = the GitHub label (_handoff.md Section A: "labels are the state").
       if [ -z "$OWNER_REPO" ]; then
@@ -201,8 +202,20 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       esac
     fi
 
-    # --- Rate-limit detection → wait until reset → auto-retry (the core) ---
     RESET_AT=$(jq -r 'select(.type == "rate_limit_event") | .rate_limit_info | select(.status != "allowed") | .resetsAt // empty' "$LOG" 2>/dev/null | tail -1)
+    # <!-- guild:supervisor-core:ratelimit -->
+    # --- Rate-limit detection → wait until reset → auto-retry (the core) ---
+    # ⚠ The `RESET_AT=` assignment above is deliberately OUTSIDE this region: /gld sprint's
+    # copy guards it with `|| true` and this one does not, so the line cannot be compared.
+    # The two MEASURED fixes this region exists to protect are both still inside — the
+    # "rate[ -]limit" regex that must not match the literal field name `rate_limit_event`,
+    # and the all-digit guard on `resetsAt`.
+    # ⚠ This region is DUPLICATED VERBATIM in skills/gld/templates/sprint-supervisor.sh
+    # (design decision D10: the sprint supervisor is a deliberate copy, not a shared
+    # library). tests/sprint_supervisor_test.sh compares the two marker-fenced regions
+    # line by line, so an edit here that is not mirrored there FAILS that suite. Fix
+    # both, or move the change outside the markers.
+
     RATE_LIMITED=0
     if [ -n "$RESET_AT" ]; then RATE_LIMITED=1; fi
     # Fallback text scan: a genuinely rate-limited log that carried NO structured
@@ -226,6 +239,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
         ''|*[!0-9]*) ;;
         *) NOW=$(date +%s); WAIT=$((RESET_AT - NOW + 30)) ;;
       esac
+        # <!-- /guild:supervisor-core:ratelimit -->
       if [ -z "$WAIT" ] || [ "$WAIT" -le 0 ]; then
         # No usable reset time (absent, non-numeric, or already past) → escalating capped
         # backoff, so a persistent limit waits instead of spinning or being mislabelled FAILED.
@@ -315,5 +329,5 @@ COMPLETED=1
 1. ✅ `batch` added to `SKILL.md` valid commands + `help.md` line.
 2. ✅ **`GLD_UNATTENDED` companion** wired in `_handoff.md` Section H + `analyze/design/test/qa/dev` gate branches (+ `implement.md` decision log).
 3. ✅ `implement.md` mid-execute resume hardened (existing-branch/PR detection).
-4. ✅ **Gating decision** (settled): `batch` **ships ahead of `sprint`'s readiness gate** — it is lower-risk than full autonomous `sprint` because the human still reviews and merges every PR (INV1), while `sprint` additionally runs the Outer/evolve loop. The condition attached to that decision is that the **security note stays prominent** (the `--dangerously-skip-permissions` warning above, which it does). The decision is already in force, not pending: `batch` is a routed command in `SKILL.md`'s valid-command list and `help.md`, and it was run live on 2026-07-14 — this item was a stale open checkbox for a call that shipping had already made.
+4. ✅ **Gating decision** (settled): `batch` **shipped ahead of `sprint`** — it is lower-risk because it drives one Issue set in one checkout, while `sprint` adds per-Issue worktrees, PR stacking and a retro that runs the Outer/evolve loop. (The readiness gate this item originally referred to was removed: it required `evolve`-accumulated data a young repo cannot have, so it could never open — `SKILL.md`.) The condition attached to that decision is that the **security note stays prominent** (the `--dangerously-skip-permissions` warning above, which it does). The decision is already in force, not pending: `batch` is a routed command in `SKILL.md`'s valid-command list and `help.md`, and it was run live on 2026-07-14 — this item was a stale open checkbox for a call that shipping had already made.
 5. ✅ **End-to-end validation** (2026-07-14): real 2-issue batch confirmed rate-limit auto-resume + `guild:needs-human` pause; found + fixed the exit-0 false-positive (now label-based completion). **Untested edges**: happy-path *unattended* completion to `guild:done` was blocked by the false-positive (re-verify after the fix); split-parent under batch (nested orchestration); worktree path assumes a **committed** harness (an untracked/dev harness needs main-checkout — see Phase 1).

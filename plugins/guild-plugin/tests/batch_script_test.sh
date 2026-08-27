@@ -37,7 +37,26 @@ PY
 
 echo ""
 echo "== A. 생성 스크립트 자체 =="
-if "$SH" -n "$WORK/batch.sh" 2>/dev/null; then ok "bash 3.2 문법 검사"; else bad "bash 3.2 문법 검사" "syntax ok" "syntax error"; fi
+# ⚠ `bash -n` EXITS 0 ON A SYNTAX ERROR on macOS bash 3.2.57 — measured, and not a wrapper
+# artifact (a control `false` returns 1 in the same shell). So the exit code cannot be the
+# signal: this check read `if "$SH" -n …; then ok` and therefore COULD NEVER FAIL. The only
+# reliable signal is whether -n wrote to stderr. Found while building /gld sprint's own
+# supervisor test, which needed the same check.
+"$SH" -n "$WORK/batch.sh" 2>"$WORK/syn.err" || true
+if [ -s "$WORK/syn.err" ]; then
+  bad "bash 3.2 문법 검사" "syntax ok" "$(head -1 "$WORK/syn.err")"
+else
+  ok "bash 3.2 문법 검사"
+fi
+# Control: the detector must actually see an error. If this stops failing, the check above is
+# inert again — exactly the state this replaced.
+printf 'X=(<PLACEHOLDER>)\n' > "$WORK/syn_control.sh"
+"$SH" -n "$WORK/syn_control.sh" 2>"$WORK/syn_control.err" || true
+if [ -s "$WORK/syn_control.err" ]; then
+  ok "문법 검출기 자체 검증 (대조군이 오류로 잡힘)"
+else
+  bad "문법 검출기 자체 검증" "대조군이 오류로 잡힘" "대조군이 통과 — 검출기가 무력하다"
+fi
 
 # 빈 큐: set -u + bash 3.2 에서 "${ISSUES[@]}" 무가드 전개가 죽던 자리
 sed 's/^ISSUES=(1 2)/ISSUES=()/' "$WORK/batch.sh" > "$WORK/empty.sh"
