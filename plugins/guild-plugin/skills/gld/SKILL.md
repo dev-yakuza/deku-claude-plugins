@@ -14,7 +14,7 @@ Route to the appropriate command based on `$0`. Read `<<SKILL_DIR>>/commands/$0.
 - Valid commands: `init`, `plan`, `dev`, `analyze`, `design`, `implement`, `debug`, `refactor`, `test`, `qa`, `review`, `audit`, `batch`, `evolve`, `sprint`, `rollback`, `ask`, `onboard`, `monitoring`, `update`, `contribute`, `config`, `resume`, `status`, `help`
 - If `$0` is empty → route to `help`.
 - If `$0` is not in the list → report unknown command, then route to `help`.
-- Every command listed above is implemented. (`sprint` routes to four subcommands — `plan`·`run`·`daily`·`retro`. It is **no longer readiness-gated**: the old lock required `evolve`-accumulated data that a young repo cannot have, so it could never run. `run`'s preflight blocks only on what makes the flow meaningless — a repo with no way to *run* tests — and warns on the rest. See `commands/sprint.md`.)
+- Every command listed above is implemented. (`sprint` routes to five subcommands — `plan`·`run`·`daily`·`retro`·`board`. It is **no longer readiness-gated**: the old lock required `evolve`-accumulated data that a young repo cannot have, so it could never run. `run`'s preflight blocks only on what makes the flow meaningless — a repo with no way to *run* tests — and warns on the rest. See `commands/sprint.md`.)
 
 ---
 

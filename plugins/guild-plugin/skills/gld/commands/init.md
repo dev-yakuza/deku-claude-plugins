@@ -156,7 +156,7 @@ Create via Write tool:
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
   "automation": { "evolve_nudge": true },
   "gates": { "enabled": true },
-  "sprint": { "capacity": null, "max_stack_depth": 3, "history": [] }
+  "sprint": { "capacity": null, "max_stack_depth": 3, "history": [], "board": null }
 }
 ```
 - `commands.*` values are the **normalized, simple-bash-safe** forms from command-scan (see `scan_repo.md` Section 2): each is either a single simple command string, or an **array** of simple commands run in sequence. They MUST NOT contain `$(...)`, `&&`, `|`, `;`, or redirections — Guild runs them one per Bash call. (e.g. `flutter test --fail-fast --concurrency=$(nproc --all)` → store `"flutter test --fail-fast"`; `flutter analyze && npx remark . --quiet --frail` → store `["flutter analyze", "npx remark . --quiet --frail"]`.) A missing category → `null`.

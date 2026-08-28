@@ -75,6 +75,19 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    | `host` matches, pid gone | crash remnant → clear the run fields and resume |
    | `host` differs | cannot verify locally → **ask the human**, showing the heartbeat age and `state` |
 
+   ⚠ **"pid alive" needs a command, and there was none.** Left unstated an LLM guesses, and a
+   guess of *"cannot tell → not running"* starts a second supervisor against the same worktrees
+   and the same tracker marker:
+
+   ```bash
+   ps -p <pid> -o command=
+   ```
+
+   Empty output → the pid is gone (crash remnant). Output containing `sprint-supervisor` →
+   running, refuse. Output that is some **other** process → the pid was recycled; treat it as
+   gone. `ps` itself unavailable → **ask the human**, same as the `host` differs row; never
+   assume not-running.
+
    ⚠ The heartbeat is what makes this usable: a rate-limit wait was measured at ~115 minutes, so
    a marker refreshed only at issue boundaries would make a live run look dead. The supervisor
    refreshes at least every 10 minutes, **including inside the wait**.
@@ -84,6 +97,15 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    — any successful forward stage transition (`_handoff.md` Section A) — and the tracker has no
    stages, so it would stick forever and mis-report to `monitoring`/`status`. Record
    `state: halted:plan-hash-mismatch` in the run marker instead.
+
+   ⚠ **This marker is normally written by the supervisor (shell), so an LLM writing one must
+   match its shape exactly.** `sprint.md` and `_handoff.md` both declare it shell-owned, and
+   two readers parse it: `daily` step 2 and the duplicate-run guard above, both of which want
+   `host`/`pid`/`state`. Prose, or a partial object, makes both read a malformed marker while
+   this command returns *"recorded"*. Write it as a fenced JSON object between the markers:
+   `{"host": "<hostname>", "pid": 0, "state": "halted:plan-hash-mismatch", "started":
+   "<ISO8601>", "heartbeat": "<ISO8601>"}`. ⚠ **`pid: 0` on purpose** — nothing is running, and
+   `ps -p 0 -o command=` is empty, so the guard reads it as a remnant and not as a live run.
 5. **Rebuild the queue.** Read the member table (immutable) for members and `base 의존`; then
    **re-read every member's current label** — the label is authoritative over anything the
    marker says. Restore retry counts and the **discovered-children list** from the marker
@@ -107,9 +129,12 @@ writes nothing.** Two reasons, and the second is the binding one:
 
 ⚠ Writing it would therefore be a change to the human's checkout that **buys nothing** — and it
 would sit outside the write list this file's own Hard rules call *"in full"*
-(`.sprint-logs/<tracker>/**`, `.claude/guild/memory/`, `.gld-sprint-<tracker>.sh`, and three
-lines in `.git/info/exclude`). A phase that wrote a fourth path would make that enumeration
-false, which is the class of defect §12.5-7 was rewritten for.
+(`.sprint-logs/<tracker>/**`, `.claude/guild/memory/`, `.gld-sprint-<tracker>.sh`,
+`.gld-sprint-<tracker>.board`, and three lines in `.git/info/exclude`). A phase that wrote a
+path outside that enumeration would make it false, which is the class of defect §12.5-7 was
+rewritten for. ⚠ **Step 2b's `.board` file IS that fifth path** — it was added to both copies of
+the list when it was introduced, because the list's whole value is being exhaustive, and a
+review found it missing from both.
 
 **Say this to the human** rather than silently skipping a phase `batch` has: the allowlist is not
 protecting anything in an unattended sprint, and what *is* load-bearing is that every child runs
@@ -149,6 +174,77 @@ inside its own worktree.
    | `<HUMAN_REPO>` | absolute path of the human's checkout |
    | `<DAG_PATH>` | absolute path of `commands/atoms/sprint_dag.py` |
    | `<INSTALL_CMDS>` | zero or more **shell-quoted** simple commands from `config.commands` (e.g. `'yarn install'`). ⚠ An array, not a string: an empty inline substitution would produce `( cd "$WT" &&  )`, a **parse** error no runtime guard can prevent |
+
+   ⚠ **There are no `<BOARD_*>` tokens.** The board's ten values are **not** rendered into the
+   script — see step 2b. Substituting them into bash source produced three separate injections
+   and the class is now removed rather than escaped.
+
+2b. **Write the board config file** — when `config.sprint.board` is set. When `board` is `null`,
+   **delete the file if it exists** rather than merely skipping this step: the supervisor treats
+   an absent file as "board off" and says nothing (which is what every existing repo looks like,
+   D2), but a file left over from an earlier run is read as "board on". A human who turns the
+   board off in config and re-runs the same sprint would otherwise keep projecting to it.
+
+   ```bash
+   rm -f .claude/guild/.gld-sprint-<tracker>.board
+   ```
+
+   (A clean run removes the file itself along with the script; this covers the interrupted-run
+   case, where both are deliberately kept.)
+
+   Path: `.claude/guild/.gld-sprint-<tracker>.board`, in the **human's checkout** (same
+   directory as the script). Write it with the **Write tool** — ten `key=value` lines, in any
+   order:
+
+   ```
+   number=<config.sprint.board.number>
+   owner=<config.sprint.board.owner>
+   field=<config.sprint.board.column_field>
+   field_needs_human=<config.sprint.board.fields.needs_human>
+   verified_as=<config.sprint.board.verified_as>
+   col_ready=<columns.ready>
+   col_in_progress=<columns.in_progress>
+   col_blocked=<columns.blocked>
+   col_in_review=<columns.in_review>
+   col_done=<columns.done>
+   ```
+
+   ⚠ **Values are literal. Do not quote them, do not escape them, do not shell-quote them.**
+   `In progress` goes in as `In progress`. A quote would become part of the display name and
+   every write would fail. The supervisor splits on the **first** `=` only, so a display name
+   may contain one.
+
+   ⚠ **`backlog`/`issues` are not here** — the supervisor never writes those columns
+   (03-sprint-board.md §5.2), `plan` does.
+
+   ⚠ **A missing line is not a harmless blank.** The supervisor validates: `number` must be all
+   digits, and `owner`, `field`, `field_needs_human` and all five column names must be
+   non-empty. Anything else is downgraded to *"board off"* plus one `WARN` line — loud, rather
+   than a six-hour run against a project that does not exist. `field_needs_human` is on that
+   list because `board_col` uses it on **every** write; an empty value used to produce
+   `item-edit --field "" --clear` twenty times out of twenty, all failing.
+
+   ⚠ **The supervisor resolves node ids once at run start** — `project view` (2 points),
+   `field-list --limit 100` (101) and `item-list --limit 200` (201) — and every projection after
+   that costs **1 point** instead of 104. Measured: `item-edit --url --field <name> --value
+   <name>` = 104 points, the `--id --project-id --field-id` form = 1, four runs each. The hourly
+   GraphQL budget is 5000, so the name form allowed ~48 writes an hour for a run that makes
+   several per member.
+
+   ⚠ **The three reads do not fail the same way.** `project view` or `field-list` failing — or
+   the column field being absent from the board — prints one WARN, records `board_off_reason`
+   and runs **without** the board rather than paying 104 a write. `item-list` failing is a
+   **degradation, not a shutdown**: the board stays on and each touched card costs one extra
+   `item-add` to learn its id, which is correct (that call is idempotent) and cheaper than
+   refusing to project at all.
+
+   ⚠ **Why a file and not render tokens.** The values are display names a human typed into the
+   GitHub Projects UI. As `VAR="<TOKEN>"` in bash source, `Done $(touch /tmp/x)` executed at
+   supervisor start and a name ending in a backslash killed the script at **load** time under
+   `set -u` — before the traps, before the empty-queue guard, before one `gh` call, so a column
+   name could stop the sprint from running at all. A quoted heredoc fixed those two and a
+   **newline** still escaped it. `bash -n` was silent for all three on bash 3.2.57. In a data
+   file none of it is code.
 
 3. **Write** it to `.claude/guild/.gld-sprint-<tracker>.sh` in the **human's checkout** — never
    inside the container. The self-delete trap and the logs must survive the container's removal.
@@ -227,6 +323,12 @@ what `split: true` is for (step 1): without it the base decision would call a *c
 The harness re-invokes when the background task exits. Then:
 1. Read the marker and the logs; report per-member outcomes (**label-truthful**: done / paused /
    blocked / incomplete / failed) with counts, plus token/cost totals.
+
+   ⚠ **Then add one board line when `config.sprint.board` is set**, from the run marker's
+   ledger: *"보드: 실패 <board_fails>건 · 버그 <board_bugs>건"*, plus the account line when
+   `board_account_mismatch` is present and *"연속 실패로 투영을 중단했습니다"* when
+   `board_disabled_after` is. Absorbing a board failure is right (D9); absorbing the *fact*
+   that N of them happened is not — zero and "every write failed" must not look alike.
 2. List **preserved worktrees** and, for each, whether what blocked removal is uncommitted
    **source** (real unfinished work — the human should look) or only **untracked docs**
    (`_execute_spine.md` Step 3.5b leaves a tech-writer ADR untracked by design — a known gap, not a
@@ -252,8 +354,9 @@ The harness re-invokes when the background task exits. Then:
   removes dies on the next git call.
 - **Never touch the human's *working tree*, index or stash.** What the run does write, in full:
   the gitignored `.claude/guild/.sprint-logs/<tracker>/**`, `.claude/guild/memory/` (through the
-  symlink), `.claude/guild/.gld-sprint-<tracker>.sh` (this script), and three lines in
-  `.git/info/exclude`. Plus, unavoidably, in the **shared ref store**: one new branch per Issue
+  symlink), `.claude/guild/.gld-sprint-<tracker>.sh` (this script),
+  `.claude/guild/.gld-sprint-<tracker>.board` (step 2b's board config — removed together with the
+  script on a clean run, deliberately kept otherwise), and three lines in `.git/info/exclude`. Plus, unavoidably, in the **shared ref store**: one new branch per Issue
   (the spine cuts it — the work would not exist otherwise), `refs/remotes/origin/<base>`
   advanced by an additive fetch, and `.git/worktrees/` bookkeeping. Fetch only into
   `refs/remotes/`; never into a local branch name. ⚠ `git worktree prune` is repo-global and

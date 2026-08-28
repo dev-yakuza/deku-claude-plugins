@@ -28,9 +28,26 @@ which; render nothing speculative.
 
 **2. Read the container.** From the body: the goal, the member table (members + `base 의존`),
 the capacity reasoning, the stack cap. From the `<!-- guild:sprint:run -->` comment: `state`,
-`heartbeat`, `host`/`pid`, per-issue retries, discovered children.
+`heartbeat`, `host`/`pid`, per-issue retries, discovered children, and — when a board is
+configured — `board_fails` · `board_bugs` · `board_unknown_col` · `board_account_mismatch` ·
+`board_disabled_after` · `board_last_write` · `board_reason_disabled` · `board_off_reason`.
 
-**3. Gather — three calls, no more.**
+**3. Gather — three `gh` calls here plus one `git`; four `gh` in total, counting step 1.**
+
+⚠ **The run marker lives in a COMMENT, and step 1's `--json body` does not contain comments.**
+Without this call, step 2's `state` · `heartbeat` · `host`/`pid` and all four `board_*` keys
+are values nothing ever fetched — so the header line *"state: … · 하트비트 4분 전"* and the
+whole board line would be invented. `retro.md` already has the right shape; `daily` was
+missing it.
+
+```bash
+gh api repos/<owner>/<repo>/issues/<tracker>/comments --paginate --jq '.[].body'
+```
+
+Take the **last** `<!-- guild:sprint:run -->` block: the supervisor rewrites the marker by
+posting, so earlier copies are stale heartbeats. Absent → render `state: 없음` and **no board
+line at all**; do not fall back to a freshness claim, because "no marker" and "board healthy"
+are the two things that must not look alike.
 
 ```bash
 gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,closingIssuesReferences
@@ -84,10 +101,77 @@ the classes are written to a file in the human's checkout, which survives worktr
 the run itself.
 Per-attempt detail still lives beside it in `issue-<N>-<ts>-attempt<k>.log` (the child's
 stream-json) and `deps-<N>-<ts>.log` (the dependency install). ⚠ Labels do not carry a reason
-and the checkpoint deliberately holds only three volatile fields — so if `failures.jsonl` is
+and the checkpoint deliberately holds only a few volatile fields (`state`/`retries`/`discovered` plus the four board counters when a board is configured) — so if `failures.jsonl` is
 absent, say *"실패 이유 기록 없음"* rather than inferring one from a label.
 
 **5. Render** — actionable first, static counts last.
+
+⚠ **When `config.sprint.board` is set, add ONE board line.** Pick the first matching row —
+this is not optional garnish, it is the only place a human learns their board is dead:
+
+| Condition (first match wins) | Line |
+|---|---|
+| `board_off_reason` present | `⚠ 보드: <url> — 이 run 은 보드를 쓰지 못했습니다 (<board_off_reason>). 카드는 지난 상태 그대로입니다` |
+| `board_disabled_after` present | `⚠ 보드: <url> — 연속 실패로 투영을 중단했습니다 (누적 <board_disabled_after>건)` |
+| `board_unknown_col` > 0 | `⚠ 보드: <url> — config 와 어긋난 컬럼 이름 <board_unknown_col>건. 보드에서 컬럼을 개명하셨다면 config 를 맞춰 주십시오 — /gld sprint board` |
+| `board_fails` > 0 | `⚠ 보드: <url> — 투영 실패 <board_fails>건 · 마지막 성공 <board_last_write>. 일부 카드가 낡았습니다. 원인은 /gld sprint board 로 확인하십시오` |
+| `board_last_write` present | `보드: <url> · 마지막 투영 <board_last_write>` |
+| otherwise | `보드: <url> · 투영 기록 없음` |
+
+Then append, when present: ` · 사유 필드 기록 중단` (`board_reason_disabled` — the supervisor
+gave up writing the reason field after ten consecutive failures and kept projecting columns; the
+cards' columns are current but their `Needs human` values are stale) and ` · Guild 버그 <board_bugs>건` (this one is **ours**, not a scope or
+rate-limit problem) and ` · 계정 불일치: <value>` (D11 — *the* explanation for a board where
+everything failed).
+
+⚠ **Freshness comes from `board_last_write`, never from `heartbeat`.** `heartbeat` is written by
+`marker_write` regardless of what the board did, so *"마지막 투영 4분 전"* was a true statement
+about the supervisor being alive and a **false** one about the cards. `board_last_write` is set
+by the supervisor only on a projection that actually succeeded, which is the only thing that
+makes that clause honest.
+
+⚠ **`board_fails: 0` does not mean anything was projected.** There is no success counter beyond
+`board_last_write`; the dependency-blocked path deliberately writes nothing at all, so a run
+where every member was blocked ends with `board_fails: 0` and no projections. That is why the
+third row keys on `board_last_write` and not on the failure count being zero.
+
+⚠ **Absent is not zero.** No `board_fails` key means the supervisor never wrote a counter — no
+marker, or a run that died before its first heartbeat, or a run launched while the board was off.
+The last row covers it. Treating absent as zero is how "the board was never touched" ends up
+displayed as "the board is fine".
+
+⚠ **`board_unknown_col` is NOT `board_bugs`.** A column renamed in the GitHub UI is the most
+probable board fault in a months-old project and the fix is one line of config; rendering it as
+*"Guild 버그"* sends the human to file a bug for something they can fix in ten seconds.
+
+⚠ **`board_off_reason` comes first** — it means the board never came up at all, so every other
+counter is 0 and would otherwise render as "fine".
+
+⚠ **Reading these keys and rendering none of them is the bug D9 exists to prevent** — a board
+where every write failed and a board where everything worked produce the same screen. That
+happened; it is why this is a table.
+
+⚠ **Add the split-parent line** for any member that reached `guild:done` with a
+`<!-- guild:children:output -->` comment and **no PR of its own** — the same condition step 6
+already evaluates: *"#107 은 자식 PR 로 완료됩니다 — 보드 카드는 부모에 남습니다"*. Guild hides
+children from the board (D8), so without this the parent sits in `In review` with no PR to
+review and a `split-children` token a human has no way to decode.
+
+⚠ **Derive it, do not read the card.** `daily` makes no board read at all — `board.md`'s Hard
+rules enumerate the design's two reads and neither is here — so an instruction phrased as *"the
+card carries `split-children`"* is one this command cannot execute. It would either invent a
+third board read or silently drop the line, and the dropped line is D8's whole compensation for
+hiding children.
+
+⚠ **Say when the columns are not split by the board's own field.** When
+`config.sprint.board.column_by_verified` is not `true`, append ` · 컬럼 기준 미확인 —
+/gld sprint board`. A view created by `--setup` is always auto-assigned `Status`, so the human
+who skipped that one click sees one undifferentiated pile and concludes the projection is
+broken — while this line says it is fine.
+
+⚠ `daily` **writes nothing to the board.** It has no way to build the supervisor's inputs and
+becoming a second writer is what 03-sprint-board.md §5.1 removed; the `daily` marker stays the
+one named exception to read-only (step 8).
 
 ```
 Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limited-until 14:20 · 하트비트 4분 전)
@@ -203,4 +287,5 @@ markers.
 - **Never use Issue open/closed as completion** — a stacked PR does not close its Issue.
 - **Never judge a preserved worktree**; report source-vs-docs and let the human decide.
 - **Never auto-catch-up a stale base** and never suggest a rebase — INV3.
-- Three `gh` calls plus one `git`; a missing source renders as "없음", not an error.
+- Four `gh` calls (issue list · tracker comments · PR list · issue list) plus one `git`, plus
+  one child-discovery call per split parent; a missing source renders as "없음", not an error.

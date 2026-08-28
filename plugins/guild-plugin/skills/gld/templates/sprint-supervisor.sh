@@ -39,10 +39,483 @@ WAIT_MAX=14400                        # 4h ceiling on ANY single rate-limit wait
 # forbids `$(…)`, `&&`, `|`, `;` and redirections in these values.
 INSTALL_CMDS=(<INSTALL_CMDS>)
 
+# ── Board projection config (03-sprint-board.md §7.2) ────────────────────────
+# ⚠ THESE TEN VALUES NEVER TOUCH SHELL SOURCE. They come from `config.sprint.board`, i.e. from
+# display names a human typed into the GitHub Projects UI, and this file has now been bitten by
+# that three times:
+#   • `VAR="<TOKEN>"` — `Done $(touch /tmp/PWNED)` executed at supervisor start, and a name
+#     ending in a backslash swallowed the following lines and killed the script at LOAD time
+#     under `set -u`: before the traps, before the empty-queue guard, before one gh call. A
+#     board display name could stop the sprint from running at all (violating D2 and D9 at once).
+#   • a quoted heredoc killed expansion and backslashes but NOT a newline — a value containing
+#     one closed the heredoc early and everything after it became top-level shell (measured:
+#     `INJECTED_CODE` printed, then rc=127 before the traps).
+# `bash -n` was silent for all three on bash 3.2.57, so no syntax gate can catch this class.
+#
+# So the values are read from a DATA FILE that `run.md` writes with the Write tool. A newline
+# in a value can now do nothing worse than produce a junk line the `case` below ignores. There
+# is no token here to leave unrendered, either — the whole class is gone rather than patched.
+BOARD_CONF="$HUMAN_REPO/.claude/guild/.gld-sprint-$TRACKER.board"
+
+BOARD_NUMBER=""; BOARD_OWNER=""; BOARD_FIELD=""; BOARD_FIELD_NEEDS_HUMAN=""
+BOARD_VERIFIED_AS=""
+# Column display names as FIVE SCALARS, not a map: this file is bash 3.2 compatible and
+# `declare -A` passes `bash -n` while dying at runtime (see the header). `backlog`/`issues`
+# are absent on purpose — the supervisor never writes them (§5.2), `plan` does.
+BOARD_COL_READY=""; BOARD_COL_IN_PROGRESS=""; BOARD_COL_BLOCKED=""
+BOARD_COL_IN_REVIEW=""; BOARD_COL_DONE=""
+BOARD_CONF_BAD=""
+BOARD_CONF_MISSING=0     # "there is no file" — the normal board-off case, and it is SILENT
+BOARD_OFF_REASON=""      # ⚠ WHY the board never came up. These paths used to signal only with
+                         # an `echo` on the supervisor's stdout — which `daily` states plainly it
+                         # cannot read. A six-hour run against an untouched board then rendered
+                         # as "투영 기록 없음", indistinguishable from "the run has not started".
+                         # D9 forbids absorbing the FACT of absorption; this is that fact.
+BOARD_WAS_ON=0           # "the board was on when this run started" — survives board_breaker
+
+if [ -f "$BOARD_CONF" ] && [ ! -r "$BOARD_CONF" ]; then
+  # `[ -f ]` is true and the redirect below then fails with a raw bash `Permission denied` and
+  # no WARN of ours. Name it instead.
+  BOARD_CONF_BAD="board config exists but is not readable"
+elif [ -f "$BOARD_CONF" ]; then
+  # `IFS='='` + `read -r k v` splits on the FIRST `=` only, so a display name may contain one.
+  # ⚠ `|| [ -n "$bk" ]` consumes an UNTERMINATED final line. Without it `read` returns non-zero
+  # on a last line with no newline and the loop body never runs for it — so the file's last key
+  # is silently dropped, and if that key is `number` the whole board goes off with nothing said.
+  # `run.md` lets the ten lines come in any order, so `number` last is a legal document.
+  while IFS='=' read -r bk bv || [ -n "$bk" ]; do
+    # `IFS='='` REPLACES the default whitespace set, so nothing is trimmed: `  number=7` would
+    # match no `case` arm. Strip a CR (CRLF files) and surrounding blanks from the key.
+    bk="${bk%$'\r'}"; bk="${bk#"${bk%%[![:space:]]*}"}"; bk="${bk%"${bk##*[![:space:]]}"}"
+    bv="${bv%$'\r'}"
+    case "$bk" in
+      # ⚠ `number` is the ONLY value that gets its blanks trimmed. It is numeric, so whitespace
+      # cannot be meaningful there. Display names are kept byte-exact: whether GitHub trims a
+      # trailing space in an option name is UNMEASURED, and trimming it here would make Guild
+      # write a name the board does not have.
+      number)            BOARD_NUMBER="${bv#"${bv%%[![:space:]]*}"}"
+                         BOARD_NUMBER="${BOARD_NUMBER%"${BOARD_NUMBER##*[![:space:]]}"}" ;;
+      owner)             BOARD_OWNER="$bv" ;;
+      field)             BOARD_FIELD="$bv" ;;
+      field_needs_human) BOARD_FIELD_NEEDS_HUMAN="$bv" ;;
+      verified_as)       BOARD_VERIFIED_AS="$bv" ;;
+      col_ready)         BOARD_COL_READY="$bv" ;;
+      col_in_progress)   BOARD_COL_IN_PROGRESS="$bv" ;;
+      col_blocked)       BOARD_COL_BLOCKED="$bv" ;;
+      col_in_review)     BOARD_COL_IN_REVIEW="$bv" ;;
+      col_done)          BOARD_COL_DONE="$bv" ;;
+    esac
+  done < "$BOARD_CONF"
+else
+  BOARD_CONF_MISSING=1
+fi
+
+# ⚠ VALIDATE, then treat anything unusable as "board off". Three failure modes converge here:
+# a renderer that never wrote the file, a project number that is not a number, and a required
+# display name that is empty. Either way the right answer is D2's off path plus ONE loud line,
+# never a silent six-hour run against a project that does not exist.
+case "$BOARD_NUMBER" in
+  "")           : ;;                                  # board genuinely off — say nothing
+  *[!0-9]*)     BOARD_CONF_BAD="number=$BOARD_NUMBER"; BOARD_NUMBER="" ;;
+esac
+# ⚠ A file that EXISTS but yielded no `number` must be loud. Without this the empty case above
+# says nothing on purpose (that is D2's board-off path) and a garbage, truncated or
+# half-written file becomes a silent six-hour run with an untouched board — which is exactly
+# what the comment above claims cannot happen.
+if [ "$BOARD_CONF_MISSING" = 0 ] && [ -z "$BOARD_NUMBER" ] && [ -z "$BOARD_CONF_BAD" ]; then
+  BOARD_CONF_BAD="no usable \`number=\` line in $BOARD_CONF"
+fi
+if [ -n "$BOARD_NUMBER" ]; then
+  # ⚠ BOARD_FIELD_NEEDS_HUMAN belongs on this list. It was left off, and `board_col` uses it
+  # unconditionally — so an empty value produced `item-edit --field "" --clear` on every single
+  # write, all of them failing, while `board_col`'s comment claimed load-time validation had
+  # already forced the board off.
+  for bn in "$BOARD_OWNER" "$BOARD_FIELD" "$BOARD_FIELD_NEEDS_HUMAN" \
+            "$BOARD_COL_READY" "$BOARD_COL_IN_PROGRESS" \
+            "$BOARD_COL_BLOCKED" "$BOARD_COL_IN_REVIEW" "$BOARD_COL_DONE"; do
+    if [ -z "$bn" ]; then
+      BOARD_CONF_BAD="a required board name is empty"; BOARD_NUMBER=""; break
+    fi
+  done
+fi
+# ⚠ Only complain when the file was supposed to describe a live board. A board-less repo has no
+# file and that is the normal case for every existing user — a WARN there would be noise on
+# every run. `run.md` writes the file only when `config.sprint.board` is set.
+# A dedicated flag, not a string comparison against the message: comparing the reason text
+# against a reconstructed sentence is the kind of check that breaks the first time the sentence
+# is reworded, and it broke here.
+if [ -n "$BOARD_CONF_BAD" ] && [ "$BOARD_CONF_MISSING" = 0 ]; then
+  echo "[sprint] WARN: board config unusable ($BOARD_CONF_BAD) — running WITHOUT the board"
+  BOARD_OFF_REASON="config:$BOARD_CONF_BAD"
+fi
+# ⚠ `if`, not `[ … ] && …`: the latter returns 1 when the board is off, and as a top-level
+# command under `set -e` that kills the script on every board-less run.
+if [ -n "$BOARD_NUMBER" ]; then BOARD_WAS_ON=1; fi
+
 RUNDIR="$HUMAN_REPO/.claude/guild/.sprint-logs/$TRACKER"
 D="$RUNDIR/dag"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 mkdir -p "$D"
+
+# ── 보드 투영 (03-sprint-board.md §5.2·§7.2) ─────────────────────────────────
+# Defined HERE, before `cleanup` and the empty-queue guard, because P7 lives inside the
+# EXIT trap: putting these after the guard leaves a window where the trap could reference
+# an undefined function. `${ISSUE:-}` in P7 already makes the empty-queue path a no-op, but
+# ordering it away is cheaper than reasoning about it.
+BOARD_FAILS=0            # gh failures, absorbed (D9) but COUNTED — see heartbeat
+BOARD_UNKNOWN_COL=0      # config names a column the board does not have — a UI rename, almost
+                         # always. Rendered as "config와 어긋난 컬럼 이름", never as our bug.
+BOARD_BUGS=0             # unknown column token = OUR bug; kept apart from gh failures so
+                         # "board failures: N" stays a scope/rate-limit signal for the human
+BOARD_LAST_OK=1          # last project_set outcome; board_col caches only on success
+BOARD_PROJECT_ID=""      # project node id; node-ID writes cost 1 point instead of 104
+BOARD_STREAK=0           # CONSECUTIVE COLUMN write failures — resets on any column success
+BOARD_RSN_STREAK=0       # ... and the same for the reason field, tracked apart (a broken
+                         # annotation must not cost the human the column layout)
+BOARD_STREAK_MAX=10      # ... and at this many, board_breaker turns the board off
+: > "$D/board.rsn"       # reason cache, one line per issue: `<issue> <column> <reason>`.
+                         # Separate from board.txt on purpose: P7's guard asks "what column
+                         # does this card show", and a file answering two questions lied both
+                         # ways once already (v13).
+: > "$D/board.txt"       # column cache, ONE LINE PER ISSUE, rewritten.
+                         # ⚠ Truncated every run on purpose: `$D` survives a run that needs
+                         # re-running (it is only removed when FAILED+INCOMPLETE+BLOCKED==0),
+                         # so a stale `101 in_progress` from the previous run would make P1
+                         # skip its write and leave the card wherever it was.
+
+# ── Node-ID addressing (§7.5, v18) ───────────────────────────────────────────
+# ⚠ WHY: a name-addressed write costs **104 GraphQL points**; the node-ID form costs **1**.
+# Both measured four times on a live project. The hourly budget is 5000, so the name form
+# allows ~48 writes an hour — and a 12-member run makes several per member, before the failure
+# retry path triples it. The supervisor shares that budget with `refresh_dag_input`'s
+# `gh pr list`/`gh issue list`, so board cost turning into `dag-input-failed` was not
+# hypothetical. §7.5's old accounting counted gh invocations and never points.
+#
+# The preparation is paid ONCE per run: `project view` = 2 points, `field-list --limit 100` = 101,
+# `item-list --limit 200` = 201. After that every projection is 1 point.
+board_resolve() {        # populates BOARD_PROJECT_ID, $D/board.fld, $D/board.opt, $D/board.itm
+  # ⚠ CALLED ONCE PER RUN. `board.itm` is truncated here, so a second call would discard every
+  # id `board_item_of` discovered via `item-add` and pay for them again. Harmless today (one
+  # call site, right after the account check) and deliberately noted for whoever adds a second.
+  [ -n "$BOARD_NUMBER" ] || return 0
+  # ⚠ Data through a FILE, program through the heredoc. `gh … | "$PY" - <<'PY'` does NOT work:
+  # the heredoc IS stdin, so it feeds the program and the pipe is discarded — python then reads
+  # an empty stdin and every parse silently yields nothing. Measured while writing this.
+  gh project view "$BOARD_NUMBER" --owner "$BOARD_OWNER" --format json \
+    > "$D/board.view.json" 2>/dev/null || : > "$D/board.view.json"
+  BOARD_PROJECT_ID=$("$PY" - "$D/board.view.json" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    print((json.load(open(sys.argv[1])) or {}).get("id") or "")
+except Exception:
+    print("")
+PY
+)
+  if [ -z "$BOARD_PROJECT_ID" ]; then
+    echo "[sprint] WARN: cannot read project $BOARD_NUMBER — running WITHOUT the board"
+    BOARD_OFF_REASON="project-unreadable"; BOARD_NUMBER=""; return 0
+  fi
+  # ⚠ 100, not 25. A new project already carries 13 built-in fields plus Guild's 5, so seven
+  # human-added fields crossed the old cap — and a short read is FATAL here (the board goes off
+  # for the whole run) while `sprint board`'s own diagnostic reads at 100 and reports the same
+  # board healthy. One limit, in all three readers.
+  gh project field-list "$BOARD_NUMBER" --owner "$BOARD_OWNER" --limit 100 --format json \
+    > "$D/board.fl.json" 2>/dev/null || : > "$D/board.fl.json"
+  "$PY" - "$D/board.fl.json" "$D/board.fld" "$D/board.opt" "$BOARD_FIELD" <<'PY' 2>/dev/null || true
+import json, sys
+src, fld, opt, colname = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+try:
+    d = json.load(open(src)) or {}
+except Exception:
+    d = {}
+fields = d.get("fields") or []
+total = d.get("totalCount")
+# A short list means a field we need may be missing from it, and "missing" is indistinguishable
+# from "renamed" downstream. Write nothing rather than a partial map.
+if total is not None and len(fields) != total:
+    fields = []
+with open(fld, "w") as fh, open(opt, "w") as oh:
+    for f in fields:
+        name = f.get("name") or ""
+        # ⚠ `\n` too, not just `\t`. A field named "Sprint\nGuild board" writes two lines and the
+        # second one hijacks the real column field's key — the column write then goes to the
+        # wrong field id. The config loader already treats a newline in a display name as a real
+        # input class; this is the same class one layer down.
+        if not name or "\t" in name or "\n" in name:
+            continue
+        fh.write("%s\t%s\n" % (name, f.get("id") or ""))
+        if name == colname:
+            for o in f.get("options") or []:
+                if o.get("name") and "\t" not in o["name"] and "\n" not in o["name"]:
+                    oh.write("%s\t%s\n" % (o["name"], o.get("id") or ""))
+PY
+  if [ ! -s "$D/board.fld" ]; then
+    echo "[sprint] WARN: cannot read the board's fields — running WITHOUT the board"
+    BOARD_OFF_REASON="fields-unreadable"; BOARD_NUMBER=""; return 0
+  fi
+  # issue -> project item id, from one read. Cards `plan` seeded are all here; anything else
+  # is added on first touch.
+  # ⚠ Keep `totalCount`. The old projection reduced the envelope to a bare array, so a board
+  # with more than the limit yielded a partial `board.itm` with no way to know — and §10 says
+  # the board accumulates forever, so any fixed limit WILL be crossed. `board_write.py` compares
+  # and re-reads; this side just says so and degrades (correctness survives — `item-add` is
+  # idempotent and returns the right id — but every missing card costs one extra mutation).
+  gh project item-list "$BOARD_NUMBER" --owner "$BOARD_OWNER" --limit 200 --format json \
+      --jq '{items: [.items[] | {id: .id, n: .content.number, r: .content.repository}], totalCount: .totalCount}' \
+    > "$D/board.il.json" 2>/dev/null || : > "$D/board.il.json"
+  : > "$D/board.short"
+  "$PY" - "$D/board.il.json" "$D/board.itm" "$OWNER_REPO" "$D/board.short" <<'PY' 2>/dev/null || true
+import json, sys
+src, out, repo, short = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+try:
+    d = json.load(open(src)) or {}
+except Exception:
+    d = {}
+items = d.get("items") or []
+total = d.get("totalCount")
+with open(out, "w") as fh:
+    for it in items:
+        if it.get("n") is None or it.get("r") != repo:
+            continue                      # drafts have no number; other repos are not ours
+        # ⚠ Skip an empty id. Writing `101 ` poisons the cache: `awk '$1==n {print $2}'` returns
+        # empty for that issue forever, so every `project_set` re-runs `item-add` AND appends a
+        # duplicate line — the file grows without bound.
+        if not it.get("id"):
+            continue
+        fh.write("%s %s\n" % (it["n"], it["id"]))
+if total is not None and len(items) != total:
+    open(short, "w").write("%d/%d\n" % (len(items), total))
+PY
+  [ -f "$D/board.itm" ] || : > "$D/board.itm"
+
+  if [ -s "$D/board.short" ]; then
+    echo "[sprint] NOTE: the board has more cards than one page ($(cat "$D/board.short")) —" \
+         "cards past the first page cost one extra call each; projection is still correct"
+    ledger_set board_items_truncated "\"$(cat "$D/board.short")\"" 2>/dev/null || true
+  fi
+
+  # ⚠ CHECK THE COLUMN FIELD HERE, not per write. Without this, a field renamed or deleted in
+  # the UI made every `project_set` fall into the no-id branch — `BOARD_FAILS++`, never
+  # `BOARD_UNKNOWN_COL++` — so `daily` said *"연속 실패로 투영을 중단했습니다"* and pointed the
+  # human at `project` scope or a rate limit instead of at config. It also PAID for it: 
+  # `board_item_of` runs first, so each of the ten doomed writes did a real `item-add`, adding
+  # cards to a board nothing could then write to. Measured: 22 gh calls, 10 of them mutations.
+  if [ -z "$(board_id_of "$BOARD_FIELD" "$D/board.fld")" ]; then
+    echo "[sprint] WARN: column field \"$BOARD_FIELD\" is not on the board — running WITHOUT the board"
+    BOARD_OFF_REASON="column-field-missing"; BOARD_NUMBER=""; return 0
+  fi
+  return 0
+}
+
+board_id_of() {          # board_id_of <name> <tab-file> -> id, or ""
+  # ⚠ `ENVIRON`, not `-v`. `awk -v k=…` performs ESCAPE-SEQUENCE PROCESSING on the value, so a
+  # display name containing a backslash (`C:\temp` -> `C:<TAB>emp`) silently never matches and
+  # the lookup returns empty — counted as a failure, blamed on scope or rate limit. Backslashes
+  # in board display names are not hypothetical here: this file's header records one that killed
+  # the script at LOAD time. `board_write.py` (a python dict lookup) resolves the same name
+  # fine, so `plan` would fill the board while the supervisor could not move a single card.
+  k="$1" awk -F'\t' '$1==ENVIRON["k"] {print $2; exit}' "$2" 2>/dev/null || true
+}
+
+board_item_of() {        # board_item_of <issue> -> project item id, adding the card if needed
+  local id
+  id=$(awk -v n="$1" '$1==n {print $2; exit}' "$D/board.itm" 2>/dev/null || true)
+  if [ -z "$id" ]; then
+    # `plan` seeds the members, but `--setup` can be run mid-sprint and a card can be deleted
+    # by hand. `item-add` is idempotent (same item id, exit 0 — measured) and returns the id.
+    gh project item-add "$BOARD_NUMBER" --owner "$BOARD_OWNER" \
+      --url "https://github.com/$OWNER_REPO/issues/$1" --format json \
+      > "$D/board.add.json" 2>/dev/null || : > "$D/board.add.json"
+    id=$("$PY" - "$D/board.add.json" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    print((json.load(open(sys.argv[1])) or {}).get("id") or "")
+except Exception:
+    print("")
+PY
+)
+    if [ -n "$id" ]; then printf '%s %s\n' "$1" "$id" >> "$D/board.itm"; fi
+  fi
+  printf '%s' "$id"
+}
+
+project_set() {          # project_set <issue> <field> [value]   (omitted/empty => --clear)
+  [ -n "$BOARD_NUMBER" ] || return 0
+  local item fid oid flag
+  item=$(board_item_of "$1")
+  fid=$(board_id_of "$2" "$D/board.fld")
+  if [ -z "$item" ] || [ -z "$fid" ]; then
+    # No id, no 1-point write. Falling back to the 104-point name form here would reintroduce
+    # exactly the cost this change removes, and on the cards that are hardest to reach anyway.
+    BOARD_FAILS=$((BOARD_FAILS+1)); BOARD_LAST_OK=0; return 0
+  fi
+  # `${3:-}` not `$3`: a value-less call (clearing a reason) must not die under `set -u`.
+  if [ -n "${3:-}" ]; then
+    if [ "$2" = "$BOARD_FIELD" ]; then
+      oid=$(board_id_of "$3" "$D/board.opt")
+      if [ -z "$oid" ]; then
+        # ⚠ ITS OWN COUNTER, not `BOARD_BUGS`. The overwhelmingly likely cause is a human
+        # renaming a column in the GitHub UI without updating config — the most probable board
+        # fault in a months-old project — and `BOARD_BUGS` is rendered as *"Guild 버그"*, i.e.
+        # "report this to us", when the fix is a one-line config edit.
+        BOARD_UNKNOWN_COL=$((BOARD_UNKNOWN_COL+1)); BOARD_LAST_OK=0; return 0
+      fi
+      flag=(--single-select-option-id "$oid")
+    else
+      # The four data fields are TEXT by `board.md`'s spec. `--value` exists only alongside
+      # `--field` (the name form), so TEXT is what a node-ID write sends.
+      flag=(--text "$3")
+    fi
+  else
+    flag=(--clear)
+  fi
+  # ⚠ `|| { … }` is REQUIRED and must not be an `if ! …; then` body: that body is NOT exempt
+  # from `set -e`, and without the guard a missing `project` scope killed the whole run at the
+  # first member.
+  gh project item-edit --id "$item" --project-id "$BOARD_PROJECT_ID" --field-id "$fid" \
+    "${flag[@]}" >/dev/null 2>&1 \
+    || { BOARD_FAILS=$((BOARD_FAILS+1)); BOARD_LAST_OK=0; return 0; }
+  BOARD_LAST_OK=1
+  return 0
+}
+
+# ⚠ Absorbing failures is D9; continuing to PAY for them is not something D9 asks for.
+# ⚠ The arithmetic here was rewritten in v18 and the old numbers were wrong twice over.
+# A `board_col` is now at most 2 `item-edit` plus, on a first touch, 1 `item-add` — the
+# edit → add → edit retry is gone. What makes a dead board expensive is not the call count but
+# that `board_col` caches only on success, so P1 re-fires on every retry (up to 12 split passes
+# and 6 rate-limit waits per member) and each attempt still spends GraphQL points. The
+# supervisor's own correctness calls (`gh pr list` / `gh issue list` in `refresh_dag_input`)
+# share that budget, so board pressure can turn into a real `dag-input-failed`, which
+# terminal-blocks every dependant. So: after N consecutive COLUMN failures, stop calling. The
+# counters and the reason survive in the ledger.
+board_breaker() {   # board_breaker <0|1: did this board_col succeed entirely>
+  if [ "$1" = 1 ]; then BOARD_STREAK=0; return 0; fi
+  BOARD_STREAK=$((BOARD_STREAK+1))
+  [ "$BOARD_STREAK" -ge "$BOARD_STREAK_MAX" ] || return 0
+  echo "[sprint] NOTE: board disabled after $BOARD_STREAK consecutive failures — the run continues"
+  # ⚠ FAILS + UNKNOWN_COL, not FAILS alone. A renamed column never touches `BOARD_FAILS`, so a
+  # board disabled entirely by renames recorded `board_disabled_after: 0` and `daily` rendered
+  # *"연속 실패로 투영을 중단했습니다 (누적 실패 0건)"* — a sentence that refutes itself.
+  ledger_set board_disabled_after "$((BOARD_FAILS + BOARD_UNKNOWN_COL))" 2>/dev/null || true
+  BOARD_NUMBER=""          # every helper's first line short-circuits on this
+  return 0
+}
+
+board_col() {            # board_col <issue> <column-token> [reason-token]
+  [ -n "$BOARD_NUMBER" ] || return 0
+  local name=""
+  case "$2" in
+    ready)       name="$BOARD_COL_READY" ;;
+    in_progress) name="$BOARD_COL_IN_PROGRESS" ;;
+    blocked)     name="$BOARD_COL_BLOCKED" ;;
+    in_review)   name="$BOARD_COL_IN_REVIEW" ;;
+    done)        name="$BOARD_COL_DONE" ;;
+    # Not silent: an unknown token is a code bug, and D9 forbids absorbing the FACT of
+    # absorption. Counted separately from gh failures so the two stay distinguishable.
+    *)           BOARD_BUGS=$((BOARD_BUGS+1)); return 0 ;;
+  esac
+  # An empty display name would reach `project_set` as a value-less call, i.e. `--clear`,
+  # which silently moves the card to the NULL BUCKET — the `Issues` column, "needs
+  # refinement" — while the cache records the intended token and neither counter moves.
+  # Load-time validation already forces the board off in that case; this is the second lock,
+  # because a card that lies with nothing counted is the one outcome D9 rules out.
+  if [ -z "$name" ]; then BOARD_BUGS=$((BOARD_BUGS+1)); return 0; fi
+  # Column write is deduped; the reason is not. P1 fires on every retry (up to 12 split
+  # passes, 6 rate-limit waits), so the column cache is where the savings are — while the
+  # reason is written at most once per outcome.
+  BOARD_LAST_OK=1          # a deduped (skipped) column write counts as "nothing went wrong"
+  if ! grep -qxF "$1 $2" "$D/board.txt" 2>/dev/null; then
+    project_set "$1" "$BOARD_FIELD" "$name"
+    if [ "$BOARD_LAST_OK" = 1 ]; then
+      grep -v "^$1 " "$D/board.txt" > "$D/board.tmp" 2>/dev/null || :
+      printf '%s %s\n' "$1" "$2" >> "$D/board.tmp"
+      mv "$D/board.tmp" "$D/board.txt"
+      # ⚠ Record WHEN A CARD ACTUALLY MOVED — inside the cache-miss branch, so a fully deduped
+      # `board_col` that makes zero gh calls does not bump it. Every reader used to derive
+      # "마지막 투영" from the marker's `heartbeat`, which `marker_write` writes regardless of
+      # what the board did; this is the only value that makes that clause honest, and it is also
+      # what distinguishes "no failures because everything worked" from "no failures because
+      # nothing was attempted" (the dependency-blocked path writes nothing at all, by design).
+      ledger_set board_last_write "$(date +%s)" 2>/dev/null || true
+    fi
+  fi
+  # ⚠ THE STREAK FOLLOWS THE COLUMN WRITE ONLY. Feeding it the AND of both writes meant a
+  # broken *reason* field — a `Needs human` created as a single-select instead of TEXT, or a
+  # per-field permission — disabled the PRIMARY projection after 10 members, even though every
+  # column write had landed (measured: 10 successful column writes, board switched off). The
+  # columns are what the human reads; the reason is an annotation. Degrade the annotation
+  # instead: stop writing it and keep the columns going.
+  local col_ok="$BOARD_LAST_OK"
+
+  # ⚠ Guarded. `board_col` used this unconditionally, so an empty field name produced
+  # `item-edit --field "" --clear` on every write — 20 failures out of 20, none of them
+  # anybody's fault but ours. Load-time validation now forces the board off in that case;
+  # this is the second lock.
+  # ⚠ The reason IS deduped, on the same (issue, column, reason) triple. It used to be written
+  # unconditionally on every call, which is O(N x sweeps) extra gh calls — and that is the same
+  # budget the breaker trips on (10 consecutive failures) and the same budget
+  # `refresh_dag_input`'s correctness reads share. `board_sweep_merged` alone re-clears the
+  # reason for every merged member at three separate call sites.
+  if [ -n "$BOARD_FIELD_NEEDS_HUMAN" ] \
+     && ! grep -qxF "$1 $2 ${3:-}" "$D/board.rsn" 2>/dev/null; then
+    project_set "$1" "$BOARD_FIELD_NEEDS_HUMAN" "${3:-}"
+    if [ "$BOARD_LAST_OK" = 1 ]; then
+      grep -v "^$1 " "$D/board.rsn" > "$D/board.rsn.tmp" 2>/dev/null || :
+      printf '%s %s %s\n' "$1" "$2" "${3:-}" >> "$D/board.rsn.tmp"
+      mv "$D/board.rsn.tmp" "$D/board.rsn"
+      BOARD_RSN_STREAK=0
+    else
+      # ⚠ Degrade, do not disable. After N consecutive reason failures stop writing the reason
+      # and keep projecting columns — an annotation nobody can write is worth less than the
+      # column layout, and turning the board off would cost the human both.
+      BOARD_RSN_STREAK=$((BOARD_RSN_STREAK+1))
+      if [ "$BOARD_RSN_STREAK" -ge "$BOARD_STREAK_MAX" ]; then
+        echo "[sprint] NOTE: reason field \"$BOARD_FIELD_NEEDS_HUMAN\" is unwritable — columns continue without it"
+        ledger_set board_reason_disabled 1 2>/dev/null || true
+        BOARD_FIELD_NEEDS_HUMAN=""
+      fi
+    fi
+  fi
+
+  # ⚠ THE STREAK IS COUNTED PER board_col, NOT PER project_set. Counting per call meant either
+  # of the two writes succeeding reset it, so the streak only ever reached the limit when EVERY
+  # gh call failed — i.e. the rate-limit case. The common partial outage (the column field
+  # renamed in the UI, or a per-field permission) left the board "on" forever: measured at 240
+  # gh calls over 60 board_col with the column write failing every time, versus 30 when
+  # everything failed. The partial outage is exactly the case the breaker was written for.
+  board_breaker "$col_ok"
+  return 0
+}
+
+board_sweep_merged() {   # P5/P6 — cards for members whose PR is already MERGED
+  [ -n "$BOARD_NUMBER" ] || return 0
+  [ -f "$D/run.json" ] || return 0
+  # `run.json`, NOT `prs.json`: the latter is the raw `gh pr list` payload with no `issue`
+  # key and no member filter. The issue<->PR attribution (closingIssuesReferences, then a
+  # unique issue-number token in the head branch) already happened in the python pass.
+  "$PY" - "$D/run.json" > "$D/merged.txt" 2>/dev/null <<'PY' || : > "$D/merged.txt"
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+for pr in d.get("prs") or []:
+    if pr.get("state") == "MERGED" and pr.get("issue") is not None:
+        print(pr["issue"])
+PY
+  while read -r n; do
+    # ⚠ `if`, not `[ … ] && …`: `done` in argument position parses correctly today, but adding a
+    # `;` before it makes this a syntax error and `bash -n` exits 0 on those (bash 3.2.57).
+    if [ -n "$n" ]; then board_col "$n" done; fi
+  done < "$D/merged.txt"
+  return 0
+}
+
+board_col_of() {         # board_col_of <issue> -> last column token written, or ""
+  [ -f "$D/board.txt" ] || { printf ''; return 0; }
+  awk -v n="$1" '$1==n {print $2}' "$D/board.txt" | tail -1
+}
 
 PY="${PY:-python3}"
 HOSTNAME_S="$(hostname 2>/dev/null || echo unknown)"
@@ -141,10 +614,35 @@ cleanup() {
   # unconditionally overwrote `state: finished` on EVERY clean run, because the trap fires
   # last — a completed sprint was then recorded as interrupted (measured).
   if [ "$FINISHED" -eq 0 ]; then
+    # P7 (03-sprint-board.md §5.2). bash defers a trap while a foreground command runs, so a
+    # `kill` lands AFTER the child session has already committed, pushed and opened its PR but
+    # BEFORE the `case "$STATE"` arms run — P1's `In progress` would then sit there forever,
+    # and the next run's queue no longer contains that Issue.
+    # ⚠ THREE guards, each for a measured failure:
+    #   `FINISHED -eq 0` — without it a run that completed normally but whose LAST P3 write
+    #     failed would relabel that member "Guild was interrupted", which is a false statement.
+    #   `${ISSUE:-}` — the empty-queue `exit 0` fires this trap before the loop ever ran.
+    #   still `in_progress` — P2/P3/P4 may already have written the real outcome; the card
+    #     cache is what tells us whether anything did.
+    if [ -n "${ISSUE:-}" ] && [ "$(board_col_of "$ISSUE")" = "in_progress" ]; then
+      board_col "$ISSUE" blocked interrupted
+    fi
+    # ⚠ Guarded, like heartbeat's. Without the guard a board-LESS run that gets interrupted
+    # gains two keys in its marker, which is the only thing an existing user could observe
+    # about this feature — and "nothing changes when the board is off" has to be literal.
+    if [ "${BOARD_WAS_ON:-0}" = 1 ]; then
+      ledger_set board_fails "${BOARD_FAILS:-0}" 2>/dev/null || true
+      ledger_set board_bugs "${BOARD_BUGS:-0}" 2>/dev/null || true
+      ledger_set board_unknown_col "${BOARD_UNKNOWN_COL:-0}" 2>/dev/null || true
+    fi
     marker_write "halted:interrupted" 2>/dev/null || true
   fi
   if [ "$COMPLETED" -eq 1 ]; then
-    rm -f "$SCRIPT_PATH"; echo "[sprint] Removed supervisor script"
+    # ⚠ The board config file goes with the script. Leaving it behind means the next run of
+    # this same tracker reads a STALE board config — and if the human turned the board off in
+    # `config.sprint.board` meanwhile, `run.md` step 2b writes no file, the old one survives,
+    # and the supervisor projects to a board the config says is gone.
+    rm -f "$SCRIPT_PATH" "$BOARD_CONF"; echo "[sprint] Removed supervisor script"
   else
     echo "[sprint] Run did not complete — script kept at $SCRIPT_PATH"
     echo "[sprint] Re-run \`/gld sprint run\` to continue; state comes from GitHub labels."
@@ -193,13 +691,43 @@ LEDGER="$D/ledger.json"
 # every marker write and the run stops before its first Issue with a one-line traceback and no
 # way to recover by re-running. Validate, and start clean if unreadable: the ledger holds only
 # the three volatile fields (§8.5), every one of which the next run re-derives from GitHub.
+# ⚠ Except the board counters (`board_fails` · `board_bugs` · `board_account_mismatch` ·
+# `board_disabled_after`): those are RUN-LOCAL and are NOT re-derivable — a fresh ledger resets
+# them to zero, which reads as "the board was fine". Accepted, because the alternative is
+# refusing to run over an unreadable ledger; but do not cite re-derivation as the reason.
 if [ -f "$LEDGER" ]; then
   "$PY" -c 'import json,sys; json.load(open(sys.argv[1]))' "$LEDGER" 2>/dev/null \
-    || { echo "[sprint] NOTE: ledger was unreadable — starting a fresh one"
+    || { echo "[sprint] NOTE: ledger was unreadable — starting a fresh one (board counters reset to 0)"
          printf '{}' > "$LEDGER"; }
 else
   printf '{}' > "$LEDGER"
 fi
+
+# ⚠ DROP THE BOARD KEYS AT RUN START. They are run-LOCAL facts living in a CROSS-RUN file, and
+# `$D` survives precisely when the run ended badly (`$D` is removed only when
+# FAILED+INCOMPLETE+BLOCKED == 0) — which is exactly when the human fixes the cause and re-runs.
+# Without this, run 2 inherits run 1's `board_disabled_after` and `board_account_mismatch`, and
+# `marker_write` renders the WHOLE ledger, so a run that projected every card correctly reports
+# "연속 실패로 투영을 중단했습니다 · 계정 불일치" — and `daily` checks `board_disabled_after`
+# FIRST, so that is the line the human reads. `heartbeat` re-establishes the two that still
+# apply within seconds; the other two must be re-earned.
+"$PY" - "$LEDGER" <<'PY' 2>/dev/null || true
+import json, os, sys
+path = sys.argv[1]
+try:
+    with open(path) as fh:
+        led = json.load(fh)
+except Exception:
+    raise SystemExit(0)
+for k in ("board_fails", "board_bugs", "board_account_mismatch",
+          "board_disabled_after", "board_last_write", "board_reason_disabled",
+          "board_unknown_col", "board_off_reason"):
+    led.pop(k, None)
+tmp = path + ".tmp"
+with open(tmp, "w") as fh:
+    json.dump(led, fh, sort_keys=True)
+os.replace(tmp, path)
+PY
 
 # marker_write <state>  — in-place replace of the run marker on the tracking Issue.
 # ONE --paginate query returns id AND body together. `_bash_rules.md:87`: needing both and
@@ -279,6 +807,21 @@ PY
 # so three consecutive failures stop cleanly instead of running blind.
 MARKER_FAILS=0
 heartbeat() {
+  # Board counters ride along here (03-sprint-board.md §7.2). This is the only position that
+  # satisfies all three requirements at once: the human sees them WHILE the run is going
+  # (`daily` reads this marker), whatever the last heartbeat wrote SURVIVES a TERM/`exit 1`/
+  # crash, and the empty-queue `exit 0` never reaches here so it cannot touch counters that
+  # are not initialised yet. `cleanup`-only loses the first, final-marker-only loses the second.
+  # ⚠ `ledger_set` is defined below this function; both are only ever CALLED from the loop.
+  # ⚠ `BOARD_WAS_ON`, not `BOARD_NUMBER`. `board_breaker` empties BOARD_NUMBER to stop paying
+  # for a dead board, and guarding on the live value meant the breaker HID the very counters it
+  # had just finished counting: `board_bugs` was lost outright and `board_fails` came out
+  # ABSENT, which selects `daily`'s reassuring row ("0 or absent → 마지막 투영 …").
+  if [ "$BOARD_WAS_ON" = 1 ]; then
+    ledger_set board_fails "$BOARD_FAILS" 2>/dev/null || true
+    ledger_set board_bugs "$BOARD_BUGS" 2>/dev/null || true
+    ledger_set board_unknown_col "$BOARD_UNKNOWN_COL" 2>/dev/null || true
+  fi
   if marker_write "$1"; then
     MARKER_FAILS=0
   else
@@ -678,6 +1221,55 @@ echo "  Guild Sprint #$TRACKER: ${#ORDER[@]} member(s) (queue may grow)"
 echo "============================================================"
 heartbeat "running"
 
+# D11 — the account that `--setup` validated vs the one this run actually has. The
+# supervisor inherits the launching session's environment, and `GH_TOKEN` overrides the
+# keyring account (measured, §1.1a): every board call then fails for a reason the human
+# cannot see. Recorded in the ledger AND echoed: this script's stdout is the supervisor log,
+# not a return channel (the LLM reads the marker and the ledger, never this stream).
+#
+# ⚠ THIS MUST STAY BELOW `heartbeat "running"`. It sat above `RUN_START` in an earlier
+# version — before `LEDGER=` was assigned and before `ledger_set` was even defined — so
+# bash returned 127 and `2>/dev/null || true` ate it. D11 was dead code under a green
+# suite: every board call failed, `board_fails` climbed, and the one key that explains why
+# was never written. The stderr redirect is gone for the same reason: if this ever moves
+# again it must be loud, not silent.
+#
+# ⚠ `Active account: true` — not list order. `gh auth status` happens to print the active
+# account first in 2.98.0, but that is undocumented and a keyring with three accounts is
+# exactly the measured situation (§1.1a).
+if [ -n "$BOARD_NUMBER" ] && [ -n "$BOARD_VERIFIED_AS" ]; then
+  BOARD_ACTIVE_AS=$(gh auth status 2>/dev/null | "$PY" -c '
+import re, sys
+active, pending = None, None
+for line in sys.stdin:
+    m = re.search(r"account\s+(\S+)", line)
+    if m:
+        pending = m.group(1)
+    if "Active account: true" in line and pending:
+        active = pending; break
+print(active or "")
+' || true)
+  if [ -n "$BOARD_ACTIVE_AS" ] && [ "$BOARD_ACTIVE_AS" != "$BOARD_VERIFIED_AS" ]; then
+    echo "[sprint] NOTE: board account mismatch — $BOARD_ACTIVE_AS != $BOARD_VERIFIED_AS"
+    ledger_set board_account_mismatch "\"$BOARD_ACTIVE_AS != $BOARD_VERIFIED_AS\"" || true
+  fi
+fi
+
+# ⚠ AFTER the account check, BEFORE the queue loop. Resolving node ids needs a working token,
+# and every projection point below needs the ids — a projection that runs before this would
+# fall into `project_set`'s no-id branch and be counted as a failure. This is also where the
+# board can still be switched off cheaply: a project that cannot be read costs one WARN here
+# instead of one failed write per member for six hours.
+board_resolve
+# ⚠ Record WHY the board is off, when it was CONFIGURED but did not come up. Deliberately NOT
+# under `BOARD_WAS_ON` — that is 0 precisely in this case. Without it the only signal is an
+# `echo` on a stream `daily` states plainly it cannot read, so a six-hour run against an
+# untouched board rendered as "투영 기록 없음" — indistinguishable from "the run has not
+# started". D9 forbids absorbing the FACT of absorption; this is that fact.
+if [ -n "$BOARD_OFF_REASON" ]; then
+  ledger_set board_off_reason "\"$BOARD_OFF_REASON\"" 2>/dev/null || true
+fi
+
 while [ ${#QUEUE[@]} -gt 0 ]; do
   ISSUE=${QUEUE[0]}; QUEUE=("${QUEUE[@]:1}")
   PROCESSED=$((PROCESSED + 1))
@@ -690,6 +1282,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   refresh_dag_input || {
     echo "  ✗ Issue #$ISSUE — DAG input could not be assembled"
     record_failure "$ISSUE" dag-input-failed "refresh_dag_input returned non-zero"
+    board_col "$ISSUE" blocked failed:dag-input-failed   # P4
     FAILED=$((FAILED + 1)); FAILED_ISSUES+=("#$ISSUE (dag-input-failed)")
     heartbeat "running"; continue
   }
@@ -702,12 +1295,19 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   if [ -n "$BLOCK_LINE" ]; then
     echo "  ⊘ Issue #$ISSUE blocked ($BLOCK_LINE) — skipped"
     record_event "$ISSUE" dependency-blocked "$BLOCK_LINE"
+    # ⚠ NOT a projection point — a wait stays in `Ready` (§4.1). But if the PREVIOUS run left
+    # this card on `Blocked` with a `failed:<class>`, that class is resolved and the card is
+    # lying: `Blocked` means "nothing moves without the human", and `daily` is meanwhile
+    # rendering this member under 의존성 차단. The cache is empty on a re-run (truncated at
+    # load), so "no cache entry" is exactly "this run has not formed an opinion yet".
+    if [ -z "$(board_col_of "$ISSUE")" ]; then board_col "$ISSUE" ready; fi
     BLOCKED=$((BLOCKED + 1)); BLOCKED_ISSUES+=("#$ISSUE ($BLOCK_LINE)")
     continue
   fi
 
   refresh_base || true
   refresh_dag_input || true
+  board_sweep_merged                                                             # P5
   BASE_TOKEN="$("$PY" "$DAG" --input "$D/run.json" --mode base 2>"$D/base.err" \
                 | awk -v i="$ISSUE" '$1==i {print $2}' || true)"
   if [ -z "$BASE_TOKEN" ] && [ -s "$D/base.err" ]; then
@@ -716,6 +1316,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     # DECISION itself failed (bad input, unparseable output), so nothing is known about the
     # dependency and the dependents must not stack on a guess.
     record_failure "$ISSUE" base-decision-failed "$(head -1 "$D/base.err")"
+    board_col "$ISSUE" blocked failed:base-decision-failed   # P4
     FAILED=$((FAILED + 1)); FAILED_ISSUES+=("#$ISSUE (base-unresolved)")
     heartbeat "running"; continue
   fi
@@ -723,6 +1324,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     BLOCKED:*)
       echo "  ⊘ Issue #$ISSUE ${BASE_TOKEN} — skipped"
       record_event "$ISSUE" dependency-blocked "$BASE_TOKEN"
+      if [ -z "$(board_col_of "$ISSUE")" ]; then board_col "$ISSUE" ready; fi   # see above
       BLOCKED=$((BLOCKED + 1)); BLOCKED_ISSUES+=("#$ISSUE ($BASE_TOKEN)")
       continue ;;
     DEFAULT|"") BASE_REF="origin/$DEFAULT_BRANCH" ;;
@@ -767,6 +1369,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     else
       echo "  ✗ Issue #$ISSUE worktree unavailable — $WT_MSG"
       record_failure "$ISSUE" worktree-create-failed "$WT_MSG"
+      board_col "$ISSUE" blocked failed:worktree-create-failed   # P4
       FAILED=$((FAILED + 1)); FAILED_ISSUES+=("#$ISSUE (worktree-create-failed)")
     fi
     WT_RC=0; heartbeat "running"; continue
@@ -783,6 +1386,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   if [ "$DEPS_OK" -eq 0 ]; then
     echo "  ✗ Issue #$ISSUE dependency install failed (see $(basename "$DEPS_LOG"))"
     record_failure "$ISSUE" deps-install-failed "see $(basename "$DEPS_LOG")"
+    board_col "$ISSUE" blocked failed:deps-install-failed   # P4
     FAILED=$((FAILED + 1)); FAILED_ISSUES+=("#$ISSUE (deps-install-failed)")
     heartbeat "running"; continue
   fi
@@ -802,6 +1406,11 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     # The child runs IN the issue worktree — this subshell is what makes §8.1a's isolation
     # real. Without it the child runs in the supervisor worktree, which has no dependencies
     # installed, and every test fails while the design silently reverts to one checkout.
+    # P1 (03-sprint-board.md §5.2). Not a derivation — the supervisor KNOWS it is about to
+    # develop this member. Fires again on every retry because it sits inside the retry loop,
+    # which is what the column cache is for. The reason is cleared with it: a stale
+    # `failed:<class>` from a previous attempt must not sit on an in-progress card.
+    board_col "$ISSUE" in_progress
     ( cd "$WT" && GLD_UNATTENDED=1 GLD_SPRINT_BASE="$BASE_REF" \
         CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
         claude -p --verbose --output-format stream-json --dangerously-skip-permissions \
@@ -821,9 +1430,40 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
         --jq '[.labels[].name] | map(select(startswith("guild:"))) | join(",")' 2>/dev/null || true)
       case "$STATE" in
         *guild:needs-human*)
-          echo "  ⏸ Issue #$ISSUE paused (needs-human)"; PAUSED=$((PAUSED + 1)); break ;;
+          echo "  ⏸ Issue #$ISSUE paused (needs-human)"; PAUSED=$((PAUSED + 1))
+          board_col "$ISSUE" blocked needs-human                                  # P2
+          break ;;
         *guild:done*)
           echo "  ✓ Issue #$ISSUE done"; DONE=$((DONE + 1))
+          # P3 — refresh FIRST. The PR this session just opened is not in the snapshot taken
+          # at the top of this iteration, so judging "has its own PR" without refreshing
+          # classifies EVERY normal member as a split parent.
+          # ⚠ INSIDE the board guard. This refresh exists only to make P3's judgement right;
+          # it costs `gh pr list` + `gh issue list` per completed member, and the arm `break`s
+          # immediately afterwards so the next iteration refreshes anyway. Outside the guard,
+          # board-off users paid two extra API calls per member for a decision never made —
+          # in a loop that has its own `rate-limit-exhausted` failure class.
+          if [ -n "$BOARD_NUMBER" ]; then
+            refresh_dag_input || true
+            BOARD_PRS=$("$PY" -c 'import json,sys;d=json.load(open(sys.argv[1]));print(len(d.get("prs") or []))' "$D/run.json" 2>/dev/null || echo 0)
+            BOARD_MINE=$("$PY" -c 'import json,sys;d=json.load(open(sys.argv[1]));print(sum(1 for p in (d.get("prs") or []) if str(p.get("issue"))==sys.argv[2]))' "$D/run.json" "$ISSUE" 2>/dev/null || echo 0)
+            if [ "$BOARD_MINE" -gt 0 ]; then
+              board_col "$ISSUE" in_review
+            elif [ "$BOARD_PRS" -gt 0 ]; then
+              # Done with no PR of its own = finished by a design-time split; its children
+              # carry the PRs and they are not members, so this card cannot reach Done on
+              # its own (§5.4). The token is how the human learns there is anything to review.
+              board_col "$ISSUE" in_review split-children
+            else
+              # `prs` empty for EVERYONE — `gh pr list` failed and was replaced with `[]`
+              # while still returning 0. Do not assert a split that we cannot see — but do not
+              # stay silent either: with no reason token this card is indistinguishable from a
+              # normal reviewed-and-waiting member, so a failed PR read would read as "there is
+              # a PR here, go review it". `pr-unknown` says which of the two it is.
+              board_col "$ISSUE" in_review pr-unknown
+            fi
+          fi
+          board_sweep_merged                                                       # P5
           worktree_release "$ISSUE"
           break ;;
         *guild:children*)
@@ -867,6 +1507,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
           fi
           echo "  ⚠ Issue #$ISSUE INCOMPLETE — split orchestration stopped advancing ($SPLIT_DESC child(ren) left after $SPLIT_PASSES passes)"
           record_failure "$ISSUE" split-stalled "$SPLIT_DESC child(ren) outstanding after $SPLIT_PASSES passes (stall $SPLIT_STALL)"
+          board_col "$ISSUE" blocked failed:split-stalled   # P4
           INCOMPLETE=$((INCOMPLETE + 1)); INCOMPLETE_ISSUES+=("#$ISSUE (split: $SPLIT_DESC left)"); break ;;
         *)
           RESUME_TRIES=$((RESUME_TRIES + 1))
@@ -877,6 +1518,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
           fi
           echo "  ⚠ Issue #$ISSUE INCOMPLETE (stuck at ${STATE:-unknown} after re-resume)"
           record_failure "$ISSUE" incomplete-mid-spine "stuck at ${STATE:-unknown} after $RESUME_TRIES re-resumes"
+          board_col "$ISSUE" blocked failed:incomplete-mid-spine   # P4
           INCOMPLETE=$((INCOMPLETE + 1)); INCOMPLETE_ISSUES+=("#$ISSUE (${STATE:-unknown})"); break ;;
       esac
       # <!-- /guild:supervisor-core:arms -->
@@ -924,6 +1566,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       if [ "$RL_TRIES" -gt 6 ]; then
         echo "  ✗ Issue #$ISSUE still rate limited after $RL_TRIES waits — giving up this run"
         record_failure "$ISSUE" rate-limit-exhausted "still rate limited after $RL_TRIES waits"
+        board_col "$ISSUE" blocked failed:rate-limit-exhausted   # P4
         FAILED=$((FAILED + 1)); FAILED_ISSUES+=("#$ISSUE (rate-limit-exhausted)"); break
       fi
       # A `resetsAt` in MILLISECONDS is all digits, so it passes the guard inside the verbatim
@@ -952,6 +1595,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     echo "  ✗ Issue #$ISSUE failed (exit $EXIT_CODE)"; FAILED=$((FAILED + 1))
     REASON=$(jq -r 'select(.type == "result") | select(.is_error == true) | .result // empty' "$LOG" 2>/dev/null | tail -1 | cut -c1-80 || true)
     record_failure "$ISSUE" child-session-failed "${REASON:-exit $EXIT_CODE}"
+    board_col "$ISSUE" blocked failed:child-session-failed   # P4
     FAILED_ISSUES+=("#$ISSUE (${REASON:-exit $EXIT_CODE})")
     break
   done
@@ -993,6 +1637,35 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   fi
   heartbeat "running"
 done
+
+# P6 (03-sprint-board.md §5.2) — the queue loop is over. `run.json` was last written at the
+# TOP of the final member's iteration, so a PR opened or merged during that session is not
+# in it; refresh once more or this is a no-op. ⚠ MUST run before the teardown below:
+# `refresh_dag_input` reads `git -C "$SUP" branch`, and $SUP is removed there.
+if [ -n "$BOARD_NUMBER" ]; then
+  refresh_dag_input || true
+  board_sweep_merged
+  # ⚠ A dependency wait is `Ready` DURING the run — "Guild is waiting and it resolves itself".
+  # The moment the queue drains that stops being true: the dependency did not land, so these
+  # members will not move again without the human. Leaving them in `Ready` makes the board's
+  # largest end-of-run pile say "queued, nothing for you to do" (§4.1's definition) about work
+  # that is dead until someone repairs the parent — and that pile is biggest exactly when a
+  # foundational member failed early. This is a terminal fact known here, needing no new read.
+  # ⚠ The token must match the actual block class. `BLOCKED_ISSUES` also collects
+  # `#N (branch-ambiguous)` and `#N (base-unresolved:<ref>)`, and those are NOT dependency
+  # waits — the repair for branch-ambiguous is deleting one of two candidate branches, so
+  # telling the human "your dependency never landed" points at the wrong thing.
+  for bi in ${BLOCKED_ISSUES[@]+"${BLOCKED_ISSUES[@]}"}; do
+    case "$bi" in
+      \#*) BOARD_BI="${bi#\#}"; BOARD_BI="${BOARD_BI%% *}"
+           case "$bi" in
+             *"(branch-ambiguous)"*)  board_col "$BOARD_BI" blocked branch-ambiguous ;;
+             *"(base-unresolved"*)    board_col "$BOARD_BI" blocked base-unresolved ;;
+             *)                       board_col "$BOARD_BI" blocked dep-unresolved ;;
+           esac ;;
+    esac
+  done
+fi
 
 # Container teardown. Order matters: prune BEFORE removing the supervisor worktree, and never
 # from inside it — this script never cd's into the container, so `git -C "$HUMAN_REPO"` is
@@ -1043,6 +1716,16 @@ echo "============================================================"
 # so the earlier order (rm first) made this call fail silently and left the marker on the last
 # `running` heartbeat: `daily` then rendered a completed sprint as in-flight, and the
 # duplicate-run guard read it as crash residue.
+# ⚠ Refresh the board counters BEFORE the marker. `marker_write` renders from the ledger, and
+# the last `heartbeat` happened before P6's sweep — so a run whose final `Done` writes all
+# failed (scope revoked late, rate limit at the end) recorded `board_fails: 0` and then
+# `daily`/`run` Phase 4 stated "보드: 실패 0건" over a board that never got the last column.
+# `cleanup` already does this before `halted:interrupted`; the clean-exit path did not.
+if [ "$BOARD_WAS_ON" = 1 ]; then
+  ledger_set board_fails "$BOARD_FAILS" 2>/dev/null || true
+  ledger_set board_bugs "$BOARD_BUGS" 2>/dev/null || true
+  ledger_set board_unknown_col "$BOARD_UNKNOWN_COL" 2>/dev/null || true
+fi
 marker_write "finished" || echo "[sprint] WARN: could not record state:finished"
 FINISHED=1
 

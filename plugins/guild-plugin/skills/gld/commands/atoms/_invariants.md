@@ -34,10 +34,17 @@ step 3 hard-block and the adversarial panel's degradation-lens veto are both abs
 git is the substrate; `/gld rollback <target>` is the escape hatch; evolve backs up each
 constituent file and auto-rolls-back on validation failure. No `reset --hard`, no
 force-push, no history rewrite — ever, by any command.
-*Known boundary*: reversibility stops at the gitignore line. `.claude/guild/memory/*` is not
-committed, so evolve's consolidation bridge (moving applied-source entries from
-`ground-truth.jsonl` to `consolidated.jsonl`) and the review-nudge state are **not**
-git-recoverable. Say so rather than implying total coverage.
+*Known boundary*: reversibility stops at the gitignore line **and at the network boundary**.
+`.claude/guild/memory/*` is not committed, so evolve's consolidation bridge (moving
+applied-source entries from `ground-truth.jsonl` to `consolidated.jsonl`) and the
+review-nudge state are **not** git-recoverable. The second boundary is remote state Guild
+writes but git never sees — today that is the GitHub Projects board (`sprint board`): which
+column a card sits in cannot be restored by any Guild path, because `--reset` deliberately
+leaves the column field alone (clearing it would move every card into the null bucket and
+assert something false). Say so rather than implying total coverage. ⚠ **Order matters when
+rolling this back**: `sprint board --reset` needs `owner`/`number`/field names out of
+`config.sprint.board`, so clearing that config first leaves every value on the board with no
+Guild path left to reach it. `--reset`, then null the config.
 *Mechanically*: one commit per evolve run; `permissions.ask` on the destructive git family.
 
 **INV4 — additive, never clobbers local evolution.**

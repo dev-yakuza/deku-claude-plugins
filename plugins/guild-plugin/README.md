@@ -40,7 +40,7 @@ claude /plugin install deku-claude-plugins@guild-plugin
 
 **On-demand & observe** — `rollback <target>` (non-destructive undo) · `ask <question>` (cited Q&A over standards + ⑥) · `monitoring [--html]` (state snapshot)
 
-**Iteration** — `sprint plan` (choose this sprint's issues, order them by dependency, open a tracking Issue) · `sprint run` (develop them unattended into dependency-ordered **PR stacks**, one git worktree per issue, rate-limit resilient — you review and merge concurrently) · `sprint daily` (what to merge and in what order, what's waiting on you, what broke) · `sprint retro` (metrics → capacity calibration → evolve → close the sprint)
+**Iteration** — `sprint plan` (choose this sprint's issues, order them by dependency, open a tracking Issue) · `sprint run` (develop them unattended into dependency-ordered **PR stacks**, one git worktree per issue, rate-limit resilient — you review and merge concurrently) · `sprint daily` (what to merge and in what order, what's waiting on you, what broke) · `sprint board` (mirror the sprint onto a GitHub Projects kanban — `Issues → Backlog → Ready → In progress → Blocked → In review → Done` — set up once, written by `plan` and `run` thereafter) · `sprint retro` (metrics → capacity calibration → evolve → close the sprint)
 
 ## Safety (the invariants)
 

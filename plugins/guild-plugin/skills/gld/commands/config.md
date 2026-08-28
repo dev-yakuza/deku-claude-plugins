@@ -33,6 +33,10 @@ Parse `$1` onward:
    automation: evolve_nudge=<on|off>
    gates:      enabled=<on|off> (commit gate: secret + verification-weakening block)
    sprint:     capacity=<n|미설정> max_stack_depth=<n> history=<count> runs
+               board=<#n (<column_field>) · 마지막 시딩(plan) <last_projected>|미설정>
+               ⚠ `last_projected` 는 `plan --create` 만 쓴다 — **"마지막 투영"이 아니다.**
+               카드가 마지막으로 움직인 시각은 run 마커의 `board_last_write` 이고
+               `sprint daily`·`sprint board` 가 그것을 렌더한다
    ```
    Render `roles` from the array in the file — **do not enumerate the roster from memory or from this document.** The installed roster is whatever `.claude/guild/config.json` lists and `.claude/agents/` contains; a repo may have grown or pruned it via `evolve` HR, so a hardcoded 16-name list would silently misreport it. Spine roles always run; specialists are convened per task by the leader (participation model: `_handoff.md` Section G).
 
@@ -57,11 +61,15 @@ The sprint PR-stack cap (`sprint.max_stack_depth`, default 3).
 `/gld sprint plan` warns and proposes cutting a chain that exceeds it. Raising it is legitimate
 but each extra level means one more PR that a change request on the bottom of the stack forces
 to catch up — and `retro` measures how often that happened before recommending a change.
+`sprint.board` is **written by `/gld sprint board --setup`** (03-sprint-board.md §6) and is
+`null` until then — a repo without a board is not in an error state (D2). Its `last_projected`
+is refreshed by `sprint plan --create`.
+
 `sprint.capacity` and `sprint.history` are **written by `/gld sprint retro`** after per-item
 human approval, not set here — they are shown by "Show current config" and have no setter, the
 same gap `commands` has (see Notes).
 
 ## Notes
-- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, history[]} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
+- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, history[], board} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
 - `roles` is edited by init (and by evolve HR later), not by `config` in M1 — editing the active roster manually is possible but unsupported as a config command yet.
-- `commands` (test/lint/typecheck/build/e2e) and `sprint.capacity`/`sprint.history` have the **same gap**: they are part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for them (`sprint.max_stack_depth` does have one) — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.
+- `commands` (test/lint/typecheck/build/e2e), `sprint.capacity`/`sprint.history` and `sprint.board` have the **same gap**: they are part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for them (`sprint.max_stack_depth` does have one) — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.

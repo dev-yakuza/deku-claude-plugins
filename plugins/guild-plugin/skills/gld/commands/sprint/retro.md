@@ -288,6 +288,20 @@ Record which of these happened — the return line distinguishes them.
 **Order matters: write the record before closing.** A closed Issue with no retro comment loses
 the sprint entirely.
 
+⚠ **Disclose the board's freeze — one line, when `config.sprint.board` is set.** `retro` writes
+**nothing** to the board (03-sprint-board.md §7.4, and the Hard rules below repeat it), but this
+is the moment the design's largest accepted cost becomes permanent: closing the tracker means
+nothing will ever move a card again. Every `In review` card stays `In review` after the human
+merges its PR tomorrow morning, and every `Blocked` card keeps a reason that may already be
+resolved. Say so rather than letting the human discover it:
+
+```
+보드: <url> — 이 시점 이후 카드는 갱신되지 않습니다. 머지하신 뒤에도 In review 에 남고,
+      정리는 GitHub UI 에서 하십시오. 다음 `sprint plan` 이 새 카드를 올립니다.
+```
+
+This is a **disclosure, not a projection** — no `gh project` call, no card touched.
+
 1. **Name the carryover explicitly** — every member that did not land, with its reason and its
    current stage. The next `sprint plan` treats these as top candidates, and it finds them by
    reading this list.

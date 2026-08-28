@@ -13,7 +13,7 @@ In this version (<PLUGIN_VERSION>)
                (leader convenes specialists by risk) + mid-execute resume
   Intake       plan: a design-doc or epic → a dependency-ordered dev-unit backlog
   Outer loop   evolve (HITL apply) · audit · contribute/update (central↔repo)
-               · sprint (plan/run/daily — an iteration container, PR stacks, worktree
+               · sprint (plan/run/daily/board — an iteration container, PR stacks, worktree
                isolation) · multi-PR child orchestration
   Memory       ⑥ knowledge · ④ working memory (evolve consolidates) · agent↔agent
                capture · ② standards lifecycle (drift sync + draft→confirmed)
@@ -61,6 +61,7 @@ Develop (spine: analyze → design → execute → test → qa)
   /gld sprint run         Develop the members unattended to PRs — dependency-ordered, PR-stacked, one git worktree per issue, rate-limit resilient. No args = resume the active sprint. --readiness shows the preflight
   /gld sprint daily       Status: what to merge and in what order, what's waiting on you, what broke (read-only; also where a bare `/gld sprint` goes)
   /gld sprint retro       Metrics, capacity calibration, evolve, close the sprint
+  /gld sprint board       Set up / inspect / reset the GitHub Projects kanban (optional)
 
 Diagnose & grow (Outer Loop)
   /gld audit [dim]        Read-only health check — grades harness+team+codebase, routes to evolve (dev weakness) / refactor (codebase). Makes no changes. dim = harness | team | knowledge | standards | evolution | codebase (empty = all)

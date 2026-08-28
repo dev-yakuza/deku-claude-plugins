@@ -24,6 +24,7 @@ as **that file's** `$1, $2, …` (shift by one).
 | `run` | `commands/sprint/run.md` — develop the members unattended to PRs |
 | `daily` | `commands/sprint/daily.md` — read-only status; merge order; what is stuck |
 | `retro` | `commands/sprint/retro.md` — metrics, capacity calibration, evolve, close the sprint |
+| `board` | `commands/sprint/board.md` — set up / inspect / reset the GitHub Projects kanban. **Optional infrastructure**: every other subcommand works without it (03-sprint-board.md D2) |
 | *(empty)* | route to **`daily`** — the most-used read-only action. A bare invocation must never start something destructive |
 | a number or comma-list (e.g. `837,840`) | do **not** run. Report: *"`/gld sprint run 837,840`으로 실행하세요"* — this was the pre-sprint-subcommand form (`help.md`), and silently mapping it to `run` would start an unattended run the user did not ask for |
 | `--readiness` | do **not** run. Report: *"`/gld sprint run --readiness`"* — the flag moved onto `run` |
@@ -72,9 +73,9 @@ on the merge-order line — reviewing is not a side activity here, it is the hal
 Guild does not do.
 
 ### Return (this router's own)
-`plan`/`run`/`daily`/`retro` each define their own return line; the router passes it through
-unchanged. Its own returns are for the paths that never reach a subcommand:
-`FAIL: unknown subcommand <$1> — valid: plan | run | daily | retro` ·
+`plan`/`run`/`daily`/`retro`/`board` each define their own return line; the router passes it
+through unchanged. Its own returns are for the paths that never reach a subcommand:
+`FAIL: unknown subcommand <$1> — valid: plan | run | daily | retro | board` ·
 `OK: use \`/gld sprint run <issues>\`` (the legacy number-list and `--readiness` forms).
 ⚠ None of these is a spine token: this file never returns `OK ADVANCE` or `OK PAUSE`
 (`_handoff.md` Section D — those belong to stage commands).
