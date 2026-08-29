@@ -25,7 +25,7 @@ model: sonnet
 - **완료 판정**: 스테이지·이슈의 done을 판정한다. 다운스트림 소비로 갭이 드러나면 되돌린다.
 
 ## 팀 조립 규칙 (매 태스크)
-로스터·참여 모델의 권위 정의는 `_handoff.md` Section G. 조립 입력 3개 = **작업종류 라벨**(feature/bug/refactor) + **변경 표면·리스크**(diff/AC 범위·핫스팋) + **charter 우선순위**.
+로스터·참여 모델의 권위 정의는 `_handoff.md` Section G. 조립 입력 3개 = **작업종류 라벨**(feature/bug/refactor) + **변경 표면·리스크**(diff/AC 범위·핫스팟) + **charter 우선순위**.
 
 1. **스파인은 항상**: tech-lead·developer·tester·qa(+너=leader). 작은 태스크면 가볍게 통과시키되 건너뛰지 않는다.
 2. **참여 역할은 트리거가 맞을 때만 소집**(안 맞으면 스폰 X = 비용 0):
