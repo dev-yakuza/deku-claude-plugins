@@ -1612,6 +1612,157 @@ fi
 # 구조 검사는 남겨둔다 — 위 셋과 다른 것을 본다(가드가 그 자리에 있는지)
 hasline "I: P7 is guarded by the column cache" 'board_col_of "$ISSUE")" = "in_progress"'
 
+# ── 변이 스윕이 드러낸 구멍 일곱 (2026-08-28) ──────────────────────────────
+# 이 파일 전체에 20개 변이를 돌렸더니 9개가 살아남았다. 하나는 다른 파일이 잡고, 하나는
+# 다음 검사가 가려서(방어 중복) 무해했고, 남은 일곱이 진짜 구멍이었다. 아래가 그 일곱이다.
+
+# (1) 차단 분기의 `ready` 복구가 **존재하는지** — 기존 검사는 *"ready 아닌 것을 쓰지 않는지"*만
+#     봤으므로, 복구를 통째로 지워도 위반이 없어서 통과했다.
+BOARD_RDY_N="$(awk '{ i=index($0,"#"); pre=(i?substr($0,1,i-1):$0);
+                      if (pre ~ /board_col_of "\$ISSUE"\)" \]; then board_col "\$ISSUE" ready/) n++ }
+                    END { print n+0 }' "$TPL")"
+if [ "$BOARD_RDY_N" -eq 2 ]; then
+  ok "I: both dependency-blocked branches repair a stale card to ready"
+else
+  bad "I: the ready repair must exist in BOTH blocked branches" "2" "found $BOARD_RDY_N"
+fi
+
+# (2) 컬럼 필드가 보드에 없으면 **보드를 끈다** — 없으면 쓰기마다 실패로 세고 22콜을 낭비했다.
+cat > "$I_WORK/ids_nocol.sh" <<'IDS'
+gh_ids() {
+  case "$2" in
+    view)       printf '{"id":"PVT_test","number":7}\n'; exit 0 ;;
+    field-list) printf '%s\n' '{"fields":[{"id":"F_nh","name":"Needs human","type":"ProjectV2Field"}],"totalCount":1}'; exit 0 ;;
+    item-list)  printf '%s\n' '{"items":[],"totalCount":0}'; exit 0 ;;
+    item-add)   printf '{"id":"I_x"}\n'; exit 0 ;;
+  esac
+}
+IDS
+: > "$I_WORK/calls.txt"
+I_NOCOL="$(GH_CALLS="$I_WORK/calls.txt" GH_IDS="$I_WORK/ids_nocol.sh" PATH="$I_WORK/bin:$PATH" \
+  "$SH" -c 'set -euo pipefail; . '"$I_WORK/helpers.sh"'
+     board_resolve
+     printf "[%s][%s]" "${BOARD_NUMBER:-OFF}" "${BOARD_OFF_REASON:-none}"' 2>&1)"
+case "$I_NOCOL" in
+  *'[OFF][column-field-missing]'*)
+    ok "I: a missing column field turns the board off, with the reason" ;;
+  *) bad "I: missing column field must turn the board off" "[OFF][column-field-missing]" \
+         "out=[$I_NOCOL]" ;;
+esac
+
+# (3) `board_resolve` 의 **호출 지점** — 함수 정의만 남겨도 `hasline` 은 통과했다.
+BOARD_RES_CALL="$(awk '{ i=index($0,"#"); pre=(i?substr($0,1,i-1):$0);
+                         if (pre ~ /^board_resolve[[:space:]]*$/) n++ } END { print n+0 }' "$TPL")"
+if [ "$BOARD_RES_CALL" -ge 1 ]; then
+  ok "I: board_resolve is actually CALLED, not just defined"
+else
+  bad "I: board_resolve call site is missing" "at least one bare call" "found $BOARD_RES_CALL"
+fi
+
+# (4) `item-list` 의 레포 필터 — 지우면 `other/repo#101` 의 항목 id 가 **우리 #101** 에 답하고,
+#     감독자가 남의 레포 카드에 쓴다. 마지막 리뷰가 살아남은 변이로 지목했다.
+cat > "$I_WORK/ids_foreign.sh" <<'IDS'
+gh_ids() {
+  case "$2" in
+    view)       printf '{"id":"PVT_test","number":7}\n'; exit 0 ;;
+    field-list) printf '%s\n' '{"fields":[
+                  {"id":"F_col","name":"Guild board","type":"ProjectV2SingleSelectField","options":[
+                    {"id":"o_ready","name":"Ready"},{"id":"o_prog","name":"In progress"},
+                    {"id":"o_block","name":"Blocked"},{"id":"o_rev","name":"In review"},
+                    {"id":"o_done","name":"Done"}]},
+                  {"id":"F_nh","name":"Needs human","type":"ProjectV2Field"}],"totalCount":2}'
+                exit 0 ;;
+    item-list)  printf '%s\n' '{"items":[{"id":"I_FOREIGN","n":101,"r":"other/repo"}],"totalCount":1}'
+                exit 0 ;;
+    item-add)   printf '{"id":"I_OURS"}\n'; exit 0 ;;
+  esac
+}
+IDS
+: > "$I_WORK/calls.txt"
+GH_CALLS="$I_WORK/calls.txt" GH_IDS="$I_WORK/ids_foreign.sh" PATH="$I_WORK/bin:$PATH" \
+  "$SH" -c 'set -euo pipefail; . '"$I_WORK/helpers.sh"'
+     board_resolve
+     : > "$GH_CALLS"
+     board_col 101 ready' >/dev/null 2>&1 || true
+if grep -q -- '--id I_OURS' "$I_WORK/calls.txt" 2>/dev/null \
+   && ! grep -q -- '--id I_FOREIGN' "$I_WORK/calls.txt" 2>/dev/null; then
+  ok "I: another repo's item id never answers for our issue number"
+else
+  bad "I: the repo filter on item-list is not enforced" "--id I_OURS only" \
+      "calls=[$(tr '\n' '|' < "$I_WORK/calls.txt")]"
+fi
+
+# (5) 브레이커는 **연속** 실패만 센다 — 성공 시 초기화를 지우면 산발적 실패로도 꺼진다.
+cat > "$I_WORK/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CALLS"
+. "$GH_IDS"; gh_ids "$@"
+# 컬럼 쓰기를 하나 걸러 하나 실패시킨다: 누적 실패는 늘지만 연속은 1을 넘지 않는다
+case "$*" in
+  *"--field-id F_col"*)
+    if [ $(( $(grep -c -- '--field-id F_col' "$GH_CALLS") % 2 )) -eq 1 ]; then exit 1; fi ;;
+esac
+exit 0
+STUB
+chmod +x "$I_WORK/bin/gh"
+I_run 'i=101; while [ $i -le 140 ]; do board_col $i ready; i=$((i+1)); done
+       printf "[%s][%s]" "${BOARD_NUMBER:-OFF}" "$BOARD_FAILS"'
+case "$(cat "$I_WORK/out.txt")" in
+  *'[7]['*) ok "I: alternating failures never trip the breaker (only CONSECUTIVE ones do)" ;;
+  *) bad "I: the breaker must count consecutive failures only" "board still on" \
+         "out=[$(cat "$I_WORK/out.txt")]" ;;
+esac
+
+# (6) 사유 강등이 실제로 **쓰기를 멈추는지** — NOTE 만 찍고 계속 쓰면 3배 비용이 그대로다.
+cat > "$I_WORK/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CALLS"
+. "$GH_IDS"; gh_ids "$@"
+case "$*" in *"--field-id F_nh"*) exit 1 ;; esac
+exit 0
+STUB
+chmod +x "$I_WORK/bin/gh"
+I_run 'i=101; while [ $i -le 140 ]; do board_col $i ready; i=$((i+1)); done
+       printf "[%s]" "${BOARD_FIELD_NEEDS_HUMAN:-EMPTY}"'
+I_RSN_TRIES=$(printf '%s\n' "$I_CALLS" | grep -c -- '--field-id F_nh' || true)
+case "$(cat "$I_WORK/out.txt")" in
+  *'[EMPTY]'*)
+    if [ "$I_RSN_TRIES" -le 15 ]; then
+      ok "I: the reason degrade STOPS the writes (tries=$I_RSN_TRIES, not 40)"
+    else
+      bad "I: degrade must stop writing the reason" "<=15 tries" "tries=$I_RSN_TRIES"
+    fi ;;
+  *) bad "I: the reason field must be blanked on degrade" "[EMPTY]" \
+         "out=[$(cat "$I_WORK/out.txt")]" ;;
+esac
+
+# (7) `heartbeat` 이 원장 3키를 쓴다 — `daily` 가 run 중에 보는 유일한 경로다.
+cat > "$I_WORK/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CALLS"
+. "$GH_IDS"; gh_ids "$@"
+exit 0
+STUB
+chmod +x "$I_WORK/bin/gh"
+I_lg 'BOARD_WAS_ON=1; BOARD_FAILS=3; BOARD_BUGS=1; BOARD_UNKNOWN_COL=2
+      MARKER_FAILS=0
+      heartbeat "running" >/dev/null 2>&1 || true
+      printf "[%s][%s][%s]" "$(ledger_get board_fails none)" "$(ledger_get board_bugs none)" "$(ledger_get board_unknown_col none)"'
+case "$(cat "$I_WORK/lg.txt")" in
+  *'[3][1][2]'*) ok "I: heartbeat writes all three board counters to the ledger" ;;
+  *) bad "I: heartbeat must write the three counters" "[3][1][2]" \
+         "out=[$(cat "$I_WORK/lg.txt")]" ;;
+esac
+
+# 스텁 복구
+cat > "$I_WORK/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CALLS"
+. "$GH_IDS"; gh_ids "$@"
+exit 0
+STUB
+chmod +x "$I_WORK/bin/gh"
+
 # ── board_sweep_merged — P5/P6 의 실체. 여기에 검사가 하나도 없었다 ──────────
 # 변이 테스트가 드러낸 구멍: `state == "MERGED"` 필터를 지워도 22+88건이 전부 초록이었다.
 # 그 변이의 결과는 *"열려 있는 PR의 이슈까지 Done 으로 옮긴다"* — 머지되지 않은 일을 완료로
