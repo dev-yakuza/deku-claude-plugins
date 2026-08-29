@@ -48,13 +48,18 @@ Guild path left to reach it. `--reset`, then null the config.
 *Mechanically*: one commit per evolve run; `permissions.ask` on the destructive git family.
 
 **INV4 — additive, never clobbers local evolution outside the central frontmatter keys
-(`name`, and `description` when `config.language == "ko"`).**
+(`name`, and `description` when `config.language == "ko"`) and the persona marker region
+(when `config.language == "ko"`).**
 `init` merges and never overwrites an existing agent file; `update` merges and does not
-overwrite outside those two keys. Locally-grown artifacts — specialized agents (**except
-the frontmatter key `name`, and `description` when `config.language == "ko"` — those are
-refreshed from central through `update`'s confirm gate**), ⑥ knowledge, `docs/standards/*`, the overlay, the evolution ledger,
-`gates/rules/boundaries.md`, `gates/dismissed.md` — are LOCAL-owned and never refreshed from
-central. `CLAUDE.md` merges by marker, `settings.json` by key union, `.gitignore` by
+overwrite outside those two keys and the region between `<!-- guild:persona:start -->` and
+`<!-- guild:persona:end -->`. Locally-grown artifacts — specialized agents (**except
+the frontmatter key `name`, `description` when `config.language == "ko"`, and the
+`persona:start`~`end` region when `config.language == "ko"` — those are refreshed from
+central through `update`'s confirm gate**), ⑥ knowledge, `docs/standards/*`, the overlay, the evolution ledger,
+`gates/rules/boundaries.md`, `gates/dismissed.md`, `gates/scripts/local/*` (**repo-local gate
+extensions** — the supported home for a check the central script does not have) and any
+`gates/rules/*.md` other than the central `secrets.md`/`verification.md` — are LOCAL-owned and
+never refreshed from central. `CLAUDE.md` merges by marker, `settings.json` by key union, `.gitignore` by
 appended negation, an existing `pre-commit` hook by chaining to `pre-commit.local`.
 
 **INV5 — nothing leaves the machine un-sanitized.**

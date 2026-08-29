@@ -636,7 +636,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # Raise the floor whenever checks are added on purpose.
 BOARD_MIN_CHECKS=75
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
-  echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 $BOARD_MIN_CHECKS건) —"
+  echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
   exit 1
 fi

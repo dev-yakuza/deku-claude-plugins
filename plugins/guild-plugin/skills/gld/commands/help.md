@@ -41,7 +41,8 @@ Commit gate (deterministic enforcement layer)
 Setup
   /gld init [lang]        Analyze & onboard → harness + Guild (agents) + standards + readiness audit (gaps → guild:harness issues) (one-time)
   /gld config [flags]     Show / adjust Guild settings — --language=<code> | --gates=<on|off> (commit gate) | --evolve-nudge=<on|off> (the review-stage "run evolve" reminder)
-  /gld update [--check]   Adopt newer central Guild improvements, preserving local evolution (also reinstalls the git hook after a fresh clone)
+  /gld update [--check|--migrate-personas]
+                          Adopt newer central Guild improvements, preserving local evolution (also reinstalls the git hook after a fresh clone)
 
 Develop (spine: analyze → design → execute → test → qa)
   /gld plan <doc|issue>   Intake (upstream of the spine): decompose a design-doc FILE or an epic ISSUE into a dependency-ordered dev-unit backlog. Default dry-run; --create to make the issues (file → flat + area labels; issue → children under it for /gld dev orchestration)

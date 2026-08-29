@@ -363,25 +363,29 @@ created**, not the whole directory (a pre-existing file without markers would ot
 `init` forever). One Bash call:
 
 ```bash
-for f in <the agent files this run wrote>; do
-  printf '%s ' "$f"
-  awk '
-    /<!-- guild:persona:start -->/ {s++; sl=NR}
-    /<!-- guild:persona:end -->/   {e++; el=NR}
-    /<!-- guild:persona:habits -->/{h++; hl=NR}
-    /^## /                          {if (el && NR>el) below++; last=NR}
-    /^# /                           {h1++}
-    END { printf "markers=%d/%d/%d order=%d below_end=%d h1=%d\n",
-                 s,e,h, (sl<el && el<hl), below, h1 }
-  ' "$f"
-done
+python3 <<SKILL_DIR>>/commands/atoms/persona_migrate.py --mode check --anchor '<the project-specialization heading this run rendered>' --file <the agent files this run wrote>
 ```
 
-Every file must report `markers=1/1/1 order=1 below_end=2 h1=1`. Anything else means the
-markers did not survive localization — fix that file before reporting success, because
-`update` keys on exactly this shape and a persona without the pair is one `update` can
-never refresh. ⚠ The headings are localized and the markers are not: check the **markers**
-and the **count** of `## ` headings below the end marker, never the heading text.
+⚠ **If that list is empty — every agent file already existed and this run wrote none — do not run
+the command.** `--file` with no argument is a usage error (exit 64) on a healthy repo.
+
+Every line must start with `ok:`; the script exits `3` if any is a `FAIL:`. **Not every FAIL is a
+marker problem.** Do not re-derive the cases here — `update.md`'s rule 3b carries the full table
+mapping every `FAIL:` string to its cause and its repair, and it is kept in step with the script.
+Read the values against that table. The init-time shapes it covers that matter most:
+`start at P, fence2=-, …` the closing YAML fence was lost · `anchor x0` **the localized
+specialization heading was dropped or renamed, and the markers are fine** · `h1=-`/`h1 x0` the
+translated H1 was lost · `anchor x2` the heading was written twice · `marker appears 0 time(s)`
+a marker line was translated or deleted — fix that file before reporting success,
+because `update` keys on exactly this shape and a persona without the pair is one `update`
+can never refresh. ⚠ The headings are localized and the markers are not — which is exactly why
+`--anchor` is passed rather than compiled in. The script **does** compare the first `## ` below the
+end marker against the heading you name, and that comparison is the only check that catches a
+mis-placed end marker. So a `FAIL: first heading below end is …` means one of **three** things: you
+passed the wrong `--anchor`, the localized specialization heading itself was dropped or renamed,
+or the markers did not survive localization. Check the argument first, then the heading, then the markers. ⚠ `--anchor` is **required here even for `ko`**: this check runs on
+files `init` just localized, so pass the heading you actually rendered. Omitting it works by
+accident in a `ko` repo and fails every file in any other language.
 
 Also confirm the settings file actually parses (its own Bash call — a malformed `settings.json`
 silently disables the gate hooks it carries):
@@ -404,7 +408,7 @@ Report what was installed:
 - Harness: `CLAUDE.md` (created or merged), `.claude/settings.json` (created or merged), `.claude/guild/` state skeleton. Note whether `.gitignore` was reconciled (P2 step 0) so `.claude/` harness is committable — and confirm the harness is visible to git (`git status` shows it), since ignored files silently look "not created".
 - ⑥ Knowledge baseline: `.claude/guild/knowledge/index.md` + `facts/` seeded from the scans (hotspots · co-change · coupling). Note the seeded slice count; `evolve` grows it from here.
 - 강제층 게이트 (M3): `.claude/guild/gates/scripts/gate_precommit.py`, wired three ways — `.git/hooks/pre-commit` (**authoritative**), `PreToolUse(Bash)` (early warning), `PreToolUse(Edit|Write)` (control-file guard). Blocks committing secrets / weakening verification. Off-switch: config `gates.enabled` (or `/gld config`). **State the two honest limits**: `.git/hooks/` is not tracked, so a fresh clone needs `/gld update` to reinstall the hook; and `git commit --no-verify` skips it. If step 6 found a non-empty `core.hooksPath`, say that the authoritative layer is **not** active and what to do about it.
-- Labels: 10 `guild:*` (analyze, design, execute, test, qa, done, child, children, harness, needs-human) (or "skipped — no GitHub repo").
+- Labels: 11 `guild:*` (analyze, design, execute, test, qa, done, child, children, harness, needs-human, sprint) (or "skipped — no GitHub repo").
 - Readiness audit (P3.5): report at `.claude/guild/readiness-report.md` — summarize the gap counts (BLOCKER/MAJOR/MINOR) and list any `guild:harness` issues created.
 - Next steps: "`/gld dev <issue>` to develop a GitHub Issue end-to-end (including any `guild:harness` remediation issues). `/gld status <issue>` to check progress. Day-1 agents are intentionally rough — they improve as you work (evolve, a later milestone)."
 
@@ -415,6 +419,6 @@ Report what was installed:
 `init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is everything P2 creates: `config.json` + 16 role agents (full roster) + 5 standards + `docs/adr/0000-template.md` + `docs/specs/.gitkeep` + CLAUDE.md guild block + settings.json allowlist **+ both PreToolUse gate hooks + an executable `.git/hooks/pre-commit`** + the `guild:*` labels created by P2 §7 (currently 11) + `knowledge/` baseline (index.md + facts/) + `gates/` (gate_precommit.py + rules + dismissed.md + findings.json) + `evolution-log.md` + `overlay/.gitkeep` + `.claude/guild/.gitignore` + `memory/.gitkeep`. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
 
 ## Hard rules (safety)
-- **Additive only** (INV4): existing files are merged/preserved, never clobbered. CLAUDE.md via markers; settings.json via key union; existing `docs/standards/*` and `.claude/agents/*` are not overwritten.
+- **Additive only** (INV4): existing files are merged/preserved, never clobbered. This stays true of `init` without exception — it never rewrites an agent file it did not create. Marker-based merging of a persona's central region is `update`'s job, not this command's. CLAUDE.md via markers; settings.json via key union; existing `docs/standards/*` and `.claude/agents/*` are not overwritten.
 - **Read-only scans** (P1) — no code changes during analysis.
 - All Bash per `_bash_rules.md`; all file bodies via the Write/Edit tools.

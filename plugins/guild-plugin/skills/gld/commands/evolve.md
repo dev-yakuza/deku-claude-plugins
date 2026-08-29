@@ -177,8 +177,10 @@ Each proposal states, in ≤ ~500 chars (context budget):
   - **hire** = add a `.claude/agents/<role>.md` (canonical descriptive name) + add to `roles`. ⚠ Give it
     the **habits section only** — the `## ` heading plus `<!-- guild:persona:habits -->`. Do **not** add
     a `persona:start`/`end` pair: that pair declares a central-owned region, and a hired file's body is
-    local prose that did not come from a template. `update` reports a file without the pair as pending
-    migration and leaves it alone, which is the correct outcome here.
+    local prose that did not come from a template. `update` leaves it alone, which is the correct
+    outcome — but it must not be *counted* as pending migration: that reads as backlog and the
+    remedy it prints (`--migrate-personas`) refuses the file (`HITL(not-from-init)`). `update`
+    reports these under **hired (local body, no central region)**, a steady state with no action.
   - **retire** = **reversible archive, NOT delete** — move `.claude/agents/<role>.md` → `.claude/guild/archive/agents/<role>.md` (committed, so it is auditable and **restorable**) and drop the name from `config.json roles`.
   - **replace** = archive the old role + hire the new.
   - ⚠ **Knowledge survives retirement**: ⑥ facts are **org-shared** (`.claude/guild/knowledge/`) and are **never removed** when a role retires — a retiring role takes only its own ③ habit (its agent file, now archived) and ④ episodes; the discovered code knowledge stays for the remaining org (this is why retirement is safe — no knowledge loss). **Restore** = move the file back from `archive/agents/` + re-add to `roles`.
@@ -242,6 +244,15 @@ later. So before an item reaches the human, check where it would land:
   patch would touch. If you cannot find it, present the item unchanged and say so.
 - **If the file has a `persona:start`/`end` pair** and the line falls between them → re-target the
   item to sit below `<!-- guild:persona:habits -->` instead, and present *that* version.
+  ⚠ **If there is more than one habits marker, take the topmost first, then apply the order
+  check below to that one** — the two rules compose in that order and only in that order.
+  ⚠ **Check that the habits marker is below `persona:end` before re-targeting to it.** If it is
+  above — a shape `--migrate-personas` refuses and `update`'s rule 3b reports as `marker order` —
+  then "below the habits marker" is still inside the central region, and re-targeting there writes
+  the habit into exactly the span the next `update` replaces. That is the loss this gate exists to
+  prevent, arrived at by obeying the gate. In that case do not re-target: present the item
+  unchanged, say the file's markers are out of order, and point at `/gld update` (its rule 3b
+  names the repair).
 - **If the file has no pair** (every repo initialized before this shipped) → re-target unless the
   line is already below the habits marker or inside the project-specialization section (`##
   프로젝트 특화` in `ko`, its localized equivalent otherwise). That section is where `/gld audit`
@@ -254,6 +265,10 @@ later. So before an item reaches the human, check where it would land:
   to `contribute-candidates` instead of writing it anywhere. The substring test is a proxy and will
   mis-sort some items — it errs toward asking, which costs one question.
 - **More than one habits marker** → use the topmost; report the duplicate.
+- **If the file has no markers at all**, mention `/gld update --migrate-personas` once, alongside
+  the item — the human is already looking at that persona, which is the cheapest moment to draw
+  the boundary. Do not block on it: the item still gets presented and applied to the habits
+  section either way.
 
 ⚠ **Re-targeting is not `reject`.** It does not touch the skip-list — the item is still presented and
 the human still decides. `reject` (step 3) means declined-stays-declined; this is a correction of

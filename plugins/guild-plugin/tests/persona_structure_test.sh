@@ -109,6 +109,27 @@ for name in sorted(f for f in os.listdir(AGENTS) if f.endswith(".md")):
     else:
         print(f"{name}\tCASE5\tanchor={len(anc)} h1={len(h1)} order={h1[0] < anc[0] if (anc and h1) else '-'}")
 
+    # 7 — the habits block is complete: the marker, and a placeholder bullet under it.
+    #     `evolve` deletes that bullet when it writes the first real habit, and `audit`/
+    #     `monitoring` exclude it from their day-1-boilerplate verdict — both key on a line
+    #     that has to be there to begin with. Cases 1-6 all pass with it missing.
+    hb = [i for i, l in enumerate(lines, 1) if l.strip() == HABITS]
+    if len(hb) == 1:
+        # Skip the `<!-- init: … -->` instruction comment: it is addressed to init, which
+        # deletes it after localizing the heading, so it is not the placeholder bullet.
+        after = [l for l in lines[hb[0]:] if l.strip() and not l.lstrip().startswith("<!--")]
+        print(f"{name}\tCASE7\t" + ("ok" if after and after[0].lstrip().startswith("- ")
+                                     else f"no placeholder bullet below habits marker: {(after[0][:30] if after else '(nothing)')}"))
+    else:
+        print(f"{name}\tCASE7\tskipped — habits marker malformed")
+
+    # 8 — the two frontmatter keys `update` refreshes centrally must exist to be refreshed.
+    #     A template that lost `name:` or renamed `description:` makes the S3a merge a no-op
+    #     for that role, silently — nothing downstream reports a key that was never there.
+    fm = lines[1:fence[1] - 1] if len(fence) >= 2 else []
+    have = [k for k in ("name:", "description:") if any(l.startswith(k) for l in fm)]
+    print(f"{name}\tCASE8\t" + ("ok" if len(have) == 2 else f"frontmatter has {have}"))
+
     # 6 — persona:start sits below the closing frontmatter fence AND below the H1.
     #     Without this a start marker placed above the frontmatter passes 1/2/3/4/5 and then
     #     update replaces the YAML fence with body text — the sub-agent stops registering.
@@ -132,9 +153,9 @@ echo "  PASS=$PASS FAIL=$FAIL"
 # partway (or the heredoc is broken by an edit) the `while` loop simply reads fewer lines and
 # the suite reports FAIL=0 over checks that never ran — "green over a hole", the exact shape
 # this file exists to prevent. 16 templates x 6 cases = 96.
-MIN_CHECKS=96
+MIN_CHECKS=128
 if [ "$((PASS + FAIL))" -lt "$MIN_CHECKS" ]; then
-  echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 $MIN_CHECKS건) —"
+  echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${MIN_CHECKS}건) —"
   echo "      python 블록이 도중에 죽었거나 템플릿 수가 줄었을 가능성이 큽니다."
   exit 1
 fi
