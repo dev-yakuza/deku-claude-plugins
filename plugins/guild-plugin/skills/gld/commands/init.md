@@ -15,10 +15,10 @@ These govern every file init writes — role agents, standards, CLAUDE.md, confi
 1. **Language = config `language` (`$1`).** Every human-readable string — prose, headings, frontmatter `description`, list items, table cells — MUST be in the target language. The templates are written in **Korean as the reference**:
    - `ko` → use the template's language as-is (just fill placeholders).
    - `ja` / `en` → **translate all human-readable text** (headings, prose, frontmatter `description`) into that language.
-   - Keep **unchanged** regardless of language: frontmatter keys (`name`, `model`), YAML/JSON structure, markers (`<!-- guild:* -->`, `<!-- guild:start -->`/`<!-- guild:end -->`), file paths, and commands/code.
+   - Keep **unchanged** regardless of language: frontmatter keys (`name`, `model`), YAML/JSON structure, markers (`<!-- guild:* -->`, `<!-- guild:start -->`/`<!-- guild:end -->`, and the persona pair `<!-- guild:persona:start -->`/`<!-- guild:persona:end -->` plus `<!-- guild:persona:habits -->`), file paths, and commands/code.
    - **CLAUDE.md is included in this rule** — it must be in the config language, never English-by-default.
 2. **No raw placeholders.** Never leave a literal `{{TOKEN}}` in a generated file. Fill it from scans/interview; if genuinely unknown, replace with an explicit localized note — e.g. `(미정 — 추후 확정)` (ko) / `(TBD)` (en). **Before writing each file, scan the rendered text for `{{` / `}}` and resolve any remaining.**
-3. **Strip authoring hints.** Remove all template instruction scaffolding from the final file: guidance HTML comments (`<!-- init: … -->`, `<!-- 이 프로젝트가 … -->`) and `←`-style inline notes. Keep only real content markers (`guild:*`, `guild:start`/`end`).
+3. **Strip authoring hints.** Remove all template instruction scaffolding from the final file: guidance HTML comments (`<!-- init: … -->`, `<!-- 이 프로젝트가 … -->`) and `←`-style inline notes. Keep only real content markers (`guild:*`, `guild:start`/`end`, `guild:persona:start`/`end`/`habits`).
 4. **Well-formed Markdown.** Structure enumerations as short bullets or **nested sub-bullets** (`  - `) — do NOT cram a long parenthetical list (e.g. "화면(a, b, c … 등 20개)") into one run-on bullet. One idea per line. Headings stay clean and localized (no bracketed English tags like `[PROJECT SPECIALIZATION]` in a Korean file).
 
 ---
@@ -177,9 +177,21 @@ For **each of the 16** roles (`leader`, `tech-lead`, `developer`, `tester`, `pro
   - Genuinely shared tokens, unchanged: `{{PROJECT_NAME}}` (all 16), `{{DOMAIN}}`, `{{STACK}}`, `{{VALUES}}`, `{{ARCHITECTURE}}`, `{{LEADER_NOTES}}`, `{{TEST_CMD}}`, `{{LINT_CMD}}`, `{{TYPECHECK_CMD}}`, `{{TEST_FRAMEWORK}}`, `{{TEST_LOCATION}}`, `{{E2E_SETUP}}`. (`{{E2E_CMD}}`/`{{BUILD_CMD}}` appear only in `verification.md`/`CLAUDE.md.tmpl`, not in any agent template.) ⚠ **This covers the 16 agent templates only, NOT the 5 standards templates** (step 3 below) — those introduce their own, separate placeholder set (`{{MISSION}}`, `{{VISION}}`, `{{VALUES}}`, `{{GOALS}}`, `{{NON_GOALS}}`, `{{CODE_STYLE}}`, `{{COMMIT_STYLE}}`, `{{TEST_CONVENTION}}`, `{{PR_CONVENTION}}`, `{{MUST_PASS}}`, `{{QUALITY_EXPECTATIONS}}`, `{{TRADEOFFS}}`, `{{VERIFY_RULES}}`, `{{DOD}}`, `{{DIRECTORY_MAP}}`, `{{SEAMS}}`, `{{PITFALLS}}`), filled per step 3's own generic "content placeholders from scans + interview" instruction — do not assume this list is exhaustive across every templated file init writes.
   - `{{TEST_CMD}}`/`{{LINT_CMD}}`/`{{TYPECHECK_CMD}}` use the **normalized** commands from config (no `$(...)`/`&&`; render an array as a comma- or slash-separated list of the simple steps).
   - **Every `{{*_HOTSPOTS}}` token MUST be filled from the hotspot-scan (scan 6) findings** — list the concrete top bug-hotspot files/areas (with their approximate `fix:` frequency) and any strong co-change groups. This is evidence from git history, not a guess — do NOT reduce such a line to "규칙 미정". The `_HOTSPOTS` suffix is the mechanical handle for this rule and is **exactly co-extensive** with the five roles it applies to, so you can check your own work in one call: `grep -l '_HOTSPOTS}}' .claude/agents/*.md` must come back empty once they are filled, and the templates carrying them are precisely `tech-lead`/`developer`/`tester`/`qa`/`performance`. (dba's data-hotspot slot is deliberately *not* named `_HOTSPOTS` — this rule does not cover it, and the suffix must keep matching the rule exactly.) (Hidden *rules/intent* may be "(미정 — evolve가 채움)", but **hotspots are known and must appear.**) Example: "핫스팟: `db_helper.dart`(fix 최다)·`sync_data_controller`·`iap_controller`·`tts_controller` — 변경 시 회귀 주의".
+  - **Carry the three persona markers through verbatim** — `<!-- guild:persona:start -->`,
+    `<!-- guild:persona:end -->`, `<!-- guild:persona:habits -->`. They are never translated and
+    never dropped: `update` replaces exactly the region between the first two, and the migration
+    path anchors on them. A template whose markers did not survive is a persona `update` can
+    never refresh.
+  - **The text BETWEEN `persona:start` and `persona:end` is localized, not rewritten.** Translate
+    it for `ja`/`en`; do not reword, reorder or trim it for `ko`. That region is central-owned —
+    `update` overwrites it wholesale, so any local improvement made here is lost on the next run.
+    Put repo-specific content in 프로젝트 특화 (below the end marker) instead.
+  - **`## 역할 습관` is localized like any other heading, but its marker stays.** Fill the section
+    with the single "(아직 없음 …)" line from the template, localized; `/gld evolve` grows it from
+    there.
   - Fill the specialization section concretely — this is what makes the role *this repo's* senior, not a generic shell. Apply the **Output conventions** above: no raw `{{...}}` (use a localized "(미정)" note if unknown), structure enumerations as nested sub-bullets, and localize the heading (the template's `프로젝트 특화` heading stays localized — never emit `[PROJECT SPECIALIZATION]`).
   - **Not-applicable specialists**: a participation role the repo genuinely never needs (e.g. `dba`/`i18n`/`designer` for a single-language headless library) still gets **installed**, but its 프로젝트 특화 section is filled with a localized "(해당 없음 — 이 레포에 <해당 영역> 없음)" per that template's authoring hint. Installing it is cheap and lets `evolve` promote it later; the leader simply won't convene it. Do NOT skip creating the file.
-- Write the result to `.claude/agents/<role>.md` (create; if a same-named agent already exists, see Merge rules below).
+- Write the result to `.claude/agents/<role>.md`. **If a file of that name already exists, do not touch it — report it and move on.** `init` never merges an agent file; that is `update`'s job (it replaces the persona marker region and refreshes the central frontmatter keys, leaving everything else alone). ⚠ This line used to say "see Merge rules below" and there was no such section.
 
 Static copy + specialization only — no HR (hire/retire/promote) in M1. The roster is installed as-is; growing/pruning it is `evolve`.
 
@@ -345,6 +357,31 @@ grep -rn "{{" .claude/agents docs/standards CLAUDE.md .claude/settings.json
   explicit localized note (`(미정 — 추후 확정)` / `(TBD)`). Re-run the grep until it is empty.
   Report in P4 which files needed a second pass — a token that survived the first write is a
   signal about that template, worth a `/gld contribute` flag if it keeps happening.
+
+Then confirm the persona skeleton survived the write — **only for the agent files this run
+created**, not the whole directory (a pre-existing file without markers would otherwise trap
+`init` forever). One Bash call:
+
+```bash
+for f in <the agent files this run wrote>; do
+  printf '%s ' "$f"
+  awk '
+    /<!-- guild:persona:start -->/ {s++; sl=NR}
+    /<!-- guild:persona:end -->/   {e++; el=NR}
+    /<!-- guild:persona:habits -->/{h++; hl=NR}
+    /^## /                          {if (el && NR>el) below++; last=NR}
+    /^# /                           {h1++}
+    END { printf "markers=%d/%d/%d order=%d below_end=%d h1=%d\n",
+                 s,e,h, (sl<el && el<hl), below, h1 }
+  ' "$f"
+done
+```
+
+Every file must report `markers=1/1/1 order=1 below_end=2 h1=1`. Anything else means the
+markers did not survive localization — fix that file before reporting success, because
+`update` keys on exactly this shape and a persona without the pair is one `update` can
+never refresh. ⚠ The headings are localized and the markers are not: check the **markers**
+and the **count** of `## ` headings below the end marker, never the heading text.
 
 Also confirm the settings file actually parses (its own Bash call — a malformed `settings.json`
 silently disables the gate hooks it carries):

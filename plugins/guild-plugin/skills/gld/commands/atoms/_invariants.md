@@ -47,9 +47,12 @@ rolling this back**: `sprint board --reset` needs `owner`/`number`/field names o
 Guild path left to reach it. `--reset`, then null the config.
 *Mechanically*: one commit per evolve run; `permissions.ask` on the destructive git family.
 
-**INV4 — additive, never clobbers local evolution.**
-`init` and `update` merge; they do not overwrite. Locally-grown artifacts — specialized
-agents, ⑥ knowledge, `docs/standards/*`, the overlay, the evolution ledger,
+**INV4 — additive, never clobbers local evolution outside the central frontmatter keys
+(`name`, and `description` when `config.language == "ko"`).**
+`init` merges and never overwrites an existing agent file; `update` merges and does not
+overwrite outside those two keys. Locally-grown artifacts — specialized agents (**except
+the frontmatter key `name`, and `description` when `config.language == "ko"` — those are
+refreshed from central through `update`'s confirm gate**), ⑥ knowledge, `docs/standards/*`, the overlay, the evolution ledger,
 `gates/rules/boundaries.md`, `gates/dismissed.md` — are LOCAL-owned and never refreshed from
 central. `CLAUDE.md` merges by marker, `settings.json` by key union, `.gitignore` by
 appended negation, an existing `pre-commit` hook by chaining to `pre-commit.local`.

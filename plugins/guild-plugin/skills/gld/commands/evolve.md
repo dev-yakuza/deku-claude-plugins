@@ -101,7 +101,7 @@ Converge the scan outputs into ranked themes. This is inline leader judgment (no
    Keep the union of evidence; do not double-count frequency.
 
 2. **Cluster into themes** and route each to its evolution target:
-   - **agent friction** (rediscovery, repeated tool-error, rework) → ③ habit (a role's `.claude/agents/<role>.md`) or ⑥ fact (`.claude/guild/knowledge/`).
+   - **agent friction** (rediscovery, repeated tool-error, rework) → ③ habit (a role's `.claude/agents/<role>.md`, **below its `<!-- guild:persona:habits -->` marker**) or ⑥ fact (`.claude/guild/knowledge/`).
    - **gate friction** (repeated lint/type failure, committed secret, a correction that recurs) → **fail-to-rule** → a new rule that catches what tests couldn't (quality-tool evolution). **Two routes by scope:**
      - **A · native boundary rule** — express it as a `- forbid: <glob> imports <substr>` line in `.claude/guild/gates/rules/boundaries.md`. **evolve applies it directly** (HITL), starting `status: draft` (WARN-only until confirmed — INV6); the Guild gate enforces it. Self-contained, low blast radius.
      - **B · external lint/Semgrep rule** — when the check needs a real linter (e.g. "no hardcoded widget text-color literal, use CustomTheme token"): **run the tool to self-verify** (`_data_sufficiency`-style evidence). *Tool present + 0 existing violations* → evolve applies the config rule directly (verified by the run). *Tool missing, OR existing violations found* → this exceeds a micro-apply (needs tool install and/or multi-file fixes) → **create a GitHub issue** (`/gld dev` will implement+test+review it: "[Guild] adopt/configure `<tool>` + rule `<X>` + fix N existing violations in `<files>`") — human confirms issue creation (same pattern as audit→refactor issue). ⚠ Never leave CI red; never weaken an existing lint rule to make room (INV2).
@@ -161,8 +161,24 @@ Present a **ranked proposal list** to the human. For each Tier A/B theme, propos
 > **patch** (tweak an existing line/section) **> umbrella-extend** (widen an existing rule/habit to cover the case) **> reference-add** (add a fact/pointer) **> new** (create a new rule/role — last resort).
 
 Each proposal states, in ≤ ~500 chars (context budget):
-- **Target file** the human should edit — a role habit → `.claude/agents/<role>.md` (③); a decided rule → `docs/standards/…` (②); a **discovered code fact** → `.claude/guild/knowledge/facts/<area>.md` (⑥); a **repeated command sequence** → `.claude/guild/tools/<name>.sh` (Tool axis) plus the one-line habit pointer to it; an **HR change** → `config.json` `roles` + the agent file. **HR mechanics:**
-  - **hire** = add a `.claude/agents/<role>.md` (canonical descriptive name) + add to `roles`.
+- **Target file** the human should edit — a role habit → `.claude/agents/<role>.md`, **below its `<!-- guild:persona:habits -->` marker** (③); a decided rule → `docs/standards/…` (②); a **discovered code fact** → `.claude/guild/knowledge/facts/<area>.md` (⑥); a **repeated command sequence** → `.claude/guild/tools/<name>.sh` (Tool axis) plus the one-line habit pointer to it; an **HR change** → `config.json` `roles` + the agent file. **HR mechanics:**
+  - ⚠ **Where a habit goes, and how to write it.** The region between `<!-- guild:persona:start -->`
+    and `<!-- guild:persona:end -->` is central-owned — `update` replaces it wholesale, so anything
+    written there is lost on the next update. Habits go **below `<!-- guild:persona:habits -->`**.
+    - **If the file has no habits marker** (every repo initialized before this shipped), create the
+      section at the end of the file: a `## ` heading rendered in `config.language` — "역할 습관" in
+      `ko` — followed by the marker line, which is **never** localized. If there is more than one
+      habits marker, use the topmost and report the duplicate.
+    - **Name the anchor in the lead.** Start a habit bullet with `**<중앙 불릿 이름> — <한 줄 제목>**:`,
+      naming the central bullet it refines. Prose narrows by succession — a later sentence qualifies
+      an earlier one — so a habit that says which bullet it attaches to reads as a refinement of that
+      bullet rather than a free-floating rule. This is what keeps a habit out of the central region
+      without losing the connection to it.
+  - **hire** = add a `.claude/agents/<role>.md` (canonical descriptive name) + add to `roles`. ⚠ Give it
+    the **habits section only** — the `## ` heading plus `<!-- guild:persona:habits -->`. Do **not** add
+    a `persona:start`/`end` pair: that pair declares a central-owned region, and a hired file's body is
+    local prose that did not come from a template. `update` reports a file without the pair as pending
+    migration and leaves it alone, which is the correct outcome here.
   - **retire** = **reversible archive, NOT delete** — move `.claude/agents/<role>.md` → `.claude/guild/archive/agents/<role>.md` (committed, so it is auditable and **restorable**) and drop the name from `config.json roles`.
   - **replace** = archive the old role + hire the new.
   - ⚠ **Knowledge survives retirement**: ⑥ facts are **org-shared** (`.claude/guild/knowledge/`) and are **never removed** when a role retires — a retiring role takes only its own ③ habit (its agent file, now archived) and ④ episodes; the discovered code knowledge stays for the remaining org (this is why retirement is safe — no knowledge loss). **Restore** = move the file back from `archive/agents/` + re-add to `roles`.
@@ -213,6 +229,41 @@ Each lens returns `{verdict: keep|drop|edit, reason, (edit: suggested change)}` 
 
 ## Phase 5 — Approval gate (P5 — per-item HITL · INV1)
 
+**Step 0 — persona boundary re-targeting (before presenting anything).** A persona file has a
+central-owned region between `<!-- guild:persona:start -->` and `<!-- guild:persona:end -->` that
+`update` replaces wholesale. A habit written there is lost on the next update — silently, months
+later. So before an item reaches the human, check where it would land:
+
+- **Scope**: items that add, change, **or delete a body line** in `.claude/agents/<role>.md`. Not
+  frontmatter-only items (model-tier HR), not `hire` (new file), not pointer updates elsewhere.
+  ⚠ Deletion and in-place change both count. Welding — a habit edited *into* an existing central
+  bullet — changes a line without adding one, and that is the common shape, not the rare one.
+- **Locate it yourself.** The proposal carries a target *file*, not a target line. Find the line the
+  patch would touch. If you cannot find it, present the item unchanged and say so.
+- **If the file has a `persona:start`/`end` pair** and the line falls between them → re-target the
+  item to sit below `<!-- guild:persona:habits -->` instead, and present *that* version.
+- **If the file has no pair** (every repo initialized before this shipped) → re-target unless the
+  line is already below the habits marker or inside the project-specialization section (`##
+  프로젝트 특화` in `ko`, its localized equivalent otherwise). That section is where `/gld audit`
+  routes day-1 boilerplate for evolve to grow, so leave it reachable.
+- **Do not re-target a proposal that contradicts the central line.** If the proposed text keeps the
+  central line as a substring — a pure addition or a qualifier appended — it is a refinement: 
+  re-target it. If it deletes or replaces words of the central line, it may be *negating* the norm
+  rather than narrowing it, and prose cannot hold both. Present that one to the human with the
+  question stated plainly ("좁히는 것입니까, 아니면 뒤집는 것입니까?"); if it is a negation, route it
+  to `contribute-candidates` instead of writing it anywhere. The substring test is a proxy and will
+  mis-sort some items — it errs toward asking, which costs one question.
+- **More than one habits marker** → use the topmost; report the duplicate.
+
+⚠ **Re-targeting is not `reject`.** It does not touch the skip-list — the item is still presented and
+the human still decides. `reject` (step 3) means declined-stays-declined; this is a correction of
+*where*, made before the human sees it.
+
+⚠ **This gate cannot live in Phase 6.** By the time step 3 validates, step 2 has already edited the
+file, and the only per-item undo there is `git checkout -- <file>` — which also discards every other
+habit this run applied to the same file (a run applies 2–5 items). Phase 6 also cannot attribute a
+violating line to one item, because its diff is cumulative for the run.
+
 Walk the **panel-surviving** proposals **one item per turn** — this is a sequential conversation, not a batch listing. For each item, in order (highest-priority first):
 1. Present **only that one item**, in **plain language** (per the rule at the top of this file — no "Tier", "ladder rung", "INV", "Phase", or bare `evidence:`/`lens:` fields). Lead with an explicit, standardized **recommendation label** derived from the lens verdicts — do not bury it in prose:
    - all lenses `keep` (with no `edit` field attached — see below) → **`패널 권장: 승인`**
@@ -243,6 +294,11 @@ git status --porcelain
 ⚠ **Why it is re-checked here and not trusted from Phase 0**: the default invocation ("propose, then ask") never runs Phase 0 step 4 at all, and on the `--apply` path Phase 5's per-item conversation can take arbitrarily long while the human edits files in another window. Step 1's backup *is* the tree's pre-state and step 4's rollback is `git checkout -- <file>` — against a dirty tree that would discard the human's unrelated in-flight work, which is exactly the harm INV3 exists to prevent. An auto-stash was deliberately **not** chosen: silently moving a human's work is a bigger surprise than stopping.
 
 For the accepted set, apply as **one reversible unit** (INV3). Per item:
+
+⚠ **Writing the first habit into a persona.** The habits section ships with one placeholder line —
+`- (아직 없음 — …)` in `ko`, localized elsewhere. **Delete that line and write in its place**; do not
+leave it above the real habit. `/gld audit` and `/gld monitoring` read a persona's boilerplate state,
+and a placeholder sitting above real content reports a grown role as still at day one.
 
 ⚠ **Multi-file items** (a hire/retire/replace HR item touches both the agent file *and* `config.json`'s `roles` field; a ⑥-fact proposal touches both `facts/<area>.md` *and* `index.md`; a tool-script proposal touches both the new script *and* a habit-pointer edit in the role's agent file): steps 1-4 below apply **independently, per constituent file** — back up, apply, and (on failure) roll back each file separately, not as an opaque single unit. A **retire** (an existing agent file's path disappearing, or moving to an archive path) is a pre-existing-file case for rollback purposes even though the net effect looks like a deletion — `git checkout -- <file>` restores it. Step 6's provenance stamp only applies to file formats that support a frontmatter/comment annotation (agent `.md`, ⑥ fact `.md`, standards `.md`) — skip it for `config.json` (pure JSON, no comment syntax); its change is already accounted for by the commit message and the ledger entry (Phase 7).
 

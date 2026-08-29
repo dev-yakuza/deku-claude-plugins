@@ -11,7 +11,7 @@
 | Memory | Store | This file? |
 |---|---|---|
 | semantic — **codebase facts** ("auth is coupled to session", "X co-changes with Y", "`disabledColor` token isn't mode-branched") | `.claude/guild/knowledge/` (⑥) | ✅ |
-| procedural — **habits** ("type-check before commit") | `.claude/agents/<role>.md` (③) | ❌ |
+| procedural — **habits** ("type-check before commit") | `.claude/agents/<role>.md` (③) — **below `<!-- guild:persona:habits -->`**, never between the `persona:start`/`end` pair (that region is central-owned and `update` replaces it) | ❌ |
 | episodic — **raw events** ("this run failed, human fixed") | `.claude/guild/memory/` (④, gitignored) | ❌ |
 | curated authority — charter, architecture, conventions | `docs/standards/` (②) | ❌ |
 

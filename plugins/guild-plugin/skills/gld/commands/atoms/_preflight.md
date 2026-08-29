@@ -26,7 +26,7 @@ All items are **best-effort**. No individual failure blocks the stage — log an
 
 ### Item 1: Guild config + role definitions (always)
 1. Read `.claude/guild/config.json` — note `language`, active `roles`, and any `gates`/automation flags. **`language` governs all human-readable output** this stage emits — its comments, discuss questions, narration, RESULT summaries, and artifact prose — **and every sub-agent prompt the leader spawns must carry that output-language instruction** (`_handoff.md` Section K; machine tokens stay ASCII).
-2. Read the role agent file(s) for the roles participating in this stage (`.claude/agents/<role>.md`). Their project-specialization section (`## 프로젝트 특화`, or its localized equivalent) carries stack/convention/hotspot facts the stage needs.
+2. Read the role agent file(s) for the roles participating in this stage (`.claude/agents/<role>.md`). Read **both** local sections: the project-specialization section (`## 프로젝트 특화`, or its localized equivalent) carries stack/convention/hotspot facts, and the section below `<!-- guild:persona:habits -->` carries the habits `/gld evolve` has grown for that role. Habits used to sit mixed into the body; they now have their own place, and a stage that reads only the specialization section would silently stop seeing them.
 
 **Failure**: config or agent files absent → this repo may not be initialized. Log "Guild not initialized (run /gld init)" and return that as a stage-level `FAIL` if the stage cannot proceed without them.
 
