@@ -194,7 +194,12 @@ case "$CMP" in
   *)    bad "ratelimit core is byte-identical to batch" "$CMP" ;;
 esac
 
-for M in selfdelete emptyguard arms ratelimit; do
+# ⚠ DERIVED, not a hardcoded list. `for M in selfdelete emptyguard arms ratelimit` was the
+# earlier form, and the instruction "add your new fence to the list" had nothing checking that
+# anyone had. A new fence must be balanced the moment it exists.
+# ⚠ Consequence, and it is the point: a fence string QUOTED in some other comment shows up here
+# as an unbalanced pair. Do not cite the fence text anywhere but the fence.
+for M in $(grep -o 'guild:supervisor-core:[a-z]*' "$TPL" | sed 's/.*://' | sort -u); do
   O="$(grep -c "# <!-- guild:supervisor-core:$M -->" "$TPL" || true)"
   C="$(grep -c "# <!-- /guild:supervisor-core:$M -->" "$TPL" || true)"
   if [ "$O" = "1" ] && [ "$C" = "1" ]; then
@@ -1165,7 +1170,12 @@ hasline "I: P2 writes blocked/needs-human"        'board_col "$ISSUE" blocked ne
 hasline "I: P3 refreshes before judging"          'refresh_dag_input || true'
 hasline "I: P3 has the split-children branch"     'board_col "$ISSUE" in_review split-children'
 hasline "I: P7 lives in cleanup, guarded"         'board_col "$ISSUE" blocked interrupted'
-hasline "I: P7 requires FINISHED -eq 0"           'if [ "$FINISHED" -eq 0 ]; then'
+# ⚠ THIS PIN WAS REWRITTEN (04-sprint-window.md §4.2b). `if [ "$FINISHED" -eq 0 ]; then` still
+# exists in `cleanup` — it now gates the counter flush and the halted marker — so the old pin
+# passes for the WRONG REASON. Pin P7's ACTUAL gate, which is the widened one.
+hasline "I: P7's gate is the ORIGINAL one — halt paths do not widen it" \
+        'if [ "$FINISHED" -eq 0 ]; then'
+hasline "I: the halted marker is still gated on FINISHED alone" 'if [ "$FINISHED" -eq 0 ]; then'
 hasline "I: writes are node-ID addressed (1 point, not 104)" 'gh project item-edit --id "$item" --project-id "$BOARD_PROJECT_ID" --field-id "$fid"'
 hasline "I: ids are resolved once per run"                   'board_resolve'
 lacksline "I: no name-addressed write survives"              '--field "$2" --value "$3"'
@@ -2090,6 +2100,875 @@ case "$I_NOF_OUT" in
   *'[OFF][0]'*) ok "I: no board config file -> board off, and silent (D2)" ;;
   *) bad "I: no board file accounting" "out=[$I_NOF_OUT]" ;;
 esac
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# §J. 실행 시간대 창 (04-sprint-window.md · 04-sprint-window-tests.md)
+# ═════════════════════════════════════════════════════════════════════════════
+# ⚠ T1–T11 은 이 절이 성립하기 위한 하네스 선행 조건이다. 대부분 리포에 없던 것이다.
+echo "== J. run window =="
+
+W_WORK="$WORK/win"; mkdir -p "$W_WORK/bin"
+
+# ── T2 · T3: 패스스루 date 스텁 + FAKE_HHMM 3파일 프로토콜 ──────────────────
+# ⚠ `$*` 매칭이다. `$1` 매칭이면 `date -j -f …` 처럼 포맷이 첫 인자가 아닌 호출을 놓친다.
+# ⚠ 패스스루가 필수다: 같은 컷 안에서 `date +%Y%m%d_%H%M%S`(TIMESTAMP)와 `date +%s`
+#    (RUN_START · board_last_write)가 돌고, 전부 `0830` 을 내면 원장과 로그가 오염된다.
+#    (`+%Y%m%d_%H%M%S` 는 `+%H%M` 을 부분문자열로 갖지 않으므로 위 글롭에 걸리지 않는다.)
+# ⚠ 3파일: `hhmm`(현재) · `hhmm.n`(읽은 횟수) · `hhmm.after`(임계 초과 후의 값). 대기를
+#    **탈출**시킬 수 있어야 §J 의 복원·재호출 검사가 관측된다.
+cat > "$W_WORK/bin/date" <<'DSTUB'
+#!/usr/bin/env bash
+case "$*" in
+  *+%H%M*)
+    N=$(( $(cat "$FAKE_HHMM.n" 2>/dev/null || echo 0) + 1 ))
+    printf '%s' "$N" > "$FAKE_HHMM.n"
+    AT="$(cat "$FAKE_HHMM.at" 2>/dev/null || echo 999999)"
+    if [ "$N" -gt "$AT" ] && [ -f "$FAKE_HHMM.after" ]; then
+      cat "$FAKE_HHMM.after"
+    else
+      cat "$FAKE_HHMM"
+    fi
+    ;;
+  *) exec /bin/date "$@" ;;
+esac
+DSTUB
+chmod +x "$W_WORK/bin/date"
+
+# ── T4: 예산 있는 no-op sleep ───────────────────────────────────────────────
+# ⚠⚠ 맨 no-op 은 위험하다. 종료하지 않는 변이(자정넘김을 `&&` 로 바꾸는 것)를 무한 스핀으로
+#    바꿔 스위트가 0% CPU 로 무기한 정지한다 — 변이 스윕을 전제한 스위트에는 상한이 필수다.
+cat > "$W_WORK/bin/sleep" <<'SSTUB'
+#!/usr/bin/env bash
+N=$(( $(cat "$SLEEP_N" 2>/dev/null || echo 0) + 1 ))
+printf '%s' "$N" > "$SLEEP_N"
+if [ "$N" -gt "${SLEEP_BUDGET:-5000}" ]; then
+  echo "SLEEP BUDGET EXCEEDED" >&2
+  kill -9 "$PPID"
+fi
+exit 0
+SSTUB
+chmod +x "$W_WORK/bin/sleep"
+
+cat > "$W_WORK/bin/gh" <<'GSTUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CALLS"
+if [ -f "$GH_FAIL" ]; then exit 1; fi
+case "$*" in *comments*--paginate*) printf '[]\n' ;; esac
+exit 0
+GSTUB
+chmod +x "$W_WORK/bin/gh"
+
+# ── T11: 창 케이스마다 별도 repo 디렉터리 ──────────────────────────────────
+# ⚠ `render.py` 에 `window` 인자를 **더하지 않는다** — `.board` 처럼 "지워야 하는 상태"를 하나
+#    더 만들 뿐이다. 앞 케이스의 `.window`(또는 ledger 의 낡은 state)가 남으면 뒤 케이스가
+#    영원히 자거나 남의 판정을 물려받는다.
+W_render() {   # W_render <tag> <window-file-content|__NONE__> ; sets W_REPO/W_CUT/W_CUTT
+  W_REPO="$W_WORK/repo_$1"; rm -rf "$W_REPO"; mkdir -p "$W_REPO/.claude/guild"
+  "$PY" "$WORK/render.py" "$TPL" "101 102" "" "$W_REPO" "$W_WORK/c_$1" "/tmp/dag.py" \
+    > "$W_WORK/full_$1.sh"
+  # T5: 창 블록 컷. ⚠ 닫는 펜스에서 끊으면 원장 `window` 재기록이 컷 밖으로 나간다.
+  sed -n '1,/^# Main loop/p' "$W_WORK/full_$1.sh" | grep -v '^trap ' > "$W_WORK/cut_$1.sh"
+  # T6: trap 보존 컷 — T5 와 정반대. FINISHED=1 삭제 변이는 EXIT 트랩이 발화해야 관측된다.
+  sed -n '1,/^# Main loop/p' "$W_WORK/full_$1.sh" > "$W_WORK/cutt_$1.sh"
+  W_CUT="$W_WORK/cut_$1.sh"; W_CUTT="$W_WORK/cutt_$1.sh"
+  if [ "$2" != "__NONE__" ]; then printf '%s' "$2" > "$W_REPO/.claude/guild/.gld-sprint-99.window"; fi
+}
+
+# ── T7: ensure_container 오버라이드 ────────────────────────────────────────
+# ⚠ §J 의 이탈 검사 전부에 필요하다. 프로브 repo 는 git 워크트리가 아니므로 진짜
+#    `ensure_container` 가 실패하고, 그러면 **정상 이탈이 halted:container-lost 로 보인다**.
+W_STUB_OK='ensure_container() { return 0; }'
+W_STUB_BAD='ensure_container() { return 1; }'
+
+W_src() {   # W_src <cut-file> <hhmm> <body> ; -> W_RC / W_OUT / W_CALLS / W_LEDGER
+  : > "$W_WORK/calls.txt"; : > "$W_WORK/n"
+  printf '%s' "$2" > "$W_WORK/hhmm"; printf '0' > "$W_WORK/hhmm.n"
+  rm -f "$W_WORK/hhmm.at" "$W_WORK/hhmm.after"
+  W_OUT="$(GH_CALLS="$W_WORK/calls.txt" GH_FAIL="$W_WORK/nogh" \
+    FAKE_HHMM="$W_WORK/hhmm" SLEEP_N="$W_WORK/n" SLEEP_BUDGET=2000 \
+    PATH="$W_WORK/bin:$PATH" "$SH" -c 'set -uo pipefail; . '"$1"'; '"$3" 2>&1)"
+  W_RC=$?
+  W_CALLS="$(cat "$W_WORK/calls.txt" 2>/dev/null || true)"
+  W_LEDGER="$(cat "$W_REPO/.claude/guild/.sprint-logs/99/dag/ledger.json" 2>/dev/null || true)"
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# §3.1 창 판정 — 순수 산술 (T5 컷)
+# ─────────────────────────────────────────────────────────────────────────
+W_render arith __NONE__
+
+# 1 · 2: 자정 넘김 분기와 비-자정 분기, 끝은 배타적
+W_probe() {   # W_probe <case> <start> <end> <hhmm> <IN|OUT>
+  W_src "$W_CUT" "$4" 'WIN_START='"$2"'; WIN_END='"$3"'; if in_window; then echo VERDICT_IN; else echo VERDICT_OUT; fi'
+  case "$W_OUT" in
+    *VERDICT_"$5"*) ok "$1" ;;
+    *) bad "$1" "$5" "out=[$(printf '%s' "$W_OUT" | tr '\n' '|')] rc=$W_RC" ;;
+  esac
+}
+for CASE in "2159 OUT" "2200 IN" "0959 IN" "1000 OUT"; do
+  set -- $CASE
+  W_probe "J1: 22:00-10:00 @ $1 = $2 (end is EXCLUSIVE, midnight crossing)" 2200 1000 "$1" "$2"
+done
+for CASE in "0859 OUT" "0900 IN" "1759 IN" "1800 OUT"; do
+  set -- $CASE
+  W_probe "J2: 09:00-18:00 @ $1 = $2 (non-crossing branch)" 900 1800 "$1" "$2"
+done
+
+# 3: 현재 시각을 08:xx / 00:xx 로 고정해도 **죽지 않고** 정답을 낸다.
+# ⚠ 이것이 `now=$(( 10#$(date …) ))` 의 `10#` 제거를 잡는 유일한 검사다. 대기 루프는
+#   08:00~09:59 를 **반드시** 통과하므로, 없으면 매일 밤 창이 열리기 직전에 결정적으로 죽는다.
+for CASE in "0830 OUT" "0000 OUT" "0008 OUT" "0900 IN"; do
+  set -- $CASE
+  W_src "$W_CUT" "$1" 'WIN_START=900; WIN_END=1800; if in_window; then echo VERDICT_IN; else echo VERDICT_OUT; fi'
+  if printf '%s' "$W_OUT" | grep -q 'value too great for base'; then
+    bad "J3: now=$1 does not die (10# on the CURRENT time)" "no octal death" "out=[$W_OUT]"
+  else
+    case "$W_OUT" in
+      *VERDICT_"$2"*) ok "J3: now=$1 survives and answers $2 (10# on the current time)" ;;
+      *) bad "J3: now=$1 answers $2" "$2" "out=[$(printf '%s' "$W_OUT" | tr '\n' '|')]" ;;
+    esac
+  fi
+done
+
+# 3b: 창 **문자열** 쪽의 10# — `08:00-09:00` / `00:00-09:00`
+W_render arith2 'window=08:00-09:00'
+W_src "$W_CUT" "0830" 'echo "PARSED S=$WIN_START E=$WIN_END TOK=$WIN_TOKEN"'
+case "$W_OUT" in
+  *"PARSED S=800 E=900 TOK=0800"*) ok "J3b: WIN_START/WIN_END use 10# (08:00-09:00 -> 800/900)" ;;
+  *) bad "J3b: 08:00-09:00 parses" "S=800 E=900" "out=[$(printf '%s' "$W_OUT" | tr '\n' '|')]" ;;
+esac
+W_render arith3 'window=00:00-09:00'
+W_src "$W_CUT" "0830" 'echo "PARSED S=$WIN_START E=$WIN_END TOK=$WIN_TOKEN"'
+case "$W_OUT" in
+  *"PARSED S=0 E=900 TOK=0000"*) ok "J3b: 00:00-09:00 parses (10#0000 -> 0, not an error)" ;;
+  *) bad "J3b: 00:00-09:00 parses" "S=0 E=900" "out=[$(printf '%s' "$W_OUT" | tr '\n' '|')]" ;;
+esac
+
+# 5: 상태 토큰이 0 패딩 4자리인가 — WIN_START 는 정수다
+W_render tok 'window=09:00-18:00'
+W_src "$W_CUT" "1000" 'echo "TOKEN=waiting-for-window-$WIN_TOKEN"'
+case "$W_OUT" in
+  *"TOKEN=waiting-for-window-0900"*) ok "J5: 09:00-18:00 -> waiting-for-window-0900 (zero-padded)" ;;
+  *) bad "J5: the state token is zero-padded to 4 digits" "…-0900" "out=[$(printf '%s' "$W_OUT" | tr '\n' '|')]" ;;
+esac
+W_render tok2 'window=00:30-02:00'
+W_src "$W_CUT" "1000" 'echo "TOKEN=waiting-for-window-$WIN_TOKEN"'
+case "$W_OUT" in
+  *"TOKEN=waiting-for-window-0030"*) ok "J5: 00:30-02:00 -> waiting-for-window-0030" ;;
+  *) bad "J5: 00:30 must not become …-30" "…-0030" "out=[$(printf '%s' "$W_OUT" | tr '\n' '|')]" ;;
+esac
+
+# ─────────────────────────────────────────────────────────────────────────
+# §3.2 형식 검증 — 거부 10종 · 수락 6종
+# ─────────────────────────────────────────────────────────────────────────
+# ⚠ 마커 state 는 원장에서 읽는다: `marker_write` 의 python 이 원장에 `state` 를 쓴 뒤
+#   `gh` 를 부르므로, 그것이 이 스크립트가 실제로 무슨 state 를 실었는지의 정본이다.
+W_reject() {   # W_reject <case> <window-file-content> <message-fragment>
+  W_render "rej$W_RN" "$2"; W_RN=$((W_RN + 1))
+  W_src "$W_CUT" "1200" 'echo UNREACHABLE'
+  local why=""
+  [ "$W_RC" -eq 1 ] || why="rc=$W_RC (want 1)"
+  case "$W_OUT" in *"FAIL: "*"$3"*) ;; *) why="$why; no message fragment [$3]" ;; esac
+  case "$W_OUT" in *UNREACHABLE*) why="$why; the block did not stop the run" ;; esac
+  case "$W_LEDGER" in
+    *'"state": "halted:window-invalid"'*) ;;
+    *) why="$why; ledger state=[$W_LEDGER]" ;;
+  esac
+  if [ -z "$why" ]; then ok "$1"; else bad "$1" "$why"; fi
+}
+W_RN=0
+# ⚠ 케이스마다 **다른** 메시지 조각을 단정한다. 하나의 메시지를 공유하면 읽기 가드
+#   (`[ ! -r ]`)를 지워도 `WFOUND=0` 이 다음 가드로 흘러 글자 하나까지 같은 결과를 낸다 —
+#   두 가드 · 한 관측량이면 하나는 무방비다(6라운드 실측 SURVIVE).
+W_reject "J6: no \`window=\` line -> halted:window-invalid (has no)"      'tracker=99
+'                       'has no'
+W_reject "J6: 9:00 (missing zero) is refused"        'window=9:00-18:00
+'   'must be HH:MM-HH:MM'
+W_reject "J6: 22:00-10:0 (short field) is refused"   'window=22:00-10:0
+'   'must be HH:MM-HH:MM'
+W_reject "J6: 2200-1000 (no colon) is refused"       'window=2200-1000
+'    'must be HH:MM-HH:MM'
+W_reject "J6: 22:00 (no end) is refused"             'window=22:00
+'        'must be HH:MM-HH:MM'
+W_reject "J6: 24:00-10:00 is out of range"           'window=24:00-10:00
+'   'out of range'
+W_reject "J6: 22:60-10:00 is out of range"           'window=22:60-10:00
+'   'out of range'
+W_reject "J6: 22:00-22:60 is out of range"           'window=22:00-22:60
+'   'out of range'
+W_reject "J6: start == end is refused"               'window=22:00-22:00
+'   'start equals end'
+# 읽기 불가 — 별도 케이스이므로 W_reject 를 쓰지 않고 chmod 를 끼운다
+W_render rej_unread 'window=22:00-10:00
+'
+chmod 000 "$W_REPO/.claude/guild/.gld-sprint-99.window"
+W_src "$W_CUT" "1200" 'echo UNREACHABLE'
+chmod 644 "$W_REPO/.claude/guild/.gld-sprint-99.window"
+case "$W_OUT" in
+  *'FAIL: '*'unreadable'*) ok "J6: an unreadable window file says 'unreadable' (its OWN fragment)" ;;
+  *) bad "J6: unreadable window file" "its own message" "out=[$(printf '%s' "$W_OUT" | tr '\n' '|')]" ;;
+esac
+
+# 6b: `ab:cd` — 형식 case 가 아니라 **10# 의 위치**를 겨냥한다. 산술을 형식 검사 앞으로
+#     옮기면 `set -e` 로 죽어 HALT_REASON 이 안 서고 마커가 `halted:interrupted` 가 된다.
+W_render rej_abcd 'window=ab:cd-ef:gh
+'
+W_src "$W_CUT" "1200" 'echo UNREACHABLE'
+W_ABCD_WHY=""
+case "$W_OUT" in *'must be HH:MM-HH:MM'*) ;; *) W_ABCD_WHY="no shape message" ;; esac
+case "$W_OUT" in *'value too great for base'*|*'syntax error'*) W_ABCD_WHY="$W_ABCD_WHY; arithmetic ran BEFORE the shape check" ;; esac
+case "$W_LEDGER" in *'halted:window-invalid'*) ;; *) W_ABCD_WHY="$W_ABCD_WHY; ledger=[$W_LEDGER]" ;; esac
+if [ -z "$W_ABCD_WHY" ]; then
+  ok "J6b: ab:cd-ef:gh is a SHAPE refusal, not an arithmetic death (10# stays behind the case)"
+else
+  bad "J6b: ab:cd must not reach \$(( ))" "$W_ABCD_WHY"
+fi
+
+# 6c: 수락 6종
+W_accept() {   # W_accept <case> <window-file-content|__NONE__> <expected WIN_RAW>
+  W_render "acc$W_AN" "$2"; W_AN=$((W_AN + 1))
+  W_src "$W_CUT" "1200" 'echo "ACCEPTED raw=[$WIN_RAW] start=[$WIN_START]"'
+  case "$W_OUT" in
+    *"ACCEPTED raw=[$3]"*) ok "$1" ;;
+    *) bad "$1" "raw=[$3]" "out=[$(printf '%s' "$W_OUT" | tr '\n' '|')] rc=$W_RC" ;;
+  esac
+}
+W_AN=0
+W_accept "J6c: no window file at all -> no window, and SILENT"  __NONE__            ''
+W_accept "J6c: a normal window is accepted"                     'window=22:00-10:00
+' '22:00-10:00'
+W_accept "J6c: \`~\` is normalised to \`-\` (the requirement's own spelling)" 'window=22:00~10:00
+' '22:00-10:00'
+W_accept "J6c: \`none\` is accepted as 'no window', NOT an error" 'window=none
+'    ''
+W_accept "J6c: an empty value is accepted as 'no window'"        'window=
+'       ''
+W_accept "J6c: surrounding whitespace in the VALUE is stripped"  'window=  22:00-10:00  
+' '22:00-10:00'
+# 파일이 없을 때는 아무것도 찍지 않는다 (D2 와 같은 계약)
+W_render silent __NONE__
+W_src "$W_CUT" "1200" 'true'
+case "$W_OUT" in
+  *FAIL*|*WARN*|*window*) bad "J6c: no window file must be silent" "silence" "out=[$(printf '%s' "$W_OUT" | tr '\n' '|')]" ;;
+  *) ok "J6c: no window file -> not one word on stdout/stderr" ;;
+esac
+
+# 7: window_fail 은 마커를 쓰고, cleanup 이 같은 문자열을 한 번 더 쓴다 (T6 · trap 보존 컷)
+# ⚠ 2회가 **정답**이다. window_fail 은 heartbeat "running" 보다 앞에서 도는 유일한 실패 경로라
+#   이유를 그 자리에서 내구화하고, cleanup 은 `halted:$HALT_REASON` 로 같은 값을 반복한다(멱등).
+#   v8 은 `FINISHED=1` 로 두 번째를 막았는데, 그 플래그가 P7·카운터가 공유하는 게이트를 함께
+#   닫아 완주한 멤버를 "interrupted" 로 재라벨할 수 있었다(§4.2b).
+W_render finished1 'window=25:00-10:00
+'
+W_src "$W_CUTT" "1200" 'true'
+W_MW=$(printf '%s\n' "$W_CALLS" | grep -c 'comments --paginate' || true)
+if [ "$W_MW" -eq 2 ]; then
+  ok "J7: window_fail writes the marker, and cleanup repeats the SAME reason (2 writes)"
+else
+  bad "J7: marker_write must be called twice, not $W_MW" "2" "calls=[$(printf '%s' "$W_CALLS" | tr '\n' '|')]"
+fi
+# 7a: 그리고 halt 경로는 FINISHED 를 세우지 않는다 — 함수 본문 스코프(T8①)
+# ⚠ Comments are STRIPPED before matching. The body explains why `FINISHED=1` is absent, so a
+#   raw body grep matches the explanation and fails on correct code — the same self-citation
+#   trap the marker-balance check has (and the reason `hascode` exists in the sibling suite).
+W_FBODY="$("$PY" - "$TPL" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r"^window_fail\(\)\s*\{(.*?)^\}", src, re.M | re.S)
+if not m:
+    print("__NOFUNC__")
+else:
+    code = []
+    for line in m.group(1).splitlines():
+        i = line.find("#")
+        code.append(line if i < 0 else line[:i])
+    print("\n".join(code))
+PY
+)"
+case "$W_FBODY" in
+  *__NOFUNC__*)   bad "J7a: window_fail does not set FINISHED" "a function body" "window_fail() not found" ;;
+  *FINISHED=*)    bad "J7a: window_fail does not set FINISHED" "no FINISHED= in the body" "it sets it" ;;
+  *)              ok  "J7a: window_fail sets HALT_REASON only — it does not touch FINISHED" ;;
+esac
+
+# 7d: wait_for_window 의 컨테이너 실패 경로가 ISSUE 를 먼저 비우는가 (함수 본문, 주석 제거)
+# ⚠ 이 경로는 이터레이션 상단이라 2회차부터 $ISSUE 가 **직전** 멤버다. 비우지 않으면 cleanup 의
+#   P7 이 그 번호를 읽고, 그 멤버의 마지막 보드 쓰기가 실패했다면 캐시가 `in_progress` 라
+#   **완주한 멤버를 "interrupted" 로 재라벨한다**(§4.2b).
+W_WBODY="$("$PY" - "$TPL" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r"^wait_for_window\(\)\s*\{(.*?)^\}", src, re.M | re.S)
+if not m:
+    print("__NOFUNC__")
+else:
+    out = []
+    for line in m.group(1).splitlines():
+        i = line.find("#")
+        out.append(line if i < 0 else line[:i])
+    print("\n".join(out))
+PY
+)"
+case "$W_WBODY" in
+  *__NOFUNC__*)  bad "J7d: wait_for_window clears ISSUE before it halts" "a function body" "not found" ;;
+  *'ISSUE=""'*)  ok  "J7d: wait_for_window clears ISSUE before halting on a lost container" ;;
+  *)             bad "J7d: wait_for_window clears ISSUE before it halts" 'ISSUE=""' "absent — P7 would relabel the PREVIOUS member" ;;
+esac
+# 7e: 워크트리 보존 사유가 git 문장이 아니라 4종 분류 토큰인가 (INV5 생산자 쪽)
+# ⚠ J32 는 배열을 직접 씨딩하므로 **writer** 만 본다. 분류 로직 자체는 여기서만 잡힌다.
+#   `head -1 "$D/rm.err"` 는 `fatal: '<절대경로>' contains modified or untracked files…` 이므로
+#   그 문장을 그대로 실으면 원장이 절대 경로를 GitHub 코멘트로 내보낸다.
+W_CLS_WHY=""
+for T in locked dirty main-worktree other; do
+  grep -qF -- "_rmclass=\"$T\"" "$TPL" || W_CLS_WHY="$W_CLS_WHY missing:$T"
+done
+# ⚠ Skips WHOLE-LINE comments; it must NOT truncate at the first `#`. The strings these checks
+#   look for contain `#` themselves (`"#$ISSUE"`), and the truncating form — the one `hasline`
+#   uses — cuts the needle in half and reports "not found" on correct code. That is the same
+#   trap as T10's `hasline_hash`, hit from the other direction: there the HAYSTACK had a `#`,
+#   here the NEEDLE does. Measured both times.
+hascode_tpl() { awk -v t="$1" '{ l=$0; sub(/^[ \t]+/,"",l); if (substr(l,1,1)=="#") next;
+                                 if (index($0,t)) { f=1; exit } } END { exit !f }' "$TPL"; }
+hascode_tpl 'KEPT_WT_REASON+=("$_rmclass")' || W_CLS_WHY="$W_CLS_WHY; the ledger array does not take the CLASS"
+hascode_tpl 'KEPT_WT_REASON+=("$_rmerr")'   && W_CLS_WHY="$W_CLS_WHY; the ledger array takes git's raw sentence (INV5)"
+if [ -z "$W_CLS_WHY" ]; then
+  ok "J7e: kept-worktree reasons are classified (locked/dirty/main-worktree/other), not git's sentence"
+else
+  bad "J7e: kept-worktree reason classification" "four class tokens" "$W_CLS_WHY"
+fi
+# 7f: 자식 세션 실패가 실패 **클래스**로 기록되는가 — $REASON 원문이 아니라 (INV5)
+# ⚠ $REASON 은 자식 세션 에러 result 80자 원문이다: 경로·스택·API 바디가 올 수 있고,
+#   FAILED_ISSUES 는 원장 completion.failed_issues 가 되어 공개 코멘트로 나간다.
+if hascode_tpl 'FAILED_ISSUES+=("#$ISSUE (child-session-failed)")' \
+   && ! hascode_tpl 'FAILED_ISSUES+=("#$ISSUE (${REASON:-exit $EXIT_CODE})")'; then
+  ok "J7f: a child-session failure is recorded as its CLASS, not the raw error text (INV5)"
+else
+  bad "J7f: FAILED_ISSUES must carry the class" "child-session-failed" \
+      "the raw \$REASON is still appended — it reaches the ledger and the issue comment"
+fi
+
+# 7g: heartbeat 의 3-strike 경로가 FINISHED 를 세우지 않는가 (함수 본문, 주석 제거)
+# ⚠ 세우면 cleanup 의 게이트가 닫혀 P7 과 보드 카운터 flush 가 함께 꺼진다. 그 경로는 gh 가 죽은
+#   상태이므로 P7 의 쓰기도 실패할 가능성이 높지만(03번 :1274 "최선 노력"), 게이트를 닫는 것은
+#   그것과 별개로 **정상 완주 판정을 오염시킨다** — v8 이 그 대가를 치렀다(§4.2b).
+W_HBODY="$("$PY" - "$TPL" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r"^heartbeat\(\)\s*\{(.*?)^\}", src, re.M | re.S)
+if not m:
+    print("__NOFUNC__")
+else:
+    out = []
+    for line in m.group(1).splitlines():
+        i = line.find("#")
+        out.append(line if i < 0 else line[:i])
+    print("\n".join(out))
+PY
+)"
+case "$W_HBODY" in
+  *__NOFUNC__*) bad "J7g: heartbeat does not set FINISHED" "a function body" "heartbeat() not found" ;;
+  *FINISHED=*)  bad "J7g: heartbeat does not set FINISHED" "no FINISHED= in the body" "it sets it — cleanup's gate would close" ;;
+  *)            ok  "J7g: heartbeat's 3-strike path sets HALT_REASON only, never FINISHED" ;;
+esac
+# 7h: board_off_reason 이 절대 경로를 원장에 넣지 않는가 (INV5, 오늘부터 참인 기존 결함의 수정)
+# ⚠ `$BOARD_CONF` 는 `$HUMAN_REPO/.claude/guild/.gld-sprint-N.board` 이고, `board_off_reason` 은
+#   원장 키이므로 `marker_write` 가 그것을 **GitHub 이슈 코멘트**로 렌더한다. 창 기능이 이 경로의
+#   빈도를 바꾸지는 않지만, `completion` 을 같은 원장에 넣으면서 INV5 를 세우려면 먼저 이것이
+#   깨끗해야 한다. 본문 §6.5.
+W_OFF_WHY=""
+awk '{ l=$0; sub(/^[ \t]+/,"",l); if (substr(l,1,1)=="#") next;
+       if (index($0,"BOARD_CONF_BAD=")) print }' "$TPL" > "$I_WORK/offreason.txt"
+[ -s "$I_WORK/offreason.txt" ] || W_OFF_WHY="no BOARD_CONF_BAD= assignment found at all"
+while IFS= read -r L; do
+  case "$L" in
+    *'basename "$BOARD_CONF"'*) ;;                                  # sanitised
+    *'$BOARD_CONF'*) W_OFF_WHY="$W_OFF_WHY; a bare \$BOARD_CONF reaches the ledger: [$L]" ;;
+    *) ;;
+  esac
+done < "$I_WORK/offreason.txt"
+if [ -z "$W_OFF_WHY" ]; then
+  ok "J7h: board_off_reason carries a basename, not the absolute board config path (INV5)"
+else
+  bad "J7h: board_off_reason must not publish an absolute path" "basename" "$W_OFF_WHY"
+fi
+# 대조군: 같은 컷에서 트랩이 실제로 살아 있는가 (없으면 위 검사는 무엇이든 통과한다)
+W_render finished2 __NONE__
+if grep -q '^trap cleanup EXIT' "$W_CUTT"; then
+  ok "J7: (control) the trap-preserving cut really keeps \`trap cleanup EXIT\`"
+else
+  bad "J7: the T6 cut lost its traps — J7 cannot fail" "trap cleanup EXIT present" "stripped"
+fi
+
+# 7b: cleanup 의 사유가 리터럴이 아닌가
+hasline "J7b: cleanup renders halted:\${HALT_REASON:-interrupted}" \
+        'marker_write "halted:${HALT_REASON:-interrupted}"'
+lacksline "J7b: no literal halted:interrupted survives in cleanup" 'marker_write "halted:interrupted"'
+
+# 7c: 게이트는 넓어지지 **않는다** (§4.2b — v8 의 확장을 철회했다)
+# ⚠ `FINISHED=1` 은 halt 사유가 있어도 P7 을 억제해야 한다. `board_col_of` 는 캐시를 읽고
+#   캐시는 성공한 쓰기에서만 갱신되므로, "마지막 P3 쓰기가 실패했다" 는 카드를 `in_progress` 로
+#   남긴다 — 게이트를 넓히면 **완주한 멤버가 `Blocked`+`interrupted` 로 재라벨된다.**
+#   halt 경로들은 `FINISHED` 를 세우지 않으므로(J7a) 이 게이트가 그들에게는 열려 있다.
+: > "$I_WORK/calls.txt"
+GH_CALLS="$I_WORK/calls.txt" PATH="$I_WORK/bin:$PATH" \
+  "$SH" -c 'set -euo pipefail; . '"$I_WORK/helpers_cl.sh"'
+     board_resolve
+     board_col 101 in_progress
+     : > "$GH_CALLS"
+     ISSUE=101; FINISHED=1; COMPLETED=0; HALT_REASON="container-lost"
+     cleanup' >/dev/null 2>&1 || true
+if grep -q -- '--single-select-option-id o_block' "$I_WORK/calls.txt" 2>/dev/null; then
+  bad "J7c: the P7 gate must NOT widen for HALT_REASON" "no write" \
+      "calls=[$(tr '\n' '|' < "$I_WORK/calls.txt")]"
+else
+  ok "J7c: FINISHED=1 + HALT_REASON is STILL suppressed — the gate was not widened"
+fi
+# 그리고 사유 없는 정상 완주도 계속 억제된다 — 기존 검사 2건과 짝을 이룬다
+: > "$I_WORK/calls.txt"
+GH_CALLS="$I_WORK/calls.txt" PATH="$I_WORK/bin:$PATH" \
+  "$SH" -c 'set -euo pipefail; . '"$I_WORK/helpers_cl.sh"'
+     board_resolve
+     board_col 101 in_progress
+     : > "$GH_CALLS"
+     ISSUE=101; FINISHED=1; COMPLETED=0; HALT_REASON=""
+     cleanup' >/dev/null 2>&1 || true
+if grep -q -- '--single-select-option-id o_block' "$I_WORK/calls.txt" 2>/dev/null; then
+  bad "J7c: a clean completion must STILL be suppressed" "no write" \
+      "calls=[$(tr '\n' '|' < "$I_WORK/calls.txt")]"
+else
+  ok "J7c: FINISHED=1 with an EMPTY HALT_REASON is still suppressed (no false 'interrupted')"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────
+# §3.3 대기 (T2 · T3 · T4 · T7 · T8)
+# ─────────────────────────────────────────────────────────────────────────
+# ── T8: 스코프 추출기 둘 ───────────────────────────────────────────────────
+# ⚠ `hasline`/`hasfx` 는 **첫 일치에서 멈추므로** `MARKER_MAX=3` 처럼 같은 문자열이 두 곳에
+#   나오는 항목을 검사할 수 없다. ① 함수 본문 ② 루프 본문. 선례는 `sig.py` 다.
+cat > "$WORK/scope.py" <<'SCOPY'
+import re, sys
+src = open(sys.argv[1]).read()
+mode, name = sys.argv[2], sys.argv[3]
+if mode == "fn":
+    m = re.search(r"^%s\(\)\s*\{(.*?)^\}" % re.escape(name), src, re.M | re.S)
+elif mode == "loop":
+    m = re.search(r"^%s(.*?)^done" % re.escape(name), src, re.M | re.S)
+else:
+    raise SystemExit("bad mode")
+if not m:
+    print("ERR scope not found: %s %s" % (mode, name)); raise SystemExit(0)
+body = m.group(1)
+# 주석은 버린다 — `: # heartbeat …` 류의 변이가 문자열 검사를 통과했던 전례가 있다.
+code = "\n".join(l.split("#", 1)[0] for l in body.split("\n"))
+out = []
+for spec in sys.argv[4:]:
+    op, needle = spec.split(":", 1)
+    if op == "has":
+        out.append(("OK " if needle in code else "MISSING ") + needle)
+    elif op == "lacks":
+        out.append(("OK " if needle not in code else "PRESENT ") + needle)
+    elif op == "before":
+        a, b = needle.split("<<")
+        ia, ib = code.find(a), code.find(b)
+        if ia < 0: out.append("MISSING " + a)
+        elif ib < 0: out.append("MISSING " + b)
+        else: out.append(("OK " if ia < ib else "ORDER ") + needle)
+print("; ".join(out) if any(not o.startswith("OK") for o in out) else "OK")
+SCOPY
+W_scope() {   # W_scope <case> <mode> <name> <spec...>
+  local c="$1"; shift
+  local r; r="$("$PY" "$WORK/scope.py" "$TPL" "$@")"
+  if [ "$r" = "OK" ]; then ok "$c"; else bad "$c" "$r"; fi
+}
+
+# 9 · 9b · 12: wait_for_window() 본문 스코프 (T8①)
+# ⚠ 파일 전체 grep 이면 `heartbeat "running"`(:1222)·재시도 루프·`hb_sleep` 내부에 맞아 통과한다.
+W_scope "J9: the first heartbeat comes BEFORE the first sleep (inside wait_for_window)" \
+        fn wait_for_window 'before:heartbeat "waiting-for-window-<<sleep "$WAIT_CHUNK"'
+W_scope "J9b: MARKER_FAILS=0 and MARKER_MAX= precede that first heartbeat" \
+        fn wait_for_window 'before:MARKER_FAILS=0<<heartbeat "waiting-for-window-' \
+        'before:MARKER_MAX=<<heartbeat "waiting-for-window-'
+W_scope "J12: MARKER_MAX=3 is RESTORED inside wait_for_window (not just initialised elsewhere)" \
+        fn wait_for_window 'has:MARKER_MAX=3'
+W_scope "J12: and hb_sleep is not reused for the window wait" \
+        fn wait_for_window 'lacks:hb_sleep'
+
+# 13: 대기 호출이 큐 루프 본문의 pop **앞**인가 (T8② 루프 추출 + 인덱스 비교)
+# ⚠ pop 뒤로 옮기면 요구는 만족해 보이고 §0.4 의 피해(자는 동안 ISSUE 가 직전 멤버를
+#   가리키고 cleanup 의 P7 이 그 번호를 읽는 것)만 조용히 난다.
+W_scope "J13: wait_for_window is called BEFORE the queue pop, inside the loop body" \
+        loop 'while [ ${#QUEUE[@]} -gt 0 ]; do' \
+        'has:wait_for_window' 'before:wait_for_window<<ISSUE=${QUEUE[0]}'
+# 그리고 호출은 **한 곳**뿐이다 (§0.4: 유일한 대기 지점)
+W_CALLN=$(awk '{ i=index($0,"#"); pre=(i?substr($0,1,i-1):$0);
+                 if (pre ~ /(^|[^_a-zA-Z])wait_for_window[[:space:]]*$/) n++ }
+               END { print n+0 }' "$TPL")
+if [ "$W_CALLN" -eq 1 ]; then
+  ok "J13: wait_for_window is CALLED in exactly one place (§0.4's single wait point)"
+else
+  bad "J13: exactly one call site" "1" "found $W_CALLN"
+fi
+
+# 8 · 11: 실제로 자고, 시계가 뒤집히면 이탈하고, 이탈 뒤 ensure_container 를 다시 부른다
+# ⚠ T7 오버라이드가 없으면 프로브 repo 가 git 워크트리가 아니어서 **정상 이탈이
+#   halted:container-lost 로 보인다**(6라운드 실측).
+W_render wait 'window=22:00-10:00
+'
+: > "$W_WORK/calls.txt"; printf '1200' > "$W_WORK/hhmm"; printf '0' > "$W_WORK/hhmm.n"
+printf '3' > "$W_WORK/hhmm.at"; printf '2300' > "$W_WORK/hhmm.after"
+W_WOUT="$(GH_CALLS="$W_WORK/calls.txt" GH_FAIL="$W_WORK/nogh" \
+  FAKE_HHMM="$W_WORK/hhmm" SLEEP_N="$W_WORK/n" SLEEP_BUDGET=50 \
+  PATH="$W_WORK/bin:$PATH" "$SH" -c 'set -uo pipefail; . '"$W_CUT"'
+     '"$W_STUB_OK"'
+     ensure_container() { echo CONTAINER_RECHECKED; return 0; }
+     wait_for_window
+     echo "ESCAPED slept=$(cat '"$W_WORK"'/n)"' 2>&1)"
+W_WHY=""
+case "$W_WOUT" in *'Outside the run window (22:00-10:00)'*) ;; *) W_WHY="no waiting notice" ;; esac
+case "$W_WOUT" in *'Window open — resuming.'*) ;; *) W_WHY="$W_WHY; never escaped" ;; esac
+case "$W_WOUT" in *CONTAINER_RECHECKED*) ;; *) W_WHY="$W_WHY; ensure_container was NOT re-called" ;; esac
+case "$W_WOUT" in *'ESCAPED slept='[1-9]*) ;; *) W_WHY="$W_WHY; it did not actually sleep" ;; esac
+case "$W_WOUT" in *'kill '*) ;; *) W_WHY="$W_WHY; no kill instruction" ;; esac
+if [ -z "$W_WHY" ]; then
+  ok "J8: outside the window it waits, re-reads the wall clock, escapes and re-checks the container"
+else
+  bad "J8: the wait loop" "$W_WHY" "out=[$(printf '%s' "$W_WOUT" | tr '\n' '|')]"
+fi
+# 대기 중 하트비트가 창 토큰을 싣는가 (state 가 10분간 `running` 이라고 거짓말하지 않는 것)
+case "$W_LEDGER$(cat "$W_REPO/.claude/guild/.sprint-logs/99/dag/ledger.json" 2>/dev/null)" in
+  *'"state": "waiting-for-window-2200"'*) ok "J8: the wait heartbeat carries waiting-for-window-2200" ;;
+  *) bad "J8: the wait must not leave state=running" "waiting-for-window-2200" \
+         "ledger=[$(cat "$W_REPO/.claude/guild/.sprint-logs/99/dag/ledger.json" 2>/dev/null)]" ;;
+esac
+# 11: 이탈 뒤 ensure_container 가 실패하면 halted:container-lost
+W_render clost 'window=22:00-10:00
+'
+: > "$W_WORK/calls.txt"; printf '1200' > "$W_WORK/hhmm"; printf '0' > "$W_WORK/hhmm.n"
+printf '3' > "$W_WORK/hhmm.at"; printf '2300' > "$W_WORK/hhmm.after"
+GH_CALLS="$W_WORK/calls.txt" GH_FAIL="$W_WORK/nogh" \
+  FAKE_HHMM="$W_WORK/hhmm" SLEEP_N="$W_WORK/n" SLEEP_BUDGET=50 \
+  PATH="$W_WORK/bin:$PATH" "$SH" -c 'set -uo pipefail; . '"$W_CUT"'
+     '"$W_STUB_BAD"'
+     wait_for_window
+     echo NOT_REACHED' > "$W_WORK/clost.txt" 2>&1
+W_CL_RC=$?
+W_CL_LED="$(cat "$W_REPO/.claude/guild/.sprint-logs/99/dag/ledger.json" 2>/dev/null || true)"
+W_CL_WHY=""
+[ "$W_CL_RC" -eq 1 ] || W_CL_WHY="rc=$W_CL_RC (want 1)"
+grep -q NOT_REACHED "$W_WORK/clost.txt" && W_CL_WHY="$W_CL_WHY; it kept going"
+case "$W_CL_LED" in *'"state": "halted:container-lost"'*) ;; *) W_CL_WHY="$W_CL_WHY; ledger=[$W_CL_LED]" ;; esac
+if [ -z "$W_CL_WHY" ]; then
+  ok "J11: a lost container after the wait is halted:container-lost, not halted:interrupted"
+else
+  bad "J11: container-lost after the wait" "$W_CL_WHY"
+fi
+
+# 10 · 10b: MARKER_MAX
+# 18 에서 5연속 실패는 **생존**한다
+W_render mm18 __NONE__
+: > "$W_WORK/calls.txt"; : > "$W_WORK/nogh"; printf '1200' > "$W_WORK/hhmm"; printf '0' > "$W_WORK/hhmm.n"
+W_MM="$(GH_CALLS="$W_WORK/calls.txt" GH_FAIL="$W_WORK/nogh" FAKE_HHMM="$W_WORK/hhmm" \
+  SLEEP_N="$W_WORK/n" PATH="$W_WORK/bin:$PATH" "$SH" -c 'set -uo pipefail; . '"$W_CUT"'
+     BOARD_WAS_ON=0; MARKER_MAX="$WAIT_MARKER_MAX"; MARKER_FAILS=0
+     i=1; while [ $i -le 5 ]; do heartbeat probe; i=$((i+1)); done
+     echo "SURVIVED_5 fails=$MARKER_FAILS"' 2>&1)"
+case "$W_MM" in
+  *'SURVIVED_5 fails=5'*) ok "J10: MARKER_MAX=18 survives 5 consecutive marker failures" ;;
+  *) bad "J10: 5 failures must not kill a waiting run" "SURVIVED_5" "out=[$(printf '%s' "$W_MM" | tr '\n' '|')]" ;;
+esac
+# 기본값 3 에서는 3회에 **죽는다**, 그리고 40회 안에 반드시 죽는다
+W_render mm3 __NONE__
+: > "$W_WORK/calls.txt"; : > "$W_WORK/nogh"; printf '1200' > "$W_WORK/hhmm"; printf '0' > "$W_WORK/hhmm.n"
+GH_CALLS="$W_WORK/calls.txt" GH_FAIL="$W_WORK/nogh" FAKE_HHMM="$W_WORK/hhmm" \
+  SLEEP_N="$W_WORK/n" PATH="$W_WORK/bin:$PATH" "$SH" -c 'set -uo pipefail; . '"$W_CUT"'
+     BOARD_WAS_ON=0; MARKER_FAILS=0
+     i=1; while [ $i -le 40 ]; do heartbeat probe; i=$((i+1)); done
+     echo NEVER_DIED' > "$W_WORK/mm3.txt" 2>&1
+W_MM3_RC=$?
+W_MM3_WHY=""
+[ "$W_MM3_RC" -eq 1 ] || W_MM3_WHY="rc=$W_MM3_RC (want 1)"
+grep -q NEVER_DIED "$W_WORK/mm3.txt" && W_MM3_WHY="$W_MM3_WHY; survived 40 failures"
+grep -q 'Marker unwritable 3x' "$W_WORK/mm3.txt" || W_MM3_WHY="$W_MM3_WHY; the message did not name 3"
+if [ -z "$W_MM3_WHY" ]; then
+  ok "J10: the DEFAULT MARKER_MAX is still 3 and it still stops the run (within 40)"
+else
+  bad "J10: default 3 must still kill" "$W_MM3_WHY"
+fi
+# 10b: 죽을 때 **원장**에 사유가 남는가. ⚠ `marker_write` 로는 남길 수 없다 — 그 함수의
+#      첫 동작이 `gh api` 이고 실패하면 원장 갱신 python **앞에서** return 1 한다.
+W_MM3_LED="$(cat "$W_REPO/.claude/guild/.sprint-logs/99/dag/ledger.json" 2>/dev/null || true)"
+case "$W_MM3_LED" in
+  *'"state": "halted:marker-unwritable"'*)
+    ok "J10b: the reason reaches the LEDGER (ledger_set has no gh in it)" ;;
+  *) bad "J10b: ledger must carry halted:marker-unwritable" "ledger_set state" "ledger=[$W_MM3_LED]" ;;
+esac
+# ⚠ v6 은 이 변이를 *"ledger_set 을 marker_write 뒤로 이동"* 이라 적었고 그것은 결함이 **아니다**
+#   (`marker_write … || true` 는 함수를 중단시키지 않는다). 죽여야 할 변이는 **줄의 삭제**다.
+W_scope "J10b: heartbeat's kill path writes the reason to the ledger (deleting the LINE is the mutation)" \
+        fn heartbeat 'has:ledger_set state'
+rm -f "$W_WORK/nogh"
+
+# ─────────────────────────────────────────────────────────────────────────
+# §3.4 원장 · 수명
+# ─────────────────────────────────────────────────────────────────────────
+# 14: 원장 씨딩 → T5 컷 소스 → `completion` **과** `window` 둘 다 드롭되는가
+W_render drop __NONE__
+mkdir -p "$W_REPO/.claude/guild/.sprint-logs/99/dag"
+cat > "$W_REPO/.claude/guild/.sprint-logs/99/dag/ledger.json" <<'SEED'
+{"completion": {"total": 9}, "window": "22:00-10:00", "retries": {"101": 1},
+ "board_fails": 3, "discovered": ["#900"]}
+SEED
+W_src "$W_CUT" "1200" 'true'
+W_DROP_WHY=""
+case "$W_LEDGER" in *'"completion"'*) W_DROP_WHY="completion survived" ;; esac
+case "$W_LEDGER" in *'"window"'*) W_DROP_WHY="$W_DROP_WHY; window survived" ;; esac
+case "$W_LEDGER" in *'"retries"'*) ;; *) W_DROP_WHY="$W_DROP_WHY; retries was dropped too (it must NOT be)" ;; esac
+case "$W_LEDGER" in *'"discovered"'*) ;; *) W_DROP_WHY="$W_DROP_WHY; discovered was dropped too" ;; esac
+if [ -z "$W_DROP_WHY" ]; then
+  ok "J14: run start drops \`completion\` AND \`window\`, and keeps retries/discovered"
+else
+  bad "J14: the run-start drop list" "$W_DROP_WHY" "ledger=[$W_LEDGER]"
+fi
+# 그리고 창이 있으면 `window` 가 **다시** 써진다 (드롭 후 조건부 재기록)
+W_render rewrite 'window=22:00-10:00
+'
+W_src "$W_CUT" "1200" 'true'
+case "$W_LEDGER" in
+  *'"window": "22:00-10:00"'*) ok "J14: and the window is re-recorded as the LITERAL (a resume needs the string)" ;;
+  *) bad "J14: the ledger must carry the window literal" '"window": "22:00-10:00"' "ledger=[$W_LEDGER]" ;;
+esac
+
+# 14b: 템플릿의 `ledger_set <key>` 키 집합을 추출해 드롭 목록과 **교차 검증** (방어 ④)
+# ⚠ `completion` 을 조건부 서브키로 분해하면 씨딩 키와 이름이 달라 14 를 **통과한다**.
+cat > "$WORK/dropx.py" <<'DXPY'
+import re, sys
+src = open(sys.argv[1]).read()
+written = set(re.findall(r"ledger_set\s+([A-Za-z_][A-Za-z_0-9.]*)", src))
+m = re.search(r"^for k in \((.*?)\):", src, re.M | re.S)
+dropped = set(re.findall(r'"([^"]+)"', m.group(1))) if m else set()
+# run-local, non-re-derivable keys that MUST be dropped at run start
+must = {"completion", "window"}
+problems = []
+for k in sorted(must):
+    if k not in written:
+        problems.append("no `ledger_set %s` in the template — the key is not written at all "
+                        "(a conditional sub-key would pass the seeding check)" % k)
+    if k not in dropped:
+        problems.append("`%s` is written but NOT in the run-start drop list" % k)
+# and every dropped name must be a name something actually writes (or a board counter)
+for k in sorted(dropped - written):
+    if not k.startswith("board_"):
+        problems.append("drop list names `%s`, which nothing writes — a stale entry" % k)
+print("OK %d written / %d dropped" % (len(written), len(dropped)) if not problems
+      else "; ".join(problems))
+DXPY
+W_DX="$("$PY" "$WORK/dropx.py" "$TPL")"
+case "$W_DX" in
+  OK*) ok "J14b: the drop list cross-checks against the ledger keys the template writes ($W_DX)" ;;
+  *)   bad "J14b: drop list vs written keys" "$W_DX" ;;
+esac
+
+# 15: cleanup 의 `rm -f` — **확장된 리터럴 전체**로 단정한다
+# ⚠ 기존 :1534 는 부분문자열 매칭이라 창 파일을 안 더해도 통과한다. 그리고 3인자 완전형
+#   `hasline` 은 **존재하지 않는다** — 그래서 완전 일치 헬퍼를 여기서 신설한다(T10 옆).
+hasexact() {  # hasexact <case> <exact-code-line, whitespace-trimmed>
+  if awk -v t="$2" '{ i=index($0,"#"); pre=(i?substr($0,1,i-1):$0);
+                      gsub(/^[ \t]+|[ \t]+$/,"",pre);
+                      if (pre == t) { found=1; exit } }
+                    END { exit !found }' "$TPL"; then
+    ok "$1"
+  else
+    bad "$1" "an EXACT code line" "not found verbatim: $2"
+  fi
+}
+hasexact "J15: cleanup removes the script, the board config AND the window file (exact line)" \
+         'rm -f "$SCRIPT_PATH" "$BOARD_CONF" "$WINDOW_CONF"; echo "[sprint] Removed supervisor script"'
+
+# 16: on_signal 본문에 HALT_REASON 대입 (sig.py 가 이미 본문을 갖고 있다)
+W_scope "J16: on_signal SETS HALT_REASON (else TERM/HUP stay 'interrupted' and _handoff lies)" \
+        fn on_signal 'has:HALT_REASON=' 'before:HALT_REASON=<<exit'
+
+# 17 · 17b: 위치·순서 단정 (방어 ⑤ — 리포에 이 종류가 0개였다)
+# ⚠ 문자열을 전혀 안 바꾸고 창 펜스를 `EVENTS=` 위로 옮겼더니 233 passed / 0 FAIL 이었다.
+cat > "$WORK/wpos.py" <<'WPPY'
+import re, sys
+src = open(sys.argv[1]).read()
+def idx(pat, label):
+    m = re.search(pat, src, re.M)
+    return m.start() if m else None
+i_events = idx(r"^EVENTS=", "EVENTS=")
+i_open   = idx(r"^# <!-- guild:supervisor-core:window -->", "opening fence")
+i_close  = idx(r"^# <!-- /guild:supervisor-core:window -->", "closing fence")
+i_main   = idx(r"^# Main loop", "# Main loop")
+i_ec     = idx(r"^ensure_container \|\| exit 1", "ensure_container call")
+i_ledger = idx(r"^ledger_set\(\)", "ledger_set definition")
+i_self   = idx(r"^# <!-- guild:supervisor-core:selfdelete -->", "selfdelete fence")
+i_rewr   = src.find('ledger_set window')
+problems = []
+for name, v in [("EVENTS=", i_events), ("window fence", i_open), ("closing fence", i_close),
+                ("# Main loop", i_main), ("ensure_container call", i_ec),
+                ("ledger_set def", i_ledger), ("selfdelete fence", i_self)]:
+    if v is None:
+        problems.append("anchor missing: %s" % name)
+if not problems:
+    if not i_self < i_open:  problems.append("the window fence is ABOVE the selfdelete fence (three harnesses cut there)")
+    if not i_ledger < i_open: problems.append("the window fence is ABOVE ledger_set's definition (heartbeat would hit 127)")
+    if not i_events < i_open: problems.append("the window fence is ABOVE `EVENTS=` — the ^EVENTS= harness would source it and window_fail's exit 1 would kill it")
+    if not i_open < i_close:  problems.append("the fences are inverted")
+    if not i_close < i_main:  problems.append("the window block is BELOW the `# Main loop` divider — the T5 cut would not contain it")
+    if not i_main < i_ec:     problems.append("the divider is below the ensure_container call")
+    if i_rewr < 0:            problems.append("no `ledger_set window` re-record")
+    elif not i_close < i_rewr < i_main:
+        problems.append("the ledger `window` re-record is not between the closing fence and the divider (T5's cut would miss it)")
+print("OK" if not problems else "; ".join(problems))
+WPPY
+W_WP="$("$PY" "$WORK/wpos.py" "$TPL")"
+if [ "$W_WP" = OK ]; then
+  ok "J17: EVENTS= < window fence < divider < ensure_container, and the re-record is inside the cut"
+else
+  bad "J17: the window block's POSITION" "$W_WP"
+fi
+# 17b: HALT_REASON 의 초기화가 FINISHED=0 과 같은 블록인가
+cat > "$WORK/hrpos.py" <<'HRPY'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r"^COMPLETED=0\n^FINISHED=0\n(.*?)^cleanup\(\)", src, re.M | re.S)
+if not m:
+    print("ERR could not find the COMPLETED/FINISHED block"); raise SystemExit(0)
+print("OK" if re.search(r'^HALT_REASON=""', m.group(1), re.M)
+      else "HALT_REASON is not initialised in the same block as COMPLETED=0/FINISHED=0 "
+           "(in the window block, `${HALT_REASON:-}` becomes the only defence)")
+HRPY
+W_HR="$("$PY" "$WORK/hrpos.py" "$TPL")"
+if [ "$W_HR" = OK ]; then
+  ok "J17b: HALT_REASON is initialised beside COMPLETED=0 / FINISHED=0"
+else
+  bad "J17b: HALT_REASON's position" "$W_HR"
+fi
+
+# ── T10: `#` 을 포함하는 줄용 헬퍼 ─────────────────────────────────────────
+# ⚠ `hasline`/`lacksline` 은 첫 `#` **앞만** 본다. `echo "  Guild Sprint #$TRACKER: …"` 는
+#   `#$TRACKER` 때문에 뒤가 전부 안 보이고, 그 줄을 겨냥한 변이가 232 passed / 0 failed 로
+#   통과했다(6라운드 실측).
+hasline_hash() {   # hasline_hash <case> <fixed-string> — the WHOLE line, `#` included
+  if grep -qF -- "$2" "$TPL"; then ok "$1"; else bad "$1" "present" "not found: $2"; fi
+}
+lacksline_hash() { # lacksline_hash <case> <fixed-string>
+  if grep -qF -- "$2" "$TPL"; then bad "$1" "absent" "still present: $2"; else ok "$1"; fi
+}
+# 18: :1220 배너에서 `(queue may grow)` 가 사라졌는가 — **lacksline_hash 로**
+lacksline_hash "J18: the supervisor banner no longer claims '(queue may grow)' (QUEUE is monotone)" \
+               'member(s) (queue may grow)'
+hasline_hash   "J18: the banner still prints the member count" 'member(s)"'
+# batch.md 쪽의 같은 문자열은 **참이므로** 남아 있어야 한다 (부모가 자식을 낳는다)
+if grep -qF -- '(queue may grow)' "$BATCH"; then
+  ok "J18: batch.md keeps '(queue may grow)' — there it is TRUE"
+else
+  bad "J18: batch.md's copy must NOT be touched" "present in batch.md" "it was removed"
+fi
+# 27: 배너 2줄 — 두 문구가 **둘 다** 있는가
+hasline_hash "J27: the banner says the member finishes first" '멤버가 끝난 뒤에 멈춥니다'
+hasline_hash "J27: the banner forbids kill -9 (else the card sticks on In progress)" 'kill -9'
+
+# 34: `completion` 쓰기가 `marker_write "finished"` **앞**인가, 그리고 필수 키가 있는가
+cat > "$WORK/comp.py" <<'CPPY'
+import re, sys
+raw = open(sys.argv[1]).read()
+# ⚠ Comments are stripped before any INDEX comparison. The comment that explains the ordering
+# rule mentions `marker_write "finished"` ~70 lines above the call, so a raw `find` reported
+# the correct code as inverted — the check failed for the wrong reason (measured, this round).
+src = "\n".join(l.split("#", 1)[0] for l in raw.split("\n"))
+problems = []
+i_set = src.find('ledger_set completion')
+i_fin = src.find('marker_write "finished"')
+i_rm  = src.find('rm -rf "$D"')
+if i_set < 0: problems.append("nothing writes `ledger_set completion`")
+elif i_fin < 0: problems.append('no `marker_write "finished"`')
+else:
+    if not i_set < i_fin:
+        problems.append("`completion` is written AFTER the finished marker — it would never reach the marker")
+    if i_rm >= 0 and not i_set < i_rm:
+        problems.append('`completion` is written after `rm -rf "$D"` deletes the ledger')
+for key in ('"paused_issues"', '"kept_worktrees"', '"reason"', '"elapsed_s"',
+            '"run_timestamp"', '"blocked_issues"', '"incomplete_issues"',
+            '"failed_issues"', '"cache_read"', '"cache_create"'):
+    if key not in raw:
+        problems.append("completion is missing %s" % key)
+# INV5: no absolute prefix may be interpolated into a ledger value
+for m in re.finditer(r'ledger_set\s+\S+\s+"([^"]*)"', src):
+    if "/Users" in m.group(1) or "/home" in m.group(1):
+        problems.append("a ledger value carries an absolute prefix: %s" % m.group(1)[:40])
+print("OK" if not problems else "; ".join(problems))
+CPPY
+W_CP="$("$PY" "$WORK/comp.py" "$TPL")"
+if [ "$W_CP" = OK ]; then
+  ok "J34: \`completion\` is written before the finished marker, with paused_issues and worktree reasons"
+else
+  bad "J34: the completion key" "$W_CP"
+fi
+
+# 32 (INV5): 원장에 실제로 실린 값에 `/Users`·`/home` 프리픽스가 없는가
+# ⚠ 산문 검사가 아니다 — 완주 경로를 실제로 돌려 원장을 읽는다. `marker_write` 는 원장
+#   **전체**를 GitHub 이슈 코멘트로 PATCH 하므로, 절대 경로 하나가 사람 이름과 리포 부모
+#   구조를 공개 리포에 싣는다. 오늘의 원장 키에는 절대 경로가 하나도 없다.
+W_render inv5 __NONE__
+: > "$W_WORK/calls.txt"; printf '1200' > "$W_WORK/hhmm"; printf '0' > "$W_WORK/hhmm.n"
+GH_CALLS="$W_WORK/calls.txt" GH_FAIL="$W_WORK/nogh" FAKE_HHMM="$W_WORK/hhmm" \
+  SLEEP_N="$W_WORK/n" PATH="$W_WORK/bin:$PATH" "$SH" -c 'set -uo pipefail; . '"$W_CUT"'
+     BOARD_WAS_ON=0
+     RUN_ELAPSED=7200; TOTAL_IN=1; TOTAL_OUT=2; TOTAL_CR=3; TOTAL_CC=4; TOTAL_COST="1.50"
+     PROCESSED=2; DONE=1; PAUSED=1
+     PAUSED_ISSUES=("#102")
+     KEPT_WORKTREES=("#101 ('"$W_WORK"'/c_inv5/issue-101): modified or untracked files")
+     KEPT_WT_ISSUE=("#101"); KEPT_WT_REASON=("dirty")
+'"$(sed -n '/^: > "\$D\/comp_failed.txt"/,/^fi$/p' "$TPL")"'
+     echo DONE_WRITING' > "$W_WORK/inv5.txt" 2>&1
+W_I5_LED="$(cat "$W_REPO/.claude/guild/.sprint-logs/99/dag/ledger.json" 2>/dev/null || true)"
+W_I5_WHY=""
+grep -q DONE_WRITING "$W_WORK/inv5.txt" || W_I5_WHY="the completion writer did not run: [$(tr '\n' '|' < "$W_WORK/inv5.txt")]"
+case "$W_I5_LED" in *'"completion"'*) ;; *) W_I5_WHY="$W_I5_WHY; no completion key: [$W_I5_LED]" ;; esac
+# ⚠ NOT a `/Users`/`/home` glob. This suite's temp dir is `/var/folders/…` on macOS, so those
+# globs are BLIND on the host the suite actually runs on — the absolute-path mutation survived
+# them (measured, this round). Judge the SHAPE: no ledger value may begin with `/`.
+W_I5_ABS="$(printf '%s' "$W_I5_LED" | "$PY" -c '
+import json, sys
+def walk(v, path=""):
+    if isinstance(v, dict):
+        for k, x in v.items(): walk(x, path + "." + k)
+    elif isinstance(v, list):
+        for x in v: walk(x, path)
+    elif isinstance(v, str) and v.startswith("/"):
+        print("%s=%s" % (path, v))
+try: walk(json.load(sys.stdin))
+except Exception as e: print(".PARSE=%s" % e)
+' 2>&1)"
+[ -z "$W_I5_ABS" ] || W_I5_WHY="$W_I5_WHY; INV5: an absolute value reached the ledger [$W_I5_ABS]"
+case "$W_I5_LED" in *'"paused_issues": ["#102"]'*) ;; *) W_I5_WHY="$W_I5_WHY; paused_issues is not carried" ;; esac
+# ⚠ The reason is a CLASS, not git's sentence. `head -1 "$D/rm.err"` reads
+#   `fatal: '<ABSOLUTE PATH>' contains modified or untracked files…` — the sentence itself
+#   carries an absolute path, so publishing it would defeat the walk above (§4.3 · INV5).
+case "$W_I5_LED" in *'"reason": "dirty"'*) ;; *) W_I5_WHY="$W_I5_WHY; the worktree reason is not a class token" ;; esac
+# ⚠ And NO path at all. The container is a sibling of the checkout (or $TMPDIR), so no
+#   $HUMAN_REPO-relative form exists in every case; `daily` joins on the issue number instead.
+case "$W_I5_LED" in *'"issue": "#101"'*) ;; *) W_I5_WHY="$W_I5_WHY; the kept worktree issue is lost" ;; esac
+case "$W_I5_LED" in *'"path"'*) W_I5_WHY="$W_I5_WHY; a worktree PATH reached the ledger" ;; *) ;; esac
+if [ -z "$W_I5_WHY" ]; then
+  ok "J32: the ledger's completion has NO /Users|/home prefix and keeps paused_issues + reasons (INV5)"
+else
+  bad "J32: INV5 / completion contents" "$W_I5_WHY"
+fi
+
+# ── T9: 검사 개수 바닥 ─────────────────────────────────────────────────────
+# ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
+#   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
+#   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
+SUP_MIN_CHECKS=207
+if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
+  printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
+    "$((PASS + FAIL))" "$SUP_MIN_CHECKS"
+  exit 1
+fi
 
 printf '\nsprint_supervisor: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

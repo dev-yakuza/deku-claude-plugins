@@ -44,9 +44,16 @@ missing it.
 gh api repos/<owner>/<repo>/issues/<tracker>/comments --paginate --jq '.[].body'
 ```
 
-Take the **last** `<!-- guild:sprint:run -->` block: the supervisor rewrites the marker by
-posting, so earlier copies are stale heartbeats. Absent → render `state: 없음` and **no board
-line at all**; do not fall back to a freshness claim, because "no marker" and "board healthy"
+Take the **oldest** `<!-- guild:sprint:run -->` block — the LOWEST comment id.
+
+⚠ **This said "the last block" and that was backwards.** The stated reason was *"the supervisor
+rewrites the marker by posting, so earlier copies are stale"* — it does not post, it PATCHES one
+comment **in place**, and when it finds several it picks `min(id)` on purpose so history is not
+orphaned. With a single marker comment last and oldest are the same, which is why nothing ever
+showed; with two, every reader took the wrong one. `plan.md` and `board.md` carried the same
+sentence and are corrected with it.
+
+Absent → render `state: 없음` and **no board line at all**; do not fall back to a freshness claim, because "no marker" and "board healthy"
 are the two things that must not look alike.
 
 ```bash
@@ -129,6 +136,10 @@ everything failed).
 about the supervisor being alive and a **false** one about the cards. `board_last_write` is set
 by the supervisor only on a projection that actually succeeded, which is the only thing that
 makes that clause honest.
+
+⚠ **`state: waiting-for-window-*` suspends the freshness clause.** `board_last_write` is frozen
+for the whole wait — twelve hours is normal — so *"마지막 투영 12시간 전"* would be rendered on a
+**correctly behaving** run. Say instead: *"창 밖 대기 중 — 투영은 <HH:MM>에 재개됩니다."*
 
 ⚠ **`board_fails: 0` does not mean anything was projected.** There is no success counter beyond
 `board_last_write`; the dependency-blocked path deliberately writes nothing at all, so a run
@@ -226,9 +237,80 @@ Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limi
 - **Heartbeat age with `state`.** A ~115-minute rate-limit wait is normal; age alone would read
   as a dead run. ⚠ Render the `state` token as the supervisor writes it and translate for the
   human beside it — the shapes are `running` · `installing-deps` ·
-  `rate-limited-until-<epoch-seconds>` · `rate-limited-remaining-<n>s` · `finished` ·
-  `halted:<reason>` (ASCII, `_handoff.md` Section K). `rate-limited-until-1790000000` becomes
-  *"rate-limited — 예상 재개 14:20"*; do **not** invent a shape the supervisor never writes.
+  `rate-limited-until-<epoch-seconds>` · `rate-limited-remaining-<n>s` ·
+  **`waiting-for-window-<HHMM>`** · `finished` · `halted:<reason>` (ASCII, `_handoff.md`
+  Section K). `rate-limited-until-1790000000` becomes *"rate-limited — 예상 재개 14:20"*;
+  `waiting-for-window-2200` becomes *"창 밖 대기 중 — 22:00에 재개"* (the `HHMM` in the token
+  **is** the next window opening); do **not** invent a shape the supervisor never writes.
+  ⚠ **`halted:<reason>`**: `interrupted` · `window-invalid` · `marker-unwritable` ·
+  `container-lost` · `sigTERM` · `sigHUP` · `plan-hash-mismatch`. `halted:marker-unwritable`
+  is the one whose reason may exist **only** in `.sprint-logs/<tracker>/dag/ledger.json` —
+  the marker write is what failed.
+- **How to stop it.** ⚠ For any live state, print the marker's `pid` with the command:
+  *"중단: `kill <pid>` — 대기 중이면 최대 60초, 멤버 작업 중이면 그 멤버가 끝난 뒤에 멈춥니다.
+  (`kill -9` 는 쓰지 마십시오 — 카드가 `In progress` 에 남습니다)"*. Ctrl-C cannot work: the
+  supervisor is a background job of a non-interactive shell and inherits SIGINT as SIG_IGN.
+  This is the **main** channel for that instruction — the supervisor's own stdout is a log this
+  command cannot read.
+
+#### `state: waiting-for-window-*` — is it sleeping, or dead?
+
+⚠ **Only for this state.** This command does not check whether the pid is alive anywhere else,
+and it deliberately renders heartbeat age harmlessly — which is right for a 115-minute rate-limit
+wait. It is **wrong** for a window: SIGKILL (power loss, a drained battery, a macOS auto-update
+reboot) runs no trap, so the marker freezes on `waiting-for-window-2200`, and a screen viewed at
+noon is **byte-for-byte identical** whether the supervisor is asleep or died nine hours ago.
+
+⚠ **Do not put this in step 2 or 3.** Those read `host`/`pid` for every state, so the check
+would also apply to `running` and `rate-limited-*` — and then **every windowless run** gets a
+wrong verdict on a host mismatch.
+
+Reuse `run.md`'s duplicate-run table **whole** — the command and all five rows:
+
+```bash
+ps -p <pid> -o command=
+```
+
+| Observed | What to say |
+|---|---|
+| empty output | **죽었습니다** — `/gld sprint run` 으로 재개하십시오 |
+| output contains `.gld-sprint-` | 정상 대기 중 (heartbeat age beside it) |
+| some **other** process | pid 재사용 — **확인할 수 없습니다** |
+| `ps` itself unavailable | **확인할 수 없습니다.** Never assume not-running |
+| `host` differs | **확인할 수 없습니다** — 로컬로 검증 불가 |
+
+⚠ **Do not collapse the last three into *"죽었습니다"*.** Following that advice starts a second
+supervisor against a first one that is alive on another host — the outcome `run.md:88` forbids.
+
+⚠ **The match string is `.gld-sprint-`, and it is NOT copied from `run.md`'s prose.** The two
+copies say the same thing for the same reason but they are separate strings: what `ps` prints is
+`bash .claude/guild/.gld-sprint-<tracker>.sh`, because the marker's `pid` is the supervisor
+script's own `$$`. `sprint-supervisor` is the **template** filename and never appears in that
+output; matching it sent a live supervisor down the "pid recycled → treat as gone" row.
+
+#### `state: finished` — render the ledger's `completion` key
+
+⚠ **There is no completion notification, and this is the only channel.** Phase 4 of `run.md`
+only runs while the launching session is alive; a run that lasted three nights has no such
+session, and the marker is a PATCH of an existing comment so GitHub sends nothing either. The
+supervisor therefore writes one `completion` object into the ledger just before `state:
+finished`, and this command renders it: counts, `elapsed_s` (⚠ **as h:m** — a multi-night run
+makes this a large number), `cost`, `tokens`, `logs`, `run_timestamp`, and the four issue lists.
+
+- ⚠ **`paused_issues` first.** A paused member (`guild:needs-human`) is the one outcome that
+  **requires** a human, and `paused: 1` without a number cannot be acted on days later.
+- ⚠ **`kept_worktrees` is `{path, reason}`**, and the `reason` is git's own refusal
+  (`locked` / `modified or untracked files` / `main working tree`) — three different actions,
+  not re-derivable from a live `git status` days later. Render the reason.
+- ⚠ **But re-derive the source-vs-docs judgement yourself.** *"Uncommitted **source** vs only
+  untracked **docs**"* comes from each worktree's **live `git status`**, never from the ledger.
+  Without that distinction `_execute_spine.md` Step 3.5b's deliberate untracked-ADR gap shows
+  up as *"확인 필요"* on every single run.
+- ⚠ **Known gap, inherited:** `worktree_release` only runs at `guild:done`, so a **paused**
+  member's preserved worktree is not in `kept_worktrees`. The `git worktree list` pass below is
+  what catches those.
+- All paths in `completion` are **relative** by design (`marker_write` PATCHes the whole ledger
+  into a public issue comment — INV5). Do not "helpfully" print an absolute one.
 
 **6. Termination — two axes, reported separately.**
 

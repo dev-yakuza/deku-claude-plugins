@@ -144,7 +144,7 @@ Create via Write tool:
   - `dismissed.md` — accepted-risk registry (header only; `- <path/pattern> — <reason>` downgrades that item to a warning).
   - `findings.json` — `{ "open": [] }` (the gate writes open violations here).
 - `.claude/guild/overlay/.gitkeep` — flow-policy override surface (empty; `/gld contribute` upstreams diffs here).
-- `.claude/guild/.gitignore` — containing `memory/` (episodic memory is gitignored) and `gates/scripts/local/__pycache__/` (a repo-local gate extension is imported at commit time; the gate sets `sys.dont_write_bytecode` so none should appear, but a repo whose own `.gitignore` does not cover `__pycache__` would otherwise commit any that slipped through — Guild owns this file, so it should not depend on the repo's).
+- `.claude/guild/.gitignore` — containing `memory/` (episodic memory is gitignored), **`.gld-sprint-*.window`** and **`.gld-sprint-*.board`** (per-run sidecar config: a sprint that has not completed keeps them for days, and the parent `!.claude/guild/` negation would otherwise show them as untracked and let `git add .` commit a machine-local window into the repo — after which `cleanup`'s `rm -f` deletes a TRACKED file; 04-sprint-window.md §6.5 INV3), and `gates/scripts/local/__pycache__/` (a repo-local gate extension is imported at commit time; the gate sets `sys.dont_write_bytecode` so none should appear, but a repo whose own `.gitignore` does not cover `__pycache__` would otherwise commit any that slipped through — Guild owns this file, so it should not depend on the repo's).
 - `.claude/guild/memory/.gitkeep`.
 
 **config.json (M1 subset):**
@@ -156,7 +156,8 @@ Create via Write tool:
   "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>" },
   "automation": { "evolve_nudge": true },
   "gates": { "enabled": true },
-  "sprint": { "capacity": null, "max_stack_depth": 3, "history": [], "board": null }
+  "sprint": { "capacity": null, "max_stack_depth": 3, "history": [], "board": null,
+              "window": null }
 }
 ```
 - `commands.*` values are the **normalized, simple-bash-safe** forms from command-scan (see `scan_repo.md` Section 2): each is either a single simple command string, or an **array** of simple commands run in sequence. They MUST NOT contain `$(...)`, `&&`, `|`, `;`, or redirections — Guild runs them one per Bash call. (e.g. `flutter test --fail-fast --concurrency=$(nproc --all)` → store `"flutter test --fail-fast"`; `flutter analyze && npx remark . --quiet --frail` → store `["flutter analyze", "npx remark . --quiet --frail"]`.) A missing category → `null`.

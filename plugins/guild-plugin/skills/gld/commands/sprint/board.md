@@ -111,7 +111,9 @@ Read-only. Four things, in this order:
    gh api repos/<owner>/<repo>/issues/<tracker>/comments --paginate --jq '.[].body'
    ```
 
-   Take the **last** `<!-- guild:sprint:run -->` block. No open sprint, or no marker → skip
+   Take the **oldest** `<!-- guild:sprint:run -->` block — the LOWEST comment id (the
+   supervisor PATCHES one comment in place and picks `min(id)`; *"last"* was wrong and only
+   showed once a second marker comment existed). No open sprint, or no marker → skip
    straight to `last_projected` and say `투영 기록 없음` when that is null too. Do not print a
    freshness figure sourced from anything that moves independently of the board.
 2. **`Column by` re-check** (D14). One `gh api graphql` read.
@@ -413,7 +415,13 @@ human who is not told to filter by it will not think to.
 
 ⚠ **Is a supervisor running right now?** Read the open tracker's `<!-- guild:sprint:run -->`
 marker (Phase S step 1 already fetches it). `state: running` / `installing-deps` /
-`rate-limited-*` with a live pid → **replace the fourth line** with:
+`rate-limited-*` / `waiting-for-window-<HHMM>` with a live pid → **replace the fourth line**
+with:
+
+⚠ **`waiting-for-window-*` belongs in that list and is the most dangerous omission.** It is a
+run that will look idle all day, so `--setup` passing quietly is the likely outcome: config
+gets the new board, but the supervisor read `.board` **once, at launch**, so it projects to the
+old board all night. That is the state this section calls the worst kind of wrong.
 
 ```
 ⚠ #<tracker> 의 감독자가 이미 돌고 있습니다 — 이 run 은 이 보드에 투영하지 않습니다.

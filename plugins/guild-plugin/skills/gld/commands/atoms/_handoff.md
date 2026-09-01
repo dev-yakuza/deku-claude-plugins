@@ -397,7 +397,16 @@ Every **human-readable string Guild emits is written in the repo's `config.langu
 
 **Never localized — stays ASCII/English (machine tokens):** the `RESULT`/return keywords (`DONE`, `BLOCKED`, `NEEDS_CONTEXT`, `OK ADVANCE`, `OK SPLIT`, …), HTML markers (`<!-- guild:* -->`), `guild:*` label names, file paths, code identifiers, git branch/commit conventions, and **any token a later run reads back out of a record it wrote**. That class currently has two members:
 - the auditor record's `### audit-record <n>` block headings and its four disposition tokens (`looped-back`/`fixed`/`recorded`/`dismissed`, `_execute_spine.md` Step 4), which the next invocation counts and re-states;
-- the sprint run ledger's `state:` values (`running` · `installing-deps` · `rate-limited-until-<epoch>` · `rate-limited-remaining-<n>s` · `finished` · `halted:<reason>`), its `retries`/`discovered` keys, the failure classes in `.sprint-logs/<tracker>/failures.jsonl`, and `sprint_dag.py`'s `DEFAULT` / `BLOCKED:<reason>` tokens — all read back by `sprint run`'s duplicate-run guard and by `sprint daily` (`sprint/run.md`, `sprint/daily.md`). The same ledger's board counters (`board_fails` · `board_bugs` · `board_unknown_col` · `board_account_mismatch` · `board_disabled_after` · `board_last_write` · `board_reason_disabled` · `board_off_reason`) belong here too: `sprint daily` and `run`'s Phase 4 report read them back, and `sprint board` renders them (`sprint/board.md`).
+- the sprint run ledger's `state:` values (`running` · `installing-deps` · `rate-limited-until-<epoch>` · `rate-limited-remaining-<n>s` · **`waiting-for-window-<HHMM>`** · `finished` · `halted:<reason>`), its `retries`/`discovered`/**`window`**/**`completion`** keys, the failure classes in `.sprint-logs/<tracker>/failures.jsonl`, and `sprint_dag.py`'s `DEFAULT` / `BLOCKED:<reason>` tokens — all read back by `sprint run`'s duplicate-run guard and by `sprint daily` (`sprint/run.md`, `sprint/daily.md`). The same ledger's board counters (`board_fails` · `board_bugs` · `board_unknown_col` · `board_account_mismatch` · `board_disabled_after` · `board_last_write` · `board_reason_disabled` · `board_off_reason`) belong here too: `sprint daily` and `run`'s Phase 4 report read them back, and `sprint board` renders them (`sprint/board.md`).
+
+⚠ **`halted:<reason>` is a wildcard and the reasons are enumerated**: `interrupted` ·
+**`window-invalid`** · **`marker-unwritable`** · **`container-lost`** · **`sigTERM`** ·
+**`sigHUP`** · `plan-hash-mismatch`. `interrupted` used to be the single destination of every
+abnormal exit, which on a run that lasts days is the only diagnostic channel there is.
+⚠ **`window`** (the literal `HH:MM-HH:MM`) and **`completion`** (one object, written just
+before `state: finished`) are the two ledger keys that **cannot be re-derived** — a writer that
+replaces the marker wholesale destroys them, and `window` losing its value turns a night run
+into an unbounded day run.
 
 Localizing any of these would break parsing.
 

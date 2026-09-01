@@ -34,8 +34,18 @@ Each its own Bash call.
 
    ⚠ **Then check whether a supervisor is actually RUNNING** — read the open tracker's
    `<!-- guild:sprint:run -->` marker (`gh api repos/<owner>/<repo>/issues/<tracker>/comments
-   --paginate --jq '.[].body'`, last block wins). `state:` of `running` / `installing-deps` /
-   `rate-limited-*` means a run may be in flight. Branch on the heartbeat, **not on the host**:
+   --paginate --jq '.[].body'`, **oldest** block wins — the supervisor PATCHES one comment in
+   place and picks `min(id)`). `state:` of `running` / `installing-deps` /
+   `rate-limited-*` / `waiting-for-window-<HHMM>` means a run may be in flight. Branch on the
+   heartbeat, **not on the host**:
+
+   ⚠ **`waiting-for-window-*` is a LIVE run.** It is the state a windowed run spends most of its
+   life in — up to twelve hours at a stretch, for days — and the refusal message has to say so
+   or the human reads *"refused, nothing is happening"* as a bug: *"#<tracker> 의 감독자가 창
+   밖이라 대기 중입니다 — 남은 멤버 <n> · 다음 창 <HH:MM>. 중단하시려면 `kill <pid>` 후 다시
+   불러 주십시오 — 멤버 작업 중이면 그 멤버가 끝난 뒤에 멈춥니다."* Omit the token and this
+   state falls into `proceed`, which does the damage this section already names below —
+   *"seeds members a live supervisor is developing, resetting their cards to `Ready`"*.
 
    | Observed | Verdict |
    |---|---|

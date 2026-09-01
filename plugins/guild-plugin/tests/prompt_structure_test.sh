@@ -646,6 +646,367 @@ hasfx "board.md: --reset 이 드래프트를 뺀다" "$BOARD" "those are **draft
 # 12d. 롤백 순서 (config 를 먼저 비우면 --reset 이 아무 것도 못 한다)
 hasfx "board.md: --reset 이 config 정리보다 먼저다" "$BOARD" "Run this BEFORE removing the board from config"
 
+
+echo ""
+echo "== 13. 실행 시간대 창 — 산문 단정 (04-sprint-window.md · -tests.md §3.5) =="
+# ⚠ 아래는 LLM 이 읽는 markdown 에 대한 검사다. **문장이 존재하면 통과하고, 주변 논리가
+#   모순돼도 통과한다.** 초록을 "검증됐다"로 읽지 않는다. 다만 선언된 한계가 곧 어쩔 수 없는
+#   한계는 아니다 — 아래 19·21·23·28·33 은 스코프를 좁혀 실제로 발화하게 만들었다.
+HANDOFF="$GLD/commands/atoms/_handoff.md"
+RETRO="$GLD/commands/sprint/retro.md"
+CONFMD="$GLD/commands/config.md"
+INITMD="$GLD/commands/init.md"
+
+# ── 19. 상태 토큰이 다섯 파일에 있고, plan.md 는 인접성 스코프 안에 있는가 ────────
+# ⚠ 명세는 **여섯** 파일(+ `design/guild/02-sprint.md`)을 요구하지만 `design/` 는 이 플러그인이
+#   배포하는 트리가 아니고 리포에서 gitignore 된다 — 여기서 단정할 수 있는 것은 다섯이다.
+#   여섯째는 설계 문서 자체의 정정이고, 검사할 파일이 없다는 사실을 여기 적어 둔다.
+for F in "$HANDOFF" "$DAILY" "$RETRO" "$PLAN" "$BOARD"; do
+  hasfx "창 토큰이 $(basename "$F") 에 열거돼 있다" "$F" "waiting-for-window-"
+done
+# ⚠ 인접성 스코프. 파일 전체 grep 이면 다른 언급(예: 거부 문구)이 남아 통과하고, `plan.md:44`
+#   의 `proceed` 로 떨어지는 파괴적 변이를 놓친다 — 6라운드 실측.
+cat > "$WORK3/adj.py" <<'ADJPY'
+import re, sys
+src = open(sys.argv[1]).read()
+anchor, needle, span = sys.argv[2], sys.argv[3], int(sys.argv[4])
+i = src.find(anchor)
+if i < 0:
+    print("MISSING anchor: %s" % anchor); raise SystemExit(0)
+print("OK" if needle in src[i:i + len(anchor) + span]
+      else "NOT within %d chars of `%s`" % (span, anchor))
+ADJPY
+
+cat > "$WORK3/blk.py" <<'BLKPY'
+import sys
+src = open(sys.argv[1]).read()
+start, end, needle = sys.argv[2], sys.argv[3], sys.argv[4]
+i = src.find(start)
+if i < 0:
+    print("MISSING block start: %s" % start); raise SystemExit(0)
+j = src.find(end, i)
+if j < 0:
+    print("MISSING block end: %s" % end); raise SystemExit(0)
+print("OK" if needle in src[i:j] else "NOT inside the block: %s" % needle)
+BLKPY
+ADJ="$("$PY" "$WORK3/adj.py" "$PLAN" '`rate-limited-*`' 'waiting-for-window-' 60)"
+if [ "$ADJ" = OK ]; then
+  ok "plan.md: 창 토큰이 \`rate-limited-*\` 열거 **안**에 있다 (인접성 스코프)"
+else
+  bad "plan.md: 창 토큰이 열거 안에 있다" "adjacent" "$ADJ"
+fi
+ADJ2="$("$PY" "$WORK3/adj.py" "$RETRO" '`rate-limited-*`' 'waiting-for-window-' 60)"
+if [ "$ADJ2" = OK ]; then
+  ok "retro.md: 창 토큰이 \`rate-limited-*\` 열거 **안**에 있다"
+else
+  bad "retro.md: 창 토큰이 열거 안에 있다" "adjacent" "$ADJ2"
+fi
+ADJ3="$("$PY" "$WORK3/adj.py" "$BOARD" '`rate-limited-*`' 'waiting-for-window-' 60)"
+if [ "$ADJ3" = OK ]; then
+  ok "board.md: 창 토큰이 \`rate-limited-*\` 열거 **안**에 있다"
+else
+  bad "board.md: 창 토큰이 열거 안에 있다" "adjacent" "$ADJ3"
+fi
+# halted 사유 다섯이 정본 열거(_handoff Section K)에 있는가
+for R in window-invalid marker-unwritable container-lost sigTERM sigHUP; do
+  hasfx "_handoff.md: halted 사유 \`$R\` 가 정본에 열거돼 있다" "$HANDOFF" "\`$R\`"
+done
+hasfx "_handoff.md: 재파생 불가 원장 키에 window 가 있다"     "$HANDOFF" '**`window`**'
+hasfx "_handoff.md: 재파생 불가 원장 키에 completion 이 있다" "$HANDOFF" '**`completion`**'
+
+# ── 20. `--duration` 별칭과 알 수 없는 플래그 거부 ────────────────────────────
+# ⚠ `--duration` 이 없으면 비플래그 인자가 없다는 이유로 *"재개"* 로 떨어져 **창 없이 24시간
+#   무인 run** 이 된다. 요구 원문이 `--duration` 이므로 이것이 가장 개연적인 첫 입력이다.
+# ⚠ 파일 전체 grep 으로는 안 된다 — `--duration` 은 거부 메시지·설명·예시에도 나오므로
+#   **알려진 플래그 문장**에서 이름을 빼도 통과한다(변이 실측, 이 라운드). 그 문장을 스코프로
+#   잡고, 그 안에 셋이 다 있는지 본다.
+FLG="$("$PY" "$WORK3/blk.py" "$RUNMD2" 'The known flags are' 'and nothing else' '`--duration`')"
+if [ "$FLG" = OK ]; then
+  ok "run.md: --duration 이 **알려진 플래그 문장 안**에 열거돼 있다 (요구 원문이 이것이다)"
+else
+  bad "run.md: --duration 의 위치" "inside the known-flags sentence" "$FLG"
+fi
+for F in '`--readiness`' '`--window`'; do
+  FL="$("$PY" "$WORK3/blk.py" "$RUNMD2" 'The known flags are' 'and nothing else' "$F")"
+  if [ "$FL" = OK ]; then ok "run.md: 알려진 플래그 문장에 $F 가 있다"
+  else bad "run.md: 알려진 플래그 $F" "inside the sentence" "$FL"; fi
+done
+hasfx "run.md: 알려진 플래그 목록이 있다"                  "$RUNMD2" 'The known flags are'
+hasfx "run.md: 그 밖의 -- 토큰은 거부한다"                 "$RUNMD2" 'Any other `--` token is REFUSED'
+hasfx "run.md: 거부 시 유효 목록을 찍는다"                 "$RUNMD2" 'FAIL: unknown flag'
+hasfx "run.md: 플래그 값 토큰은 비플래그 인자로 세지 않는다" "$RUNMD2" 'is not counted as a non-flag argument'
+hasfx "run.md: 공백과 = 를 둘 다 받는다"                   "$RUNMD2" 'accept BOTH a space and an `=`'
+hasfx "run.md: 남는 비플래그 토큰도 거부한다"              "$RUNMD2" 'A leftover non-flag token is not ignored'
+lacksfx "run.md: 옛 \$1 계약 한 줄이 남아 있지 않다"       "$RUNMD2" '`--readiness` = print the preflight verdict and stop.'
+
+# ── 21. `--readiness` 예외가 **인자 계약 블록 안**인가 (블록 스코프) ──────────
+# ⚠ `:27` 의 *"`--readiness` prints this table and stops"* 는 표의 캡션이고 개정과 무관하게
+#   남으므로, 파일 전체 grep 은 파괴적 변이(계약 블록에서 예외를 빼는 것)를 놓친다.
+BLK="$("$PY" "$WORK3/blk.py" "$RUNMD2" '**Arguments.**' '## Phase 0' \
+        '`--readiness` is the one exception')"
+if [ "$BLK" = OK ]; then
+  ok "run.md: --readiness 예외가 인자 계약 블록 **안**에 있다 (블록 스코프)"
+else
+  bad "run.md: --readiness 예외의 위치" "inside the argument block" "$BLK"
+fi
+
+# ── 22. 검증 규칙 **세 벌**이 같은 리터럴 예시를 쓰는가 ──────────────────────
+# ⚠ 스크립트의 `case` 글롭이 느슨해져도 산문은 그대로다 — 그래서 셋을 한 리터럴로 묶는다.
+W_LIT='HH:MM-HH:MM (24h, zero-padded)'
+W_LIT_MISS=""
+for F in "$RUNMD2" "$CONFMD" "$TPL"; do
+  grep -qF -- "$W_LIT" "$F" || W_LIT_MISS="$W_LIT_MISS $(basename "$F")"
+done
+if [ -z "$W_LIT_MISS" ]; then
+  ok "검증 규칙 세 벌이 같은 리터럴을 쓴다 (run.md · config.md · 템플릿)"
+else
+  bad "검증 규칙 세 벌의 리터럴" "all three" "missing:$W_LIT_MISS"
+fi
+
+# ── 23. daily 의 다섯 행 판정표 ──────────────────────────────────────────────
+# ⚠ 표가 step 2 에 놓여도 문자열 grep 은 통과한다 — 조건 헤딩 **안**인지 본다. step 2/3 은
+#   모든 state 에 대해 host/pid 를 읽으므로, 거기 두면 창을 안 쓰는 모든 run 이 host 불일치
+#   시 잘못된 판정을 받는다.
+DBLK="$("$PY" "$WORK3/blk.py" "$DAILY" \
+        '#### `state: waiting-for-window-*`' '**6. Termination' 'ps -p <pid> -o command=')"
+if [ "$DBLK" = OK ]; then
+  ok "daily.md: 생사 판정표가 waiting-for-window-* **조건 헤딩 안**에 있다"
+else
+  bad "daily.md: 판정표의 스코프" "inside the conditional heading" "$DBLK"
+fi
+for ROW in '확인할 수 없습니다' '죽었습니다' '정상 대기 중'; do
+  DR="$("$PY" "$WORK3/blk.py" "$DAILY" '#### `state: waiting-for-window-*`' '**6. Termination' "$ROW")"
+  if [ "$DR" = OK ]; then ok "daily.md: 판정표에 \`$ROW\` 행이 있다"
+  else bad "daily.md: 판정표 행 \`$ROW\`" "present in the block" "$DR"; fi
+done
+# ⚠ 문자열은 `.gld-sprint-` 다. `sprint-supervisor` 는 **템플릿 파일명**이고 `ps` 출력에 절대
+#   나타나지 않는다 — 그것을 찾으면 LIVE 감독자가 "pid 재사용 → 없는 것으로 취급" 으로 떨어진다.
+DGL="$("$PY" "$WORK3/blk.py" "$DAILY" '#### `state: waiting-for-window-*`' '**6. Termination' '.gld-sprint-')"
+if [ "$DGL" = OK ]; then
+  ok "daily.md: 판정표가 \`.gld-sprint-\` 를 찾는다 (sprint-supervisor 가 아니다)"
+else
+  bad "daily.md: 판정표의 매치 문자열" ".gld-sprint-" "$DGL"
+fi
+lacksfx "daily.md: 판정표가 템플릿 파일명을 찾지 않는다" "$DAILY" 'contains `sprint-supervisor`'
+hasfx   "daily.md: 두 사본이 다른 이유를 daily.md 안에 적었다" "$DAILY" \
+        'is the **template** filename and never appears in that'
+hasfx   "daily.md: 뒤의 셋을 죽었다고 뭉개지 말라고 말한다" "$DAILY" \
+        'Do not collapse the last three'
+
+# ── 24. caffeinate 이중 게이트 ───────────────────────────────────────────────
+hasfx "run.md: caffeinate 를 감싸는 조건이 이중이다" "$RUNMD2" 'a DOUBLE gate'
+hasfx "run.md: 창이 설정됐을 때만"                   "$RUNMD2" '**a window is set**'
+hasfx "run.md: command -v 성공 시에만"               "$RUNMD2" 'command -v caffeinate'
+hasfx "run.md: -i 만 쓴다"                           "$RUNMD2" '`-i` only'
+hasfx "run.md: 뚜껑을 닫으면 못 막는다고 적었다"      "$RUNMD2" 'a closed lid sleeps regardless'
+lacksfx "run.md: caffeinate -u 를 쓰지 않는다"        "$RUNMD2" 'caffeinate -u'
+lacksfx "run.md: caffeinate -s 를 쓰지 않는다"        "$RUNMD2" 'caffeinate -s'
+
+# ── 25. config.md 의 지점들 + init.md 의 키 집합 교차검증 (방어 ④) ───────────
+hasfx "config.md: 셋터 요약 목록에 --window= 가 있다" "$CONFMD" '- `--window=<HH:MM-HH:MM|none>`'
+hasfx "config.md: 렌더에 window 가 있다"              "$CONFMD" 'window=<HH:MM-HH:MM|미설정>'
+hasfx "config.md: 전용 섹션이 있다"                   "$CONFMD" '### `--window=<HH:MM-HH:MM|none>`'
+hasfx "config.md: M1 스키마에 window 가 있다"         "$CONFMD" 'history[], board, window}'
+hasfx "config.md: 갭 문장이 window 를 제외한다"       "$CONFMD" '`sprint.window` does **not**'
+# ⚠ **검증 규칙이 실제로 사는 곳**은 "Set a value" step 2 의 목록이고, 그것이 비면 위의
+#   나머지 여섯 지점이 전부 발화할 대상이 없다. 블록 스코프로 본다.
+# ⚠ 리터럴이 **블록 안에 있는가**로는 안 된다 — 그 블록의 설명문에도 같은 리터럴이 있어서
+#   규칙 줄을 느슨하게 고쳐도 통과했다(변이 실측, 이 라운드). 규칙 **줄 자체**를 잡는다.
+CBLK="$("$PY" "$WORK3/blk.py" "$CONFMD" '2. Validate the key/value:' '3. Update the key' \
+        '- `window` — **`HH:MM-HH:MM (24h, zero-padded)`**')"
+if [ "$CBLK" = OK ]; then
+  ok "config.md: 창 검증 규칙이 \"Set a value\" step 2 의 검증 목록 **안**에 있다"
+else
+  bad "config.md: 검증 규칙의 위치" "inside the validate list" "$CBLK"
+fi
+CBLK2="$("$PY" "$WORK3/blk.py" "$CONFMD" '2. Validate the key/value:' '3. Update the key' \
+        'start == end')"
+if [ "$CBLK2" = OK ]; then
+  ok "config.md: 그 목록이 start == end 도 거부한다"
+else
+  bad "config.md: start == end 거부" "inside the validate list" "$CBLK2"
+fi
+# init.md 의 sprint 객체와 config.md 의 스키마에서 키 집합을 뽑아 교차검증
+cat > "$WORK3/sprintkeys.py" <<'SKPY'
+import re, sys
+init, conf = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+m = re.search(r'"sprint":\s*\{(.*?)\}', init, re.S)
+if not m:
+    print('ERR init.md has no "sprint" object'); raise SystemExit(0)
+body = m.group(1)
+ikeys = set(re.findall(r'"([a-z_]+)":', body))
+m2 = re.search(r"sprint\{([^}]*)\}", conf)
+if not m2:
+    print("ERR config.md has no sprint schema"); raise SystemExit(0)
+ckeys = set(k.strip().replace("[]", "") for k in m2.group(1).split(","))
+problems = []
+if "window" not in ikeys:
+    problems.append('init.md\'s "sprint" object has no `window` key')
+elif not re.search(r'"window"\s*:\s*null', body):
+    problems.append("init.md's `window` default is not `null` — the window is opt-in and a "
+                    "windowless run must be byte-identical to today")
+for k in sorted(ikeys - ckeys):
+    problems.append("init.md writes `%s` but config.md's schema does not list it" % k)
+for k in sorted(ckeys - ikeys):
+    problems.append("config.md's schema lists `%s` but init.md does not write it" % k)
+print("OK %d keys" % len(ikeys) if not problems else "; ".join(problems))
+SKPY
+SK="$("$PY" "$WORK3/sprintkeys.py" "$INITMD" "$CONFMD")"
+case "$SK" in
+  OK*) ok "init.md 의 sprint 키 집합이 config.md 스키마와 일치하고 window 기본값이 null ($SK)" ;;
+  *)   bad "sprint 키 집합 교차검증" "the same set, window=null" "$SK" ;;
+esac
+
+# ── 26. `.git/info/exclude` 열거가 **세 줄 그대로**인가 ──────────────────────
+# ⚠ 창 파일을 여기 넣으면 **창을 안 쓰는 모든 run** 이 존재하지 않을 파일의 ignore 줄을 사람
+#   repo 에 영구히 쓰고 트래커마다 누적된다. `.board` 도 오늘 거기 없다.
+EXC_N="$(grep -c '^  for E in ".claude/guild/.gld-sprint-\$TRACKER.sh" ".claude/guild/.sprint-logs" ".claude/guild/memory"; do$' "$TPL" || true)"
+if [ "$EXC_N" = "1" ]; then
+  ok "template: info/exclude 루프가 세 항목 그대로다 (창 파일도 .board 도 넣지 않는다)"
+else
+  bad "template: info/exclude 열거" "the same three entries" "the loop line changed"
+fi
+lacksfx "run.md: info/exclude 에 창 파일을 넣지 않는다고 적었다는 것" "$RUNMD2" \
+        '`.gld-sprint-<tracker>.window` to `.git/info/exclude`'
+hasfx "run.md: 그 이유를 적었다" "$RUNMD2" 'Nothing is added to `.git/info/exclude`'
+hasfx "run.md: '두 곳'의 in full 목록에 창 파일이 있다" "$RUNMD2" '`.gld-sprint-<tracker>.window`'
+W_INFULL="$(grep -c 'gld-sprint-<tracker>.window' "$RUNMD2" || true)"
+if [ "$W_INFULL" -ge 3 ]; then
+  ok "run.md: 창 파일이 최소 세 곳(step 2c + in full 목록 둘)에 열거돼 있다"
+else
+  bad "run.md: 창 파일 열거 개수" ">=3" "found $W_INFULL"
+fi
+
+# ── 28. :151-152 주석 정정이 **결론을 유지**하는가 (주석의 *주장*을 판정) ─────
+# ⚠ 정정문이 *"`&&` 도 안전하다"* 로 쓰이면 다음 사람이 되돌리고, 그 줄이 함수 끝으로 이동하는
+#   순간 **보드 없는 run = 기존 사용자 전원**이 죽는다. `sig.py` 의 선례를 따른다.
+cat > "$WORK3/ifclaim.py" <<'IFPY'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r"((?:^#.*\n)+)^if \[ -n \"\$BOARD_NUMBER\" \]; then BOARD_WAS_ON=1; fi", src, re.M)
+if not m:
+    print("MISSING the BOARD_WAS_ON line or its comment block"); raise SystemExit(0)
+block = m.group(1)
+problems = []
+if not re.search(r"`if`, not", block):
+    problems.append("the block no longer states the `if` rule")
+if not re.search(r"[Kk]eep the `if`|Do not \"simplify\"|conclusion is unchanged", block):
+    problems.append("the corrected comment does not KEEP the conclusion (use `if`) — the next "
+                    "person will revert it on the old, false reasoning")
+if re.search(r"`&&`\s+(is|are)\s+safe|also safe|equally safe", block):
+    problems.append("the comment now says `&&` is safe, which invites the revert")
+if not re.search(r"last statement|as its last|function\b.*last|WHERE IT SITS", block):
+    problems.append("the correction does not say WHY it is position-dependent")
+print("OK" if not problems else "; ".join(problems))
+IFPY
+IFC="$("$PY" "$WORK3/ifclaim.py" "$TPL")"
+if [ "$IFC" = OK ]; then
+  ok "template: :151 주석 정정이 이유를 고치면서 결론(\`if\` 를 쓸 것)을 유지한다"
+else
+  bad "template: :151 주석의 주장" "$IFC"
+fi
+
+# ── 29. run.md Phase 4 의 halted:* 아암 ──────────────────────────────────────
+# ⚠ 없으면 오타로 즉사한 run 에 대해 사람이 *"done 0 / failed 0"* 류의 무의미한 보고를 본다.
+PBLK="$("$PY" "$WORK3/blk.py" "$RUNMD2" '## Phase 4' '## Return' 'halted:window-invalid')"
+if [ "$PBLK" = OK ]; then
+  ok "run.md: Phase 4 에 halted:window-invalid 아암이 있다"
+else
+  bad "run.md: Phase 4 의 halted 아암" "inside Phase 4" "$PBLK"
+fi
+for R in marker-unwritable container-lost sigTERM interrupted; do
+  PB="$("$PY" "$WORK3/blk.py" "$RUNMD2" '## Phase 4' '## Return' "halted:$R")"
+  if [ "$PB" = OK ]; then ok "run.md: Phase 4 에 halted:$R 아암이 있다"
+  else bad "run.md: Phase 4 의 halted:$R" "inside Phase 4" "$PB"; fi
+done
+hasfx "run.md: halted 를 정상 카운트만으로 보고하지 말라고 말한다" "$RUNMD2" \
+      'Never report a `halted:*` run with the normal counts alone'
+hasfx "run.md: marker-unwritable 의 사유가 원장에만 있을 수 있다고 적었다" "$RUNMD2" \
+      'ledger.json'
+
+# ── 30. *"완주 통지는 없다"* 가 run.md step 6 과 daily 둘에 ──────────────────
+RB="$("$PY" "$WORK3/blk.py" "$RUNMD2" '6. Report: sprint number' '**What the supervisor does' \
+      '완주 통지는 없습니다')"
+if [ "$RB" = OK ]; then
+  ok "run.md: '완주 통지는 없습니다' 가 Phase 3 step 6 안에 있다"
+else
+  bad "run.md: 완주 통지 문장의 위치" "inside step 6" "$RB"
+fi
+hasfx "daily.md: 완주 통지가 없다는 사실을 적었다" "$DAILY" 'There is no completion notification'
+hasfx "daily.md: state: finished 시 completion 을 렌더한다" "$DAILY" 'completion` key'
+hasfx "daily.md: 워크트리 판정은 git status 로 재도출한다" "$DAILY" 're-derive the source-vs-docs judgement'
+hasfx "daily.md: paused_issues 를 먼저 렌더한다" "$DAILY" '`paused_issues` first'
+hasfx "daily.md: kept_worktrees 의 reason 을 렌더한다" "$DAILY" 'is `{path, reason}`'
+hasfx "daily.md: elapsed_s 를 시:분으로 렌더한다" "$DAILY" 'as h:m'
+hasfx "daily.md: board_last_write 신선도 예외가 있다" "$DAILY" '투영은 <HH:MM>에 재개'
+hasfx "daily.md: kill <pid> 안내가 있다" "$DAILY" '중단: `kill <pid>`'
+
+# ── 31. Phase 0 의 GH_TOKEN + 창 동시 조건 경고 ─────────────────────────────
+GBLK="$("$PY" "$WORK3/blk.py" "$RUNMD2" '### Phase 0b' '## Phase 1' 'GH_TOKEN')"
+if [ "$GBLK" = OK ]; then
+  ok "run.md: Phase 0 에 GH_TOKEN + 창 동시 조건 경고가 있다"
+else
+  bad "run.md: GH_TOKEN 경고의 위치" "inside Phase 0" "$GBLK"
+fi
+hasfx "run.md: 18 이 영구 만료를 흡수할 수 없다고 적었다" "$RUNMD2" 'cannot absorb a permanent'
+
+# ── 33. 창 길이 WARN · DST 경고가 **마지막 ask 앞**이고 판별 케이스가 박혔는가 ─
+# ⚠ Phase 3 step 6 에 두면 배경 작업 시작 **후**에 경고가 나온다.
+WBLK="$("$PY" "$WORK3/blk.py" "$RUNMD2" '### Phase 0b' 'Finally, show the warnings' \
+        'shorter than 120 minutes')"
+if [ "$WBLK" = OK ]; then
+  ok "run.md: 창 길이 WARN 이 Phase 0 의 마지막 ask **앞**에 있다"
+else
+  bad "run.md: 창 길이 WARN 의 위치" "before the final ask" "$WBLK"
+fi
+DBL="$("$PY" "$WORK3/blk.py" "$RUNMD2" '### Phase 0b' 'Finally, show the warnings' 'DST')"
+if [ "$DBL" = OK ]; then
+  ok "run.md: DST 경고가 같은 자리에 있다"
+else
+  bad "run.md: DST 경고의 위치" "before the final ask" "$DBL"
+fi
+# ⚠ 판별 케이스를 리터럴로 박아 grep 가능하게 한다 — HHMM 차로 계산하면 둘의 답이 갈린다.
+for C in '23:00-00:30' '00:30-02:00'; do
+  CB="$("$PY" "$WORK3/blk.py" "$RUNMD2" '### Phase 0b' 'Finally, show the warnings' "$C")"
+  if [ "$CB" = OK ]; then ok "run.md: 판별 케이스 \`$C\` 가 산문에 리터럴로 박혔다"
+  else bad "run.md: 판별 케이스 \`$C\`" "literal in the prose" "$CB"; fi
+done
+hasfx "run.md: 분으로 센다고 말한다"                  "$RUNMD2" 'Count MINUTES, not the `HHMM` difference'
+hasfx "run.md: 스크립트는 길이를 판정하지 않는다"     "$RUNMD2" 'does not judge window length'
+# ⚠ 그리고 스크립트에 실제로 없어야 한다 — 두 곳이 판정하면 다른 답을 낼 수 있다.
+if grep -qE '(120|7200)' "$TPL" && grep -q 'window' "$TPL" && grep -qE 'WIN_(START|END).*120' "$TPL"; then
+  bad "template: 스크립트가 창 길이를 판정하지 않는다" "no length judgement" "found a 120-minute test"
+else
+  ok "template: 스크립트가 창 길이를 판정하지 않는다 (판정자는 run.md 하나뿐)"
+fi
+hasfx "run.md: N nights 를 범위로 낸다"               "$RUNMD2" 'as a RANGE'
+hasfx "run.md: 낮의 편집은 무효라고 말한다"           "$RUNMD2" '낮의 편집은 무효입니다'
+hasfx "run.md: 창 있는 run 의 ask 가 네 가지를 말한다" "$RUNMD2" 'the ask must
+name four things'
+
+# ── 35. plan-hash 마커가 window·completion 을 보존하는가 ─────────────────────
+# ⚠ 지우면 다음 재개에 창이 사라지고 **낮에 무제한 무인 run** 이 된다. 사람에게 가는 신호가
+#   하나도 없다 — `window` 를 지우는 writer 가 둘이므로 `:75` 만 가드하면 안 된다.
+HBLK="$("$PY" "$WORK3/blk.py" "$RUNMD2" 'halted:plan-hash-mismatch' '5. **Rebuild the queue' \
+        'PRESERVE THE MARKER')"
+if [ "$HBLK" = OK ]; then
+  ok "run.md: plan-hash 마커가 기존 키를 보존하라고 명시한다"
+else
+  bad "run.md: plan-hash 마커의 보존 규칙" "inside step 4" "$HBLK"
+fi
+for K in window completion; do
+  HB="$("$PY" "$WORK3/blk.py" "$RUNMD2" 'halted:plan-hash-mismatch' '5. **Rebuild the queue' "\`$K\`")"
+  if [ "$HB" = OK ]; then ok "run.md: 보존 대상에 \`$K\` 가 리터럴로 열거돼 있다"
+  else bad "run.md: 보존 대상 \`$K\`" "enumerated in step 4" "$HB"; fi
+done
+# 재개 경로: 창 파일 복원이 run 필드 clear **앞**이고, 복원 실패 시 rm -f 대신 사람에게 묻는다
+hasfx "run.md: 재개 시 창 파일을 먼저 복원한다"   "$RUNMD2" 'restore the window file from the marker'
+hasfx "run.md: window 는 clear 대상이 아니다"     "$RUNMD2" '`window` is not a run field'
+hasfx "run.md: 복원 실패 시 사람에게 묻는다"      "$RUNMD2" '**ask the human** instead of deleting it'
+hasfx "run.md: step 2c 가 창 파일을 쓴다"          "$RUNMD2" '2c. **Write the run window file**'
+hasfx "run.md: 창이 없으면 rm -f 한다"             "$RUNMD2" 'rm -f .claude/guild/.gld-sprint-<tracker>.window'
+hasfx "run.md: 거부 문구에 날짜가 들어간다"        "$RUNMD2" '시작 YYYY-MM-DD HH:MM'
+
 echo ""
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -654,7 +1015,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=91
+BOARD_MIN_CHECKS=184   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

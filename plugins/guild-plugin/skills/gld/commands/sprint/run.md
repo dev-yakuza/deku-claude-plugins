@@ -5,8 +5,46 @@ worktree, stacking PRs where a dependency has not landed yet — and keep going 
 limits until the queue is empty.** The human reviews and merges concurrently in their own
 checkout; this command never touches it.
 
-`$1` = comma-separated Issue numbers (ad-hoc sprint) · empty = **resume the active sprint** ·
-`--readiness` = print the preflight verdict and stop.
+**Arguments.** A token starting with `--` is a **flag** and its position does not matter. The
+ad-hoc/resume decision is made from the **first non-flag argument**: numbers (comma-separated)
+→ ad-hoc sprint, none → **resume the active sprint**.
+
+The known flags are **`--readiness`** · **`--window`** · **`--duration`** (= an alias of
+`--window`) and nothing else.
+
+- ⚠ **Any other `--` token is REFUSED**, with the valid list printed. Never ignored.
+  `FAIL: unknown flag <token> — valid flags: --readiness, --window=<HH:MM-HH:MM|none>,
+  --duration=<same>`. Today an unknown flag is silently dropped and the run starts, and the
+  destructive case is the requirement's own spelling: `--duration 22:00-10:00` ignored leaves
+  no non-flag argument, which reads as *"resume the active sprint"* and starts a **24-hour
+  unattended run with no window at all**. `sprint.md:31` and `config.md:13` already have the
+  *"unknown → report it"* convention.
+- ⚠ **A flag's VALUE token is not counted as a non-flag argument.** Consume the value first,
+  then look for the first non-flag token in what is left. (In `--window 22:00-10:00`, if
+  `22:00-10:00` became the first non-flag token it is neither numeric nor absent — an
+  **undefined** state.)
+- ⚠ **`--window` and `--duration` accept BOTH a space and an `=`**: `--window 22:00-10:00` and
+  `--duration=22:00-10:00` are the same input. If the `=` form fell through to "unknown flag",
+  the refusal message would print the very flag it had just refused as valid.
+- ⚠ **A leftover non-flag token is not ignored either.** `/gld sprint run 101 102` (spaces
+  instead of a comma) makes 101 ad-hoc today and loses 102 silently. Refuse and show the
+  `101,102` form.
+- ⚠ **`--readiness` is the one exception to all of this** — it prints the Phase 0 table and
+  **stops**. It must never fall through to *"resume"* on the grounds that there is no first
+  non-flag argument.
+
+**`--window <HH:MM-HH:MM>`** (alias `--duration`) limits when this run may **start a new
+member**; see Phase 0 and Phase 3 step 2c.
+
+- 24-hour clock, **zero padding required** — `9:00` is refused. Validate against this literal:
+  **`HH:MM-HH:MM (24h, zero-padded)`**.
+- `~` is accepted as the separator and normalised to `-` (`22:00~10:00` → `22:00-10:00`).
+- The **end is exclusive**: `22:00-10:00` is already outside the window at `10:00:00`.
+- **Start == end is refused** — say *"omit the window instead"*. (That refusal is what makes
+  the window guaranteed to open within 24 hours.)
+- Fields out of range (`HH` 00-23, `MM` 00-59) are refused.
+- `--window none` runs this one time with **no** window, whatever `config.sprint.window` says.
+- Precedence: **flag > ledger (on a resume) > `config.sprint.window`**.
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. The generated supervisor script is
 > the sanctioned exception (`:85`) — variable expansion, redirection and heredocs *inside* it
@@ -56,8 +94,50 @@ human-correction rate) are **not** checked. They measure trust in *self-modifica
 command does not self-modify: `retro` is a separate command the human types, and evolve inside
 it keeps per-item approval. What remains is the same risk `batch` already ships with.
 
+### Phase 0b — window questions, and they are asked HERE
+
+⚠ **Before the final ask, not in Phase 3.** Phase 3 step 5 has already launched the background
+job, so a warning printed there arrives after the run has begun. Everything needed is available
+now: the flag came in with `$1`, and `config.sprint.window` is in the config this phase reads.
+
+Resolve the effective window first (flag > ledger > `config.sprint.window`; `none` → no window).
+Then, **when there is a window**:
+
+1. **Window shorter than 120 minutes → WARN.** ⚠ **Count MINUTES, not the `HHMM` difference** —
+   `HHMM` arithmetic is off by up to 40 minutes near midnight. The two cases that tell a correct
+   implementation from a wrong one, and both must come out the same way:
+   - **`23:00-00:30`** — 90 minutes. `HHMM` says `0030 - 2300 = -2270`. **WARN.**
+   - **`00:30-02:00`** — 90 minutes. `HHMM` says `170`. **WARN.**
+
+   ⚠ **The supervisor script does not judge window length.** Two judges can disagree; this is
+   the only one.
+2. **DST warning, with the WARN.** A window that falls entirely inside the hour a
+   daylight-saving transition **skips** does not open that day. This is the one exception to
+   *"the window always opens within 24 hours"*.
+3. **`GH_TOKEN` + a window → warn and ask.** The supervisor inherits this session's
+   environment and `GH_TOKEN` overrides the keyring account; a GitHub App installation token
+   lasts an hour. A window **structurally guarantees** an idle gap of an hour or more between
+   launch and the first member — launch at 21:00 for a 22:00 window and the token is already
+   dead when work starts. The supervisor tolerates 18 consecutive marker failures while
+   waiting, which **delays** the death by about three hours and cannot absorb a permanent
+   expiry. Ask whether to continue or to re-authenticate first.
+4. **`caffeinate` — a DOUBLE gate.** Wrap the launch as `caffeinate -i bash <script>` only when
+   **a window is set** (flag or `config.sprint.window`) **and** `command -v caffeinate`
+   succeeds. ⚠ Not the platform gate alone: a windowless 40-minute run must not suppress a
+   macOS user's idle sleep, which nobody asked for and only the battery reveals. On Linux an
+   unconditional wrapper makes the run fail to start at all.
+   - `-i` only. `-u` asserts *"user activity"* and **turns the display on**; `-s` asserts only
+     on AC power; and **a closed lid sleeps regardless of any flag**.
+   - Say it plainly: *"뚜껑을 닫으면 감독자는 잡니다. 밤새 돌리시려면 전원을 연결하고 뚜껑을
+     열어 두시거나 `pmset` 스케줄을 쓰십시오 — Guild가 대신 해 드릴 수 없습니다."*
+
 Finally, show the warnings, the worktree paths to be created and the estimated dependency
-install time, then ask once: *"이대로 무인 실행할까요?"* Unattended (`GLD_UNATTENDED=1`) → do not
+install time, then ask once: *"이대로 무인 실행할까요?"* ⚠ **When a window is set the ask must
+name four things** — the window, the estimated number of nights, that `plan --create` and
+`retro` will be refused for the whole run (days, not hours), and how to stop it (`kill <pid>`).
+INV1 says the human approves the application of unattended work; a person approving at 21:00
+otherwise has no way to know they are approving 03:00 three days later.
+Unattended (`GLD_UNATTENDED=1`) → do not
 ask and do not start: return `OK: unattended — starting a sprint run requires a human`.
 
 ## Phase 1 — Resolve the sprint
@@ -71,8 +151,8 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    | Observed | Verdict |
    |---|---|
    | no marker | not running → start |
-   | `host` matches, pid alive, cmdline matches | **running** → refuse: *"이미 실행 중입니다 (pid N, 시작 HH:MM). 상태는 `/gld sprint daily`."* |
-   | `host` matches, pid gone | crash remnant → clear the run fields and resume |
+   | `host` matches, pid alive, cmdline matches | **running** → refuse: *"이미 실행 중입니다 (pid N, 시작 YYYY-MM-DD HH:MM). 상태는 `/gld sprint daily`."* ⚠ **With the date.** A windowed run lives for days, so a bare `HH:MM` shows a time from three days ago as if it were today's |
+   | `host` matches, pid gone | crash remnant → **restore the window file from the marker's `window` key FIRST**, then clear the run fields and resume. ⚠ **`window` is not a run field** — it is that run's configuration, and it is **not** cleared. Order matters and there is no second chance: `--window` never reaches `config.json`, so a run that dies at 03:00 and is resumed in the morning without the flag would have step 2c's `rm -f` fire and then **run unbounded through the day**. ⚠ If the marker has no `window` key but the window file exists, **ask the human** instead of deleting it — the script's rule (*"a constraint we could not read is not an absent constraint"*) applies to this path too. ⚠ Any marker this path writes follows the same rule as step 4: **PATCH the existing comment (lowest id if several), never post a new one** |
    | `host` differs | cannot verify locally → **ask the human**, showing the heartbeat age and `state` |
 
    ⚠ **"pid alive" needs a command, and there was none.** Left unstated an LLM guesses, and a
@@ -110,7 +190,29 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    `host`/`pid`/`state`. Prose, or a partial object, makes both read a malformed marker while
    this command returns *"recorded"*. Write it as a fenced JSON object between the markers:
    `{"host": "<hostname>", "pid": 0, "state": "halted:plan-hash-mismatch", "started":
-   "<ISO8601>", "heartbeat": "<ISO8601>"}`. ⚠ **`pid: 0` on purpose** — nothing is running, and
+   "<ISO8601>", "heartbeat": "<ISO8601>"}`.
+
+   ⚠⚠ **PRESERVE THE MARKER'S OTHER KEYS — replace only `state` (plus `host`/`pid`/
+   `heartbeat`).** Read the existing block, change those fields, write the rest back
+   untouched. Writing the five-key object as a whole **deletes `window`, `completion`,
+   `retries` and `discovered`** — and `window` has no other source. The realistic sequence:
+   the human edits the tracker body during the day (which Phase 3 step 6 tells them is void
+   for the current run, i.e. a normal thing to do), the evening resume finds a hash mismatch,
+   this marker is written, and the **next** resume restores no window and runs unbounded
+   through the day — with no signal to the human anywhere. `window` and `completion` are the
+   two that cannot be re-derived; enumerate them explicitly when you write this.
+
+   ⚠⚠ **UPDATE THE EXISTING COMMENT IN PLACE — never post a new one.** Use
+   `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH -f body=@<file>`. If the tracker
+   has **more than one** comment carrying `<!-- guild:sprint:run -->`, take the one with the
+   **LOWEST id**. That is not a preference: the supervisor does exactly this
+   (`target = min(found, key=id)`, so a run's history is not orphaned), and a new comment
+   splits the marker permanently — the supervisor keeps PATCHing the old one while `daily`,
+   `plan` and `board` read whichever they were told to, and a resume then finds no `window`
+   and runs unbounded through the day. Preserving the keys (above) does not help if the keys
+   are preserved in a comment nobody reads.
+
+   ⚠ **`pid: 0` on purpose** — nothing is running, and
    `ps -p 0 -o command=` is empty, so the guard reads it as a remnant and not as a live run.
 5. **Rebuild the queue.** Read the member table (immutable) for members and `base 의존`; then
    **re-read every member's current label** — the label is authoritative over anything the
@@ -136,7 +238,8 @@ writes nothing.** Two reasons, and the second is the binding one:
 ⚠ Writing it would therefore be a change to the human's checkout that **buys nothing** — and it
 would sit outside the write list this file's own Hard rules call *"in full"*
 (`.sprint-logs/<tracker>/**`, `.claude/guild/memory/`, `.gld-sprint-<tracker>.sh`,
-`.gld-sprint-<tracker>.board`, and three lines in `.git/info/exclude`). A phase that wrote a
+`.gld-sprint-<tracker>.board`, `.gld-sprint-<tracker>.window`, and three lines in
+`.git/info/exclude`). A phase that wrote a
 path outside that enumeration would make it false, which is the class of defect §12.5-7 was
 rewritten for. ⚠ **Step 2b's `.board` file IS that fifth path** — it was added to both copies of
 the list when it was introduced, because the list's whole value is being exhaustive, and a
@@ -252,6 +355,41 @@ inside its own worktree.
    **newline** still escaped it. `bash -n` was silent for all three on bash 3.2.57. In a data
    file none of it is code.
 
+2c. **Write the run window file** — when a window is in effect (flag > the marker's `window`
+   key on a resume > `config.sprint.window`). When there is **none**, **delete the file**
+   rather than skipping this step, exactly as step 2b does for the board:
+
+   ```bash
+   rm -f .claude/guild/.gld-sprint-<tracker>.window
+   ```
+
+   ⚠ **But not before the resume path above has restored it.** `--window` is never written to
+   `config.json`, so on a resume the marker's `window` key is the only record there is; this
+   `rm -f` firing on a resume launched without the flag is how a night run becomes an
+   unbounded day run.
+
+   Path: `.claude/guild/.gld-sprint-<tracker>.window`, in the **human's checkout** — the same
+   directory as the script and the `.board`. Write it with the **Write tool**, one line:
+
+   ```
+   window=22:00-10:00
+   ```
+
+   - The value is the **normalised** literal: `~` already turned into `-`, zero-padded.
+   - ⚠ **Do not write `window=none`.** No window means *delete the file*. (The supervisor does
+     accept `none` as "no window" rather than as an error, because the intent is unambiguous —
+     but a malformed time is refused and the run does not start.)
+   - The supervisor splits on the **first** `=` and strips whitespace from the value; it
+     validates the shape again and refuses the run on a mismatch, recording
+     `halted:window-invalid` in the marker. That is the second of the two locks — this file is
+     the instruction an LLM reads, and *"reject `9:00`"* is exactly the kind of thing an LLM
+     silently fixes for you.
+   - A clean run removes this file along with the script and the board config; an interrupted
+     run keeps all three deliberately.
+   - ⚠ **Nothing is added to `.git/info/exclude`.** That loop writes three entries and
+     `.board` is not among them either; adding one would write an ignore line for a file that
+     usually does not exist into the human's repo, permanently, once per tracker.
+
 3. **Write** it to `.claude/guild/.gld-sprint-<tracker>.sh` in the **human's checkout** — never
    inside the container. The self-delete trap and the logs must survive the container's removal.
 4. `chmod +x` it.
@@ -263,6 +401,25 @@ inside its own worktree.
    symlinks, so an unnormalised path makes every live worktree look unregistered). Phase 0's
    container check is a *precondition* test, not the creation step.
 6. Report: sprint number, member count, container path, log dir, and *"진행 상황은 `/gld sprint daily`. rate limit은 자동 대기·재개합니다."*
+
+   **When a window is in effect, this same sentence must also carry four things:**
+
+   - **The window**, and *"창 밖에서는 새 멤버를 시작하지 않고 기다립니다"*.
+   - **An estimated number of nights, as a RANGE**: `ceil(members × 60min ÷ window minutes)`
+     rendered as *"대략 1~3밤"*. A single number is a lie — a member takes 20 to 90 minutes and
+     a blocked or failed one is spent in seconds. When the window is shorter than 90 minutes,
+     `N = the member count`.
+   - ***"낮의 편집은 무효입니다"*** — the member set was fixed at launch, so editing the tracker
+     body during the day does not change this run. (And note that a body edit makes the next
+     resume see a plan-hash mismatch.)
+   - ***"완주 통지는 없습니다 — 아침에 `/gld sprint daily`로 확인하십시오."*** Phase 4 below only
+     runs while this session is alive, and the marker is a PATCH of an existing comment, so
+     GitHub sends no notification either. This is not a temporary gap; it is the design.
+   - **How to stop it**: `kill <pid>` — *"대기 중이면 최대 60초, 멤버 작업 중이면 그 멤버가 끝난
+     뒤에 멈춥니다. `kill -9` 는 쓰지 마십시오 — 카드가 `In progress` 에 남습니다."* Ctrl-C
+     cannot work: the supervisor is a background job of a non-interactive shell and inherits
+     SIGINT as SIG_IGN. ⚠ Saying only *"60초"* makes a human who sees nothing die reach for
+     `kill -9`, and that leaves the card on `In progress` permanently.
 
 **What the supervisor does per issue** (implemented in the template; summarized here so this
 file is readable on its own):
@@ -342,6 +499,22 @@ The harness re-invokes when the background task exits. Then:
 3. State both termination axes (`sprint.md` — run finished vs sprint finished) and point at
    `/gld sprint daily`.
 
+⚠ **`state: halted:*` — a separate arm, and it did not exist.** Without it a run that died in
+the first second over a one-character typo produces a *"done 0 / failed 0"* report that says
+nothing. Match on the wildcard and name the action for each:
+
+| `state` | What to say |
+|---|---|
+| `halted:window-invalid` | The window string was rejected; the run never started. **The reason line is in `FAIL:` on the supervisor log and the marker.** Fix the `--window` value (or `config.sprint.window`) and call `run` again |
+| `halted:marker-unwritable` | The marker could not be written N times in a row, so the run stopped rather than running blind (the duplicate-run guard needs it). Usually an expired token or a network outage. ⚠ **The reason may only exist in `.sprint-logs/<tracker>/dag/ledger.json`** — the marker write is what failed. Read it there |
+| `halted:container-lost` | The container disappeared mid-run (a `$TMPDIR` cleanup) and could not be re-created. Check the container path, then re-run |
+| `halted:sigTERM` / `halted:sigHUP` | Someone stopped it. The member that was running finished first; re-run to continue |
+| `halted:interrupted` | An abnormal exit that named no reason (SIGKILL cannot; power loss, battery, a forced reboot). ⚠ **A card may be stuck on `In progress`** — say so |
+| `halted:plan-hash-mismatch` | The tracker body changed. Re-plan or accept, per Phase 1 step 4 |
+
+⚠ **Never report a `halted:*` run with the normal counts alone.** `done 0 / failed 0` over a
+run that refused to start is the class of report this arm exists to remove.
+
 ## Return
 
 `OK: run complete — done <N> / paused <M> / failed <K> / blocked <J> / incomplete <I>` ·
@@ -362,7 +535,9 @@ The harness re-invokes when the background task exits. Then:
   the gitignored `.claude/guild/.sprint-logs/<tracker>/**`, `.claude/guild/memory/` (through the
   symlink), `.claude/guild/.gld-sprint-<tracker>.sh` (this script),
   `.claude/guild/.gld-sprint-<tracker>.board` (step 2b's board config — removed together with the
-  script on a clean run, deliberately kept otherwise), and three lines in `.git/info/exclude`. Plus, unavoidably, in the **shared ref store**: one new branch per Issue
+  script on a clean run, deliberately kept otherwise),
+  `.claude/guild/.gld-sprint-<tracker>.window` (step 2c's run window — same lifetime as the
+  board config; ⚠ **not** added to `.git/info/exclude`), and three lines in `.git/info/exclude`. Plus, unavoidably, in the **shared ref store**: one new branch per Issue
   (the spine cuts it — the work would not exist otherwise), `refs/remotes/origin/<base>`
   advanced by an additive fetch, and `.git/worktrees/` bookkeeping. Fetch only into
   `refs/remotes/`; never into a local branch name. ⚠ `git worktree prune` is repo-global and

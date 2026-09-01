@@ -57,6 +57,17 @@ INSTALL_CMDS=(<INSTALL_CMDS>)
 # is no token here to leave unrendered, either — the whole class is gone rather than patched.
 BOARD_CONF="$HUMAN_REPO/.claude/guild/.gld-sprint-$TRACKER.board"
 
+# ── Run window config (04-sprint-window.md §1.3) ─────────────────────────────
+# Same directory as the script and the `.board`, in the HUMAN's checkout. Unconditionally
+# initialised HERE, not in the window block below: the block only ASSIGNS when the file
+# exists, and under `set -u` a bare `$WIN_START` on a repo without a window is
+# `unbound variable` — exit 1 before the first Issue (measured, §7 L).
+WINDOW_CONF="$HUMAN_REPO/.claude/guild/.gld-sprint-$TRACKER.window"
+WIN_START=""      # integer 0..2359, or "" for "no window"
+WIN_END=""        # integer 0..2359
+WIN_RAW=""        # the literal `HH:MM-HH:MM`, for the ledger and for messages
+WIN_TOKEN=""      # zero-padded 4-digit start, for the `waiting-for-window-<HHMM>` state
+
 BOARD_NUMBER=""; BOARD_OWNER=""; BOARD_FIELD=""; BOARD_FIELD_NEEDS_HUMAN=""
 BOARD_VERIFIED_AS=""
 # Column display names as FIVE SCALARS, not a map: this file is bash 3.2 compatible and
@@ -123,7 +134,10 @@ esac
 # half-written file becomes a silent six-hour run with an untouched board — which is exactly
 # what the comment above claims cannot happen.
 if [ "$BOARD_CONF_MISSING" = 0 ] && [ -z "$BOARD_NUMBER" ] && [ -z "$BOARD_CONF_BAD" ]; then
-  BOARD_CONF_BAD="no usable \`number=\` line in $BOARD_CONF"
+  # ⚠ basename, not $BOARD_CONF. This lands in the ledger as `board_off_reason` and
+  # `marker_write` renders the whole ledger into a GitHub issue comment — the full path is
+  # `/Users/<name>/…`, which INV5 forbids leaving the machine (04-sprint-window.md §6.5).
+  BOARD_CONF_BAD="no usable \`number=\` line in $(basename "$BOARD_CONF")"
 fi
 if [ -n "$BOARD_NUMBER" ]; then
   # ⚠ BOARD_FIELD_NEEDS_HUMAN belongs on this list. It was left off, and `board_col` uses it
@@ -148,8 +162,14 @@ if [ -n "$BOARD_CONF_BAD" ] && [ "$BOARD_CONF_MISSING" = 0 ]; then
   echo "[sprint] WARN: board config unusable ($BOARD_CONF_BAD) — running WITHOUT the board"
   BOARD_OFF_REASON="config:$BOARD_CONF_BAD"
 fi
-# ⚠ `if`, not `[ … ] && …`: the latter returns 1 when the board is off, and as a top-level
-# command under `set -e` that kills the script on every board-less run.
+# ⚠ `if`, not `[ … ] && …`. ⚠ **The reason stated here until now was wrong, and the
+# conclusion is unchanged anyway.** A `[ … ] && …` returning 1 is fatal under `set -e` only
+# when it is the LAST statement of a function or of the script — in the middle of a list bash
+# does not exit (measured, 04-sprint-window.md §7 M). So this line is not, today, one line away
+# from killing every board-less run. Keep the `if` regardless: the form that is safe only
+# because of WHERE IT SITS becomes fatal the moment someone moves it, and `in_window`'s
+# `[ -z "$WIN_START" ] && return 0` is exactly that line. Do not "simplify" either of them,
+# and do not re-derive the rule from the old, false justification.
 if [ -n "$BOARD_NUMBER" ]; then BOARD_WAS_ON=1; fi
 
 RUNDIR="$HUMAN_REPO/.claude/guild/.sprint-logs/$TRACKER"
@@ -607,12 +627,33 @@ fi
 SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 COMPLETED=0
 FINISHED=0
+# ⚠ WHY this lives HERE and not next to the window block: `cleanup` reads it, and every test
+# harness that sources a cut through the closing selfdelete marker must see it ASSIGNED.
+# Declared in the window block instead, `${HALT_REASON:-}` would be the only defence and the
+# P7 gate below would be testing a default rather than a value (04-sprint-window.md §4.2).
+# `halted:interrupted` was a single bit for every abnormal exit; on a run that lasts DAYS it is
+# the only diagnostic channel there is, so each exit path names itself.
+HALT_REASON=""    # "" = a clean ending. Otherwise: window-invalid · marker-unwritable ·
+                  # container-lost · sigTERM · sigHUP. `cleanup` renders `halted:<this>`.
 cleanup() {
   # `marker_write` may not be defined yet if we die before its definition; `|| true` covers
   # both that (127) and a network failure. A failed final marker must not mask the real exit.
   # ⚠ Only a run that did NOT reach its own ending gets the halted marker. Writing it
   # unconditionally overwrote `state: finished` on EVERY clean run, because the trap fires
   # last — a completed sprint was then recorded as interrupted (measured).
+  #
+  # ⚠ **THIS GATE IS UNCHANGED, and that is the design decision** (04-sprint-window.md §4.2b).
+  # An earlier draft widened it to `|| [ -n "${HALT_REASON:-}" ]` so the three halt paths below
+  # could still repair their card. That is wrong in both directions: the yield is ~zero
+  # (`marker-unwritable` means gh is down so P7's write fails too — 03-sprint-board.md :1274
+  # calls P7 best-effort; `window-invalid` runs before ISSUE is ever assigned; `container-lost`
+  # names the PREVIOUS member), and the cost is real — `board_col_of` reads the CACHE, which is
+  # only refreshed on a successful write, so "the last P3 write failed" leaves the card reading
+  # `in_progress` and the widened gate relabels a COMPLETED member "interrupted".
+  #
+  # None of the halt paths needs it: they set `HALT_REASON` and leave `FINISHED` alone, so this
+  # gate is open for them and the reason below is theirs. `FINISHED=1` there was redundant the
+  # moment the marker's reason started coming from `HALT_REASON`.
   if [ "$FINISHED" -eq 0 ]; then
     # P7 (03-sprint-board.md §5.2). bash defers a trap while a foreground command runs, so a
     # `kill` lands AFTER the child session has already committed, pushed and opened its PR but
@@ -635,14 +676,19 @@ cleanup() {
       ledger_set board_bugs "${BOARD_BUGS:-0}" 2>/dev/null || true
       ledger_set board_unknown_col "${BOARD_UNKNOWN_COL:-0}" 2>/dev/null || true
     fi
-    marker_write "halted:interrupted" 2>/dev/null || true
+    # ⚠ The reason comes from HALT_REASON, never from a literal: `sigTERM`/`sigHUP` are set by
+    # `on_signal`, the three window/marker/container paths by their own exit points.
+    marker_write "halted:${HALT_REASON:-interrupted}" 2>/dev/null || true
   fi
   if [ "$COMPLETED" -eq 1 ]; then
     # ⚠ The board config file goes with the script. Leaving it behind means the next run of
     # this same tracker reads a STALE board config — and if the human turned the board off in
     # `config.sprint.board` meanwhile, `run.md` step 2b writes no file, the old one survives,
     # and the supervisor projects to a board the config says is gone.
-    rm -f "$SCRIPT_PATH" "$BOARD_CONF"; echo "[sprint] Removed supervisor script"
+    # ⚠ The window file goes with the script and the board config, for the same reason: a file
+    # left behind is read as "the window is still on" by the NEXT run of this tracker, which
+    # would then sit out the day for a window the human never asked for again (§3.4).
+    rm -f "$SCRIPT_PATH" "$BOARD_CONF" "$WINDOW_CONF"; echo "[sprint] Removed supervisor script"
   else
     echo "[sprint] Run did not complete — script kept at $SCRIPT_PATH"
     echo "[sprint] Re-run \`/gld sprint run\` to continue; state comes from GitHub labels."
@@ -655,6 +701,10 @@ cleanup() {
 # (c) COMPLETED reached 1, so it deleted its own re-run script. The handler below exits, which
 # then fires the EXIT trap once with FINISHED still 0.
 on_signal() {                     # on_signal <name> <exit-code>
+  # ⚠ Set the reason BEFORE exiting. Without this every `kill` still lands as
+  # `halted:interrupted` and `_handoff.md`'s enumeration of `sigTERM`/`sigHUP` is a lie —
+  # on a days-long run the marker is the only place the human can read what happened.
+  HALT_REASON="sig$1"
   echo "[sprint] SIG$1 — stopping. State comes from GitHub labels; re-run \`/gld sprint run\`."
   exit "$2"
 }
@@ -676,7 +726,13 @@ fi
 
 RUN_START=$(date +%s)
 DONE=0; PAUSED=0; FAILED=0; INCOMPLETE=0; BLOCKED=0
-FAILED_ISSUES=(); INCOMPLETE_ISSUES=(); BLOCKED_ISSUES=(); KEPT_WORKTREES=()
+# ⚠ PAUSED_ISSUES exists only for the ledger `completion` key (§4.3): a paused member is the
+# one outcome a human MUST act on, there is no completion notification, and `paused: 1`
+# without a number cannot be acted on days later.
+FAILED_ISSUES=(); INCOMPLETE_ISSUES=(); BLOCKED_ISSUES=(); KEPT_WORKTREES=(); PAUSED_ISSUES=()
+# ⚠ Parallel to KEPT_WORKTREES, same index. The single folded string cannot be split back
+# safely (`): ` can occur inside git's message), and the ledger must not carry the raw text.
+KEPT_WT_ISSUE=(); KEPT_WT_REASON=()
 QUEUE=("${ORDER[@]}"); SEEN=""
 for n in "${ORDER[@]}"; do SEEN="$SEEN #$n "; done
 TOTAL=${#ORDER[@]}; PROCESSED=0
@@ -689,8 +745,14 @@ LEDGER="$D/ledger.json"
 # Existence is not validity. The writes below are not atomic, so the very crash the ledger
 # exists to survive (SIGKILL mid-write) is what truncates it — and then `json.load` raises on
 # every marker write and the run stops before its first Issue with a one-line traceback and no
-# way to recover by re-running. Validate, and start clean if unreadable: the ledger holds only
-# the three volatile fields (§8.5), every one of which the next run re-derives from GitHub.
+# way to recover by re-running. Validate, and start clean if unreadable: most of the ledger is
+# volatile fields (§8.5) the next run re-derives from GitHub.
+# ⚠ NO LONGER "the three volatile fields, every one of which is re-derivable" — that sentence
+# was true before the run window and is now false in two places. `window` (the run's own
+# `HH:MM-HH:MM`, never written to config.json) and `completion` (the only report a days-long run
+# can leave, written just before `state: finished`) are RUN-LOCAL and NOT re-derivable, and both
+# are dropped at run start on purpose (below). 02-sprint.md §8.5's "checkpoint — three items"
+# needs the same correction.
 # ⚠ Except the board counters (`board_fails` · `board_bugs` · `board_account_mismatch` ·
 # `board_disabled_after`): those are RUN-LOCAL and are NOT re-derivable — a fresh ledger resets
 # them to zero, which reads as "the board was fine". Accepted, because the alternative is
@@ -719,9 +781,15 @@ try:
         led = json.load(fh)
 except Exception:
     raise SystemExit(0)
+# ⚠ `completion` and `window` are dropped for the SAME reason as the board keys, and it is
+# not a nicety: `$D` survives exactly when the previous run ended badly, and `marker_write`
+# renders the WHOLE ledger — so run 2's very first `heartbeat "running"` would re-publish run
+# 1's worktree list, cost and window. `completion` is ONE object key on purpose: conditional
+# sub-keys would simply not be written by run 2 and run 1's values would live on (§4.3).
 for k in ("board_fails", "board_bugs", "board_account_mismatch",
           "board_disabled_after", "board_last_write", "board_reason_disabled",
-          "board_unknown_col", "board_off_reason"):
+          "board_unknown_col", "board_off_reason",
+          "completion", "window"):
     led.pop(k, None)
 tmp = path + ".tmp"
 with open(tmp, "w") as fh:
@@ -806,6 +874,17 @@ PY
 # A marker failure must never kill the run — but §8.2's duplicate-run guard depends on it,
 # so three consecutive failures stop cleanly instead of running blind.
 MARKER_FAILS=0
+# ⚠ A VARIABLE, not the literal 3 it used to be, and `wait_for_window` raises it to 18 for the
+# duration of the wait. Why 18 is not "inconsistent with 3" — do not revert this for tidiness:
+#   • 3 consecutive failures normally span HOURS of real work, so a transient outage recovers
+#     in between. While waiting for the window the heartbeat is the ONLY thing that runs and
+#     the only thing that can kill the run: 10 min x 3 means a 30-minute network drop kills a
+#     multi-night run at 03:00.
+#   • the kill-switch's own justification (the duplicate-run guard, just above) is weak here:
+#     that guard judges by `host` + a LIVE pid + cmdline, never by heartbeat freshness.
+# 18 x ~10 min is roughly three hours. It absorbs outages that RECOVER; it cannot absorb a
+# permanently expired `GH_TOKEN`, which is why that is a Phase 0 question in run.md (§4.2).
+MARKER_MAX=3
 heartbeat() {
   # Board counters ride along here (03-sprint-board.md §7.2). This is the only position that
   # satisfies all three requirements at once: the human sees them WHILE the run is going
@@ -826,8 +905,20 @@ heartbeat() {
     MARKER_FAILS=0
   else
     MARKER_FAILS=$((MARKER_FAILS + 1))
-    if [ "$MARKER_FAILS" -ge 3 ]; then
-      echo "[sprint] Marker unwritable 3x — stopping so the duplicate-run guard stays honest."
+    if [ "$MARKER_FAILS" -ge "$MARKER_MAX" ]; then
+      HALT_REASON="marker-unwritable"
+      echo "[sprint] Marker unwritable ${MARKER_MAX}x — stopping so the duplicate-run guard stays honest."
+      # ⚠ `FINISHED` is NOT set — `cleanup` writes `halted:$HALT_REASON` and P7 still gets a
+      # chance at the card, which is the pre-window behaviour for this path.
+      # ⚠ THE LEDGER FIRST, and it is not belt-and-braces. `marker_write`'s FIRST action is a
+      # `gh api` read of the existing comment, and it `return 1`s there — BEFORE the python that
+      # updates the ledger. N consecutive failures IS "the marker cannot be written", so the
+      # call below fails too and the reason would exist nowhere. `ledger_set` is a local file
+      # write with no gh in it, and `$D` survives (a halt has COMPLETED=0), so the human reads
+      # the reason out of `ledger.json` in the morning.
+      ledger_set state '"halted:marker-unwritable"' 2>/dev/null || true
+      # ⚠ No marker_write here. `cleanup` attempts `halted:$HALT_REASON` on the way out, and a
+      # second attempt from inside the function that just failed three times adds nothing.
       exit 1
     fi
   fi
@@ -1205,10 +1296,198 @@ worktree_release() {
   if git -C "$SUP" worktree remove "$wt" 2>"$D/rm.err"; then
     return 0
   fi
-  KEPT_WORKTREES+=("#$issue ($wt): $(head -1 "$D/rm.err")")
+  # ⚠ TWO shapes on purpose. The human-facing string keeps git's own words; the parallel
+  # arrays carry what the ledger may publish. `$D/rm.err` reads
+  # `fatal: '<ABSOLUTE PATH>' contains modified or untracked files…` — the reason string itself
+  # holds an absolute path, so `completion.kept_worktrees` gets a CLASSIFICATION instead
+  # (04-sprint-window.md §4.3 · INV5). The classes differ in what the human has to do, which is
+  # the only thing the field was ever for.
+  _rmerr="$(head -1 "$D/rm.err")"
+  case "$_rmerr" in
+    *"is locked"*|*"locked working tree"*) _rmclass="locked" ;;
+    *"modified or untracked"*)             _rmclass="dirty" ;;
+    *"is a main working tree"*)            _rmclass="main-worktree" ;;
+    *)                                     _rmclass="other" ;;
+  esac
+  KEPT_WORKTREES+=("#$issue ($wt): $_rmerr")
+  KEPT_WT_ISSUE+=("#$issue")
+  KEPT_WT_REASON+=("$_rmclass")
   echo "  ⓘ worktree kept for #$issue — $(head -1 "$D/rm.err")"
   return 0
 }
+
+# <!-- guild:supervisor-core:window -->
+# The run window (04-sprint-window.md §1.2 · §1.3 · §2.1). Reading and validating only — the
+# ONE place that waits is the queue loop below, in front of the pop.
+#
+# ⚠ POSITION IS LOAD-BEARING and §3.1 fixes it: immediately above the `# Main loop` divider.
+#   • after `EVENTS=` — a test harness cuts the file at `^EVENTS=` to source the helpers, and
+#     `window_fail`'s `exit 1` would kill that harness instead of the run.
+#   • after `ledger_set`'s definition — `heartbeat` calls `ledger_set` when the board is on;
+#     above it bash returns 127 and `2>/dev/null || true` eats it (that is how D11 died).
+#   • below the selfdelete fence — three harnesses cut there.
+#   • inside the `# Main loop` cut — the arithmetic checks source this region.
+# ⚠ Do not quote the fence comment above/below anywhere else in this file: a test counts
+#   occurrences file-wide with `grep -c`, so a mention alone unbalances the pair check.
+
+window_fail() {                        # window_fail <message>
+  echo "FAIL: $1" >&2
+  # ⚠ `HALT_REASON` **and** a marker write here, but NOT `FINISHED=1` (04-sprint-window.md
+  # §4.2b). The reason:
+  #   - Writing the marker here makes the reason durable at the earliest point — this runs before
+  #     `heartbeat "running"`, so it may be the run's first marker, and the human's only clue
+  #     that a typo (not a crash) stopped the night.
+  #   - `cleanup` then writes `halted:$HALT_REASON` again on the way out. Same string, so the
+  #     repeat is idempotent — one extra PATCH on a path that is aborting anyway.
+  #   - `FINISHED=1` would have suppressed that second write, but it also closes the gate that
+  #     P7 and the counter flush share, and `board_col_of` reads a CACHE that a failed write
+  #     leaves saying `in_progress` — so a completed member could be relabelled "interrupted".
+  #     Nothing here needs protecting: ISSUE is unassigned, so P7 short-circuits on `${ISSUE:-}`.
+  # ⚠ COMPLETED stays 0 — at 1 the script deletes itself, and a run refused for a typo is
+  # exactly the run the human has to fix and start again.
+  HALT_REASON="window-invalid"
+  marker_write "halted:window-invalid" 2>/dev/null || true
+  exit 1
+}
+
+# in_window — true when the wall clock is inside the window. No window => always true.
+in_window() {
+  # ⚠ `if`, not `[ -z … ] && return 0`. The `&&` form is safe in the middle of a function and
+  # FATAL as its last statement under `set -e`; this one is one refactor away from being last.
+  if [ -z "${WIN_START:-}" ]; then return 0; fi
+  local now
+  # ⚠ `10#`. `$(( 0830 ))` is `value too great for base` — bash reads a leading zero as octal —
+  # and under `set -e` that kills the whole run. The wait loop CROSSES 08:00-09:59 every single
+  # night, so without this the failure is not a probability, it is a nightly certainty, timed
+  # for the minutes before the window opens (measured, §7 A/B).
+  now=$(( 10#$(date +%H%M) ))
+  if [ "$WIN_START" -lt "$WIN_END" ]; then
+    [ "$now" -ge "$WIN_START" ] && [ "$now" -lt "$WIN_END" ]
+  else
+    # crosses midnight
+    [ "$now" -ge "$WIN_START" ] || [ "$now" -lt "$WIN_END" ]
+  fi
+}
+
+if [ -f "$WINDOW_CONF" ]; then
+  # ⚠ Each guard gets its OWN message fragment. With one shared message the unreadable-file
+  # guard is undefended: remove it and `WFOUND=0` makes the next guard produce a byte-identical
+  # outcome (§3.2).
+  if [ ! -r "$WINDOW_CONF" ]; then
+    window_fail "window config is unreadable: $WINDOW_CONF"
+  fi
+  WFOUND=0
+  # First-`=`-only split, reusing the `.board` parser's shape.
+  while IFS='=' read -r wk wv || [ -n "$wk" ]; do
+    wk="$(printf '%s' "${wk%$'\r'}" | tr -d '[:space:]')"
+    case "$wk" in
+      # ⚠ The VALUE is stripped of whitespace too — unlike `.board`, which preserves display
+      # names byte-for-byte on purpose. Whitespace carries no meaning in a clock time, and
+      # without this `window= 22:00-10:00` written by an LLM refuses to start the run.
+      window) WIN_RAW="$(printf '%s' "${wv%$'\r'}" | tr -d '[:space:]')"; WFOUND=1 ;;
+    esac
+  done < "$WINDOW_CONF"
+  if [ "$WFOUND" -eq 0 ]; then
+    window_fail "window config has no \`window=\` line: $WINDOW_CONF"
+  fi
+
+  WIN_RAW="$(printf '%s' "$WIN_RAW" | tr '~' '-')"     # second lock; run.md normalises first
+  case "$WIN_RAW" in
+    none|'')
+      # ⚠ Accepted, not an error. run.md removes the file when there is no window, so
+      # `window=none` reaching here is an LLM slip whose INTENT is unambiguous. A malformed
+      # time is something we do not understand; `none` is something we do.
+      WIN_RAW=""
+      ;;
+    [0-9][0-9]:[0-9][0-9]-[0-9][0-9]:[0-9][0-9])
+      # ⚠ `10#` only AFTER the shape check. Arithmetic first and `29:99` dies in `$(( ))`
+      # before any guard runs — `set -e`, no HALT_REASON, marker reads `halted:interrupted`.
+      WSH="${WIN_RAW%%:*}"; WREST="${WIN_RAW#*:}"
+      WSM="${WREST%%-*}";   WREST="${WREST#*-}"
+      WEH="${WREST%%:*}";   WEM="${WREST##*:}"
+      if [ "$(( 10#$WSH ))" -gt 23 ] || [ "$(( 10#$WEH ))" -gt 23 ] \
+         || [ "$(( 10#$WSM ))" -gt 59 ] || [ "$(( 10#$WEM ))" -gt 59 ]; then
+        window_fail "window field out of range: $WIN_RAW (HH 00-23, MM 00-59)"
+      fi
+      WIN_START=$(( 10#$WSH * 100 + 10#$WSM ))
+      WIN_END=$((   10#$WEH * 100 + 10#$WEM ))
+      # ⚠ start == end is REFUSED, and that refusal is what makes §2.4's termination proof
+      # true: with start != end the window is guaranteed to open within 24 hours.
+      if [ "$WIN_START" -eq "$WIN_END" ]; then
+        window_fail "window start equals end ($WIN_RAW) — omit the window instead"
+      fi
+      # ⚠ Zero-padded, because WIN_START is an INTEGER: 09:00 is 900, and an unpadded token
+      # (`waiting-for-window-900`) is a shape five readers do not have.
+      WIN_TOKEN="$(printf '%04d' "$WIN_START")"
+      ;;
+    *)
+      # ⚠ The default direction of a parse failure is ALWAYS "do not run". A constraint we
+      # could not read is not an absent constraint, it is one we do not know.
+      window_fail "--window must be HH:MM-HH:MM (24h, zero-padded), e.g. 22:00-10:00"
+      ;;
+  esac
+fi
+
+WAIT_CHUNK=60               # ⚠ NOT HEARTBEAT_EVERY (600). See below.
+WAIT_MARKER_MAX=18          # consecutive marker failures tolerated while waiting (§2.2)
+
+# wait_for_window — the ONE wait point. Called in front of the queue pop.
+wait_for_window() {
+  if [ -z "${WIN_START:-}" ]; then return 0; fi
+  if in_window; then return 0; fi
+  echo "[sprint] Outside the run window ($WIN_RAW) — waiting. Stop with: kill $$"
+  # ⚠ These two lines go BEFORE the first heartbeat. After it, that heartbeat is judged by the
+  # 3-strike rule and the strike it just earned is then reset — §2.2's whole point is lost.
+  MARKER_FAILS=0
+  MARKER_MAX="$WAIT_MARKER_MAX"
+  # ⚠ One heartbeat BEFORE the first sleep. The marker already exists (`heartbeat "running"`
+  # runs above the queue loop); what this buys is that `state` does not claim `running` for up
+  # to ten minutes while nothing is running. Five readers take `running` to mean "a child
+  # session is going right now", and `daily` renders heartbeat age harmlessly — so the human
+  # reads a sleeping supervisor as normal progress.
+  heartbeat "waiting-for-window-$WIN_TOKEN"
+  local n=0
+  while ! in_window; do
+    # ⚠ 60s, not HEARTBEAT_EVERY. bash defers a trap while a foreground command runs, so a
+    # TERM/HUP sent during a sleep is handled only when that sleep returns (measured, and the
+    # rate-limit path says the same). Waiting spends nearly all of its time inside `sleep`, so
+    # a 600s chunk would delay a `kill` by up to ten minutes. 60s costs nothing.
+    # ⚠ NOT `hb_sleep`: it counts DOWN from a total, which machine sleep and DST break, and its
+    # state token is hardcoded to the rate-limit one — the behaviour would be right and the
+    # reason a lie. Re-asking `in_window` needs no epoch arithmetic at all.
+    sleep "$WAIT_CHUNK"
+    n=$((n + 1))
+    if [ "$((n % 10))" -eq 0 ]; then
+      heartbeat "waiting-for-window-$WIN_TOKEN"
+    fi
+  done
+  MARKER_MAX=3
+  MARKER_FAILS=0
+  echo "[sprint] Window open — resuming."
+  # ⚠ Re-check the container. A $TMPDIR container being cleaned is an ordinary event during a
+  # run that lasts days, and afterwards every `git -C "$SUP"` fails while the run reports each
+  # Issue as "worktree unavailable" (§4.2). `ensure_container` returns 0 when the worktree is
+  # registered AND present, so re-entering it is free.
+  if ! ensure_container; then
+    # ⚠ Clear ISSUE FIRST. This runs at the top of an iteration, so from the second one onward
+    # `$ISSUE` still names the PREVIOUS member — and `cleanup`'s P7 reads it. That member is
+    # finished; if its last board write happened to fail, the column CACHE still says
+    # `in_progress` and P7 would relabel a completed member "interrupted"
+    # (04-sprint-window.md §4.2b). Clearing it makes the `${ISSUE:-}` guard do the right thing.
+    # ⚠ `HALT_REASON` alone — no `FINISHED`, no marker here. `cleanup` writes
+    # `halted:container-lost` because its gate is still open.
+    ISSUE=""
+    HALT_REASON="container-lost"
+    marker_write "halted:container-lost" 2>/dev/null || true
+    exit 1
+  fi
+}
+# <!-- /guild:supervisor-core:window -->
+
+# ⚠ The ledger keeps the window as the LITERAL `22:00-10:00`, not the integers: what a resume
+# has to restore is the window file, and run.md rebuilds it from this string. Written ONCE at
+# run start (it cannot change mid-run) rather than riding along in `heartbeat`.
+if [ -n "$WIN_START" ]; then ledger_set window "\"$WIN_RAW\"" 2>/dev/null || true; fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main loop (§8.4)
@@ -1217,7 +1496,15 @@ worktree_release() {
 ensure_container || exit 1
 
 echo "============================================================"
-echo "  Guild Sprint #$TRACKER: ${#ORDER[@]} member(s) (queue may grow)"
+# ⚠ `(queue may grow)` was FALSE here and is removed: QUEUE is assigned in exactly two places
+# and never appended to, and 04-sprint-window.md §2.4's termination proof rests on that.
+# batch.md's identical string is TRUE (a parent there spawns children) and is left alone.
+echo "  Guild Sprint #$TRACKER: ${#ORDER[@]} member(s)"
+# ⚠ Only this script knows `$$`, so the stop instructions are printed here as well as by
+# `daily`. Ctrl-C cannot work — a background job of a non-interactive shell inherits SIGINT as
+# SIG_IGN and it cannot be trapped or reset — so `kill` is the only way.
+echo "  Stop: kill $$ — 대기 중이면 최대 60초, 멤버가 끝난 뒤에 멈춥니다."
+echo "        (\`kill -9\` 는 쓰지 마십시오 — 카드가 \`In progress\` 에 남습니다)"
 echo "============================================================"
 heartbeat "running"
 
@@ -1271,6 +1558,13 @@ if [ -n "$BOARD_OFF_REASON" ]; then
 fi
 
 while [ ${#QUEUE[@]} -gt 0 ]; do
+  # ⚠ BEFORE the pop, and this is the only wait point in the file (04-sprint-window.md §0.4).
+  # A whole member's life is one iteration, so waiting here satisfies both halves of the
+  # requirement for free: a member popped at 09:59 is already inside the loop and runs to the
+  # end. AFTER the pop, ISSUE would be assigned while sleeping and `cleanup`'s P7 would read
+  # that number. `refresh_base`/`refresh_dag_input` running AFTER the wait is a bonus — a
+  # dependency a human merged during the day lands in that night's run.
+  wait_for_window
   ISSUE=${QUEUE[0]}; QUEUE=("${QUEUE[@]:1}")
   PROCESSED=$((PROCESSED + 1))
 
@@ -1431,6 +1725,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       case "$STATE" in
         *guild:needs-human*)
           echo "  ⏸ Issue #$ISSUE paused (needs-human)"; PAUSED=$((PAUSED + 1))
+          PAUSED_ISSUES+=("#$ISSUE")
           board_col "$ISSUE" blocked needs-human                                  # P2
           break ;;
         *guild:done*)
@@ -1596,7 +1891,13 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     REASON=$(jq -r 'select(.type == "result") | select(.is_error == true) | .result // empty' "$LOG" 2>/dev/null | tail -1 | cut -c1-80 || true)
     record_failure "$ISSUE" child-session-failed "${REASON:-exit $EXIT_CODE}"
     board_col "$ISSUE" blocked failed:child-session-failed   # P4
-    FAILED_ISSUES+=("#$ISSUE (${REASON:-exit $EXIT_CODE})")
+    # ⚠ The CLASS, not `$REASON`. This array becomes the ledger's `completion.failed_issues`
+    # (04-sprint-window.md §4.3), and `marker_write` renders the whole ledger into a GitHub
+    # issue comment — `$REASON` is 80 raw characters of the child session's error result and can
+    # carry paths, stack frames or an API body. INV5 forbids that leaving the machine
+    # un-sanitised. The raw text stays local, in `failures.jsonl` (`record_failure` above) and
+    # on this stdout. Every other arm in this loop already appends a class.
+    FAILED_ISSUES+=("#$ISSUE (child-session-failed)")
     break
   done
 
@@ -1725,6 +2026,73 @@ if [ "$BOARD_WAS_ON" = 1 ]; then
   ledger_set board_fails "$BOARD_FAILS" 2>/dev/null || true
   ledger_set board_bugs "$BOARD_BUGS" 2>/dev/null || true
   ledger_set board_unknown_col "$BOARD_UNKNOWN_COL" 2>/dev/null || true
+fi
+# ⚠ BEFORE `marker_write "finished"` and AFTER the counter flush. On a clean run `rm -rf "$D"`
+# below deletes the ledger file, so anything that does not make it onto the marker is lost for
+# good — and the marker is rendered from the ledger by that very call. There is NO completion
+# notification (Phase 4 only runs while the launching session is alive, and the marker is a
+# PATCH of an existing comment, so GitHub sends nothing): this key is what `/gld sprint daily`
+# reads days later. §4.3.
+# ⚠ EVERY PATH IS RELATIVE. `marker_write` PATCHes the whole ledger into a GitHub issue
+# comment, so an absolute path publishes `/Users/<name>/…` and the repo's parent layout to a
+# possibly public repo — INV5. No ledger key has ever carried a path before this one.
+# ⚠ `kept_worktrees` keeps git's REFUSAL REASON, not just the path: `locked` /
+# `modified or untracked files` / `main working tree` need different actions and cannot be
+# re-derived days later. (Known gap, inherited: `worktree_release` only runs at `guild:done`,
+# so a PAUSED member's preserved worktree is not in this list.)
+# ⚠ The arrays go through FILES, and the python goes through a heredoc that is NOT inside a
+# `$( … )`. Both are measured constraints of this file: bash mis-parses parentheses and quotes
+# in a heredoc nested in a command substitution (see this file's header and `marker_write`),
+# and `"$(printf … "${ARR[@]}")"` on the same line as the heredoc is exactly that nesting.
+: > "$D/comp_failed.txt"; : > "$D/comp_incomplete.txt"
+: > "$D/comp_blocked.txt"; : > "$D/comp_paused.txt"; : > "$D/comp_kept.txt"
+for X in ${FAILED_ISSUES[@]+"${FAILED_ISSUES[@]}"};     do printf '%s\n' "$X" >> "$D/comp_failed.txt"; done
+for X in ${INCOMPLETE_ISSUES[@]+"${INCOMPLETE_ISSUES[@]}"}; do printf '%s\n' "$X" >> "$D/comp_incomplete.txt"; done
+for X in ${BLOCKED_ISSUES[@]+"${BLOCKED_ISSUES[@]}"};   do printf '%s\n' "$X" >> "$D/comp_blocked.txt"; done
+for X in ${PAUSED_ISSUES[@]+"${PAUSED_ISSUES[@]}"};     do printf '%s\n' "$X" >> "$D/comp_paused.txt"; done
+# ⚠ Two files, same index — see KEPT_WT_ISSUE's declaration. Never re-split the folded string.
+for X in ${KEPT_WT_ISSUE[@]+"${KEPT_WT_ISSUE[@]}"};     do printf '%s\n' "$X" >> "$D/comp_kept_issue.txt"; done
+for X in ${KEPT_WT_REASON[@]+"${KEPT_WT_REASON[@]}"};   do printf '%s\n' "$X" >> "$D/comp_kept_reason.txt"; done
+"$PY" - "$D" "$RUNDIR" "$HUMAN_REPO" "$CONTAINER" "$TIMESTAMP" \
+  "$PROCESSED" "$DONE" "$PAUSED" "$BLOCKED" "$INCOMPLETE" "$FAILED" \
+  "$RUN_ELAPSED" "$TOTAL_COST" "$TOTAL_IN" "$TOTAL_OUT" "$TOTAL_CR" "$TOTAL_CC" \
+  > "$D/completion.json" 2>/dev/null <<'PY' || true
+import json, os, sys
+(d, rundir, human, container, stamp, total, done, paused, blocked, incomplete, failed,
+ elapsed, cost, tin, tout, tcr, tcc) = sys.argv[1:18]
+def lines(name):
+    try:
+        with open(os.path.join(d, name)) as fh:
+            return [l.strip() for l in fh if l.strip()]
+    except Exception:
+        return []
+def rel(path, base):
+    try:
+        r = os.path.relpath(path, base)
+    except Exception:
+        return os.path.basename(path)
+    return r if not r.startswith("..") else os.path.basename(path)
+# ⚠ NO worktree path. The container is a SIBLING of the checkout (or `$TMPDIR`), so no
+# `$HUMAN_REPO`-relative form exists in every case, and `daily` already has the live absolute
+# paths from `git worktree list --porcelain` — it joins on the issue number (§4.3 · INV5).
+kept = [{"issue": i, "reason": r}
+        for i, r in zip(lines("comp_kept_issue.txt"), lines("comp_kept_reason.txt"))]
+print(json.dumps({
+    "total": int(total), "done": int(done), "paused": int(paused),
+    "blocked": int(blocked), "incomplete": int(incomplete), "failed": int(failed),
+    "elapsed_s": int(elapsed), "cost": cost,
+    "tokens": {"in": int(tin), "out": int(tout),
+               "cache_read": int(tcr), "cache_create": int(tcc)},
+    "logs": rel(rundir, human), "run_timestamp": stamp,
+    "failed_issues": lines("comp_failed.txt"),
+    "incomplete_issues": lines("comp_incomplete.txt"),
+    "blocked_issues": lines("comp_blocked.txt"),
+    "paused_issues": lines("comp_paused.txt"),
+    "kept_worktrees": kept,
+}, sort_keys=True))
+PY
+if [ -s "$D/completion.json" ]; then
+  ledger_set completion "$(cat "$D/completion.json")" 2>/dev/null || true
 fi
 marker_write "finished" || echo "[sprint] WARN: could not record state:finished"
 FINISHED=1

@@ -39,7 +39,8 @@ Each its own Bash call.
    - Two or more → list them and ask which. Never retro one speculatively.
 3. **Resolve `{owner}/{repo}`** once (`_handoff.md` Section F); hold the literal value.
 4. **Is a run still in flight?** From the `<!-- guild:sprint:run -->` comment: `state` and `heartbeat`.
-   - `state` is `running` / `installing-deps` / `rate-limited-*` **and** the heartbeat is under ~15 minutes old → **stop**: *"`sprint run`이 아직 진행 중입니다(하트비트 <n>분 전). 끝난 뒤 회고하세요 — 상태는 `/gld sprint daily`."* Return `FAIL: run still in flight`.
+   - `state` is `running` / `installing-deps` / `rate-limited-*` / `waiting-for-window-*` **and** the heartbeat is under ~15 minutes old → **stop**: *"`sprint run`이 아직 진행 중입니다(하트비트 <n>분 전). 끝난 뒤 회고하세요 — 상태는 `/gld sprint daily`."* Return `FAIL: run still in flight`.
+     - ⚠ **`waiting-for-window-<HHMM>` is a live run**, not a stalled one, and it can stay that way for **days**. Say why and for how long: *"#<tracker> 의 감독자가 창 밖이라 대기 중입니다 — 다음 창 <HH:MM>. 중단하시려면 `kill <pid>` 후 다시 부르십시오."* Refusing here is correct; refusing without the reason looks like a bug.
    - Same states but the heartbeat is **stale** → say so plainly (*"마지막 하트비트가 <n>분 전입니다 — run이 중단된 것으로 보입니다"*) and ask whether to retro anyway. Do not decide this alone: a stale heartbeat and a dead process look identical from here, and retro'ing a live run would close the container out from under it.
    - `finished` / `halted:*` / no marker at all → proceed.
 
