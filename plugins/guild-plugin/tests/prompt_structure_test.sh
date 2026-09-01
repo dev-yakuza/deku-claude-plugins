@@ -611,6 +611,26 @@ else
   bad "보드 설정 키 불일치" "all present" "missing:$BOARD_KEY_MISS"
 fi
 
+# 11c. 중복 실행 가드의 cmdline 매치 문자열이 실제로 디스크에 써지는 스크립트 이름의
+#      부분문자열이어야 한다. 마커의 `pid` 는 감독자 스크립트 자신의 `$$`(template 의
+#      `marker_write`)이므로 `ps -p <pid> -o command=` 는 `bash .claude/guild/.gld-sprint-<N>.sh`
+#      를 찍는다. 한때 이 자리가 `sprint-supervisor`(= **템플릿 파일명**)를 찾았고, 그 문자열은
+#      그 출력에 절대 나타나지 않아 LIVE 감독자가 "pid 재사용 → 없는 것으로 취급" 행으로
+#      떨어졌다 — 두 번째 감독자가 같은 워크트리와 같은 트래커 마커에 붙는다.
+#      ⚠ 파일명 참조(step 2 의 `templates/sprint-supervisor.sh`)는 정당하므로 문장 단위로 본다.
+hasfx  "run.md: 중복 실행 가드가 .gld-sprint- 를 찾는다" "$RUNMD2" \
+       'Output containing **`.gld-sprint-`**'
+lacksfx "run.md: 가드가 템플릿 파일명을 찾지 않는다" "$RUNMD2" \
+       'Output containing `sprint-supervisor`'
+# 11d. 그 문자열이 run.md 가 스스로 쓰라고 지시하는 경로의 부분문자열인가 (유도형 교차검증)
+GUARD_TOK=".gld-sprint-"
+if grep -qF -- "bash .claude/guild/${GUARD_TOK}" "$RUNMD2"; then
+  ok "가드 문자열이 run.md 가 실행하라는 경로의 부분문자열이다"
+else
+  bad "가드 문자열이 실행 경로와 맞는다" "substring of the launched path" \
+      "run.md 의 launch 줄에 ${GUARD_TOK} 가 없다"
+fi
+
 # 12. §9.2 가 요구했으나 없던 검사 셋 ─────────────────────────────────────────
 # 12a. plan 의 보드 쓰기 게이트 세 조건
 hasfx "plan.md: 쓰기는 --create/승인 시점에만" "$PLAN" 'Phase 6 — Create (`--create` or explicit approval)'
@@ -634,7 +654,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=75
+BOARD_MIN_CHECKS=91
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

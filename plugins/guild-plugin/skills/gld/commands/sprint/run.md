@@ -83,10 +83,16 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    ps -p <pid> -o command=
    ```
 
-   Empty output → the pid is gone (crash remnant). Output containing `sprint-supervisor` →
+   Empty output → the pid is gone (crash remnant). Output containing **`.gld-sprint-`** →
    running, refuse. Output that is some **other** process → the pid was recycled; treat it as
-   gone. `ps` itself unavailable → **ask the human**, same as the `host` differs row; never
-   assume not-running.
+   gone. ⚠ **Match `.gld-sprint-`, not `sprint-supervisor`.** The marker's `pid` is the
+   supervisor script's own `$$`, so `ps` prints `bash .claude/guild/.gld-sprint-<tracker>.sh`.
+   `sprint-supervisor` is the **template** filename (step 2) and never appears in that output —
+   matching it sent a LIVE supervisor down the "pid was recycled → treat it as gone" row, which
+   starts a second supervisor against the same worktrees and the same tracker marker.
+
+   `ps` itself unavailable → **ask the human**, same as the `host` differs row; never assume
+   not-running.
 
    ⚠ The heartbeat is what makes this usable: a rate-limit wait was measured at ~115 minutes, so
    a marker refreshed only at issue boundaries would make a live run look dead. The supervisor
