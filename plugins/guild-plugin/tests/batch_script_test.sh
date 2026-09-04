@@ -80,10 +80,16 @@ block = body[start:end].rstrip()
 block = block.replace('break\n', 'echo "GAVE_UP"; return 0\n')
 block = re.sub(r'\bsleep "\$WAIT"', 'echo "SLEEP=$WAIT"', block)
 block = block.replace('continue', 'return 0')
+# ⚠ EXIT_CODE is a PARAMETER, not a constant. The shared region gates its text fallback on
+# `EXIT_CODE != 0` and demotes an already-past reset when `EXIT_CODE == 0`, so both values must
+# be exercisable. Fixing it at 1 makes the exit-0 cases below unwritable; fixing it at 0 makes
+# `plaintext.log` (whose only structured event is `status:"allowed"`) stop being detected.
+# ⚠ WAIT_MAX too: the region can now report a reset up to 30 days out and the script clamps it.
 harness = '''#!/bin/bash
 set -uo pipefail
 detect() {
-  LOG="$1"; RL_TRIES=0; ISSUE=0
+  LOG="$1"; EXIT_CODE="${2:-1}"; RL_TRIES=0; ISSUE=0
+  WAIT_MAX=14400
   FAILED=0; FAILED_ISSUES=()
 %s
   echo "NOT_RATE_LIMITED"
@@ -92,8 +98,8 @@ detect() {
 open(sys.argv[2], 'w').write(harness)
 PY
 
-run_case() { # $1=label $2=expected-token $3=logfile
-  local out; out="$("$SH" -c ". '$WORK/detect.sh'; detect '$3'" 2>&1)"
+run_case() { # $1=label $2=expected-token $3=logfile [$4=exit-code, default 1]
+  local out; out="$("$SH" -c ". '$WORK/detect.sh'; detect '$3' '${4:-1}'" 2>&1)"
   case "$out" in
     *"$2"*) ok "$1" ;;
     *)      bad "$1" "$2" "$(printf '%s' "$out" | tr '\n' ' ')" ;;
@@ -110,6 +116,49 @@ run_case "구조화 resetsAt → reset 시각까지 대기"        "SLEEP=" "$WO
 run_case "평문 rate limit → 백오프 (FAILED 로 안 떨어짐)" "SLEEP=" "$WORK/plaintext.log"
 run_case "ISO-8601 resetsAt → 산술 대신 백오프"          "SLEEP=" "$WORK/iso.log"
 run_case "무관한 크래시 → rate limit 아님"               "NOT_RATE_LIMITED" "$WORK/crash.log"
+
+# ── 신설: 공유 영역이 exit 코드에 따라 갈리는 것을 행동으로 고정한다 ──────────────
+# ⚠ 이 둘이 없으면 "구조화는 모든 종료코드 · 폴백은 exit≠0" 를 지키는 것이 문자열 grep 하나뿐이다.
+run_case "구조화 한도 + exit 0 → 여전히 감지"            "SLEEP=" "$WORK/structured.log" 0
+run_case "평문 한도 + exit 0 → 감지 안 됨(폴백은 exit≠0)" "NOT_RATE_LIMITED" "$WORK/plaintext.log" 0
+
+# ── 신설: jq 가 로그를 통째로 잃는 두 경로 (측정된 회귀) ──────────────────────────
+# 선두 stderr 잡음: jq 는 첫 파싱 에러에서 중단하므로 `-R 'fromjson?'` 없이는 두 감지기가 동시에 죽는다.
+printf 'Error: some startup noise on stderr\n{"type":"rate_limit_event","rate_limit_info":{"status":"limited","resetsAt":%s}}\n' "$FUT" > "$WORK/headnoise.log"
+run_case "선두 stderr 잡음 + 구조화 한도 → 감지"          "SLEEP=" "$WORK/headnoise.log"
+# rate_limit_info 없는 이벤트: `null` 이 출력되어 `jq -e` 가 1 을 반환한다 → `objects` 가 막는다.
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}\n{"type":"rate_limit_event"}\n' > "$WORK/noinfo.log"
+run_case "rate_limit_info 부재 이벤트 → 여전히 감지"      "SLEEP=" "$WORK/noinfo.log"
+# 맨 JSON 스칼라: `.type` 인덱싱 에러로 `jq -e` 가 5 를 반환한다 → 같은 `objects` 가 막는다.
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}\n999\n' > "$WORK/scalar.log"
+run_case "맨 JSON 스칼라 줄 → 여전히 감지"                "SLEEP=" "$WORK/scalar.log"
+
+# ── 신설: 소독 각 단계 ────────────────────────────────────────────────────────────
+# (1b) 20자리는 bash 3.2 에서 `[` 를 rc=2 로 죽여 (2)(3) 을 모두 건너뛰게 만든다.
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"limited","resetsAt":99999999999999999999}}\n' > "$WORK/d20.log"
+run_case "(1b) 20자리 resetsAt → 폐기 후 백오프"          "SLEEP=300" "$WORK/d20.log"
+# (2) 밀리초는 전부 숫자라 (1) 을 통과한다 — 나누지 않으면 ~56,000년을 기다린다.
+MS=$(( FUT * 1000 ))
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"limited","resetsAt":%s}}\n' "$MS" > "$WORK/ms.log"
+run_case "(2) 밀리초 resetsAt → 초로 환산"                "SLEEP=6" "$WORK/ms.log"
+# (3) 60일 뒤. ⚠ 10자리라 (1b) 를 통과하므로 (3) 의 *존재*가 관측되는 유일한 자리다.
+FAR=$(( $(date +%s) + 60*86400 ))
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"limited","resetsAt":%s}}\n' "$FAR" > "$WORK/far.log"
+run_case "(3) 60일 뒤 resetsAt → 폐기 후 백오프"          "SLEEP=300" "$WORK/far.log"
+# (4) 지난 리셋 + exit≠0. ⚠ 이 스크립트는 신뢰 판정을 `-le 0` 로 **유지**하므로 WAIT=0 이
+# 백오프 갈래로 떨어진다 — /gld sprint 는 `-ge 0` 로 통일해 즉시 재시도한다. 이 단정이
+# 그 결정을 고정한다: `-ge 0` 로 바꾸면 `sleep 0` 무한 스핀이 되어 여기가 깨진다(상한이
+# no-reset 갈래 **안**에 있어 WAIT=0 은 그 상한에 영원히 닿지 못한다).
+PAST=$(( $(date +%s) - 600 ))
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"limited","resetsAt":%s}}\n' "$PAST" > "$WORK/past.log"
+run_case "(4) 지난 리셋 + exit≠0 → 백오프(`-le 0` 유지)"  "SLEEP=300" "$WORK/past.log"
+# (4) 지난 리셋 + exit 0 → CLI 가 이미 기다려낸 것이므로 한도로 인정하지 않는다.
+run_case "(4) 지난 리셋 + exit 0 → 한도 아님"             "NOT_RATE_LIMITED" "$WORK/past.log" 0
+
+# ── 신설: 천장. 이 스크립트는 맨 `sleep` 을 쓰므로 반드시 필요하다 ────────────────
+SIX=$(( $(date +%s) + 6*3600 ))
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"limited","resetsAt":%s}}\n' "$SIX" > "$WORK/sixh.log"
+run_case "6시간 뒤 리셋 → 4h 천장 초과로 포기"            "GAVE_UP" "$WORK/sixh.log"
 
 echo ""
 echo "결과: PASS=$PASS FAIL=$FAIL"

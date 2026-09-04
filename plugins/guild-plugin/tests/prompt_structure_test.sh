@@ -525,8 +525,11 @@ hasfx "daily.md: column_by_verified 를 읽는다" "$DAILY" "column_by_verified"
 # 감독자가 쓰는 사유 토큰은 board.md 의 어휘 목록에 있어야 한다 — 없으면 사람이 카드에서
 # 해독할 수 없는 문자열을 본다. 새 토큰을 추가할 때 한쪽만 늘어나는 것을 막는다.
 BOARD_TOK_UNDOC=""
-for T in $(grep -oE 'board_col "\$ISSUE" [a-z_]+ [a-z:-]+' "$TPL" | awk '{print $3}' | sort -u) \
-         $(grep -oE 'board_col "\$BOARD_BI" [a-z_]+ [a-z:-]+' "$TPL" | awk '{print $3}' | sort -u); do
+# ⚠ `$4`, not `$3`. The match is `board_col "$ISSUE" <column> <reason>`, so `$3` is the COLUMN
+# (`blocked`) — this loop verified the four column names over and over and never once checked a
+# reason token. Every new reason token shipped unverified until this was fixed.
+for T in $(grep -oE 'board_col "\$ISSUE" [a-z_]+ [a-z:-]+' "$TPL" | awk '{print $4}' | sort -u) \
+         $(grep -oE 'board_col "\$BOARD_BI" [a-z_]+ [a-z:-]+' "$TPL" | awk '{print $4}' | sort -u); do
   case "$T" in
     failed:*) T="failed:<class>" ;;
   esac

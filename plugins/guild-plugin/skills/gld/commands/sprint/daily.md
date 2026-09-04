@@ -87,8 +87,8 @@ The classes the supervisor writes — **this list is the code's, verbatim**:
 
 | class | 실패인가? |
 |---|---|
-| `worktree-create-failed` · `deps-install-failed` · `dag-input-failed` · `base-decision-failed` · `rate-limit-exhausted` · `incomplete-mid-spine` · `child-session-failed` | **실패** — 이 이슈의 하류도 차단된다 |
-| `dependency-blocked` · `base-unresolved` · `branch-ambiguous` | **차단** — 의존이 아직 랜딩되지 않았거나, 후보 브랜치가 둘 이상이다. 실패로 렌더하지 말 것 |
+| `worktree-create-failed` · `deps-install-failed` · `dag-input-failed` · `base-decision-failed` · `incomplete-mid-spine` · `child-session-failed` | **실패** — 이 이슈의 하류도 차단된다 |
+| `dependency-blocked` · `base-unresolved` · `branch-ambiguous` · `account-rate-limited` | **차단** — 의존이 아직 랜딩되지 않았거나, 후보 브랜치가 둘 이상이거나, 계정 한도의 리셋이 4시간 넘게 남았다. 실패로 렌더하지 말 것 — **재실행이 큐를 이어받는다** |
 | `branch-assumed` | **정보** — 실패도 차단도 아니다. 이슈 번호가 맞는 브랜치가 하나뿐이어서 그것으로 재개했다는 기록. 소유를 증명한 것은 아니므로 사람이 확인할 수 있게 남긴다 |
 | `split-stalled` | **미완**(실패로 집계) — 분할 부모의 자식 오케스트레이션이 전진을 멈췄다 |
 

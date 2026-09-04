@@ -1,6 +1,6 @@
 # BATCH (draft)
 
-**Run multiple Issues through the Guild spine unattended, with rate-limit auto-resume.** Each Issue runs in its own headless `claude -p` child session driven by `/gld dev` (**not** `/gld resume` — see the inline note in the generated script: `dev` reads the label and either starts fresh or resumes mid-spine, a superset of `resume`); a background supervisor loop **detects token rate limits and automatically waits until reset, then re-runs** — no human interaction. Ported from `sdd-plugin` `batch.md` (the verified rate-limit-resilient runner), adapted to Guild.
+**Run multiple Issues through the Guild spine unattended, with rate-limit auto-resume.** Each Issue runs in its own headless `claude -p` child session driven by `/gld dev` (**not** `/gld resume` — see the inline note in the generated script: `dev` reads the label and either starts fresh or resumes mid-spine, a superset of `resume`); a background supervisor loop **detects token rate limits and waits out a reset up to 4h away, then re-runs** — no human interaction. Ported from `sdd-plugin` `batch.md` (the verified rate-limit-resilient runner), adapted to Guild.
 
 > **Status: partially live-validated (2026-07-14, 1 real batch of 2 issues) — shipped, with untested edges (Activation checklist item 5).** The two mechanisms below were confirmed on real traffic; **happy-path unattended completion to `guild:done` has not been re-verified since the exit-0 fix**, and split-parent-under-batch and the worktree path are still unexercised — so this does **not** read as fully validated. ✅ **rate-limit auto-resume** confirmed (a real limit hit → auto-waited ~115m → resumed, no lost work) · ✅ **`guild:needs-human` pause** confirmed (a scope-defining high-stakes discuss ambiguity → leader paused without guessing) · 🐛 **found + fixed a false-positive**: the supervisor trusted `claude -p` **exit 0** as "completed," but a headless turn can exit 0 while a backgrounded pre-commit hook leaves the Issue mid-spine (no commit/PR). Completion is now judged by the **GitHub label** (`guild:done` / `guild:children`), with `guild:needs-human` counted as PAUSED and a mid-spine exit-0 re-resumed (bounded) then surfaced as INCOMPLETE — never silently "succeeded." Wired across `_handoff.md` (Section H), `analyze.md`/`design.md`/`test.md`/`qa.md` (gate branches), `dev.md` (mode detect + PAUSE handling), `implement.md` (decision log + branch/PR resume), `init.md` (`guild:needs-human` label).
 
@@ -124,6 +124,8 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     # silently undercounting a multi-retry Issue, and Phase 4's "read the logs" report loses
     # what actually happened during the earlier rate-limited/incomplete attempts.
     LOG="$LOG_DIR/issue-${ISSUE}-${TIMESTAMP}-attempt${ATTEMPT}.log"
+WAIT_MAX=14400   # 4h ceiling on any single rate-limit wait; the shared region can
+                 # report up to 30 days and this script sleeps with a bare `sleep`.
     EXIT_CODE=0
     # GLD_UNATTENDED=1: flow auto-proceeds discuss/verify gates (records assumptions) — see Notes.
     # --dangerously-skip-permissions: unattended tool calls (tests, hooks, push, PR).
@@ -202,44 +204,86 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       esac
     fi
 
-    RESET_AT=$(jq -r 'select(.type == "rate_limit_event") | .rate_limit_info | select(.status != "allowed") | .resetsAt // empty' "$LOG" 2>/dev/null | tail -1)
     # <!-- guild:supervisor-core:ratelimit -->
-    # --- Rate-limit detection → wait until reset → auto-retry (the core) ---
-    # ⚠ The `RESET_AT=` assignment above is deliberately OUTSIDE this region: /gld sprint's
-    # copy guards it with `|| true` and this one does not, so the line cannot be compared.
-    # The two MEASURED fixes this region exists to protect are both still inside — the
-    # "rate[ -]limit" regex that must not match the literal field name `rate_limit_event`,
-    # and the all-digit guard on `resetsAt`.
-    # ⚠ This region is DUPLICATED VERBATIM in skills/gld/templates/sprint-supervisor.sh
-    # (design decision D10: the sprint supervisor is a deliberate copy, not a shared
-    # library). tests/sprint_supervisor_test.sh compares the two marker-fenced regions
-    # line by line, so an edit here that is not mirrored there FAILS that suite. Fix
-    # both, or move the change outside the markers.
-
+    # Rate-limit DETECTION + SANITISATION + WAIT — VERBATIM-shared with batch.md's supervisor
+    # (tests/sprint_supervisor_test.sh compares them byte-for-byte after indent normalisation).
+    # ⚠ This block is PURE COMPUTATION and closes every `if` it opens. It used to leave
+    # `if [ "$RATE_LIMITED" -eq 1 ]` open, so moving it as a unit swallowed whatever followed —
+    # `bash -n` stays green and a completed member stops being counted (measured).
+    # ⚠ It sits ABOVE both `[ "$EXIT_CODE" -eq 0 ]` guards. Inside the first one, the exit!=0
+    # path — the ONLY one that detects a rate limit today — loses detection entirely and lands
+    # on `record_failure child-session-failed` below.
+    # ⚠ `-R 'fromjson?'` and `objects`, in BOTH filters. `$LOG` is `> "$LOG" 2>&1`, so stderr is
+    # mixed in: jq stops at the FIRST parse error and startup stderr lands at the HEAD of the
+    # log, so without `-R 'fromjson?'` both detectors go false together. And `?` wraps parsing
+    # only, not indexing: a `rate_limit_event` with no `.rate_limit_info` emits `null` (jq -e
+    # returns 1) and a bare JSON scalar raises on `.type` (jq -e returns 5). `objects` closes
+    # both. Whether it survived depended on log line ORDER, which is why fixtures missed it.
+    RESET_AT=$(jq -r -R 'fromjson? | objects | select(.type == "rate_limit_event") | .rate_limit_info | objects | select(.status != "allowed") | .resetsAt // empty' "$LOG" 2>/dev/null | tail -1 || true)
     RATE_LIMITED=0
-    if [ -n "$RESET_AT" ]; then RATE_LIMITED=1; fi
-    # Fallback text scan: a genuinely rate-limited log that carried NO structured
-    # rate_limit_event (a plain-text message). ⚠ An earlier version re-ran the *identical* jq
-    # here, which by construction returns empty a second time — so the exact case this fallback
-    # exists for fell straight through to "genuine failure" and was counted FAILED. Mark it
-    # rate-limited and back off on a schedule instead, since no resetsAt is available.
-    # "rate[ -]limit" (space/hyphen only, not an unescaped dot) avoids matching the literal JSON
-    # field name "rate_limit_event", which appears on every log carrying a routine
-    # status:"allowed" telemetry event — that false match once sent a genuine unrelated crash
-    # into an uncapped retry loop.
-    if [ "$RATE_LIMITED" -eq 0 ] && grep -qi "rate[ -]limit\|overloaded\|too many requests" "$LOG" 2>/dev/null; then
+    # Detection = a non-`allowed` block event EXISTS, or a usable resetsAt. ⚠ A logical OR, not
+    # a replacement: narrowing it to either half alone re-created the same defect twice.
+    if jq -R -e 'fromjson? | objects | select(.type == "rate_limit_event") | .rate_limit_info | objects | select(.status != "allowed")' "$LOG" >/dev/null 2>&1 || [ -n "$RESET_AT" ]; then
       RATE_LIMITED=1
     fi
+    # Fallback text scan, for a genuinely rate-limited log that carried NO structured event.
+    # ⚠ Gated on `EXIT_CODE != 0`. The regex is deliberately BROAD — a narrowed one missed four
+    # of five real limit messages (measured) — and false positives are handled STRUCTURALLY
+    # instead: structured detection wins, and a normally-completed member never reaches this
+    # line. Guild files themselves contain `rate limit`, and `$LOG` carries tool_result file
+    # contents. "rate[ -]limit" (space/hyphen only, not an unescaped dot) still avoids matching
+    # the literal JSON field name `rate_limit_event`, which appears on every log carrying a
+    # routine status:"allowed" telemetry event.
+    if [ "$RATE_LIMITED" -eq 0 ] && [ "$EXIT_CODE" -ne 0 ] \
+       && grep -qi "rate[ -]limit\|usage limit reached\|rate_limit_error\|overloaded\|too many requests" "$LOG" 2>/dev/null; then
+      RATE_LIMITED=1
+    fi
+    WAIT=""
     if [ "$RATE_LIMITED" -eq 1 ]; then
-      WAIT=""
-      # resetsAt is not guaranteed to be epoch seconds. An ISO-8601 value would make the
-      # arithmetic below fail (or silently evaluate to nonsense), so only trust an all-digit
-      # value and fall back to the backoff otherwise.
+      # Sanitise resetsAt. Every step DISCARDS rather than trusts; a discarded value falls to
+      # the bounded backoff below, which is always safe.
       case "$RESET_AT" in
-        ''|*[!0-9]*) ;;
-        *) NOW=$(date +%s); WAIT=$((RESET_AT - NOW + 30)) ;;
+        ''|*[!0-9]*)     RESET_AT="" ;;   # (1) ISO-8601 and friends
+        ??????????????*) RESET_AT="" ;;   # (1b) 14 digits or more
       esac
-        # <!-- /guild:supervisor-core:ratelimit -->
+      # ⚠ (1b) is not cosmetic. `[ 99999999999999999999 -gt 100000000000 ]` exits 2 on bash 3.2
+      # ("integer expression expected"), so (2) and (3) BOTH skip and `$(( ))` wraps to a huge
+      # positive — an effectively unbounded wait. A 14-char glob, not `${#RESET_AT}`: every
+      # comment stripper in this suite cuts at the first `#`.
+      NOW=$(date +%s)
+      if [ -n "$RESET_AT" ] && [ "$RESET_AT" -gt 100000000000 ]; then
+        RESET_AT=$((RESET_AT / 1000))                              # (2) milliseconds
+      fi
+      if [ -n "$RESET_AT" ] && [ "$RESET_AT" -gt "$((NOW + 2592000))" ]; then
+        RESET_AT=""                                                # (3) beyond now + 30 days
+      fi
+      if [ -n "$RESET_AT" ]; then
+        WAIT=$((RESET_AT - NOW + 30))
+        if [ "$WAIT" -lt 0 ]; then WAIT=0; fi                      # (4) already past
+      fi
+      # ⚠ exit 0 plus an already-past reset is a limit the CLI already waited out. Treating it
+      # as live sends a `guild:children` member into an immediate retry in which the children
+      # arm never runs, so SPLIT_PASSES/RESUME_TRIES stop advancing: the bound survives and
+      # PROGRESS dies. ⚠ `-n` FIRST. Without it an UNKNOWN reset — a non-`allowed` status with
+      # no resetsAt, an ISO-8601 value, or one (3) discarded — is demoted too, and those are
+      # live limits that then land on `record_failure incomplete-mid-spine`.
+      if [ "$EXIT_CODE" -eq 0 ] && [ -n "$WAIT" ] && [ "$WAIT" -le 0 ]; then RATE_LIMITED=0; fi
+    fi
+    # <!-- /guild:supervisor-core:ratelimit -->
+    # ⚠ Re-open the handling `if` here. The shared region above now closes every `if` it
+    # opens (it used to leave this one open), so without this line the block below and its
+    # `fi` are orphaned and the script is a syntax error.
+    if [ "$RATE_LIMITED" -eq 1 ]; then
+      # ⚠ The shared region can now hand back a wait of up to 30 days. This script sleeps with
+      # a bare `sleep`, so a ceiling is required; /gld sprint blocks the member and lets the
+      # re-run pick it up, which has no meaning here (no queue, no board) — so give up the run.
+      if [ -n "$WAIT" ] && [ "$WAIT" -gt "$WAIT_MAX" ]; then
+        echo "  ✗ Issue #$ISSUE — reset is $((WAIT/3600))h away, over the ${WAIT_MAX}s ceiling — giving up this run"
+        FAILED=$((FAILED + 1)); FAILED_ISSUES+=("#$ISSUE (rate limited, reset beyond the ceiling)"); break
+      fi
+      # ⚠ `-le 0` stays, deliberately. /gld sprint unified its trust predicate on `-ge 0`; doing
+      # that here would spin on `sleep 0` forever, because THIS script's `RL_TRIES` cap lives
+      # inside the no-reset branch below and a WAIT of 0 would never reach it.
       if [ -z "$WAIT" ] || [ "$WAIT" -le 0 ]; then
         # No usable reset time (absent, non-numeric, or already past) → escalating capped
         # backoff, so a persistent limit waits instead of spinning or being mislabelled FAILED.
@@ -302,7 +346,7 @@ COMPLETED=1
 1. `chmod +x .claude/guild/.gld-batch.sh`.
 2. Ensure `.claude/guild/.batch-logs/` won't be committed (the script already adds it to `.git/info/exclude` — that's the actual mechanism; `.claude/guild/.gitignore` only covers `memory/`, per `init.md`, so it does **not** also cover `.batch-logs/` — don't rely on it as a fallback here).
 3. Execute via the **Bash tool with `run_in_background: true`**: `bash .claude/guild/.gld-batch.sh`.
-4. Report: "Guild batch started (background). Issues: <N>. Logs: .claude/guild/.batch-logs/. Rate limits auto-wait+resume. You'll be notified on completion." Give the `tail -f … | jq …` monitor hint.
+4. Report: "Guild batch started (background). Issues: <N>. Logs: .claude/guild/.batch-logs/. Rate limits auto-wait+resume (up to a 4h reset). You'll be notified on completion." Give the `tail -f … | jq …` monitor hint.
 5. On completion (harness re-invokes when the background task exits): read the logs, report per-Issue outcome + the summary block. Outcomes are **label-truthful** (Done / Paused-needs-human / Incomplete / Failed), not exit-code-based. **List paused Issues** (`gh issue list --label guild:needs-human --state open`) — resolve, then re-run `/gld dev`/`resume`. **List Incomplete Issues** (exited 0 mid-spine — a backgrounded hook or turn-end) — `/gld resume <n>` continues them from the label; their partial work is on the feature branch.
 
 ---

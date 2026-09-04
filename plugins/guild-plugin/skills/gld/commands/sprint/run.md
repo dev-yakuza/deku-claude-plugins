@@ -400,7 +400,7 @@ inside its own worktree.
    moment (`git worktree list` reports realpaths, and on macOS both `/tmp` and `$TMPDIR` are
    symlinks, so an unnormalised path makes every live worktree look unregistered). Phase 0's
    container check is a *precondition* test, not the creation step.
-6. Report: sprint number, member count, container path, log dir, and *"진행 상황은 `/gld sprint daily`. rate limit은 자동 대기·재개합니다."*
+6. Report: sprint number, member count, container path, log dir, and *"진행 상황은 `/gld sprint daily`. rate limit 은 리셋이 4시간 이내면 기다려 재개하고, 더 멀면 그 멤버만 차단해 재실행이 이어받습니다."*
 
    **When a window is in effect, this same sentence must also carry four things:**
 
@@ -473,7 +473,7 @@ dirty and removal is refused.
 | `guild:done` | DONE. Release the worktree |
 | `guild:children` | **not terminal** — a split still mid-orchestration. **Continue it**: re-invoke `/gld dev <parent>`, which `dev.md` Phase 1 sends straight to Phase 2b, and Phase 2b drives only the children that are not yet `guild:done` — so each pass resumes where the last stopped. The bound is **progress**, not attempts: reset the counter whenever the number of outstanding children falls, and record `split-stalled` as INCOMPLETE after two passes with no progress. ⚠ Do **not** hand it to the human and do **not** queue the children as members — they are this member's own work and share its worktree, exactly as they would outside a sprint |
 | exit 0 mid-spine | bounded re-resume (2), then INCOMPLETE |
-| blocked | recorded as **blocked, not failed** — a dependency did not land |
+| blocked | recorded as **blocked, not failed**. A dependency did not land, or the account is rate limited with a reset more than 4h away — the re-run picks those up |
 
 ⚠ **The common split case is not `guild:children`.** When orchestration is *not* interrupted,
 `dev.md` drives all children to `guild:done` in the same session and Phase 2c flips the parent

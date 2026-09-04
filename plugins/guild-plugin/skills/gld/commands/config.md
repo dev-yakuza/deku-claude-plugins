@@ -78,7 +78,7 @@ is refreshed by `sprint plan --create`.
 ### `--window=<HH:MM-HH:MM|none>`
 
 The **run window** (`sprint.window`, default `null`). `/gld sprint run` starts a new member only
-inside it and otherwise waits, the way it already waits out a rate limit; a member that started
+inside it and otherwise waits, the way it already waits out a rate limit whose reset is within 4h; a member that started
 at 09:59 runs to the end. `--window none` clears the value.
 
 Same `=` syntax as the four dials above. ⚠ **`sprint run`'s flag takes a space *or* an `=`**

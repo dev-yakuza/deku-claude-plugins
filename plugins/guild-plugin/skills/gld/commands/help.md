@@ -57,9 +57,9 @@ Develop (spine: analyze → design → execute → test → qa)
   /gld review <issue|pr>  Guided pair-programming walkthrough of the PR (pass the issue number — auto-resolves its PR — or a PR number directly) (+ adversarial pre-scan: fresh external auditor on Standards/Spec axes — the same auditor execute already ran, re-run here as the independent measure of whether dev is improving) — one change-unit at a time, explains why, pauses to discuss
   /gld resume <issue>     Auto-detect stage and continue
   /gld status <issue>     Show current progress
-  /gld batch [issues]     Run many Issues unattended to guild:done (PR open), auto-resumes on rate limit; leader stands in at gates, human reviews PRs after
+  /gld batch [issues]     Run many Issues unattended to guild:done (PR open), waits out a rate limit whose reset is within 4h; leader stands in at gates, human reviews PRs after
   /gld sprint plan        Choose this sprint's issues, order them by dependency, open the tracking Issue (dry-run; --create to commit)
-  /gld sprint run         Develop the members unattended to PRs — dependency-ordered, PR-stacked, one git worktree per issue, rate-limit resilient. No args = resume the active sprint. --readiness shows the preflight
+  /gld sprint run         Develop the members unattended to PRs — dependency-ordered, PR-stacked, one git worktree per issue. A rate limit whose reset is within 4h is waited out; a longer one blocks that member and the re-run picks it up. No args = resume the active sprint. --readiness shows the preflight
   /gld sprint daily       Status: what to merge and in what order, what's waiting on you, what broke (read-only; also where a bare `/gld sprint` goes)
   /gld sprint retro       Metrics, capacity calibration, evolve, close the sprint
   /gld sprint board       Set up / inspect / reset the GitHub Projects kanban (optional)

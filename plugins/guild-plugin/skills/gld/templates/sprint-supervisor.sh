@@ -1686,7 +1686,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   fi
   heartbeat "running"
 
-  RESUME_TRIES=0; RL_TRIES=0; ATTEMPT=0
+  RESUME_TRIES=0; RL_TRIES=0; RL_ZEROWAIT=0; ATTEMPT=0
   # A value no child count can equal, so the first pass always reads as progress without
   # SPLIT_PREV having to double as a sentinel (that dual role was BLOCKER B1).
   SPLIT_PREV=999999; SPLIT_STALL=0; SPLIT_PASSES=0
@@ -1710,6 +1710,137 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
         claude -p --verbose --output-format stream-json --dangerously-skip-permissions \
         "/gld dev $ISSUE" ) > "$LOG" 2>&1 || EXIT_CODE=$?
 
+    # <!-- guild:supervisor-core:ratelimit -->
+    # Rate-limit DETECTION + SANITISATION + WAIT — VERBATIM-shared with batch.md's supervisor
+    # (tests/sprint_supervisor_test.sh compares them byte-for-byte after indent normalisation).
+    # ⚠ This block is PURE COMPUTATION and closes every `if` it opens. It used to leave
+    # `if [ "$RATE_LIMITED" -eq 1 ]` open, so moving it as a unit swallowed whatever followed —
+    # `bash -n` stays green and a completed member stops being counted (measured).
+    # ⚠ It sits ABOVE both `[ "$EXIT_CODE" -eq 0 ]` guards. Inside the first one, the exit!=0
+    # path — the ONLY one that detects a rate limit today — loses detection entirely and lands
+    # on `record_failure child-session-failed` below.
+    # ⚠ `-R 'fromjson?'` and `objects`, in BOTH filters. `$LOG` is `> "$LOG" 2>&1`, so stderr is
+    # mixed in: jq stops at the FIRST parse error and startup stderr lands at the HEAD of the
+    # log, so without `-R 'fromjson?'` both detectors go false together. And `?` wraps parsing
+    # only, not indexing: a `rate_limit_event` with no `.rate_limit_info` emits `null` (jq -e
+    # returns 1) and a bare JSON scalar raises on `.type` (jq -e returns 5). `objects` closes
+    # both. Whether it survived depended on log line ORDER, which is why fixtures missed it.
+    RESET_AT=$(jq -r -R 'fromjson? | objects | select(.type == "rate_limit_event") | .rate_limit_info | objects | select(.status != "allowed") | .resetsAt // empty' "$LOG" 2>/dev/null | tail -1 || true)
+    RATE_LIMITED=0
+    # Detection = a non-`allowed` block event EXISTS, or a usable resetsAt. ⚠ A logical OR, not
+    # a replacement: narrowing it to either half alone re-created the same defect twice.
+    if jq -R -e 'fromjson? | objects | select(.type == "rate_limit_event") | .rate_limit_info | objects | select(.status != "allowed")' "$LOG" >/dev/null 2>&1 || [ -n "$RESET_AT" ]; then
+      RATE_LIMITED=1
+    fi
+    # Fallback text scan, for a genuinely rate-limited log that carried NO structured event.
+    # ⚠ Gated on `EXIT_CODE != 0`. The regex is deliberately BROAD — a narrowed one missed four
+    # of five real limit messages (measured) — and false positives are handled STRUCTURALLY
+    # instead: structured detection wins, and a normally-completed member never reaches this
+    # line. Guild files themselves contain `rate limit`, and `$LOG` carries tool_result file
+    # contents. "rate[ -]limit" (space/hyphen only, not an unescaped dot) still avoids matching
+    # the literal JSON field name `rate_limit_event`, which appears on every log carrying a
+    # routine status:"allowed" telemetry event.
+    if [ "$RATE_LIMITED" -eq 0 ] && [ "$EXIT_CODE" -ne 0 ] \
+       && grep -qi "rate[ -]limit\|usage limit reached\|rate_limit_error\|overloaded\|too many requests" "$LOG" 2>/dev/null; then
+      RATE_LIMITED=1
+    fi
+    WAIT=""
+    if [ "$RATE_LIMITED" -eq 1 ]; then
+      # Sanitise resetsAt. Every step DISCARDS rather than trusts; a discarded value falls to
+      # the bounded backoff below, which is always safe.
+      case "$RESET_AT" in
+        ''|*[!0-9]*)     RESET_AT="" ;;   # (1) ISO-8601 and friends
+        ??????????????*) RESET_AT="" ;;   # (1b) 14 digits or more
+      esac
+      # ⚠ (1b) is not cosmetic. `[ 99999999999999999999 -gt 100000000000 ]` exits 2 on bash 3.2
+      # ("integer expression expected"), so (2) and (3) BOTH skip and `$(( ))` wraps to a huge
+      # positive — an effectively unbounded wait. A 14-char glob, not `${#RESET_AT}`: every
+      # comment stripper in this suite cuts at the first `#`.
+      NOW=$(date +%s)
+      if [ -n "$RESET_AT" ] && [ "$RESET_AT" -gt 100000000000 ]; then
+        RESET_AT=$((RESET_AT / 1000))                              # (2) milliseconds
+      fi
+      if [ -n "$RESET_AT" ] && [ "$RESET_AT" -gt "$((NOW + 2592000))" ]; then
+        RESET_AT=""                                                # (3) beyond now + 30 days
+      fi
+      if [ -n "$RESET_AT" ]; then
+        WAIT=$((RESET_AT - NOW + 30))
+        if [ "$WAIT" -lt 0 ]; then WAIT=0; fi                      # (4) already past
+      fi
+      # ⚠ exit 0 plus an already-past reset is a limit the CLI already waited out. Treating it
+      # as live sends a `guild:children` member into an immediate retry in which the children
+      # arm never runs, so SPLIT_PASSES/RESUME_TRIES stop advancing: the bound survives and
+      # PROGRESS dies. ⚠ `-n` FIRST. Without it an UNKNOWN reset — a non-`allowed` status with
+      # no resetsAt, an ISO-8601 value, or one (3) discarded — is demoted too, and those are
+      # live limits that then land on `record_failure incomplete-mid-spine`.
+      if [ "$EXIT_CODE" -eq 0 ] && [ -n "$WAIT" ] && [ "$WAIT" -le 0 ]; then RATE_LIMITED=0; fi
+    fi
+    # <!-- /guild:supervisor-core:ratelimit -->
+
+    # Truth = the GitHub label (_handoff.md Section A: "labels are the state"). Read once here,
+    # because the gate below and the arms further down both need it.
+    STATE=""
+    if [ "$EXIT_CODE" -eq 0 ]; then
+      STATE=$(gh issue view "$ISSUE" --repo "$OWNER_REPO" --json labels \
+        --jq '[.labels[].name] | map(select(startswith("guild:"))) | join(",")' 2>/dev/null || true)
+    fi
+    # Priority gate: a member that reached a terminal label BEATS a rate limit found in its log.
+    # ⚠ One arm, two patterns, and a SPACE before the closing paren. Without that space this
+    # arm's text is byte-identical to an arm literal further down, and `arms.py` requires each
+    # of those to appear exactly once in the file. ⚠ For the same reason this comment must not
+    # spell out those literals — quoting one here is itself enough to break that check.
+    # ⚠ `STATE=""` (exit != 0) falls to `*)`, so ONE copy of the handling covers both paths.
+    case "$STATE" in
+      *guild:needs-human*|*guild:done* ) : ;;
+      *)
+        if [ "$RATE_LIMITED" -eq 1 ]; then
+          # RL_TRIES advances on EVERY encounter, not only when no reset time was reported.
+          # Incrementing it inside the no-reset branch meant an API that keeps returning
+          # `resetsAt` never reached the cap of 6 — the Issue retried without limit (measured).
+          RL_TRIES=$((RL_TRIES + 1))
+          if [ "$RL_TRIES" -gt 6 ]; then
+            # ⚠ record_event, NOT record_failure. `record_failure` writes `failed.txt`, which
+            # becomes `terminal[n]="failed"` and blocks every dependant — for a condition that
+            # resolves by itself. BLOCKED keeps the script and $D, and the re-run picks it up.
+            echo "  ⏭ Issue #$ISSUE — still rate limited after $RL_TRIES waits; skipped, the re-run picks it up"
+            record_event "$ISSUE" account-rate-limited "still rate limited after 6 waits — skipped, re-run picks it up"
+            board_col "$ISSUE" blocked account-rate-limited                       # P4
+            BLOCKED=$((BLOCKED + 1)); BLOCKED_ISSUES+=("#$ISSUE (account-rate-limited)")
+            break
+          fi
+          if [ -n "$WAIT" ] && [ "$WAIT" -gt "$WAIT_MAX" ]; then
+            echo "  ⏭ Issue #$ISSUE — reset is $((WAIT/3600))h away (over the ${WAIT_MAX}s ceiling); skipped, the re-run picks it up"
+            record_event "$ISSUE" account-rate-limited "reset is $((WAIT/3600))h away (> 4h ceiling) — skipped, re-run picks it up"
+            board_col "$ISSUE" blocked account-rate-limited                       # P4
+            BLOCKED=$((BLOCKED + 1)); BLOCKED_ISSUES+=("#$ISSUE (account-rate-limited)")
+            break
+          fi
+          # ⚠ ONE trust predicate: `-n` plus `-ge 0`. The old `-le 0` form sent WAIT=0 to the
+          # backoff, which made (4) and the zero-wait cap below unreachable code.
+          if [ -n "$WAIT" ] && [ "$WAIT" -eq 0 ]; then
+            # An immediate retry costs a real child session. Two in a row means the API keeps
+            # reporting a past reset, so drop to the bounded backoff.
+            RL_ZEROWAIT=$((RL_ZEROWAIT + 1))
+            if [ "$RL_ZEROWAIT" -ge 2 ]; then WAIT=""; fi
+          elif [ -n "$WAIT" ]; then
+            RL_ZEROWAIT=0
+          fi
+          if [ -z "$WAIT" ]; then
+            WAIT=$((RL_TRIES * 300))
+            echo "  ⏳ Rate limited, no usable reset time. Backing off ${WAIT}s ($RL_TRIES/6)..."
+          else
+            RESET_TIME=$(date -r "$RESET_AT" +%H:%M:%S 2>/dev/null || date -d "@$RESET_AT" +%H:%M:%S 2>/dev/null || echo "?")
+            echo "  ⏳ Rate limited. Waiting until ~$RESET_TIME ($((WAIT/60))m $((WAIT%60))s)..."
+          fi
+          heartbeat "rate-limited-until-$(( $(date +%s) + WAIT ))"
+          hb_sleep "$WAIT"
+          heartbeat "running"
+          echo "  🔄 Retrying Issue #$ISSUE (resume from GitHub state)..."
+          RETRIES=$((RETRIES + 1)); ledger_set "retries.$ISSUE" "$RETRIES"
+          continue
+        fi ;;
+    esac
+
     if [ "$EXIT_CODE" -eq 0 ]; then
       # <!-- guild:supervisor-core:arms -->
       # exit 0 is NOT proof of completion — a headless turn can end while a backgrounded
@@ -1720,8 +1851,6 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       # .sh cannot use that jq projection, so the rule appears here as `case` ordering:
       # guild:needs-human MUST be tested BEFORE guild:done AND guild:children, because bash
       # `case` fires the FIRST matching arm and those labels coexist on one Issue.
-      STATE=$(gh issue view "$ISSUE" --repo "$OWNER_REPO" --json labels \
-        --jq '[.labels[].name] | map(select(startswith("guild:"))) | join(",")' 2>/dev/null || true)
       case "$STATE" in
         *guild:needs-human*)
           echo "  ⏸ Issue #$ISSUE paused (needs-human)"; PAUSED=$((PAUSED + 1))
@@ -1737,7 +1866,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
           # it costs `gh pr list` + `gh issue list` per completed member, and the arm `break`s
           # immediately afterwards so the next iteration refreshes anyway. Outside the guard,
           # board-off users paid two extra API calls per member for a decision never made —
-          # in a loop that has its own `rate-limit-exhausted` failure class.
+          # in a loop that has its own bounded rate-limit handling.
           if [ -n "$BOARD_NUMBER" ]; then
             refresh_dag_input || true
             BOARD_PRS=$("$PY" -c 'import json,sys;d=json.load(open(sys.argv[1]));print(len(d.get("prs") or []))' "$D/run.json" 2>/dev/null || echo 0)
@@ -1819,73 +1948,6 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       # <!-- /guild:supervisor-core:arms -->
     fi
 
-    RESET_AT=$(jq -r 'select(.type == "rate_limit_event") | .rate_limit_info | select(.status != "allowed") | .resetsAt // empty' "$LOG" 2>/dev/null | tail -1 || true)
-    # <!-- guild:supervisor-core:ratelimit -->
-    # Rate-limit DETECTION + WAIT computation — VERBATIM-shared with batch.md's supervisor
-    # (tests/sprint_supervisor_test.sh compares them byte-for-byte after indent normalisation).
-    # This is where the two measured bug fixes live: the "rate[ -]limit" regex that must not
-    # match the literal field name `rate_limit_event`, and the all-digit guard on `resetsAt`.
-    # The sleep and the give-up branch are OUTSIDE, deliberately — see hb_sleep and below.
-    RATE_LIMITED=0
-    if [ -n "$RESET_AT" ]; then RATE_LIMITED=1; fi
-    # Fallback text scan: a genuinely rate-limited log that carried NO structured
-    # rate_limit_event (a plain-text message). ⚠ An earlier version re-ran the *identical* jq
-    # here, which by construction returns empty a second time — so the exact case this fallback
-    # exists for fell straight through to "genuine failure" and was counted FAILED. Mark it
-    # rate-limited and back off on a schedule instead, since no resetsAt is available.
-    # "rate[ -]limit" (space/hyphen only, not an unescaped dot) avoids matching the literal JSON
-    # field name "rate_limit_event", which appears on every log carrying a routine
-    # status:"allowed" telemetry event — that false match once sent a genuine unrelated crash
-    # into an uncapped retry loop.
-    if [ "$RATE_LIMITED" -eq 0 ] && grep -qi "rate[ -]limit\|overloaded\|too many requests" "$LOG" 2>/dev/null; then
-      RATE_LIMITED=1
-    fi
-    if [ "$RATE_LIMITED" -eq 1 ]; then
-      WAIT=""
-      # resetsAt is not guaranteed to be epoch seconds. An ISO-8601 value would make the
-      # arithmetic below fail (or silently evaluate to nonsense), so only trust an all-digit
-      # value and fall back to the backoff otherwise.
-      case "$RESET_AT" in
-        ''|*[!0-9]*) ;;
-        *) NOW=$(date +%s); WAIT=$((RESET_AT - NOW + 30)) ;;
-      esac
-      # <!-- /guild:supervisor-core:ratelimit -->
-      # Below is per-supervisor: the give-up accounting uses this design's failure-class
-      # vocabulary (§8.5a `rate-limit-exhausted`), which batch has no concept of. Diffing the
-      # two real scripts is what showed the verbatim region has to stop here — it cannot
-      # include a branch that records into a per-design taxonomy.
-      # RL_TRIES must advance on EVERY rate-limit encounter, not only when no reset time was
-      # reported. Incrementing it inside the no-reset branch meant an API that keeps returning
-      # `resetsAt` never reached the cap of 6 — the Issue retried without limit.
-      RL_TRIES=$((RL_TRIES + 1))
-      if [ "$RL_TRIES" -gt 6 ]; then
-        echo "  ✗ Issue #$ISSUE still rate limited after $RL_TRIES waits — giving up this run"
-        record_failure "$ISSUE" rate-limit-exhausted "still rate limited after $RL_TRIES waits"
-        board_col "$ISSUE" blocked failed:rate-limit-exhausted   # P4
-        FAILED=$((FAILED + 1)); FAILED_ISSUES+=("#$ISSUE (rate-limit-exhausted)"); break
-      fi
-      # A `resetsAt` in MILLISECONDS is all digits, so it passes the guard inside the verbatim
-      # core above and yields a wait of ~56,000 years (measured). An unbounded wait is worse
-      # than a wrong one: hb_sleep keeps writing heartbeats, so §8.2's duplicate-run guard reads
-      # the hung run as healthy and the sprint cannot be resumed without killing it by hand.
-      if [ -n "$WAIT" ] && [ "$WAIT" -gt "$WAIT_MAX" ]; then
-        echo "  ⚠ Reported reset is implausible (${WAIT}s > ${WAIT_MAX}s) — using the backoff instead"
-        WAIT=""
-      fi
-      if [ -z "$WAIT" ] || [ "$WAIT" -le 0 ]; then
-        WAIT=$((RL_TRIES * 300))
-        echo "  ⏳ Rate limited, no usable reset time. Backing off ${WAIT}s ($RL_TRIES/6)..."
-      else
-        RESET_TIME=$(date -r "$RESET_AT" +%H:%M:%S 2>/dev/null || date -d "@$RESET_AT" +%H:%M:%S 2>/dev/null || echo "?")
-        echo "  ⏳ Rate limited. Waiting until ~$RESET_TIME ($((WAIT/60))m $((WAIT%60))s)..."
-      fi
-      heartbeat "rate-limited-until-$(( $(date +%s) + WAIT ))"
-      hb_sleep "$WAIT"
-      heartbeat "running"
-      echo "  🔄 Retrying Issue #$ISSUE (resume from GitHub state)..."
-      RETRIES=$((RETRIES + 1)); ledger_set "retries.$ISSUE" "$RETRIES"
-      continue
-    fi
 
     echo "  ✗ Issue #$ISSUE failed (exit $EXIT_CODE)"; FAILED=$((FAILED + 1))
     REASON=$(jq -r 'select(.type == "result") | select(.is_error == true) | .result // empty' "$LOG" 2>/dev/null | tail -1 | cut -c1-80 || true)
@@ -1955,13 +2017,15 @@ if [ -n "$BOARD_NUMBER" ]; then
   # ⚠ The token must match the actual block class. `BLOCKED_ISSUES` also collects
   # `#N (branch-ambiguous)` and `#N (base-unresolved:<ref>)`, and those are NOT dependency
   # waits — the repair for branch-ambiguous is deleting one of two candidate branches, so
-  # telling the human "your dependency never landed" points at the wrong thing.
+  # telling the human "your dependency never landed" points at the wrong thing. The same holds
+  # for `#N (account-rate-limited)`: the repair there is re-running once the account recovers.
   for bi in ${BLOCKED_ISSUES[@]+"${BLOCKED_ISSUES[@]}"}; do
     case "$bi" in
       \#*) BOARD_BI="${bi#\#}"; BOARD_BI="${BOARD_BI%% *}"
            case "$bi" in
              *"(branch-ambiguous)"*)  board_col "$BOARD_BI" blocked branch-ambiguous ;;
              *"(base-unresolved"*)    board_col "$BOARD_BI" blocked base-unresolved ;;
+             *"(account-rate-limited)"*) board_col "$BOARD_BI" blocked account-rate-limited ;;
              *)                       board_col "$BOARD_BI" blocked dep-unresolved ;;
            esac ;;
     esac
@@ -1995,7 +2059,7 @@ echo "============================================================"
 echo "  Guild Sprint #$TRACKER — run complete"
 echo "  Total: $PROCESSED  Done: $DONE  Paused: $PAUSED  Blocked: $BLOCKED  Incomplete: $INCOMPLETE  Failed: $FAILED"
 if [ ${#BLOCKED_ISSUES[@]} -gt 0 ]; then
-  echo "  Blocked (a dependency did not land — not a failure):"
+  echo "  Blocked (not a failure — each line says what to repair):"
   for BI in "${BLOCKED_ISSUES[@]}"; do echo "    $BI"; done
 fi
 if [ ${#INCOMPLETE_ISSUES[@]} -gt 0 ]; then

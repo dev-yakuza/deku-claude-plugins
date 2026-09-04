@@ -465,8 +465,17 @@ fi
 cat > "$WORK/rl.py" <<'PY'
 import sys
 src = open(sys.argv[1]).read()
-i = src.index("RL_TRIES=$((RL_TRIES + 1))")
-guard = src.index('if [ -z "$WAIT" ] || [ "$WAIT" -le 0 ]; then', src.index("RATE_LIMITED"))
+# ⚠ `find`, not `index`: an anchor that stops existing must FAIL LOUDLY, not raise and render
+# as an empty diagnostic. That is what this check did when the trust predicate was rewritten.
+i = src.find("RL_TRIES=$((RL_TRIES + 1))")
+cap = src.find('if [ "$RL_TRIES" -gt 6 ]; then')
+guard = src.find('if [ -z "$WAIT" ]; then', src.find("RATE_LIMITED"))
+if i < 0 or cap < 0 or guard < 0:
+    print("ANCHOR MISSING i=%d cap=%d guard=%d" % (i, cap, guard)); raise SystemExit(0)
+# The cap must exist AND sit between the increment and the trust branch: a counter that is
+# incremented but never compared is not a bound.
+if not (i < cap < guard):
+    print("ORDER i=%d cap=%d guard=%d — the cap must sit between them" % (i, cap, guard)); raise SystemExit(0)
 print("OK" if i < guard else "WRONG RL_TRIES is incremented inside the no-reset branch only")
 PY
 RL="$("$PY" "$WORK/rl.py" "$TPL")"
@@ -1184,11 +1193,12 @@ hasline "I: board_col has a default arm"          'BOARD_BUGS=$((BOARD_BUGS+1));
 hasline "I: cache is truncated per run"           ': > "$D/board.txt"'
 hasline "I: ledger keys ride in heartbeat"        'ledger_set board_fails "$BOARD_FAILS"'
 
-# P4 must be wired at ALL EIGHT record_failure sites. Counting is not enough — a missing one
-# leaves that failure class stuck on `In progress` and nothing else notices, so each class is
-# asserted by name.
+# P4 must be wired at EVERY record_failure site. Counting is not enough — a missing one leaves
+# that failure class stuck on `In progress` and nothing else notices, so each class is asserted
+# by name. ⚠ A list, not a number: `rate-limit-exhausted` was removed when rate limits stopped
+# being terminal, and a hardcoded count would have had to be found and changed too.
 for CLS in dag-input-failed base-decision-failed worktree-create-failed deps-install-failed \
-           split-stalled incomplete-mid-spine rate-limit-exhausted child-session-failed; do
+           split-stalled incomplete-mid-spine child-session-failed; do
   hasline "I: P4 wired for $CLS" "board_col \"\$ISSUE\" blocked failed:$CLS"
 done
 
@@ -2959,11 +2969,344 @@ else
   bad "J32: INV5 / completion contents" "$W_I5_WHY"
 fi
 
+echo "== K. rate limit: detection, sanitisation, disposal =="
+# The design that produced this section is design/guild/05-sprint-ratelimit.md. Every check here
+# exists because a mutation survived without it — the numbers in the comments are the round of
+# multi-perspective review that found each one.
+
+# ── K1: position. The single most-emphasised rule in the design had ZERO checks for three
+#   revisions, and four separate mutations that only MOVED lines all survived.
+cat > "$WORK/rlpos.py" <<'PY'
+import sys
+src = open(sys.argv[1]).read()
+fo = src.find('# <!-- guild:supervisor-core:ratelimit -->')
+fc = src.find('# <!-- /guild:supervisor-core:ratelimit -->')
+g1 = src.find('if [ "$EXIT_CODE" -eq 0 ]; then')
+ao = src.find('# <!-- guild:supervisor-core:arms -->')
+gate = src.find('*guild:needs-human*|*guild:done* )')
+if min(fo, fc, g1, ao, gate) < 0:
+    print("ANCHOR MISSING fo=%d fc=%d g1=%d ao=%d gate=%d" % (fo, fc, g1, ao, gate)); raise SystemExit(0)
+# The fence computes; it must precede BOTH exit-code guards. Put it inside the first one and the
+# exit!=0 path — the only path that detects a rate limit today — loses detection and lands on
+# `record_failure child-session-failed`.
+if not fo < g1:
+    print("FENCE BELOW THE FIRST EXIT_CODE GUARD"); raise SystemExit(0)
+# The gate must sit between the fence and the arms, never inside them.
+if not fc < gate < ao:
+    print("GATE MISPLACED fc=%d gate=%d ao=%d" % (fc, gate, ao)); raise SystemExit(0)
+print("OK")
+PY
+K1="$("$PY" "$WORK/rlpos.py" "$TPL")"
+if [ "$K1" = "OK" ]; then ok "K1: fence precedes both exit-code guards; gate sits between fence and arms"
+else bad "K1: fence/gate placement" "OK" "$K1"; fi
+
+# ── K2: the fence must be a BALANCED block. It used to leave `if [ "$RATE_LIMITED" -eq 1 ]`
+#   open, so relocating it as a unit swallowed the arms into the rate-limit branch — and
+#   `bash -n`, the byte pin and the index assertions ALL passed that mutation.
+cat > "$WORK/rlbal.py" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+fo = src.index('# <!-- guild:supervisor-core:ratelimit -->')
+fc = src.index('# <!-- /guild:supervisor-core:ratelimit -->')
+# Comments only. A bare `grep -c if` counts `verify`, `specific` and every prose `if`.
+code = [l for l in src[fo:fc].split("\n") if not l.strip().startswith("#")]
+def n(tok):
+    return sum(len(re.findall(r"(?<![\w-])" + tok + r"(?![\w-])", l)) for l in code)
+if n("if") != n("fi") or n("case") != n("esac"):
+    print("UNBALANCED if=%d fi=%d case=%d esac=%d" % (n("if"), n("fi"), n("case"), n("esac")))
+else:
+    print("OK")
+PY
+K2="$("$PY" "$WORK/rlbal.py" "$TPL")"
+if [ "$K2" = "OK" ]; then ok "K2: the shared fence opens and closes every block it starts"
+else bad "K2: fence balance" "OK" "$K2"; fi
+
+# ── K3: no `record_failure` on any rate-limit path. This is the premise, reduced to one grep:
+#   `record_failure` writes failed.txt, which becomes terminal[n]="failed" and blocks every
+#   dependant — for a condition that resolves by itself.
+#   ⚠ Range: fence marker -> the `child-session-failed` line, MINUS the arms region (whose own
+#   `record_failure` calls are legitimate). ⚠ Cut the end at a LINE START: ending on the literal
+#   leaves `record_failure "$ISSUE" ` inside the range and the check fails on its own boundary.
+#   ⚠ Code only — the comments in that range legitimately discuss `record_failure`.
+cat > "$WORK/rlnofail.py" <<'PY'
+import sys
+src = open(sys.argv[1]).read()
+fo = src.index('# <!-- guild:supervisor-core:ratelimit -->')
+ao = src.index('# <!-- guild:supervisor-core:arms -->')
+ac = src.index('# <!-- /guild:supervisor-core:arms -->')
+cs = src.index('    record_failure "$ISSUE" child-session-failed')
+region = src[fo:ao] + src[ac:cs]
+hits = [l.strip() for l in region.split("\n")
+        if "record_failure" in l and not l.strip().startswith("#")]
+print("OK" if not hits else "FOUND %d: %s" % (len(hits), hits[0][:60]))
+PY
+K3="$("$PY" "$WORK/rlnofail.py" "$TPL")"
+if [ "$K3" = "OK" ]; then ok "K3: no record_failure on any rate-limit path (the premise, as one range)"
+else bad "K3: record_failure on a rate-limit path" "OK" "$K3"; fi
+# The class itself must be gone, comments included. ⚠ `grep -qF`, not `lacksline`: that helper
+# only inspects the text before the first `#`, so it passes stale COMMENTS carrying the class.
+if grep -qF 'rate-limit-exhausted' "$TPL"; then
+  bad "K3b: the rate-limit-exhausted class is gone (comments too)" "absent" "still present"
+else
+  ok "K3b: the rate-limit-exhausted class is gone (comments too)"
+fi
+
+# ── K4: values in the SHARED fence. `cmp.py` catches DRIFT between the two copies, not values:
+#   three mutations that edited BOTH copies identically survived a whole round. Pin the literals.
+for LIT in 'select(.status != "allowed")' "fromjson? | objects" 'rate[ -]limit' 'usage limit reached' 'rate_limit_error'; do
+  if grep -qF -- "$LIT" "$TPL"; then ok "K4: fence pins the literal [$LIT]"
+  else bad "K4: fence literal" "$LIT" "missing"; fi
+done
+# The fallback must stay gated on a non-zero exit code. Ungated, a broad regex routes normally
+# completed members into the rate-limit path — guild files contain "rate limit" and $LOG carries
+# tool_result file contents, so a self-hosted run trips it on every member.
+if grep -qF -- '[ "$EXIT_CODE" -ne 0 ] \' "$TPL"; then
+  ok "K4b: the text fallback is gated on a non-zero exit code"
+else
+  bad "K4b: text fallback gate" 'EXIT_CODE -ne 0' "missing"
+fi
+
+# ── K5: the arms `case` is BYTE-IDENTICAL to the reviewed original. This is what makes the
+#   fall-through defect structurally impossible: the four arms cannot be touched at all.
+#   ⚠ Baseline is "immediately after this revision", not 0.66.0 — exterminating the class had to
+#   rewrite one comment line INSIDE this range, so the two requirements are mutually exclusive.
+#   ⚠ Anchors: scope to the arms region FIRST. An unscoped rindex lands on a later `esac`.
+#   ⚠ Slice = the `esac` line and its trailing newline included; four faithful readings of
+#   "the case block" give four different digests, so the endpoints are part of the contract.
+cat > "$WORK/rlgold.py" <<'PY'
+import hashlib, sys
+src = open(sys.argv[1]).read()
+ao = src.index('# <!-- guild:supervisor-core:arms -->')
+ac = src.index('# <!-- /guild:supervisor-core:arms -->')
+reg = src[ao:ac]
+st = ao + reg.rindex('      case "$STATE" in')
+en = ao + reg.rindex("\n      esac\n") + len("\n      esac\n")
+sl = src[st:en]
+if 'guild:supervisor-core:ratelimit' in sl:
+    print("SLICE ESCAPED the arms region"); raise SystemExit(0)
+b = sl.encode()
+print("%s %d %d" % (hashlib.sha256(b).hexdigest(), len(b), sl.count("\n")))
+PY
+K5="$("$PY" "$WORK/rlgold.py" "$TPL")"
+K5_WANT="1dfc7f61134bdcd3d73eb1b5ab85fadf3c78b3edd53916988d2fc3d7a7932715 6419 94"
+if [ "$K5" = "$K5_WANT" ]; then
+  ok "K5: the arms case is byte-identical to the pinned original"
+else
+  bad "K5: arms case byte pin" "$K5_WANT" "$K5"
+fi
+
+# ── K6: every abandon path must (a) `break` and (b) push to BLOCKED_ISSUES.
+#   ⚠ Per PATH, not by existence and not by count. The design creates TWO abandon paths pushing
+#   the SAME token, so an existence check stays green when one push is deleted — and that exact
+#   mutation survived two rounds. Counting instead would repeat the mistake this suite keeps
+#   catching elsewhere ("write a list, not a number"); pairing the two counts per token does not.
+cat > "$WORK/rlpaths.py" <<'PY'
+import sys
+src = open(sys.argv[1]).read()
+lines = src.split("\n")
+code = [l for l in lines if not l.strip().startswith("#")]
+cards = sum(1 for l in code if 'board_col "$ISSUE" blocked account-rate-limited' in l)
+pushes = sum(1 for l in code if 'BLOCKED_ISSUES+=("#$ISSUE (account-rate-limited)")' in l)
+if cards == 0:
+    print("NO abandon path writes the card"); raise SystemExit(0)
+if cards != pushes:
+    print("ASYMMETRY %d card write(s) but %d push(es)" % (cards, pushes)); raise SystemExit(0)
+# Each abandon path must actually leave the retry loop. A cap that counts and keeps going is
+# not a cap.
+blocks, cur = [], None
+for l in lines:
+    if 'board_col "$ISSUE" blocked account-rate-limited' in l and not l.strip().startswith("#"):
+        cur = []
+    elif cur is not None:
+        cur.append(l.strip())
+        if len(cur) > 4:
+            blocks.append(cur); cur = None
+if cur:
+    blocks.append(cur)
+for b in blocks:
+    if not any(x == "break" for x in b):
+        print("A path writes the card but never breaks: %s" % (b[:2],)); raise SystemExit(0)
+print("OK %d" % cards)
+PY
+K6="$("$PY" "$WORK/rlpaths.py" "$TPL")"
+case "$K6" in
+  OK*) ok "K6: every abandon path writes the card, pushes the issue, and breaks ($K6)" ;;
+  *)   bad "K6: abandon paths" "OK" "$K6" ;;
+esac
+# The P6 sweep must recognise the token, or it rewrites the card to `dep-unresolved` at the end
+# of the run — a repair instruction that is simply wrong.
+if grep -qF '*"(account-rate-limited)"*)' "$TPL"; then
+  ok "K6b: the P6 sweep has an arm for the token (else it rewrites the card to dep-unresolved)"
+else
+  bad "K6b: P6 arm for account-rate-limited" "present" "missing"
+fi
+
+# ── K7: heartbeat state tokens must all be registered in _handoff.md. Asserted for three
+#   revisions with no check; a mutation that renamed one survived.
+#   ⚠ Hybrid rule, and it has to be: 3 of the template's heartbeat arguments are not literals,
+#   and the registry lists those as `<epoch>`/`<n>s`/`<HHMM>` placeholders. Literal arguments
+#   are matched as literals; interpolated ones are truncated at the first `$` and the registry
+#   must show `<` immediately after that prefix.
+cat > "$WORK/rlhb.py" <<'PY'
+import re, sys
+tpl = open(sys.argv[1]).read()
+reg = open(sys.argv[2]).read()
+args = re.findall(r'heartbeat "([^"]+)"', tpl)
+if not args:
+    print("NO heartbeat calls found"); raise SystemExit(0)
+for a in sorted(set(args)):
+    if "$" in a:
+        pre = a[:a.index("$")]
+        if pre + "<" not in reg:
+            print("UNREGISTERED interpolated token: %s (prefix %r)" % (a, pre)); raise SystemExit(0)
+    else:
+        if "`" + a + "`" not in reg:
+            print("UNREGISTERED literal token: %s" % a); raise SystemExit(0)
+print("OK %d" % len(set(args)))
+PY
+K7="$("$PY" "$WORK/rlhb.py" "$TPL" "$HERE/../skills/gld/commands/atoms/_handoff.md")"
+case "$K7" in
+  OK*) ok "K7: every heartbeat state token is registered in _handoff.md ($K7)" ;;
+  *)   bad "K7: heartbeat token registry" "OK" "$K7" ;;
+esac
+
+# ── K8: runtime. Everything above is static; these EXECUTE the region.
+#   Three defects in this design's history were invisible to every string check: a `jq -e`
+#   whose exit code depended on log line ORDER, a demotion that treated "reset unknown" as
+#   "no limit", and a ceiling branch that string-matched correctly while behaving backwards.
+#   ⚠ The region here is `# Main loop`-relative, so the T5 cut does NOT reach it.
+"$PY" - "$TPL" "$WORK/rl_rig.sh" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+fo = src.index('    # <!-- guild:supervisor-core:ratelimit -->')
+ao = src.index('    if [ "$EXIT_CODE" -eq 0 ]; then\n      # <!-- guild:supervisor-core:arms -->')
+block = src[fo:ao].rstrip("\n")
+# ⚠ The region ends with the gate's `esac`; the arms guard that follows is NOT part of it.
+# `break`/`continue` only mean something inside the shipped loop, so make each observable —
+# and add a THIRD sentinel for falling through, which is the only way to see the exit-0
+# demotion, the gate priority and the fallback lock at all.
+block = re.sub(r'(?m)^(\s*)break$',    r'\1echo "BROKE"; return 0',    block)
+block = re.sub(r'(?m)^(\s*)continue$', r'\1echo "CONTINUE"; return 0', block)
+# ⚠ Not %-formatting: the stub bodies below are full of `printf '%s'`.
+harness = '''#!/bin/bash
+set -uo pipefail
+# Cross-call state lives here, not in detect(): "the second zero-wait in a row" and "the
+# seventh encounter" cannot be expressed without it.
+RL_TRIES=0; RL_ZEROWAIT=0; RETRIES=0
+BLOCKED=0; BLOCKED_ISSUES=()
+WAIT_MAX=14400
+ISSUE=7; OWNER_REPO="o/r"; RESET_TIME=""
+rl_reset() { RL_TRIES=0; RL_ZEROWAIT=0; RETRIES=0; BLOCKED=0; BLOCKED_ISSUES=(); }
+rl_dump()  { printf 'RL_TRIES=%s RL_ZEROWAIT=%s BLOCKED=%s\\n' "$RL_TRIES" "$RL_ZEROWAIT" "$BLOCKED"; }
+record_event() { printf 'EVENT %s\\n' "$2"; }
+board_col()    { printf 'BOARD %s %s\\n' "$2" "${3:-}"; }
+heartbeat()    { printf 'HB %s\\n' "$1"; }
+hb_sleep()     { printf 'SLEEP=%s\\n' "$1"; }
+ledger_set()   { :; }
+detect() {
+  LOG="$1"; EXIT_CODE="${2:-1}"; STATE_STUB="${3:-}"
+  gh() { printf '%s' "$STATE_STUB"; }
+@@REGION@@
+  echo "FELL_THROUGH"
+  return 0
+}
+'''
+# ⚠ A placeholder that cannot occur in the region. `BLOCK` was a prefix of this harness's own
+# `BLOCKED=0`, so the substitution landed there and the rig would not parse.
+open(sys.argv[2], 'w').write(harness.replace('@@REGION@@', '\n'.join('  ' + l for l in block.splitlines())))
+PY
+[ -s "$WORK/rl_rig.sh" ] || bad "K8: rig extraction" "the rig is empty"
+"$SH" -n "$WORK/rl_rig.sh" 2>"$WORK/rig.err" || true
+if [ -s "$WORK/rig.err" ]; then
+  bad "K8: the extracted region parses on its own" "$(head -1 "$WORK/rig.err")"
+else
+  ok "K8: the extracted region parses on its own"
+fi
+
+rl_case() { # $1=label $2=expected $3=log $4=exit-code $5=label-stub
+  local out
+  out="$("$SH" -c ". '$WORK/rl_rig.sh'; rl_reset; detect '$3' '${4:-1}' '${5:-}'" 2>&1)"
+  case "$out" in
+    *"$2"*) ok "$1" ;;
+    *)      bad "$1" "want [$2], got [$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-90)]" ;;
+  esac
+}
+
+RLW="$WORK/rl"; mkdir -p "$RLW"
+EV='{"type":"rate_limit_event","rate_limit_info":{"status":"limited","resetsAt":%s}}'
+NOWS=$(date +%s)
+# ⚠ Expectations are MINUTE-granular. A literal `SLEEP=630` flakes: one second between building
+# the fixture and running it makes it 629.
+printf "$EV\n" "$((NOWS + 600))"        > "$RLW/soon.log"
+printf "$EV\n" "$((NOWS + 6 * 3600))"   > "$RLW/sixh.log"
+printf "$EV\n" "$((NOWS + 60 * 86400))" > "$RLW/far.log"
+printf "$EV\n" "$((NOWS - 600))"        > "$RLW/past.log"
+printf "$EV\n" "99999999999999999999"   > "$RLW/d20.log"
+printf "$EV\n" "$(( (NOWS + 600) * 1000 ))" > "$RLW/ms.log"
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"limited","resetsAt":"2026-08-22T10:00:00Z"}}\n' > "$RLW/iso.log"
+printf 'Error: startup noise on stderr\n' > "$RLW/head.log"; printf "$EV\n" "$((NOWS + 600))" >> "$RLW/head.log"
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}\n{"type":"rate_limit_event"}\n' > "$RLW/noinfo.log"
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}\n999\n' > "$RLW/scalar.log"
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}\n{"type":"result","result":"Error: rate limit exceeded, try again later"}\n' > "$RLW/plain.log"
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}\n{"type":"result","result":"Error: command not found: flutter"}\n' > "$RLW/crash.log"
+
+# detection
+rl_case "K8a: a structured limit is detected on exit 0 too"     "SLEEP=" "$RLW/soon.log" 0
+rl_case "K8b: stderr noise at the HEAD of the log still detects" "SLEEP=" "$RLW/head.log"
+rl_case "K8c: an event with no rate_limit_info still detects"    "SLEEP=" "$RLW/noinfo.log"
+rl_case "K8d: a bare JSON scalar line still detects"             "SLEEP=" "$RLW/scalar.log"
+rl_case "K8e: the text fallback fires on a non-zero exit"        "SLEEP=" "$RLW/plain.log"
+rl_case "K8f: the text fallback is LOCKED on exit 0"             "FELL_THROUGH" "$RLW/plain.log" 0
+rl_case "K8g: an unrelated crash is not a rate limit"            "FELL_THROUGH" "$RLW/crash.log"
+# sanitisation
+rl_case "K8h: (1) ISO-8601 is discarded, then backs off"         "SLEEP=300" "$RLW/iso.log"
+rl_case "K8i: (1b) a 20-digit resetsAt is discarded"             "SLEEP=300" "$RLW/d20.log"
+rl_case "K8j: (2) milliseconds are converted to seconds"         "SLEEP=6"   "$RLW/ms.log"
+rl_case "K8k: (3) a reset 60 days out is discarded"              "SLEEP=300" "$RLW/far.log"
+rl_case "K8l: (4) a past reset retries at once on a crash"       "SLEEP=0"   "$RLW/past.log"
+rl_case "K8m: (4) a past reset on exit 0 is NOT a live limit"    "FELL_THROUGH" "$RLW/past.log" 0
+# disposal
+rl_case "K8n: a reset within the ceiling is waited out"          "SLEEP=6"   "$RLW/soon.log"
+rl_case "K8o: a reset past the ceiling blocks, it does not fail" "BOARD blocked account-rate-limited" "$RLW/sixh.log"
+rl_case "K8p: blocking breaks out of the retry loop"             "BROKE"     "$RLW/sixh.log"
+# gate priority
+rl_case "K8q: guild:done beats a rate limit in the same log"     "FELL_THROUGH" "$RLW/soon.log" 0 "guild:done"
+rl_case "K8r: guild:needs-human beats a rate limit too"          "FELL_THROUGH" "$RLW/soon.log" 0 "guild:needs-human"
+rl_case "K8s: guild:children does NOT beat it"                   "SLEEP="       "$RLW/soon.log" 0 "guild:children"
+# the bound, run for real: six waits, then blocked on the seventh encounter
+K8T="$("$SH" -c ". '$WORK/rl_rig.sh'; rl_reset
+  for i in 1 2 3 4 5 6 7; do detect '$RLW/soon.log' 1 >/dev/null; done
+  rl_dump" 2>&1)"
+K8U="$("$SH" -c ". '$WORK/rl_rig.sh'; rl_reset
+  for i in 1 2 3 4 5 6; do detect '$RLW/soon.log' 1 >/dev/null; done
+  detect '$RLW/soon.log' 1" 2>&1 | tr '\n' ' ')"
+case "$K8U" in
+  *"EVENT account-rate-limited"*"BROKE"*) ok "K8t: the seventh encounter blocks (six waits is the bound)" ;;
+  *) bad "K8t: the seventh encounter blocks" "want EVENT+BROKE, got [$(printf '%s' "$K8U" | cut -c1-90)]" ;;
+esac
+case "$K8T" in
+  *"BLOCKED=1"*) ok "K8u: exactly one member is counted blocked" ;;
+  *) bad "K8u: blocked accounting" "want BLOCKED=1, got [$K8T]" ;;
+esac
+# No path may reach record_failure. This is the premise, executed rather than grepped.
+K8V=0
+for L in soon sixh far past d20 ms iso head noinfo scalar plain crash; do
+  for E in 0 1; do
+    O="$("$SH" -c ". '$WORK/rl_rig.sh'; rl_reset; record_failure() { printf 'FAILURE\n'; }; detect '$RLW/$L.log' $E" 2>&1)"
+    case "$O" in *FAILURE*) K8V=$((K8V + 1)) ;; esac
+  done
+done
+if [ "$K8V" -eq 0 ]; then
+  ok "K8v: record_failure is unreachable across all 24 log/exit-code combinations"
+else
+  bad "K8v: record_failure reachable" "$K8V of 24 combinations reached it"
+fi
+
 # ── T9: 검사 개수 바닥 ─────────────────────────────────────────────────────
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=207
+SUP_MIN_CHECKS=243
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"
