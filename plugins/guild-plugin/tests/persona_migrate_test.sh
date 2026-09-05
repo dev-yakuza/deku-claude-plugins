@@ -1155,15 +1155,28 @@ m.RENAMED_HEADINGS["## __chain_b"] = "## __chain_c"
 if m.current_name("## __chain_a") != "## __chain_c":
     problems.append("current_name does not resolve transitively (A->B->C gave %r)"
                     % m.current_name("## __chain_a"))
-# 사이클이 걸려도 매달리지 않는다.
-m.RENAMED_HEADINGS["## __cyc_a"] = "## __cyc_b"
-m.RENAMED_HEADINGS["## __cyc_b"] = "## __cyc_a"
-try:
-    m.current_name("## __cyc_a")
-except Exception as exc:
-    problems.append("current_name hangs or raises on a cycle: %r" % exc)
-for k in ("## __chain_a", "## __chain_b", "## __cyc_a", "## __cyc_b"):
+for k in ("## __chain_a", "## __chain_b"):
     del m.RENAMED_HEADINGS[k]
+# ⚠ 사이클은 **자식 프로세스 + 타임아웃**으로 본다. try/except 는 매달림을 못 잡는다 — 루프의
+# 종료 조건을 지우면 이 검사는 예외를 내는 대신 영원히 돈다(실측: timeout 120 이 죽였고
+# 스위트는 진단 한 줄 없이 사라졌다. CI 에서는 원인 불명의 job timeout 이다).
+import subprocess, sys as _sys, textwrap
+_probe = textwrap.dedent("""
+    import os, sys
+    sys.path.insert(0, os.path.dirname(sys.argv[1]))
+    import persona_migrate as m
+    m.RENAMED_HEADINGS["## __cyc_a"] = "## __cyc_b"
+    m.RENAMED_HEADINGS["## __cyc_b"] = "## __cyc_a"
+    m.current_name("## __cyc_a")
+    print("SURVIVED")
+""")
+try:
+    r = subprocess.run([_sys.executable, "-B", "-c", _probe, sys.argv[1]],
+                       capture_output=True, text=True, timeout=15)
+    if "SURVIVED" not in r.stdout:
+        problems.append("current_name raised on a cycle: %s" % r.stderr.strip()[:80])
+except subprocess.TimeoutExpired:
+    problems.append("current_name HANGS on a cycle (no _max_hops / seen-set bound)")
 print("OK %d" % len(m.RENAMED_HEADINGS) if not problems else "PROBLEMS " + " | ".join(problems))
 PYLG
 # ⚠ -B. 이 프로브는 persona_migrate 를 import 하므로 atoms/ 에 .pyc 를 남기고, 그러면 C26

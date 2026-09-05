@@ -333,4 +333,12 @@ fi
 
 echo
 printf 'worktree: %d passed, %d failed\n' "$PASS" "$FAIL"
+# ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
+#   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
+#   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
+WT_MIN_CHECKS=19
+if [ "$((PASS + FAIL))" -lt "$WT_MIN_CHECKS" ]; then
+  echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${WT_MIN_CHECKS}건)."
+  exit 1
+fi
 [ "$FAIL" -eq 0 ]

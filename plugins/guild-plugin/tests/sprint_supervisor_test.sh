@@ -3808,7 +3808,7 @@ rsfail "render: --human-repo 없는 디렉터리 거부" "not an existing direct
   --tracker 99 --human-repo "$WORK/no-such-dir-$$" --out - $(rsbase)
 rsfail "render: --order 가 숫자가 아니면 거부" "--order must be digits only" \
   --tracker 99 --human-repo "$RSH" --out - $(rsbase) --order ""
-for m in 'a && b' 'a $(b)' 'a | b' 'a > f' 'a *' 'a {x,y}' 'a ?z' 'a $HOME' 'a ~/z' 'a b=~/z'; do
+for m in 'a && b' 'a $(b)' 'a | b' 'a > f' 'a *' 'a {x,y}' 'a ?z' 'a [a-z]x' 'a [abc]' 'a $HOME' 'a ~/z' 'a b=~/z'; do
   rsfail "render: --install-cmd '$m' 거부" "shell metacharacters" \
     --tracker 99 --human-repo "$RSH" --out - $(rsbase) --install-cmd "$m"
 done
@@ -3948,10 +3948,20 @@ cp "$TPL" "$FAKE_TPL"
 
 # 잘린 쓰기 — getsize 를 거짓말시켜 크기 검사에만 도달한다. 이 검사가 2d 가 받는 유일한 신호다.
 mkdir -p "$WORK/liar"
+# ⚠ 거짓말의 대상은 `os.fstat` 이다. 예전 판은 `os.path.getsize` 를 감쌌는데, 렌더러가
+#   TOCTOU 를 없애며 경로 기반 stat 을 버리고 fd 기반으로 옮기자 거짓말이 닿지 않게 됐고
+#   이 검사는 조용히 무의미해졌다(실측: 렌더가 정상 종료해 FAIL). 크기만 속이고 st_mode 와
+#   st_nlink 는 그대로 두어야 S_ISREG·하드링크 검사가 계속 제 일을 한다.
 cat > "$WORK/liar/sitecustomize.py" <<'PYL'
-import os.path
-_real = os.path.getsize
-os.path.getsize = lambda p: _real(p) - 1 if str(p).endswith(".gld-sprint-99.sh") else _real(p)
+import os
+_real = os.fstat
+def _liar(fd):
+    st = _real(fd)
+    t = list(st)
+    if t[6] > 1000:          # st_size — 렌더 직후의 큰 쓰기에만 거짓말한다
+        t[6] = t[6] - 1
+    return os.stat_result(tuple(t))
+os.fstat = _liar
 PYL
 RSTRUNC="$(PYTHONPATH="$WORK/liar" "$PY" "$RS" --tracker 99 --human-repo "$RSH" \
   --owner-repo a/b --default-branch develop --container /tmp/c --dag-path /tmp/d.py 2>&1 >/dev/null)"
@@ -3973,6 +3983,45 @@ esac
 [ -e "$WORK/symtarget/pwned.sh" ] && bad "render: 심링크 대상에 쓰지 않았다" "미생성이어야 하나 존재함" \
                                   || ok "render: 심링크 대상에 아무것도 쓰지 않았다"
 rm -f "$RSH/.claude/guild/.gld-sprint-99.sh"
+
+# ⚠ 심링크 하나만 막는 것은 봉쇄가 아니다. 같은 inode 에 닿는 길이 넷이고, O_NOFOLLOW 는
+#   그중 하나(마지막 성분이 심링크)만 막는다. 나머지 셋을 각각 세운다 — 셋 다 실측으로 뚫렸다.
+rsattack() {  # rsattack <case> <expected-stderr-fragment> <setup-fn>
+  RA_R="$WORK/atk"; rm -rf "$RA_R"; mkdir -p "$RA_R/.claude/guild" "$RA_R/.git/hooks"
+  printf '#orig\n' > "$RA_R/.git/hooks/pre-commit"
+  "$3" || { bad "$1" "셋업 실패 — 검사가 성립하지 않는다"; return; }
+  RA_ERR="$("$PY" "$RS" --tracker 99 --human-repo "$RA_R" --owner-repo a/b \
+    --default-branch develop --container /tmp/c --dag-path /tmp/d.py 2>&1 >/dev/null)"; RA_RC=$?
+  if [ "$RA_RC" -eq 0 ]; then bad "$1" "거부해야 하나 rc=0 으로 썼다"
+  elif printf '%s' "$RA_ERR" | grep -qF -- "$2"; then ok "$1"
+  else bad "$1" "stderr 에 '$2' 를 기대했으나: $(printf '%s' "$RA_ERR" | head -1)"; fi
+}
+a_hard() { ln "$RA_R/.git/hooks/pre-commit" "$RA_R/.claude/guild/.gld-sprint-99.sh"; }
+a_guild() { rm -rf "$RA_R/.claude/guild"; mkdir -p "$WORK/atk-out"; ln -s "$WORK/atk-out" "$RA_R/.claude/guild"; }
+a_claude() { rm -rf "$RA_R/.claude"; mkdir -p "$WORK/atk-out2"; ln -s "$WORK/atk-out2" "$RA_R/.claude"; }
+a_fifo() { mkfifo "$RA_R/.claude/guild/.gld-sprint-99.sh"; }
+rsattack "render: 조립 경로가 하드링크면 거부한다" "is hard-linked" a_hard
+# 그리고 거부는 아무것도 파괴하지 않아야 한다. O_TRUNC 를 open 에 두면 fstat 검사 **전에**
+# 피해자 파일이 0바이트가 된다 — 실측으로 그랬다(6바이트 -> 0).
+RA_V="$(wc -c < "$RA_R/.git/hooks/pre-commit" | tr -d ' ')"
+[ "$RA_V" = "6" ] && ok "render: 하드링크 거부가 피해자 파일을 자르지 않는다" \
+                  || bad "render: 거부의 비파괴성" "6바이트로 남아야 하나 ${RA_V}바이트"
+rsattack "render: .claude/guild 가 심링크면 거부한다" "outside the checkout" a_guild
+rsattack "render: .claude 가 심링크면 거부한다"       "outside the checkout" a_claude
+rsattack "render: FIFO 면 매달리지 않고 거부한다"      "is a FIFO"           a_fifo
+rm -rf "$WORK/atk" "$WORK/atk-out" "$WORK/atk-out2"
+
+# 경로 기반 chmod 는 그 자체로 "임의 파일을 0755 로 만드는" 원시였다 — 안전하게 연 fd 를 버리고
+# 경로를 다시 해석했기 때문이다. 실측으로 첫 시도에 뚫렸고 chmod 탈출만 보면 200/200 이었다.
+# 여기서는 경합을 재현하지 않고(불안정하다) **경로 기반 호출이 없다**는 것을 직접 단언한다.
+# ⚠ 주석이 아니라 **코드** 만 본다. 이 파일의 한국어 주석이 왜 경로 기반이면 안 되는지를
+#   설명하며 `os.chmod(out, …)` 를 인용하므로, 단순 grep 은 자기 자신의 주석에 걸려 영구
+#   FAIL 이 된다 — 이 스위트의 `hascode` 가 쓰는 것과 같은 규칙(첫 `#` 앞부분만)을 쓴다.
+if awk '{ i=index($0,"#"); pre=(i?substr($0,1,i-1):$0)
+          if (pre ~ /os\.chmod\(out|os\.path\.getsize\(out/) { found=1; exit } }
+        END { exit !found }' "$RS"; then
+  bad "render: 쓰기 후 chmod/stat 이 fd 기반이다" "fchmod/fstat 를 기대했으나 경로 기반 호출이 코드에 남아 있다"
+else ok "render: 쓰기 후 chmod/stat 이 경로가 아니라 fd 로 이뤄진다 (TOCTOU 없음)"; fi
 
 # 조립 경로 분기 — 하니스 13곳이 전부 --out - 를 쓰므로 이 분기는 여기서만 덮인다.
 if "$PY" "$RS" --tracker 99 --human-repo "$RSH" $(rsbase) --order 101 >/dev/null 2>&1; then
@@ -4023,7 +4072,7 @@ fi
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=305
+SUP_MIN_CHECKS=313
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

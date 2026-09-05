@@ -23,12 +23,21 @@ literal `-` (stdout), which the test harness needs.
 
 Two of the three checks on that assembled path are containment, one is not, and the difference
 is stated rather than blurred:
-  - `--tracker` digits-only + the fixed basename + O_NOFOLLOW on the write
-    -> containment (no traversal, no chosen name, and the destination is not a symlink).
-    The symlink clause is load-bearing, not belt-and-braces: without it a link at
-    `.claude/guild/.gld-sprint-99.sh` pointing at `.git/hooks/pre-commit` gets a 139KB
-    executable written through it, rc=0, with the stderr contract line naming the in-repo
-    path — so `run.md` step 2d approves.
+  - `--tracker` digits-only + the fixed basename gives the NAME. That is not containment on
+    its own, and O_NOFOLLOW alone does not finish the job either — it constrains the final
+    component, and only against a symlink. Four routes reach a different inode, and all four
+    are closed at the write, from the descriptor rather than the path:
+      symlink at the final component  -> O_NOFOLLOW
+      hardlink at the final component -> fstat st_nlink != 1
+      symlinked ancestor (.claude or .claude/guild) -> realpath(dirname) must equal
+        realpath(human_repo)/.claude/guild. This one is reachable from a clone alone: git
+        stores symlinks (mode 120000), so a repo that commits .claude as a link writes
+        outside the checkout on the first run.
+      FIFO / non-regular file -> O_NONBLOCK + S_ISREG (without O_NONBLOCK the open blocks
+        forever waiting for a reader, with no rc and no message).
+    chmod and the size check use fchmod/fstat on the open descriptor. The path-based pair
+    was a TOCTOU window wide enough to win on the first attempt: the render went to an
+    unlinked inode while the renderer chmod'ed the attacker's file 0755 for them.
   - `--human-repo` absolute + existing directory  -> a TYPO GUARD, not containment. The same
     model call supplies the value, so there is no independent standard to check it against; it
     catches a malformed or stale path, nothing more. The design initially left it out for that
@@ -44,6 +53,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import sys
 
 # `commands.*` values are normalized at init time and MUST NOT contain these
@@ -59,7 +69,7 @@ import sys
 # `*`/`?`/`{}` 도 거부한다. 템플릿은 `( cd "$WT" && eval "$IC" )` 로 돌리므로 글롭과 중괄호
 # 확장이 워크트리를 상대로 일어나고, 실행되는 명령이 설정 리터럴과 달라진다 — `$`·`~` 를
 # 막은 것과 같은 이유다.
-_METACHAR = re.compile(r"\$|`|&&|\|\||[|;<>&\n*?{}]|(?:\A|[\s=:])~")
+_METACHAR = re.compile(r"\$|`|&&|\|\||[|;<>&\n*?{}\[\]]|(?:\A|[\s=:])~")
 
 _TRACKER = re.compile(r"\A[0-9]+\Z")
 _VERSION = re.compile(r"\A[A-Za-z0-9._+-]+\Z")
@@ -202,7 +212,7 @@ def main():
             die(
                 "--install-cmd %r contains shell metacharacters; config.commands values are "
                 "normalized at init time and must not contain $(...), $VAR, `..`, &&, |, ;, ~, "
-                "globs (* ? {}), or redirections" % cmd
+                "globs (* ? [] {}), or redirections" % cmd
             )
 
     try:
@@ -245,6 +255,12 @@ def main():
     # (`--owner-repo '<HUMAN_REPO>'` → OWNER_REPO 가 human-repo 값으로 조용히 바뀌었다).
     src = re.sub("|".join(re.escape(t) for t in subs), lambda m: subs[m.group(0)], src)
 
+    # ⚠ 이 가드는 **입력으로는 도달할 수 없는** 심층 방어다. 위의 사전 검사가 모르는 토큰을
+    # 이미 거부하고, 아는 아홉 개는 re.sub 가 전부 바꾸므로, 어떤 인자 조합으로도 여기를
+    # 발화시킬 수 없다 — 그래서 스위트에 이 가드만 겨냥한 케이스가 없다(이 가드를 지워도
+    # 313/0 그린이다). `0eb3e7e` 의 커밋 메시지가 "네 가지를 전부 덮었다" 고 적은 것은 과장이며,
+    # 실제로 덮인 것은 셋이다. 남겨 두는 이유는 정규식 조립이 깨지는 경우(코드 변경) 때문이고,
+    # 그 경우는 스위트의 렌더 후 `<UPPER>` 검사가 잡는다.
     # 치환이 실제로 일어났는지. 위의 사전 검사가 "알 수 없는 자리표시자" 를 이미 처리하므로
     # 여기서는 아홉 개가 사라졌는지만 본다. `re.sub` 가 전부 바꿨다면 남을 수 없지만, 정규식
     # 조립이 깨지면 조용히 0건 치환이 된다 — 그 경우를 잡는다. 값 안에 토큰 문자열이 들어 있는
@@ -275,31 +291,72 @@ def main():
     out = os.path.join(
         args.human_repo, ".claude", "guild", ".gld-sprint-%s.sh" % args.tracker
     )
-    # ⚠ 심링크를 따라가지 않는다. 조립 경로가 심링크면 `open(out,"w")` 도 `os.chmod` 도 링크를
-    # 따라가므로, `.git/hooks/pre-commit` 을 가리키는 링크 하나로 "숫자 tracker + 고정 파일명이면
-    # 산출 경로가 닫힌다" 는 봉쇄 주장이 통째로 무너진다 — 그리고 stderr 계약 줄은 레포 안의
-    # 경로를 보고하므로 2d 는 아무것도 눈치채지 못한다. O_NOFOLLOW 로 커널에게 맡긴다
-    # (islink 선검사는 TOCTOU 가 남는다).
+    # ⚠ 조립 경로로 다른 파일에 도달하는 길은 **넷** 이다. `O_NOFOLLOW` 하나로는 그중 하나만
+    # 막힌다 — 마지막 성분이 심링크인 경우뿐이다. 실측으로 나머지 셋이 전부 뚫렸다:
+    #   ① 마지막 성분이 심링크        -> O_NOFOLLOW
+    #   ② 마지막 성분이 **하드링크**   -> O_NOFOLLOW 무관. `ln`(-s 없이) 하나로 .git/hooks/
+    #      pre-commit 에 139KB 가 rc=0 으로 쓰였다. st_nlink 로 본다.
+    #   ③ **상위 디렉터리**가 심링크   -> O_NOFOLLOW 는 디렉터리 성분에 적용되지 않고
+    #      makedirs 가 따라간다. 이건 클론만으로 도달한다 — git 은 심링크를 저장하므로(120000)
+    #      `.claude` 나 `.claude/guild` 를 심링크로 커밋한 레포는 첫 실행에서 체크아웃 **밖**에
+    #      0755 파일을 얻는다. realpath 로 조상을 고정한다.
+    #   ④ FIFO -> O_WRONLY 가 리더를 기다리며 **영원히 매달린다**(rc 도 메시지도 없다).
+    #      O_NONBLOCK + S_ISREG 로 닫는다.
+    # 그리고 경로 기반 chmod/getsize 는 TOCTOU 다 — 안전하게 연 fd 를 버리고 경로를 다시
+    # 해석하므로, 그 창에서 경로를 심링크로 바꾸면 렌더러 자신이 남의 파일을 0755 로 만든다
+    # (실측: 첫 시도에 성공, chmod 탈출만 따로 보면 200/200 재현). fd 로만 다룬다.
+    guild_dir = os.path.dirname(out)
     try:
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o755)
+        os.makedirs(guild_dir, exist_ok=True)
     except OSError as exc:
-        if getattr(exc, "errno", None) in (errno.ELOOP, errno.EMLINK):
-            die("%s is a symlink; refusing to write through it" % out)
-        die("cannot write %s (%s)" % (out, exc))
+        die("cannot create %s (%s)" % (guild_dir, exc))
+    want_dir = os.path.join(os.path.realpath(args.human_repo), ".claude", "guild")
+    if os.path.realpath(guild_dir) != want_dir:
+        die(
+            "%s resolves to %s, outside the checkout — a symlinked .claude or .claude/guild "
+            "component" % (guild_dir, os.path.realpath(guild_dir))
+        )
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        # ⚠ O_TRUNC 를 여기 두지 않는다. open 이 fstat 보다 먼저 일어나므로, 하드링크 검사가
+        # 거부하기 **전에** 피해자 파일이 0바이트가 된다(실측: `.git/hooks/pre-commit` 6바이트 -> 0).
+        # 거부는 아무것도 파괴하지 않아야 한다. 검사를 통과한 뒤 ftruncate 한다.
+        fd = os.open(
+            out, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o755
+        )
+    except OSError as exc:
+        _e = getattr(exc, "errno", None)
+        if _e in (errno.ELOOP, errno.EMLINK):
+            die("%s is a symlink; refusing to write through it" % out)
+        if _e == errno.ENXIO:
+            die("%s is a FIFO with no reader; refusing to write to it" % out)
+        die("cannot write %s (%s)" % (out, exc))
+
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            os.close(fd)
+            die("%s is not a regular file; refusing to write to it" % out)
+        if st.st_nlink != 1:
+            os.close(fd)
+            die("%s is hard-linked (%d links); refusing to write through it" % (out, st.st_nlink))
+    except OSError as exc:
+        os.close(fd)
+        die("cannot stat %s (%s)" % (out, exc))
+
+    try:
+        os.ftruncate(fd, 0)   # 검사를 통과한 뒤에야 자른다
+        fh = os.fdopen(fd, "w", encoding="utf-8")
+        with fh:
             fh.write(src)
-        # O_CREAT 의 mode 는 파일이 이미 있으면 무시되므로 명시적으로 다시 건다.
-        os.chmod(out, 0o755)
+            fh.flush()
+            # fd 로만 만진다. `os.chmod(out, …)` 는 경로를 다시 해석하므로 그 자체가 임의 파일을
+            # 0755 로 만드는 원시가 된다. O_CREAT 의 mode 는 기존 파일에 적용되지 않으므로 필요하다.
+            os.fchmod(fh.fileno(), 0o755)
+            size = os.fstat(fh.fileno()).st_size
     except OSError as exc:
         die("cannot write %s (%s)" % (out, exc))
 
     want = len(src.encode("utf-8"))
-    try:
-        size = os.path.getsize(out)
-    except OSError as exc:
-        die("cannot stat %s after writing it (%s)" % (out, exc))
     # 0 만 보면 잘린 쓰기가 통과한다 — 515/139621 바이트가 chmod 되고 `bash -n` 도 조용했다.
     # run.md step 2d 가 받는 유일한 신호이므로 전량 일치를 요구한다.
     if size != want:
