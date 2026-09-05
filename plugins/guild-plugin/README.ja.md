@@ -66,6 +66,17 @@ Guild は自己修正システムなので、安全性は助言ではなく決�
 正当な行為ですが、副作用として起きてはならないからです。このゲートは間違いのコストを上げる仕組みであり、
 本気の回避を防ぐ境界ではありません。
 
+## リファレンス
+
+この節は `SKILL.md` から移されました。ランタイムには読み込まれない参考資料で、原文（英語）は `README.md` の **Reference** 節にあります。
+
+- **Guild とは** — 対象リポジトリに**ハーネス**を導入し、コードベースを開発する役割エージェント組織（**Guild**）を育てる。成果物と開発者が共に進化する。
+- **Guild（リポジトリごとのエージェント組織）** — 役割エージェントは `.claude/agents/` に置かれ、そのディレクトリ自体がロスターである。スパイン役割（leader・tech-lead・developer・tester・qa）は常に稼働し、それ以外はリーダーが作業種別・リスクに応じて招集する。
+- **スパイン（不変）** — `analyze → design → execute → test → qa`。execute は作業種別により `implement`（機能）/ `debug`（バグ）/ `refactor` に分岐する。
+- **Guild が管理するリポジトリ構成** — `CLAUDE.md` · `.claude/settings.json` · `.claude/agents/` · `.claude/guild/`（config・knowledge・memory・gates・overlay）· `docs/standards/` · `docs/adr/` · `docs/specs/`。
+
+> ⚠ 詳細は英語の **Reference** 節を参照してください — この要約は各項目の存在と位置のみを伝えます。
+
 ## 状態の保存場所
 
 | 何を | どこに |

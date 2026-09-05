@@ -66,6 +66,17 @@ git이 인덱스가 확정된 뒤 실행하므로, 한 줄짜리 복합 `생성+
 일어나서는 안 되기 때문입니다. 이 게이트는 실수의 비용을 높이는 장치이지, 작정한 우회를 막는 경계가
 아닙니다.
 
+## 레퍼런스
+
+이 절은 `SKILL.md`에서 옮겨왔습니다. 런타임에 로드되지 않는 참고 자료이며, 원문(영문)은 `README.md`의 **Reference** 절에 있습니다.
+
+- **Guild란** — 대상 레포에 **하니스**를 설치하고, 코드베이스를 개발하는 역할 에이전트 조직(**Guild**)을 기른다. 결과물과 개발자가 함께 진화한다.
+- **Guild(레포별 에이전트 조직)** — 역할 에이전트는 `.claude/agents/`에 살고 그 디렉터리가 곧 로스터다. 스파인 역할(leader·tech-lead·developer·tester·qa)은 항상 돌고, 나머지는 리더가 작업 유형·위험도에 따라 소집한다.
+- **스파인(불변)** — `analyze → design → execute → test → qa`. execute는 작업 유형에 따라 `implement`(기능) / `debug`(버그) / `refactor`로 갈린다.
+- **Guild가 관리하는 레포 레이아웃** — `CLAUDE.md` · `.claude/settings.json` · `.claude/agents/` · `.claude/guild/`(config·knowledge·memory·gates·overlay) · `docs/standards/` · `docs/adr/` · `docs/specs/`.
+
+> ⚠ 상세는 영문 **Reference** 절을 보십시오 — 이 요약은 각 항목의 존재와 위치만 전달합니다.
+
 ## 상태 저장 위치
 
 | 무엇 | 어디 |

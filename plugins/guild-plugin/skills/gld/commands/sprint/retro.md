@@ -238,7 +238,7 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
    **DRY**: skip 1–5 entirely and print the JSON that *would* be written.
 
 ⚠ **Writing `config.json` trips the commit gate's own `--guard-config` guard**, which surfaces as
-a confirmation prompt (`SKILL.md`). That is expected and intended, not an error — say so before
+a confirmation prompt (`_invariants.md` INV3 — the gate's control files are guarded by an `ask`, not a block). That is expected and intended, not an error — say so before
 it appears, so the human does not read it as a failure.
 
 ⚠ `capacity` and `history` have **no `config` setter** (`config.md` Notes) — this command is

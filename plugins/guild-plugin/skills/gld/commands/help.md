@@ -73,7 +73,7 @@ On-demand & observe
   /gld rollback <target>  Safely undo a Guild change (git revert / close PR / reset stage) — non-destructive, confirms first
   /gld ask <question>     Cited Q&A over standards + ⑥ knowledge (no guessing)
   /gld onboard [area]     Guided, paced tour of the codebase for a human — teaches the WHY/principles from standards + ⑥ knowledge + hotspots, one stop per turn (ramps a new maintainer)
-  /gld monitoring [section] [--html]  Terminal snapshot: org · ⑥/④ status · evolution history · gates · active work. section = org|knowledge|gates|work|evolution|standards; --html also writes a self-contained dashboard file
+  /gld monitoring [section] [--html]  Terminal snapshot: Guild 조직 · ⑥/④ status · evolution history · gates · active work. section = org|knowledge|gates|work|evolution|standards; --html also writes a self-contained dashboard file
 
   /gld help               This help
 ```

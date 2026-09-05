@@ -67,6 +67,42 @@ off-switch or rule files prompts for human confirmation rather than being blocke
 turning the gate off is a legitimate action, it just should not be a side effect. The gate
 raises the cost of a mistake; it is not a boundary against a determined bypass.
 
+## Reference
+
+### What Guild is
+Guild installs a **harness** into the target repo and grows a per-repo agent organization — **the Guild** — of role agents that develop the codebase. The codebase (**결과물**) and the Guild (**개발자**) co-evolve. The harness combines an **advisory** layer (standards, knowledge, agent roster) with a **deterministic enforcement layer**: `init` installs a commit gate — authoritative as a `.git/hooks/pre-commit`, plus a `PreToolUse` early-warning pass — confirmed = block on secrets/verification-weakening from day one (further, stack-specific rules start `status: draft` = WARN-only until a human confirms them — INV6 draft→confirm→enforce). The six invariants are defined in one place: `<<SKILL_DIR>>/commands/atoms/_invariants.md`, which also states the gate's honest limits (`--no-verify` bypasses it; `.git/hooks/` does not survive a clone). The `evolve` growth loop reads traces and proposes how the Guild should grow; the human reviews and applies changes per item — never auto-applied (INV1). Full unattended autonomy (`sprint`) is built and **not readiness-gated** (see the note above): `run`'s preflight blocks only on what makes the flow meaningless — a repo with no way to *run* tests — and warns on everything else. The human still reviews and merges every PR (INV1).
+
+### The Guild (per-repo agent organization)
+- The **leader** is not a separate spawned subagent — the main session **embodies** the leader role (loaded from `.claude/agents/leader.md`): it assembles the team for a task, delegates to roles, arbitrates, and judges completion.
+- Roles collaborate across stages (not a 1-role-per-stage pipeline): the tech-lead sets technical direction, drafts the skeleton, and later checks conformance; tester writes test cases from acceptance criteria before implementation; developer fills the skeleton.
+
+### The spine (invariant)
+```
+analyze → design → execute → test → qa
+                    └ execute variant by work type: implement (feature) | debug (bug) | refactor (refactor)
+```
+- `test` = automated correctness (tester, verify gate). `qa` = holistic quality (qa role, exploratory/E2E/user-flow, risk-based). `qa` marks `guild:done`.
+- The **execute** stage always runs a persona-less **external auditor** on the developer's diff before the PR opens (`commands/atoms/_execute_spine.md` Step 3.5a): read-only, severity-tagged findings, `BLOCKER` blocks and loops back so the fix is still verified by `test`/`qa`. `/gld review` runs the same auditor again *outside* `dev` — duplicated on purpose, as the independent measure of whether the in-spine one is working.
+- Conditional participants + **gate reviews** the leader inserts before advancing when risk matches: designer (UI → design + a UI/UX review gate), security (→ a security review gate), infra (CI/CD·deploy·env·IaC → an execute review gate; **review-only — never authors its own diff**). Those three gate roles are the ones that can block a stage *by trigger* — plus the always-on external auditor above, whose `BLOCKER` blocks the same way; the remaining specialists participate without a gate. Full roster and triggers: `commands/atoms/_handoff.md` Section G.
+- Work type comes from the issue's `type:` label; `analyze` may reclassify. The execute variant is chosen accordingly — `implement` (feature), `debug` (bug), or `refactor` (refactor) — see the spine diagram above.
+- `/gld dev <issue>` runs the whole spine and auto-selects the execute variant. Individual stages are also invocable (`/gld analyze`, `design`, `implement`, `test`).
+
+### Repo layout Guild manages
+```
+CLAUDE.md                      # advisory: repo map + verification commands + knowledge routing
+.claude/settings.json          # permission allowlist + PreToolUse commit-gate hook
+.claude/agents/                # role agents (the Guild)
+.claude/guild/
+  config.json                  # Guild settings (managed by /gld config)
+  knowledge/                   # ⑥ codebase facts: index.md (always loaded) + facts/ (retrieved relevant-only). init seeds a baseline; evolve grows it
+  memory/                      # ④ episodic working tier (gitignored → local per-clone, low-trust): ground-truth.jsonl (captured signals, read at runtime by pre-flight Item 8) + consolidated.jsonl (archive of entries evolve grew into ③/⑥) + gate-firings.jsonl (gate firing log feeding the evolve rule scorecard) + review-nudge-state.json (review's evolve-nudge cooldown, a single repo-global {count, runs} at the last nudge, so the 충분 state doesn't nudge every review — deliberately NOT keyed by PR: since the common workflow is one PR per issue, a per-PR key made nearly every review "first time" and nudged anyway; the global key accepts a rare, self-healing race between two PRs reviewed close together instead)
+  gates/                       # 강제층 (enforcement layer): scripts/gate_precommit.py — the commit gate, run three ways (.git/hooks/pre-commit = authoritative · PreToolUse(Bash) = early warning · PreToolUse(Edit|Write) --guard-config = asks before its own off-switch/rules are edited) + rules/secrets.md, rules/verification.md (the human-readable declaration of what the gate enforces — the checks themselves are hardcoded, since they are universal and non-hallucinated) + rules/boundaries.md (the one data-driven rule file: `- forbid:` lines, frontmatter status: draft → WARN-only until confirmed — INV6) + dismissed.md (accepted-risk registry) + findings.json (open violations)
+  overlay/                     # flow-policy override surface (empty by default; /gld contribute upstreams diffs here)
+  evolution-log.md             # evolution ledger — used by evolve later
+docs/standards/                # charter, architecture, conventions, quality-bar, verification (init drafts; status: draft|confirmed)
+docs/adr/ , docs/specs/
+```
+
 ## How it stores state
 
 | What | Where |

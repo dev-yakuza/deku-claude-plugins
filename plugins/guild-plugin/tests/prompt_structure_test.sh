@@ -1010,6 +1010,46 @@ hasfx "run.md: step 2c 가 창 파일을 쓴다"          "$RUNMD2" '2c. **Write
 hasfx "run.md: 창이 없으면 rm -f 한다"             "$RUNMD2" 'rm -f .claude/guild/.gld-sprint-<tracker>.window'
 hasfx "run.md: 거부 문구에 날짜가 들어간다"        "$RUNMD2" '시작 YYYY-MM-DD HH:MM'
 
+# ── 36. SKILL.md 축약이 규범과 라우팅을 잃지 않았는가 ────────────────────────
+# 이 스위트는 지금까지 SKILL.md 를 stale-phrase grep 의 입력으로만 봤다. C 가 그 파일의
+# 61% 를 README 로 옮기므로, 남겨야 하는 것이 남았는지 볼 검사가 필요하다.
+SKILLMD="$GLD/SKILL.md"
+
+# (a) 라우팅 표의 valid-command 가 전부 실재하는 파일인가.
+MISSING=""
+for c in $(sed -n 's/^- Valid commands: //p' "$SKILLMD" | tr -d '`' | tr ',' ' '); do
+  [ -f "$GLD/commands/$c.md" ] || MISSING="$MISSING $c"
+done
+if [ -z "$MISSING" ]; then ok "SKILL.md: valid-command 가 전부 commands/*.md 로 해석된다"
+else bad "SKILL.md: valid-command 가 전부 해석된다" "모두 존재" "없음:$MISSING"; fi
+
+# (b) atom 열거 줄의 경로가 전부 실재하는가. 줄 번호로 고정하지 않는다 — C 가 민다.
+BADATOM=""
+for a in $(grep -o 'commands/atoms/_[a-z_]*\.md' "$SKILLMD" | sort -u); do
+  [ -f "$GLD/$a" ] || BADATOM="$BADATOM $a"
+done
+if [ -z "$BADATOM" ]; then ok "SKILL.md: atom 경로가 전부 resolve 된다"
+else bad "SKILL.md: atom 경로가 전부 resolve 된다" "모두 존재" "없음:$BADATOM"; fi
+
+# (c) 규범 3건이 SKILL.md 에 남아 있는가. 이주가 아니라 유지가 결정이었다 —
+#     README 로 옮기면 런타임에 도달하지 않는다.
+hasfx "SKILL.md: 용어 규범(Guild, not org)이 남아 있다" "$SKILLMD" 'Do NOT surface the internal shorthand'
+hasfx "SKILL.md: 로스터 규범(디렉터리가 로스터)이 남아 있다" "$SKILLMD" 'that directory is the roster'
+hasfx "SKILL.md: commit/gitignore 규범이 남아 있다" "$SKILLMD" 'gitignore** `.claude/guild/memory/`'
+
+# (d) 삭제된 절을 가리키던 교차참조가 갱신됐는가.
+lacksfx "retro.md: --guard-config 근거를 SKILL.md 로 인용하지 않는다" "$GLD/commands/sprint/retro.md" 'confirmation prompt (`SKILL.md`)'
+lacksfx "_model_tiering.md: 삭제된 SKILL.md 절을 인용하지 않는다" "$GLD/commands/atoms/_model_tiering.md" "Operationalizes SKILL.md's"
+
+# (e) 사용자 대면 산문에 내부 약어 org 가 남지 않았는가 (백틱 CLI 토큰은 대상 아님).
+lacksfx "help.md: 산문 org 가 남지 않았다" "$GLD/commands/help.md" 'Terminal snapshot: org'
+lacksfx "monitoring.md: 산문 org 가 남지 않았다" "$GLD/commands/monitoring.md" 'an org table'
+
+# (f) README 3종의 절 개수가 같은가 — ja/ko 가 조용히 짧아지는 것을 막는다.
+RM="$GLD/../../README.md"; RK="$GLD/../../README.ko.md"; RJ="$GLD/../../README.ja.md"
+NM=$(grep -c '^## ' "$RM"); NK=$(grep -c '^## ' "$RK"); NJ=$(grep -c '^## ' "$RJ")
+if [ "$NM" = "$NK" ] && [ "$NM" = "$NJ" ]; then ok "README 3종의 절 개수가 같다 ($NM)"
+else bad "README 3종의 절 개수가 같다" "동일" "en=$NM ko=$NK ja=$NJ"; fi
 echo ""
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -1018,7 +1058,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=184   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=194   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
