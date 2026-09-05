@@ -68,14 +68,41 @@ git이 인덱스가 확정된 뒤 실행하므로, 한 줄짜리 복합 `생성+
 
 ## 레퍼런스
 
-이 절은 `SKILL.md`에서 옮겨왔습니다. 런타임에 로드되지 않는 참고 자료이며, 원문(영문)은 `README.md`의 **Reference** 절에 있습니다.
+이 절은 `SKILL.md`에서 옮겨왔습니다 — 런타임에는 로드되지 않는 참고 자료입니다.
 
-- **Guild란** — 대상 레포에 **하니스**를 설치하고, 코드베이스를 개발하는 역할 에이전트 조직(**Guild**)을 기른다. 결과물과 개발자가 함께 진화한다.
-- **Guild(레포별 에이전트 조직)** — 역할 에이전트는 `.claude/agents/`에 살고 그 디렉터리가 곧 로스터다. 스파인 역할(leader·tech-lead·developer·tester·qa)은 항상 돌고, 나머지는 리더가 작업 유형·위험도에 따라 소집한다.
-- **스파인(불변)** — `analyze → design → execute → test → qa`. execute는 작업 유형에 따라 `implement`(기능) / `debug`(버그) / `refactor`로 갈린다.
-- **Guild가 관리하는 레포 레이아웃** — `CLAUDE.md` · `.claude/settings.json` · `.claude/agents/` · `.claude/guild/`(config·knowledge·memory·gates·overlay) · `docs/standards/` · `docs/adr/` · `docs/specs/`.
+### Guild란
+Guild는 대상 레포에 **하니스**를 설치하고, 코드베이스를 개발하는 역할 에이전트 조직 — **Guild** — 을 레포마다 길러냅니다. 코드베이스(**결과물**)와 Guild(**개발자**)는 함께 진화합니다. 하니스는 **권고** 층(표준·지식·에이전트 로스터)과 **결정적 강제층**을 결합합니다. `init`은 커밋 게이트를 설치하는데, 정본은 `.git/hooks/pre-commit`이고 여기에 `PreToolUse` 조기 경고 패스가 더해집니다 — 시크릿과 검증 약화에 대해서는 첫날부터 confirmed = 차단입니다(그 밖의 스택별 규칙은 사람이 확인하기 전까지 `status: draft` = WARN 전용으로 시작합니다 — INV6 draft→confirm→enforce). 여섯 개 불변조건은 한 곳에 정의돼 있습니다: `<<SKILL_DIR>>/commands/atoms/_invariants.md` — 이 파일은 게이트의 정직한 한계도 함께 밝힙니다(`--no-verify`가 우회하며, `.git/hooks/`는 클론에 남지 않습니다). `evolve` 성장 루프는 트레이스를 읽고 Guild가 어떻게 자라야 하는지 제안하며, 사람이 항목별로 검토해 적용합니다 — 자동 적용은 없습니다(INV1). 완전 무인 자율 실행(`sprint`)은 구현돼 있고 **준비도 게이트를 걸지 않습니다**(위 주의 참조): `run`의 프리플라이트는 흐름 자체를 무의미하게 만드는 것 — 테스트를 *실행할* 방법이 없는 레포 — 에서만 차단하고 나머지는 경고합니다. PR의 검토와 머지는 여전히 전부 사람의 몫입니다(INV1).
 
-> ⚠ 상세는 영문 **Reference** 절을 보십시오 — 이 요약은 각 항목의 존재와 위치만 전달합니다.
+### Guild(레포별 에이전트 조직)
+- **리더**는 따로 스폰되는 서브에이전트가 아닙니다 — 메인 세션이 리더 역할을 **체현**합니다(`.claude/agents/leader.md`에서 로드). 과제에 맞춰 팀을 구성하고, 역할에 위임하고, 조정하고, 완료를 판정합니다.
+- 역할들은 스테이지당 한 역할씩 배정되는 파이프라인이 아니라 스테이지를 가로질러 **협업**합니다. tech-lead가 기술 방향을 정하고 스켈레톤을 초안한 뒤 나중에 정합성을 확인하고, tester는 구현 전에 인수 기준으로부터 테스트 케이스를 쓰며, developer가 스켈레톤을 채웁니다.
+
+### 스파인(불변)
+```
+analyze → design → execute → test → qa
+                    └ 작업 유형에 따른 execute 변형: implement(기능) | debug(버그) | refactor(리팩터)
+```
+- `test` = 자동 정확성 검증(tester, verify 게이트). `qa` = 총체적 품질(qa 역할, 탐색적·E2E·사용자 흐름, 위험 기반). `guild:done`을 붙이는 것은 `qa`입니다.
+- **execute** 스테이지는 PR을 열기 전에 항상 developer의 diff에 대해 페르소나 없는 **외부 감사자**를 돌립니다(`commands/atoms/_execute_spine.md` Step 3.5a). 읽기 전용에 심각도 태그가 붙은 지적이며, `BLOCKER`는 차단하고 되돌려 보내므로 수정분도 `test`/`qa`의 검증을 다시 받습니다. `/gld review`는 같은 감사자를 `dev` *바깥*에서 한 번 더 돌립니다 — 의도적인 중복이며, 스파인 안의 감사자가 실제로 작동하는지를 재는 독립 척도입니다.
+- 조건부 참여자와, 리더가 위험도에 맞춰 진행 전에 끼워 넣는 **게이트 리뷰**: designer(UI → 디자인 + UI/UX 리뷰 게이트), security(→ 보안 리뷰 게이트), infra(CI/CD·배포·env·IaC → execute 리뷰 게이트, **리뷰 전용 — 자기 diff를 절대 작성하지 않습니다**). *트리거로* 스테이지를 막을 수 있는 것은 이 세 게이트 역할이며, 여기에 항상 켜져 있는 위 외부 감사자의 `BLOCKER`가 같은 방식으로 더해집니다. 나머지 전문가들은 게이트 없이 참여합니다. 전체 로스터와 트리거: `commands/atoms/_handoff.md` Section G.
+- 작업 유형은 이슈의 `type:` 라벨에서 오고, `analyze`가 재분류할 수 있습니다. execute 변형은 그에 따라 고릅니다 — `implement`(기능) / `debug`(버그) / `refactor`(리팩터). 위 스파인 도식을 보십시오.
+- `/gld dev <issue>`는 스파인 전체를 돌리며 execute 변형을 자동 선택합니다. 개별 스테이지도 따로 호출할 수 있습니다(`/gld analyze`, `design`, `implement`, `test`).
+
+### Guild가 관리하는 레포 레이아웃
+```
+CLAUDE.md                      # 권고: 레포 지도 + 검증 명령 + 지식 라우팅
+.claude/settings.json          # 퍼미션 허용목록 + PreToolUse 커밋 게이트 훅
+.claude/agents/                # 역할 에이전트 (= Guild)
+.claude/guild/
+  config.json                  # Guild 설정 (/gld config 가 관리)
+  knowledge/                   # ⑥ 코드베이스 사실: index.md(항상 로드) + facts/(관련된 것만 검색해 로드). init 이 기준선을 심고 evolve 가 키운다
+  memory/                      # ④ 일화적 작업 계층 (gitignore → 클론마다 로컬, 저신뢰): ground-truth.jsonl(포착된 신호, 프리플라이트 Item 8 이 런타임에 읽음) + consolidated.jsonl(evolve 가 ③/⑥ 으로 키운 항목의 보관소) + gate-firings.jsonl(evolve 규칙 스코어카드에 들어가는 게이트 발화 로그) + review-nudge-state.json(review 의 evolve 유도 쿨다운. 마지막 유도 시점의 저장소 전역 {count, runs} 하나만 둔다 — 충분 상태가 매 review 마다 유도하지 않도록 일부러 PR 별 키를 쓰지 않는다. 이슈 하나에 PR 하나가 통상 흐름이라 PR 별 키로는 거의 모든 review 가 "처음"이 되어 결국 유도했다. 대신 가까운 시점에 검토된 두 PR 사이의 드문 경합을 받아들인다. 스스로 복구된다)
+  gates/                       # 강제층: scripts/gate_precommit.py — 커밋 게이트. 세 경로로 실행된다(.git/hooks/pre-commit = 정본 · PreToolUse(Bash) = 조기 경고 · PreToolUse(Edit|Write) --guard-config = 게이트 자신의 오프 스위치·규칙 편집 전에 확인을 요구). + rules/secrets.md, rules/verification.md(게이트가 무엇을 강제하는지에 대한 사람이 읽는 선언 — 검사 자체는 하드코딩이다. 보편적이고 환각되지 않아야 하므로) + rules/boundaries.md(유일한 데이터 주도 규칙 파일: `- forbid:` 줄들. 프런트매터 status: draft → 사람이 확인하기 전까지 WARN 전용 — INV6) + dismissed.md(수용된 위험 등록부) + findings.json(미해결 위반)
+  overlay/                     # 흐름 정책 오버라이드 면 (기본은 비어 있음. /gld contribute 가 여기의 diff 를 업스트림한다)
+  evolution-log.md             # 진화 원장 — evolve 가 나중에 사용
+docs/standards/                # charter, architecture, conventions, quality-bar, verification (init 이 초안. status: draft|confirmed)
+docs/adr/ , docs/specs/
+```
 
 ## 상태 저장 위치
 

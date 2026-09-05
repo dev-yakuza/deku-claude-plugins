@@ -22,13 +22,13 @@ set -euo pipefail
 # The per-issue ledger therefore lives as one-line JSON in the tracking Issue marker and is
 # read/written by python heredocs — `declare -A` passes `bash -n` and only dies at RUNTIME.
 
-TRACKER="<TRACKER>"
+TRACKER=<TRACKER>
 ORDER=(<ORDER>)                       # execution order from sprint_dag.py --mode order
-OWNER_REPO="<OWNER_REPO>"
-DEFAULT_BRANCH="<DEFAULT_BRANCH>"
-CONTAINER="<CONTAINER>"               # <repo-parent>/.gld-<repo>-sprint-<tracker>
-HUMAN_REPO="<HUMAN_REPO>"             # the human's checkout — logs and memory live here
-DAG="<DAG_PATH>"                      # .../commands/atoms/sprint_dag.py
+OWNER_REPO=<OWNER_REPO>
+DEFAULT_BRANCH=<DEFAULT_BRANCH>
+CONTAINER=<CONTAINER>               # <repo-parent>/.gld-<repo>-sprint-<tracker>
+HUMAN_REPO=<HUMAN_REPO>             # the human's checkout — logs and memory live here
+DAG=<DAG_PATH>                      # .../commands/atoms/sprint_dag.py
 HEARTBEAT_EVERY=600                   # seconds; §8.2 requires <= 10 min, also while waiting
 WAIT_MAX=14400                        # 4h ceiling on ANY single rate-limit wait (measured
                                       # worst case ~115 min); see the clamp below for why

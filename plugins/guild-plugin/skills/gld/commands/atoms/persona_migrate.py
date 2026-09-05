@@ -231,6 +231,59 @@ def region_headings(lines, h1, anchor):
     return [l.rstrip() for l in lines[h1:anchor - 1] if l.startswith("## ")]
 
 
+# Headings the central templates have RENAMED. `foreign_headings()` cannot tell a locally
+# grown section from central text whose heading changed since this repo was initialized (see
+# its docstring), so every central rename produces a false `heading-not-in-template` for every
+# repo still holding the old text — and the documented first branch for that verdict is to cut
+# the section out of the central region, which the next `update` then makes permanent.
+#
+# Measured: 0.71.0 dropped the `(`_handoff.md` Section C)` suffix from `## 협업 프로토콜` in 15
+# of 16 templates at once. Without this list every one of those roles reports T2 in every
+# already-initialized `ko` repo.
+#
+# An entry is `old heading -> current heading`. Add one in the SAME commit that renames a
+# heading inside `guild:persona:start/end`. This is not "historical templates bundled" (§12
+# rejected that) — it is the one bit §12's rejection left missing: which absences are ours.
+# 중앙에서 개명한 헤딩의 옛 이름 → 현재 이름.
+#
+# ⚠ 헤딩을 개명하는 커밋은 **같은 커밋에서** 여기에 항목을 넣는다. 넣지 않으면 그 이전에
+#   init 된 모든 레포에서 옛 헤딩이 "로컬에서 자란 절"(T2)로 분류되고, `update.md` 가
+#   문서화한 첫 처방을 따르면 중앙 절이 영역 밖으로 잘려나간다 — 전 스위트 그린인 채로.
+# ⚠ **다시 개명하면 기존 항목의 오른쪽도 새 이름으로 옮긴다.** 해석은 아래에서 연쇄를 따라가되
+#   (2단계 개명을 겪은 레포가 실재할 수 있다), 사이클과 무한 연쇄는 끊는다.
+RENAMED_HEADINGS = {
+    # 0.71.0 (묶음 B) — 계약 본문을 스폰 프롬프트로 인라인하며 2차 포인터를 뗐다
+    "## 협업 프로토콜 (`_handoff.md` Section C)": "## 협업 프로토콜",
+    # 0.40.1 (`1283bf1`) — 조건부 참여를 헤딩에 명시했다. 그 이전 init 레포에서 측정된
+    # false T2 이며, foreign_headings 의 docstring 이 사례 (b) 로 기록해 둔 바로 그 건이다.
+    # ⚠ 이 개명은 **부분적이었다**: 조건부 전문가 10종만 `— 조건부` 를 얻었고 스파인 역할
+    #   5종(developer·qa·tech-lead·tester …)은 옛 이름을 그대로 쓴다. 그래서 이 키는 지금도
+    #   살아 있는 헤딩이기도 하다. 파일별 `h not in tplset` 이 먼저 걸러 주므로 해는 없다 —
+    #   옛 이름을 그대로 쓰는 파일에서는 이 표에 닿지 않는다.
+    "## 책임 (참여 스테이지)": "## 책임 (참여 스테이지 — 조건부)",
+}
+
+
+def current_name(heading, _max_hops=8):
+    """Follow RENAMED_HEADINGS to the current name; None when the heading is not a rename.
+
+    Two hops happen for real: a repo initialized before rename #1 that is migrated after
+    rename #2 carries the oldest name, and a single `.get()` would still call it local growth.
+    The hop cap and the seen-set stop a cycle a bad edit could introduce from hanging the run.
+    """
+    seen = {heading}
+    cur = RENAMED_HEADINGS.get(heading)
+    hops = 0
+    while cur is not None and cur not in seen and hops < _max_hops:
+        seen.add(cur)
+        nxt = RENAMED_HEADINGS.get(cur)
+        if nxt is None:
+            return cur
+        cur = nxt
+        hops += 1
+    return cur
+
+
 def template_headings(tpl_path):
     """Headings inside the template's marker region.
 
@@ -297,9 +350,16 @@ def foreign_headings(path, lines, h1, anchor, templates_dir, localized=False):
     `product-owner.md` carries `## 책임 (참여 스테이지)` where the template now reads
     `## 책임 (참여 스테이지 — 조건부)` — case (b), a false positive.
 
-    Separating them would need the template as of the init commit, and §12 rejected bundling
-    historical templates. So both go to a human, and the message must not claim which one it
-    found. A false T2 costs review time; a false T1 costs local knowledge silently.
+    Separating them in general would need the template as of the init commit, and §12 rejected
+    bundling historical templates. So the general case still goes to a human, and the message
+    must not claim which one it found. A false T2 costs review time; a false T1 costs local
+    knowledge silently.
+
+    ⚠ BOTH MEASURED (b) CASES ARE NOW SUPPRESSED by `RENAMED_HEADINGS` — the 0.71.0 협업 프로토콜
+    rename and the 0.40.1 책임 rename named above. That is not a general solution; it is an
+    explicit ledger of central renames, and it only works because every renaming commit is
+    required to add its own entry. The example text above is kept because it is the measurement
+    that justifies the ledger, not because those two are still firing.
     """
     tpl_path = os.path.join(templates_dir, os.path.basename(path))
     if not os.path.exists(tpl_path):
@@ -315,7 +375,11 @@ def foreign_headings(path, lines, h1, anchor, templates_dir, localized=False):
     tpl = template_headings(tpl_path)
     if tpl is None:
         return "bad-template"
-    return [h for h in region_headings(lines, h1, anchor) if h not in tpl]
+    # A heading we renamed centrally is not evidence of local growth. Map it forward and
+    # judge the current name — otherwise a central rename reads as 16 roles of local drift.
+    tplset = set(tpl)
+    return [h for h in region_headings(lines, h1, anchor)
+            if h not in tplset and current_name(h) not in tplset]
 
 
 def central_diff(path, init_sha):

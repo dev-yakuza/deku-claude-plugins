@@ -906,7 +906,7 @@ IFC="$("$PY" "$WORK3/ifclaim.py" "$TPL")"
 if [ "$IFC" = OK ]; then
   ok "template: :151 주석 정정이 이유를 고치면서 결론(\`if\` 를 쓸 것)을 유지한다"
 else
-  bad "template: :151 주석의 주장" "$IFC"
+  bad "template: :151 주석의 주장" "OK" "$IFC"
 fi
 
 # ── 29. run.md Phase 4 의 halted:* 아암 ──────────────────────────────────────
@@ -1016,19 +1016,24 @@ hasfx "run.md: 거부 문구에 날짜가 들어간다"        "$RUNMD2" '시작
 SKILLMD="$GLD/SKILL.md"
 
 # (a) 라우팅 표의 valid-command 가 전부 실재하는 파일인가.
-MISSING=""
+MISSING=""; NCMD=0
 for c in $(sed -n 's/^- Valid commands: //p' "$SKILLMD" | tr -d '`' | tr ',' ' '); do
-  [ -f "$GLD/commands/$c.md" ] || MISSING="$MISSING $c"
+  NCMD=$((NCMD+1)); [ -f "$GLD/commands/$c.md" ] || MISSING="$MISSING $c"
 done
-if [ -z "$MISSING" ]; then ok "SKILL.md: valid-command 가 전부 commands/*.md 로 해석된다"
+# ⚠ 바닥선이 없으면 라우팅 줄을 통째로 지워도 빈 목록이 "전부 해석됨"으로 통과한다 — 이 검사가
+#   막으려던 사고(축약이 남겨야 할 것을 지움)가 정확히 그 형태다. 오늘 25개.
+if [ "$NCMD" -lt 20 ]; then bad "SKILL.md: 라우팅 표가 남아 있다" "커맨드 20개 이상" "$NCMD 개"
+elif [ -z "$MISSING" ]; then ok "SKILL.md: valid-command $NCMD 개가 전부 commands/*.md 로 해석된다"
 else bad "SKILL.md: valid-command 가 전부 해석된다" "모두 존재" "없음:$MISSING"; fi
 
 # (b) atom 열거 줄의 경로가 전부 실재하는가. 줄 번호로 고정하지 않는다 — C 가 민다.
-BADATOM=""
+BADATOM=""; NATOM=0
 for a in $(grep -o 'commands/atoms/_[a-z_]*\.md' "$SKILLMD" | sort -u); do
-  [ -f "$GLD/$a" ] || BADATOM="$BADATOM $a"
+  NATOM=$((NATOM+1)); [ -f "$GLD/$a" ] || BADATOM="$BADATOM $a"
 done
-if [ -z "$BADATOM" ]; then ok "SKILL.md: atom 경로가 전부 resolve 된다"
+# 같은 바닥선. atom 열거를 산문으로 바꿔치기해도 0건이 "전부 resolve"로 통과했다. 오늘 10개.
+if [ "$NATOM" -lt 8 ]; then bad "SKILL.md: atom 열거가 남아 있다" "8개 이상" "$NATOM 개"
+elif [ -z "$BADATOM" ]; then ok "SKILL.md: atom 경로 $NATOM 개가 전부 resolve 된다"
 else bad "SKILL.md: atom 경로가 전부 resolve 된다" "모두 존재" "없음:$BADATOM"; fi
 
 # (c) 규범 3건이 SKILL.md 에 남아 있는가. 이주가 아니라 유지가 결정이었다 —
@@ -1050,6 +1055,27 @@ RM="$GLD/../../README.md"; RK="$GLD/../../README.ko.md"; RJ="$GLD/../../README.j
 NM=$(grep -c '^## ' "$RM"); NK=$(grep -c '^## ' "$RK"); NJ=$(grep -c '^## ' "$RJ")
 if [ "$NM" = "$NK" ] && [ "$NM" = "$NJ" ]; then ok "README 3종의 절 개수가 같다 ($NM)"
 else bad "README 3종의 절 개수가 같다" "동일" "en=$NM ko=$NK ja=$NJ"; fi
+# ⚠ `## ` 만 세면 이 검사는 자기가 막으려던 드리프트를 못 본다. C 가 옮긴 본문은 전부 `### `
+#   하위 절이므로, ja/ko 가 그것을 "영문을 보라"는 요약 한 덩어리로 대체해도 `## ` 수는 그대로다.
+#   실제로 그렇게 됐다 — en=4 ko=0 ja=0 인 채 그린이었다. 하위 절까지 센다.
+SM=$(grep -c '^### ' "$RM"); SK=$(grep -c '^### ' "$RK"); SJ=$(grep -c '^### ' "$RJ")
+if [ "$SM" = "$SK" ] && [ "$SM" = "$SJ" ]; then ok "README 3종의 하위 절(### ) 개수가 같다 ($SM)"
+else bad "README 3종의 하위 절 개수가 같다" "동일" "en=$SM ko=$SK ja=$SJ"; fi
+# 그리고 번역본이 영문을 가리키는 껍데기로 되돌아가지 않았는가 — 절 수만으로는 못 잡는 모양이다.
+lacksfx "README.ko: Reference 가 영문 참조 요약으로 되돌아가지 않았다" "$RK" '이 요약은 각 항목의 존재와 위치만'
+lacksfx "README.ja: Reference 가 영문 참조 요약으로 되돌아가지 않았다" "$RJ" 'この要約は各項目の存在と位置のみ'
+
+# (g) A 가 남긴 run.md 계약 셀 — 어느 스위트도 보지 않던 곳이다.
+# `--install-cmd` 를 "shell-quoted" 로 되돌리면 모든 워크트리의 의존성 설치가 깨지는데,
+# 렌더러는 정상 종료하고 bash -n 도 조용하다. 계약은 이 표에만 적혀 있으므로 여기서 고정한다.
+hasfx "run.md: --install-cmd 가 raw 로 넘어간다는 계약이 남아 있다" "$RUNMD2" 'passed **raw and unquoted**'
+lacksfx "run.md: --install-cmd 를 pre-quote 하라고 다시 적지 않았다" "$RUNMD2" 'shell-quoted'
+hasfx "run.md: 메타문자 거부의 근거(simple command)가 표에 남아 있다" "$RUNMD2" 'must be a **simple command**'
+# 그리고 복합 명령의 *처방* — 파이썬 거부는 이중 안전장치일 뿐 구제책이 아니다. 이 지시가
+# 없으면 레거시 설치에서 step 2 가 non-zero 로 끝나고 2d 가 실행을 세운다.
+hasfx "run.md: 레거시 복합 config.commands 정규화 지시가 있다" "$RUNMD2" 'Split such a value yourself before building argv'
+hasfx "run.md: 정규화가 처방이고 파이썬 거부는 이중 안전장치임을 밝힌다" "$RUNMD2" 'second safety net behind it, not the remedy'
+hasfx "run.md: --human-repo 거부 두 건이 표에 적혀 있다" "$RUNMD2" 'Rejected if it is **not absolute**'
 echo ""
 # ── 37. result-contract 펜스: 사본이 정본과 바이트 동일하고, 개수가 맞는가 ──────
 # B 는 12개 스폰 프롬프트에서 "per `_handoff.md` Section C" 를 없애고 계약 본문을 인라인했다.
@@ -1099,6 +1125,56 @@ case "$OUTC" in
   *)       bad "result-contract: 사본이 정본과 동일" "OK 12" "$OUTC" ;;
 esac
 
+# 펜스가 블록 *끝* 에 붙으면 `_execute_spine.md:6` 의 언어 불변조건("모든 스폰 프롬프트는
+# `Write output in \`config.language\`.` 로 끝난다")이 조용히 깨진다 — 계약은 전달되고 언어
+# 지시만 밀려난다. 12개 사본 중 9곳이 그 불변조건의 대상이다(plan 계열 3곳은 파일 머리의
+# "Output language" 줄로 대신하므로 그 줄의 존재를 대신 단언한다).
+cat > "$WORK3/lang.py" <<'PYL'
+import os, re, sys
+gld = sys.argv[1]
+EXPECT = {"commands/test.md":1, "commands/design.md":3, "commands/qa.md":2,
+          "commands/analyze.md":1, "commands/atoms/_execute_spine.md":2,
+          "commands/plan.md":0, "commands/sprint/plan.md":0}
+OPEN = "<!-- guild:result-contract -->"
+TAIL = "Write output in `config.language`."
+strip = lambda l: re.sub(r"^\s*>\s?", "", l).rstrip()
+problems, total = [], 0
+for rel, want in EXPECT.items():
+    lines = open(os.path.join(gld, rel), encoding="utf-8").read().split("\n")
+    got = 0; blocks = 0; i = 0
+    while i < len(lines):
+        if not re.match(r"^\s*>", lines[i]):
+            i += 1; continue
+        j = i
+        while j < len(lines) and (re.match(r"^\s*>", lines[j]) or not lines[j].strip()):
+            j += 1
+        body = [strip(l) for l in lines[i:j] if re.match(r"^\s*>", l)]
+        if OPEN in body:
+            blocks += 1
+            ne = [x for x in body if x.strip()]
+            if ne and ne[-1].endswith(TAIL):
+                got += 1
+        i = j
+    total += got
+    if got != want:
+        problems.append("%s: %d/%d blocks end with the language sentence (%d fenced)"
+                        % (rel, got, want, blocks))
+# plan 계열 3곳은 파일 머리 줄로 대신한다 — 0 이 "그냥 없다" 로 읽히지 않게 못박는다.
+for rel in ("commands/plan.md", "commands/sprint/plan.md"):
+    head = open(os.path.join(gld, rel), encoding="utf-8").read()
+    if "**Output language**" not in head:
+        problems.append("%s: neither per-prompt nor file-level language instruction" % rel)
+print("OK %d" % total if not problems else "PROBLEMS " + " | ".join(problems))
+PYL
+OUTL="$("$PY" "$WORK3/lang.py" "$GLD")"
+case "$OUTL" in
+  "OK 9") ok "스폰 프롬프트 9곳이 여전히 언어 지시로 끝난다 (펜스가 뒤에 붙지 않았다)" ;;
+  *)      bad "스폰 프롬프트가 언어 지시로 끝난다" "OK 9" "$OUTL" ;;
+esac
+
+# 은퇴한 문구가 정본 파일에 남아 있지 않은가 — 같은 규칙의 두 판본이 남으면 하나만 검사를 받는다.
+lacksfx "_handoff.md: 펜스로 대체된 옛 문구가 남지 않았다" "$GLD/commands/atoms/_handoff.md" 'keep RESULT to one summary line'
+
 # 앵커드 grep 0건 — 어떤 사이트도 Section C 를 이름으로 부르지 않는다.
 LEFT="$(grep -rn '^  > .*_handoff\.md` Section C' "$GLD/commands/" 2>/dev/null || true)"
 if [ -z "$LEFT" ]; then ok "스폰 프롬프트에 Section C 이름 참조가 남지 않았다"
@@ -1115,6 +1191,26 @@ hasfx "Section K: 범위가 dev.md 경로로 한정돼 있다" "$HANDOFF" 'Scope
 # 열거를 지우지 않았는가 — 예외는 추가이지 삭제가 아니다.
 hasfx "Section K: RESULT 요약이 config.language 열거에 남아 있다" "$HANDOFF" '`>>> RESULT <<<` one-line summaries'
 
+# 언어 불변조건이 이 예외 조항을 가리키는가. 안 가리키면 불변조건만 읽은 사람은 무인 실행의
+# narration 줄을 위반으로 읽고 "고친다".
+hasfx "_execute_spine.md: 언어 불변조건이 무인 예외를 가리킨다" "$GLD/commands/atoms/_execute_spine.md" 'unattended narration carve-out'
+
+# attended 누출 정적 검사 — 예외 문안이 **스폰 프롬프트 본문에 상주**하면 안 된다. 리더가
+# 조건부로 붙이는 한 줄이어야 하는데(조건은 Section K 가 규정한다), 어느 커맨드 파일이 프롬프트
+# 안에 박아 넣으면 attended 실행도 ASCII 로 narration 하게 되고 아무것도 깨지지 않으므로 조용하다.
+# ⚠ 앵커는 `^  > ` — 스폰 프롬프트 줄만 본다. 파일 전역 grep 은 예외를 *가리키는* 산문
+#   (`_execute_spine.md:6` 의 불변조건 포인터)까지 누출로 신고했다. 언급은 누출이 아니다.
+LEAKF="$(grep -rn --include='*.md' '^  > .*ASCII English' "$GLD/commands/" 2>/dev/null || true)"
+if [ -z "$LEAKF" ]; then ok "무인 narration 문안이 스폰 프롬프트에 상주하지 않는다"
+else bad "무인 narration 문안이 스폰 프롬프트에 상주하지 않는다" "0건" "$(printf '%s' "$LEAKF" | head -2 | tr '\n' ' ')"; fi
+
+# Section E 참조 카운트 — 정보성이다. 0건 차단은 Section C 패턴에만 적용한다(위 섹션 37).
+# E 는 리더가 읽는 절이므로 스폰 프롬프트에서 이름으로 불러도 무방하지만, 개수가 조용히
+# 변하면 B 의 범위가 이동했다는 신호다. 오늘 3건(qa.md ×2 · _execute_spine.md ×1)이 정상.
+NSE="$(grep -rc '^  > .*_handoff\.md` Section E' "$GLD/commands/" 2>/dev/null | awk -F: '{n+=$2} END{print n+0}')"
+if [ "$NSE" = "3" ]; then ok "Section E 참조가 기대값 3건이다 (정보성 드리프트 신호)"
+else bad "Section E 참조 개수" "3 (정보성)" "$NSE — B 의 범위가 이동했는지 확인하라"; fi
+
 # D 폐기가 기록으로 남아 있는가 — 다음 사람이 같은 가설을 다시 세우지 않도록.
 hasfx "_bash_rules.md: 무인 완화 폐기 사유가 기록돼 있다" "$GLD/commands/atoms/_bash_rules.md" 'Asked and answered: the atomic rule is NOT relaxed'
 # ── 39. enum 축소 문장이 Section C 표와 어긋나지 않는가 (회귀 검사) ──────────
@@ -1122,6 +1218,10 @@ hasfx "_bash_rules.md: 무인 완화 폐기 사유가 기록돼 있다" "$GLD/co
 # *밖* 에 남는 사이트별 축소 문장을 본다 — 어떤 스폰이 5개 중 3개만 허용한다고 다시 적은 줄들.
 # 오늘 7곳이 전부 통과하는 것이 정상이다. 이것은 모양 검사가 아니라 회귀 검사이고, Section C
 # 표에 상태가 추가·개명됐는데 사본이 안 따라올 때 발화한다.
+# ⚠ 잡는 것과 못 잡는 것을 정직하게 적는다. **잡는다**: 표에 없는 상태를 부르는 축소 문장,
+#   축소 사이트의 소멸(바닥선 7). **못 잡는다**: 표에 *있는* 상태들만으로 잘못 좁힌 문장
+#   (예: `BLOCKED` 를 허용해야 할 스폰이 `DONE`/`FAIL` 만 나열) — 그것은 부분집합이므로
+#   통과한다. 그 판정은 사이트마다 다르고 기계가 아니라 사람이 내려야 한다.
 # ⚠ 공집합도 부분집합이다 — 축소 문장이 통째로 지워지면(B 가 만들 수 있는 사고) 빈 집합이
 # 그린을 찍는다. 그래서 사이트 수 바닥선을 함께 둔다.
 cat > "$WORK3/enum.py" <<'PYE'
@@ -1174,7 +1274,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=203   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=217   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

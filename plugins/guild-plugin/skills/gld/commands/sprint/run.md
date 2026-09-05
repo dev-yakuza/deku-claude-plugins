@@ -272,6 +272,16 @@ inside its own worktree.
      call each, or fold it into that pass.
 2. **Render the supervisor** — one Bash call, no Read and no Write of the template:
 
+   **First normalize `config.commands`.** `init` stores each value as a simple string or an
+   **array** of simple steps, but an older install can still hold a raw compound value
+   (`_handoff.md` Section E step 1 tells the human to split those by hand). The renderer
+   **rejects** `$(...)`, backticks, `&&`, `||`, `|`, `;`, `<`, `>`, `&` and newlines outright, so
+   an unnormalized value does not degrade — **step 2 exits non-zero and 2d stops the run.**
+   Split such a value yourself before building argv: one `--install-cmd` per step, in order, with
+   any `$(...)` flag dropped — `yarn install && yarn build` becomes
+   `--install-cmd 'yarn install' --install-cmd 'yarn build'`. This is the fix, and the Python
+   rejection is the second safety net behind it, not the remedy.
+
    ```bash
    python3 <<SKILL_DIR>>/commands/atoms/render_supervisor.py --tracker <tracker> --owner-repo <owner/repo> --default-branch <branch> --container <container> --human-repo <abs path of the human's checkout> --dag-path <<SKILL_DIR>>/commands/atoms/sprint_dag.py --order <n> --order <n> --install-cmd <cmd>
    ```
@@ -283,9 +293,9 @@ inside its own worktree.
    | `--owner-repo` | resolved literal |
    | `--default-branch` | `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name` |
    | `--container` | `<repo-parent>/.gld-<repo-basename>-sprint-<tracker>` (repo name included so two sibling repos with the same sprint number cannot collide — a worktree registers by basename) |
-   | `--human-repo` | absolute path of the human's checkout. The output path is **assembled** from this plus `--tracker`; there is no `--out <path>` form |
+   | `--human-repo` | absolute path of the human's checkout. The output path is **assembled** from this plus `--tracker`; there is no `--out <path>` form. Rejected if it is **not absolute** (the supervisor never `cd`s and is launched in the background, so a relative value would resolve the board/window conf and log dir against an inherited cwd) or **not an existing directory**. Both are typo guards, not containment — the same model call supplies the value |
    | `--dag-path` | absolute path of `commands/atoms/sprint_dag.py` |
-   | `--install-cmd` | **repeated once per command** from `config.commands`, passed **raw and unquoted** — the renderer applies `shlex.quote`. ⚠ **Do not pre-quote.** A pre-quoted `'yarn install'` becomes `''\''yarn install'\'''` and the template's `eval "$IC"` then looks for a command literally named `yarn install`. Zero occurrences renders `INSTALL_CMDS=()` |
+   | `--install-cmd` | **repeated once per command** from `config.commands`, passed **raw and unquoted** — the renderer applies `shlex.quote`. ⚠ **Do not pre-quote.** A pre-quoted `'yarn install'` becomes `''\''yarn install'\'''` and the template's `eval "$IC"` then looks for a command literally named `yarn install`. Zero occurrences renders `INSTALL_CMDS=()`. Each value must be a **simple command** — `init.md` normalizes `config.commands` so they MUST NOT contain `$(...)`, `&&`, `|`, `;` or redirections, and that normalization is the whole reason the template's `eval "$IC"` is safe; the renderer re-checks it |
 
    ⚠ **`<PLUGIN_VERSION>` is not an argument** — the script reads it from `.claude-plugin/plugin.json` itself, resolved relative to its own location. It exits non-zero if that read fails rather than stamping a blank watermark onto a script that outlives this session.
 
@@ -406,6 +416,20 @@ inside its own worktree.
    because there is no allowlisted Bash primitive here that could (`test -s` and `wc -c` are not
    in the permission allowlist, and `_bash_rules.md` forbids joining a check onto the render call
    with `&&`).
+
+   ⚠ **Steps 2b/2c have already written into the checkout by the time this guard fires**, and
+   that ordering is deliberate: the conf files are inputs the supervisor reads at launch, so
+   they belong next to the render, not after the verdict. On a `FAIL` here, **leave them** —
+   `.gld-sprint-<tracker>.board` and `.window` are re-derived from `config.json` on every run
+   (2b deletes the board file when `board` is `null`, 2c the window file when no window is in
+   effect), so a re-run overwrites or removes them. Do not hand-delete them; do not treat their
+   presence as evidence that a supervisor is running — that is the `<!-- guild:sprint:run -->`
+   marker's job (Phase 1 step 3).
+
+   ⚠ **Numbering: there is no step 3 or 4 in this phase.** They were the old "Read the template"
+   and "Write it back" steps, absorbed into step 2 when the render moved into
+   `render_supervisor.py`. The numbers of steps 5 and 6 are kept as they were so the
+   cross-references to them elsewhere in this file (`:99`) and in the tests stay correct.
 
 5. **Start it in the background**: Bash tool with `run_in_background: true`, `bash .claude/guild/.gld-sprint-<tracker>.sh`.
    ⚠ **Do not create the container or the supervisor worktree here.** The script does both

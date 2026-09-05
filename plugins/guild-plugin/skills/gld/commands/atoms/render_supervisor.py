@@ -20,6 +20,17 @@ The output path is ASSEMBLED from --human-repo + --tracker, never accepted as an
 A `--out <path>` form would be a hook-free write primitive whose destination the same model
 call supplies, i.e. a typo guard dressed as containment. `--out` therefore accepts only the
 literal `-` (stdout), which the test harness needs.
+
+Two of the three checks on that assembled path are containment, one is not, and the difference
+is stated rather than blurred:
+  - `--tracker` digits-only + the fixed basename  -> containment (no traversal, no chosen name)
+  - `--human-repo` absolute + existing directory  -> a TYPO GUARD, not containment. The same
+    model call supplies the value, so there is no independent standard to check it against; it
+    catches a malformed or stale path, nothing more. The design initially left it out for that
+    reason; it was added back because the absolute check is load-bearing for a different reason
+    (the supervisor never `cd`s and runs in the background, so a relative HUMAN_REPO resolves
+    the board/window conf and log dir against an inherited cwd), and the isdir check costs
+    nothing once isabs is there.
 """
 
 import argparse
@@ -35,9 +46,23 @@ import sys
 # reason that is safe. We re-check here because a legacy install can still carry a
 # non-normalised value: `_handoff.md` tells the human to split raw compound commands by
 # hand, so nothing guarantees the config was ever migrated.
-_METACHAR = re.compile(r"\$\(|`|&&|\|\||[|;<>&\n]")
+# `$` 도 거부한다. `$(...)` 만 막으면 `yarn install $HOME` 이 통과하는데, 템플릿은 각 원소를
+# `eval "$IC"` 로 돌리므로 실행되는 명령이 설정에 적힌 리터럴과 달라진다(인젝션은 아니다 —
+# 구분자가 전부 막혀 있다 — 그러나 설정과 실행이 어긋나는 것은 그 자체로 결함이다).
+# 어절 첫머리의 `~` 도 같은 이유로 막는다.
+_METACHAR = re.compile(r"\$|`|&&|\|\||[|;<>&\n]|(?:\A|\s)~")
 
 _TRACKER = re.compile(r"\A[0-9]+\Z")
+
+# 템플릿에 나타나는 `<UPPER>` 중 **치환 대상이 아닌** 것들. 전부 주석 안의 설명용 자리표시자다.
+# 이 집합과 _TOKENS 의 합집합이 템플릿에 존재해도 되는 `<UPPER>` 의 전부이며, 그 밖의 것이
+# 하나라도 있으면 렌더는 실패한다 — 템플릿이 이 스크립트가 모르는 자리표시자를 얻었다는 뜻이고,
+# 치환 후 검사로는 잡을 수 없다(그 검사는 자기가 방금 치환한 아홉 개만 본다).
+_PROSE_TOKENS = frozenset((
+    "<TOKEN>", "<TAB>", "<N>", "<PLACEHOLDER>", "<EMPTY>", "<HHMM>",
+))
+
+_ANY_TOKEN = re.compile(r"<[A-Z_][A-Z0-9_]*>")
 
 _TOKENS = (
     "<PLUGIN_VERSION>",
@@ -76,8 +101,10 @@ def plugin_version():
             v = json.load(fh).get("version")
     except (OSError, ValueError) as exc:
         die("cannot read %s (%s)" % (PLUGIN_JSON, exc))
-    if not v:
-        die("no 'version' key in %s" % PLUGIN_JSON)
+    # `if not v` 만 보면 `"version": 72` 같은 비문자열이 통과해 나중에 str.join 에서 원시
+    # 트레이스백으로 죽는다 — 이 모듈이 fatal 을 자기 문구로 내는 이유가 없어진다.
+    if not isinstance(v, str) or not v:
+        die("'version' in %s must be a non-empty string, got %r" % (PLUGIN_JSON, v))
     return v
 
 
@@ -101,7 +128,9 @@ def main():
     # that what this script renders is the same file its ~60 structural checks read. Making
     # it wait on the six required scalars would make that assertion unwritable, so it is
     # handled before argparse enforces them.
-    if "--print-template-path" in sys.argv[1:]:
+    # argv 어디에서나 매치하면 값으로 들어온 것도 잡는다 — `--install-cmd --print-template-path`
+    # 가 아무것도 렌더하지 않고 exit 0 을 냈다. 유일한 인자일 때만 받는다.
+    if sys.argv[1:] == ["--print-template-path"]:
         sys.stdout.write(TEMPLATE + "\n")
         return
 
@@ -122,18 +151,39 @@ def main():
     )
     args = ap.parse_args()
 
+    # 등록만 하고 아무도 읽지 않으면 죽은 플래그가 된다 — 필수 인자와 함께 넘기면 경로를 찍는
+    # 대신 조용히 렌더했다. 단독 사용만이 의미 있는 플래그이므로 그렇게 강제한다.
+    if args.print_template_path:
+        die("--print-template-path must be the only argument")
+
     if args.out is not None and args.out != "-":
         die("--out accepts only '-' (stdout); the file path is assembled, not passed")
 
+    # ⚠ 출력 경로는 --human-repo + --tracker 로 조립된다. --tracker 만 검증하고 --human-repo 를
+    # 놓으면 "임의 디렉터리에 실행 가능한 파일을 쓰는" 원시가 그대로 남는다 — --out 을 없앤 이유가
+    # 무색해진다. 상대경로도 막는다: 스크립트는 cd 하지 않고 백그라운드로 뜨므로, 상대 HUMAN_REPO 는
+    # BOARD_CONF·WINDOW_CONF·로그 디렉터리를 상속된 cwd 기준으로 해석시킨다.
+    if not os.path.isabs(args.human_repo):
+        die("--human-repo must be an absolute path, got %r" % args.human_repo)
+    if not os.path.isdir(args.human_repo):
+        die("--human-repo is not an existing directory: %s" % args.human_repo)
+
     if not _TRACKER.match(args.tracker):
         die("--tracker must be digits only, got %r" % args.tracker)
+
+    # --order 는 --tracker 와 같은 자료형(이슈 번호)인데 검증이 없었다. `--order ''` 는
+    # `ORDER=('')` 를 만들어 템플릿의 빈 큐 가드를 무력화한다 — 길이 1 이므로 가드가 안 걸리고,
+    # 슈퍼바이저는 워크트리를 만든 뒤 이슈 번호 "" 로 큐를 돈다.
+    for n in args.order:
+        if not _TRACKER.match(n):
+            die("--order must be digits only, got %r" % n)
 
     for cmd in args.install_cmd:
         if _METACHAR.search(cmd):
             die(
                 "--install-cmd %r contains shell metacharacters; config.commands values are "
-                "normalized at init time and must not contain $(...), &&, |, ;, or "
-                "redirections" % cmd
+                "normalized at init time and must not contain $(...), $VAR, `..`, &&, |, ;, ~, "
+                "or redirections" % cmd
             )
 
     try:
@@ -142,31 +192,60 @@ def main():
     except OSError as exc:
         die("cannot read template %s (%s)" % (TEMPLATE, exc))
 
+    # ⚠ 치환 **전에** 본다. 치환 후에 _TOKENS 만 훑는 검사는 자기가 방금 지운 아홉 개를 다시
+    # 확인할 뿐이어서, 템플릿이 얻은 새 자리표시자(`HEARTBEAT_EVERY=<HEARTBEAT>`)를 통과시켰다 —
+    # 렌더는 rc=0 에 stderr 계약 줄까지 내고, run.md 2d 는 승인하고, step 5 가 파스 에러 스크립트를
+    # 백그라운드로 띄운다. 치환 후 검사로 옮기면 값 안에 `<ORDER>` 가 든 정상 인자를 오진하므로
+    # (진단문까지 틀린다) 원본에서 본다.
+    unknown = sorted(set(_ANY_TOKEN.findall(src)) - set(_TOKENS) - _PROSE_TOKENS)
+    if unknown:
+        die(
+            "template has placeholder(s) this script does not know: %s — add them to _TOKENS "
+            "(substituted) or _PROSE_TOKENS (comment-only)" % ", ".join(unknown)
+        )
+
+    # Every scalar is shell-quoted, not dropped into a `X="<TOKEN>"` slot. The template's
+    # assignments are bare (`X=<TOKEN>`) so the quoting lives here, in one place, for all of
+    # them — the same "remove the class rather than escape it" move `run.md` step 2b made for
+    # the board's ten values. Without it, `--default-branch` alone is enough: it comes from
+    # `gh repo view --json defaultBranchRef`, git ref rules permit `$`, backtick and quotes,
+    # and `DEFAULT_BRANCH="$(id -un)"` executes at script load — before any trap, under set -u.
+    # <PLUGIN_VERSION> is the exception: it lands in a `#` comment, never in an assignment.
     subs = {
         "<PLUGIN_VERSION>": plugin_version(),
-        "<TRACKER>": args.tracker,
+        "<TRACKER>": shlex.quote(args.tracker),
         "<ORDER>": array_literal(args.order),
-        "<OWNER_REPO>": args.owner_repo,
-        "<DEFAULT_BRANCH>": args.default_branch,
-        "<CONTAINER>": args.container,
-        "<HUMAN_REPO>": args.human_repo,
-        "<DAG_PATH>": args.dag_path,
+        "<OWNER_REPO>": shlex.quote(args.owner_repo),
+        "<DEFAULT_BRANCH>": shlex.quote(args.default_branch),
+        "<CONTAINER>": shlex.quote(args.container),
+        "<HUMAN_REPO>": shlex.quote(args.human_repo),
+        "<DAG_PATH>": shlex.quote(args.dag_path),
         "<INSTALL_CMDS>": array_literal(args.install_cmd),
     }
-    for token, value in subs.items():
-        src = src.replace(token, value)
+    # 단일 패스. 순차 replace 는 먼저 치환한 값 안에 들어 있던 토큰을 뒤 패스가 다시 치환한다
+    # (`--owner-repo '<HUMAN_REPO>'` → OWNER_REPO 가 human-repo 값으로 조용히 바뀌었다).
+    src = re.sub("|".join(re.escape(t) for t in subs), lambda m: subs[m.group(0)], src)
 
-    # Every token must be gone. A survivor means the template gained a placeholder this
-    # script does not know about — `ORDER=(<ORDER>)` left literal is a parse error the
-    # supervisor would only hit at launch, in the background, with nothing to read.
-    leftover = [t for t in _TOKENS if t in src]
+    # 치환이 실제로 일어났는지. 위의 사전 검사가 "알 수 없는 자리표시자" 를 이미 처리하므로
+    # 여기서는 아홉 개가 사라졌는지만 본다. `re.sub` 가 전부 바꿨다면 남을 수 없지만, 정규식
+    # 조립이 깨지면 조용히 0건 치환이 된다 — 그 경우를 잡는다. 값 안에 토큰 문자열이 들어 있는
+    # 정상 인자(`--owner-repo 'acme/<ORDER>-repo'`)는 이 검사를 오작동시킬 수 있으므로,
+    # 치환된 값들이 기여한 것은 빼고 센다.
+    injected = "".join(subs.values())
+    leftover = [t for t in _TOKENS if src.count(t) > injected.count(t)]
     if leftover:
         die("unsubstituted token(s) remain: %s" % ", ".join(leftover))
 
     if args.out == "-":
         # stdout IS the script here — the confirmation goes to stderr, or it lands inside
         # the rendered bash and the end-to-end sections execute it.
-        sys.stdout.write(src)
+        # locale 이 아니라 UTF-8 로 고정한다. LC_ALL=C 에서 sys.stdout.write 가
+        # UnicodeEncodeError 로 죽으며 0바이트를 남겼다.
+        try:
+            sys.stdout.buffer.write(src.encode("utf-8"))
+            sys.stdout.buffer.flush()
+        except BrokenPipeError:
+            die("stdout closed before the render finished")
         # len(src) is CHARACTERS; the template is UTF-8 with multibyte prose, so the two
         # differ by ~4KB. Report what actually lands on the stream.
         sys.stderr.write(
@@ -185,9 +264,15 @@ def main():
     except OSError as exc:
         die("cannot write %s (%s)" % (out, exc))
 
-    size = os.path.getsize(out)
-    if size == 0:
-        die("wrote 0 bytes to %s" % out)
+    want = len(src.encode("utf-8"))
+    try:
+        size = os.path.getsize(out)
+    except OSError as exc:
+        die("cannot stat %s after writing it (%s)" % (out, exc))
+    # 0 만 보면 잘린 쓰기가 통과한다 — 515/139621 바이트가 chmod 되고 `bash -n` 도 조용했다.
+    # run.md step 2d 가 받는 유일한 신호이므로 전량 일치를 요구한다.
+    if size != want:
+        die("wrote %d of %d bytes to %s — truncated" % (size, want, out))
     # `run.md`'s render guard reads this line. It is the only signal it gets — there is no
     # allowlisted Bash primitive (`test -s`, `wc -c`) it could use to check the file itself.
     sys.stderr.write("render_supervisor: wrote %s (%d bytes)\n" % (out, size))

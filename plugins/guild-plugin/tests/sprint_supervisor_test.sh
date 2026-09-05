@@ -124,10 +124,17 @@ for c in shlex.split(install):
     argv += ["--install-cmd", c]
 
 r = subprocess.run(argv, stdout=subprocess.PIPE)
-sys.stdout.write(r.stdout.decode("utf-8"))
+# ⚠ decode/encode 왕복을 하지 않는다. `sys.stdout.write(r.stdout.decode())` 는 LC_ALL=C 에서
+# UnicodeEncodeError 로 죽으며 0바이트를 남긴다 — 렌더러가 방금 고친 바로 그 결함을 이 래퍼가
+# 그대로 되살렸었다. 14개 렌더 사이트가 전부 여기를 지나므로 C 로케일에서 전건이 0바이트였다.
+sys.stdout.buffer.write(r.stdout)
+sys.stdout.buffer.flush()
 sys.exit(r.returncode)
 PY
 
+# ⚠ --human-repo 는 실재하는 절대 디렉터리여야 한다(렌더러가 검증한다). 예전 값
+# `/tmp/gld-test-repo` 는 이 파일 어디에서도 만들어지지 않았다 — 옛 render.py 가 그 인자를
+# 문자열로만 쓰던 때의 잔재다. $WORK 는 스위트가 소유하고 정리한다.
 echo "== A. syntax =="
 
 # Control: the stderr-based check must SEE the placeholder errors. If this stops failing, a
@@ -138,18 +145,21 @@ else
   bad "detector works: raw template reports errors" "clean — a placeholder must have been resolved in the template, or syntax_err is broken"
 fi
 
-"$PY" "$WORK/render.py" "$TPL" "101 102 103" "'yarn install'" "/tmp/gld-test-repo" > "$WORK/sup.sh"
+"$PY" "$WORK/render.py" "$TPL" "101 102 103" "'yarn install'" "$WORK" > "$WORK/sup.sh"
+[ -s "$WORK/sup.sh" ] || bad "렌더 산출물이 비어 있다" "$WORK/sup.sh"
 E="$(syntax_err "$WORK/sup.sh")"
 if [ -z "$E" ]; then ok "renders to valid bash"; else bad "renders to valid bash" "$E"; fi
 
-"$PY" "$WORK/render.py" "$TPL" "" "" "/tmp/gld-test-repo" > "$WORK/sup_empty.sh"
+"$PY" "$WORK/render.py" "$TPL" "" "" "$WORK" > "$WORK/sup_empty.sh"
+[ -s "$WORK/sup_empty.sh" ] || bad "렌더 산출물이 비어 있다" "$WORK/sup_empty.sh"
 E="$(syntax_err "$WORK/sup_empty.sh")"
 if [ -z "$E" ]; then ok "renders to valid bash with an EMPTY order"; else bad "renders to valid bash with an EMPTY order" "$E"; fi
 
 # An empty install list and a multi-step one must both parse. The single-string form used to
 # be inlined directly, so an empty value produced `( cd "$WT" &&  )` — a PARSE error that no
 # runtime guard can prevent. That is why INSTALL_CMDS is an array.
-"$PY" "$WORK/render.py" "$TPL" "101" "'pnpm i --frozen-lockfile' 'pnpm build'" "/tmp/gld-test-repo" > "$WORK/sup_multi.sh"
+"$PY" "$WORK/render.py" "$TPL" "101" "'pnpm i --frozen-lockfile' 'pnpm build'" "$WORK" > "$WORK/sup_multi.sh"
+[ -s "$WORK/sup_multi.sh" ] || bad "렌더 산출물이 비어 있다" "$WORK/sup_multi.sh"
 E="$(syntax_err "$WORK/sup_multi.sh")"
 if [ -z "$E" ]; then ok "renders to valid bash with MULTIPLE install steps"; else bad "renders to valid bash with MULTIPLE install steps" "$E"; fi
 
@@ -775,6 +785,7 @@ echo "== E. execution smoke =="
 mkdir -p "$WORK/repo"
 git -C "$WORK/repo" init -q 2>/dev/null || true
 "$PY" "$WORK/render.py" "$TPL" "" "" "$WORK/repo" > "$WORK/smoke.sh"
+[ -s "$WORK/smoke.sh" ] || bad "렌더 산출물이 비어 있다" "$WORK/smoke.sh"
 SMOKE_OUT="$("$SH" "$WORK/smoke.sh" 2>&1)"; SMOKE_RC=$?
 if [ "$SMOKE_RC" -eq 0 ] && printf '%s' "$SMOKE_OUT" | grep -q "No members to run"; then
   ok "empty order exits 0 with a clear message"
@@ -862,6 +873,7 @@ printf 'guild:done\n' > "$E_STATE"
 
 DAGPY="$HERE/../skills/gld/commands/atoms/sprint_dag.py"
 "$PY" "$WORK/render.py" "$TPL" "101 102" "" "$E/repo" "$E/cont" "$DAGPY" > "$E/sup.sh"
+[ -s "$E/sup.sh" ] || bad "렌더 산출물이 비어 있다" "$E/sup.sh"
 mkdir -p "$E/repo/.claude/guild/.sprint-logs/99/dag"
 printf '[{"number":101,"base_deps":[],"split":false},{"number":102,"base_deps":[101],"split":false}]\n' \
   > "$E/repo/.claude/guild/.sprint-logs/99/dag/members.json"
@@ -980,6 +992,7 @@ mkdir -p "$E2/repo/.claude/guild/.sprint-logs/99/dag"
 printf '[{"number":101,"base_deps":[],"split":false},{"number":102,"base_deps":[101],"split":false}]\n' \
   > "$E2/repo/.claude/guild/.sprint-logs/99/dag/members.json"
 "$PY" "$WORK/render.py" "$TPL" "101 102" "" "$E2/repo" "$E2/cont" "$DAGPY" > "$E2/sup.sh"
+[ -s "$E2/sup.sh" ] || bad "렌더 산출물이 비어 있다" "$E2/sup.sh"
 cp "$E2/sup.sh" "$E2/repo/.claude/guild/.gld-sprint-99.sh"
 F_OUT="$(cd "$E2/neutral2" && E_TRACE="$E2/trace.txt" E_PRS="$E2/prs.json" E_ISSUES="$E2/issues.json" \
          E_STATE="$E2/state.txt" E_PY="$PY" PATH="$E2/bin:$PATH" \
@@ -1071,6 +1084,7 @@ printf '#!/bin/bash\necho S >> "$H_SPAWN"\necho %s\n' '{"type":"result","is_erro
 chmod +x "$H/bin/gh" "$H/bin/claude"
 printf '[{"number":101,"base_deps":[],"split":false}]\n' > "$H/split/.claude/guild/.sprint-logs/99/dag/members.json"
 hrender "$H/split" "101" "$H/split_c" > "$H/split.sh"
+[ -s "$H/split.sh" ] || bad "렌더 산출물이 비어 있다" "$H/split.sh"
 
 split_run() {   # split_run <sequence>  -> echoes "<rc> <spawns>"
   printf '%s\n' $1 > "$H/seq.txt"; echo 0 > "$H/idx.txt"; : > "$H/spawn.txt"
@@ -1133,6 +1147,7 @@ printf '[{"number":101,"base_deps":[],"split":false}]\n' > "$H/leak/.claude/guil
 # make the event log unwritable so _record fails and warns
 mkdir -p "$H/leak/.claude/guild/.sprint-logs/99/failures.jsonl"
 hrender "$H/leak" "101" "$H/leak_c" > "$H/leak.sh"
+[ -s "$H/leak.sh" ] || bad "렌더 산출물이 비어 있다" "$H/leak.sh"
 : > "$H/trace.txt"
 LEAK_OUT="$(cd "$H/neutral" && PATH="$H/bin:$PATH" H_TRACE="$H/trace.txt" \
            timeout 60 "$SH" "$H/leak.sh" 2>&1)" || true
@@ -1330,6 +1345,7 @@ export GH_IDS="$I_WORK/ids.sh"
 # closes the helper block — the functions are all above it.
 "$PY" "$WORK/render.py" "$TPL" "101" "" "$I_WORK/repo" "/tmp/c" "/tmp/dag.py" "7" \
   > "$I_WORK/full.sh"
+[ -s "$I_WORK/full.sh" ] || bad "렌더 산출물이 비어 있다" "$I_WORK/full.sh"
 sed -n '1,/^# <!-- guild:supervisor-core:selfdelete -->/p' "$I_WORK/full.sh" \
   | grep -v '^trap ' > "$I_WORK/helpers.sh"
 
@@ -1387,6 +1403,7 @@ fi
 mkdir -p "$I_WORK/repo_lg"
 "$PY" "$WORK/render.py" "$TPL" "101" "" "$I_WORK/repo_lg" "/tmp/c" "/tmp/dag.py" "7" \
   > "$I_WORK/full_lg.sh"
+[ -s "$I_WORK/full_lg.sh" ] || bad "렌더 산출물이 비어 있다" "$I_WORK/full_lg.sh"
 sed -n '1,/^EVENTS=/p' "$I_WORK/full_lg.sh" | grep -v '^trap ' > "$I_WORK/helpers_lg.sh"
 
 I_lg() {   # I_lg <body>
@@ -1514,8 +1531,17 @@ fi
 # rendering "off" into the same repo deletes the ON case's file and every later case in this
 # section silently becomes a board-off case — which passes for the wrong reason.
 mkdir -p "$I_WORK/repo_off"
+# ⚠ 부재를 **적극 단언**한다. 별도 repo dir 로 옮긴 것은 오염 회피일 뿐 검사가 아니다 —
+#   렌더가 남긴 .board 를 아무도 보지 않으면 "board off 인데 파일이 있다" 가 그린으로 통과한다.
+#   그래서 먼저 파일을 심어 두고(= 예전 board-ON 실행의 잔재를 재현) OFF 렌더가 지우는지 본다.
+#   심지 않으면 삭제 분기는 한 번도 실행되지 않는다 — 지워도 전건 그린이었다.
+I_OFFB="$I_WORK/repo_off/.claude/guild/.gld-sprint-99.board"
+mkdir -p "$(dirname "$I_OFFB")"; printf 'number=7\n' > "$I_OFFB"
 "$PY" "$WORK/render.py" "$TPL" "101" "" "$I_WORK/repo_off" "/tmp/c" "/tmp/dag.py" "" \
   > "$I_WORK/off.sh"
+[ -s "$I_WORK/off.sh" ] || bad "렌더 산출물이 비어 있다" "$I_WORK/off.sh"
+[ ! -e "$I_OFFB" ] && ok "I: board off 렌더가 잔존 .board 를 지운다 (부재 적극 단언)" \
+                   || bad "I: board off 후 .board 부재" "지워졌어야 하나 남아 있다: $I_OFFB"
 sed -n '1,/^# <!-- guild:supervisor-core:selfdelete -->/p' "$I_WORK/off.sh" \
   | grep -v '^trap ' > "$I_WORK/helpers_off.sh"
 : > "$I_WORK/calls.txt"
@@ -1617,6 +1643,7 @@ fi
 mkdir -p "$I_WORK/repo_cl"
 "$PY" "$WORK/render.py" "$TPL" "101" "" "$I_WORK/repo_cl" "/tmp/c" "/tmp/dag.py" "7" \
   > "$I_WORK/full_cl.sh"
+[ -s "$I_WORK/full_cl.sh" ] || bad "렌더 산출물이 비어 있다" "$I_WORK/full_cl.sh"
 sed -n '1,/^# <!-- \/guild:supervisor-core:selfdelete -->/p' "$I_WORK/full_cl.sh" \
   | grep -v '^trap ' > "$I_WORK/helpers_cl.sh"
 
@@ -1978,6 +2005,7 @@ col_done=Done
 INJ
 "$PY" "$WORK/render.py" "$TPL" "101" "" "$I_WORK/repo_inj" "/tmp/c" "/tmp/dag.py" "" \
   > "$I_WORK/inj_full.sh"
+[ -s "$I_WORK/inj_full.sh" ] || bad "렌더 산출물이 비어 있다" "$I_WORK/inj_full.sh"
 # render.py 는 board_number 가 비면 파일을 지우므로, 렌더 후에 적대적 파일을 다시 놓는다
 cat > "$I_BCONF" <<INJ
 number=7
@@ -2204,6 +2232,7 @@ W_render() {   # W_render <tag> <window-file-content|__NONE__> ; sets W_REPO/W_C
   W_REPO="$W_WORK/repo_$1"; rm -rf "$W_REPO"; mkdir -p "$W_REPO/.claude/guild"
   "$PY" "$WORK/render.py" "$TPL" "101 102" "" "$W_REPO" "$W_WORK/c_$1" "/tmp/dag.py" \
     > "$W_WORK/full_$1.sh"
+[ -s "$W_WORK/full_$1.sh" ] || bad "렌더 산출물이 비어 있다" "$W_WORK/full_$1.sh"
   # T5: 창 블록 컷. ⚠ 닫는 펜스에서 끊으면 원장 `window` 재기록이 컷 밖으로 나간다.
   sed -n '1,/^# Main loop/p' "$W_WORK/full_$1.sh" | grep -v '^trap ' > "$W_WORK/cut_$1.sh"
   # T6: trap 보존 컷 — T5 와 정반대. FINISHED=1 삭제 변이는 EXIT 트랩이 발화해야 관측된다.
@@ -3749,7 +3778,7 @@ esac
 # 최초 구현에서 스위트에 넣지 않고 셸에서 손으로만 돌렸던 케이스들이다.
 echo "== T10. render_supervisor 가드 =="
 RS="$HERE/../skills/gld/commands/atoms/render_supervisor.py"
-RSH="$(mktemp -d)"
+RSH="$WORK/rs-human"; mkdir -p "$RSH"   # $WORK 의 trap 이 정리한다 — T10 중간에 죽어도 새지 않는다
 rsbase() { printf '%s\n' --owner-repo a/b --default-branch develop --container /tmp/c --dag-path /tmp/d.py; }
 
 # non-zero 여야 하는 것들. rc 와 stderr 를 함께 본다 — rc 만 보면 argparse 의 usage(2) 와
@@ -3757,9 +3786,9 @@ rsbase() { printf '%s\n' --owner-repo a/b --default-branch develop --container /
 rsfail() {  # rsfail <case> <expected-stderr-fragment> <args...>
   desc="$1"; frag="$2"; shift 2
   err="$("$PY" "$RS" "$@" 2>&1 >/dev/null)"; rc=$?
-  if [ "$rc" -eq 0 ]; then bad "$desc" "non-zero" "rc=0"
+  if [ "$rc" -eq 0 ]; then bad "$desc" "non-zero 를 기대했으나 rc=0"
   elif printf '%s' "$err" | grep -qF -- "$frag"; then ok "$desc"
-  else bad "$desc" "stderr 에 '$frag'" "$(printf '%s' "$err" | head -1)"; fi
+  else bad "$desc" "stderr 에 '$frag' 를 기대했으나: $(printf '%s' "$err" | head -1)"; fi
 }
 rsfail "render: --tracker 가 숫자가 아니면 거부" "digits only" \
   --tracker 9a --human-repo "$RSH" --out - $(rsbase)
@@ -3767,6 +3796,12 @@ rsfail "render: --tracker 로 경로 탈출 불가" "digits only" \
   --tracker ../../etc --human-repo "$RSH" --out - $(rsbase)
 rsfail "render: --out 은 '-' 외의 값을 거부" "accepts only" \
   --tracker 99 --human-repo "$RSH" --out /tmp/x.sh $(rsbase)
+rsfail "render: --human-repo 상대경로 거부" "must be an absolute path" \
+  --tracker 99 --human-repo "relative/dir" --out - $(rsbase)
+rsfail "render: --human-repo 없는 디렉터리 거부" "not an existing directory" \
+  --tracker 99 --human-repo "$WORK/no-such-dir-$$" --out - $(rsbase)
+rsfail "render: --order 가 숫자가 아니면 거부" "--order must be digits only" \
+  --tracker 99 --human-repo "$RSH" --out - $(rsbase) --order ""
 for m in 'a && b' 'a $(b)' 'a | b' 'a > f'; do
   rsfail "render: --install-cmd '$m' 거부" "shell metacharacters" \
     --tracker 99 --human-repo "$RSH" --out - $(rsbase) --install-cmd "$m"
@@ -3776,32 +3811,111 @@ done
 if "$PY" "$RS" --tracker 99 --human-repo "$RSH" --out - $(rsbase) \
      --install-cmd 'pnpm i --frozen-lockfile' >/dev/null 2>&1; then
   ok "render: 정상 install 명령은 통과한다"
-else bad "render: 정상 install 명령은 통과한다" "rc=0" "거부됨"; fi
+else bad "render: 정상 install 명령은 통과한다" "rc=0 을 기대했으나 거부됨"; fi
 
 # --print-template-path 는 필수 인자 없이 단독으로 동작해야 한다. 이 플래그의 존재 이유가
 # "테스트가 렌더 대상과 $TPL 이 같은 파일임을 단언한다" 이므로, 인자를 요구하면 그 단언을 쓸 수 없다.
+# ⚠ 설계는 이 단언을 `== A. syntax ==` 에 두라고 했다. 렌더러 가드가 전부 T10 에 모여 있어
+#   여기로 옮겼다 — $TPL 은 파일 전역 변수라 어느 섹션에서든 같은 값이고, 단언 내용은 동일하다.
 RSTPL="$("$PY" "$RS" --print-template-path 2>/dev/null)"
 if [ -n "$RSTPL" ] && [ "$RSTPL" -ef "$TPL" ]; then
   ok "render: --print-template-path 가 단독 동작하고 \$TPL 과 같은 파일을 가리킨다"
-else bad "render: --print-template-path" "\$TPL 과 동일 inode" "got: ${RSTPL:-<empty>}"; fi
+else bad "render: --print-template-path" "\$TPL 과 동일 inode 를 기대했으나: ${RSTPL:-<empty>}"; fi
+# 그리고 단독일 때만 유효해야 한다 — 필수 인자와 섞이면 경로를 찍는 대신 조용히 렌더했다.
+rsfail "render: --print-template-path 는 다른 인자와 섞일 수 없다" "must be the only argument" \
+  --tracker 99 --human-repo "$RSH" --out - $(rsbase) --print-template-path
+
+# 스칼라 인젝션 — 다섯 값 전부 `X=<TOKEN>` 슬롯에 들어가므로 인용은 렌더러가 한다.
+# `--default-branch` 는 `gh repo view` 가 주는 값이고 git ref 규칙은 `$`·백틱·따옴표를 허용한다.
+# 인용이 없으면 `DEFAULT_BRANCH="$(id -un)"` 가 스크립트 로드 시점에 — trap 전에 — 실행된다.
+cat > "$WORK/inj.py" <<'PYI'
+import shlex, subprocess, sys
+rs, tmp, probe = sys.argv[1], sys.argv[2], sys.argv[3]
+bad = []
+for inj in ["$(id -un)", 'main"; touch %s/GLD_INJ_PROBE; :"' % probe, "a`id`b"]:
+    out = subprocess.run(
+        [sys.executable, rs, "--tracker", "99", "--owner-repo", "a/b",
+         "--default-branch", inj, "--container", "/tmp/c", "--human-repo", tmp,
+         "--dag-path", "/tmp/d.py", "--out", "-"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.decode("utf-8")
+    got = next((l for l in out.split("\n") if l.startswith("DEFAULT_BRANCH=")), "")
+    want = "DEFAULT_BRANCH=" + shlex.quote(inj)
+    if got != want:
+        bad.append("%r -> %s" % (inj, got or "<none>"))
+print("OK" if not bad else "BAD " + " | ".join(bad))
+PYI
+INJOUT="$("$PY" "$WORK/inj.py" "$RS" "$RSH" "$WORK")"
+case "$INJOUT" in
+  OK) ok "render: --default-branch 의 인젝션 3종이 모두 인용돼 무력화된다" ;;
+  *)  bad "render: --default-branch 인젝션 인용" "shlex.quote 결과와 일치해야 하나: $INJOUT" ;;
+esac
+# ⚠ 프로브 파일의 부재를 보는 것만으로는 **영구 그린**이다. inj.py 는 stdout 으로 렌더할 뿐
+#   아무도 결과를 실행하지 않으므로 `touch` 는 애초에 돌 기회가 없다 — 렌더러를 통째로 지워도
+#   이 검사는 PASS 였다. 그래서 대입 줄을 **실제로 실행**한다: 서브셸에서 그 한 줄만 source 하고
+#   변수값이 입력 리터럴과 같은지 본다. 인용이 풀리면 여기서 페이로드가 돌고, 값도 달라진다.
+INJ_EXEC_BAD=""
+for INJ in '$(id -un)' 'main"; touch '"$WORK"'/GLD_INJ_PROBE; :"' 'a`id`b'; do
+  INJ_LINE="$("$PY" "$RS" --tracker 99 --owner-repo a/b --default-branch "$INJ" \
+    --container /tmp/c --human-repo "$RSH" --dag-path /tmp/d.py --out - 2>/dev/null \
+    | grep '^DEFAULT_BRANCH=' | head -1)"
+  INJ_GOT="$("$SH" -c "$INJ_LINE"'; printf %s "$DEFAULT_BRANCH"' 2>/dev/null || true)"
+  [ "$INJ_GOT" = "$INJ" ] || INJ_EXEC_BAD="$INJ_EXEC_BAD [$INJ -> ${INJ_GOT:-<died>}]"
+done
+[ -z "$INJ_EXEC_BAD" ] && ok "render: 대입 줄을 실제로 실행해도 값이 입력 리터럴 그대로다" \
+                       || bad "render: 대입 줄 실행 후 값" "입력과 동일해야 하나:$INJ_EXEC_BAD"
+[ -e "$WORK/GLD_INJ_PROBE" ] && bad "render: 인젝션 페이로드가 실행되지 않았다" "미생성이어야 하나 존재함" \
+                            || ok "render: 인젝션 페이로드가 실행되지 않았다 (실행 경로를 실제로 지난 뒤)"
 
 # 조립 경로 분기 — 하니스 13곳이 전부 --out - 를 쓰므로 이 분기는 여기서만 덮인다.
 if "$PY" "$RS" --tracker 99 --human-repo "$RSH" $(rsbase) --order 101 >/dev/null 2>&1; then
   RSOUT="$RSH/.claude/guild/.gld-sprint-99.sh"
   [ -s "$RSOUT" ] && ok "render: 조립 경로에 비어있지 않은 파일을 쓴다" \
-                  || bad "render: 조립 경로에 파일을 쓴다" "non-empty" "없거나 0바이트"
+                  || bad "render: 조립 경로에 파일을 쓴다" "non-empty 여야 하나 없거나 0바이트"
   [ -x "$RSOUT" ] && ok "render: 조립된 산출물이 실행 가능하다 (0755)" \
-                  || bad "render: 실행 권한" "0755" "실행 불가"
-  if grep -q '<TRACKER>\|<ORDER>\|<PLUGIN_VERSION>\|<INSTALL_CMDS>\|<HUMAN_REPO>' "$RSOUT"; then
-    bad "render: 미치환 토큰이 남지 않는다" "0건" "$(grep -o '<[A-Z_]*>' "$RSOUT" | sort -u | tr '\n' ' ')"
-  else ok "render: 미치환 토큰이 남지 않는다"; fi
-else bad "render: 조립 경로 모드가 성공한다" "rc=0" "실패"; fi
-rm -rf "$RSH"
+                  || bad "render: 실행 권한" "0755 여야 하나 실행 불가"
+  # ⚠ 알려진 다섯 개만 grep 하면 이 검사는 절대 실패할 수 없다 — 렌더러는 _TOKENS 가 전부
+  #   사라진 뒤에만 rc=0 을 내므로 rc=0 이 곧 그 grep 의 0건을 함의한다(렌더러 변이 8종에서
+  #   전부 그린이었다). `<UPPER>` 를 통째로 훑고, 주석용 자리표시자만 제외한다.
+  RSLEFT="$(grep -o '<[A-Z_][A-Z0-9_]*>' "$RSOUT" | sort -u \
+            | grep -vxE '<TOKEN>|<TAB>|<N>|<PLACEHOLDER>|<EMPTY>|<HHMM>' | tr '\n' ' ')"
+  [ -z "$RSLEFT" ] && ok "render: 산출물에 치환되지 않은 <UPPER> 자리표시자가 없다" \
+                   || bad "render: 미치환 자리표시자" "0건이어야 하나: $RSLEFT"
+else bad "render: 조립 경로 모드가 성공한다" "rc=0 을 기대했으나 실패"; fi
+
+# run.md step 2d 는 stderr 한 줄만 보고 기동 여부를 정한다. 그 문구가 바뀌면 가드가 조용히
+# 무장 해제된다 — 어느 스위트도 이 문자열을 보지 않았다.
+RSMSG="$("$PY" "$RS" --tracker 99 --human-repo "$RSH" $(rsbase) 2>&1 >/dev/null)"
+case "$RSMSG" in
+  "render_supervisor: wrote "*" bytes)") ok "render: 2d 가 읽는 stderr 계약 문구가 그대로다" ;;
+  *) bad "render: 2d 가 읽는 stderr 계약 문구" "'render_supervisor: wrote <path> (<n> bytes)' 여야 하나: $RSMSG" ;;
+esac
+# 그리고 run.md 가 부르는 인자 이름이 실제로 존재하는가 — 한쪽만 고치면 렌더가 죽는다.
+# ⚠ 플래그 목록을 여기에 적으면 렌더러를 *테스트* 와 대조하게 된다. run.md 가 `--install-cmds`
+#   로 바뀌어도 그린이었다. 호출 줄에서 직접 뽑고, 부분 문자열이 아니라 단어 단위로 맞춘다
+#   (`--dag-path` → `--dag-path-abs` 도 그린이었다).
+RSHELP="$("$PY" "$RS" --help 2>&1)"
+RUNMD_SUP="$HERE/../skills/gld/commands/sprint/run.md"
+RSFLAGS="$(grep -o 'render_supervisor\.py [^`]*' "$RUNMD_SUP" | head -1 | tr ' ' '\n' \
+           | grep '^--' | sort -u)"
+RSMISS=""
+RSNF=0
+for a in $RSFLAGS; do
+  RSNF=$((RSNF+1))
+  printf '%s\n' "$RSHELP" | tr ' ,' '\n\n' | grep -qx -- "$a" || RSMISS="$RSMISS $a"
+done
+if [ "$RSNF" -lt 8 ]; then
+  bad "render: run.md 호출 줄에서 플래그를 뽑았다" "8개 이상이어야 하나 ${RSNF}개 — 추출이 깨졌다"
+elif [ -z "$RSMISS" ]; then
+  ok "render: run.md 가 실제로 부르는 플래그 ${RSNF}개가 전부 --help 에 있다"
+else
+  bad "render: run.md 의 인자 이름" "전부 존재해야 하나 없음:$RSMISS"
+fi
+
 # ── T9: 검사 개수 바닥 ─────────────────────────────────────────────────────
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=280
+SUP_MIN_CHECKS=290
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

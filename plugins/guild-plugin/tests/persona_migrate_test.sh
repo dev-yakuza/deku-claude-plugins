@@ -37,6 +37,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OB
 unset GIT_CONFIG GIT_CONFIG_COUNT
 
 PASS=0; FAIL=0
+SKIPPED=0
 ok()  { PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s — %s\n' "$1" "$2"; }
 eq()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected [$2], got [$3]"; fi; }
@@ -1103,11 +1104,110 @@ eq "C25b 플래그 오타 → 64"           "64" "$("$PY" "$PM" --mode insert --
 eq "C26 __pycache__ 남기지 않음" "0" \
    "$(find "$(dirname "$PM")" -name 'persona_migrate*.pyc' | grep -c .; true)"
 
+# ── 중앙 헤딩 개명이 로컬 성장으로 오판되지 않는가 ───────────────────────────
+# 이 스위트의 다른 검사는 전부 $WORK/tpl 에 자기가 쓴 템플릿을 --templates 로 넘긴다. 그래서
+# "이전 릴리스가 설치한 것"과 "지금 템플릿"이 구조적으로 같고, foreign_headings 의 false-T2
+# 경로가 한 번도 실행되지 않는다. 0.71.0 이 15개 템플릿의 헤딩에서 `(_handoff.md Section C)`
+# 접미를 뗐을 때 기존 ko 레포 전부가 15 T2 로 떨어졌는데 세 스위트가 전부 그린이었다.
+# 여기서는 **실제 배포 템플릿**과 **이전 태그의 템플릿으로 만든 픽스처**를 대조한다.
+# 개명 원장이 현재 템플릿과 정합한가 — PREV_REF 검사가 못 보는 것을 본다.
+# PREV_REF 는 한 커밋 전이라 **가장 최근 개명 하나**만 재현한다. 0.40.1 의 `## 책임 …` 개명처럼
+# 오래된 항목은 그 픽스처에 아예 없다. 그리고 세 번째 개명이 일어나면 원장의 오른쪽이 낡아
+# `current_name()` 이 어느 템플릿에도 없는 이름을 답하고, 그 순간 옛 이름들이 전부 다시 T2 가
+# 된다 — 원장이 있는데도. 그래서 원장 자체를 템플릿에 대조한다.
+cat > "$WORK/ledger.py" <<'PYLG'
+import os, sys
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+import persona_migrate as m
+tpl_dir = sys.argv[2]
+heads = set()
+for f in sorted(os.listdir(tpl_dir)):
+    if not f.endswith(".md"):
+        continue
+    h = m.template_headings(os.path.join(tpl_dir, f))
+    if h:
+        heads.update(h)
+problems = []
+if not m.RENAMED_HEADINGS:
+    problems.append("RENAMED_HEADINGS is empty")
+for old in m.RENAMED_HEADINGS:
+    cur = m.current_name(old)
+    if cur is None:
+        problems.append("%s resolves to nothing" % old)
+    elif cur not in heads:
+        problems.append("%s -> %s, which no current template has" % (old, cur))
+    # ⚠ "원장 키가 아직 살아 있는 헤딩이면 안 된다" 는 규칙은 **틀렸다.** 0.40.1 의 개명은
+    #   전역이 아니라 부분이었다 — 스파인 역할 5종(developer/qa/tech-lead/tester …)은 아직
+    #   `## 책임 (참여 스테이지)` 를 쓰고, 조건부 전문가 10종만 `— 조건부` 를 얻었다. 그래도
+    #   해가 없다: foreign_headings 는 파일별로 `h not in tplset` 을 먼저 보므로, 옛 이름을 그대로
+    #   쓰는 파일에서는 원장에 닿지도 않는다. 이 검사는 그 규칙을 넣었다가 첫 실행에서
+    #   그 사실을 발견했고, 규칙이 아니라 사실이 맞았다.
+print("OK %d" % len(m.RENAMED_HEADINGS) if not problems else "PROBLEMS " + " | ".join(problems))
+PYLG
+# ⚠ -B. 이 프로브는 persona_migrate 를 import 하므로 atoms/ 에 .pyc 를 남기고, 그러면 C26
+#   (`__pycache__` 남기지 않음)이 붉어진다 — 검사가 다른 검사를 깨는 모양이다.
+LG="$("$PY" -B "$WORK/ledger.py" "$PM" "$HERE/../skills/gld/templates/agents" 2>&1)"
+case "$LG" in
+  OK*) ok "개명 원장의 모든 항목이 현재 템플릿의 헤딩으로 해석된다 (${LG#OK })" ;;
+  *)   bad "개명 원장이 현재 템플릿과 정합" "$LG" ;;
+esac
+
+echo "== 중앙 개명 역호환 =="
+PREV_REF="${PREV_REF:-3823b6b}"
+RTPL="$HERE/../skills/gld/templates/agents"
+RROOT="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "$RROOT" ] && git -C "$RROOT" rev-parse --verify -q "$PREV_REF" >/dev/null 2>&1; then
+  RW="$(mktemp -d)"; ( cd "$RW" && git init -q . && mkdir -p .claude/agents )
+  RPREFIX="plugins/guild-plugin/skills/gld/templates/agents/"
+  for f in $(git -C "$RROOT" ls-tree --name-only "$PREV_REF" "$RPREFIX" 2>/dev/null); do
+    n="$(basename "$f")"
+    # init 이 쓰는 형태로: 마커는 init 이 넣으므로 템플릿에서 벗긴다
+    git -C "$RROOT" show "$PREV_REF:$f" | grep -v 'guild:persona:start\|guild:persona:end' > "$RW/.claude/agents/$n"
+  done
+  ( cd "$RW" && git add -A >/dev/null 2>&1 && git -c user.email=t@t -c user.name=t commit -qm init >/dev/null 2>&1 )
+  RSHA="$(git -C "$RW" rev-parse HEAD 2>/dev/null)"
+  RN="$(ls "$RW/.claude/agents" 2>/dev/null | wc -l | tr -d " ")"
+  if [ "$RN" -lt 10 ]; then
+    bad "역호환 픽스처가 비었다 ($RN 파일)" "ls-tree 경로 접두사를 확인하십시오 — 빈 픽스처는 통과가 아니라 깨진 프로브다"
+  else
+  # ⚠ stderr 를 stdout 으로 접지 않는다. 접으면 트레이스백이 grep 의 입력이 되고 grep -c 가
+  #   0 을 답해 "깨끗함"으로 읽힌다 — foreach_headings 에 raise 를 심어도 그린이었다.
+  #   종료 상태와 판정 줄의 존재를 함께 본다.
+  RCLS="$(cd "$RW" && "$PY" "$PM" --mode classify --init "$RSHA" --anchor '## 프로젝트 특화' --templates "$RTPL" 2>"$RW/err.txt")"
+  RRC=$?
+  RT2="$(printf '%s\n' "$RCLS" | grep -c 'T2(heading-not-in-template' || true)"
+  # 판정 줄은 두 모양이다: `<path> T2(heading-not-in-template: …)` 와 `<path> T1`/`T2`.
+  RANY="$(printf '%s\n' "$RCLS" | grep -cE ' T[12]($|\(|[[:space:]])' || true)"
+  if [ "$RRC" -ne 0 ] || [ "$RANY" = "0" ]; then
+    bad "역호환 프로브가 분류를 내지 못했다 (rc=$RRC, 판정 줄 ${RANY}건)" \
+        "$(head -2 "$RW/err.txt" 2>/dev/null || echo '<no stderr>') — 빈 결과는 통과가 아니라 깨진 프로브다"
+  elif [ "$RT2" = "0" ]; then
+    ok "이전 릴리스($PREV_REF) 템플릿으로 만든 페르소나가 heading-not-in-template 을 내지 않는다"
+  else
+    bad "이전 릴리스 템플릿이 heading-not-in-template 을 낸다 (${RT2}건)" \
+        "중앙에서 헤딩을 개명했다면 persona_migrate.py 의 RENAMED_HEADINGS 에 같은 커밋에서 항목을 추가하십시오"
+  fi
+  fi
+  rm -rf "$RW"
+else
+  # ⚠ ok 로 세지 않는다 — 스킵이 PASS 로 잡히면 바닥선이 "이 검사가 돌았다" 를 보증하지 못한다.
+  printf '  SKIP  %s\n' "$PREV_REF 를 이 체크아웃에서 찾을 수 없음 (얕은 클론) — 역호환 검사 미실행"
+  SKIPPED=$((SKIPPED+1))
+fi
+
 echo ""
 echo "  PASS=$PASS FAIL=$FAIL"
 # ⚠ A FLOOR. Cases live in shell here, so a `cd` that fails or a fixture that does not build
 # makes later cases silently not run and the suite reports FAIL=0 over a hole.
-MIN_CHECKS=122
+# ⚠ SKIPPED 를 합에 넣으면 옛 `ok "SKIP:"` 과 똑같아진다 — 스킵 1건이 검사 1건 행세를 한다.
+#   얕은 클론(`actions/checkout` 기본 fetch-depth: 1)에서 역호환 검사가 통째로 무장 해제되고
+#   스위트는 그린이었다. 합에서 빼고, 스킵이 하나라도 있으면 그 자체로 실패로 본다.
+if [ "$SKIPPED" -ne 0 ]; then
+  echo "FAIL  검사 ${SKIPPED}건이 실행되지 않았습니다 (SKIP) — 스킵은 통과가 아닙니다."
+  echo "      PREV_REF 를 가져올 수 있는 체크아웃에서 돌리십시오 (예: git fetch --deepen=50)."
+  exit 1
+fi
+MIN_CHECKS=124
 if [ "$((PASS + FAIL))" -lt "$MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${MIN_CHECKS}건) — 픽스처가 도중에 죽었을 가능성이 큽니다."
   exit 1
