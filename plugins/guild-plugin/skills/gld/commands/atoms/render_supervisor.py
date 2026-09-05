@@ -23,7 +23,12 @@ literal `-` (stdout), which the test harness needs.
 
 Two of the three checks on that assembled path are containment, one is not, and the difference
 is stated rather than blurred:
-  - `--tracker` digits-only + the fixed basename  -> containment (no traversal, no chosen name)
+  - `--tracker` digits-only + the fixed basename + O_NOFOLLOW on the write
+    -> containment (no traversal, no chosen name, and the destination is not a symlink).
+    The symlink clause is load-bearing, not belt-and-braces: without it a link at
+    `.claude/guild/.gld-sprint-99.sh` pointing at `.git/hooks/pre-commit` gets a 139KB
+    executable written through it, rc=0, with the stderr contract line naming the in-repo
+    path — so `run.md` step 2d approves.
   - `--human-repo` absolute + existing directory  -> a TYPO GUARD, not containment. The same
     model call supplies the value, so there is no independent standard to check it against; it
     catches a malformed or stale path, nothing more. The design initially left it out for that
@@ -34,6 +39,7 @@ is stated rather than blurred:
 """
 
 import argparse
+import errno
 import json
 import os
 import re
@@ -50,9 +56,13 @@ import sys
 # `eval "$IC"` 로 돌리므로 실행되는 명령이 설정에 적힌 리터럴과 달라진다(인젝션은 아니다 —
 # 구분자가 전부 막혀 있다 — 그러나 설정과 실행이 어긋나는 것은 그 자체로 결함이다).
 # 어절 첫머리의 `~` 도 같은 이유로 막는다.
-_METACHAR = re.compile(r"\$|`|&&|\|\||[|;<>&\n]|(?:\A|\s)~")
+# `*`/`?`/`{}` 도 거부한다. 템플릿은 `( cd "$WT" && eval "$IC" )` 로 돌리므로 글롭과 중괄호
+# 확장이 워크트리를 상대로 일어나고, 실행되는 명령이 설정 리터럴과 달라진다 — `$`·`~` 를
+# 막은 것과 같은 이유다.
+_METACHAR = re.compile(r"\$|`|&&|\|\||[|;<>&\n*?{}]|(?:\A|[\s=:])~")
 
 _TRACKER = re.compile(r"\A[0-9]+\Z")
+_VERSION = re.compile(r"\A[A-Za-z0-9._+-]+\Z")
 
 # 템플릿에 나타나는 `<UPPER>` 중 **치환 대상이 아닌** 것들. 전부 주석 안의 설명용 자리표시자다.
 # 이 집합과 _TOKENS 의 합집합이 템플릿에 존재해도 되는 `<UPPER>` 의 전부이며, 그 밖의 것이
@@ -105,6 +115,11 @@ def plugin_version():
     # 트레이스백으로 죽는다 — 이 모듈이 fatal 을 자기 문구로 내는 이유가 없어진다.
     if not isinstance(v, str) or not v:
         die("'version' in %s must be a non-empty string, got %r" % (PLUGIN_JSON, v))
+    # <PLUGIN_VERSION> 은 주석 안에 들어가므로 유일하게 shlex.quote 를 거치지 않는다. 그래서
+    # 개행 하나면 주석을 빠져나와 실행 가능한 줄이 된다 — `bash -n` 은 조용하다. 인용을 한 곳에
+    # 모은다는 불변조건에서 새는 유일한 값이므로, 여기서 문자 집합으로 닫는다.
+    if not _VERSION.match(v):
+        die("'version' in %s must match %s, got %r" % (PLUGIN_JSON, _VERSION.pattern, v))
     return v
 
 
@@ -179,11 +194,15 @@ def main():
             die("--order must be digits only, got %r" % n)
 
     for cmd in args.install_cmd:
+        # 빈 값은 `INSTALL_CMDS=('')` 를 만들어 `eval ""` 을 돌린다. 무해하지만 --order '' 를
+        # 거부한 것과 같은 이유로 막는다 — 설정에 없는 원소가 배열에 들어가서는 안 된다.
+        if not cmd.strip():
+            die("--install-cmd must not be empty")
         if _METACHAR.search(cmd):
             die(
                 "--install-cmd %r contains shell metacharacters; config.commands values are "
                 "normalized at init time and must not contain $(...), $VAR, `..`, &&, |, ;, ~, "
-                "or redirections" % cmd
+                "globs (* ? {}), or redirections" % cmd
             )
 
     try:
@@ -256,10 +275,22 @@ def main():
     out = os.path.join(
         args.human_repo, ".claude", "guild", ".gld-sprint-%s.sh" % args.tracker
     )
+    # ⚠ 심링크를 따라가지 않는다. 조립 경로가 심링크면 `open(out,"w")` 도 `os.chmod` 도 링크를
+    # 따라가므로, `.git/hooks/pre-commit` 을 가리키는 링크 하나로 "숫자 tracker + 고정 파일명이면
+    # 산출 경로가 닫힌다" 는 봉쇄 주장이 통째로 무너진다 — 그리고 stderr 계약 줄은 레포 안의
+    # 경로를 보고하므로 2d 는 아무것도 눈치채지 못한다. O_NOFOLLOW 로 커널에게 맡긴다
+    # (islink 선검사는 TOCTOU 가 남는다).
     try:
         os.makedirs(os.path.dirname(out), exist_ok=True)
-        with open(out, "w", encoding="utf-8") as fh:
+        fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o755)
+    except OSError as exc:
+        if getattr(exc, "errno", None) in (errno.ELOOP, errno.EMLINK):
+            die("%s is a symlink; refusing to write through it" % out)
+        die("cannot write %s (%s)" % (out, exc))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(src)
+        # O_CREAT 의 mode 는 파일이 이미 있으면 무시되므로 명시적으로 다시 건다.
         os.chmod(out, 0o755)
     except OSError as exc:
         die("cannot write %s (%s)" % (out, exc))

@@ -49,7 +49,13 @@ unset GIT_CONFIG GIT_CONFIG_COUNT
 # A FUNCTIONAL probe, not `command -v`: an interpreter that exists but cannot run
 # (a broken venv, a shim that exits non-zero) produced five confusing structural
 # failures with empty diagnostics — measured.
-"$PY" -c "pass" >/dev/null 2>&1 || { echo "SKIP: $PY is not usable — this suite is python-based" >&2; exit 0; }
+# ⚠ 스킵은 통과가 아니다. 이 줄이 `exit 0` 이던 동안, python3 가 없는 컨테이너에서는
+# 스위트 전체가 **검사 0건으로 성공을 보고**했다 — 0eb3e7e 가 스위트 *안* 의 SKIP 에 대해
+# 고친 것과 똑같은 결함이 스위트 *자체* 에 남아 있었다. 의도적으로 건너뛰려면
+# GLD_ALLOW_SKIP=1 을 명시한다.
+gld_skip() { echo "SKIP: $1" >&2; [ "${GLD_ALLOW_SKIP:-0}" = 1 ] && exit 0; \
+            echo "FAIL  스킵은 통과가 아닙니다 — GLD_ALLOW_SKIP=1 로 명시하십시오." >&2; exit 1; }
+"$PY" -c "pass" >/dev/null 2>&1 || gld_skip "$PY is not usable — this suite is python-based"
 ok()  { PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s — %s\n' "$1" "$2"; }
 
@@ -3802,10 +3808,12 @@ rsfail "render: --human-repo 없는 디렉터리 거부" "not an existing direct
   --tracker 99 --human-repo "$WORK/no-such-dir-$$" --out - $(rsbase)
 rsfail "render: --order 가 숫자가 아니면 거부" "--order must be digits only" \
   --tracker 99 --human-repo "$RSH" --out - $(rsbase) --order ""
-for m in 'a && b' 'a $(b)' 'a | b' 'a > f'; do
+for m in 'a && b' 'a $(b)' 'a | b' 'a > f' 'a *' 'a {x,y}' 'a ?z' 'a $HOME' 'a ~/z' 'a b=~/z'; do
   rsfail "render: --install-cmd '$m' 거부" "shell metacharacters" \
     --tracker 99 --human-repo "$RSH" --out - $(rsbase) --install-cmd "$m"
 done
+rsfail "render: --install-cmd 빈 값 거부" "must not be empty" \
+  --tracker 99 --human-repo "$RSH" --out - $(rsbase) --install-cmd ""
 
 # 정상 통과해야 하는 것 — 과잉 차단이 아닌지.
 if "$PY" "$RS" --tracker 99 --human-repo "$RSH" --out - $(rsbase) \
@@ -3853,18 +3861,118 @@ esac
 #   아무도 결과를 실행하지 않으므로 `touch` 는 애초에 돌 기회가 없다 — 렌더러를 통째로 지워도
 #   이 검사는 PASS 였다. 그래서 대입 줄을 **실제로 실행**한다: 서브셸에서 그 한 줄만 source 하고
 #   변수값이 입력 리터럴과 같은지 본다. 인용이 풀리면 여기서 페이로드가 돌고, 값도 달라진다.
+# ⚠ 다섯 값 **전부** 를 돈다. --default-branch 하나만 보던 판은, 나머지 넷에서 shlex.quote 를
+#   빼도 290/0 그린이었다(실측). 가설이 아니다: --human-repo 는 "존재하는 절대 디렉터리" 이기만
+#   하면 되므로, `$(id -un)` 이라는 이름의 디렉터리 아래 체크아웃이면 HUMAN_REPO=$(id -un) 이
+#   trap 이전, 스크립트 로드 시점에 실행된다.
 INJ_EXEC_BAD=""
 for INJ in '$(id -un)' 'main"; touch '"$WORK"'/GLD_INJ_PROBE; :"' 'a`id`b'; do
-  INJ_LINE="$("$PY" "$RS" --tracker 99 --owner-repo a/b --default-branch "$INJ" \
-    --container /tmp/c --human-repo "$RSH" --dag-path /tmp/d.py --out - 2>/dev/null \
-    | grep '^DEFAULT_BRANCH=' | head -1)"
-  INJ_GOT="$("$SH" -c "$INJ_LINE"'; printf %s "$DEFAULT_BRANCH"' 2>/dev/null || true)"
-  [ "$INJ_GOT" = "$INJ" ] || INJ_EXEC_BAD="$INJ_EXEC_BAD [$INJ -> ${INJ_GOT:-<died>}]"
+  for SLOT in default-branch owner-repo container dag-path human-repo; do
+    case "$SLOT" in
+      human-repo) INJ_DIR="$RSH/$INJ"; mkdir -p "$INJ_DIR" 2>/dev/null || continue
+                  INJ_VAL="$INJ_DIR"; INJ_VAR=HUMAN_REPO ;;
+      owner-repo) INJ_VAL="$INJ";     INJ_VAR=OWNER_REPO ;;
+      container)  INJ_VAL="$INJ";     INJ_VAR=CONTAINER ;;
+      dag-path)   INJ_VAL="$INJ";     INJ_VAR=DAG ;;
+      *)          INJ_VAL="$INJ";     INJ_VAR=DEFAULT_BRANCH ;;
+    esac
+    INJ_ARGS="--tracker 99 --owner-repo a/b --default-branch develop --container /tmp/c --human-repo $RSH --dag-path /tmp/d.py"
+    INJ_LINE="$("$PY" "$RS" $INJ_ARGS "--$SLOT" "$INJ_VAL" --out - 2>/dev/null \
+      | grep "^$INJ_VAR=" | head -1)"
+    # ⚠ 개행으로 잇는다. `;` 로 이으면 템플릿의 **행말 주석**(`CONTAINER=…  # <repo-parent>/…`)이
+    #   뒤따르는 printf 를 통째로 주석 처리해 값이 빈 문자열로 나오고, 검사는 <died> 로 오진한다.
+    INJ_GOT="$("$SH" -c "$INJ_LINE
+printf %s \"\${$INJ_VAR}\"" 2>/dev/null || true)"
+    [ "$INJ_GOT" = "$INJ_VAL" ] || INJ_EXEC_BAD="$INJ_EXEC_BAD [--$SLOT $INJ -> ${INJ_GOT:-<died>}]"
+  done
 done
-[ -z "$INJ_EXEC_BAD" ] && ok "render: 대입 줄을 실제로 실행해도 값이 입력 리터럴 그대로다" \
+[ -z "$INJ_EXEC_BAD" ] && ok "render: 스칼라 5종 × 인젝션 3종, 대입 줄 실행 후 값이 입력 리터럴 그대로다" \
                        || bad "render: 대입 줄 실행 후 값" "입력과 동일해야 하나:$INJ_EXEC_BAD"
 [ -e "$WORK/GLD_INJ_PROBE" ] && bad "render: 인젝션 페이로드가 실행되지 않았다" "미생성이어야 하나 존재함" \
                             || ok "render: 인젝션 페이로드가 실행되지 않았다 (실행 경로를 실제로 지난 뒤)"
+
+# ── 값 안에 든 토큰이 다시 치환되지 않는가 (라운드 1 이 고친 순차 replace 결함) ──
+# 순차 replace 는 먼저 치환한 값 안의 토큰을 뒤 패스가 다시 치환했다. 커버리지가 0이어서
+# 단일 패스를 순차 replace 로 되돌려도 290/0 그린이었다.
+RSTOKV="$("$PY" "$RS" --tracker 99 --human-repo "$RSH" --out - --owner-repo '<HUMAN_REPO>' \
+  --default-branch develop --container /tmp/c --dag-path /tmp/d.py 2>/dev/null \
+  | grep '^OWNER_REPO=' | head -1)"
+case "$RSTOKV" in
+  "OWNER_REPO='<HUMAN_REPO>'") ok "render: 값 안의 토큰이 다시 치환되지 않는다" ;;
+  *) bad "render: 값 안의 토큰 재치환" "OWNER_REPO='<HUMAN_REPO>' 여야 하나: ${RSTOKV:-<none>}" ;;
+esac
+
+# ── 가짜 플러그인 트리 — plugin.json 과 템플릿을 갈아끼워야만 닿는 경로들 ──────────
+# 렌더러는 PLUGIN_JSON 과 TEMPLATE 을 __file__ 기준으로 잡으므로, 그 둘을 건드리는 검사는
+# 실레포를 변조하지 않고서는 쓸 수 없었다. 같은 깊이의 트리를 하나 만들어 거기서 돌린다.
+RSFAKE="$WORK/fake-plugin"
+mkdir -p "$RSFAKE/.claude-plugin" "$RSFAKE/skills/gld/commands/atoms" "$RSFAKE/skills/gld/templates"
+cp "$RS" "$RSFAKE/skills/gld/commands/atoms/render_supervisor.py"
+FAKE_RS="$RSFAKE/skills/gld/commands/atoms/render_supervisor.py"
+FAKE_TPL="$RSFAKE/skills/gld/templates/sprint-supervisor.sh"
+fake_ver() { printf '{"name":"guild","version":%s}\n' "$1" > "$RSFAKE/.claude-plugin/plugin.json"; }
+fake_run() { "$PY" "$FAKE_RS" --tracker 99 --human-repo "$RSH" --out - --owner-repo a/b \
+             --default-branch develop --container /tmp/c --dag-path /tmp/d.py 2>&1 >/dev/null; }
+
+cp "$TPL" "$FAKE_TPL"; fake_ver '"0.0.1"'
+if "$PY" "$FAKE_RS" --tracker 99 --human-repo "$RSH" --out - --owner-repo a/b \
+     --default-branch develop --container /tmp/c --dag-path /tmp/d.py >/dev/null 2>&1; then
+  ok "render: 가짜 트리에서도 정상 렌더된다 (검사 자체가 유효하다)"
+else bad "render: 가짜 트리 정상 렌더" "rc=0 을 기대했으나 실패 — 이후 음성 검사가 무의미해진다"; fi
+
+# version 이 문자열이 아니면 원시 트레이스백이 아니라 자기 문구로 죽는가.
+fake_ver '72'
+case "$(fake_run)" in
+  *"must be a non-empty string"*) ok "render: 비문자열 version 을 자기 문구로 거부한다" ;;
+  *) bad "render: 비문자열 version" "'must be a non-empty string' 를 기대했으나: $(fake_run | head -1)" ;;
+esac
+# version 에 개행이 들어가면 주석을 빠져나와 실행 가능한 줄이 된다 — bash -n 은 조용하다.
+fake_ver '"0.1.0\nrm -rf /tmp/PWNED; echo pwned"'
+case "$(fake_run)" in
+  *"must match"*) ok "render: version 의 문자 집합을 강제한다 (주석 탈출 차단)" ;;
+  *) bad "render: version 문자 집합" "'must match' 를 기대했으나: $(fake_run | head -1)" ;;
+esac
+fake_ver '"0.0.1"'
+# 템플릿이 이 스크립트가 모르는 자리표시자를 얻으면 거부하는가. 치환 후 검사로는 못 잡는다.
+"$PY" - "$FAKE_TPL" <<'PYFT'
+import io, sys
+p = sys.argv[1]
+with io.open(p, encoding="utf-8") as fh: t = fh.read()
+with io.open(p, "w", encoding="utf-8") as fh: fh.write(t.replace("HEARTBEAT_EVERY=600", "HEARTBEAT_EVERY=<HEARTBEAT>", 1))
+PYFT
+case "$(fake_run)" in
+  *"placeholder(s) this script does not know"*) ok "render: 템플릿의 미지 자리표시자를 거부한다" ;;
+  *) bad "render: 미지 자리표시자" "거부해야 하나: $(fake_run | head -1)" ;;
+esac
+cp "$TPL" "$FAKE_TPL"
+
+# 잘린 쓰기 — getsize 를 거짓말시켜 크기 검사에만 도달한다. 이 검사가 2d 가 받는 유일한 신호다.
+mkdir -p "$WORK/liar"
+cat > "$WORK/liar/sitecustomize.py" <<'PYL'
+import os.path
+_real = os.path.getsize
+os.path.getsize = lambda p: _real(p) - 1 if str(p).endswith(".gld-sprint-99.sh") else _real(p)
+PYL
+RSTRUNC="$(PYTHONPATH="$WORK/liar" "$PY" "$RS" --tracker 99 --human-repo "$RSH" \
+  --owner-repo a/b --default-branch develop --container /tmp/c --dag-path /tmp/d.py 2>&1 >/dev/null)"
+case "$RSTRUNC" in
+  *"truncated"*) ok "render: 전량 일치하지 않는 쓰기를 truncated 로 거부한다" ;;
+  *) bad "render: 잘린 쓰기 검출" "'truncated' 를 기대했으나: ${RSTRUNC:-<none>}" ;;
+esac
+
+# 심링크를 따라 쓰지 않는가 — "숫자 tracker + 고정 파일명이면 경로가 닫힌다" 는 봉쇄 주장의
+# 실제 경계. 링크 하나로 .git/hooks/pre-commit 에 139KB 실행 파일이 쓰이고 rc=0 이었다.
+mkdir -p "$RSH/.claude/guild" "$WORK/symtarget"
+ln -sf "$WORK/symtarget/pwned.sh" "$RSH/.claude/guild/.gld-sprint-99.sh"
+RSSYM="$("$PY" "$RS" --tracker 99 --human-repo "$RSH" --owner-repo a/b --default-branch develop \
+  --container /tmp/c --dag-path /tmp/d.py 2>&1 >/dev/null)"
+case "$RSSYM" in
+  *"is a symlink"*) ok "render: 조립 경로가 심링크면 거부한다" ;;
+  *) bad "render: 심링크 거부" "'is a symlink' 를 기대했으나: ${RSSYM:-<none>}" ;;
+esac
+[ -e "$WORK/symtarget/pwned.sh" ] && bad "render: 심링크 대상에 쓰지 않았다" "미생성이어야 하나 존재함" \
+                                  || ok "render: 심링크 대상에 아무것도 쓰지 않았다"
+rm -f "$RSH/.claude/guild/.gld-sprint-99.sh"
 
 # 조립 경로 분기 — 하니스 13곳이 전부 --out - 를 쓰므로 이 분기는 여기서만 덮인다.
 if "$PY" "$RS" --tracker 99 --human-repo "$RSH" $(rsbase) --order 101 >/dev/null 2>&1; then
@@ -3915,7 +4023,7 @@ fi
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=290
+SUP_MIN_CHECKS=305
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

@@ -34,7 +34,13 @@ unset GH_TOKEN                      # keyring account is what the design assumes
 # ⚠ A FUNCTIONAL probe, not `command -v`: an interpreter that exists but cannot run
 # (a broken venv, a shim that exits non-zero) reports as a structural failure with an
 # empty diagnostic — measured in the sprint_dag suite.
-"$PY" -c "pass" >/dev/null 2>&1 || { echo "SKIP: $PY is not usable — this suite is python-based" >&2; exit 0; }
+# ⚠ 스킵은 통과가 아니다. 이 줄이 `exit 0` 이던 동안, python3 가 없는 컨테이너에서는
+# 스위트 전체가 **검사 0건으로 성공을 보고**했다 — 0eb3e7e 가 스위트 *안* 의 SKIP 에 대해
+# 고친 것과 똑같은 결함이 스위트 *자체* 에 남아 있었다. 의도적으로 건너뛰려면
+# GLD_ALLOW_SKIP=1 을 명시한다.
+gld_skip() { echo "SKIP: $1" >&2; [ "${GLD_ALLOW_SKIP:-0}" = 1 ] && exit 0; \
+            echo "FAIL  스킵은 통과가 아닙니다 — GLD_ALLOW_SKIP=1 로 명시하십시오." >&2; exit 1; }
+"$PY" -c "pass" >/dev/null 2>&1 || gld_skip "$PY is not usable — this suite is python-based"
 
 ok()  { PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s — %s\n' "$1" "$2"; }

@@ -40,7 +40,13 @@ PY="${PY:-python3}"
 # A FUNCTIONAL probe, not `command -v`: an interpreter that exists but cannot run
 # (a broken venv, a shim that exits non-zero) produced five confusing structural
 # failures with empty diagnostics — measured.
-"$PY" -c "pass" >/dev/null 2>&1 || { echo "SKIP: $PY is not usable — this suite is python-based" >&2; exit 0; }
+# ⚠ 스킵은 통과가 아니다. 이 줄이 `exit 0` 이던 동안, python3 가 없는 컨테이너에서는
+# 스위트 전체가 **검사 0건으로 성공을 보고**했다 — 0eb3e7e 가 스위트 *안* 의 SKIP 에 대해
+# 고친 것과 똑같은 결함이 스위트 *자체* 에 남아 있었다. 의도적으로 건너뛰려면
+# GLD_ALLOW_SKIP=1 을 명시한다.
+gld_skip() { echo "SKIP: $1" >&2; [ "${GLD_ALLOW_SKIP:-0}" = 1 ] && exit 0; \
+            echo "FAIL  스킵은 통과가 아닙니다 — GLD_ALLOW_SKIP=1 로 명시하십시오." >&2; exit 1; }
+"$PY" -c "pass" >/dev/null 2>&1 || gld_skip "$PY is not usable — this suite is python-based"
 ok()  { PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s (expected %s, got %s)\n' "$1" "$2" "$3"; }
 
@@ -1076,6 +1082,48 @@ hasfx "run.md: 메타문자 거부의 근거(simple command)가 표에 남아 �
 hasfx "run.md: 레거시 복합 config.commands 정규화 지시가 있다" "$RUNMD2" 'Split such a value yourself before building argv'
 hasfx "run.md: 정규화가 처방이고 파이썬 거부는 이중 안전장치임을 밝힌다" "$RUNMD2" 'second safety net behind it, not the remedy'
 hasfx "run.md: --human-repo 거부 두 건이 표에 적혀 있다" "$RUNMD2" 'Rejected if it is **not absolute**'
+# ⚠ 2d 가드 **자체**를 고정한다. 스위트는 그 가드가 읽는 신호의 *생산자* 만 고정하고 있었다
+#   (sprint_supervisor T10 의 stderr 계약 문구). 소비자를 아무도 보지 않아서, `2d.` 블록을 통째로
+#   지워도 열 개 스위트가 전부 그린이었다 — 그러면 렌더가 죽어도 step 5 가 백그라운드로 기동하고
+#   실행은 "started" 를 보고한다. 설계가 ⚠⚠ 로 적은 바로 그 실패다.
+hasfx "run.md: 2d 렌더 검증 단계가 있다"       "$RUNMD2" '2d. **Verify the render'
+hasfx "run.md: 2d 가 stderr 계약 줄을 읽는다"  "$RUNMD2" 'render_supervisor: wrote'
+hasfx "run.md: 2d 가 step 5 를 막는다"         "$RUNMD2" 'do not run step 5'
+# 그리고 순서 — 렌더 호출과 기동 사이에 있어야 한다. 뒤로 밀리면 이미 떠 있는 것을 검증한다.
+RB2D="$($PY - "$RUNMD2" <<'PY2D'
+import re, sys
+t = open(sys.argv[1], encoding="utf-8").read()
+def at(pat):
+    m = re.search(pat, t, re.M)
+    return m.start() if m else -1
+r, g, s5 = at(r"^\s*python3 .*render_supervisor\.py"), at(r"^2d\. \*\*Verify the render"), at(r"^5\. \*\*Start it in the background")
+print("OK" if -1 not in (r, g, s5) and r < g < s5 else "render=%d guard=%d start=%d" % (r, g, s5))
+PY2D
+)"
+[ "$RB2D" = OK ] && ok "run.md: 2d 가 렌더 호출과 기동 사이에 있다" \
+                 || bad "run.md: 2d 의 위치" "render < 2d < step 5" "$RB2D"
+
+# ⚠ B 의 2차 포인터 — 절감 43.5k 전부가 여기 걸려 있는데 병합 게이트는 commands/ 만 본다.
+# 템플릿 **한 개**만 옛 접미로 되돌려도 세 스위트가 전부 그린이었다(persona_migrate 의 원장 검사는
+# 헤딩이 *어느* 템플릿엔가 있기만 하면 통과하므로 부분 회귀를 못 본다).
+# ⚠ leader.md 는 **제외한다 — 의도된 예외다.** 리더는 스폰되는 서브에이전트가 아니라 메인
+#   세션이 체현하는 역할이고, 그 세션은 이미 `_handoff.md` 를 들고 있다. 포인터를 떼도 아끼는
+#   것이 없다. B 는 16개 중 15개를 고쳤고 `0d7de0d` 가 그 이유를 기록한다. 이 검사는 처음 돌 때
+#   leader.md 를 잡았고, 틀린 쪽은 사실이 아니라 검사의 범위였다.
+TAGENTS="$GLD/templates/agents"
+NP2="$(grep -rc '_handoff\.md` Section C' "$TAGENTS" 2>/dev/null | grep -v '/leader\.md:' \
+       | awk -F: '{n+=$2} END{print n+0}')"
+NTPL="$(ls "$TAGENTS"/*.md 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$NTPL" -lt 10 ]; then
+  bad "페르소나 템플릿 집합" "10개 이상" "${NTPL}개 — 경로가 틀렸다면 0건은 통과가 아니다"
+elif [ "$NP2" = "0" ]; then
+  ok "페르소나 템플릿 ${NTPL}개(leader 제외)에 Section C 2차 포인터가 0건이다"
+else
+  bad "페르소나 2차 포인터" "0건" "${NP2}건 — 서브에이전트가 다시 53KB 를 읽는다"
+fi
+# 그리고 leader.md 의 예외가 *살아 있는지* — 예외라고 적어 놓고 조용히 사라지면 이 검사는
+# 아무것도 안 하는 검사가 된다.
+hasfx "leader.md: 리더의 Section C 참조는 그대로다 (의도된 예외)" "$TAGENTS/leader.md" '`_handoff.md` Section C'
 echo ""
 # ── 37. result-contract 펜스: 사본이 정본과 바이트 동일하고, 개수가 맞는가 ──────
 # B 는 12개 스폰 프롬프트에서 "per `_handoff.md` Section C" 를 없애고 계약 본문을 인라인했다.
@@ -1111,11 +1159,24 @@ for rel, want in EXPECT.items():
         total += 1
         if [strip(x) for x in body[a+1:b]] != canon:
             problems.append("%s:%d drifted from canonical" % (rel, a+2))
-names = re.findall(r"`([A-Z_]+)(?::|`)", canon[0]) if canon else []
+# ⚠ 양방향으로 본다. 한쪽만(펜스 ⊆ 표) 보면 표가 6번째 상태를 얻어도 사본은 전부 동일하고
+# 이름도 전부 실재해 그린이다 — 리더의 표는 어떤 서브에이전트도 들어본 적 없는 상태를 허용하게
+# 되고, `_handoff.md` 자신의 "keep the enum names in step with the table above" 가 무집행이 된다.
+# 실측: 표에 `DEFERRED` 행을 추가해도 PASS=217 FAIL=0 이었다.
+names = set(re.findall(r"`([A-Z_]+)(?::|`)", canon[0])) if canon else set()
 tbl = "\n".join(lines[:o])
-missing = [n for n in set(names) if "`%s" % n not in tbl]
-if missing:
-    problems.append("enum missing from Section C table: %s" % ",".join(sorted(missing)))
+rows = set()
+for line in tbl.split("\n"):
+    m = re.match(r"^\|\s*`([A-Z][A-Z_]*)(?::[^`]*)?`\s*\|", line)
+    if m:
+        rows.add(m.group(1))
+if not rows:
+    problems.append("Section C status table not found (row parse returned nothing)")
+if names - rows:
+    problems.append("enum missing from Section C table: %s" % ",".join(sorted(names - rows)))
+if rows - names:
+    problems.append("Section C table has status(es) the fence never states: %s"
+                    % ",".join(sorted(rows - names)))
 print("OK %d" % total if not problems else "PROBLEMS " + " | ".join(problems))
 PYC
 OUTC="$("$PY" "$WORK3/contract.py" "$GLD")"
@@ -1274,7 +1335,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=217   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=223   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

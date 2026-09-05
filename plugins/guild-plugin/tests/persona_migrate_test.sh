@@ -23,8 +23,14 @@ PM="$HERE/../skills/gld/commands/atoms/persona_migrate.py"
 PY="${PY:-python3}"
 # ⚠ FUNCTIONAL probe, not `command -v`: an interpreter that exists but cannot run (broken venv,
 # a shim that exits non-zero) otherwise reports as script failure with an empty diagnostic.
-"$PY" -c "pass" >/dev/null 2>&1 || { echo "SKIP: $PY is not usable — this suite is python-based" >&2; exit 0; }
-command -v git >/dev/null 2>&1 || { echo "SKIP: git not available" >&2; exit 0; }
+# ⚠ 스킵은 통과가 아니다. 이 줄이 `exit 0` 이던 동안, python3 가 없는 컨테이너에서는
+# 스위트 전체가 **검사 0건으로 성공을 보고**했다 — 0eb3e7e 가 스위트 *안* 의 SKIP 에 대해
+# 고친 것과 똑같은 결함이 스위트 *자체* 에 남아 있었다. 의도적으로 건너뛰려면
+# GLD_ALLOW_SKIP=1 을 명시한다.
+gld_skip() { echo "SKIP: $1" >&2; [ "${GLD_ALLOW_SKIP:-0}" = 1 ] && exit 0; \
+            echo "FAIL  스킵은 통과가 아닙니다 — GLD_ALLOW_SKIP=1 로 명시하십시오." >&2; exit 1; }
+"$PY" -c "pass" >/dev/null 2>&1 || gld_skip "$PY is not usable — this suite is python-based"
+command -v git >/dev/null 2>&1 || gld_skip "git not available"
 
 WORK="$(mktemp -d)" || { echo "mktemp -d failed" >&2; exit 1; }
 [ -n "$WORK" ] && [ -d "$WORK" ] || { echo "mktemp -d gave no directory" >&2; exit 1; }
@@ -1142,6 +1148,22 @@ for old in m.RENAMED_HEADINGS:
     #   해가 없다: foreign_headings 는 파일별로 `h not in tplset` 을 먼저 보므로, 옛 이름을 그대로
     #   쓰는 파일에서는 원장에 닿지도 않는다. 이 검사는 그 규칙을 넣었다가 첫 실행에서
     #   그 사실을 발견했고, 규칙이 아니라 사실이 맞았다.
+# 연쇄 해석 — 오늘 원장은 1홉 항목 둘뿐이라, 루프와 단일 `.get()` 이 구별되지 않는다.
+# 2단계 개명이 실제로 일어나는 순간 다시 깨지는데 아무도 경고하지 않는다. 합성 사슬로 본다.
+m.RENAMED_HEADINGS["## __chain_a"] = "## __chain_b"
+m.RENAMED_HEADINGS["## __chain_b"] = "## __chain_c"
+if m.current_name("## __chain_a") != "## __chain_c":
+    problems.append("current_name does not resolve transitively (A->B->C gave %r)"
+                    % m.current_name("## __chain_a"))
+# 사이클이 걸려도 매달리지 않는다.
+m.RENAMED_HEADINGS["## __cyc_a"] = "## __cyc_b"
+m.RENAMED_HEADINGS["## __cyc_b"] = "## __cyc_a"
+try:
+    m.current_name("## __cyc_a")
+except Exception as exc:
+    problems.append("current_name hangs or raises on a cycle: %r" % exc)
+for k in ("## __chain_a", "## __chain_b", "## __cyc_a", "## __cyc_b"):
+    del m.RENAMED_HEADINGS[k]
 print("OK %d" % len(m.RENAMED_HEADINGS) if not problems else "PROBLEMS " + " | ".join(problems))
 PYLG
 # ⚠ -B. 이 프로브는 persona_migrate 를 import 하므로 atoms/ 에 .pyc 를 남기고, 그러면 C26

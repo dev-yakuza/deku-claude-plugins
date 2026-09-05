@@ -54,7 +54,13 @@ unset GIT_CONFIG GIT_CONFIG_COUNT
 # THREE structural drift failures with an empty diagnostic — the same shape as the `$PY`
 # undefined defect this suite already had once.
 PY="${PY:-python3}"
-command -v "$PY" >/dev/null 2>&1 || { echo "SKIP: $PY not on PATH — this suite needs it for nothing yet, but keep the contract uniform" >&2; exit 0; }
+# ⚠ 스킵은 통과가 아니다. 이 줄이 `exit 0` 이던 동안, python3 가 없는 컨테이너에서는
+# 스위트 전체가 **검사 0건으로 성공을 보고**했다 — 0eb3e7e 가 스위트 *안* 의 SKIP 에 대해
+# 고친 것과 똑같은 결함이 스위트 *자체* 에 남아 있었다. 의도적으로 건너뛰려면
+# GLD_ALLOW_SKIP=1 을 명시한다.
+gld_skip() { echo "SKIP: $1" >&2; [ "${GLD_ALLOW_SKIP:-0}" = 1 ] && exit 0; \
+            echo "FAIL  스킵은 통과가 아닙니다 — GLD_ALLOW_SKIP=1 로 명시하십시오." >&2; exit 1; }
+command -v "$PY" >/dev/null 2>&1 || gld_skip "$PY not on PATH — this suite needs it for nothing yet, but keep the contract uniform"
 ok()  { PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL  %s — %s\n' "$1" "$2"; }
 
