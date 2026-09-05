@@ -2999,6 +2999,25 @@ PY
 K1="$("$PY" "$WORK/rlpos.py" "$TPL")"
 if [ "$K1" = "OK" ]; then ok "K1: fence precedes both exit-code guards; gate sits between fence and arms"
 else bad "K1: fence/gate placement" "OK" "$K1"; fi
+# ⚠ The same placement, in batch.md. `cmp.py` compares the fence's BYTES on both sides but not
+# its POSITION, and every arm inside batch's exit-0 guard breaks or continues — so below that
+# guard the whole region is dead code on exit 0 and the member is recorded INCOMPLETE with the
+# wrong cause (measured end to end). Nothing checked batch's side of this.
+"$PY" - "$HERE/../skills/gld/commands/batch.md" <<'PY' > "$WORK/bpos.txt"
+import sys
+src = open(sys.argv[1]).read()
+f = src.find('# <!-- guild:supervisor-core:ratelimit -->')
+g = src.find('if [ "$EXIT_CODE" -eq 0 ]; then')
+if min(f, g) < 0:
+    print("ANCHOR MISSING fence=%d guard=%d" % (f, g))
+else:
+    print("OK" if f < g else "FENCE BELOW THE EXIT-0 GUARD (dead code on exit 0)")
+PY
+if [ "$(cat "$WORK/bpos.txt")" = "OK" ]; then
+  ok "K1b: batch.md's fence also precedes its exit-code guard"
+else
+  bad "K1b: batch.md fence placement" "$(cat "$WORK/bpos.txt")"
+fi
 
 # ── K2: the fence must be a BALANCED block. It used to leave `if [ "$RATE_LIMITED" -eq 1 ]`
 #   open, so relocating it as a unit swallowed the arms into the rate-limit branch — and
@@ -3053,13 +3072,143 @@ fi
 
 # ── K4: values in the SHARED fence. `cmp.py` catches DRIFT between the two copies, not values:
 #   three mutations that edited BOTH copies identically survived a whole round. Pin the literals.
-for LIT in 'select(.status != "allowed")' "fromjson? | objects" 'rate[ -]limit' 'usage limit reached' 'rate_limit_error'; do
-  if grep -qF -- "$LIT" "$TPL"; then ok "K4: fence pins the literal [$LIT]"
-  else bad "K4: fence literal" "$LIT" "missing"; fi
+# ⚠ EVERY alternative of the fallback regex, and the ceiling VALUE. Two alternatives
+# (`overloaded`, `too many requests`) and `WAIT_MAX=14400` were unpinned: removing them from
+# both copies left all 445 checks green while a 529/429 body stopped being recognised and a
+# 20-day reset became 120 days of sleeping (measured). `cmp.py` sees drift between the copies,
+# never the values, and the K8 rig supplies its own WAIT_MAX — so nothing else can catch these.
+"$PY" - "$TPL" <<'PY' > "$WORK/fencecode.txt"
+import sys
+src = open(sys.argv[1]).read()
+fo = src.index('# <!-- guild:supervisor-core:ratelimit -->')
+fc = src.index('# <!-- /guild:supervisor-core:ratelimit -->')
+# ⚠ CODE lines only. `rate[ -]limit` appears twice — in the regex and in the comment that
+# explains the regex — so a whole-file grep is satisfied with the alternative DELETED. The pin
+# was inert (measured: removing `overloaded\|` from both copies survived all ten suites).
+print("\n".join(l for l in src[fo:fc].split("\n") if not l.strip().startswith("#")))
+PY
+for LIT in 'fromjson? // (' 'rindex("{\"type\":")' '| objects |'; do
+  if grep -qF -- "$LIT" "$WORK/fencecode.txt"; then ok "K4: fence CODE pins the literal [$LIT]"
+  else bad "K4: fence code literal" "$LIT is missing from the fence's code lines"; fi
 done
+# ⚠ The fallback regex, ALTERNATIVE BY ALTERNATIVE. A substring pin is satisfied by an
+# alternative that has been folded into another one — `…\|rate_limit_error   # was: overloaded`
+# keeps the bytes `overloaded` in the code line (the `#` is inside the quotes, so no comment
+# stripper helps) while a plain "Overloaded" body stops matching. Split on `\|` and compare the
+# SET, so folding, reordering and deletion all fail.
+"$PY" - "$WORK/fencecode.txt" <<'PY' > "$WORK/rx.txt"
+import re, sys
+code = open(sys.argv[1]).read()
+m = re.search(r'grep -qi "([^"]+)"', code)
+if not m:
+    print("NO REGEX FOUND"); raise SystemExit(0)
+got = set(m.group(1).split("\\|"))
+want = {"rate[ -]limit", "usage limit reached", "rate_limit_error", "overloaded", "too many requests"}
+if got == want:
+    print("OK")
+else:
+    print("MISSING %s EXTRA %s" % (sorted(want - got), sorted(got - want)))
+PY
+if [ "$(cat "$WORK/rx.txt")" = "OK" ]; then
+  ok "K4k: the fallback regex is exactly its five alternatives"
+else
+  bad "K4k: fallback regex alternatives" "$(cat "$WORK/rx.txt")"
+fi
+# ⚠ The CEILING VALUE, in BOTH files. Both rigs inject their own WAIT_MAX, so nothing else can
+# see it: `14400 → 86400` (template) and `→ 2592000` (batch) each survived all ten suites,
+# turning one wait into 24h / a bare batch `sleep` into 30 days (measured).
+# ⚠ EXACTLY ONE assignment, and it is 14400. Pinning presence alone is defeated by adding a
+# second `WAIT_MAX=` on the next line — the pin still matches the first and both rigs inject
+# their own value, so every suite stays green (measured).
+for F in "$TPL" "$HERE/../skills/gld/commands/batch.md"; do
+  # ⚠ Count OCCURRENCES, not lines. `grep -c` counts matching LINES, so `WAIT_MAX=14400;
+  # WAIT_MAX=2592000` on one line gave N=1 V=1 and passed — with a 30-day runtime ceiling, which
+  # is exactly what this check says it prevents (measured).
+  N=$(grep -o 'WAIT_MAX=' "$F" | wc -l | tr -d ' ')
+  V=$(grep -o 'WAIT_MAX=14400' "$F" | wc -l | tr -d ' ')
+  if [ "${N:-0}" -eq 1 ] && [ "${V:-0}" -eq 1 ]; then
+    ok "K4f: exactly one 4h ceiling assignment in $(basename "$F")"
+  else
+    bad "K4f: ceiling value" "$(basename "$F") has $N WAIT_MAX assignment(s), $V of them 14400"
+  fi
+done
+# ⚠ The zero-wait cap: `-ge 2 → -ge 99` survived, turning one immediate retry into six real
+# child sessions fired back to back.
+# ⚠ ANCHORED. As a bare substring `allowed*)` is also satisfied by `*allowed*)`, which dismisses
+# any blocking status containing the word (`not_allowed`, `disallowed`) — measured green.
+hasline "K4j: the healthy-status arm is a PREFIX match" '      allowed*)    ;;'
+# ⚠ The backoff multiplier and its clamp. The ceiling test runs while WAIT is empty, so nothing
+# else relates the backoff to WAIT_MAX: raising 300 alone turned six waits into 7.3 days with
+# every suite green (measured).
+# ⚠ The reporting jq calls must be `-R 'fromjson?'` too. `|| true` only stops the run from
+# dying; plain jq still stops at the first non-JSON line and $LOG mixes stderr in BY DESIGN, so
+# a member whose log has stderr at the head reported 0 tokens, $0 and an empty failure reason.
+hasline "K4n: the failure-reason jq tolerates non-JSON lines" "jq -r -R 'fromjson? | objects | select(.type == \"result\") | select(.is_error == true)"
+hasline "K4o: the token/cost jq tolerates non-JSON lines" "jq -r -R 'fromjson? | objects | select(.type==\"result\")"
+# ⚠ The re-run channel, at its CONSUMER. Rate-limit abandonment is always BLOCKED and never
+# FAILED, so dropping BLOCKED from this sum makes a run whose only unfinished members were rate
+# limited report a clean sprint, self-delete its script AND `rm -rf "$D"` — the human is never
+# told to re-run and the checkpoint is gone. Every suite stayed green (measured).
+hasline "K6c: BLOCKED gates the self-delete" 'if [ "$((FAILED + INCOMPLETE + BLOCKED))" -eq 0 ]; then'
+hasline "K4l: the backoff multiplier" 'WAIT=$((RL_TRIES * 300))'
+hasline "K4m: the backoff is clamped to the ceiling" 'if [ "$WAIT" -gt "$WAIT_MAX" ]; then WAIT="$WAIT_MAX"; fi'
+hasline "K4g: the zero-wait cap is two" 'if [ "$RL_ZEROWAIT" -ge 2 ]; then WAIT=""; fi'
+# ⚠ The human-facing copy the design supplies verbatim. Replacing it with "oops" survived: this
+# text is what `failures.jsonl` and `/gld sprint daily` show days later.
+hasline "K4h: the ceiling event detail" 'reset is $((WAIT/3600))h away (> 4h ceiling) — skipped, re-run picks it up'
+hasline "K4i: the exhausted event detail" 'still rate limited after 6 waits — skipped, re-run picks it up'
 # The fallback must stay gated on a non-zero exit code. Ungated, a broad regex routes normally
 # completed members into the rate-limit path — guild files contain "rate limit" and $LOG carries
 # tool_result file contents, so a self-hosted run trips it on every member.
+# ⚠ `.resetsAt // empty` must NOT come back: it drops the line for a live event with no reset,
+# so `tail -1` reaches back to an earlier event and a stale past value masks a live unknown one.
+# ⚠ CODE only. The fence comment explains why this form is forbidden, and quoting it there is
+# enough to fail a plain grep — the same self-citation trap this suite keeps re-learning.
+if awk '{ l=$0; sub(/^[ \t]+/,"",l); if (substr(l,1,1)=="#") next; if (index($0,".resetsAt // empty")) { f=1 } } END { exit !f }' "$TPL"; then
+  bad "K4d: detection must not drop reset-less events" "the // empty form is back in code"
+else
+  ok "K4d: detection does not drop reset-less events (no stale-sibling masking)"
+fi
+# ⚠ jq preflight, and it must be before the queue loop so no rate-limit path reaches its exit.
+"$PY" - "$TPL" <<'PY' > "$WORK/jqpre.txt"
+import sys
+src = open(sys.argv[1]).read()
+# ⚠ The preflight must EXERCISE jq, not test for the file. `command -v jq` passes for a jq that
+# exists and fails (an incompatible build, a shim, a wrapper) and detection dies just as
+# silently as when jq is absent (measured).
+i = src.find("| jq -r -R '(fromjson? // empty)")
+# ⚠ The DIVIDER, at a line start — not the first mention of the phrase. Two comments above it
+# quote `# Main loop`, and anchoring on the first hit put both this check and the code it
+# checks in the wrong place.
+m = src.find("\n# Main loop (")
+if src.find("command -v jq") >= 0:
+    print("PRESENCE-ONLY: the preflight still tests for the file, not the filter")
+else:
+    print("OK" if 0 <= i < m else "MISSING i=%d divider=%d" % (i, m))
+PY
+# ⚠ It must ABORT. A preflight that detects a broken jq and carries on is the silent death it
+# exists to prevent.
+# ⚠ The ABORT, by offset. Pinning the message alone left `exit 1` deletable in both copies with
+# every suite green — a preflight that finds a broken jq and carries on is the silent death it
+# exists to prevent.
+"$PY" - "$TPL" <<'PY' > "$WORK/jqab.txt"
+import sys
+src = open(sys.argv[1]).read()
+p = src.find("| jq -r -R '(fromjson? // empty)")
+e = src.find("exit 1", p) if p >= 0 else -1
+f = src.find("\nfi", p) if p >= 0 else -1
+print("OK" if 0 <= e < f else "the preflight does not abort (p=%d exit=%d fi=%d)" % (p, e, f))
+PY
+if [ "$(cat "$WORK/jqab.txt")" = "OK" ]; then
+  ok "K4e2: the jq preflight aborts the run"
+else
+  bad "K4e2: jq preflight abort" "$(cat "$WORK/jqab.txt")"
+fi
+if [ "$(cat "$WORK/jqpre.txt")" = "OK" ]; then
+  ok "K4e: a jq preflight guards detection, before the queue loop"
+else
+  bad "K4e: jq preflight" "$(cat "$WORK/jqpre.txt")"
+fi
 if grep -qF -- '[ "$EXIT_CODE" -ne 0 ] \' "$TPL"; then
   ok "K4b: the text fallback is gated on a non-zero exit code"
 else
@@ -3107,10 +3256,16 @@ lines = src.split("\n")
 code = [l for l in lines if not l.strip().startswith("#")]
 cards = sum(1 for l in code if 'board_col "$ISSUE" blocked account-rate-limited' in l)
 pushes = sum(1 for l in code if 'BLOCKED_ISSUES+=("#$ISSUE (account-rate-limited)")' in l)
+# ⚠ A TRIPLE, not a pair. Dropping `BLOCKED=$((BLOCKED + 1));` from the ceiling path survived
+# every suite — and `:2189`'s `[ "$((FAILED + INCOMPLETE + BLOCKED))" -eq 0 ]` then deletes the
+# script and $D and reports a clean sprint, so the human is never told to re-run. BLOCKED is the
+# premise's whole re-run channel; an abandon path that does not count it is silent.
+counts = sum(1 for l in code
+             if 'BLOCKED=$((BLOCKED + 1))' in l and 'account-rate-limited' in l)
 if cards == 0:
     print("NO abandon path writes the card"); raise SystemExit(0)
-if cards != pushes:
-    print("ASYMMETRY %d card write(s) but %d push(es)" % (cards, pushes)); raise SystemExit(0)
+if not (cards == pushes == counts):
+    print("ASYMMETRY %d card(s) / %d push(es) / %d BLOCKED++" % (cards, pushes, counts)); raise SystemExit(0)
 # Each abandon path must actually leave the retry loop. A cap that counts and keeps going is
 # not a cap.
 blocks, cur = [], None
@@ -3135,11 +3290,30 @@ case "$K6" in
 esac
 # The P6 sweep must recognise the token, or it rewrites the card to `dep-unresolved` at the end
 # of the run — a repair instruction that is simply wrong.
-if grep -qF '*"(account-rate-limited)"*)' "$TPL"; then
-  ok "K6b: the P6 sweep has an arm for the token (else it rewrites the card to dep-unresolved)"
-else
-  bad "K6b: P6 arm for account-rate-limited" "present" "missing"
-fi
+# ⚠ The arm's BODY, not just its glob. Rewriting the body's token to `dep-unresolved` survived
+# every suite, which is exactly the end-of-run mis-repair this arm exists to prevent.
+"$PY" - "$TPL" <<'PY' > "$WORK/p6arm.txt"
+import re, sys
+src = open(sys.argv[1]).read()
+# EVERY arm in the P6 sweep, not just one: the glob it matches and the reason it writes must be
+# the same token. `:2042` says so in prose and nothing enforced it.
+pairs = re.findall(r'\*"\(([a-z-]+)[):"]*\**\)\s*board_col "\$BOARD_BI" blocked ([a-z-]+)', src)
+if not pairs:
+    print("NO ARMS matched")
+else:
+    bad = [(g, b) for g, b in pairs if g != b]
+    toks = sorted(g for g, _ in pairs)
+    if bad:
+        print("TOKEN MISMATCH %s" % bad)
+    elif "account-rate-limited" not in toks:
+        print("MISSING account-rate-limited; found %s" % toks)
+    else:
+        print("OK %s" % ",".join(toks))
+PY
+case "$(cat "$WORK/p6arm.txt")" in
+  OK*) ok "K6b: every P6 arm's glob and board_col reason are the same token ($(cat "$WORK/p6arm.txt"))" ;;
+  *) bad "K6b: P6 arm token" "$(cat "$WORK/p6arm.txt")" ;;
+esac
 
 # ── K7: heartbeat state tokens must all be registered in _handoff.md. Asserted for three
 #   revisions with no check; a mutation that renamed one survived.
@@ -3266,6 +3440,11 @@ rl_case "K8k: (3) a reset 60 days out is discarded"              "SLEEP=300" "$R
 rl_case "K8l: (4) a past reset retries at once on a crash"       "SLEEP=0"   "$RLW/past.log"
 rl_case "K8m: (4) a past reset on exit 0 is NOT a live limit"    "FELL_THROUGH" "$RLW/past.log" 0
 # disposal
+# ⚠ A status containing a SPACE. `${RL_LAST#* }` strips to the FIRST space and hands the
+# sanitiser "limited <epoch>", which it discards — the member then backs off instead of waiting
+# out a reset it was told about. `##` strips to the last space, which is where the reset is.
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"rate limited","resetsAt":%s}}\n' "$((NOWS + 600))" > "$RLW/spacestatus.log"
+rl_case "K8n2: a status with a space still yields the reset"     "SLEEP=6"   "$RLW/spacestatus.log"
 rl_case "K8n: a reset within the ceiling is waited out"          "SLEEP=6"   "$RLW/soon.log"
 rl_case "K8o: a reset past the ceiling blocks, it does not fail" "BOARD blocked account-rate-limited" "$RLW/sixh.log"
 rl_case "K8p: blocking breaks out of the retry loop"             "BROKE"     "$RLW/sixh.log"
@@ -3288,25 +3467,261 @@ case "$K8T" in
   *"BLOCKED=1"*) ok "K8u: exactly one member is counted blocked" ;;
   *) bad "K8u: blocked accounting" "want BLOCKED=1, got [$K8T]" ;;
 esac
-# No path may reach record_failure. This is the premise, executed rather than grepped.
-K8V=0
-for L in soon sixh far past d20 ms iso head noinfo scalar plain crash; do
+# ⚠ The "record_failure is unreachable" runtime assertion used to live here. It was DELETED,
+# not moved: this rig's region ends at the arms guard and contains zero record_failure call
+# sites, so its stub could never be invoked and it passed for every input including a build with
+# detection destroyed. K3 covers it statically; K9b covers it at runtime over a region that
+# actually reaches the call sites.
+
+# ── K9: reachability. K8 exercises the fence and the gate in isolation, which is what its
+#   expectations mean — but its region stops at the arms guard, so it contains ZERO
+#   `record_failure` call sites and its "record_failure is unreachable" case could not fail
+#   (measured: structurally 0 for every input). This rig extends the region through the
+#   `child-session-failed` tail, where all three call sites live, and spies on the real thing.
+#   This is the check that catches "detection silently lost the limit", which is the one defect
+#   shape this design has had to close nine times.
+"$PY" - "$TPL" "$WORK/rl_reach.sh" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+fo = src.index('    # <!-- guild:supervisor-core:ratelimit -->')
+tail = src.index('    FAILED_ISSUES+=("#$ISSUE (child-session-failed)")')
+block = src[fo:tail] + '    FAILED_ISSUES+=("#$ISSUE (child-session-failed)")'
+# ⚠ `break ;;` and `continue ;;` too. A bare `break` inside a function with no enclosing loop
+# does not stop anything — it warns and FALLS THROUGH to the record_failure tail, so a case arm
+# written `break ;;` would report a spurious FAILURE the first time a fixture reached it.
+# ⚠ Keep the `;;`. Dropping it leaves the case arm unterminated and the rig will not parse.
+block = re.sub(r'(?m)^(\s*)break(\s*;;)?$',
+               lambda m: '%secho "BROKE"; return 0%s' % (m.group(1), m.group(2) or ''), block)
+block = re.sub(r'(?m)^(\s*)continue(\s*;;)?$',
+               lambda m: '%secho "CONTINUE"; return 0%s' % (m.group(1), m.group(2) or ''), block)
+harness = '''#!/bin/bash
+set -uo pipefail
+RL_TRIES=0; RL_ZEROWAIT=0; RETRIES=0; RESUME_TRIES=0
+BLOCKED=0; DONE=0; PAUSED=0; FAILED=0; INCOMPLETE=0
+BLOCKED_ISSUES=(); FAILED_ISSUES=(); INCOMPLETE_ISSUES=(); PAUSED_ISSUES=()
+SPLIT_LEFT=0; SPLIT_PREV=99999; SPLIT_STALL=0; SPLIT_PASSES=0; SPLIT_DESC=""
+WAIT_MAX=14400; ISSUE=7; OWNER_REPO="o/r"; RESET_TIME=""; WT="/tmp/wt"; D="$PWD"
+BOARD_NUMBER=""
+# ⚠ RESUME_TRIES starts at 2, not 0. `incomplete-mid-spine` needs it ABOVE 2, so with a fresh
+# counter one detect() call at exit 0 can only bump it to 1 and `continue` — and then HALF of
+# the matrix below cannot fail, the exit-0 half, which is the case this design has lost nine
+# times. Seeding it makes the next fall-through reach the call site (measured: destroying
+# detection went from 24/48 to 48/48 combinations reporting FAILURE).
+rl_reset() { RL_TRIES=0; RL_ZEROWAIT=0; RESUME_TRIES=2; SPLIT_PREV=99999; SPLIT_STALL=0
+             SPLIT_PASSES=12; BLOCKED=0; FAILED=0; INCOMPLETE=0; DONE=0; PAUSED=0
+             BLOCKED_ISSUES=(); FAILED_ISSUES=(); INCOMPLETE_ISSUES=(); PAUSED_ISSUES=(); }
+record_event()   { printf 'EVENT %s\\n' "$2"; }
+record_failure() { printf 'FAILURE %s\\n' "$2"; }
+board_col()      { printf 'BOARD %s %s\\n' "$2" "${3:-}"; }
+heartbeat()      { :; }
+hb_sleep()       { printf 'SLEEP=%s\\n' "$1"; }
+ledger_set()     { :; }
+# ⚠ NOT 0. With zero outstanding children the split arm `continue`s on its first pass, so at
+# exit 0 with a `guild:children` label a COMPLETELY LOST limit is indistinguishable from a
+# healthy member — measured: destroying detection reddened 30 of 40 combinations and the 10 it
+# missed were exactly `<log>/e0/guild:children`, the one pair the priority gate deliberately
+# does not protect.
+children_pending()   { echo 2; }   # ⚠ with SPLIT_PASSES seeded at its bound
+worktree_release()   { :; }
+board_sweep_merged() { :; }
+refresh_dag_input()  { :; }
+detect() {
+  LOG="$1"; EXIT_CODE="${2:-1}"; STATE_STUB="${3:-}"
+  gh() { printf '%s' "$STATE_STUB"; }
+@@REGION@@
+  echo "FELL_PAST_TAIL"
+  return 0
+}
+'''
+open(sys.argv[2], 'w').write(harness.replace('@@REGION@@', '\n'.join('  ' + l for l in block.splitlines())))
+PY
+"$SH" -n "$WORK/rl_reach.sh" 2>"$WORK/reach.err" || true
+if [ -s "$WORK/reach.err" ]; then
+  bad "K9: the reachability rig parses" "$(head -1 "$WORK/reach.err")"
+else
+  ok "K9: the reachability rig parses"
+fi
+# The rig must actually CONTAIN the call sites, or this whole section is decoration again.
+K9N="$("$PY" - "$WORK/rl_reach.sh" <<'PY'
+import sys
+n = sum(1 for l in open(sys.argv[1])
+        if "record_failure " in l and not l.strip().startswith("#") and "()" not in l)
+print(n)
+PY
+)"
+if [ "${K9N:-0}" -ge 3 ]; then
+  ok "K9a: the rig reaches all $K9N record_failure call sites (K8's region reaches none)"
+else
+  bad "K9a: the rig must reach the call sites" "found only ${K9N:-0}, want 3 or more"
+fi
+
+# Every log shape this design has ever lost a limit to, at both exit codes. A rate limit must
+# never reach record_failure — that is the premise, executed rather than asserted about.
+RCW="$WORK/reach"; mkdir -p "$RCW"
+RNOW=$(date +%s); RFUT=$((RNOW + 9000)); RPAST=$((RNOW - 600))
+EVT='{"type":"rate_limit_event","rate_limit_info":{"status":"%s"%s}}'
+mk() { printf "$EVT\n" "$1" "$2" > "$RCW/$3.log"; }
+mk limited ",\"resetsAt\":$RFUT" soon
+mk limited ",\"resetsAt\":$((RNOW + 6*3600))" sixh
+mk limited ",\"resetsAt\":$RPAST" past
+mk rejected ""                    noreset
+mk limited ",\"resetsAt\":99999999999999999999" d20
+mk limited ",\"resetsAt\":\"2026-08-22T10:00:00Z\"" iso
+# a status that is not a string: jq's `+` fails, the line vanishes, and an earlier routine
+# `allowed` becomes the verdict unless `| tostring` guards it
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}\n{"type":"rate_limit_event","rate_limit_info":{"status":429,"resetsAt":%s}}\n' "$RFUT" > "$RCW/numstatus.log"
+# a truncated final event: a SIGKILLed child loses its last stdout buffer
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}\n{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":%s' "$RFUT" > "$RCW/trunc.log"
+# an event split across two writes with stderr injected between them
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}\n{"type":"rate_limit_evMCP stderr: ECONNREFUSED\nent","rate_limit_info":{"status":"rejected","resetsAt":%s}}\n' "$RFUT" > "$RCW/split.log"
+# the limit FIRST and an ordinary object second, on one physical line. ⚠ This is the fixture the
+# rescue's missing `rindex` is for: with `rindex` the slice lands on the second object, which
+# decodes cleanly, so "the line failed to decode" is false and the rescue never runs — while
+# `tail -1` hands back an earlier routine `allowed`.
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}\n{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":%s}}{"type":"assistant","m":1}\n' "$RFUT" > "$RCW/limitfirst.log"
+# a stderr fragment with no trailing newline, glued to the event
+printf 'Loading\rLoading.\r{"type":"rate_limit_event","rate_limit_info":{"status":"limited","resetsAt":%s}}\n' "$RFUT" > "$RCW/glued.log"
+# a stale sibling ahead of a live reset-less event
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"limited","resetsAt":%s}}\n{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}\n' "$RPAST" > "$RCW/stale.log"
+# a status that starts with `allowed` but is not it — approaching the limit, not blocked by it
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":%s}}\n' "$((RNOW + 430000))" > "$RCW/warn.log"
+# plain text, no structured event
+printf '{"type":"result","result":"Error: rate limit exceeded, try again later"}\n' > "$RCW/plain.log"
+
+# ⚠ `past` and `plain` are NOT in this set, and that is a decision, not an oversight:
+#   • a past reset at exit 0 is a limit the CLI already waited out inside the turn, so the
+#     session ended for some other reason and the mid-spine arm is the right destination;
+#   • the text fallback is deliberately locked to a non-zero exit, so a plain-text limit that
+#     ends cleanly is invisible by construction — unlocking it routes every ordinary member
+#     through the rate-limit path, because guild files contain "rate limit" and $LOG carries
+#     tool_result file contents.
+# Both are asserted explicitly below rather than left out silently.
+K9F=0; K9L=""
+for L in soon sixh noreset d20 iso numstatus trunc split glued stale limitfirst; do
   for E in 0 1; do
-    O="$("$SH" -c ". '$WORK/rl_rig.sh'; rl_reset; record_failure() { printf 'FAILURE\n'; }; detect '$RLW/$L.log' $E" 2>&1)"
-    case "$O" in *FAILURE*) K8V=$((K8V + 1)) ;; esac
+    for S in "" guild:children; do
+      O="$("$SH" -c ". '$WORK/rl_reach.sh'; rl_reset; detect '$RCW/$L.log' $E '$S'" 2>&1)"
+      case "$O" in *FAILURE*) K9F=$((K9F + 1)); K9L="$K9L $L/e$E/${S:-nolabel}" ;; esac
+    done
   done
 done
-if [ "$K8V" -eq 0 ]; then
-  ok "K8v: record_failure is unreachable across all 24 log/exit-code combinations"
+# ⚠ Prove the rig loaded before trusting an ABSENCE. A rig that fails to parse makes every
+# "no FAILURE appeared" assertion pass for the wrong reason (measured: K9b and K9e both reported
+# PASS while the rig was a syntax error).
+K9S="$("$SH" -c ". '$WORK/rl_reach.sh'; rl_reset; detect '$RCW/soon.log' 1" 2>&1)"
+case "$K9S" in
+  *SLEEP=*) ok "K9b0: the rig loads and runs (the absence assertions below mean something)" ;;
+  *) bad "K9b0: the rig did not run" "want SLEEP=, got [$(printf '%s' "$K9S" | tr '\n' ' ' | cut -c1-70)]" ;;
+esac
+if [ "$K9F" -eq 0 ]; then
+  ok "K9b: no rate-limited log reaches record_failure (44 log/exit/label combinations)"
 else
-  bad "K8v: record_failure reachable" "$K8V of 24 combinations reached it"
+  bad "K9b: a rate limit reached record_failure" "$K9F combination(s):$K9L"
 fi
+# `allowed_warning` must not consume the member: it carries a days-out window reset and blocks
+# nothing, so treating it as a limit abandons a healthy member on attempt 1 — on every re-run.
+K9W="$("$SH" -c ". '$WORK/rl_reach.sh'; rl_reset; detect '$RCW/warn.log' 0 'guild:children'" 2>&1 | tr '\n' ' ')"
+case "$K9W" in
+  *"account-rate-limited"*) bad "K9c: a non-blocking allowed_* status must not be a limit" "it blocked the member: $(printf '%s' "$K9W" | cut -c1-80)" ;;
+  *) ok "K9c: a non-blocking allowed_* status is not treated as a limit" ;;
+esac
+# A live limit with no usable reset must survive the exit-0 demotion. The demotion exists for a
+# PAST reset; extending it to an UNKNOWN one sends the member to incomplete-mid-spine.
+# The two deliberate exclusions, stated as expectations so the trade-off is visible and a change
+# of mind has to change a test.
+K9X="$("$SH" -c ". '$WORK/rl_reach.sh'; rl_reset; detect '$RCW/past.log' 0" 2>&1 | tr '\n' ' ')"
+case "$K9X" in
+  *FAILURE*incomplete-mid-spine*) ok "K9f: a past reset at exit 0 is left to the arms (already waited out)" ;;
+  *) bad "K9f: past reset at exit 0" "want the mid-spine arm, got [$(printf '%s' "$K9X" | cut -c1-70)]" ;;
+esac
+K9Y="$("$SH" -c ". '$WORK/rl_reach.sh'; rl_reset; detect '$RCW/plain.log' 0" 2>&1 | tr '\n' ' ')"
+case "$K9Y" in
+  *FAILURE*) ok "K9g: a plain-text limit at exit 0 is invisible — the fallback is exit-gated by design" ;;
+  *) bad "K9g: plain-text limit at exit 0" "the fallback fired at exit 0 — it must not" ;;
+esac
+# ⚠ An OFFSET SWEEP, not a fixture. A single truncated log only samples one cut point, and the
+# one this suite shipped happened to sit in the favourable third: the rescue recovered 33 of 89
+# cut points while every check stayed green. Sweeping every cut of one event line — preceded by
+# a routine `allowed`, which is what makes a lost status dangerous — turns "how much of the line
+# survived" into a number that a regression moves.
+K9SW="$("$PY" - "$WORK/rl_reach.sh" "$RFUT" <<'PY'
+import subprocess, sys, tempfile, os
+rig, fut = sys.argv[1], sys.argv[2]
+ev = '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":%s}}' % fut
+head = '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}\n'
+d = tempfile.mkdtemp()
+n = 0
+for i in range(1, len(ev) + 1):
+    lp = os.path.join(d, "c.log")
+    open(lp, "w").write(head + ev[:i])
+    out = subprocess.run(["/bin/bash", "-c", ". '%s'; rl_reset; detect '%s' 1" % (rig, lp)],
+                         capture_output=True, text=True).stdout
+    if "FAILURE" not in out:
+        n += 1
+print("%d %d" % (n, len(ev)))
+PY
+)"
+K9SW_N="${K9SW%% *}"; K9SW_T="${K9SW##* }"
+# ⚠ Report the RESIDUAL, not just the survivors. The first version of this check printed
+# "none reach record_failure" while 25 of 89 cut points did exactly that — the floor was a
+# LICENCE for the defect and the message stated the opposite. A cut landing in the first ~11
+# bytes leaves `{"type":"r`, which no rule can distinguish from any other torn line; those
+# members are recorded terminal and that is a stated limitation, not a passing property.
+K9SW_F=$((K9SW_T - K9SW_N))
+if [ "${K9SW_N:-0}" -ge 78 ]; then
+  ok "K9h: truncation sweep — $K9SW_N/$K9SW_T rescued, $K9SW_F still reach record_failure (ambiguous prefixes)"
+else
+  bad "K9h: truncation sweep regressed" "only ${K9SW_N:-0}/${K9SW_T:-?} rescued, ${K9SW_F:-?} reach record_failure (want 78 or more rescued)"
+fi
+# A non-decoding line that merely NAMES the field must not become a limit — the colon is what
+# separates an event from prose about one.
+printf 'Traceback: KeyError: "rate_limit_info"\n' > "$RCW/h_keyerr.log"
+# And a whitespace-formatted status must still be read.
+printf 'x {"type":"rate_limit_event","rate_limit_info":{ "status" : "rejected" }\n' > "$RCW/pretty.log"
+K9P=0
+for E in 0 1; do
+  O="$("$SH" -c ". '$WORK/rl_reach.sh'; rl_reset; detect '$RCW/h_keyerr.log' $E" 2>&1)"
+  case "$O" in *SLEEP=*|*account-rate-limited*) K9P=$((K9P + 1)) ;; esac
+  O="$("$SH" -c ". '$WORK/rl_reach.sh'; rl_reset; detect '$RCW/pretty.log' $E" 2>&1)"
+  case "$O" in *FAILURE*) K9P=$((K9P + 1)) ;; esac
+done
+if [ "$K9P" -eq 0 ]; then
+  ok "K9i: prose naming the field is not a limit; a spaced status still is"
+else
+  bad "K9i: field-name prose / spaced status" "$K9P of 4 went the wrong way"
+fi
+# ⚠ The OTHER direction. Every fixture above is a rate-limit log, so K9b can only ever catch a
+# MISS — a false positive passes it silently. These are healthy logs whose bytes merely resemble
+# a limit: stderr appended AFTER the JSON on one line (the mirror of the case `rindex` handles),
+# a null `rate_limit_info`, and the field named in prose. A counting rescue fired on all three
+# and blocked a healthy member on every re-run (measured).
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}Loading\r\n' > "$RCW/h_tail.log"
+printf '{"type":"rate_limit_event","rate_limit_info":null}\n' > "$RCW/h_null.log"
+printf '{"type":"system","note":"the rate_limit_info field is documented here"}\n' > "$RCW/h_prose.log"
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":%s}}\n{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}\n' "$RFUT" > "$RCW/h_recov.log"
+K9H=0; K9HL=""
+for L in h_tail h_null h_prose h_recov; do
+  for E in 0 1; do
+    O="$("$SH" -c ". '$WORK/rl_reach.sh'; rl_reset; detect '$RCW/$L.log' $E 'guild:children'" 2>&1)"
+    case "$O" in *SLEEP=*|*account-rate-limited*) K9H=$((K9H + 1)); K9HL="$K9HL $L/e$E" ;; esac
+  done
+done
+if [ "$K9H" -eq 0 ]; then
+  ok "K9e: no healthy log is mistaken for a rate limit (8 combinations)"
+else
+  bad "K9e: a healthy log was treated as a rate limit" "$K9H combination(s):$K9HL"
+fi
+K9U="$("$SH" -c ". '$WORK/rl_reach.sh'; rl_reset; detect '$RCW/noreset.log' 0" 2>&1 | tr '\n' ' ')"
+case "$K9U" in
+  *"SLEEP=300"*) ok "K9d: a reset-less live limit is not demoted on exit 0" ;;
+  *) bad "K9d: reset-less live limit on exit 0" "want SLEEP=300, got [$(printf '%s' "$K9U" | cut -c1-80)]" ;;
+esac
 
 # ── T9: 검사 개수 바닥 ─────────────────────────────────────────────────────
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=243
+SUP_MIN_CHECKS=268
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

@@ -1490,6 +1490,18 @@ wait_for_window() {
 if [ -n "$WIN_START" ]; then ledger_set window "\"$WIN_RAW\"" 2>/dev/null || true; fi
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ⚠ jq preflight, and it exercises the FILTER rather than the file. Rate-limit detection is
+# the one thing in this script that depends on jq for a DECISION rather than for formatting, and
+# a jq that is missing — or present but broken (an incompatible build, a shim, a wrapper) —
+# makes it fail SILENTLY: the member falls through to the mid-spine arm and is recorded terminal,
+# blocking every dependant. `command -v` alone passes for the broken case (measured). Every
+# other jq use here is `gh --jq`, which gh implements itself.
+if ! printf '{"type":"rate_limit_event","rate_limit_info":{"status":"x"}}\n' \
+     | jq -r -R '(fromjson? // empty) | objects | .type // empty' 2>/dev/null | grep -q rate_limit_event; then
+  echo "[sprint] FAIL: a working jq is required — rate-limit detection cannot work without it" >&2
+  exit 1
+fi
+
 # Main loop (§8.4)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1713,30 +1725,76 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     # <!-- guild:supervisor-core:ratelimit -->
     # Rate-limit DETECTION + SANITISATION + WAIT — VERBATIM-shared with batch.md's supervisor
     # (tests/sprint_supervisor_test.sh compares them byte-for-byte after indent normalisation).
-    # ⚠ This block is PURE COMPUTATION and closes every `if` it opens. It used to leave
+    # ⚠ PURE COMPUTATION, and it closes every `if` it opens. It used to leave
     # `if [ "$RATE_LIMITED" -eq 1 ]` open, so moving it as a unit swallowed whatever followed —
     # `bash -n` stays green and a completed member stops being counted (measured).
-    # ⚠ It sits ABOVE both `[ "$EXIT_CODE" -eq 0 ]` guards. Inside the first one, the exit!=0
-    # path — the ONLY one that detects a rate limit today — loses detection entirely and lands
-    # on `record_failure child-session-failed` below.
-    # ⚠ `-R 'fromjson?'` and `objects`, in BOTH filters. `$LOG` is `> "$LOG" 2>&1`, so stderr is
-    # mixed in: jq stops at the FIRST parse error and startup stderr lands at the HEAD of the
-    # log, so without `-R 'fromjson?'` both detectors go false together. And `?` wraps parsing
-    # only, not indexing: a `rate_limit_event` with no `.rate_limit_info` emits `null` (jq -e
-    # returns 1) and a bare JSON scalar raises on `.type` (jq -e returns 5). `objects` closes
-    # both. Whether it survived depended on log line ORDER, which is why fixtures missed it.
-    RESET_AT=$(jq -r -R 'fromjson? | objects | select(.type == "rate_limit_event") | .rate_limit_info | objects | select(.status != "allowed") | .resetsAt // empty' "$LOG" 2>/dev/null | tail -1 || true)
+    #
+    # ⚠ ONE jq pass, and it reads the LAST rate_limit_event, whichever status that one carries.
+    # ⚠ `${RL_LAST##* }` strips to the LAST space. A status containing one ("rate limited") made
+    # the single-`#` form hand the sanitiser "limited <epoch>", which it discarded (measured).
+    # ⚠ `| tostring` on the STATUS too, not just the reset. A non-string status (`429`, `true`,
+    # a list) makes jq's `+` fail, the line emits nothing, and `tail -1` silently falls back to
+    # the previous — routine `allowed` — event. That needs no log corruption at all (measured).
+    # `rate_limit_info.status` is CURRENT STATE telemetry, not an error record: a session that
+    # was limited, waited, recovered and then died of something else carries a non-`allowed`
+    # event followed by an `allowed` one. Selecting non-`allowed` events anywhere in the log
+    # therefore hijacks a healthy member — six waits, then blocked, on every re-run (measured).
+    # ⚠ And it must not be `.resetsAt // empty`: that DROPS the line for a live event that has
+    # no resetsAt, so `tail -1` reaches back to an EARLIER event's value. A stale past reset then
+    # masked a live unknown one and the exit-0 demotion below fired on it (measured).
+    # ⚠ Parse the whole line FIRST and fall back to slicing — additive, not a replacement.
+    # `$LOG` is `> "$LOG" 2>&1`, so stdout and stderr share one file offset: a stderr write with
+    # no trailing newline (a `\r` progress spinner never emits one) is GLUED to the next JSON
+    # line, and `jq -R` splits only on `\n`, so that whole line is unparseable and the limit
+    # vanishes (measured). `rindex`, not `index`: two objects on one physical line leave the
+    # FIRST offset pointing at a concatenation that cannot parse, while the last one is a
+    # complete object (measured).
+    RL_LAST=$(jq -r -R '(fromjson? // (.[(rindex("{\"type\":") // 0):] | fromjson?)) | objects | select(.type == "rate_limit_event") | .rate_limit_info | objects | (((.status // "null") | tostring) + " " + ((.resetsAt // "") | tostring))' "$LOG" 2>/dev/null | tail -1 || true)
     RATE_LIMITED=0
-    # Detection = a non-`allowed` block event EXISTS, or a usable resetsAt. ⚠ A logical OR, not
-    # a replacement: narrowing it to either half alone re-created the same defect twice.
-    if jq -R -e 'fromjson? | objects | select(.type == "rate_limit_event") | .rate_limit_info | objects | select(.status != "allowed")' "$LOG" >/dev/null 2>&1 || [ -n "$RESET_AT" ]; then
-      RATE_LIMITED=1
+    RESET_AT=""
+    case "$RL_LAST" in
+      '')          ;;                      # no rate_limit_event in this log at all
+      allowed*)    ;;                      # `allowed`, `allowed_warning`, … — not blocking
+      *)           RATE_LIMITED=1; RESET_AT="${RL_LAST##* }" ;;
+    esac
+    # ⚠ `tail -1` is the last event jq could DECODE, not the last event that exists. One
+    # unparseable event line therefore promotes an earlier routine `allowed` to the verdict — and
+    # every real log carries one of those. Three shapes do it: a truncated final line (a SIGKILLed
+    # child loses its last stdout buffer), an event split across two writes with stderr injected
+    # between them, and any single line jq rejects.
+    # ⚠ NO `rindex` fallback here, deliberately — the main filter has it, this must not. With it,
+    # a line holding the limit FIRST and an ordinary object second slices to that second object,
+    # which decodes cleanly, so `select(decode failed)` is false and the rescue is skipped — while
+    # `tail -1` hands back an earlier routine `allowed`. The limit is not merely lost, the log's
+    # own telemetry outranks it (measured). Here "did not decode AS A WHOLE" is exactly what
+    # "the limit's bytes were lost" means.
+    # ⚠ Scope the status to the tail after the LAST `"rate_limit_info":`, and treat a missing
+    # status as a LOST limit rather than a healthy one. A corruption landing anywhere between the
+    # field name and the end of the status token deletes the limit's own status while leaving an
+    # earlier routine `allowed` as the last one on the line — an offset sweep over one event line
+    # rescued only 33 of 89 cut points before this, 63 after. The `"type":"rate_limit_event"`
+    # alternative catches cuts so early that the field name never completes. ⚠ The COLON matters:
+    # `"rate_limit_info"` without it is prose naming the field (`KeyError: "rate_limit_info"`),
+    # which used to fire. ⚠ `ltrimstr` chain, because `{ "status" : "rejected" }` is legal JSON. A first-match byte search is vetoed by an EARLIER `allowed`
+    # fragment sharing the line with a truncated limit — two corruptions this file's own fixtures
+    # assert separately — and it fires on plain stderr prose that merely names the field
+    # (`KeyError: "rate_limit_info"`). Both measured, both through record_failure.
+    # ⚠ Ask for exactly that: a line that FAILED to decode, carries the field, and does not say
+    # allowed. Counting `"rate_limit_info"` matches with grep and comparing against the decoded
+    # count looks equivalent and is not — it fires on healthy logs (stderr appended AFTER the
+    # JSON on one line, `"rate_limit_info": null`, the field named in prose), overriding an
+    # `allowed` verdict jq had read correctly and blocking the member on every re-run (measured).
+    # ⚠ Additive either way: it can only turn detection ON, and a recovered limit is untouched
+    # because there every line decodes.
+    if [ "$RATE_LIMITED" -eq 0 ]; then
+      RL_LOST=$(jq -r -R 'select((fromjson? // null) == null) | . as $l | select(index("\"rate_limit_info\":") or index("\"type\":\"rate_limit_event\"") or (($l|length) >= 12 and ("{\"type\":\"rate_limit_event\"" | startswith($l)))) | select((index("\"rate_limit_info\":") | not) or (.[(rindex("\"rate_limit_info\":")):] | (index("\"status\"") | not) or (.[(rindex("\"status\"")):] | ltrimstr("\"status\"") | ltrimstr(" ") | ltrimstr(":") | ltrimstr(" ") | startswith("\"allowed") | not))) | 1' "$LOG" 2>/dev/null | grep -c 1 || true)
+      if [ "${RL_LOST:-0}" -gt 0 ]; then RATE_LIMITED=1; fi
     fi
     # Fallback text scan, for a genuinely rate-limited log that carried NO structured event.
     # ⚠ Gated on `EXIT_CODE != 0`. The regex is deliberately BROAD — a narrowed one missed four
     # of five real limit messages (measured) — and false positives are handled STRUCTURALLY
-    # instead: structured detection wins, and a normally-completed member never reaches this
-    # line. Guild files themselves contain `rate limit`, and `$LOG` carries tool_result file
+    # instead: the structured judgement above wins, and a normally-completed member never reaches
+    # this line. Guild files themselves contain `rate limit`, and `$LOG` carries tool_result file
     # contents. "rate[ -]limit" (space/hyphen only, not an unescaped dot) still avoids matching
     # the literal JSON field name `rate_limit_event`, which appears on every log carrying a
     # routine status:"allowed" telemetry event.
@@ -1749,7 +1807,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       # Sanitise resetsAt. Every step DISCARDS rather than trusts; a discarded value falls to
       # the bounded backoff below, which is always safe.
       case "$RESET_AT" in
-        ''|*[!0-9]*)     RESET_AT="" ;;   # (1) ISO-8601 and friends
+        ''|*[!0-9]*)     RESET_AT="" ;;   # (1) ISO-8601, floats, `null`, and friends
         ??????????????*) RESET_AT="" ;;   # (1b) 14 digits or more
       esac
       # ⚠ (1b) is not cosmetic. `[ 99999999999999999999 -gt 100000000000 ]` exits 2 on bash 3.2
@@ -1770,12 +1828,17 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       # ⚠ exit 0 plus an already-past reset is a limit the CLI already waited out. Treating it
       # as live sends a `guild:children` member into an immediate retry in which the children
       # arm never runs, so SPLIT_PASSES/RESUME_TRIES stop advancing: the bound survives and
-      # PROGRESS dies. ⚠ `-n` FIRST. Without it an UNKNOWN reset — a non-`allowed` status with
-      # no resetsAt, an ISO-8601 value, or one (3) discarded — is demoted too, and those are
-      # live limits that then land on `record_failure incomplete-mid-spine`.
+      # PROGRESS dies. ⚠ `-n` FIRST. Without it an UNKNOWN reset — a live event with no
+      # resetsAt, an ISO-8601 value, or one (3) discarded — is demoted too, and those are live
+      # limits that then land on `record_failure incomplete-mid-spine`.
       if [ "$EXIT_CODE" -eq 0 ] && [ -n "$WAIT" ] && [ "$WAIT" -le 0 ]; then RATE_LIMITED=0; fi
     fi
     # <!-- /guild:supervisor-core:ratelimit -->
+    # ⚠ In THIS file the fence sits above both `[ "$EXIT_CODE" -eq 0 ]` guards. Placing it
+    # inside the first one leaves the exit!=0 path — the only path that detected a rate limit
+    # before this design — with no detection at all, landing on `record_failure
+    # child-session-failed` below. That placement is asserted by `rlpos.py`; it is a property of
+    # this file, not of the shared region, so the claim does not belong inside the markers.
 
     # Truth = the GitHub label (_handoff.md Section A: "labels are the state"). Read once here,
     # because the gate below and the arms further down both need it.
@@ -1798,16 +1861,6 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
           # Incrementing it inside the no-reset branch meant an API that keeps returning
           # `resetsAt` never reached the cap of 6 — the Issue retried without limit (measured).
           RL_TRIES=$((RL_TRIES + 1))
-          if [ "$RL_TRIES" -gt 6 ]; then
-            # ⚠ record_event, NOT record_failure. `record_failure` writes `failed.txt`, which
-            # becomes `terminal[n]="failed"` and blocks every dependant — for a condition that
-            # resolves by itself. BLOCKED keeps the script and $D, and the re-run picks it up.
-            echo "  ⏭ Issue #$ISSUE — still rate limited after $RL_TRIES waits; skipped, the re-run picks it up"
-            record_event "$ISSUE" account-rate-limited "still rate limited after 6 waits — skipped, re-run picks it up"
-            board_col "$ISSUE" blocked account-rate-limited                       # P4
-            BLOCKED=$((BLOCKED + 1)); BLOCKED_ISSUES+=("#$ISSUE (account-rate-limited)")
-            break
-          fi
           if [ -n "$WAIT" ] && [ "$WAIT" -gt "$WAIT_MAX" ]; then
             echo "  ⏭ Issue #$ISSUE — reset is $((WAIT/3600))h away (over the ${WAIT_MAX}s ceiling); skipped, the re-run picks it up"
             record_event "$ISSUE" account-rate-limited "reset is $((WAIT/3600))h away (> 4h ceiling) — skipped, re-run picks it up"
@@ -1815,8 +1868,19 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
             BLOCKED=$((BLOCKED + 1)); BLOCKED_ISSUES+=("#$ISSUE (account-rate-limited)")
             break
           fi
-          # ⚠ ONE trust predicate: `-n` plus `-ge 0`. The old `-le 0` form sent WAIT=0 to the
-          # backoff, which made (4) and the zero-wait cap below unreachable code.
+          if [ "$RL_TRIES" -gt 6 ]; then
+            # ⚠ record_event, NOT record_failure. `record_failure` writes `failed.txt`, which
+            # becomes `terminal[n]="failed"` and blocks every dependant — for a condition that
+            # resolves by itself. BLOCKED keeps the script and $D, and the re-run picks it up.
+            echo "  ⏭ Issue #$ISSUE — still rate limited after 6 waits; skipped, the re-run picks it up"
+            record_event "$ISSUE" account-rate-limited "still rate limited after 6 waits — skipped, re-run picks it up"
+            board_col "$ISSUE" blocked account-rate-limited                       # P4
+            BLOCKED=$((BLOCKED + 1)); BLOCKED_ISSUES+=("#$ISSUE (account-rate-limited)")
+            break
+          fi
+          # ⚠ `-eq 0`, reachable only because sanitiser (4) clamps a past reset to exactly 0.
+          # The old `-le 0` trust predicate sent WAIT=0 straight to the backoff, which made (4)
+          # and this zero-wait cap unreachable code.
           if [ -n "$WAIT" ] && [ "$WAIT" -eq 0 ]; then
             # An immediate retry costs a real child session. Two in a row means the API keeps
             # reporting a past reset, so drop to the bounded backoff.
@@ -1827,6 +1891,12 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
           fi
           if [ -z "$WAIT" ]; then
             WAIT=$((RL_TRIES * 300))
+        # ⚠ Belt and braces, and say so: with RL_TRIES capped at 6 this is 1800s at most, so the
+        # clamp is UNREACHABLE in any shipped configuration (instrumented: zero hits across both
+        # suites). It exists because the ceiling above ran while WAIT was still empty and never
+        # sees this value — so if the multiplier or the cap is ever raised, the bound is here
+        # rather than nowhere. The multiplier itself is pinned separately.
+        if [ "$WAIT" -gt "$WAIT_MAX" ]; then WAIT="$WAIT_MAX"; fi
             echo "  ⏳ Rate limited, no usable reset time. Backing off ${WAIT}s ($RL_TRIES/6)..."
           else
             RESET_TIME=$(date -r "$RESET_AT" +%H:%M:%S 2>/dev/null || date -d "@$RESET_AT" +%H:%M:%S 2>/dev/null || echo "?")
@@ -1949,8 +2019,12 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     fi
 
 
+    # ⚠ `-R 'fromjson?'` here too, not just `|| true`. `|| true` stops the run from dying but
+    # plain jq still stops at the first non-JSON line, and $LOG mixes stderr in BY DESIGN — a
+    # member whose log has stderr at the head reported 0 tokens and $0, and its failure reason
+    # came back empty (measured).
     echo "  ✗ Issue #$ISSUE failed (exit $EXIT_CODE)"; FAILED=$((FAILED + 1))
-    REASON=$(jq -r 'select(.type == "result") | select(.is_error == true) | .result // empty' "$LOG" 2>/dev/null | tail -1 | cut -c1-80 || true)
+    REASON=$(jq -r -R 'fromjson? | objects | select(.type == "result") | select(.is_error == true) | .result // empty' "$LOG" 2>/dev/null | tail -1 | cut -c1-80 || true)
     record_failure "$ISSUE" child-session-failed "${REASON:-exit $EXIT_CODE}"
     board_col "$ISSUE" blocked failed:child-session-failed   # P4
     # ⚠ The CLASS, not `$REASON`. This array becomes the ledger's `completion.failed_issues`
@@ -2047,7 +2121,7 @@ RUN_ELAPSED=$(( $(date +%s) - RUN_START ))
 TOTAL_IN=0; TOTAL_OUT=0; TOTAL_CR=0; TOTAL_CC=0; TOTAL_COST="0"
 for L in "$RUNDIR"/issue-*-"${TIMESTAMP}"-attempt*.log; do
   [ -f "$L" ] || continue
-  S=$(jq -r 'select(.type=="result") | "\(.usage.input_tokens // 0) \(.usage.output_tokens // 0) \(.usage.cache_read_input_tokens // 0) \(.usage.cache_creation_input_tokens // 0) \(.total_cost_usd // 0)"' "$L" 2>/dev/null | tail -1 || true)
+  S=$(jq -r -R 'fromjson? | objects | select(.type=="result") | "\(.usage.input_tokens // 0) \(.usage.output_tokens // 0) \(.usage.cache_read_input_tokens // 0) \(.usage.cache_creation_input_tokens // 0) \(.total_cost_usd // 0)"' "$L" 2>/dev/null | tail -1 || true)
   [ -n "$S" ] && read -r IN OUT CR CC COST <<< "$S" && {
     TOTAL_IN=$((TOTAL_IN + ${IN:-0})); TOTAL_OUT=$((TOTAL_OUT + ${OUT:-0}))
     TOTAL_CR=$((TOTAL_CR + ${CR:-0})); TOTAL_CC=$((TOTAL_CC + ${CC:-0}))
