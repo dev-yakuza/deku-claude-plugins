@@ -1103,6 +1103,20 @@ esac
 LEFT="$(grep -rn '^  > .*_handoff\.md` Section C' "$GLD/commands/" 2>/dev/null || true)"
 if [ -z "$LEFT" ]; then ok "스폰 프롬프트에 Section C 이름 참조가 남지 않았다"
 else bad "스폰 프롬프트에 Section C 이름 참조가 남지 않았다" "0건" "$(echo "$LEFT" | head -2)"; fi
+# ── 38. 무인 narration 예외(F/L2)가 Section K 에 살아 있는가 ──────────────────
+# L2 는 리더가 조건부로 첨부하는 한 줄로만 전달된다. 그 문안이 Section K 에서 사라지면
+# 리더가 무엇을 붙여야 하는지 알 수 없고, 실패는 조용하다 — 무인 실행이 계속 config.language
+# 로 narration 할 뿐 아무것도 깨지지 않는다.
+HANDOFF="$GLD/commands/atoms/_handoff.md"
+hasfx "Section K: 무인 narration 예외가 있다" "$HANDOFF" 'Unattended exception — narration only'
+hasfx "Section K: 리더가 붙일 문안이 verbatim 으로 있다" "$HANDOFF" 'write free narration (anything before the `>>> RESULT <<<` sentinel) in **ASCII English**'
+hasfx "Section K: 조건부 문장이 아니라 조건부 포함임을 못박는다" "$HANDOFF" 'do not include it with a condition attached'
+hasfx "Section K: 범위가 dev.md 경로로 한정돼 있다" "$HANDOFF" 'Scope: the `dev.md` drive path only'
+# 열거를 지우지 않았는가 — 예외는 추가이지 삭제가 아니다.
+hasfx "Section K: RESULT 요약이 config.language 열거에 남아 있다" "$HANDOFF" '`>>> RESULT <<<` one-line summaries'
+
+# D 폐기가 기록으로 남아 있는가 — 다음 사람이 같은 가설을 다시 세우지 않도록.
+hasfx "_bash_rules.md: 무인 완화 폐기 사유가 기록돼 있다" "$GLD/commands/atoms/_bash_rules.md" 'Asked and answered: the atomic rule is NOT relaxed'
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -1110,7 +1124,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=196   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=202   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

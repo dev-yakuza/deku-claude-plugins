@@ -416,6 +416,20 @@ into an unbounded day run.
 
 Localizing any of these would break parsing.
 
+⚠ **Unattended exception — narration only.** Under `GLD_UNATTENDED=1` (`/gld batch`·`/gld sprint`), a sub-agent's **free narration** — the lines before the `>>> RESULT <<<` sentinel, which Section C says the caller ignores — is written in **ASCII English**. Everything a human actually reads stays in `config.language`: the `>>> RESULT <<<` one-line summary, Issue/PR comments, and the prose inside artifact files.
+
+Why: that narration is read by nobody at runtime (the sprint supervisor consumes only an 80-character error excerpt, and judges by label), it survives only in `.sprint-logs/<tracker>/*.jsonl` for forensics, and Korean/Japanese cost roughly 1.5–2× the tokens of the same text in English. In an agentic loop those tokens are re-sent as input on every later turn, so the cost compounds.
+
+⚠ **This is delivered by the leader, not decided by the sub-agent.** A sub-agent does not know its own run mode, so a conditional sentence in the prompt would fire in attended sessions too. See emission point 2.
+
+⚠ **Scope: the `dev.md` drive path only.** `dev.md` is a main-session FSM that reads each stage wrapper **inline**, so the mode it resolved at its own Step 0 is still held when `analyze`/`design`/`test`/`qa`/execute reach their spawns. Entry points that never resolve a mode — a standalone `/gld design`, `/gld plan`, `/gld sprint plan` — simply do not get the line, which excludes them automatically. **No new detection step is added anywhere.**
+
 **Two emission points, both must comply:**
 1. **The leader (main session)** localizes its own output — every comment it posts, every `AskUserQuestion`, every narration line. It learns the language at pre-flight (`_preflight.md` Item 1).
 2. **Spawned role sub-agents** — the persona file is already in the target language, but the persona alone does not guarantee the *response* language. So when the leader spawns a role, its prompt **must append**: *"모든 사람이 읽는 산출물(코멘트·파일 산문·RESULT 요약)은 이 레포의 `config.language`로 작성한다 (기계 토큰·코드·경로·마커는 영어 유지)."* — rendered in that language. A sub-agent's RESULT summary and any prose it writes then match.
+
+   ⚠ **And when — and only when — the run is unattended, the leader appends one more line, verbatim:**
+
+   > Unattended: write free narration (anything before the `>>> RESULT <<<` sentinel) in **ASCII English**. The RESULT line itself, and any prose you write into a file, stay in `config.language`.
+
+   Place it **immediately before** the closing `Write output in \`config.language\`.` sentence, so `_execute_spine.md`'s invariant ("every sub-agent prompt below ends with …") still holds. **Omit the line entirely when attended** — do not include it with a condition attached, because the sub-agent has no way to evaluate the condition.
