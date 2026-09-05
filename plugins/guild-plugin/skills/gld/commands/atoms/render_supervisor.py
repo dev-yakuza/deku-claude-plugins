@@ -29,10 +29,13 @@ is stated rather than blurred:
     are closed at the write, from the descriptor rather than the path:
       symlink at the final component  -> O_NOFOLLOW
       hardlink at the final component -> fstat st_nlink != 1
-      symlinked ancestor (.claude or .claude/guild) -> realpath(dirname) must equal
-        realpath(human_repo)/.claude/guild. This one is reachable from a clone alone: git
-        stores symlinks (mode 120000), so a repo that commits .claude as a link writes
-        outside the checkout on the first run.
+      symlinked ancestor (.claude or .claude/guild) -> an openat chain: each component is
+        opened once with O_NOFOLLOW|O_DIRECTORY and held as a descriptor, and the final
+        open uses dir_fd. A realpath() pre-check is NOT enough and was measured losing the
+        race 3 times in 47 attempts under load (0 in 4000 on an idle machine, which is how
+        it read as closed) — the open re-resolved the path the check had just approved.
+        This route is reachable from a clone alone: git stores symlinks (mode 120000), so a
+        repo that commits .claude as a link would write outside the checkout on first run.
       FIFO / non-regular file -> O_NONBLOCK + S_ISREG (without O_NONBLOCK the open blocks
         forever waiting for a reader, with no rc and no message).
     chmod and the size check use fchmod/fstat on the open descriptor. The path-based pair
@@ -62,14 +65,20 @@ import sys
 # reason that is safe. We re-check here because a legacy install can still carry a
 # non-normalised value: `_handoff.md` tells the human to split raw compound commands by
 # hand, so nothing guarantees the config was ever migrated.
-# `$` 도 거부한다. `$(...)` 만 막으면 `yarn install $HOME` 이 통과하는데, 템플릿은 각 원소를
-# `eval "$IC"` 로 돌리므로 실행되는 명령이 설정에 적힌 리터럴과 달라진다(인젝션은 아니다 —
-# 구분자가 전부 막혀 있다 — 그러나 설정과 실행이 어긋나는 것은 그 자체로 결함이다).
-# 어절 첫머리의 `~` 도 같은 이유로 막는다.
-# `*`/`?`/`{}` 도 거부한다. 템플릿은 `( cd "$WT" && eval "$IC" )` 로 돌리므로 글롭과 중괄호
-# 확장이 워크트리를 상대로 일어나고, 실행되는 명령이 설정 리터럴과 달라진다 — `$`·`~` 를
-# 막은 것과 같은 이유다.
-_METACHAR = re.compile(r"\$|`|&&|\|\||[|;<>&\n*?{}\[\]]|(?:\A|[\s=:])~")
+# ⚠ 이 집합은 `init.md:163` 의 계약과 **정확히 같아야** 한다 — 그 이상도 이하도 아니다.
+#
+# 라운드 1~4 에서 리뷰어 제안을 받아 `$VAR`·`~`·글롭(`* ? {} []`)을 차례로 추가했다. 근거는
+# "eval 이 확장하면 실행되는 명령이 설정 리터럴과 달라진다" 였는데, **init.md 를 확인하지
+# 않았다.** init 이 저장을 금지하는 것은 `$(...)`·`&&`·`|`·`;`·리다이렉션뿐이고, 글롭은
+# 명시적으로 허용된다. 그래서 그 추가들은 `eslint src/**/*.ts` 나 `rm -rf build/*` 처럼
+# **완전히 정상인 config 를 가진 레포에서 `/gld sprint run` 을 기동 불가**로 만들었다 —
+# step 2 가 non-zero 로 끝나고 2d 가 실행을 세우는데, run.md 의 처방(복합 명령 쪼개기)은
+# 글롭에 적용되지 않는다. 고치려던 것보다 나쁜 회귀였다.
+#
+# 진짜 경계는 **어절 확장이 아니라 명령 연쇄·치환** 이다. 글롭·`$VAR`·`~` 는 인자를 바꿀 뿐
+# 새 명령을 도입하지 못한다. 아래 목록이 새 명령을 도입할 수 있는 것 전부다.
+# `run.md` 의 표가 이 목록을 그대로 적고, `prompt_structure_test.sh` 가 둘의 드리프트를 막는다.
+_METACHAR = re.compile(r"\$\(|`|&&|\|\||[|;<>&\n]")
 
 _TRACKER = re.compile(r"\A[0-9]+\Z")
 _VERSION = re.compile(r"\A[A-Za-z0-9._+-]+\Z")
@@ -211,8 +220,8 @@ def main():
         if _METACHAR.search(cmd):
             die(
                 "--install-cmd %r contains shell metacharacters; config.commands values are "
-                "normalized at init time and must not contain $(...), $VAR, `..`, &&, |, ;, ~, "
-                "globs (* ? [] {}), or redirections" % cmd
+                "normalized at init time and must not contain $(...), `..`, &&, ||, |, ;, &, "
+                "newlines, or redirections (init.md:163)" % cmd
             )
 
     try:
@@ -305,31 +314,67 @@ def main():
     # 그리고 경로 기반 chmod/getsize 는 TOCTOU 다 — 안전하게 연 fd 를 버리고 경로를 다시
     # 해석하므로, 그 창에서 경로를 심링크로 바꾸면 렌더러 자신이 남의 파일을 0755 로 만든다
     # (실측: 첫 시도에 성공, chmod 탈출만 따로 보면 200/200 재현). fd 로만 다룬다.
-    guild_dir = os.path.dirname(out)
+    # ⚠ 조상 검사도 **디스크립터로** 한다. `realpath` 로 미리 검사한 판은 경로 검사였고,
+    # 그 뒤의 `os.open` 이 `.claude/guild` 를 **다시** 경로로 해석했다 — 그 사이에 그 성분을
+    # 디렉터리 ↔ 심링크로 뒤집는 프로세스가 있으면 체크아웃 밖에 0755 실행 파일이 rc=0 으로
+    # 쓰인다(실측: 부하 상태에서 47회 중 3회. 한산할 때 4000회 0건이라 "닫혔다" 고 오판했다).
+    # openat 사슬은 각 성분을 한 번만 해석하고 그 결과를 fd 로 들고 있으므로 창이 없다.
+    if os.open not in os.supports_dir_fd or os.mkdir not in os.supports_dir_fd:
+        die("this platform lacks openat/mkdirat; the containment guarantee cannot be met")
+    dirfds = []
     try:
-        os.makedirs(guild_dir, exist_ok=True)
-    except OSError as exc:
-        die("cannot create %s (%s)" % (guild_dir, exc))
-    want_dir = os.path.join(os.path.realpath(args.human_repo), ".claude", "guild")
-    if os.path.realpath(guild_dir) != want_dir:
-        die(
-            "%s resolves to %s, outside the checkout — a symlinked .claude or .claude/guild "
-            "component" % (guild_dir, os.path.realpath(guild_dir))
-        )
-    try:
-        # ⚠ O_TRUNC 를 여기 두지 않는다. open 이 fstat 보다 먼저 일어나므로, 하드링크 검사가
-        # 거부하기 **전에** 피해자 파일이 0바이트가 된다(실측: `.git/hooks/pre-commit` 6바이트 -> 0).
-        # 거부는 아무것도 파괴하지 않아야 한다. 검사를 통과한 뒤 ftruncate 한다.
-        fd = os.open(
-            out, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o755
-        )
-    except OSError as exc:
-        _e = getattr(exc, "errno", None)
-        if _e in (errno.ELOOP, errno.EMLINK):
-            die("%s is a symlink; refusing to write through it" % out)
-        if _e == errno.ENXIO:
-            die("%s is a FIFO with no reader; refusing to write to it" % out)
-        die("cannot write %s (%s)" % (out, exc))
+        try:
+            dirfds.append(os.open(args.human_repo, os.O_RDONLY | os.O_DIRECTORY))
+        except OSError as exc:
+            die("cannot open --human-repo %s (%s)" % (args.human_repo, exc))
+        for comp in (".claude", "guild"):
+            # ⚠ mkdir 도 dir_fd 로 한다. 예전 판은 검사 **전에** `os.makedirs` 를 돌려, 거부하는
+            # 바로 그 경로 밖에 디렉터리를 만들어 놓고 거부했다.
+            try:
+                os.mkdir(comp, 0o755, dir_fd=dirfds[-1])
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                die("cannot create %s under %s (%s)" % (comp, args.human_repo, exc))
+            try:
+                dirfds.append(
+                    os.open(
+                        comp,
+                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        dir_fd=dirfds[-1],
+                    )
+                )
+            except OSError as exc:
+                if getattr(exc, "errno", None) in (errno.ELOOP, errno.EMLINK, errno.ENOTDIR):
+                    die(
+                        "%s is a symlink or not a directory; refusing to write outside the "
+                        "checkout" % os.path.join(args.human_repo, *(
+                            (".claude",) if comp == ".claude" else (".claude", "guild")))
+                    )
+                die("cannot open %s under %s (%s)" % (comp, args.human_repo, exc))
+        try:
+            # ⚠ O_TRUNC 를 여기 두지 않는다. open 이 fstat 보다 먼저 일어나므로, 하드링크 검사가
+            # 거부하기 **전에** 피해자 파일이 0바이트가 된다(실측: 6바이트 -> 0).
+            # 거부는 아무것도 파괴하지 않아야 한다. 검사를 통과한 뒤 ftruncate 한다.
+            fd = os.open(
+                os.path.basename(out),
+                os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                0o755,
+                dir_fd=dirfds[-1],
+            )
+        except OSError as exc:
+            _e = getattr(exc, "errno", None)
+            if _e in (errno.ELOOP, errno.EMLINK):
+                die("%s is a symlink; refusing to write through it" % out)
+            if _e == errno.ENXIO:
+                die("%s is a FIFO with no reader; refusing to write to it" % out)
+            die("cannot write %s (%s)" % (out, exc))
+    finally:
+        for d in dirfds:
+            try:
+                os.close(d)
+            except OSError:
+                pass
 
     try:
         st = os.fstat(fd)
@@ -356,6 +401,11 @@ def main():
     except OSError as exc:
         die("cannot write %s (%s)" % (out, exc))
 
+    # ⚠ 이 크기 확인은 "이 프로세스가 쓴 바이트가 전부 들어갔다" 를 뜻하지, "지금 그 경로에
+    # 있는 파일이 이 렌더다" 를 뜻하지 않는다. 같은 tracker 로 두 렌더가 동시에 돌면 둘 다
+    # rc=0 과 계약 줄을 내고 디스크에는 하나만 남는다(실측 40/40; 내용이 섞이지는 않았다).
+    # 동시 실행은 상위에서 막힌다 — `run.md` Phase 1 step 3 의 `<!-- guild:sprint:run -->`
+    # 중복 실행 가드가 그 역할이고, 여기에 락을 더 두지 않는 이유다.
     want = len(src.encode("utf-8"))
     # 0 만 보면 잘린 쓰기가 통과한다 — 515/139621 바이트가 chmod 되고 `bash -n` 도 조용했다.
     # run.md step 2d 가 받는 유일한 신호이므로 전량 일치를 요구한다.

@@ -1082,6 +1082,20 @@ hasfx "run.md: 메타문자 거부의 근거(simple command)가 표에 남아 �
 hasfx "run.md: 레거시 복합 config.commands 정규화 지시가 있다" "$RUNMD2" 'Split such a value yourself before building argv'
 hasfx "run.md: 정규화가 처방이고 파이썬 거부는 이중 안전장치임을 밝힌다" "$RUNMD2" 'second safety net behind it, not the remedy'
 hasfx "run.md: --human-repo 거부 두 건이 표에 적혀 있다" "$RUNMD2" 'Rejected if it is **not absolute**'
+# ⚠ 세 곳이 같은 목록을 말한다: `init.md:163`(계약) · `render_supervisor.py` 의 `_METACHAR`(집행)
+#   · `run.md`(문서). 이들을 묶는 검사가 없었기 때문에 연속 두 릴리스가 정규식만 넓혔고,
+#   `run.md` 는 옛 목록을 그대로 두었다. 결과는 `eslint src/**/*.ts` 처럼 init 이 허용하는 값을
+#   가진 레포에서 sprint 가 기동 불가가 된 것이다 — 라운드 5 가 잡았다. 셋을 함께 고정한다.
+RSPY="$GLD/commands/atoms/render_supervisor.py"
+hasfx "render_supervisor.py: _METACHAR 가 init.md 목록과 정확히 같다" "$RSPY" \
+  '_METACHAR = re.compile(r"\$\(|`|&&|\|\||[|;<>&\n]")'
+lacksfx "render_supervisor.py: 글롭을 다시 막지 않았다 (과잉 차단 회귀)" "$RSPY" '*?{}'
+hasfx "init.md: commands 의 금지 목록이 그대로다" "$GLD/commands/init.md" \
+  'MUST NOT contain `$(...)`, `&&`, `|`, `;`, or redirections'
+hasfx "run.md: 금지 목록이 init.md 것과 같음을 명시한다" "$RUNMD2" \
+  "rejects exactly \`init.md:163\`'s ban list and nothing more"
+hasfx "run.md: 글롭·\$VAR·~ 가 합법임을 명시한다" "$RUNMD2" 'Globs, `$VAR` and `~` are legal and pass'
+hasfx "run.md: --order 도 숫자만 받는다는 것이 표에 있다" "$RUNMD2" 'Each value is **digits only**, same as `--tracker`'
 # ⚠ 2d 가드 **자체**를 고정한다. 스위트는 그 가드가 읽는 신호의 *생산자* 만 고정하고 있었다
 #   (sprint_supervisor T10 의 stderr 계약 문구). 소비자를 아무도 보지 않아서, `2d.` 블록을 통째로
 #   지워도 열 개 스위트가 전부 그린이었다 — 그러면 렌더가 죽어도 step 5 가 백그라운드로 기동하고
@@ -1335,7 +1349,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=223   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=229   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

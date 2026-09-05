@@ -3808,12 +3808,24 @@ rsfail "render: --human-repo 없는 디렉터리 거부" "not an existing direct
   --tracker 99 --human-repo "$WORK/no-such-dir-$$" --out - $(rsbase)
 rsfail "render: --order 가 숫자가 아니면 거부" "--order must be digits only" \
   --tracker 99 --human-repo "$RSH" --out - $(rsbase) --order ""
-for m in 'a && b' 'a $(b)' 'a | b' 'a > f' 'a *' 'a {x,y}' 'a ?z' 'a [a-z]x' 'a [abc]' 'a $HOME' 'a ~/z' 'a b=~/z'; do
+for m in 'a && b' 'a $(b)' 'a | b' 'a || b' 'a > f' 'a < f' 'a ; b' 'a & b' 'a `id`'; do
   rsfail "render: --install-cmd '$m' 거부" "shell metacharacters" \
     --tracker 99 --human-repo "$RSH" --out - $(rsbase) --install-cmd "$m"
 done
 rsfail "render: --install-cmd 빈 값 거부" "must not be empty" \
   --tracker 99 --human-repo "$RSH" --out - $(rsbase) --install-cmd ""
+# ⚠ 그리고 **과잉 차단이 없는지**. 라운드 1~4 에서 `$VAR`·`~`·글롭을 차례로 막았다가, init.md 가
+#   허용하는 값(`eslint src/**/*.ts`, `rm -rf build/*`)을 가진 레포에서 sprint 를 기동 불가로
+#   만든다는 것이 라운드 5 에서 드러나 되돌렸다. 그 회귀를 다시 하지 않도록 못박는다.
+for m in 'eslint src/**/*.ts' 'rm -rf build/*' 'phpunit --testsuite=[unit]' 'go test ./...' \
+         'echo $HOME' 'ls ~/x' 'jest --testPathPattern=src/.*.test.ts'; do
+  if "$PY" "$RS" --tracker 99 --human-repo "$RSH" --out - $(rsbase) --install-cmd "$m" \
+       >/dev/null 2>&1; then
+    ok "render: init.md 가 허용하는 '$m' 는 통과한다"
+  else
+    bad "render: init.md 허용값 '$m'" "통과해야 하나 거부됨 — 과잉 차단 회귀(라운드 5)"
+  fi
+done
 
 # 정상 통과해야 하는 것 — 과잉 차단이 아닌지.
 if "$PY" "$RS" --tracker 99 --human-repo "$RSH" --out - $(rsbase) \
@@ -3886,6 +3898,14 @@ printf %s \"\${$INJ_VAR}\"" 2>/dev/null || true)"
     [ "$INJ_GOT" = "$INJ_VAL" ] || INJ_EXEC_BAD="$INJ_EXEC_BAD [--$SLOT $INJ -> ${INJ_GOT:-<died>}]"
   done
 done
+# ⚠ 템플릿의 무인용 대입은 여섯 개인데 이 루프는 다섯 개만 돈다. 여섯 번째(TRACKER)는
+#   **일부러 뺐다.** 리뷰가 "템플릿을 `TRACKER="<TRACKER>"` 로 되돌리면 `TRACKER="'99'"` 가
+#   되어 board·창이 조용히 꺼진다" 고 보고했으나, 재현되지 않는다: `--tracker` 는 숫자만
+#   통과하고 `shlex.quote("99")` 는 따옴표를 붙이지 않으므로(`'99'` 가 아니라 `99`),
+#   재인용해도 `TRACKER=99` 와 `TRACKER="99"` 는 셸에서 같은 값이다. 실측으로 두 경우 모두
+#   `$TRACKER` = `99` 였다. 여기에 검사를 두면 **절대 실패할 수 없는 검사**가 하나 더 늘 뿐이다
+#   — 그것이 이 세션이 반복해서 배운 결함이다. 숫자 검증은 T10 의 `--tracker` 케이스가 지킨다.
+
 [ -z "$INJ_EXEC_BAD" ] && ok "render: 스칼라 5종 × 인젝션 3종, 대입 줄 실행 후 값이 입력 리터럴 그대로다" \
                        || bad "render: 대입 줄 실행 후 값" "입력과 동일해야 하나:$INJ_EXEC_BAD"
 [ -e "$WORK/GLD_INJ_PROBE" ] && bad "render: 인젝션 페이로드가 실행되지 않았다" "미생성이어야 하나 존재함" \
@@ -3986,13 +4006,32 @@ rm -f "$RSH/.claude/guild/.gld-sprint-99.sh"
 
 # ⚠ 심링크 하나만 막는 것은 봉쇄가 아니다. 같은 inode 에 닿는 길이 넷이고, O_NOFOLLOW 는
 #   그중 하나(마지막 성분이 심링크)만 막는다. 나머지 셋을 각각 세운다 — 셋 다 실측으로 뚫렸다.
+# 시간 상한을 건 렌더 1회. `timeout(1)` 은 macOS 기본에 없으므로 있으면 쓰고 없으면 직접 잰다.
+rs_bounded() {  # rs_bounded <human-repo> -> stderr on stdout, rc (124 = 매달림)
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 20 "$PY" "$RS" --tracker 99 --human-repo "$1" --owner-repo a/b \
+      --default-branch develop --container /tmp/c --dag-path /tmp/d.py 2>&1 >/dev/null
+    return $?
+  fi
+  "$PY" "$RS" --tracker 99 --human-repo "$1" --owner-repo a/b --default-branch develop \
+    --container /tmp/c --dag-path /tmp/d.py > "$WORK/rsb.out" 2> "$WORK/rsb.err" &
+  RB_PID=$!; RB_N=0
+  while kill -0 "$RB_PID" 2>/dev/null && [ "$RB_N" -lt 200 ]; do sleep 0.1; RB_N=$((RB_N+1)); done
+  if kill -0 "$RB_PID" 2>/dev/null; then kill -9 "$RB_PID" 2>/dev/null; wait "$RB_PID" 2>/dev/null; cat "$WORK/rsb.err"; return 124; fi
+  wait "$RB_PID"; RB_RC=$?; cat "$WORK/rsb.err"; return "$RB_RC"
+}
+
 rsattack() {  # rsattack <case> <expected-stderr-fragment> <setup-fn>
   RA_R="$WORK/atk"; rm -rf "$RA_R"; mkdir -p "$RA_R/.claude/guild" "$RA_R/.git/hooks"
   printf '#orig\n' > "$RA_R/.git/hooks/pre-commit"
   "$3" || { bad "$1" "셋업 실패 — 검사가 성립하지 않는다"; return; }
-  RA_ERR="$("$PY" "$RS" --tracker 99 --human-repo "$RA_R" --owner-repo a/b \
-    --default-branch develop --container /tmp/c --dag-path /tmp/d.py 2>&1 >/dev/null)"; RA_RC=$?
-  if [ "$RA_RC" -eq 0 ]; then bad "$1" "거부해야 하나 rc=0 으로 썼다"
+  # ⚠ 반드시 시간 상한을 건다. FIFO 케이스는 가드가 없으면 `open` 이 리더를 기다리며 **영원히**
+  #   매달리고, 스위트는 FAIL 한 줄 없이 그대로 멈춘다(실측: O_NONBLOCK 을 빼자 15분 넘게 걸려
+  #   있었고 진단은 0건이었다). 6a27522 가 사이클 프로브에 대해 고친 것과 같은 결함이 바로
+  #   아래 블록에 남아 있었다. `timeout` 이 없는 환경에서는 백그라운드 + 폴링으로 대신한다.
+  RA_ERR="$(rs_bounded "$RA_R")"; RA_RC=$?
+  if [ "$RA_RC" -eq 124 ]; then bad "$1" "20초 안에 끝나야 하나 매달렸다 (rc=124)"
+  elif [ "$RA_RC" -eq 0 ]; then bad "$1" "거부해야 하나 rc=0 으로 썼다"
   elif printf '%s' "$RA_ERR" | grep -qF -- "$2"; then ok "$1"
   else bad "$1" "stderr 에 '$2' 를 기대했으나: $(printf '%s' "$RA_ERR" | head -1)"; fi
 }
@@ -4006,8 +4045,14 @@ rsattack "render: 조립 경로가 하드링크면 거부한다" "is hard-linked
 RA_V="$(wc -c < "$RA_R/.git/hooks/pre-commit" | tr -d ' ')"
 [ "$RA_V" = "6" ] && ok "render: 하드링크 거부가 피해자 파일을 자르지 않는다" \
                   || bad "render: 거부의 비파괴성" "6바이트로 남아야 하나 ${RA_V}바이트"
-rsattack "render: .claude/guild 가 심링크면 거부한다" "outside the checkout" a_guild
-rsattack "render: .claude 가 심링크면 거부한다"       "outside the checkout" a_claude
+rsattack "render: .claude/guild 가 심링크면 거부한다" "refusing to write outside" a_guild
+RA_O1="$(ls -A "$WORK/atk-out" 2>/dev/null | wc -l | tr -d ' ')"
+[ "$RA_O1" = "0" ] && ok "render: guild 심링크 거부가 밖에 아무것도 만들지 않는다" \
+                   || bad "render: guild 거부의 비생성성" "0개여야 하나 ${RA_O1}개 — makedirs 가 링크를 따라갔다"
+rsattack "render: .claude 가 심링크면 거부한다"       "refusing to write outside" a_claude
+RA_O2="$(ls -A "$WORK/atk-out2" 2>/dev/null | wc -l | tr -d ' ')"
+[ "$RA_O2" = "0" ] && ok "render: .claude 심링크 거부가 밖에 아무것도 만들지 않는다" \
+                   || bad "render: .claude 거부의 비생성성" "0개여야 하나 ${RA_O2}개"
 rsattack "render: FIFO 면 매달리지 않고 거부한다"      "is a FIFO"           a_fifo
 rm -rf "$WORK/atk" "$WORK/atk-out" "$WORK/atk-out2"
 
@@ -4017,9 +4062,16 @@ rm -rf "$WORK/atk" "$WORK/atk-out" "$WORK/atk-out2"
 # ⚠ 주석이 아니라 **코드** 만 본다. 이 파일의 한국어 주석이 왜 경로 기반이면 안 되는지를
 #   설명하며 `os.chmod(out, …)` 를 인용하므로, 단순 grep 은 자기 자신의 주석에 걸려 영구
 #   FAIL 이 된다 — 이 스위트의 `hascode` 가 쓰는 것과 같은 규칙(첫 `#` 앞부분만)을 쓴다.
-if awk '{ i=index($0,"#"); pre=(i?substr($0,1,i-1):$0)
-          if (pre ~ /os\.chmod\(out|os\.path\.getsize\(out/) { found=1; exit } }
-        END { exit !found }' "$RS"; then
+# ⚠ 줄 단위 grep 은 우회된다 — `os.chmod(\n out, 0o755\n)` 로 세 줄에 나눠 쓰면 그린이었다.
+#   주석을 떼고 **공백을 접어 한 줄로 만든 뒤** 본다. 변수명을 바꾼 형태(`os.chmod(out_path`)도
+#   잡히도록 인자 이름이 아니라 호출 자체를 본다: 쓰기 이후 경로 기반 chmod/stat 은 없어야 한다.
+if "$PY" - "$RS" <<'PYFD'; then
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+code = "\n".join(l.split("#", 1)[0] for l in src.split("\n"))
+flat = re.sub(r"\s+", "", code)
+sys.exit(0 if re.search(r"os\.chmod\(|os\.path\.getsize\(|os\.stat\(", flat) else 1)
+PYFD
   bad "render: 쓰기 후 chmod/stat 이 fd 기반이다" "fchmod/fstat 를 기대했으나 경로 기반 호출이 코드에 남아 있다"
 else ok "render: 쓰기 후 chmod/stat 이 경로가 아니라 fd 로 이뤄진다 (TOCTOU 없음)"; fi
 
@@ -4072,7 +4124,7 @@ fi
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=313
+SUP_MIN_CHECKS=319
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

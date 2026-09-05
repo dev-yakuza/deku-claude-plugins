@@ -275,8 +275,12 @@ inside its own worktree.
    **First normalize `config.commands`.** `init` stores each value as a simple string or an
    **array** of simple steps, but an older install can still hold a raw compound value
    (`_handoff.md` Section E step 1 tells the human to split those by hand). The renderer
-   **rejects** `$(...)`, backticks, `&&`, `||`, `|`, `;`, `<`, `>`, `&` and newlines outright, so
-   an unnormalized value does not degrade — **step 2 exits non-zero and 2d stops the run.**
+   **rejects exactly `init.md:163`'s ban list and nothing more** — `$(...)`, backticks, `&&`,
+   `||`, `|`, `;`, `<`, `>`, `&`, newlines — so an unnormalized value does not degrade: **step
+   2 exits non-zero and 2d stops the run.** ⚠ **Globs, `$VAR` and `~` are legal and pass.**
+   `init.md` permits them and the template's `eval` expands them against the worktree, which is
+   the intended behaviour. Rejecting them was tried and reverted: it made `eslint src/**/*.ts`
+   and `rm -rf build/*` — both init-conformant — unstartable, worse than what it fixed.
    Split such a value yourself before building argv: one `--install-cmd` per step, in order, with
    any `$(...)` flag dropped — `yarn install && yarn build` becomes
    `--install-cmd 'yarn install' --install-cmd 'yarn build'`. This is the fix, and the Python
@@ -289,13 +293,13 @@ inside its own worktree.
    | Argument | Value |
    |---|---|
    | `--tracker` | tracking Issue number. **Digits only** — the script rejects anything else, because the output path is assembled from it |
-   | `--order` | **repeated once per member**, in execution order, **of the queue only** — the members still to run (step 1's file stays the full set). Zero occurrences is valid and renders `ORDER=()` |
+   | `--order` | **repeated once per member**, in execution order, **of the queue only** — the members still to run (step 1's file stays the full set). Zero occurrences is valid and renders `ORDER=()`. Each value is **digits only**, same as `--tracker` — an empty or non-numeric one is rejected, because `ORDER=('')` has length 1 and so slips past the template's empty-queue guard, then runs the queue for issue `""` |
    | `--owner-repo` | resolved literal |
    | `--default-branch` | `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name` |
    | `--container` | `<repo-parent>/.gld-<repo-basename>-sprint-<tracker>` (repo name included so two sibling repos with the same sprint number cannot collide — a worktree registers by basename) |
    | `--human-repo` | absolute path of the human's checkout. The output path is **assembled** from this plus `--tracker`; there is no `--out <path>` form. Rejected if it is **not absolute** (the supervisor never `cd`s and is launched in the background, so a relative value would resolve the board/window conf and log dir against an inherited cwd) or **not an existing directory**. Both are typo guards, not containment — the same model call supplies the value |
    | `--dag-path` | absolute path of `commands/atoms/sprint_dag.py` |
-   | `--install-cmd` | **repeated once per command** from `config.commands`, passed **raw and unquoted** — the renderer applies `shlex.quote`. ⚠ **Do not pre-quote.** A pre-quoted `'yarn install'` becomes `''\''yarn install'\'''` and the template's `eval "$IC"` then looks for a command literally named `yarn install`. Zero occurrences renders `INSTALL_CMDS=()`. Each value must be a **simple command** — `init.md` normalizes `config.commands` so they MUST NOT contain `$(...)`, `&&`, `|`, `;` or redirections, and that normalization is the whole reason the template's `eval "$IC"` is safe; the renderer re-checks it |
+   | `--install-cmd` | **repeated once per command** from `config.commands`, passed **raw and unquoted** — the renderer applies `shlex.quote`. ⚠ **Do not pre-quote.** A pre-quoted `'yarn install'` becomes `''\''yarn install'\'''` and the template's `eval "$IC"` then looks for a command literally named `yarn install`. Zero occurrences renders `INSTALL_CMDS=()`. Each value must be a **simple command** — `init.md:163` normalizes `config.commands` so they MUST NOT contain `$(...)`, `&&`, `|`, `;` or redirections, and that normalization is the whole reason the template's `eval "$IC"` is safe; the renderer re-checks **that list and only that list** |
 
    ⚠ **`<PLUGIN_VERSION>` is not an argument** — the script reads it from `.claude-plugin/plugin.json` itself, resolved relative to its own location. It exits non-zero if that read fails rather than stamping a blank watermark onto a script that outlives this session.
 
