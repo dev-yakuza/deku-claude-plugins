@@ -3744,11 +3744,64 @@ case "$K9U" in
   *) bad "K9d: reset-less live limit on exit 0" "want SLEEP=300, got [$(printf '%s' "$K9U" | cut -c1-80)]" ;;
 esac
 
+# ── T10: render_supervisor.py 자체의 가드 ─────────────────────────────────────
+# 위 섹션들은 렌더 *결과* 를 본다. 이건 렌더러의 거부 경로를 본다 — 계획이 요구했으나
+# 최초 구현에서 스위트에 넣지 않고 셸에서 손으로만 돌렸던 케이스들이다.
+echo "== T10. render_supervisor 가드 =="
+RS="$HERE/../skills/gld/commands/atoms/render_supervisor.py"
+RSH="$(mktemp -d)"
+rsbase() { printf '%s\n' --owner-repo a/b --default-branch develop --container /tmp/c --dag-path /tmp/d.py; }
+
+# non-zero 여야 하는 것들. rc 와 stderr 를 함께 본다 — rc 만 보면 argparse 의 usage(2) 와
+# 우리 가드(1) 를 구분하지 못한다.
+rsfail() {  # rsfail <case> <expected-stderr-fragment> <args...>
+  desc="$1"; frag="$2"; shift 2
+  err="$("$PY" "$RS" "$@" 2>&1 >/dev/null)"; rc=$?
+  if [ "$rc" -eq 0 ]; then bad "$desc" "non-zero" "rc=0"
+  elif printf '%s' "$err" | grep -qF -- "$frag"; then ok "$desc"
+  else bad "$desc" "stderr 에 '$frag'" "$(printf '%s' "$err" | head -1)"; fi
+}
+rsfail "render: --tracker 가 숫자가 아니면 거부" "digits only" \
+  --tracker 9a --human-repo "$RSH" --out - $(rsbase)
+rsfail "render: --tracker 로 경로 탈출 불가" "digits only" \
+  --tracker ../../etc --human-repo "$RSH" --out - $(rsbase)
+rsfail "render: --out 은 '-' 외의 값을 거부" "accepts only" \
+  --tracker 99 --human-repo "$RSH" --out /tmp/x.sh $(rsbase)
+for m in 'a && b' 'a $(b)' 'a | b' 'a > f'; do
+  rsfail "render: --install-cmd '$m' 거부" "shell metacharacters" \
+    --tracker 99 --human-repo "$RSH" --out - $(rsbase) --install-cmd "$m"
+done
+
+# 정상 통과해야 하는 것 — 과잉 차단이 아닌지.
+if "$PY" "$RS" --tracker 99 --human-repo "$RSH" --out - $(rsbase) \
+     --install-cmd 'pnpm i --frozen-lockfile' >/dev/null 2>&1; then
+  ok "render: 정상 install 명령은 통과한다"
+else bad "render: 정상 install 명령은 통과한다" "rc=0" "거부됨"; fi
+
+# --print-template-path 는 필수 인자 없이 단독으로 동작해야 한다. 이 플래그의 존재 이유가
+# "테스트가 렌더 대상과 $TPL 이 같은 파일임을 단언한다" 이므로, 인자를 요구하면 그 단언을 쓸 수 없다.
+RSTPL="$("$PY" "$RS" --print-template-path 2>/dev/null)"
+if [ -n "$RSTPL" ] && [ "$RSTPL" -ef "$TPL" ]; then
+  ok "render: --print-template-path 가 단독 동작하고 \$TPL 과 같은 파일을 가리킨다"
+else bad "render: --print-template-path" "\$TPL 과 동일 inode" "got: ${RSTPL:-<empty>}"; fi
+
+# 조립 경로 분기 — 하니스 13곳이 전부 --out - 를 쓰므로 이 분기는 여기서만 덮인다.
+if "$PY" "$RS" --tracker 99 --human-repo "$RSH" $(rsbase) --order 101 >/dev/null 2>&1; then
+  RSOUT="$RSH/.claude/guild/.gld-sprint-99.sh"
+  [ -s "$RSOUT" ] && ok "render: 조립 경로에 비어있지 않은 파일을 쓴다" \
+                  || bad "render: 조립 경로에 파일을 쓴다" "non-empty" "없거나 0바이트"
+  [ -x "$RSOUT" ] && ok "render: 조립된 산출물이 실행 가능하다 (0755)" \
+                  || bad "render: 실행 권한" "0755" "실행 불가"
+  if grep -q '<TRACKER>\|<ORDER>\|<PLUGIN_VERSION>\|<INSTALL_CMDS>\|<HUMAN_REPO>' "$RSOUT"; then
+    bad "render: 미치환 토큰이 남지 않는다" "0건" "$(grep -o '<[A-Z_]*>' "$RSOUT" | sort -u | tr '\n' ' ')"
+  else ok "render: 미치환 토큰이 남지 않는다"; fi
+else bad "render: 조립 경로 모드가 성공한다" "rc=0" "실패"; fi
+rm -rf "$RSH"
 # ── T9: 검사 개수 바닥 ─────────────────────────────────────────────────────
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=268
+SUP_MIN_CHECKS=280
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

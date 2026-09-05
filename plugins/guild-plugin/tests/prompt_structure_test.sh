@@ -1117,6 +1117,56 @@ hasfx "Section K: RESULT 요약이 config.language 열거에 남아 있다" "$HA
 
 # D 폐기가 기록으로 남아 있는가 — 다음 사람이 같은 가설을 다시 세우지 않도록.
 hasfx "_bash_rules.md: 무인 완화 폐기 사유가 기록돼 있다" "$GLD/commands/atoms/_bash_rules.md" 'Asked and answered: the atomic rule is NOT relaxed'
+# ── 39. enum 축소 문장이 Section C 표와 어긋나지 않는가 (회귀 검사) ──────────
+# B 는 12곳의 계약 문장을 펜스로 갈아끼웠다. 섹션 37 은 펜스 *사본* 을 본다. 이 검사는 펜스
+# *밖* 에 남는 사이트별 축소 문장을 본다 — 어떤 스폰이 5개 중 3개만 허용한다고 다시 적은 줄들.
+# 오늘 7곳이 전부 통과하는 것이 정상이다. 이것은 모양 검사가 아니라 회귀 검사이고, Section C
+# 표에 상태가 추가·개명됐는데 사본이 안 따라올 때 발화한다.
+# ⚠ 공집합도 부분집합이다 — 축소 문장이 통째로 지워지면(B 가 만들 수 있는 사고) 빈 집합이
+# 그린을 찍는다. 그래서 사이트 수 바닥선을 함께 둔다.
+cat > "$WORK3/enum.py" <<'PYE'
+import glob, os, re, sys
+gld = sys.argv[1]
+canon = None
+for line in open(os.path.join(gld, "commands/atoms/_handoff.md"), encoding="utf-8"):
+    if line.startswith("Return EXACTLY one status line"):
+        canon = line.rstrip("\n"); break
+if canon is None:
+    print("CANON_MISSING"); raise SystemExit
+TABLE = set(re.findall(r"`(DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED|DONE|FAIL)", canon))
+TOK = re.compile(r"`([A-Z][A-Z_]{2,})")
+# 상태처럼 생겼지만 상태가 아닌 것들 — 확장 시 여기에 추가한다
+NOT_STATUS = {"RESULT", "OK", "SOURCE", "CANDIDATES", "AC", "PR", "QA", "UI", "UX", "E2E", "JSON", "TDD", "HTML"}
+strip = lambda l: re.sub(r"^\s*>\s?", "", l).rstrip("\n")
+problems, sites = [], 0
+for f in sorted(glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)):
+    rel = os.path.relpath(f, gld)
+    for n, line in enumerate(open(f, encoding="utf-8"), 1):
+        if not re.match(r"^\s*>\s", line):
+            continue
+        if strip(line) == canon:          # 정본 펜스 사본은 섹션 37 소관
+            continue
+        # 반환을 *지시하는* 줄만 본다. 머신 토큰을 설명하는 산문(`_readiness.md` 의 "the `RESULT`
+        # keywords")이나 다른 블록쿼트의 대문자 토큰은 대상이 아니다
+        # (`README`, `BLOCKER`, `INV`, `GLD_UNATTENDED` …) — 그것들은 이 게이트의 대상이 아니다.
+        if not ("Return " in line or "Narrowed for this" in line or "Surface AC ambiguity" in line
+                or "BLOCKED:" in line or "`BLOCKED` line" in line):
+            continue
+        toks = set(TOK.findall(line)) - NOT_STATUS
+        if not toks:
+            continue
+        sites += 1
+        if not toks <= TABLE:
+            problems.append("%s:%d names %s, not in Section C" % (rel, n, ",".join(sorted(toks - TABLE))))
+if sites < 7:
+    problems.append("only %d reduction sites, want >= 7 — a narrowing sentence was dropped" % sites)
+print("OK %d" % sites if not problems else "PROBLEMS " + " | ".join(problems))
+PYE
+OUTE="$("$PY" "$WORK3/enum.py" "$GLD")"
+case "$OUTE" in
+  OK*) ok "enum 축소 문장이 Section C 표의 부분집합이고 사이트가 남아 있다 (${OUTE#OK })" ;;
+  *)   bad "enum 축소 문장이 Section C 표와 정합" "OK >=7" "$OUTE" ;;
+esac
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -1124,7 +1174,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=202   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=203   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
