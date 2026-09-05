@@ -270,21 +270,26 @@ inside its own worktree.
      reads as "no PR, no branch → blocked" and stops everything downstream of it. Check it per
      member while re-reading labels in Phase 1 step 5; one `gh issue view <n> --json comments`
      call each, or fold it into that pass.
-2. **Render** `<<SKILL_DIR>>/templates/sprint-supervisor.sh`, substituting:
+2. **Render the supervisor** — one Bash call, no Read and no Write of the template:
 
-   | Token | Value |
+   ```bash
+   python3 <<SKILL_DIR>>/commands/atoms/render_supervisor.py --tracker <tracker> --owner-repo <owner/repo> --default-branch <branch> --container <container> --human-repo <abs path of the human's checkout> --dag-path <<SKILL_DIR>>/commands/atoms/sprint_dag.py --order <n> --order <n> --install-cmd <cmd>
+   ```
+
+   | Argument | Value |
    |---|---|
-   | `<PLUGIN_VERSION>` | from `<<SKILL_DIR>>/../../.claude-plugin/plugin.json` (own Read call — never hardcode) |
-   | `<TRACKER>` | tracking Issue number |
-   | `<ORDER>` | space-separated execution order **of the queue only** — the members still to run (step 1's file stays the full set) |
-   | `<OWNER_REPO>` | resolved literal |
-   | `<DEFAULT_BRANCH>` | `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name` |
-   | `<CONTAINER>` | `<repo-parent>/.gld-<repo-basename>-sprint-<tracker>` (repo name included so two sibling repos with the same sprint number cannot collide — a worktree registers by basename) |
-   | `<HUMAN_REPO>` | absolute path of the human's checkout |
-   | `<DAG_PATH>` | absolute path of `commands/atoms/sprint_dag.py` |
-   | `<INSTALL_CMDS>` | zero or more **shell-quoted** simple commands from `config.commands` (e.g. `'yarn install'`). ⚠ An array, not a string: an empty inline substitution would produce `( cd "$WT" &&  )`, a **parse** error no runtime guard can prevent |
+   | `--tracker` | tracking Issue number. **Digits only** — the script rejects anything else, because the output path is assembled from it |
+   | `--order` | **repeated once per member**, in execution order, **of the queue only** — the members still to run (step 1's file stays the full set). Zero occurrences is valid and renders `ORDER=()` |
+   | `--owner-repo` | resolved literal |
+   | `--default-branch` | `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name` |
+   | `--container` | `<repo-parent>/.gld-<repo-basename>-sprint-<tracker>` (repo name included so two sibling repos with the same sprint number cannot collide — a worktree registers by basename) |
+   | `--human-repo` | absolute path of the human's checkout. The output path is **assembled** from this plus `--tracker`; there is no `--out <path>` form |
+   | `--dag-path` | absolute path of `commands/atoms/sprint_dag.py` |
+   | `--install-cmd` | **repeated once per command** from `config.commands`, passed **raw and unquoted** — the renderer applies `shlex.quote`. ⚠ **Do not pre-quote.** A pre-quoted `'yarn install'` becomes `''\''yarn install'\'''` and the template's `eval "$IC"` then looks for a command literally named `yarn install`. Zero occurrences renders `INSTALL_CMDS=()` |
 
-   ⚠ **There are no `<BOARD_*>` tokens.** The board's ten values are **not** rendered into the
+   ⚠ **`<PLUGIN_VERSION>` is not an argument** — the script reads it from `.claude-plugin/plugin.json` itself, resolved relative to its own location. It exits non-zero if that read fails rather than stamping a blank watermark onto a script that outlives this session.
+
+   ⚠ **There are no `<BOARD_*>` arguments.** The board's ten values are **not** rendered into the
    script — see step 2b. Substituting them into bash source produced three separate injections
    and the class is now removed rather than escaped.
 
@@ -390,9 +395,18 @@ inside its own worktree.
      `.board` is not among them either; adding one would write an ignore line for a file that
      usually does not exist into the human's repo, permanently, once per tracker.
 
-3. **Write** it to `.claude/guild/.gld-sprint-<tracker>.sh` in the **human's checkout** — never
-   inside the container. The self-delete trap and the logs must survive the container's removal.
-4. `chmod +x` it.
+2d. **Verify the render before starting anything.** The renderer writes the file, `chmod`s it to
+   `0755`, and prints **one line to stderr**: `render_supervisor: wrote <path> (<n> bytes)`.
+   **Confirm that line appeared.** If the Bash call failed, or that line is absent, stop with
+   `FAIL: supervisor render failed — <stderr>` and **do not run step 5**.
+
+   ⚠ **This guard is not optional.** Step 5 launches with `run_in_background: true`; a missing or
+   zero-byte script makes bash exit immediately with no ledger, no marker and no failure record,
+   and the run reports "started" while doing nothing. The renderer checks its own output size
+   because there is no allowlisted Bash primitive here that could (`test -s` and `wc -c` are not
+   in the permission allowlist, and `_bash_rules.md` forbids joining a check onto the render call
+   with `&&`).
+
 5. **Start it in the background**: Bash tool with `run_in_background: true`, `bash .claude/guild/.gld-sprint-<tracker>.sh`.
    ⚠ **Do not create the container or the supervisor worktree here.** The script does both
    itself, after its empty-queue guard, because it must not build a worktree for a run with

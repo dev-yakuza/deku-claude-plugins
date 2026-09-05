@@ -64,20 +64,33 @@ syntax_err() {   # syntax_err <file> — echoes the first error line, empty when
 
 # ── the per-document placeholder map (round-2 review predicted this exact need) ──
 cat > "$WORK/render.py" <<'PY'
-import sys
+# Thin wrapper over the production renderer. The 13 call sites and their positional
+# argument array are UNCHANGED — only this body is. Rendering itself now happens in
+# skills/gld/commands/atoms/render_supervisor.py, so the suite exercises the same code
+# `/gld sprint run` does instead of a parallel implementation.
+import os, shlex, subprocess, sys
+
 tpl, order, install, human = sys.argv[1:5]
+# argv[1] is kept (not discarded) precisely because it is the only in-band pointer back to
+# the repo: this file is written into a mktemp dir by a QUOTED heredoc, so __file__ resolves
+# inside $WORK and no shell variable is interpolated. dirname($TPL) is skills/gld/templates.
+RENDERER = os.path.normpath(
+    os.path.join(os.path.dirname(tpl), "..", "commands", "atoms", "render_supervisor.py")
+)
+
 # Optional: a real container path and a real sprint_dag.py, for the end-to-end section.
+# These defaults are load-bearing — :114, :118, :125 and :741 pass only four positionals.
 container = sys.argv[5] if len(sys.argv) > 5 else "/tmp/gld-test-container"
 dag = sys.argv[6] if len(sys.argv) > 6 else "/tmp/gld-test-dag.py"
-# The board's ten values are NOT render tokens any more — they live in a data file the
-# supervisor reads (`$HUMAN_REPO/.claude/guild/.gld-sprint-$TRACKER.board`). Three injections
-# came out of substituting them into bash source. `board_number` here writes that file instead;
-# empty means "no file", which is what a board-less repo looks like.
+# The board's ten values are NOT render tokens — they live in a data file the supervisor
+# reads (`$HUMAN_REPO/.claude/guild/.gld-sprint-$TRACKER.board`). Three injections came out
+# of substituting them into bash source. `board_number` writes that file instead; empty
+# means "no file", which is what a board-less repo looks like. render_supervisor.py does
+# NOT absorb this — it stays here, verbatim, including the removal branch.
 board_number = sys.argv[7] if len(sys.argv) > 7 else ""
-import os
 _bconf = os.path.join(human, ".claude", "guild", ".gld-sprint-99.board")
 if not board_number:
-    # ⚠ REMOVE it. Leaving a file from an earlier board-ON render made the board-OFF case read
+    # REMOVE it. Leaving a file from an earlier board-ON render made the board-OFF case read
     # that config and fire real calls — the D2 check passed for the wrong reason.
     if os.path.exists(_bconf):
         os.remove(_bconf)
@@ -90,15 +103,29 @@ else:
         fh.write("verified_as=tester\n")
         fh.write("col_ready=Ready\ncol_in_progress=In progress\ncol_blocked=Blocked\n")
         fh.write("col_in_review=In review\ncol_done=Done\n")
-src = open(tpl).read()
-for k, v in {
-    "<PLUGIN_VERSION>": "0.0.0-test", "<TRACKER>": "99", "<ORDER>": order,
-    "<OWNER_REPO>": "acme/widget", "<DEFAULT_BRANCH>": "develop",
-    "<CONTAINER>": container, "<HUMAN_REPO>": human,
-    "<DAG_PATH>": dag, "<INSTALL_CMDS>": install,
-}.items():
-    src = src.replace(k, v)
-sys.stdout.write(src)
+
+# order arrives space-separated and unquoted; install arrives ALREADY shell-quoted (the
+# suite writes "'yarn install'"). The renderer quotes for us, so split the install string
+# back into raw elements first — passing it through as one token would double-quote it and
+# the template's `eval "$IC"` would look for a command literally named "yarn install".
+argv = [
+    sys.executable, RENDERER,
+    "--tracker", "99",
+    "--owner-repo", "acme/widget",
+    "--default-branch", "develop",
+    "--container", container,
+    "--human-repo", human,
+    "--dag-path", dag,
+    "--out", "-",
+]
+for n in order.split():
+    argv += ["--order", n]
+for c in shlex.split(install):
+    argv += ["--install-cmd", c]
+
+r = subprocess.run(argv, stdout=subprocess.PIPE)
+sys.stdout.write(r.stdout.decode("utf-8"))
+sys.exit(r.returncode)
 PY
 
 echo "== A. syntax =="
