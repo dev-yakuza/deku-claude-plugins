@@ -29,7 +29,11 @@ Spawn the tester sub-agent:
 - `prompt`:
   > Adopt the persona in `.claude/agents/tester.md`. Execute the tests for Issue #$1 on the current branch — run the project's test command (unit + existing suites; E2E/manual QA are later milestones in M1). **Capture the raw runner output**. Confirm every acceptance-criterion test case from `docs/specs/$1/test-cases.md` is covered and passing. Verify gate: your pass claim MUST match the raw output — if they disagree, the raw output wins and you report the failure honestly. Do NOT weaken/skip tests to pass (INV2). **Honesty-of-scope (mandatory)**: explicitly declare WHAT you ran (with raw evidence) AND WHAT you did NOT run — specifically `commands.e2e` (integration/E2E) and manual/visual QA are NOT executed in M1. Never phrase your result as "fully QA'd" or "all problems verified" — the accurate claim is "automated tests (what you ran) pass and the written AC are test-covered."
   > **Risk-based E2E judgment (mandatory — not a blanket skip)**: M1 does not auto-run E2E, but you MUST still JUDGE whether this change warrants E2E regression, and state it: (a) **contained / low-risk** (local widget/util fix, no cross-screen flow or integration change) → "E2E 불요: <one-line reason>" — a *justified* skip; (b) **touches flows / navigation / integration / data sync** → "**E2E 회귀 권장: `<suite>`** — M1 자동 미실행, 사람이 실행 권장" — hand it to the human. Base the judgment on the diff's scope + the hotspot list, not on convenience.
-  > Return one `>>> RESULT <<<` line per `_handoff.md` Section C, with the raw test summary line. Write output in `config.language`.
+  >
+  > <!-- guild:result-contract -->
+  > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
+  > <!-- /guild:result-contract -->
+  > Include the raw test summary line. Write output in `config.language`.
 
 ## Step 2 — verify gate (leader, mandatory)
 As the leader, enforce the verify gate (`_handoff.md` Section E):

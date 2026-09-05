@@ -1051,6 +1051,58 @@ NM=$(grep -c '^## ' "$RM"); NK=$(grep -c '^## ' "$RK"); NJ=$(grep -c '^## ' "$RJ
 if [ "$NM" = "$NK" ] && [ "$NM" = "$NJ" ]; then ok "README 3종의 절 개수가 같다 ($NM)"
 else bad "README 3종의 절 개수가 같다" "동일" "en=$NM ko=$NK ja=$NJ"; fi
 echo ""
+# ── 37. result-contract 펜스: 사본이 정본과 바이트 동일하고, 개수가 맞는가 ──────
+# B 는 12개 스폰 프롬프트에서 "per `_handoff.md` Section C" 를 없애고 계약 본문을 인라인했다.
+# 진실 원본은 여전히 _handoff.md Section C 의 펜스이므로, 사본이 그것과 갈라지면 서브에이전트가
+# 받는 계약과 리더가 믿는 계약이 달라진다. 개수 바닥선이 함께 필요하다 — 어떤 사이트가 펜스와
+# Section C 언급을 둘 다 잃으면 앵커드 grep 은 0건(통과)이고 비교할 사본이 없어(통과) 계약을
+# 전혀 못 받는 상태가 그린이 된다.
+cat > "$WORK3/contract.py" <<'PYC'
+import os, re, sys
+gld = sys.argv[1]
+EXPECT = {"commands/test.md":1, "commands/design.md":3, "commands/qa.md":2,
+          "commands/analyze.md":1, "commands/atoms/_execute_spine.md":2,
+          "commands/plan.md":2, "commands/sprint/plan.md":1}
+OPEN, CLOSE = "<!-- guild:result-contract -->", "<!-- /guild:result-contract -->"
+strip = lambda l: re.sub(r"^\s*>\s?", "", l).rstrip("\n")
+lines = open(os.path.join(gld, "commands/atoms/_handoff.md"), encoding="utf-8").read().split("\n")
+try:
+    o = lines.index(OPEN); c = lines.index(CLOSE)
+except ValueError:
+    print("CANON_MISSING"); raise SystemExit
+canon = lines[o+1:c]
+problems = []; total = 0
+if len(canon) != 1:
+    problems.append("canonical block is %d lines, want 1" % len(canon))
+for rel, want in EXPECT.items():
+    body = open(os.path.join(gld, rel), encoding="utf-8").read().split("\n")
+    opens = [n for n, l in enumerate(body) if strip(l) == OPEN]
+    closes = [n for n, l in enumerate(body) if strip(l) == CLOSE]
+    if len(opens) != want or len(closes) != want:
+        problems.append("%s: %d pairs, want %d" % (rel, min(len(opens), len(closes)), want))
+        continue
+    for a, b in zip(opens, closes):
+        total += 1
+        if [strip(x) for x in body[a+1:b]] != canon:
+            problems.append("%s:%d drifted from canonical" % (rel, a+2))
+names = re.findall(r"`([A-Z_]+)(?::|`)", canon[0]) if canon else []
+tbl = "\n".join(lines[:o])
+missing = [n for n in set(names) if "`%s" % n not in tbl]
+if missing:
+    problems.append("enum missing from Section C table: %s" % ",".join(sorted(missing)))
+print("OK %d" % total if not problems else "PROBLEMS " + " | ".join(problems))
+PYC
+OUTC="$("$PY" "$WORK3/contract.py" "$GLD")"
+case "$OUTC" in
+  "OK 12") ok "result-contract: 사본 12개가 정본과 바이트 동일하고 개수가 맞다" ;;
+  OK*)     bad "result-contract: 사본 12개" "OK 12" "$OUTC" ;;
+  *)       bad "result-contract: 사본이 정본과 동일" "OK 12" "$OUTC" ;;
+esac
+
+# 앵커드 grep 0건 — 어떤 사이트도 Section C 를 이름으로 부르지 않는다.
+LEFT="$(grep -rn '^  > .*_handoff\.md` Section C' "$GLD/commands/" 2>/dev/null || true)"
+if [ -z "$LEFT" ]; then ok "스폰 프롬프트에 Section C 이름 참조가 남지 않았다"
+else bad "스폰 프롬프트에 Section C 이름 참조가 남지 않았다" "0건" "$(echo "$LEFT" | head -2)"; fi
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -1058,7 +1110,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=194   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=196   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

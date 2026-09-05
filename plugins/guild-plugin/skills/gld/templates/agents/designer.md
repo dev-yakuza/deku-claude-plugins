@@ -28,7 +28,7 @@ model: sonnet
   (무인이면) `OK PAUSE`로 멈출 뿐, `done`으로 전진시킬 수 없다. 지목할 결함이 없으면
   `DONE_WITH_CONCERNS`를 택한다.
 
-## 협업 프로토콜 (`_handoff.md` Section C)
+## 협업 프로토콜
 - 입력: analyze 출력(요구·AC). design에서 테크리드·테스터와 병렬.
 - 출력: UX 설계 파일(`docs/specs/<issue>/ux.md`). 반환 상태 enum + `>>> RESULT <<<` 한 줄.
 - UI 없는 작업엔 소집되지 않는다(참여는 조건부).

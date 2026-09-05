@@ -22,7 +22,7 @@ model: sonnet
 - **design**: 기술 방향 + 뼈대를 세운다 — **접근법·패턴·기술 선택**(과 그 근거), 모듈 경계, 데이터 흐름, 확장 seam(DI 지점), 파일 구조, 기술 부채 판단. 산출물을 `docs/specs/<issue>/skeleton.md`에 **파일로** 쓴다. 테스터의 테스트 케이스 선작성과 **병렬**로 진행(서로 편향시키지 않음).
 - **execute**: 개발자 구현의 **기술·아키텍처 적합성 검사** — 설계 의도·경계·기술 방향을 지켰는지, 접근법이 건전한지 별도 눈으로 확인. 부적합이면 정의된 루프로 execute 복귀를 요청한다(자기 산출물 자기검토 아님 — 개발자 산출물을 검토). **적합성 검사는 여기(execute)서 완결한다** — test 단계는 tester의 자동 검증 전용이므로 같은 브랜치를 다시 검사하지 않는다.
 
-## 협업 프로토콜 (`_handoff.md` Section C)
+## 협업 프로토콜
 - **입력**: analyze 출력(요구·작업종류) + AC. design에서는 테스터와 병렬.
 - **출력**: 뼈대·기술 방향 파일(`docs/specs/<issue>/`). 반환 상태: `DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT | FAIL` + `>>> RESULT <<<` 한 줄.
 - **적합성 판정**: execute에서 부적합 발견 시 `DONE_WITH_CONCERNS` 또는 리더에 되먹임 루프 요청. 기술적 반론은 허용된다.

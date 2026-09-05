@@ -172,7 +172,13 @@ When one role hands off to another inside a stage — tech-lead → developer, t
 | `NEEDS_CONTEXT: <one-line>` | needs an input that should exist but wasn't found | leader supplies the missing artifact/pointer, then re-invokes the role |
 | `FAIL: <reason>` | hard error (gh failure, Issue is a PR, etc.) | stop the stage; report to human |
 
-**Artifacts are passed as files, not pasted** (context protection). The producer writes to the working tree or `docs/specs/<issue>/`; the RESULT line names the path. The consumer reads that path. Never inline a skeleton or full test-case list into a RESULT line — keep RESULT to one summary line.
+<!-- guild:result-contract -->
+Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
+<!-- /guild:result-contract -->
+
+**Artifacts are passed as files, not pasted** (context protection). The producer writes to the working tree or `docs/specs/<issue>/`; the RESULT line names the path. The consumer reads that path. Never inline an artifact body into a RESULT line.
+
+⚠ **The fenced block above is the canonical copy of the sub-agent-facing half of this section.** It is duplicated verbatim into every spawn prompt (`guild:result-contract` markers) so a sub-agent gets the contract without reading this 52KB file. `prompt_structure_test.sh` asserts every copy is byte-identical to it after the blockquote prefix is stripped, and that the copy count is exactly the expected one per file. **Edit it here, never in a copy** — and keep the enum names in step with the table above, which stays authoritative for the leader-side action column.
 
 ### RESULT line format
 

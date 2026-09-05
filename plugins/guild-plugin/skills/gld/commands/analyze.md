@@ -67,7 +67,11 @@ Do **not** capture when the human accepts your recommendation (agreement ≠ cor
 As the leader, decide whether this Issue needs a **product-owner** for value-alignment / AC ownership / scope calls (assembly rules in `.claude/agents/leader.md`; model in `_handoff.md` Section G). Convene it when requirements are non-trivial, value/priority is contested, or AC needs a firm owner — skip for a small unambiguous change (you own the AC yourself). If convened:
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `product-owner #$1`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/product-owner.md`. For Issue #$1, align the requirements to user value against `docs/standards/charter.md`, own/sharpen the **acceptance criteria** (make them verifiable), set priorities, and state non-goals. Return one `>>> RESULT <<<` line per `_handoff.md` Section C; surface AC ambiguity as `DONE_WITH_CONCERNS`. Write output in `config.language`.
+  > Adopt the persona in `.claude/agents/product-owner.md`. For Issue #$1, align the requirements to user value against `docs/standards/charter.md`, own/sharpen the **acceptance criteria** (make them verifiable), set priorities, and state non-goals.
+  > <!-- guild:result-contract -->
+  > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
+  > <!-- /guild:result-contract -->
+  > Surface AC ambiguity as `DONE_WITH_CONCERNS`. Write output in `config.language`.
 
 Fold the PO's aligned AC/priorities into Step 4's output; a `DONE_WITH_CONCERNS` AC ambiguity feeds the discuss gate (surface to the human).
 

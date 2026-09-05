@@ -27,7 +27,7 @@ model: sonnet
 - **slopcheck**: 환각 의존성(존재하지 않는 패키지·API) 금지. import·호출 대상을 실제 코드/매니페스트로 확인한다.
 - 산출: 코드 변경(브랜치). 테크리드의 적합성 검사 대상이 된다.
 
-## 협업 프로토콜 (`_handoff.md` Section C)
+## 협업 프로토콜
 - **입력**: 설계·뼈대(테크리드) + 테스트 케이스(테스터, AC 기반). 파일로 전달받는다(붙여넣기 아님) — `docs/specs/<issue>/`를 읽는다.
 - **출력**: 구현 diff(파일/브랜치). 반환 상태: `DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT | FAIL` + `>>> RESULT <<<` 한 줄 요약.
 - **적합성 실패 시**: 테크리드가 부적합 판정하면 정의된 루프로 execute를 다시 돈다(임의 되먹임 아님).

@@ -198,7 +198,11 @@ Spawn the developer sub-agent:
 - `prompt`:
   > Adopt the persona in `.claude/agents/developer.md`. Work Issue #<N> on the current branch. **Resume**: if Step 0 supplied a partial-work summary here — `<partial-work summary from Step 0, or "none — fresh branch">` — a prior run was interrupted mid-execute, so **CONTINUE from it**: keep the already-correct committed work, pick up where it stopped, complete the rest; redo only what is wrong. Do NOT rewrite correct existing work from scratch.
   > **‹ the variant's DEVELOPER TASK SHAPE body goes here verbatim — its inputs, its ordered steps, its constraints ›**
-  > Run the project's test command and **capture the raw runner output** as verify evidence — do NOT claim green/fixed/done without it (`_handoff.md` Section E). slopcheck: verify every import/dependency exists (no hallucinated packages). Commit with the repo's convention. Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C, including the raw test summary line, the branch name, **and the variant's stated RESULT extras**. Write output in `config.language`.
+  > Run the project's test command and **capture the raw runner output** as verify evidence — do NOT claim green/fixed/done without it (`_handoff.md` Section E). slopcheck: verify every import/dependency exists (no hallucinated packages). Commit with the repo's convention.
+  > <!-- guild:result-contract -->
+  > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
+  > <!-- /guild:result-contract -->
+  > Include the raw test summary line, the branch name, **and the variant's stated RESULT extras**. Write output in `config.language`.
 
 ## Step 2 — Capture verify evidence
 
@@ -391,7 +395,11 @@ For each matched role:
 
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `<role> review #<N>`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/<role>.md`. Review the implementation on the current branch for Issue #<N> from your specialty. You are reviewing the DEVELOPER's diff, not your own work (external, adversarial). Read `docs/specs/<N>/` for design/intent. Return one `>>> RESULT <<<` line per `_handoff.md` Section C — `DONE`, `DONE_WITH_CONCERNS: <one-line>`, or `BLOCKED: <blocking finding>`. Write output in `config.language`.
+  > Adopt the persona in `.claude/agents/<role>.md`. Review the implementation on the current branch for Issue #<N> from your specialty. You are reviewing the DEVELOPER's diff, not your own work (external, adversarial). Read `docs/specs/<N>/` for design/intent.
+  > <!-- guild:result-contract -->
+  > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
+  > <!-- /guild:result-contract -->
+  > Narrowed for this gate: only `DONE`, `DONE_WITH_CONCERNS: <one-line>`, or `BLOCKED: <blocking finding>`. Write output in `config.language`.
 
 ℹ **Known gap, deliberately NOT closed here: 3.5b's doc output is not committed by this spine.** The doc-producing roles write files after the developer's Step 1 commit, and no later step stages them, so a tech-writer ADR/README update stays untracked unless a human commits it. That predates this step and is left alone on purpose — the obvious fix (have the leader `git add`/`git commit` here) was tried and withdrawn, because it made the auditor's own machinery wrong in four ways at once: the leader has no path list to `add` (3.5b roles return a one-line verdict, not a file list, so the fallback is `git add -A`, which would sweep in a sibling Issue's stranded specs); the committed docs then enter `git diff <mb>` and are handed to the next attempt's auditor as the developer's work; a doc commit landing asynchronously breaks the mutation check's attribution; and a tech-writer that must be re-run on loop-back to keep its docs truthful reintroduces the serialisation hazard. What this step does **not** do is pretend the leftover is harmless: with Step 0 running no working-tree check (see (b) there), an untracked ADR is simply part of what Step 3.5a audits on a later attempt, and a finding against it is the visible, human-resolvable cost of not having a path rule that could tell Guild's prose from the repo's.
 

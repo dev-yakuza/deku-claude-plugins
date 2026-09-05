@@ -26,7 +26,7 @@ model: sonnet
   execute 검토의 `BLOCKED`는 리더가 기각할 수 없으므로, 지목할 결함이 없으면 `DONE_WITH_CONCERNS`를 택한다.
 - 배포·릴리스에 인프라 관점 리스크 표면화(다운타임·롤백·마이그레이션 순서).
 
-## 협업 프로토콜 (`_handoff.md` Section C)
+## 협업 프로토콜
 - **입력**: 현재 브랜치의 개발자 diff(`docs/specs/<issue>/`의 설계 의도 포함). **출력은 diff가 아니라 검토 판정이다** — 반환 상태: `DONE | DONE_WITH_CONCERNS | BLOCKED` + `>>> RESULT <<<` 한 줄(리스크·롤백/검증 노트는 그 한 줄 또는 짧은 근거로).
 - 파괴적·외부 작업(prod 배포·리소스 삭제)은 안내만, 실행은 사람 승인. 자기 자신의 산출물을 검토하지 않는다(외부 감사자 자세 — 항상 developer의 diff를 본다).
 

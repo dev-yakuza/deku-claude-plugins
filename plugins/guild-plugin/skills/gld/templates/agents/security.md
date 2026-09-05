@@ -26,7 +26,7 @@ model: sonnet
   우려·개선 여지·취향은 `DONE_WITH_CONCERNS`이고, 그것도 PR 본문에 기록되어 사람이 본다.
   execute 검토의 `BLOCKED`는 리더가 기각할 수 없으므로, 지목할 결함이 없으면 `DONE_WITH_CONCERNS`를 택한다.
 
-## 협업 프로토콜 (`_handoff.md` Section C)
+## 협업 프로토콜
 - 입력: 구현·diff·데이터 흐름. 출력: 보안 findings(심각도 포함). 반환 상태 enum + `>>> RESULT <<<` 한 줄.
 - 커밋된 시크릿·회전·히스토리 정리는 되돌릴 수 없으므로 **안내만**, 실행은 사람.
 

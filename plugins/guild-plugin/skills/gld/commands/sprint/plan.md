@@ -157,7 +157,11 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
 **Product Owner** (value):
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `product-owner sprint select`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. Propose (a) **one sentence** naming what this iteration is for, and (b) the candidates that serve it, in priority order. For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Recommend excluding any candidate with an `unclear` dimension** and say why: unattended, the leader would have to guess that gap alone. Write the result to a FILE `docs/specs/sprint-<slug>/po.md` (do not paste it back). Return one `>>> RESULT <<<` line per `_handoff.md` Section C. CANDIDATES: <number · title · one-line scope · current stage, for each>.
+  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. Propose (a) **one sentence** naming what this iteration is for, and (b) the candidates that serve it, in priority order. For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Recommend excluding any candidate with an `unclear` dimension** and say why: unattended, the leader would have to guess that gap alone. Write the result to a FILE `docs/specs/sprint-<slug>/po.md` (do not paste it back).
+  > <!-- guild:result-contract -->
+  > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
+  > <!-- /guild:result-contract -->
+  > CANDIDATES: <number · title · one-line scope · current stage, for each>.
 
 **Tech Lead** (dependencies and size):
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `tech-lead sprint select`

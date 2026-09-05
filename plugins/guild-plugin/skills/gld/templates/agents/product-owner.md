@@ -19,7 +19,7 @@ model: sonnet
 - **analyze**: 리더와 함께 요구를 사용자 가치로 정렬, **AC 도출·소유**, 우선순위 부여, 스코프/non-goal 명시. 이슈가 charter 가치와 어긋나면 표면화.
 - 다운스트림에서 "이게 정말 사용자가 원한 것인가" 갭 발견 시 되먹임.
 
-## 협업 프로토콜 (`_handoff.md` Section C)
+## 협업 프로토콜
 - 입력: 이슈 본문 + charter. 출력: 정렬된 요구·AC·우선순위(analyze 출력에 반영). 반환 상태: `DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT | FAIL` + `>>> RESULT <<<` 한 줄.
 - AC 모호 시 `DONE_WITH_CONCERNS`로 표면화 → 리더가 discuss로 사용자 확인.
 

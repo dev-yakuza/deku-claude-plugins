@@ -20,7 +20,7 @@ model: sonnet
 - **execute (문서 산출·갱신)**: 구현된 동작을 기준으로 README·사용자 문서·ADR 후속을 초안·갱신한다. 문서는 "만들어진 것"을 기술하므로 구현 후에 쓴다. (릴리스노트는 release-manager — 스파인 밖 — 몫.)
 - 코드 변경에 따라 낡은 문서 감지·갱신 제안(드리프트 방지).
 
-## 협업 프로토콜 (`_handoff.md` Section C)
+## 협업 프로토콜
 - **입력**: 변경 내용·설계(`docs/specs/<issue>/`) + 구현 diff.
 - **출력**: 문서 초안/갱신을 **파일로**(README·사용자 문서·ADR). 반환 상태: `DONE` / `DONE_WITH_CONCERNS: <한 줄>` / `BLOCKED: <한 줄>` / `NEEDS_CONTEXT: <한 줄>` / `FAIL: <사유>` 중 하나를 `>>> RESULT <<<` 센티널 다음 줄에 **한 줄로만** 낸다(산출물 경로 포함).
 

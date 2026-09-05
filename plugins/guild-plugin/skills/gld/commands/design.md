@@ -47,14 +47,22 @@ As the leader, spawn BOTH role sub-agents in a single message (two Agent tool ca
 - `prompt`:
   > Adopt the persona in `.claude/agents/tech-lead.md`. You are designing Issue #$1 for this repo. Read the analyze output (`<!-- guild:analyze:output -->` on the Issue) and `docs/standards/`. Produce the **skeleton**: module boundaries, data flow, extension seams, file structure. Write it as a FILE to `docs/specs/$1/skeleton.md` (do not paste it back). Decide whether this needs a **multi-PR split** (child issues) and note it. **If Step 0's discovery query found existing children**: <for each, in dependency order: its issue number, title, and body text — the body already states its scope + AC per the creation format below, there is no separate "scope" field to look up>. These slices are ALREADY COMMITTED (real GitHub Issues exist for them) — do NOT redecide the split from scratch or reorder/resize/rename these existing slices. Treat them as fixed and decide ONLY the remaining slice(s) needed to complete the same split, in a way that's consistent with what already exists (same dependency ordering, no scope overlap/gap with the committed ones). If on reflection the already-committed slices don't make sense to you, that's a real design conflict — return `BLOCKED: existing split slices #<n> conflict with — <reason>` instead of silently re-splitting differently.
   > This skeleton is read by the **developer**, who implements from it, and by **you** at the execute stage, where you check the finished diff against it. Write it so that the later check is decidable: state boundaries and seams as checkable items, not as prose.
-  > Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C (`DONE: skeleton at docs/specs/$1/skeleton.md — <one-line>`), or `BLOCKED:`/`NEEDS_CONTEXT:`/`FAIL:`. Write output in `config.language`.
+  >
+  > <!-- guild:result-contract -->
+  > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
+  > <!-- /guild:result-contract -->
+  > Narrowed for this spawn: `DONE: skeleton at docs/specs/$1/skeleton.md — <one-line>`, or `BLOCKED:`/`NEEDS_CONTEXT:`/`FAIL:` — this spawn does not return `DONE_WITH_CONCERNS`. Write output in `config.language`.
 
 **Tester** (test cases from AC only — do NOT read the skeleton):
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `tester cases #$1`
 - `prompt`:
   > Adopt the persona in `.claude/agents/tester.md`. Read ONLY the acceptance criteria from the analyze output (`<!-- guild:analyze:output -->`) — do NOT read the tech-lead's skeleton (bias-free test design). Write test cases (normal + edge + failure paths) as a FILE to `docs/specs/$1/test-cases.md`.
   > These cases are read by the **developer**, who turns each one into a failing test. You have not seen the implementation, so describe **observable behavior**, never internal structure.
-  > Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C. Write output in `config.language`.
+  >
+  > <!-- guild:result-contract -->
+  > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
+  > <!-- /guild:result-contract -->
+  > Write output in `config.language`.
 
 ## Step 1.5 — Conditional participants (leader assembles)
 As the leader, decide which **participation specialists** this design needs, using the assembly rules in `.claude/agents/leader.md` ("팀 조립 규칙") and `_handoff.md` Section G. Match the change surface (Issue body + AC + hotspots) against triggers:
@@ -71,7 +79,11 @@ Spawn only the matched roles (none matched → skip this step entirely; that is 
 - `prompt`:
   > Adopt the persona in `.claude/agents/<role>.md`. Contribute to the **design** of Issue #$1 for this repo. Read the analyze output (`<!-- guild:analyze:output -->`) and `docs/standards/`. Do NOT read the tech-lead's skeleton (design in parallel, from AC). Write your design contribution as a FILE to `docs/specs/$1/<role>.md` (e.g. `ux.md` for designer).
   > This document is read by the **developer**, who implements from it. If your role also runs a review gate on this change, you will check the built result against this document yourself — so write it to be checkable.
-  > Return EXACTLY one `>>> RESULT <<<` line per `_handoff.md` Section C. Write output in `config.language`.
+  >
+  > <!-- guild:result-contract -->
+  > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
+  > <!-- /guild:result-contract -->
+  > Write output in `config.language`.
 
 (The designer writes `docs/specs/$1/ux.md` per its template. If a specialist reports the area is not applicable to this change, it returns `DONE` with a one-line "해당 없음" note and no file — that is fine.)
 
