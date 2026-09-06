@@ -4002,6 +4002,16 @@ case "$(fake_run)" in
   *) bad "render: 미지 자리표시자" "거부해야 하나: $(fake_run | head -1)" ;;
 esac
 cp "$TPL" "$FAKE_TPL"
+# ⚠ 템플릿을 읽지 못할 때의 die 에 커버리지가 없었다. 그 die 를 `src = ""` 로 바꾸면
+#   **0바이트 0755 스크립트** 가 써지고 rc=0 에 `render_supervisor: wrote … (0 bytes)` 까지 나온다
+#   — 2d 가 받아들이는 바로 그 문자열이다. 크기 검사도 구제하지 않는다(`0 != 0` 은 거짓).
+#   설계가 ⚠⚠ 로 적은 "조용히 죽는 프로덕션" 이 정확히 이 모양이다.
+mv "$FAKE_TPL" "$FAKE_TPL.away"
+case "$(fake_run)" in
+  *"cannot read template"*) ok "render: 템플릿을 읽지 못하면 렌더하지 않고 죽는다" ;;
+  *) bad "render: 템플릿 읽기 실패" "'cannot read template' 를 기대했으나: $(fake_run | head -1)" ;;
+esac
+mv "$FAKE_TPL.away" "$FAKE_TPL"
 
 # 잘린 쓰기 — getsize 를 거짓말시켜 크기 검사에만 도달한다. 이 검사가 2d 가 받는 유일한 신호다.
 mkdir -p "$WORK/liar"
@@ -4235,7 +4245,7 @@ fi
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=326
+SUP_MIN_CHECKS=327
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

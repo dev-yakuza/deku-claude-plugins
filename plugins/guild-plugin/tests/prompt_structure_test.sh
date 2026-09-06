@@ -1258,6 +1258,19 @@ import glob, os, re, sys
 gld = sys.argv[1]
 STATUS = {"DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT", "FAIL"}
 SENT = ">>> RESULT <<<"
+# ⚠ 일반 대문자 토큰으로 뽑는다. 예전 판은 다섯 이름만 열거한 alternation 으로 뽑아 놓고
+#   `names <= STATUS` 를 검사했다 — **정의상 항상 참인 죽은 코드** 였다. `| \`DEFERRED\`` 를
+#   덧붙여도 열 스위트가 그린이었고, 그 페르소나는 `.claude/agents/` 에 설치되므로 서브에이전트가
+#   소비자 규칙이 호출 실패로 분류하는 상태를 반환하게 된다. 같은 파일의 `enum.py` 는 처음부터
+#   일반 토큰 + 부정목록으로 옳게 하고 있었다.
+# 상태처럼 생겼지만 상태가 아닌 것들 — 확장 시 여기에 추가한다(`enum.py` 와 같은 규칙).
+NOT_STATUS = {"RESULT", "OK", "SOURCE", "CANDIDATES", "AC", "PR", "QA", "UI", "UX", "E2E",
+              "JSON", "TDD", "HTML", "INV", "README", "BLOCKER", "GLD_UNATTENDED", "CI", "API",
+              "ADR", "DOMAIN", "HITL", "LEADER_NOTES", "NEEDS_HUMAN", "PROJECT_NAME"}
+# ⚠ 백틱을 요구하지 않는다. 페르소나는 다섯 개를 `` `A | B | C` `` 처럼 **한 쌍의 백틱 안에**
+#   적으므로, 백틱 앞머리를 요구하면 첫 이름만 잡혀 열거 형태 판정이 무너진다(실측: full 10 -> 6).
+TOKEN = re.compile(r"\b([A-Z][A-Z_]{2,})\b")
+
 problems, checked, full, partial = [], 0, 0, 0
 for f in sorted(glob.glob(os.path.join(gld, "templates/agents/*.md"))):
     rel = os.path.basename(f)
@@ -1269,10 +1282,10 @@ for f in sorted(glob.glob(os.path.join(gld, "templates/agents/*.md"))):
     #   서브에이전트가 아니라 메인 세션이 체현하는 역할이라 상태를 **반환하지 않고 읽는다** —
     #   센티널이 없는 것이 맞다. enum 이름 정합은 그대로 검사한다.
     if rel == "leader.md":
-        names = set(re.findall(r"\b(DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED|DONE|FAIL)\b", body))
-        if names and not names <= STATUS:
+        foreign = set(TOKEN.findall(body)) - NOT_STATUS - STATUS
+        if foreign:
             problems.append("leader.md names %s, not in the Section C enum"
-                            % ",".join(sorted(names - STATUS)))
+                            % ",".join(sorted(foreign)))
         if SENT in body:
             problems.append("leader.md gained a `%s` sentinel — it embodies the main session and "
                             "reads statuses, it does not return them" % SENT)
@@ -1281,9 +1294,14 @@ for f in sorted(glob.glob(os.path.join(gld, "templates/agents/*.md"))):
     if SENT not in body:
         problems.append("%s mentions a return status but not the exact `%s` sentinel" % (rel, SENT))
     for l in hits:
-        names = set(re.findall(r"\b(DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED|DONE|FAIL)\b", l))
-        if names and not names <= STATUS:
-            problems.append("%s names %s, not in the Section C enum" % (rel, ",".join(sorted(names - STATUS))))
+        # 적합성(외래 토큰)과 형태(다섯 중 몇 개)를 **따로** 센다. 한 집합으로 겸하면
+        # 무관한 대문자 토큰 하나가 열거 형태 판정을 통째로 뒤흔든다.
+        toks = set(TOKEN.findall(l)) - NOT_STATUS
+        foreign = toks - STATUS
+        if foreign:
+            problems.append("%s names %s, not in the Section C enum"
+                            % (rel, ",".join(sorted(foreign))))
+        names = toks & STATUS
         if names == STATUS:
             full += 1
         elif names:
@@ -1373,7 +1391,11 @@ hasfx "run.md: 산문 열거 둘째 줄(||·&·개행)" "$RUNMD2" '`&&`, `||`, `
 hasfx "scan_repo.md: 백틱도 shell substitution 으로 처방된다" "$GLD/commands/atoms/scan_repo.md" \
   '**Shell substitution** — `$(...)` **or backticks**'
 hasfx "run.md: 금지 목록이 init.md 것과 같음을 명시한다" "$RUNMD2" \
-  "rejects exactly \`init.md:163\`'s ban list, and nothing beyond it"
+  "rejects \`init.md:163\`'s ban list"
+# ⚠ "exactly … and nothing beyond it" 은 세 번째로 틀렸다. `_METACHAR` 는 파서가 아니라 **문자
+#   클래스** 라, 인용부호 안의 메타문자도 거부한다(`jest -t "renders <Button/>"`). 그 사실을
+#   적었는지 함께 건다 — 안 적으면 다음 사람이 또 "정확히 그것만" 으로 되돌린다.
+hasfx "run.md: 문자 클래스라는 한계를 밝힌다" "$RUNMD2" 'It is a **character class**, not a parser'
 hasfx "run.md: 글롭·\$VAR·~ 가 합법임을 명시한다" "$RUNMD2" 'Globs, `$VAR` and `~` are legal and pass'
 hasfx "run.md: --order 도 숫자만 받는다는 것이 표에 있다" "$RUNMD2" 'Each value is **digits only**, same as `--tracker`'
 # ⚠ 2d 가드 **자체**를 고정한다. 스위트는 그 가드가 읽는 신호의 *생산자* 만 고정하고 있었다
@@ -1444,7 +1466,12 @@ canon = lines[o+1:c]
 problems = []; total = 0
 if len(canon) != 1:
     problems.append("canonical block is %d lines, want 1" % len(canon))
-for f in sorted(_glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)):
+# ⚠ `templates/agents/` 도 훑는다. 서브에이전트 정의가 실제로 사는 곳인데 두 훑기 모두
+#   `commands/` 에서 멈춰 있었다 — 라운드 9 가 `review.md` 에서 잡은 13번째 펜스를 한 디렉터리
+#   옆으로 옮기면 그대로 통과했다(실측).
+SCAN = (_glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)
+        + _glob.glob(os.path.join(gld, "templates/agents/*.md")))
+for f in sorted(SCAN):
     rel = os.path.relpath(f, gld)
     if rel == "commands/atoms/_handoff.md":
         continue                      # 정본 자신
@@ -1463,10 +1490,13 @@ if total != 12:
                     "vanished; update this number deliberately" % total)
 # 스폰 프롬프트 안의 센티널은 **정확히 하나** 여야 한다. 펜스 본문이 정본과 같아도, 펜스 밖
 # 블록쿼트에 다른 센티널을 적어 넣으면 서브에이전트는 그것을 따른다.
-for f in sorted(_glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)):
+for f in sorted(SCAN):
     rel = os.path.relpath(f, gld)
     for n, l in enumerate(open(f, encoding="utf-8").read().split("\n"), 1):
-        if not re.match(r"^\s*>", l):
+        # 페르소나는 블록쿼트가 아니라 본문에 센티널을 적는다 — 그래서 `^>` 로 거르면 안 된다.
+        if rel.startswith("templates/agents/"):
+            pass
+        elif not re.match(r"^\s*>", l):
             continue
         for m in re.findall(r">>>\s*([A-Z_]+)\s*<<<", l):
             if m != "RESULT":
@@ -1632,8 +1662,11 @@ for f in sorted(glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)
         sites += 1
         if not toks <= TABLE:
             problems.append("%s:%d names %s, not in Section C" % (rel, n, ",".join(sorted(toks - TABLE))))
-if sites < 7:
-    problems.append("only %d reduction sites, want >= 7 — a narrowing sentence was dropped" % sites)
+# ⚠ 라운드 9 의 규칙 ①(바닥선은 측정값과 같게)이 여기만 빠져 있었다 — 8번째 축소 사이트가
+#   생겨도 통과했다.
+if sites != 7:
+    problems.append("found %d reduction sites, expected exactly 7 — one appeared or was dropped"
+                    % sites)
 print("OK %d" % sites if not problems else "PROBLEMS " + " | ".join(problems))
 PYE
 OUTE="$("$PY" "$WORK3/enum.py" "$GLD")"
@@ -1648,7 +1681,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=245   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=246   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

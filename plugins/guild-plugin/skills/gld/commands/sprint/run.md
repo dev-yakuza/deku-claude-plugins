@@ -275,9 +275,13 @@ inside its own worktree.
    **First normalize `config.commands`.** `init` stores each value as a simple string or an
    **array** of simple steps, but an older install can still hold a raw compound value
    (`_handoff.md` Section E step 1 tells the human to split those by hand). The renderer
-   **rejects exactly `init.md:163`'s ban list, and nothing beyond it** — `$(...)`, backticks,
+   **rejects `init.md:163`'s ban list** — `$(...)`, backticks,
    `&&`, `||`, `|`, `;`, `<`, `>`, `&`, newlines — so an unnormalized value does not degrade: **step
-   2 exits non-zero and 2d stops the run.** ⚠ **Globs, `$VAR` and `~` are legal and pass.**
+   2 exits non-zero and 2d stops the run.** ⚠ It is a **character class**, not a parser: it
+   refuses those characters anywhere in the value, including inside quotes — so
+   `jest -t "renders <Button/>"` is refused even though nothing is being chained. Drop or
+   rephrase such a flag, as `scan_repo.md` §2 already prescribes for `$(...)`.
+   ⚠ **Globs, `$VAR` and `~` are legal and pass.**
    `init.md` permits them and the template's `eval` expands them against the worktree, which is
    the intended behaviour. Rejecting them was tried and reverted: it made `eslint src/**/*.ts`
    and `rm -rf build/*` — both init-conformant — unstartable, worse than what it fixed.
