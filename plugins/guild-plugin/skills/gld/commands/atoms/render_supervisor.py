@@ -69,7 +69,7 @@ import sys
 #
 # 라운드 1~4 에서 리뷰어 제안을 받아 `$VAR`·`~`·글롭(`* ? {} []`)을 차례로 추가했다. 근거는
 # "eval 이 확장하면 실행되는 명령이 설정 리터럴과 달라진다" 였는데, **init.md 를 확인하지
-# 않았다.** init 이 저장을 금지하는 것은 `$(...)`·`&&`·`|`·`;`·리다이렉션뿐이고, 글롭은
+# 않았다.** init 이 저장을 금지하는 것은 `$(...)`·백틱·`&&`·`||`·`|`·`;`·`&`·개행·리다이렉션뿐이고, 글롭은
 # 명시적으로 허용된다. 그래서 그 추가들은 `eslint src/**/*.ts` 나 `rm -rf build/*` 처럼
 # **완전히 정상인 config 를 가진 레포에서 `/gld sprint run` 을 기동 불가**로 만들었다 —
 # step 2 가 non-zero 로 끝나고 2d 가 실행을 세우는데, run.md 의 처방(복합 명령 쪼개기)은
@@ -388,6 +388,12 @@ def main():
         os.close(fd)
         die("cannot stat %s (%s)" % (out, exc))
 
+    # ⚠ 커버리지 없음, 기록해 둔다. 아래 세 곳의 `encoding="utf-8"`(이 fdopen, 템플릿 읽기,
+    # plugin.json 읽기)은 지워도 열 스위트가 전부 그린이다. `PYTHONIOENCODING` 은 표준 스트림만
+    # 지배하므로 `open()` 의 기본 인코딩을 결정적으로 바꿀 손잡이가 없고(이 상자에서는 `LC_ALL=C`,
+    # `PYTHONCOERCECLOCALE=0`, `LC_ALL=en_US.ISO8859-1` 어디서도 preferredencoding 이 utf-8 이었다),
+    # 그래서 살아 있는 회귀를 만들 수 없다. stdout 쪽 회귀는 실재했으므로(라운드 2) 이 인자들도
+    # 남겨 둔다 — 다만 "테스트가 지킨다" 고 믿지는 말 것.
     try:
         os.ftruncate(fd, 0)   # 검사를 통과한 뒤에야 자른다
         fh = os.fdopen(fd, "w", encoding="utf-8")

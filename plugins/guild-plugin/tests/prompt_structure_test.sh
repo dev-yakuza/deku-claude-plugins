@@ -607,18 +607,33 @@ hasfx "run.md: 값을 인용하지 말라고 말한다" "$RUNMD2" "Do not quote 
 hascode "template: 설정 파일을 읽는다" "$TPL" 'BOARD_CONF="$HUMAN_REPO/.claude/guild/.gld-sprint-$TRACKER.board"'
 # 11a. 보드를 끌 때는 파일을 **지워야** 한다. 안 쓰기만 하면 낡은 파일이 읽혀 보드가 켜진다.
 hasfx "run.md: 보드가 null 이면 설정 파일을 지운다" "$RUNMD2" "rm -f .claude/guild/.gld-sprint-<tracker>.board"
-# 11b. run.md 가 요구하는 열 개 키와 템플릿의 case 분기가 일치한다 — 한쪽만 늘면 조용히 빈다
-BOARD_KEY_MISS=""
-for K in number owner field field_needs_human verified_as \
-         col_ready col_in_progress col_blocked col_in_review col_done; do
-  grep -qF -- "$K=" "$RUNMD2" || BOARD_KEY_MISS="$BOARD_KEY_MISS run.md:$K"
-  grep -qE "^ +$K\)" "$TPL"  || BOARD_KEY_MISS="$BOARD_KEY_MISS tpl:$K"
-done
-if [ -z "$BOARD_KEY_MISS" ]; then
-  ok "보드 설정 키 10개가 run.md 와 템플릿 양쪽에 있다"
-else
-  bad "보드 설정 키 불일치" "all present" "missing:$BOARD_KEY_MISS"
-fi
+# 11b. run.md 가 쓰는 키와 템플릿이 읽는 키가 **같은 집합인가.**
+# ⚠ 옛 판은 열 개 이름을 손으로 적어 놓고 양쪽에 있는지만 봤다. 그래서 주석이 말하는
+#   "한쪽만 늘면 조용히 빈다" 를 정작 탐지하지 못했다 — run.md 에만 `col_icebox=` 를 더해도,
+#   템플릿에만 `col_icebox)` 를 더해도 234/0 그린이었다(실측). 양쪽에서 **집합을 뽑아** 비교한다.
+cat > "$WORK3/boardkeys.py" <<'PYBK'
+import re, sys
+runmd, tpl = sys.argv[1], sys.argv[2]
+# run.md step 2b 의 conf 본문: `<key>=<...>` 형태의 줄
+wrote = set(re.findall(r"^\s{2,}([a-z][a-z0-9_]*)=<", open(runmd, encoding="utf-8").read(), re.M))
+# 템플릿의 conf 파서: `<key>)` case 분기
+read = set(re.findall(r"^\s+([a-z][a-z0-9_]*)\)", open(tpl, encoding="utf-8").read(), re.M))
+read = {k for k in read if k == "number" or k == "owner" or k.startswith(("field", "col_", "verified"))}
+problems = []
+if len(wrote) < 10:
+    problems.append("run.md yielded only %d keys (%s) — the extraction broke"
+                    % (len(wrote), ",".join(sorted(wrote))))
+if wrote - read:
+    problems.append("run.md writes keys the template never reads: %s" % ",".join(sorted(wrote - read)))
+if read - wrote:
+    problems.append("template reads keys run.md never writes: %s" % ",".join(sorted(read - wrote)))
+print("OK %d keys" % len(wrote) if not problems else "PROBLEMS " + " | ".join(problems))
+PYBK
+OUTBK="$("$PY" "$WORK3/boardkeys.py" "$RUNMD2" "$TPL")"
+case "$OUTBK" in
+  OK*) ok "보드 설정 키가 run.md 와 템플릿에서 같은 집합이다 (${OUTBK#OK })" ;;
+  *)   bad "보드 설정 키 집합 일치" "OK" "$OUTBK" ;;
+esac
 
 # 11c. 중복 실행 가드의 cmdline 매치 문자열이 실제로 디스크에 써지는 스크립트 이름의
 #      부분문자열이어야 한다. 마커의 `pid` 는 감독자 스크립트 자신의 `$$`(template 의
@@ -673,7 +688,7 @@ INITMD="$GLD/commands/init.md"
 for F in "$HANDOFF" "$DAILY" "$RETRO" "$PLAN" "$BOARD"; do
   hasfx "창 토큰이 $(basename "$F") 에 열거돼 있다" "$F" "waiting-for-window-"
 done
-# ⚠ 인접성 스코프. 파일 전체 grep 이면 다른 언급(예: 거부 문구)이 남아 통과하고, `plan.md:44`
+# ⚠ 인접성 스코프. 파일 전체 grep 이면 다른 언급(예: 거부 문구)이 남아 통과하고, `plan.md:23`
 #   의 `proceed` 로 떨어지는 파괴적 변이를 놓친다 — 6라운드 실측.
 cat > "$WORK3/adj.py" <<'ADJPY'
 import re, sys
@@ -1090,18 +1105,216 @@ RSPY="$GLD/commands/atoms/render_supervisor.py"
 hasfx "render_supervisor.py: _METACHAR 가 init.md 목록과 정확히 같다" "$RSPY" \
   '_METACHAR = re.compile(r"\$\(|`|&&|\|\||[|;<>&\n]")'
 lacksfx "render_supervisor.py: 글롭을 다시 막지 않았다 (과잉 차단 회귀)" "$RSPY" '*?{}'
-# ⚠ 이 목록을 열거하는 곳은 **다섯** 이다. 라운드 6 은 셋만 맞추고 검사도 셋만 고정했다 —
-#   그래서 `render_supervisor.py` 헤더(init.md 를 인용한다고 적어 놓고 옛 다섯 항목)와
-#   `run.md` 의 `--install-cmd` 셀(같은 파일 24줄 위와 모순)이 낡은 채 그린이었다. 실측:
-#   run.md 의 열거를 옛 다섯 개로 되돌려도 231/0 · 321/0. 이제 네 인용을 한 문자열로 함께 건다.
+# ⚠ 파일을 **열거하는** 검사는 세 라운드 연속으로 사이트를 놓쳤다: 라운드 6 은 다섯 중 셋을
+#   맞췄고, 라운드 7 은 "다섯 곳" 을 훑어 일곱 중 다섯을 맞췄으며, 그때 놓친 하나는 라운드 6 이
+#   직접 쓴 줄이었다. 목록을 손으로 적는 한 같은 일이 반복된다.
+#   → **발견하는** 검사로 바꾼다. 트리 전체를 훑어 금지 목록처럼 생긴 줄을 전부 찾고, 그것이
+#     `config.commands` 계약을 말하는 것이면 정본 열거와 일치할 것을 요구한다. 분류할 수 없는
+#     사이트는 **통과가 아니라 실패** 다 — 새 사이트가 조용히 생기는 것을 막는 유일한 방법이다.
+cat > "$WORK3/banlist.py" <<'PYBAN'
+import os, sys
+gld = sys.argv[1]
+# 정본 아홉 항목. 각 항목마다 **허용되는 표기** 를 함께 적는다 — 같은 규칙을 영문/한글로,
+# 낱말로/기호로 적은 판이 실제로 공존하고, 그것들은 전부 정당하다.
+ITEMS = [
+    ("substitution", ["$(...)", "$(…)"]),
+    ("backtick",     ["backtick", "백틱", "`..`", "`…`"]),
+    ("&&",           ["⺠AND⺠"]),
+    ("||",           ["⺠OR⺠"]),
+    ("|",            ["|"]),
+    (";",            [";"]),
+    ("&",            ["&"]),
+    ("newline",      ["newline", "개행", "\\n"]),
+    ("redirection",  ["redirection", "리다이렉션", "`<`, `>`"]),
+]
+# 금지 목록을 **도입하는** 어구. 토큰 개수로 찾으면 실제 셸 코드가 12건 오검출된다.
+LEAD = ("MUST NOT contain", "must not contain", "never contains", "forbids",
+        "저장을 금지하는", "ban list")
+BASHRULE = ("_bash_rules.md", "simple calls only", "simple Bash tool call", "one simple call",
+            "its own simple Bash", "each its own Bash call", "its own Bash call")
+def norm(t):
+    # `&&`/`||` 를 먼저 치환해야 낱개 `&`/`|` 검사가 그것들에 흡수되지 않는다.
+    return t.replace("&&", "⺠AND⺠").replace("||", "⺠OR⺠")
+problems, sites = [], 0
+for root, dirs, files in os.walk(gld):
+    dirs[:] = [d for d in dirs if d != "__pycache__"]
+    for f in sorted(files):
+        if not f.endswith((".md", ".py", ".sh")):
+            continue
+        path = os.path.join(root, f)
+        rel = os.path.relpath(path, gld)
+        lines = open(path, encoding="utf-8", errors="replace").read().split("\n")
+        for n, line in enumerate(lines, 1):
+            if not any(k in line for k in LEAD):
+                continue
+            # 열거가 두 줄에 걸치는 곳이 있다(run.md 산문, die() 문자열). 창으로 본다.
+            win = " ".join(lines[n - 1:n + 2])
+            # `$(...)` 표기가 없으면 금지 목록 문장이 아니다 — "INV5 forbids leaving the machine"
+            # 같은 무관한 `forbids` 를 여기서 떨어뜨린다.
+            if not any(v in win for v in ITEMS[0][1]):
+                continue
+            ctx = "\n".join(lines[max(0, n - 4):n + 2])
+            if any(k in ctx for k in BASHRULE) and "commands" not in win:
+                continue
+            sites += 1
+            w = norm(win)
+            missing = [name for name, spellings in ITEMS
+                       if not any(sp in w for sp in (norm(x) for x in spellings))]
+            if missing:
+                problems.append("%s:%d enumerates the ban list but omits %s"
+                                % (rel, n, ",".join(missing)))
+if sites < 8:
+    problems.append("only %d ban-list sites found, expected >= 8 — the scan broke" % sites)
+print("OK sites=%d" % sites if not problems else "PROBLEMS " + " | ".join(problems))
+PYBAN
+# ── file:line 인용이 여전히 그 줄을 가리키는가 ────────────────────────────────
+# 실측: `_bash_rules.md` 의 예외 목록 위에 두 줄만 끼워 넣으면 인용 다섯 건이 전부 어긋나는데
+# **열 개 스위트가 전부 rc=0** 이었다. 인용을 지키는 검사가 하나도 없었다.
+# 사이트를 손으로 적지 않는다 — 트리에서 찾고, 표에 없는 인용은 통과가 아니라 실패다.
+cat > "$WORK3/cites.py" <<'PYCITE'
+import os, re, sys
+gld = sys.argv[1]
+# 인용 -> 그 줄에 반드시 있어야 하는 조각. 새 인용이 생기면 여기에 항목을 추가해야 한다.
+EXPECT = {
+    ("_bash_rules.md", 85): "A generated OS-level",
+    ("_bash_rules.md", 87): "guild:auditor-violation",
+    ("board_write.py", 4):  "Why this is code and not a series of Bash calls",
+    ("config.md", 14):      "unknown/unsupported config key",
+    ("init.md", 163):       "normalized, simple-bash-safe",
+    ("run.md", 78):         "Not already running",
+    ("sprint.md", 31):      "unknown subcommand",
+}
+pat = re.compile(r"`?([A-Za-z_][A-Za-z0-9_./-]*\.(?:md|py|sh|json))`?:(\d+)")
+idx = {}
+found = {}
+for root, dirs, files in os.walk(gld):
+    dirs[:] = [d for d in dirs if d != "__pycache__"]
+    for f in files:
+        idx.setdefault(f, []).append(os.path.join(root, f))
+        if not f.endswith((".md", ".py", ".sh")):
+            continue
+        path = os.path.join(root, f)
+        for line in open(path, encoding="utf-8", errors="replace").read().split("\n"):
+            for m in pat.finditer(line):
+                found.setdefault((m.group(1), int(m.group(2))), 0)
+                found[(m.group(1), int(m.group(2)))] += 1
+problems = []
+for key, count in sorted(found.items()):
+    f, n = key
+    if key not in EXPECT:
+        problems.append("%s:%d cited %dx but is not in the table — add it or fix the citation"
+                        % (f, n, count))
+        continue
+    tgt = idx.get(f, [])
+    if len(tgt) != 1:
+        problems.append("%s resolves to %d files; cannot verify :%d" % (f, len(tgt), n))
+        continue
+    lines = open(tgt[0], encoding="utf-8", errors="replace").read().split("\n")
+    if n - 1 >= len(lines):
+        problems.append("%s:%d is past EOF (%d lines)" % (f, n, len(lines)))
+    elif EXPECT[key] not in lines[n - 1]:
+        problems.append("%s:%d no longer contains %r — it drifted" % (f, n, EXPECT[key]))
+for key in EXPECT:
+    if key not in found:
+        problems.append("%s:%d is in the table but nothing cites it — stale table entry" % key)
+print("OK %d citations" % len(found) if not problems else "PROBLEMS " + " | ".join(problems))
+PYCITE
+# ── 페르소나 16종의 센티널과 상태 enum ────────────────────────────────────────
+# `_handoff.md` 는 정확한 `>>> RESULT <<<` 센티널이 없는 응답을 **호출 실패** 로 분류한다.
+# 그런데 16개 템플릿의 센티널·enum 은 어느 검사도 보지 않았다 — `>>> OUTCOME <<<` 로 바꿔도
+# 세 스위트가 전부 그린이었다(실측). 그 역할의 모든 반환이 실패하게 되는 드리프트다.
+cat > "$WORK3/persona_enum.py" <<'PYPE'
+import glob, os, re, sys
+gld = sys.argv[1]
+STATUS = {"DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT", "FAIL"}
+SENT = ">>> RESULT <<<"
+problems, checked, full, partial = [], 0, 0, 0
+for f in sorted(glob.glob(os.path.join(gld, "templates/agents/*.md"))):
+    rel = os.path.basename(f)
+    body = open(f, encoding="utf-8").read()
+    hits = [l for l in body.split("\n") if "반환 상태" in l or "RESULT" in l]
+    if not hits:
+        continue
+    # ⚠ leader 는 세 번째로 같은 예외다(2차 포인터·개명 원장에 이어). 리더는 스폰되는
+    #   서브에이전트가 아니라 메인 세션이 체현하는 역할이라 상태를 **반환하지 않고 읽는다** —
+    #   센티널이 없는 것이 맞다. enum 이름 정합은 그대로 검사한다.
+    if rel == "leader.md":
+        names = set(re.findall(r"\b(DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED|DONE|FAIL)\b", body))
+        if names and not names <= STATUS:
+            problems.append("leader.md names %s, not in the Section C enum"
+                            % ",".join(sorted(names - STATUS)))
+        if SENT in body:
+            problems.append("leader.md gained a `%s` sentinel — it embodies the main session and "
+                            "reads statuses, it does not return them" % SENT)
+        continue
+    checked += 1
+    if SENT not in body:
+        problems.append("%s mentions a return status but not the exact `%s` sentinel" % (rel, SENT))
+    for l in hits:
+        names = set(re.findall(r"\b(DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED|DONE|FAIL)\b", l))
+        if names and not names <= STATUS:
+            problems.append("%s names %s, not in the Section C enum" % (rel, ",".join(sorted(names - STATUS))))
+        if names == STATUS:
+            full += 1
+        elif names:
+            partial += 1
+        # 부분집합 위반만 여기서 잡는다. 축소 자체는 정당할 수 있다 — `infra.md` 는 검토 전용이라
+        # `DONE | DONE_WITH_CONCERNS | BLOCKED` 로 좁히고 그 근거를 바로 위에 적어 둔다.
+        # ⚠ 그러면 "다섯 → 둘" 같은 **드리프트** 는 부분집합 검사로 못 잡는다. 그래서 아래에
+        #   전량 열거 페르소나 수의 바닥선을 따로 둔다. 처음 쓴 판은 "전부 아니면 전무" 라는
+        #   규칙을 넣었다가 첫 실행에서 infra.md 를 잡았고, 틀린 쪽은 사실이 아니라 규칙이었다.
+if checked < 14:
+    problems.append("only %d persona templates carried a return-status line — the scan broke" % checked)
+# ⚠ 전량 열거 페르소나 수의 바닥선. 부분집합 검사만으로는 `DONE | DONE_WITH_CONCERNS | BLOCKED
+#   | NEEDS_CONTEXT | FAIL` 이 `DONE | BLOCKED` 로 줄어드는 드리프트를 못 잡는다(실측: 그린이었다).
+#   오늘 열 개가 전량 열거이고, 축소가 정당한 곳은 infra 하나다. 의도적으로 바꿀 때만 조정한다.
+if full < 10:
+    problems.append("only %d personas enumerate all five statuses (expected >= 10) — one narrowed"
+                    % full)
+if partial > 1:
+    problems.append("%d personas enumerate a strict subset (expected 1, infra.md — review-only)"
+                    % partial)
+# 소비자 쪽 규칙도 같은 다섯을 알아야 한다.
+ho = open(os.path.join(gld, "commands/atoms/_handoff.md"), encoding="utf-8").read()
+i = ho.find("Sentinel present, but the next non-empty line is not")
+if i < 0:
+    problems.append("_handoff.md lost the consumer rejection rule")
+else:
+    seg = ho[i:i + 400]
+    miss = [s for s in STATUS if s not in seg]
+    if miss:
+        problems.append("_handoff.md consumer rule omits %s" % ",".join(sorted(miss)))
+print("OK %d personas" % checked if not problems else "PROBLEMS " + " | ".join(problems))
+PYPE
+OUTPE="$("$PY" "$WORK3/persona_enum.py" "$GLD")"
+case "$OUTPE" in
+  OK*) ok "페르소나의 센티널·상태 enum 이 정본과 일치한다 (${OUTPE#OK })" ;;
+  *)   bad "페르소나 센티널·enum 정합" "OK" "$OUTPE" ;;
+esac
+
+OUTCI="$("$PY" "$WORK3/cites.py" "$GLD")"
+case "$OUTCI" in
+  OK*) ok "file:line 인용이 전부 여전히 그 줄을 가리킨다 (${OUTCI#OK })" ;;
+  *)   bad "file:line 인용 정합" "OK" "$OUTCI" ;;
+esac
+
+OUTB="$("$PY" "$WORK3/banlist.py" "$GLD")"
+case "$OUTB" in
+  OK*) ok "금지 목록을 열거하는 모든 사이트가 정본과 일치한다 (${OUTB#OK })" ;;
+  *)   bad "금지 목록 사이트 전수 일치" "OK" "$OUTB" ;;
+esac
+# 정본 문자열 자체는 여전히 글자 그대로 건다 — 위 검사는 *구성 요소* 를 보므로 어순이나
+# 표현이 바뀌어도 통과한다. 둘 다 필요하다.
 BANLIST='MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections'
 for BF in "commands/init.md" "commands/atoms/scan_repo.md" "commands/atoms/render_supervisor.py" \
           "commands/sprint/run.md"; do
   hasfx "$BF: 금지 목록이 정본과 글자 그대로 같다" "$GLD/$BF" "$BANLIST"
 done
-# run.md:278 의 산문 열거도 함께 — 여기만 표현이 다르므로 따로 건다.
-hasfx "run.md: 산문 열거도 백틱·||·&·개행을 포함한다" "$RUNMD2" \
-  '`$(...)`, backticks,'
+# run.md 산문 열거는 **두 줄** 이다. 라운드 7 은 첫 줄만 걸었고, 그 검사의 제목이 주장하는
+# `||`·`&`·개행은 정작 둘째 줄에 있어 보호되지 않았다 — 라운드 7 의 발견이 한 단계 아래에서
+# 그대로 재현된 것이다. 두 줄을 다 건다.
+hasfx "run.md: 산문 열거 첫 줄(백틱)" "$RUNMD2" '`$(...)`, backticks,'
+hasfx "run.md: 산문 열거 둘째 줄(||·&·개행)" "$RUNMD2" '`&&`, `||`, `|`, `;`, `<`, `>`, `&`, newlines'
 # ⚠ 백틱은 `$(...)` 의 옛 표기인데 두 계약 문서 어디에도 없었고 집행기는 거부하고 있었다.
 #   "exactly … and nothing more" 를 문자 그대로 믿은 다음 사람이 _METACHAR 를 다섯 개로 좁히면
 #   `` `id` `` 가 템플릿의 `eval "$IC"` 에 닿는다. 세 문서를 같은 목록으로 맞추고 함께 고정한다.
@@ -1364,7 +1577,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=234   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=238   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

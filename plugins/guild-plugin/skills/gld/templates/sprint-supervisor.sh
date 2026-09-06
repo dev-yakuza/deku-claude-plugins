@@ -36,7 +36,9 @@ WAIT_MAX=14400                        # 4h ceiling on ANY single rate-limit wait
 # `commands` entries are already allowed to be arrays of steps (init.md P2 §1), and an empty
 # inline substitution is a PARSE-time error — `( cd "$WT" && <EMPTY> )` cannot be guarded at
 # runtime. Each element is `eval`ed, which is safe here precisely because config normalisation
-# forbids `$(…)`, `&&`, `|`, `;` and redirections in these values.
+# forbids `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections in these
+# values. (Word expansion — globs, `$VAR`, `~` — IS permitted and IS expanded here; that is
+# intended. `init.md:163` is the contract; `render_supervisor.py` re-checks it.)
 INSTALL_CMDS=(<INSTALL_CMDS>)
 
 # ── Board projection config (03-sprint-board.md §7.2) ────────────────────────

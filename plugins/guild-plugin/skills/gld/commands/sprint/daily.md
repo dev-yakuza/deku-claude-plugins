@@ -280,7 +280,7 @@ ps -p <pid> -o command=
 | `host` differs | **확인할 수 없습니다** — 로컬로 검증 불가 |
 
 ⚠ **Do not collapse the last three into *"죽었습니다"*.** Following that advice starts a second
-supervisor against a first one that is alive on another host — the outcome `run.md:88` forbids.
+supervisor against a first one that is alive on another host — the outcome `run.md:78` forbids.
 
 ⚠ **The match string is `.gld-sprint-`, and it is NOT copied from `run.md`'s prose.** The two
 copies say the same thing for the same reason but they are separate strings: what `ps` prints is

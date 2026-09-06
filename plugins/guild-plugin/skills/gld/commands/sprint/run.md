@@ -17,7 +17,7 @@ The known flags are **`--readiness`** · **`--window`** · **`--duration`** (= a
   --duration=<same>`. Today an unknown flag is silently dropped and the run starts, and the
   destructive case is the requirement's own spelling: `--duration 22:00-10:00` ignored leaves
   no non-flag argument, which reads as *"resume the active sprint"* and starts a **24-hour
-  unattended run with no window at all**. `sprint.md:31` and `config.md:13` already have the
+  unattended run with no window at all**. `sprint.md:31` and `config.md:14` already have the
   *"unknown → report it"* convention.
 - ⚠ **A flag's VALUE token is not counted as a non-flag argument.** Consume the value first,
   then look for the first non-flag token in what is left. (In `--window 22:00-10:00`, if
