@@ -736,6 +736,43 @@ else
       "a resume would drop done members and silently lose the PR stack"
 fi
 
+# ── ... and it says what SHAPE that file is ─────────────────────────────────
+# The step above pins WHICH members go in the file and said nothing about the container they
+# go in. `run.md` shows the `sprint_dag.py --input` object — `{"members": [...]}` — many times
+# over, and an LLM caller with no instruction to the contrary reaches for it: the supervisor
+# then iterates the dict's KEYS and every member dies on `TypeError: string indices must be
+# integers` before one child session starts (measured on a real repo, 6/6 failed in 65s).
+# ⚠ Tokens, not a frozen sentence — same reason as the check above. What must survive a
+# re-phrasing is (a) the word ARRAY/배열 near the top level, (b) a literal example whose first
+# non-space character is `[`, and (c) an explicit disclaimer of the wrapped form.
+if "$PY" - "$RUNMD" <<'SHAPEPY'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"^1\.\s+\*\*Write `members\.json`\*\*(.*?)^\s*2\.\s", src, re.M | re.S)
+if not m:
+    print("no numbered `Write members.json` step found", file=sys.stderr)
+    raise SystemExit(1)
+step = m.group(1)
+says_array = re.search(r"\b(bare\s+)?(json\s+)?array\b|배열", step, re.I)
+# A fenced example that actually opens with `[` — a prose claim with no sample is what the
+# previous version effectively had, and it is exactly what was mis-read.
+has_example = re.search(r"```(?:json)?\s*\[", step)
+# The wrapped form must be named and refused, not merely omitted.
+refuses_object = re.search(r'\{\s*"members"', step) and re.search(
+    r"\bNOT\b|not interchangeable|wrong here|do not (wrap|reshape)", step)
+missing = [n for n, v in (("array", says_array), ("example", has_example),
+                          ("refusal", refuses_object)) if not v]
+if missing:
+    print("members.json shape not pinned: missing %s" % ", ".join(missing), file=sys.stderr)
+raise SystemExit(1 if missing else 0)
+SHAPEPY
+then
+  ok "run.md pins members.json's TOP-LEVEL SHAPE (bare array, not the --input object)"
+else
+  bad "run.md pins members.json's top-level shape" \
+      "the wrapped form fails every member with dag-input-failed before any child starts"
+fi
+
 # ── an ambiguous branch is a BLOCK, and it reports its own reason ───────────
 cat > "$WORK/amb.py" <<'AMBPY'
 import re, sys
@@ -1705,6 +1742,70 @@ if [ "$BOARD_RDY_N" -eq 2 ]; then
   ok "I: both dependency-blocked branches repair a stale card to ready"
 else
   bad "I: the ready repair must exist in BOTH blocked branches" "2" "found $BOARD_RDY_N"
+fi
+
+# (1b) …and the queue is seeded to `ready` BEFORE the loop, not only per member at its turn.
+#      The two repairs above only fire when the supervisor TOUCHES a member — which is the same
+#      moment `in_progress` overwrites the card, so they repair nothing anyone would ever see.
+#      The visible lie is the window BEFORE a member's turn: a previous run that died, or that
+#      failed every member at once, leaves `Blocked` + `failed:<class>` on cards this run has
+#      queued, and they stay wrong for as long as the members ahead of them take (measured at
+#      hours on a six-member sprint). Ordering is the whole check: before `board_resolve` there
+#      are no field ids and every write would be counted a failure; after the `while` it is
+#      per-turn again and fixes nothing.
+BOARD_SEED_ORD="$(awk '
+  /^board_resolve$/                  { if (!r) r = NR }
+  /for Q_SEED in .*board_col .* ready/ { if (!s) s = NR }
+  /^while \[ \$\{#QUEUE\[@\]\}/      { if (!w) w = NR }
+  END { print (r && s && w && r < s && s < w) ? "ok" : "bad r=" r " s=" s " w=" w }
+' "$TPL")"
+if [ "$BOARD_SEED_ORD" = ok ]; then
+  ok "I: the whole queue is seeded to ready after board_resolve and before the loop"
+else
+  bad "I: run-start ready seeding sits between board_resolve and the queue loop" \
+      "$BOARD_SEED_ORD — stale Blocked cards from a dead run would lie for hours"
+fi
+
+# (1c) members.json's SHAPE is checked where it is read, and the message names the cause.
+#      Without it the wrapped `{"members": [...]}` form walks the dict's keys and every member
+#      dies on a `TypeError` traceback that the per-issue failure class does not carry —
+#      measured: 6/6 members failed in 65s and nothing on the run's record said why.
+if "$PY" - "$TPL" <<'SHPPY'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+guard = re.search(r"if not isinstance\(members,\s*list\)\s*:\s*\n\s*sys\.exit\((.*?)\)\s*\n",
+                  src, re.S)
+if not guard:
+    print("no isinstance(members, list) guard beside the members.json read", file=sys.stderr)
+    raise SystemExit(1)
+msg = guard.group(1)
+missing = [n for n, ok in (
+    ("array", re.search(r"ARRAY|array", msg)),
+    # ⚠ the message lives inside a bash heredoc, so its inner quotes are BACKSLASH-
+    # ESCAPED in the file (`{\"members\"`). Matching a bare `"members"` found nothing
+    # and failed a guard that was present and correct.
+    ("the wrapped form it is confused with", re.search(r'\{\s*\\?["\']members', msg)),
+) if not ok]
+if missing:
+    print("shape guard message does not name: %s" % ", ".join(missing), file=sys.stderr)
+raise SystemExit(1 if missing else 0)
+SHPPY
+then
+  ok "I: refresh_dag_input rejects a non-list members.json with a message that names the cause"
+else
+  bad "I: members.json shape guard must exist and name the cause" \
+      "a wrapped members.json kills every member with an opaque dag-input-failed"
+fi
+
+# (1d) …and that message REACHES the run's record. The python's stderr used to go to this
+#      script's stdout, which `daily` states plainly it cannot read, so the reason existed and
+#      no reader could ever see it.
+hasline "I: the dag python's stderr is captured to a file" '2>"$D/dag.err"'
+if grep -q 'record_failure "$ISSUE" dag-input-failed "${ASM_ERR:-' "$TPL"; then
+  ok "I: dag-input-failed carries the captured reason, not a restatement of the arm"
+else
+  bad "I: dag-input-failed must carry \$ASM_ERR" \
+      "'refresh_dag_input returned non-zero' is the one thing the human already knows"
 fi
 
 # (2) 컬럼 필드가 보드에 없으면 **보드를 끈다** — 없으면 쓰기마다 실패로 세고 22콜을 낭비했다.

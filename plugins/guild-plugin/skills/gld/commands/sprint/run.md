@@ -254,6 +254,26 @@ inside its own worktree.
 1. **Write `members.json`** (Write tool) into `<repo>/.claude/guild/.sprint-logs/<tracker>/dag/`:
    **one entry per member of the sprint — every row of the member table, not just the queue.**
    Each with `number`, `base_deps` (from the table) and `split`.
+
+   ⚠ **The top level is a BARE JSON ARRAY. It is NOT the `sprint_dag.py --input` object.**
+   Write exactly this shape:
+
+   ```json
+   [
+     {"number": 344, "base_deps": [], "split": false},
+     {"number": 371, "base_deps": [344], "split": false}
+   ]
+   ```
+
+   `{"members": [...]}` — the schema this same file shows you for every `sprint_dag.py --input`
+   call — is **wrong here** and the two are not interchangeable. The supervisor iterates this
+   file directly, so the wrapped form makes it walk the dict's *keys*: every member dies on
+   `TypeError: string indices must be integers` before a single child session starts. Measured
+   on a real repo: 6/6 members failed in 65 seconds, zero tokens spent, and the per-issue
+   failure class (`dag-input-failed`) named the step but not the cause. If you also need a
+   `sprint_dag.py` input (e.g. to re-check `--mode order`), build that as a **separate file** —
+   do not reshape this one.
+
    ⚠ **This is the whole member set even on a resume, and that is not a detail.** Writing only
    the queue drops any member that already reached `guild:done` — and `--mode base` then reports
    its dependants' dep as *"outside the sprint"* and answers `DEFAULT`, so **the PR stack

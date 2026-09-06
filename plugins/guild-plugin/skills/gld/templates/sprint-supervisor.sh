@@ -1074,10 +1074,22 @@ refresh_dag_input() {
     > "$D/labels.json" 2>/dev/null || printf '[]' > "$D/labels.json"
   git -C "$SUP" branch --format='%(refname:short)' > "$D/branches.txt" 2>/dev/null || : > "$D/branches.txt"
   [ -f "$D/failed.txt" ] || : > "$D/failed.txt"
-  "$PY" - "$D" "$DEFAULT_BRANCH" <<'PY' || return 1
+  "$PY" - "$D" "$DEFAULT_BRANCH" 2>"$D/dag.err" <<'PY' || return 1
 import json, os, sys
 d, default_branch = sys.argv[1], sys.argv[2]
 members = json.load(open(os.path.join(d, "members.json")))     # written once by run.md
+# ⚠ SHAPE CHECK, and it earns its place: run.md Phase 3 step 1 writes this file with the Write
+# tool, and the SAME file shows the `sprint_dag.py --input` schema — `{"members": [...]}` —
+# several times over. An LLM caller that reaches for the wrapped form produces a dict here,
+# `for m in members` then walks the KEYS, and every member dies on
+# `TypeError: string indices must be integers` inside a traceback the per-issue failure class
+# (`dag-input-failed`) does not carry. Measured on a real repo: 6/6 members failed in 65s with
+# no member reaching a child session and nothing naming the cause. One named line is the
+# difference between "the run is broken" and "the run is broken HERE".
+if not isinstance(members, list):
+    sys.exit("members.json must be a JSON ARRAY of {number, base_deps, split} objects — got %s. "
+             "This is NOT the sprint_dag.py --input schema ({\"members\": [...]}); see "
+             "run.md Phase 3 step 1." % type(members).__name__)
 prs_raw = json.load(open(os.path.join(d, "prs.json")))
 labels_raw = json.load(open(os.path.join(d, "labels.json")))
 branches = [l.strip() for l in open(os.path.join(d, "branches.txt")) if l.strip()]
@@ -1571,6 +1583,25 @@ if [ -n "$BOARD_OFF_REASON" ]; then
   ledger_set board_off_reason "\"$BOARD_OFF_REASON\"" 2>/dev/null || true
 fi
 
+# ⚠ SEED THE WHOLE QUEUE TO `Ready` BEFORE THE LOOP — not per member at its turn.
+# A card is only ever repaired when the supervisor TOUCHES that member, and a member's turn is
+# also the moment `in_progress` overwrites it — so a per-turn repair fixes nothing that anyone
+# was ever going to see. What the human sees is the gap BEFORE the turn: a previous run that
+# died (or failed every member at once) leaves `Blocked`/`In progress` + a `failed:<class>`
+# reason on cards this run has queued, and those cards then lie for as long as the members
+# ahead of them take — measured at hours on a six-member sprint, with `daily` reporting the
+# run as healthy the whole time. `queued` and `Ready` mean the same thing, so this is not a
+# guess about the previous run's state: it is the state, restated at the only moment it is
+# knowable for every member at once.
+#   • It also covers the `kill -9` remnant this file warns about elsewhere ("카드가
+#     `In progress` 에 남습니다") — nothing is running, so `Ready` is true there too.
+#   • Clearing the reason is part of it: a member carrying `guild:needs-human` is terminal and
+#     never reaches the queue (run.md Phase 1 step 5), so no live annotation is destroyed.
+#   • `board_col` self-guards on `BOARD_NUMBER`, so this is a no-op with the board off.
+# Cost is one point per queued member, once — against a 5000/hour budget. The dedup cache is
+# empty at run start by construction, so this cannot be skipped into silence.
+for Q_SEED in "${QUEUE[@]}"; do board_col "$Q_SEED" ready; done
+
 while [ ${#QUEUE[@]} -gt 0 ]; do
   # ⚠ BEFORE the pop, and this is the only wait point in the file (04-sprint-window.md §0.4).
   # A whole member's life is one iteration, so waiting here satisfies both halves of the
@@ -1588,8 +1619,15 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   # entire run with a raw traceback, no `[sprint]` prefix and no failure class. §8.5a's
   # `dag-input-failed` exists for exactly this.
   refresh_dag_input || {
-    echo "  ✗ Issue #$ISSUE — DAG input could not be assembled"
-    record_failure "$ISSUE" dag-input-failed "refresh_dag_input returned non-zero"
+    # ⚠ CARRY THE REASON. `refresh_dag_input returned non-zero` is the one thing the human
+    # already knows — the arm they are standing in says it. What they cannot get is WHY: the
+    # python's stderr used to go to this script's stdout, which `daily` states plainly it
+    # cannot read, so a shape error in members.json rendered as six identical opaque failures.
+    # The last line is the one that names the cause (a bare `sys.exit(msg)` writes exactly one;
+    # a traceback puts its exception last), and `$D/dag.err` keeps the full text either way.
+    ASM_ERR="$(tail -1 "$D/dag.err" 2>/dev/null || true)"
+    echo "  ✗ Issue #$ISSUE — DAG input could not be assembled${ASM_ERR:+ — $ASM_ERR}"
+    record_failure "$ISSUE" dag-input-failed "${ASM_ERR:-refresh_dag_input returned non-zero}"
     board_col "$ISSUE" blocked failed:dag-input-failed   # P4
     FAILED=$((FAILED + 1)); FAILED_ISSUES+=("#$ISSUE (dag-input-failed)")
     heartbeat "running"; continue
