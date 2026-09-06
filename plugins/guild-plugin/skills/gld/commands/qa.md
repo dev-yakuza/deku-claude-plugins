@@ -89,6 +89,7 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
      ```bash
      gh pr edit <PR_NUM> --repo <owner>/<repo> --body-file <temp>
      ```
+- **Wording — every entry is a thing the human MUST do.** A checklist entry is already the output of the "a human has to do this" decision, so write it as an instruction, not as advice: **"권장", "가능하면", "여유되면", "미검증(참고)" and the like are banned inside entries.** Those words come from the qa agent's own plan (where "권장" is its normal vocabulary — see the ⚠ above) and must be **translated away** when the item is lifted into the checklist, not copied through. Conversely, what you left OUT gets stated once, explicitly — *"나머지는 자동 테스트로 검증됨 — 사람 확인 불필요"* — so an empty-looking section reads as a verdict rather than as a step that was skipped.
 - Format — a checkbox list, each item = **WHAT to verify + WHERE/HOW**:
   ```markdown
   <!-- guild:manual-qa -->
