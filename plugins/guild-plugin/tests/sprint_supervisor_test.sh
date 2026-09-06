@@ -4054,6 +4054,38 @@ RA_O2="$(ls -A "$WORK/atk-out2" 2>/dev/null | wc -l | tr -d ' ')"
 [ "$RA_O2" = "0" ] && ok "render: .claude 심링크 거부가 밖에 아무것도 만들지 않는다" \
                    || bad "render: .claude 거부의 비생성성" "0개여야 하나 ${RA_O2}개"
 rsattack "render: FIFO 면 매달리지 않고 거부한다"      "is a FIFO"           a_fifo
+# ⚠ 위 케이스는 **리더 없는** FIFO 라 `ENXIO` 분기가 잡는다 — `S_ISREG` 검사는 한 번도 실행되지
+#   않는다(실측: `if not stat.S_ISREG(...)` 를 `if False:` 로 바꿔도 321/0 그린). 리더를 붙이면
+#   open 이 성공하고 그때서야 S_ISREG 가 판정한다. 설계 문서가 "리더 붙은 FIFO 도 fail-closed"
+#   라고 적어 둔 그 측정을 여기에 커밋한다.
+RA_R="$WORK/atk"; rm -rf "$RA_R"; mkdir -p "$RA_R/.claude/guild"
+mkfifo "$RA_R/.claude/guild/.gld-sprint-99.sh"
+( exec 9< "$RA_R/.claude/guild/.gld-sprint-99.sh"; sleep 8 ) &
+RA_RDR=$!
+sleep 1
+RA_ERR="$(rs_bounded "$RA_R")"; RA_RC=$?
+kill "$RA_RDR" 2>/dev/null; wait "$RA_RDR" 2>/dev/null
+if [ "$RA_RC" -eq 124 ]; then bad "render: 리더 붙은 FIFO 도 거부한다" "매달리지 않아야 하나 rc=124"
+elif [ "$RA_RC" -eq 0 ]; then bad "render: 리더 붙은 FIFO 도 거부한다" "거부해야 하나 rc=0"
+elif printf '%s' "$RA_ERR" | grep -qF -- "is not a regular file"; then
+  ok "render: 리더 붙은 FIFO 를 S_ISREG 로 거부한다 (ENXIO 가 아니라)"
+else bad "render: 리더 붙은 FIFO" "'is not a regular file' 를 기대했으나: $(printf '%s' "$RA_ERR" | head -1)"; fi
+rm -rf "$RA_R"
+
+# ⚠ stdout 을 UTF-8 로 고정한 것(라운드 2 의 로케일 결함 수정)에도 커버리지가 없었다 —
+#   `sys.stdout.buffer.write(...)` 를 `sys.stdout.write(src)` 로 되돌려도 321/0 그린이었다.
+#   최신 파이썬은 PEP 540 때문에 `LC_ALL=C` 로도 stdout 이 UTF-8 로 남아 회귀가 안 보인다.
+#   `PYTHONIOENCODING=ascii` 는 버전과 무관하게 결정적으로 그 경로를 만든다.
+RSASCII_OUT="$WORK/ascii.sh"
+if PYTHONIOENCODING=ascii "$PY" "$RS" --tracker 99 --human-repo "$RSH" --out - $(rsbase) \
+     > "$RSASCII_OUT" 2>"$WORK/ascii.err"; then
+  RSASCII_N="$(wc -c < "$RSASCII_OUT" | tr -d ' ')"
+  if [ "$RSASCII_N" -gt 100000 ]; then
+    ok "render: ASCII stdout 인코딩에서도 전량 렌더된다 (${RSASCII_N}B)"
+  else bad "render: ASCII stdout 렌더 크기" "10만 바이트 이상이어야 하나 ${RSASCII_N}B"; fi
+else
+  bad "render: ASCII stdout 인코딩" "rc=0 이어야 하나 실패: $(head -1 "$WORK/ascii.err")"
+fi
 rm -rf "$WORK/atk" "$WORK/atk-out" "$WORK/atk-out2"
 
 # ⚠ openat 사슬의 **핵심 한 줄** — 마지막 open 의 `dir_fd=` — 에 커버리지가 없었다. 그것만
@@ -4166,7 +4198,7 @@ fi
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=321
+SUP_MIN_CHECKS=323
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

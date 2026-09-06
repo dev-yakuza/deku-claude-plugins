@@ -60,7 +60,7 @@ import stat
 import sys
 
 # `commands.*` values are normalized at init time and MUST NOT contain these
-# (`init.md`: "They MUST NOT contain `$(...)`, `&&`, `|`, `;`, or redirections").
+# (`init.md:163`: "They MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections").
 # The template `eval`s each element and its own header cites that normalisation as the
 # reason that is safe. We re-check here because a legacy install can still carry a
 # non-normalised value: `_handoff.md` tells the human to split raw compound commands by

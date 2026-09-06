@@ -1090,10 +1090,18 @@ RSPY="$GLD/commands/atoms/render_supervisor.py"
 hasfx "render_supervisor.py: _METACHAR 가 init.md 목록과 정확히 같다" "$RSPY" \
   '_METACHAR = re.compile(r"\$\(|`|&&|\|\||[|;<>&\n]")'
 lacksfx "render_supervisor.py: 글롭을 다시 막지 않았다 (과잉 차단 회귀)" "$RSPY" '*?{}'
-hasfx "init.md: commands 의 금지 목록이 그대로다" "$GLD/commands/init.md" \
-  'MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections'
-hasfx "scan_repo.md: 같은 금지 목록을 쓴다" "$GLD/commands/atoms/scan_repo.md" \
-  'MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections'
+# ⚠ 이 목록을 열거하는 곳은 **다섯** 이다. 라운드 6 은 셋만 맞추고 검사도 셋만 고정했다 —
+#   그래서 `render_supervisor.py` 헤더(init.md 를 인용한다고 적어 놓고 옛 다섯 항목)와
+#   `run.md` 의 `--install-cmd` 셀(같은 파일 24줄 위와 모순)이 낡은 채 그린이었다. 실측:
+#   run.md 의 열거를 옛 다섯 개로 되돌려도 231/0 · 321/0. 이제 네 인용을 한 문자열로 함께 건다.
+BANLIST='MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections'
+for BF in "commands/init.md" "commands/atoms/scan_repo.md" "commands/atoms/render_supervisor.py" \
+          "commands/sprint/run.md"; do
+  hasfx "$BF: 금지 목록이 정본과 글자 그대로 같다" "$GLD/$BF" "$BANLIST"
+done
+# run.md:278 의 산문 열거도 함께 — 여기만 표현이 다르므로 따로 건다.
+hasfx "run.md: 산문 열거도 백틱·||·&·개행을 포함한다" "$RUNMD2" \
+  '`$(...)`, backticks,'
 # ⚠ 백틱은 `$(...)` 의 옛 표기인데 두 계약 문서 어디에도 없었고 집행기는 거부하고 있었다.
 #   "exactly … and nothing more" 를 문자 그대로 믿은 다음 사람이 _METACHAR 를 다섯 개로 좁히면
 #   `` `id` `` 가 템플릿의 `eval "$IC"` 에 닿는다. 세 문서를 같은 목록으로 맞추고 함께 고정한다.
@@ -1356,7 +1364,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=231   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=234   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
