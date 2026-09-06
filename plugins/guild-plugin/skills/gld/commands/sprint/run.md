@@ -275,8 +275,8 @@ inside its own worktree.
    **First normalize `config.commands`.** `init` stores each value as a simple string or an
    **array** of simple steps, but an older install can still hold a raw compound value
    (`_handoff.md` Section E step 1 tells the human to split those by hand). The renderer
-   **rejects exactly `init.md:163`'s ban list and nothing more** — `$(...)`, backticks, `&&`,
-   `||`, `|`, `;`, `<`, `>`, `&`, newlines — so an unnormalized value does not degrade: **step
+   **rejects exactly `init.md:163`'s ban list, and nothing beyond it** — `$(...)`, backticks,
+   `&&`, `||`, `|`, `;`, `<`, `>`, `&`, newlines — so an unnormalized value does not degrade: **step
    2 exits non-zero and 2d stops the run.** ⚠ **Globs, `$VAR` and `~` are legal and pass.**
    `init.md` permits them and the template's `eval` expands them against the worktree, which is
    the intended behaviour. Rejecting them was tried and reverted: it made `eslint src/**/*.ts`

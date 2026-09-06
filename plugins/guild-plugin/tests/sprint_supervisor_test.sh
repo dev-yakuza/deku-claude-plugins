@@ -4056,6 +4056,45 @@ RA_O2="$(ls -A "$WORK/atk-out2" 2>/dev/null | wc -l | tr -d ' ')"
 rsattack "render: FIFO 면 매달리지 않고 거부한다"      "is a FIFO"           a_fifo
 rm -rf "$WORK/atk" "$WORK/atk-out" "$WORK/atk-out2"
 
+# ⚠ openat 사슬의 **핵심 한 줄** — 마지막 open 의 `dir_fd=` — 에 커버리지가 없었다. 그것만
+#   빼고(성분 open 도 메시지도 mkdirat 도 그대로) 두면 라운드 5 의 BLOCK 이 글자 그대로 되살아나는데
+#   열 개 스위트가 전부 그린이었다(실측: 경합 4/300 탈출, 스위트 319/0·229/0). 정적 grep 은
+#   `os.open(<경로>` 를 세지 않아 지나쳤다.
+#   그래서 **행위** 로 본다: os.open 을 감싸 호출을 기록하고, 산출 파일을 여는 호출이 dir_fd 를
+#   썼는지 직접 확인한다. 경합을 재현하지 않으므로 결정적이고 빠르다.
+mkdir -p "$WORK/spy"
+cat > "$WORK/spy/sitecustomize.py" <<'PYSPY'
+import os
+_real = os.open
+_log = _real(os.environ["GLD_OPEN_LOG"], os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+def _spy(path, flags, mode=0o777, *, dir_fd=None):
+    try:
+        os.write(_log, ("%s\t%s\n" % (path, "DIRFD" if dir_fd is not None else "PATH")).encode())
+    except OSError:
+        pass
+    return _real(path, flags, mode, dir_fd=dir_fd)
+os.open = _spy
+# ⚠ 감싸는 순간 `os.open` 이 supports_dir_fd 밖으로 나가고, 렌더러의 플랫폼 가드가 먼저
+#   발화해 아무것도 열지 않는다(실측: "this platform lacks openat/mkdirat", 로그 0줄).
+#   그 가드가 제 일을 한다는 증거이기도 하다. 대역을 다시 집합에 넣어 준다.
+os.supports_dir_fd = frozenset(set(os.supports_dir_fd) | {_spy})
+PYSPY
+SPY_LOG="$WORK/spy/opens.txt"; : > "$SPY_LOG"
+SPY_REPO="$WORK/spy/repo"; mkdir -p "$SPY_REPO"
+PYTHONPATH="$WORK/spy" GLD_OPEN_LOG="$SPY_LOG" "$PY" "$RS" --tracker 99 --human-repo "$SPY_REPO" \
+  $(rsbase) >/dev/null 2>&1
+# 산출 파일을 연 호출: basename 만 넘기고 dir_fd 를 썼어야 한다.
+SPY_FINAL="$(grep -F '.gld-sprint-99.sh' "$SPY_LOG" | tail -1)"
+case "$SPY_FINAL" in
+  ".gld-sprint-99.sh	DIRFD") ok "render: 산출 파일 open 이 basename + dir_fd 로 이뤄진다 (openat 사슬)" ;;
+  *"	PATH")  bad "render: 산출 파일 open" "dir_fd 를 기대했으나 경로로 열었다 — 조상 경합이 다시 열린다: $SPY_FINAL" ;;
+  *)      bad "render: 산출 파일 open" "dir_fd 기록을 기대했으나: ${SPY_FINAL:-<기록 없음>}" ;;
+esac
+# 성분 두 개도 dir_fd 로 열렸는가 — 하나라도 경로로 열면 그 성분이 경합 대상이 된다.
+SPY_COMP="$(grep -cE '^(\.claude|guild)	DIRFD$' "$SPY_LOG" || true)"
+[ "$SPY_COMP" = "2" ] && ok "render: .claude·guild 두 성분 모두 dir_fd 로 열린다" \
+                      || bad "render: 성분 open" "2건이어야 하나 ${SPY_COMP}건 — $(grep -E '\.claude|guild' "$SPY_LOG" | tr '\n' '|')"
+
 # 경로 기반 chmod 는 그 자체로 "임의 파일을 0755 로 만드는" 원시였다 — 안전하게 연 fd 를 버리고
 # 경로를 다시 해석했기 때문이다. 실측으로 첫 시도에 뚫렸고 chmod 탈출만 보면 200/200 이었다.
 # 여기서는 경합을 재현하지 않고(불안정하다) **경로 기반 호출이 없다**는 것을 직접 단언한다.
@@ -4070,7 +4109,10 @@ import re, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 code = "\n".join(l.split("#", 1)[0] for l in src.split("\n"))
 flat = re.sub(r"\s+", "", code)
-sys.exit(0 if re.search(r"os\.chmod\(|os\.path\.getsize\(|os\.stat\(", flat) else 1)
+# ⚠ `os.open(out` 이 이 목록에 없어서 라운드 6 의 변이가 지나갔다 — 경로 기반 호출을 세는
+# 검사가 정작 **가장 위험한 경로 기반 호출**을 빼먹고 있었다.
+bad_calls = re.search(r"os\.chmod\(|os\.path\.getsize\(|os\.stat\(|os\.open\(out[,)]", flat)
+sys.exit(0 if bad_calls else 1)
 PYFD
   bad "render: 쓰기 후 chmod/stat 이 fd 기반이다" "fchmod/fstat 를 기대했으나 경로 기반 호출이 코드에 남아 있다"
 else ok "render: 쓰기 후 chmod/stat 이 경로가 아니라 fd 로 이뤄진다 (TOCTOU 없음)"; fi
@@ -4124,7 +4166,7 @@ fi
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=319
+SUP_MIN_CHECKS=321
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

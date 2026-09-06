@@ -1091,9 +1091,16 @@ hasfx "render_supervisor.py: _METACHAR 가 init.md 목록과 정확히 같다" "
   '_METACHAR = re.compile(r"\$\(|`|&&|\|\||[|;<>&\n]")'
 lacksfx "render_supervisor.py: 글롭을 다시 막지 않았다 (과잉 차단 회귀)" "$RSPY" '*?{}'
 hasfx "init.md: commands 의 금지 목록이 그대로다" "$GLD/commands/init.md" \
-  'MUST NOT contain `$(...)`, `&&`, `|`, `;`, or redirections'
+  'MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections'
+hasfx "scan_repo.md: 같은 금지 목록을 쓴다" "$GLD/commands/atoms/scan_repo.md" \
+  'MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections'
+# ⚠ 백틱은 `$(...)` 의 옛 표기인데 두 계약 문서 어디에도 없었고 집행기는 거부하고 있었다.
+#   "exactly … and nothing more" 를 문자 그대로 믿은 다음 사람이 _METACHAR 를 다섯 개로 좁히면
+#   `` `id` `` 가 템플릿의 `eval "$IC"` 에 닿는다. 세 문서를 같은 목록으로 맞추고 함께 고정한다.
+hasfx "scan_repo.md: 백틱도 shell substitution 으로 처방된다" "$GLD/commands/atoms/scan_repo.md" \
+  '**Shell substitution** — `$(...)` **or backticks**'
 hasfx "run.md: 금지 목록이 init.md 것과 같음을 명시한다" "$RUNMD2" \
-  "rejects exactly \`init.md:163\`'s ban list and nothing more"
+  "rejects exactly \`init.md:163\`'s ban list, and nothing beyond it"
 hasfx "run.md: 글롭·\$VAR·~ 가 합법임을 명시한다" "$RUNMD2" 'Globs, `$VAR` and `~` are legal and pass'
 hasfx "run.md: --order 도 숫자만 받는다는 것이 표에 있다" "$RUNMD2" 'Each value is **digits only**, same as `--tracker`'
 # ⚠ 2d 가드 **자체**를 고정한다. 스위트는 그 가드가 읽는 신호의 *생산자* 만 고정하고 있었다
@@ -1349,7 +1356,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=229   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=231   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

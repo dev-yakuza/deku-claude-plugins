@@ -45,8 +45,8 @@ Findings:
    - For Flutter: an `integration_test/` dir + `integration_test` dev-dependency → e2e command is `flutter test integration_test` (NOT covered by a plain `flutter test`, which runs `test/` only).
    - Record the e2e run command in `e2e`. If integration tests exist but you can't determine the exact command, still record the dir so the finding isn't lost (e.g. `"e2e": "flutter test integration_test"` with a note in `test_dirs`).
    - Also note special test tags/suites (e.g. `dart_test.yaml` `golden` tag) under `test_dirs`/notes if present.
-4. **Normalize each command to be directly runnable via a single Bash call** (per `_bash_rules.md`). A stored command MUST NOT contain `$(...)`, `&&`, `||`, `|`, `;`, or redirections:
-   - **Shell substitution** (e.g. `--concurrency=$(nproc --all)`) → **drop that flag** (test runners auto-detect sane defaults). Record the base command only.
+4. **Normalize each command to be directly runnable via a single Bash call** (per `_bash_rules.md`). A stored command MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections:
+   - **Shell substitution** — `$(...)` **or backticks** (e.g. `--concurrency=$(nproc --all)`, `--concurrency=`` `nproc` ``) → **drop that flag** (test runners auto-detect sane defaults). Record the base command only.
    - **Chained steps** (e.g. `flutter analyze && npx remark . --quiet --frail`) → return an **array** of the atomic steps: `["flutter analyze", "npx remark . --quiet --frail"]`.
    - A single simple command → return it as a plain string.
 5. If a category has no command, return `null` for it.
