@@ -3911,6 +3911,43 @@ done
 [ -e "$WORK/GLD_INJ_PROBE" ] && bad "render: 인젝션 페이로드가 실행되지 않았다" "미생성이어야 하나 존재함" \
                             || ok "render: 인젝션 페이로드가 실행되지 않았다 (실행 경로를 실제로 지난 뒤)"
 
+# ── 배열 원소의 인용 — 스칼라 5종만 보던 행렬의 구멍 ─────────────────────────
+# 라운드 3 이 넓힌 인용 검사는 `subs` 의 **스칼라** 다섯 개를 돈다. `array_literal()` 이 만드는
+# 두 값(ORDER·INSTALL_CMDS)은 그 행렬 밖이었고, `shlex.quote` 를 빼도 렌더는 rc=0 과 계약 줄을
+# 내며 열 스위트가 전부 그린이었다 — 그리고 `INSTALL_CMDS=(yarn install)` 은 원소 **둘** 이 되어
+# eval 이 `yarn` 과 `install` 을 따로 돌리고, 따옴표가 든 값은 아예 로드 시점 syntax error 다.
+# macOS bash 3.2 의 `bash -n` 은 그것을 놓치므로 구문 검사도 구제하지 않는다.
+# 스칼라와 같은 방식으로 **실제로 실행해서** 본다: 배열 길이와 각 원소가 입력 리터럴과 같은가.
+arr_probe() {  # arr_probe <var> <flag> <v1> <v2>
+  AP_LINE="$("$PY" "$RS" --tracker 99 --human-repo "$RSH" --out - $(rsbase) \
+    "$2" "$3" "$2" "$4" 2>/dev/null | grep "^$1=" | head -1)"
+  "$SH" -c "$AP_LINE
+printf '%s\n' \"\${#$1[@]}\" \"\${$1[0]}\" \"\${$1[1]}\"" 2>/dev/null || true
+}
+AP_OUT="$(arr_probe INSTALL_CMDS --install-cmd 'yarn install' 'go test ./...')"
+AP_N="$(printf '%s\n' "$AP_OUT" | sed -n 1p)"
+AP_0="$(printf '%s\n' "$AP_OUT" | sed -n 2p)"
+AP_1="$(printf '%s\n' "$AP_OUT" | sed -n 3p)"
+if [ "$AP_N" = "2" ] && [ "$AP_0" = "yarn install" ] && [ "$AP_1" = "go test ./..." ]; then
+  ok "render: INSTALL_CMDS 원소가 공백을 품은 채 하나씩 유지된다 (array_literal 인용)"
+else
+  bad "render: INSTALL_CMDS 배열 원소" "n=2 / 'yarn install' / 'go test ./...' 여야 하나: n=${AP_N:-?} [0]=${AP_0:-?} [1]=${AP_1:-?}"
+fi
+AP_OUT="$(arr_probe ORDER --order 12 34)"
+AP_N="$(printf '%s\n' "$AP_OUT" | sed -n 1p)"
+AP_0="$(printf '%s\n' "$AP_OUT" | sed -n 2p)"
+if [ "$AP_N" = "2" ] && [ "$AP_0" = "12" ]; then
+  ok "render: ORDER 원소가 인자 수만큼, 값 그대로 들어간다"
+else bad "render: ORDER 배열" "n=2 [0]=12 여야 하나 n=${AP_N:-?} [0]=${AP_0:-?}"; fi
+# 따옴표가 든 값은 인용이 없으면 **로드 시점 syntax error** 가 된다. 렌더된 줄을 실제로 파싱한다.
+AP_Q="$("$PY" "$RS" --tracker 99 --human-repo "$RSH" --out - $(rsbase) \
+  --install-cmd "make test'" 2>/dev/null | grep '^INSTALL_CMDS=' | head -1)"
+if "$SH" -c "$AP_Q" 2>/dev/null; then
+  ok "render: 따옴표가 든 install 값도 유효한 bash 대입이 된다"
+else
+  bad "render: 따옴표가 든 install 값" "유효한 대입이어야 하나 파싱 실패: $AP_Q"
+fi
+
 # ── 값 안에 든 토큰이 다시 치환되지 않는가 (라운드 1 이 고친 순차 replace 결함) ──
 # 순차 replace 는 먼저 치환한 값 안의 토큰을 뒤 패스가 다시 치환했다. 커버리지가 0이어서
 # 단일 패스를 순차 replace 로 되돌려도 290/0 그린이었다.
@@ -4198,7 +4235,7 @@ fi
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=323
+SUP_MIN_CHECKS=326
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

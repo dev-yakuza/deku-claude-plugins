@@ -617,11 +617,18 @@ runmd, tpl = sys.argv[1], sys.argv[2]
 # run.md step 2b 의 conf 본문: `<key>=<...>` 형태의 줄
 wrote = set(re.findall(r"^\s{2,}([a-z][a-z0-9_]*)=<", open(runmd, encoding="utf-8").read(), re.M))
 # 템플릿의 conf 파서: `<key>)` case 분기
-read = set(re.findall(r"^\s+([a-z][a-z0-9_]*)\)", open(tpl, encoding="utf-8").read(), re.M))
-read = {k for k in read if k == "number" or k == "owner" or k.startswith(("field", "col_", "verified"))}
+# ⚠ 손으로 적은 접두사 화이트리스트를 쓰지 않는다. 그 밖의 이름으로 case 분기를 더하면
+#   보이지 않았다(실측: `swimlane)` 추가 -> OK 10 keys). conf 파서 블록 안의 분기를 통째로 본다.
+src = open(tpl, encoding="utf-8").read()
+i = src.find("BOARD_CONF=")
+j = src.find("esac", i) if i >= 0 else -1
+if i < 0 or j < 0:
+    print("PROBLEMS cannot locate the board conf parser in the template")
+    raise SystemExit
+read = set(re.findall(r"^\s+([a-z][a-z0-9_]*)\)", src[i:j], re.M))
 problems = []
-if len(wrote) < 10:
-    problems.append("run.md yielded only %d keys (%s) — the extraction broke"
+if len(wrote) != 10:
+    problems.append("run.md yields %d keys (%s), expected exactly 10"
                     % (len(wrote), ",".join(sorted(wrote))))
 if wrote - read:
     problems.append("run.md writes keys the template never reads: %s" % ",".join(sorted(wrote - read)))
@@ -1128,8 +1135,13 @@ ITEMS = [
     ("redirection",  ["redirection", "리다이렉션", "`<`, `>`"]),
 ]
 # 금지 목록을 **도입하는** 어구. 토큰 개수로 찾으면 실제 셸 코드가 12건 오검출된다.
-LEAD = ("MUST NOT contain", "must not contain", "never contains", "forbids",
-        "저장을 금지하는", "ban list")
+LEAD = ("MUST NOT contain", "must not contain", "never contains", "never contain",
+        "forbids", "forbid ", "disallow", "rejects", "거부한다", "금지하는", "금지한다",
+        "ban list", "허용하지 않는")
+# `commands.*` 계약을 말하고 있다는 표지 — LEAD 는 있는데 `$(...)` 가 없을 때 후보로 남길지 정한다.
+CONFIGWORD = ("commands.*", "config.commands", "commands.test", "stored command", "stored form",
+              "--install-cmd", "INSTALL_CMDS", "config normalis", "config normaliz",
+              "저장을 금지", "in these")
 BASHRULE = ("_bash_rules.md", "simple calls only", "simple Bash tool call", "one simple call",
             "its own simple Bash", "each its own Bash call", "its own Bash call")
 def norm(t):
@@ -1147,11 +1159,26 @@ for root, dirs, files in os.walk(gld):
         for n, line in enumerate(lines, 1):
             if not any(k in line for k in LEAD):
                 continue
-            # 열거가 두 줄에 걸치는 곳이 있다(run.md 산문, die() 문자열). 창으로 본다.
-            win = " ".join(lines[n - 1:n + 2])
-            # `$(...)` 표기가 없으면 금지 목록 문장이 아니다 — "INV5 forbids leaving the machine"
-            # 같은 무관한 `forbids` 를 여기서 떨어뜨린다.
+            # 열거가 두 줄에 걸치는 곳이 있다(run.md 산문, die() 문자열). **앞이 아니라 뒤로만**
+            # 본다 — 예전 판은 앞 줄까지 포함해서, 사이트 자신이 틀린 말을 해도 위/아래 이웃이
+            # 항목을 대신 공급하면 통과했다(실측: `render_supervisor.py:62` 는 아홉 항목 전부를
+            # 이웃에게서 받고 있었다).
+            win = " ".join(lines[n - 1:n + 3])
+            # ⚠ 예전 판은 `$(...)` 가 없으면 **조용히 건너뛰었다.** 그래서 가장 위험한 누락 —
+            #   열거에서 `$(...)` 자체를 빼는 것 — 이 사이트를 통째로 사라지게 만들었고, 검사는
+            #   `OK sites=8` 을 찍었다(실측). 건너뛰기는 통과가 아니다. `commands` 문맥이면
+            #   후보로 남겨 실패시키고, 무관한 `forbids`(예: "INV5 forbids leaving the machine")
+            #   만 떨어뜨린다.
             if not any(v in win for v in ITEMS[0][1]):
+                # ⚠ 문맥 판정은 **히트 줄 자신** 에서만 한다. 창으로 보면 이웃이 문맥을 대신
+                #   공급한다 — `run.md:74`("this repo forbids merge commits")가 네 줄 아래의
+                #   `config.commands` 를 빌려 후보가 됐다. 토큰 검사에서 고친 것과 같은 결함이
+                #   분류기 쪽에 남아 있었다.
+                if not any(k in line for k in CONFIGWORD):
+                    continue
+                sites += 1
+                problems.append("%s:%d claims a ban list but does not name `$(...)` — the one "
+                                "omission that would hide the site itself" % (rel, n))
                 continue
             ctx = "\n".join(lines[max(0, n - 4):n + 2])
             if any(k in ctx for k in BASHRULE) and "commands" not in win:
@@ -1163,8 +1190,11 @@ for root, dirs, files in os.walk(gld):
             if missing:
                 problems.append("%s:%d enumerates the ban list but omits %s"
                                 % (rel, n, ",".join(missing)))
-if sites < 8:
-    problems.append("only %d ban-list sites found, expected >= 8 — the scan broke" % sites)
+# ⚠ 바닥선이 아니라 **정확값** 이다. `>= 8` 이었을 때 아홉 중 하나가 통째로 사라져도 통과했다.
+#   사이트가 늘거나 주는 것은 의도적 변경이므로 이 숫자를 함께 고치게 만든다.
+if sites != 9:
+    problems.append("found %d ban-list sites, expected exactly 9 — a site appeared or vanished; "
+                    "update this number deliberately" % sites)
 print("OK sites=%d" % sites if not problems else "PROBLEMS " + " | ".join(problems))
 PYBAN
 # ── file:line 인용이 여전히 그 줄을 가리키는가 ────────────────────────────────
@@ -1263,17 +1293,21 @@ for f in sorted(glob.glob(os.path.join(gld, "templates/agents/*.md"))):
         # ⚠ 그러면 "다섯 → 둘" 같은 **드리프트** 는 부분집합 검사로 못 잡는다. 그래서 아래에
         #   전량 열거 페르소나 수의 바닥선을 따로 둔다. 처음 쓴 판은 "전부 아니면 전무" 라는
         #   규칙을 넣었다가 첫 실행에서 infra.md 를 잡았고, 틀린 쪽은 사실이 아니라 규칙이었다.
-if checked < 14:
-    problems.append("only %d persona templates carried a return-status line — the scan broke" % checked)
+# ⚠ 정확값. `< 14` 이었을 때 페르소나 **하나가 반환 계약을 통째로 잃어도** 열 스위트가 그린이었다
+#   (실측: dba.md 에서 enum 과 센티널을 함께 지웠더니 `OK 14 personas`). 그것이 이 검사의 존재
+#   이유인 드리프트다 — `_handoff.md` 는 센티널 없는 응답을 호출 실패로 분류한다.
+if checked != 15:
+    problems.append("%d personas carry a return-status line, expected exactly 15 — one gained or "
+                    "lost its return contract" % checked)
 # ⚠ 전량 열거 페르소나 수의 바닥선. 부분집합 검사만으로는 `DONE | DONE_WITH_CONCERNS | BLOCKED
 #   | NEEDS_CONTEXT | FAIL` 이 `DONE | BLOCKED` 로 줄어드는 드리프트를 못 잡는다(실측: 그린이었다).
 #   오늘 열 개가 전량 열거이고, 축소가 정당한 곳은 infra 하나다. 의도적으로 바꿀 때만 조정한다.
-if full < 10:
-    problems.append("only %d personas enumerate all five statuses (expected >= 10) — one narrowed"
-                    % full)
-if partial > 1:
-    problems.append("%d personas enumerate a strict subset (expected 1, infra.md — review-only)"
-                    % partial)
+if full != 10:
+    problems.append("%d personas enumerate all five statuses, expected exactly 10 — one narrowed "
+                    "or widened" % full)
+if partial != 1:
+    problems.append("%d personas enumerate a strict subset, expected exactly 1 (infra.md, "
+                    "review-only)" % partial)
 # 소비자 쪽 규칙도 같은 다섯을 알아야 한다.
 ho = open(os.path.join(gld, "commands/atoms/_handoff.md"), encoding="utf-8").read()
 i = ho.find("Sentinel present, but the next non-empty line is not")
@@ -1291,6 +1325,24 @@ case "$OUTPE" in
   OK*) ok "페르소나의 센티널·상태 enum 이 정본과 일치한다 (${OUTPE#OK })" ;;
   *)   bad "페르소나 센티널·enum 정합" "OK" "$OUTPE" ;;
 esac
+
+# ── init.md 의 허용목록 서술이 실제 템플릿과 맞는가 ──────────────────────────
+# 실측: 서술은 "네 개(gh git jq ls)" 라고 적혀 있었고 템플릿은 여덟 개를 싣는다. 뒤 네 개
+# (python3·bash·chmod·ps)는 묶음 A 가 만든 렌더/기동 경로가 쓰는 것이라, 서술을 믿고 넷으로
+# 줄이면 무인 경로에서 `/gld sprint run` 이 프롬프트를 띄우거나 실패한다. 둘을 함께 건다.
+NALLOW="$(grep -c '"Bash(' "$GLD/templates/settings.json.tmpl")"
+NALLOW_ALLOW="$($PY - "$GLD/templates/settings.json.tmpl" <<'PYAL'
+import json, sys
+print(len(json.load(open(sys.argv[1], encoding="utf-8"))["permissions"]["allow"]))
+PYAL
+)"
+if [ "$NALLOW_ALLOW" = "8" ]; then ok "settings.json.tmpl 의 permissions.allow 가 8개다"
+else bad "settings.json.tmpl allow 개수" "8" "$NALLOW_ALLOW"; fi
+hasfx "init.md: 허용목록이 여덟 개라고 적는다" "$GLD/commands/init.md" 'lists only the **eight** commands'
+hasfx "init.md: 넷으로 줄이지 말라고 못박는다" "$GLD/commands/init.md" 'Do not trim it to four'
+for B in python3 bash chmod ps; do
+  hasfx "settings.json.tmpl: Bash($B:*) 가 있다" "$GLD/templates/settings.json.tmpl" "\"Bash($B:*)\""
+done
 
 OUTCI="$("$PY" "$WORK3/cites.py" "$GLD")"
 case "$OUTCI" in
@@ -1376,9 +1428,11 @@ echo ""
 cat > "$WORK3/contract.py" <<'PYC'
 import os, re, sys
 gld = sys.argv[1]
-EXPECT = {"commands/test.md":1, "commands/design.md":3, "commands/qa.md":2,
-          "commands/analyze.md":1, "commands/atoms/_execute_spine.md":2,
-          "commands/plan.md":2, "commands/sprint/plan.md":1}
+# ⚠ 파일 목록을 손으로 적지 않는다. 라운드 8 이 다른 검사에서 없앤 바로 그 모양이 여기 남아
+#   있었고, 목록 밖 파일(`commands/review.md`)에 13번째 펜스를 심으면 열 스위트가 그린이었다
+#   — 그 펜스는 서브에이전트에게 `>>> OUTCOME <<<` 를 내라고 지시했고, 소비자 규칙은 그것을
+#   호출 실패로 분류한다. 트리에서 찾고, **총 개수를 정확값** 으로 건다.
+import glob as _glob
 OPEN, CLOSE = "<!-- guild:result-contract -->", "<!-- /guild:result-contract -->"
 strip = lambda l: re.sub(r"^\s*>\s?", "", l).rstrip("\n")
 lines = open(os.path.join(gld, "commands/atoms/_handoff.md"), encoding="utf-8").read().split("\n")
@@ -1390,17 +1444,34 @@ canon = lines[o+1:c]
 problems = []; total = 0
 if len(canon) != 1:
     problems.append("canonical block is %d lines, want 1" % len(canon))
-for rel, want in EXPECT.items():
-    body = open(os.path.join(gld, rel), encoding="utf-8").read().split("\n")
+for f in sorted(_glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)):
+    rel = os.path.relpath(f, gld)
+    if rel == "commands/atoms/_handoff.md":
+        continue                      # 정본 자신
+    body = open(f, encoding="utf-8").read().split("\n")
     opens = [n for n, l in enumerate(body) if strip(l) == OPEN]
     closes = [n for n, l in enumerate(body) if strip(l) == CLOSE]
-    if len(opens) != want or len(closes) != want:
-        problems.append("%s: %d pairs, want %d" % (rel, min(len(opens), len(closes)), want))
+    if len(opens) != len(closes):
+        problems.append("%s: %d opens vs %d closes" % (rel, len(opens), len(closes)))
         continue
     for a, b in zip(opens, closes):
         total += 1
         if [strip(x) for x in body[a+1:b]] != canon:
             problems.append("%s:%d drifted from canonical" % (rel, a+2))
+if total != 12:
+    problems.append("found %d result-contract copies, expected exactly 12 — one appeared or "
+                    "vanished; update this number deliberately" % total)
+# 스폰 프롬프트 안의 센티널은 **정확히 하나** 여야 한다. 펜스 본문이 정본과 같아도, 펜스 밖
+# 블록쿼트에 다른 센티널을 적어 넣으면 서브에이전트는 그것을 따른다.
+for f in sorted(_glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)):
+    rel = os.path.relpath(f, gld)
+    for n, l in enumerate(open(f, encoding="utf-8").read().split("\n"), 1):
+        if not re.match(r"^\s*>", l):
+            continue
+        for m in re.findall(r">>>\s*([A-Z_]+)\s*<<<", l):
+            if m != "RESULT":
+                problems.append("%s:%d spawn prompt names a `>>> %s <<<` sentinel, not RESULT"
+                                % (rel, n, m))
 # ⚠ 양방향으로 본다. 한쪽만(펜스 ⊆ 표) 보면 표가 6번째 상태를 얻어도 사본은 전부 동일하고
 # 이름도 전부 실재해 그린이다 — 리더의 표는 어떤 서브에이전트도 들어본 적 없는 상태를 허용하게
 # 되고, `_handoff.md` 자신의 "keep the enum names in step with the table above" 가 무집행이 된다.
@@ -1423,7 +1494,7 @@ print("OK %d" % total if not problems else "PROBLEMS " + " | ".join(problems))
 PYC
 OUTC="$("$PY" "$WORK3/contract.py" "$GLD")"
 case "$OUTC" in
-  "OK 12") ok "result-contract: 사본 12개가 정본과 바이트 동일하고 개수가 맞다" ;;
+  "OK 12") ok "result-contract: 트리 전체에서 사본 12개, 전부 정본과 바이트 동일" ;;
   OK*)     bad "result-contract: 사본 12개" "OK 12" "$OUTC" ;;
   *)       bad "result-contract: 사본이 정본과 동일" "OK 12" "$OUTC" ;;
 esac
@@ -1577,7 +1648,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=238   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=245   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

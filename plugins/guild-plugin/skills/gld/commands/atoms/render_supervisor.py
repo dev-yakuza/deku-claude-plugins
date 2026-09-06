@@ -289,6 +289,10 @@ def main():
             sys.stdout.buffer.write(src.encode("utf-8"))
             sys.stdout.buffer.flush()
         except BrokenPipeError:
+            # ⚠ 커버리지 없음, 기록해 둔다(leftover 가드·파일 인코딩과 같은 부류). `--out -` 는
+            # 하니스 전용 경로이고(`run.md` 는 `--out <path>` 형태가 없다고 못박는다) 프로덕션은
+            # 조립 경로로만 쓴다. 이 die 를 pass 로 바꿔도 스위트가 그린이다 — 지키는 검사가
+            # 없다는 뜻이지, 없어도 된다는 뜻이 아니다.
             die("stdout closed before the render finished")
         # len(src) is CHARACTERS; the template is UTF-8 with multibyte prose, so the two
         # differ by ~4KB. Report what actually lands on the stream.
