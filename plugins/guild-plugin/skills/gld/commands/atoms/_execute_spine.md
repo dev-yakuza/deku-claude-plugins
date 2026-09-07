@@ -355,7 +355,13 @@ It uses its own marker pair, `<!-- guild:auditor-violation -->` … `<!-- /guild
   >       standards = everything else — it violates docs/standards/, a Guild gate
   >                   rule, or simply the quality this repo ships. If it is a real
   >                   defect and it is not a spec miss, it is standards.
-  > When unsure between MAJOR and MINOR, choose MINOR. When unsure whether
+  > "Unsure between MAJOR and MINOR" is not a grade — it is unfinished
+  > work. Go read what settles it: the callers of the changed line, the test
+  > that covers it, the standard it may violate, the AC it may miss. Decide
+  > from what you find. Grade MINOR only when `why` states the concrete reason
+  > the consequence is zero; if you cannot write that sentence, it is not a
+  > MINOR. If it is still unresolved after that reading, grade it MAJOR and say
+  > in `why` what you checked and what is still open. When unsure whether
   > something is a BLOCKER, report it as a BLOCKER and say in `why` exactly what
   > you are unsure about, so the reader can weigh it.
   > <!-- /guild:severity-core -->

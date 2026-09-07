@@ -60,11 +60,20 @@ OPEN  = '<!-- guild:severity-core -->'
 CLOSE = '<!-- /guild:severity-core -->'
 PREFIX = re.compile(r'^  > ?')
 
+def is_marker(line, marker):
+    # Match only a line that IS the marker (after the "  > " prompt-quote prefix).
+    # A prose mention of the marker name is legitimate — review.md Step 4 cites it
+    # when it tells the leader to grade scrutiny notes through the same core — and
+    # counting that as a second opening marker aborted this whole check, which is
+    # how the two cores went unverified while the suite still reported a pass.
+    return PREFIX.sub('', line).strip() == marker
+
+
 def extract(path):
     """Return (opens, closes, core_lines_or_None) for one file."""
     lines = open(path, encoding='utf-8').read().split('\n')
-    opens  = [i for i, l in enumerate(lines) if OPEN in l]
-    closes = [i for i, l in enumerate(lines) if CLOSE in l]
+    opens  = [i for i, l in enumerate(lines) if is_marker(l, OPEN)]
+    closes = [i for i, l in enumerate(lines) if is_marker(l, CLOSE)]
     if len(opens) != 1 or len(closes) != 1:
         return opens, closes, None
     if closes[0] < opens[0]:
