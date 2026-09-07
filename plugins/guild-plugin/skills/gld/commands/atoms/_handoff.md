@@ -363,6 +363,28 @@ Value `1` → unattended. Anything else / empty → attended (default; behave ex
 | **execute auditor** (`_execute_spine.md` Step 3.5a) | leader may dismiss a finding with a recorded reason, any severity | ⚠ **The one gate the leader may NOT stand in for.** A `BLOCKER` has exactly two outcomes — **fixed**, or `guild:needs-human` + `OK PAUSE`. Dismissing it is forbidden outright: attended, a dismissal is safe because the human sees it at `/gld review` before approving; unattended there is no such reader, and `batch.md` would count the Issue as succeeded. `MAJOR`/`MINOR` may still be dismissed with a recorded reason. ⚠ One narrow exception: a `BLOCKER` an **earlier attended** invocation already dismissed-with-reason, on code unchanged since, is **carried forward** as still-dismissed (`_execute_spine.md` Step 4) — that re-uses a human-visible decision rather than making a new one, so it is not a stand-in and does not pause. |
 | **qa** (blocking defect) | `NEEDS_HUMAN` | record the concern; bounded loop-back to execute if fixable, else `OK PAUSE: needs-human — QA defect`. Never force `done`. |
 
+⚠ **When the stakes classification itself is in doubt, classify it `high`.** The
+discuss row above splits on a judgment the leader makes alone, with nobody to check
+it, and the two errors are not the same size: a wrongly-`high` call costs one human
+question and the Issue resumes, while a wrongly-`low/medium` call ships a guessed
+product decision inside a merged PR — and no later stage re-opens it (`batch` never
+runs `/gld review`). This is the same direction the execute auditor row already
+takes for an unattended `BLOCKER`, for the same reason. "I could argue either way"
+is `high`; only classify `low/medium` when you can say **why** the decision is local
+and reversible.
+
+**Name the cause when you pause.** `OK PAUSE: needs-human` covers two different
+populations — a **defect** the run could not get past (red tests, a QA defect, a
+disputed auditor `BLOCKER`) and an **ambiguity** the leader refused to guess at
+(this row, and a `_readiness.md` `unclear`). Start the one-line and the
+`<!-- guild:needs-human -->` comment with the ASCII word `defect:` or `ambiguity:`
+accordingly — e.g. `OK PAUSE: needs-human — ambiguity: <the choice needed>`. Nothing
+branches on it (completion is judged by labels — `batch.md` Phase 4); it exists so a
+human triaging `gh issue list --label guild:needs-human` can tell the two apart at a
+glance, and so an over-strict ambiguity rule shows up as a visible population instead
+of a vague sense that batch pauses a lot. The rest of the line stays in
+`config.language` (Section K) — only the cause word is ASCII.
+
 **Decision log (mandatory when unattended)**: every gate the leader auto-resolved is recorded — analyze/design write each assumption into their output comment; the execute stage's **PR body** aggregates them under a `## 무인 결정 로그 (GLD_UNATTENDED)` heading (chosen interpretation · rationale/charter anchor · "사람 확인 요"). This makes the human's PR review **informed, not blind** — the deferred human gate lands here.
 
 **Hard rules (unchanged under unattended)**: INV1 (never merge — stop at `guild:done` = PR open) · INV2 (never weaken verification) · never fabricate a pass. `OK PAUSE: needs-human` is the honest escape hatch: mark the Issue with the **`guild:needs-human` label** (+ comment) so it is discoverable (`gh issue list --label guild:needs-human`), then stop **cleanly** (exit 0) so the supervisor counts it and moves to the next Issue.

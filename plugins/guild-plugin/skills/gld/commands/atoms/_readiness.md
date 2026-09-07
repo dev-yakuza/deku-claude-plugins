@@ -31,9 +31,22 @@ answers the dimension outright. Below that:
 - **unclear** — the readings are defensible enough that picking one is a
   product decision only the requester can make, and nothing in reach breaks
   the tie.
-When a gap sits between the two, rate it **partial** and record the assumption;
-Section C already requires that assumption to appear in Step 1's list, which is
-where a reader challenges it.
+When you cannot tell which of the two a gap is, that is not a rating — it means
+you have not finished checking. Go look at what the `partial` definition names:
+the charter, the Issue's own AC, the existing code, the repo's established
+default for this kind of decision. Something there points at one reading →
+`partial`, and record **what pointed at it** alongside the assumption. Nothing
+there breaks the tie → you have just met the definition of `unclear`; rate it
+`unclear`.
+
+⚠ **Do not settle the doubt by rating `partial` and leaning on Step 1's
+assumption list to catch it.** Attended, a human reads that list and can
+challenge the assumption. **Unattended there is no such reader** — `/gld batch`
+has nobody at Step 1, and it never runs `/gld review` (`review.md` Step 2.5), so
+the assumption is not a challenge waiting to happen: it is a product decision
+made silently and shipped. That is also why the boundary is asymmetric — a
+wrongly-`unclear` rating costs one human question, a wrongly-`partial` one costs
+a merged PR built on a guess.
 
 > **These three level values are MACHINE TOKENS** — ASCII, never localized, exactly like the `RESULT` keywords and `guild:*` labels in `_handoff.md` Section K. The gate below and every consumer (`analyze.md`) branch on `clear`/`partial`/`unclear` verbatim, so they must read the same on an `en`, `ko`, or `ja` repo. What the **human reads** — the one-line readiness summary (Section D), the `NEEDS_HUMAN` explanation, the recorded assumption prose — is written in `config.language` like all other human-readable output (Section K). Token ≠ rendered text: the token is what the logic tests, the surrounding sentence is what gets translated.
 
