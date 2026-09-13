@@ -49,6 +49,52 @@ Parallel-independent commands (e.g. `gh issue view ...` and `git status ...`) sh
 
 ---
 
+## Long-running commands: foreground with an explicit `timeout`, never backgrounded in a child
+
+A verification command routinely outruns the Bash tool's **120 s default timeout** — a full test
+suite, a `git push` whose pre-push hook mirrors CI, a build. There are two ways to survive that
+and **only one of them works in a child session**.
+
+- **Correct**: run it in the **foreground** with an explicit `timeout` (milliseconds, max
+  **600000** = 10 minutes). One call, one result, in the same turn.
+- **FORBIDDEN in a child session**: `run_in_background: true` on a turn that ends while the task
+  is still running. A `batch`/`sprint` child is `claude -p`, and **a `-p` process kills its
+  background tasks when the response completes** — there is no next turn for the completion
+  notification to arrive in. The command did not keep running; it died.
+
+⚠ **This does not look like a failure, which is why it has to be written down.** The agent ends
+its turn saying it is waiting, the stage label never advances, the child exits 0, and the
+supervisor reads that as *"exited mid-spine"* and re-resumes into the identical dead end until
+the retry cap. Measured on one `/gld sprint run` (6 members): **41 background tasks killed at
+turn end**, and the one member that never recovered ended all four attempts on the same
+sentence — *"push는 pre-push 훅이 도는 중이라 … 완료 알림을 받으면 라벨을 전이한다"* — waiting
+for a notification that cannot arrive. That repo's numbers were `flutter test` **231 s** and
+`git push` **280 s**; both fit inside 600000 ms with room to spare, so the backgrounding bought
+nothing that a `timeout` would not have.
+
+⚠ **A lost push is the expensive one.** No push means no PR, so the stage cannot advance and the
+work sits in the worktree — invisible on GitHub while the Issue merely looks stalled. In that
+run it cost one member outright, left a second's branch unpublished, and stranded a loop-back
+commit on a third.
+
+⚠ **The attended session is not the reference case.** Interactively the human's session outlives
+the turn, the notification does arrive, and backgrounding looks fine. The behaviour differs
+between the mode this is developed in and the mode it runs in, so "it worked when I tried it"
+is not evidence here.
+
+**When 600000 ms is genuinely not enough** — a suite measured above ten minutes, not a guess —
+do not fall back to backgrounding. Have the command write its own exit code and output to a
+file (the generated-`.sh` shape under **Sanctioned exceptions** below), then read that file with
+ordinary foreground calls until it is there. Each read is its own short call, so the turn never
+ends with a task outstanding.
+
+⚠ **Exception 2 below is not affected.** The supervisor launch (`bash <generated>.sh`,
+`run_in_background: true`) is made by the **parent**, in the human's own session, and is
+*designed* to outlive the turn. This rule governs what a **child** does inside its one `-p`
+turn. Do not read it as forbidding that launch.
+
+---
+
 ## Codebase exploration: use Grep/Glob/Read, not Bash
 
 For finding symbols, files, or content: use the **Grep tool**, **Glob tool**, and **Read tool** directly. They are bound to the working tree and don't trigger the safeguards that `find`/`grep`/`cat` via Bash do.
