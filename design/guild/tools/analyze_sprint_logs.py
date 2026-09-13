@@ -81,14 +81,23 @@ def load(root):
         call_ids = collections.defaultdict(list)
         pending = {}          # tool_use_id -> (tool name, command/path, parent)
         results = []          # (tool, arg, parent, result bytes)
+        results_all = []      # 모든 result 줄 — **실패 판정 전용**(비용은 마지막 줄)
         by_id = {}            # tool_use_id -> (tool, arg, result bytes)  — 4c 의 정확 귀속용
+        bodies = {}           # tool_use_id -> 라벨 질의 결과 본문(4KB 상한) — 스테이지 복구용
         spawns = {}           # tool_use_id -> description
         for ev in iter_events(path):
             kind = ev.get("type")
             msg = ev.get("message") or {}
             parent = ev.get("parent_tool_use_id")
             if kind == "result":
+                # ⚠ `result` 줄은 **로그당 1개가 아니다**(실측 38로그 중 15개가 다중, 최대 13개).
+                # 세 필드의 의미가 다르다: `total_cost_usd` 는 **누적**, `modelUsage` 는 세션
+                # **최종 스냅샷**, `.usage` 는 **세그먼트별**. 그래서 `result` 는 계속 마지막
+                # 줄을 쓰고(비용·modelUsage 가 거기 있다), **실패 판정만** 전 줄을 본다.
+                # 오늘 두 판정이 일치하는 이유는 실패가 항상 마지막이기 때문이고, 그 이유는
+                # 세션이 거기서 끝나기 때문이다 — `--resume`(M3)이 그 순서를 뒤집는다.
                 result = ev
+                results_all.append(ev)
             elif kind == "assistant":
                 # tool_use 등록은 중복 이벤트여도 멱등하므로 먼저 한다. dedup을 먼저 하면
                 # 중복 message.id 안의 tool_use 가 통째로 등록되지 않아 4·5절이 비게 된다.
@@ -149,9 +158,36 @@ def load(root):
                     size = len(json.dumps(body, ensure_ascii=False)) if body is not None else 0
                     results.append((hit[0], hit[1], hit[2], size))
                     by_id[block["tool_use_id"]] = (hit[0], hit[1], size)
+                    # ⚠ 본문은 **라벨 질의에 한해서만** 보존한다. 스테이지 경계를 복구하려면
+                    # `gh issue view --json labels` 의 **결과 본문**이 필요한데, 크기만 남기면
+                    # 200 스폰 중 52가 스테이지 미상이 되고 루프백 검출이 36 → 31 로 떨어진다.
+                    # (재개 attempt 는 라벨이 이미 맞아 전이 커맨드를 안 내보낸다.)
+                    # 전 결과를 보존하면 메모리가 터지므로 **질의 모양 + 4KB 상한**으로 막는다.
+                    if "label" in (hit[1] or "") and body is not None:
+                        bodies[block["tool_use_id"]] = json.dumps(
+                            body, ensure_ascii=False)[:4000]
         out.append(dict(log=rel, result=result, prefixes=prefixes, calls=calls,
-                        call_ids=call_ids, by_id=by_id, results=results, spawns=spawns))
+                        call_ids=call_ids, by_id=by_id, results=results, spawns=spawns,
+                        bodies=bodies, results_all=results_all))
     return out
+
+
+def failed(session):
+    """⚠ 실패 판정은 **「`is_error:true` 인 result 줄이 하나라도」** 다 — 마지막 줄이 아니다.
+
+    오늘 두 규칙이 일치하는 것은 실패가 항상 마지막이기 때문이고, 그 이유는 **세션이 거기서
+    끝나기 때문**이다(실측: `is_error` 15건이 전부 자기 로그의 마지막 줄). M3(`--resume`)는
+    정확히 그 순서를 뒤집는다 — 429 뒤에 성공 세그먼트가 붙으면 마지막 줄은 `completed` 이고
+    **429 비중이 개선 여부와 무관하게 ~0% 로 내려간다.** 즉 M3 가 자기 성공을 자동 선언한다.
+
+    ⚠ 판별자는 `subtype` 이 **아니다** — 429 로 죽은 줄도 `subtype:"success"` 였다(15/15).
+    ⚠ 그리고 이 판정을 **비용 합산에 쓰면 안 된다** — `total_cost_usd` 는 누적값이라 전 줄을
+    더하면 $832 → $2,142 로 튄다.
+    """
+    for ev in (session.get("results_all") or ([session["result"]] if session.get("result") else [])):
+        if ev.get("is_error") or (ev.get("terminal_reason") or "completed") != "completed":
+            return True
+    return False
 
 
 def settled(sessions):
@@ -188,7 +224,7 @@ def money(sessions):
         cost = res.get("total_cost_usd", 0) or 0
         total += cost
         main_only_cr += (res.get("usage") or {}).get("cache_read_input_tokens", 0)
-        if res.get("is_error") or (res.get("terminal_reason") or "completed") != "completed":
+        if failed(s):
             dead += cost
         m = re.search(r"issue-(\d+)-.*-attempt(\d+)\.log", s["log"])
         if m:
@@ -950,7 +986,73 @@ def simulate(sessions, main, sub):
     print("  ⚠ keep 은 측정값이 아니라 가정이다. 가정 (a) 검증 런에서 실측해 고정할 것.")
 
 
-def levers(sessions, main, sub):
+def loopback_union(sessions):
+    """9. 루프백 검출 — 어휘(`LOOPBACK_RE`) · 구조 · **합집합**.
+
+    ⚠ 이 절이 존재하는 이유. M1(달러가 붙은 유일한 레버)의 유일한 미지수는 **품질**이고, 그것을
+    재는 계기가 `LOOPBACK_RE` 하나였다. 그 정규식은 리더의 **자유서술 `description`** 에
+    매칭하므로 `config.language` 가 바뀌면 조용히 침묵한다 — 그리고 실측 침묵률은 문서가 적던
+    24% 가 아니라 **52.3%** 다(`attempt`·`rerun`·`final`·`3차`·`재호출` 을 하나도 안 가진다).
+
+    ⚠ **구조 검출도 「프롬프트 비의존」이 아니다.** 「같은 role」이 `spawns` 의 자유서술에서
+    파생되므로, 리더가 재시도 스폰의 이름을 바꾸면 짝이 깨진다. **의존을 없애는 게 아니라 줄인다.**
+    그래서 정답은 둘 중 하나가 아니라 **합집합**이다 — 둘 다 놓칠 때만 놓친다.
+    """
+    print()
+    print("=" * 78)
+    print("9. 루프백 검출 — 어휘 · 구조 · 합집합 (M1 의 품질 계기)")
+    print("=" * 78)
+    lex, st = set(), set()
+    nostage = tot = 0
+    for x in sessions:
+        by_id, bodies = x["by_id"], (x.get("bodies") or {})
+        # ⚠ 스테이지는 **스폰 시점**에 귀속시킨다. 세션 단위로 하나만 잡으면 「같은 스테이지」가
+        # 「같은 세션」으로 붕괴해 구조 검출이 과대해진다(실측 36 → 42).
+        # 메인 세션의 턴을 순서대로 걸으며 ① 라벨 전이 커맨드 ② 라벨 질의 **결과 본문**으로
+        # 현재 스테이지를 갱신하고, 그 턴에 일어난 Agent 스폰에 그 값을 붙인다.
+        # ⚠ 메인 세션의 parent 키는 **문자 그대로 `None`** 이다. `if main_parent is not None`
+        # 같은 가드를 두면 바로 그 키를 막는다(실제로 그렇게 해서 검출이 0 이 됐다).
+        cur, groups = None, collections.defaultdict(list)
+        turns = x["call_ids"].get(None) or []
+        for turn in turns:
+            for tid in turn:
+                arg = (by_id.get(tid) or ("", "", 0))[1] or ""
+                m = re.search(r"guild:(analyze|design|execute|test|qa)\b", arg)
+                if m:
+                    cur = m.group(1)
+                elif tid in bodies:
+                    m2 = re.search(r"guild:(analyze|design|execute|test|qa)\b", bodies[tid])
+                    if m2:
+                        cur = m2.group(1)
+            for tid in turn:
+                if tid not in x["spawns"]:
+                    continue
+                tot += 1
+                if cur is None:
+                    nostage += 1
+                desc = (x["spawns"][tid][0] or "")
+                role = re.sub(r"\s*#\d+.*", "", desc).strip() or "(unknown)"
+                groups[(cur, role)].append(tid)
+                if LOOPBACK_RE.search(desc):
+                    lex.add((x["log"], tid))
+        for members in groups.values():
+            for tid in members[1:]:          # 2번째 이후 = 재스폰
+                st.add((x["log"], tid))
+    union = lex | st
+    print(f"  어휘 `LOOPBACK_RE`        {len(lex):4d}")
+    print(f"  구조(스테이지+role 재스폰) {len(st):4d}")
+    print(f"  교집합                    {len(lex & st):4d}")
+    print(f"  **합집합**                {len(union):4d}   ← M1 이 써야 할 집합")
+    if union:
+        print(f"  어휘 단독 포착률 {len(lex) / len(union) * 100:.1f}% "
+              f"→ **침묵률 {100 - len(lex) / len(union) * 100:.1f}%**")
+    print(f"  ⚠ 스테이지 미상 스폰 {nostage}/{tot} — 미상이면 「같은 스테이지」가 「같은 세션」으로")
+    print("     붕괴해 구조 검출이 과대해진다. 라벨 질의 본문 보존(T0 #3)이 그것을 줄인다.")
+    print("  ⚠ 구조 검출도 자유서술 `description` 에 의존한다 — 합집합이 정답인 이유다.")
+    return {t for _log, t in union}
+
+
+def levers(sessions, main, sub, union_ids=None):
     """8. 레버 달러 — **이 절이 찍지 않는 수는 인용하지 않는다.**
 
     ⚠ 라운드 6의 실패에서 나왔다. 실행 순서를 정하는 레버 표가 전부 문서 프로즈에 있었고,
@@ -982,21 +1084,28 @@ def levers(sessions, main, sub):
     # opus $5/$25 → sonnet $3/$15 = 입력·출력 모두 0.6배 → 절감 0.4배
     m1 = 0.4 * (in_m + out_c * share_main)
 
-    # 루프백: spawn_roles 와 **같은 정규식**을 쓴다(지표가 갈라지면 안 된다).
-    lb_turns = lb_n = 0
-    for x in sessions:
-        for parent, seq in x["prefixes"].items():
-            if not parent:
-                continue
-            desc, _d = x["spawns"].get(parent, ("(unknown)", None))
-            if LOOPBACK_RE.search(desc):
-                lb_n += 1
-                lb_turns += sum(seq)
+    # 루프백 — ⚠ **두 집합으로 찍는다.** 어휘(`LOOPBACK_RE`) 하나만 쓰면 침묵률 43% 이고,
+    # 그 침묵이 손익분기를 **위로** 밀어 M1 이 실제보다 안전해 보인다(§9 참조).
+    def _lb(ids):
+        n = t = 0
+        for x in sessions:
+            for parent, seq in x["prefixes"].items():
+                if not parent:
+                    continue
+                if ids is None:
+                    desc, _d = x["spawns"].get(parent, ("(unknown)", None))
+                    hit = bool(LOOPBACK_RE.search(desc or ""))
+                else:
+                    hit = parent in ids
+                if hit:
+                    n += 1
+                    t += sum(seq)
+        return n, t
+    lb_n, lb_turns = _lb(None)
     lb_cost = (in_s + out_c * (1 - share_main)) * lb_turns / (si or 1)
 
     dead = sum((x["result"] or {}).get("total_cost_usd", 0) or 0 for x in sessions
-               if (x["result"] or {}).get("is_error")
-               or (((x["result"] or {}).get("terminal_reason") or "completed") != "completed"))
+               if failed(x))
 
     print(f"  기준선(재구성)                      ${base:9,.2f}")
     print(f"  M1  자식 메인 opus→sonnet           ${m1:9,.2f}  ({m1 / base * 100:4.1f}%)")
@@ -1008,6 +1117,15 @@ def levers(sessions, main, sub):
         print("        으로 두면 배수가 과대해진다(라운드 6 지적).")
         print("      ⚠ LOOPBACK_RE 는 리더의 자유서술 `description` 에 매칭한다 — 레포의")
         print("        `config.language` 가 바뀌면 이 지표가 조용히 과소계상된다.")
+    if union_ids:
+        un, ut = _lb(union_ids)
+        uc = (in_s + out_c * (1 - share_main)) * ut / (si or 1)
+        if uc > 0:
+            r2 = m1 / uc
+            print(f"      └ **합집합** {un:2d}건 ${uc:8,.2f} · 손익분기 **{r2:.1f}배** "
+                  f"(+{(r2 - 1) * 100:.0f}%)   ← 정본")
+            print("      ⚠ 어휘 하나만 쓰면 침묵분이 분모에서 빠져 손익분기가 **위로** 밀린다")
+            print("        — M1 이 실제보다 안전해 보인다. §9 의 합집합을 쓴다.")
     print(f"  M3  429/미완료 노출액                ${dead:9,.2f}  ({dead / base * 100:4.1f}%)")
     print()
     print("  ⚠ 여기에 없는 레버는 **아직 달러가 없는 것**이다. 문서에 숫자가 적혀 있어도")
@@ -1037,7 +1155,8 @@ def main_():
     tool_axis(sessions)
     bash_shapes(sessions)
     spawn_roles(sessions)
-    levers(sessions, m, s)
+    _u = loopback_union(sessions)
+    levers(sessions, m, s, _u)
     if "--sim" in sys.argv:
         simulate(sessions, m, s)
 
