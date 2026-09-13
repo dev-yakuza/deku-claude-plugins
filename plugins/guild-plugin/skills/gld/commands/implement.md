@@ -21,7 +21,7 @@ Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the
 
 **DEVELOPER TASK SHAPE** — `description`: `developer implement #$1`. Body inserted into the spine's Step 1 prompt:
 
-> Implement Issue #$1 on the current branch. Read the skeleton (`docs/specs/$1/skeleton.md`) and test cases (`docs/specs/$1/test-cases.md`) — these are your inputs, passed as files. Do TDD: make the tester's cases fail (red), implement to green, then refactor. **Resume**: keep the already-green work, pick up the TDD cycle where it stopped, complete the rest.
+> Implement Issue #$1 on the current branch. Your inputs are the skeleton (`docs/specs/$1/skeleton.md`) and the test cases (`docs/specs/$1/test-cases.md`), passed as files. ⚠ **Read them as the TDD cycle reaches them, not all up front** — start with the test cases and the skeleton's structure/boundary sections, then pull a module's section when you begin that module. This is **defer, not skip**: every section you implement against still gets read in full, just at the turn that needs it. Billed input is `Σ_turn prefix`, so a byte loaded at turn 1 is re-billed on all ~78 turns that follow — the same read costs several times more up front than in place. ⚠ Attach the read to a turn you were going to take anyway; do **not** create extra turns to page through a file (that costs the whole prefix again). Do TDD: make the tester's cases fail (red), implement to green, then refactor. **Resume**: keep the already-green work, pick up the TDD cycle where it stopped, complete the rest.
 
 RESULT extras: the raw test summary line and the branch name.
 
@@ -29,7 +29,7 @@ RESULT extras: the raw test summary line and the branch name.
 
 **CONFORMANCE CHECKS** — inserted into the spine's Step 3 prompt:
 
-> Review the implementation on the current branch against your skeleton (`docs/specs/$1/skeleton.md`) and `docs/standards/architecture.md`. Check: did it honor the module boundaries, seams, technical direction, and design intent?
+> Review the implementation on the current branch against your skeleton (`docs/specs/$1/skeleton.md`) and `docs/standards/architecture.md`. ⚠ **Read it whole, in one Read.** You are checking against the *whole* intent, so a clause you did not read is one this change passes silently — and an empty finding list is what clean work looks like, so the failure is invisible. The Read tool returns up to 2000 lines and does not say when it stopped: compare the last line number you got against the file's length, page from there if they differ, and say so if you still cannot get all of it. Check: did it honor the module boundaries, seams, technical direction, and design intent?
 
 **SIGNAL AREA** — `--area "<the target dir/file being implemented>"`; typical `--role` set `<tech-lead|security|infra|…>`.
 

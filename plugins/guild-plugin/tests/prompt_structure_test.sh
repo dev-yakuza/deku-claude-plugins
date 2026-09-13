@@ -698,6 +698,55 @@ RETRO="$GLD/commands/sprint/retro.md"
 # 있었다. 압축이 그 사이에 들어오면 **기본값이 「변화 없음」** 이 되어 셋 다 조용히 통과한다.
 # 실측: 유인 세션의 **8.5%** 가 1M 천장에서 압축하고, 세 파일 모두 **공통 경로**다.
 # 토큰 조치가 아니라 **오늘 이미 발생 중인 품질 결함**이다.
+# ⚠⚠ **M9 — `docs/specs/<issue>/` 재독 축소.** 적분의 **16.9%**(guild 지시문 전체의 2배).
+# 원리는 「덜 읽기」가 아니라 「늦게 읽기」다 — billed input 이 `Σ_turn prefix` 라 앞턴 바이트가
+# 몇 배 비싸다. ⚠ 그래서 **전수 독자 다섯은 예외**이고, 그중 **셋은 서브에이전트라
+# `_preflight.md` 를 읽지 않으므로 요구가 스폰 프롬프트에 있어야 한다.**
+PFMD="$GLD/commands/atoms/_preflight.md"
+ESMD="$GLD/commands/atoms/_execute_spine.md"
+IMPMD="$GLD/commands/implement.md"
+RFMD="$GLD/commands/refactor.md"
+TSTMD="$GLD/commands/test.md"
+hasfx "M9: Item 4 가 디렉터리가 아니라 산출물을 지정한다" "$PFMD" 'not the directory'
+hasfx "M9: 전수 독자 다섯이 예산 밖이라고 못박는다" "$PFMD" 'five jobs compare the CHANGE against the WHOLE intent'
+hasfx "M9: 셋이 서브에이전트라 이 파일을 안 읽는다고 적는다" "$PFMD" 'sub-agents that never read this file'
+hasfx "M9: 3.5b 는 전수 독자가 아니라고 못박는다" "$PFMD" '**3.5b specialists are NOT on that list**'
+hasfx "M9: refactor 리더도 아니라고 못박는다" "$PFMD" 'The `refactor` leader is not on it either'
+hasfx "M9: 페이징이 더 비싸다고 적는다" "$PFMD" 'each added turn re-bills the entire prefix'
+hasfx "M9: Read 잘림에 표시가 없다고 적는다" "$PFMD" 'adds no truncation marker'
+# ⚠ **정합성 ①** — 서브에이전트 셋의 스폰 프롬프트에 통독 요구가 **실제로** 있어야 한다.
+# 카브아웃에 이름만 올리는 것은 의도를 적을 뿐 전달하지 않는다.
+M9N=0
+grep -qF -- 'Read it whole, in one Read' "$IMPMD" && M9N=$((M9N+1))
+grep -qF -- 'Read it whole, in one Read' "$RFMD"  && M9N=$((M9N+1))
+grep -qF -- 'whole, in one Read' "$TSTMD"         && M9N=$((M9N+1))
+grep -qF -- 'read the intent whole, not a slice' "$ESMD" && M9N=$((M9N+1))
+if [ "$M9N" -eq 4 ]; then
+  ok "M9: 서브에이전트 스폰 프롬프트 4곳에 통독 요구가 있다"
+else
+  bad "M9: 서브에이전트 스폰 프롬프트에 통독 요구가 있다" "4곳" "${M9N}곳 — 카브아웃에 이름만 올렸다"
+fi
+# ⚠ **정합성 ②** — `qa.md` 의 `Load:` 열거가 깨지지 않았는가.
+# 라운드 3과 이번에 **두 번** 같은 사고를 냈다: ⚠ 절을 문장 중간에 끼워 넣으면서
+# `and the hotspot list` 가 열거에서 떨어져 무의미한 꼬리가 됐다. 소비자가 실재한다(Step 1).
+# ⚠ **문자열 존재로 판정하면 안 된다** — 떨어져 나간 꼬리도 같은 문자열을 만족한다(실증).
+# `Load:` 와 `⚠` 사이, 즉 **열거 구간 안에** 있는지를 위치로 본다.
+QAPOS="$("$PY" - "$GLD/commands/qa.md" <<'QAPY'
+import sys
+ln = open(sys.argv[1], encoding="utf-8").read().split("\n")[14]
+try:
+    lo = ln.index("Load:"); hi = ln.index("⚠", lo); h = ln.index("hotspot list", lo)
+except ValueError:
+    print("BROKEN"); raise SystemExit
+print("OK" if lo < h < hi else "BROKEN")
+QAPY
+)"
+if [ "$QAPOS" = "OK" ]; then
+  ok "M9: qa Load 열거 **안에** hotspot list 가 있다"
+else
+  bad "M9: qa Load 열거 안에 hotspot list 가 있다" "Load: 와 ⚠ 사이" "그 밖으로 떨어졌다 — Step 1 의 리스크 기반 계획이 입력을 잃는다"
+fi
+
 ESMD="$GLD/commands/atoms/_execute_spine.md"
 STMD="$GLD/commands/atoms/_stagnation.md"
 QAMD="$GLD/commands/qa.md"
@@ -1715,7 +1764,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=253   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=262   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

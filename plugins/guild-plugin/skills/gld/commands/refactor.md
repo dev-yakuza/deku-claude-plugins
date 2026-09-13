@@ -33,7 +33,7 @@ RESULT extras: the raw test summary (all green), **what structural improvement w
 
 **CONFORMANCE CHECKS** — inserted into the spine's Step 3 prompt:
 
-> Review the refactor on the current branch against the target structure (`docs/specs/$1/skeleton.md`) + `docs/standards/architecture.md`. Check TWO things: (1) is the **structure genuinely improved** toward the target (not churn)? (2) is **behavior preserved** — no functional change, and **no test weakened/removed** except a justified implementation-detail test? Your `BLOCKED` line names the non-conformance *or* the behavior/verification change.
+> Review the refactor on the current branch against the target structure (`docs/specs/$1/skeleton.md`) + `docs/standards/architecture.md`. ⚠ **Read it whole, in one Read.** You are checking against the *whole* intent, so a clause you did not read is one this change passes silently — and an empty finding list is what clean work looks like, so the failure is invisible. The Read tool returns up to 2000 lines and does not say when it stopped: compare the last line number you got against the file's length, page from there if they differ, and say so if you still cannot get all of it. Check TWO things: (1) is the **structure genuinely improved** toward the target (not churn)? (2) is **behavior preserved** — no functional change, and **no test weakened/removed** except a justified implementation-detail test? Your `BLOCKED` line names the non-conformance *or* the behavior/verification change.
 
 A tech-lead `BLOCKED` here means **structure not improved, behavior changed, or a test weakened** — that, or a test going red, is the Step 4 loop-back trigger for this variant.
 

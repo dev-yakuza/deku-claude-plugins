@@ -50,7 +50,42 @@ All items are **best-effort**. No individual failure blocks the stage — log an
    gh api repos/<owner>/<repo>/issues/<N>/comments --jq '.[] | select(.body | contains("guild:analyze:output") or contains("guild:design:output")) | .body'
    ```
    (substitute literal owner/repo and `<N>`.)
-3. Also read `docs/specs/<N>/` if present (skeleton, test cases passed as files between roles).
+3. Also read `docs/specs/<N>/` if present (`skeleton.md`, `test-cases.md`, `ux.md` — passed as
+   files between roles). ⚠ **Name them first (`ls docs/specs/<N>/`), then read the artifact(s) this
+   stage acts on — not the directory.** Measured over 14 unattended Issues, `docs/specs/<issue>/`
+   came to **16.9% of the whole run's billed input**, more than twice every Guild instruction file
+   combined; a byte pulled in at Step 0 is re-billed on every later turn of the session.
+
+   ⚠⚠ **Carve-out — five jobs compare the CHANGE against the WHOLE intent and are not bound by the
+   budget below.** For them a narrowed read passes a clause nobody looked at, and the failure is
+   invisible because an empty finding list is the expected answer for clean work:
+   the tech-lead's **conformance check**, the tester's **verification**, the execute stage's
+   **3.5a external auditor**, **qa's Step 2.6** deferred-follow-up scan (MANDATORY when design
+   artifacts exist, and explicitly a judgment read rather than a grep), and the **test leader's
+   Step 3** vacuous-test guard (it weighs *every* acceptance criterion against the covering tests).
+   ⚠ **Three of those five are sub-agents that never read this file** — no `templates/agents/*.md`
+   or spawn prompt references `_preflight.md`, only leaders run Step 0. Naming them here documents
+   the intent; **their whole-read requirement has to live in their own spawn prompts**, and until
+   it does, do not assert elsewhere that they read it whole.
+   ⚠ **3.5b specialists are NOT on that list** — they review the diff from their own specialty on
+   their own slice and return one free-text `>>> RESULT <<<` line, so neither the whole-intent
+   comparison nor the empty-list argument reaches them.
+   ⚠ **The `refactor` leader is not on it either.** Its Step 0 loads `skeleton.md` as *context*;
+   the whole-vs-whole judgment belongs to the tech-lead prompt it inserts (`refactor.md`'s
+   CONFORMANCE CHECKS), which is already row 1.
+
+   ⚠ **Do not "page" to satisfy this.** Billed input is `Σ_turn prefix`, so splitting one Read into
+   k calls adds k−1 turns and **each added turn re-bills the entire prefix** — measured, 4 chunks
+   cost +4.3% and 8 chunks +10.1% against reading it once. The lever is **when**, not in how many
+   pieces. ⚠ But the Read tool returns up to 2000 lines and **adds no truncation marker**, so for
+   an exhaustive read compare the last line number you received against the file's length and page
+   from there if they differ — say so explicitly if you still cannot get all of it.
+
+**Budget**: 1 `ls` + ≤3 artifact Reads — **for stages that consume the intent selectively.** It
+does not apply to the five exhaustive readers above; when your own step requires covering every
+artifact, cover every artifact. What the budget forbids is the reflex of reading the whole
+directory at Step 0 **because it is there**, before knowing which parts this stage acts on.
+
 
 **Failure**: no prior output → the stage may be running out of order; return `NEEDS_CONTEXT` if the stage requires it.
 
