@@ -79,6 +79,17 @@ def retraction_violations(plan):
 
 
 _HASH = re.compile(r"`([0-9a-f]{7})(?![0-9a-f…])")
+_PLAN_LINES = re.compile(r"`08-plan\.md`\(\*?\*?([\d,]+)줄\*?\*?\)")
+
+
+def plan_line_claim(decisions):
+    """결정 문서가 주장하는 원장 줄 수. 없으면 None.
+
+    ⚠ 이 수는 **두 번 낡았다**(라운드 7: 951 → 1,051, 라운드 24: 1,051 → 1,866).
+    라운드마다 손으로 갱신해야 하는 수는 반드시 낡으므로 기계가 본다.
+    """
+    m = _PLAN_LINES.search(decisions)
+    return int(m.group(1).replace(",", "")) if m else None
 
 
 def section_gaps(text):
@@ -176,6 +187,15 @@ def check(plan, decisions, n_suites, repo="."):
         problems.append("플랜 §10 이 규율의 정본(결정 문서 §6)을 가리키지 않는다")
 
     problems += retraction_violations(_strip_historical(plan))
+
+    claim = plan_line_claim(decisions)
+    if claim is None:
+        problems.append("결정 문서가 원장 줄 수를 밝히지 않는다")
+    else:
+        actual = len(plan.split("\n"))
+        # ⚠ ±2% 허용 — 한 줄 고칠 때마다 갱신을 요구하면 규칙이 지켜지지 않는다.
+        if abs(claim - actual) > max(20, actual * 0.02):
+            problems.append("결정 문서의 원장 줄 수 %d 이 실제 %d 과 어긋난다" % (claim, actual))
 
     for name, text in (("플랜", plan), ("결정문서", decisions)):
         short = [h for h in cited_hashes(text) if 7 <= len(h) <= 8]

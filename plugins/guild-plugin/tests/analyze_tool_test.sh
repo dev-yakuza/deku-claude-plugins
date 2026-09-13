@@ -265,7 +265,15 @@ if m.retraction_violations(REG):
 if not m.retraction_violations("## 12.\n아무 표도 없다\n"):
     bad.append("retraction_violations: §10b 표 부재를 신고하지 않는다")
 
-# ⑤ check() 가 실제로 문제를 **낸다** — 통과만 하는 함수가 아니다
+# ⑤ 원장 줄 수 주장 — **두 번 낡았다**(951→1,051, 1,051→1,866)
+if m.plan_line_claim("근거는 `08-plan.md`(**1,866줄**)에 있다") != 1866:
+    bad.append("plan_line_claim: 굵은 강조 표기를 못 읽는다")
+if m.plan_line_claim("근거는 `08-plan.md`(1,051줄)에") != 1051:
+    bad.append("plan_line_claim: 평문 표기를 못 읽는다")
+if m.plan_line_claim("줄 수를 안 적은 문서") is not None:
+    bad.append("plan_line_claim: 없는데 있다고 한다")
+
+# ⑥ check() 가 실제로 문제를 **낸다** — 통과만 하는 함수가 아니다
 probs = m.check("## 1. a\n## 3. c\n**9개 스위트**\n", "**9개 스위트**\n", 11)
 if not any("결번" in x for x in probs):
     bad.append("check: 결번을 보고하지 않는다")
@@ -276,8 +284,8 @@ if not any("정본" in x for x in probs):
 print("OK" if not bad else "BROKEN | " + " | ".join(bad))
 DCPY
 )"
-  if [ "$DC" = "OK" ]; then ok "문서 정합 검사기: 로직 16종이 합성 픽스처에서 발화한다"
-  else bad "문서 정합 검사기: 로직 16종" "$DC"; fi
+  if [ "$DC" = "OK" ]; then ok "문서 정합 검사기: 로직 19종이 합성 픽스처에서 발화한다"
+  else bad "문서 정합 검사기: 로직 19종" "$DC"; fi
 
   # 실제 문서가 있으면 대조까지 한다. 없으면 **그 사실을 출력**한다 — 조용히 넘어가지 않는다.
   DOCDIR="$HERE/../../../design/guild"
