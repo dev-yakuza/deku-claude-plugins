@@ -195,11 +195,78 @@ SBPY
 if [ "$SUBI" = "OK" ]; then ok "§11: 유인 SUB 적분이 실제로 합산된다 (중복 id 제외)"
 else bad "§11: 유인 SUB 적분이 실제로 합산된다" "$SUBI"; fi
 
+# ── 문서 정합 검사기 — **합성 픽스처로 로직을 검사한다** ─────────────────
+# ⚠⚠ 이 작업에서 가장 많이 재발한 결함은 **「같은 이름의 권위 있는 수가 두 문서에서 갈리는
+# 것」** 이고 라운드 15~18 만으로 **네 번** 나왔다(규율 5↔8 · 결정표 · 게이트 10↔11 ·
+# 규율 7 위반수 2↔5). 전부 결정 문서가 맞고 원장이 낡아 있었다.
+#
+# ⚠ 두 문서는 **gitignore 안**이라 CI·새 클론에는 없다. 「없으면 통과」로 짜면 그거야말로 이
+# 작업이 다섯 번 만든 **발화할 수 없는 검사**다. 그래서 **로직을 합성 픽스처로** 돌린다 —
+# 문서가 있든 없든 이 검사는 항상 무언가를 판정한다. 실제 문서 대조는 `--docs` 로 따로 돌리고,
+# 문서가 없으면 **exit 2**(0 이 아니다)를 낸다.
+DOCCHK="$HERE/../../../design/guild/tools/doc_consistency.py"
+if [ ! -f "$DOCCHK" ]; then
+  bad "문서 정합 검사기가 있다" "doc_consistency.py" "없음: $DOCCHK"
+else
+  DC="$($PY - "$DOCCHK" <<'DCPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("dc", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+bad = []
+
+# ① 절 번호 결번 — 라운드 15 에서 플랜이 §10 → §12 로 뛰고 있었다
+if m.section_gaps("## 1. a\n## 2. b\n## 4. d\n") != [3]:
+    bad.append("section_gaps: 결번 3 을 못 잡는다")
+if m.section_gaps("## 1. a\n## 2. b\n") != []:
+    bad.append("section_gaps: 결번 없는데 잡는다")
+
+# ② 스위트 개수 — 라운드 17 의 BLOCKER
+if m.suite_counts("게이트는 **10개 스위트** 전부 green") != [10]:
+    bad.append("suite_counts: 개수를 못 뽑는다")
+# ⚠ 「초안」 절 안의 수는 **당시 값이 맞다** — 보존 규율과 충돌하면 안 된다
+if m.suite_counts("### 초안의 표\n10 스위트 green\n") != []:
+    bad.append("suite_counts: 초안 절을 덜어내지 못한다")
+if m.suite_counts("### 초안의 표\nx\n## 현재\n**11개 스위트**\n") != [11]:
+    bad.append("suite_counts: 초안 절 뒤에서 다시 세지 못한다")
+
+# ③ 커밋 해시 — 7자리만. 8자리는 세션 UUID 라 오검출이 났었다(실측)
+if m.cited_hashes("커밋 `753f68b` 과 세션 `9b1ef612`") != ["753f68b"]:
+    bad.append("cited_hashes: 7자리만 골라내지 못한다")
+if m.cited_hashes("`9e91e361….jsonl`") != []:
+    bad.append("cited_hashes: 말줄임 뒤 토큰을 거른다")
+
+# ④ check() 가 실제로 문제를 **낸다** — 통과만 하는 함수가 아니다
+probs = m.check("## 1. a\n## 3. c\n**9개 스위트**\n", "**9개 스위트**\n", 11)
+if not any("결번" in x for x in probs):
+    bad.append("check: 결번을 보고하지 않는다")
+if len([x for x in probs if "스위트 개수" in x]) != 2:
+    bad.append("check: 두 문서의 스위트 불일치를 각각 보고하지 않는다")
+if not any("정본" in x for x in probs):
+    bad.append("check: 규율 정본 지시 누락을 보고하지 않는다")
+print("OK" if not bad else "BROKEN | " + " | ".join(bad))
+DCPY
+)"
+  if [ "$DC" = "OK" ]; then ok "문서 정합 검사기: 로직 8종이 합성 픽스처에서 발화한다"
+  else bad "문서 정합 검사기: 로직 8종" "$DC"; fi
+
+  # 실제 문서가 있으면 대조까지 한다. 없으면 **그 사실을 출력**한다 — 조용히 넘어가지 않는다.
+  DOCDIR="$HERE/../../../design/guild"
+  if [ -f "$DOCDIR/08-plan.md" ] && [ -f "$DOCDIR/08-decisions.md" ]; then
+    if OUT="$("$PY" "$DOCCHK" --docs "$DOCDIR" --tests "$HERE" 2>&1)"; then
+      ok "문서 정합: 원장 ↔ 결정 문서 ($OUT)"
+    else
+      bad "문서 정합: 원장 ↔ 결정 문서" "일치" "$OUT"
+    fi
+  else
+    ok "문서 정합: 원장이 이 환경에 없다 (gitignore) — 로직 검사만 돌았다"
+  fi
+fi
+
 # ── 문법 ─────────────────────────────────────────────────────────────────
 if $PY -m py_compile "$TOOL" 2>/dev/null; then ok "도구가 컴파일된다"; else bad "도구가 컴파일된다" "py_compile 실패"; fi
 
 # ⚠ 바닥선 — 나머지 10 스위트와 같은 규약. 실측 PASS 와 정확히 일치시킨다.
-TOOL_MIN_CHECKS=29
+TOOL_MIN_CHECKS=31
 echo
 echo "analyze_tool: $PASS passed, $FAIL failed"
 if [ "$((PASS + FAIL))" -lt "$TOOL_MIN_CHECKS" ]; then
