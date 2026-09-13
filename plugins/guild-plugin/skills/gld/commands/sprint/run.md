@@ -220,6 +220,38 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    (that list cannot be re-derived: a child body carries only `Parent Issue: #N`).
    Recompute the order with `--mode order` (the tie-break is stable, so a resume reproduces it).
    Queue only members that have not reached a terminal state.
+
+   ⚠⚠ **On a resume, TRUNCATE `.claude/guild/.sprint-logs/<tracker>/dag/failed.txt` first** —
+   its own Bash call, before anything else in this step:
+
+   ```bash
+   python3 -c "open('.claude/guild/.sprint-logs/<tracker>/dag/failed.txt','w').close()"
+   ```
+
+   That file is the supervisor's **working state for one run, not a record**, and it is the one
+   dag file that **accumulates across runs** — the directory survives, so every earlier
+   attempt's lines are still in it. The supervisor reads it back at start and promotes each
+   line to `terminal: failed` whenever the Issue is not already terminal by label and its PR is
+   not `MERGED`. Both hold for exactly the member a resume exists to retry: a member that
+   stalled mid-spine keeps a **stage** label (`guild:execute`), and its PR is `OPEN`. So the
+   member is silently dropped from the queue and the run reports a clean finish having never
+   touched it.
+
+   Measured (#389): `failed.txt` held `153` from the previous attempt — the one member whose
+   retry was the entire point of resuming. Nothing in the flow would have said so; the hazard
+   was documented only inside the supervisor template's own comments
+   (*"failed.txt accumulates for as long as `$D` survives, so that contradiction outlives the
+   attempt that caused it"*), which this file's reader never opens.
+
+   ⚠ **Truncate, do not delete** — the supervisor only creates it when absent
+   (`[ -f "$D/failed.txt" ] || : > "$D/failed.txt"`), so either works, but truncation keeps the
+   path's permissions and is what the script itself does.
+   ⚠ **This loses no history.** The durable per-failure record is `failures.jsonl`
+   (`{"issue": 153, "class": "incomplete-mid-spine", …}`), which this step does not touch, and
+   the retry counts live in the run marker.
+   ⚠ **No other dag file needs this.** The rest (`labels.json`, `prs.json`, `branches.txt`,
+   `cand.txt`, `run.json`, …) are rewritten every loop, and `comp_failed.txt`/
+   `comp_incomplete.txt` are truncated by the script at completion time.
 6. **Inventory worktrees.** `git worktree list --porcelain` — note which member worktrees exist,
    which are registered-but-missing, and whether any branch is held by a **preserved worktree
    from an earlier sprint** (containers are keyed by tracker, so that is possible and will
