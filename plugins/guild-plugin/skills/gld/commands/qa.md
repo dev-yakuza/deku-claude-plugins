@@ -88,7 +88,7 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
      lands between this read and the write, the "before" half is gone and step 2 renders the new
      body from **whatever survived** — everything outside the marker is deleted from the PR, and in
      unattended mode nobody sees it. That is an **INV4** violation produced by a context event, not
-     by a bad edit. Measured: **8.5% of attended sessions hit the 1M ceiling and compact**.
+     by a bad edit. Measured: **5 of 59 attended sessions (8.5%) compacted** — one repo's log corpus, and one of the five is the session that took this measurement.
      ⚠ Step 2 then reads that file back. **If the file is missing or empty, do NOT write** —
      `NEEDS_HUMAN: could not read PR #<n>'s body in full` (attended) / `guild:needs-human` label +
      comment + `OK PAUSE: needs-human — PR body unreadable` (unattended).

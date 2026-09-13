@@ -79,6 +79,39 @@ if grep -qF "cap * keep * 0.05" "$TOOL"; then
   else bad "A17 이 코드에 기록돼 있다" "cap*keep*0.05 가 있는데 경고 주석이 없다"; fi
 else ok "A17: 압축 요약 비용 모델이 수정됐다"; fi
 
+# ── §9 스테이지 귀속 — **로직 검사** ─────────────────────────────────────
+# ⚠⚠ 이 스위트의 검사가 전부 「문자열 존재」였기 때문에, `cur` 갱신의 **47% 가 전이가 아닌
+# 마커 문자열**로 정해지던 버그가 24건 green 아래에 있었다. 오귀속은 같은 role 의 재스폰 쌍을
+# 다른 그룹으로 쪼개 **위음성**을 만든다(합집합 37 ↔ 44, 침묵률 43.2% ↔ 52.3%,
+# M1 손익분기 2.2 ↔ 2.0). **문자열이 아니라 동작을 검사한다.**
+STAGE="$($PY - "$TOOL" <<'STPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("t", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+Q = chr(34)
+cases = [
+    ("gh issue edit 42 --add-label " + Q + "guild:execute" + Q, "execute", "라벨 전이"),
+    ("gh api x --jq select(.body|contains(" + Q + "guild:design:output" + Q + "))", None, "코멘트 마커"),
+    ("cat <<EOF\n<!-- guild:test-evidence:step-1 -->\nEOF", None, "test-evidence"),
+    ("gh issue edit 42 --add-label guild:qa", "qa", "따옴표 없는 전이"),
+]
+bad = []
+for arg, want, why in cases:
+    g = m._STAGE_TRANSITION.search(arg)
+    g = g.group(1) if g else None
+    if g != want:
+        bad.append(why + ": got=" + str(g) + " want=" + str(want))
+print("OK" if not bad else "BROKEN | " + " | ".join(bad))
+STPY
+)"
+if [ "$STAGE" = "OK" ]; then
+  ok "§9: 스테이지 귀속이 라벨 **전이** 만 인정한다 (마커 문자열 아님)"
+else
+  bad "§9: 스테이지 귀속이 라벨 전이만 인정한다" "$STAGE"
+fi
+hasfx_tool2() { if grep -qF -- "$2" "$TOOL"; then ok "$1"; else bad "$1" "not found: $2"; fi; }
+hasfx_tool2 "§9: 본문 폴백이 이중 인코딩을 고려한다" '이중 인코딩'
+
 # ── 유인 프런트엔드(§11) — §3 의 수를 코드가 내는가 ──────────────────────
 # ⚠ §3(유인 경로 측정) 전체가 임시 스크립트 위에 있었다 — 규율 7(「도구가 찍지 않는 수는
 # 쓰지 않는다」) 위반. M11 의 근거인 «유인 8.5% 압축» 도 재현 가능한 코드가 없었다.
@@ -103,7 +136,7 @@ hasfx_tool "§11: 동결본과 라이브가 일치함을 기록한다" '동결�
 if $PY -m py_compile "$TOOL" 2>/dev/null; then ok "도구가 컴파일된다"; else bad "도구가 컴파일된다" "py_compile 실패"; fi
 
 # ⚠ 바닥선 — 나머지 10 스위트와 같은 규약. 실측 PASS 와 정확히 일치시킨다.
-TOOL_MIN_CHECKS=25
+TOOL_MIN_CHECKS=27
 echo
 echo "analyze_tool: $PASS passed, $FAIL failed"
 if [ "$((PASS + FAIL))" -lt "$TOOL_MIN_CHECKS" ]; then

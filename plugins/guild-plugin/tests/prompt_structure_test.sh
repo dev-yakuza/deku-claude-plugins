@@ -724,7 +724,7 @@ hasfx "M5: 파일 읽기 비중을 범위로 적는다" "$BRMD" '**50.6–62.1%*
 hasfx "M5: 커맨드 출력은 증거이지 절감 대상이 아니다" "$BRMD" 'is not a target — it is the evidence'
 hasfx "M5: INV5 가 이긴다고 못박는다" "$BRMD" 'wins** — it is an invariant and this rule is not'
 hasfx "M5: 질의 축소는 허용된다" "$BRMD" 'Narrowing the QUERY is a different act'
-hasfx "M5: 스필 재독은 2차 효과라 이중 계상 금지" "$BRMD" 'do not count it twice'
+hasfx "M5: 스필 재독은 2차 효과라 이중 계상 금지" "$BRMD" 'count it twice'
 # ⚠ **정합성** — Read 도구 몫(17.9%p)을 적어야 「도구를 바꿔도 총량은 안 준다」가 근거를 갖는다.
 if grep -qF -- 'Read tool is 17.9 of those' "$BRMD"; then
   ok "M5: Read 도구 몫을 명시해 치환 무익을 실측으로 뒷받침한다"
@@ -751,6 +751,39 @@ grep -qF -- 'Read it whole, in one Read' "$IMPMD" && M9N=$((M9N+1))
 grep -qF -- 'Read it whole, in one Read' "$RFMD"  && M9N=$((M9N+1))
 grep -qF -- 'whole, in one Read' "$TSTMD"         && M9N=$((M9N+1))
 grep -qF -- 'read the intent whole, not a slice' "$ESMD" && M9N=$((M9N+1))
+# ⚠⚠ **존재 검사만으로는 부족했다 — 실증.** 이 ⚠ 절을 삽입하면서 `test.md` 의 스폰 프롬프트에서
+# `docs/specs/$1/test-cases.md` 가 **문장 중간에 쪼개졌는데**(`…test-cases.` + 300자 + `.md`)
+# 위 네 줄은 전부 PASS 했다. 파일 경로가 **온전한 한 토큰으로** 있는지 본다.
+PATHOK="$("$PY" - "$GLD" <<'PATHPY'
+import os, re, sys
+# ⚠ **파일 전체를 보면 안 된다.** 같은 경로가 리더의 Step 0 줄에도 있어서, 스폰 프롬프트에서
+# 경로가 쪼개져도 통과한다(실증). **스폰 프롬프트 줄 안에서만** 찾는다.
+gld = sys.argv[1]
+want = {
+    "commands/test.md":      (r"Adopt the persona in `\.claude/agents/tester\.md`",
+                              r"`docs/specs/\$1/test-cases\.md`"),
+    "commands/implement.md": (r"Review the implementation on the current branch",
+                              r"`docs/specs/\$1/skeleton\.md`"),
+    "commands/refactor.md":  (r"Review the refactor on the current branch",
+                              r"`docs/specs/\$1/skeleton\.md`"),
+}
+bad = []
+for rel, (marker, pat) in want.items():
+    hit = False
+    for ln in open(os.path.join(gld, rel), encoding="utf-8"):
+        if re.search(marker, ln) and re.search(pat, ln):
+            hit = True
+            break
+    if not hit:
+        bad.append(rel)
+print("OK" if not bad else "BROKEN " + " ".join(bad))
+PATHPY
+)"
+if [ "$PATHOK" = "OK" ]; then
+  ok "M9: 스폰 프롬프트의 산출물 경로가 온전하다 (문장 중간에 안 쪼개졌다)"
+else
+  bad "M9: 스폰 프롬프트의 산출물 경로가 온전하다" "온전" "$PATHOK — ⚠ 절을 경로 한가운데 끼워 넣었다"
+fi
 if [ "$M9N" -eq 4 ]; then
   ok "M9: 서브에이전트 스폰 프롬프트 4곳에 통독 요구가 있다"
 else
@@ -782,7 +815,18 @@ STMD="$GLD/commands/atoms/_stagnation.md"
 QAMD="$GLD/commands/qa.md"
 hasfx "M11-①: 3.5a 트립와이어의 before 판독이 파일로 남는다" "$ESMD" 'mutation-before.json'
 hasfx "M11-①: 파일이 없으면 기억으로 대체하지 않는다" "$ESMD" 'do not fall back to memory'
-hasfx "M11-②: 정체 가드가 audit record 에서 사유를 읽는다" "$STMD" 'Read them from the Issue'
+hasfx "M11-②: 정체 가드가 audit record 에서 사유를 읽는다" "$STMD" "read them from the Issue's"
+# ⚠ **execute 경로로 스코프돼야 한다.** 무조건이면 audit record 가 없는 무인 `test`/`qa`
+# 루프백이 매번 `OK PAUSE: needs-human` 으로 멈춘다 — 품질 조치가 무인 경로에 정지 결함을
+# 만드는 모양이고, 같은 파일이 세 줄 위에서 「종전대로 동작한다」고 적는 것과도 모순이었다.
+hasfx "M11-②: 그 규칙이 execute 경로로 스코프된다" "$STMD" '**Scope**: this applies where an audit record exists'
+# ⚠⚠ **정합성 — 읽는 쪽과 쓰는 쪽.** 정체 가드는 **두 축**(역할 · 감사자)을 비교하는데,
+# 기록 스키마가 감사자 findings 만 적으면 역할 축은 여전히 컨텍스트에만 산다 = 절반만 닫힌다.
+if grep -qF -- 'record this attempt' "$ESMD" && grep -qF -- 'ROLE axis too' "$ESMD"; then
+  ok "M11-②: 기록 스키마에 **역할 축**도 있다 (읽는 쪽 ↔ 쓰는 쪽 정합)"
+else
+  bad "M11-②: 기록 스키마에 역할 축도 있다" "있음" "없음 — `_stagnation.md` 가 읽으라는 것을 `_execute_spine.md` 가 쓰지 않는다"
+fi
 hasfx "M11-②: 숫자 상한이 대체재가 아니라고 못박는다" "$STMD" 'a **backstop, not a substitute**'
 hasfx "M11-③: PR 본문을 파일로 먼저 받는다" "$QAMD" 'gld-pr-<PR_NUM>-body.md'
 hasfx "M11-③: 파일이 비면 쓰지 않는다" "$QAMD" '**If the file is missing or empty, do NOT write**'
@@ -790,7 +834,7 @@ hasfx "M11-③: 파일이 비면 쓰지 않는다" "$QAMD" '**If the file is mis
 # 한 축만 고치고 나머지를 두는 것이 이 작업에서 가장 자주 재발한 결함이다.
 M11N=0
 for _f in "$ESMD" "$STMD" "$QAMD"; do
-  grep -qF -- '8.5%' "$_f" && M11N=$((M11N+1))
+  grep -qE -- '(^|[^0-9.])8\.5%' "$_f" && M11N=$((M11N+1))   # ⚠ -F 였을 때 98.5% 도 통과했다
 done
 if [ "$M11N" -eq 3 ]; then
   ok "M11: 세 곳이 같은 근거(유인 8.5% 압축)를 든다"
@@ -1319,8 +1363,8 @@ import os, re, sys
 gld = sys.argv[1]
 # 인용 -> 그 줄에 반드시 있어야 하는 조각. 새 인용이 생기면 여기에 항목을 추가해야 한다.
 EXPECT = {
-    ("_bash_rules.md", 123): "A generated OS-level",
-    ("_bash_rules.md", 125): "guild:auditor-violation",
+    ("_bash_rules.md", 122): "A generated OS-level",
+    ("_bash_rules.md", 124): "guild:auditor-violation",
     ("board_write.py", 4):  "Why this is code and not a series of Bash calls",
     ("config.md", 14):      "unknown/unsupported config key",
     ("init.md", 163):       "normalized, simple-bash-safe",
@@ -1794,7 +1838,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=275   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=278   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

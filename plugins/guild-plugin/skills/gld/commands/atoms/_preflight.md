@@ -19,6 +19,11 @@ Each stage runs only the items matching its tier. Lower tiers are subsets of hig
 (Item 7 = the ③ just-in-time overseer reminder — attended/optional, not tier-gated. Item 8 = the ④ episodic working-memory read — the runtime half of the growth loop.)
 
 All items are **best-effort**. No individual failure blocks the stage — log and proceed.
+⚠ **One exception: Item 2's `^status:` Grep.** It is not a convenience — it is what replaces
+the reads the budget removed. If it is skipped, the `confirmed`/`draft` split for the files
+you did **not** open is simply unknown, and a `confirmed` standard silently stops being a hard
+constraint. Before this budget existed all five were read, so this hole did not exist; the
+budget only holds with the Grep. Skip it and you must Read all five.
 
 ---
 
@@ -33,9 +38,10 @@ All items are **best-effort**. No individual failure blocks the stage — log an
 ### Item 2: Project conventions (always)
 1. Check for convention files: `ls CLAUDE.md AGENTS.md README.md`
 2. Read each present file. Extract code style, naming, architecture rules, testing conventions.
-3. Read `docs/standards/` if present (charter, architecture, conventions, quality-bar, verification).
+3. Read `docs/standards/` if present (charter, architecture, conventions, quality-bar,
+   verification) — **these are the authoritative standards Guild's init drafted.**
    ⚠ **Retrieve, do not whole-load** — measured, `docs/standards/` is **3.4% of billed input**, and
-   `verification.md` alone is 1.5% (read 161 times across 37 sessions). Read the file(s) bearing on
+   `verification.md` alone is **1.5%** — the single largest standard. Read the file(s) bearing on
    what this stage does: architecture/conventions for design and execute, quality-bar/verification
    for test and qa, charter when the Issue's scope itself is in question.
    ⚠⚠ **But never at the cost of the confirmed/draft split.** That split is a *field*, not a body:
@@ -48,7 +54,7 @@ All items are **best-effort**. No individual failure blocks the stage — log an
    (normal — this Item is `if present`), or hold hand-written standards with no frontmatter. `ls
    docs/standards/` separates them: no directory → skip and record that; files but no `status:`
    line → the split is **unknown**, so Read the ones bearing on this stage and write
-   `status: unknown` in Section C's trace rather than reporting them as drafts. — these are the authoritative standards Guild's init drafted. Honor `status: confirmed` entries as **hard constraints** and `status: draft` as strong guidance — and **surface the confirmed-vs-draft split explicitly in the pre-flight trace (Section C)** so the stage never silently treats a confirmed standard as merely advisory.
+   `status: unknown` in Section C's trace rather than reporting them as drafts.
 
 **Budget**: ~5 Read calls max, and **≤3 of them under `docs/standards/`** — plus the
 `^status:` Grep, which is not a Read and is not optional.
@@ -91,8 +97,8 @@ All items are **best-effort**. No individual failure blocks the stage — log an
    CONFORMANCE CHECKS), which is already row 1.
 
    ⚠ **Do not "page" to satisfy this.** Billed input is `Σ_turn prefix`, so splitting one Read into
-   k calls adds k−1 turns and **each added turn re-bills the entire prefix** — measured, 4 chunks
-   cost +4.3% and 8 chunks +10.1% against reading it once. The lever is **when**, not in how many
+   k calls adds k−1 turns and **each added turn re-bills the entire prefix** — the cost is `Σ_turn prefix`,
+   so the added turns are charged the whole prefix each. The lever is **when**, not in how many
    pieces. ⚠ But the Read tool returns up to 2000 lines and **adds no truncation marker**, so for
    an exhaustive read compare the last line number you received against the file's length and page
    from there if they differ — say so explicitly if you still cannot get all of it.

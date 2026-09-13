@@ -267,9 +267,11 @@ Therefore a mutation check around the auditor is **mandatory on every path, not 
 
 **Take these three readings immediately before spawning; take the first two again after the auditor returns** (each its own Bash call):
 
-⚠⚠ **Write the two compared readings to a file before spawning, and read that file back afterwards — do NOT compare against what you remember.** This check is a **before/after pair held in context**, and context is not durable: a compaction between the spawn and the return discards the *before* half, after which the natural reading of a missing baseline is *"Both sets unchanged"* — the check passes and the auditor's read-only guarantee is gone, silently. Measured: **8.5% of attended sessions hit the 1M ceiling and compact**, and this file is on the attended path too. One extra Bash call removes the whole failure mode:
+⚠⚠ **Write the two compared readings to a file before spawning, and read that file back afterwards — do NOT compare against what you remember.** This check is a **before/after pair held in context**, and context is not durable: a compaction between the spawn and the return discards the *before* half, after which the natural reading of a missing baseline is *"Both sets unchanged"* — the check passes and the auditor's read-only guarantee is gone, silently. Measured: **5 of 59 attended sessions (8.5%) compacted** — one repo's log
+corpus, and one of the five is the session that took this measurement, and this file is on the attended path too. One extra Bash call removes the whole failure mode:
 
 ```bash
+mkdir -p .claude/guild/memory   # ⚠ 없는 레포(구버전 init)에서 write 가 죽으면 before 가 통째로 사라져 **위음성**이 된다
 python3 -c "import subprocess,json,sys;d=subprocess.run(['git','diff','--numstat','--no-renames','<mb>'],capture_output=True,text=True).stdout;st=subprocess.run(['git','status','--porcelain','-uall'],capture_output=True,text=True).stdout;open('.claude/guild/memory/mutation-before.json','w').write(json.dumps({'numstat':d,'status':st}))"
 ```
 
@@ -466,6 +468,14 @@ A `recorded` entry carries forward the same way **only when it is a `MAJOR`**: t
 ⚠ **This is a carry-forward, not a new dismissal, so the unattended prohibition does not bite** — and cannot be used to evade it. A recorded `dismissed` `BLOCKER` can only ever have been created on an attended run (unattended, a `BLOCKER` has exactly two outcomes: fixed, or `OK PAUSE`), so carrying it forward re-uses a *human-visible* decision rather than making a fresh one. If the `git diff` above cannot be run, or the recorded HEAD is missing, do **not** guess in the permissive direction: treat the finding as new.
 
 **Auditor record (on the Issue, written HERE at Step 4 — not deferred to Step 5).** As soon as the disposition of this attempt's findings is decided, post them to the Issue under `<!-- guild:auditor:execute -->` … `<!-- /guild:auditor:execute -->` (temp-file pattern — one comment for the Issue, PATCHed rather than duplicated): every finding with severity + `file:line` + the one-line finding, its disposition, and for a dismissal the one-line reason. The disposition vocabulary is **four** ASCII tokens (`_handoff.md` Section K), one of which exists precisely because the record is written *at loop-back time*, before anyone knows the outcome:
+
+⚠⚠ **And record this attempt's blocking reason on the ROLE axis too, in the same block** —
+the tech-lead's `BLOCKED: <non-conformance>`, a gate role's finding, or the verify-gap
+description, one line each. `_stagnation.md` Section A compares **two axes** and reads the
+«before» half from this record; without the role axis it is durable on the auditor axis only,
+and a compaction between attempts still erases the other one. Writing the reason costs a line;
+losing it means the stagnation guard silently does not fire, which looks exactly like a normal
+retry.
 
 | Token | Meaning |
 |---|---|

@@ -994,6 +994,14 @@ def simulate(sessions, main, sub):
     print("  ⚠ keep 은 측정값이 아니라 가정이다. 가정 (a) 검증 런에서 실측해 고정할 것.")
 
 
+# ⚠ 라벨 **전이** 만 잡는다 — `--add-label "guild:<stage>"`. 마커 문자열(`:output`,
+# `test-evidence`)은 전이가 아니다.
+_STAGE_TRANSITION = re.compile(r"--add-label\s+[\"']?guild:(analyze|design|execute|test|qa)(?![\w:-])")
+# 라벨 **조회 결과 본문**에서는 전이 문법이 없으므로 라벨 자체를 본다.
+# ⚠ 본문은 `json.dumps` 로 **이중 인코딩**돼 따옴표가 `\"` 로 이스케이프된다 — 따옴표를
+# 요구하면 폴백이 통째로 죽는다(실측: 미상 52/200). 라벨 이름만 본다.
+_STAGE_LABEL = re.compile(r"guild:(analyze|design|execute|test|qa)(?![\w:-])")
+
 _QUALITY_MARKERS = (
     ("guild:test-evidence",   "raw 테스트 증거 마커"),
     ("guild:auditor:execute", "감사 기록 코멘트"),
@@ -1061,11 +1069,16 @@ def attended(root):
     print("=" * 78)
     # ⚠ 세션 중복(디스크 복제본)을 sessionId 로 제거한다 — 실측에서 한 건 있었고
     #    리더턴의 13.2% 가 재계수됐다.
+    # ⚠ 어느 쪽을 남기는가가 중요하다. 첫 등장을 남기면 **파일명 알파벳 순서**가 고르는 것이고,
+    #    복제본 중 하나가 잘린 사본이면 **짧은 쪽을 채택**해 턴 수와 적분을 과소평가한다.
+    #    복제본은 같은 세션의 서로 다른 시점 스냅샷이므로 **긴 쪽이 상위집합**이다.
     byid, dup = {}, 0
     for x in S:
-        if x["sid"] in byid:
+        prev = byid.get(x["sid"])
+        if prev is not None:
             dup += 1
-            continue
+            if len(x["seq"]) <= len(prev["seq"]):
+                continue
         byid[x["sid"]] = x
     U = list(byid.values())
     integ = [sum(x["seq"]) for x in U]
@@ -1098,10 +1111,21 @@ def quality_baseline(sessions):
     **루프백을 줄이고 BLOCKER 수를 줄여** 개선처럼 보인다. 따라서 「감사자 BLOCKER 수」나
     「테스트 커버리지」로 재면 **측정 대상이 계기를 오염시킨다.**
 
-    반면 **스폰 수와 마커 수는 구조적**이다 — 게이트가 돌았는지, 증거가 남았는지는 리더의
-    판단이 아니라 스파인이 강제하는 것이라 리더가 조용히 낮출 수 없다. 낮아졌다면 그것 자체가
-    이상이다. 그래서 이 절은 **셋 다 만족하는 것만** 싣는다:
-      ① 방향이 정의된다(**감소 = 열화**) ② 동결 로그에서 기준선이 나온다 ③ 오염되지 않는다.
+    반면 **마커 수는 구조적**이다 — 증거가 남았는지는 리더의 판단이 아니라 스파인이 강제한다.
+
+    ⚠⚠ **그러나 이 절의 초안은 「스폰 수도 오염되지 않는다」고 단언했고, 그것은 틀렸다.**
+      ① **스폰 축은 자유서술에 의존한다.** `role.startswith(...)` 가 리더가 지은 `description`
+         을 전방일치하므로, 같은 게이트가 다른 이름을 쓰면 0 이 된다 — 실측: 서브에이전트
+         200 세션 중 **95(48%)가 버킷 밖**이고 그중 `외부 감사 재스캔`·`외부 감사 최종 스캔`
+         은 감사자인데 안 세어진다. §9 가 자기 한계로 적은 것과 **같은 결함**이다.
+      ② **상위 3개는 방향이 정의되지 않는다.** `external auditor`·`tech-lead conformance`·
+         `tester verify` 는 **루프백마다 재스폰**된다(`_execute_spine.md` chain rule). 품질이
+         나빠져 루프백이 늘면 이 수는 **올라가고**, 깨끗한 런에서는 내려간다. §8 은 같은
+         루프백을 «비용» 으로 세는데 이 절이 그 증가를 «개선» 으로 읽으면 모순이다.
+
+    → 그래서 아래는 **두 묶음으로 나눠 읽는다**: 조건부 스폰(security·i18n·dba·designer)은
+    루프백과 무관하게 «그 위험이 있었는가» 를 재므로 **감소 = 열화**가 성립한다. 상위 3개는
+    **루프백 수와 함께** 읽어야 하고 단독으로는 품질 신호가 아니다.
 
     ⚠ 옛 세트에서 뺀 것: **「테스트 케이스 커버리지」는 산출 도구가 없다**(레포 스냅샷이
     로그에 없다). **「감사자 BLOCKER·MAJOR 수」는 리더의 중재 후 기록이라 오염된다** —
@@ -1128,9 +1152,12 @@ def quality_baseline(sessions):
                 if role.startswith(want):
                     spawns[want] += 1
                     break
-    print("  ── 게이트가 돌았는가 (스폰 수 — 구조적) ──")
-    for k in _QUALITY_SPAWNS:
+    print("  ── 조건부 게이트가 소집됐는가 (감소 = 열화) ──")
+    for k in ("security review", "i18n review", "dba review", "designer ui/ux review"):
         print(f"    {k:28s} {spawns.get(k, 0):5d}")
+    print("  ── 항상 도는 역할 (⚠ 루프백마다 재스폰 — 단독으로는 품질 신호가 아니다) ──")
+    for k in ("external auditor", "tech-lead conformance", "tester verify"):
+        print(f"    {k:28s} {spawns.get(k, 0):5d}   ← §9 의 루프백 수와 함께 읽어라")
     print("  ── 증거·신호가 남았는가 (마커 수 — 구조적) ──")
     for _pat, label in _QUALITY_MARKERS:
         print(f"    {label:28s} {marks.get(label, 0):5d}")
@@ -1139,6 +1166,10 @@ def quality_baseline(sessions):
     print("     내려갔다면 절감이 아니라 **게이트가 덜 돈 것**이다.")
     print("  ⚠ 이 절이 M1 A/B 의 품질 축이다. 「감사자 BLOCKER 수」·「테스트 커버리지」는")
     print("     쓰지 않는다 — 전자는 리더의 중재에 오염되고 후자는 산출 도구가 없다.")
+    print("  ⚠⚠ **스폰 축은 리더의 자유서술 `description` 에 의존한다** — 실측 48% 가 버킷")
+    print("     밖이다(`외부 감사 재스캔` 등). §9 와 같은 한계이고, 이 절도 그것을 못 벗어난다.")
+    print("  ⚠ 그리고 §10 은 「게이트가 돌았는가」를 잰다. 「옳게 판정했는가」는 재지 못한다 —")
+    print("     그것은 리더 외부의 독립 판정(`/gld review`)이 필요하고 지금 그 데이터가 없다.")
 
 
 def loopback_union(sessions):
@@ -1172,11 +1203,20 @@ def loopback_union(sessions):
         for turn in turns:
             for tid in turn:
                 arg = (by_id.get(tid) or ("", "", 0))[1] or ""
-                m = re.search(r"guild:(analyze|design|execute|test|qa)\b", arg)
+                # ⚠⚠ **라벨 「전이」만 인정한다.** 예전에는 `guild:(stage)` 를 arg 어디서나
+                # 찾았는데, 그러면 **코멘트 조회 커맨드 안의 마커 문자열**에도 걸린다 —
+                # `contains("guild:design:output")`, `<!-- guild:test-evidence:step-1 -->`.
+                # 실측: `cur` 갱신 143건 중 **67건(47%)이 전이가 아니었다.** 특히
+                # `test-evidence` 는 execute **Step 2** 에서 돌아, 그 뒤의 모든 execute 스폰이
+                # `stage=test` 로 찍혔다(구조 검출 25건 중 16건이 test, execute 는 3건뿐).
+                # 오귀속은 같은 role 의 재스폰 쌍을 **다른 그룹으로 쪼개** 검출을 떨어뜨린다
+                # (위양성이 아니라 **위음성**). 교정 후: 구조 25→36 · 합집합 37→44 ·
+                # 어휘 침묵률 43.2%→**52.3%** · M1 손익분기 2.2→**2.0배**.
+                m = _STAGE_TRANSITION.search(arg)
                 if m:
                     cur = m.group(1)
                 elif tid in bodies:
-                    m2 = re.search(r"guild:(analyze|design|execute|test|qa)\b", bodies[tid])
+                    m2 = _STAGE_TRANSITION.search(bodies[tid]) or _STAGE_LABEL.search(bodies[tid])
                     if m2:
                         cur = m2.group(1)
             for tid in turn:
