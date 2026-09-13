@@ -706,6 +706,17 @@ RETRO="$GLD/commands/sprint/retro.md"
 # (`cat` 1,076 · `sed` 1,228 · `grep` 1,558 / 37세션). 규범으로 승격한다.
 # ⚠ 핵심은 **도구 치환이 아니다** — `cat x` → `Read x` 는 delta 항등이라 절감이 **정확히 $0**.
 # 게이트는 4d 의 「파일을 끌어오는 것」 50.6% 하락으로 건다.
+PFMD="$GLD/commands/atoms/_preflight.md"
+# ⚠ **M13 — `docs/standards/` 재독 축소**(적분 3.4%, `verification.md` 홀로 1.5% · 161회 읽힘).
+# M9 와 같은 모양이지만 **하나가 다르다**: 이 Item 은 같은 문단에서 `status: confirmed` 를
+# **하드 제약**으로 다루라고 요구한다. 안 연 파일의 status 는 알 수 없으므로, 좁히기와
+# 그 요구가 충돌한다 → `^status:` Grep 한 번으로 분할 판정을 공짜로 끝낸다.
+hasfx "M13: docs/standards 를 선택적으로 읽는다" "$PFMD" 'Retrieve, do not whole-load'
+hasfx "M13: confirmed/draft 분할을 status Grep 으로 보전한다" "$PFMD" 'one Grep for `^status:`'
+hasfx "M13: Grep 기본 출력이 파일명이라 content 를 명시한다" "$PFMD" 'output_mode: "content"'
+hasfx "M13: 예산이 하드 제약에 양보한다" "$PFMD" 'the budget yields to a hard constraint'
+hasfx "M13: 빈손이 「confirmed 없음」과 다르다고 못박는다" "$PFMD" 'Zero matches is not the same'
+
 BRMD="$GLD/commands/atoms/_bash_rules.md"
 hasfx "M5: 권고가 아니라 규칙이다" "$BRMD" 'This is a rule, not a preference'
 hasfx "M5: 도구를 바꾸는 것으로는 절감이 없다고 못박는다" "$BRMD" '**saves exactly nothing**'
@@ -1783,7 +1794,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=270   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=275   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

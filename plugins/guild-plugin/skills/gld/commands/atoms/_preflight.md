@@ -33,9 +33,25 @@ All items are **best-effort**. No individual failure blocks the stage — log an
 ### Item 2: Project conventions (always)
 1. Check for convention files: `ls CLAUDE.md AGENTS.md README.md`
 2. Read each present file. Extract code style, naming, architecture rules, testing conventions.
-3. Read `docs/standards/` if present (charter, architecture, conventions, quality-bar, verification) — these are the authoritative standards Guild's init drafted. Honor `status: confirmed` entries as **hard constraints** and `status: draft` as strong guidance — and **surface the confirmed-vs-draft split explicitly in the pre-flight trace (Section C)** so the stage never silently treats a confirmed standard as merely advisory.
+3. Read `docs/standards/` if present (charter, architecture, conventions, quality-bar, verification).
+   ⚠ **Retrieve, do not whole-load** — measured, `docs/standards/` is **3.4% of billed input**, and
+   `verification.md` alone is 1.5% (read 161 times across 37 sessions). Read the file(s) bearing on
+   what this stage does: architecture/conventions for design and execute, quality-bar/verification
+   for test and qa, charter when the Issue's scope itself is in question.
+   ⚠⚠ **But never at the cost of the confirmed/draft split.** That split is a *field*, not a body:
+   **one Grep for `^status:` across `docs/standards/` — with `output_mode: "content"`, since the
+   tool's default returns file names rather than lines** — gives you all five `status` values for
+   the price of one call, so you know which standards are `confirmed` (hard constraints) even for
+   the files you do not open. If it shows a `confirmed` standard this stage did not open, **open
+   it**: the budget yields to a hard constraint, never the other way round.
+   ⚠ **Zero matches is not the same as zero confirmed standards.** The directory may be absent
+   (normal — this Item is `if present`), or hold hand-written standards with no frontmatter. `ls
+   docs/standards/` separates them: no directory → skip and record that; files but no `status:`
+   line → the split is **unknown**, so Read the ones bearing on this stage and write
+   `status: unknown` in Section C's trace rather than reporting them as drafts. — these are the authoritative standards Guild's init drafted. Honor `status: confirmed` entries as **hard constraints** and `status: draft` as strong guidance — and **surface the confirmed-vs-draft split explicitly in the pre-flight trace (Section C)** so the stage never silently treats a confirmed standard as merely advisory.
 
-**Budget**: ~5 Read calls max.
+**Budget**: ~5 Read calls max, and **≤3 of them under `docs/standards/`** — plus the
+`^status:` Grep, which is not a Read and is not optional.
 
 ### Item 3: Commit message style (always)
 1. `git log --oneline -20`
