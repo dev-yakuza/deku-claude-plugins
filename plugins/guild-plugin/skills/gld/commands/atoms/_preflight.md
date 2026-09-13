@@ -41,7 +41,7 @@ budget only holds with the Grep. Skip it and you must Read all five.
 3. Read `docs/standards/` if present (charter, architecture, conventions, quality-bar,
    verification) — **these are the authoritative standards Guild's init drafted.**
    ⚠ **Retrieve, do not whole-load** — measured, `docs/standards/` is **3.4% of billed input**, and
-   `verification.md` alone is **1.5%** — the single largest standard. Read the file(s) bearing on
+   `verification.md` alone is **1.4%** — the single largest standard. Read the file(s) bearing on
    what this stage does: architecture/conventions for design and execute, quality-bar/verification
    for test and qa, charter when the Issue's scope itself is in question.
    ⚠⚠ **But never at the cost of the confirmed/draft split.** That split is a *field*, not a body:

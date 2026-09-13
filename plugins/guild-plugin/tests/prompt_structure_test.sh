@@ -707,7 +707,9 @@ RETRO="$GLD/commands/sprint/retro.md"
 # ⚠ 핵심은 **도구 치환이 아니다** — `cat x` → `Read x` 는 delta 항등이라 절감이 **정확히 $0**.
 # 게이트는 4d 의 「파일을 끌어오는 것」 50.6% 하락으로 건다.
 PFMD="$GLD/commands/atoms/_preflight.md"
-# ⚠ **M13 — `docs/standards/` 재독 축소**(적분 3.4%, `verification.md` 홀로 1.5% · 161회 읽힘).
+# ⚠ **M13 — `docs/standards/` 재독 축소**(적분 3.36%, `verification.md` 홀로 **1.44%** —
+# 도구 §4c 의 「파일별 내역」이 찍는다. 라운드 6 이전에는 그 내역을 도구가 안 찍어서
+# 지시문의 수가 근거 없이 떠 있었고, 반올림도 1.5% 로 틀려 있었다).
 # M9 와 같은 모양이지만 **하나가 다르다**: 이 Item 은 같은 문단에서 `status: confirmed` 를
 # **하드 제약**으로 다루라고 요구한다. 안 연 파일의 status 는 알 수 없으므로, 좁히기와
 # 그 요구가 충돌한다 → `^status:` Grep 한 번으로 분할 판정을 공짜로 끝낸다.
@@ -1831,6 +1833,34 @@ case "$OUTE" in
   OK*) ok "enum 축소 문장이 Section C 표의 부분집합이고 사이트가 남아 있다 (${OUTE#OK })" ;;
   *)   bad "enum 축소 문장이 Section C 표와 정합" "OK >=7" "$OUTE" ;;
 esac
+# ── 규율 7 기계화 — 지시문의 모든 백분율이 등재돼 있는가 ──────────────────
+# ⚠ **존재 검사가 아니라 전수 대조다.** 라운드 6 에서 `verification.md 1.5%` 가 ① 도구가
+# 찍지 않는 수이면서 ② 반올림까지 틀린 채로 출하돼 있었다 — 검사가 없었기 때문이다.
+# 이 검사는 「값이 맞는가」를 못 본다(코퍼스가 레포에 없다). **출처 없는 수가 들어오는 것**을
+# 막는다. 새 수를 쓰려면 `design/guild/tools/measured-figures.tsv` 에 「어느 절이 찍는가」를
+# 함께 적어야 하고, 그 강제가 곧 재현 경로의 보존이다.
+LEDGER="$HERE/../../../design/guild/tools/measured-figures.tsv"
+if [ ! -f "$LEDGER" ]; then
+  bad "규율 7: 측정치 원장이 있다" "원장 파일" "없음: $LEDGER"
+else
+  _unlisted=""
+  for _f in "$GLD/commands/atoms/_bash_rules.md" "$GLD/commands/atoms/_preflight.md" \
+            "$GLD/commands/atoms/_execute_spine.md" "$GLD/commands/atoms/_stagnation.md" \
+            "$GLD/commands/qa.md" "$GLD/commands/test.md"; do
+    [ -f "$_f" ] || continue
+    # 범위 표기(`13.0–24.5%`)는 양끝을 각각 본다.
+    for _p in $(grep -oE '[0-9]+(\.[0-9]+)?(–[0-9]+(\.[0-9]+)?)?%' "$_f" \
+                | sed 's/%$//' | tr '–' '\n' | sed 's/$/%/' | sort -u); do
+      grep -qE "^${_p}"$'\t' "$LEDGER" || _unlisted="$_unlisted $(basename "$_f"):$_p"
+    done
+  done
+  if [ -z "$_unlisted" ]; then
+    ok "규율 7: 지시문의 모든 백분율이 원장에 등재돼 있다"
+  else
+    bad "규율 7: 지시문의 모든 백분율이 원장에 등재돼 있다" "전부 등재" "미등재 —$_unlisted"
+  fi
+fi
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -1838,7 +1868,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=278   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=279   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

@@ -559,6 +559,10 @@ def source_integral(sessions):
         return f"{tool}"
 
     cost = collections.Counter()
+    # ⚠ `docs/standards/` 를 **파일별로** 쪼갠다. `_preflight.md` 가 「verification.md 하나가
+    #    가장 크다」고 지시하는데, 그 수를 도구가 찍지 않으면 규율 7(「이 절이 찍지 않는 수는
+    #    인용하지 마라」) 위반이다 — 라운드 6 지적.
+    std = collections.Counter()
     base = 0
     for s in sessions:
         by_id = s["by_id"]
@@ -583,7 +587,12 @@ def source_integral(sessions):
                     continue
                 tot_b = sum(t[2] for t in take) or 1
                 for tool, arg, size in take:
-                    cost[bucket(tool, arg)] += delta * (n - 1 - i) * size / tot_b
+                    b = bucket(tool, arg)
+                    c = delta * (n - 1 - i) * size / tot_b
+                    cost[b] += c
+                    if b == "docs/standards/":
+                        m = _STD_FILE.search(arg)
+                        std[m.group(1) if m else "(파일명 불명)"] += c
     cost["base prefix (시스템+CLAUDE.md+툴+스킬)"] = base
     total = sum(cost.values()) or 1
     print(f"{'출처':46s} {'적분 기여':>15} {'share':>7}")
@@ -593,8 +602,14 @@ def source_integral(sessions):
     es = cost["guild 지시문: _execute_spine.md"]
     print(f"\n  guild 지시문 전체 {g / total * 100:.2f}%   그중 _execute_spine.md {es / total * 100:.2f}%")
     print(f"  → 묶음 E(그 파일 ⚠ 줄 31.5%) 상한 = {es * 0.315 / total * 100:.2f}%")
+    if std:
+        print(f"\n  `docs/standards/` {cost['docs/standards/'] / total * 100:.2f}% 의 파일별 내역")
+        for k, v in std.most_common(6):
+            print(f"    {k:40s} {int(v):13,} {v / total * 100:5.2f}%")
+        print("    ⚠ 이 내역이 `_preflight.md` Item 2 의 「어느 표준을 끌어올 것인가」 근거다.")
 
 
+_STD_FILE = re.compile(r"docs/standards/([A-Za-z0-9_.\-]+\.md)")
 _PURE_READ = ("cat", "sed", "head", "tail", "less", "more")
 _SEARCH = ("grep", "rg", "awk")
 _LIST = ("ls", "find", "wc")

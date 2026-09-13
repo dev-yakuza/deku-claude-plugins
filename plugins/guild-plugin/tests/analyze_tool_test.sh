@@ -132,11 +132,37 @@ hasfx_tool "§11: postTokens 비와 시뮬 keep 의 정의가 다름을 적는�
 hasfx_tool "§11: 동결 스냅샷에 대고 돌리라고 지시한다" '동결 스냅샷에 대고 돌려라'
 hasfx_tool "§11: 동결본과 라이브가 일치함을 기록한다" '동결본과 라이브가'
 
+# ── §4c 표준 파일별 내역 — **로직 검사** ─────────────────────────────────
+# ⚠ `_preflight.md` Item 2 는 「`verification.md` 하나가 1.4%」라고 지시한다. 그 수를 내는
+# 것이 이 내역이고, 내역이 사라지면 지시문의 수가 **출처를 잃는다**(라운드 6 에서 실제로
+# 그 상태였다). 존재가 아니라 **추출이 되는지**를 본다 — 정규식이 깨지면 전부 「파일명 불명」
+# 한 줄로 뭉쳐 표가 조용히 무의미해지기 때문이다.
+STD="$($PY - "$TOOL" <<'SDPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("t", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+cases = [
+    ("cat docs/standards/verification.md", "verification.md"),
+    ("sed -n 1,80p /x/y/docs/standards/quality-bar.md", "quality-bar.md"),
+    ("cat docs/specs/12/plan.md", None),
+]
+bad = []
+for arg, want in cases:
+    g = m._STD_FILE.search(arg)
+    g = g.group(1) if g else None
+    if g != want:
+        bad.append(arg + ": got=" + str(g) + " want=" + str(want))
+print("OK" if not bad else "BROKEN | " + " | ".join(bad))
+SDPY
+)"
+if [ "$STD" = "OK" ]; then ok "§4c: 표준 파일별 내역이 파일명을 뽑아낸다"
+else bad "§4c: 표준 파일별 내역이 파일명을 뽑아낸다" "$STD"; fi
+
 # ── 문법 ─────────────────────────────────────────────────────────────────
 if $PY -m py_compile "$TOOL" 2>/dev/null; then ok "도구가 컴파일된다"; else bad "도구가 컴파일된다" "py_compile 실패"; fi
 
 # ⚠ 바닥선 — 나머지 10 스위트와 같은 규약. 실측 PASS 와 정확히 일치시킨다.
-TOOL_MIN_CHECKS=27
+TOOL_MIN_CHECKS=28
 echo
 echo "analyze_tool: $PASS passed, $FAIL failed"
 if [ "$((PASS + FAIL))" -lt "$TOOL_MIN_CHECKS" ]; then
