@@ -248,7 +248,24 @@ if m.cited_hashes("커밋 `753f68b` 과 세션 `9b1ef612`") != ["753f68b"]:
 if m.cited_hashes("`9e91e361….jsonl`") != []:
     bad.append("cited_hashes: 말줄임 뒤 토큰을 거른다")
 
-# ④ check() 가 실제로 문제를 **낸다** — 통과만 하는 함수가 아니다
+# ④ 폐기 수치 재인용 — 이 작업에서 **세 번** 일어난 클래스(0.7087 · 4.0배 · +41.7~49.5%)
+REG = "## 10b.\n| 폐기된 값 | 대체 | 무엇 |\n| `4.0배` | **2.0배** | x |\n\n## 12.\n"
+if m.retracted_values(REG) != [("4.0배", "2.0배")]:
+    bad.append("retracted_values: §10b 표를 못 읽는다")
+v = m.retraction_violations(REG + "## M1\n손익분기는 4.0배다.\n")
+if not any("4.0배" in x for x in v):
+    bad.append("retraction_violations: 표식 없는 재인용을 못 잡는다")
+if m.retraction_violations(REG + "## M1\n~~4.0배~~ 였다.\n"):
+    bad.append("retraction_violations: 취소선 표식을 인정하지 않는다")
+if m.retraction_violations(REG + "## M1\n라운드 5 이전에는 4.0배였다.\n"):
+    bad.append("retraction_violations: 「이전」 표식을 인정하지 않는다")
+# ⚠ §10b **표 자신**은 당연히 폐기값을 담는다 — 자기 자신을 신고하면 안 된다
+if m.retraction_violations(REG):
+    bad.append("retraction_violations: §10b 표 자신을 신고한다")
+if not m.retraction_violations("## 12.\n아무 표도 없다\n"):
+    bad.append("retraction_violations: §10b 표 부재를 신고하지 않는다")
+
+# ⑤ check() 가 실제로 문제를 **낸다** — 통과만 하는 함수가 아니다
 probs = m.check("## 1. a\n## 3. c\n**9개 스위트**\n", "**9개 스위트**\n", 11)
 if not any("결번" in x for x in probs):
     bad.append("check: 결번을 보고하지 않는다")
@@ -259,8 +276,8 @@ if not any("정본" in x for x in probs):
 print("OK" if not bad else "BROKEN | " + " | ".join(bad))
 DCPY
 )"
-  if [ "$DC" = "OK" ]; then ok "문서 정합 검사기: 로직 10종이 합성 픽스처에서 발화한다"
-  else bad "문서 정합 검사기: 로직 10종" "$DC"; fi
+  if [ "$DC" = "OK" ]; then ok "문서 정합 검사기: 로직 16종이 합성 픽스처에서 발화한다"
+  else bad "문서 정합 검사기: 로직 16종" "$DC"; fi
 
   # 실제 문서가 있으면 대조까지 한다. 없으면 **그 사실을 출력**한다 — 조용히 넘어가지 않는다.
   DOCDIR="$HERE/../../../design/guild"

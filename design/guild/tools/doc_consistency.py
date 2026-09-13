@@ -33,6 +33,51 @@ _SECTION = re.compile(r"^## (\d+)\. ", re.M)
 _SUITE_COUNT = re.compile(r"\*\*(\d+)\s*(?:개)?\s*스위트\*\*|\*\*(\d+)개\*\* 스위트|(\d+)개 스위트")
 # ⚠ **정확히 7자리만** 커밋으로 본다. 이 문서들은 커밋을 git 기본 축약(7자리)으로 인용하고,
 #    8자리 16진은 **세션 UUID 앞부분**(`9b1ef612`·`9e91e361`)이라 오검출이 난다 — 실측.
+_RETRACT_ROW = re.compile(r"^\| `([^`]+)` \| \*\*([^*]+)\*\* \|", re.M)
+# 철회 표식 — 이 중 하나라도 같은 줄에 있으면 「과거를 인용한 것」으로 인정한다.
+# ⚠ 철회 표식 — 하나라도 같은 줄에 있으면 「과거를 인용한 것」으로 인정한다.
+#    아래 넷은 **실측 오검출에서 추가**했다: 「초과분」(§3.1c 의 초과분 기록 블록) ·
+#    「틀렸」(«0.7087 은 이 절이 스스로 틀렸다고 선언한 모델의 값이다») ·
+#    「임시 스크립트」(도구 이전 값을 밝히는 문장) · 「직후」(«구현 직후 이 표는 …»).
+# ⚠⚠ **표식을 붙여 현재 주장을 숨기는 것은 이 규칙의 악용이다** — 그러라고 만든 통로가 아니다.
+_RETRACT_MARK = ("~~", "정정", "철회", "유령", "초안", "라운드", "이전", "당시", "폐기",
+                 "초과분", "틀렸", "임시 스크립트", "직후")
+
+
+def retracted_values(plan):
+    """§10b 「폐기된 수치」 표에서 (폐기값, 대체값) 쌍을 읽는다."""
+    if "## 10b." not in plan:
+        return []
+    body = plan[plan.index("## 10b."):]
+    body = body[:body.index("\n## ") if "\n## " in body else len(body)]
+    return [(m.group(1), m.group(2)) for m in _RETRACT_ROW.finditer(body)]
+
+
+def retraction_violations(plan):
+    """폐기값이 **철회 표식 없는 줄**에 나타나면 위반이다.
+
+    ⚠ 이 작업에서 **세 번** 일어난 클래스다 — 자기 문서가 철회한 수를 다른 절이 현행으로
+    인용하는 것(0.7087 · 4.0배 · +41.7~49.5%). 셋 다 결론을 바꾸는 자리였다.
+    """
+    pairs = retracted_values(plan)
+    if not pairs:
+        return ["§10b 「폐기된 수치」 표가 없다"]
+    bad = []
+    in_10b = False
+    for line in plan.split("\n"):
+        if line.startswith("## "):
+            in_10b = line.startswith("## 10b.")
+        if in_10b:
+            continue
+        if any(k in line for k in _RETRACT_MARK):
+            continue
+        for old, new in pairs:
+            if old in line:
+                bad.append("폐기값 `%s`(→ %s)를 철회 표식 없이 인용: %s"
+                           % (old, new, line.strip()[:60]))
+    return bad
+
+
 _HASH = re.compile(r"`([0-9a-f]{7})(?![0-9a-f…])")
 
 
@@ -129,6 +174,8 @@ def check(plan, decisions, n_suites, repo="."):
     # 원장이 「규율의 정본은 결정 문서」임을 명시하는가
     if "정본은 `08-decisions.md` §6" not in plan:
         problems.append("플랜 §10 이 규율의 정본(결정 문서 §6)을 가리키지 않는다")
+
+    problems += retraction_violations(_strip_historical(plan))
 
     for name, text in (("플랜", plan), ("결정문서", decisions)):
         short = [h for h in cited_hashes(text) if 7 <= len(h) <= 8]
