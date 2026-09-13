@@ -994,6 +994,68 @@ def simulate(sessions, main, sub):
     print("  ⚠ keep 은 측정값이 아니라 가정이다. 가정 (a) 검증 런에서 실측해 고정할 것.")
 
 
+_QUALITY_MARKERS = (
+    ("guild:test-evidence",   "raw 테스트 증거 마커"),
+    ("guild:auditor:execute", "감사 기록 코멘트"),
+    ("manual-qa",             "qa 2.5 수동 체크리스트"),
+    ("--kind correction",     "ground-truth correction"),
+    ("--kind verify-gap",     "ground-truth verify-gap"),
+)
+_QUALITY_SPAWNS = ("external auditor", "tech-lead conformance", "tester verify",
+                   "security review", "i18n review", "dba review", "designer ui/ux review")
+
+
+def quality_baseline(sessions):
+    """10. 품질 지표 — **구조**를 센다. 판정을 세지 않는다.
+
+    ⚠ 설계 원리. M1(리더 티어 하향)이 깎는 것은 **리더의 판정**이다 — vacuous 테스트를
+    커버리지로 인정하고, stakes 를 낮게 분류하고, 심각도를 잘못 병합한다. 그 셋은 전부
+    **루프백을 줄이고 BLOCKER 수를 줄여** 개선처럼 보인다. 따라서 「감사자 BLOCKER 수」나
+    「테스트 커버리지」로 재면 **측정 대상이 계기를 오염시킨다.**
+
+    반면 **스폰 수와 마커 수는 구조적**이다 — 게이트가 돌았는지, 증거가 남았는지는 리더의
+    판단이 아니라 스파인이 강제하는 것이라 리더가 조용히 낮출 수 없다. 낮아졌다면 그것 자체가
+    이상이다. 그래서 이 절은 **셋 다 만족하는 것만** 싣는다:
+      ① 방향이 정의된다(**감소 = 열화**) ② 동결 로그에서 기준선이 나온다 ③ 오염되지 않는다.
+
+    ⚠ 옛 세트에서 뺀 것: **「테스트 케이스 커버리지」는 산출 도구가 없다**(레포 스냅샷이
+    로그에 없다). **「감사자 BLOCKER·MAJOR 수」는 리더의 중재 후 기록이라 오염된다** —
+    스폰 수로 대체한다. **`NEEDS_HUMAN` 수는 방향이 모호**해 보조로만 읽는다.
+    """
+    print()
+    print("=" * 78)
+    print("10. 품질 지표 기준선 — **감소 = 열화** (구조를 센다, 판정을 세지 않는다)")
+    print("=" * 78)
+    marks = collections.Counter()
+    spawns = collections.Counter()
+    for x in sessions:
+        for _tool, arg, _p, _n in x["results"]:
+            a = arg or ""
+            for pat, label in _QUALITY_MARKERS:
+                if pat in a:
+                    marks[label] += 1
+        for parent, _seq in x["prefixes"].items():
+            if not parent:
+                continue
+            desc = (x["spawns"].get(parent) or ("", ""))[0] or ""
+            role = re.sub(r"\s*#\d+.*", "", desc).strip().lower()
+            for want in _QUALITY_SPAWNS:
+                if role.startswith(want):
+                    spawns[want] += 1
+                    break
+    print("  ── 게이트가 돌았는가 (스폰 수 — 구조적) ──")
+    for k in _QUALITY_SPAWNS:
+        print(f"    {k:28s} {spawns.get(k, 0):5d}")
+    print("  ── 증거·신호가 남았는가 (마커 수 — 구조적) ──")
+    for _pat, label in _QUALITY_MARKERS:
+        print(f"    {label:28s} {marks.get(label, 0):5d}")
+    print()
+    print("  ⚠ **어느 하나라도 내려가면 그것이 신호다.** 비용이 내려가면서 이 수들이 같이")
+    print("     내려갔다면 절감이 아니라 **게이트가 덜 돈 것**이다.")
+    print("  ⚠ 이 절이 M1 A/B 의 품질 축이다. 「감사자 BLOCKER 수」·「테스트 커버리지」는")
+    print("     쓰지 않는다 — 전자는 리더의 중재에 오염되고 후자는 산출 도구가 없다.")
+
+
 def loopback_union(sessions):
     """9. 루프백 검출 — 어휘(`LOOPBACK_RE`) · 구조 · **합집합**.
 
@@ -1163,6 +1225,7 @@ def main_():
     tool_axis(sessions)
     bash_shapes(sessions)
     spawn_roles(sessions)
+    quality_baseline(sessions)
     _u = loopback_union(sessions)
     levers(sessions, m, s, _u)
     if "--sim" in sys.argv:
