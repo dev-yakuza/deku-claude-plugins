@@ -1437,7 +1437,52 @@ def levers(sessions, main, sub, union_ids=None):
         print("  M12 루프백 티어 상승분                **관측 0건** — opus 선언 스폰이 "
               "루프백 합집합 안에 없다")
 
-    print(f"  M3  429/미완료 노출액                ${dead:9,.2f}  ({dead / base * 100:4.1f}%)")
+    # ── M3 — **잔여 회수액** (노출액이 아니다) ───────────────────────────
+    # ⚠⚠ `$294.80` 은 「429 세션의 **총 지출**」이지 회수 가능액이 아니다. 슈퍼바이저는 이미
+    #    재시도하고(`sprint-supervisor.sh:1945-1950`) **라벨에서 재개**한다(`resume.md:34`:
+    #    *"the label is the checkpoint"*). 완료된 스테이지는 **이미 보존된다.**
+    #    `--resume` 이 **추가로** 사는 것은 **죽은 스테이지 «내부»의 부분 진행**뿐이다.
+    # → 그래서 실패 세션의 **마지막 라벨 전이 이후 턴들**만 센다. 그 앞은 다음 시도가
+    #    라벨로 건너뛰므로 재수행되지 않는다.
+    # ⚠ 전이가 **0건인 세션**(재개 attempt 는 라벨이 이미 맞아 전이를 안 내보낸다)은 전체가
+    #    한 스테이지 안이므로 **100% 재수행**이 맞다 — 과대계상이 아니다.
+    redo_seqs, fail_seqs = [], []
+    for x in sessions:
+        if not failed(x):
+            continue
+        by_id = x["by_id"]
+        for parent, seq in x["prefixes"].items():
+            if parent:
+                continue          # SUB 는 라벨 체크포인트가 없다 — 아래 ⚠ 참조
+            ids = x["call_ids"][parent]
+            last = -1
+            for i in range(len(seq)):
+                for tid in (ids[i] if i < len(ids) else []):
+                    hit = by_id.get(tid)
+                    if hit and _STAGE_TRANSITION.search(hit[1] or ""):
+                        last = i
+            if seq[last + 1:]:
+                redo_seqs.append(("claude-opus-5", "1h", seq[last + 1:]))
+            fail_seqs.append(("claude-opus-5", "1h", seq))
+    m3 = 0.0
+    if redo_seqs:
+        m3, _ = input_cost(redo_seqs)
+        fin, _ = input_cost(fail_seqs)
+    print(f"  M3  429/미완료 **노출액**             ${dead:9,.2f}  ({dead / base * 100:4.1f}%)")
+    if m3:
+        print(f"      └ **잔여 회수액**              ${m3:9,.2f}  ({m3 / base * 100:4.1f}%)"
+              f"  = 노출액의 {m3 / dead * 100:.1f}%")
+        print(f"      ⚠ 실패 MAIN 입력비 ${fin:,.2f} 중 **마지막 라벨 전이 이후** 분만 셌다 —")
+        print("        그 앞은 다음 시도가 라벨로 건너뛰므로 재수행되지 않는다.")
+        print("      ⚠⚠ **하한도 상한도 아니다 — 두 누락이 반대 방향이다:**")
+        print("         (↑ 키우는 쪽) **SUB 를 안 셌다** — 죽은 스테이지가 재실행되면 그 안의")
+        print("            서브에이전트도 다시 스폰되는데 턴 단위 귀속이 없어 못 뺐다.")
+        print("         (↓ 줄이는 쪽) **`--resume` 자체의 비용**(재개 시 prefix 재적재)이")
+        print("            빠져 있다. 회수액 전부가 절감으로 남지 않는다.")
+        print("         → **자릿수만 믿어라**: 노출액 $%.2f 의 **1/7 수준**이지 전액이 아니다."
+              % dead)
+    else:
+        print("      └ **잔여 회수액 관측 0건** — 실패 세션이 없거나 전부 전이 직후에 죽었다")
     print()
     print("  ⚠ 여기에 없는 레버는 **아직 달러가 없는 것**이다. 문서에 숫자가 적혀 있어도")
     print("     이 절이 찍지 않으면 인용하지 마라.")
