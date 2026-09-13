@@ -702,6 +702,25 @@ RETRO="$GLD/commands/sprint/retro.md"
 # 원리는 「덜 읽기」가 아니라 「늦게 읽기」다 — billed input 이 `Σ_turn prefix` 라 앞턴 바이트가
 # 몇 배 비싸다. ⚠ 그래서 **전수 독자 다섯은 예외**이고, 그중 **셋은 서브에이전트라
 # `_preflight.md` 를 읽지 않으므로 요구가 스폰 프롬프트에 있어야 한다.**
+# ⚠⚠ **M5 — 셸 파일 읽기 → Read 도구.** 규칙은 별도 절의 «prefer» 로만 있었고 무시됐다
+# (`cat` 1,076 · `sed` 1,228 · `grep` 1,558 / 37세션). 규범으로 승격한다.
+# ⚠ 핵심은 **도구 치환이 아니다** — `cat x` → `Read x` 는 delta 항등이라 절감이 **정확히 $0**.
+# 게이트는 4d 의 「파일을 끌어오는 것」 50.6% 하락으로 건다.
+BRMD="$GLD/commands/atoms/_bash_rules.md"
+hasfx "M5: 권고가 아니라 규칙이다" "$BRMD" 'This is a rule, not a preference'
+hasfx "M5: 도구를 바꾸는 것으로는 절감이 없다고 못박는다" "$BRMD" '**saves exactly nothing**'
+hasfx "M5: 파일 읽기 비중을 범위로 적는다" "$BRMD" '**50.6–62.1%**'
+hasfx "M5: 커맨드 출력은 증거이지 절감 대상이 아니다" "$BRMD" 'is not a target — it is the evidence'
+hasfx "M5: INV5 가 이긴다고 못박는다" "$BRMD" 'wins** — it is an invariant and this rule is not'
+hasfx "M5: 질의 축소는 허용된다" "$BRMD" 'Narrowing the QUERY is a different act'
+hasfx "M5: 스필 재독은 2차 효과라 이중 계상 금지" "$BRMD" 'do not count it twice'
+# ⚠ **정합성** — Read 도구 몫(17.9%p)을 적어야 「도구를 바꿔도 총량은 안 준다」가 근거를 갖는다.
+if grep -qF -- 'Read tool is 17.9 of those' "$BRMD"; then
+  ok "M5: Read 도구 몫을 명시해 치환 무익을 실측으로 뒷받침한다"
+else
+  bad "M5: Read 도구 몫을 명시한다" "17.9%p" "없다 — 「치환은 무익」이 근거 없는 주장이 된다"
+fi
+
 PFMD="$GLD/commands/atoms/_preflight.md"
 ESMD="$GLD/commands/atoms/_execute_spine.md"
 IMPMD="$GLD/commands/implement.md"
@@ -1289,8 +1308,8 @@ import os, re, sys
 gld = sys.argv[1]
 # 인용 -> 그 줄에 반드시 있어야 하는 조각. 새 인용이 생기면 여기에 항목을 추가해야 한다.
 EXPECT = {
-    ("_bash_rules.md", 85): "A generated OS-level",
-    ("_bash_rules.md", 87): "guild:auditor-violation",
+    ("_bash_rules.md", 123): "A generated OS-level",
+    ("_bash_rules.md", 125): "guild:auditor-violation",
     ("board_write.py", 4):  "Why this is code and not a series of Bash calls",
     ("config.md", 14):      "unknown/unsupported config key",
     ("init.md", 163):       "normalized, simple-bash-safe",
@@ -1764,7 +1783,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=262   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=270   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

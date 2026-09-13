@@ -49,10 +49,48 @@ Parallel-independent commands (e.g. `gh issue view ...` and `git status ...`) sh
 
 ---
 
-## Codebase exploration: prefer Grep/Glob/Read over Bash
+## Codebase exploration: use Grep/Glob/Read, not Bash
 
 For finding symbols, files, or content: use the **Grep tool**, **Glob tool**, and **Read tool** directly. They are bound to the working tree and don't trigger the safeguards that `find`/`grep`/`cat` via Bash do.
 
+
+⚠ **This is a rule, not a preference — reading a repo file with `cat`/`sed -n`/`head` violates it.**
+It was phrased as *"prefer"* and the measured result was that it was ignored: across 37 unattended
+child sessions, `cat` 1,076 calls + `sed` 1,228 + `grep` 1,558.
+
+⚠⚠ **But the point is to read LESS, not to read differently.** Swapping `cat x` for a Read of the
+same whole file moves bytes between two tools and **saves exactly nothing** — the same content still
+lands in context and is still re-billed on every later turn. The measured split of billed input
+makes that concrete: **50.6% of it is pulling files** — and the **Read tool is 17.9 of those
+points** (shell `cat`/`sed`/`head`/`tail` 26.2, `grep`/`rg`/`awk` 5.7, `ls`/`find`/`wc` 0.9) —
+against **13.0% for genuine command output**, with a further **11.4% in calls that do both at once
+and cannot be split**. Honest ranges: file pulling **50.6–62.1%**, pure command output
+**13.0–24.5%**.
+
+The Read tool helps only because it makes **scope** explicit: `offset`/`limit` let you take the 40
+lines you need instead of the 900-line file, and the harness tracks what you already have.
+**Ask what you actually need before you ask how to fetch it.** ⚠ A narrow `sed -n` is cheaper than a
+whole-file Read, and both are worse than the narrow Read that is available to you — "but my range
+was small" does not satisfy this rule.
+
+⚠⚠ **The command-output share is not a target — it is the evidence.** That line is test-runner
+output, `git diff`, `gh`: the raw material the verify gate weighs against a role's self-report
+(`_handoff.md` Section E), the diff the auditor must read to the end. **Never shorten, sample, or
+summarise a command's output after you have it to save tokens** — you would be reporting a verdict
+the evidence does not support. Two carve-outs, both mandatory rather than permissions:
+Section E step 2 captures the runner's **summary line** (a tail, not the whole log) and then
+**redacts** any secret pattern as `[REDACTED]` before posting (**INV5** — that text goes into a
+public GitHub comment). Neither is a token decision; **when they conflict with this rule, INV5
+wins** — it is an invariant and this rule is not.
+⚠ **Narrowing the QUERY is a different act and stays allowed** — `--jq`, `--limit`, `-n`/`-N`, a
+path argument, a commit range. Those decide *what you asked for*; this rule governs *what you do
+with the answer*. `_preflight.md` Item 4 filters Issue comments with `--jq`, and
+`_execute_spine.md` requires `--paginate` to get **more** output, not less.
+
+⚠ **A second-order effect, not a separate lever**: Claude Code spills oversized tool output to a
+file that then gets re-read, and that re-reading is **3.88% of billed input**. All 203 spills were
+Bash, and **164 of them (81%) came from a call that was reading a file**. Reading less upstream
+removes most of those spills; do not count it twice.
 ---
 
 ## Posting Issue/PR comments: the temp-file pattern (mandatory)

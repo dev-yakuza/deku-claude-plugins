@@ -215,7 +215,7 @@ edges it usually is. The most common shape — one foundation plus N independent
 tool**, then call the script as its own Bash call.
 
 **Shell caller** (the `run` supervisor): assemble it **inside the generated `.sh`**, where
-redirection and heredocs are allowed — `_bash_rules.md:85` puts a generated script's own
+redirection and heredocs are allowed — `_bash_rules.md:123` puts a generated script's own
 contents outside this file's rules, and that carve-out is what makes the plumbing possible at
 all. Sources, one file each, then one python pass to merge:
 

@@ -615,4 +615,4 @@ run that refused to start is the class of report this arm exists to remove.
 - **A marker write failure never kills the run** — but three consecutive failures stop it, since
   the duplicate-run guard depends on that marker being honest.
 - **The container is not removed while a worktree in it is preserved.** Removal is git's call.
-- The generated script is one backgrounded Bash tool call — the `_bash_rules.md:85` exception.
+- The generated script is one backgrounded Bash tool call — the `_bash_rules.md:123` exception.

@@ -7,7 +7,7 @@ and pipes in Bash *tool* calls, so `plan`'s board writes would become one tool c
 40-issue backlog and ~443 for a 200-issue one. The deployed precedent in `plan.md`
 (Phase 6 step 3, "One member per Bash call") sits at N≈7. The `run` supervisor's own
 ~177 calls are exempt because a generated script's contents are outside those rules
-(`_bash_rules.md:85`); `plan` is an LLM command and is not.
+(`_bash_rules.md:123`); `plan` is an LLM command and is not.
 
 This is NOT a derivation. D6 was retired precisely because deriving columns in a shared
 pure function made several callers assemble the same input from different sources. The
