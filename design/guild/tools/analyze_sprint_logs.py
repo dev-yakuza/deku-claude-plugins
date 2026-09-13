@@ -1093,9 +1093,30 @@ def load_attended(root):
             if pre:
                 seq.append(pre)
         subs = glob.glob(os.path.join(root, os.path.basename(f)[:-6], "subagents", "*.jsonl"))
+        # ⚠ 서브에이전트 **적분까지** 낸다. 라운드 15 이전에는 파일 **개수**만 셌고, §3 의
+        #    「SUB 29.7% · 리더 66.8%」는 임시 스크립트 값으로 남아 있었다(규율 7 위반).
+        #    같은 코퍼스의 파일 수가 플랜 안에서 331·334·337 셋으로 갈린 것도 그 탓이다.
+        subint = 0
+        for sf in subs:
+            sseen = set()
+            for line in open(sf, encoding="utf-8", errors="replace"):
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    continue
+                if o.get("type") != "assistant":
+                    continue
+                m = o.get("message") or {}
+                if m.get("id") in sseen:
+                    continue
+                sseen.add(m.get("id"))
+                u = m.get("usage") or {}
+                subint += ((u.get("cache_read_input_tokens") or 0)
+                           + (u.get("cache_creation_input_tokens") or 0)
+                           + (u.get("input_tokens") or 0))
         if len(seq) >= 10:
             sessions.append(dict(log=os.path.basename(f), sid=sid, seq=seq,
-                                 compacts=compacts, nsub=len(subs)))
+                                 compacts=compacts, nsub=len(subs), subint=subint))
     return sessions
 
 
@@ -1139,6 +1160,19 @@ def attended(root):
     ns = sum(x["nsub"] for x in U)
     print(f"  서브에이전트 트랜스크립트 {ns}파일 · 쓰는 세션 "
           f"{sum(1 for x in U if x['nsub'])}/{len(U)}")
+    # ⚠ **§3 의 「SUB share · 리더 share」를 여기서 낸다.** 그 두 수는 M10 의 도달 범위
+    #    논거(리더 P₀ 를 줄이는 레버가 유인에서 더 크다)를 떠받치는데, 라운드 15 까지
+    #    임시 스크립트 값이었다. 「도구가 찍지 않는 수는 쓰지 않는다」(규율 7).
+    lead = sum(integ)
+    subi = sum(x.get("subint") or 0 for x in U)
+    tot = lead + subi
+    if tot:
+        print(f"    SUB 적분 share **{subi / tot * 100:.1f}%** · 리더 **{lead / tot * 100:.1f}%** "
+              f"(무인은 §2 의 MAIN/SUB 표를 봐라 — 축이 다르다)")
+        top = sorted((x.get("subint") or 0) for x in U)[-4:]
+        if subi:
+            print(f"    ⚠ SUB 는 소수 이상치에 몰린다 — 상위 4세션이 SUB 적분의 "
+                  f"{sum(top) / subi * 100:.1f}%")
     print("  ⚠ 이 절은 **달러를 낼 수 없다** — 유인 로그에 `result`/`total_cost_usd` 가 없다.")
     print("  ⚠ **동결 스냅샷에 대고 돌려라.** 라이브 `~/.claude/projects/` 는 이 세션 자신이")
     print("     쓰고 있어 실행마다 수가 는다(A20). `cp` 로 스냅샷을 떠 두면 재현된다 —")

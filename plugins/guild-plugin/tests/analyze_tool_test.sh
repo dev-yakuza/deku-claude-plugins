@@ -158,11 +158,48 @@ SDPY
 if [ "$STD" = "OK" ]; then ok "§4c: 표준 파일별 내역이 파일명을 뽑아낸다"
 else bad "§4c: 표준 파일별 내역이 파일명을 뽑아낸다" "$STD"; fi
 
+# ── §11 유인 SUB 적분 — **로직 검사** ───────────────────────────────────
+# ⚠ 라운드 15 에서 이 코드는 처음에 **SUB share 0.0%** 를 냈다. 파싱이 조용히 실패해도
+# 「0%」는 그럴듯해 보이고, 그 수는 곧바로 §3.1c 와 M10 의 도달 범위 논거로 들어간다.
+# 존재 검사로는 안 잡히므로 **가짜 트랜스크립트를 만들어 실제로 합산되는지** 본다.
+SUBI="$($PY - "$TOOL" <<'SBPY'
+import importlib.util, json, os, sys, tempfile
+spec = importlib.util.spec_from_file_location("t", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+d = tempfile.mkdtemp()
+sid = "0000-lead"
+def rec(i, pre):
+    return json.dumps({"type": "assistant", "sessionId": sid,
+                       "message": {"id": i, "usage": {"cache_read_input_tokens": pre}}})
+with open(os.path.join(d, sid + ".jsonl"), "w") as f:
+    for i in range(12):
+        f.write(rec("L%d" % i, 100) + "\n")
+sub = os.path.join(d, sid, "subagents")
+os.makedirs(sub)
+with open(os.path.join(sub, "agent-1.jsonl"), "w") as f:
+    for i in range(5):
+        f.write(rec("S%d" % i, 400) + "\n")
+    f.write(rec("S0", 400) + "\n")          # 중복 id — 세면 안 된다
+S = m.load_attended(d)
+bad = []
+if len(S) != 1:
+    bad.append("세션 %d (기대 1)" % len(S))
+else:
+    if S[0].get("nsub") != 1:
+        bad.append("nsub=%r" % S[0].get("nsub"))
+    if S[0].get("subint") != 2000:
+        bad.append("subint=%r (기대 2000 — 중복 id 1건 제외)" % S[0].get("subint"))
+print("OK" if not bad else "BROKEN | " + " | ".join(bad))
+SBPY
+)"
+if [ "$SUBI" = "OK" ]; then ok "§11: 유인 SUB 적분이 실제로 합산된다 (중복 id 제외)"
+else bad "§11: 유인 SUB 적분이 실제로 합산된다" "$SUBI"; fi
+
 # ── 문법 ─────────────────────────────────────────────────────────────────
 if $PY -m py_compile "$TOOL" 2>/dev/null; then ok "도구가 컴파일된다"; else bad "도구가 컴파일된다" "py_compile 실패"; fi
 
 # ⚠ 바닥선 — 나머지 10 스위트와 같은 규약. 실측 PASS 와 정확히 일치시킨다.
-TOOL_MIN_CHECKS=28
+TOOL_MIN_CHECKS=29
 echo
 echo "analyze_tool: $PASS passed, $FAIL failed"
 if [ "$((PASS + FAIL))" -lt "$TOOL_MIN_CHECKS" ]; then
