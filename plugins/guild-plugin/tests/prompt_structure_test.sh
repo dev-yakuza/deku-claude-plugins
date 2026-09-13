@@ -1911,21 +1911,44 @@ LEDGER="$HERE/../../../design/guild/tools/measured-figures.tsv"
 if [ ! -f "$LEDGER" ]; then
   bad "규율 7: 측정치 원장이 있다" "원장 파일" "없음: $LEDGER"
 else
-  _unlisted=""
-  for _f in "$GLD/commands/atoms/_bash_rules.md" "$GLD/commands/atoms/_preflight.md" \
-            "$GLD/commands/atoms/_execute_spine.md" "$GLD/commands/atoms/_stagnation.md" \
-            "$GLD/commands/qa.md" "$GLD/commands/test.md"; do
-    [ -f "$_f" ] || continue
-    # 범위 표기(`13.0–24.5%`)는 양끝을 각각 본다.
-    for _p in $(grep -oE '[0-9]+(\.[0-9]+)?(–[0-9]+(\.[0-9]+)?)?%' "$_f" \
-                | sed 's/%$//' | tr '–' '\n' | sed 's/$/%/' | sort -u); do
-      grep -qE "^${_p}"$'\t' "$LEDGER" || _unlisted="$_unlisted $(basename "$_f"):$_p"
-    done
-  done
+  # ⚠ 추출을 파이썬으로 한다. 라운드 12 에서 셸 정규식판이 **공허**했다 — `**~23**` 도
+  #    `**p90 is 54**` 도 못 잡아서, 미등재 턴 수를 넣어도 통과했다(변이로 확인). 굵은 강조
+  #    안이든 밖이든 **"turn(s)" 가까이의 정수**와 모든 백분율을 잡는다.
+  _unlisted="$("$PY" - "$LEDGER" "$GLD" <<'LGPY'
+import io, os, re, sys
+ledger, gld = sys.argv[1], sys.argv[2]
+known = set()
+for line in io.open(ledger, encoding="utf-8"):
+    if line.startswith("#") or "\t" not in line:
+        continue
+    known.add(line.split("\t")[0].strip())
+PCT = re.compile(r"[0-9]+(?:\.[0-9]+)?(?:–[0-9]+(?:\.[0-9]+)?)?%")
+# ⚠ **인접만 인정한다.** 30자 창을 두면 "Step 0 … turn" 이 걸려 노이즈가 된다(라운드 12
+#    실측: `_preflight.md:0`·`:1` 오검출). 대신 지시문 쪽이 수와 "turns" 를 붙여 쓰도록
+#    표현을 맞췄다 — 검사가 물 수 있게 만드는 것도 작업의 일부다.
+# ⚠ `k−1 turns` 의 1 을 실측치로 오인하지 않도록 앞자리를 막는다(라운드 12 실측).
+TURN = re.compile(r"(?<![\w\-\u2212])([0-9]+)\*{0,2} turns?\b")
+bad = []
+for rel in ("atoms/_bash_rules.md", "atoms/_preflight.md", "atoms/_execute_spine.md",
+            "atoms/_stagnation.md", "qa.md", "test.md", "implement.md", "refactor.md"):
+    f = os.path.join(gld, "commands", rel)
+    if not os.path.exists(f):
+        continue
+    txt = io.open(f, encoding="utf-8").read()
+    got = set()
+    for m in PCT.findall(txt):
+        got.update(x.rstrip("%") + "%" for x in m.split("–"))
+    got.update(TURN.findall(txt))
+    for v in sorted(got):
+        if v not in known:
+            bad.append(os.path.basename(f) + ":" + v)
+print(" ".join(bad))
+LGPY
+)"
   if [ -z "$_unlisted" ]; then
-    ok "규율 7: 지시문의 모든 백분율이 원장에 등재돼 있다"
+    ok "규율 7: 지시문의 모든 실측치(백분율·턴 수)가 원장에 등재돼 있다"
   else
-    bad "규율 7: 지시문의 모든 백분율이 원장에 등재돼 있다" "전부 등재" "미등재 —$_unlisted"
+    bad "규율 7: 지시문의 모든 실측치(백분율·턴 수)가 원장에 등재돼 있다" "전부 등재" "미등재 —$_unlisted"
   fi
 fi
 
