@@ -906,7 +906,15 @@ def seqs_with_model(sessions):
     return out
 
 
-def input_cost(seqs, cap=None, keep=0.45, compaction_cost=True):
+# ⚠ 압축 요약의 **실측 크기**(유인 로그 `compactMetadata.postTokens`, n=12):
+#   10,503 ~ 26,078 tok · 중앙 13,164. 도구는 이것을 `cap × keep × 0.05` 로 잡고 있었는데
+#   cap=150k 에서 465~3,375 tok — **3~56배 과소**다. 게다가 그 항이 `keep` 에 비례해서,
+#   낮은 keep 이 「바닥이 작다」로 한 번 「요약이 싸다」로 또 한 번 보상받는다 —
+#   **압축의 비용 항이 압축의 이득 파라미터에 묶여 민감도 곡선이 편향된다.**
+_SUMMARY_TOKENS = 13_164          # 실측 중앙. cap 과 무관한 상수여야 한다.
+
+
+def input_cost(seqs, cap=None, keep=0.45, compaction_cost=True, summary=_SUMMARY_TOKENS):
     """입력측 달러. cap 이 있으면 압축을 재생한다.
 
     ⚠ 압축은 공짜가 아니다 — ① 요약기가 full prefix 를 **읽고** ② 요약을 **출력**하고
@@ -923,7 +931,7 @@ def input_cost(seqs, cap=None, keep=0.45, compaction_cost=True):
             if cap and cur + delta > cap:
                 if compaction_cost:
                     total += price(model, cread=cur)                       # 요약기 읽기
-                    total += price(model, out=int(cap * keep * 0.05))      # 요약 출력
+                    total += price(model, out=summary)                     # 요약 출력(실측 상수)
                 cur = int(cap * keep)
                 total += price(model, **{"cwrite_1h" if ttl == "1h" else "cwrite_5m": cur})
                 events += 1

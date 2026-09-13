@@ -40,7 +40,26 @@ What decides membership is whether the finding is **currently driving the retry*
 
 A loop-back with no auditor involvement (a verify gap, a QA defect, the unattended `test`/`qa` loop-backs) uses the role-reason axis alone and behaves **exactly as it did before this rule existed**.
 
-This is a judgment call by the leader over short strings it already has in context — no hashing, no new infra, no persistence beyond the current stage invocation. **Calibration**: same *file* + same underlying *defect* = same root cause even if the wording differs entirely (e.g. "widget test asserts nothing in the disabled path" vs. "disabled-state contrast check is a no-op" — same #894-class bug, restated); a genuinely different file, a different AC, or a different mechanism within the same file (e.g. the fix for a null-check bug then exposes a separate off-by-one) = different concern, not stagnation. When genuinely unsure, err toward **not** flagging stagnation — the bounded numeric cap (≤2) still catches a truly stuck loop-back even if one ambiguous retry gets miscounted as progress, whereas prematurely escalating a retry that was actually about to succeed costs a human interruption for nothing.
+This is a judgment call by the leader over short strings — no hashing, no new infra.
+
+⚠⚠ **But do not read those strings from memory. Read them from the Issue's audit record.** The
+comparison is a *before/after pair*, and the "before" half lives only in context unless something
+writes it down — so a **compaction between attempt 1 and attempt 2 discards it**, after which the
+natural reading of a missing baseline is "no prior loop-back", and **the guard does not fire at
+all**. That failure is invisible: it looks exactly like a normal retry. Measured: **8.5% of
+attended sessions hit the 1M ceiling and compact**, and this guard is on the attended path too.
+
+The durable place already exists. `_execute_spine.md` Step 4 writes one `### audit-record <n>`
+block per attempt to the Issue's `<!-- guild:auditor:execute -->` comment, and the attempt number
+itself is **derived by counting those headings, not remembered**. So: **each loop-back appends its
+blocking reason (role axis) and the auditor's `BLOCKER`/`MAJOR` signature set to that attempt's
+block**, and the guard compares against what it reads back there. ⚠ If the comment cannot be read
+in full, do **not** fall back to memory — `_execute_spine.md`'s existing truncation rule applies
+(`NEEDS_HUMAN` / `OK PAUSE: needs-human`), because "I don't recall a prior reason" and "there was
+no prior reason" are different findings and only one of them is safe to act on.
+
+⚠ The numeric cap (≤2) is a **backstop, not a substitute** — it bounds a stuck loop-back but cannot
+tell stagnation from progress, which is the judgment this section exists to make. **Calibration**: same *file* + same underlying *defect* = same root cause even if the wording differs entirely (e.g. "widget test asserts nothing in the disabled path" vs. "disabled-state contrast check is a no-op" — same #894-class bug, restated); a genuinely different file, a different AC, or a different mechanism within the same file (e.g. the fix for a null-check bug then exposes a separate off-by-one) = different concern, not stagnation. When genuinely unsure, err toward **not** flagging stagnation — the bounded numeric cap (≤2) still catches a truly stuck loop-back even if one ambiguous retry gets miscounted as progress, whereas prematurely escalating a retry that was actually about to succeed costs a human interruption for nothing.
 
 ## Section B — On stagnation detected
 

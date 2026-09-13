@@ -80,11 +80,19 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
   Then, from the results, keep only PRs whose body actually contains `$1` as a closing/fixing reference (`\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s*:?\s*#$1\b`, case-insensitive) **or** where the body/title otherwise makes the link obvious.
 - **Nothing found → do NOT silently skip a mandatory step.** Say so in the qa output: the checklist items still get reported in the `<!-- guild:qa:output -->` Issue comment, plus one line stating the PR could not be located (it may exist but be sidebar-linked, which `gh pr list --search` cannot see) so the human can paste them into the PR themselves.
 - PATCH the body via the temp-file **marker** pattern (`_handoff.md` Section B, applied to the PR body): the section is bounded by `<!-- guild:manual-qa -->` … `<!-- /guild:manual-qa -->` and is **updated in place** on re-run (idempotent — never duplicated). Preserve everything outside the markers (INV4). ⚠ **`gh pr edit --body-file` REPLACES the entire PR body — it does not patch it**, which is why step 1 below is mandatory and not optional. In this order:
-  1. **Read the current body first** (its own Bash call):
+  1. **Read the current body first — into a FILE, not just into context** (its own Bash call):
      ```bash
-     gh pr view <PR_NUM> --repo <owner>/<repo> --json body --jq .body
+     gh pr view <PR_NUM> --repo <owner>/<repo> --json body --jq .body > /tmp/gld-pr-<PR_NUM>-body.md
      ```
-  2. **Render the FULL new body to a temp file** (Write tool): the body fetched in step 1, verbatim, with the `<!-- guild:manual-qa -->` … `<!-- /guild:manual-qa -->` block replaced in place — or, if those markers are absent, the fetched body verbatim with the block appended at the end. Everything outside the markers is carried over unchanged (INV4).
+     ⚠⚠ **This is a before/after pair, and `--body-file` REPLACES the whole body.** If a compaction
+     lands between this read and the write, the "before" half is gone and step 2 renders the new
+     body from **whatever survived** — everything outside the marker is deleted from the PR, and in
+     unattended mode nobody sees it. That is an **INV4** violation produced by a context event, not
+     by a bad edit. Measured: **8.5% of attended sessions hit the 1M ceiling and compact**.
+     ⚠ Step 2 then reads that file back. **If the file is missing or empty, do NOT write** —
+     `NEEDS_HUMAN: could not read PR #<n>'s body in full` (attended) / `guild:needs-human` label +
+     comment + `OK PAUSE: needs-human — PR body unreadable` (unattended).
+  2. **Render the FULL new body to a temp file** (Write tool): the body **read back from the file written in step 1**, verbatim, with the `<!-- guild:manual-qa -->` … `<!-- /guild:manual-qa -->` block replaced in place — or, if those markers are absent, the fetched body verbatim with the block appended at the end. Everything outside the markers is carried over unchanged (INV4).
   3. **Write it back**:
      ```bash
      gh pr edit <PR_NUM> --repo <owner>/<repo> --body-file <temp>

@@ -694,6 +694,31 @@ echo "== 13. 실행 시간대 창 — 산문 단정 (04-sprint-window.md · -tes
 #   한계는 아니다 — 아래 19·21·23·28·33 은 스코프를 좁혀 실제로 발화하게 만들었다.
 HANDOFF="$GLD/commands/atoms/_handoff.md"
 RETRO="$GLD/commands/sprint/retro.md"
+# ⚠⚠ **M11 — 압축 내성.** 세 게이트가 «두 시점을 비교하는» 구조인데 before 半이 컨텍스트에만
+# 있었다. 압축이 그 사이에 들어오면 **기본값이 「변화 없음」** 이 되어 셋 다 조용히 통과한다.
+# 실측: 유인 세션의 **8.5%** 가 1M 천장에서 압축하고, 세 파일 모두 **공통 경로**다.
+# 토큰 조치가 아니라 **오늘 이미 발생 중인 품질 결함**이다.
+ESMD="$GLD/commands/atoms/_execute_spine.md"
+STMD="$GLD/commands/atoms/_stagnation.md"
+QAMD="$GLD/commands/qa.md"
+hasfx "M11-①: 3.5a 트립와이어의 before 판독이 파일로 남는다" "$ESMD" 'mutation-before.json'
+hasfx "M11-①: 파일이 없으면 기억으로 대체하지 않는다" "$ESMD" 'do not fall back to memory'
+hasfx "M11-②: 정체 가드가 audit record 에서 사유를 읽는다" "$STMD" 'Read them from the Issue'
+hasfx "M11-②: 숫자 상한이 대체재가 아니라고 못박는다" "$STMD" 'a **backstop, not a substitute**'
+hasfx "M11-③: PR 본문을 파일로 먼저 받는다" "$QAMD" 'gld-pr-<PR_NUM>-body.md'
+hasfx "M11-③: 파일이 비면 쓰지 않는다" "$QAMD" '**If the file is missing or empty, do NOT write**'
+# ⚠ **정합성 검사** — 존재 검사만으로는 부족하다. 세 곳이 **같은 근거(8.5%)** 를 들어야 한다.
+# 한 축만 고치고 나머지를 두는 것이 이 작업에서 가장 자주 재발한 결함이다.
+M11N=0
+for _f in "$ESMD" "$STMD" "$QAMD"; do
+  grep -qF -- '8.5%' "$_f" && M11N=$((M11N+1))
+done
+if [ "$M11N" -eq 3 ]; then
+  ok "M11: 세 곳이 같은 근거(유인 8.5% 압축)를 든다"
+else
+  bad "M11: 세 곳이 같은 근거를 든다" "3곳" "${M11N}곳 — 한 축만 고치고 나머지를 뒀다"
+fi
+
 CONFMD="$GLD/commands/config.md"
 INITMD="$GLD/commands/init.md"
 
@@ -1690,7 +1715,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=246   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=253   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

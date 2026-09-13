@@ -267,6 +267,14 @@ Therefore a mutation check around the auditor is **mandatory on every path, not 
 
 **Take these three readings immediately before spawning; take the first two again after the auditor returns** (each its own Bash call):
 
+⚠⚠ **Write the two compared readings to a file before spawning, and read that file back afterwards — do NOT compare against what you remember.** This check is a **before/after pair held in context**, and context is not durable: a compaction between the spawn and the return discards the *before* half, after which the natural reading of a missing baseline is *"Both sets unchanged"* — the check passes and the auditor's read-only guarantee is gone, silently. Measured: **8.5% of attended sessions hit the 1M ceiling and compact**, and this file is on the attended path too. One extra Bash call removes the whole failure mode:
+
+```bash
+python3 -c "import subprocess,json,sys;d=subprocess.run(['git','diff','--numstat','--no-renames','<mb>'],capture_output=True,text=True).stdout;st=subprocess.run(['git','status','--porcelain','-uall'],capture_output=True,text=True).stdout;open('.claude/guild/memory/mutation-before.json','w').write(json.dumps({'numstat':d,'status':st}))"
+```
+
+(substitute the literal `<mb>`.) After the auditor returns, take the two readings again and compare them against **that file**, not against context. ⚠ **If the file is missing or unreadable, the check has not run** — treat that exactly like a detected mutation and escalate; do not fall back to memory, and do not treat "I don't recall a difference" as "unchanged".
+
 ```bash
 git diff --numstat --no-renames <mb>
 ```
