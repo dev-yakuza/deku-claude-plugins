@@ -33,6 +33,67 @@ _SECTION = re.compile(r"^## (\d+)\. ", re.M)
 _SUITE_COUNT = re.compile(r"\*\*(\d+)\s*(?:개)?\s*스위트\*\*|\*\*(\d+)개\*\* 스위트|(\d+)개 스위트")
 # ⚠ **정확히 7자리만** 커밋으로 본다. 이 문서들은 커밋을 git 기본 축약(7자리)으로 인용하고,
 #    8자리 16진은 **세션 UUID 앞부분**(`9b1ef612`·`9e91e361`)이라 오검출이 난다 — 실측.
+_MEASURE_ROW = re.compile(r"^\|\s*(?:~~)?\**(M\d+|T0)\b")
+# 상태 어휘 → 범주. **어느 하나도 안 걸리면 「불명」** 이고 그것도 불일치로 본다.
+_STATUS = (("폐기", "dropped"), ("출하", "done"), ("완료", "done"),
+           ("미결", "open"), ("막힘", "blocked"), ("순위 미정", "unranked"),
+           ("지금 가능", "ready"))
+
+
+def measure_status(text, heading):
+    """`## <heading>` 절의 표에서 {조치: 상태범주} 를 뽑는다.
+
+    ⚠ **이 축이 이 작업에서 가장 많이 갈렸다.** 라운드 15~24 에서 네 번 잡혔고, 그러고도
+    사용자가 «플랜의 모든 내용이 구현되었나» 라고 물었을 때 **또 둘이 나왔다**(원장 §4.0 은
+    M5 를 「출하」로, 결정 문서 §2 는 「막힘」으로 두고 있었고 §2 에는 **M13 행 자체가 없었다**).
+    검사를 만들면서 정작 **가장 많이 갈린 축을 빼놓았다** — 그 교정이다.
+    """
+    if heading not in text:
+        return {}
+    body = text[text.index(heading):]
+    # ⚠ **다음 제목에서 끊는다(레벨 무관).** 처음 구현은 `\n## ` 만 찾아서, 원장 §4.0 의 표가
+    #    끝난 뒤 §4.0b(초안)과 **§4.1 조치별 상세**까지 같이 긁었다. §4.1 은 열 구성이 달라
+    #    (조치|이름|경로|기대효과) 3번 칸이 「공통」 같은 경로 문자열이고, 그것이 §4.0 의 상태를
+    #    **덮어써서 열 행 전부가 「불명」** 이 됐다(실측 — 이 검사의 첫 실행에서 바로 드러났다).
+    lines = body.split("\n")
+    for i, line in enumerate(lines[1:], 1):
+        if line.startswith("#"):
+            lines = lines[:i]
+            break
+    body = "\n".join(lines)
+    out = {}
+    for line in body.split("\n"):
+        m = _MEASURE_ROW.match(line)
+        if not m:
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) < 4:
+            continue
+        status = cells[3]
+        cat = next((v for k, v in _STATUS if k in status), "불명")
+        out[m.group(1)] = cat
+    return out
+
+
+def status_mismatches(plan, decisions):
+    """원장 §4.0 과 결정 문서 §2 의 조치 상태가 어긋나면 보고한다."""
+    # ⚠ 원장은 **§4.0 표**를 봐야 한다. `## 4. 조치` 로 잡으면 바로 다음 줄이 `### 4.0 …` 이라
+    #    절이 즉시 끊겨 0행이 된다(실측). 결정 문서는 `## 2. 결정표` 아래가 바로 표다.
+    a = measure_status(plan, "### 4.0 결정 요약")
+    b = measure_status(decisions, "## 2. 결정표")
+    if not a or not b:
+        return ["조치 상태표를 찾지 못했다 (원장 §4.0 %d행 · 결정표 %d행)" % (len(a), len(b))]
+    bad = []
+    for k in sorted(set(a) | set(b)):
+        if k not in a:
+            bad.append("%s 가 원장 §4.0 에 없다" % k)
+        elif k not in b:
+            bad.append("%s 가 결정표에 없다" % k)
+        elif a[k] != b[k]:
+            bad.append("%s 상태 불일치 — 원장 %s ↔ 결정표 %s" % (k, a[k], b[k]))
+    return bad
+
+
 _RETRACT_ROW = re.compile(r"^\| `([^`]+)` \| \*\*([^*]+)\*\* \|", re.M)
 # 철회 표식 — 이 중 하나라도 같은 줄에 있으면 「과거를 인용한 것」으로 인정한다.
 # ⚠ 철회 표식 — 하나라도 같은 줄에 있으면 「과거를 인용한 것」으로 인정한다.
@@ -187,6 +248,7 @@ def check(plan, decisions, n_suites, repo="."):
         problems.append("플랜 §10 이 규율의 정본(결정 문서 §6)을 가리키지 않는다")
 
     problems += retraction_violations(_strip_historical(plan))
+    problems += status_mismatches(plan, decisions)
 
     claim = plan_line_claim(decisions)
     if claim is None:

@@ -273,7 +273,23 @@ if m.plan_line_claim("근거는 `08-plan.md`(1,051줄)에") != 1051:
 if m.plan_line_claim("줄 수를 안 적은 문서") is not None:
     bad.append("plan_line_claim: 없는데 있다고 한다")
 
-# ⑥ check() 가 실제로 문제를 **낸다** — 통과만 하는 함수가 아니다
+# ⑥ 조치별 상태 정합 — **이 작업에서 가장 많이 갈린 축**인데 검사에서 빠져 있었다
+PLAN_T = ("### 4.0 결정 요약\n| 조치 | 경로 | 상태 |\n| **M5** x | 공통 | \u2705 **출하** |\n"
+          "| **M1** y | sprint | 막힘 |\n### 4.1 상세\n| **M5** | 이름 | 공통 | 기대효과 |\n")
+DEC_T = ("## 2. 결정표\n| 조치 | 경로 | 상태 |\n| **M5** x | 공통 | \u2705 **출하됨** |\n"
+         "| **M1** y | sprint | 막힘 |\n### 미분류\n")
+if m.measure_status(PLAN_T, "### 4.0 결정 요약") != {"M5": "done", "M1": "blocked"}:
+    bad.append("measure_status: §4.0 표를 정확히 읽지 못한다 (§4.1 이 덮어쓰는가?)")
+if m.status_mismatches(PLAN_T, DEC_T):
+    bad.append("status_mismatches: 일치하는데 불일치라 한다")
+DEC_BAD = DEC_T.replace("| **M5** x | 공통 | \u2705 **출하됨** |", "| **M5** x | 공통 | 막힘 |")
+if not any("M5" in x for x in m.status_mismatches(PLAN_T, DEC_BAD)):
+    bad.append("status_mismatches: M5 출하↔막힘 불일치를 못 잡는다")
+DEC_MISSING = DEC_T.replace("| **M5** x | 공통 | \u2705 **출하됨** |\n", "")
+if not any("M5" in x and "결정표에 없다" in x for x in m.status_mismatches(PLAN_T, DEC_MISSING)):
+    bad.append("status_mismatches: 결정표의 행 누락을 못 잡는다")
+
+# ⑦ check() 가 실제로 문제를 **낸다** — 통과만 하는 함수가 아니다
 probs = m.check("## 1. a\n## 3. c\n**9개 스위트**\n", "**9개 스위트**\n", 11)
 if not any("결번" in x for x in probs):
     bad.append("check: 결번을 보고하지 않는다")
@@ -284,8 +300,8 @@ if not any("정본" in x for x in probs):
 print("OK" if not bad else "BROKEN | " + " | ".join(bad))
 DCPY
 )"
-  if [ "$DC" = "OK" ]; then ok "문서 정합 검사기: 로직 19종이 합성 픽스처에서 발화한다"
-  else bad "문서 정합 검사기: 로직 19종" "$DC"; fi
+  if [ "$DC" = "OK" ]; then ok "문서 정합 검사기: 로직 23종이 합성 픽스처에서 발화한다"
+  else bad "문서 정합 검사기: 로직 23종" "$DC"; fi
 
   # 실제 문서가 있으면 대조까지 한다. 없으면 **그 사실을 출력**한다 — 조용히 넘어가지 않는다.
   DOCDIR="$HERE/../../../design/guild"
