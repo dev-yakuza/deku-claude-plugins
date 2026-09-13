@@ -1833,6 +1833,32 @@ case "$OUTE" in
   OK*) ok "enum 축소 문장이 Section C 표의 부분집합이고 사이트가 남아 있다 (${OUTE#OK })" ;;
   *)   bad "enum 축소 문장이 Section C 표와 정합" "OK >=7" "$OUTE" ;;
 esac
+# ── 스폰 프롬프트의 문장 융합 ────────────────────────────────────────────
+# ⚠ 라운드 13: `test.md:30` 이 «…page from there if they differ **Verify gate:** your pass
+# claim MUST…» 로 끝나 있었다. B1 을 고치며 ⚠ 절을 끼워 넣다 **마침표를 먹었다** — M-3 과
+# 같은 클래스이고, 벌써 세 번째다(`_preflight.md` 꼬리 유실 · `qa.md` 열거 파손).
+# ⚠ **한계 고지**: 일반적인 「문장 융합」 검사는 노이즈가 너무 크다(실측 — `Section A:`,
+# `Do TDD:`, `Check TWO things:` 가 전부 정상인데 걸린다). 그래서 **스폰 프롬프트에서 항상
+# 문장을 여는 라벨**로 범위를 좁힌다. 이것이 막는 것은 그 라벨들 앞의 융합뿐이다.
+FUSE="$("$PY" - "$GLD" <<'FZPY'
+import io, os, re, sys
+gld = sys.argv[1]
+FUSE = re.compile(r"[a-z] (?=(?:Verify|Evidence|Conformance) gate:|Honesty-of-scope)")
+bad = []
+for rel in ("test.md", "implement.md", "refactor.md", "debug.md", "qa.md",
+            "atoms/_execute_spine.md"):
+    f = os.path.join(gld, "commands", rel)
+    if not os.path.exists(f):
+        continue
+    for i, line in enumerate(io.open(f, encoding="utf-8"), 1):
+        if FUSE.search(line):
+            bad.append(os.path.basename(f) + ":" + str(i))
+print(" ".join(bad))
+FZPY
+)"
+if [ -z "$FUSE" ]; then ok "스폰 프롬프트: 라벨 앞 문장 경계가 살아 있다"
+else bad "스폰 프롬프트: 라벨 앞 문장 경계가 살아 있다" "융합 없음" "융합: $FUSE"; fi
+
 # ── M11-① 스냅샷 순서 — **실제로 돌려서** 위양성이 없는지 본다 ────────────
 # ⚠⚠ 이것은 문자열 검사가 아니라 **실행 검사**다. 라운드 11 에서 이 한 줄이 BLOCKER 였다:
 # `git status --porcelain -uall` 을 **파일 생성 전에** 찍으면, 감사자 복귀 후의 status 에
@@ -1959,7 +1985,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=283   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=284   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
