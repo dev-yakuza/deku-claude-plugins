@@ -1365,8 +1365,8 @@ import os, re, sys
 gld = sys.argv[1]
 # 인용 -> 그 줄에 반드시 있어야 하는 조각. 새 인용이 생기면 여기에 항목을 추가해야 한다.
 EXPECT = {
-    ("_bash_rules.md", 124): "A generated OS-level",
-    ("_bash_rules.md", 126): "guild:auditor-violation",
+    ("_bash_rules.md", 170): "A generated OS-level",
+    ("_bash_rules.md", 172): "guild:auditor-violation",
     ("board_write.py", 4):  "Why this is code and not a series of Bash calls",
     ("config.md", 14):      "unknown/unsupported config key",
     ("init.md", 163):       "normalized, simple-bash-safe",
@@ -1571,7 +1571,7 @@ t = open(sys.argv[1], encoding="utf-8").read()
 def at(pat):
     m = re.search(pat, t, re.M)
     return m.start() if m else -1
-r, g, s5 = at(r"^\s*python3 .*render_supervisor\.py"), at(r"^2d\. \*\*Verify the render"), at(r"^5\. \*\*Start it in the background")
+r, g, s5 = at(r"^\s*python3 .*render_supervisor\.py"), at(r"^2d\. \*\*Verify the render"), at(r"^5\. \*\*Start it")
 print("OK" if -1 not in (r, g, s5) and r < g < s5 else "render=%d guard=%d start=%d" % (r, g, s5))
 PY2D
 )"

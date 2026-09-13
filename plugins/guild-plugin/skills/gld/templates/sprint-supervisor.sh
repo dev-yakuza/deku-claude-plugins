@@ -800,7 +800,7 @@ os.replace(tmp, path)
 PY
 
 # marker_write <state>  — in-place replace of the run marker on the tracking Issue.
-# ONE --paginate query returns id AND body together. `_bash_rules.md:126`: needing both and
+# ONE --paginate query returns id AND body together. `_bash_rules.md:172`: needing both and
 # paginating only one lookup "is worse than paginating neither" — the body read finds the
 # record while the id read comes back empty and the "empty -> create" branch posts a
 # duplicate. Fetching both in one call removes the failure mode rather than managing it.
@@ -1062,7 +1062,7 @@ hb_sleep() {
 # ─────────────────────────────────────────────────────────────────────────────
 # §8.4c — assemble sprint_dag.py input from gh output + the immutable member table
 # ─────────────────────────────────────────────────────────────────────────────
-# Redirection is used freely here: `_bash_rules.md:124` puts a generated script's own contents
+# Redirection is used freely here: `_bash_rules.md:170` puts a generated script's own contents
 # outside those rules. That is what makes this plumbing possible at all — the design's
 # `--input <path>` interface has no shell-side producer otherwise.
 
