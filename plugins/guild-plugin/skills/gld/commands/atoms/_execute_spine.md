@@ -271,9 +271,20 @@ Therefore a mutation check around the auditor is **mandatory on every path, not 
 corpus, and one of the five is the session that took this measurement, and this file is on the attended path too. One extra Bash call removes the whole failure mode:
 
 ```bash
-mkdir -p .claude/guild/memory   # ⚠ 없는 레포(구버전 init)에서 write 가 죽으면 before 가 통째로 사라져 **위음성**이 된다
-python3 -c "import subprocess,json,sys;d=subprocess.run(['git','diff','--numstat','--no-renames','<mb>'],capture_output=True,text=True).stdout;st=subprocess.run(['git','status','--porcelain','-uall'],capture_output=True,text=True).stdout;open('.claude/guild/memory/mutation-before.json','w').write(json.dumps({'numstat':d,'status':st}))"
+python3 -c "import subprocess,json,os;os.makedirs('.claude/guild/memory',exist_ok=True);p='.claude/guild/memory/mutation-before.json';open(p,'w').write('{}');d=subprocess.run(['git','diff','--numstat','--no-renames','<mb>'],capture_output=True,text=True).stdout;st=subprocess.run(['git','status','--porcelain','-uall'],capture_output=True,text=True).stdout;open(p,'w').write(json.dumps({'numstat':d,'status':st}))"
 ```
+
+⚠⚠ **Two details in that one-liner are load-bearing, not style.** (1) `makedirs(..., exist_ok=True)`
+— a repo initialized by an older `/gld init` may have no `.claude/guild/memory/`, and a failed write
+loses the *before* half entirely, which is the exact failure this check exists to prevent. (2) The
+file is **created empty before `git status` is read, not after**. `.claude/guild/memory/` is ignored
+only in repos where init had to add negation exceptions; where `.claude` was never ignored the file
+is plain untracked, so a snapshot taken before it exists and re-taken after would differ by
+`?? .claude/guild/memory/mutation-before.json` alone and report a **mutation the auditor never
+made** — on every run, in exactly the repos that need the check most. Creating it first puts it on
+both sides of the comparison. (The `git diff --numstat` half is unaffected: untracked files are not
+in a diff.) ⚠ It is Guild scaffolding, **not part of the change** — never list it in the auditor
+prompt's untracked-paths slot.
 
 (substitute the literal `<mb>`.) After the auditor returns, take the two readings again and compare them against **that file**, not against context. ⚠ **If the file is missing or unreadable, the check has not run** — treat that exactly like a detected mutation and escalate; do not fall back to memory, and do not treat "I don't recall a difference" as "unchanged".
 

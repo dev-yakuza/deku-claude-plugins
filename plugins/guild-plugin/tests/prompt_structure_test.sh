@@ -1833,6 +1833,38 @@ case "$OUTE" in
   OK*) ok "enum 축소 문장이 Section C 표의 부분집합이고 사이트가 남아 있다 (${OUTE#OK })" ;;
   *)   bad "enum 축소 문장이 Section C 표와 정합" "OK >=7" "$OUTE" ;;
 esac
+# ── M11-① 스냅샷 순서 — **실제로 돌려서** 위양성이 없는지 본다 ────────────
+# ⚠⚠ 이것은 문자열 검사가 아니라 **실행 검사**다. 라운드 11 에서 이 한 줄이 BLOCKER 였다:
+# `git status --porcelain -uall` 을 **파일 생성 전에** 찍으면, 감사자 복귀 후의 status 에
+# `?? .claude/guild/memory/mutation-before.json` 이 새로 나타나 **감사자가 건드리지 않은 변경**
+# 으로 보고된다. `.claude/guild/memory/` 는 init 이 `.gitignore` 에 negation 을 넣어야 했던
+# 레포에서만 무시되므로, `.claude` 가 애초에 무시되지 않는 레포에서는 **매 실행마다** 터진다.
+# 지시문에서 스니펫을 뽑아 **임시 레포에서 실제로 실행**하고 before/after 를 대조한다.
+SNIP="$("$PY" - "$ESMD" <<'SNPY'
+import io, re, sys
+s = io.open(sys.argv[1], encoding="utf-8").read()
+m = [l for l in s.split("\n") if l.startswith("python3 -c") and "mutation-before.json" in l]
+print(m[0] if m else "")
+SNPY
+)"
+if [ -z "$SNIP" ]; then
+  bad "M11-①: 스냅샷 스니펫이 지시문에 있다" "python3 -c … mutation-before.json" "없음"
+else
+  WORKM="$(mktemp -d)"
+  (
+    cd "$WORKM" && git init -q && git config user.email t@t && git config user.name t \
+      && echo a > a.txt && git add . && git commit -qm init
+    MB="$(git rev-parse HEAD)"
+    eval "${SNIP//<mb>/$MB}"
+    B="$("$PY" -c "import json;print(json.load(open('.claude/guild/memory/mutation-before.json'))['status'],end='')")"
+    A="$(git status --porcelain -uall)"
+    [ "$B" = "$A" ]
+  ) >/dev/null 2>&1
+  if [ $? -eq 0 ]; then ok "M11-①: 스냅샷이 자기 자신 때문에 어긋나지 않는다 (임시 레포 실행)"
+  else bad "M11-①: 스냅샷이 자기 자신 때문에 어긋나지 않는다" "before == after" "어긋남 — 위양성"; fi
+  rm -rf "$WORKM"
+fi
+
 # ── M11-② 문단 순서 — 규칙 → 근거 → 예외 ────────────────────────────────
 # ⚠ **위치 검사다.** M-2 의 scope 삽입이 규칙의 **근거**("before/after pair")를 **예외** 블록
 # 안으로 밀어 넣었고, 그래서 읽는 사람에게 근거가 예외의 근거로 읽혔다 — 문자열은 셋 다
@@ -1904,7 +1936,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=282   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=283   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
