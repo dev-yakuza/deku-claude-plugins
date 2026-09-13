@@ -79,11 +79,27 @@ if grep -qF "cap * keep * 0.05" "$TOOL"; then
   else bad "A17 이 코드에 기록돼 있다" "cap*keep*0.05 가 있는데 경고 주석이 없다"; fi
 else ok "A17: 압축 요약 비용 모델이 수정됐다"; fi
 
+# ── 유인 프런트엔드(§11) — §3 의 수를 코드가 내는가 ──────────────────────
+# ⚠ §3(유인 경로 측정) 전체가 임시 스크립트 위에 있었다 — 규율 7(「도구가 찍지 않는 수는
+# 쓰지 않는다」) 위반. M11 의 근거인 «유인 8.5% 압축» 도 재현 가능한 코드가 없었다.
+for _fn in "load_attended" "def attended"; do
+  if grep -qF -- "$_fn" "$TOOL"; then ok "§11: $_fn 이 있다"
+  else bad "§11: $_fn 이 있다" "없음 — §3 의 수가 다시 임시 스크립트로 내려간다"; fi
+done
+# ⚠ 유인 로그에는 `result`/비용 레코드가 **없다.** 그 한계를 코드가 적어야 다음 사람이
+# 「§3 에서 달러를 뽑자」로 가지 않는다.
+hasfx_tool() { if grep -qF -- "$2" "$TOOL"; then ok "$1"; else bad "$1" "not found: $2"; fi; }
+hasfx_tool "§11: 달러를 낼 수 없다는 한계를 적는다" '달러를 낼 수 없다'
+hasfx_tool "§11: 자기검사 3축 중 하나가 유인에 없음을 적는다" '원리적으로 없다'
+hasfx_tool "§11: 세션 중복(디스크 복제본)을 제거한다" 'sessionId 로 제거'
+hasfx_tool "§11: postTokens 비와 시뮬 keep 의 정의가 다름을 적는다" '정의가 다르다'
+hasfx_tool "§11: 코퍼스가 얼어 있지 않음을 적는다" '얼어 있지 않다'
+
 # ── 문법 ─────────────────────────────────────────────────────────────────
 if $PY -m py_compile "$TOOL" 2>/dev/null; then ok "도구가 컴파일된다"; else bad "도구가 컴파일된다" "py_compile 실패"; fi
 
 # ⚠ 바닥선 — 나머지 10 스위트와 같은 규약. 실측 PASS 와 정확히 일치시킨다.
-TOOL_MIN_CHECKS=17
+TOOL_MIN_CHECKS=24
 echo
 echo "analyze_tool: $PASS passed, $FAIL failed"
 if [ "$((PASS + FAIL))" -lt "$TOOL_MIN_CHECKS" ]; then

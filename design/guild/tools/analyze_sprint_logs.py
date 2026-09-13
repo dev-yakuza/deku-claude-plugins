@@ -1005,6 +1005,89 @@ _QUALITY_SPAWNS = ("external auditor", "tech-lead conformance", "tester verify",
                    "security review", "i18n review", "dba review", "designer ui/ux review")
 
 
+def load_attended(root):
+    """유인 경로 프런트엔드 — `~/.claude/projects/<slug>/*.jsonl`.
+
+    ⚠ **stream-json 이 아니다. 「도구에 편입」이 아니라 두 번째 프런트엔드다.**
+    레코드 타입이 다르고(`attachment`·`last-prompt`·`mode`·`ai-title`·`permission-mode` …),
+    **`result` 레코드가 없어 `total_cost_usd` 가 0건**이다. 그래서:
+      - §2.1 의 자기검사 3축 중 **③(적분↔modelUsage 정합성)은 유인에 원리적으로 없다.**
+      - **§3 은 적분만 낼 수 있고 달러는 낼 수 없다.**
+    공유되는 것은 뒷단(prefix 적분)뿐이다. 이 한계를 숨기지 않는다.
+
+    ⚠ 서브에이전트는 `<session>/subagents/*.jsonl` 에 **따로** 산다 — 최상위 `.jsonl` 에
+    안 들어오므로 `isSidechain` 필터는 no-op 이다(실측 0건).
+    """
+    sessions = []
+    for f in sorted(glob.glob(os.path.join(root, "*.jsonl"))):
+        seen, seq, sid, compacts = set(), [], None, []
+        for line in open(f, encoding="utf-8", errors="replace"):
+            try:
+                o = json.loads(line)
+            except Exception:
+                continue
+            sid = sid or o.get("sessionId")
+            cm = o.get("compactMetadata")
+            if isinstance(cm, dict) and cm.get("preTokens"):
+                compacts.append((cm.get("preTokens"), cm.get("postTokens")))
+            if o.get("type") != "assistant" or o.get("isSidechain"):
+                continue
+            m = o.get("message") or {}
+            if m.get("id") in seen:
+                continue
+            seen.add(m.get("id"))
+            u = m.get("usage") or {}
+            pre = ((u.get("cache_read_input_tokens") or 0)
+                   + (u.get("cache_creation_input_tokens") or 0)
+                   + (u.get("input_tokens") or 0))
+            if pre:
+                seq.append(pre)
+        subs = glob.glob(os.path.join(root, os.path.basename(f)[:-6], "subagents", "*.jsonl"))
+        if len(seq) >= 10:
+            sessions.append(dict(log=os.path.basename(f), sid=sid, seq=seq,
+                                 compacts=compacts, nsub=len(subs)))
+    return sessions
+
+
+def attended(root):
+    """11. 유인 경로 — §3 의 수를 **코드가 낸다**(임시 스크립트가 아니라)."""
+    S = load_attended(root)
+    if not S:
+        print(f"\n유인 로그를 찾지 못했다: {root}/*.jsonl")
+        return
+    print()
+    print("=" * 78)
+    print("11. 유인 경로 (`~/.claude/projects/`) — ⚠ 프록시 · 달러 없음")
+    print("=" * 78)
+    # ⚠ 세션 중복(디스크 복제본)을 sessionId 로 제거한다 — 실측에서 한 건 있었고
+    #    리더턴의 13.2% 가 재계수됐다.
+    byid, dup = {}, 0
+    for x in S:
+        if x["sid"] in byid:
+            dup += 1
+            continue
+        byid[x["sid"]] = x
+    U = list(byid.values())
+    integ = [sum(x["seq"]) for x in U]
+    turns = [len(x["seq"]) for x in U]
+    print(f"  세션 {len(S)}개 (중복 {dup}건 제거 → **{len(U)}**) · 「리더턴 ≥10」 필터")
+    print(f"  턴/세션 중앙 {statistics.median(turns):,.0f} · 최대 {max(turns):,}")
+    ev = [(a, b) for x in U for a, b in x["compacts"]]
+    print(f"  압축 이벤트 **{len(ev)}건 / {sum(1 for x in U if x['compacts'])}세션** "
+          f"= 세션의 {sum(1 for x in U if x['compacts']) / len(U) * 100:.1f}%")
+    if ev:
+        r = sorted(b / a for a, b in ev if a)
+        print(f"    `postTokens/preTokens` 중앙 {statistics.median(r):.4f} · "
+              f"범위 {r[0]:.4f}–{r[-1]:.4f}")
+        print("    ⚠ 이것은 「요약이 원본의 몇 배인가」이고, 시뮬레이터의 `keep`(= cap 대비)과")
+        print("       **정의가 다르다.** 섞어 쓰지 마라.")
+    ns = sum(x["nsub"] for x in U)
+    print(f"  서브에이전트 트랜스크립트 {ns}파일 · 쓰는 세션 "
+          f"{sum(1 for x in U if x['nsub'])}/{len(U)}")
+    print("  ⚠ 이 절은 **달러를 낼 수 없다** — 유인 로그에 `result`/`total_cost_usd` 가 없다.")
+    print("  ⚠ 코퍼스가 **얼어 있지 않다**(A20) — 이 세션 자신이 쓰고 있어 실행마다 수가 는다.")
+
+
 def quality_baseline(sessions):
     """10. 품질 지표 — **구조**를 센다. 판정을 세지 않는다.
 
@@ -1228,6 +1311,9 @@ def main_():
     quality_baseline(sessions)
     _u = loopback_union(sessions)
     levers(sessions, m, s, _u)
+    for a in sys.argv[2:]:
+        if a.startswith("--attended="):
+            attended(os.path.expanduser(a.split("=", 1)[1]))
     if "--sim" in sys.argv:
         simulate(sessions, m, s)
 
