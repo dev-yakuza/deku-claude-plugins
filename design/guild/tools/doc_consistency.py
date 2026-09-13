@@ -48,18 +48,36 @@ def section_gaps(text):
     return [n for n in range(nums[0], nums[-1] + 1) if n not in nums]
 
 
-def _strip_historical(text):
-    """제목에 「초안」이 들어간 절을 **덜어낸다**.
+_HISTORICAL = ("초안", "라운드")
 
-    ⚠ 이 문서들은 낡은 표를 지우지 않고 «초안의 표 (비교용으로 남긴다)» 로 보존한다 — 무엇이
-    어떻게 바뀌었는지가 산출물이기 때문이다. 그 안의 수는 **당시 값이 맞는 것**이므로 현재
-    값과 대조하면 안 된다. 보존 규율과 정합 검사가 충돌하는 지점이고, 여기서 화해시킨다.
+
+def _strip_historical(text):
+    """제목에 「초안」 또는 「라운드」가 들어간 절을 **덜어낸다**.
+
+    ⚠ 이 문서들은 낡은 표를 지우지 않고 «초안의 표 (비교용으로 남긴다)» 로 보존하고, §12 의
+    «라운드 N» 절들은 **무엇이 어떻게 틀렸었는지**를 그대로 인용한다 — 둘 다 그 안의 수가
+    **당시 값이라 맞는 것**이다. 현재 값과 대조하면 안 된다. 보존 규율과 정합 검사가 충돌하는
+    지점이고 여기서 화해시킨다.
+
+    ⚠⚠ **대가를 명시한다**: 라운드 기록 **안의** 진짜 오류는 이 검사가 못 잡는다. 라운드
+    기록은 구성상 과거 서술이므로 감수하지만, **「라운드」를 제목에 넣어 현재 주장을 숨기는
+    것**은 이 규칙의 악용이다 — 그러라고 만든 통로가 아니다.
     """
-    out, skip = [], False
+    out, skip_at = [], None
     for line in text.split("\n"):
         if line.startswith("#"):
-            skip = "초안" in line
-        if not skip:
+            lvl = len(line) - len(line.lstrip("#"))
+            # ⚠ **더 깊은 제목은 절을 끝내지 않는다.** 처음 구현은 `#` 로 시작하는 모든 줄에서
+            #    스킵을 풀었고, 그래서 «### 12.17 라운드 19» 안의 «#### …» 하위 제목이 스킵을
+            #    해제해 라운드 기록 본문이 다시 대조 대상이 됐다(실측 — 이 파일의 첫 실행에서
+            #    바로 드러났다).
+            if skip_at is not None and lvl > skip_at:
+                pass
+            elif any(k in line for k in _HISTORICAL):
+                skip_at = lvl
+            else:
+                skip_at = None
+        if skip_at is None:
             out.append(line)
     return "\n".join(out)
 
