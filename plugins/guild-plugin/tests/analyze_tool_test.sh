@@ -93,13 +93,17 @@ hasfx_tool "§11: 달러를 낼 수 없다는 한계를 적는다" '달러를 �
 hasfx_tool "§11: 자기검사 3축 중 하나가 유인에 없음을 적는다" '원리적으로 없다'
 hasfx_tool "§11: 세션 중복(디스크 복제본)을 제거한다" 'sessionId 로 제거'
 hasfx_tool "§11: postTokens 비와 시뮬 keep 의 정의가 다름을 적는다" '정의가 다르다'
-hasfx_tool "§11: 코퍼스가 얼어 있지 않음을 적는다" '얼어 있지 않다'
+# ⚠ A20 은 **해소됐다**(스냅샷을 떠 도구로 재현 확인: 동결본 = 라이브). 그러나 라이브
+# 디렉터리에 대고 돌리면 여전히 수가 변하므로, 도구는 **「동결본에 대고 돌려라」** 를 적어야
+# 한다 — 그 지시가 사라지면 A20 이 그대로 돌아온다.
+hasfx_tool "§11: 동결 스냅샷에 대고 돌리라고 지시한다" '동결 스냅샷에 대고 돌려라'
+hasfx_tool "§11: 동결본과 라이브가 일치함을 기록한다" '동결본과 라이브가'
 
 # ── 문법 ─────────────────────────────────────────────────────────────────
 if $PY -m py_compile "$TOOL" 2>/dev/null; then ok "도구가 컴파일된다"; else bad "도구가 컴파일된다" "py_compile 실패"; fi
 
 # ⚠ 바닥선 — 나머지 10 스위트와 같은 규약. 실측 PASS 와 정확히 일치시킨다.
-TOOL_MIN_CHECKS=24
+TOOL_MIN_CHECKS=25
 echo
 echo "analyze_tool: $PASS passed, $FAIL failed"
 if [ "$((PASS + FAIL))" -lt "$TOOL_MIN_CHECKS" ]; then

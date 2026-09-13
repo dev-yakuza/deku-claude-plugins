@@ -1085,7 +1085,9 @@ def attended(root):
     print(f"  서브에이전트 트랜스크립트 {ns}파일 · 쓰는 세션 "
           f"{sum(1 for x in U if x['nsub'])}/{len(U)}")
     print("  ⚠ 이 절은 **달러를 낼 수 없다** — 유인 로그에 `result`/`total_cost_usd` 가 없다.")
-    print("  ⚠ 코퍼스가 **얼어 있지 않다**(A20) — 이 세션 자신이 쓰고 있어 실행마다 수가 는다.")
+    print("  ⚠ **동결 스냅샷에 대고 돌려라.** 라이브 `~/.claude/projects/` 는 이 세션 자신이")
+    print("     쓰고 있어 실행마다 수가 는다(A20). `cp` 로 스냅샷을 떠 두면 재현된다 —")
+    print("     실측: 동결본과 라이브가 59세션·9건/5세션·8.5% 로 일치했다.")
 
 
 def quality_baseline(sessions):
