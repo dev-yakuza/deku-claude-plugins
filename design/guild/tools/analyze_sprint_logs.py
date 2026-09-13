@@ -1397,6 +1397,46 @@ def levers(sessions, main, sub, union_ids=None):
                   f"(+{(r2 - 1) * 100:.0f}%)   ← 정본")
             print("      ⚠ 어휘 하나만 쓰면 침묵분이 분모에서 빠져 손익분기가 **위로** 밀린다")
             print("        — M1 이 실제보다 안전해 보인다. §9 의 합집합을 쓴다.")
+    # ── M12 — 루프백 티어 상승(sonnet→opus)의 달러 ───────────────────────
+    # ⚠ `_execute_spine.md` 의 chain rule: 루프백은 전 체인을 **한 티어 위**에서 재실행한다.
+    #    M12 는 그 상승을 없애는 조치이므로, 달러는 **「상승분」** 이다 — 루프백 합집합에
+    #    들어가면서 **`--model opus` 로 선언된 스폰**의 비용을 sonnet 으로 환산한 차액.
+    # ⚠⚠ **이 수를 「절감」으로 읽지 마라.** 상승을 없애는 것은 **재시도의 품질을 낮추는
+    #    것**이고, 루프백은 이미 「뭔가 틀렸다」가 확인된 자리다. 이 절은 **가격표**를 낼 뿐
+    #    이고 채택 여부는 플랜 §M12 의 품질 논의가 정한다.
+    esc_seqs, esc_n, esc_int = [], 0, 0
+    other_opus_n = 0
+    for x in sessions:
+        for parent, seq in x["prefixes"].items():
+            if not parent:
+                continue
+            declared = (x["spawns"].get(parent) or (None, None))[1]
+            if declared != "opus":
+                continue
+            if union_ids and parent in union_ids:
+                esc_seqs.append(("claude-opus-5", "5m", seq))
+                esc_n += 1
+                esc_int += sum(seq)
+            else:
+                other_opus_n += 1
+    if esc_seqs:
+        esc_in, _ = input_cost(esc_seqs)
+        # 출력 몫은 SUB 전체 출력비를 **적분 비율**로 배분한다(M1 과 같은 방식).
+        esc_out = out_c * (1 - share_main) * (esc_int / (si or 1))
+        # opus $5/$25 → sonnet $3/$15 = 0.6배 → 상승분은 그 비용의 0.4배
+        m12 = 0.4 * (esc_in + esc_out)
+        print(f"  M12 루프백 티어 상승분(opus→sonnet) ${m12:9,.2f}  "
+              f"({m12 / base * 100:4.1f}%)")
+        print(f"      └ 루프백 합집합 {len(union_ids or [])}건 중 **opus 선언 {esc_n}건** "
+              f"(합집합 밖 opus {other_opus_n}건은 제외)")
+        print("      ⚠⚠ **절감이 아니라 가격표다.** 상승을 없애는 것은 재시도의 품질을 낮추는")
+        print("         것이고, 루프백은 이미 「뭔가 틀렸다」가 확인된 자리다.")
+        print("      ⚠ M1 과 **합산하지 마라** — M1 은 MAIN, M12 는 SUB 라 축이 겹치지 않지만,")
+        print("         둘 다 «티어를 내린다» 는 같은 품질 대가를 두 번 치른다.")
+    else:
+        print("  M12 루프백 티어 상승분                **관측 0건** — opus 선언 스폰이 "
+              "루프백 합집합 안에 없다")
+
     print(f"  M3  429/미완료 노출액                ${dead:9,.2f}  ({dead / base * 100:4.1f}%)")
     print()
     print("  ⚠ 여기에 없는 레버는 **아직 달러가 없는 것**이다. 문서에 숫자가 적혀 있어도")
