@@ -87,8 +87,12 @@ budget only holds with the Grep. Skip it and you must Read all five.
    Step 3** vacuous-test guard (it weighs *every* acceptance criterion against the covering tests).
    ⚠ **Three of those five are sub-agents that never read this file** — no `templates/agents/*.md`
    or spawn prompt references `_preflight.md`, only leaders run Step 0. Naming them here documents
-   the intent; **their whole-read requirement has to live in their own spawn prompts**, and until
-   it does, do not assert elsewhere that they read it whole.
+   the intent; **their whole-read requirement has to live in their own spawn prompts**, and it
+   does — all four spawn sites carry it: the tech-lead conformance prompt in `implement.md` and in
+   `refactor.md` ("Read it whole"), the tester prompt in `test.md` ("Read that file whole, in one
+   Read"), and 3.5a in `_execute_spine.md` ("read the intent whole, not a slice"). ⚠ **If you add a
+   sixth exhaustive reader, its whole-read requirement goes in its own spawn prompt, not here** —
+   a leader-only file cannot bind a sub-agent that never loads it.
    ⚠ **3.5b specialists are NOT on that list** — they review the diff from their own specialty on
    their own slice and return one free-text `>>> RESULT <<<` line, so neither the whole-intent
    comparison nor the empty-list argument reaches them.

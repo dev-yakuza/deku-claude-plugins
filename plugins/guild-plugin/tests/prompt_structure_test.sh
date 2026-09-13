@@ -821,7 +821,7 @@ hasfx "M11-②: 정체 가드가 audit record 에서 사유를 읽는다" "$STMD
 # ⚠ **execute 경로로 스코프돼야 한다.** 무조건이면 audit record 가 없는 무인 `test`/`qa`
 # 루프백이 매번 `OK PAUSE: needs-human` 으로 멈춘다 — 품질 조치가 무인 경로에 정지 결함을
 # 만드는 모양이고, 같은 파일이 세 줄 위에서 「종전대로 동작한다」고 적는 것과도 모순이었다.
-hasfx "M11-②: 그 규칙이 execute 경로로 스코프된다" "$STMD" '**Scope**: this applies where an audit record exists'
+hasfx "M11-②: 그 규칙이 execute 경로로 스코프된다" "$STMD" '**Scope — the execute path only.**'
 # ⚠⚠ **정합성 — 읽는 쪽과 쓰는 쪽.** 정체 가드는 **두 축**(역할 · 감사자)을 비교하는데,
 # 기록 스키마가 감사자 findings 만 적으면 역할 축은 여전히 컨텍스트에만 산다 = 절반만 닫힌다.
 if grep -qF -- 'record this attempt' "$ESMD" && grep -qF -- 'ROLE axis too' "$ESMD"; then
@@ -1833,6 +1833,42 @@ case "$OUTE" in
   OK*) ok "enum 축소 문장이 Section C 표의 부분집합이고 사이트가 남아 있다 (${OUTE#OK })" ;;
   *)   bad "enum 축소 문장이 Section C 표와 정합" "OK >=7" "$OUTE" ;;
 esac
+# ── M11-② 문단 순서 — 규칙 → 근거 → 예외 ────────────────────────────────
+# ⚠ **위치 검사다.** M-2 의 scope 삽입이 규칙의 **근거**("before/after pair")를 **예외** 블록
+# 안으로 밀어 넣었고, 그래서 읽는 사람에게 근거가 예외의 근거로 읽혔다 — 문자열은 셋 다
+# 있었으므로 존재 검사로는 안 잡힌다. 세 조각의 **순서**를 본다.
+SGMD="$GLD/commands/atoms/_stagnation.md"
+_r=$(grep -n 'do not read those strings from memory' "$SGMD" | head -1 | cut -d: -f1)
+_w=$(grep -n 'The comparison is a \*before/after pair\*' "$SGMD" | head -1 | cut -d: -f1)
+_e=$(grep -n 'Scope — the execute path only' "$SGMD" | head -1 | cut -d: -f1)
+if [ -n "$_r" ] && [ -n "$_w" ] && [ -n "$_e" ] && [ "$_r" -le "$_w" ] && [ "$_w" -lt "$_e" ]; then
+  ok "M11-②: 규칙($_r) → 근거($_w) → 예외($_e) 순서다"
+else
+  bad "M11-②: 규칙 → 근거 → 예외 순서" "규칙≤근거<예외" "규칙=$_r 근거=$_w 예외=$_e"
+fi
+
+# ── M9 통째읽기 요건이 **네 스폰 사이트 전부**에 있는가 ───────────────────
+# ⚠ **정합 검사다.** `_preflight.md` 의 carve-out 은 「전수 독자의 통째읽기 요건은 각자의 스폰
+# 프롬프트에 있다」고 단언한다. 그 단언과 실제 사이트가 어긋나면, ① 요건이 빠진 채 예산만
+# 좁혀지거나 ② 라운드 10 처럼 **이미 있는데 없다고 적힌** 상태가 된다 — 후자는 읽는 사람이
+# 보장이 없다고 믿게 만든다. 사이트를 세고 carve-out 이 그 수를 아는지 본다.
+_WR=0
+for _pair in "$GLD/commands/implement.md:Read it whole" \
+             "$GLD/commands/refactor.md:Read it whole" \
+             "$GLD/commands/test.md:Read that file whole" \
+             "$GLD/commands/atoms/_execute_spine.md:read the intent whole"; do
+  _file="${_pair%%:*}"; _needle="${_pair#*:}"
+  if grep -qF -- "$_needle" "$_file"; then _WR=$((_WR+1))
+  else bad "M9: 통째읽기 요건 — $(basename "$_file")" "'$_needle' 있음" "없음"; fi
+done
+if [ "$_WR" -eq 4 ]; then ok "M9: 통째읽기 요건이 네 스폰 사이트 전부에 있다"; fi
+# carve-out 이 그 사실을 알고 있는가 (없다고 적혀 있으면 위 4건과 모순)
+if grep -qF -- "until it does, do not assert" "$PFMD"; then
+  bad "M9: carve-out 이 스폰 사이트의 실제 상태와 맞는다" "요건 있음을 반영" "아직 없다고 적혀 있다"
+else
+  ok "M9: carve-out 이 스폰 사이트의 실제 상태와 맞는다"
+fi
+
 # ── 규율 7 기계화 — 지시문의 모든 백분율이 등재돼 있는가 ──────────────────
 # ⚠ **존재 검사가 아니라 전수 대조다.** 라운드 6 에서 `verification.md 1.5%` 가 ① 도구가
 # 찍지 않는 수이면서 ② 반올림까지 틀린 채로 출하돼 있었다 — 검사가 없었기 때문이다.
@@ -1868,7 +1904,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=279   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=282   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

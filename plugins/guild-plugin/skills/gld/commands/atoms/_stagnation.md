@@ -43,17 +43,20 @@ A loop-back with no auditor involvement (a verify gap, a QA defect, the unattend
 This is a judgment call by the leader over short strings — no hashing, no new infra.
 
 ⚠⚠ **On the execute path, do not read those strings from memory — read them from the Issue's
-audit record.** ⚠ **Scope**: this applies where an audit record exists, i.e. the execute
-stage's loop-backs. A loop-back with **no auditor involvement** — a verify gap, a QA defect,
-the unattended `test`/`qa` loop-backs — has no `<!-- guild:auditor:execute -->` comment to
-read, so it **behaves exactly as it did before this rule existed** (see the paragraph above).
-Reading this rule as unconditional would make every unattended `test`/`qa` loop-back stop at
-`OK PAUSE: needs-human` for a record that was never supposed to exist. The
-comparison is a *before/after pair*, and the "before" half lives only in context unless something
-writes it down — so a **compaction between attempt 1 and attempt 2 discards it**, after which the
-natural reading of a missing baseline is "no prior loop-back", and **the guard does not fire at
-all**. That failure is invisible: it looks exactly like a normal retry. Measured: **5 of 59 attended sessions (8.5%) compacted** — one repo's log
-corpus, and one of the five is the session that took this measurement, and this guard is on the attended path too.
+audit record.** The comparison is a *before/after pair*, and the "before" half lives only in
+context unless something writes it down — so a **compaction between attempt 1 and attempt 2
+discards it**, after which the natural reading of a missing baseline is "no prior loop-back",
+and **the guard does not fire at all**. That failure is invisible: it looks exactly like a
+normal retry. Measured: **5 of 59 attended sessions (8.5%) compacted** — one repo's log corpus,
+and one of the five is the session that took this measurement; this guard is on the attended
+path too.
+
+⚠ **Scope — the execute path only.** The rule above applies where an audit record exists, i.e.
+the execute stage's loop-backs. A loop-back with **no auditor involvement** (a verify gap, a QA
+defect, the unattended `test`/`qa` loop-backs) has no `<!-- guild:auditor:execute -->` comment
+to read, so it uses the role-reason axis alone and **behaves exactly as it did before this rule
+existed**. Reading the rule as unconditional would make every unattended `test`/`qa` loop-back
+stop at `OK PAUSE: needs-human` waiting for a record that was never supposed to exist.
 
 The durable place already exists. `_execute_spine.md` Step 4 writes one `### audit-record <n>`
 block per attempt to the Issue's `<!-- guild:auditor:execute -->` comment, and the attempt number
