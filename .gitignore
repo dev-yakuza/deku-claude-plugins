@@ -2,5 +2,11 @@ __pycache__/
 *.py[cod]
 .DS_Store
 
-# Guild design notes — kept out of the repo deliberately
-design/guild/
+# Guild design notes — kept out of the repo deliberately.
+# ⚠ `design/guild/*`, NOT `design/guild/` — with the trailing-slash form git never descends
+# into the directory, so the negation below is silently inert.
+design/guild/*
+# …except the measurement tool. The plan's numbers are only auditable if the code that
+# produced them is reviewable, and that code has been wrong seven times.
+!design/guild/tools/
+design/guild/tools/__pycache__/

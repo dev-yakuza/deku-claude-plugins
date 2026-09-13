@@ -4346,7 +4346,7 @@ fi
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=327
+SUP_MIN_CHECKS=332
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"
