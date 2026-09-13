@@ -1365,8 +1365,8 @@ import os, re, sys
 gld = sys.argv[1]
 # 인용 -> 그 줄에 반드시 있어야 하는 조각. 새 인용이 생기면 여기에 항목을 추가해야 한다.
 EXPECT = {
-    ("_bash_rules.md", 122): "A generated OS-level",
-    ("_bash_rules.md", 124): "guild:auditor-violation",
+    ("_bash_rules.md", 124): "A generated OS-level",
+    ("_bash_rules.md", 126): "guild:auditor-violation",
     ("board_write.py", 4):  "Why this is code and not a series of Bash calls",
     ("config.md", 14):      "unknown/unsupported config key",
     ("init.md", 163):       "normalized, simple-bash-safe",

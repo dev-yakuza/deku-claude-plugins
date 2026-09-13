@@ -13,7 +13,7 @@ is the flag form — both existing precedents are argparse-only with no stdin. T
 two ways to produce the input file:
   - LLM caller (`sprint plan`)  — writes it with the Write tool.
   - shell caller (`sprint run`) — builds it inside the generated `.sh`, where redirection
-    IS allowed (`_bash_rules.md:122` puts a generated script's own contents outside these
+    IS allowed (`_bash_rules.md:124` puts a generated script's own contents outside these
     rules). See §8.4c.
 
     python3 sprint_dag.py --input <path> --mode <mode>

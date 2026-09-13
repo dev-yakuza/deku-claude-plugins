@@ -83,6 +83,7 @@ def load(root):
         results = []          # (tool, arg, parent, result bytes)
         results_all = []      # 모든 result 줄 — **실패 판정 전용**(비용은 마지막 줄)
         by_id = {}            # tool_use_id -> (tool, arg, result bytes)  — 4c 의 정확 귀속용
+        spills = []           # 스필을 만든 Bash 커맨드 (A21 잔여 해소)
         bodies = {}           # tool_use_id -> 라벨 질의 결과 본문(4KB 상한) — 스테이지 복구용
         spawns = {}           # tool_use_id -> description
         for ev in iter_events(path):
@@ -155,7 +156,16 @@ def load(root):
                     if not hit:
                         continue
                     body = block.get("content")
-                    size = len(json.dumps(body, ensure_ascii=False)) if body is not None else 0
+                    _ser = json.dumps(body, ensure_ascii=False) if body is not None else ""
+                    size = len(_ser)
+                    # ⚠ **스필을 만든 쪽**을 기록한다. 기존 코드는 `arg` 에 `tool-results/` 가
+                    #    있는 것 — 즉 **재독** — 만 봤고, 「그 파일을 애초에 누가 만들었나」는
+                    #    임시 스크립트에서만 나왔다(A21 잔여). 직렬화는 size 계산에서 이미
+                    #    하므로 추가 비용이 없다.
+                    if "tool-results/" in _ser:
+                        # ⚠ 도구 종류를 **같이** 남긴다. 플랜은 「스필 생성 203/203 이 Bash」라고
+                        #    적었는데 Bash 만 세면 그 주장을 **검증할 수 없다** — 분모가 사라진다.
+                        spills.append((hit[0], hit[1]))
                     results.append((hit[0], hit[1], hit[2], size))
                     by_id[block["tool_use_id"]] = (hit[0], hit[1], size)
                     # ⚠ 본문은 **라벨 질의에 한해서만** 보존한다. 스테이지 경계를 복구하려면
@@ -168,7 +178,7 @@ def load(root):
                             body, ensure_ascii=False)[:4000]
         out.append(dict(log=rel, result=result, prefixes=prefixes, calls=calls,
                         call_ids=call_ids, by_id=by_id, results=results, spawns=spawns,
-                        bodies=bodies, results_all=results_all))
+                        bodies=bodies, results_all=results_all, spills=spills))
     return out
 
 
@@ -607,6 +617,23 @@ def source_integral(sessions):
         for k, v in std.most_common(6):
             print(f"    {k:40s} {int(v):13,} {v / total * 100:5.2f}%")
         print("    ⚠ 이 내역이 `_preflight.md` Item 2 의 「어느 표준을 끌어올 것인가」 근거다.")
+
+    # ⚠ **스필을 만든 쪽의 분류** — `_bash_rules.md` 가 「tool-results 재독 3.88% 는 대부분
+    #    M5 의 2차 효과다」라고 적는데, 그 「대부분」의 근거가 도구 밖(임시 스크립트)에 있었다.
+    #    A21 의 잔여분이고 규율 7 위반이었다.
+    sp_all = [t for s2 in sessions for t in (s2.get("spills") or [])]
+    sp = [c for t, c in sp_all if t == "Bash"]
+    other = collections.Counter(t for t, _ in sp_all if t != "Bash")
+    if sp:
+        cl = [_classes(c) for c in sp]
+        rd = sum(1 for c in cl if "read" in c or "search" in c or "list" in c)
+        pure = sum(1 for c in cl if c == {"read"})
+        print(f"\n  스필을 **만든** Bash {len(sp)}건의 분류 (`_classes()`)")
+        print(f"    파일 끌어오기를 품은 것  {rd:5d}  = {rd / len(sp) * 100:.0f}%  ← M5 의 2차 효과 **상한**")
+        print(f"    순수 읽기만              {pure:5d}  = {pure / len(sp) * 100:.0f}%  ← 같은 것의 **하한**")
+        print(f"    독립 항목(테스트·git 등) {len(sp) - rd:5d}  = {(len(sp) - rd) / len(sp) * 100:.0f}%")
+        print(f"    스필 생성 **{len(sp)}/{len(sp_all)} 이 Bash**" + (f" · 나머지: {dict(other)}" if other else " (전부)"))
+        print("    ⚠ 그래서 3.88% 를 통째로 M5 의 몫으로 세면 **이중 계상**이다.")
 
 
 _STD_FILE = re.compile(r"docs/standards/([A-Za-z0-9_.\-]+\.md)")

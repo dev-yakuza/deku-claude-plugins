@@ -88,8 +88,10 @@ with the answer*. `_preflight.md` Item 4 filters Issue comments with `--jq`, and
 `_execute_spine.md` requires `--paginate` to get **more** output, not less.
 
 ⚠ **A second-order effect, not a separate lever**: Claude Code spills oversized tool output to a
-file that then gets re-read, and that re-reading is **3.88% of billed input**. **Most of those spills come from a call that was reading a file** — so reading less upstream
-removes most of them. Do not count it twice.
+file that then gets re-read, and that re-reading is **3.88% of billed input**. Measured: **200 of 200** spills were produced by a Bash call, and **84%** of those calls were
+pulling in a file (**61%** were pure reads) — so reading less upstream removes most of them.
+Do not count it twice. The remaining **16%** is independent (test output, `git`), and that is
+the part reading less will *not* recover.
 ---
 
 ## Posting Issue/PR comments: the temp-file pattern (mandatory)
