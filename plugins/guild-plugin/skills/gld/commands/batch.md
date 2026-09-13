@@ -446,9 +446,23 @@ if [ "$((FAILED + INCOMPLETE))" -eq 0 ]; then COMPLETED=1; fi
 ## Phase 4 — Run in background + report
 1. `chmod +x .claude/guild/.gld-batch.sh`.
 2. Ensure `.claude/guild/.batch-logs/` won't be committed (the script already adds it to `.git/info/exclude` — that's the actual mechanism; `.claude/guild/.gitignore` only covers `memory/`, per `init.md`, so it does **not** also cover `.batch-logs/` — don't rely on it as a fallback here).
-3. Execute via the **Bash tool with `run_in_background: true`**: `bash .claude/guild/.gld-batch.sh`.
-4. Report: "Guild batch started (background). Issues: <N>. Logs: .claude/guild/.batch-logs/. Rate limits auto-wait+resume (up to a 4h reset). You'll be notified on completion." Give the `tail -f … | jq …` monitor hint.
-5. On completion (harness re-invokes when the background task exits): read the logs, report per-Issue outcome + the summary block. Outcomes are **label-truthful** (Done / Paused-needs-human / Incomplete / Failed), not exit-code-based. **List paused Issues** (`gh issue list --label guild:needs-human --state open`) — resolve, then re-run `/gld dev`/`resume`. **List Incomplete Issues** (exited 0 mid-spine — a backgrounded hook or turn-end) — `/gld resume <n>` continues them from the label; their partial work is on the feature branch.
+3. Execute via the **Bash tool with `run_in_background: true`**, one call:
+   ```bash
+   python3 <<SKILL_DIR>>/commands/atoms/spawn_supervisor.py --human-repo <abs path of the human's checkout> --batch
+   ```
+   ⚠ **Not `bash .claude/guild/.gld-batch.sh` directly** — that makes the supervisor a child in
+   *this session's* process group, so whatever ends the background task (the session closing, the
+   task being stopped, a harness reap) kills the batch mid-Issue, with that Issue's branch
+   unpushed. Measured on the sibling flow (`/gld sprint run` #389): SIGTERM 37 hours in, member 6
+   of 6 dead at `guild:execute` with no PR. The launcher spawns `bash <script>` into its own
+   session, streams its log to stdout while it lives (so a live session sees the same progress and
+   the harness still gets an exit for step 5), and leaves the run alive if it is killed itself.
+   Confirm the `spawn_supervisor: pid=<n> detached` line appeared; exit 64/70 means nothing
+   started. `setsid(1)` does not exist on macOS — that is why this is a Python launcher.
+4. Report: "Guild batch started (background). Issues: <N>. Logs: .claude/guild/.batch-logs/. Rate limits auto-wait+resume (up to a 4h reset)." ⚠ **Do not promise a completion notification.** Step 3 detaches the run, so step 5 fires only if this session is still alive when it ends — say instead that the run survives this session and that the logs (and `/gld status <n>`) are where its state lives. Give the `tail -f … | jq …` monitor hint, and name `.claude/guild/.batch-logs/supervisor.log` — the launcher writes the supervisor's own progress there, so it outlives the session too.
+5. On completion (harness re-invokes when the **launcher** exits — which since step 3 no longer
+   means the run ended: check `ps -p <pid> -o command=` first, and if the supervisor is still
+   alive report that the run continues instead of reporting outcomes): read the logs, report per-Issue outcome + the summary block. Outcomes are **label-truthful** (Done / Paused-needs-human / Incomplete / Failed), not exit-code-based. **List paused Issues** (`gh issue list --label guild:needs-human --state open`) — resolve, then re-run `/gld dev`/`resume`. **List Incomplete Issues** (exited 0 mid-spine — a backgrounded hook or turn-end) — `/gld resume <n>` continues them from the label; their partial work is on the feature branch.
 
 ---
 

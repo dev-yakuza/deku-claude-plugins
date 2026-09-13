@@ -121,7 +121,7 @@ Then, **when there is a window**:
    dead when work starts. The supervisor tolerates 18 consecutive marker failures while
    waiting, which **delays** the death by about three hours and cannot absorb a permanent
    expiry. Ask whether to continue or to re-authenticate first.
-4. **`caffeinate` — a DOUBLE gate.** Wrap the launch as `caffeinate -i bash <script>` only when
+4. **`caffeinate` — a DOUBLE gate.** Pass **`--caffeinate` to Phase 3 step 5's launcher** (which puts `caffeinate -i` inside the detached session — do not wrap the launcher itself) only when
    **a window is set** (flag or `config.sprint.window`) **and** `command -v caffeinate`
    succeeds. ⚠ Not the platform gate alone: a windowless 40-minute run must not suppress a
    macOS user's idle sleep, which nobody asked for and only the battery reveals. On Linux an
@@ -440,7 +440,10 @@ inside its own worktree.
 
    ⚠ **This guard is not optional.** Step 5 launches with `run_in_background: true`; a missing or
    zero-byte script makes bash exit immediately with no ledger, no marker and no failure record,
-   and the run reports "started" while doing nothing. The renderer checks its own output size
+   and the run reports "started" while doing nothing. (Step 5's launcher now refuses both cases
+   itself with exit 64 — that is a **second** net, not a reason to drop this one: it fires after
+   the conf files of 2b/2c are already written, and this guard is what keeps the two steps from
+   running at all.) The renderer checks its own output size
    because there is no allowlisted Bash primitive here that could (`test -s` and `wc -c` are not
    in the permission allowlist, and `_bash_rules.md` forbids joining a check onto the render call
    with `&&`).
@@ -459,7 +462,40 @@ inside its own worktree.
    `render_supervisor.py`. The numbers of steps 5 and 6 are kept as they were so the
    cross-references to them elsewhere in this file (`:99`) and in the tests stay correct.
 
-5. **Start it in the background**: Bash tool with `run_in_background: true`, `bash .claude/guild/.gld-sprint-<tracker>.sh`.
+5. **Start it DETACHED, in the background**: Bash tool with `run_in_background: true`, one call:
+
+   ```bash
+   python3 <<SKILL_DIR>>/commands/atoms/spawn_supervisor.py --human-repo <abs path of the human's checkout> --tracker <tracker>
+   ```
+
+   Add `--caffeinate` when Phase 0b's double gate said so (a window is set **and**
+   `command -v caffeinate` succeeded). ⚠ **Do not wrap this call in `caffeinate` yourself** —
+   the launcher puts it *inside* the detached session, so the assertion lives and dies with the
+   supervisor. Wrapping the launcher instead lets the machine sleep the instant the launcher is
+   killed, i.e. exactly when the detachment is doing its job.
+
+   ⚠ **`bash .claude/guild/.gld-sprint-<tracker>.sh` directly is WRONG and was the previous
+   instruction.** It makes the supervisor a child in *this session's* process group, so whatever
+   ends that background task — the session closing, the task being stopped, a harness reap —
+   takes the supervisor with it. Measured (#389, 6 members): SIGTERM 37 hours in, while member
+   6 of 6 was mid-execute; that member died at `guild:execute` with its branch unpushed and no
+   PR, and the run marker was never updated, so the tracker read `state: "running"` against a
+   dead pid. The coupling also contradicts this file: step 6 tells the human there is no
+   completion notification, and a windowed run is sized in **nights**. A run designed to outlive
+   the session must not be owned by it. `setsid(1)` does not exist on macOS, which is why this is
+   a Python launcher and not a shell wrapper.
+
+   **What the launcher gives back, so nothing is lost:** it streams the supervisor's log to its
+   own stdout while it lives, so a live session sees the same progress it always did and the
+   harness still gets an exit code to trigger Phase 4 on. If it is killed, only the streaming
+   stops — the supervisor keeps running and keeps writing
+   `.claude/guild/.sprint-logs/<tracker>/supervisor.log`, which is new and durable (that progress
+   used to exist only in the harness's task-output file).
+
+   ⚠ **Confirm the `spawn_supervisor: pid=<n> detached` line appeared**, the same way step 2d
+   confirms the render. Branch on that line, never on this launcher staying alive — outliving it
+   is the point. A `FAIL:` line instead (exit 64/70) means nothing was started.
+
    ⚠ **Do not create the container or the supervisor worktree here.** The script does both
    itself, after its empty-queue guard, because it must not build a worktree for a run with
    nothing to do — and because it normalises the container path to a realpath at the same
@@ -549,7 +585,16 @@ what `split: true` is for (step 1): without it the base decision would call a *c
 
 ## Phase 4 — On completion
 
-The harness re-invokes when the background task exits. Then:
+The harness re-invokes when the launcher exits. Then:
+
+⚠ **This phase is best-effort and always was — what changed is the consequence.** Since
+Phase 3 step 5 detaches, the launcher exiting no longer means the *run* ended: killing this
+session now costs the **report**, not the run. So reaching this phase does not by itself
+prove the queue is empty — read the marker and judge, exactly as below. When the launcher
+was killed while the supervisor is still alive (`ps -p <pid> -o command=` still shows
+`.gld-sprint-`), say so and stop: the run continues, and `/gld sprint daily` is where its
+state lives. Do **not** report outcomes for a run still in progress.
+
 1. Read the marker and the logs; report per-member outcomes (**label-truthful**: done / paused /
    blocked / incomplete / failed) with counts, plus token/cost totals.
 
@@ -615,4 +660,7 @@ run that refused to start is the class of report this arm exists to remove.
 - **A marker write failure never kills the run** — but three consecutive failures stop it, since
   the duplicate-run guard depends on that marker being honest.
 - **The container is not removed while a worktree in it is preserved.** Removal is git's call.
-- The generated script is one backgrounded Bash tool call — the `_bash_rules.md:124` exception.
+- The generated script is launched by **one backgrounded `python3 spawn_supervisor.py` call**
+  (`_bash_rules.md` exception 1), which spawns `bash <script>` into its **own session** so the
+  run outlives this one. Never `bash <script>` directly — that is exception 2's shape and it
+  ties a multi-night run to a single session's lifetime (Phase 3 step 5 has the measurement).
