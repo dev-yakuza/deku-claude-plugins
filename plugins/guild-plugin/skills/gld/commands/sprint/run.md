@@ -524,6 +524,21 @@ inside its own worktree.
    `.claude/guild/.sprint-logs/<tracker>/supervisor.log`, which is new and durable (that progress
    used to exist only in the harness's task-output file).
 
+
+   ⚠⚠ **The launcher's exit code now comes from a FILE, and `71` means UNKNOWN.** The supervisor
+   is double-forked (its `ppid` is **1**, so a stop that walks this session's process *tree*
+   cannot reach it — `start_new_session=True` alone left it a direct child, and #389 then took
+   SIGTERM three runs in a row, ~2 minutes in). That detachment costs `wait()`, so the
+   supervisor writes `$?` into `.claude/guild/.sprint-logs/<tracker>/supervisor.rc` and the
+   launcher reads it back. Exit codes to branch on:
+
+   | exit | meaning | what Phase 4 must do |
+   |---|---|---|
+   | 0 | the supervisor finished cleanly | proceed |
+   | other non-zero | the supervisor's own failure code | treat as a failed run |
+   | **71** | supervisor is gone but left **no readable `.rc`** — killed before it could write | ⚠ **outcome UNKNOWN. Do NOT report a clean run.** Read `supervisor.log` and the board |
+   | 64 / 70 | nothing was started (usage error / spawn failed) | nothing to clean up |
+
    ⚠ **Confirm the `spawn_supervisor: pid=<n> detached` line appeared**, the same way step 2d
    confirms the render. Branch on that line, never on this launcher staying alive — outliving it
    is the point. A `FAIL:` line instead (exit 64/70) means nothing was started.

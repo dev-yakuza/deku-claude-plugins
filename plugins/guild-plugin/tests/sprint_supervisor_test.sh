@@ -4342,11 +4342,77 @@ else
   bad "render: run.md 의 인자 이름" "전부 존재해야 하나 없음:$RSMISS"
 fi
 
+# ── T11: spawn_supervisor.py — **실제로 띄워서** 분리·종료코드를 본다 ──────
+# ⚠⚠ 이 파일은 검사가 **0건**이었고, 첫 판이 `start_new_session=True` 만으로 「분리했다」고
+# 선언했다. 그것은 sid/pgid 만 바꾸고 **ppid 는 런처를 가리킨 채**라, 프로세스 **트리**를
+# 훑는 중지가 감독자에 닿는다. 실측: `/gld sprint run` #389 가 **3연속** 2분 만에 SIGTERM.
+# docstring 이 「검증했다」고 적은 것은 `kill -TERM -<pgid>` — **통과하는 경로만** 시험한 것이다.
+# → 그래서 이 검사는 문자열이 아니라 **진짜로 띄우고 ps 로 ppid 를 읽는다.**
+SPAWN="$HERE/../skills/gld/commands/atoms/spawn_supervisor.py"
+# ⚠⚠ **시한을 건다.** 회귀가 «틀린 답» 이 아니라 «영원히 안 끝남» 으로 나타나는 경로가
+# 실재한다 — 이중 fork 를 `Popen` 으로 되돌리면 감독자가 **좀비**가 되고 `os.kill(zombie,0)`
+# 이 계속 성공해 런처가 무한 대기한다(실측: 이 검사를 만들며 변이를 돌리다 스위트가 멈췄다).
+# **멈추는 검사는 떨어지는 검사보다 나쁘다** — CI 가 조용히 매달린다.
+# `timeout(1)` 은 macOS 기본에 없으므로 직접 만든다.
+run_capped() {   # run_capped <초> <명령...>  → 시한 초과면 124
+  local _lim="$1"; shift
+  "$@" & local _p=$!
+  local _i=0
+  while kill -0 "$_p" 2>/dev/null; do
+    _i=$((_i+1))
+    [ "$_i" -gt "$((_lim*10))" ] && { kill -KILL "$_p" 2>/dev/null; wait "$_p" 2>/dev/null; return 124; }
+    sleep 0.1
+  done
+  wait "$_p"
+}
+if [ ! -f "$SPAWN" ]; then
+  bad "T11 spawn_supervisor.py 가 있다" "없음: $SPAWN"
+else
+  ok "T11 spawn_supervisor.py 가 있다"
+  W10="$(mktemp -d)"; mkdir -p "$W10/.claude/guild/.sprint-logs/999"
+  printf '#!/usr/bin/env bash\nps -o ppid= -p $PPID | tr -d " " | sed "s/^/WRAPPER_PPID=/"\nexit 42\n' \
+    > "$W10/.claude/guild/.gld-sprint-999.sh"
+  # ⚠ **낡은 rc 를 심어 둔다.** 0 은 「성공」으로 오독되는 값이라, 지우지 않는 구현은
+  #    실패한 런을 깨끗한 런으로 보고한다.
+  printf '0' > "$W10/.claude/guild/.sprint-logs/999/supervisor.rc"
+  run_capped 20 "$PY" "$SPAWN" --human-repo "$W10" --tracker 999 --poll 0.2 >/dev/null 2>&1
+  RC10=$?
+  [ "$RC10" = "124" ] && bad "T11 런처가 시한 안에 끝난다" "20초 초과 — 무한 대기 회귀" \
+    || ok "T11 런처가 시한 안에 끝난다"
+  LOG10="$W10/.claude/guild/.sprint-logs/999/supervisor.log"
+
+  # ① 손자가 트리에서 사라졌는가 — 래퍼의 ppid 가 1
+  WP="$(grep -o 'WRAPPER_PPID=[0-9]*' "$LOG10" 2>/dev/null | head -1 | cut -d= -f2)"
+  if [ "${WP:-0}" = "1" ]; then ok "T11 감독자가 init 에 재부모된다 (ppid=1 — 트리 킬 밖)"
+  else bad "T11 감독자가 init 에 재부모된다" "ppid=${WP:-없음} (1 이 아니면 런처의 트리 안이다)"; fi
+
+  # ② 종료 코드가 전달되는가 — 이중 fork 는 wait() 를 못 쓰므로 rc 파일로 온다
+  if [ "$RC10" = "42" ]; then ok "T11 감독자의 종료 코드가 전달된다 (42)"
+  else bad "T11 감독자의 종료 코드가 전달된다" "런처가 $RC10 을 냈다 (0 이면 실패를 성공으로 읽는다)"; fi
+
+  rm -rf "$W10"
+
+  # ③ **낡은 .rc 삭제 + 부재 시 71** — 한 검사로 묶는다.
+  # ⚠⚠ 이 둘을 나눠 쓰면 삭제 쪽이 **공허해진다**(실제로 그랬다): 감독자가 정상 종료하면
+  #    래퍼가 어차피 새 코드를 덮어쓰므로, 삭제하든 안 하든 파일 내용이 같아 변이가 발화하지
+  #    않는다. 구별이 생기는 곳은 **래퍼가 쓰지 못하고 죽는 경우**뿐이다 —
+  #    삭제했으면 파일이 없어 **71(불명)**, 안 지웠으면 낡은 **0** 을 읽어 **성공으로 오독**한다.
+  #    그래서 낡은 `0` 을 심어 두고 감독자를 SIGKILL 한다.
+  W11="$(mktemp -d)"; mkdir -p "$W11/.claude/guild/.sprint-logs/999"
+  printf '0' > "$W11/.claude/guild/.sprint-logs/999/supervisor.rc"
+  printf '#!/usr/bin/env bash\nkill -KILL $PPID\nsleep 5\n' > "$W11/.claude/guild/.gld-sprint-999.sh"
+  run_capped 20 "$PY" "$SPAWN" --human-repo "$W11" --tracker 999 --poll 0.2 >/dev/null 2>&1
+  RC11=$?
+  if [ "$RC11" = "71" ]; then ok "T11 낡은 .rc 를 지우고, 부재 시 71(불명) — 0 이 아니다"
+  else bad "T11 낡은 .rc 삭제 + 부재 시 71" "런처가 $RC11 을 냈다 (0 이면 낡은 rc 를 읽어 죽은 런을 성공으로 보고한다)"; fi
+  rm -rf "$W11"
+fi
+
 # ── T9: 검사 개수 바닥 ─────────────────────────────────────────────────────
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=332
+SUP_MIN_CHECKS=337
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

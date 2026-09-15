@@ -457,6 +457,21 @@ if [ "$((FAILED + INCOMPLETE))" -eq 0 ]; then COMPLETED=1; fi
    of 6 dead at `guild:execute` with no PR. The launcher spawns `bash <script>` into its own
    session, streams its log to stdout while it lives (so a live session sees the same progress and
    the harness still gets an exit for step 5), and leaves the run alive if it is killed itself.
+
+   ⚠⚠ **The launcher's exit code now comes from a FILE, and `71` means UNKNOWN.** The supervisor
+   is double-forked (its `ppid` is **1**, so a stop that walks this session's process *tree*
+   cannot reach it — `start_new_session=True` alone left it a direct child, and #389 then took
+   SIGTERM three runs in a row, ~2 minutes in). That detachment costs `wait()`, so the
+   supervisor writes `$?` into `.claude/guild/.sprint-logs//supervisor.rc` and the
+   launcher reads it back. Exit codes to branch on:
+
+   | exit | meaning | what Phase 4 must do |
+   |---|---|---|
+   | 0 | the supervisor finished cleanly | proceed |
+   | other non-zero | the supervisor's own failure code | treat as a failed run |
+   | **71** | supervisor is gone but left **no readable `.rc`** — killed before it could write | ⚠ **outcome UNKNOWN. Do NOT report a clean run.** Read `supervisor.log` and the board |
+   | 64 / 70 | nothing was started (usage error / spawn failed) | nothing to clean up |
+
    Confirm the `spawn_supervisor: pid=<n> detached` line appeared; exit 64/70 means nothing
    started. `setsid(1)` does not exist on macOS — that is why this is a Python launcher.
 4. Report: "Guild batch started (background). Issues: <N>. Logs: .claude/guild/.batch-logs/. Rate limits auto-wait+resume (up to a 4h reset)." ⚠ **Do not promise a completion notification.** Step 3 detaches the run, so step 5 fires only if this session is still alive when it ends — say instead that the run survives this session and that the logs (and `/gld status <n>`) are where its state lives. Give the `tail -f … | jq …` monitor hint, and name `.claude/guild/.batch-logs/supervisor.log` — the launcher writes the supervisor's own progress there, so it outlives the session too.
