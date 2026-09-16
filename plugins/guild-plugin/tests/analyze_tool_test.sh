@@ -315,6 +315,15 @@ if m.measure_status(PLAN_T, "### 4.0 결정 요약") != {"M5": "done", "M1": "bl
     bad.append("measure_status: §4.0 표를 정확히 읽지 못한다 (§4.1 이 덮어쓰는가?)")
 if m.status_mismatches(PLAN_T, DEC_T):
     bad.append("status_mismatches: 일치하는데 불일치라 한다")
+# ⚠ 「부분 철회」는 **출하** 를 부분 문자열로 포함하는 칸에 붙는다 — 어휘 순서가 뒤면
+#    done 으로 먹혀 조용히 「일치」라고 보고한다(실측: M9 반증 후 이 칸에서 바로 났다).
+P_REV = "### 4.0 결정 요약\n| a | b | c |\n| **M9** x | 공통 | \u26a0 **부분 철회**(출하됨 이후) |\n"
+D_REV = "## 2. 결정표\n| a | b | c |\n| **M9** x | 공통 | \u26a0 **부분 철회** |\n"
+if m.measure_status(P_REV, "### 4.0 결정 요약") != {"M9": "partly-reverted"}:
+    bad.append("measure_status: 「부분 철회」가 done 으로 먹힌다 (어휘 순서)")
+if m.status_mismatches(P_REV, D_REV):
+    bad.append("status_mismatches: 양쪽 다 부분 철회인데 불일치라 한다")
+
 DEC_BAD = DEC_T.replace("| **M5** x | 공통 | \u2705 **출하됨** |", "| **M5** x | 공통 | 막힘 |")
 if not any("M5" in x for x in m.status_mismatches(PLAN_T, DEC_BAD)):
     bad.append("status_mismatches: M5 출하↔막힘 불일치를 못 잡는다")
@@ -333,8 +342,8 @@ if not any("정본" in x for x in probs):
 print("OK" if not bad else "BROKEN | " + " | ".join(bad))
 DCPY
 )"
-  if [ "$DC" = "OK" ]; then ok "문서 정합 검사기: 로직 23종이 합성 픽스처에서 발화한다"
-  else bad "문서 정합 검사기: 로직 23종" "$DC"; fi
+  if [ "$DC" = "OK" ]; then ok "문서 정합 검사기: 로직 25종이 합성 픽스처에서 발화한다"
+  else bad "문서 정합 검사기: 로직 25종" "$DC"; fi
 
   # 실제 문서가 있으면 대조까지 한다. 없으면 **그 사실을 출력**한다 — 조용히 넘어가지 않는다.
   DOCDIR="$HERE/../../../design/guild"

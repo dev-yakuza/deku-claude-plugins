@@ -12,7 +12,7 @@
 ---
 
 ## Step 0 — Preflight
-As the leader, follow `_preflight.md` **Medium tier**. If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Load: `<!-- guild:test:output -->` (verify result + AC coverage + the tester's risk-based E2E judgment), the PR, the design/UX artifacts this judgment needs from `docs/specs/$1/`, and the hotspot list. ⚠ For the `docs/specs/$1/` part, **name the files with `ls` and take the ones you act on, not the directory** (`_preflight.md` Item 4) — the exhaustive pass over every artifact belongs to **Step 2.6**, which the carve-out exempts. Load `docs/standards/quality-bar.md` + `verification.md`.
+As the leader, follow `_preflight.md` **Medium tier**. If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Load: `<!-- guild:test:output -->` (verify result + AC coverage + the tester's risk-based E2E judgment), the PR, the design/UX artifacts this judgment needs from `docs/specs/$1/`, and the hotspot list. ⚠ For the `docs/specs/$1/` part, **read the artifact(s) you act on, not the directory** (`_preflight.md` Item 4 — the `ls` step was removed there, it cost more than it saved) — the exhaustive pass over every artifact belongs to **Step 2.6**, which the carve-out exempts. Load `docs/standards/quality-bar.md` + `verification.md`.
 
 Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
 

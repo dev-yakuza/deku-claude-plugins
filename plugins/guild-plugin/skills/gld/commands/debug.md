@@ -15,7 +15,7 @@ Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the
 
 ## Slot values (`type:bug`)
 
-**DESIGN INPUT** — load the design output (`<!-- guild:design:output -->`) — for a bug the design is **light**: a **reproduction + root-cause hypothesis** rather than a full skeleton. Load from `docs/specs/$1/` the repro steps, hypothesis and test cases if present — ⚠ **name them with `ls` and take those, not the directory** (`_preflight.md` Item 4). A bug's design is light, so this is usually one or two small files; the reflex to load the whole directory is what the budget forbids. Missing analyze/design output → `NEEDS_CONTEXT: analyze/design not found for #$1`. (The spine's Heavy-tier preflight matters here especially for **⑥ knowledge retrieval** — a hotspot fact often names the culprit.)
+**DESIGN INPUT** — load the design output (`<!-- guild:design:output -->`) — for a bug the design is **light**: a **reproduction + root-cause hypothesis** rather than a full skeleton. Load from `docs/specs/$1/` the repro steps, hypothesis and test cases if present — ⚠ **read those, not the directory** (`_preflight.md` Item 4 — the `ls` step was removed there, it cost more than it saved). A bug's design is light, so this is usually one or two small files; the reflex to load the whole directory is what the budget forbids. Missing analyze/design output → `NEEDS_CONTEXT: analyze/design not found for #$1`. (The spine's Heavy-tier preflight matters here especially for **⑥ knowledge retrieval** — a hotspot fact often names the culprit.)
 
 **BRANCH + RESUME PROBE** — a **fix** branch (repo convention, e.g. `fix/#$1-<slug>`). The resume test-run probes: **does the repro exist yet? is it red or already green?**
 

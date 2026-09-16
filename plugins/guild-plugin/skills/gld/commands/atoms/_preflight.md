@@ -73,10 +73,28 @@ budget only holds with the Grep. Skip it and you must Read all five.
    ```
    (substitute literal owner/repo and `<N>`.)
 3. Also read `docs/specs/<N>/` if present (`skeleton.md`, `test-cases.md`, `ux.md` — passed as
-   files between roles). ⚠ **Name them first (`ls docs/specs/<N>/`), then read the artifact(s) this
+   files between roles). ⚠ **Read the artifact(s) this
    stage acts on — not the directory.** Measured over 14 unattended Issues, `docs/specs/<issue>/`
    came to **16.9% of the whole run's billed input**, more than twice every Guild instruction file
    combined; a byte pulled in at Step 0 is re-billed on every later turn of the session.
+
+   ⚠⚠ **`ls` first was removed — it cost more than it saved.** This Item used to open with
+   *"Name them first (`ls docs/specs/<N>/`)"*. Measured after shipping it (stage-entry window,
+   arm-A 85 entries vs arm-B 10, consistent at K=5/10/15):
+
+   | per stage entry | before | after |
+   |---|---|---|
+   | bytes **per call** | 4,049 | **2,086 (−48%)** |
+   | calls | 1.02 | **2.80 (+175%)** |
+   | **total bytes** | 4,130 | **5,842 (+41%)** |
+
+   Splitting the read into a name step plus targeted reads did halve each call — and then more
+   than doubled the call count, so the product went **up**. It also adds a turn, and §1's own
+   rule is that **an added turn re-bills the whole prefix**. The instruction was paying that
+   toll to save bytes it then spent again.
+   **Keep the selective part, drop the enumeration step**: the filenames are fixed
+   (`skeleton.md`, `test-cases.md`, `ux.md`), so read the one your stage acts on directly.
+   A missing file is a cheap, explicit miss; an `ls` to prevent it is not free.
 
    ⚠⚠ **Carve-out — five jobs compare the CHANGE against the WHOLE intent and are not bound by the
    budget below.** For them a narrowed read passes a clause nobody looked at, and the failure is
@@ -107,7 +125,7 @@ budget only holds with the Grep. Skip it and you must Read all five.
    an exhaustive read compare the last line number you received against the file's length and page
    from there if they differ — say so explicitly if you still cannot get all of it.
 
-**Budget**: 1 `ls` + ≤3 artifact Reads — **for stages that consume the intent selectively.** It
+**Budget**: ≤3 artifact Reads — **for stages that consume the intent selectively.** It
 does not apply to the five exhaustive readers above; when your own step requires covering every
 artifact, cover every artifact. What the budget forbids is the reflex of reading the whole
 directory at Step 0 **because it is there**, before knowing which parts this stage acts on.
