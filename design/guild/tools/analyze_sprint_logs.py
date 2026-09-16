@@ -1120,6 +1120,80 @@ def load_attended(root):
     return sessions
 
 
+def stage_entry(sessions, widths=(5, 10, 15)):
+    """12. **스테이지 진입 창** — M9·M13 이 실제로 겨냥한 지점만 잰다.
+
+    ⚠⚠ **왜 이 절이 필요한가.** M9(`docs/specs` 재독 축소)와 M13(`docs/standards` 재독 축소)은
+    각 스테이지의 **Step 0**(preflight)에서만 작동한다. 그런데 §4c 는 **세션 전체**를 세므로,
+    같은 로그를 단위만 바꿔 보면 답이 **세 개** 나온다(실측, 2026-09-16):
+
+        share(§4c)   docs/specs 17.6% → 23.1%   「M9 역효과」
+        세션당        −17.5%                     「M9 효과 있음」
+        스테이지당     +177.6%                    「M9 크게 악화」
+
+    갈린 이유는 오염원 셋이다: ①세션 크기(arm-B 가 절반) ②**정체** — 한 스테이지에서 601턴을
+    갈면 의도를 반복해서 다시 읽는데 그건 읽기 규율이 아니라 루프백 문제다 ③share 는 다른
+    버킷이 움직여도 흔들린다.
+
+    → **스테이지에 «진입한 직후 K턴»** 만 센다. 정체는 그 창 밖이고, 세션 크기와 무관하며,
+    분모가 «스테이지 진입 횟수» 라 조치가 겨냥한 단위와 일치한다.
+
+    ⚠ **K 를 하나만 고르지 않는다.** Step 0 의 길이는 tier 와 스테이지에 따라 다르고, 고른 K
+    가 결론을 만들면 그건 측정이 아니라 선택이다. 여러 K 를 나란히 찍어 **부호가 K 에 의존하는지**
+    보이게 한다.
+
+    ⚠ 세션의 **첫 스테이지는 전이가 없다**(라벨이 이미 맞아 재개된다). 그래서 turn 0 도
+    진입으로 센다 — 빼면 재개 세션의 Step 0 이 통째로 사라진다.
+    """
+    print()
+    print("=" * 78)
+    print("12. 스테이지 진입 창 — M9·M13 이 겨냥한 지점만 (정체·세션크기 비오염)")
+    print("=" * 78)
+    ent = 0
+    agg = {k: {w: [0, 0] for w in widths} for k in ("specs", "std")}
+    for x in sessions:
+        by_id = x["by_id"]
+        for parent, seq in x["prefixes"].items():
+            if parent:
+                continue                      # 리더(MAIN)만 — Step 0 은 리더가 돈다
+            ids = x["call_ids"][parent]
+            marks = [0]
+            for i in range(len(seq)):
+                for tid in (ids[i] if i < len(ids) else []):
+                    hit = by_id.get(tid)
+                    if hit and _STAGE_TRANSITION.search(hit[1] or ""):
+                        if i + 1 < len(seq):
+                            marks.append(i + 1)
+            marks = sorted(set(marks))
+            for j, start in enumerate(marks):
+                ent += 1
+                nxt = marks[j + 1] if j + 1 < len(marks) else len(seq)
+                for w in widths:
+                    end = min(start + w, nxt)
+                    for i in range(start, end):
+                        for tid in (ids[i] if i < len(ids) else []):
+                            hit = by_id.get(tid)
+                            if not hit:
+                                continue
+                            a = hit[1] or ""
+                            if "docs/specs/" in a:
+                                agg["specs"][w][0] += 1; agg["specs"][w][1] += hit[2]
+                            elif "docs/standards" in a:
+                                agg["std"][w][0] += 1; agg["std"][w][1] += hit[2]
+    if not ent:
+        print("  스테이지 진입 0건 — 잴 것이 없다")
+        return
+    print(f"  스테이지 진입 **{ent}회** (분모). 아래는 **진입 1회당** 값이다.")
+    print(f"  {'':16s}" + "".join(f"{'K=' + str(w):>22s}" for w in widths))
+    for key, lbl in (("specs", "docs/specs"), ("std", "docs/standards")):
+        cells = "".join(f"{agg[key][w][0] / ent:9.2f}회 {agg[key][w][1] / ent:10,.0f}B"
+                        for w in widths)
+        print(f"  {lbl:16s}" + cells)
+    print("  ⚠ 부호가 K 에 따라 뒤집히면 그것은 **결과가 아니라 경고**다 — Step 0 의 경계가")
+    print("     이 코퍼스에서 잘 정의되지 않는다는 뜻이고, 그때는 결론을 내지 않는다.")
+    print("  ⚠ 분모가 «진입 횟수» 이므로 **세션 수가 아니라 진입 수**로 표본 크기를 판단하라.")
+
+
 def attended(root):
     """11. 유인 경로 — §3 의 수를 **코드가 낸다**(임시 스크립트가 아니라)."""
     S = load_attended(root)
@@ -1508,6 +1582,7 @@ def main_():
     growth_by_tool(sessions)
     content_sources(sessions)
     source_integral(sessions)
+    stage_entry(sessions)
     tool_axis(sessions)
     bash_shapes(sessions)
     spawn_roles(sessions)
