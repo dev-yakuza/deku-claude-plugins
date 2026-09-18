@@ -72,7 +72,7 @@ an answer you already received is not.**
 gh issue list --state all --limit 200 --json number,title,labels,state,body --jq '{total: length, members: [.[] | select((.body // "") | contains("Sprint: #<tracker>")) | {number, title, state, labels: [.labels[].name]}]}'
 ```
 ```bash
-gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,closingIssuesReferences --jq '[<m1>,<m2>,<m3>] as $m | {total: length, prs: [.[] | ([.closingIssuesReferences[]?.number] | map(select(. as $n | $m | index($n)))) as $c | (.headRefName | test("(^|[^0-9])#?(<m1>|<m2>|<m3>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end)}]}'
+gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,closingIssuesReferences --jq '[<m1>,<m2>,<m3>] as $m | {total: length, prs: [.[] | ([.closingIssuesReferences[]?.number] | map(select(. as $n | $m | index($n)))) as $c | ((.headRefName // "") | test("(^|[^0-9])#?(<m1>|<m2>|<m3>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end)}]}'
 ```
 (substitute the tracker and the member numbers literally.)
 
@@ -85,6 +85,10 @@ MERGED, for member #153. A reference-only filter found **3** of that sprint's me
 the branch test found **4**. The missing one reads as *"#153 never merged"*, 약속 이행률 drops,
 and **Phase 4 writes that number into `config.json`** — the exact failure this phase spends a
 paragraph warning about, arriving through the filter instead of through the limit.
+
+⚠ **`// ""` on `headRefName` is not decoration either** — a null there makes `jq` exit with
+*"null cannot be matched"* and the **whole PR list returns an error**, which reads as a sprint
+with no PRs. Measured: that is exactly what the unguarded form does.
 
 ⚠ **`via` says which signal matched, and it is not decoration.** `closes` is authoritative;
 `branch` is a heuristic and can over-match (a branch that merely *mentions* another Issue's

@@ -75,9 +75,14 @@ fabricated rollups, not against this repo, whose 167 PRs happened to contain no 
 `ACTION_REQUIRED`, `STALE` and any conclusion GitHub adds later fall to `fail` for the same
 reason: on a daily status board, **an unknown CI state must not look green.**
 ⚠ `none` (no checks configured) is its own value — it is not `pass`.
+⚠ **`?` and `tostring` are there so a schema surprise cannot kill the call.** Without them a
+non-object entry in the array makes `jq` exit with *"Cannot index string with string"* and the
+**whole PR list comes back as an error** — worse than a large payload, because the phase then has
+no PRs at all. With them such an entry degrades to `pending`: not a verdict, and **not green**,
+which is the property that matters here.
 
 ```bash
-gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,closingIssuesReferences --jq '{total: length, prs: [.[] | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: [.closingIssuesReferences[]?.number], ci: ((.statusCheckRollup // []) as $c | if ($c | length) == 0 then "none" elif any($c[]; ((.conclusion // .status // .state // "") | ascii_upcase) | (. == "" or test("QUEUED|IN_PROGRESS|PENDING|WAITING|EXPECTED|REQUESTED"))) then "pending" elif all($c[]; ((.conclusion // .status // .state // "") | ascii_upcase) | test("^(SUCCESS|NEUTRAL|SKIPPED)$")) then "pass" else "fail" end)}]}'
+gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,closingIssuesReferences --jq '{total: length, prs: [.[] | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: [.closingIssuesReferences[]?.number], ci: ((.statusCheckRollup // []) as $c | if ($c | length) == 0 then "none" elif any($c[]; ((.conclusion? // .status? // .state? // "") | tostring | ascii_upcase) | (. == "" or test("QUEUED|IN_PROGRESS|PENDING|WAITING|EXPECTED|REQUESTED"))) then "pending" elif all($c[]; ((.conclusion? // .status? // .state? // "") | tostring | ascii_upcase) | test("^(SUCCESS|NEUTRAL|SKIPPED)$")) then "pass" else "fail" end)}]}'
 ```
 ```bash
 gh issue list --state all --limit 200 --json number,title,labels,state
