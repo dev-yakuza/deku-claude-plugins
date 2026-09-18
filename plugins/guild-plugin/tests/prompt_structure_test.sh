@@ -1927,6 +1927,46 @@ else
   ok "M9: carve-out 이 스폰 사이트의 실제 상태와 맞는다"
 fi
 
+# ── retro: 질의 축소가 되돌아가지 않는가 ─────────────────────────────────
+# ⚠⚠ `sprint/retro.md` 는 검사가 **0건**이었다. 실측(dev-yakuza/one-man-company, 스프린트 389):
+#   이슈 목록 556,413B → 981B · PR 목록 53,458B → 569B · 감사 기록 39,843B → 71B.
+#   전부 **Phase 1~2**, 즉 앞쪽에서 들어오므로 §1 의 적분으로 retro 의 남은 전 구간에
+#   재청구된다 — Phase 5 의 `evolve` 실행 전체를 포함해서.
+# ⚠ **존재 검사가 아니라 정합 검사다**: `--json` 에 `body` 를 요청하면서 `--jq` 가 없으면
+#   본문이 통째로 돌아온다. 그 조합을 금지한다.
+RETRO="$GLD/commands/sprint/retro.md"
+if [ ! -f "$RETRO" ]; then
+  bad "retro.md 가 있다" "파일" "없음"
+else
+  _bad_calls="$("$PY" - "$RETRO" <<'RTPY'
+import io, re, sys
+s = io.open(sys.argv[1], encoding="utf-8").read()
+bad = []
+for line in s.split("\n"):
+    t = line.strip()
+    if not t.startswith("gh "):
+        continue
+    if "--json" not in t or "body" not in t:
+        continue
+    if "--jq" not in t:
+        bad.append(t[:60])
+print(" | ".join(bad))
+RTPY
+)"
+  if [ -z "$_bad_calls" ]; then
+    ok "retro: body 를 요청하는 gh 호출은 전부 --jq 로 좁힌다"
+  else
+    bad "retro: body 요청은 --jq 로 좁힌다" "전부 좁혀짐" "맨 호출: $_bad_calls"
+  fi
+  # 절단 검사는 `total` 이 같은 호출에서 돌아오는 것에 의존한다 — 그게 사라지면
+  # 「개수를 별도 호출로 세라」던 옛 형태로 되돌아가고, 그 단계는 건너뛰기 쉽다.
+  hasfx "retro: 절단 검사용 total 을 같은 호출에서 받는다" "$RETRO" 'total: length'
+  # 감사 기록은 전문이 아니라 집계로 받는다 — 루프백이 많을수록 커지는 유일한 항목이다.
+  hasfx "retro: 감사 기록을 jq 로 집계한다 (전문 아님)" "$RETRO" 'match("### audit-record "'
+  # ⚠ 세 토큰은 평범한 낱말이라 단어 경계가 필요하다(`prefixed` 오검출).
+  hasfx "retro: disposition 토큰에 단어 경계를 건다" "$RETRO" 'match("\\bfixed\\b"'
+fi
+
 # ── 규율 7 기계화 — 지시문의 모든 백분율이 등재돼 있는가 ──────────────────
 # ⚠ **존재 검사가 아니라 전수 대조다.** 라운드 6 에서 `verification.md 1.5%` 가 ① 도구가
 # 찍지 않는 수이면서 ② 반올림까지 틀린 채로 출하돼 있었다 — 검사가 없었기 때문이다.
@@ -1985,7 +2025,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=284   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=288   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

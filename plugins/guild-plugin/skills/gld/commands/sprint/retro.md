@@ -33,8 +33,13 @@ Each its own Bash call.
 1. **Guild initialized?** `ls .claude/guild/config.json` — absent → `FAIL: Guild not initialized (run /gld init first)`. This command needs `config.language` and writes `config.sprint`.
 2. **Find the sprint.**
    ```bash
-   gh issue list --label guild:sprint --state open --limit 20 --json number,title,body
+   gh issue list --label guild:sprint --state open --limit 20 --json number,title,body --jq '{count: length, sprints: [.[] | {number, title}], body: (if length == 1 then .[0].body else null end)}'
    ```
+   ⚠ **The body comes back only when there is exactly one open sprint** — which is the normal
+   case, and then nothing extra is needed. With two or more, `body` is `null` on purpose: you
+   have to ask which one anyway, and pulling every candidate's member table to discard all but
+   one is the same waste Phase 1 was making. Fetch the chosen tracker's body **after** the human
+   picks — that call was going to happen regardless, so this adds no turn in either branch.
    - None → `OK: no open sprint`. ⚠ Suggest `/gld sprint plan`, and say that a **closed** tracker is a finished sprint — a retro is not re-runnable **once it finishes**, because Phase 6 step 3 closes the Issue and `<!-- guild:sprint:retro -->` is append-only (`_handoff.md` Section B). ⚠ A retro that died **partway** is a different case and IS re-runnable: Phase 4 replaces its own `history` entry rather than appending, and Phase 6 step 2 checks for its own comment before adding one. (v10 said "step 5", which this file has never had.)
    - Two or more → list them and ask which. Never retro one speculatively.
 3. **Resolve `{owner}/{repo}`** once (`_handoff.md` Section F); hold the literal value.
@@ -48,12 +53,35 @@ Each its own Bash call.
 
 Reuse `daily.md` step 6's **two axes verbatim** — same three `gh` calls, same derivation:
 
+⚠⚠ **`--jq` runs inside `gh`, so filtering on a field does NOT mean receiving it.** Both calls
+below decide membership from `body` / `closingIssuesReferences` and then emit **neither**.
+Measured on `dev-yakuza/one-man-company` (sprint 389, 3 members):
+
+| call | as it was | with `--jq` | |
+|---|---|---|---|
+| issue list | **556,413 B** | **981 B** | −99.8% |
+| PR list | **53,458 B** | **569 B** | −98.9% |
+
+Same predicate, same answer, 1/600th of the bytes — and they land in **Phase 1**, so under §1's
+cost identity they were re-billed on every later turn of retro, *including the whole of Phase 5's
+`evolve` run*. `_bash_rules.md` sanctions exactly this: **narrowing the query is allowed; shrinking
+an answer you already received is not.**
+
+**Members first** — the Issue list also yields the member numbers the PR filter needs:
 ```bash
-gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,closingIssuesReferences
+gh issue list --state all --limit 200 --json number,title,labels,state,body --jq '{total: length, members: [.[] | select((.body // "") | contains("Sprint: #<tracker>")) | {number, title, state, labels: [.labels[].name]}]}'
 ```
 ```bash
-gh issue list --state all --limit 200 --json number,title,labels,state,body
+gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,closingIssuesReferences --jq '{total: length, prs: [.[] | select([.closingIssuesReferences[]?.number] | any(. == <m1> or . == <m2> or . == <m3>)) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: [.closingIssuesReferences[]?.number]}]}'
 ```
+(substitute the tracker and the member numbers literally.)
+
+⚠ **`total` is not decoration — it is the truncation check below, and it now comes free.** The
+previous instruction told you to get the count *"on a separate invocation"*; that call is gone.
+⚠ A member whose PR does not use a closing keyword will not appear in `prs`. That is the same
+exposure the client-side filter always had, and Phase 2's 스택 따라잡기 row is where it shows
+up — cross-check `members` against `prs` and name any member with no PR rather than reporting it
+as not-merged.
 
 ⚠ **`--limit 200` with a client-side filter can silently miss members, and six of the nine
 metrics come from that PR list.** This matters more here than anywhere else in the sprint,
@@ -61,9 +89,14 @@ because these numbers do not just get rendered — Phase 4 writes them into `con
 next `plan` reads them. **A truncated list does not produce an error or a zero; it produces a
 plausible smaller number, which then becomes configuration.**
 
-So: **count first, then decide.** Ask for the count in the same call
-(`--jq 'length'` on a separate invocation, or read the array length before filtering) and compare
-it with the limit:
+So: **count first, then decide.** ~~Ask for the count in the same call (`--jq 'length'` on a
+separate invocation…)~~ — the `--jq` forms above already return **`total`**. Compare it with the
+limit:
+
+⚠ **This is live, not hypothetical.** Measured on `dev-yakuza/one-man-company`: the issue list
+returns **exactly 200** — `total == limit`, i.e. the read *is* truncated and the fallback below
+**must** fire. Under the old shape that check cost an extra call, which is precisely the kind of
+step that gets skipped.
 
 - **Issues** — if the count equals the limit, re-read with the server-side filter
   `--search '"Sprint: #<tracker>" in:body'`, the form `_sprint_dag.md` Section A prescribes at
@@ -126,12 +159,28 @@ unrecorded are different findings**, and only one of them is good news.
 it is exactly the shape that comes back as page 1 only — and a truncated read produces a
 plausible small number, not an error (`_execute_spine.md` Step 4 states the same requirement for
 the same comment):
+⚠⚠ **Count in `jq`, do not pull the bodies back to count them by eye.** Only two things are
+used here — the `### audit-record ` heading count and four disposition tokens — and that comment
+**grows a block per attempt and per re-entry**, so the body is the one thing in this command that
+scales with how badly the sprint went. Measured on `dev-yakuza/one-man-company`:
+
+| member | body as it was | counted in `jq` |
+|---|---|---|
+| #137 (22 loop-backs) | **39,843 B** | **71 B** |
+| #153 | 15,877 B | 67 B |
+| #388 | 7,456 B | 67 B |
+
 ```bash
-gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '[.[] | select((.body // "") | contains("<!-- guild:auditor:execute -->"))] | .[].body'
+gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '[.[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$b | match("looped-back";"g")] | length), fixed: ([$b | match("\\bfixed\\b";"g")] | length), recorded: ([$b | match("\\brecorded\\b";"g")] | length), dismissed: ([$b | match("\\bdismissed\\b";"g")] | length)}'
 ```
 
-Count the **disposition tokens** — `looped-back` · `fixed` · `recorded` · `dismissed` — and the
-number of `### audit-record ` headings (= how many times the auditor ran).
+⚠ **Word boundaries (`\b`) on the three that are ordinary words.** A bare substring count also
+matches `prefixed`, `unrecorded`, … On this corpus both forms agreed (17 = 17, 31 = 31), so this
+is prevention, not a fix — but it is free, and a silently inflated `fixed` reads as *"the auditor
+kept finding things and they kept getting fixed"*, which is a flattering error.
+⚠ `looped-back` is hyphenated and cannot collide, so it needs no boundary.
+⚠ **`dismissed` still has to be listed with its Issue numbers** (below). The call is per member,
+so the member number is already in hand — pair it with the count; do not fold it into a total.
 
 ⚠ **Do NOT count `"severity":"BLOCKER"`.** That string is the JSON the auditor returns *to the
 leader*; it is not what lands on the Issue. What lands is a `### audit-record <n>` block whose
