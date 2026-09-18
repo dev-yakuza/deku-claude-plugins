@@ -1938,26 +1938,45 @@ RETRO="$GLD/commands/sprint/retro.md"
 if [ ! -f "$RETRO" ]; then
   bad "retro.md 가 있다" "파일" "없음"
 else
-  _bad_calls="$("$PY" - "$RETRO" <<'RTPY'
-import io, re, sys
-s = io.open(sys.argv[1], encoding="utf-8").read()
+  # ⚠ **세 파일 전부**를 본다. retro 만 걸었더니 `plan`·`daily` 가 같은 모양으로 남아 있었고,
+  #    `daily` 의 PR 목록은 **123,617 B**(그중 `statusCheckRollup` 이 57%)였다.
+  #    무거운 필드는 `body` 만이 아니다 — 렌더링에 한 글자만 쓰는 `statusCheckRollup` 도 같다.
+  _bad_calls="$("$PY" - "$GLD/commands/sprint" <<'RTPY'
+import io, os, sys
+d = sys.argv[1]
+HEAVY = ("body", "statusCheckRollup")
 bad = []
-for line in s.split("\n"):
-    t = line.strip()
-    if not t.startswith("gh "):
+for f in ("retro.md", "plan.md", "daily.md", "board.md", "run.md"):
+    fp = os.path.join(d, f)
+    if not os.path.exists(fp):
         continue
-    if "--json" not in t or "body" not in t:
-        continue
-    if "--jq" not in t:
-        bad.append(t[:60])
+    for line in io.open(fp, encoding="utf-8").read().split("\n"):
+        t = line.strip()
+        if not t.startswith("gh ") or "--json" not in t:
+            continue
+        # ⚠ **`--json` 의 필드 목록만 본다.** 줄 전체에서 찾으면 `--search '"x" in:body'` 의
+        #    `body` 를 잡는다 — 실측 오검출(plan.md 의 마커 검색 호출).
+        fields = t.split("--json", 1)[1].strip().split(" ", 1)[0]
+        if not any(h in fields.split(",") for h in HEAVY):
+            continue
+        if "--jq" not in t:
+            bad.append(f + ": " + t[:50])
 print(" | ".join(bad))
 RTPY
 )"
   if [ -z "$_bad_calls" ]; then
-    ok "retro: body 를 요청하는 gh 호출은 전부 --jq 로 좁힌다"
+    ok "sprint: 무거운 필드(body·statusCheckRollup)를 요청하는 gh 호출은 전부 --jq 로 좁힌다"
   else
-    bad "retro: body 요청은 --jq 로 좁힌다" "전부 좁혀짐" "맨 호출: $_bad_calls"
+    bad "sprint: 무거운 필드 요청은 --jq 로 좁힌다" "전부 좁혀짐" "맨 호출: $_bad_calls"
   fi
+  # ⚠⚠ CI 집계의 **방향**을 고정한다. 순진한 `test("FAIL|ERROR|CANCEL")` 판은 `TIMED_OUT` 을
+  #    **pass** 로 냈다(합성 입력으로 발견 — 이 레포의 PR 200건엔 그 경우가 없었다).
+  #    일간 보드에서 **모르는 CI 상태가 초록으로 보이면 안 된다** → pass 는 화이트리스트로만.
+  DAILY="$GLD/commands/sprint/daily.md"
+  hasfx "daily: CI 집계의 pass 가 화이트리스트다 (모르면 fail)" "$DAILY" 'test("^(SUCCESS|NEUTRAL|SKIPPED)$")'
+  hasfx "daily: 진행 중이 판정보다 먼저다" "$DAILY" 'then "pending"'
+  # plan 의 body 는 **재료**다 — 줄이지 말라는 경고가 남아 있어야 한다.
+  hasfx "plan: body 는 트리아지 재료라고 못박는다" "$GLD/commands/sprint/plan.md" 'it is the material, not overhead'
   # 절단 검사는 `total` 이 같은 호출에서 돌아오는 것에 의존한다 — 그게 사라지면
   # 「개수를 별도 호출로 세라」던 옛 형태로 되돌아가고, 그 단계는 건너뛰기 쉽다.
   hasfx "retro: 절단 검사용 total 을 같은 호출에서 받는다" "$RETRO" 'total: length'
@@ -2025,7 +2044,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=288   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=291   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

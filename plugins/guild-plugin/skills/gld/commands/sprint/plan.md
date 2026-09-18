@@ -92,8 +92,21 @@ Each its own Bash call.
 ## Phase 1 — Collect candidates
 
 ```bash
-gh issue list --state open --limit 200 --json number,title,body,labels
+gh issue list --state open --limit 200 --json number,title,body,labels --jq '{total: length, candidates: [.[] | {number, title, body, labels: [.labels[].name]}]}'
 ```
+
+⚠ **`body` stays here on purpose — it is the material, not overhead.** Phase 1b judges each
+candidate 착수 가능 vs 구체화 필요 **by reading it**; a narrowed read would make that judgment
+from a title. Measured on `dev-yakuza/one-man-company`: 135,753 B over **51** open Issues
+(≈2.7 KB each) — that is the work, and the same conclusion the token work reached about
+Write/Agent/Edit. ⚠ Do **not** "optimise" this into a title-only scan.
+⚠ Excluding the label classes below in `jq` saves nothing worth having either — measured, **0 of
+51** open Issues carried `guild:done` / `guild:sprint` / `guild:child`. Filter them client-side
+as before.
+
+**What did change: `total` now comes back in the same call**, so the truncation check below no
+longer needs a second `--jq 'length'` invocation. An added turn re-bills the whole prefix, and a
+check that costs a turn is a check that gets skipped.
 
 Exclude: `guild:done` · `guild:sprint` (trackers) · `guild:child` (they arrive through a parent) · any Issue already a member of an open sprint (`_sprint_dag.md` Section A). ⚠ Do **not** exclude a `guild:children` parent — if one is taken, `run` handles it per the split rules and may hand it back to the human.
 

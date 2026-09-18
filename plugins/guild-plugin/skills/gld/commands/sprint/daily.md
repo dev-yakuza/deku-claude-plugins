@@ -21,7 +21,7 @@ subcommand routes to.
 
 **1. Find the sprint.**
 ```bash
-gh issue list --label guild:sprint --state open --limit 20 --json number,title,body
+gh issue list --label guild:sprint --state open --limit 20 --json number,title,body --jq '{count: length, sprints: [.[] | {number, title}], body: (if length == 1 then .[0].body else null end)}'
 ```
 None → `OK: no active sprint` and suggest `/gld sprint plan`. Two or more → list them and ask
 which; render nothing speculative.
@@ -41,7 +41,7 @@ whole board line would be invented. `retro.md` already has the right shape; `dai
 missing it.
 
 ```bash
-gh api repos/<owner>/<repo>/issues/<tracker>/comments --paginate --jq '.[].body'
+gh api repos/<owner>/<repo>/issues/<tracker>/comments --paginate --jq '[.[] | select((.body // "") | contains("<!-- guild:sprint:run -->")) | {id, body}] | sort_by(.id) | first'
 ```
 
 Take the **oldest** `<!-- guild:sprint:run -->` block — the LOWEST comment id.
@@ -56,8 +56,28 @@ sentence and are corrected with it.
 Absent → render `state: 없음` and **no board line at all**; do not fall back to a freshness claim, because "no marker" and "board healthy"
 are the two things that must not look alike.
 
+⚠⚠ **`--jq` runs inside `gh` — filtering on a field is not the same as receiving it.**
+Measured on `dev-yakuza/one-man-company` (200 PRs, 51 open Issues):
+
+| call | as it was | with `--jq` | |
+|---|---|---|---|
+| PR list (`statusCheckRollup`) | **123,617 B** | **30,624 B** | −75% |
+| tracker comments | 5,276 B | 918 B | −83% |
+
+`statusCheckRollup` is the expensive half, and **all this file renders from it is one glyph per
+PR** (`✅ / ⏳ / ⛔` in the sample below). So collapse it to one token in `jq` and receive that.
+
+⚠ **The collapse rule is deliberately asymmetric: anything not known-good is `fail`.**
+`pending` wins first (a run still going must not read as a verdict), then `pass` only if **every**
+check is `SUCCESS`/`NEUTRAL`/`SKIPPED`, else `fail`. ⚠ **A naive `test("FAIL|ERROR|CANCEL")`
+version of this reported `TIMED_OUT` as a pass** — caught by running the expression against
+fabricated rollups, not against this repo, whose 200 PRs happened to contain no such case.
+`ACTION_REQUIRED`, `STALE` and any conclusion GitHub adds later fall to `fail` for the same
+reason: on a daily status board, **an unknown CI state must not look green.**
+⚠ `none` (no checks configured) is its own value — it is not `pass`.
+
 ```bash
-gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,closingIssuesReferences
+gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,closingIssuesReferences --jq '{total: length, prs: [.[] | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: [.closingIssuesReferences[]?.number], ci: ((.statusCheckRollup // []) as $c | if ($c | length) == 0 then "none" elif any($c[]; ((.conclusion // .status // .state // "") | ascii_upcase) | (. == "" or test("QUEUED|IN_PROGRESS|PENDING|WAITING|EXPECTED|REQUESTED"))) then "pending" elif all($c[]; ((.conclusion // .status // .state // "") | ascii_upcase) | test("^(SUCCESS|NEUTRAL|SKIPPED)$")) then "pass" else "fail" end)}]}'
 ```
 ```bash
 gh issue list --state all --limit 200 --json number,title,labels,state
@@ -327,7 +347,7 @@ Sprint finished → *"회고 가능 — `/gld sprint retro`"*. Otherwise say pre
 parent has no PR of its own — its children carry them. Discover them and fold their PRs into
 both axes above:
 ```bash
-gh issue list --state all --limit 200 --json number,title,labels,state,body --jq '[.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)"))]'
+gh issue list --state all --limit 200 --json number,title,labels,state,body --jq '{total: length, children: [.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)")) | {number, title, state, labels: [.labels[].name]}]}'
 ```
 Without this, an open child PR sits outside the count, *"sprint finished"* reads true, and
 `retro` closes a sprint whose work is still in review. Render them indented under the parent so
