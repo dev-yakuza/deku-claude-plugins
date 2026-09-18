@@ -1977,6 +1977,14 @@ RTPY
   hasfx "daily: 진행 중이 판정보다 먼저다" "$DAILY" 'then "pending"'
   # plan 의 body 는 **재료**다 — 줄이지 말라는 경고가 남아 있어야 한다.
   hasfx "plan: body 는 트리아지 재료라고 못박는다" "$GLD/commands/sprint/plan.md" 'it is the material, not overhead'
+  # ⚠⚠ **B-1 회귀 방지.** retro 의 멤버 PR 필터를 `closingIssuesReferences` 만으로 걸면
+  #    멤버 PR 을 놓친다 — 실측 **167 PR 중 70건(42%)이 그 참조가 없고**, 그중 하나는
+  #    `#398 fix/153-…`(MERGED, 멤버 #153)다. 놓친 PR 은 「머지 안 됨」으로 읽히고
+  #    **Phase 4 가 그 수를 config.json 에 쓴다.** 브랜치명 대체 경로가 살아 있어야 한다.
+  hasfx "retro: 멤버 PR 을 브랜치명으로도 찾는다 (참조만으로는 42%를 놓친다)" "$RETRO" 'headRefName | test("(^|[^0-9])#?'
+  # ⚠ 그리고 어느 신호가 맞았는지 구별해 돌려줘야 한다 — `branch` 는 휴리스틱이라
+  #    `feat/200-refs-153-followup` 같은 것을 못 막는다. 사실이 아니라 **확인 대상**이다.
+  hasfx "retro: 매칭 신호를 via 로 구별한다" "$RETRO" 'via: (if ($c | length) > 0 then "closes" else "branch" end)'
   # 절단 검사는 `total` 이 같은 호출에서 돌아오는 것에 의존한다 — 그게 사라지면
   # 「개수를 별도 호출로 세라」던 옛 형태로 되돌아가고, 그 단계는 건너뛰기 쉽다.
   hasfx "retro: 절단 검사용 total 을 같은 호출에서 받는다" "$RETRO" 'total: length'
@@ -2044,7 +2052,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=291   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=293   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

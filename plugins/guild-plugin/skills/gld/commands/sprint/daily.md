@@ -57,7 +57,7 @@ Absent → render `state: 없음` and **no board line at all**; do not fall back
 are the two things that must not look alike.
 
 ⚠⚠ **`--jq` runs inside `gh` — filtering on a field is not the same as receiving it.**
-Measured on `dev-yakuza/one-man-company` (200 PRs, 51 open Issues):
+Measured on `dev-yakuza/one-man-company` (167 PRs, 51 open Issues):
 
 | call | as it was | with `--jq` | |
 |---|---|---|---|
@@ -71,7 +71,7 @@ PR** (`✅ / ⏳ / ⛔` in the sample below). So collapse it to one token in `jq
 `pending` wins first (a run still going must not read as a verdict), then `pass` only if **every**
 check is `SUCCESS`/`NEUTRAL`/`SKIPPED`, else `fail`. ⚠ **A naive `test("FAIL|ERROR|CANCEL")`
 version of this reported `TIMED_OUT` as a pass** — caught by running the expression against
-fabricated rollups, not against this repo, whose 200 PRs happened to contain no such case.
+fabricated rollups, not against this repo, whose 167 PRs happened to contain no such case.
 `ACTION_REQUIRED`, `STALE` and any conclusion GitHub adds later fall to `fail` for the same
 reason: on a daily status board, **an unknown CI state must not look green.**
 ⚠ `none` (no checks configured) is its own value — it is not `pass`.

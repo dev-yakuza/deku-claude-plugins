@@ -72,16 +72,27 @@ an answer you already received is not.**
 gh issue list --state all --limit 200 --json number,title,labels,state,body --jq '{total: length, members: [.[] | select((.body // "") | contains("Sprint: #<tracker>")) | {number, title, state, labels: [.labels[].name]}]}'
 ```
 ```bash
-gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,closingIssuesReferences --jq '{total: length, prs: [.[] | select([.closingIssuesReferences[]?.number] | any(. == <m1> or . == <m2> or . == <m3>)) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: [.closingIssuesReferences[]?.number]}]}'
+gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,closingIssuesReferences --jq '[<m1>,<m2>,<m3>] as $m | {total: length, prs: [.[] | ([.closingIssuesReferences[]?.number] | map(select(. as $n | $m | index($n)))) as $c | (.headRefName | test("(^|[^0-9])#?(<m1>|<m2>|<m3>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end)}]}'
 ```
 (substitute the tracker and the member numbers literally.)
 
 ⚠ **`total` is not decoration — it is the truncation check below, and it now comes free.** The
 previous instruction told you to get the count *"on a separate invocation"*; that call is gone.
-⚠ A member whose PR does not use a closing keyword will not appear in `prs`. That is the same
-exposure the client-side filter always had, and Phase 2's 스택 따라잡기 row is where it shows
-up — cross-check `members` against `prs` and name any member with no PR rather than reporting it
-as not-merged.
+⚠⚠ **Match on `closingIssuesReferences` OR the branch name — not on the reference alone.**
+Measured on `dev-yakuza/one-man-company`: **70 of 200 PRs (35%) carry no closing reference at
+all**, and several of them are member work — e.g. `#398 fix/153-assignment-header-semantics`,
+MERGED, for member #153. A reference-only filter found **3** of that sprint's member PRs; adding
+the branch test found **4**. The missing one reads as *"#153 never merged"*, 약속 이행률 drops,
+and **Phase 4 writes that number into `config.json`** — the exact failure this phase spends a
+paragraph warning about, arriving through the filter instead of through the limit.
+
+⚠ **`via` says which signal matched, and it is not decoration.** `closes` is authoritative;
+`branch` is a heuristic and can over-match (a branch that merely *mentions* another Issue's
+number). The digit-boundary test stops `153` matching `1537`, but it cannot stop
+`feat/200-refs-153-followup`. So: **treat `via: "branch"` rows as candidates to confirm, not as
+facts** — check the PR actually belongs to that member before counting it, and say so if you
+drop one. ⚠ And a member with **no** row at all is still possible: cross-check `members` against
+`prs` and name it rather than reporting it as not-merged.
 
 ⚠ **`--limit 200` with a client-side filter can silently miss members, and six of the nine
 metrics come from that PR list.** This matters more here than anywhere else in the sprint,
