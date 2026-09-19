@@ -222,6 +222,39 @@ one status from the enum"). Still malformed → escalate exactly as an exhausted
 `OK PAUSE: needs-human — <role> returned no valid RESULT line` (do NOT transition the stage label).
 A failed invocation satisfies no gate: the stage must not return `OK ADVANCE` on it.
 
+### Releasing the sub-agent after its RESULT (leader-side, every spawn)
+
+A role sub-agent spawned with the `Agent` tool does **not** disappear when it returns. Claude Code
+keeps a finished background agent alive in a *resumable* state — so `SendMessage` can continue it
+with its context intact — until the session ends or the agent is explicitly stopped. Left alone, it
+stays in the session's agent list and in the terminal's bottom status line as `general-purpose`
+(the `subagent_type` every spawn here uses), which reads to the human as "something is still
+running" long after the stage moved on. Measured: a full `/gld dev` run spawns 8+ role agents, and
+the ones that survived to the end were still listed hours later.
+
+**Rule: once the RESULT line has been read and acted on, stop the agent** — its own `TaskStop`
+call, passing the id the `Agent` tool returned. Three refinements:
+
+- **"Acted on" includes the malformed-reply path above.** A re-invoke is a *fresh* spawn with the
+  violation named in its prompt, not a `SendMessage` to the old one — so stop the old one first.
+- **Keep an agent only when you will actually `SendMessage` it.** That is rare in the spine (every
+  loop-back re-spawns at a higher tier — `_model_tiering.md` — and every stage re-derives its cast).
+  "I might want to ask it something" is not a reason; a stopped agent's artifacts are files and its
+  verdict is already in the stage record.
+- **The 3.5a auditor and 3.5b gate roles are spawns too.** The auditor returns JSON rather than a
+  RESULT line, but the rule keys on *the reply having been consumed*, not on its shape — stop it
+  after the mutation check's post-scan readings are taken (`_execute_spine.md` Step 3.5a), never
+  before, so the readings bracket a finished agent.
+
+**Stage exit check**: before a stage returns its Section D line, run `ListAgents` once; any
+subagent of this stage still `running`/`completed` is either work you forgot to consume or an agent
+you forgot to release. Stop it or explain it — do not leave it for the human to notice.
+
+Stopping is cosmetic for the flow (labels, comments and files are the state — Section A/B) and
+non-destructive for the record (a stopped agent's RESULT was already read; its artifacts are on
+disk). It is not cosmetic for the human: the status line is theirs, and the plugin should leave it
+the way it found it.
+
 ---
 
 ## Section D — Stage-level return (stage → main session)

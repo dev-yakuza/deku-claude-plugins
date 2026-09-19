@@ -85,7 +85,7 @@ Each wrapper **owns its own label transition** on success (single source — `_h
 - **`OK PAUSE: <one-line>`** → leave label as-is; report where it paused and how to resume (`/gld resume $1`). **Unattended**: a `needs-human` pause has already marked the Issue (`guild:needs-human` label + `<!-- guild:needs-human -->` comment, Section H); stop **cleanly** so the supervisor moves to the next Issue. Stop.
 - **`FAIL: <reason>`** → stop; report the reason.
 
-**Leader judgment between stages**: after each `OK ADVANCE`, briefly confirm the produced output is coherent enough to feed the next stage (completion judged by downstream consumability). If a gap is obvious, loop back rather than advancing.
+**Leader judgment between stages**: after each `OK ADVANCE`, briefly confirm the produced output is coherent enough to feed the next stage (completion judged by downstream consumability). If a gap is obvious, loop back rather than advancing. **Also release the stage's sub-agents** — every role spawned with the `Agent` tool is stopped (`TaskStop`) once its RESULT has been consumed, and a `ListAgents` at stage exit shows none of this stage's agents still listed (`_handoff.md` Section C, "Releasing the sub-agent"). A finished agent left alive stays in the human's status line as `general-purpose` for the rest of the session.
 
 ---
 
