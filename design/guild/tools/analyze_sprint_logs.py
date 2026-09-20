@@ -1298,12 +1298,21 @@ def quality_baseline(sessions):
     print("10. 품질 지표 기준선 — **감소 = 열화** (구조를 센다, 판정을 세지 않는다)")
     print("=" * 78)
     marks = collections.Counter()
+    # ⚠⚠ **두 단위를 함께 센다 — 어느 쪽도 혼자서는 깨끗하지 않다.**
+    #   · 호출 기준: 같은 파일을 두 번 쓰면 2 로 센다 → **재시도가 품질로 읽힌다.**
+    #     실측: arm-C 는 파일당 1.43회 쓰고 arm-A 는 1.03회 — 호출 기준은 arm-C 를 후하게 준다.
+    #   · 파일 기준: 흐름이 파일을 둘로 쪼개면 2 로 센다(`gld-pr-404-manualqa.md` +
+    #     `…-body-new.md`) → **흐름 모양이 품질로 읽힌다.**
+    #   두 단위가 방향은 같고 크기가 다르면(실측: 증거 −15% ↔ −39%) **그 폭이 불확실성이다.**
+    #   §4d 가 「파일 끌어오기 50.6–62.1%」를 범위로 적는 것과 같은 이유다.
+    mark_files = collections.defaultdict(set)
     spawns = collections.Counter()
     for x in sessions:
         for _tool, arg, _p, _n in x["results"]:
             a = arg or ""
             for pat, label in _QUALITY_MARKERS:
                 if pat in a:
+                    mark_files[label].add((x["log"], a.split(" \x00markers:")[0]))
                     marks[label] += 1
         for parent, _seq in x["prefixes"].items():
             if not parent:
@@ -1322,7 +1331,9 @@ def quality_baseline(sessions):
         print(f"    {k:28s} {spawns.get(k, 0):5d}   ← §9 의 루프백 수와 함께 읽어라")
     print("  ── 증거·신호가 남았는가 (마커 수 — 구조적) ──")
     for _pat, label in _QUALITY_MARKERS:
-        print(f"    {label:28s} {marks.get(label, 0):5d}")
+        print(f"    {label:28s} {marks.get(label, 0):5d} 호출 · {len(mark_files[label]):4d} 파일")
+    print("    ⚠ **두 수를 함께 읽어라.** 호출은 재시도에 부풀고, 파일은 흐름이 쪼개지면 부푼다 —")
+    print("       방향이 같고 크기가 다르면 그 폭이 **불확실성**이다(§4d 의 범위와 같은 이유).")
     print()
     print("  ⚠ **어느 하나라도 내려가면 그것이 신호다.** 비용이 내려가면서 이 수들이 같이")
     print("     내려갔다면 절감이 아니라 **게이트가 덜 돈 것**이다.")

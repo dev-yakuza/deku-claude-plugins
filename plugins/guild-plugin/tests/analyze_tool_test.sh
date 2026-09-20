@@ -269,6 +269,37 @@ QMPY
 if [ "$QM" = "OK" ]; then ok "§10: 본문이 파일 경유여도 품질 마커를 센다"
 else bad "§10: 파일 경유 본문의 마커" "$QM"; fi
 
+# ⚠⚠ **한 단위만 찍으면 안 된다.** 호출 기준은 **재시도를 품질로** 센다(실측: arm-C 는 파일당
+# 1.43회 쓰고 arm-A 는 1.03회 — 호출 기준이 arm-C 를 후하게 준다). 파일 기준은 **흐름이
+# 파일을 쪼개면** 부푼다(`gld-pr-404-manualqa.md` + `…-body-new.md`). 방향이 같고 크기가
+# 다르면(증거 −15% ↔ −39%) **그 폭이 불확실성**이고, 그것을 숨기면 안 된다.
+hasfx_tool2 "§10: 마커를 호출·파일 **두 단위**로 찍는다" '호출 · '
+hasfx_tool2 "§10: 두 단위의 오염 방향을 적는다" '호출은 재시도에 부풀고, 파일은 흐름이 쪼개지면'
+
+# ⚠⚠ **표식이 다른 절로 새면 안 된다.** `arg` 에 `\x00markers:` 를 덧붙이는 방식이라,
+# 경로 버킷(§4c)·커맨드 분류(`_classes`, §4b·4d)·스테이지 전이/라벨 정규식(§9)이 표식 때문에
+# 다르게 판정되면 **품질을 고치려다 비용 수치를 망친다.** 합성 인자로 직접 본다.
+LEAK="$($PY - "$TOOL" <<'LKPY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("t", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+tag = "/tmp/b.md \x00markers:guild:test-evidence,guild:auditor:execute,manual-qa"
+clean = tag.split(" \x00markers:")[0]
+bad = []
+for pat in ("docs/specs/", "docs/standards", "guild-plugin", "tool-results/", ".claude/"):
+    if (pat in tag) != (pat in clean):
+        bad.append("경로 버킷 " + pat)
+if m._STAGE_TRANSITION.search(tag):
+    bad.append("전이 정규식이 표식에 걸린다")
+if m._STAGE_LABEL.search(tag):
+    bad.append("라벨 정규식이 표식에 걸린다 (guild:test-evidence 의 하이픈 경계)")
+print("OK" if not bad else "LEAK | " + " | ".join(bad))
+LKPY
+)"
+if [ "$LEAK" = "OK" ]; then ok "§10: 마커 표식이 §4c·§4b·§9 판정으로 새지 않는다"
+else bad "§10: 마커 표식 누출" "$LEAK"; fi
+
+
 # ── 문서 정합 검사기 — **합성 픽스처로 로직을 검사한다** ─────────────────
 # ⚠⚠ 이 작업에서 가장 많이 재발한 결함은 **「같은 이름의 권위 있는 수가 두 문서에서 갈리는
 # 것」** 이고 라운드 15~18 만으로 **네 번** 나왔다(규율 5↔8 · 결정표 · 게이트 10↔11 ·
@@ -495,7 +526,7 @@ fi
 if $PY -m py_compile "$TOOL" 2>/dev/null; then ok "도구가 컴파일된다"; else bad "도구가 컴파일된다" "py_compile 실패"; fi
 
 # ⚠ 바닥선 — 나머지 10 스위트와 같은 규약. 실측 PASS 와 정확히 일치시킨다.
-TOOL_MIN_CHECKS=50
+TOOL_MIN_CHECKS=53
 echo
 echo "analyze_tool: $PASS passed, $FAIL failed"
 if [ "$((PASS + FAIL))" -lt "$TOOL_MIN_CHECKS" ]; then
