@@ -75,8 +75,23 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
 - **Skip the section ONLY if the human-QA item count is literally zero** (everything was automated/agent-doable). "화면이 없어 exploratory 불요" does not by itself make it zero — a platform/real-device item still counts.
 - **Find the open PR — resolve it broadly, the same way `review.md` Step 0 does.** A literal `"Closes #$1"` search is too narrow: a PR may use `Fixes`/`Fixed`/`Resolves`/`Resolved`/`Close`/`Closed` (all of GitHub's recognized closing keywords, case-insensitive), or link the Issue purely through the PR sidebar's "Development" feature with no closing keyword in the body text at all — so a PR that `/gld review $1` finds, this *mandatory* step would silently miss. Search broadly instead:
   ```bash
-  gh pr list --repo <owner>/<repo> --search "#$1 in:body" --state open --json number,url,body
+  gh pr list --repo <owner>/<repo> --search "#$1 in:body" --state open --json number,url,title,body --jq '{strict: [.[] | select((.body // "") | test("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\\s*:?\\s*#$1\\b")) | {number, url}], candidates: [.[] | {number, url, title}]}'
   ```
+   ⚠⚠ **The body is a PREDICATE here, not material — test it in `jq` and do not receive it.**
+   `--jq` runs inside `gh`, so only what is actually used comes back. Measured on
+   `dev-yakuza/one-man-company` (#153, 2026-09-20): **~68,000 B → ~1,000 B**. This call sits near
+   the front of its stage, so under §1's cost identity those bytes were re-billed on every later
+   turn of it.
+
+   ⚠⚠ **`strict` and `candidates` are BOTH returned, and dropping `candidates` breaks this step.**
+   The rule above is *"the closing reference **or** where the title/body otherwise makes the link
+   obvious"* — that second half is a **judgment**, and a jq that emitted only regex matches would
+   silently delete it. `strict` is the authoritative set; `candidates` (number/url/title, no body)
+   is what the judgment reads when `strict` is empty. ⚠ An earlier version of this line shipped
+   with `strict` only — the same defect found in `retro.md`'s member-PR filter, where a
+   reference-only match missed **70 of 167 PRs (42%)** that carry no closing keyword.
+   ⚠ `// ""` guards a null body: without it `jq` exits and the **whole call returns an error**,
+   which reads as *"no PR found"*.
   Then, from the results, keep only PRs whose body actually contains `$1` as a closing/fixing reference (`\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s*:?\s*#$1\b`, case-insensitive) **or** where the body/title otherwise makes the link obvious.
 - **Nothing found → do NOT silently skip a mandatory step.** Say so in the qa output: the checklist items still get reported in the `<!-- guild:qa:output -->` Issue comment, plus one line stating the PR could not be located (it may exist but be sidebar-linked, which `gh pr list --search` cannot see) so the human can paste them into the PR themselves.
 - PATCH the body via the temp-file **marker** pattern (`_handoff.md` Section B, applied to the PR body): the section is bounded by `<!-- guild:manual-qa -->` … `<!-- /guild:manual-qa -->` and is **updated in place** on re-run (idempotent — never duplicated). Preserve everything outside the markers (INV4). ⚠ **`gh pr edit --body-file` REPLACES the entire PR body — it does not patch it**, which is why step 1 below is mandatory and not optional. In this order:

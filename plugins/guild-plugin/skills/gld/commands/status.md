@@ -16,8 +16,15 @@ Show the current progress of an Issue. **Read-only**: never posts comments, neve
    `/pull/` → report "not an Issue"; stop.
 2. Read the Issue in one call:
    ```bash
-   gh issue view $1 --json labels,title,comments
+   gh issue view $1 --json labels,title,comments --jq '{title, labels: [.labels[].name], markers: ([.comments[]?.body // ""] | join("\n") | {analyze: test("guild:analyze:output"), design: test("guild:design:output"), evidence: test("guild:test-evidence:step-1"), test: test("guild:test:output"), qa: test("guild:qa:output")})}'
    ```
+   ⚠⚠ **`comments` is fetched for a PRESENCE test, so reduce it to one.** Step 4 below only asks
+   *which of five markers exist*; it never renders a comment. Measured on
+   `dev-yakuza/one-man-company` (#153, 2026-09-20): **64,941 B → a few hundred**. A Guild Issue's
+   comments carry the analyze/design/audit outputs, so this is the largest single read in a
+   read-only command.
+   ⚠ `.comments[]?.body // ""` tolerates a null body; without the guard `jq` exits and the whole
+   call returns an error, which this command would show as *"Issue not readable"*.
 3. Derive the current **stage** from those labels with `_handoff.md` **Section A — canonical stage derivation**, which yields `stage` (the single current stage label — `guild:analyze`…`guild:done`, or `guild:children` for a split parent — or `"none"` when there is none), `paused` (`guild:needs-human` present), `harness` (`guild:harness` present) and `sprint` (`guild:sprint` present), having dropped `guild:child` (permanent identity marker, never a stage). ⚠ **`sprint` must be projected, not just excluded.** Excluding it from the stage scan is what makes a tracking Issue return `"none"`; the render rule below then needs the flag itself to say why, and reading a field the projection does not produce leaves the tracker rendering as a bare "not started". Applied to the labels already read in step 2, that is:
    ```
    {stage: ([.labels[].name] | map(select(startswith("guild:") and . != "guild:child" and . != "guild:needs-human" and . != "guild:harness" and . != "guild:sprint")) | .[0] // "none"), paused: ([.labels[].name] | any(. == "guild:needs-human")), harness: ([.labels[].name] | any(. == "guild:harness")), sprint: ([.labels[].name] | any(. == "guild:sprint"))}
@@ -31,8 +38,23 @@ Show the current progress of an Issue. **Read-only**: never posts comments, neve
    - `<!-- guild:qa:output -->`
 5. Find the related PR — **resolve it broadly, the same way `review.md` Step 0 does.** A literal `"Closes #$1"` search is too narrow: a PR may use `Fixes`/`Fixed`/`Resolves`/`Resolved`/`Close`/`Closed` (all of GitHub's closing keywords, case-insensitive), or link the Issue purely through the PR sidebar's "Development" feature with no closing keyword in the body at all — so `status` would report "PR: none" for a PR `/gld review $1` finds:
    ```bash
-   gh pr list --search "#$1 in:body" --json number,url,state,body
+   gh pr list --search "#$1 in:body" --json number,url,state,title,body --jq '{strict: [.[] | select((.body // "") | test("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\\s*:?\\s*#$1\\b")) | {number, url, state}], candidates: [.[] | {number, url, state, title}]}'
    ```
+   ⚠⚠ **The body is a PREDICATE here, not material — test it in `jq` and do not receive it.**
+   `--jq` runs inside `gh`, so only what is actually used comes back. Measured on
+   `dev-yakuza/one-man-company` (#153, 2026-09-20): **~68,000 B → ~1,000 B**. This call sits near
+   the front of its stage, so under §1's cost identity those bytes were re-billed on every later
+   turn of it.
+
+   ⚠⚠ **`strict` and `candidates` are BOTH returned, and dropping `candidates` breaks this step.**
+   The rule above is *"the closing reference **or** where the title/body otherwise makes the link
+   obvious"* — that second half is a **judgment**, and a jq that emitted only regex matches would
+   silently delete it. `strict` is the authoritative set; `candidates` (number/url/title, no body)
+   is what the judgment reads when `strict` is empty. ⚠ An earlier version of this line shipped
+   with `strict` only — the same defect found in `retro.md`'s member-PR filter, where a
+   reference-only match missed **70 of 167 PRs (42%)** that carry no closing keyword.
+   ⚠ `// ""` guards a null body: without it `jq` exits and the **whole call returns an error**,
+   which reads as *"no PR found"*.
    Then keep only PRs whose body contains `$1` as a closing/fixing reference (`\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s*:?\s*#$1\b`, case-insensitive), or whose title/body otherwise makes the link obvious. Nothing matched → render `PR: none` (status is read-only — it never asks or edits; a sidebar-only link stays invisible to this search).
 6. Render (below).
 

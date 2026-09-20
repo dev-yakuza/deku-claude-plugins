@@ -69,9 +69,16 @@ budget only holds with the Grep. Skip it and you must Read all five.
 1. Resolve owner/repo (per `_handoff.md` Section F).
 2. Fetch prior stage comments for the Issue:
    ```bash
-   gh api repos/<owner>/<repo>/issues/<N>/comments --jq '.[] | select(.body | contains("guild:analyze:output") or contains("guild:design:output")) | .body'
+   gh api repos/<owner>/<repo>/issues/<N>/comments --paginate --jq '.[] | select(.body | contains("guild:analyze:output") or contains("guild:design:output")) | .body'
    ```
    (substitute literal owner/repo and `<N>`.)
+   ⚠ **`--paginate` is not optional.** `gh api` returns **page 1 only** by default (30 comments),
+   and `guild:analyze:output` is posted **first** — so on a heavily looped Issue it is the first
+   thing to fall off, and the stage starts with no intent. A truncated read here produces no
+   error: it looks exactly like an Issue that never had an analyze output. `retro.md` states the
+   same requirement for the same reason. ⚠ Measured on this corpus the Issues carry 6–8 comments,
+   so the failure has **not** been observed here — the guard costs nothing and the failure mode is
+   silent, which is why it goes in anyway.
 3. Also read `docs/specs/<N>/` if present (`skeleton.md`, `test-cases.md`, `ux.md` — passed as
    files between roles). ⚠ **Read the artifact(s) this
    stage acts on — not the directory.** Measured over 14 unattended Issues, `docs/specs/<issue>/`

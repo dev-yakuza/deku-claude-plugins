@@ -1941,33 +1941,36 @@ else
   # ⚠ **세 파일 전부**를 본다. retro 만 걸었더니 `plan`·`daily` 가 같은 모양으로 남아 있었고,
   #    `daily` 의 PR 목록은 **123,617 B**(그중 `statusCheckRollup` 이 57%)였다.
   #    무거운 필드는 `body` 만이 아니다 — 렌더링에 한 글자만 쓰는 `statusCheckRollup` 도 같다.
-  _bad_calls="$("$PY" - "$GLD/commands/sprint" <<'RTPY'
-import io, os, sys
+  # ⚠⚠ **범위가 곧 발견의 범위다.** retro 에만 걸었더니 plan·daily 가 남아 있었고, sprint 로
+  #    넓혔더니 `/gld dev` 경로(`qa.md`)·`status.md`·`review.md` 가 남아 있었다. 실측:
+  #    qa 67,906→80 B · review 68,663→233 B · status(PR) 67,989→97 B · status(comments) 64,941→176 B.
+  #    이제 `commands/**` 전부를 본다.
+  _bad_calls="$("$PY" - "$GLD/commands" <<'RTPY'
+import glob, io, os, sys
 d = sys.argv[1]
-HEAVY = ("body", "statusCheckRollup")
+HEAVY = ("body", "statusCheckRollup", "comments")
 bad = []
-for f in ("retro.md", "plan.md", "daily.md", "board.md", "run.md"):
-    fp = os.path.join(d, f)
-    if not os.path.exists(fp):
-        continue
-    for line in io.open(fp, encoding="utf-8").read().split("\n"):
-        t = line.strip()
-        if not t.startswith("gh ") or "--json" not in t:
-            continue
-        # ⚠ **`--json` 의 필드 목록만 본다.** 줄 전체에서 찾으면 `--search '"x" in:body'` 의
-        #    `body` 를 잡는다 — 실측 오검출(plan.md 의 마커 검색 호출).
-        fields = t.split("--json", 1)[1].strip().split(" ", 1)[0]
-        if not any(h in fields.split(",") for h in HEAVY):
-            continue
-        if "--jq" not in t:
-            bad.append(f + ": " + t[:50])
+for fp in sorted(glob.glob(os.path.join(d, "*.md")) + glob.glob(os.path.join(d, "*", "*.md"))):
+    f = os.path.relpath(fp, d)
+    if True:
+        for line in io.open(fp, encoding="utf-8").read().split("\n"):
+            t = line.strip()
+            if not t.startswith("gh ") or "--json" not in t:
+                continue
+            # ⚠ **`--json` 의 필드 목록만 본다.** 줄 전체에서 찾으면 `--search '"x" in:body'` 의
+            #    `body` 를 잡는다 — 실측 오검출(plan.md 의 마커 검색 호출).
+            fields = t.split("--json", 1)[1].strip().split(" ", 1)[0]
+            if not any(h in fields.split(",") for h in HEAVY):
+                continue
+            if "--jq" not in t:
+                bad.append(f + ": " + t[:50])
 print(" | ".join(bad))
 RTPY
 )"
   if [ -z "$_bad_calls" ]; then
-    ok "sprint: 무거운 필드(body·statusCheckRollup)를 요청하는 gh 호출은 전부 --jq 로 좁힌다"
+    ok "commands/**: 무거운 필드(body·statusCheckRollup·comments)를 요청하는 gh 호출은 전부 --jq 로 좁힌다"
   else
-    bad "sprint: 무거운 필드 요청은 --jq 로 좁힌다" "전부 좁혀짐" "맨 호출: $_bad_calls"
+    bad "commands/**: 무거운 필드 요청은 --jq 로 좁힌다" "전부 좁혀짐" "맨 호출: $_bad_calls"
   fi
   # ⚠⚠ CI 집계의 **방향**을 고정한다. 순진한 `test("FAIL|ERROR|CANCEL")` 판은 `TIMED_OUT` 을
   #    **pass** 로 냈다(합성 입력으로 발견 — 이 레포의 PR 200건엔 그 경우가 없었다).
@@ -1985,6 +1988,18 @@ RTPY
   # ⚠ 그리고 어느 신호가 맞았는지 구별해 돌려줘야 한다 — `branch` 는 휴리스틱이라
   #    `feat/200-refs-153-followup` 같은 것을 못 막는다. 사실이 아니라 **확인 대상**이다.
   hasfx "retro: 매칭 신호를 via 로 구별한다" "$RETRO" 'via: (if ($c | length) > 0 then "closes" else "branch" end)'
+  # ⚠⚠ **판단 경로를 지우지 않았는가.** qa·review·status 의 PR 찾기는 «closing 참조 **또는**
+  #    제목/본문이 명백히 연결을 보여주면» 이다. 뒤 절반은 **판단**이고, regex 매치만 내보내는
+  #    jq 는 그것을 조용히 삭제한다 — retro 의 B-1 과 같은 클래스(참조만 보면 42% 를 놓쳤다).
+  #    `strict`(권위) + `candidates`(제목만, 본문 없음) 둘 다 나와야 한다.
+  for _f in qa review status; do
+    _p="$GLD/commands/$_f.md"
+    if grep -q 'strict:' "$_p" && grep -q 'candidates:' "$_p"; then
+      ok "$_f: PR 찾기가 strict + candidates 를 둘 다 낸다 (판단 경로 보존)"
+    else
+      bad "$_f: PR 찾기가 판단 경로를 보존한다" "strict + candidates" "누락"
+    fi
+  done
   # ⚠⚠ **jq 가 죽으면 호출 전체가 에러다** — 큰 페이로드보다 나쁘다. 그 단계가 PR 을 하나도
   #    못 받는다. 실측: `headRefName` 이 null 이면 «null cannot be matched» 로 종료하고,
   #    `statusCheckRollup` 항목이 객체가 아니면 «Cannot index string» 으로 종료한다.
@@ -2056,7 +2071,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=294   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=297   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

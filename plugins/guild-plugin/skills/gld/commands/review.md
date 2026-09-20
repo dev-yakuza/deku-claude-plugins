@@ -19,8 +19,23 @@
 1. Resolve owner/repo (`_handoff.md` Section F).
 2. If `$1` is a PR number, use directly. If `$1` is an Issue → find its open PR. **A literal `"Closes #$1"` search alone is too narrow** — this command explicitly claims to "work on ANY open PR, agent-authored or human-authored" (Step 1), but a human-authored PR just as commonly uses `Fixes`/`Fixed`/`Resolves`/`Resolved`/`Close`/`Closed` (all of GitHub's recognized closing keywords, case-insensitive), or links the Issue purely through the PR sidebar's "Development" feature with no closing keyword in the body text at all — none of which a `"Closes #$1"` search would find. Search broadly instead:
    ```bash
-   gh pr list --repo <owner>/<repo> --search "#$1 in:body" --state open --json number,headRefName,url,title,body
+   gh pr list --repo <owner>/<repo> --search "#$1 in:body" --state open --json number,headRefName,url,title,body --jq '{strict: [.[] | select((.body // "") | test("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\\s*:?\\s*#$1\\b")) | {number, headRefName, url, title}], candidates: [.[] | {number, headRefName, url, title}]}'
    ```
+   ⚠⚠ **The body is a PREDICATE here, not material — test it in `jq` and do not receive it.**
+   `--jq` runs inside `gh`, so only what is actually used comes back. Measured on
+   `dev-yakuza/one-man-company` (#153, 2026-09-20): **~68,000 B → ~1,000 B**. This call sits near
+   the front of its stage, so under §1's cost identity those bytes were re-billed on every later
+   turn of it.
+
+   ⚠⚠ **`strict` and `candidates` are BOTH returned, and dropping `candidates` breaks this step.**
+   The rule above is *"the closing reference **or** where the title/body otherwise makes the link
+   obvious"* — that second half is a **judgment**, and a jq that emitted only regex matches would
+   silently delete it. `strict` is the authoritative set; `candidates` (number/url/title, no body)
+   is what the judgment reads when `strict` is empty. ⚠ An earlier version of this line shipped
+   with `strict` only — the same defect found in `retro.md`'s member-PR filter, where a
+   reference-only match missed **70 of 167 PRs (42%)** that carry no closing keyword.
+   ⚠ `// ""` guards a null body: without it `jq` exits and the **whole call returns an error**,
+   which reads as *"no PR found"*.
    Then, from the results, keep only PRs whose body actually contains `$1` as a closing/fixing reference (`\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s*:?\s*#$1\b`, case-insensitive) **or** where the exact search turns up nothing but the PR's title/body otherwise makes the link obvious. **If search finds nothing at all** (including the sidebar-linked case, which has no body text to search), don't silently report "no PR" — ask the human directly which PR this review is for, since the PR may exist but be linked in a way `gh pr list --search` can't see.
 
 ## Step 1 — Load rationale (light — so you can explain the WHY, not just the what)
