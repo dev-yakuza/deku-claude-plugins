@@ -228,6 +228,47 @@ hasfx_tool2 "M12: opus 스폰이 없으면 «관측 0건» 을 말한다" '**관
 #    「뭔가 틀렸다」가 확인된 자리이고, 상승 제거는 재시도 품질을 낮추는 것이다.
 hasfx_tool2 "M12: 절감이 아니라 가격표라고 못박는다" '절감이 아니라 가격표다'
 
+# ── §10 품질 마커 — **본문이 파일로 가도 세는가** ────────────────────────
+# ⚠⚠ §10 은 M1 A/B 의 **품질 축**이다. 그런데 마커를 **커맨드 문자열에서만** 셌고,
+# `_bash_rules.md` 는 「본문은 임시 파일 + `--body-file`」을 **강제**한다 — 그 경로를 타면
+# 커맨드에 **경로만** 남아 마커가 사라진다. 실측(arm-C): qa 체크리스트가 **6/6 PR 에 실제로
+# 들어갔는데** §10 은 **3** 으로 셌고 전이당 **−58%** 로 보고했다. **정상 런을 품질 열화로
+# 판정**한다 — 그 계기로 M1 을 판단하면 실험이 무의미하다.
+# ⚠ 그래서 문자열 검사가 아니라 **합성 로그를 만들어 파싱시킨다.**
+QM="$($PY - "$TOOL" <<'QMPY'
+import importlib.util, json, os, sys, tempfile
+spec = importlib.util.spec_from_file_location("t", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+d = tempfile.mkdtemp(); os.makedirs(os.path.join(d, "1"))
+def ev(o): return json.dumps(o) + "\n"
+# Write 로 본문(마커 포함)을 파일에 쓰고, Bash 는 --body-file 로 경로만 넘긴다 = 실제 흐름
+rows = [
+    ev({"type": "assistant", "message": {"id": "a1", "usage": {"input_tokens": 100},
+        "content": [{"type": "tool_use", "id": "t1", "name": "Write",
+                     "input": {"file_path": "/tmp/b.md",
+                               "content": "x\n<!-- guild:manual-qa -->\n- item\n"}}]}}),
+    ev({"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}),
+    ev({"type": "assistant", "message": {"id": "a2", "usage": {"input_tokens": 120},
+        "content": [{"type": "tool_use", "id": "t2", "name": "Bash",
+                     "input": {"command": "gh pr edit 1 --body-file /tmp/b.md"}}]}}),
+    ev({"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t2", "content": "ok"}]}}),
+    ev({"type": "result", "is_error": False, "total_cost_usd": 0.0, "modelUsage": {}}),
+]
+open(os.path.join(d, "1", "issue-1-20260101_000000-attempt1.log"), "w").writelines(rows)
+S = m.settled(m.load(d))
+found = 0
+for x in S:
+    for (tool, arg, blk, size) in x["results"]:
+        if "manual-qa" in (arg or ""):
+            found += 1
+print("OK" if found >= 1 else "BROKEN: 본문이 파일로 가면 마커를 못 센다 (found=%d)" % found)
+QMPY
+)"
+if [ "$QM" = "OK" ]; then ok "§10: 본문이 파일 경유여도 품질 마커를 센다"
+else bad "§10: 파일 경유 본문의 마커" "$QM"; fi
+
 # ── 문서 정합 검사기 — **합성 픽스처로 로직을 검사한다** ─────────────────
 # ⚠⚠ 이 작업에서 가장 많이 재발한 결함은 **「같은 이름의 권위 있는 수가 두 문서에서 갈리는
 # 것」** 이고 라운드 15~18 만으로 **네 번** 나왔다(규율 5↔8 · 결정표 · 게이트 10↔11 ·
@@ -454,7 +495,7 @@ fi
 if $PY -m py_compile "$TOOL" 2>/dev/null; then ok "도구가 컴파일된다"; else bad "도구가 컴파일된다" "py_compile 실패"; fi
 
 # ⚠ 바닥선 — 나머지 10 스위트와 같은 규약. 실측 PASS 와 정확히 일치시킨다.
-TOOL_MIN_CHECKS=49
+TOOL_MIN_CHECKS=50
 echo
 echo "analyze_tool: $PASS passed, $FAIL failed"
 if [ "$((PASS + FAIL))" -lt "$TOOL_MIN_CHECKS" ]; then

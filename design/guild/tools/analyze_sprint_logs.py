@@ -108,6 +108,18 @@ def load(root):
                         continue
                     inp = block.get("input") or {}
                     arg = inp.get("command") or inp.get("file_path") or inp.get("pattern") or ""
+                    # ⚠⚠ **Write/Edit 의 본문에서 품질 마커를 건져낸다.** `arg` 는 경로이지
+                    #    본문이 아니라서, `_bash_rules.md` 가 강제하는 「본문은 임시 파일 +
+                    #    `--body-file`」 경로를 타면 §10 의 마커가 **커맨드에서 사라진다**.
+                    #    실측(arm-C): qa 체크리스트가 6/6 PR 에 실제로 들어갔는데 §10 은 **3**
+                    #    으로 셌고, 전이당으로는 **−58%** 로 보고했다 — **정상 런을 품질 열화로
+                    #    판정**한다. M1 A/B 의 품질 축이 이것이므로 그대로 두면 실험이 무의미하다.
+                    #    ⚠ 본문 전체는 보존하지 않는다(메모리). **마커 문자열만** 이어 붙인다.
+                    _c = inp.get("content") or inp.get("new_string") or ""
+                    if isinstance(_c, str) and _c:
+                        _hit = [_m for _m, _ in _QUALITY_MARKERS if _m in _c]
+                        if _hit:
+                            arg = arg + " \x00markers:" + ",".join(_hit)
                     pending[block["id"]] = (block["name"], arg, parent)
                     names.append(block["name"])
                     ids.append(block["id"])
