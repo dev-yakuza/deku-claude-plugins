@@ -358,11 +358,52 @@ DCPY
   fi
 fi
 
+# ── freeze_corpus — **실제로 얼려서** 본다 ───────────────────────────────
+# ⚠⚠ 이 작업에서 코퍼스를 **두 번** 잃었다: arm-A 동결본이 `/tmp` 정리로, `word_app` 의
+# 유인 `/gld dev` 트랜스크립트 **133개**가 호스트 회전으로. 후자는 **A2·M10 을 닫을 유일한
+# 데이터**였고 복구 경로가 없다. 이 도구는 그 재발을 막는다 — 그러니 **도구 자신이 조용히
+# 반쪽 복사를 하면 안 된다.** 문자열이 아니라 임시 트리를 실제로 얼리고 검증한다.
+FRZ="$HERE/../../../design/guild/tools/freeze_corpus.py"
+if [ ! -f "$FRZ" ]; then
+  bad "freeze_corpus.py 가 있다" "파일" "없음"
+else
+  ok "freeze_corpus.py 가 있다"
+  FW="$(mktemp -d)"; mkdir -p "$FW/src/sub"
+  printf 'aaa' > "$FW/src/one.log"; printf 'bbbb' > "$FW/src/sub/two.log"
+  if "$PY" "$FRZ" --src "$FW/src" --name t --archive "$FW/arc" >/dev/null 2>&1; then
+    D="$(find "$FW/arc/t" -maxdepth 1 -mindepth 1 -type d | head -1)"
+    # ① 하위 디렉터리까지 옮겼는가 · MANIFEST 가 있는가
+    if [ -f "$D/sub/two.log" ] && [ -f "$D/MANIFEST.json" ]; then
+      ok "freeze: 하위 트리까지 얼리고 MANIFEST 를 쓴다"
+    else bad "freeze: 하위 트리 + MANIFEST" "둘 다" "누락"; fi
+    # ② 검증이 통과하는가
+    if "$PY" "$FRZ" --verify "$D" >/dev/null 2>&1; then ok "freeze: 갓 얼린 것은 검증을 통과한다"
+    else bad "freeze: 갓 얼린 것의 검증" "통과" "실패"; fi
+    # ③ ⚠ **변조를 잡는가** — 못 잡으면 이 도구는 안심만 주고 아무것도 안 한다
+    printf 'x' >> "$D/one.log"
+    if "$PY" "$FRZ" --verify "$D" >/dev/null 2>&1; then
+      bad "freeze: 변조를 잡는다" "검증 실패해야" "통과했다"
+    else ok "freeze: 변조를 잡는다 (sha256)"; fi
+    # ④ ⚠ **원본이 변해도 동결본은 그대로** — 이것이 존재 이유다
+    printf 'ccc' > "$FW/src/three.log"
+    M3="$("$PY" -c "import json,sys;print(json.load(open(sys.argv[1]))['files'])" "$D/MANIFEST.json")"
+    if [ "$M3" = "2" ]; then ok "freeze: 원본이 늘어도 동결본의 MANIFEST 는 불변"
+    else bad "freeze: 동결본 불변" "2파일" "$M3"; fi
+  else
+    bad "freeze: 임시 트리를 얼린다" "성공" "실패"
+  fi
+  # ⑤ **기본 archive 가 /tmp 도 레포 안도 아니어야 한다** — 그게 이 파일의 존재 이유다
+  if grep -q 'DEFAULT_ARCHIVE = os.path.expanduser("~/.claude/guild-corpus")' "$FRZ"; then
+    ok "freeze: 기본 보관 경로가 /tmp 밖이다"
+  else bad "freeze: 기본 보관 경로" "~/.claude/guild-corpus" "다른 값"; fi
+  rm -rf "$FW"
+fi
+
 # ── 문법 ─────────────────────────────────────────────────────────────────
 if $PY -m py_compile "$TOOL" 2>/dev/null; then ok "도구가 컴파일된다"; else bad "도구가 컴파일된다" "py_compile 실패"; fi
 
 # ⚠ 바닥선 — 나머지 10 스위트와 같은 규약. 실측 PASS 와 정확히 일치시킨다.
-TOOL_MIN_CHECKS=38
+TOOL_MIN_CHECKS=44
 echo
 echo "analyze_tool: $PASS passed, $FAIL failed"
 if [ "$((PASS + FAIL))" -lt "$TOOL_MIN_CHECKS" ]; then
