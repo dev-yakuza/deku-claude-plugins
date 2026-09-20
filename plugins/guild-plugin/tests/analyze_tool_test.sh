@@ -392,7 +392,58 @@ else
   else
     bad "freeze: 임시 트리를 얼린다" "성공" "실패"
   fi
-  # ⑤ **기본 archive 가 /tmp 도 레포 안도 아니어야 한다** — 그게 이 파일의 존재 이유다
+  # ⑤ ⚠⚠ **심볼릭 링크를 조용히 빠뜨리지 않는가.** 첫 판이 `islink` 를 전부 건너뛰어
+  #    **Guild 자신의 `memory` 링크**(런의 신호를 워크트리 밖으로 나르는 그것)가 말없이
+  #    빠졌다. 파일 링크는 따라가고, 디렉터리 링크는 **MANIFEST 에 기록**돼야 한다.
+  FS="$(mktemp -d)"; mkdir -p "$FS/src/real" "$FS/src/inner"
+  printf 'd' > "$FS/src/real/m.md"; printf 'f' > "$FS/src/inner/f.txt"
+  ln -s "$FS/src/real" "$FS/src/memory"; ln -s "$FS/src/inner/f.txt" "$FS/src/link.txt"
+  if "$PY" "$FRZ" --src "$FS/src" --name s --archive "$FS/arc" >/dev/null 2>&1; then
+    SD="$(find "$FS/arc/s" -maxdepth 1 -mindepth 1 -type d | head -1)"
+    NF="$("$PY" -c "import json,sys;print(json.load(open(sys.argv[1]))['files'])" "$SD/MANIFEST.json")"
+    NS="$("$PY" -c "import json,sys;print(len(json.load(open(sys.argv[1])).get('skipped') or []))" "$SD/MANIFEST.json")"
+    # 파일 2개 + 파일링크 1개 = 3 · 디렉터리 링크 1개는 기록
+    if [ "$NF" = "3" ]; then ok "freeze: 파일 심볼릭 링크를 따라가 얼린다"
+    else bad "freeze: 파일 링크를 얼린다" "3파일" "$NF"; fi
+    if [ "$NS" = "1" ]; then ok "freeze: 디렉터리 링크를 MANIFEST 에 기록한다 (조용히 빠뜨리지 않는다)"
+    else bad "freeze: 디렉터리 링크 기록" "1건" "$NS"; fi
+  else bad "freeze: 심볼릭 링크가 있는 트리를 얼린다" "성공" "실패"; fi
+  # ⑥ ⚠⚠ **같은 초에 두 번** 얼려도 죽지 않는가 — 첫 판은 FileExistsError 트레이스백이었다.
+  #    ⚠ 그냥 두 번 부르면 **두 호출이 다른 초에 떨어져** 충돌이 안 난다 — 실제로 그렇게 만든
+  #    첫 검사는 변이(접미사 로직 제거)에 **발화하지 않았다**. 그래서 **현재 초의 디렉터리를
+  #    미리 만들어** 충돌을 결정적으로 일으킨다.
+  # ⚠ 한 초만 선점하면 **초 경계를 스쳐** 충돌이 안 난다(실측: 변이가 두 번 연속 발화 실패).
+  #    now±2초를 전부 선점해 충돌을 **결정적으로** 만든다.
+  "$PY" - "$FS/arc/s" <<'CLPY'
+import datetime, os, sys
+base = sys.argv[1]
+now = datetime.datetime.now()
+for d in range(-2, 3):
+    os.makedirs(os.path.join(base, (now + datetime.timedelta(seconds=d)).strftime("%Y%m%d-%H%M%S")),
+                exist_ok=True)
+CLPY
+  if "$PY" "$FRZ" --src "$FS/src" --name s --archive "$FS/arc" >/dev/null 2>&1; then
+    ok "freeze: 같은 초의 디렉터리가 이미 있어도 죽지 않는다"
+  else bad "freeze: 같은 초 충돌" "접미사로 회피" "죽었다"; fi
+  # ⑦ ⚠⚠ **archive 가 src 안이면 거부**해야 한다 — 아니면 동결본이 자기를 삼킨다(실측 1→3파일)
+  if "$PY" "$FRZ" --src "$FS/src" --name inner --archive "$FS/src/arc" >/dev/null 2>&1; then
+    bad "freeze: archive 가 src 안이면 거부" "실패해야" "얼렸다"
+  else ok "freeze: archive 가 src 안이면 거부한다 (자기 포함 방지)"; fi
+  rm -rf "$FS"
+
+  # ⑨ ⚠⚠ **복사가 실패하면 반쪽 동결본을 남기지 않는가.** 첫 판은 읽기 권한 없는 파일 하나에
+  #    트레이스백으로 죽으면서 **MANIFEST 없는 디렉터리**를 남겼다 — 나중에 동결본처럼 보이고,
+  #    절반만 얼린 코퍼스로 잰 수는 되돌릴 수 없다.
+  FP="$(mktemp -d)"; mkdir -p "$FP/src"; printf 'ok' > "$FP/src/a.log"; printf 'x' > "$FP/src/no.log"
+  chmod 000 "$FP/src/no.log"
+  "$PY" "$FRZ" --src "$FP/src" --name p --archive "$FP/arc" >/dev/null 2>&1
+  _left="$(find "$FP/arc" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l | tr -d ' ')"
+  chmod 644 "$FP/src/no.log"
+  if [ "$_left" = "0" ]; then ok "freeze: 복사 실패 시 반쪽 동결본을 지운다"
+  else bad "freeze: 반쪽 동결본 정리" "0개" "${_left}개 남음"; fi
+  rm -rf "$FP"
+
+  # ⑧ **기본 archive 가 /tmp 도 레포 안도 아니어야 한다** — 그게 이 파일의 존재 이유다
   if grep -q 'DEFAULT_ARCHIVE = os.path.expanduser("~/.claude/guild-corpus")' "$FRZ"; then
     ok "freeze: 기본 보관 경로가 /tmp 밖이다"
   else bad "freeze: 기본 보관 경로" "~/.claude/guild-corpus" "다른 값"; fi
@@ -403,7 +454,7 @@ fi
 if $PY -m py_compile "$TOOL" 2>/dev/null; then ok "도구가 컴파일된다"; else bad "도구가 컴파일된다" "py_compile 실패"; fi
 
 # ⚠ 바닥선 — 나머지 10 스위트와 같은 규약. 실측 PASS 와 정확히 일치시킨다.
-TOOL_MIN_CHECKS=44
+TOOL_MIN_CHECKS=49
 echo
 echo "analyze_tool: $PASS passed, $FAIL failed"
 if [ "$((PASS + FAIL))" -lt "$TOOL_MIN_CHECKS" ]; then
