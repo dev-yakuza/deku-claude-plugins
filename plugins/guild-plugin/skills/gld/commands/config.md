@@ -10,6 +10,7 @@ Parse `$1` onward:
   - ⚠ **Scope**: this dial governs the *commit gate* only. It is **not** an override for INV2 — `/gld evolve`'s apply-time hard-block on a verification-weakening change is non-negotiable and ignores this flag (`_invariants.md` INV2). Turning gates off is for a repo the gate misjudges, not permission to weaken tests.
   - Writing this key trips the gate's own `--guard-config` guard, so the change surfaces as an explicit confirmation prompt. That is intended: disabling the enforcement layer should be a decision on the record.
 - `--max-stack-depth=<n>` → set `sprint.max_stack_depth` (default `3`). See the section below.
+- `--refactor-slot=<on|off>` → set `sprint.refactor_slot` (default `on`). Whether `/gld sprint plan` reserves one member slot for a refactor. See the section below.
 - `--window=<HH:MM-HH:MM|none>` → set `sprint.window` (default `null` = no window). The run window: `/gld sprint run` only starts a **new** member inside it. See the section below.
 - Other keys → report "unknown/unsupported config key" and list the supported ones.
 
@@ -34,6 +35,7 @@ Parse `$1` onward:
    automation: evolve_nudge=<on|off>
    gates:      enabled=<on|off> (commit gate: secret + verification-weakening block)
    sprint:     capacity=<n|미설정> max_stack_depth=<n> history=<count> runs
+               refactor_slot=<on|off> (키가 없으면 on)
                window=<HH:MM-HH:MM|미설정>
                board=<#n (<column_field>) · 마지막 시딩(plan) <last_projected>|미설정>
                ⚠ `last_projected` 는 `plan --create` 만 쓴다 — **"마지막 투영"이 아니다.**
@@ -52,6 +54,7 @@ Parse `$1` onward:
      non-integers: a cap of 0 would block every dependent Issue in every sprint. A value of 1
      is meaningful — it means "no stacking, every PR targets the default branch", which is what
      `sprint plan` proposes when the repo forbids merge commits.
+   - `refactor_slot` ∈ {on→true, off→false} (sets `sprint.refactor_slot`).
    - `window` — **`HH:MM-HH:MM (24h, zero-padded)`**, or `none` to clear it (writes `null`).
      Reject: a missing zero (`9:00`), `HH` outside 00-23, `MM` outside 00-59, and
      **start == end** (say *"omit the window instead"*). `~` is accepted as the separator and
@@ -75,13 +78,23 @@ to catch up — and `retro` measures how often that happened before recommending
 `null` until then — a repo without a board is not in an error state (D2). Its `last_projected`
 is refreshed by `sprint plan --create`.
 
+### `--refactor-slot=<on|off>`
+
+The sprint refactor slot (`sprint.refactor_slot`, default `true`). With it on, `/gld sprint plan`
+reserves one member per sprint for a behavior-preserving refactor of the code that sprint is
+about to touch — reserved, not forced: when nothing qualifies the slot stays empty and the
+tracker records why (`sprint/plan.md` "Refactor slot"). The slot sits **inside** capacity.
+⚠ **An absent key means `on`** — configs written before this key existed get the slot too.
+`off` is for a repo whose refactors are planned elsewhere; the tracker then records
+`skip (disabled)`.
+
 ### `--window=<HH:MM-HH:MM|none>`
 
 The **run window** (`sprint.window`, default `null`). `/gld sprint run` starts a new member only
 inside it and otherwise waits, the way it already waits out a rate limit whose reset is within 4h; a member that started
 at 09:59 runs to the end. `--window none` clears the value.
 
-Same `=` syntax as the four dials above. ⚠ **`sprint run`'s flag takes a space *or* an `=`**
+Same `=` syntax as the five dials above. ⚠ **`sprint run`'s flag takes a space *or* an `=`**
 (`--window 22:00-10:00`), and its `--duration` alias is a **`run` flag only** — it is not a
 config key and there is no `--duration=` setter here.
 
@@ -95,6 +108,6 @@ same gap `commands` has (see Notes). ⚠ **`sprint.window` is not in that set** 
 (above), so do not add it to the "no setter" list.
 
 ## Notes
-- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, history[], board, window} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
+- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, refactor_slot, history[], board, window} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
 - `roles` is edited by init (and by evolve HR later), not by `config` in M1 — editing the active roster manually is possible but unsupported as a config command yet.
-- `commands` (test/lint/typecheck/build/e2e), `sprint.capacity`/`sprint.history` and `sprint.board` have the **same gap** (⚠ `sprint.window` does **not** — it has a `--window=` setter): they are part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for them (`sprint.max_stack_depth` does have one) — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.
+- `commands` (test/lint/typecheck/build/e2e), `sprint.capacity`/`sprint.history` and `sprint.board` have the **same gap** (⚠ `sprint.window` does **not** — it has a `--window=` setter): they are part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for them (`sprint.max_stack_depth` and `sprint.refactor_slot` do have one) — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.

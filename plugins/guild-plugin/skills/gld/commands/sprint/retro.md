@@ -72,7 +72,7 @@ an answer you already received is not.**
 gh issue list --state all --limit 200 --json number,title,labels,state,body --jq '{total: length, members: [.[] | select((.body // "") | contains("Sprint: #<tracker>")) | {number, title, state, labels: [.labels[].name]}]}'
 ```
 ```bash
-gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,closingIssuesReferences --jq '[<m1>,<m2>,<m3>] as $m | {total: length, prs: [.[] | ([.closingIssuesReferences[]?.number] | map(select(. as $n | $m | index($n)))) as $c | ((.headRefName // "") | test("(^|[^0-9])#?(<m1>|<m2>|<m3>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end)}]}'
+gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,closedAt,reviewDecision,closingIssuesReferences --jq '[<m1>,<m2>,<m3>] as $m | {total: length, prs: [.[] | ([.closingIssuesReferences[]?.number] | map(select(. as $n | $m | index($n)))) as $c | ((.headRefName // "") | test("(^|[^0-9])#?(<m1>|<m2>|<m3>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, closedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end)}]}'
 ```
 (substitute the tracker and the member numbers literally.)
 
@@ -157,6 +157,27 @@ Sources, and **what each is honestly derived from**:
 | 리뷰 변경 요청률 | `reviewDecision == CHANGES_REQUESTED` / 멤버 PR | PR |
 | 닫힌-미머지 PR | 사람이 거절한 작업 | PR `state == CLOSED` + `mergedAt == null` |
 
+**The refactor slot's outcome** — not a tenth metric (the slot is already counted in the nine as
+a member), but the one member whose fate the next `plan` reads back. Take it from the tracker
+body's **리팩토링 슬롯** line (`plan.md` Phase 6), the slot member's PR, already in hand, and
+one read of the slot Issue — `gh issue view <slot> --json body,state,closedAt` (the members
+query keeps no body). `state`/`closedAt` decide the *Issue closed, no PR* row below; the body's
+**Files** section is Phase 4's `paths` — read it here so an unattended retro, which stops after
+Phase 3, still has it:
+
+| tracker line | slot PR | outcome token |
+|---|---|---|
+| `#<n> (existing)` · `#<n> (drafted)` | merged | `merged` |
+| `#<n> (existing)` · `#<n> (drafted)` | `CLOSED` unmerged | `refused` |
+| `#<n> (existing)` · `#<n> (drafted)` | none, **slot Issue closed** | `refused` — the human rejected it before any PR; `closed_at` is the Issue's |
+| `#<n> (existing)` · `#<n> (drafted)` | open / none, Issue open | `carryover` |
+| `skip (<token>)` | — | `skip:<token>` |
+| line absent (a tracker planned before the slot existed) | — | **no outcome** — omit the field; do not invent `skip` |
+
+⚠ **`refused` is the signal, `skip` is not.** A human closing the slot's PR says the slot picked
+the wrong refactor; a `skip` says only that nothing qualified or the human chose features this
+time. Phase 3 names a `refused` slot by number; a run of `skip:no-candidate` is not a defect.
+
 **The event log** — one call, and it spans **every run of this sprint**, not just the last:
 ```bash
 wc -l .claude/guild/.sprint-logs/<tracker>/failures.jsonl
@@ -233,6 +254,7 @@ Sprint #99 — 결제 흐름 안정화        (13일 · run 2회 · 계획 7개)
   스택          최대 3단 · 자연 단축 2회
   리뷰 변경요청 2/5 PR (40%)
   닫힌-미머지   0건
+  리팩토링 슬롯 #140 — merged (src/payment/state.ts · #101·#102의 기반)
 
 ▎계획 대비
   계획 시 판단: "7개 — 첫 스프린트, 기초 1개 + 독립 6개로 보수적"
@@ -278,7 +300,9 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
   "capacity": 7,
   "max_stack_depth": 3,
   "history": [
-    { "sprint": 99, "planned": 7, "merged": 5, "carryover": 2, "needs_human": 2 }
+    { "sprint": 99, "planned": 7, "merged": 5, "carryover": 2, "needs_human": 2,
+      "refactor": { "issue": 140, "outcome": "merged", "paths": ["src/payment/state.ts"],
+                    "merged_at": "2026-09-30T04:12:00Z", "closed_at": null } }
   ]
 }
 ```
@@ -298,6 +322,23 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
    ⚠ Older entries may have a **different shape** (a field this version does not write, or a
    missing one). Keep them byte-intact and do not normalize them — `plan` reads the trend
    defensively. Only the entry for *this* sprint is written by this command.
+4b. **`refactor`** — the slot outcome above, plus:
+   - `paths` — from the slot Issue's **Files** section, which every drafted slot has (read in
+     Phase 2 — see the slot outcome above); ⚠ not the
+     **Why** line, which names the evidence hotspot, not what the refactor reshapes). An
+     `existing` slot written by a human or by `audit` may have no Files: then take the
+     source-dir files the slot's PR changed (`gh pr view <pr> --json files`). Record the paths
+     the refactor reshaped, not tests or generated files.
+   - `merged_at` — the slot PR's `mergedAt`, already in the PR list; `null` unless `merged`.
+   - `closed_at` — the slot PR's `closedAt`, in the same PR list, or the slot Issue's
+     `closedAt` when it was closed with no PR; `null` unless `refused`.
+   - `carryover` → `paths` as above, both dates `null`. `skip:*` → `"issue": null`,
+     `"paths": []`, both dates `null`.
+   ⚠ Always write **both** date keys, `null` where they do not apply. The next `plan`'s
+   tech-lead checks PAST SLOTS against them — whether `fix:` commits kept landing on `paths`
+   after `merged_at` (merged) or `closed_at` (refused) — and it treats an **absent** key as
+   *"recorded before this field existed"*, not as `null` (`plan.md` "Refactor slot"). Omit the key entirely when the
+   outcome is *no outcome*.
 5. Write the full JSON back with the Write tool (2-space indent).
    **DRY**: skip 1–5 entirely and print the JSON that *would* be written.
 

@@ -1368,7 +1368,7 @@ EXPECT = {
     ("_bash_rules.md", 170): "A generated OS-level",
     ("_bash_rules.md", 172): "guild:auditor-violation",
     ("board_write.py", 4):  "Why this is code and not a series of Bash calls",
-    ("config.md", 14):      "unknown/unsupported config key",
+    ("config.md", 15):      "unknown/unsupported config key",
     ("init.md", 163):       "normalized, simple-bash-safe",
     ("run.md", 78):         "Not already running",
     ("sprint.md", 31):      "unknown subcommand",
@@ -2013,6 +2013,78 @@ RTPY
   hasfx "retro: disposition 토큰에 단어 경계를 건다" "$RETRO" 'match("\\bfixed\\b"'
 fi
 
+echo "== 14. 리팩토링 슬롯 — 예약이지 할당량이 아니다 =="
+
+# 슬롯이 "무조건"으로 변하면 근거 없는 리팩토링이 리뷰 처리량을 먹는다. 철자로 지킬 수 있는 것은
+# 게이트·용량·기록 토큰·의존 위치 네 가지다.
+PLAN14="$GLD/commands/sprint/plan.md"
+RETRO14="$GLD/commands/sprint/retro.md"
+CONFIG14="$GLD/commands/config.md"
+INIT14="$GLD/commands/init.md"
+hasfx "plan.md: 슬롯은 예약이지 강제가 아니다" "$PLAN14" "**reserved, not mandatory**"
+hasfx "plan.md: 슬롯도 readiness·크기 게이트를 면제받지 않는다" "$PLAN14" "the slot gets **no exemption**"
+hasfx "plan.md: 슬롯은 용량 안에서 센다" "$PLAN14" "counts inside the capacity, not on top of it"
+hasfx "plan.md: 슬롯은 준비하는 멤버의 기반으로 들어간다" "$PLAN14" "enters the graph as a foundation"
+hasfx "plan.md: 초안은 사람 승인 뒤 Phase 6 에서 만든다" "$PLAN14" "Create the refactor slot's Issue"
+hasfx "plan.md: 자리표시자는 기존 멤버보다 큰 번호다" "$PLAN14" "placeholder **\`999999999\`**"
+# 자리표시자 0 은 굵게·평문 어느 철자로도 되살아나면 안 된다 (fixed-string 이라 두 철자를 모두 막는다)
+lacksfx "plan.md: 자리표시자 0 이 되살아나지 않았다(평문)" "$PLAN14" "placeholder \`0\`"
+lacksfx "plan.md: 자리표시자 0 이 되살아나지 않았다(굵게)" "$PLAN14" "placeholder **\`0\`**"
+hasfx "plan.md: 슬롯이 깊이를 더할 때만 물러난다" "$PLAN14" "with-slot depth ≤ \`max(EFFECTIVE_CAP, without-slot depth)\`"
+hasfx "plan.md: 슬롯이 돌려준 자리는 기능 멤버로 채운다" "$PLAN14" "A seat the slot gives back is refilled"
+hasfx "plan.md: PO 가 refactor 후보 전부를 평가한다" "$PLAN14" "rate every candidate tagged \`refactor\` or \`refactor-slot\`, whether or not you selected it"
+hasfx "plan.md: 기각은 슬롯을 비우지 않는다(재스폰 1회)" "$PLAN14" "Rejecting a pick does not empty the slot — one re-spawn"
+hasfx "plan.md: 준비 실패한 초안도 재스폰한다" "$PLAN14" "a draft rejected **only** because it prepares no selected member"
+hasfx "plan.md: 기각된 PO 기능 픽은 기능 후보로 돌아간다" "$PLAN14" "A rejected pick the product-owner ranked as a feature goes back to the feature picks"
+hasfx "plan.md: 어떤 이유로든 슬롯이 떠나면 보충" "$PLAN14" "**for any reason**"
+hasfx "plan.md: stack-cap 슬롯만 재입장 가능" "$PLAN14" "**only a \`skip (stack-cap)\` slot**"
+lacksfx "plan.md: 준비 확인이 용량 컷 이전 문구로 돌아가지 않았다" "$PLAN14" "After the feature picks are settled, require"
+hasfx "retro.md: PR 없이 닫힌 슬롯 이슈는 refused" "$RETRO14" "none, **slot Issue closed**"
+hasfx "plan.md: 재실행은 고아 슬롯 이슈를 먼저 쓴다" "$PLAN14" "**A resumed slot**"
+hasfx "plan.md: 초안 본문에 Files 가 들어간다" "$PLAN14" "(Why · Files ·"
+hasfx "plan.md: fetch 는 리더가 한다(서브에이전트는 읽기 전용)" "$PLAN14" "The fetch is the leader's, not the sub-agent's"
+hasfx "retro.md: paths 는 Files 에서 온다" "$RETRO14" "from the slot Issue's **Files** section"
+hasfx "plan.md: 슬롯은 선택된 멤버를 준비해야 한다" "$PLAN14" "The slot must prepare this sprint's work"
+hasfx "plan.md: 재스폰은 (c) 만 deps-slot.md 에 쓴다" "$PLAN14" "asking for **(c) only**"
+hasfx "plan.md: 재스폰은 기각된 번호를 넘긴다" "$PLAN14" "Pass the rejected numbers, not"
+hasfx "plan.md: fetch 는 refspec 형식이다" "$PLAN14" "git fetch origin <d>:refs/remotes/origin/<d>"
+hasfx "plan.md: fetch 실패 경로" "$PLAN14" "PAST SLOTS: unverifiable"
+hasfx "plan.md: CANDIDATES 에 tag 필드" "$PLAN14" "tag (\`refactor-slot\` | \`refactor\` | \`—\`)"
+hasfx "plan.md: 재개 슬롯은 최신 트래커 이후 생성분만" "$PLAN14" "**and** it was created after"
+hasfx "plan.md: 자리는 슬롯 아니면 보충분, 둘 다는 아니다" "$PLAN14" "The seat is the slot's or the refill's, never both"
+hasfx "retro.md: 슬롯 본문을 따로 읽는다" "$RETRO14" "gh issue view <slot> --json body"
+hasfx "plan.md: fetch 실패 대체 규칙이 tech-lead 가 읽는 절에 있다" "$PLAN14" "**DEFAULT BRANCH \`unavailable\`** (the fetch failed)"
+hasfx "plan.md: unverifiable 이어도 항목은 넘긴다" "$PLAN14" "**keep the entries**"
+hasfx "plan.md: 트래커가 한 번도 없으면 시간 조건 충족" "$PLAN14" "tracker has ever existed → the bound is met"
+hasfx "plan.md: 보충이 촉발한 재계산은 슬롯을 다시 들이지 않는다" "$PLAN14" "that the slot's own refill triggers never re-admits the slot"
+hasfx "plan.md: PAST SLOTS 는 merged/refused 만 본다" "$PLAN14" "**Only \`merged\` and \`refused\` entries are checked**"
+hasfx "plan.md: 출처와 무관하게 라벨 없는 슬롯에 라벨을 묻는다" "$PLAN14" "of any origin: draft, resumed or existing"
+hasfx "plan.md: 자리표시자가 본문·보드에 새지 않는다" "$PLAN14" "\`999999999\` must not reach"
+lacksfx "plan.md: 'rerun Phase 4' 지시가 되살아나지 않았다" "$PLAN14" "rerun Phase 4"
+hasfx "plan.md: 재실행이 같은 슬롯 이슈를 찾는 마커" "$PLAN14" "<!-- guild:refactor-slot -->"
+hasfx "plan.md: 트래커에 슬롯 줄이 항상 있다" "$PLAN14" "The 리팩토링 슬롯 line is always written"
+hasfx "plan.md: 슬롯 기록 토큰 집합" "$PLAN14" "skip (<disabled|no-candidate|not-ready|capacity|stack-cap|human-declined|ad-hoc>)"
+hasfx "plan.md: git 스캔은 Step 0·1 만" "$PLAN14" "**Step 0 and Step 1 only**"
+hasfx "plan.md: 슬롯 조상에게는 간선을 걸지 않는다(순환 방지)" "$PLAN14" "Never add the edge to an ancestor of the slot"
+hasfx "plan.md: 슬롯이 기능 멤버의 스택 자리를 빼앗지 않는다" "$PLAN14" "The slot never costs a feature member its place in the stack"
+hasfx "plan.md: 상한 초과 시 슬롯은 통째로 물러난다(간선 일부 삭제 금지)" "$PLAN14" "Do **not** keep the slot by deleting some of its edges"
+hasfx "plan.md: 준비 안 된 기존 refactor 이슈는 초안 경로를 막지 않는다" "$PLAN14" "does not end the search"
+hasfx "plan.md: (c) 는 슬롯이 바꿀 파일을 적는다" "$PLAN14" "**Files** — the source files the slot reshapes"
+hasfx "plan.md: PAST SLOTS 는 기본 브랜치를 읽는다" "$PLAN14" "git log origin/<default-branch> --since=<date>"
+hasfx "plan.md: 라벨 확인은 Phase 0 의 --limit 200 목록을 쓴다" "$PLAN14" "**Phase 0 step 2's label list**"
+hasfx "plan.md: --create 가 라벨 생성을 승인하지 않는다" "$PLAN14" "Ask this even under \`--create\`"
+hasfx "plan.md: 슬롯 readiness 는 더 엄격하다" "$PLAN14" "its readiness gate is **stricter**"
+hasfx "retro.md: refused 에 closed_at 을 쓴다" "$RETRO14" "\`closed_at\` — the slot PR's \`closedAt\`"
+hasfx "retro.md: PR 조회가 closedAt 을 가져온다" "$RETRO14" "mergedAt,closedAt,reviewDecision"
+hasfx "retro.md: history 에 merged_at 을 쓴다" "$RETRO14" "\`merged_at\` — the slot PR's \`mergedAt\`"
+hasfx "run.md: 즉석 경로는 skip (ad-hoc) 를 쓴다" "$GLD/commands/sprint/run.md" "리팩토링 슬롯 \`skip (ad-hoc)\`"
+hasfx "retro.md: 슬롯 결과에 refused 가 있다" "$RETRO14" "\`refused\` is the signal, \`skip\` is not"
+hasfx "retro.md: history 에 refactor 필드를 쓴다" "$RETRO14" '"refactor": { "issue": 140, "outcome": "merged"'
+hasfx "retro.md: 슬롯 줄이 없는 옛 트래커는 결과를 지어내지 않는다" "$RETRO14" "do not invent \`skip\`"
+hasfx "config.md: refactor_slot setter" "$CONFIG14" "--refactor-slot=<on|off>"
+hasfx "config.md: 키가 없으면 on" "$CONFIG14" "An absent key means \`on\`"
+hasfx "init.md: 기본 config 에 refactor_slot" "$INIT14" '"refactor_slot": true'
+
 # ── 규율 7 기계화 — 지시문의 모든 백분율이 등재돼 있는가 ──────────────────
 # ⚠ **존재 검사가 아니라 전수 대조다.** 라운드 6 에서 `verification.md 1.5%` 가 ① 도구가
 # 찍지 않는 수이면서 ② 반올림까지 틀린 채로 출하돼 있었다 — 검사가 없었기 때문이다.
@@ -2071,7 +2143,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=297   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=359   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

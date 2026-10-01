@@ -147,6 +147,42 @@ run "one foundation + many independents stays depth 2" \
 
 run "cycle -> exit 2" "{\"members\":[$(M 101:102 102:101)]}" linearize 2 ""
 
+# ⚠ 리팩토링 슬롯의 자리표시자 (sprint/plan.md Phase 4·6). 스크립트는 linearize 와 order 모두
+# 동순위를 번호 오름차순으로 푼다. 새 이슈 번호는 항상 기존 멤버보다 크므로, 자리표시자도 그보다
+# 커야 승인된 스택·순서가 실제 번호로 바꾼 뒤에도 같다. `0` 이면 뒤집힌다 — 아래 세 쌍이 그 근거다.
+run "slot placeholder 0 linearizes differently (why 0 is forbidden)" \
+  "{\"members\":[$(M 0: 101: 102:0,101 103:0)]}" linearize 0 \
+  "0 -
+101 0
+102 101
+103 0"
+run "real number 150: the slot stacks on #101" \
+  "{\"members\":[$(M 150: 101: 102:150,101 103:150)]}" linearize 0 \
+  "101 -
+102 150
+103 150
+150 101"
+run "placeholder 999999999 linearizes exactly like the real number" \
+  "{\"members\":[$(M 999999999: 101: 102:999999999,101 103:999999999)]}" linearize 0 \
+  "101 -
+102 999999999
+103 999999999
+999999999 101"
+run "order with the real number 140" \
+  "{\"members\":[$(B 140: 101:140 102:101 103: 104:103)]}" order 0 \
+  "103
+104
+140
+101
+102"
+run "order with placeholder 999999999 matches it" \
+  "{\"members\":[$(B 999999999: 101:999999999 102:101 103: 104:103)]}" order 0 \
+  "103
+104
+999999999
+101
+102"
+
 echo "== B. order / cycles =="
 
 run "order follows base_deps" \
@@ -523,7 +559,7 @@ printf 'sprint_dag: %d passed, %d failed\n' "$PASS" "$FAIL"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-DAG_MIN_CHECKS=60
+DAG_MIN_CHECKS=65
 if [ "$((PASS + FAIL))" -lt "$DAG_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${DAG_MIN_CHECKS}건)."
   exit 1

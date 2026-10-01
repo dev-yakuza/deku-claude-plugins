@@ -17,7 +17,7 @@ The known flags are **`--readiness`** · **`--window`** · **`--duration`** (= a
   --duration=<same>`. Today an unknown flag is silently dropped and the run starts, and the
   destructive case is the requirement's own spelling: `--duration 22:00-10:00` ignored leaves
   no non-flag argument, which reads as *"resume the active sprint"* and starts a **24-hour
-  unattended run with no window at all**. `sprint.md:31` and `config.md:14` already have the
+  unattended run with no window at all**. `sprint.md:31` and `config.md:15` already have the
   *"unknown → report it"* convention.
 - ⚠ **A flag's VALUE token is not counted as a non-flag argument.** Consume the value first,
   then look for the first non-flag token in what is left. (In `--window 22:00-10:00`, if
@@ -145,7 +145,7 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
 1. **Resolve `{owner}/{repo}`** once (`_handoff.md` Section F).
 2. **Find the sprint.**
    - `$1` empty → the open `guild:sprint` Issue. None → *"활성 스프린트가 없습니다. `/gld sprint plan`으로 먼저 계획하세요."* Two or more → ask which.
-   - `$1` = numbers → **create a tracking Issue for them first**, running `plan.md` Phase 4 (cycles → linearize → order → depth) and Phase 6 on the given set, with goal "즉석 스프린트" and capacity "사람 지정". ⚠ The ad-hoc path is **not** allowed to skip the container: the duplicate-run guard, the checkpoint, resume and `daily` all live in the tracking Issue's markers — without it none of them exist.
+   - `$1` = numbers → **create a tracking Issue for them first**, running `plan.md` Phase 4 (cycles → linearize → order → depth) and Phase 6 on the given set, with goal "즉석 스프린트", capacity "사람 지정" and 리팩토링 슬롯 `skip (ad-hoc)` (a `type:refactor` Issue among the numbers is an ordinary member, not a slot — `plan.md` Phase 6). ⚠ The ad-hoc path is **not** allowed to skip the container: the duplicate-run guard, the checkpoint, resume and `daily` all live in the tracking Issue's markers — without it none of them exist.
 3. **Duplicate-run guard.** Read the `<!-- guild:sprint:run -->` comment.
 
    | Observed | Verdict |

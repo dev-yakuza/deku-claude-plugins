@@ -112,6 +112,19 @@ Exclude: `guild:done` · `guild:sprint` (trackers) · `guild:child` (they arrive
 
 Apply `_handoff.md` Section A's **list-form** derivation per element to get each candidate's current stage — an Issue already mid-spine can be a member and will resume.
 
+**Mark the refactor candidates** — each candidate gets a `tag` in the CANDIDATES list Phase 2
+hands out:
+- `refactor-slot` — its body holds `<!-- guild:refactor-slot -->` **and** it was created after
+  the newest `guild:sprint` tracker (`gh issue list --label guild:sprint --state all --limit 1
+  --json number,createdAt` against `gh issue view <n> --json createdAt`, one call each; **no
+  tracker has ever existed → the bound is met**, which is the first sprint's case). That is
+  exactly the orphan of a `plan --create` that died before its tracker existed (Phase 6 step
+  0); the re-run reuses it instead of drafting a second one. ⚠ The time bound is what keeps a
+  slot the human once declined from claiming step 0 forever: after any later tracker exists it
+  is an ordinary `refactor`.
+- `refactor` — carries `type:refactor`, or holds the marker but is older than that tracker.
+- `—` — everything else.
+
 ## Phase 1b — Triage the intake (report now, write to the board later)
 
 ⚠ **This phase runs whether or not a board is configured.** The judging and the report are
@@ -165,21 +178,167 @@ candidate next time. The backlog unit after refinement is the **epic**, not its 
 
 ## Phase 2 — Select and order (product-owner ∥ tech-lead, parallel)
 
+**When REFACTOR SLOT is `on`, first fetch the default branch** — the tech-lead's git reads go
+against it (the "Refactor slot" section below). Its name: `gh repo view --json defaultBranchRef
+--jq .defaultBranchRef.name`; then `git fetch origin <d>:refs/remotes/origin/<d>` — the refspec
+form, because a bare `git fetch origin <d>` does not update `origin/<d>` in a single-branch
+clone (`_execute_spine.md` says the same). Each its own Bash call.
+⚠ The fetch is the leader's, not the sub-agent's: the tech-lead runs `scan_git.md`, whose rule is *local &
+read-only — no git mutations*, and that stays true. Fetch fails (offline, an SSH remote with no
+agent while `gh` still works over HTTPS) → say so once, and pass `DEFAULT BRANCH: unavailable`
+and `PAST SLOTS: unverifiable — <the entries, verbatim>` — **keep the entries**: the flag says
+they cannot be checked, not that they are gone. What the tech-lead does with these values is
+in the "Refactor slot" section, which is the only part of this file it reads.
+
 As the leader, spawn BOTH role sub-agents in one message (independent, concurrent). Reuse the prompt *shape* of `plan.md` Phase 1, but the job is **selection, not decomposition**.
 
 **Product Owner** (value):
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `product-owner sprint select`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. Propose (a) **one sentence** naming what this iteration is for, and (b) the candidates that serve it, in priority order. For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Recommend excluding any candidate with an `unclear` dimension** and say why: unattended, the leader would have to guess that gap alone. Write the result to a FILE `docs/specs/sprint-<slug>/po.md` (do not paste it back).
+  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. Propose (a) **one sentence** naming what this iteration is for, and (b) the candidates that serve it, in priority order. For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Recommend excluding any candidate with an `unclear` dimension** and say why: unattended, the leader would have to guess that gap alone. **Do not select a candidate tagged `refactor-slot`** (an orphaned refactor-slot draft — the slot logic handles it), **and rate every candidate tagged `refactor` or `refactor-slot`, whether or not you selected it** — the leader may take one as the sprint's refactor slot and needs your ratings to do so. Write the result to a FILE `docs/specs/sprint-<slug>/po.md` (do not paste it back).
   > <!-- guild:result-contract -->
   > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
   > <!-- /guild:result-contract -->
-  > CANDIDATES: <number · title · one-line scope · current stage, for each>.
+  > CANDIDATES: <number · title · one-line scope · current stage · tag (`refactor-slot` | `refactor` | `—`), for each>.
 
 **Tech Lead** (dependencies and size):
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `tech-lead sprint select`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/tech-lead.md`. From the same CANDIDATES (below) and `docs/standards/architecture.md`, produce (a) the **dependency relations** among them — which is a foundation for which, using the `Depends on: #<n>` notes in the bodies as input and correcting them where the code says otherwise — and (b) a **size** verdict per candidate: single dev-unit ✅, or ⚠ **likely to split at design**. Do NOT read the product-owner's output; judge independently. Write to a FILE `docs/specs/sprint-<slug>/deps.md`. Return one `>>> RESULT <<<` line. CANDIDATES: <same as above>.
+  > Adopt the persona in `.claude/agents/tech-lead.md`. From the same CANDIDATES (below) and `docs/standards/architecture.md`, produce (a) the **dependency relations** among them — which is a foundation for which, using the `Depends on: #<n>` notes in the bodies as input and correcting them where the code says otherwise — and (b) a **size** verdict per candidate: single dev-unit ✅, or ⚠ **likely to split at design**, plus the source files each candidate will most likely touch. Do NOT read the product-owner's output; judge independently. **When REFACTOR SLOT is `on`**, also produce (c) **one refactor-slot proposal** (rules: the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md` — read that section before writing (c), not the whole file). Write to a FILE `docs/specs/sprint-<slug>/deps.md`. Return one `>>> RESULT <<<` line. CANDIDATES: <same as above>. REFACTOR SLOT: <`on` | `off`>. DEFAULT BRANCH: <the repo's default branch name — the leader has already fetched `origin/<it>` — or `unavailable`>. PAST SLOTS: <the `refactor` field of every `config.sprint.history` entry that has one, or `none`>.
+
+### Refactor slot — one per sprint, reserved, never forced
+
+**Every sprint reserves one member slot for a behavior-preserving refactor** that pays down
+the codebase the sprint is about to work in. The slot is **reserved, not mandatory**: an empty
+slot is a legitimate outcome **with a recorded reason**, and a weak refactor taken to fill it
+is the failure this section exists to prevent. It costs one PR of the human's review
+throughput, so it is the cheapest unit of codebase improvement that still goes through review.
+
+**Switch**: `config.sprint.refactor_slot` — `true`, or **absent** (a config written before
+this key existed) → `on`; `false` → `off`. `off` skips (c) entirely and the tracker records
+`skip (disabled)`.
+
+Every git read below goes against `origin/<default-branch>` (fetched by the leader before
+the spawn — Phase 2's lead paragraph), so a stale clone or a checkout on a feature branch
+cannot hide recent commits. **DEFAULT BRANCH `unavailable`** (the fetch failed) → read `HEAD`
+instead, and say in (c) that the evidence may be stale. **PAST SLOTS `unverifiable — …`** →
+run no PAST SLOTS git check; treat the `paths` of every listed `merged` or `refused` entry as
+excluded from this sprint's slot.
+
+The tech-lead fills (c) in this order and stops at the first that yields a **ready**
+candidate — all three readiness dimensions `clear` **and** size ✅ (the bar below). A
+candidate that fails it does not end the search; go on to the next step:
+
+0. **A resumed slot** — a candidate tagged `refactor-slot` (Phase 1). It is a draft an
+   earlier `plan --create` made and the human approved, orphaned when that run died before
+   the tracker existed (Phase 6 step 0). Take it ahead of everything else and judge it
+   by the draft's bar (the tech-lead's own ratings), not the existing-Issue bar — otherwise a
+   re-run drafts a second Issue beside it.
+1. **An existing candidate tagged `refactor`** (Phase 1). Prefer one whose area overlaps the
+   files this sprint's other candidates will touch. ⚠ A stale, vague `type:refactor` Issue
+   (*"clean up X"*) is the common case here; rate it honestly and fall through to 2 rather
+   than letting it occupy the slot every sprint as a `skip (not-ready)`.
+2. **A new draft**, from evidence. Run `<<SKILL_DIR>>/commands/atoms/scan_git.md`'s **Step 0 and Step 1 only** (fix
+   concentration, scoped to the source dir, with `origin/<default-branch>` as the revision
+   — `git log origin/<default-branch> --name-only … -80 -- <dir>`) — ⚠ not the whole scan; churn, co-change and
+   conventions are evolve's inputs, not this slot's. Intersect the hotspot list with the
+   files the other candidates will touch, and Read **at most ~3** of the intersecting files
+   (the same bound `audit.md` dimension F uses). Draft the refactor that **makes those
+   candidates' change easier** — a seam, an extraction, a duplication removed — in the
+   Issue shape below.
+3. **Nothing qualifies** → `none: <token>` — `no-candidate` (no hotspot overlaps this sprint's
+   work, or no change found that would make it easier).
+
+Whichever step yields it, (c) states for the slot:
+- **Files** — the source files the slot reshapes. For an existing Issue, derive them from its
+  body and the code. The leader builds the slot's edges from this list and (b)'s per-candidate
+  files (Phase 4); without it those edges are a guess.
+- **Prepares** — the candidate numbers it makes easier, and how.
+- **Readiness** — Goal / Constraint / Success-criteria each rated `clear` / `partial` /
+  `unclear` (ASCII tokens), with one line on each rating below `clear`.
+
+A draft for (2) also carries, all in `config.language` (tokens stay ASCII):
+- **Title** — what is reshaped, and where.
+- **Files** — as above, written into the Issue (Phase 6 step 0) so that a resumed slot and
+  `retro` read the same list Phase 4 built edges from.
+- **Why** — the evidence: path · `fix:` count in the window · what is hard about it today.
+- **Goal / Constraint / Success-criteria** — `_readiness.md`'s three dimensions. Constraint
+  always includes *"behavior unchanged — no test is weakened or deleted"* (INV2).
+  Success-criteria must be checkable from the diff: existing tests stay green, plus one
+  structural criterion (a named function extracted, a duplicate gone, a dependency cut).
+  ⚠ *"Code is cleaner"* is not a criterion — it is the `unclear` that Phase 2 excludes.
+
+⚠ **PAST SLOTS is a check, not a quota.** Each entry is `{issue, outcome, paths, merged_at,
+closed_at}` (`retro.md` Phase 4). Read `origin/<default-branch>` (fetched by the leader), not
+the local checkout — a stale clone or a feature branch has no commits after the date and
+answers *"no hits"* falsely. **Only `merged` and `refused` entries are checked**; ignore
+`carryover` and `skip:*` entries (no paths, no date). One call per checked entry (substitute
+the literal values):
+```bash
+git log origin/<default-branch> --since=<date> --oneline --grep='^fix[(:]' -i -- <paths>
+```
+(the same subject check as `scan_git.md` Step 1 — discard hits whose subject does not start
+with `fix`).
+- **`merged`** (`<date>` = `merged_at`) → do not propose the same `paths` again unless there are
+  hits; then you may, and say so in (c) as a finding: the earlier refactor did not hold.
+- **`refused`** (`<date>` = `closed_at`) → the human closed that slot's PR. Do not propose the
+  same `paths` again unless there are hits, or a candidate this sprint needs the change; name
+  that evidence in (c).
+- An entry whose `paths` key or date key is **absent** (a slot recorded before these fields
+  existed) gives no basis either way — ignore it rather than guessing. A `null` date is not
+  absence: `merged_at` is `null` on every `refused` entry by design.
+
+**The leader's arbitration of (c)** — the slot gets **no exemption** from the gates every
+other member passes, and its readiness gate is **stricter**: all three dimensions `clear`, where
+a feature member may carry a `partial`. An optional member has no reason to carry a gap that
+unattended the leader would have to guess alone:
+- any readiness dimension below `clear` → do not take it. For a **draft** record
+  `skip (not-ready)`; a step-0 or step-1 pick goes to the re-spawn bullet below instead.
+- size ⚠ **likely to split** → the same: a draft records `skip (not-ready)`, a step-0 or step-1
+  pick goes to the re-spawn.
+- ⚠ **A new draft was never in the product-owner's CANDIDATES**, so its readiness comes from
+  the tech-lead's own **Readiness** ratings in (c). Re-read the draft's Success-criteria
+  yourself before accepting a `clear` — the author of a draft is the one reader least likely to
+  see its gap. For an existing Issue (step 1), the product-owner's ratings and the
+  tech-lead's must both be `clear`; a resumed slot (step 0) is judged as a draft.
+- ⚠ **The slot must prepare this sprint's work.** The tech-lead chose it from the whole
+  candidate set, in parallel with the product-owner, so it cannot know which candidates
+  become members. Once Phase 3 has cut the feature picks to capacity, require that
+  **Prepares** names at least one selected feature member, or that its **Files** share a file
+  with one. Neither → it pays down code nobody in this sprint touches; reject it (next
+  bullet). Re-check this after **any** change to the feature set — the Phase 3 capacity cut, a
+  Phase 3 refill, a Phase 4 cut, a Phase 5 edit.
+- ⚠ **Rejecting a pick does not empty the slot — one re-spawn.** A rejected step-0 or step-1
+  pick, or a draft rejected **only** because it prepares no selected member (the draft was
+  aimed at the whole candidate set; a hotspot under the actual members may well exist), gets
+  **one** re-spawn per `plan` run, and it always runs **after the Phase 3 capacity cut** — a
+  readiness or size rejection made during Phase 2 waits until then, so the re-spawn gets the
+  real member list. Spawn the tech-lead once more, asking for **(c) only** —
+  *"exclude #<n>[, #<m>]; continue the search order from where those were; draft against the
+  selected feature members' files"* — with the same CANDIDATES (tags included), REFACTOR SLOT, DEFAULT BRANCH and
+  PAST SLOTS as the first spawn, plus the selected feature members and the path of `deps.md`
+  (its (b) per-candidate files are step 2's input). It writes `deps-slot.md`, leaving
+  `deps.md`'s (a)/(b) untouched; from then on Phase 4 reads the slot's **Files** and
+  **Prepares** from `deps-slot.md`. Pass the rejected numbers, not *"step 1 is exhausted"*: another
+  existing `refactor` Issue may still qualify. Arbitrate that (c) the same way; if it is
+  rejected too, or comes back `none`, the slot ends in a `skip` keyed on the **final**
+  attempt's reason — `skip (no-candidate)` when it prepares no member or came back `none`,
+  `skip (not-ready)` when it failed readiness or size. A draft rejected for readiness or
+  size ends in `skip (not-ready)` without a re-spawn.
+  From then on Phase 5's evidence lines and Phase 6 step 0's Issue body also come from
+  `deps-slot.md`.
+- ⚠ **A rejected pick the product-owner ranked as a feature goes back to the feature picks**
+  at its product-owner rank and competes under the feature gates (a `partial` is allowed
+  there). Rejecting it as the slot is not rejecting it as work the product-owner wanted. Redo
+  the Phase 3 cut with it at that rank — it may displace the lowest-ranked feature; the sprint
+  never holds more than capacity. The same applies when the human drops such a slot in Phase 5
+  (`skip (human-declined)` removes its slot role, not the Issue), unless the human drops the
+  Issue itself.
+- otherwise it is a member, tagged `🧹 리팩토링 슬롯` in the member table. A draft is **not
+  created** here — Phase 6 step 0 creates it, after the human approves.
+- ⚠ **One Issue, one role.** A `refactor` or `refactor-slot` candidate the product-owner also
+  ranked as a feature pick is the slot, not both — remove it from the feature picks, or the sprint holds
+  one fewer member than the capacity reasoning says.
 
 Collect both RESULTs and **arbitrate as the leader** into one candidate set plus a dependency edge list.
 
@@ -193,16 +352,76 @@ Collect both RESULTs and **arbitrate as the leader** into one candidate set plus
 | size per candidate | tech-lead |
 | dependency chain depth | `sprint_dag.py --mode depth` (Phase 4) |
 | readiness | the product-owner's three dimensions |
+| refactor slot | Phase 2's arbitration of (c) |
 
 No history (first sprint) → **be conservative**: the top ~5 candidates with no `unclear`
 dimension, and a chain depth within the cap. Record the *reasoning* as a sentence in the
 tracking Issue body — `retro` compares against it.
+
+⚠ **The refactor slot counts inside the capacity, not on top of it.** Capacity is the human's
+PR-review throughput (`retro.md` Phase 4), and a refactor PR is reviewed like any other. A
+capacity of 5 with the slot filled is 4 feature members plus the slot. Do **not** drop the slot
+to make room for a fifth feature unless capacity is 1 — then record `skip (capacity)`.
+⚠ **A seat the slot gives back is refilled.** Whenever the slot leaves after the capacity
+cut, **for any reason** (the prepares check below the cut, `skip (stack-cap)` in Phase 4, the
+human dropping it in Phase 5), take the next-ranked
+feature pick that passes the usual gates into its seat and redo Phase 4. Otherwise a slot that
+did not happen silently costs the sprint a feature member — the opposite of its hard rule.
+No such pick → leave the seat empty and say so in **용량 판단**.
+⚠ **The seat is the slot's or the refill's, never both.** If a later recompute lets the slot
+back in (Phase 4's comparison after a feature-set change, or the human accepting a depth),
+the refilled pick leaves again — otherwise the sprint holds capacity + 1. ⚠ **The recompute
+that the slot's own refill triggers never re-admits the slot** — only a change unrelated to it
+(a cut the human accepts, a Phase 5 edit) can, and **only a `skip (stack-cap)` slot** can be
+re-admitted at all: a slot the human declined, or one rejected at arbitration, stays out. Otherwise refill → slot fits → refill leaves →
+slot over the cap → refill returns loops without end.
 
 ## Phase 4 — Cycles → linearize → order → depth
 
 Write the graph to a temp JSON with the **Write tool** (`_sprint_dag.md` Section F), then one Bash call per mode. **Absorb every exit code and branch on the value** — these are meaningful non-zero codes, not failures (`_sprint_dag.md` Section C).
 
 ⚠ **TWO input files, not one.** `cycles` and `linearize` read `deps` (the declaration); `order`, `depth` and `base` read **`base_deps`**, which is step 2's *output*. Passing one file through all four modes therefore asks the last three to read a key that is not there yet. The script now refuses that (exit 64) rather than answering — it used to return issue-number order, `depth 1` and `DEFAULT` for every member, all with exit 0, so nothing warned. **After step 2, write a second file** with each member's `base_deps` set from the `linearize` output, and point steps 3–4 at it.
+
+**When Phase 2 accepted a slot** (the next three paragraphs; with no slot — `skip`, `off`, or
+the ad-hoc path — Phase 4 runs once, as numbered below):
+
+**The refactor slot enters the graph as a foundation.** In the with-slot graph, add the slot to the
+`deps` of every member listed in its **Prepares**, and of every member whose (b) files share a
+file with the slot's **Files**. ⚠ This is what keeps the slot from colliding
+with the work it prepares: two parallel PRs on one hotspot file conflict, and INV3 forbids the
+rebase that would resolve it; one stacked under the other is only an order.
+- ⚠ **Never add the edge to an ancestor of the slot.** If the slot already depends on a member,
+  directly or through others (an existing Issue's `Depends on:` can say so), that member is
+  below the slot in the stack already — the two are ordered, not parallel, and the extra edge
+  would only make a cycle that fails the whole sprint at step 1 over an optional member.
+- **A draft has no Issue number yet** — give it the placeholder **`999999999`** in both files
+  and present it as `#(신규)`. ⚠ **Not `0`, and not any small number.** The script breaks ties
+  by issue number (in `linearize` and in `order`), and `run` recomputes the order from the
+  table with the real number (`run.md` Phase 1 step 5). A new Issue always gets a number above every
+  existing member, so a placeholder above them too breaks every tie the same way the real
+  number will; `0` breaks them the opposite way, and the stack and order the human approves
+  would not be the ones that run. Phase 6 step 0 swaps the real number in.
+
+**The slot never costs a feature member its place in the stack — it yields instead.** Run
+steps 1–4 twice, as two independent pairs of files (each pair is the `deps` file and its
+`base_deps` file from the TWO-files rule above — four files in all): first **without** the
+slot, then **with** it. Compare the two `depth` values:
+- with-slot depth ≤ `max(EFFECTIVE_CAP, without-slot depth)` → the slot adds no depth beyond
+  what the feature work already needs; **keep it**, and use the with-slot results. If the
+  without-slot depth itself exceeds the cap, step 4's usual proposal applies — to feature work.
+- otherwise the slot is what lengthens the stack past the cap: it leaves the sprint — record
+  `skip (stack-cap)` and use the without-slot results.
+- After **any** change to the feature set (a cut the human accepts, a refill below), redo both
+  runs and this comparison; a slot that was over the cap may now fit, and the reverse (but see
+  Phase 3: the slot's own refill never re-admits it).
+
+⚠ Do **not** keep the slot by deleting some of its edges: every edge exists because a
+member is prepared by it or shares a file with it, so a deleted edge either leaves a Prepares
+member building on the pre-refactor code or puts two PRs on one file in parallel.
+⚠ At `EFFECTIVE_CAP = 1` a slot always has an edge (it must prepare a member — Phase 2), so
+the comparison removes it unless the feature work already needs a deeper stack the human
+accepted. The human may also accept the slot's depth after being told — then keep it and
+record the override like any other over-cap acceptance.
 
 1. `--mode cycles` → exit **3** means a cycle exists: show the witness path and `FAIL`. **A cycle must be caught here** — reaching an unattended run with one is a deadlock.
 2. `--mode linearize` → each member's `base_dep`. This is what gets written to the member table.
@@ -218,11 +437,15 @@ Write the graph to a temp JSON with the **Write tool** (`_sprint_dag.md` Section
 
 ▎목표: <한 문장>
 
-  ① #101  결제 상태 머신 정리   base: —        🏗 기초   readiness: clear/clear/clear
-  ② #102  타임아웃 재시도       base: #101 ⚠   (원래 독립 — #104의 fan-in을 체인으로)
-  ③ #104  실패 로그 집계        base: #102     스택 3단  원래 의존: #101, #102
-  ④ #103  영수증 재발행         base: —                  readiness: clear/partial/clear
+  ① #103  영수증 재발행         base: —        🏗 기초   readiness: clear/partial/clear
+  ② #104  실패 로그 집계        base: #103               원래 의존: #103
+  ③ #(신규) 결제 상태 갱신 경로 통합  base: —        🧹 리팩토링 슬롯
+  ④ #101  결제 상태 머신 정리   base: #(신규)            원래 의존: #(신규)
+  ⑤ #102  타임아웃 재시도       base: #101     스택 3단  원래 의존: #101
   …
+  🧹 리팩토링 슬롯: #(신규) «결제 상태 갱신 경로를 한 곳으로» — #101이 이 위에 쌓입니다 (#102는 #101 위)
+       근거: src/payment/state.ts · 최근 fix: 커밋이 몰림 · 갱신 경로 3곳 중복
+       성공 기준: 기존 테스트 green · applyTransition() 하나로 통합
   제외 5개: #108(Success=unclear) · #110(⚠ 분할 예상) · …
   용량 판단: 7개 — <근거 한 줄>
   최대 스택 깊이: 3 (상한 3 — 경계)
@@ -231,6 +454,18 @@ Write the graph to a temp JSON with the **Write tool** (`_sprint_dag.md` Section
 이대로 만들까요? (드롭 / 추가 / 재범위 / 재정렬 요청 가능)
 ```
 
+When the slot is empty, the line says why instead of disappearing —
+`🧹 리팩토링 슬롯: 비움 (no-candidate) — 이번 후보들이 건드리는 hotspot 이 없습니다`.
+When the slot — of any origin: draft, resumed or existing — will not carry `type:refactor`, and
+**Phase 0 step 2's label list** has no `type:refactor`, add one line:
+`  ⚠ 이 레포에 type:refactor 라벨이 없습니다 — 만들까요? (없으면 기능 흐름으로 개발됩니다)`.
+⚠ Use that list (`--limit 200`), not a fresh `gh label list --json name`: without `--limit`
+gh returns 30 labels, so a repo with more reads an existing label as missing.
+⚠ **Ask this even under `--create`.** `--create` approves the sprint, not a repo-wide label
+that `init`, `update` and `audit` all deliberately never create. No explicit yes → no label.
+⚠ **The human dropping the slot is a normal edit**, recorded as `skip (human-declined)`. Do not
+argue for it beyond its evidence line; the slot is a proposal like every other member.
+
 Handle edits and re-present until the human approves. **Create nothing** without `--create` or an explicit approval — opening a sprint and rewriting member bodies are outward, hard-to-reverse actions (INV1).
 
 **Unattended** (`GLD_UNATTENDED=1`): do not create. Return `OK: unattended — sprint proposal requires a human`. ⚠ Do **not** use `OK PAUSE: needs-human`: that return obliges marking an Issue with the `guild:needs-human` label plus a comment so the pause is discoverable (`_handoff.md` Section H), and there is no tracking Issue yet to mark.
@@ -238,6 +473,33 @@ Handle edits and re-present until the human approves. **Create nothing** without
 ## Phase 6 — Create (`--create` or explicit approval)
 
 **Order matters. The label goes on before any member body is touched.**
+
+0. **Create the refactor slot's Issue** — only when the approved slot is a **draft**. (A
+   **resumed** slot already exists: skip creation, record it as `#<n> (drafted)` — it was
+   drafted, only by an earlier run.) For a resumed **or existing** slot without the label: if
+   the human approved creating it, run `gh label create type:refactor` first (its own call),
+   then add it with `gh issue edit <n> --add-label type:refactor`;
+   otherwise say once that the slot will run as a feature. When the repo already has the
+   label and only the slot lacks it, add it the same way — that is part of the sprint the
+   human approved, not a new repo-wide object. A draft goes
+   first because the member table needs its number. Body: the draft's sections (Why · Files ·
+   Prepares · Goal · Constraint · Success-criteria) and a `<!-- guild:refactor-slot -->` line —
+   the marker Phase 1 finds on a re-run. Temp file + `--body-file`; add `--label type:refactor`
+   **only if that label exists or was just created** (Phase 0 step 2's list, or the approved
+   `gh label create` below — `init.md` never creates `type:*`
+   labels, and `gh issue create --label <name>` errors on a missing one; the same rule as
+   `audit.md`). Then **swap the real number for `999999999`** everywhere Phase 4's results
+   hold it — the slot's own row, every `base 의존` and every `원래 의존` cell. Because the
+   placeholder breaks ties the way the real number does (Phase 4), the order and bases the
+   human approved are unchanged, so there is nothing to rerun. ⚠ `999999999` must not reach
+   the tracker body, a member back-reference (step 3) or a board write (step 5); grep the body
+   for it before step 1.
+   ⚠ **Without the label the slot is developed as a feature.** `dev.md` defaults an unlabelled
+   Issue to `implement.md`, not `refactor.md`, so the behavior-preserving discipline is lost
+   unless `analyze` happens to reclassify. So when the label is missing, Phase 5 asks to create
+   it (`gh label create type:refactor`, its own Bash call, before the Issue) — and only an
+   explicit yes to *that question* creates it. Declined or unanswered → create the Issue
+   without it and say the slot will run as a feature.
 
 1. **Create the tracking Issue** — title `Sprint: <goal>`, body from the template below, **no label yet** (temp file + `--body-file`).
 2. **Attach the label** — `gh issue edit <tracker> --add-label "guild:sprint"`. If the label is missing this dies here, with **every member body still intact**.
@@ -373,6 +635,7 @@ plan-hash: <sprint_dag.py --mode hash 의 출력>
 - 머지 전략: <merge commit 허용 여부> · 브랜치 자동삭제 <여부>
 - 스택 깊이 상한: <유효 상한 N>
 - 상한 근거: <"config" | "merge-commit-forbidden" | "human-override">
+- 리팩토링 슬롯: <"#<n> (existing)" | "#<n> (drafted)" | "skip (<disabled|no-candidate|not-ready|capacity|stack-cap|human-declined|ad-hoc>)">
 
 ## 멤버 (실행 순서 · 의존성 정본)
 | # | 이슈 | base 의존 | 원래 의존 | 비고 |
@@ -384,6 +647,13 @@ plan-hash: <sprint_dag.py --mode hash 의 출력>
 
 보드: <config.sprint.board.url>
 ```
+
+⚠ **The 리팩토링 슬롯 line is always written**, filled or not, and its value is a token, not
+prose — `retro` reads it to tell *"no slot was taken"* from *"the slot's PR was refused"*, and
+an omitted line reads as neither. The slot's own row carries `🧹 리팩토링 슬롯` in 비고. On the
+ad-hoc path (`run.md`, numbers given to `run`) Phase 2 never ran: write `skip (ad-hoc)`. A
+`type:refactor` Issue among those numbers is an ordinary member there, not a slot — the slot is
+a `plan` decision, and `retro` reads `skip:ad-hoc` as exactly that.
 
 ⚠ **The board line goes OUTSIDE the marker.** Everything between `<!-- guild:sprint:plan -->`
 and its closing marker is the dependency source of truth, and `sprint_dag.py --mode hash`
@@ -413,6 +683,7 @@ On creation, say what to do next: *"`/gld sprint run`으로 무인 실행하세�
 - **`plan` selects and orders; it does not design or implement.** It stops at a filled container.
 - **Every body rewrite carries the truncation check** — member bodies *and* the tracking Issue's. A truncated read must not be written back.
 - **A cycle fails here, never later.**
+- **The refactor slot is reserved, never forced.** It passes the size gate every member passes and a stricter readiness gate (all three `clear`), shares the capacity (a filled slot takes one seat; a seat it gives back is refilled), never costs a feature member its place in the stack, must prepare at least one selected member, and an empty slot is recorded with its reason token.
 - **Members get no new `guild:*` label** (`_sprint_dag.md` Section A).
 - **The member table is written once.** After creation it is immutable and guarded by `plan-hash`; changing membership means running `sprint plan` again.
 - All Bash per `_bash_rules.md`; every issue body via temp file + `--body-file`.
