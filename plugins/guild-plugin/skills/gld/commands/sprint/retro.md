@@ -195,8 +195,9 @@ unrecorded are different findings**, and only one of them is good news.
 it is exactly the shape that comes back as page 1 only — and a truncated read produces a
 plausible small number, not an error (`_execute_spine.md` Step 4 states the same requirement for
 the same comment):
-⚠⚠ **Count in `jq`, do not pull the bodies back to count them by eye.** Only two things are
-used here — the `### audit-record ` heading count and four disposition tokens — and that comment
+⚠⚠ **Count in `jq`, do not pull the bodies back to count them by eye.** Only these are
+used here — the `### audit-record ` heading count, four disposition tokens and the clean-scan /
+no-scan lines (`findings: none` / `scan: none`) — and that comment
 **grows a block per attempt and per re-entry**, so the body is the one thing in this command that
 scales with how badly the sprint went. Measured on `dev-yakuza/one-man-company`:
 
@@ -207,8 +208,39 @@ scales with how badly the sprint went. Measured on `dev-yakuza/one-man-company`:
 | #388 | 7,456 B | 67 B |
 
 ```bash
-gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '[.[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$b | match("looped-back";"g")] | length), fixed: ([$b | match("\\bfixed\\b";"g")] | length), recorded: ([$b | match("\\brecorded\\b";"g")] | length), dismissed: ([$b | match("\\bdismissed\\b";"g")] | length)}'
+gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '. as $all | [$all[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$b | match("looped-back";"g")] | length), fixed: ([$b | match("\\bfixed\\b";"g")] | length), recorded: ([$b | match("\\brecorded\\b";"g")] | length), dismissed: ([$b | match("\\bdismissed\\b";"g")] | length), clean: ([$b | match("findings: none";"g")] | length), no_scan: ([$b | match("scan: none";"g")] | length), violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)}'
 ```
+
+⚠ **One object per PAGE — add them up.** `gh api --paginate --jq` runs the `jq` once per page of
+comments (30 per page by default), so an Issue with more comments than that returns **one object
+per page**, each counting only its own page — and `violation` counts a different comment from
+the audit record, so the two can land in different objects. **Sum every field across all the
+objects the call printed**; reading only the first one turns a long Issue into `records: 0`,
+the plausible-small-number failure above. (Merging pages inside `jq` would need `--slurp` or a
+pipe into a second `jq`, which `gh` and `_bash_rules.md` respectively rule out; adding a handful of
+integers by eye does not.)
+
+⚠ **`records: 0` is "no record", not "clean" — report the two separately.** From plugin 0.85.2 a
+clean scan writes its own block (`findings: none`) and an attempt that never reached the scan
+writes `scan: none` (`_execute_spine.md` Step 4). So: `clean == records` → every scan was clean;
+`no_scan == records` → the auditor **never scanned** this member, which is not clean either; and
+**no block at all** → no attempt reached the record write: the auditor did not run, 3.5a stopped
+first, *or* the member's execute ran on an older plugin, which wrote nothing for a clean scan.
+`violation ≥ 1` (same call — no extra request) names one cause for certain: the auditor broke its
+read-only contract and was stopped; say so. Other 3.5a stops leave nothing countable on an
+attended run, and the member's `guild:needs-human` label (already in the members query) is only
+a weak hint — stagnation and other pauses set it too — so do not attribute it to the auditor. Nothing on the Issue records which plugin version wrote it,
+so do not guess between those two: report such a member as *"기록 없음 — 0.85.2 이전 실행이면
+클린과 구분 불가"*. Folding `records: 0` into a "0 findings" total is the zero-vs-unrecorded error
+the hard rules forbid, and it is the one this record shape exists to remove: one repo's retros
+reported "no record" for 2–5 members a sprint without being able to say whether those were clean.
+⚠ **The counts are exact only for attempts run on 0.85.2 or later.** The record is cumulative
+across re-entries, so one Issue can hold older attempts too — those wrote no clean block and wrote
+the no-scan marker as free prose — and then `records`, `clean` and `no_scan` all undercount. For a
+member whose execute spans the upgrade, do not read `clean == records` / `no_scan == records` as
+complete; say the record is mixed.
+⚠ `scan: none` and `findings: none` both contain `: none`, but the two `match` patterns cannot
+collide: neither literal is a substring of the other.
 
 ⚠ **Word boundaries (`\b`) on the three that are ordinary words.** A bare substring count also
 matches `prefixed`, `unrecorded`, … On this corpus both forms agreed (17 = 17, 31 = 31), so this
@@ -222,7 +254,8 @@ so the member number is already in hand — pair it with the count; do not fold 
 leader*; it is not what lands on the Issue. What lands is a `### audit-record <n>` block whose
 **surrounding prose is in `config.language`** (`_execute_spine.md` Step 4 says so explicitly), so
 on a `ko` repo the severity word may not be `BLOCKER` at all. `_handoff.md` Section K guarantees
-exactly two things here: the block headings and the four disposition tokens. Counting anything
+exactly these here: the block headings, the four disposition tokens and the `findings: none` /
+`scan: none` lines. Counting anything
 else yields a number that is always 0 and reads as *"the auditor never blocked"*.
 
 ⚠ The comment is **cumulative across re-entries** (`_handoff.md` Section B), so `looped-back` +

@@ -6,7 +6,7 @@
 
 ## Section A — The signature
 
-Every loop-back already carries a blocking reason — one line for most sources (the tech-lead's `BLOCKED: <non-conformance>`, a gate's finding, the verify-gap description, the QA defect), a **set** of them for the execute-stage external auditor (see below), and often both at once. Before consuming another loop-back attempt (attempt #2+) for the same Issue/stage, the leader compares the **current** reason against the **immediately prior** attempt's reason — per source, per the two-axis rule below:
+Every loop-back already carries a blocking reason — one line for most sources (the tech-lead's `BLOCKED: <non-conformance>`, a gate's finding, the verify-gap description, the QA defect), a **set** of them for the execute-stage external auditor (see below), and often both at once. Before consuming another loop-back attempt (attempt #2+) for the same Issue/stage, the leader compares the **current** reason against the **most recent prior attempt that looped back** on that axis — per source, per the two-axis rule below (on the execute path, "most recent prior attempt" means the most recent audit-record block that carries a loop-back reason on that axis; see *The durable place* below):
 
 - **Same root cause** (same file/AC/concern restated, even if reworded) → **stagnation**: the previous loop-back did not actually address it.
 - **Different concern** (a new/different reason, even if in the same area) → genuine progress — one issue surfaced another. Not stagnation; continue under the normal bounded cap.
@@ -52,9 +52,10 @@ and one of the five is the session that took this measurement; this guard is on 
 path too.
 
 ⚠ **Scope — the execute path only.** The rule above applies where an audit record exists, i.e.
-the execute stage's loop-backs. A loop-back with **no auditor involvement** (a verify gap, a QA
-defect, the unattended `test`/`qa` loop-backs) has no `<!-- guild:auditor:execute -->` comment
-to read, so it uses the role-reason axis alone and **behaves exactly as it did before this rule
+the execute stage's loop-backs — **including an execute-stage verify gap**, which Step 2 sends
+back with a `scan: none` block carrying that reason (read it there, on the role axis, not from
+memory). A loop-back **outside execute** (a QA defect, the unattended `test`/`qa` loop-backs) has
+no `<!-- guild:auditor:execute -->` comment to read, so it uses the role-reason axis alone and **behaves exactly as it did before this rule
 existed**. Reading the rule as unconditional would make every unattended `test`/`qa` loop-back
 stop at `OK PAUSE: needs-human` waiting for a record that was never supposed to exist.
 
@@ -62,7 +63,27 @@ The durable place already exists. `_execute_spine.md` Step 4 writes one `### aud
 block per attempt to the Issue's `<!-- guild:auditor:execute -->` comment, and the attempt number
 itself is **derived by counting those headings, not remembered**. So: **each loop-back appends its
 blocking reason (role axis) and the auditor's `BLOCKER`/`MAJOR` signature set to that attempt's
-block**, and the guard compares against what it reads back there. ⚠ If the comment cannot be read
+block**, and the guard compares against what it reads back there.
+
+⚠ **Skip a block on an axis when it carries no loop-back reason ON THAT AXIS — judge per axis,
+never by the block's shape.** Since plugin 0.85.2 every attempt writes a block, so not every block
+holds a reason on every axis. The «before» half for an axis is the **most recent block that carries
+a loop-back reason on that axis** — a role reason (tech-lead `BLOCKED`, gate finding, verify gap)
+for the role axis, a triggering `BLOCKER`/`MAJOR` set for the auditor axis. What that means for
+the common shapes:
+- a clean **advancing** block (`findings: none`, no role reason) → no reason on either axis; skipped on both;
+- a block that only settles earlier findings `fixed`/`recorded` → skipped on the auditor axis (and on the role axis unless it also records a role reason);
+- a **`scan: none`** block → skipped on the **auditor** axis (nothing was scanned), but it was itself written by a loop-back — Step 2's evidence cross-check — so it normally **carries the verify-gap reason and is read on the role axis**;
+- a `findings: none` block whose attempt looped back on a role `BLOCKED` → read on the role axis, skipped on the auditor axis.
+
+Taking the literally previous block instead disarms the guard on every re-entry: invocation 1
+loops back on tech-lead `BLOCKED X` (block 1) and advances clean (block 2, `findings: none`);
+`test` re-enters execute and the tech-lead says `BLOCKED X` again — compared with block 2 there is
+"no prior reason" and the guard never runs. Note what that case is: X was resolved once and came
+back, a **recurrence**, not a retry that failed to address it. Comparing against block 1 escalates
+it, which is intended — it is the behaviour from before clean blocks existed, and a defect that
+returns after a full test/qa round is worth a human look. If no earlier block carries a loop-back
+reason on an axis, that axis has no «before» and does not vote. ⚠ If the comment cannot be read
 in full, do **not** fall back to memory — `_execute_spine.md`'s existing truncation rule applies
 (`NEEDS_HUMAN` / `OK PAUSE: needs-human`), because "I don't recall a prior reason" and "there was
 no prior reason" are different findings and only one of them is safe to act on.

@@ -2011,6 +2011,36 @@ RTPY
   hasfx "retro: 감사 기록을 jq 로 집계한다 (전문 아님)" "$RETRO" 'match("### audit-record "'
   # ⚠ 세 토큰은 평범한 낱말이라 단어 경계가 필요하다(`prefixed` 오검출).
   hasfx "retro: disposition 토큰에 단어 경계를 건다" "$RETRO" 'match("\\bfixed\\b"'
+  # A clean scan writes `findings: none` (0.85.2) so that a MISSING record means no attempt
+  # reached the record write (auditor did not run, 3.5a stopped first, or a pre-0.85.2 run). The writer (spine), the token list (Section K) and the counter (retro) must name the
+  # same literal — if one drifts, retro silently reads every clean member as unaudited again.
+  hasfx "spine: a clean auditor scan still writes a block (findings: none)" "$SPINE" 'A clean scan writes a block too: `findings: none`'
+  hasfx "handoff K: findings: none / scan: none are machine tokens" "$HANDOFF" 'the clean-scan / no-scan lines `findings: none` / `scan: none`'
+  hasfx "retro: counts clean blocks (findings: none)" "$RETRO" 'clean: ([$b | match("findings: none";"g")] | length)'
+  hasfx "retro: counts never-scanned blocks (scan: none)" "$RETRO" 'no_scan: ([$b | match("scan: none";"g")] | length)'
+  # violation must read the WHOLE comment list ($all), not the filtered auditor bodies — the
+  # first draft ran `.[]` over the joined strings and would have errored on every member.
+  # --paginate --jq runs per page; a long Issue prints one object per page (verified, per_page=2 on
+  # an Issue with a violation: records and violation landed in different objects).
+  hasfx "retro: per-page objects must be summed" "$RETRO" 'One object per PAGE — add them up.'
+  hasfx "retro: violation count reads all comments in the same call" "$RETRO" 'violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)'
+  # The behaviour, not just the spelling: the PR section is omitted only when the record holds
+  # no finding, and its header must not key on "non-empty" (every audited run is non-empty now).
+  hasfx "spine: PR auditor section omitted only when no block holds a finding" "$SPINE" 'or every block in it is `findings: none` / `scan: none`'
+  hasfx "spine: PR auditor section header keys on a finding, not on non-empty" "$SPINE" 'mandatory whenever that record holds at least one finding'
+  hasfx "spine: findings: none is auditor-axis only (role reason kept)" "$SPINE" '`findings: none` describes the **auditor axis only**'
+  lacksfx "spine: old 'writes no block when nothing to record' is gone" "$SPINE" 'writes no block when there is nothing at all to record'
+  lacksfx "spine: old 'mandatory whenever that record is non-empty' is gone" "$SPINE" 'mandatory whenever that record is non-empty'
+  lacksfx "review: old 'both are absent when execute found nothing' is gone" "$GLD/commands/review.md" 'both are absent when execute found nothing'
+  lacksfx "spine: free-prose no-scan marker is gone (scan: none replaces it)" "$SPINE" 'no scan this attempt'
+  hasfx "spine: a scan: none attempt still re-states pending findings" "$SPINE" 'A `scan: none` attempt still **re-states every finding the previous block left at `looped-back`**'
+  # Clean advance blocks now sit between loop-backs; the stagnation «before» half must skip them,
+  # or a repeated BLOCKED after a test/qa re-entry compares against "nothing" and never escalates.
+  hasfx "stagnation: «before» half is judged per axis, not by block shape" "$GLD/commands/atoms/_stagnation.md" 'carries no loop-back reason ON THAT AXIS'
+  hasfx "stagnation: a scan: none block is read on the role axis" "$GLD/commands/atoms/_stagnation.md" 'carries the verify-gap reason and is read on the role axis'
+  lacksfx "spine: no shape-based skip list (scan: none carries a role reason)" "$SPINE" 'blocks that did not loop back (`findings: none`, `scan: none`'
+  hasfx "spine: Step 4 guard points at the most recent loop-back block" "$SPINE" 'the most recent audit-record block that carries a loop-back reason on that axis'
+  hasfx "spine: Step 4 guard reads a scan: none block on the role axis" "$SPINE" 'normally carries the verify-gap reason and **is** read on the role axis'
 fi
 
 echo "== 14. 리팩토링 슬롯 — 예약이지 할당량이 아니다 =="
