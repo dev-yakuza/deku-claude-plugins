@@ -27,7 +27,7 @@ Empty → add `guild:qa`. Non-empty → do not add on top (Step 3's transition r
 
 ## Step 1 — Spawn qa (risk-based quality plan + execution)
 Spawn the qa sub-agent:
-- `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `qa #$1`
+- `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `qa #$1`
 - `prompt`:
   > Adopt the persona in `.claude/agents/qa.md`. Do holistic QA for Issue #$1 on the current branch — **do NOT repeat the tester's automated coverage**; cover what it can't. Steps:
   > 1. **Risk-based QA plan**: from the diff scope + hotspot list + AC, decide what quality checks the change warrants — exploratory scenarios, E2E user flows, usability/visual, manual/real-device. A tiny contained change → a light justified plan; a UI/flow change → a fuller plan.
@@ -43,7 +43,7 @@ Spawn the qa sub-agent:
 
 ## Step 1.5 — UI/UX review gate (conditional — designer)
 As the leader, if this change had a **UI/UX surface** (a `docs/specs/$1/ux.md` exists, or the designer participated in design, or the diff touches UI), convene the **designer** to run the **UI/UX review gate**: the built UI vs the design intent (`ux.md`) — interaction, visual, usability, accessibility. This is a **gate, not self-review**: the designer authored `ux.md` at design time, but here reviews the **built implementation** against it — a different artifact than the one they wrote, produced by the developer, which is what keeps this from being self-review (contrast: it would be self-review if the designer were re-checking `ux.md` itself). No UI surface → skip this step.
-- `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `designer ui/ux review #$1`
+- `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `designer ui/ux review #$1`
 - `prompt`:
   > Adopt the persona in `.claude/agents/designer.md`. Run the **UI/UX review gate** for Issue #$1 on the current branch. Compare the built UI against the design intent in `docs/specs/$1/ux.md` (if present) and the AC — interaction, visual, usability, accessibility (contrast, touch targets, states). You review the built result, not design anew.
   > <!-- guild:result-contract -->

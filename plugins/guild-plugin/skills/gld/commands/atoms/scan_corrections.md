@@ -7,13 +7,15 @@
 
 ---
 
-## Goal — three correction sources
+## Goal — three correction sources (plus two slim lists for the model-tier scorecard)
 
 | Source | Durability | What |
 |---|---|---|
 | **ground-truth log** (`.claude/guild/memory/ground-truth.jsonl`) | ephemeral, **captured at occurrence** (① — `capture_signal.py`) | in-session `correction` / `verify-gap` / `stagnation` entries with a `surprise` flag (`revert` is NOT a captured kind — it's the durable row below, read on-demand) |
 | **PR reject / close** (`gh pr list --state closed`) | durable | PRs closed **unmerged** = rejected work; human review corrections |
 | **git revert** (`git log --grep=revert`) | durable | a Guild-authored commit that was reverted (overlaps `scan_git` — P2 dedups by SHA) |
+
+**Auxiliary, not correction sources**: `execute_rejections[]` (step 1) and `merged_prs[]` (step 3) feed only evolve's model-tier scorecard (`_model_tiering.md` Section C); the `window-start` input comes from the evolve prompt.
 
 Maps to: ③ habit + ⑥ fact (a correction usually teaches both a habit *and* a fact), **+ gate** when the same correction recurs (fail-to-rule).
 
@@ -31,10 +33,11 @@ Every correction MUST be anchored to a **real human action or objective outcome*
 ## Procedure (each step its own read-only Bash call / Read)
 
 1. **Ground-truth log** — Read `.claude/guild/memory/ground-truth.jsonl` (Read tool):
-   - Present → parse each line (one JSON object: `kind`, `issue`, `stage`, `role`, `summary`, `evidence`, `surprise`, `escalated`). Group by theme; carry the `surprise` flag through (it is the ranking lever — `_signals.md` Section D) and carry `escalated` through too (feeds evolve's Phase 2.5 model-tier scorecard — `_model_tiering.md` Section C — so it doesn't need a second read of the log).
+   - Present → parse each line (one JSON object: `ts`, `kind`, `issue`, `stage`, `role`, `summary`, `evidence`, `surprise`, `escalated`). Group by theme; carry the `surprise` flag through (it is the ranking lever — `_signals.md` Section D) and carry `escalated` through too, as a bump marker only — `_model_tiering.md` Section C's test does **not** read it.
    - **Weight by anchor source (`role` discriminates — `_signals.md` Section B):** a discuss-override (`role: leader`, a real human overturning the recommendation) is the **strongest**; a `stagnation` entry (the same blocking reason recurring across loop-back attempts — `_stagnation.md`) ranks next, above a single **cross-role reversal** (`role: tech-lead|qa|designer|security|…`, one role overturning another's confident output, anchored to a `BLOCKED`/defect) — the *body* of the distribution, weighing **below** a human correction and **above** an unanchored opinion; a `verify-gap` is anchored to raw runner output. Set `anchored: true` for all four (each carries an objective anchor by construction) but tag the source so P2 can rank human > stagnation > cross-role > verify-gap **as the secondary tiebreaker among entries that already tie on `surprise`** — `surprise` is the primary sort key (`_signals.md` Section D); this kind-hierarchy never overrides it. This is **not** self-review — the log only ever holds sanctioned captures (`_signals.md` Section C), never an agent grading its own work.
    - **Missing or empty → this is normal, not a failure.** The log is gitignored and only fills once a live `/gld dev` run hits a discuss-override or verify-gap (① dogfooding may not have run yet). Set `gt_log_status: "missing"` / `"empty"` and continue on the durable sources. **Do not block or warn loudly.**
    - The log is **advisory / low-weight** until P2 corroborates it with a durable signal (2-tier safety).
+   - **Also emit `execute_rejections[]`** — a slim list for evolve's model-tier scorecard (`_model_tiering.md` Section C): one item `{ts, issue, role, kind}` per log line with `stage: execute` and `kind` `correction` or `verify-gap`, nothing else (no summary — this list is joined, not read). ⚠ **Read `.claude/guild/memory/consolidated.jsonl` too, with the same filter** (absent → fine). evolve's consolidation bridge moves an applied item's evidence out of `ground-truth.jsonl` into that file, so the active log alone would hide exactly the loop-backs behind an applied model-tier raise — and Section C's follow-up, which compares the share before and after the raise, would see the "before" deflated and could never call for a revert. Keep it separate from the theme-grouped `ground_truth[]`, which de-duplicates and would lose the per-Issue facts the scorecard needs.
 
 2. **PR rejections** — closed-unmerged PRs (durable human correction):
    ```bash
@@ -44,7 +47,13 @@ Every correction MUST be anchored to a **real human action or objective outcome*
    - ⚠ **Exclude bot-authored closes** (`author.is_bot == true`, e.g. `dependabot`, `renovate`): a bot routinely closes-unmerged its own superseded dependency PRs — that is **automated housekeeping, not a human correction** (observed on real data: ~10 dependabot closed-unmerged PRs would otherwise masquerade as rejections = kill-gate Tier C noise). Drop them or mark `anchored: false`.
    - To exclude AI self-review noise on the *reasons*, if you inspect review threads, drop self-authored reviews (see anchor rule). `gh` unavailable → skip, `pr_rejections: []`, note in `degraded`.
 
-3. **Reverts** — Guild/authored commits that were undone:
+3. **Merged PRs in the window** (for evolve's model-tier scorecard — `_model_tiering.md` Section C). The evolve prompt passes `window-start` (the previous evolve run's commit time, ISO-8601). **None passed** (first run) → skip, `merged_prs: null`. Otherwise (substitute the literal timestamp; the `..*` range form avoids a `>` in the argument):
+   ```bash
+   gh pr list --state merged --search "merged:<window-start>..*" --limit 200 --json number,mergedAt,headRefName,closingIssuesReferences --jq '[.[] | {pr: .number, mergedAt, branch: (.headRefName // ""), issues: [.closingIssuesReferences[]?.number]}]'
+   ```
+   Emit `merged_prs[]` as returned. If it returns exactly 200 items, set `merged_prs_truncated: true` — the scorecard must then be skipped, not computed from a partial list. `gh` unavailable → `merged_prs: null` and note it in `degraded`; the scorecard is then skipped, never reported as 0%.
+
+4. **Reverts** — Guild/authored commits that were undone:
    ```bash
    git log --grep=revert -i --oneline -80
    ```
@@ -62,6 +71,9 @@ Exactly one `>>> RESULT <<<` line + compact JSON.
 ```json
 { "scan": "corrections", "findings": {
   "ground_truth": [ { "kind": "correction", "issue": 893, "role": "tech-lead", "stage": "execute", "summary": "설계 override: 전역 토큰 → 위젯 레벨", "surprise": true, "escalated": false, "anchored": true } ],
+  "execute_rejections": [ { "ts": "2026-09-30T13:10:25Z", "issue": 893, "role": "tech-lead", "kind": "correction" } ],
+  "merged_prs": [ { "pr": 894, "mergedAt": "2026-10-01T09:49:44Z", "branch": "fix/893-token-scope", "issues": [893] } ],
+  "merged_prs_truncated": false,
   "pr_rejections": [ { "pr": 892, "reason": "wrong base branch", "anchored": true } ],
   "reverts": [ { "commit": "abc1234", "summary": "Revert \"feat: X\"", "anchored": true } ],
   "gt_log_status": "present",

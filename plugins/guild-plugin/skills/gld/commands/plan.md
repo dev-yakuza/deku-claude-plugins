@@ -32,7 +32,7 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
 **If Phase 0's idempotency check found existing items** (a file-mode manifest, or issue-mode children from the discovery query), append the same note to **both** prompts below: <the existing set — for file mode, the manifest's issue list (`#<n>` · title · scope); for issue mode, the discovered children's number/title/body>. These are ALREADY COMMITTED (real GitHub Issues) — do NOT redecide/reorder/resize/rename them. Treat them as fixed and decompose/order ONLY the remaining work needed to complete the same backlog, consistent with what already exists. If the existing items don't make sense on reflection, that's a real conflict — return `BLOCKED: existing backlog items conflict with — <reason>` instead of silently redeciding differently. (Same fix pattern as `design.md` Step 1's tech-lead prompt for a resumed multi-PR split — this file had the identical gap: Phase 1 used to always redecompose from scratch even when Phase 0 had already found a partial prior run, risking duplicate/inconsistent re-creation in Phase 3.)
 
 **Product Owner** (value slicing):
-- `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `product-owner plan`
+- `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `product-owner plan`
 - `prompt`:
   > Adopt the persona in `.claude/agents/product-owner.md`. Decompose the following source into a backlog of **vertically-sliced, independently-deliverable dev-unit issues**, each aligned to user value against `docs/standards/charter.md`. SOURCE: <the doc contents (file mode) OR the Issue #$1 body (issue mode)>. For each proposed issue produce: a concise **title**, **scope** (what + why, not how), **acceptance criteria** (verifiable), a **priority**, and **non-goals**. Right-size each to a **single dev unit** (one analyze→…→qa pass) — split a too-large feature, merge trivial ones. Group issues under **epics/areas**. Write the result as a FILE to `docs/specs/plan-<slug>/po.md` (do not paste it back).
   > <!-- guild:result-contract -->
@@ -40,7 +40,7 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
   > <!-- /guild:result-contract -->
 
 **Tech Lead** (dependency order + sizing):
-- `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `tech-lead plan`
+- `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `tech-lead plan`
 - `prompt`:
   > Adopt the persona in `.claude/agents/tech-lead.md`. From the same SOURCE (below) and `docs/standards/architecture.md`, produce a **dependency ordering** of the work: **foundations first** (data model / schema / core state / shared modules) before the features that depend on them. Flag each **foundational** issue, note **cross-cutting** concerns, and **size** each candidate (single dev-unit ✅, or ⚠ likely to child-split at design). Do NOT read the product-owner's output (order independently from the source). Write to a FILE `docs/specs/plan-<slug>/sequence.md`.
   > <!-- guild:result-contract -->

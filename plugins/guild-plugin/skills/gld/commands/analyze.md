@@ -65,7 +65,7 @@ Do **not** capture when the human accepts your recommendation (agreement ≠ cor
 
 ## Step 2.5 — Conditional participation (leader assembles)
 As the leader, decide whether this Issue needs a **product-owner** for value-alignment / AC ownership / scope calls (assembly rules in `.claude/agents/leader.md`; model in `_handoff.md` Section G). Convene it when requirements are non-trivial, value/priority is contested, or AC needs a firm owner — skip for a small unambiguous change (you own the AC yourself). If convened:
-- `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `product-owner #$1`
+- `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `product-owner #$1`
 - `prompt`:
   > Adopt the persona in `.claude/agents/product-owner.md`. For Issue #$1, align the requirements to user value against `docs/standards/charter.md`, own/sharpen the **acceptance criteria** (make them verifiable), set priorities, and state non-goals.
   > <!-- guild:result-contract -->

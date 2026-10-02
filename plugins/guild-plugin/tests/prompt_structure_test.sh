@@ -2166,6 +2166,75 @@ LGPY
   fi
 fi
 
+echo "== persona spawns take their tier from the role file (_model_tiering.md Section 0) =="
+# A spawn that names a literal tier makes the role file's `model:` inert, so evolve's default-tier
+# review has nothing it can edit — the historical reason this wiring exists: in one repo the review
+# that proposed acting on tech-lead/execute escalations found it could not apply anything. Every spawn whose prompt adopts a `.claude/agents/<role>.md` persona must read the tier
+# from that file; non-persona spawns (auditor, scans, readiness) keep their literal.
+cat > "$WORK3/tier.py" <<'TIERPY'
+import glob, os, re, sys
+gld = sys.argv[1]
+lit = re.compile(r"`model`:\s*`(haiku|sonnet|opus)`")
+persona, wrong = 0, []
+for f in sorted(glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)):
+    L = open(f, encoding="utf-8").read().split("\n")
+    for i, line in enumerate(L):
+        if "subagent_type" not in line:
+            continue
+        nxt = "\n".join(L[i:i + 4])
+        if "Adopt the persona in `.claude/agents/" not in nxt:
+            continue
+        persona += 1
+        if lit.search(line) or "role file's `model:`" not in line:
+            wrong.append("%s:%d" % (os.path.relpath(f, gld), i + 1))
+print("%d %s" % (persona, " ".join(wrong)))
+TIERPY
+_tier="$("$PY" "$WORK3/tier.py" "$GLD")"
+_tier_n="${_tier%% *}"; _tier_bad="${_tier#* }"; [ "$_tier_bad" = "$_tier" ] && _tier_bad=""
+if [ -z "$_tier_bad" ] && [ "${_tier_n:-0}" -ge 14 ]; then
+  ok "every persona spawn reads its tier from the role file ($_tier_n sites)"
+else
+  bad "every persona spawn reads its tier from the role file" ">=14 sites, none literal" "n=$_tier_n literal/missing: $_tier_bad"
+fi
+hasfx "tiering: Section 0 defines the role-file default and its fallback" "$GLD/commands/atoms/_model_tiering.md" 'Accept exactly `haiku`, `sonnet` or `opus`'
+hasfx "tiering: Section C says a role-file change moves every stage of that role" "$GLD/commands/atoms/_model_tiering.md" 'which **other** stages that role runs in will move with it'
+# Execute-stage escalations are FILED under the role that rejected the work, but the redone work is
+# the developer's. Proposing on the filing role raises the reviewer and leaves the failing attempt
+# unchanged (adversarial review of 0.86.0, round 1).
+hasfx "tiering: proposal targets the role whose output was redone" "$GLD/commands/atoms/_model_tiering.md" '**The target — the role whose output was redone**'
+# The trigger is a measurable share (Issues with a rejected execute first attempt / Issues
+# executed), not an escalation rate — `--escalated` is set on every retried execute loop-back and
+# carries no information (adversarial review of 0.86.0, rounds 2–3).
+hasfx "tiering: trigger is the first-attempt rejection share per window" "$GLD/commands/atoms/_model_tiering.md" '**The measure — the first-attempt rejection share, per window.**'
+hasfx "tiering: the bar is >=50% in >=3 consecutive windows of >=3 Issues" "$GLD/commands/atoms/_model_tiering.md" '**≥ 50% in each of ≥3 consecutive qualifying windows**'
+hasfx "tiering: a raise is followed up and may be reverted, with a hold" "$GLD/commands/atoms/_model_tiering.md" 'do **not** re-propose the raise for the next **3 windows**'
+hasfx "tiering: hard rule names the revert exception" "$GLD/commands/atoms/_model_tiering.md" '**One exception**: reverting a raise'
+lacksfx "tiering: no claim that the retry tier is doing the real work" "$GLD/commands/atoms/_model_tiering.md" 'the retry tier is doing the real work most of the time anyway'
+lacksfx "evolve: no claim that the retry tier is doing the real work" "$GLD/commands/evolve.md" 'the retry tier is already doing the real work'
+hasfx "evolve: model-tier items are excluded from the per-signal regression match" "$GLD/commands/evolve.md" '**Model-tier items are not matched here**'
+# The share needs a denominator (merged PRs → Issues) and a per-Issue numerator; both come from
+# scan_corrections as slim lists, and the numerator is counted at ANY time — an Issue's loop-back
+# usually lands a run before its PR merges (adversarial review of 0.86.0, round 4: both BLOCKERs).
+hasfx "scan_corrections: emits execute_rejections for the scorecard" "$GLD/commands/atoms/scan_corrections.md" '**Also emit `execute_rejections[]`**'
+hasfx "scan_corrections: emits merged_prs with a range search (no > in the arg)" "$GLD/commands/atoms/scan_corrections.md" 'gh pr list --state merged --search "merged:<window-start>..*"'
+hasfx "tiering: numerator counts rejections at any time, not only in the window" "$GLD/commands/atoms/_model_tiering.md" '**at any time**, not only inside the window'
+hasfx "tiering: window starts at the previous evolve commit time" "$GLD/commands/atoms/_model_tiering.md" 'the committer timestamp of the commit whose subject starts `chore(guild): evolve #<n-1> —`'
+hasfx "tiering: window start excludes rollback reverts" "$GLD/commands/atoms/_model_tiering.md" 'anchored so a rollback'
+lacksfx "spine: no stale 'never pass --escalated' on auditor captures" "$GLD/commands/atoms/_execute_spine.md" 'Never pass `--escalated` on this capture'
+# Consolidation moves an applied item's evidence out of the active log; reading only the active
+# log would deflate the follow-up's "before" share and the revert could never fire (round 5).
+hasfx "scan_corrections: execute_rejections also reads consolidated.jsonl" "$GLD/commands/atoms/scan_corrections.md" 'Read `.claude/guild/memory/consolidated.jsonl` too, with the same filter'
+lacksfx "scan_corrections: escalated no longer said to feed the scorecard" "$GLD/commands/atoms/scan_corrections.md" "feeds evolve's Phase 2.5 model-tier scorecard"
+hasfx "evolve: window start is subject-anchored (a rollback revert cannot match)" "$GLD/commands/evolve.md" 'git log -1 --format=%cI --grep="^chore(guild): evolve #<n-1> —"'
+hasfx "tiering: an unmeasured run neither passes nor breaks the streak" "$GLD/commands/atoms/_model_tiering.md" 'A run with **no measurement at all**'
+# The bar and the follow-up read PAST windows; without a ledger row per run there is no series
+# to read and a raise can never be proposed from durable data (round 6).
+hasfx "evolve: Phase 7 writes a model-tier scorecard row every run, with a status" "$GLD/commands/evolve.md" '- **Model-tier scorecard** — **every run writes one row**, measured or not'
+lacksfx "spine: auditor cap no longer cites an escalated rate" "$GLD/commands/atoms/_execute_spine.md" 'would inflate the `--escalated` rate'
+lacksfx "audit: escalation rate is not read as evidence a higher tier was needed" "$GLD/commands/audit.md" 'most recent loop-backs needed the bumped tier'
+hasfx "evolve: model-tier HR targets the redone role" "$GLD/commands/evolve.md" 'propose raising **the role whose output was redone**'
+hasfx "spine: --escalated only when the tier was actually raised" "$GLD/commands/atoms/_execute_spine.md" 'add `--escalated` when Step 4 actually raised the retry'
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -2173,7 +2242,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=359   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=404   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

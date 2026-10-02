@@ -193,7 +193,7 @@ in the "Refactor slot" section, which is the only part of this file it reads.
 As the leader, spawn BOTH role sub-agents in one message (independent, concurrent). Reuse the prompt *shape* of `plan.md` Phase 1, but the job is **selection, not decomposition**.
 
 **Product Owner** (value):
-- `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `product-owner sprint select`
+- `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `product-owner sprint select`
 - `prompt`:
   > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. Propose (a) **one sentence** naming what this iteration is for, and (b) the candidates that serve it, in priority order. For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Recommend excluding any candidate with an `unclear` dimension** and say why: unattended, the leader would have to guess that gap alone. **Do not select a candidate tagged `refactor-slot`** (an orphaned refactor-slot draft — the slot logic handles it), **and rate every candidate tagged `refactor` or `refactor-slot`, whether or not you selected it** — the leader may take one as the sprint's refactor slot and needs your ratings to do so. Write the result to a FILE `docs/specs/sprint-<slug>/po.md` (do not paste it back).
   > <!-- guild:result-contract -->
@@ -202,7 +202,7 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
   > CANDIDATES: <number · title · one-line scope · current stage · tag (`refactor-slot` | `refactor` | `—`), for each>.
 
 **Tech Lead** (dependencies and size):
-- `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `tech-lead sprint select`
+- `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `tech-lead sprint select`
 - `prompt`:
   > Adopt the persona in `.claude/agents/tech-lead.md`. From the same CANDIDATES (below) and `docs/standards/architecture.md`, produce (a) the **dependency relations** among them — which is a foundation for which, using the `Depends on: #<n>` notes in the bodies as input and correcting them where the code says otherwise — and (b) a **size** verdict per candidate: single dev-unit ✅, or ⚠ **likely to split at design**, plus the source files each candidate will most likely touch. Do NOT read the product-owner's output; judge independently. **When REFACTOR SLOT is `on`**, also produce (c) **one refactor-slot proposal** (rules: the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md` — read that section before writing (c), not the whole file). Write to a FILE `docs/specs/sprint-<slug>/deps.md`. Return one `>>> RESULT <<<` line. CANDIDATES: <same as above>. REFACTOR SLOT: <`on` | `off`>. DEFAULT BRANCH: <the repo's default branch name — the leader has already fetched `origin/<it>` — or `unavailable`>. PAST SLOTS: <the `refactor` field of every `config.sprint.history` entry that has one, or `none`>.
 
