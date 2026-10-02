@@ -800,7 +800,7 @@ os.replace(tmp, path)
 PY
 
 # marker_write <state>  — in-place replace of the run marker on the tracking Issue.
-# ONE --paginate query returns id AND body together. `_bash_rules.md:172`: needing both and
+# ONE --paginate query returns id AND body together. `_bash_rules.md:206`: needing both and
 # paginating only one lookup "is worse than paginating neither" — the body read finds the
 # record while the id read comes back empty and the "empty -> create" branch posts a
 # duplicate. Fetching both in one call removes the failure mode rather than managing it.
@@ -1062,7 +1062,7 @@ hb_sleep() {
 # ─────────────────────────────────────────────────────────────────────────────
 # §8.4c — assemble sprint_dag.py input from gh output + the immutable member table
 # ─────────────────────────────────────────────────────────────────────────────
-# Redirection is used freely here: `_bash_rules.md:170` puts a generated script's own contents
+# Redirection is used freely here: `_bash_rules.md:204` puts a generated script's own contents
 # outside those rules. That is what makes this plumbing possible at all — the design's
 # `--input <path>` interface has no shell-side producer otherwise.
 
@@ -1757,8 +1757,21 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     # which is what the column cache is for. The reason is cleared with it: a stale
     # `failed:<class>` from a previous attempt must not sit on an in-progress card.
     board_col "$ISSUE" in_progress
+    # CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1: a `-p` child kills its background Bash tasks
+    # when the response completes, and a Bash completion does not wake it (a sub-agent's
+    # does). A leader or a sub-agent that backgrounds the suite and ends its turn "waiting"
+    # therefore loses the run and exits mid-spine — 2 of 3 retries in one sprint (measured,
+    # both re-resumed at full cost). The variable removes `run_in_background` from Bash AND
+    # the Agent tool, and auto-backgrounding, for this child and everything it spawns, so
+    # the documented rule (`_bash_rules.md` — Long-running commands) is enforced, not hoped.
+    # With backgrounding gone, a Bash call that reaches its timeout STOPS, so the two timeout
+    # variables are part of the same guard: BASH_DEFAULT_TIMEOUT_MS covers a call made with no
+    # `timeout` (a `git commit` whose hook runs the suite can no longer be auto-backgrounded,
+    # so at the 120 s default it would simply stop), BASH_MAX_TIMEOUT_MS lets a suite
+    # measured above ten minutes run in the foreground instead of having nowhere to go.
     ( cd "$WT" && GLD_UNATTENDED=1 GLD_SPRINT_BASE="$BASE_REF" \
-        CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
+        CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
+        BASH_DEFAULT_TIMEOUT_MS=600000 BASH_MAX_TIMEOUT_MS=3600000 \
         claude -p --verbose --output-format stream-json --dangerously-skip-permissions \
         "/gld dev $ISSUE" ) > "$LOG" 2>&1 || EXIT_CODE=$?
 

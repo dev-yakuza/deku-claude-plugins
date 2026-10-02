@@ -141,7 +141,12 @@ WAIT_MAX=14400   # 4h ceiling on any single rate-limit wait; the shared region c
     EXIT_CODE=0
     # GLD_UNATTENDED=1: flow auto-proceeds discuss/verify gates (records assumptions) — see Notes.
     # --dangerously-skip-permissions: unattended tool calls (tests, hooks, push, PR).
-    GLD_UNATTENDED=1 CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
+    # CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1: a -p child kills backgrounded Bash at turn end
+    # and is not woken by its completion — see _bash_rules.md "Long-running commands".
+    # The two BASH_*_TIMEOUT_MS belong to the same guard: with backgrounding gone a call that
+    # hits its timeout stops, so un-timed calls get 10 min and a long suite may ask for 1 h.
+    GLD_UNATTENDED=1 CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
+      BASH_DEFAULT_TIMEOUT_MS=600000 BASH_MAX_TIMEOUT_MS=3600000 \
       claude -p --verbose --output-format stream-json --dangerously-skip-permissions \
       "/gld dev $ISSUE" > "$LOG" 2>&1 || EXIT_CODE=$?
     # /gld dev (not resume): dev Phase 1 reads the label and STARTS FRESH (analyze) on a

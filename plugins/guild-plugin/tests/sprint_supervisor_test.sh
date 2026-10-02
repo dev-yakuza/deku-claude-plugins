@@ -1260,6 +1260,29 @@ hasline() {   # hasline <case> <fixed-string>   — must appear as CODE, not ins
 }
 
 hasline "I: P1 writes in_progress"                'board_col "$ISSUE" in_progress'
+# A `-p` child kills backgrounded Bash at turn end and is not woken by its completion; 2 of 3
+# retries in one sprint were exactly that (_bash_rules.md — Long-running commands). The
+# variable is the mechanical guard — and with backgrounding gone a call that hits its timeout
+# STOPS, so the two timeout variables are part of the same guard. All three must be on the
+# child launch itself: the code lines of the `\`-continued command that ends in `claude -p`.
+# (Checking "somewhere in the file" let a refactor move them onto another command — round 1.)
+launch_has_guard() {  # launch_has_guard <file> — 0 when EVERY `claude -p --verbose` launch block carries all three
+  awk '{ i=index($0,"#"); pre=(i?substr($0,1,i-1):$0);
+         # A blank or comment-only line ENDS a bash continuation — the variables above it never
+         # reach the command below it — so it must end the block here too (round 2).
+         if (pre ~ /^[ \t]*$/) { cont = 0; blk = ""; next }
+         blk = (cont ? blk " " : "") pre
+         if (index(pre,"claude -p --verbose")) { n++
+             if (index(blk,"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1") &&
+                 index(blk,"BASH_DEFAULT_TIMEOUT_MS=600000") &&
+                 index(blk,"BASH_MAX_TIMEOUT_MS=3600000")) g++ }
+         cont = (pre ~ /\\[ \t]*$/) }
+       END { exit !(n >= 1 && g == n) }' "$1"
+}
+if launch_has_guard "$TPL"; then ok "I: child launch disables background tasks + raises Bash timeouts"
+else bad "I: child launch guard" "every claude -p --verbose launch block must carry CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1, BASH_DEFAULT_TIMEOUT_MS=600000, BASH_MAX_TIMEOUT_MS=3600000"; fi
+if launch_has_guard "$BATCH"; then ok "I: batch child launch disables background tasks + raises Bash timeouts"
+else bad "I: batch child launch guard" "every claude -p --verbose launch block must carry CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1, BASH_DEFAULT_TIMEOUT_MS=600000, BASH_MAX_TIMEOUT_MS=3600000"; fi
 hasline "I: P2 writes blocked/needs-human"        'board_col "$ISSUE" blocked needs-human'
 hasline "I: P3 refreshes before judging"          'refresh_dag_input || true'
 hasline "I: P3 has the split-children branch"     'board_col "$ISSUE" in_review split-children'
@@ -4412,7 +4435,7 @@ fi
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=337
+SUP_MIN_CHECKS=339
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

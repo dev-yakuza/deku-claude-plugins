@@ -44,7 +44,8 @@ ERROR_SIGS = [
 REDISCOVERY_RE = re.compile(r"^\s*(gh repo view|gh auth (status|switch)|gh api repos/|cat .*config|printenv)")
 # Commands Guild's OWN spine mandates be re-run VERBATIM every stage/session (_handoff.md
 # Section F: "gh repo view --json nameWithOwner -q .nameWithOwner"; Section H: "printenv
-# GLD_UNATTENDED" at every stage start; _preflight.md: "git log --oneline -20";
+# GLD_UNATTENDED" at every stage start; the developer/tester spawn prompts: "printenv
+# BASH_MAX_TIMEOUT_MS" to read the foreground timeout ceiling; _preflight.md: "git log --oneline -20";
 # _execute_spine.md Step 0/3.5a: the base-branch resolve, the merge-base resolve, the
 # HEAD/porcelain readings that bracket the external auditor, the pre-spawn "is there a diff
 # to scan" check, and the auditor sub-agent's own `git diff <mb>`). These
@@ -59,6 +60,7 @@ GUILD_MANDATED_RE = re.compile(
     r"^\s*(gh repo view --json nameWithOwner -q \.nameWithOwner"
     r"|gh repo view --json defaultBranchRef --jq \.defaultBranchRef\.name"
     r"|printenv GLD_UNATTENDED"
+    r"|printenv BASH_MAX_TIMEOUT_MS"
     r"|git log --oneline -20"
     r"|git rev-parse HEAD"
     r"|git status --porcelain( -uall)?"

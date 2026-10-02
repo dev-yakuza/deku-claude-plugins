@@ -56,7 +56,10 @@ suite, a `git push` whose pre-push hook mirrors CI, a build. There are two ways 
 and **only one of them works in a child session**.
 
 - **Correct**: run it in the **foreground** with an explicit `timeout` (milliseconds, max
-  **600000** = 10 minutes). One call, one result, in the same turn.
+  **600000** = 10 minutes by default, or whatever `BASH_MAX_TIMEOUT_MS` is set to — the
+  unattended launchers set **3600000** = 1 hour, see below; read the real value with
+  `printenv BASH_MAX_TIMEOUT_MS` rather than inferring it from `GLD_UNATTENDED`). One call, one
+  result, in the same turn.
 - **FORBIDDEN in a child session**: `run_in_background: true` on a turn that ends while the task
   is still running. A `batch`/`sprint` child is `claude -p`, and **a `-p` process kills its
   background tasks when the response completes** — there is no next turn for the completion
@@ -72,6 +75,30 @@ for a notification that cannot arrive. That repo's numbers were `flutter test` *
 `git push` **280 s**; both fit inside 600000 ms with room to spare, so the backgrounding bought
 nothing that a `timeout` would not have.
 
+⚠ **A sub-agent is not a way around it, and a sub-agent can trip it for you.** A `-p` child *is*
+woken by a sub-agent's completion notification, but **not** by a backgrounded Bash task's. Measured
+on a later sprint (9 members), 2 of its 3 retries were this rule broken from two directions: once
+the leader backgrounded `flutter test` itself and ended the turn; once the **developer sub-agent**
+backgrounded the suite, returned "running the suite", and the leader — woken by that return —
+ended its turn waiting for a task the sub-agent owned. The log shows the same end both times:
+`task_updated … status: killed` right after the final `result`.
+
+⚠ **So the unattended launchers enforce this mechanically.** `sprint-supervisor.sh` and `batch.md`
+start every child with `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, which (Claude Code docs,
+*env-vars*) disables `run_in_background` on Bash **and** on sub-agent tools, plus auto-
+backgrounding, for the child and everything it spawns. Two consequences to know: sub-agents run
+in the foreground, so the turn waits for every spawn to return (the barrier rules, e.g.
+`review.md` Step 2.5, already require exactly that — correctness does not change, at most
+wall-clock does if same-message spawns stop overlapping, which the docs do not specify); and a
+Bash call that reaches its `timeout` now **stops** instead of moving to the background. That
+second one would turn a slow hook into a lost commit — a `git commit` made with no `timeout`
+can no longer be auto-backgrounded, so at the 120 s default it would simply stop — so
+the same launch line also sets `BASH_DEFAULT_TIMEOUT_MS=600000` (an un-timed call gets ten
+minutes) and `BASH_MAX_TIMEOUT_MS=3600000` (a suite measured above ten minutes can still run in
+the foreground). The three variables are one guard; do not set the first without the other two.
+The prose rule stays: attended sessions do not set any of them, and a stage prompt must still
+tell a sub-agent to run its suite in the foreground.
+
 ⚠ **A lost push is the expensive one.** No push means no PR, so the stage cannot advance and the
 work sits in the worktree — invisible on GitHub while the Issue merely looks stalled. In that
 run it cost one member outright, left a second's branch unpublished, and stranded a loop-back
@@ -82,11 +109,18 @@ the turn, the notification does arrive, and backgrounding looks fine. The behavi
 between the mode this is developed in and the mode it runs in, so "it worked when I tried it"
 is not evidence here.
 
-**When 600000 ms is genuinely not enough** — a suite measured above ten minutes, not a guess —
-do not fall back to backgrounding. Have the command write its own exit code and output to a
-file (the generated-`.sh` shape under **Sanctioned exceptions** below), then read that file with
-ordinary foreground calls until it is there. Each read is its own short call, so the turn never
-ends with a task outstanding.
+**When ten minutes is genuinely not enough** — a suite measured above it, not a guess — do not
+fall back to backgrounding. If `BASH_MAX_TIMEOUT_MS` is set above 600000 (the unattended
+launchers set 3600000 for exactly this), pass a larger `timeout`, up to that value. Above the
+ceiling actually in force, there is no sanctioned way to detach a command (a trailing `&` and
+output redirection are both forbidden above). A call killed at the ceiling is a **failed** call,
+not a pending one — report it as not green, naming the test or file that was running, and the
+stage routes it like red (`_execute_spine.md` Step 2, `test.md` Step 3). That holds for the
+leader's own calls too. It is deliberately not treated as "the environment": a slow suite and a
+test the change made hang look identical here, and the hang is a defect. If the timeout recurs,
+the stagnation guard brings it to the human, who must set `BASH_MAX_TIMEOUT_MS` in the environment the
+session **starts** with (shell environment or `settings.json` `env` — an `export` inside a Bash
+call cannot change it for the running session) and then resume, or split the suite.
 
 ⚠ **Exception 2 below is not affected.** The supervisor launch (`bash <generated>.sh`,
 `run_in_background: true`) is made by the **parent**, in the human's own session, and is
