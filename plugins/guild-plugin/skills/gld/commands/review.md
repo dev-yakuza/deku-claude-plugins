@@ -177,6 +177,8 @@ Rules for the loop:
 ```bash
 python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage review --role <reviewer|security|performance|dba|designer> --area "<the area the finding concerns>" --summary "<the finding the human acted on, 1 line>" --evidence "<file:line + why, 1 line>" --surprise
 ```
+**Also capture the human's OWN finding** when it ends in a code change — the human spots a defect the walkthrough did not raise and asks for it to be fixed (by you, or recorded as a change-request they fix themselves): the whole spine passed it, which is the strongest kind of correction there is, and it used to go unrecorded. Same call with `--role human` (not a roster role, like `auditor` — and distinct from `reviewer`, which is the auditor lens the human confirmed), a summary that says it was the human's own finding, the fixed `file:line` as evidence, and `--surprise`. A wording or style nit is not a defect — skip it.
+
 **Skip** when the human merely acknowledges a finding without acting on it (agreement ≠ correction — already covered by Step 4 item 5's "say so and move on"), and skip `MINOR` findings unless the human explicitly elevates one — which can now only happen if they asked for the suppressed list themselves (Step 4 item 5), so it is rare by construction, not routine. This is the review-stage half of the "PR-review overturn" signal `_signals.md` Section C flags — it captures a human confirming an *independent-auditor* finding as real; an unattended execute decision reversed at review (needing the auto-decision's own trail) stays the separate, still-deferred case.
 
 ## Step 5 — Recap + decision (after the last unit)

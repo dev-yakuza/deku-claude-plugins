@@ -17,7 +17,24 @@ Invoked as ONE bash call from a gate handler:
 Writes to  <repo-root>/.claude/guild/memory/ground-truth.jsonl  (append-only, one JSON per line,
 gitignored). Creates the dir/file if missing. Best-effort: on any failure it warns to stderr
 and exits non-zero WITHOUT raising, so a logging problem never blocks the spine.
+
+Two READ-ONLY modes support the stage-exit capture reconciliation (_signals.md Section C,
+"Capture reconciliation"). Nothing in the spine checked that a capture actually happened, and
+in one repo 2–4 members per sprint ended `done` with zero entries:
+    capture_signal.py --mark --issue 893 --stage execute
+        records the stage start (UTC) in <memory>/stage-start/893-execute.txt and prints it —
+        a FILE, because a stamp held only in context does not survive a compaction, which is
+        the very case the reconciliation exists for
+    capture_signal.py --count --issue 893 --stage execute --kind correction --since auto
+        prints how many entries for that Issue, stage (and kind, when given) have ts >= the
+        marked start — reconciled per kind, so one kind's surplus cannot hide another's gap
+        (`--since <ISO>` takes an explicit YYYY-MM-DDTHH:MM:SSZ instead)
+    capture_signal.py --now
+        prints the current UTC time
 """
+import re
+
+ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 import argparse, json, os, sys
 
 LOG_REL = os.path.join(".claude", "guild", "memory", "ground-truth.jsonl")
@@ -60,8 +77,19 @@ def now_iso():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--kind", required=True, choices=KINDS)
-    ap.add_argument("--summary", required=True)
+    ap.add_argument("--now", action="store_true",
+                    help="read-only: print the current UTC time and exit")
+    ap.add_argument("--mark", action="store_true",
+                    help="record the stage start for --issue/--stage in the memory dir "
+                         "(stage-start/<issue>-<stage>.txt), print it, and exit")
+    ap.add_argument("--count", action="store_true",
+                    help="read-only: print how many entries match --issue/--stage with "
+                         "ts >= --since, and exit (stage-exit capture reconciliation)")
+    ap.add_argument("--since", default=None,
+                    help="with --count: `auto` (the --mark file) or an ISO-8601 UTC "
+                         "YYYY-MM-DDTHH:MM:SSZ lower bound")
+    ap.add_argument("--kind", choices=KINDS)
+    ap.add_argument("--summary")
     ap.add_argument("--issue", default=None)
     ap.add_argument("--stage", default=None)
     ap.add_argument("--role", default=None)
@@ -72,12 +100,81 @@ def main():
     ap.add_argument("--evidence", default=None)
     ap.add_argument("--surprise", action="store_true")
     ap.add_argument("--escalated", action="store_true",
-                     help="this loop-back's retry ran at a bumped model tier "
-                          "(_model_tiering.md Section A/B) — read by evolve's "
-                          "model-tier scorecard (_model_tiering.md Section C).")
+                     help="this loop-back's retry ran the redone role one tier above its "
+                          "default (_model_tiering.md Section A/B). A bump marker only — "
+                          "evolve's model-tier test (Section C) does not read it.")
     ap.add_argument("--log", default=None,
                     help="override log path (default: <repo-root>/" + LOG_REL + ")")
     args = ap.parse_args()
+
+    if args.now:
+        print(now_iso())
+        return 0
+    log_path = args.log or os.path.join(repo_root(), LOG_REL)
+    mark_dir = os.path.join(os.path.dirname(log_path), "stage-start")
+    issue_key = str(args.issue or "").lstrip("#")
+    if args.mark:
+        if not (issue_key and args.stage):
+            sys.stderr.write("capture_signal: --mark needs --issue and --stage\n")
+            return 2
+        stamp = now_iso()
+        try:
+            os.makedirs(mark_dir, exist_ok=True)
+            with open(os.path.join(mark_dir, f"{issue_key}-{args.stage}.txt"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(stamp + "\n")
+        except OSError as e:
+            sys.stderr.write(f"capture_signal: could not write the stage-start mark ({e})\n")
+            return 1
+        print(stamp)
+        return 0
+    if args.count and args.since == "auto":
+        try:
+            with open(os.path.join(mark_dir, f"{issue_key}-{args.stage}.txt"),
+                      encoding="utf-8") as fh:
+                args.since = fh.read().strip()
+        except OSError:
+            sys.stderr.write("capture_signal: no stage-start mark for this issue/stage — "
+                             "run --mark at Step 0\n")
+            return 2
+    if args.count and args.since and not ISO_RE.match(args.since):
+        # A malformed bound compares wrongly as a string and returns a plausible 0, which
+        # reads as "nothing recorded" and triggers duplicate backfills. Refuse instead.
+        sys.stderr.write(f"capture_signal: --since {args.since!r} is not YYYY-MM-DDTHH:MM:SSZ\n")
+        return 2
+    if args.count:
+        # Counted from the ACTIVE log only: it is written during the stage being reconciled,
+        # and evolve's consolidation (which moves lines to consolidated.jsonl) never runs
+        # inside a stage. A missing log is a count of 0, which is exactly the finding.
+        if not (args.issue and args.stage and args.since):
+            sys.stderr.write("capture_signal: --count needs --issue, --stage and --since\n")
+            return 2
+        n = 0
+        try:
+            with open(log_path, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        e = json.loads(line)
+                    except ValueError:
+                        continue
+                    if (str(e.get("issue")) == str(args.issue).lstrip("#")
+                            and e.get("stage") == args.stage
+                            and (args.kind is None or e.get("kind") == args.kind)
+                            and str(e.get("ts") or "") >= args.since):
+                        n += 1
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            sys.stderr.write(f"capture_signal: could not read ({e})\n")
+            return 1
+        print(n)
+        return 0
+    if not args.kind or not args.summary:
+        sys.stderr.write("capture_signal: --kind and --summary are required to capture\n")
+        return 2
 
     issue = None
     if args.issue not in (None, "", "null"):
@@ -111,7 +208,6 @@ def main():
         "escalated": bool(args.escalated),
     }
 
-    log_path = args.log or os.path.join(repo_root(), LOG_REL)
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as fh:

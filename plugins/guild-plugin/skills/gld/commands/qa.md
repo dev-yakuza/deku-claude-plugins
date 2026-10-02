@@ -12,9 +12,12 @@
 ---
 
 ## Step 0 — Preflight
+
 As the leader, follow `_preflight.md` **Medium tier**. If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Load: `<!-- guild:test:output -->` (verify result + AC coverage + the tester's risk-based E2E judgment), the PR, the design/UX artifacts this judgment needs from `docs/specs/$1/`, and the hotspot list. ⚠ For the `docs/specs/$1/` part, **read the artifact(s) you act on, not the directory** (`_preflight.md` Item 4 — the `ls` step was removed there, it cost more than it saved) — the exhaustive pass over every artifact belongs to **Step 2.6**, which the carve-out exempts. Load `docs/standards/quality-bar.md` + `verification.md`.
 
 Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
+
+**Stage-start mark (right after the label read above, its own Bash call — after the Guild-initialized check and the Issue validation, so an uninitialized repo or an invalid Issue writes nothing; a later guard's refusal leaves only a mark file in the gitignored memory dir, which the next run overwrites):** `python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --mark --issue $1 --stage qa`. **Every return in this file after this line** — Step 2's and Step 2.5's included, not only Step 3's — runs the capture reconciliation immediately before returning, after every capture that step makes (`_signals.md` Section C, *Capture reconciliation* — `--stage qa --since auto`).
 
 **Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so letting this stage run would transition the parent onto a stage label and destroy the link `dev.md` Phase 2b uses to drive its children:
 ```
@@ -58,7 +61,7 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
 - **QA 계획 & 결과**: what was planned, what ran (with evidence), what's recommended for human QA.
 - **UI/UX 게이트**: if Step 1.5 ran, record the designer's verdict (pass / concerns / blocking a11y-usability defect).
 - **honesty of scope**: automated-QA vs human-QA clearly separated (same discipline as the verify gate). "QA 통과" means *the automated/agent-doable quality checks passed + a human-QA plan is stated* — never "fully QA'd by a human."
-- If QA **or** the UI/UX gate surfaces a real defect → do NOT advance; return `NEEDS_HUMAN` (loop back to execute) or record the concern.
+- If QA **or** the UI/UX gate surfaces a real defect → do NOT advance; **make the capture in the next bullet first**, then return `NEEDS_HUMAN` (loop back to execute) or record the concern.
 - **Ground-truth capture (①, `_signals.md` Section C — agent↔agent correction):** when QA or the UI/UX gate surfaces a **real blocking defect** (the test stage proved correctness-green, yet QA/designer found a defect it missed), append one entry (its own Bash call, best-effort — never blocks). The concrete defect **is** the objective anchor — one role overturning the test-stage pass, not self-review (`_signals.md` Section B). `--surprise` always (a confident pass overturned):
   ```bash
   python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage qa --role <qa|designer> --area "<the area of the defect>" --summary "<the defect QA/UX found that test missed, 1 line>" --evidence "<user flow / a11y measure, 1 line>" --surprise
@@ -137,6 +140,8 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
 - This runs **once per issue, at QA** — not repeated at `review`. QA is the mandatory spine stop every `/gld dev` run passes through; `review` is on-demand (nudged, not forced) and would miss unattended/batch runs entirely if this lived there instead.
 
 ## Step 3 — Judge + return
+
+**Capture reconciliation immediately before each return line below** — after the stagnation guard and its capture, not before them (`_signals.md` Section C, *Capture reconciliation* — `--stage qa --since auto`): recorded < owed → backfill the missing captures now.
 - **QA passed** (agent-doable checks green + UI/UX gate passed or not applicable + human-QA items clearly flagged + quality-bar met) → transition to done. Remove **whatever `guild:*` stage label Step 0 actually found** (substitute in place of `guild:qa` below if it was something else; **never remove `guild:child`** if present). **Also remove `guild:needs-human` in this same call if Step 0's label read found it present** (`_handoff.md` Section A):
   ```bash
   gh issue edit $1 --remove-label "guild:qa" --add-label "guild:done" --remove-label "guild:needs-human"

@@ -31,7 +31,7 @@ Every signal that will drive a change MUST be anchored to **real ground truth**:
 
 ## Section C — Capture points (ephemeral → ground-truth log)
 
-Ephemeral signals are appended to the ground-truth log **at the moment they occur**, by the spine step that observes them. **These are the only sanctioned writes in the growth-loop foundation.** Each is a single append — no read-back, no heavy logic (keep the spine fast).
+Ephemeral signals are appended to the ground-truth log **at the moment they occur**, by the spine step that observes them. **These are the only sanctioned writes in the growth-loop foundation.** Each is a single append — no read-back, no heavy logic (keep the spine fast). The one exception is the stage-exit *Capture reconciliation* below: a read-only count, and a late capture of a missed entry tagged `backfilled at stage exit:`.
 
 | Event | Observed at | Entry kind |
 |---|---|---|
@@ -44,6 +44,7 @@ Ephemeral signals are appended to the ground-truth log **at the moment they occu
 | A loop-back's blocking reason **repeats identically** on the next attempt (stalled retry) | stagnation guard (`_stagnation.md` Section B) — `implement.md`/`debug.md`/`refactor.md` Step 4, `test.md`/`qa.md` Step 3 | `stagnation` — the recurring reason · attempt-1↔2 evidence |
 | Execute-stage external auditor `BLOCKER` **whose loop-back actually changed code** | execute Step 3.5a → the **pass through Step 4 after the redo** (`_execute_spine.md`) — deliberately not at loop-back time, when "did the redo address it?" is not yet knowable | `correction` agent↔agent (role = `auditor`, **not a roster role** — excluded from evolve's role/model-tier scorecards) · `surprise` — **capped**: `MAJOR`, dismissed, and unacted-on findings are NOT captured, and nothing is captured only when **no redo ran at all** (a `FAIL` before the developer was re-invoked). Both bounded-retry **exhaustion** and a **stagnation** exit still capture: the redo ran on both, and under `_stagnation.md`'s containment rule a stagnation exit routinely follows a redo that resolved part of the set. The `--kind stagnation` entry `_stagnation.md` Section C writes is about the *stall*; it does not stand in for the `BLOCKER`s the same redo actually fixed; the auditor runs every issue, so capturing all of it would let Axis-1 sufficiency be met by scan volume rather than real reversals |
 | Human acts on a Step 2.5 adversarial finding at PR review (fix request / change-request / request-changes because of it) | review Step 4 loop / Step 5 decision (`review.md`) | `correction` agent↔agent (role = auditor lens) · `surprise` if BLOCKER/MAJOR |
+| Human finds a defect **themselves** at PR review and has it fixed (a code change, not a wording nit) | review Step 4 loop (`review.md`) | `correction` (role = `human` — **not a roster role**, like `auditor`: excluded from the per-role scorecards, and distinct from `reviewer`, which is the auditor lens a human confirmed) · `surprise` — the whole spine, auditor included, passed it |
 | Unattended auto-decision overturned by human at PR review | *(deferred — needs PR-review read-back of the auto-decision's own trail; narrower than the row above)* | `correction` (unattended) |
 | git revert of a Guild-authored commit | on-demand via scan_git — **not** captured | — (durable) |
 
@@ -62,6 +63,55 @@ It appends one line to `.claude/guild/memory/ground-truth.jsonl` (Section D), cr
 **Wired (increment 3 — agent↔agent):** `design.md` Step 2 appends a `correction` **when a design-stage specialist `BLOCKED` reverses a decided approach** (designer WCAG / dba integrity / security threat); `implement.md` Step 4 appends a `correction` (or `verify-gap` for the claimed-green↔raw case) **only when a loop-back fires on a real reversal** — a tech-lead/gate `BLOCKED` or raw evidence contradicting a claimed green, never a `DONE_WITH_CONCERNS`; `qa.md` Step 2 appends a `correction` **only when QA or the UI/UX gate finds a blocking defect the test stage passed**. These capture the *body* of the correction distribution (cross-role reversals) that the increment-2 human-override capture cannot see — legitimate because each is anchored to an objective outcome (Section B). Role = the overturner. `--surprise` always (confident work reversed). *(The design-stage hook was added after #898 live-verification showed the designer catching a WCAG trap at design — a real reversal the execute/qa hooks alone would miss.)*
 
 **Wired (stagnation guard — `_stagnation.md`):** `implement.md`/`debug.md`/`refactor.md` Step 4 and `test.md`/`qa.md` Step 3 compare a loop-back's blocking reason against the immediately-prior attempt's before consuming another retry; an identical-reason repeat appends `--kind stagnation` and escalates immediately rather than exhausting the numeric cap. This is orthogonal to increment 2/3 above — it fires on *recurrence*, not on a single reversal.
+
+### Capture reconciliation (stage exit — execute, test, qa)
+
+Every capture above is a step the leader must remember mid-loop, and nothing checked that it
+happened: in one repo, three sprints running ended members `done` with **zero** entries (2–4 a
+sprint), and a fix a human directed at review was never recorded. So each of these stages
+reconciles before it returns — **on every return path after Step 0**: advance, pause,
+`NEEDS_HUMAN`, `FAIL` — **immediately before the return line**, after every capture that step makes
+(the stagnation guard's included).
+
+Both inputs are **durable**, because the case this exists for — a long loop that compacts — is the
+case where anything held only in context is gone:
+
+1. **Mark the start** — at Step 0, its own Bash call (substitute the literals):
+   ```bash
+   python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --mark --issue <N> --stage <execute|test|qa>
+   ```
+   It writes the time to the memory dir (`stage-start/<N>-<stage>.txt`) and prints it. On the
+   execute path every audit-record block this invocation writes also carries the ASCII line
+   `invocation: <that time>` (`_execute_spine.md` Step 4), so "the blocks this invocation
+   appended" can be read back from the record.
+2. **Count what was recorded, per kind** — one Bash call each for `correction`, `verify-gap` and
+   `stagnation` (the kinds this stage can owe):
+   ```bash
+   python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --count --issue <N> --stage <execute|test|qa> --kind <correction|verify-gap|stagnation> --since auto
+   ```
+   Per kind, because a total lets one kind's legitimate surplus hide another kind's gap.
+   ⚠ **Exit 2 (no mark) → skip the reconciliation and say so in the narration.** Do **not** run
+   `--mark` now: a mark written at the exit makes every earlier capture invisible to `--count`, and
+   the backfill would duplicate all of them — permanently, since nothing is deleted. `--mark`
+   belongs to Step 0 only.
+3. **Count what was owed** — exactly what the table above already calls for, nothing more:
+   - **execute**, per block carrying this invocation's `invocation:` line: a role `BLOCKED` owes
+     1 `correction`, a verify gap 1 `verify-gap`; a loop-back driven only by the auditor owes
+     none of those. A **stagnation exit** owes 1 `stagnation` **instead of** that attempt's
+     `correction`/`verify-gap` — on either axis, an auditor-only stall included
+     (`_stagnation.md` Section C files it under the same stage). **Plus 1 `correction`** per
+     un-dismissed auditor `BLOCKER` that a later block of this invocation shows the redo
+     resolved (the deferred capture). An auditor `MAJOR`, a dismissed finding, or an unacted-on
+     one owes **nothing** (the table's volume guard).
+   - **test**: 1 `verify-gap` per verify gap / failed verify — or 1 `stagnation` instead.
+   - **qa**: 1 `correction` per QA/designer blocking defect — or 1 `stagnation` instead.
+4. **Per kind, recorded < owed → capture the missing ones now**, with the same call the step would have made,
+   and start `--evidence` with `backfilled at stage exit:` so the delay is visible. Say in the
+   narration how many were backfilled. **Owed 0** → nothing to do; a clean run legitimately leaves
+   no entry (agreement is not a signal). Recorded > owed is not corrected — never delete.
+
+⚠ It never records anything the table does not already call for, so it cannot inflate the log.
+The `--count` read is the one sanctioned read-back of this log inside a stage.
 
 ## Section D — Ground-truth log (format & location)
 
@@ -112,6 +162,6 @@ python3 <<SKILL_DIR>>/commands/atoms/scan_transcript.py --repo-cwd <abs-repo-pat
 ## Hard rules
 - **Durable-first**: a transcript failure never blocks the growth loop — degrade to git/CI/gate.
 - **Anchor everything** to an objective outcome or a real human action (Section B). Self-review ≠ ground truth.
-- **Capture is append-only, minimal, at-occurrence** (Section C) — never a heavy inline scan on the spine. ⚠ **One sanctioned exception**: `evolve`'s Phase 7 consolidation bridge (`evolve.md`) periodically moves entries out of `ground-truth.jsonl` into `consolidated.jsonl` once they're durably captured elsewhere (③/⑥/gates) — this is a rewrite, not an append, but it's the one place outside the Section C capture points allowed to touch this file, and only evolve (an occasional, human-supervised run) does it.
+- **Capture is append-only, minimal, at-occurrence** (Section C) — never a heavy inline scan on the spine; the stage-exit *Capture reconciliation* (a read-only count, and a tagged late capture of a missed entry) is the only in-stage read-back. ⚠ **One sanctioned exception**: `evolve`'s Phase 7 consolidation bridge (`evolve.md`) periodically moves entries out of `ground-truth.jsonl` into `consolidated.jsonl` once they're durably captured elsewhere (③/⑥/gates) — this is a rewrite, not an append, but it's the one place outside the Section C capture points allowed to touch this file, and only evolve (an occasional, human-supervised run) does it.
 - The ground-truth log is **advisory / low-weight** until evolve promotes with corroboration (HITL — INV1: application always needs human approval).
 - **Nothing here weakens verification** (INV2): the verify gate's behavior (`_handoff.md` Section E) is unchanged; ① only *logs* the gap it already computes.

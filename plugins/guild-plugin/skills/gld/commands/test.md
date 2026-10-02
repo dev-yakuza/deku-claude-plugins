@@ -10,9 +10,12 @@
 ---
 
 ## Step 0 — Preflight
+
 As the leader, follow `_preflight.md` **Medium tier**. If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Load the test cases (`docs/specs/$1/test-cases.md`), the design output, and any execute-stage evidence (`<!-- guild:test-evidence:step-1 -->`). Load `docs/standards/verification.md` for the verify rules + DoD.
 
 Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
+
+**Stage-start mark (right after the label read above, its own Bash call — after the Guild-initialized check and the Issue validation, so an uninitialized repo or an invalid Issue writes nothing; a later guard's refusal leaves only a mark file in the gitignored memory dir, which the next run overwrites):** `python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --mark --issue $1 --stage test`. **Every return in this file after this line** runs the capture reconciliation immediately before returning, after every capture that step makes (`_signals.md` Section C, *Capture reconciliation* — `--stage test --since auto`).
 
 **Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so Step 3's transition would destroy the link `dev.md` Phase 2b uses to drive the children:
 ```
@@ -48,6 +51,8 @@ As the leader, enforce the verify gate (`_handoff.md` Section E):
   **Skip** when raw evidence matched the claim and was green — no gap means nothing to learn (agreement ≠ signal).
 
 ## Step 3 — Judge completion + return
+
+**Capture reconciliation immediately before each return line below** — after the stagnation guard and its capture, not before them (`_signals.md` Section C, *Capture reconciliation* — `--stage test --since auto`): recorded < owed → backfill the missing captures now.
 - **Vacuous-test guard FIRST (INV2 spirit — #894 lesson) — apply before judging "verify passed" below, never after**: before accepting "AC covered", confirm the covering tests are **effective** — a test that passes but asserts nothing meaningful, or whose assertion does **not** react when the code-under-test breaks (the #894 disabled-contrast pattern: `meetsGuideline` skipped its check in the disabled path, so it passed regardless), is **not** coverage. If verify leans on a vacuous test, treat that AC as **uncovered** → loop back for a real assertion (do not proceed to the "Verify passed" bullet below for that AC). A green suite of vacuous tests is not a pass.
 - **Verify passed** (raw evidence green + AC covered **by the guard above, not vacuously** + DoD met) → advance to the **QA stage** (holistic quality follows automated correctness). Remove **whatever `guild:*` stage label Step 0 actually found** (substitute in place of `guild:test` below if it was something else; **never remove `guild:child`** if present). **Also remove `guild:needs-human` in this same call if Step 0's label read found it present** (`_handoff.md` Section A):
   ```bash

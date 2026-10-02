@@ -535,7 +535,7 @@ hasfx "board.md: 상태 경로 반환값이 따로 있다" "$BOARD" "The bare st
 hasfx "board.md: 진행 중 run 에게 거짓 약속을 하지 않는다" "$BOARD" "Is a supervisor running right now"
 # 읽는 키는 쓰는 곳이 있어야 한다 — owned 가 사문화됐던 것과 같은 종류의 실수를 반복하지 않는다
 hasfx "board.md: column_by_verified 를 config 에 쓴다" "$BOARD" '"column_by_verified"'
-hasfx "board.md: Phase S 가 그것을 갱신한다" "$BOARD" "Write the outcome to `config.sprint.board.column_by_verified`"
+hasfx "board.md: Phase S 가 그것을 갱신한다" "$BOARD" 'Write the outcome to `config.sprint.board.column_by_verified`'
 hasfx "daily.md: column_by_verified 를 읽는다" "$DAILY" "column_by_verified"
 # 감독자가 쓰는 사유 토큰은 board.md 의 어휘 목록에 있어야 한다 — 없으면 사람이 카드에서
 # 해독할 수 없는 문자열을 본다. 새 토큰을 추가할 때 한쪽만 늘어나는 것을 막는다.
@@ -798,7 +798,12 @@ fi
 # `Load:` 와 `⚠` 사이, 즉 **열거 구간 안에** 있는지를 위치로 본다.
 QAPOS="$("$PY" - "$GLD/commands/qa.md" <<'QAPY'
 import sys
-ln = open(sys.argv[1], encoding="utf-8").read().split("\n")[14]
+# Locate the Load: line by content, not by a fixed index — a line added above the Step 0
+# paragraph (the 0.87.0 stage-start mark) shifted it and broke a check about something else.
+_lines = [l for l in open(sys.argv[1], encoding="utf-8").read().split("\n") if "Load:" in l]
+if len(_lines) != 1:
+    print("BROKEN"); raise SystemExit
+ln = _lines[0]
 try:
     lo = ln.index("Load:"); hi = ln.index("⚠", lo); h = ln.index("hotspot list", lo)
 except ValueError:
@@ -2235,6 +2240,62 @@ lacksfx "audit: escalation rate is not read as evidence a higher tier was needed
 hasfx "evolve: model-tier HR targets the redone role" "$GLD/commands/evolve.md" 'propose raising **the role whose output was redone**'
 hasfx "spine: --escalated only when the tier was actually raised" "$GLD/commands/atoms/_execute_spine.md" 'add `--escalated` when Step 4 actually raised the retry'
 
+echo "== capture reconciliation at stage exit (_signals.md Section C) =="
+# Nothing checked that a capture happened; members ended `done` with zero entries three sprints
+# running. Each stage stamps its start and reconciles recorded vs owed before every return.
+hasfx "signals: capture reconciliation is defined" "$GLD/commands/atoms/_signals.md" '### Capture reconciliation (stage exit — execute, test, qa)'
+hasfx "signals: review captures the human's own finding" "$GLD/commands/atoms/_signals.md" 'Human finds a defect **themselves** at PR review'
+hasfx "review: the human's own fixed finding is captured" "$GLD/commands/review.md" "**Also capture the human's OWN finding**"
+for _st in "$SPINE" "$GLD/commands/test.md" "$GLD/commands/qa.md"; do
+  hasfx "$(basename "$_st"): marks the stage start durably" "$_st" 'capture_signal.py --mark --issue'
+  hasfx "$(basename "$_st"): reconciles captures before returning" "$_st" '*Capture reconciliation'
+done
+# The Step 0 mark line also contains "*Capture reconciliation", so the loop above cannot tell
+# whether the exit-side pointer survived; pin the exit-side sentences themselves (round 3).
+hasfx "test.md: Step 3 reconciles immediately before each return" "$GLD/commands/test.md" '**Capture reconciliation immediately before each return line below**'
+hasfx "qa.md: Step 3 reconciles immediately before each return" "$GLD/commands/qa.md" '**Capture reconciliation immediately before each return line below**'
+hasfx "spine: Step 6 reconciles first" "$SPINE" '**Capture reconciliation first**'
+hasfx "qa.md: a defect is captured before the Step 2 return" "$GLD/commands/qa.md" '**make the capture in the next bullet first**, then return'
+
+hasfx "spine: audit-record blocks carry the invocation line" "$SPINE" 'Each block also carries the ASCII line `invocation: <stage-start>`'
+hasfx "handoff K: invocation: is a machine token" "$HANDOFF" 'the `invocation: <ISO>` line'
+hasfx "signals: owed is counted per axis (auditor-only and MAJOR owe nothing)" "$GLD/commands/atoms/_signals.md" 'a loop-back driven only by the auditor owes'
+hasfx "review: the human's own finding uses the non-roster role human" "$GLD/commands/review.md" 'Same call with `--role human`'
+hasfx "scan_corrections: role human is in the strongest (human) tier" "$GLD/commands/atoms/scan_corrections.md" 'a defect the human found **themselves** at PR review (`role: human`'
+hasfx "evolve: role human is never an HR subject" "$GLD/commands/evolve.md" '`role: auditor` and `role: human` are never HR subjects'
+hasfx "signals: reconcile per kind" "$GLD/commands/atoms/_signals.md" 'Per kind, because a total lets one kind'
+hasfx "signals: a missing mark at exit is skipped, never re-marked" "$GLD/commands/atoms/_signals.md" '**Exit 2 (no mark) → skip the reconciliation and say so in the narration.**'
+# The read-only modes must actually work: --count filters by issue, stage and time.
+_cs="$GLD/commands/atoms/capture_signal.py"; _cl="$WORK3/gt_count.jsonl"
+"$PY" "$_cs" --kind correction --issue 5 --stage execute --role tech-lead --summary s --log "$_cl" >/dev/null 2>&1
+"$PY" "$_cs" --kind correction --issue 6 --stage execute --role tech-lead --summary s --log "$_cl" >/dev/null 2>&1
+"$PY" "$_cs" --kind verify-gap --issue 5 --stage test --role tester --summary s --log "$_cl" >/dev/null 2>&1
+_c1="$("$PY" "$_cs" --count --issue 5 --stage execute --since 2000-01-01T00:00:00Z --log "$_cl" 2>/dev/null)"
+_c2="$("$PY" "$_cs" --count --issue 5 --stage execute --since 2999-01-01T00:00:00Z --log "$_cl" 2>/dev/null)"
+_c3="$("$PY" "$_cs" --count --issue 7 --stage execute --since 2000-01-01T00:00:00Z --log "$WORK3/absent.jsonl" 2>/dev/null)"
+_now="$("$PY" "$_cs" --now 2>/dev/null)"
+if [ "$_c1" = "1" ] && [ "$_c2" = "0" ] && [ "$_c3" = "0" ] && printf '%s' "$_now" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'; then
+  ok "capture_signal: --count filters issue/stage/time, absent log = 0, --now is ISO UTC"
+else
+  bad "capture_signal: --count / --now" "1 0 0 <ISO>" "$_c1 $_c2 $_c3 $_now"
+fi
+# --mark persists the start (a compaction must not lose it); --since auto reads it back; a stage
+# with no mark and a malformed bound are REFUSED (exit 2, no number) — a plausible 0 would
+# trigger duplicate backfills (adversarial review of 0.87.0, round 1).
+# A capture made BEFORE the mark must not be counted — the property re-marking broke (round 2).
+printf '%s\n' '{"ts": "2000-01-01T00:00:00Z", "kind": "correction", "issue": 9, "stage": "qa", "role": "qa", "summary": "old"}' >> "$_cl"
+"$PY" "$_cs" --mark --issue 9 --stage qa --log "$_cl" >/dev/null 2>&1
+"$PY" "$_cs" --kind correction --issue 9 --stage qa --role qa --summary s --log "$_cl" >/dev/null 2>&1
+_m1="$("$PY" "$_cs" --count --issue 9 --stage qa --since auto --log "$_cl" 2>/dev/null)"
+"$PY" "$_cs" --count --issue 9 --stage test --since auto --log "$_cl" >/dev/null 2>&1; _m2=$?
+"$PY" "$_cs" --count --issue 9 --stage qa --since 2026-10-02T09:00:00+09:00 --log "$_cl" >/dev/null 2>&1; _m3=$?
+_m4="$("$PY" "$_cs" --count --issue 9 --stage qa --kind stagnation --since auto --log "$_cl" 2>/dev/null)"
+if [ "$_m1" = "1" ] && [ "$_m2" = "2" ] && [ "$_m3" = "2" ] && [ "$_m4" = "0" ]; then
+  ok "capture_signal: --mark + --since auto; --kind filters; unmarked stage and malformed --since are refused"
+else
+  bad "capture_signal: --mark / auto / --kind / refusal" "1 2 2 0" "$_m1 $_m2 $_m3 $_m4"
+fi
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -2242,7 +2303,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=404   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=427   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
