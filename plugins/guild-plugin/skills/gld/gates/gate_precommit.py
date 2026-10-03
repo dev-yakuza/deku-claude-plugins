@@ -180,6 +180,11 @@ TEST_PATH_RE = re.compile(
     re.IGNORECASE)
 ASSERT_RE = re.compile(
     r"\b(expect|verify|should)\b\s*\(|"  # JS/Dart-style matcher calls: expect(...), verify(...)
+    # Visual assertions: `expect.element(x).toMatchScreenshot()` (Vitest browser), Dart's async
+    # `expectLater(…, matchesGoldenFile(…))`, and the matchers themselves. Without these a visual
+    # test's only assertion line could be deleted with no assertion counted as removed.
+    r"\bexpect\.\w+\s*\(|\bexpectLater\s*\(|"
+    r"\b(toMatchScreenshot|toHaveScreenshot|matchesGoldenFile|toMatchImageSnapshot)\s*\(|"
     r"\bassert\w*\s*\(|"  # assert(...) and unittest-style assertEqual(/assertTrue(/assertIn(...
     r"\bassert\b",  # bare Python `assert expr[, msg]` statement (no parens)
     re.IGNORECASE)
@@ -524,13 +529,21 @@ def check_secrets(root, dismiss, scope):
     return findings
 
 
+def is_test_path(path, extra_globs=()):
+    """TEST_PATH_RE, plus the repo's own visual-test globs (`visual.tests`). Visual tests often
+    use names no convention covers — `index.vitest.tsx`, `*_golden.dart` outside `test/` — and
+    then deleting one, or skipping it, passed B1–B3 unseen."""
+    return bool(TEST_PATH_RE.search(path)) or (bool(extra_globs) and baseline_matches(path, extra_globs))
+
+
 def check_verification(root, dismiss, scope):
     include_unstaged, _ = scope
     findings = []
+    vtests = visual_test_globs(root)
     deleted = changed_names(root, diff_filter="D", include_unstaged=include_unstaged)
     # (B1) deleted test files
     for n in deleted:
-        if TEST_PATH_RE.search(n) and not dismiss_matches(n, dismiss):
+        if is_test_path(n, vtests) and not dismiss_matches(n, dismiss):
             findings.append(finding("verification:test-deleted", n, f"테스트 파일 삭제: {n} (INV2 — 검증 약화)"))
             record_firing("verification", "block", n)
     # (B2/B3) net assertion removal / skip additions
@@ -546,7 +559,7 @@ def check_verification(root, dismiss, scope):
     # "+++ /dev/null") still resolves to its real path — the old parser needed a special
     # "--- a/" branch for that, and got the attribution wrong whenever one was missing.
     for cur, sign, body in iter_diff_lines(changed_diff(root, include_unstaged)):
-        if not TEST_PATH_RE.search(cur) or COMMENT_LINE_RE.match(body):
+        if not is_test_path(cur, vtests) or COMMENT_LINE_RE.match(body):
             continue
         if sign == "+":
             if ASSERT_RE.search(body):
@@ -613,6 +626,7 @@ def check_verification(root, dismiss, scope):
 # yields no warning, never an exception (the module-level handler is fail-OPEN, so a crash here
 # would let a staged secret through). Observed in review: `"baselines": true` did exactly that.
 BASELINE_SHOW_MAX = 5
+_RECORD_VISUAL = [False]  # set by main_git_hook
 
 
 def _visual_cfg(root):
@@ -648,6 +662,13 @@ def visual_config_files(root):
     return _str_list(_visual_cfg(root).get("config_files"))
 
 
+def visual_test_globs(root):
+    try:
+        return _str_list(_visual_cfg(root).get("tests"))
+    except Exception:
+        return []
+
+
 def glob_to_regex(g):
     """Git `:(glob)` pathspec semantics, so the gate and the spine's `git diff` agree on what a
     glob covers: `**/` is zero or more directories, a trailing `/**` everything below, `*` and `?`
@@ -664,7 +685,18 @@ def glob_to_regex(g):
         elif g.startswith("/**", i) and i + 3 == len(g):
             out.append(r"(?:/.*)?"); i += 3
         elif g.startswith("**", i):
-            out.append(r".*"); i += 2
+            # git treats a `**` not bounded by `/` (or the end) like `*`: it does not cross `/`.
+            bounded = (i == 0 or g[i - 1] == "/") and (i + 2 == len(g) or g[i + 2] == "/")
+            out.append(r".*" if bounded else r"[^/]*"); i += 2
+        elif g[i] == "[":
+            j = g.find("]", i + 2)
+            if j == -1:
+                out.append(re.escape(g[i])); i += 1
+            else:
+                body = g[i + 1:j]
+                if body[:1] in ("!", "^"):
+                    body = "^" + body[1:]
+                out.append("[" + body.replace("\\", "\\\\") + "]"); i = j + 1
         elif g[i] == "*":
             out.append(r"[^/]*"); i += 1
         elif g[i] == "?":
@@ -685,21 +717,24 @@ def baseline_matches(path, globs):
 
 
 def _natural_key(p):
-    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", p)]
+    # isdecimal, not isdigit: '²'.isdigit() is True and int('²') raises.
+    return [(0, int(t), "") if t.isdecimal() else (1, 0, t) for t in re.split(r"([0-9]+)", p)]
 
 
-def _no_rename_names(root, diff_filter, include_unstaged):
-    """Like changed_names, but with rename detection off: git pairs a deleted baseline with an
-    added one of similar (often identical — goldens share bytes) content as `R`, which the M/D
-    filters never see. Renamed-and-regenerated, moved out of the glob, and delete-plus-add all
-    went silent that way."""
-    names = set()
+def _no_rename_status(root, include_unstaged):
+    """{path: status letter} with rename detection off. git pairs a deleted baseline with an
+    added one of similar (often identical — goldens share bytes) content as `R`, which M/D
+    filters never see: renamed-and-regenerated, moved out of the glob, and delete-plus-add all
+    went silent that way. One call per scope instead of one per status."""
+    st = {}
     scopes = [["--cached"]] + ([[]] if include_unstaged else [])
     for extra in scopes:
-        out = sh(["git", "diff"] + extra + ["--name-only", "--no-renames",
-                                            f"--diff-filter={diff_filter}"], root=root)
-        names.update(unquote_git_path(n.strip()) for n in out.splitlines() if n.strip())
-    return names
+        out = sh(["git", "diff"] + extra + ["--name-status", "--no-renames"], root=root)
+        for ln in out.splitlines():
+            parts = ln.split("\t", 1)
+            if len(parts) == 2 and parts[0][:1]:
+                st[unquote_git_path(parts[1].strip())] = parts[0][:1]
+    return st
 
 
 def check_visual_baselines(root, dismiss, scope):
@@ -711,15 +746,18 @@ def check_visual_baselines(root, dismiss, scope):
             return []
         include_unstaged, _ = scope
         warn = []
+        status = _no_rename_status(root, include_unstaged)
         groups = (
-            ("baseline-updated", "M", "시각 기준 이미지 갱신", lambda n: baseline_matches(n, globs)),
+            # T (type change — e.g. replaced by a symlink) rewrites the content as surely as M.
+            ("baseline-updated", "MT", "시각 기준 이미지 갱신", lambda n: baseline_matches(n, globs)),
             ("baseline-deleted", "D", "시각 기준 이미지 삭제", lambda n: baseline_matches(n, globs)),
-            ("visual-config-changed", "MD", "시각 비교 설정 파일 변경",
+            ("visual-config-changed", "MTD", "시각 비교 설정 파일 변경",
              lambda n: baseline_matches(n, cfg_files)),
         )
         for kind, flt, label, match in groups:
-            hits = sorted((n for n in _no_rename_names(root, flt, include_unstaged)
-                           if match(n) and not dismiss_matches(n, dismiss)), key=_natural_key)
+            hits = sorted((n for n, st in status.items()
+                           if st in flt and match(n) and not dismiss_matches(n, dismiss)),
+                          key=_natural_key)
             if not hits:
                 continue
             shown = ", ".join(hits[:BASELINE_SHOW_MAX])
@@ -734,8 +772,11 @@ def check_visual_baselines(root, dismiss, scope):
             # ONE firing per kind, not per file: a full golden regeneration touches thousands of
             # images, and the firing log is a bounded episodic file that evolve's rule scorecard
             # reads — per-file lines evicted every other rule's history in one commit.
-            record_firing(f"verification:{kind}", "warn",
-                          hits[0] if len(hits) == 1 else f"{len(hits)} files")
+            # Only the authoritative layer records: PreToolUse sees the same commit first (for
+            # `-a`), and logging both double-counted every visual change in evolve's scorecard.
+            if _RECORD_VISUAL[0]:
+                record_firing(f"verification:{kind}", "warn",
+                              hits[0] if len(hits) == 1 else f"{len(hits)} files")
         return warn
     except Exception:
         return []
@@ -1100,6 +1141,7 @@ def main_git_hook():
     if not gates_enabled(root):
         return 0
     scope = (False, False)  # the index IS the commit at this point
+    _RECORD_VISUAL[0] = True
     try:
         block, warn = run_checks(root, scope)
     except GateUnavailable:
@@ -1169,7 +1211,8 @@ GATE_CONTROL_RE = re.compile(
 CONFIG_PATH_RE = re.compile(r"\.claude/guild/config\.json$")
 # `visual` decides what the gate REPORTS (an emptied `baselines` list silently ends the
 # disclosure warning), so editing it asks like `gates.enabled` does.
-GATES_KEY_RE = re.compile(r"\"gates\"|gates\.enabled|\"enabled\"|\"visual\"|\"baselines\"|\"config_files\"")
+GATES_KEY_RE = re.compile(r"\"gates\"|gates\.enabled|\"enabled\"|\"visual\"|\"baselines\"|"
+                          r"\"config_files\"|\"tests\"|\"runnable\"|\"create\"|\"vrt\"")
 
 # The gate's own WIRING: the files that decide whether it runs at all. Distinct from
 # GATE_CONTROL_RE (what it checks) because the remediation and the message differ.
@@ -1205,6 +1248,70 @@ GATE_WIRING_RE = re.compile(
     r"(^|/)\.simple-git-hooks\.(json|js|cjs)$")
 
 
+# What in config.json decides what the gate enforces or reports. Grepping the NEW text for these
+# keys missed the most natural ways to turn them off — an Edit whose old_string holds the whole
+# `visual` block and whose new_string is empty, narrowing a glob to match nothing, or a Write of
+# a config that simply omits `visual`. A missing `gates` was harmless (it defaults to on); a
+# missing `visual` turns the visual checks off. So simulate the edit and compare.
+ENFORCEMENT_KEYS = (("gates",), ("visual",), ("commands", "vrt"))
+
+
+def _pick(cfg, keys):
+    cur = cfg
+    for k in keys:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(k)
+    return cur
+
+
+def _apply_edit(text, old, new, replace_all=False):
+    if old is None or old == "" or old not in text:
+        return None
+    return text.replace(old, new or "") if replace_all else text.replace(old, new or "", 1)
+
+
+def config_enforcement_change(path, ti, body):
+    """'' when the edit leaves every enforcement key unchanged; otherwise a label for the prompt.
+    Falls back to the key-name grep (now over old_string too) when the edit cannot be simulated."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            before_text = fh.read()
+        before = json.loads(before_text)
+    except Exception:
+        before_text, before = None, None
+    after_text = None
+    if before_text is not None:
+        if "content" in ti:
+            after_text = str(ti.get("content") or "")
+        elif isinstance(ti.get("edits"), list):
+            after_text = before_text
+            for e in ti["edits"]:
+                if not isinstance(e, dict) or after_text is None:
+                    after_text = None
+                    break
+                after_text = _apply_edit(after_text, e.get("old_string"), e.get("new_string"),
+                                         bool(e.get("replace_all")))
+        elif "old_string" in ti:
+            after_text = _apply_edit(before_text, ti.get("old_string"), ti.get("new_string"),
+                                     bool(ti.get("replace_all")))
+    if before is not None and after_text is not None:
+        try:
+            after = json.loads(after_text)
+        except Exception:
+            after = None  # an edit that breaks the JSON breaks every key — ask
+        changed = [k for k in ENFORCEMENT_KEYS
+                   if after is None or _pick(before, k) != _pick(after, k)]
+        if not changed:
+            return ""
+        names = {("gates",): "게이트 off-switch (gates)", ("visual",): "시각 검사 설정 (visual)",
+                 ("commands", "vrt"): "시각 회귀 실행 커맨드 (commands.vrt)"}
+        return " · ".join(names[k] for k in changed)
+    if GATES_KEY_RE.search(body):
+        return "게이트 설정 (gates / visual)"
+    return ""
+
+
 def main_guard_config():
     raw = sys.stdin.read() if not sys.stdin.isatty() else ""
     try:
@@ -1215,13 +1322,15 @@ def main_guard_config():
     path = (ti.get("file_path") or ti.get("path") or "").replace("\\", "/")
     if not path:
         return 0
-    body = " ".join(str(ti.get(k, "")) for k in ("content", "new_string", "edits"))
+    body = " ".join(str(ti.get(k, "")) for k in ("content", "new_string", "old_string", "edits"))
     if GATE_CONTROL_RE.search(path):
         what = "게이트 규칙/스크립트"
     elif GATE_WIRING_RE.search(path):
         what = "게이트 배선 (훅 등록·훅 설정)"
-    elif CONFIG_PATH_RE.search(path) and GATES_KEY_RE.search(body):
-        what = "게이트 off-switch (gates.enabled)"
+    elif CONFIG_PATH_RE.search(path):
+        what = config_enforcement_change(path, ti, body)
+        if not what:
+            return 0
     else:
         return 0
     msg = (f"⚠ Guild 강제층 변경 확인 필요 — {what} 을(를) 수정하려 합니다 ({path}).\n"

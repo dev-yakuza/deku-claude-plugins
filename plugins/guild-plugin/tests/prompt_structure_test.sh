@@ -2327,12 +2327,12 @@ hasfx "design: 시각 케이스는 동작 케이스를 대체하지 않는다" "
 SPINE="$GLD/commands/atoms/_execute_spine.md"
 hasfx "spine: 생성·갱신은 visual.create 로, 범위 한정" "$SPINE" 'scoped to the test files you touched, never the whole suite'
 hasfx "spine: developer 가 baselines: 로 자기보고 (A 는 case 인용)" "$SPINE" '`A <path> — case: <visual case / ux.md state>`'
-hasfx "spine: 자기보고를 git 으로 대조 (--no-renames)" "$SPINE" "git diff --name-status --no-renames <base>...HEAD -- ':(glob)<g1>'"
+hasfx "spine: 자기보고를 git 으로 대조 (--no-renames)" "$SPINE" "git diff --name-status --no-renames <base>...HEAD -- ':(glob)<baseline-glob>'"
 hasfx "spine: 미신고 변경은 not-green" "$SPINE" 'undeclared visual change: <paths>'
 hasfx "spine: PR 시각 변경 섹션 마커" "$SPINE" '<!-- guild:visual-changes -->'
 hasfx "spine: 비교 설정 → 갱신 → 추가 순서" "$SPINE" 'a changed comparison setting changes what *every* image means'
 hasfx "implement: 시각 케이스를 golden/VRT 로 구현" "$GLD/commands/implement.md" 'implement each row as a golden / VRT test'
-hasfx "refactor: 원장에 C/M/D 없음" "$GLD/commands/refactor.md" 'must hold **no `C`, `M` or `D`, and no `A` without a visual case**'
+hasfx "refactor: 원장에 C/M/D 없음" "$GLD/commands/refactor.md" 'must hold **no `C`, `M`, `D` or replacing `A`, and no `A` without an existing visual case**'
 hasfx "debug: 버그를 기록한 기준 이미지" "$GLD/commands/debug.md" 'whose existing baseline *recorded the bug*'
 TESTMD="$GLD/commands/test.md"
 hasfx "test: VISUAL_CASES / VISUAL_RUN 판정" "$TESTMD" '`VISUAL_CASES = yes` when `test-cases.md` carries'
@@ -2358,8 +2358,8 @@ hasfx "handoff: Section L 이 있다" "$HO" '## Section L — Visual tests (gold
 hasfx "handoff L.1: runnable 이 없으면 false" "$HO" '**Absent → treat as `false`**'
 hasfx "handoff L.3: 원장 마커는 ASCII" "$HO" '<!-- guild:visual-baselines -->'
 hasfx "handoff L.3: 재진입 시 사유를 이어받는다" "$HO" '**carries reasons forward**'
-hasfx "handoff L.4: 케이스 없는 A 는 위장된 재작성" "$HO" '**An `A` that cites none is a rewrite in disguise**'
-hasfx "handoff L.4: 비교 설정 완화도 검증 약화" "$HO" 'loosening a `visual.config_files` setting'
+hasfx "handoff L.4: 케이스 없는 A 는 위장된 재작성" "$HO" '**An `A` that cites no existing case is a rewrite in disguise**'
+hasfx "handoff L.4: 비교 설정 완화도 검증 약화" "$HO" 'loosening a comparison setting, or excluding a test **to hide a difference the Issue did not intend**'
 hasfx "handoff L.5: 환경 의심은 재작성 사유가 아니다" "$HO" '**L.5 Environment, not regression.**'
 hasfx "scan_repo: 모노레포는 도구의 디렉터리 플래그로" "$SCAN" 'Every step runs from the repo root'
 hasfx "scan_repo: test 에 이미 포함된 golden 은 vrt 로 두 번 기록하지 않음" "$SCAN" 'recording them twice runs them twice'
@@ -2371,6 +2371,23 @@ hasfx "qa: designer 이미지 상한 12" "$QAMD" '**at most 12 in all**'
 hasfx "review: PR head 가 체크아웃일 때만 Read" "$REVIEWMD" '**only when the PR head is the current checkout**'
 lacksfx "implement: spine 규칙을 되풀이하지 않는다 (Section A)" "$GLD/commands/implement.md" 'and the `baselines:` line when'
 lacksfx "handoff: 시각 QA 를 통째로 사람 몫으로 두지 않는다" "$HO" "and manual/visual QA is the human's step."
+# 2회차 적대적 리뷰
+hasfx "handoff L.0: visual.tests (게이트가 테스트 경로로 취급)" "$HO" '| `visual.tests` |'
+hasfx "handoff L.0: visual.packages (패키지 단위 적용)" "$HO" '| `visual.packages` |'
+hasfx "handoff L.0: env 에 아키텍처" "$HO" '**with the CPU architecture**'
+hasfx "handoff L.4: 의도한 화면 변경의 재작성은 정상 경로" "$HO" '**When a rewrite is right**'
+hasfx "handoff L.4: case 는 리더가 존재를 확인" "$HO" 'checked by the leader, not taken from the developer'"'"'s text'
+hasfx "handoff L.3: 교체(A … replaces) 행" "$HO" 'A <path> — replaces <old path> — <reason>'
+hasfx "spine: 인라인 비교 설정·이미지 인자 변경을 -G 로 찾는다" "$SPINE" "git diff --name-only -G 'comparatorOptions|"
+hasfx "spine: case 를 직접 대조" "$SPINE" '**Check every `case:` yourself**'
+hasfx "spine: runnable 이 아니면 생성 금지를 대입" "$SPINE" 'when visual.runnable is true, else "none — do not create or rewrite images here'
+hasfx "spine: PATCH 시 visual-changes 블록도 교체·제거" "$SPINE" 'and the `<!-- guild:visual-changes -->` block replaced or appended'
+hasfx "scan_repo: 스크립트 이름만으로는 VRT 아님" "$SCAN" '**a script name alone (`test:view`, `vrt`) is not evidence**'
+hasfx "scan_repo: vrt_create 는 vrt 와 같은 태그·환경" "$SCAN" '**same tag/selection flags and environment**'
+hasfx "design: visual.packages 안의 UI 만" "$DESIGN" '**inside `visual.packages`**'
+hasfx "test: 모든 시각 실패에 환경 의심 예외" "$TESTMD" '- **Visual failures** (any golden/VRT failure'
+hasfx "test: 케이스 이름을 남기는 verbose reporter" "$TESTMD" '`--reporter=verbose`'
+hasfx "update: 로컬 영역의 시각 설정 줄은 확인받아 추가 제안" "$GLD/commands/update.md" 'also **offer** (one confirm, additive — INV4)'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -2379,7 +2396,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=488   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=504   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

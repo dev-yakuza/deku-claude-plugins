@@ -632,9 +632,8 @@ if [ $PRE_RC -eq 0 ] && printf '%s' "$PRE_OUT" | grep -qF "시각 기준 이미�
 else
   bad "V10 PreToolUse 모드" "exit 0 + warn" "rc=$PRE_RC"
 fi
-git reset -q >/dev/null 2>&1
-if grep -q '"rule": "verification:baseline-updated"' .claude/guild/memory/gate-firings.jsonl 2>/dev/null \
-   || grep -q 'verification:baseline-updated' .claude/guild/memory/gate-firings.jsonl 2>/dev/null; then
+git commit -qm x >/dev/null 2>&1  # git 훅(권위 있는 층)이 기록한다 — V27
+if grep -q 'verification:baseline-updated' .claude/guild/memory/gate-firings.jsonl 2>/dev/null; then
   ok "V11 경고가 gate-firings 에 기록된다 (evolve 의 규칙 성적표 입력)"
 else
   bad "V11 gate-firings 기록" "verification:baseline-updated" "absent"
@@ -681,7 +680,74 @@ git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm many >/de
 rm -f .claude/guild/memory/gate-firings.jsonl
 bash -c "for i in \$(seq 1 40); do printf 'PNG2' > src/a/__screenshots__/m\$i.png; done; git commit -qam x" >/dev/null 2>&1
 FN="$(grep -c 'baseline-updated' .claude/guild/memory/gate-firings.jsonl 2>/dev/null || echo 0)"
-if [ "$FN" -ge 1 ] && [ "$FN" -le 2 ]; then ok "V18 갱신 40건이어도 firing 은 종류당 1줄 (실측 $FN)"; else bad "V18 firing 볼륨" "1~2" "$FN"; fi
+if [ "$FN" -eq 1 ]; then ok "V18 갱신 40건이어도 firing 은 종류당 1줄 (실측 $FN)"; else bad "V18 firing 볼륨" "1" "$FN"; fi
+
+# ── 2회차 적대적 리뷰 ──
+# (V19) 실제 VRT 테스트 파일명(index.vitest.tsx)은 TEST_PATH_RE 밖이라 삭제·skip 이 B1~B3 를 통과했다.
+vt_repo() {
+  fresh_repo
+  printf '{"gates":{"enabled":true},"visual":{"baselines":["**/__screenshots__/**"],"tests":["**/*.vitest.tsx"],"config_files":["**/flutter_test_config.dart"]}}' > .claude/guild/config.json
+  mkdir -p src/btn/__screenshots__
+  printf 'PNG1' > src/btn/__screenshots__/a.png
+  printf "it('a', async () => {\n  await expect.element(el).toMatchScreenshot('a')\n  await expect.element(el2).toMatchScreenshot('b')\n  await expect.element(el3).toMatchScreenshot('c')\n})\n" > src/btn/index.vitest.tsx
+  git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm b >/dev/null 2>&1
+}
+vt_repo
+expect_commit "V19 visual.tests 의 테스트 파일 삭제 → 차단" block "git rm -q src/btn/index.vitest.tsx && git commit -qm x"
+vt_repo
+expect_commit "V20 visual.tests 의 it.skip 추가 → 차단" block \
+  "printf \"it.skip('z', () => {})\n\" >> src/btn/index.vitest.tsx && git commit -qam x"
+vt_repo
+expect_commit "V21 toMatchScreenshot 단언 3줄 삭제 → assertion 순감소 차단" block \
+  "printf \"it('a', async () => {\n})\n\" > src/btn/index.vitest.tsx && git commit -qam x"
+fresh_repo
+mkdir -p test; printf "void main() {\n  testWidgets('a', (t) async {\n    await expectLater(find.byType(A), matchesGoldenFile('a.png'));\n    await expectLater(find.byType(B), matchesGoldenFile('b.png'));\n    await expectLater(find.byType(C), matchesGoldenFile('c.png'));\n  });\n}\n" > test/a_test.dart
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm b >/dev/null 2>&1
+expect_commit "V22 Dart expectLater(matchesGoldenFile) 3줄 삭제 → 차단" block \
+  "printf \"void main() {\n  testWidgets('a', (t) async {});\n}\n\" > test/a_test.dart && git commit -qam x"
+# (V23) 새 디렉터리별 flutter_test_config.dart (glob) 도 비교 설정이다.
+vt_repo
+expect_visual "V23 config_files glob(**/flutter_test_config.dart) 새 파일은 경고 없음, 수정은 경고" allow "시각 비교 설정 파일 변경 1건: test/flutter_test_config.dart" "" \
+  "mkdir -p test && printf 'a\n' > test/flutter_test_config.dart && git add -A && git -c core.hooksPath=/dev/null commit -qm c && printf 'b\n' > test/flutter_test_config.dart && git commit -qam x"
+# (V24) 문자 클래스와 / 에 붙지 않은 ** — git :(glob) 와 같게.
+fresh_repo
+printf '{"gates":{"enabled":true},"visual":{"baselines":["shots/*.[pP][nN][gG]","**.jpg"]}}' > .claude/guild/config.json
+mkdir -p shots/sub; printf 'P' > 'shots/p(1).png'; printf 'J' > shots/sub/x.jpg; printf 'J' > root.jpg
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm b >/dev/null 2>&1
+expect_visual "V24a 문자 클래스 glob 이 매치한다 (shots/*.[pP][nN][gG])" allow "shots/p(1).png" "" \
+  "printf 'Q' > 'shots/p(1).png' && git commit -qam x"
+expect_visual "V24b / 에 붙지 않은 ** 는 / 를 넘지 않는다 (**.jpg ⊅ shots/sub/x.jpg)" allow "" "시각 기준 이미지" \
+  "printf 'K' > shots/sub/x.jpg && git commit -qam x"
+# (V25) 타입 변경(T) — 심볼릭 링크로 바꾸기 — 도 갱신이다.
+visual_repo
+expect_visual "V25 기준 이미지를 심볼릭 링크로 바꿈(T) → 갱신 경고" allow "시각 기준 이미지 갱신 1건" "" \
+  "rm src/a/__screenshots__/btn.png && ln -s ../../../README.md src/a/__screenshots__/btn.png && git add -A && git commit -qm x"
+# (V26) 자연 정렬 키가 '²' 같은 isdigit-but-not-decimal 문자에서 터지면 그 그룹 경고가 통째로 사라졌다.
+visual_repo
+printf 'PNG1' > 'src/a/__screenshots__/s1²2.png'; git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm sup >/dev/null 2>&1
+expect_visual "V26 '²' 가 섞인 이름도 경고가 사라지지 않는다" allow "시각 기준 이미지 갱신 2건" "" \
+  "printf 'PNG2' > 'src/a/__screenshots__/s1²2.png' && printf 'PNG2' > src/a/__screenshots__/btn.png && git commit -qam x"
+# (V27) PreToolUse 와 git 훅이 같은 커밋을 두 번 기록했다 — 권위 있는 층만 기록한다.
+visual_repo
+rm -f .claude/guild/memory/gate-firings.jsonl
+printf 'PNG2' > src/a/__screenshots__/btn.png
+printf '{"tool_input":{"command":"git commit -am x"}}' | python3 .claude/guild/gates/scripts/gate_precommit.py >/dev/null 2>&1
+P27="$(grep -c 'baseline-updated' .claude/guild/memory/gate-firings.jsonl 2>/dev/null || echo 0)"
+if [ "$P27" = "0" ]; then ok "V27 PreToolUse 모드는 시각 firing 을 기록하지 않는다"; else bad "V27 PreToolUse firing" "0" "$P27"; fi
+git checkout -q -- . >/dev/null 2>&1
+# (V28) guard-config: old_string 으로 visual 블록을 지우거나, Write 로 visual 을 빼면 확인 요구.
+#       실제 파일을 읽어 편집을 시뮬레이션하므로 절대 경로의 실재 config.json 을 쓴다.
+visual_repo
+CFG="$PWD/.claude/guild/config.json"
+J() { python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$1"; }
+expect_guard "V28a Edit 의 old_string 으로 visual 블록 삭제 → 확인 요구" ask \
+  "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":$(J "$CFG"),\"old_string\":$(J ',"visual":{"baselines":["**/__screenshots__/**","test/goldens/**"]}'),\"new_string\":\"\"}}"
+expect_guard "V28b glob 을 아무것도 안 맞게 좁힘 → 확인 요구" ask \
+  "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":$(J "$CFG"),\"old_string\":$(J '"**/__screenshots__/**"'),\"new_string\":$(J '"nothing/**"')}}"
+expect_guard "V28c Write 로 visual 을 뺀 config → 확인 요구" ask \
+  "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":$(J "$CFG"),\"content\":$(J '{"gates":{"enabled":true},"language":"ko"}')}}"
+expect_guard "V28d 같은 파일에 무관한 키 추가 → 통과" pass \
+  "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":$(J "$CFG"),\"old_string\":$(J '{"gates"'),\"new_string\":$(J '{"language":"ko","gates"')}}"
 
 note ""
 note "== H. 기존 훅 체이닝 =="
@@ -702,7 +768,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=97
+GATE_MIN_CHECKS=111
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

@@ -41,7 +41,7 @@ ls docs/specs/$1
 
 ## Step 1 — Spawn tech-lead and tester in parallel
 **Visual decision first (leader, before spawning — no extra call).** Decide `VISUAL` now, because the tester prompt below carries it and Step 1.5 is spawned in the same message:
-- **UI surface** — the same trigger Step 1.5 uses for the designer (the Issue body / AC / hotspots describe a screen, widget, component, layout, theme or style change).
+- **UI surface** — the same trigger Step 1.5 uses for the designer (the Issue body / AC / hotspots describe a screen, widget, component, layout, theme or style change) — **inside `visual.packages`** when that list is non-empty (a UI change in an app with no visual tests gets none, even if a sibling package has them).
 - **Visual tests are available** — `VISUAL_AVAILABLE` per `_handoff.md` Section L.1, from `config.json` (already read in preflight Item 1): `visual.runnable` is `true` and (`commands.vrt` non-null or `visual.baselines` non-empty).
 - Both → `VISUAL = yes`. Either missing → `VISUAL = no` (a UI change in a repo with no runnable golden/VRT setup still gets its behavior tests; Guild does not introduce the tooling — `audit` reports the gap). Writing visual cases nobody can turn into images would leave every one of them uncovered at test.
 
