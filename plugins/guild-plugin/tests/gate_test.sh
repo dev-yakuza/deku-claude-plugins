@@ -843,6 +843,16 @@ printf 'y\n' > "$LONG"; git commit -qam x >/dev/null 2>&1
 T1=$(date +%s)
 if [ $((T1 - T0)) -le 10 ]; then ok "V42 병적인 visual.tests glob 도 커밋이 멈추지 않는다 ($((T1 - T0))s)"; else bad "V42 glob 백트래킹" "≤10s" "$((T1 - T0))s"; fi
 
+# ── 8회차 ── 재귀 매처가 ~1000 세그먼트 경로에서 RecursionError → "테스트 경로 아님"으로 조용히 통과.
+#    파일시스템 경로 길이 한계 때문에 실제 커밋으로는 만들 수 없어, 함수 단위로 직접 검사한다.
+R43="$(python3 -c "
+import importlib.util
+spec = importlib.util.spec_from_file_location('g', '$GATE'); g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+p = '/'.join(['d'] * 3000) + '/a.vt.ts'
+print(g.is_test_path(p, ('**/*.vt.ts',)))
+" 2>&1)"
+if [ "$R43" = "True" ]; then ok "V43 3000 세그먼트 경로도 visual.tests 로 인식 (재귀 한계 없음)"; else bad "V43 깊은 경로" "True" "$R43"; fi
+
 note ""
 note "== H. 기존 훅 체이닝 =="
 fresh_repo
@@ -862,7 +872,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=126
+GATE_MIN_CHECKS=127
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

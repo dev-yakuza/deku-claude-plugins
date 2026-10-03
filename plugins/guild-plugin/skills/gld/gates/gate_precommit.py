@@ -684,6 +684,10 @@ def _str_list(value):
     for g in value:
         if isinstance(g, str) and g.strip():
             g = g.strip().replace("\\", "/")
+            while "//" in g:
+                g = g.replace("//", "/")
+            while "/./" in g:
+                g = g.replace("/./", "/")
             while g.startswith("./"):
                 g = g[2:]
             out.append(g.lstrip("/"))
@@ -820,21 +824,18 @@ def glob_matches(g, path):
         return path == p or path.startswith(p + "/")
     _, segs, below = kind
     parts = path.split("/")
-    memo = {}
-
-    def m(i, j):
-        key = (i, j)
-        if key in memo:
-            return memo[key]
-        if i == len(segs):
-            r = (j < len(parts)) if below else (j == len(parts))
-        elif segs[i] == "**":
-            r = m(i + 1, j) or (j < len(parts) and m(i, j + 1))
+    # Iterative over glob segments, tracking the set of reachable path positions — no recursion
+    # (a recursive version hit Python's recursion limit on ~1000-segment paths, and the caught
+    # error silently read as "not a test path").
+    pos = {0}
+    for sg in segs:
+        if not pos:
+            return False
+        if sg == "**":
+            pos = set(range(min(pos), len(parts) + 1))
         else:
-            r = j < len(parts) and _seg_match(segs[i], parts[j]) and m(i + 1, j + 1)
-        memo[key] = r
-        return r
-    return m(0, 0)
+            pos = {j + 1 for j in pos if j < len(parts) and _seg_match(sg, parts[j])}
+    return any((j < len(parts)) if below else (j == len(parts)) for j in pos)
 
 
 def baseline_matches(path, globs):

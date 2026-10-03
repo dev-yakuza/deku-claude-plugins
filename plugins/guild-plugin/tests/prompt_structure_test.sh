@@ -2380,7 +2380,7 @@ hasfx "handoff L.4: case 는 리더가 존재를 확인" "$HO" 'checked by the l
 hasfx "handoff L.3: 교체(A … replaces) 행" "$HO" 'A <path> — replaces <old path> — <reason>'
 hasfx "spine: 인라인 비교 설정·이미지 인자 변경을 -G 로 찾는다" "$SPINE" "git diff --name-only -G 'comparatorOptions|"
 hasfx "spine: case 를 직접 대조" "$SPINE" '**Check every `case:` yourself**'
-hasfx "spine: runnable 이 아니면 생성 금지를 대입" "$SPINE" 'when visual.runnable is true, else "none — do not create or rewrite images here'
+hasfx "spine: runnable 이 아니면 생성 금지를 대입" "$SPINE" 'else "none — do not create or rewrite images here'
 hasfx "spine: PATCH 시 visual-changes 블록도 교체·제거" "$SPINE" 'and the `<!-- guild:visual-changes -->` block replaced or appended'
 hasfx "scan_repo: 스크립트 이름만으로는 VRT 아님" "$SCAN" '**a script name alone (`test:view`, `vrt`) is not evidence**'
 hasfx "scan_repo: vrt_create 는 vrt 와 같은 태그·환경" "$SCAN" '**same tag/selection flags and environment**'
@@ -2435,6 +2435,13 @@ hasfx "handoff L.3: P 는 git 에 안 보여도 유지" "$HO" '`P` rows carry fo
 hasfx "handoff L.1: 실행 불가여도 원장·P 는 적용" "$HO" 'the ledger and the developer'"'"'s `P` declarations still apply'
 hasfx "handoff L.0: 제품 스타일시트는 config_files 아님" "$HO" '**never the product stylesheets a setup file imports**'
 hasfx "review: P 행을 먼저, 확인할 점으로" "$REVIEWMD" '`P` rows (재생성 필요'
+# 8회차 적대적 리뷰
+hasfx "handoff L.3: P 는 철회할 수 있다" "$HO" '`P-withdrawn <path> — <reason>`'
+hasfx "spine: developer 가 P 를 철회" "$SPINE" 'a `P-withdrawn` line drops its `P`'
+hasfx "spine: 100% 이름 변경은 replaces 가 아니라 R" "$SPINE" '**unless call 4 pairs the old and new image as a 100% rename**'
+hasfx "spine: create 가 null 이면 none 대입" "$SPINE" 'when visual.runnable is true and visual.create is non-null'
+hasfx "handoff L.4: 시각 케이스 없는 이슈의 A 는 추가(근거)" "$HO" 'an `A` with a reason there is a plain addition'
+hasfx "test: P 경로만의 실패는 루프 대신 사람에게" "$TESTMD" '**Except pending regeneration**'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -2443,7 +2450,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=546   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=552   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
