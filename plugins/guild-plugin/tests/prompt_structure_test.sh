@@ -2426,7 +2426,6 @@ hasfx "spine: 정확한 이동은 --find-renames=100%" "$SPINE" 'git diff --name
 hasfx "spine: PR 에 재생성 필요 행" "$SPINE" '**재생성 필요**'
 hasfx "refactor: R 이동은 허용" "$GLD/commands/refactor.md" '(an `R` — the image moved byte-for-byte with its component — is fine)'
 hasfx "debug: 재작성 전에 red 를 먼저 남긴다" "$GLD/commands/debug.md" '**first** run `visual.run_file` on that test file against the old image'
-hasfx "debug: 실행 불가면 루프 대신 사람에게" "$GLD/commands/debug.md" 'visual-only bug #$1 cannot be proven here'
 hasfx "qa: P 행은 재생성 체크리스트" "$QAMD" '에서 재생성 필요한 기준 이미지'
 lacksfx "handoff L.1: expect.element 를 단언으로 세지 않는다" "$HO" '`expect.element(`/`expectLater(` count as assertions'
 # 7회차 적대적 리뷰
@@ -2448,7 +2447,9 @@ hasfx "spine: 되돌리기는 merge base 로 (HEAD 아님)" "$SPINE" '`git check
 hasfx "spine: 케이스 없는 이슈의 A <path> — <reason> 형식" "$SPINE" 'Use `A <path> — <reason>` (no `case:`) only when'
 hasfx "spine: 철회는 PR 에 보인다" "$SPINE" '- 철회 — `<path>`'
 hasfx "handoff L.4: 되돌리기는 merge base 로" "$HO" '(`git checkout <mb> -- <path>`, or `git rm` when the merge base has no such file'
-hasfx "test: 재생성 후 다음 단계는 execute" "$TESTMD" 'the next step is **execute**, not test'
+hasfx "test: 재생성 대기 시 라벨을 execute 로 되돌린다 (resume 이 execute 로 재진입)" "$TESTMD" '**move the stage label back to execute** in the same call that pauses'
+hasfx "debug: 실행 불가 시각 버그는 PR 전에 멈추지 않는다" "$GLD/commands/debug.md" 'do not pause before the PR exists'
+hasfx "spine: 철회만 있어도 PR 섹션을 만든다" "$SPINE" 'or this invocation recorded a `P-withdrawn`'
 lacksfx "handoff: HEAD 로 되돌리지 않는다" "$HO" '`git checkout HEAD -- <path>`) instead of declaring'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
@@ -2458,7 +2459,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=559   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=560   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
