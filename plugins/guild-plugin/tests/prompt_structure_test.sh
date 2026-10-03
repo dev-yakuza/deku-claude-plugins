@@ -2325,7 +2325,7 @@ hasfx "design: tester 프롬프트가 VISUAL 을 받는다" "$DESIGN" 'Visual ca
 hasfx "design: 시각 케이스 마커는 번역하지 않는다" "$DESIGN" '`<!-- guild:visual-cases -->` on its own line — the marker is **never translated**'
 hasfx "design: 시각 케이스는 동작 케이스를 대체하지 않는다" "$DESIGN" 'A visual case never replaces a behavior case'
 SPINE="$GLD/commands/atoms/_execute_spine.md"
-hasfx "spine: 생성·갱신은 visual.create 로, 범위 한정" "$SPINE" 'scoped to the test files you touched, never the whole suite'
+hasfx "spine: 생성·갱신은 visual.create 로, 범위 한정" "$SPINE" '**or whose screen you changed** (a color/style fix touches no test file but changes its images), never the whole suite'
 hasfx "spine: developer 가 baselines: 로 자기보고 (A 는 case 인용)" "$SPINE" '`A <path> — case: <visual case / ux.md state>`'
 hasfx "spine: 자기보고를 git 으로 대조 (--no-renames)" "$SPINE" "git diff --name-status --no-renames <base>...HEAD -- ':(glob)<baseline-glob>'"
 hasfx "spine: 미신고 변경은 not-green" "$SPINE" 'undeclared visual change: <paths>'
@@ -2364,7 +2364,7 @@ hasfx "handoff L.5: 환경 의심은 재작성 사유가 아니다" "$HO" '**L.5
 hasfx "scan_repo: 모노레포는 도구의 디렉터리 플래그로" "$SCAN" 'Every step runs from the repo root'
 hasfx "scan_repo: test 에 이미 포함된 golden 은 vrt 로 두 번 기록하지 않음" "$SCAN" 'recording them twice runs them twice'
 hasfx "design: VISUAL 은 VISUAL_AVAILABLE(runnable) 기준" "$DESIGN" '`VISUAL_AVAILABLE` per `_handoff.md` Section L.1'
-hasfx "spine: developer 의 시각 실행은 visual.run_file 로 범위 한정" "$SPINE" 'and `visual.run_file` is set: run `<visual.run_file>` for each visual test file'
+hasfx "spine: developer 의 시각 실행은 visual.run_file 로 범위 한정" "$SPINE" 'run `<visual.run_file>` for each visual test file you touched or whose screen you changed'
 hasfx "test: 환경 의심은 developer 루프 대신 사람에게" "$TESTMD" 'visual failures look environmental'
 hasfx "test: diff 이미지는 이 호스트에 있을 때만" "$TESTMD" '**only if they exist on this host**'
 hasfx "qa: designer 이미지 상한 12" "$QAMD" '**at most 12 in all**'
@@ -2402,6 +2402,15 @@ hasfx "test: 리포터 플래그 외 커맨드 변경 금지" "$TESTMD" '**a rep
 hasfx "test: runnable 아니면 VRT 미실행을 밝힌다" "$TESTMD" '`commands.vrt` 미실행'
 hasfx "scan_repo: skip: 관용구는 --run-skipped" "$SCAN" '**`flutter test --tags golden --run-skipped`**'
 hasfx "scan_repo: runnable 은 시험 실행으로" "$SCAN" '**Decide `vrt_runnable` from evidence when you can**'
+# 4회차 적대적 리뷰
+hasfx "handoff L.0: run_file 은 runnable 일 때만" "$HO" 'Used **only when `visual.runnable` is `true`**'
+hasfx "handoff L.4: 화면을 바꾼 테스트의 이미지도 재작성 범위" "$HO" '**or whose screen it changed**'
+hasfx "handoff L.3: 시각 매처 순감소는 C 행" "$HO" 'visual assertion removed: <reason>'
+hasfx "spine: developer 시각 실행은 runnable 일 때만" "$SPINE" 'and `visual.run_file` is set **and `visual.runnable` is `true`**'
+hasfx "spine: 색·스타일 수정의 이미지 재작성 허용" "$SPINE" 'scoped to the visual test files you touched **or whose screen you changed**'
+hasfx "spine: 한 매처가 여러 이미지(-dark)를 쓰는 경우" "$SPINE" 'map the argument to every image it produces'
+hasfx "update: 부분 visual 블록도 빠진 키만 감지" "$GLD/commands/update.md" 'or `visual` missing any key of `_handoff.md` Section L.0'
+lacksfx "scan_repo: 비실행 예시에 run_file 을 두지 않는다" "$SCAN" '"vrt_run_file": "flutter test --tags golden <file>"'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -2410,7 +2419,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=517   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=525   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

@@ -531,11 +531,16 @@ def check_secrets(root, dismiss, scope):
     return findings
 
 
+@functools.lru_cache(maxsize=4096)
+def _is_test_path_cached(path, extra_globs):
+    return bool(TEST_PATH_RE.search(path)) or (bool(extra_globs) and baseline_matches(path, extra_globs))
+
+
 def is_test_path(path, extra_globs=()):
     """TEST_PATH_RE, plus the repo's own visual-test globs (`visual.tests`). Visual tests often
     use names no convention covers — `index.vitest.tsx`, `*_golden.dart` outside `test/` — and
-    then deleting one, or skipping it, passed B1–B3 unseen."""
-    return bool(TEST_PATH_RE.search(path)) or (bool(extra_globs) and baseline_matches(path, extra_globs))
+    then deleting one, or skipping it, passed B1–B3 unseen. Memoized: it runs per diff line."""
+    return _is_test_path_cached(path, tuple(extra_globs))
 
 
 def check_verification(root, dismiss, scope):
@@ -569,7 +574,8 @@ def check_verification(root, dismiss, scope):
         n_vis = len(vis_re.findall(body))
         if n_vis and sign == "+":
             vis_add += n_vis
-        elif n_vis and not (cur in deleted and dismiss_matches(cur, dismiss)):
+        elif n_vis and cur not in deleted and not dismiss_matches(cur, dismiss):
+            # a whole deleted test file is B1's (block, or dismissed) — not repeated here
             vis_rm += n_vis
             vis_files.add(cur)
         if sign == "+":
@@ -602,16 +608,24 @@ def check_verification(root, dismiss, scope):
                 continue
             rm_assert += 1
             per_file[cur] = per_file.get(cur, 0) + 1
-    if vis_rm > vis_add:
-        # Counted per OCCURRENCE, not per line, so a reflow never moves it. Threshold 1, unlike
-        # B2's 3: a visual test usually has one matcher, and deleting it leaves
-        # `await expect.element(x)` — valid code that asserts nothing, with the image left behind
-        # unchanged. A deliberate removal goes through dismissed.md like any test deletion.
+    if vis_rm > vis_add and _VISUAL_DROP is not None:
+        # A WARNING, not a block. Counted per OCCURRENCE so a reflow never moves it, threshold 1:
+        # deleting the one `.toMatchThemeScreenshot(...)` line leaves `await expect.element(x)` —
+        # valid code that asserts nothing, image left behind unchanged. But a threshold-1 BLOCK
+        # stopped ordinary refactors that keep coverage (two matchers merged into the repo's own
+        # wrapper; matcher calls moved into a non-test helper) and an intended removal had no way
+        # through, since dismissed.md only exempts whole-file deletions. So it joins the
+        # visual-disclosure family: warn here, and Guild's execute ledger requires the removal to
+        # be declared (`C` row) before the Issue can go green. B2 still blocks a 3+ drop of
+        # assertion entry points.
         where = ", ".join(sorted(vis_files)) or "test"
-        findings.append(finding("verification:visual-assertion-drop", where,
-                                 f"시각 단언(스크린샷/golden 매처) 순감소 {vis_rm - vis_add}건: {where} "
-                                 "(INV2 — 검증 약화)"))
-        record_firing("verification", "block", "visual-assertion-drop")
+        _VISUAL_DROP.append(finding(
+            "verification:visual-assertion-drop", where,
+            f"시각 단언(스크린샷/golden 매처) 순감소 {vis_rm - vis_add}건: {where} — 그 화면은 더 이상 "
+            "비교되지 않습니다. 의도한 삭제면 PR 본문 '시각 변경' 섹션에 근거와 함께 공개하세요 "
+            "(INV2 — 검증 약화일 수 있음)"))
+        if _RECORD_VISUAL[0]:
+            record_firing("verification:visual-assertion-drop", "warn", where)
     if add_skip:
         where = ", ".join(sorted(skip_files)) or "test"
         findings.append(finding("verification:test-skip", where, f"테스트 skip/focus 지시자 추가 {add_skip}건: {where} (INV2 — 검증 약화)"))
@@ -648,6 +662,7 @@ def check_verification(root, dismiss, scope):
 # would let a staged secret through). Observed in review: `"baselines": true` did exactly that.
 BASELINE_SHOW_MAX = 5
 _RECORD_VISUAL = [False]  # set by main_git_hook
+_VISUAL_DROP = []          # B4 warnings, collected by check_verification, emitted by run_checks
 
 
 def _visual_cfg(root):
@@ -687,7 +702,7 @@ def visual_config_files(root):
 # (`.toMatchThemeScreenshot(`, `.toMatchHoverScreenshot(` — a real repo had 79 call sites of those
 # and none of the stock name), `toMatchImageSnapshot(`, Flutter's `matchesGoldenFile(`, plus any
 # names listed in `visual.matchers`.
-VISUAL_MATCHER_BASE = (r"\.to\w*Screenshot\s*\(|\btoMatchImageSnapshot\s*\(|"
+VISUAL_MATCHER_BASE = (r"\.to(Match|Have)\w*Screenshot\s*\(|\btoMatchImageSnapshot\s*\(|"
                        r"\bmatches(Golden|Reference)File\s*\(")
 
 
@@ -803,7 +818,8 @@ def check_visual_baselines(root, dismiss, scope):
             # T (type change — e.g. replaced by a symlink) rewrites the content as surely as M.
             ("baseline-updated", "MT", "시각 기준 이미지 갱신", lambda n: baseline_matches(n, globs)),
             ("baseline-deleted", "D", "시각 기준 이미지 삭제", lambda n: baseline_matches(n, globs)),
-            ("visual-config-changed", "MTD", "시각 비교 설정 파일 변경",
+            # A (added) too: a new per-directory flutter_test_config.dart applies to everything under it.
+            ("visual-config-changed", "AMTD", "시각 비교 설정 파일 변경",
              lambda n: baseline_matches(n, cfg_files)),
         )
         for kind, flt, label, match in groups:
@@ -989,7 +1005,7 @@ VISUAL_WARN_HEADER = "⚠ Guild 게이트 경고 (시각 기준 이미지·비�
 
 
 VISUAL_RULES = {"verification:baseline-updated", "verification:baseline-deleted",
-                "verification:visual-config-changed"}
+                "verification:visual-config-changed", "verification:visual-assertion-drop"}
 
 
 def is_visual_warn(w):
@@ -1179,7 +1195,8 @@ def run_checks(root, scope):
     dismiss = dismissed(root)
     block = check_secrets(root, dismiss, scope) + check_verification(root, dismiss, scope)
     b_block, b_warn = check_boundaries(root, dismiss, scope)
-    v_warn = check_visual_baselines(root, dismiss, scope)
+    v_warn = check_visual_baselines(root, dismiss, scope) + list(_VISUAL_DROP)
+    del _VISUAL_DROP[:]
     l_block, l_warn, refiners = run_local_checks(root, dismiss, scope)
     all_block = block + b_block + l_block
     if refiners:

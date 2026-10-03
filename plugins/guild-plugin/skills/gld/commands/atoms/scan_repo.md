@@ -72,11 +72,11 @@ Findings (note `test` normalized from `$(...)`, `lint` split into an array, `e2e
   "e2e": "flutter test integration_test",
   "vrt": "flutter test --tags golden",
   "vrt_baselines": ["test/**/goldens/**"], "vrt_config_files": ["dart_test.yaml", "test/flutter_test_config.dart"],
-  "vrt_env": "CI ubuntu-latest amd64 (flutter 3.x)", "vrt_runnable": false, "vrt_create": "flutter test --tags golden --update-goldens <file>", "vrt_run_file": "flutter test --tags golden <file>", "vrt_matchers": [],
+  "vrt_env": "CI ubuntu-latest amd64 (flutter 3.x)", "vrt_runnable": false, "vrt_create": "flutter test --tags golden --update-goldens <file>", "vrt_run_file": null, "vrt_matchers": [],
   "vrt_tests": ["test/**/*_golden_test.dart"], "vrt_packages": [],
-  "test_dirs": ["test/", "integration_test/"], "notes": "dart_test.yaml has a `golden` tag" } }
+  "test_dirs": ["test/", "integration_test/"], "notes": "dart_test.yaml excludes the `golden` tag via exclude_tags (with `tags: golden: skip:` instead, both commands would need --run-skipped)" } }
 ```
-(`vrt_runnable: false` here because the goldens are rendered on Linux CI and nothing reproduces that locally — a macOS run would fail on font hinting alone.) No visual tests found → `"vrt": null, "vrt_baselines": [], "vrt_tests": [], "vrt_packages": [], "vrt_matchers": [], "vrt_run_file": null, "vrt_config_files": [], "vrt_runnable": false, "vrt_env": null, "vrt_create": null` (not an error — `audit_readiness.md` reports the gap for a UI repo; Guild does not introduce the tooling).
+(`vrt_runnable: false` here because the goldens are rendered on Linux CI and nothing reproduces that locally — a macOS run would fail on font hinting alone; `vrt_run_file` is `null` for the same reason, and `vrt_create` is kept only for when a matching environment is added.) No visual tests found → `"vrt": null, "vrt_baselines": [], "vrt_tests": [], "vrt_packages": [], "vrt_matchers": [], "vrt_run_file": null, "vrt_config_files": [], "vrt_runnable": false, "vrt_env": null, "vrt_create": null` (not an error — `audit_readiness.md` reports the gap for a UI repo; Guild does not introduce the tooling).
 
 ## Section 3 — convention-scan
 

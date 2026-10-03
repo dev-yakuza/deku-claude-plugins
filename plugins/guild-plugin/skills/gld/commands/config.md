@@ -32,7 +32,7 @@ Parse `$1` onward:
    commands:   test=<...> lint=<...> typecheck=<...> build=<...> e2e=<...>
                (e2e is auto-run by the qa stage when available/warranted; the test
                stage's own automated-correctness pass never runs it — test.md's scope)
-               vrt=<...> (visual regression — run by the test stage when the Issue has a UI surface)
+               vrt=<...> (visual regression — run by the test stage when visual is runnable and the Issue has visual cases or changed a visual package)
    visual:     runnable=<on|off> env=<...|미설정> packages=<dirs|전체> baselines=<globs|없음>
                tests=<globs|없음> matchers=<names|없음> config_files=<paths|없음>
                create=<recipe|없음> run_file=<recipe|없음> (commit gate warns when a baseline or config file changes)

@@ -707,7 +707,7 @@ expect_commit "V22 Dart expectLater(matchesGoldenFile) 3줄 삭제 → 차단" b
   "printf \"void main() {\n  testWidgets('a', (t) async {});\n}\n\" > test/a_test.dart && git commit -qam x"
 # (V23) 새 디렉터리별 flutter_test_config.dart (glob) 도 비교 설정이다.
 vt_repo
-expect_visual "V23 config_files glob(**/flutter_test_config.dart) 새 파일은 경고 없음, 수정은 경고" allow "시각 비교 설정 파일 변경 1건: test/flutter_test_config.dart" "" \
+expect_visual "V23 config_files glob(**/flutter_test_config.dart) 의 수정은 경고" allow "시각 비교 설정 파일 변경 1건: test/flutter_test_config.dart" "" \
   "mkdir -p test && printf 'a\n' > test/flutter_test_config.dart && git add -A && git -c core.hooksPath=/dev/null commit -qm c && printf 'b\n' > test/flutter_test_config.dart && git commit -qam x"
 # (V24) 문자 클래스와 / 에 붙지 않은 ** — git :(glob) 와 같게.
 fresh_repo
@@ -762,7 +762,7 @@ expect_commit "V29 비대칭 매처가 든 toEqual 을 한 줄로 접는 reflow 
 vt_repo
 printf "it('a', async () => {\n  await expect\n    .element(el)\n    .toMatchThemeScreenshot('a.png')\n})\n" > src/btn/index.vitest.tsx
 git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm theme >/dev/null 2>&1
-expect_commit "V30 커스텀 스크린샷 매처 한 줄 삭제 → 시각 단언 순감소 차단" block \
+expect_visual "V30 커스텀 스크린샷 매처 한 줄 삭제 → 통과 + 시각 단언 순감소 경고 (4회차: 차단→경고)" allow "시각 단언(스크린샷/golden 매처) 순감소 1건" "" \
   "printf \"it('a', async () => {\n  await expect\n    .element(el)\n})\n\" > src/btn/index.vitest.tsx && git commit -qam x"
 vt_repo
 printf "it('a', async () => {\n  await expect\n    .element(el)\n    .toMatchThemeScreenshot('a.png')\n})\n" > src/btn/index.vitest.tsx
@@ -779,7 +779,7 @@ fresh_repo
 printf '{"gates":{"enabled":true},"visual":{"tests":["**/*.vt.ts"],"matchers":["snapPage"]}}' > .claude/guild/config.json
 printf "test('a', async () => {\n  await snapPage(page, 'a')\n})\n" > a.vt.ts
 git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm b >/dev/null 2>&1
-expect_commit "V33 visual.matchers 의 이름 호출 삭제 → 차단" block \
+expect_visual "V33 visual.matchers 의 이름 호출 삭제 → 시각 단언 경고" allow "시각 단언(스크린샷/golden 매처) 순감소 1건" "" \
   "printf \"test('a', async () => {\n})\n\" > a.vt.ts && git commit -qam x"
 # (V34) 잘못된 visual.tests glob 이 경고를 내거나 크래시해도 시크릿 차단은 유지된다.
 fresh_repo
@@ -792,6 +792,26 @@ expect_guard "V35a 상대 file_path 를 payload cwd 기준으로 시뮬레이션
   "{\"cwd\":$(J "$PWD"),\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\".claude/guild/config.json\",\"old_string\":$(J '"**/__screenshots__/**"'),\"new_string\":$(J '"nomatch"')}}"
 expect_guard "V35b old_string 이 숫자인 이상한 payload 도 크래시 없이 키 grep 으로 → 확인 요구" ask \
   "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":$(J "$PWD/.claude/guild/config.json"),\"old_string\":5,\"new_string\":$(J '"visual": {}')}}"
+
+# ── 4회차 적대적 리뷰 ── B4 를 차단으로 두면 커버리지를 유지하는 정상 리팩터가 막혔고
+#    (두 매처를 레포 래퍼 하나로 합치기, 매처를 테스트 경로 밖 헬퍼로 옮기기), 의도한 삭제는
+#    dismissed.md 로도 통과할 길이 없었다. 경고 + PR 공개(원장의 C 행)로 내렸다.
+vt_repo
+printf "it('a', async () => {\n  await expect.element(el).toMatchScreenshot('light')\n  await expect.element(el).toMatchScreenshot('dark')\n})\n" > src/btn/index.vitest.tsx
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm two >/dev/null 2>&1
+expect_visual "V36 두 매처를 래퍼 하나로 합치는 리팩터 → 통과 (경고만)" allow "시각 단언(스크린샷/golden 매처) 순감소 1건" "Guild 게이트 차단" \
+  "printf \"it('a', async () => {\n  await expect.element(el).toMatchThemeScreenshot('a')\n})\n\" > src/btn/index.vitest.tsx && git commit -qam x"
+vt_repo
+expect_visual "V37 test 파일 통째 삭제는 B1 차단만, 시각 단언 경고는 중복하지 않음" block "테스트 파일 삭제" "시각 단언" \
+  "git rm -q src/btn/index.vitest.tsx && git commit -qm x"
+vt_repo
+printf "it('a', () => {\n  page.toggleScreenshot(true)\n  page.toggleScreenshot(false)\n  expect(1).toBe(1)\n})\n" > src/btn/index.vitest.tsx
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm tog >/dev/null 2>&1
+expect_visual "V38 .toggleScreenshot( 같은 비-매처 호출은 시각 단언이 아니다" allow "" "시각 단언" \
+  "printf \"it('a', () => {\n  expect(1).toBe(1)\n})\n\" > src/btn/index.vitest.tsx && git commit -qam x"
+vt_repo
+expect_visual "V39 새 flutter_test_config.dart 추가(A)도 비교 설정 변경 경고" allow "시각 비교 설정 파일 변경 1건: test/flutter_test_config.dart" "" \
+  "mkdir -p test && printf 'a\n' > test/flutter_test_config.dart && git add -A && git commit -qm x"
 
 note ""
 note "== H. 기존 훅 체이닝 =="
@@ -812,7 +832,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=119
+GATE_MIN_CHECKS=123
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1
