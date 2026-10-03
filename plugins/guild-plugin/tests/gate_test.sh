@@ -749,6 +749,50 @@ expect_guard "V28c Write 로 visual 을 뺀 config → 확인 요구" ask \
 expect_guard "V28d 같은 파일에 무관한 키 추가 → 통과" pass \
   "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":$(J "$CFG"),\"old_string\":$(J '{"gates"'),\"new_string\":$(J '{"language":"ko","gates"')}}"
 
+# ── 3회차 적대적 리뷰 ──
+# (V29) expect.any(...) 같은 비대칭 매처를 단언으로 세면, Prettier 가 toEqual({...}) 를 한 줄로
+#       접는 것만으로 "assertion 순감소" 차단이 났다(옛 게이트는 통과). 진입점만 센다.
+fresh_repo
+mkdir -p spec; printf "it('a', () => {\n  expect(obj).toEqual({\n    a: expect.any(String),\n    b: expect.any(Number),\n    c: expect.objectContaining({}),\n  })\n})\n" > spec/r.spec.ts
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm b >/dev/null 2>&1
+expect_commit "V29 비대칭 매처가 든 toEqual 을 한 줄로 접는 reflow 는 통과" allow \
+  "printf \"it('a', () => {\n  expect(obj).toEqual({ a: expect.any(String), b: expect.any(Number), c: expect.objectContaining({}) })\n})\n\" > spec/r.spec.ts && git commit -qam x"
+# (V30) 레포 자체 래퍼 매처(toMatchThemeScreenshot)의 줄만 지우면 `await expect.element(x)` 만 남아
+#       아무것도 단언하지 않는다. 매처 호출 횟수(B4)로 잡는다 — 임계 1.
+vt_repo
+printf "it('a', async () => {\n  await expect\n    .element(el)\n    .toMatchThemeScreenshot('a.png')\n})\n" > src/btn/index.vitest.tsx
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm theme >/dev/null 2>&1
+expect_commit "V30 커스텀 스크린샷 매처 한 줄 삭제 → 시각 단언 순감소 차단" block \
+  "printf \"it('a', async () => {\n  await expect\n    .element(el)\n})\n\" > src/btn/index.vitest.tsx && git commit -qam x"
+vt_repo
+printf "it('a', async () => {\n  await expect\n    .element(el)\n    .toMatchThemeScreenshot('a.png')\n})\n" > src/btn/index.vitest.tsx
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm theme >/dev/null 2>&1
+expect_commit "V31 같은 매처를 한 줄로 접는 reflow 는 통과 (호출 횟수 불변)" allow \
+  "printf \"it('a', async () => {\n  await expect.element(el).toMatchThemeScreenshot('a.png')\n})\n\" > src/btn/index.vitest.tsx && git commit -qam x"
+fresh_repo
+mkdir -p test; printf "void main() {\n  testWidgets('a', (t) async {\n    await expectLater(\n      find.byType(A),\n      matchesGoldenFile('a.png'),\n    );\n  });\n}\n" > test/g_test.dart
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm b >/dev/null 2>&1
+expect_commit "V32 Dart expectLater(…, matchesGoldenFile) 를 한 줄로 접는 reflow 는 통과" allow \
+  "printf \"void main() {\n  testWidgets('a', (t) async {\n    await expectLater(find.byType(A), matchesGoldenFile('a.png'));\n  });\n}\n\" > test/g_test.dart && git commit -qam x"
+# (V33) visual.matchers 에 적은 이름도 센다.
+fresh_repo
+printf '{"gates":{"enabled":true},"visual":{"tests":["**/*.vt.ts"],"matchers":["snapPage"]}}' > .claude/guild/config.json
+printf "test('a', async () => {\n  await snapPage(page, 'a')\n})\n" > a.vt.ts
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm b >/dev/null 2>&1
+expect_commit "V33 visual.matchers 의 이름 호출 삭제 → 차단" block \
+  "printf \"test('a', async () => {\n})\n\" > a.vt.ts && git commit -qam x"
+# (V34) 잘못된 visual.tests glob 이 경고를 내거나 크래시해도 시크릿 차단은 유지된다.
+fresh_repo
+printf '{"gates":{"enabled":true},"visual":{"tests":["[[:alpha:]]*.x","["]}}' > .claude/guild/config.json
+expect_commit "V34 이상한 visual.tests glob 이어도 시크릿 차단 유지 (PYTHONWARNINGS=error)" block \
+  "printf 'SECRET=abc\n' > .env && git add .env && PYTHONWARNINGS=error git commit -m x"
+# (V35) guard-config: 상대 경로 + payload cwd, 그리고 이상한 payload 모양에서도 크래시 없이 판단.
+visual_repo
+expect_guard "V35a 상대 file_path 를 payload cwd 기준으로 시뮬레이션 → 확인 요구" ask \
+  "{\"cwd\":$(J "$PWD"),\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\".claude/guild/config.json\",\"old_string\":$(J '"**/__screenshots__/**"'),\"new_string\":$(J '"nomatch"')}}"
+expect_guard "V35b old_string 이 숫자인 이상한 payload 도 크래시 없이 키 grep 으로 → 확인 요구" ask \
+  "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":$(J "$PWD/.claude/guild/config.json"),\"old_string\":5,\"new_string\":$(J '"visual": {}')}}"
+
 note ""
 note "== H. 기존 훅 체이닝 =="
 fresh_repo
@@ -768,7 +812,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=111
+GATE_MIN_CHECKS=119
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

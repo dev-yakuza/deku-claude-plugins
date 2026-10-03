@@ -34,8 +34,8 @@ Parse `$1` onward:
                stage's own automated-correctness pass never runs it — test.md's scope)
                vrt=<...> (visual regression — run by the test stage when the Issue has a UI surface)
    visual:     runnable=<on|off> env=<...|미설정> packages=<dirs|전체> baselines=<globs|없음>
-               tests=<globs|없음> config_files=<paths|없음>
-               create=<recipe|없음> (commit gate warns when a baseline or config file changes)
+               tests=<globs|없음> matchers=<names|없음> config_files=<paths|없음>
+               create=<recipe|없음> run_file=<recipe|없음> (commit gate warns when a baseline or config file changes)
    automation: evolve_nudge=<on|off>
    gates:      enabled=<on|off> (commit gate: secret + verification-weakening block)
    sprint:     capacity=<n|미설정> max_stack_depth=<n> history=<count> runs
@@ -112,6 +112,6 @@ same gap `commands` has (see Notes). ⚠ **`sprint.window` is not in that set** 
 (above), so do not add it to the "no setter" list.
 
 ## Notes
-- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, visual{baselines[], tests[], packages[], config_files[], runnable, env, create}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, refactor_slot, history[], board, window} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
+- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, visual{baselines[], tests[], matchers[], packages[], config_files[], runnable, env, create, run_file}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, refactor_slot, history[], board, window} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
 - `roles` is edited by init (and by evolve HR later), not by `config` in M1 — editing the active roster manually is possible but unsupported as a config command yet.
 - `commands` (test/lint/typecheck/build/e2e/vrt), `visual.*`, `sprint.capacity`/`sprint.history` and `sprint.board` have the **same gap** (⚠ `sprint.window` does **not** — it has a `--window=` setter): they are part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for them (`sprint.max_stack_depth` and `sprint.refactor_slot` do have one) — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.

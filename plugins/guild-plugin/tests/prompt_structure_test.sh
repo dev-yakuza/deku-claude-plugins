@@ -2364,7 +2364,7 @@ hasfx "handoff L.5: 환경 의심은 재작성 사유가 아니다" "$HO" '**L.5
 hasfx "scan_repo: 모노레포는 도구의 디렉터리 플래그로" "$SCAN" 'Every step runs from the repo root'
 hasfx "scan_repo: test 에 이미 포함된 golden 은 vrt 로 두 번 기록하지 않음" "$SCAN" 'recording them twice runs them twice'
 hasfx "design: VISUAL 은 VISUAL_AVAILABLE(runnable) 기준" "$DESIGN" '`VISUAL_AVAILABLE` per `_handoff.md` Section L.1'
-hasfx "spine: 시각 테스트 실행은 VISUAL 일 때만, 범위 한정" "$SPINE" 'run just the visual tests of the files you touched'
+hasfx "spine: developer 의 시각 실행은 visual.run_file 로 범위 한정" "$SPINE" 'and `visual.run_file` is set: run `<visual.run_file>` for each visual test file'
 hasfx "test: 환경 의심은 developer 루프 대신 사람에게" "$TESTMD" 'visual failures look environmental'
 hasfx "test: diff 이미지는 이 호스트에 있을 때만" "$TESTMD" '**only if they exist on this host**'
 hasfx "qa: designer 이미지 상한 12" "$QAMD" '**at most 12 in all**'
@@ -2388,6 +2388,20 @@ hasfx "design: visual.packages 안의 UI 만" "$DESIGN" '**inside `visual.packag
 hasfx "test: 모든 시각 실패에 환경 의심 예외" "$TESTMD" '- **Visual failures** (any golden/VRT failure'
 hasfx "test: 케이스 이름을 남기는 verbose reporter" "$TESTMD" '`--reporter=verbose`'
 hasfx "update: 로컬 영역의 시각 설정 줄은 확인받아 추가 제안" "$GLD/commands/update.md" 'also **offer** (one confirm, additive — INV4)'
+# 3회차 적대적 리뷰
+hasfx "handoff L.3: 원장 첫 줄 run: (시각 케이스 없이도 시각 스위트 실행)" "$HO" 'run: <yes|no>'
+hasfx "handoff L.0: 커스텀 매처 visual.matchers" "$HO" '| `visual.matchers` |'
+hasfx "handoff L.0: 범위 한정 비교 레시피 visual.run_file" "$HO" '| `visual.run_file` |'
+hasfx "handoff L.0: config_files 는 레포 루트 기준 + setupFiles" "$HO" '**repo-root-relative** paths or globs'
+hasfx "spine: pathspec 없는 git diff 를 막는다" "$SPINE" 'a `git diff` with no pathspec would list every changed file'
+hasfx "spine: 커스텀 Screenshot 매처까지 -G 로" "$SPINE" 'to[A-Za-z]*Screenshot|matches(Golden|Reference)File'
+hasfx "spine: 이전 원장은 페이지네이션해 읽는다" "$SPINE" 'paginated and checked for truncation exactly like Step 4'
+hasfx "spine: 패키지 변경 여부를 run: 에" "$SPINE" 'git diff --name-only <base>...HEAD -- <visual.packages dir 1>'
+hasfx "test: run: yes 면 시각 케이스 없이도 VRT" "$TESTMD" 'the execute ledger'"'"'s first line reads `run: yes`'
+hasfx "test: 리포터 플래그 외 커맨드 변경 금지" "$TESTMD" '**a reporter flag is the only change you may make to the command**'
+hasfx "test: runnable 아니면 VRT 미실행을 밝힌다" "$TESTMD" '`commands.vrt` 미실행'
+hasfx "scan_repo: skip: 관용구는 --run-skipped" "$SCAN" '**`flutter test --tags golden --run-skipped`**'
+hasfx "scan_repo: runnable 은 시험 실행으로" "$SCAN" '**Decide `vrt_runnable` from evidence when you can**'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -2396,7 +2410,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=504   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=517   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

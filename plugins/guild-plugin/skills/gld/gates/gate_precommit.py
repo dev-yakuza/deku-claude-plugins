@@ -58,7 +58,7 @@ Honest scope: this gate constrains commits made through git in this working copy
 not survive `--no-verify`, and it does not inspect history already written. It raises the
 cost of a mistake; it is not a boundary against a determined bypass.
 """
-import fnmatch, json, os, re, subprocess, sys
+import fnmatch, functools, json, os, re, subprocess, sys, warnings
 
 # --- rule-firing log — episodic tier, gitignored, best-effort append ---
 # Feeds the evolve rule scorecard + rule HR demote/retire. Each firing is one line.
@@ -180,11 +180,13 @@ TEST_PATH_RE = re.compile(
     re.IGNORECASE)
 ASSERT_RE = re.compile(
     r"\b(expect|verify|should)\b\s*\(|"  # JS/Dart-style matcher calls: expect(...), verify(...)
-    # Visual assertions: `expect.element(x).toMatchScreenshot()` (Vitest browser), Dart's async
-    # `expectLater(…, matchesGoldenFile(…))`, and the matchers themselves. Without these a visual
-    # test's only assertion line could be deleted with no assertion counted as removed.
-    r"\bexpect\.\w+\s*\(|\bexpectLater\s*\(|"
-    r"\b(toMatchScreenshot|toHaveScreenshot|matchesGoldenFile|toMatchImageSnapshot)\s*\(|"
+    # Assertion ENTRY POINTS only — one per assertion, like `expect(`: Vitest browser's
+    # `expect.element(x)`, `expect.soft/poll`, Dart's async `expectLater(`. NOT `expect.any(` /
+    # `expect.objectContaining(` (asymmetric matchers inside an argument — counting those made a
+    # Prettier reflow of one `toEqual({...})` read as a 3-assertion drop), and NOT the visual
+    # matchers themselves (a matcher on its own line next to its entry point counted 2 per
+    # assertion, so reflows moved the tally). Visual matchers get their own occurrence count, B4.
+    r"\bexpect\.(soft|element|poll)\s*\(|\bexpectLater\s*\(|"
     r"\bassert\w*\s*\(|"  # assert(...) and unittest-style assertEqual(/assertTrue(/assertIn(...
     r"\bassert\b",  # bare Python `assert expr[, msg]` statement (no parens)
     re.IGNORECASE)
@@ -549,6 +551,9 @@ def check_verification(root, dismiss, scope):
     # (B2/B3) net assertion removal / skip additions
     add_assert = rm_assert = add_skip = 0
     skip_files = set()
+    vis_re = visual_matcher_re(root)
+    vis_add = vis_rm = 0
+    vis_files = set()
     # Per-file assertion deltas as well as the total. The aggregate alone left the
     # assertion-drop finding with `file: "?"`, so a repo-local `refine()` could not tell whether
     # a drop was attributable to the one deletion it means to exempt or to an unrelated file in
@@ -561,6 +566,12 @@ def check_verification(root, dismiss, scope):
     for cur, sign, body in iter_diff_lines(changed_diff(root, include_unstaged)):
         if not is_test_path(cur, vtests) or COMMENT_LINE_RE.match(body):
             continue
+        n_vis = len(vis_re.findall(body))
+        if n_vis and sign == "+":
+            vis_add += n_vis
+        elif n_vis and not (cur in deleted and dismiss_matches(cur, dismiss)):
+            vis_rm += n_vis
+            vis_files.add(cur)
         if sign == "+":
             if ASSERT_RE.search(body):
                 add_assert += 1
@@ -591,6 +602,16 @@ def check_verification(root, dismiss, scope):
                 continue
             rm_assert += 1
             per_file[cur] = per_file.get(cur, 0) + 1
+    if vis_rm > vis_add:
+        # Counted per OCCURRENCE, not per line, so a reflow never moves it. Threshold 1, unlike
+        # B2's 3: a visual test usually has one matcher, and deleting it leaves
+        # `await expect.element(x)` — valid code that asserts nothing, with the image left behind
+        # unchanged. A deliberate removal goes through dismissed.md like any test deletion.
+        where = ", ".join(sorted(vis_files)) or "test"
+        findings.append(finding("verification:visual-assertion-drop", where,
+                                 f"시각 단언(스크린샷/golden 매처) 순감소 {vis_rm - vis_add}건: {where} "
+                                 "(INV2 — 검증 약화)"))
+        record_firing("verification", "block", "visual-assertion-drop")
     if add_skip:
         where = ", ".join(sorted(skip_files)) or "test"
         findings.append(finding("verification:test-skip", where, f"테스트 skip/focus 지시자 추가 {add_skip}건: {where} (INV2 — 검증 약화)"))
@@ -662,6 +683,25 @@ def visual_config_files(root):
     return _str_list(_visual_cfg(root).get("config_files"))
 
 
+# `.toMatchScreenshot(` / `.toHaveScreenshot(` and the repo's own wrappers around them
+# (`.toMatchThemeScreenshot(`, `.toMatchHoverScreenshot(` — a real repo had 79 call sites of those
+# and none of the stock name), `toMatchImageSnapshot(`, Flutter's `matchesGoldenFile(`, plus any
+# names listed in `visual.matchers`.
+VISUAL_MATCHER_BASE = (r"\.to\w*Screenshot\s*\(|\btoMatchImageSnapshot\s*\(|"
+                       r"\bmatches(Golden|Reference)File\s*\(")
+
+
+def visual_matcher_re(root):
+    names = []
+    try:
+        names = [n for n in _str_list(_visual_cfg(root).get("matchers"))
+                 if re.fullmatch(r"[A-Za-z_]\w*", n)]
+    except Exception:
+        names = []
+    extra = "".join(r"|\b" + n + r"\s*\(" for n in names)
+    return re.compile(VISUAL_MATCHER_BASE + extra)
+
+
 def visual_test_globs(root):
     try:
         return _str_list(_visual_cfg(root).get("tests"))
@@ -669,34 +709,42 @@ def visual_test_globs(root):
         return []
 
 
+@functools.lru_cache(maxsize=256)
 def glob_to_regex(g):
     """Git `:(glob)` pathspec semantics, so the gate and the spine's `git diff` agree on what a
-    glob covers: `**/` is zero or more directories, a trailing `/**` everything below, `*` and `?`
-    never cross `/`. fnmatch got two cases wrong — its `*` crosses `/`, and a mid-path `/**/`
-    needed at least one directory, so the documented `test/**/goldens/**` missed Flutter's most
-    common layout, `test/goldens/a.png`. A wildcard-less glob is a directory prefix (or the file
-    itself)."""
+    glob covers: `**/` (at the start or after `/`) is zero or more directories, a trailing `/**`
+    everything below, any other `**` and `*`/`?` never cross `/`, `[...]` is a class that never
+    matches `/` (`!`/`^` negate; a `]` right after the opening or the negation is literal).
+    fnmatch got the first two wrong — its `*` crosses `/`, and a mid-path `/**/` needed at least
+    one directory, so the documented `test/**/goldens/**` missed `test/goldens/a.png`. A
+    wildcard-less glob is a directory prefix (or the file itself). Cached: `visual.tests` is
+    consulted per diff line."""
     if not any(c in g for c in "*?["):
         return re.compile(re.escape(g.rstrip("/")) + r"(/.*)?$")
     out, i = [], 0
     while i < len(g):
-        if g.startswith("**/", i):
+        at_seg_start = i == 0 or g[i - 1] == "/"
+        if g.startswith("**/", i) and at_seg_start:
             out.append(r"(?:.*/)?"); i += 3
         elif g.startswith("/**", i) and i + 3 == len(g):
-            out.append(r"(?:/.*)?"); i += 3
+            out.append(r"/.*"); i += 3
         elif g.startswith("**", i):
-            # git treats a `**` not bounded by `/` (or the end) like `*`: it does not cross `/`.
-            bounded = (i == 0 or g[i - 1] == "/") and (i + 2 == len(g) or g[i + 2] == "/")
+            bounded = at_seg_start and i + 2 == len(g)
             out.append(r".*" if bounded else r"[^/]*"); i += 2
         elif g[i] == "[":
-            j = g.find("]", i + 2)
+            k = i + 1
+            neg = k < len(g) and g[k] in "!^"
+            if neg:
+                k += 1
+            if k < len(g) and g[k] == "]":
+                k += 1                      # a leading `]` is a literal member
+            j = g.find("]", k)
             if j == -1:
-                out.append(re.escape(g[i])); i += 1
+                out.append(re.escape("[")); i += 1
             else:
-                body = g[i + 1:j]
-                if body[:1] in ("!", "^"):
-                    body = "^" + body[1:]
-                out.append("[" + body.replace("\\", "\\\\") + "]"); i = j + 1
+                body = g[i + 1 + (1 if neg else 0):j]
+                body = "".join("\\" + c if c in "\\[]^" else c for c in body)
+                out.append("[^/" + body + "]" if neg else "[" + body + "]"); i = j + 1
         elif g[i] == "*":
             out.append(r"[^/]*"); i += 1
         elif g[i] == "?":
@@ -709,9 +757,13 @@ def glob_to_regex(g):
 def baseline_matches(path, globs):
     for g in globs:
         try:
-            if glob_to_regex(g).match(path):
-                return True
-        except re.error:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                if glob_to_regex(g).match(path):
+                    return True
+        except Exception:
+            # A bad glob in `visual.tests` feeds the BLOCKING checks — it must cost that one glob,
+            # never the gate (the module-level handler is fail-open).
             continue
     return False
 
@@ -1271,9 +1323,19 @@ def _apply_edit(text, old, new, replace_all=False):
     return text.replace(old, new or "") if replace_all else text.replace(old, new or "", 1)
 
 
-def config_enforcement_change(path, ti, body):
+def config_enforcement_change(path, ti, body, cwd=None):
     """'' when the edit leaves every enforcement key unchanged; otherwise a label for the prompt.
-    Falls back to the key-name grep (now over old_string too) when the edit cannot be simulated."""
+    Falls back to the key-name grep (now over old_string too) when the edit cannot be simulated
+    — including when the simulation itself fails on an odd payload shape."""
+    try:
+        return _config_enforcement_change(path, ti, body, cwd)
+    except Exception:
+        return "게이트 설정 (gates / visual)" if GATES_KEY_RE.search(body) else ""
+
+
+def _config_enforcement_change(path, ti, body, cwd):
+    if not os.path.isabs(path) and cwd:
+        path = os.path.join(cwd, path)
     try:
         with open(path, encoding="utf-8") as fh:
             before_text = fh.read()
@@ -1318,8 +1380,12 @@ def main_guard_config():
         payload = json.loads(raw) if raw.strip() else {}
     except Exception:
         return 0
+    if not isinstance(payload, dict):
+        return 0
     ti = payload.get("tool_input") or {}
-    path = (ti.get("file_path") or ti.get("path") or "").replace("\\", "/")
+    if not isinstance(ti, dict):
+        return 0
+    path = str(ti.get("file_path") or ti.get("path") or "").replace("\\", "/")
     if not path:
         return 0
     body = " ".join(str(ti.get(k, "")) for k in ("content", "new_string", "old_string", "edits"))
@@ -1328,7 +1394,7 @@ def main_guard_config():
     elif GATE_WIRING_RE.search(path):
         what = "게이트 배선 (훅 등록·훅 설정)"
     elif CONFIG_PATH_RE.search(path):
-        what = config_enforcement_change(path, ti, body)
+        what = config_enforcement_change(path, ti, body, payload.get("cwd"))
         if not what:
             return 0
     else:
