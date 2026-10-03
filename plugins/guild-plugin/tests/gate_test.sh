@@ -832,6 +832,17 @@ else
 fi
 git reset -q >/dev/null 2>&1
 
+# ── 7회차 ── 정규식 번역(`[^/]*a[^/]*a…`)은 `src/*a*a*a*a*a*a*a*b` 같은 glob 에서 경로 하나에
+#    수 초~무한 백트래킹했다(차단 경로 위). 세그먼트 단위 2-포인터 매처로 바꿨다 — 시간 상한 검사.
+fresh_repo
+printf '{"gates":{"enabled":true},"visual":{"tests":["src/*a*a*a*a*a*a*a*a*a*a*b"]}}' > .claude/guild/config.json
+mkdir -p src; LONG="src/$(printf 'a%.0s' $(seq 1 200))c.ts"; printf 'x\n' > "$LONG"
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm b >/dev/null 2>&1
+T0=$(date +%s)
+printf 'y\n' > "$LONG"; git commit -qam x >/dev/null 2>&1
+T1=$(date +%s)
+if [ $((T1 - T0)) -le 10 ]; then ok "V42 병적인 visual.tests glob 도 커밋이 멈추지 않는다 ($((T1 - T0))s)"; else bad "V42 glob 백트래킹" "≤10s" "$((T1 - T0))s"; fi
+
 note ""
 note "== H. 기존 훅 체이닝 =="
 fresh_repo
@@ -851,7 +862,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=125
+GATE_MIN_CHECKS=126
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

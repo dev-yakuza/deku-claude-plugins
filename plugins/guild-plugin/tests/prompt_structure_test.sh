@@ -2429,6 +2429,12 @@ hasfx "debug: 재작성 전에 red 를 먼저 남긴다" "$GLD/commands/debug.md
 hasfx "debug: 실행 불가면 루프 대신 사람에게" "$GLD/commands/debug.md" 'visual-only bug #$1 cannot be proven here'
 hasfx "qa: P 행은 재생성 체크리스트" "$QAMD" '에서 재생성 필요한 기준 이미지'
 lacksfx "handoff L.1: expect.element 를 단언으로 세지 않는다" "$HO" '`expect.element(`/`expectLater(` count as assertions'
+# 7회차 적대적 리뷰
+hasfx "spine: 이전 원장의 P 행을 이어받는다" "$SPINE" '**carry forward every `P` row of the previous block**'
+hasfx "handoff L.3: P 는 git 에 안 보여도 유지" "$HO" '`P` rows carry forward too, though git never lists them'
+hasfx "handoff L.1: 실행 불가여도 원장·P 는 적용" "$HO" 'the ledger and the developer'"'"'s `P` declarations still apply'
+hasfx "handoff L.0: 제품 스타일시트는 config_files 아님" "$HO" '**never the product stylesheets a setup file imports**'
+hasfx "review: P 행을 먼저, 확인할 점으로" "$REVIEWMD" '`P` rows (재생성 필요'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -2437,7 +2443,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=541   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=546   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

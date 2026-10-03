@@ -724,63 +724,124 @@ def visual_test_globs(root):
         return []
 
 
-@functools.lru_cache(maxsize=256)
-def glob_to_regex(g):
-    """Git `:(glob)` pathspec semantics, so the gate and the spine's `git diff` agree on what a
-    glob covers: `**/` (at the start or after `/`) is zero or more directories, a trailing `/**`
-    everything below, any other `**` and `*`/`?` never cross `/`, `[...]` is a class that never
-    matches `/` (`!`/`^` negate; a `]` right after the opening or the negation is literal).
-    fnmatch got the first two wrong — its `*` crosses `/`, and a mid-path `/**/` needed at least
-    one directory, so the documented `test/**/goldens/**` missed `test/goldens/a.png`. A
-    wildcard-less glob is a directory prefix (or the file itself). Cached: `visual.tests` is
-    consulted per diff line."""
-    if not any(c in g for c in "*?["):
-        return re.compile(re.escape(g.rstrip("/")) + r"(/.*)?$")
-    out, i = [], 0
-    while i < len(g):
-        at_seg_start = i == 0 or g[i - 1] == "/"
-        if g.startswith("**/", i) and at_seg_start:
-            out.append(r"(?:.*/)?"); i += 3
-        elif g.startswith("/**", i) and i + 3 == len(g):
-            out.append(r"/.*"); i += 3
-        elif g.startswith("**", i):
-            bounded = at_seg_start and i + 2 == len(g)
-            out.append(r".*" if bounded else r"[^/]*"); i += 2
-        elif g[i] == "[":
+def _seg_tokens(seg):
+    """One path segment of a glob → tokens: ('*',), ('?',), ('lit', c), ('cls', neg, items).
+    A `**` inside a segment (`foo**`, `**.png`) is a plain `*` (git: it never crosses `/`)."""
+    toks, i = [], 0
+    while i < len(seg):
+        c = seg[i]
+        if c == "*":
+            while i < len(seg) and seg[i] == "*":
+                i += 1
+            toks.append(("*",))
+            continue
+        if c == "?":
+            toks.append(("?",)); i += 1; continue
+        if c == "[":
             k = i + 1
-            neg = k < len(g) and g[k] in "!^"
+            neg = k < len(seg) and seg[k] in "!^"
             if neg:
                 k += 1
-            if k < len(g) and g[k] == "]":
+            start = k
+            if k < len(seg) and seg[k] == "]":
                 k += 1                      # a leading `]` is a literal member
-            j = g.find("]", k)
-            if j == -1:
-                out.append(re.escape("[")); i += 1
-            else:
-                body = g[i + 1 + (1 if neg else 0):j]
-                body = "".join("\\" + c if c in "\\[]^" else c for c in body)
-                out.append("[^/" + body + "]" if neg else "[" + body + "]"); i = j + 1
-        elif g[i] == "*":
-            out.append(r"[^/]*"); i += 1
-        elif g[i] == "?":
-            out.append(r"[^/]"); i += 1
+            end = seg.find("]", k)
+            if end == -1:
+                toks.append(("lit", "[")); i += 1; continue
+            body, items, m = seg[start:end], [], 0
+            while m < len(body):
+                if m + 2 < len(body) and body[m + 1] == "-":
+                    items.append((body[m], body[m + 2])); m += 3
+                else:
+                    items.append((body[m], body[m])); m += 1
+            toks.append(("cls", neg, tuple(items))); i = end + 1
+            continue
+        toks.append(("lit", c)); i += 1
+    return tuple(toks)
+
+
+def _tok_ok(t, ch):
+    if t[0] == "?":
+        return True
+    if t[0] == "lit":
+        return t[1] == ch
+    hit = any(lo <= ch <= hi for lo, hi in t[2])   # a reversed range matches nothing
+    return hit != t[1]
+
+
+def _seg_match(toks, s):
+    """Classic two-pointer wildcard match: O(len(toks) * len(s)), no backtracking blow-up.
+    The regex translation it replaces (`[^/]*a[^/]*a…`) took seconds per path for a glob
+    like `src/*a*a*a*a*a*b` and never finished on long paths — on the blocking path."""
+    ti = si = 0
+    star_t, star_s = -1, 0
+    while si < len(s):
+        if ti < len(toks) and toks[ti][0] != "*" and _tok_ok(toks[ti], s[si]):
+            ti += 1; si += 1
+        elif ti < len(toks) and toks[ti][0] == "*":
+            star_t, star_s = ti, si
+            ti += 1
+        elif star_t != -1:
+            ti = star_t + 1
+            star_s += 1
+            si = star_s
         else:
-            out.append(re.escape(g[i])); i += 1
-    return re.compile("".join(out) + "$")
+            return False
+    while ti < len(toks) and toks[ti][0] == "*":
+        ti += 1
+    return ti == len(toks)
 
 
-GLOB_MAX_WILDCARDS = 8  # `src/*a*a*a*a*a*a*a*a*b` backtracked for seconds per path on the blocking path
+@functools.lru_cache(maxsize=256)
+def _compile_glob(g):
+    """Git `:(glob)` pathspec semantics, so the gate and the spine's `git diff` agree on what a
+    glob covers: a `**` segment is zero or more directories, a trailing `/**` everything below
+    (a glob ending in `/` names no file), `*`/`?`/`[...]` never cross `/` (`!`/`^` negate; a `]` right after the
+    opening or the negation is literal). fnmatch got two cases wrong — its `*` crosses `/`, and a
+    mid-path `/**/` needed at least one directory, so the documented `test/**/goldens/**` missed
+    `test/goldens/a.png`. A wildcard-less glob is a directory prefix (or the file itself)."""
+    if not any(c in g for c in "*?["):
+        return ("prefix", g.rstrip("/"))
+    segs = g.split("/")
+    if segs[-1] == "":
+        return ("none",)                    # git: a trailing-slash glob names no file
+    below = len(segs) > 1 and segs[-1] == "**"
+    if below:
+        segs = segs[:-1]
+    return ("segs", tuple("**" if sg == "**" else _seg_tokens(sg) for sg in segs), below)
+
+
+def glob_matches(g, path):
+    kind = _compile_glob(g)
+    if kind[0] == "none":
+        return False
+    if kind[0] == "prefix":
+        p = kind[1]
+        return path == p or path.startswith(p + "/")
+    _, segs, below = kind
+    parts = path.split("/")
+    memo = {}
+
+    def m(i, j):
+        key = (i, j)
+        if key in memo:
+            return memo[key]
+        if i == len(segs):
+            r = (j < len(parts)) if below else (j == len(parts))
+        elif segs[i] == "**":
+            r = m(i + 1, j) or (j < len(parts) and m(i, j + 1))
+        else:
+            r = j < len(parts) and _seg_match(segs[i], parts[j]) and m(i + 1, j + 1)
+        memo[key] = r
+        return r
+    return m(0, 0)
 
 
 def baseline_matches(path, globs):
     for g in globs:
-        if g.count("*") > GLOB_MAX_WILDCARDS:
-            continue
         try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                if glob_to_regex(g).match(path):
-                    return True
+            if glob_matches(g, path):
+                return True
         except Exception:
             # A bad glob in `visual.tests` feeds the BLOCKING checks — it must cost that one glob,
             # never the gate (the module-level handler is fail-open).
