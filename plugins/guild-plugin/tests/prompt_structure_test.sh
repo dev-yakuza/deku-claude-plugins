@@ -2417,7 +2417,7 @@ hasfx "spine: execute 에서도 L.5 환경 의심은 사람에게" "$SPINE" '**E
 hasfx "scan_repo: exclude_tags 는 --tags 로 못 뒤집는다" "$SCAN" '**`exclude_tags: golden` cannot be overridden by `--tags`**'
 hasfx "scan_repo: 0건 실행은 깨진 커맨드" "$SCAN" '**A run that reports zero tests'
 hasfx "design: 한 호출이 여러 이미지를 쓰면 한 행" "$DESIGN" 'one row covers all of them'
-hasfx "handoff L.4: 의도 밖 재작성 이미지는 되돌린다" "$HO" 'Restore those before committing (`git checkout HEAD -- <path>`) instead of declaring them'
+hasfx "handoff L.4: 의도 밖 재작성 이미지는 되돌린다" "$HO" 'Restore those to their merge-base state before committing'
 hasfx "init: 시각 매처 삭제는 경고 (차단 아님)" "$GLD/commands/init.md" 'dropping its screenshot matcher calls **warns**'
 # 6회차 적대적 리뷰
 hasfx "handoff L.3: 바이트 동일 이동은 R 한 행" "$HO" 'R <old path> -> <new path> — moved, unchanged'
@@ -2442,6 +2442,14 @@ hasfx "spine: 100% 이름 변경은 replaces 가 아니라 R" "$SPINE" '**unless
 hasfx "spine: create 가 null 이면 none 대입" "$SPINE" 'when visual.runnable is true and visual.create is non-null'
 hasfx "handoff L.4: 시각 케이스 없는 이슈의 A 는 추가(근거)" "$HO" 'an `A` with a reason there is a plain addition'
 hasfx "test: P 경로만의 실패는 루프 대신 사람에게" "$TESTMD" '**Except pending regeneration**'
+# 9회차 적대적 리뷰
+hasfx "spine: developer 에게 이전 P 행을 넘긴다" "$SPINE" '(earlier `P` rows: `<P rows of the previous block, or none>`)'
+hasfx "spine: 되돌리기는 merge base 로 (HEAD 아님)" "$SPINE" '`git checkout <mb> -- <path>`, or `git rm` it when `<mb>` has no such file'
+hasfx "spine: 케이스 없는 이슈의 A <path> — <reason> 형식" "$SPINE" 'Use `A <path> — <reason>` (no `case:`) only when'
+hasfx "spine: 철회는 PR 에 보인다" "$SPINE" '- 철회 — `<path>`'
+hasfx "handoff L.4: 되돌리기는 merge base 로" "$HO" '(`git checkout <mb> -- <path>`, or `git rm` when the merge base has no such file'
+hasfx "test: 재생성 후 다음 단계는 execute" "$TESTMD" 'the next step is **execute**, not test'
+lacksfx "handoff: HEAD 로 되돌리지 않는다" "$HO" '`git checkout HEAD -- <path>`) instead of declaring'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -2450,7 +2458,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=552   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=559   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

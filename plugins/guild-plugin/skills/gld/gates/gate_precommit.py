@@ -58,7 +58,7 @@ Honest scope: this gate constrains commits made through git in this working copy
 not survive `--no-verify`, and it does not inspect history already written. It raises the
 cost of a mistake; it is not a boundary against a determined bypass.
 """
-import fnmatch, functools, json, os, re, subprocess, sys, warnings
+import fnmatch, functools, json, os, re, subprocess, sys
 
 # --- rule-firing log — episodic tier, gitignored, best-effort append ---
 # Feeds the evolve rule scorecard + rule HR demote/retire. Each firing is one line.
@@ -730,7 +730,9 @@ def visual_test_globs(root):
 
 def _seg_tokens(seg):
     """One path segment of a glob → tokens: ('*',), ('?',), ('lit', c), ('cls', neg, items).
-    A `**` inside a segment (`foo**`, `**.png`) is a plain `*` (git: it never crosses `/`)."""
+    A `**` inside a segment (`foo**`, `**.png`) is a plain `*` here. Known difference: git lets
+    such a `**` cross `/` when text sits to its left (`b**` matches `b/a.png` in git) — write
+    `b*/**` or `b/**` instead in `visual.*` globs."""
     toks, i = [], 0
     while i < len(seg):
         c = seg[i]
