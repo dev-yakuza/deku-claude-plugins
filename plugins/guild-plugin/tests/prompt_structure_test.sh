@@ -2332,7 +2332,7 @@ hasfx "spine: 미신고 변경은 not-green" "$SPINE" 'undeclared visual change:
 hasfx "spine: PR 시각 변경 섹션 마커" "$SPINE" '<!-- guild:visual-changes -->'
 hasfx "spine: 비교 설정 → 갱신 → 추가 순서" "$SPINE" 'a changed comparison setting changes what *every* image means'
 hasfx "implement: 시각 케이스를 golden/VRT 로 구현" "$GLD/commands/implement.md" 'implement each row as a golden / VRT test'
-hasfx "refactor: 원장에 C/M/D 없음" "$GLD/commands/refactor.md" 'must hold **no `C`, `M`, `D` or replacing `A`, and no `A` without an existing visual case**'
+hasfx "refactor: 원장에 C/M/D 없음" "$GLD/commands/refactor.md" 'must hold **no `C`, `M`, `D`, `P` or replacing `A`, and no `A` without an existing visual case**'
 hasfx "debug: 버그를 기록한 기준 이미지" "$GLD/commands/debug.md" 'whose existing baseline *recorded the bug*'
 TESTMD="$GLD/commands/test.md"
 hasfx "test: VISUAL_CASES / VISUAL_RUN 판정" "$TESTMD" '`VISUAL_CASES = yes` when `test-cases.md` carries'
@@ -2417,8 +2417,18 @@ hasfx "spine: execute 에서도 L.5 환경 의심은 사람에게" "$SPINE" '**E
 hasfx "scan_repo: exclude_tags 는 --tags 로 못 뒤집는다" "$SCAN" '**`exclude_tags: golden` cannot be overridden by `--tags`**'
 hasfx "scan_repo: 0건 실행은 깨진 커맨드" "$SCAN" '**A run that reports zero tests'
 hasfx "design: 한 호출이 여러 이미지를 쓰면 한 행" "$DESIGN" 'one row covers all of them'
-hasfx "handoff L.4: 의도 밖 재작성 이미지는 되돌린다" "$HO" 'Restore those (`git checkout <base> -- <path>`) instead of declaring them'
+hasfx "handoff L.4: 의도 밖 재작성 이미지는 되돌린다" "$HO" 'Restore those before committing (`git checkout HEAD -- <path>`) instead of declaring them'
 hasfx "init: 시각 매처 삭제는 경고 (차단 아님)" "$GLD/commands/init.md" 'dropping its screenshot matcher calls **warns**'
+# 6회차 적대적 리뷰
+hasfx "handoff L.3: 바이트 동일 이동은 R 한 행" "$HO" 'R <old path> -> <new path> — moved, unchanged'
+hasfx "handoff L.3: 재생성 필요 P 행" "$HO" '`P` (pending regeneration)'
+hasfx "spine: 정확한 이동은 --find-renames=100%" "$SPINE" 'git diff --name-status --find-renames=100% <base>...HEAD'
+hasfx "spine: PR 에 재생성 필요 행" "$SPINE" '**재생성 필요**'
+hasfx "refactor: R 이동은 허용" "$GLD/commands/refactor.md" '(an `R` — the image moved byte-for-byte with its component — is fine)'
+hasfx "debug: 재작성 전에 red 를 먼저 남긴다" "$GLD/commands/debug.md" '**first** run `visual.run_file` on that test file against the old image'
+hasfx "debug: 실행 불가면 루프 대신 사람에게" "$GLD/commands/debug.md" 'visual-only bug #$1 cannot be proven here'
+hasfx "qa: P 행은 재생성 체크리스트" "$QAMD" '에서 재생성 필요한 기준 이미지'
+lacksfx "handoff L.1: expect.element 를 단언으로 세지 않는다" "$HO" '`expect.element(`/`expectLater(` count as assertions'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -2427,7 +2437,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=532   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=541   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

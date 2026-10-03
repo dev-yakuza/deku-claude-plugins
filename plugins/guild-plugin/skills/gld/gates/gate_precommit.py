@@ -769,8 +769,13 @@ def glob_to_regex(g):
     return re.compile("".join(out) + "$")
 
 
+GLOB_MAX_WILDCARDS = 8  # `src/*a*a*a*a*a*a*a*a*b` backtracked for seconds per path on the blocking path
+
+
 def baseline_matches(path, globs):
     for g in globs:
+        if g.count("*") > GLOB_MAX_WILDCARDS:
+            continue
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
