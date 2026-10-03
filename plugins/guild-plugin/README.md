@@ -67,6 +67,15 @@ off-switch or rule files prompts for human confirmation rather than being blocke
 turning the gate off is a legitimate action, it just should not be a side effect. The gate
 raises the cost of a mistake; it is not a boundary against a determined bypass.
 
+**Visual regression (golden / VRT).** When a repo already has golden tests or screenshot
+VRT, Guild uses them as review evidence: for a UI Issue the tester writes *visual cases*
+(screen · state · theme · size) alongside behavior cases, the developer turns them into
+baselines, the test stage runs `commands.vrt`, the designer opens the images at QA, and the PR
+gets a **visual changes** section that points the reviewer at GitHub's image diff. Rewriting an
+existing baseline changes the expected value, so it must carry a reason in the PR, and the
+commit gate **warns** (never blocks) on it — configured by `visual.baselines` in
+`config.json`. Guild does not install a visual test tool; `audit` reports the gap for a UI repo.
+
 ## Reference
 
 ### What Guild is

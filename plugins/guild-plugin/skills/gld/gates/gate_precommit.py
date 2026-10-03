@@ -33,6 +33,9 @@ Two gates (the only M3 set — structure/boundary gates are v2):
   B. verification — the commit weakens tests/gates (deletes a test file, net-removes
                     assertions, or adds skip/focus directives) — INV2 "검증은 어떤 자동
                     프로세스도 약화 못 함". Heuristic (rename/semantic evasion possible).
+                    Also WARNS (never blocks) when a configured visual baseline
+                    (`visual.baselines` globs — golden images / VRT screenshots) is rewritten
+                    or removed: the expected image changed, so the PR must disclose it.
 
 Safety / status model:
 - **Off-switch**: `.claude/guild/config.json` `gates.enabled: false` → allow all.
@@ -592,6 +595,75 @@ def check_verification(root, dismiss, scope):
     return findings
 
 
+# --- visual baselines (golden images / VRT screenshots) --------------------------------
+# A visual test's assertion is the baseline IMAGE, not a line of code — so `--update-goldens` /
+# `vitest -u` rewrites the expected value itself, and a regression accepted that way passes every
+# check above: no test file deleted, no assertion line removed, no skip added. Blocking it would be
+# wrong (every intended UI change legitimately updates baselines), so this WARNS, and the warning
+# names what the PR must disclose. The human sees the image diff at review (INV1).
+#
+# Config-driven only: `config.json` → `visual.baselines` (a list of globs, written by init from
+# command-scan). No globs → no check. There is no built-in default because baseline locations
+# differ per stack (`test/goldens/`, `__screenshots__/`, `*-snapshots/`) and a guessed glob that
+# matches ordinary assets would warn on every icon change, which trains the reader to skip it.
+BASELINE_SHOW_MAX = 5
+
+
+def visual_baseline_globs(root):
+    try:
+        with open(os.path.join(root, ".claude", "guild", "config.json"), encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        globs = (cfg.get("visual") or {}).get("baselines") or []
+    except Exception:
+        return []
+    if isinstance(globs, str):
+        globs = [globs]
+    return [g.strip() for g in globs if isinstance(g, str) and g.strip()]
+
+
+def baseline_matches(path, globs):
+    """fnmatch's `*` crosses `/`, so `**/x/**` already matches nested paths — but it needs at
+    least one leading segment, so a root-level `x/a.png` would slip past `**/x/**`. Try the glob
+    with that leading `**/` removed as well. A wildcard-less glob is a directory prefix,
+    path-segment bounded (same rule as the boundary gate)."""
+    for g in globs:
+        cands = [g, g.rstrip("/") + "/*"]
+        if g.startswith("**/"):
+            cands += [g[3:], g[3:].rstrip("/") + "/*"]
+        if any(fnmatch.fnmatch(path, c) for c in cands):
+            return True
+    return False
+
+
+def check_visual_baselines(root, dismiss, scope):
+    """Return warn findings for baselines this commit rewrites or removes. Never blocks.
+    A deleted baseline under a test path is already blocked by B1 (test-deleted) and is not
+    repeated here."""
+    globs = visual_baseline_globs(root)
+    if not globs:
+        return []
+    include_unstaged, _ = scope
+    warn = []
+    for kind, flt, label in (("updated", "M", "갱신"), ("deleted", "D", "삭제")):
+        hits = sorted(n for n in changed_names(root, diff_filter=flt,
+                                               include_unstaged=include_unstaged)
+                      if baseline_matches(n, globs) and not dismiss_matches(n, dismiss)
+                      and not (kind == "deleted" and TEST_PATH_RE.search(n)))
+        if not hits:
+            continue
+        shown = ", ".join(hits[:BASELINE_SHOW_MAX])
+        if len(hits) > BASELINE_SHOW_MAX:
+            shown += f" 외 {len(hits) - BASELINE_SHOW_MAX}건"
+        warn.append(finding(
+            f"verification:baseline-{kind}", hits[0],
+            f"시각 기준 이미지 {label} {len(hits)}건: {shown} — 기대값 자체가 바뀝니다. "
+            "의도한 시각 변경이면 PR 본문 '시각 변경' 섹션에 이미지와 근거를 공개하세요 "
+            "(INV2 — 기준 이미지 갱신은 회귀를 정답으로 만들 수 있음)"))
+        for n in hits:
+            record_firing(f"verification:baseline-{kind}", "warn", n)
+    return warn
+
+
 RULE_STATUS_SUFFIX_RE = re.compile(r"\[\s*status\s*:\s*([^\]]*)\]\s*$", re.I)
 FRONTMATTER_RE = re.compile(r"\A\s*---\s*\n(.*?)\n---\s*(\n|\Z)", re.S)
 
@@ -741,6 +813,23 @@ HUMAN_NOTE = ("이 판단을 되돌리는 것은 사람의 몫입니다 — 수�
 
 
 WARN_HEADER = "⚠ Guild 게이트 경고 (draft 규칙 — 차단 안 함, confirm 시 차단):"
+# Baseline warnings are not draft rules and never become blocks — under WARN_HEADER they would
+# promise an escalation that does not exist.
+VISUAL_WARN_HEADER = "⚠ Guild 게이트 경고 (시각 기준 이미지 — 차단 안 함, PR 공개 필요):"
+
+
+def is_visual_warn(w):
+    return isinstance(w, dict) and str(w.get("rule", "")).startswith("verification:baseline-")
+
+
+def warn_message(warn):
+    """The warn section(s), each under its own header. '' when there is nothing to warn."""
+    parts = []
+    for header, items in ((WARN_HEADER, [w for w in warn if not is_visual_warn(w)]),
+                          (VISUAL_WARN_HEADER, [w for w in warn if is_visual_warn(w)])):
+        if items:
+            parts.append(header + "\n- " + "\n- ".join(as_message(w) for w in items))
+    return "\n\n".join(parts)
 
 
 def block_message(reasons, warn=()):
@@ -752,7 +841,7 @@ def block_message(reasons, warn=()):
     out = ("🚫 Guild 게이트 차단 (커밋 거부):\n- "
            + "\n- ".join(as_message(r) for r in reasons))
     if warn:
-        out += "\n\n" + WARN_HEADER + "\n- " + "\n- ".join(as_message(w) for w in warn)
+        out += "\n\n" + warn_message(warn)
     return out + "\n\n" + HUMAN_NOTE
 
 
@@ -916,11 +1005,12 @@ def run_checks(root, scope):
     dismiss = dismissed(root)
     block = check_secrets(root, dismiss, scope) + check_verification(root, dismiss, scope)
     b_block, b_warn = check_boundaries(root, dismiss, scope)
+    v_warn = check_visual_baselines(root, dismiss, scope)
     l_block, l_warn, refiners = run_local_checks(root, dismiss, scope)
     all_block = block + b_block + l_block
     if refiners:
         all_block = apply_refiners(refiners, all_block, LocalGateContext(root, dismiss, scope))
-    return all_block, b_warn + l_warn
+    return all_block, b_warn + v_warn + l_warn
 
 
 def main_git_hook():
@@ -943,8 +1033,7 @@ def main_git_hook():
         sys.stderr.write(block_message(block, warn) + "\n")
         return 1
     if warn:
-        sys.stderr.write(WARN_HEADER + "\n- "
-                         + "\n- ".join(as_message(w) for w in warn) + "\n")
+        sys.stderr.write(warn_message(warn) + "\n")
     return 0
 
 
@@ -979,8 +1068,7 @@ def main_pre_tool_use():
     if block:
         deny_pre_tool_use(block, warn)  # exits 2
     if warn:
-        sys.stderr.write(WARN_HEADER + "\n- "
-                         + "\n- ".join(as_message(w) for w in warn) + "\n")
+        sys.stderr.write(warn_message(warn) + "\n")
     return 0
 
 

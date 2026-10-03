@@ -40,6 +40,11 @@ ls docs/specs/$1
 (If absent, the role sub-agents create `docs/specs/$1/` when writing their artifacts.)
 
 ## Step 1 — Spawn tech-lead and tester in parallel
+**Visual decision first (leader, before spawning — no extra call).** Decide `VISUAL` now, because the tester prompt below carries it and Step 1.5 is spawned in the same message:
+- **UI surface** — the same trigger Step 1.5 uses for the designer (the Issue body / AC / hotspots describe a screen, widget, component, layout, theme or style change).
+- **Visual tests exist** — `config.json` (already read in preflight Item 1) has `commands.vrt` non-null **or** a non-empty `visual.baselines`.
+- Both → `VISUAL = yes`. Either missing → `VISUAL = no` (a UI change in a repo with no golden/VRT setup still gets its behavior tests; Guild does not introduce the tooling — `audit` reports the gap).
+
 As the leader, spawn BOTH role sub-agents in a single message (two Agent tool calls) so they run concurrently and independently (`claude -p`-style isolation is unnecessary in M1 — in-process Agent is fine):
 
 **Tech Lead** (skeleton first):
@@ -58,6 +63,7 @@ As the leader, spawn BOTH role sub-agents in a single message (two Agent tool ca
 - `prompt`:
   > Adopt the persona in `.claude/agents/tester.md`. Read ONLY the acceptance criteria from the analyze output (`<!-- guild:analyze:output -->`) — do NOT read the tech-lead's skeleton (bias-free test design). Write test cases (normal + edge + failure paths) as a FILE to `docs/specs/$1/test-cases.md`.
   > These cases are read by the **developer**, who turns each one into a failing test. You have not seen the implementation, so describe **observable behavior**, never internal structure.
+  > **Visual cases — `VISUAL = <yes|no>`** (the leader substitutes the literal). When `yes`, add a section after the behavior cases: a `## ` heading in `config.language` (`## 시각 케이스` in `ko`) followed by the marker line `<!-- guild:visual-cases -->` on its own line — the marker is **never translated**; later stages find the section by it. Under it, one row per baseline image the change should produce — **screen/component · state** (default, loading, error, empty, disabled, long text, … whichever the AC make reachable) **· theme · viewport/size** — each tied to the AC it shows (`AC #n`). Pick the states a reviewer would otherwise have to run the app to see; skip combinations that render identically. These images are what the human reviews in the PR, so choose them as evidence, not coverage. A visual case never replaces a behavior case — an AC that a behavior test can prove keeps its behavior case too. When `no`, write no visual section.
   >
   > <!-- guild:result-contract -->
   > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
@@ -85,7 +91,7 @@ Spawn only the matched roles (none matched → skip this step entirely; that is 
   > <!-- /guild:result-contract -->
   > Write output in `config.language`.
 
-(The designer writes `docs/specs/$1/ux.md` per its template. If a specialist reports the area is not applicable to this change, it returns `DONE` with a one-line "해당 없음" note and no file — that is fine.)
+(The designer writes `docs/specs/$1/ux.md` per its template — **when `VISUAL = yes`, append to the designer's prompt**: "Also list, in `ux.md`, the states you will want to see as baseline images at the QA review (screen · state · theme · size). The developer reconciles your list with the tester's visual cases; you review the resulting images in `qa.md` Step 1.5." If a specialist reports the area is not applicable to this change, it returns `DONE` with a one-line "해당 없음" note and no file — that is fine.)
 
 ## Step 2 — Collect handoff, arbitrate
 Read every RESULT line (tech-lead, tester, and any conditional participants):
@@ -126,7 +132,7 @@ python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue
 ## Step 3 — Post design output + durable spec
 Post the design summary comment (temp-file pattern):
 - Marker: `<!-- guild:design:output -->` … `<!-- /guild:design:output -->`.
-- Contents: design summary, pointer to `docs/specs/$1/skeleton.md`, pointer to `docs/specs/$1/test-cases.md`, pointers to any conditional-participant artifacts (`docs/specs/$1/ux.md` etc.), which specialists participated (and why), PR-split decision, any concerns. `<details>` preflight trace.
+- Contents: design summary, pointer to `docs/specs/$1/skeleton.md`, pointer to `docs/specs/$1/test-cases.md` (and, when `VISUAL = yes`, the visual-case count — `시각 케이스 N건`, for the human; later stages decide by the `<!-- guild:visual-cases -->` marker in the file, not by this line), pointers to any conditional-participant artifacts (`docs/specs/$1/ux.md` etc.), which specialists participated (and why), PR-split decision, any concerns. `<details>` preflight trace.
 
 The durable artifacts already live in `docs/specs/$1/` (written by the roles) and are committed with the PR.
 

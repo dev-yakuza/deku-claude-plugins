@@ -12,10 +12,12 @@ updated: {{DATE}}
 |---|---|
 | 테스트(유닛) | `{{TEST_CMD}}` |
 | E2E/통합 | `{{E2E_CMD}}` |
+| 시각 회귀(golden/VRT) | `{{VRT_CMD}}` — 기준 이미지: `{{VRT_BASELINES}}` |
 | 린트 | `{{LINT_CMD}}` |
 | 타입체크 | `{{TYPECHECK_CMD}}` |
 | 빌드 | `{{BUILD_CMD}}` |
 
+<!-- init: 시각 회귀 테스트가 없으면(config `commands.vrt` null · `visual.baselines` 빈 배열) 그 행을 삭제한다. 있으면 실행 커맨드와 기준 이미지 glob 을 채우고, verify 게이트 규칙에 두 줄을 남긴다: (1) UI 변경 이슈는 test 단계에서 시각 회귀를 실행한다, (2) 기준 이미지 갱신(`--update-goldens`·`-u` 등)은 기대값 자체를 바꾸므로 PR 본문 '시각 변경' 섹션에 이미지와 근거를 공개한다 — 커밋 게이트는 이를 경고만 하고 차단하지 않는다. -->
 <!-- init: E2E/통합 테스트가 없으면 그 행을 삭제한다. 있으면 커맨드를 채운다. M1은 E2E를 검출·기록만 하고 자동 실행은 하지 않는다(후속 마일스톤) — 그 취지를 verify 게이트 규칙에 한 줄로 남긴다. -->
 
 ## verify 게이트 규칙 (Verify Gate Rules)

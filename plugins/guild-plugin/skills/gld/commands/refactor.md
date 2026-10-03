@@ -29,7 +29,7 @@ Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the
 
 RESULT extras: the raw test summary (all green), **what structural improvement was made**, and the branch.
 
-**EVIDENCE RULE** — **all existing tests must be green** (there is no new feature test). A refactor that turns a test red has changed behavior (or broke something); that is not-done, loop back. If the developer changed any test, verify the justification is real — **implementation-detail only, not a weakened assertion**.
+**EVIDENCE RULE** — **all existing tests must be green** (there is no new feature test). A refactor that turns a test red has changed behavior (or broke something); that is not-done, loop back. **Visual baselines are existing tests too**: the spine's Step 2 baseline check must show **no `M`/`D`/`R`** — a rewritten baseline means the screen changed, which a behavior-preserving transform does not do. A declared reason does not rescue it here (unlike `implement`/`debug`): loop back, or surface it to the human as a scope change. If the developer changed any test, verify the justification is real — **implementation-detail only, not a weakened assertion**.
 
 **CONFORMANCE CHECKS** — inserted into the spine's Step 3 prompt:
 

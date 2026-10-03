@@ -2296,6 +2296,63 @@ else
   bad "capture_signal: --mark / auto / --kind / refusal" "1 2 2 0" "$_m1 $_m2 $_m3 $_m4"
 fi
 
+# ── 시각 회귀 (golden / VRT) — 쓰고, 돌리고, 사람에게 보여 준다 (0.88.0) ─────────────
+# 사람은 코드보다 이미지를 빨리 검토한다. 그래서 UI 이슈는 시각 케이스를 쓰고(design),
+# 기준 이미지로 만들고(execute), 돌리고(test), designer 가 이미지를 직접 열고(qa), PR 이
+# 이미지 비교로 안내한다(spine Step 5). 동시에 기준 이미지 갱신은 기대값 자체를 바꾸므로
+# 어느 단계도 갱신 명령을 "빨간 테스트를 초록으로" 쓰지 못하게 한다(INV2).
+echo "== 시각 회귀 =="
+SCAN="$GLD/commands/atoms/scan_repo.md"
+hasfx "scan_repo: vrt 범주가 있다" "$SCAN" '**`vrt`** (visual regression'
+hasfx "scan_repo: 기준 이미지 위치를 vrt_baselines 로 기록" "$SCAN" '"vrt_baselines":'
+hasfx "scan_repo: 갱신 명령은 기록하지 않는다" "$SCAN" 'Never record the update/approve command'
+hasfx "scan_repo: TTY 필요한 명령은 -it 를 뺀다" "$SCAN" 'Drop `-i`/`-t`/`-it`'
+hasfx "scan_repo: 추측한 glob 금지" "$SCAN" 'Only globs you have seen baseline images under'
+hasfx "init: config 에 commands.vrt" "$GLD/commands/init.md" '"vrt": "<simple cmd or null>"'
+hasfx "init: config 에 visual.baselines" "$GLD/commands/init.md" '"visual": { "baselines":'
+hasfx "init: VISUAL_TEST_SETUP 토큰을 안다" "$GLD/commands/init.md" '{{VISUAL_TEST_SETUP}}'
+hasfx "update: 0.88.0 이전 레포는 감지 후 확인받아 기록" "$GLD/commands/update.md" 'run `atoms/scan_repo.md` **Section 2 step 3b only**'
+hasfx "config: visual 을 보여 준다" "$GLD/commands/config.md" 'visual:     baselines='
+hasfx "audit_readiness: UI 레포의 시각 회귀 부재를 지적" "$GLD/commands/atoms/audit_readiness.md" 'id: no-visual-test'
+hasfx "verification.md 템플릿: 시각 회귀 행" "$GLD/templates/standards/verification.md" '{{VRT_CMD}}'
+hasfx "tester 템플릿: 시각 케이스" "$GLD/templates/agents/tester.md" '화면이 바뀌는 이슈면 시각 케이스도 쓴다'
+hasfx "tester 템플릿: 갱신 명령 금지" "$GLD/templates/agents/tester.md" '기준 이미지를 **갱신하는 명령은 실행하지 않는다**'
+hasfx "tester 템플릿: 프로젝트 특화 토큰" "$GLD/templates/agents/tester.md" '{{VISUAL_TEST_SETUP}}'
+hasfx "designer 템플릿: 이미지를 직접 Read" "$GLD/templates/agents/designer.md" '이미지를 직접 Read로 열어'
+DESIGN="$GLD/commands/design.md"
+hasfx "design: VISUAL 판정을 스폰 전에" "$DESIGN" 'Visual decision first'
+hasfx "design: tester 프롬프트가 VISUAL 을 받는다" "$DESIGN" 'Visual cases — `VISUAL = <yes|no>`'
+hasfx "design: 시각 케이스 마커는 번역하지 않는다" "$DESIGN" '`<!-- guild:visual-cases -->` on its own line — the marker is **never translated**'
+hasfx "design: 시각 케이스는 동작 케이스를 대체하지 않는다" "$DESIGN" 'A visual case never replaces a behavior case'
+SPINE="$GLD/commands/atoms/_execute_spine.md"
+hasfx "spine: 갱신 명령은 두 목적으로만, 범위 한정" "$SPINE" 'only **scoped to those test files**, never the whole suite'
+hasfx "spine: developer 가 baselines: 로 자기보고" "$SPINE" '`baselines: <path> — <why, tied to the AC/Issue>`'
+hasfx "spine: 자기보고를 git 으로 대조" "$SPINE" "git diff --name-status <base>...HEAD -- ':(glob)<g1>'"
+hasfx "spine: 미신고 갱신은 not-green" "$SPINE" 'An undeclared rewrite or removal is not-green'
+hasfx "spine: PR 시각 변경 섹션 마커" "$SPINE" '<!-- guild:visual-changes -->'
+hasfx "spine: 갱신·삭제를 먼저 나열" "$SPINE" 'Order rewrites and removals **first**'
+hasfx "implement: 시각 케이스를 golden/VRT 로 구현" "$GLD/commands/implement.md" 'implement each row as a golden / VRT test'
+hasfx "refactor: 기준 이미지 M/D/R 은 0" "$GLD/commands/refactor.md" 'must show **no `M`/`D`/`R`**'
+hasfx "debug: 버그를 기록한 기준 이미지" "$GLD/commands/debug.md" 'whose existing baseline *recorded the bug*'
+TESTMD="$GLD/commands/test.md"
+hasfx "test: VISUAL_RUN 판정" "$TESTMD" '**Visual run decision'
+hasfx "test: commands.vrt 를 실행" "$TESTMD" 'run `commands.vrt` after the test command'
+hasfx "test: 갱신 명령 금지" "$TESTMD" 'Never run a baseline update/approve command'
+hasfx "test: 기준 이미지 없는 시각 케이스는 미커버" "$TESTMD" 'a visual case with no baseline is **uncovered**'
+hasfx "test: 검증 범위에 시각 기준 이미지" "$TESTMD" '(c) **시각 기준 이미지**'
+lacksfx "test: 시각 QA 를 통째로 '안 돌린 것' 으로 두지 않는다" "$TESTMD" 'and manual/visual QA** (deferred / the human in M1)'
+QAMD="$GLD/commands/qa.md"
+hasfx "qa: 시각 주장도 자동화 먼저" "$QAMD" '**Visual claims** (a state renders'
+hasfx "qa: designer 가 이미지 목록을 받는다" "$QAMD" '**Images — `<image list>`**'
+hasfx "qa: designer 게이트는 읽기 전용" "$QAMD" 'this gate is read-only'
+hasfx "qa: 갱신 기준 이미지는 사람 체크리스트" "$QAMD" '**rewritten or removed visual baselines**'
+REVIEWMD="$GLD/commands/review.md"
+hasfx "review: 기준 이미지는 기계적 산출물이 아니다" "$REVIEWMD" 'Visual baselines are not mechanical'
+lacksfx "review: golden 이미지를 lockfile 과 함께 가볍게 묶지 않는다" "$REVIEWMD" 'generated artifacts (golden images, lockfiles)'
+for R in README.md README.ko.md README.ja.md; do
+  hasfx "$R: 시각 회귀 설명" "$GLD/../../$R" 'visual.baselines'
+done
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -2303,7 +2360,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=427   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=471   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

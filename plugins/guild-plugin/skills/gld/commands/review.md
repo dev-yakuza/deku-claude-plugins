@@ -134,7 +134,8 @@ Collect + dedup the findings (by file+line). The `수정 필요` ones (BLOCKER/M
 
 Group the diff into **logical change-units**, not just per-file:
 - **Group related changes together** — a source change with its directly-related test(s); files that implement one behavior.
-- **Separate the mechanical** — generated artifacts (golden images, lockfiles) as their own light unit.
+- **Separate the mechanical** — generated artifacts (lockfiles, codegen output) as their own light unit.
+- **Visual baselines are not mechanical** — golden images / VRT screenshots (paths under `config.json` `visual.baselines`, or the PR's `<!-- guild:visual-changes -->` section) are the *expected values* of visual tests, and a picture is the fastest thing in the PR for a human to judge. Give them their own unit, placed right after the source change they belong to: rewritten/removed baselines first (each a changed expectation — show the reason from the PR section), then new ones. In the walkthrough, **open the images with the Read tool** and describe what changed in one line each, and point the human at *Files changed*'s 2-up / swipe / onion-skin view for the rewrites. A rewritten baseline with no stated reason is a `확인할 점`.
 - **Order by importance** — core logic change first → its tests → supporting/mechanical last.
 - Keep each unit small enough to discuss in one exchange.
 

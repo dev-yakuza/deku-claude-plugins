@@ -39,27 +39,35 @@ Findings:
 **Goal**: the verification commands the harness needs, **normalized to simple-bash-safe form** so Guild can run them directly.
 
 1. Read `package.json` `scripts` (or Makefile / justfile / pyproject `[tool.*]` / CI config / `dart_test.yaml` / `scripts/` / language-native runner).
-2. Map to the canonical categories: `test` (unit), `lint`, `typecheck`, `build`, **`e2e`** (integration / end-to-end). Prefer the repo's actual invocation (e.g. `yarn test`, `flutter test`, `pytest`).
+2. Map to the canonical categories: `test` (unit), `lint`, `typecheck`, `build`, **`e2e`** (integration / end-to-end), **`vrt`** (visual regression — golden / screenshot comparison). Prefer the repo's actual invocation (e.g. `yarn test`, `flutter test`, `pytest`).
 3. **Detect E2E / integration tests explicitly** — the default `test` command often does NOT run them:
    - Look for dedicated dirs/config: `integration_test/`, `e2e/`, `test/e2e/`, `cypress/`, `playwright.config.*`, `*.spec.ts` under an e2e folder, Detox, Maestro.
    - For Flutter: an `integration_test/` dir + `integration_test` dev-dependency → e2e command is `flutter test integration_test` (NOT covered by a plain `flutter test`, which runs `test/` only).
    - Record the e2e run command in `e2e`. If integration tests exist but you can't determine the exact command, still record the dir so the finding isn't lost (e.g. `"e2e": "flutter test integration_test"` with a note in `test_dirs`).
    - Also note special test tags/suites (e.g. `dart_test.yaml` `golden` tag) under `test_dirs`/notes if present.
+3b. **Detect visual regression tests (golden / VRT) explicitly** — a separate category because the default `test` command may or may not include them, and because their *expected values are image files* the commit gate and the PR have to know about:
+   - **Run command → `vrt`**. Flutter: a `golden` tag in `dart_test.yaml` → `flutter test --tags golden`; goldens with no tag → they already run under `test`, so `vrt` is `null` and `notes` says "golden 은 test 에 포함". JS: a `test:vrt`/`test:view`/`vrt` script, `@playwright/test` with `toHaveScreenshot`, Vitest browser mode with `toMatchScreenshot`, `storycap`/`reg-suit`, Chromatic. Other stacks: the equivalent screenshot/snapshot-image runner.
+   - **Baseline locations → `vrt_baselines`** (a list of globs, path-relative to the repo root): where the committed expected images live — e.g. `test/goldens/**`, `**/goldens/**`, `**/__screenshots__/**`, `**/*-snapshots/**`, `.reg/expected/**`. Take them from the runner's config (`snapshotPathTemplate`, `goldenFileComparator`, `resolveScreenshotPath`) or from where committed baseline images actually sit (`git ls-files` on the candidate dirs). ⚠ **Only globs you have seen baseline images under** — never a guessed `**/*.png`. These globs drive a commit-gate warning (`gate_precommit.py`, `verification:baseline-*`); one that also matches ordinary assets fires on every icon change, and a warning that always fires is a warning nobody reads.
+   - ⚠ **Never record the update/approve command** (`--update-goldens`, `-u`, `--update-snapshots`, `reg-suit approve`). Guild has no step that should run it on its own: rewriting a baseline rewrites the expected value, which is a human decision disclosed in the PR (`test.md` Step 2, `_execute_spine.md` Step 5). A recorded update command is an invitation to make a red visual test green by redefining green.
+   - ⚠ **Non-interactive only.** Visual runners are often wrapped in Docker (`docker compose run --rm -it vrt …`). `-it`/`-t` allocates a TTY, which the Bash tool does not have — the call fails or hangs. Drop `-i`/`-t`/`-it` from a `docker run`/`docker compose run` step; if the wrapper script hard-codes them and there is no non-interactive equivalent, record `vrt: null` and put the reason in `notes` ("VRT 는 TTY 필요 — 사람 실행"). A recorded command Guild cannot run reads as covered when it is not.
 4. **Normalize each command to be directly runnable via a single Bash call** (per `_bash_rules.md`). A stored command MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections:
    - **Shell substitution** — `$(...)` **or backticks** (e.g. `--concurrency=$(nproc --all)`, `--concurrency=`` `nproc` ``) → **drop that flag** (test runners auto-detect sane defaults). Record the base command only.
-   - **Chained steps** (e.g. `flutter analyze && npx remark . --quiet --frail`) → return an **array** of the atomic steps: `["flutter analyze", "npx remark . --quiet --frail"]`.
+   - **Chained steps** (e.g. `flutter analyze && npx remark . --quiet --frail`) → return an **array** of the atomic steps: `["flutter analyze", "npx remark . --quiet --frail"]`. A `yarn <script>` whose script body is itself a chain is resolved the same way: read the script body and store its atomic steps (e.g. `test:view` = `docker compose build vrt && docker compose run --rm -it vrt npx vitest` → `["docker compose build vrt", "docker compose run --rm vrt npx vitest run"]` — `-it` dropped per 3b, and the watch-mode `vitest` made a single run with `run`).
    - A single simple command → return it as a plain string.
 5. If a category has no command, return `null` for it.
 
-Findings (note `test` normalized from `$(...)`, `lint` split into an array, `e2e` detected from `integration_test/`):
+Findings (note `test` normalized from `$(...)`, `lint` split into an array, `e2e` detected from `integration_test/`, `vrt` from the `golden` tag with its baselines located):
 ```json
 { "scan": "command", "findings": {
   "test": "flutter test --fail-fast",
   "lint": ["flutter analyze", "npx remark . --quiet --frail"],
   "typecheck": null, "build": null,
   "e2e": "flutter test integration_test",
+  "vrt": "flutter test --tags golden",
+  "vrt_baselines": ["test/**/goldens/**"],
   "test_dirs": ["test/", "integration_test/"], "notes": "dart_test.yaml has a `golden` tag" } }
 ```
+No visual tests found → `"vrt": null, "vrt_baselines": []` (not an error — `audit_readiness.md` reports the gap for a UI repo; Guild does not introduce the tooling).
 
 ## Section 3 — convention-scan
 

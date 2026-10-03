@@ -562,6 +562,83 @@ expect_commit "로컬 확장의 sys.exit(0) 이 게이트 전체를 통과시키
 git reset -q >/dev/null 2>&1; rm -f .env .claude/guild/gates/scripts/local/boom.py
 
 note ""
+note "== V. 시각 기준 이미지 (golden / VRT) — 경고만, 차단 없음 =="
+# 시각 테스트의 assertion 은 코드 줄이 아니라 기준 이미지다. `--update-goldens` / `vitest -u`
+# 는 기대값 자체를 다시 쓰므로 B1~B3 어느 것도 반응하지 않는다. 정상적인 UI 변경도 매번
+# 기준 이미지를 바꾸므로 차단은 틀리고, 경고 + PR 공개가 맞다(INV1 — 사람이 PR 에서 본다).
+# 설정(visual.baselines)이 없으면 아무 것도 하지 않는다 — 추측한 glob 이 일반 에셋에 걸리면
+# 아이콘 하나 바꿀 때마다 경고가 나고, 사람은 경고를 읽지 않게 된다.
+visual_repo() {
+  fresh_repo
+  printf '{"gates":{"enabled":true},"visual":{"baselines":["**/__screenshots__/**","test/goldens/**"]}}' > .claude/guild/config.json
+  mkdir -p src/a/__screenshots__ __screenshots__ test/goldens assets
+  printf 'PNG1' > src/a/__screenshots__/btn.png
+  printf 'PNG1' > __screenshots__/root.png
+  printf 'PNG1' > test/goldens/card.png
+  printf 'PNG1' > assets/icon.png
+  git add -A >/dev/null 2>&1
+  git -c core.hooksPath=/dev/null commit -qm baselines >/dev/null 2>&1
+}
+# $1=label $2=want rc(allow|block) $3=grep pattern that MUST appear ('' = none) $4=pattern that must NOT appear $5..=cmd
+expect_visual() {
+  local label="$1" want="$2" must="$3" mustnot="$4"; shift 4
+  local out; out="$(bash -c "$*" 2>&1)"; local rc=$?
+  local got="allow"; [ $rc -ne 0 ] && got="block"
+  if [ "$got" != "$want" ]; then bad "$label" "$want" "$got"; return; fi
+  if [ -n "$must" ] && ! printf '%s' "$out" | grep -qF -- "$must"; then bad "$label" "output has '$must'" "absent"; return; fi
+  if [ -n "$mustnot" ] && printf '%s' "$out" | grep -qF -- "$mustnot"; then bad "$label" "output lacks '$mustnot'" "present"; return; fi
+  ok "$label"
+}
+visual_repo
+expect_visual "V1 기준 이미지 갱신 → 통과 + 시각 경고" allow "시각 기준 이미지 갱신 1건: src/a/__screenshots__/btn.png" "draft 규칙" \
+  "printf 'PNG2' > src/a/__screenshots__/btn.png && git commit -qam x"
+visual_repo
+expect_visual "V2 루트의 __screenshots__ 도 **/ 앞부분 없이 매치" allow "__screenshots__/root.png" "" \
+  "printf 'PNG2' > __screenshots__/root.png && git commit -qam x"
+visual_repo
+expect_visual "V3 테스트 경로 밖 기준 이미지 삭제 → 통과 + 삭제 경고" allow "시각 기준 이미지 삭제 1건" "" \
+  "git rm -q src/a/__screenshots__/btn.png && git commit -qm x"
+visual_repo
+expect_visual "V4 test/ 아래 기준 이미지 삭제는 기존 B1 이 차단 (시각 삭제 경고는 중복 안 함)" block "테스트 파일 삭제: test/goldens/card.png" "시각 기준 이미지 삭제" \
+  "git rm -q test/goldens/card.png && git commit -qm x"
+visual_repo
+expect_visual "V5 glob 밖 이미지(assets/) 변경은 경고 없음" allow "" "시각 기준 이미지" \
+  "printf 'PNG2' > assets/icon.png && git commit -qam x"
+visual_repo
+printf -- '- `src/a/__screenshots__` — 이 컴포넌트는 매 릴리스 갱신\n' > .claude/guild/gates/dismissed.md
+expect_visual "V6 dismissed.md 에 등록된 경로는 경고 없음" allow "" "시각 기준 이미지" \
+  "printf 'PNG2' > src/a/__screenshots__/btn.png && git commit -qam x"
+fresh_repo
+mkdir -p src/__screenshots__; printf 'PNG1' > src/__screenshots__/a.png
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm b >/dev/null 2>&1
+expect_visual "V7 visual.baselines 설정이 없으면 검사 자체가 없음" allow "" "시각 기준 이미지" \
+  "printf 'PNG2' > src/__screenshots__/a.png && git commit -qam x"
+visual_repo
+for i in 1 2 3 4 5 6 7; do printf 'PNG1' > "src/a/__screenshots__/s$i.png"; done
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm more >/dev/null 2>&1
+expect_visual "V8 다수 갱신은 5건만 나열하고 나머지는 개수로" allow "외 3건" "" \
+  "for i in 1 2 3 4 5 6 7; do printf 'PNG2' > src/a/__screenshots__/s\$i.png; done; printf 'PNG2' > src/a/__screenshots__/btn.png && git commit -qam x"
+visual_repo
+expect_visual "V9 차단 메시지에도 시각 경고가 자기 헤더로 접힌다 (draft 헤더 아님)" block "시각 기준 이미지 — 차단 안 함, PR 공개 필요" "draft 규칙" \
+  "printf 'PNG2' > src/a/__screenshots__/btn.png && git rm -q test/t_test.py && git commit -qam x"
+visual_repo
+printf 'PNG2' > src/a/__screenshots__/btn.png
+git add -A >/dev/null 2>&1
+PRE_OUT="$(printf '{"tool_input":{"command":"git commit -m x"}}' | python3 .claude/guild/gates/scripts/gate_precommit.py 2>&1)"; PRE_RC=$?
+if [ $PRE_RC -eq 0 ] && printf '%s' "$PRE_OUT" | grep -qF "시각 기준 이미지 갱신 1건"; then
+  ok "V10 PreToolUse 모드: 통과(exit 0) + 시각 경고"
+else
+  bad "V10 PreToolUse 모드" "exit 0 + warn" "rc=$PRE_RC"
+fi
+git reset -q >/dev/null 2>&1
+if grep -q '"rule": "verification:baseline-updated"' .claude/guild/memory/gate-firings.jsonl 2>/dev/null \
+   || grep -q 'verification:baseline-updated' .claude/guild/memory/gate-firings.jsonl 2>/dev/null; then
+  ok "V11 경고가 gate-firings 에 기록된다 (evolve 의 규칙 성적표 입력)"
+else
+  bad "V11 gate-firings 기록" "verification:baseline-updated" "absent"
+fi
+
+note ""
 note "== H. 기존 훅 체이닝 =="
 fresh_repo
 printf '#!/bin/sh\necho local-hook-ran >&2\nexit 0\n' > .git/hooks/pre-commit.local
@@ -580,7 +657,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=76
+GATE_MIN_CHECKS=87
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1
