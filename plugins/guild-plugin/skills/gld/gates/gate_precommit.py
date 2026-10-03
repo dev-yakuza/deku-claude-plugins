@@ -180,13 +180,13 @@ TEST_PATH_RE = re.compile(
     re.IGNORECASE)
 ASSERT_RE = re.compile(
     r"\b(expect|verify|should)\b\s*\(|"  # JS/Dart-style matcher calls: expect(...), verify(...)
-    # Assertion ENTRY POINTS only — one per assertion, like `expect(`: Vitest browser's
-    # `expect.element(x)`, `expect.soft/poll`, Dart's async `expectLater(`. NOT `expect.any(` /
-    # `expect.objectContaining(` (asymmetric matchers inside an argument — counting those made a
-    # Prettier reflow of one `toEqual({...})` read as a 3-assertion drop), and NOT the visual
-    # matchers themselves (a matcher on its own line next to its entry point counted 2 per
-    # assertion, so reflows moved the tally). Visual matchers get their own occurrence count, B4.
-    r"\bexpect\.(soft|element|poll)\s*\(|\bexpectLater\s*\(|"
+    # Dart's async `expectLater(` — one token, so no formatter can split it from its paren. NOT
+    # `expect.element(` / `.soft(` / `.poll(`: Prettier breaks a long chain into `await expect` /
+    # `.element(...)`, so a line-based count of it moved with every reflow and turned three
+    # reflowed assertions into a B2 block the original gate never produced. NOT `expect.any(` and
+    # friends (asymmetric matchers inside an argument) for the same reason. Visual matchers are
+    # counted per occurrence by B4 instead.
+    r"\bexpectLater\s*\(|"
     r"\bassert\w*\s*\(|"  # assert(...) and unittest-style assertEqual(/assertTrue(/assertIn(...
     r"\bassert\b",  # bare Python `assert expr[, msg]` statement (no parens)
     re.IGNORECASE)
@@ -574,7 +574,7 @@ def check_verification(root, dismiss, scope):
         n_vis = len(vis_re.findall(body))
         if n_vis and sign == "+":
             vis_add += n_vis
-        elif n_vis and cur not in deleted and not dismiss_matches(cur, dismiss):
+        elif n_vis and cur not in deleted:
             # a whole deleted test file is B1's (block, or dismissed) — not repeated here
             vis_rm += n_vis
             vis_files.add(cur)
@@ -1192,11 +1192,11 @@ def apply_refiners(refiners, findings, ctx):
 
 
 def run_checks(root, scope):
+    del _VISUAL_DROP[:]  # B4 warnings are per run; never carry one into the next
     dismiss = dismissed(root)
     block = check_secrets(root, dismiss, scope) + check_verification(root, dismiss, scope)
     b_block, b_warn = check_boundaries(root, dismiss, scope)
     v_warn = check_visual_baselines(root, dismiss, scope) + list(_VISUAL_DROP)
-    del _VISUAL_DROP[:]
     l_block, l_warn, refiners = run_local_checks(root, dismiss, scope)
     all_block = block + b_block + l_block
     if refiners:

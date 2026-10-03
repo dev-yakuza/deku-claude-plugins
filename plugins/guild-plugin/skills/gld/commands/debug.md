@@ -29,7 +29,7 @@ Run **Steps 0–6 of `atoms/_execute_spine.md`** — Step 0 preflight (incl. the
 
 RESULT extras: the raw test summary, the **one-line root cause**, and the branch.
 
-**EVIDENCE RULE** — **the regression test must have been red before the fix** (red→green; existing tests stay green). A fix with no failing-then-passing test is a **symptom patch** — send it back.
+**EVIDENCE RULE** — **the regression test must have been red before the fix** (red→green; existing tests stay green). A fix with no failing-then-passing test is a **symptom patch** — send it back. **One carve-out — a visual-only bug whose existing image recorded the bug** (Step 1's last sentence): no test can be red *before* the fix, because the image agrees with the bug. The evidence is then the visual test going **red after the fix against the old image** (raw `visual.run_file` output, which shows the fix changed the picture), plus the ledger's `M <path>` row whose reason names the bug — the reviewer sees the corrected image in the PR's visual-changes section. Any part of the bug a behavior assertion can show still needs its red→green test.
 
 **CONFORMANCE CHECKS** — inserted into the spine's Step 3 prompt:
 

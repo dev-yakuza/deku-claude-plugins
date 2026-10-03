@@ -74,7 +74,8 @@ baselines, the test stage runs `commands.vrt`, the designer opens the images at 
 gets a **visual changes** section that points the reviewer at GitHub's image diff. Rewriting an
 existing baseline changes the expected value, so it must carry a reason in the PR, and the
 commit gate **warns** (never blocks) on it — configured by `visual.baselines` in
-`config.json`. Guild does not install a visual test tool; `audit` reports the gap for a UI repo.
+`config.json`. Files under `visual.tests` count as tests: deleting or skipping one blocks, and a
+net drop of screenshot/golden matcher calls warns (that one in every repo). Guild does not install a visual test tool; `audit` reports the gap for a UI repo.
 
 ## Reference
 

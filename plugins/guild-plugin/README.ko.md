@@ -71,7 +71,8 @@ git이 인덱스가 확정된 뒤 실행하므로, 한 줄짜리 복합 `생성+
 developer가 기준 이미지로 만들고, test 단계가 `commands.vrt`를 실행하고, designer가 QA에서 이미지를 직접
 열어 보고, PR에는 GitHub 이미지 비교로 안내하는 **시각 변경** 섹션이 붙습니다. 기존 기준 이미지를 다시
 쓰는 것은 기대값을 바꾸는 일이라 PR에 근거를 남겨야 하고, 커밋 게이트는 이를 **경고**합니다(차단하지
-않음 — `config.json`의 `visual.baselines`로 설정). Guild가 시각 테스트 도구를 설치하지는 않으며, UI
+않음 — `config.json`의 `visual.baselines`로 설정). `visual.tests`의 파일은 테스트로 취급되어 삭제·skip은
+차단되고, 스크린샷/golden 매처 호출이 순감소하면 경고합니다(이 경고는 모든 레포에서). Guild가 시각 테스트 도구를 설치하지는 않으며, UI
 레포에 없으면 `audit`이 지적합니다.
 
 ## 레퍼런스

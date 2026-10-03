@@ -698,7 +698,8 @@ vt_repo
 expect_commit "V20 visual.tests 의 it.skip 추가 → 차단" block \
   "printf \"it.skip('z', () => {})\n\" >> src/btn/index.vitest.tsx && git commit -qam x"
 vt_repo
-expect_commit "V21 toMatchScreenshot 단언 3줄 삭제 → assertion 순감소 차단" block \
+# (5회차) expect.element( 는 더 이상 B2 의 단언 줄이 아니다 — 시각 단언 삭제는 B4 경고 + 원장 C 행.
+expect_visual "V21 toMatchScreenshot 단언 3줄 삭제 → 통과 + 시각 단언 순감소 경고" allow "시각 단언(스크린샷/golden 매처) 순감소 3건" "" \
   "printf \"it('a', async () => {\n})\n\" > src/btn/index.vitest.tsx && git commit -qam x"
 fresh_repo
 mkdir -p test; printf "void main() {\n  testWidgets('a', (t) async {\n    await expectLater(find.byType(A), matchesGoldenFile('a.png'));\n    await expectLater(find.byType(B), matchesGoldenFile('b.png'));\n    await expectLater(find.byType(C), matchesGoldenFile('c.png'));\n  });\n}\n" > test/a_test.dart
@@ -813,6 +814,24 @@ vt_repo
 expect_visual "V39 새 flutter_test_config.dart 추가(A)도 비교 설정 변경 경고" allow "시각 비교 설정 파일 변경 1건: test/flutter_test_config.dart" "" \
   "mkdir -p test && printf 'a\n' > test/flutter_test_config.dart && git add -A && git commit -qm x"
 
+# ── 5회차 적대적 리뷰 ── `expect.element(` 를 한 줄 단언으로 셌더니, Prettier 가 긴 체인을
+#    `await expect` / `.element(...)` 로 쪼개는 reflow 3건이 B2 차단이 됐다(원래 게이트는 통과).
+fresh_repo
+mkdir -p src; printf "it('a', async () => {\n  await expect.element(page.getByRole('button', { name: 'A' })).toBeVisible()\n  await expect.element(page.getByRole('button', { name: 'B' })).toBeVisible()\n  await expect.element(page.getByRole('button', { name: 'C' })).toBeVisible()\n})\n" > src/f.browser.test.tsx
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm b >/dev/null 2>&1
+expect_commit "V40 expect.element 체인을 여러 줄로 쪼개는 reflow 는 통과 (원래 게이트와 동일)" allow \
+  "printf \"it('a', async () => {\n  await expect\n    .element(page.getByRole('button', { name: 'Submit the order now A' }))\n    .toBeVisible()\n  await expect\n    .element(page.getByRole('button', { name: 'Submit the order now B' }))\n    .toBeVisible()\n  await expect\n    .element(page.getByRole('button', { name: 'Submit the order now C' }))\n    .toBeVisible()\n})\n\" > src/f.browser.test.tsx && git commit -qam x"
+# (V41) B4 경고는 PreToolUse 모드에서도 통과(exit 0) + 시각 헤더로 나온다.
+vt_repo
+printf "it('a', async () => {\n})\n" > src/btn/index.vitest.tsx; git add -A >/dev/null 2>&1
+PRE41="$(printf '{"tool_input":{"command":"git commit -m x"}}' | python3 .claude/guild/gates/scripts/gate_precommit.py 2>&1)"; RC41=$?
+if [ $RC41 -eq 0 ] && printf '%s' "$PRE41" | grep -qF "시각 단언(스크린샷/golden 매처) 순감소 3건"; then
+  ok "V41 PreToolUse 모드: B4 경고 + exit 0"
+else
+  bad "V41 PreToolUse B4" "exit 0 + warn" "rc=$RC41"
+fi
+git reset -q >/dev/null 2>&1
+
 note ""
 note "== H. 기존 훅 체이닝 =="
 fresh_repo
@@ -832,7 +851,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=123
+GATE_MIN_CHECKS=125
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1
