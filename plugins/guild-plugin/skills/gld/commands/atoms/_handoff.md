@@ -295,7 +295,7 @@ Procedure:
 2. Capture the raw tail of the output (the runner's own summary line, e.g. `Tests: 12 passed, 0 failed`). ⚠ **INV5 — scrub before posting, never paste blindly**: this is raw process output pasted into a public/shared GitHub comment — a crashing runner can print environment-variable dumps, connection strings, or tokens in its stack trace. Before writing it in step 3, scan the captured tail for the same high-signal secret patterns the commit gate uses (`gate_precommit.py`'s `INLINE_SECRET_RES` — AWS/PEM/Google/Slack/GitHub/Stripe keys) and redact any hit (`[REDACTED]`) rather than posting it verbatim. This mirrors `audit_readiness.md`'s "never print secret values" rule, which this exact raw-output path was missing until now.
 3. Write it to an Issue comment via the temp-file pattern — **the marker depends on which stage is running this procedure**: execute (`implement.md`/`debug.md`/`refactor.md` Step 2) uses `<!-- guild:test-evidence:step-<n> -->`; test (`test.md` Step 2) uses `<!-- guild:test:output -->` instead (not the `step-<n>` marker — see the marker table above).
 4. In any narrative claim ("all tests green"), the claim MUST be backed by the captured raw line. If the self-report and the raw output disagree, the raw output wins and the stage returns `BLOCKED`/`FAIL`. **When they disagree (a verify-gap), the enforcing stage also logs it as a ground-truth signal for the growth loop** (`_signals.md` Section C — `capture_signal.py --kind verify-gap`; this is the plan's "verify 증거패턴을 교정·revert 로깅으로 확장"). Logging is observational only and never changes the gate verdict (INV2).
-5. **Honesty of scope**: the verify output must also state what was **NOT** run — in M1, `commands.e2e` (integration/E2E) is detected but not auto-run, and manual/visual QA is the human's step. "verify passed" means *automated-test verification*, never "fully QA'd." Do not imply full QA.
+5. **Honesty of scope**: the verify output must also state what was **NOT** run — in M1, `commands.e2e` (integration/E2E) is detected but not auto-run, and manual QA plus the human's visual judgment are the human's step (an automated golden/VRT run, when one ran, is listed as run — it proves the screen matches its expected image, not that the image is right; Section L). "verify passed" means *automated-test verification*, never "fully QA'd." Do not imply full QA.
 
 This is a hard requirement in M1 (no separate AI verify reviewer exists yet — the raw-output cross-check IS the verify gate). Honesty covers both directions: don't overstate results (claim vs raw), and don't overstate coverage (what ran vs what didn't).
 
@@ -490,3 +490,40 @@ Why: that narration is read by nobody at runtime (the sprint supervisor consumes
    > Unattended: write free narration (anything before the `>>> RESULT <<<` sentinel) in **ASCII English**. The RESULT line itself, and any prose you write into a file, stay in `config.language`.
 
    Place it **immediately before** the closing `Write output in \`config.language\`.` sentence, so `_execute_spine.md`'s invariant ("every sub-agent prompt below ends with …") still holds. **Omit the line entirely when attended** — do not include it with a condition attached, because the sub-agent has no way to evaluate the condition.
+
+## Section L — Visual tests (golden / VRT)
+
+The single definition every stage cites. A visual test's assertion is an **expected image**, so the usual verification checks (test-file deletion, assertion count, skip directives) do not see a weakened visual test — this section is what does. Stages reference it; they do not restate it.
+
+**L.0 Config** (`config.json`, written by `init`/`update` from `scan_repo.md` Section 2 step 3b):
+| Key | Meaning |
+|---|---|
+| `commands.vrt` | the separate visual run (string, array, or `null` when visual tests run inside `commands.test` or there are none) |
+| `visual.baselines` | globs of **committed** expected images (`[]` when none, or when they live off-repo — Chromatic, reg-suit storage) |
+| `visual.config_files` | files whose settings decide what counts as a match — tolerance/threshold/comparator, tags/excludes (e.g. `vitest.config.*`, `playwright.config.*`, `flutter_test_config.dart`, `dart_test.yaml`). Loosening one turns red visual tests green with no image changed |
+| `visual.runnable` | `true` only when Guild can run the visual tests **faithfully** here: no TTY needed, and the rendering environment in `visual.env` is one Guild runs in. **Absent → treat as `false`** |
+| `visual.env` | one line: where expected images are rendered (`docker (linux)`, `macOS local`, `CI ubuntu only`, …) |
+| `visual.create` | the developer's **scoped** create/update recipe, with a `<file>` placeholder (e.g. `flutter test --update-goldens <file>`), or `null`. Only the developer uses it (L.4); no other role or stage ever runs it |
+
+**L.1 When visual applies.** `VISUAL_AVAILABLE` = `visual.runnable` is `true` **and** (`commands.vrt` is non-null **or** `visual.baselines` is non-empty). For an Issue, **visual applies** when `VISUAL_AVAILABLE` and the Issue has a UI surface — decided once at design (`design.md` Step 1 `VISUAL`) and read back afterwards from the `<!-- guild:visual-cases -->` marker in `docs/specs/<N>/test-cases.md`. Not available → every visual step in every stage is skipped, and the repo behaves exactly as before visual support existed.
+
+**L.2 Coverage.** A visual case is covered when a test compares that screen/state against an expected image **and** the raw run shows that test passing. When `visual.baselines` is non-empty the expected image must also exist in the branch (a test that would create its image on first run proves nothing yet). When baselines live off-repo, the runner's pass line naming the case is the evidence.
+
+**L.3 Baseline ledger** — an ASCII-marked block, never localized, kept in the execute evidence comment (`<!-- guild:test-evidence:step-1 -->`) and copied verbatim into the test output (`<!-- guild:test:output -->`):
+```
+<!-- guild:visual-baselines -->
+C <config file> — <reason>
+M <path> — <reason>
+D <path> — <reason>
+A <path> — case: <visual-case row or ux.md state>
+<!-- /guild:visual-baselines -->
+```
+`_execute_spine.md` Step 2 builds it from git (`--no-renames`, so a rename is a `D` plus an `A`) plus the developer's `baselines:` declarations, and **carries reasons forward**: on a re-entered execute, a path already in the previous block keeps its reason — a later developer spawn that did not touch it is not asked to re-declare it. Empty diff → write `none` between the markers. Downstream stages read this block, never a localized line.
+
+**L.4 Rules (INV2).**
+- Expected images are created or rewritten **only** with `visual.create`, **only** for the test files this Issue touched, never the whole suite. `visual.create` is `null` → the developer cannot create baselines here: report the uncovered visual cases with `DONE_WITH_CONCERNS`, do not improvise a command.
+- Every change is declared: `C`, `M` and `D` need a reason tied to the Issue; an `A` must cite the visual case or ux.md state it shows. **An `A` that cites none is a rewrite in disguise** (a renamed test regenerating its picture) — it needs a reason like an `M` and is listed with the rewrites.
+- A red visual test is red. Rewriting its expected image, loosening a `visual.config_files` setting, or excluding it, to make it pass is verification weakening — the same as deleting an assertion.
+- A baseline under a test path cannot be deleted through the commit gate (B1 blocks it). Leave an obsolete one in place and name it in the RESULT; the human removes it.
+
+**L.5 Environment, not regression.** A visual failure is an environment suspect — never a reason to rewrite — when the run is outside `visual.env` (e.g. a macOS host for Linux-rendered goldens), or when many images the change could not have reached fail with uniform anti-aliasing / font-hinting diffs. Report it to the human with `visual.env` and the run host (`NEEDS_HUMAN`, unattended `OK PAUSE: needs-human`) instead of looping the developer. A failure on an image whose screen the diff does reach is a regression until shown otherwise.

@@ -599,7 +599,9 @@ visual_repo
 expect_visual "V3 테스트 경로 밖 기준 이미지 삭제 → 통과 + 삭제 경고" allow "시각 기준 이미지 삭제 1건" "" \
   "git rm -q src/a/__screenshots__/btn.png && git commit -qm x"
 visual_repo
-expect_visual "V4 test/ 아래 기준 이미지 삭제는 기존 B1 이 차단 (시각 삭제 경고는 중복 안 함)" block "테스트 파일 삭제: test/goldens/card.png" "시각 기준 이미지 삭제" \
+# ⚠ 예전엔 "B1 이 이미 막으니 시각 경고는 생략" 이었다 — 로컬 refiner 가 B1 을 억제하면 차단도
+# 경고도 없이 통과했다(1회차 리뷰). 이제 경고는 항상 나고, 차단은 B1 그대로다.
+expect_visual "V4 test/ 아래 기준 이미지 삭제: B1 차단 + 시각 삭제 경고도 함께" block "시각 기준 이미지 삭제 1건: test/goldens/card.png" "" \
   "git rm -q test/goldens/card.png && git commit -qm x"
 visual_repo
 expect_visual "V5 glob 밖 이미지(assets/) 변경은 경고 없음" allow "" "시각 기준 이미지" \
@@ -619,7 +621,7 @@ git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm more >/de
 expect_visual "V8 다수 갱신은 5건만 나열하고 나머지는 개수로" allow "외 3건" "" \
   "for i in 1 2 3 4 5 6 7; do printf 'PNG2' > src/a/__screenshots__/s\$i.png; done; printf 'PNG2' > src/a/__screenshots__/btn.png && git commit -qam x"
 visual_repo
-expect_visual "V9 차단 메시지에도 시각 경고가 자기 헤더로 접힌다 (draft 헤더 아님)" block "시각 기준 이미지 — 차단 안 함, PR 공개 필요" "draft 규칙" \
+expect_visual "V9 차단 메시지에도 시각 경고가 자기 헤더로 접힌다 (draft 헤더 아님)" block "시각 기준 이미지·비교 설정 — 차단 안 함, PR 공개 필요" "draft 규칙" \
   "printf 'PNG2' > src/a/__screenshots__/btn.png && git rm -q test/t_test.py && git commit -qam x"
 visual_repo
 printf 'PNG2' > src/a/__screenshots__/btn.png
@@ -637,6 +639,49 @@ if grep -q '"rule": "verification:baseline-updated"' .claude/guild/memory/gate-f
 else
   bad "V11 gate-firings 기록" "verification:baseline-updated" "absent"
 fi
+
+# ── 1회차 적대적 리뷰에서 나온 것들 ──
+# (V12) 문서 예시 glob `test/**/goldens/**` 가 Flutter 의 가장 흔한 배치 `test/goldens/` 를
+#       놓쳤다 — fnmatch 의 중간 `/**/` 는 디렉터리 0개를 매치하지 않는다. git :(glob) 와 같게.
+fresh_repo
+printf '{"gates":{"enabled":true},"visual":{"baselines":["test/**/goldens/**"]}}' > .claude/guild/config.json
+mkdir -p test/goldens; printf 'PNG1' > test/goldens/a.png
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm b >/dev/null 2>&1
+expect_visual "V12 중간 **/ 는 디렉터리 0개도 매치 (test/**/goldens/** ⊃ test/goldens/a.png)" allow "시각 기준 이미지 갱신 1건: test/goldens/a.png" "" \
+  "printf 'PNG2' > test/goldens/a.png && git commit -qam x"
+# (V13) rename: git 이 같은 바이트의 삭제+추가를 R 로 묶어 M/D 필터를 빠져나갔다.
+visual_repo
+expect_visual "V13 이름 변경(내용 동일)된 기준 이미지도 삭제로 경고" allow "시각 기준 이미지 삭제 1건: src/a/__screenshots__/btn.png" "" \
+  "git mv src/a/__screenshots__/btn.png src/a/__screenshots__/btn2.png && git commit -qm x"
+visual_repo
+expect_visual "V14 glob 밖으로 옮긴 기준 이미지 = 삭제 경고" allow "시각 기준 이미지 삭제 1건" "" \
+  "mkdir -p moved && git mv src/a/__screenshots__/btn.png moved/btn.png && git commit -qm x"
+# (V15) 비교 설정 완화: 이미지가 그대로여도 '같은 화면' 의 정의가 바뀐다.
+visual_repo
+printf '{"gates":{"enabled":true},"visual":{"baselines":["**/__screenshots__/**"],"config_files":["vitest.config.ts"]}}' > .claude/guild/config.json
+printf 'export default { threshold: 0 }\n' > vitest.config.ts
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm cfg >/dev/null 2>&1
+expect_visual "V15 비교 설정 파일 변경 → 통과 + 경고" allow "시각 비교 설정 파일 변경 1건: vitest.config.ts" "draft 규칙" \
+  "printf 'export default { threshold: 0.5 }\n' > vitest.config.ts && git commit -qam x"
+# (V16) 잘못된 타입의 visual.baselines 가 게이트를 크래시시키고, fail-open 이 시크릿까지 통과시켰다.
+for BAD in 'true' '5' '{"a":1}' '"**/__screenshots__/**"'; do
+  fresh_repo
+  printf '{"gates":{"enabled":true},"visual":{"baselines":%s,"config_files":%s}}' "$BAD" "$BAD" > .claude/guild/config.json
+  expect_commit "V16 visual.baselines=$BAD 여도 시크릿 차단은 유지" block \
+    "printf 'SECRET=abc\n' > .env && git add .env && git commit -m x"
+done
+# (V17) visual 설정은 게이트가 무엇을 보고하는지를 정한다 — 비우는 편집은 사람 확인.
+fresh_repo
+expect_guard "V17 config.json 의 visual.baselines 편집 → 확인 요구" ask \
+  '{"tool_name":"Edit","tool_input":{"file_path":"/r/.claude/guild/config.json","new_string":"\"baselines\": []"}}'
+# (V18) 다수 갱신이 firing 로그를 파일당 1줄씩 채워 evolve 의 규칙 성적표 이력을 밀어냈다.
+visual_repo
+for i in $(seq 1 40); do printf 'PNG1' > "src/a/__screenshots__/m$i.png"; done
+git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm many >/dev/null 2>&1
+rm -f .claude/guild/memory/gate-firings.jsonl
+bash -c "for i in \$(seq 1 40); do printf 'PNG2' > src/a/__screenshots__/m\$i.png; done; git commit -qam x" >/dev/null 2>&1
+FN="$(grep -c 'baseline-updated' .claude/guild/memory/gate-firings.jsonl 2>/dev/null || echo 0)"
+if [ "$FN" -ge 1 ] && [ "$FN" -le 2 ]; then ok "V18 갱신 40건이어도 firing 은 종류당 1줄 (실측 $FN)"; else bad "V18 firing 볼륨" "1~2" "$FN"; fi
 
 note ""
 note "== H. 기존 훅 체이닝 =="
@@ -657,7 +702,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=87
+GATE_MIN_CHECKS=97
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

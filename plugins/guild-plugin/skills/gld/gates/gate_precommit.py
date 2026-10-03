@@ -34,8 +34,8 @@ Two gates (the only M3 set — structure/boundary gates are v2):
                     assertions, or adds skip/focus directives) — INV2 "검증은 어떤 자동
                     프로세스도 약화 못 함". Heuristic (rename/semantic evasion possible).
                     Also WARNS (never blocks) when a configured visual baseline
-                    (`visual.baselines` globs — golden images / VRT screenshots) is rewritten
-                    or removed: the expected image changed, so the PR must disclose it.
+                    (`visual.baselines`) or comparison config file (`visual.config_files`) is
+                    changed: the expectation changed, so the PR must disclose it.
 
 Safety / status model:
 - **Off-switch**: `.claude/guild/config.json` `gates.enabled: false` → allow all.
@@ -596,72 +596,149 @@ def check_verification(root, dismiss, scope):
 
 
 # --- visual baselines (golden images / VRT screenshots) --------------------------------
-# A visual test's assertion is the baseline IMAGE, not a line of code — so `--update-goldens` /
+# A visual test's assertion is the expected IMAGE, not a line of code — so `--update-goldens` /
 # `vitest -u` rewrites the expected value itself, and a regression accepted that way passes every
-# check above: no test file deleted, no assertion line removed, no skip added. Blocking it would be
-# wrong (every intended UI change legitimately updates baselines), so this WARNS, and the warning
-# names what the PR must disclose. The human sees the image diff at review (INV1).
+# check above: no test file deleted, no assertion line removed, no skip added. The same goes for a
+# loosened comparison setting (tolerance, threshold, comparator) in a config file. Blocking either
+# would be wrong (every intended UI change legitimately updates baselines), so this WARNS, and the
+# warning names what the PR must disclose. The human sees the image diff at review (INV1).
 #
-# Config-driven only: `config.json` → `visual.baselines` (a list of globs, written by init from
-# command-scan). No globs → no check. There is no built-in default because baseline locations
-# differ per stack (`test/goldens/`, `__screenshots__/`, `*-snapshots/`) and a guessed glob that
-# matches ordinary assets would warn on every icon change, which trains the reader to skip it.
+# Config-driven only: `config.json` → `visual.baselines` (globs) and `visual.config_files`
+# (paths), written by init from command-scan (`_handoff.md` Section L.0). Nothing configured → no
+# check. There is no built-in default because baseline locations differ per stack and a guessed
+# glob that matches ordinary assets would warn on every icon change, which trains the reader to
+# skip it.
+#
+# ⚠ This check must never be able to take the blocking checks down with it: any error inside it
+# yields no warning, never an exception (the module-level handler is fail-OPEN, so a crash here
+# would let a staged secret through). Observed in review: `"baselines": true` did exactly that.
 BASELINE_SHOW_MAX = 5
 
 
-def visual_baseline_globs(root):
+def _visual_cfg(root):
     try:
         with open(os.path.join(root, ".claude", "guild", "config.json"), encoding="utf-8") as fh:
             cfg = json.load(fh)
-        globs = (cfg.get("visual") or {}).get("baselines") or []
+        v = cfg.get("visual") if isinstance(cfg, dict) else None
+        return v if isinstance(v, dict) else {}
     except Exception:
+        return {}
+
+
+def _str_list(value):
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
         return []
-    if isinstance(globs, str):
-        globs = [globs]
-    return [g.strip() for g in globs if isinstance(g, str) and g.strip()]
+    out = []
+    for g in value:
+        if isinstance(g, str) and g.strip():
+            g = g.strip().replace("\\", "/")
+            while g.startswith("./"):
+                g = g[2:]
+            out.append(g.lstrip("/"))
+    return [g for g in out if g]
+
+
+def visual_baseline_globs(root):
+    return _str_list(_visual_cfg(root).get("baselines"))
+
+
+def visual_config_files(root):
+    return _str_list(_visual_cfg(root).get("config_files"))
+
+
+def glob_to_regex(g):
+    """Git `:(glob)` pathspec semantics, so the gate and the spine's `git diff` agree on what a
+    glob covers: `**/` is zero or more directories, a trailing `/**` everything below, `*` and `?`
+    never cross `/`. fnmatch got two cases wrong — its `*` crosses `/`, and a mid-path `/**/`
+    needed at least one directory, so the documented `test/**/goldens/**` missed Flutter's most
+    common layout, `test/goldens/a.png`. A wildcard-less glob is a directory prefix (or the file
+    itself)."""
+    if not any(c in g for c in "*?["):
+        return re.compile(re.escape(g.rstrip("/")) + r"(/.*)?$")
+    out, i = [], 0
+    while i < len(g):
+        if g.startswith("**/", i):
+            out.append(r"(?:.*/)?"); i += 3
+        elif g.startswith("/**", i) and i + 3 == len(g):
+            out.append(r"(?:/.*)?"); i += 3
+        elif g.startswith("**", i):
+            out.append(r".*"); i += 2
+        elif g[i] == "*":
+            out.append(r"[^/]*"); i += 1
+        elif g[i] == "?":
+            out.append(r"[^/]"); i += 1
+        else:
+            out.append(re.escape(g[i])); i += 1
+    return re.compile("".join(out) + "$")
 
 
 def baseline_matches(path, globs):
-    """fnmatch's `*` crosses `/`, so `**/x/**` already matches nested paths — but it needs at
-    least one leading segment, so a root-level `x/a.png` would slip past `**/x/**`. Try the glob
-    with that leading `**/` removed as well. A wildcard-less glob is a directory prefix,
-    path-segment bounded (same rule as the boundary gate)."""
     for g in globs:
-        cands = [g, g.rstrip("/") + "/*"]
-        if g.startswith("**/"):
-            cands += [g[3:], g[3:].rstrip("/") + "/*"]
-        if any(fnmatch.fnmatch(path, c) for c in cands):
-            return True
+        try:
+            if glob_to_regex(g).match(path):
+                return True
+        except re.error:
+            continue
     return False
 
 
+def _natural_key(p):
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", p)]
+
+
+def _no_rename_names(root, diff_filter, include_unstaged):
+    """Like changed_names, but with rename detection off: git pairs a deleted baseline with an
+    added one of similar (often identical — goldens share bytes) content as `R`, which the M/D
+    filters never see. Renamed-and-regenerated, moved out of the glob, and delete-plus-add all
+    went silent that way."""
+    names = set()
+    scopes = [["--cached"]] + ([[]] if include_unstaged else [])
+    for extra in scopes:
+        out = sh(["git", "diff"] + extra + ["--name-only", "--no-renames",
+                                            f"--diff-filter={diff_filter}"], root=root)
+        names.update(unquote_git_path(n.strip()) for n in out.splitlines() if n.strip())
+    return names
+
+
 def check_visual_baselines(root, dismiss, scope):
-    """Return warn findings for baselines this commit rewrites or removes. Never blocks.
-    A deleted baseline under a test path is already blocked by B1 (test-deleted) and is not
-    repeated here."""
-    globs = visual_baseline_globs(root)
-    if not globs:
+    """Warn findings for this commit's changes to expected images and comparison config. Never
+    blocks, never raises."""
+    try:
+        globs, cfg_files = visual_baseline_globs(root), visual_config_files(root)
+        if not globs and not cfg_files:
+            return []
+        include_unstaged, _ = scope
+        warn = []
+        groups = (
+            ("baseline-updated", "M", "시각 기준 이미지 갱신", lambda n: baseline_matches(n, globs)),
+            ("baseline-deleted", "D", "시각 기준 이미지 삭제", lambda n: baseline_matches(n, globs)),
+            ("visual-config-changed", "MD", "시각 비교 설정 파일 변경",
+             lambda n: baseline_matches(n, cfg_files)),
+        )
+        for kind, flt, label, match in groups:
+            hits = sorted((n for n in _no_rename_names(root, flt, include_unstaged)
+                           if match(n) and not dismiss_matches(n, dismiss)), key=_natural_key)
+            if not hits:
+                continue
+            shown = ", ".join(hits[:BASELINE_SHOW_MAX])
+            if len(hits) > BASELINE_SHOW_MAX:
+                shown += f" 외 {len(hits) - BASELINE_SHOW_MAX}건"
+            what = ("허용 오차·비교 방식이 바뀌면 이미지가 그대로여도 무엇이 '같은 화면'인지가 바뀝니다"
+                    if kind == "visual-config-changed" else "기대값 자체가 바뀝니다")
+            warn.append(finding(
+                f"verification:{kind}", hits[0],
+                f"{label} {len(hits)}건: {shown} — {what}. 의도한 변경이면 PR 본문 '시각 변경' "
+                "섹션에 근거와 함께 공개하세요 (INV2 — 회귀를 정답으로 만들 수 있음)"))
+            # ONE firing per kind, not per file: a full golden regeneration touches thousands of
+            # images, and the firing log is a bounded episodic file that evolve's rule scorecard
+            # reads — per-file lines evicted every other rule's history in one commit.
+            record_firing(f"verification:{kind}", "warn",
+                          hits[0] if len(hits) == 1 else f"{len(hits)} files")
+        return warn
+    except Exception:
         return []
-    include_unstaged, _ = scope
-    warn = []
-    for kind, flt, label in (("updated", "M", "갱신"), ("deleted", "D", "삭제")):
-        hits = sorted(n for n in changed_names(root, diff_filter=flt,
-                                               include_unstaged=include_unstaged)
-                      if baseline_matches(n, globs) and not dismiss_matches(n, dismiss)
-                      and not (kind == "deleted" and TEST_PATH_RE.search(n)))
-        if not hits:
-            continue
-        shown = ", ".join(hits[:BASELINE_SHOW_MAX])
-        if len(hits) > BASELINE_SHOW_MAX:
-            shown += f" 외 {len(hits) - BASELINE_SHOW_MAX}건"
-        warn.append(finding(
-            f"verification:baseline-{kind}", hits[0],
-            f"시각 기준 이미지 {label} {len(hits)}건: {shown} — 기대값 자체가 바뀝니다. "
-            "의도한 시각 변경이면 PR 본문 '시각 변경' 섹션에 이미지와 근거를 공개하세요 "
-            "(INV2 — 기준 이미지 갱신은 회귀를 정답으로 만들 수 있음)"))
-        for n in hits:
-            record_firing(f"verification:baseline-{kind}", "warn", n)
-    return warn
 
 
 RULE_STATUS_SUFFIX_RE = re.compile(r"\[\s*status\s*:\s*([^\]]*)\]\s*$", re.I)
@@ -815,11 +892,15 @@ HUMAN_NOTE = ("이 판단을 되돌리는 것은 사람의 몫입니다 — 수�
 WARN_HEADER = "⚠ Guild 게이트 경고 (draft 규칙 — 차단 안 함, confirm 시 차단):"
 # Baseline warnings are not draft rules and never become blocks — under WARN_HEADER they would
 # promise an escalation that does not exist.
-VISUAL_WARN_HEADER = "⚠ Guild 게이트 경고 (시각 기준 이미지 — 차단 안 함, PR 공개 필요):"
+VISUAL_WARN_HEADER = "⚠ Guild 게이트 경고 (시각 기준 이미지·비교 설정 — 차단 안 함, PR 공개 필요):"
+
+
+VISUAL_RULES = {"verification:baseline-updated", "verification:baseline-deleted",
+                "verification:visual-config-changed"}
 
 
 def is_visual_warn(w):
-    return isinstance(w, dict) and str(w.get("rule", "")).startswith("verification:baseline-")
+    return isinstance(w, dict) and str(w.get("rule", "")) in VISUAL_RULES
 
 
 def warn_message(warn):
@@ -1086,7 +1167,9 @@ GATE_CONTROL_RE = re.compile(
     r"\.claude/guild/gates/(dismissed\.md|rules/|scripts/)|"
     r"\.git/hooks/pre-commit")
 CONFIG_PATH_RE = re.compile(r"\.claude/guild/config\.json$")
-GATES_KEY_RE = re.compile(r"\"gates\"|gates\.enabled|\"enabled\"")
+# `visual` decides what the gate REPORTS (an emptied `baselines` list silently ends the
+# disclosure warning), so editing it asks like `gates.enabled` does.
+GATES_KEY_RE = re.compile(r"\"gates\"|gates\.enabled|\"enabled\"|\"visual\"|\"baselines\"|\"config_files\"")
 
 # The gate's own WIRING: the files that decide whether it runs at all. Distinct from
 # GATE_CONTROL_RE (what it checks) because the remediation and the message differ.
