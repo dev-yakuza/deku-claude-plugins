@@ -2452,6 +2452,34 @@ hasfx "debug: 실행 불가 시각 버그는 PR 전에 멈추지 않는다" "$GL
 hasfx "spine: 철회만 있어도 PR 섹션을 만든다" "$SPINE" 'or this invocation recorded a `P-withdrawn`'
 lacksfx "handoff: HEAD 로 되돌리지 않는다" "$HO" '`git checkout HEAD -- <path>`) instead of declaring'
 
+# ── 리팩토링 슬롯의 안전망 (0.89.0) ─────────────────────────────────────────
+# 테스트가 부족한 핫스팟을 리팩토링하면 "기존 테스트 green" 이 아무것도 증명하지 못한다.
+# 안전망은 리팩토링 전에, 바뀌지 않은 코드에서 green 으로 깔고, 이후 손대지 않는다.
+# 린트 룰은 반복 실패라는 근거가 필요하므로 evolve 경로에 남긴다.
+echo "== 리팩토링 슬롯 안전망 =="
+PLANMD="$GLD/commands/sprint/plan.md"
+RFMD="$GLD/commands/refactor.md"
+hasfx "plan: 공백 검사 (테스트·시각)" "$PLANMD" '**The gap check**'
+hasfx "plan: 안전망만 하는 2b 초안" "$PLANMD" '2b. **A safety-net-only draft**'
+hasfx "plan: 2b 는 공백 근거가 있어야" "$PLANMD" 'a hotspot that is already tested is no reason to fill the slot'
+hasfx "plan: 린트 룰은 슬롯에 넣지 않는다" "$PLANMD" '**Lint rules are not part of the slot.**'
+hasfx "plan: 안전망 규칙 — 리팩토링 전 자기 커밋에서 green" "$PLANMD" '*Added before the refactor, in their own commit, and green on the unchanged code*'
+hasfx "plan: 안전망 규칙 — 공개 동작만" "$PLANMD" '*Public behavior only*'
+hasfx "plan: 안전망 규칙 — 의심 버그는 고정하지 않음" "$PLANMD" '*Never pin a suspected bug*'
+hasfx "plan: 크기 초과면 안전망을 남기고 리팩토링을 미룸" "$PLANMD" 'keep the net and drop the refactor to a later'
+hasfx "plan: 안전망만 마커" "$PLANMD" '<!-- guild:safety-net-only -->'
+hasfx "plan: 사람에게 안전망 줄을 보여 준다" "$PLANMD" '🧹 리팩토링 슬롯 (안전망만)'
+hasfx "refactor: SAFETY_NET 판정" "$RFMD" 'Hold `SAFETY_NET = <none|with-refactor|only>`'
+hasfx "refactor: 프로덕션 파일보다 먼저 안전망" "$RFMD" 'Do this **first, before touching any production file**'
+hasfx "refactor: 안전망 커밋에서 green 실행 증거" "$RFMD" 'RESULT extras for this paragraph: `safety-net: <commit sha>`'
+hasfx "refactor: 안전망 커밋에 프로덕션 변경 없음을 git 으로" "$RFMD" 'git diff --name-only <mb> <safety-net-sha>'
+hasfx "refactor: 안전망은 이후 손대지 않음을 git 으로" "$RFMD" 'git diff --name-status <safety-net-sha> HEAD --'
+hasfx "refactor: 구현 고정 테스트는 BLOCKED" "$RFMD" 'a test that pins implementation is a `BLOCKED`'
+hasfx "refactor: only 는 구조 개선 대신 커버리지 검사" "$RFMD" 'For `only`, check (2) and this coverage check **instead of** (1)'
+for R in README.md README.ko.md README.ja.md; do
+  hasfx "$R: 리팩토링 슬롯 안전망" "$GLD/../../$R" 'evolve'
+done
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -2459,7 +2487,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=560   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=580   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

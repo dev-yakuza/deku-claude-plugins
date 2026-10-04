@@ -40,7 +40,7 @@ claude /plugin install deku-claude-plugins@guild-plugin
 
 **온디맨드·관찰** — `rollback <target>`(비파괴 되돌림) · `ask <question>`(standards+⑥ 기반 인용 Q&A) · `monitoring [--html]`(상태 스냅샷)
 
-**반복 구간** — `sprint plan`(이번 스프린트에 담을 이슈 선별 + 의존성 순서 + 추적 이슈 생성 — 스프린트가 건드릴 코드의 리팩토링 한 자리를 근거와 함께 예약하고, 마땅한 것이 없으면 이유를 남기고 비운다) · `sprint run`(의존성 순서대로 무인 개발 → **PR 스택**, 이슈별 git 워크트리 격리, rate limit 은 리셋이 4시간 이내면 기다려 재개하고, 더 멀면 그 멤버만 차단해 재실행이 이어받는다 — 사장님은 그 사이에 리뷰·머지) · `sprint daily`(무엇을 어떤 순서로 머지할지 · 사람 대기 · 실패) · `sprint board`(스프린트를 GitHub Projects 칸반에 비춘다 — `Issues → Backlog → Ready → In progress → Blocked → In review → Done` — 처음 한 번만 설정하면 이후 `plan`·`run` 이 자동으로 갱신) · `sprint retro`(지표 → 용량 보정 → evolve → 스프린트 종료)
+**반복 구간** — `sprint plan`(이번 스프린트에 담을 이슈 선별 + 의존성 순서 + 추적 이슈 생성 — 스프린트가 건드릴 코드의 리팩토링 한 자리를 근거와 함께 예약하고 — 그 코드에 테스트가 부족하면 특성화 테스트(VRT 가 돌면 시각 케이스도)를 먼저, 바뀌기 전 코드에서 green 으로 깔며, 리팩토링감이 없으면 테스트가 부족한 핫스팟의 안전망만 까는 자리로 쓰고 — 마땅한 것이 없으면 이유를 남기고 비운다. 린트 룰은 `evolve` 가 맡는다) · `sprint run`(의존성 순서대로 무인 개발 → **PR 스택**, 이슈별 git 워크트리 격리, rate limit 은 리셋이 4시간 이내면 기다려 재개하고, 더 멀면 그 멤버만 차단해 재실행이 이어받는다 — 사장님은 그 사이에 리뷰·머지) · `sprint daily`(무엇을 어떤 순서로 머지할지 · 사람 대기 · 실패) · `sprint board`(스프린트를 GitHub Projects 칸반에 비춘다 — `Issues → Backlog → Ready → In progress → Blocked → In review → Done` — 처음 한 번만 설정하면 이후 `plan`·`run` 이 자동으로 갱신) · `sprint retro`(지표 → 용량 보정 → evolve → 스프린트 종료)
 
 ## 안전 (불변식)
 

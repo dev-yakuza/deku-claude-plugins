@@ -209,7 +209,9 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
 ### Refactor slot — one per sprint, reserved, never forced
 
 **Every sprint reserves one member slot for a behavior-preserving refactor** that pays down
-the codebase the sprint is about to work in. The slot is **reserved, not mandatory**: an empty
+the codebase the sprint is about to work in — **with a safety net laid first** where the code it
+reshapes is under-tested, or, when no refactor qualifies, a **safety-net-only** slot that only
+adds that net (both below). The slot is **reserved, not mandatory**: an empty
 slot is a legitimate outcome **with a recorded reason**, and a weak refactor taken to fill it
 is the failure this section exists to prevent. It costs one PR of the human's review
 throughput, so it is the cheapest unit of codebase improvement that still goes through review.
@@ -245,9 +247,31 @@ candidate that fails it does not end the search; go on to the next step:
    files the other candidates will touch, and Read **at most ~3** of the intersecting files
    (the same bound `audit.md` dimension F uses). Draft the refactor that **makes those
    candidates' change easier** — a seam, an extraction, a duplication removed — in the
-   Issue shape below.
+   Issue shape below. **Check its safety net while you are there** (the gap check below) and
+   add a **Safety net** section when it finds a gap.
+2b. **A safety-net-only draft** — only when step 2 found no refactor worth drafting. Among the
+   same intersecting hotspot files, take the one with the clearest **gap** (below) and draft an
+   Issue that adds only the net: tests (and, where they apply, visual cases) for that file's
+   public behavior, **no production code change**. It is weaker than a refactor — it removes no
+   difficulty, it makes the next change safer — so it needs the gap evidence, not just a hotspot:
+   a hotspot that is already tested is no reason to fill the slot.
 3. **Nothing qualifies** → `none: <token>` — `no-candidate` (no hotspot overlaps this sprint's
-   work, or no change found that would make it easier).
+   work, or no change found that would make it easier, and no hotspot with a safety-net gap).
+
+**The gap check** (steps 2 and 2b, the same ≤ ~3 files — no new budget):
+- **Tests** — does any test exercise this file's public behavior? One Grep per file for its
+  module/import name under the repo's test dirs (`config.json` `commands.test` and
+  `scan_repo.md`'s test locations tell you where). No test that imports it, or tests that only
+  touch it incidentally → a **test gap**, named per behavior (the exported functions / the
+  component's states the sprint's members will lean on).
+- **Visual** — only when `VISUAL_AVAILABLE` (`_handoff.md` Section L.1) and the file renders UI
+  inside `visual.packages`: is there a visual test for it (a `visual.tests` file that imports
+  it)? None → a **visual gap**, named per screen/state. Not available → no visual gap is ever
+  recorded (an image Guild cannot render here is not a safety net).
+- **Lint rules are not part of the slot.** A lint rule earns its place from repeated failures,
+  and that route is `evolve`'s (fail-to-rule, human-approved). A rule added here would arrive
+  without that evidence, and fixing its existing violations would bloat the one PR the slot
+  costs.
 
 Whichever step yields it, (c) states for the slot:
 - **Files** — the source files the slot reshapes. For an existing Issue, derive them from its
@@ -267,6 +291,25 @@ A draft for (2) also carries, all in `config.language` (tokens stay ASCII):
   Success-criteria must be checkable from the diff: existing tests stay green, plus one
   structural criterion (a named function extracted, a duplicate gone, a dependency cut).
   ⚠ *"Code is cleaner"* is not a criterion — it is the `unclear` that Phase 2 excludes.
+- **Safety net** (only when the gap check found a gap; always for a 2b draft) — the behaviors to
+  pin, one line each (`<file> · <public function or component state> · <what it must keep
+  doing>`), and the visual cases (screen · state · theme · size) when there is a visual gap.
+  Three rules ride with it into the Issue, verbatim in `config.language`:
+  1. *Added before the refactor, in their own commit, and green on the unchanged code* — that
+     run is what proves they pin today's behavior rather than the new code's.
+  2. *Public behavior only* — no private functions, no mocks of the file's own internals, no
+     snapshot of internal structure. A test that pins implementation blocks the very refactor
+     it was written to protect, and the next one.
+  3. *Never pin a suspected bug* — a behavior that looks wrong is written into the Issue as a
+     finding for the human, not frozen by a test.
+  Keep it small: the slot is one PR, and the size gate below counts the net with the refactor.
+  When both together are ⚠ likely to split, keep the net and drop the refactor to a later
+  sprint (the next slot then starts with the code already covered) — the draft becomes a 2b.
+- A **2b draft** says so in its title and carries the `<!-- guild:safety-net-only -->` line
+  beside `<!-- guild:refactor-slot -->`. Its Goal is the coverage; its Success-criteria are the
+  Safety net lines covered, green on the unchanged code, and **no production file changed**
+  (checkable from the diff: every changed path is a test, a visual baseline or `docs/specs/`);
+  it has no structural criterion.
 
 ⚠ **PAST SLOTS is a check, not a quota.** Each entry is `{issue, outcome, paths, merged_at,
 closed_at}` (`retro.md` Phase 4). Read `origin/<default-branch>` (fetched by the leader), not
@@ -446,6 +489,7 @@ record the override like any other over-cap acceptance.
   🧹 리팩토링 슬롯: #(신규) «결제 상태 갱신 경로를 한 곳으로» — #101이 이 위에 쌓입니다 (#102는 #101 위)
        근거: src/payment/state.ts · 최근 fix: 커밋이 몰림 · 갱신 경로 3곳 중복
        성공 기준: 기존 테스트 green · applyTransition() 하나로 통합
+       안전망: state.ts · applyTransition() · 취소 후 재시도 시 상태 유지 외 2건 (리팩토링 전 커밋에서 green)
   제외 5개: #108(Success=unclear) · #110(⚠ 분할 예상) · …
   용량 판단: 7개 — <근거 한 줄>
   최대 스택 깊이: 3 (상한 3 — 경계)
@@ -456,6 +500,11 @@ record the override like any other over-cap acceptance.
 
 When the slot is empty, the line says why instead of disappearing —
 `🧹 리팩토링 슬롯: 비움 (no-candidate) — 이번 후보들이 건드리는 hotspot 이 없습니다`.
+The `안전망:` line appears only when the draft carries a Safety net (one line: file · the first
+behavior · `외 N건`). A 2b draft is shown as `🧹 리팩토링 슬롯 (안전망만): #(신규) «…»` with its
+`근거:` naming the gap (`테스트 없음` / `시각 테스트 없음`) and `성공 기준:` ending in
+`프로덕션 코드 변경 없음` — the human should see at a glance that this slot adds coverage, not a
+refactor.
 When the slot — of any origin: draft, resumed or existing — will not carry `type:refactor`, and
 **Phase 0 step 2's label list** has no `type:refactor`, add one line:
 `  ⚠ 이 레포에 type:refactor 라벨이 없습니다 — 만들까요? (없으면 기능 흐름으로 개발됩니다)`.
@@ -483,7 +532,8 @@ Handle edits and re-present until the human approves. **Create nothing** without
    label and only the slot lacks it, add it the same way — that is part of the sprint the
    human approved, not a new repo-wide object. A draft goes
    first because the member table needs its number. Body: the draft's sections (Why · Files ·
-   Prepares · Goal · Constraint · Success-criteria) and a `<!-- guild:refactor-slot -->` line —
+   Prepares · Goal · Constraint · Success-criteria · Safety net when present) and a `<!-- guild:refactor-slot -->` line
+   (plus `<!-- guild:safety-net-only -->` for a 2b draft) —
    the marker Phase 1 finds on a re-run. Temp file + `--body-file`; add `--label type:refactor`
    **only if that label exists or was just created** (Phase 0 step 2's list, or the approved
    `gh label create` below — `init.md` never creates `type:*`
