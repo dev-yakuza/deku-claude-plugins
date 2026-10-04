@@ -2339,7 +2339,7 @@ hasfx "test: VISUAL_CASES / VISUAL_RUN 판정" "$TESTMD" '`VISUAL_CASES = yes` w
 hasfx "test: commands.vrt 를 실행" "$TESTMD" 'run `commands.vrt` after the test command'
 hasfx "test: 갱신 명령·비교 설정 금지" "$TESTMD" 'Never run a create/update/approve command'
 hasfx "test: 커버 안 된 시각 케이스는 미커버 AC" "$TESTMD" 'is **uncovered**, exactly like an AC with no test'
-hasfx "test: 검증 범위에 원장 블록을 그대로" "$TESTMD" '(c) **the `<!-- guild:visual-baselines -->` block copied verbatim**'
+hasfx "test: 검증 범위에 원장 블록을 그대로" "$TESTMD" '(c) **the `<!-- guild:visual-baselines -->` block — and the `<!-- guild:safety-net-evidence -->` block when there is one — copied verbatim**'
 lacksfx "test: 시각 QA 를 통째로 '안 돌린 것' 으로 두지 않는다" "$TESTMD" 'and manual/visual QA** (deferred / the human in M1)'
 QAMD="$GLD/commands/qa.md"
 hasfx "qa: 시각 주장도 자동화 먼저" "$QAMD" '**Visual claims** (a state renders'
@@ -2496,7 +2496,7 @@ hasfx "design: 안전망 시각 케이스면 VISUAL=yes" "$DESIGN" '**Safety net
 hasfx "design: 안전망만 슬롯의 skeleton" "$DESIGN" '구조 변경 없음 — 커버리지만'
 hasfx "design: tester 의 안전망 케이스는 red-first 아님" "$DESIGN" 'passes on today'"'"'s code (it is not red-first)'
 hasfx "refactor: 안전망은 test-cases 의 (safety net) 케이스" "$RFMD" 'The cases tagged `(safety net)` in `docs/specs/$1/test-cases.md`'
-hasfx "refactor: 이동·import 만 수정은 허용" "$RFMD" 'git diff --name-status --find-renames=100% <sha> HEAD'
+hasfx "refactor: 이동·import 만 수정은 허용" "$RFMD" 'git diff --name-status -M <sha> HEAD'
 hasfx "refactor: post-transform-net 은 증명 안 됨으로 표시" "$RFMD" '`post-transform-net: <paths or none>`'
 hasfx "refactor: 시임 없으면 테스트 불가 → 보고" "$RFMD" 'untestable without a seam: <behavior> — needs <seam>'
 hasfx "refactor: 실패할 수 없는 테스트는 BLOCKED" "$RFMD" 'would each **fail if their behavior broke**'
@@ -2507,7 +2507,7 @@ hasfx "refactor: 안전망 증거 ASCII 블록" "$RFMD" '<!-- guild:safety-net-e
 hasfx "refactor: 재진입 시 안전망을 다시 깔지 않는다" "$RFMD" '**If an earlier net block is given, the net already exists**'
 hasfx "refactor: 안전망은 자기 새 파일에" "$RFMD" 'Write the net in **new test files of its own**'
 hasfx "refactor: 시각 안전망 이미지는 안전망 커밋 안에" "$RFMD" 'an image made after the transform pins the transformed code'
-hasfx "refactor: post-transform-net 은 추가만" "$RFMD" 'never an edit to an existing net assertion'
+hasfx "refactor: post-transform-net 은 추가만" "$RFMD" '**added in new files only**'
 hasfx "refactor: deferral 은 tech-lead 가 확인" "$RFMD" 'confirm the developer'"'"'s "tried" line'
 hasfx "refactor: deferred 동작 위로 변환 금지" "$RFMD" 'the transform must not proceed over it'
 hasfx "plan: 이미 안전망 있으면 다시 안 붙임" "$PLANMD" 'never a second net'
@@ -2518,7 +2518,22 @@ hasfx "plan: 지금도 미커버인지 확인" "$PLANMD" '**Check it is still un
 hasfx "plan: 2b 는 라벨 거절 시 빠진다" "$PLANMD" '(없으면 이 안전망 슬롯은 빠집니다'
 hasfx "plan: 시각 불가 2b 는 (로직만)" "$PLANMD" '`(로직만)` — the human approving'
 hasfx "design: 시각 행도 (safety net) 태그 유지" "$DESIGN" 'behavior row **and** visual row alike'
-hasfx "test: deferred 케이스를 tester 에게 넘긴다" "$TESTMD" 'pass those case names to the tester in Step 1'
+hasfx "test: deferred 케이스를 tester 에게 넘긴다" "$TESTMD" '**Safety-net deferred cases —'
+# SN 3회차 적대적 리뷰
+hasfx "refactor: 증거 블록은 verified 후에만 이어받음" "$RFMD" 'only when it says verified: yes'
+hasfx "refactor: 증거 블록은 Step 2 의 한 번의 PATCH 안에서" "$RFMD" 'writes **inside Step 2'"'"'s one PATCH of that comment**'
+hasfx "refactor: run 은 모든 net 파일 실행을 보여야" "$RFMD" 'does not show **every** `net:` file executed and green'
+hasfx "refactor: 실행 가능한 러너가 잡는 파일에" "$RFMD" '**a runner Guild can run here** picks them up'
+hasfx "refactor: 안전망 이미지는 safety-net- 접두사" "$RFMD" 'with a `safety-net-`'
+hasfx "refactor: 검증 실패 시 mb 로 되돌려 다시 깐다" "$RFMD" 'git reset --hard <mb>'
+hasfx "refactor: tech-lead 에 deferred 줄 대입" "$RFMD" '`<the deferred: lines of the safety-net evidence block, or none>`'
+hasfx "design: 2b 안전망은 항상 새 파일" "$DESIGN" 'always a **new** file beside the existing tests'
+hasfx "plan: 2b 전환 시 Title·마커·Prepares 도 다시 씀" "$PLANMD" 'reduced to the members whose files share a file with the narrowed Files'
+hasfx "plan: 공백 검사 예산 명시" "$PLANMD" '≤ ~3 commit diffs **in total**'
+hasfx "plan: step 0/1 로그는 디렉터리 범위" "$PLANMD" 'scoped to the Files'"'"' **directories**, not the files'
+hasfx "plan: analyze 이후라 안전망 없음을 사람에게" "$PLANMD" '안전망: 없음 — 이미 <stage> 단계라'
+hasfx "plan: step 3 은 슬롯 멤버 먼저" "$PLANMD" '**Do the slot member first**'
+hasfx "plan: PAST SLOTS 항목에 kind" "$PLANMD" '{issue, outcome, kind, paths, merged_at,'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -2527,7 +2542,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=618   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=632   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
