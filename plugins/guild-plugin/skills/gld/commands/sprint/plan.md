@@ -225,7 +225,7 @@ the spawn — Phase 2's lead paragraph), so a stale clone or a checkout on a fea
 cannot hide recent commits. **DEFAULT BRANCH `unavailable`** (the fetch failed) → read `HEAD`
 instead, and say in (c) that the evidence may be stale. **PAST SLOTS `unverifiable — …`** →
 run no PAST SLOTS git check; treat the `paths` of every listed `merged` or `refused` entry as
-excluded from this sprint's slot.
+excluded from this sprint's slot — except a merged `"kind": "safety-net-only"` entry (below).
 
 The tech-lead fills (c) in this order and stops at the first that yields a **ready**
 candidate — all three readiness dimensions `clear` **and** size ✅ (the bar below). A
@@ -239,8 +239,14 @@ candidate that fails it does not end the search; go on to the next step:
    body already carries `<!-- guild:safety-net -->`.
 1. **An existing candidate tagged `refactor`** (Phase 1). **Run the gap check on it too** — an
    existing refactor Issue is the slot's most common source, and "existing tests stay green" is
-   exactly as empty for it as for a draft. A gap found here becomes a Safety net that Phase 6
-   step 0 appends to the existing Issue (after the human approves it in Phase 5). Prefer one whose area overlaps the
+   exactly as empty for it as for a draft — **unless** its body already carries
+   `<!-- guild:safety-net -->` (a net appended by an earlier `plan`, possibly one that died
+   mid-create: never a second net), or it is already **past analyze** (stage `guild:design` or
+   later — Phase 1's stage derivation): its AC are fixed, so an appended net would never become
+   AC and the refactor stage would find no `(safety net)` cases to lay. Such a slot runs without
+   a net; say so in (c) (`안전망 없음 — 이미 <stage> 단계`). A gap found otherwise becomes a
+   Safety net that Phase 6 step 3 appends to the existing Issue (after the human approves it in
+   Phase 5). Prefer one whose area overlaps the
    files this sprint's other candidates will touch. ⚠ A stale, vague `type:refactor` Issue
    (*"clean up X"*) is the common case here; rate it honestly and fall through to 2 rather
    than letting it occupy the slot every sprint as a `skip (not-ready)`.
@@ -253,8 +259,10 @@ candidate that fails it does not end the search; go on to the next step:
    candidates' change easier** — a seam, an extraction, a duplication removed — in the
    Issue shape below. **Check its safety net while you are there** (the gap check below) and
    add a **Safety net** section when it finds a gap.
-2b. **A safety-net-only draft** — only when step 2 found no refactor worth drafting (or a step-2
-   draft is converted for size at arbitration — see the Safety net bullets below). Among the
+2b. **A safety-net-only draft** — only when step 2 found no refactor worth drafting, or drafted
+   one that is not ready (readiness below `clear`) — the net's evidence does not depend on the
+   refactor's (or a step-2 draft is converted for size at arbitration — see the Safety net
+   bullets below). Among the
    same intersecting hotspot files, take the one with the clearest **gap** (below) and draft an
    Issue that adds only the net: tests (and, where they apply, visual cases) for that file's
    public behavior, **no production code change**. It is weaker than a refactor — it removes no
@@ -271,8 +279,16 @@ sources name the behaviors, both from data you already have:
   touched it (step 2's `git log … --name-only` output already lists each commit's files; for a
   step-0/1 candidate run that same call scoped to its Files): a `fix:` commit whose file list has
   **no test path** fixed a behavior no test was made to hold. Read that commit's subject (and, if
-  unclear, its diff of the hotspot file — at most ~3 commits) and name the behavior. That is a
-  **test gap**, and the strongest evidence this check has.
+  unclear, its diff of the hotspot file — at most ~3 commits) and name the behavior. Before
+  counting it:
+  - **Drop noise** by subject: reverts, renames/moves, lint/format/typo, and review-nit fixups
+    ("review", "指摘", "리뷰 반영", "copilot") — they changed no behavior a test could hold.
+  - **Collapse one branch's fixes** into one behavior: consecutive `fix:` commits on the same
+    feature branch (same PR, or the same subject stem) are one fix, not several.
+  - **Check it is still uncovered today** — Grep the file's current tests for an assertion on
+    that behavior, the same as the second source: a later `test:` commit may have covered it
+    (and a merged safety-net-only slot certainly did).
+  What survives is a **test gap**, and the strongest evidence this check has.
 - **Behaviors this sprint's members will lean on** — from (b)'s per-candidate files: the public
   functions / component states of the hotspot file those members call. One Grep per behavior
   name in the file's tests (an assertion that exercises it, not a mention): none → a test gap.
@@ -294,6 +310,9 @@ Whichever step yields it, (c) states for the slot:
 - **Prepares** — the candidate numbers it makes easier, and how.
 - **Readiness** — Goal / Constraint / Success-criteria each rated `clear` / `partial` /
   `unclear` (ASCII tokens), with one line on each rating below `clear`.
+- **Safety net** — for any step, when the gap check found a gap: the section as specified for a
+  draft below (lines, visual cases, test-support files, rules). For a step-0/1 slot this is what
+  Phase 6 step 3 appends; without it there is nothing to append.
 
 A draft for (2) also carries, all in `config.language` (tokens stay ASCII):
 - **Title** — what is reshaped, and where.
@@ -310,8 +329,13 @@ A draft for (2) also carries, all in `config.language` (tokens stay ASCII):
   translated — `analyze` and `refactor` find the section by it): the behaviors to pin, one line
   each (`<file> · <public function or component state> · <what it must keep doing> · <evidence:
   fix commit / member #n>`), the visual cases (screen · state · theme · size) when there is a
-  visual gap, and any **test-support files** the net needs (a test helper or fixture, named by
-  path — the only non-test files the net's commit may touch). **Each line is also a
+  visual gap (each tagged `(safety net)` too, so design keeps the tag on its visual rows), and
+  any **test-support files** the net needs (a test helper or fixture, named by path — the only
+  non-test files the net's commit may touch). The net goes into **new test files of its own**,
+  named so the runner still picks them up (`index.safety-net.vitest.tsx` beside
+  `index.vitest.tsx`, `foo_safety_net_test.dart`): the refactor stage freezes the net's files, and
+  freezing an existing colocated test file would also freeze its older tests, which a refactor is
+  allowed to adjust. **Each line is also a
   Success-criterion** (*"covered by a test that would fail if it broke"*) — that is what carries
   it into the AC, the design tester's cases and the test stage's coverage and vacuous-test
   checks; a net that lives only in its own section is checked by nobody.
@@ -342,8 +366,14 @@ A draft for (2) also carries, all in `config.language` (tokens stay ASCII):
   human declines creating it, a 2b is not offered (`skip (not-ready)`).
 - When a step-2 draft is rejected at arbitration **only for size**, and its Safety net alone
   passes the size gate, the leader converts it to a 2b instead of skipping — no re-spawn: the
-  net is already in the draft. Record the dropped refactor in the 2b's **Why** (*"deferred: <the
+  net is already in the draft. Converting means rewriting it as a 2b, not relabelling: **Files**
+  narrowed to the production files the net covers, Goal and Success-criteria rewritten per the
+  2b rules, and the readiness re-checked on those rewritten sections (all `clear`, or
+  `skip (not-ready)`). Record the dropped refactor in the 2b's **Why** (*"deferred: <the
   refactor's title>"*) so the next sprint's step 2 finds it again with the code covered.
+- When VISUAL is `unavailable` and the 2b covers a file that renders UI, its title says
+  `(로직만)` — the human approving a "safety net" for a screen should see that no picture of it
+  is pinned.
 
 ⚠ **PAST SLOTS is a check, not a quota.** Each entry is `{issue, outcome, paths, merged_at,
 closed_at}` (`retro.md` Phase 4). Read `origin/<default-branch>` (fetched by the leader), not
@@ -376,8 +406,10 @@ a feature member may carry a `partial`. An optional member has no reason to carr
 unattended the leader would have to guess alone:
 - any readiness dimension below `clear` → do not take it. For a **draft** record
   `skip (not-ready)`; a step-0 or step-1 pick goes to the re-spawn bullet below instead.
-- size ⚠ **likely to split** → the same: a draft records `skip (not-ready)`, a step-0 or step-1
-  pick goes to the re-spawn.
+- size ⚠ **likely to split** → the same: a draft records `skip (not-ready)` — **unless** it
+  carries a Safety net that alone passes the size gate, in which case it is converted to a 2b
+  (the Safety net bullets in the Refactor slot section) — and a step-0 or step-1 pick goes to the
+  re-spawn.
 - ⚠ **A new draft was never in the product-owner's CANDIDATES**, so its readiness comes from
   the tech-lead's own **Readiness** ratings in (c). Re-read the draft's Success-criteria
   yourself before accepting a `clear` — the author of a draft is the one reader least likely to
@@ -406,7 +438,8 @@ unattended the leader would have to guess alone:
   rejected too, or comes back `none`, the slot ends in a `skip` keyed on the **final**
   attempt's reason — `skip (no-candidate)` when it prepares no member or came back `none`,
   `skip (not-ready)` when it failed readiness or size. A draft rejected for readiness or
-  size ends in `skip (not-ready)` without a re-spawn.
+  size ends in `skip (not-ready)` without a re-spawn (or, for size with a net that fits, as a
+  2b — above).
   From then on Phase 5's evidence lines and Phase 6 step 0's Issue body also come from
   `deps-slot.md`.
 - ⚠ **A rejected pick the product-owner ranked as a feature goes back to the feature picks**
@@ -548,7 +581,8 @@ refactor. When the gap check reported VISUAL `unavailable` for a screen it cover
 slot that gains a net, the `안전망:` line ends with `(Issue 본문에 추가 예정)`.
 When the slot — of any origin: draft, resumed or existing — will not carry `type:refactor`, and
 **Phase 0 step 2's label list** has no `type:refactor`, add one line:
-`  ⚠ 이 레포에 type:refactor 라벨이 없습니다 — 만들까요? (없으면 기능 흐름으로 개발됩니다)`.
+`  ⚠ 이 레포에 type:refactor 라벨이 없습니다 — 만들까요? (없으면 기능 흐름으로 개발됩니다)` —
+for a 2b slot instead: `(없으면 이 안전망 슬롯은 빠집니다 — 기능 흐름에서는 "바뀌지 않은 코드에서 green" 과 "프로덕션 코드 변경 없음" 을 지킬 수 없습니다)`.
 ⚠ Use that list (`--limit 200`), not a fresh `gh label list --json name`: without `--limit`
 gh returns 30 labels, so a repo with more reads an existing label as missing.
 ⚠ **Ask this even under `--create`.** `--create` approves the sprint, not a repo-wide label
@@ -575,12 +609,9 @@ Handle edits and re-present until the human approves. **Create nothing** without
    first because the member table needs its number. Body: the draft's sections (Why · Files ·
    Prepares · Goal · Constraint · Success-criteria · Safety net when present) and a `<!-- guild:refactor-slot -->` line
    (plus `<!-- guild:safety-net-only -->` for a 2b draft) —
-   the marker Phase 1 finds on a re-run. **An existing or resumed slot that gained a Safety net**
-   (approved in Phase 5): read its body (`gh issue view <n> --json body --jq .body`), append the
-   Safety net section (heading + `<!-- guild:safety-net -->` + lines + rules) and the same lines
-   to its Success-criteria section (or a new one), and write it back with `gh issue edit <n>
-   --body-file <temp>` — read-then-replace, never a blind overwrite (a truncated read → do not
-   write; NEEDS_HUMAN). Temp file + `--body-file`; add `--label type:refactor`
+   the marker Phase 1 finds on a re-run. (An existing or resumed slot that gained a Safety net
+   is **not** edited here — step 3 appends it, after the label, in the same rewrite as the
+   back-reference.) Temp file + `--body-file`; add `--label type:refactor`
    **only if that label exists or was just created** (Phase 0 step 2's list, or the approved
    `gh label create` below — `init.md` never creates `type:*`
    labels, and `gh issue create --label <name>` errors on a missing one; the same rule as
@@ -595,11 +626,13 @@ Handle edits and re-present until the human approves. **Create nothing** without
    unless `analyze` happens to reclassify. So when the label is missing, Phase 5 asks to create
    it (`gh label create type:refactor`, its own Bash call, before the Issue) — and only an
    explicit yes to *that question* creates it. Declined or unanswered → create the Issue
-   without it and say the slot will run as a feature.
+   without it and say the slot will run as a feature — **except a 2b**: without the label it
+   would run test-first as a feature and lose both of its guarantees, so a declined label drops
+   it (`skip (not-ready)`, the seat refilled per Phase 3, Phase 4 re-run) and Phase 5 says so.
 
 1. **Create the tracking Issue** — title `Sprint: <goal>`, body from the template below, **no label yet** (temp file + `--body-file`).
 2. **Attach the label** — `gh issue edit <tracker> --add-label "guild:sprint"`. If the label is missing this dies here, with **every member body still intact**.
-3. **Add the back-reference** to each member body — a `Sprint: #<tracker>` line. Read → splice → full rewrite, **with the truncation check** (`_sprint_dag.md` Section A). One member per Bash call; a failure mid-way is resumable because step 4's idempotency check re-derives what exists.
+3. **Add the back-reference** to each member body — a `Sprint: #<tracker>` line. Read → splice → full rewrite, **with the truncation check** (`_sprint_dag.md` Section A). **For an existing or resumed slot that gained a Safety net** (approved in Phase 5), splice it into the same rewrite: the Safety net section (heading + `<!-- guild:safety-net -->` + lines + rules) and the same lines added to its Success-criteria (or a new Success-criteria section) — skipped when the body already holds `<!-- guild:safety-net -->`, which is what makes a re-run after a mid-create death append nothing twice. One member per Bash call; a failure mid-way is resumable because step 4's idempotency check re-derives what exists.
 4. **Compute and store `plan-hash`** — `sprint_dag.py --mode hash` over the finished body, then write it into the `plan-hash:` line. Do this **last**, after the body is final. ⚠ This rewrites the **tracking Issue's** body, which holds the member table — the canonical dependency source for the whole sprint. It carries the **same mandatory truncation check** as a member body (`_sprint_dag.md` Section A): if the read comes back as a preview, read the persisted full output, and if that is unavailable do **not** write. A truncated rewrite here destroys the sprint unrecoverably, which is worse than any member body. (`--mode hash` *removes* the `plan-hash:` line before hashing, so writing the value back does not change it.)
 
 5. **Project onto the board** — only when `config.sprint.board` is set. One Bash call:
