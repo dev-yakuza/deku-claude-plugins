@@ -2541,9 +2541,12 @@ lacksfx "refactor: update-ref 를 쓰지 않는다 (사용자 설정에서 거�
 hasfx "refactor: --no-verify 금지 명시" "$RFMD" 'Never use `--no-verify`'
 hasfx "refactor: 잔여물 검사는 브랜치가 정해진 뒤 (BRANCH + RESUME PROBE)" "$RFMD" 'run the EVIDENCE RULE'"'"'s **proof residue check** here — after the branch is bound'
 hasfx "refactor: detached 판정은 symbolic-ref 로" "$RFMD" '`git symbolic-ref -q HEAD` (prints `refs/heads/<name>` on a branch'
-hasfx "refactor: detached + 스테이징일 때만 잔여물" "$RFMD" '**Detached with staged changes** — step 6 was interrupted'
+hasfx "refactor: detached + 스테이징은 HEAD 가 base 의 조상일 때만 crash 로" "$RFMD" 'git merge-base --is-ancestor HEAD <base>'
+hasfx "refactor: 복사본은 내용이 branch 에 있을 때만 (이름만으로는 안 됨)" "$RFMD" 'it never makes a path a proof copy by itself'
+hasfx "refactor: 다른 브랜치의 스테이징은 이 Issue 일이 아님" "$RFMD" '**On another branch**'
+hasfx "refactor: switch 실패는 버리지 않고 사람에게" "$RFMD" 'never by discarding them'
 hasfx "refactor: 브랜치 위 스테이징은 tip 이 mb 여도 작업" "$RFMD" 'even when the branch tip still equals `<mb>`'
-hasfx "refactor: developer 복귀 후 detached 면 브랜치로 되돌린다" "$RFMD" 'step 6 stopped before switching back: `git switch <branch>`'
+hasfx "refactor: developer 복귀 후 detached 면 브랜치로 되돌린다" "$RFMD" 'Right after the developer returns with nothing staged: `git switch <branch>`'
 hasfx "refactor: 스냅샷 이동 전 대상 디렉터리 생성" "$RFMD" 'create a missing destination directory first with `mkdir -p`'
 hasfx "refactor: 증거 블록에 leftover 줄" "$RFMD" 'leftover: <untracked paths a proof run left behind'
 hasfx "spine: 변형의 전환 전 검사 훅이 슬롯 표에" "$SPINE" 'any check the variant runs after (a) binds an existing branch and **before** (c) switches to it'
@@ -2593,7 +2596,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=681   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=684   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
