@@ -227,7 +227,7 @@ the spawn — Phase 2's lead paragraph), so a stale clone or a checkout on a fea
 cannot hide recent commits. **DEFAULT BRANCH `unavailable`** (the fetch failed) → read `HEAD`
 instead, and say in (c) that the evidence may be stale. **PAST SLOTS `unverifiable — …`** →
 run no PAST SLOTS git check; treat the `paths` of every listed `merged` or `refused` entry as
-excluded from this sprint's slot — except a merged `"kind": "safety-net-only"` entry (below).
+excluded from this sprint's slot — except `"kind": "safety-net-only"` entries (below): a merged one excludes nothing, a refused one excludes only another safety-net-only slot on its paths.
 
 The tech-lead fills (c) in this order and stops at the first that yields a **ready**
 candidate — all three readiness dimensions `clear` **and** size ✅ (the bar below). A

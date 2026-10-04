@@ -2471,7 +2471,7 @@ hasfx "plan: 안전망만 마커" "$PLANMD" '<!-- guild:safety-net-only -->'
 hasfx "plan: 사람에게 안전망 줄을 보여 준다" "$PLANMD" '🧹 리팩토링 슬롯 (안전망만)'
 hasfx "refactor: SAFETY_NET 판정" "$RFMD" 'Hold `SAFETY_NET` = `only` when the second is present'
 hasfx "refactor: 프로덕션 파일보다 먼저 안전망" "$RFMD" 'Otherwise do this **first, before touching any production file**'
-hasfx "refactor: 안전망 커밋에서 green 실행 증거" "$RFMD" 'RESULT extras for this paragraph: `safety-net: <commit sha>`'
+hasfx "refactor: 안전망 커밋에서 green 실행 증거" "$RFMD" 'RESULT extras for this paragraph: `safety-net: <commit sha (net laid first) or tree sha (step 6)>`'
 hasfx "refactor: 안전망 커밋에 프로덕션 변경 없음을 git 으로" "$RFMD" 'git diff --name-only <mb> <sha>'
 hasfx "refactor: 구현 고정 테스트는 BLOCKED" "$RFMD" 'a test that pins implementation, or one that cannot fail, is a `BLOCKED`'
 hasfx "refactor: only 는 구조 개선 대신 커버리지 검사" "$RFMD" 'For `only`, check (2) and this coverage check **instead of** (1)'
@@ -2522,7 +2522,7 @@ hasfx "test: deferred 케이스를 tester 에게 넘긴다" "$TESTMD" '**Safety-
 # SN 3회차 적대적 리뷰
 hasfx "refactor: verified: no 면 증명만 다시" "$RFMD" '**If it says `verified: no`**'
 hasfx "refactor: 증거 블록은 Step 2 의 한 번의 PATCH 안에서" "$RFMD" 'writes **inside Step 2'"'"'s one PATCH of that comment**'
-hasfx "refactor: run 은 모든 net 파일 실행을 보여야" "$RFMD" 'does not show every net file **committed at `sha`** (by its path in that commit'
+hasfx "refactor: run 은 모든 net 파일 실행을 보여야" "$RFMD" 'does not show every net file **in `sha`** (by its path there'
 hasfx "refactor: 동작 케이스는 commands.test 러너 파일에" "$RFMD" '**Behavior cases go in files the `commands.test` runner picks up**'
 hasfx "refactor: 안전망 이미지는 safety-net- 접두사" "$RFMD" 'with a `safety-net-`'
 hasfx "refactor: 다시 증명하되 reset 하지 않는다" "$RFMD" '**Re-prove, never reset**'
@@ -2539,7 +2539,14 @@ hasfx "plan: PAST SLOTS 항목에 kind" "$PLANMD" '{issue, outcome, kind, paths,
 hasfx "refactor: 증명은 커밋 없이 write-tree (훅·ref·브랜치 없음)" "$RFMD" 'that **tree** sha is the proof'
 lacksfx "refactor: update-ref 를 쓰지 않는다 (사용자 설정에서 거부)" "$RFMD" 'git update-ref'
 hasfx "refactor: --no-verify 금지 명시" "$RFMD" 'Never use `--no-verify`'
-hasfx "refactor: 검사 전 브랜치 복귀 확인" "$RFMD" '**First, confirm the checkout is back on `<branch>`**'
+hasfx "refactor: 증명 잔여물 검사를 두 번 (DESIGN INPUT, developer 복귀 직후)" "$RFMD" '**Proof residue check — twice'
+hasfx "refactor: DESIGN INPUT 에서 잔여물 검사" "$RFMD" 'run the EVIDENCE RULE'"'"'s **proof residue check** now'
+hasfx "refactor: 정리는 mb 대비 새 파일만 rm" "$RFMD" 'git diff --cached --name-only --diff-filter=A <mb>'
+hasfx "refactor: 추적 파일 미커밋 변경 없음을 확인" "$RFMD" '`git diff --quiet` and `git diff --cached --quiet`'
+hasfx "refactor: 증명 트리가 사라지면 재증명" "$RFMD" '**A proof tree that is gone**'
+hasfx "refactor: 증명에 없는 net 스냅샷은 not-done" "$RFMD" 'a **snapshot file of a net test** appears as `A`'
+hasfx "refactor: only 검사도 branch 기준" "$RFMD" 'git diff --name-only <mb>...<branch>'
+hasfx "run: 해시 불일치 + 미적용 slot-net 이면 plan 재실행 안내" "$GLD/commands/sprint/run.md" 'tell the human to re-run `/gld sprint plan` first'
 hasfx "refactor: 스냅샷 파일도 net" "$RFMD" 'a `.snap` written after the transform would pin the transformed output'
 hasfx "plan: 거절된 2b 는 2b 만 막는다" "$PLANMD" 'the human rejected that coverage, not a refactor of them'
 lacksfx "refactor: -net-proof 브랜치를 만들지 않는다 (브랜치 탐색과 충돌)" "$RFMD" 'git switch -c <branch>-net-proof'
@@ -2574,7 +2581,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=662   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=669   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

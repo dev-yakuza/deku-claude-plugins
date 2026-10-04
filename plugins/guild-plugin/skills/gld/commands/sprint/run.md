@@ -179,6 +179,11 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    refreshes at least every 10 minutes, **including inside the wait**.
 4. **Verify the plan is unchanged.** `sprint_dag.py --mode hash` over the current body vs the
    `plan-hash:` line. Mismatch → attended: show what differs and ask; unattended: stop.
+   ⚠ A mismatch can mean `plan --create` died mid-Phase 6. If the tracker carries a
+   `<!-- guild:sprint:slot-net -->` comment whose slot Issue's body still lacks
+   `<!-- guild:safety-net -->`, say so and tell the human to re-run `/gld sprint plan` first — it
+   applies the approved Safety net (`plan.md` Phase 0 step 4); running now would develop the
+   slot without the net the human approved.
    ⚠ Do **not** label the tracker `guild:needs-human`: that label has exactly one removal point
    — any successful forward stage transition (`_handoff.md` Section A) — and the tracker has no
    stages, so it would stick forever and mis-report to `monitoring`/`status`. Record
