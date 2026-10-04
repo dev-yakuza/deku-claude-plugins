@@ -175,7 +175,7 @@ Phase 3, still has it:
 | line absent (a tracker planned before the slot existed) | — | **no outcome** — omit the field; do not invent `skip` |
 
 ⚠ **`refused` is the signal, `skip` is not.** A human closing the slot's PR says the slot picked
-the wrong refactor; a `skip` says only that nothing qualified or the human chose features this
+the wrong refactor (or, for a safety-net-only slot, the wrong coverage); a `skip` says only that nothing qualified or the human chose features this
 time. Phase 3 names a `refused` slot by number; a run of `skip:no-candidate` is not a defect.
 
 **The event log** — one call, and it spans **every run of this sprint**, not just the last:
@@ -334,7 +334,8 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
   "max_stack_depth": 3,
   "history": [
     { "sprint": 99, "planned": 7, "merged": 5, "carryover": 2, "needs_human": 2,
-      "refactor": { "issue": 140, "outcome": "merged", "paths": ["src/payment/state.ts"],
+      "refactor": { "issue": 140, "outcome": "merged", "kind": "refactor",
+                    "paths": ["src/payment/state.ts"],
                     "merged_at": "2026-09-30T04:12:00Z", "closed_at": null } }
   ]
 }
@@ -356,6 +357,10 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
    missing one). Keep them byte-intact and do not normalize them — `plan` reads the trend
    defensively. Only the entry for *this* sprint is written by this command.
 4b. **`refactor`** — the slot outcome above, plus:
+   - `kind` — `"safety-net-only"` when the slot Issue's body (read in Phase 2) carries
+     `<!-- guild:safety-net-only -->`, else `"refactor"` (a refactor that laid a net first is
+     still a refactor). The next `plan` exempts a merged `safety-net-only` entry from the
+     same-paths exclusion — it covered those paths so a refactor could follow. `skip:*` → omit.
    - `paths` — from the slot Issue's **Files** section, which every drafted slot has (read in
      Phase 2 — see the slot outcome above); ⚠ not the
      **Why** line, which names the evidence hotspot, not what the refactor reshapes). An

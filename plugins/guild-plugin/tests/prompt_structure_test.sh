@@ -2469,16 +2469,38 @@ hasfx "plan: 안전망 규칙 — 의심 버그는 고정하지 않음" "$PLANMD
 hasfx "plan: 크기 초과면 안전망을 남기고 리팩토링을 미룸" "$PLANMD" 'keep the net and drop the refactor to a later'
 hasfx "plan: 안전망만 마커" "$PLANMD" '<!-- guild:safety-net-only -->'
 hasfx "plan: 사람에게 안전망 줄을 보여 준다" "$PLANMD" '🧹 리팩토링 슬롯 (안전망만)'
-hasfx "refactor: SAFETY_NET 판정" "$RFMD" 'Hold `SAFETY_NET = <none|with-refactor|only>`'
+hasfx "refactor: SAFETY_NET 판정" "$RFMD" 'Hold `SAFETY_NET` = `only` when the second is present'
 hasfx "refactor: 프로덕션 파일보다 먼저 안전망" "$RFMD" 'Do this **first, before touching any production file**'
 hasfx "refactor: 안전망 커밋에서 green 실행 증거" "$RFMD" 'RESULT extras for this paragraph: `safety-net: <commit sha>`'
 hasfx "refactor: 안전망 커밋에 프로덕션 변경 없음을 git 으로" "$RFMD" 'git diff --name-only <mb> <safety-net-sha>'
-hasfx "refactor: 안전망은 이후 손대지 않음을 git 으로" "$RFMD" 'git diff --name-status <safety-net-sha> HEAD --'
-hasfx "refactor: 구현 고정 테스트는 BLOCKED" "$RFMD" 'a test that pins implementation is a `BLOCKED`'
+hasfx "refactor: 구현 고정 테스트는 BLOCKED" "$RFMD" 'a test that pins implementation, or one that cannot fail, is a `BLOCKED`'
 hasfx "refactor: only 는 구조 개선 대신 커버리지 검사" "$RFMD" 'For `only`, check (2) and this coverage check **instead of** (1)'
-for R in README.md README.ko.md README.ja.md; do
-  hasfx "$R: 리팩토링 슬롯 안전망" "$GLD/../../$R" 'evolve'
-done
+hasfx "README.md: 리팩토링 슬롯 안전망" "$GLD/../../README.md" 'safety-net-only slot'
+hasfx "README.ko.md: 리팩토링 슬롯 안전망" "$GLD/../../README.ko.md" '안전망만 까는 자리'
+hasfx "README.ja.md: 리팩토링 슬롯 안전망" "$GLD/../../README.ja.md" '安全網だけを敷く枠'
+# SN 1회차 적대적 리뷰
+hasfx "plan: 공백 검사는 동작 단위 (파일 단위 아님)" "$PLANMD" '**per behavior, not per file**'
+hasfx "plan: 테스트 없이 고친 fix 커밋이 공백 근거" "$PLANMD" '**Fix commits that changed no test**'
+hasfx "plan: 기존 refactor Issue 에도 공백 검사" "$PLANMD" '**Run the gap check on it too**'
+hasfx "plan: 안전망 ASCII 마커" "$PLANMD" '`<!-- guild:safety-net -->` (never'
+hasfx "plan: 안전망 줄은 Success-criterion 이기도" "$PLANMD" '**Each line is also a'
+hasfx "plan: 2b 의 Files 는 프로덕션 파일" "$PLANMD" '**production** hotspot file(s) the net covers'
+hasfx "plan: 라벨 없으면 2b 제시 안 함" "$PLANMD" 'a 2b is not offered (`skip (not-ready)`)'
+hasfx "plan: 크기 탈락 초안은 2b 로 전환" "$PLANMD" 'the leader converts it to a 2b instead of skipping'
+hasfx "plan: 2b 머지 이력은 같은 경로 제외에서 면제" "$PLANMD" 'is exempt from this exclusion'
+hasfx "plan: 기존 Issue 에 안전망을 덧붙인다" "$PLANMD" '**An existing or resumed slot that gained a Safety net**'
+hasfx "plan: tech-lead 스폰에 VISUAL 전달" "$PLANMD" 'VISUAL: <available or not per `_handoff.md` Section L.1'
+hasfx "retro: 슬롯 kind 기록" "$GLD/commands/sprint/retro.md" '`kind` — `"safety-net-only"` when'
+hasfx "analyze: 안전망 줄은 각각 AC (safety net)" "$GLD/commands/analyze.md" 'every line of that section becomes its own AC, tagged `(safety net)`'
+hasfx "design: 안전망 시각 케이스면 VISUAL=yes" "$DESIGN" '**Safety net override**'
+hasfx "design: 안전망만 슬롯의 skeleton" "$DESIGN" '구조 변경 없음 — 커버리지만'
+hasfx "design: tester 의 안전망 케이스는 red-first 아님" "$DESIGN" 'its case passes on today'"'"'s code (it is not red-first)'
+hasfx "refactor: 안전망은 test-cases 의 (safety net) 케이스" "$RFMD" 'The cases tagged `(safety net)` in `docs/specs/$1/test-cases.md`'
+hasfx "refactor: 이동·import 만 수정은 허용" "$RFMD" 'git diff --name-status --find-renames=100% <safety-net-sha> HEAD'
+hasfx "refactor: post-transform-net 은 증명 안 됨으로 표시" "$RFMD" '`post-transform-net: <paths or none>`'
+hasfx "refactor: 시임 없으면 테스트 불가 → 보고" "$RFMD" 'untestable without a seam: <behavior> — needs <seam>'
+hasfx "refactor: 실패할 수 없는 테스트는 BLOCKED" "$RFMD" 'would each **fail if their behavior broke**'
+hasfx "test: 안전망 케이스에 vacuous 가드, deferred 는 미실행으로" "$TESTMD" '**Safety-net cases**'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -2487,7 +2509,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=580   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=601   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

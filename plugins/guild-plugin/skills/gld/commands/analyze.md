@@ -60,7 +60,7 @@ Do **not** capture when the human accepts your recommendation (agreement ≠ cor
 
 ## Step 2 — Requirement analysis
 - Enumerate the requested features/changes (What + Why, not How).
-- Derive **acceptance criteria (AC)** — verifiable, checkable statements. These are the contract the tester will design against (design stage) without seeing the implementation.
+- Derive **acceptance criteria (AC)** — verifiable, checkable statements. These are the contract the tester will design against (design stage) without seeing the implementation. **When the Issue body carries `<!-- guild:safety-net -->`** (a sprint refactor slot's Safety net — `sprint/plan.md`): every line of that section becomes its own AC, tagged `(safety net)` and kept verbatim in meaning — never merged, generalized or dropped — and its visual-case lines stay visual (screen · state · theme · size). These are what the design tester turns into cases and what the test stage checks for coverage; an AC set that loses one leaves that behavior unpinned with nobody noticing.
 - Assign priorities where multiple items exist.
 
 ## Step 2.5 — Conditional participation (leader assembles)
