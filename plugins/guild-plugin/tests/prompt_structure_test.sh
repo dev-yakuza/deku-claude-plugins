@@ -2339,7 +2339,7 @@ hasfx "test: VISUAL_CASES / VISUAL_RUN 판정" "$TESTMD" '`VISUAL_CASES = yes` w
 hasfx "test: commands.vrt 를 실행" "$TESTMD" 'run `commands.vrt` after the test command'
 hasfx "test: 갱신 명령·비교 설정 금지" "$TESTMD" 'Never run a create/update/approve command'
 hasfx "test: 커버 안 된 시각 케이스는 미커버 AC" "$TESTMD" 'is **uncovered**, exactly like an AC with no test'
-hasfx "test: 검증 범위에 원장 블록을 그대로" "$TESTMD" '(c) **the `<!-- guild:visual-baselines -->` block — and the `<!-- guild:safety-net-evidence -->` block when there is one — copied verbatim**'
+hasfx "test: 검증 범위에 원장 블록을 그대로" "$TESTMD" '(c) **the `<!-- guild:visual-baselines -->` block copied verbatim**'
 lacksfx "test: 시각 QA 를 통째로 '안 돌린 것' 으로 두지 않는다" "$TESTMD" 'and manual/visual QA** (deferred / the human in M1)'
 QAMD="$GLD/commands/qa.md"
 hasfx "qa: 시각 주장도 자동화 먼저" "$QAMD" '**Visual claims** (a state renders'
@@ -2539,8 +2539,14 @@ hasfx "plan: PAST SLOTS 항목에 kind" "$PLANMD" '{issue, outcome, kind, paths,
 hasfx "refactor: 증명은 커밋 없이 write-tree (훅·ref·브랜치 없음)" "$RFMD" 'that **tree** sha is the proof'
 lacksfx "refactor: update-ref 를 쓰지 않는다 (사용자 설정에서 거부)" "$RFMD" 'git update-ref'
 hasfx "refactor: --no-verify 금지 명시" "$RFMD" 'Never use `--no-verify`'
-hasfx "refactor: 증명 잔여물 검사를 두 번 (DESIGN INPUT, developer 복귀 직후)" "$RFMD" '**Proof residue check — twice'
-hasfx "refactor: DESIGN INPUT 에서 잔여물 검사" "$RFMD" 'run the EVIDENCE RULE'"'"'s **proof residue check** now'
+hasfx "refactor: 잔여물 검사는 브랜치가 정해진 뒤 (BRANCH + RESUME PROBE)" "$RFMD" 'run the EVIDENCE RULE'"'"'s **proof residue check** here — after the branch is bound'
+hasfx "refactor: mb 에서 detached 일 때만 잔여물" "$RFMD" '**HEAD detached at `<mb>` with staged changes**'
+hasfx "refactor: 브랜치 위 스테이징은 작업이지 잔여물 아님" "$RFMD" 'that is work, never residue'
+hasfx "refactor: 증명 실행은 no-write 모드" "$RFMD" 'with the runner'"'"'s **no-write** mode'
+hasfx "refactor: 스냅샷도 함께 git mv" "$RFMD" '`git mv` each net file **and its snapshot/screenshot files**'
+hasfx "refactor: switch 전 index 가 mb 인지 확인" "$RFMD" 'confirm `git diff --cached --quiet` (the index is `<mb>` again) before'
+lacksfx "refactor: 추적 안 되는 파일을 rm 하지 않는다" "$RFMD" 'and delete (`rm`) any untracked file'
+hasfx "test: 안전망 증거 블록은 시각 설정과 무관하게 복사" "$TESTMD" 'block whenever the execute evidence has one** (independent of any visual config)'
 hasfx "refactor: 정리는 mb 대비 새 파일만 rm" "$RFMD" 'git diff --cached --name-only --diff-filter=A <mb>'
 hasfx "refactor: 추적 파일 미커밋 변경 없음을 확인" "$RFMD" '`git diff --quiet` and `git diff --cached --quiet`'
 hasfx "refactor: 증명 트리가 사라지면 재증명" "$RFMD" '**A proof tree that is gone**'
@@ -2550,7 +2556,7 @@ hasfx "run: 해시 불일치 + 미적용 slot-net 이면 plan 재실행 안내" 
 hasfx "refactor: 스냅샷 파일도 net" "$RFMD" 'a `.snap` written after the transform would pin the transformed output'
 hasfx "plan: 거절된 2b 는 2b 만 막는다" "$PLANMD" 'the human rejected that coverage, not a refactor of them'
 lacksfx "refactor: -net-proof 브랜치를 만들지 않는다 (브랜치 탐색과 충돌)" "$RFMD" 'git switch -c <branch>-net-proof'
-hasfx "refactor: 이동 후 안전망은 mb 시점 경로로 옮겨 증명" "$RFMD" 'to the directory where that code lives **at `<mb>`**'
+hasfx "refactor: 이동 후 안전망은 mb 시점 경로로 옮겨 증명" "$RFMD" 's tests live **at `<mb>`**'
 hasfx "refactor: developer 프롬프트에 mb·branch 대입" "$RFMD" 'merge base `<mb>`, branch `<branch>`**'
 hasfx "refactor: 재증명 시 post-transform-net 비움" "$RFMD" 'and `post-transform-net:` is cleared'
 hasfx "refactor: verified 는 감사자 net 지적도 확인" "$RFMD" 'neither the tech-lead nor the 3.5a auditor named a net finding'
@@ -2581,7 +2587,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=669   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=675   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
