@@ -423,7 +423,8 @@ with `fix`).
   catch it" instead.
 - **`refused`** (`<date>` = `closed_at`) → the human closed that slot's PR. Do not propose the
   same `paths` again unless there are hits, or a candidate this sprint needs the change; name
-  that evidence in (c).
+  that evidence in (c). A refused `"kind": "safety-net-only"` entry blocks only another
+  safety-net-only slot on those paths — the human rejected that coverage, not a refactor of them.
 - An entry whose `paths` key or date key is **absent** (a slot recorded before these fields
   existed) gives no basis either way — ignore it rather than guessing. A `null` date is not
   absence: `merged_at` is `null` on every `refused` entry by design.

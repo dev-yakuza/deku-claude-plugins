@@ -2496,7 +2496,7 @@ hasfx "design: 안전망 시각 케이스면 VISUAL=yes" "$DESIGN" '**Safety net
 hasfx "design: 안전망만 슬롯의 skeleton" "$DESIGN" '구조 변경 없음 — 커버리지만'
 hasfx "design: tester 의 안전망 케이스는 red-first 아님" "$DESIGN" 'passes on today'"'"'s code (it is not red-first)'
 hasfx "refactor: 안전망은 test-cases 의 (safety net) 케이스" "$RFMD" 'The cases tagged `(safety net)` in `docs/specs/$1/test-cases.md`'
-hasfx "refactor: 이동·import 만 수정은 허용" "$RFMD" 'git diff --name-status -M <sha> HEAD'
+hasfx "refactor: 이동·import 만 수정은 허용" "$RFMD" 'git diff --name-status -M <sha> <branch>'
 hasfx "refactor: post-transform-net 은 증명 안 됨으로 표시" "$RFMD" '`post-transform-net: <path @ blob sha, one per file — or none>`'
 hasfx "refactor: 시임 없으면 테스트 불가 → 보고" "$RFMD" 'untestable without a seam: <behavior> — needs <seam>'
 hasfx "refactor: 실패할 수 없는 테스트는 BLOCKED" "$RFMD" 'would each **fail if their behavior broke**'
@@ -2536,7 +2536,12 @@ hasfx "plan: analyze 이후라 안전망 없음을 사람에게" "$PLANMD" '안�
 hasfx "plan: step 3 은 슬롯 멤버 먼저" "$PLANMD" '**Do the slot member first.**'
 hasfx "plan: PAST SLOTS 항목에 kind" "$PLANMD" '{issue, outcome, kind, paths, merged_at,'
 # SN 4회차 적대적 리뷰
-hasfx "refactor: 증명은 detached HEAD + refs/guild/net-proof (브랜치 없음)" "$RFMD" 'git update-ref refs/guild/net-proof/<N> HEAD'
+hasfx "refactor: 증명은 커밋 없이 write-tree (훅·ref·브랜치 없음)" "$RFMD" 'that **tree** sha is the proof'
+lacksfx "refactor: update-ref 를 쓰지 않는다 (사용자 설정에서 거부)" "$RFMD" 'git update-ref'
+hasfx "refactor: --no-verify 금지 명시" "$RFMD" 'Never use `--no-verify`'
+hasfx "refactor: 검사 전 브랜치 복귀 확인" "$RFMD" '**First, confirm the checkout is back on `<branch>`**'
+hasfx "refactor: 스냅샷 파일도 net" "$RFMD" 'a `.snap` written after the transform would pin the transformed output'
+hasfx "plan: 거절된 2b 는 2b 만 막는다" "$PLANMD" 'the human rejected that coverage, not a refactor of them'
 lacksfx "refactor: -net-proof 브랜치를 만들지 않는다 (브랜치 탐색과 충돌)" "$RFMD" 'git switch -c <branch>-net-proof'
 hasfx "refactor: 이동 후 안전망은 mb 시점 경로로 옮겨 증명" "$RFMD" 'to the directory where that code lives **at `<mb>`**'
 hasfx "refactor: developer 프롬프트에 mb·branch 대입" "$RFMD" 'merge base `<mb>`, branch `<branch>`**'
@@ -2569,7 +2574,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=657   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=662   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
