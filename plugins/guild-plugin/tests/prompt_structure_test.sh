@@ -2480,12 +2480,12 @@ hasfx "README.ko.md: 리팩토링 슬롯 안전망" "$GLD/../../README.ko.md" '�
 hasfx "README.ja.md: 리팩토링 슬롯 안전망" "$GLD/../../README.ja.md" '安全網だけを敷く枠'
 # SN 1회차 적대적 리뷰
 hasfx "plan: 공백 검사는 동작 단위 (파일 단위 아님)" "$PLANMD" '**per behavior, not per file**'
-hasfx "plan: 테스트 없이 고친 fix 커밋이 공백 근거" "$PLANMD" '**Fix commits that changed no test**'
+hasfx "plan: 테스트 없이 고친 fix 커밋이 공백 근거" "$PLANMD" '**Fix commits that changed no runnable test**'
 hasfx "plan: 기존 refactor Issue 에도 공백 검사" "$PLANMD" '**Run the gap check on it too**'
 hasfx "plan: 안전망 ASCII 마커" "$PLANMD" '`<!-- guild:safety-net -->` (never'
 hasfx "plan: 안전망 줄은 Success-criterion 이기도" "$PLANMD" '**Each line is also a'
 hasfx "plan: 2b 의 Files 는 프로덕션 파일" "$PLANMD" '**production** hotspot file(s) the net covers'
-hasfx "plan: 라벨 없으면 2b 제시 안 함" "$PLANMD" 'a 2b is not offered (`skip (not-ready)`)'
+hasfx "plan: 라벨 없으면 2b 는 빠진다 (human-declined)" "$PLANMD" 'the 2b is dropped (`skip (human-declined)`)'
 hasfx "plan: 크기 탈락 초안은 2b 로 전환" "$PLANMD" 'the leader converts it to a 2b instead of skipping'
 hasfx "plan: 2b 머지 이력은 같은 경로 제외에서 면제" "$PLANMD" 'is exempt from this exclusion'
 hasfx "plan: 기존 Issue 에 안전망을 덧붙인다" "$PLANMD" '**For an existing or resumed slot that gained a Safety net**'
@@ -2504,7 +2504,7 @@ hasfx "test: 안전망 케이스에 vacuous 가드, deferred 는 미실행으로
 # SN 2회차 적대적 리뷰
 hasfx "refactor: 이름 변경 검사는 pathspec 없이 (git 은 주어진 경로끼리만 짝짓는다)" "$RFMD" '(no pathspec on the last call'
 hasfx "refactor: 안전망 증거 ASCII 블록" "$RFMD" '<!-- guild:safety-net-evidence -->'
-hasfx "refactor: 재진입 시 안전망을 다시 깔지 않는다" "$RFMD" '**If an earlier net block is given, the net already exists**'
+hasfx "refactor: 재진입 시 안전망을 다시 깔지 않는다" "$RFMD" '**If an earlier block says `verified: yes`, the net already exists**'
 hasfx "refactor: 안전망은 자기 새 파일에" "$RFMD" 'Write the net in **new test files of its own**'
 hasfx "refactor: 시각 안전망 이미지는 안전망 커밋 안에" "$RFMD" 'an image made after the transform pins the transformed code'
 hasfx "refactor: post-transform-net 은 추가만" "$RFMD" '**added in new files only**'
@@ -2520,12 +2520,12 @@ hasfx "plan: 시각 불가 2b 는 (로직만)" "$PLANMD" '`(로직만)` — the 
 hasfx "design: 시각 행도 (safety net) 태그 유지" "$DESIGN" 'behavior row **and** visual row alike'
 hasfx "test: deferred 케이스를 tester 에게 넘긴다" "$TESTMD" '**Safety-net deferred cases —'
 # SN 3회차 적대적 리뷰
-hasfx "refactor: 증거 블록은 verified 후에만 이어받음" "$RFMD" 'only when it says verified: yes'
+hasfx "refactor: verified: no 면 증명만 다시" "$RFMD" '**If it says `verified: no`**'
 hasfx "refactor: 증거 블록은 Step 2 의 한 번의 PATCH 안에서" "$RFMD" 'writes **inside Step 2'"'"'s one PATCH of that comment**'
 hasfx "refactor: run 은 모든 net 파일 실행을 보여야" "$RFMD" 'does not show every net file **committed at `sha`** executed and green'
 hasfx "refactor: 동작 케이스는 commands.test 러너 파일에" "$RFMD" '**Behavior cases go in files the `commands.test` runner picks up**'
 hasfx "refactor: 안전망 이미지는 safety-net- 접두사" "$RFMD" 'with a `safety-net-`'
-hasfx "refactor: 다시 깔기는 이력을 늘리기만 (restore 커밋 + revert)" "$RFMD" '**Re-lay, never reset**'
+hasfx "refactor: 다시 증명하되 reset 하지 않는다" "$RFMD" '**Re-prove, never reset**'
 lacksfx "refactor: reset --hard 를 지시하지 않는다 (INV3)" "$RFMD" '(`git reset --hard <mb>`'
 hasfx "refactor: tech-lead 에 deferred 줄 대입" "$RFMD" '`<the deferred: lines of the safety-net evidence block, or none>`'
 hasfx "design: 2b 안전망은 항상 새 파일" "$DESIGN" 'always a **new** file beside the existing tests'
@@ -2536,19 +2536,26 @@ hasfx "plan: analyze 이후라 안전망 없음을 사람에게" "$PLANMD" '안�
 hasfx "plan: step 3 은 슬롯 멤버 먼저" "$PLANMD" '**Do the slot member first.**'
 hasfx "plan: PAST SLOTS 항목에 kind" "$PLANMD" '{issue, outcome, kind, paths, merged_at,'
 # SN 4회차 적대적 리뷰
-hasfx "refactor: 되돌리기 커밋은 git restore --source=<mb>" "$RFMD" 'git restore --source=<mb> --staged --worktree --'
-hasfx "refactor: 변환은 revert 로 되살린다" "$RFMD" 'git revert --no-edit <that commit>'
-hasfx "refactor: verified 는 tech-lead 확인 후" "$RFMD" '**and** the tech-lead'"'"'s Step 3 net checks pass'
+hasfx "refactor: 증명은 mb 에서 자른 로컬 proof 브랜치" "$RFMD" 'git switch -c <branch>-net-proof <mb>'
+lacksfx "refactor: revert 로 되살리지 않는다 (안전망 수정까지 되돌림)" "$RFMD" 'git revert --no-edit'
+hasfx "refactor: verified 는 tech-lead 확인 후" "$RFMD" '**At Step 4, once the tech-lead'"'"'s verdict is in, PATCH the block once more**'
 hasfx "refactor: 모듈 경로만 바뀐 줄 허용 (jest.mock 포함)" "$RFMD" 'only in a quoted module path'
-hasfx "refactor: post-transform-net 은 blob 으로 동결" "$RFMD" 'differs from the one recorded when it was added'
-hasfx "refactor: PR 있고 미검증이면 사람에게" "$RFMD" 'safety net unverified on an open PR'
+hasfx "refactor: post-transform-net 은 blob 으로 동결" "$RFMD" 'differs from the blob recorded when it was added'
+hasfx "refactor: PR 있고 미검증이면 사람에게" "$RFMD" 'safety net has no evidence on an open PR'
 hasfx "refactor: tech-lead 에 실행 가능한 러너 목록" "$RFMD" 'a tool Guild cannot run here does not count against the deferral'
 hasfx "refactor: 분리 불가 deferred 는 무인 처리 포함" "$RFMD" 'OK PAUSE: needs-human — deferred net behavior'
 hasfx "plan: Guild 가 돌릴 수 있는 단언만 커버리지" "$PLANMD" '**Only an assertion Guild can run counts as coverage**'
 hasfx "plan: 2b 라벨 거절은 Phase 5 에서 human-declined" "$PLANMD" '(`skip (human-declined)`, the seat refilled per Phase 3'
 hasfx "plan: 승인된 안전망을 트래커 코멘트에 보관" "$PLANMD" '<!-- guild:sprint:slot-net -->'
-hasfx "plan: Phase 0 에서 끊긴 안전망 덧붙이기를 마친다" "$PLANMD" '**First, finish an interrupted net splice**'
+hasfx "plan: Phase 0 에서 끊긴 안전망 덧붙이기를 마친다" "$PLANMD" '**An interrupted net splice** is finished only **after** the supervisor check'
 hasfx "design: safety-net 마커에도 슬롯 지침" "$DESIGN" 'carries `<!-- guild:refactor-slot -->` or `<!-- guild:safety-net -->`'
+# SN 5회차 적대적 리뷰
+hasfx "plan: 러너가 다룰 수 없는 동작은 공백 아닌 finding" "$PLANMD" '**but only if it can be'
+hasfx "plan: 안전망은 최대 5줄" "$PLANMD" '**at most 5 net lines in all**'
+hasfx "plan: slot-net 코멘트에 slot 번호와 두 부분" "$PLANMD" 'a `slot: #<n>` line, then both parts to splice'
+hasfx "plan: --create 2b 드롭 후 다시 제시" "$PLANMD" 'the sprint is presented again before anything is created — the'
+hasfx "refactor: 바이트 동일 이동은 reshaping 아님" "$RFMD" 'a byte-identical move (`R100`) does not reshape it'
+hasfx "refactor: 기존 VRT 미실행을 PR 에" "$RFMD" 'existing VRT not run here'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -2557,7 +2564,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=646   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=652   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

@@ -31,7 +31,7 @@ Each its own Bash call.
    gh issue list --label guild:sprint --state open --limit 20 --json number,title
    ```
    Non-empty → ask the human: close it with `/gld sprint retro` first, or add these issues to it? Two or more open → say so and ask which; concurrent sprints are not supported.
-   **First, finish an interrupted net splice**: if the open tracker has a `<!-- guild:sprint:slot-net -->` comment and its slot Issue's body lacks `<!-- guild:safety-net -->`, splice the comment's section into the slot body now (Phase 6 step 3's rules — read, splice, truncation check, full rewrite) and say so. Its body already holding the marker means it was applied; do nothing.
+   **An interrupted net splice** is finished only **after** the supervisor check below returns its verdict and the human chose to proceed with this sprint — never before, never under dry-run without asking: if the open tracker has a `<!-- guild:sprint:slot-net -->` comment whose `slot: #<n>` is still the tracker's slot member, and that Issue's body lacks `<!-- guild:safety-net -->`, and the Issue is still at `guild:analyze` or earlier, splice the comment's two parts (the Safety net section and its Success-criteria lines) into the body (Phase 6 step 3's rules — read, splice, truncation check, full rewrite) and say so. Past analyze → do not splice (its AC are fixed); tell the human the approved net was not applied. Body already holding the marker → it was applied; do nothing.
 
    ⚠ **Then check whether a supervisor is actually RUNNING** — read the open tracker's
    `<!-- guild:sprint:run -->` marker (`gh api repos/<owner>/<repo>/issues/<tracker>/comments
@@ -280,8 +280,9 @@ what was already read. It is
 **per behavior, not per file**: in a repo where every component has a colocated test, "is the
 file imported by a test" is always yes and finds nothing, while the bugs keep coming. Two
 sources name the behaviors, both from data you already have:
-- **Fix commits that changed no test** — for each hotspot file, the window's `fix:` commits that
-  touched it (step 2's `git log … --name-only` output already lists each commit's files; for a
+- **Fix commits that changed no runnable test** — for each hotspot file, the window's `fix:` commits that
+  touched it (a commit whose only test change is in a file no runnable runner runs still counts as
+  test-less; step 2's `git log … --name-only` output already lists each commit's files; for a
   step-0/1 candidate run that same call scoped to the Files' **directories**, not the files —
   scoped to the files alone, colocated tests never show and every fix looks test-less): a `fix:` commit whose file list has
   **no test path** fixed a behavior no test was made to hold. Read that commit's subject (and, if
@@ -304,7 +305,13 @@ sources name the behaviors, both from data you already have:
   runs, or `commands.vrt` when `visual.runnable` is true. In a repo whose component tests run
   only through a visual runner Guild cannot run (Docker-only browser tests while
   `commands.test` is Jest), those assertions referee nothing during the refactor stage: count
-  the behavior as a gap, and the net will pin it in a runnable file.
+  the behavior as a gap, and the net will pin it in a runnable file — **but only if it can be
+  pinned there**: a behavior the runnable runner cannot exercise (placement under jsdom, a
+  real layout measurement) is not a gap the net can fill — record it as a rule-4 finding
+  (untestable here) for the human, outside the net and outside the Success-criteria.
+- **Rank and cap**: keep the strongest gaps — fix-commit evidence first, then member-relied
+  behaviors — **at most 5 net lines in all**; the rest are listed in **Why** as known gaps for a
+  later slot. A net that alone would fail the size gate is too big: cut it, do not convert it.
 - **Visual** — only when VISUAL is `available` and the file renders UI inside `visual.packages`:
   a screen/state from either list above that no `visual.tests` file captures → a **visual gap**.
   `unavailable` → no visual gap is ever recorded (an image Guild cannot render here is not a
@@ -345,8 +352,8 @@ A draft for (2) also carries, all in `config.language` (tokens stay ASCII):
   visual gap (each tagged `(safety net)` too, so design keeps the tag on its visual rows), and
   any **test-support files** the net needs (a test helper or fixture, named by path — the only
   non-test files the net's commit may touch). The net goes into **new test files of its own**,
-  named so the runner still picks them up (`index.safety-net.vitest.tsx` beside
-  `index.vitest.tsx`, `foo_safety_net_test.dart`): the refactor stage freezes the net's files, and
+  named so the runner still picks them up (a file the `commands.test` runner picks up — `index.safety-net.test.tsx` beside
+  `index.test.tsx` under Jest, `foo_safety_net_test.dart`; a visual-runner file only for visual rows, and only when that runner is runnable here): the refactor stage freezes the net's files, and
   freezing an existing colocated test file would also freeze its older tests, which a refactor is
   allowed to adjust. **Each line is also a
   Success-criterion** (*"covered by a test that would fail if it broke"*) — that is what carries
@@ -376,7 +383,7 @@ A draft for (2) also carries, all in `config.language` (tokens stay ASCII):
   records them as the slot's `paths`. A 2b runs only through `refactor.md` (it reads the
   marker): without `type:refactor` it would run as a feature, test-first, and lose both "green
   on the unchanged code" and "no production change" — so when the label is missing and the
-  human declines creating it, a 2b is not offered (`skip (not-ready)`).
+  human declines creating it in Phase 5, the 2b is dropped (`skip (human-declined)`).
 - When a step-2 draft is rejected at arbitration **only for size**, and its Safety net alone
   passes the size gate, the leader converts it to a 2b instead of skipping — no re-spawn: the
   net is already in the draft. Converting means rewriting it as a 2b, not relabelling: **Files**
@@ -462,7 +469,8 @@ unattended the leader would have to guess alone:
   size ends in `skip (not-ready)` without a re-spawn (or, for size — or readiness confined to
   its refactor sections — with a net that fits, as a 2b, above). A **converted** 2b left
   preparing no member is a draft rejected only for not preparing one: it gets the re-spawn like
-  any such draft, and `skip (no-candidate)` only if that also comes back empty.
+  any such draft — unless the re-spawn is already spent, then `skip (no-candidate)` — and
+  `skip (no-candidate)` if that also comes back empty.
   From then on Phase 5's evidence lines and Phase 6 step 0's Issue body also come from
   `deps-slot.md`.
 - ⚠ **A rejected pick the product-owner ranked as a feature goes back to the feature picks**
@@ -657,11 +665,12 @@ Handle edits and re-present until the human approves. **Create nothing** without
    2b (`skip (human-declined)`, the seat refilled per Phase 3, Phase 4 re-run) and the sprint is
    presented again before anything is created — so what Phase 6 creates is what the human
    approved. Under `--create`, a 2b whose label is missing and was not explicitly approved is
-   dropped the same way before Phase 6 starts.
+   dropped the same way, and the sprint is presented again before anything is created — the
+   refill is a member the human has not seen.
 
 1. **Create the tracking Issue** — title `Sprint: <goal>`, body from the template below, **no label yet** (temp file + `--body-file`).
 2. **Attach the label** — `gh issue edit <tracker> --add-label "guild:sprint"`. If the label is missing this dies here, with **every member body still intact**.
-3. **Add the back-reference** to each member body — a `Sprint: #<tracker>` line. Read → splice → full rewrite, **with the truncation check** (`_sprint_dag.md` Section A). **Do the slot member first.** Before it, when the slot gains a net, post the approved net (the exact section to splice) as a tracker **comment** under `<!-- guild:sprint:slot-net -->` … `<!-- /guild:sprint:slot-net -->` — a comment, not the tracker body, which `plan-hash` seals. A death before the splice leaves that comment as the only record of the net the human approved; Phase 0 step 4 applies it on the next run. **For an existing or resumed slot that gained a Safety net** (approved in Phase 5), splice it into the same rewrite: the Safety net section (heading + `<!-- guild:safety-net -->` + lines + rules) and the same lines added to its Success-criteria (or a new Success-criteria section) — skipped when the body already holds `<!-- guild:safety-net -->`, which is what makes a re-run after a mid-create death append nothing twice. One member per Bash call; a failure mid-way is resumable because step 4's idempotency check re-derives what exists.
+3. **Add the back-reference** to each member body — a `Sprint: #<tracker>` line. Read → splice → full rewrite, **with the truncation check** (`_sprint_dag.md` Section A). **Do the slot member first.** Before it, when the slot gains a net, post the approved net as a tracker **comment** under `<!-- guild:sprint:slot-net -->` … `<!-- /guild:sprint:slot-net -->` — a `slot: #<n>` line, then both parts to splice (the Safety net section, and the lines to add to Success-criteria) — a comment, not the tracker body, which `plan-hash` seals. A death before the splice leaves that comment as the only record of the net the human approved; Phase 0 step 4 applies it on the next run. **For an existing or resumed slot that gained a Safety net** (approved in Phase 5), splice it into the same rewrite: the Safety net section (heading + `<!-- guild:safety-net -->` + lines + rules) and the same lines added to its Success-criteria (or a new Success-criteria section) — skipped when the body already holds `<!-- guild:safety-net -->`, which is what makes a re-run after a mid-create death append nothing twice. One member per Bash call; a failure mid-way is resumable because step 4's idempotency check re-derives what exists.
 4. **Compute and store `plan-hash`** — `sprint_dag.py --mode hash` over the finished body, then write it into the `plan-hash:` line. Do this **last**, after the body is final. ⚠ This rewrites the **tracking Issue's** body, which holds the member table — the canonical dependency source for the whole sprint. It carries the **same mandatory truncation check** as a member body (`_sprint_dag.md` Section A): if the read comes back as a preview, read the persisted full output, and if that is unavailable do **not** write. A truncated rewrite here destroys the sprint unrecoverably, which is worse than any member body. (`--mode hash` *removes* the `plan-hash:` line before hashing, so writing the value back does not change it.)
 
 5. **Project onto the board** — only when `config.sprint.board` is set. One Bash call:
