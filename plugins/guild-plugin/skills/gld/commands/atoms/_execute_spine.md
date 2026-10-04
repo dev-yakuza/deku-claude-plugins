@@ -16,7 +16,7 @@
 | Slot | What the variant states | Consumed at |
 |---|---|---|
 | **DESIGN INPUT** | which design artifact(s) Step 0 loads, and the exact `NEEDS_CONTEXT:` line when they're missing | Step 0 |
-| **BRANCH + RESUME PROBE** | the branch prefix (`feature/` · `fix/` · `refactor/`), and what the one resume test-run probes on an existing branch | Step 0 |
+| **BRANCH + RESUME PROBE** | the branch prefix (`feature/` · `fix/` · `refactor/`), what the one resume test-run probes on an existing branch, and any check the variant runs after (a) binds an existing branch and **before** (c) switches to it | Step 0 |
 | **DEVELOPER TASK SHAPE** | the spawn `description`, the ordered task body the developer follows, and the extras its `>>> RESULT <<<` line must carry | Step 1 |
 | **EVIDENCE RULE** | what Step 2 requires of the raw evidence *beyond* the base cross-check (and therefore what "green" means at Step 4) | Steps 2, 4 |
 | **CONFORMANCE CHECKS** | what the tech-lead is asked to check (and therefore what a tech-lead `BLOCKED` means at Step 4) | Steps 3, 4 |
