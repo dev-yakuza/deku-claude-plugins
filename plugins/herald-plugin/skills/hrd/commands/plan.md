@@ -3,7 +3,8 @@
 The content strategist proposes topic clusters for the queue (`.claude/herald/topics.json`).
 It does not write articles. Plan §3.1, §5.
 
-1. `HRD lock acquire --cmd plan`; base checked out and clean; `HRD sync`.
+1. `HRD lock acquire --cmd plan` (keep the token; `HRD lock release --cmd plan --token <t>` on every
+   exit path); base checked out and clean; `HRD sync`.
 2. Spawn **content-strategist** (and **search-discovery** if enabled) with: `charter.md`, all
    category guides, `search-checklist.md` (if enabled), the existing queue (`HRD topics list`),
    the published list (`published.json` + content directory listing), open Herald PR titles.

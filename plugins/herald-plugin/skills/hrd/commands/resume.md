@@ -3,7 +3,8 @@
 Continues from `state.json.stage` on the topic's local herald branch. Works for interrupted
 runs and for preserved holds (`needs-human`, `stagnation`, `budget`). Plan §3.2.1.
 
-1. `printenv HRD_UNATTENDED`; `HRD lock acquire --cmd resume`.
+1. `printenv HRD_UNATTENDED`; `HRD lock acquire --cmd resume` (keep the token; `HRD lock release
+   --cmd resume --token <t>` on every exit path).
 2. `HRD status` → find the topic. Derived state must be `in-progress` (local branch) or a
    stored `held:needs-human|stagnation|budget` with a preserved branch. Anything else: explain
    (`pr-pending` → `/hrd ship`; `queued` → `/hrd write`; cleaned holds → `/hrd status

@@ -171,23 +171,63 @@ def segments(cmd):
     return [s.strip() for s in re.split(r"&&|\|\||;|\n|\|", cmd) if s.strip()]
 
 
+GIT_GLOBAL_WITH_VALUE = ("-c", "-C", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env",
+                         "--super-prefix", "--attr-source")
+PUSH_OPTS_WITH_VALUE = ("-o", "--push-option", "--repo", "--receive-pack", "--exec")
+
+
+def normalize(seg):
+    """argv with git's global options removed (before splitting `=`, so a value never becomes
+    the subcommand), then `--opt=value` split into two tokens."""
+    try:
+        argv = shlex.split(seg)
+    except ValueError:
+        argv = seg.split()
+    if argv and argv[0] == "git":
+        i = 1
+        while i < len(argv) and argv[i].startswith("-"):
+            opt = argv[i]
+            i += 2 if opt in GIT_GLOBAL_WITH_VALUE else 1  # `--opt=value` is one token here
+        argv = ["git"] + argv[i:]
+    return [x for a in argv for x in (a.split("=", 1) if a.startswith("--") and "=" in a else [a])]
+
+
+def contains(hay, needle):
+    n = len(needle)
+    return n > 0 and any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
+
+
+def deploy_signature(deploy):
+    """The publishing part of the configured deploy command: its last segment, normalized the
+    same way as the commands we inspect (quotes, `--opt=value`, `&&` chains)."""
+    segs = [normalize(s) for s in segments(deploy)] if deploy else []
+    segs = [s for s in segs if s]
+    return segs[-1] if segs else None
+
+
+def push_targets(argv):
+    """(remote, refspecs) of a normalized `git push ...` argv."""
+    pos, i = [], 2
+    while i < len(argv):
+        a = argv[i]
+        if a in PUSH_OPTS_WITH_VALUE:
+            i += 2
+            continue
+        if a.startswith("-"):
+            i += 1
+            continue
+        pos.append(a)
+        i += 1
+    return (pos[0] if pos else None), pos[1:]
+
+
 def check_bash(root, cfg, cmd):
     base = cfg.base
-    deploy = (cfg.get("commands", "deploy") or "").strip()
+    sig = deploy_signature((cfg.get("commands", "deploy") or "").strip())
     for seg in segments(cmd):
-        try:
-            argv = shlex.split(seg)
-        except ValueError:
-            argv = seg.split()
+        argv = normalize(seg)
         if not argv:
             continue
-        # split --opt=value and drop git's global options so `git -c k=v push` is still `push`
-        argv = [x for a in argv for x in (a.split("=", 1) if a.startswith("--") and "=" in a else [a])]
-        if argv[0] == "git":
-            i = 1
-            while i < len(argv) and argv[i].startswith("-"):
-                i += 2 if argv[i] in ("-c", "-C", "--git-dir", "--work-tree", "--namespace") else 1
-            argv = ["git"] + argv[i:]
         joined = " ".join(argv)
         # 1. merges
         if argv[:3] == ["gh", "pr", "merge"]:
@@ -203,7 +243,7 @@ def check_bash(root, cfg, cmd):
         if "--kind" in argv and "trust" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
             protect("recording `trust` in the verification ledger skips re-verification for that article.")
         # 2. deploy
-        if deploy and deploy in joined:
+        if sig and contains(argv, sig):
             if unattended():
                 decide("deny", "unattended sessions may not deploy (the batch runner does).")
             decide("ask", "running the deploy command publishes the whole base branch — confirm this is `ship` step 7.")
@@ -222,9 +262,11 @@ def check_bash(root, cfg, cmd):
             if sub == "push":
                 if unattended() and any(t in ("--all", "--mirror") for t in argv[2:]):
                     decide("deny", "unattended sessions may not push --all/--mirror.")
-                targets = [t.lstrip("+") for t in argv[2:] if not t.startswith("-")][1:]  # drop the remote
+                _, refspecs = push_targets(argv)
+                targets = [t.lstrip("+") for t in refspecs]
                 dests = [t.split(":", 1)[1] if ":" in t else t for t in targets]
                 dests = [d[len("refs/heads/"):] if d.startswith("refs/heads/") else d for d in dests]
+                # conservative: on base with no explicit refspec, a push goes to base
                 to_base = (branch == base and not targets) or base in dests or (branch == base and "HEAD" in dests)
                 if to_base and unattended():
                     decide("deny", "unattended sessions may not push the base branch.")

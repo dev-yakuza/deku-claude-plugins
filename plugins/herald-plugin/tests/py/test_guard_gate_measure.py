@@ -53,6 +53,23 @@ class GuardCase(RepoCase):
         self.assertEqual(self.guard("Bash", {"command": "gh pr merge 3 --squash --match-head-commit abc"}, env), "allow")
         self.assertEqual(self.guard("Bash", {"command": "gh pr merge 5 --squash --match-head-commit abc"}, env), "deny")
 
+    def test_deploy_command_forms(self):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        cur = json.load(open(cfgp)); cur["commands"]["deploy"] = 'npm run build && wrangler pages deploy dist --project-name="blog"'
+        with open(cfgp, "w") as f:
+            json.dump(cur, f)
+        un = {"HRD_UNATTENDED": "1"}
+        for cmd in ("wrangler pages deploy dist --project-name=blog", "wrangler pages deploy dist --project-name blog",
+                    "npm run build && wrangler pages deploy dist --project-name='blog'"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
+        self.assertEqual(self.guard("Bash", {"command": "npm run build"}, un), "allow")
+
+    def test_push_parsing_bypasses(self):
+        un = {"HRD_UNATTENDED": "1"}
+        for cmd in ("git --exec-path=/usr/lib/git-core push origin main", "git --config-env=a=B push origin main",
+                    "git push -o ci.skip origin", "git push --push-option=ci.skip origin"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
+
     def test_deploy_and_shell_writes(self):
         self.assertEqual(self.guard("Bash", {"command": "npm run deploy"}), "ask")
         self.assertEqual(self.guard("Bash", {"command": "npm run deploy"}, {"HRD_UNATTENDED": "1"}), "deny")

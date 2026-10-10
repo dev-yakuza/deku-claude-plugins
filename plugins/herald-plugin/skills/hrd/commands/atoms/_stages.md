@@ -129,7 +129,8 @@ hashing joins the verify target set when M6 is enabled.)
 ## Holds (any stage)
 
 - `cannibalization` / `research` / `rejected`: remove this topic's files **before switching**
-  (the body and images are untracked until publish and would follow you to base):
+  (they are untracked until publish — or, for a refresh, tracked and modified — and would
+  follow you to base): restore tracked ones with `git checkout HEAD -- <tracked paths>`, then
   `git clean -fd -- <body path> <image dir> <w>` (only the paths that exist), then
   `git switch <base>`, `git branch -D <branch>`, record `hold`. Attended: `HRD state --topic
   <id> --state held --reason <r>` then `HRD commit --cmd hold --kind hold -m "chore(herald):

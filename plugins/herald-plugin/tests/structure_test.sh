@@ -43,6 +43,13 @@ for p in glob.glob(os.path.join(skill, "commands", "**", "*.md"), recursive=True
         if ref in ("write.md", "ship.md", "status.md", "monitoring.md", "init.md", "resume.md"):
             check(os.path.exists(os.path.join(skill, "commands", ref)), "%s → commands/%s exists" % (os.path.relpath(p, skill), ref))
 
+# every command that acquires the checkout lock also releases it
+for p in glob.glob(os.path.join(skill, "commands", "*.md")):
+    body = open(p).read()
+    if "lock acquire" in body:
+        check("lock release" in body or "release on every exit" in body,
+              "%s releases the lock it acquires" % os.path.basename(p))
+
 # result contract identical
 canon = None
 blocks = []

@@ -3,7 +3,8 @@
 Refreshes plugin-owned parts without clobbering local evolution (INV4). `--check` reports
 only. Ported from Guild `update.md`.
 
-1. `HRD lock acquire --cmd update`; base clean; `HRD sync`.
+1. `HRD lock acquire --cmd update` (keep the token; `HRD lock release --cmd update --token <t>` on
+   every exit path); base clean; `HRD sync`.
 2. **Scripts**: diff `<<SKILL_DIR>>/scripts/` against `.claude/herald/scripts/`; show the
    changed files; on approval copy them (the guard asks — these are guard wiring). Never keep a
    locally edited central script silently: if a local copy differs from both the old and new

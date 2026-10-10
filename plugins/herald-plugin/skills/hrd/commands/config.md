@@ -10,4 +10,5 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
 - `language` is free to change.
 - Order: `HRD lock acquire --cmd config` → base checked out and clean → `HRD sync` → edit →
   `HRD commit --cmd harness --kind config -m "chore(herald): config <key>"
-  .claude/herald/config.json` → `git push origin <base>` → release the lock.
+  .claude/herald/config.json` → `git push origin <base>` → `HRD lock release --cmd config --token <t>`
+  (on every exit path).

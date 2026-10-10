@@ -207,10 +207,12 @@ def completed(root, cfg, tid, since=""):
             res = {"status": "held:needs-human", "note": "child reported unknown hold %r: %s" % (reason, res.get("note"))}
         return res
     for p in ghstate.herald_prs(root, cfg):
-        if p["topic_id"] == tid and (p["state"] == "OPEN" or (
-                since and (p.get("mergedAt") or "") >= since
-                and not (p["label_set"] & {ghstate.REVERTED, ghstate.WITHDRAWN}))):
+        if p["topic_id"] == tid and p["state"] == "OPEN":
             return {"status": "pr-open", "pr": p["number"]}
+        if p["topic_id"] == tid and since and (p.get("mergedAt") or "") >= since \
+                and not (p["label_set"] & {ghstate.REVERTED, ghstate.WITHDRAWN}):
+            # a human merged it during the run: done, but not an auto candidate (ship records it)
+            return {"status": "merged-by-human", "pr": p["number"]}
     return None
 
 
@@ -301,7 +303,9 @@ def finish_auto(root, cfg, chosen):
         set_topic_state(t, "held", "reverted", "revert PR #%d" % rv["number"])
         t.setdefault("reverted_by", []).append(rv["number"])
     save_topics(root, topics)
-    sync_base(root, cfg)
+    # commit revert records before the pre-deploy check (it refuses a dirty tracked tree)
+    commits.commit_state(root, cfg, "runner", "chore(herald): revert records", "revert",
+                         [".claude/herald/topics.json"])
     prs = ghstate.herald_prs(root, cfg)
     report = integrity.predeploy(root, cfg, prs=prs)
     if not report["ok"]:
@@ -321,12 +325,17 @@ def finish_auto(root, cfg, chosen):
             log("deploy command failed — merged articles stay merged-unrecorded")
             return False
     chosen_slugs = {by_num[n]["slug"] for _, n in merged}
+    # remember which PRs merged unattended, so a later recording keeps human_reviewed=false
+    am_path = os.path.join(result_dir(root), "auto-merged.json")
+    write_json(am_path, sorted(set(read_json(am_path, []) or []) | {n for _, n in merged}))
     # base-wide deploy also publishes earlier merged-unrecorded articles that pass integrity
     extra = [(r["ref_topic"], r["slug"]) for r in report["articles"]
              if r["merged_unrecorded"] and r["status"] == "ok" and r["slug"] not in chosen_slugs and r["ref_topic"]]
+    auto_merged = set(read_json(os.path.join(result_dir(root), "auto-merged.json"), []) or [])
     for tid, slug in extra:
         if url_ok(cfg.article_url(slug)):
-            record_published(root, cfg, tid, slug, auto=False)  # merged by a human earlier
+            was_auto = any(p["number"] in auto_merged for p in prs if p["topic_id"] == tid and p.get("mergedAt"))
+            record_published(root, cfg, tid, slug, auto=was_auto)
     for tid, n in merged:
         slug = by_num[n]["slug"]
         if not url_ok(cfg.article_url(slug)):
@@ -409,6 +418,8 @@ def main(argv):
                     preserve_wip(root, cfg, tid)
                 record_hold(root, cfg, tid, reason, res.get("note"))
                 summary["held"].append((tid, reason))
+            elif res["status"] == "merged-by-human":
+                summary.setdefault("merged_by_human", []).append((tid, res["pr"]))
             else:
                 summary["pr"].append((tid, res["pr"]))
             git(root, "checkout", "-q", cfg.base)

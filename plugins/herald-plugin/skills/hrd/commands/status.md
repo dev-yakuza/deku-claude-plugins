@@ -11,7 +11,8 @@ holder if any and `HRD ahead` warnings.
 
 ## Maintenance flags (each: `HRD lock acquire --cmd status`, base checked out and clean,
 `HRD sync`, then the action, then `HRD commit --cmd status --kind status -m "chore(herald):
-<action> <id>" <changed files>` and `git push origin <base>`; release the lock)
+<action> <id>" <changed files>` and `git push origin <base>`; finally `HRD lock release --cmd status
+--token <t>`)
 
 | Flag | Action | Notes |
 |---|---|---|

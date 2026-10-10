@@ -11,7 +11,8 @@ target.
 
 ## Phase 0 — Preflight
 
-`HRD lock acquire --cmd evolve`; base clean; `HRD sync`. Read `.claude/herald/evolution-log.md`:
+`HRD lock acquire --cmd evolve` (keep the token; `HRD lock release --cmd evolve --token <t>` on
+every exit path); base clean; `HRD sync`. Read `.claude/herald/evolution-log.md`:
 run number `n` = existing entries + 1; earlier rejected proposals must not be re-proposed
 unchanged; the targets applied in the last 3 runs (regression watch).
 

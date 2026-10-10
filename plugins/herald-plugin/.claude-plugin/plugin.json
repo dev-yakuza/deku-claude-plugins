@@ -1,7 +1,7 @@
 {
   "name": "herald-plugin",
   "description": "Herald - a per-repo editorial organization that plans topics, writes professional blog articles (brief -> research -> draft -> critique -> verify -> publish), ships them through PR review with accuracy as a floor, and grows its guides from real usage",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "author": {
     "name": "dev-yakuza"
   },
