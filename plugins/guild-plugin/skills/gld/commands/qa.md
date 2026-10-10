@@ -135,11 +135,34 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
 - As the leader, read the design artifacts and identify items the authoring role explicitly deferred as **real, wanted work, deliberately not done in this issue**. This is a **judgment read, not a fixed-string grep** (`config.language` phrasing varies — a Korean repo might say "후속 이슈 제안", an English one "follow-up issue" or "out of scope for now, revisit later").
 - **Do NOT count**: conditional/triggered deferrals with no concrete next action yet ("extract a shared helper if a 2nd similar case appears" — nothing to file until the trigger fires), items already resolved later in the same flow (design worried about X, execute/test proved it fine), or the AC's own stated non-goals (already the issue's explicit scope boundary, not a gap).
 - For each real deferred item, **search existing issues** (`gh issue list --repo <owner>/<repo> --search "<keywords>" --state all`) for one that already covers it — dedupe by intent, not exact title match.
-- **Unfiled items found** → do not auto-create (issue creation is visible/durable — the human decides, same posture as `init.md`'s harness-gap remediation). Instead:
-  - **Attended**: list them to the human in one batched prompt — "설계 산출물이 남긴 후속 항목 N개, 아직 이슈 없음: ① … ② … — 지금 이슈로 만들까요?" (localized per `config.language`). On confirmation, create via the temp-file `gh issue create --body-file` pattern — title = the gap, body = 배경·AC(안)·근거(design doc file + section), `Depends on: #$1` — labeling with the repo's existing `type:*`/`area:*` labels where a clear match exists.
-  - **Unattended** (`GLD_UNATTENDED=1`): never auto-create — append the list to the `<!-- guild:qa:output -->` comment under a `### 미등록 후속 항목` heading so the deferred human review (PR + merge, INV1) sees it; do not block `done` on it.
-- **No unfiled items** (all covered, or none real) → say so in one line, no further action. Cheap when clean — do not force ceremony on a change with no design docs or no real deferrals.
-- This runs **once per issue, at QA** — not repeated at `review`. QA is the mandatory spine stop every `/gld dev` run passes through; `review` is on-demand (nudged, not forced) and would miss unattended/batch runs entirely if this lived there instead.
+- **Read the previous follow-up record first** (a re-run after a loop-back): the Issue comment carrying `<!-- guild:followups -->`, if one exists. An item it lists as `declined` was already put to the human, who said no — carry it forward as `declined` and **do not ask again**; that answer was the decision, not an omission.
+- **Every examined item gets exactly one verdict, stated before any question** — the same binary discipline as `review.md` Step 4 item 5 and `audit.md`'s `이슈 생성 필요` / `지금은 불필요`. Never hand the human a bare list and ask what to do with it:
+  - **`후속 Issue 등록 필요`** — real deferred work with a concrete next action, and no existing Issue covers it.
+  - **`등록 불필요 — <reason>`** — the reason is one of: an existing Issue covers it (`#<n>이 이미 다룸`), a conditional deferral whose trigger has not fired, resolved later in this flow, or one of the AC's own non-goals. These are the "Do NOT count" cases above, now stated rather than silently dropped.
+  Hedging words ("검토 바람", "필요하면", "권장", "가능하면", "선택") are **banned in the verdict** — they hand the call back to the human, which is exactly what the verdict exists to prevent. The wording follows `config.language`; the binary holds in every language.
+- **`후속 Issue 등록 필요` items exist** → do not auto-create (issue creation is visible/durable — the human confirms, same posture as `init.md`'s harness-gap remediation). Instead:
+  - **Attended**: one batched prompt, verdicts first (localized per `config.language`):
+    ```
+    설계 산출물이 남긴 후속 항목
+    ① <제목> — 근거: docs/specs/$1/<file> §<section> → 후속 Issue 등록 필요
+    ② <제목> — 근거: … → 후속 Issue 등록 필요
+    등록 불필요 <n>건 — 기존 Issue #<a>·#<b> / 조건부 유예·해결됨·비목표 <m>건
+    위 등록 필요 <k>건을 지금 Issue로 등록할까요? (항목별로 뺄 수 있습니다)
+    ```
+    The `등록 불필요` line is one line, never itemized, and printed only when `<n>` > 0. On confirmation, create each item via the temp-file `gh issue create --body-file` pattern (each its own Bash call) — title = the gap, body = 배경·AC(안)·근거(design doc file + section), `Depends on: #$1` — labeling with the repo's existing `type:*`/`area:*` labels where a clear match exists (check `gh label list --limit 200 --json name` first — `--label` errors on a missing label). ⚠ **Verify each create landed** (`_handoff.md` Section F): `gh issue create` prints the new Issue's URL; no URL means that Issue does **not** exist — record the item as `unfiled`, never as `filed`. Items the human leaves out are `declined`.
+  - **Unattended** (`GLD_UNATTENDED=1`): never auto-create — every `후속 Issue 등록 필요` item is recorded as `unfiled` (below) so the deferred human review (`/gld review` Step 5, then PR + merge, INV1) puts the question to the human; do not block `done` on it.
+  - **In both modes, write the follow-up record** — its own Issue comment, bounded by `<!-- guild:followups -->` … `<!-- /guild:followups -->` (update-in-place, `_handoff.md` Section B; temp-file pattern). It is a **separate comment, not a section of `<!-- guild:qa:output -->`**: Step 2 replaces that comment on every QA re-run, and a record kept inside it would lose its `declined` answers each time. One line per `후속 Issue 등록 필요` item, status token first (ASCII, `_handoff.md` Section K):
+    ```
+    <!-- guild:followups -->
+    ### <후속 항목 — heading in config.language>
+    - unfiled — <title> — <근거: docs/specs/$1/<file> §<section>>
+    - declined — <title> — <근거>
+    - filed #<n> — <title>
+    <!-- /guild:followups -->
+    ```
+    `unfiled` is the only status `review.md` acts on; `declined` and `filed` are history. `등록 불필요` items are not recorded — they asked nothing of anyone.
+- **No `후속 Issue 등록 필요` items** (all covered, or none real) → say so in one line (`후속 Issue 등록 불필요 — <n>건 모두 기존 Issue/조건부/해결됨`, or `후속 항목 없음`), no prompt. If a `<!-- guild:followups -->` comment exists from an earlier run, rewrite it with only its `declined`/`filed` lines (the earlier `unfiled` items are now covered — that is what "none left" means); do not leave a stale `unfiled` line for review to re-ask. Cheap when clean — do not force ceremony on a change with no design docs or no real deferrals.
+- This **scan** runs **once per issue, at QA** — not repeated at `review`. QA is the mandatory spine stop every `/gld dev` run passes through; `review` is on-demand (nudged, not forced) and would miss unattended/batch runs entirely if this lived there instead. `review` only **asks** the `unfiled` items' question (its Step 5) — it does not re-read the design docs.
 
 ## Step 3 — Judge + return
 
@@ -171,5 +194,5 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
 - **Risk-based depth, never blanket skip** — always a judgment with a reason.
 - **Honesty of scope** (both directions: results + coverage), per `_handoff.md` Section E.
 - **Manual Test Checklist → PR body is mandatory when ≥1 human-QA item exists** (Step 2.5) — including on a no-new-findings re-run. A platform/real-device/manual item flagged "권장/미검증" still counts; the qa comment alone does not satisfy this — the item MUST be in the PR body where the human merges.
-- **Deferred follow-up scan is mandatory when design artifacts exist** (Step 2.6) — a design doc's self-flagged tech-debt/deferred-work note is not "handled" until it's either matched to an existing issue or surfaced for filing; it must not silently rot in `docs/specs/$1/`.
+- **Deferred follow-up scan is mandatory when design artifacts exist** (Step 2.6) — a design doc's self-flagged tech-debt/deferred-work note is not "handled" until it's either matched to an existing issue or surfaced for filing **with a stated verdict** (`후속 Issue 등록 필요` / `등록 불필요 — <reason>`) and recorded under `<!-- guild:followups -->`; it must not silently rot in `docs/specs/$1/`.
 - Read-only against source (QA observes; fixes go back through execute). *(The one exception: Step 2.5 edits the open PR **body** — a doc surface, not source — to carry the human checklist.)*

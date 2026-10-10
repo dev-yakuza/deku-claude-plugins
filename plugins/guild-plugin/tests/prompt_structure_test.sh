@@ -2589,6 +2589,26 @@ hasfx "plan: --create 2b 드롭 후 다시 제시" "$PLANMD" 'the sprint is pres
 hasfx "refactor: 바이트 동일 이동은 reshaping 아님" "$RFMD" 'a byte-identical move (`R100`) does not reshape it'
 hasfx "refactor: 기존 VRT 미실행을 PR 에" "$RFMD" 'existing VRT not run here'
 
+# 후속 Issue 판정 (0.90.0) — 이슈를 만들지 말지를 사람에게 되던지지 않는다
+FUMD="$GLD/commands/review.md"; FQMD="$GLD/commands/qa.md"; FIMD="$GLD/commands/init.md"
+hasfx "review: 범위 밖 MAJOR 는 후속 Issue 등록 필요 판정" "$FUMD" '→ 후속 Issue 등록 필요 (MAJOR) — <이번 PR에서 고치지 않는 근거'
+hasfx "review: BLOCKER 는 미루지 않는다" "$FUMD" '`BLOCKER` is **never** deferred'
+hasfx "review: Step 5 에서 한 번만 묻는다" "$FUMD" '**후속 Issue (binary per item — asked once, before the 종합 판정).**'
+hasfx "review: qa 의 unfiled 만 묻는다" "$FUMD" 'every `unfiled` line in the Issue'"'"'s `<!-- guild:followups -->` comment'
+hasfx "review: 등록돼야만 머지 판정에서 빠진다" "$FUMD" '**A `후속 Issue 등록 필요` finding counts as addressed only when it is actually tracked**'
+hasfx "review: 생성 실패는 미등록" "$FUMD" 'no URL printed means **not registered**'
+lacksfx "review: '후속 Issue를 제안할 것' 이 사라졌다" "$FUMD" '후속 Issue를 제안할 것'
+hasfx "qa: 항목마다 판정 먼저" "$FQMD" '**Every examined item gets exactly one verdict, stated before any question**'
+hasfx "qa: 후속 기록은 별도 코멘트" "$FQMD" 'It is a **separate comment, not a section of `<!-- guild:qa:output -->`**'
+hasfx "qa: declined 는 다시 묻지 않는다" "$FQMD" 'carry it forward as `declined` and **do not ask again**'
+lacksfx "qa: 판정 없는 '지금 이슈로 만들까요?' 가 사라졌다" "$FQMD" '— 지금 이슈로 만들까요?'
+lacksfx "qa: 언어 고정 헤딩 '### 미등록 후속 항목' 이 사라졌다" "$FQMD" '### 미등록 후속 항목'
+hasfx "handoff: guild:followups 마커" "$GLD/commands/atoms/_handoff.md" '| `<!-- guild:followups -->` … `<!-- /guild:followups -->` | qa (leader, Step 2.6) |'
+hasfx "init: 갭마다 판정 먼저" "$FIMD" 'Every **BLOCKER/MAJOR** gap gets **exactly one verdict, stated before any question**'
+hasfx "init: MINOR 는 한 줄 카운트" "$FIMD" '`등록 불필요 <n>건 (MINOR — 리포트에만 기록)`'
+lacksfx "init: 'offer MINOR too' 가 사라졌다" "$FIMD" 'offer MINOR too'
+lacksfx "init: 선택지를 고르게 하지 않는다" "$FIMD" 'user picks which to file'
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -2596,7 +2616,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=684   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=701   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

@@ -333,13 +333,28 @@ If the hygiene group ran only the light heuristic, offer: "전용 시크릿 스�
 - On yes + not installed → ask explicit consent to install (system change), then install via the platform's package manager as its own simple Bash call (e.g. `brew install gitleaks`). If the user declines the install → skip deep scan, keep light findings.
 - Run `gitleaks detect` (read-only, its own Bash call) and fold new findings into the report. **Never print secret values** — reference file/line only.
 
-### 4. Remediation (opt-in, per gap — INV1)
-For each **BLOCKER/MAJOR** gap (offer MINOR too, but default to skip), ask the user how to handle it. Offer only **safe, reversible** actions:
-- **Create a tracking issue** (default): via the temp-file pattern, `gh issue create --body-file <path> --label guild:harness` (+ `type:refactor`/`type:chore` if those labels exist). Title = the gap; body = gap · why it helps Guild · acceptance criteria. **Dedup**: first search open issues for an existing `guild:harness` issue with the same gap `id` marker (`<!-- guild:harness:<id> -->`) — PATCH/skip if found. These issues are then developable with `/gld dev`.
-- **Safe local fix** where applicable: e.g. gitignore gap → append the missing entries; committed-secret-file → add to `.gitignore` + `git rm --cached <file>` **(confirm first)**.
-- **Guide-only for destructive/external actions** (committed/inline secrets): print the steps for git-history purge and key rotation — **NEVER auto-run** history rewrite (`git filter-branch`/filter-repo) or rotate keys. These are irreversible (INV3) / external. The tracking issue captures the follow-up.
+### 4. Remediation (a stated verdict per gap, then one confirm — INV1)
+Every **BLOCKER/MAJOR** gap gets **exactly one verdict, stated before any question** — the same binary discipline as `review.md` Step 4 and `audit.md`'s `이슈 생성 필요` / `지금은 불필요`. Never present a menu of handling options and ask the human to pick ("어떻게 처리할까요?") — that hands back the very call this step exists to make. **Dedup first**, so the verdict is true when it is said: search open issues for a `guild:harness` issue carrying the same gap `id` marker (`<!-- guild:harness:<id> -->`), e.g. `gh issue list --repo <owner>/<repo> --label guild:harness --state open --search "guild:harness:<id> in:body" --json number,title`. The verdict is then mechanical:
+- **`등록 불필요 — #<n>이 이미 다룸`** — the dedup found one.
+- **`로컬 수정으로 해결`** — only when a **safe, reversible** local edit closes the gap **completely** (e.g. `gate-hook-not-executable` → `chmod +x` the hook it names). Nothing is left to track, so no Issue.
+- **`이슈 등록 필요`** — every other BLOCKER/MAJOR gap. This includes a **committed/inline secret**: the local part (`.gitignore` + `git rm --cached <file>`) is offered in the same confirm, but it does not close the gap — history purge and key rotation are irreversible (INV3) / external and stay **guide-only** (print the steps; **NEVER auto-run** `git filter-branch`/filter-repo or rotate keys), and the tracking Issue is what records that they are still owed.
 
-Batch the questions where possible (one grouped prompt listing gaps → user picks which to file). If the user skips remediation entirely, the report on disk still records everything.
+Hedging words ("권장", "선택", "가능하면", "검토 바람") are **banned in the verdict**. **MINOR gaps are not presented** — no item, no "참고로": by the rubric they are nice-to-haves, and listing them dilutes the gaps that need action. They get exactly one line, `등록 불필요 <n>건 (MINOR — 리포트에만 기록)`, printed even when `<n>` is 0; the full list stays in `.claude/guild/readiness-report.md`. If the human asks for them, show them then — do not offer.
+
+One batched prompt (localized per `config.language`):
+```
+[BLOCKER] no-test-command — <왜 Guild에 필요한지> → 이슈 등록 필요
+[BLOCKER] committed-secret-file — <file> → 이슈 등록 필요 (+ 로컬: .gitignore 추가 · git rm --cached)
+[MAJOR] no-ci — <왜> → 등록 불필요 — #12가 이미 다룸
+[BLOCKER] gate-hook-not-executable — <왜> → 로컬 수정으로 해결
+등록 불필요 3건 (MINOR — 리포트에만 기록)
+위 판정대로 진행할까요? (항목별로 빼거나 바꿀 수 있습니다)
+```
+On confirmation, carry out each confirmed item:
+- **`이슈 등록 필요`** → via the temp-file pattern, `gh issue create --body-file <path> --label guild:harness` (+ `type:refactor`/`type:chore` if those labels exist — `gh label list --limit 200 --json name`). Title = the gap; body = the `<!-- guild:harness:<id> -->` marker · gap · why it helps Guild · acceptance criteria (for a secret: the guide-only purge/rotation steps). ⚠ **Verify each create landed** (`_handoff.md` Section F): no URL printed means the Issue does not exist — say so for that gap; never list it as created. These issues are then developable with `/gld dev`.
+- **`로컬 수정으로 해결`**, and the local part of a secret gap → apply it; `git rm --cached` is a staging change, so name the file before running it.
+
+Items the human leaves out are not an error. If the human skips remediation entirely, the report on disk still records everything.
 
 ---
 
@@ -411,7 +426,7 @@ Report what was installed:
 - ⑥ Knowledge baseline: `.claude/guild/knowledge/index.md` + `facts/` seeded from the scans (hotspots · co-change · coupling). Note the seeded slice count; `evolve` grows it from here.
 - 강제층 게이트 (M3): `.claude/guild/gates/scripts/gate_precommit.py`, wired three ways — `.git/hooks/pre-commit` (**authoritative**), `PreToolUse(Bash)` (early warning), `PreToolUse(Edit|Write)` (control-file guard). Blocks committing secrets / weakening verification. Off-switch: config `gates.enabled` (or `/gld config`). **State the two honest limits**: `.git/hooks/` is not tracked, so a fresh clone needs `/gld update` to reinstall the hook; and `git commit --no-verify` skips it. If step 6 found a non-empty `core.hooksPath`, say that the authoritative layer is **not** active and what to do about it.
 - Labels: 11 `guild:*` (analyze, design, execute, test, qa, done, child, children, harness, needs-human, sprint) (or "skipped — no GitHub repo").
-- Readiness audit (P3.5): report at `.claude/guild/readiness-report.md` — summarize the gap counts (BLOCKER/MAJOR/MINOR) and list any `guild:harness` issues created.
+- Readiness audit (P3.5): report at `.claude/guild/readiness-report.md` — summarize the gap counts (BLOCKER/MAJOR/MINOR) and list any `guild:harness` issues created (by number — only those whose create printed a URL), local fixes applied, and `이슈 등록 필요` gaps the human left out.
 - Next steps: "`/gld dev <issue>` to develop a GitHub Issue end-to-end (including any `guild:harness` remediation issues). `/gld status <issue>` to check progress. Day-1 agents are intentionally rough — they improve as you work (evolve, a later milestone)."
 
 ---
