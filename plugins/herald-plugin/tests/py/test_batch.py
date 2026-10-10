@@ -119,6 +119,21 @@ class BatchCase(RepoCase):
         # no ledger line for the merged article on this machine → integrity refuses to deploy
         self.assertFalse(summary["auto"]["published"])
 
+    def test_runner_refuses_to_push_foreign_base_commits(self):
+        from hrdlib import batch as b
+        self.write("README.md", "moved base")
+        self.commit("foreign")  # e.g. a child moved base with update-ref
+        self.assertFalse(b.push_base(self.root, self.cfg))
+        self.assertNotEqual(sh(self.root, "git", "rev-parse", "origin/main").strip(),
+                            sh(self.root, "git", "rev-parse", "main").strip())
+
+    def test_throttle_ignores_old_or_reverted_auto_merges(self):
+        from hrdlib import batch as b
+        topics = {"topics": [{"auto_merged_pr": 1, "auto_merged_at": "2000-01-01T00:00:00+00:00", "state": "queued"},
+                             {"auto_merged_pr": 2, "auto_merged_at": b.now_iso(), "state": "held", "reason": "reverted"},
+                             {"auto_merged_pr": 3, "auto_merged_at": b.now_iso(), "state": "queued"}]}
+        self.assertEqual(b.auto_published_today({"articles": []}, topics), 1)
+
     def test_untracked_build_input_blocks_batch(self):
         self.write("src/content/blog/wip.md", "unfinished")
         p = self.run_batch({}, n=1)

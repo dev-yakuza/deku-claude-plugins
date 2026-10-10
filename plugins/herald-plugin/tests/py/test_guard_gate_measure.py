@@ -173,6 +173,30 @@ class GuardCase(RepoCase):
         for cmd in ("NODE_ENV=production vercel --prod > deploy.log", "vercel --prod"):
             self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
 
+    def test_round8_guard(self):
+        un = {"HRD_UNATTENDED": "1"}
+        sh(self.root, "git", "switch", "-q", "-c", store.branch_name("t0001", "x"))
+        self.assertEqual(self.guard("Bash", {"command": "git push origin herald/t0001--x 2>&1"}, un), "allow")
+        self.assertEqual(self.guard("Bash", {"command": "git push -u origin herald/t0001--x 2>/dev/null"}, un), "allow")
+        for cmd in ("git branch -f main HEAD", "git update-ref refs/heads/main HEAD", "git fetch origin main:main",
+                    "git worktree add ../wt main", "git merge-file a b c", "git reset --hard HEAD~1"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
+        for cmd in ("git reset HEAD src/x.md", "git reset -q", "git fetch origin", "git branch -D herald/t0002--y",
+                    "git status --porcelain"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "allow", cmd)
+
+    def test_round8_deploy_build_words(self):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        un = {"HRD_UNATTENDED": "1"}
+        for deploy, cmd, free in (("npm run build && npx gh-pages -d build && echo done", "npx gh-pages -d build", "echo done"),
+                                  ("netlify deploy --prod --dir=build && curl -X POST https://hooks.example/x",
+                                   "netlify deploy --prod --dir=build", "npm run build")):
+            cur = json.load(open(cfgp)); cur["commands"]["deploy"] = deploy
+            with open(cfgp, "w") as f:
+                json.dump(cur, f)
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
+            self.assertEqual(self.guard("Bash", {"command": free}, un), "allow", free)
+
     def test_pr_branch_scope(self):
         sh(self.root, "git", "switch", "-q", "-c", store.branch_name("t0001", "mine"))
         self.article("mine")

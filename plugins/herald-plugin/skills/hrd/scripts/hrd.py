@@ -340,6 +340,7 @@ def cmd_requeue(a):
         if b.startswith("herald/%s--" % a.topic):
             git(root, "branch", "-q", "-D", b)
     t.pop("auto_merged_pr", None)  # a new PR will be judged on its own
+    t.pop("auto_merged_at", None)
     store.set_topic_state(t, "queued", note="requeued (reverted_by kept)")
     store.save_topics(root, data)
     emit({"id": a.topic, "state": "queued", "reverted_by": t.get("reverted_by", [])})

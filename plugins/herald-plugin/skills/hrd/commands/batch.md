@@ -17,9 +17,12 @@ which denies base commits/pushes, merges outside `HRD_AUTO_PRS`, and deploys.
    `auto` → up to `throttle.max_per_day` auto publishes today, excluding PRs with dismissals,
    assumptions or image changes), the per-article budget, and that the run may take a long
    time (rate limits up to 4h are waited out).
-3. Start in the background:
-   `python3 .claude/herald/scripts/batch_runner.py --n <N>` with `run_in_background`.
-   Logs: `.claude/herald/memory/batch-logs/`.
+3. Start it **detached** — a batch can run for hours (children, rate-limit waits up to 4h), longer
+   than a background shell is allowed to live:
+   `nohup python3 .claude/herald/scripts/batch_runner.py --n <N> > .claude/herald/memory/batch-logs/runner.out 2> .claude/herald/memory/batch-logs/runner.log &`
+   (create the log directory first). Progress: `runner.log`; the final JSON summary:
+   `runner.out`; per-topic child logs: `.claude/herald/memory/batch-logs/`. Stopping it
+   (`kill <pid>`) ends its children and releases the checkout lock.
 4. When it finishes, summarize its JSON: PRs opened, PRs a human merged during the run (→
    `/hrd ship` records them), holds by reason (next steps per reason, `/hrd status`), incomplete
    topics, auto publish result (chosen / skipped with reasons).

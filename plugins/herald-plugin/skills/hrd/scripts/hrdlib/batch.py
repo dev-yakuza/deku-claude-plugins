@@ -26,6 +26,7 @@ from .util import HeraldError, git, git_ok, now_iso, read_json, write_json
 
 RATE_LIMIT_RE = re.compile(r"(rate.?limit|usage limit|\b429\b|resets? at)", re.I)
 MAX_WAIT = 4 * 3600
+CHILDREN = set()  # process-group ids of running children, for the SIGTERM handler
 
 
 def log(msg):
@@ -48,8 +49,18 @@ def sync_base(root, cfg):
     commits.sync_base(root, cfg)
 
 
+def foreign_ahead(root, cfg):
+    """Commits on local base that are neither Herald records nor sync merges (a child may have
+    moved base with a command the guard did not catch). Checked before every push and deploy."""
+    return [c for c in commits.classify_ahead(root, cfg, cfg.base) if not c["ok"]]
+
+
 def push_base(root, cfg):
     base = cfg.base
+    bad = foreign_ahead(root, cfg)
+    if bad:
+        log("refusing to push: base carries non-Herald commits %s" % ", ".join(c["sha"][:8] for c in bad))
+        return False
     if git_ok(root, "push", "-q", "origin", base):
         return True
     sync_base(root, cfg)
@@ -83,6 +94,7 @@ def run_child(root, cfg, prompt, log_path, budget_usd, extra_env=None, spent=0.0
         with open(log_path, "w") as out:
             proc = subprocess.Popen(cmd, cwd=root, stdout=out, stderr=subprocess.STDOUT, env=env,
                                     start_new_session=True)
+            CHILDREN.add(proc.pid)
             over = False
             while proc.poll() is None:
                 time.sleep(5)
@@ -96,6 +108,7 @@ def run_child(root, cfg, prompt, log_path, budget_usd, extra_env=None, spent=0.0
                         proc.wait()
                     break
         spent = base_cost + stream_json_usd(log_path, prices)
+        CHILDREN.discard(proc.pid)
         if over:
             return "budget", spent
         with open(log_path, errors="replace") as f:
@@ -239,7 +252,8 @@ def auto_published_today(pub, topics=None):
     n = sum(1 for a in pub["articles"] if a.get("human_reviewed") is False
             and str(a.get("published_at", "")).startswith(today))
     for t in (topics or {}).get("topics", []):
-        if t.get("auto_merged_pr") and t.get("state") != "published":
+        if t.get("auto_merged_pr") and str(t.get("auto_merged_at", "")).startswith(today) \
+                and t.get("state") not in ("published", "withdrawn") and t.get("reason") != "reverted":
             n += 1
     return n
 
@@ -305,6 +319,7 @@ def finish_auto(root, cfg, chosen):
         topics = load_topics(root)
         for tid, n in merged:
             get_topic(topics, tid)["auto_merged_pr"] = n
+            get_topic(topics, tid)["auto_merged_at"] = now_iso()
         save_topics(root, topics)
         commits.commit_state(root, cfg, "runner", "chore(herald): auto merges %s" % ", ".join("#%d" % n for _, n in merged),
                              "ship", [".claude/herald/topics.json"])
@@ -338,6 +353,10 @@ def finish_auto(root, cfg, chosen):
         commits.commit_state(root, cfg, "runner", "chore(herald): revert/hold records (deploy stopped)", "abort",
                              [".claude/herald/topics.json"])
         push_base(root, cfg)
+        return False
+    bad = foreign_ahead(root, cfg)
+    if bad:
+        log("refusing to deploy: base carries non-Herald commits %s" % ", ".join(c["sha"][:8] for c in bad))
         return False
     deploy = cfg.get("commands", "deploy")
     if (merged or any(r["merged_unrecorded"] for r in report["articles"])) and deploy:
@@ -382,6 +401,19 @@ def main(argv):
     cfg = Config.load(root)
     token = lock.acquire(root, "batch")
     os.environ["HRD_LOCK_TOKEN"] = token
+
+    def on_term(signum, frame):  # stopped from outside: end children, free the checkout lock
+        for pid in list(CHILDREN):
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except OSError:
+                pass
+        lock.release(root, token, owner=True)
+        sys.stderr.write("[hrd batch] stopped by signal %d — lock released\n" % signum)
+        os._exit(130)
+
+    signal.signal(signal.SIGTERM, on_term)
+    signal.signal(signal.SIGHUP, on_term)
     os.makedirs(result_dir(root), exist_ok=True)
     logs = os.path.join(paths(root)["memory"], "batch-logs")
     os.makedirs(logs, exist_ok=True)

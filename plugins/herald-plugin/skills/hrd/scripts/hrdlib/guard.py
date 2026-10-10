@@ -230,11 +230,12 @@ def deploy_signatures(deploy):
     for part in re.split(r"&&|\|\||;|\n", deploy or ""):
         for member in part.split("|"):  # `echo y | vercel --prod`: the publisher is after the pipe
             argv = strip_noise(normalize(member.strip()))
-            if argv and argv[0] not in TRIVIAL and not (set(argv) & BUILD_WORDS):
+            if argv and argv[0] not in TRIVIAL and not is_build_step(argv):
                 sigs.append(argv)
     if not sigs and (deploy or "").strip():
-        last = [x for x in segments(deploy) if x]
-        sigs = [strip_noise(normalize(last[-1]))] if last else []
+        rest = [strip_noise(normalize(x)) for x in segments(deploy)]
+        rest = [x for x in rest if x and x[0] not in TRIVIAL]
+        sigs = rest[-1:]
     # every publishing step (build/test/lint steps excluded) — a later notify step must not hide
     # the real deploy step
     return [x for x in sigs if x]
@@ -270,19 +271,31 @@ def other_git_dir(root, seg):
         if val:
             d = os.path.join(root, val)
             d = d if os.path.isdir(d) else os.path.dirname(d)
-            top = git(d, "rev-parse", "--show-toplevel", check=False).strip() if os.path.isdir(d) else ""
-            # unknown → same repository (fail closed)
-            if top and os.path.realpath(top) != os.path.realpath(root):
+            common = git(d, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False).strip() \
+                if os.path.isdir(d) else ""
+            mine = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False).strip()
+            # unknown → same repository (fail closed); worktrees share the common dir
+            if common and os.path.realpath(common) != os.path.realpath(mine):
                 return True
     return False
 
 
-def resets_history(args):
-    """`git reset -- <paths>` only unstages; --hard/--soft/--mixed/--merge/--keep or a commit moves HEAD."""
-    if any(a in ("--hard", "--soft", "--mixed", "--merge", "--keep") for a in args):
+def resets_history(args, root=None):
+    """Does this `git reset` move HEAD? --hard/--soft/--merge/--keep or a single commit argument
+    do; `reset`, `reset -- <paths>`, `reset HEAD <path>`, `reset <path>` only unstage."""
+    if any(a in ("--hard", "--soft", "--merge", "--keep") for a in args):
         return True
-    before = args[:args.index("--")] if "--" in args else args
-    return any(not a.startswith("-") for a in before)
+    if "--" in args:
+        return False
+    names = [a for a in args if not a.startswith("-")]
+    if len(names) != 1:
+        return False
+    name = names[0]
+    if root and os.path.exists(os.path.join(root, name)):
+        return False
+    if root is None:
+        return True
+    return bool(git(root, "rev-parse", "--verify", "-q", name + "^{commit}", check=False).strip())
 
 
 REDIR_RE = re.compile(r"^(\d*|&)(>>?|<)(.*)$")
@@ -302,6 +315,18 @@ def strip_noise(argv):
         out.append(argv[i])
         i += 1
     return out
+
+
+def is_build_step(argv):
+    """Build/test/lint steps judged by command position (`npm run build`, `make test`,
+    `pnpm lint`), never by arguments (`gh-pages -d build` is a deploy)."""
+    cmd = os.path.basename(argv[0])
+    if cmd in ("npm", "yarn", "pnpm", "bun", "npx") and len(argv) > 1:
+        task = argv[2] if argv[1] in ("run", "run-script") and len(argv) > 2 else argv[1]
+        return task.split(":", 1)[0] in BUILD_WORDS
+    if cmd == "make" and len(argv) > 1:
+        return argv[1] in BUILD_WORDS
+    return len(argv) > 1 and argv[1] in BUILD_WORDS
 
 
 def write_targets(seg):
@@ -350,10 +375,44 @@ def switch_target(root, argv):
     if not names:
         return None
     ref = names[0]
+    if ref == "-":
+        prev = git(root, "rev-parse", "--abbrev-ref", "@{-1}", check=False).strip()
+        return prev or None
     if argv[1] == "switch" or git(root, "rev-parse", "--verify", "-q", "refs/heads/" + ref, check=False).strip() \
             or git(root, "rev-parse", "--verify", "-q", "refs/remotes/origin/" + ref, check=False).strip():
         return ref
     return None
+
+
+UNATTENDED_GIT = {"status", "diff", "log", "show", "rev-parse", "ls-files", "ls-tree", "cat-file",
+                  "hash-object", "merge-base", "for-each-ref", "check-ignore", "blame", "grep", "describe",
+                  "rev-list", "shortlog", "switch", "checkout", "restore", "add", "rm", "mv", "commit", "push",
+                  "clean", "branch", "fetch", "reset", "show-ref", "symbolic-ref", "name-rev", "config"}
+
+
+def unattended_git_allowed(root, base, argv):
+    """Allow-list for unattended sessions: read commands, the write-path commands the flow needs,
+    and nothing that moves a ref behind the guard's back (update-ref, branch -f, worktree, merge,
+    rebase, cherry-pick, fetch into a local branch, ...)."""
+    sub, args = argv[1], argv[2:]
+    if sub not in UNATTENDED_GIT:
+        decide("deny", "unattended sessions may not run `git %s`." % sub)
+    if sub == "branch" and any(a in ("-f", "--force", "-m", "-M", "-c", "-C", "--move", "--copy",
+                                     "-u", "--set-upstream-to") for a in args):
+        decide("deny", "unattended sessions may not move, copy or force branches.")
+    if sub == "branch" and any(a in ("-D", "-d", "--delete") for a in args):
+        if not all(a.startswith(("herald/", "herald-revert/")) for a in args if not a.startswith("-")):
+            decide("deny", "unattended sessions may delete only herald/* branches.")
+    if sub == "fetch":
+        for a in args:
+            if ":" in a and not a.startswith("-"):
+                dst = a.split(":", 1)[1].lstrip("+")
+                if not dst.startswith("refs/remotes/"):
+                    decide("deny", "unattended sessions may fetch only into remote-tracking refs.")
+    if sub == "config" and any(not a.startswith("-") for a in args[1:]) and "--get" not in args:
+        decide("deny", "unattended sessions may not change git config.")
+    if sub == "reset" and resets_history(args, root):
+        decide("deny", "unattended sessions may not run `git reset` that moves HEAD.")
 
 
 def push_targets(argv):
@@ -412,10 +471,13 @@ def check_bash(root, cfg, cmd):
                 protect("shell write to %s (protected keys must change through `ask`)." % CONFIG)
         # 4. git: the effective branch follows switch/checkout segments of this same command
         if argv[0] == "git" and len(argv) > 1:
+            argv = strip_noise(argv)  # `2>&1` is not a pathspec or a refspec
             sub = argv[1]
             other_repo = other_git_dir(root, seg)
             if other_repo:
                 continue
+            if unattended():
+                unattended_git_allowed(root, base, argv)
             if sub in ("switch", "checkout"):
                 tgt = switch_target(root, argv)
                 if tgt:
@@ -424,9 +486,14 @@ def check_bash(root, cfg, cmd):
             if sub in ("add", "rm", "mv"):
                 specs = [x for x in argv[2:] if not x.startswith("-")]
                 if sub == "add":
+                    update_only = any(x in ("-u", "--update") for x in argv[2:])
                     everything = not specs and any(x in ("-A", "--all", "-u", "--update") for x in argv[2:]) \
                         or specs == ["."]
-                    pending |= set(git_pathspec_paths(root, [] if everything else specs, everything))
+                    paths_ = git_pathspec_paths(root, [] if everything else specs, everything)
+                    if update_only:  # -u stages tracked files only
+                        tracked = set(git(root, "ls-files", "-z", check=False).split("\0"))
+                        paths_ = [x for x in paths_ if x in tracked]
+                    pending |= set(paths_)
                 elif specs:  # rm/mv touch tracked files that show no diff before running
                     srcs = specs if sub == "rm" else specs[:-1]
                     pending |= {p for p in git(root, "ls-files", "-z", "--", *srcs, check=False).split("\0") if p}
@@ -437,19 +504,21 @@ def check_bash(root, cfg, cmd):
                         else:
                             pending.add(dest)
             rewrites = sub in ("merge", "cherry-pick", "revert", "am", "rebase", "pull") or (
-                sub == "reset" and resets_history(argv[2:]))
+                sub == "reset" and resets_history(argv[2:], root))
             if rewrites:
-                if unattended():  # unattended children never need history-changing git commands
-                    decide("deny", "unattended sessions may not run `git %s`." % sub)
                 if branch == base:
                     decide("ask", "`git %s` changes the base branch without Herald's commit checks — confirm." % sub)
             if sub == "push":
-                _, refspecs = push_targets(normalize(seg, split=False))
+                _, refspecs = push_targets(strip_noise(normalize(seg, split=False)))
                 targets = [t.lstrip("+") for t in refspecs]
                 targets = ["HEAD" if t == "@" else t.replace("@:", "HEAD:", 1) for t in targets]
                 dests = [t.split(":", 1)[1] if ":" in t else (branch if t == "HEAD" else t) for t in targets]
                 dests = [d[len("refs/heads/"):] if d.startswith("refs/heads/") else d for d in dests]
                 if unattended():
+                    if not dests:  # bare push: allowed only to a herald/* upstream
+                        up = git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}", check=False).strip()
+                        if branch == current_branch(root) and up.startswith("origin/herald/"):
+                            dests = [up[len("origin/"):]]
                     # allow-list: an explicit destination that is a herald/* branch, nothing else
                     if any(x in ("--all", "--mirror", "--tags") for x in argv[2:]) or not dests \
                             or not all(d.startswith("herald/") for d in dests):
