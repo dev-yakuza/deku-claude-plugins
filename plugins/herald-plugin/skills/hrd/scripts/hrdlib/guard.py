@@ -188,7 +188,35 @@ def check_edit(root, cfg, tool, ti):
 
 
 def segments(cmd):
-    return [s.strip() for s in re.split(r"&&|\|\||;|\n|\|", cmd) if s.strip()]
+    # `&&`, `||`, `;`, newlines, pipes and a lone `&` (background) all start a new command
+    return [s.strip() for s in re.split(r"&&|\|\||;|\n|\||(?<![>&])&(?![>&])", cmd) if s.strip()]
+
+
+WRAPPERS = {"env", "command", "exec", "nohup", "time", "nice", "xargs", "sudo", "stdbuf", "timeout"}
+
+
+def unwrap(argv):
+    """Drop leading VAR=value assignments and wrapper commands (`env -i A=1`, `nohup`, `time`,
+    `timeout 60`, ...), and reduce argv[0] to its basename (`/usr/bin/git` → `git`)."""
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", a):
+            i += 1
+            continue
+        base = os.path.basename(a)
+        if base in WRAPPERS:
+            i += 1
+            while i < len(argv) and (argv[i].startswith("-") or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[i])
+                                     or (base == "timeout" and re.match(r"^\d+[smhd]?$", argv[i]))
+                                     or (base == "nice" and re.match(r"^-?\d+$", argv[i]))):
+                i += 1
+            continue
+        break
+    out = argv[i:]
+    if out:
+        out = [os.path.basename(out[0])] + out[1:]
+    return out
 
 
 GIT_GLOBAL_WITH_VALUE = ("-c", "-C", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env",
@@ -203,6 +231,7 @@ def normalize(seg, split=True):
         argv = shlex.split(seg)
     except ValueError:
         argv = seg.split()
+    argv = unwrap(argv)
     if argv and argv[0] == "git":
         i = 1
         while i < len(argv) and argv[i].startswith("-"):
@@ -215,8 +244,10 @@ def normalize(seg, split=True):
 
 
 def contains(hay, needle):
+    """Signature match anchored at the command start (after env/wrappers): `grep hugo` is not
+    `hugo`."""
     n = len(needle)
-    return n > 0 and any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
+    return n > 0 and hay[:n] == needle
 
 
 TRIVIAL = {"echo", "tee", "true", ":", "printf", "cat", "sleep", "cd"}
@@ -286,7 +317,10 @@ def resets_history(args, root=None):
     if any(a in ("--hard", "--soft", "--merge", "--keep") for a in args):
         return True
     if "--" in args:
-        return False
+        after = args[args.index("--") + 1:]
+        if after:
+            return False  # `reset [rev] -- <paths>` only unstages
+        args = args[:args.index("--")]
     names = [a for a in args if not a.startswith("-")]
     if len(names) != 1:
         return False
@@ -387,7 +421,9 @@ def switch_target(root, argv):
 UNATTENDED_GIT = {"status", "diff", "log", "show", "rev-parse", "ls-files", "ls-tree", "cat-file",
                   "hash-object", "merge-base", "for-each-ref", "check-ignore", "blame", "grep", "describe",
                   "rev-list", "shortlog", "switch", "checkout", "restore", "add", "rm", "mv", "commit", "push",
-                  "clean", "branch", "fetch", "reset", "show-ref", "symbolic-ref", "name-rev", "config"}
+                  "clean", "branch", "fetch", "reset", "show-ref", "symbolic-ref", "name-rev", "config",
+                  "remote", "ls-remote", "reflog", "diff-tree", "diff-index", "version", "tag", "stash",
+                  "worktree", "help"}
 
 
 def unattended_git_allowed(root, base, argv):
@@ -409,8 +445,35 @@ def unattended_git_allowed(root, base, argv):
                 dst = a.split(":", 1)[1].lstrip("+")
                 if not dst.startswith("refs/remotes/"):
                     decide("deny", "unattended sessions may fetch only into remote-tracking refs.")
-    if sub == "config" and any(not a.startswith("-") for a in args[1:]) and "--get" not in args:
-        decide("deny", "unattended sessions may not change git config.")
+    if sub == "config":
+        readonly = any(a.startswith("--get") or a in ("-l", "--list") for a in args) or \
+            len([a for a in args if not a.startswith("-")]) <= 1
+        if not readonly:
+            decide("deny", "unattended sessions may not change git config.")
+    if sub == "remote" and [a for a in args if not a.startswith("-")][:1] not in ([], ["show"], ["get-url"]):
+        decide("deny", "unattended sessions may only read remotes.")
+    if sub == "tag" and [a for a in args if not a.startswith("-")] and "-l" not in args and "--list" not in args:
+        decide("deny", "unattended sessions may only list tags.")
+    if sub == "stash" and [a for a in args if not a.startswith("-")][:1] not in (["list"], ["show"]):
+        decide("deny", "unattended sessions may only list stashes.")
+    if sub == "worktree" and [a for a in args if not a.startswith("-")][:1] != ["list"]:
+        decide("deny", "unattended sessions may not add or move worktrees.")
+    if sub == "reflog" and [a for a in args if not a.startswith("-")][:1] not in ([], ["show"]):
+        decide("deny", "unattended sessions may only read the reflog.")
+    if sub in ("switch", "checkout"):
+        for i, a in enumerate(args):
+            if a in ("-C", "-B", "--force-create", "--orphan"):
+                tgt = args[i + 1] if i + 1 < len(args) else ""
+                if not tgt.startswith(("herald/", "herald-revert/")):
+                    decide("deny", "unattended sessions may not force-create or reset branch %s." % tgt)
+    if sub == "clean":
+        paths_ = args[args.index("--") + 1:] if "--" in args else []
+        if not paths_ or any(a.startswith("-") and ("x" in a or "X" in a) and not a.startswith("--") for a in args):
+            decide("deny", "unattended `git clean` needs explicit paths after `--` and no -x/-X.")
+        for p_ in paths_:
+            rp = os.path.relpath(os.path.realpath(os.path.join(root, p_)), os.path.realpath(root)).replace(os.sep, "/")
+            if rp in (".", "", ".claude", ".claude/herald") or rp.startswith((".claude/herald/ledger", ".claude/herald/memory")):
+                decide("deny", "unattended `git clean` may not touch the ledger or memory (%s)." % p_)
     if sub == "reset" and resets_history(args, root):
         decide("deny", "unattended sessions may not run `git reset` that moves HEAD.")
 

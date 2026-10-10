@@ -197,6 +197,22 @@ class GuardCase(RepoCase):
             self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
             self.assertEqual(self.guard("Bash", {"command": free}, un), "allow", free)
 
+    def test_round9_env_wrappers_and_paths(self):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        cur = json.load(open(cfgp)); cur["autonomy"]["publish"] = "auto"
+        with open(cfgp, "w") as f:
+            json.dump(cur, f)
+        un = {"HRD_UNATTENDED": "1"}
+        for cmd in ("HUSKY=0 git push origin main", "GH_PROMPT_DISABLED=1 gh pr merge 5 --squash",
+                    "GH_REPO=o/r gh pr merge 5 --admin", "GIT_EDITOR=true git rebase main", "/usr/bin/git push origin main",
+                    "HUSKY=0 git commit -m x", "env -i A=1 git push origin main", "timeout 60 git push origin main",
+                    "git status & git push origin main", "git checkout -B main origin/main", "git clean -fdX",
+                    "git clean -fd -- .claude/herald/ledger", "git reset HEAD~0 --"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
+        for cmd in ("git remote -v", "git ls-remote origin", "git stash list", "git config --get user.name",
+                    "git worktree list", "grep -rn hugo docs/"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "allow", cmd)
+
     def test_pr_branch_scope(self):
         sh(self.root, "git", "switch", "-q", "-c", store.branch_name("t0001", "mine"))
         self.article("mine")

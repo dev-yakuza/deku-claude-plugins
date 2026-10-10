@@ -55,8 +55,21 @@ def foreign_ahead(root, cfg):
     return [c for c in commits.classify_ahead(root, cfg, cfg.base) if not c["ok"]]
 
 
+LAST_RECORD = {"sha": None}
+
+
+def remember(sha):
+    if sha:
+        LAST_RECORD["sha"] = sha
+    return sha
+
+
 def push_base(root, cfg):
     base = cfg.base
+    if LAST_RECORD["sha"] and not git_ok(root, "merge-base", "--is-ancestor", LAST_RECORD["sha"], base):
+        log("refusing to push: the runner's last record commit %s is no longer on %s (base was reset)"
+            % (LAST_RECORD["sha"][:8], base))
+        return False
     bad = foreign_ahead(root, cfg)
     if bad:
         log("refusing to push: base carries non-Herald commits %s" % ", ".join(c["sha"][:8] for c in bad))
@@ -237,8 +250,8 @@ def record_hold(root, cfg, tid, reason, note):
     set_topic_state(get_topic(topics, tid), "held", reason, note)
     save_topics(root, topics)
     emit_signal(root, "hold", tid, {"reason": reason, "note": note, "by": "batch"})
-    commits.commit_state(root, cfg, "runner", "chore(herald): batch hold %s (%s)" % (tid, reason), "hold",
-                         [".claude/herald/topics.json"])
+    remember(commits.commit_state(root, cfg, "runner", "chore(herald): batch hold %s (%s)" % (tid, reason), "hold",
+                                  [".claude/herald/topics.json"]))
     if cfg.get("autonomy", "publish") != "auto":
         push_base(root, cfg)
 
@@ -277,7 +290,7 @@ def auto_candidates(root, cfg, pr_results):
             continue
         reasons = auto_exclusion(crit)
         img = cfg.image_dir(st.get("slug", "")) + "/"
-        files = commits.changed_files(root, "origin/%s" % cfg.base, ref) if st.get("slug") else []
+        files = commits.changed_files(root, "origin/%s...%s" % (cfg.base, ref), None) if st.get("slug") else []
         if st.get("slug") and any(f.startswith(img) for f in files):
             reasons.append("images")
         if reasons:
@@ -395,10 +408,27 @@ def main(argv):
 
     ap = argparse.ArgumentParser(prog="batch_runner")
     ap.add_argument("--n", type=int, default=3)
+    ap.add_argument("--detach", action="store_true", help="fork, setsid, log to memory/batch-logs/")
     a = ap.parse_args(argv)
     from .util import repo_root
     root = repo_root()
     cfg = Config.load(root)
+    logs_dir = os.path.join(paths(root)["memory"], "batch-logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    if a.detach:
+        if os.fork():
+            print(json.dumps({"detached": True, "pid_file": os.path.join(logs_dir, "runner.pid"),
+                              "summary": os.path.join(logs_dir, "runner.out"),
+                              "log": os.path.join(logs_dir, "runner.log")}))
+            return 0
+        os.setsid()
+        sys.stdin = open(os.devnull)
+        sys.stdout = open(os.path.join(logs_dir, "runner.out"), "w", buffering=1)
+        sys.stderr = open(os.path.join(logs_dir, "runner.log"), "a", buffering=1)
+        os.dup2(sys.stdout.fileno(), 1)
+        os.dup2(sys.stderr.fileno(), 2)
+    with open(os.path.join(logs_dir, "runner.pid"), "w") as f:
+        f.write(str(os.getpid()))
     token = lock.acquire(root, "batch")
     os.environ["HRD_LOCK_TOKEN"] = token
 
@@ -413,7 +443,8 @@ def main(argv):
         os._exit(130)
 
     signal.signal(signal.SIGTERM, on_term)
-    signal.signal(signal.SIGHUP, on_term)
+    signal.signal(signal.SIGINT, on_term)
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)  # detached runs survive a hangup
     os.makedirs(result_dir(root), exist_ok=True)
     logs = os.path.join(paths(root)["memory"], "batch-logs")
     os.makedirs(logs, exist_ok=True)

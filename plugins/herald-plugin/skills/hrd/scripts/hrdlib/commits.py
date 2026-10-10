@@ -139,8 +139,10 @@ def parents(root, sha):
     return git(root, "rev-list", "--parents", "-n", "1", sha).split()[1:]
 
 
-def changed_files(root, a, b):
-    return [p for p in git(root, "diff", "--name-only", "-z", a, b).split("\0") if p]
+def changed_files(root, a, b=None):
+    """Files changed between a and b (or in a range spec like `x...y` when b is None)."""
+    args = [a] if b is None else [a, b]
+    return [p for p in git(root, "diff", "--name-only", "-z", *args).split("\0") if p]
 
 
 def is_sync_merge(root, cfg, sha, origin_ref):
