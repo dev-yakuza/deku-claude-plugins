@@ -2627,6 +2627,15 @@ hasfx "qa: 미계획으로 닫힌 Issue 는 거절로 존중" "$FQMD" '`등록 �
 hasfx "qa: 무인 실행은 PR 에도 알린다" "$FQMD" '`<!-- guild:followups:pr -->`'
 hasfx "handoff F: 후속 Issue 생성 실패는 스테이지를 멈추지 않는다" "$GLD/commands/atoms/_handoff.md" '**Follow-up Issue creates are not stage state either.**'
 hasfx "init: 화면에는 BLOCKER/MAJOR 만" "$FIMD" '**On screen, show only BLOCKER/MAJOR gaps plus the summary count**'
+# 후속 Issue 3회차 적대적 리뷰
+hasfx "init: inline-secret 에 git rm --cached 를 제안하지 않는다" "$FIMD" 'for `inline-secret` the file is ordinary source, so **never** offer `git rm --cached`'
+hasfx "qa: 이전 기록의 declined 는 판정으로" "$FQMD" '**`등록 불필요 — 이전에 거절됨`**'
+hasfx "qa: 자기 Issue 는 덮는 Issue 가 아니다" "$FQMD" '**Never count `#$1` itself**'
+hasfx "review: 자기 Issue 는 덮는 Issue 가 아니다" "$FUMD" '**Never count `<ISSUE>` itself, or any Issue in this PR'"'"'s `closingIssuesReferences`, as the covering Issue**'
+hasfx "qa: PR 알림을 기록과 맞춘다" "$FQMD" '**Keep the PR notice in step with the record — in every mode.**'
+hasfx "review: PR 알림은 (b) 가 비어도 정리" "$FUMD" '**The PR notice is settled separately, and even when (b) was empty**'
+hasfx "review: Issue 쪽 \$1 은 <ISSUE>" "$FUMD" '**From here on, every Issue-side use of `$1` in this command means `<ISSUE>`**'
+lacksfx "qa: 정의되지 않은 <N> 을 쓰지 않는다" "$FQMD" '/gld review <N>'
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -2634,7 +2643,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=717   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=725   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

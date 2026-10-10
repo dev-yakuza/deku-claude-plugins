@@ -337,7 +337,7 @@ If the hygiene group ran only the light heuristic, offer: "전용 시크릿 스�
 Every **BLOCKER/MAJOR** gap gets **exactly one verdict, stated before any question** — the same binary discipline as `review.md` Step 4 and `audit.md`'s `이슈 생성 필요` / `지금은 불필요`. Never present a menu of handling options and ask the human to pick ("어떻게 처리할까요?") — that hands back the very call this step exists to make. **Dedup first**, so the verdict is true when it is said: search open issues for a `guild:harness` issue carrying the same gap `id` marker (`<!-- guild:harness:<id> -->`), e.g. `gh issue list --repo <owner>/<repo> --label guild:harness --state open --search "guild:harness:<id> in:body" --json number,title`. The verdict is then mechanical:
 - **`등록 불필요 — #<n>이 이미 다룸`** — the dedup found one.
 - **`로컬 수정으로 해결`** — only when a **safe, reversible** local edit closes the gap **completely** (e.g. `gate-hook-not-executable` → `chmod +x` the hook it names). Nothing is left to track, so no Issue.
-- **`이슈 등록 필요`** — every other BLOCKER/MAJOR gap. This includes a **committed/inline secret**: the local part (`.gitignore` + `git rm --cached <file>`) is offered in the same confirm, but it does not close the gap — history purge and key rotation are irreversible (INV3) / external and stay **guide-only** (print the steps; **NEVER auto-run** `git filter-branch`/filter-repo or rotate keys), and the tracking Issue is what records that they are still owed.
+- **`이슈 등록 필요`** — every other BLOCKER/MAJOR gap. This includes a **committed or inline secret**. For `committed-secret-file` the local part (`.gitignore` + `git rm --cached <file>`) is offered in the same confirm; for `inline-secret` the file is ordinary source, so **never** offer `git rm --cached` (the next commit would delete the source file) — its local part is guide-only: move the token out of the source into env/config. Either way the local part does not close the gap — history purge and key rotation are irreversible (INV3) / external and stay **guide-only** (print the steps; **NEVER auto-run** `git filter-branch`/filter-repo or rotate keys), and the tracking Issue is what records that they are still owed.
 
 **No GitHub repo** (P0 step 4 continued in harness-only mode) → there is nowhere to register an Issue and nothing to dedup against, so `이슈 등록 필요` is not a verdict this run can keep: skip the dedup, give such gaps **`기록만 — GitHub 레포 없음`** (the report on disk is their record), and still offer `로컬 수정으로 해결` items.
 
@@ -347,6 +347,7 @@ One batched prompt (localized per `config.language`):
 ```
 [BLOCKER] no-test-command — <왜 Guild에 필요한지> → 이슈 등록 필요
 [BLOCKER] committed-secret-file — <file> → 이슈 등록 필요 (+ 로컬: .gitignore 추가 · git rm --cached)
+[BLOCKER] inline-secret — <file>:<line> → 이슈 등록 필요 (+ 안내: 토큰을 env/config로 옮김)
 [MAJOR] no-ci — <왜> → 등록 불필요 — #12가 이미 다룸
 [BLOCKER] gate-hook-not-executable — <왜> → 로컬 수정으로 해결
 등록 불필요 3건 (MINOR — 리포트에만 기록)
