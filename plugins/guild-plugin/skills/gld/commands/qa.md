@@ -150,15 +150,14 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
     위 등록 필요 <k>건을 지금 Issue로 등록할까요? (항목별로 뺄 수 있습니다)
     ```
     The `등록 불필요` line is one line, never itemized, and printed only when `<n>` > 0. On confirmation, create each item via the temp-file `gh issue create --body-file` pattern (each its own Bash call) — title = the gap, body = 배경·AC(안)·근거(design doc file + section), `Depends on: #$1` — labeling with the repo's existing `type:*`/`area:*` labels where a clear match exists (check `gh label list --limit 200 --json name` first — `--label` errors on a missing label). ⚠ **Verify each create landed** (`_handoff.md` Section F): `gh issue create` prints the new Issue's URL; no URL means that Issue does **not** exist — record the item as `unfiled`, never as `filed`. Items the human leaves out are `declined`.
-  - **Unattended** (`GLD_UNATTENDED=1`): never auto-create — every `후속 Issue 등록 필요` item is recorded as `unfiled` (below), and the question must still reach a human. `/gld review` Step 5 asks it, but review is optional and `batch` never runs it (`_handoff.md` Section H), so an Issue comment alone would reach nobody. **Also post a PR notice** — a comment on this Issue's open PR (found as in Step 2.5), bounded by `<!-- guild:followups:pr -->` … `<!-- /guild:followups:pr -->`, update-in-place (temp-file pattern; find an existing one with a `--paginate`d read of `issues/<PR_NUM>/comments`):
+  - **Unattended** (`GLD_UNATTENDED=1`): never auto-create — every `후속 Issue 등록 필요` item is recorded as `unfiled` (below), and the question must still reach a human. `/gld review` Step 5 asks it, but review is optional and `batch` never runs it (`_handoff.md` Section H), so an Issue comment alone would reach nobody. **Also post a PR notice** — a comment on this Issue's open PR (found as in Step 2.5), bounded by `<!-- guild:followups:pr:$1 -->` … `<!-- /guild:followups:pr:$1 -->` (**the Issue number is part of the marker** — a PR can close more than one Issue, and each Issue's notice is settled only from that Issue's record), update-in-place (temp-file pattern; find an existing one with a `--paginate`d read of `issues/<PR_NUM>/comments`):
     ```
-    <!-- guild:followups:pr -->
+    <!-- guild:followups:pr:$1 -->
     후속 Issue 등록 필요 <k>건 — 사람 확인 전 (/gld review $1 Step 5에서 등록 여부를 묻습니다)
     - <title>
-    <!-- /guild:followups:pr -->
+    <!-- /guild:followups:pr:$1 -->
     ```
     No open PR → say so in the qa output instead. Do not block `done` on it.
-  - **Keep the PR notice in step with the record — in every mode.** Whenever this step writes the record and a `<!-- guild:followups:pr -->` comment already exists on the PR, PATCH it to match: the `unfiled` items that remain, or — none left (filed or declined in an attended re-run, or now covered) — one line `후속 Issue: 처리됨 — #$1의 후속 기록 참조`. A notice left saying "사람 확인 전" after the question was answered is a false claim on the merge surface.
   - **In both modes, write the follow-up record** — its own Issue comment, bounded by `<!-- guild:followups -->` … `<!-- /guild:followups -->` (update-in-place, `_handoff.md` Section B; temp-file pattern). It is a **separate comment, not a section of `<!-- guild:qa:output -->`**: Step 2 replaces that comment on every QA re-run, and a record kept inside it would lose its `declined` answers each time. One line per `후속 Issue 등록 필요` item, status token first (ASCII, `_handoff.md` Section K):
     ```
     <!-- guild:followups -->
@@ -170,6 +169,7 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
     ```
     `unfiled` is the only status `review.md` acts on; `declined` and `filed` are history, and **every rewrite carries both forward** from the previous record. Other `등록 불필요` items are not recorded — they asked nothing of anyone.
 - **No `후속 Issue 등록 필요` items** (all covered, or none real) → say so in one line (`후속 Issue 등록 불필요 — <n>건 모두 기존 Issue/조건부/해결됨`, or `후속 항목 없음`), no prompt. If a `<!-- guild:followups -->` comment exists from an earlier run, rewrite it with only its `declined`/`filed` lines (the earlier `unfiled` items are now covered — that is what "none left" means); do not leave a stale `unfiled` line for review to re-ask. Cheap when clean — do not force ceremony on a change with no design docs or no real deferrals.
+- **Keep the PR notice in step with the record — in every mode and on both branches above.** Whenever this step writes the record and a `<!-- guild:followups:pr:$1 -->` comment already exists on the PR (match that exact marker, `--paginate`d), PATCH it to match: the `unfiled` items that remain, or — none left (filed or declined in an attended re-run, or now covered) — one line `후속 Issue: 처리됨 — #$1의 후속 기록 참조`. A notice left saying "사람 확인 전" after the question was answered, or after the items were covered, is a false claim on the merge surface — and on an unattended run nothing else will correct it before merge.
 - This **scan** runs **once per issue, at QA** — not repeated at `review`. QA is the mandatory spine stop every `/gld dev` run passes through; `review` is on-demand (nudged, not forced) and would miss unattended/batch runs entirely if this lived there instead. `review` only **asks** the `unfiled` items' question (its Step 5) — it does not re-read the design docs.
 
 ## Step 3 — Judge + return
