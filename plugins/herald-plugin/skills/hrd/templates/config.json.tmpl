@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "language": "{{LANGUAGE}}",
+  "base_branch": "{{BASE_BRANCH}}",
+  "paths": {
+    "content": "{{CONTENT_DIR}}",
+    "body_pattern": "{{BODY_PATTERN}}",
+    "images": "{{IMAGES_DIR}}",
+    "build_inputs": ["{{CONTENT_DIR}}", "{{PUBLIC_DIR}}"]
+  },
+  "site": {
+    "base_url": "{{SITE_BASE_URL}}",
+    "url_pattern": "{{URL_PATTERN}}"
+  },
+  "commands": {
+    "deploy": "{{DEPLOY_CMD}}",
+    "deploy_artifacts": [],
+    "validate": ""
+  },
+  "autonomy": {
+    "publish": "approve",
+    "throttle": {"max_per_day": 2}
+  },
+  "budget": {"per_article_usd": 0},
+  "models": {
+    "batch_main": "sonnet",
+    "prices": {"opus": 5.0, "sonnet": 3.0, "haiku": 1.0}
+  },
+  "roles": {"conditional": []},
+  "gh": {"label": "herald", "revert_label": "herald-revert"}
+}

@@ -10,3 +10,6 @@ design/guild/*
 # produced them is reviewable, and that code has been wrong seven times.
 !design/guild/tools/
 design/guild/tools/__pycache__/
+
+# Herald design notes — kept out of the repo like Guild's (they name the pilot repo).
+design/herald/

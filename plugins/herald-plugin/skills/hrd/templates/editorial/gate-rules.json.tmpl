@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "Deterministic gate rules read by .claude/herald/scripts/validate_content.py. Unknown keys such as this one are ignored.",
+    "init replaces each quoted numeric placeholder (MIN_CHARS, MAX_CHARS, CATEGORY_MIN_CHARS, CATEGORY_MAX_CHARS), quotes included, with a number (or null for no maximum), so the file stays valid JSON.",
+    "frontmatter.required: replace with the repo's required frontmatter keys. length.count: nonspace | all. per_category: one entry per category with overrides, or {}.",
+    "forbidden: one object per phrase; status draft only warns, confirmed fails the gate. Rules extracted from existing articles start as draft (INV6); only a human sets confirmed. Remove the placeholder entry if there are none.",
+    "images.public_dir: directory that maps to the site root, so /images/x.png resolves to <public_dir>/images/x.png."
+  ],
+  "frontmatter": {
+    "required": ["title", "description", "slug", "date"]
+  },
+  "length": {
+    "min_chars": "{{MIN_CHARS}}",
+    "max_chars": "{{MAX_CHARS}}",
+    "count": "nonspace",
+    "per_category": {
+      "{{CATEGORY_NAME}}": {
+        "min_chars": "{{CATEGORY_MIN_CHARS}}",
+        "max_chars": "{{CATEGORY_MAX_CHARS}}"
+      }
+    }
+  },
+  "forbidden": [
+    {
+      "pattern": "{{FORBIDDEN_PATTERN}}",
+      "regex": false,
+      "status": "draft",
+      "note": "{{FORBIDDEN_NOTE}}"
+    }
+  ],
+  "links": {
+    "check": true
+  },
+  "images": {
+    "check": true,
+    "public_dir": "{{PUBLIC_DIR}}"
+  }
+}
