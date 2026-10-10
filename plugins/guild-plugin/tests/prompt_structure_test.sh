@@ -2645,6 +2645,9 @@ hasfx "review: DUPLICATE 는 원본을 따라간다" "$FUMD" '`DUPLICATE` → fo
 lacksfx "qa: Issue 번호 없는 PR 알림 마커를 쓰지 않는다" "$FQMD" '<!-- guild:followups:pr -->'
 hasfx "review: 자기 Issue 의 알림만 정리" "$FUMD" 'match exactly `<!-- guild:followups:pr:<ISSUE> -->`'
 lacksfx "review: 기록이 없다고 알림을 처리됨으로 바꾸지 않는다" "$FUMD" '(or there is no record)'
+# 후속 Issue 6회차 적대적 리뷰 (MINOR 정리)
+hasfx "review: 기록을 읽거나 쓴 경우에만 알림 정리" "$FUMD" 'record was actually read or written in this run and now holds no `unfiled` line'
+hasfx "review: 구버전 헤딩은 의미로 인식" "$FUMD" 'recognise it by meaning, not by the literal string'
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -2652,7 +2655,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=732   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=734   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
