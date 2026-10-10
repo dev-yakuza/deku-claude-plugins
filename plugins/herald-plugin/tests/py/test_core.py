@@ -406,6 +406,21 @@ class RegressionRound1(IntegrityTests):
         out, _ = self.hrd("record-published", "--topic", "t0001", "--slug", "new-post", "--pr", "1")
         self.assertFalse(out["human_reviewed"])
 
+    def test_requeue_clears_auto_merge_mark(self):
+        self.publish_herald("t0001", "new-post")
+        data = store.load_topics(self.root)
+        t = store.get_topic(data, "t0001")
+        t["auto_merged_pr"] = 1
+        store.set_topic_state(t, "held", "reverted")
+        store.save_topics(self.root, data)
+        self.hrd("requeue", "--topic", "t0001")
+        self.assertNotIn("auto_merged_pr", store.get_topic(store.load_topics(self.root), "t0001"))
+        data = store.load_topics(self.root)
+        store.get_topic(data, "t0001")["auto_merged_pr"] = 1
+        store.save_topics(self.root, data)
+        out, _ = self.hrd("record-published", "--topic", "t0001", "--slug", "new-post", "--pr", "5")
+        self.assertTrue(out["human_reviewed"])  # a different, human-approved PR
+
     def test_unattended_base_writers_refused(self):
         self.write(".claude/herald/topics.json", "{}")
         _, p = self.hrd("commit", "--cmd", "plan", "--kind", "plan", "-m", "m", ".claude/herald/topics.json",

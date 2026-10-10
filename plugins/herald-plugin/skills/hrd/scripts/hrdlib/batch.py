@@ -290,6 +290,7 @@ def finish_auto(root, cfg, chosen):
     # record the unattended merges first, in tracked state, before any path can stop: whoever
     # records these articles later must keep human_reviewed=false (plan §3.2.2)
     git(root, "checkout", "-q", cfg.base)
+    sync_base(root, cfg)  # origin moved by the GitHub merges: fast-forward before writing records
     if merged:
         topics = load_topics(root)
         for tid, n in merged:
@@ -302,8 +303,8 @@ def finish_auto(root, cfg, chosen):
     if ship_res is None or reported != {n for _, n in merged}:
         log("ship child result missing or disagrees with GitHub (%s vs %s) — not deploying"
             % (sorted(reported), sorted(n for _, n in merged)))
+        push_base(root, cfg)  # the auto-merge records must reach origin even when we stop here
         return False
-    sync_base(root, cfg)  # update first, then write records (refresh → write → commit)
     topics = load_topics(root)
     for rv in ghstate.pending_removal_reverts(root, cfg, topics):
         for p in prs:
@@ -323,6 +324,7 @@ def finish_auto(root, cfg, chosen):
             {k: report[k] for k in ("untracked_build_inputs", "tracked_dirty", "ignored_residue", "flags")}))
         commits.commit_state(root, cfg, "runner", "chore(herald): revert/hold records (deploy stopped)", "abort",
                              [".claude/herald/topics.json"])
+        push_base(root, cfg)
         return False
     deploy = cfg.get("commands", "deploy")
     if (merged or any(r["merged_unrecorded"] for r in report["articles"])) and deploy:
@@ -332,6 +334,7 @@ def finish_auto(root, cfg, chosen):
                 git(root, "checkout", "--", a, check=False)
             commits.commit_state(root, cfg, "runner", "chore(herald): revert/hold records (deploy failed)", "abort",
                                  [".claude/herald/topics.json"])
+            push_base(root, cfg)
             log("deploy command failed — merged articles stay merged-unrecorded")
             return False
     chosen_slugs = {by_num[n]["slug"] for _, n in merged}

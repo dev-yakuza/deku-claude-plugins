@@ -125,6 +125,26 @@ class GuardCase(RepoCase):
         self.assertEqual(self.guard("Bash", {"command": "npm run deploy"}, un), "deny")
         self.assertEqual(self.guard("Bash", {"command": "tee deploy.log"}, un), "allow")
 
+    def test_round6_guard_regressions(self):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        un = {"HRD_UNATTENDED": "1"}
+        for deploy, cmd in (("cat site.tar | ssh host deploy-site", "cat site.tar | ssh host deploy-site"),
+                            ("echo y | npx vercel --prod", "echo y | npx vercel --prod")):
+            cur = json.load(open(cfgp)); cur["commands"]["deploy"] = deploy
+            with open(cfgp, "w") as f:
+                json.dump(cur, f)
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
+        # rm/mv of a Herald article followed by a commit on base
+        data = store.load_topics(self.root)
+        data["topics"].append({"id": "t0001", "title": "x", "state": "published", "slug": "old-post", "history": []})
+        store.save_topics(self.root, data)
+        self.assertEqual(self.guard("Bash", {"command": "git rm src/content/blog/old-post.md && git commit -m x"}), "deny")
+        self.assertEqual(self.guard("Bash", {"command": "git mv src/content/blog/old-post.md src/content/blog/x.md && git commit -m x"}), "deny")
+        # unstaging and other repositories are not base rewrites
+        self.assertEqual(self.guard("Bash", {"command": "git reset -q -- README.md"}, un), "allow")
+        self.assertEqual(self.guard("Bash", {"command": "git -C /tmp merge foo"}, un), "allow")
+        self.assertEqual(self.guard("Bash", {"command": 'git commit -am "src/content/blog/old-post.md"'}), "allow")
+
     def test_pr_branch_scope(self):
         sh(self.root, "git", "switch", "-q", "-c", store.branch_name("t0001", "mine"))
         self.article("mine")

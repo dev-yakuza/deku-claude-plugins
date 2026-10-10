@@ -168,6 +168,9 @@ def staged_after(root, argv, pending=()):
                      "--fixup", "--squash", "--cleanup", "-t", "--template"):
                 skip = True
                 continue
+            if re.match(r"^-[a-zA-Z]+$", x) and x[-1] in "mFCct":  # combined short options: `-am msg`
+                skip = True
+                continue
             if not x.startswith("-"):
                 specs.append(x)
     if specs:
@@ -227,24 +230,56 @@ def deploy_signatures(deploy):
     normalized like the commands we inspect."""
     sigs = []
     for part in re.split(r"&&|\|\||;|\n", deploy or ""):
-        part = part.split("|", 1)[0].strip()
-        argv = [a for a in normalize(part) if not re.match(r"^\d*[<>]", a)]
-        if argv and argv[0] not in TRIVIAL:
-            sigs.append(argv)
+        for member in part.split("|"):  # `echo y | vercel --prod`: the publisher is after the pipe
+            argv = [a for a in normalize(member.strip()) if not re.match(r"^\d*[<>]", a)]
+            if argv and argv[0] not in TRIVIAL:
+                sigs.append(argv)
+    if not sigs and (deploy or "").strip():
+        last = [s for s in segments(deploy) if s]
+        sigs = [normalize(last[-1])] if last else []
     # only the last meaningful step publishes; earlier steps (e.g. `npm run build`) stay free
     return sigs[-1:]
 
 
 def git_pathspec_paths(root, specs, everything=False):
     """Changed (tracked or untracked-not-ignored) paths a `git add/rm/commit <specs>` would take."""
-    if everything:
-        out = git(root, "status", "--porcelain", "-z", "--untracked-files=all", check=False)
-        return sorted({rec[3:] for rec in out.split("\0") if len(rec) > 3})
+    if everything:  # name-only lists (no rename records to mis-parse)
+        changed = git(root, "diff", "--name-only", "-z", "HEAD", check=False).split("\0")
+        untracked = git(root, "ls-files", "-z", "--others", "--exclude-standard", check=False).split("\0")
+        return sorted({p for p in changed + untracked if p})
     if not specs:
         return []
     tracked = git(root, "diff", "--name-only", "-z", "HEAD", "--", *specs, check=False).split("\0")
     untracked = git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", *specs, check=False).split("\0")
     return sorted({p for p in tracked + untracked if p})
+
+
+def other_git_dir(root, seg):
+    """True when `git -C <dir>` / `--git-dir` points at another repository."""
+    try:
+        raw = shlex.split(seg)
+    except ValueError:
+        raw = seg.split()
+    for i, a in enumerate(raw[1:], 1):
+        if not a.startswith("-"):
+            break
+        val = None
+        if a in ("-C", "--git-dir") and i + 1 < len(raw):
+            val = raw[i + 1]
+        elif a.startswith("--git-dir="):
+            val = a.split("=", 1)[1]
+        if val and os.path.realpath(os.path.join(root, val)) not in (os.path.realpath(root),
+                                                                       os.path.realpath(os.path.join(root, ".git"))):
+            return True
+    return False
+
+
+def resets_history(args):
+    """`git reset -- <paths>` only unstages; --hard/--soft/--mixed/--merge/--keep or a commit moves HEAD."""
+    if any(a in ("--hard", "--soft", "--mixed", "--merge", "--keep") for a in args):
+        return True
+    before = args[:args.index("--")] if "--" in args else args
+    return any(not a.startswith("-") for a in before)
 
 
 def push_targets(argv):
@@ -307,9 +342,22 @@ def check_bash(root, cfg, cmd):
             branch = current_branch(root)
             if sub in ("add", "rm", "mv"):
                 specs = [a for a in argv[2:] if not a.startswith("-")]
-                everything = any(a in ("-A", "--all", "-u", "--update") for a in argv[2:]) or "." in specs
-                pending |= set(git_pathspec_paths(root, specs, everything))
-            if sub in ("merge", "cherry-pick", "revert", "am", "rebase", "reset", "pull") and branch == base:
+                if sub == "add":
+                    everything = any(a in ("-A", "--all", "-u", "--update") for a in argv[2:]) or "." in specs
+                    pending |= set(git_pathspec_paths(root, specs, everything))
+                elif specs:  # rm/mv touch tracked files that show no diff before running
+                    srcs = specs if sub == "rm" else specs[:-1]
+                    pending |= {p for p in git(root, "ls-files", "-z", "--", *srcs, check=False).split("\0") if p}
+                    if sub == "mv":
+                        dest = specs[-1]
+                        if os.path.isdir(os.path.join(root, dest)) and len(srcs) >= 1:
+                            pending |= {"%s/%s" % (dest.rstrip("/"), os.path.basename(x)) for x in srcs}
+                        else:
+                            pending.add(dest)
+            other_repo = other_git_dir(root, seg)
+            rewrites = sub in ("merge", "cherry-pick", "revert", "am", "rebase", "pull") or (
+                sub == "reset" and resets_history(argv[2:]))
+            if rewrites and branch == base and not other_repo:
                 if unattended():
                     decide("deny", "unattended sessions may not rewrite or merge into the base branch (`git %s`)." % sub)
                 decide("ask", "`git %s` changes the base branch without Herald's commit checks — confirm." % sub)

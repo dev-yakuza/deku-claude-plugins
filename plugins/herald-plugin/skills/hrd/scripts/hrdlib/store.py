@@ -380,8 +380,8 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
     art.update({"path": cfg.body_path(slug), "url": cfg.article_url(slug), "origin": origin,
                 "current_topic_id": tid, "published_at": now_iso(), "withdrawn": False,
                 "category": t.get("category"), "keywords": t.get("keywords", [])})
-    if t.get("auto_merged_pr"):  # merged unattended: stays false whoever records it later
-        auto = True
+    if t.get("auto_merged_pr") and (pr is None or str(pr) == str(t["auto_merged_pr"])):
+        auto = True  # merged unattended: stays false whoever records it later
     if origin == "herald":
         art["human_reviewed"] = not auto
     t["slug"] = slug
