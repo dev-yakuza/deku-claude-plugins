@@ -127,6 +127,37 @@ class BatchCase(RepoCase):
         self.assertNotEqual(sh(self.root, "git", "rev-parse", "origin/main").strip(),
                             sh(self.root, "git", "rev-parse", "main").strip())
 
+    def test_vanished_record_commit_blocks_push(self):
+        from hrdlib import batch as b
+        data = store.load_topics(self.root)
+        store.set_topic_state(store.get_topic(data, "t0001"), "held", "research")
+        store.save_topics(self.root, data)
+        sha = b.remember(commits.commit_state(self.root, self.cfg, "runner", "hold", "hold", [".claude/herald/topics.json"]))
+        sh(self.root, "git", "reset", "-q", "--hard", "HEAD~1")  # e.g. a child reset base
+        self.assertFalse(b.push_base(self.root, self.cfg))
+        b.LAST_RECORD["sha"] = None
+
+    def test_detach_writes_pid_and_summary(self):
+        import time
+        with open(self.plan, "w") as f:
+            json.dump({"t0001": "held:research"}, f)
+        env = dict(os.environ, HRD_CLAUDE=os.path.join(HERE, "fake_claude.py"), HRD_FAKE_CLAUDE_PLAN=self.plan,
+                   HRD_SCRIPTS=SCRIPTS)
+        p = subprocess.run([sys.executable, os.path.join(SCRIPTS, "batch_runner.py"), "--n", "1", "--detach"],
+                           cwd=self.root, capture_output=True, text=True, env=env, timeout=60, stdin=subprocess.DEVNULL)
+        info = json.loads(p.stdout)
+        self.assertTrue(info["detached"])
+        deadline = time.time() + 120
+        out = ""
+        while time.time() < deadline:
+            if os.path.exists(info["summary"]):
+                out = open(info["summary"]).read()
+                if out.strip().endswith("}"):
+                    break
+            time.sleep(2)
+        self.assertIn('"held"', out)
+        self.assertTrue(os.path.exists(info["pid_file"]))
+
     def test_throttle_ignores_old_or_reverted_auto_merges(self):
         from hrdlib import batch as b
         topics = {"topics": [{"auto_merged_pr": 1, "auto_merged_at": "2000-01-01T00:00:00+00:00", "state": "queued"},

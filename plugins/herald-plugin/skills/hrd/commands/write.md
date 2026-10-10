@@ -41,7 +41,11 @@ measured cost so far. Ask: approve / request changes / hold.
 ## 3. Publish
 
 `atoms/_stages.md` § publish (finalize → commit → scope → push → ledger push record → PR).
-Report the PR URL and remind: "publish with `/hrd ship`".
+Report the PR URL and remind: "publish with `/hrd ship`". If `config.autonomy.publish` is
+`auto`, instead run `/hrd ship <that PR> --session-auto` right away: per plan §3.2.2 the
+interactive auto path covers only the PR this session just created — step 4 (per-PR question) is
+skipped, the auto-exclusion rules and the daily throttle apply (`HRD auto-exclusion --topic
+<id>`; excluded → stay PR-pending and say why), and the guard's merge/deploy confirmations remain.
 
 ## 4. Unattended specifics
 

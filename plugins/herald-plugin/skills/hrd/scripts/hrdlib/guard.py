@@ -193,6 +193,36 @@ def segments(cmd):
 
 
 WRAPPERS = {"env", "command", "exec", "nohup", "time", "nice", "xargs", "sudo", "stdbuf", "timeout"}
+WRAPPER_VALUE_OPTS = {"timeout": ("-s", "--signal", "-k", "--kill-after"), "sudo": ("-u", "-g", "-C", "-h", "-p"),
+                      "env": ("-u", "--unset", "-C", "--chdir", "-S"), "nice": ("-n",),
+                      "stdbuf": ("-i", "-o", "-e"), "xargs": ("-I", "-n", "-P", "-L", "-d", "-a", "-E", "-s")}
+PKG_RUNNERS = {"npm", "pnpm", "yarn", "bun"}
+
+
+def canon(argv):
+    """Package-runner forms reduced to one shape so a configured deploy matches however it is
+    invoked: `npx|bunx|pnpm dlx|yarn dlx|npm exec X` → `X`; `npm [opts] run|run-script T`,
+    `pnpm [run] T`, `yarn [run] T`, `bun run T` → `run T`; `bash|sh script` → script basename."""
+    if not argv:
+        return argv
+    a0, rest = argv[0], argv[1:]
+    if a0 in ("npx", "bunx"):
+        while rest and rest[0].startswith("-"):
+            rest = rest[2:] if rest[0] in ("-p", "--package") else rest[1:]
+        return canon(rest)
+    if a0 in PKG_RUNNERS:
+        while rest and rest[0].startswith("-"):
+            rest = rest[2:] if rest[0] in ("--prefix", "-C", "--cwd", "--dir") else rest[1:]
+        if rest and rest[0] in ("dlx", "exec", "x"):
+            return canon([x for x in rest[1:] if x != "--"])
+        if rest and rest[0] in ("run", "run-script"):
+            return ["run"] + rest[1:]
+        if a0 in ("pnpm", "yarn") and rest and rest[0] not in ("install", "add", "remove", "i", "up", "update"):
+            return ["run"] + rest  # `pnpm deploy`, `yarn deploy` run the script
+        return [a0] + rest
+    if a0 in ("bash", "sh", "zsh") and rest and not rest[0].startswith("-"):
+        return [os.path.basename(rest[0])] + rest[1:]
+    return argv
 
 
 def unwrap(argv):
@@ -207,10 +237,17 @@ def unwrap(argv):
         base = os.path.basename(a)
         if base in WRAPPERS:
             i += 1
-            while i < len(argv) and (argv[i].startswith("-") or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[i])
-                                     or (base == "timeout" and re.match(r"^\d+[smhd]?$", argv[i]))
-                                     or (base == "nice" and re.match(r"^-?\d+$", argv[i]))):
-                i += 1
+            takes_value = WRAPPER_VALUE_OPTS.get(base, ())
+            while i < len(argv):
+                x = argv[i]
+                if x in takes_value:
+                    i += 2
+                elif x.startswith("-") or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", x) \
+                        or (base == "timeout" and re.match(r"^\d+(\.\d+)?[smhd]?$", x)) \
+                        or (base == "nice" and re.match(r"^-?\d+$", x)):
+                    i += 1
+                else:
+                    break
             continue
         break
     out = argv[i:]
@@ -262,11 +299,11 @@ def deploy_signatures(deploy):
         for member in part.split("|"):  # `echo y | vercel --prod`: the publisher is after the pipe
             argv = strip_noise(normalize(member.strip()))
             if argv and argv[0] not in TRIVIAL and not is_build_step(argv):
-                sigs.append(argv)
+                sigs.append(canon(argv))
     if not sigs and (deploy or "").strip():
         rest = [strip_noise(normalize(x)) for x in segments(deploy)]
         rest = [x for x in rest if x and x[0] not in TRIVIAL]
-        sigs = rest[-1:]
+        sigs = [canon(x) for x in rest[-1:]]
     # every publishing step (build/test/lint steps excluded) — a later notify step must not hide
     # the real deploy step
     return [x for x in sigs if x]
@@ -325,6 +362,8 @@ def resets_history(args, root=None):
     if len(names) != 1:
         return False
     name = names[0]
+    if name in ("HEAD", "@"):
+        return False  # `reset HEAD` unstages; HEAD stays
     if root and os.path.exists(os.path.join(root, name)):
         return False
     if root is None:
@@ -378,7 +417,7 @@ def write_targets(seg):
             tgt = m.group(3) or (raw[i + 1] if i + 1 < len(raw) else "")
             if tgt and not tgt.startswith("&") and tgt != "/dev/null":
                 out.append(tgt)
-    argv = strip_noise(raw)
+    argv = strip_noise(unwrap(raw))
     if not argv:
         return out
     cmd, args = os.path.basename(argv[0]), [x for x in argv[1:] if not x.startswith("-")]
@@ -446,8 +485,10 @@ def unattended_git_allowed(root, base, argv):
                 if not dst.startswith("refs/remotes/"):
                     decide("deny", "unattended sessions may fetch only into remote-tracking refs.")
     if sub == "config":
-        readonly = any(a.startswith("--get") or a in ("-l", "--list") for a in args) or \
-            len([a for a in args if not a.startswith("-")]) <= 1
+        writes = any(a.startswith(("--unset", "--add", "--replace-all", "--remove-section", "--rename-section"))
+                     or a in ("-e", "--edit") for a in args)
+        reads = any(a.startswith("--get") or a in ("-l", "--list", "--show-origin") for a in args)
+        readonly = not writes and (reads or len([a for a in args if not a.startswith("-")]) <= 1)
         if not readonly:
             decide("deny", "unattended sessions may not change git config.")
     if sub == "remote" and [a for a in args if not a.startswith("-")][:1] not in ([], ["show"], ["get-url"]):
@@ -474,6 +515,8 @@ def unattended_git_allowed(root, base, argv):
             rp = os.path.relpath(os.path.realpath(os.path.join(root, p_)), os.path.realpath(root)).replace(os.sep, "/")
             if rp in (".", "", ".claude", ".claude/herald") or rp.startswith((".claude/herald/ledger", ".claude/herald/memory")):
                 decide("deny", "unattended `git clean` may not touch the ledger or memory (%s)." % p_)
+    if sub == "symbolic-ref" and len([a for a in args if not a.startswith("-")]) >= 2:
+        decide("deny", "unattended sessions may not repoint HEAD.")
     if sub == "reset" and resets_history(args, root):
         decide("deny", "unattended sessions may not run `git reset` that moves HEAD.")
 
@@ -521,7 +564,7 @@ def check_bash(root, cfg, cmd):
         if "--kind" in argv and "trust" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
             protect("recording `trust` in the verification ledger skips re-verification for that article.")
         # 2. deploy
-        if any(contains(strip_noise(argv), s) for s in sigs):
+        if any(contains(canon(strip_noise(argv)), s) for s in sigs):
             if unattended():
                 decide("deny", "unattended sessions may not deploy (the batch runner does).")
             decide("ask", "running the deploy command publishes the whole base branch — confirm this is `ship` step 7.")

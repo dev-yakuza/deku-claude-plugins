@@ -213,6 +213,26 @@ class GuardCase(RepoCase):
                     "git worktree list", "grep -rn hugo docs/"):
             self.assertEqual(self.guard("Bash", {"command": cmd}, un), "allow", cmd)
 
+    def test_round10_runner_forms_wrappers_config(self):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        un = {"HRD_UNATTENDED": "1"}
+        for deploy, cmds in (("vercel --prod", ("npx vercel --prod", "bunx vercel --prod", "pnpm dlx vercel --prod")),
+                             ("npx wrangler pages deploy dist", ("wrangler pages deploy dist",)),
+                             ("npm run deploy", ("npm run-script deploy", "pnpm run deploy", "yarn deploy",
+                                                 "npm --silent run deploy"))):
+            cur = json.load(open(cfgp)); cur["commands"]["deploy"] = deploy
+            with open(cfgp, "w") as f:
+                json.dump(cur, f)
+            for cmd in cmds:
+                self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
+        self.assertEqual(self.guard("Bash", {"command": "npm install"}, un), "allow")
+        for cmd in ("timeout -s KILL 60 git push origin main", "sudo -u me git push origin main",
+                    "env -u X git push origin main", "git config --unset core.hooksPath",
+                    "git config --remove-section remote.origin", "git symbolic-ref HEAD refs/heads/main",
+                    "nohup cp x .claude/settings.json"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
+        self.assertEqual(self.guard("Bash", {"command": "git reset HEAD"}, un), "allow")
+
     def test_pr_branch_scope(self):
         sh(self.root, "git", "switch", "-q", "-c", store.branch_name("t0001", "mine"))
         self.article("mine")

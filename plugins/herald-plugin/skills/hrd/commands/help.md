@@ -10,7 +10,7 @@ adopt central improvements
 `batch [--n N]` unattended writing (and auto publish if enabled)
 
 **Publishing** — `ship [ids|PRs]` approve, re-verify, merge, deploy, confirm, record ·
-`ship --reverify <id>` · `ship --deploy-only <id …>` · `review <id|slug|PR>` independent audit ·
+`ship --reverify <id>` · `ship --deploy-only <id …>` · `ship <PR> --session-auto` · `review <id|slug|PR>` independent audit ·
 `refresh <slug>` update an article
 
 **State** — `status [--requeue|--drop|--withdraw|--unwithdraw|--move|--release-slug|

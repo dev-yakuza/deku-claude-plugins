@@ -24,7 +24,9 @@ which denies base commits/pushes, merges outside `HRD_AUTO_PRS`, and deploys.
    Watch for completion by polling until `runner.out` contains the summary JSON (or the pid in
    `runner.pid` is gone). Stop it with `kill $(cat .claude/herald/memory/batch-logs/runner.pid)` —
    it ends its children and releases the checkout lock.
-4. When it finishes, summarize the JSON in `runner.out`: PRs opened, PRs a human merged during the run (→
+4. When it finishes, summarize the JSON in `runner.out` (if `runner.out` is empty or carries
+   `"error"`, report the last lines of `runner.log` instead — e.g. the lock was held, untracked
+   build inputs, a base sync conflict): PRs opened, PRs a human merged during the run (→
    `/hrd ship` records them), holds by reason (next steps per reason, `/hrd status`), incomplete
    topics, auto publish result (chosen / skipped with reasons).
    Approve-mode PRs are published with `/hrd ship`.

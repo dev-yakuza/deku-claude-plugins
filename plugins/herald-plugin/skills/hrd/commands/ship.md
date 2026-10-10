@@ -12,6 +12,10 @@ that differs from the ledger → skip that PR; after step 6 write the round resu
 `HRD result --topic ship --status merged --merged <PR numbers…>` and stop (the runner does 7–9
 and re-checks the merges against GitHub).
 
+`--session-auto <PR>` (interactive, `autonomy.publish: auto`, called by `write` for the PR it just
+created): all steps for that one PR, step 4 skipped; refuse if the PR was not created in this
+session, if `HRD auto-exclusion` lists a reason, or if today's throttle is used up.
+
 Variants: default (all steps) · `--reverify <id>` (steps 1, 2, 7, 8, 9 for one article after a
 human fixed it on base) · `--deploy-only <id …>` (steps 1, 2, 7, 8, 9; the ids are articles
 merged outside Herald → external deploy targets) · `--auto` (batch ship child only: step 4 is

@@ -423,13 +423,17 @@ def main(argv):
             return 0
         os.setsid()
         sys.stdin = open(os.devnull)
-        sys.stdout = open(os.path.join(logs_dir, "runner.out"), "w", buffering=1)
+        sys.stdout = open(os.path.join(logs_dir, "runner.out.tmp"), "w", buffering=1)
         sys.stderr = open(os.path.join(logs_dir, "runner.log"), "a", buffering=1)
         os.dup2(sys.stdout.fileno(), 1)
         os.dup2(sys.stderr.fileno(), 2)
-    with open(os.path.join(logs_dir, "runner.pid"), "w") as f:
+    try:
+        token = lock.acquire(root, "batch")
+    except HeraldError as e:
+        print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        raise
+    with open(os.path.join(logs_dir, "runner.pid"), "w") as f:  # only once the lock is ours
         f.write(str(os.getpid()))
-    token = lock.acquire(root, "batch")
     os.environ["HRD_LOCK_TOKEN"] = token
 
     def on_term(signum, frame):  # stopped from outside: end children, free the checkout lock
@@ -449,6 +453,8 @@ def main(argv):
     logs = os.path.join(paths(root)["memory"], "batch-logs")
     os.makedirs(logs, exist_ok=True)
     summary = {"pr": [], "held": [], "incomplete": [], "auto": None}
+    if a.detach:  # the summary file is replaced only by a run that holds the lock
+        os.replace(os.path.join(logs_dir, "runner.out.tmp"), os.path.join(logs_dir, "runner.out"))
     try:
         sync_base(root, cfg)
         untracked = integrity.untracked_build_inputs(root, cfg)
@@ -526,6 +532,10 @@ def main(argv):
                 summary["auto"]["published"] = finish_auto(root, cfg, chosen)
         if auto and not chosen and (summary["held"] or summary["incomplete"]):
             push_base(root, cfg)  # holds were committed per topic; nothing else will push them
+    except HeraldError as e:
+        summary["error"] = str(e)
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        raise
     finally:
         lock.release(root, token, owner=True)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
