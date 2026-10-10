@@ -38,9 +38,13 @@ def acquire(root, command, token=None):
     return token
 
 
-def release(root, token):
+def release(root, token, owner=False):
+    """A command that inherited the batch runner's token (HRD_LOCK_TOKEN) does not release it —
+    the runner holds the lock for the whole run (plan §3.2.1). The runner passes owner=True."""
     cur = status(root)
     if not cur:
+        return False
+    if not owner and token == os.environ.get("HRD_LOCK_TOKEN") and cur.get("command") == "batch":
         return False
     if cur.get("token") != token:
         raise HeraldError("lock is held by another command (%s); not releasing" % cur.get("command"))

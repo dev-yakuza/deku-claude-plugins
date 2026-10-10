@@ -152,3 +152,17 @@ def add_label(root, number, label):
 
 def remove_label(root, number, label):
     gh(root, "pr", "edit", str(number), "--remove-label", label)
+
+
+def selectable(root, cfg, prs=None):
+    """Topic selection rule (plan §3.2.1): stored `queued` and no open Herald PR, no merged
+    Herald PR (reverted/withdrawn excluded) and no local herald branch for the topic."""
+    prs = prs if prs is not None else herald_prs(root, cfg)
+    busy = set()
+    for p in prs:
+        if p["state"] == "OPEN":
+            busy.add(p["topic_id"])
+        elif p.get("mergedAt") and not (p["label_set"] & {REVERTED, WITHDRAWN}):
+            busy.add(p["topic_id"])
+    busy |= {b[len("herald/"):].split("--", 1)[0] for b in local_branches(root)}
+    return [t["id"] for t in load_topics(root)["topics"] if t.get("state") == "queued" and t["id"] not in busy]

@@ -104,7 +104,8 @@ def summarize_file(path, prices):
 
 
 def project_key(root):
-    return root.replace("/", "-").replace(".", "-")
+    import re
+    return re.sub(r"[^A-Za-z0-9]", "-", root)
 
 
 def session_files(root, session=None):

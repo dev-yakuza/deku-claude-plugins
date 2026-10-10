@@ -24,7 +24,7 @@ from .store import (CLEANUP_REASONS, auto_exclusion, branch_name, get_topic, loa
                     work_rel)
 from .util import HeraldError, git, git_ok, now_iso, read_json, write_json
 
-RATE_LIMIT_RE = re.compile(r"(rate.?limit|usage limit|429|resets? at)", re.I)
+RATE_LIMIT_RE = re.compile(r"(rate.?limit|usage limit|\b429\b|resets? at)", re.I)
 MAX_WAIT = 4 * 3600
 
 
@@ -61,12 +61,7 @@ def push_base(root, cfg):
 # --- selection -------------------------------------------------------------------------------
 
 def select_topics(root, cfg, n):
-    topics = load_topics(root)
-    prs = ghstate.herald_prs(root, cfg)
-    busy = {p["topic_id"] for p in prs if p["state"] == "OPEN" or p.get("mergedAt")}
-    busy |= {b.split("/", 1)[1].split("--", 1)[0] for b in ghstate.local_branches(root)}
-    picked = [t["id"] for t in topics["topics"] if t.get("state") == "queued" and t["id"] not in busy]
-    return picked[:n]
+    return ghstate.selectable(root, cfg)[:n]
 
 
 # --- child sessions --------------------------------------------------------------------------
@@ -90,12 +85,19 @@ def run_child(root, cfg, prompt, log_path, budget_usd, extra_env=None):
                 if budget_usd and stream_json_usd(log_path, prices) > budget_usd:
                     over = True
                     os.killpg(proc.pid, signal.SIGTERM)
-                    proc.wait(timeout=60)
+                    try:
+                        proc.wait(timeout=60)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                        proc.wait()
                     break
         if over:
             return "budget"
-        tail = open(log_path, errors="replace").read()[-4000:]
-        if proc.returncode != 0 and RATE_LIMIT_RE.search(tail) and waited < MAX_WAIT:
+        with open(log_path, errors="replace") as f:
+            tail = f.read()[-4000:]
+        errors = " ".join(l for l in tail.splitlines() if '"is_error": true' in l or '"is_error":true' in l
+                          or not l.lstrip().startswith("{"))
+        if proc.returncode != 0 and RATE_LIMIT_RE.search(errors) and waited < MAX_WAIT:
             delay = 900
             log("rate limited — waiting %ds" % delay)
             time.sleep(delay)
@@ -104,23 +106,47 @@ def run_child(root, cfg, prompt, log_path, budget_usd, extra_env=None):
         return "exited:%d" % proc.returncode
 
 
+def _topic_branch(root, tid):
+    for b in ghstate.local_branches(root):
+        if b.startswith("herald/%s--" % tid):
+            return b
+    return None
+
+
+def _topic_paths(cfg, tid, slug):
+    paths_ = [work_rel(tid)]
+    if slug:
+        paths_ += [cfg.body_path(slug), cfg.image_dir(slug)]
+    return paths_
+
+
 def preserve_wip(root, cfg, tid):
-    """Budget/needs-human: commit the child's leftovers to its herald branch (no push), go back
-    to base. The branch keeps the work so a human can judge and `resume` can continue."""
+    """Budget/needs-human: commit only this topic's files (PR file scope) to its herald branch
+    (no push) and go back to base. The branch keeps the work for a human and `resume`."""
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
     if branch.startswith("herald/%s--" % tid):
-        if git(root, "status", "--porcelain").strip():
-            git(root, "add", "-A")
+        slug = branch.split("--", 1)[1]
+        git(root, "add", "-A", "--", *_topic_paths(cfg, tid, slug))
+        if git(root, "diff", "--cached", "--name-only").strip():
             git(root, "commit", "-q", "-m", "wip(herald): %s preserved by batch runner" % tid)
     git(root, "checkout", "-q", cfg.base)
 
 
 def cleanup_branch(root, cfg, tid):
-    git(root, "checkout", "-q", "-f", cfg.base)
-    git(root, "clean", "-q", "-fd", "--", *(cfg.get("paths", "build_inputs") or []))
-    for b in ghstate.local_branches(root):
-        if b.startswith("herald/%s--" % tid):
-            git(root, "branch", "-q", "-D", b)
+    """Cleaned holds: remove only this topic's files and branch — never other untracked files."""
+    branch = _topic_branch(root, tid)
+    slug = branch.split("--", 1)[1] if branch else None
+    cur = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    targets = _topic_paths(cfg, tid, slug)
+    if cur == branch:
+        tracked = [p for p in git(root, "ls-files", "-z", "--", *targets).split("\0") if p]
+        if tracked:
+            git(root, "checkout", "-q", "HEAD", "--", *tracked)
+    git(root, "clean", "-q", "-fd", "--", *targets)
+    git(root, "checkout", "-q", cfg.base)
+    git(root, "clean", "-q", "-fd", "--", work_rel(tid))
+    if branch:
+        git(root, "branch", "-q", "-D", branch)
 
 
 def completed(root, cfg, tid):
@@ -134,16 +160,23 @@ def completed(root, cfg, tid):
 
 
 def record_hold(root, cfg, tid, reason, note):
+    """Record and commit each hold immediately (plan §3.2.1): an uncommitted topics.json would be
+    lost by the next topic's branch switch and would make the next child's preflight fail."""
+    git(root, "checkout", "-q", cfg.base)
     topics = load_topics(root)
     set_topic_state(get_topic(topics, tid), "held", reason, note)
     save_topics(root, topics)
     emit_signal(root, "hold", tid, {"reason": reason, "note": note, "by": "batch"})
+    commits.commit_state(root, cfg, "runner", "chore(herald): batch hold %s (%s)" % (tid, reason), "hold",
+                         [".claude/herald/topics.json"])
+    if cfg.get("autonomy", "publish") != "auto":
+        push_base(root, cfg)
 
 
 # --- auto publish (③–⑤) ----------------------------------------------------------------------
 
 def auto_published_today(pub):
-    today = datetime.date.today().isoformat()
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     return sum(1 for a in pub["articles"] if a.get("human_reviewed") is False
                and str(a.get("published_at", "")).startswith(today))
 
@@ -192,6 +225,12 @@ def finish_auto(root, cfg, chosen):
     prs = ghstate.herald_prs(root, cfg)
     by_num = {p["number"]: p for p in prs}
     merged = [(tid, n) for tid, n in chosen if by_num.get(n, {}).get("mergedAt")]
+    ship_res = read_result(root, "ship")
+    reported = set((ship_res or {}).get("merged") or [])
+    if ship_res is None or reported != {n for _, n in merged}:
+        log("ship child result missing or disagrees with GitHub (%s vs %s) — not deploying"
+            % (sorted(reported), sorted(n for _, n in merged)))
+        return False
     topics = load_topics(root)
     for rv in ghstate.pending_removal_reverts(root, cfg, topics):
         for p in prs:
@@ -207,7 +246,7 @@ def finish_auto(root, cfg, chosen):
     if not report["ok"]:
         log("pre-deploy integrity failed — not deploying: %s" % json.dumps(
             {k: report[k] for k in ("untracked_build_inputs", "tracked_dirty", "ignored_residue", "flags")}))
-        commits.commit_state(root, cfg, "runner", "chore(herald): batch holds (deploy stopped)", "abort",
+        commits.commit_state(root, cfg, "runner", "chore(herald): revert/hold records (deploy stopped)", "abort",
                              [".claude/herald/topics.json"])
         return False
     deploy = cfg.get("commands", "deploy")
@@ -216,6 +255,8 @@ def finish_auto(root, cfg, chosen):
         if proc.returncode != 0:
             for a in cfg.deploy_artifacts():
                 git(root, "checkout", "--", a, check=False)
+            commits.commit_state(root, cfg, "runner", "chore(herald): revert/hold records (deploy failed)", "abort",
+                                 [".claude/herald/topics.json"])
             log("deploy command failed — merged articles stay merged-unrecorded")
             return False
     pub = load_published(root)
@@ -260,6 +301,10 @@ def main(argv):
     summary = {"pr": [], "held": [], "incomplete": [], "auto": None}
     try:
         sync_base(root, cfg)
+        untracked = integrity.untracked_build_inputs(root, cfg)
+        if untracked:
+            raise HeraldError("untracked files in build inputs — commit, move or remove them before batch: %s"
+                              % ", ".join(untracked[:5]))
         ahead = [c for c in commits.classify_ahead(root, cfg, cfg.base) if not c["ok"]]
         if ahead:
             raise HeraldError("base has unpushed commits that are not Herald records — resolve before batch: %s"
@@ -270,6 +315,8 @@ def main(argv):
                 p = os.path.join(result_dir(root), f + ".json")
                 if os.path.exists(p):
                     os.remove(p)
+            git(root, "checkout", "-q", cfg.base)
+            sync_base(root, cfg)  # children only fast-forward; keep base current for them
             log("write %s" % tid)
             outcome = run_child(root, cfg, "/hrd write %s" % tid, os.path.join(logs, tid + ".jsonl"), budget)
             if outcome == "budget":
@@ -279,8 +326,11 @@ def main(argv):
                 continue
             res = completed(root, cfg, tid)
             if not res:
-                log("%s incomplete (%s) — one resume" % (tid, outcome))
-                run_child(root, cfg, "/hrd resume %s" % tid, os.path.join(logs, tid + "-resume.jsonl"), budget)
+                # one retry: resume if the child got as far as a branch, else start over
+                retry = "/hrd resume %s" % tid if _topic_branch(root, tid) else "/hrd write %s" % tid
+                log("%s incomplete (%s) — one retry: %s" % (tid, outcome, retry))
+                git(root, "checkout", "-q", cfg.base, check=False)
+                run_child(root, cfg, retry, os.path.join(logs, tid + "-retry.jsonl"), budget)
                 res = completed(root, cfg, tid)
             if not res:
                 preserve_wip(root, cfg, tid)
@@ -298,24 +348,23 @@ def main(argv):
             else:
                 summary["pr"].append((tid, res["pr"]))
             git(root, "checkout", "-q", cfg.base)
-        sync_base(root, cfg)
-        if summary["held"] or summary["incomplete"]:
-            commits.commit_state(root, cfg, "runner", "chore(herald): batch holds", "hold",
-                                 [".claude/herald/topics.json"])
-            if cfg.get("autonomy", "publish") != "auto":
-                push_base(root, cfg)
-        if cfg.get("autonomy", "publish") == "auto" and summary["pr"]:
+        auto = cfg.get("autonomy", "publish") == "auto"
+        chosen = []
+        if auto and summary["pr"]:
             chosen, skipped = auto_candidates(root, cfg, summary["pr"])
             summary["auto"] = {"chosen": chosen, "skipped": skipped}
             if chosen:
                 sync_base(root, cfg)
+                p = os.path.join(result_dir(root), "ship.json")
+                if os.path.exists(p):
+                    os.remove(p)
                 env = {"HRD_AUTO_PRS": " ".join(str(n) for _, n in chosen)}
                 run_child(root, cfg, "/hrd ship --auto", os.path.join(logs, "ship.jsonl"), 0, env)
                 git(root, "checkout", "-q", cfg.base)
-                finish_auto(root, cfg, chosen)
-            elif summary["held"] or summary["incomplete"]:
-                push_base(root, cfg)
+                summary["auto"]["published"] = finish_auto(root, cfg, chosen)
+        if auto and not chosen and (summary["held"] or summary["incomplete"]):
+            push_base(root, cfg)  # holds were committed per topic; nothing else will push them
     finally:
-        lock.release(root, token)
+        lock.release(root, token, owner=True)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

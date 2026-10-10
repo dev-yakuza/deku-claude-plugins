@@ -48,9 +48,9 @@ references into the article itself; then the gate.
   `config.paths.images/<slug>/` (illustrator), and `<w>claims-map.json`:
   `{"sentences": [{"text": "...", "claims": ["C3"]}]}` for every factual sentence the writer
   wrote.
-- **Gate**: run `config.commands.validate` (default
-  `python3 .claude/herald/scripts/validate_content.py <article>`). Errors → loop back to the
-  writer with the errors (counts as a loopback; record `gate-failure`).
+- **Gate**: `HRD stage pass --stage draft` runs it in code (`config.commands.validate` if set,
+  else the built-in `validate_content.py`) and refuses on errors → loop back to the writer with
+  the errors (counts as a loopback; record `gate-failure`).
 
 ## critique — subject-expert / search-discovery (if enabled) → editor → external auditor
 
@@ -66,11 +66,12 @@ references into the article itself; then the gate.
 3. **external auditor** — only after the editor's PASS; procedure in `atoms/_auditor.md`.
    Undismissed `BLOCKER`/`MAJOR` → loopback to draft; after the fix, editor → auditor → verify
    run again. `MINOR` → PR body only.
-4. Write `<w>critique.md` (prose: verdicts, findings, dismissals with reasons) and
-   `<w>critique.json`:
+4. Before spawning the editor, take `HRD hash --slug <slug>`. Write `<w>critique.md` (prose:
+   verdicts, findings, dismissals with reasons) and `<w>critique.json` — `final_round.body_hash`
+   is that hash (the article this round evaluated):
 
 ```json
-{"final_round": {"round": 2, "verdict": "PASS",
+{"final_round": {"round": 2, "verdict": "PASS", "body_hash": "sha256:…",
                  "audit": {"blocker": 0, "major": 1, "minor": 2},
                  "dismissed": {"blocker": 0, "major": 1}},
  "decision_log": [{"kind": "routine", "note": "brief approved"},
@@ -78,7 +79,9 @@ references into the article itself; then the gate.
 ```
 
    `final_round` describes only the round that evaluated the current article. `HRD stage pass
-   --stage critique` refuses unless verdict is PASS and undismissed BLOCKER+MAJOR is 0.
+   --stage critique` refuses unless verdict is PASS, undismissed BLOCKER+MAJOR is 0, and
+   `body_hash` equals the current article hash (a verdict file left over from an earlier round
+   cannot vouch for a changed body).
 
 ## translation (M6, translator enabled)
 
@@ -94,9 +97,10 @@ hashing joins the verify target set when M6 is enabled.)
 - The fact-checker **extracts factual sentences from the article independently**. A factual
   sentence missing from the claims map is automatically `unsupported`.
 - **Output**: `<w>verify.md` (per sentence: supported / unsupported / contradicted, with
-  claim ids) and `<w>verify.json` `{"counts": {"supported": n, "unsupported": n,
-  "contradicted": n, "unmapped": n}}` — `unmapped` is a subset already counted in
-  `unsupported`.
+  claim ids) and `<w>verify.json` `{"body_hash": "<HRD hash taken before spawning>",
+  "counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n}}` —
+  `unmapped` is a subset already counted in `unsupported`; `stage pass` refuses a stale
+  `body_hash`.
 - Any unsupported/contradicted → record `verify-gap`, `HRD loopback`, back to draft.
 - Pass: `HRD stage pass --stage verify` (sets `verified_hash`), then
   `python3 .claude/herald/scripts/integrity.py --record --topic <id>`.
@@ -105,11 +109,12 @@ hashing joins the verify target set when M6 is enabled.)
 ## publish
 
 1. Re-check cannibalization (anything published or PR'd since brief). Conflict → hold.
-2. `HRD finalize --topic <id>` (entry condition: article == critique hash == verify hash;
+2. Attended `write`: session approval and any requested changes happen first (`write.md` §2) —
+   so the approved body becomes `agent_final_hash`. Unattended: skip.
+3. `HRD finalize --topic <id>` (entry condition: article == critique hash == verify hash;
    fixes `agent_final_hash` once).
-3. Commit on the herald branch: `git add` the article, its images and `<w>` — nothing else;
+4. Commit on the herald branch: `git add` the article, its images and `<w>` — nothing else;
    `HRD scope --topic <id>` must pass.
-4. Attended `write`: session approval happens here (see `write.md`). Unattended: skip.
 5. `git push -u origin <branch>`; then `python3 .claude/herald/scripts/integrity.py --record
    --topic <id> --kind push --sha $(git rev-parse HEAD)` — run `git rev-parse HEAD` as its own
    call and pass the literal SHA.

@@ -25,6 +25,13 @@ def ctx():
     return root, Config.load(root)
 
 
+def attended_only(what):
+    """Base-branch writers: unattended children never write base (plan §3.2.1) — the batch
+    runner does. The guard only sees `git commit`; this covers writes made inside hrd.py."""
+    if os.environ.get("HRD_UNATTENDED") == "1":
+        raise HeraldError("%s writes the base branch — not allowed in unattended sessions (the batch runner records)" % what)
+
+
 # --- lock -------------------------------------------------------------------------------------
 
 def cmd_lock(a):
@@ -106,9 +113,7 @@ def derived_status(root, cfg):
 
 def cmd_select(a):
     root, cfg = ctx()
-    rows = derived_status(root, cfg)
-    picked = [r["id"] for r in rows if r["stored"] == "queued" and not r["open_prs"]
-              and not r["merged_prs"] and not r["branches"]]
+    picked = ghstate.selectable(root, cfg)
     if a.topic:
         if a.topic not in picked:
             raise HeraldError("topic %s is not selectable (needs queued with no open/merged PR or local branch)" % a.topic)
@@ -195,7 +200,7 @@ def cmd_result(a):
     """Batch child result file (memory/batch/<id>.json) — children never write base."""
     root = repo_root()
     path = os.path.join(store.paths(root)["memory"], "batch", a.topic + ".json")
-    write_json(path, {"status": a.status, "pr": a.pr, "note": a.note, "at": now_iso()})
+    write_json(path, {"status": a.status, "pr": a.pr, "note": a.note, "merged": a.merged or [], "at": now_iso()})
     emit({"written": path})
 
 
@@ -235,11 +240,20 @@ def cmd_ahead(a):
 
 def cmd_sync(a):
     root, cfg = ctx()
-    emit({"sync": commits.sync_base(root, cfg)})
+    emit({"sync": commits.sync_base(root, cfg, allow_merge=os.environ.get("HRD_UNATTENDED") != "1")})
+
+
+def cmd_fetch_pr(a):
+    """Bring a PR head (possibly pushed by a human) into refs/remotes/origin/pr-<n>."""
+    root, cfg = ctx()
+    ref = "refs/remotes/origin/pr-%d" % a.pr
+    git(root, "fetch", "-q", "origin", "+pull/%d/head:%s" % (a.pr, ref))
+    emit({"ref": ref, "sha": git(root, "rev-parse", ref).strip()})
 
 
 def cmd_commit(a):
     root, cfg = ctx()
+    attended_only("`commit`")
     sha = commits.commit_state(root, cfg, a.cmd, a.message, a.kind, a.paths)
     emit({"commit": sha})
 
@@ -271,6 +285,7 @@ def cmd_reverts(a):
     topics = store.load_topics(root)
     pending = ghstate.pending_removal_reverts(root, cfg, topics)
     if a.action == "apply":
+        attended_only("`reverts apply`")
         prs = ghstate.herald_prs(root, cfg)
         for rv in pending:
             for p in prs:
@@ -288,6 +303,7 @@ def cmd_reverts(a):
 
 def cmd_state(a):
     root, cfg = ctx()
+    attended_only("`state`")
     data = store.load_topics(root)
     t = store.get_topic(data, a.topic)
     store.set_topic_state(t, a.state, a.reason, a.note)
@@ -303,6 +319,7 @@ def _article_present(root, cfg, slug):
 
 def cmd_requeue(a):
     root, cfg = ctx()
+    attended_only("`requeue`")
     data = store.load_topics(root)
     t = store.get_topic(data, a.topic)
     if t["state"] not in ("held", "declined"):
@@ -317,6 +334,7 @@ def cmd_requeue(a):
 
 def cmd_drop(a):
     root, cfg = ctx()
+    attended_only("`drop`")
     data = store.load_topics(root)
     t = store.get_topic(data, a.topic)
     t["dropped"] = True
@@ -340,6 +358,7 @@ def _topic_articles(pub, prs, slug):
 
 def cmd_withdraw(a):
     root, cfg = ctx()
+    attended_only("`withdraw`")
     pub = store.load_published(root)
     slug = a.slug_or_topic
     art = store.find_article(pub, slug) or store.find_article_by_topic(pub, slug)
@@ -349,7 +368,12 @@ def cmd_withdraw(a):
     if _article_present(root, cfg, slug):
         raise HeraldError("the body or tracked images of %s still exist on base — withdraw only after the human removed them "
                           "(to change the slug use `status --move`; to fix content use exit ①/②)" % slug)
-    renamed = git(root, "log", "-1", "-M", "--diff-filter=R", "--name-status", "--format=", "--", cfg.body_path(slug)).strip()
+    # Without a pathspec git can pair the rename (with one, the other side is out of scope and
+    # it reports a delete) — look for any rename whose source is this body or image dir.
+    renames = git(root, "log", "-M", "--diff-filter=R", "--name-status", "--format=").splitlines()
+    img = cfg.image_dir(slug) + "/"
+    renamed = [l for l in renames if l.startswith("R") and len(l.split("\t")) == 3
+               and (l.split("\t")[1] == cfg.body_path(slug) or l.split("\t")[1].startswith(img))]
     if renamed:
         raise HeraldError("git shows %s was renamed — use `status --move`, not withdraw" % slug)
     prs = ghstate.herald_prs(root, cfg)
@@ -369,6 +393,7 @@ def cmd_withdraw(a):
 
 def cmd_unwithdraw(a):
     root, cfg = ctx()
+    attended_only("`unwithdraw`")
     pub = store.load_published(root)
     art = store.find_article(pub, a.slug_or_topic) or store.find_article_by_topic(pub, a.slug_or_topic)
     if not art or not art.get("withdrawn"):
@@ -391,6 +416,7 @@ def cmd_unwithdraw(a):
 
 def cmd_move(a):
     root, cfg = ctx()
+    attended_only("`move`")
     store.check_slug(a.new_slug)
     pub = store.load_published(root)
     art = store.find_article_by_topic(pub, a.topic) or store.find_article(pub, a.topic)
@@ -412,11 +438,22 @@ def cmd_move(a):
     art["path"] = cfg.body_path(a.new_slug)
     art["url"] = cfg.article_url(a.new_slug)
     store.save_published(root, pub)
-    emit({"moved": old, "to": a.new_slug, "topic_ids": sorted(tids), "note": "next ship re-verifies (path is part of the hash)"})
+    # re-verification on base reads work/<tid>/state.json's slug — point it at the new path
+    updated = []
+    for tid in sorted(tids):
+        sp = store.state_path(root, tid)
+        st = read_json(sp)
+        if st and st.get("slug") == old:
+            st["slug"] = a.new_slug
+            write_json(sp, st)
+            updated.append(store.work_rel(tid, "state.json"))
+    emit({"moved": old, "to": a.new_slug, "topic_ids": sorted(tids), "state_files": updated,
+          "note": "commit published.json and the state files; next ship re-verifies (path is part of the hash)"})
 
 
 def cmd_release_slug(a):
     root, cfg = ctx()
+    attended_only("`release-slug`")
     pub = store.load_published(root)
     slug = a.slug
     if slug in ghstate.herald_set(root, cfg, pub=pub):
@@ -437,6 +474,7 @@ def cmd_release_slug(a):
 def cmd_mark_published(a):
     """External publish record (`status --mark-published`, `ship --deploy-only`): URL checked by caller."""
     root, cfg = ctx()
+    attended_only("`mark-published`")
     prs = ghstate.herald_prs(root, cfg)
     if any(p["topic_id"] == a.topic and p.get("mergedAt") for p in prs):
         raise HeraldError("%s has a merged Herald PR — use `ship`, not an external record" % a.topic)
@@ -458,6 +496,7 @@ def cmd_mark_published(a):
 def cmd_record_published(a):
     """ship step 9 for one Herald article (URL already confirmed)."""
     root, cfg = ctx()
+    attended_only("`record-published`")
     pub = store.load_published(root)
     data = store.load_topics(root)
     t = store.get_topic(data, a.topic)
@@ -516,7 +555,8 @@ def build():
     p.set_defaults(fn=cmd_loopback)
     p = sp.add_parser("finalize"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_finalize)
     p = sp.add_parser("result"); p.add_argument("--topic", required=True); p.add_argument("--status", required=True)
-    p.add_argument("--pr", type=int); p.add_argument("--note"); p.set_defaults(fn=cmd_result)
+    p.add_argument("--pr", type=int); p.add_argument("--note"); p.add_argument("--merged", type=int, nargs="*")
+    p.set_defaults(fn=cmd_result)
 
     p = sp.add_parser("hash"); p.add_argument("--slug", required=True); p.add_argument("--rev")
     p.set_defaults(fn=cmd_hash)
@@ -528,6 +568,7 @@ def build():
     p.add_argument("--rev", default="HEAD"); p.set_defaults(fn=cmd_scope)
     p = sp.add_parser("ahead"); p.set_defaults(fn=cmd_ahead)
     p = sp.add_parser("sync"); p.set_defaults(fn=cmd_sync)
+    p = sp.add_parser("fetch-pr"); p.add_argument("--pr", type=int, required=True); p.set_defaults(fn=cmd_fetch_pr)
     p = sp.add_parser("commit"); p.add_argument("--cmd", required=True); p.add_argument("--kind", required=True)
     p.add_argument("-m", "--message", required=True); p.add_argument("paths", nargs="+"); p.set_defaults(fn=cmd_commit)
     p = sp.add_parser("integrity"); p.add_argument("--predeploy", action="store_true"); p.add_argument("--rev")

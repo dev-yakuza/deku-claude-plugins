@@ -3,6 +3,13 @@
 The only place Herald publishes. Plan §3.2.2 (steps 1–9). Accuracy floor: `atoms/_invariants.md`.
 `<base>` = `config.base_branch`. Every `HRD …` is its own Bash call.
 
+`--auto` (batch ship child, `HRD_UNATTENDED=1`) differs: step 1 does not sync (base must
+already contain `origin/<base>`); step 2 runs `HRD reverts list` and `HRD integrity` only — any
+pending revert, non-`ok` row or flag → stop without merging; step 5 never re-verifies — a head
+that differs from the ledger → skip that PR; after step 6 write the round result with
+`HRD result --topic ship --status merged --merged <PR numbers…>` and stop (the runner does 7–9
+and re-checks the merges against GitHub).
+
 Variants: default (all steps) · `--reverify <id>` (steps 1, 2, 7, 8, 9 for one article after a
 human fixed it on base) · `--deploy-only <id …>` (steps 1, 2, 7, 8, 9; the ids are articles
 merged outside Herald → external deploy targets) · `--auto` (batch ship child only: step 4 is
@@ -37,7 +44,8 @@ skipped, merges limited to `HRD_AUTO_PRS`, steps 7–9 belong to the runner).
    file and stop.
 3. Commit what this step produced (re-verified artifacts, `held:reverted`):
    `HRD commit --cmd ship --kind integrity -m "chore(herald): integrity" <paths>` (do **not**
-   push yet).
+   push yet); then for each re-verified article `python3 .claude/herald/scripts/integrity.py
+   --record --topic <ref> --kind base-commit --sha <that commit>`.
 4. Any article that still fails re-verification → **stop the whole ship** (deploy publishes all
    of base). Move its delta artifacts to `.claude/herald/memory/reverify/<id>/`, restore
    `work/<id>/` with `git checkout -- .claude/herald/work/<id>/`, and offer the exits:
@@ -52,6 +60,8 @@ skipped, merges limited to `HRD_AUTO_PRS`, steps 7–9 belong to the runner).
 ## 3. Pending PRs
 
 `gh pr list --label herald --state open --json number,title,headRefName,headRefOid`. For each
+PR first `HRD fetch-pr --pr <n>` (a human may have pushed to it; the head then lives at
+`refs/remotes/origin/pr-<n>`) and use that ref below. For each
 (or the ones named): summary — title, category, audit summary (from `critique.json` at the PR
 head), latest `/hrd review` finding for it if any (unresolved BLOCKER → warning), verify counts,
 "body differs from verified" (`HRD hash --slug <s> --rev <headRefOid>` vs `HRD ledger show`),
@@ -67,7 +77,8 @@ declined --reason <short-reason>`, `gh pr close <n>`, delete the remote branch, 
 
 1. With base scripts, before switching: scope must pass; if the PR head hash ≠ the ledger's
    `verified_hash` (a human pushed changes), re-verify:
-2. `git switch` to the PR branch; run the gate and verify (`atoms/_stages.md` § verify). If
+2. `git switch -C <branch> refs/remotes/origin/pr-<n>` (the local branch follows the human's
+   pushed head); run the gate and verify (`atoms/_stages.md` § verify). If
    unsupported sentences remain, **delta research**: the researcher sources only those
    sentences and appends `C#` to `research.md`; the fact-checker adds the mappings to
    `claims-map.json`; a PR comment `herald-source: <sentence> <URL>` from a human counts as a

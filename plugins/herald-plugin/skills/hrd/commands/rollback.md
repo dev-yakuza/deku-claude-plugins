@@ -5,7 +5,10 @@ Non-destructive: always `git revert`, never reset or force push (INV3).
 1. `HRD lock acquire --cmd rollback`; base clean; `HRD sync`.
 2. Resolve the target: `evolve#<n>` → `git log --grep="^chore(herald): evolve #<n> —" -1
    --format=%H`; otherwise a commit SHA whose subject starts with `chore(herald):`.
-3. Show the files it changed. Protected files will trigger the guard's `ask`.
+3. Show the files it changed and list explicitly which of them are protected (criteria files,
+   critique/verify personas, gate rules, protected config keys). `git revert` does not trigger
+   the guard, so ask the human to confirm reverting those files — a revert can loosen
+   verification an evolve run had strengthened (INV2).
 4. `git revert --no-edit <sha>`; then amend the revert's message only via
    `git commit --amend -m "chore(herald): rollback <target>" --trailer "Herald-Record: harness"`
    (allowed: it is the commit just created, not history rewrite of published commits).

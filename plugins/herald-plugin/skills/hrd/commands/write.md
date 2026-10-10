@@ -7,9 +7,10 @@ Rules: `atoms/_contract.md`, `atoms/_stages.md`. Plan: §3.2, §3.2.2.
 
 1. `printenv HRD_UNATTENDED` → mode.
 2. `HRD lock acquire --cmd write` → keep the token (unattended: inherits `HRD_LOCK_TOKEN`).
-   Release with `HRD lock release --token <t>` on every exit path below.
+   Release with `HRD lock release --token <t>` on every exit path below (an inherited batch
+   lock is left to the runner — release is then a no-op).
 3. `git status --porcelain --untracked-files=no` must be empty; `git switch <base>`;
-   `HRD sync` (fetch + merge origin; a conflict stops).
+   `HRD sync` (fetch + merge origin; a conflict stops; unattended: fast-forward only).
 4. `HRD ahead` — any `needs_human` commit: attended → show it and ask whether to continue;
    unattended → `HRD result --topic <id> --status held:needs-human --note "base has foreign
    unpushed commits"` and stop.

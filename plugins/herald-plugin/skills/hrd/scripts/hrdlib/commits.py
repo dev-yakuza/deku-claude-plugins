@@ -38,7 +38,7 @@ HARNESS_GLOBS = [
 COMMAND_GLOBS = {
     "plan": [".claude/herald/topics.json"],
     "refresh": [".claude/herald/topics.json"],
-    "status": [".claude/herald/topics.json", ".claude/herald/published.json"],
+    "status": [".claude/herald/topics.json", ".claude/herald/published.json", ".claude/herald/work/*/state.json"],
     "hold": [".claude/herald/topics.json"],
     "ship": RECORD_GLOBS,
     "runner": [".claude/herald/topics.json", ".claude/herald/published.json"],
@@ -105,9 +105,10 @@ def commit_state(root, cfg, command, message, kind, add_paths):
     return git(root, "rev-parse", "HEAD").strip()
 
 
-def sync_base(root, cfg):
+def sync_base(root, cfg, allow_merge=True):
     """fetch + merge origin/<base> into base. A real merge gets the `Herald-Record: sync`
-    trailer (plan §3.2.2 sync-merge definition); conflicts abort and stop."""
+    trailer (plan §3.2.2 sync-merge definition); conflicts abort and stop. Unattended callers
+    pass allow_merge=False: up-to-date or fast-forward only (they never write base)."""
     base = cfg.base
     git(root, "checkout", "-q", base)
     git(root, "fetch", "-q", "origin", base)
@@ -117,6 +118,8 @@ def sync_base(root, cfg):
     if git_ok(root, "merge-base", "--is-ancestor", base, origin):
         git(root, "merge", "-q", "--ff-only", origin)
         return "fast-forward"
+    if not allow_merge:
+        raise HeraldError("base and origin have diverged — an unattended session may not create a merge commit")
     proc = run(["git", "merge", "--no-ff", "--no-commit", origin], cwd=root, check=False)
     if proc.returncode != 0:
         run(["git", "merge", "--abort"], cwd=root, check=False)

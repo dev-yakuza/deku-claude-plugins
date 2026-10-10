@@ -20,7 +20,7 @@ DEFAULT_RULES = {
 
 FM_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.S)
 LINK_RE = re.compile(r"\]\((/[^)\s#?]*)[^)]*\)|href=[\"'](/[^\"'#?]*)")
-IMG_RE = re.compile(r"!\[[^\]]*\]\((/[^)\s]+)\)|<img[^>]*\ssrc=[\"'](/[^\"']+)[\"']|<source[^>]*\ssrcset=[\"'](/[^\"'\s]+)")
+IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)|<img[^>]*\ssrc=[\"']([^\"']+)[\"']|<source[^>]*\ssrcset=[\"']([^\"'\s]+)")
 
 
 def parse_frontmatter(text):
@@ -95,15 +95,21 @@ def validate(root, cfg, file_path):
         prefix, _, suffix = cfg.get("site", "url_pattern", default="/{slug}/").partition("{slug}")
         for m in LINK_RE.finditer(body):
             link = m.group(1) or m.group(2)
-            if prefix and link.startswith(prefix) and prefix != "/":
+            if prefix and link.startswith(prefix):
                 slug = link[len(prefix):].strip("/").split("/")[0]
                 if slug and not os.path.exists(os.path.join(root, cfg.body_path(slug))):
-                    errors.append("internal link %s points to no article" % link)
+                    # with url_pattern "/{slug}/" every root link looks like an article: warn only
+                    (warnings if prefix == "/" else errors).append("internal link %s points to no article" % link)
     if rules["images"].get("check", True):
         pub = rules["images"].get("public_dir", "public").rstrip("/")
         for m in IMG_RE.finditer(text):
             src = next(g for g in m.groups() if g)
-            relp = "%s%s" % (pub, src)
+            if re.match(r"^[a-z]+:", src):  # http:, data: — external, not checked
+                continue
+            if src.startswith("/"):
+                relp = "%s%s" % (pub, src)
+            else:  # relative to the article file
+                relp = os.path.normpath(os.path.join(os.path.dirname(os.path.relpath(full, root)), src))
             if not os.path.exists(os.path.join(root, relp)):
                 errors.append("image %s does not exist (%s)" % (src, relp))
             elif ignored(root, relp):

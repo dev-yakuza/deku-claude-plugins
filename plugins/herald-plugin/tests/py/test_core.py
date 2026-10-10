@@ -11,7 +11,15 @@ from hrdlib.hashing import tree_hash, worktree_hash
 from hrdlib.util import HeraldError
 
 
-def write_machine(case, tid, name, obj):
+def write_machine(case, tid, name, obj, slug=None):
+    """Verdict files carry the hash of the article they evaluated (plan §3.2)."""
+    obj = json.loads(json.dumps(obj))
+    if slug:
+        h = worktree_hash(case.root, case.cfg, slug)
+        if name == "critique.json":
+            obj.setdefault("final_round", {})["body_hash"] = h
+        else:
+            obj["body_hash"] = h
     case.write(".claude/herald/work/%s/%s" % (tid, name), json.dumps(obj))
 
 
@@ -40,10 +48,10 @@ class Flow(RepoCase):
         self.write(".claude/herald/work/%s/claims-map.json" % tid, "{}")
         self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
         self.write(".claude/herald/work/%s/critique.md" % tid, "ok")
-        write_machine(self, tid, "critique.json", CRIT_PASS)
+        write_machine(self, tid, "critique.json", CRIT_PASS, slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "critique")
         self.write(".claude/herald/work/%s/verify.md" % tid, "ok")
-        write_machine(self, tid, "verify.json", VER_PASS)
+        write_machine(self, tid, "verify.json", VER_PASS, slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "verify")
         return tid, slug
 
@@ -78,9 +86,10 @@ class StageTests(Flow):
     def test_skipping_critique_after_loopback_is_blocked(self):
         tid, slug = self.run_flow()
         self.hrd("loopback", "--topic", tid)
-        self.write("src/content/blog/%s.md" % slug, "rewritten body")
+        self.write("src/content/blog/%s.md" % slug, "---\ntitle: a\ndescription: d\nslug: %s\ndate: x\n---\nrewritten body\n" % slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
         # verify passes on the new body but critique evaluated the old one
+        write_machine(self, tid, "verify.json", VER_PASS, slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "verify")
         _, p = self.hrd("finalize", "--topic", tid, check=False)
         self.assertIn("critique", p.stderr)
@@ -88,7 +97,7 @@ class StageTests(Flow):
     def test_critique_needs_zero_undismissed_findings(self):
         tid, slug = self.run_flow()
         write_machine(self, tid, "critique.json", {"final_round": {"verdict": "PASS", "audit": {"blocker": 0, "major": 1},
-                                                                   "dismissed": {"major": 0}}})
+                                                                   "dismissed": {"major": 0}}}, slug)
         _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "critique", check=False)
         self.assertNotEqual(p.returncode, 0)
 
@@ -116,7 +125,7 @@ class LedgerTests(Flow):
         """critique is not rerun on the human-edit path; --record keys on verify only."""
         tid, slug = self.run_flow()
         self.write("src/content/blog/%s.md" % slug, "human edited body")
-        write_machine(self, tid, "verify.json", VER_PASS)
+        write_machine(self, tid, "verify.json", VER_PASS, slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", "--amend")
         rec, _ = self.hrd("ledger", "record", "--topic", tid, "--kind", "push", "--sha", "abc")
         self.assertEqual(rec["kind"], "push")
@@ -291,6 +300,70 @@ class SelectionTests(IntegrityTests):
         self.publish_herald("t0001", "new-post")
         out, _ = self.hrd("select")
         self.assertNotIn("t0001", out)
+
+
+class RegressionRound1(IntegrityTests):
+    def test_stale_verdict_files_cannot_vouch_for_new_body(self):
+        tid, slug = self.run_flow()
+        self.hrd("loopback", "--topic", tid)
+        self.write("src/content/blog/%s.md" % slug, "---\ntitle: a\ndescription: d\nslug: %s\ndate: x\n---\nUNVERIFIED NEW CLAIM: 99%% of users\n" % slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "critique", check=False)
+        self.assertIn("does not evaluate the current article", p.stderr)
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", check=False)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_trust_only_without_ledger_and_attended(self):
+        tid, slug = self.run_flow()
+        _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "trust", env={"HRD_UNATTENDED": "1"}, check=False)
+        self.assertIn("need a human", p.stderr)
+        self.hrd("ledger", "record", "--topic", tid, "--kind", "trust")
+        _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "trust", check=False)
+        self.assertIn("already has a ledger line", p.stderr)
+
+    def test_trust_refused_for_unverified_body(self):
+        tid, slug = self.run_flow()
+        self.write("src/content/blog/%s.md" % slug, "human change")
+        _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "trust", check=False)
+        self.assertIn("differs from the committed verified_hash", p.stderr)
+
+    def test_inherited_lock_release_is_noop(self):
+        tok = lock.acquire(self.root, "batch")
+        _, p = self.hrd("lock", "release", "--token", tok, env={"HRD_LOCK_TOKEN": tok})
+        self.assertIsNotNone(lock.status(self.root))
+        self.assertTrue(lock.release(self.root, tok, owner=True))
+
+    def test_move_then_reverify_then_integrity_ok(self):
+        self.publish_herald("t0001", "new-post")
+        self.hrd("record-published", "--topic", "t0001", "--slug", "new-post", "--pr", "1")
+        sh(self.root, "git", "mv", "src/content/blog/new-post.md", "src/content/blog/renamed.md")
+        sh(self.root, "git", "mv", "public/blog-images/new-post", "public/blog-images/renamed")
+        self.write("src/content/blog/renamed.md", (open(os.path.join(self.root, "src/content/blog/renamed.md")).read()
+                                                   .replace("/blog-images/new-post/", "/blog-images/renamed/")
+                                                   .replace("slug: new-post", "slug: renamed")))
+        self.commit("rename")
+        self.hrd("move", "--topic", "t0001", "--new-slug", "renamed")
+        rep = integrity.check(self.root, self.cfg)
+        self.assertEqual(rep["articles"][0]["status"], "mismatch")
+        write_machine(self, "t0001", "verify.json", VER_PASS, "renamed")
+        self.hrd("stage", "pass", "--topic", "t0001", "--stage", "verify", "--amend")
+        self.hrd("ledger", "record", "--topic", "t0001", "--kind", "base-commit")
+        self.assertTrue(integrity.check(self.root, self.cfg)["ok"])
+
+    def test_withdraw_refused_after_rename(self):
+        self.publish_herald("t0001", "new-post")
+        self.hrd("record-published", "--topic", "t0001", "--slug", "new-post", "--pr", "1")
+        sh(self.root, "git", "mv", "src/content/blog/new-post.md", "src/content/blog/other.md")
+        sh(self.root, "git", "mv", "public/blog-images/new-post", "public/blog-images/other")
+        self.commit("rename")
+        _, p = self.hrd("withdraw", "new-post", check=False)
+        self.assertIn("renamed", p.stderr)
+
+    def test_unattended_base_writers_refused(self):
+        self.write(".claude/herald/topics.json", "{}")
+        _, p = self.hrd("commit", "--cmd", "plan", "--kind", "plan", "-m", "m", ".claude/herald/topics.json",
+                        env={"HRD_UNATTENDED": "1"}, check=False)
+        self.assertIn("unattended", p.stderr)
 
 
 if __name__ == "__main__":

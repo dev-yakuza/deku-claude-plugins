@@ -231,6 +231,20 @@ def auto_exclusion(crit):
     return sorted(set(reasons))
 
 
+def run_gate(root, cfg, slug):
+    """draft gate (plan §3.5): config.commands.validate if set, else the built-in validator."""
+    import shlex
+    from .util import run
+    from .validate import validate
+
+    body = cfg.body_path(slug)
+    custom = (cfg.get("commands", "validate") or "").strip()
+    if custom:
+        proc = run(shlex.split(custom) + [body], cwd=root, check=False)
+        return {"ok": proc.returncode == 0, "errors": [(proc.stdout + proc.stderr).strip()[-500:]]}
+    return validate(root, cfg, body)
+
+
 def stage_pass(root, cfg, tid, stage, amend=False):
     st = load_state(root, tid)
     if stage not in PRODUCES:
@@ -246,6 +260,25 @@ def stage_pass(root, cfg, tid, stage, amend=False):
             raise HeraldError("%s missing — %s did not write it" % (name, stage))
         outputs[name] = h
     rec = {"outputs": outputs, "at": now_iso()}
+    if stage == "draft":
+        gate = run_gate(root, cfg, st["slug"])
+        if not gate["ok"]:
+            raise HeraldError("deterministic gate failed: %s" % "; ".join(gate["errors"][:5]))
+    if stage in ("critique", "verify"):
+        # The verdict file must evaluate THIS article: the main session writes the hash it
+        # got from `HRD hash` before spawning into the file, and a verdict file carried over
+        # unchanged from an earlier pass cannot vouch for a changed body (plan §3.2).
+        cur = worktree_hash(root, cfg, st["slug"])
+        name = "critique.json" if stage == "critique" else "verify.json"
+        machine = load_machine(root, tid, name) or {}
+        claimed = (machine.get("final_round") or {}).get("body_hash") if stage == "critique" else machine.get("body_hash")
+        if claimed != cur:
+            raise HeraldError("%s does not evaluate the current article (body_hash %s != %s) — run %s again"
+                              % (name, (claimed or "missing")[:19], (cur or "none")[:19], stage))
+        prev = st["stages"].get(stage) or {}
+        if prev.get("body_hash") and prev["body_hash"] != cur and prev.get("outputs", {}).get(name) == outputs[name]:
+            raise HeraldError("%s is unchanged since the previous %s pass but the article changed — run %s again"
+                              % (name, stage, stage))
     if stage == "critique":
         crit = load_machine(root, tid, "critique.json")
         if not critique_passed(crit):
@@ -296,7 +329,16 @@ def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
         raise HeraldError("no state.json for %s" % tid)
     cur = tree_hash(root, cfg, rev, st["slug"]) if rev else worktree_hash(root, cfg, st["slug"])
     vb = st.get("stages", {}).get("verify", {}).get("body_hash")
-    if kind != "trust":
+    if kind == "trust":
+        # Only for "no ledger line on this machine", attended, and only for the exact body the
+        # committed state.json says was verified (plan §3.2 "원장 기록이 없을 때").
+        if os.environ.get("HRD_UNATTENDED") == "1":
+            raise HeraldError("refusing: trust records need a human (attended ship only)")
+        if ledger_latest(root, tid) is not None:
+            raise HeraldError("refusing: %s already has a ledger line — re-verify instead of trusting" % tid)
+        if not (cur and cur == st.get("verified_hash")):
+            raise HeraldError("refusing: the article differs from the committed verified_hash — re-verify instead")
+    else:
         if not (cur and cur == vb == st.get("verified_hash")):
             raise HeraldError("refusing to record: article hash does not match the last verify pass")
         if not verify_passed(ver):

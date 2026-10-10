@@ -53,6 +53,24 @@ class BatchCase(RepoCase):
         self.assertEqual(sh(self.root, "git", "rev-parse", "origin/main").strip(), head)
         self.assertIsNone(store.paths and __import__("hrdlib.lock", fromlist=["x"]).status(self.root))
 
+    def test_several_holds_then_pr_all_recorded(self):
+        self.write("notes/draft.txt", "user's own untracked file outside build inputs")
+        p = self.run_batch({"t0001": "held:research", "t0002": "held:rejected", "t0003": "pr"})
+        self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
+        topics = {t["id"]: t for t in store.load_topics(self.root)["topics"]}
+        self.assertEqual((topics["t0001"]["state"], topics["t0001"]["reason"]), ("held", "research"))
+        self.assertEqual((topics["t0002"]["state"], topics["t0002"]["reason"]), ("held", "rejected"))
+        summary = json.loads(p.stdout[p.stdout.index("{"):])
+        self.assertEqual([x[0] for x in summary["pr"]], ["t0003"])
+        self.assertTrue(os.path.exists(os.path.join(self.root, "notes/draft.txt")))
+        self.assertEqual(sh(self.root, "git", "status", "--porcelain", "--untracked-files=no").strip(), "")
+
+    def test_untracked_build_input_blocks_batch(self):
+        self.write("src/content/blog/wip.md", "unfinished")
+        p = self.run_batch({}, n=1)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("untracked files in build inputs", p.stderr)
+
     def test_budget_kill_holds_budget(self):
         p = self.run_batch({"t0001": "budget"}, n=1)
         self.assertEqual(p.returncode, 0, p.stderr + p.stdout)

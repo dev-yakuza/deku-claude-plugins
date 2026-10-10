@@ -85,6 +85,12 @@ class GuardCase(RepoCase):
         self.assertEqual(self.guard("Bash", {"command": "git commit -m bad"}), "ask")
         self.assertEqual(self.guard("Bash", {"command": "git commit -m bad"}, {"HRD_UNATTENDED": "1"}), "deny")
 
+    def test_trust_records_and_directory_writes(self):
+        cmd = "python3 .claude/herald/scripts/hrd.py ledger record --topic t0001 --kind trust"
+        self.assertEqual(self.guard("Bash", {"command": cmd}), "ask")
+        self.assertEqual(self.guard("Bash", {"command": cmd}, {"HRD_UNATTENDED": "1"}), "deny")
+        self.assertEqual(self.guard("Bash", {"command": "cp -r /tmp/x .claude/herald/scripts"}), "ask")
+
     def test_uninitialized_repo_is_ignored(self):
         os.remove(os.path.join(self.root, ".claude/herald/config.json"))
         self.assertEqual(self.guard("Bash", {"command": "gh pr merge 1"}), "allow")

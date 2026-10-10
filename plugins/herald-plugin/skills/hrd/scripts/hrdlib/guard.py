@@ -75,14 +75,22 @@ def rel(root, path):
     return r.replace(os.sep, "/")
 
 
+def _covers(r, globs):
+    """r matches a glob, or r is a directory that contains protected paths (`cp -r x .claude/herald/scripts`)."""
+    if commits._match(r, globs):
+        return True
+    r = r.rstrip("/")
+    return bool(r) and any(g.startswith(r + "/") for g in globs)
+
+
 def classify_path(r):
     if commits._match(r, CRITERIA):
         return "criteria file %s" % r
     if r in PERSONAS:
         return "critique/verify persona %s" % r
-    if commits._match(r, WIRING):
+    if _covers(r, WIRING):
         return "guard wiring %s" % r
-    if commits._match(r, LEDGER):
+    if _covers(r, LEDGER):
         return "verification ledger %s" % r
     return None
 
@@ -184,6 +192,9 @@ def check_bash(root, cfg, cmd):
             nums = [a for a in argv[3:] if a.isdigit()]
             if "--match-head-commit" not in joined or not nums or not set(nums) <= allowed:
                 decide("deny", "auto merge needs --match-head-commit and a PR listed in HRD_AUTO_PRS.")
+        # 1b. trust records bypass verification for one article — a human decision only
+        if "--kind" in argv and "trust" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
+            protect("recording `trust` in the verification ledger skips re-verification for that article.")
         # 2. deploy
         if deploy and deploy in joined:
             if unattended():
