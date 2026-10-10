@@ -355,7 +355,7 @@ One batched prompt (localized per `config.language`):
 ```
 On confirmation, carry out each confirmed item:
 - **`이슈 등록 필요`** → via the temp-file pattern, `gh issue create --body-file <path> --label guild:harness` (+ `type:refactor`/`type:chore` if those labels exist — `gh label list --limit 200 --json name`). Title = the gap; body = the `<!-- guild:harness:<id> -->` marker · gap · why it helps Guild · acceptance criteria (for a secret: the guide-only purge/rotation steps). ⚠ **Verify each create landed** (`_handoff.md` Section F): no URL printed means the Issue does not exist — say so for that gap; never list it as created. These issues are then developable with `/gld dev`.
-- **`로컬 수정으로 해결`**, and the local part of a secret gap → apply it; `git rm --cached` is a staging change, so name the file before running it.
+- **`로컬 수정으로 해결`**, and `committed-secret-file`'s local part (`.gitignore` + `git rm --cached`) → apply it; `git rm --cached` is a staging change, so name the file before running it. `inline-secret`'s local part is **printed as guidance only, never applied** — init does not edit application source.
 
 Items the human leaves out are not an error. If the human skips remediation entirely, the report on disk still records everything.
 
