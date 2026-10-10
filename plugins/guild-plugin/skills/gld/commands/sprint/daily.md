@@ -102,6 +102,18 @@ say *"둘 중 하나를 닫으면 풀립니다"*; it is not a failure and needs 
 **Merge order comes from the member table's
 `base 의존` chain**, not from PR creation order.
 
+**3b. Squash stacks — only when 상한 근거 is `squash-sync` or `human-override`** (`_sprint_dag.md`
+Section G), one more call. It fetches into `refs/remotes/` (and objects) only — no branch, PR or
+working tree changes:
+```bash
+python3 <<SKILL_DIR>>/commands/atoms/stack_sync.py --tracker <tracker> --check
+```
+Each line annotates that member's PR row: `needs-sync` → *"⚠ 하단 머지됨 — `/gld sprint sync`"*
+(its actions ending in `held` → add *"동기화 후 `/gld dev <n>` · `gh pr ready <pr>`"*);
+`stale` → **낡은 base** (rule below); `diverged` → *"#<dep>의 작업이 기본 브랜치에 온전히 남아 있지 않습니다 — 사람이 판단"*; `conflict` → *"동기화 충돌 — 사람이 따라잡기"*; `draft-held` → *"`/gld dev <n>` 후 `gh pr ready <pr>`"*;
+`ambiguous` → under 의존성 차단 with the reason; `skipped <reason>` → that reason (`not-done`: sync after the spine finishes); `error <message>` → the message, verbatim. No output →
+nothing to add. A non-zero exit → one line *"스택 동기화 상태 확인 불가 — <stderr>"*, never a guess.
+
 **4. Failure reasons come from `failures.jsonl`, not from the console.**
 `<repo>/.claude/guild/.sprint-logs/<tracker>/failures.jsonl` — one JSON object per line:
 `{at, tracker, run, issue, class, detail}`. Read it with its own Bash call:
@@ -387,7 +399,8 @@ markers.
 
 ## Hard rules
 
-- **Read-only except the `daily` marker** (step 8), which is named as an exception.
+- **Read-only except the `daily` marker** (step 8), which is named as an exception — and step 3b's
+  fetch into `refs/remotes/` (objects and `FETCH_HEAD` only; no branch, PR or working tree).
 - **Actionable first**: change-requested PRs, needs-human, failures and stale bases come before
   any count.
 - **Merge order is derived from the member table**, never guessed from PR numbers or dates.
@@ -395,4 +408,5 @@ markers.
 - **Never judge a preserved worktree**; report source-vs-docs and let the human decide.
 - **Never auto-catch-up a stale base** and never suggest a rebase — INV3.
 - Four `gh` calls (issue list · tracker comments · PR list · issue list) plus one `git`, plus
-  one child-discovery call per split parent; a missing source renders as "없음", not an error.
+  one child-discovery call per split parent, plus step 3b's one call on a squash-stack sprint; a
+  missing source renders as "없음", not an error.

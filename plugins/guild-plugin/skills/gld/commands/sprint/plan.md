@@ -86,9 +86,9 @@ Each its own Bash call.
    ```bash
    gh api repos/<owner>/<repo> --jq '{merge: .allow_merge_commit, squash: .allow_squash_merge, rebase: .allow_rebase_merge, delete_branch: .delete_branch_on_merge}'
    ```
-   - `allow_merge_commit == false` → **the effective cap for this sprint is 1** (no stacking; every PR targets the default branch). Reason: auto-retarget only shortens a stack under a merge-commit strategy. Under squash, merging the bottom PR makes its commits *not* ancestors of the base, so the retargeted upper PR shows the bottom's changes **again** — the human re-reviews merged code and resolves conflicts, and INV3 forbids the rebase that would fix it.
-     ⚠ **This is enforced, not advisory, and the enforcement is a value — not a warning.** Carry it as `EFFECTIVE_CAP = 1` through Phase 4 (it is what `--mode depth` is given) and write **two lines** into the tracker body: the **스택 깊이 상한** value and a **상한 근거** token. ⚠ The reason must be a machine token (`config` / `merge-commit-forbidden` / `human-override`), not prose: `run` compares it against what it sees on the repo *now*, and it cannot parse a sentence. A single line carrying two numbers ("상한 3 (사람이 1로 승인)") does not say which one is in force. Saying "we propose a cap of 1" and then handing `--mode depth` the config's 3 leaves the stack fully formed — the failure §5.6 calls unrecoverable. The human may override after being told the consequence above; record the override in the body on the same line so `run` and `retro` both see which it was.
-   - `delete_branch_on_merge == false` → warn: stacks will not shorten by themselves.
+   - `allow_merge_commit == false` (squash/rebase only) → **stack with `squash-sync`** (`_sprint_dag.md` Section G): the cap stays `config.sprint.max_stack_depth`. Under squash, merging the bottom PR leaves its commits *not* ancestors of the base, so the upper PR would show them **again**; `/gld sprint sync` fixes that by merging the default branch into the upper branch (a merge, not a rebase — INV3), verifying, and pushing. Stacked PRs open as **drafts** so they cannot merge before their base. Tell the human in Phase 5: *"하단 PR을 머지한 뒤 `/gld sprint sync`를 실행하세요. 하단이 리뷰로 바뀌었다면 상단은 사람이 따라잡습니다. draft에는 리뷰 요청 알림이 가지 않습니다 — 아래부터 리뷰하세요."* The human may decline → **`EFFECTIVE_CAP = 1`**, token `merge-commit-forbidden` (no stacking; every PR targets the default branch).
+     ⚠ **The cap is a value, not a warning.** Carry `EFFECTIVE_CAP` through Phase 4 (it is what `--mode depth` is given) and write **two lines** into the tracker body: the **스택 깊이 상한** value and a **상한 근거** token — `config` (merge commits allowed) / `squash-sync` / `merge-commit-forbidden` / `human-override` (a pre-0.91 tracker that stacked on squash without sync; never written now). ⚠ Machine tokens, not prose: `run` compares the token with the repo *now* and picks the PR mode from it. A line carrying two numbers ("상한 3 (사람이 1로 승인)") does not say which one is in force.
+   - `delete_branch_on_merge == false` → note: GitHub will not retarget an upper PR by itself; `sprint sync` does.
    - A field coming back `null` (permissions) → treat as unknown, warn, and do not silently assume the permissive value.
 
 ## Phase 1 — Collect candidates
@@ -569,12 +569,13 @@ member building on the pre-refactor code or puts two PRs on one file in parallel
 ⚠ At `EFFECTIVE_CAP = 1` a slot always has an edge (it must prepare a member — Phase 2), so
 the comparison removes it unless the feature work already needs a deeper stack the human
 accepted. The human may also accept the slot's depth after being told — then keep it and
-record the override like any other over-cap acceptance.
+record the override like any other over-cap acceptance (under `merge-commit-forbidden` that
+means switching to `squash-sync` — step 4).
 
 1. `--mode cycles` → exit **3** means a cycle exists: show the witness path and `FAIL`. **A cycle must be caught here** — reaching an unattended run with one is a deadlock.
 2. `--mode linearize` → each member's `base_dep`. This is what gets written to the member table.
 3. `--mode order` → execution order. **Reads the step-2 file.**
-4. `--mode depth` (**the step-2 file**) with `max_depth` = **`EFFECTIVE_CAP`** — Phase 0 step 5's value when the repo forbids merge commits, otherwise `config.sprint.max_stack_depth` (default 3) → exit **4** means over the cap: report the chain and **propose cutting it**, deferring the tail to the next sprint. A warning plus a proposal, not a block — the human may accept the depth. ⚠ At `EFFECTIVE_CAP = 1` any dependency at all exceeds it, which is the point: the sprint either drops the dependants or the human accepts re-reviewing merged code.
+4. `--mode depth` (**the step-2 file**) with `max_depth` = **`EFFECTIVE_CAP`** — `1` when Phase 0 step 5 recorded `merge-commit-forbidden`, otherwise `config.sprint.max_stack_depth` (default 3) → exit **4** means over the cap: report the chain and **propose cutting it**, deferring the tail to the next sprint. A warning plus a proposal, not a block — the human may accept the depth — then **keep the 상한 근거 token and write the accepted depth as the 스택 깊이 상한 value** (never `human-override`: `run` would drop the drafts). ⚠ At `EFFECTIVE_CAP = 1` any dependency at all exceeds it, which is the point: the sprint either drops the dependants or the human switches to `squash-sync` (Phase 0 step 5) — when 상한 근거 is `merge-commit-forbidden`, **accepting depth IS that switch**: rewrite 상한 근거 to `squash-sync` and the cap to the accepted depth (≥ the config value). A stack under `merge-commit-forbidden` gets no drafts and no `sync` (`run.md` Phase 0), so that combination must never be written.
 
 ⚠ Linearization adds edges: an originally independent issue can end up stacked on another so that a fan-in node has a single base. Mark those in the member table (`⚠ 선형화로 추가된 의존`) and say so in Phase 5 — the human needs to know that #102's PR now cannot merge before #101's.
 
@@ -803,7 +804,7 @@ plan-hash: <sprint_dag.py --mode hash 의 출력>
 - 용량 판단: <N>개 — <근거>
 - 머지 전략: <merge commit 허용 여부> · 브랜치 자동삭제 <여부>
 - 스택 깊이 상한: <유효 상한 N>
-- 상한 근거: <"config" | "merge-commit-forbidden" | "human-override">
+- 상한 근거: <"config" | "squash-sync" | "merge-commit-forbidden">
 - 리팩토링 슬롯: <"#<n> (existing)" | "#<n> (drafted)" | "skip (<disabled|no-candidate|not-ready|capacity|stack-cap|human-declined|ad-hoc>)">
 
 ## 멤버 (실행 순서 · 의존성 정본)

@@ -603,6 +603,7 @@ As the leader, push the branch and open a PR referencing the Issue (temp-file bo
   - **exit 0 + non-empty** → the base is still there; pass it to `--base`.
   - **exit 0 + empty** → the branch really is gone. Fall back to the repo's default branch and **say so in the PR body**; the dependency has landed, so targeting the default branch is now correct.
   - **non-zero exit** → the remote could not be reached. Do **not** claim the dependency landed: keep `<base>` and let `gh pr create` report the truth, or if that also fails, surface the git error itself. Writing "the dependency has landed" into a PR body on a transient network error is a false statement in a permanent record.
+- **Draft** — `printenv GLD_SPRINT_DRAFT` (its own call; `1` only for a stacked member of a `squash-sync` sprint). `1` → `--draft`, and keep the stack notice even after the default-branch fallback (`/gld sprint sync` readies only a draft carrying it — `_sprint_dag.md` Section G). Drafts unsupported (private repo, free plan) → retry once without `--draft`. The PATCH path never changes draft state.
 
 ⚠ Until this step, PRs were always opened against the repo's default branch even though Step 0 called `<base>` "the branch Step 5's PR targets" — `--base` was simply never passed. With no injection `<base>` is *derived from* `defaultBranchRef`, so the two agreed and nothing was broken; passing `--base` explicitly is what makes the injected case work, and it leaves the non-sprint case unchanged.
 
@@ -627,7 +628,7 @@ As the leader, push the branch and open a PR referencing the Issue (temp-file bo
 
 Rows come from the Step 2 ledger, in this order — a changed comparison setting changes what *every* image means, a rewritten image is a changed expectation, and a new image is a fresh picture; the reviewer's attention should go in that order. Same in-place-replacement rule as the auditor block below (markers are the anchor, heading text in `config.language`) — on a re-entered execute the section is rebuilt from the ledger, never appended to. The commit gate also warns on these changes (`verification:baseline-*`, `verification:visual-config-changed`); this section is where that warning's "disclose it in the PR" is satisfied.
 
-**Stack notice (only when `<base>` is not the default branch)** — add a marker-delimited block so the reviewer learns the ordering *in the PR*, where they actually arrive from a GitHub notification rather than from a terminal:
+**Stack notice (only when `<base>` is not the default branch, or `GLD_SPRINT_DRAFT=1`)** — add a marker-delimited block so the reviewer learns the ordering *in the PR*, where they actually arrive from a GitHub notification rather than from a terminal:
 
 ```markdown
 <!-- guild:sprint:stack -->
@@ -636,10 +637,11 @@ Rows come from the Step 2 ledger, in this order — a changed comparison setting
 - **먼저 머지**: #<하단 PR> → … → 이 PR
 - 이 diff는 base 브랜치 위의 변경만 담습니다 — 하단 PR들의 변경은 포함되지 않습니다.
 - 전체 순서: `/gld sprint daily`
+- (`GLD_SPRINT_DRAFT=1`일 때만, 둘 중 하나) draft — 하단이 머지되면 `/gld sprint sync`가 기본 브랜치를 머지·검증하고 ready로 바꿉니다 (그 전까지는 하단 변경이 diff에 다시 보일 수 있음) · 또는 draft 미지원 — 머지 순서는 이 안내로만 지켜집니다.
 <!-- /guild:sprint:stack -->
 ```
 
-Same in-place-replacement rule as the auditor block below (markers are the anchor, heading text in `config.language`). ⚠ Merging out of order is not prevented by GitHub's UI — this notice and `daily`'s ordered list are the only defences. The PR is where the **human reviewer** (M1's external reviewer) approves. **Resume-safe**: if a PR for this branch already exists (interrupted prior run), PATCH it rather than opening a duplicate. **Unattended (`GLD_UNATTENDED=1`)**: append a `## 무인 결정 로그 (GLD_UNATTENDED)` section to the PR body aggregating the leader-proxy gate decisions recorded in the analyze/design outputs (chosen interpretation · charter rationale · "사람 확인 요") — `_handoff.md` Section H — so the deferred human gate (PR review) is informed, not blind.
+Same in-place-replacement rule as the auditor block below (markers are the anchor, heading text in `config.language`). ⚠ Merging out of order is not prevented by GitHub's UI — this notice and `daily`'s ordered list are the only defences, except for a `squash-sync` draft, which GitHub holds until `sync` readies it. The PR is where the **human reviewer** (M1's external reviewer) approves. **Resume-safe**: if a PR for this branch already exists (interrupted prior run), PATCH it rather than opening a duplicate. **Unattended (`GLD_UNATTENDED=1`)**: append a `## 무인 결정 로그 (GLD_UNATTENDED)` section to the PR body aggregating the leader-proxy gate decisions recorded in the analyze/design outputs (chosen interpretation · charter rationale · "사람 확인 요") — `_handoff.md` Section H — so the deferred human gate (PR review) is informed, not blind.
 
 **Auditor section (a reviewer-facing copy of the Step 4 Issue record; mandatory whenever that record holds at least one finding — any block other than `findings: none` / `scan: none`; NOT keyed to whether *this* invocation's auditor found anything)** — add a marker-delimited **"external auditor (execute)" section** to the PR body — the heading text itself in `config.language` (`## 외부 감사자 (execute)` on a `ko` repo), since the stable anchor is the HTML marker, not the words — wrapped in `<!-- guild:auditor:pr -->` … `<!-- /guild:auditor:pr -->` so a later write replaces that block in place instead of leaving two contradictory copies (Step 5 already PATCHes an existing PR rather than opening a duplicate, and execute can be re-entered from test/qa).
 
@@ -664,7 +666,7 @@ That body holds every `### audit-record <n>` block from every attempt and invoca
 - **Push rejected (non-fast-forward)** — the remote branch diverged. **Do NOT force-push and do NOT rewrite history** (INV3). Re-read the divergence (`git fetch`, then `git log --oneline origin/<branch>..<branch>` / the reverse) and escalate: **attended** → `NEEDS_HUMAN: branch <branch> diverged from origin — resolve before the PR`; **unattended** → `guild:needs-human` label + comment, `OK PAUSE: needs-human — branch diverged from origin` (do NOT transition).
 - **Protected branch / push permission denied** → terminal `FAIL:` (a retry cannot help — `_handoff.md` Section F).
 - **A PR already exists for this branch** — not an error: this is the resume-safe case above. Find it (`gh pr list --head <branch> --state open`) and PATCH its body instead of creating a second PR.
-- **PR creation fails otherwise** — template/validation (422) or insufficient permission (403) → terminal `FAIL: gh pr create failed for #<N> — <gh error>`; rate limit / 5xx / network → one retry, then the same `FAIL`.
+- **PR creation fails otherwise** — template/validation (422; except a `--draft` refusal, retried once without it — Draft above) or insufficient permission (403) → terminal `FAIL: gh pr create failed for #<N> — <gh error>`; rate limit / 5xx / network → one retry, then the same `FAIL`.
 
 In every failure case the branch still holds the committed work — say so, and do **not** return `OK ADVANCE: test`: work with no open PR has no human reviewer (INV1), so the stage has not advanced.
 

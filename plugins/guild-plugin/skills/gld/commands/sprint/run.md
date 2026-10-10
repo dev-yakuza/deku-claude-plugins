@@ -17,7 +17,7 @@ The known flags are **`--readiness`** · **`--window`** · **`--duration`** (= a
   --duration=<same>`. Today an unknown flag is silently dropped and the run starts, and the
   destructive case is the requirement's own spelling: `--duration 22:00-10:00` ignored leaves
   no non-flag argument, which reads as *"resume the active sprint"* and starts a **24-hour
-  unattended run with no window at all**. `sprint.md:31` and `config.md:15` already have the
+  unattended run with no window at all**. `sprint.md:32` and `config.md:15` already have the
   *"unknown → report it"* convention.
 - ⚠ **A flag's VALUE token is not counted as a non-flag argument.** Consume the value first,
   then look for the first non-flag token in what is left. (In `--window 22:00-10:00`, if
@@ -71,7 +71,7 @@ member**; see Phase 0 and Phase 3 step 2c.
 | **Harness is committed** | `git ls-files --error-unmatch .claude/guild/config.json CLAUDE.md` (and spot-check `.claude/agents/`, `docs/standards/`) | **block** |
 | **Container dir creatable** | repo parent writable; else `$TMPDIR`; neither → **block** | **block** |
 | `guild:sprint` label exists | `gh label list --limit 200 --json name --jq '[.[].name]'` | **block** |
-| Merge strategy | `gh api repos/<o>/<r> --jq '{merge:.allow_merge_commit,squash:.allow_squash_merge,delete_branch:.delete_branch_on_merge}'` | Read the tracker body's **스택 깊이 상한** value and its **상한 근거** token, and compare with the repo now. `allow_merge_commit == false` **and** 근거 is not `merge-commit-forbidden`/`human-override` → the plan predates the setting: **stop** with `FAIL: this repo forbids merge commits but the sprint was planned with a stack — re-run /gld sprint plan`. `run` cannot lower the cap itself: the bases are already fixed in the immutable member table. ⚠ 근거 == `human-override` → **proceed**, and say once that the human accepted re-reviewing merged code under a squash strategy (`plan` Phase 0 step 5's reason). Do not re-litigate a decision the body records |
+| Merge strategy | `gh api repos/<o>/<r> --jq '{merge:.allow_merge_commit,squash:.allow_squash_merge,delete_branch:.delete_branch_on_merge}'` | Read the tracker body's **스택 깊이 상한** value and its **상한 근거** token, and compare with the repo now. `allow_merge_commit == false` **and** 근거 is anything but `squash-sync` / `merge-commit-forbidden` / `human-override` (`config`, missing, garbled) → the plan predates the setting: **stop** with `FAIL: this repo forbids merge commits but the sprint was planned with a stack — re-run /gld sprint plan`. `run` cannot change the cap itself: the bases are already fixed in the immutable member table. 근거 `squash-sync` → proceed and render with `--draft-stacked` (step 2): stacked PRs open as drafts and `/gld sprint sync` readies them once their base has merged (`_sprint_dag.md` Section G). `merge-commit-forbidden` → proceed (no member has a stack base). `human-override` (a pre-0.91 tracker) → proceed without drafts and say once that `/gld sprint sync` still applies after each merge |
 | CI runs tests on PRs | read `.github/workflows/*.yml` for a `pull_request` trigger invoking the test command | warn |
 | A review path exists | recent merged PRs carry at least one review | warn |
 | Install command resolvable | `config.commands` scan | warn |
@@ -145,7 +145,7 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
 1. **Resolve `{owner}/{repo}`** once (`_handoff.md` Section F).
 2. **Find the sprint.**
    - `$1` empty → the open `guild:sprint` Issue. None → *"활성 스프린트가 없습니다. `/gld sprint plan`으로 먼저 계획하세요."* Two or more → ask which.
-   - `$1` = numbers → **create a tracking Issue for them first**, running `plan.md` Phase 4 (cycles → linearize → order → depth) and Phase 6 on the given set, with goal "즉석 스프린트", capacity "사람 지정" and 리팩토링 슬롯 `skip (ad-hoc)` (a `type:refactor` Issue among the numbers is an ordinary member, not a slot — `plan.md` Phase 6). ⚠ The ad-hoc path is **not** allowed to skip the container: the duplicate-run guard, the checkpoint, resume and `daily` all live in the tracking Issue's markers — without it none of them exist.
+   - `$1` = numbers → **create a tracking Issue for them first**, running `plan.md` Phase 0 step 5 (merge strategy → 상한 근거; on a squash-only repo `squash-sync` unless the human declines), Phase 4 (cycles → linearize → order → depth) and Phase 6 on the given set, with goal "즉석 스프린트", capacity "사람 지정" and 리팩토링 슬롯 `skip (ad-hoc)` (a `type:refactor` Issue among the numbers is an ordinary member, not a slot — `plan.md` Phase 6). ⚠ The ad-hoc path is **not** allowed to skip the container: the duplicate-run guard, the checkpoint, resume and `daily` all live in the tracking Issue's markers — without it none of them exist.
 3. **Duplicate-run guard.** Read the `<!-- guild:sprint:run -->` comment.
 
    | Observed | Verdict |
@@ -348,7 +348,7 @@ inside its own worktree.
    rejection is the second safety net behind it, not the remedy.
 
    ```bash
-   python3 <<SKILL_DIR>>/commands/atoms/render_supervisor.py --tracker <tracker> --owner-repo <owner/repo> --default-branch <branch> --container <container> --human-repo <abs path of the human's checkout> --dag-path <<SKILL_DIR>>/commands/atoms/sprint_dag.py --order <n> --order <n> --install-cmd <cmd>
+   python3 <<SKILL_DIR>>/commands/atoms/render_supervisor.py --tracker <tracker> --owner-repo <owner/repo> --default-branch <branch> --container <container> --human-repo <abs path of the human's checkout> --dag-path <<SKILL_DIR>>/commands/atoms/sprint_dag.py --order <n> --order <n> --install-cmd <cmd> [--draft-stacked]
    ```
 
    | Argument | Value |
@@ -360,6 +360,7 @@ inside its own worktree.
    | `--container` | `<repo-parent>/.gld-<repo-basename>-sprint-<tracker>` (repo name included so two sibling repos with the same sprint number cannot collide — a worktree registers by basename) |
    | `--human-repo` | absolute path of the human's checkout. The output path is **assembled** from this plus `--tracker`; there is no `--out <path>` form. Rejected if it is **not absolute** (the supervisor never `cd`s and is launched in the background, so a relative value would resolve the board/window conf and log dir against an inherited cwd) or **not an existing directory**. Both are typo guards, not containment — the same model call supplies the value |
    | `--dag-path` | absolute path of `commands/atoms/sprint_dag.py` |
+   | `--draft-stacked` | present **only** when the tracker's 상한 근거 is `squash-sync` (Phase 0). The supervisor then sets `GLD_SPRINT_DRAFT=1` for a member whose base is not the default branch, and the spine opens that PR as a draft (`_execute_spine.md` Step 5) |
    | `--install-cmd` | **repeated once per command** from `config.commands`, passed **raw and unquoted** — the renderer applies `shlex.quote`. ⚠ **Do not pre-quote.** A pre-quoted `'yarn install'` becomes `''\''yarn install'\'''` and the template's `eval "$IC"` then looks for a command literally named `yarn install`. Zero occurrences renders `INSTALL_CMDS=()`. Each value must be a **simple command** — `init.md:163` normalizes `config.commands` so they MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections, and that normalization is the whole reason the template's `eval "$IC"` is safe; the renderer re-checks **that list and only that list** |
 
    ⚠ **`<PLUGIN_VERSION>` is not an argument** — the script reads it from `.claude-plugin/plugin.json` itself, resolved relative to its own location. It exits non-zero if that read fails rather than stamping a blank watermark onto a script that outlives this session.
@@ -584,7 +585,7 @@ file is readable on its own):
 3. refresh base             git fetch origin <d>:refs/remotes/origin/<d>
 4. decide base              sprint_dag.py --mode base      → DEFAULT | <branch> | BLOCKED:<why>
 5. acquire the worktree     four states (below) + memory symlink + dependency install
-6. run the child            (cd <worktree> && GLD_UNATTENDED=1 GLD_SPRINT_BASE=<base> claude -p "/gld dev <n>")
+6. run the child            (cd <worktree> && GLD_UNATTENDED=1 GLD_SPRINT_BASE=<base> GLD_SPRINT_DRAFT=<0|1> claude -p "/gld dev <n>")
 7. judge by label           5 outcomes (below)
 8. release the worktree     only at guild:done, never --force
 9. update the marker        heartbeat · retries · discovered children

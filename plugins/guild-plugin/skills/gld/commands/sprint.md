@@ -23,6 +23,7 @@ as **that file's** `$1, $2, …` (shift by one).
 | `plan` | `commands/sprint/plan.md` — choose this sprint's issues, order them, create the tracking Issue |
 | `run` | `commands/sprint/run.md` — develop the members unattended to PRs |
 | `daily` | `commands/sprint/daily.md` — read-only status; merge order; what is stuck |
+| `sync` | `commands/sprint/sync.md` — after merging a lower PR on a squash/rebase-only repo, bring the stacked PRs above it level with the default branch (`_sprint_dag.md` Section G) |
 | `retro` | `commands/sprint/retro.md` — metrics, capacity calibration, evolve, close the sprint |
 | `board` | `commands/sprint/board.md` — set up / inspect / reset the GitHub Projects kanban. **Optional infrastructure**: every other subcommand works without it (03-sprint-board.md D2) |
 | *(empty)* | route to **`daily`** — the most-used read-only action. A bare invocation must never start something destructive |
@@ -73,9 +74,9 @@ on the merge-order line — reviewing is not a side activity here, it is the hal
 Guild does not do.
 
 ### Return (this router's own)
-`plan`/`run`/`daily`/`retro`/`board` each define their own return line; the router passes it
+`plan`/`run`/`daily`/`sync`/`retro`/`board` each define their own return line; the router passes it
 through unchanged. Its own returns are for the paths that never reach a subcommand:
-`FAIL: unknown subcommand <$1> — valid: plan | run | daily | retro | board` ·
+`FAIL: unknown subcommand <$1> — valid: plan | run | daily | sync | retro | board` ·
 `OK: use \`/gld sprint run <issues>\`` (the legacy number-list and `--readiness` forms).
 ⚠ None of these is a spine token: this file never returns `OK ADVANCE` or `OK PAUSE`
 (`_handoff.md` Section D — those belong to stage commands).

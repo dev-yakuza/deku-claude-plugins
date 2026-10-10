@@ -232,6 +232,27 @@ line, which is the heredoc's **first body line**, leaving the group open forever
 then reports `unexpected end of file` at the end of the file, hundreds of lines from the cause.
 Use a form that completes on that line (`|| RC=$?`) and judge after the terminator.
 
+## Section G — Stacks on a squash/rebase-only repo (`squash-sync`)
+
+상한 근거 `squash-sync` (`plan.md` Phase 0 step 5) → `run` opens stacked PRs as **drafts**
+(`GLD_SPRINT_DRAFT=1`); after the human merges a lower PR, **`/gld sprint sync`**
+(`stack_sync.py`; statuses in its docstring and `sprint/sync.md`) merges `origin/<default>` into
+each upper branch, verifies (`config.commands` test/lint/typecheck), pushes without force,
+retargets and readies. Design: `design/guild/09-squash-stack.md`.
+
+- **Sync is not catch-up.** Automatic only when the member already holds the dependency's final
+  work — what the dependency gained since is clean merges of default-branch content (ours or
+  GitHub's "Update branch") — and that work is still intact on the default branch. Otherwise
+  `stale` / `diverged`: the human catches up, then `/gld dev <n>`.
+- **The merge base is the member's cut point on the dependency**, not git's own (which, after a
+  squash, predates the dependency and makes every dependency file the member edited conflict).
+- **Only finished, idle members**: `guild:done` without `guild:needs-human`, branch checked out
+  nowhere, remote head = PR head (`--check` applies the same gates). Conflict, failed
+  verification or a verification that rewrote a tracked file → nothing pushed. Readies a draft
+  with `<!-- guild:sprint:stack -->` only when its own merge (trailers `Guild-Sync: #<dep>` and
+  `Guild-Sync-Base: <cut>`) or a merge-commit landing brought it level and no human's edited
+  merge is in it; else `draft-held`.
+
 ---
 
 ## Hard rules

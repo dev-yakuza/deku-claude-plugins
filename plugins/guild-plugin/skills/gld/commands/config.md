@@ -56,8 +56,8 @@ Parse `$1` onward:
    - `gates` ∈ {on→true, off→false} (sets `gates.enabled`).
    - `max_stack_depth` — an integer ≥ 1 (sets `sprint.max_stack_depth`). Reject `0` and
      non-integers: a cap of 0 would block every dependent Issue in every sprint. A value of 1
-     is meaningful — it means "no stacking, every PR targets the default branch", which is what
-     `sprint plan` proposes when the repo forbids merge commits.
+     is meaningful — it means "no stacking, every PR targets the default branch" (what `sprint
+     plan` records as `merge-commit-forbidden` when the human declines `squash-sync`).
    - `refactor_slot` ∈ {on→true, off→false} (sets `sprint.refactor_slot`).
    - `window` — **`HH:MM-HH:MM (24h, zero-padded)`**, or `none` to clear it (writes `null`).
      Reject: a missing zero (`9:00`), `HH` outside 00-23, `MM` outside 00-59, and

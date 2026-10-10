@@ -1376,7 +1376,7 @@ EXPECT = {
     ("config.md", 15):      "unknown/unsupported config key",
     ("init.md", 163):       "normalized, simple-bash-safe",
     ("run.md", 78):         "Not already running",
-    ("sprint.md", 31):      "unknown subcommand",
+    ("sprint.md", 32):      "unknown subcommand",
 }
 pat = re.compile(r"`?([A-Za-z_][A-Za-z0-9_./-]*\.(?:md|py|sh|json))`?:(\d+)")
 idx = {}

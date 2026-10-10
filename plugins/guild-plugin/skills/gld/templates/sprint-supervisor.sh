@@ -40,6 +40,10 @@ WAIT_MAX=14400                        # 4h ceiling on ANY single rate-limit wait
 # values. (Word expansion — globs, `$VAR`, `~` — IS permitted and IS expanded here; that is
 # intended. `init.md:163` is the contract; `render_supervisor.py` re-checks it.)
 INSTALL_CMDS=(<INSTALL_CMDS>)
+# 1 = the tracker's 상한 근거 is `squash-sync` (09-squash-stack.md §5): a member whose base is not
+# the default branch opens its PR as a draft, and `/gld sprint sync` readies it after its base
+# merged. Literal 0/1 from render_supervisor.py.
+DRAFT_STACKED=<DRAFT_STACKED>
 
 # ── Board projection config (03-sprint-board.md §7.2) ────────────────────────
 # ⚠ THESE TEN VALUES NEVER TOUCH SHELL SOURCE. They come from `config.sprint.board`, i.e. from
@@ -1769,7 +1773,9 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     # `timeout` (a `git commit` whose hook runs the suite can no longer be auto-backgrounded,
     # so at the 120 s default it would simply stop), BASH_MAX_TIMEOUT_MS lets a suite
     # measured above ten minutes run in the foreground instead of having nowhere to go.
-    ( cd "$WT" && GLD_UNATTENDED=1 GLD_SPRINT_BASE="$BASE_REF" \
+    SPRINT_DRAFT=0
+    if [ "$DRAFT_STACKED" = 1 ] && [ "$BASE_REF" != "origin/$DEFAULT_BRANCH" ]; then SPRINT_DRAFT=1; fi
+    ( cd "$WT" && GLD_UNATTENDED=1 GLD_SPRINT_BASE="$BASE_REF" GLD_SPRINT_DRAFT="$SPRINT_DRAFT" \
         CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
         BASH_DEFAULT_TIMEOUT_MS=600000 BASH_MAX_TIMEOUT_MS=3600000 \
         claude -p --verbose --output-format stream-json --dangerously-skip-permissions \
