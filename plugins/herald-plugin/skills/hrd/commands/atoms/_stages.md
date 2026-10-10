@@ -126,8 +126,10 @@ hashing joins the verify target set when M6 is enabled.)
 
 ## Holds (any stage)
 
-- `cannibalization` / `research` / `rejected`: delete the local herald branch and work files
-  (`git switch <base>`, `git branch -D <branch>`), record `hold`. Attended: `HRD state --topic
+- `cannibalization` / `research` / `rejected`: remove this topic's files **before switching**
+  (the body and images are untracked until publish and would follow you to base):
+  `git clean -fd -- <body path> <image dir> <w>` (only the paths that exist), then
+  `git switch <base>`, `git branch -D <branch>`, record `hold`. Attended: `HRD state --topic
   <id> --state held --reason <r>` then `HRD commit --cmd hold --kind hold -m "chore(herald):
   hold <id>" .claude/herald/topics.json` and `git push origin <base>`. Unattended: `HRD result`
   only.

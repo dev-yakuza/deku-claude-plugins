@@ -78,7 +78,7 @@ declined --reason <short-reason>`, `gh pr close <n>`, delete the remote branch, 
 1. With base scripts, before switching: scope must pass; if the PR head hash ≠ the ledger's
    `verified_hash` (a human pushed changes), re-verify:
 2. `git switch -C <branch> refs/remotes/origin/pr-<n>` (the local branch follows the human's
-   pushed head); run the gate and verify (`atoms/_stages.md` § verify). If
+   pushed head); run the gate (`HRD gate --topic <id>`) and verify (`atoms/_stages.md` § verify). If
    unsupported sentences remain, **delta research**: the researcher sources only those
    sentences and appends `C#` to `research.md`; the fact-checker adds the mappings to
    `claims-map.json`; a PR comment `herald-source: <sentence> <URL>` from a human counts as a
@@ -92,7 +92,8 @@ declined --reason <short-reason>`, `gh pr close <n>`, delete the remote branch, 
 
 `gh pr merge <n> --squash --match-head-commit <verified sha> --delete-branch` (head changed →
 back to §5). Add to the deploy set. `HRD sync`; `git branch -D` the local herald branch.
-`--auto`: merge only PRs in `HRD_AUTO_PRS`, all §5 checks done for every target first; then
+`--auto`: merge only PRs in `HRD_AUTO_PRS`, all §5 checks done for every target first; do
+**not** run `HRD sync` between merges (merging needs no local base; the runner syncs); then
 write the round result file and stop — the runner does 7–9.
 
 ## 7. Deploy

@@ -20,7 +20,7 @@ DEFAULT_RULES = {
 
 FM_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.S)
 LINK_RE = re.compile(r"\]\((/[^)\s#?]*)[^)]*\)|href=[\"'](/[^\"'#?]*)")
-IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)|<img[^>]*\ssrc=[\"']([^\"']+)[\"']|<source[^>]*\ssrcset=[\"']([^\"'\s]+)")
+IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+[\"'][^)]*[\"'])?\)|<img[^>]*\ssrc=[\"']([^\"']+)[\"']|<source[^>]*\ssrcset=[\"']([^\"'\s]+)")
 
 
 def parse_frontmatter(text):
@@ -104,8 +104,9 @@ def validate(root, cfg, file_path):
         pub = rules["images"].get("public_dir", "public").rstrip("/")
         for m in IMG_RE.finditer(text):
             src = next(g for g in m.groups() if g)
-            if re.match(r"^[a-z]+:", src):  # http:, data: — external, not checked
+            if re.match(r"^[a-z]+:", src) or src.startswith("//"):  # http:, data:, protocol-relative
                 continue
+            src = re.split(r"[?#]", src, 1)[0]
             if src.startswith("/"):
                 relp = "%s%s" % (pub, src)
             else:  # relative to the article file

@@ -19,7 +19,7 @@ import urllib.request
 from . import commits, ghstate, integrity, lock
 from .config import Config
 from .measure import stream_json_usd
-from .store import (CLEANUP_REASONS, auto_exclusion, branch_name, get_topic, load_published, load_topics,
+from .store import (CLEANUP_REASONS, HOLD_REASONS, auto_exclusion, record_published, branch_name, get_topic, load_published, load_topics,
                     paths, read_json_at, save_published, save_topics, set_topic_state, signal as emit_signal,
                     work_rel)
 from .util import HeraldError, git, git_ok, now_iso, read_json, write_json
@@ -29,8 +29,9 @@ MAX_WAIT = 4 * 3600
 
 
 def log(msg):
-    sys.stdout.write("[hrd batch %s] %s\n" % (datetime.datetime.now().strftime("%H:%M:%S"), msg))
-    sys.stdout.flush()
+    # progress goes to stderr; stdout carries only the final JSON summary
+    sys.stderr.write("[hrd batch %s] %s\n" % (datetime.datetime.now().strftime("%H:%M:%S"), msg))
+    sys.stderr.flush()
 
 
 def result_dir(root):
@@ -66,7 +67,9 @@ def select_topics(root, cfg, n):
 
 # --- child sessions --------------------------------------------------------------------------
 
-def run_child(root, cfg, prompt, log_path, budget_usd, extra_env=None):
+def run_child(root, cfg, prompt, log_path, budget_usd, extra_env=None, spent=0.0):
+    """Returns (outcome, usd). The budget is per article: `spent` carries what earlier attempts
+    (rate-limit restarts, the retry child) already cost (plan §3.7)."""
     env = dict(os.environ)
     env.update({"HRD_UNATTENDED": "1"})
     env.update(extra_env or {})
@@ -76,13 +79,14 @@ def run_child(root, cfg, prompt, log_path, budget_usd, extra_env=None):
     prices = cfg.get("models", "prices") or {}
     waited = 0
     while True:
+        base_cost = spent
         with open(log_path, "w") as out:
             proc = subprocess.Popen(cmd, cwd=root, stdout=out, stderr=subprocess.STDOUT, env=env,
                                     start_new_session=True)
             over = False
             while proc.poll() is None:
                 time.sleep(5)
-                if budget_usd and stream_json_usd(log_path, prices) > budget_usd:
+                if budget_usd and base_cost + stream_json_usd(log_path, prices) > budget_usd:
                     over = True
                     os.killpg(proc.pid, signal.SIGTERM)
                     try:
@@ -91,8 +95,9 @@ def run_child(root, cfg, prompt, log_path, budget_usd, extra_env=None):
                         os.killpg(proc.pid, signal.SIGKILL)
                         proc.wait()
                     break
+        spent = base_cost + stream_json_usd(log_path, prices)
         if over:
-            return "budget"
+            return "budget", spent
         with open(log_path, errors="replace") as f:
             tail = f.read()[-4000:]
         errors = " ".join(l for l in tail.splitlines() if '"is_error": true' in l or '"is_error":true' in l
@@ -103,7 +108,7 @@ def run_child(root, cfg, prompt, log_path, budget_usd, extra_env=None):
             time.sleep(delay)
             waited += delay
             continue
-        return "exited:%d" % proc.returncode
+        return "exited:%d" % proc.returncode, spent
 
 
 def _topic_branch(root, tid):
@@ -120,41 +125,79 @@ def _topic_paths(cfg, tid, slug):
     return paths_
 
 
+def _present(root, paths_):
+    """Paths that exist on disk or are tracked — `git add` fails on a pathspec matching nothing
+    (no image dir without the illustrator, no body before draft)."""
+    tracked = set(p for p in git(root, "ls-files", "-z", "--", *paths_).split("\0") if p) if paths_ else set()
+    return [p for p in paths_ if os.path.exists(os.path.join(root, p))
+            or p in tracked or any(t.startswith(p.rstrip("/") + "/") for t in tracked)]
+
+
+def _slug_of(root, tid):
+    st = read_json(os.path.join(root, work_rel(tid, "state.json"))) or {}
+    if st.get("slug"):
+        return st["slug"]
+    b = _topic_branch(root, tid)
+    if b:
+        return b.split("--", 1)[1]
+    try:
+        return get_topic(load_topics(root), tid).get("slug")
+    except HeraldError:
+        return None
+
+
 def preserve_wip(root, cfg, tid):
     """Budget/needs-human: commit only this topic's files (PR file scope) to its herald branch
     (no push) and go back to base. The branch keeps the work for a human and `resume`."""
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
     if branch.startswith("herald/%s--" % tid):
         slug = branch.split("--", 1)[1]
-        git(root, "add", "-A", "--", *_topic_paths(cfg, tid, slug))
-        if git(root, "diff", "--cached", "--name-only").strip():
-            git(root, "commit", "-q", "-m", "wip(herald): %s preserved by batch runner" % tid)
+        targets = _present(root, _topic_paths(cfg, tid, slug))
+        if targets:
+            git(root, "add", "-A", "--", *targets)
+            if git(root, "diff", "--cached", "--name-only", "--", *targets).strip():
+                git(root, "commit", "-q", "-m", "wip(herald): %s preserved by batch runner" % tid, "--", *targets)
     git(root, "checkout", "-q", cfg.base)
+    # a stray untracked copy of work/<id>/ on base is redundant once the branch holds it
+    branch = _topic_branch(root, tid)
+    if branch and git_ok(root, "cat-file", "-e", "%s:%s/state.json" % (branch, work_rel(tid))):
+        if _present(root, [work_rel(tid)]) and not git(root, "ls-files", "--", work_rel(tid)).strip():
+            git(root, "clean", "-q", "-fd", "--", work_rel(tid))
 
 
 def cleanup_branch(root, cfg, tid):
     """Cleaned holds: remove only this topic's files and branch — never other untracked files."""
     branch = _topic_branch(root, tid)
-    slug = branch.split("--", 1)[1] if branch else None
+    slug = _slug_of(root, tid)  # read before work/<id>/ is removed; the child may have deleted the branch
     cur = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
     targets = _topic_paths(cfg, tid, slug)
-    if cur == branch:
+    if branch and cur == branch:
         tracked = [p for p in git(root, "ls-files", "-z", "--", *targets).split("\0") if p]
         if tracked:
             git(root, "checkout", "-q", "HEAD", "--", *tracked)
-    git(root, "clean", "-q", "-fd", "--", *targets)
+    present = _present(root, targets)
+    if present:
+        git(root, "clean", "-q", "-fd", "--", *present)
     git(root, "checkout", "-q", cfg.base)
-    git(root, "clean", "-q", "-fd", "--", work_rel(tid))
+    present = _present(root, targets)
+    if present:
+        git(root, "clean", "-q", "-fd", "--", *present)
     if branch:
         git(root, "branch", "-q", "-D", branch)
 
 
 def completed(root, cfg, tid):
+    """Only an OPEN Herald PR counts as this child's success — an old merged PR of a requeued
+    (reverted/withdrawn) topic must not (plan §3.2.1)."""
     res = read_result(root, tid) or {}
-    if str(res.get("status", "")).startswith("held:"):
+    status = str(res.get("status", ""))
+    if status.startswith("held:"):
+        reason = status.split(":", 1)[1]
+        if reason not in HOLD_REASONS:
+            res = {"status": "held:needs-human", "note": "child reported unknown hold %r: %s" % (reason, res.get("note"))}
         return res
     for p in ghstate.herald_prs(root, cfg):
-        if p["topic_id"] == tid and (p["state"] == "OPEN" or p.get("mergedAt")):
+        if p["topic_id"] == tid and p["state"] == "OPEN":
             return {"status": "pr-open", "pr": p["number"]}
     return None
 
@@ -190,10 +233,15 @@ def auto_candidates(root, cfg, pr_results):
             skipped.append((tid, "throttle"))
             continue
         ref = "refs/remotes/origin/pr-%d" % prn
-        git(root, "fetch", "-q", "origin", "pull/%d/head:%s" % (prn, ref), check=False)
+        if not git_ok(root, "fetch", "-q", "origin", "+pull/%d/head:%s" % (prn, ref)):
+            skipped.append((tid, "fetch-failed"))
+            continue
         crit = read_json_at(root, ref, work_rel(tid, "critique.json"))
+        st = read_json_at(root, ref, work_rel(tid, "state.json"))
+        if not crit or not st:
+            skipped.append((tid, "missing-critique-or-state"))  # fail closed
+            continue
         reasons = auto_exclusion(crit)
-        st = read_json_at(root, ref, work_rel(tid, "state.json")) or {}
         img = cfg.image_dir(st.get("slug", "")) + "/"
         files = commits.changed_files(root, "origin/%s" % cfg.base, ref) if st.get("slug") else []
         if st.get("slug") and any(f.startswith(img) for f in files):
@@ -259,23 +307,12 @@ def finish_auto(root, cfg, chosen):
                                  [".claude/herald/topics.json"])
             log("deploy command failed — merged articles stay merged-unrecorded")
             return False
-    pub = load_published(root)
-    topics = load_topics(root)
     for tid, n in merged:
         slug = by_num[n]["slug"]
         if not url_ok(cfg.article_url(slug)):
             log("URL check failed for %s — left merged-unrecorded" % slug)
             continue
-        art = next((a for a in pub["articles"] if a["slug"] == slug), None)
-        if not art:
-            art = {"slug": slug, "moved_from": []}
-            pub["articles"].append(art)
-        art.update({"path": cfg.body_path(slug), "url": cfg.article_url(slug), "origin": "herald",
-                    "current_topic_id": tid, "published_at": now_iso(), "human_reviewed": False,
-                    "withdrawn": False})
-        set_topic_state(get_topic(topics, tid), "published", note="auto PR #%d" % n)
-    save_published(root, pub)
-    save_topics(root, topics)
+        record_published(root, cfg, tid, slug, pr=n, auto=True)
     files = [".claude/herald/topics.json", ".claude/herald/published.json"] + cfg.deploy_artifacts()
     commits.commit_state(root, cfg, "runner", "chore(herald): auto publish record", "ship", files)
     push_base(root, cfg)
@@ -318,7 +355,7 @@ def main(argv):
             git(root, "checkout", "-q", cfg.base)
             sync_base(root, cfg)  # children only fast-forward; keep base current for them
             log("write %s" % tid)
-            outcome = run_child(root, cfg, "/hrd write %s" % tid, os.path.join(logs, tid + ".jsonl"), budget)
+            outcome, spent = run_child(root, cfg, "/hrd write %s" % tid, os.path.join(logs, tid + ".jsonl"), budget)
             if outcome == "budget":
                 preserve_wip(root, cfg, tid)
                 record_hold(root, cfg, tid, "budget", "per-article budget %.2f USD exceeded" % budget)
@@ -329,8 +366,14 @@ def main(argv):
                 # one retry: resume if the child got as far as a branch, else start over
                 retry = "/hrd resume %s" % tid if _topic_branch(root, tid) else "/hrd write %s" % tid
                 log("%s incomplete (%s) — one retry: %s" % (tid, outcome, retry))
-                git(root, "checkout", "-q", cfg.base, check=False)
-                run_child(root, cfg, retry, os.path.join(logs, tid + "-retry.jsonl"), budget)
+                preserve_wip(root, cfg, tid)  # keep the child's untracked work on its branch, not on base
+                outcome, spent = run_child(root, cfg, retry, os.path.join(logs, tid + "-retry.jsonl"), budget,
+                                           spent=spent)
+                if outcome == "budget":
+                    preserve_wip(root, cfg, tid)
+                    record_hold(root, cfg, tid, "budget", "per-article budget %.2f USD exceeded (incl. retry)" % budget)
+                    summary["held"].append((tid, "budget"))
+                    continue
                 res = completed(root, cfg, tid)
             if not res:
                 preserve_wip(root, cfg, tid)
@@ -355,6 +398,9 @@ def main(argv):
             summary["auto"] = {"chosen": chosen, "skipped": skipped}
             if chosen:
                 sync_base(root, cfg)
+                # the ship child only fast-forwards: publish this run's hold commits first so a
+                # GitHub merge never leaves its base diverged from origin
+                push_base(root, cfg)
                 p = os.path.join(result_dir(root), "ship.json")
                 if os.path.exists(p):
                     os.remove(p)

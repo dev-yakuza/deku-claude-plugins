@@ -213,7 +213,9 @@ def check_bash(root, cfg, cmd):
             sub = argv[1]
             branch = current_branch(root)
             if sub == "push":
-                targets = argv[2:]
+                if unattended() and any(t in ("--all", "--mirror") for t in argv[2:]):
+                    decide("deny", "unattended sessions may not push --all/--mirror.")
+                targets = [t.lstrip("+") for t in argv[2:] if not t.startswith("-")]
                 to_base = (branch == base and not any(":" in t for t in targets)) or \
                           any(t in (base, "HEAD:%s" % base, "refs/heads/%s" % base) or t.endswith(":" + base) for t in targets)
                 if to_base and unattended():

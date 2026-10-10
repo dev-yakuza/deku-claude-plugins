@@ -196,9 +196,15 @@ def cmd_finalize(a):
     emit({"agent_final_hash": st["agent_final_hash"]})
 
 
+RESULT_STATUSES = {"pr-open", "merged"} | {"held:%s" % r for r in
+                                          ("cannibalization", "research", "rejected", "needs-human", "stagnation", "budget")}
+
+
 def cmd_result(a):
     """Batch child result file (memory/batch/<id>.json) — children never write base."""
     root = repo_root()
+    if a.status not in RESULT_STATUSES:
+        raise HeraldError("unknown result status %r (one of: %s)" % (a.status, ", ".join(sorted(RESULT_STATUSES))))
     path = os.path.join(store.paths(root)["memory"], "batch", a.topic + ".json")
     write_json(path, {"status": a.status, "pr": a.pr, "note": a.note, "merged": a.merged or [], "at": now_iso()})
     emit({"written": path})
@@ -370,7 +376,8 @@ def cmd_withdraw(a):
                           "(to change the slug use `status --move`; to fix content use exit ①/②)" % slug)
     # Without a pathspec git can pair the rename (with one, the other side is out of scope and
     # it reports a delete) — look for any rename whose source is this body or image dir.
-    renames = git(root, "log", "-M", "--diff-filter=R", "--name-status", "--format=").splitlines()
+    since = ["--since=%s" % art["published_at"]] if art.get("published_at") else []
+    renames = git(root, "log", "-M", "--diff-filter=R", "--name-status", "--format=", *since).splitlines()
     img = cfg.image_dir(slug) + "/"
     renamed = [l for l in renames if l.startswith("R") and len(l.split("\t")) == 3
                and (l.split("\t")[1] == cfg.body_path(slug) or l.split("\t")[1].startswith(img))]
@@ -478,18 +485,7 @@ def cmd_mark_published(a):
     prs = ghstate.herald_prs(root, cfg)
     if any(p["topic_id"] == a.topic and p.get("mergedAt") for p in prs):
         raise HeraldError("%s has a merged Herald PR — use `ship`, not an external record" % a.topic)
-    pub = store.load_published(root)
-    data = store.load_topics(root)
-    t = store.get_topic(data, a.topic)
-    art = store.find_article(pub, a.slug) or {"slug": a.slug, "moved_from": []}
-    if art not in pub["articles"]:
-        pub["articles"].append(art)
-    art.update({"path": cfg.body_path(a.slug), "url": cfg.article_url(a.slug), "origin": "external",
-                "published_at": now_iso(), "current_topic_id": a.topic})
-    t["slug"] = a.slug
-    store.set_topic_state(t, "published", note="external publish")
-    store.save_published(root, pub)
-    store.save_topics(root, data)
+    store.record_published(root, cfg, a.topic, a.slug, origin="external")
     emit({"published": a.slug, "origin": "external"})
 
 
@@ -497,22 +493,18 @@ def cmd_record_published(a):
     """ship step 9 for one Herald article (URL already confirmed)."""
     root, cfg = ctx()
     attended_only("`record-published`")
-    pub = store.load_published(root)
-    data = store.load_topics(root)
-    t = store.get_topic(data, a.topic)
-    art = store.find_article(pub, a.slug)
-    if not art:
-        art = {"slug": a.slug, "moved_from": []}
-        pub["articles"].append(art)
-    art.update({"path": cfg.body_path(a.slug), "url": cfg.article_url(a.slug), "origin": "herald",
-                "current_topic_id": a.topic, "published_at": now_iso(),
-                "human_reviewed": not a.auto, "withdrawn": False,
-                "category": t.get("category"), "keywords": t.get("keywords", [])})
-    t["slug"] = a.slug
-    store.set_topic_state(t, "published", note="PR #%s" % a.pr if a.pr else None)
-    store.save_published(root, pub)
-    store.save_topics(root, data)
-    emit({"published": a.slug, "human_reviewed": not a.auto})
+    art = store.record_published(root, cfg, a.topic, a.slug, pr=a.pr, auto=a.auto)
+    emit({"published": a.slug, "human_reviewed": art.get("human_reviewed")})
+
+
+def cmd_gate(a):
+    """Deterministic gate on a topic's article (config.commands.validate or built-in)."""
+    root, cfg = ctx()
+    slug = a.slug or store.load_state(root, a.topic)["slug"]
+    rep = store.run_gate(root, cfg, slug)
+    emit(rep)
+    if not rep["ok"]:
+        sys.exit(1)
 
 
 def cmd_signal(a):
@@ -592,6 +584,8 @@ def build():
     p.set_defaults(fn=cmd_mark_published)
     p = sp.add_parser("record-published"); p.add_argument("--topic", required=True); p.add_argument("--slug", required=True)
     p.add_argument("--pr"); p.add_argument("--auto", action="store_true"); p.set_defaults(fn=cmd_record_published)
+    p = sp.add_parser("gate"); p.add_argument("--topic", required=True); p.add_argument("--slug")
+    p.set_defaults(fn=cmd_gate)
     p = sp.add_parser("signal"); p.add_argument("--kind", required=True); p.add_argument("--topic")
     p.add_argument("--data"); p.add_argument("--human-reviewed", choices=["true", "false"]); p.set_defaults(fn=cmd_signal)
     p = sp.add_parser("auto-exclusion"); p.add_argument("--topic", required=True); p.add_argument("--rev")

@@ -260,7 +260,7 @@ def stage_pass(root, cfg, tid, stage, amend=False):
             raise HeraldError("%s missing — %s did not write it" % (name, stage))
         outputs[name] = h
     rec = {"outputs": outputs, "at": now_iso()}
-    if stage == "draft":
+    if stage == "draft" or (stage == "verify" and amend):
         gate = run_gate(root, cfg, st["slug"])
         if not gate["ok"]:
             raise HeraldError("deterministic gate failed: %s" % "; ".join(gate["errors"][:5]))
@@ -319,6 +319,11 @@ def ledger_latest(root, tid):
 def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
     """`integrity.py --record` self-check (plan §3.2): current hash == verify.body_hash ==
     verified_hash and verify.json clean. With `rev`, the article is read from that commit."""
+    if kind == "trust" and not rev:
+        # trust vouches for the COMMITTED state only (plan §3.2): read HEAD, refuse local edits
+        st_head = read_json_at(root, "HEAD", work_rel(tid, "state.json"))
+        if st_head != read_json(state_path(root, tid)):
+            raise HeraldError("refusing: work/%s/state.json differs from HEAD — trust needs the committed file" % tid)
     if rev:
         st = read_json_at(root, rev, work_rel(tid, "state.json"))
         ver = read_json_at(root, rev, work_rel(tid, "verify.json"))
@@ -360,6 +365,28 @@ def read_json_at(root, rev, relpath):
         return json.loads(proc.stdout)
     except ValueError:
         return None
+
+
+# --- publish record (ship step 9 and the batch runner share it) -----------------------------
+
+def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald"):
+    pub = load_published(root)
+    data = load_topics(root)
+    t = get_topic(data, tid)
+    art = find_article(pub, slug)
+    if not art:
+        art = {"slug": slug, "moved_from": []}
+        pub["articles"].append(art)
+    art.update({"path": cfg.body_path(slug), "url": cfg.article_url(slug), "origin": origin,
+                "current_topic_id": tid, "published_at": now_iso(), "withdrawn": False,
+                "category": t.get("category"), "keywords": t.get("keywords", [])})
+    if origin == "herald":
+        art["human_reviewed"] = not auto
+    t["slug"] = slug
+    set_topic_state(t, "published", note=("auto " if auto else "") + ("PR #%s" % pr if pr else origin))
+    save_published(root, pub)
+    save_topics(root, data)
+    return art
 
 
 # --- signals --------------------------------------------------------------------------------

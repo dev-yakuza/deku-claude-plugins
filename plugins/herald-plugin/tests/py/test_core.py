@@ -124,7 +124,7 @@ class LedgerTests(Flow):
     def test_human_edit_reverify_path_can_record(self):
         """critique is not rerun on the human-edit path; --record keys on verify only."""
         tid, slug = self.run_flow()
-        self.write("src/content/blog/%s.md" % slug, "human edited body")
+        self.write("src/content/blog/%s.md" % slug, "---\ntitle: a\ndescription: d\nslug: %s\ndate: x\n---\nhuman edited body\n" % slug)
         write_machine(self, tid, "verify.json", VER_PASS, slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", "--amend")
         rec, _ = self.hrd("ledger", "record", "--topic", tid, "--kind", "push", "--sha", "abc")
@@ -315,6 +315,7 @@ class RegressionRound1(IntegrityTests):
 
     def test_trust_only_without_ledger_and_attended(self):
         tid, slug = self.run_flow()
+        self.commit("work")
         _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "trust", env={"HRD_UNATTENDED": "1"}, check=False)
         self.assertIn("need a human", p.stderr)
         self.hrd("ledger", "record", "--topic", tid, "--kind", "trust")
@@ -323,6 +324,7 @@ class RegressionRound1(IntegrityTests):
 
     def test_trust_refused_for_unverified_body(self):
         tid, slug = self.run_flow()
+        self.commit("work")
         self.write("src/content/blog/%s.md" % slug, "human change")
         _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "trust", check=False)
         self.assertIn("differs from the committed verified_hash", p.stderr)
@@ -358,6 +360,19 @@ class RegressionRound1(IntegrityTests):
         self.commit("rename")
         _, p = self.hrd("withdraw", "new-post", check=False)
         self.assertIn("renamed", p.stderr)
+
+    def test_trust_refused_for_uncommitted_state(self):
+        tid, slug = self.run_flow()
+        self.commit("work")
+        st = json.load(open(store.state_path(self.root, tid))); st["note"] = "local edit"
+        with open(store.state_path(self.root, tid), "w") as f:
+            json.dump(st, f)
+        _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "trust", check=False)
+        self.assertIn("differs from HEAD", p.stderr)
+
+    def test_result_status_validated(self):
+        _, p = self.hrd("result", "--topic", "t0001", "--status", "held:cannibalisation", check=False)
+        self.assertIn("unknown result status", p.stderr)
 
     def test_unattended_base_writers_refused(self):
         self.write(".claude/herald/topics.json", "{}")

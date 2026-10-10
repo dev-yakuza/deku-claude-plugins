@@ -74,6 +74,8 @@ class GuardCase(RepoCase):
         self.assertEqual(self.guard("Bash", {"command": "git commit -m sneak"}), "deny")
         self.assertEqual(self.guard("Bash", {"command": "git commit -m x"}, {"HRD_UNATTENDED": "1"}), "deny")
         self.assertEqual(self.guard("Bash", {"command": "git push origin main"}, {"HRD_UNATTENDED": "1"}), "deny")
+        self.assertEqual(self.guard("Bash", {"command": "git push origin +main"}, {"HRD_UNATTENDED": "1"}), "deny")
+        self.assertEqual(self.guard("Bash", {"command": "git push --all origin"}, {"HRD_UNATTENDED": "1"}), "deny")
 
     def test_pr_branch_scope(self):
         sh(self.root, "git", "switch", "-q", "-c", store.branch_name("t0001", "mine"))
@@ -120,6 +122,15 @@ class GateCase(RepoCase):
         self.assertTrue(any("gitignored" in e for e in rep["errors"]), rep)
         self.write("src/content/blog/p3.md", "---\ntitle: a\ndescription: d\nslug: p3\ndate: x\n---\n![a](/blog-images/p3/none.png)\n")
         self.assertTrue(any("does not exist" in e for e in validate(self.root, self.cfg, "src/content/blog/p3.md")["errors"]))
+
+    def test_image_ref_variants(self):
+        self.rules({})
+        self.write("public/img/a.png", b"x", binary=True)
+        self.write("src/content/blog/p4.md", "---\ntitle: a\ndescription: d\nslug: p4\ndate: x\n---\n"
+                   "![a](//cdn.example.com/x.png) ![b](/img/a.png?v=2) ![c](/img/none.png \"title\")\n")
+        errs = validate(self.root, self.cfg, "src/content/blog/p4.md")["errors"]
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("/img/none.png", errs[0])
 
     def test_double_hyphen_slug_rejected(self):
         self.rules({})
