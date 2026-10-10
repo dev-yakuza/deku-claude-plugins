@@ -30,8 +30,11 @@ findings > auditor patterns/dismissals > REVISE patterns > verify gaps > holds >
 failures > stagnation/escalations). Typical targets: style guide, category guides, writer /
 researcher / strategist personas (Habits section), sources list, exemplar promotion (first-
 round PASS + no undismissed findings + human-reviewed with almost no edits), role default
-tiers (never the editor-in-chief), auditor prompt (a repo-local note in
-`docs/editorial/auditor-notes.md`), role split proposals (e.g. GEO out of search-discovery).
+tiers (never the editor-in-chief), role split proposals (e.g. GEO out of search-discovery).
+
+Auditor findings that point at the auditor itself (its prompt, its severity scale) are not
+applied here — the auditor deliberately reads no repo guides — they become `/hrd contribute`
+candidates (flow-level).
 
 ## Phase 3 — Proposals
 

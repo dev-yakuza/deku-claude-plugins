@@ -181,6 +181,13 @@ def check_bash(root, cfg, cmd):
             argv = seg.split()
         if not argv:
             continue
+        # split --opt=value and drop git's global options so `git -c k=v push` is still `push`
+        argv = [x for a in argv for x in (a.split("=", 1) if a.startswith("--") and "=" in a else [a])]
+        if argv[0] == "git":
+            i = 1
+            while i < len(argv) and argv[i].startswith("-"):
+                i += 2 if argv[i] in ("-c", "-C", "--git-dir", "--work-tree", "--namespace") else 1
+            argv = ["git"] + argv[i:]
         joined = " ".join(argv)
         # 1. merges
         if argv[:3] == ["gh", "pr", "merge"]:
@@ -215,9 +222,10 @@ def check_bash(root, cfg, cmd):
             if sub == "push":
                 if unattended() and any(t in ("--all", "--mirror") for t in argv[2:]):
                     decide("deny", "unattended sessions may not push --all/--mirror.")
-                targets = [t.lstrip("+") for t in argv[2:] if not t.startswith("-")]
-                to_base = (branch == base and not any(":" in t for t in targets)) or \
-                          any(t in (base, "HEAD:%s" % base, "refs/heads/%s" % base) or t.endswith(":" + base) for t in targets)
+                targets = [t.lstrip("+") for t in argv[2:] if not t.startswith("-")][1:]  # drop the remote
+                dests = [t.split(":", 1)[1] if ":" in t else t for t in targets]
+                dests = [d[len("refs/heads/"):] if d.startswith("refs/heads/") else d for d in dests]
+                to_base = (branch == base and not targets) or base in dests or (branch == base and "HEAD" in dests)
                 if to_base and unattended():
                     decide("deny", "unattended sessions may not push the base branch.")
             if sub == "commit":

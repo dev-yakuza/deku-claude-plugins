@@ -28,7 +28,8 @@ Exclude `.claude/skills/**` and other local skills from every scan (D16).
 1. **Content**: static site generator (Astro/Hugo/Next MDX/Jekyll/…) from config files;
    content directory; body file pattern (`{content}/{slug}.md` or nested); frontmatter keys and
    how the slug is set; categories in use; article count; image directory and how bodies
-   reference images; length distribution per category.
+   reference images; length distribution per category; slugs outside Herald's format
+   (lowercase ASCII, single hyphens) — report them: they stay external and cannot be refreshed.
 2. **Build & deploy**: `package.json` scripts (`build`, `deploy`, `predeploy` chains) and the
    **tracked files they modify** (→ `deploy_artifacts`); CI workflows in `.github/workflows`
    that deploy on push (→ `deploy` empty, required-check advice); hosting config; build input

@@ -12,6 +12,8 @@ import json
 import os
 import sys
 
+sys.dont_write_bytecode = True  # no __pycache__ in the repo's .claude/herald/scripts
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from hrdlib import commits, ghstate, integrity, lock, store  # noqa: E402
@@ -37,9 +39,9 @@ def attended_only(what):
 def cmd_lock(a):
     root = repo_root()
     if a.action == "acquire":
-        emit({"token": lock.acquire(root, a.cmd)})
+        emit({"token": lock.acquire(root, a.cmd, token=a.token)})
     elif a.action == "release":
-        emit({"released": lock.release(root, a.token)})
+        emit({"released": lock.release(root, a.token, command=a.cmd if a.cmd != "cli" else None)})
     elif a.action == "status":
         emit({"lock": lock.status(root)})
     elif a.action == "unlock":
@@ -143,7 +145,11 @@ def cmd_begin(a):
 def cmd_branch(a):
     """After brief: fix the slug and branch from origin/<base> (plan §3.2 branch origin)."""
     root, cfg = ctx()
-    store.check_slug(a.slug)
+    try:
+        store.check_slug(a.slug)
+    except HeraldError as e:
+        raise HeraldError("%s — Herald 1.0 supports only lowercase ASCII slugs with single hyphens; "
+                          "articles with other slugs cannot be refreshed" % e)
     if "--" in a.slug:
         raise HeraldError("slug must not contain `--`")
     st = store.load_state(root, a.topic)
@@ -268,7 +274,7 @@ def cmd_integrity(a):
     root, cfg = ctx()
     rep = integrity.predeploy(root, cfg) if a.predeploy else integrity.check(root, cfg, rev=a.rev)
     emit(rep)
-    if not rep["ok"]:
+    if not rep["ok"] and not a.report:
         sys.exit(1)
 
 
@@ -564,6 +570,7 @@ def build():
     p = sp.add_parser("commit"); p.add_argument("--cmd", required=True); p.add_argument("--kind", required=True)
     p.add_argument("-m", "--message", required=True); p.add_argument("paths", nargs="+"); p.set_defaults(fn=cmd_commit)
     p = sp.add_parser("integrity"); p.add_argument("--predeploy", action="store_true"); p.add_argument("--rev")
+    p.add_argument("--report", action="store_true", help="always exit 0; read `ok` and the rows")
     p.set_defaults(fn=cmd_integrity)
     p = sp.add_parser("residue"); p.add_argument("--clean", action="store_true"); p.set_defaults(fn=cmd_residue)
     p = sp.add_parser("herald-set"); p.set_defaults(fn=cmd_herald_set)

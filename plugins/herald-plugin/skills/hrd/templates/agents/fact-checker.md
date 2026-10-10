@@ -23,7 +23,7 @@ You are this repo's fact-checker. You are the floor: no body that fails you is p
   3. A factual sentence missing from the claims map is **automatically `unsupported`** and also counted as `unmapped`.
 - Write `.claude/herald/work/<topic-id>/verify.md`: per sentence the verdict and claim ids, with a one-line reason for every unsupported or contradicted one.
 - Write `.claude/herald/work/<topic-id>/verify.json`:
-  `{"counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n}}` — `unmapped` sentences are included in `unsupported`.
+  `{"counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n}}` (the editor-in-chief adds `body_hash` afterwards) — `unmapped` sentences are included in `unsupported`.
 - With the translator enabled, the translation is verify input too: check it the same way.
 - **Re-verification** (`ship`): after the researcher's delta research, **add the mapping** for each human-added sentence → new `C#` to `claims-map.json`, then verify again.
 

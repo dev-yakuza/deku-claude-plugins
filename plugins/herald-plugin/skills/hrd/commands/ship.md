@@ -4,8 +4,10 @@ The only place Herald publishes. Plan §3.2.2 (steps 1–9). Accuracy floor: `at
 `<base>` = `config.base_branch`. Every `HRD …` is its own Bash call.
 
 `--auto` (batch ship child, `HRD_UNATTENDED=1`) differs: step 1 does not sync (base must
-already contain `origin/<base>`); step 2 runs `HRD reverts list` and `HRD integrity` only — any
-pending revert, non-`ok` row or flag → stop without merging; step 5 never re-verifies — a head
+already contain `origin/<base>`); step 2 runs `HRD reverts list` and `HRD integrity --report`
+only — any pending revert, non-`ok` row or flag → stop without merging; **every** stop writes
+`HRD result --topic ship --status merged --merged --note "<reason>"` (empty list) so the runner
+can still record reverts; step 5 never re-verifies — a head
 that differs from the ledger → skip that PR; after step 6 write the round result with
 `HRD result --topic ship --status merged --merged <PR numbers…>` and stop (the runner does 7–9
 and re-checks the merges against GitHub).
@@ -19,7 +21,7 @@ skipped, merges limited to `HRD_AUTO_PRS`, steps 7–9 belong to the runner).
 
 1. `HRD lock acquire --cmd ship` (release on every exit path).
 2. `git switch <base>`; `HRD sync` (fetch + merge; conflict → stop).
-3. `git status --porcelain --untracked-files=no` empty, and `HRD integrity --predeploy` fields
+3. `git status --porcelain --untracked-files=no` empty, and `HRD integrity --predeploy --report` fields
    `untracked_build_inputs` and `ignored_residue`: untracked files in build inputs → stop and
    list them (they would deploy unverified). Ignored residue (image dirs with no article and
    only gitignored files) → attended: show, ask, then `HRD residue --clean`; `--auto`: stop
@@ -31,7 +33,8 @@ skipped, merges limited to `HRD_AUTO_PRS`, steps 7–9 belong to the runner).
 
 1. Removal reverts first: `HRD reverts apply` (labels the original PRs `herald:reverted`, holds
    the topics `reverted`, keyed by revert PR).
-2. `HRD integrity` → one row per Herald article (`origin: herald` ∪ merged Herald PRs):
+2. `HRD integrity --report` (exit 0; `integrity` without `--report` exits 1 when not ok) →
+   one row per Herald article (`origin: herald` ∪ merged Herald PRs):
    - `ok` — matches the ledger. If `merged_unrecorded`, add to the **deploy set**.
    - `no-ledger` — no ledger line on this machine: attended → ask "re-verify N articles or
      trust the committed state.json"; trust → `HRD ledger record --topic <ref> --kind trust`

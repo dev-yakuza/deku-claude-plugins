@@ -7,10 +7,11 @@ Re-runs the spine on a published article whose metrics dropped or whose facts ag
 2. The article must be in `published.json` (Herald or external). Gather why: Search Console
    data if connected (`.claude/herald/secrets/` present — see `monitoring.md`), else the
    human's reason.
-3. Add the refresh topic: write `[{"id": "r-<slug>-<date>", "title": "<current title>",
+3. Slugs outside Herald's format (lowercase ASCII, single hyphens) cannot be refreshed in 1.0 —
+   say so and stop. Add the refresh topic: write `[{"id": "r-<slug>-<date>", "title": "<current title>",
    "category": "<cat>", "angle": "refresh: <reason>", "refresh_of": "<slug>", "slug": "<slug>"}]`
    to `.claude/herald/memory/refresh.json`, `HRD topics add --file …`, commit (`--cmd refresh`),
-   push.
+   push, then **release the lock** (`write` acquires its own).
 4. Run `write.md` for that id with these differences:
    - brief is a **refresh brief**: what is stale, what to keep (URL/slug fixed), new keywords;
      the cannibalization check **excludes the article itself**; `HRD branch --slug <slug>`.

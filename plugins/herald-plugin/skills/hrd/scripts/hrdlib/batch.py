@@ -160,8 +160,18 @@ def preserve_wip(root, cfg, tid):
     git(root, "checkout", "-q", cfg.base)
     # a stray untracked copy of work/<id>/ on base is redundant once the branch holds it
     branch = _topic_branch(root, tid)
-    if branch and git_ok(root, "cat-file", "-e", "%s:%s/state.json" % (branch, work_rel(tid))):
-        if _present(root, [work_rel(tid)]) and not git(root, "ls-files", "--", work_rel(tid)).strip():
+    stray = os.path.join(root, work_rel(tid))
+    if branch and os.path.isdir(stray) and not git(root, "ls-files", "--", work_rel(tid)).strip():
+        same = True
+        for dp, _, files in os.walk(stray):
+            for fn in files:
+                rel = os.path.relpath(os.path.join(dp, fn), root)
+                proc = __import__("subprocess").run(["git", "show", "%s:%s" % (branch, rel)], cwd=root,
+                                                    capture_output=True)
+                with open(os.path.join(dp, fn), "rb") as f:
+                    if proc.returncode != 0 or proc.stdout != f.read():
+                        same = False
+        if same:  # identical to what the branch holds — remove only then
             git(root, "clean", "-q", "-fd", "--", work_rel(tid))
 
 
@@ -186,9 +196,9 @@ def cleanup_branch(root, cfg, tid):
         git(root, "branch", "-q", "-D", branch)
 
 
-def completed(root, cfg, tid):
-    """Only an OPEN Herald PR counts as this child's success — an old merged PR of a requeued
-    (reverted/withdrawn) topic must not (plan §3.2.1)."""
+def completed(root, cfg, tid, since=""):
+    """An OPEN Herald PR — or one a human merged after this child started — counts as success;
+    an old merged PR of a requeued (reverted/withdrawn) topic must not (plan §3.2.1)."""
     res = read_result(root, tid) or {}
     status = str(res.get("status", ""))
     if status.startswith("held:"):
@@ -197,7 +207,9 @@ def completed(root, cfg, tid):
             res = {"status": "held:needs-human", "note": "child reported unknown hold %r: %s" % (reason, res.get("note"))}
         return res
     for p in ghstate.herald_prs(root, cfg):
-        if p["topic_id"] == tid and p["state"] == "OPEN":
+        if p["topic_id"] == tid and (p["state"] == "OPEN" or (
+                since and (p.get("mergedAt") or "") >= since
+                and not (p["label_set"] & {ghstate.REVERTED, ghstate.WITHDRAWN}))):
             return {"status": "pr-open", "pr": p["number"]}
     return None
 
@@ -279,6 +291,7 @@ def finish_auto(root, cfg, chosen):
         log("ship child result missing or disagrees with GitHub (%s vs %s) — not deploying"
             % (sorted(reported), sorted(n for _, n in merged)))
         return False
+    sync_base(root, cfg)  # update first, then write records (refresh → write → commit)
     topics = load_topics(root)
     for rv in ghstate.pending_removal_reverts(root, cfg, topics):
         for p in prs:
@@ -298,7 +311,7 @@ def finish_auto(root, cfg, chosen):
                              [".claude/herald/topics.json"])
         return False
     deploy = cfg.get("commands", "deploy")
-    if merged and deploy:
+    if (merged or any(r["merged_unrecorded"] for r in report["articles"])) and deploy:
         proc = subprocess.run(deploy, shell=True, cwd=root)
         if proc.returncode != 0:
             for a in cfg.deploy_artifacts():
@@ -307,6 +320,13 @@ def finish_auto(root, cfg, chosen):
                                  [".claude/herald/topics.json"])
             log("deploy command failed — merged articles stay merged-unrecorded")
             return False
+    chosen_slugs = {by_num[n]["slug"] for _, n in merged}
+    # base-wide deploy also publishes earlier merged-unrecorded articles that pass integrity
+    extra = [(r["ref_topic"], r["slug"]) for r in report["articles"]
+             if r["merged_unrecorded"] and r["status"] == "ok" and r["slug"] not in chosen_slugs and r["ref_topic"]]
+    for tid, slug in extra:
+        if url_ok(cfg.article_url(slug)):
+            record_published(root, cfg, tid, slug, auto=False)  # merged by a human earlier
     for tid, n in merged:
         slug = by_num[n]["slug"]
         if not url_ok(cfg.article_url(slug)):
@@ -355,13 +375,14 @@ def main(argv):
             git(root, "checkout", "-q", cfg.base)
             sync_base(root, cfg)  # children only fast-forward; keep base current for them
             log("write %s" % tid)
+            started = now_iso().replace("+00:00", "Z")
             outcome, spent = run_child(root, cfg, "/hrd write %s" % tid, os.path.join(logs, tid + ".jsonl"), budget)
             if outcome == "budget":
                 preserve_wip(root, cfg, tid)
                 record_hold(root, cfg, tid, "budget", "per-article budget %.2f USD exceeded" % budget)
                 summary["held"].append((tid, "budget"))
                 continue
-            res = completed(root, cfg, tid)
+            res = completed(root, cfg, tid, since=started)
             if not res:
                 # one retry: resume if the child got as far as a branch, else start over
                 retry = "/hrd resume %s" % tid if _topic_branch(root, tid) else "/hrd write %s" % tid
@@ -374,7 +395,7 @@ def main(argv):
                     record_hold(root, cfg, tid, "budget", "per-article budget %.2f USD exceeded (incl. retry)" % budget)
                     summary["held"].append((tid, "budget"))
                     continue
-                res = completed(root, cfg, tid)
+                res = completed(root, cfg, tid, since=started)
             if not res:
                 preserve_wip(root, cfg, tid)
                 record_hold(root, cfg, tid, "needs-human", "batch child did not finish (%s)" % outcome)

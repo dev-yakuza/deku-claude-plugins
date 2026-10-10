@@ -33,7 +33,8 @@ measured cost so far. Ask: approve / request changes / hold.
 
 - **Request changes**: record `HRD signal --kind session-edit-request --topic <id> --data
   '{"request": "<verbatim>"}'`; the writer applies the request (`HRD loopback --topic <id>
-  --human` — not counted); then editor → auditor → verify run again; record the before/after
+  --human` — not counted); `HRD stage pass --stage draft` (runs the gate); then critique
+  (editor → auditor) and verify run again; record the before/after
   diff summary in the same signal kind. Loop until approve or hold.
 - **Hold**: hold `needs-human` (branch preserved).
 

@@ -374,6 +374,30 @@ class RegressionRound1(IntegrityTests):
         _, p = self.hrd("result", "--topic", "t0001", "--status", "held:cannibalisation", check=False)
         self.assertIn("unknown result status", p.stderr)
 
+    def test_nested_lock_release_left_to_owner(self):
+        out, _ = self.hrd("lock", "acquire", "--cmd", "refresh")
+        tok = out["token"]
+        self.hrd("lock", "acquire", "--cmd", "write", "--token", tok)
+        out, _ = self.hrd("lock", "release", "--cmd", "write", "--token", tok)
+        self.assertFalse(out["released"])
+        out, _ = self.hrd("lock", "release", "--cmd", "refresh", "--token", tok)
+        self.assertTrue(out["released"])
+
+    def test_integrity_report_mode_exits_zero(self):
+        self.publish_herald("t0001", "new-post")
+        self.write("src/content/blog/new-post.md", "changed on base")
+        self.commit("x")
+        out, p = self.hrd("integrity", "--report")
+        self.assertFalse(out["ok"])
+        _, p = self.hrd("integrity", check=False)
+        self.assertEqual(p.returncode, 1)
+
+    def test_commit_state_refuses_bytecode(self):
+        self.write(".claude/herald/scripts/hrdlib/__pycache__/x.cpython-314.pyc", b"x", binary=True)
+        with self.assertRaises(HeraldError):
+            commits.commit_state(self.root, self.cfg, "harness", "m", "harness",
+                                 [".claude/herald/scripts/hrdlib/__pycache__/x.cpython-314.pyc"])
+
     def test_unattended_base_writers_refused(self):
         self.write(".claude/herald/topics.json", "{}")
         _, p = self.hrd("commit", "--cmd", "plan", "--kind", "plan", "-m", "m", ".claude/herald/topics.json",

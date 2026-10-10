@@ -82,7 +82,7 @@ def staged_paths(root):
 def commit_state(root, cfg, command, message, kind, add_paths):
     """Stage exactly `add_paths` (must be allowed) and commit with the Herald-Record trailer."""
     globs = allowed_globs(cfg, command)
-    bad = [p for p in add_paths if not _match(p, globs)]
+    bad = [p for p in add_paths if not _match(p, globs) or "__pycache__" in p or p.endswith(".pyc")]
     if bad:
         raise HeraldError("`%s` may not commit: %s" % (command, ", ".join(bad)))
     already = staged_paths(root)
@@ -95,7 +95,7 @@ def commit_state(root, cfg, command, message, kind, add_paths):
     if existing:
         git(root, "add", "-A", "--", *existing)
     staged = staged_paths(root)
-    stray = [p for p in staged if not _match(p, globs)]
+    stray = [p for p in staged if not _match(p, globs) or "__pycache__" in p or p.endswith(".pyc")]
     if stray:
         git(root, "reset", "-q", "--", *staged)
         raise HeraldError("refusing: staged paths outside `%s` allowance: %s" % (command, ", ".join(stray)))

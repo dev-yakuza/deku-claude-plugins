@@ -76,6 +76,9 @@ class GuardCase(RepoCase):
         self.assertEqual(self.guard("Bash", {"command": "git push origin main"}, {"HRD_UNATTENDED": "1"}), "deny")
         self.assertEqual(self.guard("Bash", {"command": "git push origin +main"}, {"HRD_UNATTENDED": "1"}), "deny")
         self.assertEqual(self.guard("Bash", {"command": "git push --all origin"}, {"HRD_UNATTENDED": "1"}), "deny")
+        self.assertEqual(self.guard("Bash", {"command": "git push origin HEAD:refs/heads/main"}, {"HRD_UNATTENDED": "1"}), "deny")
+        self.assertEqual(self.guard("Bash", {"command": "git -c a=b push origin main"}, {"HRD_UNATTENDED": "1"}), "deny")
+        self.assertEqual(self.guard("Bash", {"command": "git push origin herald/t0001--x"}, {"HRD_UNATTENDED": "1"}), "allow")
 
     def test_pr_branch_scope(self):
         sh(self.root, "git", "switch", "-q", "-c", store.branch_name("t0001", "mine"))

@@ -8,6 +8,6 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
   Turning on `autonomy.publish: auto` deserves a one-line warning: PRs then merge and deploy
   without per-PR approval (still excluding dismissals, assumptions and image changes).
 - `language` is free to change.
-- After editing: `HRD lock acquire --cmd config`, base clean, `HRD sync`,
+- Order: `HRD lock acquire --cmd config` → base checked out and clean → `HRD sync` → edit →
   `HRD commit --cmd harness --kind config -m "chore(herald): config <key>"
-  .claude/herald/config.json`, `git push origin <base>`, release the lock.
+  .claude/herald/config.json` → `git push origin <base>` → release the lock.

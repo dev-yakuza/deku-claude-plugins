@@ -96,8 +96,10 @@ hashing joins the verify target set when M6 is enabled.)
 - **Read list**: the article, `<w>claims-map.json`, `<w>research.md`.
 - The fact-checker **extracts factual sentences from the article independently**. A factual
   sentence missing from the claims map is automatically `unsupported`.
+- Before spawning, take `HRD hash --slug <slug>`; after the role returns, the editor-in-chief
+  writes that value into `verify.json` as `body_hash` (the fact-checker does not compute it).
 - **Output**: `<w>verify.md` (per sentence: supported / unsupported / contradicted, with
-  claim ids) and `<w>verify.json` `{"body_hash": "<HRD hash taken before spawning>",
+  claim ids) and `<w>verify.json` `{"body_hash": "<added by the editor-in-chief>",
   "counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n}}` —
   `unmapped` is a subset already counted in `unsupported`; `stage pass` refuses a stale
   `body_hash`.
