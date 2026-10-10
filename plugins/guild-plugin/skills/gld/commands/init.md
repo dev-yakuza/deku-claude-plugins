@@ -339,6 +339,8 @@ Every **BLOCKER/MAJOR** gap gets **exactly one verdict, stated before any questi
 - **`로컬 수정으로 해결`** — only when a **safe, reversible** local edit closes the gap **completely** (e.g. `gate-hook-not-executable` → `chmod +x` the hook it names). Nothing is left to track, so no Issue.
 - **`이슈 등록 필요`** — every other BLOCKER/MAJOR gap. This includes a **committed/inline secret**: the local part (`.gitignore` + `git rm --cached <file>`) is offered in the same confirm, but it does not close the gap — history purge and key rotation are irreversible (INV3) / external and stay **guide-only** (print the steps; **NEVER auto-run** `git filter-branch`/filter-repo or rotate keys), and the tracking Issue is what records that they are still owed.
 
+**No GitHub repo** (P0 step 4 continued in harness-only mode) → there is nowhere to register an Issue and nothing to dedup against, so `이슈 등록 필요` is not a verdict this run can keep: skip the dedup, give such gaps **`기록만 — GitHub 레포 없음`** (the report on disk is their record), and still offer `로컬 수정으로 해결` items.
+
 Hedging words ("권장", "선택", "가능하면", "검토 바람") are **banned in the verdict**. **MINOR gaps are not presented** — no item, no "참고로": by the rubric they are nice-to-haves, and listing them dilutes the gaps that need action. They get exactly one line, `등록 불필요 <n>건 (MINOR — 리포트에만 기록)`, printed even when `<n>` is 0; the full list stays in `.claude/guild/readiness-report.md`. If the human asks for them, show them then — do not offer.
 
 One batched prompt (localized per `config.language`):
