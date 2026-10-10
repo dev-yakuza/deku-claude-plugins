@@ -398,6 +398,14 @@ class RegressionRound1(IntegrityTests):
             commits.commit_state(self.root, self.cfg, "harness", "m", "harness",
                                  [".claude/herald/scripts/hrdlib/__pycache__/x.cpython-314.pyc"])
 
+    def test_auto_merged_topic_stays_unreviewed(self):
+        self.publish_herald("t0001", "new-post")
+        data = store.load_topics(self.root)
+        store.get_topic(data, "t0001")["auto_merged_pr"] = 1
+        store.save_topics(self.root, data)
+        out, _ = self.hrd("record-published", "--topic", "t0001", "--slug", "new-post", "--pr", "1")
+        self.assertFalse(out["human_reviewed"])
+
     def test_unattended_base_writers_refused(self):
         self.write(".claude/herald/topics.json", "{}")
         _, p = self.hrd("commit", "--cmd", "plan", "--kind", "plan", "-m", "m", ".claude/herald/topics.json",

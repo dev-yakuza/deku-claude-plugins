@@ -151,8 +151,27 @@ def current_branch(root):
     return git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).strip()
 
 
-def staged_after(root, argv):
-    staged = set(commits.staged_paths(root))
+def staged_after(root, argv, pending=()):
+    """What this commit will contain: the index now, paths earlier segments of the same command
+    stage (`git add x && git commit`), the commit's own pathspecs, and `-a`."""
+    staged = set(commits.staged_paths(root)) | set(pending)
+    rest = argv[2:]
+    if "--" in rest:
+        specs = rest[rest.index("--") + 1:]
+    else:
+        specs, skip = [], False
+        for x in rest:
+            if skip:
+                skip = False
+                continue
+            if x in ("-m", "--message", "-F", "--file", "-C", "-c", "--author", "--date", "--trailer",
+                     "--fixup", "--squash", "--cleanup", "-t", "--template"):
+                skip = True
+                continue
+            if not x.startswith("-"):
+                specs.append(x)
+    if specs:
+        staged |= set(git_pathspec_paths(root, specs))
     if any(a in ("-a", "--all") or (a.startswith("-") and not a.startswith("--") and "a" in a[1:]) for a in argv):
         staged |= {p for p in git(root, "diff", "--name-only", "-z").split("\0") if p}
     return sorted(staged)
@@ -176,9 +195,9 @@ GIT_GLOBAL_WITH_VALUE = ("-c", "-C", "--git-dir", "--work-tree", "--namespace", 
 PUSH_OPTS_WITH_VALUE = ("-o", "--push-option", "--repo", "--receive-pack", "--exec")
 
 
-def normalize(seg):
+def normalize(seg, split=True):
     """argv with git's global options removed (before splitting `=`, so a value never becomes
-    the subcommand), then `--opt=value` split into two tokens."""
+    the subcommand), then — unless split=False — `--opt=value` split into two tokens."""
     try:
         argv = shlex.split(seg)
     except ValueError:
@@ -189,6 +208,8 @@ def normalize(seg):
             opt = argv[i]
             i += 2 if opt in GIT_GLOBAL_WITH_VALUE else 1  # `--opt=value` is one token here
         argv = ["git"] + argv[i:]
+    if not split:
+        return argv
     return [x for a in argv for x in (a.split("=", 1) if a.startswith("--") and "=" in a else [a])]
 
 
@@ -197,16 +218,38 @@ def contains(hay, needle):
     return n > 0 and any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
 
 
-def deploy_signature(deploy):
-    """The publishing part of the configured deploy command: its last segment, normalized the
-    same way as the commands we inspect (quotes, `--opt=value`, `&&` chains)."""
-    segs = [normalize(s) for s in segments(deploy)] if deploy else []
-    segs = [s for s in segs if s]
-    return segs[-1] if segs else None
+TRIVIAL = {"echo", "tee", "true", ":", "printf", "cat", "sleep", "cd"}
+
+
+def deploy_signatures(deploy):
+    """The publishing step of the configured deploy string: split on `&&`/`;`, keep the part
+    before a pipe, drop redirections and trivial commands (echo, tee, …), take the last one —
+    normalized like the commands we inspect."""
+    sigs = []
+    for part in re.split(r"&&|\|\||;|\n", deploy or ""):
+        part = part.split("|", 1)[0].strip()
+        argv = [a for a in normalize(part) if not re.match(r"^\d*[<>]", a)]
+        if argv and argv[0] not in TRIVIAL:
+            sigs.append(argv)
+    # only the last meaningful step publishes; earlier steps (e.g. `npm run build`) stay free
+    return sigs[-1:]
+
+
+def git_pathspec_paths(root, specs, everything=False):
+    """Changed (tracked or untracked-not-ignored) paths a `git add/rm/commit <specs>` would take."""
+    if everything:
+        out = git(root, "status", "--porcelain", "-z", "--untracked-files=all", check=False)
+        return sorted({rec[3:] for rec in out.split("\0") if len(rec) > 3})
+    if not specs:
+        return []
+    tracked = git(root, "diff", "--name-only", "-z", "HEAD", "--", *specs, check=False).split("\0")
+    untracked = git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", *specs, check=False).split("\0")
+    return sorted({p for p in tracked + untracked if p})
 
 
 def push_targets(argv):
-    """(remote, refspecs) of a normalized `git push ...` argv."""
+    """(remote, refspecs) of a `git push ...` argv NOT split on `=` (a `--opt=value` stays one
+    token and is skipped; only the separated forms of value options consume a value)."""
     pos, i = [], 2
     while i < len(argv):
         a = argv[i]
@@ -223,12 +266,15 @@ def push_targets(argv):
 
 def check_bash(root, cfg, cmd):
     base = cfg.base
-    sig = deploy_signature((cfg.get("commands", "deploy") or "").strip())
+    sigs = deploy_signatures((cfg.get("commands", "deploy") or "").strip())
+    pending = set()  # paths earlier `git add/rm/mv` segments of this same command will stage
     for seg in segments(cmd):
         argv = normalize(seg)
         if not argv:
             continue
         joined = " ".join(argv)
+        if argv[:2] == ["gh", "api"] and re.search(r"/pulls/\d+/merge\b", joined):
+            argv = ["gh", "pr", "merge"] + re.findall(r"/pulls/(\d+)/merge", joined)  # same rules as a merge
         # 1. merges
         if argv[:3] == ["gh", "pr", "merge"]:
             if not unattended():
@@ -243,7 +289,7 @@ def check_bash(root, cfg, cmd):
         if "--kind" in argv and "trust" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
             protect("recording `trust` in the verification ledger skips re-verification for that article.")
         # 2. deploy
-        if sig and contains(argv, sig):
+        if any(contains(argv, s) for s in sigs):
             if unattended():
                 decide("deny", "unattended sessions may not deploy (the batch runner does).")
             decide("ask", "running the deploy command publishes the whole base branch — confirm this is `ship` step 7.")
@@ -259,11 +305,20 @@ def check_bash(root, cfg, cmd):
         if argv[0] == "git" and len(argv) > 1:
             sub = argv[1]
             branch = current_branch(root)
+            if sub in ("add", "rm", "mv"):
+                specs = [a for a in argv[2:] if not a.startswith("-")]
+                everything = any(a in ("-A", "--all", "-u", "--update") for a in argv[2:]) or "." in specs
+                pending |= set(git_pathspec_paths(root, specs, everything))
+            if sub in ("merge", "cherry-pick", "revert", "am", "rebase", "reset", "pull") and branch == base:
+                if unattended():
+                    decide("deny", "unattended sessions may not rewrite or merge into the base branch (`git %s`)." % sub)
+                decide("ask", "`git %s` changes the base branch without Herald's commit checks — confirm." % sub)
             if sub == "push":
                 if unattended() and any(t in ("--all", "--mirror") for t in argv[2:]):
                     decide("deny", "unattended sessions may not push --all/--mirror.")
-                _, refspecs = push_targets(argv)
+                _, refspecs = push_targets(normalize(seg, split=False))
                 targets = [t.lstrip("+") for t in refspecs]
+                targets = ["HEAD" if t == "@" else t.replace("@:", "HEAD:", 1) for t in targets]
                 dests = [t.split(":", 1)[1] if ":" in t else t for t in targets]
                 dests = [d[len("refs/heads/"):] if d.startswith("refs/heads/") else d for d in dests]
                 # conservative: on base with no explicit refspec, a push goes to base
@@ -274,7 +329,7 @@ def check_bash(root, cfg, cmd):
                 if branch == base:
                     if unattended():
                         decide("deny", "unattended sessions may not commit on the base branch.")
-                    staged = staged_after(root, argv)
+                    staged = staged_after(root, argv, pending)
                     juris = jurisdiction(root, cfg)
                     allowed = commits.all_base_globs(cfg)
                     bad = [p for p in staged if commits._match(p, juris) and not commits._match(p, allowed)]
@@ -283,7 +338,7 @@ def check_bash(root, cfg, cmd):
                                % ", ".join(bad[:5]))
                 parsed = parse_branch(branch)
                 if parsed or branch.startswith("herald-revert/"):
-                    staged = staged_after(root, argv)
+                    staged = staged_after(root, argv, pending)
                     if parsed:
                         globs = commits.pr_scope_globs(cfg, *parsed)
                     else:

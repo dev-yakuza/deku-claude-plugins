@@ -20,8 +20,9 @@ which denies base commits/pushes, merges outside `HRD_AUTO_PRS`, and deploys.
 3. Start in the background:
    `python3 .claude/herald/scripts/batch_runner.py --n <N>` with `run_in_background`.
    Logs: `.claude/herald/memory/batch-logs/`.
-4. When it finishes, summarize its JSON: PRs opened, holds by reason (next steps per reason,
-   `/hrd status`), incomplete topics, auto publish result (chosen / skipped with reasons).
+4. When it finishes, summarize its JSON: PRs opened, PRs a human merged during the run (→
+   `/hrd ship` records them), holds by reason (next steps per reason, `/hrd status`), incomplete
+   topics, auto publish result (chosen / skipped with reasons).
    Approve-mode PRs are published with `/hrd ship`.
 
 ## What the runner does (for the record)

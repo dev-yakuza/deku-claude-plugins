@@ -9,7 +9,7 @@ PRs · local branches. Group: in progress · PR pending (→ `/hrd ship`) · mer
 `/hrd ship`) · held (with the next step per reason) · queued · published. Also show the lock
 holder if any and `HRD ahead` warnings.
 
-## Maintenance flags (each: `HRD lock acquire --cmd status`, base checked out and clean,
+## Maintenance flags (each except `--unlock`: `HRD lock acquire --cmd status`, base checked out and clean,
 `HRD sync`, then the action, then `HRD commit --cmd status --kind status -m "chore(herald):
 <action> <id>" <changed files>` and `git push origin <base>`; finally `HRD lock release --cmd status
 --token <t>`)

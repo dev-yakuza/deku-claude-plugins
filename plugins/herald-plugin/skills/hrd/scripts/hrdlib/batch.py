@@ -287,6 +287,16 @@ def finish_auto(root, cfg, chosen):
     prs = ghstate.herald_prs(root, cfg)
     by_num = {p["number"]: p for p in prs}
     merged = [(tid, n) for tid, n in chosen if by_num.get(n, {}).get("mergedAt")]
+    # record the unattended merges first, in tracked state, before any path can stop: whoever
+    # records these articles later must keep human_reviewed=false (plan §3.2.2)
+    git(root, "checkout", "-q", cfg.base)
+    if merged:
+        topics = load_topics(root)
+        for tid, n in merged:
+            get_topic(topics, tid)["auto_merged_pr"] = n
+        save_topics(root, topics)
+        commits.commit_state(root, cfg, "runner", "chore(herald): auto merges %s" % ", ".join("#%d" % n for _, n in merged),
+                             "ship", [".claude/herald/topics.json"])
     ship_res = read_result(root, "ship")
     reported = set((ship_res or {}).get("merged") or [])
     if ship_res is None or reported != {n for _, n in merged}:
@@ -325,17 +335,12 @@ def finish_auto(root, cfg, chosen):
             log("deploy command failed — merged articles stay merged-unrecorded")
             return False
     chosen_slugs = {by_num[n]["slug"] for _, n in merged}
-    # remember which PRs merged unattended, so a later recording keeps human_reviewed=false
-    am_path = os.path.join(result_dir(root), "auto-merged.json")
-    write_json(am_path, sorted(set(read_json(am_path, []) or []) | {n for _, n in merged}))
     # base-wide deploy also publishes earlier merged-unrecorded articles that pass integrity
     extra = [(r["ref_topic"], r["slug"]) for r in report["articles"]
              if r["merged_unrecorded"] and r["status"] == "ok" and r["slug"] not in chosen_slugs and r["ref_topic"]]
-    auto_merged = set(read_json(os.path.join(result_dir(root), "auto-merged.json"), []) or [])
     for tid, slug in extra:
         if url_ok(cfg.article_url(slug)):
-            was_auto = any(p["number"] in auto_merged for p in prs if p["topic_id"] == tid and p.get("mergedAt"))
-            record_published(root, cfg, tid, slug, auto=was_auto)
+            record_published(root, cfg, tid, slug)  # auto_merged_pr on the topic keeps human_reviewed=false
     for tid, n in merged:
         slug = by_num[n]["slug"]
         if not url_ok(cfg.article_url(slug)):

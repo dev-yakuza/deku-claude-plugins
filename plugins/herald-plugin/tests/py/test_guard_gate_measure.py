@@ -97,6 +97,34 @@ class GuardCase(RepoCase):
         self.assertEqual(self.guard("Bash", {"command": "git -c a=b push origin main"}, {"HRD_UNATTENDED": "1"}), "deny")
         self.assertEqual(self.guard("Bash", {"command": "git push origin herald/t0001--x"}, {"HRD_UNATTENDED": "1"}), "allow")
 
+    def test_add_and_commit_in_one_command(self):
+        data = store.load_topics(self.root)
+        data["topics"].append({"id": "t0001", "title": "x", "state": "published", "slug": "mine", "history": []})
+        store.save_topics(self.root, data)
+        self.article("mine")
+        self.assertEqual(self.guard("Bash", {"command": "git add src/content/blog/mine.md && git commit -m x"}), "deny")
+        self.assertEqual(self.guard("Bash", {"command": "git commit -m x src/content/blog/mine.md"}), "deny")
+        self.assertEqual(self.guard("Bash", {"command": "git add -A && git commit -m x"}), "deny")
+        self.write("README.md", "human")
+        self.assertEqual(self.guard("Bash", {"command": "git add README.md && git commit -m readme"}), "allow")
+
+    def test_push_value_options_and_base_rewrites(self):
+        un = {"HRD_UNATTENDED": "1"}
+        for cmd in ("git push --force-with-lease=main origin", "git push --recurse-submodules=check origin",
+                    "git push origin @", "git merge herald/t0001--x", "git cherry-pick abc", "git reset --hard HEAD~1"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
+        self.assertEqual(self.guard("Bash", {"command": "git merge herald/t0001--x"}), "ask")
+        self.assertEqual(self.guard("Bash", {"command": "gh api repos/o/r/pulls/3/merge -X PUT"}, un), "deny")
+
+    def test_deploy_with_pipe(self):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        cur = json.load(open(cfgp)); cur["commands"]["deploy"] = "npm run deploy 2>&1 | tee deploy.log; echo done"
+        with open(cfgp, "w") as f:
+            json.dump(cur, f)
+        un = {"HRD_UNATTENDED": "1"}
+        self.assertEqual(self.guard("Bash", {"command": "npm run deploy"}, un), "deny")
+        self.assertEqual(self.guard("Bash", {"command": "tee deploy.log"}, un), "allow")
+
     def test_pr_branch_scope(self):
         sh(self.root, "git", "switch", "-q", "-c", store.branch_name("t0001", "mine"))
         self.article("mine")
