@@ -232,15 +232,21 @@ def record_hold(root, cfg, tid, reason, note):
 
 # --- auto publish (③–⑤) ----------------------------------------------------------------------
 
-def auto_published_today(pub):
+def auto_published_today(pub, topics=None):
+    """Auto publishes today, plus auto merges not yet recorded as published (they count against
+    the daily throttle too)."""
     today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
-    return sum(1 for a in pub["articles"] if a.get("human_reviewed") is False
-               and str(a.get("published_at", "")).startswith(today))
+    n = sum(1 for a in pub["articles"] if a.get("human_reviewed") is False
+            and str(a.get("published_at", "")).startswith(today))
+    for t in (topics or {}).get("topics", []):
+        if t.get("auto_merged_pr") and t.get("state") != "published":
+            n += 1
+    return n
 
 
 def auto_candidates(root, cfg, pr_results):
     pub = load_published(root)
-    room = int(cfg.get("autonomy", "throttle", "max_per_day") or 0) - auto_published_today(pub)
+    room = int(cfg.get("autonomy", "throttle", "max_per_day") or 0) - auto_published_today(pub, load_topics(root))
     chosen, skipped = [], []
     for tid, prn in pr_results:
         if room <= 0:
@@ -290,7 +296,11 @@ def finish_auto(root, cfg, chosen):
     # record the unattended merges first, in tracked state, before any path can stop: whoever
     # records these articles later must keep human_reviewed=false (plan §3.2.2)
     git(root, "checkout", "-q", cfg.base)
-    sync_base(root, cfg)  # origin moved by the GitHub merges: fast-forward before writing records
+    sync_error = None
+    try:
+        sync_base(root, cfg)  # origin moved by the GitHub merges: fast-forward before writing records
+    except HeraldError as e:
+        sync_error = e  # still record the merges locally below; the next run's step 1 carries them
     if merged:
         topics = load_topics(root)
         for tid, n in merged:
@@ -298,6 +308,9 @@ def finish_auto(root, cfg, chosen):
         save_topics(root, topics)
         commits.commit_state(root, cfg, "runner", "chore(herald): auto merges %s" % ", ".join("#%d" % n for _, n in merged),
                              "ship", [".claude/herald/topics.json"])
+    if sync_error:
+        log("base sync failed after auto merges (%s) — merges recorded locally, not deploying" % sync_error)
+        return False
     ship_res = read_result(root, "ship")
     reported = set((ship_res or {}).get("merged") or [])
     if ship_res is None or reported != {n for _, n in merged}:

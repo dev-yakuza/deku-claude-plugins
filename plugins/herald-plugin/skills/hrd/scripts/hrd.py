@@ -591,7 +591,7 @@ def build():
     p = sp.add_parser("mark-published"); p.add_argument("--topic", required=True); p.add_argument("--slug", required=True)
     p.set_defaults(fn=cmd_mark_published)
     p = sp.add_parser("record-published"); p.add_argument("--topic", required=True); p.add_argument("--slug", required=True)
-    p.add_argument("--pr"); p.add_argument("--auto", action="store_true"); p.set_defaults(fn=cmd_record_published)
+    p.add_argument("--pr", type=int); p.add_argument("--auto", action="store_true"); p.set_defaults(fn=cmd_record_published)
     p = sp.add_parser("gate"); p.add_argument("--topic", required=True); p.add_argument("--slug")
     p.set_defaults(fn=cmd_gate)
     p = sp.add_parser("signal"); p.add_argument("--kind", required=True); p.add_argument("--topic")

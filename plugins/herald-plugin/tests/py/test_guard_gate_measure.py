@@ -142,8 +142,36 @@ class GuardCase(RepoCase):
         self.assertEqual(self.guard("Bash", {"command": "git mv src/content/blog/old-post.md src/content/blog/x.md && git commit -m x"}), "deny")
         # unstaging and other repositories are not base rewrites
         self.assertEqual(self.guard("Bash", {"command": "git reset -q -- README.md"}, un), "allow")
-        self.assertEqual(self.guard("Bash", {"command": "git -C /tmp merge foo"}, un), "allow")
+        other = os.path.join(self.tmp, "otherrepo")
+        sh(self.tmp, "git", "init", "-q", other)
+        self.assertEqual(self.guard("Bash", {"command": "git -C %s merge foo" % other}, un), "allow")
+        self.assertEqual(self.guard("Bash", {"command": "git -C src merge foo"}, un), "deny")
         self.assertEqual(self.guard("Bash", {"command": 'git commit -am "src/content/blog/old-post.md"'}), "allow")
+
+    def test_round7_effective_branch_and_write_targets(self):
+        un = {"HRD_UNATTENDED": "1"}
+        sh(self.root, "git", "switch", "-q", "-c", store.branch_name("t0001", "mine"))
+        self.article("mine")
+        for cmd in ("git switch main && git add src/content/blog/mine.md && git commit -m publish && git push",
+                    "git switch main && git merge herald/t0001--mine && git push",
+                    "git push"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
+        ok = ("python3 .claude/herald/scripts/hrd.py stage pass --topic t0001 --stage draft 2>&1",
+              "python3 .claude/herald/scripts/hrd.py hash --slug mine 2>/dev/null | tail -5",
+              "git add -A -- src/content/blog/mine.md .claude/herald/work/t0001 && git commit -m draft",
+              "git push -u origin herald/t0001--mine")
+        self.write("notes.txt", "unrelated untracked file")
+        for cmd in ok:
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "allow", cmd)
+
+    def test_deploy_with_spaced_redirect_and_env(self):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        cur = json.load(open(cfgp)); cur["commands"]["deploy"] = "NODE_ENV=production vercel --prod > deploy.log && curl -X POST https://hooks.example/x"
+        with open(cfgp, "w") as f:
+            json.dump(cur, f)
+        un = {"HRD_UNATTENDED": "1"}
+        for cmd in ("NODE_ENV=production vercel --prod > deploy.log", "vercel --prod"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}, un), "deny", cmd)
 
     def test_pr_branch_scope(self):
         sh(self.root, "git", "switch", "-q", "-c", store.branch_name("t0001", "mine"))

@@ -26,7 +26,7 @@
       "name": "herald-plugin",
       "source": "./plugins/herald-plugin",
       "description": "Herald - per-repo editorial organization: plans topics, writes and verifies professional articles, ships them through PR review, and grows its guides from real usage",
-      "version": "0.1.6"
+      "version": "0.1.7"
     }
   ]
 }

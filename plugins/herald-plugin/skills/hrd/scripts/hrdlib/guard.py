@@ -41,8 +41,6 @@ HERALD_PERSONAS = [
     ".claude/agents/search-discovery.md", ".claude/agents/illustrator.md",
     ".claude/agents/translator.md", ".claude/agents/distributor.md",
 ]
-WRITE_HINT = re.compile(r"(>>?|\btee\b|\bsed\s+-i|\bmv\b|\bcp\b|\brm\b|\btruncate\b|\bdd\b|"
-                        r"open\([^)]*['\"][wa]|write_text|\bperl\s+-p?i|\bln\b|\bchmod\b)")
 
 
 def unattended():
@@ -225,20 +223,21 @@ TRIVIAL = {"echo", "tee", "true", ":", "printf", "cat", "sleep", "cd"}
 
 
 def deploy_signatures(deploy):
-    """The publishing step of the configured deploy string: split on `&&`/`;`, keep the part
-    before a pipe, drop redirections and trivial commands (echo, tee, …), take the last one —
+    """Publishing steps of the configured deploy string: split on `&&`/`;`/pipes, drop env
+    assignments, redirections, trivial commands (echo, tee, …) and build/test/lint steps —
     normalized like the commands we inspect."""
     sigs = []
     for part in re.split(r"&&|\|\||;|\n", deploy or ""):
         for member in part.split("|"):  # `echo y | vercel --prod`: the publisher is after the pipe
-            argv = [a for a in normalize(member.strip()) if not re.match(r"^\d*[<>]", a)]
-            if argv and argv[0] not in TRIVIAL:
+            argv = strip_noise(normalize(member.strip()))
+            if argv and argv[0] not in TRIVIAL and not (set(argv) & BUILD_WORDS):
                 sigs.append(argv)
     if not sigs and (deploy or "").strip():
-        last = [s for s in segments(deploy) if s]
-        sigs = [normalize(last[-1])] if last else []
-    # only the last meaningful step publishes; earlier steps (e.g. `npm run build`) stay free
-    return sigs[-1:]
+        last = [x for x in segments(deploy) if x]
+        sigs = [strip_noise(normalize(last[-1]))] if last else []
+    # every publishing step (build/test/lint steps excluded) — a later notify step must not hide
+    # the real deploy step
+    return [x for x in sigs if x]
 
 
 def git_pathspec_paths(root, specs, everything=False):
@@ -268,9 +267,13 @@ def other_git_dir(root, seg):
             val = raw[i + 1]
         elif a.startswith("--git-dir="):
             val = a.split("=", 1)[1]
-        if val and os.path.realpath(os.path.join(root, val)) not in (os.path.realpath(root),
-                                                                       os.path.realpath(os.path.join(root, ".git"))):
-            return True
+        if val:
+            d = os.path.join(root, val)
+            d = d if os.path.isdir(d) else os.path.dirname(d)
+            top = git(d, "rev-parse", "--show-toplevel", check=False).strip() if os.path.isdir(d) else ""
+            # unknown → same repository (fail closed)
+            if top and os.path.realpath(top) != os.path.realpath(root):
+                return True
     return False
 
 
@@ -280,6 +283,77 @@ def resets_history(args):
         return True
     before = args[:args.index("--")] if "--" in args else args
     return any(not a.startswith("-") for a in before)
+
+
+REDIR_RE = re.compile(r"^(\d*|&)(>>?|<)(.*)$")
+BUILD_WORDS = {"build", "test", "lint", "typecheck", "check", "install", "ci", "format", "prebuild"}
+
+
+def strip_noise(argv):
+    """Drop leading VAR=value assignments and redirections (operator + target, attached or not)."""
+    out, i = [], 0
+    while i < len(argv) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[i]) and not out:
+        i += 1
+    while i < len(argv):
+        m = REDIR_RE.match(argv[i])
+        if m:
+            i += 1 if m.group(3) else 2
+            continue
+        out.append(argv[i])
+        i += 1
+    return out
+
+
+def write_targets(seg):
+    """Paths a shell segment writes: redirection targets and the target arguments of common
+    file-writing commands. Executing a protected script (`python3 .claude/herald/scripts/hrd.py
+    ... 2>&1`) is not a write to it."""
+    try:
+        raw = shlex.split(seg)
+    except ValueError:
+        raw = seg.split()
+    out = []
+    for i, a in enumerate(raw):
+        m = REDIR_RE.match(a)
+        if m and m.group(2) in (">", ">>"):
+            tgt = m.group(3) or (raw[i + 1] if i + 1 < len(raw) else "")
+            if tgt and not tgt.startswith("&") and tgt != "/dev/null":
+                out.append(tgt)
+    argv = strip_noise(raw)
+    if not argv:
+        return out
+    cmd, args = os.path.basename(argv[0]), [x for x in argv[1:] if not x.startswith("-")]
+    if cmd in ("tee", "rm", "mv", "truncate", "shred", "unlink", "rmdir", "touch"):
+        out += args
+    elif cmd in ("cp", "ln", "install", "rsync") and args:
+        out.append(args[-1])
+    elif cmd in ("sed", "perl") and any(x.startswith("-i") or x.startswith("-pi") for x in argv[1:]):
+        out += args[1:] if cmd == "sed" else args
+    elif cmd == "chmod" and len(args) > 1:
+        out += args[1:]
+    elif cmd == "dd":
+        out += [x[3:] for x in argv[1:] if x.startswith("of=")]
+    elif cmd.startswith("python") and "-c" in argv and re.search(r"open\([^)]*['\"][wa]|write_text", seg):
+        out += [x for x in raw if "/" in x or "." in x]
+    return out
+
+
+def switch_target(root, argv):
+    """Branch a `git switch|checkout` segment moves to, or None (path checkouts move nowhere)."""
+    rest = argv[2:]
+    for i, a in enumerate(rest):
+        if a in ("-c", "-C", "-b", "-B", "--orphan") and i + 1 < len(rest):
+            return rest[i + 1]
+    if "--" in rest:
+        return None
+    names = [a for a in rest if not a.startswith("-")]
+    if not names:
+        return None
+    ref = names[0]
+    if argv[1] == "switch" or git(root, "rev-parse", "--verify", "-q", "refs/heads/" + ref, check=False).strip() \
+            or git(root, "rev-parse", "--verify", "-q", "refs/remotes/origin/" + ref, check=False).strip():
+        return ref
+    return None
 
 
 def push_targets(argv):
@@ -303,6 +377,7 @@ def check_bash(root, cfg, cmd):
     base = cfg.base
     sigs = deploy_signatures((cfg.get("commands", "deploy") or "").strip())
     pending = set()  # paths earlier `git add/rm/mv` segments of this same command will stage
+    branch = current_branch(root)  # updated by switch/checkout segments
     for seg in segments(cmd):
         argv = normalize(seg)
         if not argv:
@@ -324,27 +399,34 @@ def check_bash(root, cfg, cmd):
         if "--kind" in argv and "trust" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
             protect("recording `trust` in the verification ledger skips re-verification for that article.")
         # 2. deploy
-        if any(contains(argv, s) for s in sigs):
+        if any(contains(strip_noise(argv), s) for s in sigs):
             if unattended():
                 decide("deny", "unattended sessions may not deploy (the batch runner does).")
             decide("ask", "running the deploy command publishes the whole base branch — confirm this is `ship` step 7.")
-        # 3. writes to protected paths through the shell
-        if WRITE_HINT.search(seg):
-            for token in argv:
-                what = classify_path(rel(root, token))
-                if what:
-                    protect("shell write to the %s." % what)
-                if rel(root, token) == CONFIG:
-                    protect("shell write to %s (protected keys must change through `ask`)." % CONFIG)
-        # 4. git commit / push on base or herald branches
+        # 3. writes to protected paths through the shell (actual write targets only)
+        for token in write_targets(seg):
+            what = classify_path(rel(root, token))
+            if what:
+                protect("shell write to the %s." % what)
+            if rel(root, token) == CONFIG:
+                protect("shell write to %s (protected keys must change through `ask`)." % CONFIG)
+        # 4. git: the effective branch follows switch/checkout segments of this same command
         if argv[0] == "git" and len(argv) > 1:
             sub = argv[1]
-            branch = current_branch(root)
+            other_repo = other_git_dir(root, seg)
+            if other_repo:
+                continue
+            if sub in ("switch", "checkout"):
+                tgt = switch_target(root, argv)
+                if tgt:
+                    branch = tgt
+                continue
             if sub in ("add", "rm", "mv"):
-                specs = [a for a in argv[2:] if not a.startswith("-")]
+                specs = [x for x in argv[2:] if not x.startswith("-")]
                 if sub == "add":
-                    everything = any(a in ("-A", "--all", "-u", "--update") for a in argv[2:]) or "." in specs
-                    pending |= set(git_pathspec_paths(root, specs, everything))
+                    everything = not specs and any(x in ("-A", "--all", "-u", "--update") for x in argv[2:]) \
+                        or specs == ["."]
+                    pending |= set(git_pathspec_paths(root, [] if everything else specs, everything))
                 elif specs:  # rm/mv touch tracked files that show no diff before running
                     srcs = specs if sub == "rm" else specs[:-1]
                     pending |= {p for p in git(root, "ls-files", "-z", "--", *srcs, check=False).split("\0") if p}
@@ -354,29 +436,28 @@ def check_bash(root, cfg, cmd):
                             pending |= {"%s/%s" % (dest.rstrip("/"), os.path.basename(x)) for x in srcs}
                         else:
                             pending.add(dest)
-            other_repo = other_git_dir(root, seg)
             rewrites = sub in ("merge", "cherry-pick", "revert", "am", "rebase", "pull") or (
                 sub == "reset" and resets_history(argv[2:]))
-            if rewrites and branch == base and not other_repo:
-                if unattended():
-                    decide("deny", "unattended sessions may not rewrite or merge into the base branch (`git %s`)." % sub)
-                decide("ask", "`git %s` changes the base branch without Herald's commit checks — confirm." % sub)
+            if rewrites:
+                if unattended():  # unattended children never need history-changing git commands
+                    decide("deny", "unattended sessions may not run `git %s`." % sub)
+                if branch == base:
+                    decide("ask", "`git %s` changes the base branch without Herald's commit checks — confirm." % sub)
             if sub == "push":
-                if unattended() and any(t in ("--all", "--mirror") for t in argv[2:]):
-                    decide("deny", "unattended sessions may not push --all/--mirror.")
                 _, refspecs = push_targets(normalize(seg, split=False))
                 targets = [t.lstrip("+") for t in refspecs]
                 targets = ["HEAD" if t == "@" else t.replace("@:", "HEAD:", 1) for t in targets]
-                dests = [t.split(":", 1)[1] if ":" in t else t for t in targets]
+                dests = [t.split(":", 1)[1] if ":" in t else (branch if t == "HEAD" else t) for t in targets]
                 dests = [d[len("refs/heads/"):] if d.startswith("refs/heads/") else d for d in dests]
-                # conservative: on base with no explicit refspec, a push goes to base
-                to_base = (branch == base and not targets) or base in dests or (branch == base and "HEAD" in dests)
-                if to_base and unattended():
-                    decide("deny", "unattended sessions may not push the base branch.")
+                if unattended():
+                    # allow-list: an explicit destination that is a herald/* branch, nothing else
+                    if any(x in ("--all", "--mirror", "--tags") for x in argv[2:]) or not dests \
+                            or not all(d.startswith("herald/") for d in dests):
+                        decide("deny", "unattended sessions may push only explicit herald/* branches.")
             if sub == "commit":
+                if unattended() and not (branch.startswith("herald/") or branch.startswith("herald-revert/")):
+                    decide("deny", "unattended sessions may commit only on herald/* branches (branch: %s)." % branch)
                 if branch == base:
-                    if unattended():
-                        decide("deny", "unattended sessions may not commit on the base branch.")
                     staged = staged_after(root, argv, pending)
                     juris = jurisdiction(root, cfg)
                     allowed = commits.all_base_globs(cfg)
