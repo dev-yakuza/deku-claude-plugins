@@ -2603,7 +2603,7 @@ hasfx "qa: 후속 기록은 별도 코멘트" "$FQMD" 'It is a **separate commen
 hasfx "qa: declined 는 다시 묻지 않는다" "$FQMD" 'carry it forward as `declined` and **do not ask again**'
 lacksfx "qa: 판정 없는 '지금 이슈로 만들까요?' 가 사라졌다" "$FQMD" '— 지금 이슈로 만들까요?'
 lacksfx "qa: 언어 고정 헤딩 '### 미등록 후속 항목' 이 사라졌다" "$FQMD" '### 미등록 후속 항목'
-hasfx "handoff: guild:followups 마커" "$GLD/commands/atoms/_handoff.md" '| `<!-- guild:followups -->` … `<!-- /guild:followups -->` | qa (leader, Step 2.6) |'
+hasfx "handoff: guild:followups 마커" "$GLD/commands/atoms/_handoff.md" '| `<!-- guild:followups -->` … `<!-- /guild:followups -->` | qa (leader, Step 2.6);'
 hasfx "init: 갭마다 판정 먼저" "$FIMD" 'Every **BLOCKER/MAJOR** gap gets **exactly one verdict, stated before any question**'
 hasfx "init: MINOR 는 한 줄 카운트" "$FIMD" '`등록 불필요 <n>건 (MINOR — 리포트에만 기록)`'
 lacksfx "init: 'offer MINOR too' 가 사라졌다" "$FIMD" 'offer MINOR too'
@@ -2611,12 +2611,22 @@ lacksfx "init: 선택지를 고르게 하지 않는다" "$FIMD" 'user picks whic
 
 # 후속 Issue 1회차 적대적 리뷰
 hasfx "review: PR 번호면 Issue 를 따로 해석" "$FUMD" '3. **Resolve the Issue too — `<ISSUE>`**'
-hasfx "review: Step 5 답을 followups 에 기록" "$FUMD" '**Then record the (b) answers on the Issue**'
-hasfx "review: 열린 Issue 만 추적으로 친다" "$FUMD" '**Only an OPEN Issue covers an item.**'
+hasfx "review: Step 5 답을 followups 에 기록" "$FUMD" '**Record the (b) outcomes on the Issue'
+hasfx "review: (a) 는 열린 Issue 만 추적으로 친다" "$FUMD" '**For an (a) finding, only an OPEN Issue covers it**'
 hasfx "qa: followups 는 페이지네이션해 읽는다" "$FQMD" 'issues/$1/comments --paginate --jq'
 hasfx "qa: filed/declined 를 매번 이월" "$FQMD" '**every rewrite carries both forward**'
 hasfx "handoff K: followups 토큰" "$GLD/commands/atoms/_handoff.md" "- the follow-up record's status tokens"
 hasfx "init: GitHub 레포 없으면 기록만" "$FIMD" '`기록만 — GitHub 레포 없음`'
+# 후속 Issue 2회차 적대적 리뷰
+hasfx "review: 답이 무엇이든 followups 에 기록" "$FUMD" '**Record the (b) outcomes on the Issue — always, whatever the answer**'
+hasfx "review: 일괄 거절은 모두 declined" "$FUMD" '**a flat no makes every asked line `declined`**'
+hasfx "review: 구버전 섹션이면 followups 새로 생성" "$FUMD" '**create** a new `<!-- guild:followups -->` comment on `<ISSUE>`'
+hasfx "review: PR 이면 임의 번호의 closing 참조" "$FUMD" "not item 2's regex, which is anchored on"
+lacksfx "review: docs/specs/\$1 예시를 쓰지 않는다" "$FUMD" '[설계 유예] <제목> — docs/specs/$1/<file>'
+hasfx "qa: 미계획으로 닫힌 Issue 는 거절로 존중" "$FQMD" '`등록 불필요 — #<n> 미계획으로 닫힘`'
+hasfx "qa: 무인 실행은 PR 에도 알린다" "$FQMD" '`<!-- guild:followups:pr -->`'
+hasfx "handoff F: 후속 Issue 생성 실패는 스테이지를 멈추지 않는다" "$GLD/commands/atoms/_handoff.md" '**Follow-up Issue creates are not stage state either.**'
+hasfx "init: 화면에는 BLOCKER/MAJOR 만" "$FIMD" '**On screen, show only BLOCKER/MAJOR gaps plus the summary count**'
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -2624,7 +2634,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=708   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=717   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

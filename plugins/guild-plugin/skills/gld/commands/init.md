@@ -326,7 +326,7 @@ Spawn the readiness atom as a sub-agent:
 Parse the findings JSON. Groups: 검증 신호 · 정적 게이트 · CI · GitHub 워크플로 · 위생.
 
 ### 2. Report (always)
-Render a readiness report grouped by category, each gap as `[SEVERITY] title — why(Guild에 필요한 이유) → remediation`. Show a summary count. Then **persist** it via the Write tool to `.claude/guild/readiness-report.md` (in the config `language`) so it is not lost and a future `/gld audit` can diff against it. Include a header noting the scan date and that hygiene checks are a **light heuristic**.
+Render a readiness report grouped by category, each gap as `[SEVERITY] title — why(Guild에 필요한 이유) → remediation`. **On screen, show only BLOCKER/MAJOR gaps plus the summary count** (MINOR as a count — Step 4 says why); the persisted file below carries every gap, MINOR included. Then **persist** it via the Write tool to `.claude/guild/readiness-report.md` (in the config `language`) so it is not lost and a future `/gld audit` can diff against it. Include a header noting the scan date and that hygiene checks are a **light heuristic**.
 
 ### 3. 위생 deep scan (opt-in)
 If the hygiene group ran only the light heuristic, offer: "전용 시크릿 스캐너(gitleaks)로 정밀 검사할까요? (미설치 시 설치 동의를 받습니다)".
