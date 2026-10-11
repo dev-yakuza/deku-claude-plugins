@@ -36,7 +36,10 @@ region between `<!-- herald:persona:start -->` and `<!-- herald:persona:end -->`
 under `.claude/agents/`, `docs/editorial/`, `config.json` is local-owned.
 
 **INV5 — nothing leaves the machine un-sanitized.**
-`/hrd contribute` is the only outbound path (secret scan, generalization, human preview).
+Local growth data (signals, memory, ledger) and article drafts never go to the plugin
+repository or any third party: `/hrd contribute` is not available yet (it needs a deterministic
+secret scanner first), so flow-level ideas are filed by hand by the human. (Pushes, PRs and
+deploys to this repo's own remote are the normal flow, not outbound sharing.)
 Search Console credentials live only in `.claude/herald/secrets/` (gitignored).
 
 **INV6 — draft → confirm → enforce.**

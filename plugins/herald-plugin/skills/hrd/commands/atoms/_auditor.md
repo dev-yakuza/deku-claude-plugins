@@ -45,5 +45,5 @@ Guild `_execute_spine.md` 3.5a. Design: `design/herald/00-plan.md` §3.3.
 
 Per `_contract.md` §C: attended MAJOR → editor-in-chief may dismiss with a reason; attended
 BLOCKER → only after the human confirms; unattended BLOCKER → never. Every dismissal goes to
-`critique.md`, `critique.json` (`final_round.dismissed`, `decision_log` `kind: dismissal`) and
-`HRD signal --kind dismissal`.
+`critique.md` and `critique.json` (`final_round.dismissed`, `decision_log` `kind: dismissal`);
+`HRD stage pass --stage critique` records the `dismissal` signals from that log.

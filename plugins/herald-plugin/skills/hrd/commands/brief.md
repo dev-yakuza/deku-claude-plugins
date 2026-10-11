@@ -5,7 +5,8 @@ The full flow is `/hrd write`; continuing a stopped flow is `/hrd resume`.
 
 1. `HRD lock acquire --cmd brief` (release on every exit).
 2. The topic's work must exist on its herald branch: `git switch herald/<topic-id>--<slug>`
-   (find it with `HRD status`). For `brief` on a fresh topic use `/hrd write` instead.
+   (find it with `HRD status`), then the version check in `atoms/_stages.md` § Existing
+   branches. For `brief` on a fresh topic use `/hrd write` instead.
 3. Entry condition: `HRD stage check --topic <topic-id> --stage brief` — if it names an earlier
    stage, stop and tell the user to rerun that stage first. Do not edit `state.json`.
 4. Execute the stage exactly as `atoms/_stages.md` § brief describes (read list, role, outputs,

@@ -12,8 +12,8 @@ Rules: `atoms/_contract.md`, `atoms/_stages.md`. Plan: §3.2, §3.2.2.
 3. `git status --porcelain --untracked-files=no` must be empty; `git switch <base>`;
    `HRD sync` (fetch + merge origin; a conflict stops; unattended: fast-forward only).
 4. `HRD ahead` — any `needs_human` commit: attended → show it and ask whether to continue;
-   unattended → `HRD result --topic <id> --status held:needs-human --note "base has foreign
-   unpushed commits"` and stop.
+   unattended → `HRD result --topic <id> --status held:needs-human --note "tooling: base has
+   foreign unpushed commits"` and stop.
 5. Unpushed commits touching `docs/editorial/` or `.claude/agents/` on base → push them first
    (roles read the harness from the herald branch = `origin/<base>`).
 6. `HRD select --topic <id>` must list the topic (queued, no open/merged PR, no local
@@ -34,11 +34,14 @@ measured cost so far. Ask: approve / request changes / hold.
 - **Request changes**: record it right away — `HRD signal --kind session-edit-request --topic
   <id> --data '{"request": "<verbatim>"}'` (so a later hold or failure cannot lose it) and keep
   the `id` it prints; the writer applies the request (`HRD loopback --topic <id> --human` — not
-  counted); `HRD stage pass --stage draft` (runs the gate); then `HRD signal --kind
+  counted); `HRD stage pass --stage draft` (runs the gate; on errors the writer fixes them under
+  the same `--human` loopback — never `--cause gate` for a human-requested revision); then
+  `HRD signal --kind
   session-edit-request --topic <id> --data '{"request_id": "<that id>", "diff_summary": "...",
   "lines_changed": n}'` (joined to its request by the id, counted once); then critique (editor →
   auditor) and verify run again. Loop until approve or hold.
-- **Hold**: hold `needs-human` (branch preserved).
+- **Hold**: hold `needs-human` with `--note "human: <the human's reason>"` (branch preserved; a
+  human's choice is not a growth signal).
 
 ## 3. Publish
 

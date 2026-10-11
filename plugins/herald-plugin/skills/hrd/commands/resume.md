@@ -13,6 +13,7 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`). Plan §3.2
    note) and ask how to proceed (attended). Unattended resume of a held topic is not allowed —
    only the batch runner's one retry of an incomplete child uses `resume`.
 4. `git switch herald/<topic-id>--<slug>`; read `.claude/herald/work/<topic-id>/state.json`.
+   Then the version check in `atoms/_stages.md` § Existing branches.
 5. If `stage` is `brief` and `slug` is null, run brief as in `write.md`. Otherwise run from
    `stage` onward through publish exactly as `write.md` §1–§3 (entry checks catch stale
    artifacts: rerun the stage they name).

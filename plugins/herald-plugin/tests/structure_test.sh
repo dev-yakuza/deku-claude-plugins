@@ -94,6 +94,9 @@ pv = json.load(open(os.path.join(plugin, ".claude-plugin", "plugin.json")))["ver
 mk = json.load(open(os.path.join(plugin, "..", "..", ".claude-plugin", "marketplace.json")))
 mv = [x["version"] for x in mk["plugins"] if x["name"] == "herald-plugin"]
 check(mv == [pv], "plugin.json version (%s) == marketplace.json %s" % (pv, mv))
+sv = re.search(r'^SCRIPTS_VERSION = "([^"]+)"', open(os.path.join(plugin, "skills", "hrd", "scripts", "hrd.py")).read(), re.M)
+check(re.match(r"^\d+\.\d+\.\d+$", pv) is not None, "plugin.json version %s is dot-separated integers" % pv)
+check(sv and sv.group(1) == pv, "hrd.py SCRIPTS_VERSION (%s) == plugin.json version (%s)" % (sv and sv.group(1), pv))
 
 print("\n%d failure(s)" % len(fails))
 sys.exit(1 if fails else 0)

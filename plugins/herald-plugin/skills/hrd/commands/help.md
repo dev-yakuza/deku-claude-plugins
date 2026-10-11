@@ -17,7 +17,7 @@ adopt central improvements
 --mark-published|--unlock]`
 
 **Growth & checks** — `evolve [--dry-run|--apply]` · `rollback <evolve#n|commit>` · `audit` ·
-`monitoring [--connect-gsc]` · `ask <question>` · `contribute`
+`monitoring [--connect-gsc]` · `ask <question>` · `contribute` (not available yet)
 
 Flow: `init` → `plan` → `write` (or `batch`) → `ship`. Accuracy is a floor: nothing unverified
 is published through Herald.

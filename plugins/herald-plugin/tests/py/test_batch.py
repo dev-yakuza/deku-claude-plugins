@@ -24,16 +24,18 @@ class BatchCase(RepoCase):
         cfg["budget"] = {"per_article_usd": 1.0}
         with open(os.path.join(self.root, ".claude/herald/config.json"), "w") as f:
             json.dump(cfg, f)
+        # like `/hrd init`: the repo carries its copy of the scripts (the runner reads its version)
+        self.write(".claude/herald/scripts/hrd.py", open(os.path.join(SCRIPTS, "hrd.py")).read())
         self.commit("topics")
         sh(self.root, "git", "push", "-q", "origin", "main")
         self.plan = os.path.join(self.tmp, "plan.json")
 
-    def run_batch(self, plan, n=3):
+    def run_batch(self, plan, n=3, extra=()):
         with open(self.plan, "w") as f:
             json.dump(plan, f)
         env = dict(os.environ, HRD_CLAUDE=os.path.join(HERE, "fake_claude.py"), HRD_FAKE_CLAUDE_PLAN=self.plan,
                    HRD_SCRIPTS=SCRIPTS)
-        p = subprocess.run([sys.executable, os.path.join(SCRIPTS, "batch_runner.py"), "--n", str(n)], cwd=self.root,
+        p = subprocess.run([sys.executable, os.path.join(SCRIPTS, "batch_runner.py"), "--n", str(n), *extra], cwd=self.root,
                            capture_output=True, text=True, env=env, timeout=600, stdin=subprocess.DEVNULL)
         return p
 
@@ -52,6 +54,41 @@ class BatchCase(RepoCase):
         # approve mode pushes the hold record right away
         self.assertEqual(sh(self.root, "git", "rev-parse", "origin/main").strip(), head)
         self.assertIsNone(store.paths and __import__("hrdlib.lock", fromlist=["x"]).status(self.root))
+
+    def test_version_mismatch_stops_batch_and_leaves_topics_queued(self):
+        p = self.run_batch({"t0001": "pr"}, extra=("--expect-version", "99.0.0"))
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("expects 99.0.0", p.stdout + p.stderr)
+        p = self.run_batch({"t0001": "version-gate", "t0002": "pr"})
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("version gate", p.stdout + p.stderr)
+        topics = {t["id"]: t for t in store.load_topics(self.root)["topics"]}
+        self.assertEqual((topics["t0001"]["state"], topics["t0002"]["state"]), ("queued", "queued"))
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".claude/herald/signals.jsonl")))
+
+    def test_version_gate_after_branch_preserves_and_holds(self):
+        p = self.run_batch({"t0001": "version-gate-branch", "t0002": "pr"}, extra=("--expect-version", "0.3"))
+        self.assertNotEqual(p.returncode, 0)
+        topics = {t["id"]: t for t in store.load_topics(self.root)["topics"]}
+        self.assertEqual((topics["t0001"]["state"], topics["t0001"]["reason"]), ("held", "needs-human"))
+        self.assertEqual(topics["t0002"]["state"], "queued")
+        self.assertIn("herald/t0001--post-t0001", sh(self.root, "git", "branch", "--list", "herald/*"))
+        self.assertEqual(sh(self.root, "git", "rev-parse", "origin/main").strip(),
+                         sh(self.root, "git", "rev-parse", "main").strip())  # the hold reached origin
+        self.assertIn("wip(herald)", sh(self.root, "git", "log", "-1", "--format=%s", "herald/t0001--post-t0001"))
+        summary = json.loads(p.stdout[p.stdout.index("{"):])
+        self.assertEqual(summary["held"], [["t0001", "needs-human"]])
+        sig = os.path.join(self.root, ".claude/herald/signals.jsonl")
+        self.assertFalse(os.path.exists(sig) and "hold" in open(sig).read())
+
+    def test_tooling_holds_record_no_signal(self):
+        p = self.run_batch({"t0001": "nothing"}, n=1)
+        self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
+        topics = {t["id"]: t for t in store.load_topics(self.root)["topics"]}
+        self.assertEqual(topics["t0001"]["reason"], "needs-human")  # held, but a tooling stop
+        sig = os.path.join(self.root, ".claude/herald/signals.jsonl")
+        self.assertFalse(os.path.exists(sig) and "hold" in open(sig).read())
+        self.assertIn('"incomplete"', open(sig).read())  # context for evolve, not counted
 
     def test_several_holds_then_pr_all_recorded(self):
         self.write("notes/draft.txt", "user's own untracked file outside build inputs")

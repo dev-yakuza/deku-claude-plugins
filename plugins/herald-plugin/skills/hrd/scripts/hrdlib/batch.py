@@ -20,9 +20,9 @@ from . import commits, ghstate, integrity, lock
 from .config import Config
 from .measure import stream_json_usd
 from .store import (CLEANUP_REASONS, HOLD_REASONS, auto_exclusion, record_published, branch_name, get_topic, load_published, load_topics,
-                    paths, read_json_at, save_published, save_topics, set_topic_state, signal as emit_signal,
-                    work_rel)
-from .util import HeraldError, git, git_ok, now_iso, read_json, write_json
+                    paths, read_json_at, save_published, save_topics, set_topic_state, safe_signal as emit_signal,
+                    NON_SIGNAL_HOLD_NOTES, work_rel)
+from .util import HeraldError, git, git_ok, now_iso, read_json, version_tuple, write_json
 
 RATE_LIMIT_RE = re.compile(r"(rate.?limit|usage limit|\b429\b|resets? at)", re.I)
 MAX_WAIT = 4 * 3600
@@ -242,6 +242,16 @@ def completed(root, cfg, tid, since=""):
     return None
 
 
+def scripts_version(root):
+    """SCRIPTS_VERSION of the repo's installed hrd.py (read from the file: base may move)."""
+    try:
+        with open(os.path.join(root, ".claude", "herald", "scripts", "hrd.py"), encoding="utf-8") as f:
+            m = re.search(r'^SCRIPTS_VERSION = "([^"]+)"', f.read(), re.M)
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
 def record_hold(root, cfg, tid, reason, note):
     """Record and commit each hold immediately (plan §3.2.1): an uncommitted topics.json would be
     lost by the next topic's branch switch and would make the next child's preflight fail."""
@@ -249,7 +259,8 @@ def record_hold(root, cfg, tid, reason, note):
     topics = load_topics(root)
     set_topic_state(get_topic(topics, tid), "held", reason, note)
     save_topics(root, topics)
-    emit_signal(root, "hold", tid, {"reason": reason, "note": note, "by": "batch"})
+    if not str(note or "").startswith(NON_SIGNAL_HOLD_NOTES):  # a tooling stop is not a writing problem
+        emit_signal(root, "hold", tid, {"reason": reason, "note": note, "by": "batch"})
     remember(commits.commit_state(root, cfg, "runner", "chore(herald): batch hold %s (%s)" % (tid, reason), "hold",
                                   [".claude/herald/topics.json"]))
     if cfg.get("autonomy", "publish") != "auto":
@@ -409,6 +420,7 @@ def main(argv):
     ap = argparse.ArgumentParser(prog="batch_runner")
     ap.add_argument("--n", type=int, default=3)
     ap.add_argument("--detach", action="store_true", help="fork, setsid, log to memory/batch-logs/")
+    ap.add_argument("--expect-version", help="the plugin's version: stop when base's scripts differ")
     a = ap.parse_args(argv)
     from .util import repo_root
     root = repo_root()
@@ -455,8 +467,48 @@ def main(argv):
     summary = {"pr": [], "held": [], "incomplete": [], "auto": None}
     if a.detach:  # the summary file is replaced only by a run that holds the lock
         os.replace(os.path.join(logs_dir, "runner.out.tmp"), os.path.join(logs_dir, "runner.out"))
+    # the plugin's version (batch.md passes it); else this runner's own scripts, read before any
+    # sync — the code this process loaded
+    expected = a.expect_version or scripts_version(root)
+
+    def publish_holds():
+        # only this run's record commits (record_hold does not push in auto mode); never push what
+        # a human deliberately left unpushed when this run recorded nothing
+        if cfg.get("autonomy", "publish") == "auto" and LAST_RECORD["sha"]:
+            try:
+                push_base(root, cfg)
+            except HeraldError as e:  # never let a push problem hide why the batch stops
+                log("could not push this run's holds: %s" % e)
+
+    def stop(msg):
+        publish_holds()
+        raise HeraldError(msg)
+
+    def check_version():
+        """Children stop at the version gate when base's scripts differ from the plugin: stop the
+        batch instead of holding every remaining topic."""
+        now = scripts_version(root)
+        try:
+            want = version_tuple(expected) if expected is not None else None
+        except HeraldError:
+            stop("malformed --expect-version %r (expected dot-separated integers)" % expected)
+        try:
+            have = version_tuple(now) if now is not None else (0, 0, 0)  # no SCRIPTS_VERSION = pre-0.3.0
+        except HeraldError:
+            have = (0, 0, 0)
+        if want is None or have != want:
+            if not a.expect_version:
+                hint = "base's scripts changed since this runner started — run /hrd batch again"
+            elif want is not None and have > want:
+                hint = "base is newer than the plugin: update the installed plugin and restart, then batch again"
+            else:
+                hint = "base is older than the plugin: run /hrd update, then batch again"
+            stop("Herald scripts on base are %s but this batch expects %s — %s"
+                 % (now or "older than 0.3.0", expected or "an unknown version", hint))
+
     try:
         sync_base(root, cfg)
+        check_version()
         untracked = integrity.untracked_build_inputs(root, cfg)
         if untracked:
             raise HeraldError("untracked files in build inputs — commit, move or remove them before batch: %s"
@@ -473,6 +525,7 @@ def main(argv):
                     os.remove(p)
             git(root, "checkout", "-q", cfg.base)
             sync_base(root, cfg)  # children only fast-forward; keep base current for them
+            check_version()  # a /hrd update may have landed on origin mid-batch
             log("write %s" % tid)
             started = now_iso().replace("+00:00", "Z")
             outcome, spent = run_child(root, cfg, "/hrd write %s" % tid, os.path.join(logs, tid + ".jsonl"), budget)
@@ -497,9 +550,26 @@ def main(argv):
                 res = completed(root, cfg, tid, since=started)
             if not res:
                 preserve_wip(root, cfg, tid)
-                record_hold(root, cfg, tid, "needs-human", "batch child did not finish (%s)" % outcome)
+                record_hold(root, cfg, tid, "needs-human", "tooling: batch child did not finish (%s)" % outcome)
+                # context for evolve (listed, never counted): a repo-specific crash pattern stays visible
+                emit_signal(root, "incomplete", tid, {"outcome": outcome})
                 summary["incomplete"].append(tid)
                 continue
+            if res["status"].startswith("held:") and str(res.get("note") or "").startswith("tooling: herald version"):
+                # the child stopped at the version gate (at start, or after `HRD branch` / a branch
+                # switch). No branch yet → the topic stays queued. A branch exists → keep its work
+                # there and hold it (a tooling hold: no growth signal) so `/hrd resume` can continue;
+                # a queued topic with a local branch would never be selected again.
+                branch = _topic_branch(root, tid)
+                if branch:
+                    preserve_wip(root, cfg, tid)
+                    record_hold(root, cfg, tid, "needs-human", "tooling: herald version mismatch on %s — "
+                                "update, then /hrd resume %s" % (branch, tid))
+                    summary["held"].append((tid, "needs-human"))
+                git(root, "checkout", "-q", cfg.base)
+                check_version()
+                stop("a child stopped at the Herald version gate (%s) — update so plugin and scripts match, "
+                     "then run /hrd batch again" % res.get("note"))
             if res["status"].startswith("held:"):
                 reason = res["status"].split(":", 1)[1]
                 if reason in CLEANUP_REASONS:
@@ -520,6 +590,7 @@ def main(argv):
             summary["auto"] = {"chosen": chosen, "skipped": skipped}
             if chosen:
                 sync_base(root, cfg)
+                check_version()
                 # the ship child only fast-forwards: publish this run's hold commits first so a
                 # GitHub merge never leaves its base diverged from origin
                 push_base(root, cfg)
@@ -529,6 +600,10 @@ def main(argv):
                 env = {"HRD_AUTO_PRS": " ".join(str(n) for _, n in chosen)}
                 run_child(root, cfg, "/hrd ship --auto", os.path.join(logs, "ship.jsonl"), 0, env)
                 git(root, "checkout", "-q", cfg.base)
+                ship_res = read_result(root, "ship") or {}
+                if str(ship_res.get("note") or "").startswith("tooling: herald version"):
+                    stop("the ship child stopped at the Herald version gate — nothing was merged by it; "
+                         "update so plugin and scripts match, then /hrd ship")
                 summary["auto"]["published"] = finish_auto(root, cfg, chosen)
         if auto and not chosen and (summary["held"] or summary["incomplete"]):
             push_base(root, cfg)  # holds were committed per topic; nothing else will push them

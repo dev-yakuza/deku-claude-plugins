@@ -18,22 +18,24 @@ which denies base commits/pushes, merges outside `HRD_AUTO_PRS`, and deploys.
    assumptions or image changes), the per-article budget, and that the run may take a long
    time (rate limits up to 4h are waited out).
 3. Start it **detached** — a batch can run for hours (children, rate-limit waits up to 4h), longer
-   than a background shell may live: `python3 .claude/herald/scripts/batch_runner.py --n <N>
+   than a background shell may live: `python3 .claude/herald/scripts/batch_runner.py --n <N> --expect-version <plugin version>
    --detach`. It forks into its own session and prints the paths of `runner.pid`, `runner.out`
    (the final JSON summary) and `runner.log` (progress) under `.claude/herald/memory/batch-logs/`.
    Watch for completion by polling until `runner.out` contains the summary JSON (or the pid in
    `runner.pid` is gone). Stop it with `kill $(cat .claude/herald/memory/batch-logs/runner.pid)` —
    it ends its children and releases the checkout lock.
 4. When it finishes, summarize the JSON in `runner.out` (if `runner.out` is empty or carries
-   `"error"`, report the last lines of `runner.log` instead — e.g. the lock was held, untracked
-   build inputs, a base sync conflict): PRs opened, PRs a human merged during the run (→
+   `"error"`, report it and the last lines of `runner.log` — e.g. the lock was held, untracked
+   build inputs, a base sync conflict, or a Herald version mismatch: base's scripts differ from
+   the plugin, so the runner stopped before the next child — update, then run batch again): PRs opened, PRs a human merged during the run (→
    `/hrd ship` records them), holds by reason (next steps per reason, `/hrd status`), incomplete
    topics, auto publish result (chosen / skipped with reasons).
    Approve-mode PRs are published with `/hrd ship`.
 
 ## What the runner does (for the record)
 
-① sync base → ② per topic: child `/hrd write <id>` (budget watched from stream-json usage;
+① sync base, then base's scripts version must equal `--expect-version` (re-checked before each
+child and before the ship child; a mismatch stops the batch) → ② per topic: child `/hrd write <id>` (budget watched from stream-json usage;
 over budget → kill, WIP-commit the branch, hold `budget`) → completion judged from GitHub /
 result file, one `/hrd resume` retry, else hold `needs-human` → holds committed on base
 (`Herald-Record: hold`) → ③ (auto) PR selection from PR-head `critique.json`, throttle, base

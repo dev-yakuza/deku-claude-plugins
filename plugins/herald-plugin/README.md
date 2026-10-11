@@ -51,7 +51,7 @@ Search Console (optional): `pip install google-auth requests`.
 `draft` · `critique` · `verify` · `publish` · `resume` · `batch` — **Publishing** `ship` ·
 `review` · `refresh` — **State** `status` (`--requeue` `--drop` `--withdraw` `--unwithdraw`
 `--move` `--release-slug` `--mark-published` `--unlock`) — **Growth & checks** `evolve` ·
-`rollback` · `audit` · `monitoring` · `ask` · `contribute`. Details: `/hrd help`.
+`rollback` · `audit` · `monitoring` · `ask` · `contribute` (not available yet). Details: `/hrd help`.
 
 ## Safety
 
@@ -69,6 +69,6 @@ Search Console (optional): `pip install google-auth requests`.
 
 ## Status
 
-`0.2.1` — implemented end to end, after ten rounds of adversarial implementation review (plus five on the evolve nudge); the deterministic layer is covered by tests
+`0.3.0` — implemented end to end, after ten rounds of adversarial implementation review plus a review loop per later change; 0.3.0 records growth signals in code (existing repos: run `/hrd update`); the deterministic layer is covered by tests
 (`bash plugins/herald-plugin/tests/run_tests.sh`). `evolve`'s usefulness and metric-driven
 proposals need accumulated real use before they can be judged.

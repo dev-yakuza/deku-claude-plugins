@@ -263,6 +263,19 @@ def stage_pass(root, cfg, tid, stage, amend=False):
     if stage == "draft" or (stage == "verify" and amend):
         gate = run_gate(root, cfg, st["slug"])
         if not gate["ok"]:
+            # not on `verify --amend` or after a human-requested revision (the failing edit is a
+            # human's), and once per topic and loopback count (retries of one draft are one event)
+            n = int(st.get("loopbacks", 0))
+            attempt = st.get("created_at")  # a requeued topic starts a new state (loopbacks 0 again)
+            try:
+                seen = any(isinstance(r, dict) and r.get("kind") == "gate-failure" and r.get("topic_id") == tid
+                           and isinstance(r.get("data"), dict) and r["data"].get("loopbacks") == n
+                           and r["data"].get("attempt") == attempt for r in read_jsonl(paths(root)["signals"]))
+            except Exception:  # noqa: BLE001 — never hide the gate error behind a signal problem
+                seen = True
+            if not amend and st.get("last_loopback") != "human" and not seen:
+                safe_signal(root, "gate-failure", tid, {"stage": stage, "errors": gate["errors"][:10],
+                                                        "loopbacks": n, "attempt": attempt})
             raise HeraldError("deterministic gate failed: %s" % "; ".join(gate["errors"][:5]))
     if stage in ("critique", "verify"):
         # The verdict file must evaluate THIS article: the main session writes the hash it
@@ -284,6 +297,9 @@ def stage_pass(root, cfg, tid, stage, amend=False):
         if not critique_passed(crit):
             raise HeraldError("critique.json does not record a PASS with zero undismissed BLOCKER/MAJOR")
         rec["body_hash"] = worktree_hash(root, cfg, st["slug"])
+        # dismissals are recorded from the decision log, not from memory (abuse watch, auditor
+        # prompt material); also on audit loopbacks, so a topic that never passes keeps them
+        record_dismissals(root, tid, crit)
     if stage == "verify":
         ver = load_machine(root, tid, "verify.json")
         if not verify_passed(ver):
@@ -395,9 +411,79 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
 
 SIGNAL_KINDS = (
     "human-edit", "ship-decline", "review-finding", "audit-finding", "dismissal",
-    "revise-weakness", "verify-gap", "hold", "gate-failure", "stagnation", "escalation",
+    "revise-weakness", "verify-gap", "hold", "gate-failure", "escalation",
     "session-edit-request",
+    "stagnation",  # legacy (0.2.x): now recorded as a hold with reason stagnation
+    "incomplete",  # a batch child that ended without a result (crash, timeout)
 )
+# listed for evolve but never counted toward the nudge: an escalation accompanies a loopback that
+# is already counted; an incomplete child is usually environment, not writing
+CONTEXT_KINDS = ("escalation", "incomplete")
+
+
+# Hold notes that mark a stop as environment or a human's choice, not a writing weakness: never a
+# growth signal (the last two are what 0.2.x wrote for environment stops)
+NON_SIGNAL_HOLD_NOTES = ("tooling:", "human:", "batch child did not finish", "base has foreign unpushed commits")
+
+# Closed theme list for editor REVISE and auditor findings: the editor-in-chief classifies each
+# loopback so the nudge counts recurring weaknesses, not every REVISE (one theme = one count axis).
+THEMES = ("intro", "structure", "length", "depth", "clarity", "tone", "search", "promotion",
+          "policy", "accuracy", "images", "exemplar", "other")
+LOOPBACK_CAUSES = {"revise": "revise-weakness", "audit": "audit-finding", "verify": "verify-gap", "gate": None}
+
+
+def safe_signal(root, kind, tid=None, data=None):
+    """Best-effort recording for signals written as a side effect of a state change: a signal
+    failure is reported on stderr and never undoes or blocks the change itself."""
+    import sys
+    try:
+        return signal(root, kind, tid, data)
+    except Exception as e:  # noqa: BLE001 — growth evidence must not break the flow
+        sys.stderr.write("hrd: warning: could not record %s signal: %s\n" % (kind, e))
+        return None
+
+
+def safe_machine(root, tid, name):
+    """A verdict file as a dict, or {} if missing or unreadable (for signal data only)."""
+    try:
+        m = load_machine(root, tid, name)
+    except Exception:  # noqa: BLE001 — bad JSON, absurd nesting, unreadable file
+        return {}
+    return m if isinstance(m, dict) else {}
+
+
+def record_dismissals(root, tid, crit):
+    """Dismissals from critique.json's decision log (append-only across rounds). A record
+    identical to one already in the file (kind, topic, data) is not appended again, so a
+    dismissal an evolve proposal consumed does not come back on the next critique pass."""
+    import sys
+    try:
+        log = crit.get("decision_log") if isinstance(crit, dict) else None
+        if not isinstance(log, list):
+            return
+        # one dismissal = its note on this topic (other fields may be normalized between rounds,
+        # and 0.2.x recorded dismissals by hand in other shapes)
+        def note_of(data):
+            if not isinstance(data, dict):
+                return None
+            n = data.get("note")
+            if isinstance(n, str):
+                return n[:500]
+            import json as _json  # no note: the remaining fields identify it
+            return _json.dumps({k: data[k] for k in ("severity", "finding") if k in data}, sort_keys=True)
+        existing = {note_of(r.get("data")) for r in read_jsonl(paths(root)["signals"])
+                    if isinstance(r, dict) and r.get("kind") == "dismissal" and r.get("topic_id") == tid}
+        for d in log:
+            if isinstance(d, dict) and d.get("kind") == "dismissal":
+                data = {k: d[k] for k in ("note", "severity", "finding", "round") if k in d}
+                if isinstance(data.get("note"), str):
+                    data["note"] = data["note"][:500]
+                key = note_of(data)
+                if key not in existing:
+                    signal(root, "dismissal", tid, data)
+                    existing.add(key)
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write("hrd: warning: could not record dismissal signals: %s\n" % e)
 
 
 def signal(root, kind, tid=None, data=None, human_reviewed=None):
@@ -523,6 +609,8 @@ def evolve_signals(root):
     groups, baseline = {}, []
     records = read_jsonl(paths(root)["signals"])
     request_ids, asked = set(), set()
+    stagnation_holds = {r.get("topic_id") for r in records if isinstance(r, dict) and r.get("kind") == "hold"
+                        and isinstance(r.get("data"), dict) and r["data"].get("reason") == "stagnation"}
     for rec in records:
         if countable_signal(rec) and rec["kind"] == "session-edit-request":
             d = rec.get("data") or {}
@@ -535,6 +623,10 @@ def evolve_signals(root):
         if not countable_signal(rec):
             continue
         sid = signal_id(rec)
+        if rec["kind"] == "stagnation" and rec.get("topic_id") in stagnation_holds:
+            continue  # 0.2.x could record both for one event; the hold already counts
+        if rec["kind"] == "hold" and str((rec.get("data") or {}).get("note") or "").startswith(NON_SIGNAL_HOLD_NOTES):
+            continue  # environment stops / human choices (0.2.x recorded them as holds)
         if rec["kind"] == "session-edit-request":
             d = rec.get("data") or {}
             if "request_id" in d and d["request_id"] not in request_ids:
@@ -562,34 +654,53 @@ def evolve_signals(root):
     return out, baseline, st
 
 
+def signal_theme(rec):
+    """The count axis: `kind`, or `kind:theme` when the record names a theme from THEMES (editor
+    REVISE and auditor findings), or `hold:<reason>` — so unrelated events of one kind are not
+    one recurring problem."""
+    data = rec.get("data") or {}
+    if data.get("theme") in THEMES:
+        return "%s:%s" % (rec["kind"], data["theme"])
+    if rec["kind"] == "stagnation":
+        return "hold:stagnation"
+    if rec["kind"] == "hold" and isinstance(data.get("reason"), str) and data["reason"]:
+        return "hold:%s" % data["reason"][:40]
+    return rec["kind"]
+
+
 def evolve_readiness(root, cfg=None, listing=False):
-    """Deterministic, advisory count per kind over unconsumed signals. `tier` (machine token):
-    sufficient — some kind has >= 3 signals from >= 2 topics AND at least one of them was not
-    seen by this machine's last evolve scan (a run that found nothing is not re-nudged until
-    new evidence comes); watching — signals exist but that is not met; none — no signals."""
+    """Deterministic, advisory count per theme (see signal_theme) over unconsumed signals.
+    `tier` (machine token): sufficient — some theme has >= 3 signals from >= 2 topics AND at
+    least one of them was not seen by this machine's last evolve scan (a run that found nothing
+    is not re-nudged until new evidence comes); watching — signals exist but that is not met;
+    none — no signals."""
     sigs, baseline, st = evolve_signals(root)
     seen = set(st["seen"])
-    kinds = {}
+    themes, kinds = {}, {}
     for r in sigs:
-        k = kinds.setdefault(r["kind"], {"count": 0, "topics": set(), "new": 0})
+        kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
+        if r["kind"] in CONTEXT_KINDS:
+            continue
+        k = themes.setdefault(signal_theme(r), {"count": 0, "topics": set(), "new": 0})
         k["count"] += 1
         if r.get("topic_id"):
             k["topics"].add(r["topic_id"])
         if not seen.intersection(r["ids"]):
             k["new"] += 1
-    ready = sorted(n for n, k in kinds.items() if k["count"] >= MIN_SIGNALS and len(k["topics"]) >= MIN_TOPICS)
-    fresh = [n for n in ready if kinds[n]["new"] > 0]
-    total = sum(k["count"] for k in kinds.values())
-    topics = set().union(*[k["topics"] for k in kinds.values()]) if kinds else set()
+    ready = sorted(n for n, k in themes.items() if k["count"] >= MIN_SIGNALS and len(k["topics"]) >= MIN_TOPICS)
+    fresh = [n for n in ready if themes[n]["new"] > 0]
+    total = sum(k["count"] for k in themes.values())
+    topics = set().union(*[k["topics"] for k in themes.values()]) if themes else set()
     out = {
         "tier": "sufficient" if fresh else ("watching" if total else "none"),
         "last_scan": st["last_scan"],
         "signals": total,
         "topics": len(topics),
-        "ready_kinds": ready,
-        "new_ready_kinds": fresh,
-        "kinds": {n: {"count": k["count"], "topics": len(k["topics"]), "new": k["new"]}
-                  for n, k in sorted(kinds.items())},
+        "ready_themes": ready,
+        "new_ready_themes": fresh,
+        "themes": {n: {"count": k["count"], "topics": len(k["topics"]), "new": k["new"]}
+                   for n, k in sorted(themes.items())},
+        "kinds": dict(sorted(kinds.items())),
         "threshold": {"signals": MIN_SIGNALS, "topics": MIN_TOPICS},
     }
     if listing:

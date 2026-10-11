@@ -85,7 +85,7 @@ class StageTests(Flow):
 
     def test_skipping_critique_after_loopback_is_blocked(self):
         tid, slug = self.run_flow()
-        self.hrd("loopback", "--topic", tid)
+        self.hrd("loopback", "--topic", tid, "--cause", "verify")
         self.write("src/content/blog/%s.md" % slug, "---\ntitle: a\ndescription: d\nslug: %s\ndate: x\n---\nrewritten body\n" % slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
         # verify passes on the new body but critique evaluated the old one
@@ -104,11 +104,11 @@ class StageTests(Flow):
     def test_loopback_cap_and_human_requests_not_counted(self):
         tid, _ = self.run_flow()
         for _ in range(3):
-            out, _ = self.hrd("loopback", "--topic", tid)
+            out, _ = self.hrd("loopback", "--topic", tid, "--cause", "verify")
         self.assertFalse(out["exhausted"])
         out, _ = self.hrd("loopback", "--topic", tid, "--human")
         self.assertEqual(out["loopbacks"], 3)
-        out, _ = self.hrd("loopback", "--topic", tid)
+        out, _ = self.hrd("loopback", "--topic", tid, "--cause", "verify")
         self.assertTrue(out["exhausted"])
 
 
@@ -305,7 +305,7 @@ class SelectionTests(IntegrityTests):
 class RegressionRound1(IntegrityTests):
     def test_stale_verdict_files_cannot_vouch_for_new_body(self):
         tid, slug = self.run_flow()
-        self.hrd("loopback", "--topic", tid)
+        self.hrd("loopback", "--topic", tid, "--cause", "verify")
         self.write("src/content/blog/%s.md" % slug, "---\ntitle: a\ndescription: d\nslug: %s\ndate: x\n---\nUNVERIFIED NEW CLAIM: 99%% of users\n" % slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
         _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "critique", check=False)
@@ -452,7 +452,7 @@ class EvolveReadinessTests(RepoCase):
         self.assertEqual((r["tier"], r["signals"], r["topics"]), ("watching", 3, 1))  # one topic only
         self.sig("revise-weakness", "t0002", {"w": "intro"})
         r = self.ready()
-        self.assertEqual((r["tier"], r["ready_kinds"]), ("sufficient", ["revise-weakness"]))
+        self.assertEqual((r["tier"], r["ready_themes"]), ("sufficient", ["revise-weakness"]))
 
     def test_unreviewed_zero_line_and_clean_review_not_counted(self):
         self.sig("human-edit", "t0001", {"lines_changed": 4}, reviewed=False)
@@ -513,8 +513,8 @@ class EvolveReadinessTests(RepoCase):
         self.sig("session-edit-request", "t0004", {"request": "r"})
         self.sig("session-edit-request", "t0004", {"request": "r", "diff_summary": "d", "lines_changed": 3})  # 0.2.0 pair
         r = store.evolve_readiness(self.root, self.cfg, listing=True)
-        self.assertEqual((r["kinds"]["human-edit"]["count"], r["kinds"]["review-finding"]["count"],
-                          r["kinds"]["session-edit-request"]["count"], r["baseline"]), (2, 1, 1, []))
+        self.assertEqual((r["themes"]["human-edit"]["count"], r["themes"]["review-finding"]["count"],
+                          r["themes"]["session-edit-request"]["count"], r["baseline"]), (2, 1, 1, []))
         self.sig("human-edit", "t0005", {"lines_changed": 0}, reviewed=True)
         base = store.evolve_readiness(self.root, self.cfg, listing=True)["baseline"][0]["id"]
         out, _ = self.hrd("evolve-mark", "--consume", base)
@@ -522,7 +522,7 @@ class EvolveReadinessTests(RepoCase):
         self.hrd("evolve-readiness", "--snapshot", "--token", "run-a")  # run A aborts after Phase 1
         self.sig("verify-gap", "t0001", {"c": 1})
         self.hrd("evolve-mark", "--scan", "--token", "run-b")  # run B completes without a snapshot of its own
-        self.assertEqual(self.ready()["kinds"]["verify-gap"]["new"], 0)  # B's current list, not A's stale one
+        self.assertEqual(self.ready()["themes"]["verify-gap"]["new"], 0)  # B's current list, not A's stale one
         self.write(".claude/herald/memory/evolve-scan.json", "{broken")
         self.hrd("evolve-mark", "--scan", "--token", "run-c")  # unreadable snapshot = none
         _, p = self.hrd("evolve-readiness", "--snapshot", check=False)
@@ -534,8 +534,10 @@ class EvolveReadinessTests(RepoCase):
         self.sig("session-edit-request", "t0002", {"request": "x", "diff_summary": "d", "lines_changed": 3})  # one record
         self.raw('{"at": "x", "kind": "hold", "topic_id": "t0003", "data": {"note": "\\ud800"}}')
         r = store.evolve_readiness(self.root, self.cfg, listing=True)
-        self.assertEqual((r["kinds"]["session-edit-request"]["count"], r["kinds"]["hold"]["count"]), (1, 1))
-        out, _ = self.hrd("signal", "--kind", "hold", "--topic", "t0004", "--data", "{}")
+        self.assertEqual((r["themes"]["session-edit-request"]["count"], r["themes"]["hold"]["count"]), (1, 1))
+        _, p = self.hrd("signal", "--kind", "hold", "--topic", "t0004", "--data", "{}", check=False)
+        self.assertIn("recorded by HRD itself", p.stderr)  # automatic kinds are not manual
+        out, _ = self.hrd("signal", "--kind", "review-finding", "--topic", "t0004", "--data", '{"major": 1}')
         with open(os.path.join(self.root, ".claude/herald/signals.jsonl")) as f:
             last = json.loads(f.read().splitlines()[-1])
         self.assertNotIn("id", last)
@@ -554,7 +556,7 @@ class EvolveReadinessTests(RepoCase):
         self.sig("verify-gap", "t0001", {"c": 1})  # arrives while the run waits
         self.hrd("evolve-mark", "--scan", "--token", "run-1")
         r = self.ready()
-        self.assertEqual((r["tier"], r["kinds"]["verify-gap"]["new"]), ("watching", 1))  # not marked seen
+        self.assertEqual((r["tier"], r["themes"]["verify-gap"]["new"]), ("watching", 1))  # not marked seen
         self.sig("review-finding", "t0001", {"blocker": "0", "major": "2", "findings": []}, at="2026-12-01T00:00:00+00:00")
         self.assertEqual(self.ready()["tier"], "watching")  # identical recurrence of a seen group: not new
         sid = store.evolve_readiness(self.root, self.cfg, listing=True)["list"][0]["id"]
@@ -587,7 +589,7 @@ class EvolveReadinessTests(RepoCase):
         r = self.ready()
         self.assertEqual((r["signals"], sorted(r["kinds"])), (3, ["revise-weakness"]))  # watching evidence kept
         self.sig("revise-weakness", "t0004", {"w": "new"}, at="2000-01-01T00:00:00+00:00")  # old clock: still new
-        self.assertEqual(self.ready()["new_ready_kinds"], ["revise-weakness"])
+        self.assertEqual(self.ready()["new_ready_themes"], ["revise-weakness"])
         out, _ = self.hrd("evolve-mark", "--consume", gap_ids[0], "bogus")
         self.assertEqual((out["already_consumed"], out["unknown"]), ([gap_ids[0]], ["bogus"]))
         _, p = self.hrd("evolve-mark", "--scan", env={"HRD_UNATTENDED": "1"}, check=False)
@@ -600,6 +602,205 @@ class EvolveReadinessTests(RepoCase):
         self.hrd("commit", "--cmd", "harness", "--kind", "evolve", "-m", "chore(herald): evolve #1 — x",
                  ".claude/herald/evolution-log.md")  # another machine's evolve, synced here
         self.assertEqual(self.ready()["tier"], "sufficient")
+
+
+class AutoSignalTests(Flow):
+    def kinds(self):
+        with open(os.path.join(self.root, ".claude/herald/signals.jsonl")) as f:
+            return [json.loads(l) for l in f if l.strip()]
+
+    def test_loopbacks_gate_dismissal_hold_and_decline_record_themselves(self):
+        tid, slug = self.run_flow()
+        _, p = self.hrd("loopback", "--topic", tid, check=False)
+        self.assertIn("--cause", p.stderr)
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "revise", check=False)
+        self.assertIn("--theme", p.stderr)
+        self.hrd("loopback", "--topic", tid, "--cause", "revise", "--theme", "intro", "--note", "weak hook")
+        gap = {"counts": {"supported": 2, "unsupported": 1, "contradicted": 0, "unmapped": 0}}
+        write_machine(self, tid, "verify.json", gap, slug)
+        self.hrd("loopback", "--topic", tid, "--cause", "verify", "--note", "s1")
+        self.hrd("loopback", "--topic", tid, "--human")
+        recs = self.kinds()
+        self.assertEqual([r["kind"] for r in recs], ["revise-weakness", "verify-gap", "escalation"])
+        self.assertEqual(recs[0]["data"]["theme"], "intro")
+        self.assertEqual(recs[1]["data"]["counts"], gap["counts"])
+        # gate failure inside stage pass
+        self.write("src/content/blog/%s.md" % slug, "no frontmatter at all")
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "draft", check=False)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertEqual(self.kinds()[-1]["kind"], "escalation")  # after a --human loopback: not the flow's
+        # dismissals from the decision log, once per entry however often critique passes
+        self.article(slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
+        crit = json.loads(json.dumps(CRIT_PASS))
+        crit["decision_log"] = [{"kind": "dismissal", "note": "MAJOR-1 policy"}, {"kind": "routine", "note": "x"}]
+        write_machine(self, tid, "critique.json", crit, slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "critique")
+        self.assertEqual(sum(r["kind"] == "dismissal" for r in self.kinds()), 1)
+        # holds and declines via HRD state (base)
+        sh(self.root, "git", "stash", "-u", "-q")
+        sh(self.root, "git", "switch", "-q", "main")
+        self.hrd("state", "--topic", tid, "--state", "held", "--reason", "needs-human")
+        self.hrd("state", "--topic", tid, "--state", "declined", "--reason", "off-topic")
+        self.assertEqual([r["kind"] for r in self.kinds()[-2:]], ["hold", "ship-decline"])
+
+    def test_revise_themes_split_the_count(self):
+        for i, t in enumerate(("t0001", "t0002", "t0003")):
+            store.signal(self.root, "revise-weakness", t, {"theme": ("intro", "tone", "search")[i]})
+        self.assertEqual(store.evolve_readiness(self.root, self.cfg)["tier"], "watching")
+        store.signal(self.root, "revise-weakness", "t0004", {"theme": "intro"})
+        store.signal(self.root, "revise-weakness", "t0005", {"theme": "intro"})
+        r = store.evolve_readiness(self.root, self.cfg)
+        self.assertEqual((r["tier"], r["ready_themes"]), ("sufficient", ["revise-weakness:intro"]))
+
+
+    def test_loopback_edges_amend_gate_and_dismissal_once(self):
+        tid, slug = self.run_flow()
+        self.write("src/content/blog/%s.md" % slug, "no frontmatter at all")
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", "--amend", check=False)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".claude/herald/signals.jsonl")))  # human's edit
+        self.article(slug)
+        out, _ = self.hrd("loopback", "--topic", tid, "--cause", "gate")
+        self.assertEqual((out["loopbacks"], out["escalate_tier"]), (1, False))
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".claude/herald/signals.jsonl")))
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "verify", "--theme", "intro", check=False)
+        self.assertIn("--theme applies only", p.stderr)
+        crit = json.loads(json.dumps(CRIT_PASS))
+        crit["decision_log"] = [{"kind": "dismissal", "note": "MAJOR-1 policy", "round": 1}]
+        write_machine(self, tid, "critique.json", crit, slug)
+        out, _ = self.hrd("loopback", "--topic", tid, "--cause", "audit", "--theme", "policy", "--note", "B-1")
+        self.assertTrue(out["escalate_tier"])
+        out, _ = self.hrd("loopback", "--topic", tid, "--human")
+        self.assertFalse(out["escalate_tier"])
+        self.hrd("loopback", "--topic", tid, "--cause", "verify")
+        out, _ = self.hrd("loopback", "--topic", tid, "--cause", "verify")
+        self.assertEqual((out["exhausted"], out["escalate_tier"]), (True, False))
+        kinds = [r["kind"] for r in self.kinds()]
+        self.assertEqual(kinds.count("escalation"), 2)  # loopbacks 2 and 3 only
+        dis = [r for r in self.kinds() if r["kind"] == "dismissal"]
+        self.assertEqual(len(dis), 1)
+        self.hrd("evolve-mark", "--consume", store.signal_id(dis[0]))
+        store.record_dismissals(self.root, tid, crit)  # a later critique pass re-derives it
+        self.assertEqual(sum(r["kind"] == "dismissal" for r in self.kinds()), 1)
+        _, p = self.hrd("state", "--topic", tid, "--state", "held", "--reason", "x", env={"HRD_UNATTENDED": "1"}, check=False)
+        self.assertIn("unattended", p.stderr)
+
+    def test_bad_verdict_files_never_break_a_counted_loopback(self):
+        tid, slug = self.run_flow()
+        self.write(".claude/herald/work/%s/verify.json" % tid, "{broken")
+        out, p = self.hrd("loopback", "--topic", tid, "--cause", "verify")
+        self.assertEqual(out["loopbacks"], 1)
+        self.write(".claude/herald/work/%s/critique.json" % tid, "[1]")
+        out, p = self.hrd("loopback", "--topic", tid, "--cause", "audit", "--theme", "tone")
+        self.assertEqual((out["loopbacks"], out["escalate_tier"]), (2, True))
+        self.assertEqual([r["kind"] for r in self.kinds()], ["verify-gap", "audit-finding", "escalation"])
+
+    def test_critique_pass_after_consume_and_human_caused_holds(self):
+        tid, slug = self.run_flow()
+        crit = json.loads(json.dumps(CRIT_PASS))
+        crit["decision_log"] = [{"kind": "dismissal", "note": "MAJOR-1 policy"}]
+        self.hrd("loopback", "--topic", tid, "--cause", "gate")
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
+        write_machine(self, tid, "critique.json", crit, slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "critique")
+        dis = [r for r in self.kinds() if r["kind"] == "dismissal"]
+        self.hrd("evolve-mark", "--consume", store.signal_id(dis[0]))
+        self.hrd("loopback", "--topic", tid, "--cause", "gate")
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
+        self.write(".claude/herald/work/%s/critique.md" % tid, "round 2")
+        write_machine(self, tid, "critique.json", crit, slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "critique")
+        self.assertEqual(sum(r["kind"] == "dismissal" for r in self.kinds()), 1)
+        sh(self.root, "git", "stash", "-u", "-q")
+        sh(self.root, "git", "switch", "-q", "main")
+        self.hrd("state", "--topic", tid, "--state", "held", "--reason", "verify-after-human-edit")
+        self.hrd("state", "--topic", tid, "--state", "held", "--reason", "stagnation")
+        self.assertEqual([r["data"].get("reason") for r in self.kinds() if r["kind"] == "hold"], ["stagnation"])
+        store.signal(self.root, "stagnation", "t0009", {})  # a 0.2.x record
+        self.assertIn("hold:stagnation", store.evolve_readiness(self.root, self.cfg)["themes"])
+
+    def test_version_stale_counts_gate_once_legacy_and_dismissal_by_note(self):
+        import subprocess, sys as _sys
+        from helpers import SCRIPTS
+        out = subprocess.run([_sys.executable, os.path.join(SCRIPTS, "hrd.py"), "version"], cwd=self.tmp,
+                             capture_output=True, text=True)
+        self.assertEqual(json.loads(out.stdout)["version"],
+                         json.load(open(os.path.join(SCRIPTS, "..", "..", "..", ".claude-plugin", "plugin.json")))["version"])
+        tid, slug = self.run_flow()
+        self.article(slug, extra="\nchanged")  # verify.json now describes an older body
+        self.hrd("loopback", "--topic", tid, "--cause", "verify")
+        self.assertNotIn("counts", self.kinds()[-1]["data"])
+        self.write("src/content/blog/%s.md" % slug, "no frontmatter at all")
+        for _ in range(2):
+            self.hrd("stage", "pass", "--topic", tid, "--stage", "draft", check=False)
+        self.assertEqual(sum(r["kind"] == "gate-failure" for r in self.kinds()), 1)  # retries of one draft
+        self.hrd("loopback", "--topic", tid, "--human")
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft", check=False)
+        self.assertEqual(sum(r["kind"] == "gate-failure" for r in self.kinds()), 1)  # human's revision
+        store.signal(self.root, "dismissal", tid, {"note": "MAJOR-1 policy", "by": "hand (0.2.x)"})
+        store.record_dismissals(self.root, tid, {"decision_log": [{"kind": "dismissal", "note": "MAJOR-1 policy", "round": 2}]})
+        self.assertEqual(sum(r["kind"] == "dismissal" for r in self.kinds()), 1)
+        store.signal(self.root, "hold", "t0007", {"reason": "stagnation"})
+        store.signal(self.root, "stagnation", "t0007", {"x": 1})
+        self.assertEqual(store.evolve_readiness(self.root, self.cfg)["themes"]["hold:stagnation"]["count"], 1)
+
+    def test_malformed_counts_new_attempt_gate_and_noteless_dismissal(self):
+        tid, slug = self.run_flow()
+        write_machine(self, tid, "verify.json", {"counts": {"unsupported": "two"}}, slug)
+        out, _ = self.hrd("loopback", "--topic", tid, "--cause", "verify")
+        self.assertEqual(out["loopbacks"], 1)
+        self.write("src/content/blog/%s.md" % slug, "no frontmatter at all")
+        self.hrd("loopback", "--topic", tid, "--cause", "gate")
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft", check=False)
+        st = store.load_state(self.root, tid)
+        st["created_at"], st["loopbacks"] = "2099-01-01T00:00:00+00:00", 2  # requeued: a new attempt
+        store.save_state(self.root, tid, st)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft", check=False)
+        self.assertEqual(sum(r["kind"] == "gate-failure" for r in self.kinds()), 2)
+        log = {"decision_log": [{"kind": "dismissal", "finding": "MAJOR-2"}]}
+        store.record_dismissals(self.root, tid, log)
+        store.record_dismissals(self.root, tid, log)
+        self.assertEqual(sum(r["kind"] == "dismissal" for r in self.kinds()), 1)
+
+    def test_version_relation_and_tooling_holds(self):
+        from hrdlib import batch
+        out, _ = self.hrd("version", "--against", "0.0.1")
+        self.assertEqual(out["relation"], "newer")
+        out, _ = self.hrd("version", "--against", "99.10.0")
+        self.assertEqual(out["relation"], "older")
+        self.assertEqual(self.hrd("version", "--against", out["version"])[0]["relation"], "equal")
+        self.assertEqual(self.hrd("version", "--against", "0.10.0")[0]["relation"], "older")  # not string order
+        short = ".".join(out["version"].split(".")[:2]) if out["version"].endswith(".0") else out["version"]
+        self.assertEqual(self.hrd("version", "--against", short)[0]["relation"], "equal")  # 0.3 == 0.3.0
+        _, p = self.hrd("version", "--against", "0.3.0-rc1", check=False)
+        self.assertIn("malformed version", p.stderr)
+        self.write(".claude/herald/scripts/hrd.py", 'x = 1\nSCRIPTS_VERSION = "9.9.9"\n')
+        self.assertEqual(batch.scripts_version(self.root), "9.9.9")
+        store.save_topics(self.root, {"version": 1, "topics": [{"id": "t0001", "title": "T", "state": "queued",
+                                                                 "history": [], "reverted_by": []}]})
+        self.hrd("state", "--topic", "t0001", "--state", "held", "--reason", "needs-human",
+                 "--note", "tooling: herald version mismatch")
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".claude/herald/signals.jsonl")))
+
+    def test_legacy_tooling_holds_and_human_choice_not_counted(self):
+        for t in ("t0001", "t0002", "t0003"):
+            store.signal(self.root, "hold", t, {"reason": "needs-human", "note": "batch child did not finish (exited:1)"})
+        self.assertEqual(store.evolve_readiness(self.root, self.cfg)["tier"], "none")
+        store.save_topics(self.root, {"version": 1, "topics": [{"id": "t0001", "title": "T", "state": "queued",
+                                                                 "history": [], "reverted_by": []}]})
+        self.hrd("state", "--topic", "t0001", "--state", "held", "--reason", "needs-human", "--note", "human: later")
+        self.assertEqual(store.evolve_readiness(self.root, self.cfg)["tier"], "none")
+
+    def test_escalations_not_counted_and_holds_split_by_reason(self):
+        for t in ("t0001", "t0002", "t0003"):
+            store.signal(self.root, "escalation", t, {"loopback": 2})
+            store.signal(self.root, "hold", t, {"reason": ("budget", "research", "budget")[int(t[-1]) - 1]})
+        r = store.evolve_readiness(self.root, self.cfg)
+        self.assertEqual((r["tier"], r["kinds"]["escalation"], sorted(r["themes"])),
+                         ("watching", 3, ["hold:budget", "hold:research"]))
+        store.signal(self.root, "hold", "t0004", {"reason": "budget"})
+        self.assertEqual(store.evolve_readiness(self.root, self.cfg)["ready_themes"], ["hold:budget"])
 
 
 if __name__ == "__main__":

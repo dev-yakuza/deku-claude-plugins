@@ -81,14 +81,15 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
 - haiku: mechanical work (none of the roles by default). sonnet: every role and the auditor.
   opus: a genuine retry's rewriting role (loopback 2+), evolve's adversarial panel.
 - Role default = `model:` in its file (repo-owned). The retry bump applies to that one
-  re-invocation; record `HRD signal --kind escalation` with the role and reason.
+  re-invocation; `HRD loopback` returns `escalate_tier` and records the `escalation` signal
+  itself (loopbacks 2 and 3; never for `--human`, never past the cap).
 - The editor-in-chief is the main session: the user's model when attended,
   `config.models.batch_main` in batch children. Never proposed for change.
 
 ## F. Loops and stagnation
 
-- critique and verify loopbacks share **3 per article** (`HRD loopback --topic <id>` returns
-  `exhausted`). Human-requested revisions and `ship` delta research use `--human` / are not
+- critique and verify loopbacks share **3 per article** (`HRD loopback --topic <id> --cause …`
+  returns `exhausted`). Human-requested revisions and `ship` delta research use `--human` / are not
   counted.
 - **Stagnation guard**: if a loopback's reason repeats the previous one (same weakness or the
   same unsupported sentence), do not loop again — hold `stagnation` (attended: stop and show
@@ -96,14 +97,28 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
 
 ## G. Signals
 
-Record with `HRD signal --kind <kind> --topic <id> --data '<json>'` at the moments the plan
-names: `revise-weakness` (each REVISE), `audit-finding`, `dismissal`, `verify-gap`,
-`gate-failure`, `hold`, `stagnation`, `escalation`, `session-edit-request` (write approval
-edits), `human-edit` and `ship-decline` (ship), `review-finding` (review). Signals are local
-(gitignored) and feed `evolve`. `HRD evolve-readiness` counts the unconsumed ones
-deterministically: identical records once; malformed records and unreviewed human edits
+**Recorded by `HRD` itself** where the event happens — never call `HRD signal` for these:
+- `gate-failure` — `stage pass` refuses on the gate.
+- `revise-weakness` / `audit-finding` / `verify-gap` — `HRD loopback --cause revise|audit|verify`.
+- `dismissal` — from `critique.json` `decision_log`, on `stage pass --stage critique` and on
+  `loopback --cause audit`.
+- `hold` — `HRD state --state held` (the batch runner records its own), except holds a human's
+  change caused (`verify-after-human-edit`, `reverted`) and holds whose note starts with
+  `tooling:` (environment) or `human:` (a human's choice): not writing problems.
+- `ship-decline` — `HRD state --state declined`.
+- `escalation` (loopbacks 2 and 3) and `incomplete` (a batch child that ended without a result;
+  the runner) — context: listed for evolve, never counted by the nudge.
+
+**Recorded with `HRD signal --kind <kind> --topic <id> --data '<json>'`** (they need a judgment
+or a diff only the session has): `session-edit-request` (write approval edits), `human-edit`
+(ship) and `review-finding` (review).
+
+Signals are local (gitignored) and feed `evolve`. `HRD evolve-readiness` counts the unconsumed
+ones deterministically: identical records once; malformed records and unreviewed human edits
 excluded; baseline records (reviewed edits of ≤ 2 lines, clean reviews) listed for exemplars,
-never counted; `tier` none | watching | sufficient — sufficient at ≥ 3 signals of one kind from
-≥ 2 topics including one no completed evolve scan has seen. The same count drives evolve's
-starting point, the `ship` report nudge and the `status` line. Only a decided evolve proposal
-consumes signals (`HRD evolve-mark --consume`).
+never counted; `tier` none | watching | sufficient — sufficient at ≥ 3 signals of one theme
+(the kind, split by `theme` for REVISE and auditor findings and by reason for holds) from
+≥ 2 topics, including one no completed evolve scan has seen. The same count drives evolve's
+starting point, the `ship`
+report nudge and the `status` line. Only a decided evolve proposal consumes signals
+(`HRD evolve-mark --consume`).

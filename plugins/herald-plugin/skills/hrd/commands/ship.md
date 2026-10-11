@@ -21,6 +21,15 @@ human fixed it on base) · `--deploy-only <id …>` (steps 1, 2, 7, 8, 9, 10; th
 merged outside Herald → external deploy targets) · `--auto` (batch ship child only: step 4 is
 skipped, merges limited to `HRD_AUTO_PRS`, steps 7–9 belong to the runner).
 
+A version mismatch found by the re-check after §6's `HRD sync` (after a merge; SKILL.md version
+gate): delete that PR's local herald branch as §6 says, commit the non-deploy records made so far
+(declines, `held:verify-after-human-edit`) as in §7.1 — `HRD commit --cmd ship --kind abort -m
+"chore(herald): ship stopped (version)" .claude/herald/topics.json` — so the tree is clean for
+`/hrd update`, then stop: merged PRs stay merged-unrecorded for the next `ship` (after the
+update). Release the lock and say which PRs merged. §9's push-retry sync needs no re-check: the
+records are already committed and pushing is plain git — push first, then run the check and
+report a mismatch.
+
 ## 1. Preflight
 
 1. `HRD lock acquire --cmd ship` (release on every exit path).
@@ -77,15 +86,16 @@ head), latest `/hrd review` finding for it if any (unresolved BLOCKER → warnin
 ## 4. Per-PR human approval (skipped by `--auto`)
 
 approve / skip this time (no state change) / decline (reason → `HRD state --topic <id> --state
-declined --reason <short-reason>`, `gh pr close <n>`, delete the remote branch, `HRD signal
---kind ship-decline`).
+declined --reason <short-reason>` (records `ship-decline`), `gh pr close <n>`, delete the
+remote branch).
 
 ## 5. Re-verify (before checking out the PR)
 
 1. With base scripts, before switching: scope must pass; if the PR head hash ≠ the ledger's
    `verified_hash` (a human pushed changes), re-verify:
 2. `git switch -C <branch> refs/remotes/origin/pr-<n>` (the local branch follows the human's
-   pushed head); run the gate (`HRD gate --topic <id>`) and verify (`atoms/_stages.md` § verify). If
+   pushed head; no version re-check: the PR head is re-verified with its own scripts and never
+   merged into); run the gate (`HRD gate --topic <id>`) and verify (`atoms/_stages.md` § verify). If
    unsupported sentences remain, **delta research**: the researcher sources only those
    sentences and appends `C#` to `research.md`; the fact-checker adds the mappings to
    `claims-map.json`; a PR comment `herald-source: <sentence> <URL>` from a human counts as a
@@ -136,6 +146,6 @@ Summarize what was published, declined, held and left merged-unrecorded. Then
 `config.language` (ko example: "성장 신호가 충분히 쌓였습니다(아직 evolve가 쓰지 않은 신호 N건 · 글감 M개) —
 `/hrd evolve --dry-run`으로 제안을 확인해 보세요."), N = `signals`, M = `topics`. Otherwise (or if the
 command fails) say nothing about evolve. The nudge is advisory: evolve's own scan decides whether a theme is strong
-enough (`sufficient` = one signal kind reached ≥ 3 signals from ≥ 2 topics with something new
-since the last evolve scan). Run it even if an earlier step stopped the run, as long as step 1
+enough (`sufficient` = one theme — a signal kind, split by `theme` for editor REVISE and auditor
+findings and by reason for holds — reached ≥ 3 signals from ≥ 2 topics with something new since the last evolve scan). Run it even if an earlier step stopped the run, as long as step 1
 passed.

@@ -50,7 +50,7 @@ Search Console(任意): `pip install google-auth requests`。
 `draft` · `critique` · `verify` · `publish` · `resume` · `batch` — **公開** `ship` · `review` ·
 `refresh` — **状態** `status`(`--requeue` `--drop` `--withdraw` `--unwithdraw` `--move`
 `--release-slug` `--mark-published` `--unlock`) — **成長・点検** `evolve` · `rollback` · `audit` ·
-`monitoring` · `ask` · `contribute`。詳しくは `/hrd help`。
+`monitoring` · `ask` · `contribute`(未対応)。詳しくは `/hrd help`。
 
 ## 安全
 
@@ -66,5 +66,5 @@ Search Console(任意): `pip install google-auth requests`。
 
 ## 状態
 
-`0.2.1` — 全フロー実装済み(実装の敵対的レビュー 10 ラウンド + evolve 通知のレビュー 5 ラウンドを反映)、決定的な層はテストで検証(`bash plugins/herald-plugin/tests/run_tests.sh`)。
+`0.3.0` — 全フロー実装済み(実装の敵対的レビュー 10 ラウンド + 以降の変更ごとのレビューを反映)。0.3.0 で成長シグナルをコードが自動記録するよう変更 — 既存リポジトリでは `/hrd update` が必要、決定的な層はテストで検証(`bash plugins/herald-plugin/tests/run_tests.sh`)。
 `evolve` の有用性と指標に基づく提案は、実利用が蓄積してから判定できます。

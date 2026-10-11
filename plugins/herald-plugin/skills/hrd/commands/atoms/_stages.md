@@ -49,8 +49,8 @@ references into the article itself; then the gate.
   `{"sentences": [{"text": "...", "claims": ["C3"]}]}` for every factual sentence the writer
   wrote.
 - **Gate**: `HRD stage pass --stage draft` runs it in code (`config.commands.validate` if set,
-  else the built-in `validate_content.py`) and refuses on errors → loop back to the writer with
-  the errors (counts as a loopback; record `gate-failure`).
+  else the built-in `validate_content.py`) and refuses on errors (it records `gate-failure`
+  itself) → `HRD loopback --topic <id> --cause gate`, back to the writer with the errors.
 
 ## critique — subject-expert / search-discovery (if enabled) → editor → external auditor
 
@@ -61,11 +61,16 @@ references into the article itself; then the gate.
    `<w>review-*.md` notes. The editor writes its round into `<w>critique.md`; the
    editor-in-chief appends auditor findings and dismissals and writes `<w>critique.json`. **Never** `research.md`. Verdict PASS / REVISE / REJECT with strengths,
    weaknesses, revision direction.
-   - REVISE → record `revise-weakness`, `HRD loopback`, back to draft (stagnation guard).
+   - REVISE → `HRD loopback --topic <id> --cause revise --theme <t> --note "<main weakness>"`
+     (records `revise-weakness`; `<t>` is the closest of: intro, structure, length, depth,
+     clarity, tone, search, promotion, policy, accuracy, images, exemplar, other), back to
+     draft (stagnation guard).
    - REJECT → hold `rejected`.
 3. **external auditor** — only after the editor's PASS; procedure in `atoms/_auditor.md`.
-   Undismissed `BLOCKER`/`MAJOR` → loopback to draft; after the fix, editor → auditor → verify
-   run again. `MINOR` → PR body only.
+   Undismissed `BLOCKER`/`MAJOR` → first write this round's `<w>critique.json` (step 4,
+   including any dismissals), then `HRD loopback --topic <id> --cause audit --theme <t> --note
+   "<finding>"` (records `audit-finding` and the logged dismissals), back to draft; after the fix, editor → auditor →
+   verify run again. `MINOR` → PR body only.
 4. Before spawning the editor, take `HRD hash --slug <slug>`. Write `<w>critique.md` (prose:
    verdicts, findings, dismissals with reasons) and `<w>critique.json` — `final_round.body_hash`
    is that hash (the article this round evaluated):
@@ -78,7 +83,8 @@ references into the article itself; then the gate.
                   {"kind": "dismissal", "note": "MAJOR-2: app mention count is policy"}]}
 ```
 
-   `final_round` describes only the round that evaluated the current article. `HRD stage pass
+   `final_round` describes only the round that evaluated the current article; `decision_log`
+   is append-only across rounds (keep earlier entries when rewriting the file). `HRD stage pass
    --stage critique` refuses unless verdict is PASS, undismissed BLOCKER+MAJOR is 0, and
    `body_hash` equals the current article hash (a verdict file left over from an earlier round
    cannot vouch for a changed body).
@@ -103,7 +109,9 @@ hashing joins the verify target set when M6 is enabled.)
   "counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n}}` —
   `unmapped` is a subset already counted in `unsupported`; `stage pass` refuses a stale
   `body_hash`.
-- Any unsupported/contradicted → record `verify-gap`, `HRD loopback`, back to draft.
+- Any unsupported/contradicted → `HRD loopback --topic <id> --cause verify --note "<first
+  unsupported sentence>"` (records `verify-gap` with the counts), back to draft. (In `ship`'s
+  re-verify of a human's push: delta research instead — no loopback; see `ship.md` §5.)
 - Pass: `HRD stage pass --stage verify` (sets `verified_hash`), then
   `python3 .claude/herald/scripts/integrity.py --record --topic <id>`.
 - Any later body change (loopback, translation, session edit) means verify runs again.
@@ -126,14 +134,32 @@ hashing joins the verify target set when M6 is enabled.)
 7. Unattended: `HRD result --topic <id> --status pr-open --pr <n>`.
 8. `git switch <base>`.
 
+## Existing branches (stage commands, resume)
+
+A herald branch carries the scripts from when it was forked. Right after `git switch
+herald/<topic-id>--<slug>` to a branch that already existed, run `HRD version --against <plugin
+version>` (SKILL.md version gate):
+- `equal` → continue.
+- `newer` → stop: update the installed plugin and restart (a merge cannot fix this).
+- `older` or failing, attended: the tracked tree must be clean (`git status --porcelain
+  --untracked-files=no` empty; leftovers → commit them as `wip(herald): <id>` first). Explain and,
+  on approval, `git fetch origin <base>` and `git merge --no-edit origin/<base>` (brings base's
+  scripts; the PR scope check compares from the merge base, so base's files do not count as the
+  PR's). Merge refused (no `MERGE_HEAD`) → stop and show git's message; conflict (`MERGE_HEAD`
+  exists) → `git merge --abort`, stop and explain. Then run the version check again: still not
+  `equal` (base's update has not reached origin yet) → stop. Declined → stop. Every stop
+  releases the lock.
+- unattended: `HRD result --topic <id> --status held:needs-human --note "tooling: herald version
+  mismatch on branch"`, exit 0 (the runner records tooling holds without a growth signal).
+
 ## Holds (any stage)
 
 - `cannibalization` / `research` / `rejected`: remove this topic's files **before switching**
   (they are untracked until publish — or, for a refresh, tracked and modified — and would
   follow you to base): restore tracked ones with `git checkout HEAD -- <tracked paths>`, then
   `git clean -fd -- <body path> <image dir> <w>` (only the paths that exist), then
-  `git switch <base>`, `git branch -D <branch>`, record `hold`. Attended: `HRD state --topic
-  <id> --state held --reason <r>` then `HRD commit --cmd hold --kind hold -m "chore(herald):
+  `git switch <base>`, `git branch -D <branch>`. Attended: `HRD state --topic
+  <id> --state held --reason <r>` (records the `hold` signal) then `HRD commit --cmd hold --kind hold -m "chore(herald):
   hold <id>" .claude/herald/topics.json` and `git push origin <base>`. Unattended: `HRD result`
   only.
 - `needs-human` / `stagnation` / `budget`: keep the branch — commit leftovers as

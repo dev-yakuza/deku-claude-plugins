@@ -1,12 +1,11 @@
-# CONTRIBUTE — send a flow improvement upstream (`/hrd contribute`)
+# CONTRIBUTE — not available yet (`/hrd contribute`)
 
-The only outbound path (INV5). Ported from Guild `contribute.md`.
+Sending flow improvements upstream is **not supported in this version**. The outbound path
+needs a deterministic secret scanner and a durable candidate list, and neither exists yet; a
+prompt-only "scan" would be a promise the code cannot keep (INV5).
 
-1. Candidates: evolve proposals marked "flow-level" in `evolution-log.md` (improvements to
-   Herald itself, not to this repo's guides).
-2. Sanitize: deterministic secret scan of the text; remove repo/owner names, slugs, URLs,
-   article text, topic ids and run numbers; keep only the general improvement.
-3. Dedup: search the plugin repository's issues (`gh issue list -R dev-yakuza/deku-claude-plugins
-   --search "<keywords>"`).
-4. Show the human the final text; send only on explicit approval
-   (`gh issue create -R dev-yakuza/deku-claude-plugins --label herald --body-file <tmp>`).
+When invoked: say in `config.language` that contribute is not available yet, and that
+flow-level ideas (improvements to Herald itself — e.g. the auditor's prompt or severity scale)
+can be opened by hand as an issue on the plugin repository
+(`dev-yakuza/deku-claude-plugins`, label `herald`) after the human removes repo names, slugs,
+URLs, article text and topic ids. Do not run `gh issue create` from this command; send nothing.

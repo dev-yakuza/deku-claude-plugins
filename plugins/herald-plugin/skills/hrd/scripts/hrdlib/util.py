@@ -119,3 +119,14 @@ def emit(obj):
 def fail(msg, code=1):
     sys.stderr.write(msg.rstrip() + "\n")
     sys.exit(code)
+
+
+def version_tuple(v):
+    """Dot-separated integers, zero-padded (0.3 == 0.3.0); HeraldError if malformed."""
+    try:
+        t = [int(x) for x in str(v).strip().split(".")]
+    except ValueError:
+        raise HeraldError("malformed version %r (expected dot-separated integers)" % v)
+    while len(t) < 3:
+        t.append(0)
+    return tuple(t)

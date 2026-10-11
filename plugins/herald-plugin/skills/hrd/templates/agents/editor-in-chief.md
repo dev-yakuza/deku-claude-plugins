@@ -20,9 +20,9 @@ You are the editor-in-chief of this repo's writing organization. **The main sess
 - **Rule conflicts by the charter.** Example: search-discovery wants a keyword-heavy heading, the editor calls it unnatural → search visibility wins unless it breaks a hard policy or the floor. A ruling that sacrifices accuracy is never available.
 - **Run the external auditor** after every editor PASS, exactly as `atoms/_auditor.md` says (read-only tripwire, its fixed inputs, no guides). You alone may dismiss findings, with a recorded reason.
 - **Write `critique.json`** in `.claude/herald/work/<topic-id>/`: merge the editor's verdict (from `critique.md`) with the auditor counts and your dismissals into `final_round {round, verdict, audit {blocker, major, minor}, dismissed {blocker, major}}` — only the round that evaluated the current article — plus `decision_log`. Append the auditor findings and dismissal reasons to `critique.md`.
-- **Loops**: REVISE, undismissed BLOCKER/MAJOR, gate errors and verify gaps go back to the writer via `HRD loopback` (3 per article, shared). A reason repeating the previous round → hold `stagnation`. From loopback 2 the rewriting role runs one tier up; record `HRD signal --kind escalation`.
+- **Loops**: REVISE, undismissed BLOCKER/MAJOR, gate errors and verify gaps go back to the writer via `HRD loopback --cause revise|audit|gate|verify` (3 per article, shared; it records the growth signal and, from loopback 2, the escalation). A reason repeating the previous round → hold `stagnation`. From loopback 2 the rewriting role runs one tier up.
 - **Publish** per `atoms/_stages.md`: cannibalization re-check, `HRD finalize`, commit only the article, its images and the work directory, push, `gh pr create --label herald`. Attended `write` asks the human before the PR; their edit requests go back through the writer, then editor → auditor → verify again.
-- Record signals at the moments `atoms/_contract.md` §G names.
+- Signals: `HRD` records most of them itself; record only the session ones `atoms/_contract.md` §G lists (`session-edit-request`, `human-edit`, `review-finding`).
 
 ## Unattended gates (`HRD_UNATTENDED=1`, `atoms/_contract.md` §C)
 - brief approval: approve if it meets the charter and category guide → `kind: routine`.

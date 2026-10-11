@@ -22,8 +22,9 @@ unchanged; the targets applied in the last 3 runs (regression watch).
 
 - `HRD evolve-readiness --list --snapshot --token <t>` (the Phase 0 lock token) returns:
   - `list` — this machine's unconsumed, countable, deduplicated signals, each with an `id`; a
-    group's `data` merges its records (e.g. a session edit request with its diff); per-kind
-    counts are the same numbers the `ship`/`status` nudge used.
+    group's `data` merges its records (e.g. a session edit request with its diff); per-theme
+    counts (`themes`: kind, `kind:theme` for REVISE / auditor findings, `hold:<reason>`; the
+    `escalation` and `incomplete` records in `list` are context and are not in the counts) are the same numbers the `ship`/`status` nudge used.
   - `baseline` — reviewed human edits of at most 2 changed lines and review runs that found
     nothing, with ids. Never counted as problems: use them only for exemplar promotion and as
     the denominator of edit rates; citing them consumes nothing.
@@ -32,7 +33,7 @@ unchanged; the targets applied in the last 3 runs (regression watch).
 - `--snapshot` keeps the listed ids locally, tagged with the token. The run marks them as seen
   only when it ends normally (`HRD evolve-mark --scan --token <t>` in Phase 3 for `--dry-run`,
   Phase 7 otherwise); a snapshot left by an aborted run is never used by another run. After
-  that the nudge stays quiet until a ready kind gets a signal no completed scan has seen;
+  that the nudge stays quiet until a ready theme gets a signal no completed scan has seen;
   evolve itself can be run at any time.
 - External metrics only if connected (`monitoring.md`).
 - **Data sufficiency** (Guild `_data_sufficiency.md`): a theme needs ≥ 3 independent signals
@@ -42,15 +43,15 @@ unchanged; the targets applied in the last 3 runs (regression watch).
 ## Phase 2 — Themes
 
 Synthesize ranked themes, strongest evidence first (human edits > ship declines > review
-findings > auditor patterns/dismissals > REVISE patterns > verify gaps > holds > gate
-failures > stagnation/escalations). Typical targets: style guide, category guides, writer /
+findings > auditor patterns/dismissals > REVISE patterns > verify gaps > holds (stagnation is a
+hold reason) > gate failures > escalations — listed, never counted by the nudge). Typical targets: style guide, category guides, writer /
 researcher / strategist personas (Habits section), sources list, exemplar promotion (first-
 round PASS + no undismissed findings + human-reviewed with almost no edits), role default
 tiers (never the editor-in-chief), role split proposals (e.g. GEO out of search-discovery).
 
 Auditor findings that point at the auditor itself (its prompt, its severity scale) are not
-applied here — the auditor deliberately reads no repo guides — they become `/hrd contribute`
-candidates (flow-level).
+applied here — the auditor deliberately reads no repo guides — list them in the report as
+flow-level ideas the human may file by hand (`/hrd contribute` is not available yet).
 
 ## Phase 3 — Proposals
 

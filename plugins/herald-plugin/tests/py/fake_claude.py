@@ -65,6 +65,15 @@ elif action == "branch-rejected-sloppy":
     git("branch", "-q", "-D", "herald/%s--post-%s" % (tid, tid))
     subprocess.run([sys.executable, os.path.join(scripts, "hrd.py"), "result", "--topic", tid,
                     "--status", "held:rejected", "--note", "fake"], check=True)
+elif action == "version-gate-branch":
+    # stopped at the re-check right after `HRD branch` (origin carried other scripts)
+    start_branch("post-" + tid)
+    subprocess.run([sys.executable, os.path.join(scripts, "hrd.py"), "result", "--topic", tid,
+                    "--status", "held:needs-human", "--note", "tooling: herald version mismatch on branch"], check=True)
+elif action == "version-gate":
+    # stopped at the SKILL.md version gate before doing anything
+    subprocess.run([sys.executable, os.path.join(scripts, "hrd.py"), "result", "--topic", tid,
+                    "--status", "held:needs-human", "--note", "tooling: herald version mismatch"], check=True)
 elif action.startswith("held:"):
     subprocess.run([sys.executable, os.path.join(scripts, "hrd.py"), "result", "--topic", tid,
                     "--status", action, "--note", "fake"], check=True)

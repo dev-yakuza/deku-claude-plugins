@@ -22,6 +22,25 @@ from hrdlib.hashing import tree_hash, worktree_hash  # noqa: E402
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
+SCRIPTS_VERSION = "0.3.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+
+
+def _vtuple(v):
+    """Malformed versions raise — callers must stop and report, not treat them as "older"."""
+    from hrdlib.util import version_tuple
+    return version_tuple(v)
+
+
+def cmd_version(a):
+    """`--against <plugin version>` compares as dot-separated integers (0.10.0 > 0.9.0):
+    `relation` is this repo's scripts relative to the plugin — older | equal | newer."""
+    out = {"version": SCRIPTS_VERSION}
+    if a.against:
+        mine, theirs = _vtuple(SCRIPTS_VERSION), _vtuple(a.against)
+        out["relation"] = "equal" if mine == theirs else ("older" if mine < theirs else "newer")
+    emit(out)
+
+
 def ctx():
     root = repo_root()
     return root, Config.load(root)
@@ -182,14 +201,45 @@ def cmd_stage(a):
 
 
 def cmd_loopback(a):
+    """Back to draft. A counted loopback names its cause and records the signal itself, so
+    growth evidence never depends on a separate call being remembered."""
     root, cfg = ctx()
+    if a.human == bool(a.cause):
+        raise HeraldError("give exactly one of --cause %s or --human" % "|".join(store.LOOPBACK_CAUSES))
+    if a.cause in ("revise", "audit") and a.theme not in store.THEMES:
+        raise HeraldError("--cause %s needs --theme, one of: %s" % (a.cause, ", ".join(store.THEMES)))
+    if a.theme and a.cause not in ("revise", "audit"):
+        raise HeraldError("--theme applies only to --cause revise|audit")
     st = store.load_state(root, a.topic)
     if not a.human:
         st["loopbacks"] = int(st.get("loopbacks", 0)) + 1
+    st["last_loopback"] = "human" if a.human else a.cause
     st["stage"] = "draft"
     store.save_state(root, a.topic, st)
     n = st["loopbacks"]
-    emit({"loopbacks": n, "cap": 3, "exhausted": n > 3, "escalate_tier": n >= 2})
+    # signals below are best-effort: the loopback is already counted and must not be retried
+    kind = store.LOOPBACK_CAUSES.get(a.cause)
+    if kind:  # gate failures are recorded by `stage pass` where they happen
+        data = {"note": (a.note or "")[:500], "loopback": n}
+        if a.theme:
+            data["theme"] = a.theme
+        if a.cause == "verify":  # counts only from a verify.json about this very article
+            ver = store.safe_machine(root, a.topic, "verify.json")
+            counts = ver.get("counts")
+            try:
+                current = st.get("slug") and ver.get("body_hash") == worktree_hash(root, cfg, st["slug"])
+                gap = isinstance(counts, dict) and not store.verify_passed(ver)
+            except Exception:  # noqa: BLE001 — malformed counts: leave them out
+                current = gap = False
+            if current and gap:
+                data["counts"] = counts
+        store.safe_signal(root, kind, a.topic, data)
+    if a.cause == "audit":
+        store.record_dismissals(root, a.topic, store.safe_machine(root, a.topic, "critique.json"))
+    escalate = not a.human and 2 <= n <= 3  # the retry tier bump (contract §E); none past the cap
+    if escalate:
+        store.safe_signal(root, "escalation", a.topic, {"loopback": n, "cause": a.cause})
+    emit({"loopbacks": n, "cap": 3, "exhausted": n > 3, "escalate_tier": escalate})
 
 
 def cmd_finalize(a):
@@ -324,6 +374,15 @@ def cmd_state(a):
     t = store.get_topic(data, a.topic)
     store.set_topic_state(t, a.state, a.reason, a.note)
     store.save_topics(root, data)
+    # holds and ship declines are growth signals; record them where the state changes
+    # (the batch runner records its own holds)
+    # (not for holds caused by a human's change — a failed re-verify after their push, a revert)
+    # (nor tooling stops or a human's own choice: note "tooling: …" / "human: …")
+    if a.state == "held" and a.reason not in ("verify-after-human-edit", "reverted") \
+            and not str(a.note or "").startswith(store.NON_SIGNAL_HOLD_NOTES):
+        store.safe_signal(root, "hold", t["id"], {"reason": a.reason, "note": a.note, "by": "session"})
+    elif a.state == "declined":
+        store.safe_signal(root, "ship-decline", t["id"], {"reason": a.reason, "note": a.note})
     emit({"id": t["id"], "state": t["state"], "reason": t["reason"]})
 
 
@@ -519,7 +578,15 @@ def cmd_gate(a):
         sys.exit(1)
 
 
+MANUAL_SIGNAL_KINDS = ("session-edit-request", "human-edit", "review-finding")
+
+
 def cmd_signal(a):
+    """Only the signals that need the session's judgment or diff; the rest are recorded by the
+    command where the event happens (contract §G), so a manual call would double-record."""
+    if a.kind not in MANUAL_SIGNAL_KINDS:
+        raise HeraldError("`%s` is recorded by HRD itself; `signal` takes only: %s"
+                          % (a.kind, ", ".join(MANUAL_SIGNAL_KINDS)))
     root = repo_root()
     data = json.loads(a.data) if a.data else {}
     emit(store.signal(root, a.kind, a.topic, data,
@@ -567,6 +634,7 @@ def build():
     p = sp.add_parser("select"); p.add_argument("--n", type=int, default=0); p.add_argument("--topic")
     p.set_defaults(fn=cmd_select)
     p = sp.add_parser("status"); p.set_defaults(fn=cmd_status)
+    p = sp.add_parser("version"); p.add_argument("--against"); p.set_defaults(fn=cmd_version)
     p = sp.add_parser("evolve-readiness"); p.add_argument("--list", action="store_true")
     p.add_argument("--snapshot", action="store_true"); p.add_argument("--token")
     p.set_defaults(fn=cmd_evolve_readiness)
@@ -583,6 +651,8 @@ def build():
     p.add_argument("--amend", action="store_true"); p.set_defaults(fn=cmd_stage)
     p = sp.add_parser("loopback"); p.add_argument("--topic", required=True)
     p.add_argument("--human", action="store_true", help="human-requested revision: not counted")
+    p.add_argument("--cause", choices=sorted(store.LOOPBACK_CAUSES)); p.add_argument("--theme")
+    p.add_argument("--note")
     p.set_defaults(fn=cmd_loopback)
     p = sp.add_parser("finalize"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_finalize)
     p = sp.add_parser("result"); p.add_argument("--topic", required=True); p.add_argument("--status", required=True)
