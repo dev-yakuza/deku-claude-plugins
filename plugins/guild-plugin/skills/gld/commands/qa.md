@@ -139,16 +139,17 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
 - **Every examined item gets exactly one verdict, stated before any question** — the same binary discipline as `review.md` Step 4 item 5 and `audit.md`'s `이슈 생성 필요` / `지금은 불필요`. Never hand the human a bare list and ask what to do with it:
   - **`후속 Issue 등록 필요`** — real deferred work with a concrete next action, and no existing Issue covers it.
   - **`등록 불필요 — <reason>`** — the reason is one of: an existing **open** Issue covers it (`#<n>이 이미 다룸`), a conditional deferral whose trigger has not fired, resolved later in this flow, or one of the AC's own non-goals. These are the "Do NOT count" cases above, now stated rather than silently dropped. Two more come from the previous record, and they **win over a fresh search**: an item it lists as `declined` → **`등록 불필요 — 이전에 거절됨`**; as `filed #<n>` → **`등록 불필요 — #<n>로 등록됨`**. Neither is counted in `<k>`, asked, rewritten as `unfiled`, or listed on the PR notice.
-  Hedging words ("검토 바람", "필요하면", "권장", "가능하면", "선택") are **banned in the verdict** — they hand the call back to the human, which is exactly what the verdict exists to prevent. The wording follows `config.language`; the binary holds in every language.
+  Hedging words ("검토 바람", "필요하면", "권장", "가능하면", "선택") are **banned in the verdict** — they hand the call back to the human, which is exactly what the verdict exists to prevent. The wording follows `config.language`; the binary holds in every language. The one exception is the attended prompt below, which shows a `후속 Issue 등록 필요` item as **`등록 권장 — <남는 결과>`**: by the rule above every such item is worth doing, and the human should see that opinion and its reason (the same display as `review.md` Step 5).
 - **`후속 Issue 등록 필요` items exist** → do not auto-create (issue creation is visible/durable — the human confirms, same posture as `init.md`'s harness-gap remediation). Instead:
   - **Attended**: one batched prompt, verdicts first (localized per `config.language`):
     ```
     설계 산출물이 남긴 후속 항목
-    ① <제목> — 근거: docs/specs/$1/<file> §<section> → 후속 Issue 등록 필요
-    ② <제목> — 근거: … → 후속 Issue 등록 필요
+    ① <제목> — 근거: docs/specs/$1/<file> §<section> → 등록 권장 — <남는 결과: 무엇이 어떻게 문제가 되는지>
+    ② <제목> — 근거: … → 등록 권장 — <남는 결과>
     등록 불필요 <n>건 — 기존 Issue #<a>·#<b> / 조건부 유예·해결됨·비목표 <m>건
-    위 등록 필요 <k>건을 지금 Issue로 등록할까요? (항목별로 뺄 수 있습니다)
+    권장 <k>건을 지금 Issue로 등록할까요? ("N 빼고"라고 하면 뺍니다)
     ```
+    The answer is read like `review.md` Step 5 ("Reading the answer"), except that numbers alone mean only those numbers: plain yes = all, "N만" or numbers alone = only N (qa has no not-recommended items to add), "N 빼고" = all but N, flat no = none; any answer other than a plain yes or a flat no → echo the final set and create only on confirm.
     The `등록 불필요` line is one line, never itemized, and printed only when `<n>` > 0. On confirmation, create each item via the temp-file `gh issue create --body-file` pattern (each its own Bash call) — title = the gap, body = 배경·AC(안)·근거(design doc file + section), `Depends on: #$1` — labeling with the repo's existing `type:*`/`area:*` labels where a clear match exists (check `gh label list --limit 200 --json name` first — `--label` errors on a missing label). ⚠ **Verify each create landed** (`_handoff.md` Section F): `gh issue create` prints the new Issue's URL; no URL means that Issue does **not** exist — record the item as `unfiled`, never as `filed`. Items the human leaves out are `declined`.
   - **Unattended** (`GLD_UNATTENDED=1`): never auto-create — every `후속 Issue 등록 필요` item is recorded as `unfiled` (below), and the question must still reach a human. `/gld review` Step 5 asks it, but review is optional and `batch` never runs it (`_handoff.md` Section H), so an Issue comment alone would reach nobody. **Also post a PR notice** — a comment on this Issue's open PR (found as in Step 2.5), bounded by `<!-- guild:followups:pr:$1 -->` … `<!-- /guild:followups:pr:$1 -->` (**the Issue number is part of the marker** — a PR can close more than one Issue, and each Issue's notice is settled only from that Issue's record), update-in-place (temp-file pattern; find an existing one with a `--paginate`d read of `issues/<PR_NUM>/comments`):
     ```
