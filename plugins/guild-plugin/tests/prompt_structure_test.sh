@@ -1792,7 +1792,9 @@ hasfx "_bash_rules.md: 무인 완화 폐기 사유가 기록돼 있다" "$GLD/co
 #   통과한다. 그 판정은 사이트마다 다르고 기계가 아니라 사람이 내려야 한다.
 # ⚠ 공집합도 부분집합이다 — 축소 문장이 통째로 지워지면(B 가 만들 수 있는 사고) 빈 집합이
 # 그린을 찍는다. 그래서 사이트 수 바닥선을 함께 둔다.
-cat > "$WORK3/enum.py" <<'PYE'
+# ⚠ Not `enum.py`: a script's own directory is first on sys.path, so that name shadowed the stdlib
+#   `enum` that `re` imports — Python 3.9 (macOS's python3) failed this and the tier check after it.
+cat > "$WORK3/enum_check.py" <<'PYE'
 import glob, os, re, sys
 gld = sys.argv[1]
 canon = None
@@ -1833,7 +1835,7 @@ if sites != 7:
                     % sites)
 print("OK %d" % sites if not problems else "PROBLEMS " + " | ".join(problems))
 PYE
-OUTE="$("$PY" "$WORK3/enum.py" "$GLD")"
+OUTE="$("$PY" "$WORK3/enum_check.py" "$GLD")"
 case "$OUTE" in
   OK*) ok "enum 축소 문장이 Section C 표의 부분집합이고 사이트가 남아 있다 (${OUTE#OK })" ;;
   *)   bad "enum 축소 문장이 Section C 표와 정합" "OK >=7" "$OUTE" ;;
@@ -2648,6 +2650,89 @@ lacksfx "review: 기록이 없다고 알림을 처리됨으로 바꾸지 않는�
 # 후속 Issue 6회차 적대적 리뷰 (MINOR 정리)
 hasfx "review: 기록을 읽거나 쓴 경우에만 알림 정리" "$FUMD" 'record was actually read or written in this run and now holds no `unfiled` line'
 hasfx "review: 구버전 헤딩은 의미로 인식" "$FUMD" 'recognise it by meaning, not by the literal string'
+
+# ── evolve 산출물 위생 (design/guild/10-ledger-hygiene.md) ─────────────────────────────────────
+# 원장을 통째로 Read 하던 곳이 하나라도 남으면 383KB 가 다시 매 실행에 실린다. 그래서 각 독자가
+# ledger.py 를 거친다는 것과, 이동이 게이트 뒤·커밋 앞이라는 순서를 고정한다.
+EVO="$GLD/commands/evolve.md"
+hasfx "evolve: Phase 0 은 원장을 ledger.py context 로만 읽는다" "$EVO" 'python3 <<SKILL_DIR>>/commands/atoms/ledger.py context'
+lacksfx "evolve: Phase 0 이 원장 전체를 Read 하지 않는다" "$EVO" 'Load the ledger** (skip-list / prior context) — Read `.claude/guild/evolution-log.md`'
+hasfx "evolve: <n> 은 next= 값이다" "$EVO" '`<n>` = **the `next=` value that call printed**'
+lacksfx "evolve: <n> 을 항목 수로 세지 않는다" "$EVO" 'the count of run entries already in the ledger, plus 1'
+hasfx "evolve: 거절 목록 한 줄은 색인일 뿐 — 일치하면 원문을 연다" "$EVO" 'A carried line is only an index'
+hasfx "evolve: 원장 항목 추가는 꼬리만 읽는다" "$EVO" 'reading only its tail (`offset` = Phase 0'"'"'s `lines=` value minus 30, at least 1)'
+hasfx "evolve: compact 는 게이트 뒤에 돈다" "$EVO" '**after** the gate, so a gate failure never has an archive to restore'
+hasfx "evolve: 0건 실행도 compact 한다" "$EVO" 'run the same `ledger.py compact` + `git add` as Phase 6 step 7'
+hasfx "evolve: compact 실패는 커밋을 막지 않는다" "$EVO" 'Non-zero exit → it put both files back; commit without it'
+hasfx "evolve: ③ 습관도 densify 한다" "$EVO" '**Densify (③ habits and ⑥ knowledge — growth = density):**'
+hasfx "evolve: 크기 기준은 harness_size.py 에서 온다" "$EVO" 'python3 <<SKILL_DIR>>/commands/atoms/harness_size.py'
+hasfx "evolve: 한 실행은 최대 3줄만 다룬다" "$EVO" 'Take **at most the first 3 lines** this run'
+hasfx "evolve: 병합은 조건·예외·근거를 모두 보존" "$EVO" 'keeps **every condition, exception and evidence ref**'
+hasfx "evolve: 습관 정리는 나이만으로 하지 않는다" "$EVO" 'never age alone'
+hasfx "evolve: degradation 렌즈가 병합 손실을 본다" "$EVO" 'does the new text drop a condition, exception or evidence ref of what it replaces?'
+hasfx "evolve: 새 습관은 400자 이내" "$EVO" 'Keep a new or rewritten habit within 400 characters.'
+hasfx "evolve: Bash 예외에 새 스크립트가 들어 있다" "$EVO" '`ledger.py`, `harness_size.py`'
+hasfx "rollback: 항목은 where 로 찾는다" "$GLD/commands/rollback.md" 'ledger.py where <n>'
+hasfx "rollback: evolve 실행은 원장 없이 되돌린다" "$GLD/commands/rollback.md" '**An evolve run is reverted without its ledger**'
+hasfx "rollback: 되돌림 표시는 자기 해시를 쓰지 않는다" "$GLD/commands/rollback.md" '[reverted <date> — by the commit that carries this note]'
+hasfx "data_sufficiency: 실행 수는 ledger.py status" "$GLD/commands/atoms/_data_sufficiency.md" 'the `runs=` value of `python3 <<SKILL_DIR>>/commands/atoms/ledger.py status`'
+lacksfx "data_sufficiency: 헤더를 세지 않는다" "$GLD/commands/atoms/_data_sufficiency.md" 'count the run headers'
+hasfx "review: 실행 수는 ledger.py status" "$GLD/commands/review.md" 'commands/atoms/ledger.py status'
+hasfx "audit: E 는 ledger.py context" "$GLD/commands/audit.md" 'commands/atoms/ledger.py context'
+hasfx "audit: C 는 harness_size.py" "$GLD/commands/audit.md" 'commands/atoms/harness_size.py'
+lacksfx "audit: 한 화면 기준이 남지 않았다" "$GLD/commands/audit.md" 'a screenful, not sprawling'
+hasfx "monitoring: 실행 수는 ledger.py status" "$GLD/commands/monitoring.md" 'never Read `evolution-log.md`'
+hasfx "onboard: 점수표는 overseer 줄만" "$GLD/commands/onboard.md" 'ledger.py tagged overseer'
+hasfx "preflight: Item 7 은 overseer 줄만" "$GLD/commands/atoms/_preflight.md" 'ledger.py tagged overseer'
+hasfx "preflight: Item 7 은 무인 실행이면 호출하지 않는다" "$GLD/commands/atoms/_preflight.md" '**Attended only — unattended, skip without a call.**'
+hasfx "review: 페이딩은 overseer 줄만" "$GLD/commands/review.md" 'ledger.py tagged overseer'
+hasfx "retro: 원장 인용은 ledger.py" "$GLD/commands/sprint/retro.md" 'ledger.py status`, or `where <n>` and a ranged Read'
+hasfx "evolve: model-tier 행은 태그 한 줄" "$EVO" 'Write the row as one line starting `model-tier:`, status first'
+hasfx "evolve: model-tier 항목은 태그 한 줄" "$EVO" 'write the item as one line starting `model-tier-item: <role> raise`'
+hasfx "evolve: overseer 줄은 태그" "$EVO" 'each starting `overseer:`'
+hasfx "evolve: 게이트 실패 롤백은 HEAD 에서" "$EVO" '`git checkout HEAD -- <path>` when it existed before this run, `git rm -f <path>` when it is new'
+hasfx "rollback: PR 경로도 evolve 실행을 알아본다" "$GLD/commands/rollback.md" 'leaving out any that end `— 0 changes applied` (nothing to undo)'
+hasfx "rollback: evolve 커밋 제목은 앞부분 고정으로만 인식" "$GLD/commands/rollback.md" "If the subject **starts** \`chore(guild): evolve #<n> —\`"
+hasfx "rollback: PR 은 evolve 커밋만, 자기 oid 로 되돌린다" "$GLD/commands/rollback.md" 'Revert the run'"'"'s commit by its own `oid` from `commits`'
+hasfx "rollback: PR 커밋을 먼저 fetch" "$GLD/commands/rollback.md" '`git fetch origin pull/<p>/head <baseRefName>`'
+hasfx "rollback: 실행이 여럿이면 사람에게 묻는다" "$GLD/commands/rollback.md" 'several → ask the human which, and undo each chosen run newest first with its own note'
+hasfx "rollback: evolve 실행이 없는 merge PR 은 -m 1" "$GLD/commands/rollback.md" 'a merge commit (`git rev-list --parents -n 1 <mergeCommit.oid>` prints three hashes) is reverted with `-m 1`'
+hasfx "rollback: 커밋 제목의 변경 수는 <k>" "$GLD/commands/rollback.md" 'chore(guild): evolve #<n> — <k> changes applied'
+lacksfx "rollback: 여러 커밋 PR 에서 SHA 를 되묻지 않는다" "$GLD/commands/rollback.md" 'ask the human for the SHA of the commit that carries the run'
+hasfx "rollback: merge·squash SHA 는 PR 경로로" "$GLD/commands/rollback.md" 'or a subject ending `(#<p>)` — may carry an evolve run inside it'
+hasfx "evolve: 커밋 제목의 변경 수는 <k>" "$EVO" 'chore(guild): evolve #<n> — <k> changes applied'
+hasfx "rollback: PR 번호와 실행 번호를 다른 자리표시자로" "$GLD/commands/rollback.md" '(any number — not `<p>`)'
+hasfx "rollback: evolve 없는 rebase PR 은 커밋별로" "$GLD/commands/rollback.md" 'revert the PR'"'"'s commits by their `oid`s from `commits`, newest first, which is right for both'
+hasfx "rollback: 충돌 주석을 커밋 메시지에서 뺀다" "$GLD/commands/rollback.md" '`git commit --no-edit --cleanup=strip`'
+hasfx "rollback: 0건 실행만 있는 PR 은 멈춘다" "$GLD/commands/rollback.md" 'if the PR'"'"'s commits were all `— 0 changes applied` runs, there is nothing to undo: say so and stop'
+hasfx "rollback: baseRefName 을 읽는다" "$GLD/commands/rollback.md" 'headRefName,baseRefName,mergeCommit'
+hasfx "rollback: 머지 방식과 무관하게 동작" "$GLD/commands/rollback.md" 'that works however the PR was merged (merge, squash or rebase'
+hasfx "evolve: 꼬리 읽기 offset 은 최소 1" "$EVO" 'minus 30, at least 1)'
+hasfx "evolve: 0건 실행도 꼬리만 읽어 덧붙인다" "$EVO" 'write the entry here (appended after a tail Read, as in Phase 6 step 7)'
+hasfx "audit: 배너는 status 한 줄" "$GLD/commands/audit.md" '`runs=` from `python3 <<SKILL_DIR>>/commands/atoms/ledger.py status`, one line'
+hasfx "audit: E 가 범위일 때만 context" "$GLD/commands/audit.md" 'made only when this dimension is in scope'
+hasfx "evolve: 실행 제목 형식이 고정돼 있다" "$EVO" 'exactly `## Run — evolve #<n> (<YYYY-MM-DD>)`'
+hasfx "evolve: 항목을 쓴 뒤 where 로 읽히는지 확인" "$EVO" 'Then confirm the entry is readable as run `<n>`'
+hasfx "evolve: warning 줄은 사람 말로 알린다" "$EVO" 'A `warning:` line → tell the human in one plain sentence'
+hasfx "evolve: 게이트 거부는 Phase 7 커밋도 없다" "$EVO" '**do not commit — and write no Phase 7 entry either**'
+hasfx "rollback: 3단계 revert 충돌은 예상된 것" "$GLD/commands/rollback.md" '(a non-zero exit from a conflict is expected here — go on)'
+hasfx "rollback: 같은 번호 두 항목은 applied-onto 로 고른다" "$GLD/commands/rollback.md" 'the entry is the one whose `applied-onto:` equals the evolve commit'"'"'s parent'
+hasfx "monitoring: 추세는 runs 2 이상일 때만" "$GLD/commands/monitoring.md" 'made only when `status` printed `runs=` of 2 or more'
+hasfx "evolve: where 는 exit 0 만 통과" "$EVO" 'Only exit 0 passes. Exit 2 (found, but under a heading that is not a run heading)'
+hasfx "evolve: 거절 항목 첫 줄에 주제" "$EVO" 'its first line `- [rejected] <theme> — <reason>`'
+hasfx "evolve: 적용 항목 첫 줄에 주제" "$EVO" 'its first line `- [applied] <theme> — <target>`'
+lacksfx "evolve: 커밋 거부 시 원장 항목을 지우는 분기가 없다" "$EVO" 'take the move back out'
+hasfx "evolve: compact 가 못 되돌린 파일은 stderr 지시를 따른다" "$EVO" 'If its stderr line names a file it could not put back'
+hasfx "rollback: 0건 실행은 1단계에서 멈춘다" "$GLD/commands/rollback.md" 'there is nothing to undo, so say so and stop here, before step 2'
+hasfx "rollback: 훅이 거부하면 이유를 알리고 중단" "$GLD/commands/rollback.md" 'report the hook'"'"'s reason and `git revert --abort`'
+hasfx "rollback: PR 커밋의 부모는 rev-parse" "$GLD/commands/rollback.md" '`git rev-parse <oid>^`, since `commits` lists no parents'
+hasfx "rollback: where exit 2 도 범위를 쓴다" "$GLD/commands/rollback.md" '(exit 2: found under a heading not in the run shape — use that range all the same)'
+hasfx "rollback: 되돌림 표시는 줄 맨 앞" "$GLD/commands/rollback.md" 'marking it with a line of its own, `[reverted <date>'
+hasfx "bash_rules: 새 스크립트가 예외 목록에 있다" "$GLD/commands/atoms/_bash_rules.md" '`ledger.py` (evolve ledger read/compact'
+lacksfx "preflight: Item 8 이 원장을 열지 않는다" "$GLD/commands/atoms/_preflight.md" 'newer than the last evolve run recorded in `evolution-log.md`'
+hasfx "ask: 보관 파일도 범위만 읽는다" "$GLD/commands/ask.md" 'evolution-log.archive.md'
+hasfx "update: 보관 파일도 보존한다" "$GLD/commands/update.md" '`.claude/guild/evolution-log.md` + `.claude/guild/evolution-log.archive.md` (⑤)'
+hasfx "knowledge: index 기준은 harness_size.py" "$GLD/commands/atoms/_knowledge.md" 'If it outgrows its size bar (`harness_size.py` prints an `index:` line'
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -2655,7 +2740,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=734   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=812   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

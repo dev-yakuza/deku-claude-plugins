@@ -29,7 +29,7 @@ Count = **distinct anchored themes**, deduped by evidence identity (`_signals.md
 | **`sufficient`** | ≥5 | enough to rank above noise |
 
 ### Axis 2 — 추세 깊이 (trend depth): *can we tell whether evolution helps (thrashing guard)?*
-Source: **prior completed evolve runs** in `.claude/guild/evolution-log.md` (count the run headers). A trend needs **≥2 data points = this run + ≥1 prior run** (evolve writes its own ledger entry only in Phase 7, *after* the Phase 1.5 gate, so at gate time the ledger holds only the prior runs).
+Source: **prior completed evolve runs** — the `runs=` value of `python3 <<SKILL_DIR>>/commands/atoms/ledger.py status` (one Bash call; it counts the ledger and its archive — never Read the ledger to count headers). evolve already printed `ledger.py context` at Phase 0 and reads `runs=` from that line instead of calling again. A trend needs **≥2 data points = this run + ≥1 prior run** (evolve writes its own ledger entry only in Phase 7, *after* the Phase 1.5 gate, so at gate time the ledger holds only the prior runs).
 
 | Tier (machine token) | Prior runs (in ledger at gate time) | Meaning |
 |---|---|---|
@@ -48,7 +48,7 @@ Source: **prior completed evolve runs** in `.claude/guild/evolution-log.md` (cou
 - **audit** — cheap proxy: `ground-truth.jsonl` line count + ledger runs at Phase 0; **refined only once dimension F actually runs** (a full audit, or `$1=codebase`) by folding in the reverts it surfaces. ⚠ **Not** CI-gaps — neither dimension E (evolution-log/ground-truth friction) nor F (`scan_git` — hotspots/co-change/churn) reads CI data; CI signal is `scan_failures`'s job, which `audit.md` never invokes. A scoped run to `harness`/`team`/`knowledge`/`standards`/`evolution` never reaches F, so its proxy stays at the Phase-0 value the whole run. Label it a proxy.
 - **review** — cheapest: `ground-truth.jsonl` **deduped** by area/evidence (collapse repeat lines of one theme — same rule as evolve's Axis 1, since it already reads the lines) + ledger runs. ⚠ A **raw** line count would *over*-count vs evolve's deduped Axis 1 (recurring same-area corrections = many lines, one theme), so the nudge could fire when evolve would still refuse — dedup avoids that. Even so the review nudge is **advisory, not a proceed-guarantee**: evolve's own Phase 1.5 gate is the authority (it re-counts, incl. durable signals, and blocks apply on thin data). review may still under-count durable git/CI signals — that only makes it nudge *less*, which is safe.
 
-**Budget**: one line-count read of the jsonl + one ledger read. **Never spawn new scans just to compute the banner** — reuse what the caller already has, or the cheap log+ledger proxy.
+**Budget**: one line-count read of the jsonl + one `ledger.py status` call. **Never spawn new scans just to compute the banner** — reuse what the caller already has, or the cheap log+ledger proxy.
 
 Count the captured log cheaply (its own Bash call; absent file → 0):
 ```bash

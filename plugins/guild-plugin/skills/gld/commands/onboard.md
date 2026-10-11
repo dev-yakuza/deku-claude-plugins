@@ -21,7 +21,7 @@ Gather what the tour teaches from (best-effort — degrade gracefully on any mis
 2. **Standards** — `docs/standards/charter.md` (why the system exists), `architecture.md` (shape), `conventions.md`, `quality-bar.md`. Honor `confirmed` as authoritative; note `draft` as provisional.
 3. **Hotspots / traps** — the "주의(핫스팟·함정)" section of `.claude/agents/tech-lead.md` (the risky/subtle areas the Guild has learned).
 4. **Structure** — top-level layout (`ls`), and for a focused `$1`, `ls <area>` + the entry-point file(s).
-5. **③ competence signal (F)** — if the evolve **overseer scorecard** exists (`.claude/guild/evolution-log.md` / ledger), note the human's per-area competence trend so the tour can pitch its depth (Step 2). Absent (the common early case) → default to moderate depth.
+5. **③ competence signal (F)** — if the evolve **overseer scorecard** exists (`python3 <<SKILL_DIR>>/commands/atoms/ledger.py tagged overseer` — the newest run's `overseer:` lines; never Read the ledger), note the human's per-area competence trend so the tour can pitch its depth (Step 2). Absent (the common early case) → default to moderate depth.
 
 ## Step 1 — Build the tour map, present it, and pause
 From the material, group the system into an ordered set of **stops** — pitched at the focus (`$1`) or the whole system:

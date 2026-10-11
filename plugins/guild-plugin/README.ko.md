@@ -108,7 +108,8 @@ CLAUDE.md                      # 권고: 레포 지도 + 검증 명령 + 지식 
   memory/                      # ④ 일화적 작업 계층 (gitignore → 클론마다 로컬, 저신뢰): ground-truth.jsonl(포착된 신호, 프리플라이트 Item 8 이 런타임에 읽음) + consolidated.jsonl(evolve 가 ③/⑥ 으로 키운 항목의 보관소) + gate-firings.jsonl(evolve 규칙 스코어카드에 들어가는 게이트 발화 로그) + review-nudge-state.json(review 의 evolve 유도 쿨다운. 마지막 유도 시점의 저장소 전역 {count, runs} 하나만 둔다 — 충분 상태가 매 review 마다 유도하지 않도록 일부러 PR 별 키를 쓰지 않는다. 이슈 하나에 PR 하나가 통상 흐름이라 PR 별 키로는 거의 모든 review 가 "처음"이 되어 결국 유도했다. 대신 가까운 시점에 검토된 두 PR 사이의 드문 경합을 받아들인다. 스스로 복구된다)
   gates/                       # 강제층: scripts/gate_precommit.py — 커밋 게이트. 세 경로로 실행된다(.git/hooks/pre-commit = 정본 · PreToolUse(Bash) = 조기 경고 · PreToolUse(Edit|Write) --guard-config = 게이트 자신의 오프 스위치·규칙 편집 전에 확인을 요구). + rules/secrets.md, rules/verification.md(게이트가 무엇을 강제하는지에 대한 사람이 읽는 선언 — 검사 자체는 하드코딩이다. 보편적이고 환각되지 않아야 하므로) + rules/boundaries.md(유일한 데이터 주도 규칙 파일: `- forbid:` 줄들. 프런트매터 status: draft → 사람이 확인하기 전까지 WARN 전용 — INV6) + dismissed.md(수용된 위험 등록부) + findings.json(미해결 위반)
   overlay/                     # 흐름 정책 오버라이드 면 (기본은 비어 있음. /gld contribute 가 여기의 diff 를 업스트림한다)
-  evolution-log.md             # 진화 원장 — evolve 가 나중에 사용
+  evolution-log.md             # 진화 원장 — evolve 가 최근 실행을 여기 둔다
+  evolution-log.archive.md     # 오래된 실행 — evolve 가 옮긴다 (ledger.py 로 읽고 통째로 읽지 않음)
 docs/standards/                # charter, architecture, conventions, quality-bar, verification (init 이 초안. status: draft|confirmed)
 docs/adr/ , docs/specs/
 ```

@@ -425,7 +425,7 @@ Record which of these happened — the return line distinguishes them.
   Phase 6), so a second pass over the same signals can double-apply. If a retro is being re-run
   (Phase 6 step 2 finds this sprint's retro comment already posted, or `history` already has this
   sprint), **skip Phase 5** and say that growth already ran for this sprint. `evolve`'s own
-  ledger records its runs — cite it rather than guessing.
+  ledger records its runs — cite it (`python3 <<SKILL_DIR>>/commands/atoms/ledger.py status`, or `where <n>` and a ranged Read — never the whole file) rather than guessing.
 
 ## Phase 6 — Carryover, record, close
 

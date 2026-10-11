@@ -15,7 +15,7 @@
 **1. Retrieve (deterministic, relevant-only — `_knowledge.md` Section C — never whole-load)**
 - **② Curated authority**: read the `docs/standards/` file(s) whose topic matches the question (charter / architecture / conventions / quality-bar / verification) + `CLAUDE.md`.
 - **⑥ Knowledge**: read `.claude/guild/knowledge/index.md`, match the question's topic / file paths / symbols against the index keys, and read only the matched `facts/<area>.md` slice(s).
-- **⑤ History / ④ working memory (only if the question is about the team/process)**: `evolution-log.md` (⑤ — curated, committed evolution ledger) or `ground-truth.jsonl` (④ — raw, gitignored, per-clone episodic tier; low-trust, `_signals.md`/`_preflight.md` Item 8 — never cite it with the same confidence as ⑤'s curated ledger).
+- **⑤ History / ④ working memory (only if the question is about the team/process)**: `evolution-log.md` (⑤ — curated, committed evolution ledger; older runs are in `evolution-log.archive.md` — grep either for the topic and Read only the matching range, never a whole file) or `ground-truth.jsonl` (④ — raw, gitignored, per-clone episodic tier; low-trust, `_signals.md`/`_preflight.md` Item 8 — never cite it with the same confidence as ⑤'s curated ledger).
 - **Code (only if needed to confirm a fact)**: a bounded Grep/Read to verify a ⑥ fact against current code.
 
 **2. Answer**

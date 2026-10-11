@@ -109,7 +109,8 @@ CLAUDE.md                      # 助言: リポジトリマップ + 検証コマ
   memory/                      # ④ エピソード的な作業層（gitignore → クローンごとにローカル、低信頼）: ground-truth.jsonl（捕捉したシグナル。プリフライト Item 8 が実行時に読む）+ consolidated.jsonl（evolve が ③/⑥ に育てた項目の保管庫）+ gate-firings.jsonl（evolve のルール・スコアカードに入るゲート発火ログ）+ review-nudge-state.json（review の evolve 促しクールダウン。最後に促した時点のリポジトリ全体の {count, runs} 一つだけを持つ — 充分な状態が毎回の review で促さないよう、あえて PR 単位のキーにしていない。1 Issue に 1 PR が通常の流れなので、PR 単位キーではほぼ全ての review が「初回」になり結局促してしまった。代わりに、近い時点でレビューされた 2 つの PR 間の稀な競合を受け入れる。自己回復する）
   gates/                       # 強制層: scripts/gate_precommit.py — コミットゲート。3 経路で実行される（.git/hooks/pre-commit = 正本 · PreToolUse(Bash) = 早期警告 · PreToolUse(Edit|Write) --guard-config = ゲート自身のオフスイッチ・ルール編集の前に確認を求める）。+ rules/secrets.md, rules/verification.md（ゲートが何を強制するかの人間可読な宣言 — 検査自体はハードコードである。普遍的で、幻覚されてはならないため）+ rules/boundaries.md（唯一のデータ駆動ルールファイル: `- forbid:` 行。フロントマター status: draft → 人間が確認するまで WARN のみ — INV6）+ dismissed.md（受容したリスクの登録簿）+ findings.json（未解決の違反）
   overlay/                     # フローポリシーの上書き面（既定では空。/gld contribute がここの diff を上流に送る）
-  evolution-log.md             # 進化台帳 — evolve が後で使う
+  evolution-log.md             # 進化台帳 — evolve が直近の実行をここに置く
+  evolution-log.archive.md     # 古い実行 — evolve が移す（ledger.py で読み、丸ごとは読まない）
 docs/standards/                # charter, architecture, conventions, quality-bar, verification（init が起草。status: draft|confirmed）
 docs/adr/ , docs/specs/
 ```
