@@ -100,4 +100,10 @@ Record with `HRD signal --kind <kind> --topic <id> --data '<json>'` at the momen
 names: `revise-weakness` (each REVISE), `audit-finding`, `dismissal`, `verify-gap`,
 `gate-failure`, `hold`, `stagnation`, `escalation`, `session-edit-request` (write approval
 edits), `human-edit` and `ship-decline` (ship), `review-finding` (review). Signals are local
-(gitignored) and feed `evolve`.
+(gitignored) and feed `evolve`. `HRD evolve-readiness` counts the unconsumed ones
+deterministically: identical records once; malformed records and unreviewed human edits
+excluded; baseline records (reviewed edits of ≤ 2 lines, clean reviews) listed for exemplars,
+never counted; `tier` none | watching | sufficient — sufficient at ≥ 3 signals of one kind from
+≥ 2 topics including one no completed evolve scan has seen. The same count drives evolve's
+starting point, the `ship` report nudge and the `status` line. Only a decided evolve proposal
+consumes signals (`HRD evolve-mark --consume`).

@@ -1,6 +1,6 @@
 # SHIP — publish approved articles (`/hrd ship [topic-id|slug|PR …]`, `--reverify <id>`, `--deploy-only <id …>`, `--auto`)
 
-The only place Herald publishes. Plan §3.2.2 (steps 1–9). Accuracy floor: `atoms/_invariants.md`.
+The only place Herald publishes. Plan §3.2.2 (steps 1–9; step 10 is the attended report). Accuracy floor: `atoms/_invariants.md`.
 `<base>` = `config.base_branch`. Every `HRD …` is its own Bash call.
 
 `--auto` (batch ship child, `HRD_UNATTENDED=1`) differs: step 1 does not sync (base must
@@ -16,8 +16,8 @@ and re-checks the merges against GitHub).
 created): all steps for that one PR, step 4 skipped; refuse if the PR was not created in this
 session, if `HRD auto-exclusion` lists a reason, or if today's throttle is used up.
 
-Variants: default (all steps) · `--reverify <id>` (steps 1, 2, 7, 8, 9 for one article after a
-human fixed it on base) · `--deploy-only <id …>` (steps 1, 2, 7, 8, 9; the ids are articles
+Variants: default (all steps) · `--reverify <id>` (steps 1, 2, 7, 8, 9, 10 for one article after a
+human fixed it on base) · `--deploy-only <id …>` (steps 1, 2, 7, 8, 9, 10; the ids are articles
 merged outside Herald → external deploy targets) · `--auto` (batch ship child only: step 4 is
 skipped, merges limited to `HRD_AUTO_PRS`, steps 7–9 belong to the runner).
 
@@ -128,3 +128,14 @@ with retries for up to ~10 minutes. Failures stay merged-unrecorded for the next
   .claude/herald/published.json <deploy_artifacts>` (artifacts even if a URL failed), then
   `git push origin <base>`; refused → `HRD sync` and push once more; still refused → leave it
   unpushed (next ship step 1 picks it up) and say why (branch protection?).
+
+## 10. Report (attended runs only — not `--auto`)
+
+Summarize what was published, declined, held and left merged-unrecorded. Then
+`HRD evolve-readiness`: only when `tier` is `sufficient`, end with one line in
+`config.language` (ko example: "성장 신호가 충분히 쌓였습니다(아직 evolve가 쓰지 않은 신호 N건 · 글감 M개) —
+`/hrd evolve --dry-run`으로 제안을 확인해 보세요."), N = `signals`, M = `topics`. Otherwise (or if the
+command fails) say nothing about evolve. The nudge is advisory: evolve's own scan decides whether a theme is strong
+enough (`sufficient` = one signal kind reached ≥ 3 signals from ≥ 2 topics with something new
+since the last evolve scan). Run it even if an earlier step stopped the run, as long as step 1
+passed.

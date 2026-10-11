@@ -428,5 +428,179 @@ class RegressionRound1(IntegrityTests):
         self.assertIn("unattended", p.stderr)
 
 
+class EvolveReadinessTests(RepoCase):
+    def sig(self, kind, tid, data=None, at="2026-10-10T00:00:00+00:00", reviewed=None):
+        rec = {"at": at, "kind": kind, "topic_id": tid, "data": data or {}}
+        if reviewed is not None:
+            rec["human_reviewed"] = reviewed
+        self.raw(json.dumps(rec))
+
+    def raw(self, line):
+        with open(os.path.join(self.root, ".claude/herald/signals.jsonl"), "a") as f:
+            f.write(line + "\n")
+
+    def ready(self):
+        return store.evolve_readiness(self.root, self.cfg)
+
+    def test_tiers_dedup_and_topic_spread(self):
+        self.assertEqual(self.ready()["tier"], "none")
+        self.sig("revise-weakness", "t0001", {"w": "intro"})
+        self.sig("revise-weakness", "t0001", {"w": "intro"}, at="2026-10-10T01:00:00+00:00")  # same event
+        self.sig("revise-weakness", "t0001", {"w": "cta"})
+        self.sig("revise-weakness", "t0001", {"w": "faq"})
+        r = self.ready()
+        self.assertEqual((r["tier"], r["signals"], r["topics"]), ("watching", 3, 1))  # one topic only
+        self.sig("revise-weakness", "t0002", {"w": "intro"})
+        r = self.ready()
+        self.assertEqual((r["tier"], r["ready_kinds"]), ("sufficient", ["revise-weakness"]))
+
+    def test_unreviewed_zero_line_and_clean_review_not_counted(self):
+        self.sig("human-edit", "t0001", {"lines_changed": 4}, reviewed=False)
+        self.sig("human-edit", "t0002", {"lines_changed": 0}, reviewed=True)
+        self.sig("human-edit", "t0003", {"lines_changed": 2})  # no reviewed flag
+        for t in ("t0001", "t0002", "t0003"):
+            self.sig("review-finding", t, {"pr": 1, "blocker": 0, "major": 0, "minor": 0, "findings": []})
+        self.assertEqual(self.ready()["tier"], "none")
+        for t in ("t0001", "t0002", "t0003"):
+            self.sig("human-edit", t, {"lines_changed": 3}, reviewed=True)
+        self.assertEqual(self.ready()["tier"], "sufficient")
+
+    def test_session_edit_request_paired_by_id(self):
+        req, _ = self.hrd("signal", "--kind", "session-edit-request", "--topic", "t0001",
+                          "--data", json.dumps({"request": "shorter intro, please"}))
+        self.hrd("signal", "--kind", "session-edit-request", "--topic", "t0001",
+                 "--data", json.dumps({"request_id": req["id"], "diff_summary": "x", "lines_changed": 4}))
+        self.assertEqual(self.ready()["signals"], 1)
+        listed = store.evolve_readiness(self.root, self.cfg, listing=True)["list"]
+        self.assertEqual((listed[0]["data"]["request"], listed[0]["data"]["diff_summary"]),
+                         ("shorter intro, please", "x"))  # the diff reaches evolve with its request
+        self.hrd("signal", "--kind", "session-edit-request", "--topic", "t0001",
+                 "--data", json.dumps({"request": "shorter intro, please"}))  # same words, new request (same second)
+        self.assertEqual(self.ready()["signals"], 2)
+        self.hrd("evolve-mark", "--consume", req["id"])
+        self.assertEqual(self.ready()["signals"], 1)  # the pair is consumed together
+
+    def test_baseline_listed_not_counted_and_recurrence_after_consume(self):
+        self.sig("human-edit", "t0001", {"lines_changed": 0}, reviewed=True)
+        self.sig("review-finding", "t0001", {"pr": 1, "blocker": 0, "major": 0, "minor": 0, "findings": []})
+        r = store.evolve_readiness(self.root, self.cfg, listing=True)
+        self.assertEqual((r["signals"], len(r["baseline"])), (0, 2))
+        self.sig("hold", "t0002", {"reason": "budget"})
+        sid = store.evolve_readiness(self.root, self.cfg, listing=True)["list"][0]["id"]
+        self.hrd("evolve-mark", "--consume", sid)
+        self.assertEqual(self.ready()["signals"], 0)
+        self.sig("hold", "t0002", {"reason": "budget"}, at="2026-12-01T00:00:00+00:00")  # same reason, later
+        self.assertEqual(self.ready()["signals"], 1)
+
+    def test_invalid_utf8_line_is_skipped(self):
+        with open(os.path.join(self.root, ".claude/herald/signals.jsonl"), "ab") as f:
+            f.write(b"\xff\xfe\n")
+            f.write(b'{"at": "x", "kind": "hold", "topic_id": "t000\xff", "data": {}}\n')  # bad byte in a string
+        self.sig("hold", "t0001", {"reason": "budget"})
+        out, _ = self.hrd("evolve-readiness")
+        self.assertEqual((out["signals"], out["topics"]), (1, 1))
+        os.makedirs(os.path.join(self.root, ".claude/herald/ledger"), exist_ok=True)
+        with open(os.path.join(self.root, ".claude/herald/ledger/verified.jsonl"), "wb") as f:
+            f.write(b'{"topic_id": "t0001", "verified_hash": "ab\xff"}\n')
+        with self.assertRaises(HeraldError):  # the ledger fails closed on bad bytes
+            store.ledger_lines(self.root)
+
+    def test_unreadable_counts_legacy_diffs_baseline_cites_and_stale_snapshot(self):
+        self.sig("human-edit", "t0001", {"lines_changed": -40}, reviewed=True)
+        self.raw('{"at": "x", "kind": "human-edit", "human_reviewed": true, "topic_id": "t0002", "data": {"lines_changed": %s}}'
+                 % ("9" * 400))
+        self.sig("review-finding", "t0003", {"pr": 3})  # no counts at all
+        self.sig("session-edit-request", "t0004", {"request": "r"})
+        self.sig("session-edit-request", "t0004", {"request": "r", "diff_summary": "d", "lines_changed": 3})  # 0.2.0 pair
+        r = store.evolve_readiness(self.root, self.cfg, listing=True)
+        self.assertEqual((r["kinds"]["human-edit"]["count"], r["kinds"]["review-finding"]["count"],
+                          r["kinds"]["session-edit-request"]["count"], r["baseline"]), (2, 1, 1, []))
+        self.sig("human-edit", "t0005", {"lines_changed": 0}, reviewed=True)
+        base = store.evolve_readiness(self.root, self.cfg, listing=True)["baseline"][0]["id"]
+        out, _ = self.hrd("evolve-mark", "--consume", base)
+        self.assertEqual((out["baseline_cited"], out["unknown"]), ([base], []))
+        self.hrd("evolve-readiness", "--snapshot", "--token", "run-a")  # run A aborts after Phase 1
+        self.sig("verify-gap", "t0001", {"c": 1})
+        self.hrd("evolve-mark", "--scan", "--token", "run-b")  # run B completes without a snapshot of its own
+        self.assertEqual(self.ready()["kinds"]["verify-gap"]["new"], 0)  # B's current list, not A's stale one
+        self.write(".claude/herald/memory/evolve-scan.json", "{broken")
+        self.hrd("evolve-mark", "--scan", "--token", "run-c")  # unreadable snapshot = none
+        _, p = self.hrd("evolve-readiness", "--snapshot", check=False)
+        self.assertIn("--token", p.stderr)
+
+    def test_orphan_diffs_combined_records_surrogates_and_stored_shape(self):
+        self.sig("session-edit-request", "t0001", {"request_id": "nope", "diff_summary": "d"})  # orphan
+        self.sig("session-edit-request", "t0001", {"request_id": None, "diff_summary": "d"})
+        self.sig("session-edit-request", "t0002", {"request": "x", "diff_summary": "d", "lines_changed": 3})  # one record
+        self.raw('{"at": "x", "kind": "hold", "topic_id": "t0003", "data": {"note": "\\ud800"}}')
+        r = store.evolve_readiness(self.root, self.cfg, listing=True)
+        self.assertEqual((r["kinds"]["session-edit-request"]["count"], r["kinds"]["hold"]["count"]), (1, 1))
+        out, _ = self.hrd("signal", "--kind", "hold", "--topic", "t0004", "--data", "{}")
+        with open(os.path.join(self.root, ".claude/herald/signals.jsonl")) as f:
+            last = json.loads(f.read().splitlines()[-1])
+        self.assertNotIn("id", last)
+        self.assertEqual(store.signal_id(last), out["id"])
+        self.hrd("evolve-mark", "--consume", out["id"])
+        out2, _ = self.hrd("evolve-mark", "--consume", out["id"])
+        self.assertEqual((out2["already_consumed"], out2["unknown"]), ([out["id"]], []))
+
+    def test_counts_low_line_edits_numeric_strings_and_seen_recurrence(self):
+        for t in ("t0001", "t0002", "t0003"):
+            self.sig("human-edit", t, {"lines_changed": 1}, reviewed=True)  # typo fixes: exemplar evidence
+            self.sig("review-finding", t, {"blocker": "0", "major": "2", "findings": []})  # hand-written counts
+        r = store.evolve_readiness(self.root, self.cfg, listing=True)
+        self.assertEqual((sorted(r["kinds"]), len(r["baseline"])), (["review-finding"], 3))
+        self.hrd("evolve-readiness", "--snapshot", "--token", "run-1")
+        self.sig("verify-gap", "t0001", {"c": 1})  # arrives while the run waits
+        self.hrd("evolve-mark", "--scan", "--token", "run-1")
+        r = self.ready()
+        self.assertEqual((r["tier"], r["kinds"]["verify-gap"]["new"]), ("watching", 1))  # not marked seen
+        self.sig("review-finding", "t0001", {"blocker": "0", "major": "2", "findings": []}, at="2026-12-01T00:00:00+00:00")
+        self.assertEqual(self.ready()["tier"], "watching")  # identical recurrence of a seen group: not new
+        sid = store.evolve_readiness(self.root, self.cfg, listing=True)["list"][0]["id"]
+        out, _ = self.hrd("evolve-mark", "--scan", "--consume", sid)
+        self.assertEqual(out["unknown"], [])
+        st = store.load_evolve_state(self.root)
+        self.assertFalse(set(st["seen"]) & set(st["consumed"]))
+
+    def test_malformed_records_are_skipped_and_status_survives(self):
+        self.raw("[1]")
+        self.raw("not json")
+        self.raw(json.dumps({"at": "x", "kind": "human-edit", "human_reviewed": True, "data": "x"}))
+        self.raw(json.dumps({"at": "x", "kind": "hold", "topic_id": ["t1"], "data": {}}))
+        self.assertEqual(self.ready()["tier"], "none")
+        self.write(".claude/herald/memory/evolve-state.json", "{broken")
+        out, _ = self.hrd("status")
+        self.assertIn("error", out["evolve"])
+
+    def test_consume_only_decided_evidence_and_scan_suppresses_renudge(self):
+        for t in ("t0001", "t0002", "t0003"):
+            self.sig("verify-gap", t, {"c": t})
+            self.sig("revise-weakness", t, {"w": t})
+        out, _ = self.hrd("evolve-readiness", "--list")
+        self.assertEqual(out["tier"], "sufficient")
+        gap_ids = [r["id"] for r in out["list"] if r["kind"] == "verify-gap"]
+        self.hrd("evolve-mark", "--scan")
+        r = self.ready()
+        self.assertEqual(r["tier"], "watching")  # scanned, nothing new: no nudge
+        self.hrd("evolve-mark", "--consume", *gap_ids)
+        r = self.ready()
+        self.assertEqual((r["signals"], sorted(r["kinds"])), (3, ["revise-weakness"]))  # watching evidence kept
+        self.sig("revise-weakness", "t0004", {"w": "new"}, at="2000-01-01T00:00:00+00:00")  # old clock: still new
+        self.assertEqual(self.ready()["new_ready_kinds"], ["revise-weakness"])
+        out, _ = self.hrd("evolve-mark", "--consume", gap_ids[0], "bogus")
+        self.assertEqual((out["already_consumed"], out["unknown"]), ([gap_ids[0]], ["bogus"]))
+        _, p = self.hrd("evolve-mark", "--scan", env={"HRD_UNATTENDED": "1"}, check=False)
+        self.assertIn("attended only", p.stderr)
+
+    def test_signals_are_per_machine_not_closed_by_git_history(self):
+        for t in ("t0001", "t0002", "t0003"):
+            self.sig("verify-gap", t, {"c": t})
+        self.write(".claude/herald/evolution-log.md", "| 1 | 2026-10-11 | x | y | applied | | |\n")
+        self.hrd("commit", "--cmd", "harness", "--kind", "evolve", "-m", "chore(herald): evolve #1 — x",
+                 ".claude/herald/evolution-log.md")  # another machine's evolve, synced here
+        self.assertEqual(self.ready()["tier"], "sufficient")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -69,6 +69,6 @@ Search Console (optional): `pip install google-auth requests`.
 
 ## Status
 
-`0.2.0` — implemented end to end, after ten rounds of adversarial implementation review; the deterministic layer is covered by tests
+`0.2.1` — implemented end to end, after ten rounds of adversarial implementation review (plus five on the evolve nudge); the deterministic layer is covered by tests
 (`bash plugins/herald-plugin/tests/run_tests.sh`). `evolve`'s usefulness and metric-driven
 proposals need accumulated real use before they can be judged.

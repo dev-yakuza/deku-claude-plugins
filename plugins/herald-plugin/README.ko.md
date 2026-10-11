@@ -64,5 +64,5 @@ Search Console(선택): `pip install google-auth requests`.
 
 ## 상태
 
-`0.2.0` — 전 흐름 구현(구현 적대적 리뷰 10라운드 반영), 결정적 계층은 테스트로 검증(`bash plugins/herald-plugin/tests/run_tests.sh`).
+`0.2.1` — 전 흐름 구현(구현 적대적 리뷰 10라운드 + evolve 넛지 리뷰 5라운드 반영), 결정적 계층은 테스트로 검증(`bash plugins/herald-plugin/tests/run_tests.sh`).
 `evolve`의 유용성과 지표 기반 제안은 실제 사용이 쌓여야 판정할 수 있습니다.

@@ -66,5 +66,5 @@ Search Console(任意): `pip install google-auth requests`。
 
 ## 状態
 
-`0.2.0` — 全フロー実装済み(実装の敵対的レビュー 10 ラウンドを反映)、決定的な層はテストで検証(`bash plugins/herald-plugin/tests/run_tests.sh`)。
+`0.2.1` — 全フロー実装済み(実装の敵対的レビュー 10 ラウンド + evolve 通知のレビュー 5 ラウンドを反映)、決定的な層はテストで検証(`bash plugins/herald-plugin/tests/run_tests.sh`)。
 `evolve` の有用性と指標に基づく提案は、実利用が蓄積してから判定できます。

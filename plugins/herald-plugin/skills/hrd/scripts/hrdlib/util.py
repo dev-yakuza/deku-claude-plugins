@@ -89,17 +89,25 @@ def append_jsonl(path, record):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def read_jsonl(path):
+def read_jsonl(path, strict_bytes=False):
+    """One JSON value per line; unparsable lines are skipped. A line with invalid UTF-8 is
+    skipped too, unless `strict_bytes` (the verification ledger fails closed on it)."""
     if not os.path.exists(path):
         return []
     out = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
+    with open(path, "rb") as f:
+        for n, raw in enumerate(f, 1):
+            try:
+                line = raw.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                if strict_bytes:
+                    raise HeraldError("%s line %d is not valid UTF-8 — remove that line by hand (the guard asks), "
+                                      "then re-verify the affected article (`/hrd ship --reverify <id>`)" % (path, n))
+                continue
             if line:
                 try:
                     out.append(json.loads(line))
-                except json.JSONDecodeError:
+                except (ValueError, RecursionError):  # bad JSON, a huge integer literal, absurd nesting
                     continue
     return out
 

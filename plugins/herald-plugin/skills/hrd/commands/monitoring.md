@@ -8,7 +8,8 @@ Plan §3.6 (M5 external signals), §3.7 (cost). Read-only except `--connect-gsc`
 - Cost: `python3 .claude/herald/scripts/measure.py` for the latest session, or per batch log
   (`.claude/herald/memory/batch-logs/*.jsonl` via `--file`) — dollars per article, per role,
   read calls and bytes (the read-list hypothesis, §3.7).
-- Signals since the last evolve, by kind.
+- Unused signals by kind (not yet consumed by a decided evolve proposal): `HRD evolve-readiness`
+  (`kinds`, `tier`, `last_scan`).
 - `--html` writes `.claude/herald/memory/monitoring.html` with the same tables.
 
 ## Search Console (M5)

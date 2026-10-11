@@ -9,6 +9,15 @@ PRs · local branches. Group: in progress · PR pending (→ `/hrd ship`) · mer
 `/hrd ship`) · held (with the next step per reason) · queued · published. Also show the lock
 holder if any and `HRD ahead` warnings.
 
+Last, one line from the `evolve` field of the same `HRD status` output (`tier` is a machine
+token — branch on it, never show it raw): `sufficient` → "growth signals are enough
+(N unused signals · M topics) — try `/hrd evolve --dry-run`"; `watching` with non-empty
+`ready_kinds` → "enough signals, but evolve already looked at them on <last_scan> — the
+reminder returns with new evidence (you can still run `/hrd evolve`)"; other `watching` →
+"collecting growth signals (N unused signals · M topics; evolve proposes from ≥ 3 signals of
+one kind from ≥ 2 topics)"; `none` → omit; an `error` field → say the signals
+file could not be read. Signals are per machine (gitignored). Write it in `config.language`.
+
 ## Maintenance flags (each except `--unlock`: `HRD lock acquire --cmd status`, base checked out and clean,
 `HRD sync`, then the action, then `HRD commit --cmd status --kind status -m "chore(herald):
 <action> <id>" <changed files>` and `git push origin <base>`; finally `HRD lock release --cmd status

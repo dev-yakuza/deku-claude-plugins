@@ -125,7 +125,11 @@ def cmd_select(a):
 
 def cmd_status(a):
     root, cfg = ctx()
-    emit({"topics": derived_status(root, cfg), "lock": lock.status(root)})
+    try:
+        evolve = store.evolve_readiness(root, cfg)
+    except Exception as e:  # advisory only — never let a bad signals file break status
+        evolve = {"tier": "none", "error": str(e)}
+    emit({"topics": derived_status(root, cfg), "lock": lock.status(root), "evolve": evolve})
 
 
 # --- work lifecycle -----------------------------------------------------------------------------
@@ -522,6 +526,27 @@ def cmd_signal(a):
                       human_reviewed=None if a.human_reviewed is None else a.human_reviewed == "true"))
 
 
+def cmd_evolve_readiness(a):
+    root, cfg = ctx()
+    out = store.evolve_readiness(root, cfg, listing=a.list or a.snapshot)
+    if a.snapshot:
+        if os.environ.get("HRD_UNATTENDED") == "1":
+            raise HeraldError("evolve bookkeeping is attended only (evolve is always started by a human)")
+        if not a.token:
+            raise HeraldError("--snapshot needs --token <the evolve lock token> (ties it to this run)")
+        store.evolve_snapshot(root, out["list"], token=a.token)
+    emit(out)
+
+
+def cmd_evolve_mark(a):
+    root = repo_root()
+    if os.environ.get("HRD_UNATTENDED") == "1":
+        raise HeraldError("evolve bookkeeping is attended only (evolve is always started by a human)")
+    if not a.scan and not a.consume:
+        raise HeraldError("give --scan and/or --consume <id …>")
+    emit(store.evolve_mark(root, scan=a.scan, consume=a.consume or (), token=a.token))
+
+
 def cmd_auto_exclusion(a):
     root, cfg = ctx()
     crit = store.read_json_at(root, a.rev, store.work_rel(a.topic, "critique.json")) if a.rev else \
@@ -542,6 +567,12 @@ def build():
     p = sp.add_parser("select"); p.add_argument("--n", type=int, default=0); p.add_argument("--topic")
     p.set_defaults(fn=cmd_select)
     p = sp.add_parser("status"); p.set_defaults(fn=cmd_status)
+    p = sp.add_parser("evolve-readiness"); p.add_argument("--list", action="store_true")
+    p.add_argument("--snapshot", action="store_true"); p.add_argument("--token")
+    p.set_defaults(fn=cmd_evolve_readiness)
+    p = sp.add_parser("evolve-mark"); p.add_argument("--scan", action="store_true"); p.add_argument("--consume", nargs="+")
+    p.add_argument("--token")
+    p.set_defaults(fn=cmd_evolve_mark)
 
     p = sp.add_parser("begin"); p.add_argument("--topic", required=True); p.add_argument("--force", action="store_true")
     p.set_defaults(fn=cmd_begin)

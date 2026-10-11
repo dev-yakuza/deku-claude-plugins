@@ -31,11 +31,13 @@ Run brief, research, draft, critique, verify in order per `atoms/_stages.md`. Af
 Show: title, slug, 5-line summary, audit findings incl. MINOR and dismissals, verify counts,
 measured cost so far. Ask: approve / request changes / hold.
 
-- **Request changes**: record `HRD signal --kind session-edit-request --topic <id> --data
-  '{"request": "<verbatim>"}'`; the writer applies the request (`HRD loopback --topic <id>
-  --human` — not counted); `HRD stage pass --stage draft` (runs the gate); then critique
-  (editor → auditor) and verify run again; record the before/after
-  diff summary in the same signal kind. Loop until approve or hold.
+- **Request changes**: record it right away — `HRD signal --kind session-edit-request --topic
+  <id> --data '{"request": "<verbatim>"}'` (so a later hold or failure cannot lose it) and keep
+  the `id` it prints; the writer applies the request (`HRD loopback --topic <id> --human` — not
+  counted); `HRD stage pass --stage draft` (runs the gate); then `HRD signal --kind
+  session-edit-request --topic <id> --data '{"request_id": "<that id>", "diff_summary": "...",
+  "lines_changed": n}'` (joined to its request by the id, counted once); then critique (editor →
+  auditor) and verify run again. Loop until approve or hold.
 - **Hold**: hold `needs-human` (branch preserved).
 
 ## 3. Publish
