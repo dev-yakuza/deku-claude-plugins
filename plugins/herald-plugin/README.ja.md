@@ -39,8 +39,8 @@ Search Console(任意): `pip install google-auth requests`。
 ```bash
 /hrd init            # リポジトリ分析 + インタビュー → ハーネス(コミット前に確認)
 /hrd plan            # トピッククラスターをキューへ
-/hrd write t0001     # 記事 1 本 → PR(先にセッション内で承認)
-/hrd write t0001 --auto  # 同じ流れを PR まで質問なしで
+/hrd write t0001     # 記事 1 本 → PR、PR まで質問なし
+/hrd write t0001 --attended  # 同じ流れで各ゲートで確認し、PR の前に承認
 /hrd ship            # PR 承認 → 再検証 → マージ → デプロイ → URL 確認 → 記録
 /hrd batch --n 5     # 無人執筆。autonomy.publish=auto なら公開まで
 /hrd status          # トピック・保留・メンテナンスフラグ
@@ -68,5 +68,5 @@ Search Console(任意): `pip install google-auth requests`。
 
 ## 状態
 
-`0.4.0` — 全フロー実装済み(実装の敵対的レビュー 10 ラウンド + 以降の変更ごとのレビューを反映)。0.3.0 で成長シグナルをコードが自動記録、0.4.0 で外部監査ラウンドの上限と `write --auto` を追加 — 既存リポジトリでは `/hrd update` が必要(進行中の記事は監査ラウンドを 1 から数え直す)、決定的な層はテストで検証(`bash plugins/herald-plugin/tests/run_tests.sh`)。
+`0.5.0` — 全フロー実装済み(実装の敵対的レビュー 10 ラウンド + 以降の変更ごとのレビューを反映)。0.3.0 で成長シグナルをコードが自動記録、0.4.0 で外部監査ラウンドの上限、0.5.0 で `write` の既定を質問なしに(`--attended` で確認モード)・設定言語で対話 — 既存リポジトリでは `/hrd update` が必要、その後進行中の記事の `/hrd resume` は base のマージを確認(0.4.0 より前から進行中の記事は監査ラウンドを 1 から数え直す)、決定的な層はテストで検証(`bash plugins/herald-plugin/tests/run_tests.sh`)。
 `evolve` の有用性と指標に基づく提案は、実利用が蓄積してから判定できます。

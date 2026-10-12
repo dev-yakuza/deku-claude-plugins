@@ -22,7 +22,7 @@ from hrdlib.hashing import tree_hash, worktree_hash  # noqa: E402
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.4.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.5.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -380,6 +380,8 @@ def cmd_state(a):
     attended_only("`state`")
     data = store.load_topics(root)
     t = store.get_topic(data, a.topic)
+    if t.get("state") == "published" and a.state in ("queued", "held"):
+        raise HeraldError("%s is already published — a removal revert (ship step 2, held:reverted) or `withdraw` changes that, not `state`" % a.topic)
     store.set_topic_state(t, a.state, a.reason, a.note)
     store.save_topics(root, data)
     # holds and ship declines are growth signals; record them where the state changes
@@ -576,6 +578,24 @@ def cmd_record_published(a):
     emit({"published": a.slug, "human_reviewed": art.get("human_reviewed")})
 
 
+def cmd_auto_merged(a):
+    root, _ = ctx()
+    attended_only("`auto-merged`")
+    if a.clear == (a.pr is not None):
+        raise HeraldError("give exactly one of --pr <n> or --clear")
+    emit(store.mark_auto_merged(root, a.topic, a.pr, clear=a.clear))
+
+
+def cmd_throttle(a):
+    """Today's auto publishes against `autonomy.throttle.max_per_day` (UTC day), counting auto
+    merges not yet recorded as published."""
+    from hrdlib.batch import auto_published_today
+    root, cfg = ctx()
+    used = auto_published_today(store.load_published(root), store.load_topics(root))
+    cap = int(cfg.get("autonomy", "throttle", "max_per_day") or 0)
+    emit({"used": used, "max": cap, "room": max(cap - used, 0)})
+
+
 def cmd_gate(a):
     """Deterministic gate on a topic's article (config.commands.validate or built-in)."""
     root, cfg = ctx()
@@ -703,6 +723,9 @@ def build():
     p.set_defaults(fn=cmd_mark_published)
     p = sp.add_parser("record-published"); p.add_argument("--topic", required=True); p.add_argument("--slug", required=True)
     p.add_argument("--pr", type=int); p.add_argument("--auto", action="store_true"); p.set_defaults(fn=cmd_record_published)
+    p = sp.add_parser("auto-merged"); p.add_argument("--topic", required=True); p.add_argument("--pr", type=int)
+    p.add_argument("--clear", action="store_true"); p.set_defaults(fn=cmd_auto_merged)
+    p = sp.add_parser("throttle"); p.set_defaults(fn=cmd_throttle)
     p = sp.add_parser("gate"); p.add_argument("--topic", required=True); p.add_argument("--slug")
     p.set_defaults(fn=cmd_gate)
     p = sp.add_parser("signal"); p.add_argument("--kind", required=True); p.add_argument("--topic")

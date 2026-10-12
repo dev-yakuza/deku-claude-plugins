@@ -56,7 +56,7 @@ Detect once per command: `printenv HRD_UNATTENDED` → `1` = unattended. The edi
 | auditor `MAJOR` | may dismiss with a recorded reason | may dismiss with a recorded reason (`kind: dismissal`) |
 | auditor `MAJOR` on a recheck round (`_stages.md` § critique 3) | `new` → defer to the PR (`kind: deferral`); `unfixed`/`regression` → fix (last round: any `MAJOR` → defer) | same |
 | auditor `BLOCKER` | dismiss only after the human confirms | **never dismiss** — fix or hold `needs-human` (`defect:`) |
-| stagnation / loop cap / budget | stop and report | hold `stagnation` / `budget` |
+| stagnation / loop cap / budget | stop and report (budget: warn only) | hold `stagnation` / `budget` |
 
 **Decision log**: every judgment between brief and critique goes into
 `work/<id>/critique.json` → `decision_log: [{"kind", "note"}]` with `kind ∈ {routine,
@@ -65,16 +65,20 @@ with its `id` — `atoms/_stages.md` § critique 3). verify and publish make no 
 `dismissal`, `assumption` and `deferral` exclude a PR from auto publish. The PR body repeats the log under
 `## Unattended decisions` (`human` entries under `## Human decisions`).
 
-**In-session auto** (`/hrd write <id> --auto`, `/hrd resume <id> --auto`): a normal session
-that asks the human nothing during the flow. Gates follow the Unattended column above; holds
+**In-session auto** (the default of `/hrd write <id>` and `/hrd resume <id>`; `--attended`
+asks the human at every gate instead): a normal session that asks the human nothing during the
+flow. Gates follow the Unattended column above; holds
 are recorded the attended way (`atoms/_stages.md` § Holds: `HRD state`, commit, push — no
-`HRD result`); stagnation / loop cap / budget hold instead of stopping (budget: `measure.py`
-over `per_article_usd` at a stage end → hold `budget`; a BLOCKER open on the last audit round →
-hold `needs-human`); there is no session approval. `resume --auto` of a held topic asks the
-human once, before the flow (a hold is lifted by a human's decision); a human-directed BLOCKER
-fix also asks them to confirm it. Any other step that would
-ask the human (version mismatch, a merge offer, a foreign commit on base) stops and reports
-instead — it never guesses. Publishing is
+`HRD result`); stagnation / loop cap / budget hold instead of stopping (budget: the article's
+spend since the preflight baseline, `write.md` §0 step 7, over `per_article_usd` at a stage end
+→ hold `budget`; a BLOCKER open on the last audit round →
+hold `needs-human`); there is no session approval. **Pre-flow questions — exactly these three — are still asked**,
+because they come before any work and the run cannot proceed safely without them: foreign
+unpushed commits on base (`write.md` §0 step 4), the base merge for an existing branch with
+older scripts (`atoms/_stages.md` § Existing branches) and, on `resume`, the decision on a held
+topic. After them the flow asks nothing, except to confirm a human-directed BLOCKER fix; every other
+gate follows the Unattended column above. Any other step that would ask (a `newer` version, an unexpected error) stops and reports instead —
+it never guesses. Publishing is
 unchanged: the PR, then `/hrd ship` (or `--session-auto` when `autonomy.publish` is `auto`).
 
 Unattended children never write the base branch: they record their outcome with
@@ -83,9 +87,16 @@ and stop cleanly (exit 0). The runner records holds.
 
 ## D. Output language
 
-Human-readable output (messages, PR bodies, artifact prose, RESULT summaries) is in
-`config.language`. Machine tokens stay ASCII: status enums, `held:<reason>` values,
-`decision_log.kind`, labels (`herald`, `herald:reverted`, ...), markers, paths, JSON keys.
+Human-readable output (every message to the user — progress, questions, summaries, reports —
+PR bodies, artifact prose, RESULT summaries) is in `config.language`, although these
+instructions are English (SKILL.md "Language"). Machine tokens stay ASCII: status enums, `held:<reason>` values,
+`decision_log.kind`, labels (`herald`, `herald:reverted`, ...), markers, paths, JSON keys, the
+`--note` prefixes code reads (`tooling:`, `human:`, `ambiguity:`, `defect:`), any note starting
+`tooling: herald version mismatch` (the whole note stays English), the CLI values (`--state`,
+`--reason`, `--cause`, `--theme`) and the enum values in `critique.json`/`verify.json`
+(`verdict`, `severity`, `tag`, `outcome`) — translate only the free text after a prefix. Commit
+messages keep their English templates (free text in them in English too); a PR title is the
+article title, in `config.language`.
 Every spawn prompt ends with: "Write all human-readable output in `<language>`; keep machine
 tokens, code, paths and markers in English." Unattended runs add, immediately before it:
 "Unattended: write free narration (before the `>>> RESULT <<<` sentinel) in ASCII English."
@@ -97,7 +108,8 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
 - Role default = `model:` in its file (repo-owned). The retry bump applies to that one
   re-invocation; `HRD loopback` returns `escalate_tier` and records the `escalation` signal
   itself (loopbacks 2 and 3; never for `--human`, never past the cap).
-- The editor-in-chief is the main session: the user's model when attended,
+- The editor-in-chief is the main session: the user's model in interactive runs (attended or
+  in-session auto),
   `config.models.batch_main` in batch children. Never proposed for change.
 
 ## F. Loops and stagnation

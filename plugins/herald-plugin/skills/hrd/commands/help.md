@@ -1,17 +1,17 @@
 # HELP
 
-Show this in `config.language` (English if not initialized):
+Show this in `config.language` (not initialized: the language rule in SKILL.md):
 
 **Setup** — `init [lang]` install the harness · `config [key value]` dials · `update [--check]`
 adopt central improvements
 
-**Writing** — `plan [--n N]` build the topic queue · `write <id> [--auto]` one article to a PR (`--auto`: no questions until the PR) ·
-`brief|research|draft|critique|verify|publish <id>` one stage · `resume <id> [--auto]` continue ·
+**Writing** — `plan [--n N]` build the topic queue · `write <id> [--attended]` one article to a PR (no questions until the PR; `--attended`: ask at each gate and approve before the PR) ·
+`brief|research|draft|critique|verify|publish <id>` one stage · `resume <id> [--attended]` continue ·
 `batch [--n N]` unattended writing (and auto publish if enabled)
 
 **Publishing** — `ship [ids|PRs]` approve, re-verify, merge, deploy, confirm, record ·
 `ship --reverify <id>` · `ship --deploy-only <id …>` · `ship <PR> --session-auto` · `review <id|slug|PR>` independent audit ·
-`refresh <slug>` update an article
+`refresh <slug> [--attended]` update an article
 
 **State** — `status [--requeue|--drop|--withdraw|--unwithdraw|--move|--release-slug|
 --mark-published|--unlock]`

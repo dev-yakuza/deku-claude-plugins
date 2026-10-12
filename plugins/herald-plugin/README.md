@@ -40,8 +40,8 @@ Search Console (optional): `pip install google-auth requests`.
 ```bash
 /hrd init            # analyze the repo + interview → harness (review it before committing)
 /hrd plan            # topic clusters into the queue
-/hrd write t0001     # one article → PR (approve it in the session first)
-/hrd write t0001 --auto  # same, no questions until the PR
+/hrd write t0001     # one article → PR, no questions until the PR
+/hrd write t0001 --attended  # same, asking at each gate and approving before the PR
 /hrd ship            # approve PRs → re-verify → merge → deploy → confirm URL → record
 /hrd batch --n 5     # unattended writing; with autonomy.publish=auto also publishes
 /hrd status          # topics, holds, maintenance flags
@@ -71,6 +71,6 @@ Search Console (optional): `pip install google-auth requests`.
 
 ## Status
 
-`0.4.0` — implemented end to end, after ten rounds of adversarial implementation review plus a review loop per later change; 0.3.0 records growth signals in code, 0.4.0 caps external-audit rounds and adds `write --auto` (existing repos: run `/hrd update`; an article already in progress counts its audit rounds from 1 again); the deterministic layer is covered by tests
+`0.5.0` — implemented end to end, after ten rounds of adversarial implementation review plus a review loop per later change; 0.3.0 records growth signals in code, 0.4.0 caps external-audit rounds, 0.5.0 makes `write` run without questions by default (`--attended` to ask) and answers in the configured language (existing repos: run `/hrd update`, then `/hrd resume` asks to merge base into an article's branch; from before 0.4.0, an article in progress counts its audit rounds from 1 again); the deterministic layer is covered by tests
 (`bash plugins/herald-plugin/tests/run_tests.sh`). `evolve`'s usefulness and metric-driven
 proposals need accumulated real use before they can be judged.

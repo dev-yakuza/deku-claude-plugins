@@ -93,7 +93,8 @@ references into the article itself; then the gate.
    (records `audit-finding` and the logged dismissals), back to draft; after the fix, editor →
    auditor → verify run again. A `BLOCKER` on the `last` round is never looped back
    automatically (no auditor would check the fix): log it with outcome `open` and hold
-   `needs-human` (cause `defect:`) — attended: ask first. The human decides (on the spot, or
+   `needs-human` (cause `defect:`) — `--attended` and single-stage commands (`/hrd critique`): ask first;
+   in-session auto and unattended: hold without asking (`_contract.md` §C). The human decides (on the spot, or
    on `/hrd resume` before anything runs), recorded as `decision_log` `{"kind": "human", "id":
    "<id>", "note": "human: <their words>"}`:
    - **dismiss** → set the entry's outcome to `dismissed`, add 1 to `final_round.dismissed.blocker`
@@ -101,7 +102,7 @@ references into the article itself; then the gate.
      `HRD stage pass --stage critique` — no new auditor round.
    - **fix** → the writer applies the human's direction under `HRD loopback --topic <id> --human`
      (not counted), then gate, editor, `audit-round` (→ `skip`); show the fix and ask the human
-     to confirm it — even with `--auto` — then outcome `fixed` and the `human` entry.
+     to confirm it — even in in-session auto — then outcome `fixed` and the `human` entry.
    `stage pass` refuses a last-round BLOCKER without that `human` entry (and refuses any in an
    unattended run). A BLOCKER held on round 1–2 (hold chosen, loop cap, stagnation) is logged
    `open` while held; the human's decision on resume sets it to `fixed` (sent back to the
@@ -170,8 +171,9 @@ hashing joins the verify target set when M6 is enabled.)
 ## publish
 
 1. Re-check cannibalization (anything published or PR'd since brief). Conflict → hold.
-2. Attended `write`: session approval and any requested changes happen first (`write.md` §2) —
-   so the approved body becomes `agent_final_hash`. Unattended: skip.
+2. `--attended` (`write`/`resume`) and attended `/hrd publish`: session approval and any
+   requested changes happen first (`write.md` §2) — so the approved body becomes
+   `agent_final_hash`. In-session auto and unattended: skip.
 3. `HRD finalize --topic <id>` (entry condition: article == critique hash == verify hash;
    fixes `agent_final_hash` once).
 4. Commit on the herald branch: `git add` the article, its images and `<w>` — nothing else;
@@ -192,7 +194,7 @@ herald/<topic-id>--<slug>` to a branch that already existed, run `HRD version --
 version>` (SKILL.md version gate):
 - `equal` → continue.
 - `newer` → stop: update the installed plugin and restart (a merge cannot fix this).
-- `older` or failing, attended: the tracked tree must be clean (`git status --porcelain
+- `older` or failing, attended or in-session auto (a pre-flow question, `_contract.md` §C): the tracked tree must be clean (`git status --porcelain
   --untracked-files=no` empty; leftovers → commit them as `wip(herald): <id>` first). Explain and,
   on approval, `git fetch origin <base>` and `git merge --no-edit origin/<base>` (brings base's
   scripts; the PR scope check compares from the merge base, so base's files do not count as the

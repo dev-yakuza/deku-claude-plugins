@@ -148,7 +148,9 @@ def measure(root, prices, session=None, files=None):
         mains, subs = files, []
     else:
         mains, subs = session_files(root, session)
-    out = {"main": [summarize_file(p, prices) for p in mains], "roles": {}, "total_usd": 0.0}
+    out = {"main": [summarize_file(p, prices) for p in mains], "roles": {}, "total_usd": 0.0,
+           "session": os.path.basename(mains[0])[:-len(".jsonl")] if mains and not files else None,
+           "found": bool(mains)}  # false: no transcript to measure (wrong session id or project key)
     for p in subs:
         s = summarize_file(p, prices)
         label = subagent_label(p)

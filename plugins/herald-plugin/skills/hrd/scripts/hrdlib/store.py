@@ -536,6 +536,29 @@ def read_json_at(root, rev, relpath):
 
 # --- publish record (ship step 9 and the batch runner share it) -----------------------------
 
+def mark_auto_merged(root, tid, pr=None, clear=False):
+    """An interactive auto publish (`ship --session-auto` of a PR no human approved) stamps the
+    topic just before the merge, as the batch runner does: the article stays human_reviewed=false
+    and counts toward today's throttle whoever records it later. `clear` undoes a stamp whose
+    merge did not happen."""
+    data = load_topics(root)
+    t = get_topic(data, tid)
+    if clear:
+        t.pop("auto_merged_pr", None)
+        t.pop("auto_merged_at", None)
+    else:
+        if pr is None or int(pr) <= 0:
+            raise HeraldError("--pr must be the PR number being merged")
+        if t.get("state") == "published":
+            raise HeraldError("%s is already published" % tid)
+        if t.get("auto_merged_pr") and str(t["auto_merged_pr"]) != str(pr):
+            raise HeraldError("%s already carries an auto-merge stamp for PR #%s" % (tid, t["auto_merged_pr"]))
+        t["auto_merged_pr"] = int(pr)
+        t["auto_merged_at"] = now_iso()
+    save_topics(root, data)
+    return {"topic": tid, "auto_merged_pr": t.get("auto_merged_pr"), "auto_merged_at": t.get("auto_merged_at")}
+
+
 def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald"):
     pub = load_published(root)
     data = load_topics(root)

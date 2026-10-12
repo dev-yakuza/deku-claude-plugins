@@ -45,7 +45,7 @@ Exclude `.claude/skills/**` and other local skills from every scan (D16).
 
 Promoted service/app and CTA · north-star metric · domain expertise / YMYL · hard policies
 (external mentions, promotion count, copyright rules) · confirm detected paths, deploy command,
-base URL · per-article budget (USD) · output language (default: `$1` or the content language).
+base URL · per-article budget (USD) · output language (default: `$1` if it is a language code, else the content language).
 
 ## P2 — Generate (additive)
 

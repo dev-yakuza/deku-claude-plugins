@@ -14,6 +14,17 @@ Route on `$0`: read `<<SKILL_DIR>>/commands/$0.md` and execute it. Pass `$1`, `$
   `evolve`, `rollback`, `audit`, `monitoring`, `ask`, `contribute`, `help`.
 - Empty `$0` → `help`. Unknown `$0` → say so, then `help`.
 
+**Language**: these instructions are in English, but everything you say to the user is in the
+repo's language — read `language` from `.claude/herald/config.json` once at the start (before
+`init`: its `$1` if that is a language code, else the language the user writes in, else the
+existing articles' language once P1 has read them, else English; `init` switches to the chosen
+language as soon as the interview confirms it). That covers progress lines, questions
+and their options (`AskUserQuestion`), summaries, reports, errors you relay (translate `HRD`
+output; keep ids, paths, commands and machine tokens as they are) and the PR body. Spawned
+roles get the language line (`atoms/_contract.md` §D); in unattended runs a spawned role's
+narration before its `>>> RESULT <<<` sentinel is ASCII English. Machine tokens, note
+prefixes and commit messages stay English (§D).
+
 Before any command other than `init`/`help`: `.claude/herald/config.json` must exist, else tell
 the user to run `/hrd init`. **Version gate** (every command except `init`, `help`, `update`, and `status` with no flag or
 with `--unlock`): read `version` from `<<SKILL_DIR>>/../../.claude-plugin/plugin.json` (Read

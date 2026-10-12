@@ -57,7 +57,8 @@ Guild `_execute_spine.md` 3.5a. Design: `design/herald/00-plan.md` §3.3.
 
 Which findings block and which are deferred: `atoms/_stages.md` § critique step 3. Per
 `_contract.md` §C: attended MAJOR → editor-in-chief may dismiss with a reason; attended
-BLOCKER → only after the human confirms; unattended BLOCKER → never. Every dismissal goes to
+(`--attended`, single-stage commands) BLOCKER → only after the human confirms; in-session auto and unattended BLOCKER →
+never. Every dismissal goes to
 `critique.md` and `critique.json` (`final_round.dismissed`, `decision_log` `kind: dismissal` —
 for a last-round BLOCKER also `kind: human`, `atoms/_stages.md` § critique 3);
 `HRD stage pass --stage critique` records the `dismissal` signals from that log.

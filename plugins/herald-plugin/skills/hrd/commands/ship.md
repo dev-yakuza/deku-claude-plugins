@@ -1,4 +1,4 @@
-# SHIP — publish approved articles (`/hrd ship [topic-id|slug|PR …]`, `--reverify <id>`, `--deploy-only <id …>`, `--auto`)
+# SHIP — publish approved articles (`/hrd ship [topic-id|slug|PR …]`, `--reverify <id>`, `--deploy-only <id …>`, `--auto`, `--session-auto <PR>`)
 
 The only place Herald publishes. Plan §3.2.2 (steps 1–9; step 10 is the attended report). Accuracy floor: `atoms/_invariants.md`.
 `<base>` = `config.base_branch`. Every `HRD …` is its own Bash call.
@@ -12,20 +12,27 @@ that differs from the ledger → skip that PR; after step 6 write the round resu
 `HRD result --topic ship --status merged --merged <PR numbers…>` and stop (the runner does 7–9
 and re-checks the merges against GitHub).
 
-`--session-auto <PR>` (interactive, `autonomy.publish: auto`, called by `write` for the PR it just
-created): all steps for that one PR, step 4 skipped; refuse if the PR was not created in this
-session, if `HRD auto-exclusion` lists a reason, or if today's throttle is used up.
+`--session-auto <PR>` (interactive, `autonomy.publish: auto`, called by `write` — also when run
+by `refresh` — or `resume` for the PR it just created, while it still holds its lock — step 1
+acquires with `--token <the token of the command holding the lock>` and every release is `HRD lock release --cmd ship --token <t>`, a
+no-op while nested — the caller's own release ends the lock): all steps for
+that one PR, step 4 skipped; refuse if the PR was not created in this session, if `HRD
+auto-exclusion` lists a reason, or if `HRD throttle` shows `room` 0. Unless that run was
+`--attended` (a human approved the body in the session), the article is published without a
+human reading it, so §6 stamps it before merging (below): the stamp keeps it `human_reviewed:
+false` and counted in today's throttle even if deploy fails and a later ship records it.
 
 Variants: default (all steps) · `--reverify <id>` (steps 1, 2, 7, 8, 9, 10 for one article after a
 human fixed it on base) · `--deploy-only <id …>` (steps 1, 2, 7, 8, 9, 10; the ids are articles
 merged outside Herald → external deploy targets) · `--auto` (batch ship child only: step 4 is
 skipped, merges limited to `HRD_AUTO_PRS`, steps 7–9 belong to the runner).
 
-A version mismatch found by the re-check after §6's `HRD sync` (after a merge; SKILL.md version
-gate): delete that PR's local herald branch as §6 says, commit the non-deploy records made so far
-(declines, `held:verify-after-human-edit`) as in §7.1 — `HRD commit --cmd ship --kind abort -m
-"chore(herald): ship stopped (version)" .claude/herald/topics.json` — so the tree is clean for
-`/hrd update`, then stop: merged PRs stay merged-unrecorded for the next `ship` (after the
+A version mismatch found by the re-check after §6's `HRD sync` (only after a merge; SKILL.md version
+gate): delete that PR's local herald branch as §6 says, commit any records not yet committed (normally none: §4, §5 and §6 commit as they go) — `HRD
+commit --cmd ship --kind abort -m "chore(herald): ship stopped (version)"
+.claude/herald/topics.json`, which commits nothing if nothing changed — so the tree is clean for
+`/hrd update`, then stop — a nested `--session-auto` stop also ends the calling `write`/`resume`
+(release its lock; no further steps): merged PRs stay merged-unrecorded for the next `ship` (after the
 update). Release the lock and say which PRs merged. §9's push-retry sync needs no re-check: the
 records are already committed and pushing is plain git — push first, then run the check and
 report a mismatch.
@@ -89,9 +96,17 @@ human decides them here), latest `/hrd review` finding for it if any (unresolved
 Deferred MAJORs (`## Late audit findings`) are decided here: approve accepts them; to fix one,
 skip this time and push the fix to the PR (the next ship re-verifies it, §5); or decline.
 
+A topic whose `auto_merged_pr` names this open PR (a session-auto stamp whose merge never
+happened): on approve or decline, `HRD auto-merged --topic <id> --clear` — a human decided it
+now.
+
 approve / skip this time (no state change) / decline (reason → `HRD state --topic <id> --state
 declined --reason <short-reason>` (records `ship-decline`), `gh pr close <n>`, delete the
 remote branch).
+
+After §4, if `topics.json` changed (clears, declines): `HRD commit --cmd ship --kind ship -m
+"chore(herald): ship decisions" .claude/herald/topics.json` (not pushed yet) — §5's branch
+switch and §7.1 need a clean tree.
 
 ## 5. Re-verify (before checking out the PR)
 
@@ -107,11 +122,26 @@ remote branch).
 3. Pass → `HRD stage pass --topic <id> --stage verify --amend`, commit the artifacts, `git push origin <branch>`,
    `git rev-parse HEAD` as its own call, then `integrity.py --record --topic <id> --kind push --sha
    <that literal SHA>` (the PR head may carry older scripts that need `--sha`; newer ones check it
-   is the pushed HEAD). Fail →
-   `held:verify-after-human-edit` (PR stays open), next PR.
+   is the pushed HEAD). Fail (or the push is refused: the head moved) → discard this run's
+   changes on the PR branch — of `<w>`, the body path and the image dir, `git checkout HEAD -- <those tracked
+   in HEAD>` and `git clean -fd -- <those that exist>` (as in `atoms/_stages.md` § Holds; a local commit left by a refused push is dropped by the next `switch -C`) —
+   `git switch <base>`, then `HRD
+   state --topic <id> --state held --reason verify-after-human-edit` and `HRD commit --cmd ship
+   --kind ship -m "chore(herald): hold <id>" .claude/herald/topics.json` (not pushed yet — §7.1
+   needs a clean tree); the PR stays open; next PR.
 4. Note the verified head SHA. `git switch <base>`.
 
 ## 6. Merge
+
+`--session-auto` of a PR no human approved: immediately before `gh pr merge`, `HRD
+auto-merged --topic <id> --pr <n>` and `HRD commit --cmd ship --kind ship -m "chore(herald):
+auto-merge <id>" .claude/herald/topics.json` (local only — §9's push carries it out; nothing
+runs between the stamp and the merge). If `gh pr merge` fails or is declined, check `gh pr view
+<n> --json state,mergedAt` — a non-zero exit can come after the merge itself (branch cleanup):
+merged → continue as a successful merge (below); **not** merged → `HRD auto-merged --topic <id>
+--clear`, `HRD commit --cmd ship --kind ship -m "chore(herald): auto-merge cleared <id>"
+.claude/herald/topics.json`, and stop (a changed head means a human pushed: leave it to an
+attended `/hrd ship`, never loop back to §5 here).
 
 `gh pr merge <n> --squash --match-head-commit <verified sha> --delete-branch` (head changed →
 back to §5). Add to the deploy set. `HRD sync`; `git branch -D` the local herald branch.
@@ -122,8 +152,8 @@ write the round result file and stop — the runner does 7–9.
 ## 7. Deploy
 
 1. `HRD integrity --predeploy` must be `ok` (HEAD's full Herald set vs ledger, clean tree, no
-   untracked build inputs, no residue). Not ok → no deploy; commit only the non-deploy records
-   (declines, holds) as `HRD commit --cmd ship --kind abort …` (unpushed), stop.
+   untracked build inputs, no residue). Not ok → no deploy; commit any records not yet committed
+   (normally none) as `HRD commit --cmd ship --kind abort …` (unpushed), stop.
 2. If the deploy set (or `--deploy-only` targets) is non-empty and `config.commands.deploy` is
    set: run it once (the guard asks — confirm it is this step). Failure → `git checkout --
    <deploy_artifacts>`, merged articles stay merged-unrecorded, stop.
@@ -135,11 +165,13 @@ with retries for up to ~10 minutes. Failures stay merged-unrecorded for the next
 
 ## 9. Record and push
 
-- Published Herald articles: `HRD record-published --topic <id> --slug <slug> --pr <n>`.
+- Published Herald articles: `HRD record-published --topic <id> --slug <slug> --pr <n>` (an
+  auto-merge stamp on the topic makes it `human_reviewed: false` by itself).
 - `--deploy-only` targets: `HRD mark-published --topic <id> --slug <slug>`.
 - Signals: per merged PR, the diff between `agent_final_hash` content (state.json at the first
   Herald push) and the merged body → `HRD signal --kind human-edit --topic <id> --data
-  '{"diff_summary": "...", "lines_changed": n}' --human-reviewed true`.
+  '{"diff_summary": "...", "lines_changed": n}' --human-reviewed <the human_reviewed value
+  record-published returned for it>`.
 - `HRD commit --cmd ship --kind ship -m "chore(herald): ship <ids>" .claude/herald/topics.json
   .claude/herald/published.json <deploy_artifacts>` (artifacts even if a URL failed), then
   `git push origin <base>`; refused → `HRD sync` and push once more; still refused → leave it

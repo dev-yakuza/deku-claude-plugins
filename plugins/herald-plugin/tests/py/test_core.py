@@ -167,6 +167,39 @@ class LedgerTests(Flow):
         self.assertIn("detached", p.stderr)
 
 
+class AutoMergeStampTests(Flow):
+    def test_session_auto_stamp_keeps_a_later_record_unreviewed(self):
+        tid, slug = self.run_flow()
+        sh(self.root, "git", "stash", "-u", "-q")
+        sh(self.root, "git", "switch", "-q", "main")
+        out, _ = self.hrd("auto-merged", "--topic", tid, "--pr", "12")
+        self.assertEqual(out["auto_merged_pr"], 12)
+        _, p = self.hrd("auto-merged", "--topic", tid, "--pr", "12", env={"HRD_UNATTENDED": "1"}, check=False)
+        self.assertNotEqual(p.returncode, 0)  # the batch runner stamps its own
+        _, p = self.hrd("auto-merged", "--topic", tid, "--pr", "13", check=False)
+        self.assertIn("already carries", p.stderr)
+        for bad in (("--pr", "0"), ("--pr", "12", "--clear"), ()):
+            _, p = self.hrd("auto-merged", "--topic", tid, *bad, check=False)
+            self.assertNotEqual(p.returncode, 0, bad)
+        self.assertEqual(self.hrd("throttle")[0]["used"], 1)  # an unrecorded auto merge counts today
+        rec, _ = self.hrd("record-published", "--topic", tid, "--slug", slug, "--pr", "12")
+        self.assertFalse(rec["human_reviewed"])  # a plain later ship cannot turn it into a reviewed article
+        self.assertEqual(self.hrd("throttle")[0]["used"], 1)  # counted once, recorded or not
+        _, p = self.hrd("state", "--topic", tid, "--state", "queued", check=False)
+        self.assertIn("already published", p.stderr)
+        _, p = self.hrd("auto-merged", "--topic", tid, "--pr", "12", check=False)
+        self.assertIn("already published", p.stderr)
+
+    def test_clear_undoes_a_stamp_whose_merge_failed(self):
+        tid, slug = self.run_flow()
+        sh(self.root, "git", "stash", "-u", "-q")
+        sh(self.root, "git", "switch", "-q", "main")
+        self.hrd("auto-merged", "--topic", tid, "--pr", "5")
+        out, _ = self.hrd("auto-merged", "--topic", tid, "--clear")
+        self.assertIsNone(out["auto_merged_pr"])
+        self.assertEqual(self.hrd("throttle")[0]["used"], 0)
+
+
 class AuditRoundTests(Flow):
     def crit(self, tid, slug, log=None, **fr):
         c = json.loads(json.dumps(CRIT_PASS))

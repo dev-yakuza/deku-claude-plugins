@@ -311,6 +311,27 @@ class MeasureCase(unittest.TestCase):
         self.assertAlmostEqual(measure.stream_json_usd(path, {"sonnet": 3.0}), round(expected, 4))
         os.remove(path)
 
+    def test_reports_the_session_it_read_so_later_readings_can_pin_it(self):
+        home = tempfile.mkdtemp()
+        root = "/tmp/hrd-measure-repo"
+        base = os.path.join(home, ".claude", "projects", measure.project_key(root))
+        os.makedirs(base)
+        for sid in ("older", "newer"):
+            with open(os.path.join(base, sid + ".jsonl"), "w") as f:
+                f.write("{}\n")
+            os.utime(os.path.join(base, sid + ".jsonl"), (1, 1) if sid == "older" else None)
+        old = os.environ.get("HOME")
+        os.environ["HOME"] = home
+        try:
+            self.assertEqual(measure.measure(root, {})["session"], "newer")
+            self.assertEqual(measure.measure(root, {}, session="older")["session"], "older")
+            self.assertIsNone(measure.measure(root, {}, files=[os.path.join(base, "older.jsonl")])["session"])
+            missing = measure.measure(root, {}, session="gone")
+            self.assertEqual((missing["found"], missing["total_usd"]), (False, 0.0))  # never a silent 0 spent
+            self.assertTrue(measure.measure(root, {})["found"])
+        finally:
+            os.environ["HOME"] = old
+
 
 if __name__ == "__main__":
     unittest.main()

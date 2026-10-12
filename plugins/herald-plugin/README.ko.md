@@ -37,8 +37,8 @@ Search Console(선택): `pip install google-auth requests`.
 ```bash
 /hrd init            # 레포 분석 + 인터뷰 → 하네스 (커밋 전에 검토)
 /hrd plan            # 글감 클러스터를 큐에 추가
-/hrd write t0001     # 글 1편 → PR (세션 안에서 먼저 승인)
-/hrd write t0001 --auto  # 같은 흐름, PR까지 질문 없이
+/hrd write t0001     # 글 1편 → PR, PR까지 질문 없이
+/hrd write t0001 --attended  # 같은 흐름, 단계마다 묻고 PR 전에 승인
 /hrd ship            # PR 승인 → 재검증 → 머지 → 배포 → URL 확인 → 기록
 /hrd batch --n 5     # 무인 작성. autonomy.publish=auto면 발행까지
 /hrd status          # 글감 · 보류 · 유지보수 플래그
@@ -66,5 +66,5 @@ Search Console(선택): `pip install google-auth requests`.
 
 ## 상태
 
-`0.4.0` — 전 흐름 구현(구현 적대적 리뷰 10라운드 + 이후 변경별 리뷰 반영). 0.3.0부터 성장 신호를 코드가 자동 기록, 0.4.0에서 외부 감사 라운드 상한과 `write --auto` 추가 — 기존 레포는 `/hrd update` 필요(진행 중이던 글은 감사 라운드를 1부터 다시 셈), 결정적 계층은 테스트로 검증(`bash plugins/herald-plugin/tests/run_tests.sh`).
+`0.5.0` — 전 흐름 구현(구현 적대적 리뷰 10라운드 + 이후 변경별 리뷰 반영). 0.3.0부터 성장 신호를 코드가 자동 기록, 0.4.0에서 외부 감사 라운드 상한, 0.5.0에서 `write` 기본을 무질문으로(`--attended`로 확인 모드)·설정 언어로 대화 — 기존 레포는 `/hrd update` 필요, 이후 진행 중인 글의 `/hrd resume`은 base 병합을 물음(0.4.0 이전부터 진행 중이던 글은 감사 라운드를 1부터 다시 셈), 결정적 계층은 테스트로 검증(`bash plugins/herald-plugin/tests/run_tests.sh`).
 `evolve`의 유용성과 지표 기반 제안은 실제 사용이 쌓여야 판정할 수 있습니다.
