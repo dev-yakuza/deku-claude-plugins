@@ -67,7 +67,7 @@ class BatchCase(RepoCase):
         self.assertFalse(os.path.exists(os.path.join(self.root, ".claude/herald/signals.jsonl")))
 
     def test_version_gate_after_branch_preserves_and_holds(self):
-        p = self.run_batch({"t0001": "version-gate-branch", "t0002": "pr"}, extra=("--expect-version", "0.3"))
+        p = self.run_batch({"t0001": "version-gate-branch", "t0002": "pr"}, extra=("--expect-version", "0.4"))
         self.assertNotEqual(p.returncode, 0)
         topics = {t["id"]: t for t in store.load_topics(self.root)["topics"]}
         self.assertEqual((topics["t0001"]["state"], topics["t0001"]["reason"]), ("held", "needs-human"))
@@ -242,9 +242,17 @@ class AutoSelectionCase(RepoCase):
         self.make_pr_head("t0002", "b", 2, dismissed)
         self.make_pr_head("t0003", "c", 3, ok, images=True)
         self.make_pr_head("t0004", "d", 4, ok)
-        chosen, skipped = batch.auto_candidates(self.root, self.cfg, [("t0001", 1), ("t0002", 2), ("t0003", 3), ("t0004", 4)])
+        late = {"final_round": {"verdict": "PASS", "audit": {}}, "decision_log": [],
+                "audit_log": [{"round": 2, "id": "R2-1", "severity": "MAJOR", "outcome": "deferred"}]}
+        skipped_round = {"final_round": {"verdict": "PASS", "audit": {}, "audit_round": 4}, "decision_log": []}
+        self.make_pr_head("t0005", "e", 5, late)
+        self.make_pr_head("t0006", "f", 6, skipped_round)
+        chosen, skipped = batch.auto_candidates(self.root, self.cfg, [("t0005", 5), ("t0006", 6), ("t0001", 1), ("t0002", 2),
+                                                                      ("t0003", 3), ("t0004", 4)])
         self.assertEqual(chosen, [("t0001", 1), ("t0004", 4)])
         reasons = dict(skipped)
+        self.assertIn("audit-log:deferred", reasons["t0005"])
+        self.assertIn("audit-skipped", reasons["t0006"])
         self.assertIn("decision:dismissal", reasons["t0002"])
         self.assertIn("images", reasons["t0003"])
         # throttle (max_per_day=2) reached

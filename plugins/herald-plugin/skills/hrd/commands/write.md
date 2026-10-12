@@ -1,11 +1,12 @@
-# WRITE — one article end to end (`/hrd write <topic-id>`)
+# WRITE — one article end to end (`/hrd write <topic-id> [--auto]`)
 
 brief → research → draft → critique → verify → publish (PR). Publishing itself is `/hrd ship`.
 Rules: `atoms/_contract.md`, `atoms/_stages.md`. Plan: §3.2, §3.2.2.
 
 ## 0. Preflight (each its own call)
 
-1. `printenv HRD_UNATTENDED` → mode.
+1. `printenv HRD_UNATTENDED` → mode: `1` = unattended; else `--auto` given = in-session auto
+   (`atoms/_contract.md` §C — no questions until the PR); else attended.
 2. `HRD lock acquire --cmd write` → keep the token (unattended: inherits `HRD_LOCK_TOKEN`).
    Release with `HRD lock release --token <t>` on every exit path below (an inherited batch
    lock is left to the runner — release is then a no-op).
@@ -19,17 +20,19 @@ Rules: `atoms/_contract.md`, `atoms/_stages.md`. Plan: §3.2, §3.2.2.
 6. `HRD select --topic <id>` must list the topic (queued, no open/merged PR, no local
    branch). An existing local branch means `resume`, not `write`.
 7. Budget: `config.budget.per_article_usd` — attended runs check it at each stage end with
-   `python3 .claude/herald/scripts/measure.py` and **warn only**; batch enforces it.
+   `python3 .claude/herald/scripts/measure.py` and **warn only**; `--auto` holds `budget` when
+   it is exceeded; batch enforces it.
 
 ## 1. Stages
 
 Run brief, research, draft, critique, verify in order per `atoms/_stages.md`. After each
 `DONE`, tell the user one line (attended).
 
-## 2. Session approval (attended only, before the PR)
+## 2. Session approval (attended only, before the PR; not with `--auto`)
 
-Show: title, slug, 5-line summary, audit findings incl. MINOR and dismissals, verify counts,
-measured cost so far. Ask: approve / request changes / hold.
+Show: title, slug, 5-line summary, audit findings incl. MINOR, dismissals and deferrals, verify
+counts, measured cost so far. Ask: approve / request changes / hold. Each re-run below counts
+an audit round (`HRD audit-round`), so after the cap only the editor and verify run again.
 
 - **Request changes**: record it right away — `HRD signal --kind session-edit-request --topic
   <id> --data '{"request": "<verbatim>"}'` (so a later hold or failure cannot lose it) and keep
@@ -46,7 +49,8 @@ measured cost so far. Ask: approve / request changes / hold.
 ## 3. Publish
 
 `atoms/_stages.md` § publish (finalize → commit → scope → push → ledger push record → PR).
-Report the PR URL and remind: "publish with `/hrd ship`". If `config.autonomy.publish` is
+Report the PR URL (with `--auto`: also the decisions it made and any deferred findings) and
+remind: "publish with `/hrd ship`". If `config.autonomy.publish` is
 `auto`, instead run `/hrd ship <that PR> --session-auto` right away: per plan §3.2.2 the
 interactive auto path covers only the PR this session just created — step 4 (per-PR question) is
 skipped, the auto-exclusion rules and the daily throttle apply (`HRD auto-exclusion --topic

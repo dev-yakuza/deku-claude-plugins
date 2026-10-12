@@ -79,11 +79,15 @@ report a mismatch.
 PR first `HRD fetch-pr --pr <n>` (a human may have pushed to it; the head then lives at
 `refs/remotes/origin/pr-<n>`) and use that ref below. For each
 (or the ones named): summary — title, category, audit summary (from `critique.json` at the PR
-head), latest `/hrd review` finding for it if any (unresolved BLOCKER → warning), verify counts,
+head) with any deferred MAJORs listed one per line (`audit_log` outcome `deferred` — the
+human decides them here), latest `/hrd review` finding for it if any (unresolved BLOCKER → warning), verify counts,
 "body differs from verified" (`HRD hash --slug <s> --rev <headRefOid>` vs `HRD ledger show`),
 "images changed", cannibalization re-check, and `HRD scope --topic <id> --rev <headRefOid>`.
 
 ## 4. Per-PR human approval (skipped by `--auto`)
+
+Deferred MAJORs (`## Late audit findings`) are decided here: approve accepts them; to fix one,
+skip this time and push the fix to the PR (the next ship re-verifies it, §5); or decline.
 
 approve / skip this time (no state change) / decline (reason → `HRD state --topic <id> --state
 declined --reason <short-reason>` (records `ship-decline`), `gh pr close <n>`, delete the
@@ -93,15 +97,17 @@ remote branch).
 
 1. With base scripts, before switching: scope must pass; if the PR head hash ≠ the ledger's
    `verified_hash` (a human pushed changes), re-verify:
-2. `git switch -C <branch> refs/remotes/origin/pr-<n>` (the local branch follows the human's
+2. `git switch -C <branch> --no-track refs/remotes/origin/pr-<n>` (the local branch follows the human's
    pushed head; no version re-check: the PR head is re-verified with its own scripts and never
    merged into); run the gate (`HRD gate --topic <id>`) and verify (`atoms/_stages.md` § verify). If
    unsupported sentences remain, **delta research**: the researcher sources only those
    sentences and appends `C#` to `research.md`; the fact-checker adds the mappings to
    `claims-map.json`; a PR comment `herald-source: <sentence> <URL>` from a human counts as a
    source. Image-only changes still run the gate and verify (the hash covers images).
-3. Pass → `HRD stage pass --topic <id> --stage verify --amend`, commit the artifacts, push,
-   `integrity.py --record --topic <id> --kind push --sha <new head>`. Fail →
+3. Pass → `HRD stage pass --topic <id> --stage verify --amend`, commit the artifacts, `git push origin <branch>`,
+   `git rev-parse HEAD` as its own call, then `integrity.py --record --topic <id> --kind push --sha
+   <that literal SHA>` (the PR head may carry older scripts that need `--sha`; newer ones check it
+   is the pushed HEAD). Fail →
    `held:verify-after-human-edit` (PR stays open), next PR.
 4. Note the verified head SHA. `git switch <base>`.
 

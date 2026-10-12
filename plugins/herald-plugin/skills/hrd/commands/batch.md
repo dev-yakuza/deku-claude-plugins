@@ -15,7 +15,7 @@ which denies base commits/pushes, merges outside `HRD_AUTO_PRS`, and deploys.
    no budget enforcement).
 2. Tell the user what will happen: N topics (`HRD select --n N`), mode (`approve` → PRs only;
    `auto` → up to `throttle.max_per_day` auto publishes today, excluding PRs with dismissals,
-   assumptions or image changes), the per-article budget, and that the run may take a long
+   assumptions, deferred audit findings, a skipped audit round or image changes), the per-article budget, and that the run may take a long
    time (rate limits up to 4h are waited out).
 3. Start it **detached** — a batch can run for hours (children, rate-limit waits up to 4h), longer
    than a background shell may live: `python3 .claude/herald/scripts/batch_runner.py --n <N> --expect-version <plugin version>

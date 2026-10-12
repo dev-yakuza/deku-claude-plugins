@@ -19,7 +19,7 @@ You are this repo's writer. You turn a brief and a source ledger into an article
 - Write `.claude/herald/work/<topic-id>/claims-map.json`:
   `{"sentences": [{"text": "<exact sentence>", "claims": ["C3"]}]}` — one entry for **every** factual sentence you wrote; `text` matches the article verbatim.
 - The deterministic gate (`config.commands.validate`, default `python3 .claude/herald/scripts/validate_content.py <article>`) must pass; fix its errors rather than arguing with them.
-- **Revisions** (loopbacks): address exactly the editor's weaknesses, the auditor's undismissed findings, the gate errors or the fact-checker's unsupported sentences given to you; keep `claims-map.json` in sync with the new text.
+- **Revisions** (loopbacks): address exactly the editor's weaknesses, the auditor's blocking findings (deferred ones are not yours to fix), the gate errors or the fact-checker's unsupported sentences given to you; keep `claims-map.json` in sync with the new text.
 
 ## Read list (draft — exactly this, nothing else)
 - `.claude/herald/work/<topic-id>/brief.md`

@@ -203,14 +203,47 @@ def load_machine(root, tid, name):
     return read_json(os.path.join(root, work_rel(tid, name)))
 
 
+AUDIT_ROUND_CAP = 3  # external-auditor rounds per article, human-requested revisions included
+
+
+def audit_round(root, cfg, tid):
+    """Count one external-auditor round before it is spawned (contract §F). Round 1 audits in
+    full; later rounds only recheck (a BLOCKER, a regression or an unfixed earlier finding
+    blocks; any other new MAJOR is deferred to the PR); past the cap the auditor is not run
+    again. Asking again for the same article (an interrupted or discarded round, a re-invoked
+    RESULT) returns the same round instead of counting a new one."""
+    st = load_state(root, tid)
+    cur = worktree_hash(root, cfg, st["slug"]) if st.get("slug") else None
+    n = _int(st.get("audit_rounds"))
+    repeat = n >= 1 and cur is not None and st.get("audit_round_body") == cur
+    if not repeat:
+        n += 1
+        st["audit_rounds"] = n
+        st["audit_round_body"] = cur
+        save_state(root, tid, st)
+    mode = "full" if n == 1 else ("recheck" if n <= AUDIT_ROUND_CAP else "skip")
+    return {"round": n, "mode": mode, "last": n == AUDIT_ROUND_CAP, "cap": AUDIT_ROUND_CAP, "repeat": repeat}
+
+
+def _int(v):
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def critique_passed(crit):
-    """critique.json final round: editor PASS and no undismissed BLOCKER/MAJOR."""
+    """critique.json final round: editor PASS and no BLOCKER/MAJOR left open. A MAJOR is closed
+    by a dismissal, or — on a recheck round (audit_round 2+) — by deferring it to the PR."""
     fr = (crit or {}).get("final_round") or {}
     audit = fr.get("audit") or {}
     dism = fr.get("dismissed") or {}
-    undismissed = (int(audit.get("blocker", 0)) - int(dism.get("blocker", 0))) + \
-                  (int(audit.get("major", 0)) - int(dism.get("major", 0)))
-    return fr.get("verdict") == "PASS" and undismissed <= 0
+    deferred = fr.get("deferred") or {}
+    rnd = fr.get("audit_round")
+    recheck = isinstance(rnd, int) and not isinstance(rnd, bool) and rnd >= 2
+    blocker = _int(audit.get("blocker")) - _int(dism.get("blocker"))
+    major = _int(audit.get("major")) - _int(dism.get("major")) - (_int(deferred.get("major")) if recheck else 0)
+    return fr.get("verdict") == "PASS" and blocker <= 0 and major <= 0
 
 
 def verify_passed(ver):
@@ -222,13 +255,94 @@ def auto_exclusion(crit):
     """Reasons a PR may not be auto-published (plan §3.2.2 ③). Empty list = eligible."""
     reasons = []
     for d in (crit or {}).get("decision_log") or []:
-        if d.get("kind") in ("dismissal", "assumption"):
+        if isinstance(d, dict) and d.get("kind") in ("dismissal", "assumption", "deferral"):
             reasons.append("decision:%s" % d.get("kind"))
     fr = (crit or {}).get("final_round") or {}
     audit = fr.get("audit") or {}
-    if fr.get("verdict") == "PASS" and int(audit.get("blocker", 0)) + int(audit.get("major", 0)) > 0:
+    if fr.get("verdict") == "PASS" and _int(audit.get("blocker")) + _int(audit.get("major")) > 0:
         reasons.append("audit-dismissed")
+    if _int(fr.get("audit_round")) > AUDIT_ROUND_CAP:
+        reasons.append("audit-skipped")  # the article changed after the last auditor round
+    for e in audit_entries(crit):  # whatever the decision log says, a deferred finding stays visible
+        if _sev(e) in ("BLOCKER", "MAJOR") and e.get("outcome") in ("deferred", "open"):
+            reasons.append("audit-log:%s" % e.get("outcome"))
     return sorted(set(reasons))
+
+
+def audit_entries(crit):
+    """`audit_log` entries, the latest per id (an outcome is updated by rewriting the entry;
+    an appended entry with the same id supersedes the earlier one)."""
+    latest = {}
+    for i, e in enumerate((crit or {}).get("audit_log") or []):
+        if isinstance(e, dict):
+            latest[str(e.get("id", "#%d" % i))] = e
+    return list(latest.values())
+
+
+def _sev(e):
+    return str(e.get("severity", "")).upper()
+
+
+def _count_problems(fr):
+    problems = []
+    for group in ("audit", "dismissed", "deferred"):
+        g = fr.get(group)
+        if g is None:
+            continue
+        if not isinstance(g, dict):
+            problems.append("final_round.%s must be an object" % group)
+            continue
+        for k, v in g.items():
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                problems.append("final_round.%s.%s must be a non-negative integer, not %r" % (group, k, v))
+    return problems
+
+
+def audit_log_problems(crit, rnd):
+    """What `stage pass --stage critique` checks beyond the verdict: counts are integers; a
+    deferred MAJOR is logged as deferred in this round (tag `new`, any tag on the last round); a
+    BLOCKER from the last round is closed only by a human's recorded decision; a skip round ran
+    no auditor."""
+    fr = (crit or {}).get("final_round") or {}
+    log = audit_entries(crit)
+    problems = _count_problems(fr)
+    deferred = _int((fr.get("deferred") or {}).get("major"))
+    if deferred and rnd <= AUDIT_ROUND_CAP:
+        last = rnd >= AUDIT_ROUND_CAP
+        ok = [e for e in log if e.get("round") == rnd and _sev(e) == "MAJOR" and e.get("outcome") == "deferred"
+              and (last or e.get("tag") == "new")]
+        if len(ok) < deferred:
+            problems.append("final_round.deferred.major is %d but audit_log lists %d deferrable MAJOR(s) for round %d "
+                            "(deferred, tag new — any tag on the last round)" % (deferred, len(ok), rnd))
+    human = {str(d.get("id")) for d in ((crit or {}).get("decision_log") or [])
+             if isinstance(d, dict) and d.get("kind") == "human"}
+    if os.environ.get("HRD_UNATTENDED") == "1" and any(
+            _sev(e) == "BLOCKER" and _int(e.get("round")) >= AUDIT_ROUND_CAP and str(e.get("id")) in human for e in log):
+        problems.append("refusing: a last-round BLOCKER closed by a human decision cannot pass in an unattended run")
+    if rnd == AUDIT_ROUND_CAP:
+        logged = [e for e in log if _sev(e) == "BLOCKER" and e.get("round") == rnd]
+        if _int((fr.get("audit") or {}).get("blocker")) > len(logged):
+            problems.append("every BLOCKER of the last audit round must be in audit_log with its id and round")
+    for e in log:
+        r = e.get("round")
+        if isinstance(r, bool) or not isinstance(r, int):
+            problems.append("audit_log entry %s has no integer round" % e.get("id"))
+            continue
+        if _sev(e) == "BLOCKER" and r >= AUDIT_ROUND_CAP and str(e.get("id")) not in human:
+            problems.append("BLOCKER %s from the last audit round needs a human's decision (decision_log kind "
+                            "human, id %s) — hold needs-human" % (e.get("id"), e.get("id")))
+        elif _sev(e) in ("BLOCKER", "MAJOR") and e.get("outcome") == "open" and r < AUDIT_ROUND_CAP:
+            problems.append("audit_log %s is open (held for a human): resolve it to fixed or dismissed with the "
+                            "human before passing" % e.get("id"))
+    if rnd > AUDIT_ROUND_CAP:
+        for group in ("audit", "dismissed", "deferred"):
+            if any(_int(v) for v in (fr.get(group) or {}).values()):
+                problems.append("audit round %d is past the cap: no auditor ran, final_round.%s must be empty "
+                                "(earlier decisions stay in audit_log)" % (rnd, group))
+        open_ = [e.get("id") for e in log if _sev(e) == "BLOCKER" and e.get("outcome") not in ("fixed", "dismissed")]
+        if open_:
+            problems.append("BLOCKER %s is still open in audit_log" % ", ".join(map(str, open_)))
+    return problems
 
 
 def run_gate(root, cfg, slug):
@@ -294,8 +408,19 @@ def stage_pass(root, cfg, tid, stage, amend=False):
                               % (name, stage, stage))
     if stage == "critique":
         crit = load_machine(root, tid, "critique.json")
+        rounds = _int(st.get("audit_rounds"))
+        claimed_round = ((crit or {}).get("final_round") or {}).get("audit_round")
+        if rounds < 1:
+            raise HeraldError("no audit round counted — run `HRD audit-round --topic %s` before spawning the auditor" % tid)
+        if claimed_round != rounds:
+            raise HeraldError("critique.json final_round.audit_round is %r but this article's audit round is %d"
+                              % (claimed_round, rounds))
+        problems = audit_log_problems(crit, rounds)
+        if problems:
+            raise HeraldError("; ".join(problems))
         if not critique_passed(crit):
-            raise HeraldError("critique.json does not record a PASS with zero undismissed BLOCKER/MAJOR")
+            raise HeraldError("critique.json does not record a PASS with no BLOCKER/MAJOR left open "
+                              "(dismissed, or a MAJOR deferred on a recheck round)")
         rec["body_hash"] = worktree_hash(root, cfg, st["slug"])
         # dismissals are recorded from the decision log, not from memory (abuse watch, auditor
         # prompt material); also on audit loopbacks, so a topic that never passes keeps them
@@ -364,10 +489,36 @@ def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
             raise HeraldError("refusing to record: article hash does not match the last verify pass")
         if not verify_passed(ver):
             raise HeraldError("refusing to record: verify.json is not clean")
+    if kind == "push":
+        sha = pushed_head(root, sha)
     rec = {"at": now_iso(), "topic_id": tid, "slug": st["slug"], "verified_hash": cur,
            "sha": sha, "kind": kind}
     append_jsonl(paths(root)["ledger"], rec)
     return rec
+
+
+def pushed_head(root, sha=None):
+    """A push record names the commit the branch now points at: HEAD, read here rather than
+    copied by hand. A given `sha` must resolve to that same commit."""
+    from .util import run
+
+    head = run(["git", "rev-parse", "--verify", "HEAD^{commit}"], cwd=root, check=False)
+    if head.returncode != 0:
+        raise HeraldError("cannot read HEAD for the push record")
+    head = head.stdout.strip()
+    br = run(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], cwd=root, check=False).stdout.strip()
+    if not br:
+        raise HeraldError("refusing to record a push: HEAD is detached — switch to the herald branch")
+    # what `git push origin <branch>` updated, whatever the branch tracks
+    remote = run(["git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/%s" % br], cwd=root, check=False)
+    if remote.returncode != 0 or remote.stdout.strip() != head:
+        raise HeraldError("refusing to record: HEAD %s is not origin/%s — `git push origin %s` first"
+                          % (head[:12], br, br))
+    if sha:
+        got = run(["git", "rev-parse", "--verify", "--quiet", "%s^{commit}" % sha], cwd=root, check=False)
+        if got.returncode != 0 or got.stdout.strip() != head:
+            raise HeraldError("refusing to record: --sha %s is not HEAD (%s) — omit --sha" % (sha, head[:12]))
+    return head
 
 
 def read_json_at(root, rev, relpath):

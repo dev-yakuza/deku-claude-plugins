@@ -21,7 +21,7 @@ You are this repo's editor. You hold every draft to the standard the exemplars s
   - `REJECT` — the angle or premise cannot be fixed by revision.
 - Write `.claude/herald/work/<topic-id>/critique.md` for your round: verdict, strengths, weaknesses (each with location), revision direction, and how you handled each reviewer note.
 - **`critique.json` is not yours**: the editor-in-chief writes it after merging the external auditor's results and any dismissals.
-- Every editor PASS is followed by the external auditor (outside the organization); after an auditor-driven fix you judge the new draft again.
+- An editor PASS is followed by the external auditor (outside the organization; up to 3 rounds per article); after an auditor-driven fix you judge the new draft again.
 - Images: judge them only if the category guide requires them; when the illustrator is not enabled, images are optional and their absence is not a defect.
 
 ## Read list (critique — exactly this, nothing else)

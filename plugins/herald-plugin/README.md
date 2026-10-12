@@ -20,7 +20,8 @@ through PR review, and grows its guides from real usage.
   fact-checker, editor. **Conditional** — subject expert, search & discovery (SEO · AEO · GEO
   lenses), illustrator, translator, distributor.
 - **External auditor** — a fresh, persona-less reviewer outside the organization runs after
-  every editor PASS and again outside the flow (`/hrd review`).
+  an editor PASS (up to 3 rounds per article; later rounds block only on BLOCKERs, unfixed
+  findings and regressions, the rest goes to the PR) and again outside the flow (`/hrd review`).
 - **Publishing = `/hrd ship`** — per-PR approval, re-verification of human edits, merge, deploy,
   URL check, record. Nothing is published by writing alone.
 
@@ -40,6 +41,7 @@ Search Console (optional): `pip install google-auth requests`.
 /hrd init            # analyze the repo + interview → harness (review it before committing)
 /hrd plan            # topic clusters into the queue
 /hrd write t0001     # one article → PR (approve it in the session first)
+/hrd write t0001 --auto  # same, no questions until the PR
 /hrd ship            # approve PRs → re-verify → merge → deploy → confirm URL → record
 /hrd batch --n 5     # unattended writing; with autonomy.publish=auto also publishes
 /hrd status          # topics, holds, maintenance flags
@@ -69,6 +71,6 @@ Search Console (optional): `pip install google-auth requests`.
 
 ## Status
 
-`0.3.0` — implemented end to end, after ten rounds of adversarial implementation review plus a review loop per later change; 0.3.0 records growth signals in code (existing repos: run `/hrd update`); the deterministic layer is covered by tests
+`0.4.0` — implemented end to end, after ten rounds of adversarial implementation review plus a review loop per later change; 0.3.0 records growth signals in code, 0.4.0 caps external-audit rounds and adds `write --auto` (existing repos: run `/hrd update`; an article already in progress counts its audit rounds from 1 again); the deterministic layer is covered by tests
 (`bash plugins/herald-plugin/tests/run_tests.sh`). `evolve`'s usefulness and metric-driven
 proposals need accumulated real use before they can be judged.

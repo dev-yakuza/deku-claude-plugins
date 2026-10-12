@@ -16,7 +16,8 @@ Claude Code를 위한 **레포 맞춤 편집 조직**. Herald는 레포에 글 �
   (사람이 고친 글 포함). 바닥선 위에서는 검색 노출 > 독자 가치.
 - **골격 역할** — 편집장(메인 세션), 콘텐츠 기획자, 리서처, 작가, 사실 확인 담당, 편집자.
   **조건부** — 분야 전문가·감수자, 검색·발견 담당(SEO·AEO·GEO), 일러스트, 번역, 배포·SNS.
-- **외부 감사자** — 조직 밖의 페르소나 없는 리뷰어가 편집자 PASS 뒤마다, 그리고 흐름 밖
+- **외부 감사자** — 조직 밖의 페르소나 없는 리뷰어가 편집자 PASS 뒤(글당 최대 3라운드, 2라운드부터는
+  BLOCKER·미해결 지적·회귀만 막고 나머지는 PR로 넘김), 그리고 흐름 밖
   (`/hrd review`)에서 다시 검토합니다.
 - **발행 = `/hrd ship`** — PR별 승인, 사람 수정의 재검증, 머지, 배포, URL 확인, 기록. 글을 쓰는
   것만으로는 아무것도 발행되지 않습니다.
@@ -37,6 +38,7 @@ Search Console(선택): `pip install google-auth requests`.
 /hrd init            # 레포 분석 + 인터뷰 → 하네스 (커밋 전에 검토)
 /hrd plan            # 글감 클러스터를 큐에 추가
 /hrd write t0001     # 글 1편 → PR (세션 안에서 먼저 승인)
+/hrd write t0001 --auto  # 같은 흐름, PR까지 질문 없이
 /hrd ship            # PR 승인 → 재검증 → 머지 → 배포 → URL 확인 → 기록
 /hrd batch --n 5     # 무인 작성. autonomy.publish=auto면 발행까지
 /hrd status          # 글감 · 보류 · 유지보수 플래그
@@ -64,5 +66,5 @@ Search Console(선택): `pip install google-auth requests`.
 
 ## 상태
 
-`0.3.0` — 전 흐름 구현(구현 적대적 리뷰 10라운드 + 이후 변경별 리뷰 반영). 0.3.0부터 성장 신호를 코드가 자동 기록 — 기존 레포는 `/hrd update` 필요, 결정적 계층은 테스트로 검증(`bash plugins/herald-plugin/tests/run_tests.sh`).
+`0.4.0` — 전 흐름 구현(구현 적대적 리뷰 10라운드 + 이후 변경별 리뷰 반영). 0.3.0부터 성장 신호를 코드가 자동 기록, 0.4.0에서 외부 감사 라운드 상한과 `write --auto` 추가 — 기존 레포는 `/hrd update` 필요(진행 중이던 글은 감사 라운드를 1부터 다시 셈), 결정적 계층은 테스트로 검증(`bash plugins/herald-plugin/tests/run_tests.sh`).
 `evolve`의 유용성과 지표 기반 제안은 실제 사용이 쌓여야 판정할 수 있습니다.

@@ -54,14 +54,28 @@ Detect once per command: `printenv HRD_UNATTENDED` → `1` = unattended. The edi
 | ambiguity (topic intent, angle) | ask | low/medium stakes: pick the charter-aligned reading, record `kind: assumption`; high/unsure: hold `needs-human` with cause `ambiguity:` |
 | cannibalization conflict | ask | hold `cannibalization` (never guess) |
 | auditor `MAJOR` | may dismiss with a recorded reason | may dismiss with a recorded reason (`kind: dismissal`) |
+| auditor `MAJOR` on a recheck round (`_stages.md` § critique 3) | `new` → defer to the PR (`kind: deferral`); `unfixed`/`regression` → fix (last round: any `MAJOR` → defer) | same |
 | auditor `BLOCKER` | dismiss only after the human confirms | **never dismiss** — fix or hold `needs-human` (`defect:`) |
 | stagnation / loop cap / budget | stop and report | hold `stagnation` / `budget` |
 
 **Decision log**: every judgment between brief and critique goes into
 `work/<id>/critique.json` → `decision_log: [{"kind", "note"}]` with `kind ∈ {routine,
-dismissal, assumption}`. verify and publish make no judgments; they only hold. `dismissal` and
-`assumption` exclude a PR from auto publish. The PR body repeats the log under
-`## Unattended decisions`.
+dismissal, assumption, deferral, human}` (`human`: a human's decision on a last-round BLOCKER,
+with its `id` — `atoms/_stages.md` § critique 3). verify and publish make no judgments; they only hold.
+`dismissal`, `assumption` and `deferral` exclude a PR from auto publish. The PR body repeats the log under
+`## Unattended decisions` (`human` entries under `## Human decisions`).
+
+**In-session auto** (`/hrd write <id> --auto`, `/hrd resume <id> --auto`): a normal session
+that asks the human nothing during the flow. Gates follow the Unattended column above; holds
+are recorded the attended way (`atoms/_stages.md` § Holds: `HRD state`, commit, push — no
+`HRD result`); stagnation / loop cap / budget hold instead of stopping (budget: `measure.py`
+over `per_article_usd` at a stage end → hold `budget`; a BLOCKER open on the last audit round →
+hold `needs-human`); there is no session approval. `resume --auto` of a held topic asks the
+human once, before the flow (a hold is lifted by a human's decision); a human-directed BLOCKER
+fix also asks them to confirm it. Any other step that would
+ask the human (version mismatch, a merge offer, a foreign commit on base) stops and reports
+instead — it never guesses. Publishing is
+unchanged: the PR, then `/hrd ship` (or `--session-auto` when `autonomy.publish` is `auto`).
 
 Unattended children never write the base branch: they record their outcome with
 `HRD result --topic <id> --status pr-open --pr <n>` or `--status held:<reason> --note "..."`
@@ -91,6 +105,10 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
 - critique and verify loopbacks share **3 per article** (`HRD loopback --topic <id> --cause …`
   returns `exhausted`). Human-requested revisions and `ship` delta research use `--human` / are not
   counted.
+- External-auditor rounds are capped separately at **3 per article**, human-requested
+  revisions included (`HRD audit-round` counts them; round 1 full, then recheck, then skip).
+  A fresh auditor always finds something new, so later rounds block only on BLOCKERs, unfixed
+  findings and regressions; the rest goes to the human at ship.
 - **Stagnation guard**: if a loopback's reason repeats the previous one (same weakness or the
   same unsupported sentence), do not loop again — hold `stagnation` (attended: stop and show
   both rounds).

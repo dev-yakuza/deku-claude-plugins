@@ -17,7 +17,10 @@ def write_machine(case, tid, name, obj, slug=None):
     if slug:
         h = worktree_hash(case.root, case.cfg, slug)
         if name == "critique.json":
-            obj.setdefault("final_round", {})["body_hash"] = h
+            fr = obj.setdefault("final_round", {})
+            fr["body_hash"] = h
+            if "audit_round" not in fr:  # the main session counts each auditor round first
+                fr["audit_round"] = case.hrd("audit-round", "--topic", tid)[0]["round"]
         else:
             obj["body_hash"] = h
     case.write(".claude/herald/work/%s/%s" % (tid, name), json.dumps(obj))
@@ -127,9 +130,203 @@ class LedgerTests(Flow):
         self.write("src/content/blog/%s.md" % slug, "---\ntitle: a\ndescription: d\nslug: %s\ndate: x\n---\nhuman edited body\n" % slug)
         write_machine(self, tid, "verify.json", VER_PASS, slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", "--amend")
-        rec, _ = self.hrd("ledger", "record", "--topic", tid, "--kind", "push", "--sha", "abc")
+        sh(self.root, "git", "push", "-q", "origin", sh(self.root, "git", "branch", "--show-current").strip())
+        rec, _ = self.hrd("ledger", "record", "--topic", tid, "--kind", "push")
         self.assertEqual(rec["kind"], "push")
+        head = sh(self.root, "git", "rev-parse", "HEAD").strip()
+        self.assertEqual(rec["sha"], head)
 
+    def test_push_record_names_head_not_a_typed_sha(self):
+        tid, slug = self.run_flow()
+        head = sh(self.root, "git", "rev-parse", "HEAD").strip()
+        br = sh(self.root, "git", "branch", "--show-current").strip()
+        _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "push", check=False)
+        self.assertIn("first", p.stderr)  # never pushed: no origin/<branch>
+        sh(self.root, "git", "push", "-q", "origin", br)
+        rec, _ = self.hrd("ledger", "record", "--topic", tid, "--kind", "push", "--sha", head[:7])
+        self.assertEqual(rec["sha"], head)  # an abbreviation of HEAD is expanded
+        for bad in ("abc", head[:7] + "0" * 33, "HEAD~1"):
+            _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "push", "--sha", bad, check=False)
+            self.assertIn("is not HEAD", p.stderr)
+        lines = [r for r in store.ledger_lines(self.root) if r["kind"] == "push"]
+        self.assertEqual([r["sha"] for r in lines], [head])
+        sh(self.root, "git", "commit", "-q", "--allow-empty", "-m", "unpushed")
+        _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "push", check=False)
+        self.assertIn("first", p.stderr)
+        # ship §5: a branch reset onto a PR ref tracks origin/pr-<n>; `git push origin <branch>`
+        # updates origin/<branch>, which is what the record compares
+        sh(self.root, "git", "push", "-q", "origin", "HEAD:refs/heads/pr-7")
+        sh(self.root, "git", "fetch", "-q", "origin")
+        sh(self.root, "git", "switch", "-q", "-C", br, "refs/remotes/origin/pr-7")
+        sh(self.root, "git", "commit", "-q", "--allow-empty", "-m", "re-verify artifacts")
+        sh(self.root, "git", "push", "-q", "origin", br)
+        rec, _ = self.hrd("ledger", "record", "--topic", tid, "--kind", "push")
+        self.assertEqual(rec["sha"], sh(self.root, "git", "rev-parse", "HEAD").strip())
+        sh(self.root, "git", "switch", "-q", "--detach")
+        _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "push", check=False)
+        self.assertIn("detached", p.stderr)
+
+
+class AuditRoundTests(Flow):
+    def crit(self, tid, slug, log=None, **fr):
+        c = json.loads(json.dumps(CRIT_PASS))
+        c["final_round"].update(fr)
+        if log is not None:
+            c["audit_log"] = log
+        write_machine(self, tid, "critique.json", c, slug)
+        return self.hrd("stage", "pass", "--topic", tid, "--stage", "critique", check=False)[1]
+
+    def edit(self, slug, n):
+        self.write("src/content/blog/%s.md" % slug,
+                   "---\ntitle: a\ndescription: d\nslug: %s\ndate: x\n---\nrevision %d\n" % (slug, n))
+
+    def at_round(self, tid, n):
+        st = store.load_state(self.root, tid)
+        st["audit_rounds"], st["audit_round_body"] = n, None
+        store.save_state(self.root, tid, st)
+
+    def test_rounds_full_then_recheck_then_skip_and_repeat_counts_once(self):
+        tid, slug = self.run_flow()  # the flow's critique used round 1
+        again, _ = self.hrd("audit-round", "--topic", tid)
+        self.assertEqual((again["round"], again["mode"], again["repeat"]), (1, "full", True))  # same article
+        modes = []
+        for i in range(3):
+            self.edit(slug, i)
+            modes.append(self.hrd("audit-round", "--topic", tid)[0])
+        self.assertEqual([(m["round"], m["mode"], m["last"]) for m in modes],
+                         [(2, "recheck", False), (3, "recheck", True), (4, "skip", False)])
+
+    def test_critique_pass_needs_the_counted_round(self):
+        tid, slug = self.run_flow()
+        p = self.crit(tid, slug, audit_round=1)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        p = self.crit(tid, slug, audit_round=5)
+        self.assertIn("audit_round is 5", p.stderr)
+        st = store.load_state(self.root, tid)
+        st.pop("audit_rounds")
+        store.save_state(self.root, tid, st)
+        p = self.crit(tid, slug, audit_round=1)
+        self.assertIn("HRD audit-round", p.stderr)
+
+    def test_deferral_rules(self):
+        tid, slug = self.run_flow()
+        new = lambda r, tag="new", sev="MAJOR", out="deferred", i="B1": {"round": r, "id": i, "severity": sev,  # noqa: E731
+                                                                         "tag": tag, "outcome": out}
+        p = self.crit(tid, slug, [new(1)], audit_round=1, audit={"major": 1}, deferred={"major": 1})
+        self.assertNotEqual(p.returncode, 0)  # round 1: fixed or dismissed, never deferred
+        self.at_round(tid, 2)
+        p = self.crit(tid, slug, [], audit_round=2, audit={"major": 1}, deferred={"major": 1})
+        self.assertIn("deferrable", p.stderr)  # not logged
+        p = self.crit(tid, slug, [new(2, tag="regression")], audit_round=2, audit={"major": 1}, deferred={"major": 1})
+        self.assertIn("deferrable", p.stderr)  # a regression blocks before the last round
+        p = self.crit(tid, slug, [new(2), new(2, i="B2")], audit_round=2, audit={"major": 2}, deferred={"major": 2})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.at_round(tid, 3)
+        p = self.crit(tid, slug, [new(3, tag="unfixed")], audit_round=3, audit={"major": 1}, deferred={"major": 1})
+        self.assertEqual(p.returncode, 0, p.stderr)  # last round: any MAJOR is deferred
+        p = self.crit(tid, slug, [new(3, sev="BLOCKER", out="open")], audit_round=3, audit={"blocker": 1},
+                      dismissed={"blocker": 1})
+        self.assertIn("needs a human", p.stderr)  # open + a dismissal count without a human decision
+        p = self.crit(tid, slug, [], audit_round=3, audit={"blocker": 1}, dismissed={"blocker": 1})
+        self.assertIn("must be in audit_log", p.stderr)  # an unlogged last-round BLOCKER
+        p = self.crit(tid, slug, [{"id": "R3-1", "severity": "BLOCKER", "outcome": "dismissed"}], audit_round=3,
+                      audit={"blocker": 1}, dismissed={"blocker": 1})
+        self.assertIn("no integer round", p.stderr)
+        self.at_round(tid, 2)
+        p = self.crit(tid, slug, [new(1, out="open")], audit_round=2)
+        self.assertIn("is open", p.stderr)  # a looped-back finding is logged as fixed
+        p = self.crit(tid, slug, [new(1, sev="BLOCKER", out="open")], audit_round=2)
+        self.assertIn("is open", p.stderr)  # a held round-1 BLOCKER is resolved with the human first
+        self.at_round(tid, 4)
+        p = self.crit(tid, slug, [new(1, sev="BLOCKER", out="open")], audit_round=4, audit={})
+        self.assertIn("still open", p.stderr)
+        crit = {"final_round": {"verdict": "PASS", "audit": {}}, "audit_log": [new(3, out="open")]}
+        self.assertEqual(store.auto_exclusion(crit), ["audit-log:open"])
+
+    def test_last_round_blocker_needs_a_human_and_skip_is_never_auto_published(self):
+        tid, slug = self.run_flow()
+        self.at_round(tid, 4)
+        blocker = {"round": 3, "id": "R3-1", "severity": "BLOCKER", "outcome": "open"}
+        p = self.crit(tid, slug, [blocker], audit_round=4, audit={})
+        self.assertIn("needs a human", p.stderr)
+        p = self.crit(tid, slug, [dict(blocker, outcome="fixed")], audit_round=4, audit={})
+        self.assertIn("needs a human", p.stderr)  # a loopback alone cannot close it
+        human = [{"kind": "human", "id": "R3-1", "note": "human: confirmed the fix"}]
+        c = json.loads(json.dumps(CRIT_PASS))
+        c["final_round"].update(audit_round=4, audit={"major": 1}, dismissed={"major": 1})
+        c["audit_log"], c["decision_log"] = [blocker, dict(blocker, outcome="fixed")], human
+        write_machine(self, tid, "critique.json", c, slug)
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "critique", check=False)
+        self.assertIn("past the cap", p.stderr)
+        c["final_round"].update(audit={}, dismissed={}, deferred={"major": 1})
+        write_machine(self, tid, "critique.json", c, slug)
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "critique", check=False)
+        self.assertIn("final_round.deferred must be empty", p.stderr)  # round 3's deferral is not carried over
+        c["final_round"].pop("deferred")
+        write_machine(self, tid, "critique.json", c, slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "critique")  # the later entry for R3-1 wins
+        crit = store.load_machine(self.root, tid, "critique.json")
+        self.assertEqual(store.auto_exclusion(crit), ["audit-skipped"])
+
+    def test_last_round_blocker_dismissed_by_a_human_passes_the_same_round(self):
+        tid, slug = self.run_flow()
+        self.at_round(tid, 3)
+        blocker = {"round": 3, "id": "R3-1", "severity": "BLOCKER", "outcome": "dismissed"}
+        p = self.crit(tid, slug, [blocker], audit_round=3, audit={"blocker": 1}, dismissed={"blocker": 1})
+        self.assertIn("needs a human", p.stderr)
+        c = json.loads(json.dumps(CRIT_PASS))
+        c["final_round"].update(audit_round=3, audit={"blocker": 1}, dismissed={"blocker": 1})
+        c["audit_log"], c["decision_log"] = [blocker], [{"kind": "human", "id": "R3-1", "note": "human: policy"}]
+        write_machine(self, tid, "critique.json", c, slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "critique")
+
+    def test_last_round_refuses_audit_loopback_and_unattended_human_closure(self):
+        tid, slug = self.run_flow()
+        self.at_round(tid, 3)
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "audit", "--theme", "depth", check=False)
+        self.assertIn("no audit loopback on the last audit round", p.stderr)
+        out, _ = self.hrd("loopback", "--topic", tid, "--human")
+        self.assertEqual(out["loopbacks"], 0)
+        self.article(slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
+        c = json.loads(json.dumps(CRIT_PASS))
+        c["final_round"].update(audit_round=3, audit={"blocker": 1}, dismissed={"blocker": 1})
+        c["audit_log"] = [{"round": 3, "id": "R3-1", "severity": "BLOCKER", "outcome": "dismissed"}]
+        c["decision_log"] = [{"kind": "human", "id": "R3-1", "note": "human: ok"}, {"kind": "dismissal", "note": "R3-1: ok"}]
+        write_machine(self, tid, "critique.json", c, slug)
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "critique", env={"HRD_UNATTENDED": "1"}, check=False)
+        self.assertIn("unattended", p.stderr)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "critique")
+        with open(os.path.join(self.root, ".claude/herald/signals.jsonl")) as f:
+            kinds = [json.loads(l)["kind"] for l in f if l.strip()]
+        self.assertEqual(kinds.count("dismissal"), 1)  # a human dismissal is a signal
+
+    def test_minor_findings_are_noted_and_never_block(self):
+        tid, slug = self.run_flow()
+        self.at_round(tid, 2)
+        minor = {"round": 1, "id": "R1-2", "severity": "MINOR", "outcome": "open"}
+        p = self.crit(tid, slug, [minor, dict(minor, id="R1-3", outcome="noted")], audit_round=2, audit={"minor": 2})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        crit = store.load_machine(self.root, tid, "critique.json")
+        self.assertEqual(store.auto_exclusion(crit), [])
+
+    def test_junk_counts_and_deferral_exclusion(self):
+        self.assertFalse(store.critique_passed({"final_round": {"verdict": "PASS", "audit_round": True,
+                                                                "audit": {"major": 1}, "deferred": {"major": 1}}}))
+        self.assertTrue(store.critique_passed({"final_round": {"verdict": "PASS", "audit": {"major": "x"},
+                                                               "dismissed": {"major": None}}}))  # junk counts as 0
+        crit = {"final_round": {"verdict": "PASS", "audit": {"major": "x"}}, "decision_log": [{"kind": "deferral"}, "junk"]}
+        self.assertEqual(store.auto_exclusion(crit), ["decision:deferral"])
+        # a deferred finding excludes auto publish even when the decision log forgot it
+        crit = {"final_round": {"verdict": "PASS", "audit": {}}, "decision_log": [],
+                "audit_log": [{"id": "R2-1", "severity": "MAJOR", "outcome": "deferred"}]}
+        self.assertEqual(store.auto_exclusion(crit), ["audit-log:deferred"])
+
+    def test_stage_pass_refuses_junk_counts(self):
+        tid, slug = self.run_flow()
+        for bad in ({"major": "1"}, {"major": True}, {"blocker": -1}, [0]):
+            p = self.crit(tid, slug, audit_round=1, audit=bad)
+            self.assertNotEqual(p.returncode, 0, bad)
 
 class LockTests(RepoCase):
     def test_lock_reentry_and_conflict(self):

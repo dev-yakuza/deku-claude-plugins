@@ -22,7 +22,7 @@ from hrdlib.hashing import tree_hash, worktree_hash  # noqa: E402
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.3.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.4.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -211,6 +211,9 @@ def cmd_loopback(a):
     if a.theme and a.cause not in ("revise", "audit"):
         raise HeraldError("--theme applies only to --cause revise|audit")
     st = store.load_state(root, a.topic)
+    if a.cause == "audit" and store._int(st.get("audit_rounds")) >= store.AUDIT_ROUND_CAP:
+        raise HeraldError("no audit loopback on the last audit round: a MAJOR is deferred, a BLOCKER is held "
+                          "needs-human (a human-directed fix uses --human)")
     if not a.human:
         st["loopbacks"] = int(st.get("loopbacks", 0)) + 1
     st["last_loopback"] = "human" if a.human else a.cause
@@ -240,6 +243,11 @@ def cmd_loopback(a):
     if escalate:
         store.safe_signal(root, "escalation", a.topic, {"loopback": n, "cause": a.cause})
     emit({"loopbacks": n, "cap": 3, "exhausted": n > 3, "escalate_tier": escalate})
+
+
+def cmd_audit_round(a):
+    root, cfg = ctx()
+    emit(store.audit_round(root, cfg, a.topic))
 
 
 def cmd_finalize(a):
@@ -654,6 +662,7 @@ def build():
     p.add_argument("--cause", choices=sorted(store.LOOPBACK_CAUSES)); p.add_argument("--theme")
     p.add_argument("--note")
     p.set_defaults(fn=cmd_loopback)
+    p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)
     p = sp.add_parser("finalize"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_finalize)
     p = sp.add_parser("result"); p.add_argument("--topic", required=True); p.add_argument("--status", required=True)
     p.add_argument("--pr", type=int); p.add_argument("--note"); p.add_argument("--merged", type=int, nargs="*")

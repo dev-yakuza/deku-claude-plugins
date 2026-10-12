@@ -5,8 +5,8 @@ Show this in `config.language` (English if not initialized):
 **Setup** — `init [lang]` install the harness · `config [key value]` dials · `update [--check]`
 adopt central improvements
 
-**Writing** — `plan [--n N]` build the topic queue · `write <id>` one article to a PR ·
-`brief|research|draft|critique|verify|publish <id>` one stage · `resume <id>` continue ·
+**Writing** — `plan [--n N]` build the topic queue · `write <id> [--auto]` one article to a PR (`--auto`: no questions until the PR) ·
+`brief|research|draft|critique|verify|publish <id>` one stage · `resume <id> [--auto]` continue ·
 `batch [--n N]` unattended writing (and auto publish if enabled)
 
 **Publishing** — `ship [ids|PRs]` approve, re-verify, merge, deploy, confirm, record ·
