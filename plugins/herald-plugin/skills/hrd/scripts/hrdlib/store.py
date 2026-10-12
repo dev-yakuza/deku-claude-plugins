@@ -182,6 +182,8 @@ def artifact_hash(root, cfg, st, name):
 def entry_check(root, cfg, st, stage):
     """Plan §3.2 entry condition: every input file still matches the hash its producer recorded."""
     problems = []
+    if (st.get("trim") or {}).get("status") == "open":
+        problems.append("a trim is open — `HRD trim --topic %s --abort` first" % st.get("topic_id"))
     for producer, name in CONSUMES.get(stage, []):
         rec = st["stages"].get(producer, {}).get("outputs", {})
         if name not in rec:
@@ -251,9 +253,12 @@ def verify_passed(ver):
     return int(c.get("unsupported", 1)) == 0 and int(c.get("contradicted", 1)) == 0
 
 
-def auto_exclusion(crit):
+def auto_exclusion(crit, st=None):
     """Reasons a PR may not be auto-published (plan §3.2.2 ③). Empty list = eligible."""
     reasons = []
+    tr = (st or {}).get("trim") or {}
+    if tr.get("status") == "done" and tr.get("hash") != tr.get("base_hash"):
+        reasons.append("trimmed")  # the agents changed the body after critique
     for d in (crit or {}).get("decision_log") or []:
         if isinstance(d, dict) and d.get("kind") in ("dismissal", "assumption", "deferral"):
             reasons.append("decision:%s" % d.get("kind"))
@@ -261,11 +266,88 @@ def auto_exclusion(crit):
     audit = fr.get("audit") or {}
     if fr.get("verdict") == "PASS" and _int(audit.get("blocker")) + _int(audit.get("major")) > 0:
         reasons.append("audit-dismissed")
+    human = {str(d.get("id")) for d in (crit or {}).get("decision_log") or []
+             if isinstance(d, dict) and d.get("kind") == "human"}
+    by_human = sum(1 for e in audit_entries(crit) if _sev(e) == "BLOCKER" and e.get("outcome") == "dismissed"
+                   and str(e.get("id")) in human and e.get("round") == fr.get("audit_round"))
+    if _int((fr.get("dismissed") or {}).get("blocker")) > by_human or any(
+            _sev(e) == "BLOCKER" and e.get("outcome") == "dismissed" and str(e.get("id")) not in human
+            for e in audit_entries(crit)):
+        reasons.append("audit-dismissed:blocker")  # only a human closes a BLOCKER; never accepted unread
     if _int(fr.get("audit_round")) > AUDIT_ROUND_CAP:
         reasons.append("audit-skipped")  # the article changed after the last auditor round
     for e in audit_entries(crit):  # whatever the decision log says, a deferred finding stays visible
-        if _sev(e) in ("BLOCKER", "MAJOR") and e.get("outcome") in ("deferred", "open"):
+        if _sev(e) == "BLOCKER" and e.get("outcome") == "deferred":
+            reasons.append("audit-log:deferred-blocker")  # a BLOCKER is never deferred; never accepted unread
+        elif _sev(e) in ("BLOCKER", "MAJOR") and e.get("outcome") in ("deferred", "open"):
             reasons.append("audit-log:%s" % e.get("outcome"))
+    return sorted(set(reasons))
+
+
+# Exclusions a human may accept for one article by asking for it to be published unread
+# (`/hrd next`, `write --ship`): each is a decision the agents made and logged in the PR. The
+# others stay blocking: an open BLOCKER, an article changed after its last auditor round, a
+# PR whose verdict files cannot be read.
+CONSENT_ACCEPTS = ("decision:dismissal", "decision:assumption", "decision:deferral",
+                   "audit-dismissed", "audit-log:deferred", "trimmed", "images")
+
+
+def blocking_exclusions(reasons, consent=False):
+    return [r for r in reasons if not (consent and r in CONSENT_ACCEPTS)]
+
+
+def _git_blob(root, rev, relpath):
+    """The git blob id of a file at `rev`, or of the working-tree file as git would store it."""
+    import subprocess
+
+    args = ["git", "rev-parse", "-q", "--verify", "%s:%s" % (rev, relpath)] if rev else \
+        ["git", "hash-object", "--", relpath]
+    if not rev and not os.path.isfile(os.path.join(root, relpath)):
+        return None
+    proc = subprocess.run(args, cwd=root, capture_output=True, text=True)
+    return proc.stdout.strip() or None if proc.returncode == 0 else None
+
+
+def _blob_hash(root, rev, relpath):
+    import hashlib
+    import subprocess
+
+    proc = subprocess.run(["git", "show", "%s:%s" % (rev, relpath)], cwd=root, capture_output=True)
+    return "sha256:" + hashlib.sha256(proc.stdout).hexdigest() if proc.returncode == 0 else None
+
+
+def exclusion_reasons(root, cfg, tid, rev=None):
+    """auto_exclusion for one topic, read from a PR head (`rev`; on base the work files are not
+    there) or the working tree, plus what only the repo shows: a critique.json changed after
+    critique passed, and images the PR adds or changes (they go out unseen). A PR whose verdict
+    files cannot be read is never eligible."""
+    from . import commits
+
+    rel = work_rel(tid, "critique.json")
+    if rev:
+        crit, st, ch = read_json_at(root, rev, rel), read_json_at(root, rev, work_rel(tid, "state.json")), \
+            _blob_hash(root, rev, rel)
+    else:
+        crit, st, ch = load_machine(root, tid, "critique.json"), read_json(state_path(root, tid)), file_hash(root, rel)
+    if not isinstance(crit, dict) or not isinstance(st, dict):
+        return ["missing-critique-or-state"]
+    reasons = auto_exclusion(crit, st)
+    cst = (st.get("stages") or {}).get("critique") or {}
+    blobs = cst.get("blobs") if isinstance(cst.get("blobs"), dict) else None
+    md_rel = work_rel(tid, "critique.md")
+    if blobs:
+        changed = any(_git_blob(root, rev, work_rel(tid, n)) != blobs.get(n) for n in ("critique.md", "critique.json"))
+    else:  # recorded before 0.6.0: content hashes only
+        outs = cst.get("outputs") or {}
+        md = _blob_hash(root, rev, md_rel) if rev else file_hash(root, md_rel)
+        changed = ch != outs.get("critique.json") or md != outs.get("critique.md")
+    if changed:
+        reasons.append("critique-changed")
+    slug = st.get("slug")
+    if slug:
+        img = cfg.image_dir(slug) + "/"
+        if any(f.startswith(img) for f in commits.changed_files(root, "origin/%s...%s" % (cfg.base, rev or "HEAD"))):
+            reasons.append("images")
     return sorted(set(reasons))
 
 
@@ -328,6 +410,9 @@ def audit_log_problems(crit, rnd):
         if isinstance(r, bool) or not isinstance(r, int):
             problems.append("audit_log entry %s has no integer round" % e.get("id"))
             continue
+        if _sev(e) == "BLOCKER" and e.get("outcome") == "deferred":
+            problems.append("BLOCKER %s is logged deferred — a BLOCKER is fixed, dismissed by a human or held"
+                            % e.get("id"))
         if _sev(e) == "BLOCKER" and r >= AUDIT_ROUND_CAP and str(e.get("id")) not in human:
             problems.append("BLOCKER %s from the last audit round needs a human's decision (decision_log kind "
                             "human, id %s) — hold needs-human" % (e.get("id"), e.get("id")))
@@ -363,6 +448,8 @@ def stage_pass(root, cfg, tid, stage, amend=False):
     st = load_state(root, tid)
     if stage not in PRODUCES:
         raise HeraldError("unknown stage %s" % stage)
+    if (st.get("trim") or {}).get("status") == "open":
+        raise HeraldError("a trim is open — `HRD trim --topic %s --finish` or `--abort` first" % tid)
     if not amend:
         problems = entry_check(root, cfg, st, stage)
         if problems:
@@ -422,6 +509,11 @@ def stage_pass(root, cfg, tid, stage, amend=False):
             raise HeraldError("critique.json does not record a PASS with no BLOCKER/MAJOR left open "
                               "(dismissed, or a MAJOR deferred on a recheck round)")
         rec["body_hash"] = worktree_hash(root, cfg, st["slug"])
+        # git blob ids too: a PR head is compared by blob, which line-ending filters keep equal
+        rec["blobs"] = {n: _git_blob(root, None, work_rel(tid, n)) for n in ("critique.md", "critique.json")}
+        tr = st.get("trim") or {}
+        if tr.get("status") == "done" and tr.get("hash") != rec["body_hash"]:
+            tr["status"] = "superseded"  # a fresh critique evaluated a later body: the trim is history
         # dismissals are recorded from the decision log, not from memory (abuse watch, auditor
         # prompt material); also on audit loopbacks, so a topic that never passes keeps them
         record_dismissals(root, tid, crit)
@@ -441,6 +533,377 @@ def stage_pass(root, cfg, tid, stage, amend=False):
     st["stage"] = nxt
     save_state(root, tid, st)
     return st
+
+
+# --- trim: the one deletion-only repair of a verify gap (contract §F) ----------------------
+
+TRIM_MAX_UNSUPPORTED = 3   # more unsupported sentences than this is a writing problem: loop back
+TRIM_MAX_SENTENCE = 400    # characters: a longer "sentence" is a passage
+_ASIDE_RE = re.compile(r"[(（][^()（）\n]*[)）]")
+_CLOSERS = "\"'”’)）」』"
+_ABBREVIATIONS = {"dr", "mr", "mrs", "ms", "prof", "st", "jr", "sr", "vs", "etc", "e.g", "i.e", "no", "fig", "vol",
+                  "approx", "inc", "ltd", "co", "corp", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep",
+                  "sept", "oct", "nov", "dec", "mt", "ft", "est", "dept", "gen", "gov", "rev", "p", "pp"}
+_LINE_MARK_RE = re.compile(r"[ \t]*(?:[-*+]|\d+[.)]|>|#{1,6})?[ \t]*")
+# text a trim never cuts into: code, URLs, autolinks, link targets
+_PROTECTED_RE = re.compile(r"(?ms)^[ \t]*(```|~~~).*?^[ \t]*\1[^\n]*$|^(?: {4}|\t)[^\n]*$|`[^`\n]+`|<[^<>\s]+>"
+                           r"|\]\((?:[^()\s]|\([^()\s]*\))*\)|\bhttps?://\S+")
+
+
+def _trim_dir(root, tid):
+    return os.path.join(paths(root)["memory"], "trim", tid)
+
+
+def _image_hash(root, cfg, slug):
+    return worktree_hash(root, cfg, slug, path=cfg.image_dir(slug))
+
+
+def _body_start(text):
+    """Offset where the body starts (after a `---` YAML or `+++` TOML frontmatter block), so a
+    trim never touches frontmatter fields (draft, noindex, description …). None: a frontmatter
+    opens but does not close."""
+    m = re.match(r"(---|\+\+\+)\r?\n", text)
+    if not m:
+        return 0
+    end = re.compile(r"\r?\n%s\r?\n" % re.escape(m.group(1))).search(text, m.end() - 1)
+    return end.end() if end else None
+
+
+def _sentence_bounds(text, a, b):
+    """Does text[a:b] stand as whole sentences? It starts a paragraph or block line (after a
+    list/quote/heading mark), or follows a sentence end — after 。！？ directly, after .!? and a
+    space only when it opens with a capital, a digit or a non-ASCII letter (so "e.g. aspirin"
+    is no start); a line start inside a paragraph counts only when the previous line ended a
+    sentence. It ends with a sentence end followed by whitespace or the end of the text (a CJK
+    end may also be followed by more text, but not after a closing quote)."""
+    seg = text[a:b]
+    if not seg or len(seg) > TRIM_MAX_SENTENCE or re.search(r"\n[ \t]*\n", seg):
+        return False
+    ls = text.rfind("\n", 0, a) + 1
+    line = text[ls:a]
+    end_re = r"(?:[.!?][%s]*|[。！？][%s]*)" % (_CLOSERS, _CLOSERS)
+    if _LINE_MARK_RE.fullmatch(line):
+        if line.strip():
+            starts = True  # after a list, quote or heading mark
+        else:
+            prev = text[text.rfind("\n", 0, max(ls - 1, 0)) + 1:max(ls - 1, 0)] if ls else ""
+            starts = ls == 0 or not prev.strip() or re.search(end_re + r"[ \t]*$", prev) is not None
+    elif re.search(r"[。！？][%s]*[ \t]*$" % _CLOSERS, line):
+        # after a closing quote only with a space: 「…。」と述べた。 continues the sentence
+        starts = re.search(r"[。！？][%s]+$" % _CLOSERS, line) is None
+    elif re.search(r"[.!?][%s]*[ \t]+$" % _CLOSERS, line):
+        word = re.search(r"(\S*)[.!?][%s]*[ \t]+$" % _CLOSERS, line).group(1)
+        abbrev = (word.lower().rstrip(".") in _ABBREVIATIONS or re.fullmatch(r"[A-Z]", word) is not None
+                  or "." in word)  # Dr. Smith, J. Doe, U.S. Food …
+        starts = not re.match(r"[a-z]", seg) and not abbrev
+    else:
+        starts = False
+    m = re.search(r"([.!?。！？])([%s]*)$" % _CLOSERS, seg)
+    after = text[b:b + 1]
+    if not m:
+        ends = False
+    elif after in ("", " ", "\t", "\r", "\n"):
+        ends = True
+    else:
+        ends = m.group(1) in "。！？" and not m.group(2)
+    return bool(starts and ends)
+
+
+def _cjk(c):
+    """Kana, CJK ideographs and fullwidth forms: written without spaces (Hangul is not)."""
+    return bool(c) and ("\u3000" <= c <= "\u30ff" or "\u3400" <= c <= "\u9fff" or "\uff00" <= c <= "\uffef")
+
+
+def _protected(text):
+    return [(m.start(), m.end()) for m in _PROTECTED_RE.finditer(text)]
+
+
+def _kept_pattern(old, spans):
+    """The trimmed body must be the snapshot minus `spans`, byte for byte. At each seam only the
+    whitespace the deletion left may change: within a line it may close up to one space or none;
+    across lines the line break and indentation before the next kept text stay as they were."""
+    merged = []
+    for a, b in sorted(spans):  # deletions separated only by whitespace form one seam
+        if merged and not old[merged[-1][1]:a].strip():
+            merged[-1][1] = b
+        else:
+            merged.append([a, b])
+    pieces, last = [], 0
+    for a, b in merged:
+        pieces.append(old[last:a])
+        last = b
+    pieces.append(old[last:])
+    out = []
+    for i, p in enumerate(pieces):
+        lead = re.match(r"\s*", p).group(0) if i > 0 else ""
+        core = p[len(lead):]
+        trail = re.search(r"\s*$", core).group(0) if i < len(pieces) - 1 else ""
+        core = core[:len(core) - len(trail)] if trail else core
+        out.append((lead, core, trail))
+    pat = []
+    for i, (lead, core, trail) in enumerate(out):
+        if i > 0:
+            wl, wr = out[i - 1][2], lead
+            if i == len(out) - 1 and not core:
+                opts = {wl, wr, wl + wr}  # trailing whitespace at the end of the text
+            elif "\n" in wr:
+                # the next line keeps its own break and indentation (or the previous side's,
+                # when the indentation is the same)
+                opts = {wr} | ({wl} if "\n" in wl and wl.rsplit("\n", 1)[1] == wr.rsplit("\n", 1)[1] else set())
+            elif "\n" in wl:
+                opts = {wl}
+            else:
+                opts = {x for x in (" ", wl, wr, wl + wr) if x}
+                left, right = out[i - 1][1][-1:], core[:1]
+                if (not wl and not wr) or (right and not right.isalnum() and not right.isspace()) or (
+                        _cjk(left) and _cjk(right)):
+                    opts.add("")  # as it was, before punctuation ("helps (x)." → "helps."), or between CJK
+            pat.append("(?:%s)" % "|".join(re.escape(o) for o in sorted(opts, key=len, reverse=True)))
+        pat.append(re.escape(core))
+    return re.compile("".join(pat), re.S)
+
+
+def trim_begin(root, cfg, tid):
+    """Open the trim after a failed verify. The fact-checker lists the unsupported text verbatim
+    — whole sentences, or a parenthetical aside when that aside alone is unsupported; the writer
+    may then only delete a listed text whole, or map it to an existing claim. The article
+    critique passed is snapshotted."""
+    import shutil
+
+    st = load_state(root, tid)
+    slug = st.get("slug")
+    if st.get("trim"):
+        raise HeraldError("%s was already trimmed once (%s) — loop back or hold" % (tid, st["trim"].get("status")))
+    if st.get("stage") != "verify" or not slug:
+        raise HeraldError("trim repairs a failed verify (stage is %s)" % st.get("stage"))
+    if "translator" in ((cfg.get("roles", "conditional") or [])):
+        raise HeraldError("trim does not cover translations — loop back")
+    cur = worktree_hash(root, cfg, slug)
+    if not cur or (st["stages"].get("critique") or {}).get("body_hash") != cur:
+        raise HeraldError("critique did not pass on the current article — trim only repairs a verify gap on it")
+    ver = load_machine(root, tid, "verify.json") or {}
+    if ver.get("body_hash") != cur:
+        raise HeraldError("verify.json does not evaluate the current article — run verify first")
+    counts = ver.get("counts") if isinstance(ver.get("counts"), dict) else {}
+    con, uns = _int(counts.get("contradicted")), _int(counts.get("unsupported"))
+    if con:
+        raise HeraldError("a contradicted sentence is never trimmed away — loop back")
+    if not 1 <= uns <= TRIM_MAX_UNSUPPORTED:
+        raise HeraldError("trim takes 1 to %d unsupported sentences, not %d — loop back"
+                          % (TRIM_MAX_UNSUPPORTED, uns))
+    sents = ver.get("unsupported_sentences")
+    if not isinstance(sents, list) or len(sents) != uns or not all(isinstance(x, str) and x.strip() for x in sents):
+        raise HeraldError("verify.json must list the %d unsupported sentences verbatim (unsupported_sentences) — "
+                          "loop back" % uns)
+    quals = ver.get("unsupported_qualifiers") or []
+    if not isinstance(quals, list) or any(isinstance(q, str) and q.strip() in [x.strip() for x in sents] for q in quals):
+        raise HeraldError("an unsupported warning or limit is never trimmed (deleting it broadens what remains) — "
+                          "loop back")
+    body_path = os.path.join(root, cfg.body_path(slug))
+    with open(body_path, encoding="utf-8", newline="") as f:
+        old = f.read()
+    b0 = _body_start(old)
+    if b0 is None:
+        raise HeraldError("the article's frontmatter does not close — loop back")
+    prot = _protected(old)
+    units, taken = [], []
+    for text in sents:
+        text = text.strip()
+        aside = _ASIDE_RE.fullmatch(text) is not None
+        hits = [m.start() + b0 for m in re.finditer(re.escape(text), old[b0:])]
+        if len(hits) != 1:
+            raise HeraldError("unsupported text found %d times in the article body (need exactly once, "
+                              "verbatim): %r — loop back" % (len(hits), text[:80]))
+        a, b = hits[0], hits[0] + len(text)
+        if aside:
+            # an aside the fact-checker named as the unsupported part, never inside code or a link
+            if old[a - 1:a] == "]" or any(a < y and x < b for x, y in prot):
+                raise HeraldError("%r sits in a link, code or URL — loop back" % text[:80])
+            if old[a - 1:a] in (" ", "\t"):
+                a -= 1
+        else:
+            if not _sentence_bounds(old, a, b):
+                raise HeraldError("%r is not a whole sentence (it must start a line or follow a sentence end, end a "
+                                  "sentence or a line, be at most %d characters and one paragraph) — loop back"
+                                  % (text[:80], TRIM_MAX_SENTENCE))
+            if any((x < a < y) or (x < b < y) for x, y in prot):
+                raise HeraldError("%r cuts through a link, code or URL — loop back" % text[:80])
+            ls = old.rfind("\n", 0, a) + 1
+            le = old.find("\n", b)
+            mark = old[ls:a]
+            if mark.strip() and _LINE_MARK_RE.fullmatch(mark) and not old[b:le if le != -1 else None].strip():
+                if mark.strip().startswith("#"):
+                    raise HeraldError("%r is a whole heading — deleting it would move its section under the "
+                                      "previous one; loop back" % text[:80])
+                nxt = old[le + 1:old.find("\n", le + 1) if old.find("\n", le + 1) != -1 else None] if le != -1 else ""
+                ind = len(mark) - len(mark.lstrip())
+                nm = re.match(r"([ \t]*)(?:[-*+]|\d+[.)])[ \t]", nxt)
+                if not (le == -1 or not nxt.strip() or (nm and len(nm.group(1)) <= ind)):
+                    raise HeraldError("%r is a list item with lines attached below it — deleting it would move them "
+                                      "to another item; loop back" % text[:80])
+                a = ls  # a whole list item goes with its mark
+        if any(a < y and x < b for x, y in taken):
+            raise HeraldError("unsupported texts overlap — loop back")
+        taken.append((a, b))
+        units.append({"text": text, "span": [a, b], "aside": aside})
+    d = _trim_dir(root, tid)
+    if os.path.isdir(d):
+        shutil.rmtree(d)
+    os.makedirs(d)
+    shutil.copyfile(body_path, os.path.join(d, "body"))
+    cmap = os.path.join(root, work_rel(tid, "claims-map.json"))
+    if os.path.isfile(cmap):
+        shutil.copyfile(cmap, os.path.join(d, "claims-map.json"))
+    img = os.path.join(root, cfg.image_dir(slug))
+    if os.path.isdir(img):
+        shutil.copytree(img, os.path.join(d, "images"))
+    st["trim"] = {"status": "open", "base_hash": cur, "images": _image_hash(root, cfg, slug),
+                  "snapshot": file_hash(root, os.path.relpath(os.path.join(d, "body"), root)),
+                  "unsupported": uns, "sentences": units, "at": now_iso()}
+    save_state(root, tid, st)
+    # the gap is the writer's, even when no loopback follows
+    safe_signal(root, "verify-gap", tid, {"note": "trim", "trim": True, "counts": counts,
+                                          "loopback": _int(st.get("loopbacks"))})
+    return {"status": "open", "sentences": [u["text"] for u in units]}
+
+
+def _trim_choices(units):
+    """Each listed sentence or aside is kept or deleted whole."""
+    import itertools
+
+    for combo in itertools.product(*[[None, tuple(u["span"])] for u in units]):
+        yield sorted(sp for sp in combo if sp)
+
+
+def _claims_map_problems(root, tid, d, units):
+    """The writer may add, change or drop only the claims-map entries of the listed texts (an
+    entry whose text contains one, or a sentence that lost a listed aside)."""
+    import json
+
+    snap = os.path.join(d, "claims-map.json")
+    if not os.path.isfile(snap):
+        return []
+    try:
+        with open(snap, encoding="utf-8") as f:
+            old = json.load(f)
+        with open(os.path.join(root, work_rel(tid, "claims-map.json")), encoding="utf-8") as f:
+            new = json.load(f)
+    except (OSError, ValueError) as e:
+        return ["claims-map.json is unreadable: %s" % e]
+
+    def entries(cm):
+        sents = cm.get("sentences") if isinstance(cm, dict) else None
+        return [x for x in sents if isinstance(x, dict)] if isinstance(sents, list) else []
+
+    def key(e):
+        return json.dumps(e, sort_keys=True, ensure_ascii=False)
+
+    listed = [u["text"] for u in units]
+    asides = [u["text"] for u in units if u.get("aside")]
+    o, n = entries(old), entries(new)
+    shorter = {re.sub(r"[ \t]*" + re.escape(x), "", str(e.get("text", ""))) for e in o for x in asides
+               if x in str(e.get("text", ""))}
+    ok = set(map(key, o)) & set(map(key, n))
+    bad = [e for e in o + n if key(e) not in ok and not any(x in str(e.get("text", "")) for x in listed)
+           and str(e.get("text", "")) not in shorter]
+    return ["claims-map.json changed outside the listed texts (%s)" % ", ".join(repr(str(e.get("text", ""))[:40])
+                                                                       for e in bad[:3])] if bad else []
+
+
+def _trim_open(root, tid):
+    st = load_state(root, tid)
+    if (st.get("trim") or {}).get("status") != "open":
+        raise HeraldError("%s has no open trim (`HRD trim --topic %s --begin` first)" % (tid, tid))
+    return st
+
+
+def trim_finish(root, cfg, tid):
+    """Accept the trim only if the body equals the snapshot minus whole listed texts (only the
+    seam whitespace may differ), the images and critique files are untouched and the gate passes;
+    then critique's verdict carries over to the shorter body and verify runs again on it."""
+    import shutil
+
+    st = _trim_open(root, tid)
+    tr, slug = st["trim"], st["slug"]
+    if st.get("stage") != "verify":
+        raise HeraldError("the trim belongs to verify, but the stage is %s — `HRD trim --topic %s --abort`"
+                          % (st.get("stage"), tid))
+    d = _trim_dir(root, tid)
+    if file_hash(root, os.path.relpath(os.path.join(d, "body"), root)) != tr.get("snapshot"):
+        raise HeraldError("the trim snapshot changed or is gone — `HRD trim --topic %s --abort` (with --force if "
+                          "the snapshot is gone), then loop back" % tid)
+    try:
+        with open(os.path.join(d, "body"), encoding="utf-8", newline="") as f:
+            old = f.read()
+        with open(os.path.join(root, cfg.body_path(slug)), encoding="utf-8", newline="") as f:
+            new = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise HeraldError("cannot compare the trimmed body with its snapshot: %s" % e)
+    chosen = None
+    for spans in _trim_choices(tr.get("sentences") or []):
+        if (not spans and new == old) or (spans and _kept_pattern(old, spans).fullmatch(new)):
+            chosen = spans
+            break
+    problems = []
+    if chosen is None:
+        problems.append("the body changed beyond deleting listed texts whole")
+    crit_out = (st["stages"].get("critique") or {}).get("outputs") or {}
+    for name in ("critique.md", "critique.json"):
+        if file_hash(root, work_rel(tid, name)) != crit_out.get(name):
+            problems.append("%s changed since critique passed" % name)
+    problems.extend(_claims_map_problems(root, tid, d, tr.get("sentences") or []))
+    if _image_hash(root, cfg, slug) != tr.get("images"):
+        problems.append("the images changed — a trim touches only the body text")
+    if problems:
+        raise HeraldError("; ".join(problems) + " (`HRD trim --topic %s --abort` restores the article)" % tid)
+    gate = run_gate(root, cfg, slug)
+    if not gate["ok"]:
+        raise HeraldError("deterministic gate failed on the trimmed body: %s (`HRD trim --topic %s --abort` "
+                          "restores the article)" % ("; ".join(gate["errors"][:5]), tid))
+    cur = worktree_hash(root, cfg, slug)
+    out = st["stages"].setdefault("draft", {}).setdefault("outputs", {})
+    out["@article"] = cur
+    out["claims-map.json"] = file_hash(root, work_rel(tid, "claims-map.json"))
+    st["stages"].setdefault("critique", {})["body_hash"] = cur  # critique's verdict covers the shorter body
+    tr.update({"status": "done", "hash": cur, "removed": [old[a:b].strip() for a, b in chosen],
+               "done_at": now_iso()})
+    save_state(root, tid, st)
+    shutil.rmtree(d, ignore_errors=True)
+    return tr
+
+
+def trim_abort(root, cfg, tid, force=False):
+    """Put back the article, claims map and images critique passed; the trim stays used. With
+    `force` and the snapshot gone (it is local), only close the trim: the article then differs
+    from what critique passed, so the entry checks send it back through draft."""
+    import shutil
+
+    st = _trim_open(root, tid)
+    d = _trim_dir(root, tid)
+    body = os.path.join(d, "body")
+    if not os.path.isfile(body):
+        if not force:
+            raise HeraldError("the trim snapshot is gone (%s) — `HRD trim --topic %s --abort --force` closes the "
+                              "trim; then loop back" % (d, tid))
+        st["trim"].update({"status": "aborted", "done_at": now_iso(), "note": "snapshot lost"})
+        save_state(root, tid, st)
+        return {"restored": False, "trim": st["trim"]}
+    slug = st["slug"]
+    shutil.copyfile(body, os.path.join(root, cfg.body_path(slug)))
+    if os.path.isfile(os.path.join(d, "claims-map.json")):
+        shutil.copyfile(os.path.join(d, "claims-map.json"), os.path.join(root, work_rel(tid, "claims-map.json")))
+    img = os.path.join(root, cfg.image_dir(slug))
+    if _image_hash(root, cfg, slug) != st["trim"].get("images"):
+        if os.path.isdir(img):
+            shutil.rmtree(img)
+        if os.path.isdir(os.path.join(d, "images")):
+            shutil.copytree(os.path.join(d, "images"), img)
+    if worktree_hash(root, cfg, slug) != st["trim"].get("base_hash"):
+        raise HeraldError("could not restore the article critique passed (snapshot kept in %s)" % d)
+    st["trim"].update({"status": "aborted", "done_at": now_iso()})
+    save_state(root, tid, st)
+    shutil.rmtree(d, ignore_errors=True)
+    return {"restored": True, "trim": st["trim"]}
 
 
 # --- ledger ---------------------------------------------------------------------------------
@@ -536,7 +999,7 @@ def read_json_at(root, rev, relpath):
 
 # --- publish record (ship step 9 and the batch runner share it) -----------------------------
 
-def mark_auto_merged(root, tid, pr=None, clear=False):
+def mark_auto_merged(root, tid, pr=None, clear=False, accepted=None):
     """An interactive auto publish (`ship --session-auto` of a PR no human approved) stamps the
     topic just before the merge, as the batch runner does: the article stays human_reviewed=false
     and counts toward today's throttle whoever records it later. `clear` undoes a stamp whose
@@ -546,6 +1009,7 @@ def mark_auto_merged(root, tid, pr=None, clear=False):
     if clear:
         t.pop("auto_merged_pr", None)
         t.pop("auto_merged_at", None)
+        t.pop("auto_merged_accepted", None)
     else:
         if pr is None or int(pr) <= 0:
             raise HeraldError("--pr must be the PR number being merged")
@@ -555,8 +1019,13 @@ def mark_auto_merged(root, tid, pr=None, clear=False):
             raise HeraldError("%s already carries an auto-merge stamp for PR #%s" % (tid, t["auto_merged_pr"]))
         t["auto_merged_pr"] = int(pr)
         t["auto_merged_at"] = now_iso()
+        if accepted:  # exclusions the human accepted by asking for this publish (`/hrd next`)
+            t["auto_merged_accepted"] = sorted(set(accepted))
+        else:
+            t.pop("auto_merged_accepted", None)
     save_topics(root, data)
-    return {"topic": tid, "auto_merged_pr": t.get("auto_merged_pr"), "auto_merged_at": t.get("auto_merged_at")}
+    return {"topic": tid, "auto_merged_pr": t.get("auto_merged_pr"), "auto_merged_at": t.get("auto_merged_at"),
+            "accepted": t.get("auto_merged_accepted", [])}
 
 
 def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald"):
@@ -570,8 +1039,14 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
     art.update({"path": cfg.body_path(slug), "url": cfg.article_url(slug), "origin": origin,
                 "current_topic_id": tid, "published_at": now_iso(), "withdrawn": False,
                 "category": t.get("category"), "keywords": t.get("keywords", [])})
-    if t.get("auto_merged_pr") and (pr is None or str(pr) == str(t["auto_merged_pr"])):
+    stamped = bool(t.get("auto_merged_pr")) and (pr is None or str(pr) == str(t["auto_merged_pr"]))
+    if stamped:
         auto = True  # merged unattended: stays false whoever records it later
+    accepted = t.get("auto_merged_accepted") if stamped else None
+    if accepted:  # what the human accepted unread for this publish (`/hrd next`)
+        art["auto_accepted"] = list(accepted)
+    else:
+        art.pop("auto_accepted", None)
     if origin == "herald":
         art["human_reviewed"] = not auto
     t["slug"] = slug

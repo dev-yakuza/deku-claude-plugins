@@ -19,7 +19,7 @@ import urllib.request
 from . import commits, ghstate, integrity, lock
 from .config import Config
 from .measure import stream_json_usd
-from .store import (CLEANUP_REASONS, HOLD_REASONS, auto_exclusion, record_published, branch_name, get_topic, load_published, load_topics,
+from .store import (CLEANUP_REASONS, HOLD_REASONS, exclusion_reasons, record_published, branch_name, get_topic, load_published, load_topics,
                     paths, read_json_at, save_published, save_topics, set_topic_state, safe_signal as emit_signal,
                     NON_SIGNAL_HOLD_NOTES, work_rel)
 from .util import HeraldError, git, git_ok, now_iso, read_json, version_tuple, write_json
@@ -294,16 +294,7 @@ def auto_candidates(root, cfg, pr_results):
         if not git_ok(root, "fetch", "-q", "origin", "+pull/%d/head:%s" % (prn, ref)):
             skipped.append((tid, "fetch-failed"))
             continue
-        crit = read_json_at(root, ref, work_rel(tid, "critique.json"))
-        st = read_json_at(root, ref, work_rel(tid, "state.json"))
-        if not crit or not st:
-            skipped.append((tid, "missing-critique-or-state"))  # fail closed
-            continue
-        reasons = auto_exclusion(crit)
-        img = cfg.image_dir(st.get("slug", "")) + "/"
-        files = commits.changed_files(root, "origin/%s...%s" % (cfg.base, ref), None) if st.get("slug") else []
-        if st.get("slug") and any(f.startswith(img) for f in files):
-            reasons.append("images")
+        reasons = exclusion_reasons(root, cfg, tid, ref)  # fails closed on missing files
         if reasons:
             skipped.append((tid, ",".join(reasons)))
             continue

@@ -31,10 +31,13 @@ Every stage follows the same frame:
 
 ## research — researcher
 
-- **Read list**: `<w>brief.md`, `docs/editorial/sources.md`. The researcher alone reads web
-  pages (WebFetch/WebSearch); raw pages never reach other roles.
+- **Read list**: `<w>brief.md`, `docs/editorial/sources.md`, `docs/editorial/promotion.md`.
+  The researcher alone reads web pages (WebFetch/WebSearch); raw pages never reach other roles.
 - **Output**: `<w>research.md` — claims `C1..Cn`, each with source URL, short excerpt, access
-  date, confidence. Policy from `sources.md` (banned sources, mention rules) applies.
+  date, confidence. Policy from `sources.md` (banned sources, mention rules) applies. What the
+  article will say about the site's own product (CTA, app features) comes from `promotion.md`
+  as **owner claims** (source `docs/editorial/promotion.md`, confidence `owner`); they support
+  statements about that product only (fact-checker persona).
 - Not enough support for the required sections → `BLOCKED` → hold `research`.
 
 ## draft — writer (+ illustrator if enabled)
@@ -151,19 +154,55 @@ hashing joins the verify target set when M6 is enabled.)
 
 ## verify — fact-checker
 
-- **Read list**: the article, `<w>claims-map.json`, `<w>research.md`.
+- **Read list**: the article, `<w>claims-map.json`, `<w>research.md`,
+  `docs/editorial/promotion.md` (only to check `owner` claims).
 - The fact-checker **extracts factual sentences from the article independently**. A factual
   sentence missing from the claims map is automatically `unsupported`.
 - Before spawning, take `HRD hash --slug <slug>`; after the role returns, the editor-in-chief
   writes that value into `verify.json` as `body_hash` (the fact-checker does not compute it).
 - **Output**: `<w>verify.md` (per sentence: supported / unsupported / contradicted, with
   claim ids) and `<w>verify.json` `{"body_hash": "<added by the editor-in-chief>",
-  "counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n}}` —
-  `unmapped` is a subset already counted in `unsupported`; `stage pass` refuses a stale
-  `body_hash`.
-- Any unsupported/contradicted → `HRD loopback --topic <id> --cause verify --note "<first
-  unsupported sentence>"` (records `verify-gap` with the counts), back to draft. (In `ship`'s
-  re-verify of a human's push: delta research instead — no loopback; see `ship.md` §5.)
+  "counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n},
+  "unsupported_sentences": ["<verbatim>", …]}` — `unmapped` is a subset already counted in
+  `unsupported`; each unsupported sentence is listed exactly as it appears in the article
+  (markdown included) — or only its parenthetical aside `(…)` when that aside alone is the
+  unsupported part and it is not a qualifier, warning or limit; an unsupported sentence that
+  warns about or limits another one is also listed under `"unsupported_qualifiers"` and is
+  never trimmed (fact-checker persona); `stage pass` refuses a stale `body_hash`.
+- Any unsupported/contradicted → first the **trim**, once per article, when nothing is
+  contradicted and 1–3 sentences are unsupported (`--attended`: ask the human — trim, loop back
+  or hold; otherwise no question):
+  1. `HRD trim --topic <id> --begin` — refuses when the counts or the state do not qualify, a
+     listed text is not found once verbatim in the body (frontmatter excluded), a listed
+     sentence is not whole (it starts a paragraph, a list item or heading, or follows a
+     sentence end; it ends with a sentence end; one paragraph, at most 400 characters) or cuts
+     through code, a URL or a link, a listed aside sits inside one, a listed text is a warning
+     or limit (`unsupported_qualifiers`), a whole heading, or a list item with lines attached
+     below it, a translator is enabled, or the article was
+     trimmed before (→ loop back below). It snapshots the article and records `verify-gap`
+     itself.
+  2. Spawn the **writer** for the trim — read list: the article, `<w>claims-map.json`,
+     `<w>research.md`, `<w>verify.md`, the texts `--begin` returned. Each is mapped to an
+     existing claim that says it or deleted whole; nothing else changes. A text the article
+     cannot do without (its CTA, a required section's point) → `BLOCKED` (→ abort, loop back).
+  3. `HRD trim --topic <id> --finish` — code checks that the body equals the snapshot minus
+     listed texts byte for byte (at a seam only the whitespace the deletion left may change,
+     never the line breaks or indentation around it; a list item goes with its mark),
+     the claims map changed only for the listed texts, the images and critique files are
+     unchanged and the gate passes; critique's verdict then carries over to the shorter body. Refused → `HRD trim
+     --topic <id> --abort` (puts back the article, claims map and images critique passed) and
+     loop back below (snapshot lost → `--abort --force`, which only closes the trim). While a
+     trim is open, `loopback`, `stage check` and `stage pass` refuse; a hold or stop aborts it
+     first.
+  4. Verify again (new hash, new `verify.json`); a gap again → loop back below.
+  The trim is not a loopback (not counted) and runs no editor or auditor round: deletions add
+  no claim to check. It is the agents' decision, so it excludes the PR from auto publish
+  (`trimmed`) unless the human asked for this publish (`--consent`); the PR body lists the
+  deleted passages (`state.json` `trim.removed`, while `trim.status` is `done` — a later
+  critique of a rewritten body marks it `superseded`).
+- Otherwise → `HRD loopback --topic <id> --cause verify --note "<first unsupported
+  sentence>"` (records `verify-gap` with the counts), back to draft. (In `ship`'s re-verify of
+  a human's push: delta research instead — no trim, no loopback; see `ship.md` §5.)
 - Pass: `HRD stage pass --stage verify` (sets `verified_hash`), then
   `python3 .claude/herald/scripts/integrity.py --record --topic <id>`.
 - Any later body change (loopback, translation, session edit) means verify runs again.
@@ -183,7 +222,9 @@ hashing joins the verify target set when M6 is enabled.)
 6. `gh pr create --base <base> --label herald --title "<title>" --body-file <tmp>` — body:
    summary, sources count, audit summary, MINOR findings, `## Late audit findings` (deferred
    MAJORs) if any, `## Unattended decisions` if any (`human` entries go under `## Human decisions`),
-   and the marker `<!-- herald:topic=<id> slug=<slug> -->`.
+   `## Trimmed sentences` (`state.json` `trim.removed`, `trim.status` `done`) if the trim
+   deleted anything, and the
+   marker `<!-- herald:topic=<id> slug=<slug> -->`.
 7. Unattended: `HRD result --topic <id> --status pr-open --pr <n>`.
 8. `git switch <base>`.
 
@@ -215,5 +256,6 @@ version>` (SKILL.md version gate):
   <id> --state held --reason <r>` (records the `hold` signal) then `HRD commit --cmd hold --kind hold -m "chore(herald):
   hold <id>" .claude/herald/topics.json` and `git push origin <base>`. Unattended: `HRD result`
   only.
+- Any hold or stop with a trim `open`: `HRD trim --topic <id> --abort` first.
 - `needs-human` / `stagnation` / `budget`: keep the branch — commit leftovers as
   `wip(herald): <id>` on it (no push), switch to base, record as above.

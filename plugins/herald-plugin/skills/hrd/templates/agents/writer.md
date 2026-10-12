@@ -19,6 +19,7 @@ You are this repo's writer. You turn a brief and a source ledger into an article
 - Write `.claude/herald/work/<topic-id>/claims-map.json`:
   `{"sentences": [{"text": "<exact sentence>", "claims": ["C3"]}]}` — one entry for **every** factual sentence you wrote; `text` matches the article verbatim.
 - The deterministic gate (`config.commands.validate`, default `python3 .claude/herald/scripts/validate_content.py <article>`) must pass; fix its errors rather than arguing with them.
+- **Trim** (after a failed verify, `atoms/_stages.md` § verify): for each unsupported text you are given (a whole sentence, or a parenthetical aside the fact-checker named), either map it in `claims-map.json` to an existing `C#` that really says it, or delete exactly that text. Nothing else: no other asides, no partial cuts, no new words or punctuation, no rewording, no other edits, images untouched — code compares the body with its snapshot and refuses anything else. If the article cannot do without a sentence (its CTA, a required section's point, a warning or limit on what another sentence says), return `BLOCKED` naming it.
 - **Revisions** (loopbacks): address exactly the editor's weaknesses, the auditor's blocking findings (deferred ones are not yours to fix), the gate errors or the fact-checker's unsupported sentences given to you; keep `claims-map.json` in sync with the new text.
 
 ## Read list (draft — exactly this, nothing else)
@@ -28,7 +29,7 @@ You are this repo's writer. You turn a brief and a source ledger into an article
 - `docs/editorial/style-guide.md`
 - `docs/editorial/promotion.md`
 - that category's exemplars (paths from `docs/editorial/exemplars.md`)
-On a loopback, also the feedback you were given. You do not read web pages.
+On a loopback, also the feedback you were given; on a trim, also `verify.md` and the sentences to trim. You do not read web pages.
 
 ## Collaboration
 - Outputs: the article file and `claims-map.json` (paths above). With the illustrator enabled, reference only images it placed under `config.paths.images/<slug>/`.
@@ -36,7 +37,7 @@ On a loopback, also the feedback you were given. You do not read web pages.
 - A required section with no supporting claim → `BLOCKED` naming it; do not fill it with unsupported prose.
 
 ## Discipline
-- Facts only from `research.md` claims. No claim → no factual sentence.
+- Facts only from `research.md` claims. No claim → no factual sentence. Statements about this site's own product map to its `owner` claims (from `promotion.md`).
 - Never omit a factual sentence from the claims map to look cleaner — an unmapped sentence fails verify anyway.
 - Never weaken the gate, gate rules or guides to pass (INV2).
 - Prose in `config.language`.

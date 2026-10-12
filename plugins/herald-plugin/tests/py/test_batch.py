@@ -12,6 +12,15 @@ from helpers import HERE, SCRIPTS, RepoCase, sh
 from hrdlib import batch, commits, store
 
 
+def pr_work(crit, tid, slug):
+    """critique.json and the state.json that pinned it when critique passed."""
+    import hashlib
+    text = json.dumps(crit)
+    pinned = "sha256:" + hashlib.sha256(text.encode()).hexdigest()
+    return text, json.dumps({"topic_id": tid, "slug": slug,
+                             "stages": {"critique": {"outputs": {"critique.json": pinned}}}})
+
+
 class BatchCase(RepoCase):
     def setUp(self):
         super().setUp()
@@ -67,7 +76,7 @@ class BatchCase(RepoCase):
         self.assertFalse(os.path.exists(os.path.join(self.root, ".claude/herald/signals.jsonl")))
 
     def test_version_gate_after_branch_preserves_and_holds(self):
-        p = self.run_batch({"t0001": "version-gate-branch", "t0002": "pr"}, extra=("--expect-version", "0.5"))
+        p = self.run_batch({"t0001": "version-gate-branch", "t0002": "pr"}, extra=("--expect-version", "0.6"))
         self.assertNotEqual(p.returncode, 0)
         topics = {t["id"]: t for t in store.load_topics(self.root)["topics"]}
         self.assertEqual((topics["t0001"]["state"], topics["t0001"]["reason"]), ("held", "needs-human"))
@@ -140,8 +149,9 @@ class BatchCase(RepoCase):
         # a PR head with a clean critique so auto selection picks it
         from test_batch import AutoSelectionCase  # noqa
         sh(self.root, "git", "switch", "-q", "-c", "herald/t0002--post-t0002")
-        self.write(".claude/herald/work/t0002/critique.json", json.dumps({"final_round": {"verdict": "PASS", "audit": {}}}))
-        self.write(".claude/herald/work/t0002/state.json", json.dumps({"topic_id": "t0002", "slug": "post-t0002"}))
+        crit, st = pr_work({"final_round": {"verdict": "PASS", "audit": {}}}, "t0002", "post-t0002")
+        self.write(".claude/herald/work/t0002/critique.json", crit)
+        self.write(".claude/herald/work/t0002/state.json", st)
         self.write("src/content/blog/post-t0002.md", "x")
         self.commit("pr head")
         sh(self.root, "git", "push", "-q", "origin", "HEAD:refs/pull/100/head")
@@ -225,8 +235,9 @@ class BatchCase(RepoCase):
 class AutoSelectionCase(RepoCase):
     def make_pr_head(self, tid, slug, number, critique, images=False):
         sh(self.root, "git", "switch", "-q", "-c", store.branch_name(tid, slug))
-        self.write(".claude/herald/work/%s/critique.json" % tid, json.dumps(critique))
-        self.write(".claude/herald/work/%s/state.json" % tid, json.dumps({"topic_id": tid, "slug": slug}))
+        crit, st = pr_work(critique, tid, slug)
+        self.write(".claude/herald/work/%s/critique.json" % tid, crit)
+        self.write(".claude/herald/work/%s/state.json" % tid, st)
         self.write("src/content/blog/%s.md" % slug, "x")
         if images:
             self.write("public/blog-images/%s/01.png" % slug, b"img", binary=True)

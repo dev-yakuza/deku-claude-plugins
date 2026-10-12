@@ -168,17 +168,25 @@ class LedgerTests(Flow):
 
 
 class AutoMergeStampTests(Flow):
+    def pr_head(self):
+        """Commit the work as the PR head would carry it, back on base; the stamp reads it there."""
+        sh(self.root, "git", "add", "-A")
+        sh(self.root, "git", "commit", "-q", "-m", "pr head")
+        branch = sh(self.root, "git", "branch", "--show-current").strip()
+        sh(self.root, "git", "switch", "-q", "main")
+        return ("--rev", branch, "--sha", sh(self.root, "git", "rev-parse", branch).strip(), "--consent")  # the article adds images: accepted only with consent
+
     def test_session_auto_stamp_keeps_a_later_record_unreviewed(self):
         tid, slug = self.run_flow()
-        sh(self.root, "git", "stash", "-u", "-q")
-        sh(self.root, "git", "switch", "-q", "main")
-        out, _ = self.hrd("auto-merged", "--topic", tid, "--pr", "12")
+        rev = self.pr_head()
+        out, _ = self.hrd("auto-merged", "--topic", tid, "--pr", "12", *rev)
         self.assertEqual(out["auto_merged_pr"], 12)
-        _, p = self.hrd("auto-merged", "--topic", tid, "--pr", "12", env={"HRD_UNATTENDED": "1"}, check=False)
+        _, p = self.hrd("auto-merged", "--topic", tid, "--pr", "12", *rev, env={"HRD_UNATTENDED": "1"}, check=False)
         self.assertNotEqual(p.returncode, 0)  # the batch runner stamps its own
-        _, p = self.hrd("auto-merged", "--topic", tid, "--pr", "13", check=False)
+        _, p = self.hrd("auto-merged", "--topic", tid, "--pr", "13", *rev, check=False)
         self.assertIn("already carries", p.stderr)
-        for bad in (("--pr", "0"), ("--pr", "12", "--clear"), ()):
+        for bad in (("--pr", "0", *rev), ("--pr", "12", "--clear"), (), ("--pr", "12"),
+                    ("--pr", "12", *rev, "--sha", "0" * 40)):
             _, p = self.hrd("auto-merged", "--topic", tid, *bad, check=False)
             self.assertNotEqual(p.returncode, 0, bad)
         self.assertEqual(self.hrd("throttle")[0]["used"], 1)  # an unrecorded auto merge counts today
@@ -187,17 +195,346 @@ class AutoMergeStampTests(Flow):
         self.assertEqual(self.hrd("throttle")[0]["used"], 1)  # counted once, recorded or not
         _, p = self.hrd("state", "--topic", tid, "--state", "queued", check=False)
         self.assertIn("already published", p.stderr)
-        _, p = self.hrd("auto-merged", "--topic", tid, "--pr", "12", check=False)
+        _, p = self.hrd("auto-merged", "--topic", tid, "--pr", "12", *rev, check=False)
         self.assertIn("already published", p.stderr)
 
     def test_clear_undoes_a_stamp_whose_merge_failed(self):
         tid, slug = self.run_flow()
-        sh(self.root, "git", "stash", "-u", "-q")
-        sh(self.root, "git", "switch", "-q", "main")
-        self.hrd("auto-merged", "--topic", tid, "--pr", "5")
+        rev = self.pr_head()
+        self.hrd("auto-merged", "--topic", tid, "--pr", "5", *rev)
         out, _ = self.hrd("auto-merged", "--topic", tid, "--clear")
         self.assertIsNone(out["auto_merged_pr"])
         self.assertEqual(self.hrd("throttle")[0]["used"], 0)
+
+
+ARTICLE_BODY_AND_EXTRA = "Body text for new-post. ![x](/blog-images/new-post/01.png)\n\nListening daily helps"
+
+
+class TrimTests(Flow):
+    EXTRA = "\nListening daily helps (often called shadowing). The app does not read examples aloud.\n"
+    S1 = "Listening daily helps (often called shadowing)."
+    S2 = "The app does not read examples aloud."
+
+    def to_verify_gap(self, tid="t0001", slug="new-post", ver=None):
+        """critique passed, verify found unsupported sentences (stage stays verify)."""
+        store.save_topics(self.root, {"version": 1, "topics": [{"id": tid, "title": "T", "state": "queued",
+                                                                 "history": [], "reverted_by": []}]})
+        self.commit("topics")
+        self.hrd("begin", "--topic", tid)
+        self.write(".claude/herald/work/%s/brief.md" % tid, "brief")
+        self.hrd("branch", "--topic", tid, "--slug", slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "brief")
+        self.write(".claude/herald/work/%s/research.md" % tid, "C1 source")
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "research")
+        self.article(slug, self.EXTRA)
+        self.write(".claude/herald/work/%s/claims-map.json" % tid, "{}")
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
+        self.write(".claude/herald/work/%s/critique.md" % tid, "ok")
+        write_machine(self, tid, "critique.json", CRIT_PASS, slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "critique")
+        self.write(".claude/herald/work/%s/verify.md" % tid, "two unsupported")
+        write_machine(self, tid, "verify.json", ver or {
+            "counts": {"supported": 3, "unsupported": 2, "contradicted": 0, "unmapped": 1},
+            "unsupported_sentences": [self.S1, self.S2]}, slug)
+        return tid, slug
+
+    def body(self, slug):
+        with open(os.path.join(self.root, "src/content/blog/%s.md" % slug)) as f:
+            return f.read()
+
+    def finish_with(self, tid, slug, body):
+        self.write("src/content/blog/%s.md" % slug, body)
+        return self.hrd("trim", "--topic", tid, "--finish", check=False)
+
+    def test_deletion_carries_critique_over_and_verify_runs_again(self):
+        tid, slug = self.to_verify_gap(ver={"counts": {"unsupported": 2, "contradicted": 0},
+                                            "unsupported_sentences": ["(often called shadowing)", self.S2]})
+        out, _ = self.hrd("trim", "--topic", tid, "--begin")
+        self.assertEqual(out["sentences"], ["(often called shadowing)", self.S2])
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "verify", check=False)
+        self.assertIn("trim is open", p.stderr)
+        self.write(".claude/herald/work/%s/claims-map.json" % tid, '{"sentences": []}')
+        out, _ = self.finish_with(tid, slug, self.body(slug).replace(" (often called shadowing)", "")
+                                  .replace(" " + self.S2, ""))
+        self.assertEqual(out["status"], "done")
+        self.assertEqual(out["removed"], ["(often called shadowing)", self.S2])
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", check=False)
+        self.assertIn("does not evaluate the current article", p.stderr)  # the old verify.json is stale
+        self.assertTrue(self.hrd("stage", "check", "--topic", tid, "--stage", "verify")[0]["ok"])
+        write_machine(self, tid, "verify.json", VER_PASS, slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "verify")
+        self.hrd("finalize", "--topic", tid)  # critique hash == verify hash == the trimmed body
+        _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+        self.assertIn("already trimmed", p.stderr)
+        with open(os.path.join(self.root, ".claude/herald/signals.jsonl")) as f:
+            gaps = [json.loads(x) for x in f if '"verify-gap"' in x]
+        self.assertEqual(len(gaps), 1)
+        self.assertTrue(gaps[0]["data"]["trim"])
+        reasons = self.hrd("auto-exclusion", "--topic", tid)[0]
+        self.assertIn("trimmed", reasons["blocking"])
+        self.assertNotIn("trimmed", self.hrd("auto-exclusion", "--topic", tid, "--consent")[0]["blocking"])
+
+    def test_only_whole_listed_sentences_or_asides_may_go(self):
+        tid, slug = self.to_verify_gap()
+        self.hrd("trim", "--topic", tid, "--begin")
+        body = self.body(slug)
+        for changed in (body.replace("helps", "helps a lot"),          # added words
+                        body.replace(" not", ""),                       # a negation inside a listed sentence
+                        body.replace("Body text", "Body"),              # outside the listed sentences
+                        body.replace("category: guide\n", ""),          # frontmatter
+                        body.replace("helps (often", "helps. (often"),   # punctuation added
+                        body.replace("\nListening", "\n    Listening"),  # re-indented (a code block)
+                        body.replace(" (often called shadowing)", ""),  # an aside the fact-checker did not list
+                        body.replace(self.S1 + " ", "\n    ")):  # a seam that changes the structure
+            _, p = self.finish_with(tid, slug, changed)
+            self.assertIn("changed beyond deleting", p.stderr)
+        out, _ = self.finish_with(tid, slug, body.replace(self.S1 + " " + self.S2, ""))
+        self.assertEqual(out["removed"], [self.S1, self.S2])
+
+    def test_abort_restores_body_and_images_and_the_gap_is_counted_once(self):
+        tid, slug = self.to_verify_gap()
+        base = worktree_hash(self.root, self.cfg, slug)
+        self.hrd("trim", "--topic", tid, "--begin")
+        self.write("public/blog-images/%s/01.png" % slug, b"\x89PNG other", binary=True)
+        self.write("public/blog-images/%s/02.png" % slug, b"\x89PNG new", binary=True)
+        _, p = self.finish_with(tid, slug, self.body(slug).replace(self.S2, ""))
+        self.assertIn("images changed", p.stderr)
+        out, _ = self.hrd("trim", "--topic", tid, "--abort")
+        self.assertTrue(out["restored"])
+        self.assertEqual(worktree_hash(self.root, self.cfg, slug), base)
+        _, p = self.hrd("trim", "--topic", tid, "--finish", check=False)
+        self.assertIn("no open trim", p.stderr)
+        _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+        self.assertIn("already trimmed", p.stderr)  # used once, even when aborted
+        self.hrd("loopback", "--topic", tid, "--cause", "verify")
+        with open(os.path.join(self.root, ".claude/herald/signals.jsonl")) as f:
+            self.assertEqual(sum('"verify-gap"' in x for x in f), 1)
+
+    def gap_for(self, extra, listed):
+        self.tearDown()
+        self.setUp()
+        self.EXTRA = extra
+        return self.to_verify_gap(ver={"counts": {"unsupported": len(listed)}, "unsupported_sentences": listed})
+
+    def test_listed_text_must_be_whole_sentences_or_a_named_aside(self):
+        for extra, listed in ((self.EXTRA, ["not"]), (self.EXTRA, ["Body text for new-post"]),
+                              (self.EXTRA, [ARTICLE_BODY_AND_EXTRA]),
+                              ("\nThe safe dose is 2.5 mg daily.\n", ["5 mg daily."]),
+                              ("\nThe safe dose is 2.5 mg daily.\n", ["The safe dose is 2."]),
+                              ("\nDo not\nmix it with alcohol.\n", ["Do not"]),
+                              ("\nChildren can use it\nonly under supervision.\n", ["only under supervision."]),
+                              ("\nUse e.g. aspirin for kids.\n", ["aspirin for kids."]),
+                              ("\n「AはBだ。」と彼は言った。\n", ["「AはBだ。」"]),
+                              ("\nAsk Dr. Smith said it works.\n", ["Smith said it works."]),
+                              ("\nIt was approved by the U.S. Food agency in 2020.\n", ["Food agency in 2020."]),
+                              ("\n専門家は「この薬は安全だ。」と述べた。\n", ["と述べた。"])):
+            tid, _ = self.gap_for(extra, listed)
+            _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+            self.assertIn("not a whole sentence", p.stderr, listed)
+        for extra, listed in (("\nSee [the guide](/blog/old-post/) for details.\n", ["(/blog/old-post/)"]),
+                              ("\nRun `rm -rf $(pwd)/build` now.\n", ["(pwd)"]),
+                              ("\nSee https://example.test/a_(b) now.\n", ["(b)"]),
+                              ("\n- item\n\n   ```\n   This is safe.\n   ```\n", ["This is safe."])):
+            tid, _ = self.gap_for(extra, listed)
+            _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+            self.assertTrue("link, code or URL" in p.stderr or "not a whole sentence" in p.stderr, (listed, p.stderr))
+        tid, slug = self.gap_for("\nSee [the guide](/blog/old-post/) for details (in Korean).\n", ["(in Korean)"])
+        self.hrd("trim", "--topic", tid, "--begin")
+        out, _ = self.finish_with(tid, slug, self.body(slug).replace(" (in Korean)", ""))
+        self.assertEqual(out["removed"], ["(in Korean)"])
+
+    def test_seams_keep_the_markdown_structure(self):
+        extra = "\nFirst point.\n\nUnsupported point.\n\n## Warnings\n"
+        tid, slug = self.gap_for(extra, ["Unsupported point."])
+        self.hrd("trim", "--topic", tid, "--begin")
+        body = self.body(slug)
+        for bad in (body.replace("First point.\n\nUnsupported point.\n\n## Warnings", "First point. ## Warnings"),
+                    body.replace("Unsupported point.\n\n## Warnings", "\n    ## Warnings")):
+            _, p = self.finish_with(tid, slug, bad)
+            self.assertIn("changed beyond deleting", p.stderr)
+        out, _ = self.finish_with(tid, slug, body.replace("Unsupported point.\n\n", ""))
+        self.assertEqual(out["status"], "done")
+
+    def test_a_whole_list_item_goes_with_its_mark(self):
+        tid, slug = self.gap_for("\n- First.\n- Unsupported.\n- Third.\n", ["Unsupported."])
+        self.hrd("trim", "--topic", tid, "--begin")
+        _, p = self.finish_with(tid, slug, self.body(slug).replace("Unsupported.", ""))
+        self.assertIn("changed beyond deleting", p.stderr)  # an empty bullet would stay
+        out, _ = self.finish_with(tid, slug, self.body(slug).replace("\n- Unsupported.", "", 1)
+                                  if "- Unsupported." in self.body(slug) else
+                                  self.body(slug).replace("- \n", "", 1))
+        self.assertEqual(out["removed"], ["- Unsupported."])
+
+    def test_items_with_attached_lines_headings_and_warnings_are_not_trimmed(self):
+        for extra, listed, msg in (
+                ("\n- Aspirin is fine.\n- Ibuprofen is approved.\n  It is not safe for children.\n- Other.\n",
+                 ["Ibuprofen is approved."], "lines attached below"),
+                ("\n## Dosage notes.\n\nTake one.\n", ["Dosage notes."], "whole heading")):
+            tid, _ = self.gap_for(extra, listed)
+            _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+            self.assertIn(msg, p.stderr)
+        self.tearDown()
+        self.setUp()
+        tid, _ = self.to_verify_gap(ver={"counts": {"unsupported": 2}, "unsupported_sentences": [self.S1, self.S2],
+                                         "unsupported_qualifiers": [self.S2]})
+        _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+        self.assertIn("warning or limit", p.stderr)
+
+    def test_seams_do_not_glue_words(self):
+        tid, slug = self.gap_for("\nFirst one. Unsupported two. Third (aside) here.\n", ["Unsupported two.", "(aside)"])
+        self.hrd("trim", "--topic", tid, "--begin")
+        body = self.body(slug)
+        for bad in (body.replace(" Unsupported two. ", ""), body.replace(" (aside) ", "")):
+            _, p = self.finish_with(tid, slug, bad)
+            self.assertIn("changed beyond deleting", p.stderr)
+        out, _ = self.finish_with(tid, slug, body.replace(" Unsupported two.", "").replace(" (aside)", ""))
+        self.assertEqual(out["status"], "done")
+        tid, slug = self.gap_for("\n듣기는 매일 (섀도잉) 도움이 된다. 다른 문장이다.\n", ["(섀도잉)"])
+        self.hrd("trim", "--topic", tid, "--begin")
+        _, p = self.finish_with(tid, slug, self.body(slug).replace(" (섀도잉) ", ""))
+        self.assertIn("changed beyond deleting", p.stderr)  # Hangul is written with spaces
+        out, _ = self.finish_with(tid, slug, self.body(slug).replace("매일도움", "매일 (섀도잉) 도움").replace(" (섀도잉)", ""))
+        self.assertEqual(out["status"], "done")
+
+    def test_claims_map_changes_only_for_listed_texts(self):
+        tid, slug = self.to_verify_gap()
+        cm = {"sentences": [{"text": "Body text for new-post.", "claims": ["C1"]}]}
+        self.write(".claude/herald/work/%s/claims-map.json" % tid, json.dumps(cm))
+        st = store.load_state(self.root, tid)  # as if draft had passed with this map
+        from hrdlib.hashing import file_hash
+        st["stages"]["draft"]["outputs"]["claims-map.json"] = file_hash(self.root, store.work_rel(tid, "claims-map.json"))
+        store.save_state(self.root, tid, st)
+        self.hrd("trim", "--topic", tid, "--begin")
+        self.write(".claude/herald/work/%s/claims-map.json" % tid, json.dumps(
+            {"sentences": [{"text": "Body text for new-post.", "claims": ["C9"]}]}))
+        _, p = self.finish_with(tid, slug, self.body(slug).replace(" " + self.S2, ""))
+        self.assertIn("claims-map.json changed outside", p.stderr)
+        self.write(".claude/herald/work/%s/claims-map.json" % tid, json.dumps(
+            {"sentences": cm["sentences"] + [{"text": self.S1, "claims": ["C1"]}]}))
+        out, _ = self.finish_with(tid, slug, self.body(slug).replace(" " + self.S2, ""))
+        self.assertEqual(out["status"], "done")
+
+    def test_a_changed_critique_file_refuses_the_trim(self):
+        tid, slug = self.to_verify_gap()
+        self.hrd("trim", "--topic", tid, "--begin")
+        self.write(".claude/herald/work/%s/critique.json" % tid, json.dumps({"final_round": {"verdict": "PASS"}}))
+        _, p = self.finish_with(tid, slug, self.body(slug).replace(" " + self.S2, ""))
+        self.assertIn("critique.json changed", p.stderr)
+
+    def test_open_trim_blocks_stages_and_a_later_critique_supersedes_it(self):
+        tid, slug = self.to_verify_gap()
+        self.hrd("trim", "--topic", tid, "--begin")
+        _, p = self.hrd("stage", "check", "--topic", tid, "--stage", "verify", check=False)
+        self.assertIn("trim is open", p.stdout)
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", check=False)
+        self.assertIn("trim is open", p.stderr)
+        self.finish_with(tid, slug, self.body(slug).replace(" " + self.S2, ""))
+        self.assertIn("trimmed", self.hrd("auto-exclusion", "--topic", tid)[0]["reasons"])
+        self.hrd("loopback", "--topic", tid, "--cause", "verify")
+        self.write("src/content/blog/%s.md" % slug, self.body(slug) + "\nRewritten.\n")
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
+        write_machine(self, tid, "critique.json", CRIT_PASS, slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "critique")
+        self.assertNotIn("trimmed", self.hrd("auto-exclusion", "--topic", tid)[0]["reasons"])
+
+    def test_force_abort_closes_a_trim_whose_snapshot_is_gone(self):
+        import shutil
+        tid, slug = self.to_verify_gap()
+        self.hrd("trim", "--topic", tid, "--begin")
+        shutil.rmtree(os.path.join(self.root, ".claude/herald/memory/trim", tid))
+        _, p = self.hrd("trim", "--topic", tid, "--finish", check=False)
+        self.assertIn("snapshot changed or is gone", p.stderr)
+        _, p = self.hrd("trim", "--topic", tid, "--abort", check=False)
+        self.assertIn("--force", p.stderr)
+        out, _ = self.hrd("trim", "--topic", tid, "--abort", "--force")
+        self.assertFalse(out["restored"])
+        self.hrd("loopback", "--topic", tid, "--cause", "verify")
+
+    def test_trim_only_repairs_a_small_listed_uncontradicted_gap(self):
+        for ver, msg in (({"counts": {"unsupported": 1, "contradicted": 1}}, "contradicted"),
+                         ({"counts": {"unsupported": 4, "contradicted": 0}}, "1 to 3"),
+                         ({"counts": {"unsupported": 0, "contradicted": 0}}, "1 to 3"),
+                         ({"counts": {"unsupported": 1, "contradicted": 0}}, "verbatim"),
+                         ({"counts": {"unsupported": 1}, "unsupported_sentences": ["Not in the body."]}, "found 0 times"),
+                         ({"counts": {"unsupported": 1}, "unsupported_sentences": ["title: Hello"]}, "found 0 times")):
+            self.tearDown()
+            self.setUp()
+            tid, _ = self.to_verify_gap(ver=ver)
+            _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+            self.assertIn(msg, p.stderr)
+        self.write("src/content/blog/new-post.md", self.body("new-post") + "x")
+        _, p = self.hrd("trim", "--topic", "t0001", "--begin", check=False)
+        self.assertIn("critique did not pass on the current article", p.stderr)
+
+
+class ConsentTests(Flow):
+    def pin(self, tid, crit):
+        """A critique.json as stage pass would have recorded it."""
+        from hrdlib.hashing import file_hash
+        self.write(".claude/herald/work/%s/critique.json" % tid, json.dumps(crit))
+        st = store.load_state(self.root, tid)
+        st["stages"]["critique"]["outputs"]["critique.json"] = file_hash(self.root, store.work_rel(tid, "critique.json"))
+        st["stages"]["critique"]["blobs"]["critique.json"] = store._git_blob(self.root, None, store.work_rel(tid, "critique.json"))
+        store.save_state(self.root, tid, st)
+
+    def test_consent_accepts_logged_decisions_but_not_blocking_ones(self):
+        tid, slug = self.run_flow()
+        crit = {"final_round": {"verdict": "PASS", "audit_round": 2, "audit": {"major": 1},
+                                "dismissed": {"major": 1}},
+                "decision_log": [{"kind": "dismissal", "note": "R1-1"}]}
+        self.pin(tid, crit)
+        out, _ = self.hrd("auto-exclusion", "--topic", tid)
+        self.assertEqual(out["blocking"], out["reasons"])
+        out, _ = self.hrd("auto-exclusion", "--topic", tid, "--consent")
+        self.assertEqual(out["blocking"], [])
+        self.assertEqual(sorted(out["accepted"]), ["audit-dismissed", "decision:dismissal"])
+        deferred = dict(crit, audit_log=[{"round": 1, "id": "R1-1", "severity": "BLOCKER", "outcome": "deferred"}])
+        self.pin(tid, deferred)
+        self.assertIn("audit-log:deferred-blocker", self.hrd("auto-exclusion", "--topic", tid, "--consent")[0]["blocking"])
+        self.assertTrue(any("logged deferred" in x for x in store.audit_log_problems(deferred, 2)))
+        human = dict(crit, final_round=dict(crit["final_round"], audit_round=3, audit={"blocker": 1},
+                                            dismissed={"blocker": 1}),
+                     audit_log=[{"round": 3, "id": "R3-1", "severity": "BLOCKER", "outcome": "dismissed"}],
+                     decision_log=[{"kind": "human", "id": "R3-1", "note": "human: ok"}])
+        self.pin(tid, human)
+        self.assertEqual(self.hrd("auto-exclusion", "--topic", tid, "--consent")[0]["blocking"], [])
+        for change, reason in ((dict(crit["final_round"], audit_round=4), "audit-skipped"),
+                               (dict(crit["final_round"], audit={"blocker": 1}, dismissed={"blocker": 1}),
+                                "audit-dismissed:blocker")):
+            self.pin(tid, dict(crit, final_round=change))
+            out, _ = self.hrd("auto-exclusion", "--topic", tid, "--consent")
+            self.assertEqual(out["blocking"], [reason])
+        self.pin(tid, crit)
+        self.write(".claude/herald/work/%s/critique.json" % tid, json.dumps(dict(crit, decision_log=[])))
+        out, _ = self.hrd("auto-exclusion", "--topic", tid, "--consent")
+        self.assertEqual(out["blocking"], ["critique-changed"])  # edited after critique passed
+        self.pin(tid, crit)
+        sh(self.root, "git", "add", "-A")
+        sh(self.root, "git", "commit", "-q", "-m", "wip")
+        out, _ = self.hrd("auto-exclusion", "--topic", tid, "--rev", "HEAD", "--consent")
+        self.assertIn("images", out["accepted"])  # the branch adds the article's images
+        sh(self.root, "git", "switch", "-q", "main")
+        out, _ = self.hrd("auto-exclusion", "--topic", tid, "--consent")
+        self.assertEqual(out["blocking"], ["missing-critique-or-state"])  # never eligible unread
+
+    def test_the_stamp_records_what_code_found_accepted(self):
+        tid, slug = self.run_flow()
+        sh(self.root, "git", "add", "-A")
+        sh(self.root, "git", "commit", "-q", "-m", "wip")
+        branch = sh(self.root, "git", "branch", "--show-current").strip()
+        sh(self.root, "git", "switch", "-q", "main")
+        _, p = self.hrd("auto-merged", "--topic", tid, "--pr", "7", "--rev", branch, "--sha",
+                        sh(self.root, "git", "rev-parse", branch).strip(), check=False)
+        self.assertIn("excluded (images)", p.stderr)  # without consent images block
+        _, p = self.hrd("auto-merged", "--topic", tid, "--pr", "7", "--consent", check=False)
+        self.assertIn("needs --rev", p.stderr)
+        sha = sh(self.root, "git", "rev-parse", branch).strip()
+        out, _ = self.hrd("auto-merged", "--topic", tid, "--pr", "7", "--rev", branch, "--sha", sha, "--consent")
+        self.assertEqual(out["accepted"], ["images"])
+        rec, _ = self.hrd("record-published", "--topic", tid, "--slug", slug, "--pr", "7")
+        self.assertFalse(rec["human_reviewed"])
+        pub = store.load_published(self.root)
+        self.assertEqual(store.find_article(pub, slug)["auto_accepted"], ["images"])
 
 
 class AuditRoundTests(Flow):

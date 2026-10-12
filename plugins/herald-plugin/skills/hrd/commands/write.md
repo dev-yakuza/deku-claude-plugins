@@ -1,6 +1,7 @@
-# WRITE — one article end to end (`/hrd write <topic-id> [--attended]`)
+# WRITE — one article end to end (`/hrd write <topic-id> [--attended] [--ship]`)
 
-brief → research → draft → critique → verify → publish (PR). Publishing itself is `/hrd ship`.
+brief → research → draft → critique → verify → publish (PR). Publishing itself is `/hrd ship`;
+`--ship` (also what `/hrd next` runs) ships the PR right away (§3).
 Rules: `atoms/_contract.md`, `atoms/_stages.md`. Plan: §3.2, §3.2.2.
 
 ## 0. Preflight (each its own call)
@@ -59,13 +60,16 @@ an audit round (`HRD audit-round`), so after the cap only the editor and verify 
 ## 3. Publish
 
 `atoms/_stages.md` § publish (finalize → commit → scope → push → ledger push record → PR).
-Report the PR URL (in-session auto: also the decisions it made and any deferred findings) and
-remind: "publish with `/hrd ship`". If `config.autonomy.publish` is
-`auto`, instead run `/hrd ship <that PR> --session-auto` right away, before releasing this
-command's lock (ship nests on it with this token): per plan §3.2.2 the
-interactive auto path covers only the PR this session just created — step 4 (per-PR question) is
-skipped, the auto-exclusion rules and the daily throttle apply (`HRD auto-exclusion --topic
-<id>`; excluded → stay PR-pending and say why), and the guard's merge/deploy confirmations remain.
+Report the PR URL (in-session auto: also the decisions it made, any deferred findings and
+trimmed sentences) and remind: "publish with `/hrd ship`". If `--ship` was given or
+`config.autonomy.publish` is `auto`, instead run `/hrd ship <that PR> --session-auto` (plus
+`--consent` with `--ship`) right away, before releasing this command's lock (ship nests on it
+with this token): per plan §3.2.2 the interactive auto path covers only the PR this session
+just created — step 4 (per-PR question) is skipped, the auto-exclusion rules and the daily
+throttle apply (ship checks `HRD auto-exclusion` — with `--ship`, `--consent`: asking for
+this publish accepts the agents' logged decisions, a trim and Herald-made images, so only its
+`blocking` list excludes; excluded → stay PR-pending and say why), and the guard's
+merge/deploy confirmations remain.
 
 ## 4. Unattended specifics
 

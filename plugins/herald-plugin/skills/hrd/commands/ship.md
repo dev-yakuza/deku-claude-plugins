@@ -1,4 +1,4 @@
-# SHIP — publish approved articles (`/hrd ship [topic-id|slug|PR …]`, `--reverify <id>`, `--deploy-only <id …>`, `--auto`, `--session-auto <PR>`)
+# SHIP — publish approved articles (`/hrd ship [topic-id|slug|PR …]`, `--reverify <id>`, `--deploy-only <id …>`, `--auto`, `--session-auto <PR> [--consent]`)
 
 The only place Herald publishes. Plan §3.2.2 (steps 1–9; step 10 is the attended report). Accuracy floor: `atoms/_invariants.md`.
 `<base>` = `config.base_branch`. Every `HRD …` is its own Bash call.
@@ -12,12 +12,16 @@ that differs from the ledger → skip that PR; after step 6 write the round resu
 `HRD result --topic ship --status merged --merged <PR numbers…>` and stop (the runner does 7–9
 and re-checks the merges against GitHub).
 
-`--session-auto <PR>` (interactive, `autonomy.publish: auto`, called by `write` — also when run
-by `refresh` — or `resume` for the PR it just created, while it still holds its lock — step 1
+`--session-auto <PR>` (interactive, `autonomy.publish: auto` or `--ship`, called by `write` —
+also when run by `refresh` or `/hrd next` — or `resume` for the PR it just created, while it still holds its lock — step 1
 acquires with `--token <the token of the command holding the lock>` and every release is `HRD lock release --cmd ship --token <t>`, a
 no-op while nested — the caller's own release ends the lock): all steps for
 that one PR, step 4 skipped; refuse if the PR was not created in this session, if `HRD
-auto-exclusion` lists a reason, or if `HRD throttle` shows `room` 0. Unless that run was
+auto-exclusion --topic <id> --rev refs/remotes/origin/pr-<n>` (after §3's fetch — the work
+files live on the PR head; with `--consent` when the caller passed it — the human asked for
+this publish, which accepts the agents' logged decisions, a trim and Herald-made images) has
+anything under `blocking`, or if
+`HRD throttle` shows `room` 0. Unless that run was
 `--attended` (a human approved the body in the session), the article is published without a
 human reading it, so §6 stamps it before merging (below): the stamp keeps it `human_reviewed:
 false` and counted in today's throttle even if deploy fails and a later ship records it.
@@ -88,6 +92,8 @@ PR first `HRD fetch-pr --pr <n>` (a human may have pushed to it; the head then l
 (or the ones named): summary — title, category, audit summary (from `critique.json` at the PR
 head) with any deferred MAJORs listed one per line (`audit_log` outcome `deferred` — the
 human decides them here), latest `/hrd review` finding for it if any (unresolved BLOCKER → warning), verify counts,
+the trimmed sentences (`state.json` `trim.removed` at the PR head while `trim.status` is `done`
+— critique's verdict was carried over to that shorter body unseen by the editor and auditor),
 "body differs from verified" (`HRD hash --slug <s> --rev <headRefOid>` vs `HRD ledger show`),
 "images changed", cannibalization re-check, and `HRD scope --topic <id> --rev <headRefOid>`.
 
@@ -134,7 +140,10 @@ switch and §7.1 need a clean tree.
 ## 6. Merge
 
 `--session-auto` of a PR no human approved: immediately before `gh pr merge`, `HRD
-auto-merged --topic <id> --pr <n>` and `HRD commit --cmd ship --kind ship -m "chore(herald):
+auto-merged --topic <id> --pr <n> --rev refs/remotes/origin/pr-<n> --sha <verified sha>` (plus
+`--consent` when the caller passed it; code checks the ref is the verified head, recomputes the
+exclusions there, refuses if any blocks, and keeps the accepted ones for the published
+record — refused: do not merge and do not `--clear`; the PR stays pending, report why, stop) and `HRD commit --cmd ship --kind ship -m "chore(herald):
 auto-merge <id>" .claude/herald/topics.json` (local only — §9's push carries it out; nothing
 runs between the stamp and the merge). If `gh pr merge` fails or is declined, check `gh pr view
 <n> --json state,mergedAt` — a non-zero exit can come after the merge itself (branch cleanup):
@@ -179,7 +188,10 @@ with retries for up to ~10 minutes. Failures stay merged-unrecorded for the next
 
 ## 10. Report (attended runs only — not `--auto`)
 
-Summarize what was published, declined, held and left merged-unrecorded. Then
+Summarize what was published, declined, held and left merged-unrecorded. For a `--session-auto`
+publish nobody approved, also list what was accepted unread (the `accepted` exclusions, the
+deferred MAJORs and dismissals with their reasons, the trimmed sentences) — the human sees
+them now at the latest. Then
 `HRD evolve-readiness`: only when `tier` is `sufficient`, end with one line in
 `config.language` (ko example: "성장 신호가 충분히 쌓였습니다(아직 evolve가 쓰지 않은 신호 N건 · 글감 M개) —
 `/hrd evolve --dry-run`으로 제안을 확인해 보세요."), N = `signals`, M = `topics`. Otherwise (or if the

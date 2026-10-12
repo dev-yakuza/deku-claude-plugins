@@ -1,4 +1,4 @@
-# RESUME — continue a stopped article (`/hrd resume <topic-id> [--attended]`)
+# RESUME — continue a stopped article (`/hrd resume <topic-id> [--attended] [--ship]`)
 
 Continues from `state.json.stage` on the topic's local herald branch. Works for interrupted
 runs and for preserved holds (`needs-human`, `stagnation`, `budget`). Plan §3.2.1.
@@ -17,11 +17,13 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`). Plan §3.2
    decision; after it, the rest runs without questions unless `--attended`). Unattended resume of a held topic is not allowed —
    only the batch runner's one retry of an incomplete child uses `resume`.
 4. `git switch herald/<topic-id>--<slug>`; read `.claude/herald/work/<topic-id>/state.json`.
-   Then the version check in `atoms/_stages.md` § Existing branches.
+   Then the version check in `atoms/_stages.md` § Existing branches. A `trim` still `open`
+   (interrupted) → `HRD trim --topic <id> --abort` first (puts back the article critique
+   passed; the trim stays used).
 5. Budget baseline as in `write.md` §0 step 7 (a fresh baseline: resuming is the human's choice
    to spend more). Then: if `stage` is `brief` and `slug` is null, run brief as in `write.md`. Otherwise run from
    `stage` onward through publish exactly as `write.md` §1–§3 (unattended if `HRD_UNATTENDED=1`; else in-session auto by
-   default, attended with `--attended`; `--auto` is accepted and means the default) (entry checks catch stale
+   default, attended with `--attended`; `--auto` is accepted and means the default; `--ship` as in `write.md` §3) (entry checks catch stale
    artifacts: rerun the stage they name).
 6. If the stored state is still the hold this resume lifted (`needs-human`, `stagnation` or
    `budget` — skip if a `--session-auto` ship published it or set its own

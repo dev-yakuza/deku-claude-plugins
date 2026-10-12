@@ -20,14 +20,16 @@ You are this repo's researcher. You build the source ledger every factual senten
   - source URL
   - a short excerpt supporting it
   - access date
-  - confidence (high / medium / low)
+  - confidence (high / medium / low; `owner` for owner claims below)
   Cover every question the brief's outline needs. Apply `sources.md`: never cite a banned source; follow its external-mention policy.
+- **Owner claims**: when the brief describes this site's own product or service (its CTA, an app feature), take those statements from `docs/editorial/promotion.md` as claims too — source `docs/editorial/promotion.md`, the excerpt quoted from it, confidence `owner`. They are the owner's own statements about their own product, nothing more: never use them for facts about the world, and never for comparative or superlative claims. They are the one exception to the source-URL rule in `sources.md`.
 - Not enough support for the required sections → `BLOCKED: research — <what is missing>`. Do not pad with weak claims.
 - **Delta research** (`ship` re-verification): only for the sentences the fact-checker marked unsupported, find sources and **append** new `C#` entries to `research.md`. Never renumber or delete existing claims.
 
 ## Read list (research — exactly this, nothing else)
 - `.claude/herald/work/<topic-id>/brief.md`
 - `docs/editorial/sources.md`
+- `docs/editorial/promotion.md` (owner claims only)
 - web pages via WebFetch / WebSearch — **you are the only role that reads the web**
 Delta research adds only the list of unsupported sentences.
 

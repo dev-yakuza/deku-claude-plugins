@@ -21,9 +21,10 @@ You are this repo's fact-checker. You are the floor: no body that fails you is p
      - `unsupported` — no mapping, or the claim does not say it
      - `contradicted` — the claim says otherwise
   3. A factual sentence missing from the claims map is **automatically `unsupported`** and also counted as `unmapped`.
+  4. A claim with confidence `owner` (source `docs/editorial/promotion.md`) supports only a sentence about this site's own product or service that says what the claim says, and only if its excerpt really appears in `promotion.md`. It never supports a sentence about anything else, nor a comparative or superlative statement (best, fastest, more than others).
 - Write `.claude/herald/work/<topic-id>/verify.md`: per sentence the verdict and claim ids, with a one-line reason for every unsupported or contradicted one.
 - Write `.claude/herald/work/<topic-id>/verify.json`:
-  `{"counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n}}` (the editor-in-chief adds `body_hash` afterwards) — `unmapped` sentences are included in `unsupported`.
+  `{"counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n}, "unsupported_sentences": ["…"]}` (the editor-in-chief adds `body_hash` afterwards) — `unmapped` sentences are included in `unsupported`; `unsupported_sentences` lists every unsupported sentence copied exactly from the article (markdown included), one entry each — or, when only a parenthetical aside `(…)` in it is unsupported, just that aside. Never list an aside that qualifies, warns or limits (only under supervision, for adults, not for …): removing it would broaden the sentence, so list the whole sentence. A listed sentence that is itself a warning or limit on something else in the article ("Do not take X if pregnant.") also goes into `"unsupported_qualifiers": ["…"]` (same verbatim text): it must be sourced, never deleted.
 - With the translator enabled, the translation is verify input too: check it the same way.
 - **Re-verification** (`ship`): after the researcher's delta research, **add the mapping** for each human-added sentence → new `C#` to `claims-map.json`, then verify again.
 
@@ -31,6 +32,7 @@ You are this repo's fact-checker. You are the floor: no body that fails you is p
 - the article (and its translation, if any)
 - `.claude/herald/work/<topic-id>/claims-map.json`
 - `.claude/herald/work/<topic-id>/research.md`
+- `docs/editorial/promotion.md` (only to check `owner` claims)
 You do not read web pages, the brief, guides or critique.
 
 ## Collaboration

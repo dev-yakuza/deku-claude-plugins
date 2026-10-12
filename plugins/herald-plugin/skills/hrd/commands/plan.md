@@ -1,4 +1,4 @@
-# PLAN — build the topic queue (`/hrd plan [--n N] [--issue]`)
+# PLAN — build the topic queue (`/hrd plan [--n N] [--issue] [--auto]`)
 
 The content strategist proposes topic clusters for the queue (`.claude/herald/topics.json`).
 It does not write articles. Plan §3.1, §5.
@@ -12,8 +12,12 @@ It does not write articles. Plan §3.1, §5.
    the **angle** must say what this article offers that the existing ones do not
    (scaled-content policy). Reject near-duplicates of existing or queued articles. Output file:
    `.claude/herald/memory/plan-proposal.json` (a JSON list).
-3. Attended: show the proposal grouped by cluster; the human keeps, edits or drops items.
-   (Unattended `plan` is not supported.)
+3. Default: show the proposal grouped by cluster; the human keeps, edits or drops items.
+   `--auto` (what `/hrd next` runs on an empty queue): no question — the editor-in-chief keeps
+   the items that fit `charter.md` and a category guide, state a distinct angle and are not
+   near-duplicates of a published, queued or open-PR article; it drops the rest and tells the
+   user each kept or dropped title with a one-line reason. Nothing kept → release the lock and
+   stop. (Unattended `plan` — `HRD_UNATTENDED=1` — is not supported.)
 4. `HRD topics add --file .claude/herald/memory/plan-proposal.json` (accepted items only).
 5. `HRD commit --cmd plan --kind plan -m "chore(herald): plan <n> topics"
    .claude/herald/topics.json`; `git push origin <base>`.

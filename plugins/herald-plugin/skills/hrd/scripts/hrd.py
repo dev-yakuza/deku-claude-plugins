@@ -22,7 +22,7 @@ from hrdlib.hashing import tree_hash, worktree_hash  # noqa: E402
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.5.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.6.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -211,6 +211,8 @@ def cmd_loopback(a):
     if a.theme and a.cause not in ("revise", "audit"):
         raise HeraldError("--theme applies only to --cause revise|audit")
     st = store.load_state(root, a.topic)
+    if (st.get("trim") or {}).get("status") == "open":
+        raise HeraldError("a trim is open — `HRD trim --topic %s --abort` first (it restores the article)" % a.topic)
     if a.cause == "audit" and store._int(st.get("audit_rounds")) >= store.AUDIT_ROUND_CAP:
         raise HeraldError("no audit loopback on the last audit round: a MAJOR is deferred, a BLOCKER is held "
                           "needs-human (a human-directed fix uses --human)")
@@ -222,6 +224,10 @@ def cmd_loopback(a):
     n = st["loopbacks"]
     # signals below are best-effort: the loopback is already counted and must not be retried
     kind = store.LOOPBACK_CAUSES.get(a.cause)
+    if a.cause == "verify":  # a trim that was tried on this very verify result already recorded the gap
+        ver = store.safe_machine(root, a.topic, "verify.json")
+        if ver.get("body_hash") and (st.get("trim") or {}).get("base_hash") == ver.get("body_hash"):
+            kind = None
     if kind:  # gate failures are recorded by `stage pass` where they happen
         data = {"note": (a.note or "")[:500], "loopback": n}
         if a.theme:
@@ -583,7 +589,21 @@ def cmd_auto_merged(a):
     attended_only("`auto-merged`")
     if a.clear == (a.pr is not None):
         raise HeraldError("give exactly one of --pr <n> or --clear")
-    emit(store.mark_auto_merged(root, a.topic, a.pr, clear=a.clear))
+    if (a.rev or a.consent or a.sha) and a.clear:
+        raise HeraldError("--rev/--consent/--sha go with --pr")
+    accepted = []
+    if a.pr is not None:  # recomputed here at the PR head, never taken from the caller
+        if not a.rev or not a.sha:
+            raise HeraldError("--pr needs --rev <the PR head ref> and --sha <the verified head it must be>")
+        if git(root, "rev-parse", a.rev).strip() != a.sha.strip():
+            raise HeraldError("%s is not the verified head %s — fetch the PR again" % (a.rev, a.sha))
+        cfg = Config.load(root)
+        reasons = store.exclusion_reasons(root, cfg, a.topic, a.rev)
+        blocking = store.blocking_exclusions(reasons, consent=a.consent)
+        if blocking:
+            raise HeraldError("refusing to stamp an auto merge: excluded (%s)" % ", ".join(blocking))
+        accepted = reasons
+    emit(store.mark_auto_merged(root, a.topic, a.pr, clear=a.clear, accepted=accepted))
 
 
 def cmd_throttle(a):
@@ -644,9 +664,20 @@ def cmd_evolve_mark(a):
 
 def cmd_auto_exclusion(a):
     root, cfg = ctx()
-    crit = store.read_json_at(root, a.rev, store.work_rel(a.topic, "critique.json")) if a.rev else \
-        store.load_machine(root, a.topic, "critique.json")
-    emit({"reasons": store.auto_exclusion(crit)})
+    reasons = store.exclusion_reasons(root, cfg, a.topic, a.rev)
+    blocking = store.blocking_exclusions(reasons, consent=a.consent)
+    emit({"reasons": reasons, "blocking": blocking,
+          "accepted": [r for r in reasons if r not in blocking]})
+
+
+def cmd_trim(a):
+    root, cfg = ctx()
+    if a.force and not a.abort:
+        raise HeraldError("--force goes with --abort")
+    if a.abort:
+        emit(store.trim_abort(root, cfg, a.topic, force=a.force))
+    else:
+        emit((store.trim_begin if a.begin else store.trim_finish)(root, cfg, a.topic))
 
 
 def build():
@@ -724,14 +755,20 @@ def build():
     p = sp.add_parser("record-published"); p.add_argument("--topic", required=True); p.add_argument("--slug", required=True)
     p.add_argument("--pr", type=int); p.add_argument("--auto", action="store_true"); p.set_defaults(fn=cmd_record_published)
     p = sp.add_parser("auto-merged"); p.add_argument("--topic", required=True); p.add_argument("--pr", type=int)
-    p.add_argument("--clear", action="store_true"); p.set_defaults(fn=cmd_auto_merged)
+    p.add_argument("--clear", action="store_true"); p.add_argument("--rev")
+    p.add_argument("--consent", action="store_true"); p.add_argument("--sha"); p.set_defaults(fn=cmd_auto_merged)
     p = sp.add_parser("throttle"); p.set_defaults(fn=cmd_throttle)
     p = sp.add_parser("gate"); p.add_argument("--topic", required=True); p.add_argument("--slug")
     p.set_defaults(fn=cmd_gate)
     p = sp.add_parser("signal"); p.add_argument("--kind", required=True); p.add_argument("--topic")
     p.add_argument("--data"); p.add_argument("--human-reviewed", choices=["true", "false"]); p.set_defaults(fn=cmd_signal)
     p = sp.add_parser("auto-exclusion"); p.add_argument("--topic", required=True); p.add_argument("--rev")
-    p.set_defaults(fn=cmd_auto_exclusion)
+    p.add_argument("--consent", action="store_true"); p.set_defaults(fn=cmd_auto_exclusion)
+    p = sp.add_parser("trim"); p.add_argument("--topic", required=True)
+    g = p.add_mutually_exclusive_group(required=True)
+    for flag in ("--begin", "--finish", "--abort"):
+        g.add_argument(flag, action="store_true")
+    p.add_argument("--force", action="store_true"); p.set_defaults(fn=cmd_trim)
     return ap
 
 

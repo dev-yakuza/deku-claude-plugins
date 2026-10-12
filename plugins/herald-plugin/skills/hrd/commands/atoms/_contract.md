@@ -56,12 +56,15 @@ Detect once per command: `printenv HRD_UNATTENDED` → `1` = unattended. The edi
 | auditor `MAJOR` | may dismiss with a recorded reason | may dismiss with a recorded reason (`kind: dismissal`) |
 | auditor `MAJOR` on a recheck round (`_stages.md` § critique 3) | `new` → defer to the PR (`kind: deferral`); `unfixed`/`regression` → fix (last round: any `MAJOR` → defer) | same |
 | auditor `BLOCKER` | dismiss only after the human confirms | **never dismiss** — fix or hold `needs-human` (`defect:`) |
+| verify gap, nothing contradicted, 1–3 unsupported (`_stages.md` § verify) | ask: trim / loop back / hold | trim once (delete or map only; code-checked), then loop back |
 | stagnation / loop cap / budget | stop and report (budget: warn only) | hold `stagnation` / `budget` |
 
 **Decision log**: every judgment between brief and critique goes into
 `work/<id>/critique.json` → `decision_log: [{"kind", "note"}]` with `kind ∈ {routine,
 dismissal, assumption, deferral, human}` (`human`: a human's decision on a last-round BLOCKER,
-with its `id` — `atoms/_stages.md` § critique 3). verify and publish make no judgments; they only hold.
+with its `id` — `atoms/_stages.md` § critique 3). verify and publish make no judgments — they
+only hold — except the trim (§F), recorded in `state.json` `trim` and excluding the PR from
+auto publish as `trimmed`.
 `dismissal`, `assumption` and `deferral` exclude a PR from auto publish. The PR body repeats the log under
 `## Unattended decisions` (`human` entries under `## Human decisions`).
 
@@ -79,7 +82,9 @@ older scripts (`atoms/_stages.md` § Existing branches) and, on `resume`, the de
 topic. After them the flow asks nothing, except to confirm a human-directed BLOCKER fix; every other
 gate follows the Unattended column above. Any other step that would ask (a `newer` version, an unexpected error) stops and reports instead —
 it never guesses. Publishing is
-unchanged: the PR, then `/hrd ship` (or `--session-auto` when `autonomy.publish` is `auto`).
+the PR, then `/hrd ship` — or `ship --session-auto` right away when `autonomy.publish` is
+`auto`, or when the human asked for this article to be published (`write --ship`,
+`resume --ship`, `/hrd next`).
 
 Unattended children never write the base branch: they record their outcome with
 `HRD result --topic <id> --status pr-open --pr <n>` or `--status held:<reason> --note "..."`
@@ -121,6 +126,12 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
   revisions included (`HRD audit-round` counts them; round 1 full, then recheck, then skip).
   A fresh auditor always finds something new, so later rounds block only on BLOCKERs, unfixed
   findings and regressions; the rest goes to the human at ship.
+- **Trim** (`_stages.md` § verify): a verify gap of 1–3 unsupported sentences with nothing
+  contradicted is first repaired by deleting those sentences (or mapping them to an existing
+  claim, or dropping only a parenthetical aside the fact-checker named) — once per article, not counted as a
+  loopback, checked in code (`HRD trim`). The
+  agents settle it among themselves this way instead of holding; accepting an unsupported
+  sentence as true is never theirs to decide.
 - **Stagnation guard**: if a loopback's reason repeats the previous one (same weakness or the
   same unsupported sentence), do not loop again — hold `stagnation` (attended: stop and show
   both rounds).

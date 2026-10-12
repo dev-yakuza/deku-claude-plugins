@@ -60,5 +60,7 @@ Which findings block and which are deferred: `atoms/_stages.md` § critique step
 (`--attended`, single-stage commands) BLOCKER → only after the human confirms; in-session auto and unattended BLOCKER →
 never. Every dismissal goes to
 `critique.md` and `critique.json` (`final_round.dismissed`, `decision_log` `kind: dismissal` —
-for a last-round BLOCKER also `kind: human`, `atoms/_stages.md` § critique 3);
+for every BLOCKER a human confirmed dismissing, in any round, also `kind: human` with its id,
+`atoms/_stages.md` § critique 3 — without it the dismissal counts as the agents' and blocks any
+unread publish);
 `HRD stage pass --stage critique` records the `dismissal` signals from that log.

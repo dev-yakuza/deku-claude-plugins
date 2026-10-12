@@ -6,8 +6,8 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
 - Protected keys (`autonomy`, `budget`, `commands`, `paths`, `base_branch`, `roles`, `models`)
   are guarded: the edit triggers an `ask` — the human approves it on the record (INV1/INV2).
   Turning on `autonomy.publish: auto` deserves a one-line warning: PRs then merge and deploy
-  without per-PR approval (still excluding dismissals, assumptions, deferred audit findings, a skipped audit round and
-  image changes). Since `/hrd write` runs without questions by default, `auto` then publishes
+  without per-PR approval (still excluding dismissals, assumptions, deferred audit findings, a skipped audit round, a
+  trim and image changes). Since `/hrd write` runs without questions by default, `auto` then publishes
   articles no human read before the merge/deploy confirmation; use `write --attended` to read
   them first.
 - `language` is free to change.
