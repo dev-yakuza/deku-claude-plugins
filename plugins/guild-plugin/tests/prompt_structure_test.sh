@@ -619,9 +619,16 @@ hasfx "retro.md: 다른 PR 의 base 인 브랜치는 후보가 아니다" "$RETR
 hasfx "retro.md: 원격 조회는 전체 ref 로 한다" "$RETRO" "git ls-remote origin refs/heads/<branch>"
 hasfx "retro.md: 지우기 직전에 run 을 다시 확인한다" "$RETRO" "**Re-check the run**"
 hasfx "retro.md: 닫기 실패는 손으로 닫지 말고 재실행" "$RETRO" "closing it failed — re-run /gld sprint retro"
-hasfx "retro.md: 닫힌 스프린트는 --cleanup 으로 정리한다" "$RETRO" '`$1 == --cleanup` → set **CLEANUP**'
+hasfx "retro.md: 닫힌 스프린트는 --cleanup 으로 정리한다" "$RETRO" 'any argument `--cleanup` → set **CLEANUP**'
 hasfx "settings.json.tmpl: branch -D 는 ask" "$GLD/templates/settings.json.tmpl" '"Bash(git branch -D:*)"'
 hasfx "settings.json.tmpl: 원격 브랜치 삭제는 ask" "$GLD/templates/settings.json.tmpl" '"Bash(git push origin --delete:*)"'
+hasfx "settings.json.tmpl: push --delete 도 ask" "$GLD/templates/settings.json.tmpl" '"Bash(git push --delete:*)"'
+hasfx "settings.json.tmpl: push origin -d 도 ask" "$GLD/templates/settings.json.tmpl" '"Bash(git push origin -d:*)"'
+hasfx "retro.md: 멤버 판정에 숫자 경계" "$RETRO" 'test("Sprint: #<tracker>([^0-9]|$)")'
+lacksfx "retro.md: 멤버 판정이 contains 가 아니다 (#38 이 #389 에 걸린다)" "$RETRO" 'contains("Sprint: #<tracker>")'
+hasfx "retro.md: --cleanup 은 열린 트래커를 거절한다" "$RETRO" "is still open — run /gld sprint retro"
+hasfx "retro.md: --cleanup 은 스프린트가 아닌 Issue 를 거절한다" "$RETRO" "is not a sprint tracking Issue"
+hasfx "retro.md: --cleanup 도 무인 실행을 거절한다" "$RETRO" "(In **CLEANUP** mode there is no Phase 3"
 cat > "$WORK3/cleanup.py" <<'CLEANPY'
 import re, sys
 retro = open(sys.argv[1], encoding="utf-8").read()
@@ -698,6 +705,32 @@ if "`.sprint-logs/<tracker>/` is **never** a candidate" not in " ".join(sec.spli
     problems.append(".sprint-logs is not excluded")
 if "no `OPEN` PR at all" not in sec:
     problems.append("a branch that is the base of an open PR can be deleted")
+flat = " ".join(sec.split())
+for phrase, why in (
+    ("`ls -A .claude/guild/`", "run files are dotfiles; plain ls hides them"),
+    ("--head <headRefName>", "no check for PRs headed by the branch"),
+    ("only the line whose ref is **exactly** `refs/heads/<branch>`", "ls-remote tail match not guarded"),
+    ("`git ls-files .claude/guild/<file>`", "tracked run files are not excluded"),
+    ("This re-check is never skipped", "the run re-check may be skipped"),
+    ("disagree on `headRefOid`", "two merged PRs with different heads are not kept"),
+    ("Phase 1's branch test", "the branch-name token test is missing"),
+):
+    if phrase not in flat:
+        problems.append(why)
+if re.search(r"\bskip (this|the) re-check", " ".join(rc.split())):
+    problems.append("the run re-check may be skipped")
+# rm 은 run 파일만 — 재귀 삭제나 .sprint-logs 삭제는 부정 문맥에서만 언급된다.
+for p_ in paras:
+    f_ = " ".join(p_.split())
+    for m in re.finditer(r"rm -r\b|rm [^`]*\.sprint-logs", f_):
+        if not NEG.search(f_[max(0, m.start() - 20):m.start()]):
+            problems.append("unnegated rm near: " + f_[max(0, m.start() - 20):m.end()])
+# 원격 삭제는 ask 에 걸리는 한 가지 철자로만. 다른 철자는 경고 문단에서만 나온다.
+warn = next((" ".join(p_.split()) for p_ in paras if "Use exactly these spellings" in p_), "")
+rest = flat.replace(warn, "") if warn else flat
+for alt in ("push origin :<", "push --delete origin", "push origin -d ", "-C <dir> branch -D"):
+    if alt in rest:
+        problems.append("delete spelled as " + alt + " outside the warning")
 # rollback.md 의 branch -D 금지 행이 retro 예외를 명시한다 (issue close 와 _handoff.md 의 짝과 같다).
 rows = [l for l in rollback.splitlines() if "branch -D" in l]
 if not any("sprint retro" in r and "headRefOid" in r for r in rows):
