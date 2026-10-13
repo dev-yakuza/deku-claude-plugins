@@ -199,6 +199,9 @@ def entry_check(root, cfg, st, stage):
         v = st["stages"].get("verify", {}).get("body_hash")
         if not (cur and cur == c == v == st.get("verified_hash")):
             problems.append("article differs from what critique/verify evaluated — rerun critique and verify")
+        vr = st["stages"].get("verify", {}).get("research")
+        if vr and vr != artifact_hash(root, cfg, st, "research.md"):
+            problems.append("research.md changed since verify checked the article against it — rerun verify")
     return problems
 
 
@@ -252,8 +255,14 @@ def critique_passed(crit):
 
 
 def verify_passed(ver):
+    """No unsupported or contradicted sentence and no research claim found wrong (a malformed
+    research_suspects list never passes)."""
     c = (ver or {}).get("counts") or {}
-    return int(c.get("unsupported", 1)) == 0 and int(c.get("contradicted", 1)) == 0
+    try:
+        suspects = research_suspects(ver)
+    except HeraldError:
+        return False
+    return int(c.get("unsupported", 1)) == 0 and int(c.get("contradicted", 1)) == 0 and not suspects
 
 
 def auto_exclusion(crit, st=None):
@@ -505,6 +514,94 @@ def reader_round_used(st):
     return bool(st.get("reader_revise")) or _int(st.get("loopbacks")) >= LOOP_CAP - 1
 
 
+# the accuracy reserve (contract §F): once per article, one counted loopback past LOOP_CAP for a
+# contradicted sentence or a research fix — state `accuracy_reserve`
+# a claim is defined where a line starts with its id and a mark after it (`C9.`, `**C9.**`,
+# `### C9:`, `- C9 —`, `1. C9)`, `| C9 |`, `Claim C9:`); ids merely mentioned in excerpts or
+# notes do not count, nor a wrapped line that only starts with one ("C2 level …")
+_CLAIM_DEF_RE = re.compile(r"(?m)^[ \t]*(?:#{1,6}[ \t]*|[-*+][ \t]+|[0-9]+[.)][ \t]+|\|[ \t]*)?(?:\*\*|__)?\[?"
+                           r"(?:Claim[ \t]+)?C([0-9]+)(?:\*\*|__|\])?(?=[.:)．：](?![0-9])|[ \t]*\||[ \t]+[—–-]|[ \t]*$)")
+# any line that starts like a claim id: a research.md the strict pattern only partly reads is refused
+_CLAIM_LOOSE_RE = re.compile(r"(?m)^[ \t]*(?:#{1,6}[ \t]*|[-*+][ \t]+|[0-9]+[.)][ \t]+|\|[ \t]*)?(?:\*\*|__)?\[?"
+                             r"(?:Claim[ \t]+)?C([0-9]+)(?![0-9A-Za-z_])")
+CLAIM_FORMAT = "each claim starts a line with its id and a mark: `**C3.** …`, `C3: …`, `| C3 | … |`"
+
+
+def research_claim_ids(root, tid):
+    try:
+        with open(os.path.join(root, work_rel(tid, "research.md")), encoding="utf-8") as f:
+            return sorted({"C%s" % m for m in _CLAIM_DEF_RE.findall(f.read())}, key=lambda c: int(c[1:]))
+    except OSError:
+        return []
+
+
+def current_verify(root, cfg, tid, st):
+    """verify.json when it evaluates the current article, else {}."""
+    ver = safe_machine(root, tid, "verify.json")
+    if not st.get("slug") or not ver.get("body_hash") or ver["body_hash"] != worktree_hash(root, cfg, st["slug"]):
+        return {}
+    return ver
+
+
+def research_suspects(ver):
+    """Claim ids the fact-checker listed as wrong in research.md (`research_suspects`). A
+    malformed list is refused: reading it as "none" would switch the research route off."""
+    raw = (ver or {}).get("research_suspects")
+    if raw in (None, []):
+        return []
+    ok = isinstance(raw, list) and all(isinstance(x, dict) and isinstance(x.get("claim"), str)
+                                       and re.fullmatch(r"C[0-9]+", x["claim"].strip()) for x in raw)
+    if not ok:
+        raise HeraldError('verify.json research_suspects is malformed — a list of {"claim": "C<n>", "reason": "…", '
+                          '"sentences": […]}')
+    return [x["claim"].strip() for x in raw]
+
+
+def accuracy_gap(ver):
+    """A current verify result the accuracy reserve may answer: a contradicted sentence, or a
+    research claim the fact-checker found wrong."""
+    c = (ver or {}).get("counts") or {}
+    return _int(c.get("contradicted")) > 0 or bool(research_suspects(ver))
+
+
+def open_research_fix(st):
+    fixes = st.get("research_fixes") or []
+    return fixes[-1] if fixes and isinstance(fixes[-1], dict) and fixes[-1].get("status") == "open" else None
+
+
+def research_fix_claims(root, cfg, tid, st, claims):
+    """Validate `loopback --cause research --claims`: each id is one the fact-checker listed in
+    the current verify.json `research_suspects` and exists in research.md."""
+    ver = current_verify(root, cfg, tid, st)
+    suspects = research_suspects(ver)
+    if not suspects:
+        raise HeraldError("the current verify.json lists no research_suspects — a research fix starts from the "
+                          "fact-checker's finding on this article (run verify first)")
+    want = sorted({c.strip() for c in (claims or "").split(",") if c.strip()})
+    if set(want) != set(suspects):
+        raise HeraldError("--claims must name exactly the suspects verify.json lists: --claims %s"
+                          % ",".join(sorted(set(suspects), key=lambda c: int(c[1:]))))
+    last = (st.get("research_fixes") or [None])[-1]
+    if isinstance(last, dict) and last.get("verify_blob") and last["verify_blob"] == _verify_blob(root, tid):
+        raise HeraldError("this verify.json was already answered by a research fix — the same finding again: "
+                          "hold `stagnation` (contract §F)")
+    have = research_claim_ids(root, tid)
+    missing = [c for c in want if c not in have]
+    if missing:
+        raise HeraldError("%s not found as a claim in research.md (%s)" % (", ".join(missing), CLAIM_FORMAT))
+    again = sorted({c for f in st.get("research_fixes") or [] if isinstance(f, dict) and f.get("status") == "done"
+                    for c in f.get("claims") or []} & set(want), key=lambda c: int(c[1:]))
+    if again:
+        raise HeraldError("%s already went through a research fix — the same finding again: hold `stagnation` "
+                          "(contract §F); a deferred auditor pointer is not passed again once its claim was "
+                          "rechecked" % ", ".join(again))
+    return sorted(set(want), key=lambda c: int(c[1:])), have
+
+
+def _verify_blob(root, tid):
+    return file_hash(root, work_rel(tid, "verify.json"))
+
+
 def _reader_pass_refusal(st, when):
     if reader_round_used(st):  # the editor ignored reader_round_used: its PASS stands, the blockers are notes
         return ("reader.json lists blocking reader-pass problems, but the one reader-pass send-back is used — move "
@@ -552,6 +649,9 @@ def stage_pass(root, cfg, tid, stage, amend=False):
         raise HeraldError("unknown stage %s" % stage)
     if (st.get("trim") or {}).get("status") == "open":
         raise HeraldError("a trim is open — `HRD trim --topic %s --finish` or `--abort` first" % tid)
+    if stage != "research" and open_research_fix(st):
+        raise HeraldError("a research fix is open (%s) — the researcher corrects those claims and `stage pass --stage "
+                          "research` runs first" % ", ".join(open_research_fix(st).get("claims") or []))
     if not amend:
         problems = entry_check(root, cfg, st, stage)
         if problems:
@@ -563,6 +663,31 @@ def stage_pass(root, cfg, tid, stage, amend=False):
             raise HeraldError("%s missing — %s did not write it" % (name, stage))
         outputs[name] = h
     rec = {"outputs": outputs, "at": now_iso()}
+    fix = open_research_fix(st) if stage == "research" else None
+    if stage == "research":
+        ids = research_claim_ids(root, tid)
+        if not ids:
+            raise HeraldError("research.md has no claim the tools can find — %s" % CLAIM_FORMAT)
+        try:
+            with open(os.path.join(root, work_rel(tid, "research.md")), encoding="utf-8") as f:
+                loose = {"C%s" % m for m in _CLAIM_LOOSE_RE.findall(f.read())}
+        except OSError:
+            loose = set()
+        odd = sorted(loose - set(ids), key=lambda c: int(c[1:]))
+        if odd and not fix:  # a fix keeps the file's layout; the first pass sets it
+            raise HeraldError("research.md lines start with %s in a form the tools cannot read as a claim — %s "
+                              "(an excerpt line starting with an id: rewrap it)" % (", ".join(odd[:5]), CLAIM_FORMAT))
+    if fix and fix.get("research_before") and fix["research_before"] == artifact_hash(root, cfg, st, "research.md"):
+        raise HeraldError("research.md is unchanged since the research fix opened — the researcher marks each listed "
+                          "claim corrected:, rechecked: or withdrawn:")
+    if fix:
+        # a correction rewrites the listed claims in place: no claim id disappears or is renumbered
+        gone = [c for c in fix.get("ids_before") or [] if c not in research_claim_ids(root, tid)]
+        if gone:
+            raise HeraldError("research.md lost claim ids %s — correct the listed claims in place, append new ones, "
+                              "never delete or renumber" % ", ".join(gone))
+        fix["status"] = "done"
+        fix["done_at"] = now_iso()
     if stage == "draft" or (stage == "verify" and amend):
         gate = run_gate(root, cfg, st["slug"])
         if stage == "draft":
@@ -613,11 +738,15 @@ def stage_pass(root, cfg, tid, stage, amend=False):
         record_dismissals(root, tid, crit)
     if stage == "verify":
         ver = load_machine(root, tid, "verify.json")
+        if research_suspects(ver):
+            raise HeraldError("verify.json lists research_suspects — a claim the article rests on is wrong; "
+                              "`HRD loopback --cause research` first")
         if not verify_passed(ver):
             raise HeraldError("verify.json has unsupported or contradicted claims")
         bh = worktree_hash(root, cfg, st["slug"])
         rec["body_hash"] = bh
         rec["blobs"] = {"verify.json": _git_blob(root, None, work_rel(tid, "verify.json"))}
+        rec["research"] = artifact_hash(root, cfg, st, "research.md")  # the evidence it checked against
         st["verified_hash"] = bh
         if amend:
             # delta research rewrote research.md / claims-map.json: re-anchor their producers
@@ -783,6 +912,9 @@ def trim_begin(root, cfg, tid):
     con, uns = _int(counts.get("contradicted")), _int(counts.get("unsupported"))
     if con:
         raise HeraldError("a contradicted sentence is never trimmed away — loop back")
+    if research_suspects(ver):
+        raise HeraldError("verify.json lists research_suspects — the researcher rechecks them first "
+                          "(`HRD loopback --cause research --claims …`), never a trim")
     if not 1 <= uns <= TRIM_MAX_UNSUPPORTED:
         raise HeraldError("trim takes 1 to %d unsupported sentences, not %d — loop back"
                           % (TRIM_MAX_UNSUPPORTED, uns))
@@ -1154,7 +1286,7 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
 SIGNAL_KINDS = (
     "human-edit", "ship-decline", "review-finding", "audit-finding", "dismissal",
     "revise-weakness", "verify-gap", "hold", "gate-failure", "escalation",
-    "session-edit-request",
+    "session-edit-request", "research-error",
     "stagnation",  # legacy (0.2.x): now recorded as a hold with reason stagnation
     "incomplete",  # a batch child that ended without a result (crash, timeout)
 )
@@ -1171,7 +1303,8 @@ NON_SIGNAL_HOLD_NOTES = ("tooling:", "human:", "batch child did not finish", "ba
 # loopback so the nudge counts recurring weaknesses, not every REVISE (one theme = one count axis).
 THEMES = ("intro", "structure", "length", "depth", "clarity", "tone", "search", "promotion",
           "policy", "accuracy", "images", "exemplar", "other")
-LOOPBACK_CAUSES = {"revise": "revise-weakness", "audit": "audit-finding", "verify": "verify-gap", "gate": None}
+LOOPBACK_CAUSES = {"revise": "revise-weakness", "audit": "audit-finding", "verify": "verify-gap", "gate": None,
+                   "research": "research-error"}
 
 
 def safe_signal(root, kind, tid=None, data=None):

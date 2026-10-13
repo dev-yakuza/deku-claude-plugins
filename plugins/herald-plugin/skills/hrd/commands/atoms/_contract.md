@@ -31,7 +31,7 @@ unattended: hold `needs-human`. Never infer a verdict from prose.
 |---|---|
 | `DONE` | `HRD stage pass`, next stage |
 | `DONE_WITH_CONCERNS` | record the concern in the stage artifact and the PR body; proceed |
-| `BLOCKED` | brief/research: hold with that stage's reason; others: stop (attended) / `needs-human` (unattended) |
+| `BLOCKED` | brief/research: hold with that stage's reason (a research fix: `needs-human`, branch kept); others: stop (attended) / `needs-human` (unattended) |
 | `NEEDS_CONTEXT` | supply the missing file from the stage's read list and re-invoke once |
 | `FAIL` | stop; report |
 
@@ -114,16 +114,27 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
   opus: a genuine retry's rewriting role (loopback 2+), evolve's adversarial panel.
 - Role default = `model:` in its file (repo-owned). The retry bump applies to that one
   re-invocation; `HRD loopback` returns `escalate_tier` and records the `escalation` signal
-  itself (loopbacks 2 and 3; never for `--human`, never past the cap).
+  itself (loopbacks 2 and 3, and the accuracy reserve; never for `--human`, never otherwise past the cap).
 - The editor-in-chief is the main session: the user's model in interactive runs (attended or
   in-session auto),
   `config.models.batch_main` in batch children. Never proposed for change.
 
 ## F. Loops and stagnation
 
-- critique and verify loopbacks share **3 per article** (`HRD loopback --topic <id> --cause …`
+- critique, verify and research loopbacks share **3 per article** (`HRD loopback --topic <id> --cause …`
   returns `exhausted`). Human-requested revisions and `ship` delta research use `--human` / are not
   counted.
+- **Accuracy reserve**: once the 3 are spent, one more counted loopback per article is kept for
+  a fact the article got wrong — `--cause verify` while the current `verify.json` has a
+  contradicted sentence, or `--cause research`; checked in code (`accuracy_reserve` in the
+  output and in `state.json`). Readability and audit findings never reach it, so polishing
+  never leaves a wrong fact without a fix.
+- **Research fix** (`_stages.md` § verify): when the fact-checker finds that a claim in
+  `research.md` itself is wrong (`verify.json` `research_suspects`), the loopback is `--cause
+  research --claims C9,…` — the researcher rechecks those claims at their source and corrects
+  them in place, then draft, critique and verify run again. Counted like any loopback (it
+  records `research-error`); `--cause verify` and the trim refuse while suspects are listed,
+  since rewriting from a wrong claim cannot fix it.
 - External-auditor rounds are capped separately at **3 per article**, human-requested
   revisions included (`HRD audit-round` counts them; round 1 full, then recheck, then skip).
   A fresh auditor always finds something new, so later rounds block only on BLOCKERs, unfixed
@@ -148,14 +159,15 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
 
 **Recorded by `HRD` itself** where the event happens — never call `HRD signal` for these:
 - `gate-failure` — `stage pass` refuses on the gate, or the pre-editor `HRD gate --record` fails.
-- `revise-weakness` / `audit-finding` / `verify-gap` — `HRD loopback --cause revise|audit|verify`.
+- `revise-weakness` / `audit-finding` / `verify-gap` / `research-error` — `HRD loopback --cause
+  revise|audit|verify|research`.
 - `dismissal` — from `critique.json` `decision_log`, on `stage pass --stage critique` and on
   `loopback --cause audit`.
 - `hold` — `HRD state --state held` (the batch runner records its own), except holds a human's
   change caused (`verify-after-human-edit`, `reverted`) and holds whose note starts with
   `tooling:` (environment) or `human:` (a human's choice): not writing problems.
 - `ship-decline` — `HRD state --state declined`.
-- `escalation` (loopbacks 2 and 3) and `incomplete` (a batch child that ended without a result;
+- `escalation` (loopbacks 2 and 3, and the accuracy reserve) and `incomplete` (a batch child that ended without a result;
   the runner) — context: listed for evolve, never counted by the nudge.
 
 **Recorded with `HRD signal --kind <kind> --topic <id> --data '<json>'`** (they need a judgment

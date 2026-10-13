@@ -22,7 +22,7 @@ from hrdlib.hashing import tree_hash, worktree_hash  # noqa: E402
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.7.1"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.8.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -214,7 +214,25 @@ def cmd_loopback(a):
         raise HeraldError("--cause %s needs --theme, one of: %s" % (a.cause, ", ".join(store.THEMES)))
     if a.theme and a.cause not in ("revise", "audit"):
         raise HeraldError("--theme applies only to --cause revise|audit")
+    if a.claims and a.cause != "research":
+        raise HeraldError("--claims applies only to --cause research")
     st = store.load_state(root, a.topic)
+    if store.open_research_fix(st):
+        raise HeraldError("a research fix is open (%s) — the researcher runs first (`atoms/_stages.md` § research); "
+                          "a human's direction goes to the researcher with it"
+                          % ", ".join(store.open_research_fix(st).get("claims") or []))
+    ver = store.current_verify(root, cfg, a.topic, st)
+    if a.cause == "verify" and store.research_suspects(ver):
+        raise HeraldError("verify.json lists research_suspects (%s) — the researcher rechecks them first: "
+                          "`HRD loopback --cause research --claims %s`"
+                          % (", ".join(store.research_suspects(ver)), ",".join(store.research_suspects(ver))))
+    fix = None
+    if a.cause == "research":
+        claims, ids = store.research_fix_claims(root, cfg, a.topic, st, a.claims)
+        fix = {"claims": claims, "ids_before": ids, "status": "open", "at": now_iso(),
+               "verify_blob": store._verify_blob(root, a.topic),
+               "research_before": store.artifact_hash(root, cfg, st, "research.md"),
+               "suspects": [dict(s, claim=s["claim"].strip()) for s in ver["research_suspects"]][:20]}
     reader = a.cause == "revise" and bool(store.reader_blockers(root, cfg, a.topic, st))
     if reader and store.reader_round_used(st):
         raise HeraldError("reader.json lists blocking reader-pass problems, but readability can no longer send this "
@@ -225,12 +243,21 @@ def cmd_loopback(a):
     if a.cause == "audit" and store._int(st.get("audit_rounds")) >= store.AUDIT_ROUND_CAP:
         raise HeraldError("no audit loopback on the last audit round: a MAJOR is deferred, a BLOCKER is held "
                           "needs-human (a human-directed fix uses --human)")
+    # the accuracy reserve: past the shared cap, one more loopback for a fact the article got wrong
+    reserve = (not a.human and store._int(st.get("loopbacks")) >= store.LOOP_CAP and not st.get("accuracy_reserve")
+               and a.cause in ("verify", "research") and store.accuracy_gap(ver))
     if not a.human:
         st["loopbacks"] = int(st.get("loopbacks", 0)) + 1
     st["last_loopback"] = "human" if a.human else a.cause
     if reader:
         st["reader_revise"] = True
+    if reserve:
+        st["accuracy_reserve"] = True
     st["stage"] = "draft"
+    if fix:  # the researcher corrects the claims first; draft, critique and verify follow
+        st.setdefault("research_fixes", []).append(fix)
+        st["stage"] = "research"
+        st["verified_hash"] = None  # what verify vouched for rested on the claims being corrected
     store.save_state(root, a.topic, st)
     n = st["loopbacks"]
     # signals below are best-effort: the loopback is already counted and must not be retried
@@ -243,6 +270,10 @@ def cmd_loopback(a):
         data = {"note": (a.note or "")[:500], "loopback": n}
         if a.theme:
             data["theme"] = a.theme
+        if fix:
+            data["claims"] = fix["claims"]
+        if reserve:
+            data["accuracy_reserve"] = True
         if reader:
             data["reader"] = True
         if a.cause == "verify":  # counts only from a verify.json about this very article
@@ -258,10 +289,12 @@ def cmd_loopback(a):
         store.safe_signal(root, kind, a.topic, data)
     if a.cause == "audit":
         store.record_dismissals(root, a.topic, store.safe_machine(root, a.topic, "critique.json"))
-    escalate = not a.human and 2 <= n <= 3  # the retry tier bump (contract §E); none past the cap
+    # the retry tier bump (contract §E); past the cap only for the accuracy reserve
+    escalate = not a.human and (2 <= n <= store.LOOP_CAP or reserve)
     if escalate:
         store.safe_signal(root, "escalation", a.topic, {"loopback": n, "cause": a.cause})
-    emit({"loopbacks": n, "cap": 3, "exhausted": n > 3, "escalate_tier": escalate})
+    emit({"loopbacks": n, "cap": store.LOOP_CAP, "exhausted": n > store.LOOP_CAP and not reserve,
+          "accuracy_reserve": bool(reserve), "escalate_tier": escalate, "stage": st["stage"]})
 
 
 def cmd_audit_round(a):
@@ -729,7 +762,7 @@ def build():
     p = sp.add_parser("loopback"); p.add_argument("--topic", required=True)
     p.add_argument("--human", action="store_true", help="human-requested revision: not counted")
     p.add_argument("--cause", choices=sorted(store.LOOPBACK_CAUSES)); p.add_argument("--theme")
-    p.add_argument("--note")
+    p.add_argument("--note"); p.add_argument("--claims", help="research: the suspect claim ids, comma-separated")
     p.set_defaults(fn=cmd_loopback)
     p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)
     p = sp.add_parser("finalize"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_finalize)

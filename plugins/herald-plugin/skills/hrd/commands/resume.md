@@ -20,7 +20,8 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`). Plan §3.2
 4. `git switch herald/<topic-id>--<slug>`; read `.claude/herald/work/<topic-id>/state.json`.
    Then the version check in `atoms/_stages.md` § Existing branches. A `trim` still `open`
    (interrupted) → `HRD trim --topic <id> --abort` first (puts back the article critique
-   passed; the trim stays used).
+   passed; the trim stays used). `stage` `research` with `research_fixes[-1]` `open` (a research
+   fix that was held or interrupted) → run the research fix (`atoms/_stages.md` § research).
 5. Budget baseline as in `write.md` §0 step 7 (a fresh baseline: resuming is the human's choice
    to spend more). Then: if `stage` is `brief` and `slug` is null, run brief as in `write.md`. Otherwise run from
    `stage` onward through publish exactly as `write.md` §1–§3 (unattended if `HRD_UNATTENDED=1`; else in-session auto by

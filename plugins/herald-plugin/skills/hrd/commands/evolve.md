@@ -43,7 +43,7 @@ unchanged; the targets applied in the last 3 runs (regression watch).
 ## Phase 2 — Themes
 
 Synthesize ranked themes, strongest evidence first (human edits > ship declines > review
-findings > auditor patterns/dismissals > REVISE patterns > verify gaps > holds (stagnation is a
+findings > auditor patterns/dismissals > REVISE patterns > research errors (claims the researcher got wrong; researcher persona, `sources.md`) > verify gaps > holds (stagnation is a
 hold reason) > gate failures > escalations — listed, never counted by the nudge). Typical targets: style guide, category guides, writer /
 researcher / strategist personas (Habits section), sources list, exemplar promotion (first-
 round PASS + no undismissed findings + human-reviewed with almost no edits), role default

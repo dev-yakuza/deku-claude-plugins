@@ -95,7 +95,7 @@ head) with any deferred MAJORs listed one per line (`audit_log` outcome `deferre
 human decides them here), latest `/hrd review` finding for it if any (unresolved BLOCKER → warning), verify counts,
 the trimmed sentences (`state.json` `trim.removed` at the PR head while `trim.status` is `done`
 — critique's verdict was carried over to that shorter body unseen by the editor and auditor),
-the PR body's `## Reader notes` and `## Framings` if any (readability notes the editor did not
+the PR body's `## Reader notes`, `## Framings` and `## Research corrections` if any (readability notes the editor did not
 send back; sentences the fact-checker treated as the article's own example under a framing),
 "body differs from verified" (`HRD hash --slug <s> --rev <headRefOid>` vs `HRD ledger show`),
 "images changed", cannibalization re-check, and `HRD scope --topic <id> --rev <headRefOid>`.
@@ -128,6 +128,8 @@ switch and §7.1 need a clean tree.
    sentences and appends `C#` to `research.md`; the fact-checker adds the mappings to
    `claims-map.json`; a PR comment `herald-source: <sentence> <URL>` from a human counts as a
    source. Image-only changes still run the gate and verify (the hash covers images).
+   `research_suspects` (a claim in `research.md` found wrong) fail this re-verify — no research
+   fix here: the fail path below holds `verify-after-human-edit`; the human resolves it.
 3. Pass → `HRD stage pass --topic <id> --stage verify --amend`, commit the artifacts, `git push origin <branch>`,
    `git rev-parse HEAD` as its own call, then `integrity.py --record --topic <id> --kind push --sha
    <that literal SHA>` (the PR head may carry older scripts that need `--sha`; newer ones check it

@@ -33,12 +33,30 @@ Every stage follows the same frame:
 
 - **Read list**: `<w>brief.md`, `docs/editorial/sources.md`, `docs/editorial/promotion.md`.
   The researcher alone reads web pages (WebFetch/WebSearch); raw pages never reach other roles.
-- **Output**: `<w>research.md` — claims `C1..Cn`, each with source URL, short excerpt, access
+- **Output**: `<w>research.md` — claims `C1..Cn`, each starting a line with its id and a mark
+  (`**C3.** …`; `stage pass` refuses a file where it finds none), each with source URL, short excerpt, access
   date, confidence. Policy from `sources.md` (banned sources, mention rules) applies. What the
   article will say about the site's own product (CTA, app features) comes from `promotion.md`
   as **owner claims** (source `docs/editorial/promotion.md`, confidence `owner`); they support
   statements about that product only (fact-checker persona).
 - Not enough support for the required sections → `BLOCKED` → hold `research`.
+- **Research fix** (after `HRD loopback --cause research --claims …` set `stage` to research;
+  `state.json` `research_fixes`, last entry `open`): spawn the researcher (one tier up when the
+  loopback returned `escalate_tier`) with `<w>research.md`, `docs/editorial/sources.md` and the
+  listed claims with the fact-checker's reasons (`research_fixes[-1].suspects`). It reopens each
+  listed claim's source and corrects the claim in place under the same id (claim, excerpt,
+  access date), adding a line `corrected: <date> — <what was wrong>`; a claim the source does
+  support as written gets `rechecked: <date> — <what the source says>` instead; one no source
+  supports any more gets `withdrawn: <date> — <why>` (no sentence may rest on it; `stage pass`
+  refuses an unchanged `research.md`). New claims are
+  appended; no id is deleted or renumbered (`stage pass` refuses that; a pass closes the fix,
+  and until then draft, critique and verify refuse to pass). A claim id counts where a line
+  starts with it (`C9.`, `**C9.**`, `### C9`). `BLOCKED` in a fix (source gone, or the
+  corrected claim no longer carries a required section) → hold `needs-human` with the reason,
+  never `research` (that hold deletes the branch). A human's direction while a fix is open goes
+  to the researcher with it (`loopback --human` refuses until the fix passes). Then draft (the writer
+  also gets the corrected claim ids and rewrites every sentence mapped to them, dropping or
+  remapping those on a withdrawn claim), critique and verify as after any loopback.
 
 ## draft — writer (+ illustrator if enabled)
 
@@ -134,7 +152,12 @@ references into the article itself; then the gate.
    dismissals; the finding goes into `audit_log` with outcome `fixed` — the next recheck checks
    it, `unfixed` if it is still there), then `HRD loopback --topic <id> --cause audit --theme <t> --note "<finding>"`
    (records `audit-finding` and the logged dismissals), back to draft; after the fix, editor →
-   auditor → verify run again. A `BLOCKER` on the `last` round is never looped back
+   auditor → verify run again. A MAJOR about a fact that is deferred (recheck rounds) also goes
+   to the fact-checker in step verify as a pointer — the claim id and the finding in one line;
+   the fact-checker lists every pointer's claim in `research_suspects` (only the researcher reads
+   the source, so only a research fix settles it). Once a research fix has rechecked a claim
+   (`research_fixes`, status `done`), its pointer is not passed again; `loopback --cause
+   research` refuses a claim a done fix covered — the same finding again holds `stagnation`. A `BLOCKER` on the `last` round is never looped back
    automatically (no auditor would check the fix): log it with outcome `open` and hold
    `needs-human` (cause `defect:`) — `--attended` and single-stage commands (`/hrd critique`): ask first;
    in-session auto and unattended: hold without asking (`_contract.md` §C). The human decides (on the spot, or
@@ -196,7 +219,8 @@ hashing joins the verify target set when M6 is enabled.)
 ## verify — fact-checker
 
 - **Read list**: the article, `<w>claims-map.json`, `<w>research.md`,
-  `docs/editorial/promotion.md` (only to check `owner` claims).
+  `docs/editorial/promotion.md` (only to check `owner` claims), and any pointers from deferred
+  auditor findings about facts (§ critique 3).
 - The fact-checker **extracts factual sentences from the article independently**. A factual
   sentence missing from the claims map is automatically `unsupported`.
 - Before spawning, take `HRD hash --slug <slug>`; after the role returns, the editor-in-chief
@@ -205,7 +229,11 @@ hashing joins the verify target set when M6 is enabled.)
   claim ids) and `<w>verify.json` `{"body_hash": "<added by the editor-in-chief>",
   "counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n},
   "unsupported_sentences": ["<verbatim>", …], "framings": [{"framing": "<text>", "covers":
-  ["<sentence>", …]}]}` — `framings` lists every framing the fact-checker applied (also under
+  ["<sentence>", …]}], "research_suspects": [{"claim": "C9", "reason": "<what is wrong>",
+  "sentences": ["<sentence>", …]}]}` — `research_suspects` lists claims in `research.md` the
+  fact-checker found wrong in themselves (their own excerpt says otherwise, or they contradict
+  another claim) or that a pointer from a deferred auditor finding names, with the
+  sentences that rest on them (fact-checker persona); `framings` lists every framing the fact-checker applied (also under
   `## Framings` in `verify.md`; a non-empty list excludes the PR from auto publish as `framed`,
   accepted by `--consent`); `unmapped` is a subset already counted in
   `unsupported`; each unsupported sentence is listed exactly as it appears in the article
@@ -213,7 +241,10 @@ hashing joins the verify target set when M6 is enabled.)
   unsupported part and it is not a qualifier, warning or limit; an unsupported sentence that
   warns about or limits another one is also listed under `"unsupported_qualifiers"` and is
   never trimmed (fact-checker persona); `stage pass` refuses a stale `body_hash`.
-- Any unsupported/contradicted → first the **trim**, once per article, when nothing is
+- `research_suspects` listed → `HRD loopback --topic <id> --cause research --claims <ids>
+  --note "<first reason>"` (records `research-error`) → § research, Research fix. No trim, no
+  `--cause verify`: both refuse, since the writer cannot fix a sentence from a wrong claim.
+- Otherwise any unsupported/contradicted → first the **trim**, once per article, when nothing is
   contradicted and 1–3 sentences are unsupported (`--attended`: ask the human — trim, loop back
   or hold; otherwise no question):
   1. `HRD trim --topic <id> --begin` — refuses when the counts or the state do not qualify, a
@@ -245,7 +276,9 @@ hashing joins the verify target set when M6 is enabled.)
   deleted passages (`state.json` `trim.removed`, while `trim.status` is `done` — a later
   critique of a rewritten body marks it `superseded`).
 - Otherwise → `HRD loopback --topic <id> --cause verify --note "<first unsupported
-  sentence>"` (records `verify-gap` with the counts), back to draft. (In `ship`'s re-verify of
+  sentence>"` (records `verify-gap` with the counts), back to draft. Past the shared 3, a
+  contradicted sentence (or a research fix) still gets the one accuracy reserve
+  (`_contract.md` §F; the output says `accuracy_reserve`); only `exhausted` holds. (In `ship`'s re-verify of
   a human's push: delta research instead — no trim, no loopback; see `ship.md` §5.)
 - Pass: `HRD stage pass --stage verify` (sets `verified_hash`), then
   `python3 .claude/herald/scripts/integrity.py --record --topic <id>`.
@@ -269,7 +302,9 @@ hashing joins the verify target set when M6 is enabled.)
    `## Trimmed sentences` (`state.json` `trim.removed`, `trim.status` `done`) if the trim
    deleted anything, `## Reader notes` (`reader.json` `notes` of the final round, and whether the one
    reader-pass send-back was used — `state.json` `reader_revise`) if any, `## Framings` (the
-   framings the fact-checker applied and the sentences each covered, from `verify.md`) if any —
+   framings the fact-checker applied and the sentences each covered, from `verify.md`) if any,
+   `## Research corrections` (`state.json` `research_fixes`: each claim, the fact-checker's
+   reason and the researcher's `corrected:`/`rechecked:` line from `research.md`) if any —
    so the human sees what was treated as the article's own example rather than fact — and the
    marker `<!-- herald:topic=<id> slug=<slug> -->`.
 7. Unattended: `HRD result --topic <id> --status pr-open --pr <n>`.

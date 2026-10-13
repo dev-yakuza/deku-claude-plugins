@@ -45,7 +45,7 @@ class Flow(RepoCase):
         self.write(".claude/herald/work/%s/brief.md" % tid, "brief")
         self.hrd("branch", "--topic", tid, "--slug", slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "brief")
-        self.write(".claude/herald/work/%s/research.md" % tid, "C1 source")
+        self.write(".claude/herald/work/%s/research.md" % tid, "C1. source")
         self.hrd("stage", "pass", "--topic", tid, "--stage", "research")
         self.article(slug)
         self.write(".claude/herald/work/%s/claims-map.json" % tid, "{}")
@@ -113,6 +113,114 @@ class StageTests(Flow):
         self.assertEqual(out["loopbacks"], 3)
         out, _ = self.hrd("loopback", "--topic", tid, "--cause", "verify")
         self.assertTrue(out["exhausted"])
+
+
+class AccuracyTests(Flow):
+    VER_SUSPECT = {"counts": {"supported": 2, "unsupported": 0, "contradicted": 1, "unmapped": 0},
+                   "research_suspects": [{"claim": "C1", "reason": "example sits under sense 1",
+                                          "sentences": ["x"]}]}
+    VER_CONTRA = {"counts": {"supported": 2, "unsupported": 0, "contradicted": 1, "unmapped": 0}}
+
+    def spend(self, tid, n=3):
+        for _ in range(n):
+            self.hrd("loopback", "--topic", tid, "--cause", "revise", "--theme", "depth")
+
+    def test_research_fix_goes_to_researcher_and_keeps_claim_ids(self):
+        tid, slug = self.run_flow()
+        write_machine(self, tid, "verify.json", self.VER_SUSPECT, slug)
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", check=False)
+        self.assertIn("research_suspects", p.stderr)  # a listed suspect never passes verify
+        self.write(".claude/herald/work/%s/research.md" % tid, "C1. source\nC2. other")
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "verify", check=False)
+        self.assertIn("--cause research", p.stderr)
+        _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+        self.assertNotEqual(p.returncode, 0)
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "research", "--claims", "C2", check=False)
+        self.assertIn("exactly the suspects", p.stderr)
+        out, _ = self.hrd("loopback", "--topic", tid, "--cause", "research", "--claims", "C1", "--note", "sense")
+        self.assertEqual((out["stage"], out["loopbacks"]), ("research", 1))
+        self.assertIsNone(store.load_state(self.root, tid)["verified_hash"])
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "research", "--claims", "C1", check=False)
+        self.assertIn("research fix is open", p.stderr)  # one fix at a time
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "draft", check=False)
+        self.assertIn("research fix is open", p.stderr)  # the researcher is never skipped
+        _, p = self.hrd("loopback", "--topic", tid, "--human", check=False)
+        self.assertIn("research fix is open", p.stderr)
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "research", check=False)
+        self.assertIn("unchanged since the research fix", p.stderr)
+        self.write(".claude/herald/work/%s/research.md" % tid, "no claim here")
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "research", check=False)
+        self.assertIn("no claim the tools can find", p.stderr)
+        self.write(".claude/herald/work/%s/research.md" % tid, "C1. corrected\ncorrected: x")  # C2 lost
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "research", check=False)
+        self.assertIn("C2", p.stderr)
+        self.write(".claude/herald/work/%s/research.md" % tid, "C1. corrected\nC2. other\nC3. new")
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "research")
+        st = store.load_state(self.root, tid)
+        self.assertEqual((st["stage"], st["research_fixes"][-1]["status"]), ("draft", "done"))
+        self.assertEqual(st["research_fixes"][-1]["claims"], ["C1"])
+        sig = [json.loads(x) for x in open(os.path.join(self.root, ".claude/herald/signals.jsonl"))]
+        self.assertTrue(any(r["kind"] == "research-error" and r["data"]["claims"] == ["C1"] for r in sig))
+        # the draft is checked against the corrected research
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
+        # the same claim found wrong again after its fix: no second fix, the session holds
+        write_machine(self, tid, "verify.json", self.VER_SUSPECT, slug)
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "research", "--claims", "C1", check=False)
+        self.assertIn("stagnation", p.stderr)
+
+    def test_malformed_suspects_refused_and_claim_ids_are_line_starts(self):
+        tid, slug = self.run_flow()
+        write_machine(self, tid, "verify.json", dict(self.VER_CONTRA, research_suspects=["C1"]), slug)
+        for args in (("loopback", "--topic", tid, "--cause", "verify"),
+                     ("stage", "pass", "--topic", tid, "--stage", "verify")):
+            _, p = self.hrd(*args, check=False)
+            self.assertNotEqual(p.returncode, 0)
+            self.assertIn("malformed", p.stderr)
+        self.write(".claude/herald/work/%s/research.md" % tid, "**C1.** claim (see\nC40 grade)\n### C2: two\n> C7 note\n"
+                   "C3 level wraps\n| C5 | row |\n1. **C6.** x\nClaim C8: y\n- C9 — z\nC10.5 percent\nC11：jp")
+        self.assertEqual(store.research_claim_ids(self.root, tid), ["C1", "C2", "C5", "C6", "C8", "C9", "C11"])
+
+    def test_research_pass_refuses_claims_it_cannot_read(self):
+        tid, slug = self.run_flow()
+        st = store.load_state(self.root, tid)
+        st["stage"] = "research"
+        store.save_state(self.root, tid, st)
+        self.write(".claude/herald/work/%s/research.md" % tid, "**C1.** a\n**C2** b\n- C3 c")
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "research", check=False)
+        self.assertIn("C2, C3", p.stderr)
+
+    def test_research_change_after_verify_blocks_publish(self):
+        tid, slug = self.run_flow()
+        self.write(".claude/herald/work/%s/research.md" % tid, "C1 changed")
+        _, p = self.hrd("finalize", "--topic", tid, check=False)
+        self.assertIn("research.md", p.stderr)
+
+    def test_accuracy_reserve_only_for_a_wrong_fact(self):
+        tid, slug = self.run_flow()
+        self.spend(tid)
+        write_machine(self, tid, "verify.json", VER_PASS, slug)  # nothing contradicted: no reserve
+        out, _ = self.hrd("loopback", "--topic", tid, "--cause", "verify")
+        self.assertEqual((out["exhausted"], out["accuracy_reserve"]), (True, False))
+
+    def test_accuracy_reserve_answers_a_contradicted_sentence_once(self):
+        tid, slug = self.run_flow()
+        self.spend(tid)
+        out, _ = self.hrd("loopback", "--topic", tid, "--cause", "revise", "--theme", "depth")
+        self.assertTrue(out["exhausted"])  # readability and audit never reach it
+        write_machine(self, tid, "verify.json", self.VER_CONTRA, slug)
+        out, _ = self.hrd("loopback", "--topic", tid, "--cause", "verify")
+        self.assertEqual((out["exhausted"], out["accuracy_reserve"], out["escalate_tier"]), (False, True, True))
+        out, _ = self.hrd("loopback", "--topic", tid, "--cause", "verify")  # once per article
+        self.assertEqual((out["exhausted"], out["accuracy_reserve"]), (True, False))
+
+    def test_accuracy_reserve_covers_a_research_fix(self):
+        tid, slug = self.run_flow()
+        self.spend(tid)
+        write_machine(self, tid, "verify.json", self.VER_SUSPECT, slug)
+        out, _ = self.hrd("loopback", "--topic", tid, "--cause", "research", "--claims", "C1")
+        self.assertEqual((out["exhausted"], out["accuracy_reserve"], out["stage"]), (False, True, "research"))
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "verify", "--claims", "C1", check=False)
+        self.assertIn("--claims applies only", p.stderr)
 
 
 class LedgerTests(Flow):
@@ -224,7 +332,7 @@ class TrimTests(Flow):
         self.write(".claude/herald/work/%s/brief.md" % tid, "brief")
         self.hrd("branch", "--topic", tid, "--slug", slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "brief")
-        self.write(".claude/herald/work/%s/research.md" % tid, "C1 source")
+        self.write(".claude/herald/work/%s/research.md" % tid, "C1. source")
         self.hrd("stage", "pass", "--topic", tid, "--stage", "research")
         self.article(slug, self.EXTRA)
         self.write(".claude/herald/work/%s/claims-map.json" % tid, "{}")

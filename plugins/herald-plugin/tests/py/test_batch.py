@@ -76,7 +76,7 @@ class BatchCase(RepoCase):
         self.assertFalse(os.path.exists(os.path.join(self.root, ".claude/herald/signals.jsonl")))
 
     def test_version_gate_after_branch_preserves_and_holds(self):
-        p = self.run_batch({"t0001": "version-gate-branch", "t0002": "pr"}, extra=("--expect-version", "0.7"))
+        p = self.run_batch({"t0001": "version-gate-branch", "t0002": "pr"}, extra=("--expect-version", "0.8"))
         self.assertNotEqual(p.returncode, 0)
         topics = {t["id"]: t for t in store.load_topics(self.root)["topics"]}
         self.assertEqual((topics["t0001"]["state"], topics["t0001"]["reason"]), ("held", "needs-human"))

@@ -43,7 +43,7 @@ Run brief, research, draft, critique, verify in order per `atoms/_stages.md`. Af
 
 Show: title, slug, 5-line summary, audit findings incl. MINOR, dismissals and deferrals, verify
 counts, the framings (`verify.json` `framings`: sentences treated as the article's own example)
-and the reader notes (`reader.json` `notes`) if any, measured cost so far. Ask: approve / request changes / hold. Each re-run below counts
+the reader notes (`reader.json` `notes`) and the research corrections (`state.json` `research_fixes`) if any, measured cost so far. Ask: approve / request changes / hold. Each re-run below counts
 an audit round (`HRD audit-round`), so after the cap only the editor and verify run again.
 
 - **Request changes**: record it right away — `HRD signal --kind session-edit-request --topic
@@ -62,7 +62,7 @@ an audit round (`HRD audit-round`), so after the cap only the editor and verify 
 
 `atoms/_stages.md` § publish (finalize → commit → scope → push → ledger push record → PR).
 Report the PR URL (in-session auto: also the decisions it made, any deferred findings,
-trimmed sentences, framings and reader notes) and remind: "publish with `/hrd ship`". If `--ship` was given or
+trimmed sentences, framings, reader notes and research corrections) and remind: "publish with `/hrd ship`". If `--ship` was given or
 `config.autonomy.publish` is `auto`, instead run `/hrd ship <that PR> --session-auto` (plus
 `--consent` with `--ship`) right away, before releasing this command's lock (ship nests on it
 with this token): per plan §3.2.2 the interactive auto path covers only the PR this session
