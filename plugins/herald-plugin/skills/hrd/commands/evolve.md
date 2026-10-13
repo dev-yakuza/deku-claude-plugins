@@ -62,24 +62,62 @@ and PRs, plus the signal `id`s from Phase 1 — Phase 6 consumes them), expected
 ## Phase 4 — Adversarial panel
 
 Spawn three fresh reviewers (opus) in parallel, one lens each: correctness (does the evidence
-support it?), degradation (does it weaken verification or the floor? any yes = veto),
-redundancy (already covered?). Drop what does not survive; say why in plain words.
+support it?), degradation (does it weaken verification or the floor?), redundancy (already
+covered?). Each returns, per item, `{"verdict": "keep|drop|edit", "reason": "<one sentence>",
+"edit": "<changed wording, only for edit>"}`. Tell every reviewer: `reason` and `edit` in
+`config.language`; `edit` only for a change that alters what the item does or fixes something
+that would otherwise mislead — a wording nit is `keep` with the nit in `reason`. Tell the
+degradation reviewer: anything that weakens verification or the floor is `drop`, never `edit`.
+
+- Drop an item that a majority drops, that the degradation reviewer drops, or for which the
+  degradation reviewer returned no valid verdict (the veto must have run). A missing or
+  invalid verdict from another reviewer counts as `drop`.
+- **The version on the table**: no `edit` → the Phase 3 draft. One or more `edit`s → one
+  revised version, the edits combined when they are compatible. When they conflict: the
+  correctness reviewer's edit if it made one (it fixes what is wrong), else the Phase 3 draft —
+  and in that case the recommendation's reason says the reviewers disagreed on the wording. A
+  revised version goes to a **re-check**: one fresh degradation reviewer (opus) compares it with
+  the file it changes — does it loosen a fact-check rule, a critique criterion, the gate, an
+  exemplar (deleting or downgrading one) or the charter floor (INV2)? Only `keep` passes;
+  `drop`, `edit` or no valid verdict → the item is dropped (no further rounds).
+- Say in plain words why each dropped item went. Survivors carry their verdicts and the
+  version on the table into Phase 5.
 
 ## Phase 5 — Per-item approval
 
-`AskUserQuestion` per surviving item: apply / edit / reject. Rejected items go to the ledger's
-skip list.
+One item at a time, in `config.language` and plain words (no "Phase", "lens", "INV" or bare
+field names): what changes (one clause plus the diff of the version on the table), why (the
+evidence as a sentence citing topics and PRs), and the panel's recommendation with its reason
+in one or two sentences — always exactly one of two, never a hedge:
+- no `drop` → **recommend apply** (plus "the panel's revised wording" when the version on the
+  table was revised); the reason says what the change fixes and that it keeps verification;
+- one outvoted `drop`, whatever the others said → **recommend reject** (plus "the panel's
+  revised wording" when revised); the reason is that reviewer's concern, saying which version
+  it was about, or that the reviewer gave no answer (the human may well override it — every
+  survivor "passed", so recommending apply here would make the label meaningless).
+
+Then `AskUserQuestion` for that item alone: three options — apply, reject, edit — named in
+`config.language` (ko 적용 / 거절 / 수정), the recommended one first and marked (ko "(권장)", ja
+"(推奨)", en "(recommended)"); the question repeats the recommendation in the options' words.
+Apply means the version on the table; edit means the human's wording, which goes to the same
+re-check (anything but `keep` → say why and ask again: apply the version on the table, reject,
+or edit once more). Wait for the answer before the next item. Rejected items go to the
+ledger's skip list.
 
 ## Phase 6 — Apply
 
-1. Edit approved files (protected files trigger the guard's `ask` — that prompt is the human's
+1. Apply each approved item's version on the table (or the human's edit) to its files
+   (protected files trigger the guard's `ask` — that prompt is the human's
    per-file approval). Re-run `tests` that exist for the harness (`validate_content.py` on the
    last 3 published articles must still pass). Failure → revert the working tree for this run,
    report, and stop without committing, consuming or stamping the scan (the evidence stays
    pending and the nudge stays as it was; the same holds if the human aborts the run).
 2. No item was decided (nothing proposed, nothing survived the panel) → no commit, no log row;
    go to Phase 7. Otherwise append the run to `evolution-log.md` (n, date, applied items with
-   evidence and target files, rejected items) and commit once:
+   evidence, target files and the wording applied — draft, panel-revised or human-edited —
+   rejected items with their Phase 3 draft (and the version on the table when it differed, so
+   an unchanged draft is not proposed again), and for each decided item the panel's
+   recommendation next to the human's decision) and commit once:
    `HRD commit --cmd harness --kind evolve -m "chore(herald): evolve #<n> — <summary>" <files>`,
    `git push origin <base>`.
 3. After the commit (even if the push was refused; if `HRD commit` itself fails, revert as in
