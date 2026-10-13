@@ -612,11 +612,13 @@ ROLLBACK="$GLD/commands/rollback.md"
 hasfx "retro.md: 정리 단계가 있다" "$RETRO" "## Phase 7 — Cleanup"
 hasfx "retro.md: DRY 분기가 정리를 포함한다" "$RETRO" "*deleting worktrees and branches*"
 hasfx "retro.md: DRY 는 아무것도 지우지 않는다" "$RETRO" "아무것도 삭제하지 않습니다"
-hasfx "retro.md: 워크트리를 강제로 지우지 않는다" "$RETRO" "**never \`--force\`**"
-hasfx "retro.md: -D 는 머지된 커밋과 같을 때만" "$RETRO" "local tip equals its \`headRefOid\`"
-hasfx "retro.md: 열린 PR 의 base 는 지우지 않는다" "$RETRO" "any open PR** — deleting a base branch"
 hasfx "retro.md: 이름 패턴으로 브랜치를 찾지 않는다" "$RETRO" "**Never** find branches by name pattern"
 hasfx "retro.md: prune 은 컨테이너 안일 때만" "$RETRO" "only when every \`prunable\` entry is inside the container"
+hasfx "retro.md: 포크 PR 의 브랜치는 후보가 아니다" "$RETRO" "\`isCrossRepository\` is \`false\`"
+hasfx "retro.md: 다른 PR 의 base 인 브랜치는 후보가 아니다" "$RETRO" "names **no PR outside the confirmed set**"
+hasfx "retro.md: 원격 조회는 전체 ref 로 한다" "$RETRO" "git ls-remote origin refs/heads/<branch>"
+hasfx "retro.md: 지우기 직전에 run 을 다시 확인한다" "$RETRO" "**Re-check the run.**"
+hasfx "retro.md: 닫기 실패는 손으로 닫지 말고 재실행" "$RETRO" "closing it failed — re-run /gld sprint retro"
 cat > "$WORK3/cleanup.py" <<'CLEANPY'
 import re, sys
 retro = open(sys.argv[1], encoding="utf-8").read()
@@ -625,32 +627,47 @@ problems = []
 # 정리는 트래커를 닫은 뒤에 온다 — 정리 실패가 끝난 스프린트를 열어 두면 안 된다.
 close = retro.find("gh issue close")
 p7 = retro.find("## Phase 7")
-if close < 0 or p7 < 0 or p7 < close:
-    problems.append("Phase 7 must come after the tracker close")
-# 닫기에 실패하면 정리를 건너뛴다 — 재실행이 정리에 도달한다.
+ret = retro.find("## Return")
+if close < 0 or p7 < 0 or ret < p7 or p7 < close:
+    print("PROBLEMS Phase 7 must exist after the tracker close and before Return"); raise SystemExit
 if "**skip Phase 7**" not in retro:
     problems.append("a failed close does not skip Phase 7")
-# 코드 펜스 안의 실제 명령에 --force 가 없다.
-fence = chr(96) * 3
-inside = False
-for n, line in enumerate(retro.splitlines(), 1):
-    if line.lstrip().startswith(fence):
-        inside = not inside
-        continue
-    if inside and re.search(r"--force\b|\s-f\b", line) and ("worktree" in line or "push" in line):
-        problems.append("forced command in a fence at line %d" % n)
+sec = retro[p7:ret]
+# ⚠ 코드 펜스만 보면 안 된다 — Phase 7 의 명령은 인라인 코드다. 문단 단위로 판정한다.
+paras = re.split(r"\n\s*\n|\n(?=\s*(?:\d+\.|-) )", sec)
+NEG = re.compile(r"\b(never|not|no|nor)\b", re.I)
+for p in paras:
+    flat = " ".join(p.split())
+    for m in re.finditer(r"--force\b|push -f\b|worktree remove -f\b", flat):
+        if not NEG.search(flat[max(0, m.start() - 40):m.start()]):
+            problems.append("unnegated force near: " + flat[max(0, m.start() - 40):m.end()])
+    for m in re.finditer(r"git branch -d\b", flat):
+        if not NEG.search(flat[max(0, m.start() - 20):m.start()]):
+            problems.append("git branch -d offered: it trusts the upstream and skips the tip check")
+    for m in re.finditer(r"git branch -D\b", flat):
+        if "equal" not in flat or "headRefOid" not in flat:
+            problems.append("branch -D without the tip == headRefOid guard in the same item")
+    if "push origin --delete" in flat and "headRefOid" not in flat:
+        problems.append("remote delete without the headRefOid guard in the same item")
+# 캐리오버와 닫힌-미머지 브랜치는 지우지 않는다.
+for row in ("carryover", "closed-unmerged"):
+    line = next((l for l in sec.splitlines() if l.startswith("| " + row)), "")
+    if line.count("keep") < 2:
+        problems.append("the %s row does not keep both branches" % row)
+# 기본 브랜치와 현재 브랜치는 후보가 아니다.
+if "defaultBranchRef" not in sec or "branch --show-current" not in sec:
+    problems.append("default/current branch exclusion missing")
 # rollback.md 의 branch -D 금지 행이 retro 예외를 명시한다 (issue close 와 _handoff.md 의 짝과 같다).
-if "branch -D" in retro:
-    rows = [l for l in rollback.splitlines() if "branch -D" in l]
-    if not any("sprint retro" in r and "headRefOid" in r for r in rows):
-        problems.append("rollback.md's branch -D rule does not name the retro exception")
+rows = [l for l in rollback.splitlines() if "branch -D" in l]
+if not any("sprint retro" in r and "headRefOid" in r for r in rows):
+    problems.append("rollback.md's branch -D rule does not name the retro exception")
 print("OK" if not problems else "PROBLEMS " + "; ".join(problems))
 CLEANPY
 CLEAN="$("$PY" "$WORK3/cleanup.py" "$RETRO" "$ROLLBACK")"
 if [ "$CLEAN" = "OK" ]; then
-  ok "retro.md: 정리는 닫은 뒤, 강제 없음, rollback.md 가 예외를 명시한다"
+  ok "retro.md: 정리는 닫은 뒤, 강제·-d 없음, 삭제는 headRefOid 일치일 때만, rollback.md 가 예외를 명시한다"
 else
-  bad "retro.md: 정리 순서와 rollback.md 의 예외" "OK" "$CLEAN"
+  bad "retro.md: 정리의 안전 장치" "OK" "$CLEAN"
 fi
 
 # 11. run.md — 보드 값은 렌더 토큰이 아니라 **데이터 파일**이다. 이 클래스가 세 번 나왔다:
