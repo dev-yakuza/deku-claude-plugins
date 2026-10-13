@@ -41,6 +41,6 @@ Execute the confirmed method. **An evolve run is reverted without its ledger** �
 **4. Report** — what was reverted, the undo commit/PR link, and how to **redo** if this was a mistake (revert the revert / reopen the PR / relabel forward). Everything is reversible.
 
 ## Hard rules
-- **Never destructive** (INV3/INV4): `git revert` (additive) only — never `reset --hard`, `push --force`, `rebase`, `branch -D` of merged work, or history rewrite.
+- **Never destructive** (INV3/INV4): `git revert` (additive) only — never `reset --hard`, `push --force`, `rebase`, `branch -D` of merged work, or history rewrite. ⚠ The `branch -D` ban is **rollback's** — undoing must not drop the work it undoes. `/gld sprint retro` Phase 7 is the one exception, and only for a closed sprint's `MERGED` PR whose local tip equals the merged `headRefOid`: the commits stay on GitHub, so that deletion is reversible (INV3).
 - **Confirm before acting** (INV1): show target + method, wait for the human. Read-only until confirmed.
 - **Conflicts surface, never force** — a revert that conflicts is handed to the human.

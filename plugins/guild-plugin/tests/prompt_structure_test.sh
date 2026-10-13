@@ -606,6 +606,52 @@ else
   bad "retro.md: 보드에 쓰지 않는다" "no board write in any code fence" "offenders:$RETRO_WRITES"
 fi
 hasfx "retro.md: 얼어붙음을 사람에게 고지한다" "$RETRO" "이 시점 이후 카드는 갱신되지 않습니다"
+# 10d. retro Phase 7 — 정리. 지우는 단계라서 안전 장치 문구가 사라지면 안 된다.
+#      스프린트 밖의 브랜치, 쌓인 PR 의 base, 머지 뒤에 생긴 커밋을 지우는 것이 각각의 실패 모양이다.
+ROLLBACK="$GLD/commands/rollback.md"
+hasfx "retro.md: 정리 단계가 있다" "$RETRO" "## Phase 7 — Cleanup"
+hasfx "retro.md: DRY 분기가 정리를 포함한다" "$RETRO" "*deleting worktrees and branches*"
+hasfx "retro.md: DRY 는 아무것도 지우지 않는다" "$RETRO" "아무것도 삭제하지 않습니다"
+hasfx "retro.md: 워크트리를 강제로 지우지 않는다" "$RETRO" "**never \`--force\`**"
+hasfx "retro.md: -D 는 머지된 커밋과 같을 때만" "$RETRO" "local tip equals its \`headRefOid\`"
+hasfx "retro.md: 열린 PR 의 base 는 지우지 않는다" "$RETRO" "any open PR** — deleting a base branch"
+hasfx "retro.md: 이름 패턴으로 브랜치를 찾지 않는다" "$RETRO" "**Never** find branches by name pattern"
+hasfx "retro.md: prune 은 컨테이너 안일 때만" "$RETRO" "only when every \`prunable\` entry is inside the container"
+cat > "$WORK3/cleanup.py" <<'CLEANPY'
+import re, sys
+retro = open(sys.argv[1], encoding="utf-8").read()
+rollback = open(sys.argv[2], encoding="utf-8").read()
+problems = []
+# 정리는 트래커를 닫은 뒤에 온다 — 정리 실패가 끝난 스프린트를 열어 두면 안 된다.
+close = retro.find("gh issue close")
+p7 = retro.find("## Phase 7")
+if close < 0 or p7 < 0 or p7 < close:
+    problems.append("Phase 7 must come after the tracker close")
+# 닫기에 실패하면 정리를 건너뛴다 — 재실행이 정리에 도달한다.
+if "**skip Phase 7**" not in retro:
+    problems.append("a failed close does not skip Phase 7")
+# 코드 펜스 안의 실제 명령에 --force 가 없다.
+fence = chr(96) * 3
+inside = False
+for n, line in enumerate(retro.splitlines(), 1):
+    if line.lstrip().startswith(fence):
+        inside = not inside
+        continue
+    if inside and re.search(r"--force\b|\s-f\b", line) and ("worktree" in line or "push" in line):
+        problems.append("forced command in a fence at line %d" % n)
+# rollback.md 의 branch -D 금지 행이 retro 예외를 명시한다 (issue close 와 _handoff.md 의 짝과 같다).
+if "branch -D" in retro:
+    rows = [l for l in rollback.splitlines() if "branch -D" in l]
+    if not any("sprint retro" in r and "headRefOid" in r for r in rows):
+        problems.append("rollback.md's branch -D rule does not name the retro exception")
+print("OK" if not problems else "PROBLEMS " + "; ".join(problems))
+CLEANPY
+CLEAN="$("$PY" "$WORK3/cleanup.py" "$RETRO" "$ROLLBACK")"
+if [ "$CLEAN" = "OK" ]; then
+  ok "retro.md: 정리는 닫은 뒤, 강제 없음, rollback.md 가 예외를 명시한다"
+else
+  bad "retro.md: 정리 순서와 rollback.md 의 예외" "OK" "$CLEAN"
+fi
 
 # 11. run.md — 보드 값은 렌더 토큰이 아니라 **데이터 파일**이다. 이 클래스가 세 번 나왔다:
 #     소스 보간(실행됨) → 인용 heredoc(개행이 탈출) → 데이터 파일.

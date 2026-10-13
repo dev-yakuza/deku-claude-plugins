@@ -62,7 +62,7 @@ Develop (spine: analyze → design → execute → test → qa)
   /gld sprint run         Develop the members unattended to PRs — dependency-ordered, PR-stacked, one git worktree per issue. A rate limit whose reset is within 4h is waited out; a longer one blocks that member and the re-run picks it up. No args = resume the active sprint. --readiness shows the preflight
   /gld sprint daily       Status: what to merge and in what order, what's waiting on you, what broke (read-only; also where a bare `/gld sprint` goes)
   /gld sprint sync        After merging a lower PR on a squash-only repo: merge the default branch into the stacked PRs above it, verify, push, ready them (--check = report only)
-  /gld sprint retro       Metrics, capacity calibration, evolve, close the sprint
+  /gld sprint retro       Metrics, capacity calibration, evolve, close the sprint, clean up its worktrees and branches
   /gld sprint board       Set up / inspect / reset the GitHub Projects kanban (optional)
 
 Diagnose & grow (Outer Loop)
