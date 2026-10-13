@@ -5,7 +5,8 @@ Attended and multi-turn: this is where measurement changes configuration and whe
 loop runs, so every write stops for the human (INV1). Terminal: after this, the sprint is closed.
 
 `$1` (optional) = `--dry-run` (measure and present, change nothing — no config write, no evolve,
-no close, no cleanup).
+no close, no cleanup) · `--cleanup <tracker>` (Phase 7 alone, for a sprint already closed;
+`--dry-run` may follow it).
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md` — simple calls; bodies via temp file +
 > `--body-file`. Membership · order · base: `_sprint_dag.md`. Stage derivation: `_handoff.md`
@@ -24,6 +25,16 @@ Each its own Bash call.
    thing; read `$1` and `printenv GLD_UNATTENDED`:
    - `$1 == --dry-run` → set **DRY** for this whole run.
    - `GLD_UNATTENDED=1` → stop after Phase 3 and return `OK: unattended — retro requires a human`.
+     (In **CLEANUP** mode there is no Phase 3: return the same line at once.)
+   - `$1 == --cleanup` → set **CLEANUP**; `$2` is the tracker, digits only (anything else →
+     `FAIL: --cleanup needs a tracker number`); `$3 == --dry-run` also sets **DRY**. CLEANUP runs
+     Phase 0 steps 1, 3 and 4, then `gh issue view <tracker> --repo <owner>/<repo> --json state,labels,body --jq '{state, sprint: ([.labels[].name] | index("guild:sprint") != null), body}'`
+     — not a `guild:sprint` Issue → `FAIL: #<tracker> is not a sprint tracking Issue`; still
+     `OPEN` → `FAIL: #<tracker> is still open — run /gld sprint retro` (an open sprint is cleaned
+     by its retro, after the record and the close). Then Phase 1's two member/PR calls with that
+     body, then **Phase 7**, skipping 2–6 entirely: nothing is measured, written or closed. It
+     exists because Phase 7 runs after the close, so a cleanup that was declined, interrupted or
+     refused by a permission prompt has no other way back.
    ⚠ **This is step 0 for the same reason `_execute_spine.md` Step 0 detects the mode first: the
    branches below depend on it.** Here those branches are *writing `config.json`*, *running an
    evolve that commits*, *closing the Issue*, and *deleting worktrees and branches*. Reading this
@@ -41,7 +52,8 @@ Each its own Bash call.
    have to ask which one anyway, and pulling every candidate's member table to discard all but
    one is the same waste Phase 1 was making. Fetch the chosen tracker's body **after** the human
    picks — that call was going to happen regardless, so this adds no turn in either branch.
-   - None → `OK: no open sprint`. ⚠ Suggest `/gld sprint plan`, and say that a **closed** tracker is a finished sprint — a retro is not re-runnable **once it finishes**, because Phase 6 step 3 closes the Issue and `<!-- guild:sprint:retro -->` is append-only (`_handoff.md` Section B). ⚠ A retro that died **partway** is a different case and IS re-runnable: Phase 4 replaces its own `history` entry rather than appending, and Phase 6 step 2 checks for its own comment before adding one. (v10 said "step 5", which this file has never had.)
+   - None → `OK: no open sprint`. ⚠ Suggest `/gld sprint plan` (and `--cleanup <tracker>` for
+     a closed sprint whose worktrees or branches are still around), and say that a **closed** tracker is a finished sprint — a retro is not re-runnable **once it finishes**, because Phase 6 step 3 closes the Issue and `<!-- guild:sprint:retro -->` is append-only (`_handoff.md` Section B). ⚠ A retro that died **partway** is a different case and IS re-runnable: Phase 4 replaces its own `history` entry rather than appending, and Phase 6 step 2 checks for its own comment before adding one. (v10 said "step 5", which this file has never had.)
    - Two or more → list them and ask which. Never retro one speculatively.
 3. **Resolve `{owner}/{repo}`** once (`_handoff.md` Section F); hold the literal value.
 4. **Is a run still in flight?** From the `<!-- guild:sprint:run -->` comment: `state` and `heartbeat`.
@@ -483,8 +495,8 @@ This is a **disclosure, not a projection** — no `gh project` call, no card tou
 4. **Go to Phase 7** — only when step 3 closed the tracker (or DRY skipped it). If the close
    failed, return the `NEEDS_HUMAN` above and **skip Phase 7**: the sprint is still open, so the
    re-run that closes it reaches Phase 7 then. That is why the message says *re-run*, not
-   *close it by hand* — a tracker closed by hand is a finished sprint to Phase 0 step 2, and no
-   later call reaches this cleanup.
+   *close it by hand* — a tracker closed by hand is a finished sprint to Phase 0 step 2, and only
+   `--cleanup <tracker>` reaches this phase after that.
 
 ## Phase 7 — Cleanup (worktrees, branches and run files the sprint left behind)
 
@@ -513,38 +525,51 @@ human's.
   under the temp dir (`run.md` Phase 3 `--container`, `stack_sync.py` `container_dir`), and on
   macOS git prints the temp dir as `/private/var/…` while `$TMPDIR` says `/var/…`. Keep the
   entries under it: `issue-<N>` (member), `supervisor` (detached), `sync-<N>` (a `sprint sync`
-  that died mid-run). Note `locked` and `prunable` on each.
-- `git branch --show-current` (never a candidate) and `gh repo view --repo <owner>/<repo> --json
-  defaultBranchRef --jq .defaultBranchRef.name` (never a candidate).
-- **Split children.** Phase 1's PR filter holds member numbers only. For each member whose
-  `<!-- guild:children:output -->` comment exists (a split parent — it has no PR of its own),
-  discover its children with `daily.md` step 6's call (`Parent Issue: #<parent>`) and read their
-  PRs with Phase 1's PR call, the children's numbers substituted for the members'.
+  that died mid-run). Note `locked` and `prunable` on each — a `prunable` entry's directory is
+  already gone, so it is not removed or inspected, only covered by the prune in step 3.
+- `git branch --show-current` (never a candidate) and `gh repo view <owner>/<repo> --json
+  defaultBranchRef --jq .defaultBranchRef.name` (never a candidate). ⚠ `gh repo view` takes the
+  repo **positionally** — it has no `--repo` flag, and the call fails with `unknown flag`.
+- **Split children.** Phase 1's PR filter holds member numbers only, and a member split into
+  children has no PR of its own. Take the children from the run marker's discovered children
+  (Phase 0 step 4 already read it). For any member that is `guild:done` with **no** PR in
+  Phase 1's list and no children in the marker, ask the server — exact, so no `--limit`
+  truncation: `gh issue list --repo <owner>/<repo> --state all --search '"Parent Issue: #<m>" in:body' --json number --jq 'map(.number)'`.
+  Read the children's PRs with Phase 1's PR call, their numbers substituted for the members'.
 - **Confirm each PR before its branch becomes a candidate** — Phase 1 itself calls a
   `via: "branch"` row *"a candidate to confirm, not a fact"*, and a cleanup that deletes is the
   last place to skip that. One call per PR:
-  `gh pr view <pr> --repo <owner>/<repo> --json headRefName,headRefOid,isCrossRepository,state,closingIssuesReferences --jq '{headRefName, headRefOid, isCrossRepository, state, closes: [.closingIssuesReferences[].number]}'`.
-  The branch is a candidate only when **all** hold:
+  `gh pr view <pr> --repo <owner>/<repo> --json headRefName,headRefOid,isCrossRepository,state,mergedAt,closingIssuesReferences,body --jq '{headRefName, headRefOid, isCrossRepository, state, mergedAt, closes: ([.closingIssuesReferences[].number] + [(.body // "") | scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?) #([0-9]+)") | .[0] | tonumber] | unique)}'`.
+  `closes` unions GitHub's link with the body's keywords on purpose: GitHub links a closing
+  keyword only for a PR based on the default branch, so a stacked member PR has an **empty**
+  `closingIssuesReferences` while its body still says `Closes #<N>` (`_execute_spine.md` Step 5
+  writes it into every PR). The branch is a candidate only when **all** hold:
   - `isCrossRepository` is `false` — a fork's branch name says nothing about ours, and can
     equal `main`;
-  - `closes` is exactly **one** sprint member or child, or empty with the branch confirmed by
-    reading it — a PR closing several Issues (a `develop → main` release PR) or a non-member is a
-    long-lived line, not member work;
+  - `closes` is exactly **one** number, and it is a sprint member or child — a PR closing several
+    Issues (a `develop → main` release PR), a non-member, or nothing at all is not member work;
   - the name is neither the default branch nor the current branch;
-  - `gh pr list --repo <owner>/<repo> --state all --base <headRefName> --json number --jq
-    'map(.number)'` names **no PR outside the confirmed set** — `develop` and `release/*` are the
-    base of other people's work; a member's stack branch is the base of member PRs only.
+  - `gh pr list --repo <owner>/<repo> --state all --base <headRefName> --json number,state --jq 'map({number, state})'`
+    names **no PR outside the confirmed set** (`develop` and `release/*` are the base of other
+    people's work) **and no `OPEN` PR at all**. A merged member that is still the base of an open
+    member PR is kept whole — local and remote — because what GitHub does to a PR whose base
+    branch is deleted depends on how it was deleted, and either way the stack under review
+    changes underneath the human.
   Every PR that fails a test is listed as excluded, with the test it failed.
 - **Group by branch, not by PR.** A branch can head several PRs (a closed attempt and a reopened
-  one). Its row is decided by all of them: any `OPEN` → carryover; else any `MERGED` → merged
-  with that PR's `headRefOid`; else closed-unmerged.
+  one). Its row is decided by all of them: any `OPEN` → carryover; else any `MERGED` → merged,
+  with that PR's `headRefOid` — and if two `MERGED` PRs on one branch disagree on `headRefOid`,
+  the branch is kept and reported; else closed-unmerged.
 - For each candidate branch: `git rev-parse --verify --quiet refs/heads/<branch>` (local tip, or
   nothing) and `git ls-remote origin refs/heads/<branch>` — the full ref, not `--heads <name>`,
-  which tail-matches and also returns `refs/heads/user/<name>`.
+  and even then take only the line whose ref is **exactly** `refs/heads/<branch>`: ls-remote
+  matches patterns from the tail, so `x/refs/heads/<branch>` would come back too.
 - **Run files**: `ls .claude/guild/` and keep `.gld-sprint-<tracker>.sh`, `.board`, `.window`. A
-  clean run removed the first two itself; after any other run they stay (`run.md` Hard rules), and
-  `.window` is not in `.git/info/exclude`, so it shows as untracked. ⚠ `.sprint-logs/<tracker>/`
-  is **not** a candidate — it is the evidence this retro just measured.
+  clean run removed the first two itself; after any other run they stay (`run.md` Hard rules).
+  For each, `git ls-files .claude/guild/<file>` — a **tracked** one (an older repo whose
+  `git add .` committed it before `.claude/guild/.gitignore` existed, `init.md`) is excluded and
+  reported: deleting it would be a change to the human's tree. ⚠ `.sprint-logs/<tracker>/` is
+  **never** a candidate — it is the evidence this retro just measured.
 
 **2. Classify and present — then stop for the human (INV1).**
 
@@ -555,7 +580,7 @@ human's.
 | closed-unmerged | remove (if clean) | **keep — report only** | **keep — report only** |
 | split parent (`guild:done`, no PR) | remove (if clean) | — | — |
 | `supervisor`, `sync-<N>` | remove (if clean) | — (detached) | — |
-| run files | delete | — | — |
+| run files (untracked only) | delete | — | — |
 
 - A carryover member's **branch** is kept because the next sprint resumes on it —
   `worktree_acquire` re-attaches an existing branch (*"resumed worktree … on <branch>"*), and
@@ -570,42 +595,50 @@ human's.
 Show one table — worktree path (relative to the container), branch, PR, row, action — plus the
 exclusions and their reasons, and ask. The human may approve all, approve by row numbers, or
 decline; **nothing is removed without that answer.** An unanswered or ambiguous reply is a decline.
+⚠ `git branch -D` and `git push origin --delete` are in the template's `permissions.ask`
+(`settings.json.tmpl`), so each also raises a prompt — expected, not an error; say so first.
 
 **3. Apply, in this order** (a branch held by a worktree cannot be deleted, so worktrees first):
-0. **Re-check the run.** Re-read the `<!-- guild:sprint:run -->` marker exactly as Phase 0 step 4
-   does. A live state with a fresh heartbeat → remove **nothing** and say so: Phase 0 may have
-   proceeded over a stale heartbeat, and removing `supervisor` under a live supervisor makes
-   every one of its `git -C` calls fail.
-1. **Worktrees.** `git worktree remove <path>` — **never `--force`**. git's refusal is the safety
-   mechanism (`worktree_release` relies on it the same way): a `dirty` or `locked` one is refused
-   and preserved. For each refusal run `git -C <path> status --short` and report whether what is
-   left is source or only untracked docs (`daily.md` makes the same distinction — an
-   execute-stage ADR is left untracked by design), plus the command the human can run themselves.
-   Then `rmdir <container>` — it fails harmlessly while anything is left.
+0. **Re-check the run** — both signals, each its own call. Re-read the `<!-- guild:sprint:run -->`
+   marker as Phase 0 step 4 does, **and** probe its `pid` the way `run.md` Phase 1 does:
+   `ps -p <pid> -o command=` (when the marker's `host` is this machine). A fresh heartbeat, or
+   output containing `.gld-sprint-` → remove **nothing** and say so. ⚠ The heartbeat alone is not
+   enough: Phase 0 may have proceeded over a **stale** one on the human's word, and re-reading it
+   finds the same stale value — while a live supervisor, whose every `git -C` call needs the
+   `supervisor` worktree, may still be behind it.
+1. **Worktrees** (not `prunable` ones). `git worktree remove <path>` — **never `--force`**. git's
+   refusal is the safety mechanism (`worktree_release` relies on it the same way): a `dirty` or
+   `locked` one is refused and preserved. For each refusal run `git -C <path> status --short` and
+   report whether what is left is source or only untracked docs (`daily.md` makes the same
+   distinction — an execute-stage ADR is left untracked by design), plus the command the human
+   can run themselves. Then `rmdir <container>` — it fails harmlessly while anything is left.
    ⚠ **`git worktree prune` only when every `prunable` entry is inside the container.** prune is
    repo-global and would drop the registration of one of the human's worktrees that is merely on
    an unmounted volume (`sprint-supervisor.sh` `prune_safe`). If any prunable entry is outside it,
    skip prune and say so.
-2. **Local branches** — merged rows only, and only after re-reading the tip (`git rev-parse
-   refs/heads/<branch>`) and finding it **equal** to `headRefOid`: `git branch -D <branch>`.
+2. **Local branches** — merged rows only, and only after re-reading the tip right then (`git
+   rev-parse --verify --quiet refs/heads/<branch>`) and finding it **exactly equal** to
+   `headRefOid`: `git branch -D <branch>`.
    ⚠ **Not `git branch -d`, and not as a first try.** Every Guild branch has an upstream (the
    spine pushes with `git push -u`, `_execute_spine.md` Step 5), and `-d` then judges against the
-   upstream instead of HEAD: it deletes the branch whatever its tip, with only a warning. That
-   would bypass the tip check — the one thing that makes this deletion safe. With the tip equal,
-   the commits are exactly the ones GitHub merged and stay reachable from the PR
-   (`refs/pull/<pr>/head`), so nothing is lost (INV3).
-3. **Remote branches** — merged rows only, whose branch is still on `origin` (GitHub's
-   *automatically delete head branches* already removed it otherwise) at exactly `headRefOid`:
-   `git push origin --delete <branch>`. This is an outward write, which is why step 2 asked for
-   it. Never `--force`, and never a branch that step 1 found as the base of any PR — what GitHub
-   does to PRs based on a deleted branch depends on how it was deleted, and either way the stack
-   under review changes underneath the human.
-4. **Run files** — `rm .claude/guild/.gld-sprint-<tracker>.window` (and `.sh`, `.board` when
-   present), one call each.
+   upstream instead of HEAD: a branch whose tip is in its upstream is deleted with only a warning,
+   whether or not it equals what GitHub merged. That sidesteps the tip check — the one thing that
+   makes this deletion safe. With the tip exactly equal, the commits are the ones GitHub merged
+   and stay reachable from the PR (`refs/pull/<pr>/head`), so nothing is lost (INV3).
+3. **Remote branches** — merged rows only. Right before each delete, re-read the remote ref
+   (`git ls-remote origin refs/heads/<branch>`, the exact-ref line only) — **not** the value step
+   1 read before the human answered, which may be hours old. Only when it is still there and
+   **exactly equal** to `headRefOid`: `git push origin --delete <branch>`. A ref that moved means
+   someone pushed after the merge, and a plain delete has no lease, so it would drop those
+   commits; keep it and report both SHAs. Never `--force`. This is an outward write, which is
+   why step 2 asked for it.
+4. **Run files** — untracked ones only: `rm .claude/guild/.gld-sprint-<tracker>.window` (and
+   `.sh`, `.board` when present), one call each.
 
-A failed item is reported with its reason and the command to finish it by hand, and the phase
-moves on — **the retro cannot be re-run for this** (Phase 0 step 2: a closed tracker is a finished
-sprint), so the report is the only record of what is left.
+A failed, declined or interrupted item is reported with its reason and the command to finish it
+by hand. The retro itself cannot be re-run once the tracker is closed (Phase 0 step 2), so for
+anything left the report says *"남은 정리는 `/gld sprint retro --cleanup <tracker>`로 다시 할 수
+있습니다"* — that mode runs this phase alone (Phase 0 step 0).
 
 **DRY**: run 1, print 2's table with a *"`--dry-run`: 아무것도 삭제하지 않습니다"* line, and skip 3
 entirely — delete nothing.
@@ -628,6 +661,7 @@ refuse to develop — the pause would be undiscoverable and unclearable.
 `OK: sprint #<n> closed — carryover <K>` ·
 `OK: sprint #<n> closed — evolve declined (thin data)` ·
 `OK: sprint #<n> measured (dry-run)` ·
+`OK: sprint #<n> cleanup — <W> worktrees, <B> branches` (CLEANUP mode) ·
 `OK: no open sprint` ·
 `OK: unattended — retro requires a human` ·
 `NEEDS_HUMAN: <one-line>` · `FAIL: <reason>`

@@ -617,8 +617,11 @@ hasfx "retro.md: prune 은 컨테이너 안일 때만" "$RETRO" "only when every
 hasfx "retro.md: 포크 PR 의 브랜치는 후보가 아니다" "$RETRO" "\`isCrossRepository\` is \`false\`"
 hasfx "retro.md: 다른 PR 의 base 인 브랜치는 후보가 아니다" "$RETRO" "names **no PR outside the confirmed set**"
 hasfx "retro.md: 원격 조회는 전체 ref 로 한다" "$RETRO" "git ls-remote origin refs/heads/<branch>"
-hasfx "retro.md: 지우기 직전에 run 을 다시 확인한다" "$RETRO" "**Re-check the run.**"
+hasfx "retro.md: 지우기 직전에 run 을 다시 확인한다" "$RETRO" "**Re-check the run**"
 hasfx "retro.md: 닫기 실패는 손으로 닫지 말고 재실행" "$RETRO" "closing it failed — re-run /gld sprint retro"
+hasfx "retro.md: 닫힌 스프린트는 --cleanup 으로 정리한다" "$RETRO" '`$1 == --cleanup` → set **CLEANUP**'
+hasfx "settings.json.tmpl: branch -D 는 ask" "$GLD/templates/settings.json.tmpl" '"Bash(git branch -D:*)"'
+hasfx "settings.json.tmpl: 원격 브랜치 삭제는 ask" "$GLD/templates/settings.json.tmpl" '"Bash(git push origin --delete:*)"'
 cat > "$WORK3/cleanup.py" <<'CLEANPY'
 import re, sys
 retro = open(sys.argv[1], encoding="utf-8").read()
@@ -644,10 +647,10 @@ for p in paras:
     for m in re.finditer(r"git branch -d\b", flat):
         if not NEG.search(flat[max(0, m.start() - 20):m.start()]):
             problems.append("git branch -d offered: it trusts the upstream and skips the tip check")
-    for m in re.finditer(r"git branch -D\b", flat):
+    for m in re.finditer(r"git branch -D <", flat):
         if "equal" not in flat or "headRefOid" not in flat:
             problems.append("branch -D without the tip == headRefOid guard in the same item")
-    if "push origin --delete" in flat and "headRefOid" not in flat:
+    if "push origin --delete <" in flat and "headRefOid" not in flat:
         problems.append("remote delete without the headRefOid guard in the same item")
 # 캐리오버와 닫힌-미머지 브랜치는 지우지 않는다.
 for row in ("carryover", "closed-unmerged"):
@@ -657,6 +660,44 @@ for row in ("carryover", "closed-unmerged"):
 # 기본 브랜치와 현재 브랜치는 후보가 아니다.
 if "defaultBranchRef" not in sec or "branch --show-current" not in sec:
     problems.append("default/current branch exclusion missing")
+# gh repo view 에는 --repo 가 없다 (unknown flag). 저장소는 위치 인자다.
+if "gh repo view --repo" in sec or "gh repo view <owner>/<repo>" not in sec:
+    problems.append("gh repo view must take the repo positionally")
+# 확인 호출이 판정에 쓰는 필드를 실제로 가져온다 — 문장만 남고 데이터가 빠지면 가드가 빈다.
+m = re.search(r"gh pr view <pr>[^\n]*--json ([^ ]+)", sec)
+fields = set(m.group(1).split(",")) if m else set()
+for f in ("headRefOid", "isCrossRepository", "closingIssuesReferences", "body", "state"):
+    if f not in fields:
+        problems.append("gh pr view --json lacks " + f)
+def item(head):
+    i = sec.find(head)
+    if i < 0:
+        problems.append("missing item: " + head); return ""
+    j = re.search(r"\n\d+\. \*\*|\n\*\*DRY\*\*|\nA failed", sec[i + 1:])
+    return " ".join(sec[i:i + 1 + (j.start() if j else len(sec))].split())
+for head in ("2. **Local branches**", "3. **Remote branches**"):
+    it = item(head)
+    if "merged rows only" not in it:
+        problems.append(head + " is not limited to merged rows")
+    if not re.search(r"\*\*exactly equal\*\* to `headRefOid`", it):
+        problems.append(head + " does not require the tip to equal headRefOid")
+    if re.search(r"\b(different from|whatever|informational|any SHA)\b", it):
+        problems.append(head + " weakens the tip test")
+if "Right before each delete, re-read the remote ref" not in item("3. **Remote branches**"):
+    problems.append("remote delete trusts the pre-approval ls-remote")
+rc = item("0. **Re-check the run**")
+if "ps -p <pid> -o command=" not in rc or ".gld-sprint-" not in rc or "remove **nothing**" not in rc:
+    problems.append("run re-check lacks the pid probe or the stop")
+row = next((l for l in sec.splitlines() if l.startswith("| merged")), "")
+if row.count("iff tip == `headRefOid`") != 2:
+    problems.append("merged row does not guard both branch deletions")
+dry = " ".join(sec[sec.find("**DRY**: run 1"):].split("\n\n")[0].split()) if "**DRY**: run 1" in sec else ""
+if "skip 3" not in dry or "delete nothing" not in dry:
+    problems.append("DRY does not skip the apply step")
+if "`.sprint-logs/<tracker>/` is **never** a candidate" not in " ".join(sec.split()):
+    problems.append(".sprint-logs is not excluded")
+if "no `OPEN` PR at all" not in sec:
+    problems.append("a branch that is the base of an open PR can be deleted")
 # rollback.md 의 branch -D 금지 행이 retro 예외를 명시한다 (issue close 와 _handoff.md 의 짝과 같다).
 rows = [l for l in rollback.splitlines() if "branch -D" in l]
 if not any("sprint retro" in r and "headRefOid" in r for r in rows):
