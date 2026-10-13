@@ -713,7 +713,13 @@ for phrase, why in (
     ("`git ls-files .claude/guild/<file>`", "tracked run files are not excluded"),
     ("This re-check is never skipped", "the run re-check may be skipped"),
     ("disagree on `headRefOid`", "two merged PRs with different heads are not kept"),
-    ("Phase 1's branch test", "the branch-name token test is missing"),
+    ("Phase 1's branch test, `(^|[^0-9])#?<N>([^0-9]|$)`", "the branch-name token test is missing or weakened"),
+    ("`closes` is exactly **one** number", "membership no longer needs exactly one closed Issue"),
+    ("re-run step 1's `--head` and `--base` calls with `--state open`", "the remote delete skips the open-PR re-check"),
+    ("test(\"Parent Issue: #<m>([^0-9]|$)\")", "children search lost its digit boundary"),
+    ("the **same live states**", "the run re-check no longer names Phase 0's live states"),
+    ("`release/…`, `support/…`, `hotfix/…`", "release/version lines can become candidates"),
+    ("Read its `permissions.ask` first", "the prompt claim is not checked against the repo's settings"),
 ):
     if phrase not in flat:
         problems.append(why)
@@ -728,13 +734,20 @@ for p_ in paras:
 # 원격 삭제는 ask 에 걸리는 한 가지 철자로만. 다른 철자는 경고 문단에서만 나온다.
 warn = next((" ".join(p_.split()) for p_ in paras if "Use exactly these spellings" in p_), "")
 rest = flat.replace(warn, "") if warn else flat
-for alt in ("push origin :<", "push --delete origin", "push origin -d ", "-C <dir> branch -D"):
+for alt in ("push origin :<", "push --delete origin", "push -d origin", "push origin -d ", "-C <dir> branch -D"):
     if alt in rest:
         problems.append("delete spelled as " + alt + " outside the warning")
 # rollback.md 의 branch -D 금지 행이 retro 예외를 명시한다 (issue close 와 _handoff.md 의 짝과 같다).
 rows = [l for l in rollback.splitlines() if "branch -D" in l]
 if not any("sprint retro" in r and "headRefOid" in r for r in rows):
     problems.append("rollback.md's branch -D rule does not name the retro exception")
+# Hard rules 도 같은 부정 검사를 받는다 — Phase 7 밖에서 강제를 허용하면 같은 지시가 된다.
+hr = retro[retro.find("## Hard rules"):]
+for line in hr.split("\n- "):
+    f_ = " ".join(line.split())
+    for m in re.finditer(r"--force\b|git branch -d\b", f_):
+        if not NEG.search(f_[max(0, m.start() - 40):m.start()]):
+            problems.append("Hard rules allow: " + f_[max(0, m.start() - 40):m.end()])
 print("OK" if not problems else "PROBLEMS " + "; ".join(problems))
 CLEANPY
 CLEAN="$("$PY" "$WORK3/cleanup.py" "$RETRO" "$ROLLBACK")"

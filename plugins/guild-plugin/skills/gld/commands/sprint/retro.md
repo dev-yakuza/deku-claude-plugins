@@ -6,7 +6,7 @@ loop runs, so every write stops for the human (INV1). Terminal: after this, the 
 
 `$1` (optional) = `--dry-run` (measure and present, change nothing — no config write, no evolve,
 no close, no cleanup) · `--cleanup <tracker>` (Phase 7 alone, for a sprint already closed;
-`--dry-run` may follow it).
+`--dry-run` may come before or after it).
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md` — simple calls; bodies via temp file +
 > `--body-file`. Membership · order · base: `_sprint_dag.md`. Stage derivation: `_handoff.md`
@@ -36,8 +36,10 @@ Each its own Bash call.
      that tracker, then **Phase 7**, skipping 2–6 entirely: nothing is measured, written or
      closed. ⚠ The PR call's truncation `FAIL` below is about **metrics** and does not apply
      here: in CLEANUP, when the PR list still equals the limit, look each member up on the server
-     instead — `gh pr list --repo <owner>/<repo> --state all --search "<m> in:body" --limit 50 --json number,headRefName,baseRefName,state,mergedAt,closedAt,closingIssuesReferences`
-     — and let Phase 7's confirmation decide which rows are really that member's. It
+     instead — `gh pr list --repo <owner>/<repo> --state all --search '"Closes #<m>" in:body' --limit 100 --json number,headRefName,baseRefName,state,mergedAt,closedAt,closingIssuesReferences`
+     — and let Phase 7's confirmation decide which rows are really that member's. A result that
+     **equals the limit** is truncated: report *"#<m>의 PR을 전부 읽지 못했습니다"* and exclude
+     that member — never read it as "no PR", which would call a merged member carryover. It
      exists because Phase 7 runs after the close, so a cleanup that was declined, interrupted or
      refused by a permission prompt has no other way back.
    ⚠ **This is step 0 for the same reason `_execute_spine.md` Step 0 detects the mode first: the
@@ -531,8 +533,8 @@ human's.
   `.gld-<repo>-sprint-<tracker>` and is the **parent** of a listed worktree — find it by that
   name, not by computing a path: it sits beside the checkout or, when that was not writable,
   under the temp dir (`run.md` Phase 3 `--container`, `stack_sync.py` `container_dir`), and on
-  macOS git prints the temp dir as `/private/var/…` while `$TMPDIR` says `/var/…`. Keep the
-  entries under it: `issue-<N>` (member), `supervisor` (detached), `sync-<N>` (a `sprint sync`
+  macOS git prints the temp dir as `/private/var/…` while `$TMPDIR` says `/var/…`. The
+  candidates are the entries under it: `issue-<N>` (member), `supervisor` (detached), `sync-<N>` (a `sprint sync`
   that died mid-run). Note `locked` and `prunable` on each — a `prunable` entry's directory is
   already gone, so it is not removed or inspected, only covered by the prune in step 3.
 - `git branch --show-current` (never a candidate) and `gh repo view <owner>/<repo> --json
@@ -544,7 +546,9 @@ human's.
   Phase 1's list and no children in the marker, ask the server:
   `gh issue list --repo <owner>/<repo> --state all --search '"Parent Issue: #<m>" in:body' --limit 200 --json number,body --jq 'map(select((.body // "") | test("Parent Issue: #<m>([^0-9]|$)")) | .number)'`
   (search is token-based, so the `jq` re-applies the digit boundary).
-  Read the children's PRs with Phase 1's PR call, their numbers substituted for the members'.
+  Read the children's PRs with Phase 1's PR call, their numbers substituted for the members' —
+  and, when that list equals its limit, the same per-Issue server lookup as CLEANUP's
+  (Phase 0 step 0), with the same truncation rule.
 - **Confirm each PR before its branch becomes a candidate** — Phase 1 itself calls a
   `via: "branch"` row *"a candidate to confirm, not a fact"*, and a cleanup that deletes is the
   last place to skip that. One call per PR:
@@ -560,6 +564,9 @@ human's.
   - the branch name carries that number as a token — Phase 1's branch test,
     `(^|[^0-9])#?<N>([^0-9]|$)` — because the spine names every branch it cuts after its Issue
     (`_execute_spine.md` Step 0 (c)). `develop` or `main` with a `Closes #12` body fails this;
+  - the name is not a release or version line — `release/…`, `support/…`, `hotfix/…`, `v<digits>…`
+    — which can carry the number by coincidence (`release/12` for #12); the spine's own resume
+    probe drops the same shapes (`_execute_spine.md` Step 0 (a));
   - the name is neither the default branch nor the current branch;
   - `gh pr list --repo <owner>/<repo> --state all --base <headRefName> --limit 200 --json number,state --jq 'map({number, state})'`
     names **no PR outside the confirmed set** (`develop` and `release/*` are the base of other
@@ -581,8 +588,8 @@ human's.
   and even then take only the line whose ref is **exactly** `refs/heads/<branch>`: ls-remote
   matches patterns from the tail, so `x/refs/heads/<branch>` would come back too.
 - **Run files**: `ls -A .claude/guild/` — **`-A`**: all three are dotfiles, and a plain `ls`
-  hides them, so the inventory would report nothing to clean. Keep `.gld-sprint-<tracker>.sh`,
-  `.board`, `.window`. A clean run removed them itself (`sprint-supervisor.sh` cleanup); after any
+  hides them, so the inventory would report nothing to clean. The candidates are
+  `.gld-sprint-<tracker>.sh`, `.board`, `.window`. A clean run removed them itself (`sprint-supervisor.sh` cleanup); after any
   other run they stay (`run.md` Hard rules).
   For each, `git ls-files .claude/guild/<file>` — a **tracked** one (an older repo whose
   `git add .` committed it before `.claude/guild/.gitignore` existed, `init.md`) is excluded and
@@ -615,8 +622,12 @@ exclusions and their reasons, and ask. The human may approve all, approve by row
 decline; **nothing is removed without that answer.** An unanswered or ambiguous reply is a decline.
 ⚠ `git branch -D` and `git push origin --delete` are in the template's `permissions.ask`
 (`settings.json.tmpl`), and `rm`, `rmdir` and `hostname` are in no allow list, so each raises a
-prompt — expected, not an error; say so first. Use exactly these spellings: another form of the
-same delete (`git push origin :<branch>`, `git push --delete origin <branch>`, `git -C <dir>
+prompt — expected, not an error; say so first. ⚠ That is true only once the repo's
+`.claude/settings.json` has those `ask` entries (`init` writes them, `/gld update` adds them to an
+older repo): Read its `permissions.ask` first, and if `Bash(git branch -D:*)` or
+`Bash(git push origin --delete:*)` is missing, say the deletes will **not** prompt and suggest
+`/gld update` — the table answer is then the only gate. Use exactly these spellings: another form
+of the same delete (`git push -d origin <branch>`, `git push origin :<branch>`, `git -C <dir>
 branch -D`) slips past the `ask` entry that is the harness's half of INV1.
 
 **3. Apply, in this order** (a branch held by a worktree cannot be deleted, so worktrees first):
@@ -642,7 +653,9 @@ branch -D`) slips past the `ask` entry that is the harness's half of INV1.
    repo-global and would drop the registration of one of the human's worktrees that is merely on
    an unmounted volume (`sprint-supervisor.sh` `prune_safe`). If any prunable entry is outside it,
    skip prune and say so.
-2. **Local branches** — merged rows only, and only after re-reading the tip right then (`git
+2. **Local branches** — merged rows only, and only after **item 3's re-checks for the same
+   branch** have passed (run them first; a branch that fails them keeps its local copy too), and
+   after re-reading the tip right then (`git
    rev-parse --verify --quiet refs/heads/<branch>`) and finding it **exactly equal** to
    `headRefOid`: `git branch -D <branch>`.
    ⚠ **Not `git branch -d`, and not as a first try.** Every Guild branch has an upstream (the
@@ -653,8 +666,9 @@ branch -D`) slips past the `ask` entry that is the harness's half of INV1.
    and stay reachable from the PR (`refs/pull/<pr>/head`), so nothing is lost (INV3).
 3. **Remote branches** — merged rows only. Right before each delete, re-read the remote ref
    (`git ls-remote origin refs/heads/<branch>`, the exact-ref line only) — **not** the value step
-   1 read before the human answered, which may be hours old — and re-run step 1's `--head` call
-   with `--state open`: an open PR headed by the branch appeared meanwhile → keep. Only when the
+   1 read before the human answered, which may be hours old — and re-run step 1's `--head` and
+   `--base` calls with `--state open`: an open PR headed by **or based on** the branch appeared
+   meanwhile → keep. Only when the
    ref is still there and **exactly equal** to `headRefOid`: `git push origin --delete <branch>`. A ref that moved means
    someone pushed after the merge, and a plain delete has no lease, so it would drop those
    commits; keep it and report both SHAs. Never `--force`. This is an outward write, which is
@@ -691,6 +705,7 @@ refuse to develop — the pause would be undiscoverable and unclearable.
 `OK: sprint #<n> measured (dry-run)` ·
 `OK: sprint #<n> cleanup — <W> worktrees, <B> branches` (CLEANUP mode) ·
 `OK: sprint #<n> cleanup listed (dry-run)` (CLEANUP + DRY) ·
+`OK: sprint #<n> cleanup declined` (CLEANUP, the human said no) ·
 `OK: no open sprint` ·
 `OK: unattended — retro requires a human` ·
 `NEEDS_HUMAN: <one-line>` · `FAIL: <reason>`
