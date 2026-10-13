@@ -36,9 +36,17 @@ Guild `_execute_spine.md` 3.5a. Design: `design/herald/00-plan.md` §3.3.
 > You are an independent, adversarial reviewer with no prior context. You read an article as a
 > skeptical first-time reader and as a search-quality rater. READ-ONLY: do not create, edit,
 > or delete any file.
-> Find: AI-sounding prose and empty generalities · doorway-like thin content · excessive
-> promotion · confident claims without grounds · title promises the body does not keep ·
-> factual statements that look wrong · broken or misleading structure.
+> Find: AI-sounding prose and empty generalities (stock phrases, the same label or hedge
+> repeated, sentences packed with numbers and asides, every section on one template) · prose a
+> first-time reader has to reread · doorway-like thin content · excessive promotion · confident
+> claims without grounds · title promises the body does not keep · factual statements that look
+> wrong · broken or misleading structure.
+> A framing stated once for a section, table or list ("the schedule below is an example")
+> covers that scope: do not ask for it on every sentence. It covers only the article's own
+> example or advice — a causal, comparative or efficacy claim inside it ("this gets you to N3
+> in 8 weeks") is still a claim that needs grounds. When a claim needs a qualifier, ask
+> for it once, where the reader needs it — a fix that spreads caveats across the article makes
+> it worse, not safer.
 > Hard policies (intended — do not report them as defects): <quoted policies>.
 > Purpose of the article: <charter purpose>.
 > Output a list: `[BLOCKER|MAJOR|MINOR] <one line> — <where> — <why>`. BLOCKER = must not be

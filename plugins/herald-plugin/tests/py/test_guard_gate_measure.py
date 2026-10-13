@@ -9,7 +9,8 @@ import unittest
 
 from helpers import SCRIPTS, RepoCase, sh
 
-from hrdlib import measure, store
+from hrdlib import hashing, measure, store
+from hrdlib.prose import prose_report
 from hrdlib.validate import validate
 
 
@@ -292,6 +293,186 @@ class GateCase(RepoCase):
         self.rules({})
         self.write("src/content/blog/a--b.md", "---\ntitle: a\ndescription: d\nslug: a--b\ndate: x\n---\nbody\n")
         self.assertFalse(validate(self.root, self.cfg, "src/content/blog/a--b.md")["ok"])
+
+
+class ProseCase(RepoCase):
+    def test_hints_never_fail_the_gate_and_carry_file_lines(self):
+        self.write("docs/editorial/gate-rules.json", json.dumps({}))
+        long_ = "This sentence " + "keeps going and going " * 12 + "until it ends."
+        self.write("src/content/blog/p5.md", "---\ntitle: a\ndescription: d\nslug: p5\ndate: x\n---\n"
+                   "Intro line.\n\n" + long_ + "\n\nIn conclusion, delve in.\n")
+        rep = validate(self.root, self.cfg, "src/content/blog/p5.md")
+        self.assertTrue(rep["ok"], rep)
+        self.assertEqual(rep["warnings"], [])
+        hints = " | ".join(rep["prose"]["warnings"])
+        self.assertIn("over 35 words", hints)
+        self.assertIn("line 9 ", hints)
+        self.assertIn("'in conclusion'", hints)
+        self.assertIn("'delve'", hints)
+        self.write("docs/editorial/gate-rules.json", json.dumps({"prose": {"check": False}}))
+        self.assertEqual(validate(self.root, self.cfg, "src/content/blog/p5.md")["prose"]["warnings"], [])
+
+    def test_custom_validator_still_gets_hints(self):
+        self.write("docs/editorial/gate-rules.json", json.dumps({}))
+        self.write("src/content/blog/p6.md", "---\ntitle: a\nslug: p6\n---\nIn conclusion, it ends.\n")
+        self.cfg.data["commands"]["validate"] = "true"
+        rep = store.run_gate(self.root, self.cfg, "p6")
+        self.assertTrue(rep["ok"])
+        self.assertTrue(any("in conclusion" in w for w in rep["prose"]["warnings"]), rep)
+
+    def test_korean_labels_numbers_and_asides(self):
+        body = ("공부 시간은 하루 1.5시간입니다(가정). 주말에는 3시간입니다(가정).\n\n"
+                "8주 합계는 105시간입니다(가정).\n\n"
+                "| 표 | 1 | 2 | 3 | 4 | 5 |\n|---|---|---|---|---|---|\n\n"
+                "```\n(가정) (가정) 1 2 3 4 5 6\n```\n\n"
+                "기준점(N3는 19점, 약 32%)과 합격점(N3는 95점, 약 53%)을 1, 2주에 확인합니다.\n\n"
+                "空港(くうこう)과 搭乗券(탑승권), 「はい」(네)는 설명입니다.\n")
+        rep = prose_report(body, "ko")
+        hints = " | ".join(rep["warnings"])
+        self.assertIn("(가정) appears 3 times", hints)
+        self.assertIn("1 sentence(s) with 2+ parenthetical asides", hints)
+        self.assertIn("1 sentence(s) with 5+ numbers", hints)
+        self.assertEqual(rep["stats"]["sentences"], 5)
+        tuned = prose_report(body, "ko", {"repeat_label": 4, "max_numbers": 9, "stock_phrases": ["설명입니다"]})
+        hints = " | ".join(tuned["warnings"])
+        self.assertNotIn("appears", hints)
+        self.assertNotIn("numbers", hints)
+        self.assertIn("'설명입니다' ×1", hints)
+        self.assertEqual(prose_report("짧은 문장입니다. " * 3 + "가" * 91 + "다.", "ko")["stats"]["long"], 1)
+
+
+class ProseEdgeCase(RepoCase):
+    def test_bad_rule_values_fall_back_and_never_crash(self):
+        body = "One sentence here. In conclusion, two."
+        for rules in (None, [], "x", {"max_asides": None, "repeat_label": "3", "max_numbers": 0,
+                                       "stock_phrases": [{"phrase": "x"}, "", 3]},
+                      {"stock_phrases": "abc"}, {"max_sentence": True}):
+            rep = prose_report(body, "en", rules)
+            self.assertEqual(rep["stats"]["sentences"], 2, rules)
+            self.assertFalse(any("numbers" in w for w in rep["warnings"]), rules)
+            self.assertFalse(any("'a'" in w or "''" in w for w in rep["warnings"]), rules)
+        for lang in (None, 5, "", "ja_JP"):
+            prose_report(body, lang)
+        self.assertEqual(prose_report("", "ko")["stats"]["sentences"], 0)
+        self.write("docs/editorial/gate-rules.json", json.dumps({"prose": None, "links": None}))
+        self.article("p7")
+        rep = validate(self.root, self.cfg, "src/content/blog/p7.md")
+        self.assertIn("prose", rep)
+
+    def test_custom_validator_with_broken_rules_keeps_its_own_verdict(self):
+        self.write("src/content/blog/p8.md", "---\ntitle: a\nslug: p8\n---\nIn conclusion, it ends.\n")
+        self.write("docs/editorial/gate-rules.json", "{not json")
+        self.cfg.data["commands"]["validate"] = "true"
+        rep = store.run_gate(self.root, self.cfg, "p8")
+        self.assertTrue(rep["ok"], rep)
+        self.assertIn("hints unavailable", rep["prose"]["warnings"][0])
+        self.cfg.data["commands"]["validate"] = "false"
+        self.write("docs/editorial/gate-rules.json", json.dumps({}))
+        rep = store.run_gate(self.root, self.cfg, "p8")
+        self.assertFalse(rep["ok"])
+        self.assertTrue(any("in conclusion" in w for w in rep["prose"]["warnings"]), rep)
+
+    def test_japanese_and_chinese_split_without_spaces(self):
+        zh = "考试在七月举行。考试在十二月举行。报名三月开始。" * 3
+        rep = prose_report(zh, "zh")
+        self.assertEqual(rep["stats"]["sentences"], 9)
+        self.assertEqual(rep["stats"]["long"], 0)
+        ja = ("受験料は5,500円です（税込）。試験は年2回です（仮定）。会場は東京です（仮定）。"
+              "時間は2時間です（仮定）。空港（くうこう）に行きます。")
+        rep = prose_report(ja, "ja_JP")
+        hints = " | ".join(rep["warnings"])
+        self.assertIn("(仮定) appears 3 times", hints)
+        self.assertNotIn("くうこう", hints)
+        self.assertEqual(rep["stats"]["sentences"], 5)
+        self.assertEqual(rep["stats"]["limit"], 80)
+
+    def test_line_numbers_comments_scripts_tables_abbreviations(self):
+        body = ("First line of a paragraph.\nSecond line, " + "very " * 40 + "long.\n\n"
+                "<!-- a comment\nIn conclusion, hidden.\n-->\n"
+                "<script>\ndelve();\n</script>\n"
+                "a | b | c\n1 | 2 | 3\n\n"
+                "See e.g. the guide by Dr. Kim. It was 2024-01-15 at 10:30 with v1.2.3.\n")
+        rep = prose_report(body, "en", offset=10)
+        hints = " | ".join(rep["warnings"])
+        self.assertIn("line 12 ", hints)
+        self.assertNotIn("conclusion", hints)
+        self.assertNotIn("delve", hints)
+        self.assertNotIn("numbers", hints)
+        self.assertEqual(rep["stats"]["sentences"], 4)
+        self.assertNotIn("asides", " | ".join(prose_report("한국어(韓國語)와 일본어(日本語), 영어(英語)를 씁니다.", "ko")["warnings"]))
+
+    def test_breaks_two_column_tables_emphasis_and_list_before_break(self):
+        from hrdlib.prose import _paragraphs
+        self.assertEqual([t for para in _paragraphs("Para one.\n\n---\n\nPara two.\n\n* * *\n\nMore.\n***\n")
+                          for _, t in para], ["Para one.", "Para two.", "More."])
+        self.assertEqual(_paragraphs("a | b\n--- | ---\n1 | in conclusion\n\nAfter."), [[(5, "After.")]])
+        self.assertEqual(prose_report("**Bold.** Next one.", "en")["stats"]["sentences"], 2)
+        self.assertIn("'delve'", " ".join(prose_report("- item delve here.\n---\n", "en")["warnings"]))
+        self.assertEqual(_paragraphs("Title\n---\nbody"), [[(3, "body")]])
+
+    def test_custom_validator_json_errors_are_kept(self):
+        self.write("src/content/blog/q1.md", "---\ntitle: a\nslug: q1\n---\nText.\n")
+        self.write("check.py", "import json; print(json.dumps({'ok': False, 'errors': ['real error'], "
+                               "'prose': {'warnings': ['x' * 900]}})); raise SystemExit(1)\n")
+        self.cfg.data["commands"]["validate"] = "python3 check.py"
+        rep = store.run_gate(self.root, self.cfg, "q1")
+        self.assertFalse(rep["ok"])
+        self.assertEqual(rep["errors"], ["real error"])
+        self.write("check.py", "import json; print('> blog@1.0.0 validate'); print(json.dumps({'ok': False, "
+                               "'errors': ['after banner'], 'prose': {'warnings': ['x' * 900]}}, indent=2)); "
+                               "raise SystemExit(1)\n")
+        self.assertEqual(store.run_gate(self.root, self.cfg, "q1")["errors"], ["after banner"])
+        self.write("check.py", "print('all good')\n")
+        self.assertEqual(store.run_gate(self.root, self.cfg, "q1")["errors"], [])
+        from hrdlib.prose import _paragraphs
+        self.assertEqual(_paragraphs("Header\n| --- |\n| x |\n\nText."), [[(5, "Text.")]])
+
+    def test_quotes_weekdays_glosses_mdx_toml(self):
+        from hrdlib.prose import _sentences
+        self.assertEqual([t for _, t in _sentences('「はい。」と言った。He said "Hi." Then e.g. this ends.')],
+                         ["「はい。」と言った。", 'He said "Hi."', "Then e.g. this ends."])
+        self.assertEqual(prose_report("12월 6일(일), 13일(일), 20일(일). 음독(音読み)과 시험(日本語能力試験, にほんご)이다.",
+                                      "ko")["warnings"], [])
+        self.assertEqual(prose_report('import X from "y"\n\n:::note\n\nOne.\n', "en")["stats"]["sentences"], 1)
+        self.assertEqual(prose_report("長い" * 60 + "。", "jp")["stats"]["long"], 1)
+        self.write("src/content/blog/q2.md", '+++\ntitle = "Delve into 2024 1 2 3 4"\n+++\nShort text.\n')
+        from hrdlib.validate import prose_for
+        self.assertEqual(prose_for(self.root, self.cfg, "src/content/blog/q2.md")["warnings"], [])
+
+    def test_dialogue_dates_and_hard_wrapped_import(self):
+        from hrdlib.prose import _sentences
+        self.assertEqual([t for _, t in _sentences("「ばかな！ このオレが…だと！？」と叫んだ。See Fig. 2 now.")],
+                         ["「ばかな！ このオレが…だと！？」と叫んだ。", "See Fig. 2 now."])
+        self.assertEqual(prose_report("2026년 JLPT는 7월 5일과 12월 6일 두 번 있고 3시 30분에 시작합니다.", "ko")["warnings"], [])
+        self.assertEqual(len(list(_sentences("Japan must\nimport most wheat, raising\nexport prices."))), 1)
+        self.assertEqual(len(list(_sentences("今日は晴れです。\n明日は雨です。 次です。"))), 3)
+        self.assertEqual(len(list(_sentences("Meet at 3 p.m. Tomorrow we go."))), 2)
+        self.assertEqual(prose_report("GitHub Security LabはCommunity CodeQL Bountyを開始しました。", "ja")["stats"]["long"], 0)
+
+    def test_gate_command_writes_prose_file_for_the_editor(self):
+        self.write("docs/editorial/gate-rules.json", json.dumps({}))
+        self.article("p9", "In conclusion, done.")
+        self.write(".claude/herald/work/t0001/state.json", json.dumps({"slug": "p9"}))
+        out, _ = self.hrd("gate", "--topic", "t0001")
+        self.assertEqual(out["prose_file"], ".claude/herald/memory/prose/t0001.json")
+        with open(os.path.join(self.root, out["prose_file"])) as f:
+            saved = json.load(f)
+        self.assertEqual(saved["warnings"], out["prose"]["warnings"])
+        self.assertEqual(saved["body_hash"], hashing.worktree_hash(self.root, self.cfg, "p9"))
+        sh(self.root, "git", "add", "-A")
+        self.assertEqual(sh(self.root, "git", "status", "--porcelain", "--", ".claude/herald/memory").strip(), "")
+        self.assertFalse(os.path.exists(os.path.join(self.root, ".claude/herald/work/t0001/prose.json")))
+
+    def test_language_names_blockquotes_fences_setext(self):
+        self.assertIn("over 80 chars", " ".join(prose_report("長い" * 60 + "。", "日本語")["warnings"]))
+        self.assertIn("over 80 chars", " ".join(prose_report("長い" * 60 + "。", "Japanese")["warnings"]))
+        body = ("````\n```\ndelve\n```\n````\nUse `in conclusion` here.\n\nTitle delve\n=====\n\n"
+                "> In conclusion, quoted.\n\n- item one.\n\n    second para of item, embark on it.\n\n"
+                "Take vitamin C. It helps.\n")
+        rep = prose_report(body, "en")
+        self.assertEqual(rep["warnings"], ["prose: stock phrase 'embark on' ×1"])
+        self.assertEqual(rep["stats"]["sentences"], 5)
+        self.assertIn("1 sentence(s) with 1+ numbers", " ".join(prose_report("It costs 5 dollars.", "en", {"max_numbers": 1})["warnings"]))
 
 
 class MeasureCase(unittest.TestCase):

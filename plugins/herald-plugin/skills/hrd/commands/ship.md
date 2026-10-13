@@ -19,7 +19,8 @@ no-op while nested — the caller's own release ends the lock): all steps for
 that one PR, step 4 skipped; refuse if the PR was not created in this session, if `HRD
 auto-exclusion --topic <id> --rev refs/remotes/origin/pr-<n>` (after §3's fetch — the work
 files live on the PR head; with `--consent` when the caller passed it — the human asked for
-this publish, which accepts the agents' logged decisions, a trim and Herald-made images) has
+this publish, which accepts the agents' logged decisions, a trim, the fact-checker's framings
+and Herald-made images) has
 anything under `blocking`, or if
 `HRD throttle` shows `room` 0. Unless that run was
 `--attended` (a human approved the body in the session), the article is published without a
@@ -94,6 +95,8 @@ head) with any deferred MAJORs listed one per line (`audit_log` outcome `deferre
 human decides them here), latest `/hrd review` finding for it if any (unresolved BLOCKER → warning), verify counts,
 the trimmed sentences (`state.json` `trim.removed` at the PR head while `trim.status` is `done`
 — critique's verdict was carried over to that shorter body unseen by the editor and auditor),
+the PR body's `## Reader notes` and `## Framings` if any (readability notes the editor did not
+send back; sentences the fact-checker treated as the article's own example under a framing),
 "body differs from verified" (`HRD hash --slug <s> --rev <headRefOid>` vs `HRD ledger show`),
 "images changed", cannibalization re-check, and `HRD scope --topic <id> --rev <headRefOid>`.
 
@@ -190,7 +193,7 @@ with retries for up to ~10 minutes. Failures stay merged-unrecorded for the next
 
 Summarize what was published, declined, held and left merged-unrecorded. For a `--session-auto`
 publish nobody approved, also list what was accepted unread (the `accepted` exclusions, the
-deferred MAJORs and dismissals with their reasons, the trimmed sentences) — the human sees
+deferred MAJORs and dismissals with their reasons, the trimmed sentences, the framings) — the human sees
 them now at the latest. Then
 `HRD evolve-readiness`: only when `tier` is `sufficient`, end with one line in
 `config.language` (ko example: "성장 신호가 충분히 쌓였습니다(아직 evolve가 쓰지 않은 신호 N건 · 글감 M개) —

@@ -7,6 +7,7 @@
 - signals.jsonl           local — growth signals
 """
 
+import json
 import os
 import re
 
@@ -215,6 +216,8 @@ def audit_round(root, cfg, tid):
     again. Asking again for the same article (an interrupted or discarded round, a re-invoked
     RESULT) returns the same round instead of counting a new one."""
     st = load_state(root, tid)
+    if reader_blockers(root, cfg, tid, st):
+        raise HeraldError(_reader_pass_refusal(st, "before any auditor round"))
     cur = worktree_hash(root, cfg, st["slug"]) if st.get("slug") else None
     n = _int(st.get("audit_rounds"))
     repeat = n >= 1 and cur is not None and st.get("audit_round_body") == cur
@@ -289,7 +292,7 @@ def auto_exclusion(crit, st=None):
 # others stay blocking: an open BLOCKER, an article changed after its last auditor round, a
 # PR whose verdict files cannot be read.
 CONSENT_ACCEPTS = ("decision:dismissal", "decision:assumption", "decision:deferral",
-                   "audit-dismissed", "audit-log:deferred", "trimmed", "images")
+                   "audit-dismissed", "audit-log:deferred", "trimmed", "images", "framed")
 
 
 def blocking_exclusions(reasons, consent=False):
@@ -332,6 +335,22 @@ def exclusion_reasons(root, cfg, tid, rev=None):
     if not isinstance(crit, dict) or not isinstance(st, dict):
         return ["missing-critique-or-state"]
     reasons = auto_exclusion(crit, st)
+    vrel = work_rel(tid, "verify.json")
+    try:
+        ver = read_json_at(root, rev, vrel) if rev else load_machine(root, tid, "verify.json")
+    except Exception:  # noqa: BLE001
+        ver = None
+    vst = (st.get("stages") or {}).get("verify") or {}
+    if not isinstance(ver, dict):
+        reasons.append("missing-verify")
+    else:
+        if ver.get("framings"):
+            reasons.append("framed")  # the fact-checker exempted sentences as the article's own example
+        vblob = (vst.get("blobs") or {}).get("verify.json") if isinstance(vst.get("blobs"), dict) else None
+        # verified before 0.7.0: no blob recorded, and a working-tree byte hash cannot be compared
+        # with a PR head under line-ending filters — those PRs carry no framings to drop anyway
+        if vblob and _git_blob(root, rev, vrel) != vblob:
+            reasons.append("verify-changed")  # e.g. framings dropped after verify passed
     cst = (st.get("stages") or {}).get("critique") or {}
     blobs = cst.get("blobs") if isinstance(cst.get("blobs"), dict) else None
     md_rel = work_rel(tid, "critique.md")
@@ -434,14 +453,97 @@ def run_gate(root, cfg, slug):
     """draft gate (plan §3.5): config.commands.validate if set, else the built-in validator."""
     import shlex
     from .util import run
-    from .validate import validate
+    from .validate import prose_for, validate
 
     body = cfg.body_path(slug)
     custom = (cfg.get("commands", "validate") or "").strip()
     if custom:
         proc = run(shlex.split(custom) + [body], cwd=root, check=False)
-        return {"ok": proc.returncode == 0, "errors": [(proc.stdout + proc.stderr).strip()[-500:]]}
+        ok = proc.returncode == 0
+        errors = [] if ok else [(proc.stdout + proc.stderr).strip()[-500:]]
+        out = proc.stdout
+        try:  # a validator that prints Herald's own report (e.g. wraps validate_content.py, maybe after a banner)
+            out = json.loads(out[out.index("{"):out.rindex("}") + 1])
+            if isinstance(out, dict) and isinstance(out.get("errors"), list) and (out["errors"] or ok):
+                errors = [str(e) for e in out["errors"]]
+        except ValueError:
+            pass
+        return {"ok": ok, "errors": errors, "prose": prose_for(root, cfg, body)}
     return validate(root, cfg, body)
+
+
+def prose_rel(tid):
+    """Readability hints of a topic's current body: gitignored memory, never committed (a tracked
+    file would go stale on base and dirty the tree before a deploy)."""
+    return os.path.join(".claude", "herald", "memory", "prose", "%s.json" % tid)
+
+
+def reader_blockers(root, cfg, tid, st):
+    """The editor's blocking reader-pass problems for the current body, from `reader.json`
+    (`{"body_hash", "round", "blockers": [...], "notes": [...]}`; body_hash added by the
+    editor-in-chief). No file (an editor before 0.7.0) or one about another body → none. A file
+    without `body_hash`, unreadable, or with non-list `blockers` is refused: silently reading
+    it as "none" would switch the once-per-article count off."""
+    path = os.path.join(root, work_rel(tid, "reader.json"))
+    if not os.path.exists(path):
+        return []
+    rd = safe_machine(root, tid, "reader.json")
+    if not rd or not isinstance(rd.get("blockers"), list) or not str(rd.get("body_hash") or "").startswith("sha256:"):
+        raise HeraldError("reader.json is malformed — it needs a `blockers` list (the editor's) and `body_hash` "
+                          "(the `HRD hash` taken before the editor ran, added by the editor-in-chief)")
+    if not st.get("slug") or rd["body_hash"] != worktree_hash(root, cfg, st["slug"]):
+        return []
+    return [str(x) for x in rd["blockers"]]
+
+
+LOOP_CAP = 3  # counted loopbacks per article (contract §F)
+
+
+def reader_round_used(st):
+    """Readability can no longer send this article back: its one send-back is used, or the
+    loopback budget is down to its last one, which stays for accuracy and audit findings."""
+    return bool(st.get("reader_revise")) or _int(st.get("loopbacks")) >= LOOP_CAP - 1
+
+
+def _reader_pass_refusal(st, when):
+    if reader_round_used(st):  # the editor ignored reader_round_used: its PASS stands, the blockers are notes
+        return ("reader.json lists blocking reader-pass problems, but the one reader-pass send-back is used — move "
+                "them to `notes` in reader.json (the editor's PASS stands; no loopback), then run this again")
+    return ("reader.json lists blocking reader-pass problems for this body — a PASS cannot carry them: loop back "
+            "(`HRD loopback --cause revise`) %s" % when)
+
+
+def write_prose(root, cfg, tid, slug, gate):
+    """`reader_round_used`: reader-pass problems already sent this article back (state
+    `reader_revise`, set by `loopback --cause revise` from reader.json) or the loopback budget
+    is spent — the editor then lists new ones as reader notes instead of blocking."""
+    prose = gate.get("prose") or {"warnings": [], "stats": {}}
+    try:
+        used = reader_round_used(load_state(root, tid))
+    except Exception:  # noqa: BLE001 — hints never fail the gate
+        used = False
+    try:
+        write_json(os.path.join(root, prose_rel(tid)),
+                   {"body_hash": worktree_hash(root, cfg, slug), "reader_round_used": used, **prose})
+    except Exception:  # noqa: BLE001 — hints never fail the gate
+        return None
+    return prose_rel(tid)
+
+
+def record_gate_failure(root, st, tid, stage, gate, amend=False):
+    """Not on `verify --amend` or after a human-requested revision (the failing edit is a
+    human's), and once per topic and loopback count (retries of one draft are one event)."""
+    n = int(st.get("loopbacks", 0))
+    attempt = st.get("created_at")  # a requeued topic starts a new state (loopbacks 0 again)
+    try:
+        seen = any(isinstance(r, dict) and r.get("kind") == "gate-failure" and r.get("topic_id") == tid
+                   and isinstance(r.get("data"), dict) and r["data"].get("loopbacks") == n
+                   and r["data"].get("attempt") == attempt for r in read_jsonl(paths(root)["signals"]))
+    except Exception:  # noqa: BLE001 — never hide the gate error behind a signal problem
+        seen = True
+    if not amend and st.get("last_loopback") != "human" and not seen:
+        safe_signal(root, "gate-failure", tid, {"stage": stage, "errors": gate["errors"][:10],
+                                                "loopbacks": n, "attempt": attempt})
 
 
 def stage_pass(root, cfg, tid, stage, amend=False):
@@ -463,20 +565,10 @@ def stage_pass(root, cfg, tid, stage, amend=False):
     rec = {"outputs": outputs, "at": now_iso()}
     if stage == "draft" or (stage == "verify" and amend):
         gate = run_gate(root, cfg, st["slug"])
+        if stage == "draft":
+            write_prose(root, cfg, tid, st["slug"], gate)
         if not gate["ok"]:
-            # not on `verify --amend` or after a human-requested revision (the failing edit is a
-            # human's), and once per topic and loopback count (retries of one draft are one event)
-            n = int(st.get("loopbacks", 0))
-            attempt = st.get("created_at")  # a requeued topic starts a new state (loopbacks 0 again)
-            try:
-                seen = any(isinstance(r, dict) and r.get("kind") == "gate-failure" and r.get("topic_id") == tid
-                           and isinstance(r.get("data"), dict) and r["data"].get("loopbacks") == n
-                           and r["data"].get("attempt") == attempt for r in read_jsonl(paths(root)["signals"]))
-            except Exception:  # noqa: BLE001 — never hide the gate error behind a signal problem
-                seen = True
-            if not amend and st.get("last_loopback") != "human" and not seen:
-                safe_signal(root, "gate-failure", tid, {"stage": stage, "errors": gate["errors"][:10],
-                                                        "loopbacks": n, "attempt": attempt})
+            record_gate_failure(root, st, tid, stage, gate, amend)
             raise HeraldError("deterministic gate failed: %s" % "; ".join(gate["errors"][:5]))
     if stage in ("critique", "verify"):
         # The verdict file must evaluate THIS article: the main session writes the hash it
@@ -508,6 +600,8 @@ def stage_pass(root, cfg, tid, stage, amend=False):
         if not critique_passed(crit):
             raise HeraldError("critique.json does not record a PASS with no BLOCKER/MAJOR left open "
                               "(dismissed, or a MAJOR deferred on a recheck round)")
+        if reader_blockers(root, cfg, tid, st):
+            raise HeraldError(_reader_pass_refusal(st, "before this pass"))
         rec["body_hash"] = worktree_hash(root, cfg, st["slug"])
         # git blob ids too: a PR head is compared by blob, which line-ending filters keep equal
         rec["blobs"] = {n: _git_blob(root, None, work_rel(tid, n)) for n in ("critique.md", "critique.json")}
@@ -523,6 +617,7 @@ def stage_pass(root, cfg, tid, stage, amend=False):
             raise HeraldError("verify.json has unsupported or contradicted claims")
         bh = worktree_hash(root, cfg, st["slug"])
         rec["body_hash"] = bh
+        rec["blobs"] = {"verify.json": _git_blob(root, None, work_rel(tid, "verify.json"))}
         st["verified_hash"] = bh
         if amend:
             # delta research rewrote research.md / claims-map.json: re-anchor their producers
@@ -778,8 +873,6 @@ def _trim_choices(units):
 def _claims_map_problems(root, tid, d, units):
     """The writer may add, change or drop only the claims-map entries of the listed texts (an
     entry whose text contains one, or a sentence that lost a listed aside)."""
-    import json
-
     snap = os.path.join(d, "claims-map.json")
     if not os.path.isfile(snap):
         return []

@@ -76,7 +76,7 @@ class BatchCase(RepoCase):
         self.assertFalse(os.path.exists(os.path.join(self.root, ".claude/herald/signals.jsonl")))
 
     def test_version_gate_after_branch_preserves_and_holds(self):
-        p = self.run_batch({"t0001": "version-gate-branch", "t0002": "pr"}, extra=("--expect-version", "0.6"))
+        p = self.run_batch({"t0001": "version-gate-branch", "t0002": "pr"}, extra=("--expect-version", "0.7"))
         self.assertNotEqual(p.returncode, 0)
         topics = {t["id"]: t for t in store.load_topics(self.root)["topics"]}
         self.assertEqual((topics["t0001"]["state"], topics["t0001"]["reason"]), ("held", "needs-human"))
@@ -152,6 +152,7 @@ class BatchCase(RepoCase):
         crit, st = pr_work({"final_round": {"verdict": "PASS", "audit": {}}}, "t0002", "post-t0002")
         self.write(".claude/herald/work/t0002/critique.json", crit)
         self.write(".claude/herald/work/t0002/state.json", st)
+        self.write(".claude/herald/work/t0002/verify.json", json.dumps({"counts": {}}))
         self.write("src/content/blog/post-t0002.md", "x")
         self.commit("pr head")
         sh(self.root, "git", "push", "-q", "origin", "HEAD:refs/pull/100/head")
@@ -238,6 +239,7 @@ class AutoSelectionCase(RepoCase):
         crit, st = pr_work(critique, tid, slug)
         self.write(".claude/herald/work/%s/critique.json" % tid, crit)
         self.write(".claude/herald/work/%s/state.json" % tid, st)
+        self.write(".claude/herald/work/%s/verify.json" % tid, json.dumps({"counts": {}}))
         self.write("src/content/blog/%s.md" % slug, "x")
         if images:
             self.write("public/blog-images/%s/01.png" % slug, b"img", binary=True)

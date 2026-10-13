@@ -22,7 +22,7 @@ from hrdlib.hashing import tree_hash, worktree_hash  # noqa: E402
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.6.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.7.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -162,6 +162,10 @@ def cmd_begin(a):
         return
     st = store.new_state(a.topic, None)
     store.save_state(root, a.topic, st)
+    try:  # hints of an earlier attempt describe another body
+        os.remove(os.path.join(root, store.prose_rel(a.topic)))
+    except OSError:
+        pass
     emit({"created": store.work_rel(a.topic)})
 
 
@@ -211,6 +215,11 @@ def cmd_loopback(a):
     if a.theme and a.cause not in ("revise", "audit"):
         raise HeraldError("--theme applies only to --cause revise|audit")
     st = store.load_state(root, a.topic)
+    reader = a.cause == "revise" and bool(store.reader_blockers(root, cfg, a.topic, st))
+    if reader and store.reader_round_used(st):
+        raise HeraldError("reader.json lists blocking reader-pass problems, but readability can no longer send this "
+                          "article back (its one send-back is used, or the loopback budget is spent) — move them "
+                          "to `notes` in reader.json (the editor's verdict stands), then go on")
     if (st.get("trim") or {}).get("status") == "open":
         raise HeraldError("a trim is open — `HRD trim --topic %s --abort` first (it restores the article)" % a.topic)
     if a.cause == "audit" and store._int(st.get("audit_rounds")) >= store.AUDIT_ROUND_CAP:
@@ -219,6 +228,8 @@ def cmd_loopback(a):
     if not a.human:
         st["loopbacks"] = int(st.get("loopbacks", 0)) + 1
     st["last_loopback"] = "human" if a.human else a.cause
+    if reader:
+        st["reader_revise"] = True
     st["stage"] = "draft"
     store.save_state(root, a.topic, st)
     n = st["loopbacks"]
@@ -232,6 +243,8 @@ def cmd_loopback(a):
         data = {"note": (a.note or "")[:500], "loopback": n}
         if a.theme:
             data["theme"] = a.theme
+        if reader:
+            data["reader"] = True
         if a.cause == "verify":  # counts only from a verify.json about this very article
             ver = store.safe_machine(root, a.topic, "verify.json")
             counts = ver.get("counts")
@@ -617,10 +630,15 @@ def cmd_throttle(a):
 
 
 def cmd_gate(a):
-    """Deterministic gate on a topic's article (config.commands.validate or built-in)."""
+    """Deterministic gate on a topic's article (config.commands.validate or built-in). Also
+    writes the readability hints, with the body hash they describe, to
+    memory/prose/<id>.json — the editor's input for its reader pass (gitignored)."""
     root, cfg = ctx()
     slug = a.slug or store.load_state(root, a.topic)["slug"]
     rep = store.run_gate(root, cfg, slug)
+    rep["prose_file"] = store.write_prose(root, cfg, a.topic, slug, rep)
+    if a.record and not rep["ok"]:  # the pre-editor check: a gate failure the flow acts on
+        store.record_gate_failure(root, store.load_state(root, a.topic), a.topic, "critique", rep)
     emit(rep)
     if not rep["ok"]:
         sys.exit(1)
@@ -759,6 +777,7 @@ def build():
     p.add_argument("--consent", action="store_true"); p.add_argument("--sha"); p.set_defaults(fn=cmd_auto_merged)
     p = sp.add_parser("throttle"); p.set_defaults(fn=cmd_throttle)
     p = sp.add_parser("gate"); p.add_argument("--topic", required=True); p.add_argument("--slug")
+    p.add_argument("--record", action="store_true", help="record a failure as a gate-failure signal (pre-editor check)")
     p.set_defaults(fn=cmd_gate)
     p = sp.add_parser("signal"); p.add_argument("--kind", required=True); p.add_argument("--topic")
     p.add_argument("--data"); p.add_argument("--human-reviewed", choices=["true", "false"]); p.set_defaults(fn=cmd_signal)

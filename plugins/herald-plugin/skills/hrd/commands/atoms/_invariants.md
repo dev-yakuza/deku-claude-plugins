@@ -33,7 +33,10 @@ no history rewrite by any command. *Boundary*: gitignored files (`signals.jsonl`
 **INV4 — additive; never clobbers local evolution.**
 `init`/`update` merge. `update` refreshes only persona frontmatter `name`/`description` and the
 region between `<!-- herald:persona:start -->` and `<!-- herald:persona:end -->`. Everything else
-under `.claude/agents/`, `docs/editorial/`, `config.json` is local-owned.
+under `.claude/agents/`, `docs/editorial/`, `config.json` is local-owned; the one exception is
+`update`'s offer to append new style-guide lines, applied only on the human's approval (a
+decline appends only a version marker comment, so the offer is not repeated) and never
+removing or rewording a line (`update.md` step 3).
 
 **INV5 — nothing leaves the machine un-sanitized.**
 Local growth data (signals, memory, ledger) and article drafts never go to the plugin

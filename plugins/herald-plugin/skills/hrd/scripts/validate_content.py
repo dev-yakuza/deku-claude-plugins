@@ -15,5 +15,6 @@ if len(sys.argv) != 2:
     sys.exit(2)
 root = repo_root()
 rep = validate(root, Config.load(root), sys.argv[1])
+rep.pop("prose", None)  # readability hints come from `hrd.py gate`; keep this CLI's output to the gate verdict
 emit(rep)
 sys.exit(0 if rep["ok"] else 1)

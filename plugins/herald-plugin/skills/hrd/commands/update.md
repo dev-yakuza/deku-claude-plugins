@@ -23,6 +23,15 @@ only. Ported from Guild `update.md`.
    editorial text (any file, including the kept sections) that tells the session to run
    `HRD signal --kind` with a kind other than `session-edit-request`, `human-edit` or
    `review-finding` — those are recorded automatically since 0.3.0 and the call now fails.
+   **Style guide** (local-owned, INV4 — never rewritten): when `docs/editorial/style-guide.md`
+   has no `<!-- herald:style <v'> -->` marker for the plugin version `v'` that last changed the
+   template's "Not AI prose" section (now `0.7.0`), show the template's lines there that the
+   style guide does not already say (in any wording or language), translated into
+   `config.language` (the `{{AI_TELLS}}` line filled from the style guide's own avoid list and
+   the language's common generated-sounding phrases). On approval append them, followed by the
+   marker, to the section that holds the AI-prose rules (any heading or language), or as a new
+   `## Not AI prose` section at the end if there is none; declined → append only the marker, so
+   the offer is not repeated. Additions only; never remove or reword the repo's lines.
 4. **Settings/gitignore/labels**: re-merge `templates/settings.json.tmpl` (key union), the
    gitignore block, and create missing labels.
 5. Show a summary; on approval `HRD commit --cmd harness --kind update -m "chore(herald):

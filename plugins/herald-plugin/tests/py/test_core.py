@@ -477,6 +477,29 @@ class ConsentTests(Flow):
         st["stages"]["critique"]["blobs"]["critique.json"] = store._git_blob(self.root, None, store.work_rel(tid, "critique.json"))
         store.save_state(self.root, tid, st)
 
+    def test_framings_exclude_unless_consented(self):
+        tid, slug = self.run_flow()
+        self.pin(tid, {"final_round": {"verdict": "PASS", "audit_round": 1}})
+        self.assertEqual(self.hrd("auto-exclusion", "--topic", tid)[0]["reasons"], [])
+        ver = json.loads(json.dumps(VER_PASS))
+        ver["framings"] = [{"framing": "the schedule below is an example", "covers": ["Week 1: 5 hours."]}]
+        write_machine(self, tid, "verify.json", ver, slug)
+        st = store.load_state(self.root, tid)  # as verify's stage pass records it
+        st["stages"]["verify"]["blobs"] = {"verify.json": store._git_blob(self.root, None, store.work_rel(tid, "verify.json"))}
+        store.save_state(self.root, tid, st)
+        out, _ = self.hrd("auto-exclusion", "--topic", tid)
+        self.assertEqual(out["blocking"], ["framed"])
+        self.assertEqual(self.hrd("auto-exclusion", "--topic", tid, "--consent")[0]["blocking"], [])
+        self.assertEqual(store.exclusion_reasons(self.root, self.cfg, tid, None), ["framed"])
+        sh(self.root, "git", "add", "-A")
+        sh(self.root, "git", "commit", "-qm", "work")
+        self.assertIn("framed", store.exclusion_reasons(self.root, self.cfg, tid, "HEAD"))  # PR-head path
+        ver["framings"] = []
+        write_machine(self, tid, "verify.json", ver, slug)  # dropped after verify passed
+        self.assertEqual(self.hrd("auto-exclusion", "--topic", tid, "--consent")[0]["blocking"], ["verify-changed"])
+        os.remove(os.path.join(self.root, store.work_rel(tid, "verify.json")))
+        self.assertIn("missing-verify", self.hrd("auto-exclusion", "--topic", tid, "--consent")[0]["blocking"])
+
     def test_consent_accepts_logged_decisions_but_not_blocking_ones(self):
         tid, slug = self.run_flow()
         crit = {"final_round": {"verdict": "PASS", "audit_round": 2, "audit": {"major": 1},
@@ -1220,6 +1243,132 @@ class AutoSignalTests(Flow):
         r = store.evolve_readiness(self.root, self.cfg)
         self.assertEqual((r["tier"], r["ready_themes"]), ("sufficient", ["revise-weakness:intro"]))
 
+
+    def test_reader_loopback_once_and_hints_written_by_draft_pass(self):
+        tid, slug = self.run_flow()
+        hints = os.path.join(self.root, ".claude/herald/memory/prose/%s.json" % tid)
+        self.assertTrue(os.path.exists(hints))  # written by `stage pass --stage draft`
+        with open(hints) as f:
+            self.assertFalse(json.load(f)["reader_round_used"])
+        reader = os.path.join(self.root, ".claude/herald/work/%s/reader.json" % tid)
+
+        def say(blockers, body_hash=None):
+            with open(reader, "w") as f:
+                json.dump({"round": 1, "blockers": blockers, "notes": [],
+                           "body_hash": body_hash or worktree_hash(self.root, self.cfg, slug)}, f)
+
+        say(["intro: hard to follow"], body_hash="sha256:other")  # about another body: ignored
+        self.hrd("loopback", "--topic", tid, "--cause", "revise", "--theme", "depth")
+        self.assertFalse(store.load_state(self.root, tid).get("reader_revise"))
+        say(["intro: hard to follow"])
+        self.hrd("loopback", "--topic", tid, "--cause", "revise", "--theme", "clarity")
+        self.assertTrue(store.load_state(self.root, tid)["reader_revise"])
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "revise", "--theme", "clarity", check=False)
+        self.assertIn("send-back is used", p.stderr)
+        self.assertEqual(store.load_state(self.root, tid)["loopbacks"], 2)  # the refusal counted nothing
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "verify", check=False)
+        self.assertEqual(p.returncode, 0, p.stderr)  # only revise looks at reader.json
+        sig = [json.loads(l) for l in open(os.path.join(self.root, ".claude/herald/signals.jsonl"))]
+        self.assertEqual([r["data"].get("reader") for r in sig if r["kind"] == "revise-weakness"], [None, True])
+        self.write("src/content/blog/%s.md" % slug, "no frontmatter at all")
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "draft", check=False)
+        self.assertNotEqual(p.returncode, 0)  # a failing gate still refreshes the hints
+        with open(hints) as f:
+            saved = json.load(f)
+        self.assertTrue(saved["reader_round_used"])
+        self.assertEqual(saved["body_hash"], worktree_hash(self.root, self.cfg, slug))
+        self.hrd("begin", "--topic", tid, "--force")
+        self.assertFalse(os.path.exists(hints))
+
+    def test_critique_pass_refuses_reader_blockers(self):
+        tid, slug = self.run_flow()
+        with open(os.path.join(self.root, ".claude/herald/work/%s/reader.json" % tid), "w") as f:
+            json.dump({"round": 1, "blockers": ["intro: hard to follow"], "notes": [],
+                       "body_hash": worktree_hash(self.root, self.cfg, slug)}, f)
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "critique", "--amend", check=False)
+        self.assertIn("a PASS cannot carry them", p.stderr)
+        with open(os.path.join(self.root, ".claude/herald/work/%s/reader.json" % tid), "w") as f:
+            json.dump({"round": 1, "blockers": [], "notes": ["intro: hard to follow"],
+                       "body_hash": worktree_hash(self.root, self.cfg, slug)}, f)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "critique", "--amend")
+
+    def test_reader_json_malformed_refused_and_other_causes_ignore_it(self):
+        tid, slug = self.run_flow()
+        path = os.path.join(self.root, ".claude/herald/work/%s/reader.json" % tid)
+        cur = worktree_hash(self.root, self.cfg, slug)
+        for bad in ('{"blockers": ["x"]}', "{not json", '{"blockers": "x", "body_hash": "%s"}' % cur):
+            with open(path, "w") as f:
+                f.write(bad)
+            _, p = self.hrd("loopback", "--topic", tid, "--cause", "revise", "--theme", "clarity", check=False)
+            self.assertIn("reader.json is malformed", p.stderr, bad)
+            _, p = self.hrd("audit-round", "--topic", tid, check=False)
+            self.assertIn("reader.json is malformed", p.stderr, bad)
+        self.assertEqual(store.load_state(self.root, tid)["loopbacks"], 0)
+        with open(path, "w") as f:
+            json.dump({"round": 1, "blockers": ["intro"], "notes": [], "body_hash": cur}, f)
+        _, p = self.hrd("audit-round", "--topic", tid, check=False)
+        self.assertIn("a PASS cannot carry them", p.stderr)
+        self.hrd("loopback", "--topic", tid, "--cause", "audit", "--theme", "policy")
+        self.hrd("loopback", "--topic", tid, "--human")
+        self.assertFalse(store.load_state(self.root, tid).get("reader_revise"))
+
+    def test_pass_with_blockers_after_send_back_moves_them_to_notes(self):
+        tid, slug = self.run_flow()
+        path = os.path.join(self.root, ".claude/herald/work/%s/reader.json" % tid)
+        cur = worktree_hash(self.root, self.cfg, slug)
+        with open(path, "w") as f:
+            json.dump({"round": 1, "blockers": ["intro"], "notes": [], "body_hash": cur}, f)
+        self.hrd("loopback", "--topic", tid, "--cause", "revise", "--theme", "clarity")
+        with open(path, "w") as f:
+            json.dump({"round": 2, "blockers": ["intro"], "notes": [], "body_hash": cur}, f)
+        _, p = self.hrd("audit-round", "--topic", tid, check=False)
+        self.assertIn("the editor's PASS stands; no loopback", p.stderr)
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "critique", "--amend", check=False)
+        self.assertIn("the editor's PASS stands", p.stderr)
+        with open(path, "w") as f:
+            f.write('{"blockers": ["x"]}')
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "critique", "--amend", check=False)
+        self.assertIn("reader.json is malformed", p.stderr)
+        with open(path, "w") as f:
+            json.dump({"round": 2, "blockers": [], "notes": ["intro"], "body_hash": cur}, f)
+        self.hrd("audit-round", "--topic", tid)
+        self.assertEqual(store.load_state(self.root, tid)["loopbacks"], 1)
+
+    def test_reader_round_used_once_loopbacks_are_spent(self):
+        tid, slug = self.run_flow()
+        for _ in range(2):  # the last loopback stays for accuracy and audit findings
+            self.hrd("loopback", "--topic", tid, "--cause", "verify")
+        path = os.path.join(self.root, ".claude/herald/work/%s/reader.json" % tid)
+        with open(path, "w") as f:
+            json.dump({"round": 4, "blockers": ["intro"], "notes": [],
+                       "body_hash": worktree_hash(self.root, self.cfg, slug)}, f)
+        _, p = self.hrd("audit-round", "--topic", tid, check=False)
+        self.assertIn("the editor's PASS stands; no loopback", p.stderr)
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "revise", "--theme", "clarity", check=False)
+        self.assertIn("loopback budget is spent", p.stderr)
+        st = store.load_state(self.root, tid)
+        self.assertEqual((st["loopbacks"], st.get("reader_revise")), (2, None))
+        self.assertFalse(self.hrd("loopback", "--topic", tid, "--cause", "audit", "--theme", "accuracy")[0]["exhausted"])
+        self.hrd("gate", "--topic", tid)
+        with open(os.path.join(self.root, ".claude/herald/memory/prose/%s.json" % tid)) as f:
+            self.assertTrue(json.load(f)["reader_round_used"])
+
+    def test_gate_record_signals_once_per_loopback(self):
+        tid, slug = self.run_flow()
+        self.write("src/content/blog/%s.md" % slug, "no frontmatter at all")
+        sigfile = os.path.join(self.root, ".claude/herald/signals.jsonl")
+
+        def gate_failures():
+            if not os.path.exists(sigfile):
+                return []
+            return [json.loads(l) for l in open(sigfile) if '"gate-failure"' in l]
+
+        _, p = self.hrd("gate", "--topic", tid, check=False)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertEqual(gate_failures(), [])  # the writer's own check records nothing
+        self.hrd("gate", "--topic", tid, "--record", check=False)
+        self.hrd("gate", "--topic", tid, "--record", check=False)
+        self.assertEqual([r["data"]["stage"] for r in gate_failures()], ["critique"])
 
     def test_loopback_edges_amend_gate_and_dismissal_once(self):
         tid, slug = self.run_flow()

@@ -54,7 +54,9 @@ base URL · per-article budget (USD) · output language (default: `$1` if it is 
 2. `.claude/herald/config.json` from `templates/config.json.tmpl` with the detected/confirmed
    values (`roles.conditional` = enabled conditional roles).
 3. `docs/editorial/` from `templates/editorial/*.tmpl`: charter (purpose from the interview,
-   floor and priority lines verbatim), style guide, one `categories/<cat>.md` per category,
+   floor and priority lines verbatim), style guide (its "Not AI prose" tells: phrases in
+   `config.language` that read as generated, plus any the existing articles avoid), one
+   `categories/<cat>.md` per category,
    sources, promotion, exemplars (P1 candidates, human-confirmed), search checklist (if
    enabled), `gate-rules.json` (frontmatter keys from P1, length ranges from the distribution,
    extracted forbidden phrases with `"status": "draft"` — INV6).

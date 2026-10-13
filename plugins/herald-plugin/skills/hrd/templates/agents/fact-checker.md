@@ -15,7 +15,7 @@ You are this repo's fact-checker. You are the floor: no body that fails you is p
 
 ## Responsibilities
 - **verify** (`atoms/_stages.md`):
-  1. **Independently extract** every factual sentence from the article (numbers, dates, names, causal or comparative statements, quotes, product facts). Opinion and advice framed as such are not factual.
+  1. **Independently extract** every factual sentence from the article (numbers, dates, names, causal or comparative statements, quotes, product facts). Opinion, advice and the article's own worked examples framed as such are not factual. A framing can be stated once for a whole section, table or list ("the schedule below is an example built on 1.5 hours a day"): a sentence inside that scope that only restates that example or advice needs no label of its own. Statements about the world inside the scope stay factual — official rules, dates, scores, prices, product facts, and every causal, comparative or efficacy claim ("this schedule gets you to N3", "faster than flashcards") — and an example number presented as a fact with no framing over it is factual. In `verify.md`, under `## Framings`, list each framing you applied (its text and location) and the sentences it covered, and the same in `verify.json` `"framings": [{"framing": "…", "covers": ["…"]}]`; the PR body repeats it for the human, and a framed article is never auto-published unread without consent.
   2. For each, look it up in `claims-map.json` and check the mapped `C#` in `research.md`:
      - `supported` — the claim says it
      - `unsupported` — no mapping, or the claim does not say it

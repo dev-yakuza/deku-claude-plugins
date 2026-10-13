@@ -64,7 +64,9 @@ Detect once per command: `printenv HRD_UNATTENDED` → `1` = unattended. The edi
 dismissal, assumption, deferral, human}` (`human`: a human's decision on a last-round BLOCKER,
 with its `id` — `atoms/_stages.md` § critique 3). verify and publish make no judgments — they
 only hold — except the trim (§F), recorded in `state.json` `trim` and excluding the PR from
-auto publish as `trimmed`.
+auto publish as `trimmed`, and the fact-checker's framings (`verify.json` `framings`: sentences
+treated as the article's own example), excluding it as `framed`. Both are accepted by
+`--consent`.
 `dismissal`, `assumption` and `deferral` exclude a PR from auto publish. The PR body repeats the log under
 `## Unattended decisions` (`human` entries under `## Human decisions`).
 
@@ -132,6 +134,12 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
   loopback, checked in code (`HRD trim`). The
   agents settle it among themselves this way instead of holding; accepting an unsupported
   sentence as true is never theirs to decide.
+- **Reader pass** (`_stages.md` § critique 2): readability problems alone send an article back
+  in one round only — one of the 3 counted loopbacks (`HRD loopback --cause revise` reads the
+  editor's `reader.json` and sets state `reader_revise`); after that, or once only the last
+  loopback is left (kept for accuracy and audit findings), they are reader notes for the human, so readability never spends more than that one
+  loopback and never holds an article (unless an editor ignores that and returns a REVISE on
+  readability alone — its verdict stands and costs a loopback).
 - **Stagnation guard**: if a loopback's reason repeats the previous one (same weakness or the
   same unsupported sentence), do not loop again — hold `stagnation` (attended: stop and show
   both rounds).
@@ -139,7 +147,7 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
 ## G. Signals
 
 **Recorded by `HRD` itself** where the event happens — never call `HRD signal` for these:
-- `gate-failure` — `stage pass` refuses on the gate.
+- `gate-failure` — `stage pass` refuses on the gate, or the pre-editor `HRD gate --record` fails.
 - `revise-weakness` / `audit-finding` / `verify-gap` — `HRD loopback --cause revise|audit|verify`.
 - `dismissal` — from `critique.json` `decision_log`, on `stage pass --stage critique` and on
   `loopback --cause audit`.

@@ -54,6 +54,12 @@ references into the article itself; then the gate.
 - **Gate**: `HRD stage pass --stage draft` runs it in code (`config.commands.validate` if set,
   else the built-in `validate_content.py`) and refuses on errors (it records `gate-failure`
   itself) → `HRD loopback --topic <id> --cause gate`, back to the writer with the errors.
+  Its `prose` hints (long, crowded or number-packed sentences, repeated asides, stock phrases;
+  `gate-rules.json` `prose` tunes them) never fail it. The writer runs `HRD gate --topic <id>`
+  before returning (errors and hints, also with a custom validator) and fixes what is real
+  (writer persona § Readable prose). Both `HRD gate` and `HRD stage pass --stage draft` write
+  the hints with the body hash they describe to `.claude/herald/memory/prose/<id>.json` (gitignored, never committed); a
+  gate loopback passes the errors and that file.
 
 ## critique — subject-expert / search-discovery (if enabled) → editor → external auditor
 
@@ -61,13 +67,44 @@ references into the article itself; then the gate.
    (its persona's Project specifics) → `<w>review-subject-expert.md`. search-discovery:
    article + `search-checklist.md` → `<w>review-search-discovery.md`.
 2. **editor** — read list: the article, category guide, `style-guide.md`, exemplars, the
-   `<w>review-*.md` notes. The editor writes its round into `<w>critique.md`; the
-   editor-in-chief appends auditor findings and dismissals and writes `<w>critique.json`. **Never** `research.md`. Verdict PASS / REVISE / REJECT with strengths,
-   weaknesses, revision direction.
+   `<w>review-*.md` notes, `.claude/herald/memory/prose/<id>.json` and, from round 2,
+   `<w>critique.md` (earlier rounds, including the findings sent back). Right before every
+   spawn (reruns included) run `HRD gate --topic <id> --record`: it rewrites that file for
+   this body (its `body_hash` equals the `HRD hash` taken in step 4) and carries
+   `reader_round_used`. Gate errors there (e.g. base's gate rules changed under a resumed
+   branch; `--record` logs the `gate-failure` signal) → `HRD loopback --topic <id> --cause
+   gate`, back to the writer — no editor round.
+   Besides the bar, the editor does a **reader pass** (editor persona): prose under
+   `### Reader pass` in its round, and `<w>reader.json` `{"round": n, "blockers": ["<where>:
+   <problem>", …], "notes": ["…"]}`; after it returns, add `"body_hash"` (the step 4 hash),
+   as for `verify.json`. Reader-pass blockers send the article back (theme `clarity` or
+   `tone`) once per article, and code keeps the count: `HRD loopback --cause revise` sees
+   `blockers` in a `reader.json` about the current body and sets state.json `reader_revise`
+   (a round that never reached `loopback` uses nothing; any revise loopback whose `reader.json`
+   lists blockers uses it, whatever the main theme — the writer got them). A `reader.json`
+   without `body_hash`, unreadable or with non-list `blockers` is refused by `loopback`,
+   `audit-round` and `stage pass`. The send-back is one of the 3 counted loopbacks and never
+   the last one: once it is used, or only one loopback is left (kept for accuracy and audit
+   findings), the hints file says `reader_round_used: true` and the editor lists reader-pass
+   problems (regressions included) as `notes` — readability spends at most that one loopback.
+   `HRD audit-round` and `stage pass --stage critique` refuse while the current `reader.json`
+   lists `blockers`: before `reader_round_used`, an editor PASS with blockers is not a PASS —
+   loop back; after it, the refusal says so and you move them to `notes` in `reader.json` and
+   go on. Likewise if an editor lists `blockers` despite `reader_round_used`: move them to
+   `notes` yourself and keep its verdict — never turn a REVISE into a PASS or a PASS into a
+   REVISE, no editor re-run: a REVISE then loops back on its other weaknesses (`loopback`
+   refuses until they are moved; such a REVISE still costs a loopback), a PASS goes on to
+   `audit-round`. Delete `<w>reader.json` before
+   every editor spawn, so a file the editor did not write this round is never stamped. The editor appends its round to `<w>critique.md`
+   under `## Round <n> — editor` (earlier rounds stay; before re-running a round whose
+   section is already there — interrupted or discarded — delete that section, so each round
+   appears once); the editor-in-chief adds the auditor findings and dismissals to that round
+   and writes `<w>critique.json`. **Never** `research.md`. Verdict PASS / REVISE / REJECT
+   with strengths, weaknesses, revision direction.
    - REVISE → `HRD loopback --topic <id> --cause revise --theme <t> --note "<main weakness>"`
-     (records `revise-weakness`; `<t>` is the closest of: intro, structure, length, depth,
-     clarity, tone, search, promotion, policy, accuracy, images, exemplar, other), back to
-     draft (stagnation guard).
+     (records `revise-weakness`, with `reader: true` when it used the reader send-back; `<t>`
+     is the closest of: intro, structure, length, depth, clarity, tone, search, promotion,
+     policy, accuracy, images, exemplar, other), back to draft (stagnation guard).
    - REJECT → hold `rejected`.
 3. **external auditor** — only after the editor's PASS; procedure in `atoms/_auditor.md`.
    First `HRD audit-round --topic <id>` (counts every auditor round of this article, human-
@@ -90,6 +127,9 @@ references into the article itself; then the gate.
    already in `audit_log`, reuse them and do not spawn the auditor again. Call it before taking
    the tripwire hashes (it writes `state.json`). Finding ids are `R<round>-<n>`; a repeated
    round replaces its own entries.
+   When you send a finding back to the writer, add: fix it where the reader needs it, in plain
+   words — no caveat added elsewhere, no label repeated (writer persona § Readable prose); the
+   editor's next reader pass checks for that regression.
    A finding that blocks → first write this round's `<w>critique.json` (step 4, including any
    dismissals; the finding goes into `audit_log` with outcome `fixed` — the next recheck checks
    it, `unfixed` if it is still there), then `HRD loopback --topic <id> --cause audit --theme <t> --note "<finding>"`
@@ -111,8 +151,9 @@ references into the article itself; then the gate.
    `open` while held; the human's decision on resume sets it to `fixed` (sent back to the
    writer under `HRD loopback --human` — the next recheck verifies it) or `dismissed`, before
    any further audit round (an `open` finding is never handed to an auditor as pending). `MINOR` → PR body only (`noted`).
-4. Before spawning the editor, take `HRD hash --slug <slug>`. Write `<w>critique.md` (prose:
-   verdicts, findings, dismissals with reasons) and `<w>critique.json` — `final_round.body_hash`
+4. Before spawning the editor, take `HRD hash --slug <slug>`. After the round, add to this
+   round's section of `<w>critique.md` (the editor wrote its part in step 2; earlier rounds
+   stay) the auditor findings and dismissals with reasons, and write `<w>critique.json` — `final_round.body_hash`
    is that hash (the article this round evaluated):
 
 ```json
@@ -163,7 +204,10 @@ hashing joins the verify target set when M6 is enabled.)
 - **Output**: `<w>verify.md` (per sentence: supported / unsupported / contradicted, with
   claim ids) and `<w>verify.json` `{"body_hash": "<added by the editor-in-chief>",
   "counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n},
-  "unsupported_sentences": ["<verbatim>", …]}` — `unmapped` is a subset already counted in
+  "unsupported_sentences": ["<verbatim>", …], "framings": [{"framing": "<text>", "covers":
+  ["<sentence>", …]}]}` — `framings` lists every framing the fact-checker applied (also under
+  `## Framings` in `verify.md`; a non-empty list excludes the PR from auto publish as `framed`,
+  accepted by `--consent`); `unmapped` is a subset already counted in
   `unsupported`; each unsupported sentence is listed exactly as it appears in the article
   (markdown included) — or only its parenthetical aside `(…)` when that aside alone is the
   unsupported part and it is not a qualifier, warning or limit; an unsupported sentence that
@@ -223,7 +267,10 @@ hashing joins the verify target set when M6 is enabled.)
    summary, sources count, audit summary, MINOR findings, `## Late audit findings` (deferred
    MAJORs) if any, `## Unattended decisions` if any (`human` entries go under `## Human decisions`),
    `## Trimmed sentences` (`state.json` `trim.removed`, `trim.status` `done`) if the trim
-   deleted anything, and the
+   deleted anything, `## Reader notes` (`reader.json` `notes` of the final round, and whether the one
+   reader-pass send-back was used — `state.json` `reader_revise`) if any, `## Framings` (the
+   framings the fact-checker applied and the sentences each covered, from `verify.md`) if any —
+   so the human sees what was treated as the article's own example rather than fact — and the
    marker `<!-- herald:topic=<id> slug=<slug> -->`.
 7. Unattended: `HRD result --topic <id> --status pr-open --pr <n>`.
 8. `git switch <base>`.

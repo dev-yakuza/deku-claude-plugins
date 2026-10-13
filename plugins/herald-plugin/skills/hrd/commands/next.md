@@ -3,7 +3,7 @@
 Picks the next queued topic (planning first when the queue is empty), writes it to a PR and
 ships it: brief → … → PR → merge → deploy → URL check, one article per run. Running it is the
 human's request to publish this article without reading it first, so `ship` accepts the
-agents' logged decisions, a trim and Herald-made images (`--consent`, `ship.md`); a blocking
+agents' logged decisions, a trim, the fact-checker's framings and Herald-made images (`--consent`, `ship.md`); a blocking
 exclusion, a hold or the daily
 throttle still stops it, the article is recorded `human_reviewed: false` (unless `--attended`,
 where the human approves the body before the PR), and the guard's merge and deploy
@@ -22,7 +22,7 @@ critique passed, verdict files that cannot be read. `next` takes no lock itself:
    questions still apply (`atoms/_contract.md` §C).
 6. Report in one short block: the published URL and what was accepted unread (ship §10: the
    accepted exclusions, the deferred auditor findings, dismissals and assumptions with their
-   reasons, the trimmed sentences, the Herald-made images — a deferred MAJOR is published as
+   reasons, the trimmed sentences, the framings and the sentences they covered, the Herald-made images — a deferred MAJOR is published as
    is, so name each one) — or where it stopped and what to do next
    (a preserved hold — `needs-human`, `stagnation`, `budget` → `/hrd resume <id> --ship`; a
    cleaned hold — `cannibalization`, `research`, `rejected` → `/hrd status`, then `/hrd next`

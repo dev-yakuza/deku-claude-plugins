@@ -2,12 +2,14 @@
 
 Checks: frontmatter keys, body length range, forbidden phrases (INV6: `draft` rules warn,
 `confirmed` rules block), internal article links, referenced images (must exist and must not
-be gitignored — an ignored image would deploy from this machine only).
+be gitignored — an ignored image would deploy from this machine only). Readability hints
+(`prose.py`) ride along under `prose`; they never fail the gate.
 """
 
 import os
 import re
 
+from .prose import safe_report
 from .util import read_json, run
 
 DEFAULT_RULES = {
@@ -16,6 +18,7 @@ DEFAULT_RULES = {
     "forbidden": [],
     "links": {"check": True},
     "images": {"check": True, "public_dir": "public"},
+    "prose": {},
 }
 
 FM_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.S)
@@ -50,7 +53,11 @@ def load_rules(root):
     rules = read_json(os.path.join(root, "docs", "editorial", "gate-rules.json"), {})
     out = {}
     for k, v in DEFAULT_RULES.items():
-        out[k] = {**v, **rules.get(k, {})} if isinstance(v, dict) else rules.get(k, v)
+        if isinstance(v, dict):
+            given = rules.get(k)
+            out[k] = {**v, **given} if isinstance(given, dict) else dict(v)
+        else:
+            out[k] = rules.get(k, v)
     return out
 
 
@@ -65,7 +72,8 @@ def validate(root, cfg, file_path):
     try:
         text = open(full, encoding="utf-8").read()
     except OSError as e:
-        return {"ok": False, "errors": ["cannot read %s: %s" % (file_path, e)], "warnings": []}
+        return {"ok": False, "errors": ["cannot read %s: %s" % (file_path, e)], "warnings": [],
+                "prose": {"warnings": [], "stats": {}}}
     fm, body = parse_frontmatter(text)
     if fm is None:
         errors.append("frontmatter (---) missing or malformed")
@@ -115,4 +123,24 @@ def validate(root, cfg, file_path):
                 errors.append("image %s does not exist (%s)" % (src, relp))
             elif ignored(root, relp):
                 errors.append("image %s is gitignored — it would deploy from this machine only" % src)
-    return {"ok": not errors, "errors": errors, "warnings": warnings, "chars": n}
+    return {"ok": not errors, "errors": errors, "warnings": warnings, "chars": n,
+            "prose": safe_report(body, cfg.get("language"), rules.get("prose"), _offset(text, body))}
+
+
+def _offset(text, body):
+    return text[:len(text) - len(body)].count("\n") if body and text.endswith(body) else 0
+
+
+def prose_for(root, cfg, file_path):
+    """Readability hints alone (used when config.commands.validate replaces the built-in gate)."""
+    full = file_path if os.path.isabs(file_path) else os.path.join(root, file_path)
+    try:
+        text = open(full, encoding="utf-8").read().replace("\r\n", "\n")
+        body = parse_frontmatter(text)[1]
+        toml = re.match(r"\+\+\+\n.*?\n\+\+\+\n?", text, re.S)  # Hugo-style frontmatter
+        if toml:
+            body = text[toml.end():]
+        rules = load_rules(root).get("prose")
+    except Exception as e:  # noqa: BLE001 — the repo's own validator decides; hints never break it
+        return {"warnings": ["prose: hints unavailable (%s: %s)" % (type(e).__name__, e)], "stats": {}}
+    return safe_report(body, cfg.get("language"), rules, _offset(text, body))

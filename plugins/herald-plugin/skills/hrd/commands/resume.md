@@ -10,7 +10,8 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`). Plan §3.2
    (`pr-pending` → `/hrd ship`; `queued` → `/hrd write`; cleaned holds → `/hrd status
    --requeue`) and stop.
 3. Preserved hold: show the human why it stopped (last `critique.md`/`verify.md`, the hold
-   note) and ask how to proceed — for an `open` BLOCKER (any round), dismiss or fix as in
+   note, and whether the one reader-pass send-back is used — `state.json` `reader_revise`, with the last
+   `reader.json`) and ask how to proceed — for an `open` BLOCKER (any round), dismiss or fix as in
    `atoms/_stages.md` § critique 3, a fix always under `HRD loopback --human`; record the
    decision in `critique.json` only after step 4's switch and version check — if step 4 stops,
    nothing is recorded and the next resume asks again (asked in every mode but unattended — a pre-flow question: a hold is resumed by a human's
