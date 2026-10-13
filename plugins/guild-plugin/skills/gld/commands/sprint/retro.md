@@ -564,9 +564,11 @@ human's.
   - the branch name carries that number as a token — Phase 1's branch test,
     `(^|[^0-9])#?<N>([^0-9]|$)` — because the spine names every branch it cuts after its Issue
     (`_execute_spine.md` Step 0 (c)). `develop` or `main` with a `Closes #12` body fails this;
-  - the name is not a release or version line — `release/…`, `support/…`, `hotfix/…`, `v<digits>…`
-    — which can carry the number by coincidence (`release/12` for #12); the spine's own resume
-    probe drops the same shapes (`_execute_spine.md` Step 0 (a));
+  - the name is not a release or version line — `release/…` or `v<digits>…` — which can carry
+    the number by coincidence (`release/12` for #12), by analogy with the spine's empty-log drop
+    (`_execute_spine.md` Step 0 (a)). `hotfix/<N>-…` and `support/<N>-…` are **not** excluded:
+    they are real Issue-branch conventions there, and the tests above already stop a long-lived
+    line;
   - the name is neither the default branch nor the current branch;
   - `gh pr list --repo <owner>/<repo> --state all --base <headRefName> --limit 200 --json number,state --jq 'map({number, state})'`
     names **no PR outside the confirmed set** (`develop` and `release/*` are the base of other
@@ -653,9 +655,11 @@ branch -D`) slips past the `ask` entry that is the harness's half of INV1.
    repo-global and would drop the registration of one of the human's worktrees that is merely on
    an unmounted volume (`sprint-supervisor.sh` `prune_safe`). If any prunable entry is outside it,
    skip prune and say so.
-2. **Local branches** — merged rows only, and only after **item 3's re-checks for the same
-   branch** have passed (run them first; a branch that fails them keeps its local copy too), and
-   after re-reading the tip right then (`git
+2. **Local branches** — merged rows only, and only after re-running item 3's `--head` and
+   `--base` calls with `--state open` for the same branch and finding **no open PR** (a branch
+   that has one keeps its local copy too). ⚠ A remote ref that is **absent** (GitHub deleted it on
+   merge — the normal case with `delete_branch_on_merge`) or that moved does **not** block the
+   local delete; the local tip test below decides. Then re-read the tip right then (`git
    rev-parse --verify --quiet refs/heads/<branch>`) and finding it **exactly equal** to
    `headRefOid`: `git branch -D <branch>`.
    ⚠ **Not `git branch -d`, and not as a first try.** Every Guild branch has an upstream (the

@@ -718,10 +718,20 @@ for phrase, why in (
     ("re-run step 1's `--head` and `--base` calls with `--state open`", "the remote delete skips the open-PR re-check"),
     ("test(\"Parent Issue: #<m>([^0-9]|$)\")", "children search lost its digit boundary"),
     ("the **same live states**", "the run re-check no longer names Phase 0's live states"),
-    ("`release/…`, `support/…`, `hotfix/…`", "release/version lines can become candidates"),
+    ("`release/…` or `v<digits>…`", "release/version lines can become candidates"),
+    ("does **not** block the local delete", "an absent remote ref blocks the local delete"),
+    ("finding **no open PR**", "the local delete skips the open-PR re-check"),
+    ("same per-Issue server lookup", "children have no truncation fallback"),
     ("Read its `permissions.ask` first", "the prompt claim is not checked against the repo's settings"),
 ):
     if phrase not in flat:
+        problems.append(why)
+whole = " ".join(retro.split())
+for phrase, why in (
+    ("\"Closes #<m>\" in:body", "CLEANUP search is not bounded to a closing reference"),
+    ("**equals the limit** is truncated", "a truncated CLEANUP lookup reads as no PR"),
+):
+    if phrase not in whole:
         problems.append(why)
 if re.search(r"\bskip (this|the) re-check", " ".join(rc.split())):
     problems.append("the run re-check may be skipped")
@@ -742,7 +752,9 @@ rows = [l for l in rollback.splitlines() if "branch -D" in l]
 if not any("sprint retro" in r and "headRefOid" in r for r in rows):
     problems.append("rollback.md's branch -D rule does not name the retro exception")
 # Hard rules 도 같은 부정 검사를 받는다 — Phase 7 밖에서 강제를 허용하면 같은 지시가 된다.
-hr = retro[retro.find("## Hard rules"):]
+if retro.find("## Hard rules") < 0:
+    problems.append("Hard rules section missing")
+hr = retro[retro.find("## Hard rules"):] if retro.find("## Hard rules") >= 0 else ""
 for line in hr.split("\n- "):
     f_ = " ".join(line.split())
     for m in re.finditer(r"--force\b|git branch -d\b", f_):
