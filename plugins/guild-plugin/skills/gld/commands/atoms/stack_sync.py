@@ -16,7 +16,7 @@ cut, that is a catch-up (`stale`) and stays the human's (daily.md: never auto-ca
 base).
 
 Usage:
-  python3 stack_sync.py --tracker <n> [--check] [--install-cmd <cmd>]...
+  python3 stack_sync.py --tracker <n> [--check] [--install-cmd <cmd>]... [--done-cards]
 
 Run from the human's checkout. Output, one line per stacked member whose dependency merged and
 whose own PR is open (`--check` omits lines with nothing to act on):
@@ -39,6 +39,11 @@ whose own PR is open (`--check` omits lines with nothing to act on):
   <issue> push-rejected #<dep> <log>      nothing changed on the remote
   <issue> error #<dep> <message>          anything else; the member is left as it was
   <issue> worktree-kept #<dep> <path>     extra line: the throwaway worktree was not clean
+
+With --done-cards, one more line, always last (and printed even when no member is stacked):
+
+  done-cards <n>,<n>… | none             members whose board card belongs in Done (done_members)
+  done-cards error <message>             that read failed; the sync lines above still stand
 
 Exit: 0 (the lines carry the outcome) · 64 usage/input error · 65 GitHub/git unavailable.
 """
@@ -187,18 +192,61 @@ def pick_dep_pr(top, merged, m_head):
     return sorted(anc or merged, key=lambda p: p.get("mergedAt") or "")[-1]
 
 
+def done_members(ctx, members, prs):
+    """Members whose board card belongs in `Done`: a MERGED PR is attributed to this member and
+    the Issue is closed as `COMPLETED`. The PR attribution is `prs_by_issue`'s, the same one the
+    run supervisor's P5 (`board_sweep_merged`) moves cards by; the Issue half makes this a
+    subset of P5's cards, never a superset.
+
+    ⚠ Both halves, not either. MERGED alone also matches a stacked PR merged into its base
+    branch: that does not close the Issue, and the work is not on the default branch yet.
+    ⚠ `stateReason`, not `state`. `CLOSED` also matches an Issue the human closed as not planned
+    or as a duplicate — and the MERGED half can still hold for it (a stacked PR merged into a
+    base that was then abandoned, or a branch name that merely contains the number). A merged
+    closing PR sets `COMPLETED`; so does a human closing it as done by hand — and then the human
+    has said it is done, which is what the `Done` column means."""
+    out = []
+    for n in members:
+        if not any(p["state"] == "MERGED" for p in prs.get(n, [])):
+            continue
+        st = gh_json(["issue", "view", str(n), "-R", ctx["repo"], "--json", "state,stateReason"]) or {}
+        if (str(st.get("state", "")).upper() == "CLOSED"
+                and str(st.get("stateReason") or "").upper() == "COMPLETED"):
+            out.append(n)
+    return out
+
+
+def report_done(ctx, members, prs):
+    """The `done-cards` line. A failed read is a line, not an exit code: the sync above it has
+    already pushed, and the board is a view (03-sprint-board.md D1) — it must not turn a
+    finished sync into a failure."""
+    try:
+        done = done_members(ctx, [n for n, _ in members], prs)
+    except EnvError as exc:
+        print("done-cards error %s" % exc)
+        return 0
+    print("done-cards %s" % (",".join(str(n) for n in done) or "none"))
+    return 0
+
+
 def merge_oid(pr):
     return (pr.get("mergeCommit") or {}).get("oid") or ""
 
 
 def load_verify_cmds(top):
-    """config.commands test · lint · typecheck (each a string, an array of steps, or null)."""
+    """config.commands test · lint · typecheck (each a string, an array of steps, or null)
+    -> (commands, None) or ([], reason).
+
+    ⚠ A reason, not an exit. It used to `die` before the tracker was even read, so a repo with
+    no verification command could not run `sync` at all — not even where nothing needs a merge
+    (a merge-commit repo, or no stack) and the only job left was `--done-cards`. The refusal
+    now lands where it matters: a member whose sync would push a merge (`member_outcome`)."""
     path = os.path.join(top, ".claude", "guild", "config.json")
     try:
         with open(path, encoding="utf-8") as fh:
             cmds = (json.load(fh) or {}).get("commands") or {}
     except (OSError, ValueError) as exc:
-        die("cannot read %s (%s)" % (path, exc))
+        return [], "cannot read %s (%s)" % (path, exc)
     out = []
     for key in ("test", "lint", "typecheck"):
         v = cmds.get(key)
@@ -207,8 +255,11 @@ def load_verify_cmds(top):
                 out.append(c)
     if not out:
         # Pushing an unverified merge is the one thing this script must not do quietly.
-        die("config.commands has no test/lint/typecheck command — refusing to sync unverified")
-    return out
+        return [], "config.commands has no test/lint/typecheck command — refusing to sync unverified"
+    for c in out:
+        if _METACHAR.search(c):
+            return [], "config.commands value %r contains shell metacharacters (init.md:163)" % c
+    return out, None
 
 
 def check_simple(cmds, what):
@@ -520,6 +571,8 @@ def main(argv=None):
     ap.add_argument("--tracker", required=True)
     ap.add_argument("--check", action="store_true", help="classify only; change nothing")
     ap.add_argument("--install-cmd", action="append", default=[])
+    ap.add_argument("--done-cards", action="store_true",
+                    help="also print which members' board cards belong in Done")
     args = ap.parse_args(argv)
     if not re.match(r"\A[0-9]+\Z", args.tracker):
         die("--tracker must be digits only, got %r" % args.tracker)
@@ -534,9 +587,7 @@ def main(argv=None):
         ctx = {"top": top, "repo": repo, "default": default, "tracker": args.tracker,
                "install": args.install_cmd, "notes": [],
                "logdir": os.path.join(top, ".claude", "guild", ".sprint-logs", args.tracker)}
-        if not args.check:
-            ctx["verify"] = load_verify_cmds(top)
-            check_simple(ctx["verify"], "config.commands value")
+        ctx["verify"], ctx["verify_err"] = load_verify_cmds(top)
 
         tracker = gh_json(["issue", "view", args.tracker, "-R", repo, "--json", "body,labels"])
         if "guild:sprint" not in [l["name"] for l in tracker.get("labels") or []]:
@@ -560,7 +611,7 @@ def main(argv=None):
             elif m_pr is not None:
                 work.append((issue, dep, m_pr, merged, None, None))
         if not work:
-            return 0
+            return report_done(ctx, members, prs) if args.done_cards else 0
 
         refspecs = ["+refs/heads/%s:refs/remotes/origin/%s" % (default, default)]
         refspecs += ["+refs/heads/{0}:refs/remotes/origin/{0}".format(w[2]["headRefName"])
@@ -583,7 +634,7 @@ def main(argv=None):
             print(note)
         del ctx["notes"][:]
         sys.stdout.flush()
-    return 0
+    return report_done(ctx, members, prs) if args.done_cards else 0
 
 
 def member_outcome(ctx, check, issue, dep, m_pr, merged):
@@ -606,6 +657,9 @@ def member_outcome(ctx, check, issue, dep, m_pr, merged):
             return "skipped", "branch-checked-out " + holder
         if m_head != m_pr.get("headRefOid"):
             return "skipped", "head-moved"
+        if "merge" in actions and ctx["verify_err"]:
+            # Same in --check, so `daily` does not promise a sync that will refuse.
+            return "error", ctx["verify_err"]
         if check:
             # `held`: the sync will push but leave the draft to the human — say so now.
             return "needs-sync", ",".join(actions + (["held"] if held else []))

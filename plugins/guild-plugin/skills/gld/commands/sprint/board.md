@@ -1,8 +1,8 @@
 # SPRINT BOARD (set up / inspect / reset the GitHub Projects kanban)
 
 **Optional infrastructure.** Every other `sprint` subcommand works without a board
-(03-sprint-board.md D2) — this one only exists so `plan` and the `run` supervisor have
-somewhere to project onto. The board is a **view**: labels and the tracking Issue stay the
+(03-sprint-board.md D2) — this one only exists so `plan`, the `run` supervisor and
+`sync` (merged members to `Done`, `sync.md` step 5) have somewhere to project onto. The board is a **view**: labels and the tracking Issue stay the
 source of truth, and moving a card changes nothing about what Guild does (D1).
 
 `$1` = *(empty)* | `--setup` | `--reset` · `$2…` = that form's own flags. ⚠ **`--project` is
@@ -399,7 +399,7 @@ that state a **cost** — which are the two a human cannot infer:
 새 이슈는 `sprint plan` 을 확정하실 때 보드에 올라옵니다.
 ⚠ 마지막으로 확정하신 뒤에 만드신 이슈는 다음 `sprint plan` 까지 보드에 보이지 않습니다.
 (제안만 보시는 단계에서는 보드가 바뀌지 않습니다 — `--create` 로 확정하실 때 올라옵니다.)
-(스프린트가 도는 동안 카드는 Guild 가 알아서 옮깁니다.)
+(스프린트가 도는 동안 카드는 Guild 가 알아서 옮깁니다. run 이 끝난 뒤 머지하셨다면 `/gld sprint retro` 전에 `/gld sprint sync` 를 부르시면 Done 으로 옮깁니다 — 완료로 닫힌 이슈만.)
 GitHub 의 자동 추가 설정을 켜두시면 즉시 올라오지만, Guild 가 그것을 켜거나 확인할 수는 없습니다.
 `Order` 로 정렬하실 때는 `Sprint` = #<tracker> 로 먼저 걸러 주십시오 — 지난 스프린트의 1..N 이 섞입니다.
 카드를 직접 끌어 옮기셔도 Guild 의 동작은 바뀌지 않고, `Backlog`·`Ready` 로 옮기신 것은

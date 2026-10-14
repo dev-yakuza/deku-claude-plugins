@@ -23,7 +23,7 @@ as **that file's** `$1, $2, …` (shift by one).
 | `plan` | `commands/sprint/plan.md` — choose this sprint's issues, order them, create the tracking Issue |
 | `run` | `commands/sprint/run.md` — develop the members unattended to PRs |
 | `daily` | `commands/sprint/daily.md` — read-only status; merge order; what is stuck |
-| `sync` | `commands/sprint/sync.md` — after merging a lower PR on a squash/rebase-only repo, bring the stacked PRs above it level with the default branch (`_sprint_dag.md` Section G) |
+| `sync` | `commands/sprint/sync.md` — after a merge: on a squash/rebase-only repo, bring the stacked PRs above it level with the default branch (`_sprint_dag.md` Section G); with a board, move the merged members' cards to `Done` (any merge strategy) |
 | `retro` | `commands/sprint/retro.md` — metrics, capacity calibration, evolve, close the sprint, clean up its worktrees and branches |
 | `board` | `commands/sprint/board.md` — set up / inspect / reset the GitHub Projects kanban. **Optional infrastructure**: every other subcommand works without it (03-sprint-board.md D2) |
 | *(empty)* | route to **`daily`** — the most-used read-only action. A bare invocation must never start something destructive |

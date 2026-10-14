@@ -769,6 +769,59 @@ else
   bad "retro.md: 정리의 안전 장치" "OK" "$CLEAN"
 fi
 
+# 10e. sprint sync 가 머지된 멤버 카드를 Done 으로 옮긴다 (0.94.0, 03-sprint-board.md §5.5).
+#     가드를 끄고 쓰므로 안전 장치는 (a) 대상 목록이 스크립트(done_members)에서만 온다,
+#     (b) 쓰는 컬럼이 done 하나다, (c) --check 에서는 쓰지 않는다 — 셋이다.
+SYNCMD="$GLD/commands/sprint/sync.md"
+hasfx "sync.md: 보드가 있으면 --done-cards 를 넘긴다" "$SYNCMD" 'Add `--done-cards` when `config.sprint.board` is set'
+hasfx "sync.md: done-cards 줄은 상태가 아니다(attention 에 세지 않는다)" "$SYNCMD" 'line is not a status'
+hasfx "sync.md: 대상을 손으로 고르지 않는다" "$SYNCMD" "the script's list is the guard"
+hasfx "retro.md: sync 는 열린 스프린트만 다룬다고 고지한다" "$RETRO" "열린 스프린트만 다룹니다"
+hasfx "help.md: sync 가 카드를 Done 으로 옮긴다" "$GLD/commands/help.md" "move merged members' cards to Done"
+hasfx "sprint.md: sync 가 카드를 Done 으로 옮긴다" "$GLD/commands/sprint.md" 'move the merged members'"'"' cards to `Done`'
+hasfx "stack_sync.py: done-cards 는 MERGED 와 CLOSED 를 둘 다 요구한다" "$GLD/commands/atoms/stack_sync.py" '⚠ Both halves, not either.'
+hascode "stack_sync.py: done-cards 는 stateReason COMPLETED 를 요구한다" "$GLD/commands/atoms/stack_sync.py" '== "COMPLETED"'
+cat > "$WORK3/syncboard.py" <<'SYNCPY'
+import re, sys
+s = open(sys.argv[1], encoding="utf-8").read()
+errs = []
+a = s.find("5. **Board"); b = s.find("## Return")
+if a < 0 or b < a:
+    print("step 5 (Board) not found before ## Return"); sys.exit(0)
+step = s[a:b]
+js = re.search(r"```json\n(.*?)```", step, re.S)
+if not js:
+    errs.append("no json input block in step 5")
+else:
+    j = js.group(1)
+    for k in ("number", "owner", "repo", "field", "columns", "owned", "writes"):
+        if not re.search(r'"%s":' % k, j):
+            errs.append("input lacks %s" % k)
+    if not re.search(r'"guard":\s*false', j): errs.append('"guard": false missing')
+    # read: false — a read is item-list at board size (~500 points) on every sync
+    if not re.search(r'"read":\s*false', j): errs.append('"read": false missing')
+    cols = re.findall(r'"column":\s*"([^"]*)"', j)
+    if cols != ["done"]: errs.append("columns written must be exactly [done], got %r" % cols)
+    if "fields.needs_human" not in j: errs.append("Needs human is not cleared")
+    if re.search(r'"fields":', j): errs.append("writes a data field besides the column")
+    for v in ("columns, verbatim", "owned, verbatim"):
+        if v not in j: errs.append("%s missing" % v)
+chk = [ln for ln in step.split("\n   - ") if "with `--check`" in ln]
+if not chk or "write nothing" not in chk[0]:
+    errs.append("--check bullet does not say write nothing")
+hr = s[s.find("## Hard rules"):]
+m = re.search(r"- \*\*The board gets `Done` and nothing else\*\*(.*?)(?=\n- |\Z)", hr, re.S)
+if not m or "never under `--check`" not in m.group(1):
+    errs.append("Hard rule for the board missing or lacks never under --check")
+print("; ".join(errs) or "OK")
+SYNCPY
+SB="$("$PY" "$WORK3/syncboard.py" "$SYNCMD")"
+if [ "$SB" = "OK" ]; then
+  ok "sync.md: Done 하나만, 가드 끔은 목록이 정할 때만, --check 는 쓰지 않는다, Needs human 을 비운다"
+else
+  bad "sync.md: 보드 단계의 안전 장치" "OK" "$SB"
+fi
+
 # 11. run.md — 보드 값은 렌더 토큰이 아니라 **데이터 파일**이다. 이 클래스가 세 번 나왔다:
 #     소스 보간(실행됨) → 인용 heredoc(개행이 탈출) → 데이터 파일.
 lacksfx "template: 보드 렌더 토큰이 남아 있지 않다" "$TPL" "<BOARD_NUMBER>"

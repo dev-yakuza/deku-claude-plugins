@@ -458,13 +458,16 @@ the sprint entirely.
 ⚠ **Disclose the board's freeze — one line, when `config.sprint.board` is set.** `retro` writes
 **nothing** to the board (03-sprint-board.md §7.4, and the Hard rules below repeat it), but this
 is the moment the design's largest accepted cost becomes permanent: closing the tracker means
-nothing will ever move a card again. Every `In review` card stays `In review` after the human
-merges its PR tomorrow morning, and every `Blocked` card keeps a reason that may already be
-resolved. Say so rather than letting the human discover it:
+nothing will ever move a card again. `/gld sprint sync` moves a merged member's card to `Done`
+(`sync.md` step 5), but it only finds an **open** sprint — after this close, every `In review`
+card stays `In review` after the human merges its PR tomorrow morning, and every `Blocked` card
+keeps a reason that may already be resolved. Say so rather than letting the human discover it:
 
 ```
 보드: <url> — 이 시점 이후 카드는 갱신되지 않습니다. 머지하신 뒤에도 In review 에 남고,
-      정리는 GitHub UI 에서 하십시오. 다음 `sprint plan` 이 새 카드를 올립니다.
+      정리는 GitHub UI 에서 하십시오 (`/gld sprint sync` 는 열린 스프린트만 다룹니다).
+      다음부터는 retro 전에 `/gld sprint sync` 를 부르시면 머지된 카드가 Done 으로 갑니다.
+      다음 `sprint plan` 이 새 카드를 올립니다.
 ```
 
 This is a **disclosure, not a projection** — no `gh project` call, no card touched.

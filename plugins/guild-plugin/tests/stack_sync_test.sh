@@ -62,8 +62,12 @@ def head(b):
 if a[:2] == ["repo", "view"]:
     print(json.dumps({"nameWithOwner": "acme/app", "defaultBranchRef": {"name": "main"}}))
 elif a[:2] == ["issue", "view"]:
+    # Only fields gh really has: a typo in --json fails here as it would on GitHub.
+    if "--json" in a and not set(a[a.index("--json") + 1].split(",")) <= {"body", "labels", "state", "stateReason"}:
+        sys.stderr.write("Unknown JSON field\n"); sys.exit(1)
     it = st["issues"][a[2]]
-    print(json.dumps({"body": it.get("body", ""), "labels": [{"name": l} for l in it["labels"]]}))
+    print(json.dumps({"body": it.get("body", ""), "labels": [{"name": l} for l in it["labels"]],
+                      "state": it.get("state", "OPEN"), "stateReason": it.get("stateReason")}))
 elif a[:2] == ["pr", "list"]:
     out = []
     for p in st["prs"]:
@@ -248,6 +252,15 @@ json.dump(s, open(p, "w"))
 EOF
 sync
 eq "merge-commit strategy: a Guild draft is still retargeted and readied" "$OUT" "12 synced #11 retarget+ready"
+# no verification command refuses only a member that needs a MERGE — retarget/ready push nothing
+"$PY" - "$S/state.json" <<'EOF'
+import json, sys; p = sys.argv[1]; s = json.load(open(p))
+s["prs"][1].update(isDraft=True, baseRefName="feature/#11-dep")
+json.dump(s, open(p, "w"))
+EOF
+printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/config.json"
+sync
+eq "no verification command: a merge-commit member is still retargeted and readied" "$OUT" "12 synced #11 retarget+ready"
 
 # conflict: main moved under the member on the same lines
 standard s4
@@ -738,14 +751,75 @@ printf '{"commands":{"test":null,"lint":null}}\n' > "$R/.claude/guild/config.jso
 "$PY" - "$S/state.json" <<'EOF'
 import json, sys; p = sys.argv[1]; s = json.load(open(p)); s["issues"]["10"]["labels"] = ["guild:sprint"]; json.dump(s, open(p, "w"))
 EOF
+BEFORE="$(sha 'feature/#12-member')"; : > "$S/calls.txt"
 sync
-eq "no verification command: refused (64) rather than pushing unverified" "$RC" "64"
+eq "no verification command: exit 0 — the refusal is the member's, not the run's" "$RC" "0"
+eq "no verification command: the member that needs a merge is refused, not pushed unverified" "$OUT" \
+  "12 error #11 config.commands has no test/lint/typecheck command — refusing to sync unverified"
+eq "no verification command: the remote branch is untouched" "$(sha 'feature/#12-member')" "$BEFORE"
+eq "no verification command: no mutating gh call" "$(cat "$S/calls.txt")" ""
 sync --check
-eq "no verification command: --check still works" "$RC" "0"
+eq "no verification command: --check exit 0" "$RC" "0"
+eq "no verification command: --check says the sync would refuse (daily must not promise it)" "$OUT" \
+  "12 error #11 config.commands has no test/lint/typecheck command — refusing to sync unverified"
+# A sentinel, not a destructive payload: if the guard ever regresses, this is what runs.
+printf '{"commands":{"test":"true; touch %s/pwned"}}\n' "$S" > "$R/.claude/guild/config.json"
+sync
+eq "verify command with a metacharacter: the member is refused, nothing pushed" "$OUT|$(sha 'feature/#12-member')" \
+  "12 error #11 config.commands value 'true; touch $S/pwned' contains shell metacharacters (init.md:163)|$BEFORE"
+[ ! -e "$S/pwned" ] && ok "verify command with a metacharacter: never executed" \
+  || bad "verify command with a metacharacter" "the payload ran"
 
 M1="$("$PY" -c "import sys; sys.dont_write_bytecode=True; sys.path.insert(0, '$(dirname "$SYNC")'); import stack_sync; print(stack_sync._METACHAR.pattern)")"
 M2="$("$PY" -c "import sys; sys.path.insert(0, '$(dirname "$RENDER")'); sys.dont_write_bytecode=True; import render_supervisor; print(render_supervisor._METACHAR.pattern)")"
 eq "the metacharacter class is the renderer's (init.md:163)" "$M1" "$M2"
+
+echo "── stack_sync: --done-cards (sync.md board step) ──"
+# mutate <python statements on `st`> — edit the stub's world in place
+mutate() { "$PY" -c "import json,sys; p=sys.argv[1]; st=json.load(open(p)); exec(sys.argv[2]); json.dump(st, open(p,'w'))" "$S/state.json" "$1"; }
+last() { printf '%s\n' "$1" | tail -n 1; }
+standard d1
+mutate 'st["issues"]["11"]={"labels":["guild:done"],"state":"CLOSED","stateReason":"COMPLETED"}'
+sync --check --done-cards
+eq "done-cards: exit 0" "$RC" "0"
+eq "done-cards: the sync lines come first, unchanged" "$(printf '%s\n' "$OUT" | head -n 1)" "12 needs-sync #11 merge,retarget,ready"
+eq "done-cards: merged + closed member listed, last line" "$(last "$OUT")" "done-cards 11"
+eq "done-cards: --check still makes no mutating gh call" "$(cat "$S/calls.txt")" ""
+sync --check
+lacks "no flag: no done-cards line (daily.md parses this output)" "$OUT" "done-cards"
+mutate 'st["issues"]["11"]["state"]="OPEN"'
+sync --check --done-cards
+eq "done-cards: merged but the Issue still open (merged into a stack base) → none" "$(last "$OUT")" "done-cards none"
+mutate 'st["issues"]["11"]["state"]="CLOSED"; st["issues"]["11"]["stateReason"]="NOT_PLANNED"'
+sync --check --done-cards
+eq "done-cards: merged PR but the Issue closed as not planned → none" "$(last "$OUT")" "done-cards none"
+mutate 'st["issues"]["11"]["stateReason"]="DUPLICATE"'
+sync --check --done-cards
+eq "done-cards: closed as a duplicate → none" "$(last "$OUT")" "done-cards none"
+mutate 'st["issues"]["11"]["stateReason"]="COMPLETED"; st["prs"][0]["closingIssuesReferences"]=[{"number":11},{"number":30}]'
+sync --check --done-cards
+eq "done-cards: a PR closing several Issues (release PR) counts — the Issue says COMPLETED" "$(last "$OUT")" "done-cards 11"
+mutate 'st["prs"][0]["closingIssuesReferences"]=[]'
+sync --check --done-cards
+eq "done-cards: no closing reference → the branch token attributes it (stacked PR)" "$(last "$OUT")" "done-cards 11"
+mutate 'st["prs"][0]["state"]="CLOSED"; st["prs"][0]["mergedAt"]=None; st["prs"][0]["closingIssuesReferences"]=[{"number":11}]'
+sync --check --done-cards
+eq "done-cards: closed as not planned with an unmerged PR → none" "$(last "$OUT")" "done-cards none"
+# nothing stacked: the early return must still print the line
+new_scenario d2
+write_state "{\"issues\":{\"10\":{\"labels\":[\"guild:sprint\"],\"body\":\"$(tracker_body 11:- 13:-)\"},
+  \"11\":{\"labels\":[\"guild:done\"],\"state\":\"CLOSED\",\"stateReason\":\"COMPLETED\"},\"13\":{\"labels\":[\"guild:done\"],\"state\":\"CLOSED\",\"stateReason\":\"COMPLETED\"}},
+  \"prs\":[{\"number\":101,\"state\":\"MERGED\",\"headRefName\":\"feature/#11-a\",\"headRefOid\":\"x\",\"baseRefName\":\"main\",\"mergeCommit\":{\"oid\":\"y\"},\"isDraft\":false,\"closingIssuesReferences\":[{\"number\":11}]},
+   {\"number\":103,\"state\":\"MERGED\",\"headRefName\":\"feature/#13-b\",\"headRefOid\":\"x\",\"baseRefName\":\"main\",\"mergeCommit\":{\"oid\":\"z\"},\"isDraft\":false,\"closingIssuesReferences\":[{\"number\":13}]}]}"
+printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/config.json"
+sync --done-cards
+eq "done-cards: no stack → exit 0 (and no verification command needed)" "$RC" "0"
+eq "done-cards: no stack → the line alone, members in table order" "$OUT" "done-cards 11,13"
+eq "done-cards: no stack → no mutating gh call" "$(cat "$S/calls.txt")" ""
+mutate 'del st["issues"]["13"]'
+sync --done-cards
+eq "done-cards: a failed Issue read → exit 0 all the same" "$RC" "0"
+has "done-cards: a failed Issue read → an error line, not a guess" "$OUT" "done-cards error "
 
 echo "── supervisor wiring (run.md --draft-stacked) ──"
 RH="$WORK/render"; mkdir -p "$RH"
@@ -767,7 +841,7 @@ echo
 echo "stack_sync: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when checks are added on purpose. A
 #   quote that swallows the rest of the file runs fewer checks and still ends green otherwise.
-SYNC_MIN_CHECKS=112
+SYNC_MIN_CHECKS=135
 if [ "$((PASS + FAIL))" -lt "$SYNC_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${SYNC_MIN_CHECKS}건)."
   exit 1
