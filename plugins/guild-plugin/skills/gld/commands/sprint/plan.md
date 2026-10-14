@@ -192,12 +192,21 @@ and `PAST SLOTS: unverifiable — <the entries, verbatim>` — **keep the entrie
 they cannot be checked, not that they are gone. What the tech-lead does with these values is
 in the "Refactor slot" section, which is the only part of this file it reads.
 
+**`docs/specs/sprint-draft/`** is a fixed scratch name: the sprint has no number yet. **Before
+spawning, clear the last run's verdicts** — one call,
+`rm -f docs/specs/sprint-draft/po.md docs/specs/sprint-draft/deps.md docs/specs/sprint-draft/deps-slot.md`
+— so a sub-agent that returns without writing, or a re-spawn that does not happen this time,
+cannot leave an older run's file to be read or recorded as this one's. Phase 6 step 6 moves the
+files this run's RESULT lines named into `docs/specs/sprint-<tracker>/` and commits them: the PO
+and tech-lead **verdicts as first given** (판정 원문), not the composition the human approved
+after edits — that is the tracker body.
+
 As the leader, spawn BOTH role sub-agents in one message (independent, concurrent). Reuse the prompt *shape* of `plan.md` Phase 1, but the job is **selection, not decomposition**.
 
 **Product Owner** (value):
 - `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `product-owner sprint select`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. Propose (a) **one sentence** naming what this iteration is for, and (b) the candidates that serve it, in priority order. For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Recommend excluding any candidate with an `unclear` dimension** and say why: unattended, the leader would have to guess that gap alone. **Do not select a candidate tagged `refactor-slot`** (an orphaned refactor-slot draft — the slot logic handles it), **and rate every candidate tagged `refactor` or `refactor-slot`, whether or not you selected it** — the leader may take one as the sprint's refactor slot and needs your ratings to do so. Write the result to a FILE `docs/specs/sprint-<slug>/po.md` (do not paste it back).
+  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. Propose (a) **one sentence** naming what this iteration is for, and (b) the candidates that serve it, in priority order. For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Recommend excluding any candidate with an `unclear` dimension** and say why: unattended, the leader would have to guess that gap alone. **Do not select a candidate tagged `refactor-slot`** (an orphaned refactor-slot draft — the slot logic handles it), **and rate every candidate tagged `refactor` or `refactor-slot`, whether or not you selected it** — the leader may take one as the sprint's refactor slot and needs your ratings to do so. Write the result to a FILE `docs/specs/sprint-draft/po.md` (do not paste it back).
   > <!-- guild:result-contract -->
   > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
   > <!-- /guild:result-contract -->
@@ -206,7 +215,7 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
 **Tech Lead** (dependencies and size):
 - `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `tech-lead sprint select`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/tech-lead.md`. From the same CANDIDATES (below) and `docs/standards/architecture.md`, produce (a) the **dependency relations** among them — which is a foundation for which, using the `Depends on: #<n>` notes in the bodies as input and correcting them where the code says otherwise — and (b) a **size** verdict per candidate: single dev-unit ✅, or ⚠ **likely to split at design**, plus the source files each candidate will most likely touch. Do NOT read the product-owner's output; judge independently. **When REFACTOR SLOT is `on`**, also produce (c) **one refactor-slot proposal** (rules: the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md` — read that section before writing (c), not the whole file). Write to a FILE `docs/specs/sprint-<slug>/deps.md`. Return one `>>> RESULT <<<` line. CANDIDATES: <same as above>. REFACTOR SLOT: <`on` | `off`>. DEFAULT BRANCH: <the repo's default branch name — the leader has already fetched `origin/<it>` — or `unavailable`>. PAST SLOTS: <the `refactor` field of every `config.sprint.history` entry that has one, or `none`>. VISUAL: <available or not per `_handoff.md` Section L.1 — `available` with `visual.packages` and `visual.tests`, or `unavailable`> (the gap check's visual half needs it; you are not reading config.json yourself).
+  > Adopt the persona in `.claude/agents/tech-lead.md`. From the same CANDIDATES (below) and `docs/standards/architecture.md`, produce (a) the **dependency relations** among them — which is a foundation for which, using the `Depends on: #<n>` notes in the bodies as input and correcting them where the code says otherwise — and (b) a **size** verdict per candidate: single dev-unit ✅, or ⚠ **likely to split at design**, plus the source files each candidate will most likely touch. Do NOT read the product-owner's output; judge independently. **When REFACTOR SLOT is `on`**, also produce (c) **one refactor-slot proposal** (rules: the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md` — read that section before writing (c), not the whole file). Write to a FILE `docs/specs/sprint-draft/deps.md`. Return one `>>> RESULT <<<` line. CANDIDATES: <same as above>. REFACTOR SLOT: <`on` | `off`>. DEFAULT BRANCH: <the repo's default branch name — the leader has already fetched `origin/<it>` — or `unavailable`>. PAST SLOTS: <the `refactor` field of every `config.sprint.history` entry that has one, or `none`>. VISUAL: <available or not per `_handoff.md` Section L.1 — `available` with `visual.packages` and `visual.tests`, or `unavailable`> (the gap check's visual half needs it; you are not reading config.json yourself).
 
 ### Refactor slot — one per sprint, reserved, never forced
 
@@ -600,10 +609,15 @@ means switching to `squash-sync` — step 4).
   용량 판단: 7개 — <근거 한 줄>
   최대 스택 깊이: 3 (상한 3 — 경계)
   머지 전략: merge commit 허용 ✅ · 브랜치 자동삭제 ✅
+  기록: 만들면 판정 원문(docs/specs/sprint-<트래커 번호>/)과 config.json 을 main 에 커밋하고 push 합니다
 
 이대로 만들까요? (드롭 / 추가 / 재범위 / 재정렬 요청 가능)
 ```
 
+The `기록:` line is what Phase 6 step 6 will actually do — read it before presenting, with
+the read-only checks of step 6 sub-steps 3 and 5 (current branch, upstream, push URLs): not the
+default branch → `기록: 현재 브랜치가 기본 브랜치가 아니라 커밋하지 않습니다 — 직접 커밋해 주세요`;
+no upstream or another push target → `… 에 커밋합니다 (push 하지 않음)`.
 When the slot is empty, the line says why instead of disappearing —
 `🧹 리팩토링 슬롯: 비움 (no-candidate) — 이번 후보들이 건드리는 hotspot 이 없습니다`.
 The `안전망:` line appears only when the draft carries a Safety net (one line: file · the first
@@ -792,6 +806,108 @@ projection of each member.
 
 ⚠ **Also set `config.sprint.board.last_projected`** to now. `sprint board` and `daily` show it.
 
+6. **Record the plan in git** — after step 5, so `last_projected` is in it. Phase 5 told the
+   human this commit and push would happen; Phase 6 only runs after their approval.
+   ⚠ **Not on `run.md`'s ad-hoc path** (its Phase 1 step 2 runs this Phase 6): there was no
+   Phase 2, and `run` leaves the human's checkout alone — skip this step there, and when step 5
+   wrote `last_projected`, say once that `config.json` is left uncommitted.
+   Each command its own Bash call. Any check below that stops → **commit nothing**, say why, and
+   print the retry line at the end of this step.
+   **The record** is: the verdict files **this run's** Phase 2 RESULT lines named in
+   `docs/specs/sprint-draft/` — `po.md`, `deps.md`, and `deps-slot.md` only when this run
+   re-spawned — plus `.claude/guild/config.json`. Never the directory: anything else in it
+   (a file a sub-agent or a leader left there) is not this sprint's record.
+   1. **What is there to record?** `git status --porcelain -uall -- .claude/guild/config.json docs/specs/sprint-draft/`.
+      Keep only the record's paths from what it prints — plus any ` D` line for one of the three
+      fixed names under `sprint-draft/`: Phase 2's `rm -f` deleted a draft that had been committed,
+      and that deletion goes into the record too. None → skip the rest of this step silently.
+   2. **Name the files after the sprint — first, before any check can stop**, so a record a later
+      check leaves uncommitted is not where the next `sprint plan` overwrites it. One
+      `mkdir -p docs/specs/sprint-<tracker>`, then pick **one suffix for the whole run**: none
+      when no target name exists, else the first `-<N>` (2, 3, …) at which none of this run's
+      names exists (`ls` each; the add-these-issues path of Phase 0 step 4 records into a sprint
+      that already has a record) — so `po-2.md`, `deps-2.md` and `deps-slot-2.md` read as one
+      run. Then per file `mv docs/specs/sprint-draft/<name> docs/specs/sprint-<tracker>/<stem><suffix>.md`.
+      `mkdir`, `mv` (and Phase 2's `rm`) are not on the template's allow list, so each asks —
+      expected in an attended step. Denied → stop, and say which files are still in `sprint-draft/`.
+      A source that was already committed — a dry-run's draft swept into one of the human's own
+      commits (`git ls-files --error-unmatch docs/specs/sprint-draft/<name>` succeeds) — leaves a
+      deletion behind: add that source path to the record too, so this commit carries the
+      deletion instead of leaving it unstaged in the human's tree.
+   3. **On the default branch?** `git branch --show-current` must equal the default branch
+      (Phase 2's `DEFAULT BRANCH`; when that was `unavailable` or never resolved — the refactor
+      slot was off — `gh repo view <owner>/<repo>
+      --json defaultBranchRef --jq .defaultBranchRef.name` — the repo is positional, there is no
+      `--repo` flag). A feature branch, or empty output (detached HEAD) → stop: a sprint record
+      committed onto a feature branch ships inside that branch's PR.
+   4. **Nothing else staged?** `git diff --cached --name-only` must print nothing. Anything →
+      stop: those are the human's. With paths after `--`, git itself commits only those paths,
+      but Guild's PreToolUse commit gate scans the whole index — it would judge (and may refuse)
+      this commit by files it does not contain.
+   5. **Where does it go, and is the branch level?**
+      `git config branch.<branch>.remote` and `git config branch.<branch>.merge` (e.g. `origin`,
+      `refs/heads/main`). Either empty → no upstream: commit, and skip sub-step 8. Otherwise:
+      - `git config branch.<branch>.pushRemote` and `git config remote.pushDefault` must both print
+        nothing, and `git remote get-url <remote>` and `git remote get-url --push <remote>` must both
+        name `<owner>/<repo>` (Phase 0 step 3; `pushurl` can point the push elsewhere) —
+        else the human pushes elsewhere (a fork) or this is not the tracker's repo: commit, and
+        skip sub-step 8 ("push 하지 않았습니다 — push 대상이 이 저장소의 upstream 이 아닙니다").
+      - `git fetch <remote>` — it fails → stop: a stale `@{u}` cannot prove the branch is level.
+      - `git rev-list --count HEAD..@{u}` must print `0` (it fails — the upstream branch is gone
+        or not fetched → stop). Behind → stop: the push would be
+        rejected and leave the branch diverged; the human pulls first.
+      - `git rev-list --count @{u}..HEAD` — `0` → go on. Not `0` → the branch already has the
+        human's unpushed commits, usually `retro`'s evolve commit (evolve commits on this branch
+        and deliberately never pushes). `git log --oneline @{u}..HEAD` and ask: (a) push them
+        together with the record, (b) commit the record but push nothing, (c) commit nothing.
+        An unanswered or ambiguous reply is (b). (a) → go on to sub-step 6.
+   6. **Is `config.json` only Guild's?** `git diff HEAD -- .claude/guild/config.json` — against
+      `HEAD`, not the index, because the commit takes the working-tree file. Guild's own lines:
+      the whole `sprint.board` block (`sprint board` setup writes it, and its status writes
+      `column_by_verified`; step 5 writes `last_projected`) and `sprint.capacity` /
+      `sprint.history` (`retro` Phase 4 writes them; the human may not have committed them yet).
+      A hand edit inside `sprint.board` (a column rename the board step tells the human to make)
+      is committed without asking — it is still the board's config.
+      Any other changed line is the human's edit: ask — (a) commit it together, (b) leave
+      `config.json` out, (c) commit nothing. An unanswered or ambiguous reply is (c). After (b),
+      if nothing is left in the record, stop.
+   7. **Commit — only the record's paths, never an empty list.**
+      `git add -- <record paths>`, then `git commit -m "<message>" -- <record paths>`, each with
+      an explicit `timeout` (600000) — the repo's hooks run in full (`_bash_rules.md`
+      Long-running).
+      ⚠ **Both commands need at least one path after `--`.** `git commit -m <m> --` with nothing
+      after it exits 0 and commits the whole index. Never `git add .`, never `-a`. Message, in
+      `config.language`: `docs(guild): 스프린트 #<tracker> 구성 판정 원문을 남긴다`, or
+      `docs(guild): 스프린트 #<tracker> 구성 판정 원문과 Guild 설정을 남긴다` when `config.json`
+      is in the record (`… Guild 설정을 남긴다` alone when it is the only path).
+      Either command fails (a pre-commit refusal, an ignored path) → `git restore --staged --
+      <path>` for each record path, one call each (one call for the list errors on the first
+      unmatched path and unstages nothing), so nothing of ours stays staged for the human's
+      next commit; report the reason and stop. **Never `--no-verify`.**
+   8. **Push to the upstream, by name** — skipped after sub-step 5 said so.
+      `git push <remote> HEAD:<merge>` with sub-step 5's two values and an explicit `timeout`
+      (600000) — not a bare `git push`, whose target depends on `push.default`. It pushes the
+      record's commit, plus the commits the human chose with sub-step 5 (a).
+      Fails for any reason (a protected default branch that requires PRs, a race, the network, the
+      timeout) → first `git ls-remote <remote> <merge>`: its hash equals our commit → the push
+      landed after all; report `pushed` and stop here. It cannot be read → leave the commit and
+      say so. Otherwise take **our** commit back so the default branch is not left with an
+      unpublished commit the human did not make: `git rev-parse HEAD` must equal the commit just
+      made (anything else → leave it and say so), then `git reset --soft HEAD~1` — local and unpublished, so no
+      published history is rewritten (INV3) — and `git restore --staged -- <path>` per record
+      path. The files stay in the working tree as they are (under `sprint-<tracker>`). Report
+      the stderr line and *"push 가 실패해 커밋을 되돌렸습니다 — 파일은 그대로 있습니다. 보호
+      브랜치라면 PR 로 올려 주세요"*. **Never `--force`, never pull or rebase on the human's
+      behalf.**
+   **Retry by hand** — this step does not re-run by itself: a second `plan --create` meets
+   Phase 0 step 4's open sprint and only records again if the human adds issues. Whenever it
+   stopped, say where the files are now and print the commands for the record as it stands
+   (without `config.json` after sub-step 6 (b)): `git add -- <record paths>` ·
+   `git commit -m "<message>" -- <record paths>` · `git push <remote> HEAD:<merge>` (or the PR
+   their branch rules require). Stopped at sub-step 3 → put `git switch <default branch>` first,
+   and name `<remote>`/`<merge>` as that branch's (`git config branch.<default>.remote`/`.merge`) —
+   run as printed on the feature branch, they would commit there.
+
 Body template:
 
 ```markdown
@@ -839,7 +955,9 @@ gh issue list --state open --limit 200 --search '"guild:sprint:plan" in:body' --
 
 ## Return
 
-`OK: sprint #<n> created with <N> members` · `OK: proposed <N> members (dry-run)` ·
+`OK: sprint #<n> created with <N> members` (+ ` · plan recorded <sha> pushed` |
+` · plan recorded <sha> local` | ` · plan not recorded (<reason>)` from step 6; nothing when
+there was nothing to record) · `OK: proposed <N> members (dry-run)` ·
 `OK: unattended — sprint proposal requires a human` · `NEEDS_HUMAN: <one-line>` · `FAIL: <reason>`
 
 On creation, say what to do next: *"`/gld sprint run`으로 무인 실행하세요. 상태는 `/gld sprint daily`."*
@@ -856,4 +974,10 @@ On creation, say what to do next: *"`/gld sprint run`으로 무인 실행하세�
 - **The refactor slot is reserved, never forced.** It passes the size gate every member passes and a stricter readiness gate (all three `clear`), shares the capacity (a filled slot takes one seat; a seat it gives back is refilled), never costs a feature member its place in the stack, must prepare at least one selected member, and an empty slot is recorded with its reason token.
 - **Members get no new `guild:*` label** (`_sprint_dag.md` Section A).
 - **The member table is written once.** After creation it is immutable and guarded by `plan-hash`; changing membership means running `sprint plan` again.
+- **The plan commit holds this run's verdict files and `config.json` — nothing else** (bar the
+  deletion of a committed `sprint-draft/` source it moved). At least
+  one path after `--` on `git commit`, default branch only, nothing else staged, not behind the
+  upstream, the human's own unpushed commits pushed only on their word, push by name, a failed
+  push taken back with `--soft`; never `git add .`, `-a`, `--no-verify`, `--force` or a pull
+  (step 6). Not on `run`'s ad-hoc path.
 - All Bash per `_bash_rules.md`; every issue body via temp file + `--body-file`.

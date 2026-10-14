@@ -58,7 +58,7 @@ Develop (spine: analyze → design → execute → test → qa)
   /gld resume <issue>     Auto-detect stage and continue
   /gld status <issue>     Show current progress
   /gld batch [issues]     Run many Issues unattended to guild:done (PR open), waits out a rate limit whose reset is within 4h; leader stands in at gates, human reviews PRs after
-  /gld sprint plan        Choose this sprint's issues, order them by dependency, open the tracking Issue (dry-run; --create to commit)
+  /gld sprint plan        Choose this sprint's issues, order them by dependency, open the tracking Issue, then commit + push the PO/tech-lead verdicts (dry-run; --create to create)
   /gld sprint run         Develop the members unattended to PRs — dependency-ordered, PR-stacked, one git worktree per issue. A rate limit whose reset is within 4h is waited out; a longer one blocks that member and the re-run picks it up. No args = resume the active sprint. --readiness shows the preflight
   /gld sprint daily       Status: what to merge and in what order, what's waiting on you, what broke (read-only; also where a bare `/gld sprint` goes)
   /gld sprint sync        After a merge: on a squash-only repo merge the default branch into the stacked PRs above it, verify, push, ready them; with a board, move merged members' cards to Done (--check = report only)

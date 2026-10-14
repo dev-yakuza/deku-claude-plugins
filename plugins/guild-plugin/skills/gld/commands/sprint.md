@@ -20,7 +20,7 @@ as **that file's** `$1, $2, …` (shift by one).
 
 | `$1` | Action |
 |---|---|
-| `plan` | `commands/sprint/plan.md` — choose this sprint's issues, order them, create the tracking Issue |
+| `plan` | `commands/sprint/plan.md` — choose this sprint's issues, order them, create the tracking Issue, and commit + push the PO/tech-lead verdicts (`docs/specs/sprint-<tracker>/`) with `config.json` |
 | `run` | `commands/sprint/run.md` — develop the members unattended to PRs |
 | `daily` | `commands/sprint/daily.md` — read-only status; merge order; what is stuck |
 | `sync` | `commands/sprint/sync.md` — after a merge: on a squash/rebase-only repo, bring the stacked PRs above it level with the default branch (`_sprint_dag.md` Section G); with a board, move the merged members' cards to `Done` (any merge strategy) |

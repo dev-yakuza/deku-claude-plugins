@@ -76,6 +76,7 @@ member**; see Phase 0 and Phase 3 step 2c.
 | A review path exists | recent merged PRs carry at least one review | warn |
 | Install command resolvable | `config.commands` scan | warn |
 | **Not already running** | Phase 1 step 3 | **block** |
+| Plan record committed | `git status --porcelain -uall -- docs/specs/` — any line under `docs/specs/sprint-<tracker number>/` (`-uall`: without it a never-committed `docs/specs/` collapses to one `?? docs/specs/` line). `sprint-draft/` is an uncreated proposal and a pre-0.95 `sprint-<date>/` is not this — neither counts | warn, once — *"plan 기록이 커밋되지 않았습니다: <paths> — 커밋해 두지 않으면 잊기 쉽습니다"*. Not a block: no worktree reads them (`sprint plan` Phase 6 step 6 commits them, or says why it did not) |
 
 **Why only the test row blocks on verification.** Guild judges completion by the raw output of
 a test runner, refusing self-report (`_handoff.md` Section E). With no way to *run* tests that

@@ -822,6 +822,97 @@ else
   bad "sync.md: 보드 단계의 안전 장치" "OK" "$SB"
 fi
 
+# 10f. sprint plan 이 PO·tech-lead 판정 원문과 config.json 을 커밋·push 한다 (0.95.0).
+#     잊고 run 하던 미커밋 파일을 없애되 — 사람의 다른 변경을 섞거나, 기능 브랜치에 올리거나,
+#     사람이 push 하지 않은 커밋을 함께 내보내거나, 거부된 push 로 기본 브랜치를 갈라 두면 안 된다.
+PLANMD="$GLD/commands/sprint/plan.md"
+lacksfx "plan.md: 정의되지 않은 <slug> 가 남아 있지 않다" "$PLANMD" "sprint-<slug>"
+hasfx "plan.md: PO 산출물은 고정된 초안 디렉터리에 쓴다" "$PLANMD" 'docs/specs/sprint-draft/po.md'
+hasfx "plan.md: tech-lead 산출물은 고정된 초안 디렉터리에 쓴다" "$PLANMD" 'docs/specs/sprint-draft/deps.md'
+hasfx "run.md: 미커밋 plan 기록을 경고한다 (-uall)" "$RUNMD2" "git status --porcelain -uall -- docs/specs/"
+cat > "$WORK3/plancommit.py" <<'PLANPY'
+import re, sys
+s = open(sys.argv[1], encoding="utf-8").read()
+errs = []
+a = s.find("6. **Record the plan in git**"); b = s.find("Body template:")
+five = s.find("5. **Project onto the board**")
+if a < 0 or b < a or not (0 <= five < a):
+    print("step 6 missing, or not after step 5 and before the body template"); sys.exit(0)
+st = s[a:b]
+subs = {}
+for m in re.finditer(r"^   (\d)\. \*\*(.*?)\*\*", st, re.M):
+    subs[int(m.group(1))] = m.start()
+if sorted(subs) != list(range(1, 9)):
+    print("step 6 must have sub-steps 1..8, got %r" % sorted(subs)); sys.exit(0)
+def sub(n):
+    return st[subs[n]:subs[n + 1]] if n + 1 in subs else st[subs[n]:st.find("**Retry by hand**")]
+need = {
+    1: ["git status --porcelain -uall -- .claude/guild/config.json docs/specs/sprint-draft/`.", "skip the rest"],
+    2: ["mkdir -p docs/specs/sprint-<tracker>", "mv docs/specs/sprint-draft/<name> docs/specs/sprint-<tracker>/<stem><suffix>.md",
+        "**one suffix for the whole run**", "git ls-files --error-unmatch", "Denied → stop"],
+    3: ["git branch --show-current", "must equal the default branch", "→ stop"],
+    4: ["git diff --cached --name-only", "Anything →\n      stop"],
+    5: ["git config branch.<branch>.remote", "git config branch.<branch>.merge",
+        "git config branch.<branch>.pushRemote", "git remote get-url <remote>",
+        "`git fetch <remote>` — it fails → stop", "or not fetched → stop). Behind → stop",
+        "`git config remote.pushDefault` must both print\n        nothing",
+        "git remote get-url --push <remote>", "git rev-list --count @{u}..HEAD",
+        "(a) push them\n        together with the record, (b) commit the record but push nothing, (c) commit nothing",
+        "An unanswered or ambiguous reply is (b)"],
+    6: ["git diff HEAD -- .claude/guild/config.json", "unanswered or ambiguous reply is (c)",
+        "if nothing is left in the record, stop"],
+    7: ["git add -- <record paths>", 'git commit -m "<message>" -- <record paths>',
+        "at least one path after `--`", "git restore --staged --", "one call each", "timeout",
+        "**Never `--no-verify`.**"],
+    8: ["git push <remote> HEAD:<merge>", "timeout", "git ls-remote <remote> <merge>",
+        "must equal the commit just\n      made", "git rev-parse HEAD", "git reset --soft HEAD~1",
+        "git restore --staged -- <path>", "**Never `--force`, never pull or rebase"],
+}
+for n, items in need.items():
+    body = sub(n)
+    for x in items:
+        if x not in body:
+            errs.append("sub-step %d lacks: %s" % (n, x.replace("\n", "\\n")))
+if "Not on `run.md`'s ad-hoc path" not in st[:subs[1]]:
+    errs.append("step 6 does not exclude run.md's ad-hoc path")
+if "**Retry by hand**" not in st:
+    errs.append("no retry line")
+# a forbidden spelling may appear only right after "never"/"Never" (with an optional backtick)
+for bad in (r"git add \.", r"git add -A", r"--all\b", r"--no-verify", r"--force", r"(?<![\w-])-a(?:m)?\b",
+            r"git reset --(?:hard|mixed|merge|keep)", r"git stash", r"git push`", r"git pull",
+            r"git diff -- \.claude", r"Behind → (?!stop)", r"--amend", r"git reset (?!--soft)",
+            r"git push (?!<remote> HEAD:<merge>)"):
+    for m in re.finditer(bad, st):
+        pre = st[max(0, m.start() - 9):m.start()]
+        if not re.search(r"[Nn]ever `?$", pre) and not re.search(r"bare `$", pre):
+            errs.append("unnegated %s in step 6: …%s" % (bad, st[max(0, m.start() - 30):m.end() + 10].replace("\n", " ")))
+# the sub-agents' prompts themselves must name the draft paths, and Phase 2 clears them first
+po = [l for l in s.splitlines() if "Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list" in l]
+tl = [l for l in s.splitlines() if "Adopt the persona in `.claude/agents/tech-lead.md`. From the same CANDIDATES" in l]
+if len(po) != 1 or "`docs/specs/sprint-draft/po.md`" not in po[0]:
+    errs.append("the PO prompt does not write docs/specs/sprint-draft/po.md")
+if len(tl) != 1 or "`docs/specs/sprint-draft/deps.md`" not in tl[0]:
+    errs.append("the tech-lead prompt does not write docs/specs/sprint-draft/deps.md")
+if "\n  기록: 만들면 판정 원문(docs/specs/sprint-<트래커 번호>/)과 config.json 을" not in s:
+    errs.append("Phase 5 does not disclose the commit and push")
+if "`rm -f docs/specs/sprint-draft/po.md docs/specs/sprint-draft/deps.md docs/specs/sprint-draft/deps-slot.md`" not in s:
+    errs.append("Phase 2 does not clear the last run's verdicts")
+hr = s[s.find("## Hard rules"):]
+if "**The plan commit holds this run's verdict files and `config.json` — nothing else**" not in hr:
+    errs.append("Hard rule for the plan commit missing")
+ret = s[s.find("## Return"):s.find("## Hard rules")]
+for t in ("plan recorded <sha> pushed", "plan recorded <sha> local", "plan not recorded (<reason>)"):
+    if t not in ret:
+        errs.append("Return lacks " + t)
+print("; ".join(errs) or "OK")
+PLANPY
+PC="$("$PY" "$WORK3/plancommit.py" "$PLANMD")"
+if [ "$PC" = "OK" ]; then
+  ok "plan.md: 기록 커밋은 이름 붙인 경로만, 기본 브랜치·빈 인덱스·원격과 같을 때만, 거부되면 되돌린다"
+else
+  bad "plan.md: plan 기록 커밋의 안전 장치" "OK" "$PC"
+fi
+
 # 11. run.md — 보드 값은 렌더 토큰이 아니라 **데이터 파일**이다. 이 클래스가 세 번 나왔다:
 #     소스 보간(실행됨) → 인용 heredoc(개행이 탈출) → 데이터 파일.
 lacksfx "template: 보드 렌더 토큰이 남아 있지 않다" "$TPL" "<BOARD_NUMBER>"
