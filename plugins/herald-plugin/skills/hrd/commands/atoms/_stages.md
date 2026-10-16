@@ -15,7 +15,10 @@ Every stage follows the same frame:
 
 ## brief — content-strategist (+ search-discovery if enabled)
 
-- Before spawning: `HRD begin --topic <id>`.
+- Before spawning: `HRD begin --topic <id>`. Refused with `slug in progress: <id>` (translation
+  repos: another topic is in flight on a refresh's slug) → hold `cannibalization` with the note
+  `tooling: slug in progress: <id>` (attended: `HRD state` + commit + push; unattended: `HRD
+  result --status held:cannibalization`).
 - **Read list**: the topic entry (`HRD topics show --topic <id>`; its `direction` file, if set, is
   a human's change to carry — the strategist plans for it and the writer gets it too),
   `docs/editorial/charter.md`,

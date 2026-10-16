@@ -366,6 +366,8 @@ def _translation_loopback(root, cfg, a, st, ver, langs):
 
     if a.cause == "translation" and store.research_suspects(ver):
         raise HeraldError("verify.json lists research_suspects — `HRD loopback --cause research` first")
+    if a.human:
+        attended_only("`loopback --human --lang`")  # uncounted: only a human may ask for it
     reserve = (not a.human and store._int(st.get("loopbacks")) >= store.LOOP_CAP and not st.get("accuracy_reserve")
                and store.accuracy_gap(ver))
     new, stagnant = translation.loopback(root, cfg, st, langs, ver, human=a.human)

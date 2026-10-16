@@ -1251,10 +1251,13 @@ def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
         # bundle; without a line here, the committed record at trust grade (01-multilingual.md §5)
         if os.environ.get("HRD_UNATTENDED") == "1":
             raise HeraldError("refusing: withdraw-lang records need a human (attended only)")
+        if not rev and bundle_hash(root, cfg, st["slug"]) != bundle_hash(root, cfg, st["slug"], rev="HEAD"):
+            raise HeraldError("refusing: the bundle has uncommitted changes — the record describes HEAD")
         problem = withdraw_lang_proof(root, cfg, tid, st, rev or "HEAD")
         if problem:
             raise HeraldError("refusing: %s" % problem)
-        cur = bundle_hash(root, cfg, st["slug"], rev=rev or "HEAD")
+        rev = rev or "HEAD"  # hash and file list below both from the committed tree
+        cur = bundle_hash(root, cfg, st["slug"], rev=rev)
     elif kind == "trust":
         # Only for "no ledger line on this machine", attended, and only for the exact body the
         # committed state.json says was verified (plan §3.2 "원장 기록이 없을 때").
@@ -1272,6 +1275,9 @@ def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
     if kind == "push":
         sha = pushed_head(root, sha)
     files = bundle_files(root, cfg, st["slug"], rev=rev)
+    from .hashing import digest_files
+    if cfg.translations() and digest_files(files) != cur:
+        raise HeraldError("refusing: the file list and the hash describe different trees")
     rec = {"at": now_iso(), "topic_id": tid, "slug": st["slug"], "verified_hash": cur,
            "sha": sha, "kind": kind}
     if cfg.translations():  # 0.8.0 lines carry neither: no translations (L15)
@@ -1289,20 +1295,25 @@ def withdraw_lang_proof(root, cfg, tid, st, rev):
     led = ledger_latest(root, tid)
     if led is not None and not led.get("files"):
         return "the ledger line predates 0.9.0 (no file list) — re-verify instead"
-    basis = (led or {}).get("files") or st.get("verified_files") or {}
+    if led is None:
+        # no line on this machine: only the committed record counts (trust grade)
+        head_st = read_json_at(root, "HEAD", work_rel(tid, "state.json")) or {}
+        if head_st != st:
+            return "work/%s/state.json differs from HEAD — commit what `withdraw-lang` wrote first" % tid
+        basis = head_st.get("verified_files") or {}
+    else:
+        basis = led["files"]
     if not basis:
         return "no file-level record to prove against — re-verify instead"
-    if led is None and read_json_at(root, "HEAD", work_rel(tid, "state.json")) != st:
-        return "work/%s/state.json differs from HEAD — commit what `withdraw-lang` wrote first" % tid
     gone = [p for p in basis if p not in cur]
     roles = {p: (basis[p] or {}).get("role") for p in gone}
     if led is None and not gone:
         # the committed record already excludes the language (applied on another machine)
         if cur == {p: v["blob"] for p, v in basis.items()} and st.get("withdrawn_langs"):
             return None
-        return "nothing was taken down"
+        return "nothing to record: the bundle already matches this machine's ledger line"
     if len(gone) != 1 or roles[gone[0]] not in (st.get("withdrawn_langs") or []):
-        return "the bundle differs from the verified one by more than one withdrawn translation (%s)" % ", ".join(gone) or "-"
+        return "the bundle differs from the verified one by more than one withdrawn translation (%s)" % (", ".join(gone) or "-")
     if any(cur.get(p) != (basis[p] or {}).get("blob") for p in basis if p not in gone) or set(cur) - set(basis):
         return "the rest of the bundle differs from what was verified — re-verify or restore"
     return None
@@ -1387,6 +1398,8 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
     translated = bool(cfg.translations())
     now = now_iso()
     prev_published = art.get("published_at")
+    if translated and tid.startswith("tr-") and prev_published:
+        art.setdefault("source_published_at", prev_published)  # the source's own time, before a tr- overwrites
     upd = {"path": cfg.body_path(slug), "url": cfg.article_url(slug), "origin": origin,
            "current_topic_id": tid, "published_at": now, "withdrawn": False}
     # 0.8.0 overwrites category/keywords; a translation repo keeps them when the topic has none

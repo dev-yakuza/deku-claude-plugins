@@ -191,7 +191,7 @@ class Config:
         if not isinstance(t, dict) or not isinstance(t.get("targets"), list) or not t["targets"]:
             return ["translations needs a non-empty `targets` list"], []
         src = self.source_lang()
-        if not LANG_RE.match(src or ""):
+        if not isinstance(src, str) or not LANG_RE.match(src):
             errors.append("translations.source %r is not a language code" % src)
         if "translator" not in (self.get("roles", "conditional") or []):
             errors.append("translations is set but the translator role is not in roles.conditional")
@@ -234,7 +234,8 @@ class Config:
                         errors.append("%s of %s and %s can produce the same path for some slugs"
                                       % (what, pats[i][0], pats[j][0]))
         if not errors:
-            inputs = [b.rstrip("/") for b in self.get("paths", "build_inputs") or []]
+            raw = self.get("paths", "build_inputs") or []
+            inputs = [b.rstrip("/") for b in (raw if isinstance(raw, list) else [raw]) if isinstance(b, str)]
             for lang in seen:
                 sample = self.body_path("a", lang)
                 if inputs and not any(sample == b or sample.startswith(b + "/") for b in inputs):

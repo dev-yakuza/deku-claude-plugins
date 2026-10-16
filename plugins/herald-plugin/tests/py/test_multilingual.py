@@ -317,6 +317,13 @@ class LedgerIntegrityTests(TranslationFlow):
         st = store.load_state(self.root, tid)
         self.assertEqual(st["translation"]["langs"], [])  # R2 M-2: a later re-verify does not look for ko
         self.commit("withdraw ko")
+        # R3 G-1: the record describes HEAD — an uncommitted source edit is refused, not recorded
+        with open(os.path.join(self.root, self.cfg.body_path(slug))) as f:
+            committed = f.read()
+        self.write(self.cfg.body_path(slug), committed + "uncommitted")
+        _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "withdraw-lang", check=False)
+        self.assertIn("uncommitted", p.stderr)
+        self.write(self.cfg.body_path(slug), committed)
         self.hrd("ledger", "record", "--topic", tid, "--kind", "withdraw-lang")
         self.assertEqual(self.row()["status"], "ok")
         # R2 M-1: a forged state cannot launder a source edit through another withdraw-lang record
@@ -455,6 +462,8 @@ class TranslationStageTests(TranslationFlow):
         self.translate(slug, "ko")
         self.translate(slug, "ja")
         self.tpass(tid)
+        _, p = self.hrd("loopback", "--topic", tid, "--human", "--lang", "ja", check=False, env={"HRD_UNATTENDED": "1"})
+        self.assertNotEqual(p.returncode, 0)  # R3 G-6: an uncounted loopback is a human's only
         out = self.hrd("loopback", "--topic", tid, "--human", "--lang", "ja")[0]
         self.assertEqual((out["loopbacks"], out["langs"], out["stage"]), (0, ["ja"], "translation"))
 
@@ -815,14 +824,11 @@ class GuardTests(MultiCase):
         self.assertEqual(self.guard("Bash", {"command": "git commit -m x"}), "ask")
         self.assertEqual(self.guard("Bash", {"command": "git commit -m x"}, {"HRD_UNATTENDED": "1"}), "deny")
         self.assertEqual(self.guard("Write", {"file_path": os.path.join(self.root, "notes.md")}), "ask")
-        self.assertEqual(self.guard("Bash", {"command": "ls"}), "allow")
-        self.assertEqual(self.guard("Bash", {"command": "git status"}), "allow")
-        # R1 MN-10: any other Bash needs a human — the guard computes no path from a broken config
-        self.assertEqual(self.guard("Bash", {"command": "cp a.md src/content/blog/ko/x.md"}), "ask")
-        self.assertEqual(self.guard("Bash", {"command": "git cherry-pick abc"}), "ask")
-        self.assertEqual(self.guard("Bash", {"command": "cat a > b"}), "ask")
-        self.assertEqual(self.guard("Bash", {"command": "find . -delete"}), "ask")
-        self.assertEqual(self.guard("Bash", {"command": "git branch -M x"}), "ask")
+        # R3 G-2: every shell command needs a human while config is broken — no allow-list to slip past
+        for cmd in ("ls", "git status", "echo $(git commit -am x)", "git -c core.fsmonitor=x status",
+                    "cp a.md src/content/blog/ko/x.md"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}), "ask", cmd)
+        self.assertEqual(self.guard("Bash", {"command": "ls"}, {"HRD_UNATTENDED": "1"}), "deny")
         # R2 B-1: repairing config.json never skips the protected-key ask
         cfgp = os.path.join(self.root, ".claude/herald/config.json")
         risky = dict(data, autonomy={"publish": "auto"})

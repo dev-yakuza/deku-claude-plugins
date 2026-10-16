@@ -663,43 +663,23 @@ def closed_rule(root, cfg, tool, ti):
     """A malformed `translations` block: the bundle paths cannot be trusted, so the guard does
     not compute them — every git write and every edit except config.json itself needs a human
     (unattended: denied) until config is fixed (01-multilingual.md §2)."""
-    errors, _ = cfg.validate()
+    try:
+        errors, _ = cfg.validate()
+    except Exception as e:  # noqa: BLE001 — a validator crash is an invalid config, closed
+        errors = ["validation failed: %s" % e]
     if not errors:
         return False
     why = "config.json translations is invalid (%s) — fix it first" % "; ".join(errors)[:300]
     if tool == "Bash":
-        if not _read_only(ti.get("command", "")):
-            protect(why)
+        # no allow-list: every shell command needs a human while config is broken (rare, and an
+        # allow-list of "reads" kept leaking through substitutions, wrappers and git options)
+        protect(why)
     elif tool in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
         if rel(root, ti.get("file_path") or ti.get("notebook_path") or "") != CONFIG:
             protect(why)
         elif config_change_protected(root, ti, tool):
             # fixing config never skips the protected-key rule (INV1): the same ask as ever
             protect("changing protected config keys (%s)." % ", ".join(PROTECTED_CONFIG_KEYS))
-    return True
-
-
-_READ_ONLY = {"ls", "cat", "head", "tail", "grep", "rg", "wc", "pwd", "echo", "printenv", "stat", "jq"}
-_READ_ONLY_GIT = {"status", "diff", "log", "show", "rev-parse", "ls-files", "ls-tree", "fetch", "cat-file"}
-
-
-def _read_only(cmd):
-    """Every segment is a plain read (no redirection): the only Bash a broken config lets through."""
-    if re.search(r"[<>]", cmd):
-        return False
-    for seg in segments(cmd):
-        argv = normalize(seg)
-        if not argv:
-            continue
-        if argv[0] == "git" and len(argv) > 1 and argv[1] in _READ_ONLY_GIT \
-                and not any(x.startswith("--output") or x == "-o" for x in argv):
-            continue
-        if argv[:2] == ["git", "branch"] and all(x in ("--list", "-a", "-r", "--show-current", "-v") or
-                                                  not x.startswith("-") and argv.index(x) > 2 and "--list" in argv
-                                                  for x in argv[2:]):
-            continue
-        if argv[0] not in _READ_ONLY:
-            return False
     return True
 
 
