@@ -22,7 +22,7 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.9.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.10.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -102,7 +102,7 @@ def cmd_topics(a):
                 t["languages"] = [str(x) for x in item["languages"]]
             if item.get("direction"):  # a saved human change to carry (refresh --direction)
                 t["direction"] = str(item["direction"])
-            for k in ("translate_of", "adopt"):  # tr- topics (01-multilingual.md §7)
+            for k in ("translate_of", "adopt", "follows", "refresh_decision"):  # tr- topics, refresh decisions
                 if item.get(k):
                     t[k] = item[k]
             store.set_topic_state(t, "queued", note="added")
@@ -145,7 +145,8 @@ def derived_status(root, cfg):
             d = "in-progress"
         else:
             d = stored
-        out.append({"id": tid, "title": t.get("title"), "stored": stored, "reason": t.get("reason"),
+        note = ((t.get("history") or [{}])[-1] or {}).get("note")
+        out.append({"id": tid, "title": t.get("title"), "stored": stored, "reason": t.get("reason"), "note": note,
                     "derived": d, "open_prs": [p["number"] for p in open_],
                     "merged_prs": [p["number"] for p in merged], "branches": branches})
     return out
@@ -167,7 +168,13 @@ def cmd_status(a):
         evolve = store.evolve_readiness(root, cfg)
     except Exception as e:  # advisory only — never let a bad signals file break status
         evolve = {"tier": "none", "error": str(e)}
-    emit({"topics": derived_status(root, cfg), "lock": lock.status(root), "evolve": evolve})
+    from hrdlib import refresh
+    try:  # old articles whose new article has no link from them yet (02-refresh-decision.md R9)
+        pending = refresh.supersede_pending(root, cfg, store.load_published(root))
+    except Exception as e:  # noqa: BLE001 — advisory
+        pending = [{"error": str(e)}]
+    emit({"topics": derived_status(root, cfg), "lock": lock.status(root), "evolve": evolve,
+          "supersede_pending": pending})
 
 
 # --- work lifecycle -----------------------------------------------------------------------------
@@ -228,6 +235,15 @@ def cmd_branch(a):
                           "articles with other slugs cannot be refreshed" % e)
     if "--" in a.slug:
         raise HeraldError("slug must not contain `--`")
+    try:
+        topic = store.get_topic(store.load_topics(root), a.topic)
+    except HeraldError:
+        topic = {}
+    # slug rules (02-refresh-decision.md R11): a refresh keeps its article's slug, a later
+    # translation its source's — on every path, resume included
+    fixed = topic.get("refresh_of") or topic.get("translate_of")
+    if fixed and a.slug != fixed:
+        raise HeraldError("slug mismatch: %s works on %s — call HRD branch with --slug %s" % (a.topic, fixed, fixed))
     name = store.branch_name(a.topic, a.slug)
     if not os.path.exists(store.state_path(root, a.topic)) and git_ok(root, "rev-parse", "--verify", "-q", "refs/heads/" + name):
         # the work (and its state.json) lives on the branch: a preserved hold, a retry (R4 MJ-1)
@@ -241,6 +257,10 @@ def cmd_branch(a):
     if busy:  # L16: one topic in flight per slug in a translation repo
         raise HeraldError("slug in progress: %s — another topic is working on %s; hold this one cannibalization "
                           "with the note `tooling: slug in progress: %s`" % (busy[0], a.slug, busy[0]))
+    if not fixed and not git_ok(root, "rev-parse", "--verify", "-q", "refs/heads/" + name):
+        used = _slug_in_use(root, cfg, a.slug)
+        if used:  # a new article never takes a slug something lives at (R11)
+            raise HeraldError("slug used: %s (%s) — ask the strategist for another slug" % (a.slug, used))
     st = store.load_state(root, a.topic)
     st["slug"] = a.slug
     store.save_state(root, a.topic, st)
@@ -251,6 +271,52 @@ def cmd_branch(a):
     else:
         git(root, "switch", "-q", "-c", name, "origin/%s" % cfg.base)
     emit({"branch": name})
+
+
+def _slug_in_use(root, cfg, slug):
+    """Why a new article may not take `slug`, or None: a current Herald article (published or
+    merged-unrecorded), an external article not withdrawn, or any file of that slug's bundle on
+    origin/<base>. A withdrawn slug and a moved-away old slug stay reusable (00-plan §3.2.1)."""
+    try:
+        if slug in ghstate.herald_set(root, cfg):
+            return "a Herald article"
+    except Exception as e:  # noqa: BLE001 — gh down: refuse rather than guess
+        raise HeraldError("gh unavailable (%s) — hold cannibalization with `tooling: gh unavailable`" % e)
+    art = store.find_article(store.load_published(root), slug)
+    if art and art.get("origin") != "herald" and not art.get("withdrawn"):
+        return "an external article"
+    for p in [cfg.body_path(slug)] + list(cfg.translation_paths(slug).values()):
+        if git_ok(root, "cat-file", "-e", "origin/%s:%s" % (cfg.base, p)):
+            return "a file on %s: %s" % (cfg.base, p)
+    return None
+
+
+def cmd_refresh_decision(a):
+    """02-refresh-decision.md §2: precheck / check / decide / signal."""
+    from hrdlib import refresh
+
+    root, cfg = ctx()
+    if a.precheck:
+        out = refresh.precheck(root, cfg, a.slug, for_translation=a.for_translation)
+        emit(out)
+        if not out["choices"]:
+            sys.exit(1)
+    elif a.check:
+        pc = refresh.precheck(root, cfg, a.slug, for_translation=a.for_translation, clear=False)
+        rec, problems = refresh.check(root, cfg, a.slug, pc["choices"])
+        emit({"ok": not problems, "problems": problems, "recommendation": (rec or {}).get("recommendation"),
+              "choices": pc["choices"]})
+        if problems:
+            sys.exit(1)
+    elif a.decide:
+        attended_only("`refresh-decision --decide`")
+        emit(refresh.decide(root, cfg, a.slug, a.decide, source=a.source, direction=a.direction,
+                            for_translation=a.for_translation, override_reason=a.override_reason,
+                            topic=refresh.load_topic_file(a.topic_file)))
+    elif a.signal:
+        emit(refresh.signal(root, cfg, a.slug))
+    else:
+        raise HeraldError("one of --precheck, --check, --decide, --signal")
 
 
 def cmd_stage(a):
@@ -691,6 +757,9 @@ def cmd_withdraw(a):
         if p.get("mergedAt") and p["topic_id"] in tids:
             ghstate.add_label(root, p["number"], ghstate.WITHDRAWN)
     art.update({"withdrawn": True, "withdrawn_at": now_iso(), "withdrawn_topics": sorted(tids)})
+    for x in pub["articles"]:  # an old article no longer points at a withdrawn new one (R9)
+        if (x.get("superseded") or {}).get("by") == slug:
+            x.pop("superseded", None)
     data = store.load_topics(root)
     for t in data["topics"]:
         if t["id"] in tids:
@@ -715,6 +784,10 @@ def cmd_unwithdraw(a):
             ghstate.remove_label(root, p["number"], ghstate.WITHDRAWN)
     art["withdrawn"] = False
     data = store.load_topics(root)
+    from hrdlib import refresh
+    for t in data["topics"]:  # any topic of this article that followed an old one (R9)
+        if t["id"] in tids and t.get("follows"):
+            refresh.link_superseded(pub, t["follows"], art["slug"])
     for t in data["topics"]:
         if t["id"] in tids:
             store.set_topic_state(t, "unwithdrawn", note="restored; next ship re-checks and deploys")
@@ -747,6 +820,9 @@ def cmd_move(a):
     art.setdefault("moved_from", []).append({"slug": old, "moved_at": now_iso(),
                                              "moved_at_commit": git(root, "rev-parse", "HEAD").strip(),
                                              "topic_ids": sorted(tids)})
+    for x in pub["articles"]:  # an old article's link follows the new article's move (R9)
+        if (x.get("superseded") or {}).get("by") == old:
+            x["superseded"]["by"] = a.new_slug
     art["slug"] = a.new_slug
     art["path"] = cfg.body_path(a.new_slug)
     art["url"] = cfg.article_url(a.new_slug)
@@ -1027,6 +1103,14 @@ def build():
     p.set_defaults(fn=cmd_loopback)
     p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)
     p = sp.add_parser("remap"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_remap)
+    p = sp.add_parser("refresh-decision"); p.add_argument("--slug", required=True)
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--precheck", action="store_true"); g.add_argument("--check", action="store_true")
+    g.add_argument("--decide", choices=["update", "new", "none"]); g.add_argument("--signal", action="store_true")
+    p.add_argument("--source", default="recommended", choices=["recommended", "forced", "direction"])
+    p.add_argument("--direction"); p.add_argument("--for-translation", action="store_true")
+    p.add_argument("--override-reason"); p.add_argument("--topic-file")
+    p.set_defaults(fn=cmd_refresh_decision)
     p = sp.add_parser("config-check"); p.set_defaults(fn=cmd_config_check)
     p = sp.add_parser("translate"); p.add_argument("action", choices=["check", "missing"])
     p.add_argument("--slug"); p.add_argument("--lang"); p.add_argument("--adopt", action="store_true")

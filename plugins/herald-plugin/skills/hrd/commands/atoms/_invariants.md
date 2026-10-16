@@ -36,7 +36,8 @@ region between `<!-- herald:persona:start -->` and `<!-- herald:persona:end -->`
 under `.claude/agents/`, `docs/editorial/`, `config.json` is local-owned; the one exception is
 `update`'s offer to append new style-guide lines, applied only on the human's approval (a
 decline appends only a version marker comment, so the offer is not repeated) and never
-removing or rewording a line (`update.md` step 3).
+removing or rewording a line (`update.md` step 3); and its offer to create a missing
+`refresh-policy.md` from the template (a new file, on approval only).
 
 **INV5 — nothing leaves the machine un-sanitized.**
 Local growth data (signals, memory, ledger) and article drafts never go to the plugin

@@ -19,6 +19,19 @@ Every stage follows the same frame:
   repos: another topic is in flight on a refresh's slug) → hold `cannibalization` with the note
   `tooling: slug in progress: <id>` (attended: `HRD state` + commit + push; unattended: `HRD
   result --status held:cannibalization`).
+- A topic with a `direction` whose file is not on this machine (`.claude/herald/memory/directions/`
+  is local — another machine saved it) → hold `cannibalization` with `tooling: direction file
+  missing` (no branch yet: a cleaned hold; the human requeues it where the file is).
+- **Refresh topics** (`refresh_of: X` — from `/hrd refresh`, plan, or a queue another command
+  picked; design `02-refresh-decision.md` R11): the brief is a **refresh brief** — start from
+  the topic's `refresh_decision.stale` (else find what is stale), keep the URL/slug `X`, new
+  keywords; the strategist also reads X's current body. In the cannibalization check X itself
+  and any article or topic that `follows` X are not conflicts (the brief says how they differ
+  and where X links to the newer one). `HRD branch` uses `--slug X` (code refuses another).
+- **Following topics** (`follows: X` — a new article chosen instead of refreshing X): X (and
+  its aliases) is not a cannibalization conflict; the brief must state what differs from X
+  (year, edition, audience, intent). The slug must be new — `HRD branch` refuses a slug
+  something already lives at.
 - **Read list**: the topic entry (`HRD topics show --topic <id>`; its `direction` file, if set, is
   a human's change to carry — the strategist plans for it and the writer gets it too),
   `docs/editorial/charter.md`,
@@ -31,12 +44,18 @@ Every stage follows the same frame:
 - **Output**: `<w>brief.md` — search intent, target reader, primary/secondary keywords, the
   distinct angle (required — scaled-content policy), outline, CTA placement, internal links,
   and a proposed **slug** (lowercase, single hyphens, no `--`) on a line `slug: <slug>`.
-- Cannibalization conflict → hold `cannibalization`.
+- Cannibalization conflict → hold `cannibalization`; when the strategist names `refresh
+  candidate: <slug> — <reason>`, put it in the hold note (`status` shows it: continue with
+  `/hrd refresh <slug>`).
 - Approval (§C table), then `HRD branch --topic <id> --slug <slug>` (branches from
   `origin/<base>`), then `HRD stage pass --topic <id> --stage brief`. `HRD branch` refusing with
   `slug in progress: <id>` (translation repos: one topic in flight per slug) → hold
   `cannibalization` with the note `tooling: slug in progress: <id>` (no branch was made; clean the
-  work files as for any cleaned hold).
+  work files as for any cleaned hold). `slug mismatch` → call it again with the slug it names.
+  `slug used: <slug>` (a new article never takes a slug an article or a file already has) → ask
+  the strategist once for another slug (unattended too), then hold `cannibalization` with
+  `tooling: slug used: <slug>`. `gh unavailable` → hold `cannibalization` with `tooling: gh
+  unavailable`.
 
 ## research — researcher
 
@@ -73,7 +92,9 @@ Order: writer first; then the illustrator reads the draft, creates images and in
 references into the article itself; then the gate.
 
 - **Read list**: `<w>brief.md`, `<w>research.md`, the category guide, `style-guide.md`,
-  `promotion.md`, that category's exemplars (paths from `exemplars.md`).
+  `promotion.md`, that category's exemplars (paths from `exemplars.md`). A refresh topic
+  (`refresh_of`): the draft starts from the article's current body, and the topic's
+  `direction` file (a human's change) is applied.
 - **Output**: the article at `config.paths.body_pattern` for the slug, images under
   `config.paths.images/<slug>/` (illustrator), and `<w>claims-map.json`:
   `{"sentences": [{"text": "...", "claims": ["C3"]}]}` for every factual sentence the writer
@@ -343,7 +364,9 @@ the topic to verify and this stage does not run. `translation.pending` are the l
 
 ## publish
 
-1. Re-check cannibalization (anything published or PR'd since brief). Conflict → hold.
+1. Re-check cannibalization (anything published or PR'd since brief), with the brief's
+   exceptions (a refresh's own article and what follows it; a following topic's old article).
+   Conflict → hold.
 2. `--attended` (`write`/`resume`) and attended `/hrd publish`: session approval and any
    requested changes happen first (`write.md` §2) — so the approved body becomes
    `agent_final_hash`. In-session auto and unattended: skip.

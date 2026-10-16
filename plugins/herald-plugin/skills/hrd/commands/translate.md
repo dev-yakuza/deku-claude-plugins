@@ -12,7 +12,8 @@ or redoes translations.
    <t>` on every exit path); base clean; `HRD sync`.
 2. `HRD translate check --slug <slug> [--lang <l,…>] [--adopt]` — the preconditions, in code: a
    published Herald article (an external article has no research to verify a translation
-   against → suggest `/hrd refresh <slug>` and stop), its reference topic's `research.md` and
+   against → suggest `/hrd refresh <slug> --for-translation` and stop — that refresh can only
+   `update` the article, so it gains research Herald can verify a translation against), its reference topic's `research.md` and
    `claims-map.json` on base, no other topic in flight on the slug, and the bundle matching
    its verified record — or, with `--adopt`, differing only by the human translations being
    adopted. Without `--lang`: every target the article lacks (languages taken down with
@@ -62,7 +63,8 @@ base: every stop is `HRD result`.
    translation, not only the new ones. Then:
    - a gap or `research_suspects` in the **source** → hold **`source-defect`** (a cleaned hold:
      the branch and files go): the verified article itself no longer holds up. Note: "the
-     source needs `/hrd refresh <slug>` first". Unattended: `HRD result --status
+     source needs `/hrd refresh <slug>` first" (that refresh's precheck finds this hold and
+     offers only `update`, with the defect as what is stale). Unattended: `HRD result --status
      held:source-defect --note …`.
    - a gap in an existing translation outside the request → `HRD loopback --topic <id> --cause
      translation --lang <that lang>` adds it to the topic (and its PR scope) and redoes it.

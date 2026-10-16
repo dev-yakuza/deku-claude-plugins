@@ -32,6 +32,10 @@ only. Ported from Guild `update.md`.
    marker, to the section that holds the AI-prose rules (any heading or language), or as a new
    `## Not AI prose` section at the end if there is none; declined → append only the marker, so
    the offer is not repeated. Additions only; never remove or reword the repo's lines.
+   **Refresh policy** (0.10.0): no `docs/editorial/refresh-policy.md` → offer to create it from
+   `templates/editorial/refresh-policy.md.tmpl` (exceptions left empty for the human); declined
+   → `/hrd refresh` keeps using the template's default rules. A new file only, never an edit of
+   an existing one.
 4. **Settings/gitignore/labels**: re-merge `templates/settings.json.tmpl` (key union), the
    gitignore block, and create missing labels.
    **Translations** (0.9.0): never added by `update` (INV4). If config has no `translations` and

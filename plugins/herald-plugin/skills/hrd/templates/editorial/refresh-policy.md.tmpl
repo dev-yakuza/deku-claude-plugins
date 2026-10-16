@@ -1,0 +1,22 @@
+# Refresh policy — {{PROJECT_NAME}}
+
+<!-- Created by /hrd init. The content strategist applies these rules when it recommends how to
+     refresh a published article (`/hrd refresh`); a human makes the final decision. Edits ask
+     for approval (guard); `/hrd evolve` may propose changes from `refresh-override` signals. -->
+
+## Default rules
+
+1. **update** (same URL) is the default: the search intent is the same, so the existing page —
+   with its links and history — is fixed. A new article that `superseded` this one, while this
+   body has no link to it, is also a reason to update (add the link).
+2. **new** (a new article; this one stays as it is) when:
+   - (a) the top queries moved to a different intent than the article serves;
+   - (b) the point in time is the content (people search per year, edition or version);
+   - (c) fixing it would change the article's topic or target reader.
+3. **none** when there is nothing to fix: the facts still hold and a metrics drop looks seasonal
+   or competitive. Never refresh only to change a date.
+
+## Category exceptions
+
+<!-- One line per category: `<category>: <rule>` — e.g. `exam-schedule: a new article per year`. -->
+{{REFRESH_EXCEPTIONS}}

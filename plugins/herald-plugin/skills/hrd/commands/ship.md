@@ -113,7 +113,9 @@ the PR body's `## Reader notes`, `## Framings` and `## Research corrections` if 
 send back; sentences the fact-checker treated as the article's own example under a framing),
 "body differs from verified" (`HRD hash --slug <s> --rev <headRefOid>` vs `HRD ledger show` — the
 default hash is the bundle: source and translations),
-"images changed", cannibalization re-check, and `HRD scope --topic <id> --rev <headRefOid>`.
+"images changed", cannibalization re-check (with the brief's exceptions: a refresh's own
+article and what follows it; a following topic's old article — `atoms/_stages.md` § brief), and
+`HRD scope --topic <id> --rev <headRefOid>`.
 With `translations` in config also: the languages and their verify counts (`verify.json`
 `by_lang`), the line "translations were checked by the fact-checker and the gate; no editor or
 auditor read them", and `HRD premerge --topic <id> --rev refs/remotes/origin/pr-<n>` — any
@@ -234,7 +236,9 @@ publish: any failed URL leaves the article merged-unrecorded. Failures stay merg
 Summarize what was published, declined, held and left merged-unrecorded. For a `--session-auto`
 publish nobody approved, also list what was accepted unread (the `accepted` exclusions, the
 deferred MAJORs and dismissals with their reasons, the trimmed sentences, the framings) — the human sees
-them now at the latest. Then
+them now at the latest. A published topic that `follows` an older article: say that the older
+one now has `superseded` set and, while `HRD status` lists it under `supersede_pending`, how to
+link it — `/hrd refresh <old>` (`refreshable: true`), or by hand. Then
 `HRD evolve-readiness`: only when `tier` is `sufficient`, end with one line in
 `config.language` (ko example: "성장 신호가 충분히 쌓였습니다(아직 evolve가 쓰지 않은 신호 N건 · 글감 M개) —
 `/hrd evolve --dry-run`으로 제안을 확인해 보세요."), N = `signals`, M = `topics`. Otherwise (or if the

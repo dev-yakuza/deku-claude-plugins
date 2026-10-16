@@ -26,6 +26,7 @@ CRITERIA = [
     "docs/editorial/charter.md", "docs/editorial/exemplars.md", "docs/editorial/sources.md",
     "docs/editorial/style-guide.md", "docs/editorial/promotion.md",
     "docs/editorial/search-checklist.md", "docs/editorial/gate-rules.json",
+    "docs/editorial/refresh-policy.md",  # the refresh decision's rules (02-refresh-decision.md R4)
     "docs/editorial/categories/*",
 ]
 PERSONAS = [".claude/agents/editor.md", ".claude/agents/fact-checker.md", ".claude/agents/subject-expert.md"]

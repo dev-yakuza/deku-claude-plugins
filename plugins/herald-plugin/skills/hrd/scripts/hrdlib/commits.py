@@ -37,8 +37,9 @@ HARNESS_GLOBS = [
 ]
 
 COMMAND_GLOBS = {
-    "plan": [".claude/herald/topics.json"],
-    "refresh": [".claude/herald/topics.json"],
+    # refresh/plan also record the refresh decision in published.json (02-refresh-decision.md R6)
+    "plan": [".claude/herald/topics.json", ".claude/herald/published.json"],
+    "refresh": [".claude/herald/topics.json", ".claude/herald/published.json"],
     "translate": [".claude/herald/topics.json"],
     "status": [".claude/herald/topics.json", ".claude/herald/published.json", ".claude/herald/work/*/state.json"],
     "hold": [".claude/herald/topics.json"],

@@ -1594,7 +1594,8 @@ class AutoSignalTests(Flow):
         out, _ = self.hrd("version", "--against", "99.10.0")
         self.assertEqual(out["relation"], "older")
         self.assertEqual(self.hrd("version", "--against", out["version"])[0]["relation"], "equal")
-        self.assertEqual(self.hrd("version", "--against", "0.10.0")[0]["relation"], "older")  # not string order
+        # not string order: "0.9.0" sorts after "0.10.0" as text, yet the 0.10+ scripts are newer
+        self.assertEqual(self.hrd("version", "--against", "0.9.0")[0]["relation"], "newer")
         short = ".".join(out["version"].split(".")[:2]) if out["version"].endswith(".0") else out["version"]
         self.assertEqual(self.hrd("version", "--against", short)[0]["relation"], "equal")  # 0.3 == 0.3.0
         _, p = self.hrd("version", "--against", "0.3.0-rc1", check=False)

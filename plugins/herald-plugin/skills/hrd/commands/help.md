@@ -11,7 +11,7 @@ adopt central improvements
 
 **Publishing** — `next [--attended]` one more article published end to end (plans first if the queue is empty; the guard still confirms merge and deploy) · `ship [ids|PRs]` approve, re-verify, merge, deploy, confirm, record ·
 `ship --reverify <id>` · `ship --deploy-only <id …>` · `ship <PR> --session-auto [--consent]` · `review <id|slug|PR>` independent audit ·
-`refresh <slug> [--attended] [--direction <id>]` update an article · `translate <slug> [--lang l,…] [--adopt l,…]` add languages to a published article (`--missing`: every article lacking one; `--resume <id>` continue)
+`refresh <slug> [--attended] [--ship] [--direction <id>] [--force-update] [--for-translation]` bring an article up to date — the strategist recommends update (same URL), new article or nothing; you decide · `translate <slug> [--lang l,…] [--adopt l,…]` add languages to a published article (`--missing`: every article lacking one; `--resume <id>` continue)
 
 **State** — `status [--requeue|--drop|--withdraw|--withdraw-lang|--unwithdraw|--move|--release-slug|
 --mark-published|--unlock]`

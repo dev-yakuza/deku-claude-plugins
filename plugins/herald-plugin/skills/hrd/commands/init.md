@@ -29,7 +29,8 @@ Exclude `.claude/skills/**` and other local skills from every scan (D16).
    content directory; body file pattern (`{content}/{slug}.md` or nested); frontmatter keys and
    how the slug is set; categories in use; article count; image directory and how bodies
    reference images; length distribution per category; slugs outside Herald's format
-   (lowercase ASCII, single hyphens) — report them: they stay external and cannot be refreshed.
+   (lowercase ASCII, single hyphens) — report them: they stay external; they cannot be refreshed
+   at the same URL (a refresh decision may still choose a new article).
 2. **Build & deploy**: `package.json` scripts (`build`, `deploy`, `predeploy` chains) and the
    **tracked files they modify** (→ `deploy_artifacts`); CI workflows in `.github/workflows`
    that deploy on push (→ `deploy` empty, required-check advice); hosting config; build input
@@ -64,7 +65,9 @@ base URL · per-article budget (USD) · output language (default: `$1` if it is 
    `categories/<cat>.md` per category,
    sources, promotion, exemplars (P1 candidates, human-confirmed), search checklist (if
    enabled), `gate-rules.json` (frontmatter keys from P1, length ranges from the distribution,
-   extracted forbidden phrases with `"status": "draft"` — INV6).
+   extracted forbidden phrases with `"status": "draft"` — INV6), refresh policy
+   (`refresh-policy.md`: the template's default rules, plus category exceptions drafted from
+   P1 patterns — e.g. a category whose articles are per year — for the human to confirm).
 4. `.claude/agents/`: the six spine roles + enabled conditional roles from `templates/agents/`;
    fill the "Project specifics" sections in `config.language`; never touch the marker region's
    text.

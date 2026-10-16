@@ -1473,6 +1473,10 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
                     e.pop("auto_accepted", None)
         # one entry per publish (PR): the daily throttle counts these, not human_reviewed
         art["publishes"] = (art.get("publishes") or [])[-19:] + [{"at": now, "auto": bool(auto), "topic_id": tid}]
+    if t.get("follows"):  # a new article written instead of refreshing an old one (02-refresh-decision.md R9)
+        import sys
+        from .refresh import link_superseded
+        link_superseded(pub, t["follows"], slug, warn=lambda m: sys.stderr.write("hrd: warning: %s\n" % m))
     t["slug"] = slug
     set_topic_state(t, "published", note=("auto " if auto else "") + ("PR #%s" % pr if pr else origin))
     save_published(root, pub)
@@ -1507,6 +1511,7 @@ SIGNAL_KINDS = (
     "session-edit-request", "research-error",
     "stagnation",  # legacy (0.2.x): now recorded as a hold with reason stagnation
     "incomplete",  # a batch child that ended without a result (crash, timeout)
+    "refresh-override",  # a human overturned the strategist's refresh recommendation (topic_id slug:<slug>)
 )
 # listed for evolve but never counted toward the nudge: an escalation accompanies a loopback that
 # is already counted; an incomplete child is usually environment, not writing

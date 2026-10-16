@@ -10,7 +10,10 @@ PRs · local branches. Group: in progress · PR pending (→ `/hrd ship`) · mer
 holder if any and `HRD ahead` warnings. With `translations` in config, add per published Herald
 article its languages from `published.json` (`translations`, `withdrawn_langs`) and, from
 `HRD integrity --report`, any `translation_added` (a translation Herald has not verified —
-adopt with `/hrd translate <slug> --adopt <l>`) or other `causes`.
+adopt with `/hrd translate <slug> --adopt <l>`) or other `causes`. A hold whose `note` names a
+`refresh candidate: <slug>` → suggest `/hrd refresh <slug>`. From the same output,
+`supersede_pending` (old articles a newer one follows, not linked to it yet): for each, "link
+`<new>` from `<old>`" — `/hrd refresh <old>` when `refreshable`, otherwise by hand.
 
 Last, one line from the `evolve` field of the same `HRD status` output (absent with scripts
 older than 0.3.0 — `status` runs without the version gate — then omit the line) (`tier` is a machine
