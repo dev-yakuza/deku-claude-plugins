@@ -194,6 +194,9 @@ def cmd_begin(a):
             if tree_hash(root, cfg, "origin/%s" % cfg.base, st["slug"]) != \
                     (st["stages"].get("critique") or {}).get("body_hash"):
                 raise HeraldError("base-source-changed: the source on base is not the one this topic translates")
+            busy = ghstate.slug_busy(root, cfg, st["slug"], exclude=a.topic)
+            if busy:
+                raise HeraldError("slug in progress: %s — another topic is working on %s" % (busy[0], st["slug"]))
         emit({"resumed": True, "state": st})
         return
     known = topic.get("refresh_of") or topic.get("slug")
@@ -225,6 +228,12 @@ def cmd_branch(a):
                           "articles with other slugs cannot be refreshed" % e)
     if "--" in a.slug:
         raise HeraldError("slug must not contain `--`")
+    name = store.branch_name(a.topic, a.slug)
+    if not os.path.exists(store.state_path(root, a.topic)) and git_ok(root, "rev-parse", "--verify", "-q", "refs/heads/" + name):
+        # the work (and its state.json) lives on the branch: a preserved hold, a retry (R4 MJ-1)
+        git(root, "switch", "-q", name)
+        emit({"branch": name, "resumed": True})
+        return
     busy = ghstate.slug_busy(root, cfg, a.slug, exclude=a.topic)
     if busy:  # L16: one topic in flight per slug in a translation repo
         raise HeraldError("slug in progress: %s — another topic is working on %s; hold this one cannibalization "
@@ -792,7 +801,11 @@ def cmd_withdraw_lang(a):
         trial = dict(st, withdrawn_langs=sorted(set(st.get("withdrawn_langs") or []) | {lang}))
         problem = store.withdraw_lang_proof(root, cfg, ref, trial, "HEAD") if store.ledger_latest(root, ref) else None
         if problem is None and not store.ledger_latest(root, ref):
-            basis = st.get("verified_files") or {}
+            # no ledger line here: the committed record only (R4 MN-1)
+            head_st = store.read_json_at(root, "HEAD", store.work_rel(ref, "state.json")) or {}
+            if head_st != st:
+                raise HeraldError("work/%s/state.json differs from HEAD — commit or discard that edit first" % ref)
+            basis = head_st.get("verified_files") or {}
             if path not in basis:
                 problem = "%s was not part of the verified bundle" % path
             elif {p: v["blob"] for p, v in basis.items() if p != path} != {p: v["blob"] for p, v in cur.items()}:

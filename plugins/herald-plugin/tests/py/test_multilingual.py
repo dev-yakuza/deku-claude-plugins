@@ -738,6 +738,9 @@ class ReviewRound1Tests(TranslationFlow):
         out = self.hrd("begin", "--topic", tid)[0]
         self.assertEqual(out["branch"], store.branch_name(tid, slug))
         self.assertFalse(os.path.exists(store.state_path(self.root, tid)))
+        # R4 MJ-1: `HRD branch` then switches to it before reading any state
+        self.assertTrue(self.hrd("branch", "--topic", tid, "--slug", slug)[0]["resumed"])
+        self.assertEqual(store.load_state(self.root, tid)["stage"], "translation")
 
     def test_translation_loopback_needs_the_translation_stage(self):
         """R1 MN-11."""

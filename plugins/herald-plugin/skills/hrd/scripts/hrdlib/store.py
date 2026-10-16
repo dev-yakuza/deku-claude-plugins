@@ -1274,6 +1274,11 @@ def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
             raise HeraldError("refusing to record: verify.json is not clean")
     if kind == "push":
         sha = pushed_head(root, sha)
+    if kind == "withdraw-lang":
+        head = git_rev(root, "HEAD")
+        if sha and git_rev(root, sha) != head:
+            raise HeraldError("refusing: --sha must be HEAD (the commit the record describes)")
+        sha = head
     files = bundle_files(root, cfg, st["slug"], rev=rev)
     from .hashing import digest_files
     if cfg.translations() and digest_files(files) != cur:
@@ -1293,6 +1298,14 @@ def withdraw_lang_proof(root, cfg, tid, st, rev):
     `files`; no line → the committed `verified_files` (the caller is attended, like trust)."""
     cur = {p: v["blob"] for p, v in bundle_files(root, cfg, st["slug"], rev=rev).items()}
     led = ledger_latest(root, tid)
+    head_st = read_json_at(root, "HEAD", work_rel(tid, "state.json")) or {}
+    committed = {p: v["blob"] for p, v in (head_st.get("verified_files") or {}).items()}
+    if led is None and head_st == st and committed == cur and set(head_st.get("withdrawn_langs") or []) and \
+            not any((v or {}).get("role") in head_st["withdrawn_langs"] for v in (head_st.get("verified_files") or {}).values()):
+        # applied (and committed) already on another machine, and this one has no line: the
+        # committed record decides, at trust grade (design §5). With a line here the line decides —
+        # a committed state alone never outranks this machine's ledger (R2 M-1)
+        return None
     if led is not None and not led.get("files"):
         return "the ledger line predates 0.9.0 (no file list) — re-verify instead"
     if led is None:
@@ -1311,12 +1324,18 @@ def withdraw_lang_proof(root, cfg, tid, st, rev):
         # the committed record already excludes the language (applied on another machine)
         if cur == {p: v["blob"] for p, v in basis.items()} and st.get("withdrawn_langs"):
             return None
-        return "nothing to record: the bundle already matches this machine's ledger line"
+        return "the bundle differs from the committed verified_files, or no language was withdrawn — re-verify or restore"
     if len(gone) != 1 or roles[gone[0]] not in (st.get("withdrawn_langs") or []):
         return "the bundle differs from the verified one by more than one withdrawn translation (%s)" % (", ".join(gone) or "-")
     if any(cur.get(p) != (basis[p] or {}).get("blob") for p in basis if p not in gone) or set(cur) - set(basis):
         return "the rest of the bundle differs from what was verified — re-verify or restore"
     return None
+
+
+def git_rev(root, ref):
+    from .util import run
+    proc = run(["git", "rev-parse", "--verify", "%s^{commit}" % ref], cwd=root, check=False)
+    return proc.stdout.strip() if proc.returncode == 0 else None
 
 
 def pushed_head(root, sha=None):
@@ -1424,7 +1443,11 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
         if origin == "herald":
             art["human_reviewed"] = not auto
     if translated:
-        art.setdefault("first_published_at", prev_published or now)
+        if "first_published_at" not in art:
+            # the earliest publish the topics remember; unknown for pre-Herald history (R4 MN-7)
+            seen = [h.get("at") for x in data["topics"] if (x.get("slug") or x.get("refresh_of")) == slug
+                    for h in x.get("history") or [] if h.get("state") == "published" and h.get("at")]
+            art["first_published_at"] = min(seen) if seen else (None if prev_published else now)
         mine = _published_langs(root, cfg, tid, t)
         withdrawn = [l for l in art.get("withdrawn_langs") or [] if l not in mine]
         if withdrawn:

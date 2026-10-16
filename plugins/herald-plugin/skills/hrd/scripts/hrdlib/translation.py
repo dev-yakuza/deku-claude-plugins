@@ -429,7 +429,10 @@ def amend_problems(root, cfg, tid, st, run_gate):
     translation whose file or map changed since the translation stage passed (§4 table)."""
     tr = st.get("translation") or {}
     problems = []
-    if not tr.get("langs"):
+    verified = st.get("verified_files") or {}
+    translated = bool(tr.get("langs")) or any((v or {}).get("role") not in ("src", "img", None) for v in verified.values()) \
+        or bool(existing_langs(root, cfg, st["slug"]))
+    if not translated:
         return problems
     if tr.get("source_body") and file_hash(root, cfg.body_path(st["slug"])) != tr["source_body"]:
         # L18: the translations no longer render this source — never re-verified in place
@@ -437,10 +440,13 @@ def amend_problems(root, cfg, tid, st, run_gate):
                 "requeue with the direction file"]
     images_changed = worktree_hash(root, cfg, st["slug"]) != tr.get("source_hash")
     from .hashing import _worktree_entries
-    verified = st.get("verified_files") or {}
     others = []  # a tr- reference topic also answers for translations it did not make (R2 M-3)
     for lang, path in cfg.translation_paths(st["slug"]).items():
         if lang in (tr.get("langs") or []) or not os.path.isfile(os.path.join(root, path)):
+            continue
+        if path not in verified:
+            # never verified with this topic: a human's new file is adopted, not re-verified (R4 MN-4)
+            problems.append("%s is not part of the verified bundle — adopt it with /hrd translate --adopt" % lang)
             continue
         blob = dict(_worktree_entries(root, [path])).get(path)
         if blob != (verified.get(path) or {}).get("blob"):
