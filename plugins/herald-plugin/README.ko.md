@@ -49,7 +49,7 @@ Search Console(선택): `pip install google-auth requests`.
 
 **설정** `init` · `config` · `update` — **작성** `plan` · `write` · `brief` · `research` ·
 `draft` · `critique` · `verify` · `publish` · `resume` · `batch` — **발행** `next` · `ship` · `review` ·
-`refresh` — **상태** `status`(`--requeue` `--drop` `--withdraw` `--unwithdraw` `--move`
+`refresh` · `translate` — **상태** `status`(`--requeue` `--drop` `--withdraw` `--withdraw-lang` `--unwithdraw` `--move`
 `--release-slug` `--mark-published` `--unlock`) — **성장·점검** `evolve` · `rollback` · `audit` ·
 `monitoring` · `ask` · `contribute`(미지원). 자세한 내용은 `/hrd help`.
 
@@ -67,5 +67,5 @@ Search Console(선택): `pip install google-auth requests`.
 
 ## 상태
 
-`0.8.0` — 전 흐름 구현(구현 적대적 리뷰 10라운드 + 이후 변경별 리뷰 반영). 0.3.0부터 성장 신호를 코드가 자동 기록, 0.4.0에서 외부 감사 라운드 상한, 0.5.0에서 `write` 기본을 무질문으로(`--attended`로 확인 모드)·설정 언어로 대화, 0.6.0에서 `/hrd next`(필요하면 plan → write → ship 1편)와 근거 없는 문장이 적을 때 보류 대신 삭제로 정리하는 단계 추가, 0.7.0에서 읽기 쉬움을 기준에 추가(사람이 쓴 듯한 쉬운 문장 규칙·경험 지어내기 금지, 편집자의 독자 읽기, 게이트의 가독성 힌트, 팩트체커가 "이 글의 예시"로 본 문장은 목록으로 남기고 동의 없이는 자동 발행하지 않음), 0.7.1에서 `/hrd evolve`의 항목별 승인에 검토 패널의 권장안(적용/거절과 이유) 표시, 0.8.0에서 팩트체커가 조사 자료 자체의 오류를 찾으면 writer가 아니라 researcher에게 먼저 되돌리고, 루프백 상한을 다 써도 사실 오류에는 1회를 더 남겨 문장 다듬기 때문에 사실 오류를 못 고치는 일이 없게 함 — 기존 레포는 `/hrd update` 필요, 이후 진행 중인 글의 `/hrd resume`은 base 병합을 물음(0.4.0 이전부터 진행 중이던 글은 감사 라운드를 1부터 다시 셈), 결정적 계층은 테스트로 검증(`bash plugins/herald-plugin/tests/run_tests.sh`).
+`0.9.0` — 전 흐름 구현(구현 적대적 리뷰 10라운드 + 이후 변경별 리뷰 반영). 0.3.0부터 성장 신호를 코드가 자동 기록, 0.4.0에서 외부 감사 라운드 상한, 0.5.0에서 `write` 기본을 무질문으로(`--attended`로 확인 모드)·설정 언어로 대화, 0.6.0에서 `/hrd next`(필요하면 plan → write → ship 1편)와 근거 없는 문장이 적을 때 보류 대신 삭제로 정리하는 단계 추가, 0.7.0에서 읽기 쉬움을 기준에 추가(사람이 쓴 듯한 쉬운 문장 규칙·경험 지어내기 금지, 편집자의 독자 읽기, 게이트의 가독성 힌트, 팩트체커가 "이 글의 예시"로 본 문장은 목록으로 남기고 동의 없이는 자동 발행하지 않음), 0.7.1에서 `/hrd evolve`의 항목별 승인에 검토 패널의 권장안(적용/거절과 이유) 표시, 0.8.0에서 팩트체커가 조사 자료 자체의 오류를 찾으면 writer가 아니라 researcher에게 먼저 되돌리고, 루프백 상한을 다 써도 사실 오류에는 1회를 더 남겨 문장 다듬기 때문에 사실 오류를 못 고치는 일이 없게 함, 0.9.0에서 다국어 — 원문 1편을 쓰고 config `translations`의 언어로 번역(critique 뒤 `translation` 단계, 언어마다 translator, 같은 클레임에 대응시켜 코드가 누락·추가를 확인, 팩트체커가 원문 대응까지 검증), 원문과 번역을 한 묶음으로 검증·원장·발행하고 무결성은 원인(원문·번역·이미지 변경, 번역 추가·삭제)별로 처리, 이미 발행한 글은 `/hrd translate`로 나중에 번역(`--adopt`로 사람 번역 편입, `--missing`), 언어 하나 내리기 `status --withdraw-lang`, 번역이 든 PR은 기본적으로 자동 발행 제외(`translations.auto_publish`로 허용) — `translations`가 없는 레포는 0.8.0과 같게 동작 — 기존 레포는 `/hrd update` 필요, 이후 진행 중인 글의 `/hrd resume`은 base 병합을 물음(0.4.0 이전부터 진행 중이던 글은 감사 라운드를 1부터 다시 셈), 결정적 계층은 테스트로 검증(`bash plugins/herald-plugin/tests/run_tests.sh`).
 `evolve`의 유용성과 지표 기반 제안은 실제 사용이 쌓여야 판정할 수 있습니다.

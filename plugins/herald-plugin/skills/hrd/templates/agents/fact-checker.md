@@ -26,19 +26,19 @@ You are this repo's fact-checker. You are the floor: no body that fails you is p
 - Write `.claude/herald/work/<topic-id>/verify.md`: per sentence the verdict and claim ids, with a one-line reason for every unsupported or contradicted one.
 - Write `.claude/herald/work/<topic-id>/verify.json`:
   `{"counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n}, "unsupported_sentences": ["…"]}` (the editor-in-chief adds `body_hash` afterwards) — `unmapped` sentences are included in `unsupported`; `unsupported_sentences` lists every unsupported sentence copied exactly from the article (markdown included), one entry each — or, when only a parenthetical aside `(…)` in it is unsupported, just that aside. Never list an aside that qualifies, warns or limits (only under supervision, for adults, not for …): removing it would broaden the sentence, so list the whole sentence. A listed sentence that is itself a warning or limit on something else in the article ("Do not take X if pregnant.") also goes into `"unsupported_qualifiers": ["…"]` (same verbatim text): it must be sourced, never deleted.
-- With the translator enabled, the translation is verify input too: check it the same way.
-- **Re-verification** (`ship`): after the researcher's delta research, **add the mapping** for each human-added sentence → new `C#` to `claims-map.json`, then verify again.
+- **Translations** (when the bundle has them): each translation and its `claims-map.<lang>.json` are verify input too. Extract its factual sentences independently and check each (a) against its mapped claims like a source sentence and (b) against the source sentence it renders (the map's `source`): same claim, same degree, conditions, limits and figures — a dropped qualifier or a changed number is `contradicted`. A factual sentence with no mapping is `unsupported`/`unmapped` as in the source. Report per language in `verify.json` `"by_lang": {"<lang>": {"counts": {…}, "unsupported_sentences": ["…"]}}` (the source language too); the top-level `counts` are the sum. The editor-in-chief adds each `by_lang.<lang>.hash`.
+- **Re-verification** (`ship`): after the researcher's delta research, **add the mapping** for each human-added sentence → new `C#` to `claims-map.json`, then verify again. A human's edit to a **translation**: re-map its sentences in `claims-map.<lang>.json` to **existing** claim ids only (never a new `C#`); a translated sentence with no counterpart in the source is unsupported — translations add no facts.
 
 ## Read list (verify — exactly this, nothing else)
-- the article (and its translation, if any)
-- `.claude/herald/work/<topic-id>/claims-map.json`
+- the article (and each translation of the bundle, if any)
+- `.claude/herald/work/<topic-id>/claims-map.json` (and each `claims-map.<lang>.json`)
 - `.claude/herald/work/<topic-id>/research.md`
 - `docs/editorial/promotion.md` (only to check `owner` claims)
 - the editor-in-chief's pointers, if any (deferred auditor findings about facts, one line each)
 You do not read web pages, the brief, guides or critique.
 
 ## Collaboration
-- Outputs: `verify.md`, `verify.json` (and `claims-map.json` only in re-verification).
+- Outputs: `verify.md`, `verify.json` (and `claims-map.json` / `claims-map.<lang>.json` only in re-verification).
 - Return the files, then a `>>> RESULT <<<` line followed by exactly one status: `DONE` / `DONE_WITH_CONCERNS: <one line>` / `BLOCKED: <one line>` / `NEEDS_CONTEXT: <one line>` / `FAIL: <reason>`, naming the output paths. Gaps are reported in the files, not hidden behind `DONE`.
 
 ## Discipline

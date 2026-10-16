@@ -52,8 +52,13 @@ def collect(root, cfg, days=28):
         for row in query(sess, prop, s.isoformat(), e.isoformat()):
             pages.setdefault(row["keys"][0], {})[label] = {k: row.get(k) for k in ("clicks", "impressions", "ctr", "position")}
     out = {"at": now_iso(), "property": prop, "window_days": days, "articles": []}
+    rows = []
     for a in load_published(root)["articles"]:
-        url = a.get("url") or cfg.article_url(a["slug"])
+        rows.append((a, None, a.get("url") or cfg.article_url(a["slug"])))
+        for lang, e in sorted((a.get("translations") or {}).items()):  # one row per URL (01-multilingual.md §8)
+            if isinstance(e, dict) and e.get("url"):
+                rows.append((a, lang, e["url"]))
+    for a, lang, url in rows:
         m = pages.get(url, {})
         cur, prev = m.get("current") or {}, m.get("previous") or {}
         queries = [r["keys"][0] for r in query(sess, prop, cur_start.isoformat(), end.isoformat(), page=url,
@@ -61,9 +66,12 @@ def collect(root, cfg, days=28):
         drop = None
         if prev.get("clicks"):
             drop = round((cur.get("clicks", 0) - prev["clicks"]) / prev["clicks"], 3)
-        out["articles"].append({"slug": a["slug"], "url": url, "origin": a.get("origin"), "current": cur,
-                                "previous": prev, "click_change": drop, "top_queries": queries,
-                                "refresh_candidate": drop is not None and drop <= -0.3})
+        row = {"slug": a["slug"], "url": url, "origin": a.get("origin"), "current": cur,
+               "previous": prev, "click_change": drop, "top_queries": queries,
+               "refresh_candidate": drop is not None and drop <= -0.3}
+        if lang:
+            row["lang"] = lang
+        out["articles"].append(row)
     write_json(os.path.join(paths(root)["memory"], "metrics.json"), out)
     return out
 

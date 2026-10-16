@@ -17,6 +17,7 @@ routes findings to `evolve`, `status` or `update`. Plan §3.4 (limits of the gua
      `ship`.
 3. **State**: `HRD status` anomalies — held topics older than 14 days, merged-unrecorded
    articles, stale lock, unpushed Herald record commits (`HRD ahead`).
-4. **Gate**: `validate_content.py` over every `origin: herald` article; draft forbidden rules
+4. **Gate**: `validate_content.py` over every `origin: herald` article and each of its
+   translations (the path selects the language's rules); draft forbidden rules
    that fired often (candidates for a human to confirm — INV6).
 5. Report with a stated verdict per finding and the command that fixes it.

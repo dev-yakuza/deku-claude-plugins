@@ -70,6 +70,19 @@ report a mismatch.
      `--unwithdraw`, remove the files); `--auto`: stop.
    `--auto`: any non-`ok` row → no merge and no deploy this round; write that to the result
    file and stop.
+   **With `translations` in config** each `mismatch`/`no-ledger` row also carries `causes`
+   (design/herald/01-multilingual.md §3); handle the row by its causes, the strictest wins
+   (stop > adopt-pending > re-verify):
+
+   | causes | handling | exits |
+   |---|---|---|
+   | `moved`, `image_changed`, `source_changed` with no translation in the bundle | re-verify as above (0.8.0); `image_changed` with translations: the gate for **every** language (`HRD gate --topic <ref> --lang <l>`) and verify of the source; `by_lang` of unchanged languages carries over | §2.4 |
+   | `translation_changed:<l>` (source unchanged) | re-verify only those languages: their gate, then the fact-checker re-maps the language's sentences to **existing** claim ids only and verifies them; a fact found only in the translation is not delta-researched — it fails | §2.4 ① / ② |
+   | `translation_added:<l>` alone | **no re-verify** — an unmapped human translation never enters the ledger through the fact-checker alone. The article is *adopt-pending*: attended ship may continue to §3–§6, but §7 deploys only if integrity is all `ok` after the merges (the `tr-…` adopt PR for it, `/hrd translate <slug> --adopt <l>`, clears it). `--auto`: stop as for any non-`ok` row | adopt, or remove the file |
+   | `translation_missing:<l>` | stop — re-verifying the rest would silently accept the deletion | `HRD withdraw-lang <slug> --lang <l>` (attended; then commit and `integrity.py --record --kind withdraw-lang`), or ② restore |
+   | `source_changed` / `source_missing` with translations in the bundle | stop — the translations no longer render this source; Herald does not translate onto base | ② restore, then `/hrd refresh <slug> --direction <ref>` (published slug; before the restore save the base diff: `git diff <ledger sha> HEAD -- <bundle paths> > .claude/herald/memory/directions/<ref>.diff`); a merged-unrecorded first publish: ② remove, then `status --requeue <ref> --direction`; `source_missing` meant: remove the rest of the bundle, then ⓪ withdraw |
+   | `unknown_path` | stop — a translation pattern changed under published files | put `translations` back, or change it through `/hrd config` |
+   | `translation_added` with any other cause | stop | take the added file out of base for now, handle the rest, put it back and adopt |
 3. Commit what this step produced (re-verified artifacts, `held:reverted`):
    `HRD commit --cmd ship --kind integrity -m "chore(herald): integrity" <paths>` (do **not**
    push yet); then for each re-verified article `python3 .claude/herald/scripts/integrity.py
@@ -82,8 +95,9 @@ report a mismatch.
    - ② removal/restore revert PR: branch `herald-revert/<id>` from `origin/<base>`, label
      `herald-revert` plus `herald-revert:remove` (merged-unrecorded article: revert the whole
      original PR incl. `work/<id>/`) or `herald-revert:restore` (published article: restore the
-     body/images from the latest ledger SHA, `git show <sha>:<path>`); open the PR and let the
-     human merge it.
+     body/images from the latest ledger SHA, `git show <sha>:<path>`; with translations restore
+     every bundle path that tree has and **delete** translation files it does not have); open the
+     PR and let the human merge it.
 
 ## 3. Pending PRs
 
@@ -97,8 +111,15 @@ the trimmed sentences (`state.json` `trim.removed` at the PR head while `trim.st
 — critique's verdict was carried over to that shorter body unseen by the editor and auditor),
 the PR body's `## Reader notes`, `## Framings` and `## Research corrections` if any (readability notes the editor did not
 send back; sentences the fact-checker treated as the article's own example under a framing),
-"body differs from verified" (`HRD hash --slug <s> --rev <headRefOid>` vs `HRD ledger show`),
+"body differs from verified" (`HRD hash --slug <s> --rev <headRefOid>` vs `HRD ledger show` — the
+default hash is the bundle: source and translations),
 "images changed", cannibalization re-check, and `HRD scope --topic <id> --rev <headRefOid>`.
+With `translations` in config also: the languages and their verify counts (`verify.json`
+`by_lang`), the line "translations were checked by the fact-checker and the gate; no editor or
+auditor read them", and `HRD premerge --topic <id> --rev refs/remotes/origin/pr-<n>` — any
+`problems` → this PR is not merged this run (also under `--auto` and `--session-auto`): show
+them; `base-source-changed` / `base-bundle-changed` / `withdrawn-lang` → recommend decline
+(then `/hrd translate` again, or a refresh).
 
 ## 4. Per-PR human approval (skipped by `--auto`)
 
@@ -111,7 +132,12 @@ now.
 
 approve / skip this time (no state change) / decline (reason → `HRD state --topic <id> --state
 declined --reason <short-reason>` (records `ship-decline`), `gh pr close <n>`, delete the
-remote branch).
+remote branch). Declining a PR held `verify-after-human-edit` because a human edited the source
+of a translated article: first save the human's change as a *direction file* —
+`git diff <the ledger's push sha> refs/remotes/origin/pr-<n> -- <bundle paths> >
+.claude/herald/memory/directions/<id>.diff` — then decline; tell the human to continue with
+`/hrd refresh <slug> --direction <id>` (published slug) or `/hrd status --requeue <id>
+--direction` (first publish).
 
 After §4, if `topics.json` changed (clears, declines): `HRD commit --cmd ship --kind ship -m
 "chore(herald): ship decisions" .claude/herald/topics.json` (not pushed yet) — §5's branch
@@ -120,7 +146,15 @@ switch and §7.1 need a clean tree.
 ## 5. Re-verify (before checking out the PR)
 
 1. With base scripts, before switching: scope must pass; if the PR head hash ≠ the ledger's
-   `verified_hash` (a human pushed changes), re-verify:
+   `verified_hash` (a human pushed changes), re-verify — with `translations` in config first
+   decide by what the human changed (`HRD premerge` above already refused deletions and added
+   languages):
+   - the source changed and the PR carries translations → do **not** re-verify: the
+     translations no longer render it. Hold `verify-after-human-edit` with the note "source edited
+     on a translated article — decline and refresh/requeue with the direction file" (§4 decline).
+   - only translations changed → re-verify those languages as in §2's cause table
+     (`translation_changed`).
+   - otherwise as below.
 2. `git switch -C <branch> --no-track refs/remotes/origin/pr-<n>` (the local branch follows the human's
    pushed head; no version re-check: the PR head is re-verified with its own scripts and never
    merged into); run the gate (`HRD gate --topic <id>`) and verify (`atoms/_stages.md` § verify). If
@@ -134,7 +168,7 @@ switch and §7.1 need a clean tree.
    `git rev-parse HEAD` as its own call, then `integrity.py --record --topic <id> --kind push --sha
    <that literal SHA>` (the PR head may carry older scripts that need `--sha`; newer ones check it
    is the pushed HEAD). Fail (or the push is refused: the head moved) → discard this run's
-   changes on the PR branch — of `<w>`, the body path and the image dir, `git checkout HEAD -- <those tracked
+   changes on the PR branch — of `<w>`, the body path, the image dir and the translation paths, `git checkout HEAD -- <those tracked
    in HEAD>` and `git clean -fd -- <those that exist>` (as in `atoms/_stages.md` § Holds; a local commit left by a refused push is dropped by the next `switch -C`) —
    `git switch <base>`, then `HRD
    state --topic <id> --state held --reason verify-after-human-edit` and `HRD commit --cmd ship
@@ -175,7 +209,9 @@ write the round result file and stop — the runner does 7–9.
 ## 8. URL check
 
 For each deployed article: open `config.site.base_url` + `url_pattern` (WebFetch or `curl -sI`)
-with retries for up to ~10 minutes. Failures stay merged-unrecorded for the next ship.
+with retries for up to ~10 minutes — with translations, every translation URL of the bundle too
+(`url_pattern` of each `translations.targets` entry whose file exists); the bundle is one
+publish: any failed URL leaves the article merged-unrecorded. Failures stay merged-unrecorded for the next ship.
 
 ## 9. Record and push
 
@@ -185,7 +221,9 @@ with retries for up to ~10 minutes. Failures stay merged-unrecorded for the next
 - Signals: per merged PR, the diff between `agent_final_hash` content (state.json at the first
   Herald push) and the merged body → `HRD signal --kind human-edit --topic <id> --data
   '{"diff_summary": "...", "lines_changed": n}' --human-reviewed <the human_reviewed value
-  record-published returned for it>`.
+  record-published returned for it>`. With translations, one signal per changed file of the
+  bundle: add `"lang": "<l>"` to the data and use that entry's value from record-published
+  `entries`.
 - `HRD commit --cmd ship --kind ship -m "chore(herald): ship <ids>" .claude/herald/topics.json
   .claude/herald/published.json <deploy_artifacts>` (artifacts even if a URL failed), then
   `git push origin <base>`; refused → `HRD sync` and push once more; still refused → leave it

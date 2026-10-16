@@ -34,5 +34,10 @@ only. Ported from Guild `update.md`.
    the offer is not repeated. Additions only; never remove or reword the repo's lines.
 4. **Settings/gitignore/labels**: re-merge `templates/settings.json.tmpl` (key union), the
    gitignore block, and create missing labels.
+   **Translations** (0.9.0): never added by `update` (INV4). If config has no `translations` and
+   the content has locale directories, say once that `/hrd config` can turn translations on.
+   A translator persona from before 0.9.0 still has `{{TRANSLATION_TARGETS}}`-style values in
+   "Project specifics": offer to replace them with the line pointing to `config.json`
+   `translations` (local-owned — on approval only).
 5. Show a summary; on approval `HRD commit --cmd harness --kind update -m "chore(herald):
    update to <v>" <paths>`, `git push origin <base>`.

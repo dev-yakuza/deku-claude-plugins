@@ -104,6 +104,11 @@ instructions are English (SKILL.md "Language"). Machine tokens stay ASCII: statu
 (`verdict`, `severity`, `tag`, `outcome`) — translate only the free text after a prefix. Commit
 messages keep their English templates (free text in them in English too); a PR title is the
 article title, in `config.language`.
+**Article language** is separate (design/herald/01-multilingual.md L14): the article and the
+writer's and researcher's artifacts about it are in the source language
+(`translations.source`, else `config.language`); a translator writes its translation and
+`claims-map.<lang>.json` in its target language. Their spawn prompts name that language in the
+closing line instead of `config.language` for the article text.
 Every spawn prompt ends with: "Write all human-readable output in `<language>`; keep machine
 tokens, code, paths and markers in English." Unattended runs add, immediately before it:
 "Unattended: write free narration (before the `>>> RESULT <<<` sentinel) in ASCII English."
@@ -160,7 +165,9 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
 **Recorded by `HRD` itself** where the event happens — never call `HRD signal` for these:
 - `gate-failure` — `stage pass` refuses on the gate, or the pre-editor `HRD gate --record` fails.
 - `revise-weakness` / `audit-finding` / `verify-gap` / `research-error` — `HRD loopback --cause
-  revise|audit|verify|research`.
+  revise|audit|verify|research`; `verify-gap` also for `--cause translation` (data `cause:
+  translation`, `langs`). A translation gate refusal records `gate-failure` with `stage:
+  translation` and `lang`.
 - `dismissal` — from `critique.json` `decision_log`, on `stage pass --stage critique` and on
   `loopback --cause audit`.
 - `hold` — `HRD state --state held` (the batch runner records its own), except holds a human's
@@ -172,7 +179,8 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
 
 **Recorded with `HRD signal --kind <kind> --topic <id> --data '<json>'`** (they need a judgment
 or a diff only the session has): `session-edit-request` (write approval edits), `human-edit`
-(ship) and `review-finding` (review).
+(ship) and `review-finding` (review). With translations, `human-edit` is one signal per changed
+file of the bundle, with `"lang"` in its data.
 
 Signals are local (gitignored) and feed `evolve`. `HRD evolve-readiness` counts the unconsumed
 ones deterministically: identical records once; malformed records and unreviewed human edits

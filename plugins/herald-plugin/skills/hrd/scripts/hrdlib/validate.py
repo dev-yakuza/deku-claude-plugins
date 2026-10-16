@@ -19,6 +19,8 @@ DEFAULT_RULES = {
     "links": {"check": True},
     "images": {"check": True, "public_dir": "public"},
     "prose": {},
+    # per-language length/forbidden overrides for translations (01-multilingual.md §6)
+    "languages": {},
 }
 
 FM_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.S)
@@ -65,10 +67,39 @@ def ignored(root, rel):
     return run(["git", "check-ignore", "-q", rel], cwd=root, check=False).returncode == 0
 
 
-def validate(root, cfg, file_path):
+def file_lang(root, cfg, file_path):
+    """The language a file is written in: a translation path's language, else the source
+    language (01-multilingual.md §6 — CI and custom wrappers pass no --lang)."""
+    full = file_path if os.path.isabs(file_path) else os.path.join(root, file_path)
+    role = cfg.explains(os.path.relpath(os.path.realpath(full), os.path.realpath(root))) if cfg.translations() else None
+    return role if role and role not in ("src", "img") else cfg.source_lang()
+
+
+def lang_rules(rules, cfg, lang):
+    """Length and forbidden rules for one language. A translation without its own `languages`
+    entry skips the length range (character counts differ across languages) and keeps the
+    common forbidden list."""
+    over = (rules.get("languages") or {}).get(lang) if isinstance(rules.get("languages"), dict) else None
+    if lang == cfg.source_lang() or not cfg.translations():
+        length, forbidden = rules["length"], list(rules.get("forbidden", []))
+        if isinstance(over, dict):
+            length = {**length, **{k: v for k, v in over.items() if k in ("min_chars", "max_chars", "count")}}
+            forbidden += list(over.get("forbidden") or [])
+        return length, forbidden
+    length = {"min_chars": 0, "max_chars": None, "count": rules["length"].get("count", "nonspace"), "per_category": {}}
+    forbidden = list(rules.get("forbidden", []))
+    if isinstance(over, dict):
+        length.update({k: v for k, v in over.items() if k in ("min_chars", "max_chars", "count")})
+        forbidden += list(over.get("forbidden") or [])
+    return length, forbidden
+
+
+def validate(root, cfg, file_path, lang=None):
     rules = load_rules(root)
     errors, warnings = [], []
     full = file_path if os.path.isabs(file_path) else os.path.join(root, file_path)
+    lang = lang or file_lang(root, cfg, file_path)
+    translated = bool(cfg.translations()) and lang != cfg.source_lang()
     try:
         text = open(full, encoding="utf-8").read()
     except OSError as e:
@@ -83,7 +114,7 @@ def validate(root, cfg, file_path):
             errors.append("frontmatter `%s` missing" % key)
     if "--" in fm.get("slug", ""):
         errors.append("slug must not contain `--` (Herald branch separator)")
-    ln = rules["length"]
+    ln, forbidden = lang_rules(rules, cfg, lang)
     cat = fm.get("category")
     limits = {**ln, **(ln.get("per_category", {}).get(cat, {}) if cat else {})}
     n = body_chars(body, ln.get("count", "nonspace"))
@@ -91,7 +122,7 @@ def validate(root, cfg, file_path):
         errors.append("body is %d chars; minimum %d%s" % (n, limits["min_chars"], " for %s" % cat if cat else ""))
     if limits.get("max_chars") and n > limits["max_chars"]:
         errors.append("body is %d chars; maximum %d%s" % (n, limits["max_chars"], " for %s" % cat if cat else ""))
-    for rule in rules.get("forbidden", []):
+    for rule in forbidden:
         pat = rule.get("pattern", "")
         if not pat:
             continue
@@ -100,12 +131,19 @@ def validate(root, cfg, file_path):
             msg = "forbidden phrase %r%s" % (pat, " (%s)" % rule["note"] if rule.get("note") else "")
             (errors if rule.get("status") == "confirmed" else warnings).append(msg)
     if rules["links"].get("check", True):
-        prefix, _, suffix = cfg.get("site", "url_pattern", default="/{slug}/").partition("{slug}")
+        # a translation links within its own language (its url_pattern and body path)
+        pattern = (next((t.get("url_pattern") for t in cfg.targets() if t.get("lang") == lang), None)
+                   if translated else None) or cfg.get("site", "url_pattern", default="/{slug}/")
+        prefix, _, suffix = pattern.partition("{slug}")
         for m in LINK_RE.finditer(body):
             link = m.group(1) or m.group(2)
             if prefix and link.startswith(prefix):
                 slug = link[len(prefix):].strip("/").split("/")[0]
-                if slug and not os.path.exists(os.path.join(root, cfg.body_path(slug))):
+                if slug and not os.path.exists(os.path.join(root, cfg.body_path(slug, lang if translated else None))):
+                    if translated and os.path.exists(os.path.join(root, cfg.body_path(slug))):
+                        warnings.append("internal link %s: that article has no %s translation — link the source "
+                                        "language page instead" % (link, lang))
+                        continue
                     # with url_pattern "/{slug}/" every root link looks like an article: warn only
                     (warnings if prefix == "/" else errors).append("internal link %s points to no article" % link)
     if rules["images"].get("check", True):
@@ -124,14 +162,14 @@ def validate(root, cfg, file_path):
             elif ignored(root, relp):
                 errors.append("image %s is gitignored — it would deploy from this machine only" % src)
     return {"ok": not errors, "errors": errors, "warnings": warnings, "chars": n,
-            "prose": safe_report(body, cfg.get("language"), rules.get("prose"), _offset(text, body))}
+            "lang": lang, "prose": safe_report(body, lang, rules.get("prose"), _offset(text, body))}
 
 
 def _offset(text, body):
     return text[:len(text) - len(body)].count("\n") if body and text.endswith(body) else 0
 
 
-def prose_for(root, cfg, file_path):
+def prose_for(root, cfg, file_path, lang=None):
     """Readability hints alone (used when config.commands.validate replaces the built-in gate)."""
     full = file_path if os.path.isabs(file_path) else os.path.join(root, file_path)
     try:
@@ -143,4 +181,4 @@ def prose_for(root, cfg, file_path):
         rules = load_rules(root).get("prose")
     except Exception as e:  # noqa: BLE001 — the repo's own validator decides; hints never break it
         return {"warnings": ["prose: hints unavailable (%s: %s)" % (type(e).__name__, e)], "stats": {}}
-    return safe_report(body, cfg.get("language"), rules, _offset(text, body))
+    return safe_report(body, lang or file_lang(root, cfg, file_path), rules, _offset(text, body))

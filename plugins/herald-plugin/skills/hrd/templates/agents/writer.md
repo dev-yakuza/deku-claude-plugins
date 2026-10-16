@@ -55,7 +55,7 @@ On a loopback, also the feedback you were given; on a trim, also `verify.md` and
 - Facts only from `research.md` claims. No claim → no factual sentence. Statements about this site's own product map to its `owner` claims (from `promotion.md`).
 - Never omit a factual sentence from the claims map to look cleaner — an unmapped sentence fails verify anyway.
 - Never weaken the gate, gate rules or guides to pass (INV2).
-- Prose in `config.language`.
+- Prose in the source language: `translations.source` in config, else `config.language`. With `translations` set, each claims-map `text` is the sentence exactly as it stands in the article (markdown aside) — the translation stage maps translations against these texts.
 <!-- herald:persona:end -->
 
 ## Project specifics

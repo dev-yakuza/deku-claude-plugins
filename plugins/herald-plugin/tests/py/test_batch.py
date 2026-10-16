@@ -21,6 +21,13 @@ def pr_work(crit, tid, slug):
                              "stages": {"critique": {"outputs": {"critique.json": pinned}}}})
 
 
+def _major_minor():
+    """The running scripts' version as "x.y" — equal to them, so the batch starts (no edit per release)."""
+    import re
+    src = open(os.path.join(SCRIPTS, "hrd.py")).read()
+    return ".".join(re.search(r'SCRIPTS_VERSION = "([0-9.]+)"', src).group(1).split(".")[:2])
+
+
 class BatchCase(RepoCase):
     def setUp(self):
         super().setUp()
@@ -76,7 +83,7 @@ class BatchCase(RepoCase):
         self.assertFalse(os.path.exists(os.path.join(self.root, ".claude/herald/signals.jsonl")))
 
     def test_version_gate_after_branch_preserves_and_holds(self):
-        p = self.run_batch({"t0001": "version-gate-branch", "t0002": "pr"}, extra=("--expect-version", "0.8"))
+        p = self.run_batch({"t0001": "version-gate-branch", "t0002": "pr"}, extra=("--expect-version", _major_minor()))
         self.assertNotEqual(p.returncode, 0)
         topics = {t["id"]: t for t in store.load_topics(self.root)["topics"]}
         self.assertEqual((topics["t0001"]["state"], topics["t0001"]["reason"]), ("held", "needs-human"))

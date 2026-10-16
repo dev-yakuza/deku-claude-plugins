@@ -115,7 +115,7 @@ def reappearance_flags(root, cfg, prs=None, pub=None):
     """Withdrawn slugs / moved-away slugs that have files again with no later Herald PR, minus
     active releases (plan §3.2.1 withdrawn row, §3.2.2 exit ⓪)."""
     import os
-    from .hashing import worktree_hash
+    from .hashing import bundle_hash
 
     pub = pub or load_published(root)
     prs = prs if prs is not None else herald_prs(root, cfg)
@@ -135,12 +135,13 @@ def reappearance_flags(root, cfg, prs=None, pub=None):
         for m in a.get("moved_from") or []:
             candidates.append((m["slug"], m.get("moved_at"), set(m.get("topic_ids") or []), "moved"))
     for slug, at, topics_, why in candidates:
-        if not os.path.exists(os.path.join(root, cfg.body_path(slug))):
+        # any bundle file counts: a withdrawn slug whose translation alone came back is flagged too
+        if not any(os.path.exists(os.path.join(root, p)) for p in cfg.bundle_paths(slug)):
             continue
         if later_pr(slug, at, topics_):
             continue
         rel = releases.get(slug)
-        if rel and rel.get("content_hash") == worktree_hash(root, cfg, slug) and not later_pr(slug, rel.get("at"), set()):
+        if rel and rel.get("content_hash") == bundle_hash(root, cfg, slug) and not later_pr(slug, rel.get("at"), set()):
             continue
         flags.append({"slug": slug, "why": why})
     return flags
@@ -166,3 +167,53 @@ def selectable(root, cfg, prs=None):
             busy.add(p["topic_id"])
     busy |= {b[len("herald/"):].split("--", 1)[0] for b in local_branches(root)}
     return [t["id"] for t in load_topics(root)["topics"] if t.get("state") == "queued" and t["id"] not in busy]
+
+
+# L16 (01-multilingual.md): holds whose work is kept count as in progress — judged by reason,
+# not by the branch (a preserved branch is local to one machine)
+IN_PROGRESS_HOLDS = ("needs-human", "stagnation", "budget", "verify-after-human-edit")
+
+
+def in_progress_topics(root, cfg, prs=None):
+    """Topics still in flight, with the slug each one works on when it can be known here:
+    queued, in progress, a kept hold, PR pending, merged-unrecorded. Inputs: topics.json (r-/tr-
+    carry their slug), Herald PRs and local herald branch names (both carry it), and a state.json
+    left in the working tree."""
+    import os
+
+    from .util import read_json
+
+    prs = prs if prs is not None else herald_prs(root, cfg)
+    local = local_branches(root)
+    out = []
+    for t in load_topics(root)["topics"]:
+        tid, stored = t["id"], t.get("state")
+        if stored in ("published", "withdrawn", "declined"):
+            continue
+        mine = [p for p in prs if p["topic_id"] == tid]
+        merged = [p for p in mine if p.get("mergedAt") and not (p["label_set"] & {REVERTED, WITHDRAWN})]
+        open_ = [p for p in mine if p["state"] == "OPEN"]
+        branches = [b for b in local if b.startswith("herald/%s--" % tid)]
+        if stored == "held" and t.get("reason") not in IN_PROGRESS_HOLDS and not open_ and not merged:
+            continue
+        slug = t.get("slug") or t.get("refresh_of") or t.get("translate_of")
+        if not slug:
+            for name in [p["headRefName"] for p in mine] + branches:
+                parsed = parse_branch(name)
+                if parsed:
+                    slug = parsed[1]
+                    break
+        if not slug:
+            st = read_json(os.path.join(root, ".claude", "herald", "work", tid, "state.json")) or {}
+            slug = st.get("slug")
+        out.append({"id": tid, "slug": slug, "state": stored})
+    return out
+
+
+def slug_busy(root, cfg, slug, exclude=None, prs=None):
+    """The ids of other in-progress topics on `slug` (translation repos only — without
+    translations overlapping topics surface as source conflicts, as in 0.8.0)."""
+    if not cfg.translations() or not slug:
+        return []
+    return [t["id"] for t in in_progress_topics(root, cfg, prs=prs) if t["slug"] == slug and t["id"] != exclude]
+

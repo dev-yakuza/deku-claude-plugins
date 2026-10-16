@@ -1,7 +1,13 @@
-"""Article content hash (plan §3.2).
+"""Article content hashes (plan §3.2, design/herald/01-multilingual.md §3).
 
-The hash covers one article = its body file + its slug image directory, as a list of
-(repo-relative path, git blob id). Two input modes must agree on the same commit:
+Two scopes, both lists of (repo-relative path, git blob id):
+
+- source: the body file + its slug image directory (what critique, the editor and the
+  auditor rounds evaluate) — `worktree_hash` / `tree_hash`, unchanged from 0.8.0.
+- bundle: source + every configured translation path that exists (what verify, the ledger,
+  integrity and ship compare) — `bundle_hash` / `bundle_tree_hash`. Paths that do not exist
+  add nothing, so without translations the two are equal.
+ Two input modes must agree on the same commit:
 
 - worktree: tracked files + untracked files that are not gitignored, restricted to files that
   exist on disk (`git ls-files --cached --others --exclude-standard`). Blob ids come from
@@ -35,20 +41,14 @@ def _hash_objects(root, files):
     return proc.stdout.split()
 
 
-def worktree_hash(root, cfg, slug, path=None):
-    body = path or cfg.body_path(slug)
-    img = cfg.image_dir(slug)
-    out = git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", body, img)
+def _worktree_entries(root, paths_):
+    out = git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *paths_)
     files = sorted({p for p in out.split("\0") if p and os.path.isfile(os.path.join(root, p))})
-    if not files:
-        return None
-    return _digest(list(zip(files, _hash_objects(root, files))))
+    return list(zip(files, _hash_objects(root, files))) if files else []
 
 
-def tree_entries(root, cfg, rev, slug, path=None):
-    body = path or cfg.body_path(slug)
-    img = cfg.image_dir(slug)
-    out = git(root, "ls-tree", "-r", "-z", rev, "--", body, img)
+def _tree_entries(root, rev, paths_):
+    out = git(root, "ls-tree", "-r", "-z", rev, "--", *paths_)
     entries = []
     for rec in out.split("\0"):
         if not rec:
@@ -60,8 +60,53 @@ def tree_entries(root, cfg, rev, slug, path=None):
     return entries
 
 
+def worktree_hash(root, cfg, slug, path=None):
+    """Source hash: body (or `path`) + image dir."""
+    return _digest(_worktree_entries(root, [path or cfg.body_path(slug), cfg.image_dir(slug)]))
+
+
+source_hash = worktree_hash
+
+
+def tree_entries(root, cfg, rev, slug, path=None):
+    return _tree_entries(root, rev, [path or cfg.body_path(slug), cfg.image_dir(slug)])
+
+
 def tree_hash(root, cfg, rev, slug, path=None):
     return _digest(tree_entries(root, cfg, rev, slug, path))
+
+
+def bundle_entries(root, cfg, slug, rev=None):
+    paths_ = cfg.bundle_paths(slug)
+    return _tree_entries(root, rev, paths_) if rev else _worktree_entries(root, paths_)
+
+
+def bundle_hash(root, cfg, slug, rev=None):
+    """Source + every configured translation that exists (the bundle, §3)."""
+    return _digest(bundle_entries(root, cfg, slug, rev))
+
+
+def bundle_tree_hash(root, cfg, rev, slug):
+    return bundle_hash(root, cfg, slug, rev=rev)
+
+
+def lang_hash(root, cfg, slug, lang, rev=None):
+    """One translation file (`lang` = a target) — or the source (body + images) for the source
+    language — as `verify.json` `by_lang[l].hash` records it."""
+    if lang == cfg.source_lang():
+        return tree_hash(root, cfg, rev, slug) if rev else worktree_hash(root, cfg, slug)
+    p = [cfg.body_path(slug, lang)]
+    return _digest(_tree_entries(root, rev, p) if rev else _worktree_entries(root, p))
+
+
+def bundle_files(root, cfg, slug, rev=None):
+    """{path: {"blob", "role"}} of the bundle — the ledger's `files` (L17) and state.json
+    `verified_files`, so a later integrity check can say what changed."""
+    return {p: {"blob": b, "role": cfg.path_role(slug, p)} for p, b in bundle_entries(root, cfg, slug, rev)}
+
+
+def digest_files(files):
+    return _digest([(p, v["blob"]) for p, v in (files or {}).items()])
 
 
 def file_hash(root, relpath):

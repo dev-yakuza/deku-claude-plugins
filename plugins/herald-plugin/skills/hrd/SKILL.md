@@ -11,7 +11,7 @@ Route on `$0`: read `<<SKILL_DIR>>/commands/$0.md` and execute it. Pass `$1`, `$
 
 - Valid commands: `init`, `config`, `update`, `plan`, `next`, `write`, `brief`, `research`, `draft`,
   `critique`, `verify`, `publish`, `status`, `resume`, `ship`, `batch`, `review`, `refresh`,
-  `evolve`, `rollback`, `audit`, `monitoring`, `ask`, `contribute`, `help`.
+  `evolve`, `rollback`, `audit`, `monitoring`, `ask`, `contribute`, `translate`, `help`.
 - Empty `$0` → `help`. Unknown `$0` → say so, then `help`.
 
 **Language**: these instructions are in English, but everything you say to the user is in the

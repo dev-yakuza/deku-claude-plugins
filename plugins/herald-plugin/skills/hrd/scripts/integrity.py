@@ -22,7 +22,7 @@ ap.add_argument("--predeploy", action="store_true")
 a = ap.parse_args()
 try:
     root = repo_root()
-    cfg = Config.load(root)
+    cfg = Config.load_checked(root)
     if a.record:
         emit(store.ledger_record(root, cfg, a.topic, sha=a.sha, kind=a.kind, rev=a.rev))
         sys.exit(0)

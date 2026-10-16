@@ -11,10 +11,11 @@ import json
 import os
 import re
 
-from .hashing import file_hash, tree_hash, worktree_hash
+from .hashing import bundle_files, bundle_hash, file_hash, tree_hash, worktree_hash
 from .util import HeraldError, append_jsonl, herald_dir, now_iso, read_json, read_jsonl, write_json
 
-TOPIC_ID_RE = re.compile(r"^(t\d{4,}|r-[a-z0-9][a-z0-9-]*-\d{8})$")
+# t0001 · r-<slug>-<date>[-n] (refresh) · tr-<slug>-<date>[-n] (later translation, 01-multilingual.md L11)
+TOPIC_ID_RE = re.compile(r"^(t\d{4,}|(?:r|tr)-[a-z0-9][a-z0-9-]*-\d{8}(?:-\d+)?)$")
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 STORED_STATES = ("queued", "held", "declined", "published", "withdrawn", "unwithdrawn")
@@ -23,8 +24,9 @@ HOLD_REASONS = (
     "needs-human", "stagnation", "budget",               # before PR — preserved (WIP branch)
     "verify-after-human-edit",                           # after PR — PR kept open
     "reverted",                                          # after merge — removal revert
+    "source-defect",                                     # tr-: the verified source fails verify — cleaned up
 )
-CLEANUP_REASONS = ("cannibalization", "research", "rejected")
+CLEANUP_REASONS = ("cannibalization", "research", "rejected", "source-defect")
 PRESERVE_REASONS = ("needs-human", "stagnation", "budget")
 
 
@@ -48,7 +50,7 @@ def work_rel(topic_id, name=""):
 
 def check_topic_id(tid):
     if not TOPIC_ID_RE.match(tid or ""):
-        raise HeraldError("invalid topic id %r (expected t0001 or r-<slug>-YYYYMMDD)" % tid)
+        raise HeraldError("invalid topic id %r (expected t0001, r-<slug>-YYYYMMDD or tr-<slug>-YYYYMMDD, optionally -<n>)" % tid)
 
 
 def check_slug(slug):
@@ -141,6 +143,7 @@ PRODUCES = {
     "research": ["research.md"],
     "draft": ["@article", "claims-map.json"],
     "critique": ["critique.md", "critique.json"],
+    "translation": ["@translations"],  # files + claims-map.<lang>.json (01-multilingual.md §3)
     "verify": ["verify.md", "verify.json"],
 }
 CONSUMES = {
@@ -148,9 +151,12 @@ CONSUMES = {
     "research": [("brief", "brief.md")],
     "draft": [("brief", "brief.md"), ("research", "research.md")],
     "critique": [("draft", "@article")],
-    "verify": [("draft", "@article"), ("draft", "claims-map.json"), ("research", "research.md")],
+    # not @article: a translator that edited the source must reach translation's own refusal
+    "translation": [("critique", "critique.json")],
+    "verify": [("draft", "@article"), ("draft", "claims-map.json"), ("research", "research.md"),
+               ("translation", "@translations")],
 }
-ORDER = ["brief", "research", "draft", "critique", "verify", "publish"]
+ORDER = ["brief", "research", "draft", "critique", "translation", "verify", "publish"]
 
 
 def state_path(root, tid):
@@ -177,6 +183,9 @@ def save_state(root, tid, st):
 def artifact_hash(root, cfg, st, name):
     if name == "@article":
         return worktree_hash(root, cfg, st["slug"])
+    if name == "@translations":
+        from .translation import translations_hash
+        return translations_hash(root, cfg, st)
     return file_hash(root, work_rel(st["topic_id"], name))
 
 
@@ -185,19 +194,30 @@ def entry_check(root, cfg, st, stage):
     problems = []
     if (st.get("trim") or {}).get("status") == "open":
         problems.append("a trim is open — `HRD trim --topic %s --abort` first" % st.get("topic_id"))
+    from .translation import langs_of, verify_entry_problems
     for producer, name in CONSUMES.get(stage, []):
-        rec = st["stages"].get(producer, {}).get("outputs", {})
+        if name == "@translations" and not langs_of(st):
+            continue  # no languages (0.8.0 topics, untranslated repos): verify follows critique
+        prec = st["stages"].get(producer, {})
+        if prec.get("inherited") and name not in (prec.get("outputs") or {}):
+            continue  # a tr- topic: that stage ran in its reference topic (01-multilingual.md §7)
+        rec = prec.get("outputs", {})
         if name not in rec:
             problems.append("%s has not passed (needed for %s)" % (producer, name))
             continue
         cur = artifact_hash(root, cfg, st, name)
         if cur != rec[name]:
             problems.append("%s changed since %s passed — rerun %s" % (name, producer, producer))
+    if stage == "verify":
+        problems += verify_entry_problems(st)
     if stage == "publish":
-        cur = worktree_hash(root, cfg, st["slug"])
+        # critique evaluated the source; verify the bundle (source + translations) — equal
+        # without translations (design/herald/01-multilingual.md §3)
+        src = worktree_hash(root, cfg, st["slug"])
+        cur = bundle_hash(root, cfg, st["slug"])
         c = st["stages"].get("critique", {}).get("body_hash")
         v = st["stages"].get("verify", {}).get("body_hash")
-        if not (cur and cur == c == v == st.get("verified_hash")):
+        if not (src and src == c and cur and cur == v == st.get("verified_hash")):
             problems.append("article differs from what critique/verify evaluated — rerun critique and verify")
         vr = st["stages"].get("verify", {}).get("research")
         if vr and vr != artifact_hash(root, cfg, st, "research.md"):
@@ -301,7 +321,7 @@ def auto_exclusion(crit, st=None):
 # others stay blocking: an open BLOCKER, an article changed after its last auditor round, a
 # PR whose verdict files cannot be read.
 CONSENT_ACCEPTS = ("decision:dismissal", "decision:assumption", "decision:deferral",
-                   "audit-dismissed", "audit-log:deferred", "trimmed", "images", "framed")
+                   "audit-dismissed", "audit-log:deferred", "trimmed", "images", "framed", "translated")
 
 
 def blocking_exclusions(reasons, consent=False):
@@ -341,6 +361,9 @@ def exclusion_reasons(root, cfg, tid, rev=None):
             _blob_hash(root, rev, rel)
     else:
         crit, st, ch = load_machine(root, tid, "critique.json"), read_json(state_path(root, tid)), file_hash(root, rel)
+    inherited = isinstance(st, dict) and ((st.get("stages") or {}).get("critique") or {}).get("inherited")
+    if inherited and crit is None:
+        crit = {}  # a tr- topic: critique ran in the reference topic; its decisions are not this PR's
     if not isinstance(crit, dict) or not isinstance(st, dict):
         return ["missing-critique-or-state"]
     reasons = auto_exclusion(crit, st)
@@ -369,13 +392,19 @@ def exclusion_reasons(root, cfg, tid, rev=None):
         outs = cst.get("outputs") or {}
         md = _blob_hash(root, rev, md_rel) if rev else file_hash(root, md_rel)
         changed = ch != outs.get("critique.json") or md != outs.get("critique.md")
-    if changed:
+    if changed and not inherited:
         reasons.append("critique-changed")
     slug = st.get("slug")
     if slug:
         img = cfg.image_dir(slug) + "/"
-        if any(f.startswith(img) for f in commits.changed_files(root, "origin/%s...%s" % (cfg.base, rev or "HEAD"))):
+        changed = commits.changed_files(root, "origin/%s...%s" % (cfg.base, rev or "HEAD"))
+        if any(f.startswith(img) for f in changed):
             reasons.append("images")
+        # translations read by no editor or auditor go out only with a human, unless the repo
+        # allowed it (translations.auto_publish) — derived from the diff, not from state.json
+        tr_paths = set(cfg.translation_paths(slug).values())
+        if tr_paths and not (cfg.translations() or {}).get("auto_publish") and any(f in tr_paths for f in changed):
+            reasons.append("translated")
     return sorted(set(reasons))
 
 
@@ -458,16 +487,19 @@ def audit_log_problems(crit, rnd):
     return problems
 
 
-def run_gate(root, cfg, slug):
-    """draft gate (plan §3.5): config.commands.validate if set, else the built-in validator."""
+def run_gate(root, cfg, slug, lang=None):
+    """draft gate (plan §3.5): config.commands.validate if set, else the built-in validator.
+    `lang`: one translation (the translation stage, a re-verify) — the custom validator gets it
+    as HRD_LANG, the built-in one applies that language's rules (01-multilingual.md §6)."""
     import shlex
     from .util import run
     from .validate import prose_for, validate
 
-    body = cfg.body_path(slug)
+    body = cfg.body_path(slug, lang)
     custom = (cfg.get("commands", "validate") or "").strip()
     if custom:
-        proc = run(shlex.split(custom) + [body], cwd=root, check=False)
+        env = dict(os.environ, HRD_LANG=lang or cfg.source_lang())
+        proc = run(shlex.split(custom) + [body], cwd=root, check=False, env=env)
         ok = proc.returncode == 0
         errors = [] if ok else [(proc.stdout + proc.stderr).strip()[-500:]]
         out = proc.stdout
@@ -477,8 +509,8 @@ def run_gate(root, cfg, slug):
                 errors = [str(e) for e in out["errors"]]
         except ValueError:
             pass
-        return {"ok": ok, "errors": errors, "prose": prose_for(root, cfg, body)}
-    return validate(root, cfg, body)
+        return {"ok": ok, "errors": errors, "prose": prose_for(root, cfg, body, lang=lang)}
+    return validate(root, cfg, body, lang=lang)
 
 
 def prose_rel(tid):
@@ -536,9 +568,9 @@ def research_claim_ids(root, tid):
 
 
 def current_verify(root, cfg, tid, st):
-    """verify.json when it evaluates the current article, else {}."""
+    """verify.json when it evaluates the current bundle, else {}."""
     ver = safe_machine(root, tid, "verify.json")
-    if not st.get("slug") or not ver.get("body_hash") or ver["body_hash"] != worktree_hash(root, cfg, st["slug"]):
+    if not st.get("slug") or not ver.get("body_hash") or ver["body_hash"] != bundle_hash(root, cfg, st["slug"]):
         return {}
     return ver
 
@@ -627,20 +659,26 @@ def write_prose(root, cfg, tid, slug, gate):
     return prose_rel(tid)
 
 
-def record_gate_failure(root, st, tid, stage, gate, amend=False):
+def record_gate_failure(root, st, tid, stage, gate, amend=False, lang=None):
     """Not on `verify --amend` or after a human-requested revision (the failing edit is a
     human's), and once per topic and loopback count (retries of one draft are one event)."""
     n = int(st.get("loopbacks", 0))
     attempt = st.get("created_at")  # a requeued topic starts a new state (loopbacks 0 again)
     try:
+        # translation failures are keyed per stage and language too (several languages can fail
+        # in one round); draft/critique keep the 0.8.0 key (01-multilingual.md §4)
         seen = any(isinstance(r, dict) and r.get("kind") == "gate-failure" and r.get("topic_id") == tid
                    and isinstance(r.get("data"), dict) and r["data"].get("loopbacks") == n
-                   and r["data"].get("attempt") == attempt for r in read_jsonl(paths(root)["signals"]))
+                   and r["data"].get("attempt") == attempt
+                   and (stage != "translation" or (r["data"].get("stage"), r["data"].get("lang")) == (stage, lang))
+                   for r in read_jsonl(paths(root)["signals"]))
     except Exception:  # noqa: BLE001 — never hide the gate error behind a signal problem
         seen = True
     if not amend and st.get("last_loopback") != "human" and not seen:
-        safe_signal(root, "gate-failure", tid, {"stage": stage, "errors": gate["errors"][:10],
-                                                "loopbacks": n, "attempt": attempt})
+        data = {"stage": stage, "errors": gate["errors"][:10], "loopbacks": n, "attempt": attempt}
+        if lang:
+            data["lang"] = lang
+        safe_signal(root, "gate-failure", tid, data)
 
 
 def stage_pass(root, cfg, tid, stage, amend=False):
@@ -652,6 +690,13 @@ def stage_pass(root, cfg, tid, stage, amend=False):
     if stage != "research" and open_research_fix(st):
         raise HeraldError("a research fix is open (%s) — the researcher corrects those claims and `stage pass --stage "
                           "research` runs first" % ", ".join(open_research_fix(st).get("claims") or []))
+    if stage == "translation":
+        from . import translation
+        problems = entry_check(root, cfg, st, stage)
+        if problems:
+            raise HeraldError("; ".join(problems))
+        return translation.stage_pass(root, cfg, tid, st, run_gate, lambda s: save_state(root, tid, s),
+                                      record_gate_failure)
     if not amend:
         problems = entry_check(root, cfg, st, stage)
         if problems:
@@ -692,14 +737,25 @@ def stage_pass(root, cfg, tid, stage, amend=False):
         gate = run_gate(root, cfg, st["slug"])
         if stage == "draft":
             write_prose(root, cfg, tid, st["slug"], gate)
+            if cfg.translations():  # the correspondence filter needs every map text in the body
+                from .translation import draft_text_problems
+                missing = draft_text_problems(root, cfg, tid, st["slug"])
+                if missing:
+                    gate = dict(gate, ok=False, errors=list(gate.get("errors") or []) + missing)
         if not gate["ok"]:
             record_gate_failure(root, st, tid, stage, gate, amend)
             raise HeraldError("deterministic gate failed: %s" % "; ".join(gate["errors"][:5]))
+        if stage == "verify" and amend:
+            from .translation import amend_problems
+            problems = amend_problems(root, cfg, tid, st, run_gate)
+            if problems:
+                raise HeraldError("re-verify of a translation failed: %s" % "; ".join(problems[:4]))
     if stage in ("critique", "verify"):
         # The verdict file must evaluate THIS article: the main session writes the hash it
         # got from `HRD hash` before spawning into the file, and a verdict file carried over
-        # unchanged from an earlier pass cannot vouch for a changed body (plan §3.2).
-        cur = worktree_hash(root, cfg, st["slug"])
+        # unchanged from an earlier pass cannot vouch for a changed body (plan §3.2). Critique
+        # evaluated the source, verify the bundle (01-multilingual.md §3).
+        cur = worktree_hash(root, cfg, st["slug"]) if stage == "critique" else bundle_hash(root, cfg, st["slug"])
         name = "critique.json" if stage == "critique" else "verify.json"
         machine = load_machine(root, tid, name) or {}
         claimed = (machine.get("final_round") or {}).get("body_hash") if stage == "critique" else machine.get("body_hash")
@@ -743,17 +799,33 @@ def stage_pass(root, cfg, tid, stage, amend=False):
                               "`HRD loopback --cause research` first")
         if not verify_passed(ver):
             raise HeraldError("verify.json has unsupported or contradicted claims")
-        bh = worktree_hash(root, cfg, st["slug"])
+        from .translation import lang_record, verify_problems
+        problems = verify_problems(root, cfg, st, ver)
+        if problems:
+            raise HeraldError("; ".join(problems))
+        bh = bundle_hash(root, cfg, st["slug"])
         rec["body_hash"] = bh
         rec["blobs"] = {"verify.json": _git_blob(root, None, work_rel(tid, "verify.json"))}
         rec["research"] = artifact_hash(root, cfg, st, "research.md")  # the evidence it checked against
         st["verified_hash"] = bh
+        # what was verified, file by file: integrity's cause basis on a machine without a ledger
+        # line (01-multilingual.md §3, basis 3)
+        if cfg.translations():
+            st["verified_files"] = bundle_files(root, cfg, st["slug"])
         if amend:
             # delta research rewrote research.md / claims-map.json: re-anchor their producers
             for producer, name in (("research", "research.md"), ("draft", "claims-map.json")):
                 st["stages"].setdefault(producer, {}).setdefault("outputs", {})[name] = artifact_hash(root, cfg, st, name)
+            tr = st.get("translation") or {}
+            if tr.get("langs"):  # a re-verified human edit to a translation becomes its new record
+                tr["hashes"] = {l: lang_record(root, cfg, tid, st["slug"], l) for l in tr["langs"]}
+                st["stages"].setdefault("translation", {}).setdefault("outputs", {})["@translations"] = \
+                    artifact_hash(root, cfg, st, "@translations")
     st["stages"][stage] = rec
     nxt = ORDER[ORDER.index(stage) + 1]
+    if stage == "critique":
+        from .translation import on_critique_pass
+        nxt = on_critique_pass(st, rec["body_hash"])
     st["stage"] = nxt
     save_state(root, tid, st)
     return st
@@ -1161,9 +1233,19 @@ def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
         ver = load_machine(root, tid, "verify.json")
     if not st:
         raise HeraldError("no state.json for %s" % tid)
-    cur = tree_hash(root, cfg, rev, st["slug"]) if rev else worktree_hash(root, cfg, st["slug"])
+    cur = bundle_hash(root, cfg, st["slug"], rev=rev)
     vb = st.get("stages", {}).get("verify", {}).get("body_hash")
-    if kind == "trust":
+    if kind == "withdraw-lang":
+        # a translation taken down (`status --withdraw-lang` proved, file by file, that only that
+        # file left the verified bundle and updated the committed state): the bundle must be
+        # exactly that committed record — a human decision, like trust (01-multilingual.md §5)
+        if os.environ.get("HRD_UNATTENDED") == "1":
+            raise HeraldError("refusing: withdraw-lang records need a human (attended only)")
+        files = bundle_files(root, cfg, st["slug"], rev=rev)
+        if not st.get("withdrawn_langs") or not (cur and cur == st.get("verified_hash")) \
+                or {p: v["blob"] for p, v in (st.get("verified_files") or {}).items()} != {p: v["blob"] for p, v in files.items()}:
+            raise HeraldError("refusing: run `status --withdraw-lang` first — the bundle must equal the state it recorded")
+    elif kind == "trust":
         # Only for "no ledger line on this machine", attended, and only for the exact body the
         # committed state.json says was verified (plan §3.2 "원장 기록이 없을 때").
         if os.environ.get("HRD_UNATTENDED") == "1":
@@ -1179,8 +1261,12 @@ def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
             raise HeraldError("refusing to record: verify.json is not clean")
     if kind == "push":
         sha = pushed_head(root, sha)
+    files = bundle_files(root, cfg, st["slug"], rev=rev)
     rec = {"at": now_iso(), "topic_id": tid, "slug": st["slug"], "verified_hash": cur,
            "sha": sha, "kind": kind}
+    if cfg.translations():  # 0.8.0 lines carry neither: no translations (L15)
+        rec["langs"] = sorted({v["role"] for v in files.values() if v["role"] not in ("src", "img", None)})
+        rec["files"] = files
     append_jsonl(paths(root)["ledger"], rec)
     return rec
 
@@ -1261,24 +1347,79 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
     if not art:
         art = {"slug": slug, "moved_from": []}
         pub["articles"].append(art)
-    art.update({"path": cfg.body_path(slug), "url": cfg.article_url(slug), "origin": origin,
-                "current_topic_id": tid, "published_at": now_iso(), "withdrawn": False,
-                "category": t.get("category"), "keywords": t.get("keywords", [])})
+    translated = bool(cfg.translations())
+    now = now_iso()
+    prev_published = art.get("published_at")
+    upd = {"path": cfg.body_path(slug), "url": cfg.article_url(slug), "origin": origin,
+           "current_topic_id": tid, "published_at": now, "withdrawn": False}
+    # 0.8.0 overwrites category/keywords; a translation repo keeps them when the topic has none
+    # (a tr- topic, 01-multilingual.md §5)
+    if not translated or t.get("category") is not None:
+        upd["category"] = t.get("category")
+    if not translated or t.get("keywords"):
+        upd["keywords"] = t.get("keywords", [])
+    art.update(upd)
     stamped = bool(t.get("auto_merged_pr")) and (pr is None or str(pr) == str(t["auto_merged_pr"]))
     if stamped:
         auto = True  # merged unattended: stays false whoever records it later
     accepted = t.get("auto_merged_accepted") if stamped else None
-    if accepted:  # what the human accepted unread for this publish (`/hrd next`)
-        art["auto_accepted"] = list(accepted)
-    else:
-        art.pop("auto_accepted", None)
-    if origin == "herald":
-        art["human_reviewed"] = not auto
+    source_published = not tid.startswith("tr-")  # a later translation never publishes the source
+    if source_published:
+        if accepted:  # what the human accepted unread for this publish (`/hrd next`)
+            art["auto_accepted"] = list(accepted)
+        else:
+            art.pop("auto_accepted", None)
+        if origin == "herald":
+            art["human_reviewed"] = not auto
+    if translated:
+        art.setdefault("first_published_at", prev_published or now)
+        mine = _published_langs(root, cfg, tid, t)
+        withdrawn = [l for l in art.get("withdrawn_langs") or [] if l not in mine]
+        if withdrawn:
+            art["withdrawn_langs"] = withdrawn
+        else:
+            art.pop("withdrawn_langs", None)
+        trs = art.setdefault("translations", {})
+        for lang, path in cfg.translation_paths(slug).items():
+            if not os.path.isfile(os.path.join(root, path)):
+                continue
+            e = trs.setdefault(lang, {})
+            e.update({"path": path, "url": cfg.article_url(slug, lang)})
+            if lang in mine or "published_at" not in e:
+                e["published_at"] = now
+                e.setdefault("first_published_at", now)
+                if origin == "herald":
+                    e["human_reviewed"] = not auto
+                if accepted:
+                    e["auto_accepted"] = list(accepted)
+                else:
+                    e.pop("auto_accepted", None)
+        # one entry per publish (PR): the daily throttle counts these, not human_reviewed
+        art["publishes"] = (art.get("publishes") or [])[-19:] + [{"at": now, "auto": bool(auto), "topic_id": tid}]
     t["slug"] = slug
     set_topic_state(t, "published", note=("auto " if auto else "") + ("PR #%s" % pr if pr else origin))
     save_published(root, pub)
     save_topics(root, data)
     return art
+
+
+def _published_langs(root, cfg, tid, t):
+    """The translation languages this topic's PR published: its state.json `translation.langs`
+    (committed with the merge), else the topic's `languages`."""
+    st = read_json(state_path(root, tid)) or {}
+    langs = ((st.get("translation") or {}).get("langs"))
+    if langs is None:
+        langs = t.get("languages") or []
+    return [l for l in langs if l in cfg.target_langs()]
+
+
+def bundle_urls(root, cfg, slug):
+    """The source URL and the URL of every translation that exists — ship §8 opens them all."""
+    out = {cfg.source_lang(): cfg.article_url(slug)}
+    for lang, path in cfg.translation_paths(slug).items():
+        if os.path.isfile(os.path.join(root, path)):
+            out[lang] = cfg.article_url(slug, lang)
+    return out
 
 
 # --- signals --------------------------------------------------------------------------------
@@ -1304,7 +1445,7 @@ NON_SIGNAL_HOLD_NOTES = ("tooling:", "human:", "batch child did not finish", "ba
 THEMES = ("intro", "structure", "length", "depth", "clarity", "tone", "search", "promotion",
           "policy", "accuracy", "images", "exemplar", "other")
 LOOPBACK_CAUSES = {"revise": "revise-weakness", "audit": "audit-finding", "verify": "verify-gap", "gate": None,
-                   "research": "research-error"}
+                   "research": "research-error", "translation": "verify-gap"}
 
 
 def safe_signal(root, kind, tid=None, data=None):

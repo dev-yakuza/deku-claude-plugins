@@ -51,7 +51,7 @@ Search Console(任意): `pip install google-auth requests`。
 
 **設定** `init` · `config` · `update` — **執筆** `plan` · `write` · `brief` · `research` ·
 `draft` · `critique` · `verify` · `publish` · `resume` · `batch` — **公開** `next` · `ship` · `review` ·
-`refresh` — **状態** `status`(`--requeue` `--drop` `--withdraw` `--unwithdraw` `--move`
+`refresh` · `translate` — **状態** `status`(`--requeue` `--drop` `--withdraw` `--withdraw-lang` `--unwithdraw` `--move`
 `--release-slug` `--mark-published` `--unlock`) — **成長・点検** `evolve` · `rollback` · `audit` ·
 `monitoring` · `ask` · `contribute`(未対応)。詳しくは `/hrd help`。
 
@@ -69,5 +69,5 @@ Search Console(任意): `pip install google-auth requests`。
 
 ## 状態
 
-`0.8.0` — 全フロー実装済み(実装の敵対的レビュー 10 ラウンド + 以降の変更ごとのレビューを反映)。0.3.0 で成長シグナルをコードが自動記録、0.4.0 で外部監査ラウンドの上限、0.5.0 で `write` の既定を質問なしに(`--attended` で確認モード)・設定言語で対話、0.6.0 で `/hrd next`(必要なら plan → write → ship を 1 本)と、根拠のない文が少ないときに保留せず削除で整える段階を追加、0.7.0 で読みやすさを基準に追加(人が書いたような平易な文章の規則・経験の捏造禁止、編集者の読者パス、ゲートの読みやすさヒント、ファクトチェッカーが「記事自身の例」と扱った文は一覧に残し、同意なしでは自動公開しない)、0.7.1 で `/hrd evolve` の各承認にレビューパネルの推奨(適用/却下と理由)を表示、0.8.0 でファクトチェッカーが調査資料そのものの誤りを見つけたら writer ではなく researcher に先に戻し、ループバックの上限を使い切っても事実の誤りには 1 回を残す(文章の手直しで事実の誤りを直せなくなることがない) — 既存リポジトリでは `/hrd update` が必要、その後進行中の記事の `/hrd resume` は base のマージを確認(0.4.0 より前から進行中の記事は監査ラウンドを 1 から数え直す)、決定的な層はテストで検証(`bash plugins/herald-plugin/tests/run_tests.sh`)。
+`0.9.0` — 全フロー実装済み(実装の敵対的レビュー 10 ラウンド + 以降の変更ごとのレビューを反映)。0.3.0 で成長シグナルをコードが自動記録、0.4.0 で外部監査ラウンドの上限、0.5.0 で `write` の既定を質問なしに(`--attended` で確認モード)・設定言語で対話、0.6.0 で `/hrd next`(必要なら plan → write → ship を 1 本)と、根拠のない文が少ないときに保留せず削除で整える段階を追加、0.7.0 で読みやすさを基準に追加(人が書いたような平易な文章の規則・経験の捏造禁止、編集者の読者パス、ゲートの読みやすさヒント、ファクトチェッカーが「記事自身の例」と扱った文は一覧に残し、同意なしでは自動公開しない)、0.7.1 で `/hrd evolve` の各承認にレビューパネルの推奨(適用/却下と理由)を表示、0.8.0 でファクトチェッカーが調査資料そのものの誤りを見つけたら writer ではなく researcher に先に戻し、ループバックの上限を使い切っても事実の誤りには 1 回を残す(文章の手直しで事実の誤りを直せなくなることがない)、0.9.0 で多言語対応 — 原文 1 本を config `translations` の言語に翻訳(critique の後に `translation` 段階、言語ごとに translator、同じクレームに対応づけてコードが欠落・追加を確認、ファクトチェッカーが原文との対応まで検証)、原文と翻訳を 1 つの束として検証・台帳・公開し、整合性は原因(原文・翻訳・画像の変更、翻訳の追加・削除)ごとに処理、公開済みの記事は `/hrd translate` で後から翻訳(`--adopt` で人の翻訳を取り込み、`--missing`)、1 言語だけ取り下げる `status --withdraw-lang`、翻訳を含む PR は既定で自動公開から除外(`translations.auto_publish` で許可) — `translations` のないリポジトリは 0.8.0 と同じ動作 — 既存リポジトリでは `/hrd update` が必要、その後進行中の記事の `/hrd resume` は base のマージを確認(0.4.0 より前から進行中の記事は監査ラウンドを 1 から数え直す)、決定的な層はテストで検証(`bash plugins/herald-plugin/tests/run_tests.sh`)。
 `evolve` の有用性と指標に基づく提案は、実利用が蓄積してから判定できます。

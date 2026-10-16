@@ -18,6 +18,7 @@ RECORD_GLOBS = [
     ".claude/herald/published.json",
     ".claude/herald/work/*/research.md",
     ".claude/herald/work/*/claims-map.json",
+    ".claude/herald/work/*/claims-map.*.json",  # translations' maps (re-verify re-maps them)
     ".claude/herald/work/*/verify.md",
     ".claude/herald/work/*/verify.json",
     ".claude/herald/work/*/state.json",
@@ -38,6 +39,7 @@ HARNESS_GLOBS = [
 COMMAND_GLOBS = {
     "plan": [".claude/herald/topics.json"],
     "refresh": [".claude/herald/topics.json"],
+    "translate": [".claude/herald/topics.json"],
     "status": [".claude/herald/topics.json", ".claude/herald/published.json", ".claude/herald/work/*/state.json"],
     "hold": [".claude/herald/topics.json"],
     "ship": RECORD_GLOBS,
@@ -188,15 +190,49 @@ def classify_ahead(root, cfg, base, origin_ref=None):
 
 # --- PR file scope -------------------------------------------------------------------------
 
-def pr_scope_globs(cfg, tid, slug):
-    return [".claude/herald/work/%s/*" % tid, cfg.body_path(slug), cfg.image_dir(slug) + "/*",
-            cfg.image_dir(slug) + "/**"]
+def topic_langs(root, tid, rev=None):
+    """The topic's translation languages (state.json `translation.langs`), from a commit or the
+    working tree; [] without translations."""
+    import json
+    import os
+
+    rel = ".claude/herald/work/%s/state.json" % tid
+    try:
+        if rev:
+            proc = run(["git", "show", "%s:%s" % (rev, rel)], cwd=root, check=False)
+            st = json.loads(proc.stdout) if proc.returncode == 0 else {}
+        else:
+            with open(os.path.join(root, rel), encoding="utf-8") as f:
+                st = json.load(f)
+    except (OSError, ValueError):
+        st = {}
+    return list(((st or {}).get("translation") or {}).get("langs") or [])
+
+
+def pr_scope_globs(cfg, tid, slug, langs=()):
+    """The files a topic's PR may change: its work dir, the source and images (not for a tr-
+    topic: a later translation never touches the verified source, 01-multilingual.md L11) and
+    the translations of its own languages."""
+    out = [".claude/herald/work/%s/*" % tid]
+    if not tid.startswith("tr-"):
+        out += [cfg.body_path(slug), cfg.image_dir(slug) + "/*", cfg.image_dir(slug) + "/**"]
+    out += [cfg.body_path(slug, l) for l in langs if l in cfg.target_langs()]
+    return out
+
+
+def pr_scope_paths(cfg, tid, slug, langs=()):
+    """Plain paths (no globs) of the same scope — for `git add` lists."""
+    out = [".claude/herald/work/%s" % tid]
+    if not tid.startswith("tr-"):
+        out += [cfg.body_path(slug), cfg.image_dir(slug)]
+    out += [cfg.body_path(slug, l) for l in langs if l in cfg.target_langs()]
+    return out
 
 
 def scope_check(root, cfg, tid, slug, rev="HEAD", base_ref=None, herald_sha=None):
     base_ref = base_ref or "origin/%s" % cfg.base
     files = [p for p in git(root, "diff", "--name-only", "-z", "%s...%s" % (base_ref, rev)).split("\0") if p]
-    globs = pr_scope_globs(cfg, tid, slug)
+    globs = pr_scope_globs(cfg, tid, slug, topic_langs(root, tid, rev=rev))
     bad = [p for p in files if not _match(p, globs)]
     tampered = []
     if herald_sha and herald_sha != rev:

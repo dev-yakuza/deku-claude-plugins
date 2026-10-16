@@ -33,7 +33,8 @@ WIRING = [".claude/settings.json", ".claude/settings.local.json", ".claude/heral
           ".claude/herald/scripts/**"]
 LEDGER = [".claude/herald/ledger/*", ".claude/herald/ledger/**"]
 CONFIG = ".claude/herald/config.json"
-PROTECTED_CONFIG_KEYS = ("autonomy", "budget", "commands", "paths", "base_branch", "roles", "models")
+PROTECTED_CONFIG_KEYS = ("autonomy", "budget", "commands", "paths", "base_branch", "roles", "models",
+                         "translations")
 HERALD_PERSONAS = [
     ".claude/agents/editor-in-chief.md", ".claude/agents/content-strategist.md",
     ".claude/agents/researcher.md", ".claude/agents/writer.md", ".claude/agents/fact-checker.md",
@@ -136,7 +137,10 @@ def herald_article_paths(root, cfg):
         pass
     globs = []
     for s in slugs:
+        # the bundle: every configured translation path too, so an unverified translation
+        # cannot be committed to base directly (01-multilingual.md §5)
         globs += [cfg.body_path(s), cfg.image_dir(s) + "/*", cfg.image_dir(s) + "/**"]
+        globs += list(cfg.translation_paths(s).values())
     return globs
 
 
@@ -563,6 +567,8 @@ def check_bash(root, cfg, cmd):
         # 1b. trust records bypass verification for one article — a human decision only
         if "--kind" in argv and "trust" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
             protect("recording `trust` in the verification ledger skips re-verification for that article.")
+        if "--kind" in argv and "withdraw-lang" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
+            protect("recording `withdraw-lang` in the verification ledger takes a translation down without re-verification.")
         # 2. deploy
         if any(contains(canon(strip_noise(argv)), s) for s in sigs):
             if unattended():
@@ -644,13 +650,31 @@ def check_bash(root, cfg, cmd):
                 if parsed or branch.startswith("herald-revert/"):
                     staged = staged_after(root, argv, pending)
                     if parsed:
-                        globs = commits.pr_scope_globs(cfg, *parsed)
+                        globs = commits.pr_scope_globs(cfg, *parsed, langs=commits.topic_langs(root, parsed[0]))
                     else:
                         tid = branch[len("herald-revert/"):]
                         globs = [".claude/herald/work/%s/*" % tid] + herald_article_paths(root, cfg)
                     bad = [p for p in staged if not commits._match(p, globs)]
                     if bad:
                         protect("commit on %s touches files outside the PR file scope: %s" % (branch, ", ".join(bad[:5])))
+
+
+def closed_rule(root, cfg, tool, ti):
+    """A malformed `translations` block: the bundle paths cannot be trusted, so the guard does
+    not compute them — every git write and every edit except config.json itself needs a human
+    (unattended: denied) until config is fixed (01-multilingual.md §2)."""
+    errors, _ = cfg.validate()
+    if not errors:
+        return
+    why = "config.json translations is invalid (%s) — fix it first" % "; ".join(errors)[:300]
+    if tool == "Bash":
+        cmd = ti.get("command", "")
+        if re.search(r"\bgit\b[^\n;&|]*\b(commit|push|merge|rebase|reset|checkout|switch|rm|mv|clean)\b", cmd) \
+                or re.search(r"\bgh\s+pr\s+merge\b", cmd):
+            protect(why)
+    elif tool in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+        if rel(root, ti.get("file_path") or ti.get("notebook_path") or "") != CONFIG:
+            protect(why)
 
 
 def main():
@@ -667,6 +691,7 @@ def main():
         cfg = Config.load(root)
         tool = payload.get("tool_name", "")
         ti = payload.get("tool_input") or {}
+        closed_rule(root, cfg, tool, ti)
         if tool == "Bash":
             check_bash(root, cfg, ti.get("command", ""))
         elif tool in ("Edit", "Write", "MultiEdit", "NotebookEdit"):

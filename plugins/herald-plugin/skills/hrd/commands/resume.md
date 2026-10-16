@@ -17,7 +17,8 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`). Plan §3.2
    nothing is recorded and the next resume asks again (asked in every mode but unattended — a pre-flow question: a hold is resumed by a human's
    decision; after it, the rest runs without questions unless `--attended`). Unattended resume of a held topic is not allowed —
    only the batch runner's one retry of an incomplete child uses `resume`.
-4. `git switch herald/<topic-id>--<slug>`; read `.claude/herald/work/<topic-id>/state.json`.
+4. A `tr-` id: continue with `translate.md` § C (its steps skip what is done). Otherwise
+   `git switch herald/<topic-id>--<slug>`; read `.claude/herald/work/<topic-id>/state.json`.
    Then the version check in `atoms/_stages.md` § Existing branches. A `trim` still `open`
    (interrupted) → `HRD trim --topic <id> --abort` first (puts back the article critique
    passed; the trim stays used). `stage` `research` with `research_fixes[-1]` `open` (a research

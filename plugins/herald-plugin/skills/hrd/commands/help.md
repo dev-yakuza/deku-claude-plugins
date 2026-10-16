@@ -11,9 +11,9 @@ adopt central improvements
 
 **Publishing** — `next [--attended]` one more article published end to end (plans first if the queue is empty; the guard still confirms merge and deploy) · `ship [ids|PRs]` approve, re-verify, merge, deploy, confirm, record ·
 `ship --reverify <id>` · `ship --deploy-only <id …>` · `ship <PR> --session-auto [--consent]` · `review <id|slug|PR>` independent audit ·
-`refresh <slug> [--attended]` update an article
+`refresh <slug> [--attended] [--direction <id>]` update an article · `translate <slug> [--lang l,…] [--adopt l,…]` add languages to a published article (`--missing`: every article lacking one; `--resume <id>` continue)
 
-**State** — `status [--requeue|--drop|--withdraw|--unwithdraw|--move|--release-slug|
+**State** — `status [--requeue|--drop|--withdraw|--withdraw-lang|--unwithdraw|--move|--release-slug|
 --mark-published|--unlock]`
 
 **Growth & checks** — `evolve [--dry-run|--apply]` · `rollback <evolve#n|commit>` · `audit` ·

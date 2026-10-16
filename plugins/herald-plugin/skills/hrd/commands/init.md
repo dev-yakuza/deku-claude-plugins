@@ -37,7 +37,10 @@ Exclude `.claude/skills/**` and other local skills from every scan (D16).
    in image directories; site base URL and URL pattern (config files, sitemap, README).
 3. **Style & policy evidence**: tone, recurring sections, phrases that look like house rules,
    exemplar candidates per category (3 best-structured articles), sitemap/public site
-   (→ search-discovery role), multiple locale directories (→ translator), YMYL topics
+   (→ search-discovery role), multiple locale directories (→ translator and a `translations`
+   draft: the source language, each target's `body_pattern`/`url_pattern` measured on 2–3
+   existing translated articles, frontmatter conventions of translations — e.g. a `lang` field —
+   and glossary candidates from terms that recur across translation pairs), YMYL topics
    (→ subject-expert), an image/diagram pipeline in the repo's own build (→ illustrator).
    Other deploy entry points (scripts or skills that run the deploy command) → **warn only**.
 
@@ -45,14 +48,16 @@ Exclude `.claude/skills/**` and other local skills from every scan (D16).
 
 Promoted service/app and CTA · north-star metric · domain expertise / YMYL · hard policies
 (external mentions, promotion count, copyright rules) · confirm detected paths, deploy command,
-base URL · per-article budget (USD) · output language (default: `$1` if it is a language code, else the content language).
+base URL · per-article budget (USD) · output language (default: `$1` if it is a language code, else the content language) · with locale directories: translate new articles? which languages, which is the source, auto publish translations (default no).
 
 ## P2 — Generate (additive)
 
 1. **Scripts**: copy `<<SKILL_DIR>>/scripts/` (hrd.py, guard.py, integrity.py,
    validate_content.py, measure.py, batch_runner.py, gsc.py, hrdlib/) to `.claude/herald/scripts/`.
 2. `.claude/herald/config.json` from `templates/config.json.tmpl` with the detected/confirmed
-   values (`roles.conditional` = enabled conditional roles).
+   values (`roles.conditional` = enabled conditional roles). Translations confirmed in the
+   interview → add the `translations` block (`config.md` § Translations: rules, validation,
+   build inputs) and a `docs/editorial/glossary.md` draft if candidates were found.
 3. `docs/editorial/` from `templates/editorial/*.tmpl`: charter (purpose from the interview,
    floor and priority lines verbatim), style guide (its "Not AI prose" tells: phrases in
    `config.language` that read as generated, plus any the existing articles avoid), one
@@ -64,7 +69,9 @@ base URL · per-article budget (USD) · output language (default: `$1` if it is 
    fill the "Project specifics" sections in `config.language`; never touch the marker region's
    text.
 5. `.claude/herald/topics.json` (empty queue), `.claude/herald/published.json` (every existing
-   article as `origin: external`, `current_topic_id: null`), `.claude/herald/evolution-log.md`.
+   article as `origin: external`, `current_topic_id: null` — with translations, an existing
+   translation is listed under its source article's `translations`, not as an article of its
+   own), `.claude/herald/evolution-log.md`.
 6. `.claude/settings.json`: key-level merge of `templates/settings.json.tmpl` (hooks +
    permissions); keep every existing key.
 7. `.gitignore`: append the `templates/gitignore.tmpl` block if missing.

@@ -1,4 +1,4 @@
-# ATOM — Stage spine (brief → research → draft → critique → verify → publish)
+# ATOM — Stage spine (brief → research → draft → critique → translation → verify → publish)
 
 **Not a command.** `write`, `resume`, the single-stage commands and `refresh` drive stages
 through this file. Contract: `atoms/_contract.md`. Design: `design/herald/00-plan.md` §3.2–§3.3.
@@ -16,9 +16,12 @@ Every stage follows the same frame:
 ## brief — content-strategist (+ search-discovery if enabled)
 
 - Before spawning: `HRD begin --topic <id>`.
-- **Read list**: the topic entry (`HRD topics show --topic <id>`), `docs/editorial/charter.md`,
+- **Read list**: the topic entry (`HRD topics show --topic <id>`; its `direction` file, if set, is
+  a human's change to carry — the strategist plans for it and the writer gets it too),
+  `docs/editorial/charter.md`,
   the topic's `docs/editorial/categories/<category>.md`, the cannibalization set (published
-  article list from `published.json` + content directory listing + `brief.md` of open Herald PRs
+  article list from `published.json` + content directory listing, translation directories
+  excluded — translations are the same articles + `brief.md` of open Herald PRs
   via `gh pr list --label herald --state open` / `git show origin/<branch>:<w>brief.md`),
   `docs/editorial/search-checklist.md` if search-discovery is enabled (search-discovery writes
   `<w>search-notes.md` first; the strategist reads it).
@@ -68,7 +71,11 @@ references into the article itself; then the gate.
 - **Output**: the article at `config.paths.body_pattern` for the slug, images under
   `config.paths.images/<slug>/` (illustrator), and `<w>claims-map.json`:
   `{"sentences": [{"text": "...", "claims": ["C3"]}]}` for every factual sentence the writer
-  wrote.
+  wrote. The article is in the **source language** (`translations.source`, else
+  `config.language`). With `translations` in config, every `text` must be the sentence as it
+  stands in the article (markdown aside) — `stage pass --stage draft` refuses a text it cannot
+  find there (a gate error: `--cause gate`), because the translation stage maps translations
+  against these texts.
 - **Gate**: `HRD stage pass --stage draft` runs it in code (`config.commands.validate` if set,
   else the built-in `validate_content.py`) and refuses on errors (it records `gate-failure`
   itself) → `HRD loopback --topic <id> --cause gate`, back to the writer with the errors.
@@ -174,7 +181,8 @@ references into the article itself; then the gate.
    `open` while held; the human's decision on resume sets it to `fixed` (sent back to the
    writer under `HRD loopback --human` — the next recheck verifies it) or `dismissed`, before
    any further audit round (an `open` finding is never handed to an auditor as pending). `MINOR` → PR body only (`noted`).
-4. Before spawning the editor, take `HRD hash --slug <slug>`. After the round, add to this
+4. Before spawning the editor, take `HRD hash --slug <slug> --source` (critique evaluates the
+   source; without translations it equals the default bundle hash). After the round, add to this
    round's section of `<w>critique.md` (the editor wrote its part in step 2; earlier rounds
    stay) the auditor findings and dismissals with reasons, and write `<w>critique.json` — `final_round.body_hash`
    is that hash (the article this round evaluated):
@@ -208,23 +216,55 @@ references into the article itself; then the gate.
    `deferred` and tag `new` (any tag on the last round) — and `body_hash` equals the current article hash (a verdict file left over
    from an earlier round cannot vouch for a changed body).
 
-## translation (M6, translator enabled)
+## translation — translator (topics with translation languages)
 
-After critique, before verify. Read list: the source article, `<w>claims-map.json`,
-`style-guide.md`. Output: the translated file (path from `config.paths` locale pattern) and
-`<w>claims-map.<lang>.json` mapping translated sentences to the same `C#`. verify then checks
-the source and the translation; the critique body hash covers the source only. (Translation
-hashing joins the verify target set when M6 is enabled.)
+Design: `design/herald/01-multilingual.md` §4. `state.json` `translation.langs` are the topic's
+languages (set by `HRD begin`); empty or absent → `stage pass --stage critique` already moved
+the topic to verify and this stage does not run. `translation.pending` are the languages to
+(re)make now — all of them after every critique pass.
+
+- `HRD stage check --topic <id> --stage translation`, then spawn **one translator per pending
+  language** (they may run in parallel; each writes only its own files).
+- **Read list** (per language): the critique-passed source article, `<w>claims-map.json`,
+  `docs/editorial/style-guide.md`, the glossary (`translations.glossary`) if set, and — on a
+  refresh or a redo — that language's current translation (terminology and starting point).
+  Never `research.md` or web pages.
+- **Output**: the translation at `HRD`'s path for that language (`config.translations.targets[].
+  body_pattern` with the slug) and `<w>claims-map.<lang>.json` — `{"sentences": [{"text":
+  "<the translated sentence as it stands>", "source": "<the source sentence>", "claims":
+  ["C3"]}]}` for every factual sentence, with the same claim ids as the source sentence. The
+  translator runs `HRD gate --topic <id> --lang <lang>` before returning and fixes errors.
+- `HRD stage pass --topic <id> --stage translation` checks in code, in order: the source is
+  still what critique evaluated; every pending language exists, passes its own gate and maps
+  exactly the claims the source maps (both sides counted only for sentences really in their
+  article); languages not pending are unchanged. On refusal it records `passed` (the languages
+  that made it) and `last_refusal`:
+  - refusal names languages → `HRD loopback --topic <id> --cause translation` (no `--lang`
+    needed: the refusal is the basis; counted, same cap and accuracy reserve), then translate
+    the languages it returns in `langs` again. `"stagnation": true` in its output (the same
+    language twice in a row) → hold `stagnation`.
+  - "translator modified the source" → hold `needs-human` (`translator modified the source`);
+    a translation loopback cannot repair the source.
+- A human's request about one translation (attended review) → `HRD loopback --topic <id>
+  --human --lang <l>` (not counted) → this stage for that language.
 
 ## verify — fact-checker
 
 - **Read list**: the article, `<w>claims-map.json`, `<w>research.md`,
   `docs/editorial/promotion.md` (only to check `owner` claims), and any pointers from deferred
-  auditor findings about facts (§ critique 3).
+  auditor findings about facts (§ critique 3). With translations: every translation file of the
+  bundle and its `<w>claims-map.<lang>.json` too — each translated sentence is checked against
+  its claims like a source sentence **and** against the source sentence it renders (same claim,
+  same degree, conditions and figures).
 - The fact-checker **extracts factual sentences from the article independently**. A factual
   sentence missing from the claims map is automatically `unsupported`.
-- Before spawning, take `HRD hash --slug <slug>`; after the role returns, the editor-in-chief
-  writes that value into `verify.json` as `body_hash` (the fact-checker does not compute it).
+- Before spawning, take `HRD hash --slug <slug>` (the bundle: source + translations) and, in a
+  translation repo, `HRD hash --slug <slug> --source` and `HRD hash --slug <slug> --lang <l>` for
+  every existing translation; after the role returns, the editor-in-chief writes them into
+  `verify.json` as `body_hash` and `by_lang.<lang>.hash` (the fact-checker computes neither).
+  With translations, `verify.json` also carries `"by_lang": {"<source lang>": {"hash", "counts",
+  "unsupported_sentences"}, "<lang>": {…}}` — one entry per existing language; the top-level
+  `counts` are their sum (`stage pass` checks both).
 - **Output**: `<w>verify.md` (per sentence: supported / unsupported / contradicted, with
   claim ids) and `<w>verify.json` `{"body_hash": "<added by the editor-in-chief>",
   "counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n},
@@ -280,6 +320,11 @@ hashing joins the verify target set when M6 is enabled.)
   contradicted sentence (or a research fix) still gets the one accuracy reserve
   (`_contract.md` §F; the output says `accuracy_reserve`); only `exhausted` holds. (In `ship`'s re-verify of
   a human's push: delta research instead — no trim, no loopback; see `ship.md` §5.)
+- **Translation gap only** (the source entry is clean, no `research_suspects`, a translation has
+  unsupported or contradicted sentences) → `HRD loopback --topic <id> --cause translation --lang
+  <l,…> --note "<first sentence>"` → the translation stage for those languages only. A gap in
+  the source → the routes above (draft / research), after which every translation is made
+  again. The trim never runs in a translation repo.
 - Pass: `HRD stage pass --stage verify` (sets `verified_hash`), then
   `python3 .claude/herald/scripts/integrity.py --record --topic <id>`.
 - Any later body change (loopback, translation, session edit) means verify runs again.
@@ -290,10 +335,10 @@ hashing joins the verify target set when M6 is enabled.)
 2. `--attended` (`write`/`resume`) and attended `/hrd publish`: session approval and any
    requested changes happen first (`write.md` §2) — so the approved body becomes
    `agent_final_hash`. In-session auto and unattended: skip.
-3. `HRD finalize --topic <id>` (entry condition: article == critique hash == verify hash;
-   fixes `agent_final_hash` once).
-4. Commit on the herald branch: `git add` the article, its images and `<w>` — nothing else;
-   `HRD scope --topic <id>` must pass.
+3. `HRD finalize --topic <id>` (entry condition: source == critique hash, bundle == verify
+   hash; fixes `agent_final_hash` once).
+4. Commit on the herald branch: `git add` the article, its images, the topic's translation files
+   and `<w>` — nothing else; `HRD scope --topic <id>` must pass.
 5. `git push -u origin <branch>`; then `python3 .claude/herald/scripts/integrity.py --record
    --topic <id> --kind push` (no `--sha`: the record reads HEAD itself).
 6. `gh pr create --base <base> --label herald --title "<title>" --body-file <tmp>` — body:
@@ -305,8 +350,11 @@ hashing joins the verify target set when M6 is enabled.)
    framings the fact-checker applied and the sentences each covered, from `verify.md`) if any,
    `## Research corrections` (`state.json` `research_fixes`: each claim, the fact-checker's
    reason and the researcher's `corrected:`/`rechecked:` line from `research.md`) if any —
-   so the human sees what was treated as the article's own example rather than fact — and the
-   marker `<!-- herald:topic=<id> slug=<slug> -->`.
+   so the human sees what was treated as the article's own example rather than fact —, with
+   translations `## Translations` (each language, its path and verify counts, and the line
+   "Translations are checked by the fact-checker and the gate; no editor or auditor read
+   them") — and the marker `<!-- herald:topic=<id> slug=<slug> langs=<l,…> -->` (`langs=`
+   only with translations).
 7. Unattended: `HRD result --topic <id> --status pr-open --pr <n>`.
 8. `git switch <base>`.
 
@@ -333,7 +381,8 @@ version>` (SKILL.md version gate):
 - `cannibalization` / `research` / `rejected`: remove this topic's files **before switching**
   (they are untracked until publish — or, for a refresh, tracked and modified — and would
   follow you to base): restore tracked ones with `git checkout HEAD -- <tracked paths>`, then
-  `git clean -fd -- <body path> <image dir> <w>` (only the paths that exist), then
+  `git clean -fd -- <body path> <image dir> <translation paths> <w>` (only the paths that
+  exist), then
   `git switch <base>`, `git branch -D <branch>`. Attended: `HRD state --topic
   <id> --state held --reason <r>` (records the `hold` signal) then `HRD commit --cmd hold --kind hold -m "chore(herald):
   hold <id>" .claude/herald/topics.json` and `git push origin <base>`. Unattended: `HRD result`

@@ -18,11 +18,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from hrdlib import commits, ghstate, integrity, lock, store  # noqa: E402
 from hrdlib.config import Config  # noqa: E402
-from hrdlib.hashing import tree_hash, worktree_hash  # noqa: E402
+from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # noqa: E402
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.8.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.9.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -41,9 +41,17 @@ def cmd_version(a):
     emit(out)
 
 
-def ctx():
+def ctx(check=True):
+    """Repo root and config. `check` refuses a malformed `translations` block (Config.validate);
+    the commands needed to repair config — sync, status, the harness commit — pass False
+    (design/herald/01-multilingual.md §2)."""
     root = repo_root()
-    return root, Config.load(root)
+    cfg = Config.load(root)
+    if check:
+        errors, _ = cfg.validate()
+        if errors:
+            raise HeraldError("config.json translations is invalid: %s — fix it with /hrd config" % "; ".join(errors))
+    return root, cfg
 
 
 def attended_only(what):
@@ -82,10 +90,21 @@ def cmd_topics(a):
             store.check_topic_id(tid)
             if any(t["id"] == tid for t in data["topics"]):
                 raise HeraldError("topic %s exists" % tid)
+            busy = ghstate.slug_busy(root, cfg, item.get("slug") or item.get("refresh_of") or item.get("translate_of"))
+            if busy:  # L16
+                raise HeraldError("another topic is in progress on %s (%s) — finish or close it first"
+                                  % (item.get("slug") or item.get("refresh_of") or item.get("translate_of"), ", ".join(busy)))
             t = {"id": tid, "title": item["title"], "category": item.get("category"),
                  "keywords": item.get("keywords", []), "angle": item.get("angle", ""),
                  "refresh_of": item.get("refresh_of"), "slug": item.get("slug"),
                  "state": "queued", "reason": None, "reverted_by": [], "history": []}
+            if isinstance(item.get("languages"), list):  # a subset of the translation targets (§2)
+                t["languages"] = [str(x) for x in item["languages"]]
+            if item.get("direction"):  # a saved human change to carry (refresh --direction)
+                t["direction"] = str(item["direction"])
+            for k in ("translate_of", "adopt"):  # tr- topics (01-multilingual.md §7)
+                if item.get(k):
+                    t[k] = item[k]
             store.set_topic_state(t, "queued", note="added")
             data["topics"].append(t)
             added.append(tid)
@@ -143,7 +162,7 @@ def cmd_select(a):
 
 
 def cmd_status(a):
-    root, cfg = ctx()
+    root, cfg = ctx(check=False)
     try:
         evolve = store.evolve_readiness(root, cfg)
     except Exception as e:  # advisory only — never let a bad signals file break status
@@ -157,10 +176,26 @@ def cmd_begin(a):
     """Create work/<id>/state.json on base (untracked; carried onto the branch by `branch`)."""
     root, cfg = ctx()
     store.check_topic_id(a.topic)
+    from hrdlib import translation
+    try:
+        topic = store.get_topic(store.load_topics(root), a.topic)
+    except HeraldError:
+        topic = {}
     if os.path.exists(store.state_path(root, a.topic)) and not a.force:
-        emit({"resumed": True, "state": store.load_state(root, a.topic)})
+        st = store.load_state(root, a.topic)
+        if topic.get("translate_of") and st.get("stage") == "translation":
+            # a retry or resume: the source on base may have moved since the queue entry (§7 step 4)
+            translation.translate_check(root, cfg, topic["translate_of"], st["translation"]["langs"],
+                                        adopt=bool(topic.get("adopt")), exclude=a.topic)
+        emit({"resumed": True, "state": st})
         return
     st = store.new_state(a.topic, None)
+    if topic.get("translate_of"):
+        st = translation.inherit_state(root, cfg, st, topic)
+    else:
+        tr = translation.init_state(root, cfg, topic, slug=topic.get("refresh_of") or topic.get("slug"))
+        if tr is not None:  # without translations state.json stays as in 0.8.0
+            st["translation"] = tr
     store.save_state(root, a.topic, st)
     try:  # hints of an earlier attempt describe another body
         os.remove(os.path.join(root, store.prose_rel(a.topic)))
@@ -179,6 +214,10 @@ def cmd_branch(a):
                           "articles with other slugs cannot be refreshed" % e)
     if "--" in a.slug:
         raise HeraldError("slug must not contain `--`")
+    busy = ghstate.slug_busy(root, cfg, a.slug, exclude=a.topic)
+    if busy:  # L16: one topic in flight per slug in a translation repo
+        raise HeraldError("slug in progress: %s — another topic is working on %s; hold this one cannibalization "
+                          "with the note `tooling: slug in progress: %s`" % (busy[0], a.slug, busy[0]))
     st = store.load_state(root, a.topic)
     st["slug"] = a.slug
     store.save_state(root, a.topic, st)
@@ -243,6 +282,17 @@ def cmd_loopback(a):
     if a.cause == "audit" and store._int(st.get("audit_rounds")) >= store.AUDIT_ROUND_CAP:
         raise HeraldError("no audit loopback on the last audit round: a MAJOR is deferred, a BLOCKER is held "
                           "needs-human (a human-directed fix uses --human)")
+    langs = [x.strip() for x in (a.lang or "").split(",") if x.strip()]
+    if a.topic.startswith("tr-") and not (a.cause == "translation" or (a.human and langs)):
+        raise HeraldError("a tr- topic has no draft: only `--cause translation` or `--human --lang` — a defect in the "
+                          "source holds source-defect (then `/hrd refresh`)")
+    if langs and not (a.cause == "translation" or a.human):
+        raise HeraldError("--lang applies only to --cause translation or --human")
+    if a.cause == "translation" or (a.human and langs):
+        return _translation_loopback(root, cfg, a, st, ver, langs)
+    if st.get("translation"):  # another cause breaks a run of translation loopbacks
+        st["translation"].pop("last_loopback_langs", None)
+        st["translation"].pop("last_loopback_stage", None)
     # the accuracy reserve: past the shared cap, one more loopback for a fact the article got wrong
     reserve = (not a.human and store._int(st.get("loopbacks")) >= store.LOOP_CAP and not st.get("accuracy_reserve")
                and a.cause in ("verify", "research") and store.accuracy_gap(ver))
@@ -280,7 +330,7 @@ def cmd_loopback(a):
             ver = store.safe_machine(root, a.topic, "verify.json")
             counts = ver.get("counts")
             try:
-                current = st.get("slug") and ver.get("body_hash") == worktree_hash(root, cfg, st["slug"])
+                current = st.get("slug") and ver.get("body_hash") == bundle_hash(root, cfg, st["slug"])
                 gap = isinstance(counts, dict) and not store.verify_passed(ver)
             except Exception:  # noqa: BLE001 — malformed counts: leave them out
                 current = gap = False
@@ -295,6 +345,59 @@ def cmd_loopback(a):
         store.safe_signal(root, "escalation", a.topic, {"loopback": n, "cause": a.cause})
     emit({"loopbacks": n, "cap": store.LOOP_CAP, "exhausted": n > store.LOOP_CAP and not reserve,
           "accuracy_reserve": bool(reserve), "escalate_tier": escalate, "stage": st["stage"]})
+
+
+def _translation_loopback(root, cfg, a, st, ver, langs):
+    """Back to the translation stage for some languages (01-multilingual.md §4, L9): counted like
+    any loopback unless --human, shares the cap and the accuracy reserve; the same language twice
+    in a row reports `stagnation` (the caller holds)."""
+    from hrdlib import translation
+
+    if a.cause == "translation" and store.research_suspects(ver):
+        raise HeraldError("verify.json lists research_suspects — `HRD loopback --cause research` first")
+    reserve = (not a.human and store._int(st.get("loopbacks")) >= store.LOOP_CAP and not st.get("accuracy_reserve")
+               and store.accuracy_gap(ver))
+    new, stagnant = translation.loopback(root, cfg, st, langs, ver, human=a.human)
+    if not a.human:
+        st["loopbacks"] = int(st.get("loopbacks", 0)) + 1
+    st["last_loopback"] = "human" if a.human else "translation"
+    if reserve:
+        st["accuracy_reserve"] = True
+    store.save_state(root, a.topic, st)
+    n = st["loopbacks"]
+    if not a.human:
+        store.safe_signal(root, "verify-gap", a.topic, {"note": (a.note or "")[:500], "loopback": n,
+                                                        "cause": "translation", "langs": new})
+    escalate = not a.human and (2 <= n <= store.LOOP_CAP or reserve)
+    if escalate:
+        store.safe_signal(root, "escalation", a.topic, {"loopback": n, "cause": "translation"})
+    emit({"loopbacks": n, "cap": store.LOOP_CAP, "exhausted": n > store.LOOP_CAP and not reserve,
+          "accuracy_reserve": bool(reserve), "escalate_tier": escalate, "stage": "translation",
+          "langs": new, "stagnation": stagnant})
+
+
+def cmd_remap(a):
+    from hrdlib import translation
+
+    root, cfg = ctx()
+    st = store.load_state(root, a.topic)
+    st = translation.remap(root, cfg, a.topic, st)
+    store.save_state(root, a.topic, st)
+    emit({"remapped": True, "stage": st["stage"]})
+
+
+def cmd_translate(a):
+    """`/hrd translate` helpers: `check` (preconditions of one tr- topic) and `missing`."""
+    from hrdlib import translation
+
+    root, cfg = ctx()
+    langs = [x.strip() for x in (a.lang or "").split(",") if x.strip()] or None
+    if a.action == "check":
+        if not a.slug:
+            raise HeraldError("check needs --slug")
+        emit(translation.translate_check(root, cfg, a.slug, langs, adopt=a.adopt))
+    else:
+        emit({"articles": translation.missing(root, cfg, langs)})
 
 
 def cmd_audit_round(a):
@@ -317,7 +420,8 @@ def cmd_finalize(a):
 
 
 RESULT_STATUSES = {"pr-open", "merged"} | {"held:%s" % r for r in
-                                          ("cannibalization", "research", "rejected", "needs-human", "stagnation", "budget")}
+                                          ("cannibalization", "research", "rejected", "needs-human", "stagnation", "budget",
+                                           "source-defect")}
 
 
 def cmd_result(a):
@@ -333,8 +437,17 @@ def cmd_result(a):
 # --- hashes / ledger / scope ----------------------------------------------------------------------
 
 def cmd_hash(a):
+    """Default: the bundle (source + translations) — what verify, the ledger and ship compare.
+    `--source`: body + images (critique, the editor's reader pass). `--lang`: one language's
+    file (`verify.json` by_lang). Design: 01-multilingual.md §3."""
     root, cfg = ctx()
-    emit({"hash": tree_hash(root, cfg, a.rev, a.slug) if a.rev else worktree_hash(root, cfg, a.slug)})
+    if a.lang:
+        h = lang_hash(root, cfg, a.slug, a.lang, rev=a.rev)
+    elif a.source:
+        h = tree_hash(root, cfg, a.rev, a.slug) if a.rev else worktree_hash(root, cfg, a.slug)
+    else:
+        h = bundle_hash(root, cfg, a.slug, rev=a.rev)
+    emit({"hash": h})
 
 
 def cmd_ledger(a):
@@ -358,6 +471,18 @@ def cmd_scope(a):
         sys.exit(1)
 
 
+def cmd_premerge(a):
+    """ship §3/§5: checks on a PR head before merging when the repo translates
+    (01-multilingual.md §5). Exit 1 with `problems` → do not merge this PR."""
+    from hrdlib import translation
+
+    root, cfg = ctx()
+    problems = translation.premerge_problems(root, cfg, a.topic, a.rev)
+    emit({"ok": not problems, "problems": problems})
+    if problems:
+        sys.exit(1)
+
+
 def cmd_ahead(a):
     root, cfg = ctx()
     rows = commits.classify_ahead(root, cfg, cfg.base)
@@ -365,7 +490,7 @@ def cmd_ahead(a):
 
 
 def cmd_sync(a):
-    root, cfg = ctx()
+    root, cfg = ctx(check=False)
     emit({"sync": commits.sync_base(root, cfg, allow_merge=os.environ.get("HRD_UNATTENDED") != "1")})
 
 
@@ -378,7 +503,7 @@ def cmd_fetch_pr(a):
 
 
 def cmd_commit(a):
-    root, cfg = ctx()
+    root, cfg = ctx(check=a.cmd != "harness")
     attended_only("`commit`")
     sha = commits.commit_state(root, cfg, a.cmd, a.message, a.kind, a.paths)
     emit({"commit": sha})
@@ -449,7 +574,9 @@ def cmd_state(a):
 
 
 def _article_present(root, cfg, slug):
+    """Any part of the bundle still on base: the body, tracked images, or a translation."""
     return os.path.exists(os.path.join(root, cfg.body_path(slug))) or \
+        any(os.path.exists(os.path.join(root, p)) for p in cfg.translation_paths(slug).values()) or \
         os.path.isdir(os.path.join(root, cfg.image_dir(slug))) and bool(
             git(root, "ls-files", "--", cfg.image_dir(slug)).strip())
 
@@ -461,11 +588,19 @@ def cmd_requeue(a):
     t = store.get_topic(data, a.topic)
     if t["state"] not in ("held", "declined"):
         raise HeraldError("only held/declined topics can be requeued (state: %s)" % t["state"])
+    busy = ghstate.slug_busy(root, cfg, t.get("slug") or t.get("refresh_of") or t.get("translate_of"), exclude=a.topic)
+    if busy:
+        raise HeraldError("another topic is in progress on this slug (%s) — finish or close it first" % ", ".join(busy))
     for b in ghstate.local_branches(root):
         if b.startswith("herald/%s--" % a.topic):
             git(root, "branch", "-q", "-D", b)
     t.pop("auto_merged_pr", None)  # a new PR will be judged on its own
     t.pop("auto_merged_at", None)
+    if a.direction:  # a human's change saved at decline (01-multilingual.md §5): brief/draft read it
+        rel = os.path.join(".claude", "herald", "memory", "directions", "%s.diff" % a.topic)
+        if not os.path.isfile(os.path.join(root, rel)):
+            raise HeraldError("no saved direction %s" % rel)
+        t["direction"] = rel
     store.set_topic_state(t, "queued", note="requeued (reverted_by kept)")
     store.save_topics(root, data)
     emit({"id": a.topic, "state": "queued", "reverted_by": t.get("reverted_by", [])})
@@ -505,7 +640,7 @@ def cmd_withdraw(a):
         raise HeraldError("no published article %s" % slug)
     slug = art["slug"]
     if _article_present(root, cfg, slug):
-        raise HeraldError("the body or tracked images of %s still exist on base — withdraw only after the human removed them "
+        raise HeraldError("the body, tracked images or a translation of %s still exist on base — withdraw only after the human removed them "
                           "(to change the slug use `status --move`; to fix content use exit ①/②)" % slug)
     # Without a pathspec git can pair the rename (with one, the other side is out of scope and
     # it reports a delete) — look for any rename whose source is this body or image dir.
@@ -563,6 +698,10 @@ def cmd_move(a):
     if not art:
         raise HeraldError("`move` needs a published article (merged-unrecorded: move the files back and run ship)")
     old = art["slug"]
+    if art.get("translations") or any(os.path.exists(os.path.join(root, p)) for p in
+                                      list(cfg.translation_paths(old).values()) + list(cfg.translation_paths(a.new_slug).values())):
+        raise HeraldError("moving an article with translations is not supported (01-multilingual.md §5) — "
+                          "`status --withdraw-lang` each language, move, then `/hrd translate`")
     if os.path.exists(os.path.join(root, cfg.body_path(old))):
         raise HeraldError("old path %s still exists" % cfg.body_path(old))
     if not os.path.exists(os.path.join(root, cfg.body_path(a.new_slug))):
@@ -591,6 +730,70 @@ def cmd_move(a):
           "note": "commit published.json and the state files; next ship re-verifies (path is part of the hash)"})
 
 
+def cmd_withdraw_lang(a):
+    """Take one translation down (01-multilingual.md §5): the file is already gone from base;
+    the rest of the bundle must be exactly what was verified, file by file, so nothing else can
+    ride along. Updates the reference topic's committed state (verified_hash, verified_files,
+    withdrawn_langs) and published.json; the caller commits them, then records the ledger line
+    with `integrity.py --record --kind withdraw-lang`."""
+    from hrdlib.hashing import bundle_files, bundle_hash, digest_files
+
+    root, cfg = ctx()
+    attended_only("`withdraw-lang`")
+    lang = a.lang
+    if lang not in cfg.target_langs():
+        raise HeraldError("%s is not a translation target" % lang)
+    pub = store.load_published(root)
+    art = store.find_article(pub, a.slug)
+    if not art or art.get("origin") != "herald":
+        raise HeraldError("no Herald article %s" % a.slug)
+    slug = art["slug"]
+    if os.path.exists(os.path.join(root, cfg.body_path(slug, lang))):
+        raise HeraldError("remove %s from base first" % cfg.body_path(slug, lang))
+    prs = ghstate.herald_prs(root, cfg)
+    busy = [t for t in ghstate.in_progress_topics(root, cfg, prs=prs) if t["slug"] == slug]
+    if busy:
+        raise HeraldError("%s has a topic in progress (%s) — finish or close it first: its verify covers the bundle "
+                          "with this language" % (slug, ", ".join(t["id"] for t in busy)))
+    ref = ghstate.herald_set(root, cfg, prs=prs, pub=pub).get(slug, {}).get("ref_topic")
+    if not ref:
+        raise HeraldError("no reference topic for %s" % slug)
+    st = store.load_state(root, ref)
+    led = store.ledger_latest(root, ref)
+    cur = bundle_files(root, cfg, slug)
+    path = cfg.body_path(slug, lang)
+    committed = st.get("verified_files") or {}
+    already = lang in (st.get("withdrawn_langs") or []) and committed == cur
+    if already:
+        basis = None  # another machine applied it: only this machine's ledger line is missing
+    elif led and led.get("files"):
+        basis = led["files"]
+    elif committed and not led:
+        basis = committed  # no ledger line here: the committed record, attended (like trust)
+    else:
+        raise HeraldError("no file-level record to prove against (a ledger line from before 0.9.0) — re-verify instead")
+    if basis is not None:
+        if path not in basis:
+            raise HeraldError("%s was not part of the verified bundle" % path)
+        want = {p: v for p, v in basis.items() if p != path}
+        if {p: v["blob"] for p, v in want.items()} != {p: v["blob"] for p, v in cur.items()}:
+            raise HeraldError("the bundle differs from what was verified beyond removing %s — re-verify or restore" % lang)
+        st["verified_hash"] = bundle_hash(root, cfg, slug)
+        st["verified_files"] = cur
+        st["withdrawn_langs"] = sorted(set(st.get("withdrawn_langs") or []) | {lang})
+        if st.get("stages", {}).get("verify"):
+            st["stages"]["verify"]["body_hash"] = st["verified_hash"]
+        store.save_state(root, ref, st)
+        (art.get("translations") or {}).pop(lang, None)
+        art["withdrawn_langs"] = sorted(set(art.get("withdrawn_langs") or []) | {lang})
+        store.save_published(root, pub)
+    emit({"withdrawn_lang": lang, "slug": slug, "ref_topic": ref, "already_applied": already,
+          "verified_hash": st.get("verified_hash"),
+          "commit": [] if already else [store.work_rel(ref, "state.json"), ".claude/herald/published.json"],
+          "next": "commit these (HRD commit --cmd status), then integrity.py --record --topic %s --kind withdraw-lang "
+                  "--sha <that commit>" % ref})
+
+
 def cmd_release_slug(a):
     root, cfg = ctx()
     attended_only("`release-slug`")
@@ -602,7 +805,7 @@ def cmd_release_slug(a):
         any(m["slug"] == slug for x in pub["articles"] for m in x.get("moved_from") or [])
     if not known:
         raise HeraldError("%s is neither withdrawn nor a moved-away slug" % slug)
-    rel = {"slug": slug, "at": now_iso(), "content_hash": worktree_hash(root, cfg, slug)}
+    rel = {"slug": slug, "at": now_iso(), "content_hash": bundle_hash(root, cfg, slug)}
     pub["releases"] = [r for r in pub.get("releases", []) if r["slug"] != slug] + [rel]
     if not store.find_article(pub, slug):
         pub["articles"].append({"slug": slug, "path": cfg.body_path(slug), "origin": "external",
@@ -627,7 +830,16 @@ def cmd_record_published(a):
     root, cfg = ctx()
     attended_only("`record-published`")
     art = store.record_published(root, cfg, a.topic, a.slug, pr=a.pr, auto=a.auto)
-    emit({"published": a.slug, "human_reviewed": art.get("human_reviewed")})
+    out = {"published": a.slug, "human_reviewed": art.get("human_reviewed")}
+    if cfg.translations():
+        # per published entry: ship §9 records human-edit signals with each one's own value
+        out["entries"] = {}
+        if not a.topic.startswith("tr-"):
+            out["entries"][cfg.source_lang()] = art.get("human_reviewed")
+        for lang in store._published_langs(root, cfg, a.topic, store.get_topic(store.load_topics(root), a.topic)):
+            out["entries"][lang] = (art.get("translations") or {}).get(lang, {}).get("human_reviewed")
+        out["urls"] = store.bundle_urls(root, cfg, a.slug)
+    emit(out)
 
 
 def cmd_auto_merged(a):
@@ -668,8 +880,11 @@ def cmd_gate(a):
     memory/prose/<id>.json — the editor's input for its reader pass (gitignored)."""
     root, cfg = ctx()
     slug = a.slug or store.load_state(root, a.topic)["slug"]
-    rep = store.run_gate(root, cfg, slug)
-    rep["prose_file"] = store.write_prose(root, cfg, a.topic, slug, rep)
+    rep = store.run_gate(root, cfg, slug, lang=a.lang)
+    if a.lang:  # a translation's hints describe that file, not the source the editor reads
+        rep["prose_file"] = None
+    else:
+        rep["prose_file"] = store.write_prose(root, cfg, a.topic, slug, rep)
     if a.record and not rep["ok"]:  # the pre-editor check: a gate failure the flow acts on
         store.record_gate_failure(root, store.load_state(root, a.topic), a.topic, "critique", rep)
     emit(rep)
@@ -763,21 +978,29 @@ def build():
     p.add_argument("--human", action="store_true", help="human-requested revision: not counted")
     p.add_argument("--cause", choices=sorted(store.LOOPBACK_CAUSES)); p.add_argument("--theme")
     p.add_argument("--note"); p.add_argument("--claims", help="research: the suspect claim ids, comma-separated")
+    p.add_argument("--lang", help="translation / --human: the languages to translate again, comma-separated")
     p.set_defaults(fn=cmd_loopback)
     p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)
+    p = sp.add_parser("remap"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_remap)
+    p = sp.add_parser("translate"); p.add_argument("action", choices=["check", "missing"])
+    p.add_argument("--slug"); p.add_argument("--lang"); p.add_argument("--adopt", action="store_true")
+    p.set_defaults(fn=cmd_translate)
     p = sp.add_parser("finalize"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_finalize)
     p = sp.add_parser("result"); p.add_argument("--topic", required=True); p.add_argument("--status", required=True)
     p.add_argument("--pr", type=int); p.add_argument("--note"); p.add_argument("--merged", type=int, nargs="*")
     p.set_defaults(fn=cmd_result)
 
     p = sp.add_parser("hash"); p.add_argument("--slug", required=True); p.add_argument("--rev")
+    g = p.add_mutually_exclusive_group(); g.add_argument("--source", action="store_true"); g.add_argument("--lang")
     p.set_defaults(fn=cmd_hash)
     p = sp.add_parser("ledger"); p.add_argument("action", choices=["record", "show"])
     p.add_argument("--topic", required=True); p.add_argument("--sha"); p.add_argument("--rev")
-    p.add_argument("--kind", default="verify", choices=["verify", "push", "base-commit", "trust"])
+    p.add_argument("--kind", default="verify", choices=["verify", "push", "base-commit", "trust", "withdraw-lang"])
     p.set_defaults(fn=cmd_ledger)
     p = sp.add_parser("scope"); p.add_argument("--topic", required=True); p.add_argument("--slug")
     p.add_argument("--rev", default="HEAD"); p.set_defaults(fn=cmd_scope)
+    p = sp.add_parser("premerge"); p.add_argument("--topic", required=True); p.add_argument("--rev", required=True)
+    p.set_defaults(fn=cmd_premerge)
     p = sp.add_parser("ahead"); p.set_defaults(fn=cmd_ahead)
     p = sp.add_parser("sync"); p.set_defaults(fn=cmd_sync)
     p = sp.add_parser("fetch-pr"); p.add_argument("--pr", type=int, required=True); p.set_defaults(fn=cmd_fetch_pr)
@@ -792,9 +1015,13 @@ def build():
 
     p = sp.add_parser("state"); p.add_argument("--topic", required=True); p.add_argument("--state", required=True)
     p.add_argument("--reason"); p.add_argument("--note"); p.set_defaults(fn=cmd_state)
-    p = sp.add_parser("requeue"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_requeue)
+    p = sp.add_parser("requeue"); p.add_argument("--topic", required=True)
+    p.add_argument("--direction", action="store_true", help="attach memory/directions/<id>.diff as the topic's direction")
+    p.set_defaults(fn=cmd_requeue)
     p = sp.add_parser("drop"); p.add_argument("--topic", required=True); p.add_argument("--note")
     p.set_defaults(fn=cmd_drop)
+    p = sp.add_parser("withdraw-lang"); p.add_argument("slug"); p.add_argument("--lang", required=True)
+    p.set_defaults(fn=cmd_withdraw_lang)
     p = sp.add_parser("withdraw"); p.add_argument("slug_or_topic"); p.add_argument("--note")
     p.set_defaults(fn=cmd_withdraw)
     p = sp.add_parser("unwithdraw"); p.add_argument("slug_or_topic"); p.set_defaults(fn=cmd_unwithdraw)
@@ -810,6 +1037,7 @@ def build():
     p.add_argument("--consent", action="store_true"); p.add_argument("--sha"); p.set_defaults(fn=cmd_auto_merged)
     p = sp.add_parser("throttle"); p.set_defaults(fn=cmd_throttle)
     p = sp.add_parser("gate"); p.add_argument("--topic", required=True); p.add_argument("--slug")
+    p.add_argument("--lang", help="gate one translation (the translator's own check)")
     p.add_argument("--record", action="store_true", help="record a failure as a gate-failure signal (pre-editor check)")
     p.set_defaults(fn=cmd_gate)
     p = sp.add_parser("signal"); p.add_argument("--kind", required=True); p.add_argument("--topic")

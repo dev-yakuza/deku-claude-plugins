@@ -17,7 +17,7 @@ ap.add_argument("--days", type=int, default=28)
 a = ap.parse_args()
 try:
     root = repo_root()
-    cfg = Config.load(root)
+    cfg = Config.load_checked(root)
     emit(gsc.collect(root, cfg, a.days) if a.action == "collect" else gsc.cached(root))
 except HeraldError as e:
     sys.stderr.write("gsc: %s\n" % e)

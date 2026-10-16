@@ -19,7 +19,7 @@ import urllib.request
 from . import commits, ghstate, integrity, lock
 from .config import Config
 from .measure import stream_json_usd
-from .store import (CLEANUP_REASONS, HOLD_REASONS, exclusion_reasons, record_published, branch_name, get_topic, load_published, load_topics,
+from .store import (CLEANUP_REASONS, HOLD_REASONS, bundle_urls, exclusion_reasons, record_published, branch_name, get_topic, load_published, load_topics,
                     paths, read_json_at, save_published, save_topics, set_topic_state, safe_signal as emit_signal,
                     NON_SIGNAL_HOLD_NOTES, work_rel)
 from .util import HeraldError, git, git_ok, now_iso, read_json, version_tuple, write_json
@@ -145,10 +145,43 @@ def _topic_branch(root, tid):
 
 
 def _topic_paths(cfg, tid, slug):
+    """Everything a cleanup removes: the work dir and the whole bundle (every configured
+    translation path too — 01-multilingual.md §5)."""
     paths_ = [work_rel(tid)]
     if slug:
-        paths_ += [cfg.body_path(slug), cfg.image_dir(slug)]
+        paths_ += cfg.bundle_paths(slug)
     return paths_
+
+
+def _discard_out_of_scope(root, cfg, tid, slug, scope):
+    """Bundle paths outside the topic's PR scope that changed (a tr- source, a translation of
+    another language): saved under memory/wip-discard/<id>/ (tracked: a diff; untracked: a
+    copy — `git diff` shows no untracked file), then put back, so nothing follows the switch to
+    base (01-multilingual.md §5)."""
+    import shutil
+
+    outside = [p for p in cfg.bundle_paths(slug) if p not in scope]
+    present = _present(root, outside)
+    if not present:
+        return
+    tracked = [p for p in git(root, "ls-files", "-z", "--", *present).split("\0") if p]
+    untracked = [p for p in git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", *present).split("\0") if p]
+    diff = git(root, "diff", "HEAD", "--", *tracked) if tracked else ""
+    if not diff.strip() and not untracked:
+        return
+    keep = os.path.join(paths(root)["memory"], "wip-discard", tid)
+    os.makedirs(keep, exist_ok=True)
+    if diff.strip():
+        with open(os.path.join(keep, "tracked.diff"), "w", encoding="utf-8") as f:
+            f.write(diff)
+    for p in untracked:
+        dst = os.path.join(keep, "untracked", p)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(os.path.join(root, p), dst)
+    if tracked:
+        git(root, "checkout", "-q", "HEAD", "--", *tracked)
+    if untracked:
+        git(root, "clean", "-q", "-f", "--", *untracked)
 
 
 def _present(root, paths_):
@@ -178,11 +211,15 @@ def preserve_wip(root, cfg, tid):
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
     if branch.startswith("herald/%s--" % tid):
         slug = branch.split("--", 1)[1]
-        targets = _present(root, _topic_paths(cfg, tid, slug))
+        # commit the PR scope only (a runner commit passes no guard); then put back the rest
+        from .commits import pr_scope_paths, topic_langs
+        scope = pr_scope_paths(cfg, tid, slug, topic_langs(root, tid))
+        targets = _present(root, scope)
         if targets:
             git(root, "add", "-A", "--", *targets)
             if git(root, "diff", "--cached", "--name-only", "--", *targets).strip():
                 git(root, "commit", "-q", "-m", "wip(herald): %s preserved by batch runner" % tid, "--", *targets)
+        _discard_out_of_scope(root, cfg, tid, slug, scope)
     git(root, "checkout", "-q", cfg.base)
     # a stray untracked copy of work/<id>/ on base is redundant once the branch holds it
     branch = _topic_branch(root, tid)
@@ -273,8 +310,13 @@ def auto_published_today(pub, topics=None):
     """Auto publishes today, plus auto merges not yet recorded as published (they count against
     the daily throttle too)."""
     today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
-    n = sum(1 for a in pub["articles"] if a.get("human_reviewed") is False
-            and str(a.get("published_at", "")).startswith(today))
+    n = 0
+    for a in pub["articles"]:
+        if isinstance(a.get("publishes"), list):  # a translation repo: one entry per publish (§5)
+            n += sum(1 for e in a["publishes"] if isinstance(e, dict) and e.get("auto")
+                     and str(e.get("at", "")).startswith(today))
+        elif a.get("human_reviewed") is False and str(a.get("published_at", "")).startswith(today):
+            n += 1
     for t in (topics or {}).get("topics", []):
         if t.get("auto_merged_pr") and str(t.get("auto_merged_at", "")).startswith(today) \
                 and t.get("state") not in ("published", "withdrawn") and t.get("reason") != "reverted":
@@ -389,11 +431,12 @@ def finish_auto(root, cfg, chosen):
     extra = [(r["ref_topic"], r["slug"]) for r in report["articles"]
              if r["merged_unrecorded"] and r["status"] == "ok" and r["slug"] not in chosen_slugs and r["ref_topic"]]
     for tid, slug in extra:
-        if url_ok(cfg.article_url(slug)):
+        if all(url_ok(u) for u in bundle_urls(root, cfg, slug).values()):
             record_published(root, cfg, tid, slug)  # auto_merged_pr on the topic keeps human_reviewed=false
     for tid, n in merged:
         slug = by_num[n]["slug"]
-        if not url_ok(cfg.article_url(slug)):
+        # the source and every translation: the bundle is published as one (§5)
+        if not all(url_ok(u) for u in bundle_urls(root, cfg, slug).values()):
             log("URL check failed for %s — left merged-unrecorded" % slug)
             continue
         record_published(root, cfg, tid, slug, pr=n, auto=True)
@@ -415,7 +458,7 @@ def main(argv):
     a = ap.parse_args(argv)
     from .util import repo_root
     root = repo_root()
-    cfg = Config.load(root)
+    cfg = Config.load_checked(root)
     logs_dir = os.path.join(paths(root)["memory"], "batch-logs")
     os.makedirs(logs_dir, exist_ok=True)
     if a.detach:
@@ -519,7 +562,8 @@ def main(argv):
             check_version()  # a /hrd update may have landed on origin mid-batch
             log("write %s" % tid)
             started = now_iso().replace("+00:00", "Z")
-            outcome, spent = run_child(root, cfg, "/hrd write %s" % tid, os.path.join(logs, tid + ".jsonl"), budget)
+            first = "/hrd translate --resume %s" % tid if tid.startswith("tr-") else "/hrd write %s" % tid
+            outcome, spent = run_child(root, cfg, first, os.path.join(logs, tid + ".jsonl"), budget)
             if outcome == "budget":
                 preserve_wip(root, cfg, tid)
                 record_hold(root, cfg, tid, "budget", "per-article budget %.2f USD exceeded" % budget)
@@ -528,7 +572,9 @@ def main(argv):
             res = completed(root, cfg, tid, since=started)
             if not res:
                 # one retry: resume if the child got as far as a branch, else start over
-                retry = "/hrd resume %s" % tid if _topic_branch(root, tid) else "/hrd write %s" % tid
+                # a tr- topic has no brief or draft: it always resumes through /hrd translate (§7)
+                retry = ("/hrd translate --resume %s" % tid if tid.startswith("tr-") else
+                         "/hrd resume %s" % tid if _topic_branch(root, tid) else "/hrd write %s" % tid)
                 log("%s incomplete (%s) — one retry: %s" % (tid, outcome, retry))
                 preserve_wip(root, cfg, tid)  # keep the child's untracked work on its branch, not on base
                 outcome, spent = run_child(root, cfg, retry, os.path.join(logs, tid + "-retry.jsonl"), budget,

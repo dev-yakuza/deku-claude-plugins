@@ -18,7 +18,8 @@ critique passed, verdict files that cannot be read. `next` takes no lock itself:
    (`autonomy.throttle.max_per_day`); nothing is written.
 4. `HRD select --n 1` → the topic. Empty → run `plan.md` with `--auto --n 3`, then select
    again; still empty (the planner kept nothing) → report the dropped titles and stop.
-5. Run `write.md` for that topic with `--ship` (and `--attended` if `next` got it). Its pre-flow
+5. Run `write.md` for that topic with `--ship` (and `--attended` if `next` got it) — a `tr-` id
+   runs `translate.md` § C instead, with the same flags. Its pre-flow
    questions still apply (`atoms/_contract.md` §C).
 6. Report in one short block: the published URL and what was accepted unread (ship §10: the
    accepted exclusions, the deferred auditor findings, dismissals and assumptions with their

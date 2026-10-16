@@ -1,6 +1,7 @@
 # WRITE — one article end to end (`/hrd write <topic-id> [--attended] [--ship]`)
 
-brief → research → draft → critique → verify → publish (PR). Publishing itself is `/hrd ship`;
+brief → research → draft → critique → translation (topics with translation languages) → verify →
+publish (PR). Publishing itself is `/hrd ship`;
 `--ship` (also what `/hrd next` runs) ships the PR right away (§3).
 Rules: `atoms/_contract.md`, `atoms/_stages.md`. Plan: §3.2, §3.2.2.
 
@@ -22,7 +23,8 @@ Rules: `atoms/_contract.md`, `atoms/_stages.md`. Plan: §3.2, §3.2.2.
 5. Unpushed commits touching `docs/editorial/` or `.claude/agents/` on base → push them first
    (roles read the harness from the herald branch = `origin/<base>`).
 6. `HRD select --topic <id>` must list the topic (queued, no open/merged PR, no local
-   branch). An existing local branch means `resume`, not `write`.
+   branch). An existing local branch means `resume`, not `write`. A `tr-` id (a later
+   translation) has no brief or draft: run `translate.md` § C for it instead (same flags).
 7. Budget: `config.budget.per_article_usd` (0 = none). Run `python3
    .claude/herald/scripts/measure.py` now and keep its `total_usd` as the baseline and its
    `session` id (the session may already have spent on other work); at each stage end run
@@ -36,14 +38,15 @@ Rules: `atoms/_contract.md`, `atoms/_stages.md`. Plan: §3.2, §3.2.2.
 
 ## 1. Stages
 
-Run brief, research, draft, critique, verify in order per `atoms/_stages.md`. After each
+Run brief, research, draft, critique, translation (when `state.json` `translation.langs` is
+non-empty), verify in order per `atoms/_stages.md`. After each
 `DONE`, tell the user one line (in `config.language`; not unattended).
 
 ## 2. Session approval (`--attended` only, before the PR)
 
 Show: title, slug, 5-line summary, audit findings incl. MINOR, dismissals and deferrals, verify
 counts, the framings (`verify.json` `framings`: sentences treated as the article's own example)
-the reader notes (`reader.json` `notes`) and the research corrections (`state.json` `research_fixes`) if any, measured cost so far. Ask: approve / request changes / hold. Each re-run below counts
+the reader notes (`reader.json` `notes`) and the research corrections (`state.json` `research_fixes`) if any, with translations each language's path, title and verify counts (`verify.json` `by_lang`) — the human may open them; no editor or auditor read them —, measured cost so far. Ask: approve / request changes / hold. Each re-run below counts
 an audit round (`HRD audit-round`), so after the cap only the editor and verify run again.
 
 - **Request changes**: record it right away — `HRD signal --kind session-edit-request --topic
@@ -55,6 +58,9 @@ an audit round (`HRD audit-round`), so after the cap only the editor and verify 
   session-edit-request --topic <id> --data '{"request_id": "<that id>", "diff_summary": "...",
   "lines_changed": n}'` (joined to its request by the id, counted once); then critique (editor →
   auditor) and verify run again. Loop until approve or hold.
+- **Request changes to a translation only**: record the request as above, then `HRD loopback
+  --topic <id> --human --lang <l>` (not counted) → the translation stage for that language with
+  the request as direction → verify again (no critique: the source did not change).
 - **Hold**: hold `needs-human` with `--note "human: <the human's reason>"` (branch preserved; a
   human's choice is not a growth signal).
 

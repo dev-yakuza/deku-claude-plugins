@@ -9,7 +9,9 @@ out branches.
    topic id/slug → open PR if any, else the published file on base.
 2. Materialize the article for reading without switching branches:
    `git show <ref>:<body path>` into `.claude/herald/memory/review/<id>/article.md` and the
-   referenced images likewise.
+   referenced images likewise; with translations also each translation of the bundle into
+   `article.<lang>.md` — the auditor reads them too (fidelity to the source, the house policies
+   in that language).
 3. Spawn the auditor with those paths + the charter purpose + hard policies (read-only
    tripwire: hash the materialized files before/after).
 4. **Always record**: `HRD signal --kind review-finding --topic <id> --data

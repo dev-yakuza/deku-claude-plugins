@@ -7,7 +7,8 @@ It does not write articles. Plan §3.1, §5.
    exit path); base checked out and clean; `HRD sync`.
 2. Spawn **content-strategist** (and **search-discovery** if enabled) with: `charter.md`, all
    category guides, `search-checklist.md` (if enabled), the existing queue (`HRD topics list`),
-   the published list (`published.json` + content directory listing), open Herald PR titles.
+   the published list (`published.json` + content directory listing — translation directories
+   excluded: a translation is the same article, `published.json` `translations`), open Herald PR titles.
    Task: propose N topics (default 10) as clusters, each `{title, category, keywords, angle}`;
    the **angle** must say what this article offers that the existing ones do not
    (scaled-content policy). Reject near-duplicates of existing or queued articles. Output file:
