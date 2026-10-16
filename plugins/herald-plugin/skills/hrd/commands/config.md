@@ -20,6 +20,13 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
   the image directory — Hugo page bundles are not supported —, a missing role); fix before
   committing. A warning (build inputs not covering a translation directory) → offer to add it to
   `paths.build_inputs`.
+  - **Turning it on**: add `translator` to `roles.conditional` and, if
+    `.claude/agents/translator.md` does not exist (a repo set up without the role), create it
+    from `<<SKILL_DIR>>/templates/agents/translator.md` — fill its "Project specifics" in
+    `config.language` (language conventions from 2–3 existing translated articles if any) and
+    leave the marker region as is; commit it with config.json (`HRD commit --cmd harness --kind
+    config … .claude/herald/config.json .claude/agents/translator.md`). The translation stage
+    spawns this role.
   - **Turning it on or adding a target**: first list the Herald articles (`published.json`
     `origin: herald`) that already have a file at the new language's path — after the change
     each shows as `translation_added` and **stops deploys until adopted**. Ask per article:
