@@ -13,10 +13,10 @@ from hrdlib.validate import validate  # noqa: E402
 args = sys.argv[1:]
 lang = None
 if len(args) == 3 and args[1] == "--lang":
-    lang = args[2]
+    lang, args = args[2], args[:1]
 elif len(args) == 3 and args[0] == "--lang":
     lang, args = args[1], args[2:]
-if len(args) not in (1, 3):
+if len(args) != 1 or args[0].startswith("--"):
     sys.stderr.write("usage: validate_content.py <file> [--lang <code>]\n")
     sys.exit(2)
 root = repo_root()

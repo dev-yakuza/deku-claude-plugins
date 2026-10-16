@@ -62,6 +62,36 @@ def langs_of(st):
     return list((st.get("translation") or {}).get("langs") or [])
 
 
+def langs_problems(st):
+    """`langs` changes only at the points the design lists, each logged (§2): a language with no
+    log entry was put there by hand."""
+    tr = st.get("translation") or {}
+    logged = {e.get("lang") for e in tr.get("log") or [] if isinstance(e, dict)}
+    odd = [l for l in tr.get("langs") or [] if l not in logged]
+    return ["translation.langs has %s with no log entry — languages change only through begin and loopback"
+            % ", ".join(odd)] if odd else []
+
+
+def unowned_translations(root, cfg, st):
+    """Translation files in the bundle this topic never translated (§2, R1 MJ-2): a topic begun
+    without translations, or a language outside its own. Only a tr- topic may carry them, and only
+    unchanged from base (they are covered by the verified record its begin checked)."""
+    from .hashing import _tree_entries, _worktree_entries
+
+    if not cfg.translations() or not st.get("slug"):
+        return []
+    mine = set(langs_of(st))
+    out = []
+    for lang, path in cfg.translation_paths(st["slug"]).items():
+        if lang in mine or not os.path.isfile(os.path.join(root, path)):
+            continue
+        if st.get("topic_id", "").startswith("tr-") and \
+                _worktree_entries(root, [path]) == _tree_entries(root, "origin/%s" % cfg.base, [path]):
+            continue
+        out.append(lang)
+    return out
+
+
 # --- hashes -----------------------------------------------------------------------------------
 
 def lang_record(root, cfg, tid, slug, lang):
@@ -208,8 +238,13 @@ def stage_pass(root, cfg, tid, st, run_gate, save_state, record_gate_failure):
     tr = st.get("translation")
     if not tr or not tr.get("langs"):
         raise HeraldError("this topic has no translation languages — verify follows critique")
+    if st.get("stage") != "translation":
+        raise HeraldError("the topic is at %s, not translation" % st.get("stage"))
     if tid.startswith("tr-") and not tr.get("remapped"):
         raise HeraldError("`HRD remap --topic %s` first (the inherited claims map must match the source)" % tid)
+    problems = langs_problems(st)
+    if problems:
+        raise HeraldError("; ".join(problems))
     slug = st["slug"]
     crit = (st["stages"].get("critique") or {}).get("body_hash")
     if not crit:
@@ -217,6 +252,13 @@ def stage_pass(root, cfg, tid, st, run_gate, save_state, record_gate_failure):
     if worktree_hash(root, cfg, slug) != crit:
         raise HeraldError("the source changed during translation (translator modified the source) — "
                           "hold needs-human; translation cannot repair it")
+    if tid.startswith("tr-"):
+        from .hashing import tree_hash
+        # a retry may come long after begin: the source on base must still be the one translated (§7)
+        if tree_hash(root, cfg, "origin/%s" % cfg.base, slug) != crit:
+            raise HeraldError("base-source-changed: the source on base is no longer the one this translation was "
+                              "made from — hold cannibalization (`tooling: translate precondition: base source "
+                              "changed`) and start again")
     tr["round"] = int(tr.get("round") or 0) + 1
     refused, reasons = [], []
     pending = list(tr.get("pending") or [])
@@ -256,7 +298,8 @@ def stage_pass(root, cfg, tid, st, run_gate, save_state, record_gate_failure):
         raise TranslationRefused("translation refused: %s — `HRD loopback --topic %s --cause translation`"
                                  % ("; ".join(reasons[:4]), tid))
     tr["hashes"] = {lang: lang_record(root, cfg, tid, slug, lang) for lang in tr["langs"]}
-    tr.update({"source_hash": crit, "pending": [], "passed": {}, "last_refusal": None})
+    tr.update({"source_hash": crit, "source_body": file_hash(root, cfg.body_path(slug)),
+               "pending": [], "passed": {}, "last_refusal": None})
     st["stages"]["translation"] = {"outputs": {"@translations": translations_hash(root, cfg, st)}, "at": now_iso()}
     st["stage"] = "verify"
     save_state(st)
@@ -283,6 +326,8 @@ def loopback(root, cfg, st, langs, ver, human=False):
     bad = [l for l in langs if l not in all_langs]
     if bad:
         raise HeraldError("%s not among this topic's languages (%s)" % (", ".join(bad), ", ".join(all_langs)))
+    if st.get("stage") not in ("translation", "verify", "publish"):
+        raise HeraldError("the topic is at %s — a translation loopback follows critique" % st.get("stage"))
     ref = tr.get("last_refusal") or {}
     if human:
         if not langs:
@@ -336,6 +381,14 @@ def verify_problems(root, cfg, st, ver):
 
     if not cfg.translations():
         return []
+    unowned = unowned_translations(root, cfg, st)
+    if unowned:
+        return ["the bundle has %s translations this topic did not make (begun without translations, or a "
+                "human's file) — hold needs-human: verify alone never takes a translation into the ledger; "
+                "requeue the topic, or adopt them with /hrd translate --adopt" % ", ".join(unowned)]
+    problems = langs_problems(st)
+    if problems:
+        return problems
     slug = st["slug"]
     present = [cfg.source_lang()] + [l for l in cfg.target_langs()
                                      if os.path.isfile(os.path.join(root, cfg.body_path(slug, l)))]
@@ -372,8 +425,22 @@ def amend_problems(root, cfg, tid, st, run_gate):
     translation whose file or map changed since the translation stage passed (§4 table)."""
     tr = st.get("translation") or {}
     problems = []
+    if not tr.get("langs"):
+        return problems
+    if tr.get("source_body") and file_hash(root, cfg.body_path(st["slug"])) != tr["source_body"]:
+        # L18: the translations no longer render this source — never re-verified in place
+        return ["the source changed on a translated article (L18) — do not re-verify: decline, then refresh or "
+                "requeue with the direction file"]
+    images_changed = worktree_hash(root, cfg, st["slug"]) != tr.get("source_hash")
     for lang in tr.get("langs") or []:
-        if lang_record(root, cfg, tid, st["slug"], lang) == (tr.get("hashes") or {}).get(lang):
+        same = lang_record(root, cfg, tid, st["slug"], lang) == (tr.get("hashes") or {}).get(lang)
+        if same and images_changed:
+            # a shared image changed: every translation's references are checked again (§5)
+            gate = run_gate(root, cfg, st["slug"], lang=lang)
+            if not gate["ok"]:
+                problems.append("%s gate: %s" % (lang, "; ".join(gate["errors"][:3])))
+            continue
+        if same:
             continue
         gate = run_gate(root, cfg, st["slug"], lang=lang)
         if not gate["ok"]:
@@ -420,7 +487,7 @@ def premerge_problems(root, cfg, tid, rev):
                 problems.append("base-bundle-changed: the article's files changed on base after this PR forked — "
                                 "decline and refresh")
     # 2. a PR never deletes a translation, nor adds one outside its languages
-    status = __import__("subprocess").run(["git", "diff", "--name-status", "-z", "%s...%s" % (base, rev)],
+    status = __import__("subprocess").run(["git", "diff", "--no-renames", "--name-status", "-z", "%s...%s" % (base, rev)],
                                           cwd=root, capture_output=True, text=True).stdout.split("\0")
     deleted = {status[i + 1] for i in range(0, len(status) - 1, 2) if status[i].startswith("D")}
     for lang, p in tr_paths.items():
@@ -429,6 +496,9 @@ def premerge_problems(root, cfg, tid, rev):
                             "after publishing)" % lang)
         elif p in in_pr and lang not in langs:
             problems.append("translation-added:%s — not one of this topic's languages" % lang)
+        elif lang in langs and __import__("subprocess").run(["git", "cat-file", "-e", "%s:%s" % (rev, p)],
+                                                            cwd=root, capture_output=True).returncode != 0:
+            problems.append("translation-missing:%s — the PR head lacks a translation of this topic" % lang)
     # 3. a language taken down while this PR was open must not come back unasked
     art = find_article(load_published(root), slug) or {}
     revived = {e.get("lang") for e in (st.get("translation") or {}).get("log") or [] if e.get("why") == "revive"}

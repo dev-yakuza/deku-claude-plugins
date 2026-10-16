@@ -181,6 +181,11 @@ def cmd_begin(a):
         topic = store.get_topic(store.load_topics(root), a.topic)
     except HeraldError:
         topic = {}
+    branch = next((b for b in ghstate.local_branches(root) if b.startswith("herald/%s--" % a.topic)), None)
+    if branch and not os.path.exists(store.state_path(root, a.topic)) and not a.force:
+        # the work lives on its branch (a preserved hold, a batch retry): switch to it, never start over
+        emit({"resumed": True, "branch": branch, "note": "state.json is on the branch — `git switch %s`" % branch})
+        return
     if os.path.exists(store.state_path(root, a.topic)) and not a.force:
         st = store.load_state(root, a.topic)
         if topic.get("translate_of") and st.get("stage") == "translation":
@@ -398,6 +403,15 @@ def cmd_translate(a):
         emit(translation.translate_check(root, cfg, a.slug, langs, adopt=a.adopt))
     else:
         emit({"articles": translation.missing(root, cfg, langs)})
+
+
+def cmd_config_check(a):
+    """Config.validate's errors and warnings (`/hrd config` runs it after an edit)."""
+    root, cfg = ctx(check=False)
+    errors, warnings = cfg.validate()
+    emit({"ok": not errors, "errors": errors, "warnings": warnings})
+    if errors:
+        sys.exit(1)
 
 
 def cmd_audit_round(a):
@@ -982,6 +996,7 @@ def build():
     p.set_defaults(fn=cmd_loopback)
     p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)
     p = sp.add_parser("remap"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_remap)
+    p = sp.add_parser("config-check"); p.set_defaults(fn=cmd_config_check)
     p = sp.add_parser("translate"); p.add_argument("action", choices=["check", "missing"])
     p.add_argument("--slug"); p.add_argument("--lang"); p.add_argument("--adopt", action="store_true")
     p.set_defaults(fn=cmd_translate)

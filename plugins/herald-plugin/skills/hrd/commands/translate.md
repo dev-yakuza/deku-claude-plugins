@@ -40,10 +40,12 @@ Preflight as `write.md` §0 (`HRD lock acquire --cmd write` — inherited from t
 when unattended; `HRD lock release --cmd write --token <t>` on every exit path; base clean; `HRD sync`; `HRD ahead`; budget baseline). Unattended runs never write
 base: every stop is `HRD result`.
 
-1. `HRD begin --topic <id>` — for a new topic it re-checks § A step 2 (the queue may be old),
+1. `HRD begin --topic <id>` — a reply with `"branch"` (the work is on an existing branch: a
+   preserved hold or a retry) → skip to step 2 with that branch; for a new topic it re-checks § A step 2 (the queue may be old),
    copies the reference topic's `research.md` and claims maps, records brief…critique as
    inherited from it and sets the stage to translation; for an existing one it re-checks the
-   source on base. Refused → hold `cannibalization` with the note `tooling: translate
+   source on base (the translation stage checks it again against `origin/<base>` — a
+   `base-source-changed` refusal is handled the same way). Refused → hold `cannibalization` with the note `tooling: translate
    precondition: <reason>` (attended: `HRD state` + commit + push; unattended: `HRD result
    --status held:cannibalization --note …`); stop.
 2. `HRD branch --topic <id> --slug <slug>` (an existing branch: switch to it and run the

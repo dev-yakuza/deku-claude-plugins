@@ -15,8 +15,8 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
   `"translations": {"source": "<lang>", "targets": [{"lang": "<l>", "body_pattern":
   "{content}/<l>/{slug}.md", "url_pattern": "/<l>/{slug}/"}], "glossary": "<path, optional>",
   "auto_publish": false}` — patterns use only `{content}`/`{slug}` (`{slug}` exactly once),
-  `translator` must be in `roles.conditional`. After editing, `HRD hash --slug <any article>`
-  runs `Config.validate`: an error names what to fix (overlapping patterns, a pattern inside
+  `translator` must be in `roles.conditional`. After editing, `HRD config-check` prints
+  `Config.validate`'s `errors` and `warnings`: an error names what to fix (overlapping patterns, a pattern inside
   the image directory — Hugo page bundles are not supported —, a missing role); fix before
   committing. A warning (build inputs not covering a translation directory) → offer to add it to
   `paths.build_inputs`.

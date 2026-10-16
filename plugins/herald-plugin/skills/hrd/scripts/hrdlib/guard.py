@@ -665,16 +665,34 @@ def closed_rule(root, cfg, tool, ti):
     (unattended: denied) until config is fixed (01-multilingual.md §2)."""
     errors, _ = cfg.validate()
     if not errors:
-        return
+        return False
     why = "config.json translations is invalid (%s) — fix it first" % "; ".join(errors)[:300]
     if tool == "Bash":
-        cmd = ti.get("command", "")
-        if re.search(r"\bgit\b[^\n;&|]*\b(commit|push|merge|rebase|reset|checkout|switch|rm|mv|clean)\b", cmd) \
-                or re.search(r"\bgh\s+pr\s+merge\b", cmd):
+        if not _read_only(ti.get("command", "")):
             protect(why)
     elif tool in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
         if rel(root, ti.get("file_path") or ti.get("notebook_path") or "") != CONFIG:
             protect(why)
+    return True
+
+
+_READ_ONLY = {"ls", "cat", "head", "tail", "grep", "rg", "wc", "pwd", "echo", "printenv", "find", "stat", "jq"}
+_READ_ONLY_GIT = {"status", "diff", "log", "show", "rev-parse", "ls-files", "ls-tree", "branch", "fetch", "cat-file"}
+
+
+def _read_only(cmd):
+    """Every segment is a plain read (no redirection): the only Bash a broken config lets through."""
+    if re.search(r"[<>]", cmd):
+        return False
+    for seg in segments(cmd):
+        argv = normalize(seg)
+        if not argv:
+            continue
+        if argv[0] == "git" and len(argv) > 1 and argv[1] in _READ_ONLY_GIT and "-D" not in argv and "-d" not in argv:
+            continue
+        if argv[0] not in _READ_ONLY:
+            return False
+    return True
 
 
 def main():
@@ -691,7 +709,8 @@ def main():
         cfg = Config.load(root)
         tool = payload.get("tool_name", "")
         ti = payload.get("tool_input") or {}
-        closed_rule(root, cfg, tool, ti)
+        if closed_rule(root, cfg, tool, ti):
+            sys.exit(0)  # never compute bundle paths from a config that failed validation
         if tool == "Bash":
             check_bash(root, cfg, ti.get("command", ""))
         elif tool in ("Edit", "Write", "MultiEdit", "NotebookEdit"):

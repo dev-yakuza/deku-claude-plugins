@@ -99,6 +99,9 @@ def validate(root, cfg, file_path, lang=None):
     errors, warnings = [], []
     full = file_path if os.path.isabs(file_path) else os.path.join(root, file_path)
     lang = lang or file_lang(root, cfg, file_path)
+    if lang != cfg.source_lang() and lang not in cfg.target_langs():
+        return {"ok": False, "errors": ["%r is neither the source language nor a translation target" % lang],
+                "warnings": [], "lang": lang, "prose": {"warnings": [], "stats": {}}}
     translated = bool(cfg.translations()) and lang != cfg.source_lang()
     try:
         text = open(full, encoding="utf-8").read()

@@ -30,7 +30,10 @@ Every stage follows the same frame:
   and a proposed **slug** (lowercase, single hyphens, no `--`) on a line `slug: <slug>`.
 - Cannibalization conflict → hold `cannibalization`.
 - Approval (§C table), then `HRD branch --topic <id> --slug <slug>` (branches from
-  `origin/<base>`), then `HRD stage pass --topic <id> --stage brief`.
+  `origin/<base>`), then `HRD stage pass --topic <id> --stage brief`. `HRD branch` refusing with
+  `slug in progress: <id>` (translation repos: one topic in flight per slug) → hold
+  `cannibalization` with the note `tooling: slug in progress: <id>` (no branch was made; clean the
+  work files as for any cleaned hold).
 
 ## research — researcher
 
@@ -245,6 +248,12 @@ the topic to verify and this stage does not run. `translation.pending` are the l
     language twice in a row) → hold `stagnation`.
   - "translator modified the source" → hold `needs-human` (`translator modified the source`);
     a translation loopback cannot repair the source.
+  - `base-source-changed` (tr- topics) → hold `cannibalization` with `tooling: translate
+    precondition: base source changed` (`translate.md` § C).
+- verify refusing "translations this topic did not make" (a topic begun before translations
+  were turned on, or a human's file in the bundle) → hold `needs-human`; the human requeues the
+  topic or adopts the file (`/hrd translate --adopt`) — verify alone never takes a translation
+  into the ledger.
 - A human's request about one translation (attended review) → `HRD loopback --topic <id>
   --human --lang <l>` (not counted) → this stage for that language.
 

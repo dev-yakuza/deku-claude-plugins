@@ -660,6 +660,91 @@ class LaterTranslationTests(TranslationFlow):
             return f.read()
 
 
+class ReviewRound1Tests(TranslationFlow):
+    def test_topic_begun_without_translations_cannot_verify_a_human_translation(self):
+        """R1 MJ-2: begun before translations were on; a human's ko file sits in the bundle."""
+        data = translated_config()
+        tid, slug = "t0001", "new-post"
+        self.to_critique(tid, slug)  # languages = all targets
+        st = store.load_state(self.root, tid)
+        st.pop("translation")  # what a 0.8.0-begun topic looks like
+        st["stage"] = "verify"
+        st["stages"].pop("translation", None)
+        store.save_state(self.root, tid, st)
+        self.translate(slug, "ko")
+        self.verify(tid, slug, langs=("ko",))
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", check=False)
+        self.assertIn("did not make", p.stderr)
+
+    def test_amend_refuses_a_source_edit_on_a_translated_article(self):
+        """R1 MJ-3 (L18)."""
+        tid, slug = self.to_critique(languages=["ko"])
+        self.translate(slug, "ko")
+        self.tpass(tid)
+        self.verify(tid, slug, langs=("ko",))
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "verify")
+        body = self.cfg.body_path(slug)
+        with open(os.path.join(self.root, body)) as f:
+            text = f.read()
+        self.write(body, text + "\nA human sentence.\n")
+        self.verify(tid, slug, langs=("ko",))
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", "--amend", check=False)
+        self.assertIn("L18", p.stderr)
+
+    def test_amend_regates_every_language_when_an_image_changes(self):
+        """R1 MN-4: a shared image removed — the untouched translation's reference breaks."""
+        self.write("public/blog-images/new-post/02.png", b"img", binary=True)  # part of the source from draft on
+        tid, slug = self.to_critique(languages=["ko"])
+        self.translate(slug, "ko", sentence="KO ![x](/blog-images/%s/02.png)" % slug)
+        self.write(self.w + "claims-map.ko.json", json.dumps({"sentences": [{"text": "KO", "claims": ["C1"]}]}))
+        self.tpass(tid)
+        self.verify(tid, slug, langs=("ko",))
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "verify")
+        os.remove(os.path.join(self.root, "public/blog-images/%s/02.png" % slug))
+        self.verify(tid, slug, langs=("ko",))
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", "--amend", check=False)
+        self.assertIn("ko gate", p.stderr)
+
+    def test_begin_with_an_existing_branch_resumes_there(self):
+        """R1 MJ-1: the state lives on the branch (preserved hold / retry)."""
+        tid, slug = self.to_critique(languages=["ko"])
+        self.commit("wip")
+        sh(self.root, "git", "checkout", "-q", "main")
+        self.assertFalse(os.path.exists(store.state_path(self.root, tid)))
+        out = self.hrd("begin", "--topic", tid)[0]
+        self.assertEqual(out["branch"], store.branch_name(tid, slug))
+        self.assertFalse(os.path.exists(store.state_path(self.root, tid)))
+
+    def test_translation_loopback_needs_the_translation_stage(self):
+        """R1 MN-11."""
+        tid, slug = self.to_critique(languages=["ko"])
+        st = store.load_state(self.root, tid)
+        st["stage"] = "draft"
+        store.save_state(self.root, tid, st)
+        _, p = self.hrd("loopback", "--topic", tid, "--human", "--lang", "ko", check=False)
+        self.assertIn("follows critique", p.stderr)
+
+    def test_premerge_reports_missing_and_deleted_translations(self):
+        """R1 MN-3: a topic language absent at the PR head."""
+        tid, slug = self.to_critique(languages=["ko", "ja"])
+        self.translate(slug, "ko")
+        self.translate(slug, "ja")
+        self.tpass(tid)
+        os.remove(os.path.join(self.root, self.cfg.body_path(slug, "ja")))
+        self.commit("head without ja")
+        out, _ = self.hrd("premerge", "--topic", tid, "--rev", "HEAD", check=False)
+        self.assertTrue(any(p.startswith("translation-missing:ja") for p in out["problems"]), out)
+
+    def test_config_check_reports_warnings(self):
+        """R1 MN-5."""
+        data = translated_config()
+        data["paths"]["build_inputs"] = ["src/content/blog"]
+        self.use_config(data, commit=False)
+        out = self.hrd("config-check")[0]
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["warnings"])
+
+
 class GuardTests(MultiCase):
     def guard(self, tool, tool_input, env=None):
         e = dict(os.environ)
@@ -697,6 +782,11 @@ class GuardTests(MultiCase):
         self.assertEqual(self.guard("Bash", {"command": "git commit -m x"}, {"HRD_UNATTENDED": "1"}), "deny")
         self.assertEqual(self.guard("Write", {"file_path": os.path.join(self.root, "notes.md")}), "ask")
         self.assertEqual(self.guard("Bash", {"command": "ls"}), "allow")
+        self.assertEqual(self.guard("Bash", {"command": "git status"}), "allow")
+        # R1 MN-10: any other Bash needs a human — the guard computes no path from a broken config
+        self.assertEqual(self.guard("Bash", {"command": "cp a.md src/content/blog/ko/x.md"}), "ask")
+        self.assertEqual(self.guard("Bash", {"command": "git cherry-pick abc"}), "ask")
+        self.assertEqual(self.guard("Bash", {"command": "cat a > b"}), "ask")
 
 
 if __name__ == "__main__":

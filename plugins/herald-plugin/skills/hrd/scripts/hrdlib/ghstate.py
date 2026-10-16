@@ -136,7 +136,9 @@ def reappearance_flags(root, cfg, prs=None, pub=None):
             candidates.append((m["slug"], m.get("moved_at"), set(m.get("topic_ids") or []), "moved"))
     for slug, at, topics_, why in candidates:
         # any bundle file counts: a withdrawn slug whose translation alone came back is flagged too
-        if not any(os.path.exists(os.path.join(root, p)) for p in cfg.bundle_paths(slug)):
+        # the body or a translation (not the image dir: as in 0.8.0, image residue is ship's
+        # residue check, L15)
+        if not any(os.path.exists(os.path.join(root, p)) for p in [cfg.body_path(slug)] + list(cfg.translation_paths(slug).values())):
             continue
         if later_pr(slug, at, topics_):
             continue

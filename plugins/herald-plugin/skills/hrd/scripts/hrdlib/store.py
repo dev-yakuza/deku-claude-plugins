@@ -199,7 +199,7 @@ def entry_check(root, cfg, st, stage):
         if name == "@translations" and not langs_of(st):
             continue  # no languages (0.8.0 topics, untranslated repos): verify follows critique
         prec = st["stages"].get(producer, {})
-        if prec.get("inherited") and name not in (prec.get("outputs") or {}):
+        if prec.get("inherited") and str(st.get("topic_id", "")).startswith("tr-") and name not in (prec.get("outputs") or {}):
             continue  # a tr- topic: that stage ran in its reference topic (01-multilingual.md §7)
         rec = prec.get("outputs", {})
         if name not in rec:
@@ -209,7 +209,12 @@ def entry_check(root, cfg, st, stage):
         if cur != rec[name]:
             problems.append("%s changed since %s passed — rerun %s" % (name, producer, producer))
     if stage == "verify":
+        from .translation import unowned_translations
         problems += verify_entry_problems(st)
+        unowned = unowned_translations(root, cfg, st)
+        if unowned:
+            problems.append("the bundle has %s translations this topic did not make — hold needs-human (requeue, or "
+                            "adopt them with /hrd translate --adopt)" % ", ".join(unowned))
     if stage == "publish":
         # critique evaluated the source; verify the bundle (source + translations) — equal
         # without translations (design/herald/01-multilingual.md §3)
@@ -361,7 +366,8 @@ def exclusion_reasons(root, cfg, tid, rev=None):
             _blob_hash(root, rev, rel)
     else:
         crit, st, ch = load_machine(root, tid, "critique.json"), read_json(state_path(root, tid)), file_hash(root, rel)
-    inherited = isinstance(st, dict) and ((st.get("stages") or {}).get("critique") or {}).get("inherited")
+    inherited = isinstance(st, dict) and tid.startswith("tr-") and \
+        ((st.get("stages") or {}).get("critique") or {}).get("inherited")
     if inherited and crit is None:
         crit = {}  # a tr- topic: critique ran in the reference topic; its decisions are not this PR's
     if not isinstance(crit, dict) or not isinstance(st, dict):
@@ -1235,6 +1241,10 @@ def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
         raise HeraldError("no state.json for %s" % tid)
     cur = bundle_hash(root, cfg, st["slug"], rev=rev)
     vb = st.get("stages", {}).get("verify", {}).get("body_hash")
+    if kind == "withdraw-lang" and not rev:
+        st_head = read_json_at(root, "HEAD", work_rel(tid, "state.json"))
+        if st_head != read_json(state_path(root, tid)):
+            raise HeraldError("refusing: work/%s/state.json differs from HEAD — commit what `withdraw-lang` wrote first" % tid)
     if kind == "withdraw-lang":
         # a translation taken down (`status --withdraw-lang` proved, file by file, that only that
         # file left the verified bundle and updated the committed state): the bundle must be
