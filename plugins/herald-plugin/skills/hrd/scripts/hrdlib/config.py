@@ -247,11 +247,26 @@ class Config:
     def _patterns_overlap(self, a, b):
         """Whether pattern a and b can name the same path for two slugs: sample each one's paths
         against the other's matcher (slug characters cannot contain "/" or ".")."""
-        ra, rb = self._pattern_regex(a), self._pattern_regex(b)
-        if ra is None or rb is None:
+        if "{slug}" not in a or "{slug}" not in b:
             return False
-        return any(rb.match(self._fill(a, s)) for s in _PATTERN_SAMPLES) or \
-            any(ra.match(self._fill(b, s)) for s in _PATTERN_SAMPLES)
+        content = self.data["paths"]["content"]
+        (pa, sa), (pb, sb) = (x.replace("{content}", content).split("{slug}", 1) for x in (a, b))
+        # a path p·s·q of one equals p'·t·q' of the other only if the fixed prefixes nest and the
+        # fixed suffixes nest, and what one has extra there can be part of a slug (no "/", ".")
+        if pa.startswith(pb):
+            px = pa[len(pb):]
+        elif pb.startswith(pa):
+            px = pb[len(pa):]
+        else:
+            return False
+        if sa.endswith(sb):
+            sx = sa[:len(sa) - len(sb)]
+        elif sb.endswith(sa):
+            sx = sb[:len(sb) - len(sa)]
+        else:
+            return False
+        ok = re.compile(r"^[a-z0-9-]*$")
+        return bool(ok.match(px) and ok.match(sx))
 
     def deploy_artifacts(self):
         return list(self.data["commands"].get("deploy_artifacts") or [])

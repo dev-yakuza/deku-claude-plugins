@@ -301,18 +301,33 @@ class LedgerIntegrityTests(TranslationFlow):
         _, p = self.hrd("withdraw-lang", slug, "--lang", "ko", check=False)
         self.assertIn("remove", p.stderr)
         os.remove(os.path.join(self.root, ko))
-        self.write(self.cfg.body_path(slug), "sneaky edit")
         _, p = self.hrd("withdraw-lang", slug, "--lang", "ko", check=False)
-        self.assertIn("beyond removing", p.stderr)
-        sh(self.root, "git", "checkout", "-q", "--", self.cfg.body_path(slug))
+        self.assertIn("commit its removal first", p.stderr)  # the committed tree decides
+        self.write(self.cfg.body_path(slug), "sneaky edit")
+        self.commit("remove ko and edit the source")
+        _, p = self.hrd("withdraw-lang", slug, "--lang", "ko", check=False)
+        self.assertIn("differs from what was verified", p.stderr)
+        sh(self.root, "git", "checkout", "-q", "HEAD~1", "--", self.cfg.body_path(slug))
+        self.commit("source back")
         out = self.hrd("withdraw-lang", slug, "--lang", "ko")[0]
         self.assertFalse(out["already_applied"])
         art = store.find_article(store.load_published(self.root), slug)
         self.assertNotIn("ko", art.get("translations") or {})
         self.assertEqual(art["withdrawn_langs"], ["ko"])
+        st = store.load_state(self.root, tid)
+        self.assertEqual(st["translation"]["langs"], [])  # R2 M-2: a later re-verify does not look for ko
         self.commit("withdraw ko")
         self.hrd("ledger", "record", "--topic", tid, "--kind", "withdraw-lang")
         self.assertEqual(self.row()["status"], "ok")
+        # R2 M-1: a forged state cannot launder a source edit through another withdraw-lang record
+        self.write(self.cfg.body_path(slug), "edited")
+        self.commit("edit")
+        st = store.load_state(self.root, tid)
+        st["verified_files"] = __import__("hrdlib.hashing", fromlist=["x"]).bundle_files(self.root, self.cfg, slug)
+        store.save_state(self.root, tid, st)
+        self.commit("forged state")
+        _, p = self.hrd("ledger", "record", "--topic", tid, "--kind", "withdraw-lang", check=False)
+        self.assertNotEqual(p.returncode, 0)
 
     def test_no_translations_rows_unchanged(self):
         self.run_flow("t0001", "new-post")
@@ -735,6 +750,25 @@ class ReviewRound1Tests(TranslationFlow):
         out, _ = self.hrd("premerge", "--topic", tid, "--rev", "HEAD", check=False)
         self.assertTrue(any(p.startswith("translation-missing:ja") for p in out["problems"]), out)
 
+    def test_overlap_check_is_structural(self):
+        """R2 m-2: source {slug}-ko.md vs target en-{slug}.md collide (x-ko / en-x)."""
+        data = translated_config()
+        data["paths"]["body_pattern"] = "{content}/{slug}-ko.md"
+        data["translations"]["targets"][0]["body_pattern"] = "{content}/en-{slug}.md"
+        self.use_config(data, commit=False)
+        self.assertTrue(any("same path" in e for e in self.cfg.validate()[0]))
+
+    def test_human_loopback_does_not_count_toward_stagnation(self):
+        """R2 m-3."""
+        tid, slug = self.to_critique()
+        self.translate(slug, "ko")
+        self.translate(slug, "ja")
+        self.tpass(tid)
+        self.hrd("loopback", "--topic", tid, "--human", "--lang", "ja")
+        self.translate(slug, "ja", claims=("C2",))
+        self.tpass(tid, check=False)
+        self.assertFalse(self.hrd("loopback", "--topic", tid, "--cause", "translation")[0]["stagnation"])
+
     def test_config_check_reports_warnings(self):
         """R1 MN-5."""
         data = translated_config()
@@ -787,6 +821,13 @@ class GuardTests(MultiCase):
         self.assertEqual(self.guard("Bash", {"command": "cp a.md src/content/blog/ko/x.md"}), "ask")
         self.assertEqual(self.guard("Bash", {"command": "git cherry-pick abc"}), "ask")
         self.assertEqual(self.guard("Bash", {"command": "cat a > b"}), "ask")
+        self.assertEqual(self.guard("Bash", {"command": "find . -delete"}), "ask")
+        self.assertEqual(self.guard("Bash", {"command": "git branch -M x"}), "ask")
+        # R2 B-1: repairing config.json never skips the protected-key ask
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        risky = dict(data, autonomy={"publish": "auto"})
+        self.assertEqual(self.guard("Write", {"file_path": cfgp, "content": json.dumps(risky)}), "ask")
+        self.assertEqual(self.guard("Write", {"file_path": cfgp, "content": json.dumps(dict(data, language="ko"))}), "allow")
 
 
 if __name__ == "__main__":

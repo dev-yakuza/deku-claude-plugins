@@ -112,7 +112,7 @@ def _causes(root, cfg, rev, slug, ref, led, article):
     if not ref:
         return []
     rel = work_rel(ref, "state.json")
-    st = read_json_at(root, rev, rel) if rev else read_json(state_path(root, ref))
+    st = read_json_at(root, rev or "HEAD", rel)  # the committed record, never a working-tree edit
     st = st or {}
     if st.get("verified_files"):
         return diagnose(cfg, slug, cur, base=st["verified_files"], old_slugs=old)

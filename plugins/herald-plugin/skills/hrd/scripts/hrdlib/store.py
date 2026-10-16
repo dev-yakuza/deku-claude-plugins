@@ -1246,15 +1246,15 @@ def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
         if st_head != read_json(state_path(root, tid)):
             raise HeraldError("refusing: work/%s/state.json differs from HEAD — commit what `withdraw-lang` wrote first" % tid)
     if kind == "withdraw-lang":
-        # a translation taken down (`status --withdraw-lang` proved, file by file, that only that
-        # file left the verified bundle and updated the committed state): the bundle must be
-        # exactly that committed record — a human decision, like trust (01-multilingual.md §5)
+        # a translation taken down: proved again here, file by file and on the committed tree,
+        # against this machine's last ledger line — only that language's file left the verified
+        # bundle; without a line here, the committed record at trust grade (01-multilingual.md §5)
         if os.environ.get("HRD_UNATTENDED") == "1":
             raise HeraldError("refusing: withdraw-lang records need a human (attended only)")
-        files = bundle_files(root, cfg, st["slug"], rev=rev)
-        if not st.get("withdrawn_langs") or not (cur and cur == st.get("verified_hash")) \
-                or {p: v["blob"] for p, v in (st.get("verified_files") or {}).items()} != {p: v["blob"] for p, v in files.items()}:
-            raise HeraldError("refusing: run `status --withdraw-lang` first — the bundle must equal the state it recorded")
+        problem = withdraw_lang_proof(root, cfg, tid, st, rev or "HEAD")
+        if problem:
+            raise HeraldError("refusing: %s" % problem)
+        cur = bundle_hash(root, cfg, st["slug"], rev=rev or "HEAD")
     elif kind == "trust":
         # Only for "no ledger line on this machine", attended, and only for the exact body the
         # committed state.json says was verified (plan §3.2 "원장 기록이 없을 때").
@@ -1279,6 +1279,33 @@ def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
         rec["files"] = files
     append_jsonl(paths(root)["ledger"], rec)
     return rec
+
+
+def withdraw_lang_proof(root, cfg, tid, st, rev):
+    """None when the bundle at `rev` is the verified one minus exactly one translation file of a
+    language in `withdrawn_langs`, else why not. Basis: this machine's last ledger line with
+    `files`; no line → the committed `verified_files` (the caller is attended, like trust)."""
+    cur = {p: v["blob"] for p, v in bundle_files(root, cfg, st["slug"], rev=rev).items()}
+    led = ledger_latest(root, tid)
+    if led is not None and not led.get("files"):
+        return "the ledger line predates 0.9.0 (no file list) — re-verify instead"
+    basis = (led or {}).get("files") or st.get("verified_files") or {}
+    if not basis:
+        return "no file-level record to prove against — re-verify instead"
+    if led is None and read_json_at(root, "HEAD", work_rel(tid, "state.json")) != st:
+        return "work/%s/state.json differs from HEAD — commit what `withdraw-lang` wrote first" % tid
+    gone = [p for p in basis if p not in cur]
+    roles = {p: (basis[p] or {}).get("role") for p in gone}
+    if led is None and not gone:
+        # the committed record already excludes the language (applied on another machine)
+        if cur == {p: v["blob"] for p, v in basis.items()} and st.get("withdrawn_langs"):
+            return None
+        return "nothing was taken down"
+    if len(gone) != 1 or roles[gone[0]] not in (st.get("withdrawn_langs") or []):
+        return "the bundle differs from the verified one by more than one withdrawn translation (%s)" % ", ".join(gone) or "-"
+    if any(cur.get(p) != (basis[p] or {}).get("blob") for p in basis if p not in gone) or set(cur) - set(basis):
+        return "the rest of the bundle differs from what was verified — re-verify or restore"
+    return None
 
 
 def pushed_head(root, sha=None):
@@ -1375,6 +1402,8 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
     accepted = t.get("auto_merged_accepted") if stamped else None
     source_published = not tid.startswith("tr-")  # a later translation never publishes the source
     if source_published:
+        if translated:
+            art["source_published_at"] = now  # the source itself changed (not a tr- publish)
         if accepted:  # what the human accepted unread for this publish (`/hrd next`)
             art["auto_accepted"] = list(accepted)
         else:

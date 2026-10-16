@@ -189,11 +189,17 @@ def cmd_begin(a):
     if os.path.exists(store.state_path(root, a.topic)) and not a.force:
         st = store.load_state(root, a.topic)
         if topic.get("translate_of") and st.get("stage") == "translation":
-            # a retry or resume: the source on base may have moved since the queue entry (§7 step 4)
-            translation.translate_check(root, cfg, topic["translate_of"], st["translation"]["langs"],
-                                        adopt=bool(topic.get("adopt")), exclude=a.topic)
+            # a retry or resume: the source on base may have moved since begin. Compare the committed
+            # source only — the working tree may hold this topic's own translations (R2 M-4)
+            if tree_hash(root, cfg, "origin/%s" % cfg.base, st["slug"]) != \
+                    (st["stages"].get("critique") or {}).get("body_hash"):
+                raise HeraldError("base-source-changed: the source on base is not the one this topic translates")
         emit({"resumed": True, "state": st})
         return
+    known = topic.get("refresh_of") or topic.get("slug")
+    busy = ghstate.slug_busy(root, cfg, known, exclude=a.topic) if known and not topic.get("translate_of") else []
+    if busy:  # L16 again at begin: the queue entry may be older than the other topic
+        raise HeraldError("slug in progress: %s — another topic is working on %s" % (busy[0], known))
     st = store.new_state(a.topic, None)
     if topic.get("translate_of"):
         st = translation.inherit_state(root, cfg, st, topic)
@@ -773,30 +779,37 @@ def cmd_withdraw_lang(a):
     if not ref:
         raise HeraldError("no reference topic for %s" % slug)
     st = store.load_state(root, ref)
-    led = store.ledger_latest(root, ref)
-    cur = bundle_files(root, cfg, slug)
     path = cfg.body_path(slug, lang)
-    committed = st.get("verified_files") or {}
-    already = lang in (st.get("withdrawn_langs") or []) and committed == cur
-    if already:
-        basis = None  # another machine applied it: only this machine's ledger line is missing
-    elif led and led.get("files"):
-        basis = led["files"]
-    elif committed and not led:
-        basis = committed  # no ledger line here: the committed record, attended (like trust)
-    else:
-        raise HeraldError("no file-level record to prove against (a ledger line from before 0.9.0) — re-verify instead")
-    if basis is not None:
-        if path not in basis:
-            raise HeraldError("%s was not part of the verified bundle" % path)
-        want = {p: v for p, v in basis.items() if p != path}
-        if {p: v["blob"] for p, v in want.items()} != {p: v["blob"] for p, v in cur.items()}:
-            raise HeraldError("the bundle differs from what was verified beyond removing %s — re-verify or restore" % lang)
-        st["verified_hash"] = bundle_hash(root, cfg, slug)
+    # the committed tree decides: a deletion that is not committed is not a withdrawal (R2 M-5')
+    if git(root, "ls-tree", "--name-only", "HEAD", "--", path).strip():
+        raise HeraldError("%s is still in HEAD — commit its removal first" % path)
+    cur = bundle_files(root, cfg, slug, rev="HEAD")
+    already = lang in (st.get("withdrawn_langs") or []) and \
+        {p: v["blob"] for p, v in (st.get("verified_files") or {}).items()} == {p: v["blob"] for p, v in cur.items()}
+    if not already:
+        trial = dict(st, withdrawn_langs=sorted(set(st.get("withdrawn_langs") or []) | {lang}))
+        problem = store.withdraw_lang_proof(root, cfg, ref, trial, "HEAD") if store.ledger_latest(root, ref) else None
+        if problem is None and not store.ledger_latest(root, ref):
+            basis = st.get("verified_files") or {}
+            if path not in basis:
+                problem = "%s was not part of the verified bundle" % path
+            elif {p: v["blob"] for p, v in basis.items() if p != path} != {p: v["blob"] for p, v in cur.items()}:
+                problem = "the bundle differs from what was verified beyond removing %s — re-verify or restore" % lang
+        if problem:
+            raise HeraldError(problem)
+        st["verified_hash"] = bundle_hash(root, cfg, slug, rev="HEAD")
         st["verified_files"] = cur
-        st["withdrawn_langs"] = sorted(set(st.get("withdrawn_langs") or []) | {lang})
+        st["withdrawn_langs"] = trial["withdrawn_langs"]
         if st.get("stages", {}).get("verify"):
             st["stages"]["verify"]["body_hash"] = st["verified_hash"]
+        tr = st.get("translation")
+        if tr and lang in (tr.get("langs") or []):
+            # the topic no longer carries that language: a later re-verify must not look for it (R2 M-2)
+            tr["langs"] = [l for l in tr["langs"] if l != lang]
+            (tr.get("hashes") or {}).pop(lang, None)
+            tr.setdefault("log", []).append({"at": now_iso(), "lang": lang, "why": "withdraw"})
+            st.setdefault("stages", {}).setdefault("translation", {}).setdefault("outputs", {})["@translations"] = \
+                store.artifact_hash(root, cfg, st, "@translations")
         store.save_state(root, ref, st)
         (art.get("translations") or {}).pop(lang, None)
         art["withdrawn_langs"] = sorted(set(art.get("withdrawn_langs") or []) | {lang})

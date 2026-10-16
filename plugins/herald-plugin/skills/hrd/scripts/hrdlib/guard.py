@@ -673,11 +673,14 @@ def closed_rule(root, cfg, tool, ti):
     elif tool in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
         if rel(root, ti.get("file_path") or ti.get("notebook_path") or "") != CONFIG:
             protect(why)
+        elif config_change_protected(root, ti, tool):
+            # fixing config never skips the protected-key rule (INV1): the same ask as ever
+            protect("changing protected config keys (%s)." % ", ".join(PROTECTED_CONFIG_KEYS))
     return True
 
 
-_READ_ONLY = {"ls", "cat", "head", "tail", "grep", "rg", "wc", "pwd", "echo", "printenv", "find", "stat", "jq"}
-_READ_ONLY_GIT = {"status", "diff", "log", "show", "rev-parse", "ls-files", "ls-tree", "branch", "fetch", "cat-file"}
+_READ_ONLY = {"ls", "cat", "head", "tail", "grep", "rg", "wc", "pwd", "echo", "printenv", "stat", "jq"}
+_READ_ONLY_GIT = {"status", "diff", "log", "show", "rev-parse", "ls-files", "ls-tree", "fetch", "cat-file"}
 
 
 def _read_only(cmd):
@@ -688,7 +691,12 @@ def _read_only(cmd):
         argv = normalize(seg)
         if not argv:
             continue
-        if argv[0] == "git" and len(argv) > 1 and argv[1] in _READ_ONLY_GIT and "-D" not in argv and "-d" not in argv:
+        if argv[0] == "git" and len(argv) > 1 and argv[1] in _READ_ONLY_GIT \
+                and not any(x.startswith("--output") or x == "-o" for x in argv):
+            continue
+        if argv[:2] == ["git", "branch"] and all(x in ("--list", "-a", "-r", "--show-current", "-v") or
+                                                  not x.startswith("-") and argv.index(x) > 2 and "--list" in argv
+                                                  for x in argv[2:]):
             continue
         if argv[0] not in _READ_ONLY:
             return False

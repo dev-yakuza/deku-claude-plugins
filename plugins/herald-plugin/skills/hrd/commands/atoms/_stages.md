@@ -398,4 +398,10 @@ version>` (SKILL.md version gate):
   only.
 - Any hold or stop with a trim `open`: `HRD trim --topic <id> --abort` first.
 - `needs-human` / `stagnation` / `budget`: keep the branch — commit leftovers as
-  `wip(herald): <id>` on it (no push), switch to base, record as above.
+  `wip(herald): <id>` on it (no push), switch to base, record as above. With translations, the
+  wip commit holds only the topic's PR scope (`<w>`, and for a non-`tr-` topic the source and
+  images, plus the topic's own translation files); any other changed bundle file (a `tr-`
+  topic's source, another language's translation) is first saved under
+  `.claude/herald/memory/wip-discard/<id>/` (`git diff HEAD -- <tracked>` > `tracked.diff`, a
+  copy of each untracked one), then put back (`git checkout HEAD -- <tracked>`, `git clean -f
+  -- <untracked>`) — the batch runner does the same — so nothing follows the switch to base.

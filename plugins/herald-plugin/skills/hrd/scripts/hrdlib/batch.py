@@ -339,7 +339,7 @@ def auto_candidates(root, cfg, pr_results):
         reasons = exclusion_reasons(root, cfg, tid, ref)  # fails closed on missing files
         from .translation import premerge_problems
         # translated PRs: base source unchanged, no deleted/foreign/withdrawn languages (§5)
-        reasons += [p.split(":", 1)[0].split(" ", 1)[0] for p in premerge_problems(root, cfg, tid, ref)]
+        reasons += ["premerge:%s" % re.match(r"[a-z-]*", p).group(0) for p in premerge_problems(root, cfg, tid, ref)]
         if reasons:
             skipped.append((tid, ",".join(reasons)))
             continue

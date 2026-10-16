@@ -356,8 +356,12 @@ def loopback(root, cfg, st, langs, ver, human=False):
     prev = tr.get("last_loopback_langs") or []
     tr["pending"] = sorted(new)
     stagnant = (not human) and bool(set(prev) & set(new)) and tr.get("last_loopback_stage") == "translation"
-    tr["last_loopback_langs"] = sorted(new)
-    tr["last_loopback_stage"] = "translation"
+    if human:  # a human's request is not a failure: it starts no run toward stagnation
+        tr.pop("last_loopback_langs", None)
+        tr.pop("last_loopback_stage", None)
+    else:
+        tr["last_loopback_langs"] = sorted(new)
+        tr["last_loopback_stage"] = "translation"
     st["stage"] = "translation"
     return sorted(new), stagnant
 
@@ -432,8 +436,18 @@ def amend_problems(root, cfg, tid, st, run_gate):
         return ["the source changed on a translated article (L18) — do not re-verify: decline, then refresh or "
                 "requeue with the direction file"]
     images_changed = worktree_hash(root, cfg, st["slug"]) != tr.get("source_hash")
-    for lang in tr.get("langs") or []:
-        same = lang_record(root, cfg, tid, st["slug"], lang) == (tr.get("hashes") or {}).get(lang)
+    from .hashing import _worktree_entries
+    verified = st.get("verified_files") or {}
+    others = []  # a tr- reference topic also answers for translations it did not make (R2 M-3)
+    for lang, path in cfg.translation_paths(st["slug"]).items():
+        if lang in (tr.get("langs") or []) or not os.path.isfile(os.path.join(root, path)):
+            continue
+        blob = dict(_worktree_entries(root, [path])).get(path)
+        if blob != (verified.get(path) or {}).get("blob"):
+            others.append(lang)
+    for lang in list(tr.get("langs") or []) + others:
+        same = lang in (tr.get("langs") or []) and \
+            lang_record(root, cfg, tid, st["slug"], lang) == (tr.get("hashes") or {}).get(lang)
         if same and images_changed:
             # a shared image changed: every translation's references are checked again (§5)
             gate = run_gate(root, cfg, st["slug"], lang=lang)
@@ -613,6 +627,8 @@ def remap(root, cfg, tid, st):
     if not tid.startswith("tr-") or not st.get("inherited_from"):
         raise HeraldError("remap is the first step of a tr- topic only")
     tr = st.get("translation") or {}
+    if st.get("stage") != "translation" or tr.get("remapped"):
+        raise HeraldError("remap runs once, before the first translation of a tr- topic")
     if file_hash(root, work_rel(tid, "research.md")) != st["stages"]["research"]["outputs"].get("research.md"):
         raise HeraldError("research.md changed — a later translation never edits the research")
     sents = entries(root, tid)
@@ -648,7 +664,7 @@ def missing(root, cfg, langs=None):
             continue
         defect = max((h.get("at", "") for t in topics if t.get("translate_of") == a["slug"]
                       for h in t.get("history") or [] if h.get("reason") == "source-defect"), default="")
-        if defect and defect > str(a.get("published_at", "")):
+        if defect and defect > str(a.get("source_published_at") or a.get("published_at", "")):
             continue
         have = set(existing_langs(root, cfg, a["slug"])) | set(a.get("withdrawn_langs") or [])
         want = [l for l in (langs or cfg.target_langs()) if l not in have]
