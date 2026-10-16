@@ -565,9 +565,11 @@ def check_bash(root, cfg, cmd):
             if "--match-head-commit" not in joined or not nums or not set(nums) <= allowed:
                 decide("deny", "auto merge needs --match-head-commit and a PR listed in HRD_AUTO_PRS.")
         # 1b. trust records bypass verification for one article — a human decision only
-        if "--kind" in argv and "trust" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
+        # argparse accepts any unambiguous prefix (`--kin trust`): match those too (R5 MN-6)
+        has_kind = any(len(x) >= 3 and "--kind".startswith(x.split("=", 1)[0]) and x.startswith("--k") for x in argv)
+        if has_kind and "trust" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
             protect("recording `trust` in the verification ledger skips re-verification for that article.")
-        if "--kind" in argv and "withdraw-lang" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
+        if has_kind and "withdraw-lang" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
             protect("recording `withdraw-lang` in the verification ledger takes a translation down without re-verification.")
         # 2. deploy
         if any(contains(canon(strip_noise(argv)), s) for s in sigs):

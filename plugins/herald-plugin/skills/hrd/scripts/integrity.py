@@ -12,7 +12,7 @@ from hrdlib import integrity, store  # noqa: E402
 from hrdlib.config import Config  # noqa: E402
 from hrdlib.util import HeraldError, emit, repo_root  # noqa: E402
 
-ap = argparse.ArgumentParser()
+ap = argparse.ArgumentParser(allow_abbrev=False)
 ap.add_argument("--record", action="store_true")
 ap.add_argument("--topic")
 ap.add_argument("--sha")

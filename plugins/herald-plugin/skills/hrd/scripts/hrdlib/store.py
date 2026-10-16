@@ -1245,6 +1245,8 @@ def ledger_record(root, cfg, tid, sha=None, kind="verify", rev=None):
         st_head = read_json_at(root, "HEAD", work_rel(tid, "state.json"))
         if st_head != read_json(state_path(root, tid)):
             raise HeraldError("refusing: work/%s/state.json differs from HEAD — commit what `withdraw-lang` wrote first" % tid)
+    if kind == "withdraw-lang" and rev and git_rev(root, rev) != git_rev(root, "HEAD"):
+        raise HeraldError("refusing: a withdraw-lang record describes HEAD — no other --rev")
     if kind == "withdraw-lang":
         # a translation taken down: proved again here, file by file and on the committed tree,
         # against this machine's last ledger line — only that language's file left the verified

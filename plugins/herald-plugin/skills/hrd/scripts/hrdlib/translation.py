@@ -446,11 +446,15 @@ def amend_problems(root, cfg, tid, st, run_gate):
             continue
         if path not in verified:
             # never verified with this topic: a human's new file is adopted, not re-verified (R4 MN-4)
-            problems.append("%s is not part of the verified bundle — adopt it with /hrd translate --adopt" % lang)
+            from .store import find_article, load_published
+            published = (find_article(load_published(root), st["slug"]) or {}).get("current_topic_id") == tid
+            problems.append("%s is not part of the verified bundle — %s" % (lang, (
+                "adopt it with /hrd translate --adopt" if published else
+                "take it out of the PR, or requeue the topic with that language")))
             continue
         blob = dict(_worktree_entries(root, [path])).get(path)
-        if blob != (verified.get(path) or {}).get("blob"):
-            others.append(lang)
+        if blob != (verified.get(path) or {}).get("blob") or images_changed:
+            others.append(lang)  # changed — or every language when a shared image changed (R5 MN-5)
     for lang in list(tr.get("langs") or []) + others:
         same = lang in (tr.get("langs") or []) and \
             lang_record(root, cfg, tid, st["slug"], lang) == (tr.get("hashes") or {}).get(lang)

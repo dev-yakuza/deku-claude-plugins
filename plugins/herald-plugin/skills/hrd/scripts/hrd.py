@@ -232,6 +232,9 @@ def cmd_branch(a):
     if not os.path.exists(store.state_path(root, a.topic)) and git_ok(root, "rev-parse", "--verify", "-q", "refs/heads/" + name):
         # the work (and its state.json) lives on the branch: a preserved hold, a retry (R4 MJ-1)
         git(root, "switch", "-q", name)
+        busy = ghstate.slug_busy(root, cfg, a.slug, exclude=a.topic)
+        if busy:  # L16 on the main resume path too (R5 MN-1)
+            raise HeraldError("slug in progress: %s — another topic is working on %s" % (busy[0], a.slug))
         emit({"branch": name, "resumed": True})
         return
     busy = ghstate.slug_busy(root, cfg, a.slug, exclude=a.topic)
@@ -832,8 +835,8 @@ def cmd_withdraw_lang(a):
     emit({"withdrawn_lang": lang, "slug": slug, "ref_topic": ref, "already_applied": already,
           "verified_hash": st.get("verified_hash"),
           "commit": [] if already else [store.work_rel(ref, "state.json"), ".claude/herald/published.json"],
-          "next": "commit these (HRD commit --cmd status), then integrity.py --record --topic %s --kind withdraw-lang "
-                  "--sha <that commit>" % ref})
+          "next": "commit these (HRD commit --cmd status) unless already_applied, then integrity.py --record --topic %s "
+                  "--kind withdraw-lang (no --sha: the record names HEAD)" % ref})
 
 
 def cmd_release_slug(a):
@@ -989,7 +992,7 @@ def cmd_trim(a):
 
 
 def build():
-    ap = argparse.ArgumentParser(prog="hrd.py")
+    ap = argparse.ArgumentParser(allow_abbrev=False, prog="hrd.py")
     sp = ap.add_subparsers(dest="group", required=True)
 
     p = sp.add_parser("lock"); p.add_argument("action", choices=["acquire", "release", "status", "unlock"])

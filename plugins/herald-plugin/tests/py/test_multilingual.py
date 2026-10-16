@@ -816,6 +816,12 @@ class GuardTests(MultiCase):
         # same rule as a base commit of the body itself in 0.8.0: refused
         self.assertEqual(self.guard("Bash", {"command": "git commit -m x"}), "deny")
 
+    def test_ledger_kind_prefix_still_asks(self):
+        """R5 MN-6: argparse prefixes."""
+        for cmd in ("python3 .claude/herald/scripts/integrity.py --record --topic t0001 --kin trust",
+                    "python3 .claude/herald/scripts/hrd.py ledger record --topic t0001 --ki withdraw-lang"):
+            self.assertEqual(self.guard("Bash", {"command": cmd}), "ask", cmd)
+
     def test_translations_key_is_protected(self):
         cfgp = os.path.join(self.root, ".claude/herald/config.json")
         self.assertEqual(self.guard("Write", {"file_path": cfgp, "content": json.dumps(translated_config())}), "ask")
