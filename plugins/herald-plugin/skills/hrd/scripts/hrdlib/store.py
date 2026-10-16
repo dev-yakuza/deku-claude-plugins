@@ -1416,6 +1416,10 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
     if not art:
         art = {"slug": slug, "moved_from": []}
         pub["articles"].append(art)
+    if art.get("withdrawn") and tid not in (art.get("withdrawn_topics") or []):
+        # a different article reuses a withdrawn slug: the old one's refresh history is not its own
+        art.pop("superseded", None)
+        art.pop("last_refresh_decision", None)
     translated = bool(cfg.translations())
     now = now_iso()
     prev_published = art.get("published_at")

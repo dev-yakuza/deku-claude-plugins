@@ -28,7 +28,9 @@ It does not write articles. Plan §3.1, §5.
    recommendation → the human's decision → `--decide` → commit with `HRD commit --cmd plan --kind
    plan -m "chore(herald): refresh decision <slug>" .claude/herald/topics.json
    .claude/herald/published.json` → `--signal`) — before step 4, so the proposal's topics and
-   these decisions never share a commit. Plan does not continue into write: the topics wait in
+   these decisions never share a commit. Not taken from `refresh.md`: its push and lock release
+   (plan keeps its lock; step 5 pushes) and its stop on a failed precheck (here: skip that
+   suggestion with the reason and go on). Plan does not continue into write: the topics wait in
    the queue.
 4. `HRD topics add --file .claude/herald/memory/plan-proposal.json` (accepted items only).
 5. `HRD commit --cmd plan --kind plan -m "chore(herald): plan <n> topics"

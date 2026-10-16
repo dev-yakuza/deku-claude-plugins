@@ -296,6 +296,35 @@ class SupersededTests(RefreshCase):
         self.hrd("move", "--topic", "t0002", "--new-slug", "exam-2027-ed")
         self.assertEqual(self.article()["superseded"]["by"], "exam-2027-ed")
 
+    def test_withdraw_and_unwithdraw_keep_the_old_articles_link(self):
+        """R2 F1: withdrawing and restoring the old article keeps its superseded link."""
+        data = store.load_topics(self.root)
+        data["topics"].append({"id": "t0002", "title": "2027", "state": "queued", "follows": "old-post",
+                               "history": [], "reverted_by": []})
+        store.save_topics(self.root, data)
+        self.article_file("exam-2027")
+        store.record_published(self.root, self.cfg, "t0002", "exam-2027", pr=2)
+        body = os.path.join(self.root, "src/content/blog/old-post.md")
+        text = open(body).read()
+        os.remove(body)
+        self.hrd("withdraw", "old-post")
+        with open(body, "w") as f:
+            f.write(text)
+        self.hrd("unwithdraw", "old-post")
+        self.assertEqual(self.article()["superseded"]["by"], "exam-2027")
+
+    def test_link_forms_count(self):
+        """R2 F2: punctuation after the URL and sub-paths are links; a longer slug is not."""
+        cfg = self.cfg
+        pub = {"articles": [{"slug": "old-post", "superseded": {"by": "exam-2027", "at": "x"}},
+                            {"slug": "exam-2027"}]}
+        body = os.path.join(self.root, "src/content/blog/old-post.md")
+        for text, linked in (("see https://x/blog/exam-2027/.", True), ("see /blog/exam-2027, and", True),
+                             ('href="/blog/exam-2027/index.html"', True), ("/blog/exam-2027-guide/)", False)):
+            with open(body, "w") as f:
+                f.write(text)
+            self.assertEqual(refresh.supersede_pending(self.root, cfg, pub) == [], linked, text)
+
     def article_file(self, slug):
         RepoCase.article(self, slug)
 

@@ -761,10 +761,8 @@ def cmd_withdraw(a):
     for x in pub["articles"]:  # an old article no longer points at a withdrawn new one (R9)
         if (x.get("superseded") or {}).get("by") == slug:
             x.pop("superseded", None)
-    # and the withdrawn entry forgets its own refresh history: a later article reusing the slug
-    # starts clean (record_published revives the entry)
-    art.pop("superseded", None)
-    art.pop("last_refresh_decision", None)
+    # (the withdrawn entry keeps its own refresh history for unwithdraw; record_published clears
+    # it when another topic reuses the slug)
     data = store.load_topics(root)
     for t in data["topics"]:
         if t["id"] in tids:

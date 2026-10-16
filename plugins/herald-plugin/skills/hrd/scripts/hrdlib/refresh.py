@@ -59,7 +59,7 @@ def precheck(root, cfg, slug, for_translation=False, clear=True):
     art = find_article(pub, slug)
     if not art:
         moved = find_old(pub, slug)
-        if moved:
+        if moved and not moved.get("withdrawn"):
             raise HeraldError("%s moved to %s — refresh %s" % (slug, moved["slug"], moved["slug"]))
     if not art or art.get("withdrawn"):
         raise HeraldError("%s is not a published article (published.json)" % slug)
@@ -71,12 +71,12 @@ def precheck(root, cfg, slug, for_translation=False, clear=True):
         blocked.append("update: %s is outside Herald's slug format — the same URL cannot be refreshed" % slug)
     in_flight = ghstate.in_progress_topics(root, cfg)
     busy_ids = {t["id"] for t in in_flight}
-    same = [t["id"] for t in in_flight if t["slug"] == slug or
-            next((x for x in topics if x["id"] == t["id"]), {}).get("refresh_of") == slug]
+    names = {slug} | {m.get("slug") for m in art.get("moved_from") or [] if m.get("slug")}
+    same = [t["id"] for t in in_flight if t["slug"] in names or
+            next((x for x in topics if x["id"] == t["id"]), {}).get("refresh_of") in names]
     if same and "update" in choices:
         choices.remove("update")
         blocked.append("update: %s is already in progress on this article — finish or close it first" % ", ".join(same))
-    names = {slug} | {m.get("slug") for m in art.get("moved_from") or [] if m.get("slug")}
     follows = [t["id"] for t in topics if t.get("follows") in names and t["id"] in busy_ids]
     if follows:
         choices.remove("new")
@@ -295,7 +295,7 @@ def supersede_pending(root, cfg, pub):
                 body = f.read()
         except OSError:
             continue
-        if path and re.search(re.escape(path.rstrip("/")) + r"(?=/?[)\"'#?\s>]|/?$)", body, re.M):
+        if path and re.search(re.escape(path.rstrip("/")) + r"(?![\w-])", body):
             continue
         out.append({"old": old["slug"], "new": sup["by"], "refreshable": bool(SLUG_RE.match(old["slug"]))})
     return out
