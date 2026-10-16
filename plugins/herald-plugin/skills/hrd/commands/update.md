@@ -34,8 +34,9 @@ only. Ported from Guild `update.md`.
    the offer is not repeated. Additions only; never remove or reword the repo's lines.
    **Refresh policy** (0.10.0): no `docs/editorial/refresh-policy.md` → offer to create it from
    `templates/editorial/refresh-policy.md.tmpl` (exceptions left empty for the human); declined
-   → `/hrd refresh` keeps using the template's default rules. A new file only, never an edit of
-   an existing one.
+   → `/hrd refresh` keeps using the template's default rules, and the decline is remembered in
+   `.claude/herald/memory/update-declined.json` (`{"refresh-policy": "<version>"}`) so the offer
+   is not repeated on this machine. A new file only, never an edit of an existing one.
 4. **Settings/gitignore/labels**: re-merge `templates/settings.json.tmpl` (key union), the
    gitignore block, and create missing labels.
    **Translations** (0.9.0): never added by `update` (INV4). If config has no `translations` and

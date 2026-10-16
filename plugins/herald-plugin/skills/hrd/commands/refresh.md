@@ -24,8 +24,10 @@ strategist recommends; **the human decides**, in every mode. Design:
      from step 2, the source defects if any, `docs/editorial/refresh-policy.md` (absent in a
      repo set up before 0.10.0: use the template's default rules,
      `<<SKILL_DIR>>/templates/editorial/refresh-policy.md.tmpl`).
-   - `HRD refresh-decision --slug <slug> --check` → problems → send them back to the strategist
-     once, else show the recommendation as information only.
+   - `HRD refresh-decision --slug <slug> --check [--for-translation]` → problems → send them back
+     to the strategist once; still unusable → ask the human without a recommendation (the
+     decision is recorded with none, and no override signal), or a recommendation outside the
+     choices → show it as information only.
    - Ask the human (`AskUserQuestion`, in every mode): options = the `choices`, the
      recommendation first and marked recommended, each with a one-line consequence (`update`:
      rewrite this URL; `new`: a new article, this one stays; `none`: nothing changes); show the

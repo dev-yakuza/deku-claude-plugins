@@ -258,6 +258,7 @@ def cmd_branch(a):
         raise HeraldError("slug in progress: %s — another topic is working on %s; hold this one cannibalization "
                           "with the note `tooling: slug in progress: %s`" % (busy[0], a.slug, busy[0]))
     if not fixed and not git_ok(root, "rev-parse", "--verify", "-q", "refs/heads/" + name):
+        git(root, "fetch", "-q", "origin", cfg.base)  # judge against base as it is now, not at preflight
         used = _slug_in_use(root, cfg, a.slug)
         if used:  # a new article never takes a slug something lives at (R11)
             raise HeraldError("slug used: %s (%s) — ask the strategist for another slug" % (a.slug, used))
@@ -760,6 +761,10 @@ def cmd_withdraw(a):
     for x in pub["articles"]:  # an old article no longer points at a withdrawn new one (R9)
         if (x.get("superseded") or {}).get("by") == slug:
             x.pop("superseded", None)
+    # and the withdrawn entry forgets its own refresh history: a later article reusing the slug
+    # starts clean (record_published revives the entry)
+    art.pop("superseded", None)
+    art.pop("last_refresh_decision", None)
     data = store.load_topics(root)
     for t in data["topics"]:
         if t["id"] in tids:

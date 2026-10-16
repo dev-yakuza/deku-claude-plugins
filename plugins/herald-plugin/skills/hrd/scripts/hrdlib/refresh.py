@@ -57,6 +57,10 @@ def precheck(root, cfg, slug, for_translation=False, clear=True):
 
     pub = load_published(root)
     art = find_article(pub, slug)
+    if not art:
+        moved = find_old(pub, slug)
+        if moved:
+            raise HeraldError("%s moved to %s — refresh %s" % (slug, moved["slug"], moved["slug"]))
     if not art or art.get("withdrawn"):
         raise HeraldError("%s is not a published article (published.json)" % slug)
     topics = load_topics(root)["topics"]
@@ -72,7 +76,8 @@ def precheck(root, cfg, slug, for_translation=False, clear=True):
     if same and "update" in choices:
         choices.remove("update")
         blocked.append("update: %s is already in progress on this article — finish or close it first" % ", ".join(same))
-    follows = [t["id"] for t in topics if t.get("follows") == slug and t["id"] in busy_ids]
+    names = {slug} | {m.get("slug") for m in art.get("moved_from") or [] if m.get("slug")}
+    follows = [t["id"] for t in topics if t.get("follows") in names and t["id"] in busy_ids]
     if follows:
         choices.remove("new")
         blocked.append("new: %s already follows this article" % ", ".join(follows))
@@ -107,6 +112,11 @@ def check(root, cfg, slug, choices):
     if not isinstance(rec, dict):
         return None, ["%s is missing or not JSON — run the strategist's refresh recommendation" % rec_rel(slug)]
     problems = []
+    for k in ("stale", "reasons"):  # a model may write one string where a list belongs
+        if isinstance(rec.get(k), str):
+            rec[k] = [rec[k]]
+        elif rec.get(k) is not None and not (isinstance(rec[k], list) and all(isinstance(x, str) for x in rec[k])):
+            problems.append("%s must be a list of strings" % k)
     r = rec.get("recommendation")
     if r not in DECISIONS:
         problems.append("recommendation must be one of %s" % ", ".join(DECISIONS))
@@ -156,7 +166,9 @@ def decide(root, cfg, slug, decision, source="recommended", direction=None, for_
     if source == "recommended":
         rec, problems = check(root, cfg, slug, pc["choices"])
         if rec is None or [p for p in problems if "not among" not in p]:
-            raise HeraldError("; ".join(problems))
+            # the strategist's file is unusable: the human still decides, and the record says
+            # there was no recommendation (so no override signal either)
+            rec = None
     dir_path = None
     if source == "direction":
         if not direction:
@@ -167,6 +179,8 @@ def decide(root, cfg, slug, decision, source="recommended", direction=None, for_
     if decision != "none":
         if not isinstance(topic, dict) or not topic.get("title"):
             raise HeraldError("--topic-file must hold the topic entry (title, category, keywords, angle)")
+        if isinstance(topic.get("keywords"), str):
+            topic["keywords"] = [topic["keywords"]]
     data = store.load_topics(root)
     pub = store.load_published(root)
     art = store.find_article(pub, slug)
@@ -281,7 +295,7 @@ def supersede_pending(root, cfg, pub):
                 body = f.read()
         except OSError:
             continue
-        if path and (path in body or path.rstrip("/") in body):
+        if path and re.search(re.escape(path.rstrip("/")) + r"(?=/?[)\"'#?\s>]|/?$)", body, re.M):
             continue
         out.append({"old": old["slug"], "new": sup["by"], "refreshable": bool(SLUG_RE.match(old["slug"]))})
     return out
