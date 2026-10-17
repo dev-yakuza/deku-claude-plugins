@@ -79,7 +79,8 @@ def all_base_globs(cfg):
 
 
 def staged_paths(root):
-    return [p for p in git(root, "diff", "--cached", "--name-only", "-z").split("\0") if p]
+    # --no-renames: a rename is a deletion plus an addition, so neither side hides from a check
+    return [p for p in git(root, "diff", "--cached", "--name-only", "--no-renames", "-z").split("\0") if p]
 
 
 EXTRA_TRAILERS = ("Herald-Floor", "Herald-Strengthen")  # a human's floor decision (03-social.md S14)
@@ -119,7 +120,10 @@ def commit_state(root, cfg, command, message, kind, add_paths, extra_trailers=()
     if any(p.startswith("docs/editorial/") for p in staged):
         from . import social  # lazily: the guard imports this module on every tool call
 
-        problems = social.commit_problems(root, cfg, staged, extra)
+        try:
+            problems = social.commit_problems(root, cfg, staged, extra)
+        except Exception as e:  # noqa: BLE001 — a crash must not leave the index staged
+            problems = ["the check failed (%s: %s)" % (type(e).__name__, e)]
         if problems:
             git(root, "reset", "-q", "--", *staged)
             raise HeraldError("refusing: the social guides' floor (03-social.md S14) — %s" % "; ".join(problems))

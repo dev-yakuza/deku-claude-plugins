@@ -1065,6 +1065,8 @@ def cmd_social(a):
             raise HeraldError("final needs --draft <approved draft> and --final-file <memory/social/final/<sns>/…>")
         emit(social.final(root, cfg, a.draft, a.final_file))
     elif a.action == "lint":
+        if a.mode == "rollback" and a.target and not a.file:
+            a.file = [a.target]  # the working tree after `git revert --no-commit`
         if not (a.mode and a.file and a.target):
             raise HeraldError("lint needs --mode, --file <pending> and --target <repo path>")
         if len(a.file) != 1:

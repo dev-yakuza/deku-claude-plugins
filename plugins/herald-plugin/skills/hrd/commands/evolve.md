@@ -25,8 +25,8 @@ unchanged; the targets applied in the last 3 runs (regression watch).
     group's `data` merges its records (e.g. a session edit request with its diff); per-theme
     counts (`themes`: kind, `kind:theme` for REVISE / auditor findings, `hold:<reason>`; the
     `escalation` and `incomplete` records in `list` are context and are not in the counts) are the same numbers the `ship`/`status` nudge used.
-  - `baseline` — reviewed human edits of at most 2 changed lines and review runs that found
-    nothing, with ids. Never counted as problems: use them only for exemplar promotion and as
+  - `baseline` — reviewed human edits of at most 2 changed lines, review runs that found
+    nothing, and uploaded social texts that changed at most 10% of the approved draft, with ids. Never counted as problems: use them only for exemplar promotion and as
     the denominator of edit rates; citing them consumes nothing.
   - Already excluded: malformed records, human-edit records without `human_reviewed: true`
     (also out of exemplar denominators), and signals an earlier decided proposal consumed.
@@ -62,8 +62,8 @@ guide's house rules (outside the researched region) and its `house` limits (`max
 `hashtags`, `link` — narrowing only), `persona.md` (voice, themes, never-says, `mix`, new
 `service_terms`, new `forbidden` rules as `draft`), `persona-notes.md`, and the distributor's
 Habits. Never: the researched region or research fields (that is `--refresh`), name, aliases or
-language, the disclosure items or the waiver except to strengthen them, confirming a rule (a
-human does it), removing a service term or adding an exclusion — the social floor (INV2).
+language, the waiver (only a human adds or removes it), the disclosure items except to strengthen
+them, widening `house` (it only narrows), confirming a rule (a human does it), removing a service term or adding an exclusion — the social floor (INV2).
 
 Auditor findings that point at the auditor itself (its prompt, its severity scale) are not
 applied here — the auditor deliberately reads no repo guides — list them in the report as

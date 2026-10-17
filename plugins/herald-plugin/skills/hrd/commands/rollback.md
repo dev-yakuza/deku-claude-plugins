@@ -13,13 +13,16 @@ Non-destructive: always `git revert`, never reset or force push (INV3).
    verification an evolve run had strengthened (INV2).
 4. The target touches a channel guide, the persona or its empathy notes
    (`docs/editorial/channels/*`, `persona.md`, `persona-notes.md`): `git revert --no-commit <sha>`,
-   then for each such file `HRD social lint --mode edit --file <path> --target <path>` (the persona
-   files: `--mode persona`) — the working tree against HEAD. Show its floor changes in plain words
-   (reverting a strengthened disclosure weakens it) and ask; on a yes, unstage everything
+   then for each such file `HRD social lint --mode rollback --target <path>` — the working tree
+   (a deleted file included) against HEAD, format and floor only. Show its errors as floor changes
+   in plain words (reverting a strengthened disclosure weakens it; reverting a loosening confirms
+   a rule again) and ask about each; on a yes, run it again with `--allow-floor <token>` /
+   `--strengthen <token>` for what the human accepted until it passes, then unstage everything
    (`git reset -q`) and commit through `HRD commit --cmd harness --kind harness -m "chore(herald):
-   rollback <target>" --trailer "Herald-Floor: <token> — <reason>"… <the reverted paths>` (it checks
-   the floor again against those trailers), add the rollback line to `evolution-log.md` in that
-   commit, and go to step 5. Declined → `git revert --abort`, release, stop.
+   rollback <target>" --trailer "<each line of the lint's trailers> — <reason>"… <the reverted
+   paths> .claude/herald/evolution-log.md` with the rollback line added to the log (it checks the
+   floor again against those trailers), and go to step 5. Declined, or `HRD commit` refuses →
+   `git revert --abort` (the tree is back as it was), release, stop.
    Otherwise: `git revert --no-edit <sha>`; then amend the revert's message only via
    `git commit --amend -m "chore(herald): rollback <target>" --trailer "Herald-Record: harness"`
    (allowed: it is the commit just created, not history rewrite of published commits).

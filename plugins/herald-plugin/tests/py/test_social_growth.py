@@ -137,7 +137,8 @@ class FinalTests(SocialCase):
         sh(self.root, "git", "switch", "-q", "-c", "elsewhere")
         out = self.hrd("social", "final", "--draft", rel, "--final-file",
                        self.final_file(rel, "Nice read. #PR https://example.test/blog/old-post/"))[0]
-        self.assertFalse(out["check"]["sources_checked"])
+        self.assertEqual(out["fix_live_post"], [])  # quotes are about the draft, never checked on the post
+        self.assertIn("profile", out["check"])
 
 
 class MergeTests(SocialCase):
@@ -297,3 +298,129 @@ class StatusTests(SocialCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Round1Tests(SocialCase):
+    def hrd_commit(self, msg, *paths, trailers=(), check=True):
+        args = ["commit", "--cmd", "harness", "--kind", "social", "-m", msg]
+        for t in trailers:
+            args += ["--trailer", t]
+        return self.hrd(*args, *paths, check=check)
+
+    def revert(self, sha):
+        sh(self.root, "git", "revert", "--no-commit", sha)
+
+    def test_rollback_lint_cases(self):
+        t = "docs/editorial/channels/x.md"
+        # a refresh commit: research fields reverted — fine for rollback
+        self.write(t, guide_text(guide_head(max_chars=300)))
+        sha = self.hrd_commit("chore(herald): social refresh x", t)[0]["commit"]
+        self.revert(sha)
+        self.assertTrue(self.hrd("social", "lint", "--mode", "rollback", "--target", t)[0]["ok"])
+        sh(self.root, "git", "revert", "--abort")
+        # an add commit: the revert deletes the guide — fine
+        y = "docs/editorial/channels/y.md"
+        self.write(y, guide_text(guide_head("y")))
+        sha = self.hrd_commit("chore(herald): social add y", y)[0]["commit"]
+        self.revert(sha)
+        out = self.hrd("social", "lint", "--mode", "rollback", "--target", y)[0]
+        self.assertTrue(out["ok"] and out["deleted"])
+        sh(self.root, "git", "revert", "--abort")
+        # reverting a loosening confirms the rule again: needs --strengthen, and the commit takes it
+        self.write(t, guide_text(guide_head(forbidden=[{"pattern": "spam", "status": "confirmed"}])))
+        self.commit("rule")
+        h = social._rule_hash({"pattern": "spam"})
+        self.write(t, guide_text(guide_head()))
+        sha = self.hrd_commit("chore(herald): social edit x", t, trailers=["Herald-Floor: forbidden:%s — gone" % h])[0]["commit"]
+        self.revert(sha)
+        out = self.hrd("social", "lint", "--mode", "rollback", "--target", t, check=False)[0]
+        self.assertFalse(out["ok"])
+        out = self.hrd("social", "lint", "--mode", "rollback", "--target", t, "--strengthen", "forbidden:%s" % h)[0]
+        self.assertEqual(out["trailers"], ["Herald-Strengthen: forbidden:%s" % h])
+        sh(self.root, "git", "reset", "-q")
+        self.hrd_commit("chore(herald): rollback x", t, trailers=["Herald-Strengthen: forbidden:%s — restore" % h])
+        # a persona deletion by revert needs `persona`
+        out = self.hrd("social", "lint", "--mode", "rollback", "--target", "docs/editorial/persona.md")[0]
+        self.assertTrue(out["ok"])  # still there
+        os.remove(os.path.join(self.root, "docs/editorial/persona.md"))
+        out = self.hrd("social", "lint", "--mode", "rollback", "--target", "docs/editorial/persona.md", check=False)[0]
+        self.assertFalse(out["ok"])
+
+    def test_remove_then_add_keeps_the_floor(self):
+        t = "docs/editorial/channels/x.md"
+        self.write(t, guide_text(guide_head(forbidden=[{"pattern": "spam", "status": "confirmed"}])))
+        self.commit("rule")
+        os.remove(os.path.join(self.root, t))
+        self.hrd_commit("chore(herald): social remove x", t)
+        p = os.path.join(self.tmp, "p.md")
+        with open(p, "w") as f:
+            f.write(guide_text(guide_head()))
+        out = self.hrd("social", "lint", "--mode", "add", "--file", p, "--target", t, check=False)[0]
+        self.assertTrue(any("forbidden:" in e for e in out["errors"]), out)
+        self.write(t, guide_text(guide_head()))
+        _, proc = self.hrd_commit("chore(herald): social add x", t, check=False)
+        self.assertIn("social guides' floor", proc.stderr)
+
+    def test_malformed_heads_fail_closed_and_unstage(self):
+        self.write("docs/editorial/persona.md", persona_text(dict(PERSONA, service_terms=[{"term": "Safie", "exclude": 5}])))
+        _, proc = self.hrd_commit("m", "docs/editorial/persona.md", check=False)
+        self.assertIn("social guides' floor", proc.stderr)
+        self.assertEqual(sh(self.root, "git", "diff", "--cached", "--name-only").strip(), "")
+        self.write("docs/editorial/persona.md", persona_text())
+        self.write("docs/editorial/channels/x.md", guide_text(guide_head(disclosure=[
+            {"kind": ["ad"], "required": True, "text": "#PR", "where": "post"}])))
+        _, proc = self.hrd_commit("m", "docs/editorial/channels/x.md", check=False)
+        self.assertIn("social guides' floor", proc.stderr)
+        self.assertEqual(sh(self.root, "git", "diff", "--cached", "--name-only").strip(), "")
+
+    def test_rename_does_not_hide_a_persona_removal(self):
+        sh(self.root, "git", "mv", "docs/editorial/persona.md", "docs/editorial/persona-old.md")
+        sh(self.root, "git", "reset", "-q")
+        _, proc = self.hrd_commit("m", "docs/editorial/persona.md", "docs/editorial/persona-old.md", check=False)
+        self.assertIn("Herald-Floor: persona", proc.stderr)
+
+    def test_evolve_never_widens_house(self):
+        t = "docs/editorial/channels/x.md"
+        self.write(t, guide_text(guide_head(house={"max_chars": 100, "hashtags": [0, 1], "link": "end"})))
+        self.commit("house")
+        p = os.path.join(self.tmp, "p.md")
+        for house in ({"max_chars": 200, "hashtags": [0, 1], "link": "end"}, {"max_chars": 100, "hashtags": [0, 2], "link": "end"},
+                      {"max_chars": 100, "hashtags": [0, 1], "link": "any"}, {}):
+            with open(p, "w") as f:
+                f.write(guide_text(guide_head(house=house)))
+            out = self.hrd("social", "lint", "--mode", "evolve", "--file", p, "--target", t, check=False)[0]
+            self.assertFalse(out["ok"], house)
+        with open(p, "w") as f:
+            f.write(guide_text(guide_head(house={"max_chars": 90, "hashtags": [0, 0], "link": "none"})))
+        self.assertTrue(self.hrd("social", "lint", "--mode", "evolve", "--file", p, "--target", t)[0]["ok"])
+
+    def test_final_after_the_article_changed(self):
+        out = self.hrd("social", "prepare", "--sns", "x", "--slug", "old-post", "--n", "1")[0]
+        rel = out["drafts"][0]
+        body = "Nice read. #PR https://example.test/blog/old-post/"
+        self.draft(rel, body, sources=QUOTE)
+        self.hrd("social", "close", "--run", out["run"], "--approved", rel)
+        self.write("src/content/blog/old-post.md", "---\ntitle: x\n---\nnew body\n")
+        self.commit("article updated")
+        path = social.memory_rel("final", "x", os.path.basename(rel))
+        self.write(path, body)
+        res = self.hrd("social", "final", "--draft", rel, "--final-file", path)[0]
+        self.assertEqual(res["fix_live_post"], [])
+
+    def test_merge_move_loss_and_additions(self):
+        t = "docs/editorial/channels/x.md"
+        self.write(t, guide_text(guide_head(disclosure=[
+            {"kind": "ad", "required": True, "text": "#PR", "where": "post"},
+            {"kind": "operator", "required": True, "text": "Run by ACME", "where": "post"}])))
+        self.commit("two items")
+        new = guide_head(researched_at="2099-01-01", disclosure=[
+            {"kind": "ad", "required": True, "text": "#PR", "where": "post"},
+            {"kind": "operator", "required": True, "text": "Run by ACME", "where": "profile"},
+            {"kind": "ad", "required": True, "text": "Paid", "where": "setting"}])
+        p = social.memory_rel("pending", "channels", "x.md")
+        self.write(p, guide_text(new))
+        out = self.hrd("social", "merge", "--sns", "x", "--researched", p)[0]
+        h = social.parse_channel(open(os.path.join(self.root, out["out"])).read())[0]
+        keys = {(d["kind"], d["where"]) for d in h["disclosure"]}
+        self.assertEqual(keys, {("ad", "post"), ("operator", "post"), ("ad", "setting")})
+        self.assertEqual([c["token"] for c in out["floor_changes"]], ["disclosure:operator/post"])

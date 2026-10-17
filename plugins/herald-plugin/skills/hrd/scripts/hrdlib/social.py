@@ -199,7 +199,8 @@ def service_terms(persona, cfg):
         if isinstance(t, str) and t.strip():
             out.append((fold(t.strip()), []))
         elif isinstance(t, dict) and isinstance(t.get("term"), str) and t["term"].strip():
-            out.append((fold(t["term"].strip()), [fold(x) for x in t.get("exclude") or [] if isinstance(x, str) and x]))
+            ex = t.get("exclude") if isinstance(t.get("exclude"), list) else []
+            out.append((fold(t["term"].strip()), [fold(x) for x in ex if isinstance(x, str) and x]))
     host = site_host(cfg)
     if host and host not in [x[0] for x in out]:
         out.append((host, []))
@@ -905,7 +906,7 @@ def _gate_failure_signals(root, rec, rel, failed):
     return out
 
 
-def evaluate(root, cfg, rec, text, sources=True):
+def evaluate(root, cfg, rec, text, sources=True, basis=True):
     """The rules on one post text against its `drafted` basis. `sources=False` skips the quote
     checks (a final text checked off base). Returns {profile, failed, warnings, settings}."""
     failed, warnings = [], []
@@ -929,10 +930,10 @@ def evaluate(root, cfg, rec, text, sources=True):
         fail("guide-invalid", str(e))
         return {"profile": profile, "failed": failed, "warnings": warnings, "settings": []}
     lang = rec.get("lang") or h["lang"]
-    if h["lang"] != lang:
+    if basis and h["lang"] != lang:
         fail("basis-changed", "the %s guide's language changed from %s to %s since prepare — prepare again"
              % (sns, lang, h["lang"]))
-    if rec.get("body"):
+    if basis and rec.get("body"):
         blob = git(root, "rev-parse", "-q", "--verify", "HEAD:%s" % rec["body"], check=False).strip()
         if blob != rec.get("body_blob"):
             fail("basis-changed", "%s changed on base since prepare checked it — prepare again" % rec["body"])
@@ -1228,8 +1229,11 @@ def _floor_forbidden(old, new, need, strong):
 def _disclosure_pairs(old, new):
     """[(old item, the new item it became or None, [(token, what)])] plus the new items no old
     item became (additions). A `where` change of one kind is a move judged by WHERE_STRENGTH."""
-    old = [d for d in old or [] if isinstance(d, dict)]
-    new = [d for d in new or [] if isinstance(d, dict)]
+    def ok(d):  # malformed items are format errors (channel_problems), never a crash here
+        return isinstance(d, dict) and isinstance(d.get("kind"), str) and isinstance(d.get("where"), str)
+
+    old = [d for d in (old if isinstance(old, list) else []) if ok(d)]
+    new = [d for d in (new if isinstance(new, list) else []) if ok(d)]
     new_keys = {(d.get("kind"), d.get("where")): d for d in new}
     old_keys = {(d.get("kind"), d.get("where")) for d in old}
     taken, pairs = set(), []
@@ -1265,9 +1269,20 @@ def _floor_disclosure(old, new, need):
             need(tok, what)
 
 
+def removed_version(root, target):
+    """(text, sha) of `target` as it was before the last commit that deleted it, or (None, None)."""
+    sha = git(root, "log", "-1", "--format=%H", "--diff-filter=D", "--", target, check=False).strip()
+    if not sha:
+        return None, None
+    text = show(root, sha + "^", target)
+    return (text, sha) if text is not None else (None, None)
+
+
 def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
+    if mode == "rollback":  # a revert in the working tree: format and floor only, deletions included
+        return rollback_lint(root, cfg, target, allow_floor, strengthen)
     if mode not in MODES:
-        raise HeraldError("--mode must be one of %s" % ", ".join(MODES))
+        raise HeraldError("--mode must be one of %s, rollback" % ", ".join(MODES))
     target = target.replace(os.sep, "/")
     kind = _target_kind(target)
     full = file_path if os.path.isabs(file_path) else os.path.join(root, file_path)
@@ -1298,6 +1313,11 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
     errors, warnings, floor, strong_list = [], [], [], []
     allow, strengthen_ok = set(allow_floor or ()), set(strengthen or ())
     used = set()
+    if head is None and mode in ("add", "setup", "commit"):
+        prev, sha = removed_version(root, target)
+        if prev is not None:  # removed and added again: the floor it had still counts (no laundering)
+            warnings.append("%s was removed in %s — compared with that version" % (target, sha[:10]))
+            head = prev
 
     def need(token, what):
         if mode == "evolve":
@@ -1373,6 +1393,20 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
                     for k, r in nm.items():
                         if k not in om and r.get("status") != "draft":
                             errors.append("a new rule %r must start as draft (INV6)" % r.get("pattern"))
+                if mode == "evolve":  # evolve narrows the account's limits, never widens them
+                    a, b = effective(old), effective(h)
+                    loose = []
+                    if isinstance(a.get("max_chars"), int) and isinstance(b.get("max_chars"), int) and b["max_chars"] > a["max_chars"]:
+                        loose.append("max_chars")
+                    if _hashtags_ok(a.get("hashtags")) and _hashtags_ok(b.get("hashtags")) and \
+                            (b["hashtags"][0] < a["hashtags"][0] or b["hashtags"][1] > a["hashtags"][1]):
+                        loose.append("hashtags")
+                    order = {"none": 0, "end": 1, "start": 1, "any": 2}
+                    if order.get(b.get("link"), 2) > order.get(a.get("link"), 2) or \
+                            (b.get("link") != a.get("link") and order.get(b.get("link")) == order.get(a.get("link"))):
+                        loose.append("link")
+                    if loose:
+                        errors.append("evolve only narrows the account's limits — loosened: %s" % ", ".join(loose))
                 if mode == "refresh":
                     if (old.get("house") or {}) != (h.get("house") or {}):
                         errors.append("house belongs to the humans and evolve — re-research leaves it")
@@ -1408,7 +1442,8 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
                         if isinstance(t, str):
                             out[fold(t)] = set()
                         elif isinstance(t, dict) and isinstance(t.get("term"), str):
-                            out[fold(t["term"])] = {fold(e) for e in t.get("exclude") or [] if isinstance(e, str)}
+                            ex = t.get("exclude") if isinstance(t.get("exclude"), list) else []
+                            out[fold(t["term"])] = {fold(e) for e in ex if isinstance(e, str)}
                     return out
 
                 ot, nt = terms(old), terms(p)
@@ -1477,6 +1512,26 @@ def commit_problems(root, cfg, staged, trailers):
             continue
         res = lint_text(root, cfg, "commit", text, path, head, allow, strong)
         out += ["%s: %s" % (path, e) for e in res["errors"]]
+    return out
+
+
+def rollback_lint(root, cfg, target, allow_floor=(), strengthen=()):
+    """`/hrd rollback` of a social commit: the working tree against HEAD, as the commit check
+    will see it — a deleted channel guide is fine, a deleted persona needs `persona`."""
+    target = _rel(root, target)
+    kind = _target_kind(target)
+    head = show(root, "HEAD", target)
+    full = os.path.join(root, target)
+    if not os.path.exists(full):
+        need = kind == "persona" and head is not None and "persona" not in set(allow_floor or ())
+        errors = ["floor: removing the persona drops its floor — needs the human's approval (--allow-floor persona)"] \
+            if need else []
+        trailers = ["Herald-Floor: persona"] if kind == "persona" and head is not None and not need else []
+        return {"ok": not errors, "target": target, "mode": "rollback", "errors": errors, "warnings": [],
+                "floor": [], "strengthen": [], "trailers": trailers, "deleted": True}
+    text = open(full, encoding="utf-8-sig").read()
+    out = lint_text(root, cfg, "commit", text, target, head, allow_floor, strengthen)
+    out["mode"] = "rollback"
     return out
 
 
@@ -1558,6 +1613,10 @@ def merge(root, cfg, sns, researched, accept=None, accept_floor=()):
 
 # --- the final text (S11, S13) -----------------------------------------------------------------
 
+LIVE_POST_RULES = ("disclosure", "promo-url", "promo-link-missing", "daily-url", "forbidden-confirmed",
+                   "service-mention-not-allowed")
+
+
 def final(root, cfg, draft, final_file):
     """The text a human actually uploaded, for an approved draft: recorded as `uploaded`, compared
     with the approved copy (`social-final`, unless nothing changed) and checked for information."""
@@ -1596,19 +1655,16 @@ def final(root, cfg, draft, final_file):
         minus += line.startswith("- ")
     lines = max(plus, minus)
     # the check, for information: the post rules on the uploaded text
-    on_base_now = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).strip() == cfg.base
-    if rec["sns"] not in guides(root):
+    # what the post itself shows — quotes and the article's basis are about the draft, not the post
+    if rec["sns"] not in guides(root, cfg.base):
         check = {"skipped": "guide-missing"}  # the channel was removed since
     else:
         head = "---\n%s\n---\n" % "\n".join(
             "%s: %s" % (k, json.dumps(v, ensure_ascii=False) if k == "sources" else (v or ""))
             for k, v in hdr.items())
-        res = evaluate(root, cfg, rec, head + final_text, sources=on_base_now)
-        check = {"profile": res["profile"], "failed": res["failed"], "warnings": res["warnings"],
-                 "sources_checked": on_base_now}
-        if not on_base_now:
-            check["note"] = "not on %s: quotes not checked" % cfg.base
-    hard = [f["id"] for f in check.get("failed", []) if not f["overridable"]]
+        res = evaluate(root, cfg, rec, head + final_text, sources=False, basis=False)
+        check = {"profile": res["profile"], "failed": res["failed"], "warnings": res["warnings"]}
+    hard = [f["id"] for f in check.get("failed", []) if f["id"] in LIVE_POST_RULES]
     entry = {"event": "status", "status": "uploaded", "run": rec.get("run"), "sns": rec.get("sns"),
              "kind": rec.get("kind"), "slug": rec.get("slug"), "draft": rel, "profile": latest.get("profile"),
              "approved_copy": latest.get("approved_copy"), "final": frel, "chars_changed": chars,

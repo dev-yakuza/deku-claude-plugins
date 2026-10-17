@@ -104,9 +104,10 @@ the empathy notes are committed with the repo, which may be public.
    give the human the profile checklist (what to put in the account profile).
 
 ### `--refresh <sns>`
-1. Spawn **researcher** (channel research) with the committed guide as the starting point and
-   the path `pending/channels/<sns>.md`; it rewrites the head block's research fields and the
-   researched region from current sources.
+1. Spawn **researcher** (channel re-research) with the committed guide as the starting point and
+   the path `pending/channels/<sns>.md`; it rewrites the head block's research fields, the
+   researched region, the `disclosure` items and new `forbidden` entries (as draft) from current
+   sources — the disclosure rules are the main reason to re-research.
 2. `HRD social merge --sns <sns> --researched pending/channels/<sns>.md` — code merges: research
    fields and the researched region from the draft; name, aliases, language, `house`, the house
    rules, the waiver and every existing rule's status stay; new `forbidden` rules join as
@@ -172,7 +173,8 @@ After the common start:
      "request": "<what the human asked, in one line>", "run": "<run>", "draft": "<draft>"}'` (pick
      the theme that names what the human objected to); then the distributor rewrites that draft
      (or you write the human's own text to the draft path); every changed draft is checked again
-     (step 3, without `--record` until its last check);
+     (step 3, without `--record` until its last check; never `--record` on a text the human wrote —
+     a signal is evidence about the distributor's writing);
    - **pick one** — rules marked `overridable: false` cannot be approved (rewrite or pick another).
      Overridable failures (`length`, `hashtags`, `link-position`, `s9b-statistic`,
      `s9a-service-experience` on promotional posts) → ask the human to accept each, with their
