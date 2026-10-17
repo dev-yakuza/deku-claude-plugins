@@ -105,6 +105,10 @@ case where anything held only in context is gone:
      one owes **nothing** (the table's volume guard).
    - **test**: 1 `verify-gap` per verify gap / failed verify — or 1 `stagnation` instead.
    - **qa**: 1 `correction` per QA/designer blocking defect — or 1 `stagnation` instead.
+     The "or 1 `stagnation` instead" applies only when the loop-back procedure actually **stopped**
+     the loop on stagnation (unattended). An attended run that only *asked* — with a stagnation
+     reading in its question (`_handoff.md` Section B, *Asking first*) — owes its `verify-gap` /
+     `correction`, never a `stagnation`.
    - **test / qa — owed = 0** on the two loop-back re-entries (`_handoff.md` Section B): the re-run
      carrying the human's "loop back" / "stop" answer, and the *Interrupted loop-back* entry. Neither
      runs tests or QA, so neither makes a new verdict — the first run already recorded the

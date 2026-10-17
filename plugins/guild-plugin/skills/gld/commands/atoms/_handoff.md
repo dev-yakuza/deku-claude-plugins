@@ -125,11 +125,12 @@ Labels are created by `/gld init`.
    back, or the leader does (`dev.md` Phase 2's between-stage judgment). The wrapper (or the
    leader) that decides it **first appends a `### loopback <n>` block to the Issue's
    `<!-- guild:loopback -->` comment** (Section B), **then** moves the label
-   `guild:test|qa` → `guild:execute`, removing `guild:needs-human` in the same call when present.
+   `guild:test|qa` → `guild:execute` (removing `guild:needs-human` in the same call only when a
+   human decided this loop-back — the procedure's step 6).
    Block first, label second: an interruption between the two leaves a recorded loop-back with the
    label not yet moved, which test/qa Step 0 finishes (`test.md` Step 0, *Interrupted loop-back*);
    the reverse order would run execute without the reason and lose the count. The cap is
-   **`<cap>` = 2 active loop-backs per Issue** (Section H — the only place this number is defined).
+   **`<cap>` active loop-backs per Issue** — the number is defined only in Section H.
 2. **Pending regeneration** (`test.md` Step 2 — visual baselines declared un-regenerable) moves
    `guild:test` → `guild:execute` together with `guild:needs-human`. It is a wait for a human, not
    a failure: it writes no loop-back block and does not count against the cap.
@@ -227,8 +228,10 @@ for the leader the gap it saw (AC ids / files / defects).
 Steps 2–3 are the **unattended** path's guards: there the procedure decides alone, so a repeat or an
 exhausted cap must stop it.
 
-**Asking first (attended)**: test/qa do not loop back on their own judgment when a human is present —
-the human decides, with the guards' readings in front of them. Run steps 1–3 **as readings only**
+**Asking first (attended — test, qa, and the leader alike)**: none of them loops back on its own
+judgment when a human is present — the human decides, with the guards' readings in front of them.
+The leader (`dev.md` Phase 2's between-stage judgment) asks with `AskUserQuestion` itself, then runs
+steps 1, 4–7 on a "loop back" exactly as the wrapper re-run below does. Run steps 1–3 **as readings only**
 (no label, no comment, no capture): the active count, whether the cap is reached, whether this
 signature is stagnant. Write `loopback-reason: <one line>` and `loopback-signature: <set>` into the
 stage's own output comment (`guild:test:output` / `guild:qa:output`), then return
@@ -238,8 +241,10 @@ reached, append ` — cap reached; yes overrides it`, when stagnant,
 direct `/gld test|qa` run) puts exactly that to the human and **re-runs the same wrapper with the
 answer**. On "loop back" the wrapper **skips its run steps** (no tests, no QA — the output comment
 and its `loopback-*` lines stay as they are), reads `reason` and `signature` from those two lines,
-and runs steps 1, 4–7 — **not** 2–3: the human saw both readings and answered, and that answer is
-the decision (write `override: human` if either warning was in the question). On "stop" it returns
+and runs steps 1, 4–7 — **not** 2–3 as guards: the human saw both readings and answered, and that
+answer is the decision. To fill `override:` it recomputes the two readings from the record (step 1's
+count against `<cap>`; the step-3 containment test) — never from memory of what the question said —
+and writes `override: human` when either is true. On "stop" it returns
 `OK PAUSE`. This re-run makes no new verdict, so it owes **no** captures (`_signals.md` Section C) —
 the first run already recorded the `verify-gap` / `correction`.
 

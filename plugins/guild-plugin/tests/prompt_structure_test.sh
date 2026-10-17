@@ -3136,7 +3136,7 @@ hasfx "test: 루프백 진입점" "$GLD/commands/test.md" '**Loop-back entries (
 hasfx "qa: 루프백 진입점" "$GLD/commands/qa.md" '**Loop-back entries (right after the label read, before any other work):**'
 hasfx "execute Step 0: 미처리 루프백 읽기" "$GLD/commands/atoms/_execute_spine.md" '**Pending loop-back** (its own `gh api` call, before the branch work)'
 hasfx "execute Step 0(a): 루프백 branch 우선" "$GLD/commands/atoms/_execute_spine.md" 'If `<loopback>` is set and its `branch:` is among them'
-hasfx "execute Step 1: resume 문구 교체" "$GLD/commands/atoms/_execute_spine.md" 'replace "keep the already-correct committed work"'
+hasfx "execute Step 1: resume 문구 교체" "$GLD/commands/atoms/_execute_spine.md" 'replace everything after the summary slot with'
 hasfx "execute Step 6: consumed 재조회 판정" "$GLD/commands/atoms/_execute_spine.md" "re-read the \`<!-- guild:loopback -->\` record now — not Step 0's reading from memory"
 hasfx "execute Step 6: consumed 실패 시 전진 금지" "$GLD/commands/atoms/_execute_spine.md" 'still missing → do **not** advance'
 hasfx "_signals: 루프백 재진입은 owed 0" "$GLD/commands/atoms/_signals.md" '**test / qa — owed = 0** on the two loop-back re-entries'
@@ -3149,10 +3149,22 @@ hasfx "qa: 무인 분기는 루프백 절차를 호출" "$GLD/commands/qa.md" 'r
 hasfx "답 재실행은 steps 1, 4–7 (가드 2–3 은 질문에 이미 반영)" "$HOMD" 'and runs steps 1, 4–7 — **not** 2–3'
 lacksfx "답 재실행이 steps 1–7 을 돌지 않음" "$HOMD" 'and runs steps 1–7.'
 hasfx "질문에 상한/정체 표시" "$HOMD" ' — cap reached; yes overrides it'
+hasfx "질문에 정체 접미사" "$HOMD" ' — same failure as loop-back <n>; yes tries again anyway'
+hasfx "test: 질문이 접미사를 참조" "$GLD/commands/test.md" 'with the cap / stagnation suffix'
+hasfx "qa: 질문이 접미사를 참조" "$GLD/commands/qa.md" 'with the cap / stagnation suffix'
+hasfx "Asking first 는 리더에게도" "$HOMD" '**Asking first (attended — test, qa, and the leader alike)**'
+hasfx "dev: attended 리더 루프백은 사람에게 묻는다" "$GLD/commands/dev.md" 'its *Asking first*: you put the readings to the human'
+hasfx "override 는 기록에서 재계산" "$HOMD" 'never from memory of what the question said'
+hasfx "_signals: 질문만 한 실행은 stagnation 을 빚지지 않음" "$GLD/commands/atoms/_signals.md" 'owes its `verify-gap` /'
+hasfx "_stagnation: 루프백 질문은 Asking first 를 따름" "$GLD/commands/atoms/_stagnation.md" '**Not for a test / qa / leader → execute loop-back**'
+_cap_n="$(grep -c '`<cap>` = 2' "$HOMD")"
+[ "$_cap_n" = 1 ] && ok "_handoff 안에서도 상한 숫자는 Section H 한 곳" || bad "_handoff 상한 정의 개수" "1" "$_cap_n"
+lacksfx "Section A 의 무조건 needs-human 제거 문구 제거" "$HOMD" 'removing `guild:needs-human` in the same call when present.'
+lacksfx "루프백 프롬프트에 '중단된 실행' 전제 잔존 금지" "$GLD/commands/atoms/_execute_spine.md" 'with "keep committed work unrelated to the failure below"\'
 hasfx "사람 결정 루프백은 decided: human 으로 기록 (중단 재진입도 needs-human 제거)" "$HOMD" 'step 6 reads `decided: human` from'
 hasfx "직접 호출 test 는 리더가 묻고 재실행" "$GLD/commands/test.md" 'is asked by the leader right here (`AskUserQuestion`)'
 hasfx "직접 호출 qa 는 리더가 묻고 재실행" "$GLD/commands/qa.md" 'the leader asks a `NEEDS_HUMAN` loop-back question itself'
-hasfx "execute: 루프백 시 partial-work 요약 슬롯 유지" "$GLD/commands/atoms/_execute_spine.md" 'keep its partial-work summary slot'
+hasfx "execute: 루프백 시 partial-work 요약 슬롯 유지" "$GLD/commands/atoms/_execute_spine.md" 'keep the partial-work summary slot itself'
 lacksfx "execute: 'the documented exception' 단수 표현 제거" "$GLD/commands/atoms/_execute_spine.md" 'This marker is the documented exception'
 lacksfx "_stagnation: 상한 리터럴 (≤2) 제거" "$GLD/commands/atoms/_stagnation.md" 'numeric cap (≤2)'
 # 접두 문자열로 세는 지시 금지 — `### loopback` 은 reset 블록에도 맞는다
@@ -3170,7 +3182,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=958   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=969   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

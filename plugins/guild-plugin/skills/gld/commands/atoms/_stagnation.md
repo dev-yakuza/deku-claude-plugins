@@ -99,7 +99,7 @@ tell stagnation from progress, which is the judgment this section exists to make
 
 Do not spend the remaining loop-back budget on a retry unlikely to help. Escalate immediately, before the numeric cap would otherwise be reached:
 
-- **Attended**: `NEEDS_HUMAN: same blocker recurred after loop-back — <reason>; retrying is unlikely to resolve it without a different approach`.
+- **Attended**: `NEEDS_HUMAN: same blocker recurred after loop-back — <reason>; retrying is unlikely to resolve it without a different approach`. ⚠ **Not for a test / qa / leader → execute loop-back**: there the reading goes into the loop-back question as its suffix (`_handoff.md` Section B, *Asking first*), the human's answer decides, and no `stagnation` capture is made (Section C applies when the procedure stops the loop, i.e. unattended).
 - **Unattended** (`GLD_UNATTENDED=1`): translates via `_handoff.md` Section H's escape hatch → `OK PAUSE: needs-human — stagnant loop-back — <reason>` + `guild:needs-human` label.
 
 This **composes with, not replaces**, each stage's existing numeric cap ("~2 loops"): whichever condition fires first wins. An identical-reason repeat can fire *before* the cap (e.g. on attempt 2 of 2, immediately); the cap still fires on its own when every attempt raises a genuinely different concern.
