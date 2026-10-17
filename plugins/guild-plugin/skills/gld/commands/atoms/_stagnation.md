@@ -1,6 +1,6 @@
 # STAGNATION (shared loop-back guard)
 
-**Not a stage.** Shared contract for how a stage's bounded loop-back — execute↔conformance (`implement.md`/`debug.md`/`refactor.md` Step 4), and the unattended test/qa loop-back (`_handoff.md` Section H, `test.md`/`qa.md` Step 3) — detects a **stalled** retry (the blocking reason repeats instead of resolving) and stops burning attempts against it, instead of silently exhausting the numeric cap. Read by any stage step that is about to re-invoke after a `BLOCKED` / failed-verify / defect result.
+**Not a stage.** Shared contract for how a stage's bounded loop-back — execute↔conformance (`implement.md`/`debug.md`/`refactor.md` Step 4), and the test/qa/leader → execute loop-back (`_handoff.md` Section B, *Loop-back procedure* — unattended it stops the loop; attended its reading is put in the question and the human's answer decides) — detects a **stalled** retry (the blocking reason repeats instead of resolving) and stops burning attempts against it, instead of silently exhausting the numeric cap. Read by any stage step that is about to re-invoke after a `BLOCKED` / failed-verify / defect result.
 
 ---
 
@@ -92,8 +92,8 @@ in full, do **not** fall back to memory — `_execute_spine.md`'s existing trunc
 (`NEEDS_HUMAN` / `OK PAUSE: needs-human`), because "I don't recall a prior reason" and "there was
 no prior reason" are different findings and only one of them is safe to act on.
 
-⚠ The numeric cap (≤2) is a **backstop, not a substitute** — it bounds a stuck loop-back but cannot
-tell stagnation from progress, which is the judgment this section exists to make. **Calibration**: same *file* + same underlying *defect* = same root cause even if the wording differs entirely (e.g. "widget test asserts nothing in the disabled path" vs. "disabled-state contrast check is a no-op" — same #894-class bug, restated); a genuinely different file, a different AC, or a different mechanism within the same file (e.g. the fix for a null-check bug then exposes a separate off-by-one) = different concern, not stagnation. When genuinely unsure, err toward **not** flagging stagnation — the bounded numeric cap (≤2) still catches a truly stuck loop-back even if one ambiguous retry gets miscounted as progress, whereas prematurely escalating a retry that was actually about to succeed costs a human interruption for nothing.
+⚠ The numeric cap (execute's ~2 attempts; `<cap>` for test/qa loop-backs, `_handoff.md` Section H) is a **backstop, not a substitute** — it bounds a stuck loop-back but cannot
+tell stagnation from progress, which is the judgment this section exists to make. **Calibration**: same *file* + same underlying *defect* = same root cause even if the wording differs entirely (e.g. "widget test asserts nothing in the disabled path" vs. "disabled-state contrast check is a no-op" — same #894-class bug, restated); a genuinely different file, a different AC, or a different mechanism within the same file (e.g. the fix for a null-check bug then exposes a separate off-by-one) = different concern, not stagnation. When genuinely unsure, err toward **not** flagging stagnation — the bounded numeric cap (execute's ~2 attempts; `<cap>` for test/qa loop-backs) still catches a truly stuck loop-back even if one ambiguous retry gets miscounted as progress, whereas prematurely escalating a retry that was actually about to succeed costs a human interruption for nothing.
 
 ## Section B — On stagnation detected
 

@@ -3136,13 +3136,28 @@ hasfx "test: 루프백 진입점" "$GLD/commands/test.md" '**Loop-back entries (
 hasfx "qa: 루프백 진입점" "$GLD/commands/qa.md" '**Loop-back entries (right after the label read, before any other work):**'
 hasfx "execute Step 0: 미처리 루프백 읽기" "$GLD/commands/atoms/_execute_spine.md" '**Pending loop-back** (its own `gh api` call, before the branch work)'
 hasfx "execute Step 0(a): 루프백 branch 우선" "$GLD/commands/atoms/_execute_spine.md" 'If `<loopback>` is set and its `branch:` is among them'
-hasfx "execute Step 1: resume 문구 교체" "$GLD/commands/atoms/_execute_spine.md" 'this paragraph REPLACES the Resume paragraph above'
+hasfx "execute Step 1: resume 문구 교체" "$GLD/commands/atoms/_execute_spine.md" 'replace "keep the already-correct committed work"'
 hasfx "execute Step 6: consumed 재조회 판정" "$GLD/commands/atoms/_execute_spine.md" "re-read the \`<!-- guild:loopback -->\` record now — not Step 0's reading from memory"
 hasfx "execute Step 6: consumed 실패 시 전진 금지" "$GLD/commands/atoms/_execute_spine.md" 'still missing → do **not** advance'
 hasfx "_signals: 루프백 재진입은 owed 0" "$GLD/commands/atoms/_signals.md" '**test / qa — owed = 0** on the two loop-back re-entries'
 hasfx "_bash_rules: loopback 도 누적형 id·body 동시 조회" "$GLD/commands/atoms/_bash_rules.md" '`<!-- guild:loopback -->` has the same cumulative shape'
 hasfx "rollback: loopback-reset" "$GLD/commands/rollback.md" '### loopback-reset'
 hasfx "status: 활성 루프백 수 표시" "$GLD/commands/status.md" 'Loop-backs: <active>/<cap>'
+hasfx "test: 무인 분기는 루프백 절차를 호출" "$GLD/commands/test.md" 'run the **loop-back procedure** (`_handoff.md` Section B) with `from: test`'
+hasfx "qa: 무인 분기는 루프백 절차를 호출" "$GLD/commands/qa.md" 'run the **loop-back procedure** (`_handoff.md` Section B) with `from: qa`'
+# 사람의 답이 가드에 다시 뒤집히지 않는다 (사람이 "loop back" 해도 정체 판정이 PAUSE 로 막던 회귀)
+hasfx "답 재실행은 steps 1, 4–7 (가드 2–3 은 질문에 이미 반영)" "$HOMD" 'and runs steps 1, 4–7 — **not** 2–3'
+lacksfx "답 재실행이 steps 1–7 을 돌지 않음" "$HOMD" 'and runs steps 1–7.'
+hasfx "질문에 상한/정체 표시" "$HOMD" ' — cap reached; yes overrides it'
+hasfx "사람 결정 루프백은 decided: human 으로 기록 (중단 재진입도 needs-human 제거)" "$HOMD" 'step 6 reads `decided: human` from'
+hasfx "직접 호출 test 는 리더가 묻고 재실행" "$GLD/commands/test.md" 'is asked by the leader right here (`AskUserQuestion`)'
+hasfx "직접 호출 qa 는 리더가 묻고 재실행" "$GLD/commands/qa.md" 'the leader asks a `NEEDS_HUMAN` loop-back question itself'
+hasfx "execute: 루프백 시 partial-work 요약 슬롯 유지" "$GLD/commands/atoms/_execute_spine.md" 'keep its partial-work summary slot'
+lacksfx "execute: 'the documented exception' 단수 표현 제거" "$GLD/commands/atoms/_execute_spine.md" 'This marker is the documented exception'
+lacksfx "_stagnation: 상한 리터럴 (≤2) 제거" "$GLD/commands/atoms/_stagnation.md" 'numeric cap (≤2)'
+# 접두 문자열로 세는 지시 금지 — `### loopback` 은 reset 블록에도 맞는다
+_pfx="$(grep -rnE '(count|세)[^.]{0,40}`### loopback`' "$GLD/commands" | grep -vi 'never count by' || true)"
+[ -z "$_pfx" ] && ok "어떤 파일도 '### loopback' 접두로 세지 않음" || bad "접두로 세는 지시" "none" "$(printf '%s' "$_pfx" | head -2 | tr '\n' '|')"
 _lb_files="$(grep -rl 'guild:loopback' "$GLD/commands" | sed 's#.*/##' | sort | tr '\n' ' ')"
 for want in _handoff.md test.md qa.md _execute_spine.md _stagnation.md rollback.md status.md resume.md review.md _bash_rules.md; do
   case " $_lb_files " in *" $want "*) ok "guild:loopback 철자 — $want" ;; *) bad "guild:loopback 철자 — $want" "present" "missing" ;; esac
@@ -3155,7 +3170,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=946   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=958   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

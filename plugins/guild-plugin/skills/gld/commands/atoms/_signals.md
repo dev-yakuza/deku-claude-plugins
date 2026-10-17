@@ -109,8 +109,8 @@ case where anything held only in context is gone:
      carrying the human's "loop back" / "stop" answer, and the *Interrupted loop-back* entry. Neither
      runs tests or QA, so neither makes a new verdict — the first run already recorded the
      `verify-gap` / `correction`. Counting from their own Step 0 `--mark` would see 0 recorded,
-     owe 1, and backfill a duplicate. (A **stagnation** exit from the loop-back procedure on the
-     answer re-run still owes its 1 `stagnation` — that is a new verdict.)
+     owe 1, and backfill a duplicate. (The answer re-run skips the procedure's stagnation guard —
+     the human already saw that reading — so it has no stagnation exit to owe either.)
 4. **Per kind, recorded < owed → capture the missing ones now**, with the same call the step would have made,
    and start `--evidence` with `backfilled at stage exit:` so the delay is visible. Say in the
    narration how many were backfilled. **Owed 0** → nothing to do; a clean run legitimately leaves

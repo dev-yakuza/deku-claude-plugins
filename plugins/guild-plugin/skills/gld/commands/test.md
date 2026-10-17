@@ -30,7 +30,7 @@ Empty → add `guild:test`. Non-empty → do not add on top (Step 3's transition
 
 **Loop-back entries (right after the label read, before any other work):**
 - **Interrupted loop-back** — `_handoff.md` Section B, *Interrupted loop-back*: when it applies, run only steps 6–7 of the loop-back procedure and return `OK LOOPBACK: execute`. No tester spawn.
-- **Re-run carrying the human's loop-back answer** (`dev.md` passes "loop back" / "stop" after this stage asked) — `_handoff.md` Section B, *Asking first*: skip Steps 1–2 entirely, read `reason` / `signature` from the `loopback-reason:` / `loopback-signature:` lines of this Issue's `<!-- guild:test:output -->`, and go to the loop-back procedure (`from: test`). Neither entry runs tests or owes a capture.
+- **Re-run carrying the human's loop-back answer** (`dev.md` — or, on a direct `/gld test $1`, the leader after asking the human itself — passes "loop back" / "stop" after this stage asked) — `_handoff.md` Section B, *Asking first*: skip Steps 1–2 entirely, read `reason` / `signature` from the `loopback-reason:` / `loopback-signature:` lines of this Issue's `<!-- guild:test:output -->`, and go to the loop-back procedure (`from: test`). Neither entry runs tests or owes a capture.
 
 ## Step 1 — Spawn tester (run + verify)
 Spawn the tester sub-agent:
@@ -76,7 +76,7 @@ As the leader, enforce the verify gate (`_handoff.md` Section E):
   OK ADVANCE: qa
   ```
 - **Verify failed** (tests red — a suite killed at the Bash timeout ceiling counts as red: a slow suite and a test the change made hang look identical, and the hang is a defect; a recurring timeout reaches the human through the stagnation guard below, where the timeout itself is the blocking signature whichever test was last running — or evidence contradicts claim, or AC gap) → do NOT mark done.
-  - **Attended**: add two lines to the `<!-- guild:test:output -->` comment Step 2 posted — `loopback-reason: <one line>` and `loopback-signature: <failing test names and uncovered AC ids, sorted, comma-separated>` — then return `NEEDS_HUMAN: tests not green / AC gap — <one-line>; loop back to execute? (loop-backs so far: <active>/<cap>)` (`<active>` = active blocks in the `<!-- guild:loopback -->` record, `_handoff.md` Section B; `<cap>` from `_handoff.md` Section H). The human's answer comes back as a re-run (Step 0, *Loop-back entries*).
+  - **Attended**: add two lines to the `<!-- guild:test:output -->` comment Step 2 posted — `loopback-reason: <one line>` and `loopback-signature: <failing test names and uncovered AC ids, sorted, comma-separated>` — then return `NEEDS_HUMAN: tests not green / AC gap — <one-line>; loop back to execute? (loop-backs so far: <active>/<cap>)` with the cap / stagnation suffix the loop-back procedure's *Asking first* defines (its steps 1–3 run as readings only — `_handoff.md` Section B) (`<active>` = active blocks in the `<!-- guild:loopback -->` record, `_handoff.md` Section B; `<cap>` from `_handoff.md` Section H). The human's answer comes back as a re-run (Step 0, *Loop-back entries*).
   - **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): run the **loop-back procedure** (`_handoff.md` Section B) with `from: test`, `reason` = the gap in one line, `signature` = the failing test names and uncovered AC ids. It checks the cap and the stagnation guard first and returns either `OK LOOPBACK: execute` or `OK PAUSE: needs-human — …` (the cap and stagnant cases add the `guild:needs-human` label + a `<!-- guild:needs-human -->` comment and do NOT transition the stage label). **Never weaken/skip tests to pass** (INV2). Detect mode via `printenv GLD_UNATTENDED`.
   ```
   >>> RESULT <<<
@@ -87,7 +87,7 @@ As the leader, enforce the verify gate (`_handoff.md` Section E):
   >>> RESULT <<<
   OK LOOPBACK: execute
   ```
-  Invoked directly (`/gld test $1`, not under `dev`): after `OK LOOPBACK`, tell the human the next step is `/gld resume $1` (it re-enters execute with the loop-back reason).
+  Invoked directly (`/gld test $1`, not under `dev`): a `NEEDS_HUMAN` loop-back question is asked by the leader right here (`AskUserQuestion`), then this file is re-run with the answer (Step 0, *Loop-back entries*). After `OK LOOPBACK`, tell the human the next step is `/gld resume $1` (it re-enters execute with the loop-back reason).
 - Hard error → `FAIL: <reason>`.
 
 ## Note — test hands off to QA

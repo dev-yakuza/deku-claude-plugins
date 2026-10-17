@@ -168,7 +168,7 @@ Each stage persists its output as a GitHub Issue comment wrapped in a marker pai
 | `<!-- guild:sprint:run -->` … `<!-- /guild:sprint:run -->` | `sprint run` **supervisor (shell, not an LLM)** | the run ledger: `state`, `heartbeat`, `host`/`pid`, per-issue retries, discovered children. Replace-in-place. ⚠ A shell writer cannot perform the truncation recovery an LLM writer does; it also cannot be truncated, since it fetches the comment body via `gh api --paginate` rather than a previewed read. |
 | `<!-- guild:sprint:daily -->` … `<!-- /guild:sprint:daily -->` | `sprint daily` (leader) | the latest status snapshot, so the human can read it on GitHub. Replace-in-place. The **one** exception to `daily`'s read-only contract. |
 | `<!-- guild:sprint:retro -->` … `<!-- /guild:sprint:retro -->` | `sprint retro` (leader) | the sprint's metrics, capacity verdict and the evolve hand-off. ⚠ **Appended once per sprint** (the third Section B exception) — a repo's sprint history is the sequence of these. |
-| `<!-- guild:loopback -->` … `<!-- /guild:loopback -->` | test / qa (or the leader, `dev.md` Phase 2) on a loop-back; `/gld rollback stage` appends a reset | one `### loopback <n>` block per loop-back — `from:` · `at:` · `branch:` · `reason:` · `signature:` (+ `override: human`, + `consumed:` once execute has handled it) — and a `### loopback-reset` block (`at:` · `by: human`) when a rollback restarts the design. ⚠ **Cumulative** (the fourth exception above). Read with the definition of *active blocks* just below this table. |
+| `<!-- guild:loopback -->` … `<!-- /guild:loopback -->` | test / qa (or the leader, `dev.md` Phase 2) on a loop-back; `/gld rollback stage` appends a reset | one `### loopback <n>` block per loop-back — `from:` · `at:` · `branch:` · `reason:` · `signature:` (+ `decided: human` / `override: human` on the attended path, + `consumed:` once execute has handled it) — and a `### loopback-reset` block (`at:` · `by: human`) when a rollback restarts the design. ⚠ **Cumulative** (the fourth exception above). Read with the definition of *active blocks* just below this table. |
 | `<!-- guild:review:output -->` … `<!-- /guild:review:output -->` | review (fresh reviewer) | guided pair-review walkthrough (risk-weighted, rationale-backed). Posted to the PR only with `/gld review … --comment`; default is **session-only, nothing persisted to disk** (unlike the other stages, `review.md` never writes a `docs/specs/<issue>/` file for its own recap) — this row documents the marker's shape for that opt-in case, not a durable output. |
 
 **Loop-back record — active blocks (the single definition; test, qa, `_execute_spine.md`, `_stagnation.md`, `rollback.md`, `status.md` and `resume.md` refer here and do not restate it).**
@@ -197,11 +197,9 @@ Input: `from` (`test` / `qa` / `leader`), a one-line `reason`, and a `signature`
 what is failing: for test the failing test names and uncovered AC ids, for qa the defect identifiers,
 for the leader the gap it saw (AC ids / files / defects).
 1. **Read the record** (the lookup above) and count the active blocks.
-2. **Cap**: active blocks ≥ `<cap>` (Section H) → do not loop back. Unattended: add
-   `guild:needs-human`, post a `<!-- guild:needs-human -->` comment naming the repeated failure,
-   return `OK PAUSE: needs-human — loop-back cap reached`. Attended: say in the question that the cap
-   is reached; loop back only on the human's explicit yes, and then write `override: human` in the
-   block.
+2. **Cap**: active blocks ≥ `<cap>` (Section H) → do not loop back: add `guild:needs-human`, post a
+   `<!-- guild:needs-human -->` comment naming the repeated failure, return
+   `OK PAUSE: needs-human — loop-back cap reached`.
 3. **Stagnation** (`_stagnation.md` Section A, its containment test): this `signature`, if non-empty,
    is wholly contained in the `signature` of the latest active block **with the same `from`** →
    stagnant (an empty signature falls back to the "same root cause" reading of the two `reason`s).
@@ -217,29 +215,41 @@ for the leader the gap it saw (AC ids / files / defects).
    reason: <one line, config.language>
    signature: <the sorted set, comma-separated>
    ```
-   (+ `override: human` per step 2.) Re-read the comment and confirm the block is there; a failed
-   write → do not move the label (Section F), return `FAIL: loop-back record not written`.
+   On the attended answer path (below) add `decided: human`, and `override: human` when the human
+   said yes past the cap or a stagnation warning. Re-read the comment and confirm the block is
+   there; a failed write → do not move the label (Section F), return
+   `FAIL: loop-back record not written`.
 6. **Move the label**: `gh issue edit <N> --remove-label "guild:<test|qa>" --add-label "guild:execute"`,
-   adding `--remove-label "guild:needs-human"` only when the human decided this loop-back and the
-   label is present. Re-read the labels to confirm (Section F).
+   adding `--remove-label "guild:needs-human"` when the block carries `decided: human` and the label
+   is present. Re-read the labels to confirm (Section F).
 7. Return `OK LOOPBACK: execute`.
 
-**Asking first (attended)**: test/qa do not run the steps above on their own judgment when a human
-is present. They write `loopback-reason: <one line>` and `loopback-signature: <set>` into their own
-output comment (`guild:test:output` / `guild:qa:output`), then return
-`NEEDS_HUMAN: … loop back to execute? (loop-backs so far: <active>/<cap>)`. `dev.md` asks, and
-re-runs the same wrapper with the answer. On "loop back" the wrapper **skips its run steps** (no
-tests, no QA — the output comment and its `loopback-*` lines stay as they are), reads `reason` and
-`signature` from those two lines, and runs steps 1–7. On "stop" it returns `OK PAUSE`. This re-run
-makes no new verdict, so it owes **no** captures (`_signals.md` Section C) — the first run already
-recorded the `verify-gap` / `correction`.
+Steps 2–3 are the **unattended** path's guards: there the procedure decides alone, so a repeat or an
+exhausted cap must stop it.
+
+**Asking first (attended)**: test/qa do not loop back on their own judgment when a human is present —
+the human decides, with the guards' readings in front of them. Run steps 1–3 **as readings only**
+(no label, no comment, no capture): the active count, whether the cap is reached, whether this
+signature is stagnant. Write `loopback-reason: <one line>` and `loopback-signature: <set>` into the
+stage's own output comment (`guild:test:output` / `guild:qa:output`), then return
+`NEEDS_HUMAN: … loop back to execute? (loop-backs so far: <active>/<cap>)` — and when the cap is
+reached, append ` — cap reached; yes overrides it`, when stagnant,
+` — same failure as loop-back <n>; yes tries again anyway`. Whoever asks (`dev.md`, or the leader of a
+direct `/gld test|qa` run) puts exactly that to the human and **re-runs the same wrapper with the
+answer**. On "loop back" the wrapper **skips its run steps** (no tests, no QA — the output comment
+and its `loopback-*` lines stay as they are), reads `reason` and `signature` from those two lines,
+and runs steps 1, 4–7 — **not** 2–3: the human saw both readings and answered, and that answer is
+the decision (write `override: human` if either warning was in the question). On "stop" it returns
+`OK PAUSE`. This re-run makes no new verdict, so it owes **no** captures (`_signals.md` Section C) —
+the first run already recorded the `verify-gap` / `correction`.
 
 **Interrupted loop-back** (test/qa Step 0, before anything else): the latest active block is not yet
 handled (no `consumed:`), **no** `invocation:` line in the Issue's `<!-- guild:auditor:execute -->`
 record is ≥ that block's `at:`, and the label is still `guild:test` / `guild:qa` → the previous run
-appended the block and stopped before step 6. Run only steps 6–7. This also owes no captures. (If
-execute *has* run since — an `invocation:` ≥ `at:` exists — the block is merely missing its
-`consumed:` line; that is not an interrupted loop-back, so run the stage normally.)
+appended the block and stopped before step 6. Run only steps 6–7 (step 6 reads `decided: human` from
+that block, so a human-decided loop-back still clears `guild:needs-human`). This also owes no
+captures. (If execute *has* run since — an `invocation:` ≥ `at:` exists — the block is merely
+missing its `consumed:` line; that is not an interrupted loop-back, so run the stage normally.)
 
 **Durable design artifacts** (skeleton, architecture decisions, test cases) that outlive the Issue thread are also written to the working tree:
 - `docs/specs/<issue>/` — design skeleton, notes, test-case list (committed with the PR).
@@ -492,9 +502,9 @@ Value `1` → unattended. Anything else / empty → attended (default; behave ex
 | Gate | Attended (default) | Unattended (leader stands in) |
 |---|---|---|
 | **discuss** (analyze/design) | return `NEEDS_HUMAN` → main session `AskUserQuestion` | leader classifies the ambiguity's stakes, **charter-anchored**: **low/medium** (local, reversible) → pick the most charter/standards-aligned interpretation, **record it as an explicit assumption** in the stage output (for the decision log), proceed. **high** (scope-defining / materially different product / hard to reverse) → do NOT guess: post a `<!-- guild:needs-human -->` comment listing the options, **add the `guild:needs-human` label**, and return `OK PAUSE: needs-human — <one-line>` (do NOT transition the stage label). |
-| **verify** (test) | `NEEDS_HUMAN` on red/AC-gap | **deterministic**: raw evidence green + AC covered + DoD → advance. Else loop back to execute (`OK LOOPBACK: execute`, Section A) while the Issue has fewer than **`<cap>` = 2** active loop-backs (Section B — **this row defines the cap; every other file says `<cap>`**). At the cap, or stagnant (`_stagnation.md`) → `OK PAUSE: needs-human — tests not green / AC gap`. **Never weaken/skip tests to pass** (INV2). |
+| **verify** (test) | `NEEDS_HUMAN` on red/AC-gap | **deterministic**: raw evidence green + AC covered + DoD → advance. Else loop back to execute (`OK LOOPBACK: execute`, Section A) while the Issue has fewer than **`<cap>` = 2** active loop-backs (Section B — **this row defines the cap; every other file says `<cap>`**). At the cap, or stagnant (`_stagnation.md`) → the loop-back procedure's own pause (`OK PAUSE: needs-human — loop-back cap reached` / `— stagnant loop-back — <reason>`). **Never weaken/skip tests to pass** (INV2). |
 | **execute auditor** (`_execute_spine.md` Step 3.5a) | leader may dismiss a finding with a recorded reason, any severity | ⚠ **The one gate the leader may NOT stand in for.** A `BLOCKER` has exactly two outcomes — **fixed**, or `guild:needs-human` + `OK PAUSE`. Dismissing it is forbidden outright: attended, a dismissal is safe because the human sees it at `/gld review` before approving; unattended there is no such reader, and `batch.md` would count the Issue as succeeded. `MAJOR`/`MINOR` may still be dismissed with a recorded reason. ⚠ One narrow exception: a `BLOCKER` an **earlier attended** invocation already dismissed-with-reason, on code unchanged since, is **carried forward** as still-dismissed (`_execute_spine.md` Step 4) — that re-uses a human-visible decision rather than making a new one, so it is not a stand-in and does not pause. |
-| **qa** (blocking defect) | `NEEDS_HUMAN` | record the concern; loop back to execute (`OK LOOPBACK: execute`) if fixable and under `<cap>` (shared with test — one count per Issue), else `OK PAUSE: needs-human — QA defect`. Never force `done`. |
+| **qa** (blocking defect) | `NEEDS_HUMAN` | record the concern; loop back to execute (`OK LOOPBACK: execute`) if fixable and under `<cap>` (shared with test — one count per Issue), else (not fixable in code) `OK PAUSE: needs-human — QA defect: <one-line>`; at the cap or stagnant, the procedure's own pause as in the verify row. Never force `done`. |
 
 ⚠ **When the stakes classification itself is in doubt, classify it `high`.** The
 discuss row above splits on a judgment the leader makes alone, with nobody to check
@@ -560,7 +570,7 @@ Every **human-readable string Guild emits is written in the repo's `config.langu
 - the auditor record's `### audit-record <n>` block headings, its four disposition tokens (`looped-back`/`fixed`/`recorded`/`dismissed`) the clean-scan / no-scan lines `findings: none` / `scan: none` and the `invocation: <ISO>` line (`_execute_spine.md` Step 4), which the next invocation counts and re-states and `sprint retro` counts;
 - the sprint run ledger's `state:` values (`running` · `installing-deps` · `rate-limited-until-<epoch>` · `rate-limited-remaining-<n>s` · **`waiting-for-window-<HHMM>`** · `finished` · `halted:<reason>`), its `retries`/`discovered`/**`window`**/**`completion`** keys, the failure classes in `.sprint-logs/<tracker>/failures.jsonl`, and `sprint_dag.py`'s `DEFAULT` / `BLOCKED:<reason>` tokens — all read back by `sprint run`'s duplicate-run guard and by `sprint daily` (`sprint/run.md`, `sprint/daily.md`). The same ledger's board counters (`board_fails` · `board_bugs` · `board_unknown_col` · `board_account_mismatch` · `board_disabled_after` · `board_last_write` · `board_reason_disabled` · `board_off_reason`) belong here too: `sprint daily` and `run`'s Phase 4 report read them back, and `sprint board` renders them (`sprint/board.md`).
 - the follow-up record's status tokens `unfiled` · `declined` · `filed #<n>` (`<!-- guild:followups -->`, `qa.md` Step 2.6), read back by a QA re-run (never re-ask `declined`) and by `review.md` Step 5 (asks only `unfiled`, then rewrites the answered lines).
-- the loop-back record (`<!-- guild:loopback -->`, Section B): the headings `### loopback <n>` and `### loopback-reset`, the keys `from:` · `at:` · `branch:` · `signature:` · `override:` · `consumed:` · `by:` and the values `test` · `qa` · `leader` · `human`, plus the `loopback-reason:` / `loopback-signature:` lines test and qa write into their own output comment before asking a human — read back for the cap, the stagnation comparison and the not-yet-handled test. Only the **value** of `reason:` / `loopback-reason:` is prose in `config.language`.
+- the loop-back record (`<!-- guild:loopback -->`, Section B): the headings `### loopback <n>` and `### loopback-reset`, the keys `from:` · `at:` · `branch:` · `signature:` · `override:` · `decided:` · `consumed:` · `by:` and the values `test` · `qa` · `leader` · `human`, plus the `loopback-reason:` / `loopback-signature:` lines test and qa write into their own output comment before asking a human — read back for the cap, the stagnation comparison and the not-yet-handled test. Only the **value** of `reason:` / `loopback-reason:` is prose in `config.language`.
 
 ⚠ **`halted:<reason>` is a wildcard and the reasons are enumerated**: `interrupted` ·
 **`window-invalid`** · **`marker-unwritable`** · **`container-lost`** · **`sigTERM`** ·
