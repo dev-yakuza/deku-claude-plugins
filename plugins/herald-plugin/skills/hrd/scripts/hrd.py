@@ -22,7 +22,7 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.11.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.12.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -173,8 +173,16 @@ def cmd_status(a):
         pending = refresh.supersede_pending(root, cfg, store.load_published(root))
     except Exception as e:  # noqa: BLE001 — advisory
         pending = [{"error": str(e)}]
-    emit({"topics": derived_status(root, cfg), "lock": lock.status(root), "evolve": evolve,
-          "supersede_pending": pending})
+    try:  # stale or invalid channel guides (03-social.md S3); absent before social is set up
+        from hrdlib import social
+        soc = social.status_summary(root, cfg)
+    except Exception as e:  # noqa: BLE001 — advisory
+        soc = {"error": str(e)}
+    out = {"topics": derived_status(root, cfg), "lock": lock.status(root), "evolve": evolve,
+           "supersede_pending": pending}
+    if soc is not None:
+        out["social"] = soc
+    emit(out)
 
 
 # --- work lifecycle -----------------------------------------------------------------------------
@@ -1021,7 +1029,7 @@ def cmd_social(a):
     from hrdlib import social
 
     root, cfg = ctx()
-    if a.action in ("prepare", "check", "close") and os.environ.get("HRD_UNATTENDED") == "1":
+    if a.action in ("prepare", "check", "close", "merge", "final") and os.environ.get("HRD_UNATTENDED") == "1":
         raise HeraldError("/hrd social is interactive only (a human picks every post)")
     if a.action == "prepare":
         if not a.sns:
@@ -1034,7 +1042,7 @@ def cmd_social(a):
         out = []
         for f in a.file:  # one missing draft must not hide the others' results
             try:
-                out.append(social.check_draft(root, cfg, f))
+                out.append(social.check_draft(root, cfg, f, record_signal=a.record))
             except HeraldError as e:  # not a writing problem: nothing for the distributor to fix
                 out.append({"draft": f, "ok": False, "profile": None, "settings_to_confirm": [], "warnings": [],
                             "failed": [{"id": "check-error", "overridable": False, "detail": str(e)}]})
@@ -1048,6 +1056,14 @@ def cmd_social(a):
                           settings_confirmed=a.setting_confirmed or ()))
     elif a.action == "list":
         emit(social.listing(root, cfg))
+    elif a.action == "merge":
+        if not (a.sns and a.researched):
+            raise HeraldError("merge needs --sns and --researched <pending draft>")
+        emit(social.merge(root, cfg, a.sns, a.researched, accept=a.accept, accept_floor=a.accept_floor or ()))
+    elif a.action == "final":
+        if not (a.draft and a.final_file):
+            raise HeraldError("final needs --draft <approved draft> and --final-file <memory/social/final/<sns>/…>")
+        emit(social.final(root, cfg, a.draft, a.final_file))
     elif a.action == "lint":
         if not (a.mode and a.file and a.target):
             raise HeraldError("lint needs --mode, --file <pending> and --target <repo path>")
@@ -1060,7 +1076,7 @@ def cmd_social(a):
             sys.exit(1)
 
 
-MANUAL_SIGNAL_KINDS = ("session-edit-request", "human-edit", "review-finding")
+MANUAL_SIGNAL_KINDS = ("session-edit-request", "human-edit", "review-finding", "social-edit-request")
 
 
 def cmd_signal(a):
@@ -1071,6 +1087,15 @@ def cmd_signal(a):
                           % (a.kind, ", ".join(MANUAL_SIGNAL_KINDS)))
     root = repo_root()
     data = json.loads(a.data) if a.data else {}
+    if a.kind == "social-edit-request":  # one axis per theme and day (03-social.md S13)
+        import re
+        if not isinstance(data, dict) or data.get("theme") not in store.SOCIAL_THEMES:
+            raise HeraldError("social-edit-request needs data.theme, one of: %s" % ", ".join(store.SOCIAL_THEMES))
+        if not re.match(r"^social:[a-z0-9-]+:\d{8}$", a.topic or ""):
+            raise HeraldError("social-edit-request needs --topic social:<sns>:<YYYYMMDD> (prepare's signal_topic)")
+        bad = [k for k in ("request", "run", "draft") if not isinstance(data.get(k), str) or not data[k]]
+        if bad:
+            raise HeraldError("social-edit-request data needs %s" % ", ".join(bad))
     emit(store.signal(root, a.kind, a.topic, data,
                       human_reviewed=None if a.human_reviewed is None else a.human_reviewed == "true"))
 
@@ -1219,7 +1244,11 @@ def build():
     p.add_argument("--lang", help="gate one translation (the translator's own check)")
     p.add_argument("--record", action="store_true", help="record a failure as a gate-failure signal (pre-editor check)")
     p.set_defaults(fn=cmd_gate)
-    p = sp.add_parser("social"); p.add_argument("action", choices=["prepare", "check", "close", "list", "lint"])
+    p = sp.add_parser("social")
+    p.add_argument("action", choices=["prepare", "check", "close", "list", "lint", "merge", "final"])
+    p.add_argument("--record", action="store_true", help="check: record failures as social-gate-failure signals")
+    p.add_argument("--researched"); p.add_argument("--accept", nargs="*"); p.add_argument("--accept-floor", action="append")
+    p.add_argument("--draft"); p.add_argument("--final-file")
     p.add_argument("--sns"); p.add_argument("--slug"); p.add_argument("--n", type=int, default=3)
     p.add_argument("--file", nargs="+"); p.add_argument("--run"); p.add_argument("--approved")
     p.add_argument("--reject-all", action="store_true"); p.add_argument("--override")

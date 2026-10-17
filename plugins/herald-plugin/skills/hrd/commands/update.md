@@ -21,8 +21,8 @@ only. Ported from Guild `update.md`.
    `<!-- herald:persona:end -->` with the central template's; keep "Project specifics" and
    "Habits". Missing markers → skip that file and report it. Also report any persona or
    editorial text (any file, including the kept sections) that tells the session to run
-   `HRD signal --kind` with a kind other than `session-edit-request`, `human-edit` or
-   `review-finding` — those are recorded automatically since 0.3.0 and the call now fails.
+   `HRD signal --kind` with a kind other than `session-edit-request`, `human-edit`,
+   `review-finding` or `social-edit-request` — those are recorded automatically since 0.3.0 and the call now fails.
    **Style guide** (local-owned, INV4 — never rewritten): when `docs/editorial/style-guide.md`
    has no `<!-- herald:style <v'> -->` marker for the plugin version `v'` that last changed the
    template's "Not AI prose" section (now `0.7.0`), show the template's lines there that the

@@ -47,7 +47,9 @@ RESEARCH_FIELDS = ("max_chars", "count", "url_len", "hashtags", "link", "researc
 HOUSE_KEYS = ("max_chars", "hashtags", "link")
 LINK_VALUES = ("end", "start", "any", "none")
 WHERE_STRENGTH = {"post": 3, "setting": 2, "profile": 1}
-MODES = ("setup", "add", "edit", "persona")
+MODES = ("setup", "add", "edit", "persona", "refresh", "evolve")
+CHANNEL_MODES = ("add", "edit", "refresh", "evolve")
+PERSONA_MODES = ("setup", "persona", "evolve")
 FLOOR_MODES_STRENGTHEN = ("setup", "persona", "edit")
 
 # S9 starter patterns per language (primary subtag). A language without an entry has no code
@@ -849,12 +851,25 @@ def _overridable(rid, profile):
     return rid in OVERRIDABLE or (rid == "s9a-service-experience" and profile == "promo")
 
 
-def check_draft(root, cfg, rel, record=True):
-    """The post rules on one draft. Every basis comes from the `drafted` record and HEAD."""
-    on_base(root, cfg)
+# which theme a failed rule is evidence for (S13); rules absent here are not writing problems
+RULE_THEMES = {"length": "length", "hashtags": "hashtags", "disclosure": "disclosure",
+               "sources": "fact", "promotion-quote-not-found": "fact", "promotion-lang": "fact", "daily-sources": "fact",
+               "s9a-service-experience": "persona", "s9b-statistic": "persona", "service-mention-not-allowed": "persona",
+               "promo-url": "format", "promo-link-missing": "format", "link-position": "format", "daily-url": "format",
+               "forbidden-confirmed": "other"}
+
+
+def _rel(root, rel):
     rel = rel.replace(os.sep, "/")
-    if os.path.isabs(rel):
-        rel = os.path.relpath(rel, root).replace(os.sep, "/")
+    return os.path.relpath(rel, root).replace(os.sep, "/") if os.path.isabs(rel) else rel
+
+
+def check_draft(root, cfg, rel, record=True, record_signal=False):
+    """The post rules on one draft. Every basis comes from the `drafted` record and HEAD.
+    `record_signal`: the final check after the retry — failures become `social-gate-failure`
+    signals, one per theme, once per (run, draft, theme)."""
+    on_base(root, cfg)
+    rel = _rel(root, rel)
     rec = drafted_record(root, rel)
     if not rec:
         raise HeraldError("%s is not a draft `HRD social prepare` laid out" % rel)
@@ -862,7 +877,37 @@ def check_draft(root, cfg, rel, record=True):
         raw = open(os.path.join(root, rel), "rb").read()
     except OSError:
         raise HeraldError("draft %s does not exist" % rel)
-    text = raw.decode("utf-8-sig", errors="replace")
+    res = evaluate(root, cfg, rec, raw.decode("utf-8-sig", errors="replace"))
+    out = _result(root, rel, raw, rec, res, record)
+    if record_signal and not out["ok"]:
+        out["signals"] = _gate_failure_signals(root, rec, rel, out["failed"])
+    return out
+
+
+def _gate_failure_signals(root, rec, rel, failed):
+    from .store import paths as store_paths, read_jsonl as _read, safe_signal
+
+    by_theme = {}
+    for f in failed:
+        theme = RULE_THEMES.get(f["id"])
+        if theme:
+            by_theme.setdefault(theme, []).append(f["id"])
+    done = {(d.get("run"), d.get("draft"), d.get("theme")) for r in _read(store_paths(root)["signals"])
+            if isinstance(r, dict) and r.get("kind") == "social-gate-failure"
+            for d in [r.get("data") if isinstance(r.get("data"), dict) else {}]}
+    out = []
+    for theme, rules in sorted(by_theme.items()):
+        if (rec.get("run"), rel, theme) in done:
+            continue
+        safe_signal(root, "social-gate-failure", rec.get("signal_topic"),
+                    {"theme": theme, "rules": sorted(set(rules)), "run": rec.get("run"), "draft": rel})
+        out.append(theme)
+    return out
+
+
+def evaluate(root, cfg, rec, text, sources=True):
+    """The rules on one post text against its `drafted` basis. `sources=False` skips the quote
+    checks (a final text checked off base). Returns {profile, failed, warnings, settings}."""
     failed, warnings = [], []
     profile = rec.get("kind")
 
@@ -882,7 +927,7 @@ def check_draft(root, cfg, rel, record=True):
         h, persona = _load_committed(root, cfg, sns)
     except HeraldError as e:
         fail("guide-invalid", str(e))
-        return _result(root, rel, raw, rec, profile, failed, warnings, [], record)
+        return {"profile": profile, "failed": failed, "warnings": warnings, "settings": []}
     lang = rec.get("lang") or h["lang"]
     if h["lang"] != lang:
         fail("basis-changed", "the %s guide's language changed from %s to %s since prepare — prepare again"
@@ -956,7 +1001,8 @@ def check_draft(root, cfg, rel, record=True):
         fail("service-mention-not-allowed", "posts in %s may not mention the service (promotion.md is in %s)"
              % (lang, cfg.get("language")))
     # sources (S7)
-    _check_sources(root, cfg, rec, hdr, profile, lang, fail)
+    if sources:
+        _check_sources(root, cfg, rec, hdr, profile, lang, fail)
     # forbidden
     try:
         gate = _gate_forbidden(root, cfg, lang)
@@ -1011,7 +1057,7 @@ def check_draft(root, cfg, rel, record=True):
             hit = same_sentence(vocab, digits)
             if hit:
                 fail("s9b-statistic", "statistics wording with a number: %r" % hit[:120])
-    return _result(root, rel, raw, rec, profile, failed, warnings, settings, record)
+    return {"profile": profile, "failed": failed, "warnings": warnings, "settings": settings}
 
 
 def _check_sources(root, cfg, rec, hdr, profile, lang, fail):
@@ -1054,9 +1100,10 @@ def _check_sources(root, cfg, rec, hdr, profile, lang, fail):
             fail("sources", "from must be body or promotion: %r" % (origin,))
 
 
-def _result(root, rel, raw, rec, profile, failed, warnings, settings, record):
+def _result(root, rel, raw, rec, res, record):
+    profile, failed = res["profile"], res["failed"]
     out = {"draft": rel, "run": rec.get("run"), "sns": rec.get("sns"), "profile": profile,
-           "ok": not failed, "failed": failed, "warnings": warnings, "settings_to_confirm": settings,
+           "ok": not failed, "failed": failed, "warnings": res["warnings"], "settings_to_confirm": res["settings"],
            "sha256": hashlib.sha256(raw).hexdigest()}
     if record:
         _log(root, {"event": "check", "run": rec.get("run"), "sns": rec.get("sns"), "draft": rel,
@@ -1080,8 +1127,11 @@ def close(root, cfg, run_id, approved=None, reject_all=False, override=None, set
         raise HeraldError("run %s is already closed (%s)" % (run_id, ", ".join(sorted(closed))))
     base = {k: latest[drafts[0]].get(k) for k in ("run", "sns", "kind", "slug")}
     if reject_all:
+        from .store import safe_signal
+
         for d in sorted(drafts):
             _log(root, dict(base, event="status", status="rejected", draft=d))
+        safe_signal(root, "social-reject", latest[drafts[0]].get("signal_topic"), {"run": run_id, "n": len(drafts)})
         return {"run": run_id, "rejected": sorted(drafts)}
     rel = approved.replace(os.sep, "/")
     if os.path.isabs(rel):
@@ -1175,36 +1225,49 @@ def _floor_forbidden(old, new, need, strong):
             strong("forbidden:%s" % k, "rule %r confirmed" % r.get("pattern"))
 
 
-def _floor_disclosure(old, new, need):
+def _disclosure_pairs(old, new):
+    """[(old item, the new item it became or None, [(token, what)])] plus the new items no old
+    item became (additions). A `where` change of one kind is a move judged by WHERE_STRENGTH."""
     old = [d for d in old or [] if isinstance(d, dict)]
     new = [d for d in new or [] if isinstance(d, dict)]
     new_keys = {(d.get("kind"), d.get("where")): d for d in new}
     old_keys = {(d.get("kind"), d.get("where")) for d in old}
-    moved_to = set()
+    taken, pairs = set(), []
     for d in old:
         key = (d.get("kind"), d.get("where"))
         tok = "disclosure:%s/%s" % key
+        losses = []
         n = new_keys.get(key)
         moved = False
         if n is None:  # a move: the same kind at a `where` HEAD did not have
-            n = next((x for k, x in new_keys.items() if k[0] == key[0] and k not in old_keys and k not in moved_to), None)
+            n = next((x for k, x in new_keys.items() if k[0] == key[0] and k not in old_keys and k not in taken), None)
             if n is not None:
                 moved = True
-                moved_to.add((n.get("kind"), n.get("where")))
                 if WHERE_STRENGTH.get(n.get("where"), 0) < WHERE_STRENGTH.get(key[1], 0):
-                    need(tok, "%s disclosure moved from %s to %s" % (key[0], key[1], n.get("where")))
+                    losses.append((tok, "%s disclosure moved from %s to %s" % (key[0], key[1], n.get("where"))))
         if n is None:
-            need(tok, "%s/%s disclosure removed" % key)
-            continue
-        if d.get("required") and not n.get("required"):
-            need(tok, "%s/%s disclosure no longer required" % key)
-        if not moved and fold(d.get("text") or "").strip() != fold(n.get("text") or "").strip():
-            need(tok, "%s/%s disclosure text changed" % key)
+            losses.append((tok, "%s/%s disclosure removed" % key))
+        else:
+            taken.add((n.get("kind"), n.get("where")))
+            if d.get("required") and not n.get("required"):
+                losses.append((tok, "%s/%s disclosure no longer required" % key))
+            if not moved and fold(d.get("text") or "").strip() != fold(n.get("text") or "").strip():
+                losses.append((tok, "%s/%s disclosure text changed" % key))
+        pairs.append((d, n, losses))
+    added = [n for k, n in new_keys.items() if k not in taken]
+    return pairs, added
+
+
+def _floor_disclosure(old, new, need):
+    pairs, _ = _disclosure_pairs(old, new)
+    for _, _, losses in pairs:
+        for tok, what in losses:
+            need(tok, what)
 
 
 def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
     if mode not in MODES:
-        raise HeraldError("--mode must be one of %s (refresh and evolve come with 0.12.0)" % ", ".join(MODES))
+        raise HeraldError("--mode must be one of %s" % ", ".join(MODES))
     target = target.replace(os.sep, "/")
     kind = _target_kind(target)
     full = file_path if os.path.isabs(file_path) else os.path.join(root, file_path)
@@ -1215,32 +1278,41 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
     head = show(root, "HEAD", target)
     if mode == "add" and head is not None:
         raise HeraldError("%s already exists — use `/hrd social --edit` (or --refresh)" % target)
-    if mode == "edit" and head is None:
+    if mode in ("edit", "refresh") and head is None:
         raise HeraldError("%s is not on base — use `/hrd social --add`" % target)
-    if kind == "channel" and mode not in ("add", "edit"):
-        raise HeraldError("a channel guide is linted with --mode add (new) or edit (existing)")
-    if kind == "channel" and mode == "edit" and head is None or kind == "channel" and mode == "add" and head is not None:
-        raise HeraldError("mode %s does not fit %s" % (mode, target))
-    if kind in ("persona", "notes") and mode not in ("setup", "persona"):
-        raise HeraldError("the persona files are linted with --mode setup (new) or persona")
+    if kind == "channel" and mode not in CHANNEL_MODES:
+        raise HeraldError("a channel guide is linted with --mode %s" % "|".join(CHANNEL_MODES))
+    if kind in ("persona", "notes") and mode not in PERSONA_MODES:
+        raise HeraldError("the persona files are linted with --mode %s" % "|".join(PERSONA_MODES))
     if kind in ("persona", "notes") and mode == "setup" and head is not None:
         raise HeraldError("%s already exists — use --mode persona (`/hrd social --persona`)" % target)
+    return lint_text(root, cfg, mode, text, target, head, allow_floor, strengthen)
+
+
+def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()):
+    """Format and floor of `text` for `target` against `head` (its committed text or None).
+    Modes beyond the setting ones: `refresh` (re-research: identity, house, house rules, the
+    waiver and rule statuses stay), `evolve` (house and house rules only, never a floor loss,
+    never a confirmation), `commit` (format and floor only, tokens from the commit's trailers)."""
+    kind = _target_kind(target)
     errors, warnings, floor, strong_list = [], [], [], []
     allow, strengthen_ok = set(allow_floor or ()), set(strengthen or ())
     used = set()
 
     def need(token, what):
-        if token in allow:
+        if mode == "evolve":
+            errors.append("floor: %s — evolve never loosens the floor (S14)" % what)
+        elif token in allow:
             used.add(token)
             floor.append({"token": token, "what": what})
         else:
             errors.append("floor: %s — needs the human's approval (--allow-floor %s)" % (what, token))
 
     def strong(token, what):
-        if mode in FLOOR_MODES_STRENGTHEN and token in strengthen_ok:
+        if mode in FLOOR_MODES_STRENGTHEN + ("commit",) and token in strengthen_ok:
             used.add(token)
             strong_list.append({"token": token, "what": what})
-        elif mode in FLOOR_MODES_STRENGTHEN:
+        elif mode in FLOOR_MODES_STRENGTHEN + ("commit",):
             errors.append("%s — a human confirms rules (--strengthen %s after asking)" % (what, token))
         else:
             errors.append("%s — only a human confirms a rule (/hrd social --edit or --persona)" % what)
@@ -1262,7 +1334,7 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
             accepted = isinstance(prev, dict) and primary(prev.get("lang")) == primary(lang)  # decided before
             if isinstance(lang, str) and primary(lang) not in PATTERNS and not accepted:
                 tok = "s9:%s" % primary(lang)
-                if tok in allow:
+                if tok in allow and mode != "evolve":
                     used.add(tok)
                     floor.append({"token": tok, "what": "no default S9 patterns for %s" % lang})
                 else:
@@ -1285,12 +1357,27 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
                 _floor_disclosure(old.get("disclosure"), h.get("disclosure"), need)
                 if old.get("disclosure_waiver") != h.get("disclosure_waiver") and h.get("disclosure_waiver"):
                     need("disclosure_waiver", "ad disclosure waiver added or changed")
-                if mode == "edit":
+                if mode in ("edit", "evolve"):
                     changed = [k for k in RESEARCH_FIELDS if old.get(k) != h.get(k)]
                     if changed:
                         errors.append("research fields change only through --refresh: %s" % ", ".join(changed))
                     if researched_region(head) is not None and researched_region(head) != researched_region(text):
                         errors.append("the researched region changes only through --refresh")
+                if mode in ("refresh", "evolve"):
+                    moved = [k for k in ("name", "aliases", "lang") if old.get(k) != h.get(k)]
+                    if moved:
+                        errors.append("%s change only through --edit: %s" % ("identity fields", ", ".join(moved)))
+                    if old.get("disclosure_waiver") != h.get("disclosure_waiver"):
+                        errors.append("the disclosure waiver changes only through --edit (a human)")
+                    om, nm = _forbidden_map(old.get("forbidden")), _forbidden_map(h.get("forbidden"))
+                    for k, r in nm.items():
+                        if k not in om and r.get("status") != "draft":
+                            errors.append("a new rule %r must start as draft (INV6)" % r.get("pattern"))
+                if mode == "refresh":
+                    if (old.get("house") or {}) != (h.get("house") or {}):
+                        errors.append("house belongs to the humans and evolve — re-research leaves it")
+                    if outside_region(head) != outside_region(text):
+                        errors.append("the house rules (outside the researched region) belong to the humans and evolve")
     elif kind == "persona":
         p, err = parse_persona(text)
         if err:
@@ -1309,6 +1396,11 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
                         strong("forbidden:%s" % k, "new rule %r starts confirmed" % r.get("pattern"))
             else:
                 _floor_forbidden(old.get("forbidden"), p.get("forbidden"), need, strong)
+                if mode == "evolve":
+                    om = _forbidden_map(old.get("forbidden"))
+                    for k, r in _forbidden_map(p.get("forbidden")).items():
+                        if k not in om and r.get("status") != "draft":
+                            errors.append("a new rule %r must start as draft (INV6)" % r.get("pattern"))
 
                 def terms(x):
                     out = {}
@@ -1340,3 +1432,201 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
     trailers = ["Herald-Floor: %s" % f["token"] for f in floor] + ["Herald-Strengthen: %s" % s["token"] for s in strong_list]
     return {"ok": not errors, "target": target, "mode": mode, "errors": errors, "warnings": warnings,
             "floor": floor, "strengthen": strong_list, "trailers": trailers}
+
+
+# --- commit-time lint (03-social.md §4 commits.py) -----------------------------------------------
+
+def social_path(path):
+    try:
+        _target_kind(path)
+        return True
+    except HeraldError:
+        return False
+
+
+def trailer_tokens(trailers):
+    """({Herald-Floor tokens}, {Herald-Strengthen tokens}) from `Key: <token> — <reason>` lines."""
+    allow, strong = set(), set()
+    for t in trailers or ():
+        key, _, val = str(t).partition(":")
+        words = val.split()
+        if not words:
+            continue
+        if key.strip() == "Herald-Floor":
+            allow.add(words[0])
+        elif key.strip() == "Herald-Strengthen":
+            strong.add(words[0])
+    return allow, strong
+
+
+def commit_problems(root, cfg, staged, trailers):
+    """Format and floor of every staged guide, persona and empathy-notes file against HEAD, the
+    human's floor decisions read from the commit's trailers — whichever command commits them.
+    Removing a whole channel guide is not a floor change; removing the persona is (`persona`)."""
+    allow, strong = trailer_tokens(trailers)
+    out = []
+    for path in staged:
+        if not social_path(path):
+            continue
+        text = show(root, "", path)  # the index
+        head = show(root, "HEAD", path)
+        kind = _target_kind(path)
+        if text is None:
+            if kind == "persona" and head is not None and "persona" not in allow:
+                out.append("%s: removing the persona drops its floor — needs Herald-Floor: persona" % path)
+            continue
+        res = lint_text(root, cfg, "commit", text, path, head, allow, strong)
+        out += ["%s: %s" % (path, e) for e in res["errors"]]
+    return out
+
+
+# --- re-research merge (S2, S3) ---------------------------------------------------------------
+
+def _replace_head(text, h):
+    block = "<!-- herald:channel\n%s\n-->" % json.dumps(h, ensure_ascii=False)
+    return CHANNEL_RE.sub(lambda m: block, text, count=1)
+
+
+def _replace_region(text, region):
+    a, b = text.index(RESEARCHED_START), text.index(RESEARCHED_END)
+    return text[:a + len(RESEARCHED_START)] + region + text[b:]
+
+
+def merge(root, cfg, sns, researched, accept=None, accept_floor=()):
+    """The committed guide + a re-research draft → a merged guide in pending/ (never the repo).
+    Research fields and the researched region come from the draft (all, or `accept`); identity,
+    house, house rules, the waiver and existing rules' statuses stay; new rules join as draft;
+    a disclosure loss applies only when its token is in `accept_floor` (the human said yes)."""
+    import difflib
+
+    on_base(root, cfg)
+    sns = resolve(root, sns)
+    rel = guide_rel(sns)
+    head = show(root, "HEAD", rel)
+    old, err = parse_channel(head)
+    if err:
+        raise HeraldError("guide-invalid: %s: %s — fix it with `/hrd social --edit %s` first" % (rel, err, sns))
+    full = researched if os.path.isabs(researched) else os.path.join(root, researched)
+    try:
+        text = open(full, encoding="utf-8-sig").read()
+    except OSError as e:
+        raise HeraldError("cannot read %s: %s" % (researched, e))
+    new, err = parse_channel(text)
+    if err:
+        raise HeraldError("the re-research draft: %s" % err)
+    region = researched_region(text)
+    fields = [k for k in RESEARCH_FIELDS if old.get(k) != new.get(k)]
+    region_changed = region is not None and region != researched_region(head)
+    proposed = fields + (["region"] if region_changed else [])
+    accepted = set(proposed if accept is None else accept)
+    unknown = sorted(accepted - set(proposed))
+    if unknown:
+        raise HeraldError("--accept names nothing the research changed: %s (changed: %s)" % (", ".join(unknown), ", ".join(proposed) or "none"))
+    merged = dict(old)
+    for k in fields:
+        if k in accepted:
+            merged[k] = new.get(k)
+    om = _forbidden_map(old.get("forbidden"))
+    added_rules = [dict(r, status="draft") for k, r in _forbidden_map(new.get("forbidden")).items() if k not in om]
+    merged["forbidden"] = list(old.get("forbidden") or []) + added_rules
+    pairs, additions = _disclosure_pairs(old.get("disclosure"), new.get("disclosure"))
+    floor_changes, disclosure = [], []
+    for d, n, losses in pairs:
+        ok = all(tok in (accept_floor or ()) for tok, _ in losses)
+        for tok, what in losses:
+            floor_changes.append({"token": tok, "what": what, "applied": ok})
+        if losses and not ok:
+            disclosure.append(d)
+        elif n is not None:
+            disclosure.append(n)
+    merged["disclosure"] = disclosure + additions
+    out_text = _replace_head(head, merged)
+    if "region" in accepted and researched_region(out_text) is not None:
+        out_text = _replace_region(out_text, region)
+    out_rel = memory_rel("pending", "channels", "%s.merged.md" % sns)
+    out_full = os.path.join(root, out_rel)
+    os.makedirs(os.path.dirname(out_full), exist_ok=True)
+    with open(out_full, "w", encoding="utf-8") as f:
+        f.write(out_text)
+    diff = "".join(difflib.unified_diff(head.splitlines(True), out_text.splitlines(True), rel, out_rel))
+    return {"out": out_rel, "target": rel, "changed": proposed, "accepted": sorted(accepted),
+            "added_rules": [r.get("pattern") for r in added_rules], "disclosure_added": additions,
+            "floor_changes": floor_changes, "house_untouched": True, "diff": diff,
+            "next": "HRD social lint --mode refresh --file %s --target %s%s" % (
+                out_rel, rel, "".join(" --allow-floor %s" % c["token"] for c in floor_changes if c["applied"]))}
+
+
+# --- the final text (S11, S13) -----------------------------------------------------------------
+
+def final(root, cfg, draft, final_file):
+    """The text a human actually uploaded, for an approved draft: recorded as `uploaded`, compared
+    with the approved copy (`social-final`, unless nothing changed) and checked for information."""
+    import difflib
+    from .store import safe_signal
+
+    rel = _rel(root, draft)
+    latest = latest_status(root).get(rel)
+    if not latest or latest.get("status") != "approved":
+        raise HeraldError("%s is not an approved draft (status: %s) — only an approved draft gets a final text"
+                          % (rel, (latest or {}).get("status")))
+    rec = drafted_record(root, rel)
+    frel = _rel(root, final_file)
+    if not frel.startswith(memory_rel("final", rec["sns"]) + "/"):
+        raise HeraldError("write the final text under %s/" % memory_rel("final", rec["sns"]))
+    try:
+        final_text = open(os.path.join(root, frel), encoding="utf-8-sig").read().replace("\r\n", "\n").strip()
+    except OSError as e:
+        raise HeraldError("cannot read %s: %s" % (frel, e))
+    if not final_text:
+        raise HeraldError("%s is empty" % frel)
+    try:
+        approved_text = open(os.path.join(root, latest["approved_copy"]), encoding="utf-8-sig").read()
+    except (OSError, KeyError):
+        raise HeraldError("the approved copy of %s is missing" % rel)
+    hdr, body, err = parse_draft(approved_text)
+    if err:
+        raise HeraldError("the approved copy of %s: %s" % (rel, err))
+    body = body.replace("\r\n", "\n").strip()
+    ops = difflib.SequenceMatcher(None, body, final_text, autojunk=False).get_opcodes()
+    chars = sum(max(i2 - i1, j2 - j1) for tag, i1, i2, j1, j2 in ops if tag != "equal")
+    a, b = body.splitlines(), final_text.splitlines()
+    plus = minus = 0
+    for line in difflib.ndiff(a, b):
+        plus += line.startswith("+ ")
+        minus += line.startswith("- ")
+    lines = max(plus, minus)
+    # the check, for information: the post rules on the uploaded text
+    on_base_now = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).strip() == cfg.base
+    if rec["sns"] not in guides(root):
+        check = {"skipped": "guide-missing"}  # the channel was removed since
+    else:
+        head = "---\n%s\n---\n" % "\n".join(
+            "%s: %s" % (k, json.dumps(v, ensure_ascii=False) if k == "sources" else (v or ""))
+            for k, v in hdr.items())
+        res = evaluate(root, cfg, rec, head + final_text, sources=on_base_now)
+        check = {"profile": res["profile"], "failed": res["failed"], "warnings": res["warnings"],
+                 "sources_checked": on_base_now}
+        if not on_base_now:
+            check["note"] = "not on %s: quotes not checked" % cfg.base
+    hard = [f["id"] for f in check.get("failed", []) if not f["overridable"]]
+    entry = {"event": "status", "status": "uploaded", "run": rec.get("run"), "sns": rec.get("sns"),
+             "kind": rec.get("kind"), "slug": rec.get("slug"), "draft": rel, "profile": latest.get("profile"),
+             "approved_copy": latest.get("approved_copy"), "final": frel, "chars_changed": chars,
+             "lines_changed": lines, "check_failed": [f["id"] for f in check.get("failed", [])]}
+    _log(root, entry)
+    sig = None
+    if chars:
+        sig = safe_signal(root, "social-final", rec.get("signal_topic"),
+                          {"theme": "other", "run": rec.get("run"), "draft": rel, "chars_changed": chars,
+                           "draft_chars": len(body), "lines_changed": lines})
+    return {"draft": rel, "uploaded": True, "chars_changed": chars, "draft_chars": len(body), "lines_changed": lines,
+            "signal": bool(sig), "check": check, "fix_live_post": hard}
+
+
+def status_summary(root, cfg):
+    """For `HRD status`: stale or invalid channel guides; None when social is not set up."""
+    if show(root, "HEAD", PERSONA) is None:
+        return None
+    rows = listing(root, cfg)["channels"]
+    return {"stale": [r["name"] for r in rows if r.get("stale")],
+            "invalid": [r["name"] for r in rows if r.get("errors")]}

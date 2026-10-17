@@ -647,6 +647,11 @@ def check_bash(root, cfg, cmd):
                     decide("deny", "unattended sessions may commit only on herald/* branches (branch: %s)." % branch)
                 if branch == base:
                     staged = staged_after(root, argv, pending)
+                    social_files = [p for p in staged if p.startswith("docs/editorial/channels/")
+                                    or p in ("docs/editorial/persona.md", "docs/editorial/persona-notes.md")]
+                    if social_files:  # HRD commit checks their floor; a raw commit does not
+                        protect("committing %s without `HRD commit` skips the social floor check (03-social.md S14) — "
+                                "use `HRD commit --cmd harness --kind social …`" % ", ".join(social_files[:3]))
                     juris = jurisdiction(root, cfg)
                     allowed = commits.all_base_globs(cfg)
                     bad = [p for p in staged if commits._match(p, juris) and not commits._match(p, allowed)]

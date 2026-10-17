@@ -1516,6 +1516,11 @@ SIGNAL_KINDS = (
     "stagnation",  # legacy (0.2.x): now recorded as a hold with reason stagnation
     "incomplete",  # a batch child that ended without a result (crash, timeout)
     "refresh-override",  # a human overturned the strategist's refresh recommendation (topic_id slug:<slug>)
+    # SNS drafts (03-social.md S13), topic_id social:<sns>:<YYYYMMDD>
+    "social-edit-request",  # the human asked for a change to a draft (session, HRD signal)
+    "social-reject",        # the human discarded every draft of a run (HRD social close --reject-all)
+    "social-gate-failure",  # a draft still failing the post checks after its retry (HRD social check --record)
+    "social-final",         # the uploaded text differs from the approved draft (HRD social final)
 )
 # listed for evolve but never counted toward the nudge: an escalation accompanies a loopback that
 # is already counted; an incomplete child is usually environment, not writing
@@ -1530,6 +1535,9 @@ NON_SIGNAL_HOLD_NOTES = ("tooling:", "human:", "batch child did not finish", "ba
 # loopback so the nudge counts recurring weaknesses, not every REVISE (one theme = one count axis).
 THEMES = ("intro", "structure", "length", "depth", "clarity", "tone", "search", "promotion",
           "policy", "accuracy", "images", "exemplar", "other")
+# the count axis of social signals (S13): what the human or the checks objected to
+SOCIAL_THEMES = ("tone", "length", "format", "persona", "hashtags", "disclosure", "fact", "other")
+SOCIAL_FINAL_BASELINE = 0.1  # an uploaded text changed by at most 10% of the draft's characters
 LOOPBACK_CAUSES = {"revise": "revise-weakness", "audit": "audit-finding", "verify": "verify-gap", "gate": None,
                    "research": "research-error", "translation": "verify-gap"}
 
@@ -1672,6 +1680,9 @@ def baseline_signal(rec):
     if rec["kind"] == "review-finding":
         counts = [_count(data.get(k)) for k in ("blocker", "major", "minor")]  # all three required
         return all(c == 0 for c in counts) and not data.get("findings")
+    if rec["kind"] == "social-final":  # posts are 1–4 lines: judge by characters, not lines
+        changed, total = _count(data.get("chars_changed")), _count(data.get("draft_chars"))
+        return changed is not None and total is not None and changed <= SOCIAL_FINAL_BASELINE * max(total, 1)
     return False
 
 
@@ -1761,6 +1772,8 @@ def signal_theme(rec):
     REVISE and auditor findings), or `hold:<reason>` — so unrelated events of one kind are not
     one recurring problem."""
     data = rec.get("data") or {}
+    if rec["kind"].startswith("social-"):
+        return "%s:%s" % (rec["kind"], data["theme"]) if data.get("theme") in SOCIAL_THEMES else rec["kind"]
     if data.get("theme") in THEMES:
         return "%s:%s" % (rec["kind"], data["theme"])
     if rec["kind"] == "stagnation":
@@ -1792,12 +1805,16 @@ def evolve_readiness(root, cfg=None, listing=False):
     ready = sorted(n for n, k in themes.items() if k["count"] >= MIN_SIGNALS and len(k["topics"]) >= MIN_TOPICS)
     fresh = [n for n in ready if themes[n]["new"] > 0]
     total = sum(k["count"] for k in themes.values())
-    topics = set().union(*[k["topics"] for k in themes.values()]) if themes else set()
+    every = set().union(*[k["topics"] for k in themes.values()]) if themes else set()
+    # the summary counts articles; social signals count SNS days (03-social.md S13)
+    topics = {t for t in every if not t.startswith("social:")}
+    social_topics = every - topics
     out = {
         "tier": "sufficient" if fresh else ("watching" if total else "none"),
         "last_scan": st["last_scan"],
         "signals": total,
         "topics": len(topics),
+        "social_topics": len(social_topics),
         "ready_themes": ready,
         "new_ready_themes": fresh,
         "themes": {n: {"count": k["count"], "topics": len(k["topics"]), "new": k["new"]}

@@ -18,12 +18,17 @@ adopt with `/hrd translate <slug> --adopt <l>`) or other `causes`. A hold whose 
 Last, one line from the `evolve` field of the same `HRD status` output (absent with scripts
 older than 0.3.0 — `status` runs without the version gate — then omit the line) (`tier` is a machine
 token — branch on it, never show it raw): `sufficient` → "growth signals are enough
-(N unused signals · M topics) — try `/hrd evolve --dry-run`"; `watching` with non-empty
+(N unused signals · M topics[ · K SNS days]) — try `/hrd evolve --dry-run`" (K = `social_topics`, only when > 0); `watching` with non-empty
 `ready_themes` → "enough signals, but evolve already looked at them on <last_scan> — the
 reminder returns with new evidence (you can still run `/hrd evolve`)"; other `watching` →
 "collecting growth signals (N unused signals · M topics; evolve proposes from ≥ 3 signals of
 one theme from ≥ 2 topics)"; `none` → omit; an `error` field → say the signals
 file could not be read. Signals are per machine (gitignored). Write it in `config.language`.
+
+Then, when the output has a `social` field (absent before `/hrd social --setup`, and with older
+scripts): `stale` channels → "the <sns> guide was researched over 180 days ago — `/hrd social
+--refresh <sns>`"; `invalid` → "the <sns> guide has problems — `/hrd social --edit <sns>`"; an
+`error` → say it could not be read. Nothing to say → omit.
 
 ## Maintenance flags (each except `--unlock`: `HRD lock acquire --cmd status`, base checked out and clean,
 `HRD sync`, then the action, then `HRD commit --cmd status --kind status -m "chore(herald):

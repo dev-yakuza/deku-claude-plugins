@@ -174,12 +174,17 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
   change caused (`verify-after-human-edit`, `reverted`) and holds whose note starts with
   `tooling:` (environment) or `human:` (a human's choice): not writing problems.
 - `ship-decline` — `HRD state --state declined`.
+- `social-gate-failure` — `HRD social check --record` (a draft's last check, one per theme), `social-reject`
+  — `HRD social close --reject-all`, `social-final` — `HRD social final` (only when the uploaded text
+  differs; a change of ≤ 10% of the characters is baseline). `topic_id` `social:<sns>:<YYYYMMDD>`,
+  `data.theme` from `tone|length|format|persona|hashtags|disclosure|fact|other`.
 - `escalation` (loopbacks 2 and 3, and the accuracy reserve) and `incomplete` (a batch child that ended without a result;
   the runner) — context: listed for evolve, never counted by the nudge.
 
 **Recorded with `HRD signal --kind <kind> --topic <id> --data '<json>'`** (they need a judgment
 or a diff only the session has): `session-edit-request` (write approval edits), `human-edit`
-(ship) and `review-finding` (review). With translations, `human-edit` is one signal per changed
+(ship), `review-finding` (review) and `social-edit-request` (a human's change to a social draft:
+`--topic <prepare's signal_topic>`, data `theme`, `request`, `run`, `draft`). With translations, `human-edit` is one signal per changed
 file of the bundle, with `"lang"` in its data.
 
 Signals are local (gitignored) and feed `evolve`. `HRD evolve-readiness` counts the unconsumed

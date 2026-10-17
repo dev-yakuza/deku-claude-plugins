@@ -241,7 +241,8 @@ one now has `superseded` set and, while `HRD status` lists it under `supersede_p
 link it — `/hrd refresh <old>` (`refreshable: true`), or by hand. Then
 `HRD evolve-readiness`: only when `tier` is `sufficient`, end with one line in
 `config.language` (ko example: "성장 신호가 충분히 쌓였습니다(아직 evolve가 쓰지 않은 신호 N건 · 글감 M개) —
-`/hrd evolve --dry-run`으로 제안을 확인해 보세요."), N = `signals`, M = `topics`. Otherwise (or if the
+`/hrd evolve --dry-run`으로 제안을 확인해 보세요."), N = `signals`, M = `topics` (articles; when
+`social_topics` > 0 add "· SNS 일자 K개", K = `social_topics`). Otherwise (or if the
 command fails) say nothing about evolve. The nudge is advisory: evolve's own scan decides whether a theme is strong
 enough (`sufficient` = one theme — a signal kind, split by `theme` for editor REVISE and auditor
 findings and by reason for holds — reached ≥ 3 signals from ≥ 2 topics with something new since the last evolve scan). Run it even if an earlier step stopped the run, as long as step 1

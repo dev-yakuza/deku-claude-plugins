@@ -52,6 +52,19 @@ and `refresh-policy.md` from `refresh-override` signals (a human overturned the 
 refresh recommendation — data: recommendation, decision, rule applied, reason; counted per
 article, `topic_id` `slug:<slug>`).
 
+**Social posts** (`design/herald/03-social.md` S13): `social-edit-request` (the human asked for a
+change), `social-final` (the uploaded text differed from the approved draft), `social-reject`
+(every draft of a run discarded) and `social-gate-failure` (a draft still failing the checks),
+each on an axis `<kind>:<theme>` (tone, length, format, persona, hashtags, disclosure, fact,
+other), counted per SNS day (`topic_id` `social:<sns>:<YYYYMMDD>`). Rank human edits and finals
+like human edits, rejects like ship declines, gate failures like gate failures. Targets: a channel
+guide's house rules (outside the researched region) and its `house` limits (`max_chars`,
+`hashtags`, `link` — narrowing only), `persona.md` (voice, themes, never-says, `mix`, new
+`service_terms`, new `forbidden` rules as `draft`), `persona-notes.md`, and the distributor's
+Habits. Never: the researched region or research fields (that is `--refresh`), name, aliases or
+language, the disclosure items or the waiver except to strengthen them, confirming a rule (a
+human does it), removing a service term or adding an exclusion — the social floor (INV2).
+
 Auditor findings that point at the auditor itself (its prompt, its severity scale) are not
 applied here — the auditor deliberately reads no repo guides — list them in the report as
 flow-level ideas the human may file by hand (`/hrd contribute` is not available yet).
@@ -70,7 +83,10 @@ covered?). Each returns, per item, `{"verdict": "keep|drop|edit", "reason": "<on
 "edit": "<changed wording, only for edit>"}`. Tell every reviewer: `reason` and `edit` in
 `config.language`; `edit` only for a change that alters what the item does or fixes something
 that would otherwise mislead — a wording nit is `keep` with the nit in `reason`. Tell the
-degradation reviewer: anything that weakens verification or the floor is `drop`, never `edit`.
+degradation reviewer: anything that weakens verification or the floor is `drop`, never `edit` —
+for social files that includes anything on the social floor (`_invariants.md` INV2: the post
+checks, confirmed rules, disclosure items and the waiver, service terms and exclusions, a gate
+rule's `scope`) and a distributor Habit that contradicts it.
 
 - Drop an item that a majority drops, that the degradation reviewer drops, or for which the
   degradation reviewer returned no valid verdict (the veto must have run). A missing or
@@ -81,7 +97,7 @@ degradation reviewer: anything that weakens verification or the floor is `drop`,
   and in that case the recommendation's reason says the reviewers disagreed on the wording. A
   revised version goes to a **re-check**: one fresh degradation reviewer (opus) compares it with
   the file it changes — does it loosen a fact-check rule, a critique criterion, the gate, an
-  exemplar (deleting or downgrading one) or the charter floor (INV2)? Only `keep` passes;
+  exemplar (deleting or downgrading one), the charter floor or the social floor (INV2)? Only `keep` passes;
   `drop`, `edit` or no valid verdict → the item is dropped (no further rounds).
 - Say in plain words why each dropped item went. Survivors carry their verdicts and the
   version on the table into Phase 5.
@@ -112,7 +128,8 @@ ledger's skip list.
 1. Apply each approved item's version on the table (or the human's edit) to its files
    (protected files trigger the guard's `ask` — that prompt is the human's
    per-file approval). Re-run `tests` that exist for the harness (`validate_content.py` on the
-   last 3 published articles must still pass). Failure → revert the working tree for this run,
+   last 3 published articles must still pass; every changed channel guide, `persona.md` or
+   `persona-notes.md` must pass `HRD social lint --mode evolve --file <path> --target <path>`). Failure → revert the working tree for this run,
    report, and stop without committing, consuming or stamping the scan (the evidence stays
    pending and the nudge stays as it was; the same holds if the human aborts the run).
 2. No item was decided (nothing proposed, nothing survived the panel) → no commit, no log row;

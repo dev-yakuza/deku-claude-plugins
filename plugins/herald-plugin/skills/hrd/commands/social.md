@@ -3,29 +3,29 @@
 Drafts posts for social channels in the voice of the account's one fictional persona:
 promotional posts for published articles and daily posts of the persona's ordinary life (mixed
 in so the account does not read as an ad account). Herald never posts — a human or another tool
-uploads the post the human picked. Design: `design/herald/03-social.md` (0.11.0: setup and
-drafts; re-research and growth come later). Interactive only: refuse when `HRD_UNATTENDED=1`.
+uploads the post the human picked. Design: `design/herald/03-social.md`. Interactive only: refuse when `HRD_UNATTENDED=1`.
 
 | Input | What it does |
 |---|---|
 | `--setup` | first setup: the persona, its empathy notes, the distributor role |
 | `--add <sns>` | research a channel into a guide |
+| `--refresh <sns>` | re-research a channel; only the researched part changes |
 | `--edit <sns>` | a human's change to a channel guide (house rules, disclosure, confirming rules, aliases, language) |
 | `--persona` | change the persona or its empathy notes |
 | `--remove <sns>` | delete a channel guide (local drafts stay) |
 | `--list` | channels, their state and the recent post mix |
 | `<sns> <slug> [--n N]` | N promotional drafts (1–5, default 3) for a published article |
 | `<sns> --daily [--theme "…"] [--n N]` | N daily drafts |
+| `--final <draft>` | record the text actually uploaded for an approved draft |
 | `<sns>` alone | show this table and stop |
 
 Options may come in any order; the first positional argument after `<sns>` is the slug. A slug
 together with `--daily` is an error. `<sns>` is matched case-insensitively against guide names
-and their aliases; an unknown name → "`/hrd social --add <sns>` first". `--refresh <sns>` and
-`--final` are not available yet (0.12.0) — say so.
+and their aliases; an unknown name → "`/hrd social --add <sns>` first".
 
 Translate `HRD` output into `config.language`; keep ids, paths, rule ids and commands as they are.
 
-## Common start (every mode except `--list`)
+## Common start (every mode except `--list` and `--final`)
 
 1. `HRD lock acquire --cmd social` (keep the token; `HRD lock release --cmd social --token <t>`
    on every exit path).
@@ -35,7 +35,7 @@ Translate `HRD` output into `config.language`; keep ids, paths, rule ids and com
 ## Setting modes
 
 Work in `.claude/herald/memory/social/pending/` (local): never write `docs/editorial/` before
-the human approved. For each file: `HRD social lint --mode <setup|add|edit|persona> --file
+the human approved. For each file: `HRD social lint --mode <setup|add|edit|persona|refresh> --file
 <pending file> --target <repo path>` must pass before the human sees it (errors → fix and lint
 again). `lint` checks the format and, against HEAD, the floor — a removed or downgraded
 confirmed rule, a weaker disclosure, a removed service term, an added exclusion, a disclosure
@@ -47,8 +47,9 @@ rule the human confirms needs `--strengthen <token>`. `lint` prints the trailers
 After approval: **you** copy each pending file to its repo path with Write or `cp` (the guard
 asks — these are criteria files; `HRD` never writes them), run `lint` again with `--file` = the
 repo path (a later tweak must not skip the check), then `HRD commit --cmd harness --kind social
--m "chore(herald): social <setup|add|edit|persona|remove> [<sns>]" [--trailer …] <paths>` and
-`git push origin <base>`, then release. Declined, aborted or a failed commit → put every repo
+-m "chore(herald): social <setup|add|refresh|edit|persona|remove> [<sns>]" [--trailer …] <paths>` and
+`git push origin <base>`, then release. `HRD commit` checks the floor of these files again against
+the trailers (whichever command commits them), and the guard asks before a plain `git commit` of them. Declined, aborted or a failed commit → put every repo
 file you wrote back (`git checkout HEAD -- <path>`; delete a new file), release and stop. A failed
 push → keep the commit, say so, and tell the human to push again.
 
@@ -102,10 +103,32 @@ the empathy notes are committed with the repo, which may be public.
 5. Show the guide, approve, copy, lint, commit, push, release. Any `where: profile` disclosure →
    give the human the profile checklist (what to put in the account profile).
 
+### `--refresh <sns>`
+1. Spawn **researcher** (channel research) with the committed guide as the starting point and
+   the path `pending/channels/<sns>.md`; it rewrites the head block's research fields and the
+   researched region from current sources.
+2. `HRD social merge --sns <sns> --researched pending/channels/<sns>.md` — code merges: research
+   fields and the researched region from the draft; name, aliases, language, `house`, the house
+   rules, the waiver and every existing rule's status stay; new `forbidden` rules join as
+   `draft`; a disclosure that would get weaker stays as it was. It writes
+   `pending/channels/<sns>.merged.md` and prints `changed`, `added_rules`, `disclosure_added`
+   and `floor_changes` (each with `applied: false`).
+3. Show the human what changed, field by field, and each floor change separately, in plain
+   words (what posts lose). The human picks what to take: run `merge` again with `--accept
+   <field|region …>` (only those) and `--accept-floor <token>` for each floor change the human
+   explicitly accepted (`AskUserQuestion` per item) — never edit the merged file by hand.
+4. `HRD social lint --mode refresh --file pending/channels/<sns>.merged.md --target
+   docs/editorial/channels/<sns>.md` with `--allow-floor <token>` for the accepted floor changes
+   (`next` in the merge output). A merged guide that loses its last required ad disclosure fails
+   here: stop and point to `--edit <sns>` (the human decides the disclosure or a waiver there).
+5. Copy the merged file to the guide, lint again, commit (`chore(herald): social refresh <sns>`,
+   the `Herald-Floor` trailers), push, release. A `where: profile` item that is new → the profile
+   checklist.
+
 ### `--edit <sns>`
 Copy the guide from base to `pending/channels/<sns>.md`, apply the human's change there, then
-`lint --mode edit`. Research fields and the researched region change only by re-research (not
-available yet). Show the diff, approve, copy, lint, commit, push, release.
+`lint --mode edit`. Research fields and the researched region change only by `--refresh`. Show
+the diff, approve, copy, lint, commit, push, release.
 
 ### `--persona`
 No persona on base → `--setup`. Copy `persona.md` (and `persona-notes.md` when it changes) to
@@ -134,7 +157,8 @@ After the common start:
    each), `limits`, `disclosure`, `daily_service_allowed`, the read list (`read`), the theme
    (`--theme`, daily), and the language line (`atoms/_contract.md` §D).
 3. `HRD social check --file <every draft>`. A draft that fails: send its failed rules back to the
-   distributor once for that draft, then check it again. Still failing → keep it, marked.
+   distributor once for that draft, then check it again with `--record` (the last check; a rule
+   still failing becomes a growth signal). Still failing → keep it, marked.
    `basis-changed` (the article or the guide's language changed on base since prepare) and
    `check-error` (no such draft, or not a draft prepare laid out) are not writing problems: never
    send them to the distributor — `basis-changed` → run `prepare` again; `check-error` → relay it.
@@ -143,14 +167,28 @@ After the common start:
    `from: promotion` quotes highlighted (the human judges what code cannot: claims beyond the
    quotes, comparisons), and the mix line (`recent_mix` against the persona's `mix`). Ask
    (`AskUserQuestion`):
-   - **edit** — the distributor rewrites that draft (or you write the human's own text to the
-     draft path); every changed draft is checked again (step 3);
+   - **edit** — record the request first: `HRD signal --kind social-edit-request --topic
+     <signal_topic> --data '{"theme": "<tone|length|format|persona|hashtags|disclosure|fact|other>",
+     "request": "<what the human asked, in one line>", "run": "<run>", "draft": "<draft>"}'` (pick
+     the theme that names what the human objected to); then the distributor rewrites that draft
+     (or you write the human's own text to the draft path); every changed draft is checked again
+     (step 3, without `--record` until its last check);
    - **pick one** — rules marked `overridable: false` cannot be approved (rewrite or pick another).
      Overridable failures (`length`, `hashtags`, `link-position`, `s9b-statistic`,
      `s9a-service-experience` on promotional posts) → ask the human to accept each, with their
      reason → `--override "<reason>"`. Each `settings_to_confirm` → ask the human to turn that
      platform disclosure setting on for this post → `--setting-confirmed <kind>` only on a yes.
      Then `HRD social close --run <run> --approved <draft> […]` (it checks the draft again);
-   - **reject all** — `HRD social close --run <run> --reject-all`.
+   - **reject all** — `HRD social close --run <run> --reject-all` (it records the growth signal).
 5. Release. Show the approved post ready to paste, the platform settings to turn on, and say
-   that Herald does not post.
+   that Herald does not post — and that after uploading, `/hrd social --final <draft>` records
+   the text actually posted (optional; a changed text teaches evolve).
+
+## `--final <draft>`
+
+No lock (local records only). The draft must be approved. Ask the human to paste the text as
+posted; write it, body only, to `.claude/herald/memory/social/final/<sns>/<draft file name>`,
+then `HRD social final --draft <draft> --final-file <that path>`. It records `uploaded`, compares
+the text with the approved copy (a change becomes a `social-final` signal; small changes are
+evidence, not problems) and checks it for information. `fix_live_post` non-empty (a
+disclosure missing, another URL) → tell the human plainly to fix the live post.

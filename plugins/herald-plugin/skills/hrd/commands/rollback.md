@@ -11,7 +11,16 @@ Non-destructive: always `git revert`, never reset or force push (INV3).
    `git revert` on base but does not look at what it reverts, so ask the human to confirm
    reverting those files — a revert can loosen
    verification an evolve run had strengthened (INV2).
-4. `git revert --no-edit <sha>`; then amend the revert's message only via
+4. The target touches a channel guide, the persona or its empathy notes
+   (`docs/editorial/channels/*`, `persona.md`, `persona-notes.md`): `git revert --no-commit <sha>`,
+   then for each such file `HRD social lint --mode edit --file <path> --target <path>` (the persona
+   files: `--mode persona`) — the working tree against HEAD. Show its floor changes in plain words
+   (reverting a strengthened disclosure weakens it) and ask; on a yes, unstage everything
+   (`git reset -q`) and commit through `HRD commit --cmd harness --kind harness -m "chore(herald):
+   rollback <target>" --trailer "Herald-Floor: <token> — <reason>"… <the reverted paths>` (it checks
+   the floor again against those trailers), add the rollback line to `evolution-log.md` in that
+   commit, and go to step 5. Declined → `git revert --abort`, release, stop.
+   Otherwise: `git revert --no-edit <sha>`; then amend the revert's message only via
    `git commit --amend -m "chore(herald): rollback <target>" --trailer "Herald-Record: harness"`
    (allowed: it is the commit just created, not history rewrite of published commits).
    Append a rollback line to `evolution-log.md` in the same commit.

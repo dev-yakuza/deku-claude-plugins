@@ -116,6 +116,13 @@ def commit_state(root, cfg, command, message, kind, add_paths, extra_trailers=()
     if stray:
         git(root, "reset", "-q", "--", *staged)
         raise HeraldError("refusing: staged paths outside `%s` allowance: %s" % (command, ", ".join(stray)))
+    if any(p.startswith("docs/editorial/") for p in staged):
+        from . import social  # lazily: the guard imports this module on every tool call
+
+        problems = social.commit_problems(root, cfg, staged, extra)
+        if problems:
+            git(root, "reset", "-q", "--", *staged)
+            raise HeraldError("refusing: the social guides' floor (03-social.md S14) — %s" % "; ".join(problems))
     if not staged:
         return None
     args = ["--trailer", "%s: %s" % (TRAILER, kind)]
