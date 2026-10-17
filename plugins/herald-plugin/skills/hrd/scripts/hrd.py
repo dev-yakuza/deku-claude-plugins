@@ -1030,7 +1030,13 @@ def cmd_social(a):
     elif a.action == "check":
         if not a.file:
             raise HeraldError("check needs --file <draft> …")
-        out = [social.check_draft(root, cfg, f) for f in a.file]
+        out = []
+        for f in a.file:  # one missing draft must not hide the others' results
+            try:
+                out.append(social.check_draft(root, cfg, f))
+            except HeraldError as e:
+                out.append({"draft": f, "ok": False, "failed": [{"id": "header-mismatch", "overridable": False,
+                                                                 "detail": str(e)}], "warnings": []})
         emit(out)
         if not all(r["ok"] for r in out):
             sys.exit(1)

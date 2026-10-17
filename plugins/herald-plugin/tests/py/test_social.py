@@ -443,6 +443,58 @@ class ReviewRound1Tests(SocialCase):
         self.assertEqual(social.post_length("\U0001F44D\U0001F3FD", "weighted", 23), 2)
 
 
+class ReviewRound2Tests(SocialCase):
+    def test_cjk_adjacent_domains_and_handles(self):
+        self.assertEqual([u for _, _, u in social.find_urls("詳しくはevil.comで")], ["evil.com"])
+        self.assertEqual([u for _, _, u in social.find_urls("방문은evil.co.kr에서")], ["evil.co.kr"])
+        self.assertEqual([u for _, _, u in social.find_urls("https://safie.jpで見た")], ["https://safie.jp"])
+        self.assertEqual([u for _, _, u in social.find_urls("see https://例え.jp/abc")], ["https://例え.jp/abc"])
+        rel = self.promo("#PR Body text. 詳しくはevil.comで https://example.test/blog/old-post/")
+        self.assertIn("promo-url", self.failed(rel))
+        self.assertEqual([m.group(0) for m in social.HANDLE_RE.finditer("Xの@tanaka_123さん a@b.c")], ["@tanaka_123"])
+
+    def test_plain_disclosure_is_a_word(self):
+        self.assertFalse(social.disclosure_present(social.fold("spring sale, read today"), "Ad"))
+        self.assertFalse(social.disclosure_present(social.fold("our product"), "PR"))
+        self.assertTrue(social.disclosure_present(social.fold("PR: new post"), "PR"))
+        self.assertTrue(social.disclosure_present(social.fold("【PR】新しい記事"), "【PR】"))
+        self.assertTrue(social.disclosure_present(social.fold("広告です"), "広告"))
+
+    def test_guide_removed_after_prepare(self):
+        rel = self.daily("Rainy day.")
+        sh(self.root, "git", "rm", "-q", "docs/editorial/channels/x.md")
+        self.commit("remove x")
+        self.assertIn("guide-invalid", self.failed(rel))
+        out, p = self.hrd("social", "check", "--file", rel, "nope.md", check=False)
+        self.assertEqual(len(out), 2)
+
+    def test_ledger_basis(self):
+        led = os.path.join(self.root, ".claude/herald/ledger/verified.jsonl")
+        os.makedirs(os.path.dirname(led), exist_ok=True)
+        with open(led, "w") as f:
+            f.write(json.dumps({"topic_id": "t0001", "verified_hash": bundle_hash(self.root, self.cfg, "old-post", rev="HEAD")}) + "\n")
+        self.hrd("social", "prepare", "--sns", "x", "--slug", "old-post", "--n", "1")
+        with open(led, "a") as f:
+            f.write(json.dumps({"topic_id": "t0001", "verified_hash": "sha256:other"}) + "\n")
+        _, p = self.hrd("social", "prepare", "--sns", "x", "--slug", "old-post", check=False)
+        self.assertIn("ledger mismatch", p.stderr)
+
+    def test_withdrawn_refused(self):
+        pub = store.load_published(self.root)
+        pub["articles"][0]["withdrawn"] = True
+        store.save_published(self.root, pub)
+        self.commit("withdrawn")
+        _, p = self.hrd("social", "prepare", "--sns", "x", "--slug", "old-post", check=False)
+        self.assertIn("withdrawn", p.stderr)
+
+    def test_weights_and_regions(self):
+        self.assertEqual(social.post_length("\U0001F1EF\U0001F1F5", "weighted", 23), 2)
+        self.assertEqual(social.post_length("1\ufe0f\u20e3", "weighted", 23), 2)
+        cfg = self.cfg
+        self.assertEqual(social.promo_lang(cfg, "en-US"), "en")
+        self.assertIsNone(social.promo_lang(cfg, "zh-TW"))
+
+
 class CloseTests(SocialCase):
     def test_approve_records_and_copies(self):
         out = self.hrd("social", "prepare", "--sns", "x", "--slug", "old-post", "--n", "2")[0]
@@ -610,6 +662,24 @@ class LintRound1Tests(LintTests):
         out = self.lint("setup", "# notes\n- x.com/someone/status/123\n- www.instagram.com/p/abc\n",
                         "docs/editorial/persona-notes.md")
         self.assertEqual(len(out["errors"]), 2)
+
+
+class LintRound2Tests(LintTests):
+    def test_unpatterned_language_decided_once(self):
+        t = "docs/editorial/channels/fr.md"
+        self.write(t, guide_text(guide_head("fr", lang="fr")))
+        self.commit("fr accepted earlier")
+        out = self.lint("edit", guide_text(guide_head("fr", lang="fr"), house="- calmer\n"), t)
+        self.assertTrue(out["ok"], out)
+        out = self.lint("edit", guide_text(guide_head("fr", lang="de")), t)
+        self.assertTrue(any("s9:de" in e for e in out["errors"]))
+
+    def test_disclosure_text_with_a_url(self):
+        out = self.lint("add", guide_text(guide_head("y", disclosure=[
+            {"kind": "ad", "required": True, "text": "#PR", "where": "post"},
+            {"kind": "operator", "required": True, "text": "提供: safie.jp", "where": "post"}])),
+            "docs/editorial/channels/y.md")
+        self.assertTrue(any("contains a URL" in e for e in out["errors"]))
 
 
 class TrailerAndGuardTests(SocialCase):

@@ -78,9 +78,15 @@ _TLDS = ("com|net|org|edu|gov|io|dev|app|ai|co|jp|kr|cn|tw|hk|sg|us|uk|de|fr|es|
          "life|today|jobs|vn|th|id|ph|my")
 # a scheme URL's host may be non-ASCII (IDN); its path is RFC 3986 characters, so CJK text right
 # after it is not swallowed
-URL_RE = re.compile(r"https?://[^\s/<>\"'「」『』（）【】、。！？]+(?:/[%s]*)?|(?<![\w@.\-/])"
-                    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+(?:%s)(?![A-Za-z0-9-])(?:/[%s]*)?"
-                    % (_URLCH, _TLDS, _URLCH), re.I)
+# The host of a scheme URL may have non-ASCII labels (IDN) but ends in an ASCII top-level label,
+# so text right after it (`https://safie.jpで`) is not swallowed; the path is RFC 3986 characters.
+# A bare domain may follow CJK text directly (X autolinks `詳しくはevil.comで`): its lookbehind is
+# ASCII only.
+_HOSTLABEL = r"[^\s/.:<>\"'「」『』（）【】、。！？]+"
+URL_RE = re.compile(r"https?://(?:%s\.)+(?:xn--[A-Za-z0-9-]+|[A-Za-z]{2,63})(?::\d+)?(?:/[%s]*)?"
+                    r"|(?<![A-Za-z0-9@.\-/_])(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+(?:%s)"
+                    r"(?![A-Za-z0-9-])(?:/[%s]*)?" % (_HOSTLABEL, _URLCH, _TLDS, _URLCH), re.I)
+HANDLE_RE = re.compile(r"(?<![A-Za-z0-9_.@])@[A-Za-z0-9_]{2,}")
 HASHTAG_RE = re.compile(r"(?<![\w#&])#[^\s#.,!?、。！？()\[\]{}\"']+")
 CJK = "ᄀ-ᇿ⺀-鿿ꥠ-꥿가-힯豈-﫿　-〿"
 _CJK_SPACE_RE = re.compile(r"\s+(?=[%s])|(?<=[%s])\s+" % (CJK, CJK))
@@ -261,9 +267,18 @@ def _wide(c):
 
 def _weight(s):
     """An emoji sequence (ZWJ joins, skin tones, variation selectors) counts as one unit."""
-    n, join = 0, False
+    n, join, ri = 0, False, False
     for c in s:
         o = ord(c)
+        if 0x1F1E6 <= o <= 0x1F1FF:  # a flag is a pair of regional indicators
+            ri = not ri
+            if not ri:
+                continue
+        else:
+            ri = False
+        if o == 0x20E3:  # keycap: `1️⃣` counts as one emoji (2) — the digit already counted 1
+            n += 1
+            continue
         if o == 0x200D:
             join = True
             continue
@@ -293,7 +308,10 @@ def disclosure_present(norm, text):
         return False
     if t.startswith("#"):
         return re.search(r"(?<!\w)%s(?!\w)" % re.escape(t), norm) is not None
-    return t in norm
+    # a latin label is a word, not letters inside one (`ad` is not in `today`, `pr` not in `product`)
+    head = r"(?<![a-z0-9])" if re.match(r"[a-z0-9]", t) else ""
+    tail = r"(?![a-z0-9])" if re.search(r"[a-z0-9]$", t) else ""
+    return re.search(head + re.escape(t) + tail, norm) is not None
 
 
 def plain(text):
@@ -411,6 +429,9 @@ def channel_problems(h, name, cfg=None, persona=None, others=None):
             continue
         if d["where"] in ("post", "setting") and not unicodedata.normalize("NFKC", d.get("text") or "").strip():
             errors.append("disclosure[%d] (%s/%s) needs a text" % (i, d["kind"], d["where"]))
+        elif d["where"] == "post" and find_urls(d.get("text") or ""):
+            errors.append("disclosure[%d] text contains a URL — post checks never read text inside links; "
+                          "write the operator without its domain" % i)
     waiver = h.get("disclosure_waiver")
     if waiver is not None and not (isinstance(waiver, dict) and waiver.get("kind") == "ad"
                                    and isinstance(waiver.get("reason"), str) and waiver["reason"].strip()
@@ -512,6 +533,8 @@ def resolve(root, name, rev="HEAD"):
 def _load_committed(root, cfg, sns):
     """(guide header, persona header) at HEAD, refusing invalid ones (guide-invalid)."""
     gs = guides(root)
+    if sns not in gs:
+        raise HeraldError("guide-invalid: no channel guide %s on base (removed?) — `/hrd social --add %s`" % (sns, sns))
     rel, h, err = gs[sns]
     others = {k: v[1] for k, v in gs.items()}
     if err:
@@ -555,8 +578,10 @@ def promo_lang(cfg, lang):
     for x in langs:
         if x == lang:
             return x
+    # a regional tag on the channel (`ja-JP`) promotes the bare configured language (`ja`);
+    # two different regions (`zh-TW` vs `zh-CN`) are different languages
     for x in langs:
-        if primary(x) == primary(lang):
+        if "-" not in x and primary(x) == primary(lang):
             return x
     return None
 
@@ -1147,7 +1172,7 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
     kind = _target_kind(target)
     full = file_path if os.path.isabs(file_path) else os.path.join(root, file_path)
     try:
-        text = open(full, encoding="utf-8").read()
+        text = open(full, encoding="utf-8-sig").read()
     except OSError as e:
         raise HeraldError("cannot read %s: %s" % (file_path, e))
     head = show(root, "HEAD", target)
@@ -1196,7 +1221,9 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
             errors += e
             warnings += w
             lang = h.get("lang")
-            if isinstance(lang, str) and primary(lang) not in PATTERNS:
+            prev, _ = parse_channel(head) if head is not None else (None, None)
+            accepted = isinstance(prev, dict) and primary(prev.get("lang")) == primary(lang)  # decided before
+            if isinstance(lang, str) and primary(lang) not in PATTERNS and not accepted:
                 tok = "s9:%s" % primary(lang)
                 if tok in allow:
                     used.add(tok)
@@ -1266,7 +1293,7 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
         for _, _, u in find_urls(text):
             if "/" in re.sub(r"^https?://", "", u, flags=re.I).rstrip("/"):
                 errors.append("a URL with a path (%s) — keep the source kind or domain only (S5)" % u[:60])
-        for m in re.finditer(r"(?<![\w.@])@[A-Za-z0-9_]{2,}", text):
+        for m in HANDLE_RE.finditer(text):
             errors.append("an account handle (%s) — no handles in persona-notes.md (S5)" % m.group(0))
     unused = sorted((allow | strengthen_ok) - used)
     if unused:
