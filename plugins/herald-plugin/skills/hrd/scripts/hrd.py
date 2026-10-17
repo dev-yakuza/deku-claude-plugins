@@ -1030,13 +1030,14 @@ def cmd_social(a):
     elif a.action == "check":
         if not a.file:
             raise HeraldError("check needs --file <draft> …")
+        social.on_base(root, cfg)  # once for the run, not as a per-draft failure
         out = []
         for f in a.file:  # one missing draft must not hide the others' results
             try:
                 out.append(social.check_draft(root, cfg, f))
-            except HeraldError as e:
-                out.append({"draft": f, "ok": False, "failed": [{"id": "header-mismatch", "overridable": False,
-                                                                 "detail": str(e)}], "warnings": []})
+            except HeraldError as e:  # not a writing problem: nothing for the distributor to fix
+                out.append({"draft": f, "ok": False, "profile": None, "settings_to_confirm": [], "warnings": [],
+                            "failed": [{"id": "check-error", "overridable": False, "detail": str(e)}]})
         emit(out)
         if not all(r["ok"] for r in out):
             sys.exit(1)

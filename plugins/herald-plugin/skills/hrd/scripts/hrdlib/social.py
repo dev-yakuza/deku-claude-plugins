@@ -68,25 +68,27 @@ OVERRIDABLE = ("length", "hashtags", "link-position", "s9b-statistic")  # + s9a 
 RULE_IDS = ("length", "hashtags", "link-position", "s9a-service-experience", "s9b-statistic",
             "disclosure", "forbidden-confirmed", "forbidden-invalid", "sources", "promotion-quote-not-found",
             "promotion-lang", "promo-url", "promo-link-missing", "daily-url", "daily-sources",
-            "service-mention-not-allowed", "header-mismatch", "guide-invalid", "basis-changed")
+            "service-mention-not-allowed", "header-mismatch", "guide-invalid", "basis-changed", "check-error")
 
 _URLCH = r"A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%"
 _TLDS = ("com|net|org|edu|gov|io|dev|app|ai|co|jp|kr|cn|tw|hk|sg|us|uk|de|fr|es|it|nl|ru|br|in|au|ca|eu|me|"
          "ch|at|se|pl|be|nz|fi|dk|no|pt|cz|gr|hu|ro|ie|il|tr|ua|za|mx|ar|cl|pe|kz|lt|lv|ee|sk|si|hr|rs|bg|"
          "art|top|club|xyz|fun|live|space|cloud|digital|social|media|studio|design|email|asia|tokyo|"
          "info|biz|xyz|site|blog|tech|page|link|ly|gl|to|tv|so|sh|gg|cc|news|online|shop|store|website|world|"
-         "life|today|jobs|vn|th|id|ph|my")
-# a scheme URL's host may be non-ASCII (IDN); its path is RFC 3986 characters, so CJK text right
-# after it is not swallowed
-# The host of a scheme URL may have non-ASCII labels (IDN) but ends in an ASCII top-level label,
-# so text right after it (`https://safie.jpで`) is not swallowed; the path is RFC 3986 characters.
-# A bare domain may follow CJK text directly (X autolinks `詳しくはevil.comで`): its lookbehind is
-# ASCII only.
-_HOSTLABEL = r"[^\s/.:<>\"'「」『』（）【】、。！？]+"
-URL_RE = re.compile(r"https?://(?:%s\.)+(?:xn--[A-Za-z0-9-]+|[A-Za-z]{2,63})(?::\d+)?(?:/[%s]*)?"
-                    r"|(?<![A-Za-z0-9@.\-/_])(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+(?:%s)"
-                    r"(?![A-Za-z0-9-])(?:/[%s]*)?" % (_HOSTLABEL, _URLCH, _TLDS, _URLCH), re.I)
-HANDLE_RE = re.compile(r"(?<![A-Za-z0-9_.@])@[A-Za-z0-9_]{2,}")
+         "life|today|jobs|vn|th|id|ph|my|pro|fm|ai|im|ws|bz|la|ac|ag|nu|tk")
+# URLs as platforms link them (twitter-text):
+# - a scheme URL's host is ASCII labels, an IPv4 address or a single label; non-ASCII (IDN)
+#   labels only when a path or port follows, so text right after a host (`https://safie.jpで`)
+#   is never swallowed; the path is RFC 3986 characters (CJK after it is not swallowed either);
+# - a bare domain may follow CJK text or an ellipsis directly (`詳しくはevil.comで`,
+#   `see...evil.com`): its lookbehind is ASCII only and a run of dots does not block it.
+_IDNLABEL = r"[^\s/.:<>\"'「」『』（）【】、。！？]+"
+URL_RE = re.compile(
+    r"https?://(?:(?:%s\.)+%s(?=[/:?#])|\d{1,3}(?:\.\d{1,3}){3}|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)(?::\d+)?"
+    r"(?:[/?#][%s]*)?"
+    r"|(?<![A-Za-z0-9@\-/_])(?<![A-Za-z0-9]\.)(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+(?:%s)"
+    r"(?![A-Za-z0-9-])(?:[/?#][%s]*)?" % (_IDNLABEL, _IDNLABEL, _URLCH, _TLDS, _URLCH), re.I)
+HANDLE_RE = re.compile(r"(?<![A-Za-z0-9_.@])@[A-Za-z0-9_]+")  # run on NFKC text: ＠ is @ there
 HASHTAG_RE = re.compile(r"(?<![\w#&])#[^\s#.,!?、。！？()\[\]{}\"']+")
 CJK = "ᄀ-ᇿ⺀-鿿ꥠ-꥿가-힯豈-﫿　-〿"
 _CJK_SPACE_RE = re.compile(r"\s+(?=[%s])|(?<=[%s])\s+" % (CJK, CJK))
@@ -123,7 +125,7 @@ def show(root, rev, rel):
     return proc.stdout if proc.returncode == 0 else None
 
 
-def _on_base(root, cfg):
+def on_base(root, cfg):
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).strip()
     if branch != cfg.base:
         raise HeraldError("social drafts read the committed base — switch to %s first (now on %s)" % (cfg.base, branch))
@@ -265,29 +267,42 @@ def _wide(c):
     return not any(a <= o <= b for a, b in _LIGHT)
 
 
+def _emoji(o):
+    return 0x1F000 <= o <= 0x1FAFF or 0x2600 <= o <= 0x27BF or o in (0x00A9, 0x00AE, 0x203C, 0x2049, 0x2122)
+
+
 def _weight(s):
-    """An emoji sequence (ZWJ joins, skin tones, variation selectors) counts as one unit."""
-    n, join, ri = 0, False, False
+    """An emoji sequence (ZWJ joins, skin tones, flags, tags, keycaps, FE0F presentation) counts
+    as one unit of 2."""
+    n, ri, prev, unit, join = 0, False, None, 0, False
     for c in s:
         o = ord(c)
+        if 0xE0020 <= o <= 0xE007F or 0x1F3FB <= o <= 0x1F3FF or o == 0xFE0E:
+            continue  # tag characters (subdivision flags), skin tones, text presentation
+        if o == 0x200D:
+            join = prev is not None and _emoji(prev)  # a ZWJ outside emoji (Indic scripts) joins nothing
+            continue
+        if o in (0xFE0F, 0x20E3):  # emoji presentation / keycap: the unit weighs 2 in all
+            if unit == 1:
+                n += 1
+                unit = 2
+            continue
+        if unicodedata.combining(c):
+            continue
         if 0x1F1E6 <= o <= 0x1F1FF:  # a flag is a pair of regional indicators
             ri = not ri
             if not ri:
                 continue
         else:
             ri = False
-        if o == 0x20E3:  # keycap: `1️⃣` counts as one emoji (2) — the digit already counted 1
-            n += 1
-            continue
-        if o == 0x200D:
-            join = True
-            continue
-        if unicodedata.combining(c) or o in (0xFE0F, 0xFE0E) or 0x1F3FB <= o <= 0x1F3FF:
-            continue
-        if join:
+        if join and _emoji(o):
             join = False
+            prev = o
             continue
-        n += 2 if _wide(c) else 1
+        join = False
+        unit = 2 if _wide(c) else 1
+        n += unit
+        prev = o
     return n
 
 
@@ -302,15 +317,20 @@ def post_length(text, count, url_len):
     return total + _weight(text[pos:])
 
 
+def mask_handles(text):
+    return HANDLE_RE.sub(lambda m: " " * len(m.group(0)), text)
+
+
 def disclosure_present(norm, text):
+    """`norm`: the folded post with URLs and @handles masked (`@safie_pr` is not a `PR` label)."""
     t = fold(text).strip()
     if not t:
         return False
     if t.startswith("#"):
         return re.search(r"(?<!\w)%s(?!\w)" % re.escape(t), norm) is not None
     # a latin label is a word, not letters inside one (`ad` is not in `today`, `pr` not in `product`)
-    head = r"(?<![a-z0-9])" if re.match(r"[a-z0-9]", t) else ""
-    tail = r"(?![a-z0-9])" if re.search(r"[a-z0-9]$", t) else ""
+    head = r"(?<![a-z0-9_])" if re.match(r"[a-z0-9]", t) else ""
+    tail = r"(?![a-z0-9_])" if re.search(r"[a-z0-9]$", t) else ""
     return re.search(head + re.escape(t) + tail, norm) is not None
 
 
@@ -573,23 +593,27 @@ def _stale(h, today=None):
 
 
 def promo_lang(cfg, lang):
-    """The configured language a channel's posts promote in, or None (daily only, S8)."""
+    """The configured language a channel's posts promote in, or None (daily only, S8): the same
+    tag, else the single configured language that names the same language (`same_lang`)."""
     langs = [cfg.source_lang()] + cfg.target_langs()
     for x in langs:
-        if x == lang:
+        if str(x).lower() == str(lang or "").lower():
             return x
-    # a regional tag on the channel (`ja-JP`) promotes the bare configured language (`ja`);
-    # two different regions (`zh-TW` vs `zh-CN`) are different languages
-    for x in langs:
-        if "-" not in x and primary(x) == primary(lang):
-            return x
-    return None
+    match = [x for x in langs if same_lang(x, lang)]
+    return match[0] if len(match) == 1 else None
+
+
+def same_lang(a, b):
+    """Tags name the same language: equal ignoring case, or one is bare and the primaries match
+    (`ja` and `ja-JP`); two regions (`zh-TW`, `zh-CN`) are different languages."""
+    a, b = str(a or "").lower(), str(b or "").lower()
+    return a == b or (("-" not in a or "-" not in b) and primary(a) == primary(b))
 
 
 def daily_service_allowed(cfg, lang):
     """promotion.md is written in config.language: only posts in that language may quote it, so
     only they may mention the service at all (S6, S7)."""
-    return primary(lang) == primary(cfg.get("language") or "en")
+    return same_lang(lang, cfg.get("language") or "en")
 
 
 # --- the log ------------------------------------------------------------------------------------
@@ -730,7 +754,7 @@ def _run_id(root):
 
 
 def prepare(root, cfg, sns, slug=None, n=3):
-    _on_base(root, cfg)
+    on_base(root, cfg)
     if not 1 <= int(n) <= MAX_N:
         raise HeraldError("--n must be 1–%d" % MAX_N)
     _require_setup(root, cfg)
@@ -819,7 +843,7 @@ def _overridable(rid, profile):
 
 def check_draft(root, cfg, rel, record=True):
     """The post rules on one draft. Every basis comes from the `drafted` record and HEAD."""
-    _on_base(root, cfg)
+    on_base(root, cfg)
     rel = rel.replace(os.sep, "/")
     if os.path.isabs(rel):
         rel = os.path.relpath(rel, root).replace(os.sep, "/")
@@ -862,7 +886,7 @@ def check_draft(root, cfg, rel, record=True):
     eff = effective(h)
     post = body.strip()
     norm = fold(post)
-    urls = find_urls(post)
+    urls = find_urls(unicodedata.normalize("NFKC", post))  # `Ｓａｆｉｅ．ｃｏｍ` is a URL once normalized
     terms = service_terms(persona, cfg)
     masked = mask_urls(norm)
     mentions = term_spans(masked, terms)
@@ -892,14 +916,15 @@ def check_draft(root, cfg, rel, record=True):
             for _, _, u in urls:
                 if norm_url(u) != want:
                     fail("promo-url", "%s is not the article URL %s" % (u, rec.get("url")))
+            nf = unicodedata.normalize("NFKC", post)
             if urls and eff["link"] == "end":
-                tail = post[urls[-1][1]:]
+                tail = nf[urls[-1][1]:]
                 for d in disc:
                     tail = tail.replace(d.get("text") or "\0", " ")
                 tail = HASHTAG_RE.sub(" ", tail)
                 if re.search(r"\w", tail):
                     fail("link-position", "the link must come last (only hashtags after it)")
-            elif urls and eff["link"] == "start" and post[:urls[0][0]].strip():
+            elif urls and eff["link"] == "start" and nf[:urls[0][0]].strip():
                 fail("link-position", "the link must come first")
     else:
         for _, _, u in urls:
@@ -909,7 +934,7 @@ def check_draft(root, cfg, rel, record=True):
     if profile in ("promo", "daily+service"):
         for d in disc:
             if d.get("where") == "post":
-                if not disclosure_present(masked, d.get("text") or ""):  # never inside a URL
+                if not disclosure_present(mask_handles(masked), d.get("text") or ""):  # never in a URL or a handle
                     if d.get("required"):
                         fail("disclosure", "missing %s disclosure %r" % (d.get("kind"), d.get("text")))
                     else:
@@ -1032,7 +1057,7 @@ def _result(root, rel, raw, rec, profile, failed, warnings, settings, record):
 # --- close ---------------------------------------------------------------------------------------
 
 def close(root, cfg, run_id, approved=None, reject_all=False, override=None, settings_confirmed=()):
-    _on_base(root, cfg)
+    on_base(root, cfg)
     if bool(approved) == bool(reject_all):
         raise HeraldError("give exactly one of --approved <draft> or --reject-all")
     latest = latest_status(root)
@@ -1054,7 +1079,8 @@ def close(root, cfg, run_id, approved=None, reject_all=False, override=None, set
         raise HeraldError("%s is not a draft of run %s" % (rel, run_id))
     res = check_draft(root, cfg, rel)
     rec = latest[rel]
-    read = [guide_rel(rec["sns"]), PERSONA, PROMOTION, GATE_RULES] + ([rec["body"]] if rec.get("body") else [])
+    read = [guide_rel(rec["sns"]), PERSONA, PROMOTION, GATE_RULES, ".claude/herald/config.json"] + \
+        ([rec["body"]] if rec.get("body") else [])
     dirty = git(root, "status", "--porcelain", "--", *read).strip()
     if dirty:
         raise HeraldError("the sources this draft was checked against have local edits — commit or discard them first:\n%s" % dirty)
@@ -1290,10 +1316,12 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
                     if ex - ot.get(t, set()):
                         need("exclude:%s" % t, "exclusions added for %r: %s" % (t, ", ".join(sorted(ex - ot.get(t, set())))))
     else:  # persona-notes: themes and source kinds only (S5)
-        for _, _, u in find_urls(text):
-            if "/" in re.sub(r"^https?://", "", u, flags=re.I).rstrip("/"):
-                errors.append("a URL with a path (%s) — keep the source kind or domain only (S5)" % u[:60])
-        for m in HANDLE_RE.finditer(text):
+        nf = unicodedata.normalize("NFKC", text)
+        for _, _, u in find_urls(nf):
+            rest = re.sub(r"^https?://", "", u, flags=re.I).rstrip("/")
+            if "/" in rest or "?" in rest or "#" in rest:
+                errors.append("a URL with a path or query (%s) — keep the source kind or domain only (S5)" % u[:60])
+        for m in HANDLE_RE.finditer(nf):
             errors.append("an account handle (%s) — no handles in persona-notes.md (S5)" % m.group(0))
     unused = sorted((allow | strengthen_ok) - used)
     if unused:

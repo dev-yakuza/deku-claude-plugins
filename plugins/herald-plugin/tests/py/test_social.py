@@ -495,6 +495,65 @@ class ReviewRound2Tests(SocialCase):
         self.assertIsNone(social.promo_lang(cfg, "zh-TW"))
 
 
+class ReviewRound3Tests(SocialCase):
+    def test_handle_is_not_a_disclosure_label(self):
+        self.write("docs/editorial/channels/x.md", guide_text(guide_head(disclosure=[
+            {"kind": "ad", "required": True, "text": "PR", "where": "post"}])))
+        self.commit("PR label")
+        for body in ("New post from @safie_pr", "see #safie_pr", "ad_free PR_team"):
+            rel = self.promo(body + " https://example.test/blog/old-post/")
+            self.assertIn("disclosure", self.failed(rel), body)
+        rel = self.promo("PR New post https://example.test/blog/old-post/")
+        self.assertNotIn("disclosure", self.failed(rel))
+
+    def test_fullwidth_domain_is_a_url(self):
+        rel = self.daily("Ｓａｆｉｅ．ｃｏｍ I tried it and my mornings changed.")
+        self.assertIn("daily-url", self.failed(rel))
+
+    def test_url_forms(self):
+        for text, want in (("see...evil.com/x", ["evil.com/x"]), ("https://203.0.113.5/x", ["https://203.0.113.5/x"]),
+                           ("http://intranet/x", ["http://intranet/x"]),
+                           ("https://safie.jpで詳しくはNode.jsへ", ["https://safie.jp"])):
+            self.assertEqual([u for _, _, u in social.find_urls(text)], want, text)
+
+    def test_weights(self):
+        flag = "\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F"
+        self.assertEqual(social.post_length(flag, "weighted", 23), 2)
+        self.assertEqual(social.post_length("\u00a9\ufe0f", "weighted", 23), 2)
+        self.assertEqual(social.post_length("\u0915\u094d\u200d\u0937", "weighted", 23), 2)
+
+    def test_language_tags(self):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        cfg = json.load(open(cfgp))
+        cfg["roles"] = {"conditional": ["distributor", "translator"]}
+        cfg["translations"] = {"source": "en", "targets": [
+            {"lang": "ja-JP", "body_pattern": "{content}/ja/{slug}.md", "url_pattern": "/ja/blog/{slug}/"}]}
+        self.write(".claude/herald/config.json", json.dumps(cfg))
+        self.commit("ja-JP")
+        self.reload()
+        self.assertEqual(social.promo_lang(self.cfg, "ja"), "ja-JP")
+        self.assertEqual(social.promo_lang(self.cfg, "JA-jp"), "ja-JP")
+        self.assertTrue(social.daily_service_allowed(self.cfg, "EN"))
+        self.assertFalse(social.same_lang("zh-TW", "zh-CN"))
+
+    def test_check_errors_are_not_writing_failures(self):
+        out, _ = self.hrd("social", "check", "--file", "nope.md", check=False)
+        self.assertEqual(out[0]["failed"][0]["id"], "check-error")
+        sh(self.root, "git", "switch", "-q", "-c", "other")
+        _, p = self.hrd("social", "check", "--file", "nope.md", check=False)
+        self.assertIn("switch to main", p.stderr)
+
+    def test_close_needs_clean_config(self):
+        out = self.hrd("social", "prepare", "--sns", "x", "--n", "1")[0]
+        self.draft(out["drafts"][0], "Rainy day.", kind="daily", slug=None)
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        cfg = json.load(open(cfgp))
+        cfg["language"] = "ko"
+        self.write(".claude/herald/config.json", json.dumps(cfg))
+        _, p = self.hrd("social", "close", "--run", out["run"], "--approved", out["drafts"][0], check=False)
+        self.assertIn("local edits", p.stderr)
+
+
 class CloseTests(SocialCase):
     def test_approve_records_and_copies(self):
         out = self.hrd("social", "prepare", "--sns", "x", "--slug", "old-post", "--n", "2")[0]
@@ -659,9 +718,9 @@ class LintRound1Tests(LintTests):
         self.assertTrue(out["ok"], out)
 
     def test_notes_without_scheme(self):
-        out = self.lint("setup", "# notes\n- x.com/someone/status/123\n- www.instagram.com/p/abc\n",
-                        "docs/editorial/persona-notes.md")
-        self.assertEqual(len(out["errors"]), 2)
+        out = self.lint("setup", "# notes\n- x.com/someone/status/123\n- www.instagram.com/p/abc\n"
+                        "- example.com?user=tanaka\n- Xの＠tanaka_note\n", "docs/editorial/persona-notes.md")
+        self.assertEqual(len(out["errors"]), 4, out)
 
 
 class LintRound2Tests(LintTests):
