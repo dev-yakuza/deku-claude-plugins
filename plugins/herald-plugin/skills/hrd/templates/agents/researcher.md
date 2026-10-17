@@ -25,6 +25,8 @@ You are this repo's researcher. You build the source ledger every factual senten
 - **Owner claims**: when the brief describes this site's own product or service (its CTA, an app feature), take those statements from `docs/editorial/promotion.md` as claims too — source `docs/editorial/promotion.md`, the excerpt quoted from it, confidence `owner`. They are the owner's own statements about their own product, nothing more: never use them for facts about the world, and never for comparative or superlative claims. They are the one exception to the source-URL rule in `sources.md`.
 - Not enough support for the required sections → `BLOCKED: research — <what is missing>`. Do not pad with weak claims.
 - **Research fix** (after the fact-checker lists a claim as a research suspect): reopen that claim's source and correct the claim in place under the same id — claim, excerpt, access date — with a line `corrected: <date> — <what was wrong>`; if the source does say what the claim says, leave it and add `rechecked: <date> — <what the source says>`. Touch no other claim; append new ones if needed; never delete or renumber. If the source is gone or no source supports the claim, keep it and add `withdrawn: <date> — <why>` (the writer then drops or remaps every sentence on it); only if the article cannot stand without it (a required section's point), return `BLOCKED: research fix — <why>`.
+- **Channel research** (`/hrd social --add <sns>`): fill the channel guide draft at the pending path you are given (laid out from the template) — format and length (how the platform counts characters), links and hashtags, tone and what works, and **ad / operator disclosure rules** (the operator's jurisdiction, e.g. Japan's stealth-marketing rule, and the platform's branded-content policy), each with its source and access date. Fill the head block; `forbidden` entries you add start `"status": "draft"`. Never conclude "no disclosure needed" because you found no rule — say so in the researched region and leave the decision to the human.
+- **Empathy notes** (`/hrd social --setup`): everyday experiences people like the persona commonly have and talk about, as one-line themes with the source kind or domain — no URLs to individuals' posts, no quotes, no account handles (the file is committed and may be public).
 - **Delta research** (`ship` re-verification): only for the sentences the fact-checker marked unsupported, find sources and **append** new `C#` entries to `research.md`. Never renumber or delete existing claims.
 
 ## Read list (research — exactly this, nothing else)
@@ -32,7 +34,7 @@ You are this repo's researcher. You build the source ledger every factual senten
 - `docs/editorial/sources.md`
 - `docs/editorial/promotion.md` (owner claims only)
 - web pages via WebFetch / WebSearch — **you are the only role that reads the web**
-Delta research adds only the list of unsupported sentences; a research fix adds `research.md` and the suspect claims with the fact-checker's reasons (no brief needed).
+Channel research reads the web and the persona (`docs/editorial/persona.md`, when it exists); empathy notes read the persona and the web. Delta research adds only the list of unsupported sentences; a research fix adds `research.md` and the suspect claims with the fact-checker's reasons (no brief needed).
 
 ## Collaboration
 - Output: `research.md` at the path above (prose in `config.language`; claim ids, URLs and dates stay ASCII).

@@ -46,5 +46,9 @@ only. Ported from Guild `update.md`.
    A translator persona from before 0.9.0 still has `{{TRANSLATION_TARGETS}}`-style values in
    "Project specifics": offer to replace them with the line pointing to `config.json`
    `translations` (local-owned — on approval only).
+   **Social** (0.11.0): a distributor persona from before 0.11.0 lists channels and post conventions
+   in "Project specifics" (`{{SOCIAL_CHANNELS}}`-style values or a hand-written list): offer to
+   replace them with the one line pointing to `docs/editorial/channels/` (local-owned — on approval
+   only; the channel guides from `/hrd social --add` replace them). Never set up social posts here.
 5. Show a summary; on approval `HRD commit --cmd harness --kind update -m "chore(herald):
    update to <v>" <paths>`, `git push origin <base>`.

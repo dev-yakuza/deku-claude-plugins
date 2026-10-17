@@ -2,7 +2,8 @@
 `python3 "${CLAUDE_PROJECT_DIR}/.claude/herald/scripts/guard.py"` for Bash and Edit/Write.
 
 Decision table (attended → `ask`, unattended `HRD_UNATTENDED=1` → `deny`):
-- criteria files, critique/verify personas, protected config keys, guard wiring, the ledger
+- criteria files (SNS guides and persona included), protected personas (critique/verify, distributor),
+  protected config keys, guard wiring, the ledger
 - `gh pr merge` (unattended: allowed only for auto + --match-head-commit + PR in HRD_AUTO_PRS)
 - the deploy command
 - base-branch commits that touch Herald paths outside the allowed set (unattended: any
@@ -28,8 +29,11 @@ CRITERIA = [
     "docs/editorial/search-checklist.md", "docs/editorial/gate-rules.json",
     "docs/editorial/refresh-policy.md",  # the refresh decision's rules (02-refresh-decision.md R4)
     "docs/editorial/categories/*",
+    # SNS (03-social.md S14): channel guides, the persona and its empathy notes hold the floor
+    "docs/editorial/channels/*", "docs/editorial/persona.md", "docs/editorial/persona-notes.md",
 ]
-PERSONAS = [".claude/agents/editor.md", ".claude/agents/fact-checker.md", ".claude/agents/subject-expert.md"]
+PERSONAS = [".claude/agents/editor.md", ".claude/agents/fact-checker.md", ".claude/agents/subject-expert.md",
+            ".claude/agents/distributor.md"]
 WIRING = [".claude/settings.json", ".claude/settings.local.json", ".claude/herald/scripts/*",
           ".claude/herald/scripts/**"]
 LEDGER = [".claude/herald/ledger/*", ".claude/herald/ledger/**"]
@@ -84,10 +88,10 @@ def _covers(r, globs):
 
 
 def classify_path(r):
-    if commits._match(r, CRITERIA):
+    if _covers(r, CRITERIA):  # a directory holding criteria too (`rm -r docs/editorial/channels`)
         return "criteria file %s" % r
     if r in PERSONAS:
-        return "critique/verify persona %s" % r
+        return "protected persona %s" % r
     if _covers(r, WIRING):
         return "guard wiring %s" % r
     if _covers(r, LEDGER):

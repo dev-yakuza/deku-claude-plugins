@@ -22,7 +22,7 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.10.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.11.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -606,7 +606,7 @@ def cmd_fetch_pr(a):
 def cmd_commit(a):
     root, cfg = ctx(check=a.cmd != "harness")
     attended_only("`commit`")
-    sha = commits.commit_state(root, cfg, a.cmd, a.message, a.kind, a.paths)
+    sha = commits.commit_state(root, cfg, a.cmd, a.message, a.kind, a.paths, extra_trailers=a.trailer or ())
     emit({"commit": sha})
 
 
@@ -1016,6 +1016,43 @@ def cmd_gate(a):
         sys.exit(1)
 
 
+def cmd_social(a):
+    """SNS drafts (design/herald/03-social.md): prepare / check / close / list / lint."""
+    from hrdlib import social
+
+    root, cfg = ctx()
+    if a.action in ("prepare", "check", "close") and os.environ.get("HRD_UNATTENDED") == "1":
+        raise HeraldError("/hrd social is interactive only (a human picks every post)")
+    if a.action == "prepare":
+        if not a.sns:
+            raise HeraldError("prepare needs --sns")
+        emit(social.prepare(root, cfg, a.sns, slug=a.slug, n=a.n))
+    elif a.action == "check":
+        if not a.file:
+            raise HeraldError("check needs --file <draft> …")
+        out = [social.check_draft(root, cfg, f) for f in a.file]
+        emit(out)
+        if not all(r["ok"] for r in out):
+            sys.exit(1)
+    elif a.action == "close":
+        if not a.run:
+            raise HeraldError("close needs --run")
+        emit(social.close(root, cfg, a.run, approved=a.approved, reject_all=a.reject_all, override=a.override,
+                          settings_confirmed=a.setting_confirmed or ()))
+    elif a.action == "list":
+        emit(social.listing(root, cfg))
+    elif a.action == "lint":
+        if not (a.mode and a.file and a.target):
+            raise HeraldError("lint needs --mode, --file <pending> and --target <repo path>")
+        if len(a.file) != 1:
+            raise HeraldError("lint takes one --file")
+        out = social.lint(root, cfg, a.mode, a.file[0], a.target, allow_floor=a.allow_floor or (),
+                          strengthen=a.strengthen or ())
+        emit(out)
+        if not out["ok"]:
+            sys.exit(1)
+
+
 MANUAL_SIGNAL_KINDS = ("session-edit-request", "human-edit", "review-finding")
 
 
@@ -1138,7 +1175,9 @@ def build():
     p = sp.add_parser("sync"); p.set_defaults(fn=cmd_sync)
     p = sp.add_parser("fetch-pr"); p.add_argument("--pr", type=int, required=True); p.set_defaults(fn=cmd_fetch_pr)
     p = sp.add_parser("commit"); p.add_argument("--cmd", required=True); p.add_argument("--kind", required=True)
-    p.add_argument("-m", "--message", required=True); p.add_argument("paths", nargs="+"); p.set_defaults(fn=cmd_commit)
+    p.add_argument("-m", "--message", required=True)
+    p.add_argument("--trailer", action="append", help="Herald-Floor: <token> … / Herald-Strengthen: <token> … (repeatable)")
+    p.add_argument("paths", nargs="+"); p.set_defaults(fn=cmd_commit)
     p = sp.add_parser("integrity"); p.add_argument("--predeploy", action="store_true"); p.add_argument("--rev")
     p.add_argument("--report", action="store_true", help="always exit 0; read `ok` and the rows")
     p.set_defaults(fn=cmd_integrity)
@@ -1173,6 +1212,14 @@ def build():
     p.add_argument("--lang", help="gate one translation (the translator's own check)")
     p.add_argument("--record", action="store_true", help="record a failure as a gate-failure signal (pre-editor check)")
     p.set_defaults(fn=cmd_gate)
+    p = sp.add_parser("social"); p.add_argument("action", choices=["prepare", "check", "close", "list", "lint"])
+    p.add_argument("--sns"); p.add_argument("--slug"); p.add_argument("--n", type=int, default=3)
+    p.add_argument("--file", nargs="+"); p.add_argument("--run"); p.add_argument("--approved")
+    p.add_argument("--reject-all", action="store_true"); p.add_argument("--override")
+    p.add_argument("--setting-confirmed", action="append")
+    p.add_argument("--mode"); p.add_argument("--target")
+    p.add_argument("--allow-floor", action="append"); p.add_argument("--strengthen", action="append")
+    p.set_defaults(fn=cmd_social)
     p = sp.add_parser("signal"); p.add_argument("--kind", required=True); p.add_argument("--topic")
     p.add_argument("--data"); p.add_argument("--human-reviewed", choices=["true", "false"]); p.set_defaults(fn=cmd_signal)
     p = sp.add_parser("auto-exclusion"); p.add_argument("--topic", required=True); p.add_argument("--rev")

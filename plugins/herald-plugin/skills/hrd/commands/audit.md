@@ -9,7 +9,10 @@ routes findings to `evolve`, `status` or `update`. Plan §3.4 (limits of the gua
 2. **Enforcement after the fact**:
    - Protected files (criteria, critique/verify personas, gate rules, config protected keys):
      `git log --format='%H %s' -- <file>` — every change must be an `evolve #n`, `config`,
-     `update`, `init` or `rollback` commit, or a human commit outside Claude. List others.
+     `update`, `init`, `rollback` or `social` (`chore(herald): social …`) commit, or a human commit outside
+     Claude. List others. Floor changes a human accepted carry `Herald-Floor:` trailers
+     (`git log --format='%h %s %(trailers:key=Herald-Floor,valueonly,separator=; )' -- docs/editorial`):
+     list them with their reasons.
    - Ledger: `.claude/herald/ledger/verified.jsonl` lines are append-only in time order; every
      `push` line's SHA exists; ledger hashes agree with `verify.json`/`state.json` committed in
      `work/<id>/` (spot-check the last 10).

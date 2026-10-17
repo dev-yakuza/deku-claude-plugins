@@ -82,8 +82,22 @@ def staged_paths(root):
     return [p for p in git(root, "diff", "--cached", "--name-only", "-z").split("\0") if p]
 
 
-def commit_state(root, cfg, command, message, kind, add_paths):
+EXTRA_TRAILERS = ("Herald-Floor", "Herald-Strengthen")  # a human's floor decision (03-social.md S14)
+
+
+def _extra_trailers(items):
+    out = []
+    for t in items or ():
+        key, sep, val = str(t).partition(":")
+        if not sep or key.strip() not in EXTRA_TRAILERS or not val.strip() or "\n" in t or "\r" in t:
+            raise HeraldError("--trailer takes `%s: <token> — <reason>` on one line" % " | ".join(EXTRA_TRAILERS))
+        out.append("%s: %s" % (key.strip(), val.strip()))
+    return out
+
+
+def commit_state(root, cfg, command, message, kind, add_paths, extra_trailers=()):
     """Stage exactly `add_paths` (must be allowed) and commit with the Herald-Record trailer."""
+    extra = _extra_trailers(extra_trailers)
     globs = allowed_globs(cfg, command)
     bad = [p for p in add_paths if not _match(p, globs) or "__pycache__" in p or p.endswith(".pyc")]
     if bad:
@@ -104,7 +118,10 @@ def commit_state(root, cfg, command, message, kind, add_paths):
         raise HeraldError("refusing: staged paths outside `%s` allowance: %s" % (command, ", ".join(stray)))
     if not staged:
         return None
-    git(root, "commit", "-q", "-m", message, "--trailer", "%s: %s" % (TRAILER, kind))
+    args = ["--trailer", "%s: %s" % (TRAILER, kind)]
+    for t in extra:
+        args += ["--trailer", t]
+    git(root, "commit", "-q", "-m", message, *args)
     return git(root, "rev-parse", "HEAD").strip()
 
 

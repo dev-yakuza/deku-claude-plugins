@@ -51,8 +51,19 @@ def body_chars(body, mode):
     return len(re.sub(r"\s", "", text))
 
 
-def load_rules(root):
-    rules = read_json(os.path.join(root, "docs", "editorial", "gate-rules.json"), {})
+def load_rules(root, rev=None):
+    """The gate rules from the working tree, or from commit `rev` (social checks read HEAD)."""
+    if rev:
+        import json
+
+        proc = run(["git", "show", "%s:docs/editorial/gate-rules.json" % rev], cwd=root, check=False)
+        try:
+            rules = json.loads(proc.stdout) if proc.returncode == 0 else {}
+        except ValueError:
+            rules = {}
+        rules = rules if isinstance(rules, dict) else {}
+    else:
+        rules = read_json(os.path.join(root, "docs", "editorial", "gate-rules.json"), {})
     out = {}
     for k, v in DEFAULT_RULES.items():
         if isinstance(v, dict):

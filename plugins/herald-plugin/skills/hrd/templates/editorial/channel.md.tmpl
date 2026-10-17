@@ -1,0 +1,47 @@
+# {{SNS_DISPLAY_NAME}} — channel guide
+
+<!-- herald:channel
+{"name": "{{SNS}}", "aliases": [{{ALIASES}}], "lang": "{{LANG}}",
+ "max_chars": {{MAX_CHARS}}, "count": "{{COUNT}}", "url_len": {{URL_LEN}}, "hashtags": [{{HASHTAGS_MIN}}, {{HASHTAGS_MAX}}],
+ "link": "{{LINK}}",
+ "disclosure": [{{DISCLOSURE_ITEMS}}],
+ "disclosure_waiver": null,
+ "forbidden": [],
+ "house": {},
+ "researched_at": "{{RESEARCHED_AT}}"}
+-->
+
+<!-- social: written by `/hrd social --add` in config.language (design/herald/03-social.md §2).
+     The head block is machine-read and checked by `HRD social lint`:
+     - name = this file's name; aliases = other names people type for it; lang = the posts' language.
+     - count: "chars" (code points) or "weighted" (CJK and emoji 2, a URL counts url_len);
+       max_chars is in that unit. hashtags: [min, max]. link: end | start | any | none.
+     - disclosure: [{"kind": "ad"|"operator", "required": true|false, "text": "…",
+       "where": "post"|"setting"|"profile"}] — at least one required ad item in the post or as a
+       platform setting; otherwise only a human writes disclosure_waiver (`/hrd social --edit`).
+     - forbidden entries start "status": "draft"; a human confirms them.
+     - house (humans and evolve): narrows max_chars, hashtags or link for this account.
+     Between the researched markers: rewritten by `/hrd social --refresh`. After them: house rules,
+     owned by the humans and `/hrd evolve`. Delete this comment. -->
+
+<!-- herald:researched:start -->
+## Researched ({{RESEARCHED_AT}})
+
+### Format and length
+- {{FORMAT}}
+
+### Links and hashtags
+- {{LINKS_AND_HASHTAGS}}
+
+### Tone and what works
+- {{TONE}}
+
+### Ad and operator disclosure
+- {{DISCLOSURE_RULES}}
+
+### Sources
+- {{SOURCES}}
+<!-- herald:researched:end -->
+
+## House rules
+- (none yet — our own rules for this account; humans and `/hrd evolve` add them here.)

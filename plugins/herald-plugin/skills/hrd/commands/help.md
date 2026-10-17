@@ -13,6 +13,8 @@ adopt central improvements
 `ship --reverify <id>` · `ship --deploy-only <id …>` · `ship <PR> --session-auto [--consent]` · `review <id|slug|PR>` independent audit ·
 `refresh <slug> [--attended] [--ship] [--direction <id>] [--force-update] [--for-translation]` bring an article up to date — the strategist recommends update (same URL), new article or nothing; you decide · `translate <slug> [--lang l,…] [--adopt l,…]` add languages to a published article (`--missing`: every article lacking one; `--resume <id>` continue)
 
+**Social** — `social --setup` the account persona · `social --add|--edit|--remove <sns>` a channel guide (researched) · `social --persona` · `social --list` · `social <sns> <slug> [--n N]` promotional drafts for a published article · `social <sns> --daily [--theme …]` daily drafts — Herald drafts; a human picks and uploads
+
 **State** — `status [--requeue|--drop|--withdraw|--withdraw-lang|--unwithdraw|--move|--release-slug|
 --mark-published|--unlock]`
 

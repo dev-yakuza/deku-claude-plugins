@@ -24,6 +24,13 @@ Changes that loosen fact-check rules, critique criteria, exemplars (replacing is
 deleting or downgrading is not), the deterministic gate, or the charter floor are blocked.
 *Mechanically*: guard on criteria files, critique/verify personas and protected config keys;
 `evolve` panel veto + apply-time check.
+For social posts (`design/herald/03-social.md` S14) the floor is: the post checks themselves
+(no service effect told as a personal experience, no statistics in daily posts), confirmed
+`forbidden` rules in channel guides, the persona and gate rules (including turning a confirmed
+gate rule to `"scope": "article"`), the disclosure items and the waiver, and the persona's
+`service_terms` (removing one, adding an exclusion). Only a human loosens them, one named item at
+a time (`HRD social lint --allow-floor`, recorded as a `Herald-Floor:` commit trailer); the
+distributor's Habits never contradict them.
 
 **INV3 — everything is reversible.**
 git is the substrate; `/hrd rollback` reverts an evolve run. No `reset --hard`, no force push,
@@ -33,11 +40,13 @@ no history rewrite by any command. *Boundary*: gitignored files (`signals.jsonl`
 **INV4 — additive; never clobbers local evolution.**
 `init`/`update` merge. `update` refreshes only persona frontmatter `name`/`description` and the
 region between `<!-- herald:persona:start -->` and `<!-- herald:persona:end -->`. Everything else
-under `.claude/agents/`, `docs/editorial/`, `config.json` is local-owned; the one exception is
-`update`'s offer to append new style-guide lines, applied only on the human's approval (a
-decline appends only a version marker comment, so the offer is not repeated) and never
-removing or rewording a line (`update.md` step 3); and its offer to create a missing
-`refresh-policy.md` from the template (a new file, on approval only).
+under `.claude/agents/`, `docs/editorial/`, `config.json` is local-owned. The exceptions are
+`update`'s offers, each applied only on the human's approval: to append new style-guide lines (a
+decline appends only a version marker comment, so the offer is not repeated; never removing or
+rewording a line — `update.md` step 3), to create a missing `refresh-policy.md` from the
+template (a new file), and to replace the old "Project specifics" values of a translator
+(pre-0.9.0) or distributor (pre-0.11.0) persona with the line pointing to `config.json`
+`translations` or the channel guides.
 
 **INV5 — nothing leaves the machine un-sanitized.**
 Local growth data (signals, memory, ledger) and article drafts never go to the plugin
@@ -48,7 +57,9 @@ Search Console credentials live only in `.claude/herald/secrets/` (gitignored).
 
 **INV6 — draft → confirm → enforce.**
 Rules `init` extracts from existing articles (style rules, forbidden phrases) start with
-`"status": "draft"` in `gate-rules.json` and only warn until a human sets `"confirmed"`.
+`"status": "draft"` in `gate-rules.json` and only warn until a human sets `"confirmed"`. The
+same holds for `forbidden` rules research or evolve adds to channel guides and the persona: only
+a human confirms one (`HRD social lint` refuses anything else).
 
 ## Honest scope of the enforcement layer
 

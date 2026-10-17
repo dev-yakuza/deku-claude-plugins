@@ -49,7 +49,7 @@ Exclude `.claude/skills/**` and other local skills from every scan (D16).
 
 Promoted service/app and CTA · north-star metric · domain expertise / YMYL · hard policies
 (external mentions, promotion count, copyright rules) · confirm detected paths, deploy command,
-base URL · per-article budget (USD) · output language (default: `$1` if it is a language code, else the content language) · with locale directories: translate new articles? which languages, which is the source, auto publish translations (default no).
+base URL · per-article budget (USD) · social posts too? (yes → the summary points to `/hrd social --setup`; `init` never enables `distributor` itself) · output language (default: `$1` if it is a language code, else the content language) · with locale directories: translate new articles? which languages, which is the source, auto publish translations (default no).
 
 ## P2 — Generate (additive)
 
@@ -94,4 +94,4 @@ base URL · per-article budget (USD) · output language (default: `$1` if it is 
 
 `python3 .claude/herald/scripts/hrd.py commit --cmd harness --kind harness -m
 "chore(herald): install harness" <generated paths>` then `git push origin <base>`. Summary:
-next steps — `/hrd plan`, then `/hrd write <topic-id>`, then `/hrd ship`.
+next steps — `/hrd plan`, then `/hrd write <topic-id>`, then `/hrd ship` (and `/hrd social --setup` if the human wants social posts).
