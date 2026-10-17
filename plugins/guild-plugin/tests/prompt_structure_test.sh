@@ -3096,6 +3096,8 @@ hasfx "evolve: firing 로그는 --firing-log 로만" "$GLD/commands/evolve.md" '
 hasfx "evolve: NOLOG 는 never fires 가 아님" "$GLD/commands/evolve.md" 'never** read it as "the rule never fires"'
 hasfx "audit: rule health 도 --firing-log" "$GLD/commands/audit.md" '--firing-log --out'
 hasfx "audit: NOLOG 면 stale 판정 금지" "$GLD/commands/audit.md" 'never "stale"'
+hasfx "audit: --firing-log 출력 행 수 대조" "$GLD/commands/audit.md" 'confirm its last line number equals `n`'
+hasfx "evolve: --firing-log 출력 행 수 대조" "$GLD/commands/evolve.md" 'confirm its last line number equals `n`'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -3104,7 +3106,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=895   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=897   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

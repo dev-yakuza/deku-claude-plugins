@@ -174,6 +174,9 @@ got="$(detect "")"
 [ "$got" = "none" ] && ok "빈 훅 파일은 none" || bad "빈 훅 파일은 none" "none" "$got"
 got="$(python3 "$GATE" --detect-hook-manager "$DETF.absent" </dev/null 2>/dev/null)"
 [ "$got" = "absent" ] && ok "훅 파일 없음은 absent" || bad "훅 파일 없음은 absent" "absent" "$got"
+printf '#!/bin/sh\n# caf\351\nlefthook run pre-commit\n' > "$DETF"
+got="$(python3 "$GATE" --detect-hook-manager "$DETF" </dev/null 2>/dev/null)"
+[ "$got" = "lefthook" ] && ok "Latin-1 바이트가 섞인 훅도 판별 (판정 불가로 떨어지지 않음)" || bad "Latin-1 훅 판별" "lefthook" "$got"
 python3 "$GATE" --detect-hook-manager </dev/null >/dev/null 2>&1; rc=$?
 [ "$rc" = 64 ] && ok "경로 없이 호출 → 64 (판정 아님)" || bad "경로 없이 호출" "64" "$rc"
 got="$(detect "$(cat "$HOOK")")"
@@ -238,7 +241,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-INST_MIN_CHECKS=30
+INST_MIN_CHECKS=31
 if [ "$((PASS + FAIL))" -lt "$INST_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${INST_MIN_CHECKS}건)."
   exit 1

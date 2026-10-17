@@ -958,6 +958,12 @@ printf '{"tool_input":{"command":"git commit -m x"}}' | python3 .claude/guild/ga
 [ "$(cnt $LOGF '"secret"')" = 1 ] && [ ! -f "$PENDF" ] \
   && ok "L4 차단된 PreToolUse → 본 로그 1줄, pending 없음" || bad "L4 차단 기록" "log 1 / no pending" "log $(cnt $LOGF '"secret"')"
 git rm -q --cached id_rsa >/dev/null 2>&1; rm -f id_rsa
+# 차단된 실행의 warn 도 함께 본 로그로 (그 커밋은 훅에 닿지 않으므로 유일한 기록)
+visual_repo
+printf 'PNG2' > src/a/__screenshots__/btn.png; printf 'k\n' > id_rsa; git add -A >/dev/null 2>&1
+printf '{"tool_input":{"command":"git commit -m x"}}' | python3 .claude/guild/gates/scripts/gate_precommit.py >/dev/null 2>&1
+[ "$(cnt $LOGF '"secret"')" = 1 ] && [ "$(cnt $LOGF baseline-updated)" = 1 ] && [ ! -f "$PENDF" ] \
+  && ok "L4b 차단 시 block 과 warn 이 함께 본 로그에" || bad "L4b block+warn" "secret 1 / baseline 1" "secret $(cnt $LOGF '"secret"') / baseline $(cnt $LOGF baseline-updated)"
 # 훅이 없는 저장소: 오래된 pending 은 다음 게이트 실행이 승격한다
 fresh_repo; rm -f .git/hooks/pre-commit
 OLD="$(python3 -c 'import time;print(time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime(time.time()-700)))')"
@@ -978,6 +984,26 @@ PY
 done
 wait
 [ "$(cnt $LOGF 'boundary:c')" = 12 ] && ok "L6 동시 flush 12개 → 12줄 (유실 없음)" || bad "L6 동시 flush" "12" "$(cnt $LOGF 'boundary:c')"
+# L6 는 O_APPEND 의 원자성만으로도 통과한다. 잠금이 실제로 지키는 것은 pending 의 읽기-수정-쓰기와
+# 승격이므로, 잠금이 없으면 실패하는 형태로 따로 잰다: 여러 프로세스가 동시에 pending 에 쓰고
+# (재작성 경쟁 → 유실), 동시에 같은 오래된 행을 승격한다(→ 중복).
+fresh_repo
+GP="$PWD/.claude/guild/gates/scripts/gate_precommit.py"
+printf '{"v": 2, "ts": "%s", "mode": "pre-tool-use", "rule": "boundary:old", "action": "warn", "file": "o"}\n' "$OLD" > "$PENDF"
+for i in $(seq 1 24); do
+  python3 - "$GP" "$PWD" "$i" <<'PY' &
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1]); g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+for k in range(4):
+    g._FIRINGS[:] = []
+    g.record_firing("boundary:p%s_%d" % (sys.argv[3], k), "warn", "f"); g.flush_firings(sys.argv[2], "pre-tool-use", pending=True)
+PY
+done
+wait
+[ "$(cnt $PENDF 'boundary:p')" = 96 ] && ok "L7 동시 pending 쓰기 96건 → 96줄 (재작성 경쟁 유실 없음)" || bad "L7 동시 pending" "96" "$(cnt $PENDF 'boundary:p')"
+# (L8 은 잠금을 빼도 대개 통과한다 — 프로세스 시작이 엇갈려 같은 행을 동시에 읽는 창이 좁다. 잠금 회귀는
+#  L7 이 잡는다(잠금 제거 변이에서 96 → 93 실측). L8 은 정상 경로의 중복 승격 부재만 확인한다.)
+[ "$(cnt $LOGF 'boundary:old')" = 1 ] && ok "L8 동시 승격 → 오래된 행 정확히 1번" || bad "L8 중복 승격" "1" "$(cnt $LOGF 'boundary:old')"
 
 note ""
 note "== M. --firing-log (evolve / audit 의 읽기 경로) =="
@@ -1023,6 +1049,34 @@ printf '{"v": 2, "ts": "%s", "mode": "pre-tool-use", "rule": "boundary:g", "acti
 OUT="$($G --firing-log --out "$OUTF" </dev/null 2>&1)"
 case "$OUT" in "ROWS 1 $OUTF") ok "M12 10분 넘은 pending 은 데이터로 포함 (NOLOG 아님)" ;; *) bad "M12 old pending" "ROWS 1 $OUTF" "$OUT" ;; esac
 [ "$(cnt $PENDF boundary)" = 2 ] && ok "M13 --firing-log 는 읽기 전용 (pending 그대로)" || bad "M13 읽기 전용" "2" "$(cnt $PENDF boundary)"
+# 읽을 수 없는 로그 → 판정 불가(2). "발동 0건" 으로 읽히면 audit 이 stale 로 보고한다.
+printf '{"v": 2, "ts": "2026-10-01T00:00:00Z", "mode": "git-hook", "rule": "boundary:a", "action": "warn", "file": "x"}\n' > "$LOGF"
+if [ "$(id -u)" != 0 ]; then
+  chmod 000 "$LOGF"
+  $G --firing-log --out "$OUTF" </dev/null >/dev/null 2>&1; RC=$?
+  chmod 644 "$LOGF"
+  [ "$RC" = 2 ] && ok "M14 읽을 수 없는 로그 → 2" || bad "M14 읽기 실패" "2" "$RC"
+else
+  ok "M14 읽을 수 없는 로그 → 2 (SKIP: root 는 권한으로 막을 수 없음)"
+fi
+# 최상위 크래시 분기: 질문하는 모드의 크래시는 0(=clean/없음) 이 아니라 2. --out 의 부모가 파일이면
+# makedirs 가 예외를 던져 그 분기를 실제로 지난다.
+printf 'x' > "$WORK/notadir"
+$G --firing-log --out "$WORK/notadir/o.jsonl" </dev/null >/dev/null 2>&1; RC=$?
+[ "$RC" = 2 ] && ok "M15 스캔/로그 모드의 내부 크래시 → 2 (fail-open 0 아님)" || bad "M15 크래시 분기" "2" "$RC"
+rm -f "$PENDF"
+# 큰 로그에서도 짝 짓기가 빠르다 (이중 루프는 짝 없는 5000행에서 ~50초 — Bash 기본 타임아웃 근처)
+python3 - "$LOGF" <<'PY'
+import sys, time
+with open(sys.argv[1], "w") as fh:
+    for i in range(2500):
+        t = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(1700000000 + i * 1000))
+        fh.write('{"ts": "%s", "mode": "pre-tool-use", "rule": "boundary:r%d", "action": "warn", "file": "f"}\n' % (t, i))
+        fh.write('{"ts": "%s", "mode": "git-hook", "rule": "boundary:h%d", "action": "warn", "file": "f"}\n' % (t, i))
+PY
+S0=$(date +%s); $G --firing-log --out "$OUTF" </dev/null >/dev/null 2>&1; S1=$(date +%s)
+[ $((S1 - S0)) -le 10 ] && [ "$(wc -l < "$OUTF" | tr -d ' ')" = 5000 ] && ok "M16 짝 없는 5000행 → 10초 이내, 5000행 보존 ($((S1 - S0))s)" \
+  || bad "M16 성능" "≤10s / 5000" "$((S1 - S0))s / $(wc -l < "$OUTF")"
 
 note ""
 note "결과: PASS=$PASS FAIL=$FAIL"
@@ -1030,7 +1084,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=159
+GATE_MIN_CHECKS=165
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

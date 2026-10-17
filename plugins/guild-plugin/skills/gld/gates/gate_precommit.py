@@ -177,13 +177,19 @@ class _FiringsLock:
         return False
 
 
-def _read_rows(p):
-    """Parse a JSONL firing file → list of dicts. Missing file → []. Bad lines are skipped."""
+def _read_rows(p, strict=False):
+    """Parse a JSONL firing file → list of dicts. Missing file → []. Bad lines are skipped.
+    strict=True: a file that exists but cannot be read raises instead of reading as empty — a
+    reader must not turn "could not read the log" into "no firings"."""
     rows = []
     try:
         with open(p, "rb") as fh:
             raw = fh.read()
+    except FileNotFoundError:
+        return rows
     except Exception:
+        if strict:
+            raise
         return rows
     for ln in raw.decode("utf-8", "surrogateescape").splitlines():
         try:
@@ -1828,26 +1834,29 @@ def main_detect_manager(args):
 # The rows go to a file, not stdout: the log holds up to FIRINGS_MAX lines, and a reader working
 # from a truncated tool-output preview would under-count without noticing.
 def _dedupe_legacy(rows):
-    used = set()
-    hooks = [(i, r) for i, r in enumerate(rows) if r.get("mode") == "git-hook"]
-    drop = set()
+    # Bucket by (rule, file, action) and walk each bucket in time order with one pointer into its
+    # git-hook rows — O(n log n). A nested scan re-parsing timestamps took ~50 s on a full
+    # 5000-row log of unpaired rows, close to the Bash tool's default timeout.
+    key = lambda r: (r.get("rule"), r.get("file"), r.get("action"))
+    pre, hooks = {}, {}
     for i, r in enumerate(rows):
-        if r.get("v") or r.get("mode") != "pre-tool-use":
-            continue
         t = _iso_epoch(r.get("ts", ""))
         if t is None:
             continue
-        for j, h in hooks:
-            if j in used:
-                continue
-            th = _iso_epoch(h.get("ts", ""))
-            if th is None or not (0 <= th - t <= PENDING_PROMOTE_S):
-                continue
-            if (h.get("rule"), h.get("file"), h.get("action")) == \
-                    (r.get("rule"), r.get("file"), r.get("action")):
-                used.add(j)
+        if r.get("mode") == "git-hook":
+            hooks.setdefault(key(r), []).append((t, i))
+        elif r.get("mode") == "pre-tool-use" and not r.get("v"):
+            pre.setdefault(key(r), []).append((t, i))
+    drop = set()
+    for k, ps in pre.items():
+        hs = sorted(hooks.get(k, []))
+        j = 0
+        for t, i in sorted(ps):
+            while j < len(hs) and hs[j][0] < t:
+                j += 1          # a hook row before this PreToolUse row cannot be its pair
+            if j < len(hs) and hs[j][0] - t <= PENDING_PROMOTE_S:
                 drop.add(i)
-                break
+                j += 1          # 1:1 — each hook row pairs at most one
     return [r for i, r in enumerate(rows) if i not in drop]
 
 
@@ -1866,8 +1875,13 @@ def main_firing_log(args):
     pp = os.path.join(root, PENDING_REL)
     import time
     now = time.time()
-    rows = _read_rows(p)
-    old_pending = [r for r in _read_rows(pp)
+    try:
+        rows = _read_rows(p, strict=True)
+        pending_rows = _read_rows(pp, strict=True)
+    except Exception as e:
+        sys.stderr.write(f"guild gate: --firing-log: cannot read the firing log ({e}) — NOT judged\n")
+        return EXIT_NOT_JUDGED
+    old_pending = [r for r in pending_rows
                    if (_iso_epoch(r.get("ts", "")) or now) <= now - PENDING_PROMOTE_S]
     nolog = not os.path.exists(p) and not old_pending
     rows = _dedupe_legacy(rows) + old_pending
