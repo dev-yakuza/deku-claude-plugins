@@ -3153,6 +3153,12 @@ hasfx "질문에 정체 접미사" "$HOMD" ' — same failure as loop-back <n>; 
 hasfx "test: 질문이 접미사를 참조" "$GLD/commands/test.md" 'with the cap / stagnation suffix'
 hasfx "qa: 질문이 접미사를 참조" "$GLD/commands/qa.md" 'with the cap / stagnation suffix'
 hasfx "Asking first 는 리더에게도" "$HOMD" '**Asking first (attended — test, qa, and the leader alike)**'
+hasfx "리더 변형: output 댓글·NEEDS_HUMAN 없음" "$HOMD" 'and **never returns `NEEDS_HUMAN`**'
+hasfx "리더 변형: '아니오' 처리" "$HOMD" 'On "no" it does not loop back: it continues the'
+hasfx "step 6: 현재 stage 라벨을 제거 (리더 루프백)" "$HOMD" 'the stage label the Issue carries now — guild:test or guild:qa, as just read'
+hasfx "정체 캡처 --stage (리더 루프백)" "$HOMD" 'with `--stage` = the stage that'
+hasfx "needs-human 제거 지점은 decided: human 블록" "$HOMD" 'one whose block carries `decided: human`'
+
 hasfx "dev: attended 리더 루프백은 사람에게 묻는다" "$GLD/commands/dev.md" 'its *Asking first*: you put the readings to the human'
 hasfx "override 는 기록에서 재계산" "$HOMD" 'never from memory of what the question said'
 hasfx "_signals: 질문만 한 실행은 stagnation 을 빚지지 않음" "$GLD/commands/atoms/_signals.md" 'owes its `verify-gap` /'
@@ -3182,7 +3188,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=969   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=974   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

@@ -139,7 +139,7 @@ A human moving labels by hand (`/gld rollback stage`) is neither: no block, no c
 `dev.md` Phase 2c's "targeted loop-back to the responsible child" is out of scope too — it re-opens a
 `done` child and always goes through a human (`NEEDS_HUMAN`) first.
 
-**`guild:needs-human` removal.** This label is *additive* to whatever `guild:<stage>` label the Issue already carries (Section H) — a paused Issue keeps its stage label and gains this one on top. It is added by the unattended-mode pause path; it must also be **removed** somewhere, or a resolved pause stays permanently mis-reported to `batch`/`monitoring`/`status`, which all poll it as a first-class state. There are exactly two removal points: **whenever the main session performs ANY successful forward-progress label transition on an Issue that currently carries `guild:needs-human`**, and **a loop-back transition the human decided** (test/qa re-run with the human's "loop back" answer — the answer is the resolution). The forward case: — an `OK ADVANCE`/`OK SPLIT`/`OK DONE` after the human resolved the pause and a re-run/`resume` made real progress, whether the transition is between two spine stages (`guild:<stage>` → `guild:<next-stage>`) or into/out of the `guild:children` orchestration state (which Section A above already notes is *not itself* a stage, but still counts as forward progress) — remove `guild:needs-human` as part of that same transition. The advance itself is the evidence the pause was resolved:
+**`guild:needs-human` removal.** This label is *additive* to whatever `guild:<stage>` label the Issue already carries (Section H) — a paused Issue keeps its stage label and gains this one on top. It is added by the unattended-mode pause path; it must also be **removed** somewhere, or a resolved pause stays permanently mis-reported to `batch`/`monitoring`/`status`, which all poll it as a first-class state. There are exactly two removal points: **whenever the main session performs ANY successful forward-progress label transition on an Issue that currently carries `guild:needs-human`**, and **a loop-back transition the human decided** — one whose block carries `decided: human` (Section B, loop-back procedure step 6), whether test, qa or the leader asked, and including its *Interrupted loop-back* completion; the human's answer is the resolution. The forward case: — an `OK ADVANCE`/`OK SPLIT`/`OK DONE` after the human resolved the pause and a re-run/`resume` made real progress, whether the transition is between two spine stages (`guild:<stage>` → `guild:<next-stage>`) or into/out of the `guild:children` orchestration state (which Section A above already notes is *not itself* a stage, but still counts as forward progress) — remove `guild:needs-human` as part of that same transition. The advance itself is the evidence the pause was resolved:
 ```bash
 gh issue edit <n> --remove-label "guild:execute" --add-label "guild:test" --remove-label "guild:needs-human"
 ```
@@ -205,7 +205,9 @@ for the leader the gap it saw (AC ids / files / defects).
    is wholly contained in the `signature` of the latest active block **with the same `from`** →
    stagnant (an empty signature falls back to the "same root cause" reading of the two `reason`s).
    Stagnant → `guild:needs-human` + comment + `OK PAUSE: needs-human — stagnant loop-back — <reason>`
-   and the `--kind stagnation` capture `_stagnation.md` describes. Do not loop back.
+   and the `--kind stagnation` capture `_stagnation.md` describes, with `--stage` = the stage that
+   judged the work (`test` / `qa`; for `from: leader`, the stage label the Issue carries now). Do not
+   loop back.
 4. **Timestamp**: `python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --now` (its own call).
 5. **Append the block** (write rule above):
    ```
@@ -220,7 +222,7 @@ for the leader the gap it saw (AC ids / files / defects).
    said yes past the cap or a stagnation warning. Re-read the comment and confirm the block is
    there; a failed write → do not move the label (Section F), return
    `FAIL: loop-back record not written`.
-6. **Move the label**: `gh issue edit <N> --remove-label "guild:<test|qa>" --add-label "guild:execute"`,
+6. **Move the label**: `gh issue edit <N> --remove-label "<the stage label the Issue carries now — guild:test or guild:qa, as just read>" --add-label "guild:execute"` (for `from: leader` this is whichever stage the run had just advanced into, not something `from` tells you),
    adding `--remove-label "guild:needs-human"` when the block carries `decided: human` and the label
    is present. Re-read the labels to confirm (Section F).
 7. Return `OK LOOPBACK: execute`.
@@ -230,8 +232,16 @@ exhausted cap must stop it.
 
 **Asking first (attended — test, qa, and the leader alike)**: none of them loops back on its own
 judgment when a human is present — the human decides, with the guards' readings in front of them.
-The leader (`dev.md` Phase 2's between-stage judgment) asks with `AskUserQuestion` itself, then runs
-steps 1, 4–7 on a "loop back" exactly as the wrapper re-run below does. Run steps 1–3 **as readings only**
+**The leader's variant** (`dev.md` Phase 2's between-stage judgment) is different in three ways, and
+the test/qa paragraph below does not apply to it: the leader writes **nothing** into any stage's
+output comment and **never returns `NEEDS_HUMAN`** (that would send `dev.md` back into the test or qa
+wrapper, which would then record the loop-back as its own). It runs steps 1–3 as readings, puts
+the gap, the readings and the same suffixes to the human with `AskUserQuestion` in that same turn,
+and on "loop back" runs steps 1, 4–7 with its own `reason` / `signature` (`decided: human`, plus
+`override: human` per the recomputation below). On "no" it does not loop back: it continues the
+spine from where it stands, and says in the stage report that the gap it saw was left as is.
+
+**test / qa:** Run steps 1–3 **as readings only**
 (no label, no comment, no capture): the active count, whether the cap is reached, whether this
 signature is stagnant. Write `loopback-reason: <one line>` and `loopback-signature: <set>` into the
 stage's own output comment (`guild:test:output` / `guild:qa:output`), then return
@@ -371,7 +381,7 @@ A stage wrapper (analyze/design/implement/test) returns one line to the main ses
 | `OK ADVANCE: <next-stage>` | stage complete, advance | transition label to `guild:<next-stage>` |
 | `OK SPLIT: <N> children` | design split the Issue into `N` child Issues | transition the **parent** to `guild:children` and enter child orchestration (dev Phase 2b — Section I) |
 | `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done` — **Guild's work is complete; the PR is open awaiting human review + merge**. Do **not** close the Issue: the PR body carries `Closes #<N>`, so **GitHub** closes it when the human merges — INV1 (nothing merges unattended; the human is the external reviewer of record). No Guild command closes a **stage** Issue deliberately. ⚠ **One exception, and it is not a stage Issue**: `/gld sprint retro` closes the sprint **tracking Issue** (`guild:sprint`). That Issue never runs the spine and has no PR of its own, so nothing else can ever close it — leaving it open would make every later `sprint plan` report an active sprint that finished weeks ago. The rule above is about work whose completion GitHub records through a merge; a container's completion is recorded by the retro that closed it. |
-| `OK LOOPBACK: execute` | test or qa sent the work back (Section A, *Backward transitions*) — the wrapper has already appended the loop-back block and moved the label to `guild:execute` | run the execute variant again (re-read the `type:` label first), then continue from test. Not a forward transition: it never removes `guild:needs-human` except when the human decided the loop-back |
+| `OK LOOPBACK: execute` | test or qa sent the work back (the leader's own loop-back returns no token — it records it and runs execute directly) (Section A, *Backward transitions*) — the wrapper has already appended the loop-back block and moved the label to `guild:execute` | run the execute variant again (re-read the `type:` label first), then continue from test. Not a forward transition: it never removes `guild:needs-human` except when the human decided the loop-back |
 | `OK PAUSE: <one-line>` | leader/human chose to stop here | leave label as-is; report |
 | `NEEDS_HUMAN: <one-line>` | a discuss/verify gate needs a human decision | main session prompts the human (`AskUserQuestion`), then resumes |
 | `NEEDS_CONTEXT: <one-line>` | a **required upstream artifact is missing** — design without analyze output, execute without a design skeleton | do **not** advance and do **not** treat as a hard error: the fix is to run the missing stage. Report which artifact is absent and re-enter the spine at the stage that produces it; if that stage's label is already set (so it "ran" but left nothing), surface it as `NEEDS_HUMAN` — a silent no-op upstream is a state inconsistency a human should see. |
