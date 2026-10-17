@@ -638,7 +638,7 @@ class LintTests(SocialCase):
         self.assertTrue(any("--allow-floor disclosure_waiver" in e for e in out["errors"]))
         out = self.lint("add", guide_text(waived), t, "--allow-floor", "disclosure_waiver")
         self.assertTrue(out["ok"], out)
-        self.assertEqual(out["trailers"], ["Herald-Floor: disclosure_waiver"])
+        self.assertEqual(out["trailers"], ["Herald-Floor: y::disclosure_waiver"])
 
     def test_format_errors(self):
         t = "docs/editorial/channels/y.md"
@@ -680,7 +680,7 @@ class LintTests(SocialCase):
         h = social._rule_hash({"pattern": "scam"})
         out = self.lint("edit", guide_text(stronger), t, "--strengthen", "forbidden:%s" % h)
         self.assertTrue(out["ok"], out)
-        self.assertEqual(out["trailers"], ["Herald-Strengthen: forbidden:%s" % h])
+        self.assertEqual(out["trailers"], ["Herald-Strengthen: x::forbidden:%s" % h])
         out = self.lint("edit", guide_text(guide_head(forbidden=base["forbidden"]), house="- shorter posts\n"), t)
         self.assertTrue(out["ok"], out)  # house rules are free
 

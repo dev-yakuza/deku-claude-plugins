@@ -296,9 +296,6 @@ class StatusTests(SocialCase):
             self.assertIn("interactive only", p.stderr)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class Round1Tests(SocialCase):
     def hrd_commit(self, msg, *paths, trailers=(), check=True):
@@ -336,7 +333,7 @@ class Round1Tests(SocialCase):
         out = self.hrd("social", "lint", "--mode", "rollback", "--target", t, check=False)[0]
         self.assertFalse(out["ok"])
         out = self.hrd("social", "lint", "--mode", "rollback", "--target", t, "--strengthen", "forbidden:%s" % h)[0]
-        self.assertEqual(out["trailers"], ["Herald-Strengthen: forbidden:%s" % h])
+        self.assertEqual(out["trailers"], ["Herald-Strengthen: x::forbidden:%s" % h])
         sh(self.root, "git", "reset", "-q")
         self.hrd_commit("chore(herald): rollback x", t, trailers=["Herald-Strengthen: forbidden:%s — restore" % h])
         # a persona deletion by revert needs `persona`
@@ -424,3 +421,62 @@ class Round1Tests(SocialCase):
         keys = {(d["kind"], d["where"]) for d in h["disclosure"]}
         self.assertEqual(keys, {("ad", "post"), ("operator", "post"), ("ad", "setting")})
         self.assertEqual([c["token"] for c in out["floor_changes"]], ["disclosure:operator/post"])
+
+
+class Round2Tests(SocialCase):
+    def test_final_daily_turned_ad_needs_the_setting(self):
+        self.write("docs/editorial/channels/x.md", guide_text(guide_head(disclosure=[
+            {"kind": "ad", "required": True, "text": "Paid partnership", "where": "setting"}])))
+        self.commit("setting")
+        rel = self.daily("Rainy day.")
+        out = self.hrd("social", "prepare", "--sns", "x", "--n", "1")[0]  # noqa: F841 — another run
+        self.hrd("social", "close", "--run", social.drafted_record(self.root, rel)["run"], "--approved", rel)
+        path = social.memory_rel("final", "x", os.path.basename(rel))
+        self.write(path, "Rainy day. Safie keeps my footage safe.")
+        res = self.hrd("social", "final", "--draft", rel, "--final-file", path)[0]
+        self.assertIn("setting:ad", res["fix_live_post"])
+        self.assertEqual(social.latest_status(self.root)[rel]["profile"], "daily+service")
+
+    def test_malformed_head_on_base_can_be_repaired(self):
+        t = "docs/editorial/channels/x.md"
+        self.write(t, guide_text(guide_head(forbidden=5, house="x")))
+        self.commit("broken by hand")
+        p = os.path.join(self.tmp, "p.md")
+        with open(p, "w") as f:
+            f.write(guide_text(guide_head()))
+        out = self.hrd("social", "lint", "--mode", "edit", "--file", p, "--target", t, check=False)[0]
+        self.assertIsNotNone(out)  # no traceback
+        self.write(t, guide_text(guide_head()))
+        self.hrd("commit", "--cmd", "harness", "--kind", "social", "-m", "chore(herald): social edit x", t)
+
+    def test_tokens_name_their_file(self):
+        y = "docs/editorial/channels/y.md"
+        two = [{"kind": "ad", "required": True, "text": "#PR", "where": "post"}]
+        for path, name in (("docs/editorial/channels/x.md", "x"), (y, "y")):
+            self.write(path, guide_text(guide_head(name, disclosure=two)))
+        self.commit("two guides")
+        for path, name in (("docs/editorial/channels/x.md", "x"), (y, "y")):
+            self.write(path, guide_text(guide_head(name, disclosure=[dict(two[0], text="#ad")])))
+        args = ["commit", "--cmd", "harness", "--kind", "social", "-m", "m"]
+        _, p = self.hrd(*args, "--trailer", "Herald-Floor: disclosure:ad/post — x only",
+                        "docs/editorial/channels/x.md", y, check=False)
+        self.assertIn("social guides' floor", p.stderr)
+        _, p = self.hrd(*args, "--trailer", "Herald-Floor: x::disclosure:ad/post — x only",
+                        "docs/editorial/channels/x.md", y, check=False)
+        self.assertIn("channels/y.md", p.stderr)
+        self.hrd(*args, "--trailer", "Herald-Floor: x::disclosure:ad/post — ok", "--trailer",
+                 "Herald-Floor: y::disclosure:ad/post — ok", "docs/editorial/channels/x.md", y)
+
+    def test_final_reads_the_guide_on_base(self):
+        rel = self.daily("Rainy day.")
+        self.hrd("social", "close", "--run", social.drafted_record(self.root, rel)["run"], "--approved", rel)
+        first = sh(self.root, "git", "rev-list", "--max-parents=0", "HEAD").strip()
+        sh(self.root, "git", "switch", "-q", "-c", "old", first)  # a branch from before social existed
+        path = social.memory_rel("final", "x", os.path.basename(rel))
+        self.write(path, "Rainy day. see https://x.test/")
+        res = self.hrd("social", "final", "--draft", rel, "--final-file", path)[0]
+        self.assertIn("daily-url", res["fix_live_post"])
+
+
+if __name__ == "__main__":
+    unittest.main()

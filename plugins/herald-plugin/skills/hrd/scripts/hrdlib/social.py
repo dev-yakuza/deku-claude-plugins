@@ -561,16 +561,16 @@ def resolve(root, name, rev="HEAD"):
     raise HeraldError("no channel guide for %s — run `/hrd social --add %s` first" % (n, n))
 
 
-def _load_committed(root, cfg, sns):
-    """(guide header, persona header) at HEAD, refusing invalid ones (guide-invalid)."""
-    gs = guides(root)
+def _load_committed(root, cfg, sns, rev="HEAD"):
+    """(guide header, persona header) at `rev`, refusing invalid ones (guide-invalid)."""
+    gs = guides(root, rev)
     if sns not in gs:
         raise HeraldError("guide-invalid: no channel guide %s on base (removed?) — `/hrd social --add %s`" % (sns, sns))
     rel, h, err = gs[sns]
     others = {k: v[1] for k, v in gs.items()}
     if err:
         raise HeraldError("guide-invalid: %s: %s — fix it with `/hrd social --edit %s`" % (rel, err, sns))
-    ptext = show(root, "HEAD", PERSONA)
+    ptext = show(root, rev, PERSONA)
     if ptext is None:
         raise HeraldError("no %s on base — run `/hrd social --setup` first" % PERSONA)
     p, perr = parse_persona(ptext)
@@ -589,7 +589,8 @@ def effective(h):
     """Research fields with the house overrides (house wins; only HOUSE_KEYS)."""
     eff = {"max_chars": h.get("max_chars"), "count": h.get("count", "chars"), "url_len": h.get("url_len", 23),
            "hashtags": h.get("hashtags", [0, 30]), "link": h.get("link", "any")}
-    for k, v in (h.get("house") or {}).items():
+    house = h.get("house") if isinstance(h.get("house"), dict) else {}
+    for k, v in house.items():
         if k in HOUSE_KEYS:
             eff[k] = v
     return eff
@@ -839,10 +840,10 @@ def parse_draft(text):
     return hdr, m.group(2), None
 
 
-def _gate_forbidden(root, cfg, lang):
+def _gate_forbidden(root, cfg, lang, rev="HEAD"):
     from .validate import lang_rules, load_rules
 
-    rules = load_rules(root, rev="HEAD")  # raises on an unreadable gate-rules.json (fail closed)
+    rules = load_rules(root, rev=rev)  # raises on an unreadable gate-rules.json (fail closed)
     known = promo_lang(cfg, lang) or lang
     _, forbidden = lang_rules(rules, cfg, known)
     return [r for r in forbidden if isinstance(r, dict) and r.get("scope", "all") != "article"]
@@ -906,7 +907,7 @@ def _gate_failure_signals(root, rec, rel, failed):
     return out
 
 
-def evaluate(root, cfg, rec, text, sources=True, basis=True):
+def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD"):
     """The rules on one post text against its `drafted` basis. `sources=False` skips the quote
     checks (a final text checked off base). Returns {profile, failed, warnings, settings}."""
     failed, warnings = [], []
@@ -925,7 +926,7 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True):
                 fail("header-mismatch", "header %s=%r but prepare recorded %r" % (k, hdr.get(k), rec.get(k)))
     sns = rec["sns"]
     try:
-        h, persona = _load_committed(root, cfg, sns)
+        h, persona = _load_committed(root, cfg, sns, rev)
     except HeraldError as e:
         fail("guide-invalid", str(e))
         return {"profile": profile, "failed": failed, "warnings": warnings, "settings": []}
@@ -1006,7 +1007,7 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True):
         _check_sources(root, cfg, rec, hdr, profile, lang, fail)
     # forbidden
     try:
-        gate = _gate_forbidden(root, cfg, lang)
+        gate = _gate_forbidden(root, cfg, lang, rev)
     except HeraldError as e:
         gate = []
         fail("forbidden-invalid", str(e))
@@ -1213,7 +1214,8 @@ def _target_kind(target):
 
 
 def _forbidden_map(rules):
-    return {_rule_hash(r): r for r in rules or [] if isinstance(r, dict) and r.get("pattern")}
+    return {_rule_hash(r): r for r in (rules if isinstance(rules, list) else [])
+            if isinstance(r, dict) and isinstance(r.get("pattern"), str) and r["pattern"]}
 
 
 def _floor_forbidden(old, new, need, strong):
@@ -1301,7 +1303,16 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
         raise HeraldError("the persona files are linted with --mode %s" % "|".join(PERSONA_MODES))
     if kind in ("persona", "notes") and mode == "setup" and head is not None:
         raise HeraldError("%s already exists — use --mode persona (`/hrd social --persona`)" % target)
-    return lint_text(root, cfg, mode, text, target, head, allow_floor, strengthen)
+    return _safe_lint(root, cfg, mode, text, target, head, allow_floor, strengthen)
+
+
+def _safe_lint(root, cfg, mode, text, target, head, allow_floor, strengthen):
+    try:
+        return lint_text(root, cfg, mode, text, target, head, allow_floor, strengthen)
+    except (TypeError, AttributeError, ValueError, KeyError) as e:  # a value of the wrong type somewhere
+        return {"ok": False, "target": target, "mode": mode, "warnings": [], "floor": [], "strengthen": [],
+                "trailers": [], "errors": ["a head block value has the wrong type (%s: %s) — fix its format"
+                                           % (type(e).__name__, e)]}
 
 
 def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()):
@@ -1311,13 +1322,21 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
     never a confirmation), `commit` (format and floor only, tokens from the commit's trailers)."""
     kind = _target_kind(target)
     errors, warnings, floor, strong_list = [], [], [], []
-    allow, strengthen_ok = set(allow_floor or ()), set(strengthen or ())
+    key = file_key(target)
+    # tokens name their file (`x::disclosure:ad/post`); a bare token is this file's
+    allow = {t.split("::", 1)[1] if t.startswith(key + "::") else t for t in allow_floor or () if "::" not in t
+             or t.startswith(key + "::")}
+    strengthen_ok = {t.split("::", 1)[1] if t.startswith(key + "::") else t for t in strengthen or () if "::" not in t
+                     or t.startswith(key + "::")}
     used = set()
+    where, shallow = "on base", False
     if head is None and mode in ("add", "setup", "commit"):
         prev, sha = removed_version(root, target)
         if prev is not None:  # removed and added again: the floor it had still counts (no laundering)
             warnings.append("%s was removed in %s — compared with that version" % (target, sha[:10]))
-            head = prev
+            head, where = prev, "removed in %s" % sha[:10]
+        elif mode != "commit" and git(root, "rev-parse", "--is-shallow-repository", check=False).strip() == "true":
+            shallow = True
 
     def need(token, what):
         if mode == "evolve":
@@ -1337,6 +1356,8 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
         else:
             errors.append("%s — only a human confirms a rule (/hrd social --edit or --persona)" % what)
 
+    if shallow:
+        need("history", "this clone is shallow — a removed version of %s cannot be checked" % target)
     if kind == "channel":
         name = os.path.basename(target)[:-3]
         h, err = parse_channel(text)
@@ -1364,8 +1385,8 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
                 errors.append("the researched region markers (%s … %s) must appear once each" % (RESEARCHED_START, RESEARCHED_END))
             old, _ = parse_channel(head) if head is not None else (None, None)
             if head is not None and old is None:
-                warnings.append("the guide on base has an unparsable head block — compared as a new file")
-                need("head", "the floor cannot be compared with the broken guide on base")
+                warnings.append("the guide %s has an unparsable head block — compared as a new file" % where)
+                need("head", "the floor cannot be compared with the broken guide %s" % where)
             if old is None:
                 for k, r in _forbidden_map(h.get("forbidden")).items():
                     if r.get("status") == "confirmed":
@@ -1422,8 +1443,8 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
             warnings += w
             old = parse_persona(head)[0] if head is not None else None
             if head is not None and old is None:
-                warnings.append("the persona on base has an unparsable head block — compared as a new file")
-                need("head", "the floor cannot be compared with the broken persona on base")
+                warnings.append("the persona %s has an unparsable head block — compared as a new file" % where)
+                need("head", "the floor cannot be compared with the broken persona %s" % where)
             if old is None:
                 for k, r in _forbidden_map(p.get("forbidden")).items():
                     if r.get("status") == "confirmed":
@@ -1438,7 +1459,8 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
 
                 def terms(x):
                     out = {}
-                    for t in (x or {}).get("service_terms") or []:
+                    items = (x or {}).get("service_terms")
+                    for t in items if isinstance(items, list) else []:
                         if isinstance(t, str):
                             out[fold(t)] = set()
                         elif isinstance(t, dict) and isinstance(t.get("term"), str):
@@ -1464,12 +1486,19 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
     unused = sorted((allow | strengthen_ok) - used)
     if unused:
         warnings.append("tokens not needed: %s" % ", ".join(unused))
-    trailers = ["Herald-Floor: %s" % f["token"] for f in floor] + ["Herald-Strengthen: %s" % s["token"] for s in strong_list]
+    trailers = ["Herald-Floor: %s::%s" % (key, f["token"]) for f in floor] + \
+        ["Herald-Strengthen: %s::%s" % (key, s["token"]) for s in strong_list]
     return {"ok": not errors, "target": target, "mode": mode, "errors": errors, "warnings": warnings,
             "floor": floor, "strengthen": strong_list, "trailers": trailers}
 
 
 # --- commit-time lint (03-social.md §4 commits.py) -----------------------------------------------
+
+def file_key(path):
+    """The file a floor token belongs to: the channel name, `persona` or `persona-notes`."""
+    kind = _target_kind(path)
+    return os.path.basename(path)[:-3] if kind == "channel" else ("persona" if kind == "persona" else "persona-notes")
+
 
 def social_path(path):
     try:
@@ -1499,16 +1528,18 @@ def commit_problems(root, cfg, staged, trailers):
     human's floor decisions read from the commit's trailers — whichever command commits them.
     Removing a whole channel guide is not a floor change; removing the persona is (`persona`)."""
     allow, strong = trailer_tokens(trailers)
+    mine = [p for p in staged if social_path(p)]
+    if len(mine) > 1:  # several files: a decision must name its file (`<file>::<token>`)
+        allow = {t for t in allow if "::" in t}
+        strong = {t for t in strong if "::" in t}
     out = []
-    for path in staged:
-        if not social_path(path):
-            continue
+    for path in mine:
         text = show(root, "", path)  # the index
         head = show(root, "HEAD", path)
         kind = _target_kind(path)
         if text is None:
-            if kind == "persona" and head is not None and "persona" not in allow:
-                out.append("%s: removing the persona drops its floor — needs Herald-Floor: persona" % path)
+            if kind == "persona" and head is not None and not {"persona", "persona::persona"} & allow:
+                out.append("%s: removing the persona drops its floor — needs Herald-Floor: persona::persona" % path)
             continue
         res = lint_text(root, cfg, "commit", text, path, head, allow, strong)
         out += ["%s: %s" % (path, e) for e in res["errors"]]
@@ -1523,14 +1554,14 @@ def rollback_lint(root, cfg, target, allow_floor=(), strengthen=()):
     head = show(root, "HEAD", target)
     full = os.path.join(root, target)
     if not os.path.exists(full):
-        need = kind == "persona" and head is not None and "persona" not in set(allow_floor or ())
+        need = kind == "persona" and head is not None and not {"persona", "persona::persona"} & set(allow_floor or ())
         errors = ["floor: removing the persona drops its floor — needs the human's approval (--allow-floor persona)"] \
             if need else []
-        trailers = ["Herald-Floor: persona"] if kind == "persona" and head is not None and not need else []
+        trailers = ["Herald-Floor: persona::persona"] if kind == "persona" and head is not None and not need else []
         return {"ok": not errors, "target": target, "mode": "rollback", "errors": errors, "warnings": [],
                 "floor": [], "strengthen": [], "trailers": trailers, "deleted": True}
     text = open(full, encoding="utf-8-sig").read()
-    out = lint_text(root, cfg, "commit", text, target, head, allow_floor, strengthen)
+    out = _safe_lint(root, cfg, "commit", text, target, head, allow_floor, strengthen)
     out["mode"] = "rollback"
     return out
 
@@ -1662,11 +1693,16 @@ def final(root, cfg, draft, final_file):
         head = "---\n%s\n---\n" % "\n".join(
             "%s: %s" % (k, json.dumps(v, ensure_ascii=False) if k == "sources" else (v or ""))
             for k, v in hdr.items())
-        res = evaluate(root, cfg, rec, head + final_text, sources=False, basis=False)
+        res = evaluate(root, cfg, rec, head + final_text, sources=False, basis=False, rev=cfg.base)
         check = {"profile": res["profile"], "failed": res["failed"], "warnings": res["warnings"]}
+        if latest.get("profile") == "daily" and res["profile"] != "daily":
+            # the human made a daily post name the service: an ad now, with settings nobody confirmed
+            check["settings_to_confirm"] = res["settings"]
     hard = [f["id"] for f in check.get("failed", []) if f["id"] in LIVE_POST_RULES]
+    hard += ["setting:%s" % k for k in check.get("settings_to_confirm") or []]
     entry = {"event": "status", "status": "uploaded", "run": rec.get("run"), "sns": rec.get("sns"),
-             "kind": rec.get("kind"), "slug": rec.get("slug"), "draft": rel, "profile": latest.get("profile"),
+             "kind": rec.get("kind"), "slug": rec.get("slug"), "draft": rel,
+             "profile": check.get("profile") or latest.get("profile"),  # what was posted counts in the mix
              "approved_copy": latest.get("approved_copy"), "final": frel, "chars_changed": chars,
              "lines_changed": lines, "check_failed": [f["id"] for f in check.get("failed", [])]}
     _log(root, entry)

@@ -42,7 +42,9 @@ confirmed rule, a weaker disclosure, a removed service term, an added exclusion,
 waiver, a channel language without default checks. Each floor change needs the human's explicit
 yes (`AskUserQuestion`, naming exactly what is lost) before you pass `--allow-floor <token>`; a
 rule the human confirms needs `--strengthen <token>`. `lint` prints the trailers to commit with
-(`trailers`); add the human's reason in English: `--trailer "Herald-Floor: <token> — <reason>"`.
+(`trailers`, each naming its file: `<file>::<token>`); add the human's reason in English:
+`--trailer "Herald-Floor: <file>::<token> — <reason>"`. A commit of several social files accepts
+only file-named tokens.
 
 After approval: **you** copy each pending file to its repo path with Write or `cp` (the guard
 asks — these are criteria files; `HRD` never writes them), run `lint` again with `--file` = the
@@ -85,7 +87,8 @@ the empathy notes are committed with the repo, which may be public.
    `approved`, `final` or `drafts`; already a guide's name or alias (`HRD social list`) → point
    to `--edit` and stop.
 2. Ask the human the posts' language (default: the source language — `HRD social list`
-   `source_lang`) and other names people type for this channel (aliases). A language that is
+   `source_lang`) and other names people type for this channel (aliases). A channel that existed before (`--remove`d) is compared with its removed version: carry its
+   confirmed rules and disclosure texts over, or each loss needs the human's yes. A language that is
    neither the source nor a translation target makes the channel daily-only; a language other
    than `config.language` means daily posts never mention the service there (`promotion.md` is in
    `config.language`) — say so.

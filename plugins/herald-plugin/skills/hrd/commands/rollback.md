@@ -21,8 +21,11 @@ Non-destructive: always `git revert`, never reset or force push (INV3).
    (`git reset -q`) and commit through `HRD commit --cmd harness --kind harness -m "chore(herald):
    rollback <target>" --trailer "<each line of the lint's trailers> — <reason>"… <the reverted
    paths> .claude/herald/evolution-log.md` with the rollback line added to the log (it checks the
-   floor again against those trailers), and go to step 5. Declined, or `HRD commit` refuses →
-   `git revert --abort` (the tree is back as it was), release, stop.
+   floor again against those trailers; trailers name their file, `<file>::<token>`), and go to
+   step 5. Declined (before the `git reset`) → `git revert --abort`, release, stop. `HRD commit`
+   refuses (after the reset, the revert is no longer in progress) → restore by hand: `git checkout
+   HEAD -- <the reverted paths that exist in HEAD> .claude/herald/evolution-log.md`, delete the
+   reverted paths that do not, confirm `git status` is clean, release, stop.
    Otherwise: `git revert --no-edit <sha>`; then amend the revert's message only via
    `git commit --amend -m "chore(herald): rollback <target>" --trailer "Herald-Record: harness"`
    (allowed: it is the commit just created, not history rewrite of published commits).
