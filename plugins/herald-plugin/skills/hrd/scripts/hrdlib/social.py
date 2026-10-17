@@ -71,11 +71,15 @@ RULE_IDS = ("length", "hashtags", "link-position", "s9a-service-experience", "s9
             "service-mention-not-allowed", "header-mismatch", "guide-invalid", "basis-changed", "check-error")
 
 _URLCH = r"A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%"
-_TLDS = ("com|net|org|edu|gov|io|dev|app|ai|co|jp|kr|cn|tw|hk|sg|us|uk|de|fr|es|it|nl|ru|br|in|au|ca|eu|me|"
-         "ch|at|se|pl|be|nz|fi|dk|no|pt|cz|gr|hu|ro|ie|il|tr|ua|za|mx|ar|cl|pe|kz|lt|lv|ee|sk|si|hr|rs|bg|"
-         "art|top|club|xyz|fun|live|space|cloud|digital|social|media|studio|design|email|asia|tokyo|"
-         "info|biz|xyz|site|blog|tech|page|link|ly|gl|to|tv|so|sh|gg|cc|news|online|shop|store|website|world|"
-         "life|today|jobs|vn|th|id|ph|my|pro|fm|ai|im|ws|bz|la|ac|ag|nu|tk")
+# Top-level labels a bare domain is a link with even without a path. English words (`.today`,
+# `.life`, `.shop` …) and word-like country codes are links only with a path (below), so a missing
+# space after a period ("Long day.So tired", "done.Today") is not a URL; a path makes any
+# alphabetic top-level label one.
+_TLDS = ("com|net|org|edu|gov|io|dev|app|ai|co|jp|kr|cn|tw|hk|sg|uk|de|fr|es|nl|ru|br|au|ca|eu|"
+         "ch|se|pl|nz|fi|dk|pt|cz|gr|hu|ro|ie|il|tr|ua|za|mx|ar|cl|pe|kz|lt|lv|ee|sk|si|hr|rs|bg|ng|ke|eg|"
+         "xyz|info|biz|tokyo|asia|ly|gl|tv|sh|gg|cc|vn|th|ph|fm|ws|bz|ac|ag|nu|moe|wtf|lol")
+# word-like country codes ("Long day.So tired", "gym.It was") are links only with a path
+_TLDS_PATH = "so|it|me|to|in|be|at|no|my|id|us|is|la|am|do|im|go|an|as|by|of|on|or|tk"
 # URLs as platforms link them (twitter-text):
 # - a scheme URL's host is ASCII labels, an IPv4 address or a single label; non-ASCII (IDN)
 #   labels only when a path or port follows, so text right after a host (`https://safie.jpで`)
@@ -86,8 +90,9 @@ _IDNLABEL = r"[^\s/.:<>\"'「」『』（）【】、。！？]+"
 URL_RE = re.compile(
     r"https?://(?:(?:%s\.)+%s(?=[/:?#])|\d{1,3}(?:\.\d{1,3}){3}|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)(?::\d+)?"
     r"(?:[/?#][%s]*)?"
-    r"|(?<![A-Za-z0-9@\-/_])(?<![A-Za-z0-9]\.)(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+(?:%s)"
-    r"(?![A-Za-z0-9-])(?:[/?#][%s]*)?" % (_IDNLABEL, _IDNLABEL, _URLCH, _TLDS, _URLCH), re.I)
+    r"|(?<![A-Za-z0-9@\-/_])(?<![A-Za-z0-9]\.)(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+"
+    r"(?:(?:%s)(?![A-Za-z0-9-])(?:[/?#][%s]*)?|(?:%s|[A-Za-z]{3,63})(?![A-Za-z0-9-])[/?#][%s]*)"
+    % (_IDNLABEL, _IDNLABEL, _URLCH, _TLDS, _URLCH, _TLDS_PATH, _URLCH), re.I)
 HANDLE_RE = re.compile(r"(?<![A-Za-z0-9_.@])@[A-Za-z0-9_]+")  # run on NFKC text: ＠ is @ there
 HASHTAG_RE = re.compile(r"(?<![\w#&])#[^\s#.,!?、。！？()\[\]{}\"']+")
 CJK = "ᄀ-ᇿ⺀-鿿ꥠ-꥿가-힯豈-﫿　-〿"
@@ -307,7 +312,7 @@ def _weight(s):
 
 
 def post_length(text, count, url_len):
-    text = unicodedata.normalize("NFC", text).strip()
+    text = unicodedata.normalize("NFC", text).strip()  # as the platform counts: `…` is one character
     if count != "weighted":
         return len(text)
     total, pos = 0, 0
@@ -452,6 +457,9 @@ def channel_problems(h, name, cfg=None, persona=None, others=None):
         elif d["where"] == "post" and find_urls(d.get("text") or ""):
             errors.append("disclosure[%d] text contains a URL — post checks never read text inside links; "
                           "write the operator without its domain" % i)
+        elif d["where"] == "post" and HANDLE_RE.search(unicodedata.normalize("NFKC", d.get("text") or "")):
+            errors.append("disclosure[%d] text contains an @handle — a handle is never read as a disclosure; "
+                          "write the operator's name" % i)
     waiver = h.get("disclosure_waiver")
     if waiver is not None and not (isinstance(waiver, dict) and waiver.get("kind") == "ad"
                                    and isinstance(waiver.get("reason"), str) and waiver["reason"].strip()
@@ -913,14 +921,17 @@ def check_draft(root, cfg, rel, record=True):
         else:
             if not urls:
                 fail("promo-link-missing", "the post needs the article link %s" % rec.get("url"))
+            linked = {norm_url(u) for _, _, u in find_urls(unicodedata.normalize("NFC", post))}
             for _, _, u in urls:
                 if norm_url(u) != want:
                     fail("promo-url", "%s is not the article URL %s" % (u, rec.get("url")))
+                elif norm_url(u) not in linked:
+                    fail("promo-url", "%s is written in full-width characters — the platform will not link it" % u)
             nf = unicodedata.normalize("NFKC", post)
             if urls and eff["link"] == "end":
                 tail = nf[urls[-1][1]:]
                 for d in disc:
-                    tail = tail.replace(d.get("text") or "\0", " ")
+                    tail = tail.replace(unicodedata.normalize("NFKC", d.get("text") or "") or "\0", " ")
                 tail = HASHTAG_RE.sub(" ", tail)
                 if re.search(r"\w", tail):
                     fail("link-position", "the link must come last (only hashtags after it)")

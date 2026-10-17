@@ -135,6 +135,9 @@ After the common start:
    (`--theme`, daily), and the language line (`atoms/_contract.md` §D).
 3. `HRD social check --file <every draft>`. A draft that fails: send its failed rules back to the
    distributor once for that draft, then check it again. Still failing → keep it, marked.
+   `basis-changed` (the article or the guide's language changed on base since prepare) and
+   `check-error` (no such draft, or not a draft prepare laid out) are not writing problems: never
+   send them to the distributor — `basis-changed` → run `prepare` again; `check-error` → relay it.
 4. Show the human every draft: the text, its profile (`promo`, `daily`, or `daily+service` — a
    daily post naming the service, checked like an ad), failed rules and warnings, its
    `from: promotion` quotes highlighted (the human judges what code cannot: claims beyond the

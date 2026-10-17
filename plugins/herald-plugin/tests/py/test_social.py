@@ -554,6 +554,25 @@ class ReviewRound3Tests(SocialCase):
         self.assertIn("local edits", p.stderr)
 
 
+class ReviewRound4Tests(SocialCase):
+    def test_missing_space_after_a_period_is_not_a_url(self):
+        for body in ("Long day.So tired.", "Went to the gym.It was hard.", "Finally home.me time", "done.Today was fine"):
+            self.assertEqual(self.failed(self.daily(body)), [], body)
+        for text, want in (("evil.cafe/x", ["evil.cafe/x"]), ("x.it/abc", ["x.it/abc"]), ("evil.ng", ["evil.ng"])):
+            self.assertEqual([u for _, _, u in social.find_urls(text)], want, text)
+
+    def test_fullwidth_disclosure_after_the_link(self):
+        self.write("docs/editorial/channels/x.md", guide_text(guide_head(disclosure=[
+            {"kind": "ad", "required": True, "text": "（PR）", "where": "post"}])))
+        self.commit("fullwidth PR")
+        rel = self.promo("Body text. https://example.test/blog/old-post/ （PR）")
+        self.assertEqual(self.failed(rel), [])
+
+    def test_fullwidth_article_url_is_not_a_link(self):
+        rel = self.promo("Body text. #PR ｈｔｔｐｓ://ｅｘａｍｐｌｅ.ｔｅｓｔ/ｂｌｏｇ/ｏｌｄ-ｐｏｓｔ/")
+        self.assertIn("promo-url", self.failed(rel))
+
+
 class CloseTests(SocialCase):
     def test_approve_records_and_copies(self):
         out = self.hrd("social", "prepare", "--sns", "x", "--slug", "old-post", "--n", "2")[0]
@@ -732,6 +751,13 @@ class LintRound2Tests(LintTests):
         self.assertTrue(out["ok"], out)
         out = self.lint("edit", guide_text(guide_head("fr", lang="de")), t)
         self.assertTrue(any("s9:de" in e for e in out["errors"]))
+
+    def test_disclosure_text_with_a_handle(self):
+        out = self.lint("add", guide_text(guide_head("y", disclosure=[
+            {"kind": "ad", "required": True, "text": "#PR", "where": "post"},
+            {"kind": "operator", "required": True, "text": "Sponsored by @safie_jp", "where": "post"}])),
+            "docs/editorial/channels/y.md")
+        self.assertTrue(any("@handle" in e for e in out["errors"]))
 
     def test_disclosure_text_with_a_url(self):
         out = self.lint("add", guide_text(guide_head("y", disclosure=[
