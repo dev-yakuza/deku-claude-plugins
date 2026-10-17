@@ -28,6 +28,10 @@ FAIL: #$1 is a split parent (guild:children) — its work is its children's, not
 
 Empty → add `guild:qa`. Non-empty → do not add on top (Step 3's transition removes whatever **stage** label was actually found here, not necessarily `guild:qa` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A).
 
+**Loop-back entries (right after the label read, before any other work):**
+- **Interrupted loop-back** — `_handoff.md` Section B, *Interrupted loop-back*: when it applies, run only steps 6–7 of the loop-back procedure and return `OK LOOPBACK: execute`.
+- **Re-run carrying the human's loop-back answer** (`dev.md` passes "loop back" / "stop" after this stage asked) — `_handoff.md` Section B, *Asking first*: skip Steps 1–2.6 entirely (no QA run, no `<!-- guild:qa:output -->` rewrite, no checklist or follow-up step — they already ran), read `reason` / `signature` from the `loopback-reason:` / `loopback-signature:` lines of this Issue's `<!-- guild:qa:output -->`, and go to the loop-back procedure (`from: qa`). Neither entry owes a capture.
+
 ## Step 1 — Spawn qa (risk-based quality plan + execution)
 Spawn the qa sub-agent:
 - `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `qa #$1`
@@ -62,7 +66,7 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
 - **QA 계획 & 결과**: what was planned, what ran (with evidence), what's recommended for human QA.
 - **UI/UX 게이트**: if Step 1.5 ran, record the designer's verdict (pass / concerns / blocking a11y-usability defect).
 - **honesty of scope**: automated-QA vs human-QA clearly separated (same discipline as the verify gate). "QA 통과" means *the automated/agent-doable quality checks passed + a human-QA plan is stated* — never "fully QA'd by a human."
-- If QA **or** the UI/UX gate surfaces a real defect → do NOT advance; **make the capture in the next bullet first**, then return `NEEDS_HUMAN` (loop back to execute) or record the concern.
+- If QA **or** the UI/UX gate surfaces a real defect → do NOT advance; **make the capture in the next bullet first**, then return through Step 3's **QA found a blocking defect** branch (never an early `NEEDS_HUMAN` from here — that skipped the cap, the stagnation guard and the loop-back record) or record the concern.
 - **Ground-truth capture (①, `_signals.md` Section C — agent↔agent correction):** when QA or the UI/UX gate surfaces a **real blocking defect** (the test stage proved correctness-green, yet QA/designer found a defect it missed), append one entry (its own Bash call, best-effort — never blocks). The concrete defect **is** the objective anchor — one role overturning the test-stage pass, not self-review (`_signals.md` Section B). `--surprise` always (a confident pass overturned):
   ```bash
   python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --kind correction --issue $1 --stage qa --role <qa|designer> --area "<the area of the defect>" --summary "<the defect QA/UX found that test missed, 1 line>" --evidence "<user flow / a11y measure, 1 line>" --surprise
@@ -187,12 +191,13 @@ As the leader, post the QA result (and the UI/UX gate verdict, if it ran) under 
   ```
   **Nudge the guided review** (the Issue is now `done` and the PR awaits the human reviewer — M1 external reviewer, INV1). When invoked directly (`/gld qa`), surface it here; under `/gld dev`, Phase 3 surfaces it: "이슈 #$1 리뷰 준비됨 (연결된 PR) — `/gld review $1`로 리스크 가중 가이드 리뷰를 받을 수 있습니다 (이슈 번호로 PR을 자동으로 찾습니다)." Do not force it on a trivial change.
 - **QA found a blocking defect** → do NOT mark done.
-  - **Attended**: return `NEEDS_HUMAN: QA found <one-line>; loop back to execute?`.
-  - **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): before looping back, apply the **stagnation guard** (`_stagnation.md`) — the same defect recurring after a loop-back → escalate immediately (`OK PAUSE: needs-human — stagnant loop-back — <reason>`, `--kind stagnation` capture) rather than consuming another attempt. Otherwise: record the concern; bounded loop-back to execute if fixable, else add the **`guild:needs-human` label** + a `<!-- guild:needs-human -->` comment stating the defect, and return `OK PAUSE: needs-human — QA defect: <one-line>` (do NOT transition the stage label). Never force `done`. Detect via `printenv GLD_UNATTENDED`.
+  - **Attended**: add `loopback-reason: <one line>` and `loopback-signature: <defect identifiers, sorted, comma-separated>` to the `<!-- guild:qa:output -->` comment, then return `NEEDS_HUMAN: QA found <one-line>; loop back to execute? (loop-backs so far: <active>/<cap>)` (`<active>` = active blocks in the `<!-- guild:loopback -->` record, `_handoff.md` Section B; `<cap>` from Section H). The answer comes back as a re-run (Step 0, *Loop-back entries*).
+  - **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): record the concern. Fixable → run the **loop-back procedure** (`_handoff.md` Section B) with `from: qa` — it checks the cap (shared with test) and the stagnation guard first and returns `OK LOOPBACK: execute` or `OK PAUSE: needs-human — …`. Not fixable in code → add the **`guild:needs-human` label** + a `<!-- guild:needs-human -->` comment stating the defect, and return `OK PAUSE: needs-human — QA defect: <one-line>` (do NOT transition the stage label). Never force `done`. Detect via `printenv GLD_UNATTENDED`.
   ```
   >>> RESULT <<<
-  NEEDS_HUMAN: QA found <one-line>; loop back to execute?
+  NEEDS_HUMAN: QA found <one-line>; loop back to execute? (loop-backs so far: <active>/<cap>)
   ```
+  or `OK LOOPBACK: execute` from the loop-back procedure. Invoked directly (`/gld qa $1`): after `OK LOOPBACK`, the next step is `/gld resume $1`.
 - Hard error → `FAIL: <reason>`.
 
 ## Note

@@ -185,8 +185,8 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    `<!-- guild:safety-net -->`, say so and tell the human to re-run `/gld sprint plan` first and choose to **add** to the open
    sprint — that is the path that applies the approved Safety net (`plan.md` Phase 0 step 4); running now would develop the
    slot without the net the human approved.
-   ⚠ Do **not** label the tracker `guild:needs-human`: that label has exactly one removal point
-   — any successful forward stage transition (`_handoff.md` Section A) — and the tracker has no
+   ⚠ Do **not** label the tracker `guild:needs-human`: that label is removed only by a successful
+   forward stage transition or a human-decided loop-back (`_handoff.md` Section A) — and the tracker has no
    stages, so it would stick forever and mis-report to `monitoring`/`status`. Record
    `state: halted:plan-hash-mismatch` in the run marker instead.
 

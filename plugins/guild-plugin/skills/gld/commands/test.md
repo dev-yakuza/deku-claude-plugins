@@ -26,7 +26,11 @@ FAIL: #$1 is a split parent (guild:children) — its work is its children's, not
 ```
 (`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
 
-Empty → add `guild:test`. Non-empty → do not add on top (Step 3's transition removes whatever **stage** label was actually found here, not necessarily `guild:test` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A). Ensure the Issue's branch is checked out (the one implement created).
+Empty → add `guild:test`. Non-empty → do not add on top (Step 3's transition removes whatever **stage** label was actually found here, not necessarily `guild:test` — never `guild:child`, a permanent identity marker a child Issue also carries alongside its stage label; `_handoff.md` Section A). Ensure the Issue's branch is checked out (the one the execute stage created or resumed on).
+
+**Loop-back entries (right after the label read, before any other work):**
+- **Interrupted loop-back** — `_handoff.md` Section B, *Interrupted loop-back*: when it applies, run only steps 6–7 of the loop-back procedure and return `OK LOOPBACK: execute`. No tester spawn.
+- **Re-run carrying the human's loop-back answer** (`dev.md` passes "loop back" / "stop" after this stage asked) — `_handoff.md` Section B, *Asking first*: skip Steps 1–2 entirely, read `reason` / `signature` from the `loopback-reason:` / `loopback-signature:` lines of this Issue's `<!-- guild:test:output -->`, and go to the loop-back procedure (`from: test`). Neither entry runs tests or owes a capture.
 
 ## Step 1 — Spawn tester (run + verify)
 Spawn the tester sub-agent:
@@ -72,12 +76,18 @@ As the leader, enforce the verify gate (`_handoff.md` Section E):
   OK ADVANCE: qa
   ```
 - **Verify failed** (tests red — a suite killed at the Bash timeout ceiling counts as red: a slow suite and a test the change made hang look identical, and the hang is a defect; a recurring timeout reaches the human through the stagnation guard below, where the timeout itself is the blocking signature whichever test was last running — or evidence contradicts claim, or AC gap) → do NOT mark done.
-  - **Attended**: return `NEEDS_HUMAN: tests not green / AC gap — <one-line>; loop back to execute?` (the leader/human decides whether to loop back to `/gld implement $1`).
-  - **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): before each loop-back, apply the **stagnation guard** (`_stagnation.md`) — the same test(s)/AC gap recurring after a loop-back → escalate immediately (`OK PAUSE: needs-human — stagnant loop-back — <reason>`, `--kind stagnation` capture) rather than consuming the remaining attempt. Otherwise the leader auto-decides — bounded loop-back to execute (≤2 attempts); if still failing, add the **`guild:needs-human` label** + a `<!-- guild:needs-human -->` comment stating the gap, and return `OK PAUSE: needs-human — tests not green / AC gap` (do NOT transition the stage label). **Never weaken/skip tests to pass** (INV2). Detect mode via `printenv GLD_UNATTENDED`.
+  - **Attended**: add two lines to the `<!-- guild:test:output -->` comment Step 2 posted — `loopback-reason: <one line>` and `loopback-signature: <failing test names and uncovered AC ids, sorted, comma-separated>` — then return `NEEDS_HUMAN: tests not green / AC gap — <one-line>; loop back to execute? (loop-backs so far: <active>/<cap>)` (`<active>` = active blocks in the `<!-- guild:loopback -->` record, `_handoff.md` Section B; `<cap>` from `_handoff.md` Section H). The human's answer comes back as a re-run (Step 0, *Loop-back entries*).
+  - **Unattended** (`GLD_UNATTENDED=1`, `_handoff.md` Section H): run the **loop-back procedure** (`_handoff.md` Section B) with `from: test`, `reason` = the gap in one line, `signature` = the failing test names and uncovered AC ids. It checks the cap and the stagnation guard first and returns either `OK LOOPBACK: execute` or `OK PAUSE: needs-human — …` (the cap and stagnant cases add the `guild:needs-human` label + a `<!-- guild:needs-human -->` comment and do NOT transition the stage label). **Never weaken/skip tests to pass** (INV2). Detect mode via `printenv GLD_UNATTENDED`.
   ```
   >>> RESULT <<<
-  NEEDS_HUMAN: tests not green / AC gap — <one-line>; loop back to execute?
+  NEEDS_HUMAN: tests not green / AC gap — <one-line>; loop back to execute? (loop-backs so far: <active>/<cap>)
   ```
+  or, from the loop-back procedure:
+  ```
+  >>> RESULT <<<
+  OK LOOPBACK: execute
+  ```
+  Invoked directly (`/gld test $1`, not under `dev`): after `OK LOOPBACK`, tell the human the next step is `/gld resume $1` (it re-enters execute with the loop-back reason).
 - Hard error → `FAIL: <reason>`.
 
 ## Note — test hands off to QA

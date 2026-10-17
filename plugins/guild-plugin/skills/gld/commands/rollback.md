@@ -31,6 +31,13 @@ State exactly WHAT will be reverted and the METHOD (which is always non-destruct
 - Merged PR / commit → **`git revert <sha>`** (new undo commit; opens a revert PR referencing the original). Merge-conflict on revert → surface, the human resolves; never force. If step 1 identified this commit as an `[applied]` evolve run (via its `evolve #<n>` subject tag), also state that the ledger is kept as it is and the entry is annotated `[reverted]` (below) so it stops reading as still-applied — a plain revert would delete the entry.
 - Open (unmerged) PR → **close + delete its branch** (`gh pr close <n> --delete-branch`). The work is on the branch's history only (recoverable by reopening).
 - `$1 == "stage"` → **relabel** Issue `$2` back one stage, using the derived `stage` from step 1 (never `guild:needs-human`/`guild:child`/`guild:harness`, which aren't stages): `gh issue edit $2 --remove-label guild:<cur> --add-label guild:<prev>`. Touch **only** that one label: `guild:child` is a permanent identity marker (stripping it would drop the Issue out of Section I's child-discovery query), `guild:harness` is provenance that outlives every stage, and if `guild:needs-human` was also present, leave it — rolling back a stage doesn't resolve the pause, and stripping it here would misreport an unresolved pause as clear. Note: the stage's *artifacts* (comments, commits) remain — this only moves the state pointer so the stage re-runs. `guild:children` target → refused per step 1 (not a stage). `guild:analyze` target → refused per step 1 (no predecessor stage). `guild:done` target on a closed Issue → the plan also states the reopen.
+  **Loop-back record** (`_handoff.md` Section B): a stage rollback is a human relabel — it writes no `### loopback <n>` block and does not count against the cap. But when the target `<prev>` is `guild:design` or `guild:analyze` — the design is being redone, so the old loop-back history should stop counting — **and** the Issue has a `<!-- guild:loopback -->` comment **and** its last block is not already a `### loopback-reset`, the plan also says "loop-back count reset" and, after the relabel, step 3 takes a timestamp (`python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --now`) and inserts
+  ```
+  ### loopback-reset
+  at: <that output>
+  by: human
+  ```
+  just before `<!-- /guild:loopback -->` (the write rule in Section B). No comment → write nothing; never create one just to hold a reset. (`stage` moves one stage per call, so `execute → design` and then `design → analyze` are two calls; the "last block is already a reset" check keeps the second from adding another.)
 Wait for the human's explicit "yes".
 
 **3. Act (only after confirm; each its own Bash call)**

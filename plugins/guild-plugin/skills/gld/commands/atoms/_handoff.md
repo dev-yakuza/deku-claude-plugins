@@ -28,7 +28,7 @@ The single source of truth for "what stage is this Issue in" is its GitHub label
 | `guild:done` | Issue complete | QA gate passed |
 | `guild:child` | this Issue is a child of a parent Issue | design split work into multiple PRs |
 | `guild:children` | this (parent) Issue is split; its children are being driven sequentially | design decided a multi-PR split (Section I) |
-| `guild:needs-human` | **additive, not a stage** — an unattended run paused here at a high-stakes gate | Section H's pause path; removed on the next forward transition (below) |
+| `guild:needs-human` | **additive, not a stage** — an unattended run paused here at a high-stakes gate | Section H's pause path; removed on the next forward transition, or on a human-decided loop-back (below) |
 | `guild:harness` | **not a stage** — a harness readiness gap filed as a developable Issue | `init` P3.5 / `/gld audit` remediation. `resume.md` routes it to a fresh `dev` run |
 | `guild:sprint` | **identity, never a stage** — this Issue IS a sprint container (`_sprint_dag.md` Section A). It never runs the spine; `dev`/`resume`/`batch` refuse to develop it | `/gld sprint plan --create` |
 
@@ -120,7 +120,25 @@ Transition rule: remove whatever `guild:<stage>` label Step 0 actually found and
 `guild:<next>` — plus `--remove-label "guild:needs-human"` when that label is present (below).
 Labels are created by `/gld init`.
 
-**`guild:needs-human` removal.** This label is *additive* to whatever `guild:<stage>` label the Issue already carries (Section H) — a paused Issue keeps its stage label and gains this one on top. It is added by the unattended-mode pause path; it must also be **removed** somewhere, or a resolved pause stays permanently mis-reported to `batch`/`monitoring`/`status`, which all poll it as a first-class state. There is exactly one removal point: **whenever the main session performs ANY successful forward-progress label transition on an Issue that currently carries `guild:needs-human`** — an `OK ADVANCE`/`OK SPLIT`/`OK DONE` after the human resolved the pause and a re-run/`resume` made real progress, whether the transition is between two spine stages (`guild:<stage>` → `guild:<next-stage>`) or into/out of the `guild:children` orchestration state (which Section A above already notes is *not itself* a stage, but still counts as forward progress) — remove `guild:needs-human` as part of that same transition. The advance itself is the evidence the pause was resolved:
+**Backward transitions into `guild:execute` — exactly two.**
+1. **Loop-back** (`OK LOOPBACK: execute`, Section D) — test or qa found the work wrong and sends it
+   back, or the leader does (`dev.md` Phase 2's between-stage judgment). The wrapper (or the
+   leader) that decides it **first appends a `### loopback <n>` block to the Issue's
+   `<!-- guild:loopback -->` comment** (Section B), **then** moves the label
+   `guild:test|qa` → `guild:execute`, removing `guild:needs-human` in the same call when present.
+   Block first, label second: an interruption between the two leaves a recorded loop-back with the
+   label not yet moved, which test/qa Step 0 finishes (`test.md` Step 0, *Interrupted loop-back*);
+   the reverse order would run execute without the reason and lose the count. The cap is
+   **`<cap>` = 2 active loop-backs per Issue** (Section H — the only place this number is defined).
+2. **Pending regeneration** (`test.md` Step 2 — visual baselines declared un-regenerable) moves
+   `guild:test` → `guild:execute` together with `guild:needs-human`. It is a wait for a human, not
+   a failure: it writes no loop-back block and does not count against the cap.
+
+A human moving labels by hand (`/gld rollback stage`) is neither: no block, no count (`rollback.md`).
+`dev.md` Phase 2c's "targeted loop-back to the responsible child" is out of scope too — it re-opens a
+`done` child and always goes through a human (`NEEDS_HUMAN`) first.
+
+**`guild:needs-human` removal.** This label is *additive* to whatever `guild:<stage>` label the Issue already carries (Section H) — a paused Issue keeps its stage label and gains this one on top. It is added by the unattended-mode pause path; it must also be **removed** somewhere, or a resolved pause stays permanently mis-reported to `batch`/`monitoring`/`status`, which all poll it as a first-class state. There are exactly two removal points: **whenever the main session performs ANY successful forward-progress label transition on an Issue that currently carries `guild:needs-human`**, and **a loop-back transition the human decided** (test/qa re-run with the human's "loop back" answer — the answer is the resolution). The forward case: — an `OK ADVANCE`/`OK SPLIT`/`OK DONE` after the human resolved the pause and a re-run/`resume` made real progress, whether the transition is between two spine stages (`guild:<stage>` → `guild:<next-stage>`) or into/out of the `guild:children` orchestration state (which Section A above already notes is *not itself* a stage, but still counts as forward progress) — remove `guild:needs-human` as part of that same transition. The advance itself is the evidence the pause was resolved:
 ```bash
 gh issue edit <n> --remove-label "guild:execute" --add-label "guild:test" --remove-label "guild:needs-human"
 ```
@@ -130,7 +148,7 @@ Check the Issue's current labels first (already read at Step 0 of every stage �
 
 ## Section B — Stage outputs = Issue comments + markers
 
-Each stage persists its output as a GitHub Issue comment wrapped in a marker pair, so later stages (and `/gld resume`) can find it. Update-in-place: if a comment with the marker already exists, PATCH it rather than appending (per `_bash_rules.md` temp-file pattern) — **three documented exceptions**: `<!-- guild:auditor:execute -->` is a **cumulative single comment** whose PATCH re-writes the *previous body plus* a new block inserted inside the marker pair; `<!-- guild:auditor-violation -->` is **one new comment per occurrence, never PATCHed**; and `<!-- guild:sprint:retro -->` is **appended once per sprint** (a sprint's history is the sequence of its retros, so replacing would erase the previous one). The first two exist because losing an earlier attempt's dismissal — or an earlier violation's evidence — is the specific failure those records exist to prevent. Every other marker is replace-in-place.
+Each stage persists its output as a GitHub Issue comment wrapped in a marker pair, so later stages (and `/gld resume`) can find it. Update-in-place: if a comment with the marker already exists, PATCH it rather than appending (per `_bash_rules.md` temp-file pattern) — **four documented exceptions**: `<!-- guild:auditor:execute -->` is a **cumulative single comment** whose PATCH re-writes the *previous body plus* a new block inserted inside the marker pair; `<!-- guild:auditor-violation -->` is **one new comment per occurrence, never PATCHed**; and `<!-- guild:sprint:retro -->` is **appended once per sprint** (a sprint's history is the sequence of its retros, so replacing would erase the previous one); and, fourth, `<!-- guild:loopback -->` is **cumulative** exactly like `guild:auditor:execute` — each loop-back inserts a new block just before the closing marker and keeps every earlier one, because the cap, the stagnation comparison and the "not yet handled" test all read the earlier blocks (both lookups `--paginate`, stream form). The first two exist because losing an earlier attempt's dismissal — or an earlier violation's evidence — is the specific failure those records exist to prevent. Every other marker is replace-in-place.
 
 ⚠ One further shape this section did not previously cover: `<!-- guild:sprint:plan -->` lives in an **Issue BODY**, not a comment, and is immutable after creation (guarded by `plan-hash`). Rewriting a body is read → splice → full replace, and `gh issue edit` has no append — so it carries a **mandatory truncation check** (`_sprint_dag.md` Section A). The rest of this section assumes a comment; that row does not.
 
@@ -150,7 +168,78 @@ Each stage persists its output as a GitHub Issue comment wrapped in a marker pai
 | `<!-- guild:sprint:run -->` … `<!-- /guild:sprint:run -->` | `sprint run` **supervisor (shell, not an LLM)** | the run ledger: `state`, `heartbeat`, `host`/`pid`, per-issue retries, discovered children. Replace-in-place. ⚠ A shell writer cannot perform the truncation recovery an LLM writer does; it also cannot be truncated, since it fetches the comment body via `gh api --paginate` rather than a previewed read. |
 | `<!-- guild:sprint:daily -->` … `<!-- /guild:sprint:daily -->` | `sprint daily` (leader) | the latest status snapshot, so the human can read it on GitHub. Replace-in-place. The **one** exception to `daily`'s read-only contract. |
 | `<!-- guild:sprint:retro -->` … `<!-- /guild:sprint:retro -->` | `sprint retro` (leader) | the sprint's metrics, capacity verdict and the evolve hand-off. ⚠ **Appended once per sprint** (the third Section B exception) — a repo's sprint history is the sequence of these. |
+| `<!-- guild:loopback -->` … `<!-- /guild:loopback -->` | test / qa (or the leader, `dev.md` Phase 2) on a loop-back; `/gld rollback stage` appends a reset | one `### loopback <n>` block per loop-back — `from:` · `at:` · `branch:` · `reason:` · `signature:` (+ `override: human`, + `consumed:` once execute has handled it) — and a `### loopback-reset` block (`at:` · `by: human`) when a rollback restarts the design. ⚠ **Cumulative** (the fourth exception above). Read with the definition of *active blocks* just below this table. |
 | `<!-- guild:review:output -->` … `<!-- /guild:review:output -->` | review (fresh reviewer) | guided pair-review walkthrough (risk-weighted, rationale-backed). Posted to the PR only with `/gld review … --comment`; default is **session-only, nothing persisted to disk** (unlike the other stages, `review.md` never writes a `docs/specs/<issue>/` file for its own recap) — this row documents the marker's shape for that opt-in case, not a durable output. |
+
+**Loop-back record — active blocks (the single definition; test, qa, `_execute_spine.md`, `_stagnation.md`, `rollback.md`, `status.md` and `resume.md` refer here and do not restate it).**
+- Read the comment with
+  `gh api --paginate repos/<owner>/<repo>/issues/<N>/comments --jq '.[] | select((.body // "") | contains("<!-- guild:loopback -->")) | {id, body}'`
+  (stream form — `--paginate --jq` runs per page, so an array form `[…]` prints one array per
+  page). Several matches → the lowest `id` is the record. None → no loop-back has happened.
+- **Write**: create it if absent, wrapped in the marker pair; otherwise PATCH the old body with the
+  new block inserted **immediately before** `<!-- /guild:loopback -->` (`--body-file`).
+- A block heading is either `### loopback <n>` (regex `^### loopback [0-9]+$`) or `### loopback-reset`
+  (`^### loopback-reset$`). **Never count by the prefix `### loopback`** — it matches the reset too.
+- **Active blocks** = the `### loopback <n>` blocks that come **after the last `### loopback-reset`**
+  (all of them when there is no reset). A reset treats every earlier block as handled, consumed or
+  not. "**The latest block**" always means the latest *active* block; a reset block is never it.
+- `<n>` = the number of `### loopback <n>` headings in the whole comment + 1 — an identifier only.
+  The cap, the `(loop-backs so far: <active>/<cap>)` display and every count use the number of
+  **active** blocks.
+- A block is **not yet handled** while it has no `consumed:` line. Every timestamp
+  (`at:`, `consumed:`, the reset's `at:`) is the output of a lone
+  `python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --now` call — never written by hand —
+  so it compares with the audit record's `invocation:` lines (same clock, same format; whole
+  seconds, so comparisons include equality).
+
+**Loop-back procedure — the steps test, qa and the leader all run (they cite this; do not restate it).**
+Input: `from` (`test` / `qa` / `leader`), a one-line `reason`, and a `signature` — the sorted set of
+what is failing: for test the failing test names and uncovered AC ids, for qa the defect identifiers,
+for the leader the gap it saw (AC ids / files / defects).
+1. **Read the record** (the lookup above) and count the active blocks.
+2. **Cap**: active blocks ≥ `<cap>` (Section H) → do not loop back. Unattended: add
+   `guild:needs-human`, post a `<!-- guild:needs-human -->` comment naming the repeated failure,
+   return `OK PAUSE: needs-human — loop-back cap reached`. Attended: say in the question that the cap
+   is reached; loop back only on the human's explicit yes, and then write `override: human` in the
+   block.
+3. **Stagnation** (`_stagnation.md` Section A, its containment test): this `signature`, if non-empty,
+   is wholly contained in the `signature` of the latest active block **with the same `from`** →
+   stagnant (an empty signature falls back to the "same root cause" reading of the two `reason`s).
+   Stagnant → `guild:needs-human` + comment + `OK PAUSE: needs-human — stagnant loop-back — <reason>`
+   and the `--kind stagnation` capture `_stagnation.md` describes. Do not loop back.
+4. **Timestamp**: `python3 <<SKILL_DIR>>/commands/atoms/capture_signal.py --now` (its own call).
+5. **Append the block** (write rule above):
+   ```
+   ### loopback <n>
+   from: <test|qa|leader>
+   at: <the --now output>
+   branch: <git rev-parse --abbrev-ref HEAD, its own call>
+   reason: <one line, config.language>
+   signature: <the sorted set, comma-separated>
+   ```
+   (+ `override: human` per step 2.) Re-read the comment and confirm the block is there; a failed
+   write → do not move the label (Section F), return `FAIL: loop-back record not written`.
+6. **Move the label**: `gh issue edit <N> --remove-label "guild:<test|qa>" --add-label "guild:execute"`,
+   adding `--remove-label "guild:needs-human"` only when the human decided this loop-back and the
+   label is present. Re-read the labels to confirm (Section F).
+7. Return `OK LOOPBACK: execute`.
+
+**Asking first (attended)**: test/qa do not run the steps above on their own judgment when a human
+is present. They write `loopback-reason: <one line>` and `loopback-signature: <set>` into their own
+output comment (`guild:test:output` / `guild:qa:output`), then return
+`NEEDS_HUMAN: … loop back to execute? (loop-backs so far: <active>/<cap>)`. `dev.md` asks, and
+re-runs the same wrapper with the answer. On "loop back" the wrapper **skips its run steps** (no
+tests, no QA — the output comment and its `loopback-*` lines stay as they are), reads `reason` and
+`signature` from those two lines, and runs steps 1–7. On "stop" it returns `OK PAUSE`. This re-run
+makes no new verdict, so it owes **no** captures (`_signals.md` Section C) — the first run already
+recorded the `verify-gap` / `correction`.
+
+**Interrupted loop-back** (test/qa Step 0, before anything else): the latest active block is not yet
+handled (no `consumed:`), **no** `invocation:` line in the Issue's `<!-- guild:auditor:execute -->`
+record is ≥ that block's `at:`, and the label is still `guild:test` / `guild:qa` → the previous run
+appended the block and stopped before step 6. Run only steps 6–7. This also owes no captures. (If
+execute *has* run since — an `invocation:` ≥ `at:` exists — the block is merely missing its
+`consumed:` line; that is not an interrupted loop-back, so run the stage normally.)
 
 **Durable design artifacts** (skeleton, architecture decisions, test cases) that outlive the Issue thread are also written to the working tree:
 - `docs/specs/<issue>/` — design skeleton, notes, test-case list (committed with the PR).
@@ -267,6 +356,7 @@ A stage wrapper (analyze/design/implement/test) returns one line to the main ses
 | `OK ADVANCE: <next-stage>` | stage complete, advance | transition label to `guild:<next-stage>` |
 | `OK SPLIT: <N> children` | design split the Issue into `N` child Issues | transition the **parent** to `guild:children` and enter child orchestration (dev Phase 2b — Section I) |
 | `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done` — **Guild's work is complete; the PR is open awaiting human review + merge**. Do **not** close the Issue: the PR body carries `Closes #<N>`, so **GitHub** closes it when the human merges — INV1 (nothing merges unattended; the human is the external reviewer of record). No Guild command closes a **stage** Issue deliberately. ⚠ **One exception, and it is not a stage Issue**: `/gld sprint retro` closes the sprint **tracking Issue** (`guild:sprint`). That Issue never runs the spine and has no PR of its own, so nothing else can ever close it — leaving it open would make every later `sprint plan` report an active sprint that finished weeks ago. The rule above is about work whose completion GitHub records through a merge; a container's completion is recorded by the retro that closed it. |
+| `OK LOOPBACK: execute` | test or qa sent the work back (Section A, *Backward transitions*) — the wrapper has already appended the loop-back block and moved the label to `guild:execute` | run the execute variant again (re-read the `type:` label first), then continue from test. Not a forward transition: it never removes `guild:needs-human` except when the human decided the loop-back |
 | `OK PAUSE: <one-line>` | leader/human chose to stop here | leave label as-is; report |
 | `NEEDS_HUMAN: <one-line>` | a discuss/verify gate needs a human decision | main session prompts the human (`AskUserQuestion`), then resumes |
 | `NEEDS_CONTEXT: <one-line>` | a **required upstream artifact is missing** — design without analyze output, execute without a design skeleton | do **not** advance and do **not** treat as a hard error: the fix is to run the missing stage. Report which artifact is absent and re-enter the spine at the stage that produces it; if that stage's label is already set (so it "ran" but left nothing), surface it as `NEEDS_HUMAN` — a silent no-op upstream is a state inconsistency a human should see. |
@@ -402,9 +492,9 @@ Value `1` → unattended. Anything else / empty → attended (default; behave ex
 | Gate | Attended (default) | Unattended (leader stands in) |
 |---|---|---|
 | **discuss** (analyze/design) | return `NEEDS_HUMAN` → main session `AskUserQuestion` | leader classifies the ambiguity's stakes, **charter-anchored**: **low/medium** (local, reversible) → pick the most charter/standards-aligned interpretation, **record it as an explicit assumption** in the stage output (for the decision log), proceed. **high** (scope-defining / materially different product / hard to reverse) → do NOT guess: post a `<!-- guild:needs-human -->` comment listing the options, **add the `guild:needs-human` label**, and return `OK PAUSE: needs-human — <one-line>` (do NOT transition the stage label). |
-| **verify** (test) | `NEEDS_HUMAN` on red/AC-gap | **deterministic**: raw evidence green + AC covered + DoD → advance. Else bounded loop-back to execute (≤2 attempts). Still failing → `OK PAUSE: needs-human — tests not green / AC gap`. **Never weaken/skip tests to pass** (INV2). |
+| **verify** (test) | `NEEDS_HUMAN` on red/AC-gap | **deterministic**: raw evidence green + AC covered + DoD → advance. Else loop back to execute (`OK LOOPBACK: execute`, Section A) while the Issue has fewer than **`<cap>` = 2** active loop-backs (Section B — **this row defines the cap; every other file says `<cap>`**). At the cap, or stagnant (`_stagnation.md`) → `OK PAUSE: needs-human — tests not green / AC gap`. **Never weaken/skip tests to pass** (INV2). |
 | **execute auditor** (`_execute_spine.md` Step 3.5a) | leader may dismiss a finding with a recorded reason, any severity | ⚠ **The one gate the leader may NOT stand in for.** A `BLOCKER` has exactly two outcomes — **fixed**, or `guild:needs-human` + `OK PAUSE`. Dismissing it is forbidden outright: attended, a dismissal is safe because the human sees it at `/gld review` before approving; unattended there is no such reader, and `batch.md` would count the Issue as succeeded. `MAJOR`/`MINOR` may still be dismissed with a recorded reason. ⚠ One narrow exception: a `BLOCKER` an **earlier attended** invocation already dismissed-with-reason, on code unchanged since, is **carried forward** as still-dismissed (`_execute_spine.md` Step 4) — that re-uses a human-visible decision rather than making a new one, so it is not a stand-in and does not pause. |
-| **qa** (blocking defect) | `NEEDS_HUMAN` | record the concern; bounded loop-back to execute if fixable, else `OK PAUSE: needs-human — QA defect`. Never force `done`. |
+| **qa** (blocking defect) | `NEEDS_HUMAN` | record the concern; loop back to execute (`OK LOOPBACK: execute`) if fixable and under `<cap>` (shared with test — one count per Issue), else `OK PAUSE: needs-human — QA defect`. Never force `done`. |
 
 ⚠ **When the stakes classification itself is in doubt, classify it `high`.** The
 discuss row above splits on a judgment the leader makes alone, with nobody to check
@@ -466,10 +556,11 @@ gh issue list --label guild:child --state all --limit 200 --json number,title,la
 
 Every **human-readable string Guild emits is written in the repo's `config.language`** (`.claude/guild/config.json`; default `en` when absent) — Issue/PR comments, discuss `AskUserQuestion` questions/options, stage narration to the user, `>>> RESULT <<<` one-line summaries, and the **prose inside artifact files** (`docs/specs/<issue>/*`). This is the same language `/gld init` wrote the agents and standards in.
 
-**Never localized — stays ASCII/English (machine tokens):** the `RESULT`/return keywords (`DONE`, `BLOCKED`, `NEEDS_CONTEXT`, `OK ADVANCE`, `OK SPLIT`, …), HTML markers (`<!-- guild:* -->`), `guild:*` label names, file paths, code identifiers, git branch/commit conventions, and **any token a later run reads back out of a record it wrote**. That class currently has three members:
+**Never localized — stays ASCII/English (machine tokens):** the `RESULT`/return keywords (`DONE`, `BLOCKED`, `NEEDS_CONTEXT`, `OK ADVANCE`, `OK SPLIT`, …), HTML markers (`<!-- guild:* -->`), `guild:*` label names, file paths, code identifiers, git branch/commit conventions, and **any token a later run reads back out of a record it wrote**. That class currently has four members:
 - the auditor record's `### audit-record <n>` block headings, its four disposition tokens (`looped-back`/`fixed`/`recorded`/`dismissed`) the clean-scan / no-scan lines `findings: none` / `scan: none` and the `invocation: <ISO>` line (`_execute_spine.md` Step 4), which the next invocation counts and re-states and `sprint retro` counts;
 - the sprint run ledger's `state:` values (`running` · `installing-deps` · `rate-limited-until-<epoch>` · `rate-limited-remaining-<n>s` · **`waiting-for-window-<HHMM>`** · `finished` · `halted:<reason>`), its `retries`/`discovered`/**`window`**/**`completion`** keys, the failure classes in `.sprint-logs/<tracker>/failures.jsonl`, and `sprint_dag.py`'s `DEFAULT` / `BLOCKED:<reason>` tokens — all read back by `sprint run`'s duplicate-run guard and by `sprint daily` (`sprint/run.md`, `sprint/daily.md`). The same ledger's board counters (`board_fails` · `board_bugs` · `board_unknown_col` · `board_account_mismatch` · `board_disabled_after` · `board_last_write` · `board_reason_disabled` · `board_off_reason`) belong here too: `sprint daily` and `run`'s Phase 4 report read them back, and `sprint board` renders them (`sprint/board.md`).
 - the follow-up record's status tokens `unfiled` · `declined` · `filed #<n>` (`<!-- guild:followups -->`, `qa.md` Step 2.6), read back by a QA re-run (never re-ask `declined`) and by `review.md` Step 5 (asks only `unfiled`, then rewrites the answered lines).
+- the loop-back record (`<!-- guild:loopback -->`, Section B): the headings `### loopback <n>` and `### loopback-reset`, the keys `from:` · `at:` · `branch:` · `signature:` · `override:` · `consumed:` · `by:` and the values `test` · `qa` · `leader` · `human`, plus the `loopback-reason:` / `loopback-signature:` lines test and qa write into their own output comment before asking a human — read back for the cap, the stagnation comparison and the not-yet-handled test. Only the **value** of `reason:` / `loopback-reason:` is prose in `config.language`.
 
 ⚠ **`halted:<reason>` is a wildcard and the reasons are enumerated**: `interrupted` ·
 **`window-invalid`** · **`marker-unwritable`** · **`container-lost`** · **`sigTERM`** ·

@@ -1132,7 +1132,7 @@ hasfx "M11-②: 정체 가드가 audit record 에서 사유를 읽는다" "$STMD
 # ⚠ **execute 경로로 스코프돼야 한다.** 무조건이면 audit record 가 없는 무인 `test`/`qa`
 # 루프백이 매번 `OK PAUSE: needs-human` 으로 멈춘다 — 품질 조치가 무인 경로에 정지 결함을
 # 만드는 모양이고, 같은 파일이 세 줄 위에서 「종전대로 동작한다」고 적는 것과도 모순이었다.
-hasfx "M11-②: 그 규칙이 execute 경로로 스코프된다" "$STMD" '**Scope — the execute path only.**'
+hasfx "M11-②: 그 규칙의 범위 — 기록이 둘(audit record · loop-back record)" "$STMD" '**Scope — where the "before" half is read.**'
 # ⚠⚠ **정합성 — 읽는 쪽과 쓰는 쪽.** 정체 가드는 **두 축**(역할 · 감사자)을 비교하는데,
 # 기록 스키마가 감사자 findings 만 적으면 역할 축은 여전히 컨텍스트에만 산다 = 절반만 닫힌다.
 if grep -qF -- 'record this attempt' "$ESMD" && grep -qF -- 'ROLE axis too' "$ESMD"; then
@@ -2211,7 +2211,7 @@ fi
 SGMD="$GLD/commands/atoms/_stagnation.md"
 _r=$(grep -n 'do not read those strings from memory' "$SGMD" | head -1 | cut -d: -f1)
 _w=$(grep -n 'The comparison is a \*before/after pair\*' "$SGMD" | head -1 | cut -d: -f1)
-_e=$(grep -n 'Scope — the execute path only' "$SGMD" | head -1 | cut -d: -f1)
+_e=$(grep -n 'Scope — where the "before" half is read' "$SGMD" | head -1 | cut -d: -f1)
 if [ -n "$_r" ] && [ -n "$_w" ] && [ -n "$_e" ] && [ "$_r" -le "$_w" ] && [ "$_w" -lt "$_e" ]; then
   ok "M11-②: 규칙($_r) → 근거($_w) → 예외($_e) 순서다"
 else
@@ -3099,6 +3099,55 @@ hasfx "audit: NOLOG 면 stale 판정 금지" "$GLD/commands/audit.md" 'never "st
 hasfx "audit: --firing-log 출력 행 수 대조" "$GLD/commands/audit.md" 'confirm its last line number equals `n`'
 hasfx "evolve: --firing-log 출력 행 수 대조" "$GLD/commands/evolve.md" 'confirm its last line number equals `n`'
 
+# ── 0.96.0: test/qa → execute 루프백 ─────────────────────────────────────────
+# 예전엔 "≤2회 루프백" 문장만 있고 카운터·라벨·기록이 없었다: 사람이 "execute 로" 라고 답해도 dev 는
+# 같은 단계(test)를 다시 돌렸고, 무인 실행이 끊기면 라벨이 test 에 남아 의도·횟수가 사라졌으며,
+# 정체 가드는 컴팩션 뒤 비교할 "직전 이유" 가 없었다.
+HOMD="$GLD/commands/atoms/_handoff.md"
+for f in "$HOMD" "$GLD/commands/dev.md" "$GLD/commands/test.md" "$GLD/commands/qa.md"; do
+  hasfx "OK LOOPBACK 토큰 — $(basename "$f")" "$f" 'OK LOOPBACK: execute'
+done
+hasfx "Section D 에 OK LOOPBACK 행" "$HOMD" '| `OK LOOPBACK: execute` |'
+hasfx "Section A: execute 로의 역전이는 정확히 둘" "$HOMD" '**Backward transitions into `guild:execute` — exactly two.**'
+hasfx "Section B: 네 가지 예외" "$HOMD" '**four documented exceptions**'
+hasfx "Section B: loopback 은 누적형 (네 번째 예외)" "$HOMD" 'and, fourth, `<!-- guild:loopback -->` is **cumulative**'
+hasfx "Section B: 마커 표에 guild:loopback 행" "$HOMD" '| `<!-- guild:loopback -->` … `<!-- /guild:loopback -->` |'
+hasfx "Section B: 활성 블록 단일 정의" "$HOMD" '**Loop-back record — active blocks (the single definition;'
+hasfx "Section B: 접두 문자열로 세지 않는다" "$HOMD" 'Never count by the prefix `### loopback`'
+hasfx "Section B: 루프백 절차 단일 정의" "$HOMD" '**Loop-back procedure — the steps test, qa and the leader all run'
+hasfx "Section B: 중단된 루프백 재진입" "$HOMD" '**Interrupted loop-back** (test/qa Step 0'
+hasfx "Section K: loopback 토큰 등재" "$HOMD" 'the loop-back record (`<!-- guild:loopback -->`, Section B): the headings'
+hasfx "Section K: 네 가지 멤버" "$HOMD" 'That class currently has four members:'
+hasfx "Section H: 상한은 여기서만 정의" "$HOMD" '**this row defines the cap; every other file says `<cap>`**'
+# 상한 리터럴은 Section H 한 곳만 — 표시 문구는 <cap> 자리표시자
+for f in test.md qa.md dev.md batch.md status.md resume.md; do
+  if grep -qE 'loop-backs so far: [^<]|≤ ?2 attempts|bounded loop-back to execute \(≤2' "$GLD/commands/$f"; then
+    bad "상한 리터럴 없음 — $f" "<cap> 만" "리터럴 2"
+  else ok "상한 리터럴 없음 — $f"; fi
+done
+# 루프백 조회는 스트림형 (A-1 의 다중 페이지 결함을 재현하지 않음)
+hasfx "loopback 조회는 --paginate 스트림형" "$HOMD" "contains(\"<!-- guild:loopback -->\")) | {id, body}'"
+hasfx "dev: 사람의 루프백 답은 같은 래퍼가 처리" "$GLD/commands/dev.md" 'the wrapper itself records the loop-back and returns `OK LOOPBACK: execute`'
+hasfx "dev: 리더 루프백도 같은 절차 (from: leader)" "$GLD/commands/dev.md" 'the loop-back procedure with `from: leader`'
+hasfx "dev 2b: 자식의 루프백 질문은 인라인 예외" "$GLD/commands/dev.md" '**The one inline exception — a test/qa "loop back to execute?" `NEEDS_HUMAN` (attended)**'
+hasfx "dev 2b: 자식의 OK LOOPBACK 처리" "$GLD/commands/dev.md" '`OK LOOPBACK: execute` → handle it exactly as Phase 2 does, for `C`'
+hasfx "qa: Step 2 조기 NEEDS_HUMAN 반환 제거" "$GLD/commands/qa.md" "never an early \`NEEDS_HUMAN\` from here"
+hasfx "test: 루프백 진입점" "$GLD/commands/test.md" '**Loop-back entries (right after the label read, before any other work):**'
+hasfx "qa: 루프백 진입점" "$GLD/commands/qa.md" '**Loop-back entries (right after the label read, before any other work):**'
+hasfx "execute Step 0: 미처리 루프백 읽기" "$GLD/commands/atoms/_execute_spine.md" '**Pending loop-back** (its own `gh api` call, before the branch work)'
+hasfx "execute Step 0(a): 루프백 branch 우선" "$GLD/commands/atoms/_execute_spine.md" 'If `<loopback>` is set and its `branch:` is among them'
+hasfx "execute Step 1: resume 문구 교체" "$GLD/commands/atoms/_execute_spine.md" 'this paragraph REPLACES the Resume paragraph above'
+hasfx "execute Step 6: consumed 재조회 판정" "$GLD/commands/atoms/_execute_spine.md" "re-read the \`<!-- guild:loopback -->\` record now — not Step 0's reading from memory"
+hasfx "execute Step 6: consumed 실패 시 전진 금지" "$GLD/commands/atoms/_execute_spine.md" 'still missing → do **not** advance'
+hasfx "_signals: 루프백 재진입은 owed 0" "$GLD/commands/atoms/_signals.md" '**test / qa — owed = 0** on the two loop-back re-entries'
+hasfx "_bash_rules: loopback 도 누적형 id·body 동시 조회" "$GLD/commands/atoms/_bash_rules.md" '`<!-- guild:loopback -->` has the same cumulative shape'
+hasfx "rollback: loopback-reset" "$GLD/commands/rollback.md" '### loopback-reset'
+hasfx "status: 활성 루프백 수 표시" "$GLD/commands/status.md" 'Loop-backs: <active>/<cap>'
+_lb_files="$(grep -rl 'guild:loopback' "$GLD/commands" | sed 's#.*/##' | sort | tr '\n' ' ')"
+for want in _handoff.md test.md qa.md _execute_spine.md _stagnation.md rollback.md status.md resume.md review.md _bash_rules.md; do
+  case " $_lb_files " in *" $want "*) ok "guild:loopback 철자 — $want" ;; *) bad "guild:loopback 철자 — $want" "present" "missing" ;; esac
+done
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -3106,7 +3155,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=897   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=946   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

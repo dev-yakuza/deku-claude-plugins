@@ -36,6 +36,7 @@ Show the current progress of an Issue. **Read-only**: never posts comments, neve
    - `<!-- guild:test-evidence:step-1 -->` (execute produced evidence)
    - `<!-- guild:test:output -->`
    - `<!-- guild:qa:output -->`
+   - `<!-- guild:loopback -->` — when present, count its **active** blocks (`_handoff.md` Section B — never count by the `### loopback` prefix, it also matches a reset) and render one line under the checklist: `Loop-backs: <active>/<cap>` (`<cap>` from `_handoff.md` Section H), plus `— latest from <from>: <reason>` and `(not yet handled)` when the latest active block has no `consumed:` line.
 5. Find the related PR — **resolve it broadly, the same way `review.md` Step 0 does.** A literal `"Closes #$1"` search is too narrow: a PR may use `Fixes`/`Fixed`/`Resolves`/`Resolved`/`Close`/`Closed` (all of GitHub's closing keywords, case-insensitive), or link the Issue purely through the PR sidebar's "Development" feature with no closing keyword in the body at all — so `status` would report "PR: none" for a PR `/gld review $1` finds:
    ```bash
    gh pr list --search "#$1 in:body" --json number,url,state,title,body --jq '{strict: [.[] | select((.body // "") | test("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\\s*:?\\s*#$1\\b")) | {number, url, state}], candidates: [.[] | {number, url, state, title}]}'

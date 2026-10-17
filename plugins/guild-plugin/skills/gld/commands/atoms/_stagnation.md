@@ -38,7 +38,7 @@ What decides membership is whether the finding is **currently driving the retry*
 
 ⚠ **Containment is not the same as intersection — do not loosen it further.** Firing on *any* recurring pair would also fire when something genuinely new is driving the loop (`{A}` → `{A, C}`: `C` is new, the loop is moving), which is a real interruption for no reason. Containment fires only when **nothing** new is driving it. The two rules differ exactly where it matters, and the calibration below still governs the judgment inside each pair ("when genuinely unsure whether two reasons are the same root cause, err toward **not** flagging").
 
-A loop-back with no auditor involvement (a verify gap, a QA defect, the unattended `test`/`qa` loop-backs) uses the role-reason axis alone and behaves **exactly as it did before this rule existed**.
+A loop-back with no auditor involvement (a verify gap, a QA defect, a test/qa loop-back) uses the role-reason axis alone (for test/qa, read from the loop-back record — see *Scope* below).
 
 This is a judgment call by the leader over short strings — no hashing, no new infra.
 
@@ -51,13 +51,17 @@ normal retry. Measured: **5 of 59 attended sessions (8.5%) compacted** — one r
 and one of the five is the session that took this measurement; this guard is on the attended
 path too.
 
-⚠ **Scope — the execute path only.** The rule above applies where an audit record exists, i.e.
-the execute stage's loop-backs — **including an execute-stage verify gap**, which Step 2 sends
-back with a `scan: none` block carrying that reason (read it there, on the role axis, not from
-memory). A loop-back **outside execute** (a QA defect, the unattended `test`/`qa` loop-backs) has
-no `<!-- guild:auditor:execute -->` comment to read, so it uses the role-reason axis alone and **behaves exactly as it did before this rule
-existed**. Reading the rule as unconditional would make every unattended `test`/`qa` loop-back
-stop at `OK PAUSE: needs-human` waiting for a record that was never supposed to exist.
+⚠ **Scope — where the "before" half is read.** Two records, one per kind of loop-back:
+- **Inside execute** (an auditor or role `BLOCKER`, **including an execute-stage verify gap**, which
+  Step 2 sends back with a `scan: none` block carrying that reason) → the audit record above, on the
+  role axis and the auditor axis.
+- **test / qa / leader → execute** (`OK LOOPBACK`) → the Issue's `<!-- guild:loopback -->` record
+  (`_handoff.md` Section B): compare this loop-back's `signature` with the latest active block **of
+  the same `from`**, by the containment test in Section A (an empty signature falls back to the
+  "same root cause" reading of the two `reason`s). That record has no auditor axis.
+Neither is read from memory. Before the loop-back record existed, test/qa loop-backs used the
+role-reason axis from context alone, which a compaction between the two attempts erased — the
+same failure the audit record closed for execute.
 
 The durable place already exists. `_execute_spine.md` Step 4 writes one `### audit-record <n>`
 block per attempt to the Issue's `<!-- guild:auditor:execute -->` comment, and the attempt number
@@ -116,5 +120,5 @@ Substitute the **literal** Issue number for `<N>` (and the literal values for ev
 
 - **Shortens the loop, never lengthens it** (INV2 spirit) — stagnation detection is never used to justify looping *past* the numeric cap.
 - **An identical reason on attempt 2 is decisive, not a hint** — do not silently try a third time hoping it resolves.
-- Detection is read-only bookkeeping (comparing reasons already produced elsewhere — two short strings, or two small `(file, defect)` sets for a multi-finding source) — no new sub-agent, no new file, no cross-session persistence required.
+- Detection is read-only bookkeeping (comparing reasons already produced elsewhere — two short strings, or two small `(file, defect)` sets for a multi-finding source) — no new sub-agent, no new file. The "before" half is read from a durable record (the audit record, or the loop-back record), never from memory.
 - **`MINOR` findings never enter a signature.** They never block, so a churning `MINOR` would make two otherwise-identical attempts compare unequal and **suppress** a stall the guard should have caught.
