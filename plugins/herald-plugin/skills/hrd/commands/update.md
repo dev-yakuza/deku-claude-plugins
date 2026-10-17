@@ -50,5 +50,7 @@ only. Ported from Guild `update.md`.
    in "Project specifics" (`{{SOCIAL_CHANNELS}}`-style values or a hand-written list): offer to
    replace them with the one line pointing to `docs/editorial/channels/` (local-owned — on approval
    only; the channel guides from `/hrd social --add` replace them). Never set up social posts here.
+   0.12.0 reserves the channel names `persona` and `persona-notes`: a channel guide with either name
+   → say it must be removed (`/hrd social --remove`) and added again under another name.
 5. Show a summary; on approval `HRD commit --cmd harness --kind update -m "chore(herald):
    update to <v>" <paths>`, `git push origin <base>`.

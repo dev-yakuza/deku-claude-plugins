@@ -27,7 +27,9 @@ file could not be read. Signals are per machine (gitignored). Write it in `confi
 
 Then, when the output has a `social` field (absent before `/hrd social --setup`, and with older
 scripts): `stale` channels → "the <sns> guide was researched over 180 days ago — `/hrd social
---refresh <sns>`"; `invalid` → "the <sns> guide has problems — `/hrd social --edit <sns>`"; an
+--refresh <sns>`"; `invalid` → "the <sns> guide has problems — `/hrd social --edit <sns>` (research fields:
+`--refresh <sns>`)"; `reserved` → "a channel named <sns> clashes with a reserved name since 0.12.0 —
+`/hrd social --remove <sns>`, then `--add` it under another name"; an
 `error` → say it could not be read. Nothing to say → omit.
 
 ## Maintenance flags (each except `--unlock`: `HRD lock acquire --cmd status`, base checked out and clean,

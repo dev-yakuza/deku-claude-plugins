@@ -184,13 +184,13 @@ class MergeTests(SocialCase):
         self.assertEqual({d["text"] for d in h["disclosure"]}, {"#PR", "Run by ACME"})
         self.assertTrue(all(not c["applied"] for c in out["floor_changes"]))
         out = self.hrd("social", "merge", "--sns", "x", "--researched", self.research(disclosure=weaker),
-                       "--accept-floor", "disclosure:ad/post")[0]
+                       "--accept-floor", "disclosure:ad/post:text")[0]
         h, _ = self.merged(out)
         self.assertEqual({d["text"] for d in h["disclosure"]}, {"#ad", "Run by ACME"})
         lint, _ = self.hrd("social", "lint", "--mode", "refresh", "--file", out["out"], "--target",
                            "docs/editorial/channels/x.md", check=False)
         self.assertFalse(lint["ok"])  # the operator item is gone too, and nobody accepted that
-        self.assertIn("--allow-floor disclosure:ad/post", out["next"])
+        self.assertIn("--allow-floor disclosure:ad/post:text", out["next"])
 
     def test_accept_subset(self):
         out = self.hrd("social", "merge", "--sns", "x", "--researched", self.research(), "--accept", "researched_at")[0]
@@ -285,7 +285,7 @@ class StatusTests(SocialCase):
         self.write("docs/editorial/channels/old.md", guide_text(guide_head("old", researched_at="2020-01-01")))
         self.commit("old")
         out = self.hrd("status")[0]
-        self.assertEqual(out["social"], {"stale": ["old"], "invalid": []})
+        self.assertEqual(out["social"], {"stale": ["old"], "invalid": [], "reserved": []})
         sh(self.root, "git", "rm", "-q", "docs/editorial/persona.md")
         self.commit("no persona")
         self.assertNotIn("social", self.hrd("status")[0])
@@ -420,7 +420,7 @@ class Round1Tests(SocialCase):
         h = social.parse_channel(open(os.path.join(self.root, out["out"])).read())[0]
         keys = {(d["kind"], d["where"]) for d in h["disclosure"]}
         self.assertEqual(keys, {("ad", "post"), ("operator", "post"), ("ad", "setting")})
-        self.assertEqual([c["token"] for c in out["floor_changes"]], ["disclosure:operator/post"])
+        self.assertEqual([c["token"] for c in out["floor_changes"]], ["disclosure:operator/post:moved"])
 
 
 class Round2Tests(SocialCase):
@@ -458,14 +458,14 @@ class Round2Tests(SocialCase):
         for path, name in (("docs/editorial/channels/x.md", "x"), (y, "y")):
             self.write(path, guide_text(guide_head(name, disclosure=[dict(two[0], text="#ad")])))
         args = ["commit", "--cmd", "harness", "--kind", "social", "-m", "m"]
-        _, p = self.hrd(*args, "--trailer", "Herald-Floor: disclosure:ad/post — x only",
+        _, p = self.hrd(*args, "--trailer", "Herald-Floor: disclosure:ad/post:text — x only",
                         "docs/editorial/channels/x.md", y, check=False)
         self.assertIn("social guides' floor", p.stderr)
-        _, p = self.hrd(*args, "--trailer", "Herald-Floor: x::disclosure:ad/post — x only",
+        _, p = self.hrd(*args, "--trailer", "Herald-Floor: x::disclosure:ad/post:text — x only",
                         "docs/editorial/channels/x.md", y, check=False)
         self.assertIn("channels/y.md", p.stderr)
-        self.hrd(*args, "--trailer", "Herald-Floor: x::disclosure:ad/post — ok", "--trailer",
-                 "Herald-Floor: y::disclosure:ad/post — ok", "docs/editorial/channels/x.md", y)
+        self.hrd(*args, "--trailer", "Herald-Floor: x::disclosure:ad/post:text — ok", "--trailer",
+                 "Herald-Floor: y::disclosure:ad/post:text — ok", "docs/editorial/channels/x.md", y)
 
     def test_final_reads_the_guide_on_base(self):
         rel = self.daily("Rainy day.")
@@ -505,7 +505,7 @@ class Round3Tests(SocialCase):
         p = social.memory_rel("pending", "channels", "x.md")  # the guide on base has #PR in the post
         self.write(p, guide_text(guide_head(researched_at="2099-01-01", disclosure=[
             {"kind": "ad", "required": True, "text": "#ad", "where": "post"}])))
-        out = self.hrd("social", "merge", "--sns", "x", "--researched", p, "--accept-floor", "x::disclosure:ad/post")[0]
+        out = self.hrd("social", "merge", "--sns", "x", "--researched", p, "--accept-floor", "x::disclosure:ad/post:text")[0]
         self.assertTrue(all(c["applied"] for c in out["floor_changes"]))
         _, proc = self.hrd("social", "merge", "--sns", "x", "--researched", p, "--accept-floor", "disclosure:operator/post",
                            check=False)

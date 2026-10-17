@@ -1183,7 +1183,7 @@ def listing(root, cfg):
     others = {k: v[1] for k, v in gs.items()}
     rows = []
     for name, (rel, h, err) in sorted(gs.items()):
-        row = {"name": name, "path": rel}
+        row = {"name": name, "path": rel, "reserved": name in RESERVED}
         if err:
             row["errors"] = [err]
         else:
@@ -1257,15 +1257,15 @@ def _disclosure_pairs(old, new):
             if n is not None:
                 moved = True
                 if WHERE_STRENGTH.get(n.get("where"), 0) < WHERE_STRENGTH.get(key[1], 0):
-                    losses.append((tok, "%s disclosure moved from %s to %s" % (key[0], key[1], n.get("where"))))
+                    losses.append((tok + ":moved", "%s disclosure moved from %s to %s" % (key[0], key[1], n.get("where"))))
         if n is None:
-            losses.append((tok, "%s/%s disclosure removed" % key))
+            losses.append((tok + ":removed", "%s/%s disclosure removed" % key))
         else:
             taken.add((n.get("kind"), n.get("where")))
             if d.get("required") and not n.get("required"):
-                losses.append((tok, "%s/%s disclosure no longer required" % key))
+                losses.append((tok + ":required", "%s/%s disclosure no longer required" % key))
             if not moved and fold(d.get("text") or "").strip() != fold(n.get("text") or "").strip():
-                losses.append((tok, "%s/%s disclosure text changed" % key))
+                losses.append((tok + ":text", "%s/%s disclosure text changed" % key))
         pairs.append((d, n, losses))
     added = [n for k, n in new_keys.items() if k not in taken]
     return pairs, added
@@ -1479,7 +1479,7 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
                 ot, nt = terms(old), terms(p)
                 for t in ot:
                     if t not in nt:
-                        need("service_terms", "service term %r removed" % t)
+                        need("service_terms:%s" % _term_hash(t), "service term %r removed" % t)
                 for t, ex in nt.items():
                     if ex - ot.get(t, set()):
                         need("exclude:%s" % _term_hash(t),  # no spaces: tokens travel in commit trailers
@@ -1715,7 +1715,7 @@ def final(root, cfg, draft, final_file):
         if latest.get("profile") == "daily" and res["profile"] != "daily":
             # the human made a daily post name the service: an ad now, with settings nobody confirmed
             check["settings_to_confirm"] = res["settings"]
-    incomplete = "skipped" in check or any(f["id"] == "guide-invalid" for f in check.get("failed", []))
+    incomplete = "skipped" in check or any(f["id"] in ("guide-invalid", "forbidden-invalid") for f in check.get("failed", []))
     if incomplete:
         check.pop("profile", None)  # unknown: keep the approved profile for the mix
     hard = [f["id"] for f in check.get("failed", []) if f["id"] in LIVE_POST_RULES]
@@ -1741,4 +1741,5 @@ def status_summary(root, cfg):
         return None
     rows = listing(root, cfg)["channels"]
     return {"stale": [r["name"] for r in rows if r.get("stale")],
-            "invalid": [r["name"] for r in rows if r.get("errors")]}
+            "invalid": [r["name"] for r in rows if r.get("errors") and not r.get("reserved")],
+            "reserved": [r["name"] for r in rows if r.get("reserved")]}

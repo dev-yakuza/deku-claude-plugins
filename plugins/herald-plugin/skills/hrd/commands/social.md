@@ -44,7 +44,8 @@ yes (`AskUserQuestion`, naming exactly what is lost) before you pass `--allow-fl
 rule the human confirms needs `--strengthen <token>`. `lint` prints the trailers to commit with
 (`trailers`, each naming its file: `<file>::<token>`, where `<file>` is the channel name, `persona`
 or `persona-notes` — copy them exactly); add the human's reason in English:
-`--trailer "Herald-Floor: <file>::<token> — <reason>"`. A commit of several social files accepts
+`--trailer "Herald-Floor: <file>::<token> — <what is lost (lint's floor[].what)>: <reason>"` — tokens
+are hashes in places, so the reason names the term or item for whoever reads the history. A commit of several social files accepts
 only file-named tokens. In a shallow clone, a new file's removed version cannot be looked up: `lint`
 asks for `history` — fetch the full history (`git fetch --unshallow`) rather than accepting it.
 
@@ -86,7 +87,7 @@ the empathy notes are committed with the repo, which may be public.
 
 ### `--add <sns>`
 1. No persona on base → `--setup` first. The name: lowercase `[a-z0-9-]`, not `pending`,
-   `approved`, `final` or `drafts`; already a guide's name or alias (`HRD social list`) → point
+   `approved`, `final`, `drafts`, `persona` or `persona-notes`; already a guide's name or alias (`HRD social list`) → point
    to `--edit` and stop.
 2. Ask the human the posts' language (default: the source language — `HRD social list`
    `source_lang`) and other names people type for this channel (aliases). A channel that existed before (`--remove`d) is compared with its removed version: carry its
