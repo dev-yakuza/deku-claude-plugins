@@ -56,12 +56,15 @@ def load_rules(root, rev=None):
     if rev:
         import json
 
+        from .util import HeraldError
+
         proc = run(["git", "show", "%s:docs/editorial/gate-rules.json" % rev], cwd=root, check=False)
         try:
             rules = json.loads(proc.stdout) if proc.returncode == 0 else {}
-        except ValueError:
-            rules = {}
-        rules = rules if isinstance(rules, dict) else {}
+        except ValueError as e:
+            raise HeraldError("docs/editorial/gate-rules.json at %s is not JSON (%s)" % (rev, e))
+        if not isinstance(rules, dict):
+            raise HeraldError("docs/editorial/gate-rules.json at %s is not a JSON object" % rev)
     else:
         rules = read_json(os.path.join(root, "docs", "editorial", "gate-rules.json"), {})
     out = {}

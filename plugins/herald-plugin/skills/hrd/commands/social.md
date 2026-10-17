@@ -60,7 +60,8 @@ the empathy notes are committed with the repo, which may be public.
 2. Article rules on posts: list the `confirmed` forbidden rules of `docs/editorial/gate-rules.json`
    (common and per language). Ask per rule whether it is for articles only (e.g. a ban on the
    first person) or for posts too; set `"scope": "article"` on the articles-only ones (the guard
-   asks). Later, turning a confirmed rule to `article` loosens posts — only by a human.
+   asks) and commit each with `--trailer "Herald-Floor: gate-scope:<pattern> — <reason>"`.
+   Later, turning a confirmed rule to `article` loosens posts — only by a human, the same way.
 3. Interview (`AskUserQuestion`, at most 4 per call): the persona's background (never stated in
    posts), voice, point of view, daily themes, things it never says; the service terms — the
    service's names, product and feature names, their spelling in each language the channels will

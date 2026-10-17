@@ -390,6 +390,59 @@ class CheckTests(SocialCase):
         self.assertEqual(social.find_urls("Node.js/Deno e.g. 3.5"), [])
 
 
+class ReviewRound1Tests(SocialCase):
+    def test_disclosure_inside_a_url_does_not_count(self):
+        rel = self.promo("Read our post https://example.test/blog/old-post/#PR")
+        self.assertIn("disclosure", self.failed(rel))
+        self.write("docs/editorial/channels/x.md", guide_text(guide_head(disclosure=[
+            {"kind": "ad", "required": True, "text": "promo", "where": "post"}])))
+        self.commit("word disclosure")
+        rel = self.promo("Read it https://example.test/blog/old-post/?promo=1")
+        self.assertIn("disclosure", self.failed(rel))
+
+    def test_body_changed_after_prepare(self):
+        out = self.hrd("social", "prepare", "--sns", "x", "--slug", "old-post", "--n", "1")[0]
+        rel = out["drafts"][0]
+        self.write("src/content/blog/old-post.md", open(os.path.join(self.root, "src/content/blog/old-post.md")).read()
+                   + "\nAn unverified sentence here.\n")
+        self.commit("edit on base")
+        self.draft(rel, "x #PR https://example.test/blog/old-post/",
+                   sources=[{"text": "An unverified sentence here.", "from": "body"}])
+        self.assertIn("basis-changed", self.failed(rel))
+
+    def test_guide_language_changed_after_prepare(self):
+        rel = self.daily("Rainy day.")
+        self.write("docs/editorial/channels/x.md", guide_text(guide_head(lang="ko")))
+        self.commit("lang")
+        self.assertIn("basis-changed", self.failed(rel))
+
+    def test_bom_draft(self):
+        rel = self.daily("Rainy day.")
+        self.write(rel, "\ufeff" + open(os.path.join(self.root, rel)).read())
+        self.assertEqual(self.failed(rel), [])
+
+    def test_invalid_gate_rules_fail_closed(self):
+        self.write("docs/editorial/gate-rules.json", "{bad json")
+        self.commit("broken rules")
+        self.assertIn("forbidden-invalid", self.failed(self.daily("Rainy day.")))
+
+    def test_www_host_and_idn_and_more_tlds(self):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        cfg = json.load(open(cfgp))
+        cfg["site"]["base_url"] = "https://www.example.test"
+        self.write(".claude/herald/config.json", json.dumps(cfg))
+        self.commit("www")
+        self.reload()
+        self.assertEqual(social.site_host(self.cfg), "example.test")
+        self.assertIn("daily-url", self.failed(self.daily("see https://例え.jp/abc")))
+        self.assertIn("daily-url", self.failed(self.daily("see example.ch/abc")))
+
+    def test_weighted_counts(self):
+        self.assertEqual(social.post_length("…→", "weighted", 23), 4)
+        self.assertEqual(social.post_length("\U0001F469\u200D\U0001F4BB", "weighted", 23), 2)
+        self.assertEqual(social.post_length("\U0001F44D\U0001F3FD", "weighted", 23), 2)
+
+
 class CloseTests(SocialCase):
     def test_approve_records_and_copies(self):
         out = self.hrd("social", "prepare", "--sns", "x", "--slug", "old-post", "--n", "2")[0]
@@ -516,6 +569,47 @@ class LintTests(SocialCase):
         self.assertEqual(len(out["errors"]), 2)
         self.assertTrue(self.lint("setup", "# notes\n- crowded trains (source kind: forum.test)\n",
                                   "docs/editorial/persona-notes.md")["ok"])
+
+
+class LintRound1Tests(LintTests):
+    def test_unparsable_head_is_compared_as_new(self):
+        t = "docs/editorial/channels/x.md"
+        self.write(t, "<!-- herald:channel {\"name\": \"x\",} -->\n")
+        self.commit("broken guide")
+        waived = guide_head(disclosure=[{"kind": "ad", "required": False, "text": "#PR", "where": "post"}],
+                            disclosure_waiver={"kind": "ad", "reason": "r", "approved_at": TODAY})
+        out = self.lint("edit", guide_text(waived), t)
+        self.assertFalse(out["ok"])
+        self.assertTrue(any("--allow-floor head" in e for e in out["errors"]))
+        self.assertTrue(any("--allow-floor disclosure_waiver" in e for e in out["errors"]))
+        self.write("docs/editorial/persona.md", "<!-- herald:social-persona {bad} -->\n")
+        self.commit("broken persona")
+        out = self.lint("persona", persona_text(), "docs/editorial/persona.md")
+        self.assertTrue(any("--allow-floor head" in e for e in out["errors"]))
+
+    def test_mode_must_fit_target(self):
+        for mode, target in (("setup", "docs/editorial/channels/x.md"), ("persona", "docs/editorial/channels/x.md"),
+                             ("edit", "docs/editorial/persona.md"), ("setup", "docs/editorial/persona.md")):
+            self.assertIsNone(self.lint(mode, guide_text(guide_head()), target), (mode, target))
+
+    def test_non_string_text_and_upward_move(self):
+        t = "docs/editorial/channels/x.md"
+        out = self.lint("edit", guide_text(guide_head(disclosure=[
+            {"kind": "ad", "required": True, "text": 123, "where": "post"}])), t)
+        self.assertTrue(any("must be a string" in e for e in out["errors"]))
+        self.write(t, guide_text(guide_head(disclosure=[
+            {"kind": "ad", "required": True, "text": "#PR", "where": "post"},
+            {"kind": "operator", "required": True, "text": "Run by ACME", "where": "profile"}])))
+        self.commit("operator profile")
+        out = self.lint("edit", guide_text(guide_head(disclosure=[
+            {"kind": "ad", "required": True, "text": "#PR", "where": "post"},
+            {"kind": "operator", "required": True, "text": "#ACME", "where": "post"}])), t)
+        self.assertTrue(out["ok"], out)
+
+    def test_notes_without_scheme(self):
+        out = self.lint("setup", "# notes\n- x.com/someone/status/123\n- www.instagram.com/p/abc\n",
+                        "docs/editorial/persona-notes.md")
+        self.assertEqual(len(out["errors"]), 2)
 
 
 class TrailerAndGuardTests(SocialCase):

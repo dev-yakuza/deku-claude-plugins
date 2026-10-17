@@ -29,7 +29,9 @@ For social posts (`design/herald/03-social.md` S14) the floor is: the post check
 `forbidden` rules in channel guides, the persona and gate rules (including turning a confirmed
 gate rule to `"scope": "article"`), the disclosure items and the waiver, and the persona's
 `service_terms` (removing one, adding an exclusion). Only a human loosens them, one named item at
-a time (`HRD social lint --allow-floor`, recorded as a `Herald-Floor:` commit trailer); the
+a time, recorded as a `Herald-Floor:` commit trailer (`HRD social lint --allow-floor` checks the
+guides and the persona in code; a gate rule's `scope` is the human's per-rule answer in
+`/hrd social --setup`); the
 distributor's Habits never contradict them.
 
 **INV3 — everything is reversible.**

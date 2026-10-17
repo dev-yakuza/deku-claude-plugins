@@ -68,14 +68,19 @@ OVERRIDABLE = ("length", "hashtags", "link-position", "s9b-statistic")  # + s9a 
 RULE_IDS = ("length", "hashtags", "link-position", "s9a-service-experience", "s9b-statistic",
             "disclosure", "forbidden-confirmed", "forbidden-invalid", "sources", "promotion-quote-not-found",
             "promotion-lang", "promo-url", "promo-link-missing", "daily-url", "daily-sources",
-            "service-mention-not-allowed", "header-mismatch", "guide-invalid")
+            "service-mention-not-allowed", "header-mismatch", "guide-invalid", "basis-changed")
 
 _URLCH = r"A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%"
 _TLDS = ("com|net|org|edu|gov|io|dev|app|ai|co|jp|kr|cn|tw|hk|sg|us|uk|de|fr|es|it|nl|ru|br|in|au|ca|eu|me|"
+         "ch|at|se|pl|be|nz|fi|dk|no|pt|cz|gr|hu|ro|ie|il|tr|ua|za|mx|ar|cl|pe|kz|lt|lv|ee|sk|si|hr|rs|bg|"
+         "art|top|club|xyz|fun|live|space|cloud|digital|social|media|studio|design|email|asia|tokyo|"
          "info|biz|xyz|site|blog|tech|page|link|ly|gl|to|tv|so|sh|gg|cc|news|online|shop|store|website|world|"
          "life|today|jobs|vn|th|id|ph|my")
-URL_RE = re.compile(r"https?://[%s]+|(?<![\w@.\-/])(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+(?:%s)"
-                    r"(?![A-Za-z0-9-])(?:/[%s]*)?" % (_URLCH, _TLDS, _URLCH), re.I)
+# a scheme URL's host may be non-ASCII (IDN); its path is RFC 3986 characters, so CJK text right
+# after it is not swallowed
+URL_RE = re.compile(r"https?://[^\s/<>\"'「」『』（）【】、。！？]+(?:/[%s]*)?|(?<![\w@.\-/])"
+                    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+(?:%s)(?![A-Za-z0-9-])(?:/[%s]*)?"
+                    % (_URLCH, _TLDS, _URLCH), re.I)
 HASHTAG_RE = re.compile(r"(?<![\w#&])#[^\s#.,!?、。！？()\[\]{}\"']+")
 CJK = "ᄀ-ᇿ⺀-鿿ꥠ-꥿가-힯豈-﫿　-〿"
 _CJK_SPACE_RE = re.compile(r"\s+(?=[%s])|(?<=[%s])\s+" % (CJK, CJK))
@@ -88,7 +93,7 @@ def primary(lang):
 
 
 def fold(s):
-    return unicodedata.normalize("NFKC", s or "").casefold()
+    return unicodedata.normalize("NFKC", s if isinstance(s, str) else str(s or "")).casefold()
 
 
 def memory_dir(root):
@@ -245,17 +250,27 @@ def mask_urls(text):
     return out
 
 
+# twitter-text v3 weights: these ranges count 1, every other code point 2 (03-social.md §2)
+_LIGHT = ((0x0000, 0x10FF), (0x2000, 0x200D), (0x2010, 0x201F), (0x2032, 0x2037))
+
+
 def _wide(c):
     o = ord(c)
-    return (0x1100 <= o <= 0x11FF or 0x2E80 <= o <= 0x9FFF or 0xA960 <= o <= 0xA97F or 0xAC00 <= o <= 0xD7AF
-            or 0xF900 <= o <= 0xFAFF or 0xFE30 <= o <= 0xFE4F or 0xFF00 <= o <= 0xFF60 or 0xFFE0 <= o <= 0xFFE6
-            or 0x20000 <= o <= 0x3FFFD or 0x1F000 <= o <= 0x1FAFF or 0x2600 <= o <= 0x27BF)
+    return not any(a <= o <= b for a, b in _LIGHT)
 
 
 def _weight(s):
-    n = 0
+    """An emoji sequence (ZWJ joins, skin tones, variation selectors) counts as one unit."""
+    n, join = 0, False
     for c in s:
-        if unicodedata.combining(c) or ord(c) in (0x200D, 0xFE0F, 0xFE0E):
+        o = ord(c)
+        if o == 0x200D:
+            join = True
+            continue
+        if unicodedata.combining(c) or o in (0xFE0F, 0xFE0E) or 0x1F3FB <= o <= 0x1F3FF:
+            continue
+        if join:
+            join = False
             continue
         n += 2 if _wide(c) else 1
     return n
@@ -391,7 +406,10 @@ def channel_problems(h, name, cfg=None, persona=None, others=None):
         if (d["kind"], d["where"]) in seen:
             errors.append("disclosure has two %s/%s items" % (d["kind"], d["where"]))
         seen.add((d["kind"], d["where"]))
-        if d["where"] in ("post", "setting") and not unicodedata.normalize("NFKC", str(d.get("text") or "")).strip():
+        if "text" in d and not isinstance(d["text"], str):
+            errors.append("disclosure[%d] text must be a string" % i)
+            continue
+        if d["where"] in ("post", "setting") and not unicodedata.normalize("NFKC", d.get("text") or "").strip():
             errors.append("disclosure[%d] (%s/%s) needs a text" % (i, d["kind"], d["where"]))
     waiver = h.get("disclosure_waiver")
     if waiver is not None and not (isinstance(waiver, dict) and waiver.get("kind") == "ad"
@@ -708,6 +726,7 @@ def prepare(root, cfg, sns, slug=None, n=3):
             raise HeraldError("the %s guide's language %s is neither the source nor a translation target — this "
                               "channel takes daily posts only" % (sns, lang))
         basis = promotable(root, cfg, slug, plang)
+        basis["body_blob"] = git(root, "rev-parse", "HEAD:%s" % basis["body"]).strip()
         if basis["unread"]:
             warnings.append("%s was published without a human reading it (auto publish) — read it before promoting" % slug)
     run_id = _run_id(root)
@@ -716,6 +735,7 @@ def prepare(root, cfg, sns, slug=None, n=3):
     for d in drafts:
         _log(root, {"event": "status", "status": "drafted", "run": run_id, "sns": sns, "kind": kind, "slug": slug,
                     "draft": d, "lang": lang, "url": basis.get("url"), "body": basis.get("body"),
+                    "body_blob": basis.get("body_blob"),
                     "signal_topic": "social:%s:%s" % (sns, date)})
     os.makedirs(os.path.join(memory_dir(root), sns), exist_ok=True)
     read = {"guide": guide_rel(sns), "persona": PERSONA, "promotion": PROMOTION,
@@ -762,7 +782,7 @@ def parse_draft(text):
 def _gate_forbidden(root, cfg, lang):
     from .validate import lang_rules, load_rules
 
-    rules = load_rules(root, rev="HEAD")
+    rules = load_rules(root, rev="HEAD")  # raises on an unreadable gate-rules.json (fail closed)
     known = promo_lang(cfg, lang) or lang
     _, forbidden = lang_rules(rules, cfg, known)
     return [r for r in forbidden if isinstance(r, dict) and r.get("scope", "all") != "article"]
@@ -785,7 +805,7 @@ def check_draft(root, cfg, rel, record=True):
         raw = open(os.path.join(root, rel), "rb").read()
     except OSError:
         raise HeraldError("draft %s does not exist" % rel)
-    text = raw.decode("utf-8", errors="replace")
+    text = raw.decode("utf-8-sig", errors="replace")
     failed, warnings = [], []
     profile = rec.get("kind")
 
@@ -806,7 +826,14 @@ def check_draft(root, cfg, rel, record=True):
     except HeraldError as e:
         fail("guide-invalid", str(e))
         return _result(root, rel, raw, rec, profile, failed, warnings, [], record)
-    lang = h["lang"]
+    lang = rec.get("lang") or h["lang"]
+    if h["lang"] != lang:
+        fail("basis-changed", "the %s guide's language changed from %s to %s since prepare — prepare again"
+             % (sns, lang, h["lang"]))
+    if rec.get("body"):
+        blob = git(root, "rev-parse", "-q", "--verify", "HEAD:%s" % rec["body"], check=False).strip()
+        if blob != rec.get("body_blob"):
+            fail("basis-changed", "%s changed on base since prepare checked it — prepare again" % rec["body"])
     eff = effective(h)
     post = body.strip()
     norm = fold(post)
@@ -857,7 +884,7 @@ def check_draft(root, cfg, rel, record=True):
     if profile in ("promo", "daily+service"):
         for d in disc:
             if d.get("where") == "post":
-                if not disclosure_present(norm, d.get("text") or ""):
+                if not disclosure_present(masked, d.get("text") or ""):  # never inside a URL
                     if d.get("required"):
                         fail("disclosure", "missing %s disclosure %r" % (d.get("kind"), d.get("text")))
                     else:
@@ -870,7 +897,12 @@ def check_draft(root, cfg, rel, record=True):
     # sources (S7)
     _check_sources(root, cfg, rec, hdr, profile, lang, fail)
     # forbidden
-    rules = list(h.get("forbidden") or []) + list(persona.get("forbidden") or []) + _gate_forbidden(root, cfg, lang)
+    try:
+        gate = _gate_forbidden(root, cfg, lang)
+    except HeraldError as e:
+        gate = []
+        fail("forbidden-invalid", str(e))
+    rules = list(h.get("forbidden") or []) + list(persona.get("forbidden") or []) + gate
     for r in rules:
         pat = r.get("pattern") or ""
         if not pat:
@@ -1091,9 +1123,11 @@ def _floor_disclosure(old, new, need):
         key = (d.get("kind"), d.get("where"))
         tok = "disclosure:%s/%s" % key
         n = new_keys.get(key)
+        moved = False
         if n is None:  # a move: the same kind at a `where` HEAD did not have
             n = next((x for k, x in new_keys.items() if k[0] == key[0] and k not in old_keys and k not in moved_to), None)
             if n is not None:
+                moved = True
                 moved_to.add((n.get("kind"), n.get("where")))
                 if WHERE_STRENGTH.get(n.get("where"), 0) < WHERE_STRENGTH.get(key[1], 0):
                     need(tok, "%s disclosure moved from %s to %s" % (key[0], key[1], n.get("where")))
@@ -1102,7 +1136,7 @@ def _floor_disclosure(old, new, need):
             continue
         if d.get("required") and not n.get("required"):
             need(tok, "%s/%s disclosure no longer required" % key)
-        if fold(d.get("text") or "").strip() != fold(n.get("text") or "").strip():
+        if not moved and fold(d.get("text") or "").strip() != fold(n.get("text") or "").strip():
             need(tok, "%s/%s disclosure text changed" % key)
 
 
@@ -1121,6 +1155,14 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
         raise HeraldError("%s already exists — use `/hrd social --edit` (or --refresh)" % target)
     if mode == "edit" and head is None:
         raise HeraldError("%s is not on base — use `/hrd social --add`" % target)
+    if kind == "channel" and mode not in ("add", "edit"):
+        raise HeraldError("a channel guide is linted with --mode add (new) or edit (existing)")
+    if kind == "channel" and mode == "edit" and head is None or kind == "channel" and mode == "add" and head is not None:
+        raise HeraldError("mode %s does not fit %s" % (mode, target))
+    if kind in ("persona", "notes") and mode not in ("setup", "persona"):
+        raise HeraldError("the persona files are linted with --mode setup (new) or persona")
+    if kind in ("persona", "notes") and mode == "setup" and head is not None:
+        raise HeraldError("%s already exists — use --mode persona (`/hrd social --persona`)" % target)
     errors, warnings, floor, strong_list = [], [], [], []
     allow, strengthen_ok = set(allow_floor or ()), set(strengthen or ())
     used = set()
@@ -1165,13 +1207,16 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
             if researched_region(text) is None:
                 errors.append("the researched region markers (%s … %s) must appear once each" % (RESEARCHED_START, RESEARCHED_END))
             old, _ = parse_channel(head) if head is not None else (None, None)
-            if head is None:
+            if head is not None and old is None:
+                warnings.append("the guide on base has an unparsable head block — compared as a new file")
+                need("head", "the floor cannot be compared with the broken guide on base")
+            if old is None:
                 for k, r in _forbidden_map(h.get("forbidden")).items():
                     if r.get("status") == "confirmed":
                         strong("forbidden:%s" % k, "new rule %r starts confirmed" % r.get("pattern"))
                 if h.get("disclosure_waiver"):
                     need("disclosure_waiver", "the guide starts with an ad disclosure waiver")
-            elif old is not None:
+            else:
                 _floor_forbidden(old.get("forbidden"), h.get("forbidden"), need, strong)
                 _floor_disclosure(old.get("disclosure"), h.get("disclosure"), need)
                 if old.get("disclosure_waiver") != h.get("disclosure_waiver") and h.get("disclosure_waiver"):
@@ -1191,11 +1236,14 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
             errors += e
             warnings += w
             old = parse_persona(head)[0] if head is not None else None
-            if head is None:
+            if head is not None and old is None:
+                warnings.append("the persona on base has an unparsable head block — compared as a new file")
+                need("head", "the floor cannot be compared with the broken persona on base")
+            if old is None:
                 for k, r in _forbidden_map(p.get("forbidden")).items():
                     if r.get("status") == "confirmed":
                         strong("forbidden:%s" % k, "new rule %r starts confirmed" % r.get("pattern"))
-            elif old is not None:
+            else:
                 _floor_forbidden(old.get("forbidden"), p.get("forbidden"), need, strong)
 
                 def terms(x):
@@ -1215,8 +1263,9 @@ def lint(root, cfg, mode, file_path, target, allow_floor=(), strengthen=()):
                     if ex - ot.get(t, set()):
                         need("exclude:%s" % t, "exclusions added for %r: %s" % (t, ", ".join(sorted(ex - ot.get(t, set())))))
     else:  # persona-notes: themes and source kinds only (S5)
-        for m in re.finditer(r"https?://[^\s/]+/[^\s)>\]]+", text):
-            errors.append("a URL with a path (%s) — keep the source kind or domain only (S5)" % m.group(0)[:60])
+        for _, _, u in find_urls(text):
+            if "/" in re.sub(r"^https?://", "", u, flags=re.I).rstrip("/"):
+                errors.append("a URL with a path (%s) — keep the source kind or domain only (S5)" % u[:60])
         for m in re.finditer(r"(?<![\w.@])@[A-Za-z0-9_]{2,}", text):
             errors.append("an account handle (%s) — no handles in persona-notes.md (S5)" % m.group(0))
     unused = sorted((allow | strengthen_ok) - used)
