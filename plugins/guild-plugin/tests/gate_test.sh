@@ -951,6 +951,14 @@ git commit -qam x >/dev/null 2>&1
 [ "$(cnt $LOGF baseline-updated)" = 1 ] && [ ! -f "$PENDF" ] \
   && ok "L2 git 훅이 pending 을 대체 → 본 로그 1줄, pending 없음" || bad "L2 훅 대체" "log 1 / no pending" "log $(cnt $LOGF baseline-updated) / pending $([ -f $PENDF ] && echo yes || echo no)"
 grep -q '"v": 2' "$LOGF" && ok "L3 새 행은 v:2" || bad "L3 v:2" "v 2" "$(head -1 $LOGF)"
+# 훅을 건너뛰는 커밋(--no-verify)은 반영되는데 훅이 대체 기록을 남기지 않는다 → PreToolUse 기록이 유일
+visual_repo
+printf 'PNG2' > src/a/__screenshots__/btn.png
+printf '{"tool_input":{"command":"git commit --no-verify -am x"}}' | python3 .claude/guild/gates/scripts/gate_precommit.py >/dev/null 2>&1
+git commit -q --no-verify -am x >/dev/null 2>&1
+printf 'more\n' >> README.md; git commit -qam y >/dev/null 2>&1
+[ "$(cnt $LOGF baseline-updated)" = 1 ] && ok "L3b --no-verify 커밋의 경고는 본 로그에 (다음 훅이 지우지 않음)" \
+  || bad "L3b --no-verify" "log 1" "log $(cnt $LOGF baseline-updated) / pending $(cnt $PENDF baseline-updated)"
 # 차단된 PreToolUse 는 커밋이 훅에 닿지 않으므로 본 로그에 바로 쓴다
 fresh_repo
 printf 'k\n' > id_rsa; git add id_rsa >/dev/null 2>&1
@@ -1027,6 +1035,8 @@ cat > "$LOGF" <<'J'
 {"ts": "2026-10-01T04:00:00Z", "mode": "pre-tool-use", "rule": "boundary:d", "action": "warn", "file": "w"}
 {"ts": "2026-10-01T04:11:00Z", "mode": "git-hook", "rule": "boundary:d", "action": "warn", "file": "w"}
 {"v": 2, "ts": "2026-10-02T00:00:00Z", "mode": "pre-tool-use", "rule": "boundary:e", "action": "warn", "file": "v"}
+{"v": 2, "ts": "2026-10-03T00:00:00Z", "mode": "pre-tool-use", "rule": "boundary:h", "action": "block", "file": "q"}
+{"v": 2, "ts": "2026-10-03T00:00:30Z", "mode": "git-hook", "rule": "boundary:h", "action": "block", "file": "q"}
 J
 OUT="$($G --firing-log --out "$OUTF" </dev/null 2>&1)"
 fl() { grep -c "$1" "$OUTF"; }
@@ -1036,6 +1046,7 @@ fl() { grep -c "$1" "$OUTF"; }
 [ "$(fl '"secret"')" = 1 ] && ok "M6 레거시 block 행도 짝 제거" || bad "M6 block 짝" "1" "$(fl '"secret"')"
 [ "$(fl boundary:d)" = 2 ] && ok "M7 600초 넘게 떨어진 행은 짝이 아님" || bad "M7 경계" "2" "$(fl boundary:d)"
 [ "$(fl boundary:e)" = 1 ] && ok "M8 v2 행은 그대로" || bad "M8 v2" "1" "$(fl boundary:e)"
+[ "$(fl boundary:h)" = 2 ] && ok "M8b v2 PreToolUse 행은 같은 키의 훅 행이 있어도 짝 제거 대상 아님" || bad "M8b v2 짝 제외" "2" "$(fl boundary:h)"
 case "$OUT" in *NOLOG*) bad "M9 로그 있으면 NOLOG 아님" "no NOLOG" "$OUT" ;; *) ok "M9 로그 있으면 NOLOG 아님" ;; esac
 $G --firing-log --out "$OUTF" --since 2026-10-01T03:30:00Z </dev/null >/dev/null 2>&1
 [ "$(fl boundary:a)" = 0 ] && [ "$(fl boundary:e)" = 1 ] && ok "M10 --since 필터" || bad "M10 --since" "a 0 / e 1" "a $(fl boundary:a) / e $(fl boundary:e)"
@@ -1084,7 +1095,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=165
+GATE_MIN_CHECKS=167
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

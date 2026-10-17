@@ -466,6 +466,16 @@ def is_git_commit(cmd):
     return bool(GIT_COMMIT_RE.search(cmd))
 
 
+# A commit that skips the hook still lands, so the PreToolUse pass is its only firing record —
+# parking it as pending would let the next hook run discard it. `-n` is commit's short form of
+# --no-verify; a `-c core.hooksPath=…` override can point the hook away just the same.
+HOOK_BYPASS_RE = re.compile(r"(?:^|\s)(?:--no-verify|-n)(?=\s|$)|core\.hooksPath\s*=")
+
+
+def bypasses_hook(cmd):
+    return bool(cmd) and bool(HOOK_BYPASS_RE.search(cmd))
+
+
 def commit_scope(cmd):
     """What will this specific commit command actually put in the commit?
 
@@ -1453,7 +1463,7 @@ def main_pre_tool_use():
         return 0
     # Blocked → this commit never reaches the git hook, so this is its only record. Not blocked
     # → park the rows; the hook replaces them (see flush_firings).
-    flush_firings(root, "pre-tool-use", pending=not block)
+    flush_firings(root, "pre-tool-use", pending=not block and not bypasses_hook(cmd))
     write_findings(root, block)
     if block:
         deny_pre_tool_use(block, warn)  # exits 2
@@ -1876,8 +1886,14 @@ def main_firing_log(args):
     import time
     now = time.time()
     try:
-        rows = _read_rows(p, strict=True)
-        pending_rows = _read_rows(pp, strict=True)
+        # Under the lock: a promotion between the two reads (log append, then pending removal)
+        # would otherwise make the promoted rows invisible to both. Reading takes the lock but
+        # never writes, so this mode stays read-only.
+        with _FiringsLock(root) as lk:
+            if not lk.acquired:
+                raise RuntimeError("firing-log lock busy")
+            rows = _read_rows(p, strict=True)
+            pending_rows = _read_rows(pp, strict=True)
     except Exception as e:
         sys.stderr.write(f"guild gate: --firing-log: cannot read the firing log ({e}) — NOT judged\n")
         return EXIT_NOT_JUDGED
