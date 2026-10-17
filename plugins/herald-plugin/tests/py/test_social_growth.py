@@ -478,5 +478,60 @@ class Round2Tests(SocialCase):
         self.assertIn("daily-url", res["fix_live_post"])
 
 
+class Round3Tests(SocialCase):
+    def test_multi_word_term_exclusion_commits(self):
+        p1 = dict(PERSONA, service_terms=["Safie", "セーフィー", {"term": "Safie Pocket"}])
+        self.write("docs/editorial/persona.md", persona_text(p1))
+        self.commit("pocket")
+        p2 = dict(PERSONA, service_terms=["Safie", "セーフィー", {"term": "Safie Pocket", "exclude": ["Safie Pocket 2"]}])
+        pending = os.path.join(self.tmp, "p.md")
+        with open(pending, "w") as f:
+            f.write(persona_text(p2))
+        out = self.hrd("social", "lint", "--mode", "persona", "--file", pending, "--target", "docs/editorial/persona.md",
+                       check=False)[0]
+        tok = [e.split("--allow-floor ")[1].rstrip(")") for e in out["errors"] if "--allow-floor" in e][0]
+        self.assertNotIn(" ", tok)
+        out = self.hrd("social", "lint", "--mode", "persona", "--file", pending, "--target", "docs/editorial/persona.md",
+                       "--allow-floor", tok)[0]
+        self.write("docs/editorial/persona.md", persona_text(p2))
+        self.hrd("commit", "--cmd", "harness", "--kind", "social", "-m", "m", "--trailer",
+                 "%s — the human agreed" % out["trailers"][0], "docs/editorial/persona.md")
+
+    def test_persona_is_not_a_channel_name(self):
+        _, p = self.hrd("social", "prepare", "--sns", "persona", check=False)
+        self.assertIn("invalid channel name", p.stderr)
+
+    def test_merge_accept_floor_tokens(self):
+        p = social.memory_rel("pending", "channels", "x.md")  # the guide on base has #PR in the post
+        self.write(p, guide_text(guide_head(researched_at="2099-01-01", disclosure=[
+            {"kind": "ad", "required": True, "text": "#ad", "where": "post"}])))
+        out = self.hrd("social", "merge", "--sns", "x", "--researched", p, "--accept-floor", "x::disclosure:ad/post")[0]
+        self.assertTrue(all(c["applied"] for c in out["floor_changes"]))
+        _, proc = self.hrd("social", "merge", "--sns", "x", "--researched", p, "--accept-floor", "disclosure:operator/post",
+                           check=False)
+        self.assertIn("names no change", proc.stderr)
+
+    def test_final_incomplete_and_base_missing(self):
+        rel = self.daily("Rainy day.")
+        self.hrd("social", "close", "--run", social.drafted_record(self.root, rel)["run"], "--approved", rel)
+        sh(self.root, "git", "rm", "-q", "docs/editorial/channels/x.md")
+        self.commit("removed")
+        path = social.memory_rel("final", "x", os.path.basename(rel))
+        self.write(path, "Safie! https://x.test/")
+        res = self.hrd("social", "final", "--draft", rel, "--final-file", path)[0]
+        self.assertTrue(res["check_incomplete"])
+        self.assertEqual(social.latest_status(self.root)[rel]["profile"], "daily")
+
+    def test_bad_researched_at_never_crashes_list(self):
+        self.write("docs/editorial/channels/x.md", guide_text(guide_head(researched_at=5)))
+        self.commit("bad")
+        self.assertTrue(self.hrd("social", "list")[0]["channels"][0]["stale"])
+
+    def test_trailer_tokens(self):
+        allow, strong = social.trailer_tokens(["Herald-Floor: persona::exclude:abcd1234 — fine",
+                                               "Herald-Strengthen: x::forbidden:1 - ok", "Herald-Floor: y::head"])
+        self.assertEqual((allow, strong), ({"persona::exclude:abcd1234", "y::head"}, {"x::forbidden:1"}))
+
+
 if __name__ == "__main__":
     unittest.main()

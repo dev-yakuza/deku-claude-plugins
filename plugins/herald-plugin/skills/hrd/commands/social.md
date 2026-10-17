@@ -42,9 +42,11 @@ confirmed rule, a weaker disclosure, a removed service term, an added exclusion,
 waiver, a channel language without default checks. Each floor change needs the human's explicit
 yes (`AskUserQuestion`, naming exactly what is lost) before you pass `--allow-floor <token>`; a
 rule the human confirms needs `--strengthen <token>`. `lint` prints the trailers to commit with
-(`trailers`, each naming its file: `<file>::<token>`); add the human's reason in English:
+(`trailers`, each naming its file: `<file>::<token>`, where `<file>` is the channel name, `persona`
+or `persona-notes` — copy them exactly); add the human's reason in English:
 `--trailer "Herald-Floor: <file>::<token> — <reason>"`. A commit of several social files accepts
-only file-named tokens.
+only file-named tokens. In a shallow clone, a new file's removed version cannot be looked up: `lint`
+asks for `history` — fetch the full history (`git fetch --unshallow`) rather than accepting it.
 
 After approval: **you** copy each pending file to its repo path with Write or `cp` (the guard
 asks — these are criteria files; `HRD` never writes them), run `lint` again with `--file` = the
@@ -196,4 +198,7 @@ posted; write it, body only, to `.claude/herald/memory/social/final/<sns>/<draft
 then `HRD social final --draft <draft> --final-file <that path>`. It records `uploaded`, compares
 the text with the approved copy (a change becomes a `social-final` signal; small changes are
 evidence, not problems) and checks it for information. `fix_live_post` non-empty (a
-disclosure missing, another URL) → tell the human plainly to fix the live post.
+disclosure missing, another URL; `setting:<kind>` — the text now names the service, so the
+platform's `<kind>` disclosure setting must be turned on for the live post) → tell the human
+plainly to fix the live post. `check_incomplete: true` → the post could not be checked (the
+channel's guide is gone or invalid on base): ask the human to verify the disclosure by hand.

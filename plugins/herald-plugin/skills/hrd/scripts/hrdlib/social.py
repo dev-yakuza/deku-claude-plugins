@@ -35,7 +35,7 @@ DISTRIBUTOR = ".claude/agents/distributor.md"
 STALE_DAYS = 180
 MAX_N = 5
 SNS_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-RESERVED = ("pending", "approved", "final", "drafts")
+RESERVED = ("pending", "approved", "final", "drafts", "persona", "persona-notes")  # memory dirs, file keys
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 CHANNEL_RE = re.compile(r"<!--\s*herald:channel\s*(\{.*?\})\s*-->", re.S)
@@ -581,7 +581,8 @@ def _load_committed(root, cfg, sns, rev="HEAD"):
         raise HeraldError("guide-invalid: %s: %s — fix it with `/hrd social --persona`" % (PERSONA, "; ".join(perrors)))
     errors, _ = channel_problems(h, sns, cfg, None, others)
     if errors:
-        raise HeraldError("guide-invalid: %s: %s — fix it with `/hrd social --edit %s`" % (rel, "; ".join(errors), sns))
+        raise HeraldError("guide-invalid: %s: %s — fix it with `/hrd social --edit %s` (research fields: `--refresh %s`)"
+                          % (rel, "; ".join(errors), sns, sns))
     return h, p
 
 
@@ -597,8 +598,10 @@ def effective(h):
 
 
 def _stale(h, today=None):
+    if not isinstance(h.get("researched_at"), str):
+        return True
     try:
-        d = datetime.date.fromisoformat(h.get("researched_at") or "")
+        d = datetime.date.fromisoformat(h["researched_at"])
     except ValueError:
         return True
     return ((today or datetime.date.today()) - d).days > STALE_DAYS
@@ -1213,6 +1216,10 @@ def _target_kind(target):
     raise HeraldError("lint targets %s/<sns>.md, %s or %s" % (CHANNELS_DIR, PERSONA, NOTES))
 
 
+def _term_hash(term):
+    return hashlib.sha1(fold(term).encode("utf-8")).hexdigest()[:8]
+
+
 def _forbidden_map(rules):
     return {_rule_hash(r): r for r in (rules if isinstance(rules, list) else [])
             if isinstance(r, dict) and isinstance(r.get("pattern"), str) and r["pattern"]}
@@ -1335,7 +1342,8 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
         if prev is not None:  # removed and added again: the floor it had still counts (no laundering)
             warnings.append("%s was removed in %s — compared with that version" % (target, sha[:10]))
             head, where = prev, "removed in %s" % sha[:10]
-        elif mode != "commit" and git(root, "rev-parse", "--is-shallow-repository", check=False).strip() == "true":
+        elif mode != "commit" and kind != "notes" and \
+                git(root, "rev-parse", "--is-shallow-repository", check=False).strip() == "true":
             shallow = True
 
     def need(token, what):
@@ -1474,7 +1482,8 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
                         need("service_terms", "service term %r removed" % t)
                 for t, ex in nt.items():
                     if ex - ot.get(t, set()):
-                        need("exclude:%s" % t, "exclusions added for %r: %s" % (t, ", ".join(sorted(ex - ot.get(t, set())))))
+                        need("exclude:%s" % _term_hash(t),  # no spaces: tokens travel in commit trailers
+                             "exclusions added for %r: %s" % (t, ", ".join(sorted(ex - ot.get(t, set())))))
     else:  # persona-notes: themes and source kinds only (S5)
         nf = unicodedata.normalize("NFKC", text)
         for _, _, u in find_urls(nf):
@@ -1513,13 +1522,13 @@ def trailer_tokens(trailers):
     allow, strong = set(), set()
     for t in trailers or ():
         key, _, val = str(t).partition(":")
-        words = val.split()
-        if not words:
+        token = re.split(r"\s+[—–-]\s+", val.strip(), 1)[0].strip()  # everything before the reason
+        if not token:
             continue
         if key.strip() == "Herald-Floor":
-            allow.add(words[0])
+            allow.add(token)
         elif key.strip() == "Herald-Strengthen":
-            strong.add(words[0])
+            strong.add(token)
     return allow, strong
 
 
@@ -1616,6 +1625,12 @@ def merge(root, cfg, sns, researched, accept=None, accept_floor=()):
     added_rules = [dict(r, status="draft") for k, r in _forbidden_map(new.get("forbidden")).items() if k not in om]
     merged["forbidden"] = list(old.get("forbidden") or []) + added_rules
     pairs, additions = _disclosure_pairs(old.get("disclosure"), new.get("disclosure"))
+    accept_floor = {t.split("::", 1)[1] if t.startswith(sns + "::") else t for t in accept_floor or ()}
+    known = {tok for _, _, losses in pairs for tok, _ in losses}
+    stray = sorted(accept_floor - known)
+    if stray:
+        raise HeraldError("--accept-floor names no change the research proposes: %s (proposed: %s)"
+                          % (", ".join(stray), ", ".join(sorted(known)) or "none"))
     floor_changes, disclosure = [], []
     for d, n, losses in pairs:
         ok = all(tok in (accept_floor or ()) for tok, _ in losses)
@@ -1687,6 +1702,8 @@ def final(root, cfg, draft, final_file):
     lines = max(plus, minus)
     # the check, for information: the post rules on the uploaded text
     # what the post itself shows — quotes and the article's basis are about the draft, not the post
+    if not git_ok(root, "rev-parse", "--verify", "-q", cfg.base + "^{commit}"):
+        raise HeraldError("the base branch %s is not available here — `git fetch origin %s:%s` first" % (cfg.base, cfg.base, cfg.base))
     if rec["sns"] not in guides(root, cfg.base):
         check = {"skipped": "guide-missing"}  # the channel was removed since
     else:
@@ -1698,6 +1715,9 @@ def final(root, cfg, draft, final_file):
         if latest.get("profile") == "daily" and res["profile"] != "daily":
             # the human made a daily post name the service: an ad now, with settings nobody confirmed
             check["settings_to_confirm"] = res["settings"]
+    incomplete = "skipped" in check or any(f["id"] == "guide-invalid" for f in check.get("failed", []))
+    if incomplete:
+        check.pop("profile", None)  # unknown: keep the approved profile for the mix
     hard = [f["id"] for f in check.get("failed", []) if f["id"] in LIVE_POST_RULES]
     hard += ["setting:%s" % k for k in check.get("settings_to_confirm") or []]
     entry = {"event": "status", "status": "uploaded", "run": rec.get("run"), "sns": rec.get("sns"),
@@ -1712,7 +1732,7 @@ def final(root, cfg, draft, final_file):
                           {"theme": "other", "run": rec.get("run"), "draft": rel, "chars_changed": chars,
                            "draft_chars": len(body), "lines_changed": lines})
     return {"draft": rel, "uploaded": True, "chars_changed": chars, "draft_chars": len(body), "lines_changed": lines,
-            "signal": bool(sig), "check": check, "fix_live_post": hard}
+            "signal": bool(sig), "check": check, "fix_live_post": hard, "check_incomplete": incomplete}
 
 
 def status_summary(root, cfg):
