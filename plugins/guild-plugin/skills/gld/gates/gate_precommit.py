@@ -53,6 +53,8 @@ so mode 1 refuses and says so. Mode 2 warns and defers to the git hook.
 Exit codes:
   mode 1 (`--git-hook`): 0 = allow · 1 = block (message on stderr)
   mode 2 (PreToolUse):   0 = allow · 2 = deny (deny JSON on stdout + message on stderr)
+  scan / detect / firing-log modes: 0 = clean (or the answer printed) · 1 = found ·
+    anything else = NOT judged (2 = could not run, 64 = usage) — see "mode 4/5" below.
 
 Honest scope: this gate constrains commits made through git in this working copy. It does
 not survive `--no-verify`, and it does not inspect history already written. It raises the
@@ -104,32 +106,156 @@ def now_iso():
 FIRINGS_MAX = 5000
 FIRINGS_KEEP = 4000
 
+# ⚠ One commit, one record. The PreToolUse pass and the git hook run the SAME checks on the same
+# commit, and a non-blocking PreToolUse pass lets the commit proceed to the hook — so logging
+# both counted every warn twice, and a draft boundary rule (warn-only by construction) looked
+# twice as noisy to evolve's demote/retire scorecard. But the PreToolUse record cannot simply be
+# dropped: on a fresh clone there is no hook yet (`.git/hooks/` is untracked), and then it is the
+# ONLY record. So a non-blocking PreToolUse pass parks its rows in a pending file; the git hook,
+# when it runs, discards them (its own rows replace them); rows nobody replaced within
+# PENDING_PROMOTE_S are promoted to the log by the next gate run of any mode. A BLOCKING
+# PreToolUse pass writes straight to the log — that commit never reaches the hook.
+# Rows carry "v": 2; rows without it come from an older script, which logged both layers
+# (`--firing-log` de-duplicates those by pairing).
+PENDING_REL = os.path.join(".claude", "guild", "memory", "gate-firings.pending.jsonl")
+LOCK_REL = os.path.join(".claude", "guild", "memory", "gate-firings.lock")
+PENDING_PROMOTE_S = 600
+FIRINGS_ROW_VERSION = 2
 
-def flush_firings(root, mode):
-    """Append the queued firings to the gitignored episodic log, trimming it when it outgrows
-    FIRINGS_MAX. Best-effort throughout — a logging or trimming failure never affects the gate
-    verdict, which is why the trim is wrapped separately from the append."""
-    if not _FIRINGS:
-        return
+
+def _iso_epoch(ts):
+    """'2026-10-17T12:00:00Z' → epoch seconds, or None when unparseable."""
+    try:
+        import calendar, time
+        return calendar.timegm(time.strptime(ts, "%Y-%m-%dT%H:%M:%SZ"))
+    except Exception:
+        return None
+
+
+class _FiringsLock:
+    """Serialise every read-modify-write of the firing files. Sprint worktrees symlink their
+    memory dir to the human's (`sprint-supervisor.sh` link_memory) while the human keeps
+    committing, so two gate processes can touch the same files at once — an unlocked rewrite
+    loses the other process's append, and two promoters double-count the same rows.
+    `fcntl.flock` has no timeout argument, so poll LOCK_NB for up to 2 s. `fcntl` is imported
+    lazily: a module-level import would take the whole gate down where it does not exist.
+    Never raises — `acquired` is False when the lock could not be had, and the caller then
+    skips the write (best-effort; the verdict never depends on logging)."""
+
+    def __init__(self, root):
+        self.path = os.path.join(root, LOCK_REL)
+        self.fh = None
+        self.acquired = False
+
+    def __enter__(self):
+        try:
+            import fcntl, time
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            self.fh = open(self.path, "a")
+            deadline = time.time() + 2.0
+            while True:
+                try:
+                    fcntl.flock(self.fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self.acquired = True
+                    break
+                except (BlockingIOError, PermissionError):
+                    if time.time() >= deadline:
+                        break
+                    time.sleep(0.05)
+        except ImportError:
+            self.acquired = True  # no flock on this platform: proceed unlocked, as before
+        except Exception:
+            self.acquired = False
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            if self.fh:
+                self.fh.close()  # closing releases the flock
+        except Exception:
+            pass
+        return False
+
+
+def _read_rows(p):
+    """Parse a JSONL firing file → list of dicts. Missing file → []. Bad lines are skipped."""
+    rows = []
+    try:
+        with open(p, "rb") as fh:
+            raw = fh.read()
+    except Exception:
+        return rows
+    for ln in raw.decode("utf-8", "surrogateescape").splitlines():
+        try:
+            r = json.loads(ln)
+            if isinstance(r, dict):
+                rows.append(r)
+        except Exception:
+            continue
+    return rows
+
+
+def _write_atomic(p, lines):
+    """Replace p with lines via a temp file + os.replace, so a reader (or a crash) never sees a
+    half-written file."""
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8", errors="backslashreplace") as fh:
+        fh.writelines(lines)
+    os.replace(tmp, p)
+
+
+def _row_line(r):
+    return json.dumps(r, ensure_ascii=False) + "\n"
+
+
+def flush_firings(root, mode, pending=False):
+    """Record this run's firings. Best-effort throughout — a logging failure never affects the
+    gate verdict.
+      pending=False → append to the log (git hook; or a PreToolUse pass that BLOCKED).
+      pending=True  → park in the pending file (a PreToolUse pass that let the commit go on).
+    Every call, even with nothing queued, first promotes pending rows older than
+    PENDING_PROMOTE_S, and the git hook then discards the rest (they are this commit's, and its
+    own rows replace them)."""
     p = os.path.join(root, FIRINGS_REL)
+    pp = os.path.join(root, PENDING_REL)
     try:
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        ts = now_iso()
-        with open(p, "a", encoding="utf-8", errors="backslashreplace") as fh:
-            for f in _FIRINGS:
-                fh.write(json.dumps({"ts": ts, "mode": mode, **f}, ensure_ascii=False) + "\n")
+        if not _FIRINGS and not os.path.exists(pp):
+            return
+        with _FiringsLock(root) as lk:
+            if not lk.acquired:
+                return
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            import time
+            now = time.time()
+            promote, keep = [], []
+            for r in _read_rows(pp):
+                t = _iso_epoch(r.get("ts", ""))
+                (promote if t is not None and now - t > PENDING_PROMOTE_S else keep).append(r)
+            if mode == "git-hook":
+                keep = []
+            ts = now_iso()
+            new = [{"v": FIRINGS_ROW_VERSION, "ts": ts, "mode": mode, **f} for f in _FIRINGS]
+            to_log = promote + ([] if pending else new)
+            to_pending = keep + (new if pending else [])
+            if to_log:
+                with open(p, "a", encoding="utf-8", errors="backslashreplace") as fh:
+                    fh.writelines(_row_line(r) for r in to_log)
+            if os.path.exists(pp) or to_pending:
+                if to_pending:
+                    _write_atomic(pp, [_row_line(r) for r in to_pending])
+                else:
+                    os.remove(pp)
+            # Trim inside the lock, atomically: an in-place "w" rewrite racing another process's
+            # append drops that append.
+            try:
+                with open(p, encoding="utf-8", errors="surrogateescape") as fh:
+                    lines = fh.readlines()
+                if len(lines) > FIRINGS_MAX:
+                    _write_atomic(p, lines[-FIRINGS_KEEP:])
+            except Exception:
+                pass
     except Exception:
         return
-    # Trim in a separate try: a failure here must not lose the append that already succeeded.
-    try:
-        with open(p, encoding="utf-8") as fh:
-            lines = fh.readlines()
-        if len(lines) <= FIRINGS_MAX:
-            return
-        with open(p, "w", encoding="utf-8") as fh:
-            fh.writelines(lines[-FIRINGS_KEEP:])
-    except Exception:
-        pass
 
 
 # --- sensitive file patterns (BLOCK) — the "진짜 위험" set ---
@@ -624,8 +750,7 @@ def check_verification(root, dismiss, scope):
             f"시각 단언(스크린샷/golden 매처) 순감소 {vis_rm - vis_add}건: {where} — 그 화면은 더 이상 "
             "비교되지 않습니다. 의도한 삭제면 PR 본문 '시각 변경' 섹션에 근거와 함께 공개하세요 "
             "(INV2 — 검증 약화일 수 있음)"))
-        if _RECORD_VISUAL[0]:
-            record_firing("verification:visual-assertion-drop", "warn", where)
+        record_firing("verification:visual-assertion-drop", "warn", where)
     if add_skip:
         where = ", ".join(sorted(skip_files)) or "test"
         findings.append(finding("verification:test-skip", where, f"테스트 skip/focus 지시자 추가 {add_skip}건: {where} (INV2 — 검증 약화)"))
@@ -661,7 +786,6 @@ def check_verification(root, dismiss, scope):
 # yields no warning, never an exception (the module-level handler is fail-OPEN, so a crash here
 # would let a staged secret through). Observed in review: `"baselines": true` did exactly that.
 BASELINE_SHOW_MAX = 5
-_RECORD_VISUAL = [False]  # set by main_git_hook
 _VISUAL_DROP = []          # B4 warnings, collected by check_verification, emitted by run_checks
 
 
@@ -909,11 +1033,9 @@ def check_visual_baselines(root, dismiss, scope):
             # ONE firing per kind, not per file: a full golden regeneration touches thousands of
             # images, and the firing log is a bounded episodic file that evolve's rule scorecard
             # reads — per-file lines evicted every other rule's history in one commit.
-            # Only the authoritative layer records: PreToolUse sees the same commit first (for
-            # `-a`), and logging both double-counted every visual change in evolve's scorecard.
-            if _RECORD_VISUAL[0]:
-                record_firing(f"verification:{kind}", "warn",
-                              hits[0] if len(hits) == 1 else f"{len(hits)} files")
+            # Double counting across the two layers is handled once, in flush_firings.
+            record_firing(f"verification:{kind}", "warn",
+                          hits[0] if len(hits) == 1 else f"{len(hits)} files")
         return warn
     except Exception:
         return []
@@ -1279,7 +1401,6 @@ def main_git_hook():
     if not gates_enabled(root):
         return 0
     scope = (False, False)  # the index IS the commit at this point
-    _RECORD_VISUAL[0] = True
     try:
         block, warn = run_checks(root, scope)
     except GateUnavailable:
@@ -1324,7 +1445,9 @@ def main_pre_tool_use():
         sys.stderr.write("⚠ Guild 게이트: 사전 점검을 완료하지 못했습니다 (타임아웃). "
                          "커밋 시점의 git 훅이 다시 검사합니다.\n")
         return 0
-    flush_firings(root, "pre-tool-use")
+    # Blocked → this commit never reaches the git hook, so this is its only record. Not blocked
+    # → park the rows; the hook replaces them (see flush_firings).
+    flush_firings(root, "pre-tool-use", pending=not block)
     write_findings(root, block)
     if block:
         deny_pre_tool_use(block, warn)  # exits 2
@@ -1503,17 +1626,88 @@ def main_guard_config():
 # hand-copied the patterns into its own grep: `audit_readiness.md` re-implemented three of them
 # inline for its hygiene check, and `contribute.md` was told to "reuse INLINE_SECRET_RES" from a
 # script that offered no way to do so. Two copies of a security-critical pattern set, free to
-# drift, with the drift invisible until something leaks. These two modes close that by exposing
+# drift, with the drift invisible until something leaks. These modes close that by exposing
 # the same objects the commit gate uses.
 #
-#   --scan-paths   stdin = newline-separated paths (e.g. from `git ls-files`)
-#                  → one `SECRET-PATH <path>` line per sensitive name, allowlist applied
-#   --scan-text    stdin = arbitrary text (e.g. a draft contribution body)
-#                  → one `SECRET-TEXT <line-no>` per line containing an inline secret
+#   --scan-paths            the script runs `git ls-files -z` itself → one `SECRET-PATH <path>`
+#                           line per sensitive tracked name, allowlist + dismissed.md applied
+#   --scan-paths --stdin    same, over newline-separated paths on stdin
+#   --scan-text <file>      → one `SECRET-TEXT <line-no>` per line containing an inline secret
+#   --scan-text --stdin     same, over stdin
 #
-# Exit 1 if anything was found, 0 if clean, so a caller can branch on the status alone.
+# Exit 0 = clean · 1 = found · anything else = NOT JUDGED (never read it as clean):
+#   2 = the scan could not run (not a git repo, git failed, unreadable file, internal crash)
+#   64 = usage (no input named, or an empty stdin)
+# ⚠ Why input is named by argument: the Bash tool runs commands with stdin at /dev/null, and the
+# command docs could only say "stdin = that file". Followed literally, the scanner read nothing
+# and answered "clean" — contribute's INV5 secret scan always passed and audit never reported a
+# committed secret file. An empty stdin is now a usage error, not a clean result.
 # Neither mode ever prints the matched value — only a path or a line number (INV5).
-def main_scan_paths():
+EXIT_NOT_JUDGED = 2
+EXIT_USAGE = 64
+SCAN_MODES = ("--scan-paths", "--scan-text", "--detect-hook-manager", "--firing-log")
+
+
+def _usage(msg):
+    sys.stderr.write(f"guild gate: {msg}\n")
+    return EXIT_USAGE
+
+
+def _decode(b):
+    # surrogateescape, as in sh(): a strict decode turns ONE Latin-1/EUC-KR byte into a crash,
+    # and a crash here is "not judged" — a repo that scans fine today would start failing.
+    return b.decode("utf-8", "surrogateescape")
+
+
+def _safe_stdout():
+    # A surrogate-escaped path printed to a strict stdout (Python <= 3.14 outside UTF-8 mode)
+    # raises UnicodeEncodeError, which would turn a committed-secret BLOCKER into "not judged".
+    try:
+        sys.stdout.reconfigure(errors="backslashreplace")
+    except Exception:
+        pass
+
+
+def _arg_after(args, flag):
+    """The token after `flag`, unless it is absent or another option."""
+    try:
+        v = args[args.index(flag) + 1]
+    except (ValueError, IndexError):
+        return None
+    return None if v.startswith("--") else v
+
+
+def _stdin_bytes():
+    """stdin as bytes, or None when it is a tty or empty."""
+    try:
+        if sys.stdin.isatty():
+            return None
+        b = sys.stdin.buffer.read()
+    except Exception:
+        return None
+    return b if b.strip() else None
+
+
+def _tracked_paths():
+    """`git ls-files -z` run directly — NOT through sh(), which returns "" on any failure and
+    would make "git broke" read as "no tracked files" = clean. Returns a list, or None when the
+    listing could not be produced."""
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
+                             timeout=20)
+        if top.returncode != 0:
+            return None
+        root = _decode(top.stdout).strip()
+        out = subprocess.run(["git", "-C", root, "ls-files", "-z"], capture_output=True,
+                             timeout=60)
+        if out.returncode != 0:
+            return None
+    except Exception:
+        return None
+    return [n for n in _decode(out.stdout).split("\0") if n]
+
+
+def main_scan_paths(args):
     # Honour the accepted-risk registry, exactly as check_secrets does. Without this the two
     # consumers disagree with the gate they were built to share a definition with: `audit` would
     # report a BLOCKER for every path a human already registered in dismissed.md and the commit
@@ -1521,9 +1715,21 @@ def main_scan_paths():
     # multi-flavour app tracks a .p12/.p8/.mobileprovision set per flavour) that is dozens of
     # findings the human has to re-dismiss by hand, every audit — which trains them to ignore the
     # check. A dismissal is a decision, and it belongs to every reader of these patterns.
+    _safe_stdout()
+    if "--stdin" in args:
+        b = _stdin_bytes()
+        if b is None:
+            return _usage("--scan-paths --stdin: stdin is empty")
+        names = _decode(b).splitlines()
+    else:
+        names = _tracked_paths()
+        if names is None:
+            sys.stderr.write("guild gate: --scan-paths: could not list tracked files "
+                             "(not a git repository, or git failed) — NOT judged\n")
+            return EXIT_NOT_JUDGED
     dismiss = dismissed(repo_root())
     hits = 0
-    for raw in sys.stdin:
+    for raw in names:
         name = raw.strip().replace("\\", "/")
         if not name or SECRET_PATH_ALLOW_RE.search(name) or dismiss_matches(name, dismiss):
             continue
@@ -1533,9 +1739,24 @@ def main_scan_paths():
     return 1 if hits else 0
 
 
-def main_scan_text():
+def main_scan_text(args):
+    _safe_stdout()
+    if "--stdin" in args:
+        b = _stdin_bytes()
+        if b is None:
+            return _usage("--scan-text --stdin: stdin is empty")
+    else:
+        path = _arg_after(args, "--scan-text")
+        if not path:
+            return _usage("--scan-text needs a file path (or --stdin)")
+        try:
+            with open(path, "rb") as fh:
+                b = fh.read()
+        except Exception as e:
+            sys.stderr.write(f"guild gate: --scan-text: cannot read {path} ({e}) — NOT judged\n")
+            return EXIT_NOT_JUDGED
     hits = 0
-    for i, line in enumerate(sys.stdin, 1):
+    for i, line in enumerate(_decode(b).splitlines(), 1):
         if any(rx.search(line) for rx in INLINE_SECRET_RES):
             print(f"SECRET-TEXT {i}")
             hits += 1
@@ -1551,8 +1772,11 @@ def main_scan_text():
 # instead: the manager keeps owning the hook file, and (because its config is committed) the gate
 # then travels with a clone, which the .git/hooks path never does.
 #
-# stdin = the existing hook's text. Prints the manager's name, or `none` for a hand-written or
-# absent hook. Exit 0 always — this is a question, not a verdict.
+# `--detect-hook-manager <hook-path>` reads the hook file itself (the path from
+# `git rev-parse --git-path hooks/pre-commit`). Prints exactly one word:
+#   absent · guild · none (present, hand-written) · or the manager's name.
+# Exit 0 with one of those words; anything else (no path given → 64, unreadable → 2) is NOT a
+# verdict — never install a hook on it.
 HOOK_MANAGERS = [
     ("lefthook", re.compile(r"\blefthook\b", re.I)),
     ("husky", re.compile(r"\bhusky\b", re.I)),
@@ -1562,8 +1786,20 @@ HOOK_MANAGERS = [
 ]
 
 
-def main_detect_manager():
-    text = sys.stdin.read() if not sys.stdin.isatty() else ""
+def main_detect_manager(args):
+    path = _arg_after(args, "--detect-hook-manager")
+    if not path:
+        return _usage("--detect-hook-manager needs the hook path "
+                      "(git rev-parse --git-path hooks/pre-commit)")
+    if not os.path.exists(path):
+        print("absent")         # nothing to move aside: the plain install path applies
+        return 0
+    try:
+        with open(path, "rb") as fh:
+            text = _decode(fh.read())
+    except Exception as e:
+        sys.stderr.write(f"guild gate: --detect-hook-manager: cannot read {path} ({e})\n")
+        return EXIT_NOT_JUDGED
     if "gate_precommit.py" in text:
         print("guild")          # already ours — safe to overwrite in place
         return 0
@@ -1571,22 +1807,93 @@ def main_detect_manager():
         if rx.search(text):
             print(name)
             return 0
-    print("none")               # absent, or hand-written: the chain-to-.local path applies
+    print("none")               # hand-written: the chain-to-.local path applies
+    return 0
+
+
+# --- mode 7: the firing log, de-duplicated, for evolve / audit ---------------------------
+# `--firing-log --out <abs-path> [--since <ISO>]` writes the log's rows (one JSON per line) to
+# <abs-path> and prints ONE line: `ROWS <n> <abs-path>`, plus ` NOLOG` when there is no data at
+# all yet (no log file, and no pending row old enough to count — the normal state of a fresh
+# clone, whose memory/ dir is gitignored). Readers must not score a rule from a NOLOG run: "no
+# data" is not "never fires".
+# Read-only: it never promotes or rewrites anything, so its answer does not depend on when the
+# last commit ran. Pending rows older than PENDING_PROMOTE_S are included (on a hook-less clone
+# they are real firings nobody has promoted yet); younger ones are left out (the hook may still
+# replace them).
+# Legacy rows (no "v") come from a script that logged BOTH layers, so each PreToolUse row is
+# dropped when a git-hook row with the same rule, file and action follows it within
+# PENDING_PROMOTE_S — matched 1:1, each git-hook row pairing at most one. A legacy PreToolUse row
+# with no such partner is the only record of that firing (no hook installed) and is kept.
+# The rows go to a file, not stdout: the log holds up to FIRINGS_MAX lines, and a reader working
+# from a truncated tool-output preview would under-count without noticing.
+def _dedupe_legacy(rows):
+    used = set()
+    hooks = [(i, r) for i, r in enumerate(rows) if r.get("mode") == "git-hook"]
+    drop = set()
+    for i, r in enumerate(rows):
+        if r.get("v") or r.get("mode") != "pre-tool-use":
+            continue
+        t = _iso_epoch(r.get("ts", ""))
+        if t is None:
+            continue
+        for j, h in hooks:
+            if j in used:
+                continue
+            th = _iso_epoch(h.get("ts", ""))
+            if th is None or not (0 <= th - t <= PENDING_PROMOTE_S):
+                continue
+            if (h.get("rule"), h.get("file"), h.get("action")) == \
+                    (r.get("rule"), r.get("file"), r.get("action")):
+                used.add(j)
+                drop.add(i)
+                break
+    return [r for i, r in enumerate(rows) if i not in drop]
+
+
+def main_firing_log(args):
+    out = _arg_after(args, "--out")
+    if not out or not os.path.isabs(out):
+        return _usage("--firing-log needs --out <absolute path>")
+    since = _arg_after(args, "--since")
+    since_t = None
+    if since is not None:
+        since_t = _iso_epoch(since)
+        if since_t is None:
+            return _usage(f"--since must be YYYY-MM-DDTHH:MM:SSZ, got {since!r}")
+    root = repo_root()
+    p = os.path.join(root, FIRINGS_REL)
+    pp = os.path.join(root, PENDING_REL)
+    import time
+    now = time.time()
+    rows = _read_rows(p)
+    old_pending = [r for r in _read_rows(pp)
+                   if (_iso_epoch(r.get("ts", "")) or now) <= now - PENDING_PROMOTE_S]
+    nolog = not os.path.exists(p) and not old_pending
+    rows = _dedupe_legacy(rows) + old_pending
+    rows.sort(key=lambda r: r.get("ts", ""))
+    if since_t is not None:
+        rows = [r for r in rows if (_iso_epoch(r.get("ts", "")) or 0) >= since_t]
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    _write_atomic(out, [_row_line(r) for r in rows])
+    print(f"ROWS {len(rows)} {out}" + (" NOLOG" if nolog else ""))
     return 0
 
 
 def main():
     args = sys.argv[1:]
     if "--detect-hook-manager" in args:
-        return main_detect_manager()
+        return main_detect_manager(args)
     if "--git-hook" in args:
         return main_git_hook()
     if "--guard-config" in args:
         return main_guard_config()
     if "--scan-paths" in args:
-        return main_scan_paths()
+        return main_scan_paths(args)
     if "--scan-text" in args:
-        return main_scan_text()
+        return main_scan_text(args)
+    if "--firing-log" in args:
+        return main_firing_log(args)
     return main_pre_tool_use()
 
 
@@ -1596,6 +1903,11 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except Exception as e:
+        if any(m in sys.argv[1:] for m in SCAN_MODES):
+            # A scan/detect/log mode answers a question; a crash is "not judged", and exit 0
+            # would read as "clean" / "no firings".
+            sys.stderr.write(f"guild gate: internal error — NOT judged ({e})\n")
+            sys.exit(EXIT_NOT_JUDGED)
         # fail-open on a crash: a broken gate must never wedge the repo. (A *timeout* is
         # handled separately above — that one does block in git-hook mode.)
         sys.stderr.write(f"guild gate: internal error, allowing commit ({e})\n")

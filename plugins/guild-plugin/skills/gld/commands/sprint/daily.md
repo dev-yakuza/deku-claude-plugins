@@ -41,10 +41,15 @@ whole board line would be invented. `retro.md` already has the right shape; `dai
 missing it.
 
 ```bash
-gh api repos/<owner>/<repo>/issues/<tracker>/comments --paginate --jq '[.[] | select((.body // "") | contains("<!-- guild:sprint:run -->")) | {id, body}] | sort_by(.id) | first'
+gh api repos/<owner>/<repo>/issues/<tracker>/comments --paginate --jq '.[] | select((.body // "") | contains("<!-- guild:sprint:run -->")) | {id, body}'
 ```
 
-Take the **oldest** `<!-- guild:sprint:run -->` block — the LOWEST comment id.
+Take the **oldest** `<!-- guild:sprint:run -->` block — the LOWEST `id` among the objects printed.
+⚠ **Stream form, not `[…] | sort_by(.id) | first`.** `--paginate --jq` runs the jq once **per
+page**, so on a tracker with more than one page of comments (30+) the array form printed one
+"first" per page — `{…}` then `null`, or two different blocks — and none of them was the
+oldest across the whole thread. Printing every match and taking the minimum yourself is
+correct for any page count (the supervisor's own reader, `marker_write`, was fixed the same way).
 
 ⚠ **This said "the last block" and that was backwards.** The stated reason was *"the supervisor
 rewrites the marker by posting, so earlier copies are stale"* — it does not post, it PATCHES one

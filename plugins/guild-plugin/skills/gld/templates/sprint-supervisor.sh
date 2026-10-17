@@ -836,7 +836,24 @@ led.update({
 with open(ledger_path, "w") as fh:
     json.dump(led, fh, sort_keys=True)
 block = "%s\n```json\n%s\n```\n%s" % (OPEN, json.dumps(led, sort_keys=True), CLOSE)
-found = json.load(open(os.path.join(d, "marker.json")))
+# `gh api --paginate --jq` runs the jq PER PAGE, so a tracker with more than one page of comments
+# (30+) yields one JSON array per page — `[..]\n[..]`. json.load rejects that ("Extra data"), the
+# marker write failed, and three failures in a row halt the run (`halted:marker-unwritable`):
+# every long sprint eventually stopped itself. Decode the stream value by value and flatten.
+# Zero values (empty output) must still FAIL, as json.load("") did: reading it as "no marker"
+# would CREATE a duplicate record.
+raw = open(os.path.join(d, "marker.json")).read()
+dec, pos, found, nvals = json.JSONDecoder(), 0, [], 0
+while True:
+    while pos < len(raw) and raw[pos].isspace():
+        pos += 1
+    if pos >= len(raw):
+        break
+    val, pos = dec.raw_decode(raw, pos)
+    nvals += 1
+    found.extend(val if isinstance(val, list) else [val])
+if nvals == 0:
+    raise SystemExit("marker fetch produced no JSON")
 # Several matches: use the OLDEST (lowest id) as the record of account and warn. The
 # nearest precedent is _handoff.md Section B's auditor-violation rule, which judges "resolved"
 # by POSITION rather than presence. ⚠ Not the same concept — that rule is about a line's place

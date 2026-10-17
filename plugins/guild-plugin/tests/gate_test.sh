@@ -260,9 +260,13 @@ note ""
 note "== G. 재사용 스캔 CLI (--scan-paths / --scan-text) =="
 # audit_readiness 와 contribute 가 게이트의 패턴을 손으로 베끼지 않고 호출하도록 하는 모드.
 # 두 소비자와 커밋 게이트가 "무엇이 시크릿인가" 에 대해 절대 어긋나지 않는 것이 요점.
-expect_scan() { # $1=label $2=mode $3=expected-exit $4=stdin $5=expected-substring(또는 "")
+# 파이프 입력은 `--stdin` 을 명시해야 한다 — 인자 없는 `--scan-paths` 는 git 추적 목록을 스스로
+# 읽고, `--scan-text` 는 파일 경로를 받는다(Bash 도구는 stdin 을 /dev/null 로 붙여 문서대로
+# 호출하면 빈 입력 = "clean" 이 되던 결함). $2 는 공백으로 나뉜 여러 인자일 수 있다.
+expect_scan() { # $1=label $2=mode-args $3=expected-exit $4=stdin $5=expected-substring(또는 "")
   local out rc
-  out="$(printf '%s' "$4" | python3 .claude/guild/gates/scripts/gate_precommit.py "$2" 2>&1)"; rc=$?
+  # shellcheck disable=SC2086
+  out="$(printf '%s' "$4" | python3 .claude/guild/gates/scripts/gate_precommit.py $2 2>&1)"; rc=$?
   if [ "$rc" != "$3" ]; then bad "$1" "exit $3" "exit $rc"; return; fi
   if [ -n "$5" ]; then
     case "$out" in *"$5"*) ok "$1" ;; *) bad "$1" "$5" "$(printf '%s' "$out" | tr '\n' ' ')" ;; esac
@@ -271,21 +275,21 @@ expect_scan() { # $1=label $2=mode $3=expected-exit $4=stdin $5=expected-substri
   fi
 }
 fresh_repo
-expect_scan "--scan-paths 가 실제 시크릿 경로를 잡음" --scan-paths 1 \
+expect_scan "--scan-paths --stdin 가 실제 시크릿 경로를 잡음" "--scan-paths --stdin" 1 \
   '.env
 lib/main.dart
 id_rsa
 ' "SECRET-PATH id_rsa"
-expect_scan "--scan-paths 가 허용 목록을 존중 (.env.example)" --scan-paths 0 \
+expect_scan "--scan-paths --stdin 가 허용 목록을 존중 (.env.example)" "--scan-paths --stdin" 0 \
   '.env.example
 google-services.json
 lib/main.dart
 ' ""
-expect_scan "--scan-text 가 줄번호만 보고 (값 미출력)" --scan-text 1 \
+expect_scan "--scan-text 가 줄번호만 보고 (값 미출력)" "--scan-text --stdin" 1 \
   'ordinary
 KEY = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAA"
 ' "SECRET-TEXT 2"
-expect_scan "--scan-text 깨끗한 본문은 통과" --scan-text 0 \
+expect_scan "--scan-text 깨끗한 본문은 통과" "--scan-text --stdin" 0 \
   'just prose
 no keys here
 ' ""
@@ -298,29 +302,92 @@ no keys here
 # 조용히 아무 일도 하지 않았다 — 사람은 수용 위험을 적었는데 게이트는 계속 차단했고, 왜인지
 # 알려주는 신호가 없었다. 두 표기 모두 회귀 케이스로 고정한다.
 printf '# accepted\n- `env` — flavor별 배포 인증서 (비공개 레포 정책)\n' > .claude/guild/gates/dismissed.md
-expect_scan "--scan-paths 가 백틱 표기 dismissed 를 존중" --scan-paths 0 \
+expect_scan "--scan-paths --stdin 가 백틱 표기 dismissed 를 존중" "--scan-paths --stdin" 0 \
   'env/koreanwords/ios/distribution.p12
 lib/main.dart
 ' ""
 # 괄호 부연이 붙은 형태 (실제 레포에서 관측된 형태)
 printf '# accepted\n- `env` (`distribution.p12` 등) — 사유\n' > .claude/guild/gates/dismissed.md
-expect_scan "--scan-paths 가 괄호 부연이 붙어도 경로만 추출" --scan-paths 0 \
+expect_scan "--scan-paths --stdin 가 괄호 부연이 붙어도 경로만 추출" "--scan-paths --stdin" 0 \
   'env/koreanwords/ios/distribution.p12
 ' ""
 printf '# accepted\n- env — flavor별 배포 인증서 (비공개 레포 정책)\n' > .claude/guild/gates/dismissed.md
-expect_scan "--scan-paths 가 백틱 없는 표기도 존중" --scan-paths 0 \
+expect_scan "--scan-paths --stdin 가 백틱 없는 표기도 존중" "--scan-paths --stdin" 0 \
   'env/koreanwords/ios/distribution.p12
 lib/main.dart
 ' ""
-expect_scan "dismissed 밖의 시크릿은 계속 잡음" --scan-paths 1 \
+expect_scan "dismissed 밖의 시크릿은 계속 잡음" "--scan-paths --stdin" 1 \
   'env/koreanwords/ios/distribution.p12
 .env
 ' "SECRET-PATH .env"
 printf '' > .claude/guild/gates/dismissed.md
 
 # 값이 새어나가지 않는지 명시적으로 확인 (INV5)
-LEAK="$(printf 'K="sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAA"\n' | python3 .claude/guild/gates/scripts/gate_precommit.py --scan-text 2>&1)"
-case "$LEAK" in *sk-ant*) bad "스캔 출력에 시크릿 값이 없음" "no value" "value leaked" ;; *) ok "스캔 출력에 시크릿 값이 없음 (INV5)" ;; esac
+# exit 1 도 함께 단언한다 — 출력이 비어 있으면(스캔이 아예 안 돈 경우) 값도 당연히 없어서
+# 값 미출력 검사만으로는 "아무것도 안 함" 을 통과시킨다.
+LEAK="$(printf 'K="sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAA"\n' | python3 .claude/guild/gates/scripts/gate_precommit.py --scan-text --stdin 2>&1)"; LRC=$?
+case "$LRC:$LEAK" in
+  1:*sk-ant*) bad "스캔 출력에 시크릿 값이 없음" "no value" "value leaked" ;;
+  1:*SECRET-TEXT*) ok "스캔 출력에 시크릿 값이 없음 (INV5)" ;;
+  *) bad "스캔이 실제로 검출하고 값은 숨김" "exit 1 + SECRET-TEXT" "exit $LRC: $LEAK" ;;
+esac
+
+note ""
+note "== G2. 스캔 입력은 인자로 — 빈 입력은 clean 이 아니다 =="
+G="python3 .claude/guild/gates/scripts/gate_precommit.py"
+fresh_repo
+# 인자 없는 --scan-paths 는 git 추적 파일을 스스로 읽는다
+printf 'k\n' > id_rsa; git add id_rsa >/dev/null 2>&1
+OUT="$($G --scan-paths </dev/null 2>&1)"; RC=$?
+[ "$RC" = 1 ] && case "$OUT" in *"SECRET-PATH id_rsa"*) true ;; *) false ;; esac \
+  && ok "--scan-paths 가 추적 목록을 직접 읽어 시크릿 경로를 잡음" || bad "--scan-paths git 모드" "exit 1 + id_rsa" "exit $RC: $OUT"
+git rm -q --cached id_rsa >/dev/null 2>&1; rm -f id_rsa
+$G --scan-paths </dev/null >/dev/null 2>&1; RC=$?
+[ "$RC" = 0 ] && ok "--scan-paths git 모드, 깨끗한 저장소 → 0" || bad "--scan-paths 깨끗한 저장소" "0" "$RC"
+# git 저장소 밖 → 판정 불가(2). 예전처럼 "추적 파일 없음 = clean" 으로 읽히면 안 된다.
+NG="$WORK/nogit"; mkdir -p "$NG"
+( cd "$NG" && python3 "$WORK/r/.claude/guild/gates/scripts/gate_precommit.py" --scan-paths </dev/null >/dev/null 2>&1 ); RC=$?
+[ "$RC" = 2 ] && ok "--scan-paths git 저장소 밖 → 2 (판정 불가)" || bad "--scan-paths 저장소 밖" "2" "$RC"
+# 빈 stdin → 64 (Bash 도구의 /dev/null stdin 이 바로 이 경우)
+for m in "--scan-paths --stdin" "--scan-text --stdin" "--scan-text"; do
+  # shellcheck disable=SC2086
+  $G $m </dev/null >/dev/null 2>&1; RC=$?
+  [ "$RC" = 64 ] && ok "$m 에 입력 없음 → 64" || bad "$m 빈 입력" "64" "$RC"
+done
+# 파일 인자
+printf 'ordinary\nKEY = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAA"\n' > "$WORK/body.txt"
+OUT="$($G --scan-text "$WORK/body.txt" </dev/null 2>&1)"; RC=$?
+[ "$RC" = 1 ] && [ "$OUT" = "SECRET-TEXT 2" ] && ok "--scan-text <file> 가 줄번호를 보고" || bad "--scan-text <file>" "1 / SECRET-TEXT 2" "$RC / $OUT"
+: > "$WORK/empty.txt"
+$G --scan-text "$WORK/empty.txt" </dev/null >/dev/null 2>&1; RC=$?
+[ "$RC" = 0 ] && ok "--scan-text 빈 파일은 정당하게 clean(0)" || bad "--scan-text 빈 파일" "0" "$RC"
+# 읽을 수 없는 입력 → 2. 디렉터리 경로를 쓴다(권한 기반은 root CI 에서 읽혀 버린다).
+for bad_path in "$WORK/does-not-exist" "$WORK"; do
+  $G --scan-text "$bad_path" </dev/null >/dev/null 2>&1; RC=$?
+  [ "$RC" = 2 ] && ok "--scan-text 읽을 수 없는 경로 → 2 ($(basename "$bad_path"))" || bad "--scan-text 읽기 실패" "2" "$RC"
+done
+# 레거시 인코딩(Latin-1) 본문은 크래시(→ 판정 불가) 없이 스캔된다
+printf '# caf\351\nKEY = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAA"\n' > "$WORK/latin1.txt"
+OUT="$($G --scan-text "$WORK/latin1.txt" </dev/null 2>&1)"; RC=$?
+[ "$RC" = 1 ] && ok "--scan-text Latin-1 파일도 판정 (1)" || bad "--scan-text Latin-1" "1" "$RC: $OUT"
+printf 'caf\351\nplain\n' | $G --scan-text --stdin >/dev/null 2>&1; RC=$?
+[ "$RC" = 0 ] && ok "--scan-text --stdin Latin-1 입력도 판정 (0)" || bad "--scan-text --stdin Latin-1" "0" "$RC"
+# 비 UTF-8 시크릿 경로명 — 파일을 만들지 않고 인덱스에 주입한다(APFS 는 비 UTF-8 파일명 생성을
+# 거부). 출력은 strict stdout 에서 크래시하지 않아야 한다: Python ≤3.14 는 UTF-8 로캘 + UTF-8
+# mode 꺼짐에서 stdout 이 strict 다. C 로캘은 PEP 538/540 으로 surrogateescape 가 되어 수정 전
+# 코드도 통과하므로 UTF-8 로캘을 고정하고, 그래도 strict 가 아니면 SKIP 으로 표시한다.
+BLOB="$(printf 'k' | git hash-object -w --stdin)"
+printf '100644 %s\tcl\351.pem\0' "$BLOB" | git update-index -z --index-info
+U8="en_US.UTF-8"; [ "$(uname)" = Linux ] && U8="C.UTF-8"
+STRICT="$(LC_ALL=$U8 PYTHONUTF8=0 python3 -c 'import sys; print(sys.stdout.errors)' 2>/dev/null)"
+OUT="$(LC_ALL=$U8 PYTHONUTF8=0 $G --scan-paths </dev/null 2>&1)"; RC=$?
+if [ "$RC" = 1 ] && case "$OUT" in *"SECRET-PATH cl"*".pem"*) true ;; *) false ;; esac; then
+  if [ "$STRICT" = strict ]; then ok "비 UTF-8 시크릿 경로명 → 1 + SECRET-PATH (strict stdout)"
+  else ok "비 UTF-8 시크릿 경로명 → 1 + SECRET-PATH (SKIP: 이 인터프리터의 stdout 은 $STRICT — strict 경로 미검증)"; fi
+else
+  bad "비 UTF-8 시크릿 경로명" "exit 1 + SECRET-PATH" "exit $RC: $OUT"
+fi
+git rm -q --cached -- "$(printf 'cl\351.pem')" >/dev/null 2>&1
 
 note ""
 note "== J. 경계 규칙의 규칙별 status =="
@@ -728,7 +795,8 @@ visual_repo
 printf 'PNG1' > 'src/a/__screenshots__/s1²2.png'; git add -A >/dev/null 2>&1; git -c core.hooksPath=/dev/null commit -qm sup >/dev/null 2>&1
 expect_visual "V26 '²' 가 섞인 이름도 경고가 사라지지 않는다" allow "시각 기준 이미지 갱신 2건" "" \
   "printf 'PNG2' > 'src/a/__screenshots__/s1²2.png' && printf 'PNG2' > src/a/__screenshots__/btn.png && git commit -qam x"
-# (V27) PreToolUse 와 git 훅이 같은 커밋을 두 번 기록했다 — 권위 있는 층만 기록한다.
+# (V27) PreToolUse 와 git 훅이 같은 커밋을 두 번 기록했다 — 차단하지 않은 PreToolUse 는 본 로그가
+#       아니라 pending 에 둔다(훅이 대체). 상세는 section L.
 visual_repo
 rm -f .claude/guild/memory/gate-firings.jsonl
 printf 'PNG2' > src/a/__screenshots__/btn.png
@@ -867,12 +935,102 @@ expect_commit "기존 훅 실패 시 커밋 중단" block \
   "printf 'more\n' >> README.md && git add README.md && git commit -m x"
 
 note ""
+note "== L. 발동 로그 — 커밋당 한 번 기록 (pending → 훅 대체 → 승격) =="
+# PreToolUse 와 git 훅이 같은 커밋을 각각 기록해 warn 이 두 번 셌다(draft 경계 규칙은 warn 전용이라
+# evolve 의 강등/폐기 성적표에서 두 배로 시끄러워 보였다). 그러나 훅이 없는 새 클론에서는 PreToolUse
+# 기록이 유일하므로 그냥 버릴 수도 없다.
+LOGF=.claude/guild/memory/gate-firings.jsonl
+PENDF=.claude/guild/memory/gate-firings.pending.jsonl
+cnt() { [ -f "$1" ] && grep -c "$2" "$1" || echo 0; }
+visual_repo
+printf 'PNG2' > src/a/__screenshots__/btn.png
+printf '{"tool_input":{"command":"git commit -am x"}}' | python3 .claude/guild/gates/scripts/gate_precommit.py >/dev/null 2>&1
+[ "$(cnt $LOGF baseline-updated)" = 0 ] && [ "$(cnt $PENDF baseline-updated)" = 1 ] \
+  && ok "L1 차단 없는 PreToolUse → 본 로그 0, pending 1" || bad "L1 pending" "log 0 / pending 1" "log $(cnt $LOGF baseline-updated) / pending $(cnt $PENDF baseline-updated)"
+git commit -qam x >/dev/null 2>&1
+[ "$(cnt $LOGF baseline-updated)" = 1 ] && [ ! -f "$PENDF" ] \
+  && ok "L2 git 훅이 pending 을 대체 → 본 로그 1줄, pending 없음" || bad "L2 훅 대체" "log 1 / no pending" "log $(cnt $LOGF baseline-updated) / pending $([ -f $PENDF ] && echo yes || echo no)"
+grep -q '"v": 2' "$LOGF" && ok "L3 새 행은 v:2" || bad "L3 v:2" "v 2" "$(head -1 $LOGF)"
+# 차단된 PreToolUse 는 커밋이 훅에 닿지 않으므로 본 로그에 바로 쓴다
+fresh_repo
+printf 'k\n' > id_rsa; git add id_rsa >/dev/null 2>&1
+printf '{"tool_input":{"command":"git commit -m x"}}' | python3 .claude/guild/gates/scripts/gate_precommit.py >/dev/null 2>&1
+[ "$(cnt $LOGF '"secret"')" = 1 ] && [ ! -f "$PENDF" ] \
+  && ok "L4 차단된 PreToolUse → 본 로그 1줄, pending 없음" || bad "L4 차단 기록" "log 1 / no pending" "log $(cnt $LOGF '"secret"')"
+git rm -q --cached id_rsa >/dev/null 2>&1; rm -f id_rsa
+# 훅이 없는 저장소: 오래된 pending 은 다음 게이트 실행이 승격한다
+fresh_repo; rm -f .git/hooks/pre-commit
+OLD="$(python3 -c 'import time;print(time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime(time.time()-700)))')"
+printf '{"v": 2, "ts": "%s", "mode": "pre-tool-use", "rule": "boundary:x", "action": "warn", "file": "a"}\n' "$OLD" > "$PENDF"
+printf 'more\n' >> README.md
+printf '{"tool_input":{"command":"git commit -am y"}}' | python3 .claude/guild/gates/scripts/gate_precommit.py >/dev/null 2>&1
+[ "$(cnt $LOGF boundary:x)" = 1 ] && [ "$(cnt $PENDF boundary:x)" = 0 ] \
+  && ok "L5 10분 넘은 pending 은 다음 실행에서 본 로그로 승격" || bad "L5 승격" "log 1 / pending 0" "log $(cnt $LOGF boundary:x) / pending $(cnt $PENDF boundary:x)"
+# 동시 기록: 잠금이 append 를 잃지 않는다 (sprint worktree 들이 memory 를 공유)
+fresh_repo
+GP="$PWD/.claude/guild/gates/scripts/gate_precommit.py"
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  python3 - "$GP" "$PWD" "$i" <<'PY' &
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1]); g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+g.record_firing("boundary:c%s" % sys.argv[3], "warn", "f"); g.flush_firings(sys.argv[2], "git-hook")
+PY
+done
+wait
+[ "$(cnt $LOGF 'boundary:c')" = 12 ] && ok "L6 동시 flush 12개 → 12줄 (유실 없음)" || bad "L6 동시 flush" "12" "$(cnt $LOGF 'boundary:c')"
+
+note ""
+note "== M. --firing-log (evolve / audit 의 읽기 경로) =="
+fresh_repo
+OUTF="$WORK/fl.jsonl"
+OUT="$($G --firing-log --out "$OUTF" </dev/null 2>&1)"; RC=$?
+[ "$RC" = 0 ] && case "$OUT" in "ROWS 0 $OUTF NOLOG") true ;; *) false ;; esac \
+  && ok "M1 로그 없음 → ROWS 0 … NOLOG (0건과 구분)" || bad "M1 NOLOG" "ROWS 0 $OUTF NOLOG" "$RC: $OUT"
+$G --firing-log --out rel.jsonl </dev/null >/dev/null 2>&1; RC=$?
+[ "$RC" = 64 ] && ok "M2 상대 경로 --out → 64" || bad "M2 상대 경로" "64" "$RC"
+# 레거시(v 없음) 짝 제거: 1:1, Δts 0 포함, 600초 경계
+cat > "$LOGF" <<'J'
+{"ts": "2026-10-01T00:00:00Z", "mode": "pre-tool-use", "rule": "boundary:a", "action": "warn", "file": "x"}
+{"ts": "2026-10-01T00:00:00Z", "mode": "git-hook", "rule": "boundary:a", "action": "warn", "file": "x"}
+{"ts": "2026-10-01T01:00:00Z", "mode": "pre-tool-use", "rule": "boundary:b", "action": "warn", "file": "y"}
+{"ts": "2026-10-01T01:00:01Z", "mode": "pre-tool-use", "rule": "boundary:b", "action": "warn", "file": "y"}
+{"ts": "2026-10-01T01:00:05Z", "mode": "git-hook", "rule": "boundary:b", "action": "warn", "file": "y"}
+{"ts": "2026-10-01T02:00:00Z", "mode": "pre-tool-use", "rule": "boundary:c", "action": "warn", "file": "z"}
+{"ts": "2026-10-01T03:00:00Z", "mode": "pre-tool-use", "rule": "secret", "action": "block", "file": "k"}
+{"ts": "2026-10-01T03:00:30Z", "mode": "git-hook", "rule": "secret", "action": "block", "file": "k"}
+{"ts": "2026-10-01T04:00:00Z", "mode": "pre-tool-use", "rule": "boundary:d", "action": "warn", "file": "w"}
+{"ts": "2026-10-01T04:11:00Z", "mode": "git-hook", "rule": "boundary:d", "action": "warn", "file": "w"}
+{"v": 2, "ts": "2026-10-02T00:00:00Z", "mode": "pre-tool-use", "rule": "boundary:e", "action": "warn", "file": "v"}
+J
+OUT="$($G --firing-log --out "$OUTF" </dev/null 2>&1)"
+fl() { grep -c "$1" "$OUTF"; }
+[ "$(fl boundary:a)" = 1 ] && ok "M3 Δts=0 짝 → 1줄" || bad "M3 Δts 0" "1" "$(fl boundary:a)"
+[ "$(fl boundary:b)" = 2 ] && ok "M4 PreToolUse 2 + 훅 1 → 2줄 (1:1 짝)" || bad "M4 1:1" "2" "$(fl boundary:b)"
+[ "$(fl boundary:c)" = 1 ] && ok "M5 짝 없는 레거시 PreToolUse 는 유일 기록이라 보존" || bad "M5 단독 보존" "1" "$(fl boundary:c)"
+[ "$(fl '"secret"')" = 1 ] && ok "M6 레거시 block 행도 짝 제거" || bad "M6 block 짝" "1" "$(fl '"secret"')"
+[ "$(fl boundary:d)" = 2 ] && ok "M7 600초 넘게 떨어진 행은 짝이 아님" || bad "M7 경계" "2" "$(fl boundary:d)"
+[ "$(fl boundary:e)" = 1 ] && ok "M8 v2 행은 그대로" || bad "M8 v2" "1" "$(fl boundary:e)"
+case "$OUT" in *NOLOG*) bad "M9 로그 있으면 NOLOG 아님" "no NOLOG" "$OUT" ;; *) ok "M9 로그 있으면 NOLOG 아님" ;; esac
+$G --firing-log --out "$OUTF" --since 2026-10-01T03:30:00Z </dev/null >/dev/null 2>&1
+[ "$(fl boundary:a)" = 0 ] && [ "$(fl boundary:e)" = 1 ] && ok "M10 --since 필터" || bad "M10 --since" "a 0 / e 1" "a $(fl boundary:a) / e $(fl boundary:e)"
+# pending 만 있을 때: 10분 미만이면 NOLOG, 넘으면 데이터
+rm -f "$LOGF"
+NOW="$(python3 -c 'import time;print(time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()))')"
+printf '{"v": 2, "ts": "%s", "mode": "pre-tool-use", "rule": "boundary:f", "action": "warn", "file": "u"}\n' "$NOW" > "$PENDF"
+OUT="$($G --firing-log --out "$OUTF" </dev/null 2>&1)"
+case "$OUT" in "ROWS 0 "*NOLOG) ok "M11 10분 미만 pending 만 → NOLOG" ;; *) bad "M11 young pending" "ROWS 0 … NOLOG" "$OUT" ;; esac
+printf '{"v": 2, "ts": "%s", "mode": "pre-tool-use", "rule": "boundary:g", "action": "warn", "file": "u"}\n' "$OLD" >> "$PENDF"
+OUT="$($G --firing-log --out "$OUTF" </dev/null 2>&1)"
+case "$OUT" in "ROWS 1 $OUTF") ok "M12 10분 넘은 pending 은 데이터로 포함 (NOLOG 아님)" ;; *) bad "M12 old pending" "ROWS 1 $OUTF" "$OUT" ;; esac
+[ "$(cnt $PENDF boundary)" = 2 ] && ok "M13 --firing-log 는 읽기 전용 (pending 그대로)" || bad "M13 읽기 전용" "2" "$(cnt $PENDF boundary)"
+
+note ""
 note "결과: PASS=$PASS FAIL=$FAIL"
 cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=127
+GATE_MIN_CHECKS=159
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

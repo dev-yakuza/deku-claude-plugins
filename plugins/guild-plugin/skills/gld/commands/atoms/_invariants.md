@@ -95,5 +95,16 @@ The commit gate constrains commits made through git **in this working copy**:
 - Its off-switch and control files are guarded by an `ask`, not a block (`--guard-config`):
   turning the gate off is a legitimate action that should be a human's, on the record.
 
+Its **firing log** (what evolve's rule scorecard and audit's rule health count) records each
+commit once, not exactly: a PreToolUse pass that does not block parks its rows as *pending*; the
+git hook replaces them; rows nobody replaced for 10 minutes are promoted by the next gate run.
+So — a managed hook whose earlier commands take over 10 minutes can count that commit's warns
+twice; a commit attempt that passed PreToolUse but never reached the hook (another hook command
+failed, the editor was aborted) leaves a warn that is promoted later unless a hook run within 10
+minutes discards it; and on a hook-less clone the newest rows are not readable until they are 10
+minutes old. All three are rare and none of them affects a verdict. The log is gitignored, so a
+fresh clone has none — readers treat that as "no data" (`--firing-log` prints `NOLOG`), never as
+"never fires".
+
 It raises the cost of a mistake. It is not a boundary against a determined bypass, and no
 Guild output should describe it as one.

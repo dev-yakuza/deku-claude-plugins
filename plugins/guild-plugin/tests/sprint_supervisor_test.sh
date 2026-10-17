@@ -4431,11 +4431,47 @@ else
   rm -rf "$W11"
 fi
 
+# ── T12: 진행 기록(marker) 조회가 여러 페이지여도 깨지지 않는다 ─────────────────
+# `gh api --paginate --jq '[…]'` 은 jq 를 페이지마다 돌려 `[..]\n[..]` 를 낸다. 예전 json.load 는
+# "Extra data" 로 실패했고, 3회 연속 실패하면 run 이 `halted:marker-unwritable` 로 스스로 멈췄다 —
+# 트래커 댓글이 30개를 넘는 모든 긴 스프린트. stub 이 `[]` 한 개만 돌려줘 테스트가 놓쳤다.
+# marker_write 의 인라인 Python 을 템플릿에서 그대로 떼어 실제 다중 페이지 출력으로 돌린다.
+MW="$WORK/t12"; mkdir -p "$MW"
+"$PY" - "$TPL" "$MW/mw.py" <<'PY'
+import sys
+src = open(sys.argv[1]).read()
+i = src.index('marker_write() {')
+a = src.index("<<'PY'", i); a = src.index("\n", a) + 1
+b = src.index("\nPY\n", a)
+open(sys.argv[2], "w").write(src[a:b] + "\n")
+PY
+printf '{"state":"running"}' > "$MW/ledger.json"
+mw_case() { # $1=label $2=marker.json 내용 $3=기대 stdout 첫 줄(또는 FAIL)
+  printf '%b' "$2" > "$MW/marker.json"
+  printf '{"state":"running"}' > "$MW/ledger.json"
+  local out rc
+  out="$("$PY" "$MW/mw.py" "$MW" "$MW/ledger.json" running host 1 1700000000 2>/dev/null | head -1)"; rc=$?
+  if [ "$3" = FAIL ]; then
+    "$PY" "$MW/mw.py" "$MW" "$MW/ledger.json" running host 1 1700000000 >/dev/null 2>&1 \
+      && bad "$1" "non-zero exit" || ok "$1"
+  elif [ "$out" = "$3" ]; then ok "$1"; else bad "$1" "$3 (got: $out)"; fi
+}
+M='<!-- guild:sprint:run -->\\n```json\\n{}\\n```\\n<!-- /guild:sprint:run -->'
+mw_case "T12a 2페이지, 마커가 2페이지에만 → 그 댓글을 PATCH" \
+  "[]\n[{\"id\": 77, \"body\": \"$M\"}]\n" "PATCH 77"
+mw_case "T12b 2페이지, 마커가 1페이지에만 → PATCH (CREATE 아님)" \
+  "[{\"id\": 55, \"body\": \"$M\"}]\n[]\n" "PATCH 55"
+mw_case "T12c 양쪽 페이지에 마커 → 최소 id" \
+  "[{\"id\": 90, \"body\": \"$M\"}]\n[{\"id\": 12, \"body\": \"$M\"}]\n" "PATCH 12"
+mw_case "T12d 마커 없음(여러 페이지 모두 빈 배열) → CREATE" "[]\n[]\n" "CREATE"
+mw_case "T12e 빈 출력은 실패 (\"마커 없음\" 으로 읽어 중복 CREATE 하지 않음)" "" FAIL
+mw_case "T12f 깨진 JSON 은 실패" "[{\"id\": 1,\n" FAIL
+
 # ── T9: 검사 개수 바닥 ─────────────────────────────────────────────────────
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=339
+SUP_MIN_CHECKS=345
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

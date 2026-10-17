@@ -7,6 +7,8 @@
 ---
 
 ## Inputs
+- **`GATE_SCRIPT`** — the absolute path of the plugin's `gates/gate_precommit.py`, **supplied by the caller** (`init` P3.5 puts it in the spawn prompt; `audit` dimension A passes it inline). There is no fallback: this atom may run as a sub-agent, which cannot resolve `<<SKILL_DIR>>`. Not supplied, or the path does not exist → every check below that calls it reports `id: gate-script-unavailable`, **MAJOR** ("판정 불가 — 시크릿·훅 검사를 실행하지 못함"), and is **never** read as clean. The plugin's copy is used rather than the repo's `.claude/guild/gates/scripts/` copy because the repo's can lag behind these instructions (`update` may skip refreshing it) and an old script ignores the arguments below.
+- **Exit-code contract for every `GATE_SCRIPT` call**: `0` = clean · `1` = found · **anything else (2 = could not scan, 64 = no input) = NOT judged**. Not judged → `id: secret-scan-unavailable` (or `gate-hook-undetermined` for the hook check), **MAJOR**, with the stderr line — never "no findings".
 - The five P1 scan findings if available (from `scan_repo.md`), else re-derive by reading the repo directly.
 - `.claude/guild/config.json` (for `commands`, `language`).
 - Owner/repo (per `_handoff.md` Section F) for the GitHub-workflow checks.
@@ -50,18 +52,23 @@ when `.claude/guild/config.json` is absent (Guild not initialized — `init` wil
   ```bash
   git rev-parse --git-path hooks/pre-commit
   ```
-  Read that file (absent → treat as empty text) and pipe its text to (its own Bash call):
+  Pass that path to the detector as its argument (its own Bash call; never "pipe its text" —
+  the Bash tool's stdin is `/dev/null`, so that form always read nothing):
   ```bash
-  python3 .claude/guild/gates/scripts/gate_precommit.py --detect-hook-manager
+  python3 <GATE_SCRIPT> --detect-hook-manager <resolved-path>
   ```
+  It prints one word; a non-zero exit or any other output → `id: gate-hook-undetermined`, MAJOR.
   - Prints **`guild`** → Guild owns the hook. Confirm it is **executable** (`ls -l <path>`) —
     git silently ignores a non-executable hook, so this is installed-but-inert and
     indistinguishable from working. Not executable → `id: gate-hook-not-executable`, **BLOCKER**.
-  - Prints **`none`** with the file absent → `id: gate-hook-missing`, **BLOCKER**. Remediation:
+  - Prints **`absent`** → `id: gate-hook-missing`, **BLOCKER**. Remediation:
     `/gld update`. This is the **normal state of a fresh clone** — `.git/hooks/` is not tracked,
     so every clone starts without it while every committed harness file is present. Until then
     only the advisory `PreToolUse` layer runs and a compound `create-and-commit` in one Bash call
     is unchecked.
+  - Prints **`none`** → a hand-written hook owns the file and Guild's shim is not in it →
+    `id: gate-hook-missing`, **BLOCKER**, same remediation (`/gld update` moves the hand-written
+    hook to `<path>.local` and chains to it).
   - Prints a **manager name** (`lefthook`/`husky`/…) → the hook file is *supposed* to be theirs
     (`init` step 2b). **Do not flag its absence.** Instead grep that manager's committed config
     for `gate_precommit.py`; present → wired correctly, no finding. Absent →
@@ -102,26 +109,18 @@ Guild's work-type routing needs labels; `dev` operates on Issues.
 
 ## Group 5 — 위생 (hygiene) — light heuristic (read-only)
 ⚠ This is a **light heuristic**, not a full secret scan (real scanning = gitleaks/trufflehog/Semgrep, offered as an opt-in deep step by the caller — later milestone). State this limitation in findings.
-- **Committed sensitive files?** Ask the **commit gate itself** rather than re-implementing its judgement (its own Bash call — a bundled `python3 script.py` invocation is a sanctioned `_bash_rules.md` exception):
+- **Committed sensitive files?** Ask the **commit gate itself** rather than re-implementing its judgement (its own Bash call — a bundled `python3 script.py` invocation is a sanctioned `_bash_rules.md` exception). It lists the tracked files itself — do not run `git ls-files` and hand the list over:
   ```bash
-  git ls-files
+  python3 <GATE_SCRIPT> --scan-paths
   ```
-  Pipe is forbidden, so run that first, then feed the file list to the gate's path scanner as its own call:
-  ```bash
-  python3 .claude/guild/gates/scripts/gate_precommit.py --scan-paths
-  ```
-  (stdin = the `git ls-files` output you just read.) It prints one `SECRET-PATH <path>` line per sensitive tracked file and exits 1 if any, 0 if clean; it never prints a value.
-  ⚠ **Use this instead of a hand-written glob list.** An earlier version re-implemented the gate's pattern set inline as `git ls-files '.env' '*.pem' …` plus its own allowlist caveat — two copies of a security-critical definition, free to drift apart, with the drift invisible until something leaks. `--scan-paths` uses the same `SECRET_PATH_RE` and `SECRET_PATH_ALLOW_RE` the commit gate blocks on, so this check and commit-time enforcement can never disagree. (That allowlist is why `google-services.json` / `GoogleService-Info.plist` / `firebase_options.dart` are **not** flagged — public Flutter/Firebase client identifiers, conventionally committed; flagging them would train the human to dismiss this finding.)
+  It prints one `SECRET-PATH <path>` line per sensitive tracked file and exits 1 if any, 0 if clean (any other exit = not judged, see Inputs); it never prints a value.
+  ⚠ **Use this instead of a hand-written glob list.** An earlier version re-implemented the gate's pattern set inline as `git ls-files '.env' '*.pem' …` plus its own allowlist caveat — two copies of a security-critical definition, free to drift apart, with the drift invisible until something leaks. `--scan-paths` uses the same `SECRET_PATH_RE` and `SECRET_PATH_ALLOW_RE` as the **current plugin's** commit gate. ⚠ The repo's installed copy is what actually runs at commit time, and if `update` skipped refreshing it, it can be older and weaker than this check — a clean result here does not prove the commit-time gate would block the same file (`/gld update` closes the gap). (That allowlist is why `google-services.json` / `GoogleService-Info.plist` / `firebase_options.dart` are **not** flagged — public Flutter/Firebase client identifiers, conventionally committed; flagging them would train the human to dismiss this finding.)
   Any `SECRET-PATH` hit → `id: committed-secret-file`, **BLOCKER**, why: "레포/히스토리 시크릿 = 유출 경로(INV5)". remediation: "gitignore+`git rm --cached`(향후), 키 회전·히스토리 정리는 사람이 수행".
-  If the gate script is absent (Guild not initialized), fall back to a **quoted** glob query — quote every pattern, because unquoted globs are expanded by the shell before `git ls-files` sees them, and under zsh's default `NOMATCH` an unquoted pattern matching nothing **aborts the whole command** (verified: `git ls-files .env.*` with no such file exits 1 with "no matches found", not a clean empty result), silently skipping this BLOCKER-severity check:
+- **Obvious in-source tokens?** Same principle — use the gate's own inline pattern set rather than a copy. For each candidate source file (keep it bounded), its own Bash call, the file's path as the argument:
   ```bash
-  git ls-files '.env' '.env.*' '*.pem' '*.p12' '*.keystore' '*.jks' 'serviceAccount*.json'
+  python3 <GATE_SCRIPT> --scan-text <file-path>
   ```
-- **Obvious in-source tokens?** Same principle — use the gate's own inline pattern set rather than a copy. For each candidate source file (keep it bounded), its own Bash call:
-  ```bash
-  python3 .claude/guild/gates/scripts/gate_precommit.py --scan-text
-  ```
-  (stdin = the file's text.) It prints `SECRET-TEXT <line-no>` per hit and never the value. Hits → `id: inline-secret`, BLOCKER (report file + line only). Gate script absent → bounded Grep for `AKIA[0-9A-Z]{16}`, `-----BEGIN * PRIVATE KEY-----`, `AIza[0-9A-Za-z_-]{35}` as a degraded fallback, and say in the finding that it was the degraded path.
+  It prints `SECRET-TEXT <line-no>` per hit and never the value. Hits → `id: inline-secret`, BLOCKER (report file + line only). Any exit other than 0/1 → not judged (see Inputs).
 - **.gitignore coverage?** Read root `.gitignore`. Missing coverage for `.env`, build artifacts, or `.claude/guild/memory/` → `id: gitignore-gap`, MINOR. (Note: init already writes `.claude/guild/.gitignore` for `memory/`; this checks the project root file.)
 
 ---

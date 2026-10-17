@@ -229,14 +229,16 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
    git rev-parse --git-path hooks/pre-commit
    ```
    Hold the literal it prints and use it for every step below. In a **git worktree** `.git` is a *file* (a `gitdir:` pointer), not a directory, so a literal `.git/hooks/…` path does not exist there and every step would silently target nothing — `batch.md` hit exactly this with `info/exclude`. `--git-path` resolves correctly from a normal checkout and a worktree alike (worktrees share the main checkout's hooks, which is what we want: one gate for all of them).
-2. **Ask who owns the existing hook** — this decides everything below. Read the resolved path (absent → `none`), then pipe its text to the gate's detector. Two calls: Read the file with the Read tool, Write its text to a temp file, then (its own Bash call, stdin = that file):
+2. **Ask who owns the existing hook** — this decides everything below. Pass the resolved path to the detector **as an argument** (its own Bash call — the plugin's copy, substituting the literal resolved path):
    ```bash
-   python3 .claude/guild/gates/scripts/gate_precommit.py --detect-hook-manager
+   python3 <<SKILL_DIR>>/gates/gate_precommit.py --detect-hook-manager <resolved-path>
    ```
-   It prints one word: `guild` · `none` · or a manager name (`lefthook` / `husky` / `pre-commit` / `overcommit` / `simple-git-hooks`).
+   ⚠ **By argument, never "stdin = the hook's text".** The Bash tool runs every command with stdin at `/dev/null`, so the old stdin form always read nothing and answered `none` — and on a lefthook/husky repo `none` is the path that overwrites the manager's hook, which its next `install` silently erases along with the gate. The plugin's copy is used because the repo's copy can lag (`update` may skip refreshing it), and a lagging script ignores the path argument.
+   It prints one word: `absent` · `guild` · `none` · or a manager name (`lefthook` / `husky` / `pre-commit` / `overcommit` / `simple-git-hooks`). **Exit non-zero, or any other output, is not an answer**: do not install a hook on it — stop this step and report the detector's error.
 
+   - **`absent`** → no hook yet; nothing to move aside. Continue to step 3.
    - **`guild`** → already ours; overwrite in place at step 3.
-   - **`none`** (absent, or a hand-written hook) → if a hand-written hook is present, move it aside so the shim can chain to it (its own Bash call, substituting the literal resolved path):
+   - **`none`** (a hand-written hook) → move it aside so the shim can chain to it (its own Bash call, substituting the literal resolved path):
      ```bash
      mv <resolved-path> <resolved-path>.local
      ```
@@ -322,6 +324,7 @@ Spawn the readiness atom as a sub-agent:
 - `subagent_type`: `general-purpose`, `model`: `sonnet`, `description`: `readiness audit`
 - `prompt`:
   > Read `<<SKILL_DIR>>/commands/atoms/audit_readiness.md` and execute it. Use the P1 scan findings for this repo: <inline the six findings summaries, incl. hotspot>. Return exactly one `>>> RESULT <<<` line with the findings JSON.
+  > `GATE_SCRIPT` = `<<SKILL_DIR>>/gates/gate_precommit.py` — substitute the resolved absolute path into this line before spawning; the sub-agent cannot resolve `<<SKILL_DIR>>` itself, and the atom's secret and hook checks need it.
 
 Parse the findings JSON. Groups: 검증 신호 · 정적 게이트 · CI · GitHub 워크플로 · 위생.
 

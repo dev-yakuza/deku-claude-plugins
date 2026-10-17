@@ -3073,6 +3073,30 @@ lacksfx "preflight: Item 8 이 원장을 열지 않는다" "$GLD/commands/atoms/
 hasfx "ask: 보관 파일도 범위만 읽는다" "$GLD/commands/ask.md" 'evolution-log.archive.md'
 hasfx "update: 보관 파일도 보존한다" "$GLD/commands/update.md" '`.claude/guild/evolution-log.md` + `.claude/guild/evolution-log.archive.md` (⑤)'
 hasfx "knowledge: index 기준은 harness_size.py" "$GLD/commands/atoms/_knowledge.md" 'If it outgrows its size bar (`harness_size.py` prints an `index:` line'
+# ── 0.95.1: 스캔/감지 입력은 인자로, 플러그인 사본으로 ────────────────────────────
+# Bash 도구는 stdin 을 /dev/null 로 붙인다. "stdin = 그 파일" 로 문서화된 호출은 늘 빈 입력을 읽어
+# clean / none 을 냈다(contribute 의 INV5 스캔 무조건 통과, init 의 관리형 훅 덮어쓰기). 그리고 저장소
+# 사본은 update 가 갱신을 건너뛰면 옛 스크립트라 새 인자를 무시하므로 플러그인 사본을 부른다.
+G95="$(grep -rnE 'gate_precommit\.py --(scan-paths|scan-text|detect-hook-manager|firing-log)' "$GLD/commands" | grep -vE '<<SKILL_DIR>>/gates/gate_precommit\.py|<GATE_SCRIPT>' || true)"
+[ -z "$G95" ] && ok "스캔/감지/로그 호출은 모두 플러그인 사본(<<SKILL_DIR>> / <GATE_SCRIPT>)" \
+  || bad "스캔/감지 호출이 저장소 사본을 부름" "none" "$(printf '%s' "$G95" | head -3 | tr '\n' '|')"
+G95b="$(grep -rnE '[(,] ?stdin = ' "$GLD/commands" || true)"
+[ -z "$G95b" ] && ok "\"stdin = …\" 로 입력을 넘기라는 지시가 없음" || bad "stdin 지시 잔존" "none" "$(printf '%s' "$G95b" | head -3 | tr '\n' '|')"
+G95c="$(grep -rn -- "--paginate --jq '\[" "$GLD/commands" "$GLD/templates" || true)"
+[ -z "$G95c" ] && ok "--paginate --jq 가 배열형 '[…]' 이 아님 (페이지마다 배열이 따로 나온다)" \
+  || bad "--paginate --jq 배열형" "none" "$(printf '%s' "$G95c" | head -3 | tr '\n' '|')"
+hasfx "audit_readiness: GATE_SCRIPT 는 호출자가 넘김 (대체 경로 없음)" "$GLD/commands/atoms/audit_readiness.md" 'There is no fallback'
+hasfx "audit_readiness: 0/1 외 종료 코드는 판정 불가" "$GLD/commands/atoms/audit_readiness.md" 'anything else (2 = could not scan, 64 = no input) = NOT judged'
+hasfx "init: 서브에이전트 프롬프트에 GATE_SCRIPT" "$GLD/commands/init.md" '`GATE_SCRIPT` = `<<SKILL_DIR>>/gates/gate_precommit.py`'
+hasfx "audit: GATE_SCRIPT 전달" "$GLD/commands/audit.md" 'execute it with `GATE_SCRIPT`'
+hasfx "init: absent 분기" "$GLD/commands/init.md" '**`absent`** → no hook yet'
+hasfx "update: absent 분기" "$GLD/commands/update.md" '**`absent` / `guild` / `none`**'
+hasfx "contribute: 판정 불가면 반출 중단" "$GLD/commands/contribute.md" 'means NOT scanned, not clean'
+hasfx "evolve: firing 로그는 --firing-log 로만" "$GLD/commands/evolve.md" '**Never read `gate-firings.jsonl` directly**'
+hasfx "evolve: NOLOG 는 never fires 가 아님" "$GLD/commands/evolve.md" 'never** read it as "the rule never fires"'
+hasfx "audit: rule health 도 --firing-log" "$GLD/commands/audit.md" '--firing-log --out'
+hasfx "audit: NOLOG 면 stale 판정 금지" "$GLD/commands/audit.md" 'never "stale"'
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -3080,7 +3104,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=846   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=895   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
