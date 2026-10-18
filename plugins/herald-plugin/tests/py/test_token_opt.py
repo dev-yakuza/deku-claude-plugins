@@ -211,5 +211,61 @@ class OutputCase(SocialCase):
         self.assertEqual(json.loads(p.stdout), None)
 
 
+class DetailRound2Case(ConfigDirCase):
+    test_config_dir_nested_agents_and_labels = None
+    test_cli_outside_a_repo_with_prices = None
+
+    def detail(self, rows, labels=None):
+        p = os.path.join(self.base, "s3.jsonl")
+        self.jsonl(p, rows)
+        return measure.main_detail(p, labels or {})
+
+    def test_compaction_without_boundary_and_summary_flag(self):
+        m = self.detail([asst("m1", 50000), asst("m2", 51000), asst("m3", 9000), asst("m4", 9100)])
+        self.assertEqual(m["compactions"], 1)  # a prefix drop alone
+        m = self.detail([asst("m1", 50000), {"type": "user", "isCompactSummary": True, "message": {"content": "summary"}},
+                         asst("m2", 48000)])
+        self.assertEqual(m["compactions"], 1)
+
+    def test_launch_stub_hooks_and_synthetic_carry_over(self):
+        stub = {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "a1", "content": "launched"}]},
+                "toolUseResult": {"status": "async_launched"}}
+        syn = {"type": "assistant", "message": {"id": "e%d", "model": "<synthetic>", "usage": {"input_tokens": 0}}}
+        rows = [asst("m1", 1000, [("a1", "Agent", {"description": "Herald: researcher—channel"})]), stub,
+                {"type": "attachment", "attachment": {"type": "hook_success", "hookEvent": "SessionStart", "content": "ctx " * 50}},
+                {"type": "attachment", "attachment": {"type": "hook_success", "hookEvent": "Stop", "content": "log " * 50}},
+                dict(syn, message=dict(syn["message"], id="e1")), dict(syn, message=dict(syn["message"], id="e2")),
+                asst("m2", 1500)]
+        m = self.detail(rows)
+        self.assertIn("agent researcher — channel (launch)", m["sources"])  # a dash without spaces still parses
+        self.assertIn("attachment hook_success", m["sources"])
+        self.assertIn("hook_success", m["excluded_bytes"])  # the Stop hook's output
+        self.assertEqual(m["turns"], 2)
+
+    def test_measure_inside_a_compound_command_and_bad_prices(self):
+        m = self.detail([asst("m1", 1000, [("b1", "Bash", {"command": "python3 x/measure.py --session s && python3 x/hrd.py status"})]),
+                         result("b1", "{}"), asst("m2", 1100)])
+        self.assertEqual(m["measure"]["calls"], 1)
+        self.jsonl(os.path.join(self.base, "s1.jsonl"), [asst("m1", 1000)])
+        p = subprocess.run([sys.executable, os.path.join(SCRIPTS, "measure.py"), "--transcript-dir", self.base,
+                            "--session", "s1", "--prices", "[1]"], capture_output=True, text=True, cwd=self.tmp)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("JSON object", p.stderr)
+
+    def test_bash_source_names(self):
+        self.assertEqual(measure._bash_source("python3 .claude/herald/scripts/hrd.py trim --topic t1 --begin"), "hrd trim")
+        self.assertEqual(measure._bash_source("python3 .claude/herald/scripts/hrd.py lock acquire --cmd x"), "hrd lock acquire")
+
+
+class PricesInRepoCase(RepoCase):
+    def test_partial_config_prices_merge_defaults(self):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        cfg = json.load(open(cfgp))
+        cfg["models"] = {"prices": {"sonnet": 4.0}}
+        self.write(".claude/herald/config.json", json.dumps(cfg))
+        from hrdlib.config import Config
+        self.assertEqual(Config.load(self.root).get("models", "prices")["opus"], 5.0)
+
+
 if __name__ == "__main__":
     unittest.main()

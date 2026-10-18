@@ -96,7 +96,9 @@ def summarize_file(path, prices):
         tot["output"] += u.get("output_tokens", 0)
         usd = dollars(u, model, prices)
         tot["usd"] += usd
-        tot["turns"] += 1
+        if model != "<synthetic>" and (u.get("input_tokens", 0) or u.get("cache_read_input_tokens", 0)
+                                       or u.get("cache_creation_input_tokens", 0)):
+            tot["turns"] += 1  # the same turns `--detail` counts (an API error is no turn)
         tot["models"][family(model)] = tot["models"].get(family(model), 0.0) + usd
     tot["usd"] = round(tot["usd"], 4)
     tot.update(tool_stats(path))
@@ -148,15 +150,25 @@ def subagent_meta(path):
         return {}
 
 
+def herald_description(text):
+    """(role, task|None) from `Herald: <role> — <task>` (any dash, spaces optional), else None."""
+    import re
+
+    t = str(text or "").strip()
+    m = re.match(r"^Herald:\s*(\S+?)(?:\s*[—–]\s*|\s+-\s+)(.+)$", t)
+    if m:
+        return m.group(1), m.group(2).strip()
+    m = re.match(r"^Herald:\s*(\S+)\s*$", t)
+    return (m.group(1), None) if m else None
+
+
 def subagent_task(path):
     """(role, task) — the spawn's `description` `Herald: <role> — <task>` (0.13.0 spawns), else the
     agent type unless it is a built-in one, else a guess from the first prompt."""
-    import re
-
     meta = subagent_meta(path)
-    m = re.match(r"^Herald:\s*(\S+)(?:\s+[—-]\s+(.+))?$", str(meta.get("description") or "").strip())
-    if m:
-        return m.group(1), (m.group(2) or "").strip() or None
+    found = herald_description(meta.get("description"))
+    if found:
+        return found
     t = meta.get("agentType")
     if t and t not in BUILTIN_TYPES:
         return t, None
@@ -246,6 +258,8 @@ def _att_text(a):
         "selected_lines_in_ide": lambda: a.get("content"),
         "model": lambda: a.get("text"),
         "date": lambda: a.get("date"),
+        "nested_memory": lambda: a.get("content") if isinstance(a.get("content"), str) else json.dumps(a.get("content")),
+        "task_reminder": lambda: json.dumps(a.get("content") if "content" in a else a.get("tasks")),
         "date_change": lambda: a.get("newDate"),
         "session_context": lambda: a.get("context") if isinstance(a.get("context"), str) else json.dumps(a.get("context")),
         "instructions": lambda: join(a.get("files"), "content"),
@@ -258,7 +272,9 @@ def _att_text(a):
         # hook output the model sees: added context from these events; never PreToolUse (the guard's
         # answer) or Stop
         "hook_success": lambda: (a.get("content") or a.get("additionalContext") or None)
-        if a.get("hookEvent") in ("UserPromptSubmit", "SessionStart", "PostToolUse") else None,
+        if a.get("hookEvent") in ("UserPromptSubmit", "SessionStart") else
+        (a.get("additionalContext") or (a.get("content") if a.get("exitCode") == 2 else None))
+        if a.get("hookEvent") == "PostToolUse" else None,
     }
     f = table.get(t)
     if f is None:
@@ -278,9 +294,9 @@ def _est_tokens(text):
 def _bash_source(cmd):
     import re
 
-    m = re.search(r"(?:^|[\s/])hrd\.py\s+([a-z-]+)(?:\s+([a-z-]+)(?=\s|$))?", cmd)
-    if m:  # the action word only for groups that have actions (never a slug or topic id)
-        two = m.group(1) in ("lock", "stage", "social", "ledger", "topics", "translate", "reverts", "trim")
+    m = re.search(r"(?:^|[\s/])hrd\.py\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*)(?=\s|$))?", cmd)
+    if m:  # the action word only for groups that have actions (never a slug, topic id or flag)
+        two = m.group(1) in ("lock", "stage", "social", "ledger", "topics", "translate", "reverts")
         return "hrd " + m.group(1) + (" " + m.group(2) if two and m.group(2) else "")
     # prompt files read through the shell (`cat <plugin cache>/skills/hrd/commands/x.md`)
     files = re.findall(r"/skills/hrd/([\w./-]+\.md)", cmd)
@@ -310,12 +326,14 @@ def _notification_source(text, labels, tools):
 
     tid = re.search(r"<tool-use-id>([^<]+)</tool-use-id>", text)
     task = re.search(r"<task-id>([^<]+)</task-id>", text)
-    for key in [tid.group(1).strip() if tid else None, task.group(1).strip() if task else None]:
-        if key and key in labels:
+    keys = [k for k in (tid.group(1).strip() if tid else None, task.group(1).strip() if task else None) if k]
+    for key in keys:
+        if key in labels:
             return "agent " + labels[key]
-    if tid and tid.group(1).strip() in tools:
-        name, inp, cwd = tools[tid.group(1).strip()]
-        return _tool_source(name, inp, cwd, labels, tid.group(1).strip())
+    for key in keys:
+        if key in tools:
+            name, inp, cwd = tools[key]
+            return _tool_source(name, inp, cwd, labels, key)
     return "agent ?"
 
 
@@ -327,15 +345,14 @@ def _tool_source(name, inp, cwd, labels, tool_use_id):
     if name in ("Agent", "Task"):
         label = labels.get(tool_use_id)
         if not label:
-            import re
-
-            m = re.match(r"^Herald:\s*(\S+)(?:\s+[—-]\s+(.+))?$", str(inp.get("description") or "").strip())
-            label = ("%s — %s" % (m.group(1), m.group(2)) if m and m.group(2) else m.group(1)) if m else "?"
+            found = herald_description(inp.get("description"))
+            label = ("%s — %s" % found if found[1] else found[0]) if found else "?"
         return "agent " + label
     return "tool " + str(name)
 
 
 SKILL_INJECTION = "Base directory for this skill:"
+_MEASURE_RE = __import__("re").compile(r"(?:^|[\s/])measure\.py\b")
 
 
 def main_detail(path, labels=None):
@@ -400,7 +417,13 @@ def main_detail(path, labels=None):
                         if isinstance(body, list):
                             body = "".join(x.get("text", "") for x in body if isinstance(x, dict))
                         name, inp, cwd = tools.get(c.get("tool_use_id"), (None, {}, None))
+                        tur = o.get("toolUseResult") if isinstance(o.get("toolUseResult"), dict) else {}
+                        for k in ("taskId", "task_id", "backgroundTaskId"):
+                            if tur.get(k) and c.get("tool_use_id") in tools:
+                                tools[str(tur[k])] = tools[c.get("tool_use_id")]  # task-id-only notifications
                         src = _tool_source(name, inp, cwd, labels, c.get("tool_use_id"))
+                        if name == "Bash" and _MEASURE_RE.search(str(inp.get("command") or "")):
+                            src = "measure.py"  # whatever else the command ran: the budget check's call
                         status = (o.get("toolUseResult") or {}).get("status") if isinstance(o.get("toolUseResult"), dict) else None
                         if name in ("Agent", "Task") and status in ("async_launched", "forked"):
                             src += " (launch)"  # the stub; the report arrives later as a notification

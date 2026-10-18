@@ -21,7 +21,8 @@ block every tool call once the hook script is missing).
 4. Existing harness → merge mode: never overwrite local files (INV4); report what exists.
 5. `HRD` is not available yet; step P2.1 installs it.
 
-## P1 — Repo analysis (read-only; spawn up to three Explore agents in parallel)
+## P1 — Repo analysis (read-only; spawn up to three Explore agents in parallel — `description`
+`Herald: init — content|build|style`)
 
 Exclude `.claude/skills/**` and other local skills from every scan.
 

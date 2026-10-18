@@ -25,7 +25,13 @@ else:
     root = repo_root()
     prices = dict(Config.load(root, required=False).get("models", "prices") or DEFAULTS["models"]["prices"])
 if a.prices:
-    prices.update(json.loads(a.prices))
+    try:
+        extra = json.loads(a.prices)
+    except ValueError:
+        extra = None
+    if not isinstance(extra, dict):
+        ap.error('--prices takes a JSON object, e.g. {"opus": 5, "sonnet": 3, "haiku": 1}')
+    prices.update(extra)
 out = measure(root, prices, session=a.session, files=a.file, detail=a.detail, transcript_dir=a.transcript_dir)
 if a.detail:
     out.setdefault("detail", {})["prices"] = prices
