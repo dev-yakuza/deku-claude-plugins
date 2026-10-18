@@ -291,8 +291,11 @@ def _est_tokens(text):
     return int(ascii_ / 4 + (len(text) - ascii_))
 
 
-_STMT = r"(?:^|[;&|\n(][ \t]*)"  # where a shell statement starts (no \s*: blank runs stay linear)
+_STMT = r"(?:^[ \t]*|[;&|\n(][ \t]*)"  # where a shell statement starts (no \s*: blank runs stay linear)
+_KEYWORD = r"(?:(?:if|then|else|elif|do|while|until|time|!)[ \t]+)*"  # may come before a command
 _VALUE_CAP = 4096  # an expanded variable longer than this is left as written (no blow-up)
+_GROWTH_CAP = 4  # expansion stops when the command would grow past this many times its size
+_ENV_PREFIX = r"^(?:[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|\$\([^()]*\)|\([^()]*\)|\S*)[ \t]*)+"
 
 
 def _expand_shell(cmd):
@@ -311,17 +314,23 @@ def _expand_shell(cmd):
     # functions: `H() { body; }` or `function H { body; }` — a call takes the body up to "$@"
     fdef = re.compile(_STMT + r"(?:function\s+([A-Za-z_]\w*)\s*(?:\(\))?|([A-Za-z_]\w*)\s*\(\))\s*"
                       r"\{((?:[^{}]|\$\{[^{}]*\})*)\}")
+    limit = _GROWTH_CAP * len(cmd) + _VALUE_CAP
     names = {}
     for m in fdef.finditer(cmd):
-        names[m.group(1) or m.group(2)] = re.split(r"\"?\$\{?@\}?\"?", m.group(3), maxsplit=1)[0].strip().rstrip(";").strip()
+        body = re.split(r"\"?\$\{?@\}?\"?", m.group(3), maxsplit=1)[0].strip().rstrip(";").strip()
+        if len(body) <= _VALUE_CAP:
+            names[m.group(1) or m.group(2)] = body
     if names:
         cmd = fdef.sub(drop, cmd)
-        call = re.compile(r"(" + _STMT + r"|\beval\s+[\"']?)([A-Za-z_]\w*)(?=\s|[\"';&|)]|$)")
+        call = re.compile(r"(" + _STMT + _KEYWORD + r"|\beval\s+[\"']?)([A-Za-z_]\w*)(?=\s|[\"';&|)]|$)")
         for _ in range(3):  # a function that calls another
-            cmd = call.sub(lambda m: m.group(1) + names.get(m.group(2), m.group(2)), cmd)
+            grown = call.sub(lambda m: m.group(1) + names.get(m.group(2), m.group(2)), cmd)
+            if len(grown) > limit:
+                break
+            cmd = grown
     # assignments, with an optional export/declare/local/readonly in front
     adef = re.compile(_STMT + r"(?:(?:export|declare|local|readonly|typeset)(?:\s+-\w+)*\s+)?"
-                      r"([A-Za-z_]\w*)=(?:\"([^\"]*)\"|'([^']*)'|([^\s;&|\"']*))(?=\s*(?:[;&|\n)]|$))")
+                      r"([A-Za-z_]\w*)=(?:\"([^\"]*)\"|'([^']*)'|([^\s;&|\"']*))(?=[ \t]*(?:[;&|\n)#]|$))")
     defs = [(m.start(), m.end(), m.group(1), m.group(2) or m.group(3) or m.group(4) or "") for m in adef.finditer(cmd)]
     if not defs:
         return cmd
@@ -331,9 +340,12 @@ def _expand_shell(cmd):
     def expand(text):
         return ref.sub(lambda r: values.get(r.group(1) or r.group(2), r.group(0)), text)
 
-    out, pos = [], 0
+    out, pos, size = [], 0, 0
     for start, end, name, value in defs:
         out.append(expand(cmd[pos:start]))
+        size += len(out[-1])
+        if size > limit:
+            return cmd
         out.append(drop(adef.match(cmd, start)))
         value = expand(value)  # a value may use earlier variables
         if len(value) <= _VALUE_CAP:
@@ -342,7 +354,7 @@ def _expand_shell(cmd):
             values.pop(name, None)
         pos = end
     out.append(expand(cmd[pos:]))
-    return "".join(out)
+    return cmd if size + len(out[-1]) > limit else "".join(out)
 
 
 def _bash_source(cmd):
@@ -353,7 +365,7 @@ def _bash_source(cmd):
     # it (python3 -X …, timeout, xargs, ./hrd.py, a quoted "$(…)" path); a command that only
     # reads or names hrd.py (`sed -n 1,40p …/hrd.py`) is not a call
     m = re.search(r"(?:^|[\s/\"'])hrd\.py[\"']?[ \t]+(?:[\"']?([a-z][a-z-]*)[\"']?"
-                  r"(?:[ \t]+[\"']?([a-z][a-z-]*)[\"']?(?=[\s;&|)]|$))?(?=[\s;&|)]|$)|(-))", cmd)
+                  r"(?:[ \t]+[\"']?([a-z][a-z-]*)[\"']?(?=[\s;&|)`<>}]|$))?(?=[\s;&|)`<>}]|$)|(-))", cmd)
     if m:  # the action word only for groups that have actions (never a slug, topic id or flag)
         if not m.group(1):
             return "hrd"  # `hrd.py --help`
@@ -361,19 +373,26 @@ def _bash_source(cmd):
         return "hrd " + m.group(1) + (" " + m.group(2) if two and m.group(2) else "")
     # prompt files read through the shell (`cat <plugin cache>/skills/hrd/commands/x.md`, or a
     # path relative to the plugin after `cd <plugin>`): the files of the first reading statement
+    files = []
     for stmt in re.split(r"[;&|\n]+", cmd):
-        if re.match(r"(cat|head|sed|less|tail)\b", stmt.lstrip(" \t(")):
-            files = re.findall(r"(?:^|[\s/\"'])skills/hrd/([\w./-]+\.md)", stmt)
-            if files:
-                return "skill " + files[0] + (" +%d" % (len(files) - 1) if len(files) > 1 else "")
+        stmt = re.sub(_ENV_PREFIX, "", re.sub("^" + _KEYWORD, "", stmt.lstrip(" \t({")))
+        if re.match(r"(cat|head|sed|less|tail)\b", stmt):
+            files += re.findall(r"(?:^|[\s/\"'])skills/hrd/([\w./-]+\.md)", stmt)
+    if files:
+        return "skill " + files[0] + (" +%d" % (len(files) - 1) if len(files) > 1 else "")
     for script in ("measure.py", "gsc.py", "integrity.py", "validate_content.py", "batch_runner.py"):
         if script in cmd:
             return script
     # the first statement that runs something: past comments, `cd` and env prefixes (`CI=1 npm test`)
     cd = False
     for stmt in re.split(r"[;&|\n]+", cmd):
-        stmt = re.sub(r"^(?:[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|\([^()]*\)|\S*)\s*)+", "", stmt.strip().lstrip("({! \t"))
+        raw = stmt.strip().lstrip("({! \t")
+        stmt = re.sub(_ENV_PREFIX, "", raw)
         words = stmt.split()
+        if not words:  # only assignments: a command substitution in them runs (`SHA=$(git rev-parse HEAD)`)
+            sub = re.search(r"=\$\(\s*([^\s()]+)", raw)
+            if sub:
+                return "bash " + os.path.basename(sub.group(1))
         if not words or words[0].startswith("#") or words[0] in ("export", "declare", "local", "readonly", "typeset"):
             continue
         if words[0] == "cd":

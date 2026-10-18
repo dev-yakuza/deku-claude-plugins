@@ -22,10 +22,12 @@ def pr_work(crit, tid, slug):
 
 
 def _major_minor():
-    """The running scripts' version as "x.y" — equal to them, so the batch starts (no edit per release)."""
+    """The running scripts' version, given as "x.y" when the patch is 0 — equal to them, so the batch
+    starts (no edit per release; "0.13" equals 0.13.0, never 0.13.1)."""
     import re
     src = open(os.path.join(SCRIPTS, "hrd.py")).read()
-    return ".".join(re.search(r'SCRIPTS_VERSION = "([0-9.]+)"', src).group(1).split(".")[:2])
+    v = re.search(r'SCRIPTS_VERSION = "([0-9.]+)"', src).group(1)
+    return v[:-2] if v.endswith(".0") and v.count(".") == 2 else v
 
 
 class BatchCase(RepoCase):

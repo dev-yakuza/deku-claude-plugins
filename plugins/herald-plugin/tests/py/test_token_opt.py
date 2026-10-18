@@ -314,15 +314,29 @@ class DetailRound2Case(ConfigDirCase):
         # the file the reading statement reads
         self.assertEqual(src("grep -l x /p/skills/hrd/commands/a.md; cat /p/skills/hrd/commands/b.md"), "skill commands/b.md")
         self.assertEqual(src("(cd sub && make)"), "bash make")
+        # backticks and redirections after the subcommand; keywords before a function call
+        self.assertEqual(src("echo `%s sync`" % hrd), "hrd sync")
+        self.assertEqual(src("%s sync>/tmp/o" % hrd), "hrd sync")
+        self.assertEqual(src('H() { %s "$@"; }; if ! H lock acquire --cmd x; then exit 1; fi' % hrd), "hrd lock acquire")
+        self.assertEqual(src('H="%s" # the cli\n$H sync' % hrd), "hrd sync")
+        self.assertEqual(src('  H="%s"\n  $H sync' % hrd), "hrd sync")
+        # a command substitution in an assignment is what runs
+        self.assertEqual(src("SHA=$(git rev-parse HEAD)\ngit show $SHA"), "bash git")
+        # every prompt file the reading statements read, after an env prefix or a brace too
+        self.assertEqual(src("LC_ALL=C cat /p/skills/hrd/commands/write.md"), "skill commands/write.md")
+        self.assertEqual(src("cat /p/skills/hrd/commands/w.md; echo ---; cat /p/skills/hrd/commands/s.md"), "skill commands/w.md +1")
+        self.assertEqual(src("{ cat /p/skills/hrd/commands/x.md; }"), "skill commands/x.md")
 
     def test_bash_source_long_inputs_stay_fast(self):
         import time
         doubling = "".join('A%d="$A%d$A%d"; ' % (i + 1, i, i) for i in range(30))
         for cmd in ('"; f() { ' * 6000, "f() { a" + " " * 40000 + 'x"$@"', "A=1\n" * 25000, "\n" * 50000,
-                    " " * 50000, "(x)" * 16000, "(" * 50000, doubling):
+                    " " * 50000, "(x)" * 16000, "(" * 50000, doubling,
+                    "f() { " + "a " * 10000 + ' "$@"; }\n' + "f;" * 15000,  # a long body called often
+                    'H="' + "a" * 4000 + '"\n' + "$H;" * 15000):  # a long value referenced often
             t = time.time()
             self.assertIsInstance(measure._bash_source(cmd), str)
-            self.assertLess(time.time() - t, 2.0)
+            self.assertLess(time.time() - t, 1.0)
 
 
 class PricesInRepoCase(RepoCase):
