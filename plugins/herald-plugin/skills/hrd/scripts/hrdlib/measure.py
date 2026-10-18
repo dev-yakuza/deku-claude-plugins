@@ -291,22 +291,53 @@ def _est_tokens(text):
     return int(ascii_ / 4 + (len(text) - ascii_))
 
 
+_STMT = r"(?:^|[;&|\n(]\s*)"  # where a shell statement starts
+
+
+def _expand_shell(cmd):
+    """Inline the command's own shorthands so the patterns below see what really runs:
+    `H="python3 …/hrd.py"; $H sync`, `eval "$H sync"`, `H() { python3 …/hrd.py "$@"; }; H sync`
+    and path variables (`S=<plugin>/commands; cat $S/x.md`). Plain assignments only; the
+    definitions themselves are dropped (a definition runs nothing)."""
+    import re
+
+    fdef = re.compile(_STMT + r"([A-Za-z_]\w*)\s*\(\)\s*\{\s*(.*?)\s+\"\$@\"\s*;?\s*\}")
+    funcs = dict(fdef.findall(cmd))
+    cmd = fdef.sub(lambda m: m.group(0)[:len(m.group(0)) - len(m.group(0).lstrip(";&|\n( \t"))], cmd)
+    for name, body in funcs.items():
+        cmd = re.sub(r"(" + _STMT + r"|\beval\s+[\"']?)" + name + r"(?=\s|$)", lambda m, b=body: m.group(1) + b, cmd)
+    adef = re.compile(_STMT + r"([A-Za-z_]\w*)=(?:\"([^\"$`]*)\"|'([^']*)'|([^\s;&|\"'$`]*))(?=\s*(?:[;&|\n)]|$))")
+    for name, dq, sq, bare in adef.findall(cmd):
+        value = dq or sq or bare
+        cmd = re.sub(r"\$(?:\{" + name + r"\}|" + name + r"\b)", lambda m, v=value: v, cmd)
+    return adef.sub(lambda m: m.group(0)[:len(m.group(0)) - len(m.group(0).lstrip(";&|\n( \t"))], cmd)
+
+
 def _bash_source(cmd):
     import re
 
-    m = re.search(r"(?:^|[\s/])hrd\.py\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*)(?=\s|$))?", cmd)
+    cmd = _expand_shell(cmd)
+    m = re.search(r"(?:^|[\s/])hrd\.py(?:\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*)(?=[\s\"';&|)]|$))?)?", cmd)
     if m:  # the action word only for groups that have actions (never a slug, topic id or flag)
+        if not m.group(1):
+            return "hrd"  # `hrd.py --help`
         two = m.group(1) in ("lock", "stage", "social", "ledger", "topics", "translate", "reverts")
         return "hrd " + m.group(1) + (" " + m.group(2) if two and m.group(2) else "")
-    # prompt files read through the shell (`cat <plugin cache>/skills/hrd/commands/x.md`)
-    files = re.findall(r"/skills/hrd/([\w./-]+\.md)", cmd)
-    if files and re.match(r"\s*(?:cd [^;&]+[;&]+\s*)?(?:[A-Z_]+=\S+\s*[;&]*\s*)?(cat|head|sed|less|tail)\b", cmd):
+    # prompt files read through the shell (`cat <plugin cache>/skills/hrd/commands/x.md`, or a
+    # path relative to the plugin after `cd <plugin>`)
+    files = re.findall(r"(?:^|[\s/\"'])skills/hrd/([\w./-]+\.md)", cmd)
+    if files and re.search(_STMT + r"(cat|head|sed|less|tail)\b[^;&|\n]*skills/hrd/", cmd):
         return "skill " + files[0] + (" +%d" % (len(files) - 1) if len(files) > 1 else "")
     for script in ("measure.py", "gsc.py", "integrity.py", "validate_content.py", "batch_runner.py"):
         if script in cmd:
             return script
-    first = (cmd.strip().split() or ["?"])[0]
-    return "bash " + os.path.basename(first)
+    # the first statement that runs something (not an assignment or `cd`)
+    for stmt in re.split(r"[;&|\n]+", cmd):
+        words = stmt.strip().split()
+        if not words or re.match(r"[A-Za-z_]\w*=", words[0]) or words[0] in ("cd", "export"):
+            continue
+        return "bash " + os.path.basename(words[0])
+    return "bash ?"
 
 
 def _read_source(path, cwd):

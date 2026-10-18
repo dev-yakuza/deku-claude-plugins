@@ -256,6 +256,29 @@ class DetailRound2Case(ConfigDirCase):
         self.assertEqual(measure._bash_source("python3 .claude/herald/scripts/hrd.py trim --topic t1 --begin"), "hrd trim")
         self.assertEqual(measure._bash_source("python3 .claude/herald/scripts/hrd.py lock acquire --cmd x"), "hrd lock acquire")
 
+    def test_bash_source_shell_shorthands(self):
+        src = measure._bash_source
+        hrd = "python3 .claude/herald/scripts/hrd.py"
+        # a variable or a function standing for HRD, `eval`, a leading command before the definition
+        self.assertEqual(src('H="%s"; $H version --against 1.0 && $H lock acquire --cmd x' % hrd), "hrd version")
+        self.assertEqual(src('HRD="%s"; ${HRD} social check --file a.md' % hrd), "hrd social check")
+        self.assertEqual(src('H="%s"; eval "$H sync" && eval "$H lock release --cmd x"' % hrd), "hrd sync")
+        self.assertEqual(src('H() { %s "$@"; }; H social prepare --sns x --n 2' % hrd), "hrd social prepare")
+        self.assertEqual(src('echo "U=$HRD_UNATTENDED"; H="%s"; $H lock acquire --cmd x' % hrd), "hrd lock acquire")
+        self.assertEqual(src('eval "%s lock release"' % hrd), "hrd lock release")
+        self.assertEqual(src("%s --help 2>&1 | head -60" % hrd), "hrd")
+        # a definition alone runs nothing
+        self.assertEqual(src('H="%s"; git status' % hrd), "bash git")
+        # prompt files through a path variable, or relative after `cd <plugin>`
+        self.assertEqual(src("S=/p/skills/hrd/commands; sed -n 1,80p $S/write.md; ls $S/atoms"), "skill commands/write.md")
+        self.assertEqual(src("cd /p/herald-plugin; cat skills/hrd/commands/translate.md; cd -"), "skill commands/translate.md")
+        self.assertEqual(src("cat /p/skills/hrd/commands/a.md /p/skills/hrd/SKILL.md"), "skill commands/a.md +1")
+        # the first statement that runs something
+        self.assertEqual(src("SD=/p/skills/hrd; grep -n x .claude/agents/a.md"), "bash grep")
+        self.assertEqual(src("T=tr-a-20261018; git log -1"), "bash git")
+        self.assertEqual(src("cd repo && ls"), "bash ls")
+        self.assertEqual(src("X=1"), "bash ?")
+
 
 class PricesInRepoCase(RepoCase):
     def test_partial_config_prices_merge_defaults(self):
