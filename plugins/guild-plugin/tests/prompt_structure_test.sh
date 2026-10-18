@@ -3229,7 +3229,10 @@ hasfx "analyze: 계획 중 결정 블록을 근거로" "$GLD/commands/analyze.md
 hasfx "_handoff: plan-decision 마커" "$HOMD" '| `<!-- guild:plan-decision -->` … `<!-- /guild:plan-decision -->` |'
 hasfx "_handoff: K 에 구분·기계 줄" "$HOMD" "the sprint plan's fill record: the member table's \`구분\` values"
 hasfx "plan: 이미 결정된 차원은 다시 묻지 않음" "$SPP" '**Already decided**: a candidate whose body'
-hasfx "plan: CANDIDATES 에 decided 키" "$SPP" 'decided: <dimension keys the body'"'"'s `<!-- guild:plan-decision -->` block already answers'
+hasfx "plan: CANDIDATES 에 decided 줄 — 그 질문만 해결" "$SPP" 'rate the rest of that dimension as usual'
+hasfx "plan: analyze 지난 후보는 readiness 게이트 없음" "$SPP" '**A candidate already past analyze**'
+hasfx "plan: history 없으면 실측 최대·경고 생략" "$SPP" 'No usable history entry'
+hasfx "plan: 추가 경로는 새 이슈 없어도 Phase 6 복구" "$SPP" 'Phase 6 runs even when the human approves no new issue'
 hasfx "plan: 답한 후보는 1b 게이트 통과" "$SPP" 'passes the 1b gate as well'
 hasfx "plan: 첫 스프린트 C=5 로 같은 채우기" "$SPP" 'use `C` = 5 for the fill below'
 hasfx "plan: PO 목표 외에 결정 하나로 착수 가능한 unclear 포함" "$SPP" 'include one that is `unclear` when a single decision would make it startable'

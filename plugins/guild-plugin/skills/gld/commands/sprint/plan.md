@@ -34,7 +34,7 @@ Each its own Bash call.
    Before asking, when the open tracker has a `<!-- guild:sprint:plan-decisions -->` comment, say
    how many of its lines are missing from their members' bodies (by dimension key, members at
    stage `none`/`guild:analyze` only): `결정 N건이 본문에 반영되지 못했습니다: #a … — "추가" 를
-   고르면 재실행이 복구합니다` (Idempotency, below). Two or more open → say so and ask which; concurrent sprints are not supported.
+   고르고 Phase 6 까지 승인하면(추가할 이슈가 없어도) 재실행이 복구합니다` (Idempotency, below). Two or more open → say so and ask which; concurrent sprints are not supported.
 
    ⚠ **Then check whether a supervisor is actually RUNNING** — read the open tracker's
    `<!-- guild:sprint:run -->` marker (`gh api repos/<owner>/<repo>/issues/<tracker>/comments
@@ -219,7 +219,7 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
   > <!-- guild:result-contract -->
   > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
   > <!-- /guild:result-contract -->
-  > CANDIDATES: <number · title · one-line scope · current stage · tag (`refactor-slot` | `refactor` | `—`) · decided: <dimension keys the body's `<!-- guild:plan-decision -->` block already answers, or `—`>, for each>. A decided dimension is settled by the human — rate it `clear` and draft nothing for it.
+  > CANDIDATES: <number · title · one-line scope · current stage · tag (`refactor-slot` | `refactor` | `—`) · decided: <the body's `<!-- guild:plan-decision -->` lines (`<key>: <question> → <answer>`), or `—`>, for each>. A decided line is the human's answer to that question — never draft it again; rate the rest of that dimension as usual (the same rule `analyze.md` Step 1 applies).
 
 **Tech Lead** (dependencies and size):
 - `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `tech-lead sprint select`
@@ -540,7 +540,10 @@ Changing `C` itself is `retro`'s job (Phase 4 there), nowhere else.
 **Fill — in this order, each list in its product-owner rank, while seats remain:**
 1. **goal-picks** — the feature gates as before: no `unclear` dimension; size ✅ (a `⚠ likely to
    split` candidate is excluded by strong default, below); the slot rules; dependencies as the
-   tech-lead's edges. **Plus two gates the fill now has to state, because the leader no longer
+   tech-lead's edges. **A candidate already past analyze** (`guild:design` or later — typically a
+   carried-over member) is not held to the readiness gate: analyze already settled its
+   acceptance criteria, which is what readiness protects; Phase 5 shows it as
+   `이월(<stage>)`. **Plus two gates the fill now has to state, because the leader no longer
    picks by judgment:** the candidate is **착수 가능** in Phase 1b (one 1b reported as
    구체화 필요 is never filled automatically, whatever the product-owner rated — 1b's own
    definition is "handed to `dev` today it ends at `needs-human`"), and it does **not** carry
@@ -560,11 +563,10 @@ When a seat cannot be filled, the seat stays empty and the reason is the `shortf
 **Decision questions (steps 2 and 4).** The point: an `unclear` candidate is not unready
 forever — it is waiting on one answer from the person who is right here.
 - **Already decided**: a candidate whose body (Phase 1 read it) already holds a
-  `<!-- guild:plan-decision -->` line for a dimension — a decision made in an earlier sprint plan,
-  for a member that carried over — counts that dimension as `clear (계획 중 결정)` whatever the
-  product-owner rated; it is never asked again (`analyze.md` Step 1 reads the same block). Pass
-  those keys to the product-owner too, in CANDIDATES (`decided: <keys>`), so its rating and
-  drafts skip them.
+  `<!-- guild:plan-decision -->` line — a decision made in an earlier sprint plan, for a member
+  that carried over — has that question settled: it is never asked again (`analyze.md` Step 1
+  reads the same block). Pass those lines to the product-owner in CANDIDATES (`decided: …`); a
+  gap the block does not answer is rated and drafted as usual.
 - **Who is asked about**: a candidate of that step's list whose every remaining `unclear`
   dimension has a drafted question (not `human-work`), that does not carry `guild:needs-human`, whose stage is
   `none` or `guild:analyze` (later than analyze, an answer in the body can no longer reach the
@@ -723,6 +725,8 @@ means switching to `squash-sync` — step 4).
   the sprint holds `C` and `C` is larger than that largest past size**, add
   `⚠ 용량 <C> 는 아직 실측된 적 없는 크기입니다(실측 최대 <M>) — 줄이려면 "크기 N" 으로 말해 주세요`.
   The number is never cut automatically — it is the human's to change here, or `retro`'s.
+  No usable history entry (first sprint, or every entry `adhoc`/without `planned`) → omit the
+  `실측 최대` part and the ⚠ line.
 - `계획 중 결정:` / `결정했지만 제외:` / `사람 작업 필요:` / `선행 대기:` — Phase 3's decision
   questions and the candidates they could not reach. A dry-run adds
   `dry-run 으로 끝나면 이 답은 남지 않습니다 — --create 로 다시 부르면 다시 묻습니다`.
@@ -1069,7 +1073,7 @@ Body template:
 plan-hash: <sprint_dag.py --mode hash 의 출력>
 - 목표: <한 문장>
 - 시작: <YYYY-MM-DD>
-- 용량 판단: <N>개 — 용량 <C> · 목표 <g> · 목표 외 <o> · 슬롯 <s> · 미달 사유 <없음 | 구체적 사유>
+- 용량 판단: <N>개 — 용량 <C> · 목표 <g>(슬롯 포함) · 목표 외 <o> · 미달 사유 <없음 | 구체적 사유>
 - capacity: <C 정수 | n/a>
 - shortfall: <none | supply | depth | human-cut | n/a>
 - 머지 전략: <merge commit 허용 여부> · 브랜치 자동삭제 <여부>
@@ -1111,7 +1115,7 @@ hashes it — a line added inside would change `plan-hash` on the next read and 
 `plan-hash-mismatch`. Omit the line entirely when no board is configured; do not write an
 empty one.
 
-**Idempotency.** A re-run finds the open tracker at Phase 0 step 4 and adds only what is missing — including, for a member that gets its `Sprint:` line now, the decision lines the tracker's `<!-- guild:sprint:plan-decisions -->` comment (lowest id if several) holds for it and its body block lacks (by dimension key; stage `none`/`guild:analyze` only — later, tell the human instead). ⚠ **Known limit**: a member whose back-reference already landed but whose decision lines did not, and a tracker that died before step 2, are not repaired by this — report `결정 N건이 본문에 반영되지 못했습니다: #a … (트래커의 plan-decisions 댓글 참고)` so the human can copy them by hand. A tracker that was created but never labelled is found by its body marker:
+**Idempotency.** A re-run finds the open tracker at Phase 0 step 4 and adds only what is missing — including, for a member that gets its `Sprint:` line now, the decision lines the tracker's `<!-- guild:sprint:plan-decisions -->` comment (lowest id if several) holds for it and its body block lacks (by dimension key; stage `none`/`guild:analyze` only — later, tell the human instead). The repair runs inside Phase 6, so on the "add" path Phase 6 runs even when the human approves no new issue (it then only adds what is missing). ⚠ **Known limit**: a member whose back-reference already landed but whose decision lines did not, a tracker that died before step 2, and an "add" re-run that ends before Phase 6 (a dry-run, or the human stopping) are not repaired by this — report `결정 N건이 본문에 반영되지 못했습니다: #a … (트래커의 plan-decisions 댓글 참고)` so the human can copy them by hand. A tracker that was created but never labelled is found by its body marker:
 ```bash
 gh issue list --state open --limit 200 --search '"guild:sprint:plan" in:body' --json number,title
 ```
