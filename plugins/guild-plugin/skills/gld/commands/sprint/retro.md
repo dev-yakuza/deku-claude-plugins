@@ -179,7 +179,7 @@ Sources, and **what each is honestly derived from**:
 | 스택 따라잡기 횟수 | base가 기본 브랜치로 폴백한 PR 수 | PR `baseRefName` ↔ 멤버 표의 기대 base |
 | 리뷰 변경 요청률 | `reviewDecision == CHANGES_REQUESTED` / 멤버 PR | PR |
 | 닫힌-미머지 PR | 사람이 거절한 작업 | PR `state == CLOSED` + `mergedAt == null` |
-| 목표 달성 | `구분 = goal` 멤버가 **모두** 머지됐는가(예/아니오) + 머지된 goal / 계획된 goal | 멤버 표의 `구분` 열 + PR `mergedAt`. 열이 없는 옛 트래커 → "목표 구분 없음" |
+| 목표 달성 | `구분 = goal` 과 `slot` 멤버가 **모두** 머지됐는가(예/아니오) + 머지된 / 계획된 (슬롯은 목표 쪽에 센다 — `daily` 와 같은 기준) | 멤버 표의 `구분` 열 + PR `mergedAt`. 열이 없는 옛 트래커 → "목표 구분 없음" |
 | 목표 외 | 머지된 other / 계획된 other | 같은 출처 |
 
 **The refactor slot's outcome** — not a tenth metric (the slot is already counted in the nine as
@@ -313,14 +313,15 @@ Sprint #99 — 결제 흐름 안정화        (13일 · run 2회 · 계획 7개)
   리뷰 변경요청 2/5 PR (40%)
   닫힌-미머지   0건
   리팩토링 슬롯 #140 — merged (src/payment/state.ts · #101·#102의 기반)
+  목표 달성     아니오 — 목표 4/5 (#103 캐리오버) · 목표 외 1/2
 
 ▎계획 대비
   계획 시 판단: "7개 — 첫 스프린트, 기초 1개 + 독립 6개로 보수적"
   실제:         5개 머지. 두 개는 같은 원인(#103의 범위 불명확)으로 멈췄습니다.
 
 ▎회고 (사람이 고칠 것 / Guild가 고칠 것)
-  · 사람 쪽: #103은 readiness가 partial(Constraint)인데 담았습니다 — plan이 제외를
-    권고했고 override했습니다. 다음엔 그 권고를 받는 것이 이 두 개를 살립니다.
+  · 사람 쪽: #103은 계획 중 결정(Constraint)으로 담았지만, 그 답이 실제로 막힌 지점과
+    달랐습니다. 다음엔 그 결정을 먼저 Issue 에서 다듬는 것이 이 두 개를 살립니다.
   · Guild 쪽: 리뷰 변경요청 40%는 감사자가 놓친 축이 있다는 신호입니다 → 아래 성장 루프.
 ```
 
@@ -394,8 +395,8 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
 4. `history` is **bounded — keep the most recent 10** entries, oldest dropped. Unbounded growth
    would make `config.json` a log, and `plan` only ever reads the recent trend.
    ⚠ Older entries may have a **different shape** (a field this version does not write, or a
-   missing one). Keep them byte-intact and do not normalize them — `plan` reads the trend
-   defensively. Only the entry for *this* sprint is written by this command.
+   missing one). Keep them byte-intact and do not normalize them — `plan` reads only
+   `planned` (and skips `adhoc` entries) to show the largest past size beside the capacity. Only the entry for *this* sprint is written by this command.
 4a. **`capacity` · `shortfall` · `adhoc`** — copied from the plan block's machine lines:
    `capacity` the integer (omit the key when the line says `n/a` or is absent), `shortfall` the
    token as written (omit when absent), `adhoc: true` only when the line is there. `plan` shows

@@ -160,7 +160,8 @@ def members_of(data, dep_key):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def topo(nodes, deps, rank=None):
-    """Kahn's algorithm. Tie-break by issue number ascending, so the same plan always
+    """Kahn's algorithm. Tie-break by issue number ascending (in `order`, by `kind` first —
+    see KIND_RANK), so the same plan always
     yields the same order — that is what makes a resumed run reproducible (§8.6 step 6).
     `rank` (order mode only) puts a key in front of the number: a lower rank wins a tie.
     Returns None when a cycle is present."""

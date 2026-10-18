@@ -184,7 +184,12 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    `<!-- guild:sprint:slot-net -->` comment whose slot Issue's body still lacks
    `<!-- guild:safety-net -->`, say so and tell the human to re-run `/gld sprint plan` first and choose to **add** to the open
    sprint — that is the path that applies the approved Safety net (`plan.md` Phase 0 step 4); running now would develop the
-   slot without the net the human approved.
+   slot without the net the human approved. The same applies when the tracker carries a
+   `<!-- guild:sprint:plan-decisions -->` comment with a line (`- #<n> <key>: …`) whose member, at
+   stage `none`/`guild:analyze`, lacks that dimension key in its `<!-- guild:plan-decision -->`
+   block: say so and tell the human to re-run `/gld sprint plan` first and choose to **add** — that
+   re-run restores the decisions; running now would send the member to an unattended `analyze`
+   that stops on the very question the human already answered.
    ⚠ Do **not** label the tracker `guild:needs-human`: that label is removed only by a successful
    forward stage transition or a human-decided loop-back (`_handoff.md` Section A) — and the tracker has no
    stages, so it would stick forever and mis-report to `monitoring`/`status`. Record

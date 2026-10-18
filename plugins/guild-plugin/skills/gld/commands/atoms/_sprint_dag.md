@@ -64,6 +64,12 @@ destroys the member Issue's body.
 than the linearized one, and reach a branch (two or more deps) that linearization exists to
 make unreachable.
 
+The member table's **last** column is **`구분`** — `goal` · `other` · `slot` (`plan.md` Phase 3's
+fill). It feeds `--mode order`'s tie-break (`run` rebuilds the order input from it) and the
+goal metrics in `daily`/`retro`; it is last so the positional readers of the first three columns
+(`stack_sync.py`) are unaffected. A table without it is from before the column: no `kind`, plain
+issue-number ties.
+
 The member table also keeps an **`원래 의존`** column — the pre-linearization declaration. It is
 for the human to read and is **never** an input to any calculation.
 

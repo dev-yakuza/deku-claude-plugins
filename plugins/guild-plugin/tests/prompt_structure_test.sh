@@ -3228,6 +3228,17 @@ hasfx "daily: 목표/목표 외 줄" "$GLD/commands/sprint/daily.md" '`목표: �
 hasfx "analyze: 계획 중 결정 블록을 근거로" "$GLD/commands/analyze.md" '**Decisions already made in sprint planning.**'
 hasfx "_handoff: plan-decision 마커" "$HOMD" '| `<!-- guild:plan-decision -->` … `<!-- /guild:plan-decision -->` |'
 hasfx "_handoff: K 에 구분·기계 줄" "$HOMD" "the sprint plan's fill record: the member table's \`구분\` values"
+hasfx "plan: 이미 결정된 차원은 다시 묻지 않음" "$SPP" '**Already decided**: a candidate whose body'
+hasfx "plan: CANDIDATES 에 decided 키" "$SPP" 'decided: <dimension keys the body'"'"'s `<!-- guild:plan-decision -->` block already answers'
+hasfx "plan: 답한 후보는 1b 게이트 통과" "$SPP" 'passes the 1b gate as well'
+hasfx "plan: 첫 스프린트 C=5 로 같은 채우기" "$SPP" 'use `C` = 5 for the fill below'
+hasfx "plan: PO 목표 외에 결정 하나로 착수 가능한 unclear 포함" "$SPP" 'include one that is `unclear` when a single decision would make it startable'
+hasfx "plan: Phase 0 에서 미반영 결정 보고" "$SPP" '결정 N건이 본문에 반영되지 못했습니다: #a … — "추가" 를'
+hasfx "run: 해시 불일치 안내에 plan-decisions 조건" "$GLD/commands/sprint/run.md" 'that stops on the very question the human already answered'
+hasfx "retro: 슬롯은 목표 쪽에 센다(daily 와 같은 기준)" "$GLD/commands/sprint/retro.md" '슬롯은 목표 쪽에 센다 — `daily` 와 같은 기준'
+lacksfx "retro: plan 이 history 추세를 읽는다는 옛 문장 제거" "$GLD/commands/sprint/retro.md" '`plan` reads the trend'
+hasfx "_sprint_dag: 표의 구분 열 설명" "$GLD/commands/atoms/_sprint_dag.md" 'The member table'"'"'s **last** column is **`구분`**'
+lacksfx "plan: 용량 판단 옛 참조 제거" "$SPP" 'say so in **용량 판단**'
 hasfx "sprint.md: 용량을 이력으로 줄이지 않음" "$GLD/commands/sprint.md" 'never
 shrinks that number from history'
 

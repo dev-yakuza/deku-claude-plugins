@@ -30,7 +30,11 @@ Each its own Bash call.
    ```bash
    gh issue list --label guild:sprint --state open --limit 20 --json number,title
    ```
-   Non-empty → ask the human: close it with `/gld sprint retro` first, or add these issues to it? Two or more open → say so and ask which; concurrent sprints are not supported.
+   Non-empty → ask the human: close it with `/gld sprint retro` first, or add these issues to it?
+   Before asking, when the open tracker has a `<!-- guild:sprint:plan-decisions -->` comment, say
+   how many of its lines are missing from their members' bodies (by dimension key, members at
+   stage `none`/`guild:analyze` only): `결정 N건이 본문에 반영되지 못했습니다: #a … — "추가" 를
+   고르면 재실행이 복구합니다` (Idempotency, below). Two or more open → say so and ask which; concurrent sprints are not supported.
 
    ⚠ **Then check whether a supervisor is actually RUNNING** — read the open tracker's
    `<!-- guild:sprint:run -->` marker (`gh api repos/<owner>/<repo>/issues/<tracker>/comments
@@ -211,11 +215,11 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
 **Product Owner** (value):
 - `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `product-owner sprint select`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. Propose (a) **one sentence** naming what this iteration is for — it becomes the tracker's title, so it names the aim, never a list of the issues; (b) **goal-picks**: the candidates that serve it, in priority order; (c) **other-ranked**: every other candidate worth starting now, in priority order, whatever its relation to the goal — do not leave one out for being off-goal, the sprint fills its remaining seats from this list. For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Mark every candidate with an `unclear` dimension and, for each such dimension, draft the decision that would settle it**: one question line and 2–3 answer options of one line each — or, when no answer from the requester can settle it, `human-work: <credential|upstream|device|other>` instead of a question (`upstream` also covers a gap that exists only because a prerequisite Issue is unfinished). The leader puts your drafts to the human when one is present and leaves those candidates out when unattended. **Do not select a candidate tagged `refactor-slot`** (an orphaned refactor-slot draft — the slot logic handles it), **and rate every candidate tagged `refactor` or `refactor-slot`, whether or not you selected it** — the leader may take one as the sprint's refactor slot and needs your ratings to do so. Write the result to a FILE `docs/specs/sprint-draft/po.md` (do not paste it back) with exactly these section headings, in this order: `## goal` · `## goal-picks` · `## other-ranked` · `## readiness` (a table `| # | Goal | Constraint | Success | note |`) · `## questions` (per drafted dimension `### #<n> <Goal|Constraint|Success>`, then `Q: <question>` and `- A) …` lines, or `human-work: <class>`).
+  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. Propose (a) **one sentence** naming what this iteration is for — it becomes the tracker's title, so it names the aim, never a list of the issues; (b) **goal-picks**: the candidates that serve it, in priority order; (c) **other-ranked**: every other candidate worth starting now, in priority order, whatever its relation to the goal — do not leave one out for being off-goal, the sprint fills its remaining seats from this list; include one that is `unclear` when a single decision would make it startable (its question is drafted below). For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Mark every candidate with an `unclear` dimension and, for each such dimension, draft the decision that would settle it**: one question line and 2–3 answer options of one line each — or, when no answer from the requester can settle it, `human-work: <credential|upstream|device|other>` instead of a question (`upstream` also covers a gap that exists only because a prerequisite Issue is unfinished). The leader puts your drafts to the human when one is present and leaves those candidates out when unattended. **Do not select a candidate tagged `refactor-slot`** (an orphaned refactor-slot draft — the slot logic handles it), **and rate every candidate tagged `refactor` or `refactor-slot`, whether or not you selected it** — the leader may take one as the sprint's refactor slot and needs your ratings to do so. Write the result to a FILE `docs/specs/sprint-draft/po.md` (do not paste it back) with exactly these section headings, in this order: `## goal` · `## goal-picks` · `## other-ranked` · `## readiness` (a table `| # | Goal | Constraint | Success | note |`) · `## questions` (per drafted dimension `### #<n> <Goal|Constraint|Success>`, then `Q: <question>` and `- A) …` lines, or `human-work: <class>`).
   > <!-- guild:result-contract -->
   > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
   > <!-- /guild:result-contract -->
-  > CANDIDATES: <number · title · one-line scope · current stage · tag (`refactor-slot` | `refactor` | `—`), for each>.
+  > CANDIDATES: <number · title · one-line scope · current stage · tag (`refactor-slot` | `refactor` | `—`) · decided: <dimension keys the body's `<!-- guild:plan-decision -->` block already answers, or `—`>, for each>. A decided dimension is settled by the human — rate it `clear` and draft nothing for it.
 
 **Tech Lead** (dependencies and size):
 - `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `tech-lead sprint select`
@@ -522,8 +526,10 @@ Collect both RESULTs and **arbitrate as the leader** into one candidate set plus
 | refactor slot | Phase 2's arbitration of (c) |
 
 **`C` is the target, not a ceiling to argue under.** `C` = `config.sprint.capacity`. No capacity
-yet (first sprint) → **be conservative**: the top ~5 candidates with no `unclear` dimension, and a
-chain depth within the cap. ⚠ **Never shrink `C` from history.** A history entry whose `planned`
+yet (first sprint) → **be conservative**: use `C` = 5 for the fill below (same order, same gates,
+same questions — an answered candidate counts as having no `unclear` dimension), with a chain
+depth within the cap, and write `- capacity: n/a` (there was no configured number to fill
+against). ⚠ **Never shrink `C` from history.** A history entry whose `planned`
 equals its `merged` with no carryover measured the *supply* that sprint had, not the human's
 review throughput — reading "the last sprints were all about 3" as "capacity is about 3" planned
 3 because 3 were ready, merged 3, and fed the next plan the same number. Fewer members than `C`
@@ -545,14 +551,22 @@ Changing `C` itself is `retro`'s job (Phase 4 there), nowhere else.
 3. **other-ranked** — the same gates.
 4. **Decision questions for the other candidates** — attended and not `--no-ask` only.
 
+A candidate whose questions the human answered passes the 1b gate as well — the answer is the
+refinement 1b asked for; that is what Phase 5's `이번에 답해 담았습니다` reports.
 When a seat cannot be filled, the seat stays empty and the reason is the `shortfall`. A 1b
 구체화 필요 candidate with no `unclear` dimension (so no question to ask) is listed in Phase 5 as
 `제외: #n (구체화 필요 — 1b)` and goes no further.
 
 **Decision questions (steps 2 and 4).** The point: an `unclear` candidate is not unready
 forever — it is waiting on one answer from the person who is right here.
-- **Who is asked about**: a candidate of that step's list whose every `unclear` dimension has a
-  drafted question (not `human-work`), that does not carry `guild:needs-human`, whose stage is
+- **Already decided**: a candidate whose body (Phase 1 read it) already holds a
+  `<!-- guild:plan-decision -->` line for a dimension — a decision made in an earlier sprint plan,
+  for a member that carried over — counts that dimension as `clear (계획 중 결정)` whatever the
+  product-owner rated; it is never asked again (`analyze.md` Step 1 reads the same block). Pass
+  those keys to the product-owner too, in CANDIDATES (`decided: <keys>`), so its rating and
+  drafts skip them.
+- **Who is asked about**: a candidate of that step's list whose every remaining `unclear`
+  dimension has a drafted question (not `human-work`), that does not carry `guild:needs-human`, whose stage is
   `none` or `guild:analyze` (later than analyze, an answer in the body can no longer reach the
   acceptance criteria analyze already wrote), that the human has not dropped this session, and
   that would actually be taken once answered — size ✅, not a `refactor-slot`-tagged candidate
@@ -578,7 +592,8 @@ forever — it is waiting on one answer from the person who is right here.
 
 **Adding to an open sprint** (Phase 0 step 4's "add"): none of the above applies — no automatic
 fill, no decision questions, no `구분` column, no machine lines. The tracker body is sealed by its
-`plan-hash`, and the leader proposes additions by judgment exactly as before this change. (Members
+`plan-hash`, and the leader proposes additions by judgment — which issues, how many — and the
+human approves them in Phase 5. (Members
 added this way have a known gap of their own — `run` reads only the sealed table; that is
 separate work.)
 
@@ -592,7 +607,7 @@ human dropping it in Phase 5), take the next candidate in
 the fill order (goal-picks, then other-ranked) that passes the usual gates into its seat — never
 one needing a decision question, which are asked once, in the fill — and redo Phase 4. Otherwise a slot that
 did not happen silently costs the sprint a feature member — the opposite of its hard rule.
-No such pick → leave the seat empty and say so in **용량 판단**.
+No such pick → leave the seat empty and say so in Phase 5's **`용량:`** line (`shortfall: supply`).
 ⚠ **The seat is the slot's or the refill's, never both.** If a later recompute lets the slot
 back in (Phase 4's comparison after a feature-set change, or the human accepting a depth),
 the refilled pick leaves again — otherwise the sprint holds capacity + 1. ⚠ **The recompute
@@ -693,7 +708,7 @@ means switching to `squash-sync` — step 4).
   ⚠ 선행 미포함: #120 ← #118(열림, 멤버 아님) — 기본 브랜치에서 시작합니다
   제외 5개: #108(Success=unclear · 건너뜀) · #110(⚠ 분할 예상) · #133(구체화 필요 — 1b) · …
   용량: 10 · 담음 7(목표 5 · 목표 외 2 · 슬롯 1 포함) · 미달 사유: supply — 남은 후보 없음 (실측 최대 9)
-  ⚠ 용량 10 은 아직 실측된 적 없는 크기입니다(실측 최대 9) — 줄이려면 "크기 N" 으로 말해 주세요
+  (담음이 용량과 같을 때만, 용량 > 실측 최대이면: ⚠ 용량 10 은 아직 실측된 적 없는 크기입니다(실측 최대 9) — 줄이려면 "크기 N" 으로 말해 주세요)
   최대 스택 깊이: 3 (상한 3 — 경계)
   머지 전략: merge commit 허용 ✅ · 브랜치 자동삭제 ✅
   기록: 만들면 판정 원문(docs/specs/sprint-<트래커 번호>/)과 config.json 을 main 에 커밋하고 push 합니다
