@@ -326,6 +326,18 @@ class DetailRound2Case(ConfigDirCase):
         self.assertEqual(src("LC_ALL=C cat /p/skills/hrd/commands/write.md"), "skill commands/write.md")
         self.assertEqual(src("cat /p/skills/hrd/commands/w.md; echo ---; cat /p/skills/hrd/commands/s.md"), "skill commands/w.md +1")
         self.assertEqual(src("{ cat /p/skills/hrd/commands/x.md; }"), "skill commands/x.md")
+        # quotes and comments are honoured when splitting statements
+        self.assertEqual(src("sed -n '1,40p;120,160p' /p/skills/hrd/commands/write.md"), "skill commands/write.md")
+        self.assertEqual(src('P="/p/skills/hrd"; cat "$P"/commands/write.md'), "skill commands/write.md")
+        self.assertEqual(src("# build & test; then ship\nnpm test"), "bash npm")
+        # an assignment from a substitution, quoted or not, runs that command
+        for c, want in (('SHA="$(git rev-parse HEAD)"', "bash git"), ("ROOT=$(pwd)", "bash pwd"),
+                        ('OUT="$(gh pr view 1)"; echo "$OUT"', "bash gh"), ("BR=`git branch`; echo $BR", "bash git")):
+            self.assertEqual(src(c), want, c)
+        # a later redefinition does not change an earlier reference; $* bodies; hyphenated names
+        self.assertEqual(src('H=git; $H status; H="%s"' % hrd), "bash git")
+        self.assertEqual(src("H() { %s $*; }; H sync" % hrd), "hrd sync")
+        self.assertEqual(src('hrd-cli() { %s "$@"; }; hrd-cli sync' % hrd), "hrd sync")
 
     def test_bash_source_long_inputs_stay_fast(self):
         import time
@@ -333,7 +345,9 @@ class DetailRound2Case(ConfigDirCase):
         for cmd in ('"; f() { ' * 6000, "f() { a" + " " * 40000 + 'x"$@"', "A=1\n" * 25000, "\n" * 50000,
                     " " * 50000, "(x)" * 16000, "(" * 50000, doubling,
                     "f() { " + "a " * 10000 + ' "$@"; }\n' + "f;" * 15000,  # a long body called often
-                    'H="' + "a" * 4000 + '"\n' + "$H;" * 15000):  # a long value referenced often
+                    'H="' + "a" * 4000 + '"\n' + "$H;" * 15000,  # a long value referenced often
+                    "function f" + " " * 50000, "cat " + "/skills/hrd" * 4540,
+                    "S=" + "/skills/hrd" * 372 + "; cat " + "/skills/hrd" * 4000 + "$S" * 37):
             t = time.time()
             self.assertIsInstance(measure._bash_source(cmd), str)
             self.assertLess(time.time() - t, 1.0)

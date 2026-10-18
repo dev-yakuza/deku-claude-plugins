@@ -295,7 +295,40 @@ _STMT = r"(?:^[ \t]*|[;&|\n(][ \t]*)"  # where a shell statement starts (no \s*:
 _KEYWORD = r"(?:(?:if|then|else|elif|do|while|until|time|!)[ \t]+)*"  # may come before a command
 _VALUE_CAP = 4096  # an expanded variable longer than this is left as written (no blow-up)
 _GROWTH_CAP = 4  # expansion stops when the command would grow past this many times its size
-_ENV_PREFIX = r"^(?:[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|\$\([^()]*\)|\([^()]*\)|\S*)[ \t]*)+"
+_ENV_PREFIX = r"^(?:[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|\$\([^()]*\)|`[^`]*`|\([^()]*\)|\S*)[ \t]*)+"
+_SUBST = r"\$\(([^()]*)\)|`([^`]*)`"  # a command substitution and the command in it
+
+
+def _statements(cmd):
+    """Split a command into statements at ; & | and newlines outside quotes, dropping comments.
+    One linear pass (no regex backtracking)."""
+    out, cur, quote, i, n = [], [], None, 0, len(cmd)
+    while i < n:
+        c = cmd[i]
+        if quote:
+            cur.append(c)
+            if c == quote:
+                quote = None
+            elif c == "\\" and quote == '"' and i + 1 < n:
+                cur.append(cmd[i + 1])
+                i += 1
+        elif c in "\"'":
+            quote = c
+            cur.append(c)
+        elif c == "#" and (not cur or cur[-1] in " \t"):
+            j = cmd.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        elif c in ";&|\n":
+            if cur:
+                out.append("".join(cur))
+                cur = []
+        else:
+            cur.append(c)
+        i += 1
+    if cur:
+        out.append("".join(cur))
+    return out
 
 
 def _expand_shell(cmd):
@@ -312,17 +345,17 @@ def _expand_shell(cmd):
 
     cmd = cmd.replace("\\\n", " ")  # line continuations
     # functions: `H() { body; }` or `function H { body; }` — a call takes the body up to "$@"
-    fdef = re.compile(_STMT + r"(?:function\s+([A-Za-z_]\w*)\s*(?:\(\))?|([A-Za-z_]\w*)\s*\(\))\s*"
+    fdef = re.compile(_STMT + r"(?:function[ \t]+([A-Za-z_][\w-]*)(?:[ \t]*\(\))?|([A-Za-z_][\w-]*)[ \t]*\(\))[ \t\n]*"
                       r"\{((?:[^{}]|\$\{[^{}]*\})*)\}")
     limit = _GROWTH_CAP * len(cmd) + _VALUE_CAP
     names = {}
     for m in fdef.finditer(cmd):
-        body = re.split(r"\"?\$\{?@\}?\"?", m.group(3), maxsplit=1)[0].strip().rstrip(";").strip()
+        body = re.split(r"\"?\$\{?[@*]\}?\"?", m.group(3), maxsplit=1)[0].strip().rstrip(";").strip()
         if len(body) <= _VALUE_CAP:
             names[m.group(1) or m.group(2)] = body
     if names:
         cmd = fdef.sub(drop, cmd)
-        call = re.compile(r"(" + _STMT + _KEYWORD + r"|\beval\s+[\"']?)([A-Za-z_]\w*)(?=\s|[\"';&|)]|$)")
+        call = re.compile(r"(" + _STMT + _KEYWORD + r"|\beval\s+[\"']?)([A-Za-z_][\w-]*)(?=\s|[\"';&|)]|$)")
         for _ in range(3):  # a function that calls another
             grown = call.sub(lambda m: m.group(1) + names.get(m.group(2), m.group(2)), cmd)
             if len(grown) > limit:
@@ -347,6 +380,9 @@ def _expand_shell(cmd):
         if size > limit:
             return cmd
         out.append(drop(adef.match(cmd, start)))
+        sub = re.search(_SUBST, value)
+        if sub:  # the assignment runs the command in its substitution (`SHA="$(git rev-parse HEAD)"`)
+            out.append((sub.group(1) if sub.group(1) is not None else sub.group(2)).strip() or ":")
         value = expand(value)  # a value may use earlier variables
         if len(value) <= _VALUE_CAP:
             values[name] = value
@@ -374,10 +410,13 @@ def _bash_source(cmd):
     # prompt files read through the shell (`cat <plugin cache>/skills/hrd/commands/x.md`, or a
     # path relative to the plugin after `cd <plugin>`): the files of the first reading statement
     files = []
-    for stmt in re.split(r"[;&|\n]+", cmd):
+    statements = _statements(cmd)
+    for stmt in statements:
         stmt = re.sub(_ENV_PREFIX, "", re.sub("^" + _KEYWORD, "", stmt.lstrip(" \t({")))
         if re.match(r"(cat|head|sed|less|tail)\b", stmt):
-            files += re.findall(r"(?:^|[\s/\"'])skills/hrd/([\w./-]+\.md)", stmt)
+            # quotes removed (`"$P"/commands/x.md`); a greedy path match never backtracks
+            paths = re.findall(r"(?:^|[\s/])skills/hrd/([\w./-]+)", stmt.replace('"', "").replace("'", ""))
+            files += [f for f in paths if f.endswith(".md")]
     if files:
         return "skill " + files[0] + (" +%d" % (len(files) - 1) if len(files) > 1 else "")
     for script in ("measure.py", "gsc.py", "integrity.py", "validate_content.py", "batch_runner.py"):
@@ -385,15 +424,15 @@ def _bash_source(cmd):
             return script
     # the first statement that runs something: past comments, `cd` and env prefixes (`CI=1 npm test`)
     cd = False
-    for stmt in re.split(r"[;&|\n]+", cmd):
+    for stmt in statements:
         raw = stmt.strip().lstrip("({! \t")
         stmt = re.sub(_ENV_PREFIX, "", raw)
         words = stmt.split()
         if not words:  # only assignments: a command substitution in them runs (`SHA=$(git rev-parse HEAD)`)
-            sub = re.search(r"=\$\(\s*([^\s()]+)", raw)
+            sub = re.search(r"=[\"']?(?:\$\(|`)\s*([^\s()`\"']+)", raw)
             if sub:
                 return "bash " + os.path.basename(sub.group(1))
-        if not words or words[0].startswith("#") or words[0] in ("export", "declare", "local", "readonly", "typeset"):
+        if not words or words[0] in ("export", "declare", "local", "readonly", "typeset"):
             continue
         if words[0] == "cd":
             cd = True
