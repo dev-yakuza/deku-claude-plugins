@@ -250,6 +250,8 @@ def release(root, cfg, tid, run_id, summary=None):
     remember(commits.commit_state(root, cfg, "runner", "chore(herald): batch release %s (resumed to PR)" % tid,
                                   "hold", [".claude/herald/topics.json"]))
     push_base(root, cfg)
+    if summary is not None and tid in summary.get("rate_limit_held", []):
+        summary["rate_limit_held"].remove(tid)  # no longer held: never tell the human to resume it
     return True
 
 
@@ -782,6 +784,7 @@ def main(argv):
                     handle_result(tid, done)
                     return
             res = completed(root, cfg, tid, since=started)
+            demoted = False
             if res and res["status"].startswith("held:") and str(res.get("note") or "").startswith(LIMIT_NOTE):
                 sv = ratelimit.scan(logp, rc, clock.now())  # H9: a sub-agent hit a usage limit
                 reset = (sv["reset_at"] if sv["limited"] and sv["kind"] == "limit" else None) or \
@@ -797,7 +800,7 @@ def main(argv):
                 demoted = v["demoted"]
                 if demoted and r7_prev:  # a "passed" reset right after another one: a misread time zone
                     v = ratelimit.verdict(True, "limit", None, v["source"], v["info"], "limit again after a passed reset")
-                r7_prev = demoted
+            r7_prev = demoted  # "right after": every attempt resets it
             if v["limited"] and v["kind"] == "limit":
                 waits += 1
                 now = clock.now()

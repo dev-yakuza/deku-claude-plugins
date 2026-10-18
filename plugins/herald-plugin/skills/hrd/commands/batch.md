@@ -38,6 +38,11 @@ which denies base commits/pushes, merges outside `HRD_AUTO_PRS`, and deploys.
    with `/hrd resume <id>` after that and the rest with `/hrd batch`, and that this run's PRs are
    published with `/hrd ship`. `rate_limit_waits`: the waits it sat out. `skipped`: each reason.
    `stopped`: the run left the checkout untouched (it changed during a wait) — say why.
+   `rate_limit_held`: topics this run holds for a usage limit (whatever ended the run) — each
+   continues with `/hrd resume <id>` after the reset. `not_released`: a topic reached its PR but its
+   hold changed elsewhere meanwhile — check it with `/hrd status`. `auto.rate_limited`: the ship
+   child stopped on a usage limit (`limit`) or an overloaded API (`overloaded`) — nothing was
+   deployed; `/hrd ship` later.
 
 ## What the runner does (for the record)
 

@@ -15,11 +15,11 @@ FAR = "far"  # a reset beyond the single-wait ceiling (weekly wording without a 
 MAX_FUTURE = 30 * 86400
 
 _LIMIT_RE = re.compile(
-    r"usage limit|limit reached|hit your (?:usage )?limit|rate[ -]limit|rate_limit_error|too many requests"
+    r"usage limit|limit reached|hit your (?:usage )?limit|rate[ _-]limit\b|rate_limit_error|too many requests"
     r"|\b429\b|resets? (?:at|in)\b|\bresets \d", re.I)
 _STRONG_RE = re.compile(
     r"usage limit|hit your (?:usage )?limit|(?:session|5-hour|weekly|opus|sonnet|claude)[ -]limit reached"
-    r"|\|\s*\d{10,13}\b", re.I)
+    r"|\|\s*\d{10,13}\s*$", re.I)
 _OVERLOADED_RE = re.compile(r"overloaded|\b529\b", re.I)
 # "context limit reached", "output token limit": a context or output ceiling, not a usage limit
 _NOT_USAGE_RE = re.compile(r"\b(?:context|tokens?|output)(?:[ -](?:window|tokens?))?[ -]+limit\w*(?: reached)?", re.I)
@@ -76,7 +76,14 @@ def _zone(name):
 
 
 def extract_reset(text, now):
-    """A reset time named in a message: epoch seconds, FAR, or None."""
+    """A reset time named in a message: epoch seconds, FAR, or None. Never raises."""
+    try:
+        return _extract_reset(text, now)
+    except (ValueError, OverflowError):
+        return None
+
+
+def _extract_reset(text, now):
     if not text:
         return None
     m = _EPOCH_RE.search(text)
@@ -179,8 +186,11 @@ def _texts(obj):
             elif isinstance(e, dict):
                 dst.extend(str(v) for v in e.values() if isinstance(v, str))
     elif t == "assistant" and (obj.get("isApiErrorMessage") or obj.get("error")):
-        if isinstance(obj.get("error"), str):
-            err.append(obj["error"])
+        e = obj.get("error")
+        if isinstance(e, str):
+            err.append(e)
+        elif isinstance(e, dict):
+            err.extend(str(v) for v in e.values() if isinstance(v, (str, int)) and not isinstance(v, bool))
         msg = obj.get("message") or {}
         for c in msg.get("content") or [] if isinstance(msg, dict) else []:
             if isinstance(c, dict) and isinstance(c.get("text"), str):
@@ -245,8 +255,8 @@ def _scan(log_path, returncode, now):
                 objs.append((n, obj))
                 if obj.get("type") == "rate_limit_event" and isinstance(obj.get("rate_limit_info"), dict):
                     last_event = (n, obj["rate_limit_info"])
-            elif obj is None and not line.lstrip().startswith("{"):
-                stderr.append(line)
+            elif not isinstance(obj, dict) and not line.lstrip().startswith("{"):
+                stderr.append(line)  # includes stderr that happens to parse as JSON ("429")
     # 1. the last event
     if last_event:
         n_e, info = last_event
@@ -271,6 +281,8 @@ def _scan(log_path, returncode, now):
         ok += s
     if returncode != 0:
         err += stderr
+    err.reverse()  # the latest error speaks for the session (it may name the reset time)
+    ok.reverse()
     for text in err:
         clean = _NOT_USAGE_RE.sub(" ", text)
         if _LIMIT_RE.search(clean):

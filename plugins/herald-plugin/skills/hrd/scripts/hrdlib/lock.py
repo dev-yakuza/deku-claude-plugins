@@ -45,7 +45,10 @@ def _pid_runs_batch(pid):
         os.kill(int(pid), 0)
     except (OSError, ValueError, TypeError):
         return False
-    p = subprocess.run(["ps", "-o", "command=", "-p", str(int(pid))], capture_output=True, text=True)
+    try:
+        p = subprocess.run(["ps", "-o", "command=", "-p", str(int(pid))], capture_output=True, text=True)
+    except OSError:  # no `ps` on this host: cannot tell — show the ordinary message
+        return False
     return p.returncode == 0 and "batch_runner" in p.stdout
 
 

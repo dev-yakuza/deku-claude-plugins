@@ -12,7 +12,7 @@ import time
 import unittest
 
 from helpers import HERE, SCRIPTS, sh
-from test_batch import BatchCase
+import test_batch
 
 from hrdlib import lock, ratelimit, store
 
@@ -100,6 +100,18 @@ class ScanTests(unittest.TestCase):
                   "output token limit exceeded"):
             self.assertFalse(scan(result(t, error=True), rc=1)["limited"], t)
 
+    def test_review2_edges(self):
+        # the latest error names the reset time
+        v = scan({"type": "assistant", "isApiErrorMessage": True, "error": "API Error: 429 rate limit"},
+                 result("5-hour limit reached ∙ resets in 3 hours", error=True), rc=1)
+        self.assertEqual(v["reset_at"], NOW + 3 * 3600)
+        self.assertFalse(scan(result("| 9012345678 | ok |"))["limited"])  # a table cell is not |<epoch>
+        self.assertTrue(scan({"type": "assistant", "isApiErrorMessage": True, "error": "rate_limit"}, rc=1)["limited"])
+        self.assertTrue(scan({"type": "assistant", "isApiErrorMessage": True, "error": {"type": "rate_limit"}},
+                             rc=1)["limited"])
+        self.assertTrue(scan(raw=["429"], rc=1)["limited"])
+        self.assertIsNone(ratelimit.extract_reset("resets in 1" + "0" * 400 + " hours", NOW))
+
     def test_glued_stderr_prefix_and_odd_values(self):
         line = "429 Too Many Requests" + json.dumps(result("x", error=True))
         self.assertTrue(scan(raw=[line], rc=1)["limited"])
@@ -145,7 +157,7 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(scan(result(text, error=True), rc=1)["limited"])  # rc≠0: still a live limit
 
 
-class RunnerCase(BatchCase):
+class RunnerCase(test_batch.BatchCase):
     """BatchCase's fixture without BatchCase's own tests (they run in test_batch)."""
 
     def setUp(self):
@@ -180,7 +192,7 @@ class RunnerCase(BatchCase):
         return sh(self.root, "git", "log", "--format=%s", "origin/main")
 
 
-for _name in [n for n in dir(BatchCase) if n.startswith("test_")]:
+for _name in [n for n in dir(test_batch.BatchCase) if n.startswith("test_")]:
     setattr(RunnerCase, _name, None)
 
 
@@ -271,7 +283,9 @@ class LimitRunTests(RunnerCase):
         self.assertEqual(len([w for w in s["rate_limit_waits"] if w["kind"] == "overloaded"]), 3)
         self.assertEqual(len(self.call_log()), 5)  # first + 3 backoffs + the one retry
 
-    def test_budget_before_a_restart(self):
+    def test_budget_over_on_a_limited_attempt(self):
+        # run_once reports "budget" whenever the attempt ended over budget, so the limit branch's own
+        # budget guard is defensive; this pins the observable rule: no sleep, a budget hold
         cfgp = os.path.join(self.root, ".claude/herald/config.json")
         cfg = json.load(open(cfgp)); cfg["budget"] = {"per_article_usd": 0.0000001}
         json.dump(cfg, open(cfgp, "w"))
@@ -381,7 +395,7 @@ class MoreRunTests(RunnerCase):
         cfg = json.load(open(cfgp)); cfg["autonomy"]["publish"] = "auto"
         json.dump(cfg, open(cfgp, "w"))
         self.commit("auto"); sh(self.root, "git", "push", "-q", "origin", "main")
-        from test_batch import pr_work
+        from test_batch import pr_work  # noqa: F401
         sh(self.root, "git", "switch", "-q", "-c", "herald/t0001--post-t0001")
         crit, st = pr_work({"final_round": {"verdict": "PASS", "audit": {}}}, "t0001", "post-t0001")
         self.write(".claude/herald/work/t0001/critique.json", crit)
