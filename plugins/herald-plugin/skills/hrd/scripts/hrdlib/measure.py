@@ -116,7 +116,7 @@ def config_dir():
 
 def _subagent_files(base, sid):
     """Every subagent transcript of a session, nested ones (`subagents/workflows/…`) included."""
-    return sorted(glob.glob(os.path.join(base, sid, "subagents", "**", "*.jsonl"), recursive=True))
+    return sorted(glob.glob(os.path.join(base, sid, "subagents", "**", "agent-*.jsonl"), recursive=True))
 
 
 def session_files(root, session=None, transcript_dir=None):
@@ -211,6 +211,8 @@ def measure(root, prices, session=None, files=None, detail=False, transcript_dir
         if detail:
             t = out.setdefault("detail", {}).setdefault("tasks", {})
             key = "%s — %s" % (label, task) if task else label
+            if meta.get("parentAgentId"):  # spawned by a sub-agent: its own row, marked as nested
+                key += " (nested)"
             agg2 = t.setdefault(key, {"usd": 0.0, "spawns": 0})
             agg2["usd"] = round(agg2["usd"] + s["usd"], 4)
             agg2["spawns"] += 1
@@ -253,7 +255,10 @@ def _att_text(a):
         "mcp_instructions_delta": lambda: json.dumps(a.get("addedBlocks")),
         "agent_listing_delta": lambda: json.dumps(a.get("addedLines")),
         "environment": lambda: json.dumps([a.get("snapshot"), a.get("changes")]),  # structured: bytes approximate
-        "hook_success": lambda: a.get("content") or a.get("additionalContext") or None,  # empty for the guard
+        # hook output the model sees: added context from these events; never PreToolUse (the guard's
+        # answer) or Stop
+        "hook_success": lambda: (a.get("content") or a.get("additionalContext") or None)
+        if a.get("hookEvent") in ("UserPromptSubmit", "SessionStart", "PostToolUse") else None,
     }
     f = table.get(t)
     if f is None:
@@ -273,9 +278,10 @@ def _est_tokens(text):
 def _bash_source(cmd):
     import re
 
-    m = re.search(r"(?:^|[\s/])hrd\.py\s+([a-z-]+)(?:\s+([a-z-]+))?", cmd)
-    if m:
-        return "hrd " + m.group(1) + (" " + m.group(2) if m.group(2) and not m.group(2).startswith("-") else "")
+    m = re.search(r"(?:^|[\s/])hrd\.py\s+([a-z-]+)(?:\s+([a-z-]+)(?=\s|$))?", cmd)
+    if m:  # the action word only for groups that have actions (never a slug or topic id)
+        two = m.group(1) in ("lock", "stage", "social", "ledger", "topics", "translate", "reverts", "trim")
+        return "hrd " + m.group(1) + (" " + m.group(2) if two and m.group(2) else "")
     # prompt files read through the shell (`cat <plugin cache>/skills/hrd/commands/x.md`)
     files = re.findall(r"/skills/hrd/([\w./-]+\.md)", cmd)
     if files and re.match(r"\s*(?:cd [^;&]+[;&]+\s*)?(?:[A-Z_]+=\S+\s*[;&]*\s*)?(cat|head|sed|less|tail)\b", cmd):
@@ -298,20 +304,60 @@ def _read_source(path, cwd):
     return "read " + os.path.basename(p)
 
 
-def _notification_source(text, labels):
+def _notification_source(text, labels, tools):
+    """The agent (or background tool) a `task-notification` reports for."""
     import re
 
-    m = re.search(r"<tool-use-id>([^<]+)</tool-use-id>", text) or re.search(r"<task-id>([^<]+)</task-id>", text)
-    if not m:
-        return None
-    return "agent " + labels.get(m.group(1).strip(), "?")
+    tid = re.search(r"<tool-use-id>([^<]+)</tool-use-id>", text)
+    task = re.search(r"<task-id>([^<]+)</task-id>", text)
+    for key in [tid.group(1).strip() if tid else None, task.group(1).strip() if task else None]:
+        if key and key in labels:
+            return "agent " + labels[key]
+    if tid and tid.group(1).strip() in tools:
+        name, inp, cwd = tools[tid.group(1).strip()]
+        return _tool_source(name, inp, cwd, labels, tid.group(1).strip())
+    return "agent ?"
+
+
+def _tool_source(name, inp, cwd, labels, tool_use_id):
+    if name == "Read":
+        return _read_source(inp.get("file_path"), cwd)
+    if name == "Bash":
+        return _bash_source(str(inp.get("command") or ""))
+    if name in ("Agent", "Task"):
+        label = labels.get(tool_use_id)
+        if not label:
+            import re
+
+            m = re.match(r"^Herald:\s*(\S+)(?:\s+[—-]\s+(.+))?$", str(inp.get("description") or "").strip())
+            label = ("%s — %s" % (m.group(1), m.group(2)) if m and m.group(2) else m.group(1)) if m else "?"
+        return "agent " + label
+    return "tool " + str(name)
+
+
+SKILL_INJECTION = "Base directory for this skill:"
 
 
 def main_detail(path, labels=None):
-    """Attribute the main session's per-turn prefix growth to what entered between turns."""
+    """Attribute the main session's per-turn prefix growth to what entered between turns.
+
+    Turns are assistant messages with real usage (synthetic/API-error messages are skipped). Each
+    turn's growth beyond the previous turn's output is split over the inputs that arrived in
+    between, by estimated tokens; what the estimates miss is `residual_tokens`. A source's
+    integral counts it until the next compaction (it leaves the context there)."""
     labels = labels or {}
     tools, turns, pending, excluded, skill_dirs = {}, [], [], {}, []
     seen, compact = set(), False
+    measure = {"calls": 0, "result_bytes": 0, "integral": 0}
+
+    def user_text(text, is_meta):
+        if is_meta and text.startswith(SKILL_INJECTION):
+            skill_dirs.append(text.split("\n", 1)[0][len(SKILL_INJECTION):].strip())
+            return "skill", text
+        if "<task-notification>" in text:
+            return _notification_source(text, labels, tools), text
+        return ("harness notice" if is_meta else "human"), text
+
     try:
         f = open(path, encoding="utf-8")
     except OSError:
@@ -325,29 +371,26 @@ def main_detail(path, labels=None):
             t = o.get("type")
             msg = o.get("message") or {}
             if t == "assistant":
-                for c in msg.get("content") or []:
+                for c in msg.get("content") or []:  # every streamed event: one event per content block
                     if isinstance(c, dict) and c.get("type") == "tool_use":
                         tools[c.get("id")] = (c.get("name"), c.get("input") or {}, o.get("cwd"))
                 mid = msg.get("id") or o.get("uuid")
-                if mid in seen or not msg.get("usage"):
-                    continue
-                seen.add(mid)
-                u = msg["usage"]
+                u = msg.get("usage") or {}
                 prefix = u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0) + u.get("cache_creation_input_tokens", 0)
-                names = [c.get("name") for c in msg.get("content") or [] if isinstance(c, dict) and c.get("type") == "tool_use"]
+                if mid in seen or not prefix or msg.get("model") == "<synthetic>" or o.get("isApiErrorMessage"):
+                    continue  # a duplicate event, or an error turn the model never ran (inputs carry over)
+                seen.add(mid)
+                if turns and not compact and prefix < 0.5 * turns[-1]["prefix"]:
+                    compact = True  # context cleared without a boundary line
                 turns.append({"prefix": prefix, "output": u.get("output_tokens", 0), "inputs": pending,
-                              "cache_write": u.get("cache_creation_input_tokens", 0), "compact": compact, "tools": names})
+                              "cache_write": u.get("cache_creation_input_tokens", 0), "compact": compact})
                 pending, compact = [], False
             elif t == "user":
+                if o.get("isCompactSummary"):
+                    compact = True
                 content = msg.get("content")
                 if isinstance(content, str):
-                    if o.get("isMeta") and content.startswith("Base directory for this skill:"):
-                        skill_dirs.append(content.split("\n", 1)[0][len("Base directory for this skill:"):].strip())
-                        pending.append(("skill", content))
-                    elif "<task-notification>" in content:
-                        pending.append((_notification_source(content, labels) or "agent ?", content))
-                    else:
-                        pending.append(("human", content))
+                    pending.append(user_text(content, o.get("isMeta")))
                     continue
                 for c in content or []:
                     if not isinstance(c, dict):
@@ -357,24 +400,16 @@ def main_detail(path, labels=None):
                         if isinstance(body, list):
                             body = "".join(x.get("text", "") for x in body if isinstance(x, dict))
                         name, inp, cwd = tools.get(c.get("tool_use_id"), (None, {}, None))
-                        if name == "Read":
-                            src = _read_source(inp.get("file_path"), cwd)
-                        elif name == "Bash":
-                            src = _bash_source(str(inp.get("command") or ""))
-                        elif name in ("Agent", "Task"):
-                            src = "agent launch"
-                        else:
-                            src = "tool " + str(name)
+                        src = _tool_source(name, inp, cwd, labels, c.get("tool_use_id"))
+                        status = (o.get("toolUseResult") or {}).get("status") if isinstance(o.get("toolUseResult"), dict) else None
+                        if name in ("Agent", "Task") and status in ("async_launched", "forked"):
+                            src += " (launch)"  # the stub; the report arrives later as a notification
                         pending.append((src, str(body or "")))
+                        if src == "measure.py":  # counted here: a result can land in a compaction turn
+                            measure["calls"] += 1
+                            measure["result_bytes"] += len(str(body or "").encode("utf-8"))
                     elif c.get("type") == "text":
-                        text = c.get("text") or ""
-                        if "<task-notification>" in text:
-                            pending.append((_notification_source(text, labels) or "agent ?", text))
-                        elif o.get("isMeta") and text.startswith("Base directory for this skill:"):
-                            skill_dirs.append(text.split("\n", 1)[0][len("Base directory for this skill:"):].strip())
-                            pending.append(("skill", text))
-                        else:
-                            pending.append(("human", text))
+                        pending.append(user_text(c.get("text") or "", o.get("isMeta")))
             elif t == "attachment":
                 a = o.get("attachment") or {}
                 text = _att_text(a)
@@ -382,7 +417,7 @@ def main_detail(path, labels=None):
                     excluded[a.get("type") or "?"] = excluded.get(a.get("type") or "?", 0) + len(json.dumps(a))
                     continue
                 if a.get("type") == "queued_command" and "<task-notification>" in text:
-                    pending.append((_notification_source(text, labels) or "agent ?", text))
+                    pending.append((_notification_source(text, labels, tools), text))
                 elif a.get("type") == "queued_command":
                     pending.append(("human", text))
                 elif a.get("type") == "edited_text_file":
@@ -391,33 +426,39 @@ def main_detail(path, labels=None):
                     pending.append(("attachment " + str(a.get("type")), text))
             elif t == "system" and o.get("subtype") == "compact_boundary":
                 compact = True
-            if t == "user" and o.get("isCompactSummary"):
-                compact = True
     n = len(turns)
+    ends, end = [n] * n, n  # each turn's segment ends at the next compaction
+    for i in range(n - 1, -1, -1):
+        ends[i] = end
+        if turns[i]["compact"]:
+            end = i
     sources, residual, negative, compactions = {}, 0, 0, 0
+
+    def add(src, b, e, i):
+        agg = sources.setdefault(src, {"bytes": 0, "est_tokens": 0, "integral": 0, "count": 0})
+        agg["bytes"] += b
+        agg["est_tokens"] += int(e)
+        agg["integral"] += int(e) * (ends[i] - i)
+        agg["count"] += 1
+
     for i, turn in enumerate(turns):
         if i == 0 or turn["compact"]:
             compactions += 1 if turn["compact"] else 0
-            sources.setdefault("base", {"bytes": 0, "est_tokens": 0, "integral": 0, "count": 0})
-            sources["base"]["est_tokens"] += turn["prefix"]
-            sources["base"]["integral"] += turn["prefix"] * (n - i)
-            sources["base"]["count"] += 1
+            add("base", 0, turn["prefix"], i)
             continue
         delta = turn["prefix"] - turns[i - 1]["prefix"] - turns[i - 1]["output"]
         if turn["prefix"] < turns[i - 1]["prefix"]:
             negative += 1
         ests = [(src, len(text.encode("utf-8")), _est_tokens(text)) for src, text in turn["inputs"]]
-        srcs = {src for src, _, _ in ests}
-        if len(srcs) == 1 and delta > 0:
-            ests = [(src, b, delta * (e / max(sum(x[2] for x in ests), 1))) for src, b, e in ests]
+        total = sum(e for _, _, e in ests)
+        if len({src for src, _, _ in ests}) == 1 and delta > 0 and total > 0:
+            ests = [(src, b, delta * e / total) for src, b, e in ests]  # one source: it owns the growth
         else:
-            residual += delta - sum(e for _, _, e in ests)
+            residual += delta - total
         for src, b, e in ests:
-            agg = sources.setdefault(src, {"bytes": 0, "est_tokens": 0, "integral": 0, "count": 0})
-            agg["bytes"] += b
-            agg["est_tokens"] += int(e)
-            agg["integral"] += int(e) * (n - i)
-            agg["count"] += 1
+            add(src, b, e, i)
+            if src == "measure.py":
+                measure["integral"] += int(e) * (ends[i] - i)
     total_prefix = sum(t["prefix"] for t in turns) or 1
     top = dict(sorted(sources.items(), key=lambda kv: -kv[1]["integral"])[:40])
     return {"turns": n, "sources": top, "sources_total": len(sources), "residual_tokens": int(residual),
@@ -425,9 +466,9 @@ def main_detail(path, labels=None):
             "cache": {"write_share": round(sum(t["cache_write"] for t in turns) / total_prefix, 4),
                       "creation_spikes": sum(1 for i, t in enumerate(turns) if i and t["cache_write"] > 0.5 * t["prefix"])},
             "skill_dirs": sorted(set(skill_dirs)),
-            # the budget check's own calls (write/translate run measure.py per stage) — reported apart so a
-            # comparison across versions can leave them out
-            "measure_calls": sum(1 for t in turns for s, _ in t["inputs"] if s == "measure.py"),
+            # the budget check's own measure.py calls (write/translate run it per stage): reported apart so
+            # a comparison across versions can take them out
+            "measure": measure,
             "integral_total": sum(t["prefix"] for t in turns)}
 
 

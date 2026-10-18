@@ -16,8 +16,8 @@ Guild `_execute_spine.md` 3.5a.
 1. Before spawning (in `critique`: after `HRD audit-round`, which writes `state.json`; `/hrd
    review` counts no round): `HRD hash --slug
    <slug>` and record the hash of every file in `<w>`.
-2. Spawn (`description` `Herald: auditor — <stage> round <n>` — `_contract.md` §B; never in the
-   prompt) with an agent type that has no Edit/Write tools if available (e.g. `Explore`), else
+2. Spawn (`description` `Herald: auditor — <stage> round <n>`, from `/hrd review` `Herald: auditor —
+   review` — `_contract.md` §B; never in the prompt) with an agent type that has no Edit/Write tools if available (e.g. `Explore`), else
    `general-purpose`; model `sonnet`.
 3. After: hash again. Any change → discard the findings, restore nothing yourself, and stop
    (attended) / hold `needs-human` with cause `defect:` (unattended).

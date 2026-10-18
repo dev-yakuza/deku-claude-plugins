@@ -93,7 +93,7 @@ class ConfigDirCase(unittest.TestCase):
         self.assertIn("hrd social prepare", m["sources"])
         self.assertIn("read docs/editorial/persona.md", m["sources"])
         self.assertIn("agent distributor — promo", m["sources"])
-        self.assertEqual(m["measure_calls"], 1)
+        self.assertEqual(m["measure"]["calls"], 1)
         self.assertIn("prompt_snapshot", m["excluded_bytes"])
         self.assertIn("hook_success", m["excluded_bytes"])  # the guard's answer is never visible
         self.assertEqual(m["skill_dirs"], ["/x/skills/hrd"])
@@ -105,8 +105,65 @@ class ConfigDirCase(unittest.TestCase):
                             "--session", "s1", "--detail", "--prices", '{"sonnet": 3}'],
                            capture_output=True, text=True, cwd=self.tmp)
         out = json.loads(p.stdout)
-        self.assertEqual((out["total_usd"], out["detail"]["prices"]), (0.3, {"sonnet": 3}))
+        self.assertEqual((out["total_usd"], out["detail"]["prices"]), (0.3, {"opus": 5.0, "sonnet": 3, "haiku": 1.0}))
         self.assertNotIn("\n", p.stdout.strip())  # compact JSON
+
+
+class DetailRound1Case(ConfigDirCase):
+    test_config_dir_nested_agents_and_labels = None  # inherited fixtures only
+    test_cli_outside_a_repo_with_prices = None
+
+    def run_detail(self, rows, labels=None):
+        p = os.path.join(self.base, "s2.jsonl")
+        self.jsonl(p, rows)
+        return measure.main_detail(p, labels or {})
+
+    def test_sync_agent_results_synthetic_turns_and_compaction(self):
+        rows = [
+            asst("m1", 10000),
+            {"type": "user", "message": {"content": [{"type": "text", "text": "go"}]}},
+            asst("m2", 10100, [("a1", "Agent", {"description": "Herald: writer — draft"})]),
+            result("a1", "the full writer report " * 200),  # a foreground (sync) spawn returns its report
+            {"type": "assistant", "message": {"id": "e1", "model": "<synthetic>", "usage": {"input_tokens": 0,
+                                                                                           "output_tokens": 0}}},
+            asst("m3", 11400, [("r1", "Read", {"file_path": "/repo/big.md"})]),
+            result("r1", "q" * 40000),
+            asst("m4", 21500),
+            {"type": "system", "subtype": "compact_boundary"},
+            asst("m5", 3000),
+            asst("m6", 3100),
+        ]
+        m = self.run_detail(rows)
+        self.assertEqual(m["turns"], 6)  # the synthetic error turn is not a turn
+        self.assertIn("agent writer — draft", m["sources"])
+        self.assertNotIn("agent launch", " ".join(m["sources"]))
+        self.assertEqual(m["compactions"], 1)
+        big = m["sources"]["read big.md"]
+        self.assertEqual(big["integral"], big["est_tokens"] * 1)  # m4 only: it left at the compaction (m5)
+
+    def test_task_id_only_notifications_and_background_bash(self):
+        rows = [
+            asst("m1", 1000, [("b1", "Bash", {"command": "python3 .claude/herald/scripts/hrd.py begin t0001", "run_in_background": True})]),
+            result("b1", "started"),
+            asst("m2", 1100),
+            {"type": "user", "message": {"content": "<task-notification><task-id>abc</task-id>done</task-notification>"}},
+            {"type": "attachment", "attachment": {"type": "queued_command",
+                                                  "prompt": "<task-notification><tool-use-id>b1</tool-use-id>exit 0</task-notification>"}},
+            asst("m3", 1300),
+        ]
+        m = self.run_detail(rows, {"abc": "researcher"})
+        self.assertIn("agent researcher", m["sources"])
+        self.assertIn("hrd begin", m["sources"])  # a slug or topic id is never part of the source name
+        self.assertNotIn("hrd begin t", m["sources"])
+
+    def test_default_prices_outside_a_repo_and_journal_files(self):
+        u = {"input_tokens": 1000000, "output_tokens": 0}
+        self.jsonl(os.path.join(self.base, "s1.jsonl"), [{"type": "assistant", "message": {"id": "o1", "model": "claude-opus-5-5", "usage": u}}])
+        self.jsonl(os.path.join(self.base, "s1", "subagents", "workflows", "w1", "journal.jsonl"), [{"type": "started"}])
+        p = subprocess.run([sys.executable, os.path.join(SCRIPTS, "measure.py"), "--transcript-dir", self.base, "--session", "s1"],
+                           capture_output=True, text=True, cwd=self.tmp)
+        out = json.loads(p.stdout)
+        self.assertEqual((out["total_usd"], out["roles"]), (5.0, {}))  # opus at its default price; no journal "agent"
 
 
 class OutputCase(SocialCase):
@@ -123,6 +180,10 @@ class OutputCase(SocialCase):
         self.assertTrue(any(r["slug"] == "old-post" for r in out["articles"]))  # merged_unrecorded stays listed
         out = self.hrd("integrity", "--predeploy", "--report", check=False)[0]
         self.assertNotIn("ok_count", out)
+        os.remove(os.path.join(self.root, "src/content/blog/old-post.md"))
+        self.set_prs([])
+        out = self.hrd("integrity", "--report", check=False)[0]
+        self.assertEqual([r["status"] for r in out["articles"]], ["missing"])
 
     def test_social_check_output_and_merge(self):
         rel = self.daily("Rainy day.")
@@ -144,6 +205,10 @@ class OutputCase(SocialCase):
                            capture_output=True, text=True, cwd=self.root)
         out = json.loads(p.stdout)
         self.assertEqual((len(out["articles"]), out["at"], out["window_days"]), (2, "x", 28))
+        os.remove(os.path.join(mem, "metrics.json"))
+        p = subprocess.run([sys.executable, os.path.join(SCRIPTS, "gsc.py"), "show", "--slug", "a"],
+                           capture_output=True, text=True, cwd=self.root)
+        self.assertEqual(json.loads(p.stdout), None)
 
 
 if __name__ == "__main__":

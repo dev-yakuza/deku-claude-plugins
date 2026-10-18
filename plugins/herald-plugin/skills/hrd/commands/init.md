@@ -87,8 +87,7 @@ base URL · per-article budget (USD) · social posts too? (yes → the summary p
 2. Readiness report: what was detected vs confirmed, enabled roles and why, warnings (other
    deploy entry points, CI deploy → required-check advice: add `validate_content.py` as a
    required check through a ruleset with the current user as a bypass actor).
-3. The human reviews the generated harness (D17 replaces the golden comparison with this
-   review) and approves.
+3. The human reviews the generated harness and approves.
 
 ## P4 — Commit
 

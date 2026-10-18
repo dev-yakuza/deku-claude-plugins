@@ -8,7 +8,7 @@ import sys
 sys.dont_write_bytecode = True  # no __pycache__ in the repo's .claude/herald/scripts
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hrdlib.config import Config  # noqa: E402
+from hrdlib.config import DEFAULTS, Config  # noqa: E402
 from hrdlib.measure import measure  # noqa: E402
 from hrdlib.util import emit, repo_root  # noqa: E402
 
@@ -19,13 +19,13 @@ ap.add_argument("--detail", action="store_true", help="where the main session's 
 ap.add_argument("--transcript-dir", help="a project transcript directory (no repo needed)")
 ap.add_argument("--prices", help='JSON, e.g. {"opus": 5, "sonnet": 3, "haiku": 1} (USD per 1M input tokens)')
 a = ap.parse_args()
-if a.transcript_dir:
-    root, prices = None, {}
+if a.transcript_dir:  # no repo: the default prices, so opus and haiku are not priced as sonnet
+    root, prices = None, dict(DEFAULTS["models"]["prices"])
 else:
     root = repo_root()
-    prices = Config.load(root, required=False).get("models", "prices") or {}
+    prices = dict(Config.load(root, required=False).get("models", "prices") or DEFAULTS["models"]["prices"])
 if a.prices:
-    prices = json.loads(a.prices)
+    prices.update(json.loads(a.prices))
 out = measure(root, prices, session=a.session, files=a.file, detail=a.detail, transcript_dir=a.transcript_dir)
 if a.detail:
     out.setdefault("detail", {})["prices"] = prices

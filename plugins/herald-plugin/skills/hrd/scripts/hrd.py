@@ -624,9 +624,9 @@ def cmd_integrity(a):
     if not a.predeploy:
         # rows that need nothing (ok and recorded) are counted, not listed: the list grows with the
         # site and enters the session's context; ok + merged_unrecorded rows stay (ship's deploy set)
-        quiet = [r for r in rep["articles"] if r["status"] == "ok" and not r.get("merged_unrecorded")]
-        rep["articles"] = [r for r in rep["articles"] if r not in quiet]
-        rep["ok_count"] = len(quiet)
+        keep = [r for r in rep["articles"] if r["status"] != "ok" or r.get("merged_unrecorded")]
+        rep["ok_count"] = len(rep["articles"]) - len(keep)
+        rep["articles"] = keep
     emit(rep)
     if not rep["ok"] and not a.report:
         sys.exit(1)
