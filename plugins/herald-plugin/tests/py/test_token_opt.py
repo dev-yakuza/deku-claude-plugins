@@ -278,6 +278,31 @@ class DetailRound2Case(ConfigDirCase):
         self.assertEqual(src("T=tr-a-20261018; git log -1"), "bash git")
         self.assertEqual(src("cd repo && ls"), "bash ls")
         self.assertEqual(src("X=1"), "bash ?")
+        self.assertEqual(src("cd /repo"), "bash cd")
+        # a command that only reads or names hrd.py is not an HRD call
+        for c in ("sed -n 1,40p .claude/herald/scripts/hrd.py", "grep -n x .claude/herald/scripts/hrd.py",
+                  "git diff -- .claude/herald/scripts/hrd.py", "cat .claude/herald/scripts/hrd.py | head"):
+            self.assertEqual(src(c), "bash " + c.split()[0], c)
+        # other definition forms; a value with `$`; a reference takes the last definition before it
+        self.assertEqual(src('export H="%s"; git status' % hrd), "bash git")
+        self.assertEqual(src('declare -r H="%s"; $H sync' % hrd), "hrd sync")
+        self.assertEqual(src('H="python3 $(git rev-parse --show-toplevel)/.claude/herald/scripts/hrd.py"; $H sync'), "hrd sync")
+        self.assertEqual(src('H="python3 $R/.claude/herald/scripts/hrd.py"; git status'), "bash git")
+        self.assertEqual(src('H() { %s "$@" 2>&1; }; H sync' % hrd), "hrd sync")
+        self.assertEqual(src('function H { %s $@; }; H sync' % hrd), "hrd sync")
+        self.assertEqual(src('H() {\n  %s "$@"\n}\nH lock acquire --cmd x' % hrd), "hrd lock acquire")
+        self.assertEqual(src('H=git; $H status'), "bash git")
+        self.assertEqual(src('H="%s"; $H "sync"' % hrd), "hrd sync")
+        # env prefixes
+        self.assertEqual(src("GIT_PAGER=cat git log -3"), "bash git")
+        self.assertEqual(src("HRD_UNATTENDED=1 %s lock acquire --cmd x" % hrd), "hrd lock acquire")
+
+    def test_bash_source_long_inputs_stay_fast(self):
+        import time
+        for cmd in ('"; f() { ' * 6000, "f() { a" + " " * 40000 + 'x"$@"', "A=1\n" * 25000, "\n" * 50000):
+            t = time.time()
+            self.assertIsInstance(measure._bash_source(cmd), str)
+            self.assertLess(time.time() - t, 2.0)
 
 
 class PricesInRepoCase(RepoCase):
