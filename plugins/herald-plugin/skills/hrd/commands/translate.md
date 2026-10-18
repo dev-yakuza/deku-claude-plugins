@@ -2,7 +2,7 @@
 
 Adds languages to an article Herald already verified and published, without rewriting it:
 `translation → verify → publish` on a `tr-<slug>-<YYYYMMDD>[-<n>]` topic (branch
-`herald/<id>--<slug>`). Design: `design/herald/01-multilingual.md` §7. Needs `translations` in
+`herald/<id>--<slug>`). Needs `translations` in
 config (`/hrd config`). The source and its images are outside a `tr-` PR's scope: it only adds
 or redoes translations.
 

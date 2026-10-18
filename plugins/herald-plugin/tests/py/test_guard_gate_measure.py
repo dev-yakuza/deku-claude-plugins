@@ -502,6 +502,7 @@ class MeasureCase(unittest.TestCase):
                 f.write("{}\n")
             os.utime(os.path.join(base, sid + ".jsonl"), (1, 1) if sid == "older" else None)
         old = os.environ.get("HOME")
+        old_cfg = os.environ.pop("CLAUDE_CONFIG_DIR", None)  # set when the suite runs inside Claude Code
         os.environ["HOME"] = home
         try:
             self.assertEqual(measure.measure(root, {})["session"], "newer")
@@ -512,6 +513,8 @@ class MeasureCase(unittest.TestCase):
             self.assertTrue(measure.measure(root, {})["found"])
         finally:
             os.environ["HOME"] = old
+            if old_cfg is not None:
+                os.environ["CLAUDE_CONFIG_DIR"] = old_cfg
 
 
 if __name__ == "__main__":

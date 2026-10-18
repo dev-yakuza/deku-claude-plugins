@@ -22,7 +22,7 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.12.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.13.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -621,6 +621,12 @@ def cmd_commit(a):
 def cmd_integrity(a):
     root, cfg = ctx()
     rep = integrity.predeploy(root, cfg) if a.predeploy else integrity.check(root, cfg, rev=a.rev)
+    if not a.predeploy:
+        # rows that need nothing (ok and recorded) are counted, not listed: the list grows with the
+        # site and enters the session's context; ok + merged_unrecorded rows stay (ship's deploy set)
+        quiet = [r for r in rep["articles"] if r["status"] == "ok" and not r.get("merged_unrecorded")]
+        rep["articles"] = [r for r in rep["articles"] if r not in quiet]
+        rep["ok_count"] = len(quiet)
     emit(rep)
     if not rep["ok"] and not a.report:
         sys.exit(1)
@@ -1042,7 +1048,9 @@ def cmd_social(a):
         out = []
         for f in a.file:  # one missing draft must not hide the others' results
             try:
-                out.append(social.check_draft(root, cfg, f, record_signal=a.record))
+                res = social.check_draft(root, cfg, f, record_signal=a.record)
+                res.pop("sha256", None)  # kept in the log; no prompt reads it
+                out.append(res)
             except HeraldError as e:  # not a writing problem: nothing for the distributor to fix
                 out.append({"draft": f, "ok": False, "profile": None, "settings_to_confirm": [], "warnings": [],
                             "failed": [{"id": "check-error", "overridable": False, "detail": str(e)}]})

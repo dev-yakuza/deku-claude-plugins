@@ -1,7 +1,7 @@
 # CONFIG — dials and off-switches (`/hrd config [key value]`)
 
 Shows `.claude/herald/config.json` in `config.language` with what each dial does; with
-`key value` changes one dial. Plan §3.5.
+`key value` changes one dial.
 
 - Protected keys (`autonomy`, `budget`, `commands`, `paths`, `base_branch`, `roles`, `models`, `translations`)
   are guarded: the edit triggers an `ask` — the human approves it on the record (INV1/INV2).
@@ -11,7 +11,7 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
   articles no human read before the merge/deploy confirmation; use `write --attended` to read
   them first.
 - `language` is free to change.
-- **Translations** (design/herald/01-multilingual.md §2). The block:
+- **Translations**. The block:
   `"translations": {"source": "<lang>", "targets": [{"lang": "<l>", "body_pattern":
   "{content}/<l>/{slug}.md", "url_pattern": "/<l>/{slug}/"}], "glossary": "<path, optional>",
   "auto_publish": false}` — patterns use only `{content}`/`{slug}` (`{slug}` exactly once),

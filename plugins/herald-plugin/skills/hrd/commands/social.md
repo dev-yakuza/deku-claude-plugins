@@ -3,7 +3,7 @@
 Drafts posts for social channels in the voice of the account's one fictional persona:
 promotional posts for published articles and daily posts of the persona's ordinary life (mixed
 in so the account does not read as an ad account). Herald never posts — a human or another tool
-uploads the post the human picked. Design: `design/herald/03-social.md`. Interactive only: refuse when `HRD_UNATTENDED=1`.
+uploads the post the human picked. Interactive only: refuse when `HRD_UNATTENDED=1`.
 
 | Input | What it does |
 |---|---|

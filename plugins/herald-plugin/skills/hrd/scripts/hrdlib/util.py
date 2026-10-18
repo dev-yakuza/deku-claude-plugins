@@ -113,7 +113,8 @@ def read_jsonl(path, strict_bytes=False):
 
 
 def emit(obj):
-    print(json.dumps(obj, ensure_ascii=False, indent=2))
+    # compact: every HRD output enters the session's context, where whitespace costs tokens every turn
+    print(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
 
 
 def fail(msg, code=1):

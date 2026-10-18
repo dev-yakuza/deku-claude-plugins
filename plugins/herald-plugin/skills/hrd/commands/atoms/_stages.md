@@ -1,7 +1,7 @@
 # ATOM — Stage spine (brief → research → draft → critique → translation → verify → publish)
 
 **Not a command.** `write`, `resume`, the single-stage commands and `refresh` drive stages
-through this file. Contract: `atoms/_contract.md`. Design: `design/herald/00-plan.md` §3.2–§3.3.
+through this file. Contract: `atoms/_contract.md`.
 
 Every stage follows the same frame:
 
@@ -23,7 +23,7 @@ Every stage follows the same frame:
   is local — another machine saved it) → hold `cannibalization` with `tooling: direction file
   missing` (no branch yet: a cleaned hold; the human requeues it where the file is).
 - **Refresh topics** (`refresh_of: X` — from `/hrd refresh`, plan, or a queue another command
-  picked; design `02-refresh-decision.md` R11): the brief is a **refresh brief** — start from
+  picked): the brief is a **refresh brief** — start from
   the topic's `refresh_decision.stale` (else find what is stale), keep the URL/slug `X`, new
   keywords; the strategist also reads X's current body. In the cannibalization check X itself
   and any article or topic that `follows` X are not conflicts (the brief says how they differ
@@ -245,7 +245,7 @@ references into the article itself; then the gate.
 
 ## translation — translator (topics with translation languages)
 
-Design: `design/herald/01-multilingual.md` §4. `state.json` `translation.langs` are the topic's
+`state.json` `translation.langs` are the topic's
 languages (set by `HRD begin`); empty or absent → `stage pass --stage critique` already moved
 the topic to verify and this stage does not run. `translation.pending` are the languages to
 (re)make now — all of them after every critique pass.

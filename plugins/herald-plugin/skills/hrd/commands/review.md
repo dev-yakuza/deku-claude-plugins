@@ -2,7 +2,7 @@
 
 Runs the same external auditor (`atoms/_auditor.md`) on a pending PR or a published article.
 Two purposes: help the human review a PR before `ship`, and measure whether the in-flow review
-works — on a healthy flow it finds nothing. Plan §3.3. Read-only on content; it never checks
+works — on a healthy flow it finds nothing. Read-only on content; it never checks
 out branches.
 
 1. Resolve the target: PR number → head ref (`gh pr view <n> --json headRefName,headRefOid`);

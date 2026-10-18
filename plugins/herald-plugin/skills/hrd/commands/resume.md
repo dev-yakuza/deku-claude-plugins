@@ -1,7 +1,7 @@
 # RESUME — continue a stopped article (`/hrd resume <topic-id> [--attended] [--ship]`)
 
 Continues from `state.json.stage` on the topic's local herald branch. Works for interrupted
-runs and for preserved holds (`needs-human`, `stagnation`, `budget`). Plan §3.2.1.
+runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
 
 1. `printenv HRD_UNATTENDED`; `HRD lock acquire --cmd resume` (keep the token; `HRD lock release
    --cmd resume --token <t>` on every exit path).

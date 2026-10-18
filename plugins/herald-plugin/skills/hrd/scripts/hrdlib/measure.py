@@ -108,21 +108,62 @@ def project_key(root):
     return re.sub(r"[^A-Za-z0-9]", "-", root)
 
 
-def session_files(root, session=None):
-    base = os.path.expanduser(os.path.join("~", ".claude", "projects", project_key(root)))
+def config_dir():
+    """Claude Code's config directory: `CLAUDE_CONFIG_DIR` when set (per-account setups), else
+    `~/.claude`."""
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser(os.path.join("~", ".claude"))
+
+
+def _subagent_files(base, sid):
+    """Every subagent transcript of a session, nested ones (`subagents/workflows/…`) included."""
+    return sorted(glob.glob(os.path.join(base, sid, "subagents", "**", "*.jsonl"), recursive=True))
+
+
+def session_files(root, session=None, transcript_dir=None):
+    base = transcript_dir or os.path.join(config_dir(), "projects", project_key(root))
     if session:
         main = os.path.join(base, session + ".jsonl")
-        subs = sorted(glob.glob(os.path.join(base, session, "subagents", "*.jsonl")))
-        return ([main] if os.path.exists(main) else []), subs
+        return ([main] if os.path.exists(main) else []), _subagent_files(base, session)
     mains = sorted(glob.glob(os.path.join(base, "*.jsonl")), key=os.path.getmtime)
     if not mains:
         return [], []
     latest = mains[-1]
     sid = os.path.basename(latest)[:-6]
-    return [latest], sorted(glob.glob(os.path.join(base, sid, "subagents", "*.jsonl")))
+    return [latest], _subagent_files(base, sid)
 
 
-def subagent_label(path):
+ROLES = ("content-strategist", "researcher", "writer", "editor-in-chief", "editor", "fact-checker", "subject-expert",
+         "search-discovery", "illustrator", "translator", "distributor", "auditor")
+# built-in agent types say nothing about the Herald role (the auditor spawns as Explore)
+BUILTIN_TYPES = ("Explore", "Plan", "general-purpose", "workflow-subagent", "claude", "statusline-setup",
+                 "claude-code-guide", "fork")
+
+
+def subagent_meta(path):
+    try:
+        with open(path[:-len(".jsonl")] + ".meta.json", encoding="utf-8") as f:
+            m = json.load(f)
+        return m if isinstance(m, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def subagent_task(path):
+    """(role, task) — the spawn's `description` `Herald: <role> — <task>` (0.13.0 spawns), else the
+    agent type unless it is a built-in one, else a guess from the first prompt."""
+    import re
+
+    meta = subagent_meta(path)
+    m = re.match(r"^Herald:\s*(\S+)(?:\s+[—-]\s+(.+))?$", str(meta.get("description") or "").strip())
+    if m:
+        return m.group(1), (m.group(2) or "").strip() or None
+    t = meta.get("agentType")
+    if t and t not in BUILTIN_TYPES:
+        return t, None
+    return _guess_label(path), None
+
+
+def _guess_label(path):
     """Best-effort role label: the first user prompt line naming a persona file."""
     try:
         with open(path, encoding="utf-8") as f:
@@ -132,9 +173,7 @@ def subagent_label(path):
                     content = (o.get("message") or {}).get("content")
                     text = content if isinstance(content, str) else " ".join(
                         c.get("text", "") for c in content or [] if isinstance(c, dict))
-                    for role in ("content-strategist", "researcher", "writer", "editor-in-chief", "editor",
-                                 "fact-checker", "subject-expert", "search-discovery", "illustrator",
-                                 "translator", "auditor"):
+                    for role in ROLES:
                         if role in text:
                             return role
                     return "other"
@@ -143,27 +182,253 @@ def subagent_label(path):
     return "other"
 
 
-def measure(root, prices, session=None, files=None):
+def subagent_label(path):
+    return subagent_task(path)[0]
+
+
+def measure(root, prices, session=None, files=None, detail=False, transcript_dir=None):
     if files:
         mains, subs = files, []
     else:
-        mains, subs = session_files(root, session)
+        mains, subs = session_files(root, session, transcript_dir)
     out = {"main": [summarize_file(p, prices) for p in mains], "roles": {}, "total_usd": 0.0,
            "session": os.path.basename(mains[0])[:-len(".jsonl")] if mains and not files else None,
            "found": bool(mains)}  # false: no transcript to measure (wrong session id or project key)
+    labels = {}
     for p in subs:
         s = summarize_file(p, prices)
-        label = subagent_label(p)
+        label, task = subagent_task(p)
+        meta = subagent_meta(p)
+        if meta.get("toolUseId"):
+            labels[meta["toolUseId"]] = "%s — %s" % (label, task) if task else label
+        labels[os.path.basename(p)[len("agent-"):-len(".jsonl")]] = labels.get(meta.get("toolUseId"), label)
         agg = out["roles"].setdefault(label, {"usd": 0.0, "spawns": 0, "output": 0, "read_calls": 0, "read_bytes": 0})
         agg["usd"] = round(agg["usd"] + s["usd"], 4)
         agg["spawns"] += 1
         agg["output"] += s["output"]
         agg["read_calls"] += s["read_calls"]
         agg["read_bytes"] += s["read_bytes"]
+        if detail:
+            t = out.setdefault("detail", {}).setdefault("tasks", {})
+            key = "%s — %s" % (label, task) if task else label
+            agg2 = t.setdefault(key, {"usd": 0.0, "spawns": 0})
+            agg2["usd"] = round(agg2["usd"] + s["usd"], 4)
+            agg2["spawns"] += 1
     out["main_usd"] = round(sum(m["usd"] for m in out["main"]), 4)
     out["subagent_usd"] = round(sum(r["usd"] for r in out["roles"].values()), 4)
     out["total_usd"] = round(out["main_usd"] + out["subagent_usd"], 4)
+    if detail and mains and not files:
+        out.setdefault("detail", {})["main"] = main_detail(mains[0], labels)
+        out["detail"]["config_dir"] = transcript_dir or config_dir()
     return out
+
+
+# --- where the main session's context comes from (design/herald/04-token-optimization.md §2.1) ----
+
+def _att_text(a):
+    """The model-visible text of an attachment, or None for types that only record state."""
+    t = a.get("type")
+
+    def join(items, key):
+        return "\n".join(str(i.get(key) or "") for i in items or [] if isinstance(i, dict))
+
+    table = {
+        "edited_text_file": lambda: a.get("snippet"),
+        "queued_command": lambda: a.get("prompt"),
+        "skill_listing": lambda: a.get("content"),
+        "total_tokens_reminder": lambda: a.get("text"),
+        "silent_turn_reminder": lambda: a.get("text"),
+        "task_status": lambda: a.get("deltaSummary"),
+        "file": lambda: a.get("content") if isinstance(a.get("content"), str) else json.dumps(a.get("content")),
+        "directory": lambda: a.get("content"),
+        "selected_lines_in_ide": lambda: a.get("content"),
+        "model": lambda: a.get("text"),
+        "date": lambda: a.get("date"),
+        "date_change": lambda: a.get("newDate"),
+        "session_context": lambda: a.get("context") if isinstance(a.get("context"), str) else json.dumps(a.get("context")),
+        "instructions": lambda: join(a.get("files"), "content"),
+        "invoked_skills": lambda: join(a.get("skills"), "content"),
+        "read_truncation_notice": lambda: a.get("banner"),
+        "deferred_tools_delta": lambda: json.dumps([a.get("addedLines"), a.get("surfacedDefinitions")]),
+        "mcp_instructions_delta": lambda: json.dumps(a.get("addedBlocks")),
+        "agent_listing_delta": lambda: json.dumps(a.get("addedLines")),
+        "environment": lambda: json.dumps([a.get("snapshot"), a.get("changes")]),  # structured: bytes approximate
+        "hook_success": lambda: a.get("content") or a.get("additionalContext") or None,  # empty for the guard
+    }
+    f = table.get(t)
+    if f is None:
+        return None
+    v = f()
+    if t == "hook_success" and not v:
+        return None  # a hook whose output the model never sees (the guard's PreToolUse answer)
+    return v if isinstance(v, str) else ""
+
+
+def _est_tokens(text):
+    """Rough tokens: ASCII ~4 bytes per token, other characters ~1 token each."""
+    ascii_ = sum(1 for c in text if ord(c) < 128)
+    return int(ascii_ / 4 + (len(text) - ascii_))
+
+
+def _bash_source(cmd):
+    import re
+
+    m = re.search(r"(?:^|[\s/])hrd\.py\s+([a-z-]+)(?:\s+([a-z-]+))?", cmd)
+    if m:
+        return "hrd " + m.group(1) + (" " + m.group(2) if m.group(2) and not m.group(2).startswith("-") else "")
+    # prompt files read through the shell (`cat <plugin cache>/skills/hrd/commands/x.md`)
+    files = re.findall(r"/skills/hrd/([\w./-]+\.md)", cmd)
+    if files and re.match(r"\s*(?:cd [^;&]+[;&]+\s*)?(?:[A-Z_]+=\S+\s*[;&]*\s*)?(cat|head|sed|less|tail)\b", cmd):
+        return "skill " + files[0] + (" +%d" % (len(files) - 1) if len(files) > 1 else "")
+    for script in ("measure.py", "gsc.py", "integrity.py", "validate_content.py", "batch_runner.py"):
+        if script in cmd:
+            return script
+    first = (cmd.strip().split() or ["?"])[0]
+    return "bash " + os.path.basename(first)
+
+
+def _read_source(path, cwd):
+    if not path:
+        return "read ?"
+    p = path.replace(os.sep, "/")
+    if "/skills/hrd/" in p:
+        return "skill " + p.split("/skills/hrd/", 1)[1]
+    if cwd and p.startswith(cwd.rstrip("/") + "/"):
+        return "read " + p[len(cwd.rstrip("/")) + 1:]
+    return "read " + os.path.basename(p)
+
+
+def _notification_source(text, labels):
+    import re
+
+    m = re.search(r"<tool-use-id>([^<]+)</tool-use-id>", text) or re.search(r"<task-id>([^<]+)</task-id>", text)
+    if not m:
+        return None
+    return "agent " + labels.get(m.group(1).strip(), "?")
+
+
+def main_detail(path, labels=None):
+    """Attribute the main session's per-turn prefix growth to what entered between turns."""
+    labels = labels or {}
+    tools, turns, pending, excluded, skill_dirs = {}, [], [], {}, []
+    seen, compact = set(), False
+    try:
+        f = open(path, encoding="utf-8")
+    except OSError:
+        return {}
+    with f:
+        for line in f:
+            try:
+                o = json.loads(line)
+            except ValueError:
+                continue
+            t = o.get("type")
+            msg = o.get("message") or {}
+            if t == "assistant":
+                for c in msg.get("content") or []:
+                    if isinstance(c, dict) and c.get("type") == "tool_use":
+                        tools[c.get("id")] = (c.get("name"), c.get("input") or {}, o.get("cwd"))
+                mid = msg.get("id") or o.get("uuid")
+                if mid in seen or not msg.get("usage"):
+                    continue
+                seen.add(mid)
+                u = msg["usage"]
+                prefix = u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0) + u.get("cache_creation_input_tokens", 0)
+                names = [c.get("name") for c in msg.get("content") or [] if isinstance(c, dict) and c.get("type") == "tool_use"]
+                turns.append({"prefix": prefix, "output": u.get("output_tokens", 0), "inputs": pending,
+                              "cache_write": u.get("cache_creation_input_tokens", 0), "compact": compact, "tools": names})
+                pending, compact = [], False
+            elif t == "user":
+                content = msg.get("content")
+                if isinstance(content, str):
+                    if o.get("isMeta") and content.startswith("Base directory for this skill:"):
+                        skill_dirs.append(content.split("\n", 1)[0][len("Base directory for this skill:"):].strip())
+                        pending.append(("skill", content))
+                    elif "<task-notification>" in content:
+                        pending.append((_notification_source(content, labels) or "agent ?", content))
+                    else:
+                        pending.append(("human", content))
+                    continue
+                for c in content or []:
+                    if not isinstance(c, dict):
+                        continue
+                    if c.get("type") == "tool_result":
+                        body = c.get("content")
+                        if isinstance(body, list):
+                            body = "".join(x.get("text", "") for x in body if isinstance(x, dict))
+                        name, inp, cwd = tools.get(c.get("tool_use_id"), (None, {}, None))
+                        if name == "Read":
+                            src = _read_source(inp.get("file_path"), cwd)
+                        elif name == "Bash":
+                            src = _bash_source(str(inp.get("command") or ""))
+                        elif name in ("Agent", "Task"):
+                            src = "agent launch"
+                        else:
+                            src = "tool " + str(name)
+                        pending.append((src, str(body or "")))
+                    elif c.get("type") == "text":
+                        text = c.get("text") or ""
+                        if "<task-notification>" in text:
+                            pending.append((_notification_source(text, labels) or "agent ?", text))
+                        elif o.get("isMeta") and text.startswith("Base directory for this skill:"):
+                            skill_dirs.append(text.split("\n", 1)[0][len("Base directory for this skill:"):].strip())
+                            pending.append(("skill", text))
+                        else:
+                            pending.append(("human", text))
+            elif t == "attachment":
+                a = o.get("attachment") or {}
+                text = _att_text(a)
+                if text is None:
+                    excluded[a.get("type") or "?"] = excluded.get(a.get("type") or "?", 0) + len(json.dumps(a))
+                    continue
+                if a.get("type") == "queued_command" and "<task-notification>" in text:
+                    pending.append((_notification_source(text, labels) or "agent ?", text))
+                elif a.get("type") == "queued_command":
+                    pending.append(("human", text))
+                elif a.get("type") == "edited_text_file":
+                    pending.append(("edited " + os.path.basename(str(a.get("filename") or "?")), text))
+                else:
+                    pending.append(("attachment " + str(a.get("type")), text))
+            elif t == "system" and o.get("subtype") == "compact_boundary":
+                compact = True
+            if t == "user" and o.get("isCompactSummary"):
+                compact = True
+    n = len(turns)
+    sources, residual, negative, compactions = {}, 0, 0, 0
+    for i, turn in enumerate(turns):
+        if i == 0 or turn["compact"]:
+            compactions += 1 if turn["compact"] else 0
+            sources.setdefault("base", {"bytes": 0, "est_tokens": 0, "integral": 0, "count": 0})
+            sources["base"]["est_tokens"] += turn["prefix"]
+            sources["base"]["integral"] += turn["prefix"] * (n - i)
+            sources["base"]["count"] += 1
+            continue
+        delta = turn["prefix"] - turns[i - 1]["prefix"] - turns[i - 1]["output"]
+        if turn["prefix"] < turns[i - 1]["prefix"]:
+            negative += 1
+        ests = [(src, len(text.encode("utf-8")), _est_tokens(text)) for src, text in turn["inputs"]]
+        srcs = {src for src, _, _ in ests}
+        if len(srcs) == 1 and delta > 0:
+            ests = [(src, b, delta * (e / max(sum(x[2] for x in ests), 1))) for src, b, e in ests]
+        else:
+            residual += delta - sum(e for _, _, e in ests)
+        for src, b, e in ests:
+            agg = sources.setdefault(src, {"bytes": 0, "est_tokens": 0, "integral": 0, "count": 0})
+            agg["bytes"] += b
+            agg["est_tokens"] += int(e)
+            agg["integral"] += int(e) * (n - i)
+            agg["count"] += 1
+    total_prefix = sum(t["prefix"] for t in turns) or 1
+    top = dict(sorted(sources.items(), key=lambda kv: -kv[1]["integral"])[:40])
+    return {"turns": n, "sources": top, "sources_total": len(sources), "residual_tokens": int(residual),
+            "negative_deltas": negative, "compactions": compactions, "excluded_bytes": dict(sorted(excluded.items())),
+            "cache": {"write_share": round(sum(t["cache_write"] for t in turns) / total_prefix, 4),
+                      "creation_spikes": sum(1 for i, t in enumerate(turns) if i and t["cache_write"] > 0.5 * t["prefix"])},
+            "skill_dirs": sorted(set(skill_dirs)),
+            # the budget check's own calls (write/translate run measure.py per stage) — reported apart so a
+            # comparison across versions can leave them out
+            "measure_calls": sum(1 for t in turns for s, _ in t["inputs"] if s == "measure.py"),
+            "integral_total": sum(t["prefix"] for t in turns)}
 
 
 def stream_json_usd(path, prices):

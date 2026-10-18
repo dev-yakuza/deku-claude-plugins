@@ -1,6 +1,6 @@
 # SHIP — publish approved articles (`/hrd ship [topic-id|slug|PR …]`, `--reverify <id>`, `--deploy-only <id …>`, `--auto`, `--session-auto <PR> [--consent]`)
 
-The only place Herald publishes. Plan §3.2.2 (steps 1–9; step 10 is the attended report). Accuracy floor: `atoms/_invariants.md`.
+The only place Herald publishes (steps 1–9; step 10 is the attended report). Accuracy floor: `atoms/_invariants.md`.
 `<base>` = `config.base_branch`. Every `HRD …` is its own Bash call.
 
 `--auto` (batch ship child, `HRD_UNATTENDED=1`) differs: step 1 does not sync (base must
@@ -59,7 +59,8 @@ report a mismatch.
 1. Removal reverts first: `HRD reverts apply` (labels the original PRs `herald:reverted`, holds
    the topics `reverted`, keyed by revert PR).
 2. `HRD integrity --report` (exit 0; `integrity` without `--report` exits 1 when not ok) →
-   one row per Herald article (`origin: herald` ∪ merged Herald PRs):
+   a row per Herald article (`origin: herald` ∪ merged Herald PRs) that needs something; the
+   articles that are `ok` and already recorded are only counted (`ok_count`):
    - `ok` — matches the ledger. If `merged_unrecorded`, add to the **deploy set**.
    - `no-ledger` — no ledger line on this machine: attended → ask "re-verify N articles or
      trust the committed state.json"; trust → `HRD ledger record --topic <ref> --kind trust`
@@ -70,8 +71,8 @@ report a mismatch.
      `--unwithdraw`, remove the files); `--auto`: stop.
    `--auto`: any non-`ok` row → no merge and no deploy this round; write that to the result
    file and stop.
-   **With `translations` in config** each `mismatch`/`no-ledger` row also carries `causes`
-   (design/herald/01-multilingual.md §3); handle the row by its causes, the strictest wins
+   **With `translations` in config** each `mismatch`/`no-ledger` row also carries `causes`;
+   handle the row by its causes, the strictest wins
    (stop > adopt-pending > re-verify):
 
    | causes | handling | exits |

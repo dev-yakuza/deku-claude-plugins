@@ -2,13 +2,12 @@
 
 Decides how to bring a published article up to date — same URL (`update`), a new article
 (`new`, the old one stays) or nothing (`none`) — and continues with that work. The content
-strategist recommends; **the human decides**, in every mode. Design:
-`design/herald/02-refresh-decision.md`. Interactive only (it writes base).
+strategist recommends; **the human decides**, in every mode. Interactive only (it writes base).
 
 1. `HRD lock acquire --cmd refresh` (keep the token; release on every exit path); base clean;
    `HRD sync`.
 2. Gather why: Search Console data if connected (`.claude/herald/secrets/` present — see
-   `monitoring.md`; the article's row in `gsc.py show`), else the human's reason.
+   `monitoring.md`; the article's rows: `gsc.py show --slug <slug>`), else the human's reason.
 3. **Precheck**: `HRD refresh-decision --slug <slug> --precheck [--for-translation]` — the
    article must be in `published.json`. It prints `choices` (the decisions possible now),
    `blocked` (why others are not), `required` (`source-defect` or `for-translation`: only

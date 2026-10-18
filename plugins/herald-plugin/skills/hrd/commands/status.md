@@ -1,6 +1,6 @@
 # STATUS — topics, holds and maintenance (`/hrd status [flags]`)
 
-Plan §3.2.1. Read-only unless a flag below is given.
+Read-only unless a flag below is given.
 
 ## Show (no flags)
 

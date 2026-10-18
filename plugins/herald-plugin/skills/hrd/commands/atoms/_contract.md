@@ -1,7 +1,7 @@
 # ATOM — Shared contract (roles, unattended mode, language, tiers, loops)
 
 **Not a stage.** Ported from Guild `_handoff.md` (C, H, K), `_model_tiering.md`,
-`_stagnation.md`, adapted to articles. Design source: `design/herald/00-plan.md` §3.2–§3.3, §3.7.
+`_stagnation.md`, adapted to articles.
 
 ## A. Tooling
 
@@ -38,9 +38,14 @@ unattended: hold `needs-human`. Never infer a verdict from prose.
 **Spawning a role**: Agent tool with `subagent_type` = the role's agent name (from
 `.claude/agents/<role>.md`); if that agent type is unavailable, `general-purpose` with
 "Adopt the persona in `.claude/agents/<role>.md`." The prompt contains: the task, the stage's
-**read list** (paths only — nothing else; §3.2 read lists are the whole input), the output
+**read list** (paths only — nothing else; read lists are the whole input), the output
 paths, the result-contract block, and the language line (§D). Default model = the role
 file's `model:`; a genuine retry raises one tier (§E).
+**Every** spawn Herald makes — roles, the external auditor, review and evolve reviewers — sets the
+Agent `description` to `Herald: <role> — <task>` (e.g. `Herald: fact-checker — remap`, `Herald:
+translator — ja`, `Herald: auditor — round 2`, `Herald: evolve-panel — degradation`). The
+sub-agent never sees the description; `measure.py --detail` reads it to split costs by task. Never
+put it in the prompt.
 
 ## C. Unattended mode (`HRD_UNATTENDED=1`, set by the batch runner)
 
@@ -104,7 +109,7 @@ instructions are English (SKILL.md "Language"). Machine tokens stay ASCII: statu
 (`verdict`, `severity`, `tag`, `outcome`) — translate only the free text after a prefix. Commit
 messages keep their English templates (free text in them in English too); a PR title is the
 article title, in `config.language`.
-**Article language** is separate (design/herald/01-multilingual.md L14): the article and the
+**Article language** is separate: the article and the
 writer's and researcher's artifacts about it are in the source language
 (`translations.source`, else `config.language`); a translator writes its translation and
 `claims-map.<lang>.json` in its target language. Their spawn prompts name that language in the

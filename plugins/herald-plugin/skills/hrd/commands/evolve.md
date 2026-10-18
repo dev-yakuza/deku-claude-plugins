@@ -4,7 +4,7 @@ No flag and `--apply` are the same full run; `--dry-run` stops after the proposa
 
 Reads signals, proposes improvements, has them attacked by an adversarial panel, applies only
 what the human approves item by item, and records everything. Ported from Guild `evolve.md`.
-Plan §3.6. Always started by a human; there is no automatic trigger.
+Always started by a human; there is no automatic trigger.
 
 Invariants: INV1 (per-item approval), INV2 (no proposal may loosen fact-check rules, critique
 criteria, exemplars by deletion/downgrade, the gate, or the charter floor — hard veto), INV3
@@ -52,7 +52,7 @@ and `refresh-policy.md` from `refresh-override` signals (a human overturned the 
 refresh recommendation — data: recommendation, decision, rule applied, reason; counted per
 article, `topic_id` `slug:<slug>`).
 
-**Social posts** (`design/herald/03-social.md` S13): `social-edit-request` (the human asked for a
+**Social posts**: `social-edit-request` (the human asked for a
 change), `social-final` (the uploaded text differed from the approved draft), `social-reject`
 (every draft of a run discarded) and `social-gate-failure` (a draft still failing the checks),
 each on an axis `<kind>:<theme>` (tone, length, format, persona, hashtags, disclosure, fact,
@@ -77,7 +77,7 @@ and PRs, plus the signal `id`s from Phase 1 — Phase 6 consumes them), expected
 
 ## Phase 4 — Adversarial panel
 
-Spawn three fresh reviewers (opus) in parallel, one lens each: correctness (does the evidence
+Spawn three fresh reviewers (opus) in parallel (`description` `Herald: evolve-panel — <lens>`), one lens each: correctness (does the evidence
 support it?), degradation (does it weaken verification or the floor?), redundancy (already
 covered?). Each returns, per item, `{"verdict": "keep|drop|edit", "reason": "<one sentence>",
 "edit": "<changed wording, only for edit>"}`. Tell every reviewer: `reason` and `edit` in

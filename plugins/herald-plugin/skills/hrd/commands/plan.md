@@ -1,7 +1,7 @@
 # PLAN — build the topic queue (`/hrd plan [--n N] [--issue] [--auto]`)
 
 The content strategist proposes topic clusters for the queue (`.claude/herald/topics.json`).
-It does not write articles. Plan §3.1, §5.
+It does not write articles.
 
 1. `HRD lock acquire --cmd plan` (keep the token; `HRD lock release --cmd plan --token <t>` on every
    exit path); base checked out and clean; `HRD sync`.

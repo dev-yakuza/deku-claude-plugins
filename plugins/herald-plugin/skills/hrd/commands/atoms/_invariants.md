@@ -1,9 +1,9 @@
 # ATOM — Invariants (INV1–INV6)
 
 **Not a stage.** The single definition of Herald's safety invariants. Every command that cites
-an `INVn` cites this file. Design source: `design/herald/00-plan.md` §3.4.
+an `INVn` cites this file.
 
-## Charter floor (D2)
+## Charter floor
 
 > Accuracy is a **floor**, not a priority. On Herald's publishing paths (`ship`, auto publish)
 > no body that has not passed `verify` is ever published — including bodies a human edited.
@@ -24,7 +24,7 @@ Changes that loosen fact-check rules, critique criteria, exemplars (replacing is
 deleting or downgrading is not), the deterministic gate, or the charter floor are blocked.
 *Mechanically*: guard on criteria files, critique/verify personas and protected config keys;
 `evolve` panel veto + apply-time check.
-For social posts (`design/herald/03-social.md` S14) the floor is: the post checks themselves
+For social posts the floor is: the post checks themselves
 (no service effect told as a personal experience, no statistics in daily posts), confirmed
 `forbidden` rules in channel guides, the persona and gate rules (including turning a confirmed
 gate rule to `"scope": "article"`), the disclosure items and the waiver, and the persona's

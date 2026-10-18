@@ -1,9 +1,9 @@
 # AUDIT — read-only health check (`/hrd audit`)
 
 Checks the harness, the state and the enforcement layer after the fact. Never changes files;
-routes findings to `evolve`, `status` or `update`. Plan §3.4 (limits of the guard).
+routes findings to `evolve`, `status` or `update`, including what the guard cannot see.
 
-1. **Harness**: required files exist (§3.5 tree), no `{{...}}` placeholders, personas have the
+1. **Harness**: required files exist (the tree `init` generates), no `{{...}}` placeholders, personas have the
    marker region, `settings.json` wires `guard.py` for Bash and Edit/Write, the scripts match
    the installed plugin version (else → `/hrd update`).
 2. **Enforcement after the fact**:

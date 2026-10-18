@@ -1,8 +1,8 @@
 # BATCH — unattended writing (`/hrd batch [--n N]`)
 
 Writes N queued topics, one fresh `claude -p` child session per article (no context carried
-between articles — plan §3.7), and stops at PRs (`approve`) or also publishes through a ship
-child (`autonomy.publish: auto`). Plan §3.2.1 (batch structure), §3.2.2 (batch + auto table).
+between articles), and stops at PRs (`approve`) or also publishes through a ship
+child (`autonomy.publish: auto`).
 
 The runner is a plain Python process — the only writer of base-branch state during a batch.
 Children run with `HRD_UNATTENDED=1`, `--dangerously-skip-permissions` and the guard hook,

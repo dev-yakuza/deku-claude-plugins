@@ -1,7 +1,7 @@
 # INIT — install the Herald harness (`/hrd init [lang] [--dry-run --out <dir>]`)
 
 Analyzes the repo and its existing articles, interviews the human, and generates the harness
-additively. Plan §3.5, §6 M2, D16 (never reads or reuses other local skills). Ported from Guild
+additively, and never reads or reuses other local skills. Ported from Guild
 `init.md` (P0–P4, additive merge, placeholder sweep).
 
 `--dry-run --out <dir>`: no checkout, commit, push, label or settings change — write every file
@@ -23,7 +23,7 @@ block every tool call once the hook script is missing).
 
 ## P1 — Repo analysis (read-only; spawn up to three Explore agents in parallel)
 
-Exclude `.claude/skills/**` and other local skills from every scan (D16).
+Exclude `.claude/skills/**` and other local skills from every scan.
 
 1. **Content**: static site generator (Astro/Hugo/Next MDX/Jekyll/…) from config files;
    content directory; body file pattern (`{content}/{slug}.md` or nested); frontmatter keys and

@@ -1652,7 +1652,7 @@ def merge(root, cfg, sns, researched, accept=None, accept_floor=()):
     diff = "".join(difflib.unified_diff(head.splitlines(True), out_text.splitlines(True), rel, out_rel))
     return {"out": out_rel, "target": rel, "changed": proposed, "accepted": sorted(accepted),
             "added_rules": [r.get("pattern") for r in added_rules], "disclosure_added": additions,
-            "floor_changes": floor_changes, "house_untouched": True, "diff": diff,
+            "floor_changes": floor_changes, "diff": diff,
             "next": "HRD social lint --mode refresh --file %s --target %s%s" % (
                 out_rel, rel, "".join(" --allow-floor %s" % c["token"] for c in floor_changes if c["applied"]))}
 
