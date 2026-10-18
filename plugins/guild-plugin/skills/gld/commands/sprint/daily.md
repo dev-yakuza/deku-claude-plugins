@@ -26,7 +26,8 @@ gh issue list --label guild:sprint --state open --limit 20 --json number,title,b
 None → `OK: no active sprint` and suggest `/gld sprint plan`. Two or more → list them and ask
 which; render nothing speculative.
 
-**2. Read the container.** From the body: the goal, the member table (members + `base 의존`),
+**2. Read the container.** From the body: the goal, the member table (members + `base 의존`, and
+the `구분` column — `goal` / `other` / `slot` — when the table has one),
 the capacity reasoning, the stack cap. From the `<!-- guild:sprint:run -->` comment: `state`,
 `heartbeat`, `host`/`pid`, per-issue retries, discovered children, and — when a board is
 configured — `board_fails` · `board_bugs` · `board_unknown_col` · `board_account_mismatch` ·
@@ -154,6 +155,11 @@ and the checkpoint deliberately holds only a few volatile fields (`state`/`retri
 absent, say *"실패 이유 기록 없음"* rather than inferring one from a label.
 
 **5. Render** — actionable first, static counts last.
+
+When the member table has a `구분` column, add one line under the header:
+`목표: 머지 <g_merged>/<g> · 목표 외: 머지 <o_merged>/<o>` (the slot counts with the goal). The
+merge order below is unchanged — it follows `base 의존`, never `구분`. A table without the column
+(a sprint planned before it existed) gets no such line.
 
 ⚠ **When `config.sprint.board` is set, add ONE board line.** Pick the first matching row —
 this is not optional garnish, it is the only place a human learns their board is dead:

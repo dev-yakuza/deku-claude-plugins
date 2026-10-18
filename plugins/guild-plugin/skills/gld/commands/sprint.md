@@ -82,6 +82,8 @@ through unchanged. Its own returns are for the paths that never reach a subcomma
 (`_handoff.md` Section D — those belong to stage commands).
 
 ### Capacity is judged, then calibrated
-`plan`'s leader decides how many issues to take (it does **not** ask the human), and `retro`
+`plan` fills to `config.sprint.capacity` — goal picks first, then other ready work — and never
+shrinks that number from history (the capacity number is not asked; attended, `plan` asks
+one-answer decision questions that turn waiting candidates into ready ones), and `retro`
 compares plan against outcome and recommends the next number, which is stored in
 `config.json` → `sprint.capacity` after per-item human approval.

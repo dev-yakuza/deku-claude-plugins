@@ -86,7 +86,7 @@ of caller produces the file.
 
 ```json
 {
-  "members":        [{"number": 101, "deps": [], "base_deps": [], "split": false}],
+  "members":        [{"number": 101, "deps": [], "base_deps": [], "split": false, "kind": "goal"}],
   "prs":            [{"issue": 101, "branch": "feature/#101-x", "state": "MERGED|OPEN|CLOSED"}],
   "branches":       ["feature/#101-x"],
   "terminal":       {"101": "done|needs-human|failed|children"},
@@ -117,7 +117,7 @@ with exit 0. A key that is *present and empty* is still legitimate and means wha
 | Mode | Needs | stdout (one item per line) | exit |
 |---|---|---|---|
 | `linearize` | `members.deps` | `<issue> <base_dep\|->` | 0 · cycle **2** |
-| `order` | `members.base_deps` | execution order; tie-break = **issue number ascending** | 0 · cycle **2** |
+| `order` | `members.base_deps` (+ optional `members.kind`) | execution order; tie-break = **`kind` (`goal`/`slot` before `other`), then issue number ascending** — no `kind` → issue number only; an unknown `kind` → **64** | 0 · cycle **2** |
 | `cycles` | `members.deps` | one witness path per cycle | 0=none · **3=found** |
 | `depth` | `members.base_deps`; `max_depth` **optional** (omit = compute, do not judge) | `depth <n>` + `chain <n1,n2,…>` per over-limit chain | 0 · not linearized **2** · over cap **4** |
 | `base` | `members.base_deps`, `members.split`, `prs`, `branches` | `<issue> <branch>` \| `<issue> DEFAULT` \| `<issue> BLOCKED:<reason>` | 0 · not linearized **2** |

@@ -159,17 +159,19 @@ def members_of(data, dep_key):
 # Graph primitives
 # ─────────────────────────────────────────────────────────────────────────────
 
-def topo(nodes, deps):
+def topo(nodes, deps, rank=None):
     """Kahn's algorithm. Tie-break by issue number ascending, so the same plan always
     yields the same order — that is what makes a resumed run reproducible (§8.6 step 6).
+    `rank` (order mode only) puts a key in front of the number: a lower rank wins a tie.
     Returns None when a cycle is present."""
+    key = (lambda n: (rank.get(n, 0), n)) if rank else (lambda n: n)
     indeg = {n: 0 for n in nodes}
     adj = {n: [] for n in nodes}
     for x, ds in deps.items():
         for d in ds:
             adj[d].append(x)
             indeg[x] += 1
-    ready = sorted(n for n in nodes if indeg[n] == 0)
+    ready = sorted((n for n in nodes if indeg[n] == 0), key=key)
     out = []
     while ready:
         n = ready.pop(0)
@@ -178,7 +180,7 @@ def topo(nodes, deps):
             indeg[m] -= 1
             if indeg[m] == 0:
                 ready.append(m)
-                ready.sort()
+                ready.sort(key=key)
     return out if len(out) == len(nodes) else None
 
 
@@ -442,9 +444,33 @@ def mode_linearize(data):
     return EXIT_OK
 
 
+# `kind` (the tracker table's `구분` column): where dependencies leave a choice, the sprint goal's
+# work runs before work outside it. Only `order` reads it — `linearize` stays number-only so the
+# bases a plan already computed do not move. Absent → rank 0 (old trackers keep number order).
+# An unknown value is refused: a localized "목표" silently falling to some rank would make the
+# order `run` executes differ from the one the human approved.
+KIND_RANK = {"goal": 0, "slot": 0, "other": 1}
+
+
+def kinds_of(data):
+    rank = {}
+    for m in data.get("members") or []:
+        if not isinstance(m, dict) or "kind" not in m:
+            continue
+        k = m["kind"]
+        if k not in KIND_RANK:
+            die("member #%s has unknown `kind` %r — expected one of %s"
+                % (m.get("number"), k, ", ".join(sorted(KIND_RANK))))
+        try:
+            rank[int(m["number"])] = KIND_RANK[k]
+        except (TypeError, ValueError, KeyError):
+            pass  # members_of reports a bad number
+    return rank
+
+
 def mode_order(data):
     nodes, bd = members_of(data, "base_deps")
-    order = topo(nodes, bd)
+    order = topo(nodes, bd, kinds_of(data))
     if order is None:
         warn("cycle detected in base_deps — run --mode cycles for the path")
         return EXIT_CYCLE

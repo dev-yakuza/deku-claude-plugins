@@ -3117,7 +3117,7 @@ hasfx "Section B: 접두 문자열로 세지 않는다" "$HOMD" 'Never count by 
 hasfx "Section B: 루프백 절차 단일 정의" "$HOMD" '**Loop-back procedure — the steps test, qa and the leader all run'
 hasfx "Section B: 중단된 루프백 재진입" "$HOMD" '**Interrupted loop-back** (test/qa Step 0'
 hasfx "Section K: loopback 토큰 등재" "$HOMD" 'the loop-back record (`<!-- guild:loopback -->`, Section B): the headings'
-hasfx "Section K: 네 가지 멤버" "$HOMD" 'That class currently has four members:'
+hasfx "Section K: 다섯 가지 멤버" "$HOMD" 'That class currently has five members:'
 hasfx "Section H: 상한은 여기서만 정의" "$HOMD" '**this row defines the cap; every other file says `<cap>`**'
 # 상한 리터럴은 Section H 한 곳만 — 표시 문구는 <cap> 자리표시자
 for f in test.md qa.md dev.md batch.md status.md resume.md; do
@@ -3180,6 +3180,56 @@ _lb_files="$(grep -rl 'guild:loopback' "$GLD/commands" | sed 's#.*/##' | sort | 
 for want in _handoff.md test.md qa.md _execute_spine.md _stagnation.md rollback.md status.md resume.md review.md _bash_rules.md; do
   case " $_lb_files " in *" $want "*) ok "guild:loopback 철자 — $want" ;; *) bad "guild:loopback 철자 — $want" "present" "missing" ;; esac
 done
+
+# ── 0.97.0: sprint plan — 목표 하나 + 용량까지 채움 + 결정 질문 ──────────────────────────
+# one-man-company: capacity 10 인데 계획은 9→7→4→3→3→3→2→1→3→3, 전부 머지·캐리오버 0. 착수 가능한 목표 외
+# 후보가 빠졌고(#545: #164 #210 #246), Phase 3 이 history 를 처리량으로 읽어 3 안팎으로 줄였으며, unclear 후보는
+# 결정할 기회 없이 제외됐다.
+SPP="$GLD/commands/sprint/plan.md"
+hasfx "plan: 인자 순서 무관 --create/--no-ask" "$SPP" '`$1`, `$2` = flags, in either order: `--create`'
+hasfx "plan: PO 가 목표 외 순위를 낸다" "$SPP" '(c) **other-ranked**: every other candidate worth starting now'
+hasfx "plan: PO 목표는 제목 — 나열 금지" "$SPP" 'it becomes the tracker'"'"'s title, so it names the aim, never a list of the issues'
+hasfx "plan: PO 가 unclear 차원마다 결정 초안" "$SPP" 'draft the decision that would settle it'
+lacksfx "plan: unclear 제외 권고 문장 교체됨" "$SPP" '**Recommend excluding any candidate with an `unclear` dimension**'
+hasfx "plan: po.md 절 헤더 고정" "$SPP" '`## goal` · `## goal-picks` · `## other-ranked` · `## readiness`'
+hasfx "plan: history 로 C 를 줄이지 않는다" "$SPP" '**Never shrink `C` from history.**'
+hasfx "plan: 채우기 순서 1 goal-picks" "$SPP" '1. **goal-picks** — the feature gates as before'
+hasfx "plan: 채우기 순서 3 other-ranked" "$SPP" '3. **other-ranked** — the same gates.'
+hasfx "plan: 1b 구체화 필요는 자동으로 담지 않음" "$SPP" '구체화 필요 is never filled automatically'
+hasfx "plan: needs-human 후보는 자동으로 담지 않음" "$SPP" 'does **not** carry
+   `guild:needs-human`'
+hasfx "plan: 질문은 attended·--no-ask 아님" "$SPP" '2. **Decision questions for goal-related candidates** — attended and not `--no-ask` only'
+hasfx "plan: 질문 대상 stage none/analyze" "$SPP" 'whose stage is
+  `none` or `guild:analyze`'
+hasfx "plan: 건너뛰기는 위치로 판정" "$SPP" 'judged by being the last option, never by its text'
+hasfx "plan: 질문 시점엔 아무것도 쓰지 않음" "$SPP" '**Nothing is written now.**'
+hasfx "plan: 추가 경로엔 새 규칙 미적용" "$SPP" '**Adding to an open sprint** (Phase 0 step 4'"'"'s "add"): none of the above applies'
+hasfx "plan: plan-decisions 댓글은 step 2 직후" "$SPP" 'post them as one
+   tracker comment before any member body is touched'
+hasfx "plan: 결정 블록은 Sprint 줄과 같은 rewrite" "$SPP" 'its decision block in the same rewrite'
+hasfx "plan: 기존 결정 줄은 건드리지 않음" "$SPP" 'leave existing lines
+   alone — a different value there is a human'"'"'s edit'
+hasfx "plan: 구분 열은 표의 마지막" "$SPP" '| # | 이슈 | base 의존 | 원래 의존 | 비고 | 구분 |'
+hasfx "plan: capacity 기계 줄" "$SPP" '- capacity: <C 정수 | n/a>'
+hasfx "plan: shortfall 기계 줄" "$SPP" '- shortfall: <none | supply | depth | human-cut | n/a>'
+hasfx "plan: 선행 미포함 경고 필수" "$SPP" '**`⚠ 선행 미포함:` (required)**'
+hasfx "plan: 크기 N 만 human-cut" "$SPP" 'Record `shortfall: human-cut` **only** in this case'
+hasfx "plan: C 출처 경고" "$SPP" '⚠ 용량 <C> 는 아직 실측된 적 없는 크기입니다(실측 최대 <M>)'
+hasfx "plan: 재실행이 빠진 결정 줄 복구" "$SPP" 'the decision lines the tracker'"'"'s `<!-- guild:sprint:plan-decisions -->` comment'
+hasfx "plan: order 는 kind 로 동순위" "$SPP" '**Every member in the `base_deps` file carries its `kind`**'
+hasfx "run: order.json 에 kind" "$GLD/commands/sprint/run.md" '`{"members":[{"number":<n>,"base_deps":[…],"kind":"<goal|other|slot>"}, …]}`'
+hasfx "run: ad-hoc 기계 값" "$GLD/commands/sprint/run.md" '`- capacity: n/a`, `- shortfall: n/a`, `- adhoc: true`'
+hasfx "retro: 권고 우선순위 — adhoc 권고 없음" "$GLD/commands/sprint/retro.md" '| ① | `adhoc: true` | **권고 없음**'
+hasfx "retro: human-cut 이면 capacity = planned" "$GLD/commands/sprint/retro.md" '| ③ | `shortfall: human-cut` | **`capacity = planned`**'
+hasfx "retro: supply/depth 는 +1 차단" "$GLD/commands/sprint/retro.md" '**유지 — +1 은 하지 않는다.**'
+hasfx "retro: 목표 달성 지표" "$GLD/commands/sprint/retro.md" '| 목표 달성 |'
+hasfx "retro: history capacity·shortfall" "$GLD/commands/sprint/retro.md" '"capacity": 7, "shortfall": "none",'
+hasfx "daily: 목표/목표 외 줄" "$GLD/commands/sprint/daily.md" '`목표: 머지 <g_merged>/<g> · 목표 외: 머지 <o_merged>/<o>`'
+hasfx "analyze: 계획 중 결정 블록을 근거로" "$GLD/commands/analyze.md" '**Decisions already made in sprint planning.**'
+hasfx "_handoff: plan-decision 마커" "$HOMD" '| `<!-- guild:plan-decision -->` … `<!-- /guild:plan-decision -->` |'
+hasfx "_handoff: K 에 구분·기계 줄" "$HOMD" "the sprint plan's fill record: the member table's \`구분\` values"
+hasfx "sprint.md: 용량을 이력으로 줄이지 않음" "$GLD/commands/sprint.md" 'never
+shrinks that number from history'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 

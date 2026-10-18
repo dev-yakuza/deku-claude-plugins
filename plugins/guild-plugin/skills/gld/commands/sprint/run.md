@@ -146,7 +146,7 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
 1. **Resolve `{owner}/{repo}`** once (`_handoff.md` Section F).
 2. **Find the sprint.**
    - `$1` empty → the open `guild:sprint` Issue. None → *"활성 스프린트가 없습니다. `/gld sprint plan`으로 먼저 계획하세요."* Two or more → ask which.
-   - `$1` = numbers → **create a tracking Issue for them first**, running `plan.md` Phase 0 step 5 (merge strategy → 상한 근거; on a squash-only repo `squash-sync` unless the human declines), Phase 4 (cycles → linearize → order → depth) and Phase 6 on the given set, with goal "즉석 스프린트", capacity "사람 지정" and 리팩토링 슬롯 `skip (ad-hoc)` (a `type:refactor` Issue among the numbers is an ordinary member, not a slot — `plan.md` Phase 6). ⚠ The ad-hoc path is **not** allowed to skip the container: the duplicate-run guard, the checkpoint, resume and `daily` all live in the tracking Issue's markers — without it none of them exist.
+   - `$1` = numbers → **create a tracking Issue for them first**, running `plan.md` Phase 0 step 5 (merge strategy → 상한 근거; on a squash-only repo `squash-sync` unless the human declines), Phase 4 (cycles → linearize → order → depth) and Phase 6 on the given set, with goal "즉석 스프린트", capacity "사람 지정" and 리팩토링 슬롯 `skip (ad-hoc)` — and, for the `plan.md` Phase 6 template's machine fields, `구분` = `goal` for every member, `- capacity: n/a`, `- shortfall: n/a`, `- adhoc: true` (`retro` skips its capacity recommendation for an ad-hoc sprint; the numbers a human hand-picks are not a capacity signal) (a `type:refactor` Issue among the numbers is an ordinary member, not a slot — `plan.md` Phase 6). ⚠ The ad-hoc path is **not** allowed to skip the container: the duplicate-run guard, the checkpoint, resume and `daily` all live in the tracking Issue's markers — without it none of them exist.
 3. **Duplicate-run guard.** Read the `<!-- guild:sprint:run -->` comment.
 
    | Observed | Verdict |
@@ -224,7 +224,15 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    **re-read every member's current label** — the label is authoritative over anything the
    marker says. Restore retry counts and the **discovered-children list** from the marker
    (that list cannot be re-derived: a child body carries only `Parent Issue: #N`).
-   Recompute the order with `--mode order` (the tie-break is stable, so a resume reproduces it).
+   Recompute the order with `--mode order` (the tie-break is stable, so a resume reproduces it):
+   write `.claude/guild/.sprint-logs/<tracker>/dag/order.json` with the Write tool as
+   `{"members":[{"number":<n>,"base_deps":[…],"kind":"<goal|other|slot>"}, …]}` — `kind` from the
+   table's `구분` column, **omitted** when the table has no such column (a tracker from before the
+   column; the order is then plain issue number, as it always was) — and run
+   `python3 <<SKILL_DIR>>/commands/atoms/sprint_dag.py --input <that path> --mode order`. Without
+   `kind` the order would quietly differ from the one the human approved in `plan` Phase 5, where
+   goal members win ties. Exit 64 (an unknown `구분` value) → do not start the supervisor; tell
+   the human which row and value.
    Queue only members that have not reached a terminal state.
 
    ⚠⚠ **On a resume, TRUNCATE `.claude/guild/.sprint-logs/<tracker>/dag/failed.txt` first** —

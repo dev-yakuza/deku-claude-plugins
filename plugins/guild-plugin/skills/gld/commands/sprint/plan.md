@@ -4,7 +4,7 @@
 Attended and multi-turn: composing a sprint is a judgment the human refines before anything is
 created. Upstream of `sprint run`.
 
-`$1` = `--create` (default = **dry-run**: propose only, create nothing).
+`$1`, `$2` = flags, in either order: `--create` (default = **dry-run**: propose only, create nothing) · `--no-ask` (skip the Phase 3 decision questions — the sprint is filled only from candidates that are ready as they stand).
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md` — simple calls; issue bodies via a
 > temp file + `--body-file`, never inline multi-line. Owner/repo · labels · `gh` write failures:
@@ -171,7 +171,12 @@ for the human:
       → /gld plan 133
 ```
 
-⚠ **Refinement is not this command's job.** The human runs the existing **`/gld plan <issue>`**,
+When attended and not `--no-ask`, add one line under the second group: *"일부는 이번 플래닝 중에
+결정 질문으로 담을 수 있습니다"* — which ones is known only after Phase 2, so Phase 5 says which
+were asked (`앞서 구체화 필요로 보고한 #n — 이번에 답해 담았습니다 / 건너뛰었습니다`).
+
+⚠ **Larger refinement is not this command's job.** A decision that one answer settles is asked
+in Phase 3; anything bigger stays with the human, who runs the existing **`/gld plan <issue>`**,
 which decomposes an epic into dev-unit Issues. That labels the parent `guild:children`, and a
 `guild:children` parent is **not** excluded from Phase 1 — so the epic itself becomes a
 candidate next time. The backlog unit after refinement is the **epic**, not its children.
@@ -206,7 +211,7 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
 **Product Owner** (value):
 - `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `product-owner sprint select`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. Propose (a) **one sentence** naming what this iteration is for, and (b) the candidates that serve it, in priority order. For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Recommend excluding any candidate with an `unclear` dimension** and say why: unattended, the leader would have to guess that gap alone. **Do not select a candidate tagged `refactor-slot`** (an orphaned refactor-slot draft — the slot logic handles it), **and rate every candidate tagged `refactor` or `refactor-slot`, whether or not you selected it** — the leader may take one as the sprint's refactor slot and needs your ratings to do so. Write the result to a FILE `docs/specs/sprint-draft/po.md` (do not paste it back).
+  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. Propose (a) **one sentence** naming what this iteration is for — it becomes the tracker's title, so it names the aim, never a list of the issues; (b) **goal-picks**: the candidates that serve it, in priority order; (c) **other-ranked**: every other candidate worth starting now, in priority order, whatever its relation to the goal — do not leave one out for being off-goal, the sprint fills its remaining seats from this list. For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Mark every candidate with an `unclear` dimension and, for each such dimension, draft the decision that would settle it**: one question line and 2–3 answer options of one line each — or, when no answer from the requester can settle it, `human-work: <credential|upstream|device|other>` instead of a question (`upstream` also covers a gap that exists only because a prerequisite Issue is unfinished). The leader puts your drafts to the human when one is present and leaves those candidates out when unattended. **Do not select a candidate tagged `refactor-slot`** (an orphaned refactor-slot draft — the slot logic handles it), **and rate every candidate tagged `refactor` or `refactor-slot`, whether or not you selected it** — the leader may take one as the sprint's refactor slot and needs your ratings to do so. Write the result to a FILE `docs/specs/sprint-draft/po.md` (do not paste it back) with exactly these section headings, in this order: `## goal` · `## goal-picks` · `## other-ranked` · `## readiness` (a table `| # | Goal | Constraint | Success | note |`) · `## questions` (per drafted dimension `### #<n> <Goal|Constraint|Success>`, then `Q: <question>` and `- A) …` lines, or `human-work: <class>`).
   > <!-- guild:result-contract -->
   > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
   > <!-- /guild:result-contract -->
@@ -485,9 +490,11 @@ unattended the leader would have to guess alone:
   From then on Phase 5's evidence lines and Phase 6 step 0's Issue body also come from
   `deps-slot.md`.
 - ⚠ **A rejected pick the product-owner ranked as a feature goes back to the feature picks**
+  (the goal-picks or the other-ranked list, wherever the product-owner put it)
   at its product-owner rank and competes under the feature gates (a `partial` is allowed
   there). Rejecting it as the slot is not rejecting it as work the product-owner wanted. Redo
-  the Phase 3 cut with it at that rank — it may displace the lowest-ranked feature; the sprint
+  the Phase 3 fill with it at that rank — if the sprint then holds more than capacity, drop
+  members in reverse fill order (lowest other-ranked first, then lowest goal pick); the sprint
   never holds more than capacity. The same applies when the human drops such a slot in Phase 5
   (`skip (human-declined)` removes its slot role, not the Issue), unless the human drops the
   Issue itself.
@@ -499,21 +506,81 @@ unattended the leader would have to guess alone:
 
 Collect both RESULTs and **arbitrate as the leader** into one candidate set plus a dependency edge list.
 
-⚠ **A `⚠ likely to split` candidate is excluded by strong default.** A split that happens *during* the run is handed back to the human (`run.md`), so the sprint stops on that issue. Include one only if the human overrides after being told this.
+⚠ **A `⚠ likely to split` candidate is excluded by strong default** (the Phase 3 fill keeps this gate as it is). A split that happens *during* the run is handed back to the human (`run.md`), so the sprint stops on that issue. Include one only if the human overrides after being told this.
 
-## Phase 3 — Capacity (leader judgment — the human is not asked)
+## Phase 3 — Capacity and fill (the capacity number is not asked; attended, the decision questions add supply)
 
 | Input | Source |
 |---|---|
-| past performance | `config.json` → `sprint.capacity` and `sprint.history` (written by `retro`) |
+| capacity `C` | `config.json` → `sprint.capacity` (written by `retro`) |
+| past sizes (shown, never used to shrink `C`) | `config.json` → `sprint.history[].planned` |
 | size per candidate | tech-lead |
 | dependency chain depth | `sprint_dag.py --mode depth` (Phase 4) |
-| readiness | the product-owner's three dimensions |
+| readiness + decision drafts | the product-owner's `## readiness` and `## questions` |
+| goal / other ranking | the product-owner's `## goal-picks` and `## other-ranked` |
+| ready vs needs refinement | Phase 1b |
 | refactor slot | Phase 2's arbitration of (c) |
 
-No history (first sprint) → **be conservative**: the top ~5 candidates with no `unclear`
-dimension, and a chain depth within the cap. Record the *reasoning* as a sentence in the
-tracking Issue body — `retro` compares against it.
+**`C` is the target, not a ceiling to argue under.** `C` = `config.sprint.capacity`. No capacity
+yet (first sprint) → **be conservative**: the top ~5 candidates with no `unclear` dimension, and a
+chain depth within the cap. ⚠ **Never shrink `C` from history.** A history entry whose `planned`
+equals its `merged` with no carryover measured the *supply* that sprint had, not the human's
+review throughput — reading "the last sprints were all about 3" as "capacity is about 3" planned
+3 because 3 were ready, merged 3, and fed the next plan the same number. Fewer members than `C`
+happen only for a reason recorded as `shortfall` (Phase 6 template): `supply` (no candidate left
+that passes the gates), `depth` (Phase 4's cut), `human-cut` (the human set a size in Phase 5).
+Changing `C` itself is `retro`'s job (Phase 4 there), nowhere else.
+
+**Fill — in this order, each list in its product-owner rank, while seats remain:**
+1. **goal-picks** — the feature gates as before: no `unclear` dimension; size ✅ (a `⚠ likely to
+   split` candidate is excluded by strong default, below); the slot rules; dependencies as the
+   tech-lead's edges. **Plus two gates the fill now has to state, because the leader no longer
+   picks by judgment:** the candidate is **착수 가능** in Phase 1b (one 1b reported as
+   구체화 필요 is never filled automatically, whatever the product-owner rated — 1b's own
+   definition is "handed to `dev` today it ends at `needs-human`"), and it does **not** carry
+   `guild:needs-human` (the supervisor treats that label as terminal and blocks everything stacked
+   on it — `sprint-supervisor.sh`, `sprint_dag.py` `TERMINAL_BLOCKING`; list it under
+   `사람 작업 필요` instead).
+2. **Decision questions for goal-related candidates** — attended and not `--no-ask` only (below).
+3. **other-ranked** — the same gates.
+4. **Decision questions for the other candidates** — attended and not `--no-ask` only.
+
+When a seat cannot be filled, the seat stays empty and the reason is the `shortfall`. A 1b
+구체화 필요 candidate with no `unclear` dimension (so no question to ask) is listed in Phase 5 as
+`제외: #n (구체화 필요 — 1b)` and goes no further.
+
+**Decision questions (steps 2 and 4).** The point: an `unclear` candidate is not unready
+forever — it is waiting on one answer from the person who is right here.
+- **Who is asked about**: a candidate of that step's list whose every `unclear` dimension has a
+  drafted question (not `human-work`), that does not carry `guild:needs-human`, whose stage is
+  `none` or `guild:analyze` (later than analyze, an answer in the body can no longer reach the
+  acceptance criteria analyze already wrote), that the human has not dropped this session, and
+  that would actually be taken once answered — size ✅, not a `refactor-slot`-tagged candidate
+  and not this sprint's slot (One Issue, one role). No more candidates than seats remain, in
+  rank order. A dimension whose gap is an unfinished prerequisite is `human-work: upstream` and is
+  not asked; Phase 5 shows it as `선행 대기: #n ← #d` when `#d` is a member of this sprint and as
+  `사람 작업 필요` otherwise.
+- **How**: `AskUserQuestion`, one candidate's questions together (at most three — one per
+  dimension), at most four questions per call. Each question is `#<n> <title> — <question>`, its
+  options the product-owner's drafts (at most three) and, **always last, a skip option**
+  (labelled in `config.language`; judged by being the last option, never by its text). A
+  free-text answer counts as an answer. The preamble says it plainly: *answered candidates join
+  this sprint if they pass the selection gates, and the decision is written into the Issue when
+  the sprint is created; skipped ones are not taken.*
+- **Then**: all of a candidate's questions answered (none skipped) → treat those dimensions as
+  `clear (계획 중 결정)` for selection and offer it to that step's fill at its rank; any skipped →
+  not taken. Answered candidates that end up outside the sprint (Phase 4 cut, slot
+  re-arbitration, a Phase 5 edit) are shown as `결정했지만 제외: #a (<reason>) — 답은 기록되지
+  않습니다`.
+- **Nothing is written now.** The answers live in this session until Phase 6 writes them — into
+  the final members only. A dry-run that ends here loses them; Phase 5 says so.
+- Unattended or `--no-ask`: steps 2 and 4 do not run.
+
+**Adding to an open sprint** (Phase 0 step 4's "add"): none of the above applies — no automatic
+fill, no decision questions, no `구분` column, no machine lines. The tracker body is sealed by its
+`plan-hash`, and the leader proposes additions by judgment exactly as before this change. (Members
+added this way have a known gap of their own — `run` reads only the sealed table; that is
+separate work.)
 
 ⚠ **The refactor slot counts inside the capacity, not on top of it.** Capacity is the human's
 PR-review throughput (`retro.md` Phase 4), and a refactor PR is reviewed like any other. A
@@ -521,8 +588,9 @@ capacity of 5 with the slot filled is 4 feature members plus the slot. Do **not*
 to make room for a fifth feature unless capacity is 1 — then record `skip (capacity)`.
 ⚠ **A seat the slot gives back is refilled.** Whenever the slot leaves after the capacity
 cut, **for any reason** (the prepares check below the cut, `skip (stack-cap)` in Phase 4, the
-human dropping it in Phase 5), take the next-ranked
-feature pick that passes the usual gates into its seat and redo Phase 4. Otherwise a slot that
+human dropping it in Phase 5), take the next candidate in
+the fill order (goal-picks, then other-ranked) that passes the usual gates into its seat — never
+one needing a decision question, which are asked once, in the fill — and redo Phase 4. Otherwise a slot that
 did not happen silently costs the sprint a feature member — the opposite of its hard rule.
 No such pick → leave the seat empty and say so in **용량 판단**.
 ⚠ **The seat is the slot's or the refill's, never both.** If a later recompute lets the slot
@@ -539,6 +607,14 @@ Write the graph to a temp JSON with the **Write tool** (`_sprint_dag.md` Section
 
 ⚠ **TWO input files, not one.** `cycles` and `linearize` read `deps` (the declaration); `order`, `depth` and `base` read **`base_deps`**, which is step 2's *output*. Passing one file through all four modes therefore asks the last three to read a key that is not there yet. The script now refuses that (exit 64) rather than answering — it used to return issue-number order, `depth 1` and `DEFAULT` for every member, all with exit 0, so nothing warned. **After step 2, write a second file** with each member's `base_deps` set from the `linearize` output, and point steps 3–4 at it.
 
+**Every member in the `base_deps` file carries its `kind`** — `goal`, `other` or `slot` (the
+Phase 3 fill; the draft placeholder is `slot`). `--mode order` breaks a tie by kind first
+(`goal`/`slot` before `other`) and then by issue number, so where dependencies leave a choice the
+goal's work runs first. `linearize` ignores `kind` — which issue becomes a fan-in's base is
+unchanged, and an `other` member can still end up as a `goal` member's base (a known limit).
+`run` rebuilds the same file from the table's `구분` column (`run.md` Phase 1 step 5) so the
+order it runs is the order the human approved.
+
 **When Phase 2 accepted a slot** (the next three paragraphs; with no slot — `skip`, `off`, or
 the ad-hoc path — Phase 4 runs once, as numbered below):
 
@@ -553,7 +629,8 @@ rebase that would resolve it; one stacked under the other is only an order.
   would only make a cycle that fails the whole sprint at step 1 over an optional member.
 - **A draft has no Issue number yet** — give it the placeholder **`999999999`** in both files
   and present it as `#(신규)`. ⚠ **Not `0`, and not any small number.** The script breaks ties
-  by issue number (in `linearize` and in `order`), and `run` recomputes the order from the
+  by issue number (in `linearize`, and in `order` after `kind` — the slot's kind is the same
+  for the placeholder and the real number), and `run` recomputes the order from the
   table with the real number (`run.md` Phase 1 step 5). A new Issue always gets a number above every
   existing member, so a placeholder above them too breaks every tie the same way the real
   number will; `0` breaks them the opposite way, and the stack and order the human approves
@@ -595,24 +672,66 @@ means switching to `squash-sync` — step 4).
 
 ▎목표: <한 문장>
 
+  ■ 목표
   ① #103  영수증 재발행         base: —        🏗 기초   readiness: clear/partial/clear
   ② #104  실패 로그 집계        base: #103               원래 의존: #103
   ③ #(신규) 결제 상태 갱신 경로 통합  base: —        🧹 리팩토링 슬롯
   ④ #101  결제 상태 머신 정리   base: #(신규)            원래 의존: #(신규)
   ⑤ #102  타임아웃 재시도       base: #101     스택 3단  원래 의존: #101
+  ■ 목표 외
+  ⑥ #164  알림 설정 섹션        base: —
+  ⑦ #210  감사 로깅            base: —        계획 중 결정: Constraint → 감사 테이블은 history 계층에
   …
   🧹 리팩토링 슬롯: #(신규) «결제 상태 갱신 경로를 한 곳으로» — #101이 이 위에 쌓입니다 (#102는 #101 위)
        근거: src/payment/state.ts · 최근 fix: 커밋이 몰림 · 갱신 경로 3곳 중복
        성공 기준: 기존 테스트 green · applyTransition() 하나로 통합
        안전망: state.ts · applyTransition() · 취소 후 재시도 시 상태 유지 외 2건 (리팩토링 전 커밋에서 green)
-  제외 5개: #108(Success=unclear) · #110(⚠ 분할 예상) · …
-  용량 판단: 7개 — <근거 한 줄>
+  계획 중 결정: #210(Constraint: 감사 테이블 위치 → history 계층) — 만들 때 Issue 본문에 기록합니다
+  결정했지만 제외: #213(스택 깊이) — 답은 기록되지 않습니다
+  사람 작업 필요: #190(credential) · #357(upstream) · #377(needs-human 대기 — /gld resume 377)
+  선행 대기: #159 ← #158(이번 스프린트)
+  ⚠ 선행 미포함: #120 ← #118(열림, 멤버 아님) — 기본 브랜치에서 시작합니다
+  제외 5개: #108(Success=unclear · 건너뜀) · #110(⚠ 분할 예상) · #133(구체화 필요 — 1b) · …
+  용량: 10 · 담음 7(목표 5 · 목표 외 2 · 슬롯 1 포함) · 미달 사유: supply — 남은 후보 없음 (실측 최대 9)
+  ⚠ 용량 10 은 아직 실측된 적 없는 크기입니다(실측 최대 9) — 줄이려면 "크기 N" 으로 말해 주세요
   최대 스택 깊이: 3 (상한 3 — 경계)
   머지 전략: merge commit 허용 ✅ · 브랜치 자동삭제 ✅
   기록: 만들면 판정 원문(docs/specs/sprint-<트래커 번호>/)과 config.json 을 main 에 커밋하고 push 합니다
 
-이대로 만들까요? (드롭 / 추가 / 재범위 / 재정렬 요청 가능)
+이대로 만들까요? (드롭 / 추가 / 크기 N / 재범위 / 재정렬 요청 가능)
 ```
+
+**The lines the fill adds** (each only when it has something to say):
+- `■ 목표` / `■ 목표 외` — the two groups; the slot sits in the goal group.
+- `용량:` — `C`, how many were taken and how they split, the `shortfall` reason when fewer than
+  `C`, and the largest `planned` in `sprint.history` (entries with `adhoc` excluded). ⚠ **When
+  the sprint holds `C` and `C` is larger than that largest past size**, add
+  `⚠ 용량 <C> 는 아직 실측된 적 없는 크기입니다(실측 최대 <M>) — 줄이려면 "크기 N" 으로 말해 주세요`.
+  The number is never cut automatically — it is the human's to change here, or `retro`'s.
+- `계획 중 결정:` / `결정했지만 제외:` / `사람 작업 필요:` / `선행 대기:` — Phase 3's decision
+  questions and the candidates they could not reach. A dry-run adds
+  `dry-run 으로 끝나면 이 답은 남지 않습니다 — --create 로 다시 부르면 다시 묻습니다`.
+- `앞서 구체화 필요로 보고한 #n — …` — when Phase 1b listed a candidate this run then asked about.
+- **`⚠ 선행 미포함:` (required)** — for every member, each dependency (the tech-lead's edges and
+  the body's `Depends on: #d`) that is **open** (in Phase 1's list before exclusions) and **not a
+  member**: `⚠ 선행 미포함: #p ← #d(열림, 멤버 아님) — 기본 브랜치에서 시작합니다`. Phase 4's
+  "outside the sprint" warnings go to stderr where nobody reads them; the leader used to filter
+  such picks by judgment, and the fill no longer does — so the human must see them. Nothing is
+  added or removed automatically; dropping or adding is the human's edit.
+
+**Edits** (re-apply before re-presenting; new sprints only — the "add" path is unchanged):
+- **Drop** → the seat is refilled by the next candidate in the fill order that passes the gates
+  (never one the human dropped this session, never one needing a question). Dropping is not a
+  size decision; no candidate left → the seat stays empty, `shortfall: supply`.
+- **"크기 N"** → cut in reverse fill order (lowest other-ranked first, then lowest goal pick)
+  down to N and do not refill. Record `shortfall: human-cut` **only** in this case and only when
+  the sprint held at least `C` before the cut — a sprint already short of `C` keeps its own
+  reason, so the supply level never hardens into the capacity.
+- **Add** → the human's own choice: the automatic gates (`unclear`, `guild:needs-human`,
+  구체화 필요) do not apply, a warning line is shown instead (`⚠ #n 은 needs-human 대기 — run 이
+  건너뜁니다` …); size and slot rules apply as before. Its `구분` follows where the product-owner
+  ranked it (goal-picks → `goal`, anything else → `other`). More than `C` → one warning line,
+  `shortfall: none`.
 
 The `기록:` line is what Phase 6 step 6 will actually do — read it before presenting, with
 the read-only checks of step 6 sub-steps 3 and 5 (current branch, upstream, push URLs): not the
@@ -687,7 +806,24 @@ Handle edits and re-present until the human approves. **Create nothing** without
 
 1. **Create the tracking Issue** — title `Sprint: <goal>`, body from the template below, **no label yet** (temp file + `--body-file`).
 2. **Attach the label** — `gh issue edit <tracker> --add-label "guild:sprint"`. If the label is missing this dies here, with **every member body still intact**.
-3. **Add the back-reference** to each member body — a `Sprint: #<tracker>` line. Read → splice → full rewrite, **with the truncation check** (`_sprint_dag.md` Section A). **Do the slot member first.** Before it, when the slot gains a net, post the approved net as a tracker **comment** under `<!-- guild:sprint:slot-net -->` … `<!-- /guild:sprint:slot-net -->` — a `slot: #<n>` line, then the three parts to splice (the Safety net section, the lines to add to Success-criteria, and a known-gaps/findings part: gaps cut by the 5-line cap and rule-4 "untestable here" findings — an existing Issue has no Why section to hold them) — a comment, not the tracker body, which `plan-hash` seals. A death before the splice leaves that comment as the only record of the net the human approved; Phase 0 step 4 applies it on the next run. **For an existing or resumed slot that gained a Safety net** (approved in Phase 5), splice it into the same rewrite: the Safety net section (heading + `<!-- guild:safety-net -->` + lines + rules), the same lines added to its Success-criteria (or a new Success-criteria section), and the known-gaps/findings part (gaps cut by the cap, untestable-here findings) — skipped when the body already holds `<!-- guild:safety-net -->`, which is what makes a re-run after a mid-create death append nothing twice. One member per Bash call; a failure mid-way is resumable because step 4's idempotency check re-derives what exists.
+   **Then, when Phase 3 collected at least one decision for a final member**, post them as one
+   tracker comment before any member body is touched — `<!-- guild:sprint:plan-decisions -->` …
+   `<!-- /guild:sprint:plan-decisions -->`, one line per decision,
+   `- #<n> <Goal|Constraint|Success>: <question> → <answer> (<YYYY-MM-DD>)` (the answer's line
+   breaks and runs of spaces collapsed to one space). It is the record a re-run reads if this
+   step dies before step 3 finishes; one comment per tracker, replace-in-place (`_handoff.md`
+   Section B).
+3. **Add the back-reference** to each member body — a `Sprint: #<tracker>` line, **and, for a
+   member Phase 3 asked about, its decision block in the same rewrite** (appended once per Issue;
+   when the block already exists, add only the dimension keys it lacks and leave existing lines
+   alone — a different value there is a human's edit):
+   ```
+   <!-- guild:plan-decision -->
+   ### <계획 중 결정 — config.language>
+   - <Goal|Constraint|Success>: <question> → <answer> (<YYYY-MM-DD>, sprint plan)
+   <!-- /guild:plan-decision -->
+   ```
+   The dimension keys stay ASCII; the question and answer are in `config.language`. Read → splice → full rewrite, **with the truncation check** (`_sprint_dag.md` Section A). **Do the slot member first.** Before it, when the slot gains a net, post the approved net as a tracker **comment** under `<!-- guild:sprint:slot-net -->` … `<!-- /guild:sprint:slot-net -->` — a `slot: #<n>` line, then the three parts to splice (the Safety net section, the lines to add to Success-criteria, and a known-gaps/findings part: gaps cut by the 5-line cap and rule-4 "untestable here" findings — an existing Issue has no Why section to hold them) — a comment, not the tracker body, which `plan-hash` seals. A death before the splice leaves that comment as the only record of the net the human approved; Phase 0 step 4 applies it on the next run. **For an existing or resumed slot that gained a Safety net** (approved in Phase 5), splice it into the same rewrite: the Safety net section (heading + `<!-- guild:safety-net -->` + lines + rules), the same lines added to its Success-criteria (or a new Success-criteria section), and the known-gaps/findings part (gaps cut by the cap, untestable-here findings) — skipped when the body already holds `<!-- guild:safety-net -->`, which is what makes a re-run after a mid-create death append nothing twice. One member per Bash call; a failure mid-way is resumable because step 4's idempotency check re-derives what exists.
 4. **Compute and store `plan-hash`** — `sprint_dag.py --mode hash` over the finished body, then write it into the `plan-hash:` line. Do this **last**, after the body is final. ⚠ This rewrites the **tracking Issue's** body, which holds the member table — the canonical dependency source for the whole sprint. It carries the **same mandatory truncation check** as a member body (`_sprint_dag.md` Section A): if the read comes back as a preview, read the persisted full output, and if that is unavailable do **not** write. A truncated rewrite here destroys the sprint unrecoverably, which is worse than any member body. (`--mode hash` *removes* the `plan-hash:` line before hashing, so writing the value back does not change it.)
 
 5. **Project onto the board** — only when `config.sprint.board` is set. One Bash call:
@@ -740,8 +876,9 @@ so a `backlog` entry landing after the member's `ready` entry leaves that member
 `Backlog` for the entire sprint. Members are seeded by the member rows; the triage rows cover
 everything else.
 
-⚠ **Clear the `needs_human` field on every member.** A carryover member arrives still carrying
-`guild:needs-human` (that is the designed path — 02번 §10.4), and the supervisor left
+⚠ **Clear the `needs_human` field on every member.** A carryover member can arrive still carrying
+`guild:needs-human` — the Phase 3 fill no longer takes such a candidate on its own, but the
+human may add it in Phase 5 (that is the designed path — 02번 §10.4), and the supervisor left
 `failed:<class>` or `needs-human` on its card last sprint. Writing `Ready` without clearing
 the reason produces a self-contradictory card: *"queued"* with *"blocked because …"* beside it.
 
@@ -917,18 +1054,20 @@ Body template:
 plan-hash: <sprint_dag.py --mode hash 의 출력>
 - 목표: <한 문장>
 - 시작: <YYYY-MM-DD>
-- 용량 판단: <N>개 — <근거>
+- 용량 판단: <N>개 — 용량 <C> · 목표 <g> · 목표 외 <o> · 슬롯 <s> · 미달 사유 <없음 | 구체적 사유>
+- capacity: <C 정수 | n/a>
+- shortfall: <none | supply | depth | human-cut | n/a>
 - 머지 전략: <merge commit 허용 여부> · 브랜치 자동삭제 <여부>
 - 스택 깊이 상한: <유효 상한 N>
 - 상한 근거: <"config" | "squash-sync" | "merge-commit-forbidden">
 - 리팩토링 슬롯: <"#<n> (existing)" | "#<n> (drafted)" | "skip (<disabled|no-candidate|not-ready|capacity|stack-cap|human-declined|ad-hoc>)">
 
 ## 멤버 (실행 순서 · 의존성 정본)
-| # | 이슈 | base 의존 | 원래 의존 | 비고 |
-|---|---|---|---|---|
-| 1 | #101 | — | — | 🏗 기초 |
-| 2 | #102 | #101 | — | ⚠ 선형화로 추가된 의존 |
-| 3 | #104 | #102 | #101, #102 | fan-in → 체인 · 깊이 3 |
+| # | 이슈 | base 의존 | 원래 의존 | 비고 | 구분 |
+|---|---|---|---|---|---|
+| 1 | #101 | — | — | 🏗 기초 | goal |
+| 2 | #102 | #101 | — | ⚠ 선형화로 추가된 의존 | goal |
+| 3 | #104 | #102 | #101, #102 | fan-in → 체인 · 깊이 3 | other |
 <!-- /guild:sprint:plan -->
 
 보드: <config.sprint.board.url>
@@ -941,13 +1080,23 @@ ad-hoc path (`run.md`, numbers given to `run`) Phase 2 never ran: write `skip (a
 `type:refactor` Issue among those numbers is an ordinary member there, not a slot — the slot is
 a `plan` decision, and `retro` reads `skip:ad-hoc` as exactly that.
 
+⚠ **The `구분` column is the last column, and its values are machine tokens** — `goal` ·
+`other` · `slot` (`_handoff.md` Section K), read back by `run` (the order's tie-break),
+`daily` and `retro`. It is last because `stack_sync.py` reads the first three columns by
+position; a column inserted earlier would shift `base 의존`. `capacity:` and `shortfall:` are
+machine lines too: `capacity` is `C` when this plan filled against one and `n/a` on the first
+sprint (no capacity yet) and on the ad-hoc path; `shortfall` is `none` when the sprint holds
+`C`, otherwise the reason (Phase 3; several → `human-cut` before `depth` before `supply`), and
+`n/a` whenever `capacity` is `n/a`. On the ad-hoc path also write `- adhoc: true`. `retro`
+reads these lines (its Phase 4); the prose `용량 판단:` line is for people (`daily` shows it).
+
 ⚠ **The board line goes OUTSIDE the marker.** Everything between `<!-- guild:sprint:plan -->`
 and its closing marker is the dependency source of truth, and `sprint_dag.py --mode hash`
 hashes it — a line added inside would change `plan-hash` on the next read and halt `run` with
 `plan-hash-mismatch`. Omit the line entirely when no board is configured; do not write an
 empty one.
 
-**Idempotency.** A re-run finds the open tracker at Phase 0 step 4 and adds only what is missing. A tracker that was created but never labelled is found by its body marker:
+**Idempotency.** A re-run finds the open tracker at Phase 0 step 4 and adds only what is missing — including, for a member that gets its `Sprint:` line now, the decision lines the tracker's `<!-- guild:sprint:plan-decisions -->` comment (lowest id if several) holds for it and its body block lacks (by dimension key; stage `none`/`guild:analyze` only — later, tell the human instead). ⚠ **Known limit**: a member whose back-reference already landed but whose decision lines did not, and a tracker that died before step 2, are not repaired by this — report `결정 N건이 본문에 반영되지 못했습니다: #a … (트래커의 plan-decisions 댓글 참고)` so the human can copy them by hand. A tracker that was created but never labelled is found by its body marker:
 ```bash
 gh issue list --state open --limit 200 --search '"guild:sprint:plan" in:body' --json number,title
 ```

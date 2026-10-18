@@ -197,6 +197,33 @@ run "order tie-break is issue number" \
 102
 103"
 
+# kind (표의 `구분` 열): 의존이 순서를 정하지 않는 곳에서는 목표 멤버가 먼저 돈다. 키가 없으면 지금처럼
+# 번호순(옛 트래커). 모르는 값은 64 — 현지화된 "목표" 가 조용히 어떤 rank 로 떨어지면 run 이 도는 순서가
+# 사람이 승인한 순서와 달라진다. linearize 는 kind 를 보지 않는다(이미 계산된 base 가 움직이지 않게).
+run "order: goal before other on a tie" \
+  '{"members":[{"number":101,"base_deps":[],"kind":"other"},{"number":102,"base_deps":[],"kind":"goal"}]}' order 0 \
+  "102
+101"
+run "order: slot ranks with goal" \
+  '{"members":[{"number":101,"base_deps":[],"kind":"other"},{"number":999999999,"base_deps":[],"kind":"slot"},{"number":103,"base_deps":[],"kind":"goal"}]}' order 0 \
+  "103
+999999999
+101"
+run "order: dependencies still win over kind" \
+  '{"members":[{"number":101,"base_deps":[],"kind":"other"},{"number":102,"base_deps":[101],"kind":"goal"}]}' order 0 \
+  "101
+102"
+run "order: a goal freed by its dep still precedes a waiting other" \
+  '{"members":[{"number":101,"base_deps":[],"kind":"goal"},{"number":102,"base_deps":[],"kind":"other"},{"number":103,"base_deps":[101],"kind":"goal"}]}' order 0 \
+  "101
+103
+102"
+run "order: unknown kind -> 64" \
+  '{"members":[{"number":101,"base_deps":[],"kind":"목표"}]}' order 64 ""
+run "linearize ignores kind" \
+  '{"members":[{"number":101,"deps":[],"kind":"other"},{"number":102,"deps":[],"kind":"goal"},{"number":103,"deps":[101,102],"kind":"goal"}]}' linearize 0 \
+  "$(printf '%s' '{"members":[{"number":101,"deps":[],"kind":"other"},{"number":102,"deps":[],"kind":"goal"},{"number":103,"deps":[101,102],"kind":"goal"}]}' > "$WORK/lin_nokind_in.json"; printf '%s' '{"members":[{"number":101,"deps":[]},{"number":102,"deps":[]},{"number":103,"deps":[101,102]}]}' > "$WORK/lin_nokind.json"; python3 "$DAG" --input "$WORK/lin_nokind.json" --mode linearize 2>/dev/null)"
+
 run "cycles: none -> exit 0, empty" "{\"members\":[$(M 101: 102:101)]}" cycles 0 ""
 run "cycles: found -> exit 3 with path" \
   "{\"members\":[$(M 101:102 102:101)]}" cycles 3 "#101 -> #102 -> #101"
@@ -559,7 +586,7 @@ printf 'sprint_dag: %d passed, %d failed\n' "$PASS" "$FAIL"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-DAG_MIN_CHECKS=65
+DAG_MIN_CHECKS=71
 if [ "$((PASS + FAIL))" -lt "$DAG_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${DAG_MIN_CHECKS}건)."
   exit 1

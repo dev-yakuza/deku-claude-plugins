@@ -179,6 +179,8 @@ Sources, and **what each is honestly derived from**:
 | 스택 따라잡기 횟수 | base가 기본 브랜치로 폴백한 PR 수 | PR `baseRefName` ↔ 멤버 표의 기대 base |
 | 리뷰 변경 요청률 | `reviewDecision == CHANGES_REQUESTED` / 멤버 PR | PR |
 | 닫힌-미머지 PR | 사람이 거절한 작업 | PR `state == CLOSED` + `mergedAt == null` |
+| 목표 달성 | `구분 = goal` 멤버가 **모두** 머지됐는가(예/아니오) + 머지된 goal / 계획된 goal | 멤버 표의 `구분` 열 + PR `mergedAt`. 열이 없는 옛 트래커 → "목표 구분 없음" |
+| 목표 외 | 머지된 other / 계획된 other | 같은 출처 |
 
 **The refactor slot's outcome** — not a tenth metric (the slot is already counted in the nine as
 a member), but the one member whose fate the next `plan` reads back. Take it from the tracker
@@ -338,6 +340,20 @@ human's account of their own sprint is ground truth this command cannot derive.
 
 Recommend **one number** for the next sprint, with the reasoning in one sentence:
 
+**First, the plan's own record of how full the sprint was** — the tracking Issue's plan block
+carries `- capacity:`, `- shortfall:` and, on the ad-hoc path, `- adhoc: true` (`plan.md` Phase 6
+template). Apply the **first** row that matches, top to bottom; the table after it only runs
+when none does:
+
+| 순서 | 관측 | 권고 |
+|---|---|---|
+| ① | `adhoc: true` | **권고 없음** — 사람이 고른 번호 묶음의 크기는 용량 신호가 아니다. 그렇게 말한다 |
+| ② | 캐리오버 원인이 **하나의 이슈**에 몰림 | **숫자를 건드리지 않는다** (아래 표의 같은 행) |
+| ③ | `shortfall: human-cut` | **`capacity = planned`** — 사람이 Phase 5 에서 "크기 N" 으로 이번 크기를 직접 정했다. 다음 plan 이 같은 숫자로 다시 채워 또 줄이게 만들지 않는다 |
+| ④ | 이행률 < 60% · 또는 캐리오버 ≥ 절반 | −1 (아래 표의 같은 행) |
+| ⑤ | `shortfall: supply` · `shortfall: depth` | **유지 — +1 은 하지 않는다.** 용량보다 적게 계획했으니 "다 해냈다" 는 더 큰 용량의 근거가 아니다(채울 후보가 없었거나 스택이 막았다). ⚠ 이 행이 없던 때는 3/3 이 +1 을 낳아, 공급과 무관하게 capacity 가 계속 올랐다 |
+| ⑥ | `shortfall: none` · `n/a` · 줄이 없는 옛 트래커 | 아래 표 |
+
 | 관측 | 권고 방향 |
 |---|---|
 | 이행률 ≥ 85% · 사람 대기 ≤ 1 | +1 |
@@ -357,6 +373,7 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
   "max_stack_depth": 3,
   "history": [
     { "sprint": 99, "planned": 7, "merged": 5, "carryover": 2, "needs_human": 2,
+      "capacity": 7, "shortfall": "none",
       "refactor": { "issue": 140, "outcome": "merged", "kind": "refactor",
                     "paths": ["src/payment/state.ts"],
                     "merged_at": "2026-09-30T04:12:00Z", "closed_at": null } }
@@ -379,6 +396,10 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
    ⚠ Older entries may have a **different shape** (a field this version does not write, or a
    missing one). Keep them byte-intact and do not normalize them — `plan` reads the trend
    defensively. Only the entry for *this* sprint is written by this command.
+4a. **`capacity` · `shortfall` · `adhoc`** — copied from the plan block's machine lines:
+   `capacity` the integer (omit the key when the line says `n/a` or is absent), `shortfall` the
+   token as written (omit when absent), `adhoc: true` only when the line is there. `plan` shows
+   the largest past `planned` beside `C` and leaves `adhoc` entries out of that comparison.
 4b. **`refactor`** — the slot outcome above, plus:
    - `kind` — `"safety-net-only"` when the slot Issue's body (read in Phase 2) carries
      `<!-- guild:safety-net-only -->`, else `"refactor"` (a refactor that laid a net first is
@@ -473,7 +494,7 @@ keeps a reason that may already be resolved. Say so rather than letting the huma
 This is a **disclosure, not a projection** — no `gh project` call, no card touched.
 
 1. **Name the carryover explicitly** — every member that did not land, with its reason and its
-   current stage. The next `sprint plan` treats these as top candidates, and it finds them by
+   current stage. The next `sprint plan` treats these as top candidates (except one still carrying `guild:needs-human`, which its fill does not take on its own — the human resolves it or adds it in Phase 5), and it finds them by
    reading this list.
    ⚠ Members carry **no** `guild:*` sprint label (`_sprint_dag.md` Section A) and their
    `Sprint: #<tracker>` back-reference is **kept**, not removed — one Issue having passed through
