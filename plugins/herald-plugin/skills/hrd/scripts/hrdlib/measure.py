@@ -355,8 +355,14 @@ def _shell_scan(cmd, i, split):
             j = cmd.find("\n", i)
             i = n if j < 0 else j
             continue
-        elif top is None and c == "<" and cmd.startswith("<<", i) and not cmd.startswith("<<<", i):
-            m = re.match(r"<<(-?)[ \t]*(?:([\"'])([A-Za-z_]\w*)\2|\\?([A-Za-z_]\w*))", cmd[i:i + 200])
+        elif top is None and cmd.startswith("<<<", i):  # a here-string, not a heredoc
+            cur.append("<<<")
+            i += 3
+            continue
+        elif top is None and c == "&" and ((i > 0 and cmd[i - 1] in "<>") or cmd.startswith(">", i + 1)):
+            cur.append(c)  # 2>&1, &>file: a redirection, not a separator
+        elif top is None and c == "<" and cmd.startswith("<<", i):
+            m = re.match(r"<<(-?)[ \t]*(?:([\"'])([A-Za-z_][\w.-]*)\2|\\?([A-Za-z_][\w.-]*))", cmd[i:i + 200])
             if m:
                 heredocs.append((m.group(3) or m.group(4), bool(m.group(1))))
                 cur.append(m.group(0))
@@ -449,7 +455,7 @@ def _expand_shell(cmd):
             cmd = grown
     # assignments, with an optional export/declare/local/readonly in front
     adef = re.compile(_STMT + r"(?:(?:export|declare|local|readonly|typeset)(?:\s+-\w+)*\s+)?"
-                      r"([A-Za-z_]\w*)=(?:\"([^\"]*)\"|'([^']*)'|([^\s;&|\"']*))(?=[ \t]*(?:[;&|\n)#]|$))")
+                      r"([A-Za-z_]\w*)=(?:\"([^\"]*)\"|'([^']*)'|([^\s;&|\"'()`]*))(?=[ \t]*(?:[;&|\n)#]|$))")
     defs = [(m.start(), m.end(), m.group(1), m.group(2) or m.group(3) or m.group(4) or "") for m in adef.finditer(cmd)]
     if not defs:
         return cmd
@@ -515,22 +521,28 @@ def _bash_source(cmd):
         if script in cmd:
             return script
     # the first statement that runs something: past comments, `cd` and env prefixes (`CI=1 npm test`)
+    return "bash " + _first_command(statements)
+
+
+def _first_command(statements, depth=0):
+    """The first command the statements run: past comments, `cd`, env prefixes and pure
+    assignments — whose substitutions run (`SHA="$(cd /r && git rev-parse HEAD)"` → git)."""
     cd = False
     for stmt in statements:
         rest, values = _strip_assignments(stmt.strip().lstrip("({! \t"))
         words = rest.split()
-        if not words:  # only assignments: a command substitution in them runs (`SHA="$(git rev-parse HEAD)"`)
+        if not words and depth < 3:
             for inner in _substituted(values):
-                word = os.path.basename(inner.split()[0].strip("\"'()")) if inner.split() else ""
-                if word:
-                    return "bash " + word
+                word = _first_command(_statements(inner), depth + 1)
+                if word not in ("?", "cd"):
+                    return word
         if not words or words[0] in ("export", "declare", "local", "readonly", "typeset"):
             continue
         if words[0] == "cd":
             cd = True
             continue
-        return "bash " + (os.path.basename(words[0].strip("\"'()")) or "?")
-    return "bash cd" if cd else "bash ?"
+        return os.path.basename(words[0].strip("\"'()")) or "?"
+    return "cd" if cd else "?"
 
 
 def _read_source(path, cwd):

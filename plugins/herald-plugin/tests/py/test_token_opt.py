@@ -347,6 +347,13 @@ class DetailRound2Case(ConfigDirCase):
         self.assertEqual(src("cat <<'EOF' > /tmp/x.md\nit's done\nEOF\ncat /p/skills/hrd/commands/a.md"),
                          "skill commands/a.md")
         self.assertEqual(src("N=$(( N + 1 )); git push"), "bash git")  # arithmetic is not a command
+        # an env prefix holding a substitution; a substitution's own cd and env prefixes
+        self.assertEqual(src("PYTHONPATH=$(pwd) python3 -m unittest"), "bash python3")
+        self.assertEqual(src("D=$(pwd) cat /p/skills/hrd/commands/a.md"), "skill commands/a.md")
+        self.assertEqual(src("SHA=$(cd /repo && git rev-parse HEAD)"), "bash git")
+        # redirections with & are not separators; a here-string is not a heredoc
+        self.assertEqual(src("cd /repo >/dev/null 2>&1; npm test"), "bash npm")
+        self.assertEqual(src("read -r a <<< foo\ncat /p/skills/hrd/commands/a.md"), "skill commands/a.md")
 
     def test_bash_source_long_inputs_stay_fast(self):
         import time
