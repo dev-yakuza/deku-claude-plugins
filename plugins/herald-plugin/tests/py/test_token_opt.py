@@ -296,10 +296,30 @@ class DetailRound2Case(ConfigDirCase):
         # env prefixes
         self.assertEqual(src("GIT_PAGER=cat git log -3"), "bash git")
         self.assertEqual(src("HRD_UNATTENDED=1 %s lock acquire --cmd x" % hrd), "hrd lock acquire")
+        self.assertEqual(src('VAR="a b" git status'), "bash git")
+        # whatever runs the script: wrappers, flags with values, quoted "$(…)" paths, ./hrd.py, eval
+        script = ".claude/herald/scripts/hrd.py"
+        for c in ('python3 "$(git rev-parse --show-toplevel)"/%s sync' % script,
+                  'python3 "$(git rev-parse --show-toplevel)/%s" sync' % script,
+                  'R="$(git rev-parse --show-toplevel)"; python3 "$R/%s" sync' % script,
+                  "python3 -X utf8 %s sync" % script, "timeout 120 ./%s sync" % script,
+                  "$PYTHON %s sync" % script, 'eval "./%s sync"' % script,
+                  "python3 %s \\\n  sync" % script):
+            self.assertEqual(src(c), "hrd sync", c)
+        self.assertEqual(src("if ./%s lock acquire --cmd x; then :; fi" % script), "hrd lock acquire")
+        # a definition or a comment on its own line is not a call; braces and nesting in functions
+        self.assertEqual(src('# H="%s"\ngit status' % hrd), "bash git")
+        self.assertEqual(src('H() { python3 "${ROOT}/%s" "$@"; }; H sync' % script), "hrd sync")
+        self.assertEqual(src('H() { %s "$@"; }; G() { H "$@"; }; G sync' % hrd), "hrd sync")
+        # the file the reading statement reads
+        self.assertEqual(src("grep -l x /p/skills/hrd/commands/a.md; cat /p/skills/hrd/commands/b.md"), "skill commands/b.md")
+        self.assertEqual(src("(cd sub && make)"), "bash make")
 
     def test_bash_source_long_inputs_stay_fast(self):
         import time
-        for cmd in ('"; f() { ' * 6000, "f() { a" + " " * 40000 + 'x"$@"', "A=1\n" * 25000, "\n" * 50000):
+        doubling = "".join('A%d="$A%d$A%d"; ' % (i + 1, i, i) for i in range(30))
+        for cmd in ('"; f() { ' * 6000, "f() { a" + " " * 40000 + 'x"$@"', "A=1\n" * 25000, "\n" * 50000,
+                    " " * 50000, "(x)" * 16000, "(" * 50000, doubling):
             t = time.time()
             self.assertIsInstance(measure._bash_source(cmd), str)
             self.assertLess(time.time() - t, 2.0)

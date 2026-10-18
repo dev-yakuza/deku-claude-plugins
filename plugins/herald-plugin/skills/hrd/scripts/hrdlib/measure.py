@@ -292,34 +292,33 @@ def _est_tokens(text):
 
 
 _STMT = r"(?:^|[;&|\n(][ \t]*)"  # where a shell statement starts (no \s*: blank runs stay linear)
+_VALUE_CAP = 4096  # an expanded variable longer than this is left as written (no blow-up)
 
 
 def _expand_shell(cmd):
     """Inline the command's own shorthands so the patterns below see what really runs:
     `H="python3 …/hrd.py"; $H sync`, `eval "$H sync"`, `H() { python3 …/hrd.py "$@"; }; H sync`
-    and path variables (`S=<plugin>/commands; cat $S/x.md`). A reference takes the last
-    definition before it; the definitions themselves are dropped (a definition runs nothing)."""
+    and path variables (`S=<plugin>/commands; cat $S/x.md`). A variable reference takes the
+    last assignment before it; a function call takes the last definition of that name. The
+    definitions themselves are dropped (a definition runs nothing)."""
     import re
 
     def drop(m):  # keep the statement separator, drop the definition
         s = m.group(0)
         return s[:len(s) - len(s.lstrip(";&|\n( \t"))]
 
-    # functions: `H() { body; }` or `function H { body; }` — calls take the body up to "$@"
-    fdef = re.compile(_STMT + r"(?:function\s+([A-Za-z_]\w*)\s*(?:\(\))?|([A-Za-z_]\w*)\s*\(\))\s*\{([^{}]*)\}")
-    funcs = []
+    cmd = cmd.replace("\\\n", " ")  # line continuations
+    # functions: `H() { body; }` or `function H { body; }` — a call takes the body up to "$@"
+    fdef = re.compile(_STMT + r"(?:function\s+([A-Za-z_]\w*)\s*(?:\(\))?|([A-Za-z_]\w*)\s*\(\))\s*"
+                      r"\{((?:[^{}]|\$\{[^{}]*\})*)\}")
+    names = {}
     for m in fdef.finditer(cmd):
-        body = re.split(r"\"?\$\{?@\}?\"?", m.group(3), maxsplit=1)[0].strip().rstrip(";").strip()
-        funcs.append((m.end(), m.group(1) or m.group(2), body))
-    cmd_f = fdef.sub(drop, cmd)
-    if funcs:
-        # positions moved when definitions were dropped: map calls by order of definition instead
-        names = {}
-        for _, name, body in funcs:
-            names[name] = body  # the last definition wins (a call before it is rare)
-        cmd_f = re.sub(r"(" + _STMT + r"|\beval\s+[\"']?)([A-Za-z_]\w*)(?=\s|[\"';&|)]|$)",
-                       lambda m: m.group(1) + names.get(m.group(2), m.group(2)), cmd_f)
-    cmd = cmd_f
+        names[m.group(1) or m.group(2)] = re.split(r"\"?\$\{?@\}?\"?", m.group(3), maxsplit=1)[0].strip().rstrip(";").strip()
+    if names:
+        cmd = fdef.sub(drop, cmd)
+        call = re.compile(r"(" + _STMT + r"|\beval\s+[\"']?)([A-Za-z_]\w*)(?=\s|[\"';&|)]|$)")
+        for _ in range(3):  # a function that calls another
+            cmd = call.sub(lambda m: m.group(1) + names.get(m.group(2), m.group(2)), cmd)
     # assignments, with an optional export/declare/local/readonly in front
     adef = re.compile(_STMT + r"(?:(?:export|declare|local|readonly|typeset)(?:\s+-\w+)*\s+)?"
                       r"([A-Za-z_]\w*)=(?:\"([^\"]*)\"|'([^']*)'|([^\s;&|\"']*))(?=\s*(?:[;&|\n)]|$))")
@@ -336,7 +335,11 @@ def _expand_shell(cmd):
     for start, end, name, value in defs:
         out.append(expand(cmd[pos:start]))
         out.append(drop(adef.match(cmd, start)))
-        values[name] = expand(value)  # a value may use earlier variables
+        value = expand(value)  # a value may use earlier variables
+        if len(value) <= _VALUE_CAP:
+            values[name] = value
+        else:
+            values.pop(name, None)
         pos = end
     out.append(expand(cmd[pos:]))
     return "".join(out)
@@ -346,35 +349,37 @@ def _bash_source(cmd):
     import re
 
     cmd = _expand_shell(cmd)
-    # an HRD call: the script run by python or as a statement, then a subcommand or a flag
-    # (a command that only reads or names hrd.py is not a call)
-    m = re.search(r"(?:\bpython3?(?:\.\d+)?(?:\s+-\w+)*\s+|" + _STMT + r"|\beval\s+[\"']?)(?:\$\([^()]*\))?[^\s;&|]*hrd\.py[\"']?"
-                  r"\s+(?:[\"']?([a-z][a-z-]*)[\"']?(?:\s+[\"']?([a-z][a-z-]*)[\"']?(?=[\s;&|)]|$))?(?=[\s;&|)]|$)|(-))", cmd)
+    # an HRD call: the script followed on the same line by a subcommand or a flag, whatever runs
+    # it (python3 -X …, timeout, xargs, ./hrd.py, a quoted "$(…)" path); a command that only
+    # reads or names hrd.py (`sed -n 1,40p …/hrd.py`) is not a call
+    m = re.search(r"(?:^|[\s/\"'])hrd\.py[\"']?[ \t]+(?:[\"']?([a-z][a-z-]*)[\"']?"
+                  r"(?:[ \t]+[\"']?([a-z][a-z-]*)[\"']?(?=[\s;&|)]|$))?(?=[\s;&|)]|$)|(-))", cmd)
     if m:  # the action word only for groups that have actions (never a slug, topic id or flag)
         if not m.group(1):
             return "hrd"  # `hrd.py --help`
         two = m.group(1) in ("lock", "stage", "social", "ledger", "topics", "translate", "reverts")
         return "hrd " + m.group(1) + (" " + m.group(2) if two and m.group(2) else "")
     # prompt files read through the shell (`cat <plugin cache>/skills/hrd/commands/x.md`, or a
-    # path relative to the plugin after `cd <plugin>`)
-    files = re.findall(r"(?:^|[\s/\"'])skills/hrd/([\w./-]+\.md)", cmd)
-    if files and re.search(_STMT + r"(cat|head|sed|less|tail)\b[^;&|\n]*skills/hrd/", cmd):
-        return "skill " + files[0] + (" +%d" % (len(files) - 1) if len(files) > 1 else "")
+    # path relative to the plugin after `cd <plugin>`): the files of the first reading statement
+    for stmt in re.split(r"[;&|\n]+", cmd):
+        if re.match(r"(cat|head|sed|less|tail)\b", stmt.lstrip(" \t(")):
+            files = re.findall(r"(?:^|[\s/\"'])skills/hrd/([\w./-]+\.md)", stmt)
+            if files:
+                return "skill " + files[0] + (" +%d" % (len(files) - 1) if len(files) > 1 else "")
     for script in ("measure.py", "gsc.py", "integrity.py", "validate_content.py", "batch_runner.py"):
         if script in cmd:
             return script
-    # the first statement that runs something: past `cd` and env prefixes (`CI=1 npm test`)
+    # the first statement that runs something: past comments, `cd` and env prefixes (`CI=1 npm test`)
     cd = False
     for stmt in re.split(r"[;&|\n]+", cmd):
-        words = stmt.strip().lstrip("(").split()
-        while words and re.match(r"[A-Za-z_]\w*=", words[0]):
-            words = words[1:]
-        if not words or words[0] in ("export", "declare", "local", "readonly", "typeset"):
+        stmt = re.sub(r"^(?:[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|\([^()]*\)|\S*)\s*)+", "", stmt.strip().lstrip("({! \t"))
+        words = stmt.split()
+        if not words or words[0].startswith("#") or words[0] in ("export", "declare", "local", "readonly", "typeset"):
             continue
         if words[0] == "cd":
             cd = True
             continue
-        return "bash " + os.path.basename(words[0])
+        return "bash " + (os.path.basename(words[0].strip("\"'()")) or "?")
     return "bash cd" if cd else "bash ?"
 
 
