@@ -346,6 +346,7 @@ class DetailRound2Case(ConfigDirCase):
         # a heredoc body is data: an apostrophe in it does not swallow later statements
         self.assertEqual(src("cat <<'EOF' > /tmp/x.md\nit's done\nEOF\ncat /p/skills/hrd/commands/a.md"),
                          "skill commands/a.md")
+        self.assertEqual(src("N=$(( N + 1 )); git push"), "bash git")  # arithmetic is not a command
 
     def test_bash_source_long_inputs_stay_fast(self):
         import time
@@ -355,6 +356,7 @@ class DetailRound2Case(ConfigDirCase):
                     "f() { " + "a " * 10000 + ' "$@"; }\n' + "f;" * 15000,  # a long body called often
                     'H="' + "a" * 4000 + '"\n' + "$H;" * 15000,  # a long value referenced often
                     "function f" + " " * 50000, "cat " + "/skills/hrd" * 4540, "$(" * 25000, "<<A\n" * 10000,
+                    'B="' + "x" * 4000 + '"; A=$(' + "$B" * 11000 + ")",  # a long value inside a substitution
                     "S=" + "/skills/hrd" * 372 + "; cat " + "/skills/hrd" * 4000 + "$S" * 37):
             t = time.time()
             self.assertIsInstance(measure._bash_source(cmd), str)

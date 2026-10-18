@@ -356,9 +356,9 @@ def _shell_scan(cmd, i, split):
             i = n if j < 0 else j
             continue
         elif top is None and c == "<" and cmd.startswith("<<", i) and not cmd.startswith("<<<", i):
-            m = re.match(r"<<(-?)[ \t]*([\"']?)([A-Za-z_]\w*)\2", cmd[i:i + 200])
+            m = re.match(r"<<(-?)[ \t]*(?:([\"'])([A-Za-z_]\w*)\2|\\?([A-Za-z_]\w*))", cmd[i:i + 200])
             if m:
-                heredocs.append((m.group(3), bool(m.group(1))))
+                heredocs.append((m.group(3) or m.group(4), bool(m.group(1))))
                 cur.append(m.group(0))
                 i += m.end()
                 continue
@@ -414,7 +414,7 @@ def _substituted(values):
     import re
 
     return [(m.group(1) if m.group(1) is not None else m.group(2)).strip()
-            for v in values for m in re.finditer(r"\$\(((?:[^()]|\([^()]*\))*)\)|`([^`]*)`", v)]
+            for v in values for m in re.finditer(r"\$\((?!\()((?:[^()]|\([^()]*\))*)\)|`([^`]*)`", v)]
 
 
 def _expand_shell(cmd):
@@ -468,7 +468,11 @@ def _expand_shell(cmd):
         out.append(drop(adef.match(cmd, start)))
         sub = re.search(_SUBST, value)
         if sub:  # the assignment runs the command in its substitution (`SHA="$(git rev-parse HEAD)"`)
-            out.append(expand((sub.group(1) if sub.group(1) is not None else sub.group(2)).strip()) or ":")
+            inner = expand((sub.group(1) if sub.group(1) is not None else sub.group(2)).strip())
+            size += len(inner)
+            if size > limit:
+                return cmd
+            out.append(inner)
         value = expand(value)  # a value may use earlier variables
         if len(value) <= _VALUE_CAP:
             values[name] = value
@@ -517,8 +521,9 @@ def _bash_source(cmd):
         words = rest.split()
         if not words:  # only assignments: a command substitution in them runs (`SHA="$(git rev-parse HEAD)"`)
             for inner in _substituted(values):
-                if inner.split():
-                    return "bash " + os.path.basename(inner.split()[0].strip("\"'()"))
+                word = os.path.basename(inner.split()[0].strip("\"'()")) if inner.split() else ""
+                if word:
+                    return "bash " + word
         if not words or words[0] in ("export", "declare", "local", "readonly", "typeset"):
             continue
         if words[0] == "cd":
