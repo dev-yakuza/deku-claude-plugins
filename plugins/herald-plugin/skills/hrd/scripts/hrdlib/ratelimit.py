@@ -8,6 +8,7 @@ status counts as limited and an unknown reset time falls back to a backoff.
 
 import datetime
 import json
+import math
 import re
 
 FAR = "far"  # a reset beyond the single-wait ceiling (weekly wording without a dated time)
@@ -21,7 +22,7 @@ _STRONG_RE = re.compile(
     r"|\|\s*\d{10,13}\b", re.I)
 _OVERLOADED_RE = re.compile(r"overloaded|\b529\b", re.I)
 # "context limit reached", "output token limit": a context or output ceiling, not a usage limit
-_NOT_USAGE_RE = re.compile(r"\b(?:context|token|output)(?:[ -]window)?[ -]+limit\w*(?: reached)?", re.I)
+_NOT_USAGE_RE = re.compile(r"\b(?:context|tokens?|output)(?:[ -](?:window|tokens?))?[ -]+limit\w*(?: reached)?", re.I)
 _WEEKLY_RE = re.compile(r"\b(?:weekly|week|monthly)\b", re.I)
 
 _DAYS = {d: i for i, d in enumerate(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])}
@@ -42,7 +43,7 @@ def sanitize(value, now):
     if isinstance(value, bool) or value is None:
         return None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if isinstance(value, float) and value != value:  # NaN
+        if isinstance(value, float) and not math.isfinite(value):  # NaN, Infinity (json.loads accepts them)
             return None
         v = int(value)
     elif isinstance(value, str) and value.strip().isdigit():
@@ -132,18 +133,19 @@ def extract_reset(text, now):
 
 
 def _decode(line):
-    """(object, whole) — `whole` is False when only the slice from the last `{"type":` decoded."""
+    """(object, whole, prefix) — `whole` is False when only the slice from the last `{"type":`
+    decoded; `prefix` is what came before that slice (stderr glued to a JSON line — Guild L3)."""
     try:
-        return json.loads(line), True
+        return json.loads(line), True, ""
     except ValueError:
         pass
     i = line.rfind('{"type":')
     if i > 0:
         try:
-            return json.loads(line[i:]), False
+            return json.loads(line[i:]), False, line[:i]
         except ValueError:
             pass
-    return None, False
+    return None, False, ""
 
 
 def _lost_event(line):
@@ -212,7 +214,15 @@ def _past(v, returncode, now):
 
 
 def scan(log_path, returncode, now):
-    """The verdict for one child log (§2.1)."""
+    """The verdict for one child log (§2.1). Never raises: an unreadable log is no verdict, an
+    internal error is a limit with no reset (the runner then backs off rather than crashing)."""
+    try:
+        return _scan(log_path, returncode, now)
+    except Exception as e:  # noqa: BLE001 — a verdict must never take the runner down
+        return verdict(True, "limit", None, "scan-error", None, "scan failed: %s" % e)
+
+
+def _scan(log_path, returncode, now):
     objs = []          # (line_no, obj)
     broken = []        # (line_no, raw line) of lines that did not decode as a whole
     stderr = []
@@ -226,9 +236,11 @@ def scan(log_path, returncode, now):
             line = raw.rstrip("\n")
             if not line.strip():
                 continue
-            obj, whole = _decode(line)
+            obj, whole, prefix = _decode(line)
             if not whole:
                 broken.append((n, line))
+            if prefix.strip():
+                stderr.append(prefix)
             if isinstance(obj, dict):
                 objs.append((n, obj))
                 if obj.get("type") == "rate_limit_event" and isinstance(obj.get("rate_limit_info"), dict):

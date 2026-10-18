@@ -188,11 +188,11 @@ def iso(ts):
     return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def wait_out(root, clock, token, secs, label):
+def wait_out(root, clock, token, secs, label, kind="limit"):
     """Sleep `secs` in slices until a wall-clock deadline, checking each slice that the lock is
     still ours. lock.wait tells other commands why the checkout is locked."""
     deadline = clock.now() + secs
-    lock.write_wait(root, token, iso(deadline) if clock.fake is None else iso(time.time() + secs))
+    lock.write_wait(root, token, iso(deadline) if clock.fake is None else iso(time.time() + secs), kind)
     last_note = clock.now()
     try:
         while True:
@@ -234,13 +234,15 @@ def limit_hold_of(root, tid, run_id):
             and str(h.get("note") or "").startswith(LIMIT_NOTE) and ("(run %s)" % run_id) in str(h.get("note")))
 
 
-def release(root, cfg, tid, run_id):
+def release(root, cfg, tid, run_id, summary=None):
     """The topic this run held for a usage limit reached a PR: back to queued (an open PR then
     derives pr-pending). Only if nobody changed it meanwhile (another machine)."""
     preserve_wip(root, cfg, tid)  # whatever the child left on its branch stays there; back to base
     sync_base(root, cfg)
     if not limit_hold_of(root, tid, run_id):
         log("%s reached a PR but its hold changed meanwhile — not released" % tid)
+        if summary is not None:
+            summary.setdefault("not_released", []).append(tid)
         return False
     topics = load_topics(root)
     set_topic_state(get_topic(topics, tid), "queued", None, "resumed to PR after a usage limit")
@@ -711,7 +713,7 @@ def main(argv):
                         "/hrd resume %s" % (why, tid))
             summary["held"].append((tid, "needs-human"))
 
-    def after_wait(tid, held):
+    def after_wait(tid, held, started):
         """§2.4 1–3. Returns True to restart; False to drop this topic and go on."""
         head = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
         dirty = git(root, "status", "--porcelain", "--untracked-files=no").strip()
@@ -728,7 +730,7 @@ def main(argv):
             ok = limit_hold_of(root, tid, run_id)
         else:
             try:
-                ok = get_topic(load_topics(root), tid).get("state") == "queued" and not pr_done(root, cfg, tid, "")
+                ok = get_topic(load_topics(root), tid).get("state") == "queued" and not pr_done(root, cfg, tid, started)
             except HeraldError:
                 ok = False
         if not ok:
@@ -758,7 +760,7 @@ def main(argv):
             if held:
                 done = pr_done(root, cfg, tid, started)
                 if done:
-                    release(root, cfg, tid, run_id)
+                    release(root, cfg, tid, run_id, summary)
                     handle_result(tid, done)
                     return
             if os.path.exists(p):
@@ -776,18 +778,18 @@ def main(argv):
             if held:  # the PR beats any result file (a child cut off between `gh pr create` and `HRD result`)
                 done = pr_done(root, cfg, tid, started)
                 if done:
-                    release(root, cfg, tid, run_id)
+                    release(root, cfg, tid, run_id, summary)
                     handle_result(tid, done)
                     return
             res = completed(root, cfg, tid, since=started)
             if res and res["status"].startswith("held:") and str(res.get("note") or "").startswith(LIMIT_NOTE):
                 sv = ratelimit.scan(logp, rc, clock.now())  # H9: a sub-agent hit a usage limit
-                reset = sv["reset_at"] if sv["limited"] and sv["kind"] == "limit" else \
+                reset = (sv["reset_at"] if sv["limited"] and sv["kind"] == "limit" else None) or \
                     ratelimit.extract_reset(str(res.get("note")), clock.now())
                 v = ratelimit.verdict(True, "limit", reset, "result-note", sv.get("info"), str(res.get("note"))[:200])
             elif res:
                 if held and not res["status"].startswith("held:"):
-                    release(root, cfg, tid, run_id)
+                    release(root, cfg, tid, run_id, summary)
                 handle_result(tid, res)
                 return
             else:
@@ -824,7 +826,7 @@ def main(argv):
                     {"topic": tid, "source": v["source"], "kind": "limit", "waited_s": int(secs), "until": until})
                 wait_out(root, clock, token, secs, "%s waiting for the usage limit (until %s)" % (tid, until))
                 waited["s"] += secs
-                if not after_wait(tid, held):
+                if not after_wait(tid, held, started):
                     return
                 preserve_wip(root, cfg, tid)
                 prompt = child_prompt(tid)
@@ -837,7 +839,7 @@ def main(argv):
                 log("API overloaded — %s; backing off %ds (%d/%d)" % (tid, secs, overloads, MAX_OVERLOADS))
                 summary.setdefault("rate_limit_waits", []).append(
                     {"topic": tid, "source": v["source"], "kind": "overloaded", "waited_s": secs, "until": None})
-                wait_out(root, clock, token, secs, "%s backing off" % tid)
+                wait_out(root, clock, token, secs, "%s backing off" % tid, kind="overloaded")
                 waited["s"] += secs
                 git(root, "checkout", "-q", cfg.base)
                 prompt = child_prompt(tid)
@@ -873,8 +875,9 @@ def main(argv):
             handle_topic(tid)
         auto = cfg.get("autonomy", "publish") == "auto"
         chosen = []
-        if auto and summary["pr"]:
-            chosen, skipped = auto_candidates(root, cfg, summary["pr"])
+        held_back = set(summary.get("not_released", []))  # its hold changed elsewhere: a human decides
+        if auto and [x for x in summary["pr"] if x[0] not in held_back]:
+            chosen, skipped = auto_candidates(root, cfg, [x for x in summary["pr"] if x[0] not in held_back])
             summary["auto"] = {"chosen": chosen, "skipped": skipped}
             if chosen:
                 sync_base(root, cfg)
@@ -890,8 +893,9 @@ def main(argv):
                                                    os.path.join(logs, "%s-ship.jsonl" % run_id), 0, env)
                 sv = ratelimit.scan(ship_log, ship_rc, clock.now())
                 if sv["limited"]:  # never re-run a ship child (partial merges): record what merged, no deploy
-                    summary["auto"]["rate_limited"] = True
-                    log("ship child hit a usage limit (%s) — not re-run; /hrd ship after the reset" % sv["detail"])
+                    summary["auto"]["rate_limited"] = sv["kind"]
+                    log("ship child stopped on %s (%s) — not re-run; /hrd ship later"
+                        % ("a usage limit" if sv["kind"] == "limit" else "an overloaded API", sv["detail"]))
                 git(root, "checkout", "-q", cfg.base)
                 ship_res = read_result(root, "ship") or {}
                 if str(ship_res.get("note") or "").startswith("tooling: herald version"):

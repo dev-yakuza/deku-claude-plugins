@@ -109,6 +109,31 @@ elif action == "branch-h9":
     subprocess.run([sys.executable, os.path.join(scripts, "hrd.py"), "result", "--topic", tid,
                     "--status", "held:needs-human", "--note", "tooling: rate limited: usage limit reached"], check=True)
     sys.exit(0)
+elif action == "branch-overloaded":
+    start_branch("post-" + tid)
+    print(json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True,
+                      "result": "API Error: 529 Overloaded"}), flush=True)
+    sys.exit(1)
+elif action == "branch-h9-past":
+    start_branch("post-" + tid)
+    subprocess.run([sys.executable, os.path.join(scripts, "hrd.py"), "result", "--topic", tid,
+                    "--status", "held:needs-human", "--note",
+                    "tooling: rate limited: usage limit reached|%s" % os.environ["HRD_FAKE_PAST"]], check=True)
+    sys.exit(0)
+elif action == "pr-and-requeue-elsewhere":  # the PR opens while another machine requeues the topic
+    other = os.environ["HRD_FAKE_OTHER_CLONE"]
+    subprocess.run(["git", "-C", other, "pull", "-q"], check=True)
+    tp = os.path.join(other, ".claude/herald/topics.json")
+    data = json.load(open(tp))
+    for t in data["topics"]:
+        if t["id"] == tid:
+            t["state"] = "queued"
+            t.setdefault("history", []).append({"at": "2099-01-01T00:00:00+00:00", "state": "queued",
+                                                "reason": None, "note": "requeued elsewhere"})
+    json.dump(data, open(tp, "w"))
+    subprocess.run(["git", "-C", other, "commit", "-qam", "chore(herald): requeue elsewhere"], check=True)
+    subprocess.run(["git", "-C", other, "push", "-q"], check=True)
+    action = "pr"
 elif action == "overloaded":
     print(json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True,
                       "result": "API Error: 529 Overloaded"}), flush=True)

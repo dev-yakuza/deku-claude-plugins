@@ -26,8 +26,8 @@ def wait_path(root):
     return os.path.join(paths(root)["memory"], "lock.wait")
 
 
-def write_wait(root, token, until_iso):
-    write_json(wait_path(root), {"token": token, "pid": os.getpid(), "until": until_iso})
+def write_wait(root, token, until_iso, kind="limit"):
+    write_json(wait_path(root), {"token": token, "pid": os.getpid(), "until": until_iso, "kind": kind})
 
 
 def clear_wait(root, token=None):
@@ -65,7 +65,7 @@ def waiting(root, cur=None):
         until = until.replace(tzinfo=datetime.timezone.utc)
     if until <= datetime.datetime.now(datetime.timezone.utc) or not _pid_runs_batch(w.get("pid")):
         return None
-    return {"pid": w.get("pid"), "until": w.get("until")}
+    return {"pid": w.get("pid"), "until": w.get("until"), "kind": w.get("kind") or "limit"}
 
 
 def acquire(root, command, token=None):
@@ -76,8 +76,9 @@ def acquire(root, command, token=None):
             return cur["token"]
         w = waiting(root, cur)
         if w:
-            raise HeraldError("checkout is locked: batch (pid %s) is waiting for a usage limit until %s — "
-                              "stop it with `kill %s`, or wait." % (w["pid"], w["until"], w["pid"]))
+            what = "an overloaded API (backoff)" if w["kind"] == "overloaded" else "a usage limit"
+            raise HeraldError("checkout is locked: batch (pid %s) is waiting for %s until %s — "
+                              "stop it with `kill %s`, or wait." % (w["pid"], what, w["until"], w["pid"]))
         raise HeraldError(
             "checkout is locked by `%s` since %s. If that run is gone, run `/hrd status --unlock`."
             % (cur.get("command"), cur.get("at"))

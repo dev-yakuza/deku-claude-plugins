@@ -100,6 +100,15 @@ class ScanTests(unittest.TestCase):
                   "output token limit exceeded"):
             self.assertFalse(scan(result(t, error=True), rc=1)["limited"], t)
 
+    def test_glued_stderr_prefix_and_odd_values(self):
+        line = "429 Too Many Requests" + json.dumps(result("x", error=True))
+        self.assertTrue(scan(raw=[line], rc=1)["limited"])
+        self.assertFalse(scan(raw=[line], rc=0)["limited"])  # stderr counts only when the child failed
+        v = scan(raw=['{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":Infinity}}'])
+        self.assertEqual((v["limited"], v["reset_at"]), (True, None))
+        self.assertFalse(scan(result("max output tokens limit reached", error=True), rc=1)["limited"])
+        self.assertFalse(scan(result("context limit reached"))["limited"])
+
     def test_overloaded(self):
         v = scan(result("API Error: 529 Overloaded", error=True), rc=1)
         self.assertEqual((v["limited"], v["kind"]), (True, "overloaded"))
@@ -276,6 +285,120 @@ class LimitRunTests(RunnerCase):
         self.assertEqual(len(self.call_log()), 1)
 
 
+class MoreRunTests(RunnerCase):
+    def other_clone(self):
+        other = os.path.join(self.tmp, "other")
+        sh(self.tmp, "git", "clone", "-q", self.origin, other)
+        sh(other, "git", "config", "user.email", "o@x"); sh(other, "git", "config", "user.name", "o")
+        return other
+
+    def test_overloaded_on_a_branch_restarts(self):
+        p = self.run_batch({"t0001": ["branch-overloaded", "pr"]}, n=1)
+        self.assertEqual([t for t, _ in self.summary(p)["pr"]], ["t0001"], p.stderr)
+        self.assertEqual([c["prompt"] for c in self.call_log()], ["/hrd write t0001", "/hrd resume t0001"])
+        self.assertNotIn("batch hold", self.origin_log())  # a short backoff records no hold
+
+    def test_past_reset_in_a_subagent_note_waits_30s(self):
+        p = self.run_batch({"t0001": ["branch-h9-past", "pr"]}, n=1, env={"HRD_FAKE_PAST": str(NOW - 100)})
+        self.assertEqual(self.summary(p)["rate_limit_waits"][0]["waited_s"], 30, p.stderr)
+
+    def test_passed_reset_then_limit_again_backs_off(self):
+        p = self.run_batch({"t0001": ["limit-exit0", "limit-exit0", "pr"]}, n=1, reset=NOW - 100)
+        s = self.summary(p)
+        self.assertEqual([t for t, _ in s["pr"]], ["t0001"], p.stderr)
+        self.assertEqual([w["until"] for w in s["rate_limit_waits"]], ["unknown"])
+
+    def test_run_wait_ceiling(self):
+        unk = "branch-limit-unknown"
+        p = self.run_batch({"t0001": [unk] * 5 + ["pr"], "t0002": [unk] * 5 + ["pr"], "t0003": [unk, unk, "pr"]}, n=3)
+        s = self.summary(p)
+        self.assertEqual((s["rate_limited"]["topic"], s["rate_limited"]["why"]), ("t0003", "12h of waiting in this run"),
+                         p.stderr)
+        self.assertEqual(sorted(t for t, _ in s["pr"]), ["t0001", "t0002"])
+
+    def test_old_reverted_pr_is_not_a_release(self):
+        self.set_prs([{"number": 7, "state": "MERGED", "headRefName": "herald/t0001--post-t0001",
+                       "mergedAt": "2020-01-01T00:00:00Z", "labels": ["herald", "herald:reverted"]}])
+        p = self.run_batch({"t0001": ["branch-limit", "branch-nothing", "branch-nothing"]}, n=1)
+        self.assertNotIn("batch release", self.origin_log(), p.stderr)
+        self.assertEqual(self.summary(p)["incomplete"], ["t0001"])
+
+    def test_requeued_elsewhere_during_the_wait_is_skipped(self):
+        other = self.other_clone()
+        proc = self.run_batch({"t0001": ["branch-limit", "pr"], "t0002": "pr"}, n=2, reset=NOW + 4 * 3600,
+                              background=True)
+        waitf = os.path.join(self.root, ".claude/herald/memory/lock.wait")
+        end = time.time() + 120
+        while not os.path.exists(waitf) and time.time() < end:
+            time.sleep(0.05)
+        sh(other, "git", "pull", "-q")
+        data = json.load(open(os.path.join(other, ".claude/herald/topics.json")))
+        store.set_topic_state([t for t in data["topics"] if t["id"] == "t0001"][0], "queued", note="requeued elsewhere")
+        json.dump(data, open(os.path.join(other, ".claude/herald/topics.json"), "w"))
+        sh(other, "git", "commit", "-qam", "requeue"); sh(other, "git", "push", "-q")
+        out, err = proc.communicate(timeout=300)
+        s = json.loads(out[out.index("{"):])
+        self.assertEqual([x["topic"] for x in s["skipped"]], ["t0001"], err)
+        self.assertIn("local branch", s["skipped"][0]["why"])
+        self.assertEqual([c["prompt"] for c in self.call_log()], ["/hrd write t0001", "/hrd write t0002"])
+
+    def test_version_changed_during_the_wait_stops_with_the_hold(self):
+        other = self.other_clone()
+        proc = self.run_batch({"t0001": ["branch-limit", "pr"]}, n=1, reset=NOW + 4 * 3600, background=True)
+        waitf = os.path.join(self.root, ".claude/herald/memory/lock.wait")
+        end = time.time() + 120
+        while not os.path.exists(waitf) and time.time() < end:
+            time.sleep(0.05)
+        sh(other, "git", "pull", "-q")
+        hp = os.path.join(other, ".claude/herald/scripts/hrd.py")
+        src = open(hp).read()
+        import re
+        open(hp, "w").write(re.sub(r'SCRIPTS_VERSION = "[^"]+"', 'SCRIPTS_VERSION = "99.0.0"', src))
+        sh(other, "git", "commit", "-qam", "update"); sh(other, "git", "push", "-q")
+        out, err = proc.communicate(timeout=300)
+        self.assertIn("99.0.0", json.loads(out[out.index("{"):])["error"], err)
+        self.assertEqual(self.topic("t0001")["state"], "held")
+        self.assertEqual(len(self.call_log()), 1)
+
+    def test_release_refused_when_changed_elsewhere(self):
+        os.environ["HRD_FAKE_OTHER_CLONE"] = self.other_clone()
+        try:
+            p = self.run_batch({"t0001": ["branch-limit", "pr-and-requeue-elsewhere"]}, n=1)
+        finally:
+            os.environ.pop("HRD_FAKE_OTHER_CLONE", None)
+        s = self.summary(p)
+        self.assertEqual(s.get("not_released"), ["t0001"], p.stderr)
+        self.assertNotIn("batch release", self.origin_log())
+
+    def test_next_batch_leaves_the_hold_alone(self):
+        self.run_batch({"t0001": "branch-limit-far"}, n=1)
+        os.remove(self.calls)
+        self.run_batch({"t0001": "pr", "t0002": "pr"}, n=1)
+        self.assertEqual([c["prompt"] for c in self.call_log()], ["/hrd write t0002"])
+
+    def test_ship_child_limit_is_not_rerun(self):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        cfg = json.load(open(cfgp)); cfg["autonomy"]["publish"] = "auto"
+        json.dump(cfg, open(cfgp, "w"))
+        self.commit("auto"); sh(self.root, "git", "push", "-q", "origin", "main")
+        from test_batch import pr_work
+        sh(self.root, "git", "switch", "-q", "-c", "herald/t0001--post-t0001")
+        crit, st = pr_work({"final_round": {"verdict": "PASS", "audit": {}}}, "t0001", "post-t0001")
+        self.write(".claude/herald/work/t0001/critique.json", crit)
+        self.write(".claude/herald/work/t0001/state.json", st)
+        self.write(".claude/herald/work/t0001/verify.json", json.dumps({"counts": {}}))
+        self.write("src/content/blog/post-t0001.md", "x")
+        self.commit("pr head")
+        sh(self.root, "git", "push", "-q", "origin", "HEAD:refs/pull/100/head")
+        sh(self.root, "git", "switch", "-q", "main")
+        sh(self.root, "git", "branch", "-q", "-D", "herald/t0001--post-t0001")
+        p = self.run_batch({"t0001": "pr"}, n=1, env={"HRD_FAKE_SHIP_LIMIT": "1"})
+        s = self.summary(p)
+        self.assertEqual(s["auto"]["rate_limited"], "limit", p.stderr)
+        self.assertFalse(s["auto"]["published"])
+        self.assertEqual([c["prompt"] for c in self.call_log()].count("/hrd ship --auto"), 1)
+
+
 class LockAndSignalTests(RunnerCase):
     def wait_for(self, path, timeout=120):
         end = time.time() + timeout
@@ -338,6 +461,24 @@ class LockAndSignalTests(RunnerCase):
         with self.assertRaises(Exception) as cm:  # dead pid: the ordinary message
             lock.acquire(self.root, "write", token="x")
         self.assertIn("--unlock", str(cm.exception))
+
+
+class LockStatusTests(RunnerCase):
+    def test_lock_status_shows_the_wait(self):
+        tok = lock.acquire(self.root, "batch")
+        sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "batch_runner"])
+        try:
+            until = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()
+            lock.write_wait(self.root, tok, until)
+            data = json.load(open(lock.wait_path(self.root)))
+            data["pid"] = sleeper.pid
+            json.dump(data, open(lock.wait_path(self.root), "w"))
+            out, _ = self.hrd("lock", "status")
+            self.assertEqual((out["waiting"]["pid"], out["waiting"]["kind"]), (sleeper.pid, "limit"))
+        finally:
+            sleeper.kill()
+            sleeper.wait()
+        self.assertIsNone(self.hrd("lock", "status")[0]["waiting"])
 
 
 class ShipChildTests(RunnerCase):
