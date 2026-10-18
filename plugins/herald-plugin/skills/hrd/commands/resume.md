@@ -3,7 +3,7 @@
 Continues from `state.json.stage` on the topic's local herald branch. Works for interrupted
 runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
 
-1. `printenv HRD_UNATTENDED`; `HRD lock acquire --cmd resume` (keep the token; `HRD lock release
+1. `printenv HRD_UNATTENDED`; `printenv HRD_RESUME_LIMITED`; `HRD lock acquire --cmd resume` (keep the token; `HRD lock release
    --cmd resume --token <t>` on every exit path).
 2. `HRD status` → find the topic. Derived state must be `in-progress` (local branch) or a
    stored `held:needs-human|stagnation|budget` with a preserved branch. Anything else: explain
@@ -16,7 +16,10 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
    decision in `critique.json` only after step 4's switch and version check — if step 4 stops,
    nothing is recorded and the next resume asks again (asked in every mode but unattended — a pre-flow question: a hold is resumed by a human's
    decision; after it, the rest runs without questions unless `--attended`). Unattended resume of a held topic is not allowed —
-   only the batch runner's one retry of an incomplete child uses `resume`.
+   only the batch runner's one retry of an incomplete child uses `resume`. Exception: with
+   `HRD_UNATTENDED=1` and `HRD_RESUME_LIMITED` equal to the `(run <id>)` in the hold's note (a
+   `tooling: rate limited …` hold the same batch run recorded when a usage limit cut the topic off),
+   continue without questions — there is no human decision to make.
 4. A `tr-` id: continue with `translate.md` § C (its steps skip what is done). Otherwise
    `git switch herald/<topic-id>--<slug>`; read `.claude/herald/work/<topic-id>/state.json`.
    Then the version check in `atoms/_stages.md` § Existing branches. A `trim` still `open`
@@ -28,7 +31,8 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
    `stage` onward through publish exactly as `write.md` §1–§3 (unattended if `HRD_UNATTENDED=1`; else in-session auto by
    default, attended with `--attended`; `--auto` is accepted and means the default; `--ship` as in `write.md` §3) (entry checks catch stale
    artifacts: rerun the stage they name).
-6. If the stored state is still the hold this resume lifted (`needs-human`, `stagnation` or
+6. Unattended: skip this step — the batch runner releases the hold (a child never writes base).
+   Otherwise: if the stored state is still the hold this resume lifted (`needs-human`, `stagnation` or
    `budget` — skip if a `--session-auto` ship published it or set its own
    `verify-after-human-edit` hold, or if it stopped on a version mismatch), clear it once the PR
    exists (an open PR then derives

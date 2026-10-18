@@ -22,7 +22,7 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.13.1"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.14.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -70,7 +70,8 @@ def cmd_lock(a):
     elif a.action == "release":
         emit({"released": lock.release(root, a.token, command=a.cmd if a.cmd != "cli" else None)})
     elif a.action == "status":
-        emit({"lock": lock.status(root)})
+        cur = lock.status(root)
+        emit({"lock": cur, "waiting": lock.waiting(root, cur)})
     elif a.action == "unlock":
         emit({"removed": lock.force_unlock(root)})
 

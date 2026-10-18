@@ -20,12 +20,64 @@ def status(root):
     return read_json(lock_path(root))
 
 
+def wait_path(root):
+    """A batch runner waiting out a usage limit says so here — never in the lock file itself, so
+    the lock is only ever written by acquire (no read-modify-write race with --unlock)."""
+    return os.path.join(paths(root)["memory"], "lock.wait")
+
+
+def write_wait(root, token, until_iso):
+    write_json(wait_path(root), {"token": token, "pid": os.getpid(), "until": until_iso})
+
+
+def clear_wait(root, token=None):
+    cur = read_json(wait_path(root))
+    if cur is not None and (token is None or cur.get("token") == token):
+        try:
+            os.remove(wait_path(root))
+        except OSError:
+            pass
+
+
+def _pid_runs_batch(pid):
+    import subprocess
+    try:
+        os.kill(int(pid), 0)
+    except (OSError, ValueError, TypeError):
+        return False
+    p = subprocess.run(["ps", "-o", "command=", "-p", str(int(pid))], capture_output=True, text=True)
+    return p.returncode == 0 and "batch_runner" in p.stdout
+
+
+def waiting(root, cur=None):
+    """The live usage-limit wait of the batch holding the lock, else None: same token as the lock,
+    `until` in the future, and the pid is alive and runs batch_runner (a reused pid is not)."""
+    import datetime
+    cur = cur if cur is not None else status(root)
+    w = read_json(wait_path(root))
+    if not cur or not isinstance(w, dict) or w.get("token") != cur.get("token"):
+        return None
+    try:
+        until = datetime.datetime.fromisoformat(str(w.get("until")).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=datetime.timezone.utc)
+    if until <= datetime.datetime.now(datetime.timezone.utc) or not _pid_runs_batch(w.get("pid")):
+        return None
+    return {"pid": w.get("pid"), "until": w.get("until")}
+
+
 def acquire(root, command, token=None):
     token = token or os.environ.get("HRD_LOCK_TOKEN")
     cur = status(root)
     if cur:
         if token and cur.get("token") == token:
             return cur["token"]
+        w = waiting(root, cur)
+        if w:
+            raise HeraldError("checkout is locked: batch (pid %s) is waiting for a usage limit until %s — "
+                              "stop it with `kill %s`, or wait." % (w["pid"], w["until"], w["pid"]))
         raise HeraldError(
             "checkout is locked by `%s` since %s. If that run is gone, run `/hrd status --unlock`."
             % (cur.get("command"), cur.get("at"))

@@ -7,7 +7,9 @@ Read-only unless a flag below is given.
 `HRD status` → a table in `config.language`: id · title · derived state · reason · open/merged
 PRs · local branches. Group: in progress · PR pending (→ `/hrd ship`) · merged-unrecorded (→
 `/hrd ship`) · held (with the next step per reason) · queued · published. Also show the lock
-holder if any and `HRD ahead` warnings. With `translations` in config, add per published Herald
+holder if any (`HRD lock status`; when it carries `waiting`, say that a batch is waiting for a
+usage limit until that time — `--unlock` would end that batch; `kill <pid>` stops it cleanly) and
+`HRD ahead` warnings. With `translations` in config, add per published Herald
 article its languages from `published.json` (`translations`, `withdrawn_langs`) and, from
 `HRD integrity --report`, any `translation_added` (a translation Herald has not verified —
 adopt with `/hrd translate <slug> --adopt <l>`) or other `causes`. A hold whose `note` names a

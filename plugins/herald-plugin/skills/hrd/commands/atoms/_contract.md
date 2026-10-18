@@ -96,6 +96,11 @@ the PR, then `/hrd ship` — or `ship --session-auto` right away when `autonomy.
 Unattended children never write the base branch: they record their outcome with
 `HRD result --topic <id> --status pr-open --pr <n>` or `--status held:<reason> --note "..."`
 and stop cleanly (exit 0). The runner records holds.
+A spawned role (or this session's own call) that fails on the **Claude API usage limit** — "usage
+limit", `rate_limit_error`, a 429 from the Claude API — is not a writing problem: record
+`HRD result --topic <id> --status held:needs-human --note "tooling: rate limited: <the error's first
+line>"` and stop; the runner waits for the reset and resumes the topic. A 429 from a website
+(WebFetch, a source) is not this — handle it as the stage says.
 
 ## D. Output language
 
