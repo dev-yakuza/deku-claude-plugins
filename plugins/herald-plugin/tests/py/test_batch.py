@@ -22,8 +22,8 @@ def pr_work(crit, tid, slug):
 
 
 def _major_minor():
-    """The running scripts' version — "x.y" when the patch is 0 (that short form is what is under
-    test), else "x.y.z" — equal to them, so the batch starts (no edit per release)."""
+    """The running scripts' version — "x.y" when the patch is 0 (so .0 releases also exercise the
+    short form), else "x.y.z" — equal to them, so the batch starts (no edit per release)."""
     import re
     src = open(os.path.join(SCRIPTS, "hrd.py")).read()
     v = re.search(r'SCRIPTS_VERSION = "([0-9.]+)"', src).group(1)

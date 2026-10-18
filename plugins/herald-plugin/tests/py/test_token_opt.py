@@ -338,6 +338,14 @@ class DetailRound2Case(ConfigDirCase):
         self.assertEqual(src('H=git; $H status; H="%s"' % hrd), "bash git")
         self.assertEqual(src("H() { %s $*; }; H sync" % hrd), "hrd sync")
         self.assertEqual(src('hrd-cli() { %s "$@"; }; hrd-cli sync' % hrd), "hrd sync")
+        # substitutions: an HRD call or a read inside one, pipes and nested quotes inside one
+        self.assertEqual(src('H="%s"; OUT="$($H status --json)"; echo done' % hrd), "hrd status")
+        self.assertEqual(src('X="$(cat "/p/skills/hrd/commands/write.md")"'), "skill commands/write.md")
+        self.assertEqual(src("COUNT=$(ls posts | wc -l); echo $COUNT"), "bash ls")
+        self.assertEqual(src('MSG="$(git log -1 --format="%s")"; echo "$MSG"'), "bash git")
+        # a heredoc body is data: an apostrophe in it does not swallow later statements
+        self.assertEqual(src("cat <<'EOF' > /tmp/x.md\nit's done\nEOF\ncat /p/skills/hrd/commands/a.md"),
+                         "skill commands/a.md")
 
     def test_bash_source_long_inputs_stay_fast(self):
         import time
@@ -346,7 +354,7 @@ class DetailRound2Case(ConfigDirCase):
                     " " * 50000, "(x)" * 16000, "(" * 50000, doubling,
                     "f() { " + "a " * 10000 + ' "$@"; }\n' + "f;" * 15000,  # a long body called often
                     'H="' + "a" * 4000 + '"\n' + "$H;" * 15000,  # a long value referenced often
-                    "function f" + " " * 50000, "cat " + "/skills/hrd" * 4540,
+                    "function f" + " " * 50000, "cat " + "/skills/hrd" * 4540, "$(" * 25000, "<<A\n" * 10000,
                     "S=" + "/skills/hrd" * 372 + "; cat " + "/skills/hrd" * 4000 + "$S" * 37):
             t = time.time()
             self.assertIsInstance(measure._bash_source(cmd), str)

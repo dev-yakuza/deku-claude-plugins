@@ -295,40 +295,126 @@ _STMT = r"(?:^[ \t]*|[;&|\n(][ \t]*)"  # where a shell statement starts (no \s*:
 _KEYWORD = r"(?:(?:if|then|else|elif|do|while|until|time|!)[ \t]+)*"  # may come before a command
 _VALUE_CAP = 4096  # an expanded variable longer than this is left as written (no blow-up)
 _GROWTH_CAP = 4  # expansion stops when the command would grow past this many times its size
-_ENV_PREFIX = r"^(?:[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|\$\([^()]*\)|`[^`]*`|\([^()]*\)|\S*)[ \t]*)+"
 _SUBST = r"\$\(([^()]*)\)|`([^`]*)`"  # a command substitution and the command in it
+_ASSIGN = r"[ \t]*(?:(?:export|declare|local|readonly|typeset)(?:[ \t]+-\w+)*[ \t]+)?[A-Za-z_]\w*="
 
 
-def _statements(cmd):
-    """Split a command into statements at ; & | and newlines outside quotes, dropping comments.
-    One linear pass (no regex backtracking)."""
-    out, cur, quote, i, n = [], [], None, 0, len(cmd)
+def _shell_scan(cmd, i, split):
+    """One linear pass over shell text from i, tracking quotes, $( … ), backticks and heredoc
+    bodies. split=True: return the statements (split at ; & | and newlines at the top level,
+    comments and heredoc bodies dropped). split=False: return where the word starting at i ends."""
+    import re
+
+    out, cur, stack, heredocs, n = [], [], [], [], len(cmd)
     while i < n:
-        c = cmd[i]
-        if quote:
+        c, top = cmd[i], (stack[-1] if stack else None)
+        if top == "'":
             cur.append(c)
-            if c == quote:
-                quote = None
-            elif c == "\\" and quote == '"' and i + 1 < n:
+            if c == "'":
+                stack.pop()
+        elif top == '"':
+            cur.append(c)
+            if c == "\\" and i + 1 < n:
                 cur.append(cmd[i + 1])
                 i += 1
+            elif c == '"':
+                stack.pop()
+            elif c == "$" and cmd.startswith("(", i + 1):
+                cur.append("(")
+                i += 1
+                stack.append("(")
+            elif c == "`":
+                stack.append("`")
+        elif c == "\\" and i + 1 < n:
+            cur.append(cmd[i:i + 2])
+            i += 2
+            continue
         elif c in "\"'":
-            quote = c
+            stack.append(c)
             cur.append(c)
-        elif c == "#" and (not cur or cur[-1] in " \t"):
+        elif c == "`":
+            if top == "`":
+                stack.pop()
+            else:
+                stack.append("`")
+            cur.append(c)
+        elif c == "$" and cmd.startswith("(", i + 1):
+            stack.append("(")
+            cur.append("$(")
+            i += 2
+            continue
+        elif c == "(" and top == "(":
+            stack.append("(")
+            cur.append(c)
+        elif c == ")" and top == "(":
+            stack.pop()
+            cur.append(c)
+        elif not split and top is None and c in " \t\n;&|<>)":
+            return i
+        elif c == "#" and (not cur or cur[-1] in " \t("):
             j = cmd.find("\n", i)
             i = n if j < 0 else j
             continue
-        elif c in ";&|\n":
+        elif top is None and c == "<" and cmd.startswith("<<", i) and not cmd.startswith("<<<", i):
+            m = re.match(r"<<(-?)[ \t]*([\"']?)([A-Za-z_]\w*)\2", cmd[i:i + 200])
+            if m:
+                heredocs.append((m.group(3), bool(m.group(1))))
+                cur.append(m.group(0))
+                i += m.end()
+                continue
+            cur.append(c)
+        elif top is None and c in ";&|\n":
             if cur:
                 out.append("".join(cur))
                 cur = []
+            if c == "\n" and heredocs:  # a heredoc body is data, not statements
+                pos = i + 1
+                for delim, dash in heredocs:
+                    while pos < n:
+                        j = cmd.find("\n", pos)
+                        line = cmd[pos:n if j < 0 else j]
+                        pos = n if j < 0 else j + 1
+                        if (line.lstrip("\t") if dash else line) == delim:
+                            break
+                heredocs = []
+                i = pos
+                continue
         else:
             cur.append(c)
         i += 1
+    if not split:
+        return n
     if cur:
         out.append("".join(cur))
     return out
+
+
+def _statements(cmd):
+    return _shell_scan(cmd, 0, True)
+
+
+def _strip_assignments(stmt):
+    """`A=1 B="$(x "y")" cmd …` → ("cmd …", ['1', '"$(x "y")"']) — values end where the shell
+    word ends (quotes and substitutions included)."""
+    import re
+
+    values, i = [], 0
+    while True:
+        m = re.match(_ASSIGN, stmt[i:i + 300])
+        if not m:
+            break
+        j = _shell_scan(stmt, i + m.end(), False)
+        values.append(stmt[i + m.end():j])
+        i = j
+    return stmt[i:].strip(), values
+
+
+def _substituted(values):
+    """The commands run by command substitutions in assignment values, outermost first."""
+    import re
+
+    return [(m.group(1) if m.group(1) is not None else m.group(2)).strip()
+            for v in values for m in re.finditer(r"\$\(((?:[^()]|\([^()]*\))*)\)|`([^`]*)`", v)]
 
 
 def _expand_shell(cmd):
@@ -382,7 +468,7 @@ def _expand_shell(cmd):
         out.append(drop(adef.match(cmd, start)))
         sub = re.search(_SUBST, value)
         if sub:  # the assignment runs the command in its substitution (`SHA="$(git rev-parse HEAD)"`)
-            out.append((sub.group(1) if sub.group(1) is not None else sub.group(2)).strip() or ":")
+            out.append(expand((sub.group(1) if sub.group(1) is not None else sub.group(2)).strip()) or ":")
         value = expand(value)  # a value may use earlier variables
         if len(value) <= _VALUE_CAP:
             values[name] = value
@@ -412,11 +498,13 @@ def _bash_source(cmd):
     files = []
     statements = _statements(cmd)
     for stmt in statements:
-        stmt = re.sub(_ENV_PREFIX, "", re.sub("^" + _KEYWORD, "", stmt.lstrip(" \t({")))
-        if re.match(r"(cat|head|sed|less|tail)\b", stmt):
-            # quotes removed (`"$P"/commands/x.md`); a greedy path match never backtracks
-            paths = re.findall(r"(?:^|[\s/])skills/hrd/([\w./-]+)", stmt.replace('"', "").replace("'", ""))
-            files += [f for f in paths if f.endswith(".md")]
+        rest, values = _strip_assignments(re.sub("^" + _KEYWORD, "", stmt.lstrip(" \t({")))
+        for text in [rest] + _substituted(values):  # `X="$(cat …/x.md)"` reads too
+            text = re.sub("^" + _KEYWORD, "", text.lstrip(" \t({"))
+            if re.match(r"(cat|head|sed|less|tail)\b", text):
+                # quotes removed (`"$P"/commands/x.md`); a greedy path match never backtracks
+                paths = re.findall(r"(?:^|[\s/])skills/hrd/([\w./-]+)", text.replace('"', "").replace("'", ""))
+                files += [f for f in paths if f.endswith(".md")]
     if files:
         return "skill " + files[0] + (" +%d" % (len(files) - 1) if len(files) > 1 else "")
     for script in ("measure.py", "gsc.py", "integrity.py", "validate_content.py", "batch_runner.py"):
@@ -425,13 +513,12 @@ def _bash_source(cmd):
     # the first statement that runs something: past comments, `cd` and env prefixes (`CI=1 npm test`)
     cd = False
     for stmt in statements:
-        raw = stmt.strip().lstrip("({! \t")
-        stmt = re.sub(_ENV_PREFIX, "", raw)
-        words = stmt.split()
-        if not words:  # only assignments: a command substitution in them runs (`SHA=$(git rev-parse HEAD)`)
-            sub = re.search(r"=[\"']?(?:\$\(|`)\s*([^\s()`\"']+)", raw)
-            if sub:
-                return "bash " + os.path.basename(sub.group(1))
+        rest, values = _strip_assignments(stmt.strip().lstrip("({! \t"))
+        words = rest.split()
+        if not words:  # only assignments: a command substitution in them runs (`SHA="$(git rev-parse HEAD)"`)
+            for inner in _substituted(values):
+                if inner.split():
+                    return "bash " + os.path.basename(inner.split()[0].strip("\"'()"))
         if not words or words[0] in ("export", "declare", "local", "readonly", "typeset"):
             continue
         if words[0] == "cd":
