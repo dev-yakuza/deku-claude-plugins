@@ -30,7 +30,16 @@ for k in ("name", "description", "version", "author", "homepage", "repository", 
 check(pj.get("name") == "studio-plugin", "plugin name is studio-plugin")
 check(bool(re.fullmatch(r"\d+\.\d+\.\d+", pj.get("version", ""))), "plugin version is semver")
 check("hooks" not in pj, "plugin.json declares no hooks (hooks/hooks.json only, from M0d-1)")
-check(not os.path.exists(os.path.join(plugin, "hooks")), "no hooks/ yet (M0a)")
+hj = os.path.join(plugin, "hooks", "hooks.json")
+check(os.path.exists(hj), "hooks/hooks.json exists (M0d-1b)")
+if os.path.exists(hj):
+    hooks = json.load(open(hj)).get("hooks", {})
+    pre = hooks.get("PreToolUse", [])
+    ok = len(pre) == 1 and len(pre[0].get("hooks", [])) == 1 and set(hooks) == {"PreToolUse"}
+    h = pre[0]["hooks"][0] if ok else {}
+    check(ok and h.get("onFailure") == "block" and h.get("timeout") == 20 and h.get("type") == "command"
+          and h.get("command") == 'python3 "${CLAUDE_PLUGIN_ROOT}/skills/std/scripts/guard.py"',
+          "the guard hook: one PreToolUse command, timeout 20, onFailure block, quoted plugin path")
 sv = re.search(r'SCRIPTS_VERSION = "([^"]+)"', open(os.path.join(skill, "scripts", "stdo", "__init__.py")).read())
 check(bool(sv) and sv.group(1).isdigit(), "SCRIPTS_VERSION is a whole number (bumped only when scripts/ change)")
 mp = os.path.normpath(os.path.join(plugin, "..", "..", ".claude-plugin", "marketplace.json"))
@@ -115,9 +124,11 @@ gdir = os.path.join(skill, "scripts", "stdo", "guard")
 for p in sorted(glob.glob(os.path.join(gdir, "*.py"))):
     body = open(p).read()
     rel = os.path.relpath(p, skill)
-    check("subprocess" not in body and "os.system" not in body and "os.popen" not in body,
-          "%s starts no subprocess" % rel)
-    check(not re.search(r"from \.\.state|import store|stdo\.state", body), "%s does not import state writers" % rel)
+    if os.path.basename(p) != "gitprobe.py":  # the guard's only child processes (git previews, M0d-1b)
+        check("subprocess" not in body and "os.system" not in body and "os.popen" not in body,
+              "%s starts no subprocess" % rel)
+    check(not re.search(r"from \.\.state import .*(store|gates|backup|evidence|cli)|import store|stdo\.state\.(store|gates|backup|evidence|cli)", body),
+          "%s does not import state writers" % rel)
 # ...and not transitively either: lockargs (shared with lock.py) owns UsageError so that the guard
 # does not import locks -> dirlock (which run `ps` through subprocess)
 import subprocess as _sp

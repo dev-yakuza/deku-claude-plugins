@@ -1,0 +1,1456 @@
+"""The guard's judgement (M0d-1b, m0d1b-plan v2). `decide(hook_input, env)` -> (Deny | None, repos).
+
+Two outcomes only: deny, or no decision (the normal permission flow). Never allow, ask or defer.
+"""
+
+import fnmatch
+import json
+import os
+import re
+
+from .. import paths, s2vcall
+from ..state import commands as state_commands
+from . import gitprobe, limits, messages, protect, ranlog, recog
+from . import scan as scan_command
+from . import load_snapshot
+from .messages import Deny
+from .repos import LOCK_VARS, Repos, has_exclude_block, terms_for
+from .where import FS, Where
+
+PLUGIN_SCRIPTS = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+STUDIO_NAMES_RE = re.compile(r"\bSTUDIO_(SANDBOX|HOME|TEST_[A-Za-z0-9_]*)\b")
+MARKER_VARS = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID")
+S2V_APPROVALS = {("character", "pick"), ("character", "approve"), ("voice", "pick"), ("takes", "pick"),
+                 ("takes", "unpick")}
+MCP_PATH_KEYS = ("path", "file_path", "filepath", "destination", "source", "target", "dest", "src", "filename",
+                 "directory", "dir")
+MCP_LIST_KEYS = ("paths", "files", "sources", "targets")
+MAX_CANDIDATES = 500
+
+
+class Context(object):
+    def __init__(self, hook, env, fs=None, probe=None, snapshot_loader=None):
+        self.hook = hook
+        self.env = dict(env)
+        self.cwd = hook.get("cwd") or os.getcwd()
+        self.fs = fs or FS()
+        self.where = Where(self.fs, self.env)
+        self.repos = Repos(self.where, self.env)
+        self.probe = probe or gitprobe.Probe(self.env)
+        self.snapshot_loader = snapshot_loader or load_snapshot
+        try:
+            self.user_dir = paths.user_dir(self.env)
+        except ValueError:
+            self.user_dir = os.path.join(self.env.get("HOME") or os.path.expanduser("~"), ".claude")
+        home = self.env.get("HOME") or os.path.expanduser("~")
+        states = [os.path.join(home, ".s2v")]
+        sd = self.env.get("S2V_STATE_DIR")
+        if sd and os.path.isabs(sd):
+            states.insert(0, sd)
+        self.state_dirs = states
+        items = protect.out_of_repo(self.user_dir, states)
+        pdata = self.env.get("CLAUDE_PLUGIN_DATA")
+        if pdata and os.path.isabs(pdata):
+            items.append((os.path.join(pdata, "pycache"), "dir"))  # the guard's own bytecode
+        self.out_items = [(self._real(p), k) for p, k in items]
+        self.touched = []  # RepoInfo of Studio repositories this call involves (for the guard-ran record)
+        self.denies = []
+        self.current = None  # the command being judged (its alias sources go into messages)
+
+    def _real(self, p):
+        anc, tail = p, ""
+        while anc not in ("/", "") and not os.path.exists(anc):
+            tail = os.path.join(os.path.basename(anc), tail) if tail else os.path.basename(anc)
+            anc = os.path.dirname(anc)
+        r = os.path.realpath(anc)
+        return os.path.join(r, tail) if tail else r
+
+    def deny(self, rule, text, sources=()):
+        src = list(sources)
+        if self.current is not None:
+            for s in messages.alias_sources(self.current):
+                if s not in src:
+                    src.insert(0, s)
+        self.denies.append(Deny(rule, text, src))
+
+    def touch(self, ri):
+        if ri is not None and ri.studio and ri not in self.touched:
+            self.touched.append(ri)
+
+
+# ---- helpers ----
+
+def _inside(path, root):
+    return path == root or path.startswith(root.rstrip("/") + "/")
+
+
+def out_hit(ctx, real, op):
+    """Whether `real` (an absolute real path) touches a per-user/machine-lock file. op: write|delete|read."""
+    if real is None:
+        return None
+    for item, kind in ctx.out_items:
+        if kind == "prefix":
+            hit = real.startswith(item) or _inside(real, item)
+            parent_hit = op == "delete" and _inside(item, real)
+        else:
+            hit = _inside(real, item)
+            parent_hit = op == "delete" and _inside(item, real)
+        if op == "read":
+            if kind == "prefix" and (real.startswith(item)) and real.endswith("/owner.json"):
+                return item
+            continue
+        if hit or parent_hit:
+            return item
+    return None
+
+
+def is_owner_json(real):
+    return real is not None and real.endswith("/owner.json") and (
+        "/heavy.lock.d" in real or "/.work/op.lock.d" in real)
+
+
+def studio_script(ctx, cmd, name=None):
+    """The real path when this command runs a Studio script (repository copy or the plugin's)."""
+    sc = cmd.script
+    if sc is None:
+        return None
+    path = sc.path if isinstance(sc.path, dict) else {}
+    real = path.get("real")
+    if not real:
+        return None
+    base = os.path.basename(real)
+    if name and base != name:
+        return None
+    if os.path.dirname(real) == PLUGIN_SCRIPTS:
+        return real
+    parent = os.path.dirname(real)
+    if parent.endswith("/.claude/studio/scripts"):
+        root = parent[:-len("/.claude/studio/scripts")]
+        ri = ctx.repos.info(ctx.where.git_repo(root)) if ctx.fs.exists(root) else None
+        if ri is not None and ri.harness and os.path.realpath(ri.worktree) == os.path.realpath(root):
+            return real
+    return None
+
+
+def candidates(cmd):
+    """(Word, value) path candidates of a command: arguments, `=value` parts, redirect targets."""
+    out = []
+    for w in cmd.words[1:]:
+        vals = []
+        if w.value is not None:
+            vals.append(w.value)
+            if "=" in w.value:
+                v = w.value.split("=", 1)[1]
+                if v:
+                    vals.append(v)
+        if w.alt and w.alt != "\0":
+            vals.append(w.alt)
+        out.append((w, vals))
+    return out
+
+
+def resolve_all(ctx, cmd, value):
+    """[(abs, real, RepoInfo|None)] for a literal value across the command's cwds."""
+    res = []
+    if os.path.isabs(value):
+        cwds = [None]
+    else:
+        cwds = cmd.run_cwds or cmd.cwds or []
+        if not cwds:
+            return [(None, None, None)]
+    for c in cwds:
+        r = ctx.where.resolve(value, c)
+        if r is None or r.abs is None:
+            res.append((None, None, None))
+            continue
+        ri = ctx.repos.info(r.repo) if r.repo is not None else None
+        res.append((r.abs, r.real, ri))
+    return res
+
+
+def rel(ctx, ri, real):
+    fold = ctx.where.case_insensitive(real)
+    parts = protect.rel_parts(real, ri.worktree, fold)
+    return parts, fold
+
+
+def looks_like_path(value, cmd, ctx):
+    if not value or value.startswith("-") and "=" not in value:
+        return False
+    if "/" in value or value in (".", ".."):
+        return True
+    for c in (cmd.cwds or []):
+        if ctx.fs.exists(os.path.join(c, value)):
+            return True
+    return False
+
+
+# ---- per-command checks ----
+
+RUNNERS = {"npx": 1, "bunx": 1, "pnpx": 1}
+RUNNER_SUB = {"pnpm": ("dlx", "exec"), "yarn": ("dlx", "exec"), "npm": ("exec", "x"), "bun": ("x",)}
+
+
+def effective(cmd):
+    """(program, argument Words) with package runners unwrapped (`npx rimraf x` → rimraf, [x])."""
+    prog = cmd.prog or ""
+    words = cmd.words[1:]
+    rest = None
+    if prog in RUNNERS:
+        rest = words
+    elif prog in RUNNER_SUB and words and words[0].value in RUNNER_SUB[prog]:
+        rest = words[1:]
+    if rest is None:
+        return prog, words
+    i = 0
+    while i < len(rest) and rest[i].value is not None and rest[i].value.startswith("-"):
+        i += 2 if rest[i].value in ("-p", "--package") else 1
+    if i < len(rest) and rest[i].value is not None:
+        name = rest[i].value.split("@")[0] if not rest[i].value.startswith("@") else rest[i].value
+        return os.path.basename(name), rest[i + 1:]
+    return prog, words
+
+
+FIND_NAME_TESTS = ("-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-lname")
+
+
+def find_starts_in_studio(ctx, cmd, studio_infos):
+    """A start path inside a Studio folder: every match there may be protected (voices/**, character/**)."""
+    for w in cmd.words[1:]:
+        v = w.value
+        if v is None:
+            return True
+        if v.startswith("-") or v in ("(", "!"):
+            break
+        for a, real, ri in resolve_all(ctx, cmd, v):
+            if ri is None or not ri.studio or real is None:
+                continue
+            parts, fold = rel(ctx, ri, real)
+            if parts and (parts[:1] == [ri.studio_root] or parts[:2] == [".claude", "studio"]):
+                return True
+    return False
+
+
+def find_may_hit(argv, studio_infos):
+    """Whether a find's name/path conditions could select protected items (no conditions: yes)."""
+    names = set(protect.TAIL_NAMES) | {"studio", ".claude", "work", "videos", "cast", "voices", "audio", "local",
+                                       "character", "consent"}
+    for ri in studio_infos:
+        names.add(ri.studio_root)
+    conds = []
+    for i, a in enumerate(argv):
+        if a in ("!", "-not", "-o", "-or"):
+            return True  # negations and alternatives: cannot tell
+        if a in FIND_NAME_TESTS:
+            v = argv[i + 1] if i + 1 < len(argv) else None
+            if v is None or a in ("-regex", "-iregex"):
+                return True
+            conds.append((a, v))
+    if not conds:
+        return True
+    import fnmatch as _fn
+    for a, v in conds:
+        fold = a.startswith("-i")
+        segs = [x for x in v.split("/") if x not in ("", ".")] if "path" in a else [v]
+        for seg in segs:
+            for n in names:
+                if _fn.fnmatchcase(n.casefold() if fold else n, seg.casefold() if fold else seg):
+                    return True
+    return False
+
+
+def check_paths(ctx, cmd, studio_infos):
+    prog, eff_words = effective(cmd)
+    if cmd.lock is not None or studio_script(ctx, cmd):
+        writes_ok = True
+    else:
+        writes_ok = False
+    argv = [cmd.words[0].value if cmd.words else None] + [w.value for w in eff_words]
+    is_s2v = cmd.s2v is not None
+    role = "write"
+    if prog in protect.READ_ALLOW:
+        role = "read"
+        exec_tpl = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a in ("-exec", "-execdir", "-ok", "-okdir")]
+        if prog in ("find", "bfs") and ("-delete" in argv or any(
+                t is None or os.path.basename(t) not in protect.READ_ALLOW for t in exec_tpl)) and \
+                (find_starts_in_studio(ctx, cmd, studio_infos) or find_may_hit(argv, studio_infos)):
+            role = "find-write"  # -delete, or -exec of a command that may write: the start paths are at stake
+        elif prog in ("find", "bfs") and any(a in ("-fprint", "-fprint0", "-fprintf", "-fls") for a in argv if a):
+            role = "find-print"
+        if prog == "jq":
+            role = "read"
+    if "via-function" in cmd.flags and prog in ("grep", "find", "rg"):
+        pass
+    if prog == "git":
+        role = "git"
+    if prog in protect.DELETE_PROGS or prog in ("mv", "rsync"):
+        role = prog
+    if prog == "gio" and argv[1:2] in (["trash"], ["remove"]):
+        role = "rm"
+        eff_words = eff_words[1:]
+    if prog == "zip" and any(a and (a == "-m" or a == "--move" or re.match(r"^-[a-zA-Z]*m", a)) for a in argv[1:]):
+        role = "zip-move"
+    if prog in ("tar", "gtar", "bsdtar") and "--remove-files" in argv:
+        role = "tar-remove"
+    # redirects
+    for r in cmd.redirs:
+        if r.target is None or r.mode not in ("write", "append", "rw"):
+            continue
+        check_target(ctx, cmd, r.target, r.target.value, "write", studio_infos, s2v=False)
+    if writes_ok or role in ("read", "git"):
+        if role == "git":
+            check_git(ctx, cmd, studio_infos)
+        return
+    recursive = any(a and (a in ("-r", "-R", "--recursive") or re.match(r"^-[a-zA-Z]*[rR]", a)) for a in argv[1:])
+    words = eff_words
+    targets = []  # (word, value, op)
+    if role in protect.DELETE_PROGS - {"rmdir"}:
+        for w in words:
+            if w.value is not None and w.value.startswith("-"):
+                continue
+            targets.append((w, w.value, "delete" if (recursive or role != "rm") else "delete-file"))
+    elif role in ("zip-move", "tar-remove"):
+        ops = [w for w in words if w.value is None or not w.value.startswith("-")]
+        for w in ops[1:]:  # the first operand is the archive
+            targets.append((w, w.value, "delete"))
+    elif role == "rmdir":
+        for w in words:
+            if w.value is None or not w.value.startswith("-"):
+                targets.append((w, w.value, "delete"))
+    elif role == "mv":
+        ops = [w for w in words if w.value is None or not w.value.startswith("-")]
+        for w in ops[:-1]:
+            targets.append((w, w.value, "delete"))
+        if ops:
+            targets.append((ops[-1], ops[-1].value, "write"))
+    elif role == "rsync":
+        ops = [w for w in words if w.value is None or not w.value.startswith("-")]
+        delete = any(a and a.startswith("--delete") for a in argv[1:])
+        for w in ops[:-1]:
+            targets.append((w, w.value, "read"))
+        if ops:
+            targets.append((ops[-1], ops[-1].value, "delete" if delete else "write"))
+        for w, vals in candidates(cmd):
+            if w.value and w.value.startswith("--") and "=" in w.value:
+                targets.append((w, w.value.split("=", 1)[1], "write"))
+    elif prog in ("cp", "install", "ln", "gcp"):
+        ops = [w for w in words if w.value is None or not w.value.startswith("-")]
+        tdir = None
+        for i, w in enumerate(words):
+            if w.value in ("-t",) and i + 1 < len(words):
+                tdir = words[i + 1]
+            elif w.value and w.value.startswith("--target-directory="):
+                tdir = w
+        if tdir is not None:
+            dval = tdir.value.split("=", 1)[1] if tdir.value and tdir.value.startswith("--") else tdir.value
+            for w in ops:
+                if w is tdir or w.value == dval:
+                    continue
+                targets.append((w, os.path.join(dval, os.path.basename(w.value)) if (w.value and dval) else None,
+                                "write"))
+        elif len(ops) >= 2:
+            dest = ops[-1]
+            if prog == "ln":
+                for w in ops[:-1]:
+                    targets.append((w, w.value, "link-source"))
+            for w in ops[:-1]:
+                into = dest.value is not None and any(ctx.fs.isdir(os.path.join(c, dest.value)) if not
+                                                      os.path.isabs(dest.value) else ctx.fs.isdir(dest.value)
+                                                      for c in (cmd.cwds or [None]) if c or os.path.isabs(dest.value))
+                if into and w.value is not None:
+                    targets.append((dest, os.path.join(dest.value, os.path.basename(w.value.rstrip("/"))), "write"))
+                else:
+                    targets.append((dest, dest.value, "write"))
+    elif prog in ("tar", "gtar", "unzip", "ditto", "bsdtar"):
+        extracting = prog in ("unzip", "ditto") or any(
+            a and (a in ("--extract", "--get") or (a.startswith("-") and not a.startswith("--") and "x" in a[1:])
+                   or (i == 0 and not a.startswith("-") and "x" in a)) for i, a in enumerate(argv[1:]))
+        dirs = [w for w in words if w.value and w.value.startswith("--directory=")]
+        for i, w in enumerate(words):
+            if w.value in ("-C", "-d", "--directory") and i + 1 < len(words):
+                dirs.append(words[i + 1])
+        if extracting:
+            for w in dirs:
+                v = w.value.split("=", 1)[1] if w.value and w.value.startswith("--directory=") else w.value
+                targets.append((w, v, "write-dir"))
+    elif role == "find-print":
+        for i, w in enumerate(words):
+            if w.value in ("-fprint", "-fprint0", "-fprintf", "-fls") and i + 1 < len(words):
+                targets.append((words[i + 1], words[i + 1].value, "write"))
+    elif role == "find-write":
+        for w in words:
+            if w.value is None or w.value.startswith("-") or w.value in ("(", "!"):
+                break
+            targets.append((w, w.value, "delete"))
+    else:
+        for w, vals in candidates(cmd):
+            if w.value is None:
+                targets.append((w, None, "write"))
+                continue
+            for v in vals:
+                if looks_like_path(v, cmd, ctx) or (w.value != v):
+                    targets.append((w, v, "write"))
+    for w, v, op in targets:
+        if op == "read":
+            continue
+        check_target(ctx, cmd, w, v, op, studio_infos, s2v=is_s2v)
+    # other `--opt=value` / `name=value` paths of ordinary writers (dd of=, --backup-dir=, …)
+    if prog in ("cp", "install", "ln", "gcp", "tar", "gtar", "unzip", "ditto", "bsdtar"):
+        for w in words:
+            if w.value and "=" in w.value and not w.value.startswith(("--target-directory=", "--directory=")):
+                v = w.value.split("=", 1)[1]
+                if v and looks_like_path(v, cmd, ctx):
+                    check_target(ctx, cmd, w, v, "write", studio_infos, s2v=is_s2v)
+
+
+def check_target(ctx, cmd, word, value, op, studio_infos, s2v=False):
+    if value is None:
+        if word.dynamic and studio_infos and protect.tail_hits(word.skeleton or ""):
+            ctx.deny("G-PROT" if op == "write" else "G-DEL",
+                     "%s %s a path the guard cannot read (%s) that ends in a protected name."
+                     % (cmd.prog or "the command", "writes" if op == "write" else "deletes", word.raw))
+        return
+    for a, real, ri in resolve_all(ctx, cmd, value):
+        if a is None:
+            # unknown cwd: judge the text as if relative to each Studio repository root
+            for sri in studio_infos:
+                parts = [x for x in value.split("/") if x not in ("", ".")]
+                judge_parts(ctx, cmd, word, value, parts, sri, False, op, s2v, None)
+            continue
+        if op == "link-source":
+            if ri is not None and ri.studio:
+                parts, fold = rel(ctx, ri, real)
+                if parts is not None:
+                    judge_parts(ctx, cmd, word, value, parts, ri, fold, op, s2v, real)
+            continue
+        hit = out_hit(ctx, real, "delete" if op.startswith("delete") else "write")
+        if hit:
+            ctx.deny("G-OUT", "%s %s %s (Studio's per-user files or the machine lock) — only Studio's scripts change "
+                              "it. If a stale lock blocks you, run \"python3 .claude/studio/scripts/lock.py status\" "
+                              "and ask the user." % (cmd.prog or "the command",
+                                                    "deletes" if op.startswith("delete") else "writes", value))
+            continue
+        if ri is None or not ri.studio:
+            continue
+        ctx.touch(ri)
+        parts, fold = rel(ctx, ri, real)
+        if parts is None:
+            continue
+        if word.glob and word.glob_base is not None:
+            judge_glob(ctx, cmd, word, ri, real, fold, op)
+            continue
+        judge_parts(ctx, cmd, word, value, parts, ri, fold, op, s2v, real)
+
+
+def judge_parts(ctx, cmd, word, value, parts, ri, fold, op, s2v, real):
+    sr = ri.studio_root
+    if op == "link-source":
+        tid = protect.classify(parts, sr, fold)
+        if tid:
+            ctx.deny("G-PROT", "ln %s links a protected Studio file (%s) — writing through the link would change it."
+                     % (value, protect.BY_ID[tid][2]))
+        return
+    if op == "write-dir":
+        for tid, pats, cls, who in protect.TABLE:
+            if tid == "P-LOCAL":
+                continue
+            if any(protect._match(parts, protect._expand(p, sr), fold) or
+                   protect._may_contain(parts, protect._expand(p, sr), fold) for p in pats):
+                ctx.deny("G-PROT", "%s extracts into %s, which may overwrite %s files — only %s may change them."
+                         % (cmd.prog, value, cls, who))
+                return
+        return
+    if op.startswith("delete"):
+        is_dir = op == "delete" and (real is None or ctx.fs.isdir(real))
+        tid = protect.delete_hits(parts, sr, fold, is_dir=is_dir)
+        if tid:
+            what = "the repository root or an ancestor of Studio's folders" if tid == "P-ANC" else \
+                protect.BY_ID[tid][2] + " data"
+            ctx.deny("G-DEL", "%s deletes %s, which holds %s that git cannot restore." % (cmd.prog, value, what))
+        return
+    tid = protect.classify(parts, sr, fold)
+    if tid is None:
+        return
+    if s2v and tid in protect.S2V_OWNED:
+        return
+    _id, _p, cls, who = protect.BY_ID[tid]
+    hint = ""
+    if tid == "P-CHAR":
+        hint = " Write character.yaml.draft instead; a person moves it."
+    elif tid == "P-CRED":
+        hint = " Write CREDITS.draft.yaml instead."
+    elif tid == "P-STATE":
+        hint = " Use state.py."
+    ctx.deny("G-PROT", "%s writes %s (%s) — only %s may change it.%s" % (cmd.prog or "the command", value, cls, who, hint))
+
+
+def judge_glob(ctx, cmd, word, ri, real, fold, op):
+    sr = ri.studio_root
+    base_val = word.glob_base or ""
+    cwd = (cmd.run_cwds or cmd.cwds or [None])[0]
+    base = ctx.where.resolve(base_val or ".", cwd)
+    if base is None or base.real is None:
+        return
+    bparts = protect.rel_parts(base.real, ri.worktree, fold)
+    if bparts is None:
+        return
+    rest = (word.value or "")[len(base_val):]
+    seg = rest.split("/")[0]
+    anchors = [[sr], [".claude", "studio"]]
+    for anc in anchors:
+        if len(anc) > len(bparts) and anc[:len(bparts)] == bparts:
+            nxt = anc[len(bparts)]
+            if fnmatch.fnmatchcase(nxt.casefold() if fold else nxt, seg.casefold() if fold else seg):
+                judge_parts(ctx, cmd, word, word.value, anc[:len(bparts) + 1], ri, fold,
+                            "delete" if op.startswith("delete") else op, False, None)
+                return
+    if bparts[:1] == [sr] or bparts[:2] == [".claude", "studio"]:
+        if op.startswith("delete"):
+            tid = protect.delete_hits(bparts, sr, fold, is_dir=True)
+            if tid:
+                ctx.deny("G-DEL", "%s deletes %s, which may include protected Studio data." % (cmd.prog, word.value))
+        else:
+            for tid, pats, _c, _w in protect.TABLE:
+                if tid == "P-LOCAL":
+                    continue
+                if any(protect._may_contain(bparts, protect._expand(p, sr), fold) for p in pats):
+                    ctx.deny("G-PROT", "%s writes %s, which may match protected Studio files." % (cmd.prog, word.value))
+                    return
+
+
+GIT_ENV_TARGET = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")
+
+
+def git_target(ctx, cmd):
+    """(RepoInfo, run cwd, git prefix args, extra env) for a git command, or a reason string to deny.
+    --git-dir/--work-tree and GIT_DIR/GIT_WORK_TREE (command first, then the inherited environment) win."""
+    g = cmd.git
+    run = cmd.run_cwds or cmd.cwds or [None]
+    run_cwd = run[0] if len(run) == 1 else None
+    env_set = cmd.env.set
+    extra = {}
+    for name, w in env_set.items():
+        if name.startswith("GIT_CONFIG"):
+            return "the command sets %s" % name
+        if name in GIT_ENV_TARGET:
+            if w is None or w.value is None:
+                return "%s is not a literal" % name
+            extra[name] = w.value
+    if any(d is None for d in g.c_dirs):
+        return "-C is not a literal"
+    gd = g.git_dir if g.git_dir is not None else extra.get("GIT_DIR", ctx.env.get("GIT_DIR"))
+    wt = g.work_tree if g.work_tree is not None else extra.get("GIT_WORK_TREE", ctx.env.get("GIT_WORK_TREE"))
+    raw = [w.value for w in cmd.words]
+    for i, a in enumerate(raw):
+        if a in ("--git-dir", "--work-tree") and (i + 1 >= len(raw) or raw[i + 1] is None):
+            return "%s is not a literal" % a
+    if run_cwd is None:
+        if gd is None and wt is None:
+            return None
+        if (gd and not os.path.isabs(gd)) or (wt and not os.path.isabs(wt)):
+            return "the working folder is unknown"
+    def absol(p):
+        return os.path.normpath(p if os.path.isabs(p) else os.path.join(run_cwd, p))
+    pre = []
+    if gd is not None:
+        gd = absol(gd)
+        pre += ["--git-dir", gd]
+    if wt is not None:
+        wt = absol(wt)
+        pre += ["--work-tree", wt]
+    if gd is None and wt is None:
+        if run_cwd is None or not ctx.fs.exists(run_cwd):
+            return None
+        repo = ctx.where.git_repo(run_cwd)
+    else:
+        from .where import GitRepo
+        worktree = wt or run_cwd
+        git_dir = gd or os.path.join(worktree, ".git")
+        common = git_dir
+        cf = os.path.join(git_dir, "commondir")
+        if ctx.fs.isfile(cf):
+            c = (ctx.fs.read(cf, 4096, count_read=False) or "").strip()
+            if c:
+                common = os.path.normpath(c if os.path.isabs(c) else os.path.join(git_dir, c))
+        repo = GitRepo(ctx.fs.realpath(worktree), ctx.fs.realpath(git_dir), ctx.fs.realpath(common))
+    ri = ctx.repos.info(repo) if repo is not None else None
+    if ri is None:
+        return None
+    env = {k: v for k, v in extra.items() if k == "GIT_INDEX_FILE"}
+    cwd = run_cwd or ri.worktree
+    if pre and protect.rel_parts(os.path.realpath(cwd), ri.worktree, False) is None:
+        cwd = ri.worktree  # outside the work tree git reads paths from its top; previews print them from there
+    return ri, cwd, pre, env
+
+
+def _ancestor_or_equal(parts, anchor, fold):
+    if len(parts) > len(anchor):
+        return False
+    return all((a.casefold() == b.casefold()) if fold else a == b for a, b in zip(parts, anchor))
+
+
+def _within(parts, anchor, fold):
+    if len(parts) < len(anchor):
+        return False
+    return all((a.casefold() == b.casefold()) if fold else a == b for a, b in zip(parts[:len(anchor)], anchor))
+
+
+def spec_parts(ctx, ri, run_cwd, spec):
+    """Repository-relative parts of a pathspec (None when outside the worktree)."""
+    if spec.startswith(":/") or spec.startswith(":(top)"):
+        rest = spec.split(")", 1)[1] if spec.startswith(":(") else spec[2:]
+        base = ri.worktree
+        spec = rest or "."
+    else:
+        base = run_cwd
+    p = os.path.normpath(os.path.join(base, spec)) if not os.path.isabs(spec) else os.path.normpath(spec)
+    real = ctx.fs.realpath(p) if ctx.fs.exists(p) else p
+    fold = ctx.where.case_insensitive(ri.worktree)
+    parts = protect.rel_parts(real, ri.worktree, fold)
+    if parts is None:
+        parts = protect.rel_parts(p, ri.worktree, fold)
+    return parts, fold, real
+
+
+def check_git(ctx, cmd, studio_infos):
+    g = cmd.git
+    if g is None:
+        return
+    dyn_global = [w.raw for w in cmd.words[1:] if w.value is None and w.raw.startswith(("--git-dir", "--work-tree"))]
+    if g.sub is None or dyn_global:
+        if dyn_global and studio_infos:
+            ctx.deny("G-RESET", "git with %s (not a literal) cannot be checked — write the path." % dyn_global[0])
+        return
+    target = git_target(ctx, cmd)
+    if isinstance(target, str):
+        if studio_infos and g.sub in ("clean", "reset", "checkout", "restore", "switch", "stash", "rm", "mv", "add", "worktree"):
+            ctx.deny("G-RESET" if g.sub != "clean" else "G-CLEAN",
+                     "git %s cannot be checked safely (%s)." % (g.sub, target))
+        return
+    if target is None:
+        return
+    ri, run_cwd, pre, penv = target
+    if not ri.studio:
+        return
+    ctx.touch(ri)
+    args = [w.value for w in g.args]
+    sub = g.sub
+    raw_argv = [w.value for w in cmd.words]
+    sr_anchor, cl_anchor = [ri.studio_root], [".claude", "studio"]
+    unsafe = gitprobe.unsafe(g) or ("--exec-path" if any(a and a.startswith("--exec-path") for a in raw_argv) else None)
+    if sub == "clean":
+        if any(a in ("-n", "--dry-run") or (a and re.match(r"^-[a-zA-Z]*n", a)) for a in args):
+            return
+        if unsafe:
+            ctx.deny("G-CLEAN", "git clean with %s cannot be previewed safely." % unsafe)
+            return
+        if any(a is None for a in args):
+            ctx.deny("G-CLEAN", "could not preview git clean (an argument the guard cannot read).")
+            return
+        removed = ctx.probe.clean_preview(run_cwd, g.configs, args, pre=pre, env=penv)
+        if removed is None:
+            ctx.deny("G-CLEAN", "could not preview git clean (git failed or timed out).")
+            return
+        for p in removed:
+            real = ctx.fs.realpath(p.rstrip("/")) if ctx.fs.exists(p.rstrip("/")) else p.rstrip("/")
+            parts, fold = rel(ctx, ri, real)
+            if parts is None:
+                continue
+            if any(_ancestor_or_equal(parts, anc, fold) or _within(parts, anc, fold) for anc in (sr_anchor, cl_anchor)):
+                ctx.deny("G-CLEAN", "git clean would remove %s (Studio files). Limit the pathspec to non-Studio "
+                                    "folders, or ask the user." % p)
+                return
+        return
+    if sub == "stash":
+        if any(a is not None and (a == "--all" or re.match(r"^-[a-zA-Z]*a[a-zA-Z]*$", a)) for a in args):
+            ctx.deny("G-STASH", "git stash --all would take Studio's local files (%s/local)." % ri.studio_root)
+        return
+    if sub == "worktree" and args[:1] == ["remove"]:
+        for w in g.args[1:]:
+            if w.value is None or w.value.startswith("-"):
+                continue
+            path = os.path.normpath(os.path.join(run_cwd, w.value))
+            other = ctx.repos.info(ctx.where.git_repo(path)) if ctx.fs.exists(path) else None
+            if other is not None and other.studio:
+                ctx.deny("G-DEL", "git worktree remove %s deletes a checkout that holds Studio's folders." % w.value)
+        return
+    if sub in ("rm", "mv"):
+        specs = [w for w in g.args if w.value is None or not w.value.startswith("-")]
+        if any(w.value is None for w in specs):
+            ctx.deny("G-DEL", "git %s with a pathspec the guard cannot read." % sub)
+            return
+        dels = specs if sub == "rm" else specs[:-1]
+        for w in dels:
+            parts, fold, real = spec_parts(ctx, ri, run_cwd, w.value)
+            if parts is None:
+                continue
+            tid = protect.delete_hits(parts, ri.studio_root, fold, is_dir=(not ctx.fs.exists(real)) or ctx.fs.isdir(real))
+            if tid:
+                ctx.deny("G-DEL", "git %s %s removes %s that git cannot restore." % (
+                    sub, w.value, "Studio's folders" if tid == "P-ANC" else protect.BY_ID[tid][2] + " data"))
+                return
+        if sub == "mv" and specs:
+            parts, fold, real = spec_parts(ctx, ri, run_cwd, specs[-1].value)
+            if parts is not None and protect.classify(parts, ri.studio_root, fold):
+                ctx.deny("G-PROT", "git mv onto %s writes a protected Studio path." % specs[-1].value)
+        return
+    if sub == "add":
+        force = any(a is not None and (a in ("-f", "--force") or re.match(r"^-[a-zA-Z]*f[a-zA-Z]*$", a)) for a in args)
+        for w in g.args:
+            if w.value is None or w.value.startswith("-"):
+                continue
+            parts, fold, real = spec_parts(ctx, ri, run_cwd, w.value)
+            if parts is None:
+                continue
+            tid = protect.classify(parts, ri.studio_root, fold, include_local=True)
+            if tid == "P-LOCAL" or (force and _ancestor_or_equal(parts, sr_anchor + ["local"], fold)):
+                if force:
+                    ctx.deny("G-PROT", "git add -f %s: Studio's local files are never staged (they stay out of "
+                                       "every commit)." % w.value)
+            elif tid:
+                ctx.deny("G-PROT", "git add %s (%s) — Studio files are staged only by check_commit.py --stage."
+                         % (w.value, protect.BY_ID[tid][2]))
+        return
+    if sub in ("checkout", "restore", "reset", "switch"):
+        check_discard(ctx, cmd, ri, run_cwd, pre, penv, unsafe)
+
+
+def check_discard(ctx, cmd, ri, run_cwd, pre, penv, unsafe):
+    g = cmd.git
+    sub = g.sub
+    args = [w.value for w in g.args]
+    sr_anchor, cl_anchor = [ri.studio_root], [".claude", "studio"]
+    rev, specs, whole = None, [], False
+    if sub == "reset":
+        whole = "--hard" in args or "--merge" in args or "--keep" in args
+        if not whole:
+            return
+    elif sub == "switch":
+        whole = any(a in ("--discard-changes", "-f", "--force") for a in args)
+        if not whole:
+            return
+    elif sub == "checkout":
+        positional, after, seen_dd, branch = [], [], False, False
+        flags_patch = False
+        i = 0
+        while i < len(args):
+            a = args[i]
+            if seen_dd:
+                after.append(g.args[i])
+            elif a == "--":
+                seen_dd = True
+            elif a in ("-b", "-B", "--orphan"):
+                branch = True
+                i += 1
+            elif a is not None and a.startswith("--orphan="):
+                branch = True
+            elif a in ("-f", "--force"):
+                whole = True
+            elif a in ("-p", "--patch"):
+                flags_patch = True
+            elif a is not None and a.startswith("-"):
+                if a in ("--conflict", "--pathspec-from-file"):
+                    i += 1
+                if a.startswith("--pathspec-from-file"):
+                    ctx.deny("G-RESET", "git checkout --pathspec-from-file cannot be checked.")
+                    return
+            else:
+                positional.append(g.args[i])
+            i += 1
+        if seen_dd:
+            rev = positional[0].value if positional else None
+            specs = after
+        elif branch:
+            specs = []
+        elif positional:
+            first = positional[0]
+            is_rev = first.value is not None and ctx.probe.is_rev(run_cwd, first.value, pre=pre, env=penv)
+            if is_rev:
+                rev, specs = first.value, positional[1:]
+            else:
+                specs = positional
+                if is_rev is None:
+                    rev = first.value  # cannot tell: judge both readings (as a revision and as a pathspec)
+        if flags_patch and not specs and not branch:
+            whole = True  # --patch without a pathspec walks the whole tree
+    elif sub == "restore":
+        staged_only = False
+        flags = set()
+        i = 0
+        while i < len(args):
+            a = args[i]
+            if a in ("-s", "--source") and i + 1 < len(args):
+                rev = args[i + 1]
+                i += 2
+                continue
+            if a is not None and a.startswith("--source="):
+                rev = a.split("=", 1)[1]
+            elif a is not None and a.startswith("-") and a != "--":
+                flags.add(a)
+            elif a != "--":
+                specs.append(g.args[i])
+            i += 1
+        staged_only = bool(flags & {"-S", "--staged"}) and not (flags & {"-W", "--worktree"})
+        if staged_only:
+            return
+        if flags & {"-p", "--patch"} and not specs:
+            whole = True
+    if whole:
+        specs_check = [ri.studio_root, ".claude/studio"]
+        protected_spec = None
+    else:
+        specs_check, protected_spec, covers = [], None, False
+        for w in specs:
+            if w.value is None:
+                ctx.deny("G-RESET", "git %s with a pathspec the guard cannot read." % sub)
+                return
+            parts, fold, real = spec_parts(ctx, ri, run_cwd, w.value)
+            if parts is None:
+                continue
+            if _ancestor_or_equal(parts, sr_anchor, fold) or _ancestor_or_equal(parts, cl_anchor, fold) or \
+                    any(ch in w.value for ch in "*?["):
+                covers = True
+            elif _within(parts, sr_anchor, fold) or _within(parts, cl_anchor, fold):
+                tid = protect.classify(parts, ri.studio_root, fold, include_local=True)
+                if tid:
+                    protected_spec = (w.value, tid)
+                specs_check.append("/".join(parts))
+        if covers:
+            specs_check = [ri.studio_root, ".claude/studio"]
+        if protected_spec:
+            ctx.deny("G-PROT", "git %s %s overwrites a protected Studio file (%s)%s." % (
+                sub, protected_spec[0], protect.BY_ID[protected_spec[1]][2], (" from %s" % rev) if rev else ""))
+            return
+        if covers and rev:
+            ctx.deny("G-PROT", "git %s %s … restores Studio's folders from %s, overwriting Studio files."
+                     % (sub, rev, rev))
+            return
+        if not specs_check:
+            return
+    if unsafe:
+        ctx.deny("G-RESET", "git with %s cannot be checked safely." % unsafe)
+        return
+    changes = ctx.probe.studio_changes(run_cwd, specs_check, pre=pre, env=penv)
+    if changes is None:
+        ctx.deny("G-RESET", "could not check for uncommitted Studio changes (git failed or timed out).")
+    elif changes:
+        ctx.deny("G-RESET", "git %s would discard uncommitted Studio changes: %s." % (sub, ", ".join(changes[:5])))
+
+
+def check_env(ctx, cmd):
+    """(f): lock-bypassing environment on s2v and lock.py calls; Claude Code markers on commits."""
+    v = cmd.env
+    if cmd.s2v is not None or cmd.lock is not None:
+        what = "s2v" if cmd.s2v is not None else "lock.py"
+        if v.cleared:
+            ctx.deny("G-ENV", "%s runs with an emptied environment (env -i / sudo / exec -c) — that bypasses the "
+                              "machine lock." % what)
+        if v.unknown:
+            ctx.deny("G-ENV", "%s runs after `source` changed the environment in unknown ways." % what)
+        if "HOME" in v.set or "HOME" in v.unset:
+            ctx.deny("G-ENV", "%s runs with a different HOME — that moves ~/.s2v (the machine lock)." % what)
+        for name in LOCK_VARS:
+            if name in v.set or name in v.unset:
+                if name == "S2V_STATE_DIR":
+                    mine = ctx.env.get("S2V_STATE_DIR")
+                    if name in v.unset:
+                        if not mine:
+                            continue
+                    else:
+                        val = v.set[name].value
+                        if val is not None and mine and os.path.realpath(val) == os.path.realpath(mine):
+                            continue
+                ctx.deny("G-ENV", "%s changes %s for an %s call — that bypasses the machine lock (S2V_STATE_DIR "
+                                  "must be the guard's own)." % (cmd.prog or what, name, what))
+    is_commit = (cmd.git is not None and cmd.git.sub == "commit") or studio_script(ctx, cmd, "check_commit.py")
+    if is_commit:
+        if v.cleared or any(n in v.set or n in v.unset for n in MARKER_VARS):
+            ctx.deny("G-MARKER", "this removes the Claude Code session markers from a commit — do not remove "
+                                 "markers to retry.")
+
+
+def check_approval(ctx, cmd):
+    real = studio_script(ctx, cmd, "state.py")
+    if real is not None:
+        args = cmd.script.args
+        if any(w.value is None for w in args):
+            ctx.deny("G-DYNARG", "state.py arguments must be literal (the approval record binds the exact command "
+                                 "line).")
+            return
+        sub = args[0].value if args else None
+        if sub is None or state_commands.needs_evidence(sub):
+            approval_decision(ctx, cmd, "state.py %s" % (sub or ""))
+        return
+    if cmd.s2v is not None:
+        vals = [w.value for w in cmd.s2v.args]
+        if any(x is None for x in vals):
+            known = [x for x in vals if x is not None]
+        else:
+            known = vals
+        words, flags = s2vcall.split(known)
+        appr = words in S2V_APPROVALS
+        if words == ("character", "build") and "--reset-derived" in flags and "--dry-run" not in flags:
+            appr = True
+        if words == ("character", "missing") and "--apply" in flags:
+            appr = True
+        if words == ("voice", "create"):
+            for i, x in enumerate(known):
+                if x == "--candidates" and i + 1 < len(known) and known[i + 1] == "1":
+                    appr = True
+                if x == "--candidates=1":
+                    appr = True
+        if appr:
+            approval_decision(ctx, cmd, "s2v " + " ".join(words))
+
+
+def approval_decision(ctx, cmd, what):
+    """M0d-1b: no evidence check yet (M0d-2 replaces this with the transcript evidence)."""
+    ctx.deny("G-APPROVAL", "%s records a person's decision; the guard cannot check approval evidence yet (M0d-2). "
+                           "Ask the user with AskUserQuestion; do not run it another way." % what,
+             messages.alias_sources(cmd))
+
+
+# ---- tools ----
+
+def decide_bash(ctx, command):
+    ctx.command = command
+    try:
+        snap, notes = ctx.snapshot_loader(ctx.env)
+    except Exception:  # noqa: BLE001 — an unreadable snapshot is the None mode
+        snap, notes = None, ["snapshot-unreadable:load"]
+    budget = limits.Budget()
+    sc = scan_command(command, ctx.cwd, ctx.env, snapshot=snap, snapshot_notes=notes, terms=None, fs=ctx.fs,
+                      budget=budget)
+    cwd_repo = ctx.repos.info(ctx.where.git_repo(ctx.cwd)) if ctx.fs.exists(ctx.cwd) else None
+    infos = []
+    if cwd_repo is not None and cwd_repo.studio:
+        infos.append(cwd_repo)
+    # target repositories
+    n = 0
+    for c in sc.commands:
+        for d in (c.cwds or []) + (c.run_cwds or []):
+            if ctx.fs.exists(d):
+                ri = ctx.repos.info(ctx.where.git_repo(d))
+                if ri is not None and ri.studio and ri not in infos:
+                    infos.append(ri)
+        for w, vals in candidates(c):
+            for v in vals:
+                if not looks_like_path(v, c, ctx):
+                    continue
+                n += 1
+                if n > MAX_CANDIDATES:
+                    ctx.deny("G-LIMIT", "the command has too many path arguments for the guard — split it.")
+                    return sc, infos
+                for a, real, ri in resolve_all(ctx, c, v):
+                    if ri is not None and ri.studio and ri not in infos:
+                        infos.append(ri)
+        for r in c.redirs:
+            if r.target is not None and r.target.value:
+                for a, real, ri in resolve_all(ctx, c, r.target.value):
+                    if ri is not None and ri.studio and ri not in infos:
+                        infos.append(ri)
+    for ri in infos:
+        ctx.touch(ri)
+    fold = ctx.where.case_insensitive(ctx.cwd) if ctx.fs.exists(ctx.cwd) else False
+    terms = terms_for(infos, fold)
+    raw_hits = terms.find(command)
+    src_notes = messages.snapshot_sources(sc.notes)
+    if sc.status == "error":
+        if infos:
+            ctx.deny("G-ERR", "internal guard error (%s) in a Studio repository — tell the user; this is a bug in the "
+                              "guard." % sc.reason)
+        return sc, infos
+    if sc.status == "unparsable":
+        if infos and raw_hits:
+            ctx.deny("G-UNPARSE", "the guard could not parse this command (%s) and it mentions %s — split it into "
+                                  "simple commands." % (sc.reason, raw_hits[0].term), src_notes)
+        # out-of-repo files are judged from the text only when parsing failed
+        return sc, infos
+    # always: out-of-repo protected files (and lock owner records); Studio paths when a repository is one
+    for c in sc.commands:
+        ctx.current = c
+        check_out_of_repo(ctx, c)
+        check_paths(ctx, c, infos)
+    ctx.current = None
+    if not infos:
+        return sc, infos
+    if STUDIO_NAMES_RE.search(command):
+        ctx.deny("G-ENV", "STUDIO_* variables are set only by the person who starts Claude.")
+    ctx.scan = sc
+    by_id = {c.id: c for c in sc.commands}
+    check_dynamic_writers(ctx, sc, terms, infos)
+    for o in sc.opaque:
+        check_opaque(ctx, o, by_id.get(o.cmd), terms, infos, src_notes)
+    for c in sc.commands:
+        ctx.current = c
+        check_env(ctx, c)
+        check_approval(ctx, c)
+    ctx.current = None
+    return sc, infos
+
+
+def check_out_of_repo(ctx, c):
+    for w, vals in candidates(c):
+        for v in vals:
+            if not looks_like_path(v, c, ctx):
+                continue
+            for a, real, ri in resolve_all(ctx, c, v):
+                if real is not None and is_owner_json(real) and (out_hit(ctx, real, "read") or "/.work/op.lock.d/" in real):
+                    ctx.deny("G-OUT", "reading %s (a lock owner record with its token) is not allowed — use "
+                                      "\"python3 .claude/studio/scripts/lock.py status\"." % v)
+
+
+FED_MAX = 64 * 1024
+# programs whose arguments are paths they delete, move or write: only these are judged by fed input
+FED_WRITERS = protect.DELETE_PROGS | {"mv", "cp", "ln", "rsync", "tee", "install", "gcp", "trash"}
+# readers that pass file lines on; the value says which arguments are not files
+READER_SKIP = {"cat": (), "tac": (), "head": ("-n", "-c"), "tail": ("-n", "-c"), "sort": ("-k", "-t", "-o"),
+               "uniq": (), "cut": ("-d", "-f", "-c", "-b"), "grep": ("-e", "-f", "-m", "-A", "-B", "-C"),
+               "egrep": ("-e", "-f"), "rg": ("-e", "-f", "-g", "-m", "-A", "-B", "-C", "-t", "-T"),
+               "sed": ("-e", "-f"), "awk": ("-F", "-v", "-f"), "jq": ("--arg", "--argjson", "-f")}
+PATTERN_FIRST = {"grep", "egrep", "rg", "sed", "awk", "jq"}  # the first operand is a pattern/program
+
+
+def reader_files(c):
+    """The input files a reader command passes on (patterns, programs and option values skipped)."""
+    prog = c.prog
+    if prog not in READER_SKIP:
+        return []
+    takes = READER_SKIP[prog]
+    argv = [w.value for w in c.words[1:]]
+    out, i, pattern_given = [], 0, False
+    if prog in PATTERN_FIRST and any(a in ("-e", "-f") or (a and a.startswith(("-e", "--regexp", "--file", "-f")))
+                                     for a in argv if a and prog not in ("awk", "jq")):
+        pattern_given = True
+    if prog == "awk" and "-f" in argv:
+        pattern_given = True
+    first_operand = True
+    while i < len(argv):
+        a = argv[i]
+        if a is None:
+            out.append(None)
+            i += 1
+            continue
+        if a in takes:
+            i += 2
+            continue
+        if a.startswith("-") and a != "-":
+            i += 1
+            continue
+        if first_operand and prog in PATTERN_FIRST and not pattern_given:
+            first_operand = False
+            i += 1
+            continue
+        first_operand = False
+        out.append(a)
+        i += 1
+    return out
+
+
+def _span_in(inner, outer):
+    return inner.span and outer.span and outer.span[0] <= inner.span[0] and inner.span[1] <= outer.span[1]
+
+
+def statement_start(raw, pos):
+    head = raw[:pos]
+    cut = max(head.rfind(";"), head.rfind("\n"), head.rfind("&&"), head.rfind("||"))
+    return cut + 1 if cut >= 0 else 0
+
+
+def fed_inputs(sc, cmd, raw=""):
+    """(file, cwd) that actually feed `cmd`: its stdin redirect, `$(cat F)` in its own words, the pipeline
+    readers before an xargs/parallel, xargs -a / parallel ::::, and a while/for loop's input."""
+    out = []
+    cwd = (cmd.cwds or [None])[0]
+    for r in cmd.redirs:
+        if r.mode == "read" and r.fd in (None, "0") and r.target is not None:
+            out.append((r.target.value, cwd))
+    for c in sc.commands:
+        if c is cmd:
+            continue
+        if "cmdsubst" in c.ctx and _span_in(c, cmd) and any(w.value is None for w in cmd.words):
+            out += [(f, (c.cwds or [cwd])[0]) for f in reader_files(c)]
+    argv = [w.value for w in cmd.words]
+    if cmd.prog in ("xargs", "parallel"):
+        for i, v in enumerate(argv):
+            if v in ("-a", "--arg-file") and i + 1 < len(argv):
+                out.append((argv[i + 1], cwd))
+            elif v is not None and v.startswith("--arg-file="):
+                out.append((v.split("=", 1)[1], cwd))
+        if cmd.prog == "parallel" and "::::" in argv:
+            for v in argv[argv.index("::::") + 1:]:
+                if v in (":::", "::::"):
+                    break
+                out.append((v, cwd))
+        if "pipeline" in cmd.ctx and cmd.span:
+            start = statement_start(raw, cmd.span[0])
+            for c in sc.commands:
+                if c is not cmd and "pipeline" in c.ctx and c.span and start <= c.span[0] and c.span[1] <= cmd.span[0] and \
+                        not ("cmdsubst" in c.ctx and not _span_in(c, cmd)):
+                    out += [(f, (c.cwds or [cwd])[0]) for f in reader_files(c)]
+                    for r in c.redirs:
+                        if r.mode == "read" and r.fd in (None, "0") and r.target is not None:
+                            out.append((r.target.value, (c.cwds or [cwd])[0]))
+    if "loop" in cmd.ctx:
+        for c in sc.commands:
+            if "compound-redirect" in c.ctx and c.span and cmd.span and c.span[0] <= cmd.span[0]:
+                for r in c.redirs:
+                    if r.mode == "read" and r.target is not None:
+                        out.append((r.target.value, (c.cwds or [cwd])[0]))
+            if "cmdsubst" in c.ctx and c.span and cmd.span and c.span[1] <= cmd.span[0]:
+                out += [(f, (c.cwds or [cwd])[0]) for f in reader_files(c)]
+    return [(v, c) for v, c in out if v is None or not (v.startswith("/dev/") or v == "-")]
+
+
+def read_fed(ctx, value, cwd):
+    """(text, state): state "ok", "missing" (the command fails anyway) or "unreadable"."""
+    if value is None:
+        return None, "unreadable"
+    p = value if os.path.isabs(value) else (os.path.join(cwd, value) if cwd else None)
+    if p is None:
+        return None, "unreadable"
+    if not os.path.lexists(p):
+        return None, "missing"
+    try:
+        with open(p, "rb") as f:
+            data = f.read(FED_MAX)
+    except OSError:
+        return None, "unreadable"
+    return data.decode("utf-8", "replace"), "ok"
+
+
+def check_fed(ctx, cmd, sc, terms, op, label, feeder=None):
+    """Paths the command takes from files: deny when a line, resolved against the command's cwd, is a
+    protected item. Patterns and file bodies' words are not reasons by themselves."""
+    target = feeder or cmd
+    for value, cwd in fed_inputs(sc, target, getattr(ctx, "command", "")):
+        text, state = read_fed(ctx, value, cwd)
+        if state == "missing":
+            continue
+        if state == "unreadable":
+            ctx.deny("G-OPAQUE", "%s takes paths from %s, which the guard cannot read — run the commands directly on "
+                                 "literal paths." % (label, value or "a file named by a variable"))
+            return True
+        for line in text.splitlines()[:1000]:
+            line = line.strip()
+            if not line or "\x00" in line or len(line) > 4096:
+                continue
+            for a, real, ri in resolve_all(ctx, cmd, line):
+                if ri is None or not ri.studio or real is None:
+                    continue
+                parts, fold = rel(ctx, ri, real)
+                if parts is None:
+                    continue
+                tid = protect.delete_hits(parts, ri.studio_root, fold, is_dir=ctx.fs.isdir(real)) if op == "delete" \
+                    else protect.classify(parts, ri.studio_root, fold)
+                if tid:
+                    ctx.deny("G-OPAQUE", "%s takes %s from %s — a protected Studio path." % (label, line, value))
+                    return True
+    return False
+
+
+def template_op(prog):
+    base = os.path.basename(prog or "")
+    if base in protect.DELETE_PROGS or base == "mv":
+        return "delete"
+    if base in FED_WRITERS:
+        return "write"
+    return None
+
+
+def check_dynamic_writers(ctx, sc, terms, infos):
+    """Deleting/moving/path-writing commands whose arguments are not literal (loop variables, `$(cat F)`)."""
+    for c in sc.commands:
+        prog, words = effective(c)
+        op = template_op(prog)
+        if op is None or c.lock is not None or studio_script(ctx, c):
+            continue
+        if not any(w.value is None for w in words):
+            continue
+        ctx.current = c
+        check_fed(ctx, c, sc, terms, op, prog)
+    ctx.current = None
+
+
+def check_parallel_args(ctx, cmd, infos):
+    """`parallel <template> ::: args`: the arguments are the template's."""
+    argv = [w.value for w in cmd.words]
+    if ":::" not in argv:
+        return
+    i = argv.index(":::")
+    tpl = [v for v in argv[1:i] if v is not None and not v.startswith("-")]
+    base = os.path.basename(tpl[0]) if tpl else ""
+    if base in protect.DELETE_PROGS or base == "mv":
+        op = "delete"
+    elif base in protect.READ_ALLOW and base not in ("find", "bfs"):
+        return
+    else:
+        op = "write"
+    for w in cmd.words[i + 1:]:
+        if w.value in (":::", "::::"):
+            break
+        check_target(ctx, cmd, w, w.value, op, infos)
+
+
+def upstream_args(ctx, cmd):
+    """Literal arguments of the pipeline commands before this one (patterns and programs of readers left out)."""
+    sc = getattr(ctx, "scan", None)
+    if sc is None or cmd is None or not cmd.span:
+        return upstream_text(ctx, cmd)
+    seg_start = cmd.span[0] - len(upstream_text(ctx, cmd))
+    out = []
+    for c in sc.commands:
+        if c is cmd or not c.span or c.span[0] < seg_start or c.span[1] > cmd.span[0]:
+            continue
+        if c.prog in READER_SKIP:
+            out += [f for f in reader_files(c) if f]
+        else:
+            out += [w.value for w in c.words[1:] if w.value]
+        out += [r.target.value for r in c.redirs if r.target is not None and r.target.value]
+    return "\n".join(out)
+
+
+def upstream_text(ctx, cmd):
+    """The raw text of the statement before this command (the pipeline that feeds it)."""
+    raw = getattr(ctx, "command", "") or ""
+    if cmd is None or not cmd.span:
+        return raw
+    end = cmd.span[0]
+    head = raw[:end]
+    cut = max(head.rfind(";"), head.rfind("\n"), head.rfind("&&"), head.rfind("||"))
+    return head[cut + 1:] if cut >= 0 else head
+
+
+def studio_related(ctx, cmd, infos):
+    if cmd is None:
+        return True
+    for d in cmd.cwds or []:
+        for ri in infos:
+            p = protect.rel_parts(d, ri.worktree, False)
+            if p is not None and (p[:1] == [ri.studio_root] or p[:2] == [".claude", "studio"]):
+                return True
+    if cmd.s2v is not None or studio_script(ctx, cmd):
+        return True
+    return False
+
+
+def check_opaque(ctx, o, cmd, terms, infos, src_notes):
+    if o.kind == "unknown-command":
+        name = (o.payload or "").split(" ")[0]
+        ctx.deny("G-UNKNOWN", "\"%s\" is not a command on PATH, a builtin or a known alias/function, and the shell "
+                              "snapshot could not be read fully — write the real command name." % name, src_notes)
+        return
+    if o.kind == "ambiguous-alias":
+        name = (o.payload or "").split(":")[0]
+        ctx.deny("G-AMBIG", "alias \"%s\" has too many different meanings across recent shell snapshots — write the "
+                            "real command." % name, src_notes)
+        return
+    if o.kind in ("xargs", "parallel"):
+        # the template runs on input the guard cannot see; a reading template is harmless
+        tpl = (o.payload or "").split(" ")[0]
+        if tpl and os.path.basename(tpl) in protect.READ_ALLOW and tpl not in ("find", "bfs", "echo", "printf"):
+            return
+        if cmd is not None and o.kind == "parallel":
+            check_parallel_args(ctx, cmd, infos)
+        top = template_op(tpl)
+        if cmd is not None and top is not None and check_fed(ctx, cmd, ctx.scan, terms, top, o.kind):
+            return
+        upstream = upstream_args(ctx, cmd)
+        uhits = terms.find(upstream)
+        if uhits or studio_related(ctx, cmd, infos):
+            what = ("the input mentions %s" % uhits[0].term) if uhits else "it runs in a Studio folder"
+            ctx.deny("G-OPAQUE", "%s feeds paths the guard cannot see into \"%s\", and %s — run the commands "
+                                 "directly on literal paths." % (o.kind, tpl or "?", what), src_notes)
+        return
+    if o.kind == "find-exec" and cmd is not None:
+        tpl = (o.payload or "").split(" ")[0]
+        if tpl in protect.READ_ALLOW and tpl not in ("find", "bfs"):
+            return  # judged as the template command
+    if o.kind == "script":
+        cls = o.path_class or []
+        work = False
+        if o.path:
+            for ri in infos:
+                parts = protect.rel_parts(o.path, ri.worktree, False)
+                if parts and parts[:1] == [ri.studio_root] and "work" in parts[1:-1]:
+                    work = True
+        if not (work or "tmp" in cls or "scratch" in cls):
+            return
+    hits = terms.find(o.payload) if o.payload is not None else []
+    lit_hit = None
+    if cmd is not None:
+        for lit in o.literals or []:
+            if "/" not in lit:
+                continue
+            for a, real, ri in resolve_all(ctx, cmd, lit):
+                if ri is not None and ri.studio and real is not None:
+                    parts, fold = rel(ctx, ri, real)
+                    if parts is not None and protect.classify(parts, ri.studio_root, fold, include_local=True):
+                        lit_hit = lit
+    sources = messages.alias_sources(cmd) if cmd is not None else []
+    if hits or lit_hit:
+        what = hits[0].term if hits else lit_hit
+        ctx.deny("G-OPAQUE", "%s runs code the guard cannot read, and it mentions %s — run the commands directly so "
+                             "they can be checked." % (o.kind, what), sources + src_notes)
+    elif o.hits_unknown and studio_related(ctx, cmd, infos):
+        ctx.deny("G-OPAQUE", "%s runs code the guard cannot read in a Studio context — run the commands directly."
+                 % o.kind, sources + src_notes)
+
+
+def decide_file(ctx, tool, ti):
+    key = "notebook_path" if tool == "NotebookEdit" else "file_path"
+    path = ti.get(key) or ti.get("file_path") or ti.get("notebook_path")
+    if not isinstance(path, str) or not path:
+        return
+    judge_file_path(ctx, path, tool, ti)
+
+
+def judge_file_path(ctx, path, tool, ti, mcp=False):
+    r = ctx.where.resolve(path, ctx.cwd)
+    if r is None or r.abs is None:
+        return
+    if out_hit(ctx, r.real, "write"):
+        ctx.deny("G-OUT", "%s %s (Studio's per-user files or the machine lock) — only Studio's scripts change it."
+                 % ("writing" if not mcp else "this tool touches", path))
+        return
+    ri = ctx.repos.info(r.repo) if r.repo is not None else None
+    if ri is None or not ri.studio:
+        return
+    ctx.touch(ri)
+    parts, fold = rel(ctx, ri, r.real)
+    if parts is None:
+        return
+    tid = protect.classify(parts, ri.studio_root, fold)
+    if tid is None:
+        return
+    if tid == "P-CONF" and not mcp:
+        verdict = config_change(ctx, ri, r.real, tool, ti)
+        if verdict is None:
+            return
+        ctx.deny("G-PROT", "%s changes protected keys of .claude/studio/config.json (%s) — only the person changes "
+                           "them (/std config)." % (tool, verdict))
+        return
+    _i, _p, cls, who = protect.BY_ID[tid]
+    hint = " Write character.yaml.draft instead; a person moves it." if tid == "P-CHAR" else (
+        " Write CREDITS.draft.yaml instead." if tid == "P-CRED" else "")
+    ctx.deny("G-PROT", "%s %s (%s) — only %s may change it.%s" % ("writing" if not mcp else "this tool touches", path,
+                                                                 cls, who, hint))
+
+
+def config_change(ctx, ri, real, tool, ti):
+    """None when no protected key changes; otherwise a short reason."""
+    try:
+        with open(real, encoding="utf-8") as f:
+            current_text = f.read()
+    except OSError:
+        current_text = None
+    if tool == "Write":
+        new_text = ti.get("content")
+    elif tool in ("Edit", "MultiEdit"):
+        if current_text is None:
+            return None
+        edits = ti.get("edits") if tool == "MultiEdit" else [ti]
+        new_text = current_text
+        for e in edits or []:
+            old, new = e.get("old_string"), e.get("new_string")
+            if not isinstance(old, str) or not isinstance(new, str):
+                return "an edit the guard cannot read"
+            cnt = new_text.count(old)
+            if cnt == 0 or (cnt > 1 and not e.get("replace_all")):
+                return None  # Claude Code rejects this edit itself
+            new_text = new_text.replace(old, new) if e.get("replace_all") else new_text.replace(old, new, 1)
+    else:
+        return "not a JSON edit"
+    try:
+        new = json.loads(new_text) if isinstance(new_text, str) else None
+    except ValueError:
+        return "the new content is not JSON"
+    if not isinstance(new, dict):
+        return "the new content is not a JSON object"
+    try:
+        cur = json.loads(current_text) if current_text else {}
+    except ValueError:
+        cur = {}
+    if not isinstance(cur, dict):
+        cur = {}
+    changed = sorted(k for k in ri.protected_keys if cur.get(k) != new.get(k))
+    return ", ".join(changed) if changed else None
+
+
+def mcp_paths(obj, depth=0, out=None):
+    """Path-like values in (nested) MCP arguments, depth ≤ 4."""
+    out = [] if out is None else out
+    if depth > 4 or len(out) > MAX_CANDIDATES:
+        return out
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            kl = str(k).lower()
+            if kl in MCP_PATH_KEYS and isinstance(v, str):
+                out.append(v)
+            elif kl in MCP_LIST_KEYS and isinstance(v, list):
+                out.extend(x for x in v if isinstance(x, str))
+            if isinstance(v, (dict, list)):
+                mcp_paths(v, depth + 1, out)
+    elif isinstance(obj, list):
+        for v in obj:
+            if isinstance(v, (dict, list)):
+                mcp_paths(v, depth + 1, out)
+    return out
+
+
+def decide_mcp(ctx, ti):
+    if not isinstance(ti, dict):
+        return
+    found = mcp_paths(ti)
+    for p in found[:MAX_CANDIDATES]:
+        judge_file_path(ctx, p, "mcp", ti, mcp=True)
+
+
+def decide(hook, env, fs=None, probe=None, snapshot_loader=None):
+    """(Deny | None, Context). Internal errors deny (closed side)."""
+    ctx = Context(hook, env, fs=fs, probe=probe, snapshot_loader=snapshot_loader)
+    try:
+        return _decide(ctx, hook)
+    except Exception as e:  # noqa: BLE001
+        ctx.denies.insert(0, Deny("G-ERR", "internal guard error (%s) — tell the user; this is a bug in the guard."
+                                  % type(e).__name__))
+        return ctx.denies[0], ctx
+
+
+def _decide(ctx, hook):
+    tool = hook.get("tool_name") or ""
+    ti = hook.get("tool_input") or {}
+    if tool == "Bash":
+        cmd = ti.get("command")
+        if isinstance(cmd, str):
+            decide_bash(ctx, cmd)
+    elif tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+        decide_file(ctx, tool, ti)
+    elif tool.startswith("mcp__"):
+        decide_mcp(ctx, ti)
+    if ctx.denies:
+        return ctx.denies[0], ctx
+    return None, ctx
+
+
+def record_run(ctx):
+    """The guard-ran record in each harness repository this call involves (after the decision)."""
+    sid = ctx.hook.get("session_id")
+    seen = set()
+    infos = list(ctx.touched)
+    try:
+        if ctx.fs.exists(ctx.cwd):
+            ri = ctx.repos.info(ctx.where.git_repo(ctx.cwd))
+            if ri is not None:
+                infos.append(ri)
+    except Exception:  # noqa: BLE001
+        pass
+    for ri in infos:
+        if ri is None or not ri.harness or ri.worktree in seen:
+            continue
+        seen.add(ri.worktree)
+        local = os.path.join(ri.worktree, ".claude", "studio", "local")
+        ranlog.record(ri.worktree, sid, may_create=os.path.isdir(local) or has_exclude_block(ri))
+
+
+__all__ = ["decide", "record_run", "Deny", "recog"]
