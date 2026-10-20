@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 
-from . import dirlock, locks, s2vcall
+from . import dirlock, lockargs, locks, s2vcall
 
 WATCHER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watcher.py")
 SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
@@ -56,41 +56,7 @@ def _show_argv(argv, cwd):
                     and os.path.exists(os.path.join(cwd, a)) else a for a in argv)
 
 
-def _parse(argv):
-    if not argv:
-        raise locks.UsageError("usage: lock.py run|actor-op|status …")
-    cmd, rest = argv[0], argv[1:]
-    child = []
-    if "--" in rest:
-        i = rest.index("--")
-        rest, child = rest[:i], rest[i + 1:]
-    opts = {"cmd": cmd, "child": child, "ids": [], "actors": [], "json": False, "kind": None,
-            "holder": None}
-    it = iter(rest)
-    for a in it:
-        if cmd == "run" and a == "--kind":
-            opts["kind"] = next(it, None)
-        elif cmd == "run" and a == "--holder":
-            opts["holder"] = next(it, None)
-        elif cmd == "status" and a == "--actor":
-            opts["actors"].append(next(it, None))
-        elif cmd == "status" and a == "--json":
-            opts["json"] = True
-        elif cmd == "actor-op" and not a.startswith("-"):
-            opts["ids"].append(a)
-        else:
-            raise locks.UsageError("unknown argument for %s: %s" % (cmd, a))
-    if cmd == "run":
-        if opts["kind"] not in ("tts", "gen"):
-            raise locks.UsageError("run needs --kind tts|gen")
-    elif cmd == "actor-op":
-        if not opts["ids"]:
-            raise locks.UsageError("actor-op needs at least one actor id")
-    elif cmd != "status":
-        raise locks.UsageError("unknown command: %s" % cmd)
-    if cmd in ("run", "actor-op") and not child:
-        raise locks.UsageError("%s needs the s2v command after --" % cmd)
-    return opts
+_parse = lockargs.parse  # shared with the guard (M0d-1a): one reading of lock.py arguments
 
 
 class Wrapper(object):

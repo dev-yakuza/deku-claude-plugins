@@ -110,6 +110,21 @@ check(True, "home-path scan over %d files%s" % (len(shipped), "" if df else " (d
 
 check(not glob.glob(os.path.join(plugin, "**", "__pycache__"), recursive=True), "no __pycache__ in the plugin")
 
+# the guard's scanner (M0d-1a): no subprocesses, no state writes
+gdir = os.path.join(skill, "scripts", "stdo", "guard")
+for p in sorted(glob.glob(os.path.join(gdir, "*.py"))):
+    body = open(p).read()
+    rel = os.path.relpath(p, skill)
+    check("subprocess" not in body and "os.system" not in body and "os.popen" not in body,
+          "%s starts no subprocess" % rel)
+    check(not re.search(r"from \.\.state|import store|stdo\.state", body), "%s does not import state writers" % rel)
+# ...and not transitively either: lockargs (shared with lock.py) owns UsageError so that the guard
+# does not import locks -> dirlock (which run `ps` through subprocess)
+import subprocess as _sp
+probe = _sp.run([sys.executable, "-B", "-c", "import sys; sys.path.insert(0, %r); import stdo.guard; "
+                 "print('subprocess' in sys.modules)" % os.path.join(skill, "scripts")], capture_output=True, text=True)
+check(probe.stdout.strip() == "False", "importing stdo.guard loads no subprocess module (%s)" % probe.stdout.strip())
+
 if fails:
     print("structure: %d failure(s)" % len(fails))
     sys.exit(1)

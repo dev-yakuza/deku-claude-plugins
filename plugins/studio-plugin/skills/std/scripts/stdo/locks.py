@@ -6,6 +6,7 @@ import re
 import subprocess
 
 from . import dirlock
+from .lockargs import UsageError  # noqa: F401 — defined there so lockargs imports nothing heavy
 
 HEAVY_TOKEN_ENV = "S2V_HEAVY_LOCK_TOKEN"
 ACTOR_TOKEN_ENV = "S2V_ACTOR_LOCK_TOKEN"
@@ -14,10 +15,6 @@ EXIT_ACTOR_BUSY = 74
 EXIT_USAGE = 2
 WORK = ".work"
 ACTOR_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-
-
-class UsageError(Exception):
-    """Usage or setup problem (exit 2), found before any lock is taken."""
 
 
 def state_dir(env=None):
