@@ -684,7 +684,7 @@ branch -D`) slips past the `ask` entry that is the harness's half of INV1.
 2. **Local branches** — merged rows only, and only after re-running item 3's `--head` and
    `--base` calls with `--state open` for the same branch and finding **no open PR** (a branch
    that has one keeps its local copy too). ⚠ A remote ref that is **absent** (GitHub deleted it on
-   merge — the normal case with `delete_branch_on_merge`) or that moved does **not** block the
+   merge — the normal case with `deleteBranchOnMerge`) or that moved does **not** block the
    local delete; the local tip test below decides. Then re-read the tip right then (`git
    rev-parse --verify --quiet refs/heads/<branch>`) and finding it **exactly equal** to
    `headRefOid`: `git branch -D <branch>`.

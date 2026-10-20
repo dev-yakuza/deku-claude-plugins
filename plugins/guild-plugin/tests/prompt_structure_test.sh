@@ -3196,7 +3196,7 @@ hasfx "plan: po.md 절 헤더 고정" "$SPP" '`## goal` · `## goal-picks` · `#
 hasfx "plan: history 로 C 를 줄이지 않는다" "$SPP" '**Never shrink `C` from history.**'
 hasfx "plan: 채우기 순서 1 goal-picks" "$SPP" '1. **goal-picks** — the feature gates as before'
 hasfx "plan: 채우기 순서 3 other-ranked" "$SPP" '3. **other-ranked** — the same gates.'
-hasfx "plan: 1b 구체화 필요는 자동으로 담지 않음" "$SPP" '구체화 필요 is never filled automatically'
+hasfx "plan: 1b 구체화 필요는 자동으로 담지 않음(analyze 이하만)" "$SPP" '구체화 필요 **at stage `none` or `guild:analyze`** is never filled automatically, whatever the'
 hasfx "plan: needs-human 후보는 자동으로 담지 않음" "$SPP" 'does **not** carry
    `guild:needs-human`'
 hasfx "plan: 질문은 attended·--no-ask 아님" "$SPP" '2. **Decision questions for goal-related candidates** — attended and not `--no-ask` only'
@@ -3275,7 +3275,9 @@ hasfx "plan: Depends on 읽기 규칙은 모든 Depends on 에" "$SPP" '**`Depen
 hasfx "plan: Depends on: 없음/none 은 의존 없음" "$SPP" 'or `Depends on: none` (any case) is **no dependency at all**'
 hasfx "plan: 의존 무시 표시" "$SPP" '`의존 무시: #e ← #d (본문: «<그 문장>»)`'
 hasfx "plan: 의존 유지 편집" "$SPP" '- **`의존 유지 #d`** → put `#d` back'
-hasfx "plan: 안내 줄에 의존 유지" "$SPP" '(드롭 / 추가 / 크기 N / 의존 유지 #d / 재범위 / 재정렬 요청 가능)'
+hasfx "plan: 안내 줄에 의존 유지·목표 편집·스택 없음" "$SPP" '(드롭 / 추가 / 크기 N / 의존 유지 #d / 목표 <문장> / 재범위 / 재정렬 [/ 스택 없음] 요청 가능)'
+lacksfx "plan: 스택 없음 없는 안내 줄 제거" "$SPP" '(드롭 / 추가 / 크기 N / 의존 유지 #d / 목표 <문장> / 재범위 / 재정렬 요청 가능)'
+lacksfx "plan: 목표 편집 없는 안내 줄 제거" "$SPP" '(드롭 / 추가 / 크기 N / 의존 유지 #d / 재범위 / 재정렬 요청 가능)'
 lacksfx "plan: 옛 안내 줄 제거" "$SPP" '(드롭 / 추가 / 크기 N / 재범위 / 재정렬 요청 가능)'
 hasfx "plan: 자식을 가리키는 의존 매핑" "$SPP" 'target child `c` closed or `guild:done` → judged as `c` itself'
 hasfx "plan: 에픽 파일 = 남은 자식 파일 합집합" "$SPP" '**An epic'"'"'s files** = the union of the files its remaining children will touch'
@@ -3294,8 +3296,11 @@ hasfx "plan: TL 의존성 절 글머리 줄 추가" "$SPP" 'in a `## 의존성` 
 hasfx "plan: blocked_children 는 자동 미포함" "$SPP" '**`blocked_children` present → not filled automatically**'
 hasfx "plan: 자식 needs-human 대기 사유" "$SPP" '`사람 작업 필요: #e (자식 #c needs-human 대기 — /gld resume c)`'
 hasfx "plan: 에픽 규칙 (i) 확장 의존 모두 닫힘/done" "$SPP" '**(i) Every extended-dependency target is closed or `guild:done`.**'
-hasfx "plan: 매핑된 선행 대기 표시" "$SPP" '`선행 대기(미포함): #e ← #e2(자식 #c)`'
-hasfx "plan: 매핑된 선행 미포함 표시" "$SPP" '`⚠ 선행 미포함: #q ← #e(자식 #c)`'
+hasfx "plan: 매핑된 선행 대기 표시(대상 쪽)" "$SPP" '`선행 대기(미포함): #e ← #d(자식 #c…)`'
+hasfx "plan: 매핑된 선행 대기 표시(직접+자식)" "$SPP" '`선행 대기(미포함): #e ← #d(+자식 #c…)`'
+hasfx "plan: 매핑된 선행 미포함 표시(대상 쪽)" "$SPP" '`⚠ 선행 미포함: #q ← #d(자식 #c…)`'
+lacksfx "plan: 옛 매핑 표시(양쪽 표시) 제거" "$SPP" '`선행 대기(미포함): #e ← #e2(자식 #c)`'
+lacksfx "plan: 옛 선행 미포함 매핑 표시 제거" "$SPP" '`⚠ 선행 미포함: #q ← #e(자식 #c)`'
 hasfx "plan: 에픽 규칙 (ii) 순위가 이김" "$SPP" '**(ii) The fill order (rank) wins — a member already filled is never pushed out.**'
 hasfx "plan: 하류 멤버가 먼저 담김" "$SPP" '`제외: #e (하류 멤버 #q 가 먼저 담김)`'
 hasfx "plan: 선행 에픽과 같은 스프린트 불가" "$SPP" '`제외: #q (선행 에픽 #e 와 같은 스프린트에 쌓을 수 없음)`'
@@ -3311,7 +3316,8 @@ lacksfx "plan: 에픽 결정 필요 사유에 /gld plan 안내 제거" "$SPP" '�
 hasfx "plan: 에픽 Phase 5 표시" "$SPP" '`#e (에픽 · 남은 자식 k개 — PR 최대 k개)`'
 hasfx "plan: 남은 자식 많으면 경고" "$SPP" '`⚠ #e 는 남은 자식 <k>개 — 한 run 안에 끝나지 않을 수 있습니다`'
 hasfx "plan: 자식 PR 스택 경고" "$SPP" '`⚠ #e 의 자식 PR 은 서로 쌓일 수 있고 sprint sync 대상이 아닙니다`'
-hasfx "plan: retro·daily 에픽 집계 한계 줄(0.97.2)" "$SPP" 'ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(0.97.2 에서 수정)'
+hasfx "plan: retro·daily 에픽 집계 한계 줄(다음 버전)" "$SPP" 'ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(다음 버전에서 수정)'
+lacksfx "plan: 버전 번호 약속 문구 제거" "$SPP" '(0.97.2 에서 수정)'
 hasfx "plan: 슬롯은 에픽 멤버를 건드리지 않음" "$SPP" '⚠ **A slot never touches an epic member.**'
 hasfx "plan: 재스폰 조건에 에픽 파일 회피" "$SPP" '*"do not touch the epic members'"'"' files"*'
 hasfx "plan: skip (epic-overlap)" "$SPP" '`skip (epic-overlap)` when it overlaps'
@@ -3334,7 +3340,8 @@ hasfx "plan: depends 인데 질문 없음" "$SPP" '`제외: #n (크기가 결정
 hasfx "plan: human-work upstream 은 다른 저장소" "$SPP" '`human-work: <credential|device|upstream|other>` instead of a question (`upstream` = a fix that must land first in **another repository**)'
 hasfx "plan: 선행 Issue 미완은 human-work 아님(차원은 unclear)" "$SPP" '**An unfinished prerequisite Issue is not human work**: rate that dimension (usually Constraint) `unclear` and write `prerequisite: #<d>` instead'
 lacksfx "plan: upstream 이 선행 미완도 덮는다는 옛 문장 제거" "$SPP" '(`upstream` also covers a gap that exists only because a prerequisite Issue is unfinished)'
-hasfx "plan: questions 항목은 셋 중 정확히 하나" "$SPP" 'then exactly one of: `Q: <question>` and `- A) …` lines (a goal-picks or other-ranked candidate only), `human-work: <class>`, or `prerequisite: #<d>`)'
+hasfx "plan: questions 항목은 셋 중 정확히 하나(권장 선택지 먼저)" "$SPP" 'then exactly one of: `Q: <question>` and `- A) …` lines, the option you recommend first as `- A) <answer> (recommended) — <reason>` (`(recommended)` stays in English; one option only) (a goal-picks or other-ranked candidate only), `human-work: <class>`, or `prerequisite: #<d>`)'
+lacksfx "plan: 권장 없는 questions 형식 제거" "$SPP" 'then exactly one of: `Q: <question>` and `- A) …` lines (a goal-picks'
 lacksfx "plan: questions 옛 형식(또는) 제거" "$SPP" 'lines, or `human-work: <class>`, or `prerequisite: #<d>`)'
 hasfx "plan: prerequisite 차원은 묻지 않음" "$SPP" '**A `prerequisite: #d` dimension is not asked**'
 hasfx "plan: 선행 대기(미포함) 접두" "$SPP" '`선행 대기(미포함): #n ← #d`'
@@ -3372,7 +3379,7 @@ lacksfx "_handoff: K 옛 human-work 순서 제거" "$HOMD" '`human-work: <creden
 
 hasfx "plan: 자식 목록 절단 시 에픽 제외 사유" "$PLAN" '`제외: #e (에픽 · 자식 목록이 500건에서 잘려 판정 불가)`'
 hasfx "plan: 1b 가 closed-not-done 자식 본문을 직접 읽음" "$PLAN" '`gh issue view <c> --json body` (one call per such child; rare)'
-hasfx "plan: 슬롯 재스폰도 BODIES 를 받음(tech-lead 목록)" "$PLAN" 'with the same `CANDIDATES (tech-lead)` (tags and `slot:` fields included), BODIES, REFACTOR SLOT'
+hasfx "plan: 슬롯 재스폰도 BODIES 를 받음(tech-lead 목록)" "$PLAN" 'CANDIDATES (tech-lead): <the same entries as the first spawn — tags and `slot:` fields included>'
 lacksfx "plan: 재스폰 옛 CANDIDATES 문구 제거" "$PLAN" 'with the same CANDIDATES (tags included)'
 hasfx "plan: 슬롯 반납 재채움 시점은 Phase 3 fill 뒤" "$PLAN" 'Whenever the slot leaves after the Phase 3'
 lacksfx "plan: 슬롯 반납 옛 시점(capacity cut) 제거" "$PLAN" 'Whenever the slot leaves after the capacity'
@@ -3391,8 +3398,11 @@ hasfx "plan: Add 경고 — 결정 필요 자식" "$PLAN" '`⚠ #e 의 자식 #c
 lacksfx "plan: Add 경고 옛 문구(다시 나뉠 수 없어) 제거" "$PLAN" '자식은 다시 나뉠 수 없어 run 이 그 자식에서 멈춥니다'
 # 1-2 tech-lead satisfied 메모 → Phase 5 의견 줄 (규칙 불변)
 hasfx "plan: TL satisfied 별도 메모" "$PLAN" 'write a **separate note** `satisfied: #<e> ← #<d> — via #<x> — <evidence>`'
-hasfx "plan: 의견 줄" "$PLAN" '`의견: #e ← #d 는 이미 충족됐을 수 있습니다(tech-lead: <근거>, via #x) — 맞으면 <#e 본문|자식 #c 본문>의 Depends on 을 고치세요[ (그 뒤에도 자식 #c 결정 필요)]`'
-hasfx "plan: 의견 줄은 선행 대기로 빠진 후보만" "$PLAN" '**only when that candidate (an epic or not)'
+hasfx "plan: 의견 줄(괄호 없음 — 그 뒤의 장벽 줄로)" "$PLAN" '- `의견: #e ← #d 는 이미 충족됐을 수 있습니다(tech-lead: <근거>, via #x) — 맞으면 <#e 본문|자식 #c 본문>의 Depends on 을 고치세요`'
+lacksfx "plan: 의견 줄 옛 괄호 제거" "$PLAN" '(그 뒤에도 자식 #c 결정 필요)'
+lacksfx "plan: Phase 5 예시의 옛 괄호 제거" "$PLAN" '(그 뒤에도 자식 #506 결정 필요)'
+hasfx "plan: satisfied 의견 줄은 선행 대기로 빠진 후보만" "$PLAN" 'This `satisfied` 의견 line is shown'
+hasfx "plan: satisfied 의견 줄 조건 본문" "$PLAN" '**only when that candidate (an epic or not)'
 hasfx "_handoff: K 에 satisfied 메모" "$HOMD" '`satisfied: #<e> ← #<d> — via #<x> — <evidence>`'
 # 1-3 크기를 정하는 질문
 lacksfx "plan: depends 인데 세 차원 clear 면 제외 옛 규칙 제거" "$PLAN" 'three dimensions `clear` has no question to settle it'
@@ -3434,7 +3444,7 @@ hasfx "plan: Q 는 랭크 후보에만" "$PLAN" '**Write `Q:` only for a candida
 hasfx "_handoff: K questions 항목 하나" "$HOMD" 'each entry is exactly one of `Q:` / `human-work:` / `prerequisite:`'
 # 1-7 언어 줄
 hasfx "plan: 역할 프롬프트는 Section K 언어 줄로 끝남" "$PLAN" 'Every role prompt below (product-owner, tech-lead, the slot re-spawn) ends with Section K'"'"'s'
-hasfx "plan: 재스폰도 언어 줄" "$PLAN" 'the prompt ends with the same Section K'
+hasfx "plan: 재스폰 템플릿이 언어 줄로 끝남" "$PLAN" 'SELECTED FEATURE MEMBERS: <number · title · files from (b) of each feature member the Phase 3 fill selected>. <`_handoff.md` Section K'"'"'s language line, rendered in `config.language` — the same line as the product-owner'"'"'s> Write output in `config.language`.'
 
 hasfx "plan(보강): PO 목록에서 빼는 대상" "$PLAN" 'a Phase 1b **막힘** one, one carrying'
 hasfx "plan(보강): refactor-slot 제외 시 슬롯 off·fetch 생략" "$PLAN" 'tech-lead with REFACTOR SLOT `off` (no (c) is asked for'
@@ -3444,7 +3454,7 @@ hasfx "plan(보강): 목표 승격 금지 범위" "$PLAN" 'Never after Phase 4'
 hasfx "plan(보강): 에픽 크기 게이트 핵심 절" "$PLAN" '**An epic passes the size gate only when every child to be sized is ✅**'
 hasfx "plan(보강): 의견 줄 표시 조건 핵심 절" "$PLAN" '**only when that candidate (an epic or not) is out as `선행 대기`**'
 hasfx "plan(보강): tech-lead 프롬프트 끝 언어 줄" "$PLAN" "the same line as the product-owner's> Write output in \`config.language\`."
-hasfx "plan(보강): 재스폰 프롬프트도 언어 줄로 끝남" "$PLAN" 'the prompt ends with the same Section K'
+hasfx "plan(보강): 재스폰 프롬프트는 전체 템플릿" "$PLAN" '  > Adopt the persona in `.claude/agents/tech-lead.md`. This is a second request, for the sprint'"'"'s refactor slot only: produce **(c) only**'
 lacksfx "plan(보강): 재스폰 옛 순서 문장 제거" "$PLAN" 'and ending with the same Section K language line, plus'
 
 # ── 0.97.1 보강 2: dry-run 3차 — 판정 대상 자식·⚠ depends·사유 한 줄 (design-relax2 v4-final) ──
@@ -3465,7 +3475,7 @@ hasfx "plan(보강2): design 자식 depends 사유" "$PLAN" '`제외: #e (에픽
 hasfx "plan(보강2): 일반 후보 execute 이후 ⚠ 무시" "$PLAN" '**Except at `guild:execute` or later**: design does not run on it again, so it cannot split'
 hasfx "plan(보강2): 슬롯 크기 기준에도 stage 면제" "$PLAN" 'candidate at stage `guild:execute` or later counts as ✅ — design can no longer split it, the'
 hasfx "plan(보강2): Add 경고는 판정 대상 자식만" "$PLAN" 'a `decide-in: #c` on a child to be decided — Phase 1'"'"'s bounds; a child past them gets no such warning'
-hasfx "plan(보강2): 의견 줄 괄호도 판정 대상만" "$PLAN" 'child Phase 1'"'"'s bounds judge (a child to be sized, or one to be decided).'
+hasfx "plan(보강2): 그 뒤의 장벽 줄도 판정 대상 자식만" "$PLAN" 'child Phase 1'"'"'s bounds judge (a child to be sized, or one to be decided).'
 lacksfx "plan(보강2): TL 옛 자식마다 판정 문구 제거" "$PLAN" '**and a ✅/⚠ for each remaining child**'
 # ② ⚠ depends:
 hasfx "plan(보강2): ⚠ depends 는 depends 로 읽음" "$PLAN" '**`⚠ depends: …` is read as `depends:`** (an ordinary candidate or a child)'
@@ -3475,7 +3485,7 @@ lacksfx "plan(보강2): 옛 섞임 측정 문구 제거" "$PLAN" '(measured #503
 # ③ 일반 후보 사유 한 줄
 lacksfx "plan(보강2): 일반 후보 사유 여러 줄 옛 규칙 제거" "$PLAN" 'keeps one line per'
 hasfx "plan(보강2): 일반 후보 사유 순서 절" "$PLAN" '**Phase 5 order of reasons — ordinary candidates: one line each, the first gate it failed.**'
-hasfx "plan(보강2): ② 묻지 않은 1b 구체화 필요" "$PLAN" '② 1b 구체화 필요 **not asked about** — `제외: #n (구체화 필요 — 1b)`'
+hasfx "plan(보강2): ② 묻지 않은 1b 구체화 필요(analyze 이하만)" "$PLAN" '② 1b 구체화 필요 at stage `none` or `guild:analyze` **not asked about** — `제외: #n (구체화 필요 — 1b)`'
 hasfx "plan(보강2): ③ 선행 대기가 not-ranked 보다 먼저" "$PLAN" 'ahead of not-ranked even for a'
 hasfx "plan(보강2): ⑥ 묻지 않음 형식" "$PLAN" '`제외: #n (<dim>=unclear · 묻지 않음)`'
 hasfx "plan(보강2): ⑥ 여러 차원 결합" "$PLAN" '(`Goal·Success=unclear · 건너뜀`)'
@@ -3493,6 +3503,140 @@ lacksfx "plan(보강2): 옛 '남은 자식 전체' 안내 제거" "$PLAN" '남�
 lacksfx "plan(보강2): 옛 표제 Every remaining child ✅ 제거" "$PLAN" '**Every remaining child ✅**'
 hasfx "plan(보강2): 자동 채움은 크기 판정 대상 자식 모두 ✅" "$PLAN" 'Only an epic whose children to be sized are **all** ✅'
 
+# ── 0.97.2: sprint plan 남은 지시문 결함 (design 16 v10-final) ──
+# A. 이월 후보의 1b 구체화 필요는 게이트가 아님
+lacksfx "plan(0.97.2): stage 조건 없는 1b 게이트 문장 제거" "$PLAN" '구체화 필요 is never filled automatically, whatever the product-owner rated'
+hasfx "plan(0.97.2): analyze 이후 1b 구체화 필요는 게이트 아님" "$PLAN" '**later than analyze** (`guild:design` or after — a carry-over) 구체화 필요 is not a gate, for'
+hasfx "plan(0.97.2): 1b 보고의 이월 표시" "$PLAN" '#133 · #140 (이월 — 채우기를 막지 않음)'
+hasfx "plan(0.97.2): 이월 후보에는 /gld plan 안내 없음" "$PLAN" '**A carried-over 구체화 필요** — an ordinary candidate (not an epic) at stage `guild:design` or'
+hasfx "plan(0.97.2): 묻지 않은 1b 사유도 analyze 이하만" "$PLAN" '구체화 필요 candidate at stage `none` or `guild:analyze` not asked about'
+# B. 중앙 관리 파일 — 정의는 Refactor slot 절 한 곳, Phase 5 는 경고 줄
+_cof_n="$(grep -cF 'A central-owned file is one `/gld update` refreshes from the plugin' "$PLAN")"
+if [ "$_cof_n" = 1 ]; then ok "plan(0.97.2): 중앙 관리 파일 정의는 정확히 한 곳"
+else bad "plan(0.97.2): 중앙 관리 파일 정의는 정확히 한 곳" "1" "$_cof_n"; fi
+_cof_in="$("$PY" - "$PLAN" <<'COFPY'
+import sys
+s = open(sys.argv[1], encoding="utf-8").read()
+a = s.find("### Refactor slot"); b = s.find("Collect both RESULTs")
+i = s.find("A central-owned file is one `/gld update` refreshes from the plugin")
+print("OK" if 0 <= a < i < b else "OUT %d %d %d" % (a, i, b))
+COFPY
+)"
+if [ "$_cof_in" = OK ]; then ok "plan(0.97.2): 중앙 관리 파일 정의가 tech-lead 가 읽는 Refactor slot 절 안"
+else bad "plan(0.97.2): 중앙 관리 파일 정의 위치" "OK" "$_cof_in"; fi
+hasfx "plan(0.97.2): 파일명 토큰 앞 경계" "$PLAN" '- **`gate_precommit.py`** as a file-name token — the character before it is none of'
+hasfx "plan(0.97.2): 파일명 토큰 합성 양성 사례" "$PLAN" '`gate_precommit.py.`, `gate_precommit.py를` and `gate_precommit.py` followed by `:` and a line'
+hasfx "plan(0.97.2): 파일명 토큰 합성 음성 사례" "$PLAN" 'number are it; `gate_precommit.py.bak`, `gate_precommit.pyc` and `test_gate_precommit.py` are'
+hasfx "plan(0.97.2): 경로 접두는 .claude/guild/gates/ 만" "$PLAN" 'quote), it counts only when that path begins `.claude/guild/gates/` or `./.claude/guild/gates/`'
+hasfx "plan(0.97.2): 규칙 두 파일은 gates/rules/ 접미로만" "$PLAN" '- **`secrets.md`, `verification.md`** — only with `gates/rules/` right in front'
+hasfx "plan(0.97.2): (c) 는 중앙 관리 파일을 제안하지 않음(2b 포함)" "$PLAN" 'So **do not propose (c) whose Files include a'
+hasfx "plan(0.97.2): 중재 — 중앙 관리 파일 (c) 는 2b 전환 없이 거절" "$PLAN" '- **Files that include a central-owned file** (*Central-owned files*, above) → do not take it,'
+hasfx "plan(0.97.2): 재스폰 최종 시도 매핑에 중앙 관리 파일" "$PLAN" '`skip (not-ready)` when it failed readiness or size or its Files include a central-owned file,'
+hasfx "plan(0.97.2): 슬롯 줄 꼬리 (중앙 관리 파일)" "$PLAN" 'with `(중앙 관리 파일)`.'
+hasfx "plan(0.97.2): 경고 줄 형식(스크립트)" "$PLAN" '`⚠ #n 은 중앙 관리 파일 <file> 을 고칩니다 — 다음 /gld update 는 이 로컬 수정을 덮어쓰자고 제안합니다(새 check 추가일 때만 scripts/local/ 이관을 묻습니다); 플러그인 저장소(plugin.json 의 repository)에서 고칠 일인지 확인하세요`'
+hasfx "plan(0.97.2): 경고 줄 형식(규칙 파일)" "$PLAN" '`⚠ #n 은 중앙 관리 파일 <file> 을 고칩니다 — 다음 /gld update 가 게이트 스크립트와 함께 덮어씁니다; 플러그인 저장소(plugin.json 의 repository)에서 고칠 일인지 확인하세요`.'
+hasfx "plan(0.97.2): 경고 줄은 정본을 가리킴" "$PLAN" 'section (*Central-owned files*), the one place they are written. Read that body: does it name'
+hasfx "plan(0.97.2): 경고일 뿐 게이트 아님" "$PLAN" '`/gld contribute`: it takes only overlay and evolve candidates. **A warning, not a gate** — the'
+hasfx "plan(0.97.2): 중앙 관리 파일 수정만으로는 upstream 아님" "$PLAN" '⚠ **Changing a central-owned file is not by itself `upstream`** (*Central-owned files*, in the'
+# C. 목표 부분 불일치 — 기계적 기준
+hasfx "plan(0.97.2): 목표 재확인은 goal-picks 출신이 있을 때 기계적" "$PLAN" '- **At least one filled `goal` member came from the product-owner'"'"'s goal-picks** (a member made'
+hasfx "plan(0.97.2): 빠진 목표 후보 표시" "$PLAN" '`목표 수정: 원래 «…» — 빠진 목표 후보 #a · #b`'
+hasfx "plan(0.97.2): 사람이 정한 목표는 재계산 안 함" "$PLAN" '- **A goal the human set** with Phase 5'"'"'s `목표 <문장>` edit is never recomputed; only'
+hasfx "plan(0.97.2): 목표 편집" "$PLAN" '- **`목표 <문장>`** → the human'"'"'s sentence becomes the goal (and the tracker'"'"'s title). The goal'
+lacksfx "plan(0.97.2): 판단에 맡기던 옛 목표 재확인 문장 제거" "$PLAN" 'does the goal sentence describe the'
+# D. 권장 선택지
+hasfx "plan(0.97.2): 권장 선택지 렌더링" "$PLAN" '**The recommended option** — the product-owner'"'"'s option carrying `(recommended)`, written'
+hasfx "plan(0.97.2): 권장 + ⚠ 꼬리표 함께" "$PLAN" '`(권장) (이 답이면 이번 스프린트에서 빠집니다)`; the leader never drops the warning. A draft'
+hasfx "plan(0.97.2): 크기 질문은 권장 없음" "$PLAN" 'size question (below) has no recommendation: it is not a product judgment — the ✅ side first,'
+hasfx "plan(0.97.2): 기록되는 답은 꼬리표를 뗀 문구" "$PLAN" '  with its tags removed: `(recommended)` together with the `— <reason>` right after it'
+hasfx "plan(0.97.2): 크기 매핑도 꼬리표 뗀 문구로" "$PLAN" '  is settled — the mapping reads the option'"'"'s wording with its tags removed (`(recommended)` and'
+hasfx "_handoff(0.97.2): K 에 (recommended) 토큰" "$HOMD" 'the recommended-option token `(recommended)` on one `## questions` option line'
+# E. 재스폰 프롬프트 전체 템플릿 (결과 계약 펜스 없음 — 사본 12개 유지)
+hasfx "plan(0.97.2): 재스폰 subagent_type 줄" "$PLAN" '`description`: `tech-lead sprint slot re-spawn`'
+hasfx "plan(0.97.2): 재스폰 템플릿 — Refactor slot 절만 읽기" "$PLAN" 'produce **(c) only** — one refactor-slot proposal (rules: the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md` — read that section before writing (c), not the whole file); do not redo (a) or (b).'
+hasfx "plan(0.97.2): 재스폰 템플릿 — 에픽 파일 회피 조건부" "$PLAN" '<only when epic members are selected: Do not touch the epic members'"'"' files: <their files>.>'
+hasfx "plan(0.97.2): 재스폰 템플릿 — deps-slot.md 에 쓰기" "$PLAN" 'Write (c) to a FILE `docs/specs/sprint-draft/deps-slot.md`. Return one `>>> RESULT <<<` line.'
+hasfx "plan(0.97.2): 재스폰 리더 지시는 블록 밖" "$PLAN" '**The slot re-spawn** (tech-lead, (c) only — the one re-spawn above). Pass the rejected numbers, not *"step 1 is exhausted"*: another'
+lacksfx "plan(0.97.2): 재스폰 옛 산문 인용 제거" "$PLAN" 'asking for **(c) only** — *"exclude #<n>[, #<m>]; continue the search order'
+# G. 머지 설정은 읽기 권한으로 되는 조회
+hasfx "plan(0.97.2): 머지 설정 조회 gh repo view" "$PLAN" 'gh repo view <owner>/<repo> --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed,deleteBranchOnMerge'
+lacksfx "plan(0.97.2): REST 필드 이름 제거" "$PLAN" 'allow_merge_commit'
+hasfx "run(0.97.2): 머지 설정 조회 gh repo view" "$RUNMD2" 'gh repo view <owner>/<repo> --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed,deleteBranchOnMerge'
+lacksfx "run(0.97.2): REST 필드 이름 제거" "$RUNMD2" 'allow_merge_commit'
+hasfx "run(0.97.2): 조회 실패 시 토큰만으로 진행" "$RUNMD2" '*"머지 설정을 확인하지 못했습니다"*'
+hasfx "run(0.97.2): 멈춤은 기본이 아닌 base 가 있을 때만" "$RUNMD2" '**and** the member table has a base that is not the default branch (a `base 의존` cell other than `—`)'
+lacksfx "retro(0.97.2): 옛 필드 이름 제거" "$GLD/commands/sprint/retro.md" 'delete_branch_on_merge'
+hasfx "plan(0.97.2): 조회 실패는 상한 1" "$PLAN" '- **The call fails, or `mergeCommitAllowed` is missing from its output** → do not assume the'
+hasfx "plan(0.97.2): 조회 실패 Phase 5 형태(수락 전)" "$PLAN" '`머지 전략: 알 수 없음(조회 실패) → 스택 없음(상한 1) · 브랜치 자동삭제 ?`'
+hasfx "plan(0.97.2): 조회 실패 Phase 5 형태(수락 후)" "$PLAN" '`머지 전략: 알 수 없음(조회 실패) → squash-sync(상한 <n>) — 하단 PR 머지 뒤 /gld sprint sync · 브랜치 자동삭제 ?`'
+hasfx "plan(0.97.2): 머지 전략 squash-sync 형태" "$PLAN" '`merge commit 불허 → squash-sync(상한 <n>) — 하단 PR 머지 뒤 /gld sprint sync` (`squash-sync`) /'
+hasfx "plan(0.97.2): 머지 전략 스택 거절 형태" "$PLAN" '`merge commit 불허 · 스택 거절 → 스택 없음(상한 1)` (`merge-commit-forbidden`), then'
+hasfx "plan(0.97.2): 트래커 머지 전략 줄도 같은 형태" "$PLAN" '- 머지 전략: <Phase 5 의 머지 전략: 줄과 같은 형태 — merge commit 허용 ✅ |'
+lacksfx "plan(0.97.2): 트래커 옛 머지 전략 줄 제거" "$PLAN" '- 머지 전략: <merge commit 허용 여부> · 브랜치 자동삭제 <여부>'
+# H. 매핑 표시·그 뒤의 장벽
+hasfx "plan(0.97.2): 매핑은 대상 쪽만" "$PLAN" '**The mapping is shown on the'
+hasfx "plan(0.97.2): 그 뒤의 장벽 규칙" "$PLAN" '`그 뒤의 장벽: #e(자식 #c 결정 필요, #c2 분할 예상) · #e2(…)` — the words in the bracket are'
+hasfx "plan(0.97.2): Phase 5 예시의 그 뒤의 장벽 줄" "$PLAN" '  그 뒤의 장벽: #161(자식 #506 결정 필요)'
+
+hasfx "plan(0.97.2 r1): upstream 은 다른 저장소 선수정일 때만(핵심 절)" "$PLAN" 'only when the body requires a fix to land first in another'
+hasfx "plan(0.97.2 r1): 이월 후보는 /gld plan 줄 없음(핵심 절)" "$PLAN" '`→ /gld plan <n>` line: past analyze'
+hasfx "plan(0.97.2 r1): fill 게이트 문장에 이월 구체화 필요" "$PLAN" '착수 가능 in Phase 1b, or 구체화 필요 past analyze'
+hasfx "plan(0.97.2 r1): 이유는 (recommended) 바로 뒤만 뗌" "$PLAN" 'the `— <reason>` right after it'
+hasfx "plan(0.97.2 r1): 목표 후보가 돌아오면 승격 메시지 대체" "$PLAN" 'once a goal-pick is back, this rule'
+hasfx "plan(0.97.2 r1): 멤버 대상 매핑 표기" "$PLAN" '`선행 대기: #e ← #d(자식 #c…)(이번 스프린트)`'
+hasfx "plan(0.97.2 r1): 그 뒤의 장벽 괄호 문구" "$PLAN" '`자식 #c 크기 판정 없음`, `구체화 필요`'
+hasfx "plan(0.97.2 r1): 재스폰 입력은 템플릿 한 곳" "$PLAN" 'its inputs are'
+lacksfx "plan(0.97.2 r1): 재스폰 입력 중복 열거 제거" "$PLAN" 'the slot re-spawn prompt** (after this list) — with the same'
+
+# 0.97.2 r2 — dry-run 4차·오프라인 판정 보강
+# a. 중앙 관리 파일 판정 모호점
+hasfx "plan(0.97.2 r2): 조건부 수정도 지목" "$PLAN" '**A conditional change counts**: written as one branch of the work ("if the investigation'
+hasfx "plan(0.97.2 r2): 배제하려는 언급은 지목 아님" "$PLAN" '**A mention made to rule the change out does not**: when every'
+hasfx "plan(0.97.2 r2): 경고 줄 <file> 은 파일명" "$PLAN" '`<file>` in the line is the **file name** (`gate_precommit.py`, `secrets.md`,'
+# b. 결정이 수정을 모두 배제하면 경고 없음
+hasfx "plan(0.97.2 r2): 결정 배제 예외(두 조건)" "$PLAN" 'unchanged — **unless a decision rules the change out**, which takes both: (1) a decision (one'
+hasfx "plan(0.97.2 r2): 결정이 그 파일·묶인 항목을 다룸" "$PLAN" 'with **that file, or a change item the body ties to that file**, and (2) an answer that rules'
+hasfx "plan(0.97.2 r2): 수정 갈래 모두 배제" "$PLAN" 'out **every** change branch the body writes for that file (measured #349: "3건 모두 명시적'
+hasfx "plan(0.97.2 r2): 일부 배제·무관 결정이면 경고" "$PLAN" 'file changes of defects 1 and 2 remain), or one unrelated to that file → the line.'
+# c. tech-lead 도 같은 규칙 · 조건부 관계는 메모
+hasfx "plan(0.97.2 r2): TL 은 슬롯 값과 무관하게 정본 문단을 읽음" "$PLAN" '**Whatever REFACTOR SLOT is, read the *Central-owned files* paragraph of the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md`**'
+hasfx "plan(0.97.2 r2): TL 중앙 관리 파일 수정만으로는 선수정 아님" "$PLAN" 'changing a central-owned file is not by itself a fix that must land first in another repository — judge size and dependencies on the work in this repository'
+hasfx "plan(0.97.2 r2): TL 조건부 관계는 별도 메모" "$PLAN" '`conditional: #<a> ← #<b> (조건: <condition>) — <note>` (apart from (b)'"'"'s `depends:` size form)'
+hasfx "plan(0.97.2 r2): TL decided 줄이 조건을 정하면 참/거짓" "$PLAN" 'when a body'"'"'s `decided:` line already settles the condition, it is true → a dependency in (a), or false → left out'
+hasfx "plan(0.97.2 r2): 조건부 의견 줄" "$PLAN" '- `의견: #a ← #b (조건: <조건>) — <tech-lead 메모>` — the tech-lead'"'"'s `conditional:` note (a'
+hasfx "plan(0.97.2 r2): 조건부 의견 줄은 둘 다 멤버일 때만" "$PLAN" 'shown **only when both `#a` and `#b` are members**'
+hasfx "plan(0.97.2 r2): 조건부 메모는 의존으로 쓰지 않음" "$PLAN" 'line. The direction is the note'"'"'s — never `↔`. The leader never uses the note as a dependency:'
+hasfx "plan(0.97.2 r2): 선행 미포함은 조건부 메모 제외" "$PLAN" 'conditional note or soft ordering recommendation of the tech-lead'"'"'s) that is **open** (in'
+hasfx "plan(0.97.2 r2): 사유 순서 ③ 은 satisfied 의견 줄" "$PLAN" 'not-ranked candidate, so that the `satisfied` `의견:` line (shown only for a candidate out as'
+lacksfx "plan(0.97.2 r2): 옛 의견 줄 일반 조건 제거" "$PLAN" 'so that the `의견:` line (shown only for a candidate out as `선행 대기`)'
+# e. k=0 에픽
+hasfx "plan(0.97.2 r2): 1b 제외에 k=0 에픽 포함" "$PLAN" '(`<후보 수>` = a + b + c; `제외` = the Issues Phase 1'"'"'s exclusions removed from the read, **k = 0'
+hasfx "plan(0.97.2 r2): k=0 에픽은 에픽마다 한 줄, 사람 작업 필요 다음" "$PLAN" 'candidate: Phase 5 `통합 점검 대기 — /gld dev #e`, one line per such epic, right after the'
+hasfx "plan(0.97.2 r2): Phase 5 템플릿에 통합 점검 대기 줄" "$PLAN" '  통합 점검 대기 — /gld dev #458'
+# f. 후보 N개 중 M개
+hasfx "plan(0.97.2 r2): 첫 줄 M·N 정의" "$PLAN" 'The first line, `후보 N개 중 M개`: M = the members taken (a new slot draft included), N = the'
+hasfx "plan(0.97.2 r2): M 이 N 을 넘을 수 있음" "$PLAN" 'candidates judged (1b'"'"'s `<후보 수>`) — a new slot draft is not among the N, so M can exceed N.'
+# g. 앞서 구체화 필요로 보고한 — 세 번째 결말
+hasfx "plan(0.97.2 r2): 1b 안내에 세 결말" "$PLAN" '(`앞서 구체화 필요로 보고한 #n — 이번에 답해 담았습니다 / 건너뛰었습니다 / 이번에 답했지만 빠졌습니다(결정했지만 제외 줄 참고)`)'
+lacksfx "plan(0.97.2 r2): 두 결말만 있던 옛 문구 제거" "$PLAN" '이번에 답해 담았습니다 / 건너뛰었습니다`)'
+hasfx "plan(0.97.2 r2): Phase 5 세 번째 결말" "$PLAN" '`이번에 답했지만 빠졌습니다(결정했지만 제외 줄 참고)` — answered but out of the sprint (size,'
+hasfx "plan(0.97.2 r2): 사유는 결정했지만 제외 줄에만" "$PLAN" 'depth, a dependency, a drop — whichever): the reason is written on its `결정했지만 제외:` line'
+# h. 스택 없음 편집
+hasfx "plan(0.97.2 r2): Phase 0 거절은 스택 없음 편집" "$PLAN" '(no stacking; every PR targets the default branch) — Phase 5'"'"'s **`스택 없음`** edit.'
+hasfx "plan(0.97.2 r2): 스택 없음은 squash-sync 일 때만" "$PLAN" '- **`스택 없음`** → offered **only when 상한 근거 is `squash-sync`** — including a `squash-sync`'
+hasfx "plan(0.97.2 r2): 안내 줄 스택 없음은 squash-sync 일 때만" "$PLAN" '`[/ 스택 없음]` is shown **only when 상한 근거 is `squash-sync`** (Edits, `스택 없음`), rendered without'
+hasfx "plan(0.97.2 r2): 스택 없음 → merge-commit-forbidden·상한 1·sync 안내 제거" "$PLAN" 'stacking (Phase 0 step 5): rewrite 상한 근거 to `merge-commit-forbidden` and `EFFECTIVE_CAP` to'
+hasfx "plan(0.97.2 r2): 스택 없음은 컷 제안으로" "$PLAN" '**This edit leads to a cut proposal**: a depth over 1 gets step 4'"'"'s usual proposal to cut.'
+hasfx "plan(0.97.2 r2): 깊이 수락은 스택 없음을 무름" "$PLAN" '**Accepting that depth instead of the cut switches back to `squash-sync`** (step 4) — it undoes'
+hasfx "plan(0.97.2 r2): 스택 없음이면 슬롯은 stack-cap 으로 빠짐" "$PLAN" '`스택 없음`. A slot, if there is one, leaves by itself once the depth is 1 (the cut accepted —'
+hasfx "plan(0.97.2 r2): config 일 때 스택 없음 답" "$PLAN" 'line: `merge commit 이 허용되어 스택은 그대로 머지됩니다 — 깊이를 줄이려면 크기 N 이나 드롭`.'
+
+hasfx "_handoff: K 에 conditional: 메모 토큰" "$HOMD" '`conditional: #<a> ← #<b> (조건: <condition>) — <note>`'
+
+hasfx "plan(0.97.2 r2 cr): 스택 없음 안내 렌더링" "$PLAN" 'the line then ends `재정렬 / 스택 없음 요청 가능)`'
+hasfx "plan(0.97.2 r2 cr): 슬롯은 깊이 1 이 된 뒤 빠짐" "$PLAN" 'leaves by itself once the depth is 1'
+hasfx "plan(0.97.2 r2 cr): stack-cap 비움 문구" "$PLAN" '`🧹 리팩토링 슬롯: 비움 (stack-cap) — 스택 없음(상한 1)에서는 슬롯이 스택을 늘립니다`'
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -3500,7 +3644,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=1245   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=1357   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

@@ -92,12 +92,26 @@ Each its own Bash call.
    **An interrupted net splice** — only now, after the verdict above is `proceed` **and** the human chose to **add** these issues to the open sprint (never on the "retro first" choice — then say the approved net was not applied — and never under dry-run without asking): if the open tracker has a `<!-- guild:sprint:slot-net -->` comment whose `slot: #<n>` is still the tracker's slot member, that Issue's body lacks `<!-- guild:safety-net -->`, and the Issue is still at `guild:analyze` or earlier, splice the comment's parts (the Safety net section, its Success-criteria lines, and the known-gaps/findings part) into the body (Phase 6 step 3's rules — read, splice, truncation check, full rewrite) and say so. Past analyze → do not splice (its AC are fixed); tell the human the approved net was not applied. Body already holding the marker → it was applied; do nothing.
 5. **Merge strategy + branch deletion** — the stack's premise:
    ```bash
-   gh api repos/<owner>/<repo> --jq '{merge: .allow_merge_commit, squash: .allow_squash_merge, rebase: .allow_rebase_merge, delete_branch: .delete_branch_on_merge}'
+   gh repo view <owner>/<repo> --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed,deleteBranchOnMerge
    ```
-   - `allow_merge_commit == false` (squash/rebase only) → **stack with `squash-sync`** (`_sprint_dag.md` Section G): the cap stays `config.sprint.max_stack_depth`. Under squash, merging the bottom PR leaves its commits *not* ancestors of the base, so the upper PR would show them **again**; `/gld sprint sync` fixes that by merging the default branch into the upper branch (a merge, not a rebase — INV3), verifying, and pushing. Stacked PRs open as **drafts** so they cannot merge before their base. Tell the human in Phase 5: *"하단 PR을 머지한 뒤 `/gld sprint sync`를 실행하세요. 하단이 리뷰로 바뀌었다면 상단은 사람이 따라잡습니다. draft에는 리뷰 요청 알림이 가지 않습니다 — 아래부터 리뷰하세요."* The human may decline → **`EFFECTIVE_CAP = 1`**, token `merge-commit-forbidden` (no stacking; every PR targets the default branch).
+   ⚠ **A read that works with read permission.** The REST repository endpoint returns its merge
+   settings as `null` to an account that is not a repo admin (measured on `cli/cli`: every field
+   `null` over REST, the real values from this call with the same account; on a repo the account
+   administers the two agree). Read over REST, a non-admin's settings would fall into the
+   unknown case below and cap every sprint at 1.
+   The repo is positional; there is no `--repo` flag.
+   - `mergeCommitAllowed == false` (squash/rebase only) → **stack with `squash-sync`** (`_sprint_dag.md` Section G): the cap stays `config.sprint.max_stack_depth`. Under squash, merging the bottom PR leaves its commits *not* ancestors of the base, so the upper PR would show them **again**; `/gld sprint sync` fixes that by merging the default branch into the upper branch (a merge, not a rebase — INV3), verifying, and pushing. Stacked PRs open as **drafts** so they cannot merge before their base. Tell the human in Phase 5: *"하단 PR을 머지한 뒤 `/gld sprint sync`를 실행하세요. 하단이 리뷰로 바뀌었다면 상단은 사람이 따라잡습니다. draft에는 리뷰 요청 알림이 가지 않습니다 — 아래부터 리뷰하세요."* The human may decline → **`EFFECTIVE_CAP = 1`**, token `merge-commit-forbidden` (no stacking; every PR targets the default branch) — Phase 5's **`스택 없음`** edit.
      ⚠ **The cap is a value, not a warning.** Carry `EFFECTIVE_CAP` through Phase 4 (it is what `--mode depth` is given) and write **two lines** into the tracker body: the **스택 깊이 상한** value and a **상한 근거** token — `config` (merge commits allowed) / `squash-sync` / `merge-commit-forbidden` / `human-override` (a pre-0.91 tracker that stacked on squash without sync; never written now). ⚠ Machine tokens, not prose: `run` compares the token with the repo *now* and picks the PR mode from it. A line carrying two numbers ("상한 3 (사람이 1로 승인)") does not say which one is in force.
-   - `delete_branch_on_merge == false` → note: GitHub will not retarget an upper PR by itself; `sprint sync` does.
-   - A field coming back `null` (permissions) → treat as unknown, warn, and do not silently assume the permissive value.
+   - `deleteBranchOnMerge == false` → note: GitHub will not retarget an upper PR by itself; `sprint sync` does.
+   - **The call fails, or `mergeCommitAllowed` is missing from its output** → do not assume the
+     permissive value: **`EFFECTIVE_CAP = 1`**, token `merge-commit-forbidden` (conservative), and
+     Phase 5 says
+     `머지 전략: 알 수 없음(조회 실패) → 스택 없음(상한 1) · 브랜치 자동삭제 ?`.
+     The human accepting a depth is the same switch to `squash-sync` as on a repo known to
+     disallow merge commits (Phase 4 step 4); the line then reads
+     `머지 전략: 알 수 없음(조회 실패) → squash-sync(상한 <n>) — 하단 PR 머지 뒤 /gld sprint sync · 브랜치 자동삭제 ?`
+     — only these two forms. Only `deleteBranchOnMerge` missing → only that half reads
+     `브랜치 자동삭제 ?`.
 
 ## Phase 1 — Collect candidates
 
@@ -147,7 +161,8 @@ Per epic `#e` (a candidate with `guild:children`):
   `closed-not-done: <#c…>` = those of them that are closed (their bodies are not in the Phase 1
   output).
 - **k = 0** → every child is done; only `dev` Phase 2c's integration check is left. Not a
-  candidate: Phase 5 `통합 점검 대기 — /gld dev #e`.
+  candidate: Phase 5 `통합 점검 대기 — /gld dev #e`, one line per such epic, right after the
+  `사람 작업 필요` line; it counts in Phase 1b's first-line `제외`.
 - **The extended dependency floor** (the leader computes it, here, mechanically): the `#<n>` in
   the epic's own body's `Depends on` lines and in the remaining children's `depends_text`,
   **minus each line's own Issue, its parent (the epic) and its siblings (the epic's other
@@ -235,6 +250,11 @@ The candidate set is Phase 1's, unchanged. Split it in three:
 | **구체화 필요** | an idea, or a plan with an open question. Handed to `dev` today it ends at `needs-human` | the card's column is **cleared** → the null bucket, i.e. `Issues`. **Grouped by theme and reported** |
 | **막힘** | what to build is decided, but something only a human can clear blocks it — a credential, a real device, a fix in **another repository** | the card's column is **cleared** → the null bucket, like 구체화 필요. **Reported as its own group**; Phase 5 lists it under `사람 작업 필요: #n (<credential\|device\|upstream\|other>)` — the class from this 1b reading (Phase 2 leaves it out of the product-owner's CANDIDATES, so the product-owner never rates it) |
 
+⚠ **Changing a central-owned file is not by itself `upstream`** (*Central-owned files*, in the
+Refactor slot section) — 막힘 (upstream) only when the body requires a fix to land first in another
+repository. A change the body would make here is Phase 5's warning line, not a block: the same
+kind of Issue must not come out 막힘 on one reading and a member on another.
+
 An **epic** (`guild:children`) is judged by its **remaining children's bodies** (Phase 1 —
 the children without `guild:done`), not its own: 착수 가능 / 구체화 필요 / 막힘 — **막힘 from
 every remaining child, 구체화 필요 only from the children to be decided** (Phase 1's bounds: a
@@ -256,7 +276,8 @@ issues, which it does today.
 Report all three groups. This is the whole point of the phase — the second and third groups
 are a work list for the human. The first line is defined, not free-form:
 `판정 <후보 수>개 · 착수 가능 <a> · 구체화 필요 <b> · 막힘 <c> · 제외 <Phase 1 에서 뺀 수> · 절단 <없음|있음>`
-(`<후보 수>` = a + b + c; `제외` = the Issues Phase 1's exclusions removed from the read).
+(`<후보 수>` = a + b + c; `제외` = the Issues Phase 1's exclusions removed from the read, **k = 0
+epics included** — `통합 점검 대기`).
 
 ```
 판정 41개 · 착수 가능 34 · 구체화 필요 4 · 막힘 3 · 제외 6 · 절단 없음
@@ -269,7 +290,7 @@ are a work list for the human. The first line is defined, not free-form:
   그룹 A «알림 채널 재편»   #120 #121 #127
       → 셋 다 "어디로 보낼지"가 미정입니다. 함께 정하는 편이 낫습니다
       → /gld plan 120
-  그룹 B «관리자 화면»      #133
+  그룹 B «관리자 화면»      #133 · #140 (이월 — 채우기를 막지 않음)
       → 화면 범위가 한 줄뿐입니다
       → /gld plan 133
   그룹 C «일정 엔진»        #459 (에픽)
@@ -280,9 +301,15 @@ are a work list for the human. The first line is defined, not free-form:
   #190 (credential) · #246 (device) · #357 (upstream)
 ```
 
+**A carried-over 구체화 필요** — an ordinary candidate (not an epic) at stage `guild:design` or
+later — is reported as judged, with `(이월 — 채우기를 막지 않음)` beside its number, and gets no
+`→ /gld plan <n>` line: past analyze its acceptance criteria are written, so an answer in its body
+reaches nothing, and the fill does not gate on 구체화 필요 there (Phase 3 step 1 — the same bound
+and reason as the readiness exemption). 막힘 is reported the same at every stage.
+
 When attended and not `--no-ask`, add one line under the second group: *"일부는 이번 플래닝 중에
 결정 질문으로 담을 수 있습니다"* — which ones is known only after Phase 2, so Phase 5 says which
-were asked (`앞서 구체화 필요로 보고한 #n — 이번에 답해 담았습니다 / 건너뛰었습니다`).
+were asked (`앞서 구체화 필요로 보고한 #n — 이번에 답해 담았습니다 / 건너뛰었습니다 / 이번에 답했지만 빠졌습니다(결정했지만 제외 줄 참고)`).
 
 ⚠ **Larger refinement is not this command's job.** A decision that one answer settles is asked
 in Phase 3; anything bigger stays with the human, who runs the existing **`/gld plan <issue>`**,
@@ -357,7 +384,7 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
 **Product Owner** (value):
 - `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `product-owner sprint select`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. **A number that is not in CANDIDATES (product-owner) is never ranked, made the goal, or given a `Q:`** — even when its body is in the BODIES output; pointing at it from another candidate's `prerequisite: #<d>` or `decide-in: #<c>` is allowed, and writing that dependency is required. **Judge from the bodies, not the one-line scope**: run the read-only command given as BODIES (after CANDIDATES) yourself and read its output to the end — when the tool moves it to a file, page through it with Read's `offset`/`limit` (it prints one Issue per line, the first line is the count). A `guild:children` candidate is an epic already split into children — taken, `run` carries its remaining children through in order to the end. Its children cannot be picked one by one, so rank the epic as one candidate, exactly like the others. Its readiness is judged from its remaining (not `guild:done`) children's bodies — open ones are in the same output, a `closed-not-done` one you read with `gh issue view <c> --json body`. **A child whose stage in `children:` is later than `guild:analyze` gets no `decide-in:`, and leave it out of the readiness judgment** — its acceptance criteria are already written, so an answer in its body would reach nothing. Do not draft decision questions for an epic — when one of its children needs a decision, write that child's number in the epic's readiness `note` (`decide-in: #<c>`), and an unfinished prerequisite of the epic there too (`prerequisite: #<d>`); neither goes under `## questions`. **An epic whose `children:` shows `바닥 선행 미완 #<d…>` or `바닥 선행 미완 판정 불가` is not taken this sprint** — do not make it the center of the goal. Propose (a) **one sentence** naming what this iteration is for — it becomes the tracker's title, so it names the aim, never a list of the issues; (b) **goal-picks**: the candidates that serve it, in priority order; (c) **other-ranked**: every other candidate worth starting now, in priority order, whatever its relation to the goal — do not leave one out for being off-goal, the sprint fills its remaining seats from this list; include one that is `unclear` when a single decision would make it startable (its question is drafted below). For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Mark every candidate with an `unclear` dimension and, for each such dimension, draft the decision that would settle it**: one question line and 2–3 answer options of one line each — or, when no answer from the requester can settle it, `human-work: <credential|device|upstream|other>` instead of a question (`upstream` = a fix that must land first in **another repository**). **An unfinished prerequisite Issue is not human work**: rate that dimension (usually Constraint) `unclear` and write `prerequisite: #<d>` instead — it waits on that Issue, not on a person. **Each `## questions` entry is exactly one of `Q:` / `human-work:` / `prerequisite:`** — when a question and human work both apply, write `human-work:` (an answer would not make it takeable). **Write `Q:` only for a candidate you put in goal-picks or other-ranked** — a not-ranked one is never asked; `human-work:` and `prerequisite:` are written for a not-ranked one too. The leader puts your drafts to the human when one is present and leaves those candidates out when unattended. **Do not select a candidate tagged `refactor-slot`** (an orphaned refactor-slot draft — the slot logic handles it), **and rate every candidate tagged `refactor` or `refactor-slot`, whether or not you selected it** — the leader may take one as the sprint's refactor slot and needs your ratings to do so. Write the result to a FILE `docs/specs/sprint-draft/po.md` (do not paste it back) with exactly these section headings, in this order: `## goal` · `## goal-picks` · `## other-ranked` · `## readiness` (a table `| # | Goal | Constraint | Success | note |`) · `## questions` (per drafted dimension `### #<n> <Goal|Constraint|Success>`, then exactly one of: `Q: <question>` and `- A) …` lines (a goal-picks or other-ranked candidate only), `human-work: <class>`, or `prerequisite: #<d>`) · `## not-ranked` (every candidate you put in neither goal-picks nor other-ranked, one line each: `#<n> <reason>`).
+  > Adopt the persona in `.claude/agents/product-owner.md`. Read the candidate list below and `docs/standards/charter.md`. **A number that is not in CANDIDATES (product-owner) is never ranked, made the goal, or given a `Q:`** — even when its body is in the BODIES output; pointing at it from another candidate's `prerequisite: #<d>` or `decide-in: #<c>` is allowed, and writing that dependency is required. **Judge from the bodies, not the one-line scope**: run the read-only command given as BODIES (after CANDIDATES) yourself and read its output to the end — when the tool moves it to a file, page through it with Read's `offset`/`limit` (it prints one Issue per line, the first line is the count). A `guild:children` candidate is an epic already split into children — taken, `run` carries its remaining children through in order to the end. Its children cannot be picked one by one, so rank the epic as one candidate, exactly like the others. Its readiness is judged from its remaining (not `guild:done`) children's bodies — open ones are in the same output, a `closed-not-done` one you read with `gh issue view <c> --json body`. **A child whose stage in `children:` is later than `guild:analyze` gets no `decide-in:`, and leave it out of the readiness judgment** — its acceptance criteria are already written, so an answer in its body would reach nothing. Do not draft decision questions for an epic — when one of its children needs a decision, write that child's number in the epic's readiness `note` (`decide-in: #<c>`), and an unfinished prerequisite of the epic there too (`prerequisite: #<d>`); neither goes under `## questions`. **An epic whose `children:` shows `바닥 선행 미완 #<d…>` or `바닥 선행 미완 판정 불가` is not taken this sprint** — do not make it the center of the goal. Propose (a) **one sentence** naming what this iteration is for — it becomes the tracker's title, so it names the aim, never a list of the issues; (b) **goal-picks**: the candidates that serve it, in priority order; (c) **other-ranked**: every other candidate worth starting now, in priority order, whatever its relation to the goal — do not leave one out for being off-goal, the sprint fills its remaining seats from this list; include one that is `unclear` when a single decision would make it startable (its question is drafted below). For each candidate rate the three readiness dimensions of `_readiness.md` — **Goal / Constraint / Success-criteria** — as `clear` / `partial` / `unclear` (ASCII machine tokens, never localized). **Mark every candidate with an `unclear` dimension and, for each such dimension, draft the decision that would settle it**: one question line and 2–3 answer options of one line each — or, when no answer from the requester can settle it, `human-work: <credential|device|upstream|other>` instead of a question (`upstream` = a fix that must land first in **another repository**). **An unfinished prerequisite Issue is not human work**: rate that dimension (usually Constraint) `unclear` and write `prerequisite: #<d>` instead — it waits on that Issue, not on a person. **Each `## questions` entry is exactly one of `Q:` / `human-work:` / `prerequisite:`** — when a question and human work both apply, write `human-work:` (an answer would not make it takeable). **Write `Q:` only for a candidate you put in goal-picks or other-ranked** — a not-ranked one is never asked; `human-work:` and `prerequisite:` are written for a not-ranked one too. The leader puts your drafts to the human when one is present and leaves those candidates out when unattended. **Do not select a candidate tagged `refactor-slot`** (an orphaned refactor-slot draft — the slot logic handles it), **and rate every candidate tagged `refactor` or `refactor-slot`, whether or not you selected it** — the leader may take one as the sprint's refactor slot and needs your ratings to do so. Write the result to a FILE `docs/specs/sprint-draft/po.md` (do not paste it back) with exactly these section headings, in this order: `## goal` · `## goal-picks` · `## other-ranked` · `## readiness` (a table `| # | Goal | Constraint | Success | note |`) · `## questions` (per drafted dimension `### #<n> <Goal|Constraint|Success>`, then exactly one of: `Q: <question>` and `- A) …` lines, the option you recommend first as `- A) <answer> (recommended) — <reason>` (`(recommended)` stays in English; one option only) (a goal-picks or other-ranked candidate only), `human-work: <class>`, or `prerequisite: #<d>`) · `## not-ranked` (every candidate you put in neither goal-picks nor other-ranked, one line each: `#<n> <reason>`).
   > <!-- guild:result-contract -->
   > Return EXACTLY one status line, preceded by a `>>> RESULT <<<` sentinel on its own line. Anything before the sentinel is ignored. Status is one of `DONE` / `DONE_WITH_CONCERNS: <one-line>` / `BLOCKED: <one-line>` / `NEEDS_CONTEXT: <one-line>` / `FAIL: <reason>`. **Artifacts are passed as files, not pasted** — write to the working tree or `docs/specs/<issue>/` and name the path in the RESULT line; never inline an artifact body into it.
   > <!-- /guild:result-contract -->
@@ -367,7 +394,7 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
 **Tech Lead** (dependencies and size):
 - `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `tech-lead sprint select`
 - `prompt`:
-  > Adopt the persona in `.claude/agents/tech-lead.md`. From CANDIDATES (tech-lead) (below) and `docs/standards/architecture.md`, produce (a) the **dependency relations** among them — which is a foundation for which, using the `Depends on: #<n>` notes in the bodies as input (only each line's first sentence, before `. `; a line beginning `Depends on: 없음` or `Depends on: none` is no dependency) and **adding** relations where the code says otherwise — add only, never remove one a body states (the leader computes those itself). A bullet line that follows a `Depends on` line with no blank line between, in a `## 의존성` section (`- #161 … (선행 필수)`), is a dependency too — add it. A soft ordering recommendation (better after another, not required) is not a dependency: keep it out of (a), as a separate note. When you judge that a dependency a body states is **already satisfied** in the code or at the child level, keep it in (a) all the same and write a **separate note** `satisfied: #<e> ← #<d> — via #<x> — <evidence>` (`#x` = the Issue that actually delivered what was needed) — it is shown to the human, it removes nothing. For an epic, (a) also covers its remaining children's dependencies outside the epic. And (b) a **size** verdict per candidate: single dev-unit ✅, or ⚠ **likely to split at design**; for an epic, `epic ×<k>` (k = its remaining children) **and a ✅/⚠ for each child to be sized** — a child is a leaf and cannot be split again; **do not size a child whose stage in `children:` is `guild:execute` or later** (design does not run on it again) — keep writing its (a) dependencies and its files; when the size turns on a decision not yet made, `depends: <option>→✅, <option>→⚠`, saying in plain words which decision makes it ✅ (the leader maps that onto the product-owner's options, or asks it itself); **do not put ⚠ in front of `depends:`** — when it looks likely to split whatever the decision, write ⚠ alone (with its reason); the `decided:` lines of a candidate's body and of an epic's remaining children's bodies are evidence for the size — a decision a decided line already made is not a `depends:`; plus the source files each candidate will most likely touch (for an epic, its remaining children's; a directory is acceptable). Judge from the bodies: run the BODIES command yourself and read its output to the end (Read's `offset`/`limit` when it is moved to a file); a `closed-not-done` child's body via `gh issue view <c> --json body`. Do NOT read the product-owner's output; judge independently. **When REFACTOR SLOT is `on`**, also produce (c) **one refactor-slot proposal** (rules: the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md` — read that section before writing (c), not the whole file). Write to a FILE `docs/specs/sprint-draft/deps.md`. Return one `>>> RESULT <<<` line. CANDIDATES (tech-lead): <the product-owner's entry format, for **every** candidate — those left out of the product-owner's list included, each with `slot: ineligible`>. BODIES: <same as above>. REFACTOR SLOT: <`on` | `off`>. DEFAULT BRANCH: <the repo's default branch name — the leader has already fetched `origin/<it>` — or `unavailable`>. PAST SLOTS: <the `refactor` field of every `config.sprint.history` entry that has one, or `none`>. VISUAL: <available or not per `_handoff.md` Section L.1 — `available` with `visual.packages` and `visual.tests`, or `unavailable`> (the gap check's visual half needs it; you are not reading config.json yourself). <`_handoff.md` Section K's language line, rendered in `config.language` — the same line as the product-owner's> Write output in `config.language`.
+  > Adopt the persona in `.claude/agents/tech-lead.md`. From CANDIDATES (tech-lead) (below) and `docs/standards/architecture.md`, produce (a) the **dependency relations** among them — which is a foundation for which, using the `Depends on: #<n>` notes in the bodies as input (only each line's first sentence, before `. `; a line beginning `Depends on: 없음` or `Depends on: none` is no dependency) and **adding** relations where the code says otherwise — add only, never remove one a body states (the leader computes those itself). A bullet line that follows a `Depends on` line with no blank line between, in a `## 의존성` section (`- #161 … (선행 필수)`), is a dependency too — add it. A soft ordering recommendation (better after another, not required) is not a dependency: keep it out of (a), as a separate note. When you judge that a dependency a body states is **already satisfied** in the code or at the child level, keep it in (a) all the same and write a **separate note** `satisfied: #<e> ← #<d> — via #<x> — <evidence>` (`#x` = the Issue that actually delivered what was needed) — it is shown to the human, it removes nothing. For an epic, (a) also covers its remaining children's dependencies outside the epic. **Whatever REFACTOR SLOT is, read the *Central-owned files* paragraph of the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md`** (the one place it is written; not the whole file): changing a central-owned file is not by itself a fix that must land first in another repository — judge size and dependencies on the work in this repository. Write in (a) only a dependency that holds with no condition; a relation that holds only under a condition is a **separate note**, like a soft ordering recommendation — `conditional: #<a> ← #<b> (조건: <condition>) — <note>` (apart from (b)'s `depends:` size form) — except that when a body's `decided:` line already settles the condition, it is true → a dependency in (a), or false → left out. And (b) a **size** verdict per candidate: single dev-unit ✅, or ⚠ **likely to split at design**; for an epic, `epic ×<k>` (k = its remaining children) **and a ✅/⚠ for each child to be sized** — a child is a leaf and cannot be split again; **do not size a child whose stage in `children:` is `guild:execute` or later** (design does not run on it again) — keep writing its (a) dependencies and its files; when the size turns on a decision not yet made, `depends: <option>→✅, <option>→⚠`, saying in plain words which decision makes it ✅ (the leader maps that onto the product-owner's options, or asks it itself); **do not put ⚠ in front of `depends:`** — when it looks likely to split whatever the decision, write ⚠ alone (with its reason); the `decided:` lines of a candidate's body and of an epic's remaining children's bodies are evidence for the size — a decision a decided line already made is not a `depends:`; plus the source files each candidate will most likely touch (for an epic, its remaining children's; a directory is acceptable). Judge from the bodies: run the BODIES command yourself and read its output to the end (Read's `offset`/`limit` when it is moved to a file); a `closed-not-done` child's body via `gh issue view <c> --json body`. Do NOT read the product-owner's output; judge independently. **When REFACTOR SLOT is `on`**, also produce (c) **one refactor-slot proposal** (rules: the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md` — read that section before writing (c), not the whole file). Write to a FILE `docs/specs/sprint-draft/deps.md`. Return one `>>> RESULT <<<` line. CANDIDATES (tech-lead): <the product-owner's entry format, for **every** candidate — those left out of the product-owner's list included, each with `slot: ineligible`>. BODIES: <same as above>. REFACTOR SLOT: <`on` | `off`>. DEFAULT BRANCH: <the repo's default branch name — the leader has already fetched `origin/<it>` — or `unavailable`>. PAST SLOTS: <the `refactor` field of every `config.sprint.history` entry that has one, or `none`>. VISUAL: <available or not per `_handoff.md` Section L.1 — `available` with `visual.packages` and `visual.tests`, or `unavailable`> (the gap check's visual half needs it; you are not reading config.json yourself). <`_handoff.md` Section K's language line, rendered in `config.language` — the same line as the product-owner's> Write output in `config.language`.
 
 ### Refactor slot — one per sprint, reserved, never forced
 
@@ -438,6 +465,25 @@ knows it cannot be taken (Phase 2's two lists):
    a hotspot that is already tested is no reason to fill the slot.
 3. **Nothing qualifies** → `none: <token>` — `no-candidate` (no hotspot overlaps this sprint's
    work, or no change found that would make it easier, and no hotspot with a safety-net gap).
+
+**Central-owned files — never (c).** A central-owned file is one `/gld update` refreshes from the plugin: the gate script and the two universal gate rules. A text names one when it holds:
+- **`gate_precommit.py`** as a file-name token — the character before it is none of
+  `[A-Za-z0-9_.-]` and it is not prefixed `test_`, and what follows is neither one of
+  `[A-Za-z0-9_]` nor a `.` followed by one of `[A-Za-z0-9]`. So a sentence-final
+  `gate_precommit.py.`, `gate_precommit.py를` and `gate_precommit.py` followed by `:` and a line
+  number are it; `gate_precommit.py.bak`, `gate_precommit.pyc` and `test_gate_precommit.py` are
+  not. When a path is attached in front (the run of characters back to a space, a backtick or a
+  quote), it counts only when that path begins `.claude/guild/gates/` or `./.claude/guild/gates/`
+  — `.claude/guild/gates/scripts/gate_precommit.py` and the short `.claude/guild/gates/gate_precommit.py`
+  are it, a plugin source path such as `skills/gld/gates/gate_precommit.py` is not.
+- **`secrets.md`, `verification.md`** — only with `gates/rules/` right in front
+  (`gates/rules/verification.md`); `docs/standards/verification.md` is not one.
+The next `/gld update` offers to overwrite a local change to the script (it asks to move the
+change into `scripts/local/` only when it finds a new check), and the two rule files are
+overwritten together with the script. So **do not propose (c) whose Files include a
+central-owned file** — at any step, **a 2b included**: a 2b changes no production code itself,
+but the refactor that follows it would fork that file. The leader rejects one that slips in
+(the arbitration below). The same definition is what Phase 5's warning line on a member reads.
 
 **The gap check** (every step 0–2b candidate). Budget: the ≤ ~3 hotspot files and their test
 files, ≤ ~5 behaviors per file, ≤ ~3 commit diffs **in total**; a Grep with a few lines of
@@ -606,6 +652,14 @@ unattended the leader would have to guess alone:
   (the Safety net bullets in the Refactor slot section; the same conversion applies to a
   readiness rejection confined to the refactor's own sections) — and a step-0 or step-1 pick
   goes to the re-spawn.
+- **Files that include a central-owned file** (*Central-owned files*, above) → do not take it,
+  and never convert it to a 2b. A step-0 or step-1 pick goes to the re-spawn bullet below; a
+  step-2 draft records `skip (not-ready)` with no re-spawn; a re-spawned final attempt rejected
+  for it records `skip (not-ready)` too. The tracker token stays `skip (not-ready)`; **only when
+  the slot ends for this reason** (the final `skip (not-ready)` came from a central-owned file)
+  does Phase 5's slot line end with `(중앙 관리 파일)` — a re-spawn that brings back a normal slot
+  shows no tail. A step-1 pick rejected for it that goes back to the feature picks (below) is a
+  member like any other, and Phase 5's central-owned-file warning line applies to it.
 - ⚠ **A new draft was never in the product-owner's CANDIDATES**, so its readiness comes from
   the tech-lead's own **Readiness** ratings in (c). Re-read the draft's Success-criteria
   yourself before accepting a `clear` — the author of a draft is the one reader least likely to
@@ -635,19 +689,14 @@ unattended the leader would have to guess alone:
   **one** re-spawn per `plan` run, and it always runs **after the Phase 3 fill is done (whether
   or not it cut anything)** — a readiness or size rejection made during Phase 2 waits until
   then, so the re-spawn gets the real member list. Spawn the tech-lead once more,
-  asking for **(c) only** — *"exclude #<n>[, #<m>]; continue the search order from where those were; draft
-  against the selected feature members' files"* (a rejected draft has no number — name it by
-  its title: *"exclude the draft «<title>»"*; when epic members are selected, add *"do not touch
-  the epic members' files: <their files>"*) — with the same `CANDIDATES (tech-lead)` (tags and `slot:` fields included), BODIES, REFACTOR SLOT, VISUAL, DEFAULT BRANCH and
-  PAST SLOTS as the first spawn, plus the selected feature members and the path of `deps.md`
-  (its (b) per-candidate files are step 2's input); the prompt ends with the same Section K
-  language line. It writes `deps-slot.md`, leaving
+  asking for **(c) only**, with **the slot re-spawn prompt** (after this list — its inputs are
+  listed there once). It writes `deps-slot.md`, leaving
   `deps.md`'s (a)/(b) untouched; from then on Phase 4 reads the slot's **Files** and
-  **Prepares** from `deps-slot.md`. Pass the rejected numbers, not *"step 1 is exhausted"*: another
-  existing `refactor` Issue may still qualify. Arbitrate that (c) the same way; if it is
+  **Prepares** from `deps-slot.md`. Arbitrate that (c) the same way; if it is
   rejected too, or comes back `none`, the slot ends in a `skip` keyed on the **final**
   attempt's reason — `skip (no-candidate)` when it prepares no member or came back `none`,
-  `skip (not-ready)` when it failed readiness or size, `skip (epic-overlap)` when it overlaps
+  `skip (not-ready)` when it failed readiness or size or its Files include a central-owned file,
+  `skip (epic-overlap)` when it overlaps
   an epic member. A draft rejected for readiness or
   size ends in `skip (not-ready)` without a re-spawn (or, for size — or readiness confined to
   its refactor sections — with a net that fits, as a 2b, above). A **converted** 2b left
@@ -670,6 +719,14 @@ unattended the leader would have to guess alone:
 - ⚠ **One Issue, one role.** A `refactor` or `refactor-slot` candidate the product-owner also
   ranked as a feature pick is the slot, not both — remove it from the feature picks, or the sprint holds
   one fewer member than the capacity reasoning says.
+
+**The slot re-spawn** (tech-lead, (c) only — the one re-spawn above). Pass the rejected numbers, not *"step 1 is exhausted"*: another
+existing `refactor` Issue may still qualify. A rejected draft has no number — name it by its
+title: *"exclude the draft «<title>»"*. Write the epic sentence only when epic members are
+selected; otherwise leave it out.
+- `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `tech-lead sprint slot re-spawn`
+- `prompt`:
+  > Adopt the persona in `.claude/agents/tech-lead.md`. This is a second request, for the sprint's refactor slot only: produce **(c) only** — one refactor-slot proposal (rules: the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md` — read that section before writing (c), not the whole file); do not redo (a) or (b). Exclude <#n[, #m] | the draft «<title>»>; continue the search order from where those were; draft against the selected feature members' files. <only when epic members are selected: Do not touch the epic members' files: <their files>.> Judge from the bodies: run the BODIES command yourself and read its output to the end (Read's `offset`/`limit` when it is moved to a file); a `closed-not-done` child's body via `gh issue view <c> --json body`. Your first answer's (b) per-candidate files are in `docs/specs/sprint-draft/deps.md` — read them as step 2's input, and do not edit that file. Write (c) to a FILE `docs/specs/sprint-draft/deps-slot.md`. Return one `>>> RESULT <<<` line. CANDIDATES (tech-lead): <the same entries as the first spawn — tags and `slot:` fields included>. BODIES: <same as the first spawn>. REFACTOR SLOT: on. DEFAULT BRANCH: <same as the first spawn>. PAST SLOTS: <same as the first spawn>. VISUAL: <same as the first spawn>. SELECTED FEATURE MEMBERS: <number · title · files from (b) of each feature member the Phase 3 fill selected>. <`_handoff.md` Section K's language line, rendered in `config.language` — the same line as the product-owner's> Write output in `config.language`.
 
 Collect both RESULTs and **arbitrate as the leader** into one candidate set plus a dependency edge list.
 
@@ -732,10 +789,14 @@ Changing `C` itself is `retro`'s job (Phase 4 there), nowhere else.
    Section A) and its remaining children are usually still at analyze, so an epic is held
    to the readiness gate — **unless it has no child to be decided** (Phase 1: every remaining
    child is past analyze) → exempt, Phase 5 `이월(에픽 · 자식 모두 <stage> 이후)`. **Plus two gates the fill now has to state, because the leader no longer
-   picks by judgment:** the candidate is **착수 가능** in Phase 1b (one 1b reported as
-   구체화 필요 is never filled automatically, whatever the product-owner rated — 1b's own
-   definition is "handed to `dev` today it ends at `needs-human`"; one reported as **막힘** is
-   never filled either — Phase 5 `사람 작업 필요: #n (<credential|device|upstream|other>)`), and it does **not** carry
+   picks by judgment:** the candidate is **착수 가능 in Phase 1b, or 구체화 필요 past analyze** (one 1b reported as
+   구체화 필요 **at stage `none` or `guild:analyze`** is never filled automatically, whatever the
+   product-owner rated — 1b's own definition is "handed to `dev` today it ends at `needs-human`";
+   **later than analyze** (`guild:design` or after — a carry-over) 구체화 필요 is not a gate, for
+   the reason and at the bound of the readiness exemption above: an answer in the body no longer
+   reaches the acceptance criteria, and *Who is asked about* never reaches it, so as a gate it
+   would keep the candidate out for good; one reported as **막힘** is never filled either,
+   whatever its stage — Phase 5 `사람 작업 필요: #n (<credential|device|upstream|other>)`), and it does **not** carry
    `guild:needs-human` (the supervisor treats that label as terminal and blocks everything stacked
    on it — `sprint-supervisor.sh`, `sprint_dag.py` `TERMINAL_BLOCKING`; list it under
    `사람 작업 필요` instead).
@@ -753,7 +814,7 @@ another repository, not a decision). **Only the answer to a product-owner `Q:`**
 answer to a leader-drafted size question (below) settles the size, never a 1b verdict reached
 for another reason.
 When a seat cannot be filled, the seat stays empty and the reason is the `shortfall`. A 1b
-구체화 필요 candidate not asked about (no `unclear` dimension, so no question to ask — or the
+구체화 필요 candidate at stage `none` or `guild:analyze` not asked about (no `unclear` dimension, so no question to ask — or the
 questions did not reach it) is listed in Phase 5 as
 `제외: #n (구체화 필요 — 1b)` and goes no further (② of *Phase 5 order of reasons — ordinary candidates*).
 
@@ -797,7 +858,18 @@ forever — it is waiting on one answer from the person who is right here.
   `depends:` verdict carries `(이 답이면 이번 스프린트에서 빠집니다)` in its label, so the human
   knows before choosing) and, **always last, a skip option**
   (labelled in `config.language`; judged by being the last option, never by its text). A
-  free-text answer counts as an answer. The preamble says it plainly: *answered candidates join
+  free-text answer counts as an answer.
+  **The recommended option** — the product-owner's option carrying `(recommended)`, written
+  first — is asked first, its label ending in `(권장)` (rendered in `config.language`) and its
+  reason as the option's description (`AskUserQuestion`'s recommended-first convention). When it
+  is also an option that leads to a ⚠ size, its label carries both —
+  `(권장) (이 답이면 이번 스프린트에서 빠집니다)`; the leader never drops the warning. A draft
+  with no recommended option is asked as it is — the leader does not pick one. A leader-drafted
+  size question (below) has no recommendation: it is not a product judgment — the ✅ side first,
+  then the ⚠ side.
+  **The `<answer>`** every record and display uses — the decision lines (Phase 6 steps 2 and 3),
+  Phase 5's `계획 중 결정:` line and the member table's 비고 — is the chosen option's wording
+  with its tags removed: `(recommended)` together with the `— <reason>` right after it (only there — a ` — ` elsewhere in an option is its wording), `(권장)` and `(이 답이면 …)`. The preamble says it plainly: *answered candidates join
   this sprint if they pass the selection gates, and the decision is written into the Issue when
   the sprint is created; skipped ones are not taken.*
 - **Then**: all of a candidate's questions answered (none skipped) → treat those dimensions as
@@ -808,7 +880,8 @@ forever — it is waiting on one answer from the person who is right here.
 - **A size that depends on the answer** (`depends: <option>→✅, <option>→⚠` — the tech-lead
   wrote which decision makes it ✅ in plain words; the tech-lead does not read `po.md`, so the
   leader maps that onto the product-owner's options here, in Phase 3). After the answer the size
-  is settled: an answer that maps to ✅ → ✅; one that maps to ⚠, a free-text answer, or one that
+  is settled — the mapping reads the option's wording with its tags removed (`(recommended)` and
+  the `— <reason>` right after it, `(권장)`, `(이 답이면 …)`): an answer that maps to ✅ → ✅; one that maps to ⚠, a free-text answer, or one that
   cannot be mapped → ⚠, and the candidate is not taken — `결정했지만 제외: #n (답 <X> → 분할 예상)` (the decision is not recorded — only final members get it).
   **An option maps to ✅ only when its wording explicitly meets the tech-lead's ✅ condition**; one
   that takes any interpretation to get there → ⚠ (measured #555: whether option A met the
@@ -874,11 +947,15 @@ the fill's walk reaches the epic:
   `guild:done` counts as itself, any other as its epic).
 - **(i) Every extended-dependency target is closed or `guild:done`.** One still open → the epic
   is not filled, whether that target is a member or not: `선행 대기: #e ← #d(이번 스프린트)`
-  when `#d` is a member, `선행 대기(미포함): #e ← #d` otherwise; when the mapping moved the target,
-  show both — `선행 대기(미포함): #e ← #e2(자식 #c)`. A target that is `guild:done` but still open
+  when `#d` is a member, `선행 대기(미포함): #e ← #d` otherwise. **The mapping is shown on the
+  target side only**: a dependency that reached target epic `#d` through its children →
+  `선행 대기(미포함): #e ← #d(자식 #c…)`; the body naming `#d` itself → plain `#e ← #d`; both →
+  `선행 대기(미포함): #e ← #d(+자식 #c…)`; a member target carries both brackets in that order —
+  `선행 대기: #e ← #d(자식 #c…)(이번 스프린트)`. Where the dependency came from on the depending side
+  (the epic's own body or one of its children) is not shown — one bracket, one meaning. A target that is `guild:done` but still open
   (not yet merged — `_handoff.md` Section D; measured #530·#531) passes (i), and Phase 5's
   `⚠ 선행 미포함` covers the epic's extended dependency too (its children start from the default
-  branch without that code) — mapped: `⚠ 선행 미포함: #q ← #e(자식 #c)`. A chain (measured
+  branch without that code) — the same notation: `⚠ 선행 미포함: #q ← #d(자식 #c…)`. A chain (measured
   #154→#158→#159, #146→#161→#164) drops to its tail by this alone — #158 waits on the open #154,
   #159 on the open #158 — whatever the product-owner noted. An epic depending on another member
   is covered here too (members are open).
@@ -919,6 +996,12 @@ the fill's walk reaches the epic:
   `제외: #e (에픽 · 구체화 필요 — 자식 <#c|결정할 자식 전체> 본문을 구체화하세요)` — not `/gld plan`:
   on an already-split epic it only adds the children it lacks (Phase 1b)
   ⑤ (ii)–(iii).
+  **A barrier hidden behind ②** — an epic out as `선행 대기` whose ③ (a child's split expected
+  or decision needed) or ④ (구체화 필요) also applies — is shown on a **separate line**, so the
+  next sprint does not meet it for the first time once the prerequisite clears:
+  `그 뒤의 장벽: #e(자식 #c 결정 필요, #c2 분할 예상) · #e2(…)` — the words in the bracket are
+  ③'s and ④'s own: `자식 #c 분할 예상`, `자식 #c 결정 필요`, `자식 #c 크기 판정 없음`, `구체화 필요` — only about a child Phase 1's bounds judge (a child to be sized, or one to be decided). Not in brackets on the
+  `선행 대기` line, which joins several epics with `·`.
 - **Shown in Phase 5** as `#e (에픽 · 남은 자식 k개 — PR 최대 k개)`. **k ≥ 10** → add
   `⚠ #e 는 남은 자식 <k>개 — 한 run 안에 끝나지 않을 수 있습니다` (the supervisor's split
   progress bound, `SPLIT_PASSES ≤ 12` — past it the member is `split-stalled`, INCOMPLETE).
@@ -928,7 +1011,7 @@ the fill's walk reaches the epic:
   `⚠ #e 의 자식 PR 은 서로 쌓일 수 있고 sprint sync 대상이 아닙니다`. A child whose design tries to
   split again goes to needs-human (leaf-only, `_handoff.md` Section I) — `run` stops on it, and
   unattended it may re-try and end the epic `split-stalled` (Phase 5's Add warning).
-  Any epic member at all → one line `ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(0.97.2 에서 수정)` (an epic has no PR of its own; `retro`'s and `daily`'s merge
+  Any epic member at all → one line `ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(다음 버전에서 수정)` (an epic has no PR of its own; `retro`'s and `daily`'s merge
   counts do not know that yet).
   Known limit: `run`'s `children_pending`, `dev` Phase 2b and the other child-discovery reads
   (`_handoff.md` Section I, `status.md`, `daily.md`) still read `--limit 200`; in a repo with more
@@ -941,12 +1024,13 @@ lists the gates):
 ① human work — 1b 막힘 `사람 작업 필요: #n (<class>)`, the product-owner's `human-work:`
   `사람 작업 필요: #n (<class> · PO 판단, 1b 는 <착수 가능|구체화 필요>)`, `guild:needs-human`
   `사람 작업 필요: #n (needs-human 대기 — /gld resume n)`
-② 1b 구체화 필요 **not asked about** — `제외: #n (구체화 필요 — 1b)` (one asked and skipped is ⑥'s
+② 1b 구체화 필요 at stage `none` or `guild:analyze` **not asked about** — `제외: #n (구체화 필요 — 1b)`
+  (later than analyze it is no gate — Phase 3 step 1; one asked and skipped is ⑥'s
   `건너뜀`; Phase 1b's `앞서 구체화 필요로 보고한 #n …` line is a follow-up to the 1b report, not a
   reason line)
 ③ an open prerequisite — `선행 대기…` (`prerequisite:`) — ahead of not-ranked even for a
-  not-ranked candidate, so that the `의견:` line (shown only for a candidate out as `선행 대기`)
-  still appears
+  not-ranked candidate, so that the `satisfied` `의견:` line (shown only for a candidate out as
+  `선행 대기`) still appears
 ④ not-ranked — `제외: #n (PO: <사유>)`
 ⑤ size ⚠ — `제외: #n (⚠ 분할 예상)`
 ⑥ readiness — asked and skipped `제외: #n (<dim>=unclear · 건너뜀)`; not asked for any other
@@ -967,19 +1051,30 @@ notice that the answer is not recorded never disappears behind another line.
 
 **The goal matches the members — re-checked whenever the member set changes** (after the Phase 3
 fill, after a Phase 4 depth cut or slot refill, after a Phase 5 drop, "크기 N" or add — the same
-"after any change" list as the slot's prepares check): does the goal sentence describe the
-`goal` members actually filled? If not (the candidate it was written for fell out, say), rewrite
-it as one sentence from the `goal` members filled, and show `목표 수정: 원래 «…» — <이유>` in
-Phase 5. **No `goal` member filled (the slot aside) while `other` members were** → the leader
-rewrites the goal as one sentence around the filled `other` member the product-owner ranked
-**highest**, and changes **that one member's** `구분` to `goal` — `목표 수정: 원래 «…» — 목표 후보가
-모두 빠져 #n 으로 다시 씀`. This promotion happens **only in the Phase 3 fill and in the refill a
-slot re-arbitration runs inside Phase 3** (*A rejected pick … goes back to the feature picks*),
-recomputed from scratch each time (an earlier promotion is undone first). Never after Phase 4
-(a `skip (stack-cap)` refill, the final-graph re-check) or a Phase 5 edit — the `구분` the human
-has seen does not change under them; there a `goal` group holding only the slot, or nothing,
-reads `⚠ 목표 멤버 없음 — 목표를 정하거나 드롭/추가하세요`, as it does when nothing at all was
-filled. (`plan-hash` is computed over Phase 6's final body — a promotion does not affect it.)
+"after any change" list as the slot's prepares check). The check is mechanical, not a reading
+of the sentence:
+- **At least one filled `goal` member came from the product-owner's goal-picks** (a member made
+  `goal` by the promotion below does not count) → **any goal-pick not filled** (a goal-pick taken
+  as the slot counts as filled — One Issue, one role) → rewrite the goal as one sentence from the
+  `goal` members filled and show `목표 수정: 원래 «…» — 빠진 목표 후보 #a · #b` in Phase 5. A pick
+  left out only for want of a seat counts too: the goal sentence becomes the tracker's title, and
+  a title wider than the members it holds is the mismatch this check exists for. Recompute every
+  time from the product-owner's original sentence and goal-picks — a Phase 5 Add that brings
+  every missing pick back restores the original and the `목표 수정:` line disappears. While a
+  promotion (below) is in force **and no filled `goal` member came from the goal-picks**, its
+  message is the one shown; once a goal-pick is back, this rule's line replaces it.
+- **A goal the human set** with Phase 5's `목표 <문장>` edit is never recomputed; only
+  `⚠ 목표 멤버 없음 — …` still shows when later drops leave no `goal` member.
+- **No goal-pick filled** (the slot aside) **while `other` members were** → the leader
+  rewrites the goal as one sentence around the filled `other` member the product-owner ranked
+  **highest**, and changes **that one member's** `구분` to `goal` — `목표 수정: 원래 «…» — 목표 후보가
+  모두 빠져 #n 으로 다시 씀`. This promotion happens **only in the Phase 3 fill and in the refill a
+  slot re-arbitration runs inside Phase 3** (*A rejected pick … goes back to the feature picks*),
+  recomputed from scratch each time (an earlier promotion is undone first). Never after Phase 4
+  (a `skip (stack-cap)` refill, the final-graph re-check) or a Phase 5 edit — the `구분` the human
+  has seen does not change under them; there a `goal` group holding only the slot, or nothing,
+  reads `⚠ 목표 멤버 없음 — 목표를 정하거나 드롭/추가하세요`, as it does when nothing at all was
+  filled. (`plan-hash` is computed over Phase 6's final body — a promotion does not affect it.)
 
 **Adding to an open sprint** (Phase 0 step 4's "add"): none of the above applies — no automatic
 fill, no decision questions, no `구분` column, no machine lines. The tracker body is sealed by its
@@ -1082,6 +1177,9 @@ not removed this way — it gets Phase 3's direction warning and the human's ans
 
 ## Phase 5 — Present, then stop (attended)
 
+The first line, `후보 N개 중 M개`: M = the members taken (a new slot draft included), N = the
+candidates judged (1b's `<후보 수>`) — a new slot draft is not among the N, so M can exceed N.
+
 ```
 후보 12개 중 8개를 이번 스프린트로 제안합니다.
 
@@ -1105,12 +1203,14 @@ not removed this way — it gets Phase 3's direction warning and the human's ans
   계획 중 결정: #210(Constraint: 감사 테이블 위치 → history 계층) — 만들 때 Issue 본문에 기록합니다
   결정했지만 제외: #213(스택 깊이) — 답은 기록되지 않습니다
   사람 작업 필요: #190(credential) · #357(upstream) · #377(needs-human 대기 — /gld resume 377)
+  통합 점검 대기 — /gld dev #458
   선행 대기: #122 ← #103(이번 스프린트)
   선행 대기(미포함): #159 ← #158 · #161 ← #146
+  그 뒤의 장벽: #161(자식 #506 결정 필요)
   ⚠ 선행 미포함: #120 ← #118(열림, 멤버 아님) — 기본 브랜치에서 시작합니다
   의존 무시: #459 ← #146 (본문: «#496. #146(…)과 같은 엔진 구간이라 순서를 조율한다»)
-  의견: #161 ← #146 는 이미 충족됐을 수 있습니다(tech-lead: 실제 필요는 #531 의 엔진 변경, via #531) — 맞으면 #161 본문 · 자식 #512 본문의 Depends on 을 고치세요 (그 뒤에도 자식 #506 결정 필요)
-  ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(0.97.2 에서 수정)
+  의견: #161 ← #146 는 이미 충족됐을 수 있습니다(tech-lead: 실제 필요는 #531 의 엔진 변경, via #531) — 맞으면 #161 본문 · 자식 #512 본문의 Depends on 을 고치세요
+  ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(다음 버전에서 수정)
   제외 5개: #108(Success=unclear · 건너뜀) · #110(⚠ 분할 예상) · #133(구체화 필요 — 1b) · #141(PO: 이번 목표와 무관한 실험) · …
   용량: 10 · 담음 8(목표 5 · 목표 외 3 · 슬롯 1 포함) · 미달 사유: supply — 남은 후보 없음 (실측 최대 9)
   (담음이 용량과 같을 때만, 용량 > 실측 최대이면: ⚠ 용량 10 은 아직 실측된 적 없는 크기입니다(실측 최대 9) — 줄이려면 "크기 N" 으로 말해 주세요)
@@ -1118,8 +1218,11 @@ not removed this way — it gets Phase 3's direction warning and the human's ans
   머지 전략: merge commit 허용 ✅ · 브랜치 자동삭제 ✅
   기록: 만들면 판정 원문(docs/specs/sprint-<트래커 번호>/)과 config.json 을 main 에 커밋하고 push 합니다
 
-이대로 만들까요? (드롭 / 추가 / 크기 N / 의존 유지 #d / 재범위 / 재정렬 요청 가능)
+이대로 만들까요? (드롭 / 추가 / 크기 N / 의존 유지 #d / 목표 <문장> / 재범위 / 재정렬 [/ 스택 없음] 요청 가능)
 ```
+
+`[/ 스택 없음]` is shown **only when 상한 근거 is `squash-sync`** (Edits, `스택 없음`), rendered without
+the brackets — the line then ends `재정렬 / 스택 없음 요청 가능)`; otherwise it ends `재정렬 요청 가능)`.
 
 **The lines the fill adds** (each only when it has something to say):
 - `■ 목표` / `■ 목표 외` — the two groups; the slot sits in the goal group.
@@ -1130,10 +1233,45 @@ not removed this way — it gets Phase 3's direction warning and the human's ans
   The number is never cut automatically — it is the human's to change here, or `retro`'s.
   No usable history entry (first sprint, or every entry `adhoc`/without `planned`) → omit the
   `실측 최대` part and the ⚠ line.
+- `머지 전략:` — Phase 0 step 5's reading, its front part 1:1 with the 상한 근거 token:
+  `merge commit 허용 ✅` (`config`) /
+  `merge commit 불허 → squash-sync(상한 <n>) — 하단 PR 머지 뒤 /gld sprint sync` (`squash-sync`) /
+  `merge commit 불허 · 스택 거절 → 스택 없음(상한 1)` (`merge-commit-forbidden`), then
+  `· 브랜치 자동삭제 <✅|❌>`. Settings that could not be read → Phase 0 step 5's two
+  `머지 전략: 알 수 없음(조회 실패) → …` forms, and nothing else.
+- `⚠ #n 은 중앙 관리 파일 <file> 을 고칩니다 — …` — for every **member** (filled automatically or
+  added with Add; for an epic, its remaining children's bodies too, shown as `#e(자식 #c)`) whose
+  body holds a central-owned file — the definition and matching rule are in the Refactor slot
+  section (*Central-owned files*), the one place they are written. Read that body: does it name
+  the file **as something to change**? Yes even when it also offers accepting it or leaving it
+  unchanged — **unless a decision rules the change out**, which takes both: (1) a decision (one
+  made in this plan, or a `decided:` line of the body — an earlier plan's, Phase 3's *Already
+  decided*; for a `#e(자식 #c)` warning, that child's body's line) whose question or options deal
+  with **that file, or a change item the body ties to that file**, and (2) an answer that rules
+  out **every** change branch the body writes for that file (measured #349: "3건 모두 명시적
+  수용") → no line. A decision that rules out only some of them (accepting defect 3 only — the
+  file changes of defects 1 and 2 remain), or one unrelated to that file → the line.
+  **A conditional change counts**: written as one branch of the work ("if the investigation
+  shows X, fix that file") → yes. **A mention made to rule the change out does not**: when every
+  sentence naming the file rules the change out ("fixing it here would fork it", "not that file
+  but …") → no. No when it only describes calling it, comparing with it or its timing.
+  `<file>` in the line is the **file name** (`gate_precommit.py`, `secrets.md`,
+  `verification.md`), even when the body attaches a path. Yes → one line:
+  `⚠ #n 은 중앙 관리 파일 <file> 을 고칩니다 — 다음 /gld update 는 이 로컬 수정을 덮어쓰자고 제안합니다(새 check 추가일 때만 scripts/local/ 이관을 묻습니다); 플러그인 저장소(plugin.json 의 repository)에서 고칠 일인지 확인하세요`
+  — for `secrets.md` / `verification.md`:
+  `⚠ #n 은 중앙 관리 파일 <file> 을 고칩니다 — 다음 /gld update 가 게이트 스크립트와 함께 덮어씁니다; 플러그인 저장소(plugin.json 의 repository)에서 고칠 일인지 확인하세요`.
+  A body that says it makes the change as a `scripts/local/` extension → no line. Not
+  `/gld contribute`: it takes only overlay and evolve candidates. **A warning, not a gate** — the
+  gates, the product-owner's list, 1b and the board do not change: the change can be made here,
+  and the risk is that the next update overwrites it.
 - `계획 중 결정:` / `결정했지만 제외:` / `사람 작업 필요:` / `선행 대기:` — Phase 3's decision
   questions and the candidates they could not reach. A dry-run adds
   `dry-run 으로 끝나면 이 답은 남지 않습니다 — --create 로 다시 부르면 다시 묻습니다`.
-- `앞서 구체화 필요로 보고한 #n — …` — when Phase 1b listed a candidate this run then asked about.
+- `앞서 구체화 필요로 보고한 #n — …` — when Phase 1b listed a candidate this run then asked about,
+  with one of three endings: `이번에 답해 담았습니다` / `건너뛰었습니다` /
+  `이번에 답했지만 빠졌습니다(결정했지만 제외 줄 참고)` — answered but out of the sprint (size,
+  depth, a dependency, a drop — whichever): the reason is written on its `결정했지만 제외:` line
+  only, never here.
 - `사람 작업 필요: #n (<credential|device|upstream|other>)` — a Phase 1b **막힘** candidate (the
   class is the leader's 1b reading — Phase 2 left it out of the product-owner's list, so there is
   no `human-work:` of the product-owner's for it); an epic waiting on a child:
@@ -1149,10 +1287,12 @@ not removed this way — it gets Phase 3's direction warning and the human's ans
   has no not-ranked — measured #161) **only when no other line already gives it a reason** (`사람 작업 필요`, `선행 대기`, a Phase 3
   `제외` — measured: 7 candidates shown twice). Together with the Phase 3 reasons (`제외: #e (에픽 · …)`, `제외: #n (크기가 결정에 달림 — …)`,
   `통합 점검 대기 — /gld dev #e` …) every candidate the sprint did not take has a stated reason.
+- `그 뒤의 장벽: #e(자식 #c 결정 필요, #c2 분할 예상) · …` — an epic out as `선행 대기` whose
+  ③ or ④ reason the one-line rule hid (Phase 3, *A barrier hidden behind ②*).
 - `목표 수정: 원래 «…» — <이유>` / `⚠ 목표 멤버 없음 — 목표를 정하거나 드롭/추가하세요` —
   Phase 3's goal re-check.
 - An epic member's lines (Phase 3, *Epics in the fill*): `#e (에픽 · 남은 자식 k개 — PR 최대 k개)`
-  in its row, the k ≥ 10 and stacking warnings, and `ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(0.97.2 에서 수정)` once.
+  in its row, the k ≥ 10 and stacking warnings, and `ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(다음 버전에서 수정)` once.
 - `의존 무시: #e ← #d (본문: «<그 문장>»)` — **for members only** (an epic member, or an ordinary
   member whose `Depends on` Phase 5's `⚠ 선행 미포함` reads by the same rule; a non-member's ignored
   number changes nothing): each number left out only because it sat after the first sentence,
@@ -1160,21 +1300,25 @@ not removed this way — it gets Phase 3's direction warning and the human's ans
   for the Issue itself, its parent, a sibling, or a line that begins `없음`/`none`. A negation
   inside the first sentence is shown too, not hidden — the line is how the human can undo the
   leader's reading (`의존 유지 #d`).
-- `의견: #e ← #d 는 이미 충족됐을 수 있습니다(tech-lead: <근거>, via #x) — 맞으면 <#e 본문|자식 #c 본문>의 Depends on 을 고치세요[ (그 뒤에도 자식 #c 결정 필요)]`
-  — the tech-lead's `satisfied: #e ← #d — via #x — <근거>` note, shown
+- `의견: #e ← #d 는 이미 충족됐을 수 있습니다(tech-lead: <근거>, via #x) — 맞으면 <#e 본문|자식 #c 본문>의 Depends on 을 고치세요`
+  — the tech-lead's `satisfied: #e ← #d — via #x — <근거>` note. This `satisfied` 의견 line is shown
   **only when that candidate (an epic or not) is out as `선행 대기`** on `#d`. Name **every** source that put `#d`
-  in its floor (measured #161: the epic's own body and child #512 both say #146); when the
-  one-line rule hid an epic's ③ reason behind the `선행 대기`, add it in the brackets — only about a
-  child Phase 1's bounds judge (a child to be sized, or one to be decided). Display only:
+  in its floor (measured #161: the epic's own body and child #512 both say #146). A reason the
+  one-line rule hid behind the `선행 대기` goes on the `그 뒤의 장벽:` line, not here. Display only:
   the dependency stays (the tech-lead's (a) adds, never removes), and nothing is edited for the
   human.
+- `의견: #a ← #b (조건: <조건>) — <tech-lead 메모>` — the tech-lead's `conditional:` note (a
+  relation that holds only under a condition), shown **only when both `#a` and `#b` are members**
+  (most often through an Add); an epic side mapped as `#e(자식 #c)`, the same as the `satisfied`
+  line. The direction is the note's — never `↔`. The leader never uses the note as a dependency:
+  no edge in Phase 4, no `⚠ 선행 미포함`.
 - **`⚠ 선행 미포함:` (required)** — for every member, each **dependency** (a hard edge: the
   tech-lead's (a) relations and the body's `Depends on: #d` read by Phase 1's `Depends on` reading
   rule — first sentence only, `없음`/`none` is none; an epic's extended dependency; **not** a
-  soft ordering recommendation of the tech-lead's) that is **open** (in Phase 1's list before
-  exclusions — for an epic that includes a `guild:done` target not yet closed) and **not a
+  conditional note or soft ordering recommendation of the tech-lead's) that is **open** (in
+  Phase 1's list before exclusions — for an epic that includes a `guild:done` target not yet closed) and **not a
   member**: `⚠ 선행 미포함: #p ← #d(열림, 멤버 아님) — 기본 브랜치에서 시작합니다` (mapped through a
-  child: `⚠ 선행 미포함: #q ← #e(자식 #c)`). Phase 4's
+  child, on the target side only as in (i): `⚠ 선행 미포함: #q ← #d(자식 #c…)`, `#q ← #d(+자식 #c…)`). Phase 4's
   "outside the sprint" warnings go to stderr where nobody reads them; the leader used to filter
   such picks by judgment, and the fill no longer does — so the human must see them. Nothing is
   added or removed automatically; dropping or adding is the human's edit.
@@ -1188,6 +1332,9 @@ not removed this way — it gets Phase 3's direction warning and the human's ans
   line showed) and re-apply Phase 3's *Epics in the fill* (i)–(ii); the epic leaving as a result
   → its seat is refilled as for a Drop. For an ordinary member, `#d` goes back into its
   dependencies — Phase 4 and the `⚠ 선행 미포함` check then read it like any other.
+- **`목표 <문장>`** → the human's sentence becomes the goal (and the tracker's title). The goal
+  re-check (Phase 3) no longer rewrites it and shows no `목표 수정:` line for it; it still shows
+  `⚠ 목표 멤버 없음 — …` when no `goal` member is left. No member's `구분` changes.
 - **"크기 N"** → cut in reverse fill order (lowest other-ranked first, then lowest goal pick)
   down to N and do not refill. Record `shortfall: human-cut` **only** in this case and only when
   the sprint held at least `C` before the cut — a sprint already short of `C` keeps its own
@@ -1204,6 +1351,18 @@ not removed this way — it gets Phase 3's direction warning and the human's ans
   `shortfall: none`. An add or drop that leaves an epic member depending on, or depended on by,
   another member gets Phase 3's two direction warnings (*Epics in the fill* (iii)) and the
   human's answer — never an automatic removal.
+- **`스택 없음`** → offered **only when 상한 근거 is `squash-sync`** — including a `squash-sync`
+  reached by accepting a depth after Phase 0's read failed (Phase 4 step 4). The human declines
+  stacking (Phase 0 step 5): rewrite 상한 근거 to `merge-commit-forbidden` and `EFFECTIVE_CAP` to
+  1, leave Phase 0's `/gld sprint sync` instruction out of the presentation, and re-run Phase 4.
+  The `머지 전략:` line becomes `merge commit 불허 · 스택 거절 → 스택 없음(상한 1)`, or after a
+  failed read `머지 전략: 알 수 없음(조회 실패) → 스택 없음(상한 1) · 브랜치 자동삭제 ?`.
+  **This edit leads to a cut proposal**: a depth over 1 gets step 4's usual proposal to cut.
+  **Accepting that depth instead of the cut switches back to `squash-sync`** (step 4) — it undoes
+  `스택 없음`. A slot, if there is one, leaves by itself once the depth is 1 (the cut accepted —
+  Phase 4's slot comparison at `EFFECTIVE_CAP = 1`, `skip (stack-cap)`).
+  When 상한 근거 is `config` (merge commits allowed) and the human says `스택 없음`, answer in one
+  line: `merge commit 이 허용되어 스택은 그대로 머지됩니다 — 깊이를 줄이려면 크기 N 이나 드롭`.
 - After every edit, re-run Phase 4 (an epic re-check on the final graph included), the slot's
   prepares checks and the goal re-check (Phase 3).
 
@@ -1212,7 +1371,10 @@ the read-only checks of step 6 sub-steps 3 and 5 (current branch, upstream, push
 default branch → `기록: 현재 브랜치가 기본 브랜치가 아니라 커밋하지 않습니다 — 직접 커밋해 주세요`;
 no upstream or another push target → `… 에 커밋합니다 (push 하지 않음)`.
 When the slot is empty, the line says why instead of disappearing —
-`🧹 리팩토링 슬롯: 비움 (no-candidate) — 이번 후보들이 건드리는 hotspot 이 없습니다`.
+`🧹 리팩토링 슬롯: 비움 (no-candidate) — 이번 후보들이 건드리는 hotspot 이 없습니다`; after `스택 없음`,
+`🧹 리팩토링 슬롯: 비움 (stack-cap) — 스택 없음(상한 1)에서는 슬롯이 스택을 늘립니다`; a slot that
+ended `skip (not-ready)` because of a central-owned file (Phase 2's arbitration) ends the line
+with `(중앙 관리 파일)`.
 The `안전망:` line appears only when the draft carries a Safety net (one line: file · the first
 behavior · `외 N건`). A 2b draft is shown as `🧹 리팩토링 슬롯 (안전망만): #(신규) «…»` with its
 `근거:` naming the gap (`테스트 없음` / `시각 테스트 없음`) and `성공 기준:` ending in
@@ -1283,8 +1445,8 @@ Handle edits and re-present until the human approves. **Create nothing** without
    **Then, when Phase 3 collected at least one decision for a final member**, post them as one
    tracker comment before any member body is touched — `<!-- guild:sprint:plan-decisions -->` …
    `<!-- /guild:sprint:plan-decisions -->`, one line per decision,
-   `- #<n> <Goal|Constraint|Success>: <question> → <answer> (<YYYY-MM-DD>)` (the answer's line
-   breaks and runs of spaces collapsed to one space). It is the record a re-run reads if this
+   `- #<n> <Goal|Constraint|Success>: <question> → <answer> (<YYYY-MM-DD>)` (`<answer>` without
+   its option tags — Phase 3, *How*; its line breaks and runs of spaces collapsed to one space). It is the record a re-run reads if this
    step dies before step 3 finishes; one comment per tracker, replace-in-place (`_handoff.md`
    Section B).
 3. **Add the back-reference** to each member body — a `Sprint: #<tracker>` line, **and, for a
@@ -1531,7 +1693,7 @@ plan-hash: <sprint_dag.py --mode hash 의 출력>
 - 용량 판단: <N>개 — 용량 <C> · 목표 <g>(슬롯 포함) · 목표 외 <o> · 미달 사유 <없음 | 구체적 사유>
 - capacity: <C 정수 | n/a>
 - shortfall: <none | supply | depth | human-cut | n/a>
-- 머지 전략: <merge commit 허용 여부> · 브랜치 자동삭제 <여부>
+- 머지 전략: <Phase 5 의 머지 전략: 줄과 같은 형태 — merge commit 허용 ✅ | merge commit 불허 → squash-sync(상한 <n>) — 하단 PR 머지 뒤 /gld sprint sync | merge commit 불허 · 스택 거절 → 스택 없음(상한 1) | 알 수 없음(조회 실패) → …> · 브랜치 자동삭제 <✅|❌|?>
 - 스택 깊이 상한: <유효 상한 N>
 - 상한 근거: <"config" | "squash-sync" | "merge-commit-forbidden">
 - 리팩토링 슬롯: <"#<n> (existing)" | "#<n> (drafted)" | "skip (<disabled|no-candidate|not-ready|capacity|stack-cap|human-declined|epic-overlap|ad-hoc>)">
