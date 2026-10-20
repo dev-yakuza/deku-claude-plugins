@@ -196,12 +196,13 @@ Phase 3, still has it:
 | `#<n> (existing)` · `#<n> (drafted)` | `CLOSED` unmerged | `refused` |
 | `#<n> (existing)` · `#<n> (drafted)` | none, **slot Issue closed** | `refused` — the human rejected it before any PR; `closed_at` is the Issue's |
 | `#<n> (existing)` · `#<n> (drafted)` | open / none, Issue open | `carryover` |
-| `skip (<token>)` | — | `skip:<token>` |
+| `skip (<token>)` — `disabled` · `no-candidate` · `not-ready` · `capacity` · `stack-cap` · `human-declined` · `epic-overlap` · `ad-hoc` | — | `skip:<token>` |
 | line absent (a tracker planned before the slot existed) | — | **no outcome** — omit the field; do not invent `skip` |
 
 ⚠ **`refused` is the signal, `skip` is not.** A human closing the slot's PR says the slot picked
 the wrong refactor (or, for a safety-net-only slot, the wrong coverage); a `skip` says only that nothing qualified or the human chose features this
-time. Phase 3 names a `refused` slot by number; a run of `skip:no-candidate` is not a defect.
+time. Phase 3 names a `refused` slot by number; a run of `skip:no-candidate` is not a defect, and neither is `skip:epic-overlap` (the slot
+yielded to an epic member that touches the same files — `plan.md` Phase 2).
 
 **The event log** — one call, and it spans **every run of this sprint**, not just the last:
 ```bash

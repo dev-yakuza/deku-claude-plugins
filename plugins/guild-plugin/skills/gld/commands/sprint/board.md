@@ -319,7 +319,8 @@ with spaces (`In progress`, `In review`) survive intact.
 
 ⚠ **Six options, seven columns.** `Issues` is deliberately **not** an option — it is the
 **null bucket** (D16). A card with no value for this field lands there, which is exactly
-what "`plan` has not judged this, or judged it as needing refinement" should look like.
+what "`plan` has not judged this, or judged it as needing refinement (1b 구체화 필요) or as
+blocked on something only a human can clear (1b 막힘)" should look like.
 Creating an `Issues` option would give you *two* empty-ish buckets instead of one.
 ⚠ The human most likely sees that column labelled **`No Guild board`** — the built-in `Status`
 field's null bucket was observed as `No Status` (screenshot), but **a custom field's null-bucket
