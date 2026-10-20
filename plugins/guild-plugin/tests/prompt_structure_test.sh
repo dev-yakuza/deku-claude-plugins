@@ -716,12 +716,12 @@ for phrase, why in (
     ("Phase 1's branch test, `(^|[^0-9])#?<N>([^0-9]|$)`", "the branch-name token test is missing or weakened"),
     ("`closes` is exactly **one** number", "membership no longer needs exactly one closed Issue"),
     ("re-run step 1's `--head` and `--base` calls with `--state open`", "the remote delete skips the open-PR re-check"),
-    ("test(\"Parent Issue: #<m>([^0-9]|$)\")", "children search lost its digit boundary"),
     ("the **same live states**", "the run re-check no longer names Phase 0's live states"),
     ("`release/…` or `v<digits>…`", "release/version lines can become candidates"),
     ("does **not** block the local delete", "an absent remote ref blocks the local delete"),
     ("finding **no open PR**", "the local delete skips the open-PR re-check"),
-    ("same per-Issue server lookup", "children have no truncation fallback"),
+    ("Phase 0 step 0's per-Issue lookup", "children have no truncation fallback"),
+    ("Reuse Phase 1's S and its children", "Phase 7 no longer reuses Phase 1's children"),
     ("Read its `permissions.ask` first", "the prompt claim is not checked against the repo's settings"),
 ):
     if phrase not in flat:
@@ -730,6 +730,9 @@ whole = " ".join(retro.split())
 for phrase, why in (
     ("\"Closes #<m>\" in:body", "CLEANUP search is not bounded to a closing reference"),
     ("**equals the limit** is truncated", "a truncated CLEANUP lookup reads as no PR"),
+    # 0.98.0: 자식 검색은 Phase 1 로 옮겼다 — 숫자 경계는 거기서 지킨다.
+    ("test(\"Parent Issue: #<m>([^0-9]|$)\")", "children search lost its digit boundary"),
+    ("look up each member **and each child of S**", "CLEANUP per-Issue lookup does not cover the children"),
 ):
     if phrase not in whole:
         problems.append(why)
@@ -3316,7 +3319,7 @@ lacksfx "plan: 에픽 결정 필요 사유에 /gld plan 안내 제거" "$SPP" '�
 hasfx "plan: 에픽 Phase 5 표시" "$SPP" '`#e (에픽 · 남은 자식 k개 — PR 최대 k개)`'
 hasfx "plan: 남은 자식 많으면 경고" "$SPP" '`⚠ #e 는 남은 자식 <k>개 — 한 run 안에 끝나지 않을 수 있습니다`'
 hasfx "plan: 자식 PR 스택 경고" "$SPP" '`⚠ #e 의 자식 PR 은 서로 쌓일 수 있고 sprint sync 대상이 아닙니다`'
-hasfx "plan: retro·daily 에픽 집계 한계 줄(다음 버전)" "$SPP" 'ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(다음 버전에서 수정)'
+lacksfx "plan(0.98.0): retro·daily 에픽 집계 한계 줄 제거" "$SPP" 'ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(다음 버전에서 수정)'
 lacksfx "plan: 버전 번호 약속 문구 제거" "$SPP" '(0.97.2 에서 수정)'
 hasfx "plan: 슬롯은 에픽 멤버를 건드리지 않음" "$SPP" '⚠ **A slot never touches an epic member.**'
 hasfx "plan: 재스폰 조건에 에픽 파일 회피" "$SPP" '*"do not touch the epic members'"'"' files"*'
@@ -3637,6 +3640,176 @@ hasfx "plan(0.97.2 r2 cr): 스택 없음 안내 렌더링" "$PLAN" 'the line the
 hasfx "plan(0.97.2 r2 cr): 슬롯은 깊이 1 이 된 뒤 빠짐" "$PLAN" 'leaves by itself once the depth is 1'
 hasfx "plan(0.97.2 r2 cr): stack-cap 비움 문구" "$PLAN" '`🧹 리팩토링 슬롯: 비움 (stack-cap) — 스택 없음(상한 1)에서는 슬롯이 스택을 늘립니다`'
 
+
+# 0.98.0 — retro·daily 의 에픽(분할) 멤버: S·자식 발견, PR 필터 멤버∪자식, 두 축, 판단 불가
+D98="$GLD/commands/sprint/daily.md"
+R98="$GLD/commands/sprint/retro.md"
+P98="$GLD/commands/sprint/plan.md"
+# 1-1 자식 발견 — daily·retro 같은 명령(스트림, 첫 줄 = 개수)
+CHILD98='gh issue list --label guild:child --state all --limit 500 --json number,title,body,labels,state --jq '"'"'length, (.[] | {number, title, state, labels: [.labels[].name], parent: ((.body // "") | (match("Parent Issue: #([0-9]+)").captures[0].string | tonumber)? // null)})'"'"
+hasfx "daily(0.98.0): 자식 발견 호출" "$D98" "$CHILD98"
+hasfx "retro(0.98.0): 자식 발견 호출(daily 와 같음)" "$R98" "$CHILD98"
+SUPP98='gh issue list --state all --search '"'"'"Parent Issue: #<m>" in:body'"'"' --limit 200 --json number,title,body,labels,state --jq '"'"'length, (.[] | select((.body // "") | test("Parent Issue: #<m>([^0-9]|$)")) | {number, title, state, labels: [.labels[].name], parent: <m>})'"'"
+hasfx "daily(0.98.0): 자식 보충 — 같은 객체 형태" "$D98" "$SUPP98"
+hasfx "retro(0.98.0): 자식 보충 — 같은 객체 형태" "$R98" "$SUPP98"
+hasfx "daily(0.98.0): S 정의" "$D98" '**S** (the split members) = every member that is some child'"'"'s `parent`, plus every member'
+hasfx "retro(0.98.0): S 정의" "$R98" '**S** = every member that is some child'"'"'s `parent`, plus every member labelled'
+hasfx "daily(0.98.0): 자식 절단 시 done·children 멤버 전부 보충" "$D98" 'for **every** member labelled `guild:done` or `guild:children` — by label, whether'
+hasfx "daily(0.98.0): 보충 실패는 판단 불가" "$D98" 'first line equals 200** → the children cannot be known: the sprint is **판단 불가** (step 6).'
+hasfx "retro(0.98.0): 보충 실패는 지표 FAIL" "$R98" '`FAIL: could not find every child of #<m> — the metrics would be wrong and'
+# 1-2 daily 멤버 호출 = retro 형식
+MEM98='gh issue list --state all --limit 200 --json number,title,labels,state,body --jq '"'"'{total: length, members: [.[] | select((.body // "") | test("Sprint: #<tracker>([^0-9]|$)")) | {number, title, state, labels: [.labels[].name]}]}'"'"
+hasfx "daily(0.98.0): 멤버 호출이 retro 와 같음" "$D98" "$MEM98"
+hasfx "retro(0.98.0): 멤버 호출(daily 와 같음)" "$R98" "$MEM98"
+hasfx "daily(0.98.0): 멤버 절단 시 서버 검색" "$D98" '`total` equal to the limit → re-read with the server-side filter `--search '"'"'"Sprint: #<tracker>" in:body'"'"'`'
+if grep -qxF 'gh issue list --state all --limit 200 --json number,title,labels,state' "$D98"; then
+  bad "daily(0.98.0): 옛 무필터 멤버 호출 제거" "absent" "found the unfiltered members call"
+else
+  ok "daily(0.98.0): 옛 무필터 멤버 호출 제거"
+fi
+lacksfx "daily(0.98.0): 옛 자식 호출(전체 --limit 200) 제거" "$D98" 'children: [.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)"))'
+# 1-3 PR 호출 — 같은 형태, 멤버∪자식, 스트림
+hasfx "daily(0.98.0): PR 호출 스트림·멤버∪자식 필터" "$D98" "--jq '[<m1>,<m2>,<c1>] as \$m | length, (.[] | ([.closingIssuesReferences[]?.number] | map(select(. as \$n | \$m | index(\$n)))) as \$c | ((.headRefName // \"\") | test(\"(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|\$)\")) as \$b | select((\$c | length) > 0 or \$b) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: \$c, via:"
+hasfx "daily(0.98.0): PR 호출 필드" "$D98" 'gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,closingIssuesReferences --jq'
+hasfx "retro(0.98.0): PR 호출 스트림·멤버∪자식 필터" "$R98" "--jq '[<m1>,<m2>,<c1>] as \$m | length, (.[] | ([.closingIssuesReferences[]?.number] | map(select(. as \$n | \$m | index(\$n)))) as \$c | ((.headRefName // \"\") | test(\"(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|\$)\")) as \$b | select((\$c | length) > 0 or \$b) | {number, headRefName, baseRefName, state, mergedAt, closedAt, reviewDecision, closes: \$c, via:"
+lacksfx "daily(0.98.0): 옛 PR 한 줄 형태 제거" "$D98" "--jq '{total: length, prs: [.[] | {number"
+lacksfx "retro(0.98.0): 옛 PR 한 줄 형태 제거" "$R98" '[<m1>,<m2>,<m3>] as $m | {total: length, prs:'
+hasfx "daily(0.98.0): PR 첫 줄 200 → 500 재읽기" "$D98" '**First line == 200 → re-read with `--limit 500`.** Still 500 → **no per-Issue fallback**'
+hasfx "retro(0.98.0): PR 절단은 per-Issue 보충 없이 FAIL" "$R98" '⚠ **No per-Issue fallback on this'
+hasfx "daily(0.98.0): branch 연결은 확인 후" "$D98" 'confirm, not a fact — the same check as `retro.md` Phase 1 — and only a confirmed one joins that'
+hasfx "daily(0.98.0): 호출 순서" "$D98" '**In this order — members, then children, then PRs**'
+# 1-4 두 축·에픽 결말
+hasfx "daily(0.98.0): 머지 축" "$D98" '- **Merge axis** (the counts — the goal line here, `retro`'"'"'s metrics): any `MERGED` PR → **머지**'
+hasfx "daily(0.98.0): 종료 축" "$D98" '- **Finish axis** (the table above): no `OPEN` PR and not 거절. An Issue whose first PR was'
+hasfx "daily(0.98.0): sprint finished 정의" "$D98" '| **sprint finished** | run finished **AND**, for every ordinary member and every child of S: no `OPEN` PR **AND** not 거절 (below) |'
+hasfx "retro(0.98.0): sprint finished 정의(같음)" "$R98" '| **sprint finished** | run finished **AND**, for every ordinary member and every child of S: no `OPEN` PR **AND** not 거절'
+lacksfx "daily(0.98.0): 옛 PR 단위 finished 제거" "$D98" 'no member PR is `CLOSED` unmerged'
+lacksfx "retro(0.98.0): 옛 PR 단위 finished 제거" "$R98" 'no member PR is `CLOSED` unmerged'
+hasfx "daily(0.98.0): 에픽은 한 자리 — 머지 조건" "$D98" '- **An epic (a member of S) is one seat.** It is 머지 ⇔ the parent is `guild:done` **and** every'
+hasfx "daily(0.98.0): 에픽 결말 — 거절·진행 중" "$D98" 'Parent `guild:done` and a child 거절 → **미머지(자식 PR 거절)**; else a child'
+hasfx "daily(0.98.0): 에픽 결말 — 미착수·캐리오버" "$D98" 'else a child 미착수 (no PR — a `closed-not-done` child, say) → **미머지(자식 PR 없음)**. Parent'
+lacksfx "daily(0.98.0): done 도달 분할 부모 조건 제거" "$D98" 'reached `guild:done` by being split'
+# 1-5 retro 지표
+hasfx "retro(0.98.0): 이행률은 머지 축·에픽 한 자리" "$R98" '머지 축(`daily.md` step 6). 에픽은 한 자리, 자식이 모두 머지돼야 머지'
+hasfx "retro(0.98.0 17b): 사람 대기 — 에픽(부모 또는 done 아닌 자식)" "$R98" '에픽은 부모 또는 done 이 아닌 자식 중 하나라도 `guild:needs-human` 이면 1'
+lacksfx "retro(0.98.0 17b): 옛 S 의 자식 사람 대기 정의 제거" "$R98" '에픽은 부모 또는 S 의 자식 중 하나라도'
+hasfx "retro(0.98.0): 닫힌-미머지는 자식 PR 포함" "$GLD/commands/sprint/retro.md" '— **자식 PR 도 같은 범위로 센다**'
+hasfx "retro(0.98.0): 변경 요청률·스택은 멤버 PR 만" "$R98" '리뷰 변경 요청률과 스택 따라잡기만 **멤버 PR 만** 센다'
+hasfx "retro(0.98.0 17b): 에픽 행 자식 머지 x/y" "$R98" '`자식 머지 <x>/<y>`'
+lacksfx "retro(0.98.0 17b): 옛 자식 PR 머지 제거" "$R98" '자식 PR 머지'
+hasfx "retro(0.98.0): history·권고 표 불변" "$R98" 'The `history` schema and the recommendation table do not change.'
+# 1-6 daily 목표 줄·판단 불가·분할 부모 줄
+hasfx "daily(0.98.0): 목표 줄 판단 불가" "$D98" '`목표: 판단 불가(<이유>)`'
+hasfx "daily(0.98.0): 스프린트 판단 불가(PR 절단)" "$D98" '`스프린트 종료: 판단 불가 — PR 목록이 500건에서 잘려 판정할 수 없습니다(retro 도 같은 이유로 실패합니다)`'
+hasfx "daily(0.98.0): 판단 불가면 회고 가능 안내 없음" "$D98" 'and do **not** suggest `회고 가능`'
+hasfx "daily(0.98.0): Return 에 undetermined" "$D98" 'sprint <finished|open PRs N|undetermined>`'
+hasfx "daily(0.98.0): 분할 부모 줄은 S 전체" "$D98" '⚠ **Add the split-parent line** for every member of S (step 3), whatever its state, with its'
+hasfx "daily(0.98.0 17b): 진행 중 분할 부모 문구" "$D98" '`#e 은 자식으로 진행 중입니다(머지 안 된 자식 <n>개)`'
+lacksfx "daily(0.98.0 17b): 옛 남은 자식 k 문구 제거" "$D98" '(남은 자식 <k>개)'
+lacksfx "daily(0.98.0): 옛 분할 부모 조건 제거" "$D98" 'the same condition step 6'
+hasfx "daily(0.98.0): Hard rules 호출 수" "$D98" '- Five `gh` calls (sprint list · tracker comments · members · child discovery · PR list) plus'
+lacksfx "daily(0.98.0): 옛 Hard rules 호출 수 제거" "$D98" '- Four `gh` calls (issue list · tracker comments · PR list · issue list)'
+hasfx "daily(0.98.0): Gather 호출 수" "$D98" '**3. Gather — four `gh` calls here plus one `git`; five `gh` in total, counting step 1**'
+# CLEANUP·Phase 1·Phase 7
+hasfx "retro(0.98.0): CLEANUP 호출 목록" "$R98" 'Then Phase 1'"'"'s members call, child-discovery'
+hasfx "retro(0.98.0): CLEANUP per-Issue 대상에 자식" "$R98" 'look up each member **and each'
+lacksfx "retro(0.98.0): 옛 CLEANUP 호출 목록 제거" "$R98" 'Then Phase 1'"'"'s members call and PR call for'
+hasfx "retro(0.98.0): Phase 1 같은 세 호출" "$R98" 'the same three calls in the same order'
+lacksfx "retro(0.98.0): 옛 same three gh calls 제거" "$R98" 'same three `gh` calls, same derivation'
+hasfx "retro(0.98.0): 개수 설명(total·첫 줄)" "$R98" '`total` in the members call, the first line of the child and PR calls.'
+hasfx "retro(0.98.0): Phase 7 은 Phase 1 의 S·자식 재사용" "$R98" '- **Split children.** Reuse Phase 1'"'"'s S and its children (the child call and, when it was'
+lacksfx "retro(0.98.0): Phase 7 의 마커 자식 읽기 제거" "$R98" 'Take the children from the run marker'"'"'s discovered children'
+lacksfx "retro(0.98.0): Phase 7 의 번호만 자식 검색 제거" "$R98" "--json number,body --jq 'map(select((.body // \"\") | test(\"Parent Issue: #<m>([^0-9]|\$)\")) | .number)'"
+# 1-7 plan
+hasfx "plan(0.98.0): Known limit 에서 daily 제외" "$P98" '(`_handoff.md` Section I, `status.md`) still read `--limit 200`; in a repo with more'
+hasfx "plan(0.98.0): daily·retro 는 --label guild:child --limit 500" "$P98" '(`daily` and `retro` read `--label guild:child --limit 500`, as Phase 1 does.)'
+lacksfx "plan(0.98.0): Known limit 의 daily.md 제거" "$P98" '(`_handoff.md` Section I, `status.md`, `daily.md`) still read'
+lacksfx "plan(0.98.0): 다음 버전 안내 문구 제거" "$P98" '(다음 버전에서 수정)'
+
+hasfx "daily(0.98.0 cr): 자식 보충 실패 시 스프린트 판단 불가" "$GLD/commands/sprint/daily.md" '`스프린트 종료: 판단 불가 — #<m> 의 자식을 모두 찾지 못했습니다(retro 도 같은 이유로 실패합니다)`'
+hasfx "retro(0.98.0 cr): CLEANUP 자식 보충 실패는 보고 후 제외" "$GLD/commands/sprint/retro.md" 'A child supplement that fails (an error, or its first line equals 200 — Phase 1) → report'
+hasfx "retro(0.98.0 cr): CLEANUP 은 Phase 0 step 0 경로" "$GLD/commands/sprint/retro.md" '(CLEANUP: Phase 0 step 0 instead)'
+hasfx "retro(0.98.0 cr): 닫힌-미머지는 자식 PR 도 같은 범위" "$GLD/commands/sprint/retro.md" '**자식 PR 도 같은 범위로 센다**(멤버 PR 만이 아님)'
+hasfx "plan(0.98.0 cr): 에픽 머지는 부모 done + 자식 모두 머지" "$PLAN" 'merged when it is `guild:done` and all its children are merged'
+
+# 0.98.0 보강(17b) — 감사자 자식 합산 · 사람이 닫음과 에픽 · 분할 부모 줄 · 리뷰 대기의 자식 PR · Phase 6 묶음 · 사소
+# f. 마커의 discovered children 읽기 제거 · 판단 불가 목표 줄은 구분 열이 있을 때만 · 완료 N/M 은 라벨
+lacksfx "daily(0.98.0 17b): 마커의 discovered children 읽기 제거" "$D98" 'per-issue retries, discovered children'
+hasfx "daily(0.98.0 17b): 자식은 마커가 아니라 자식 발견 호출" "$D98" 'The children are **not** read from the marker — they come from step 3'"'"'s child call'
+hasfx "daily(0.98.0 17b): 판단 불가 목표 줄은 구분 열이 있을 때만" "$D98" '**and the table has the `구분`'
+hasfx "daily(0.98.0 17b): 구분 열 없는 트래커는 목표 줄 없음" "$D98" 'not shown; a table without the column still gets no goal line at all.'
+hasfx "daily(0.98.0 17b): 완료 N/M 은 라벨 기준" "$D98" '- **`완료 N/M` on the 진행 line counts labels** (`guild:done`)'
+# c. 분할 부모 줄
+hasfx "daily(0.98.0 17b): n = 머지 축에서 머지 아닌 자식" "$D98" 'children that are **not 머지 on step 6'"'"'s merge axis**, whatever their labels.'
+hasfx "daily(0.98.0 17b): 부모 닫힘·미done 이면 사람이 닫음 우선" "$D98" '0. Parent `CLOSED` and not `guild:done` → step 6'"'"'s *"사람이 닫음"* line takes precedence'
+hasfx "daily(0.98.0 17b): 통합 점검 대기 문구" "$D98" '`통합 점검 대기 — run 이 끝난 뒤에도 남아 있으면 /gld dev #e (run 진행 중에는 run 이 이어갈 수 있으니 동시에 실행하지 마세요)`'
+lacksfx "daily(0.98.0 17b): 옛 k = done 아닌 자식 정의 제거" "$D98" '`k` = its children **without'
+hasfx "daily(0.98.0 17b): 에픽의 사람 대기 정의" "$D98" 'without `guild:done`, carries `guild:needs-human`**'
+hasfx "daily(0.98.0 17b): 분할 부모 줄 사람 대기 표기" "$D98" 'append ` · 사람 대기 #<번호>`'
+hasfx "daily(0.98.0 17b): done 부모 — 거절 자식" "$D98" '2. Parent `guild:done` — step 6'"'"'s epic order, unchanged: a child 거절 → `#e 미머지(자식 PR 거절)`'
+hasfx "daily(0.98.0 17b): 거절 자식 줄에 열린 자식 PR" "$D98" 'plus ` · 열린 자식 PR #<pr>` for each open child PR'
+hasfx "daily(0.98.0 17b): done 부모 — 진행 중 자식" "$D98" '`#e done·미머지 — 자식 PR 리뷰·머지 대기(머지 안 된 자식 <n>개)`'
+hasfx "daily(0.98.0 17b): done 부모 — 미착수 자식" "$D98" '`#e 미머지(자식 PR 없음)`'
+hasfx "daily(0.98.0 17b): 모두 머지 문구" "$D98" '`#e 은 자식 PR 로 완료됩니다 — 보드 카드는 부모에 남습니다`'
+hasfx "daily(0.98.0 17b): 자식 needs-human 은 사람 대기 섹션에" "$D98" '`#e 자식 #c needs-human 대기 — /gld resume <c> (그 뒤'
+hasfx "daily(0.98.0 17b): step 6 캐리오버는 지표 그대로" "$D98" '진행 중 or 사람이 닫음; the count stays 캐리오버)'
+# d. 리뷰 대기의 자식 PR 위치
+hasfx "daily(0.98.0 17b): 자식 PR 은 부모 자리" "$D98" '- **A child PR sits in its parent'"'"'s place**, not after the member PRs'
+hasfx "daily(0.98.0 17b): 자식 PR 줄 형식·N = 목록 순번" "$D98" '`PR #<pr>  #<c>(#<e> 자식) 제목 → base`. The **N in "N번 먼저" is the list position**'
+hasfx "daily(0.98.0 17b): 에픽 의존 멤버는 남은 마지막 자식 PR" "$D98" 'that depends on the epic → the position of the **last of that epic'"'"'s child PRs still in the'
+hasfx "daily(0.98.0 17b): 순서 권고이지 스택 경고 아님" "$D98" 'split-completed parent), so for it the marker is an **order recommendation, not a stack'
+# b. 사람이 닫음
+hasfx "daily(0.98.0 17b): 사람이 닫음 판정 — CLOSED·미done" "$D98" 'judged from data already in hand: the member Issue is `CLOSED`, is **not `guild:done`**, and'
+hasfx "daily(0.98.0 17b): 사람이 닫음 판정 — 머지 PR 없음" "$D98" 'has **no `MERGED` PR mapped to it** (step 3'"'"'s PR list) — the same definition as `retro.md`'
+hasfx "daily(0.98.0 17b): 사람이 닫음 한계(직접 push)" "$D98" 'by a `fixes #N` commit pushed directly, with no PR, lands here too.'
+hasfx "daily(0.98.0 17b): done 부모 에픽은 사람이 닫음 아님" "$D98" '- **Not for an epic whose parent is `guild:done`** (a member of S)'
+hasfx "daily(0.98.0 17b): 거절과 겹치면 한 줄" "$D98" '`… · 사람이 닫음 · 닫힌 PR #<n>`'
+# a. 감사자
+hasfx "retro(0.98.0 17b): 감사자 행 — 분할 멤버는 자식 이슈" "$R98" '| 감사자 루프백 | 멤버 이슈(분할 멤버는 자식 이슈)의 감사자 레코드에서'
+hasfx "retro(0.98.0 17b): 감사자는 멤버 PR 만 목록에 없음" "$R98" '넣지 않는다 — PR 이 아니라 Issue 의 레코드이고, 분할 멤버는 자식 이슈를 읽는다'
+hasfx "retro(0.98.0 17b): 감사자 호출 — 멤버 또는 S 의 자식마다" "$R98" '**감사자 루프백** — one call per member or per child of S is acceptable here'
+lacksfx "retro(0.98.0 17b): 옛 멤버당 1회 문구 제거" "$R98" 'one call per member is acceptable here'
+hasfx "retro(0.98.0 17b): dismissed 번호 — 멤버 또는 자식" "$R98" 'The call is per member or'
+lacksfx "retro(0.98.0 17b): 옛 The call is per member 제거" "$R98" 'The call is per member,'
+hasfx "retro(0.98.0 17b): 자식이 발견된 부모는 빼고 자식을 조회" "$R98" '⚠ **Which Issues — an epic is read through its children.** Look up every member **except a'
+hasfx "retro(0.98.0 17b): 숫자는 합산, 판정은 자식별" "$R98" '- **Numbers are summed, verdicts are not.**'
+hasfx "retro(0.98.0 17b): 에픽 감사자 줄 형식" "$R98" '`#146 에픽(자식 합산) records 11 · looped-back 4 · 기록 없음 #<c>`'
+hasfx "retro(0.98.0 17b): 미착수 자식은 따로" "$R98" 'A child that is **미착수** on the merge axis (no PR) is written apart as `미착수 #<c>` and left'
+hasfx "retro(0.98.0 17b): 이전 스프린트 자식 레코드 누적" "$R98" 'The record is cumulative, so a child finished in an **earlier** sprint still adds its records'
+# f. 자식 머지 x/y
+hasfx "retro(0.98.0 17b): 에픽 행 예시" "$R98" '`#146 에픽 — done·미머지 · 자식 머지 2/3`'
+# e. Phase 6 묶음 · 다음 안내
+lacksfx "retro(0.98.0 17b): 옛 착지 못한 모든 멤버 한 목록 제거" "$R98" '1. **Name the carryover explicitly** — every member that did not land'
+hasfx "retro(0.98.0 17b): 미머지 멤버는 정확히 한 묶음" "$R98" 'falls in **exactly one** group:'
+hasfx "retro(0.98.0 17b): 1번 캐리오버" "$R98" '1. **캐리오버 — 다음 plan 이 이어받음**: an `OPEN` Issue, not `guild:done`.'
+hasfx "retro(0.98.0 17b): 1b 통합 점검 대기" "$R98" '1b. **`통합 점검 대기 — /gld dev #e (다음 plan 후보 아님)`**'
+hasfx "retro(0.98.0 17b): 2번 사람이 닫음" "$R98" '2. **사람이 닫음 — 다음 plan 대상 아님**: `CLOSED` and not `guild:done`'
+hasfx "retro(0.98.0 17b): 3번 done·열린 PR" "$R98" '3. **done·미머지 — 열린 PR 리뷰·머지 필요**: `guild:done` with an `OPEN` PR.'
+hasfx "retro(0.98.0 17b): 3번 에픽 표기" "$R98" '`#e — 열린 자식 PR #<pr>(#<c>)`, plus `· 거절 #<c>`'
+hasfx "retro(0.98.0 17b): 4번 done·PR 거절/없음" "$R98" '4. **done·미머지 — PR 거절/없음(사람이 판단)**: `guild:done` with **no open PR**'
+hasfx "retro(0.98.0 17b): 지표 캐리오버 = 1+1b+2" "$R98" 'The carryover **metric** (Phase 2) is unchanged by this grouping: it is groups 1 + 1b + 2'
+hasfx "retro(0.98.0 17b): 다음 안내 — 다음 plan 대상" "$R98" '캐리오버 <n>개(다음 plan 대상 — 사람 대기 <m>개 제외)가 최우선 후보입니다'
+lacksfx "retro(0.98.0 17b): 옛 다음 안내 제거" "$R98" '캐리오버 <n>개가'
+
+hasfx "daily(17b cr): 사람 대기 예시가 자식 needs-human 형식" "$GLD/commands/sprint/daily.md" '  #107 자식 #112 needs-human 대기 — /gld resume 112'
+hasfx "daily(17b cr): resume 뒤 남은 자식 안내" "$GLD/commands/sprint/daily.md" '(그 뒤 남은 자식은 /gld dev #e 또는 sprint run 재실행)'
+hasfx "daily(17b cr): 자식 PR 은 부모 자리" "$GLD/commands/sprint/daily.md" 'a child PR takes its parent'"'"'s place in it'
+hasfx "daily(17b cr): 자식은 하나씩 — PR 없어도 사람 대기" "$GLD/commands/sprint/daily.md" 'stopped epic often shows only children with no PR or already merged'
+hasfx "daily(17b cr): step 6 괄호에 사람이 닫음" "$GLD/commands/sprint/daily.md" 'it as 통합 점검 대기, 진행 중 or 사람이 닫음'
+hasfx "retro(17b cr): 미착수 자식 숫자는 합산" "$GLD/commands/sprint/retro.md" '(its numbers, if any, still go into the epic'"'"'s sum)'
+
+hasfx "daily(0.98.0 verify): completion 은 run 종료 시점 스냅샷" "$GLD/commands/sprint/daily.md" 'is rendered with ` (run 종료 시점)` after it'
+hasfx "daily(0.98.0 verify): 완료된 에픽 부모는 닫으라고 안내" "$GLD/commands/sprint/daily.md" 'plus ` — #e 를 닫으세요` while the'
+hasfx "retro(0.98.0 verify): 그룹 3 에픽은 머지 뒤 닫기 안내" "$GLD/commands/sprint/retro.md" '`— 자식 PR 이 모두 머지되면 #e 를 닫으세요`'
+hasfx "retro(0.98.0 verify): 자식 판정에 mixed 를 쓰지 않음" "$GLD/commands/sprint/retro.md" '(not called "mixed": that word below means a'
+hasfx "retro(0.98.0 verify): 캐리오버 0 문구" "$GLD/commands/sprint/retro.md" '(n = 0 → *"다음 plan 이 이어받을'
+
+hasfx "retro(0.98.0 final): 머지된 열린 에픽 부모 닫기 안내" "$GLD/commands/sprint/retro.md" '`#e — 자식이 모두 머지됨, #e 를 닫으세요`'
+hasfx "retro(0.98.0 final): 거절 자식이 있으면 닫기 안내 없음" "$GLD/commands/sprint/retro.md" 'child needs the human'"'"'s call first, so that case gets no close line'
+hasfx "retro(0.98.0 final): 리뷰·머지 대기 PR 수 문장과 k 정의" "$GLD/commands/sprint/retro.md" '`k` = the open PRs in group 3, child PRs'
+hasfx "retro(0.98.0 final): n=0 이어도 사람 대기 m 표기" "$GLD/commands/sprint/retro.md" 'm > 0 → add *"(사람 대기 <m>개는 직접 처리)"*'
+lacksfx "retro(0.98.0 final): 자식 판정 나열에 mixed 없음" "$GLD/commands/sprint/retro.md" '`no_scan == records`, mixed, `violation`'
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -3644,7 +3817,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=1357   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=1493   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

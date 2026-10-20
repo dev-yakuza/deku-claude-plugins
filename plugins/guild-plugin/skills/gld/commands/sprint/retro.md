@@ -32,14 +32,17 @@ Each its own Bash call.
      Phase 0 steps 1, 3 and 4, then `gh issue view <tracker> --repo <owner>/<repo> --json state,labels,body --jq '{state, sprint: ([.labels[].name] | index("guild:sprint") != null), body}'`
      — not a `guild:sprint` Issue → `FAIL: #<tracker> is not a sprint tracking Issue`; still
      `OPEN` → `FAIL: #<tracker> is still open — run /gld sprint retro` (an open sprint is cleaned
-     by its retro, after the record and the close). Then Phase 1's members call and PR call for
-     that tracker, then **Phase 7**, skipping 2–6 entirely: nothing is measured, written or
-     closed. ⚠ The PR call's truncation `FAIL` below is about **metrics** and does not apply
-     here: in CLEANUP, when the PR list still equals the limit, look each member up on the server
-     instead — `gh pr list --repo <owner>/<repo> --state all --search '"Closes #<m>" in:body' --limit 100 --json number,headRefName,baseRefName,state,mergedAt,closedAt,closingIssuesReferences`
-     — and let Phase 7's confirmation decide which rows are really that member's. A result that
+     by its retro, after the record and the close). Then Phase 1's members call, child-discovery
+     call and PR call for that tracker (in that order — they define S and the PR filter), then
+     **Phase 7**, skipping 2–6 entirely: nothing is measured, written or
+     closed. ⚠ The truncation `FAIL`s in Phase 1 are about **metrics** and do not apply
+     here: in CLEANUP, when the PR list still equals the limit, look up each member **and each
+     child of S** on the server instead (this is the branch-confirmation path, not a count) — `gh pr list --repo <owner>/<repo> --state all --search '"Closes #<m>" in:body' --limit 100 --json number,headRefName,baseRefName,state,mergedAt,closedAt,closingIssuesReferences`
+     — and let Phase 7's confirmation decide which rows are really that Issue's. A result that
      **equals the limit** is truncated: report *"#<m>의 PR을 전부 읽지 못했습니다"* and exclude
-     that member — never read it as "no PR", which would call a merged member carryover. It
+     that member or child — never read it as "no PR", which would call a merged member carryover.
+     A child supplement that fails (an error, or its first line equals 200 — Phase 1) → report *"#<m>의 자식을 모두 찾지 못했습니다"* and exclude
+     that member's children (their branches are not candidates). It
      exists because Phase 7 runs after the close, so a cleanup that was declined, interrupted or
      refused by a permission prompt has no other way back.
    ⚠ **This is step 0 for the same reason `_execute_spine.md` Step 0 detects the mode first: the
@@ -71,9 +74,11 @@ Each its own Bash call.
 
 ## Phase 1 — Is the sprint actually finished?
 
-Reuse `daily.md` step 6's **two axes verbatim** — same three `gh` calls, same derivation:
+Reuse `daily.md` step 6's **two axes verbatim** — the same three calls in the same order
+(members, child discovery, PR list — `daily.md` step 3; this PR call takes `closedAt` for
+Phase 4 and no CI), the same per-Issue derivation:
 
-⚠⚠ **`--jq` runs inside `gh`, so filtering on a field does NOT mean receiving it.** Both calls
+⚠⚠ **`--jq` runs inside `gh`, so filtering on a field does NOT mean receiving it.** The calls
 below decide membership from `body` / `closingIssuesReferences` and then emit **neither**.
 Measured on `dev-yakuza/one-man-company` (sprint 389, 3 members):
 
@@ -91,15 +96,36 @@ an answer you already received is not.**
 ```bash
 gh issue list --state all --limit 200 --json number,title,labels,state,body --jq '{total: length, members: [.[] | select((.body // "") | test("Sprint: #<tracker>([^0-9]|$)")) | {number, title, state, labels: [.labels[].name]}]}'
 ```
+**Then the children** — the same call as `daily.md` step 3 (stream form, first line = the count):
 ```bash
-gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,closedAt,reviewDecision,closingIssuesReferences --jq '[<m1>,<m2>,<m3>] as $m | {total: length, prs: [.[] | ([.closingIssuesReferences[]?.number] | map(select(. as $n | $m | index($n)))) as $c | ((.headRefName // "") | test("(^|[^0-9])#?(<m1>|<m2>|<m3>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, closedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end)}]}'
+gh issue list --label guild:child --state all --limit 500 --json number,title,body,labels,state --jq 'length, (.[] | {number, title, state, labels: [.labels[].name], parent: ((.body // "") | (match("Parent Issue: #([0-9]+)").captures[0].string | tonumber)? // null)})'
 ```
-(substitute the tracker and the member numbers literally.)
+**S** = every member that is some child's `parent`, plus every member labelled
+`guild:children`; the children of S are those whose `parent` is in S (a member of S with no child
+found is an ordinary member). First line == 500 → for every member labelled `guild:done` or
+`guild:children` (by label, in S or not) run `daily.md` step 3's child search:
+```bash
+gh issue list --state all --search '"Parent Issue: #<m>" in:body' --limit 200 --json number,title,body,labels,state --jq 'length, (.[] | select((.body // "") | test("Parent Issue: #<m>([^0-9]|$)")) | {number, title, state, labels: [.labels[].name], parent: <m>})'
+```
+and add what it finds. ⚠ **That search fails or its first line equals 200 → stop**, as for a
+truncated PR list: `FAIL: could not find every child of #<m> — the metrics would be wrong and
+Phase 4 would write them into config.json` (CLEANUP: Phase 0 step 0 instead).
+
+**Then the PRs** — filtered to the members **and** the children of S (`$m` and the branch
+pattern both hold all of those numbers), stream form: first line = the total PR count, then one
+filtered PR per line:
+```bash
+gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,closedAt,reviewDecision,closingIssuesReferences --jq '[<m1>,<m2>,<c1>] as $m | length, (.[] | ([.closingIssuesReferences[]?.number] | map(select(. as $n | $m | index($n)))) as $c | ((.headRefName // "") | test("(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, closedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end)})'
+```
+(substitute the tracker, the member numbers and the children's numbers literally.) ⚠ The PR
+filter used to hold member numbers only, so a split member's children's PRs were read for the
+first time in Phase 7 — after the metrics and after the close.
 ⚠ **The back-reference test has a digit boundary** — the same form as `_sprint_dag.md` Section A.
 `contains("Sprint: #38")` also matches `Sprint: #389`, which once only skewed a metric; Phase 7
 now deletes branches by this membership, so a sibling sprint's members must not leak in.
 
-⚠ **`total` is not decoration — it is the truncation check below, and it now comes free.** The
+⚠ **The count is not decoration — it is the truncation check below, and it now comes free**:
+`total` in the members call, the first line of the child and PR calls. The
 previous instruction told you to get the count *"on a separate invocation"*; that call is gone.
 ⚠⚠ **Match on `closingIssuesReferences` OR the branch name — not on the reference alone.**
 Measured on `dev-yakuza/one-man-company`: **70 of 200 PRs (35%) carry no closing reference at
@@ -117,9 +143,9 @@ with no PRs. Measured: that is exactly what the unguarded form does.
 `branch` is a heuristic and can over-match (a branch that merely *mentions* another Issue's
 number). The digit-boundary test stops `153` matching `1537`, but it cannot stop
 `feat/200-refs-153-followup`. So: **treat `via: "branch"` rows as candidates to confirm, not as
-facts** — check the PR actually belongs to that member before counting it, and say so if you
-drop one. ⚠ And a member with **no** row at all is still possible: cross-check `members` against
-`prs` and name it rather than reporting it as not-merged.
+facts** — check the PR actually belongs to that member (or child) before counting it, and say so if you
+drop one; only a confirmed row joins that Issue's PRs. ⚠ And a member with **no** row at all is still possible: cross-check `members` against
+the PR lines and name it rather than reporting it as not-merged.
 
 ⚠ **`--limit 200` with a client-side filter can silently miss members, and six of the nine
 metrics come from that PR list.** This matters more here than anywhere else in the sprint,
@@ -128,8 +154,8 @@ next `plan` reads them. **A truncated list does not produce an error or a zero; 
 plausible smaller number, which then becomes configuration.**
 
 So: **count first, then decide.** ~~Ask for the count in the same call (`--jq 'length'` on a
-separate invocation…)~~ — the `--jq` forms above already return **`total`**. Compare it with the
-limit:
+separate invocation…)~~ — the `--jq` forms above already return the count (`total`, or the
+first line). Compare it with the limit:
 
 ⚠ **This is live, not hypothetical.** Measured on `dev-yakuza/one-man-company`: the issue list
 returns **exactly 200** — `total == limit`, i.e. the read *is* truncated and the fallback below
@@ -145,7 +171,11 @@ step that gets skipped.
   possible failure for this phase: six of the nine metrics come from the PR list, and zero reads
   as *"nothing happened"*. Instead raise the limit (`--limit 500`) and, if the count still equals
   the limit, **stop**: `FAIL: could not read the sprint's PRs in full — the metrics would be
-  understated and Phase 4 would write them into config.json`.
+  understated and Phase 4 would write them into config.json`. ⚠ **No per-Issue fallback on this
+  path**: a `"Closes #<m>" in:body` search misses every PR linked only by its branch (measured:
+  71 such PRs, member work among them), so it would turn merged work into "no PR" — a plausible
+  smaller number again. A repo past 500 PRs cannot be measured here yet (a known limit); `daily`
+  says so in advance (`스프린트 종료: 판단 불가`).
 
 The hard rule *"Zero and unrecorded are different"* is worthless if a truncated read is treated
 as a count — and here a truncated read becomes **configuration**.
@@ -153,7 +183,7 @@ as a count — and here a truncated read becomes **configuration**.
 | Axis | Condition |
 |---|---|
 | **run finished** | the queue is empty — every member ended done, needs-human, failed or blocked |
-| **sprint finished** | run finished **AND** no member PR is `OPEN` **AND** no member PR is `CLOSED` unmerged **AND** the same holds for split children's PRs |
+| **sprint finished** | run finished **AND**, for every ordinary member and every child of S: no `OPEN` PR **AND** not 거절 (`daily.md` step 6 — no `MERGED` PR, only `CLOSED`) |
 
 **Not finished → present what remains and ask.** A retro over open PRs measures a sprint that is
 not over, and closing the tracker orphans them from the next `plan`'s carryover list. But this is
@@ -170,17 +200,28 @@ Sources, and **what each is honestly derived from**:
 
 | 지표 | 계산 | 출처 |
 |---|---|---|
-| 약속 이행률 | 머지된 멤버 / 계획된 멤버 | 멤버 표 + PR `mergedAt` |
-| 캐리오버 | 결말나지 않은 멤버 (done도 아니고 머지도 안 된 것) | 라벨 + PR 상태 |
-| 사람 대기 횟수 | `guild:needs-human`에 도달한 멤버 수 | 라벨 |
+| 약속 이행률 | 머지된 멤버 / 계획된 멤버 | 멤버 표 + PR `mergedAt` — 머지 축(`daily.md` step 6). 에픽은 한 자리, 자식이 모두 머지돼야 머지 |
+| 캐리오버 | 결말나지 않은 멤버 (done도 아니고 머지도 안 된 것) | 라벨 + PR 상태. 에픽은 부모가 done 이 아니면 캐리오버(자식 상태 무관) |
+| 사람 대기 횟수 | `guild:needs-human`에 도달한 멤버 수 | 라벨. 에픽은 부모 또는 done 이 아닌 자식 중 하나라도 `guild:needs-human` 이면 1(`daily.md` step 5 의 **사람 대기** 정의) |
 | ↳ 그중 분할이 멈춘 것 | **분리 집계** — 원인이 다르다 | `failures.jsonl`의 `split-stalled`. ⚠ 분할 자체는 더 이상 일시정지가 아니다(§8.7) — 감독자가 이어서 재개하므로, 이 값은 *재개가 전진을 멈춘* 횟수다 |
-| 감사자 루프백 | 멤버 이슈의 감사자 레코드에서 **disposition 토큰** 집계 | `<!-- guild:auditor:execute -->` 댓글 |
+| 감사자 루프백 | 멤버 이슈(분할 멤버는 자식 이슈)의 감사자 레코드에서 **disposition 토큰** 집계 | 멤버 이슈(분할 멤버는 자식 이슈)의 `<!-- guild:auditor:execute -->` 댓글 |
 | 의존성 차단 횟수 | 차단으로 건너뛴 횟수 | `failures.jsonl`의 `dependency-blocked` · `base-unresolved`. ⚠ `base-decision-failed`는 **세지 말 것** — 그것은 실패다 |
 | 스택 따라잡기 횟수 | base가 기본 브랜치로 폴백한 PR 수 | PR `baseRefName` ↔ 멤버 표의 기대 base |
 | 리뷰 변경 요청률 | `reviewDecision == CHANGES_REQUESTED` / 멤버 PR | PR |
-| 닫힌-미머지 PR | 사람이 거절한 작업 | PR `state == CLOSED` + `mergedAt == null` |
+| 닫힌-미머지 PR | 사람이 거절한 작업 | PR `state == CLOSED` + `mergedAt == null` — **자식 PR 도 같은 범위로 센다**(멤버 PR 만이 아님) |
 | 목표 달성 | `구분 = goal` 과 `slot` 멤버가 **모두** 머지됐는가(예/아니오) + 머지된 / 계획된 (슬롯은 목표 쪽에 센다 — `daily` 와 같은 기준) | 멤버 표의 `구분` 열 + PR `mergedAt`. 열이 없는 옛 트래커 → "목표 구분 없음" |
 | 목표 외 | 머지된 other / 계획된 other | 같은 출처 |
+
+리뷰 변경 요청률과 스택 따라잡기만 **멤버 PR 만** 센다 — 자식 PR 은 넣지 않는다. 감사자 루프백은 이 목록에
+넣지 않는다 — PR 이 아니라 Issue 의 레코드이고, 분할 멤버는 자식 이슈를 읽는다(아래 **감사자 루프백**).
+
+**An epic (a member of S) is one seat** in 이행률 · 캐리오버 · 목표 달성 · 목표 외, with
+`daily.md` step 6's epic rule deciding it — so `history`'s `planned` stays the seat count (row ③'s
+`capacity = planned`, the first-value row and `plan`'s largest-past comparison all count seats).
+The `history` schema and the recommendation table do not change. Phase 3 gives each epic one line
+with its outcome and `자식 머지 <x>/<y>` (its children merged / its children — counts of
+children, not of PRs), e.g. `#146 에픽 — done·미머지 · 자식 머지 2/3`. ⚠ Without this an epic, which has no PR of its
+own, counted as unmerged and rows ④/⑥ cut `capacity` for work that had landed.
 
 **The refactor slot's outcome** — not a tenth metric (the slot is already counted in the nine as
 a member), but the one member whose fate the next `plan` reads back. Take it from the tracker
@@ -216,7 +257,8 @@ cat .claude/guild/.sprint-logs/<tracker>/failures.jsonl
 Absent → say *"이벤트 기록 없음"* for those three rows rather than reporting 0. **Zero and
 unrecorded are different findings**, and only one of them is good news.
 
-**감사자 루프백** — one call per member is acceptable here (retro is attended and runs once).
+**감사자 루프백** — one call per member or per child of S is acceptable here (retro is attended
+and runs once). The calls grow with the number of children — the same per-Issue shape as before.
 ⚠ **`--paginate`, not a plain view.** That comment grows a block per attempt and per re-entry, so
 it is exactly the shape that comes back as page 1 only — and a truncated read produces a
 plausible small number, not an error (`_execute_spine.md` Step 4 states the same requirement for
@@ -246,6 +288,24 @@ the plausible-small-number failure above. (Merging pages inside `jq` would need 
 pipe into a second `jq`, which `gh` and `_bash_rules.md` respectively rule out; adding a handful of
 integers by eye does not.)
 
+⚠ **Which Issues — an epic is read through its children.** Look up every member **except a
+member of S whose children were found**, and every child of S instead (a member of S with no
+child found is an ordinary member — Phase 1 — and is looked up as one). A parent never runs
+execute, so its own record is always `records: 0` — measured: #146 and #483 reported *"기록 없음"*
+while their children held 18 records, 4 of them looped-back (#532).
+- **Numbers are summed, verdicts are not.** Add `records` · `looped_back` · `fixed` · … over the
+  children into the epic's row, `#e 에픽(자식 합산)`, but **judge each child on its own**: records 0
+  → "기록 없음", `clean == records`, `no_scan == records`, `violation`, `dismissed` — and a child
+  that is none of these is listed with its counts (not called "mixed": that word below means a
+  record spanning the 0.85.2 upgrade) — every
+  verdict and listing below carries the **child's** number. Shape (numbers illustrative):
+  `#146 에픽(자식 합산) records 11 · looped-back 4 · 기록 없음 #<c>` — so that *"Zero and
+  unrecorded are different"* is not buried in a sum.
+- A child that is **미착수** on the merge axis (no PR) is written apart as `미착수 #<c>` and left
+  out of the "기록 없음" verdict (its numbers, if any, still go into the epic's sum) — its missing record says nothing about the auditor.
+- The record is cumulative, so a child finished in an **earlier** sprint still adds its records
+  here — the same property an ordinary carryover member's record has.
+
 ⚠ **`records: 0` is "no record", not "clean" — report the two separately.** From plugin 0.85.2 a
 clean scan writes its own block (`findings: none`) and an attempt that never reached the scan
 writes `scan: none` (`_execute_spine.md` Step 4). So: `clean == records` → every scan was clean;
@@ -273,8 +333,9 @@ matches `prefixed`, `unrecorded`, … On this corpus both forms agreed (17 = 17,
 is prevention, not a fix — but it is free, and a silently inflated `fixed` reads as *"the auditor
 kept finding things and they kept getting fixed"*, which is a flattering error.
 ⚠ `looped-back` is hyphenated and cannot collide, so it needs no boundary.
-⚠ **`dismissed` still has to be listed with its Issue numbers** (below). The call is per member,
-so the member number is already in hand — pair it with the count; do not fold it into a total.
+⚠ **`dismissed` still has to be listed with its Issue numbers** (below). The call is per member or
+per child of S, so that Issue's number is already in hand — pair it with the count; do not fold
+it into a total.
 
 ⚠ **Do NOT count `"severity":"BLOCKER"`.** That string is the JSON the auditor returns *to the
 leader*; it is not what lands on the Issue. What lands is a `### audit-record <n>` block whose
@@ -495,9 +556,35 @@ keeps a reason that may already be resolved. Say so rather than letting the huma
 
 This is a **disclosure, not a projection** — no `gh project` call, no card touched.
 
-1. **Name the carryover explicitly** — every member that did not land, with its reason and its
-   current stage. The next `sprint plan` treats these as top candidates (except one still carrying `guild:needs-human`, which its fill does not take on its own — the human resolves it or adds it in Phase 5), and it finds them by
-   reading this list.
+1. **Name every member that did not land, in the group whose advice fits it** — with its reason
+   and its current stage. Every unmerged member (merge axis, `daily.md` step 6; an epic is one
+   seat) falls in **exactly one** group:
+   1. **캐리오버 — 다음 plan 이 이어받음**: an `OPEN` Issue, not `guild:done`. The next
+      `sprint plan` treats these as top candidates (except one still carrying `guild:needs-human`
+      — for an epic, `daily.md` step 5's **사람 대기** definition — which its fill does not take
+      on its own: the human resolves it or adds it in Phase 5), and it finds them by reading this
+      list. ⚠ Except an epic (parent not done) whose children are **all** `guild:done` → group 1b.
+   1b. **`통합 점검 대기 — /gld dev #e (다음 plan 후보 아님)`** — `plan` leaves a k = 0 epic out of
+      its candidates (`plan.md` Phase 1); the same split as case 1 of `daily.md` step 5's
+      split-parent line.
+   2. **사람이 닫음 — 다음 plan 대상 아님**: `CLOSED` and not `guild:done` (`plan` reads open
+      Issues only) — the same definition as `daily.md` step 6's *"사람이 닫음"*.
+   3. **done·미머지 — 열린 PR 리뷰·머지 필요**: `guild:done` with an `OPEN` PR. An epic:
+      `#e — 열린 자식 PR #<pr>(#<c>)`, plus `· 거절 #<c>` when a child is also 거절; with no 거절
+      child, also `— 자식 PR 이 모두 머지되면 #e 를 닫으세요` (no PR closes a split parent; a 거절
+      child needs the human's call first, so that case gets no close line).
+   4. **done·미머지 — PR 거절/없음(사람이 판단)**: `guild:done` with **no open PR** (for an epic,
+      no open child PR) — only rejected PRs, or none; an epic's `미머지(자식 PR 거절)` and
+      `미머지(자식 PR 없음)` land here when no child PR is open.
+
+   (Not a group — a member that landed: an epic counted 머지 whose parent Issue is still `OPEN`
+   gets one line `#e — 자식이 모두 머지됨, #e 를 닫으세요`, since retro closing the tracker ends
+   `daily`, the only other place that says it.)
+
+   The carryover **metric** (Phase 2) is unchanged by this grouping: it is groups 1 + 1b + 2 (an
+   epic whose parent is not done is 캐리오버 whatever its children's state), so Phase 3's
+   `캐리오버 <n>개`, `history` and the Return line keep that number. Put no note or equation in
+   `history`.
    ⚠ Members carry **no** `guild:*` sprint label (`_sprint_dag.md` Section A) and their
    `Sprint: #<tracker>` back-reference is **kept**, not removed — one Issue having passed through
    two sprints is accurate history. So carryover needs no label surgery at all.
@@ -566,15 +653,11 @@ human's.
 - `git branch --show-current` (never a candidate) and `gh repo view <owner>/<repo> --json
   defaultBranchRef --jq .defaultBranchRef.name` (never a candidate). ⚠ `gh repo view` takes the
   repo **positionally** — it has no `--repo` flag, and the call fails with `unknown flag`.
-- **Split children.** Phase 1's PR filter holds member numbers only, and a member split into
-  children has no PR of its own. Take the children from the run marker's discovered children
-  (Phase 0 step 4 already read it). For any member that is `guild:done` with **no** PR in
-  Phase 1's list and no children in the marker, ask the server:
-  `gh issue list --repo <owner>/<repo> --state all --search '"Parent Issue: #<m>" in:body' --limit 200 --json number,body --jq 'map(select((.body // "") | test("Parent Issue: #<m>([^0-9]|$)")) | .number)'`
-  (search is token-based, so the `jq` re-applies the digit boundary).
-  Read the children's PRs with Phase 1's PR call, their numbers substituted for the members' —
-  and, when that list equals its limit, the same per-Issue server lookup as CLEANUP's
-  (Phase 0 step 0), with the same truncation rule.
+- **Split children.** Reuse Phase 1's S and its children (the child call and, when it was
+  truncated, its supplement) and their PRs — already in Phase 1's PR list, whose filter holds
+  the children's numbers. No run-marker read and no server re-query here: Phase 1's supplement
+  already does what this step used to. In CLEANUP with a truncated PR list, the children's PRs
+  come from Phase 0 step 0's per-Issue lookup, with its truncation rule.
 - **Confirm each PR before its branch becomes a candidate** — Phase 1 itself calls a
   `via: "branch"` row *"a candidate to confirm, not a fact"*, and a cleanup that deletes is the
   last place to skip that. One call per PR:
@@ -631,7 +714,7 @@ human's.
 | merged (any PR `MERGED`, none `OPEN`) | remove (if clean) | delete **iff tip == `headRefOid`** | delete **iff tip == `headRefOid`** |
 | carryover (a PR `OPEN`, or no PR) | remove (if clean) | **keep** | **keep** |
 | closed-unmerged | remove (if clean) | **keep — report only** | **keep — report only** |
-| split parent (`guild:done`, no PR) | remove (if clean) | — | — |
+| split parent (a member of S — no PR of its own) | remove (if clean) | — | — |
 | `supervisor`, `sync-<N>` | remove (if clean) | — (detached) | — |
 | run files (untracked only) | delete | — | — |
 
@@ -715,8 +798,14 @@ anything left the report says *"남은 정리는 `/gld sprint retro --cleanup <t
 **DRY**: run 1, print 2's table with a *"`--dry-run`: 아무것도 삭제하지 않습니다"* line, and skip 3
 entirely — delete nothing.
 
-**Then say what is next**: *"`/gld sprint plan`으로 다음 스프린트를 구성하세요. 캐리오버 <n>개가
-최우선 후보입니다."*
+**Then say what is next**: *"`/gld sprint plan`으로 다음 스프린트를 구성하세요.
+캐리오버 <n>개(다음 plan 대상 — 사람 대기 <m>개 제외)가 최우선 후보입니다."* (n = 0 → *"다음 plan 이 이어받을
+캐리오버는 없습니다."*; m > 0 → add *"(사람 대기 <m>개는 직접 처리)"*; group 3 non-empty → add
+*"리뷰·머지 대기 PR <k>건이 남아 있습니다(위 목록)."* — `k` = the open PRs in group 3, child PRs
+included) — `n` = Phase 6 step 1's group 1 minus its
+사람 대기 members, `m` = those (an epic's by `daily.md` step 5's **사람 대기** definition). It is not
+Phase 3's `캐리오버 <n>개` or the Return line's `carryover <K>` — those are the metric (groups 1 + 1b
++ 2); "다음 plan 대상" is what tells the two numbers apart.
 
 **`--dry-run`**: stop after Phase 3, then print what Phases 4–7 *would* do — the capacity number,
 the history entry, the carryover list, and the cleanup table. Write nothing, run no evolve, close

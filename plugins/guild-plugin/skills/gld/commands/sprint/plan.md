@@ -1011,11 +1011,11 @@ the fill's walk reaches the epic:
   `⚠ #e 의 자식 PR 은 서로 쌓일 수 있고 sprint sync 대상이 아닙니다`. A child whose design tries to
   split again goes to needs-human (leaf-only, `_handoff.md` Section I) — `run` stops on it, and
   unattended it may re-try and end the epic `split-stalled` (Phase 5's Add warning).
-  Any epic member at all → one line `ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(다음 버전에서 수정)` (an epic has no PR of its own; `retro`'s and `daily`'s merge
-  counts do not know that yet).
+  `retro` and `daily` count an epic as one seat, merged when it is `guild:done` and all its children are merged (`daily.md` step 6).
   Known limit: `run`'s `children_pending`, `dev` Phase 2b and the other child-discovery reads
-  (`_handoff.md` Section I, `status.md`, `daily.md`) still read `--limit 200`; in a repo with more
+  (`_handoff.md` Section I, `status.md`) still read `--limit 200`; in a repo with more
   than 200 `guild:child` Issues they can see fewer children than this plan's 500 — separate work.
+  (`daily` and `retro` read `--label guild:child --limit 500`, as Phase 1 does.)
 
 **Phase 5 order of reasons — ordinary candidates: one line each, the first gate it failed.** An
 ordinary candidate (not an epic) the sprint does not take gets **one** reason line — the first of
@@ -1210,7 +1210,6 @@ candidates judged (1b's `<후보 수>`) — a new slot draft is not among the N,
   ⚠ 선행 미포함: #120 ← #118(열림, 멤버 아님) — 기본 브랜치에서 시작합니다
   의존 무시: #459 ← #146 (본문: «#496. #146(…)과 같은 엔진 구간이라 순서를 조율한다»)
   의견: #161 ← #146 는 이미 충족됐을 수 있습니다(tech-lead: 실제 필요는 #531 의 엔진 변경, via #531) — 맞으면 #161 본문 · 자식 #512 본문의 Depends on 을 고치세요
-  ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(다음 버전에서 수정)
   제외 5개: #108(Success=unclear · 건너뜀) · #110(⚠ 분할 예상) · #133(구체화 필요 — 1b) · #141(PO: 이번 목표와 무관한 실험) · …
   용량: 10 · 담음 8(목표 5 · 목표 외 3 · 슬롯 1 포함) · 미달 사유: supply — 남은 후보 없음 (실측 최대 9)
   (담음이 용량과 같을 때만, 용량 > 실측 최대이면: ⚠ 용량 10 은 아직 실측된 적 없는 크기입니다(실측 최대 9) — 줄이려면 "크기 N" 으로 말해 주세요)
@@ -1292,7 +1291,7 @@ the brackets — the line then ends `재정렬 / 스택 없음 요청 가능)`; 
 - `목표 수정: 원래 «…» — <이유>` / `⚠ 목표 멤버 없음 — 목표를 정하거나 드롭/추가하세요` —
   Phase 3's goal re-check.
 - An epic member's lines (Phase 3, *Epics in the fill*): `#e (에픽 · 남은 자식 k개 — PR 최대 k개)`
-  in its row, the k ≥ 10 and stacking warnings, and `ⓘ 에픽 멤버는 retro·daily 지표에서 아직 미머지로 보일 수 있습니다(다음 버전에서 수정)` once.
+  in its row, and the k ≥ 10 and stacking warnings.
 - `의존 무시: #e ← #d (본문: «<그 문장>»)` — **for members only** (an epic member, or an ordinary
   member whose `Depends on` Phase 5's `⚠ 선행 미포함` reads by the same rule; a non-member's ignored
   number changes nothing): each number left out only because it sat after the first sentence,

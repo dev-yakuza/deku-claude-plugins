@@ -29,11 +29,13 @@ which; render nothing speculative.
 **2. Read the container.** From the body: the goal, the member table (members + `base 의존`, and
 the `구분` column — `goal` / `other` / `slot` — when the table has one),
 the capacity reasoning, the stack cap. From the `<!-- guild:sprint:run -->` comment: `state`,
-`heartbeat`, `host`/`pid`, per-issue retries, discovered children, and — when a board is
+`heartbeat`, `host`/`pid`, per-issue retries, and — when a board is
 configured — `board_fails` · `board_bugs` · `board_unknown_col` · `board_account_mismatch` ·
 `board_disabled_after` · `board_last_write` · `board_reason_disabled` · `board_off_reason`.
+The children are **not** read from the marker — they come from step 3's child call (S, below).
 
-**3. Gather — three `gh` calls here plus one `git`; four `gh` in total, counting step 1.**
+**3. Gather — four `gh` calls here plus one `git`; five `gh` in total, counting step 1** (plus
+the truncation re-reads below, only when a count says so).
 
 ⚠ **The run marker lives in a COMMENT, and step 1's `--json body` does not contain comments.**
 Without this call, step 2's `state` · `heartbeat` · `host`/`pid` and all four `board_*` keys
@@ -87,12 +89,47 @@ non-object entry in the array makes `jq` exit with *"Cannot index string with st
 no PRs at all. With them such an entry degrades to `pending`: not a verdict, and **not green**,
 which is the property that matters here.
 
+**In this order — members, then children, then PRs**: the PR call's filter needs both sets.
+
+**Members** — the same call as `retro.md` Phase 1, with the same truncation rule:
 ```bash
-gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,closingIssuesReferences --jq '{total: length, prs: [.[] | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: [.closingIssuesReferences[]?.number], ci: ((.statusCheckRollup // []) as $c | if ($c | length) == 0 then "none" elif any($c[]; ((.conclusion? // .status? // .state? // "") | tostring | ascii_upcase) | (. == "" or test("QUEUED|IN_PROGRESS|PENDING|WAITING|EXPECTED|REQUESTED"))) then "pending" elif all($c[]; ((.conclusion? // .status? // .state? // "") | tostring | ascii_upcase) | test("^(SUCCESS|NEUTRAL|SKIPPED)$")) then "pass" else "fail" end)}]}'
+gh issue list --state all --limit 200 --json number,title,labels,state,body --jq '{total: length, members: [.[] | select((.body // "") | test("Sprint: #<tracker>([^0-9]|$)")) | {number, title, state, labels: [.labels[].name]}]}'
 ```
+`total` equal to the limit → re-read with the server-side filter `--search '"Sprint: #<tracker>" in:body'`
+(same `--json` and `--jq`), as `retro.md` Phase 1 does. ⚠ The unfiltered `--limit 200` list this
+replaced had no such check — a repo past 200 Issues silently dropped its older members (an epic
+planned weeks ago is exactly that).
+
+**Children** — one call for every split member at once (the same form as `plan.md` Phase 1's
+child read; stream form, first line = the count, one child per line):
 ```bash
-gh issue list --state all --limit 200 --json number,title,labels,state
+gh issue list --label guild:child --state all --limit 500 --json number,title,body,labels,state --jq 'length, (.[] | {number, title, state, labels: [.labels[].name], parent: ((.body // "") | (match("Parent Issue: #([0-9]+)").captures[0].string | tonumber)? // null)})'
 ```
+**S** (the split members) = every member that is some child's `parent`, plus every member
+labelled `guild:children`. The children of S are the children whose `parent` is in S. No tracker
+line, no comment read. A member of S with no child found is judged as an ordinary member.
+⚠ **First line == 500 → the list is truncated** (newest first, so one epic's children can be cut
+at the edge): for **every** member labelled `guild:done` or `guild:children` — by label, whether
+or not it is in S yet — search the server and add what it finds (substitute `<m>` literally,
+also in `parent: <m>`):
+```bash
+gh issue list --state all --search '"Parent Issue: #<m>" in:body' --limit 200 --json number,title,body,labels,state --jq 'length, (.[] | select((.body // "") | test("Parent Issue: #<m>([^0-9]|$)")) | {number, title, state, labels: [.labels[].name], parent: <m>})'
+```
+(search is token-based, so the `jq` re-applies the digit boundary; `Parent Issue:` is body text,
+so the search is reliable.) Nothing found → that member stays ordinary. **The call fails, or its
+first line equals 200** → the children cannot be known: the sprint is **판단 불가** (step 6).
+
+**PRs** — filtered to members **and** the children of S (`<m…>` = all of those numbers,
+substituted literally in both places); stream form — first line = the total PR count, then one
+filtered PR per line:
+```bash
+gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,closingIssuesReferences --jq '[<m1>,<m2>,<c1>] as $m | length, (.[] | ([.closingIssuesReferences[]?.number] | map(select(. as $n | $m | index($n)))) as $c | ((.headRefName // "") | test("(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end), ci: ((.statusCheckRollup // []) as $c | if ($c | length) == 0 then "none" elif any($c[]; ((.conclusion? // .status? // .state? // "") | tostring | ascii_upcase) | (. == "" or test("QUEUED|IN_PROGRESS|PENDING|WAITING|EXPECTED|REQUESTED"))) then "pending" elif all($c[]; ((.conclusion? // .status? // .state? // "") | tostring | ascii_upcase) | test("^(SUCCESS|NEUTRAL|SKIPPED)$")) then "pass" else "fail" end)})'
+```
+⚠ **First line == 200 → re-read with `--limit 500`.** Still 500 → **no per-Issue fallback**: a
+`"Closes #<m>" in:body` search cannot find a PR linked only by its branch, so it would turn real
+work into "no PR". The sprint is **판단 불가** instead (step 6). ⚠ The old shape — every PR
+unfiltered as one `{total, prs:[…]}` line — was cut at 200 in a 235-PR repo, and at 500 its
+single line grew to ~40 KB, more than Read shows of one line.
 ```bash
 git worktree list --porcelain
 ```
@@ -101,12 +138,15 @@ Derive each member's stage with `_handoff.md` Section A's **list form** (it alre
 `guild:child`, `guild:needs-human`, `guild:harness` and `guild:sprint`, and returns the
 additive `paused` flag separately — never sum `paused` beside the stage buckets).
 
-Map PR → member via `closingIssuesReferences`, falling back to an issue-number token in the
-head branch name (`_sprint_dag.md` Section D). ⚠ A member whose dependency shows `BLOCKED:dep-pr-ambiguous` has
+Map PR → member or child by `closes`, falling back to the issue-number token in the head branch
+name (`via: "branch"`, `_sprint_dag.md` Section D). ⚠ A `via: "branch"` row is a candidate to
+confirm, not a fact — the same check as `retro.md` Phase 1 — and only a confirmed one joins that
+Issue's PRs. ⚠ A member whose dependency shows `BLOCKED:dep-pr-ambiguous` has
 **two open PRs with different branches** — render it under 의존성 차단 with both PR numbers and
 say *"둘 중 하나를 닫으면 풀립니다"*; it is not a failure and needs no re-plan.
 **Merge order comes from the member table's
-`base 의존` chain**, not from PR creation order.
+`base 의존` chain**, not from PR creation order — a child PR takes its parent's place in it
+(step 5).
 
 **3b. Squash stacks — only when 상한 근거 is `squash-sync` or `human-override`** (`_sprint_dag.md`
 Section G), one more call. It fetches into `refs/remotes/` (and objects) only — no branch, PR or
@@ -160,6 +200,10 @@ When the member table has a `구분` column, add one line under the header:
 `목표: 머지 <g_merged>/<g> · 목표 외: 머지 <o_merged>/<o>` (the slot counts with the goal). The
 merge order below is unchanged — it follows `base 의존`, never `구분`. A table without the column
 (a sprint planned before it existed) gets no such line.
+"머지" is step 6's **merge axis**, and an epic (a member of S) is **one seat**, merged only by
+step 6's epic rule. When the sprint is 판단 불가 (step 6) **and the table has the `구분`
+column**, the line is `목표: 판단 불가(<이유>)` instead — a number counted from a truncated list is
+not shown; a table without the column still gets no goal line at all.
 
 ⚠ **When `config.sprint.board` is set, add ONE board line.** Pick the first matching row —
 this is not optional garnish, it is the only place a human learns their board is dead:
@@ -210,11 +254,45 @@ counter is 0 and would otherwise render as "fine".
 where every write failed and a board where everything worked produce the same screen. That
 happened; it is why this is a table.
 
-⚠ **Add the split-parent line** for any member that reached `guild:done` with a
-`<!-- guild:children:output -->` comment and **no PR of its own** — the same condition step 6
-already evaluates: *"#107 은 자식 PR 로 완료됩니다 — 보드 카드는 부모에 남습니다"*. Guild hides
-children from the board (D8), so without this the parent sits in `In review` with no PR to
-review and a `split-children` token a human has no way to decode.
+⚠ **Add the split-parent line** for every member of S (step 3), whatever its state, with its
+children indented under it — the same set step 6 evaluates. `#e` = the parent; `<n>` = its
+children that are **not 머지 on step 6's merge axis**, whatever their labels. **First match wins:**
+0. Parent `CLOSED` and not `guild:done` → step 6's *"사람이 닫음"* line takes precedence — never
+   suggest `dev` on a closed Issue.
+1. Parent **not** `guild:done`:
+   - every child `guild:done` (`plan.md` Phase 1's `remaining` is 0 — `dev.md` Phase 2b's
+     condition for Phase 2c) → one phrase, with no further condition:
+     `통합 점검 대기 — run 이 끝난 뒤에도 남아 있으면 /gld dev #e (run 진행 중에는 run 이 이어갈 수 있으니 동시에 실행하지 마세요)`.
+     The marker carries no queue, so whether that epic is still queued in a live run is not
+     something this command has the data to decide — do not guess it.
+   - otherwise → `#e 은 자식으로 진행 중입니다(머지 안 된 자식 <n>개)`.
+
+   Either way, when the epic is **사람 대기** — defined once: **the parent, or one of its children
+   without `guild:done`, carries `guild:needs-human`** (`plan.md` Phase 1's `blocked_children`, and
+   `retro.md`'s 사람 대기 row; a stopped child carries the label itself, `dev.md` Phase 2b) —
+   append ` · 사람 대기 #<번호>` (the Issue that carries it). Children run one at a time, so a
+   stopped epic often shows only children with no PR or already merged — that is still 사람 대기,
+   and step 6 still counts it as 캐리오버.
+2. Parent `guild:done` — step 6's epic order, unchanged: a child 거절 → `#e 미머지(자식 PR 거절)`,
+   plus ` · 열린 자식 PR #<pr>` for each open child PR; else a child 진행 중 →
+   `#e done·미머지 — 자식 PR 리뷰·머지 대기(머지 안 된 자식 <n>개)`; else a child 미착수 →
+   `#e 미머지(자식 PR 없음)`; else (every child 머지) →
+   `#e 은 자식 PR 로 완료됩니다 — 보드 카드는 부모에 남습니다`, plus ` — #e 를 닫으세요` while the
+   parent is still OPEN (no PR closes a split parent; a human closing it is the normal path, and
+   `plan` never offers a `guild:done` Issue again).
+
+⚠ The old line keyed on the parent's label alone, so a done parent read *"자식 PR 로 완료됩니다"*
+on the same screen as that child's open PR, and its `남은 자식` count (`guild:done`-based) could not
+show a child that was done with its PR still open.
+
+⚠ **A child's `guild:needs-human` goes under ▎사람 대기 too** — children are not in the list form
+(step 3), so without this line nothing on the screen names it:
+`#e 자식 #c needs-human 대기 — /gld resume <c> (그 뒤 남은 자식은 /gld dev #e 또는 sprint run 재실행)`
+(`plan.md` Phase 5's command; `/gld resume <c>` finishes only that child). The split-parent
+line's ` · 사람 대기 #c` points at it.
+
+Guild hides children from the board (D8), so without the split-parent line the parent sits in
+`In review` with no PR to review and a `split-children` token a human has no way to decode.
 
 ⚠ **Derive it, do not read the card.** `daily` makes no board read at all — `board.md`'s Hard
 rules enumerate the design's two reads and neither is here — so an instruction phrased as *"the
@@ -244,7 +322,7 @@ Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limi
 ▎사람 대기 (2)
   #103  design — 영수증 재발행 범위 불명확 (2개 안 제시됨)
         → 결정 후 `/gld dev 103`.  ⚠ 지금 풀어도 이 run은 다시 집지 않습니다 — `sprint run` 재실행 필요
-  #107  분할 오케스트레이션이 멈춤 — 자식 2개 미완 (`/gld dev 107`로 이어가세요)
+  #107 자식 #112 needs-human 대기 — /gld resume 112 (그 뒤 남은 자식은 /gld dev #107 또는 sprint run 재실행)
 
 ▎실패 (1)
   #106  base-unresolved — origin/develop 을 로컬에서 확인 불가
@@ -272,6 +350,17 @@ Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limi
   `reviewDecision` and 낡은 base are trying to keep them in.
 - **Merge order with a "N번 먼저" marker.** A stack must be merged bottom-up; GitHub's UI does
   not enforce it. Merging out of order pulls the upper PR's commits into the lower one's diff.
+- **A child PR sits in its parent's place**, not after the member PRs: at the epic member's
+  position in the `base 의존` order, the same parent's child PRs in ascending child number
+  (`dev` Phase 2b's execution order — measured, child PRs stack on each other). Same line shape:
+  `PR #<pr>  #<c>(#<e> 자식) 제목 → base`. The **N in "N번 먼저" is the list position**, as above:
+  a child PR whose base is an earlier sibling's branch → that sibling PR's position; a member
+  that depends on the epic → the position of the **last of that epic's child PRs still in the
+  list**, and none left → no marker. ⚠ That member's base is `DEFAULT` (`_sprint_dag.md`: a
+  split-completed parent), so for it the marker is an **order recommendation, not a stack
+  warning** — word it as one.
+- **`완료 N/M` on the 진행 line counts labels** (`guild:done`) — what it does today; it is not
+  the merge axis. Merging is the goal line's and *sprint finished*'s (step 6) job.
 - **"낡은 base"** — the dep's PR head has moved since this PR was cut. Catching up is the
   **human's** job (Guild does not auto-rebase: INV3 forbids force-push), and after catching up
   the change has not been through the auditor/test/qa, so the honest advice is to re-enter with
@@ -345,6 +434,10 @@ supervisor therefore writes one `completion` object into the ledger just before 
 finished`, and this command renders it: counts, `elapsed_s` (⚠ **as h:m** — a multi-night run
 makes this a large number), `cost`, `tokens`, `logs`, `run_timestamp`, and the four issue lists.
 
+- ⚠ **The completion is a snapshot taken when the run ended.** An issue list that no longer
+  matches today's labels and PRs (measured: `incomplete: #146 (split: 1 left)` after #532 reached
+  `guild:done`) is rendered with ` (run 종료 시점)` after it — the step 5 lines above are the
+  current state.
 - ⚠ **`paused_issues` first.** A paused member (`guild:needs-human`) is the one outcome that
   **requires** a human, and `paused: 1` without a number cannot be acted on days later.
 - ⚠ **`kept_worktrees` is `{path, reason}`**, and the `reason` is git's own refusal
@@ -365,24 +458,54 @@ makes this a large number), `cost`, `tokens`, `logs`, `run_timestamp`, and the f
 | Axis | Condition |
 |---|---|
 | **run finished** | the queue is empty — every member ended done, needs-human, failed or blocked. **Not all done.** |
-| **sprint finished** | run finished **AND** no member PR is `OPEN` **AND** no member PR is `CLOSED` unmerged **AND** the same holds for the PRs of any children a split produced |
+| **sprint finished** | run finished **AND**, for every ordinary member and every child of S: no `OPEN` PR **AND** not 거절 (below) |
+
+**Per Issue (a member or a child of S), two separate readings.** Its PRs are those step 3 mapped
+to it by `closes`, plus `via: "branch"` rows only once confirmed — several branches included.
+- **Merge axis** (the counts — the goal line here, `retro`'s metrics): any `MERGED` PR → **머지**
+  (merge time = the latest `mergedAt`; a later `OPEN` PR does not undo it) · no `MERGED`, only
+  `CLOSED` → **거절** · no PR → **미착수** · otherwise (only `OPEN`) → **진행 중**.
+- **Finish axis** (the table above): no `OPEN` PR and not 거절. An Issue whose first PR was
+  closed and a later one merged is **not** 거절 — judging PR by PR, that sprint could never finish.
+- **An epic (a member of S) is one seat.** It is 머지 ⇔ the parent is `guild:done` **and** every
+  child of it is 머지. Parent `guild:done` and a child 거절 → **미머지(자식 PR 거절)**; else a child
+  진행 중 → **done·미머지** (the same cell as an ordinary member that is done with its PR open);
+  else a child 미착수 (no PR — a `closed-not-done` child, say) → **미머지(자식 PR 없음)**. Parent
+  not `guild:done` → **캐리오버**, whatever its children's state (step 5's split-parent line words
+  it as 통합 점검 대기, 진행 중 or 사람이 닫음; the count stays 캐리오버). The finish axis reads the
+  children themselves, never the parent.
 
 Sprint finished → *"회고 가능 — `/gld sprint retro`"*. Otherwise say precisely what remains.
-⚠ A `CLOSED`-unmerged PR is **not** a completion: the human rejected that work. Surface it as
+⚠ A 거절 Issue is **not** a completion: the human rejected that work. Surface its `CLOSED` PRs as
 *"닫힌 PR <n>건 — 확인 후 회고하세요"* rather than letting the count read as done.
-⚠ **A split parent's CHILDREN count too.** When a member reached `guild:done` by being split
-(its `<!-- guild:children:output -->` comment exists, and `run` handed it to the human), the
-parent has no PR of its own — its children carry them. Discover them and fold their PRs into
-both axes above:
-```bash
-gh issue list --state all --limit 200 --json number,title,labels,state,body --jq '{total: length, children: [.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)")) | {number, title, state, labels: [.labels[].name]}]}'
-```
-Without this, an open child PR sits outside the count, *"sprint finished"* reads true, and
-`retro` closes a sprint whose work is still in review. Render them indented under the parent so
-the human sees they belong to it.
+⚠ **A split member's CHILDREN count, not the member** — the parent has no PR of its own. They
+come from step 3's child call (and its supplement), whatever the parent's state: a parent that
+stopped at its k-th child (`guild:children` + `guild:needs-human`) still has open PRs from the
+children before it, and leaving them out let *"sprint finished"* read true while `retro` closed a
+sprint whose work was still in review. ⚠ The call this replaced looked only at parents that had
+reached `guild:done`, over every Issue unfiltered at `--limit 200` with no truncation check.
+Render the children indented under the parent (step 5's split-parent line).
+
+⚠ **판단 불가 — the sprint, not one Issue.** When step 3's PR list is still truncated at 500, or
+a child supplement failed, do not decide either axis: render
+`스프린트 종료: 판단 불가 — PR 목록이 500건에서 잘려 판정할 수 없습니다(retro 도 같은 이유로 실패합니다)`
+(for a child supplement: `스프린트 종료: 판단 불가 — #<m> 의 자식을 모두 찾지 못했습니다(retro 도 같은 이유로 실패합니다)`)
+and do **not** suggest `회고 가능` — `retro` stops on the same truncation, so suggesting it would
+send the human into a `FAIL`.
 
 ⚠ **A member Issue the human CLOSED is not a completion either.** `run` drops it from the queue;
 render it as *"사람이 닫음"* in its own line rather than letting it vanish or count as done.
+- **What "the human closed" means here** — no call fetches `stateReason` or events, so it is
+  judged from data already in hand: the member Issue is `CLOSED`, is **not `guild:done`**, and
+  has **no `MERGED` PR mapped to it** (step 3's PR list) — the same definition as `retro.md`
+  Phase 6's group 2. A done one is not this rule — it is done·미머지. ⚠ Limit: a member closed
+  by a `fixes #N` commit pushed directly, with no PR, lands here too.
+- **Not for an epic whose parent is `guild:done`** (a member of S): no PR closes a parent, so a
+  human closing it after its children merged is the normal path — its outcome comes from the
+  epic rule above only. A parent closed while **not** done is still *"사람이 닫음"* (`plan`
+  reads open Issues only, so nothing takes it up again — it must show).
+- A member that also has only `CLOSED` PRs (거절) gets one line, not two:
+  `… · 사람이 닫음 · 닫힌 PR #<n>`.
 
 ⚠ **Do not use Issue open/closed as the completion signal.** A stacked PR merged into a
 dependency branch does **not** close its Issue — GitHub's closing keywords only fire when a PR
@@ -403,7 +526,7 @@ markers.
 
 ## Return
 
-`OK: sprint #<n> — run <finished|queue N> / sprint <finished|open PRs N>` ·
+`OK: sprint #<n> — run <finished|queue N> / sprint <finished|open PRs N|undetermined>` ·
 `OK: no active sprint` · `FAIL: <reason>`
 
 ---
@@ -418,6 +541,7 @@ markers.
 - **Never use Issue open/closed as completion** — a stacked PR does not close its Issue.
 - **Never judge a preserved worktree**; report source-vs-docs and let the human decide.
 - **Never auto-catch-up a stale base** and never suggest a rebase — INV3.
-- Four `gh` calls (issue list · tracker comments · PR list · issue list) plus one `git`, plus
-  one child-discovery call per split parent, plus step 3b's one call on a squash-stack sprint; a
-  missing source renders as "없음", not an error.
+- Five `gh` calls (sprint list · tracker comments · members · child discovery · PR list) plus
+  one `git`; only when a count says so, the members re-read, one child search per `guild:done` /
+  `guild:children` member and the PR re-read at `--limit 500`; plus step 3b's one call on a
+  squash-stack sprint. A missing source renders as "없음", not an error.
