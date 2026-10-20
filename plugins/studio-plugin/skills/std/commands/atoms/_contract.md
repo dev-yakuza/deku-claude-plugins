@@ -31,6 +31,10 @@ written with M1.
 
 ## D. Exit codes of the Studio scripts
 
+Each script has its own table; a code means only what its script's table says.
+
+**`state.py`**
+
 | Code | Meaning | Producer |
 |---|---|---|
 | 0 | done (`next`: the line says what to do; `--enter`: go) | continue |
@@ -41,7 +45,22 @@ written with M1.
 | 4 | waiting for a person (held state, s2v version changed, hash_version; `loop` on a held language) | ask the person |
 | 5 | the video's state lock is busy | wait and retry |
 | 6 | no usable evidence of a person's answer (`approve`, `reject-source-diff`, `repin`, `exclude-output`, `unlock`) | ask with AskUserQuestion (fixed label), then run the command once |
-| 73 / 74 | machine / character busy (`lock.py`, s2v) | `held:lock` / `held:actor` |
+
+**`check_commit.py`** (`--staged` is the pre-commit hook's check) **and `hooks.py`**
+
+| Code | Meaning | Producer |
+|---|---|---|
+| 0 | passed · staged (`--stage` prints the question label `커밋 <tree12>`) · range clean · hook installed/valid | continue (after `--stage`: ask the person with that label, then `git commit`) |
+| 1 | refused: a check failed (local/ path, mixed commit, outside the allow-list, not what `--stage` prepared, video approvals, ignore blocks) · hook cannot be installed or is not valid | fix what the message says, stage again, ask again |
+| 2 | usage or setup (not a repository, no harness, config unreadable, git failed, Python < 3.9) | a Studio defect or setup: stop and report |
+| 3 | not supported yet (commit kinds `harness` M0f · `video` M1 · `actor` M3b; nothing Studio's to finish in a merge/rebase) | stop and report |
+| 4 | a person decides (internal overlay missing or changed · proxy approvals · a hook block proposed for a team-shared file) | ask the person |
+| 7 | the Studio guard has not run in this Claude Code session | ask the person to enable the Studio plugin; never remove the session markers |
+
+**`lock.py` and s2v**: 73 / 74 = machine / character busy → `held:lock` / `held:actor`; otherwise the child's code.
+
+A Studio commit is: `check_commit.py --stage <kind> [<target>]` → AskUserQuestion with the staged paths and the
+fixed option `커밋 <tree12>` → `git commit` (never `-a`, a pathspec, `--amend` or `--no-verify`).
 
 Approval-type commands work only from a Claude session with the guard's evidence: a person answers
 the session's question; there is no direct terminal path (intended — 00-plan §3.4).

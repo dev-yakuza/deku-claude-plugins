@@ -2,7 +2,7 @@
 # Structural checks for the Studio plugin (m0-plan §2).
 #
 # - plugin.json fields; SCRIPTS_VERSION is a whole number; marketplace entry (when registered) matches
-# - no hooks yet (M0a: an empty guard must not ship enabled)
+# - hooks/hooks.json registers the guard (M0d-1b); the commit checks and hook templates (M0e)
 # - SKILL.md routing list == commands/*.md; atom references exist
 # - the result-contract block is byte-identical wherever it appears
 # - persona templates: frontmatter name == file name, one marker region
@@ -135,6 +135,32 @@ import subprocess as _sp
 probe = _sp.run([sys.executable, "-B", "-c", "import sys; sys.path.insert(0, %r); import stdo.guard; "
                  "print('subprocess' in sys.modules)" % os.path.join(skill, "scripts")], capture_output=True, text=True)
 check(probe.stdout.strip() == "False", "importing stdo.guard loads no subprocess module (%s)" % probe.stdout.strip())
+
+# M0e: commit checks and the hook installer
+scripts = os.path.join(skill, "scripts")
+for name in ("check_commit.py", "hooks.py"):
+    body = open(os.path.join(scripts, name)).read()
+    check("sys.dont_write_bytecode = True" in body, "%s writes no bytecode" % name)
+    check(os.access(os.path.join(scripts, name), os.X_OK), "%s is executable" % name)
+for mod in ("commit/cli.py", "commit/checks.py", "commit/stage.py", "commit/rangecheck.py", "commit/okfile.py",
+            "commit/kinds.py", "commit/approvals.py", "commit/inprogress.py", "commit/spaths.py", "commit/gitx.py",
+            "hooks/cli.py", "hooks/install.py", "hooks/templates.py", "ignore.py", "guard/hookfiles.py"):
+    check(os.path.exists(os.path.join(scripts, "stdo", mod)), "stdo/%s exists" % mod)
+sys.path.insert(0, scripts)
+sys.dont_write_bytecode = True
+from stdo import ignore as _ign
+from stdo.hooks import templates as _tpl
+check(open(os.path.join(skill, "templates", "studio", "gitignore.tmpl")).read() == _ign.TEMPLATE,
+      "the ignore block in stdo/ignore.py == templates/studio/gitignore.tmpl")
+for nm, text in (("runner", _tpl.runner(["studio"])), ("shim", _tpl.shim()), ("husky", _tpl.husky_block()),
+                 ("lefthook", _tpl.lefthook_block())):
+    check(_tpl.MARK in text, "hook template %s carries the studio:hook mark" % nm)
+    check(not re.search(r"/(Users|home)/[A-Za-z]", text) and "~/" not in text, "hook template %s has no home path" % nm)
+for d in ("commit", "hooks"):
+    for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
+        check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
+              "%s (copied into repositories) does not import the guard (plugin only)" % os.path.relpath(p, skill))
+check(sv and sv.group(1) == "6", "SCRIPTS_VERSION is 6 (M0e added repository scripts)")
 
 if fails:
     print("structure: %d failure(s)" % len(fails))

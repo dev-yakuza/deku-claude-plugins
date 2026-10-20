@@ -32,3 +32,11 @@ STUDIO_TEST_S2V=/abs/path/to/script2video \
 - `STUDIO_TEST_DENY_TERMS_FILE` (optional): a file outside the repository with one term per line
   that must not appear in shipped files.
 - Fixtures are synthetic only (`tests/fixtures/`).
+- **Hook managers (M0e)**: `test_hooks_full.py` runs only under `--full`. It fetches pinned
+  `husky@9.1.7` and `lefthook@2.2.2` with `npx --yes` into an npm cache inside the test's temporary
+  home (`npm_config_cache`, `npm_config_userconfig=/dev/null`) — no global install, network needed.
+  Everything else about the hook (plain git, husky and lefthook file formats, chaining) runs offline
+  with real git in temporary repositories. `STUDIO_TEST_COMMIT_KIND` registers a test-only commit kind
+  (`test`) for `check_commit.py --stage`; the guard refuses `STUDIO_TEST_*` in agent commands.
+- **Perf lines**: `test_commit_perf.py` prints the runner's cost on a non-Studio commit and
+  `check_commit --staged` on a Studio commit (targets 50 ms / 300 ms; fails only above 3×).

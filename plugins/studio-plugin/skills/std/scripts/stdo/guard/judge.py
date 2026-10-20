@@ -10,7 +10,7 @@ import re
 
 from .. import paths, s2vcall
 from ..state import commands as state_commands
-from . import gitprobe, limits, messages, protect, ranlog, recog
+from . import gitprobe, hookfiles, limits, messages, protect, ranlog, recog
 from . import scan as scan_command
 from . import load_snapshot
 from .messages import Deny
@@ -430,6 +430,8 @@ def check_target(ctx, cmd, word, value, op, studio_infos, s2v=False):
                               "and ask the user." % (cmd.prog or "the command",
                                                     "deletes" if op.startswith("delete") else "writes", value))
             continue
+        if op != "link-source" and hook_file_denied(ctx, cmd, ri, real, value, op):
+            continue
         if ri is None or not ri.studio:
             continue
         ctx.touch(ri)
@@ -440,6 +442,19 @@ def check_target(ctx, cmd, word, value, op, studio_infos, s2v=False):
             judge_glob(ctx, cmd, word, ri, real, fold, op)
             continue
         judge_parts(ctx, cmd, word, value, parts, ri, fold, op, s2v, real)
+
+
+HOOK_WHY = "Studio's pre-commit hook (wiring) — only \"python3 .claude/studio/scripts/hooks.py install\" changes it"
+
+
+def hook_file_denied(ctx, cmd, ri, real, value, op):
+    """P-HOOK for Bash: any write, delete or move of an installed hook file (m0e-plan §10)."""
+    h = hookfiles.hit(ri, real, "delete" if op.startswith("delete") else "write")
+    if not h:
+        return False
+    ctx.deny("G-PROT", "%s %s %s, %s." % (cmd.prog or "the command", "deletes" if op.startswith("delete") else "writes",
+                                          value, HOOK_WHY))
+    return True
 
 
 def judge_parts(ctx, cmd, word, value, parts, ri, fold, op, s2v, real):
@@ -1314,6 +1329,16 @@ def judge_file_path(ctx, path, tool, ti, mcp=False):
                  % ("writing" if not mcp else "this tool touches", path))
         return
     ri = ctx.repos.info(r.repo) if r.repo is not None else None
+    h = hookfiles.hit(ri, r.real, "write")
+    if h:
+        if h[1] != "shared" or mcp or tool not in ("Write", "Edit", "MultiEdit"):
+            ctx.deny("G-PROT", "%s %s, %s." % ("writing" if not mcp else "this tool touches", path, HOOK_WHY))
+            return
+        new = new_text(r.real, tool, ti)
+        if new is not _REJECTED and not hookfiles.shared_edit_ok(h[0], new):
+            ctx.deny("G-PROT", "%s %s removes or changes Studio's \"studio:hook\" block (%s) — edit only the other "
+                               "lines; the block is Studio's pre-commit hook." % (tool, path, HOOK_WHY))
+            return
     if ri is None or not ri.studio:
         return
     ctx.touch(ri)
@@ -1335,6 +1360,31 @@ def judge_file_path(ctx, path, tool, ti, mcp=False):
         " Write CREDITS.draft.yaml instead." if tid == "P-CRED" else "")
     ctx.deny("G-PROT", "%s %s (%s) — only %s may change it.%s" % ("writing" if not mcp else "this tool touches", path,
                                                                  cls, who, hint))
+
+
+_REJECTED = object()  # an edit Claude Code itself rejects (no match, several matches)
+
+
+def new_text(real, tool, ti):
+    """The file's content after a Write/Edit/MultiEdit (None: unreadable edit; _REJECTED: the tool fails)."""
+    if tool == "Write":
+        c = ti.get("content")
+        return c if isinstance(c, str) else None
+    try:
+        with open(real, encoding="utf-8", errors="surrogateescape") as f:
+            text = f.read()
+    except OSError:
+        return _REJECTED
+    edits = ti.get("edits") if tool == "MultiEdit" else [ti]
+    for e in edits or []:
+        old, new = e.get("old_string"), e.get("new_string")
+        if not isinstance(old, str) or not isinstance(new, str):
+            return None
+        cnt = text.count(old)
+        if cnt == 0 or (cnt > 1 and not e.get("replace_all")):
+            return _REJECTED
+        text = text.replace(old, new) if e.get("replace_all") else text.replace(old, new, 1)
+    return text
 
 
 def config_change(ctx, ri, real, tool, ti):

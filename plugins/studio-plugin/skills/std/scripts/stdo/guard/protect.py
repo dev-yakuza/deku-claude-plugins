@@ -16,7 +16,7 @@ TABLE = [
                  "<sr>/**/cast/*/shown.json", ".claude/studio/local/commit-ok.json",
                  ".claude/studio/local/pending-approval.json", ".claude/studio/local/guard-ran.json",
                  ".claude/studio/local/guard-ran.lock", ".claude/studio/local/consumed-answers.jsonl",
-                 ".claude/studio/local/consumed-answers.lock"),
+                 ".claude/studio/local/consumed-answers.lock", ".claude/studio/local/last-checked.json"),
      "state", "state.py, check_commit.py and the guard"),
     ("P-CRIT", (".claude/studio/charter.md", ".claude/studio/formats/**", ".claude/studio/platforms/**"),
      "criteria", "the person"),
@@ -37,7 +37,7 @@ DRAFT_OK = {"P-CHAR": "character.yaml.draft"}
 # names that make a protected path when they end a dynamic word's literal tail
 TAIL_NAMES = {"local", "character", "voices", "audio", "consent", "state.json", "approvals.jsonl", "shown.json",
               "verify.json", "CREDITS.yaml", "status.json", "approvals.json", "charter.md", "config.json",
-              "commit-ok.json", "pending-approval.json", "guard-ran.json"}
+              "commit-ok.json", "pending-approval.json", "guard-ran.json", "last-checked.json"}
 
 READ_ALLOW = {"cat", "head", "tail", "less", "more", "ls", "stat", "file", "du", "wc", "shasum", "sha256sum",
               "sha1sum", "md5", "md5sum", "cmp", "diff", "grep", "egrep", "fgrep", "rg", "ag", "jq", "ffprobe",
