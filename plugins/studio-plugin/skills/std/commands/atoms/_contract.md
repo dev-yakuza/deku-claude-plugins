@@ -28,3 +28,16 @@ written with M1.
 > (another command, a script, editing the file directly, removing environment markers, retrying
 > with different flags). Tell the user what was refused and why, and ask how to proceed.
 <!-- /studio:guard-refusal -->
+
+## D. Exit codes of the Studio scripts
+
+| Code | Meaning | Producer |
+|---|---|---|
+| 0 | done (`next`: the line says what to do; `--enter`: go) | continue |
+| 1 | failed (script errors from s2v inspect, a malformed input, a hash s2v could not compute) | fix the cause, then retry |
+| 2 | usage or setup (no harness, unknown command, schema, flock unsupported) | a Studio defect or setup: stop and report |
+| 3 | `next --enter`: an earlier stage must be redone | go to the stage `next` names |
+| 3 | `record-brief`: approved outputs/platforms would be removed | ask the person; removing them is `exclude-output` |
+| 4 | waiting for a person (held state, s2v version changed, hash_version; `loop` on a held language) | ask the person |
+| 5 | the video's state lock is busy | wait and retry |
+| 73 / 74 | machine / character busy (`lock.py`, s2v) | `held:lock` / `held:actor` |

@@ -27,7 +27,14 @@ source → brief → script → verify ─[①]→ cast → tts → audition ─
 | ④b | person | approved copy (per platform) | approval record |
 | commit | producer | one commit per language | every hash and approval matches · `check_commit` |
 
-Every stage calls `state.py next` on entry: when an upstream hash differs from its approved
-value, the flow goes back to the stage that must be redone and never past it.
+Every stage calls `state.py next --enter <stage>` on entry: when an upstream hash differs from its
+approved value, the flow goes back to the stage that must be redone and never past it.
+**Every stage calls `state.py stage-done <stage> [--output o | --platform p]` at its exit** (after its
+deterministic checks passed). That records the stage's completion against its section's current
+hashes, so the next stage of the section (up to the gate) may be entered even while the gate's
+approval is stale; a later change of those hashes makes the record stale again. `stage-done`
+records no person's decision (the guard treats it as evidence-free); gates are approved only with
+`state.py approve` (M0b-2). `source` and `brief` have their own records (the frozen copy,
+`record-brief`).
 Each person gate is approved only with a fixed answer `승인 <hash12>` (in the repo's language
 the label stays this token) to an `AskUserQuestion` that showed the artifact and its hash.
