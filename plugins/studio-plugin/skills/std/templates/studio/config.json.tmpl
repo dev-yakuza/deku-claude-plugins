@@ -1,0 +1,42 @@
+{
+  "language": "{{LANGUAGE}}",
+  "studio_root": "{{STUDIO_ROOT}}",
+  "s2v": {
+    "path": "{{S2V_PATH}}",
+    "min_version": "0.12.1"
+  },
+  "visibility": {
+    "default": "unknown",
+    "public": []
+  },
+  "internal_overlay": "required",
+  "public_domains": [],
+  "web_roots": {},
+  "allow_internal_commits": false,
+  "roles": {
+    "casting-director": false,
+    "actor-designer": false,
+    "translator": false
+  },
+  "models": {
+    "default": "sonnet",
+    "rewrite_from_loop": 2,
+    "rewrite": "opus"
+  },
+  "gates": ["1", "2", "3", "4a", "4b"],
+  "commit_audio": false,
+  "character_generation": "off",
+  "protected_keys": [
+    "visibility",
+    "internal_overlay",
+    "public_domains",
+    "web_roots",
+    "allow_internal_commits",
+    "s2v",
+    "models",
+    "gates",
+    "roles",
+    "studio_root",
+    "protected_keys"
+  ]
+}
