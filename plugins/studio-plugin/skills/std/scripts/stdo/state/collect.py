@@ -40,13 +40,27 @@ def run_inspect(s2v_path, script, hash_version=None):
         raise CollectError("s2v inspect printed no JSON: %s" % e)
 
 
+def run_version(s2v_path):
+    """`s2v --version --json` (id, version, commit, dirty, stale_build)."""
+    if not s2v_path:
+        raise CollectError("config.s2v.path is not set", 2)
+    cmd = ["node", os.path.join(s2v_path, "packages", "cli", "dist", "main.js"), "--version", "--json"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        return json.loads(out.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+        raise CollectError("cannot read the s2v version: %s" % e)
+
+
 class Providers(object):
-    def __init__(self, inspect=None, source=None):
+    def __init__(self, inspect=None, source=None, inspect_at=None, version=None):
         self.inspect = inspect or (lambda ctx: run_inspect(ctx["s2v_path"], ctx["script"]))
         self.source = source or default_source
+        self.inspect_at = inspect_at or (lambda ctx, hv: run_inspect(ctx["s2v_path"], ctx["script"], hash_version=hv))
+        self.version = version or (lambda ctx: run_version(ctx["s2v_path"]))
 
-    def collect(self, ctx, state, lang):
-        ins = self.inspect(ctx)
+    def collect(self, ctx, state, lang, ins=None):
+        ins = ins if ins is not None else self.inspect(ctx)
         if ins.get("lang") != lang:
             raise CollectError("the script's lang %r is not %r" % (ins.get("lang"), lang))
         names = [o.get("name") for o in ins.get("outputs", [])]

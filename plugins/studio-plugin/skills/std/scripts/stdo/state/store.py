@@ -185,9 +185,13 @@ def _replace_state(state_path, state, hooks):
     _fsync_dir(d)
 
 
-def write(vdir, event, change, hooks=None, flock=fcntl.flock, check=None):
-    """Record `event` (dict) and apply `change(state)` under the lock. `check(state)` runs first,
-    under the lock, and may raise Refused (then nothing is written). Returns the new state."""
+def write(vdir, event, change, hooks=None, flock=fcntl.flock, check=None, after_check=None,
+          after_write=None):
+    """Record `event` (a dict, or a list of dicts, or a function of the checked state returning
+    them) and apply `change(state)` under the lock. `check(state)` runs first, under the lock, and
+    may raise Refused (then nothing is written); `after_check(state)` runs once the checks passed,
+    before anything of the video is written (M0b-2: the evidence's consumption record);
+    `after_write(state)` runs after state.json is replaced, still under the lock. Returns the state."""
     _check_writes()
     hooks = hooks or {}
     p = paths(vdir)
@@ -195,6 +199,10 @@ def write(vdir, event, change, hooks=None, flock=fcntl.flock, check=None):
         state = read_state(vdir)
         if check:
             check(state)
+        if after_check:
+            after_check(state)
+        if callable(event):
+            event = event(state)
         _clean_tmp(p["work"])
         seq = state["last_seq"]
         entries = []
@@ -204,15 +212,18 @@ def write(vdir, event, change, hooks=None, flock=fcntl.flock, check=None):
         for s in incomplete(vdir, state):
             seq += 1
             entries.append({"seq": seq, "event": "void", "of": s, "at": schema.now()})
-        seq += 1
-        entry = dict(event)
-        entry.update(seq=seq, at=schema.now())
-        entries.append(entry)
+        for ev in (event if isinstance(event, list) else [event]):
+            seq += 1
+            entry = dict(ev)
+            entry.update(seq=seq, at=schema.now())
+            entries.append(entry)
         _append(p["log"], entries)
         hooks.get("after_log", lambda: None)()
         change(state)
         state["last_seq"] = seq
         _replace_state(p["state"], state, hooks)
+        if after_write:
+            after_write(state)
         return state
 
 
@@ -230,22 +241,28 @@ def create(vdir, state):
         _replace_state(p["state"], state, {})
 
 
+def apply_approval(state, lang, gate, record, key=None):
+    """Store an approval in `state`: the record, the loop counters of the gate's stages back to 0,
+    the section's completion records spent; ① also sets the video's approved source hash."""
+    L = state["langs"][lang]
+    if gate in ("3", "4a", "4b"):
+        L["approved"].setdefault(gate, {})[key] = record
+    else:
+        L["approved"][gate] = record
+    for k in schema.LOOP_RESET.get(gate, ()):
+        L["loops"][k] = 0
+    o = key if gate in ("3", "4a") else None
+    p = key if gate == "4b" else None
+    L["done_stages"] = [r for r in L.get("done_stages", [])
+                        if not (schema.section_gate(r["stage"]) == gate and r.get("output") == o
+                                and r.get("platform") == p)]
+    if gate == "1" and isinstance(record.get("tuple"), dict) and "source_hash" in record["tuple"]:
+        state["source"]["approved_hash"] = record["tuple"]["source_hash"]
+
+
 def record_approval(vdir, lang, gate, record, key=None, hooks=None):
-    """Store an approval (M0b-2's `approve` calls this after the evidence checks) and reset the loop
-    counters of that gate's stages."""
+    """Store one approval (tests; `approve` uses apply_approval inside its own write)."""
     def change(state):
-        L = state["langs"][lang]
-        if gate in ("3", "4a", "4b"):
-            L["approved"].setdefault(gate, {})[key] = record
-        else:
-            L["approved"][gate] = record
-        for k in schema.LOOP_RESET.get(gate, ()):
-            L["loops"][k] = 0
-        # the section's completion records are spent once its gate is approved
-        o = key if gate in ("3", "4a") else None
-        p = key if gate == "4b" else None
-        L["done_stages"] = [r for r in L.get("done_stages", [])
-                            if not (schema.section_gate(r["stage"]) == gate and r.get("output") == o
-                                    and r.get("platform") == p)]
+        apply_approval(state, lang, gate, record, key)
     return write(vdir, {"event": "approve", "lang": lang, "gate": gate, "key": key, "record": record},
                  change, hooks=hooks)

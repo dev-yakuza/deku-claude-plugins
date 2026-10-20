@@ -15,7 +15,7 @@ import re
 import subprocess
 import sys
 
-from . import commands, schema, store
+from . import backup, commands, gates, schema, store
 from .collect import CollectError, Providers
 from .hashes import brief_core
 from .router import decide, decide_without_script, precheck, section_tuple
@@ -52,6 +52,12 @@ def _opts(rest, flags, values):
     out = {"_": []}
     it = iter(rest)
     for a in it:
+        if a.startswith("--") and "=" in a:
+            k, v = a.split("=", 1)
+            if k not in values:
+                raise Usage("unknown option: %s" % k)
+            out[k] = v
+            continue
         if a in flags:
             out[a] = True
         elif a in values:
@@ -92,7 +98,8 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
         root = cfg.get("studio_root") or "studio"
         if cmd == "status":
             return _status(repo, root, _opts(rest, {"--json"}, set()))
-        o = _opts(rest, {"--json"}, {"--lang", "--enter", "--output", "--platform", "--from"})
+        o = _opts(rest, {"--json", "--proxy", "--begin", "--end"},
+                  {"--lang", "--enter", "--output", "--platform", "--from", "--expect"})
         if not o["_"]:
             raise Usage("%s needs a video id" % cmd)
         vdir = store.video_dir(repo, root, o["_"][0])
@@ -109,6 +116,11 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
             return _loop(vdir, lang, o, hooks, flock)
         if cmd == "stage-done":
             return _stage_done(vdir, state, lang, ctx, o, providers, hooks, flock)
+        if cmd == "shown":
+            return gates.shown(vdir, state, lang, ctx, o, providers, hooks)
+        handler = {"approve": gates.approve, "reject-source-diff": gates.reject_source_diff,
+                   "repin": gates.repin, "exclude-output": gates.exclude_output, "unlock": gates.unlock}[cmd]
+        return handler(repo, vdir, state, lang, ctx, o, providers, hooks, list(argv))
     except Usage as e:
         _err(str(e))
         return C.USAGE
@@ -234,6 +246,9 @@ def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock):
 
     def change(s):
         s["brief"] = {"core": core, "outputs": list(outputs), "platforms": dict(platforms)}
+        for L in s["langs"].values():  # an excluded output (platform) recorded again comes back
+            L["excluded"]["outputs"] = [x for x in L["excluded"]["outputs"] if x not in outputs]
+            L["excluded"]["platforms"] = [x for x in L["excluded"]["platforms"] if x not in platforms]
 
     store.write(vdir, {"event": "record-brief", "core": core, "outputs": outputs, "platforms": platforms},
                 change, hooks=hooks, check=check, **({"flock": flock} if flock else {}))
@@ -351,7 +366,10 @@ def _status(repo, root, o):
         except schema.SchemaError as e:
             out.append({"video": os.path.basename(vdir), "error": str(e)})
             continue
+        bst = backup.read_status(repo, st["video"]) if st["location"] == "local" else None
         out.append({"video": st["video"], "location": st["location"],
+                    "backup_warning": (bst or {}).get("warning"),
+                    "proxy_approvals": _proxy(st),
                     "langs": {k: {"status": v["status"], "stage": v["stage"], "held": v["held"]}
                               for k, v in st["langs"].items()},
                     "incomplete_events": store.incomplete(vdir, st),
@@ -370,11 +388,27 @@ def _status(repo, root, o):
                                                          " held:%s" % L["held"]["state"] if L["held"] else ""))
             if v["incomplete_events"]:
                 sys.stdout.write("%s: incomplete events %s (not applied)\n" % (v["video"], v["incomplete_events"]))
+            if v.get("proxy_approvals"):
+                sys.stdout.write("%s: approved by proxy (a person must approve again): %s\n"
+                                 % (v["video"], ", ".join(v["proxy_approvals"])))
+            if v.get("backup_warning"):
+                sys.stdout.write("%s: backup: %s\n" % (v["video"], v["backup_warning"]))
             if v["unreadable_log_lines"]:
                 sys.stdout.write("%s: %d unreadable line(s) in approvals.jsonl\n" % (v["video"], v["unreadable_log_lines"]))
         if warn:
             sys.stdout.write("warning: %s\n" % warn)
     return C.OK
+
+
+def _proxy(st):
+    out = []
+    for lg, L in st["langs"].items():
+        for g, rs in L["approved"].items():
+            items = rs.items() if g in ("3", "4a", "4b") else [(None, rs)]
+            for k, r in items:
+                if isinstance(r, dict) and r.get("approved_by") == "proxy":
+                    out.append("%s %s%s" % (lg, g, "(%s)" % k if k else ""))
+    return out
 
 
 def _guard_ran_warning(repo):

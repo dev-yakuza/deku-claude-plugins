@@ -35,7 +35,7 @@ def stage_index(stage):
 def new_lang():
     return {"status": "active", "stage": "source", "held": None, "loops": {k: 0 for k in LOOPS},
             "approved": {}, "renders": {}, "copies": {}, "excluded": {"outputs": [], "platforms": []},
-            "done_stages": []}
+            "done_stages": [], "shown": {}, "shown_pending": {}}
 
 
 # stages whose completion is recorded with `state.py stage-done` (gates are approved instead;
@@ -86,7 +86,7 @@ def create_state(video, location, kind, scope, source_lang, s2v, source):
     return {"schema": SCHEMA, "video": video, "location": location, "kind": kind, "scope": scope,
             "source_lang": source_lang, "s2v": dict(s2v),
             "brief": {"core": None, "outputs": [], "platforms": {}},
-            "source": dict(source), "langs": {source_lang: new_lang()}, "last_seq": 0}
+            "source": dict(source, approved_hash=source.get("approved_hash")), "langs": {source_lang: new_lang()}, "last_seq": 0}
 
 
 def validate(state):
@@ -101,6 +101,10 @@ def validate(state):
     for L in state.get("langs", {}).values():
         if isinstance(L, dict):
             L.setdefault("done_stages", [])
+            L.setdefault("shown", {})
+            L.setdefault("shown_pending", {})
+    if isinstance(state.get("source"), dict):
+        state["source"].setdefault("approved_hash", None)
     return state
 
 

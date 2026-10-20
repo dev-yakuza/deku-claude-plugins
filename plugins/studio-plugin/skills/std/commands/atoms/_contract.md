@@ -40,4 +40,8 @@ written with M1.
 | 3 | `record-brief`: approved outputs/platforms would be removed | ask the person; removing them is `exclude-output` |
 | 4 | waiting for a person (held state, s2v version changed, hash_version; `loop` on a held language) | ask the person |
 | 5 | the video's state lock is busy | wait and retry |
+| 6 | no usable evidence of a person's answer (`approve`, `reject-source-diff`, `repin`, `exclude-output`, `unlock`) | ask with AskUserQuestion (fixed label), then run the command once |
 | 73 / 74 | machine / character busy (`lock.py`, s2v) | `held:lock` / `held:actor` |
+
+Approval-type commands work only from a Claude session with the guard's evidence: a person answers
+the session's question; there is no direct terminal path (intended — 00-plan §3.4).

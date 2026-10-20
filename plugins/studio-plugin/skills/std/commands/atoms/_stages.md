@@ -34,7 +34,13 @@ deterministic checks passed). That records the stage's completion against its se
 hashes, so the next stage of the section (up to the gate) may be entered even while the gate's
 approval is stale; a later change of those hashes makes the record stale again. `stage-done`
 records no person's decision (the guard treats it as evidence-free); gates are approved only with
-`state.py approve` (M0b-2). `source` and `brief` have their own records (the frozen copy,
+`state.py approve` (M0b-2).
+
+**A person gate**: `state.py shown <video> <gate> [--output o | --platform p]` for every scope as the artifact
+is shown (③: `--begin` right before the snapshot and `--end` right after it) → the last `shown`
+prints `hash12` → AskUserQuestion with the fixed label `승인 <hash12>` (other options: changes,
+or `거부 <hash12>` for a source diff) → only on that label, `state.py approve <video> <gate> --expect
+<hash12>` once. Anything changed after showing (upstream included) needs showing again. `source` and `brief` have their own records (the frozen copy,
 `record-brief`).
 Each person gate is approved only with a fixed answer `승인 <hash12>` (in the repo's language
 the label stays this token) to an `AskUserQuestion` that showed the artifact and its hash.
