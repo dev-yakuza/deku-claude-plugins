@@ -268,4 +268,24 @@ def status(git, top, env):
             reasons.append("lefthook-local.yml lacks Studio's block")
         if "lefthook" not in (_read(os.path.join(det["hooks_dir"], "pre-commit")) or ""):
             reasons.append("lefthook's git hook is not installed (lefthook install)")
-    return {"manager": m, "valid": not reasons, "reasons": reasons, "files": files}
+    return {"manager": m, "valid": not reasons, "reasons": reasons, "files": files,
+            "warnings": reincluded_local(top, roots)}
+
+
+def reincluded_local(top, roots):
+    """`!` lines outside .gitignore's Studio block that re-include machine-only paths (m0f-plan v4 NIT-2)."""
+    text = _read(os.path.join(top, ".gitignore")) or ""
+    try:
+        rest, _block = ignore.split(text)
+    except ignore.BlockError:
+        return [".gitignore's Studio block markers are broken"]
+    locals_ = [".claude/studio/local"] + ["%s/local" % r for r in roots]
+    out = []
+    for line in rest.splitlines():
+        l = line.strip()
+        if not l.startswith("!"):
+            continue
+        pat = l[1:].lstrip("/")
+        if any(pat.rstrip("/") == x or pat.startswith(x + "/") for x in locals_):
+            out.append(".gitignore re-includes machine-only Studio files outside Studio's block: %s" % l)
+    return out

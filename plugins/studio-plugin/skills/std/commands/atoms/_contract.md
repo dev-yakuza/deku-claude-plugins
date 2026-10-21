@@ -59,8 +59,13 @@ Each script has its own table; a code means only what its script's table says.
 
 **`lock.py` and s2v**: 73 / 74 = machine / character busy → `held:lock` / `held:actor`; otherwise the child's code.
 
-A Studio commit is: `check_commit.py --stage <kind> [<target>]` → AskUserQuestion with the staged paths and the
-fixed option `커밋 <tree12>` → `git commit -m …` (never `-a`, a pathspec, `--amend`, `--no-verify`, `HUSKY=0` /
+A Studio commit is: `check_commit.py --stage <kind> [<target>]` → AskUserQuestion whose text contains the **summary
+line `--stage` printed, verbatim** (`커밋 <tree12> | 변경 N | 삭제 M | 보호 키: … | 없음`, plus deleted agents), the
+staged paths, and the fixed option `커밋 <tree12>` → `git commit -m …`. Protected setting changes (`보호 키`) are only
+for the person — the sandbox proxy mode cannot commit them. Harness commits (`--stage harness`) never delete
+`config.json`, `charter.md`, the protected personas or Studio's scripts: **taking Studio out of a repository is the
+person's removal procedure**, done in a terminal (remove the installed hook and blocks, `.claude/studio`,
+`.claude/agents/std-*` and the `.gitignore` block, then `git commit --no-verify`) (never `-a`, a pathspec, `--amend`, `--no-verify`, `HUSKY=0` /
 `LEFTHOOK=0` / `SKIP`, `-c core.hooksPath` or a `git config` change of hooks or aliases).
 
 Approval-type commands work only from a Claude session with the guard's evidence: a person answers
@@ -73,7 +78,9 @@ the session's question; there is no direct terminal path (intended — 00-plan �
   and language). The fixed label is one of the options; a free-text "Other" answer is never an approval.
 - Right after the answer, **in the same turn**, run the command **alone** (optionally after `cd <repo> &&`), as
   `python3 .claude/studio/scripts/state.py …` or `git commit -m …`, without environment prefixes. If the person
-  writes anything before the command runs, ask again. An answer is used once.
+  writes anything before the command runs, ask again. An answer is used once. Only an answer Claude Code marks as
+  the person's (`permissionDecision` source `user_*`) counts — an answer filled in by a hook never does. Never send the question and the
+  approval command in the same message (the guard cannot always tell them apart when the transcript is written late).
 - Guard rules: `G-EVIDENCE` (no usable answer: ask again), `G-MAIN` (main session only), `G-PROXY` (`--proxy`
   outside the sandbox proxy mode), `G-COMMIT` / `G-COMMITFORM` (stage again with `--stage`; plain `git commit`),
   `G-HOOKOFF` (hooks must stay on), `G-PLUMB` (no plumbing or GitHub API writes), `G-PUSH` (machine-only or internal

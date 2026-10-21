@@ -42,6 +42,8 @@ def main(argv, cwd=None, env=None):
                 sys.stdout.write("Studio hook (%s): %s\n" % (st["manager"], "valid" if st["valid"] else "NOT valid"))
                 for r in st["reasons"]:
                     sys.stdout.write("  - %s\n" % r)
+                for w in st.get("warnings") or []:
+                    sys.stdout.write("  warning: %s\n" % w)
             return 0 if st["valid"] else 1
         extra = [a for a in args[1:] if a != "--husky-apply"]
         if extra:

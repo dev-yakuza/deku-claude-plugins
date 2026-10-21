@@ -160,7 +160,13 @@ for d in ("commit", "hooks"):
     for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
         check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
               "%s (copied into repositories) does not import the guard (plugin only)" % os.path.relpath(p, skill))
-check(sv and sv.group(1) == "7", "SCRIPTS_VERSION is 7 (M0d-2 changed repository scripts: labels, commit approval)")
+check(sv and sv.group(1) == "8", "SCRIPTS_VERSION is 8 (M0f: harness commit kind, manifest, summary line)")
+from stdo import manifest as _man
+_mp = os.path.join(scripts, _man.NAME)
+check(os.path.exists(_mp) and open(_mp).read() == _man.render(scripts, sv.group(1)),
+      "scripts/MANIFEST.sha256 lists every copied script with its sha (run tests/tools/manifest.py)")
+check("stdo/guard/judge.py" not in open(_mp).read() and "guard.py" not in _man.files(scripts),
+      "the manifest leaves out the guard (plugin only)")
 
 if fails:
     print("structure: %d failure(s)" % len(fails))

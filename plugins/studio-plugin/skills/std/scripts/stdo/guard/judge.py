@@ -1073,6 +1073,7 @@ def decide_bash(ctx, command):
         check_approval(ctx, c)
         check_git_rules(ctx, c, infos)
         check_gh(ctx, c, infos)
+        check_patch(ctx, c, infos, sc)
     ctx.current = None
     return sc, infos
 
@@ -1169,7 +1170,7 @@ def check_git_rules(ctx, cmd, infos):
             extra["GIT_DIR"] = pre[gi]
         if wi:
             extra["GIT_WORK_TREE"] = pre[wi]
-    out = commitrule.evaluate(ri.worktree, ctx.env, extra, opts)
+    out = commitrule.evaluate(ri.worktree, ctx.env, extra, opts, plugin_scripts=PLUGIN_SCRIPTS)
     if out.deny:
         ctx.deny(*out.deny)
         return
@@ -1187,6 +1188,13 @@ def commit_evidence(ctx, cmd, ri, out):
         return
     sid = hook.get("session_id")
     ok = out.ok
+    rv = runner_version(ri)
+    from ..hooks import templates as HT
+    if rv is None or rv < HT.RUNNER_VERSION:
+        ctx.deny("G-COMMIT", "Studio's pre-commit runner in this clone is %s — run \"python3 "
+                             ".claude/studio/scripts/hooks.py install\" and ask the person to commit again."
+                 % ("missing" if rv is None else "an older version (v%d)" % rv))
+        return
     if ok.get("session_id") != sid:
         ctx.deny("G-COMMIT", "commit-ok.json was prepared in another session — stage again (check_commit.py "
                              "--stage) and ask the person again.")
@@ -1195,16 +1203,29 @@ def commit_evidence(ctx, cmd, ri, out):
     approval = {"tree": out.tree, "head": out.head, "session_id": sid, "answer": label,
                 "at": transcript_now()}
     if proxy.active(ctx.env, ri.worktree):
+        if ok.get("protected_changes"):
+            ctx.deny("G-COMMIT", "this commit changes protected settings (%s) — only a person approves that, not the "
+                                 "proxy mode." % ", ".join(c.get("key", "?") for c in ok["protected_changes"]))
+            return
         approval.update({"mode": "proxy", "tool_use_id": hook.get("tool_use_id"), "question_index": 0})
         reason = "proxy commit %s" % label
     else:
+        line = ok.get("summary")
         try:
             ans = transcript.find(hook, ctx.env)
-            idx, _text, _note = transcript.choose(ans, label, out.tree[:12])
+            # with a summary line (M0f) the question must show it verbatim; it holds tree12, so F9 is not needed
+            idx, text, _note = transcript.choose(ans, label, None if line else out.tree[:12])
+            if line:
+                from ..commit import summary as csum
+                if not csum.shown_in(line, text):
+                    raise transcript.NoEvidence("summary-not-shown")
         except transcript.NoEvidence as e:
-            ctx.deny("G-EVIDENCE", approve.evidence_text("this Studio commit", label, e))
+            what = "this Studio commit" + (" (the question must contain the line: %s)" % line if line else "")
+            ctx.deny("G-EVIDENCE", approve.evidence_text(what, label, e))
             return
         approval.update({"mode": "human", "tool_use_id": ans.tool_use_id, "question_index": idx})
+        if line:
+            approval["summary"] = line
         reason = "answer %s#%d (%s)" % (ans.tool_use_id, idx, label)
     top = out.top
 
@@ -1214,6 +1235,17 @@ def commit_evidence(ctx, cmd, ri, out):
             raise OSError("could not record that the guard ran in this session")
     ctx.effects.append(("G-COMMIT", effect))
     ctx.candidates.append((cmd, "commit", reason))
+
+
+def runner_version(ri):
+    """The version mark of `<git common dir>/studio/pre-commit` (M0f review MINOR-3), None when absent."""
+    try:
+        with open(os.path.join(ri.common_dir, "studio", "pre-commit"), encoding="utf-8") as f:
+            head = f.read(400)
+    except (OSError, TypeError):
+        return None
+    m = re.search(r"studio:hook v(\d+) \S+ Studio's pre-commit runner", head)
+    return int(m.group(1)) if m else None
 
 
 def transcript_now():
@@ -1232,6 +1264,151 @@ def check_push(ctx, cmd, ri):
         ctx.deny("G-PUSH", deny)
     for w in warns:
         ctx.warnings.append("Studio (git push): %s." % w)
+
+
+APPLY_READONLY = ("--check", "--stat", "--numstat", "--summary")
+
+
+def _patch_call(cmd):
+    """("git-apply" | "git-am" | "patch", [operand words], strip levels or None, directory) or None."""
+    g = cmd.git
+    if g is not None and g.sub in ("apply", "am"):
+        vals = [w.value for w in g.args]
+        if g.sub == "apply" and any(v in APPLY_READONLY for v in vals if v):
+            return None
+        if g.sub == "am" and any(v in ("--abort", "--skip", "--quit", "--show-current-patch") for v in vals if v):
+            return None
+        levels, directory, files = [1], None, []
+        i = 0
+        while i < len(g.args):
+            w, v = g.args[i], vals[i]
+            if v is None:
+                files.append(w)
+            elif re.match(r"^-p\d+$", v):
+                levels = [int(v[2:])]
+            elif v == "-p" and i + 1 < len(vals) and (vals[i + 1] or "").isdigit():
+                levels = [int(vals[i + 1])]
+                i += 1
+            elif v.startswith("--directory="):
+                directory = v.split("=", 1)[1]
+            elif v == "--directory" and i + 1 < len(vals):
+                directory = vals[i + 1]
+                i += 1
+            elif v in ("--exclude", "--include", "-C", "--whitespace") and i + 1 < len(vals):
+                i += 1
+            elif not v.startswith("-"):
+                files.append(w)
+            i += 1
+        return ("git-" + g.sub, files, levels, directory)
+    if cmd.prog in ("patch", "gpatch"):
+        words = cmd.words[1:]
+        vals = [w.value for w in words]
+        levels, directory, files, operands = None, None, [], []
+        i = 0
+        while i < len(words):
+            v = vals[i]
+            if v is None:
+                operands.append(words[i])
+            elif re.match(r"^-p\d+$", v):
+                levels = [int(v[2:])]
+            elif v.startswith("--strip="):
+                levels = [int(v.split("=", 1)[1])] if v.split("=", 1)[1].isdigit() else None
+            elif v in ("-p", "--strip") and i + 1 < len(vals):
+                levels = [int(vals[i + 1])] if (vals[i + 1] or "").isdigit() else None
+                i += 1
+            elif v in ("-i", "--input") and i + 1 < len(vals):
+                files.append(words[i + 1])
+                i += 1
+            elif v.startswith("--input="):
+                files.append(model_word(v.split("=", 1)[1]))
+            elif v in ("-d", "--directory") and i + 1 < len(vals):
+                directory = vals[i + 1]
+                i += 1
+            elif v.startswith("--directory="):
+                directory = v.split("=", 1)[1]
+            elif v in ("-o", "--output", "-r", "--reject-file", "-B", "-z", "-D", "-F", "--fuzz", "-V"):
+                i += 1
+            elif not v.startswith("-"):
+                operands.append(words[i])
+            i += 1
+        if len(operands) >= 2:
+            files.append(operands[1])  # patch [options] [originalfile [patchfile]]
+        return ("patch", files, levels, directory)
+    return None
+
+
+def model_word(text):
+    from .model import Word
+    return Word.lit(text)
+
+
+def check_patch(ctx, cmd, infos, sc):
+    """MAJOR-1 (M0f review): the files a patch tool writes, judged like any other write in a Studio repository."""
+    if not infos:
+        return
+    call = _patch_call(cmd)
+    if call is None:
+        return
+    from . import patchtargets as PT
+    tool, files, levels, directory = call
+    run = cmd.run_cwds or cmd.cwds or [None]
+    cwd = run[0] if len(run) == 1 else None
+    texts = []
+    stdin = [r for r in cmd.redirs if r.mode in ("read", "heredoc", "herestring") and r.fd in (None, "0")]
+    if not files:
+        if stdin:
+            r = stdin[0]
+            if r.mode in ("heredoc", "herestring"):
+                if r.body_dynamic or r.body is None:
+                    ctx.deny("G-PROT", "%s reads a patch the guard cannot read (a here-document with expansions)."
+                             % tool)
+                    return
+                texts.append(r.body)
+            else:
+                files = [r.target] if r.target is not None else [model_word("")]
+        else:
+            ctx.deny("G-PROT", "%s reads its patch from a pipe or the terminal, which the guard cannot read — save it "
+                               "to a file and apply that file." % tool)
+            return
+    for w in files:
+        if w is None or w.value is None or w.value in ("-", ""):
+            ctx.deny("G-PROT", "%s applies a patch the guard cannot read (%s)." % (tool, getattr(w, "raw", "?")))
+            return
+        p = w.value if os.path.isabs(w.value) else (os.path.join(cwd, w.value) if cwd else None)
+        if p is None or not ctx.fs.exists(p):
+            ctx.deny("G-PROT", "%s applies %s, which the guard cannot read." % (tool, w.value))
+            return
+        try:
+            if os.path.getsize(p) > PT.MAX:
+                ctx.deny("G-PROT", "%s applies %s, larger than the guard reads (64 KB) — split it." % (tool, w.value))
+                return
+            with open(p, "rb") as f:
+                texts.append(f.read(PT.MAX).decode("utf-8", "replace"))
+        except OSError:
+            ctx.deny("G-PROT", "%s applies %s, which the guard cannot read." % (tool, w.value))
+            return
+    tops = []
+    if tool.startswith("git-"):
+        t = git_target(ctx, cmd)
+        if isinstance(t, tuple):
+            tops.append(t[0].worktree)
+    found = [(t, PT.targets(t)) for t in texts]
+    if any(t.strip() for t in texts) and not any(ts for _t, ts in found):
+        ctx.deny("G-PROT", "%s applies a patch whose target files the guard cannot read (no diff headers it "
+                           "knows) — apply a unified or git diff." % tool)
+        return
+    for text, tlist in found:
+        for path, op, stripped in tlist:
+            lv = levels if levels is not None else list(range(0, max(1, len(path.split("/")))))
+            names = PT.candidates(path, lv) if stripped else [path]
+            for name in names:
+                if directory:
+                    name = directory.rstrip("/") + "/" + name
+                values = [name]
+                if not os.path.isabs(name):
+                    values += [os.path.join(top, name) for top in tops]
+                for v in values:
+                    check_target(ctx, cmd, model_word(v), v, "delete-file" if op == "delete" else "write", infos)
 
 
 def check_gh(ctx, cmd, infos):

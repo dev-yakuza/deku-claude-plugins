@@ -78,6 +78,81 @@ class Measured(Base):
             self.run_fixture("ask-four-other", call, prompt, "A")  # Q1 and Q4
         self.assertEqual(cm.exception.code, "ambiguous")
 
+    def test_newer_unpaired_answer_is_not_skipped(self):
+        """Review repro A: an older paired answer must not win over a newer answer whose question line is not on
+        disk yet."""
+        t = TR.approval_turn(TR.T(), LABEL)
+        t.lines.pop()  # no current call line (interactive)
+        q2 = [TR.question("다시 보여 드릴까요? 3f2a9c0d1e4b", [LABEL, "수정해 줘"])]
+        t.answer("toolu_ask2", q2, {q2[0]["question"]: "수정해 줘"})  # its tool_use line is not flushed
+        self.assertEqual(self.code(t, call="toolu_late"), "unflushed")
+        # any newer unpaired result (whatever its shape) means the transcript is still being written (review MINOR-1)
+        t = TR.approval_turn(TR.T(), LABEL)
+        t.lines.pop()
+        t.tool_result("toolu_unpaired")
+        self.assertEqual(self.code(t, call="toolu_late"), "unflushed")
+        # an unpaired result OLDER than the answer (same turn) does not matter
+        t = TR.T()
+        qs = [TR.question("q 3f2a9c0d1e4b", [LABEL])]
+        t.user_prompt("x")
+        t.tool_result("toolu_old_unpaired")
+        t.ask("a1", qs)
+        t.answer("a1", qs, {qs[0]["question"]: LABEL})
+        self.assertEqual(self.code(t, call="toolu_late"), "ok")
+
+    def test_answer_written_after_the_current_call(self):
+        """An answer that reached the transcript only after the current call's line is not its evidence."""
+        t = TR.T()
+        qs = [TR.question("q 3f2a9c0d1e4b", [LABEL])]
+        t.user_prompt("x")
+        t.ask("a1", qs)
+        t.tool_use("Bash", "toolu_cmd1")
+        t.answer("a1", qs, {qs[0]["question"]: LABEL})
+        self.assertEqual(self.code(t), "no-question")
+
+    def test_same_message_even_out_of_order(self):
+        """The question and the current call in one assistant line are never an answer-then-command, whatever the
+        order the lines were flushed in."""
+        t = TR.T()
+        qs = [TR.question("q 3f2a9c0d1e4b", [LABEL])]
+        t.user_prompt("x")
+        t.answer("a1", qs, {qs[0]["question"]: LABEL})
+        d = t._base("assistant", message={"role": "assistant", "content": [
+            {"type": "tool_use", "id": "a1", "name": "AskUserQuestion", "input": {"questions": qs}},
+            {"type": "tool_use", "id": "toolu_cmd1", "name": "Bash", "input": {"command": "x"}}]})
+        t.add(d)
+        self.assertEqual(self.code(t), "no-question")
+
+    def test_question_sent_with_other_calls(self):
+        """Review MINOR-1: content blocks of one message flushed as separate lines."""
+        t = TR.T()
+        qs = [TR.question("q 3f2a9c0d1e4b", [LABEL])]
+        t.user_prompt("x")
+        t.ask("a1", qs)
+        mid = t.lines[-1]["message"]["id"]
+        t.answer("a1", qs, {qs[0]["question"]: LABEL})
+        d = t._base("assistant", message={"id": mid, "role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_sib", "name": "Bash", "input": {"command": "y"}}]})
+        t.add(d)
+        self.assertEqual(self.code(t, call="toolu_late"), "no-question")
+
+    def test_measured_late_current_call(self):
+        """The anonymized U1 transcript: the AskUserQuestion answer is on disk, the Bash call's line is not."""
+        lines = TR.fixture_lines("ask-then-bash-late")
+        sid = lines[0].get("sessionId") or [d for d in lines if d.get("sessionId")][0]["sessionId"]
+        path = TR.transcript_path(self.env, sid)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        hook = {"session_id": sid, "prompt_id": "664441d5-ce43-4267-a383-b0f2c69eb2d7",
+                "tool_use_id": "toolu_01S6TLSnog4DSeRjvL515tQ3", "transcript_path": path}
+        for upto in (11, len(lines)):  # at PreToolUse (through the attachment); with the later request copies too
+            with open(path, "w") as f:
+                for d in lines[:upto]:
+                    f.write(json.dumps(d, ensure_ascii=False, separators=(",", ":")) + "\n")
+            res = [d for d in lines[:upto] if isinstance(d.get("toolUseResult"), dict)][-1]
+            a = X.find(hook, self.env, now=X._epoch(res["timestamp"]) + 5)
+            i, text, _n = X.choose(a, "승인 c26611707a0e", "c26611707a0e")
+            self.assertEqual((i, a.tool_use_id), (0, "toolu_01Y6w5y1X1jC7bmUgaNo2vX5"))
+
     def test_esc_then_new_turn(self):
         with self.assertRaises(X.NoEvidence) as cm:
             self.run_fixture("ask-esc", "toolu_01QZaz73LgCFxApp8jNmmuQo", "8b7178dc-09fb-4a3d-bd32-f0d63d306350", "예")
@@ -145,10 +220,14 @@ class Evidence(Base):
         self.assertEqual(self.code(TR.approval_turn(TR.T(), LABEL, source="hook")), "not-a-person")
         self.assertEqual(self.code(TR.approval_turn(TR.T(), LABEL, source="config")), "not-a-person")
         self.assertEqual(self.code(TR.approval_turn(TR.T(), LABEL, decision="reject")), "not-a-person")
-        # absent (a mode where nobody was prompted): answers + entrypoint cli suffice (v2 MINOR 1)
-        self.assertEqual(self.code(TR.approval_turn(TR.T(), LABEL, permission=False)), "ok")
+        # absent: not the person's mark (M0f U1–U8: every human answer carried it; Q8 closed)
+        self.assertEqual(self.code(TR.approval_turn(TR.T(), LABEL, permission=False)), "not-a-person")
         t = TR.approval_turn(TR.T(), LABEL, permission=False, entrypoint="sdk-cli")
         self.assertEqual(self.code(t), "non-interactive")
+        # what U8 measured for hook-filled answers (PreToolUse / PermissionRequest updatedInput)
+        self.assertEqual(self.code(TR.approval_turn(TR.T(), LABEL, source="hook")), "not-a-person")
+        self.assertEqual(self.code(TR.approval_turn(TR.T(), LABEL, source="user_temporary")), "ok")
+        self.assertEqual(self.code(TR.approval_turn(TR.T(), LABEL, source="user_permanent")), "ok")
 
     def test_non_interactive(self):
         self.assertEqual(self.code(TR.approval_turn(TR.T(entrypoint="sdk-cli"), LABEL)), "non-interactive")
@@ -298,9 +377,36 @@ class Robust(Base):
             f.write(txt + '{"type":"user","promptId":"' + t.prompt + '","message":{"conte')
         self.assertEqual(X.choose(X.find(self.hook(t), self.env), LABEL, "3f2a9c0d1e4b")[0], 0)
 
-    def test_current_call_missing(self):
+    def test_current_call_written_late(self):
+        """M0f U1 (interactive 2.1.304): the current call's tool_use line is written after the tool ran — at
+        PreToolUse the end of the file is "now"; the turn and answer rules stay the same."""
         t = TR.approval_turn(TR.T(), LABEL)
-        self.assertEqual(self.code(t, call="toolu_other"), "current-call-not-found")
+        t.lines.pop()  # the current call's line is not on disk yet
+        self.assertEqual(self.code(t, call="toolu_late"), "ok")
+        # a person's message after the answer: another turn
+        t2 = TR.approval_turn(TR.T(), LABEL)
+        t2.lines.pop()
+        t2.user_prompt("잠깐")
+        self.assertEqual(self.code(t2, call="toolu_late"), "no-question")
+        # the answer belongs to another turn (the hook's prompt id differs)
+        t3 = TR.approval_turn(TR.T(), LABEL)
+        t3.lines.pop()
+        self.assertEqual(self.code(t3, call="toolu_late", prompt="another-prompt"), "no-question")
+        # the question's own line is missing: the answer cannot be paired (closed)
+        t4 = TR.approval_turn(TR.T(), LABEL)
+        t4.lines.pop()
+        del t4.lines[1]
+        self.assertEqual(self.code(t4, call="toolu_late"), "unflushed")
+        # results written after the current call (when it is present) are not its evidence
+        t5 = TR.T()
+        qs = [TR.question("q 3f2a9c0d1e4b", [LABEL])]
+        t5.user_prompt("x")
+        d = t5._base("assistant", message={"role": "assistant", "content": [
+            {"type": "tool_use", "id": "a1", "name": "AskUserQuestion", "input": {"questions": qs}},
+            {"type": "tool_use", "id": "toolu_cmd1", "name": "Bash", "input": {"command": "x"}}]})
+        t5.add(d)
+        t5.answer("a1", qs, {qs[0]["question"]: LABEL})
+        self.assertEqual(self.code(t5), "no-question")
 
     def test_large_copy_lines_between_answer_and_command(self):
         """v2 MINOR 2: 4 × 4 MB copy lines between the answer and the command are skipped unparsed."""

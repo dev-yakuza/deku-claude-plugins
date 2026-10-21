@@ -6,6 +6,8 @@ import re
 
 MARK = "studio:hook"
 VERSION = 1
+RUNNER_VERSION = 2  # 2 (M0f): closed when HEAD has Studio's check script but the work tree does not; .husky/pre-commit
+HUSKY_FILE = ".husky/pre-commit"
 BLOCK_BEGIN = "# >>> studio:hook >>>"
 BLOCK_END = "# <<< studio:hook <<<"
 CHAINED = "pre-commit.studio-chained"
@@ -25,10 +27,10 @@ def runner(roots):
     """The per-clone runner (git common dir): fast checks in sh, Python only for Studio paths."""
     # lines are "<status>\t<path>"; a leak is any status but D (unstaging or deleting a local file is fine)
     local_re = "^[^D]\t(" + "|".join([ere(".claude/studio/local/")] + [ere(r + "/local/") for r in roots]) + ")"
-    studio_re = "^.\t(" + "|".join([ere(".claude/studio/"), ere(".claude/agents/std-"), ere(".gitignore") + "$"] +
-                                  [ere(r + "/") for r in roots]) + ")"
+    studio_re = "^.\t(" + "|".join([ere(".claude/studio/"), ere(".claude/agents/std-"), ere(".gitignore") + "$",
+                                   ere(HUSKY_FILE) + "$"] + [ere(r + "/") for r in roots]) + ")"
     return """#!/bin/sh
-# %(mark)s v%(ver)d — Studio's pre-commit runner (written by hooks.py; untracked, one per clone)
+# %(mark)s v%(rver)d — Studio's pre-commit runner (written by hooks.py; untracked, one per clone)
 # Studio roots: %(roots)s
 # git runs a hook from the top of the work tree (husky and lefthook too)
 for t in tr awk grep cut sed head; do
@@ -57,13 +59,24 @@ if [ -n "$bad" ]; then
 fi
 [ -n "$(studio_match %(studio_re)s)" ] || exit 0
 cc=.claude/studio/scripts/check_commit.py
-[ -f "$cc" ] || exit 0
+if [ ! -f "$cc" ]; then
+  # a branch that never had the harness: nothing to check; HEAD has it but the work tree not: closed
+  git cat-file -e "HEAD:$cc" 2>/dev/null || exit 0
+  echo "Studio pre-commit: refused — Studio's check script ($cc) is in HEAD but not in the work tree." >&2
+  if [ "$(git config --bool core.sparseCheckout 2>/dev/null)" = true ]; then
+    echo "  This clone uses sparse-checkout: include Studio's folder (git sparse-checkout add .claude/studio)." >&2
+  fi
+  echo "  Taking Studio out of the repository is the person's removal procedure, committed in a terminal." >&2
+  echo "Do not bypass this check (--no-verify, HUSKY=0, LEFTHOOK=0, removing session markers): stop and ask the user (INV9)." >&2
+  exit 1
+fi
 if ! command -v python3 >/dev/null 2>&1; then
   echo "Studio pre-commit: refused — python3 (3.9 or newer) is needed to check the staged Studio files." >&2
   exit 1
 fi
 exec python3 -B "$cc" --staged
-""" % {"mark": MARK, "ver": VERSION, "roots": " ".join(roots), "local_re": _sq(local_re), "studio_re": _sq(studio_re)}
+""" % {"mark": MARK, "rver": RUNNER_VERSION, "roots": " ".join(roots), "local_re": _sq(local_re),
+       "studio_re": _sq(studio_re)}
 
 
 def shim():
@@ -130,7 +143,7 @@ def put_block(text, block):
     return text[:sp[0]] + block + text[sp[1]:]
 
 
-STOP_RE = re.compile(r"^\s*(exit|return|exec)\b")
+STOP_RE = re.compile(r"^(exit|return|exec)\b")  # column 0 only: an indented exit sits inside an if/case/function
 
 
 def stops_before_block(text):

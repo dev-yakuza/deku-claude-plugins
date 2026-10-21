@@ -13,6 +13,7 @@ from .. import ignore, paths
 
 CONFIG = ".claude/studio/config.json"
 GITIGNORE = ".gitignore"
+HUSKY = ".husky/pre-commit"  # tracked; Studio's only inside its studio:hook block (m0f-plan §2.1)
 STUDIO_PREFIXES = (".claude/studio/", ".claude/agents/std-")
 LOCAL_FIXED = ".claude/studio/local/"
 
@@ -141,3 +142,40 @@ def gitignore_block(data):
         return ignore.split((data or b"").decode("utf-8", "surrogateescape"))[1]
     except ignore.BlockError:
         return "<broken>"
+
+
+def husky_kind(old, new):
+    """How a .husky/pre-commit change splits around the studio:hook block — like gitignore_kind."""
+    from ..hooks import templates as T
+    old = (old or b"").decode("utf-8", "surrogateescape")
+    new = (new or b"").decode("utf-8", "surrogateescape")
+    if old == new:
+        return "none"
+
+    def parts(text):
+        sp = T.find_block(text)
+        if sp is None:
+            return text, None
+        return text[:sp[0]] + text[sp[1]:], text[sp[0]:sp[1]]
+    try:
+        o_rest, o_blk = parts(old)
+        n_rest, n_blk = parts(new)
+    except ValueError:
+        return "broken"
+    if n_blk is not None and T.stops_before_block(new):
+        return "broken"  # an exit/return/exec line before the block: Studio's check would never run (review MINOR-2)
+    if o_rest == n_rest and o_blk != n_blk:
+        return "studio"
+    if o_blk == n_blk and o_rest != n_rest:
+        return "other"
+    return "mixed"
+
+
+def husky_block(data):
+    from ..hooks import templates as T
+    text = (data or b"").decode("utf-8", "surrogateescape")
+    try:
+        sp = T.find_block(text)
+    except ValueError:
+        return "<broken>"
+    return None if sp is None else text[sp[0]:sp[1]]

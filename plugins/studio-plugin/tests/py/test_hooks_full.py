@@ -48,13 +48,18 @@ class RealManagers(CommitCase):
         self.npx(HUSKY, "init")
         self.assertEqual(self.git("config", "core.hooksPath").stdout.strip(), ".husky/_")
         self.write(".husky/pre-commit", "true\n")  # husky init puts "npm test" there
+        self.git("add", "package.json", ".husky/pre-commit")
+        self.assertEqual(self.commit("husky").returncode, 0)  # the team's husky setup, before Studio's block
         out = self.hooks("install")
         self.assertEqual(out.returncode, 4, out.stderr)
         out = self.hooks("install", "--husky-apply")
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(self.hooks("status").returncode, 0)
-        self.git("add", "package.json", ".husky/pre-commit")
-        self.assertEqual(self.commit("husky").returncode, 0)
+        # Studio's block in the tracked file is a harness commit (M0f): staged by check_commit, checked by the hook
+        out = self.cc("--stage", "harness")
+        self.assertEqual(out.returncode, 0, out.stderr + out.stdout)
+        out = self.commit("studio: husky block")
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
         self.leak_refused_and_plain_passes()
         wt = os.path.join(self.tmp, "wt")
         self.git("worktree", "add", "-q", wt)

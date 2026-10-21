@@ -100,4 +100,4 @@ def shared_edit_ok(path, new_text):
         return True  # nothing of Studio's (or already broken): not ours to protect
     if not isinstance(new_text, str) or block(new_text) != old:
         return False
-    return stops_before_block(new_text) <= stops_before_block(cur)
+    return stops_before_block(new_text) == 0  # no exit/return/exec line may stand before the block (M0f review)

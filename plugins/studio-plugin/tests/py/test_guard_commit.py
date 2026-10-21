@@ -36,8 +36,10 @@ class GuardCommit(CommitCase):
         return okfile.read(self.repo)[0]
 
     def answer(self, label, qtext=None, **kw):
-        tree12 = label.split(" ", 1)[1]
-        self.t = TR.approval_turn(TR.T(session_id=SID), label, qtext=qtext or "이 파일들을 커밋할까요? %s" % tree12,
+        """The person's answer; the question shows the summary line --stage printed (M0f) unless `qtext` is given."""
+        ok, _ = okfile.read(self.repo)
+        line = ok.get("summary") if ok and ok.get("label") == label else "%s | 변경 1" % label
+        self.t = TR.approval_turn(TR.T(session_id=SID), label, qtext=qtext or "이 파일들을 커밋할까요?\n%s" % line,
                                   **kw)
         self.t.write(self.tpath)
 
@@ -63,6 +65,14 @@ class GuardCommit(CommitCase):
         # the hook then sees the guard's record and the commit goes through
         out = self.commit("studio: v1", env=self.claude_env())
         self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_commit_with_the_current_call_written_late(self):
+        """M0f U1/U5: the commit evidence uses the same transcript reading (end of file = now)."""
+        ok = self.staged()
+        self.answer(ok["label"])
+        self.t.lines.pop()
+        self.t.write(self.tpath)
+        self.assertGate('git commit -m "studio: v1"', allow=True)
 
     def test_heredoc_message_is_still_one_command(self):
         ok = self.staged()
@@ -113,7 +123,9 @@ class GuardCommit(CommitCase):
         self.assertGate("git commit -m x", "G-EVIDENCE")
         self.answer(ok["label"], chosen="수정해 줘")
         self.assertGate("git commit -m x", "G-EVIDENCE")
-        self.answer(ok["label"], qtext="이 파일들을 커밋할까요?")  # the tree hash was not shown
+        self.answer(ok["label"], qtext="이 파일들을 커밋할까요?")  # the summary line (with tree12) was not shown
+        self.assertGate("git commit -m x", "G-EVIDENCE")
+        self.answer(ok["label"], qtext="커밋할까요? %s" % ok["summary"].replace("변경 ", "변경 1"))  # one digit off
         self.assertGate("git commit -m x", "G-EVIDENCE")
         self.assertIsNone(okfile.read(self.repo)[0]["approval"])
 
@@ -144,6 +156,24 @@ class GuardCommit(CommitCase):
         data["session_id"] = "sess-other"
         json.dump(data, open(okfile.path(self.repo), "w"))
         self.assertGate("git commit -m x", "G-COMMIT")
+
+    def test_old_runner_is_refused(self):
+        """M0f review MINOR-3: a clone whose runner predates M0f (v1) or has none cannot make a Studio commit."""
+        ok = self.staged()
+        self.answer(ok["label"])
+        common = self.git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+        rp = os.path.join(common, "studio", "pre-commit")
+        with open(rp) as f:
+            text = f.read()
+        with open(rp, "w") as f:
+            f.write(text.replace("studio:hook v2 ", "studio:hook v1 "))
+        d, _ = self.assertGate("git commit -m x", "G-COMMIT")
+        self.assertIn("hooks.py install", d.message())
+        os.remove(rp)
+        self.assertGate("git commit -m x", "G-COMMIT")
+        with open(rp, "w") as f:
+            f.write(text)
+        self.assertGate("git commit -m x", allow=True)
 
     def test_subagent_cannot_commit_studio(self):
         ok = self.staged()
@@ -305,7 +335,237 @@ class GuardPush(CommitCase):
         self.assertIsNone(deny)
         self.assertTrue(any("mixes" in w for w in ctx.warnings), ctx.warnings)
         deny, ctx = self.gate("git push --all")
-        self.assertTrue(any("only HEAD" in w for w in ctx.warnings), ctx.warnings)
+        self.assertIsNone(deny)
+        self.assertTrue(any("mixes" in w for w in ctx.warnings), ctx.warnings)  # every pushed branch is checked
+
+    def leak(self, branch=None):
+        if branch:
+            self.git("checkout", "-q", "-b", branch)
+        self.add_commit("studio/local/videos/w/script.md", "leak", force=True)
+
+    def test_h5_explicit_refspec_without_upstream(self):
+        """Sandbox H5: `git push origin HEAD:main` from a branch with no upstream (and no origin/HEAD)."""
+        self.leak("work")
+        self.assertIsNone(self.git("rev-parse", "-q", "--verify", "refs/remotes/origin/HEAD", check=False).stdout.strip()
+                          or None)
+        for cmd in ("git push origin HEAD:main", "git push origin work:refs/heads/main", "git push origin +HEAD:main"):
+            deny, _ = self.gate(cmd)
+            self.assertIsNotNone(deny, cmd)
+            self.assertEqual(deny.rule, "G-PUSH", deny.message())
+            self.assertIn("machine-only", deny.message())
+
+    def test_leak_already_on_another_remote_branch_reaching_main(self):
+        """The base is the destination's remote branch: a leak already on origin/side still counts when it goes to
+        main (a fallback over every remote ref would miss it)."""
+        self.leak("side")
+        self.git("push", "-q", "origin", "side")
+        self.git("checkout", "-q", "-b", "work")
+        self.add_commit("src/w.ts", "work")
+        deny, _ = self.gate("git push origin HEAD:main")
+        self.assertIsNotNone(deny)
+        self.assertEqual(deny.rule, "G-PUSH")
+        # a plain branch with its own remote branch (no upstream): based on origin/work, the leak counts too
+        self.git("checkout", "-q", "main")
+        self.git("checkout", "-q", "-b", "w2")
+        self.add_commit("src/w2.ts", "w2")
+        self.git("push", "-q", "origin", "w2")  # no -u
+        self.git("merge", "-q", "--no-edit", "side")
+        deny, _ = self.gate("git push origin w2")
+        self.assertIsNotNone(deny)
+        self.assertEqual(deny.rule, "G-PUSH")
+
+    def test_plain_branch_with_a_remote_branch_but_no_upstream(self):
+        self.git("checkout", "-q", "-b", "work")
+        self.add_commit("src/w.ts", "work")
+        self.git("push", "-q", "origin", "work")  # no -u
+        self.add_commit("studio/local/videos/w/script.md", "leak", force=True)
+        deny, _ = self.gate("git push origin work")
+        self.assertEqual(deny.rule, "G-PUSH")
+
+    def test_new_remote_branch(self):
+        self.git("checkout", "-q", "-b", "fresh")
+        self.write("src/f.ts", "f\n")
+        self.write("studio/videos/v3/script.ko.md", "s\n")
+        self.git("add", "src/f.ts", "studio/videos/v3/script.ko.md")
+        self.git("commit", "-q", "--no-verify", "-m", "mixed on a new branch")
+        deny, ctx = self.gate("git push -u origin fresh")
+        self.assertIsNone(deny, deny and deny.message())
+        self.assertEqual(sum("mixes" in w for w in ctx.warnings), 1, ctx.warnings)  # only the new commit
+        self.add_commit("studio/local/videos/w/script.md", "leak", force=True)
+        self.assertEqual(self.gate("git push -u origin fresh")[0].rule, "G-PUSH")
+
+    def test_all_and_tags_are_checked_per_ref(self):
+        self.leak("side")
+        self.git("checkout", "-q", "main")
+        self.add_commit("src/m.ts", "main work")
+        self.assertIsNone(self.gate("git push")[0])  # main itself is clean
+        self.assertEqual(self.gate("git push --all")[0].rule, "G-PUSH")
+        self.assertEqual(self.gate("git push --mirror")[0].rule, "G-PUSH")
+        self.git("tag", "t1", "side")
+        self.assertEqual(self.gate("git push --tags")[0].rule, "G-PUSH")
+        self.assertEqual(self.gate("git push origin main side")[0].rule, "G-PUSH")
+        self.assertIsNone(self.gate("git push origin :old-branch")[0])  # deleting a remote branch sends nothing
+
+    def test_delete_and_configured_refspecs(self):
+        """Review: --delete sends nothing; a bare push follows push.default=matching or remote.<r>.push."""
+        self.assertIsNone(self.gate("git push --delete origin old")[0])
+        self.assertIsNone(self.gate("git push origin -d old")[0])
+        self.git("checkout", "-q", "-b", "side")
+        self.add_commit("src/s.ts", "side")
+        self.git("push", "-q", "origin", "side")
+        self.add_commit("studio/local/videos/w/script.md", "leak", force=True)
+        self.git("checkout", "-q", "main")
+        self.assertIsNone(self.gate("git push")[0])  # simple: only main
+        self.git("config", "push.default", "matching")
+        self.assertEqual(self.gate("git push")[0].rule, "G-PUSH")
+        self.git("config", "--unset", "push.default")
+        self.git("config", "remote.origin.push", "refs/heads/side:refs/heads/side")
+        self.assertEqual(self.gate("git push")[0].rule, "G-PUSH")
+        self.git("config", "remote.origin.push", "refs/heads/*:refs/heads/*")
+        d = self.gate("git push")[0]
+        self.assertEqual(d.rule, "G-PUSH")
+        self.assertIn("pattern", d.message())
+
+    def test_first_publish_checks_local_paths_only(self):
+        from stdo.guard import push
+        fresh = os.path.join(self.tmp, "fresh.git")
+        subprocess.run(["git", "init", "-q", "--bare", fresh], check=True, env=self.env)
+        self.git("remote", "add", "fresh", fresh)
+        self.git("checkout", "-q", "-b", "pub")
+        for i in range(4):
+            self.add_commit("src/p%d.ts" % i, "p%d" % i)
+        old = push.MAX_COMMITS
+        push.MAX_COMMITS = 2
+        try:
+            deny, ctx = self.gate("git push fresh pub")
+            self.assertIsNone(deny, deny and deny.message())
+            self.assertTrue(any("only machine-only and internal files were checked" in w for w in ctx.warnings),
+                            ctx.warnings)
+            self.add_commit("studio/local/videos/w/script.md", "leak", force=True)
+            deny, _ = self.gate("git push fresh pub")
+            self.assertEqual(deny.rule, "G-PUSH")
+            self.assertIn("from a terminal", deny.message())
+        finally:
+            push.MAX_COMMITS = old
+
+    def leak_on_origin(self):
+        """A machine-only file already on origin/main (someone pushed it earlier): origin's base hides it."""
+        self.add_commit("studio/local/videos/w/script.md", "old leak", force=True)
+        self.git("push", "-q", "origin", "main")
+        public = os.path.join(self.tmp, "public.git")
+        subprocess.run(["git", "init", "-q", "--bare", public], check=True, env=self.env)
+        return public
+
+    def test_target_remote_is_the_base(self):
+        """Review MAJOR-1: the base comes from the remote actually pushed to, never origin's upstream."""
+        public = self.leak_on_origin()
+        self.assertIsNone(self.gate("git push")[0])  # origin already has it: nothing new for origin
+        for cmd in ("git push %s main" % public, "git push --repo=%s HEAD" % public, "git push --repo %s" % public):
+            deny, _ = self.gate(cmd)
+            self.assertIsNotNone(deny, cmd)
+            self.assertEqual(deny.rule, "G-PUSH", cmd)
+        self.git("remote", "add", "public", public)
+        self.git("config", "remote.pushDefault", "public")
+        self.assertEqual(self.gate("git push")[0].rule, "G-PUSH")
+        self.git("config", "--unset", "remote.pushDefault")
+        self.git("config", "branch.main.pushRemote", "public")
+        self.assertEqual(self.gate("git push")[0].rule, "G-PUSH")
+        self.git("config", "--unset", "branch.main.pushRemote")
+        self.assertIsNone(self.gate("git push")[0])
+
+    def test_pushurl_elsewhere_is_a_url_target(self):
+        """origin fetches one place and pushes to another: its tracking refs say nothing about the push target."""
+        public = self.leak_on_origin()
+        self.assertIsNone(self.gate("git push")[0])
+        self.git("config", "remote.origin.pushurl", public)
+        deny, _ = self.gate("git push")
+        self.assertIsNotNone(deny)
+        self.assertEqual(deny.rule, "G-PUSH")
+
+    def evil_merge(self):
+        self.git("checkout", "-q", "-b", "b1")
+        self.add_commit("src/b1.ts", "b1")
+        self.git("checkout", "-q", "main")
+        self.add_commit("src/m1.ts", "m1")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "b1")
+        self.write("studio/local/videos/w/evil.md", "only in the merge\n")
+        self.git("add", "-f", "studio/local/videos/w/evil.md")
+        self.git("commit", "-q", "--no-verify", "-m", "evil merge")
+
+    def test_evil_merge_is_seen(self):
+        """A machine-only file added only by a merge commit: both the commit-by-commit path and the over-the-cap
+        `git log -m` path see it."""
+        from stdo.guard import push
+        self.evil_merge()
+        self.assertEqual(self.gate("git push")[0].rule, "G-PUSH")  # rangecheck: differs from every parent
+        old = push.MAX_COMMITS
+        push.MAX_COMMITS = 1
+        try:
+            deny, _ = self.gate("git push")
+            self.assertIsNotNone(deny)
+            self.assertIn("evil.md", deny.message())
+        finally:
+            push.MAX_COMMITS = old
+
+    def test_ignorecase_paths_over_the_cap(self):
+        from stdo.guard import push
+        self.git("config", "core.ignorecase", "true")
+        self.git("checkout", "-q", "-b", "case")
+        self.add_commit("src/c0.ts", "c0")
+        self.add_commit("src/c1.ts", "c1")
+        self.add_commit("studio/LOCAL/videos/w/x.md", "case leak", force=True)
+        old = push.MAX_COMMITS
+        push.MAX_COMMITS = 1
+        try:
+            deny, _ = self.gate("git push origin case")
+            self.assertIsNotNone(deny)
+            self.assertEqual(deny.rule, "G-PUSH")
+        finally:
+            push.MAX_COMMITS = old
+
+    def test_follow_tags_keeps_the_branch(self):
+        """Review MAJOR-2: --follow-tags pushes the branch too."""
+        self.add_commit("studio/local/videos/w/script.md", "leak", force=True)
+        self.assertEqual(self.gate("git push --follow-tags")[0].rule, "G-PUSH")
+        self.assertEqual(self.gate("git push origin main --follow-tags")[0].rule, "G-PUSH")
+
+    def test_over_the_cap_checks_internal_ids_too(self):
+        """Review MAJOR-3: the single git log of the over-the-cap path covers internal video/actor folders."""
+        from stdo.guard import push
+        self.overlay()
+        p = os.path.join(self.repo, ".claude", "studio", "local", "config.internal.json")
+        with open(p, "w") as f:
+            json.dump({"internal": {"videos": ["onboard-x"], "actors": ["staff-a"]}}, f)
+        self.overlay_sha(p)
+        self.git("checkout", "-q", "-b", "big")
+        for i in range(3):
+            self.add_commit("src/b%d.ts" % i, "b%d" % i)
+        self.add_commit("studio/cast/staff-a/profile.md", "internal actor")
+        old = push.MAX_COMMITS
+        push.MAX_COMMITS = 2
+        try:
+            deny, _ = self.gate("git push origin big")
+            self.assertIsNotNone(deny)
+            self.assertIn("staff-a", deny.message())
+        finally:
+            push.MAX_COMMITS = old
+
+    def test_unclear_or_too_many_is_refused(self):
+        from stdo.guard import push
+        self.git("checkout", "-q", "-b", "many")
+        for i in range(5):
+            self.add_commit("src/n%d.ts" % i, "n%d" % i)
+        old = push.MAX_COMMITS
+        push.MAX_COMMITS = 3
+        try:
+            deny, ctx = self.gate("git push origin many")  # over the cap: the local-path check only, a warning
+            self.assertIsNone(deny, deny and deny.message())
+            self.assertTrue(any("only machine-only and internal files" in w for w in ctx.warnings), ctx.warnings)
+        finally:
+            push.MAX_COMMITS = old
+        self.assertIsNone(self.gate("git push origin many")[0])
+        self.assertEqual(self.gate('git push origin "$BRANCH"')[0].rule, "G-PUSH")
+        self.assertEqual(self.gate("git push origin nosuch:main")[0].rule, "G-PUSH")
 
     def test_internal_video_id(self):
         self.overlay()

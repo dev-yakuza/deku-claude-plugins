@@ -73,6 +73,11 @@ def main(argv, cwd=None, env=None, extra_kinds=None):
                 sys.stdout.write("staged %d Studio path%s · tree %s · ask the user with the option \"%s\"\n"
                                  % (len(data["paths"]), "" if len(data["paths"]) == 1 else "s", data["tree"][:12],
                                     data["label"]))
+                sys.stdout.write("put this line in the question as it is:\n%s\n" % data["summary"])
+                for p in data["paths"][:10]:
+                    sys.stdout.write("  %s\n" % p)
+                if len(data["paths"]) > 10:
+                    sys.stdout.write("  … and %d more\n" % (len(data["paths"]) - 10))
             else:
                 _report("Studio stage", problems)
             return code

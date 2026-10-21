@@ -113,9 +113,25 @@ class Version(JudgeCase):
                 self.assertIn(word, d.message())
             self.assertPass("git status")
             self.assertPass("ls studio")
-        self.set_copy(mine)
+        import shutil
+        shutil.copy(os.path.join(helpers.SCRIPTS, "stdo", "__init__.py"),
+                    os.path.join(self.repo, ".claude", "studio", "scripts", "stdo", "__init__.py"))
         for c in cmds:
             self.assertPass(c)
+        # M0f review MAJOR-1b: an edited work-tree copy with the manifest untouched
+        p = os.path.join(self.repo, ".claude", "studio", "scripts", "stdo", "paths.py")
+        with open(p, "a") as f:
+            f.write("# edited\n")
+        d = self.assertDeny(cmds[0], "G-VERSION")
+        self.assertIn("stdo/paths.py", d.message())
+        self.assertIn("in a terminal", d.message())
+        self.assertPass("git status")
+        # a CRLF checkout of the same copy (core.autocrlf) is not an edit (review 2 MINOR-1)
+        with open(os.path.join(helpers.SCRIPTS, "stdo", "paths.py"), "rb") as f:
+            orig = f.read()
+        with open(p, "wb") as f:
+            f.write(orig.replace(b"\n", b"\r\n"))
+        self.assertPass(cmds[0])
 
 
 class Protected(JudgeCase):
@@ -273,3 +289,117 @@ class Perf(JudgeCase):
         print("\n[perf] %s: approval with evidence (5 MB transcript) p50 %.1f ms max %.1f ms; git status p50 %.1f ms"
               % (sys.version.split()[0], times[7] * 1000, times[-1] * 1000, base[7] * 1000))
         self.assertLess(times[7], 0.25)
+
+
+class Patches(JudgeCase):
+    """M0f review MAJOR-1: patch tools write the files their patch names."""
+
+    def patch_file(self, name, target, new=False, git=True, delete=False):
+        a, b = ("a/" + target, "b/" + target)
+        head = "diff --git %s %s\n" % (a, b) if git else ""
+        if delete:
+            body = head + "deleted file mode 100644\n--- %s\n+++ /dev/null\n@@ -1 +0,0 @@\n-x\n" % a
+        else:
+            body = head + "--- %s\n+++ %s\n@@ -1 +1 @@\n-{}\n+{\"x\": 1}\n" % ("/dev/null" if new else a, b)
+        p = os.path.join(self.repo, name)
+        with open(p, "w") as f:
+            f.write(body)
+        return name
+
+    def test_targets_are_judged(self):
+        self.patch_file("s.diff", "studio/videos/v/work/state.json")
+        self.patch_file("c.diff", ".claude/studio/charter.md", git=False)
+        self.patch_file("ok.diff", "src/a.ts")
+        self.assertDeny("git apply s.diff", "G-PROT")
+        self.assertDeny("git apply -v --index s.diff")  # G-PLUMB or G-PROT
+        self.assertDeny("patch -p1 < c.diff", "G-PROT")
+        self.assertDeny("patch -p1 -i c.diff", "G-PROT")
+        self.assertDeny("patch < c.diff", "G-PROT")  # no -p: every plausible strip level
+        self.assertDeny("git am s.diff", "G-PROT")
+        self.assertDeny("cd src && git apply ../s.diff", "G-PROT", cwd=None)
+        self.assertPass("git apply ok.diff")
+        self.assertPass("git apply --check s.diff")
+        self.assertPass("git apply --stat s.diff")
+
+    def test_patch_without_p_judges_every_level(self):
+        with open(os.path.join(self.repo, "np.diff"), "w") as f:
+            f.write("--- .claude/studio/charter.md\n+++ .claude/studio/charter.md\n@@ -1 +1 @@\n-a\n+b\n")
+        self.assertDeny("patch < np.diff", "G-PROT")  # level 0 is the protected file
+        self.assertDeny("patch -p0 < np.diff", "G-PROT")
+        self.assertPass("patch -p1 < np.diff")  # studio/charter.md: not Studio's
+
+    def test_context_quoted_and_headerless(self):
+        """M0f review 2 MAJOR-1: context diffs, git-quoted paths, patches with no headers."""
+        with open(os.path.join(self.repo, "ctx.diff"), "w") as f:
+            f.write("*** a/.claude/studio/charter.md\t2026-10-21\n--- b/.claude/studio/charter.md\t2026-10-21\n"
+                    "***************\n*** 1 ****\n! a\n--- 1 ----\n! b\n")
+        self.assertDeny("patch -p1 < ctx.diff", "G-PROT")
+        self.assertDeny("patch -p1 -i ctx.diff", "G-PROT")
+        os.makedirs(os.path.join(self.repo, ".claude", "studio", "formats"), exist_ok=True)
+        with open(os.path.join(self.repo, "q.diff"), "w") as f:
+            f.write('diff --git "a/.claude/studio/formats/my f\\303\\251.md" "b/.claude/studio/formats/my f\\303\\251.md"\n'
+                    '--- "a/.claude/studio/formats/my f\\303\\251.md"\n+++ "b/.claude/studio/formats/my f\\303\\251.md"\n'
+                    "@@ -1 +1 @@\n-a\n+b\n")
+        self.assertDeny("git apply q.diff", "G-PROT")
+        # the same shapes aimed at ordinary files pass (so the targets were really read, not just "no headers")
+        with open(os.path.join(self.repo, "ctx-ok.diff"), "w") as f:
+            f.write("*** a/src/a.ts\t2026-10-21\n--- b/src/a.ts\t2026-10-21\n***************\n*** 1 ****\n! a\n"
+                    "--- 1 ----\n! b\n")
+        self.assertPass("patch -p1 < ctx-ok.diff")
+        with open(os.path.join(self.repo, "q-ok.diff"), "w") as f:
+            f.write('diff --git "a/src/my f\\303\\251.ts" "b/src/my f\\303\\251.ts"\n'
+                    '--- "a/src/my f\\303\\251.ts"\n+++ "b/src/my f\\303\\251.ts"\n@@ -1 +1 @@\n-a\n+b\n')
+        self.assertPass("git apply q-ok.diff")
+        from stdo.guard import patchtargets as PT
+        self.assertIn(("b/src/my fé.ts", "write", True), PT.targets(open(os.path.join(self.repo, "q-ok.diff")).read()))
+        with open(os.path.join(self.repo, "raw.diff"), "w") as f:
+            f.write("@@ -1 +1 @@\n-a\n+b\n")
+        d = self.assertDeny("git apply raw.diff", "G-PROT")
+        self.assertIn("cannot read", d.message())
+        self.assertDeny("patch < raw.diff", "G-PROT")
+
+    def test_gnu_unquoted_paths_with_spaces(self):
+        """M0f review 3 MINOR-1: GNU diff writes spaces unquoted and a tab before the timestamp."""
+        with open(os.path.join(self.repo, "gnu.diff"), "w") as f:
+            f.write("--- a/studio/videos/v x/work/state.json\t2026-10-21 10:00:00\n"
+                    "+++ b/studio/videos/v x/work/state.json\t2026-10-21 10:00:00\n@@ -1 +1 @@\n-{}\n+{\"x\": 1}\n")
+        self.assertDeny("patch -p1 < gnu.diff", "G-PROT")
+        with open(os.path.join(self.repo, "gnu-notab.diff"), "w") as f:
+            f.write("--- a/.claude/studio/formats/my f.md\n+++ b/.claude/studio/formats/my f.md\n@@ -1 +1 @@\n-a\n+b\n")
+        self.assertDeny("patch -p1 < gnu-notab.diff", "G-PROT")
+        with open(os.path.join(self.repo, "gnu-ok.diff"), "w") as f:
+            f.write("--- a/src/my f.ts\t2026-10-21 10:00:00\n+++ b/src/my f.ts\t2026-10-21 10:00:00\n@@ -1 +1 @@\n"
+                    "-a\n+b\n")
+        self.assertPass("patch -p1 < gnu-ok.diff")
+        from stdo.guard import patchtargets as PT
+        self.assertEqual([("a/src/my f.ts", "write", True), ("b/src/my f.ts", "write", True)],
+                         PT.targets(open(os.path.join(self.repo, "gnu-ok.diff")).read()))
+
+    def test_unreadable_patches(self):
+        self.patch_file("s.diff", "studio/videos/v/work/state.json")
+        self.assertDeny("cat s.diff | git apply", "G-PROT")
+        self.assertDeny("git apply", "G-PROT")
+        self.assertDeny("git apply missing.diff", "G-PROT")
+        with open(os.path.join(self.repo, "big.diff"), "w") as f:
+            f.write("x" * (70 * 1024))
+        self.assertDeny("git apply big.diff", "G-PROT")
+        self.assertDeny('git apply "$P"', None)
+
+    def test_heredoc_patch(self):
+        cmd = ("git apply <<'EOF'\ndiff --git a/.claude/studio/charter.md b/.claude/studio/charter.md\n"
+               "--- a/.claude/studio/charter.md\n+++ b/.claude/studio/charter.md\n@@ -1 +1 @@\n-a\n+b\nEOF")
+        self.assertDeny(cmd, "G-PROT")
+
+    def test_renames_and_deletes(self):
+        p = os.path.join(self.repo, "r.diff")
+        with open(p, "w") as f:
+            f.write("diff --git a/src/x.ts b/studio/videos/v/work/state.json\nsimilarity index 100%\n"
+                    "rename from src/x.ts\nrename to studio/videos/v/work/state.json\n")
+        self.assertDeny("git apply r.diff", "G-PROT")
+        self.patch_file("d.diff", "studio/local/videos/w/notes.md", delete=True)
+        self.assertDeny("git apply d.diff")
+
+    def test_checkout_restore_writes_are_judged(self):
+        """(confirmation) `git checkout -p` / `git restore --source` on protected paths are already writes."""
+        self.assertDeny("git checkout -p -- studio/videos/v/work/state.json")
+        self.assertDeny("git restore --source HEAD~1 -- .claude/studio/charter.md")

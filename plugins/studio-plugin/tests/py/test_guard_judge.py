@@ -32,15 +32,16 @@ class JudgeCase(GuardCase):
             os.makedirs(os.path.join(self.repo, d), exist_ok=True)
         for f, text in (("studio/videos/v/work/state.json", "{}"), ("studio/videos/v/script.md", "# s\n"),
                         ("src/a.ts", "x\n"), ("src/x.ts", "x\n"), ("a.txt", "a\n"), ("studio/CREDITS.yaml", "[]\n"),
-                        (".claude/studio/scripts/state.py", "#\n"),
-                        # the copy's version must be the guard's (D-M0-3, M0d-2)
-                        (".claude/studio/scripts/stdo/__init__.py", 'SCRIPTS_VERSION = "%s"\n' % SCRIPTS_VERSION),
-                        (".claude/studio/scripts/lock.py", "#\n"), (".claude/studio/scripts/check_commit.py", "#\n"),
+
                         ("scripts/x.py", "print(1)\n"), ("scripts/release.sh", "echo release\n"),
                         ("studio/cast/a/character/character.yaml", "a: 1\n")):
             p = os.path.join(self.repo, f)
             with open(p, "w") as fh:
                 fh.write(text)
+        # the repository copy of Studio's scripts: the plugin's own files (the guard checks the copy's version and
+        # manifest on every Studio command — D-M0-3, M0f)
+        from commit_base import copy_scripts
+        copy_scripts(self.repo)
         helpers.git(self.repo, "add", "-A")
         helpers.git(self.repo, "commit", "-q", "-m", "fixture files")
         self.snap_with = self.make_snapshot()

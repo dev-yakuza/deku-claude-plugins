@@ -219,7 +219,7 @@ class StageAndCommit(CommitCase):
 
     def test_planned_kinds_refuse(self):
         self.ready()
-        for kind, m in (("video", "M1"), ("actor", "M3b"), ("harness", "M0f")):
+        for kind, m in (("video", "M1"), ("actor", "M3b")):  # harness is real since M0f
             out = self.cc("--stage", kind, "v1")
             self.assertEqual(out.returncode, 3, out.stderr)
             self.assertIn(m, out.stderr)

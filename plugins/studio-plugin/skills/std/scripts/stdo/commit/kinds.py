@@ -1,5 +1,5 @@
 """Commit kinds (m0e-plan §7.2): each kind gives the paths it stages (its allow-list) and its checks.
-M0e has none of the real kinds yet — `harness` (M0f), `video` (M1), `actor` (M3b) refuse with exit 3.
+`harness` (M0f) is real; `video` (M1) and `actor` (M3b) refuse with exit 3.
 
 A kind: `name`, `needs_overlay` (the internal overlay must be present: video and actor yes, harness no —
 it holds nothing internal), `collect(ctx, target) -> Collected`, `allowed(ctx, path) -> bool`."""
@@ -8,7 +8,7 @@ import os
 
 from . import approvals
 
-PLANNED = {"harness": "M0f", "video": "M1", "actor": "M3b"}
+PLANNED = {"video": "M1", "actor": "M3b"}
 TEST_ENV = "STUDIO_TEST_COMMIT_KIND"  # test only (the guard refuses STUDIO_TEST_* in agent commands)
 
 
@@ -58,6 +58,8 @@ class FolderKind(object):
 
 def registry(env, extra=None):
     kinds = {name: None for name in PLANNED}
+    from .harness import HarnessKind  # (M0f) imported here: harness.py uses Collected from this module
+    kinds["harness"] = HarnessKind()
     if env.get(TEST_ENV):
         kinds["test"] = FolderKind(with_gitignore=env.get(TEST_ENV) == "gitignore")
     if extra:

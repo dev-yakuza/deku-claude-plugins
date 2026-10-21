@@ -85,6 +85,14 @@ class GuardApproval(JudgeCase):
         self.assertAllow(APPROVE.replace("--expect ", "--expect="))
         self.assertEqual(self.pending()["argv_sha"], p["argv_sha"])
 
+    def test_current_call_written_after_pretooluse(self):
+        """M0f U1: interactive sessions write the current call's line after the tool ran — still allowed."""
+        self.turn()
+        self.t.lines.pop()
+        self.t.write(self.tpath)
+        ctx = self.assertAllow(APPROVE)
+        self.assertEqual(self.pending()["tool_use_id"], "toolu_ask1")
+
     def test_no_or_wrong_evidence(self):
         d = self.assertRule(APPROVE, "G-EVIDENCE")
         self.assertIn("승인 %s" % H, d.message())

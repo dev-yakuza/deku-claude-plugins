@@ -43,13 +43,25 @@ class Staged(object):
         if spaths.GITIGNORE in names:
             old = ctx.git.show("%s:%s" % (ctx.head, spaths.GITIGNORE)) if ctx.head else None
             self.gi_kind = spaths.gitignore_kind(old, ctx.git.show(":" + spaths.GITIGNORE))
+        self.husky_kind = "none"
+        if spaths.HUSKY in names:
+            old = ctx.git.show("%s:%s" % (ctx.head, spaths.HUSKY)) if ctx.head else None
+            self.husky_kind = spaths.husky_kind(old, ctx.git.show(":" + spaths.HUSKY))
         self.studio, self.other = [], []
         # removing a local/ file from the index (a leak being cleaned up) is neither a Studio nor another change
         cleanup = set(p for st, p in self.all if st == "D" and ctx.cls.is_local(p))
         for p in names:
             if p in cleanup:
                 continue
-            if p == spaths.GITIGNORE:
+            if p == spaths.HUSKY:
+                if self.husky_kind in ("studio", "broken"):
+                    self.studio.append(p)
+                elif self.husky_kind == "other":
+                    self.other.append(p)
+                elif self.husky_kind == "mixed":
+                    self.studio.append(p)
+                    self.other.append(p)
+            elif p == spaths.GITIGNORE:
                 if self.gi_kind in ("studio", "broken"):
                     self.studio.append(p)
                 elif self.gi_kind == "other":
@@ -182,7 +194,10 @@ def kind_problems(ctx, kind_name, studio_paths):
         return [Problem(3, "commit kind \"%s\" arrives in %s — Studio cannot make this commit yet"
                            % (kind_name, approvals_planned(kind_name)))]
     bad = [p for p in studio_paths if not kind.allowed(ctx, p)]
-    return [Problem(1, "%s is outside the allow-list of a %s commit" % (p, kind_name), p) for p in bad]
+    out = [Problem(1, "%s is outside the allow-list of a %s commit" % (p, kind_name), p) for p in bad]
+    if not bad and studio_paths and hasattr(kind, "staged_problems"):
+        out += kind.staged_problems(ctx, studio_paths)  # checks on the index (M0f harness)
+    return out
 
 
 def approvals_planned(name):
@@ -237,12 +252,18 @@ def approval_problem(ctx, ok, sid, tree):
     if mode == "human":
         if ap.get("answer") != label:
             return Problem(1, NOT_SEEN % label)
+        if ok.get("summary") and ap.get("summary") != ok.get("summary"):
+            return Problem(1, "the guard did not see the commit's summary line in the person's question — ask again "
+                              "with the line --stage printed")
         return None
     if mode == "proxy":
         kind = ctx.kinds.get(ok.get("kind"))
         if kind is None or not getattr(kind, "proxy_commit", False):
             return Problem(4, "this commit was approved in the sandbox proxy mode, which commit kind %s does not "
                               "accept — a person must approve it" % ok.get("kind"))
+        if ok.get("protected_changes"):
+            return Problem(4, "this commit changes protected settings (%s) — only a person approves that, not the "
+                              "proxy mode" % ", ".join(c.get("key", "?") for c in ok["protected_changes"]))
         return None
     return Problem(1, NOT_SEEN % label)
 
@@ -263,6 +284,10 @@ def staged_check(ctx):
         problems.append(Problem(2, ctx.cfg_error))
         return code_of(problems), problems
     if not ctx.harness:
+        if ctx.head and ctx.git.show("%s:%s" % (ctx.head, spaths.CONFIG)) is not None:
+            # HEAD has the harness and this commit removes its config: not a Studio commit (m0f-plan §2.5)
+            problems.append(Problem(1, "this commit removes Studio's config.json — taking Studio out of the "
+                                       "repository is the person's removal procedure (in a terminal)", spaths.CONFIG))
         # a branch without the harness: only the local check applies (00-plan §3.4)
         return code_of(problems), problems
     g = guard_ran_problem(ctx)

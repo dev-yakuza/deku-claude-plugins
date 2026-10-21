@@ -6,7 +6,7 @@ import os
 import shutil
 
 from .. import ignore
-from . import checks, okfile, spaths
+from . import checks, okfile, spaths, summary
 from .approvals import Problem
 
 
@@ -70,7 +70,12 @@ def run(ctx, kind_name, target):
         shutil.copy2(index, backup)
     try:
         if col.paths:
-            ctx.git.run("add", "-A", "--", *[":(literal)" + p for p in col.paths])
+            idx = set(x for x in ctx.git.text("ls-files", "-z", "--", *[":(literal)" + p for p in col.paths]).split("\0")
+                      if x)
+            # a deletion already staged is neither on disk nor in the index: nothing to add for it
+            todo = [p for p in col.paths if p in idx or os.path.lexists(os.path.join(ctx.top, p))]
+            if todo:
+                ctx.git.run("add", "-A", "--", *[":(literal)" + p for p in todo])
         if col.gitignore:
             _stage_gitignore_block(ctx)
         ctx.git.index_changed()
@@ -95,9 +100,11 @@ def run(ctx, kind_name, target):
             raise _Undo(bad)
         tree = ctx.git.write_tree()
         claude, sid = checks.session(ctx.env)
+        line, prot, _agents = summary.compute(ctx, sorted(after.studio), tree)
         data = okfile.write(ctx.top, {
             "tree": tree, "head": ctx.head, "kind": kind_name, "target": target, "studio_root": ctx.roots[0],
             "paths": sorted(after.studio), "states": col.states, "session_id": sid if claude else None,
+            "summary": line, "protected_changes": prot,
             "in_progress": after.progress, "scripts_version": checks.scripts_version()})
     except _Undo as u:
         _restore(index, backup, had_index)

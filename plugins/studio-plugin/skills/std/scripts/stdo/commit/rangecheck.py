@@ -38,6 +38,11 @@ def check(ctx, spec):
         if not ctx.git.ok("rev-parse", "-q", "--verify", rev + "^{commit}"):
             return 2, [Problem(2, "unknown revision %s" % rev)], [], []
     lines = ctx.git.text("rev-list", "--reverse", "--parents", "%s..%s" % (a, b or "HEAD")).split("\n")
+    return check_lines(ctx, lines)
+
+
+def check_lines(ctx, lines):
+    """The checks of `check` over `rev-list --parents` lines (shared with the guard's push check)."""
     problems, warnings, commits = [], [], []
     for line in lines:
         if not line.strip():

@@ -321,7 +321,40 @@ def _names(raw):
     return [p for p in raw.split("\0") if p]
 
 
-def evaluate(worktree, env, extra_env, opts, budget=8.0):
+SCRIPTS_REL = ".claude/studio/scripts/"
+
+
+def scripts_vs_plugin(git, plugin_scripts):
+    """H10 on the guard's side (m0f-plan §2.3): the committed copy of Studio's scripts is byte-identical to the plugin's
+    own files and complete — catches a copy edited together with its manifest."""
+    from .. import manifest
+    want = manifest.files(plugin_scripts) + [manifest.NAME]
+    raw = git.text("ls-files", "-s", "-z", "--", ":(literal)" + SCRIPTS_REL.rstrip("/"))
+    have = set()
+    for rec in raw.split("\0"):
+        if rec:
+            have.add(rec.split("\t", 1)[1][len(SCRIPTS_REL):])
+    out = []
+    if have != set(want):
+        diff = sorted(have ^ set(want))
+        out.append("the committed copy of Studio's scripts is not the plugin's file set (%s)" % ", ".join(diff[:3]))
+        return out
+    git.prefetch([":" + SCRIPTS_REL + r for r in want])
+    bad = []
+    for r in want:
+        try:
+            with open(os.path.join(plugin_scripts, r), "rb") as f:
+                mine = f.read()
+        except OSError:
+            mine = None
+        if git.show(":" + SCRIPTS_REL + r) != mine:
+            bad.append(r)
+    if bad:
+        out.append("the committed copy of Studio's scripts differs from the plugin's (%s)" % ", ".join(bad[:3]))
+    return out
+
+
+def evaluate(worktree, env, extra_env, opts, budget=8.0, plugin_scripts=None):
     """Outcome of `git commit` with options `opts` in `worktree` (a harness repository)."""
     from ..commit import checks, gitx, kinds, okfile
     from . import gitprobe
@@ -382,6 +415,8 @@ def evaluate(worktree, env, extra_env, opts, budget=8.0):
             problems.append("commit-ok.json was prepared for a different situation")
         if ok.get("label") != okfile.LABEL % tree[:12]:
             problems.append("commit-ok.json's label is not \"%s\"" % (okfile.LABEL % tree[:12]))
+        if not problems and any(p.startswith(SCRIPTS_REL) for p in out.studio):
+            problems += scripts_vs_plugin(git, plugin_scripts)
         if problems:
             out.deny = ("G-COMMIT", "%s — stage again (check_commit.py --stage) and ask the person again." %
                         "; ".join(problems))

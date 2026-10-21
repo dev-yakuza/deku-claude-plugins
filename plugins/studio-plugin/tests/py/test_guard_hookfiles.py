@@ -25,8 +25,7 @@ class HookFiles(JudgeCase):
         self.lh = os.path.join(self.repo, "lefthook-local.yml")
         with open(self.lh, "w") as f:
             f.write(T.lefthook_block())
-        with open(os.path.join(self.repo, ".claude", "studio", "scripts", "hooks.py"), "w") as f:
-            f.write("#\n")
+        # the repository copy (with hooks.py) comes from JudgeCase (the plugin's own files, M0f)
 
     def test_bash_writes_and_deletes_are_denied(self):
         for cmd in ("echo x > .git/hooks/pre-commit", "rm .git/hooks/pre-commit", "sed -i '' s/a/b/ .git/hooks/pre-commit",
@@ -69,12 +68,15 @@ class HookFiles(JudgeCase):
 
     def test_no_early_exit_before_the_block(self):
         """Review MINOR 3."""
-        for line in ("exit 0", "  return 0", "exec true"):
+        for line in ("exit 0", "return 0", "exec true"):
             d = self.decide("Edit", {"file_path": self.husky, "old_string": "npm test", "new_string": "npm test\n" + line})
             self.assertIsNotNone(d, line)
             self.assertEqual(d.rule, "G-PROT")
         self.assertIsNone(self.decide("Edit", {"file_path": self.husky, "old_string": "npm test",
                                                "new_string": "npm test || exit 1"}))
+        # an indented exit inside an if is not a stop before the block (M0f review 2 MINOR-3: column 0 only)
+        self.assertIsNone(self.decide("Edit", {"file_path": self.husky, "old_string": "npm test",
+                                               "new_string": "if [ -n \"$CI\" ]; then\n  exit 0\nfi\nnpm test"}))
         # after the block it does not stop Studio's check
         self.assertIsNone(self.decide("Write", {"file_path": self.husky,
                                                 "content": "npm test\n" + T.husky_block() + "exit 0\n"}))

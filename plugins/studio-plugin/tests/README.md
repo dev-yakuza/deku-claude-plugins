@@ -44,3 +44,9 @@ STUDIO_TEST_S2V=/abs/path/to/script2video \
 **Scripts version (M0d-2, D-M0-3)**: the guard refuses Studio commands in a repository whose copy of
 `.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 7). Until `/std update` exists (M1), copy the plugin's
 `skills/std/scripts/` (without `guard.py` and `stdo/guard/`) into an older sandbox repository again by hand.
+
+**M0f**: `tests/py/drivers/make_harness.py <dir>` builds a synthetic harness repository (templates, agents, a copy of
+the scripts, ignore blocks, the hook, a first commit made outside any session) — the end-to-end tests and the sandbox
+real-session check use the same function. After changing anything under `skills/std/scripts/`, run
+`python3 tests/tools/manifest.py` (structure_test.sh checks `MANIFEST.sha256`). From 0.0.9 (`SCRIPTS_VERSION` 8)
+older sandboxes are refused by the guard: build them again with `make_harness.py`.
