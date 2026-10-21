@@ -160,7 +160,7 @@ for d in ("commit", "hooks"):
     for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
         check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
               "%s (copied into repositories) does not import the guard (plugin only)" % os.path.relpath(p, skill))
-check(sv and sv.group(1) == "6", "SCRIPTS_VERSION is 6 (M0e added repository scripts)")
+check(sv and sv.group(1) == "7", "SCRIPTS_VERSION is 7 (M0d-2 changed repository scripts: labels, commit approval)")
 
 if fails:
     print("structure: %d failure(s)" % len(fails))

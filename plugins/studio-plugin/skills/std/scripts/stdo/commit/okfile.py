@@ -48,3 +48,20 @@ def write(top, data):
         os.fsync(f.fileno())
     os.replace(tmp, p)
     return data
+
+
+def set_approval(top, approval):
+    """The guard records the answer it checked (m0d2-plan §5.5-6, M0e Q12): every other field is kept as read."""
+    data, why = read(top)
+    if data is None:
+        raise OSError("commit-ok.json is %s" % why)
+    data["approval"] = approval
+    p = path(top)
+    tmp = "%s.tmp.%d" % (p, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({k: data.get(k) for k in FIELDS}, f, ensure_ascii=False, indent=2, sort_keys=True)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, p)
+    return data

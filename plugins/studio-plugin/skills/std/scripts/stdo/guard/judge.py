@@ -10,7 +10,7 @@ import re
 
 from .. import paths, s2vcall
 from ..state import commands as state_commands
-from . import gitprobe, hookfiles, limits, messages, protect, ranlog, recog
+from . import commitrule, gitprobe, hookfiles, limits, messages, protect, ranlog, recog
 from . import scan as scan_command
 from . import load_snapshot
 from .messages import Deny
@@ -55,6 +55,18 @@ class Context(object):
         self.out_items = [(self._real(p), k) for p, k in items]
         self.touched = []  # RepoInfo of Studio repositories this call involves (for the guard-ran record)
         self.denies = []
+        # M0d-2: an allow needs evidence (approval commands, Studio commits) and the call being that command alone
+        self.allow = None  # the reason, when the guard answers allow
+        self.candidates = []  # (cmd, kind "state" | "commit" | "s2v", reason)
+        self.effects = []  # (rule, function) run only when nothing is denied
+        self.warnings = []  # shown to the person and the model when there is no decision
+        self.snap = None
+        self.scan = None
+        self.approvals = 0
+        cfg = self.env.get("CLAUDE_CONFIG_DIR") or os.path.join(self.env.get("HOME") or os.path.expanduser("~"),
+                                                                 ".claude")
+        projects = os.path.join(cfg, "projects")  # transcripts: the evidence of a person's answers (M0d-2)
+        self.out_items.append((self._real(projects), "transcripts"))
         self.current = None  # the command being judged (its alias sources go into messages)
 
     def _real(self, p):
@@ -89,6 +101,17 @@ def out_hit(ctx, real, op):
     if real is None:
         return None
     for item, kind in ctx.out_items:
+        if kind == "transcripts":
+            if op == "read":
+                continue
+            if _inside(real, item):
+                parts = os.path.relpath(real, item).split(os.sep)
+                if (len(parts) == 2 and parts[1].endswith(".jsonl")) or (len(parts) >= 3 and parts[2] == "subagents") \
+                        or (op == "delete" and len(parts) == 1 and parts[0] not in (".", "")):
+                    return item
+            elif op == "delete" and _inside(item, real):
+                return item
+            continue
         if kind == "prefix":
             hit = real.startswith(item) or _inside(real, item)
             parent_hit = op == "delete" and _inside(item, real)
@@ -452,6 +475,12 @@ def hook_file_denied(ctx, cmd, ri, real, value, op):
     h = hookfiles.hit(ri, real, "delete" if op.startswith("delete") else "write")
     if not h:
         return False
+    if h[1] == "gitconfig":
+        ctx.deny("G-HOOKOFF", "%s %s %s (git's settings of a Studio repository: hooks and aliases live there) — "
+                              "change settings with git config; %s" % (cmd.prog or "the command", "deletes" if
+                                                                      op.startswith("delete") else "writes", value,
+                                                                      commitrule.HOOKOFF_TAIL))
+        return True
     ctx.deny("G-PROT", "%s %s %s, %s." % (cmd.prog or "the command", "deletes" if op.startswith("delete") else "writes",
                                           value, HOOK_WHY))
     return True
@@ -894,7 +923,7 @@ def check_approval(ctx, cmd):
             return
         sub = args[0].value if args else None
         if sub is None or state_commands.needs_evidence(sub):
-            approval_decision(ctx, cmd, "state.py %s" % (sub or ""))
+            state_approval(ctx, cmd, [w.value for w in args])
         return
     if cmd.s2v is not None:
         vals = [w.value for w in cmd.s2v.args]
@@ -915,14 +944,54 @@ def check_approval(ctx, cmd):
                 if x == "--candidates=1":
                     appr = True
         if appr:
-            approval_decision(ctx, cmd, "s2v " + " ".join(words))
+            s2v_approval(ctx, cmd, words)
 
 
-def approval_decision(ctx, cmd, what):
-    """M0d-1b: no evidence check yet (M0d-2 replaces this with the transcript evidence)."""
-    ctx.deny("G-APPROVAL", "%s records a person's decision; the guard cannot check approval evidence yet (M0d-2). "
-                           "Ask the user with AskUserQuestion; do not run it another way." % what,
-             messages.alias_sources(cmd))
+def _run_repo(ctx, cmd):
+    run = cmd.run_cwds or cmd.cwds or []
+    if len(run) != 1 or not ctx.fs.exists(run[0]):
+        return None
+    return ctx.repos.info(ctx.where.git_repo(run[0]))
+
+
+def _count_approval(ctx, cmd, what):
+    ctx.approvals += 1
+    if ctx.approvals > 1:
+        ctx.deny("G-APPROVAL", "%s: one approval command per call (the evidence slot holds one)." % what)
+        return False
+    return True
+
+
+def state_approval(ctx, cmd, argv):
+    """M0d-2: a state.py subcommand that records a person's decision (m0d2-plan §3)."""
+    from . import approve
+    sub = argv[0] if argv else ""
+    if not _count_approval(ctx, cmd, "state.py %s" % sub):
+        return
+    ri = _run_repo(ctx, cmd)
+    if ri is None or not ri.harness:
+        ctx.deny("G-APPROVAL", "state.py %s runs outside a Studio repository the guard can tell." % sub)
+        return
+    v = approve.state_py(ctx.hook, ctx.env, ri, argv)
+    if v.rule:
+        ctx.deny(v.rule, v.text, messages.alias_sources(cmd))
+        return
+    pend = v.pending
+    ctx.effects.append(("G-EVIDENCE", lambda: approve.write_pending(ri, pend)))
+    ctx.candidates.append((cmd, "state", v.reason))
+
+
+def s2v_approval(ctx, cmd, words):
+    from . import approve
+    what = "s2v " + " ".join(words)
+    if not _count_approval(ctx, cmd, what):
+        return
+    ri = _run_repo(ctx, cmd)
+    v = approve.s2v(ctx.hook, ctx.env, ri if ri is not None and ri.studio else None, words)
+    if v.rule:
+        ctx.deny(v.rule, v.text, messages.alias_sources(cmd))
+        return
+    ctx.candidates.append((cmd, "s2v", v.reason))
 
 
 # ---- tools ----
@@ -934,6 +1003,7 @@ def decide_bash(ctx, command):
     except Exception:  # noqa: BLE001 — an unreadable snapshot is the None mode
         snap, notes = None, ["snapshot-unreadable:load"]
     budget = limits.Budget()
+    ctx.snap = snap
     sc = scan_command(command, ctx.cwd, ctx.env, snapshot=snap, snapshot_notes=notes, terms=None, fs=ctx.fs,
                       budget=budget)
     cwd_repo = ctx.repos.info(ctx.where.git_repo(ctx.cwd)) if ctx.fs.exists(ctx.cwd) else None
@@ -998,10 +1068,186 @@ def decide_bash(ctx, command):
         check_opaque(ctx, o, by_id.get(o.cmd), terms, infos, src_notes)
     for c in sc.commands:
         ctx.current = c
+        check_version(ctx, c)
         check_env(ctx, c)
         check_approval(ctx, c)
+        check_git_rules(ctx, c, infos)
+        check_gh(ctx, c, infos)
     ctx.current = None
     return sc, infos
+
+
+# ---- M0d-2: versions, commits, pushes, GitHub API (m0d2-plan §5, §6, §8) ----
+
+def check_version(ctx, cmd):
+    """D-M0-3: Studio commands stop when the repository's scripts are another version than the guard's."""
+    from . import version
+    real = None
+    for name in ("state.py", "check_commit.py", "hooks.py", "lock.py"):
+        real = studio_script(ctx, cmd, name)
+        if real is not None:
+            break
+    if real is None:
+        return
+    if os.path.dirname(real) == PLUGIN_SCRIPTS:
+        ri = _run_repo(ctx, cmd)
+        repo_copy = False
+    else:
+        ri = ctx.repos.info(ctx.where.git_repo(os.path.dirname(real)))
+        repo_copy = True
+    if ri is None or not ri.harness:
+        return
+    why = version.problem(ri.worktree, repo_copy)
+    if why:
+        ctx.deny("G-VERSION", "%s: %s." % (os.path.basename(real), why))
+
+
+def _commit_like(g):
+    if g.sub == "commit":
+        return True
+    vals = [w.value for w in g.args]
+    return g.sub in commitrule.CONTINUE_SUBS and "--continue" in vals
+
+
+def check_git_rules(ctx, cmd, infos):
+    g = cmd.git
+    if g is None or g.sub is None:
+        return
+    sub = g.sub
+    is_commit = _commit_like(g)
+    cfg = commitrule.hook_config(cmd)
+    if not (is_commit or cfg or sub in ("config", "push") or commitrule.plumbing(sub, g.args)):
+        return
+    target = git_target(ctx, cmd)
+    if isinstance(target, str):
+        if infos and (is_commit or sub == "config"):
+            ctx.deny("G-HOOKOFF" if "GIT_CONFIG" in target else "G-COMMIT",
+                     "git %s cannot be checked (%s) in a Studio repository; %s" % (sub, target, commitrule.HOOKOFF_TAIL))
+        return
+    if target is None:
+        return
+    ri, run_cwd, pre, penv = target
+    if not ri.studio:
+        return
+    ctx.touch(ri)
+    if cfg:
+        ctx.deny("G-HOOKOFF", "git %s %s changes hooks or aliases in a Studio repository; %s"
+                 % (cmd.git.sub, cfg, commitrule.HOOKOFF_TAIL))
+        return
+    if sub == "config":
+        key = commitrule.config_write(g.args)
+        if key:
+            ctx.deny("G-HOOKOFF", "git config %s changes how commits are checked in a Studio repository (hooks, "
+                                  "aliases or included config files). If the person wants this setting, they run the "
+                                  "command themselves in a terminal; %s" % (key if key != "*" else "(any key)",
+                                                                           commitrule.HOOKOFF_TAIL))
+        return
+    why = commitrule.plumbing(sub, g.args)
+    if why:
+        ctx.deny("G-PLUMB", "%s — in a Studio repository commits and the index change only through git commit and "
+                            "check_commit.py --stage. If this is needed, ask the person to run it in a terminal." % why)
+        return
+    if sub == "push":
+        check_push(ctx, cmd, ri)
+        return
+    # commits
+    env_names = commitrule.hookoff_env(cmd)
+    if env_names:
+        ctx.deny("G-HOOKOFF", "git %s with %s in a Studio repository turns Studio's pre-commit check off or points git "
+                              "elsewhere; %s" % (sub, ", ".join(env_names), commitrule.HOOKOFF_TAIL))
+        return
+    if not ri.harness:
+        return
+    opts = commitrule.parse_commit(g.args) if sub == "commit" else commitrule.parse_commit([])
+    if opts["dry_run"]:
+        return
+    extra = {}
+    if pre:
+        gi = pre.index("--git-dir") + 1 if "--git-dir" in pre else None
+        wi = pre.index("--work-tree") + 1 if "--work-tree" in pre else None
+        if gi:
+            extra["GIT_DIR"] = pre[gi]
+        if wi:
+            extra["GIT_WORK_TREE"] = pre[wi]
+    out = commitrule.evaluate(ri.worktree, ctx.env, extra, opts)
+    if out.deny:
+        ctx.deny(*out.deny)
+        return
+    if not out.studio:
+        return
+    commit_evidence(ctx, cmd, ri, out)
+
+
+def commit_evidence(ctx, cmd, ri, out):
+    from . import approve, proxy, transcript
+    from ..commit import okfile
+    hook = ctx.hook
+    if approve.in_subagent(hook):
+        ctx.deny("G-MAIN", "a Studio commit runs only in the main session.")
+        return
+    sid = hook.get("session_id")
+    ok = out.ok
+    if ok.get("session_id") != sid:
+        ctx.deny("G-COMMIT", "commit-ok.json was prepared in another session — stage again (check_commit.py "
+                             "--stage) and ask the person again.")
+        return
+    label = ok.get("label")
+    approval = {"tree": out.tree, "head": out.head, "session_id": sid, "answer": label,
+                "at": transcript_now()}
+    if proxy.active(ctx.env, ri.worktree):
+        approval.update({"mode": "proxy", "tool_use_id": hook.get("tool_use_id"), "question_index": 0})
+        reason = "proxy commit %s" % label
+    else:
+        try:
+            ans = transcript.find(hook, ctx.env)
+            idx, _text, _note = transcript.choose(ans, label, out.tree[:12])
+        except transcript.NoEvidence as e:
+            ctx.deny("G-EVIDENCE", approve.evidence_text("this Studio commit", label, e))
+            return
+        approval.update({"mode": "human", "tool_use_id": ans.tool_use_id, "question_index": idx})
+        reason = "answer %s#%d (%s)" % (ans.tool_use_id, idx, label)
+    top = out.top
+
+    def effect():
+        okfile.set_approval(top, approval)
+        if not ranlog.record(ri.worktree, sid, may_create=True):
+            raise OSError("could not record that the guard ran in this session")
+    ctx.effects.append(("G-COMMIT", effect))
+    ctx.candidates.append((cmd, "commit", reason))
+
+
+def transcript_now():
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def check_push(ctx, cmd, ri):
+    from . import push, web
+    if not ri.harness:
+        return
+    st, data = web.overlay(ri.worktree, ri.config, ctx.env)
+    ids = web.internal_items(data)[2] if st == "ok" else set()
+    deny, warns = push.check(ri.worktree, ctx.env, cmd.git.args, ids)
+    if deny:
+        ctx.deny("G-PUSH", deny)
+    for w in warns:
+        ctx.warnings.append("Studio (git push): %s." % w)
+
+
+def check_gh(ctx, cmd, infos):
+    if cmd.prog != "gh" or not infos:
+        return
+    argv = [w.value for w in cmd.words[1:]]
+    if not argv or argv[0] != "api":
+        return
+    sps = set([".claude/studio", ".claude/agents/std-"])
+    for ri in infos:
+        if ri.studio:
+            sps.add(ri.studio_root)
+    why = commitrule.gh_api(argv, sorted(sps))
+    if why:
+        ctx.deny("G-PLUMB", "%s — Studio files reach a repository only through Studio's commit checks. Ask the person."
+                 % why)
 
 
 def check_out_of_repo(ctx, c):
@@ -1282,6 +1528,8 @@ def check_opaque(ctx, o, cmd, terms, infos, src_notes):
         if tpl in protect.READ_ALLOW and tpl not in ("find", "bfs"):
             return  # judged as the template command
     if o.kind == "script":
+        if cmd is not None and studio_script(ctx, cmd) is not None:
+            return  # Studio's own scripts (P-WIRE protected) are not opaque, even in a temporary sandbox (m0d1b Q8)
         cls = o.path_class or []
         work = False
         if o.path:
@@ -1330,6 +1578,10 @@ def judge_file_path(ctx, path, tool, ti, mcp=False):
         return
     ri = ctx.repos.info(r.repo) if r.repo is not None else None
     h = hookfiles.hit(ri, r.real, "write")
+    if h and h[1] == "gitconfig":
+        ctx.deny("G-HOOKOFF", "%s %s (git's settings of a Studio repository) — change settings with git config; %s"
+                 % ("writing" if not mcp else "this tool touches", path, commitrule.HOOKOFF_TAIL))
+        return
     if h:
         if h[1] != "shared" or mcp or tool not in ("Write", "Edit", "MultiEdit"):
             ctx.deny("G-PROT", "%s %s, %s." % ("writing" if not mcp else "this tool touches", path, HOOK_WHY))
@@ -1476,11 +1728,54 @@ def _decide(ctx, hook):
             decide_bash(ctx, cmd)
     elif tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         decide_file(ctx, tool, ti)
+    elif tool in ("WebFetch", "WebSearch"):
+        decide_web(ctx, tool, ti)
     elif tool.startswith("mcp__"):
         decide_mcp(ctx, ti)
     if ctx.denies:
         return ctx.denies[0], ctx
+    finish(ctx)
+    if ctx.denies:
+        return ctx.denies[0], ctx
     return None, ctx
+
+
+def finish(ctx):
+    """Nothing is denied: run the evidence writes, then decide whether to answer allow (m0d2-plan §4.2)."""
+    for rule, fn in ctx.effects:
+        try:
+            fn()
+        except Exception as e:  # noqa: BLE001 — a failed evidence write denies (closed side)
+            ctx.deny(rule, "could not record the checked answer (%s: %s) — ask the person again." % (type(e).__name__, e))
+            return
+    if len(ctx.candidates) == 1:
+        from . import allowrule
+        cmd, kind, reason = ctx.candidates[0]
+        if allowrule.sole(ctx, ctx.scan, cmd, kind):
+            allow_for(ctx, reason)
+
+
+def allow_for(ctx, reason):
+    """The only place the guard decides to allow (structure-tested)."""
+    ctx.allow = "Studio guard: " + reason
+
+
+def decide_web(ctx, tool, ti):
+    """INV5 (m0d2-plan §9) in the hook cwd's repository."""
+    from . import web
+    if not ctx.fs.exists(ctx.cwd):
+        return
+    ri = ctx.repos.info(ctx.where.git_repo(ctx.cwd))
+    if ri is None or not ri.harness:
+        return
+    ctx.touch(ri)
+    v = web.judge(tool, ti, ctx.hook, ri, ctx.env)
+    if v is None:
+        return
+    if v[0] == "deny":
+        ctx.deny("G-WEB", v[1])
+    else:
+        ctx.warnings.append(v[1])
 
 
 def record_run(ctx):

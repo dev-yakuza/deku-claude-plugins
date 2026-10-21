@@ -40,3 +40,7 @@ STUDIO_TEST_S2V=/abs/path/to/script2video \
   (`test`) for `check_commit.py --stage`; the guard refuses `STUDIO_TEST_*` in agent commands.
 - **Perf lines**: `test_commit_perf.py` prints the runner's cost on a non-Studio commit and
   `check_commit --staged` on a Studio commit (targets 50 ms / 300 ms; fails only above 3×).
+
+**Scripts version (M0d-2, D-M0-3)**: the guard refuses Studio commands in a repository whose copy of
+`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 7). Until `/std update` exists (M1), copy the plugin's
+`skills/std/scripts/` (without `guard.py` and `stdo/guard/`) into an older sandbox repository again by hand.

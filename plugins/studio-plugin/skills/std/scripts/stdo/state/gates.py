@@ -8,7 +8,7 @@ import json
 import os
 import sys
 
-from . import backup, commands, evidence, schema, store
+from . import backup, commands, evidence, labels, schema, store
 from .collect import CollectError
 from .hashes import hash_of
 from .router import decide, precheck
@@ -236,7 +236,7 @@ def approve(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
         for k, r in records(s, ev):
             store.apply_approval(s, lang, gate, r, k)
 
-    _with_evidence(repo, vdir, state["video"], argv, "approve", lambda s: "승인 %s" % expect, check_state,
+    _with_evidence(repo, vdir, state["video"], argv, "approve", lambda s: labels.approve(expect), check_state,
                    change, events, proxy, hooks)
     _out("approved %s %s" % (gate, lang))
     return C.OK
@@ -318,7 +318,7 @@ def _source_diff(repo, vdir, state, lang, ctx, o, providers, hooks, argv, reject
         if not reject:
             s["source"]["approved_hash"] = new
 
-    label = ("거부 %s" if reject else "승인 %s") % expect
+    label = (labels.reject if reject else labels.approve)(expect)
     _with_evidence(repo, vdir, state["video"], argv, "reject-source-diff" if reject else "approve",
                    lambda s: label, check_state, change, events, bool(o.get("--proxy")), hooks)
     _out("source diff %s" % ("rejected" if reject else "approved"))
@@ -362,14 +362,14 @@ def repin(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
                     _refuse("s2v cannot compute hash_version %s any more (%s): approve again" % (hv, e), C.WAIT)
 
     def label(s):
-        return "재고정 %s" % hash_of({"video": s["video"], "from_id": s["s2v"].get("id"), "to_id": cur["s2v_version"]})[:12]
+        return labels.repin(hash_of({"video": s["video"], "from_id": s["s2v"].get("id"), "to_id": cur["s2v_version"]})[:12])
 
     def check_state(s):
         _one_language(s)
         d = decide(s, lang, cur)
         if not (d.stop and d.stop.get("stop") == "s2v-version"):
             _refuse("the s2v version did not change: nothing to re-pin", C.REFUSED)
-        if label(s) != "재고정 %s" % expect:
+        if label(s) != labels.repin(expect):
             _refuse("--expect %s does not match this re-pin" % expect, C.FAIL)
         olds_of(s)
 
@@ -428,14 +428,14 @@ def exclude_output(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
         return sorted(p for p, outs in s["brief"]["platforms"].items() if outs == [out])
 
     def label(s):
-        return "제외 %s" % hash_of({"video": s["video"], "lang": lang, "output": out, "platforms": dropped(s)})[:12]
+        return labels.exclude(hash_of({"video": s["video"], "lang": lang, "output": out, "platforms": dropped(s)})[:12])
 
     def check_state(s):
         if out not in s["brief"]["outputs"]:
             _refuse("%s is not an output of %s" % (out, s["video"]), C.USAGE)
         if len(s["brief"]["outputs"]) == 1:
             _refuse("%s is the last output: to stop the video, abandon it" % out, C.USAGE)
-        if label(s) != "제외 %s" % expect:
+        if label(s) != labels.exclude(expect):
             _refuse("--expect %s does not match this exclusion" % expect, C.FAIL)
 
     def removed(s):
@@ -527,7 +527,7 @@ def unlock(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
         L["held"] = None
 
     _with_evidence(repo, vdir, state["video"], argv, "unlock",
-                   lambda s: "해제 %s %s %s" % (s["video"], lang, s["langs"][lang]["held"]["state"]),
+                   lambda s: labels.unlock(s["video"], lang, s["langs"][lang]["held"]["state"]),
                    check_state, change, events,
                    bool(o.get("--proxy")), hooks)
     _out("%s unlocked" % lang)

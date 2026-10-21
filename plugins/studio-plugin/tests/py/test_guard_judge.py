@@ -7,7 +7,7 @@ import shutil
 
 import helpers
 from guard_base import DEFAULT_ALIASES, GuardCase, snapshot_text
-from stdo import paths
+from stdo import SCRIPTS_VERSION, paths
 from stdo.guard import judge
 from stdo.guard import snapshot as snapmod
 
@@ -28,11 +28,13 @@ class JudgeCase(GuardCase):
         os.symlink(git, os.path.join(self.bin, "git"))
         self.repo = helpers.make_repo(self.tmp, name="studio-repo", harness=True)
         for d in ("studio/videos/v/work", "studio/local/videos/w/work", "studio/cast/a/character", "studio/voices/a",
-                  "studio/videos/v/audio/ko", "src", ".claude/studio/scripts", "scripts", "node_modules", "dist"):
+                  "studio/videos/v/audio/ko", "src", ".claude/studio/scripts/stdo", "scripts", "node_modules", "dist"):
             os.makedirs(os.path.join(self.repo, d), exist_ok=True)
         for f, text in (("studio/videos/v/work/state.json", "{}"), ("studio/videos/v/script.md", "# s\n"),
                         ("src/a.ts", "x\n"), ("src/x.ts", "x\n"), ("a.txt", "a\n"), ("studio/CREDITS.yaml", "[]\n"),
                         (".claude/studio/scripts/state.py", "#\n"),
+                        # the copy's version must be the guard's (D-M0-3, M0d-2)
+                        (".claude/studio/scripts/stdo/__init__.py", 'SCRIPTS_VERSION = "%s"\n' % SCRIPTS_VERSION),
                         (".claude/studio/scripts/lock.py", "#\n"), (".claude/studio/scripts/check_commit.py", "#\n"),
                         ("scripts/x.py", "print(1)\n"), ("scripts/release.sh", "echo release\n"),
                         ("studio/cast/a/character/character.yaml", "a: 1\n")):

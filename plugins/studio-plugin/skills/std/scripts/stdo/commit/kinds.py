@@ -26,6 +26,7 @@ class FolderKind(object):
 
     name = "test"
     needs_overlay = True
+    proxy_commit = True  # the sandbox proxy mode may commit the test kind (M0d-2 checks; real kinds decide later)
 
     def __init__(self, with_gitignore=False):
         self.with_gitignore = with_gitignore

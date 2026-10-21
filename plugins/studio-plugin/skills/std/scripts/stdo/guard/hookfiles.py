@@ -37,10 +37,20 @@ def items(ri):
         out += [(os.path.join(cd, "hooks", "pre-commit"), "file"),
                 (os.path.join(cd, "hooks", "pre-commit.studio-chained"), "chained"),
                 (os.path.join(cd, "studio"), "dir")]
+        if getattr(ri, "studio", False):
+            # git's own settings (core.hooksPath, aliases) of a Studio repository: `git config` only (m0d2-plan §10)
+            out.append((os.path.join(cd, "config"), "gitconfig"))
+            gd = os.path.realpath(ri.git_dir) if getattr(ri, "git_dir", None) else None
+            if gd:
+                out.append((os.path.join(gd, "config.worktree"), "gitconfig"))
+                if gd != cd:
+                    out.append((os.path.join(gd, "config"), "gitconfig"))
     return out
 
 
 def _active(path, kind, ri, op):
+    if kind == "gitconfig":
+        return True
     if kind == "dir":
         # writing into it is always Studio's business (a planted runner would pass every commit)
         return op != "delete" or os.path.isdir(path)
@@ -56,7 +66,9 @@ def hit(ri, real, op):
         return None
     wt = os.path.realpath(ri.worktree)
     for path, kind in items(ri):
-        if op == "delete":
+        if kind == "gitconfig":
+            touch = real == path
+        elif op == "delete":
             # deleting a folder that holds the file; the work tree itself and its ancestors are the
             # ancestor-deletion rule's (G-DEL) — the guard reports that one
             touch = _inside(real, path) or (_inside(path, real) and not _inside(wt, real))

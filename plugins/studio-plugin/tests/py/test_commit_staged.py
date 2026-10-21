@@ -397,7 +397,11 @@ class GuardRan(CommitCase):
         # empty session id
         e = self.claude_env("")
         self.assertEqual(self.cc("--staged", env=e).returncode, 7)
-        # the same session (a subagent has the same id) passes
+        # the same session (a subagent has the same id) passes once the guard recorded the answer (M0d-2)
+        out = self.commit(env=env)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("did not see this commit being approved", out.stderr)
+        self.guard_approved()
         self.assertEqual(self.commit(env=env).returncode, 0)
 
     def test_commit_ok_from_another_session(self):

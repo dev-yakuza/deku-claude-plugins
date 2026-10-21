@@ -73,7 +73,8 @@ class HooksJson(JudgeCase):
         data = json.load(open(HOOKS))
         pre = data["hooks"]["PreToolUse"]
         self.assertEqual(len(pre), 1)
-        self.assertEqual(pre[0]["matcher"], "^(Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*)$")
+        # M0d-2 adds WebFetch and WebSearch (INV5)
+        self.assertEqual(pre[0]["matcher"], "^(Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*)$")
         h = pre[0]["hooks"][0]
         self.assertEqual((h["type"], h["timeout"], h["onFailure"]), ("command", 20, "block"))
         self.assertEqual(h["command"], 'python3 "${CLAUDE_PLUGIN_ROOT}/skills/std/scripts/guard.py"')
@@ -81,9 +82,9 @@ class HooksJson(JudgeCase):
         self.assertNotIn("hooks", pj)
         import re
         rx = re.compile(pre[0]["matcher"])
-        for t in ("Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "mcp__fs__write"):
+        for t in ("Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch", "mcp__fs__write"):
             self.assertTrue(rx.search(t), t)
-        for t in ("TodoWrite", "Read", "Agent", "WebFetch", "BashOutput"):
+        for t in ("TodoWrite", "Read", "Agent", "AskUserQuestion", "BashOutput", "WebFetchX"):
             self.assertFalse(rx.search(t), t)
 
 

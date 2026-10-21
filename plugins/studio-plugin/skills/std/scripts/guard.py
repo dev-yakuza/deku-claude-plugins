@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Studio's PreToolUse guard (hooks/hooks.json; m0d1b-plan §2). Reads the hook input on stdin and
-prints a deny decision, or nothing (no decision). Never allow, ask or defer. Any failure denies."""
+"""Studio's PreToolUse guard (hooks/hooks.json; m0d1b-plan §2, m0d2-plan §4). Reads the hook input on stdin and
+prints a deny decision, an allow decision (only for an approval command or a Studio commit with a person's
+answer, alone in its call), a warning without a decision, or nothing. Never ask or defer. Any failure denies."""
 import json
 import os
 import sys
@@ -14,6 +15,18 @@ if _DATA and os.path.isabs(_DATA):
 else:
     sys.dont_write_bytecode = True  # no __pycache__ in the plugin
 MAX_INPUT = 64 * 1024 * 1024
+
+
+def _allow(reason):
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                              "permissionDecisionReason": reason}}, ensure_ascii=False)
+
+
+def _warn(lines):
+    text = "\n".join(lines)[:4000]
+    return json.dumps({"systemMessage": text,
+                       "hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": text}},
+                      ensure_ascii=False)
 
 
 def _deny(reason):
@@ -34,7 +47,14 @@ def main():
         else:
             hook = json.loads(data.decode("utf-8"))
             deny, ctx = judge.decide(hook, os.environ)
-            out = _deny(deny.message(len(ctx.denies) - 1)) if deny is not None else None
+            if deny is not None:
+                out = _deny(deny.message(len(ctx.denies) - 1))
+            elif ctx.allow:
+                out = _allow(ctx.allow)
+            elif ctx.warnings:
+                out = _warn(ctx.warnings)
+            else:
+                out = None
             try:
                 judge.record_run(ctx)
             except Exception:  # noqa: BLE001 — the record never changes the decision

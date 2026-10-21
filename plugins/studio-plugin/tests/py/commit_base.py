@@ -100,6 +100,15 @@ class CommitCase(StudioTestCase):
         with open(os.path.join(d, "overlay.sha"), "w") as f:
             f.write(("0" * 64 if wrong else sha) + "\n")
 
+    def guard_approved(self, sid=SID, repo=None, mode="human"):
+        """What the guard records in commit-ok.json after checking the person's answer (M0d-2, M0e Q12)."""
+        from stdo.commit import okfile as _ok
+        repo = repo or self.repo
+        ok, _ = _ok.read(repo)
+        _ok.set_approval(repo, {"mode": mode, "tree": ok["tree"], "head": ok["head"], "session_id": sid,
+                                "answer": ok["label"], "tool_use_id": "toolu_ask", "question_index": 0,
+                                "at": "2026-10-21T00:00:00Z"})
+
     def guard_ran(self, sid=SID, repo=None):
         p = self.write(".claude/studio/local/guard-ran.json",
                        json.dumps({"schema": 1, "sessions": {sid: "2026-10-21T00:00:00Z"}}), repo)

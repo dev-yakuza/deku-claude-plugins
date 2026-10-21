@@ -132,3 +132,48 @@ def unsafe(gitinfo):
         if kl in UNSAFE_CONFIG or kl.startswith("alias."):
             return k
     return None
+
+
+def clean_env(env):
+    """The guard's environment for git children: no injected config, repository selection, pagers or helpers."""
+    out = dict(env)
+    for k in list(out):
+        if k in ("GIT_EXTERNAL_DIFF", "GIT_PAGER", "PAGER", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_SSH_COMMAND",
+                 "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_CONFIG_COUNT",
+                 "GIT_CONFIG_PARAMETERS", "GIT_OBJECT_DIRECTORY", "GIT_EXEC_PATH") or \
+                k.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            del out[k]
+    out["GIT_TERMINAL_PROMPT"] = "0"
+    return out
+
+
+def budget_git(cwd, env, budget=TOTAL, max_calls=40, extra_env=None):
+    """The commit checks' git object (stdo/commit/gitx.Git, the hook's own functions) with the guard's limits:
+    each call at most TIMEOUT seconds, `budget` seconds and `max_calls` calls in all; any failure raises
+    gitx.GitError (the caller denies — closed side). Hardened like the hook (no fsmonitor, pager, external
+    diff); none of the commands the checks use runs hooks."""
+    from ..commit import gitx
+    import time
+
+    class BudgetGit(gitx.Git):
+        def __init__(self):
+            e = clean_env(env)
+            e.update(extra_env or {})
+            gitx.Git.__init__(self, cwd, e)
+            self.left = budget
+            self.calls = 0
+
+        def run(self, *args, **kw):
+            if self.calls >= max_calls or self.left <= 0:
+                raise gitx.GitError("the guard's git budget is spent")
+            self.calls += 1
+            kw["timeout"] = min(TIMEOUT, self.left)
+            start = time.monotonic()
+            try:
+                return gitx.Git.run(self, *args, **kw)
+            except (OSError, subprocess.SubprocessError) as e:
+                raise gitx.GitError("git %s: %s" % (args[0] if args else "", type(e).__name__))
+            finally:
+                self.left -= time.monotonic() - start
+
+    return BudgetGit()

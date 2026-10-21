@@ -209,12 +209,42 @@ def ok_problems(ctx, st, ok):
     claude, sid = session(ctx.env)
     if claude and ok.get("session_id") != sid:
         out.append(Problem(1, "commit-ok.json was prepared in another Claude Code session — stage again in this one"))
+    if claude:
+        a = approval_problem(ctx, ok, sid, tree)
+        if a:
+            out.append(a)
     for video, want in sorted((ok.get("states") or {}).items()):
         have = approvals.state_seq(approvals.video_dir(ctx.top, ctx.roots[0], video))
         if not isinstance(want, dict) or want.get("last_seq") != have:
             out.append(Problem(1, "video %s changed since Studio prepared this commit (state seq) — stage again"
                                   % video))
     return out
+
+
+NOT_SEEN = ("the Studio guard did not see this commit being approved — commit with a plain \"git commit -m …\" "
+            "right after the person chose \"%s\", so the guard can check the answer")
+
+
+def approval_problem(ctx, ok, sid, tree):
+    """A Claude Code session's Studio commit carries the answer the guard checked (m0d2-plan §5.7, M0e Q12)."""
+    ap = ok.get("approval")
+    label = ok.get("label")
+    if not isinstance(ap, dict):
+        return Problem(1, NOT_SEEN % label)
+    if ap.get("session_id") != sid or ap.get("tree") != tree or ap.get("head") != ctx.head:
+        return Problem(1, NOT_SEEN % label)
+    mode = ap.get("mode")
+    if mode == "human":
+        if ap.get("answer") != label:
+            return Problem(1, NOT_SEEN % label)
+        return None
+    if mode == "proxy":
+        kind = ctx.kinds.get(ok.get("kind"))
+        if kind is None or not getattr(kind, "proxy_commit", False):
+            return Problem(4, "this commit was approved in the sandbox proxy mode, which commit kind %s does not "
+                              "accept — a person must approve it" % ok.get("kind"))
+        return None
+    return Problem(1, NOT_SEEN % label)
 
 
 def staged_check(ctx):
