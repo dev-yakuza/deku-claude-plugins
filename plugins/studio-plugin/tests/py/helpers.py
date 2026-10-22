@@ -26,7 +26,7 @@ TEMPLATES = os.path.join(SKILL, "templates")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
-from stdo import paths  # noqa: E402
+from stdo import machine, paths  # noqa: E402
 
 MIN_S2V = (0, 12, 1)
 LEAK_VARS = ("S2V_HEAVY_LOCK_TOKEN", "S2V_ACTOR_LOCK_TOKEN")
@@ -273,7 +273,7 @@ def make_repo(tmp, name="repo", harness=True, marker=False, local=False, studio_
         f.write("# Fixture\n")
     if harness:
         values = {
-            "LANGUAGE": language, "S2V_PATH": s2v,
+            "LANGUAGE": language, "S2V_PATH": s2v or "",
             "PROJECT_NAME": "Fixture", "PRIORITIES_BY_KIND": "fixture", "PURPOSE": "fixture",
             "STUDIO_ROOT": studio_root,
         }
@@ -288,6 +288,8 @@ def make_repo(tmp, name="repo", harness=True, marker=False, local=False, studio_
         os.makedirs(os.path.join(repo, studio_root, "voices"))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "fixture")
+    if harness and s2v:
+        machine.write(repo, s2v)  # this machine's s2v path (ignored; m1-plan §3.1)
     if local:
         os.makedirs(os.path.join(repo, studio_root, "local"), exist_ok=True)
         os.makedirs(os.path.join(repo, ".claude", "studio", "local"), exist_ok=True)

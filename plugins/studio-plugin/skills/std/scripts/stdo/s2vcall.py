@@ -1,10 +1,11 @@
 """Which commands are script2video calls, and which lock each one needs (m0c-plan §6).
 
-Shared with the guard (M0d-1). A call is accepted only in these forms (`p` = config.s2v.path):
+Shared with the guard (M0d-1). A call is accepted only in these forms (`p` = this work tree's s2v path,
+`stdo/machine.s2v_path` — `.claude/studio/local/machine.json`, m1-plan §3.1; callers pass it in):
 `s2v …`, `node <p>/packages/cli/dist/main.js …`, `yarn --cwd <p> s2v …`, `yarn s2v …` and
 `npx s2v …` (cwd = p), `tsx <p>/packages/cli/src/main.ts …`.
 A bare `s2v` is accepted by name only: the guard (M0d) must check that it resolves (realpath) to
-config.s2v.path's executable.
+that path's executable.
 """
 
 import os

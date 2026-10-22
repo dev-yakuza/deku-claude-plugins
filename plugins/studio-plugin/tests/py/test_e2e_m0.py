@@ -12,6 +12,7 @@ from approve_base import SESSION, ApproveCase
 from commit_base import copy_scripts
 from e2e_runner import Session, state_py_executor
 from harness_base import SID, HarnessCase
+from stdo import machine, paths
 from stdo.commit import okfile
 from stdo.state import backup
 from stdo.state.hashes import hash_of
@@ -274,8 +275,8 @@ class ApprovalE2E(ApproveCase):
 
     def test_e2_e3_approve_with_the_persons_answer(self):
         h = self.show1()
-        label = "승인 %s" % h
-        q = "① 대본을 승인할까요? %s" % h
+        label = "승인 v1 %s" % h
+        q = "[v1] ① 대본을 승인할까요? %s" % h
         # no answer yet
         r = self.sp("approve v1 1 --expect %s" % h)
         self.assertEqual((r.decision, r.code), ("deny", None))
@@ -306,8 +307,8 @@ class ApprovalE2E(ApproveCase):
         from e2e_runner import guard
         import transcripts as TRm
         h = self.show1()
-        label = "승인 %s" % h
-        qs = [TRm.question("① %s" % h, [label])]
+        label = "승인 v1 %s" % h
+        qs = [TRm.question("[v1] ① %s" % h, [label])]
         cmd = "python3 .claude/studio/scripts/state.py approve v1 1 --expect %s" % h
         t = self.s.t
         d = t._base("assistant", message={"role": "assistant", "content": [
@@ -326,7 +327,7 @@ class ApprovalE2E(ApproveCase):
     def test_e4_changed_after_showing(self):
         h = self.show1()
         self.ins["hashes"]["content"] = "c-changed"  # the script changed after it was shown
-        self.s.ask("① %s" % h, ["승인 %s" % h], "승인 %s" % h)
+        self.s.ask("[v1] ① %s" % h, ["승인 v1 %s" % h], "승인 v1 %s" % h)
         r = self.sp("approve v1 1 --expect %s" % h)
         self.assertEqual(r.decision, "allow")  # the label is right…
         self.assertIn(r.code, (1, 3), r)  # …but state.py sees the shown work is not current (back to script: 3)
@@ -334,11 +335,11 @@ class ApprovalE2E(ApproveCase):
 
     def test_e15_rewriting_events(self):
         h = self.show1()
-        self.s.ask("① %s" % h, ["승인 %s" % h], "승인 %s" % h)
+        self.s.ask("[v1] ① %s" % h, ["승인 v1 %s" % h], "승인 v1 %s" % h)
         self.assertEqual(self.sp("approve v1 1 --expect %s" % h).code, 0)
         # exclude-output (shorts takes sns with it)
         x = hash_of({"video": "v1", "lang": "ko", "output": "shorts", "platforms": ["sns"]})[:12]
-        self.s.ask("shorts 출력을 뺄까요? %s" % x, ["제외 %s" % x], "제외 %s" % x)
+        self.s.ask("[v1] shorts 출력을 뺄까요? %s" % x, ["제외 v1 %s" % x], "제외 v1 %s" % x)
         r = self.sp("exclude-output v1 shorts --expect %s" % x)
         self.assertEqual((r.decision, r.code), ("allow", 0), r)
         # reject the source diff
@@ -349,13 +350,13 @@ class ApprovalE2E(ApproveCase):
         r = self.sp("shown v1 source-diff")
         self.assertEqual(r.code, 0, r)
         d = re.search(r"hash12 (\w+)", r.out).group(1)
-        self.s.ask("원본 변경을 받아들일까요? %s" % d, ["승인 %s" % d, "거부 %s" % d], "거부 %s" % d)
+        self.s.ask("[v1] 원본 변경을 받아들일까요? %s" % d, ["승인 v1 %s" % d, "거부 v1 %s" % d], "거부 v1 %s" % d)
         r = self.sp("reject-source-diff v1 --expect %s" % d)
         self.assertEqual((r.decision, r.code), ("allow", 0), r)
         # unlock a stagnation
         for _ in range(3):
             self.cli("loop", "v1", "verify")
-        self.s.ask("v1 ko 를 해제할까요?", ["해제 v1 ko stagnation"], "해제 v1 ko stagnation")
+        self.s.ask("[v1] ko 를 해제할까요?", ["해제 v1 ko stagnation"], "해제 v1 ko stagnation")
         r = self.sp("unlock v1 --expect stagnation")
         self.assertEqual((r.decision, r.code), ("allow", 0), r)
         # re-pin
@@ -363,11 +364,11 @@ class ApprovalE2E(ApproveCase):
         self.ver["id"] = "0.13.0+new"
         self.old_ins[1] = dict(self.ins)
         rp = hash_of({"video": "v1", "from_id": "0.12.1+abc", "to_id": "0.13.0+new"})[:12]
-        self.s.ask("s2v 판을 다시 고정할까요? %s" % rp, ["재고정 %s" % rp], "재고정 %s" % rp)
+        self.s.ask("[v1] s2v 판을 다시 고정할까요? %s" % rp, ["재고정 v1 %s" % rp], "재고정 v1 %s" % rp)
         r = self.sp("repin v1 --expect %s" % rp)
         self.assertEqual(r.decision, "allow", r)
         self.assertNotEqual(r.code, 6, r)  # the evidence was accepted (state rules decide the rest)
-        with open(os.path.join(self.repo, ".claude", "studio", "local", "consumed-answers.jsonl")) as f:
+        with open(paths.consumed_log(self.repo)) as f:
             cmds = [json.loads(l)["cmd"] for l in f]
         self.assertEqual(cmds[:4], ["approve", "exclude-output", "reject-source-diff", "unlock"])
 
@@ -388,7 +389,7 @@ class LocalBackupE2E(ApprovalE2E):
 
     def test_e21_local_video_backup(self):
         h = self.show1()
-        self.s.ask("① %s" % h, ["승인 %s" % h], "승인 %s" % h)
+        self.s.ask("[v1] ① %s" % h, ["승인 v1 %s" % h], "승인 v1 %s" % h)
         r = self.sp("approve v1 1 --expect %s" % h)
         self.assertEqual((r.decision, r.code), ("allow", 0), r)
         base = backup.root(self.repo, "v1")
@@ -398,7 +399,7 @@ class LocalBackupE2E(ApprovalE2E):
 
 class RealProcessE2E(ApproveCase):
     """M0f review MINOR-4: state.py as a real process (`python3 .claude/studio/scripts/state.py`) with a fake s2v
-    behind config.s2v.path — the guard's argv sha, CLAUDE_CODE_SESSION_ID and the consumption lock across
+    behind this machine's s2v path (machine.json) — the guard's argv sha, CLAUDE_CODE_SESSION_ID and the consumption lock across
     processes."""
 
     FAKE = ("const fs = require('fs'), path = require('path');\n"
@@ -424,12 +425,7 @@ class RealProcessE2E(ApproveCase):
             f.write(self.FAKE)
         with open(os.path.join(dist, "fixture.json"), "w") as f:
             json.dump({"inspect": self.ins, "version": self.ver}, f)
-        cfgp = os.path.join(self.repo, ".claude", "studio", "config.json")
-        with open(cfgp) as f:
-            cfg = json.load(f)
-        cfg["s2v"]["path"] = fake
-        with open(cfgp, "w") as f:
-            json.dump(cfg, f, indent=2)
+        machine.write(self.repo, fake)  # this machine's s2v path (m1-plan §3.1)
         os.makedirs(os.path.join(self.repo, "docs"), exist_ok=True)
         with open(os.path.join(self.repo, "docs", "a.md"), "w") as f:
             f.write(self.text)
@@ -458,8 +454,8 @@ class RealProcessE2E(ApproveCase):
         r = self.sp("shown v1 1")
         self.assertEqual(r.code, 0, r)
         h = re.search(r"hash12 (\w+)", r.out).group(1)
-        label = "승인 %s" % h
-        q = "① 대본을 승인할까요? %s" % h
+        label = "승인 v1 %s" % h
+        q = "[v1] ① 대본을 승인할까요? %s" % h
         # the guard writes the evidence for this exact command line; nothing runs yet
         self.s.executor = lambda cmd: (0, "", "")
         self.s.ask(q, [label, "수정해 줘"], label)
@@ -470,7 +466,8 @@ class RealProcessE2E(ApproveCase):
         # another session's environment -> 6
         self.assertEqual(self.direct("approve v1 1 --expect %s" % h, sid="sess-other").returncode, 6)
         # the consumption lock held by another process -> busy (5), nothing recorded
-        lock = os.path.join(self.repo, ".claude", "studio", "local", "consumed-answers.lock")
+        lock = paths.consumed_lock(self.repo)
+        os.makedirs(os.path.dirname(lock), exist_ok=True)
         holder = subprocess.Popen(["python3", "-c", "import fcntl,sys,time; fd=open(sys.argv[1],'a'); "
                                    "fcntl.flock(fd, fcntl.LOCK_EX); print('held', flush=True); time.sleep(20)", lock],
                                   stdout=subprocess.PIPE, text=True)

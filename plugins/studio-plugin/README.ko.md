@@ -27,6 +27,17 @@ claude --plugin-dir plugins/studio-plugin
 
 그다음 `/std help`. script2video 0.12.1 이상이 필요합니다(나중에 `/std init`이 설정).
 
+## 참고
+
+- **s2v 경로는 기기마다** 둡니다. `.claude/studio/local/machine.json`(커밋하지 않음)에 clone · 워크트리마다 한 번,
+  `config.json`에는 s2v 최소 버전만 남습니다.
+- **승인 답은 레포 하나에서 한 번만** 쓰입니다. 같은 레포의 워크트리는 그 기록을 나누지만, 따로 받은 clone(별도
+  `git clone`)은 나누지 않습니다. 영상의 답은 그 영상과 해시를 담고 있어 다른 clone에 맞는 일이 드물고, 영상이 없는
+  답(설정 · 갱신)만 남는 경우입니다. 0.0.9 이하가 워크트리마다 남긴 기록은 무시됩니다.
+- **0.0.x 샌드박스를 손으로 옮기기**(`/std config`가 생기기 전까지): `.claude/studio/config.json`의 `"s2v"` 아래
+  `"path"`를 지우고, `.claude/studio/local/machine.json`(링크가 아닌 실제 폴더)에
+  `{"schema": 1, "s2v": {"path": "<절대 경로>"}}`를 씁니다.
+
 ## 라이선스
 
 MIT

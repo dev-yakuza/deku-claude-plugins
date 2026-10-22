@@ -73,15 +73,33 @@ the session's question; there is no direct terminal path (intended — 00-plan �
 
 **How to ask for an approval** (the guard reads the answer from the transcript — m0d2-plan §2–§4):
 - Ask in the **main session** (never from a subagent), with AskUserQuestion. Show the artifact and its hash.
-- Each question's text is unique within the call and **contains the hash** of its fixed option (`승인 <hash12>`,
-  `거부 <hash12>`, `재고정 <hash12>`, `제외 <hash12>`, `커밋 <tree12>`; `해제 <video> <lang> <held>` names the video
-  and language). The fixed label is one of the options; a free-text "Other" answer is never an approval.
+- Each question's text is unique within the call and **contains the hash** of its fixed option. A question about
+  a video **starts with the video id in brackets, literally `[<video>]`** (e.g. `[v1] ① 대본 — … · hash
+  3f2a9c0d1e4b`); the guard checks the brackets too, so `[v1]` never stands for `v10`. The fixed labels:
+  `승인 <video> <hash12>` · `거부 <video> <hash12>` (a source diff) · `재고정 <video> <hash12>` · `제외 <video> <hash12>` ·
+  `해제 <video> <lang> <held>` · `커밋 <tree12>`; later milestones add `출처 <video> <hash12>` (CREDITS),
+  `중단 <video> <lang>` (abandon), `사내설정 <sha12>` (overlay), `설정 <hash12>` (protected settings, the s2v path,
+  the narrator) and `갱신 <hash12>` (update). Copy the label exactly as the command printed it. The fixed label is one
+  of the options; a free-text "Other" answer is never an approval.
 - Right after the answer, **in the same turn**, run the command **alone** (optionally after `cd <repo> &&`), as
   `python3 .claude/studio/scripts/state.py …` or `git commit -m …`, without environment prefixes. If the person
-  writes anything before the command runs, ask again. An answer is used once. Only an answer Claude Code marks as
+  writes anything before the command runs, ask again. An answer is used once in the whole repository (every worktree shares the record). Only an answer Claude Code marks as
   the person's (`permissionDecision` source `user_*`) counts — an answer filled in by a hook never does. Never send the question and the
   approval command in the same message (the guard cannot always tell them apart when the transcript is written late).
 - Guard rules: `G-EVIDENCE` (no usable answer: ask again), `G-MAIN` (main session only), `G-PROXY` (`--proxy`
   outside the sandbox proxy mode), `G-COMMIT` / `G-COMMITFORM` (stage again with `--stage`; plain `git commit`),
   `G-HOOKOFF` (hooks must stay on), `G-PLUMB` (no plumbing or GitHub API writes), `G-PUSH` (machine-only or internal
   files in the pushed history), `G-WEB` (INV5), `G-VERSION` (the repository's scripts are another version).
+
+## E. Known limits of the Bash guard
+
+The guard reads each Bash call before it runs; it cannot be complete, and deliberate forgery is outside Studio's
+threat model. What it does not see is backed by the pre-commit hook, the commit checks and the person's gates:
+- **Interpreters** (python, node, …) run code the guard cannot follow; where it notices Studio paths or terms it
+  refuses (`G-OPAQUE`), otherwise it lets the code run.
+- **Background jobs started in earlier calls** can change files between the guard's check and a later command; for
+  plain (non-recursive) writers the guard judges the paths as they are when it checks. Archive extractions and
+  recursive copies are judged by their destination folder for this reason.
+- **Tool flags it does not model** (mostly GNU-only options) are judged by the paths it can read, not by what the
+  flag changes.
+Work with literal commands, one step per call, so the guard can check what runs.

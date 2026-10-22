@@ -98,8 +98,8 @@ MUST_DENY = [
     ("git add -f studio/local/x", "G-PROT"),
     ("git checkout -- studio/videos/v/work/state.json", "G-PROT"),
     ("python3 -c \"import shutil; shutil.rmtree('studio/local')\"", "G-OPAQUE"),
-    ("bash -c 'rm -rf studio/local'", "G-OPAQUE"),
-    ("cat > /tmp/gx.sh <<'EOF'\nrm -rf studio/local\nEOF\nbash /tmp/gx.sh", "G-OPAQUE"),
+    ("bash -c 'rm -rf studio/local'", "G-DEL"),  # M1a W2: the string's commands are judged too
+    ("cat > /tmp/gx.sh <<'EOF'\nrm -rf studio/local\nEOF\nbash /tmp/gx.sh", "G-DEL"),  # M1a X1: script files too
     ('eval "rm studio/x"', "G-OPAQUE"),
     ("X=$(echo s); rm -rf $X/local", "G-DEL"),
     ("S2V_TTS_PORT=1 s2v tts v.md", "G-ENV"),
@@ -545,7 +545,7 @@ class Review1b(JudgeCase):
 
     def test_unknown_payload_in_studio_cwd(self):  # MINOR 6 (J22)
         self.assertDeny('eval "$X"', "G-OPAQUE", cwd=os.path.join(self.repo, "studio", "videos"))
-        self.assertPass('eval "$X"')
+        self.assertDeny('eval "$X"', "G-OPAQUE")  # M1a X1: a non-literal eval anywhere in a Studio repository
 
     def test_studio_script_needs_harness(self):  # NIT
         fake = helpers.make_repo(self.tmp, name="noh", harness=False)

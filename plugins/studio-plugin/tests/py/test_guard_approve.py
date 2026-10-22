@@ -9,6 +9,7 @@ import transcripts as TR
 from approve_base import ApproveCase, SESSION
 from commit_base import copy_scripts
 from guard_base import snapshot_text
+from stdo import paths
 from stdo.guard import judge, transcript
 from stdo.state.argv import argv_sha
 from test_guard_judge import ALIASES, JudgeCase
@@ -23,9 +24,16 @@ class GuardApproval(JudgeCase):
         os.makedirs(os.path.join(self.repo, ".claude", "studio", "local"), exist_ok=True)
         self.tpath = TR.transcript_path(self.env)
         self.t = None
+        self.video_state("v")
+
+    def video_state(self, vid, lang="ko"):
+        d = os.path.join(self.repo, "studio", "videos", vid, "work")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "state.json"), "w") as f:
+            json.dump({"video": vid, "source_lang": lang}, f)
 
     # --- helpers ---
-    def turn(self, label="승인 %s" % H, **kw):
+    def turn(self, label="승인 v %s" % H, **kw):
         self.t = TR.approval_turn(TR.T(), label, **kw)
         self.t.write(self.tpath)
         return self.t
@@ -77,7 +85,7 @@ class GuardApproval(JudgeCase):
         p = self.pending()
         self.assertEqual(p["argv_sha"], argv_sha(["approve", "v", "1", "--expect", H]))
         self.assertEqual((p["session_id"], p["tool_use_id"], p["question_index"], p["answer"], p["mode"]),
-                         ("sess-1", "toolu_ask1", 0, "승인 %s" % H, "human"))
+                         ("sess-1", "toolu_ask1", 0, "승인 v %s" % H, "human"))
         self.assertIn(H, p["question"])
         self.assertIn("toolu_ask1#0", ctx.allow)
         # --x=v spelling: same canonical argv
@@ -95,24 +103,26 @@ class GuardApproval(JudgeCase):
 
     def test_no_or_wrong_evidence(self):
         d = self.assertRule(APPROVE, "G-EVIDENCE")
-        self.assertIn("승인 %s" % H, d.message())
+        self.assertIn("승인 v %s" % H, d.message())
         self.turn(chosen="수정해 줘")
         self.assertRule(APPROVE, "G-EVIDENCE")
-        self.turn(label="승인 000000000000", qtext="q 000000000000")
+        self.turn(label="승인 v 000000000000", qtext="[v] q 000000000000")
         self.assertRule(APPROVE, "G-EVIDENCE")
         self.assertIsNone(self.pending())
 
     def test_consumed_answer_is_not_reused(self):
         self.turn()
-        with open(os.path.join(self.repo, ".claude", "studio", "local", "consumed-answers.jsonl"), "w") as f:
+        log = paths.consumed_log(self.repo)
+        os.makedirs(os.path.dirname(log), exist_ok=True)
+        with open(log, "w") as f:
             f.write(json.dumps({"session_id": "sess-1", "tool_use_id": "toolu_ask1", "question_index": 0}) + "\n")
         d = self.assertRule(APPROVE, "G-EVIDENCE")
         self.assertIn("used already", d.message())
         self.assertIsNone(self.pending())
 
     def test_subcommands_and_labels(self):
-        cases = [("reject-source-diff v --expect %s" % H, "거부 %s" % H), ("repin v --expect %s" % H, "재고정 %s" % H),
-                 ("exclude-output v short --expect %s" % H, "제외 %s" % H)]
+        cases = [("reject-source-diff v --expect %s" % H, "거부 v %s" % H), ("repin v --expect %s" % H, "재고정 v %s" % H),
+                 ("exclude-output v short --expect %s" % H, "제외 v %s" % H)]
         for args, label in cases:
             self.turn(label=label)
             self.assertAllow("python3 .claude/studio/scripts/state.py " + args)
@@ -120,9 +130,9 @@ class GuardApproval(JudgeCase):
         # unlock: video and language from the state (read only)
         with open(os.path.join(self.repo, "studio", "videos", "v", "work", "state.json"), "w") as f:
             json.dump({"video": "v", "source_lang": "ko"}, f)
-        self.turn(label="해제 v ko stagnation", qtext="v ko 를 해제할까요?")
+        self.turn(label="해제 v ko stagnation", qtext="[v] ko 를 해제할까요?")
         self.assertAllow("python3 .claude/studio/scripts/state.py unlock v --expect stagnation")
-        self.turn(label="해제 v en stagnation", qtext="v en 을 해제할까요?")
+        self.turn(label="해제 v en stagnation", qtext="[v] en 을 해제할까요?")
         self.assertRule("python3 .claude/studio/scripts/state.py unlock v --expect stagnation", "G-EVIDENCE")
         self.assertAllow("python3 .claude/studio/scripts/state.py unlock v --lang en --expect stagnation")
         # --expect must be the 12 hex shown
@@ -130,7 +140,7 @@ class GuardApproval(JudgeCase):
         self.assertRule("python3 .claude/studio/scripts/state.py approve v 1 --expect 3F2A", "G-APPROVAL")
 
     def test_credit_and_unknown_need_evidence_and_are_denied(self):
-        self.turn(label="승인 %s" % H)
+        self.turn(label="승인 v %s" % H)
         for sub in ("credit studio/x.png --expect %s" % H, "approve-actor a definition --expect %s" % H,
                     "frobnicate v", "rollback v"):
             d = self.assertRule("python3 .claude/studio/scripts/state.py " + sub, "G-APPROVAL")
@@ -152,7 +162,7 @@ class GuardApproval(JudgeCase):
         self.assertRule(APPROVE, "G-MAIN", extra={"agent_id": "a1", "agent_type": "general-purpose"})
 
     def test_non_interactive(self):
-        self.t = TR.approval_turn(TR.T(entrypoint="sdk-cli"), "승인 %s" % H)
+        self.t = TR.approval_turn(TR.T(entrypoint="sdk-cli"), "승인 v %s" % H)
         self.t.write(self.tpath)
         d = self.assertRule(APPROVE, "G-EVIDENCE")
         self.assertIn("claude -p", d.message())
@@ -231,7 +241,7 @@ class GuardApproval(JudgeCase):
         ctx = self.assertAllow(APPROVE + " --proxy")
         p = self.pending()
         self.assertEqual((p["mode"], p["tool_use_id"], p["question_index"], p["question"], p["answer"]),
-                         ("proxy", "toolu_cmd1", 0, "proxy", "승인 %s" % H))
+                         ("proxy", "toolu_cmd1", 0, "proxy", "승인 v %s" % H))
         self.assertIn("proxy", ctx.allow)
         # s2v approvals are allowed in the proxy mode (none in the person's mode until M3b)
         self.assertAllow("s2v character approve a")
@@ -254,7 +264,7 @@ class GuardApproval(JudgeCase):
         self.assertRule(APPROVE, "G-EVIDENCE")
 
     def test_s2v_approvals_in_the_persons_mode(self):
-        self.turn(label="승인 %s" % H)
+        self.turn(label="승인 v %s" % H)
         d = self.assertRule("s2v character approve a", "G-APPROVAL")
         self.assertIn("M3b", d.message())
         self.assertRule("python3 .claude/studio/scripts/lock.py actor-op a -- s2v character approve a", "G-APPROVAL")
@@ -279,8 +289,8 @@ class EndToEnd(ApproveCase):
         for st in ("script", "verify"):
             self.assertEqual(self.cli("stage-done", "v1", st), 0, self.last_err)
         h = self.show("1")
-        label = "승인 %s" % h
-        t = TR.approval_turn(TR.T(session_id=SESSION), label, qtext="① 대본을 승인할까요? %s" % h)
+        label = "승인 v1 %s" % h
+        t = TR.approval_turn(TR.T(session_id=SESSION), label, qtext="[v1] ① 대본을 승인할까요? %s" % h)
         t.write(self.tpath)
         cmd = "python3 .claude/studio/scripts/state.py approve v1 1 --expect %s" % h
         deny, ctx = self.guard(cmd, t)

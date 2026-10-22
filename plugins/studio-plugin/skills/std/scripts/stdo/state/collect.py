@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 
+from .. import machine
 from . import hashes
 
 
@@ -17,7 +18,7 @@ class CollectError(Exception):
 def run_inspect(s2v_path, script, hash_version=None):
     """`s2v inspect <script> --json` (no lock). exit 1: script errors, 2: usage — both fail here."""
     if not s2v_path:
-        raise CollectError("config.s2v.path is not set", 2)
+        raise CollectError(machine.HINT, 2)
     cmd = ["node", os.path.join(s2v_path, "packages", "cli", "dist", "main.js"), "inspect", script, "--json"]
     if hash_version is not None:
         cmd += ["--hash-version", str(hash_version)]
@@ -27,7 +28,8 @@ def run_inspect(s2v_path, script, hash_version=None):
         raise CollectError("cannot run s2v inspect: %s" % e)
     err = out.stderr.strip()
     if "Cannot find module" in err or "MODULE_NOT_FOUND" in err:
-        raise CollectError("s2v is not built or config.s2v.path is wrong (node: %s)" % err.splitlines()[0])
+        raise CollectError("s2v is not built or this machine's s2v path (.claude/studio/local/machine.json) is "
+                           "wrong (node: %s)" % err.splitlines()[0])
     if out.returncode == 2:
         raise CollectError("s2v inspect refused (usage): %s" % err)
     if out.returncode == 1 and " error " in err:
@@ -43,7 +45,7 @@ def run_inspect(s2v_path, script, hash_version=None):
 def run_version(s2v_path):
     """`s2v --version --json` (id, version, commit, dirty, stale_build)."""
     if not s2v_path:
-        raise CollectError("config.s2v.path is not set", 2)
+        raise CollectError(machine.HINT, 2)
     cmd = ["node", os.path.join(s2v_path, "packages", "cli", "dist", "main.js"), "--version", "--json"]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=120)

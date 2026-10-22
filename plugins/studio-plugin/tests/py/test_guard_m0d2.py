@@ -180,8 +180,9 @@ class AllowLeak(JudgeCase):
 
     def test_no_allow(self):
         # a valid answer exists in the transcript the whole time: it must not leak into other commands
+        video_state(self.repo, "v")
         tpath = TR.transcript_path(self.env)
-        t = TR.approval_turn(TR.T(), "승인 3f2a9c0d1e4b")
+        t = TR.approval_turn(TR.T(), "승인 v 3f2a9c0d1e4b")
         t.write(tpath)
         transcript.STATS.opened = 0
         for mode in ("with", "none"):
@@ -212,6 +213,14 @@ class AllowLeak(JudgeCase):
         self.assertEqual(body.count('"permissionDecision": "allow"'), 1)
 
 
+def video_state(repo, vid):
+    """A video's state as the guard reads it for a label (the video id, m1-plan §3.2)."""
+    d = os.path.join(repo, "studio", "videos", vid, "work")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "state.json"), "w") as f:
+        json.dump({"video": vid, "source_lang": "ko"}, f)
+
+
 class Process(JudgeCase):
     """guard.py as Claude Code runs it: allow JSON, warning JSON (no decision), deny JSON."""
 
@@ -225,8 +234,9 @@ class Process(JudgeCase):
 
     def test_outputs(self):
         os.makedirs(os.path.join(self.repo, ".claude", "studio", "local"), exist_ok=True)
+        video_state(self.repo, "v")
         tpath = TR.transcript_path(self.env)
-        t = TR.approval_turn(TR.T(), "승인 3f2a9c0d1e4b")
+        t = TR.approval_turn(TR.T(), "승인 v 3f2a9c0d1e4b")
         t.write(tpath)
         base = {"tool_name": "Bash", "cwd": self.repo, "session_id": "sess-1", "transcript_path": tpath,
                 "permission_mode": "default", "tool_use_id": "toolu_cmd1", "prompt_id": t.prompt,
@@ -263,13 +273,14 @@ class Process(JudgeCase):
 class Perf(JudgeCase):
     def test_approval_path(self):
         os.makedirs(os.path.join(self.repo, ".claude", "studio", "local"), exist_ok=True)
+        video_state(self.repo, "v")
         tpath = TR.transcript_path(self.env)
         t = TR.T()
         for i in range(25):
             t.user_prompt("old %d" % i)
             t.tool_use("Bash", "toolu_o%d" % i)
             t.tool_result("toolu_o%d" % i, "z" * 200000)
-        TR.approval_turn(t, "승인 3f2a9c0d1e4b")
+        TR.approval_turn(t, "승인 v 3f2a9c0d1e4b")
         t.write(tpath)
         cmd = "python3 .claude/studio/scripts/state.py approve v 1 --expect 3f2a9c0d1e4b"
         times, base = [], []

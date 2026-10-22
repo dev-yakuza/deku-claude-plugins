@@ -44,7 +44,10 @@ REASONS = {
     "label-not-chosen": "the person did not choose that option",
     "ambiguous": "more than one question was answered with that option",
     "hash-not-shown": "the question text does not show the hash of the option",
+    "video-not-shown": "the question text does not show the video as [<video>] (brackets included)",
     "consumed": "this answer was used already — ask again",
+    "record-unreadable": "the repository's record of used answers cannot be read, so the answer cannot be checked "
+                         "(tell the user)",
     "unflushed": "the latest answer's question is not in the transcript yet — ask again",
     "summary-not-shown": "the question does not show the commit's summary line as --stage printed it",
 }
@@ -360,9 +363,11 @@ def _validate(tuid, item, line, ask_input, session_id, now):
     return Answer(tuid, answered, answers, ann if isinstance(ann, dict) else {}, line)
 
 
-def choose(answer, label, hash12=None):
+def choose(answer, label, hash12=None, video=None):
     """(question index, question text, note) of the one question answered with exactly `label`, which must be
-    one of that question's options (an "Other" text cannot be told from a label — only option labels count)."""
+    one of that question's options (an "Other" text cannot be told from a label — only option labels count).
+    A video's question shows the video literally as `[<video>]` (m1-plan §3.2): the brackets are part of the match,
+    so `[v1]` never stands for `v10`."""
     hits = []
     for i, (text, labels, multi) in enumerate(answer.questions):
         if answer.answers.get(text) == label and label in labels and not multi:
@@ -374,6 +379,8 @@ def choose(answer, label, hash12=None):
     i, text = hits[0]
     if hash12 and hash12 not in text:
         raise NoEvidence("hash-not-shown")
+    if video is not None and "[%s]" % video not in text:
+        raise NoEvidence("video-not-shown")
     note = answer.annotations.get(text)
     if isinstance(note, dict):
         note = note.get("notes")

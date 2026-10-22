@@ -27,6 +27,17 @@ claude --plugin-dir plugins/studio-plugin
 
 その後 `/std help`。script2video 0.12.1 以上が必要です(のちに `/std init` が設定します)。
 
+## 補足
+
+- **s2v のパスはマシンごと**です。`.claude/studio/local/machine.json`(コミットしません)に clone・ワークツリーごとに
+  一度だけ設定し、`config.json` には s2v の最低バージョンだけが残ります。
+- **承認の回答はリポジトリ全体で一度だけ**使えます。同じリポジトリのワークツリーはその記録を共有しますが、別に取得した
+  clone(別の `git clone`)は共有しません。動画の回答はその動画とハッシュを含むので別の clone に当てはまることはまれで、
+  動画を持たない回答(設定・更新)だけが残るケースです。0.0.9 以前がワークツリーごとに残した記録は無視されます。
+- **0.0.x のサンドボックスを手で移行する**(`/std config` ができるまで): `.claude/studio/config.json` の `"s2v"` の
+  `"path"` を削除し、`.claude/studio/local/machine.json`(リンクではない実際のフォルダ)に
+  `{"schema": 1, "s2v": {"path": "<絶対パス>"}}` を書きます。
+
 ## ライセンス
 
 MIT

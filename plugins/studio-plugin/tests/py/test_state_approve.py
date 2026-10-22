@@ -9,6 +9,7 @@ import time
 
 import helpers
 from approve_base import SESSION, ApproveCase, stamp
+from stdo import paths
 from stdo.state import evidence
 from stdo.state.argv import argv_sha, canonical
 
@@ -33,11 +34,11 @@ class Evidence(ApproveCase):
 
     def test_e2_argv_binding(self):
         h = self.ready_1()
-        self.pend(["approve", "v1", "1", "--expect", "000000000000"], "승인 %s" % h)
+        self.pend(["approve", "v1", "1", "--expect", "000000000000"], "승인 v1 %s" % h)
         self.assertEqual(self.cli("approve", "v1", "1", "--expect", h), 6)
         self.assertEqual(canonical(["approve", "v1", "1", "--expect=%s" % h, "--lang", "ko"]),
                          canonical(["approve", "--lang=ko", "v1", "1", "--expect", h]))
-        self.pend(["approve", "v1", "1", "--expect", h, "--lang", "ko"], "승인 %s" % h)
+        self.pend(["approve", "v1", "1", "--expect", h, "--lang", "ko"], "승인 v1 %s" % h)
         self.assertEqual(self.cli("approve", "--lang=ko", "v1", "1", "--expect=%s" % h), 0, self.last_err)
 
     def test_e3_other_session(self):
@@ -53,7 +54,7 @@ class Evidence(ApproveCase):
 
     def test_e5_only_the_fixed_label(self):
         h = self.ready_1()
-        for ans in ("Other: looks fine", "승인 000000000000", "승인 %s " % h, "승인  %s" % h):
+        for ans in ("Other: looks fine", "승인 v1 000000000000", "승인 v1 %s " % h, "승인 v1  %s" % h):
             self.assertEqual(self.approve("1", h, answer=ans), 6, ans)
         self.assertFalse(self.state()["langs"]["ko"]["approved"].get("1"))
 
@@ -75,7 +76,7 @@ class Evidence(ApproveCase):
         self.assertEqual(len(lines), 1)
         self.assertEqual((lines[0]["session_id"], lines[0]["video"]), (SESSION, "v1"))
         ev = [e for e in self.events() if e.get("event") == "approve"][-1]
-        self.assertEqual(ev["record"]["answer"]["answer"], "승인 %s" % h)
+        self.assertEqual(ev["record"]["answer"]["answer"], "승인 v1 %s" % h)
         self.assertEqual(ev["record"]["answer"]["reason"], "ok by me")
         L = self.state()["langs"]["ko"]
         self.assertEqual((L["loops"]["verify"], L["done_stages"]), (0, []))
@@ -84,7 +85,7 @@ class Evidence(ApproveCase):
     def test_e8_crash_after_consumption_loses_the_approval(self):
         h = self.ready_1()
         argv = ["approve", "v1", "1", "--expect", h]
-        self.pend(argv, "승인 %s" % h, tool="toolu_crash")
+        self.pend(argv, "승인 v1 %s" % h, tool="toolu_crash")
         ins = os.path.join(self.tmp, "ins.json")
         with open(ins, "w") as f:
             json.dump(self.ins, f)
@@ -97,8 +98,9 @@ class Evidence(ApproveCase):
 
     def test_e9_consumption_lock_busy(self):
         h = self.ready_1()
-        self.pend(["approve", "v1", "1", "--expect", h], "승인 %s" % h)
-        lock = os.path.join(evidence.local_dir(self.repo), "consumed-answers.lock")
+        self.pend(["approve", "v1", "1", "--expect", h], "승인 v1 %s" % h)
+        lock = paths.consumed_lock(self.repo)
+        os.makedirs(os.path.dirname(lock), exist_ok=True)
         holder = subprocess.Popen([sys.executable, "-B", "-c",
                                    "import fcntl,os,sys,time; fd=os.open(sys.argv[1], os.O_RDWR|os.O_CREAT); "
                                    "fcntl.flock(fd, fcntl.LOCK_EX); print('held', flush=True); time.sleep(30)", lock],
@@ -147,7 +149,7 @@ class ClaimsMap(ApproveCase):
         h = self.show("1")
         argv = ["approve", "v1", "1", "--expect", h]
         for bad in ({"question_index": "0"}, {"question_index": True}, {"tool_use_id": None}, {"tool_use_id": ""}):
-            ev = self.pend(argv, "승인 %s" % h)
+            ev = self.pend(argv, "승인 v1 %s" % h)
             ev.update(bad)
             with open(evidence.pending_path(self.repo), "w") as f:
                 json.dump(ev, f)

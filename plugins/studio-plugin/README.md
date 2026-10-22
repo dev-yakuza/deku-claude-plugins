@@ -28,6 +28,18 @@ claude --plugin-dir plugins/studio-plugin
 
 Then `/std help`. Requires script2video 0.12.1 or later (set up later by `/std init`).
 
+## Notes
+
+- **The s2v path is this machine's.** It lives in `.claude/studio/local/machine.json` (not committed), once per
+  clone or worktree; `config.json` keeps only the minimum s2v version.
+- **An approval answer is used once per repository.** Worktrees of one repository share that record; separate
+  clones (another `git clone`) do not. A video's answer still names that video and its hash, so it rarely fits
+  another clone; answers without a video (settings, updates) are the remaining case. Records kept per worktree by
+  0.0.9 and earlier are ignored.
+- **Upgrading a 0.0.x sandbox by hand** (until `/std config` arrives): delete `"path"` under `"s2v"` in
+  `.claude/studio/config.json` and write `{"schema": 1, "s2v": {"path": "<absolute path>"}}` to
+  `.claude/studio/local/machine.json` (a real folder, not a link).
+
 ## License
 
 MIT

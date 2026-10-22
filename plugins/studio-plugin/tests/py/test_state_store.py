@@ -407,7 +407,9 @@ class Durability(StoreCase):
         os.makedirs(os.path.join(v, "work"))
         with open(os.path.join(v, "work", "approvals.jsonl"), "w") as f:
             f.write('{"seq": 7, "event": "old"}\n')
-        store.create(v, F.state())
+        st = F.state()
+        st["video"] = "v2"  # the folder's own id (a state in another video's folder is refused, M1a review U3)
+        store.create(v, st)
         self.assertEqual(store.read_state(v)["last_seq"], 8)
 
     def test_r13_old_tmp_files_are_cleaned(self):

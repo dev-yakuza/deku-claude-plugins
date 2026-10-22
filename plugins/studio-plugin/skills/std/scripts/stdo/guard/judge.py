@@ -58,6 +58,7 @@ class Context(object):
         # M0d-2: an allow needs evidence (approval commands, Studio commits) and the call being that command alone
         self.allow = None  # the reason, when the guard answers allow
         self.candidates = []  # (cmd, kind "state" | "commit" | "s2v", reason)
+        self.bulk_ids = set()  # extractions and recursive copies in a Studio repository (W4)
         self.effects = []  # (rule, function) run only when nothing is denied
         self.warnings = []  # shown to the person and the model when there is no decision
         self.snap = None
@@ -373,29 +374,21 @@ def check_paths(ctx, cmd, studio_infos):
                                 "write"))
         elif len(ops) >= 2:
             dest = ops[-1]
-            if prog == "ln":
+            if prog == "ln" or (prog in ("cp", "gcp") and hard_link_copy(argv)):
+                # a hard link (ln, cp -l / --link / -al) shares the file: writing the copy writes the original
                 for w in ops[:-1]:
                     targets.append((w, w.value, "link-source"))
+            nt = prog in ("cp", "gcp", "install") and no_target_dir(argv)
             for w in ops[:-1]:
-                into = dest.value is not None and any(ctx.fs.isdir(os.path.join(c, dest.value)) if not
+                into = not nt and dest.value is not None and any(ctx.fs.isdir(os.path.join(c, dest.value)) if not
                                                       os.path.isabs(dest.value) else ctx.fs.isdir(dest.value)
                                                       for c in (cmd.cwds or [None]) if c or os.path.isabs(dest.value))
                 if into and w.value is not None:
                     targets.append((dest, os.path.join(dest.value, os.path.basename(w.value.rstrip("/"))), "write"))
                 else:
                     targets.append((dest, dest.value, "write"))
-    elif prog in ("tar", "gtar", "unzip", "ditto", "bsdtar"):
-        extracting = prog in ("unzip", "ditto") or any(
-            a and (a in ("--extract", "--get") or (a.startswith("-") and not a.startswith("--") and "x" in a[1:])
-                   or (i == 0 and not a.startswith("-") and "x" in a)) for i, a in enumerate(argv[1:]))
-        dirs = [w for w in words if w.value and w.value.startswith("--directory=")]
-        for i, w in enumerate(words):
-            if w.value in ("-C", "-d", "--directory") and i + 1 < len(words):
-                dirs.append(words[i + 1])
-        if extracting:
-            for w in dirs:
-                v = w.value.split("=", 1)[1] if w.value and w.value.startswith("--directory=") else w.value
-                targets.append((w, v, "write-dir"))
+    elif prog in EXTRACT_PROGS:
+        pass  # judged by check_bulk
     elif role == "find-print":
         for i, w in enumerate(words):
             if w.value in ("-fprint", "-fprint0", "-fprintf", "-fls") and i + 1 < len(words):
@@ -417,6 +410,8 @@ def check_paths(ctx, cmd, studio_infos):
         if op == "read":
             continue
         check_target(ctx, cmd, w, v, op, studio_infos, s2v=is_s2v)
+    if check_bulk(ctx, cmd, prog, argv, words, studio_infos):
+        ctx.bulk_ids.add(cmd.id)
     # other `--opt=value` / `name=value` paths of ordinary writers (dd of=, --backup-dir=, …)
     if prog in ("cp", "install", "ln", "gcp", "tar", "gtar", "unzip", "ditto", "bsdtar"):
         for w in words:
@@ -424,6 +419,430 @@ def check_paths(ctx, cmd, studio_infos):
                 v = w.value.split("=", 1)[1]
                 if v and looks_like_path(v, cmd, ctx):
                     check_target(ctx, cmd, w, v, "write", studio_infos, s2v=is_s2v)
+
+
+# ---------- writers whose file list is not known in advance (m1-plan §3.1 reviews V1/W1–W4) ----------
+# Archive extractors and recursive copies. One rule: their destination folder must not be (or hold) Studio's
+# folders — the repository root, .claude/**, <sr>/**, .git/** or the git common dir; a recursive copy whose source
+# exists is judged entry by entry instead. Flags that let members leave the folder, and extractors whose behaviour
+# was not measured, are refused in Studio repositories.
+
+EXTRACT_PROGS = ("tar", "gtar", "bsdtar", "unzip", "ditto", "cpio", "pax", "7z", "7za", "7zz", "7zr", "bsdcpio")
+WEAK_7Z = ("7z", "7za", "7zz", "7zr")
+BUSYBOX_EXTRACT = ("tar", "unzip", "cpio", "rpm2cpio", "ar", "dpkg-deb", "rpm")
+WALK_MAX = 500
+BULK_WHY = ("%s writes files the guard cannot list beforehand into %s, which is (or holds) Studio's folders — extract "
+            "or copy into another folder (e.g. a build folder) and copy the files you need.")
+
+
+def _short_has(x, letters):
+    return x is not None and x.startswith("-") and not x.startswith("--") and any(c in x[1:] for c in letters)
+
+
+def _tar_like(prog):
+    return prog in ("tar", "gtar", "bsdtar")
+
+
+def extract_info(prog, argv, words):
+    """(extracting, [(word or None, folder or None)], w1 reason or None). Folder None = not readable; an empty list =
+    the working folder."""
+    a = list(argv[1:])
+    dirs = []
+    w1 = None
+    if _tar_like(prog):
+        ext = any(x is None or x in ("--extract", "--get") or _short_has(x, "x")
+                  or (i == 0 and not x.startswith("-") and "x" in x) for i, x in enumerate(a))
+        for i, w in enumerate(words):
+            v = w.value
+            if v in ("-C", "--directory", "--cd") and i + 1 < len(words):
+                dirs.append((words[i + 1], words[i + 1].value))
+            elif v and v.startswith(("--directory=", "--cd=")):
+                dirs.append((w, v.split("=", 1)[1]))
+            elif v and v.startswith("-C") and len(v) > 2 and not v.startswith("--"):
+                dirs.append((w, v[2:]))
+            elif v is None and w.raw.startswith(("-C", "--directory")):
+                dirs.append((w, None))
+        for i, x in enumerate(a):
+            if x is None:
+                continue
+            if x in ("-P", "--absolute-names") or _short_has(x, "P") or (i == 0 and not x.startswith("-") and "P" in x):
+                w1 = "-P (absolute names)"
+            elif x.startswith(("--transform", "--xform")) or x == "-s":
+                w1 = "%s (renames members)" % x.split("=", 1)[0]
+    elif prog == "unzip":
+        ext = not any(x in ("-l", "-t", "-v", "-z", "-Z", "-p", "-c") for x in a if x)
+        for i, w in enumerate(words):
+            if w.value == "-d" and i + 1 < len(words):
+                dirs.append((words[i + 1], words[i + 1].value))
+            elif w.value and w.value.startswith("-d") and len(w.value) > 2:
+                dirs.append((w, w.value[2:]))
+        if any(x is not None and x.startswith("-") and not x.startswith("--") and ":" in x for x in a):
+            w1 = "-: (keeps ../ in member names)"
+    elif prog == "ditto":
+        ext = any(x == "-x" or _short_has(x, "x") for x in a if x)
+        ops = [w for w in words if w.value is None or not w.value.startswith("-")]
+        if ext and ops:
+            dirs.append((ops[-1], ops[-1].value))
+    elif prog == "cpio":
+        ext = any(x is None or x == "--extract" or _short_has(x, "i") for x in a)
+        for i, w in enumerate(words):
+            if w.value in ("-D", "--directory") and i + 1 < len(words):
+                dirs.append((words[i + 1], words[i + 1].value))
+            elif w.value and w.value.startswith("--directory="):
+                dirs.append((w, w.value.split("=", 1)[1]))
+        if ext and "--no-absolute-filenames" not in a:
+            w1 = "cpio -i without --no-absolute-filenames"
+    elif prog == "pax":
+        ext = True
+        w1 = "pax (its member names are not limited to the folder)"
+    else:
+        return False, [], None
+    return ext, dirs, w1
+
+
+def weak_extractor(prog, argv):
+    """A reason when this is an extractor whose behaviour Studio did not measure (refused in Studio repositories)."""
+    a = [x for x in argv[1:]]
+    if prog in WEAK_7Z:
+        w = next((x for x in a if x is not None and not x.startswith("-")), None)
+        if w is None or w.lower() in ("x", "e"):
+            return "%s extraction" % prog
+    elif prog == "bsdcpio":
+        return "bsdcpio"
+    elif prog == "busybox":
+        if a and (a[0] is None or a[0] in BUSYBOX_EXTRACT):
+            return "busybox %s" % (a[0] or "?")
+    elif prog == "jar":
+        if a and (a[0] is None or a[0].lstrip("-").startswith("x") or "--extract" in a):
+            return "jar extraction"
+    elif prog == "cmake":
+        if len(a) >= 3 and a[0] == "-E" and a[1] == "tar" and (a[2] is None or "x" in a[2]):
+            return "cmake -E tar extraction"
+    elif re.match(r"^python(\d+(\.\d+)*)?$", prog or ""):
+        if "-m" in a:
+            i = a.index("-m")
+            mod = a[i + 1] if i + 1 < len(a) else None
+            if mod in ("tarfile", "zipfile", "shutil") and any(x in ("-e", "--extract") for x in a[i + 2:] if x):
+                return "python -m %s -e" % mod
+    return None
+
+
+def recursive_copy(prog, argv):
+    """'cp' | 'rsync' | 'ditto' | 'rsync-relative' when the command copies trees, else None."""
+    a = [x for x in argv[1:] if x is not None]
+    if prog in ("cp", "gcp"):
+        if any(x in ("--recursive", "--archive") or (x.startswith("-") and not x.startswith("--") and
+                                                     any(c in x[1:] for c in "rRa")) for x in a):
+            return "cp"
+    elif prog == "rsync":
+        rec = any(x in ("--recursive", "--archive") or (x.startswith("-") and not x.startswith("--") and
+                                                        any(c in x[1:] for c in "ra")) for x in a)
+        rel_ = any(x == "--relative" or (x.startswith("-") and not x.startswith("--") and "R" in x[1:]) for x in a)
+        if rel_:
+            return "rsync-relative"
+        if rec:
+            return "rsync"
+    elif prog == "ditto":
+        if not any(x == "-x" or _short_has(x, "x") for x in a):
+            return "ditto"
+    return None
+
+
+def studio_area(ctx, cmd, value, studio_infos):
+    """None, or why the folder `value` is (or holds) Studio's folders: the repository root, .claude/**, <sr>/**,
+    .git/**, the git common dir, or a folder above a Studio repository."""
+    if value is None:
+        return "a folder the guard cannot read" if studio_infos else None
+    for a, real, ri in resolve_all(ctx, cmd, value):
+        if a is None:
+            if studio_infos:
+                return value
+            continue
+        r = real or a
+        for si in studio_infos:
+            wt = os.path.realpath(si.worktree)
+            if wt.startswith(r.rstrip("/") + "/"):
+                return value  # above a Studio repository
+            for d in (si.common_dir, si.git_dir):
+                if d and (r == os.path.realpath(d) or r.startswith(os.path.realpath(d) + "/")):
+                    return value
+        if ri is None or not ri.studio:
+            continue
+        parts, fold = rel(ctx, ri, r)
+        if parts is None:
+            continue
+        if _within(parts, [".claude"], fold):
+            return value + " (to put files under .claude/, copy into it from an existing folder in a separate call, " \
+                           "or copy the files one by one)"
+        if parts == [] or _within(parts, [ri.studio_root], fold):
+            return value  # .git/**: the git dir checks above
+    return None
+
+
+def _walk(root):
+    """Relative entries (folders, files, links — links not followed) of a folder, or None past WALK_MAX."""
+    out = []
+    for d, dirs, files in os.walk(root, followlinks=False):
+        for n in dirs + files:
+            p = os.path.join(d, n)
+            out.append((os.path.relpath(p, root), os.path.islink(p), n in dirs and not os.path.islink(p)))
+            if len(out) > WALK_MAX:
+                return None
+    return out
+
+
+def check_bulk(ctx, cmd, prog, argv, words, studio_infos):
+    """Returns True when the command is a bulk writer in a Studio context (for the later-writer rule, W4)."""
+    weak = weak_extractor(prog, argv)
+    if weak:
+        if studio_infos:
+            ctx.deny("G-PROT", "%s is not an extractor Studio has checked — in a Studio repository, extract outside "
+                               "the repository with tar or unzip and copy the files you need." % weak)
+        return bool(studio_infos)
+    if prog in EXTRACT_PROGS:
+        ext, dirs, w1 = extract_info(prog, argv, words)
+    else:
+        ext, dirs, w1 = False, [], None
+    if prog in EXTRACT_PROGS and (ext or prog != "ditto"):
+        if not ext:
+            return False
+        if w1 and studio_infos:
+            ctx.deny("G-PROT", "%s: %s lets archive members leave the folder — not in a Studio repository." % (prog, w1))
+            return True
+        folders = [v for _w, v in dirs] if dirs else (cmd.run_cwds or cmd.cwds or [None])
+        for v in folders:
+            why = studio_area(ctx, cmd, v, studio_infos)
+            if why:
+                ctx.deny("G-PROT", BULK_WHY % (prog, why))
+                return True
+        return bool(studio_infos)
+    mode = recursive_copy(prog, argv)
+    if mode is None:
+        return False
+    ops = [w for w in words if w.value is None or not w.value.startswith("-")]  # words: the arguments
+    tdir = None
+    for i, w in enumerate(words):
+        if w.value in ("-t",) and i + 1 < len(words):
+            tdir = words[i + 1]
+        elif w.value and w.value.startswith("--target-directory="):
+            tdir = w
+    if tdir is not None:
+        dest = tdir.value.split("=", 1)[1] if tdir.value and tdir.value.startswith("--") else tdir.value
+        srcs = [w for w in ops if w is not tdir and w.value != dest]
+    elif len(ops) >= 2:
+        dest, srcs = ops[-1].value, ops[:-1]
+    else:
+        return False
+    no_target = prog in ("cp", "gcp") and no_target_dir(argv)
+    # the destination rule always (review X2): the walk below is a snapshot and a tool's landing can differ from the
+    # model (GNU -T); it only adds checks for other destinations
+    for b in [dest] + [x for sw in srcs for x in _copy_bases(ctx, cmd, mode, sw.value, dest, no_target)]:
+        why = studio_area(ctx, cmd, b, studio_infos)
+        if why:
+            ctx.deny("G-PROT", BULK_WHY % (prog, why))
+            return True
+    for sw in srcs:
+        sv = sw.value
+        bases = _copy_bases(ctx, cmd, mode, sv, dest, no_target)
+        entries = None
+        if sv is not None and mode != "rsync-relative":
+            for a, real, _ri in resolve_all(ctx, cmd, sv):
+                if real and ctx.fs.isdir(real):
+                    entries = _walk(real)
+                elif real and ctx.fs.exists(real):
+                    entries = []
+                break
+        if entries is None:
+            continue  # nothing more to know: the destination rule above decided
+        for b in bases:
+            if b is None:
+                continue
+            for rel_path, is_link, is_dir in entries:
+                target = os.path.join(b, rel_path)
+                if is_dir and _real_dir(ctx, cmd, target):
+                    continue  # merged into a folder that is already there: its files are judged one by one
+                check_target(ctx, cmd, sw, target, "write", studio_infos)  # e.g. a team-shared hook file
+    return bool(studio_infos)
+
+
+def _real_dir(ctx, cmd, value):
+    found = [a for a, _r, _ri in resolve_all(ctx, cmd, value) if a]
+    return bool(found) and all(os.path.isdir(a) and not os.path.islink(a) for a in found)
+
+
+def no_target_dir(argv):
+    """cp/gcp/install -T / --no-target-directory: the destination is the copy itself, never a folder to copy into."""
+    return any(x is not None and (x == "--no-target-directory" or (x.startswith("-") and not x.startswith("--")
+                                                                    and "T" in x[1:])) for x in argv[1:])
+
+
+def _copy_bases(ctx, cmd, mode, src, dest, no_target=False):
+    """Where a source's entries land (more than one when the tool's semantics differ — both are judged)."""
+    if dest is None:
+        return [None]
+    if no_target:
+        return [dest]
+    into = any(ctx.fs.isdir(r) for _a, r, _ri in resolve_all(ctx, cmd, dest) if r)
+    if src is None:
+        return [dest]
+    name = os.path.basename(src.rstrip("/")) or "."
+    contents = src.endswith("/.") or src == "." or name == "."
+    if mode in ("rsync", "rsync-relative"):
+        return [dest] if src.endswith("/") or contents else [os.path.join(dest, name)]
+    if mode == "ditto":
+        return [dest]
+    # cp: GNU copies the folder itself unless `/.`; BSD (macOS) copies the contents for a trailing `/`
+    if contents:
+        return [dest]
+    if not into:
+        return [dest]
+    out = [os.path.join(dest, name)]
+    if src.endswith("/"):
+        out.append(dest)
+    return out
+
+
+SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
+SHELL_DEPTH = 3
+
+
+INNER_KINDS = ("shell-c", "eval", "env-S", "script", "source", "stdin-interp")
+SCRIPT_OPTS_VALUE = ("-t", "-T", "-I", "-O", "-B", "-E", "-m", "-c", "-F")  # script(1) options taking a value
+
+
+def check_shell_strings(ctx, sc, infos, depth):
+    """W2 / X1: the path rules (extractions, recursive copies, later writers) for code the shell runs from text:
+    literal `sh -c` / `eval` / `env -S` strings, script files run or sourced (`bash f`, `. f`, `bash < f`) and
+    `script … <cmd>`, in the host's folder; nested up to SHELL_DEPTH. In a Studio repository, code the guard cannot
+    read (an unreadable script, a non-literal string, a command word from a variable or a substitution, `xargs … sh
+    -c`) is refused."""
+    by_id = {c.id: c for c in sc.commands}
+    texts = []  # (host command, text)
+    for o in sc.opaque:
+        host = by_id.get(o.cmd)
+        if o.kind == "dynamic-command":
+            unknown(ctx, infos, "a command word or a shell string built at run time")
+            continue
+        if o.kind == "xargs" and re.match(r"^(\S*/)?(sh|bash|zsh|dash|ksh)\b", o.payload or ""):
+            unknown(ctx, infos, "xargs feeding text to a shell")
+            continue
+        if o.kind not in INNER_KINDS:
+            continue
+        if host is not None and "exec-by-program" in (host.flags or ()):
+            continue  # the template of an xargs/find -exec (judged above)
+        if o.kind in ("script", "stdin-interp") and (host is None or os.path.basename(host.prog or "") not in SHELLS):
+            continue  # another interpreter's code (python, node, …): the opaque rules (G-OPAQUE) decide
+        text = o.payload
+        if o.kind in ("shell-c", "eval", "env-S") and (o.origin != "literal" or text is None or (
+                host is not None and any(w.value is None for w in host.words[1:]))):
+            unknown(ctx, infos, "%s with text the guard cannot read" % o.kind)
+            continue
+        if text is None:
+            unknown(ctx, infos, "a script the guard cannot read")
+            continue
+        if o.kind == "env-S":
+            text = re.sub(r"^\s*(-S|--split-string=?)\s*", "", text)
+        texts.append((host, text, o.cwds))
+    for c in sc.commands:
+        w0 = c.words[0] if c.words else None
+        if w0 is not None and ("$" in (w0.raw or "") or "`" in (w0.raw or "")) and w0.value != "":
+            unknown(ctx, infos, "a command word taken from a variable or a substitution (%s)" % w0.raw)
+        if c.prog == "script":
+            inner = script_inner(c)
+            if inner is None:
+                unknown(ctx, infos, "script(1) running a command the guard cannot read")
+            elif inner:
+                texts.append((c, inner, None))
+    for host, text, ocwds in texts:
+        cwds = (host.run_cwds or host.cwds) if host is not None else ocwds
+        if not cwds or len(cwds) != 1:
+            unknown(ctx, infos, "code run from a folder the guard cannot tell")
+            continue
+        if depth >= SHELL_DEPTH:
+            unknown(ctx, infos, "code nested deeper than %d levels" % SHELL_DEPTH)
+            continue
+        sub = scan_command(text, cwds[0], ctx.env, snapshot=ctx.snap, snapshot_notes=(), terms=None, fs=ctx.fs,
+                           budget=limits.Budget())
+        if sub.status != "ok":
+            unknown(ctx, infos, "code the guard cannot parse")
+            continue
+        outer, ctx.bulk_ids = ctx.bulk_ids, set()  # the inner command ids are their own
+        try:
+            for c in sub.commands:
+                ctx.current = c
+                check_paths(ctx, c, infos)
+            ctx.current = None
+            check_shell_strings(ctx, sub, infos, depth + 1)
+            inner = ctx.bulk_ids
+        finally:
+            ctx.bulk_ids = outer
+        if inner:
+            bulk_then_write(ctx, sub.commands, inner)
+            if host is not None:
+                ctx.bulk_ids.add(host.id)
+
+
+def unknown(ctx, infos, what):
+    if infos:
+        ctx.deny("G-OPAQUE", "%s runs code the guard cannot check in a Studio repository — write the commands directly "
+                             "(literal words), one step per call." % what)
+
+
+def script_inner(c):
+    """The command script(1) runs, as shell text: '' for none, None when not literal. BSD: script [opts] [file
+    [cmd …]]; util-linux: script [opts] -c 'cmd' [file]."""
+    vals = [w.value for w in c.words[1:]]
+    if any(v is None for v in vals):
+        return None
+    i, rest = 0, []
+    while i < len(vals):
+        v = vals[i]
+        if v == "-c" and i + 1 < len(vals):
+            return vals[i + 1]
+        if v == "--":
+            rest = vals[i + 1:]
+            break
+        if v.startswith("-") and len(v) > 1:
+            i += 2 if v in SCRIPT_OPTS_VALUE else 1
+            continue
+        rest = vals[i:]
+        break
+    if len(rest) <= 1:
+        return ""
+    import shlex
+    return " ".join(shlex.quote(x) for x in rest[1:])
+
+
+def bulk_then_write(ctx, commands, bulk_ids):
+    """W4: after an extraction or a recursive copy in a Studio repository, no other writing command in the same call
+    (what the bulk writer put down could be moved into Studio's folders before the guard sees it)."""
+    seen = False
+    for c in commands:
+        if seen and is_writer(c):
+            ctx.deny("G-PROT", "%s runs after an archive extraction or a recursive copy in the same call — run the "
+                               "extraction or copy alone, then run the next step in a separate call."
+                     % (c.prog or "a command"))
+            return
+        if c.id in bulk_ids:
+            seen = True
+
+
+def is_writer(c):
+    prog = c.prog or ""
+    if any(r.target is not None and r.mode in ("write", "append", "rw") for r in c.redirs):
+        return True
+    if prog in protect.READ_ALLOW and prog not in ("find", "bfs"):
+        return False
+    if prog in ("find", "bfs"):
+        return any(w.value in protect.FIND_WRITE for w in c.words if w.value)
+    if prog == "git" and c.git is not None and c.git.sub in protect.GIT_READ:
+        return False
+    return True
+
+
+def hard_link_copy(argv):
+    return any(x is not None and (x == "--link" or (x.startswith("-") and not x.startswith("--") and "l" in x[1:]))
+               for x in argv[1:])
 
 
 def check_target(ctx, cmd, word, value, op, studio_infos, s2v=False):
@@ -441,6 +860,10 @@ def check_target(ctx, cmd, word, value, op, studio_infos, s2v=False):
                 judge_parts(ctx, cmd, word, value, parts, sri, False, op, s2v, None)
             continue
         if op == "link-source":
+            if ri is not None and hookfiles.hit(ri, real, "delete"):
+                ctx.deny("G-PROT", "%s links %s, which holds %s — writing through the link would change it."
+                         % (cmd.prog or "the command", value, HOOK_WHY))
+                continue
             if ri is not None and ri.studio:
                 parts, fold = rel(ctx, ri, real)
                 if parts is not None:
@@ -490,9 +913,17 @@ def judge_parts(ctx, cmd, word, value, parts, ri, fold, op, s2v, real):
     sr = ri.studio_root
     if op == "link-source":
         tid = protect.classify(parts, sr, fold)
+        if not tid and real is not None and ctx.fs.isdir(real):
+            tid = protect.delete_hits(parts, sr, fold, is_dir=True)  # a folder that holds protected files (cp -al)
         if tid:
-            ctx.deny("G-PROT", "ln %s links a protected Studio file (%s) — writing through the link would change it."
-                     % (value, protect.BY_ID[tid][2]))
+            if tid == "P-ANC":
+                what = "which holds Studio's folders"
+            elif real is not None and ctx.fs.isdir(real):
+                what = "which holds protected Studio files (%s)" % protect.BY_ID[tid][2]
+            else:
+                what = "a protected Studio file (%s)" % protect.BY_ID[tid][2]
+            ctx.deny("G-PROT", "%s links %s, %s — writing through the link would change it."
+                     % (cmd.prog or "ln", value, what))
         return
     if op == "write-dir":
         for tid, pats, cls, who in protect.TABLE:
@@ -511,6 +942,16 @@ def judge_parts(ctx, cmd, word, value, parts, ri, fold, op, s2v, real):
             what = "the repository root or an ancestor of Studio's folders" if tid == "P-ANC" else \
                 protect.BY_ID[tid][2] + " data"
             ctx.deny("G-DEL", "%s deletes %s, which holds %s that git cannot restore." % (cmd.prog, value, what))
+        return
+    if op == "write" and effective(cmd)[0] in protect.CREATORS and protect.local_anchor(parts, sr, fold):
+        # a link, a moved or a copied tree in place of the machine-local folder would put files there that no
+        # Studio script wrote (machine.json, pending approvals) — only a real folder (mkdir) (m1-plan §3.1 review U1)
+        ctx.deny("G-PROT", "%s creates %s, Studio's machine-local folder (or a folder above it) — it may only be a "
+                           "real folder made with mkdir; ask the user." % (cmd.prog or "the command", value))
+        return
+    if op == "write" and effective(cmd)[0] == "ln" and protect.may_hold_protected(parts, sr, fold):
+        ctx.deny("G-PROT", "ln %s: Studio does not follow links under %s/ (or its own folders); reference the file "
+                           "by its relative path (assets.json script_src) or copy it." % (value, sr))
         return
     tid = protect.classify(parts, sr, fold)
     if tid is None:
@@ -656,6 +1097,73 @@ def spec_parts(ctx, ri, run_cwd, spec):
     return parts, fold, real
 
 
+GIT_NEW_VALUE_OPTS = {"-b", "-B", "--reason", "--orphan", "-o", "--origin", "--branch", "--template",
+                      "--separate-git-dir", "--reference", "--reference-if-able", "--depth", "--shallow-since",
+                      "--shallow-exclude", "-c", "--config", "--server-option", "--filter", "-u", "--upload-pack",
+                      "-j", "--jobs", "--bundle-uri", "--object-format", "--ref-format", "--initial-branch"}
+
+
+def check_git_new_checkout(ctx, cmd):
+    """`git worktree add` / `git clone` / `git init` with a folder inside Studio's folders would fill them with files
+    no Studio script wrote (a branch's local/ — machine.json, pending approvals; m1-plan §3.1 review V1)."""
+    g = cmd.git
+    args = [w.value for w in g.args]
+    if g.sub == "worktree" and args[:1] == ["add"]:
+        rest, sub = g.args[1:], "worktree add"
+    elif g.sub in ("clone", "init"):
+        rest, sub = g.args, g.sub
+    else:
+        return False
+    pos, skip = [], False
+    for w in rest:
+        v = w.value
+        if skip:
+            skip = False
+            if v is not None and g.sub == "init" and w is not None:
+                pass
+            continue
+        if v is None:
+            pos.append(None)
+            continue
+        if v.startswith("-"):
+            if v in GIT_NEW_VALUE_OPTS:
+                skip = True
+            if v.startswith("--separate-git-dir="):
+                pos.append(v.split("=", 1)[1])
+            continue
+        pos.append(v)
+    if g.sub == "clone":
+        if len(pos) >= 2:
+            dests = pos[1:2]
+        elif pos and pos[0] is not None:
+            dests = [os.path.basename(pos[0].rstrip("/")).rsplit(".git", 1)[0] or "."]
+        else:
+            dests = pos[:1]
+    elif g.sub == "init":
+        dests = pos[:1] or ["."]
+    else:
+        dests = pos[:1]
+    # --separate-git-dir <dir> of init/clone also writes a git folder
+    for i, w in enumerate(rest):
+        if w.value == "--separate-git-dir" and i + 1 < len(rest):
+            dests.append(rest[i + 1].value)
+    for d in dests:
+        if d is None:
+            continue
+        for a, real, ri in resolve_all(ctx, cmd, d):
+            if real is None or ri is None or not ri.studio:
+                continue
+            parts, fold = rel(ctx, ri, real)
+            if parts is None:
+                continue
+            if any(_within(parts, anc, fold) for anc in ([ri.studio_root], [".claude", "studio"])):
+                ctx.deny("G-PROT", "git %s %s would create a checkout inside Studio's folders (%s) — its files would "
+                                   "stand where only Studio's scripts write; use a folder outside them."
+                         % (sub, d, "/".join(parts)))
+                return True
+    return False
+
+
 def check_git(ctx, cmd, studio_infos):
     g = cmd.git
     if g is None:
@@ -664,6 +1172,8 @@ def check_git(ctx, cmd, studio_infos):
     if g.sub is None or dyn_global:
         if dyn_global and studio_infos:
             ctx.deny("G-RESET", "git with %s (not a literal) cannot be checked — write the path." % dyn_global[0])
+        return
+    if check_git_new_checkout(ctx, cmd):
         return
     target = git_target(ctx, cmd)
     if isinstance(target, str):
@@ -906,6 +1416,17 @@ def check_env(ctx, cmd):
                             continue
                 ctx.deny("G-ENV", "%s changes %s for an %s call — that bypasses the machine lock (S2V_STATE_DIR "
                                   "must be the guard's own)." % (cmd.prog or what, name, what))
+    if studio_script(ctx, cmd):
+        # Studio's scripts find the repository (and its used-answer record) through git: a redirected git folder
+        # would make them use a copy (m1-plan §3.2 review U2)
+        moved = sorted(n for n in set(v.set) | set(v.unset) if n in commitrule.GIT_ENV or n in GIT_ENV_TARGET
+                       or n.startswith("GIT_CONFIG"))
+        if v.cleared:
+            moved.append("env -i")
+        if moved:
+            ctx.deny("G-ENV", "%s runs with %s changed — Studio's scripts use the repository's own git folder; run "
+                              "them without git variables." % (os.path.basename(studio_script(ctx, cmd)),
+                                                               ", ".join(moved)))
     is_commit = (cmd.git is not None and cmd.git.sub == "commit") or studio_script(ctx, cmd, "check_commit.py")
     if is_commit:
         if v.cleared or any(n in v.set or n in v.unset for n in MARKER_VARS):
@@ -1057,6 +1578,9 @@ def decide_bash(ctx, command):
         check_out_of_repo(ctx, c)
         check_paths(ctx, c, infos)
     ctx.current = None
+    check_shell_strings(ctx, sc, infos, 0)  # adds the host `sh` of a string that extracts or copies trees
+    if ctx.bulk_ids:
+        bulk_then_write(ctx, sc.commands, ctx.bulk_ids)
     if not infos:
         return sc, infos
     if STUDIO_NAMES_RE.search(command):
@@ -1215,6 +1739,9 @@ def commit_evidence(ctx, cmd, ri, out):
             ans = transcript.find(hook, ctx.env)
             # with a summary line (M0f) the question must show it verbatim; it holds tree12, so F9 is not needed
             idx, text, _note = transcript.choose(ans, label, None if line else out.tree[:12])
+            if approve.consumed(ri, (sid, ans.tool_use_id, idx)):
+                # the record is shared by the repository's worktrees: an answer approves one commit (m1-plan §3.2)
+                raise transcript.NoEvidence("consumed")
             if line:
                 from ..commit import summary as csum
                 if not csum.shown_in(line, text):

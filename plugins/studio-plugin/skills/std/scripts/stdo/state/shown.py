@@ -52,14 +52,16 @@ def shown_hash(ctx, state, lang, cur, gate, scope):
 
 
 def hash12(state, lang, gate, recorded=None):
-    """The label hash of a gate: all current scopes' shown hashes (None until all were shown)."""
+    """The label hash of a gate: the video, the language, the gate and all current scopes' shown hashes (None
+    until all were shown). The video, language and gate are in it so that two videos (or languages, or gates)
+    with the same content never share a label (m1-plan §3.2)."""
     rec = recorded if recorded is not None else state["langs"][lang]["shown"].get(gate, {})
     pairs = []
     for sc in scopes(state, lang, gate):
         if sc not in rec:
             return None
         pairs.append([sc, rec[sc]["hash"] if isinstance(rec[sc], dict) else rec[sc]])
-    return hash_of(sorted(pairs))[:12]
+    return hash_of({"video": state["video"], "lang": lang, "gate": gate, "shown": sorted(pairs)})[:12]
 
 
 def frames_stamp(path):

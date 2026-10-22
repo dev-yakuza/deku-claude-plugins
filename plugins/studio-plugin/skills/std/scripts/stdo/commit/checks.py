@@ -39,6 +39,7 @@ class Staged(object):
         names = [p for _s, p in self.all]
         # a leak adds or changes a local/ file; unstaging or deleting one (status D) is not a leak
         self.local = [p for st, p in self.all if st != "D" and ctx.cls.is_local(p)]
+        self.links = ctx.cls.links(ctx.git, None, [p for st, p in self.all if st != "D"])
         self.gi_kind = "none"
         if spaths.GITIGNORE in names:
             old = ctx.git.show("%s:%s" % (ctx.head, spaths.GITIGNORE)) if ctx.head else None
@@ -80,8 +81,12 @@ class Staged(object):
 
 
 def local_problems(st):
-    return [Problem(1, "%s is a machine-only Studio file (local/) staged to be added or changed — it is never "
-                       "committed. Unstage it: git restore --staged -- '%s'" % (p, p), p) for p in st.local]
+    out = [Problem(1, "%s is a machine-only Studio file (local/) staged to be added or changed — it is never "
+                      "committed. Unstage it: git restore --staged -- '%s'" % (p, p), p) for p in st.local]
+    out += [Problem(1, "%s is a symbolic link in Studio's folders — a checkout would make it a real link that Studio "
+                       "reads through. Unstage it: git restore --staged -- '%s'" % (p, p), p)
+            for p in getattr(st, "links", []) if p not in st.local]
+    return out
 
 
 def mixed_problem(ctx, st):
@@ -104,11 +109,17 @@ def session(env):
     return False, None
 
 
+def local_link_problem(ctx):
+    """`.claude/studio/local/` (or `<sr>/local/`) is a symbolic link: nothing there is read or written (review U1)."""
+    why = paths.local_problem(ctx.top, ctx.roots[0] if ctx.roots else None)
+    return Problem(1, why) if why else None
+
+
 def guard_ran_problem(ctx):
     claude, sid = session(ctx.env)
     if not claude:
         return None
-    if sid:
+    if sid and not paths.local_problem(ctx.top):
         p = os.path.join(ctx.top, ".claude", "studio", "local", "guard-ran.json")
         try:
             with open(p, encoding="utf-8") as f:
@@ -268,6 +279,41 @@ def approval_problem(ctx, ok, sid, tree):
     return Problem(1, NOT_SEEN % label)
 
 
+def answer_key(ap):
+    return (ap.get("session_id"), ap.get("tool_use_id"), ap.get("question_index"))
+
+
+def used_answers(ctx):
+    """The repository-wide used-answer keys (m1-plan §3.2: `<git common dir>/studio/consumed-answers.jsonl`)."""
+    from ..state import evidence
+    try:
+        return evidence.consumed_keys(ctx.top, log=paths.consumed_log(ctx.top))
+    except RuntimeError:
+        return set()
+
+
+def consume_answer(ctx, ok):
+    """Record the person's commit answer as used once the hook passed (Problem when it cannot be recorded): the same
+    answer never approves another commit, in this worktree or another (m1-plan §3.2)."""
+    claude, _sid = session(ctx.env)
+    ap = ok.get("approval") if isinstance(ok, dict) else None
+    if not claude or not isinstance(ap, dict) or ap.get("mode") != "human":
+        return None
+    from ..state import evidence, store
+    try:
+        with evidence.ConsumptionLock(ctx.top):
+            if answer_key(ap) in used_answers(ctx):
+                return Problem(1, "the person's answer \"%s\" was used already (in this or another worktree — an "
+                                  "earlier commit that the hook passed but that did not finish also uses it up) — "
+                                  "stage again and ask the person again" % ok.get("label"))
+            evidence.consume(ctx.top, {"session_id": ap.get("session_id"), "tool_use_id": ap.get("tool_use_id"),
+                                       "question_index": ap.get("question_index")}, ok.get("target"),
+                             "commit %s" % ok.get("kind"), log=paths.consumed_log(ctx.top))
+    except (store.Busy, store.Unsupported, OSError, RuntimeError) as e:
+        return Problem(1, "cannot record the person's commit answer as used (%s) — retry the commit" % e)
+    return None
+
+
 def staged_check(ctx):
     """(code, problems) of the pre-commit hook."""
     problems = []
@@ -290,6 +336,9 @@ def staged_check(ctx):
                                        "repository is the person's removal procedure (in a terminal)", spaths.CONFIG))
         # a branch without the harness: only the local check applies (00-plan §3.4)
         return code_of(problems), problems
+    lp = local_link_problem(ctx)
+    if lp:
+        problems.append(lp)
     g = guard_ran_problem(ctx)
     if g:
         problems.append(g)
@@ -308,6 +357,10 @@ def staged_check(ctx):
         problems += ok_problems(ctx, st, ok)
         problems += kind_problems(ctx, ok.get("kind"), st.studio)
     problems += video_problems(ctx, st.studio)
+    if not problems:
+        c = consume_answer(ctx, ok)
+        if c:
+            problems.append(c)
     return code_of(problems), problems
 
 

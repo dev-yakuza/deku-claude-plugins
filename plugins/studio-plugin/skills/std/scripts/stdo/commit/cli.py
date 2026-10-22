@@ -23,6 +23,8 @@ MAX_LIST = 10
 
 def _report(head, problems, warnings=(), stream=None):
     stream = stream or sys.stderr
+    seen = set()
+    problems = [p for p in problems if not (p.message in seen or seen.add(p.message))]  # one line per reason
     lines = []
     if problems:
         lines.append("%s: refused (%d problem%s)." % (head, len(problems), "" if len(problems) == 1 else "s"))

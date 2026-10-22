@@ -8,6 +8,8 @@ import json
 import os
 import time
 
+from .. import paths
+
 KEEP_DAYS = 30
 WAIT = 0.5
 
@@ -32,6 +34,8 @@ def record(worktree, session_id, may_create, now=None):
     if not session_id:
         return False
     local = os.path.join(worktree, ".claude", "studio", "local")
+    if paths.local_problem(worktree):
+        return False  # never through a link (m1-plan §3.1 review U1)
     try:
         if not os.path.isdir(local):
             if not may_create:
@@ -68,7 +72,7 @@ def record(worktree, session_id, may_create, now=None):
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp, path)
-            return True
+            return not paths.local_problem(worktree)
         finally:
             os.close(fd)
     except OSError:

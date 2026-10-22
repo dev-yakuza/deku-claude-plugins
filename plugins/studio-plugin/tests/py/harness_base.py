@@ -55,9 +55,12 @@ class HarnessCase(StudioTestCase):
 
     def approve_as_guard(self, sid=SID, mode="human"):
         ok, _ = okfile.read(self.repo)
+        # each approval is a new answer (an answer is used once in the repository, m1-plan §3.2)
+        self._answers = getattr(self, "_answers", 0) + 1
         okfile.set_approval(self.repo, {"mode": mode, "tree": ok["tree"], "head": ok["head"], "session_id": sid,
-                                        "answer": ok["label"], "summary": ok.get("summary"), "tool_use_id": "t",
-                                        "question_index": 0, "at": "2026-10-21T00:00:00Z"})
+                                        "answer": ok["label"], "summary": ok.get("summary"),
+                                        "tool_use_id": "t%d" % self._answers, "question_index": 0,
+                                        "at": "2026-10-21T00:00:00Z"})
 
     def commit(self, msg="harness", env=None, *extra):
         return self.git("commit", "-q", "-m", msg, *extra, check=False, env=env)

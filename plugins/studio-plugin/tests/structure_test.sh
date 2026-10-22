@@ -64,6 +64,14 @@ for c in files - {"help"}:
     check("Not implemented yet" in open(os.path.join(skill, "commands", c + ".md")).read(),
           "commands/%s.md says not implemented yet (M0)" % c)
 
+# parallel-call contract (m1-plan §3.5): every command document that runs an approval asks first and runs the
+# approval command alone in a later message
+for p in glob.glob(os.path.join(skill, "commands", "**", "*.md"), recursive=True):
+    body = open(p).read()
+    if re.search(r"state\.py approve(?![-\w])", body):
+        check("never in the same message" in body,
+              "%s: a gate is the question, then (a later message) one approval command" % os.path.relpath(p, skill))
+
 # result contract identical
 blocks = []
 for p in glob.glob(os.path.join(skill, "**", "*.md"), recursive=True):
@@ -160,7 +168,7 @@ for d in ("commit", "hooks"):
     for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
         check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
               "%s (copied into repositories) does not import the guard (plugin only)" % os.path.relpath(p, skill))
-check(sv and sv.group(1) == "8", "SCRIPTS_VERSION is 8 (M0f: harness commit kind, manifest, summary line)")
+check(sv and sv.group(1) == "9", "SCRIPTS_VERSION is 9 (M1a: machine-local s2v path, video labels, shared used-answer record)")
 from stdo import manifest as _man
 _mp = os.path.join(scripts, _man.NAME)
 check(os.path.exists(_mp) and open(_mp).read() == _man.render(scripts, sv.group(1)),

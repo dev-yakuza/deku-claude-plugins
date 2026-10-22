@@ -128,10 +128,18 @@ def transcript_path(env, session_id="sess-1", key="-repo"):
     return os.path.join(cfg, "projects", key, session_id + ".jsonl")
 
 
+def default_qtext(label):
+    parts = label.split(" ")
+    if len(parts) >= 3:  # "<word> <video> <hash or lang …>"
+        return "[%s] 이 결과를 승인할까요? (%s)" % (parts[1], " ".join(parts[2:]))
+    return "이 결과를 승인할까요? (%s)" % label.split(" ", 1)[-1]
+
+
 def approval_turn(t, label, ask_id="toolu_ask1", call_id="toolu_cmd1", qtext=None, other_label="수정해 줘",
                   chosen=None, **answer_kw):
-    """A turn: the person's prompt, an AskUserQuestion with the fixed label, the answer, then the command's tool_use."""
-    qtext = qtext or "이 결과를 승인할까요? (%s)" % label.split(" ", 1)[-1]
+    """A turn: the person's prompt, an AskUserQuestion with the fixed label, the answer, then the command's tool_use.
+    The default question text shows what the guard needs: `[<video>]` first for a video's label, and the hash."""
+    qtext = qtext or default_qtext(label)
     qs = [question(qtext, [label, other_label])]
     t.user_prompt("진행해")
     t.ask(ask_id, qs)
@@ -143,3 +151,33 @@ def approval_turn(t, label, ask_id="toolu_ask1", call_id="toolu_cmd1", qtext=Non
 def fixture_lines(name):
     with open(os.path.join(FIXTURES, name + ".jsonl"), encoding="utf-8") as f:
         return [json.loads(l) for l in f if l.strip()]
+
+
+def relabeled(name, video):
+    """A copy of a measured fixture in the M1a label form (m1-plan §3.3): every `<word> <hash12>` label becomes
+    `<word> <video> <hash12>` and every AskUserQuestion text starts with `[<video>]` (keys of `answers` and the
+    result text included). The measured files themselves stay as recorded."""
+    import re
+    lines = fixture_lines(name)
+    texts = set()
+    for d in lines:
+        for b in ((d.get("message") or {}).get("content") or []) if isinstance(d.get("message"), dict) else []:
+            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion":
+                for q in (b.get("input") or {}).get("questions") or []:
+                    texts.add(q["question"])
+    label_re = re.compile(r"(승인|거부|재고정|제외) ([0-9a-f]{12})\b")
+
+    def fix(s):
+        s = label_re.sub(lambda m: "%s %s %s" % (m.group(1), video, m.group(2)), s)
+        for q in sorted(texts, key=len, reverse=True):
+            if q in s and ("[%s] %s" % (video, q)) not in s:
+                s = s.replace(q, "[%s] %s" % (video, q))
+        return s
+
+    def walk(o):
+        if isinstance(o, dict):
+            return {(fix(k) if isinstance(k, str) else k): walk(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [walk(v) for v in o]
+        return fix(o) if isinstance(o, str) else o
+    return [walk(d) for d in lines]

@@ -23,7 +23,8 @@ TABLE = [
     ("P-PERS", (".claude/agents/std-fact-checker.md", ".claude/agents/std-source-analyst.md"), "persona", "the person"),
     ("P-WIRE", (".claude/studio/scripts/**",), "wiring", "the person (/std update)"),
     ("P-CONF", (".claude/studio/config.json",), "config", "the person (protected keys)"),
-    ("P-CONF-L", (".claude/studio/local/config.internal.json",), "config", "the person"),
+    ("P-CONF-L", (".claude/studio/local/config.internal.json", ".claude/studio/local/machine.json"), "config",
+     "the person (/std config; machine.json: /std config s2v.path)"),
     ("P-CHAR", ("<sr>/**/cast/*/character/**",), "character", "s2v and lock.py actor-op (write character.yaml.draft)"),
     ("P-CRED", ("<sr>/**/CREDITS.yaml",), "credits", "state.py credit (write CREDITS.draft.yaml)"),
     ("P-VOICE", ("<sr>/**/voices/**",), "voices", "s2v"),
@@ -50,6 +51,30 @@ GIT_PATHSPEC_WRITE = {"add", "rm", "mv", "restore", "checkout"}
 FIND_WRITE = ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls")
 DELETE_PROGS = {"rm", "rmdir", "unlink", "trash", "shred", "srm", "rimraf", "del", "trash-put", "trash-rm",
                 "del-cli", "rimraf-cli"}
+
+
+# programs that can put a link, a moved folder or a copied tree at a path (dest of ln/mv/cp/…)
+CREATORS = {"ln", "mv", "cp", "gcp", "install", "rsync", "ditto"}
+LOCAL_ANCHORS = ((".claude", "studio", "local"), ("<sr>", "local"))
+
+
+def local_anchor(parts, sr, fold):
+    """`parts` is a machine-local folder (`.claude/studio/local`, `<sr>/local`) or a folder above one."""
+    if not parts:
+        return False
+    for anc in LOCAL_ANCHORS:
+        full = []
+        for x in anc:
+            full += [y for y in sr.strip("/").split("/") if y] if x == "<sr>" else [x]
+        if len(parts) <= len(full) and all((a.casefold() == b.casefold()) if fold else a == b
+                                           for a, b in zip(parts, full)):
+            return True
+    return False
+
+
+def may_hold_protected(parts, sr, fold):
+    """A folder at `parts` could hold a protected path (any table entry, local/ included)."""
+    return bool(parts) and any(_may_contain(parts, _expand(p, sr), fold) for _t, pats, _c, _w in TABLE for p in pats)
 
 
 def norm(p):

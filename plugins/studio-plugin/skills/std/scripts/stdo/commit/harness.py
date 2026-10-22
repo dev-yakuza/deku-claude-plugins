@@ -29,6 +29,17 @@ SCOPE_RE = re.compile(r"^\s*(<!--\s*)?scope:\s*internal\b", re.I | re.M)
 MIN_TERM = 4
 
 
+def old_s2v_path(cfg):
+    """config.json in the format before M1a: a machine's s2v folder in a committed file (m1-plan §3.1)."""
+    s2v = cfg.get("s2v") if isinstance(cfg, dict) else None
+    return isinstance(s2v, dict) and "path" in s2v
+
+
+OLD_FORMAT = Problem(1, "config.json has s2v.path — the old format: this machine's s2v path now lives in "
+                        ".claude/studio/local/machine.json (not committed). Remove \"path\" from config.json's s2v "
+                        "and set the path with /std config s2v.path", spaths.CONFIG)
+
+
 def _content(p):
     """Guides, criteria, platform rules and other content files (H3 with a missing overlay, m0f-plan Q2)."""
     return (p in CONTENT or p.startswith(CONTENT_DIRS)) and p != spaths.CONFIG
@@ -56,6 +67,8 @@ class HarnessKind(object):
         cached = ctx.git.text("diff", "--name-only", "-z", "--no-renames", ctx.head or ctx.git.empty_tree(), *specs)
         found = sorted(set(p for p in (raw + "\0" + cached).split("\0") if p and self.allowed(ctx, p)))
         problems = []
+        if old_s2v_path(ctx.cfg):
+            problems.append(OLD_FORMAT)  # also when config.json itself is not part of this commit
         gi = False
         try:
             with open(os.path.join(ctx.top, spaths.GITIGNORE), "rb") as f:
@@ -121,6 +134,8 @@ class HarnessKind(object):
             if cfg is None:
                 out.append(Problem(2, ".claude/studio/config.json is not a JSON object", spaths.CONFIG))
             else:
+                if old_s2v_path(cfg):
+                    out.append(OLD_FORMAT)  # the committed blob (the work tree copy may say otherwise)
                 old = _json(git.show("%s:%s" % (ctx.head, spaths.CONFIG))) if ctx.head else None
                 if isinstance(old, dict) and (old.get("studio_root") or "studio") != (cfg.get("studio_root") or "studio"):
                     out.append(Problem(3, "studio_root changes — moving Studio's folder is not supported yet (M1)",

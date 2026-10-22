@@ -43,6 +43,9 @@ def run(ctx, kind_name, target):
         return 3, checks.kind_problems(ctx, kind_name, []), None
     st = checks.Staged(ctx)
     problems = checks.local_problems(st)
+    lp = checks.local_link_problem(ctx)
+    if lp:
+        problems.append(lp)
     if not st.progress:
         others = [p for p in st.other]
         if others:

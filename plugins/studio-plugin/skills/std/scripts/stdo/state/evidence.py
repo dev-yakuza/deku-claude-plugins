@@ -1,5 +1,7 @@
 """The guard's evidence of a person's answer (`.claude/studio/local/pending-approval.json`) and
-its one-use consumption record (m0b2-plan §1).
+its one-use consumption record (m0b2-plan §1). The record and its lock live in the git common dir
+(`<common>/studio/consumed-answers.{jsonl,lock}`, m1-plan §3.2): an answer is used once in the whole
+repository, whichever worktree used it. The pending file stays per worktree.
 
 Lock order (the only one): consumption lock (this module) -> the video's lock (store.write).
 Commands that take only the video lock never take the consumption lock."""
@@ -9,6 +11,7 @@ import json
 import os
 import time
 
+from .. import paths
 from . import schema
 from .argv import argv_sha
 
@@ -30,12 +33,12 @@ def pending_path(repo):
 
 
 def consumed_path(repo):
-    return os.path.join(local_dir(repo), "consumed-answers.jsonl")
+    return paths.consumed_log(repo)
 
 
 class ConsumptionLock(object):
     def __init__(self, repo, wait=2.0):
-        self.path = os.path.join(local_dir(repo), "consumed-answers.lock")
+        self.path = paths.consumed_lock(repo)
         self.wait = wait
         self.fd = None
 
@@ -57,10 +60,10 @@ def _epoch(stamp):
         return None
 
 
-def consumed_keys(repo):
+def consumed_keys(repo, log=None):
     keys = set()
     try:
-        with open(consumed_path(repo), encoding="utf-8") as f:
+        with open(log or consumed_path(repo), encoding="utf-8") as f:
             for line in f:
                 try:
                     e = json.loads(line)
@@ -76,11 +79,16 @@ def check(repo, argv, label, proxy, now=None):
     """Checks 1-6 of m0b2-plan §1; returns the evidence or raises Missing."""
     now = time.time() if now is None else now
     try:
-        with open(pending_path(repo), encoding="utf-8") as f:
-            ev = json.load(f)
+        raw = paths.read_local(repo, "pending-approval.json")
+    except paths.UnsafeLocal as e:
+        raise Missing(str(e))
     except OSError:
+        raw = None
+    if raw is None:
         raise Missing("no evidence of a person's answer: ask with AskUserQuestion first")
-    except ValueError:
+    try:
+        ev = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
         raise Missing("the evidence file is not JSON")
     if not isinstance(ev, dict) or ev.get("schema") != SCHEMA:
         raise Missing("the evidence file has another schema")
@@ -110,17 +118,21 @@ def check(repo, argv, label, proxy, now=None):
     return ev
 
 
-def consume(repo, ev, video, cmd):
+def consume(repo, ev, video, cmd, log=None):
     """Append the consumption record and fsync (before the video's state is written)."""
     line = {"session_id": ev["session_id"], "tool_use_id": ev["tool_use_id"],
             "question_index": ev["question_index"], "video": video, "cmd": cmd, "at": schema.now()}
-    with open(consumed_path(repo), "a", encoding="utf-8") as f:
+    p = log or consumed_path(repo)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "a", encoding="utf-8") as f:
         f.write(json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n")
         f.flush()
         os.fsync(f.fileno())
 
 
 def remove_pending(repo):
+    if paths.local_problem(repo):
+        return False
     try:
         os.remove(pending_path(repo))
     except OSError:

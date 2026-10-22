@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 
+from .. import machine, paths
 from . import backup, commands, gates, schema, store
 from .collect import CollectError, Providers
 from .hashes import brief_core
@@ -32,7 +33,8 @@ def _err(msg):
 
 
 def _repo(cwd):
-    out = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    out = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                         env=paths.git_env())
     if out.returncode != 0:
         raise Usage("not inside a git repository: %s" % cwd)
     repo = out.stdout.strip()
@@ -74,7 +76,7 @@ def _opts(rest, flags, values):
 
 def _ctx(repo, cfg, vdir, lang):
     return {"repo": repo, "studio_root": cfg.get("studio_root") or "studio", "vdir": vdir,
-            "s2v_path": (cfg.get("s2v") or {}).get("path"),
+            "s2v_path": machine.s2v_path(repo),
             "script": os.path.join(vdir, "script.%s.md" % lang)}
 
 
@@ -96,8 +98,11 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
             raise Usage("sync arrives with actors (M3b)")
         repo, cfg = _repo(cwd)
         root = cfg.get("studio_root") or "studio"
+        unsafe = paths.local_problem(repo, root)
         if cmd == "status":
-            return _status(repo, root, _opts(rest, {"--json"}, set()))
+            return _status(repo, root, _opts(rest, {"--json"}, set()), unsafe)
+        if unsafe:
+            raise Usage(unsafe)  # nothing machine-local is read or written through a link (m1-plan §3.1 review U1)
         o = _opts(rest, {"--json", "--proxy", "--begin", "--end"},
                   {"--lang", "--enter", "--output", "--platform", "--from", "--expect"})
         if not o["_"]:
@@ -349,7 +354,7 @@ def _loop(vdir, lang, o, hooks, flock):
     return C.OK
 
 
-def _status(repo, root, o):
+def _status(repo, root, o, unsafe=None):
     vids = []
     for base in (os.path.join(repo, root, "videos"), os.path.join(repo, root, "local", "videos")):
         if os.path.isdir(base):
@@ -374,9 +379,9 @@ def _status(repo, root, o):
                               for k, v in st["langs"].items()},
                     "incomplete_events": store.incomplete(vdir, st),
                     "unreadable_log_lines": sum(1 for e in store.read_log(vdir) if e.get("event") == "unreadable")})
-    warn = _guard_ran_warning(repo)
+    warns = [w for w in (unsafe, None if unsafe else _guard_ran_warning(repo)) if w]
     if o.get("--json"):
-        sys.stdout.write(json.dumps({"videos": out, "warnings": [warn] if warn else []}, ensure_ascii=False,
+        sys.stdout.write(json.dumps({"videos": out, "warnings": warns}, ensure_ascii=False,
                                     sort_keys=True) + "\n")
     else:
         for v in out:
@@ -395,8 +400,8 @@ def _status(repo, root, o):
                 sys.stdout.write("%s: backup: %s\n" % (v["video"], v["backup_warning"]))
             if v["unreadable_log_lines"]:
                 sys.stdout.write("%s: %d unreadable line(s) in approvals.jsonl\n" % (v["video"], v["unreadable_log_lines"]))
-        if warn:
-            sys.stdout.write("warning: %s\n" % warn)
+        for w in warns:
+            sys.stdout.write("warning: %s\n" % w)
     return C.OK
 
 

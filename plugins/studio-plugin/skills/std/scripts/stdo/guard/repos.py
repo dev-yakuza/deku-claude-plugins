@@ -30,10 +30,6 @@ class RepoInfo(object):
         return self.harness or self.marker is not None or self.local_exists
 
     @property
-    def s2v_path(self):
-        return (self.config.get("s2v") or {}).get("path") if isinstance(self.config, dict) else None
-
-    @property
     def protected_keys(self):
         fixed = {"visibility", "internal_overlay", "public_domains", "web_roots", "allow_internal_commits", "s2v",
                  "models", "gates", "roles", "studio_root", "protected_keys"}

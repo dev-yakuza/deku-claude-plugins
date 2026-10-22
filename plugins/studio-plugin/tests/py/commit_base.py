@@ -105,9 +105,11 @@ class CommitCase(StudioTestCase):
         from stdo.commit import okfile as _ok
         repo = repo or self.repo
         ok, _ = _ok.read(repo)
+        # each approval is a new answer (an answer is used once in the repository, m1-plan §3.2)
+        self._answers = getattr(self, "_answers", 0) + 1
         _ok.set_approval(repo, {"mode": mode, "tree": ok["tree"], "head": ok["head"], "session_id": sid,
-                                "answer": ok["label"], "summary": ok.get("summary"), "tool_use_id": "toolu_ask",
-                                "question_index": 0,
+                                "answer": ok["label"], "summary": ok.get("summary"),
+                                "tool_use_id": "toolu_ask%d" % self._answers, "question_index": 0,
                                 "at": "2026-10-21T00:00:00Z"})
 
     def guard_ran(self, sid=SID, repo=None):

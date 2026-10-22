@@ -93,7 +93,7 @@ class ApproveCase(StudioTestCase):
 
     def approve(self, gate, expect, *extra, answer=None, **pend):
         argv = ["approve", "v1", gate, "--expect", expect] + list(extra)
-        self.pend(argv, answer or "승인 %s" % expect, **pend)
+        self.pend(argv, answer or "승인 v1 %s" % expect, **pend)
         return self.cli(*argv)
 
     # ---------- moving a video along ----------

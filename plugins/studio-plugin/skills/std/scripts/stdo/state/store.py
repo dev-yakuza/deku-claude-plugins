@@ -73,7 +73,13 @@ def read_state(vdir):
         raise schema.SchemaError("no state at %s" % p, 2)
     except ValueError as e:
         raise schema.SchemaError("state.json is not JSON: %s" % e)
-    return schema.validate(state)
+    state = schema.validate(state)
+    folder = os.path.basename(os.path.normpath(vdir))
+    if state.get("video") != folder:
+        # a copied video folder still names the original: its approvals and labels would be the original's
+        raise schema.SchemaError("folder/state mismatch: the folder %s holds the state of video %r — a copied or "
+                                 "renamed video folder is not a video (ask the user)" % (folder, state.get("video")), 2)
+    return state
 
 
 def read_log(vdir):

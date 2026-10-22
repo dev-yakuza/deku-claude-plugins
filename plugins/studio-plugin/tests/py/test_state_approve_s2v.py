@@ -68,7 +68,7 @@ class RealApprove(StudioTestCase):
         to_id = run_inspect(self.s2v, self.script)["s2v_version"]
         h = hash_of({"video": "v1", "from_id": "0.0.1+old", "to_id": to_id})[:12]
         argv = ["repin", "v1", "--expect", h]
-        self.pend(argv, "재고정 %s" % h)
+        self.pend(argv, "재고정 v1 %s" % h)
         before = store.read_state(self.vdir)
         code, _, err = self.run_cli(*argv)
         self.assertEqual(code, 4, err)
@@ -89,7 +89,7 @@ class RealApprove(StudioTestCase):
         self.assertEqual(code, 0, err)
         h = out.split()[1]
         argv = ["approve", "v1", "1", "--expect", h]
-        self.pend(argv, "승인 %s" % h)
+        self.pend(argv, "승인 v1 %s" % h)
         code, _, err = self.run_cli(*argv)
         self.assertEqual(code, 0, err)
         code, out, _ = self.run_cli("next", "v1", "--json")

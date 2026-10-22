@@ -5,7 +5,8 @@
     make_harness.py <dir> [--studio-root studio] [--husky] [--overlay terms.json] [--s2v PATH]
 
 Writes a git repository with the rendered templates, Studio's agents, a copy of the plugin's scripts (without the
-guard), the ignore blocks and the pre-commit hook, and makes the first commit outside any session
+guard), the ignore blocks, the pre-commit hook and this machine's `.claude/studio/local/machine.json` (`--s2v`; the
+path is never committed), and makes the first commit outside any session
 (`--no-verify`: what a person would do once). Everything is synthetic: no home paths, nothing internal."""
 
 import hashlib
@@ -95,6 +96,8 @@ def make(repo, env=None, studio_root="studio", husky=False, overlay=(), s2v="/no
     out = subprocess.run(args, cwd=repo, capture_output=True, text=True, env=env)
     if out.returncode != 0:
         raise RuntimeError("hooks.py install: %s%s" % (out.stdout, out.stderr))
+    from stdo import machine
+    machine.write(repo, s2v)  # this machine's s2v path (m1-plan §3.1): ignored, never committed
     if overlay == ():
         overlay = {"internal": {}}  # set up (with its machine sha) like /std init would; nothing internal yet
     if overlay is not None:

@@ -102,6 +102,8 @@ class RanLog(JudgeCase):
         self.assertIn("sess-1", json.load(open(os.path.join(self.local(), "guard-ran.json")))["sessions"])
 
     def test_local_created_only_with_exclude_block(self):
+        import shutil
+        shutil.rmtree(self.local())  # a fresh clone: no machine.json yet (M1a), so no local/ folder either
         Entry.run_guard(self, self.hook("Bash", {"command": "ls"}))
         self.assertFalse(os.path.exists(self.local()))
         common = helpers.git(self.repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()

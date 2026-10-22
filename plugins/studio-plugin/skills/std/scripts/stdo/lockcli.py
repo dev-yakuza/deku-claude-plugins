@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 
-from . import dirlock, lockargs, locks, s2vcall
+from . import dirlock, lockargs, locks, machine, paths, s2vcall
 
 WATCHER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watcher.py")
 SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
@@ -230,7 +230,12 @@ def main(argv, child_kind=None, hooks=None, lock_env=None, cwd=None):
             locks.state_dir()
             repo = _git_top(cwd)
             cfg = _config(repo)
-            s2v_path = (cfg.get("s2v") or {}).get("path")
+            try:
+                s2v_path = machine.s2v_path(repo)
+            except paths.UnsafeLocal as e:
+                raise locks.UsageError(str(e))
+            if s2v_path is None:
+                raise locks.UsageError(machine.HINT)
             studio_root = cfg.get("studio_root") or "studio"
             if child_kind is None:
                 args = s2vcall.s2v_args(opts["child"], s2v_path, cwd)

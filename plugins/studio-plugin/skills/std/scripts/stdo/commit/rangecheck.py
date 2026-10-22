@@ -56,6 +56,9 @@ def check_lines(ctx, lines):
         for p in local:
             problems.append(Problem(1, "commit %s adds or changes machine-only Studio file %s (local/) in the history" % (c[:12], p),
                                     p))
+        for p in ctx.cls.links(ctx.git, c, sorted(_changed(ctx.git, c, parents, added=True))):
+            if p not in local:
+                problems.append(Problem(1, "commit %s adds a symbolic link %s in Studio's folders" % (c[:12], p), p))
         if studio and [p for p in other if not ctx.cls.is_local(p)]:
             warnings.append("commit %s mixes Studio paths with other paths" % c[:12])
         commits.append({"commit": c, "studio_paths": studio, "local_paths": local,

@@ -9,6 +9,7 @@ import datetime
 import json
 import os
 
+from .. import paths
 from ..state import labels
 from . import proxy, transcript
 from .repos import has_exclude_block
@@ -24,9 +25,20 @@ def local_dir(worktree):
     return os.path.join(worktree, ".claude", "studio", "local")
 
 
-def consumed(worktree, key):
+def consumed(ri, key):
+    """Whether the answer `key` (session, tool_use_id, question index) was used anywhere in the repository: the record
+    is in the git common dir, shared by every worktree (m1-plan §3.2). transcript.NoEvidence("record-unreadable")
+    when the record cannot be read (closed; the guard runs no git to find the folder)."""
+    if not ri.common_dir:
+        raise transcript.NoEvidence("record-unreadable", "the repository's git folder is unknown")
     try:
-        with open(os.path.join(local_dir(worktree), "consumed-answers.jsonl"), encoding="utf-8") as f:
+        f = open(paths.consumed_log(ri.worktree, ri.common_dir), encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    except OSError as e:
+        raise transcript.NoEvidence("record-unreadable", str(e))
+    try:
+        with f:
             for line in f:
                 try:
                     e = json.loads(line)
@@ -34,13 +46,16 @@ def consumed(worktree, key):
                     continue
                 if isinstance(e, dict) and (e.get("session_id"), e.get("tool_use_id"), e.get("question_index")) == key:
                     return True
-    except OSError:
-        pass
+    except OSError as e:
+        raise transcript.NoEvidence("record-unreadable", str(e))
     return False
 
 
 def write_pending(ri, data):
-    """Atomic write; raises OSError."""
+    """Atomic write; raises OSError (also when local/ or a folder above it is a symbolic link)."""
+    why = paths.local_problem(ri.worktree)
+    if why:
+        raise OSError(why)
     local = local_dir(ri.worktree)
     if not os.path.isdir(local):
         if not has_exclude_block(ri):
@@ -54,6 +69,9 @@ def write_pending(ri, data):
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, p)
+    why = paths.local_problem(ri.worktree)
+    if why:  # the folder was swapped for a link while writing (review V4)
+        raise OSError(why)
 
 
 def in_subagent(hook):
@@ -79,7 +97,7 @@ def state_py(hook, env, ri, argv):
         return Verdict("G-PROXY", "--proxy is accepted only in the sandbox proxy mode started by the person "
                                   "(STUDIO_SANDBOX).")
     try:
-        label, h12 = labels.expected(argv, ri.worktree, ri.studio_root)
+        label, h12, video = labels.expected(argv, ri.worktree, ri.studio_root)
     except labels.NoLabel as e:
         return Verdict("G-APPROVAL", "%s. Ask the user what to do." % e)
     sid = hook.get("session_id")
@@ -92,9 +110,9 @@ def state_py(hook, env, ri, argv):
         return Verdict(pending=base, ri=ri, reason="proxy approval %s" % label)
     try:
         ans = transcript.find(hook, env)
-        idx, text, note = transcript.choose(ans, label, h12)
+        idx, text, note = transcript.choose(ans, label, h12, video=video)
         key = (sid, ans.tool_use_id, idx)
-        if consumed(ri.worktree, key):
+        if consumed(ri, key):
             raise transcript.NoEvidence("consumed")
     except transcript.NoEvidence as e:
         return Verdict("G-EVIDENCE", evidence_text("state.py %s" % sub, label, e))
@@ -112,8 +130,9 @@ def labels_argv_sha(argv):
 
 def evidence_text(what, label, e):
     return ("%s records a person's decision, and the guard found no answer \"%s\" in this turn: %s. Ask with "
-            "AskUserQuestion — show the artifact and its hash and offer the fixed option \"%s\" (each question text "
-            "unique) — then run the command alone right after the answer." % (what, label, e.sentence(), label))
+            "AskUserQuestion — show the artifact and its hash, start a video's question with [<video>], and offer the "
+            "fixed option \"%s\" (each question text unique) — then run the command alone in a later message, right "
+            "after the answer." % (what, label, e.sentence(), label))
 
 
 def s2v(hook, env, ri, words):

@@ -38,7 +38,7 @@ class SourceDiff(ApproveCase):
     def reject(self):
         h = self.show("source-diff")
         argv = ["reject-source-diff", "v1", "--expect", h]
-        self.pend(argv, "거부 %s" % h)
+        self.pend(argv, "거부 v1 %s" % h)
         return self.cli(*argv)
 
     def test_t4_rejected_then_1_again_keeps_2(self):
@@ -70,7 +70,7 @@ class SourceDiff(ApproveCase):
         self.change_source()
         h = self.show("source-diff")
         self.assertEqual(self.cli("reject-source-diff", "v1", "--expect", h), 6)
-        self.assertEqual(self.approve("source-diff", h, answer="거부 %s" % h), 6)  # not an approval
+        self.assertEqual(self.approve("source-diff", h, answer="거부 v1 %s" % h), 6)  # not an approval
 
     def test_x3_baseline_from_the_last_approved_hash(self):
         self.pass_gate("1")
@@ -121,7 +121,7 @@ class Repin(ApproveCase):
     def repin(self, frm, to, expect=None):
         h = expect or hash_of({"video": "v1", "from_id": frm, "to_id": to})[:12]
         argv = ["repin", "v1", "--expect", h]
-        self.pend(argv, "재고정 %s" % h)
+        self.pend(argv, "재고정 v1 %s" % h)
         return self.cli(*argv)
 
     def test_t8_repin_migrates_only_what_was_current(self):
@@ -199,7 +199,7 @@ class Exclude(ApproveCase):
     def exclude(self, out, platforms):
         h = hash_of({"video": "v1", "lang": "ko", "output": out, "platforms": platforms})[:12]
         argv = ["exclude-output", "v1", out, "--expect", h]
-        self.pend(argv, "제외 %s" % h)
+        self.pend(argv, "제외 v1 %s" % h)
         return self.cli(*argv)
 
     def test_x1_exclude_and_bring_back(self):
@@ -243,7 +243,7 @@ class ExcludeShared(ApproveCase):
         self.pass_all(upto="1")
         h = hash_of({"video": "v1", "lang": "ko", "output": "shorts", "platforms": []})[:12]
         argv = ["exclude-output", "v1", "shorts", "--expect", h]
-        self.pend(argv, "제외 %s" % h)
+        self.pend(argv, "제외 v1 %s" % h)
         self.assertEqual(self.cli(*argv), 0, self.last_err)
         self.assertEqual(self.state()["brief"]["platforms"], {"youtube": ["youtube"]})
 

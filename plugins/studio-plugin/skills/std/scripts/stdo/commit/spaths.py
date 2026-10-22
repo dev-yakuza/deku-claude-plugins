@@ -93,10 +93,31 @@ class Classifier(object):
         return s.casefold() if self.fold else s
 
     def is_local(self, path):
+        """Under a machine-local folder — or the folder's own path (a file or link standing in for it)."""
         p = self._k(path)
-        if p.startswith(self._k(LOCAL_FIXED)):
+        if p.startswith(self._k(LOCAL_FIXED)) or p == self._k(LOCAL_FIXED.rstrip("/")):
             return True
-        return any(p.startswith(self._k(r + "/local/")) for r in self.roots)
+        return any(p.startswith(self._k(r + "/local/")) or p == self._k(r + "/local") for r in self.roots)
+
+    def links(self, git, where, paths):
+        """Symbolic links (mode 120000) among `paths` in Studio's folders: `where` None = the index, else a commit.
+        A committed link there becomes a real link on checkout (m1-plan §3.1 review V2)."""
+        above = {self._k(".claude"), self._k(".claude/studio")} | {self._k(r) for r in self.roots}
+        cand = [p for p in paths if self.is_studio(p) or self.is_local(p) or self._k(p) in above]
+        if not cand:
+            return []
+        specs = ["--"] + [":(literal)" + p for p in cand]
+        if where is None:
+            raw = git.text("ls-files", "-s", "-z", *specs)
+        else:
+            raw = git.text("ls-tree", "-z", where, *specs)
+        out = []
+        for rec in raw.split("\0"):
+            if rec and "\t" in rec:
+                meta, path = rec.split("\t", 1)
+                if meta.split()[0] == "120000":
+                    out.append(path)
+        return sorted(out)
 
     def is_studio(self, path):
         """Studio path by name (`.gitignore` is decided by its block, see gitignore_kind)."""

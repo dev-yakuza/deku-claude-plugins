@@ -6,6 +6,8 @@ import datetime
 import json
 import os
 
+from .. import paths as _paths
+
 SCHEMA = 1
 REL = os.path.join(".claude", "studio", "local", "commit-ok.json")
 LABEL = "커밋 %s"
@@ -20,16 +22,27 @@ def path(top):
 def read(top):
     """(dict, None) or (None, reason)."""
     try:
-        with open(path(top), encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
+        raw = _paths.read_local(top, "commit-ok.json")
+    except _paths.UnsafeLocal as e:
+        return None, "not readable safely (%s)" % e
+    except OSError as e:
+        return None, "unreadable (%s)" % e
+    if raw is None:
         return None, "missing"
-    except (OSError, ValueError) as e:
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as e:
         return None, "unreadable (%s)" % e
     if not isinstance(data, dict) or data.get("schema") != SCHEMA or not isinstance(data.get("tree"), str) or \
             not isinstance(data.get("paths"), list):
         return None, "malformed"
     return data, None
+
+
+def _check(top):
+    why = _paths.local_problem(top)
+    if why:
+        raise OSError(why)
 
 
 def write(top, data):
@@ -38,6 +51,7 @@ def write(top, data):
     data["label"] = LABEL % data["tree"][:12]
     data.setdefault("approval", None)
     data["written_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _check(top)
     p = path(top)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = "%s.tmp.%d" % (p, os.getpid())
@@ -47,6 +61,7 @@ def write(top, data):
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, p)
+    _check(top)  # written through a folder swapped meanwhile: say so (closed)
     return data
 
 
@@ -56,6 +71,7 @@ def set_approval(top, approval):
     if data is None:
         raise OSError("commit-ok.json is %s" % why)
     data["approval"] = approval
+    _check(top)
     p = path(top)
     tmp = "%s.tmp.%d" % (p, os.getpid())
     with open(tmp, "w", encoding="utf-8") as f:
@@ -64,4 +80,5 @@ def set_approval(top, approval):
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, p)
+    _check(top)  # written through a folder swapped meanwhile: say so (closed)
     return data
