@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "about": "Which inspect hash the fake s2v changes for each kind of edit. Written by hand in M1b; M1j generates it from real s2v (tests/tools/fake_table.py, m1-plan §12.3). Frontmatter keys missing here change no hash.",
+  "frontmatter": {
+    "title": ["content"],
+    "lang": ["content", "voice", "presentation"],
+    "cast": ["voice", "presentation"],
+    "pronounce": ["voice"],
+    "pacing": ["voice"],
+    "theme": ["presentation"],
+    "transition": ["presentation"],
+    "logo": ["presentation"],
+    "subtitleStyle": ["presentation"],
+    "bgm": ["presentation"],
+    "outputs": ["presentation"],
+    "targetDuration": []
+  },
+  "output_attrs_ignored": ["maxDuration"],
+  "body": {
+    "scene_title": ["content", "presentation"],
+    "paragraph": ["content", "presentation"],
+    "screen": ["content", "presentation"],
+    "image": ["presentation"]
+  }
+}

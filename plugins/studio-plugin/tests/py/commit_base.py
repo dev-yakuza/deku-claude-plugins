@@ -28,6 +28,13 @@ def copy_scripts(repo):
     return dst
 
 
+def commit_scripts(repo):
+    """Copy the scripts and commit them (outside any session) — a committed harness, as begin and stage-done need."""
+    copy_scripts(repo)
+    helpers.git(repo, "add", "-A", "--", ".claude/studio/scripts")
+    helpers.git(repo, "commit", "-q", "--no-verify", "-m", "scripts")
+
+
 class CommitCase(StudioTestCase):
     studio_root = "studio"
     install_hook = True

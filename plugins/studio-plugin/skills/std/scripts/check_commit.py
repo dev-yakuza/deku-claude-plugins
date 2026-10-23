@@ -9,6 +9,9 @@ if sys.version_info < (3, 9):
     sys.stderr.write("std check_commit: Python 3.9 or newer is needed\n")
     sys.exit(2)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from stdo import writes  # noqa: E402
 from stdo.commit.cli import main  # noqa: E402
+
+writes.enable()  # commit-ok.json and the used-answer record (the hook) are written from this entry only
 
 sys.exit(main(sys.argv[1:]))

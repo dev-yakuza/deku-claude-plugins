@@ -8,6 +8,7 @@ import json
 import os
 import time
 
+import checkfix
 import helpers
 import state_fixtures as F
 from helpers import StudioTestCase
@@ -27,6 +28,7 @@ class ApproveCase(StudioTestCase):
     outputs = ("youtube",)
     platforms = {"youtube": ["youtube"]}
     location = "public"
+    auto_checks = True  # stage-done finds a passing check result written over the current inputs (checkfix)
 
     def setUp(self):
         super().setUp()
@@ -57,12 +59,15 @@ class ApproveCase(StudioTestCase):
         self.providers = Providers(inspect=lambda ctx: copy.deepcopy(self.ins),
                                    source=lambda ctx, st: (self.src, self.text),
                                    inspect_at=lambda ctx, hv: copy.deepcopy(self.old_ins[hv]),
-                                   version=lambda ctx: dict(self.ver))
+                                   version=lambda ctx: dict(self.ver),
+                                   sentences=lambda ctx: [{"id": "s:0:0", "lock": None}])
         self.tool = 0
 
     # ---------- running ----------
 
     def cli(self, *argv):
+        if self.auto_checks:
+            checkfix.before_stage_done(self.repo, list(argv), self.providers)
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = cli.main(list(argv), providers=self.providers, cwd=self.repo)

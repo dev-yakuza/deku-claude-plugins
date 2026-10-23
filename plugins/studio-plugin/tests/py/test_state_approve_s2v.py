@@ -5,6 +5,7 @@ import io
 import json
 import os
 
+import checkfix
 import helpers
 import state_fixtures as F
 from approve_base import SESSION, stamp
@@ -50,6 +51,8 @@ class RealApprove(StudioTestCase):
         store.create(self.vdir, st)
 
     def run_cli(self, *argv):
+        from stdo.state.collect import Providers
+        checkfix.before_stage_done(self.repo, list(argv), Providers())
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = cli.main(list(argv), cwd=self.repo)

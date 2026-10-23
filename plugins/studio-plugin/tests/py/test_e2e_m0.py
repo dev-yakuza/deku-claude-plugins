@@ -9,7 +9,7 @@ import subprocess
 
 import transcripts as TR
 from approve_base import SESSION, ApproveCase
-from commit_base import copy_scripts
+from commit_base import commit_scripts
 from e2e_runner import Session, state_py_executor
 from harness_base import SID, HarnessCase
 from stdo import machine, paths
@@ -258,7 +258,7 @@ class ApprovalE2E(ApproveCase):
 
     def setUp(self):
         super().setUp()
-        copy_scripts(self.repo)
+        commit_scripts(self.repo)
         os.makedirs(os.path.join(self.repo, ".claude", "studio", "local"), exist_ok=True)
         self.s = Session(self.repo, dict(os.environ), dict(os.environ), SESSION)
         self.s.executor = state_py_executor(self, self.s)
@@ -416,7 +416,7 @@ class RealProcessE2E(ApproveCase):
             raise unittest.SkipTest("needs node for the fake s2v")
         super().setUp()
         from stdo.state import hashes, store
-        copy_scripts(self.repo)
+        commit_scripts(self.repo)
         os.makedirs(os.path.join(self.repo, ".claude", "studio", "local"), exist_ok=True)
         fake = os.path.join(self.tmp, "fake-s2v")
         dist = os.path.join(fake, "packages", "cli", "dist")
@@ -448,7 +448,10 @@ class RealProcessE2E(ApproveCase):
                               capture_output=True, text=True, env=e)
 
     def test_e2_e3_real_state_py(self):
+        import checkfix
+        from stdo.state.collect import Providers
         for st in ("script", "verify"):
+            checkfix.before_stage_done(self.repo, ["stage-done", "v1", st], Providers())
             r = self.sp("stage-done v1 %s" % st)
             self.assertEqual(r.code, 0, r)
         r = self.sp("shown v1 1")

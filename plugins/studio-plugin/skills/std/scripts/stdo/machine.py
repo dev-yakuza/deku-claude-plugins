@@ -9,7 +9,7 @@ Read-only here except `write`, which `/std init` and `/std config s2v.path` (set
 import json
 import os
 
-from . import paths
+from . import paths, writes
 
 SCHEMA = 1
 REL = os.path.join(".claude", "studio", "local", "machine.json")
@@ -60,6 +60,7 @@ def require_s2v_path(repo):
 
 def write(repo, s2v):
     """Write machine.json (atomic). The caller checks the person's evidence where one is needed."""
+    writes.check("machine.json")
     if not isinstance(s2v, str) or not os.path.isabs(s2v):
         raise ValueError("the s2v path must be absolute: %r" % (s2v,))
     paths.check_local(repo)

@@ -15,6 +15,9 @@ DOWNSTREAM_START = {"2": "cast", "3": "board", "4a": "render", "4b": "copy"}  # 
 LOOPS = ("verify", "1", "3", "4a", "copy")
 LOOP_RESET = {"1": ("verify", "1"), "3": ("3",), "4a": ("4a",), "4b": ("copy",)}
 HELD = ("render", "lock", "source-diff", "stagnation", "actor", "actor-building")
+# the field of a ② approval record that holds the sha of `work/<l>/pronounce-approved.json` written with it (m1-plan
+# §8, v5.1 T1; M1f writes it): only a file with that sha, of a current human ② record, counts anywhere
+PRONOUNCE_SHA = "pronounce_approved_sha"
 REQUIRED = ("schema", "video", "location", "kind", "scope", "source_lang", "s2v", "brief", "source", "langs")
 
 
@@ -116,3 +119,31 @@ def current_outputs(state, lang):
 def current_platforms(state, lang):
     ex = set(state["langs"][lang]["excluded"]["platforms"])
     return [p for p in state["brief"]["platforms"] if p not in ex]
+
+
+# ---------- deterministic check results (m1-plan §4.1, D-M1-12) ----------
+# One table for the check scripts (which write `work/<l>/checks/<file>[--<scope>].json`) and `stage-done` (which
+# recomputes the input sha from the same inputs). `scope`: None, "output" or "platform". `s2v`: the s2v `id` is part
+# of the input sha (a pass under another s2v is not reused). visual-check has no file of its own: ③'s shown record
+# binds the stills' index.json and the whole ③ tuple already (v5 S4).
+STAGE_CHECKS = {
+    "script": {"file": "script", "script": "check_claims.py", "scope": None, "s2v": True,
+               "inputs": ("script", "claims_map", "format", "assets_json", "script_files")},
+    "verify": {"file": "verify-claims", "script": "check_claims.py", "scope": None, "s2v": False,
+               "inputs": ("verify_draft", "source_copy", "claims_map", "script")},
+    "cast": {"file": "cast", "script": "check_assets.py", "scope": None, "s2v": True,
+             "inputs": ("script", "cast_roster")},
+    "tts": {"file": "tts", "script": "check_tts.py", "scope": None, "s2v": True,
+            "inputs": ("lock_manifest", "sentences", "format")},
+    "audition": {"file": "audition", "script": "audition.py", "scope": None, "s2v": False,
+                 "inputs": ("lock_manifest", "approved_2", "exemptions", "pronounce_changes", "audition_out")},
+    "board": {"file": "board", "script": "check_assets.py", "scope": "output", "s2v": True,
+              "inputs": ("script", "assets_json", "credits", "script_files", "config_protected", "overlay_sha",
+                         "credit_approvals")},
+    "render": {"file": "render", "script": "run_s2v.py", "scope": "output", "s2v": True,
+               "inputs": ("render_result",)},
+    "copy": {"file": "copy", "script": "validate_copy.py", "scope": "platform", "s2v": False,
+             "inputs": ("copy_text", "platform_rules", "chapters", "credits", "overlay_sha", "claims_map",
+                        "source_copy")},
+}
+NO_CHECK_FILE = ("visual-check",)

@@ -6,7 +6,7 @@ import datetime
 import json
 import os
 
-from .. import paths as _paths
+from .. import paths as _paths, writes
 
 SCHEMA = 1
 REL = os.path.join(".claude", "studio", "local", "commit-ok.json")
@@ -46,6 +46,7 @@ def _check(top):
 
 
 def write(top, data):
+    writes.check("commit-ok.json")
     data = dict(data)
     data["schema"] = SCHEMA
     data["label"] = LABEL % data["tree"][:12]
@@ -63,6 +64,44 @@ def write(top, data):
     os.replace(tmp, p)
     _check(top)  # written through a folder swapped meanwhile: say so (closed)
     return data
+
+
+VIDEO_RECORD = "commit-ok.json"  # <sr>/videos/<video>/work/commit-ok.json (P-STATE, M1b review Y3)
+
+
+def video_record_path(top, studio_root, video):
+    return os.path.join(top, studio_root, "videos", video, "work", VIDEO_RECORD)
+
+
+def keep_for_video(top, studio_root, ok):
+    """The hook passed a video commit with the person's answer: keep that commit-ok in the video's own folder, so
+    `state.py done` still finds it after later commits overwrite commit-ok.json (M1b review Y3). Returns the path or
+    None (not a video commit)."""
+    writes.check("a video's commit record")
+    target = ok.get("target") if isinstance(ok, dict) else None
+    ap = ok.get("approval") if isinstance(ok, dict) else None
+    if ok.get("kind") != "video" or not isinstance(target, str) or not target or "/" in target or \
+            target in (".", "..") or not isinstance(ap, dict) or ap.get("mode") != "human":
+        return None
+    p = video_record_path(top, studio_root, target)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = "%s.tmp.%d" % (p, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({k: ok.get(k) for k in FIELDS}, f, ensure_ascii=False, indent=2, sort_keys=True)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, p)
+    return p
+
+
+def read_video_record(top, studio_root, video):
+    try:
+        with open(video_record_path(top, studio_root, video), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and data.get("schema") == SCHEMA else None
 
 
 def set_approval(top, approval):

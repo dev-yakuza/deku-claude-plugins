@@ -13,9 +13,9 @@ import os
 import secrets
 import time
 
+from .. import writes
 from . import schema
 
-_WRITES = [False]
 LOCK_WAIT = 2.0
 TMP_AGE = 60.0
 UNSUPPORTED = (errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOLCK, errno.EINVAL)
@@ -38,12 +38,11 @@ class Refused(Exception):
 
 
 def enable_writes():
-    _WRITES[0] = True
+    writes.enable()  # one flag for every protected writer of the library (M1b review Y2)
 
 
 def _check_writes():
-    if not _WRITES[0]:
-        raise RuntimeError("state writes run only from state.py (its CLI entry), not from an import")
+    writes.check("a video's state")
 
 
 def video_dir(repo, studio_root, video):

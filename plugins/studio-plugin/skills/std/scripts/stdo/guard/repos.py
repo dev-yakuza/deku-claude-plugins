@@ -10,7 +10,7 @@ from .terms import Terms
 
 LOCK_VARS = ("S2V_STATE_DIR", "S2V_HEAVY_LOCK_TOKEN", "S2V_ACTOR_LOCK_TOKEN", "S2V_TTS_PORT", "S2V_ALIGNER_PORT",
              "S2V_TTS", "S2V_TAKES_ALL")
-STUDIO_WORDS = ("s2v", "state.py", "lock.py", "check_commit.py", "STUDIO_SANDBOX", "STUDIO_HOME") + LOCK_VARS
+STUDIO_WORDS = ("s2v", "state.py", "lock.py", "check_commit.py", "run_s2v.py", "STUDIO_SANDBOX", "STUDIO_HOME") + LOCK_VARS
 
 
 class RepoInfo(object):

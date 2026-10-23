@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 
+import checkfix
 import helpers
 import state_fixtures as F
 from helpers import StudioTestCase
@@ -44,6 +45,11 @@ class StoreCase(StudioTestCase):
         self.providers = Providers(inspect=lambda ctx: inspect_json(), source=lambda ctx, st: ("src1", ""))
 
     def cli(self, *argv, providers=None, **kw):
+        p = providers or self.providers
+        if getattr(p, "sentences", None) is not None and not getattr(p, "_fixed", False):
+            checkfix.fixed_sentences(p)
+            p._fixed = True
+        checkfix.before_stage_done(self.repo, list(argv), p)
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = cli.main(list(argv), providers=providers or self.providers, cwd=self.repo, **kw)

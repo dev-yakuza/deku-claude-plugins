@@ -96,7 +96,8 @@ def make(repo, env=None, studio_root="studio", husky=False, overlay=(), s2v="/no
     out = subprocess.run(args, cwd=repo, capture_output=True, text=True, env=env)
     if out.returncode != 0:
         raise RuntimeError("hooks.py install: %s%s" % (out.stdout, out.stderr))
-    from stdo import machine
+    from stdo import machine, writes
+    writes.enable()  # a test-tree driver: it stands in for /std init (setup.py, M1c)
     machine.write(repo, s2v)  # this machine's s2v path (m1-plan §3.1): ignored, never committed
     if overlay == ():
         overlay = {"internal": {}}  # set up (with its machine sha) like /std init would; nothing internal yet

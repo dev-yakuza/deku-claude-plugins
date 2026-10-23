@@ -26,7 +26,9 @@ TEMPLATES = os.path.join(SKILL, "templates")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
-from stdo import machine, paths  # noqa: E402
+from stdo import machine, paths, writes  # noqa: E402
+
+writes.enable()  # the test process stands in for Studio's entry scripts (test_m1b checks the flag in a fresh process)
 
 MIN_S2V = (0, 12, 1)
 LEAK_VARS = ("S2V_HEAVY_LOCK_TOKEN", "S2V_ACTOR_LOCK_TOKEN")

@@ -7,7 +7,7 @@ import os
 
 import transcripts as TR
 from approve_base import ApproveCase, SESSION
-from commit_base import copy_scripts
+from commit_base import commit_scripts
 from guard_base import snapshot_text
 from stdo import paths
 from stdo.guard import judge, transcript
@@ -275,7 +275,7 @@ class EndToEnd(ApproveCase):
 
     def setUp(self):
         super().setUp()
-        copy_scripts(self.repo)
+        commit_scripts(self.repo)
         self.tpath = TR.transcript_path(os.environ, SESSION)
         os.makedirs(os.path.join(self.repo, ".claude", "studio", "local"), exist_ok=True)
 

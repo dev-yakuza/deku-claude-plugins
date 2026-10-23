@@ -42,7 +42,7 @@ STUDIO_TEST_S2V=/abs/path/to/script2video \
   `check_commit --staged` on a Studio commit (targets 50 ms / 300 ms; fails only above 3×).
 
 **Scripts version (M0d-2, D-M0-3)**: the guard refuses Studio commands in a repository whose copy of
-`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 9). Until `/std update` exists (M1), copy the plugin's
+`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 10). Until `/std update` exists (M1), copy the plugin's
 `skills/std/scripts/` (without `guard.py` and `stdo/guard/`) into an older sandbox repository again by hand.
 
 **M0f**: `tests/py/drivers/make_harness.py <dir>` builds a synthetic harness repository (templates, agents, a copy of
@@ -62,3 +62,19 @@ have other hash12s: show them again (sandboxes and tests only).
 `make_harness.py`); in `.claude/studio/config.json` delete `"path"` under `"s2v"` (keep `"min_version"`) — a harness
 commit refuses the old format; create `.claude/studio/local/machine.json` as
 `{"schema": 1, "s2v": {"path": "<absolute s2v path>"}}` (a real folder, never a link); show every gate again.
+
+**M1b** (`SCRIPTS_VERSION` 10): `state.py` flow commands (`begin` · `record-source` · `hold` · `release-lock` ·
+`record-render` · `done`, and `abandon` · `overlay` with a person's answer), `run_s2v.py` (render and snapshot; the proxy
+watermark comes from the state) and the check results `stage-done` requires (`work/<l>/checks/*.json`, table
+`schema.STAGE_CHECKS`). `begin` and `stage-done` need a committed harness.
+- **The fake s2v CLI** `tests/py/drivers/fake_s2v_cli/packages/cli/dist/main.js` (Node, no dependencies): point
+  `machine.json` at `tests/py/drivers/fake_s2v_cli`. Scenarios come from the JSON file named by
+  `STUDIO_TEST_FAKE_S2V_SCENARIO` (the guard refuses `STUDIO_TEST_*` in agent commands); each call is appended to
+  `calls.log` beside that file. It writes results only with `--out-dir` and never into its own folder.
+  `fake_inspect_table.json` (which hash an edit changes) is written by hand until M1j generates it from real s2v.
+- **Tests that move a video along** without the stages' check scripts (they arrive in M1d–M1h) use `checkfix.py`: it
+  writes the passing check result a check script would write over the current inputs (the same input sha), so
+  `stage-done` keeps its own rule. `test_m1b.StageChecks` turns this off and checks the rule itself.
+- **Writers of protected records** (`stdo/writes.py`): the library writes state, check results, the used-answer record,
+  commit-ok and machine.json only after an entry script called `writes.enable()`; `helpers.py` enables it for the test
+  process (`test_m1b.Y2Writers` checks a fresh process is refused).

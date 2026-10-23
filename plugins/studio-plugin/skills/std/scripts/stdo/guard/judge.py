@@ -574,7 +574,10 @@ def studio_area(ctx, cmd, value, studio_infos):
         if _within(parts, [".claude"], fold):
             return value + " (to put files under .claude/, copy into it from an existing folder in a separate call, " \
                            "or copy the files one by one)"
-        if parts == [] or _within(parts, [ri.studio_root], fold):
+        if parts and _within(parts, [ri.studio_root], fold):
+            return value + " (to put files under %s/, copy them one at a time — cp <file> <destination file> — or " \
+                           "let the Studio script that makes them write them)" % ri.studio_root
+        if parts == []:
             return value  # .git/**: the git dir checks above
     return None
 
@@ -721,7 +724,10 @@ def check_shell_strings(ctx, sc, infos, depth):
     for o in sc.opaque:
         host = by_id.get(o.cmd)
         if o.kind == "dynamic-command":
-            unknown(ctx, infos, "a command word or a shell string built at run time")
+            if infos:
+                ctx.deny("G-OPAQUE", "a command word or a shell string built at run time runs code the guard cannot "
+                                     "check in a Studio repository — write the command's path literally (or use npx "
+                                     "…), one step per call.")
             continue
         if o.kind == "xargs" and re.match(r"^(\S*/)?(sh|bash|zsh|dash|ksh)\b", o.payload or ""):
             unknown(ctx, infos, "xargs feeding text to a shell")
@@ -746,7 +752,10 @@ def check_shell_strings(ctx, sc, infos, depth):
     for c in sc.commands:
         w0 = c.words[0] if c.words else None
         if w0 is not None and ("$" in (w0.raw or "") or "`" in (w0.raw or "")) and w0.value != "":
-            unknown(ctx, infos, "a command word taken from a variable or a substitution (%s)" % w0.raw)
+            if infos:
+                ctx.deny("G-OPAQUE", "a command word taken from a variable or a substitution (%s) runs a program the "
+                                     "guard cannot name in a Studio repository — write the command's path literally "
+                                     "(or use npx …), one step per call." % w0.raw)
         if c.prog == "script":
             inner = script_inner(c)
             if inner is None:
@@ -1434,6 +1443,31 @@ def check_env(ctx, cmd):
                                  "markers to retry.")
 
 
+# s2v commands whose results a person reviews: in a Studio repository only run_s2v.py runs them (m1-plan §4.2,
+# M1b review Y1) — it picks the watermark from the state and records the result. The wrapper's own child process is
+# not a Bash command the guard sees.
+WRAPPED_S2V = (("render",), ("snapshot",), ("dev",))  # dev runs snapshot / render --draft and keeps servers up
+# pages written into a folder of the agent's choosing: refused with --out-dir (their default place is s2v's own)
+OUT_DIR_S2V = (("takes",), ("direct",))
+
+
+def check_s2v_results(ctx, cmd):
+    if cmd.s2v is None:
+        return
+    vals = [w.value for w in cmd.s2v.args]
+    words, flags = s2vcall.split([x for x in vals if x is not None])
+    if words[:1] in OUT_DIR_S2V and "--out-dir" in flags:  # `takes` is a two-word s2v command (takes pick …)
+        ctx.deny("G-WRAP", "s2v %s --out-dir writes its results where the agent says in a Studio repository — run it "
+                           "without --out-dir (s2v's own results folder), or use \"python3 "
+                           ".claude/studio/scripts/run_s2v.py render|snapshot <video> --output <output>\"." % words[0])
+        return
+    if words in WRAPPED_S2V or (any(x is None for x in vals[:1])):
+        ctx.deny("G-WRAP", "s2v %s in a Studio repository runs only through Studio's wrapper, which sets the proxy "
+                           "watermark from the approvals and records the result — use \"python3 "
+                           ".claude/studio/scripts/run_s2v.py render|snapshot <video> --output <output>\"."
+                 % (words[0] if words else "with a command word the guard cannot read"))
+
+
 def check_approval(ctx, cmd):
     real = studio_script(ctx, cmd, "state.py")
     if real is not None:
@@ -1595,6 +1629,7 @@ def decide_bash(ctx, command):
         check_version(ctx, c)
         check_env(ctx, c)
         check_approval(ctx, c)
+        check_s2v_results(ctx, c)
         check_git_rules(ctx, c, infos)
         check_gh(ctx, c, infos)
         check_patch(ctx, c, infos, sc)
@@ -1608,7 +1643,7 @@ def check_version(ctx, cmd):
     """D-M0-3: Studio commands stop when the repository's scripts are another version than the guard's."""
     from . import version
     real = None
-    for name in ("state.py", "check_commit.py", "hooks.py", "lock.py"):
+    for name in ("state.py", "check_commit.py", "hooks.py", "lock.py", "run_s2v.py"):
         real = studio_script(ctx, cmd, name)
         if real is not None:
             break

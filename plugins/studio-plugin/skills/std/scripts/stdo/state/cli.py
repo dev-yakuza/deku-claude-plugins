@@ -5,6 +5,14 @@
     state.py loop <video> <verify|1|3|4a|copy> [--lang l]
     state.py status [<video>] [--json]
     state.py sync                     (M3b)
+    state.py begin <video> --source <path> --kind youtube [--lang l]       (M1b; the harness must be committed)
+    state.py record-source <video>
+    state.py hold <video> lock --reason <busy line> [--lang l]
+    state.py release-lock <video> [--lang l]
+    state.py record-render <video> --output o [--lang l]                   (reads run_s2v.py's check file)
+    state.py done <video> [--lang l]                                       (after the video commit)
+    state.py abandon <video> [--lang l]                                    (evidence: 중단 <video> <lang>)
+    state.py overlay --from <json> --expect <sha12>                        (evidence: 사내설정 <sha12>)
 
 Exit: 0 ok · 1 failed · 2 usage/setup · 3 entry refused · 4 waiting for a person · 5 state lock busy.
 """
@@ -16,7 +24,7 @@ import subprocess
 import sys
 
 from .. import machine, paths
-from . import backup, commands, gates, schema, store
+from . import backup, commands, flow, gates, harnessgate, schema, stagechecks, store
 from .collect import CollectError, Providers
 from .hashes import brief_core
 from .router import decide, decide_without_script, precheck, section_tuple
@@ -80,6 +88,13 @@ def _ctx(repo, cfg, vdir, lang):
             "script": os.path.join(vdir, "script.%s.md" % lang)}
 
 
+def _ctx_of(repo, cfg):
+    """The collect context of another video's language (the harness check reads videos in progress)."""
+    def ctx_of(vdir, lang):
+        return _ctx(repo, cfg, vdir, lang)
+    return ctx_of
+
+
 OUTPUT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
@@ -100,11 +115,16 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
         root = cfg.get("studio_root") or "studio"
         unsafe = paths.local_problem(repo, root)
         if cmd == "status":
-            return _status(repo, root, _opts(rest, {"--json"}, set()), unsafe)
+            return _status(repo, root, _opts(rest, {"--json"}, set()), unsafe, providers)
         if unsafe:
             raise Usage(unsafe)  # nothing machine-local is read or written through a link (m1-plan §3.1 review U1)
         o = _opts(rest, {"--json", "--proxy", "--begin", "--end"},
-                  {"--lang", "--enter", "--output", "--platform", "--from", "--expect"})
+                  {"--lang", "--enter", "--output", "--platform", "--from", "--expect", "--source", "--kind",
+                   "--reason"})
+        if cmd == "begin":
+            return flow.begin(repo, cfg, root, o, providers, _ctx_of(repo, cfg))
+        if cmd == "overlay":
+            return flow.overlay(repo, o, hooks, list(argv))
         if not o["_"]:
             raise Usage("%s needs a video id" % cmd)
         vdir = store.video_dir(repo, root, o["_"][0])
@@ -123,10 +143,22 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
             return _stage_done(vdir, state, lang, ctx, o, providers, hooks, flock)
         if cmd == "shown":
             return gates.shown(vdir, state, lang, ctx, o, providers, hooks)
+        if cmd == "record-source":
+            return flow.record_source(repo, vdir, state, hooks)
+        if cmd == "hold":
+            return flow.hold(vdir, lang, o, hooks)
+        if cmd == "release-lock":
+            return flow.release_lock(vdir, state, lang, ctx, providers, hooks)
+        if cmd == "record-render":
+            return flow.record_render(repo, vdir, state, lang, o, hooks)
+        if cmd == "done":
+            return flow.done(repo, vdir, state, lang, hooks, root=root)
+        if cmd == "abandon":
+            return flow.abandon(repo, vdir, state, lang, o, hooks, list(argv))
         handler = {"approve": gates.approve, "reject-source-diff": gates.reject_source_diff,
                    "repin": gates.repin, "exclude-output": gates.exclude_output, "unlock": gates.unlock}[cmd]
         return handler(repo, vdir, state, lang, ctx, o, providers, hooks, list(argv))
-    except Usage as e:
+    except (Usage, flow.Usage) as e:
         _err(str(e))
         return C.USAGE
     except schema.SchemaError as e:
@@ -284,16 +316,23 @@ def _stage_done(vdir, state, lang, ctx, o, providers, hooks, flock):
     if d:
         _err("%s is %s" % (lang, "finished" if d.done else "held"))
         return C.WAIT if d.held else C.USAGE
-    cur = providers.collect(ctx, state, lang)
+    # the harness must be committed (m1-plan §4.1: the same check as begin)
+    why = flow.harness_refusal(ctx["repo"], providers, _ctx_of(ctx["repo"], _cfg_of(ctx["repo"])))
+    if why:
+        raise store.Refused(why, C.REFUSED)
+    scope = stagechecks.scope_of(stage, output, platform)
     o_key = output if gate in ("3", "4a") else None
     p_key = platform if gate == "4b" else None
     box = {}
 
-    def check(s):  # judged again under the lock, on the state as it is now
+    def check(s):  # judged under the lock, on the state and the files as they are now
         first = precheck(s, lang)
         if first:
             raise store.Refused("%s is %s" % (lang, "finished" if first.done else "held"),
                                 C.WAIT if first.held else C.USAGE)
+        # the current values are read under the video's lock (M1b review Y9): the tuple recorded and the check's
+        # inputs are those of the same moment (another state writer waits up to store.LOCK_WAIT, then exits 5)
+        cur = providers.collect(ctx, s, lang)
         d = decide(s, lang, cur, enter=stage, output=output, platform=platform)
         if d.stop:
             raise store.Refused("waiting for a person (%s)" % d.stop["stop"], C.WAIT)
@@ -309,6 +348,15 @@ def _stage_done(vdir, state, lang, ctx, o, providers, hooks, flock):
                 " %s=%s" % (k, r[k]) for k in ("output", "platform") if k in r)
             raise store.Refused("%s cannot be recorded yet: the work is at %s" % (stage, where), C.REFUSED)
         box["tuple"] = schema.project(stage, section_tuple(s, lang, cur, gate, output, platform))
+        # the stage's check result: pass, this scripts version, the inputs as they are now (v3 N2)
+        try:
+            stagechecks.verify(stage, stagechecks.Inputs(ctx, s, lang, scope, cur, providers), cur.get("s2v_version"))
+        except stagechecks.CheckProblem as e:
+            raise store.Refused(str(e), C.FAIL)
+        if stage == "render":
+            why_r = flow.render_problem(s, lang, output, ctx["repo"])
+            if why_r:
+                raise store.Refused(why_r, C.FAIL)
 
     rec = {"stage": stage, "output": o_key, "platform": p_key, "at": schema.now()}
 
@@ -323,6 +371,15 @@ def _stage_done(vdir, state, lang, ctx, o, providers, hooks, flock):
                 **({"flock": flock} if flock else {}))
     sys.stdout.write("%s done\n" % stage)
     return C.OK
+
+
+def _cfg_of(repo):
+    try:
+        with open(os.path.join(repo, ".claude", "studio", "config.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return cfg if isinstance(cfg, dict) else {}
 
 
 def _loop(vdir, lang, o, hooks, flock):
@@ -354,7 +411,7 @@ def _loop(vdir, lang, o, hooks, flock):
     return C.OK
 
 
-def _status(repo, root, o, unsafe=None):
+def _status(repo, root, o, unsafe=None, providers=None):
     vids = []
     for base in (os.path.join(repo, root, "videos"), os.path.join(repo, root, "local", "videos")):
         if os.path.isdir(base):
@@ -380,8 +437,11 @@ def _status(repo, root, o, unsafe=None):
                     "incomplete_events": store.incomplete(vdir, st),
                     "unreadable_log_lines": sum(1 for e in store.read_log(vdir) if e.get("event") == "unreadable")})
     warns = [w for w in (unsafe, None if unsafe else _guard_ran_warning(repo)) if w]
+    hres = harnessgate.check(repo, providers=providers, ctx_of=_ctx_of(repo, _cfg_of(repo)))
+    harness = hres.lines()
     if o.get("--json"):
-        sys.stdout.write(json.dumps({"videos": out, "warnings": warns}, ensure_ascii=False,
+        sys.stdout.write(json.dumps({"videos": out, "warnings": warns, "harness_uncommitted": harness,
+                                     "pronounce_leftover": hres.leftover}, ensure_ascii=False,
                                     sort_keys=True) + "\n")
     else:
         for v in out:
@@ -402,6 +462,12 @@ def _status(repo, root, o, unsafe=None):
                 sys.stdout.write("%s: %d unreadable line(s) in approvals.jsonl\n" % (v["video"], v["unreadable_log_lines"]))
         for w in warns:
             sys.stdout.write("warning: %s\n" % w)
+        if harness:
+            more = len(harness) - harnessgate.MAX_LIST
+            sys.stdout.write("harness changes not committed (begin and stage-done wait for a harness commit): %s%s\n"
+                             % (", ".join(harness[:harnessgate.MAX_LIST]), " and %d more" % more if more > 0 else ""))
+        if hres.leftover:
+            sys.stdout.write("%s: %s\n" % (harnessgate.PRONOUNCE, harnessgate.LEFTOVER))
     return C.OK
 
 

@@ -72,6 +72,23 @@ for p in glob.glob(os.path.join(skill, "commands", "**", "*.md"), recursive=True
         check("never in the same message" in body,
               "%s: a gate is the question, then (a later message) one approval command" % os.path.relpath(p, skill))
 
+# no variable in command position (M1a review NIT A): a command document runs Studio's scripts (run_s2v.py, lock.py,
+# state.py, …) or a literal path — never "$S2V …", "${X} …" or a backquoted command word (the guard refuses those)
+cmd_re = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
+for p in glob.glob(os.path.join(skill, "commands", "**", "*.md"), recursive=True):
+    body = open(p).read()
+    fenced = re.findall(r"```[^\n]*\n(.*?)```", body, re.S)
+    inline = re.findall(r"`([^`\n]+)`", re.sub(r"```.*?```", "", body, flags=re.S))
+    bad = []
+    for sn in [l for f in fenced for l in f.splitlines()] + inline:
+        for seg in cmd_re.split(sn.strip()):
+            words = [w for w in seg.strip().split() if not re.match(r"^[A-Z_][A-Z0-9_]*=", w)]
+            if words and ("$" in words[0] or "`" in words[0]):
+                bad.append(seg.strip()[:60])
+            if "main.js" in seg and "$" in seg:
+                bad.append(seg.strip()[:60])
+    check(not bad, "%s: no variable in command position (%s)" % (os.path.relpath(p, skill), "; ".join(bad[:3])))
+
 # result contract identical
 blocks = []
 for p in glob.glob(os.path.join(skill, "**", "*.md"), recursive=True):
@@ -168,7 +185,7 @@ for d in ("commit", "hooks"):
     for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
         check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
               "%s (copied into repositories) does not import the guard (plugin only)" % os.path.relpath(p, skill))
-check(sv and sv.group(1) == "9", "SCRIPTS_VERSION is 9 (M1a: machine-local s2v path, video labels, shared used-answer record)")
+check(sv and sv.group(1) == "10", "SCRIPTS_VERSION is 10 (M1b: flow commands, check results, run_s2v.py)")
 from stdo import manifest as _man
 _mp = os.path.join(scripts, _man.NAME)
 check(os.path.exists(_mp) and open(_mp).read() == _man.render(scripts, sv.group(1)),

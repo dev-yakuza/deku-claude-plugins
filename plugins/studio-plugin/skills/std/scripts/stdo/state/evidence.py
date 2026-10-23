@@ -11,7 +11,7 @@ import json
 import os
 import time
 
-from .. import paths
+from .. import paths, writes
 from . import schema
 from .argv import argv_sha
 
@@ -120,6 +120,7 @@ def check(repo, argv, label, proxy, now=None):
 
 def consume(repo, ev, video, cmd, log=None):
     """Append the consumption record and fsync (before the video's state is written)."""
+    writes.check("the used-answer record")
     line = {"session_id": ev["session_id"], "tool_use_id": ev["tool_use_id"],
             "question_index": ev["question_index"], "video": video, "cmd": cmd, "at": schema.now()}
     p = log or consumed_path(repo)

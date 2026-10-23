@@ -92,8 +92,7 @@ def parse(label):
 # subcommands whose label is "<word> <video> <--expect>" (a 12-hex hash the question shows)
 HASHED = {"approve": approve, "reject-source-diff": reject, "repin": repin, "exclude-output": exclude}
 # subcommands that need evidence but have no label yet: the milestone that brings them
-PLANNED = {"approve-actor": "M3b", "credit": "M1g", "abandon": "M1b", "move": "later", "overlay": "M1b",
-           "rollback": "M4"}
+PLANNED = {"approve-actor": "M3b", "credit": "M1g", "move": "later", "rollback": "M4"}
 
 
 class NoLabel(Exception):
@@ -154,6 +153,23 @@ def expected(argv, repo, studio_root):
         if not isinstance(lang, str) or not lang:
             raise NoLabel("cannot tell the language of video %s" % pos[0])
         return unlock(st["video"], lang, expect), None, st["video"]
+    if cmd == "abandon":
+        # `중단 <video> <lang>` (M1b): the language comes from --lang or the video's source language
+        if not pos:
+            raise NoLabel("abandon needs a video id")
+        _vdir, st = _video(repo, studio_root, pos[0])
+        lang = opt.get("--lang") if isinstance(opt.get("--lang"), str) else st.get("source_lang")
+        if not isinstance(lang, str) or not _WORD.match(lang):
+            raise NoLabel("cannot tell the language of video %s" % pos[0])
+        return abandon(st["video"], lang), None, st["video"]
+    if cmd == "overlay":
+        # `사내설정 <sha12>` (M1b): --expect is the first 12 hex characters of the sha256 of the --from file, which
+        # state.py checks; the question shows it
+        if not isinstance(expect, str) or not HASH12.match(expect):
+            raise NoLabel("--expect must be the 12 lowercase hex characters shown in the question")
+        if pos:
+            raise NoLabel("overlay takes no video id")
+        return overlay(expect), expect, None
     if cmd in PLANNED:
         when = PLANNED[cmd]
         raise NoLabel("state.py %s %s — there is no approval label for it yet" % (

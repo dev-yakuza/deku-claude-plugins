@@ -361,6 +361,11 @@ def staged_check(ctx):
         c = consume_answer(ctx, ok)
         if c:
             problems.append(c)
+        elif isinstance(ok, dict) and ok.get("kind") == "video" and ctx.roots:
+            try:
+                okfile.keep_for_video(ctx.top, ctx.roots[0], ok)  # for state.py done (M1b review Y3)
+            except (OSError, RuntimeError) as e:
+                problems.append(Problem(1, "cannot keep the video's commit record (%s) — retry the commit" % e))
     return code_of(problems), problems
 
 

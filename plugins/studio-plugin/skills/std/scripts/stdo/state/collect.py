@@ -54,12 +54,48 @@ def run_version(s2v_path):
         raise CollectError("cannot read the s2v version: %s" % e)
 
 
+def _main_js(s2v_path):
+    if not s2v_path:
+        raise CollectError(machine.HINT, 2)
+    return os.path.join(s2v_path, "packages", "cli", "dist", "main.js")
+
+
+def _json_call(s2v_path, args, what, ok=(0,), timeout=300):
+    cmd = ["node", _main_js(s2v_path)] + list(args)
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise CollectError("cannot run s2v %s: %s" % (what, e))
+    if out.returncode not in ok:
+        raise CollectError("s2v %s failed (exit %d): %s" % (what, out.returncode, out.stderr.strip()[-2000:]))
+    try:
+        return json.loads(out.stdout)
+    except ValueError as e:
+        raise CollectError("s2v %s printed no JSON: %s" % (what, e))
+
+
+def run_sentences(s2v_path, script):
+    """`s2v sentences <script> --json` (no lock). The JSON comes even when lint finds errors (exit 1, as s2v
+    prints it); exit 2 is a usage error."""
+    return _json_call(s2v_path, ["sentences", script, "--json"], "sentences", ok=(0, 1))
+
+
+def run_services_status(s2v_path):
+    """`s2v services status --json`: the machine lock as s2v sees it (version 1, state_dir, busy)."""
+    data = _json_call(s2v_path, ["services", "status", "--json"], "services status", timeout=120)
+    if not isinstance(data, dict) or data.get("version") != 1:
+        raise CollectError("s2v services status --json is not version 1")
+    return data
+
+
 class Providers(object):
-    def __init__(self, inspect=None, source=None, inspect_at=None, version=None):
+    def __init__(self, inspect=None, source=None, inspect_at=None, version=None, sentences=None, services=None):
         self.inspect = inspect or (lambda ctx: run_inspect(ctx["s2v_path"], ctx["script"]))
         self.source = source or default_source
         self.inspect_at = inspect_at or (lambda ctx, hv: run_inspect(ctx["s2v_path"], ctx["script"], hash_version=hv))
         self.version = version or (lambda ctx: run_version(ctx["s2v_path"]))
+        self.sentences = sentences or (lambda ctx: run_sentences(ctx["s2v_path"], ctx["script"]))
+        self.services = services or (lambda ctx: run_services_status(ctx["s2v_path"]))
 
     def collect(self, ctx, state, lang, ins=None):
         ins = ins if ins is not None else self.inspect(ctx)
@@ -86,6 +122,8 @@ class Providers(object):
             "voice": h.get("voice"), "audio": h.get("audio"), "engine": h.get("engine") or {},
             "presentation": h.get("presentation_by_output") or {}, "reasons": ins.get("reasons") or {},
             "render": render, "copy": copies, "outputs_missing": missing,
+            # the files the script refers to (s2v lists them with their sha256): inputs of the check results
+            "files": ins.get("files") if isinstance(ins.get("files"), list) else None,
         }
 
 

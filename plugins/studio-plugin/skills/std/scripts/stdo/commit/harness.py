@@ -45,13 +45,28 @@ def _content(p):
     return (p in CONTENT or p.startswith(CONTENT_DIRS)) and p != spaths.CONFIG
 
 
+# editor and OS leftovers are never part of the harness (M1b review Y4): they neither block begin/stage-done nor get
+# staged by a harness commit
+JUNK_NAMES = (".DS_Store", "Thumbs.db", "desktop.ini")
+JUNK_SUFFIXES = (".swp", ".swo", ".swx", "~", ".pyc", ".orig", ".rej")
+
+
+def junk(path):
+    if path.startswith(".claude/studio/scripts/"):
+        return False  # in the scripts copy every file counts (H10 holds it to its manifest) — M1b re-review Z4
+    parts = path.split("/")
+    name = parts[-1]
+    return name in JUNK_NAMES or name.endswith(JUNK_SUFFIXES) or "__pycache__" in parts or \
+        (name.startswith(".#") and len(name) > 2)
+
+
 class HarnessKind(object):
     name = "harness"
     needs_overlay = False  # nothing internal; H3 decides about content files
     proxy_commit = True  # the sandbox proxy mode may commit the harness (not with protected key changes)
 
     def allowed(self, ctx, path):
-        if ctx.cls.is_local(path):
+        if ctx.cls.is_local(path) or junk(path):
             return False
         if path in (spaths.GITIGNORE, spaths.HUSKY):
             return True
