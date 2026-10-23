@@ -35,7 +35,8 @@ configured — `board_fails` · `board_bugs` · `board_unknown_col` · `board_ac
 The children are **not** read from the marker — they come from step 3's child call (S, below).
 
 **3. Gather — four `gh` calls here plus one `git`; five `gh` in total, counting step 1** (plus
-the truncation re-reads below, only when a count says so).
+the truncation re-reads below, only when a count says so —
+for the PR list, only when its 완전성 판정 fails).
 
 ⚠ **The run marker lives in a COMMENT, and step 1's `--json body` does not contain comments.**
 Without this call, step 2's `state` · `heartbeat` · `host`/`pid` and all four `board_*` keys
@@ -120,14 +121,22 @@ so the search is reliable.) Nothing found → that member stays ordinary. **The 
 first line equals 200** → the children cannot be known: the sprint is **판단 불가** (step 6).
 
 **PRs** — filtered to members **and** the children of S (`<m…>` = all of those numbers,
-substituted literally in both places); stream form — first line = the total PR count, then one
-filtered PR per line:
+substituted literally in both places) and to closing references **in this repo** (`<owner>` and
+`<repo>` = step 0's `{owner}/{repo}`, `_handoff.md`'s `nameWithOwner`, substituted literally);
+stream form — first line = the total PR count (`length`), second line = the smallest PR number in
+the window (`(map(.number) | min // 0)`), then one filtered PR per line from the third line on:
 ```bash
-gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,closingIssuesReferences --jq '[<m1>,<m2>,<c1>] as $m | length, (.[] | ([.closingIssuesReferences[]?.number] | map(select(. as $n | $m | index($n)))) as $c | ((.headRefName // "") | test("(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end), ci: ((.statusCheckRollup // []) as $c | if ($c | length) == 0 then "none" elif any($c[]; ((.conclusion? // .status? // .state? // "") | tostring | ascii_upcase) | (. == "" or test("QUEUED|IN_PROGRESS|PENDING|WAITING|EXPECTED|REQUESTED"))) then "pending" elif all($c[]; ((.conclusion? // .status? // .state? // "") | tostring | ascii_upcase) | test("^(SUCCESS|NEUTRAL|SKIPPED)$")) then "pass" else "fail" end)})'
+gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,closingIssuesReferences --jq '[<m1>,<m2>,<c1>] as $m | length, (map(.number) | min // 0), (.[] | ([.closingIssuesReferences[]? | select(.repository.owner.login == "<owner>" and .repository.name == "<repo>") | .number] | map(select(. as $n | $m | index($n)))) as $c | ((.headRefName // "") | test("(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end), ci: ((.statusCheckRollup // []) as $c | if ($c | length) == 0 then "none" elif any($c[]; ((.conclusion? // .status? // .state? // "") | tostring | ascii_upcase) | (. == "" or test("QUEUED|IN_PROGRESS|PENDING|WAITING|EXPECTED|REQUESTED"))) then "pending" elif all($c[]; ((.conclusion? // .status? // .state? // "") | tostring | ascii_upcase) | test("^(SUCCESS|NEUTRAL|SKIPPED)$")) then "pass" else "fail" end)})'
 ```
-⚠ **First line == 200 → re-read with `--limit 500`.** Still 500 → **no per-Issue fallback**: a
-`"Closes #<m>" in:body` search cannot find a PR linked only by its branch, so it would turn real
-work into "no PR". The sprint is **판단 불가** instead (step 6). ⚠ The old shape — every PR
+⚠ **완전성 판정** — the same rule as `retro.md` Phase 1, which states the premise and its limits:
+first line < the limit → complete. First line == the limit → **second line < the smallest number
+among the members and the children of S → complete; do not re-read** (at 200 too — that saves the
+re-read). Otherwise re-read with `--limit 500` and apply the same test. **The 완전성 판정 still
+fails → no per-Issue fallback**: a `"Closes #<m>" in:body` search cannot find a PR linked only by
+its branch, so it would turn real work into "no PR". The sprint is **판단 불가** instead (step 6).
+A closing reference to **another repo's** Issue is dropped by the `select(.repository…)` above —
+its number can equal a member's (measured on `word_app`: 32 such references), and the 완전성 판정's
+premise holds only for same-repo references. ⚠ The old shape — every PR
 unfiltered as one `{total, prs:[…]}` line — was cut at 200 in a 235-PR repo, and at 500 its
 single line grew to ~40 KB, more than Read shows of one line.
 ```bash
@@ -486,9 +495,10 @@ sprint whose work was still in review. ⚠ The call this replaced looked only at
 reached `guild:done`, over every Issue unfiltered at `--limit 200` with no truncation check.
 Render the children indented under the parent (step 5's split-parent line).
 
-⚠ **판단 불가 — the sprint, not one Issue.** When step 3's PR list is still truncated at 500, or
-a child supplement failed, do not decide either axis: render
-`스프린트 종료: 판단 불가 — PR 목록이 500건에서 잘려 판정할 수 없습니다(retro 도 같은 이유로 실패합니다)`
+⚠ **판단 불가 — the sprint, not one Issue.** When step 3's 완전성 판정 fails at 500 (the window
+does not reach below the oldest member — a very old carryover member, say), or a child supplement
+failed, do not decide either axis: render
+`스프린트 종료: 판단 불가 — PR 목록 500건이 가장 오래된 멤버까지 닿지 않아 판정할 수 없습니다(retro 도 같은 이유로 실패합니다)`
 (for a child supplement: `스프린트 종료: 판단 불가 — #<m> 의 자식을 모두 찾지 못했습니다(retro 도 같은 이유로 실패합니다)`)
 and do **not** suggest `회고 가능` — `retro` stops on the same truncation, so suggesting it would
 send the human into a `FAIL`.
@@ -542,6 +552,7 @@ markers.
 - **Never judge a preserved worktree**; report source-vs-docs and let the human decide.
 - **Never auto-catch-up a stale base** and never suggest a rebase — INV3.
 - Five `gh` calls (sprint list · tracker comments · members · child discovery · PR list) plus
-  one `git`; only when a count says so, the members re-read, one child search per `guild:done` /
-  `guild:children` member and the PR re-read at `--limit 500`; plus step 3b's one call on a
+  one `git`; only when a count says so, the members re-read and one child search per
+  `guild:done` / `guild:children` member; only when the PR list's 완전성 판정 fails at 200, the PR
+  re-read at `--limit 500`; plus step 3b's one call on a
   squash-stack sprint. A missing source renders as "없음", not an error.

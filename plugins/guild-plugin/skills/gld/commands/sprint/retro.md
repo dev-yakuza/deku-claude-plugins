@@ -36,7 +36,7 @@ Each its own Bash call.
      call and PR call for that tracker (in that order — they define S and the PR filter), then
      **Phase 7**, skipping 2–6 entirely: nothing is measured, written or
      closed. ⚠ The truncation `FAIL`s in Phase 1 are about **metrics** and do not apply
-     here: in CLEANUP, when the PR list still equals the limit, look up each member **and each
+     here: in CLEANUP, when Phase 1's 완전성 판정 fails (the PR list is not complete even at 500), look up each member **and each
      child of S** on the server instead (this is the branch-confirmation path, not a count) — `gh pr list --repo <owner>/<repo> --state all --search '"Closes #<m>" in:body' --limit 100 --json number,headRefName,baseRefName,state,mergedAt,closedAt,closingIssuesReferences`
      — and let Phase 7's confirmation decide which rows are really that Issue's. A result that
      **equals the limit** is truncated: report *"#<m>의 PR을 전부 읽지 못했습니다"* and exclude
@@ -108,16 +108,22 @@ found is an ordinary member). First line == 500 → for every member labelled `g
 gh issue list --state all --search '"Parent Issue: #<m>" in:body' --limit 200 --json number,title,body,labels,state --jq 'length, (.[] | select((.body // "") | test("Parent Issue: #<m>([^0-9]|$)")) | {number, title, state, labels: [.labels[].name], parent: <m>})'
 ```
 and add what it finds. ⚠ **That search fails or its first line equals 200 → stop**, as for a
-truncated PR list: `FAIL: could not find every child of #<m> — the metrics would be wrong and
+PR list whose 완전성 판정 fails: `FAIL: could not find every child of #<m> — the metrics would be wrong and
 Phase 4 would write them into config.json` (CLEANUP: Phase 0 step 0 instead).
 
 **Then the PRs** — filtered to the members **and** the children of S (`$m` and the branch
-pattern both hold all of those numbers), stream form: first line = the total PR count, then one
-filtered PR per line:
+pattern both hold all of those numbers) and to closing references **in this repo**, stream form:
+first line = the total PR count (`length`), second line = the smallest PR number in the window
+(`(map(.number) | min // 0)`), then one filtered PR per line from the third line on:
 ```bash
-gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,closedAt,reviewDecision,closingIssuesReferences --jq '[<m1>,<m2>,<c1>] as $m | length, (.[] | ([.closingIssuesReferences[]?.number] | map(select(. as $n | $m | index($n)))) as $c | ((.headRefName // "") | test("(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, closedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end)})'
+gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,closedAt,reviewDecision,closingIssuesReferences --jq '[<m1>,<m2>,<c1>] as $m | length, (map(.number) | min // 0), (.[] | ([.closingIssuesReferences[]? | select(.repository.owner.login == "<owner>" and .repository.name == "<repo>") | .number] | map(select(. as $n | $m | index($n)))) as $c | ((.headRefName // "") | test("(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|$)")) as $b | select(($c | length) > 0 or $b) | {number, headRefName, baseRefName, state, mergedAt, closedAt, reviewDecision, closes: $c, via: (if ($c | length) > 0 then "closes" else "branch" end)})'
 ```
-(substitute the tracker, the member numbers and the children's numbers literally.) ⚠ The PR
+(substitute the tracker, the member numbers, the children's numbers and `<owner>`/`<repo>` —
+`_handoff.md`'s `nameWithOwner` — literally.) ⚠ **Only this repo's closing references count.**
+`closingIssuesReferences` can point at another repo's Issue (measured on `word_app`: 32 such
+references, e.g. PR #351 → `dev-yakuza/word_app#1686`); comparing `.number` alone maps it to a
+member whose number happens to match. The `select(.repository…)` drops it — and the 완전성 판정
+below holds only for same-repo references anyway. ⚠ The PR
 filter used to hold member numbers only, so a split member's children's PRs were read for the
 first time in Phase 7 — after the metrics and after the close.
 ⚠ **The back-reference test has a digit boundary** — the same form as `_sprint_dag.md` Section A.
@@ -125,7 +131,8 @@ first time in Phase 7 — after the metrics and after the close.
 now deletes branches by this membership, so a sibling sprint's members must not leak in.
 
 ⚠ **The count is not decoration — it is the truncation check below, and it now comes free**:
-`total` in the members call, the first line of the child and PR calls. The
+`total` in the members call, the first line of the child and PR calls. (The PR call's second line
+— the window's smallest PR number — is the other half of its 완전성 판정.) The
 previous instruction told you to get the count *"on a separate invocation"*; that call is gone.
 ⚠⚠ **Match on `closingIssuesReferences` OR the branch name — not on the reference alone.**
 Measured on `dev-yakuza/one-man-company`: **70 of 200 PRs (35%) carry no closing reference at
@@ -155,7 +162,8 @@ plausible smaller number, which then becomes configuration.**
 
 So: **count first, then decide.** ~~Ask for the count in the same call (`--jq 'length'` on a
 separate invocation…)~~ — the `--jq` forms above already return the count (`total`, or the
-first line). Compare it with the limit:
+first line). Compare it with the limit (for the PRs, together with the second line — the
+완전성 판정):
 
 ⚠ **This is live, not hypothetical.** Measured on `dev-yakuza/one-man-company`: the issue list
 returns **exactly 200** — `total == limit`, i.e. the read *is* truncated and the fallback below
@@ -169,13 +177,32 @@ step that gets skipped.
   `Sprint: #<tracker>` into a PR body; a PR body carries `Closes #<N>` and the auditor block
   (`_execute_spine.md` Step 5). Searching for it returns an **empty set**, which is the worst
   possible failure for this phase: six of the nine metrics come from the PR list, and zero reads
-  as *"nothing happened"*. Instead raise the limit (`--limit 500`) and, if the count still equals
-  the limit, **stop**: `FAIL: could not read the sprint's PRs in full — the metrics would be
+  as *"nothing happened"*. Instead apply the **완전성 판정** (below) — first line < the limit →
+  complete; first line == the limit and **second line < the smallest number among the members
+  and the children of S → complete, do not re-read** (at 200 too); otherwise re-read with
+  `--limit 500` and apply the same test. The 완전성 판정 still fails → **stop**: `FAIL: could not read the sprint's PRs in full — the metrics would be
   understated and Phase 4 would write them into config.json`. ⚠ **No per-Issue fallback on this
   path**: a `"Closes #<m>" in:body` search misses every PR linked only by its branch (measured:
   71 such PRs, member work among them), so it would turn merged work into "no PR" — a plausible
-  smaller number again. A repo past 500 PRs cannot be measured here yet (a known limit); `daily`
-  says so in advance (`스프린트 종료: 판단 불가`).
+  smaller number again. A repo past 500 PRs **can** be measured now: it fails only when the
+  완전성 판정 fails at 500; `daily` says so in advance (`스프린트 종료: 판단 불가`).
+
+  **완전성 판정 — why a full window can still be complete.** GitHub numbers a repo's Issues and
+  PRs from **one shared counter** (a fork's PR too). A PR that closes a **same-repo** Issue #n, or
+  carries n in its branch, is created after #n, so its number is greater than n (measured: 0
+  inversions on `word_app` and `one-man-company`). `gh pr list` with no `--search` / `--label`
+  returns PRs in creation order, newest first (createdAt DESC) = number order, descending
+  (cli/cli `pkg/cmd/pr/shared/lister.go`: `orderBy: CREATED_AT DESC`). So when the window's
+  smallest PR number is below the smallest target Issue, every PR that can map to a target is
+  inside the window. The premise holds **only for same-repo references** — hence the
+  `select(.repository…)` in the PR call. Its limits: it covers PRs Guild created after their
+  Issue — a PR whose body was edited later, or that was linked through the Development sidebar to
+  a later Issue, and an Issue transferred from another repo (it gets a new number) are exceptions
+  (measured: 0). The real floor is the smallest **member** number (a child is created after its
+  parent, at the split), so a very old carryover member (say #50) leaves even the 500 window
+  incomplete — `FAIL` as before. Measured: `word_app` sprint #1708, smallest member #1097 (a
+  carryover), 200-window minimum #916 → complete at 200; `one-man-company` #563, smallest member
+  #349, 200-window minimum #104 → complete.
 
 The hard rule *"Zero and unrecorded are different"* is worthless if a truncated read is treated
 as a count — and here a truncated read becomes **configuration**.
@@ -656,12 +683,12 @@ human's.
 - **Split children.** Reuse Phase 1's S and its children (the child call and, when it was
   truncated, its supplement) and their PRs — already in Phase 1's PR list, whose filter holds
   the children's numbers. No run-marker read and no server re-query here: Phase 1's supplement
-  already does what this step used to. In CLEANUP with a truncated PR list, the children's PRs
+  already does what this step used to. In CLEANUP when Phase 1's 완전성 판정 fails, the children's PRs
   come from Phase 0 step 0's per-Issue lookup, with its truncation rule.
 - **Confirm each PR before its branch becomes a candidate** — Phase 1 itself calls a
   `via: "branch"` row *"a candidate to confirm, not a fact"*, and a cleanup that deletes is the
   last place to skip that. One call per PR:
-  `gh pr view <pr> --repo <owner>/<repo> --json headRefName,headRefOid,isCrossRepository,state,mergedAt,closingIssuesReferences,body --jq '{headRefName, headRefOid, isCrossRepository, state, mergedAt, closes: ([.closingIssuesReferences[].number] + [(.body // "") | scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?) #([0-9]+)") | .[0] | tonumber] | unique)}'`.
+  `gh pr view <pr> --repo <owner>/<repo> --json headRefName,headRefOid,isCrossRepository,state,mergedAt,closingIssuesReferences,body --jq '{headRefName, headRefOid, isCrossRepository, state, mergedAt, closes: ([.closingIssuesReferences[] | select(.repository.owner.login == "<owner>" and .repository.name == "<repo>") | .number] + [(.body // "") | scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?) #([0-9]+)") | .[0] | tonumber] | unique)}'`.
   `closes` unions GitHub's link with the body's keywords on purpose: GitHub links a closing
   keyword only for a PR based on the default branch, so a stacked member PR has an **empty**
   `closingIssuesReferences` while its body still says `Closes #<N>` (`_execute_spine.md` Step 5

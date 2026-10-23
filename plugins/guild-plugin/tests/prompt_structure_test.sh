@@ -3669,12 +3669,13 @@ else
 fi
 lacksfx "daily(0.98.0): 옛 자식 호출(전체 --limit 200) 제거" "$D98" 'children: [.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)"))'
 # 1-3 PR 호출 — 같은 형태, 멤버∪자식, 스트림
-hasfx "daily(0.98.0): PR 호출 스트림·멤버∪자식 필터" "$D98" "--jq '[<m1>,<m2>,<c1>] as \$m | length, (.[] | ([.closingIssuesReferences[]?.number] | map(select(. as \$n | \$m | index(\$n)))) as \$c | ((.headRefName // \"\") | test(\"(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|\$)\")) as \$b | select((\$c | length) > 0 or \$b) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: \$c, via:"
+hasfx "daily(0.98.0): PR 호출 스트림·멤버∪자식 필터" "$D98" "--jq '[<m1>,<m2>,<c1>] as \$m | length, (map(.number) | min // 0), (.[] | ([.closingIssuesReferences[]? | select(.repository.owner.login == \"<owner>\" and .repository.name == \"<repo>\") | .number] | map(select(. as \$n | \$m | index(\$n)))) as \$c | ((.headRefName // \"\") | test(\"(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|\$)\")) as \$b | select((\$c | length) > 0 or \$b) | {number, headRefName, baseRefName, state, mergedAt, reviewDecision, closes: \$c, via:"
 hasfx "daily(0.98.0): PR 호출 필드" "$D98" 'gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,closingIssuesReferences --jq'
-hasfx "retro(0.98.0): PR 호출 스트림·멤버∪자식 필터" "$R98" "--jq '[<m1>,<m2>,<c1>] as \$m | length, (.[] | ([.closingIssuesReferences[]?.number] | map(select(. as \$n | \$m | index(\$n)))) as \$c | ((.headRefName // \"\") | test(\"(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|\$)\")) as \$b | select((\$c | length) > 0 or \$b) | {number, headRefName, baseRefName, state, mergedAt, closedAt, reviewDecision, closes: \$c, via:"
+hasfx "retro(0.98.0): PR 호출 스트림·멤버∪자식 필터" "$R98" "--jq '[<m1>,<m2>,<c1>] as \$m | length, (map(.number) | min // 0), (.[] | ([.closingIssuesReferences[]? | select(.repository.owner.login == \"<owner>\" and .repository.name == \"<repo>\") | .number] | map(select(. as \$n | \$m | index(\$n)))) as \$c | ((.headRefName // \"\") | test(\"(^|[^0-9])#?(<m1>|<m2>|<c1>)([^0-9]|\$)\")) as \$b | select((\$c | length) > 0 or \$b) | {number, headRefName, baseRefName, state, mergedAt, closedAt, reviewDecision, closes: \$c, via:"
 lacksfx "daily(0.98.0): 옛 PR 한 줄 형태 제거" "$D98" "--jq '{total: length, prs: [.[] | {number"
 lacksfx "retro(0.98.0): 옛 PR 한 줄 형태 제거" "$R98" '[<m1>,<m2>,<m3>] as $m | {total: length, prs:'
-hasfx "daily(0.98.0): PR 첫 줄 200 → 500 재읽기" "$D98" '**First line == 200 → re-read with `--limit 500`.** Still 500 → **no per-Issue fallback**'
+hasfx "daily(0.98.1): PR 완전성 판정 실패 → 500 재읽기" "$D98" 'Otherwise re-read with `--limit 500` and apply the same test. **The 완전성 판정 still'
+hasfx "daily(0.98.1): 완전성 판정 실패 시 per-Issue 보충 없음" "$D98" 'fails → no per-Issue fallback**: a `"Closes #<m>" in:body` search cannot find a PR linked only by'
 hasfx "retro(0.98.0): PR 절단은 per-Issue 보충 없이 FAIL" "$R98" '⚠ **No per-Issue fallback on this'
 hasfx "daily(0.98.0): branch 연결은 확인 후" "$D98" 'confirm, not a fact — the same check as `retro.md` Phase 1 — and only a confirmed one joins that'
 hasfx "daily(0.98.0): 호출 순서" "$D98" '**In this order — members, then children, then PRs**'
@@ -3700,7 +3701,7 @@ lacksfx "retro(0.98.0 17b): 옛 자식 PR 머지 제거" "$R98" '자식 PR 머�
 hasfx "retro(0.98.0): history·권고 표 불변" "$R98" 'The `history` schema and the recommendation table do not change.'
 # 1-6 daily 목표 줄·판단 불가·분할 부모 줄
 hasfx "daily(0.98.0): 목표 줄 판단 불가" "$D98" '`목표: 판단 불가(<이유>)`'
-hasfx "daily(0.98.0): 스프린트 판단 불가(PR 절단)" "$D98" '`스프린트 종료: 판단 불가 — PR 목록이 500건에서 잘려 판정할 수 없습니다(retro 도 같은 이유로 실패합니다)`'
+hasfx "daily(0.98.1): 스프린트 판단 불가(완전성 판정 실패)" "$D98" '`스프린트 종료: 판단 불가 — PR 목록 500건이 가장 오래된 멤버까지 닿지 않아 판정할 수 없습니다(retro 도 같은 이유로 실패합니다)`'
 hasfx "daily(0.98.0): 판단 불가면 회고 가능 안내 없음" "$D98" 'and do **not** suggest `회고 가능`'
 hasfx "daily(0.98.0): Return 에 undetermined" "$D98" 'sprint <finished|open PRs N|undetermined>`'
 hasfx "daily(0.98.0): 분할 부모 줄은 S 전체" "$D98" '⚠ **Add the split-parent line** for every member of S (step 3), whatever its state, with its'
@@ -3810,6 +3811,44 @@ hasfx "retro(0.98.0 final): 리뷰·머지 대기 PR 수 문장과 k 정의" "$G
 hasfx "retro(0.98.0 final): n=0 이어도 사람 대기 m 표기" "$GLD/commands/sprint/retro.md" 'm > 0 → add *"(사람 대기 <m>개는 직접 처리)"*'
 lacksfx "retro(0.98.0 final): 자식 판정 나열에 mixed 없음" "$GLD/commands/sprint/retro.md" '`no_scan == records`, mixed, `violation`'
 
+# 0.98.1 — PR 목록 절단 시 완전성 판정 · 같은 저장소 참조만 · CLEANUP 조건
+hasfx "daily(0.98.1): PR 출력 둘째 줄 = 창의 최소 PR 번호" "$D98" 'second line = the smallest PR number in'
+hasfx "retro(0.98.1): PR 출력 둘째 줄 = 창의 최소 PR 번호" "$R98" 'second line = the smallest PR number in the window'
+hasfx "daily(0.98.1): PR 은 셋째 줄부터" "$D98" 'then one filtered PR per line from the third line on:'
+hasfx "retro(0.98.1): PR 은 셋째 줄부터" "$R98" 'then one filtered PR per line from the third line on:'
+lacksfx "daily(0.98.1): 옛 출력 형태(첫 줄 다음 바로 PR) 제거" "$D98" 'first line = the total PR count, then one'
+lacksfx "retro(0.98.1): 옛 출력 형태(첫 줄 다음 바로 PR) 제거" "$R98" 'first line = the total PR count, then one'
+hasfx "daily(0.98.1): 완전성 판정 — 둘째 줄 < 최소(첫 줄)" "$D98" 'First line == the limit → **second line < the smallest number'
+hasfx "daily(0.98.1): 완전성 판정 — 재조회 없음" "$D98" 'among the members and the children of S → complete; do not re-read** (at 200 too'
+hasfx "retro(0.98.1): 완전성 판정 — 재조회 없음" "$R98" 'and the children of S → complete, do not re-read** (at 200 too)'
+hasfx "retro(0.98.1): 완전성 판정 실패 → FAIL" "$R98" 'The 완전성 판정 still fails → **stop**: `FAIL: could not read the sprint'"'"'s PRs in full'
+hasfx "retro(0.98.1): 전제 — 공유 번호 카운터" "$R98" 'PRs from **one shared counter** (a fork'"'"'s PR too)'
+hasfx "retro(0.98.1): 전제 — 생성순 = 번호순" "$R98" 'returns PRs in creation order, newest first (createdAt DESC) = number order, descending'
+hasfx "retro(0.98.1): 전제 — 같은 저장소 참조만" "$R98" 'The premise holds **only for same-repo references**'
+hasfx "retro(0.98.1): 한계 — 본문 수정·사이드바·이전 Issue 예외" "$R98" 'a later Issue, and an Issue transferred from another repo (it gets a new number) are exceptions'
+hasfx "retro(0.98.1): 하한 — 가장 작은 멤버 번호" "$R98" 'The real floor is the smallest **member** number (a child is created after its'
+hasfx "retro(0.98.1): 하한 — 오래된 이월 멤버는 500 에서도 FAIL" "$R98" 'a very old carryover member (say #50) leaves even the 500 window'
+lacksfx "retro(0.98.1): 옛 '500 넘으면 측정 불가' 문장 제거" "$R98" 'cannot be measured here yet'
+hasfx "retro(0.98.1): 500 넘는 저장소도 측정 가능" "$R98" 'A repo past 500 PRs **can** be measured now'
+hasfx "retro(0.98.1): CLEANUP 조건 — Phase 1 완전성 판정 실패" "$R98" 'in CLEANUP, when Phase 1'"'"'s 완전성 판정 fails (the PR list is not complete even at 500), look up each member'
+lacksfx "retro(0.98.1): 옛 CLEANUP 조건(limit 와 같음) 제거" "$R98" 'when the PR list still equals the limit'
+hasfx "retro(0.98.1): Phase 7 자식 CLEANUP 조건" "$R98" 'In CLEANUP when Phase 1'"'"'s 완전성 판정 fails, the children'"'"'s PRs'
+lacksfx "retro(0.98.1): 옛 Phase 7 truncated 조건 제거" "$R98" 'In CLEANUP with a truncated PR list'
+SAMEREPO='[.closingIssuesReferences[]? | select(.repository.owner.login == "<owner>" and .repository.name == "<repo>") | .number]'
+hasfx "daily(0.98.1): PR 호출 — 같은 저장소 참조만" "$D98" "$SAMEREPO"
+hasfx "retro(0.98.1): PR 호출 — 같은 저장소 참조만" "$R98" "$SAMEREPO"
+hasfx "retro(0.98.1): Phase 7 확인 호출 — 같은 저장소 참조만" "$R98" 'closes: ([.closingIssuesReferences[] | select(.repository.owner.login == "<owner>" and .repository.name == "<repo>") | .number] + ['
+lacksfx "daily(0.98.1): 옛 번호만 비교 제거" "$D98" '[.closingIssuesReferences[]?.number]'
+lacksfx "retro(0.98.1): 옛 번호만 비교 제거(Phase 1)" "$R98" '[.closingIssuesReferences[]?.number]'
+lacksfx "retro(0.98.1): 옛 번호만 비교 제거(Phase 7)" "$R98" 'closes: ([.closingIssuesReferences[].number]'
+hasfx "daily(0.98.1): Gather 재조회는 완전성 판정 실패 때만" "$D98" 'for the PR list, only when its 완전성 판정 fails'
+hasfx "daily(0.98.1): Hard rules 재조회는 완전성 판정 실패 때만" "$D98" 'only when the PR list'"'"'s 완전성 판정 fails at 200, the PR'
+hasfx "daily(0.98.1): 판단 불가는 완전성 판정 실패" "$D98" 'When step 3'"'"'s 완전성 판정 fails at 500'
+lacksfx "daily(0.98.1): 옛 'still truncated at 500' 제거" "$D98" 'still truncated at 500'
+lacksfx "daily(0.98.1): 옛 '500건에서 잘려' 판단 불가 문구 제거" "$D98" 'PR 목록이 500건에서 잘려'
+
+hasfx "retro(0.98.1 cr): 완전성 비교 방향" "$GLD/commands/sprint/retro.md" '**second line < the smallest number among the members'
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -3817,7 +3856,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=1493   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=1528   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."
