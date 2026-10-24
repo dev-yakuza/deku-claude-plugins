@@ -59,6 +59,7 @@ class HarnessCase(StudioTestCase):
         self._answers = getattr(self, "_answers", 0) + 1
         okfile.set_approval(self.repo, {"mode": mode, "tree": ok["tree"], "head": ok["head"], "session_id": sid,
                                         "answer": ok["label"], "summary": ok.get("summary"),
+                                        "values": ok.get("values_shown") or None,
                                         "tool_use_id": "t%d" % self._answers, "question_index": 0,
                                         "at": "2026-10-21T00:00:00Z"})
 

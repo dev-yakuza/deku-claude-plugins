@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""A synthetic Studio harness for tests and the sandbox real-session check (m0f-plan §3). Test tree only —
-`/std init` (M1) is the real way to set up a repository.
+"""A synthetic Studio harness for tests and the sandbox real-session check (m0f-plan §3). Test tree only — a thin
+wrapper over setup.py's `init plan|apply` (M1c), which is the real way to set up a repository.
 
     make_harness.py <dir> [--studio-root studio] [--husky] [--overlay terms.json] [--s2v PATH]
 
@@ -12,7 +12,6 @@ path is never committed), and makes the first commit outside any session
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 
@@ -26,14 +25,6 @@ if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
 
-def _render(rel, values):
-    with open(os.path.join(TEMPLATES, rel), encoding="utf-8") as f:
-        text = f.read()
-    for k, v in values.items():
-        text = text.replace("{{%s}}" % k, v)
-    return text
-
-
 def _git(repo, env, *args):
     out = subprocess.run(["git", "-C", repo] + list(args), capture_output=True, text=True, env=env)
     if out.returncode != 0:
@@ -42,44 +33,29 @@ def _git(repo, env, *args):
 
 
 def copy_scripts(repo):
-    dst = os.path.join(repo, ".claude", "studio", "scripts")
-    if os.path.exists(dst):
-        shutil.rmtree(dst)
-    shutil.copytree(SCRIPTS, dst, ignore=shutil.ignore_patterns("__pycache__", "guard.py", "guard", "*.pyc"))
-    return dst
+    """The plugin's scripts as /std init copies them (exactly the manifest's files)."""
+    from stdo.setup import initcmd
+    return initcmd.copy_scripts(repo)
+
+
+ANSWERS = {"language": "ko", "project_name": "Sandbox", "purpose": "sandbox", "priorities": "sandbox",
+           "narrator": {"style": "차분하게"}}
 
 
 def make(repo, env=None, studio_root="studio", husky=False, overlay=(), s2v="/nonexistent/script2video",
          python=None):
+    """A harness made by setup.py's own init (m1-plan §5.1: make_harness is a thin wrapper), committed once outside
+    any session. `python` is kept for older callers (the hook runs python3 from PATH)."""
     env = dict(os.environ if env is None else env)
-    python = python or sys.executable
+    from stdo import writes
+    from stdo.setup import initcmd
+    writes.enable()  # a test-tree driver: it stands in for /std init (setup.py)
     os.makedirs(repo)
     _git(repo, env, "init", "-q")
     with open(os.path.join(repo, "README.md"), "w") as f:
         f.write("# Sandbox\n")
-    values = {"LANGUAGE": "ko", "S2V_PATH": s2v, "PROJECT_NAME": "Sandbox", "PRIORITIES_BY_KIND": "sandbox",
-              "PURPOSE": "sandbox", "STUDIO_ROOT": studio_root}
-    st = os.path.join(repo, ".claude", "studio")
-    os.makedirs(st)
-    with open(os.path.join(st, "config.json"), "w") as f:
-        json.dump(json.loads(_render("studio/config.json.tmpl", values)), f, indent=2)
-        f.write("\n")
-    with open(os.path.join(st, "charter.md"), "w") as f:
-        f.write(_render("studio/charter.md.tmpl", values))
-    os.makedirs(os.path.join(st, "guides"))
-    with open(os.path.join(st, "guides", "script.md"), "w") as f:
-        f.write("# Script guide\n\n- Say what the source says.\n")
     with open(os.path.join(repo, ".gitignore"), "w") as f:
-        f.write("node_modules/\n" + _render("studio/gitignore.tmpl", values))
-    agents = os.path.join(repo, ".claude", "agents")
-    os.makedirs(agents)
-    for n in sorted(os.listdir(os.path.join(TEMPLATES, "agents"))):
-        if n.startswith("std-") and n.endswith(".md"):
-            shutil.copy(os.path.join(TEMPLATES, "agents", n), os.path.join(agents, n))
-    os.makedirs(os.path.join(repo, studio_root, "voices"))
-    with open(os.path.join(repo, studio_root, "voices", ".keep"), "w"):
-        pass
-    copy_scripts(repo)
+        f.write("node_modules/\n")
     if husky:
         os.makedirs(os.path.join(repo, ".husky", "_"))
         with open(os.path.join(repo, ".husky", "pre-commit"), "w") as f:
@@ -90,19 +66,25 @@ def make(repo, env=None, studio_root="studio", husky=False, overlay=(), s2v="/no
         with open(os.path.join(repo, "package.json"), "w") as f:
             f.write('{"name": "sandbox", "devDependencies": {"husky": "9.1.7"}}\n')
         _git(repo, env, "config", "core.hooksPath", ".husky/_")
-    args = [python, "-B", os.path.join(repo, ".claude", "studio", "scripts", "hooks.py"), "install"]
-    if husky:
-        args.append("--husky-apply")
-    out = subprocess.run(args, cwd=repo, capture_output=True, text=True, env=env)
-    if out.returncode != 0:
-        raise RuntimeError("hooks.py install: %s%s" % (out.stdout, out.stderr))
-    from stdo import machine, writes
-    writes.enable()  # a test-tree driver: it stands in for /std init (setup.py, M1c)
-    machine.write(repo, s2v)  # this machine's s2v path (m1-plan §3.1): ignored, never committed
-    if overlay == ():
-        overlay = {"internal": {}}  # set up (with its machine sha) like /std init would; nothing internal yet
-    if overlay is not None:
-        write_overlay(repo, overlay, env)
+    answers = dict(ANSWERS, studio_root=studio_root, s2v_path=s2v, husky=husky)
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(env)  # STUDIO_HOME and friends: the marker and the overlay sha go to the test's folders
+    try:
+        plan = initcmd.plan(repo, answers, check_s2v=False)
+        res = initcmd.apply(repo, plan, env=env, check_s2v=False)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+    if res["hooks"]["code"] not in (0,):
+        raise RuntimeError("hooks install: %s" % res["hooks"])
+    with open(os.path.join(repo, studio_root, "voices", ".keep"), "w"):
+        pass
+    if overlay != ():
+        if overlay is None:
+            os.remove(os.path.join(repo, ".claude", "studio", "local", "config.internal.json"))
+        else:
+            write_overlay(repo, overlay, env)
     _git(repo, env, "add", "-A")
     _git(repo, env, "commit", "-q", "--no-verify", "-m", "sandbox harness (set up outside any session)")
     return repo

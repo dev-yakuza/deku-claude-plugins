@@ -123,6 +123,87 @@ def state_py(hook, env, ri, argv):
     return Verdict(pending=base, ri=ri, reason="answer %s#%d (%s)" % (ans.tool_use_id, idx, label))
 
 
+def setup_py(hook, env, ri, argv):
+    """Verdict for the plugin's `setup.py <argv>` approval commands (m1-plan §5.1, D-M1-5): `config set` of a protected
+    key or s2v.path and `narrator set` (설정 <h12>), `update apply` (갱신 <h12>). Never in the proxy mode. A config
+    or narrator question must also show the change as a line `설정 <key>: <old> → <new>` — the old value is read here
+    (config.json, machine.json, the narrator's status.json), the new one from the command line."""
+    from ..setup import labels as sl
+    what = "setup.py %s" % " ".join(argv[:2])
+    if in_subagent(hook):
+        return Verdict("G-MAIN", "%s runs only in the main session." % what)
+    if any(a == "--proxy" or a.startswith("--proxy=") for a in argv):
+        return Verdict("G-PROXY", "%s records the person's own settings — the proxy mode cannot approve it." % what)
+    try:
+        label, h12 = sl.expected(argv)
+    except labels.NoLabel as e:
+        return Verdict("G-APPROVAL", "%s. Run the preview (setup.py config preview / narrator preview / update plan) "
+                                     "and ask the person first." % e)
+    line = None
+    try:
+        line = _setup_line(ri, argv, sl)
+    except ValueError as e:
+        return Verdict("G-APPROVAL", "%s: %s" % (what, e))
+    sid = hook.get("session_id")
+    base = {"schema": 1, "argv_sha": labels_argv_sha(argv), "session_id": sid, "written_at": _now()}
+    try:
+        ans = transcript.find(hook, env)
+        idx, text, note = transcript.choose(ans, label, h12, video=None)
+        if consumed(ri, (sid, ans.tool_use_id, idx)):
+            raise transcript.NoEvidence("consumed")
+        if line is not None:
+            from ..commit.summary import norm
+            if norm(line) not in norm(text):
+                raise transcript.NoEvidence("values-not-shown")
+    except transcript.NoEvidence as e:
+        return Verdict("G-EVIDENCE", evidence_text(what, label, e) + (" The question shows: %s" % line if line
+                                                                     else ""))
+    base.update({"tool_use_id": ans.tool_use_id, "question_index": idx, "question": text, "answer": label,
+                 "mode": "human"})
+    if note:
+        base["reason"] = note
+    return Verdict(pending=base, ri=ri, reason="answer %s#%d (%s)" % (ans.tool_use_id, idx, label))
+
+
+def _setup_line(ri, argv, sl):
+    """The change line a config/narrator question must show (None for update apply)."""
+    from ..state.argv import canonical
+    c = canonical(argv)
+    words = [c["cmd"]] + c["pos"]
+    if words[:2] == ["config", "set"]:
+        if len(words) != 4:
+            raise ValueError("config set <key> <value>")
+        key, new = words[2], sl.parse_value(words[3])
+        if key == "s2v.path":
+            from .. import machine
+            try:
+                old = machine.s2v_path(ri.worktree)
+            except paths.UnsafeLocal as e:
+                raise ValueError(str(e))
+            if isinstance(new, str):
+                new = os.path.normpath(new)
+            return sl.config_line(key, old, new, old is not None)
+        present, old = sl.lookup(ri.config if isinstance(ri.config, dict) else {}, key)
+        return sl.config_line(key, old, new, present)
+    if words[:2] == ["narrator", "set"]:
+        if len(words) != 3:
+            raise ValueError("narrator set <lang> --engine … --style …")
+        nid = c["opt"].get("--id") or "narrator"
+        engine, style = c["opt"].get("--engine"), c["opt"].get("--style")
+        if not isinstance(engine, str) or not isinstance(style, str):
+            raise ValueError("narrator set needs --engine and --style")
+        from .. import narrator as nar
+        st = None
+        p = os.path.join(ri.worktree, ri.studio_root, "cast", nid, "status.json")
+        try:
+            with open(p, "rb") as f:
+                st = nar.parse(f.read())
+        except OSError:
+            st = None
+        return sl.narrator_line(nid, words[2], nar._voice(st, words[2]) if st else None, (engine, style))
+    return None
+
+
 def labels_argv_sha(argv):
     from ..state.argv import argv_sha
     return argv_sha(argv)

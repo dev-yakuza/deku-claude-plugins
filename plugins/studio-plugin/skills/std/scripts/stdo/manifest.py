@@ -1,5 +1,5 @@
 """The copy's file list (m0f-plan §2.3 H10): `scripts/MANIFEST.sha256` names every file of Studio's scripts
-that a repository copy carries (the guard is plugin-only and not listed), with its sha256. The plugin ships it;
+that a repository copy carries (the guard and setup.py are plugin-only and not listed), with its sha256. The plugin ships it;
 structure_test.sh keeps it equal to the files; check_commit.py compares a harness commit's copy with it."""
 
 import hashlib
@@ -12,7 +12,9 @@ HEADER = "# Studio scripts manifest v1 — SCRIPTS_VERSION %s\n"
 def skip(rel):
     rel = rel.replace(os.sep, "/")
     parts = rel.split("/")
-    return rel in (NAME, "guard.py") or "__pycache__" in parts or rel.startswith("stdo/guard/") or \
+    # plugin-only: the guard and setup.py (init · config · update run from the plugin, m1-plan §5.1)
+    return rel in (NAME, "guard.py", "setup.py") or "__pycache__" in parts or \
+        rel.startswith(("stdo/guard/", "stdo/setup/")) or \
         parts[-1].endswith((".pyc", ".pyo")) or parts[-1].startswith(".")
 
 

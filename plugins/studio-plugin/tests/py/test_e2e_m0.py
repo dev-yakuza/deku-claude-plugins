@@ -20,6 +20,13 @@ from stdo.state.hashes import hash_of
 STAGE = "python3 .claude/studio/scripts/check_commit.py --stage harness"
 
 
+
+def values_of(out):
+    """The value-block lines --stage printed (M1c, m1-plan §5.1)."""
+    m = re.search(r"(?:and these lines \(the protected values, each as it is\):|then put these lines in the "
+                  r"question too:)\n((?:[^ \n].*\n)*)", out)
+    return [l for l in (m.group(1).splitlines() if m else []) if l]
+
 class HarnessE2E(HarnessCase):
     def session(self, guard_env=None, sid=SID, mode="default"):
         return Session(self.repo, guard_env or self.env, self.env, sid, mode=mode)
@@ -28,11 +35,12 @@ class HarnessE2E(HarnessCase):
         self.assertTrue(r.ran and r.code == 0, r)
         m = re.search(r"put this line in the question as it is:\n(.+)\n", r.out)
         self.assertTrue(m, r.out)
+        self.values = values_of(r.out)
         return m.group(1), m.group(1).split(" | ")[0]
 
     def commit_round(self, s, msg="studio: harness", show_line=True):
         line, label = self.staged_line(s.bash(STAGE))
-        q = "이 파일들을 커밋할까요?\n" + (line if show_line else label)
+        q = "이 파일들을 커밋할까요?\n" + (line if show_line else label) + "".join("\n" + v for v in self.values)
         s.ask(q, [label, "수정해 줘"], label)
         return s.bash('git commit -m "%s"' % msg), line
 
@@ -111,6 +119,10 @@ class HarnessE2E(HarnessCase):
         r = s.bash('git commit -m "x"')
         self.assertEqual(r.decision, "deny")
         s.ask("커밋할까요?\n" + line, [line.split(" | ")[0]], line.split(" | ")[0])
+        r = s.bash('git commit -m "settings"')
+        self.assertEqual(r.decision, "deny")  # M1c: the value block is missing (m1-plan §5.1)
+        self.assertIn("value block", r.reason)
+        s.ask("커밋할까요?\n" + line + "\n" + "\n".join(self.values), [line.split(" | ")[0]], line.split(" | ")[0])
         r = s.bash('git commit -m "settings"')
         self.assertEqual((r.decision, r.code), ("allow", 0), r)
 

@@ -57,6 +57,16 @@ Each script has its own table; a code means only what its script's table says.
 | 4 | a person decides (internal overlay missing or changed · proxy approvals · a hook block proposed for a team-shared file) | ask the person |
 | 7 | the Studio guard has not run in this Claude Code session | ask the person to enable the Studio plugin; never remove the session markers |
 
+**`setup.py`** (plugin-only: `init` · `config` · `narrator` · `update`)
+
+| Code | Meaning | Producer |
+|---|---|---|
+| 0 | done (JSON on stdout) | continue (a change to committed files: the harness commit next) |
+| 1 | refused: a check failed (`--expect` is not this change's hash, the plan changed since it was shown) | show the person again |
+| 2 | usage or setup (no harness — everything but `init`; a value or path that is not allowed; `--proxy`) | fix the command, or stop and report |
+| 3 | refused: a harness (or an earlier install's traces) exists for `init`; the folder name is taken; the value is already set; an update that would raise `s2v.min_version` while videos are in progress | tell the person |
+| 6 | no usable evidence of the person's answer (`config set` of a protected key or `s2v.path`, `narrator set`, `update apply`) | ask with AskUserQuestion (fixed label, the change line), then run the command once |
+
 **`lock.py` and s2v**: 73 / 74 = machine / character busy → `held:lock` / `held:actor`; otherwise the child's code.
 
 A Studio commit is: `check_commit.py --stage <kind> [<target>]` → AskUserQuestion whose text contains the **summary

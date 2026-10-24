@@ -60,15 +60,19 @@ for a in ("_contract", "_stages", "_auditor", "_invariants", "_actors"):
 for p in glob.glob(os.path.join(skill, "**", "*.md"), recursive=True):
     for ref in set(re.findall(r"`(?:<<SKILL_DIR>>/)?(?:commands/)?(atoms/_[a-z_]+\.md)`", open(p).read())):
         check(os.path.exists(os.path.join(skill, "commands", ref)), "%s → %s exists" % (os.path.relpath(p, skill), ref))
-for c in files - {"help"}:
+IMPLEMENTED_CMDS = {"help", "init", "config", "update"}  # M1c
+for c in files - IMPLEMENTED_CMDS:
     check("Not implemented yet" in open(os.path.join(skill, "commands", c + ".md")).read(),
-          "commands/%s.md says not implemented yet (M0)" % c)
+          "commands/%s.md says not implemented yet" % c)
+for c in IMPLEMENTED_CMDS - {"help"}:
+    check("Not implemented yet" not in open(os.path.join(skill, "commands", c + ".md")).read(),
+          "commands/%s.md is implemented (M1c)" % c)
 
 # parallel-call contract (m1-plan §3.5): every command document that runs an approval asks first and runs the
 # approval command alone in a later message
 for p in glob.glob(os.path.join(skill, "commands", "**", "*.md"), recursive=True):
     body = open(p).read()
-    if re.search(r"state\.py approve(?![-\w])", body):
+    if re.search(r"state\.py (approve|overlay)(?![-\w])|setup\.py (config set|narrator set|update apply)", body):
         check("never in the same message" in body,
               "%s: a gate is the question, then (a later message) one approval command" % os.path.relpath(p, skill))
 
@@ -102,7 +106,13 @@ check(len(guards) == 1, "guard-refusal (INV9) blocks are identical")
 
 # personas
 agents = sorted(glob.glob(os.path.join(skill, "templates", "agents", "std-*.md")))
-check(len(agents) == 9, "9 persona templates (6 spine + 3 conditional)")
+check(len(agents) == 10, "10 persona templates (6 spine + 3 conditional + the external auditor)")
+aud = open(os.path.join(skill, "templates", "agents", "std-auditor.md")).read()
+check(re.search(r"^tools: Read, Grep, Glob$", aud, re.M) is not None, "std-auditor reads only (tools: Read, Grep, Glob)")
+# J29 (M1b review Y10): the overlay question lists every key with its number of entries
+cfgdoc = open(os.path.join(skill, "commands", "config.md")).read()
+for k in ("hosts", "sources", "terms", "videos", "actors"):
+    check(("internal.%s: <N>개" % k) in cfgdoc, "config.md: the overlay question shows internal.%s and its count" % k)
 for p in agents:
     body = open(p).read()
     fm = re.match(r"---\n(.*?)\n---\n", body, re.S)
@@ -185,13 +195,22 @@ for d in ("commit", "hooks"):
     for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
         check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
               "%s (copied into repositories) does not import the guard (plugin only)" % os.path.relpath(p, skill))
-check(sv and sv.group(1) == "10", "SCRIPTS_VERSION is 10 (M1b: flow commands, check results, run_s2v.py)")
+check(sv and sv.group(1) == "11", "SCRIPTS_VERSION is 11 (M1c: value block, builtin narrator, criteria)")
 from stdo import manifest as _man
 _mp = os.path.join(scripts, _man.NAME)
 check(os.path.exists(_mp) and open(_mp).read() == _man.render(scripts, sv.group(1)),
       "scripts/MANIFEST.sha256 lists every copied script with its sha (run tests/tools/manifest.py)")
 check("stdo/guard/judge.py" not in open(_mp).read() and "guard.py" not in _man.files(scripts),
       "the manifest leaves out the guard (plugin only)")
+check("setup.py" not in _man.files(scripts) and not [f for f in _man.files(scripts) if f.startswith("stdo/setup/")],
+      "the manifest leaves out setup.py and stdo/setup/ (plugin only, m1-plan §5.1)")
+check(os.access(os.path.join(scripts, "setup.py"), os.X_OK) and
+      "sys.dont_write_bytecode = True" in open(os.path.join(scripts, "setup.py")).read(),
+      "setup.py is executable and writes no bytecode")
+_bad = [os.path.relpath(p, skill) for p in glob.glob(os.path.join(scripts, "stdo", "*", "*.py")) +
+        glob.glob(os.path.join(scripts, "stdo", "*.py")) if "/stdo/setup/" not in p and "/stdo/guard/" not in p
+        and re.search(r"^\s*(from|import) .*\bsetup\b", open(p).read(), re.M)]
+check(not _bad, "the copied scripts do not import setup (plugin only): %s" % ", ".join(_bad))
 
 if fails:
     print("structure: %d failure(s)" % len(fails))

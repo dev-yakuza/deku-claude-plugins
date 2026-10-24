@@ -76,6 +76,16 @@ def main(argv, cwd=None, env=None, extra_kinds=None):
                                  % (len(data["paths"]), "" if len(data["paths"]) == 1 else "s", data["tree"][:12],
                                     data["label"]))
                 sys.stdout.write("put this line in the question as it is:\n%s\n" % data["summary"])
+                if data.get("values_shown"):
+                    if data.get("overflow"):
+                        sys.stdout.write("the value block is long: open %s for the person (open it) before asking, "
+                                         "then put these lines in the question too:\n" % data["overflow"]["file"])
+                    else:
+                        sys.stdout.write("and these lines (the protected values, each as it is):\n")
+                    for l in data["values_shown"]:
+                        sys.stdout.write("%s\n" % l)
+                for w in data.get("warnings") or []:
+                    sys.stderr.write("Studio stage: warning: %s\n" % w)
                 for p in data["paths"][:10]:
                     sys.stdout.write("  %s\n" % p)
                 if len(data["paths"]) > 10:

@@ -13,11 +13,12 @@ TEST_ENV = "STUDIO_TEST_COMMIT_KIND"  # test only (the guard refuses STUDIO_TEST
 
 
 class Collected(object):
-    def __init__(self, paths, gitignore=False, problems=(), states=None):
+    def __init__(self, paths, gitignore=False, problems=(), states=None, warnings=()):
         self.paths = sorted(paths)
         self.gitignore = gitignore
         self.problems = list(problems)
         self.states = dict(states or {})
+        self.warnings = list(warnings)
 
 
 class FolderKind(object):

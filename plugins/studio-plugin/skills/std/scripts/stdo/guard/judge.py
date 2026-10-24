@@ -1468,7 +1468,42 @@ def check_s2v_results(ctx, cmd):
                  % (words[0] if words else "with a command word the guard cannot read"))
 
 
+def check_setup(ctx, cmd):
+    """The plugin's setup.py (M1c): its approval commands need the person's answer; init, get, previews and plans do
+    not. A setup.py that is not the plugin's is not Studio's (a repository copy never has one)."""
+    real = studio_script(ctx, cmd, "setup.py")
+    if real is None:
+        return False
+    args = cmd.script.args
+    ri = _run_repo(ctx, cmd)
+    if ri is None or not ri.harness:
+        return True  # no harness: setup.py refuses everything but init itself (m1-plan §5.1)
+    if os.path.dirname(real) != PLUGIN_SCRIPTS:
+        ctx.deny("G-APPROVAL", "setup.py runs from the plugin only — this one (%s) is not Studio's." % real)
+        return True
+    if any(w.value is None for w in args):
+        ctx.deny("G-DYNARG", "setup.py arguments must be literal (the person's answer binds the exact command line).")
+        return True
+    vals = [w.value for w in args]
+    from ..setup import labels as sl
+    if not sl.needs_evidence(vals, ri.protected_keys):
+        return True
+    from . import approve
+    if not _count_approval(ctx, cmd, "setup.py %s" % " ".join(vals[:2])):
+        return True
+    v = approve.setup_py(ctx.hook, ctx.env, ri, vals)
+    if v.rule:
+        ctx.deny(v.rule, v.text, messages.alias_sources(cmd))
+        return True
+    pend = v.pending
+    ctx.effects.append(("G-EVIDENCE", lambda: approve.write_pending(ri, pend)))
+    ctx.candidates.append((cmd, "state", v.reason))
+    return True
+
+
 def check_approval(ctx, cmd):
+    if check_setup(ctx, cmd):
+        return
     real = studio_script(ctx, cmd, "state.py")
     if real is not None:
         args = cmd.script.args
@@ -1781,13 +1816,22 @@ def commit_evidence(ctx, cmd, ri, out):
                 from ..commit import summary as csum
                 if not csum.shown_in(line, text):
                     raise transcript.NoEvidence("summary-not-shown")
+            shown = ok.get("values_shown") or []
+            if shown:
+                from ..commit import values as cvals
+                if not cvals.shown_in(shown, text):
+                    raise transcript.NoEvidence("values-not-shown")  # m1-plan §5.1 (v3 N1)
         except transcript.NoEvidence as e:
             what = "this Studio commit" + (" (the question must contain the line: %s)" % line if line else "")
+            if ok.get("values_shown"):
+                what += " and these lines: %s" % " / ".join(ok["values_shown"][:6])
             ctx.deny("G-EVIDENCE", approve.evidence_text(what, label, e))
             return
         approval.update({"mode": "human", "tool_use_id": ans.tool_use_id, "question_index": idx})
         if line:
             approval["summary"] = line
+        if ok.get("values_shown"):
+            approval["values"] = list(ok["values_shown"])
         reason = "answer %s#%d (%s)" % (ans.tool_use_id, idx, label)
     top = out.top
 

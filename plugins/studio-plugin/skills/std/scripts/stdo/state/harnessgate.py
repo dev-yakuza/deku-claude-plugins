@@ -84,9 +84,9 @@ def _video_dirs(repo, root):
     return out
 
 
-def approved_additions(repo, root, providers, ctx_of):
+def approved_additions(repo, root, providers, ctx_of, videos=None):
     """{key: [values]} of the valid pronounce-approved.json of every video in progress (T1). `ctx_of(vdir, lang)`
-    gives the collect context of a video's language."""
+    gives the collect context of a video's language; `videos` (a set) receives the ids that contributed."""
     from .store import read_state  # read-only use
     out = {}
     for vdir in _video_dirs(repo, root):
@@ -119,6 +119,8 @@ def approved_additions(repo, root, providers, ctx_of):
                 data = None
             for k, v in (data or {}).items():
                 out.setdefault(k, []).append(v)
+            if data and videos is not None:
+                videos.add(st["video"])
     return out
 
 
@@ -136,6 +138,48 @@ def _judge(head, obj, allowed):
     return "exempt" if all(v in ok.get(k, []) for k, v in added.items()) else "additions"
 
 
+class Verdict(object):
+    def __init__(self, discard=False, exempted=False, leftover=False, videos=()):
+        self.discard, self.exempted, self.leftover, self.videos = discard, exempted, leftover, sorted(videos)
+
+
+def _default_providers(ctx):
+    """state.py's providers and contexts (real s2v inspect) for a caller that has none (check_commit --stage)."""
+    from . import cli as scli
+    from .collect import Providers
+    return Providers(), scli._ctx_of(ctx.top, ctx.cfg if isinstance(ctx.cfg, dict) else {})
+
+
+def pronounce_verdict(ctx, providers=None, ctx_of=None):
+    """How pronounce.json's difference from HEAD counts (T1–T4, Y5): `discard` — the work tree and the index are each
+    the same as HEAD or only approved additions; `exempted` — some approved addition was left out; `leftover` —
+    additions only, not all approved (the hint)."""
+    if providers is None:
+        providers, ctx_of = _default_providers(ctx)
+    head_blob = ctx.git.show("%s:%s" % (ctx.head, PRONOUNCE)) if ctx.head else None
+    head = _parse(head_blob)
+    try:
+        with open(os.path.join(ctx.top, PRONOUNCE), "rb") as f:
+            work = _parse(f.read())
+    except OSError:
+        work = None
+    # the index too (M1b review Y5): a staged pronounce.json is what the next commit takes
+    staged = ctx.git.show(":" + PRONOUNCE)
+    # not in the index: untracked (as in HEAD: nothing) or a staged deletion (blocks)
+    index = _parse(staged) if staged is not None else ({} if head_blob is None else None)
+    root = ctx.roots[0] if ctx.roots else "studio"
+    cache, videos = {}, set()
+
+    def allowed():
+        if "a" not in cache:
+            cache["a"] = approved_additions(ctx.top, root, providers, ctx_of or (lambda v, l: None), videos)
+        return cache["a"]
+    verdicts = [_judge(head, work, allowed), _judge(head, index, allowed)]
+    discard = all(v in ("same", "exempt") for v in verdicts)
+    return Verdict(discard=discard, exempted=discard and "exempt" in verdicts,
+                   leftover="additions" in verdicts and "block" not in verdicts, videos=videos)
+
+
 def check(repo, env=None, providers=None, ctx_of=None):
     """Result for the work tree `repo`."""
     env = paths.git_env(env)
@@ -147,7 +191,7 @@ def check(repo, env=None, providers=None, ctx_of=None):
     if not ctx.harness:
         return Result(error="no Studio harness here")
     try:
-        col = HarnessKind().collect(ctx, None)
+        col = HarnessKind().collect(ctx, None, judge_pronounce=False)
     except (GitError, OSError) as e:
         return Result(error=str(e))
     found = set(col.paths)
@@ -156,27 +200,15 @@ def check(repo, env=None, providers=None, ctx_of=None):
     problems = [(p.message, p.path) for p in col.problems]
     leftover = exempted = False
     if PRONOUNCE in found:
-        head_blob = ctx.git.show("%s:%s" % (ctx.head, PRONOUNCE)) if ctx.head else None
-        head = _parse(head_blob)
-        try:
-            with open(os.path.join(ctx.top, PRONOUNCE), "rb") as f:
-                work = _parse(f.read())
-        except OSError:
-            work = None
-        # the index too (M1b review Y5): a staged pronounce.json is what the next commit takes
-        staged = ctx.git.show(":" + PRONOUNCE)
-        # not in the index: untracked (as in HEAD: nothing) or a staged deletion (blocks)
-        index = _parse(staged) if staged is not None else ({} if head_blob is None else None)
-        root = ctx.roots[0] if ctx.roots else "studio"
-        cache = {}
-
-        def allowed():
-            if "a" not in cache:
-                cache["a"] = approved_additions(ctx.top, root, providers, ctx_of or (lambda v, l: None))
-            return cache["a"]
-        verdicts = [_judge(head, work, allowed), _judge(head, index, allowed)]
-        if all(v in ("same", "exempt") for v in verdicts):
+        v = pronounce_verdict(ctx, providers=providers or _NoProviders(), ctx_of=ctx_of)
+        if v.discard:
             found.discard(PRONOUNCE)
-            exempted = "exempt" in verdicts
-        leftover = "additions" in verdicts and "block" not in verdicts
+        exempted, leftover = v.exempted, v.leftover
     return Result(found, problems, leftover=leftover, exempted=exempted)
+
+
+class _NoProviders(object):
+    """No providers given: nothing can be checked as current, so nothing is exempt (closed)."""
+
+    def collect(self, *a, **k):
+        raise CollectError("no providers")

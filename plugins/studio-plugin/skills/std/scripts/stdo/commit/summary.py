@@ -48,6 +48,58 @@ def protected_changes(old_cfg, new_cfg):
     return out
 
 
+def protected_keys(old_cfg, new_cfg):
+    keys = set(FIXED_PROTECTED)
+    for c in (old_cfg, new_cfg):
+        more = c.get("protected_keys") if isinstance(c, dict) else None
+        keys |= set(k for k in (more or []) if isinstance(k, str))
+    return keys
+
+
+def configs(ctx, studio_paths):
+    """(HEAD's config, the index's config) when this commit changes config.json, else ({}, {})."""
+    if spaths.CONFIG not in studio_paths:
+        return {}, {}
+    status = dict((p, st) for st, p in ctx.git.staged(ctx.base))
+    old = _cfg(ctx.git.show("%s:%s" % (ctx.head, spaths.CONFIG))) if ctx.head else {}
+    new = _cfg(ctx.git.show(":" + spaths.CONFIG)) if status.get(spaths.CONFIG) != "D" else {}
+    return old or {}, new or {}
+
+
+def narrators(ctx, studio_paths):
+    """[(id, HEAD status, index status)] of the builtin narrators this commit changes (m1-plan §5.3)."""
+    from .. import narrator
+    from .harness import narrator_file
+    out = []
+    for p in sorted(studio_paths):
+        nf = narrator_file(ctx, p)
+        if nf and nf[1] == "status.json":
+            old = narrator.parse(ctx.git.show("%s:%s" % (ctx.head, p))) if ctx.head else None
+            out.append((nf[0], old, narrator.parse(ctx.git.show(":" + p))))
+    return out
+
+
+def crit_files(ctx, studio_paths):
+    """[(path, HEAD blob or None, index blob or None)] of the criteria files (P-CRIT) this commit changes."""
+    from . import values
+    status = dict((p, st) for st, p in ctx.git.staged(ctx.base))
+    out = []
+    for p in sorted(studio_paths):
+        if values.is_crit(p):
+            old = ctx.git.show("%s:%s" % (ctx.head, p)) if ctx.head else None
+            new = ctx.git.show(":" + p) if status.get(p) != "D" else None
+            out.append((p, old, new))
+    return out
+
+
+def settings_lines(ctx, studio_paths):
+    """The settings part of the value block, from HEAD and the index (the hook recomputes it the same way)."""
+    from . import values
+    old, new = configs(ctx, studio_paths)
+    return values.settings(old, new, protected_keys(old, new), narrators(ctx, studio_paths),
+                           crit_files(ctx, studio_paths))[0]
+
+
 def compute(ctx, studio_paths, tree):
     """(summary line, protected_changes, deleted agent names)."""
     status = dict((p, st) for st, p in ctx.git.staged(ctx.base))

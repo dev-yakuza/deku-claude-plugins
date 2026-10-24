@@ -776,7 +776,13 @@ class Overlay(FlowCase):
     def run_overlay(self, p, h, answer=True, *extra):
         argv = ["overlay", "--from", p, "--expect", h] + list(extra)
         if answer:
-            self.pend(argv, "사내설정 %s" % h)
+            try:
+                from stdo.state.flow import overlay_lines
+                with open(p, "rb") as f:
+                    shown = "\n".join(overlay_lines(f.read()))  # J29: every key and its count (M1c)
+            except Exception:  # noqa: BLE001 — a source the command refuses anyway
+                shown = ""
+            self.pend(argv, "사내설정 %s" % h, question="사내설정 %s\n%s" % (h, shown))
         return self.cli(*argv)
 
     def test_good(self):

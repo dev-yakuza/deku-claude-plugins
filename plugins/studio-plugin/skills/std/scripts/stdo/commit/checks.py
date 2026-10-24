@@ -239,12 +239,46 @@ def ok_problems(ctx, st, ok):
         a = approval_problem(ctx, ok, sid, tree)
         if a:
             out.append(a)
+    v = values_problem(ctx, st, ok)
+    if v:
+        out.append(v)
     for video, want in sorted((ok.get("states") or {}).items()):
         have = approvals.state_seq(approvals.video_dir(ctx.top, ctx.roots[0], video))
         if not isinstance(want, dict) or want.get("last_seq") != have:
             out.append(Problem(1, "video %s changed since Studio prepared this commit (state seq) — stage again"
                                   % video))
     return out
+
+
+def values_problem(ctx, st, ok):
+    """The value block (m1-plan §5.1): its settings part is recomputed here from HEAD and the index; the lines the
+    question showed follow from it (and from the machine part --stage computed — never recomputed here: no s2v run in
+    the hook, v4 R6), or from the overflow file."""
+    from . import summary, values
+    if ok.get("kind") not in ("harness",) and not ok.get("values_settings") and not ok.get("values_shown"):
+        return None  # kinds that change no settings carry an empty block
+    want = summary.settings_lines(ctx, sorted(st.studio))
+    have = ok.get("values_settings")
+    if have != want:
+        return Problem(1, "the protected values in the commit are not the ones Studio showed (the value block "
+                          "differs) — stage again and ask the person again")
+    mach = ok.get("values_machine") or []
+    full = want + mach
+    longest = max([len(l) for l in full] or [0])
+    ov = ok.get("overflow")
+    expect_overflow = values.overflows(full, longest) if full else False
+    if bool(ov) != expect_overflow:
+        return Problem(1, "the value block's overflow mode is not what its size says — stage again")
+    if ov:
+        why = values.summary_problem(ctx.top, ok)
+        if why:
+            return Problem(1, why)
+        shown = ok.get("values_shown") or []
+        if not shown or shown[0] != values.file_line(ov.get("file"), ov.get("sha12")):
+            return Problem(1, "the value block file is not the one the question named — stage again")
+    elif (ok.get("values_shown") or []) != full:
+        return Problem(1, "the lines the question had to show are not the value block — stage again")
+    return None
 
 
 NOT_SEEN = ("the Studio guard did not see this commit being approved — commit with a plain \"git commit -m …\" "
@@ -266,6 +300,9 @@ def approval_problem(ctx, ok, sid, tree):
         if ok.get("summary") and ap.get("summary") != ok.get("summary"):
             return Problem(1, "the guard did not see the commit's summary line in the person's question — ask again "
                               "with the line --stage printed")
+        if (ok.get("values_shown") or []) and ap.get("values") != ok.get("values_shown"):
+            return Problem(1, "the guard did not see the value block in the person's question — ask again with the "
+                              "lines --stage printed")
         return None
     if mode == "proxy":
         kind = ctx.kinds.get(ok.get("kind"))

@@ -12,7 +12,10 @@ SCHEMA = 1
 REL = os.path.join(".claude", "studio", "local", "commit-ok.json")
 LABEL = "커밋 %s"
 FIELDS = ("schema", "tree", "head", "kind", "target", "studio_root", "paths", "states", "session_id", "label",
-          "summary", "protected_changes", "in_progress", "scripts_version", "approval", "written_at")
+          "summary", "protected_changes", "in_progress", "scripts_version", "approval", "written_at",
+          # M1c (m1-plan §5.1): the value block — settings (the hook recomputes them), machine (first install), the
+          # lines the question must show, and the overflow file {file, sha12, reason} or null
+          "values_settings", "values_machine", "values_shown", "overflow", "warnings")
 
 
 def path(top):

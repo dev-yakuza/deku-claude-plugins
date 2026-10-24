@@ -8,13 +8,14 @@ import json
 import os
 import re
 
-from .. import SCRIPTS_VERSION, ignore, manifest, paths
+from .. import SCRIPTS_VERSION, ignore, manifest, narrator, paths
 from ..hooks import templates as T
 from . import spaths
 from .approvals import Problem
 from .kinds import Collected
 
 SCRIPTS = ".claude/studio/scripts/"
+PRONOUNCE = ".claude/studio/pronounce.json"
 MANIFEST = SCRIPTS + manifest.NAME
 NO_DELETE = (spaths.CONFIG, MANIFEST, ".claude/studio/charter.md", ".claude/agents/std-fact-checker.md",
              ".claude/agents/std-source-analyst.md")
@@ -60,6 +61,30 @@ def junk(path):
         (name.startswith(".#") and len(name) > 2)
 
 
+def narrator_file(ctx, path):
+    """(id, file name) when `path` is `<sr>/cast/<id>/{profile.md,status.json}` (a builtin narrator's files may be
+    part of a harness commit, m1-plan §5.3), else None."""
+    parts = path.split("/")
+    for r in ctx.roots:
+        rp = r.split("/")
+        n = len(rp)
+        if parts[:n] == rp and len(parts) == n + 3 and parts[n] == "cast" and parts[n + 2] in narrator.FILES:
+            return parts[n + 1], parts[n + 2]
+    return None
+
+
+def _narrator_status(ctx, root, nid, where):
+    """The narrator's status.json from the index (`where` ":") or the work tree ("work")."""
+    rel = "%s/cast/%s/status.json" % (root, nid)
+    if where == "work":
+        try:
+            with open(os.path.join(ctx.top, rel), "rb") as f:
+                return narrator.parse(f.read())
+        except OSError:
+            return None
+    return narrator.parse(ctx.git.show(":" + rel))
+
+
 class HarnessKind(object):
     name = "harness"
     needs_overlay = False  # nothing internal; H3 decides about content files
@@ -72,12 +97,19 @@ class HarnessKind(object):
             return True
         if path.startswith(".claude/studio/"):
             return True
+        nf = narrator_file(ctx, path)
+        if nf:
+            root = path[:-len("/cast/%s/%s" % nf)]
+            # a builtin narrator's two files (in the index, or on disk for what is about to be staged)
+            return any(narrator.is_builtin(_narrator_status(ctx, root, nf[0], w)) for w in (":", "work"))
         return path.startswith(".claude/agents/std-") and path.endswith(".md")
 
-    def collect(self, ctx, target):
+    def collect(self, ctx, target, judge_pronounce=True):
         if target:
             return Collected([], problems=[Problem(2, "a harness commit takes no target")])
         specs = ["--", ":(literal).claude/studio", ":(glob).claude/agents/std-*.md"]
+        for r in ctx.roots:
+            specs += [":(glob)%s/cast/*/profile.md" % r, ":(glob)%s/cast/*/status.json" % r]
         raw = ctx.git.text("ls-files", "-z", "--modified", "--deleted", "--others", "--exclude-standard", *specs)
         cached = ctx.git.text("diff", "--name-only", "-z", "--no-renames", ctx.head or ctx.git.empty_tree(), *specs)
         found = sorted(set(p for p in (raw + "\0" + cached).split("\0") if p and self.allowed(ctx, p)))
@@ -105,7 +137,16 @@ class HarnessKind(object):
         elif hk in ("mixed", "broken"):
             problems.append(Problem(1, ".husky/pre-commit has changes outside Studio's block (or broken markers) — "
                                        "commit those separately", spaths.HUSKY))
-        return Collected(sorted(set(found)), gitignore=gi, problems=problems)
+        warnings = []
+        if judge_pronounce and PRONOUNCE in found:
+            # a leftover merge of a refused video commit is that video's: not staged here (m1-plan §5.1, v5.1 T2)
+            from ..state import harnessgate
+            verdict = harnessgate.pronounce_verdict(ctx)
+            if verdict.discard and verdict.exempted:
+                found = [p for p in found if p != PRONOUNCE]
+                warnings.append("%s: additions approved for videos in progress (%s) are left out — those videos' "
+                                "commits put them in" % (PRONOUNCE, ", ".join(verdict.videos) or "?"))
+        return Collected(sorted(set(found)), gitignore=gi, problems=problems, warnings=warnings)
 
     # --- checks on the index (stage and hook) ---
     def staged_problems(self, ctx, studio_paths):
@@ -140,6 +181,28 @@ class HarnessKind(object):
             if blk != T.husky_block():
                 out.append(Problem(1, ".husky/pre-commit's Studio block is not this version's (hooks.py install "
                                       "proposes it); removing or changing it is the person's decision", spaths.HUSKY))
+        # a format's criteria must stay readable (the checks read them; M1c review P1 · P3)
+        for p in present:
+            if p.startswith(".claude/studio/formats/") and p.endswith(".md"):
+                from .. import criteria
+                data = git.show(":" + p)
+                cfg = _json(git.show(":" + spaths.CONFIG)) or {}
+                lang = cfg.get("language")
+                try:
+                    criteria.parse((data or b"").decode("utf-8", "replace"), (lang,) if isinstance(lang, str) else ())
+                except criteria.Missing as e:
+                    out.append(Problem(1, "%s: the criteria are not usable (%s)" % (p, e), p))
+        # the builtin narrators (m1-plan §5.3): a valid status.json, and a profile only beside one
+        for p in present:
+            nf = narrator_file(ctx, p)
+            if not nf:
+                continue
+            root = p[:-len("/cast/%s/%s" % nf)]
+            st = _narrator_status(ctx, root, nf[0], ":")
+            why = narrator.problems(st, nf[0]) if st is not None else ["status.json is missing in the commit"]
+            if why:
+                out.append(Problem(1, "%s/cast/%s/status.json is not a builtin narrator record: %s"
+                                      % (root, nf[0], "; ".join(why[:3])), p))
         # H13 .gitignore block
         if spaths.GITIGNORE in studio_paths:
             out += gitignore_block_problems(git.show(":" + spaths.GITIGNORE), ctx.roots[0])

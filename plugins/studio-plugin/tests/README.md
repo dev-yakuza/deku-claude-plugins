@@ -42,7 +42,7 @@ STUDIO_TEST_S2V=/abs/path/to/script2video \
   `check_commit --staged` on a Studio commit (targets 50 ms / 300 ms; fails only above 3×).
 
 **Scripts version (M0d-2, D-M0-3)**: the guard refuses Studio commands in a repository whose copy of
-`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 10). Until `/std update` exists (M1), copy the plugin's
+`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 11). Until `/std update` exists (M1), copy the plugin's
 `skills/std/scripts/` (without `guard.py` and `stdo/guard/`) into an older sandbox repository again by hand.
 
 **M0f**: `tests/py/drivers/make_harness.py <dir>` builds a synthetic harness repository (templates, agents, a copy of
@@ -78,3 +78,11 @@ watermark comes from the state) and the check results `stage-done` requires (`wo
 - **Writers of protected records** (`stdo/writes.py`): the library writes state, check results, the used-answer record,
   commit-ok and machine.json only after an entry script called `writes.enable()`; `helpers.py` enables it for the test
   process (`test_m1b.Y2Writers` checks a fresh process is refused).
+
+**M1c** (`SCRIPTS_VERSION` 11): `skills/std/scripts/setup.py` (plugin-only, with `stdo/setup/`: neither is in the
+manifest or the copy) runs `init analyze|plan|apply`, `config get|preview|set`, `narrator preview|set` and
+`update plan|apply`. `make_harness.py` is a thin wrapper over its `init` (no s2v check), so test harnesses carry the
+default narrator, `installed.json`, the format and the guides. A harness commit's question shows the **value block**
+(`--stage` prints it; commit-ok keeps `values_settings` · `values_machine` · `values_shown` · `overflow`): test helpers
+that commit a harness put those lines in the question and in the recorded approval.
+

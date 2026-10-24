@@ -19,12 +19,14 @@ TABLE = [
                  "<sr>/**/cast/*/shown.json", ".claude/studio/local/commit-ok.json",
                  ".claude/studio/local/pending-approval.json", ".claude/studio/local/guard-ran.json",
                  ".claude/studio/local/guard-ran.lock", ".claude/studio/local/consumed-answers.jsonl",
-                 ".claude/studio/local/consumed-answers.lock", ".claude/studio/local/last-checked.json"),
+                 ".claude/studio/local/consumed-answers.lock", ".claude/studio/local/last-checked.json",
+                 ".claude/studio/local/commit-summary-*.txt"),
      "state", "state.py, the Studio check scripts (run_s2v.py, …), check_commit.py and the guard"),
     ("P-CRIT", (".claude/studio/charter.md", ".claude/studio/formats/**", ".claude/studio/platforms/**"),
      "criteria", "the person"),
     ("P-PERS", (".claude/agents/std-fact-checker.md", ".claude/agents/std-source-analyst.md"), "persona", "the person"),
-    ("P-WIRE", (".claude/studio/scripts/**",), "wiring", "the person (/std update)"),
+    ("P-WIRE", (".claude/studio/scripts/**", ".claude/studio/installed.json"), "wiring",
+     "the person (/std update; installed.json: setup.py)"),
     ("P-CONF", (".claude/studio/config.json",), "config", "the person (protected keys)"),
     ("P-CONF-L", (".claude/studio/local/config.internal.json", ".claude/studio/local/machine.json"), "config",
      "the person (/std config; machine.json: /std config s2v.path)"),
@@ -42,7 +44,7 @@ DRAFT_OK = {"P-CHAR": "character.yaml.draft"}
 TAIL_NAMES = {"local", "character", "voices", "audio", "consent", "state.json", "approvals.jsonl", "shown.json",
               "verify.json", "CREDITS.yaml", "status.json", "approvals.json", "charter.md", "config.json",
               "commit-ok.json", "pending-approval.json", "guard-ran.json", "last-checked.json", "assets.json",
-              "pronounce-approved.json"}
+              "pronounce-approved.json", "installed.json"}
 
 READ_ALLOW = {"cat", "head", "tail", "less", "more", "ls", "stat", "file", "du", "wc", "shasum", "sha256sum",
               "sha1sum", "md5", "md5sum", "cmp", "diff", "grep", "egrep", "fgrep", "rg", "ag", "jq", "ffprobe",

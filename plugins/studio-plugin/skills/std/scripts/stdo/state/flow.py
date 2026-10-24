@@ -450,6 +450,18 @@ def overlay_problems(raw):
     return out
 
 
+def overlay_lines(raw):
+    """The lines the overlay question shows: every key with its number of entries (M1b review Y10 / J29)."""
+    inner = json.loads(raw.decode("utf-8"))["internal"]
+    return ["internal.%s: %d개" % (k, len(inner.get(k) or [])) for k in OVERLAY_KEYS]
+
+
+def overlay_lines_missing(raw, question):
+    from ..commit.summary import norm
+    q = norm(question or "")
+    return [l for l in overlay_lines(raw) if norm(l) not in q]
+
+
 def overlay(repo, o, hooks, argv):
     if o["_"]:
         raise Usage("overlay takes no video id: overlay --from <json> --expect <sha12>")
@@ -474,6 +486,11 @@ def overlay(repo, o, hooks, argv):
             ev = evidence.check(repo, argv, labels.overlay(expect), False)
         except evidence.Missing as e:
             raise store.Refused(str(e), C.NO_EVIDENCE)
+        missing = overlay_lines_missing(raw, ev.get("question"))
+        if missing:
+            raise store.Refused("the person's question did not show what the overlay holds (%s) — ask again with "
+                                "each key and its number of entries (m1-plan §23.2 J29)" % "; ".join(missing),
+                                C.NO_EVIDENCE)
         evidence.consume(repo, ev, None, "overlay")
         p = os.path.join(repo, ".claude", "studio", "local", "config.internal.json")
         os.makedirs(os.path.dirname(p), exist_ok=True)

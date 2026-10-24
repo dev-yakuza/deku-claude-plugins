@@ -50,6 +50,8 @@ REASONS = {
                          "(tell the user)",
     "unflushed": "the latest answer's question is not in the transcript yet — ask again",
     "summary-not-shown": "the question does not show the commit's summary line as --stage printed it",
+    "values-not-shown": "the question does not show every line of the value block as --stage printed it (the "
+                        "protected values, or the overflow file and its counts)",
 }
 
 
