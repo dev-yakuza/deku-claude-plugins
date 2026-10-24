@@ -14,6 +14,7 @@ TABLE = [
                  "<sr>/**/videos/*/work/.state.lock", "<sr>/**/videos/*/work/**/shown.json",
                  "<sr>/**/videos/*/work/**/verify.json", "<sr>/**/videos/*/work/**/checks/**",
                  "<sr>/**/videos/*/work/assets.json", "<sr>/**/videos/*/work/commit-ok.json",
+                 "<sr>/**/videos/*/work/source/**",
                  "<sr>/**/videos/*/work/**/pronounce-approved.json",
                  "<sr>/**/cast/*/status.json", "<sr>/**/cast/*/approvals.json",
                  "<sr>/**/cast/*/shown.json", ".claude/studio/local/commit-ok.json",

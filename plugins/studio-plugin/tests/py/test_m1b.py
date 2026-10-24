@@ -415,7 +415,9 @@ class RecordSource(FlowCase):
         from stdo.state.hashes import source_hash_repo_md
         self.assertEqual(st["source"]["frozen_hash"], source_hash_repo_md(self.repo, "docs/a.md", []))
         self.assertEqual(st["source"]["copy_sha"], file_sha(os.path.join(self.repo, "docs", "a.md")))
-        self.assertEqual(st["source"]["assets_sha"], file_sha(os.path.join(self.v2, "work", "assets.json")))
+        # M1d: an assets.json that check_scope did not pass for this copy is not recorded (test_m1d.Record)
+        self.assertIsNone(st["source"]["assets_sha"])
+        self.assertIn("not checked for this copy", self.last_out)
         with open(os.path.join(self.v2, "work", "source", "a.md")) as f:
             self.assertEqual(f.read(), self.text)
 

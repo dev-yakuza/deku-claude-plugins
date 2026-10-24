@@ -42,7 +42,7 @@ STUDIO_TEST_S2V=/abs/path/to/script2video \
   `check_commit --staged` on a Studio commit (targets 50 ms / 300 ms; fails only above 3×).
 
 **Scripts version (M0d-2, D-M0-3)**: the guard refuses Studio commands in a repository whose copy of
-`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 11). Until `/std update` exists (M1), copy the plugin's
+`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 12). Until `/std update` exists (M1), copy the plugin's
 `skills/std/scripts/` (without `guard.py` and `stdo/guard/`) into an older sandbox repository again by hand.
 
 **M0f**: `tests/py/drivers/make_harness.py <dir>` builds a synthetic harness repository (templates, agents, a copy of
@@ -85,4 +85,9 @@ manifest or the copy) runs `init analyze|plan|apply`, `config get|preview|set`, 
 default narrator, `installed.json`, the format and the guides. A harness commit's question shows the **value block**
 (`--stage` prints it; commit-ok keeps `values_settings` · `values_machine` · `values_shown` · `overflow`): test helpers
 that commit a harness put those lines in the question and in the recorded approval.
+
+**M1d** (`SCRIPTS_VERSION` 12): `resolve_assets.py` and `check_scope.py` (the source stage). `test_m1d.py` builds a
+synthetic static site (PNG/JPEG headers written byte by byte, WebP/AVIF headers, a © caption, a symbolic link out of the
+web root, an image outside `visibility.public`). The source analyst's image classes are a JSON block in
+`work/source.md`; `record-source` records images and the assets sha only after `check_scope` passed for that copy.
 

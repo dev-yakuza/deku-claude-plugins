@@ -123,12 +123,37 @@ def begin(repo, cfg, root, o, providers, ctx_of, env=None):
 
 # ---------- record-source ----------
 
-def record_source(repo, vdir, state, hooks=None):
+def _checked_assets(vdir, copy_sha, fp):
+    """(images, assets.json sha, note): the usable images of assets.json when check_scope passed for this very copy of
+    the source (m1-plan §6, M1d); else no images and a note saying what to run."""
+    p = os.path.join(vdir, "work", "assets.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError:
+        return [], None, "no work/assets.json yet: run resolve_assets.py, the source analyst and check_scope.py, " \
+                         "then record-source again"
+    except ValueError:
+        return [], None, "work/assets.json is not JSON: run resolve_assets.py again"
+    sc = data.get("scope_check") if isinstance(data, dict) else None
+    if not isinstance(sc, dict) or sc.get("result") != "pass" or sc.get("source_copy_sha") != copy_sha or \
+            data.get("source_copy_sha") != copy_sha:
+        return [], None, "work/assets.json is not checked for this copy of the source: run resolve_assets.py and " \
+                         "check_scope.py, then record-source again"
+    changed = [k for k in sorted(fp) if k not in sc or sc[k] != fp[k]]
+    if changed:
+        return [], None, "%s changed since check_scope.py: run check_scope.py again, then record-source again" \
+            % ", ".join(changed)
+    images = sorted(set(i["resolved"] for i in data.get("images") or []
+                        if isinstance(i, dict) and i.get("status") == "ok" and isinstance(i.get("resolved"), str)))
+    return images, hashes.file_sha(p), None
+
+
+def record_source(repo, vdir, state, cfg, hooks=None, env=None):
     src = state["source"]
     if src.get("kind") != "repo-md":
         raise store.Refused("source kind %r is not supported yet" % src.get("kind"), C.USAGE)
     absrc = os.path.join(repo, src["path"])
-    before_live = hashes.source_hash_repo_md(repo, src["path"], src.get("images", []))
     before = hashes.file_sha(absrc)
     if before is None:
         raise store.Refused("the source is missing: %s" % src["path"], C.FAIL)
@@ -136,14 +161,22 @@ def record_source(repo, vdir, state, hooks=None):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     tmp = "%s.tmp.%d" % (dst, os.getpid())
     shutil.copyfile(absrc, tmp)
-    after_live = hashes.source_hash_repo_md(repo, src["path"], src.get("images", []))
     copied = hashes.file_sha(tmp)
-    if hashes.file_sha(absrc) != before or copied != before or after_live != before_live:
+    if hashes.file_sha(absrc) != before or copied != before:
         os.remove(tmp)
         raise store.Refused("the source changed while it was copied: run record-source again", C.FAIL)
+    # the images the source refers to are part of its hash once assets.json is checked for this copy (M1d)
+    from ..source.scope import fingerprint
+    fp = fingerprint(repo, cfg, dict(os.environ if env is None else env))
+    images, assets_sha, note = _checked_assets(vdir, copied, fp)
+    before_live = hashes.source_hash_repo_md(repo, src["path"], images)
     os.replace(tmp, dst)
-    assets = hashes.file_sha(os.path.join(vdir, "work", "assets.json"))
-    rec = {"frozen_hash": after_live, "copy_sha": copied, "assets_sha": assets, "frozen_at": schema.now()}
+    after_live = hashes.source_hash_repo_md(repo, src["path"], images)
+    if after_live != before_live or hashes.file_sha(absrc) != before:
+        raise store.Refused("the source or its images changed while they were recorded: run record-source again",
+                            C.FAIL)
+    rec = {"frozen_hash": after_live, "copy_sha": copied, "assets_sha": assets_sha, "images": images,
+           "frozen_at": schema.now()}
 
     def check(s):
         if all(L["status"] in ("done", "aborted") for L in s["langs"].values()):
@@ -153,7 +186,9 @@ def record_source(repo, vdir, state, hooks=None):
         s["source"].update(rec)
 
     store.write(vdir, dict({"event": "record-source"}, **rec), change, hooks=hooks, check=check)
-    _out("source frozen %s" % after_live[:12])
+    _out("source frozen %s (%d image(s))" % (after_live[:12], len(images)))
+    if note:
+        _out("note: %s" % note)
     return C.OK
 
 

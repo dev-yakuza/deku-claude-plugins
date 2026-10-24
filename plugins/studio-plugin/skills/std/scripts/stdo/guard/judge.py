@@ -1678,7 +1678,8 @@ def check_version(ctx, cmd):
     """D-M0-3: Studio commands stop when the repository's scripts are another version than the guard's."""
     from . import version
     real = None
-    for name in ("state.py", "check_commit.py", "hooks.py", "lock.py", "run_s2v.py"):
+    for name in ("state.py", "check_commit.py", "hooks.py", "lock.py", "run_s2v.py", "resolve_assets.py",
+                 "check_scope.py"):
         real = studio_script(ctx, cmd, name)
         if real is not None:
             break

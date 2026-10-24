@@ -54,6 +54,9 @@ def _old_new(top, cfg, key, raw):
     if key in ("studio_root",) or key.startswith("studio_root."):
         raise SetupError(USAGE, "studio_root is not changed by config (moving Studio's folder is `move`, later)")
     new = L.parse_value(raw)
+    if key.startswith("s2v.path") and key != "s2v.path":
+        raise SetupError(USAGE, "%s is not a setting: this machine's s2v path is exactly s2v.path (M1c review P6)"
+                         % key)
     if key == "s2v.path":
         if not isinstance(new, str) or not os.path.isabs(new):
             raise SetupError(USAGE, "s2v.path is the absolute path of this machine's script2video checkout")

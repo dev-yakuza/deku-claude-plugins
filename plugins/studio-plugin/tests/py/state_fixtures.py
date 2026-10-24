@@ -13,7 +13,8 @@ ENGINE = {"tts": "e-tts", "templates": "e-tpl", "defaults_voice": "e-dv", "compo
 def state(outputs=("youtube",), platforms=None, langs=("ko",)):
     s = schema.create_state("v1", "public", "youtube", "public", langs[0],
                             {"id": "0.12.1+abc", "version": "0.12.1", "commit": "c0ffee", "dirty": False},
-                            {"kind": "repo-md", "path": "docs/a.md", "images": [], "frozen_hash": "src1"})
+                            {"kind": "repo-md", "path": "docs/a.md", "images": [], "frozen_hash": "src1",
+                             "assets_sha": "a" * 64})  # past the source stage: its images are checked (M1d Q3)
     for l in langs[1:]:
         s["langs"][l] = schema.new_lang()
     s["brief"] = {"core": "brief1", "outputs": list(outputs),

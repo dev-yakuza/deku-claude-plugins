@@ -113,9 +113,25 @@ class Commands(StoreCase):
         store.record_approval(self.vdir, "ko", "1", {"tuple": F.literal_tuple("1", c)})
         store.record_approval(self.vdir, "ko", "4b", {"tuple": {}}, key="x")
         seq = self.state()["last_seq"]
-        self.assertEqual(self.cli("record-brief", "v1", "--from", self.brief())[0], 3)
+        code, _, err = self.cli("record-brief", "v1", "--from", self.brief())
+        self.assertEqual(code, 3)
+        self.assertIn("exclude-output", err)
         self.assertEqual(self.state()["last_seq"], seq)  # nothing written
         self.assertEqual(store.incomplete(self.vdir), [])
+
+    def test_record_brief_needs_checked_images(self):
+        """M1d Q3: no brief before record-source has recorded the checked images (assets_sha)."""
+        st = self.state()
+        st["source"]["assets_sha"] = None
+        store.create(os.path.join(self.repo, "studio", "videos", "v2"), dict(st, video="v2"))
+        p = self.brief()
+        seq = store.read_state(os.path.join(self.repo, "studio", "videos", "v2"))["last_seq"]
+        code, _, err = self.cli("record-brief", "v2", "--from", p)
+        self.assertEqual(code, 3)
+        self.assertIn("no assets_sha", err)
+        self.assertIn("record-source v2", err)
+        self.assertEqual(store.read_state(os.path.join(self.repo, "studio", "videos", "v2"))["last_seq"], seq)
+        self.assertEqual(self.cli("record-brief", "v1", "--from", p)[0], 0)  # v1's images are checked
 
     def test_record_brief_malformed(self):
         for body in ({"platforms": {"youtube": "youtube"}}, {"roles": "narrator"}, {"claims": [1]}):

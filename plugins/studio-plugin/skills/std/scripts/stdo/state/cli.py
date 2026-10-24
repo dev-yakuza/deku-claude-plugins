@@ -144,7 +144,7 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
         if cmd == "shown":
             return gates.shown(vdir, state, lang, ctx, o, providers, hooks)
         if cmd == "record-source":
-            return flow.record_source(repo, vdir, state, hooks)
+            return flow.record_source(repo, vdir, state, cfg, hooks)
         if cmd == "hold":
             return flow.hold(vdir, lang, o, hooks)
         if cmd == "release-lock":
@@ -269,6 +269,10 @@ def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock):
     core = brief_core(claims, roles)
 
     def check(s):  # under the lock (MINOR 4): approved outputs/platforms cannot be removed here
+        if s["source"].get("assets_sha") is None:  # the source's images are checked before the brief (M1d Q3)
+            raise store.Refused("the source's images are not checked yet (no assets_sha): run resolve_assets.py, the "
+                                "source analyst and check_scope.py, then state.py record-source %s" % s["video"],
+                                C.REFUSED)
         removed_o = set(s["brief"]["outputs"]) - set(outputs)
         removed_p = set(s["brief"]["platforms"]) - set(platforms)
         for L in s["langs"].values():
