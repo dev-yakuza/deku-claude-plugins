@@ -1174,6 +1174,17 @@ if [ "${R%%$'\037'*}" = 0 ] && case "${R#*$'\037'}" in *"$SKIPN"*) true ;; *) fa
 else
   bad "N12 git -C \"\$d\"" "rc 0 + skip note + no dir" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-100) / $(ls -a | tr '\n' ' ')"
 fi
+# N12b — 따옴표 없는 `$W` (0.98.4 X14, 백로그 15 의 `$W/` 디렉터리): 셸 변수가 남은 인자는 건너뛰고,
+# root 가 git 저장소가 아니므로 findings·firing 을 쓰지 않는다 — `$W` 라는 디렉터리가 생기지 않는다.
+fresh_repo
+printf 'SECRET=abc\n' > .env; git add .env >/dev/null 2>&1
+R="$(pre_out 'git -C $W commit -m x')"
+if [ "${R%%$'\037'*}" = 0 ] && case "${R#*$'\037'}" in *"$SKIPN"*) true ;; *) false ;; esac \
+   && [ ! -e '$W' ] && [ ! -e 'W' ]; then
+  ok "N12b git -C \$W commit(따옴표 없음) → 건너뜀 메시지 · exit 0 · \$W 디렉터리 없음"
+else
+  bad "N12b git -C \$W" "rc 0 + skip note + no dir" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-100) / $(ls -a | tr '\n' ' ')"
+fi
 expect_pre "N13 정상 -C <절대 경로> → 그 저장소를 검사(거부)" deny "git -C $PWD commit -m x"
 expect_pre "N13b 따옴표 친 -C 경로도 따옴표를 벗겨 검사(거부)" deny "git -C \"$PWD\" commit -m x"
 R="$(HOME="$WORK" pre_out 'git -C ~/r commit -m x')"
@@ -1268,7 +1279,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=201
+GATE_MIN_CHECKS=202
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

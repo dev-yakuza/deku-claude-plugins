@@ -177,6 +177,21 @@ come back empty — **fall back to matching the issue number as a token in the h
 name**, and when that matches more than one branch return `BLOCKED:dep-branch-ambiguous`
 rather than guessing.
 
+⚠ **The 200 windows are checked for completeness on the run side too** (0.98.4) — the 0.98.1 rule
+`retro`/`daily` use: complete when `count < limit` or the window's smallest PR number is below the
+smallest member. Measured word_app: Issue window minimum #1420, PR window minimum #972, carryover
+member #1097 — outside the **label** window, so its `guild:needs-human` never reached `terminal`
+and `dep-needs-human` did not fire. The supervisor's `refresh_dag_input`: **the verdict on every
+refresh** (on the 200 result — no extra call; a failed 200 read gets no verdict and no merge);
+**the 1000 read at most once per run**, into `prs_tail.json` (≈ 340 points; a failure retried at
+most twice; still short of the smallest member, or out of retries → one `[sprint] WARN`), merged
+under the 200 window (the window wins on the same number; a tail entry pushed out of the window
+that is still `OPEN` is refreshed by its own `gh pr view`, up to 20); **labels**: a member missing
+from the label window is read on its own, `gh issue view <n> --json number,labels`, every refresh
+(never cached). Supplement lines are read one by one — anything but an object with an integer
+`number` is dropped, never a `dag-input-failed`. `stack_sync.py` (one run, no cache): 200 → 1000
+once; still incomplete or failed → a first line `window-incomplete <window min PR> <smallest member>`.
+
 ⚠ **Same-repository references only** (0.98.3): a ref whose `repository` names another repo is
 dropped before the fallback — a PR can close an Issue of another repository with the same number.
 The supervisor's `refresh_dag_input` and `stack_sync.py`'s `prs_by_issue` compare `owner/name`

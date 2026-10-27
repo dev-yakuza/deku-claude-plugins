@@ -33,8 +33,13 @@ sync, but nothing else moves those cards once the run has ended (`retro.md` Phas
    nothing was changed for members not yet printed. Any other non-zero → `FAIL: stack_sync crashed
    — <last stderr line>`, plus the lines it printed before. On any non-zero exit there is no
    `done-cards` line, so step 5 does not run.
+   A first line `window-incomplete <pr> <member>` is **not a member line**: the PR list (200, then
+   1000) did not reach the smallest member. It is printed before anything else, even when there
+   is no work.
 4. **Report** one line per member line, actionable first (the `done-cards` line is step 5's, not
-   a member):
+   a member). A `window-incomplete <pr> <member>` line → one sentence on top,
+   *"PR 목록이 #<member> 까지 닿지 않아 그보다 오래된 머지는 보지 못했습니다"* — it is not a member
+   line and does not change *"동기화할 스택이 없습니다"* below:
    - `stale` → *"#<dep>가 리뷰로 바뀌었습니다 — 상단 브랜치를 직접 따라잡은 뒤 `/gld dev <n>`"*
      (then `sync` reports `draft-held` until the human readies it)
    - `diverged` → *"#<dep>의 작업이 기본 브랜치에 온전히 남아 있지 않습니다(revert·부분 재머지) — 사람이 판단"*
@@ -105,15 +110,16 @@ sync, but nothing else moves those cards once the run has ended (`retro.md` Phas
    is added again (`item-add`). That is the one exception to *"Guild
    does not re-read, so it does not undo"* (`board.md` D1) — and it applies only to a member
    whose PR merged and whose Issue was closed as completed.
-   ⚠ **A merge older than the last 200 PRs is not seen** — `stack_sync.py` reads `gh pr list
-   --limit 200`, the same window as the supervisor. Such a card stays where it is; move it in
-   the UI.
+   ⚠ **A merge older than the PR window is not seen** — `stack_sync.py` reads `gh pr list
+   --limit 200`, and 1000 when that does not reach the smallest member (the supervisor's rule);
+   still short → it says so with `window-incomplete` (step 4). Such a card stays where it is; move
+   it in the UI.
 
 ## Return
 
 `OK: sprint #<n> — synced <a> / attention <b>` (synced = `synced` lines whose actions are not
 `none`; attention = every status other than `synced`, `clean` and `needs-sync` — the `done-cards`
-line is not a status) · `OK: no active sprint` · `OK: unattended — …` · `FAIL: <stderr line>`.
+line is not a status, nor is a `window-incomplete` line) · `OK: no active sprint` · `OK: unattended — …` · `FAIL: <stderr line>`.
 When step 5 wrote, append ` · board done <k − col_failed>`; when it listed (`--check`), ` · board to-done <k>`.
 
 ## Hard rules

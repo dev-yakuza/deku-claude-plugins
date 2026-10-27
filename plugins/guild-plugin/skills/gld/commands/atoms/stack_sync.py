@@ -579,6 +579,20 @@ def plan_actions(ctx, status, dep, m_pr, m_head, h_d):
     return actions, held
 
 
+def window_gap(prs, limit, member_nums):
+    """The 0.98.1 completeness rule: the window is complete when it is shorter than `limit` or
+    its smallest PR number is below the smallest member (one number counter; a PR is created
+    after the Issue it closes; same-repo refs). Incomplete -> (window minimum, smallest member);
+    complete -> None."""
+    if not isinstance(prs, list) or not member_nums or len(prs) < limit:
+        return None
+    nums = [p["number"] for p in prs
+            if isinstance(p, dict) and isinstance(p.get("number"), int)]
+    if not nums or min(nums) < min(member_nums):
+        return None
+    return min(nums), min(member_nums)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--tracker", required=True)
@@ -606,10 +620,26 @@ def main(argv=None):
         if "guild:sprint" not in [l["name"] for l in tracker.get("labels") or []]:
             die("#%s is not a sprint tracking Issue (no guild:sprint label)" % args.tracker)
         members = parse_members(tracker.get("body") or "")
-        prs = prs_by_issue(gh_json(["pr", "list", "-R", repo, "--state", "all", "--limit", "200",
-                                    "--json", "number,headRefName,headRefOid,baseRefName,state,"
-                                    "mergedAt,isDraft,mergeCommit,closingIssuesReferences"]),
-                           [n for n, _ in members], ctx["repo"])
+        member_nums = [n for n, _ in members]
+        pr_list = ["pr", "list", "-R", repo, "--state", "all", "--json",
+                   "number,headRefName,headRefOid,baseRefName,state,"
+                   "mergedAt,isDraft,mergeCommit,closingIssuesReferences"]
+        raw = gh_json(pr_list + ["--limit", "200"])
+        gap = window_gap(raw, 200, member_nums)
+        if gap:
+            # One run, so no cache: 200 → 1000 once. A failed wide read keeps the 200 result.
+            try:
+                wide = gh_json(pr_list + ["--limit", "1000"])
+            except EnvError:
+                wide = None
+            if isinstance(wide, list):
+                raw, gap = wide, window_gap(wide, 1000, member_nums)
+        if gap:
+            # BEFORE the work verdict and unconditionally: an empty `work` returns below
+            # without ever printing a note. Not a member line — readers keep it out of theirs.
+            print("window-incomplete %d %d" % gap)
+            sys.stdout.flush()
+        prs = prs_by_issue(raw, member_nums, ctx["repo"])
 
         work = []          # (issue, dep, member PR, dep's merged PRs, status, detail)
         for issue, dep in members:

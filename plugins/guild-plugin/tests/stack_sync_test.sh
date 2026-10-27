@@ -69,6 +69,13 @@ elif a[:2] == ["issue", "view"]:
     print(json.dumps({"body": it.get("body", ""), "labels": [{"name": l} for l in it["labels"]],
                       "state": it.get("state", "OPEN"), "stateReason": it.get("stateReason")}))
 elif a[:2] == ["pr", "list"]:
+    # `--limit` as GitHub applies it (newest first, cut) — only when the state holds more PRs
+    # than the limit, so the small fixtures keep their order. STUB_FAIL_WIDE fails the 1000 read.
+    lim = int(a[a.index("--limit") + 1]) if "--limit" in a else 30
+    if os.environ.get("STUB_LISTS"):
+        open(os.environ["STUB_LISTS"], "a").write("limit %d\n" % lim)
+    if lim == 1000 and os.environ.get("STUB_FAIL_WIDE"):
+        sys.stderr.write("HTTP 502\n"); sys.exit(1)
     out = []
     for p in st["prs"]:
         p = dict(p)
@@ -77,6 +84,8 @@ elif a[:2] == ["pr", "list"]:
         p["mergedAt"] = p.get("mergedAt") or ("2026-10-10T00:00:00Z" if p["state"] == "MERGED" else None)
         p.pop("body", None)
         out.append(p)
+    if len(out) > lim:
+        out = sorted(out, key=lambda p: -p["number"])[:lim]
     print(json.dumps(out))
 elif a[:2] == ["pr", "view"]:
     p = [p for p in st["prs"] if str(p["number"]) == a[2]][0]
@@ -842,6 +851,43 @@ eq "W8: ref without repository → kept (as before)" \
 eq "W8: uppercase owner/name → the same repository" \
   "$(pbi '[{"number":204,"state":"OPEN","headRefName":"feature/misc","closingIssuesReferences":[{"number":12,"repository":{"name":"App","owner":{"login":"ACME"}}}]}]')" "12:204"
 
+echo "── stack_sync: PR window completeness (0.98.4 X15) ──"
+# add_fillers <n> — n newer CLOSED PRs (#500…) that close nothing, pushing #101/#102 out of the
+# 200 window: its minimum (#550 with 250) is not below the smallest member (#11) → incomplete.
+add_fillers() {
+  "$PY" - "$S/state.json" "$1" <<'PYF'
+import json, sys
+p, n = sys.argv[1], int(sys.argv[2])
+st = json.load(open(p))
+st["prs"] += [{"number": 500 + i, "state": "CLOSED", "headRefName": "chore/filler-x%d" % i,
+               "baseRefName": "main", "mergeCommit": None, "isDraft": False,
+               "closingIssuesReferences": []} for i in range(n)]
+json.dump(st, open(p, "w"))
+PYF
+}
+# (g) complete window → no token, the exact output as before
+standard w1
+: > "$S/lists.txt"
+STUB_LISTS="$S/lists.txt" sync --check
+eq "window(g): complete → exact output, no token" "$OUT" "12 needs-sync #11 merge,retarget,ready"
+eq "window(g): complete → no 1000 read" "$(tr '\n' ' ' < "$S/lists.txt")" "limit 200 "
+# (f) 200 incomplete, 1000 reaches the members → the old merge is seen, no token
+standard w2; add_fillers 250
+: > "$S/lists.txt"
+STUB_LISTS="$S/lists.txt" sync --check
+eq "window(f): 1000 read reaches the member → sync target, no token" "$OUT" "12 needs-sync #11 merge,retarget,ready"
+eq "window(f): 200 then 1000, once each" "$(tr '\n' ' ' < "$S/lists.txt")" "limit 200 limit 1000 "
+# (e) 1000 read fails → the 200 result stays; dep out of window → work empty — token first, rc 0
+standard w3; add_fillers 250
+STUB_FAIL_WIDE=1 sync --check
+eq "window(e): wide read failed → token only (work empty), exit 0" "$RC:$OUT" "0:window-incomplete 550 11"
+STUB_FAIL_WIDE=1 sync --done-cards
+eq "window(e): token before the work verdict on the sync path too" "$(printf '%s' "$OUT" | head -1)" "window-incomplete 550 11"
+# (e') 1000 succeeds but still does not reach #11 → token with the 1000 window's minimum
+standard w4; add_fillers 1001
+sync --check
+eq "window(e'): 1000 still incomplete → its minimum in the token" "$RC:$OUT" "0:window-incomplete 501 11"
+
 echo "── supervisor wiring (run.md --draft-stacked) ──"
 RH="$WORK/render"; mkdir -p "$RH"
 rflags() { echo --tracker 99 --owner-repo acme/app --default-branch main --container "$RH/c" \
@@ -862,7 +908,7 @@ echo
 echo "stack_sync: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when checks are added on purpose. A
 #   quote that swallows the rest of the file runs fewer checks and still ends green otherwise.
-SYNC_MIN_CHECKS=139
+SYNC_MIN_CHECKS=146
 if [ "$((PASS + FAIL))" -lt "$SYNC_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${SYNC_MIN_CHECKS}건)."
   exit 1

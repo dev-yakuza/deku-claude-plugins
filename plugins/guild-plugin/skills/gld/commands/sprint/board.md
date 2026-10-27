@@ -409,7 +409,9 @@ GitHub 의 자동 추가 설정을 켜두시면 즉시 올라오지만, Guild �
 
 ⚠ **The `Sprint` filter line is not optional.** `Order` is the field this design calls the most
 valuable of the four, and it is written fresh as `1..N` every sprint while nothing clears the old
-values and nothing archives cards. So `In review` — the one column where merge order matters —
+values and Guild archives nothing — but a project's own **Auto-archive items** workflow (set in
+the project UI) can: measured project 13, closed members `isArchived: true` with no Guild call;
+archived cards leave every view (the project's *Archived items* list restores them). So `In review` — the one column where merge order matters —
 accumulates last sprint's frozen `Order 1..7` beside this sprint's live `Order 1..7`, and sorting
 it yields `1,1,2,2,3,3…`. `Sprint` is the only thing standing between `Order` and noise, and a
 human who is not told to filter by it will not think to.

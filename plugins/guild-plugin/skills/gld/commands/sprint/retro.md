@@ -200,7 +200,7 @@ step that gets skipped.
   a later Issue, and an Issue transferred from another repo (it gets a new number) are exceptions
   (measured: 0). The real floor is the smallest **member** number (a child is created after its
   parent, at the split), so a very old carryover member (say #50) leaves even the 500 window
-  incomplete — `FAIL` as before. Measured: `word_app` sprint #1708, smallest member #1097 (a
+  incomplete — `FAIL` as before. Measured (2026-10-25 · 2026-10-21 — the window minimum grows as PRs are added): `word_app` sprint #1708, smallest member #1097 (a
   carryover), 200-window minimum #916 → complete at 200; `one-man-company` #563, smallest member
   #349, 200-window minimum #104 → complete.
 
@@ -234,13 +234,20 @@ Sources, and **what each is honestly derived from**:
 | 감사자 루프백 | 멤버 이슈(분할 멤버는 자식 이슈)의 감사자 레코드에서 **disposition 토큰** 집계 | 멤버 이슈(분할 멤버는 자식 이슈)의 `<!-- guild:auditor:execute -->` 댓글 |
 | 의존성 차단 횟수 | 차단으로 건너뛴 횟수 | `failures.jsonl`의 `dependency-blocked` · `base-unresolved`. ⚠ `base-decision-failed`는 **세지 말 것** — 그것은 실패다 |
 | 스택 따라잡기 횟수 | base가 기본 브랜치로 폴백한 PR 수 | PR `baseRefName` ↔ 멤버 표의 기대 base |
-| 리뷰 변경 요청률 | `reviewDecision == CHANGES_REQUESTED` / 멤버 PR | PR |
+| 리뷰 변경 요청률 | `reviewDecision == CHANGES_REQUESTED` / `reviewDecision` 이 **빈 값이 아닌** 멤버 PR — 빈 값은 0 이 아니라 **미집계**(아래) | PR |
 | 닫힌-미머지 PR | 사람이 거절한 작업 | PR `state == CLOSED` + `mergedAt == null` — **자식 PR 도 같은 범위로 센다**(멤버 PR 만이 아님) |
 | 목표 달성 | `구분 = goal` 과 `slot` 멤버가 **모두** 머지됐는가(예/아니오) + 머지된 / 계획된 (슬롯은 목표 쪽에 센다 — `daily` 와 같은 기준) | 멤버 표의 `구분` 열 + PR `mergedAt`. 열이 없는 옛 트래커 → "목표 구분 없음" |
 | 목표 외 | 머지된 other / 계획된 other | 같은 출처 |
 
 리뷰 변경 요청률과 스택 따라잡기만 **멤버 PR 만** 센다 — 자식 PR 은 넣지 않는다. 감사자 루프백은 이 목록에
 넣지 않는다 — PR 이 아니라 Issue 의 레코드이고, 분할 멤버는 자식 이슈를 읽는다(아래 **감사자 루프백**).
+
+⚠ **`reviewDecision` 빈 값은 "리뷰 없음"이 아니라 "이 저장소는 결정을 집계하지 않음"이다** — 보호 규칙이 리뷰를
+**요구하지 않으면** 리뷰가 있어도 null 이다(1인 저장소는 자기 PR 에 변경 요청을 할 수도 없다 — 실측 word_app ·
+one-man-company 최근 PR 100 건 모두 빈 값). 그래서 분모는 빈 값이 아닌 멤버 PR 이고("Zero and unrecorded are
+different"): 모두 빈 값 → Phase 3 줄은 `리뷰 변경요청  리뷰 결정 미집계(리뷰 필수 규칙 없음 — reviewDecision 빈 값 <k>/<k>)`
+이고 회고 서술·Phase 4 근거에 쓰지 않는다; 일부만 빈 값 → `<c>/<m> PR (<p>%) · 결정 미집계 <e>건`. 이 행은
+`history` 에 없다 — 스키마는 그대로.
 
 **An epic (a member of S) is one seat** in 이행률 · 캐리오버 · 목표 달성 · 목표 외, with
 `daily.md` step 6's epic rule deciding it — so `history`'s `planned` stays the seat count (row ③'s
@@ -451,7 +458,11 @@ Sprint #99 — 결제 흐름 안정화        (13일 · run 2회 · 계획 7개)
   acceptance, a change request) is not a Guild defect, and proposing an agent change for it is how
   `evolve` learns the wrong lesson. Say which is which, explicitly.
 - **Anchor every claim to a number above or to a specific `#N`.** No unanchored narrative — this
-  record becomes `history` and the next sprint's reasoning reads it.
+  record becomes `history` and the next sprint's reasoning reads it. **A number in the narrative
+  (a time, a count, a rate, a range) is one of the metrics above or a value read in this run**
+  (a time difference between run markers or events, …), and a range covers **every** case it
+  sums up — measured counterexample: #1708's retro said *"rate limit 대기 회당 2.5~3.7h"* while the
+  last wait was 9 minutes. A value not read is said without a number.
 - **Never propose a Guild change here.** Phase 4 is where proposals come from, adversarially
   reviewed, per-item approved. Phase 3 states observations.
 
@@ -796,6 +807,24 @@ human's.
   `git add .` committed it before `.claude/guild/.gitignore` existed, `init.md`) is excluded and
   reported: deleting it would be a change to the human's tree. ⚠ `.sprint-logs/<tracker>/` is
   **never** a candidate — it is the evidence this retro just measured.
+- **다른 정리 대상 — report only, never a candidate** (the scope rule above holds; these are
+  named so the human knows something else is left, not removed here). From the same porcelain
+  and `ls -A` output:
+  - a `.gld-<repo>-sprint-<t>` container other than this one (`t` ≠ tracker) — per `t` its own
+    call, `gh issue view <t> --repo <owner>/<repo> --json state --jq .state`: `CLOSED` →
+    `이전 스프린트 #t 워크트리 <k>개 — /gld sprint retro --cleanup <t>`; `OPEN` →
+    `진행 중인 다른 스프린트 #t — 손대지 않음`; the call fails → `#t 상태 확인 불가 — 손대지 않음`.
+  - `.claude/guild/.gld-sprint-<t>.{sh,board,window}` with `t` ≠ tracker and untracked (the same
+    `git ls-files .claude/guild/<file>` call as the run files above; a tracked one is not named) — the
+    same state (one call per distinct `t`, shared with the bullet above): `CLOSED` → the same
+    `--cleanup <t>` line (that mode's (c) deletes them); `OPEN` or failed → as above.
+  - any other `.gld-<repo>-*` worktree (e.g. `-review-<pr>`, `review.md`'s temporary one) →
+    `Guild 실행 밖 워크트리 <path> (<branch>) — 필요 없으면 git worktree remove <path>`.
+  - **a merged row's branch checked out in a worktree outside this container** (porcelain
+    `branch refs/heads/<b>`) → its local delete is skipped (step 3 item 2 would fail on git's
+    "used by worktree") and reported: `<path> 가 잡고 있음 — 먼저 git worktree remove <path>`.
+  A worktree whose name does not start with `.gld-` is not named at all — names never pick out the
+  human's own worktrees (the scope rule above).
 
 **2. Classify and present — then stop for the human (INV1).**
 
@@ -858,7 +887,8 @@ branch -D`) slips past the `ask` entry that is the harness's half of INV1.
    `--base` calls with `--state open` for the same branch and finding **no open PR** (a branch
    that has one keeps its local copy too). ⚠ A remote ref that is **absent** (GitHub deleted it on
    merge — the normal case with `deleteBranchOnMerge`) or that moved does **not** block the
-   local delete; the local tip test below decides. Then re-read the tip right then (`git
+   local delete; the local tip test below decides. A branch step 1 found checked out in a
+   worktree outside the container is skipped here (already reported). Then re-read the tip right then (`git
    rev-parse --verify --quiet refs/heads/<branch>`) and finding it **exactly equal** to
    `headRefOid`: `git branch -D <branch>`.
    ⚠ **Not `git branch -d`, and not as a first try.** Every Guild branch has an upstream (the

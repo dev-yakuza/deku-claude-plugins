@@ -852,7 +852,9 @@ def sub(n):
 need = {
     1: ["git status --porcelain -uall -- .claude/guild/config.json docs/specs/sprint-draft/`.", "skip the rest"],
     2: ["mkdir -p docs/specs/sprint-<tracker>", "mv docs/specs/sprint-draft/<name> docs/specs/sprint-<tracker>/<stem><suffix>.md",
-        "**one suffix for the whole run**", "git ls-files --error-unmatch", "Denied → stop"],
+        "**one suffix for the whole run**", "git ls-files --error-unmatch", "Denied → stop",
+        "rmdir docs/specs/sprint-draft", "**Only in a run that moved files here**",
+        "**Whether it fails or is denied, ignore it and go\n      on** — it never stops this step"],
     3: ["git branch --show-current", "must equal the default branch", "→ stop"],
     4: ["git diff --cached --name-only", "Anything →\n      stop"],
     5: ["git config branch.<branch>.remote", "git config branch.<branch>.merge",
@@ -876,6 +878,10 @@ for n, items in need.items():
     for x in items:
         if x not in body:
             errs.append("sub-step %d lacks: %s" % (n, x.replace("\n", "\\n")))
+# 0.98.4 X13: the rmdir is its own sentence after the move rules — never under "Denied → stop"
+_s2 = sub(2)
+if not (0 <= _s2.find("deletion instead of leaving it unstaged") < _s2.find("rmdir docs/specs/sprint-draft")):
+    errs.append("sub-step 2: the rmdir sentence is not on its own after the mv rules")
 if "Not on `run.md`'s ad-hoc path" not in st[:subs[1]]:
     errs.append("step 6 does not exclude run.md's ad-hoc path")
 if "**Retry by hand**" not in st:
@@ -896,6 +902,16 @@ if len(po) != 1 or "`docs/specs/sprint-draft/po.md`" not in po[0]:
     errs.append("the PO prompt does not write docs/specs/sprint-draft/po.md")
 if len(tl) != 1 or "`docs/specs/sprint-draft/deps.md`" not in tl[0]:
     errs.append("the tech-lead prompt does not write docs/specs/sprint-draft/deps.md")
+# 0.98.4 X4 · X1 · X2: inside the product-owner prompt itself, not elsewhere in plan.md
+for x in ("— changing a central-owned file (`.claude/guild/gates/scripts/gate_precommit.py`, `.claude/guild/gates/rules/secrets.md`, `.claude/guild/gates/rules/verification.md`) is not by itself `upstream`: rate it as usual; the leader warns about it in Phase 5.",
+          "**`device` only when the work itself cannot finish without a device**",
+          "a code change whose acceptance criteria include a real-device E2E or manual check is not `device`",
+          "**every option exactly `- <X>) <answer>[ (needs #<d>)][ (recommended)] — <reason>`**"):
+    if len(po) == 1 and x not in po[0]:
+        errs.append("the PO prompt lacks: " + x[:60])
+# 0.98.4 X12: inside the tech-lead prompt
+if len(tl) == 1 and "do not move a real dependency to `conditional:` or `soft:` for depth or cost" not in tl[0]:
+    errs.append("the tech-lead prompt does not keep stack depth out of (a)")
 if "\n  기록: 만들면 판정 원문(docs/specs/sprint-<트래커 번호>/)과 config.json 을" not in s:
     errs.append("Phase 5 does not disclose the commit and push")
 if "`rm -f docs/specs/sprint-draft/po.md docs/specs/sprint-draft/deps.md docs/specs/sprint-draft/deps-slot.md`" not in s:
@@ -3346,7 +3362,8 @@ hasfx "plan: depends 인데 질문 없음" "$SPP" '`제외: #n (크기가 결정
 hasfx "plan: human-work upstream 은 다른 저장소" "$SPP" '`human-work: <credential|device|upstream|other>` instead of a question (`upstream` = a fix that must land first in **another repository**)'
 hasfx "plan: 선행 Issue 미완은 human-work 아님(차원은 unclear)" "$SPP" '**An unfinished prerequisite Issue is not human work**: rate that dimension (usually Constraint) `unclear` and write `prerequisite: #<d>` instead'
 lacksfx "plan: upstream 이 선행 미완도 덮는다는 옛 문장 제거" "$SPP" '(`upstream` also covers a gap that exists only because a prerequisite Issue is unfinished)'
-hasfx "plan: questions 항목은 셋 중 정확히 하나(권장 선택지 먼저)" "$SPP" 'then exactly one of: `Q: <question>` and `- A) …` lines, the option you recommend first as `- A) <answer> (recommended) — <reason>` (`(recommended)` stays in English; one option only) (a goal-picks or other-ranked candidate only), `human-work: <class>`, or `prerequisite: #<d>`)'
+hasfx "plan: questions 항목은 셋 중 정확히 하나(모든 옵션 한 줄 형식)" "$SPP" 'then exactly one of: `Q: <question>` and `- A) …` lines, **every option exactly `- <X>) <answer>[ (needs #<d>)][ (recommended)] — <reason>`** — a reason on every option, and never a ` — ` inside the answer (use `,` or `(…)`), the option you recommend first (`(recommended)` stays in English; one option only) (a goal-picks or other-ranked candidate only), `human-work: <class>`, or `prerequisite: #<d>`)'
+lacksfx "plan(0.98.4 X2): 권장 옵션만 이유를 보이던 옛 형식 제거" "$SPP" 'the option you recommend first as `- A) <answer> (recommended) — <reason>`'
 lacksfx "plan: 권장 없는 questions 형식 제거" "$SPP" 'then exactly one of: `Q: <question>` and `- A) …` lines (a goal-picks'
 lacksfx "plan: questions 옛 형식(또는) 제거" "$SPP" 'lines, or `human-work: <class>`, or `prerequisite: #<d>`)'
 hasfx "plan: prerequisite 차원은 묻지 않음" "$SPP" '**A `prerequisite: #d` dimension is not asked**'
@@ -3554,8 +3571,10 @@ lacksfx "plan(0.97.2): 판단에 맡기던 옛 목표 재확인 문장 제거" "
 hasfx "plan(0.97.2): 권장 선택지 렌더링" "$PLAN" '**The recommended option** — the product-owner'"'"'s option carrying `(recommended)`, written'
 hasfx "plan(0.97.2): 권장 + ⚠ 꼬리표 함께" "$PLAN" '`(권장) (이 답이면 이번 스프린트에서 빠집니다)`; the leader never drops the warning. A draft'
 hasfx "plan(0.97.2): 크기 질문은 권장 없음" "$PLAN" 'size question (below) has no recommendation: it is not a product judgment — the ✅ side first,'
-hasfx "plan(0.97.2): 기록되는 답은 꼬리표를 뗀 문구" "$PLAN" '  with its tags removed: `(recommended)` together with the `— <reason>` right after it'
-hasfx "plan(0.97.2): 크기 매핑도 꼬리표 뗀 문구로" "$PLAN" '  is settled — the mapping reads the option'"'"'s wording with its tags removed (`(recommended)` and'
+hasfx "plan(0.98.4 X2): 기록되는 답은 첫 ` — ` 이후를 뗀 초안 줄" "$PLAN" '  ` — ` and everything after it** (the reason — every option carries one), `(recommended)`,'
+lacksfx "plan(0.98.4 X2): 권장 옵션 뒤 이유만 떼던 옛 규칙 제거" "$PLAN" '`(recommended)` together with the `— <reason>` right after it'
+hasfx "plan(0.98.4 X2): 크기 매핑도 같은 제거 규칙" "$PLAN" '  is settled — the mapping reads the chosen option'"'"'s draft line with the same tags removed as'
+lacksfx "plan(0.98.4 X2): 크기 매핑 옛 문구 제거" "$PLAN" 'the mapping reads the option'"'"'s wording with its tags removed'
 hasfx "_handoff(0.97.2): K 에 (recommended) 토큰" "$HOMD" 'the recommended-option token `(recommended)` on one `## questions` option line'
 # E. 재스폰 프롬프트 전체 템플릿 (결과 계약 펜스 없음 — 사본 12개 유지)
 hasfx "plan(0.97.2): 재스폰 subagent_type 줄" "$PLAN" '`description`: `tech-lead sprint slot re-spawn`'
@@ -3587,7 +3606,8 @@ hasfx "plan(0.97.2): Phase 5 예시의 그 뒤의 장벽 줄" "$PLAN" '  그 뒤
 hasfx "plan(0.97.2 r1): upstream 은 다른 저장소 선수정일 때만(핵심 절)" "$PLAN" 'only when the body requires a fix to land first in another'
 hasfx "plan(0.97.2 r1): 이월 후보는 /gld plan 줄 없음(핵심 절)" "$PLAN" '`→ /gld plan <n>` line: past analyze'
 hasfx "plan(0.97.2 r1): fill 게이트 문장에 이월 구체화 필요" "$PLAN" '착수 가능 in Phase 1b, or 구체화 필요 past analyze'
-hasfx "plan(0.97.2 r1): 이유는 (recommended) 바로 뒤만 뗌" "$PLAN" 'the `— <reason>` right after it'
+hasfx "plan(0.97.2 r1 → 0.98.4 X2): 이유는 첫 ` — ` 이후 전부(모든 옵션에 이유)" "$PLAN" '(the reason — every option carries one)'
+lacksfx "plan(0.98.4 X2): (recommended) 바로 뒤만 떼던 규칙 제거" "$PLAN" 'the `— <reason>` right after it'
 hasfx "plan(0.97.2 r1): 목표 후보가 돌아오면 승격 메시지 대체" "$PLAN" 'once a goal-pick is back, this rule'
 hasfx "plan(0.97.2 r1): 멤버 대상 매핑 표기" "$PLAN" '`선행 대기: #e ← #d(자식 #c…)(이번 스프린트)`'
 hasfx "plan(0.97.2 r1): 그 뒤의 장벽 괄호 문구" "$PLAN" '`자식 #c 크기 판정 없음`, `구체화 필요`'
@@ -3974,7 +3994,8 @@ P3_PLAN="$GLD/commands/sprint/plan.md"; P3_AN="$GLD/commands/analyze.md"; P3_HO=
 P3_SP="$GLD/commands/atoms/_execute_spine.md"; P3_RETRO="$GLD/commands/sprint/retro.md"; P3_DAILY="$GLD/commands/sprint/daily.md"
 P3_QA="$GLD/commands/qa.md"; P3_EVO="$GLD/commands/evolve.md"; P3_RB="$GLD/commands/rollback.md"; P3_RV="$GLD/commands/review.md"
 # W1 — 결정 답의 전제(비멤버 후보)
-hasfx "plan(W1): PO (needs #d) 토큰 위치" "$P3_PLAN" '`- A) <answer> (needs #<d>) (recommended) — <reason>`'
+hasfx "plan(W1·0.98.4 X2): PO (needs #d) 토큰 위치 — 한 줄 형식" "$P3_PLAN" '`- <X>) <answer>[ (needs #<d>)][ (recommended)] — <reason>`'
+lacksfx "plan(0.98.4 X2): 옛 (needs #d) 형식 예 제거" "$P3_PLAN" '`- A) <answer> (needs #<d>) (recommended) — <reason>`'
 hasfx "plan(W1): 모든 답이면 prerequisite, 일부면 needs" "$P3_PLAN" 'When **every** answer needs `#<d>`, write `prerequisite: #<d>` instead (not a question); `(needs #<d>)` is for a question where only some options need it.'
 hasfx "plan(W1): TL 조건부 메모의 명시적 충족도 전제" "$P3_PLAN" 'its wording **explicitly** meeting the condition of a tech-lead `conditional: #n ← #d (조건: …)`'
 hasfx "plan(W1): 닫힌 #d 조회 호출" "$P3_PLAN" '`gh issue view <d> --json state,stateReason`'
@@ -3991,7 +4012,7 @@ hasfx "plan(W1): 재충전 후보도 같은 판정" "$P3_PLAN" 'gets the same ju
 hasfx "plan(W1): 일반 하드 의존과 일부러 다르다" "$P3_PLAN" '**Deliberately unlike an ordinary hard dependency on a non-member**'
 hasfx "plan(W1): 연쇄 제외 줄" "$P3_PLAN" '`결정했지만 제외: #n (답 <X> → #d 선행 필요 — #d 가 빠짐)`'
 hasfx "plan(W1): Add 경고" "$P3_PLAN" '`⚠ #n 의 답은 #d 를 전제합니다 — #d 없이 기본 브랜치에서 시작해 analyze 에서 멈출 수 있습니다`'
-hasfx "plan(W1): 태그 제거 목록 끝에 (needs #<d>)" "$P3_PLAN" '`(권장)` and `(이 답이면 …)`, and `(needs #<d>)`.'
+hasfx "plan(W1): 태그 제거 목록 끝에 (needs #<d>)" "$P3_PLAN" '`(권장)`, `(이 답이면 …)` and `(needs #<d>)`. Measured sprint-563 `po.md`:'
 hasfx "plan(W1): 크기 매핑 태그 목록 끝에 (needs #<d>)" "$P3_PLAN" '`(권장)`, `(이 답이면 …)`, `(needs #<d>)`): an answer that maps'
 hasfx "plan(W1): 기록 답 끝에 (전제: #d)" "$P3_PLAN" '**ends with the plain text `(전제: #d)`**'
 hasfx "plan(W1): 이월 판정은 none/analyze 만" "$P3_PLAN" 'whose stage is `none` or `guild:analyze`** the leader judges it'
@@ -4139,6 +4160,121 @@ lacksfx "plan(r2): 구분 문장 앞의 ⓪ 경고 없음" "$P3_PLAN" '`readines
 hasfx "analyze(r2): 사람의 답이 해소" "$P3_AN" 'A decision the human gives now (the attended answer, or the answer a resume brings) settles it'
 hasfx "analyze(r2): 출구 안내" "$P3_AN" '`Issue 본문의 결정 줄을 고치거나 #d 를 먼저 끝내세요`'
 
+# ── 0.98.4 (22-0984 design, X1–X16) ──────────────────────────────────────────────
+echo ""
+echo "== 0.98.4 =="
+P4_PLAN="$GLD/commands/sprint/plan.md"; P4_HO="$GLD/commands/atoms/_handoff.md"; P4_AN="$GLD/commands/analyze.md"
+P4_SP="$GLD/commands/atoms/_execute_spine.md"; P4_RETRO="$GLD/commands/sprint/retro.md"; P4_RV="$GLD/commands/review.md"
+P4_RUN="$GLD/commands/sprint/run.md"; P4_DAILY="$GLD/commands/sprint/daily.md"; P4_DEV="$GLD/commands/dev.md"
+P4_EVO="$GLD/commands/evolve.md"; P4_BOARD="$GLD/commands/sprint/board.md"; P4_INV="$GLD/commands/atoms/_invariants.md"
+P4_DAG="$GLD/commands/atoms/_sprint_dag.md"; P4_SYNC="$GLD/commands/sprint/sync.md"
+# X1 — 1b 막힘(device) 기준 (D1 = A)
+hasfx "plan(X1): 막힘(device) 은 일 자체가 기기 없이 끝나지 않을 때만" "$P4_PLAN" '⚠ **막힘 (device) only when the work itself cannot finish without a device** — the deliverable'
+hasfx "plan(X1): 첫 기준 — 산출물이 사람의 기기 작업(#575)" "$P4_PLAN" 'QA — measured #575 `VoiceOver 실기 스폿 체크 (사람 수동 QA)`), or what to fix depends on the result'
+hasfx "plan(X1): 둘째 기준 — 수정이 기기 측정·감사 결과에 달림(#246)" "$P4_PLAN" 'of measuring or auditing on a device (the audit first, the fix from its result — #246, spike'
+hasfx "plan(X1): AC 의 실기 확인은 막힘이 아니다" "$P4_PLAN" '막힘 — AC 의 실기 확인은 막힘이 아니다**: `qa.md` Step 2.5 moves that check into the PR body'"'"'s'
+hasfx "plan(X1): 비고에 사람 QA(실기) 만 더함 — 표시 전용" "$P4_PLAN" 'something else holds it), and its member-table 비고 adds `사람 QA(실기)` — nothing more is done'
+hasfx "plan(X1): 에픽 규칙 그대로" "$P4_PLAN" 'like #575 makes the epic 막힘 (device). The same kind of Issue must not come out 막힘 on one reading and a member'
+hasfx "_handoff(X1): K 1b 막힘 꼬리(토큰 설명 뒤)" "$P4_HO" 'read back in Phase 3 and 5) — 막힘 (device) only when the work itself cannot finish without a device; a code change whose acceptance criteria hold a real-device check is 착수 가능, its 비고 `사람 QA(실기)` display only'
+# X2 — 기록되는 답은 초안 줄
+hasfx "plan(X2): 라벨은 줄여도 기록은 라벨에서 오지 않음" "$P4_PLAN" '**A label may be shortened — the record never comes from it** (*The `<answer>`*, below). Each'
+hasfx "plan(X2): PO 글자로 po.md 줄을 찾음" "$P4_PLAN" 'option of a product-owner question carries that option'"'"'s **PO letter** — the `<X>` of its'
+hasfx "plan(X2): 위치가 아니라 글자" "$P4_PLAN" 'letter, not by position** (*The recommended option*, below). **A'
+hasfx "plan(X2): 권장 옵션은 먼저 쓰이고 글자는 A 가 아닐 수 있음" "$P4_PLAN" 'first (its letter need not be `A`) — is asked first,'
+hasfx "plan(X2): 크기 질문은 위치로 찾지 않음" "$P4_PLAN" 'leader-drafted size question is not matched by position either** — it is reordered ✅ side'
+hasfx "plan(X2): 크기 질문은 TL 조건 문구 일치" "$P4_PLAN" '**by its wording**, and that condition is what is recorded.'
+hasfx "plan(X2): answer 새 첫 줄 — 초안 줄" "$P4_PLAN" 'Phase 5'"'"'s `계획 중 결정:` line and the member table'"'"'s 비고 — is **the draft line** of the chosen'
+hasfx "plan(X2): 라벨·설명이 아님" "$P4_PLAN" 'question — **never the question'"'"'s label or description** — with its tags removed: **the first'
+lacksfx "plan(X2): 옛 answer 첫 줄 제거" "$P4_PLAN" "is the chosen option's wording"
+hasfx "plan(X2): 실데이터 표본(563 B 줄)" "$P4_PLAN" '`범위 축소 (변경 영역만 훅에서 실행)`. A free-text answer is recorded as typed (it has no tags).'
+hasfx "plan(X2): PO 형식 — 답 안 ` — ` 금지" "$P4_PLAN" 'a reason on every option, and never a ` — ` inside the answer (use `,` or `(…)`)'
+hasfx "_handoff(X2): K 형식 줄 — 모든 옵션 이유" "$P4_HO" '(every option `- <X>) <answer>[ (needs #<d>)][ (recommended)] — <reason>` — a reason on every option, no ` — ` inside the answer'
+lacksfx "_handoff(X2): K 옛 권장 형식 예 제거" "$P4_HO" '`- A) <answer> (recommended) — <reason>`'
+# X3 — type:refactor 기능 멤버
+hasfx "plan(X3): 구분은 좌석, 실행 변형은 type: 라벨" "$P4_PLAN" 'The member'"'"'s `구분` is its seat; its execution variant is its `type:` label (`dev.md` Phase 1) —'
+hasfx "plan(X3): 비고 토큰" "$P4_PLAN" '(behavior-preserving); its Phase 5 table 비고 says `type:refactor — 동작 보존 흐름` (display only).'
+hasfx "analyze(X3): refactor 는 관찰 가능한 동작이 같을 때만" "$P4_AN" '**`type:refactor` holds only while the observable behavior stays the same** — when the AC require a new capability (a new event, API, screen or setting) or a behavior change, reclassify to `type:feature`'
+hasfx "analyze(X3): 판단 근거는 분석 댓글에" "$P4_AN" 'When the call is close, write its reason in the analysis comment (the same rule unattended — not a stakes judgment).'
+# X5 — invocation 은 호출 시작
+hasfx "spine(X5): 같은 호출의 시도는 같은 invocation" "$P4_SP" '같은 호출의 시도들은 같은 값 — 시도 시각이 아니라 호출 시작'
+# X7 — reviewDecision 빈 값은 미집계
+hasfx "retro(X7): 분모는 빈 값이 아닌 멤버 PR" "$P4_RETRO" '| 리뷰 변경 요청률 | `reviewDecision == CHANGES_REQUESTED` / `reviewDecision` 이 **빈 값이 아닌** 멤버 PR'
+hasfx "retro(X7): 모두 빈 값 → 리뷰 결정 미집계" "$P4_RETRO" '`리뷰 변경요청  리뷰 결정 미집계(리뷰 필수 규칙 없음 — reviewDecision 빈 값 <k>/<k>)`'
+hasfx "retro(X7): 일부 빈 값 → 결정 미집계 건수" "$P4_RETRO" '`<c>/<m> PR (<p>%) · 결정 미집계 <e>건`'
+lacksfx "retro(X7): 옛 분모(멤버 PR 전부) 제거" "$P4_RETRO" '| 리뷰 변경 요청률 | `reviewDecision == CHANGES_REQUESTED` / 멤버 PR | PR |'
+# X8 — 슬롯 포함은 채워졌을 때만
+hasfx "plan(X8): 템플릿 목표 <g>[(슬롯 포함)]" "$P4_PLAN" '· 목표 <g>[(슬롯 포함)] · 목표 외'
+hasfx "plan(X8): (슬롯 포함) 은 슬롯이 채워졌을 때만" "$P4_PLAN" '`(슬롯 포함)` 은 리팩토링 슬롯이 채워졌을 때만 쓴다'
+lacksfx "plan(X8): 옛 고정 문구 제거" "$P4_PLAN" '· 목표 <g>(슬롯 포함) · 목표 외'
+# X9 — 이전 스프린트·리뷰 워크트리 안내
+hasfx "review(X9): 체크아웃 밖 편집 단락" "$P4_RV" '> **⚠ When a requested edit happens outside this checkout** — the PR head is not the branch checked out here. **Never switch the human'"'"'s checkout to another branch.**'
+hasfx "review(X9): 이미 다른 워크트리에 있으면 거기서(묻고)" "$P4_RV" '**The head is already checked out in another worktree** (`git worktree list --porcelain` shows `branch refs/heads/<head>`'
+hasfx "review(X9): stack_sync 와 같은 refspec" "$P4_RV" '`git fetch origin +refs/heads/<head>:refs/remotes/origin/<head>` (the refspec `stack_sync.py` uses)'
+hasfx "review(X9): PR head 는 자기 호출로 읽음" "$P4_RV" '`gh pr view <pr> --repo <owner>/<repo> --json headRefOid --jq .headRefOid`'
+hasfx "run(X9): 다른 t 의 run 파일 미추적 판정 호출" "$P4_RUN" 'untracked by the same `git ls-files .claude/guild/<file>` call as `retro.md` Phase 7, one per'
+hasfx "retro(X9): 다른 t 의 run 파일 미추적 판정 호출" "$P4_RETRO" '`git ls-files .claude/guild/<file>` call as the run files above; a tracked one is not named) — the'
+hasfx "run(X15): prs_tail_open.jsonl 도 매 loop 새로" "$P4_RUN" '`prs.json`, `prs_tail_open.jsonl`,'
+hasfx "review(X9): 로컬 tip ≠ headRefOid 면 묻기" "$P4_RV" 'differs from that `headRefOid` → show both SHAs and ask the human'
+hasfx "review(X9): 임시 워크트리 경로" "$P4_RV" '`git worktree add <repo-parent>/.gld-<repo>-review-<pr> <head>`'
+hasfx "review(X9): 로컬 브랜치 없으면 -b" "$P4_RV" '`git worktree add -b <head> <repo-parent>/.gld-<repo>-review-<pr> origin/<head>`'
+hasfx "review(X9): 커밋·push 뒤에만 remove, never --force" "$P4_RV" 'both landed → `git worktree remove <path>` (never `--force`). **An edit left uncommitted or unpushed is not removed**'
+hasfx "review(X9): 이번 review 가 만든 것만 지움" "$P4_RV" 'Remove only a worktree this review created — an existing one is never touched.'
+hasfx "review(X9): Notes 한 줄" "$P4_RV" '- **Edits outside this checkout** — when the PR head is not checked out here'
+hasfx "retro(X9): 다른 정리 대상은 보고 전용" "$P4_RETRO" '- **다른 정리 대상 — report only, never a candidate** (the scope rule above holds; these are'
+hasfx "retro(X9): 이전 스프린트 state 호출" "$P4_RETRO" 'call, `gh issue view <t> --repo <owner>/<repo> --json state --jq .state`: `CLOSED` →'
+hasfx "retro(X9): CLOSED → --cleanup 안내" "$P4_RETRO" '`이전 스프린트 #t 워크트리 <k>개 — /gld sprint retro --cleanup <t>`; `OPEN` →'
+hasfx "retro(X9): OPEN · 실패는 손대지 않음" "$P4_RETRO" '`진행 중인 다른 스프린트 #t — 손대지 않음`; the call fails → `#t 상태 확인 불가 — 손대지 않음`.'
+hasfx "retro(X9): run 파일도 같은 state" "$P4_RETRO" '- `.claude/guild/.gld-sprint-<t>.{sh,board,window}` with `t` ≠ tracker and untracked (the same'
+hasfx "retro(X9): Guild 실행 밖 워크트리" "$P4_RETRO" '`Guild 실행 밖 워크트리 <path> (<branch>) — 필요 없으면 git worktree remove <path>`.'
+hasfx "retro(X9): 밖 워크트리가 잡은 머지 브랜치는 건너뜀" "$P4_RETRO" '"used by worktree") and reported: `<path> 가 잡고 있음 — 먼저 git worktree remove <path>`.'
+hasfx "retro(X9): step 3.2 도 건너뜀" "$P4_RETRO" 'local delete; the local tip test below decides. A branch step 1 found checked out in a'
+hasfx "retro(X9): 범위 단락 유지" "$P4_RETRO" '⚠ **Scope is this sprint and nothing else.** Only (a) worktrees inside this sprint'"'"'s container,'
+hasfx "run(X9): step 6 이전 스프린트 안내(보고 전용)" "$P4_RUN" 'Also one line each for what an **earlier sprint** left — report only, nothing is removed here:'
+hasfx "run(X9): run 파일은 자기 호출 ls -A" "$P4_RUN" 'run files `.gld-sprint-<t>.*` from its own call `ls -A .claude/guild/` (`t` ≠ this tracker;'
+hasfx "run(X9): state 호출" "$P4_RUN" '`gh issue view <t> --repo <owner>/<repo> --json state --jq .state` — `CLOSED` →'
+hasfx "run(X9): 실패 → 상태 확인 불가" "$P4_RUN" '`#t 상태 확인 불가 — 손대지 않음`.'
+hasfx "daily(X9): 다른 Guild 워크트리 수만 한 줄" "$P4_DAILY" '`다른 Guild 워크트리 <k>개 — /gld sprint retro 정리 단계가 안내합니다`; none → no line. daily never'
+hasfx "daily(X9): 새 호출 없음" "$P4_DAILY" '(step 3 — no new call): the `.gld-<repo>-*` entries outside this sprint'"'"'s container (an earlier'
+# X10 — 서술 숫자·예시 시점
+hasfx "retro(X10): 서술 속 숫자는 지표이거나 읽은 값" "$P4_RETRO" '**A number in the narrative'
+hasfx "retro(X10): 범위는 모든 경우를 덮는다" "$P4_RETRO" '(a time difference between run markers or events, …), and a range covers **every** case it'
+hasfx "retro(X10): 실측 반례 #1708" "$P4_RETRO" 'sums up — measured counterexample: #1708'"'"'s retro said *"rate limit 대기 회당 2.5~3.7h"* while the'
+hasfx "retro(X10): 읽지 않은 값은 숫자 없이" "$P4_RETRO" 'last wait was 9 minutes. A value not read is said without a number.'
+hasfx "retro(X10): 측정 예시 시점" "$P4_RETRO" 'Measured (2026-10-25 · 2026-10-21 — the window minimum grows as PRs are added):'
+# X11 — split 자식 엄격 순차 근거
+hasfx "dev(X11): 자식 간 의존 기록 없음" "$P4_DEV" 'Do not proceed to later children (their order is the intended dependency order and no child-to-child dependency is recorded — `_handoff.md` Section I — so a later child is never judged independent here).'
+hasfx "dev(X11): 남은 자식·따로 돌리기 안내" "$P4_DEV" '독립이라고 판단한 자식은 `/gld dev <c>` 로 따로 돌릴 수 있고, 부모 재개는 done 인 자식을 건너뜁니다'
+lacksfx "dev(X11): 옛 괄호 제거" "$P4_DEV" '(they may depend on it)'
+# X12 — 스택 깊이는 리더 몫
+hasfx "plan(X12): (a) 는 필요 여부만 — 깊이·비용은 리더" "$P4_PLAN" '(a) says whether one candidate needs the other — never whether it can be stacked: stack depth, the cap and squash-sync cost are the leader'"'"'s (Phase 4 cuts or linearizes); do not move a real dependency to `conditional:` or `soft:` for depth or cost.'
+hasfx "evolve(X12): degradation 렌즈 — 다른 역할의 판단을 습관으로" "$P4_EVO" '"does it move a judgment a Guild command assigns to another role (e.g. stack depth — the leader'"'"'s, `sprint/plan.md` Phase 4) into this role'"'"'s habit?"'
+# X13 — 빈 sprint-draft 디렉터리
+hasfx "plan(X13): rmdir 은 실제로 mv 한 실행에서만" "$P4_PLAN" '**Only in a run that moved files here** (never on sub-step 1'"'"'s silent skip), after the last'
+hasfx "plan(X13): rmdir 명령" "$P4_PLAN" '`mv`: `rmdir docs/specs/sprint-draft`, its own call — it fails on a directory that still'
+hasfx "plan(X13): rmdir 도 expected 문장에" "$P4_PLAN" '`mkdir`, `mv` (and Phase 2'"'"'s `rm`, and the `rmdir` below) are not on the template'"'"'s allow'
+hasfx "plan(X13): 실패·거절은 무시하고 계속" "$P4_PLAN" 'removed — *Never the directory*, above). **Whether it fails or is denied, ignore it and go'
+# X14 — 보드 자동 보관
+hasfx "board(X14): Guild 은 보관하지 않지만 프로젝트 자동 보관은 할 수 있음" "$P4_BOARD" 'values and Guild archives nothing — but a project'"'"'s own **Auto-archive items** workflow (set in'
+hasfx "board(X14): 실측 project 13" "$P4_BOARD" 'the project UI) can: measured project 13, closed members `isArchived: true` with no Guild call;'
+lacksfx "board(X14): 옛 문구 제거" "$P4_BOARD" 'nothing archives cards'
+# X15 — run 쪽 창 완전성
+hasfx "_sprint_dag(X15): run 쪽 완전성 단락" "$P4_DAG" '⚠ **The 200 windows are checked for completeness on the run side too** (0.98.4) — the 0.98.1 rule'
+hasfx "_sprint_dag(X15): 1000 은 run 당 한 번" "$P4_DAG" '**the 1000 read at most once per run**, into `prs_tail.json` (≈ 340 points; a failure retried at'
+hasfx "_sprint_dag(X15): stack_sync 토큰" "$P4_DAG" 'once; still incomplete or failed → a first line `window-incomplete <window min PR> <smallest member>`.'
+hasfx "run(X15): labels_extra 는 매 loop 새로" "$P4_RUN" 'The rest (`labels.json`, `labels_extra.jsonl`, `prs.json`, `prs_tail_open.jsonl`,'
+hasfx "run(X15): prs_tail.* 는 script 시작 때 지움" "$P4_RUN" '`_sprint_dag.md`) lives for the run only and **the script deletes it at its start** — it does'
+hasfx "daily(X15): window-incomplete 는 멤버 줄이 아님" "$P4_DAILY" '⚠ A line `window-incomplete <pr> <member>` is **not a member line** — the PR list it read (200,'
+hasfx "daily(X15): PR 표 위 한 줄 경고" "$P4_DAILY" '*"PR 목록이 #<member> 까지 닿지 않아 그보다 오래된 머지는 판정하지 못했습니다"*, and it takes no part in'
+hasfx "daily(X15): No output 판단에서 제외" "$P4_DAILY" 'the member annotations below or in the "No output" judgment.'
+hasfx "sync(X15): step 3 토큰 설명" "$P4_SYNC" 'A first line `window-incomplete <pr> <member>` is **not a member line**: the PR list (200, then'
+hasfx "sync(X15): step 4 보고 문구" "$P4_SYNC" '*"PR 목록이 #<member> 까지 닿지 않아 그보다 오래된 머지는 보지 못했습니다"* — it is not a member'
+hasfx "sync(X15): Return attention 에서 제외" "$P4_SYNC" 'line is not a status, nor is a `window-incomplete` line)'
+lacksfx "sync(X15): 옛 200 창 문장 제거" "$P4_SYNC" 'A merge older than the last 200 PRs is not seen'
+# X16 — 저장소 로컬 면제 한계
+hasfx "_invariants(X16): 로컬 refiner 의 레코드 한계" "$P4_INV" '- A repo-local refiner (`scripts/local/`) that suppresses on a record it reads is only as strong'
+hasfx "_invariants(X16): Bash 쓰기는 묻지 않음 · 승인자 검증 없음" "$P4_INV" 'as that record: `--guard-config` asks on Edit/Write, not on a Bash write, and nothing verifies'
+hasfx "_invariants(X16): dismissed.md 처럼 검토" "$P4_INV" 'an approver line — review such a record'"'"'s additions as you would `dismissed.md` (each'
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -4146,7 +4282,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=1730   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=1827   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

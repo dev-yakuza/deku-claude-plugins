@@ -1979,6 +1979,189 @@ w8eq "I(W8): ref without repository → kept (as before)" \
 w8eq "I(W8): uppercase owner/name → the same repository" \
   "$(w8 '[{"number":204,"state":"OPEN","headRefName":"feature/misc","closingIssuesReferences":[{"number":12,"repository":{"name":"App","owner":{"login":"ACME"}}}]}]')" "12:feature/misc"
 
+# (1f) 0.98.4 X15 — the run side's 200 windows. The region from the completeness helpers through
+#      refresh_dag_input is sourced as it is, against a fake gh whose `issue view` branch is
+#      SPLIT: `--json number,labels` is the label supplement, anything else the STATE read.
+#      Shape of the measured word_app window: carryover member #1097 below both windows.
+X15="$WORK/x15"; mkdir -p "$X15/bin" "$X15/dag"
+awk '/^# ── Completeness of the 200 windows/{f=1} f{print} f&&/^refresh_dag_input\(\) \{/{r=1} r&&/^}$/{exit}' \
+  "$TPL" > "$X15/fn.sh"
+cat > "$X15/bin/gh" <<'GHX'
+#!/bin/bash
+echo "$*" >> "$X_DIR/calls.txt"
+case "$*" in
+  "pr list"*"--limit 1000"*) [ -f "$X_DIR/fail_wide" ] && exit 1; cat "$X_DIR/wide.json" ;;
+  "pr list"*)                [ -f "$X_DIR/fail_200" ] && exit 1; cat "$X_DIR/w200.json" ;;
+  "issue list"*)             cat "$X_DIR/labels.json" ;;
+  "issue view"*"--json number,labels"*) cat "$X_DIR/iv_$3.txt" 2>/dev/null ;;
+  "issue view"*)             echo 'guild:done' ;;
+  "pr view"*)                cat "$X_DIR/pv_$3.json" 2>/dev/null ;;
+  *)                         echo '[]' ;;
+esac
+GHX
+chmod +x "$X15/bin/gh"
+x15_reset() {   # x15_reset — a fresh $D, the measured shape, no failure switches
+  rm -rf "$X15/dag" "$X15"/fail_* "$X15"/iv_* "$X15"/pv_*; mkdir -p "$X15/dag"; : > "$X15/calls.txt"
+  printf '[{"number":1097,"base_deps":[],"split":false},{"number":1500,"base_deps":[1097],"split":false}]' \
+    > "$X15/dag/members.json"
+  "$PY" - "$X15" <<'PYX'
+import json, os, sys
+d = sys.argv[1]
+win = [{"number": n, "state": "CLOSED", "headRefName": "chore/x-%d" % n, "baseRefName": "main",
+        "mergedAt": None, "reviewDecision": None, "closingIssuesReferences": []}
+       for n in range(1700, 1500, -1)]                      # 200 PRs, minimum #1501 ≥ #1097
+old = [{"number": 1098, "state": "MERGED", "headRefName": "feature/#1097-old", "baseRefName": "main",
+        "mergedAt": "2026-09-01T00:00:00Z", "reviewDecision": None,
+        "closingIssuesReferences": [{"number": 1097}]},
+       {"number": 1100, "state": "OPEN", "headRefName": "chore/open-a", "baseRefName": "main",
+        "mergedAt": None, "reviewDecision": None, "closingIssuesReferences": []},
+       {"number": 1101, "state": "CLOSED", "headRefName": "chore/closed-b", "baseRefName": "main",
+        "mergedAt": None, "reviewDecision": None, "closingIssuesReferences": []}]
+json.dump(win, open(os.path.join(d, "w200.json"), "w"))
+json.dump(win + old, open(os.path.join(d, "wide.json"), "w"))
+json.dump([{"number": 1500, "labels": []}], open(os.path.join(d, "labels.json"), "w"))
+PYX
+  printf '{"number":1100,"state":"OPEN","headRefName":"chore/open-a","baseRefName":"main","mergedAt":null,"reviewDecision":null,"closingIssuesReferences":[]}\n' \
+    > "$X15/pv_1100.json"
+}
+x15_run() {     # x15_run <refreshes> → the refreshes' stdout
+  X_DIR="$X15" PATH="$X15/bin:$PATH" D="$X15/dag" OWNER_REPO=acme/app PY="$PY" \
+    SUP="$X15/no-sup" DEFAULT_BRANCH=main "$SH" -c 'set -uo pipefail; . "$1"
+      i=0; while [ "$i" -lt "$2" ]; do refresh_dag_input || echo REFRESH-FAILED; i=$((i+1)); done' \
+    _ "$X15/fn.sh" "$1" 2>&1
+}
+x15_mode() { "$PY" "$HERE/../skills/gld/commands/atoms/sprint_dag.py" --input "$X15/dag/run.json" --mode "$1" 2>/dev/null; }
+x15_n() { grep -cF -- "$1" "$X15/calls.txt" | tr -d ' '; }
+[ -s "$X15/fn.sh" ] && grep -q '^refresh_dag_input() {' "$X15/fn.sh" \
+  && ok "X15: the completeness helpers and refresh_dag_input are cut as one region" \
+  || bad "X15: region cut" "fn.sh does not hold the helpers + refresh_dag_input"
+# (a) a member outside the label window that is needs-human → its dependant is dep-needs-human
+x15_reset
+printf '{"number":1097,"labels":[{"name":"guild:needs-human"}]}\n' > "$X15/iv_1097.txt"
+X15_OUT="$(x15_run 1)"
+w8eq "X15(a): out-of-window member's needs-human reaches terminal → dep-needs-human" \
+  "$(x15_mode blocked)" "1500 dep-needs-human:#1097"
+w8eq "X15(a): the supplement asks only for the member outside the window" \
+  "$(grep '^issue view' "$X15/calls.txt" | tr '\n' ' ')" "issue view 1097 --repo acme/app --json number,labels "
+# (a') the supplement answers rc 0 with text → dropped, as today — never dag-input-failed
+x15_reset
+printf 'guild:needs-human\n' > "$X15/iv_1097.txt"
+X15_OUT="$(x15_run 1)"
+case "$X15_OUT" in *REFRESH-FAILED*) bad "X15(a'): non-JSON supplement must not fail the refresh" "$X15_OUT" ;;
+  *) ok "X15(a'): a non-JSON supplement line does not fail the refresh" ;; esac
+w8eq "X15(a'): …and the member simply has no label (no dep-needs-human)" "$(x15_mode blocked)" ""
+grep -q 'dropped 1 unreadable supplement line' "$X15/dag/dag.err" \
+  && ok "X15(a'): the dropped line is counted in dag.err" || bad "X15(a'): dag.err note" "$(cat "$X15/dag/dag.err")"
+# (b) incomplete 200 window → exactly ONE 1000 read over three refreshes; the old MERGED dep → DEFAULT
+x15_reset
+printf '{"number":1097,"labels":[]}\n' > "$X15/iv_1097.txt"
+X15_OUT="$(x15_run 3)"
+w8eq "X15(b): --limit 1000 read exactly once in three refreshes" "$(x15_n '--limit 1000')" "1"
+w8eq "X15(b): the 200 reads go on every refresh" "$(x15_n '--limit 200 --json number,headRefName')" "3"
+w8eq "X15(b): an old MERGED dependency outside the window → DEFAULT" "$(x15_mode base | grep '^1500 ')" "1500 DEFAULT"
+"$PY" -c 'import json,sys; sys.exit(0 if len(json.load(open(sys.argv[1]))) == 200 else 1)' "$X15/dag/prs.json" \
+  && ok "X15(b): prs.json stays the 200 result (the tail is a separate file)" \
+  || bad "X15(b): prs.json" "was overwritten"
+case "$X15_OUT" in *WARN*) bad "X15(b): a 1000 window that reaches the member warns nothing" "$X15_OUT" ;;
+  *) ok "X15(b): a 1000 window that reaches the member warns nothing" ;; esac
+# (d) only the tail's OPEN entry pushed out of the window is refreshed with pr view (each refresh)
+w8eq "X15(d): pr view only for the OPEN tail entry, once per refresh" \
+  "$(grep '^pr view' "$X15/calls.txt" | awk '{print $3}' | sort | uniq -c | tr -s ' ' | tr '\n' ' ')" " 3 1100 "
+# (c) the 1000 read fails → prs.json keeps the 200 result, at most 2 retries, then ONE WARN
+x15_reset; : > "$X15/fail_wide"
+printf '{"number":1097,"labels":[]}\n' > "$X15/iv_1097.txt"
+X15_OUT="$(x15_run 5)"
+w8eq "X15(c): failed wide read → first try + 2 retries, no more" "$(x15_n '--limit 1000')" "3"
+w8eq "X15(c): one WARN, naming the smallest member and the failure" \
+  "$(printf '%s\n' "$X15_OUT" | grep -c 'WARN: PR 목록이 최소 멤버 #1097 에 닿지 않음(넓은 읽기 실패)' | tr -d ' ')" "1"
+[ ! -e "$X15/dag/prs_tail.json" ] && [ ! -e "$X15/dag/prs_tail.tmp" ] \
+  && ok "X15(c): no tail file from a failed read" || bad "X15(c): tail files" "$(ls "$X15/dag")"
+w8eq "X15(c): without the tail the old dependency stays unresolved" "$(x15_mode base | grep '^1500 ')" "1500 BLOCKED:dep-no-branch"
+# (c') the 200 read fails → no verdict, no 1000 read, no tail merge (today: no PRs)
+x15_reset; : > "$X15/fail_200"
+printf '[{"number":1098,"state":"MERGED","headRefName":"feature/#1097-old","mergedAt":"2026-09-01T00:00:00Z","closingIssuesReferences":[{"number":1097}]}]' \
+  > "$X15/dag/prs_tail.json"
+X15_OUT="$(x15_run 1)"
+w8eq "X15(c'): failed 200 read → no 1000 read" "$(x15_n '--limit 1000')" "0"
+w8eq "X15(c'): failed 200 read → the tail is not merged (no PRs)" \
+  "$("$PY" -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["prs"]))' "$X15/dag/run.json")" "0"
+# (c'') the script start deletes prs_tail.* — a re-run over a surviving $D reads 1000 again
+hasline "X15(c''): run start deletes the tail files" 'rm -f "$D/prs_tail.json" "$D/prs_tail.tmp" "$D/prs_tail.tries" "$D/prs_tail.warned"'
+# every `$D/prs_tail.<x>` the template names is in that start-of-run rm (a new marker cannot be forgotten)
+if "$PY" - "$TPL" <<'PYX'
+import re, sys
+s = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r'^rm -f "\$D/prs_tail\.json"(?:[^\n]*\\\n)*[^\n]*$', s, re.M)
+if not m:
+    sys.exit(1)
+named = set(re.findall(r'"\$D/(prs_tail\.[a-z]+)"', s))
+missing = named - set(re.findall(r'"\$D/(prs_tail\.[a-z]+)"', m.group(0)))
+if missing:
+    print(sorted(missing), file=sys.stderr)
+sys.exit(1 if missing or "prs_tail.openwarned" not in named else 0)
+PYX
+then ok "X15(c''): the start-of-run rm lists every prs_tail.* file the template uses (openwarned included)"
+else bad "X15(c''): start-of-run rm list" "a prs_tail.* file the template writes is not deleted at start"; fi
+if "$PY" - "$TPL" <<'PYX'
+import sys
+s = open(sys.argv[1], encoding="utf-8").read()
+a = s.find('rm -f "$D/prs_tail.json"'); b = s.find(': > "$D/board.txt"'); c = s.find("refresh_dag_input() {")
+sys.exit(0 if 0 <= b < a < c else 1)
+PYX
+then ok "X15(c''): …beside the board.txt truncation, before any refresh is defined"
+else bad "X15(c''): tail cleanup position" "not beside board.txt at run start"; fi
+x15_reset; printf '{"number":1097,"labels":[]}\n' > "$X15/iv_1097.txt"
+x15_run 1 >/dev/null
+: > "$X15/dag/prs_tail.openwarned"; : > "$X15/dag/prs_tail.warned"
+# the template's own start-of-run rm, cut out and run against this $D
+awk '/^rm -f "\$D\/prs_tail\.json"/{f=1} f{print} f&&!/\\$/{exit}' "$TPL" > "$X15/start_rm.sh"
+D="$X15/dag" "$SH" "$X15/start_rm.sh"
+w8eq "X15(c''): the template's start-of-run rm leaves no prs_tail.* behind" \
+  "$(cd "$X15/dag" && ls -A | grep -c '^prs_tail\.' | tr -d ' ')" "0"
+: > "$X15/calls.txt"; x15_run 1 >/dev/null
+w8eq "X15(c''): after the start-of-run cleanup the 1000 read happens again" "$(x15_n '--limit 1000')" "1"
+# a 1000 read that succeeds but still does not reach the smallest member → ONE WARN with its minimum
+x15_reset; printf '{"number":1097,"labels":[]}\n' > "$X15/iv_1097.txt"
+"$PY" -c 'import json,sys; json.dump([{"number":n,"state":"CLOSED","headRefName":"chore/y-%d" % n,"baseRefName":"main","mergedAt":None,"reviewDecision":None,"closingIssuesReferences":[]} for n in range(2500,1500,-1)], open(sys.argv[1],"w"))' "$X15/wide.json"
+X15_OUT="$(x15_run 3)"
+w8eq "X15: 1000 window still short of the member → WARN once with the 1000 window's minimum" \
+  "$(printf '%s\n' "$X15_OUT" | grep -c 'WARN: PR 목록이 최소 멤버 #1097 에 닿지 않음(1000 창 최소 #1501)' | tr -d ' '):$(x15_n '--limit 1000')" "1:1"
+# more than 20 OPEN tail entries outside the window → no pr view at all, ONE WARN
+x15_reset; printf '{"number":1097,"labels":[]}\n' > "$X15/iv_1097.txt"
+"$PY" - "$X15" <<'PYX'
+import json, os, sys
+d = sys.argv[1]
+w = json.load(open(os.path.join(d, "w200.json")))
+w += [{"number": n, "state": "OPEN", "headRefName": "chore/o-%d" % n, "baseRefName": "main",
+       "mergedAt": None, "reviewDecision": None, "closingIssuesReferences": []} for n in range(1200, 1221)]
+json.dump(w, open(os.path.join(d, "wide.json"), "w"))
+PYX
+X15_OUT="$(x15_run 2)"
+w8eq "X15: 21 OPEN tail entries → no pr view, one WARN" \
+  "$(x15_n 'pr view'):$(printf '%s\n' "$X15_OUT" | grep -c 'WARN: 창 밖 OPEN PR 21개' | tr -d ' ')" "0:1"
+# a complete window costs nothing extra
+x15_reset
+"$PY" -c 'import json,sys; p=sys.argv[1]; json.dump(json.load(open(p))[:150], open(p,"w"))' "$X15/w200.json"
+printf '[{"number":1097,"labels":[]},{"number":1500,"labels":[]}]' > "$X15/labels.json"
+x15_run 2 >/dev/null
+w8eq "X15: complete windows → no 1000 read, no supplement, no pr view" \
+  "$(x15_n '--limit 1000'):$(x15_n 'issue view'):$(x15_n 'pr view')" "0:0:0"
+
+# (1g) 0.98.4 X5 — the cost total is printed with two decimals, only when it is number-shaped.
+CST="$WORK/cost"; mkdir -p "$CST/run"
+awk '/^TOTAL_IN=0; TOTAL_OUT=0/{f=1} f{print} f&&/^esac$/{exit}' "$TPL" > "$CST/loop.sh"
+printf '{"type":"result","usage":{"input_tokens":1,"output_tokens":1},"total_cost_usd":0.3}\n' \
+  > "$CST/run/issue-1-T1-attempt1.log"
+printf '{"type":"result","usage":{"input_tokens":1,"output_tokens":1},"total_cost_usd":0.2000000000000001}\n' \
+  > "$CST/run/issue-2-T1-attempt1.log"
+w8eq "X5: two logs (0.3 + 0.2000000000000001) → 0.50" \
+  "$(RUNDIR="$CST/run" TIMESTAMP=T1 "$SH" -c 'set -uo pipefail; . "$1"; printf "%s" "$TOTAL_COST"' _ "$CST/loop.sh")" "0.50"
+awk '/^case "\$TOTAL_COST" in$/{f=1} f{print} f&&/^esac$/{exit}' "$TPL" > "$CST/case.sh"
+for X5V in "50.6617524999999938:50.66" "130.5578195000000137:130.56" ".5:0.50" "abc:abc" ":" "1.2.3:1.2.3"; do
+  w8eq "X5: TOTAL_COST [${X5V%%:*}] → [${X5V#*:}]" \
+    "$(TOTAL_COST="${X5V%%:*}" "$SH" -c 'set -uo pipefail; . "$1"; printf "%s" "$TOTAL_COST"' _ "$CST/case.sh")" "${X5V#*:}"
+done
+
 # (2) 컬럼 필드가 보드에 없으면 **보드를 끈다** — 없으면 쓰기마다 실패로 세고 22콜을 낭비했다.
 cat > "$I_WORK/ids_nocol.sh" <<'IDS'
 gh_ids() {
@@ -4634,7 +4817,7 @@ mw_case "T12f 깨진 JSON 은 실패" "[{\"id\": 1,\n" FAIL
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=361
+SUP_MIN_CHECKS=394
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

@@ -208,6 +208,12 @@ BOARD_STREAK_MAX=10      # ... and at this many, board_breaker turns the board o
                          # re-running (it is only removed when FAILED+INCOMPLETE+BLOCKED==0),
                          # so a stale `101 in_progress` from the previous run would make P1
                          # skip its write and leave the card wherever it was.
+rm -f "$D/prs_tail.json" "$D/prs_tail.tmp" "$D/prs_tail.tries" "$D/prs_tail.warned" \
+      "$D/prs_tail.openwarned"
+                         # ⚠ The once-per-run wide PR read (refresh_dag_input) — deleted for the
+                         # same reason: a re-run judges completeness afresh and takes a new
+                         # snapshot (measured word_app: 52 PRs between #972 and #1097 — the last
+                         # run's verdict and snapshot go stale).
 
 # ── Node-ID addressing (§7.5, v18) ───────────────────────────────────────────
 # ⚠ WHY: a name-addressed write costs **104 GraphQL points**; the node-ID form costs **1**.
@@ -215,7 +221,9 @@ BOARD_STREAK_MAX=10      # ... and at this many, board_breaker turns the board o
 # allows ~48 writes an hour — and a 12-member run makes several per member, before the failure
 # retry path triples it. The supervisor shares that budget with `refresh_dag_input`'s
 # `gh pr list`/`gh issue list`, so board cost turning into `dag-input-failed` was not
-# hypothetical. §7.5's old accounting counted gh invocations and never points.
+# hypothetical. (0.98.4: the 1000-PR read ≈ 340 points — at most once per run, only when the
+# 200 window is incomplete; the label supplement is 1 call per member outside the label window,
+# every refresh.) §7.5's old accounting counted gh invocations and never points.
 #
 # The preparation is paid ONCE per run: `project view` = 2 points, `field-list --limit 100` = 101,
 # `item-list --limit 200` = 201. After that every projection is 1 point.
@@ -411,7 +419,9 @@ project_set() {          # project_set <issue> <field> [value]   (omitted/empty 
 # edit → add → edit retry is gone. What makes a dead board expensive is not the call count but
 # that `board_col` caches only on success, so P1 re-fires on every retry (up to 12 split passes
 # and 6 rate-limit waits per member) and each attempt still spends GraphQL points. The
-# supervisor's own correctness calls (`gh pr list` / `gh issue list` in `refresh_dag_input`)
+# supervisor's own correctness calls (`gh pr list` / `gh issue list` in `refresh_dag_input`;
+# the 1000-PR read ≈ 340 points — at most once per run, only when incomplete; the label
+# supplement 1 call per out-of-window member per refresh)
 # share that budget, so board pressure can turn into a real `dag-input-failed`, which
 # terminal-blocks every dependant. So: after N consecutive COLUMN failures, stop calling. The
 # counters and the reason survive in the ledger.
@@ -1116,16 +1126,138 @@ hb_sleep() {
 # outside those rules. That is what makes this plumbing possible at all — the design's
 # `--input <path>` interface has no shell-side producer otherwise.
 
+# ── Completeness of the 200 windows (0.98.4 X15) ─────────────────────────────
+# The 0.98.1 rule (retro/daily): the PR window is complete when `count < limit` or its smallest
+# PR number is below the smallest member — premises: one number counter for Issues and PRs, a
+# PR is created after the Issue it closes, same-repo refs. Measured word_app: Issue window
+# minimum #1420, PR window minimum #972, carryover member #1097 — outside the LABEL window, so
+# its `guild:needs-human` never reached `terminal` and `dep-needs-human` did not fire.
+# Judged on every refresh (no extra call). ⚠ Only the 1000 read is once per run: refresh runs
+# several times per member, and 1000 PRs every time (≈ 340 points) would drain the hourly
+# budget into `dag-input-failed`.
+PR_FIELDS=number,headRefName,baseRefName,state,mergedAt,reviewDecision,closingIssuesReferences
+PR_TAIL_MAX_TRIES=3      # the first wide read + at most 2 retries per run (prs_tail.tries)
+PR_TAIL_OPEN_MAX=20      # OPEN tail entries refreshed one `pr view` each; more → snapshot + WARN
+
+pr_window_verdict() {    # pr_window_verdict <prs-file> <limit> → "complete" | "incomplete <wmin> <mmin>"
+  "$PY" - "$1" "$2" "$D/members.json" 2>/dev/null <<'PY' || echo complete
+import json, sys
+try:
+    prs = json.load(open(sys.argv[1]))
+    limit = int(sys.argv[2])
+    mmin = min(int(m["number"]) for m in json.load(open(sys.argv[3])))
+    nums = [p["number"] for p in prs
+            if isinstance(p, dict) and isinstance(p.get("number"), int)]
+except Exception:
+    print("complete"); sys.exit(0)
+if len(prs) < limit or not nums or min(nums) < mmin:
+    print("complete")
+else:
+    print("incomplete %d %d" % (min(nums), mmin))
+PY
+}
+
+pr_tail_warn() {         # pr_tail_warn <reason> <smallest member> — once per run
+  [ -f "$D/prs_tail.warned" ] && return 0
+  : > "$D/prs_tail.warned"
+  echo "[sprint] WARN: PR 목록이 최소 멤버 #$2 에 닿지 않음($1) — 그보다 오래된 멤버 PR 은 매핑에서 빠질 수 있음"
+}
+
+# Called only after a SUCCESSFUL 200 read. The wide read goes to its own file and replaces
+# nothing: `prs.json` stays the 200 result, the python merges `prs_tail.json` under it.
+pr_tail_refresh() {
+  local v tries n open_nums count
+  if [ ! -f "$D/prs_tail.json" ]; then
+    v="$(pr_window_verdict "$D/prs.json" 200)"
+    case "$v" in incomplete*) ;; *) return 0 ;; esac
+    tries="$(cat "$D/prs_tail.tries" 2>/dev/null || echo 0)"
+    case "$tries" in ''|*[!0-9]*) tries=0 ;; esac
+    [ "$tries" -lt "$PR_TAIL_MAX_TRIES" ] || return 0
+    tries=$((tries + 1)); echo "$tries" > "$D/prs_tail.tries"
+    if gh pr list --repo "$OWNER_REPO" --state all --limit 1000 --json "$PR_FIELDS" \
+         > "$D/prs_tail.tmp" 2>/dev/null \
+       && "$PY" -c 'import json,sys; sys.exit(0 if isinstance(json.load(open(sys.argv[1])), list) else 1)' \
+         "$D/prs_tail.tmp" 2>/dev/null; then
+      mv "$D/prs_tail.tmp" "$D/prs_tail.json"
+      v="$(pr_window_verdict "$D/prs_tail.json" 1000)"
+      case "$v" in incomplete*) set -- $v; pr_tail_warn "1000 창 최소 #$2" "$3" ;; esac
+    else
+      rm -f "$D/prs_tail.tmp"
+      if [ "$tries" -ge "$PR_TAIL_MAX_TRIES" ]; then set -- $v; pr_tail_warn "넓은 읽기 실패" "$3"; fi
+      return 0
+    fi
+  fi
+  # A tail entry pushed out of the 200 window that is still OPEN can change; MERGED/CLOSED cannot.
+  open_nums="$("$PY" - "$D" 2>/dev/null <<'PY' || true
+import json, os, sys
+d = sys.argv[1]
+try:
+    win = set(p["number"] for p in json.load(open(os.path.join(d, "prs.json")))
+              if isinstance(p, dict) and isinstance(p.get("number"), int))
+    tail = json.load(open(os.path.join(d, "prs_tail.json")))
+except Exception:
+    sys.exit(0)
+for p in tail:
+    if (isinstance(p, dict) and isinstance(p.get("number"), int) and p["number"] not in win
+            and not p.get("mergedAt") and str(p.get("state", "")).upper() == "OPEN"):
+        print(p["number"])
+PY
+)"
+  [ -n "$open_nums" ] || return 0
+  count="$(printf '%s\n' "$open_nums" | wc -l | tr -d ' ')"
+  if [ "$count" -gt "$PR_TAIL_OPEN_MAX" ]; then
+    if [ ! -f "$D/prs_tail.openwarned" ]; then
+      : > "$D/prs_tail.openwarned"
+      echo "[sprint] WARN: 창 밖 OPEN PR ${count}개 — ${PR_TAIL_OPEN_MAX}개 초과라 갱신하지 않고 run 시작 스냅숏을 씁니다"
+    fi
+    return 0
+  fi
+  for n in $open_nums; do
+    gh pr view "$n" --repo "$OWNER_REPO" --json "$PR_FIELDS" >> "$D/prs_tail_open.jsonl" 2>/dev/null || true
+    echo >> "$D/prs_tail_open.jsonl"
+  done
+}
+
+# Labels: the window stays as it is; a member missing from it is read on its own, every refresh
+# (labels change — never cached). Only after a SUCCESSFUL list read: a failed list would turn
+# into one call per member, on a budget that just failed.
+labels_supplement() {
+  local n missing
+  missing="$("$PY" - "$D" 2>/dev/null <<'PY' || true
+import json, os, sys
+d = sys.argv[1]
+try:
+    have = set(int(it["number"]) for it in json.load(open(os.path.join(d, "labels.json"))))
+    members = [int(m["number"]) for m in json.load(open(os.path.join(d, "members.json")))]
+except Exception:
+    sys.exit(0)
+for n in members:
+    if n not in have:
+        print(n)
+PY
+)"
+  for n in $missing; do
+    gh issue view "$n" --repo "$OWNER_REPO" --json number,labels >> "$D/labels_extra.jsonl" 2>/dev/null || true
+    echo >> "$D/labels_extra.jsonl"
+  done
+}
+
 refresh_dag_input() {
+  local prs_ok=1 labels_ok=1
+  : > "$D/labels_extra.jsonl"; : > "$D/prs_tail_open.jsonl"     # rewritten every refresh
   gh pr list --repo "$OWNER_REPO" --state all --limit 200 \
     --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,closingIssuesReferences \
-    > "$D/prs.json" 2>/dev/null || printf '[]' > "$D/prs.json"
+    > "$D/prs.json" 2>/dev/null || { printf '[]' > "$D/prs.json"; prs_ok=0; }
   gh issue list --repo "$OWNER_REPO" --state all --limit 200 --json number,labels \
-    > "$D/labels.json" 2>/dev/null || printf '[]' > "$D/labels.json"
+    > "$D/labels.json" 2>/dev/null || { printf '[]' > "$D/labels.json"; labels_ok=0; }
+  # ⚠ A failed 200 read is `[]`, which `length 0 < 200` would call complete — it is not: no
+  # verdict, no tail merge (GLD_PRS_OK=0), today's behaviour (no PRs).
+  if [ "$prs_ok" = 1 ]; then pr_tail_refresh || true; fi
+  if [ "$labels_ok" = 1 ]; then labels_supplement || true; fi
   git -C "$SUP" branch --format='%(refname:short)' > "$D/branches.txt" 2>/dev/null || : > "$D/branches.txt"
   [ -f "$D/failed.txt" ] || : > "$D/failed.txt"
   [ -f "$D/paused.txt" ] || : > "$D/paused.txt"
-  "$PY" - "$D" "$DEFAULT_BRANCH" "$OWNER_REPO" 2>"$D/dag.err" <<'PY' || return 1
+  GLD_PRS_OK="$prs_ok" "$PY" - "$D" "$DEFAULT_BRANCH" "$OWNER_REPO" 2>"$D/dag.err" <<'PY' || return 1
 import json, os, sys
 d, default_branch = sys.argv[1], sys.argv[2]
 this_repo = (sys.argv[3] if len(sys.argv) > 3 else "").lower()
@@ -1144,6 +1276,64 @@ if not isinstance(members, list):
              "run.md Phase 3 step 1." % type(members).__name__)
 prs_raw = json.load(open(os.path.join(d, "prs.json")))
 labels_raw = json.load(open(os.path.join(d, "labels.json")))
+
+# 0.98.4 X15 — the supplements. Read LINE BY LINE with try/except, keeping only objects with an
+# integer `number`: a gh that answers rc 0 with text (a test's fake, an error page) must not turn
+# into `|| return 1` → `dag-input-failed` for every member — it is dropped, as if never read.
+def read_objs(path):
+    out, dropped = [], 0
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError:
+        return out, 0
+    dec, i = json.JSONDecoder(), 0
+    while i < len(text):
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if i >= len(text):
+            break
+        try:
+            obj, i = dec.raw_decode(text, i)
+        except ValueError:
+            k = text.find("\n", i)
+            i = len(text) if k < 0 else k + 1
+            dropped += 1
+            continue
+        for o in (obj if isinstance(obj, list) else [obj]):
+            if (isinstance(o, dict) and isinstance(o.get("number"), int)
+                    and not isinstance(o.get("number"), bool)):
+                out.append(o)
+            else:
+                dropped += 1
+    return out, dropped
+
+dropped = 0
+# The wide-read snapshot, merged only after a successful 200 read — the 200 window wins on the
+# same number; an OPEN entry refreshed by `pr view` this refresh replaces its snapshot.
+if os.environ.get("GLD_PRS_OK") == "1" and isinstance(prs_raw, list):
+    tail, n1 = read_objs(os.path.join(d, "prs_tail.json"))
+    fresh, n2 = read_objs(os.path.join(d, "prs_tail_open.jsonl"))
+    dropped += n1 + n2
+    fresh_by = dict((o["number"], o) for o in fresh)
+    seen = set(p.get("number") for p in prs_raw if isinstance(p, dict))
+    for o in tail:
+        if o["number"] not in seen:
+            prs_raw.append(fresh_by.get(o["number"], o))
+            seen.add(o["number"])
+# Labels of members outside the label window — never over one the window has.
+if isinstance(labels_raw, list):
+    extra, n3 = read_objs(os.path.join(d, "labels_extra.jsonl"))
+    dropped += n3
+    have = set(it.get("number") for it in labels_raw if isinstance(it, dict))
+    for o in extra:
+        labs = o.get("labels")
+        if (o["number"] not in have and isinstance(labs, list)
+                and all(isinstance(l, dict) and isinstance(l.get("name"), str) for l in labs)):
+            labels_raw.append({"number": o["number"], "labels": labs})
+            have.add(o["number"])
+if dropped:
+    print("refresh_dag_input: dropped %d unreadable supplement line(s) — not a failure" % dropped,
+          file=sys.stderr)
 branches = [l.strip() for l in open(os.path.join(d, "branches.txt")) if l.strip()]
 
 member_nums = set(int(m["number"]) for m in members)
@@ -2270,6 +2460,13 @@ for L in "$RUNDIR"/issue-*-"${TIMESTAMP}"-attempt*.log; do
     TOTAL_COST=$(echo "$TOTAL_COST + ${COST:-0}" | bc 2>/dev/null || echo "$TOTAL_COST")
   }
 done
+# Two decimals, only when the sum is number-shaped. `bc` prints its scale as it comes
+# (measured `50.6617524999999938`) and drops the leading zero below 1 (`.5`); `printf '%.2f' abc`
+# prints `0.00` and exits 1, so a `|| fallback` would print `0.00abc` — hence the shape check.
+case "$TOTAL_COST" in
+  ''|.|*[!0-9.]*|*.*.*) ;;                                  # not a number → left as it is
+  *) TOTAL_COST=$(LC_ALL=C printf '%.2f' "$TOTAL_COST") ;;  # `.5` included
+esac
 
 echo "============================================================"
 echo "  Guild Sprint #$TRACKER — run complete"

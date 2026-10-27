@@ -301,13 +301,25 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    would keep blocking that epic's dependants after the human resolved the child. It is not
    written to `failures.jsonl` (no new class) — the run marker's `paused_issues` is its record.
    ⚠ **No other dag file needs this** — `failed.txt` and `paused.txt` are the two that
-   accumulate. The rest (`labels.json`, `prs.json`, `branches.txt`,
-   `cand.txt`, `run.json`, …) are rewritten every loop, and `comp_failed.txt`/
-   `comp_incomplete.txt` are truncated by the script at completion time.
+   accumulate. The rest (`labels.json`, `labels_extra.jsonl`, `prs.json`, `prs_tail_open.jsonl`,
+   `branches.txt`, `cand.txt`, `run.json`, …) are rewritten every loop, and `comp_failed.txt`/
+   `comp_incomplete.txt` are truncated by the script at completion time. `prs_tail.*`
+   (`.json`, `.tmp`, `.tries`, `.warned`, `.openwarned` — the once-per-run wide PR read,
+   `_sprint_dag.md`) lives for the run only and **the script deletes it at its start** — it does
+   not accumulate either.
 6. **Inventory worktrees.** `git worktree list --porcelain` — note which member worktrees exist,
    which are registered-but-missing, and whether any branch is held by a **preserved worktree
    from an earlier sprint** (containers are keyed by tracker, so that is possible and will
    otherwise surface as a confusing refusal mid-run). Report those to the human now.
+   Also one line each for what an **earlier sprint** left — report only, nothing is removed here:
+   a `.gld-<repo>-sprint-<t>` container (`t` ≠ this tracker) from the same porcelain output, and
+   run files `.gld-sprint-<t>.*` from its own call `ls -A .claude/guild/` (`t` ≠ this tracker;
+   untracked by the same `git ls-files .claude/guild/<file>` call as `retro.md` Phase 7, one per
+   file — a tracked one is not named). One state call per distinct `t` across both:
+   `gh issue view <t> --repo <owner>/<repo> --json state --jq .state` — `CLOSED` →
+   `이전 스프린트 #t 워크트리 <k>개 — /gld sprint retro --cleanup <t>` (run files only → the same
+   `--cleanup <t>` line); `OPEN` → `진행 중인 다른 스프린트 #t — 손대지 않음`; the call fails →
+   `#t 상태 확인 불가 — 손대지 않음`.
 
 ## Phase 2 — Permissions for child sessions: nothing to write, and say why
 

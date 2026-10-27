@@ -94,6 +94,10 @@ The commit gate constrains commits made through git **in this working copy**:
 - It **does not** inspect history that is already written, or anything pushed elsewhere.
 - Its off-switch and control files are guarded by an `ask`, not a block (`--guard-config`):
   turning the gate off is a legitimate action that should be a human's, on the record.
+- A repo-local refiner (`scripts/local/`) that suppresses on a record it reads is only as strong
+  as that record: `--guard-config` asks on Edit/Write, not on a Bash write, and nothing verifies
+  an approver line — review such a record's additions as you would `dismissed.md` (each
+  suppression is still logged as `suppressed-by-<module>`).
 
 Its **firing log** (what evolve's rule scorecard and audit's rule health count) records each
 commit once, not exactly: a PreToolUse pass that does not block parks its rows as *pending*; the

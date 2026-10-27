@@ -174,6 +174,10 @@ working tree changes:
 ```bash
 python3 <<SKILL_DIR>>/commands/atoms/stack_sync.py --tracker <tracker> --check
 ```
+⚠ A line `window-incomplete <pr> <member>` is **not a member line** — the PR list it read (200,
+then 1000) did not reach the smallest member. It is one warning above the PR table,
+*"PR 목록이 #<member> 까지 닿지 않아 그보다 오래된 머지는 판정하지 못했습니다"*, and it takes no part in
+the member annotations below or in the "No output" judgment.
 Each line annotates that member's PR row: `needs-sync` → *"⚠ 하단 머지됨 — `/gld sprint sync`"*
 (its actions ending in `held` → add *"동기화 후 `/gld dev <n>` · `gh pr ready <pr>`"*);
 `stale` → **낡은 base** (rule below); `diverged` → *"#<dep>의 작업이 기본 브랜치에 온전히 남아 있지 않습니다 — 사람이 판단"*; `conflict` → *"동기화 충돌 — 사람이 따라잡기"*; `draft-held` → *"`/gld dev <n>` 후 `gh pr ready <pr>`"*;
@@ -414,6 +418,11 @@ Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limi
   Only untracked **docs** = the known gap where `_execute_spine.md` Step 3.5b deliberately leaves a
   tech-writer's ADR uncommitted. Report the distinction; never judge it automatically and never
   auto-commit or delete (Step 3.5a forbids the blanket revert; Step 3.5b withdrew the auto-commit).
+- **Other Guild worktrees — a count only.** From the same `git worktree list --porcelain` output
+  (step 3 — no new call): the `.gld-<repo>-*` entries outside this sprint's container (an earlier
+  sprint's, a `review` one). Any → one line under ▎보존된 워크트리,
+  `다른 Guild 워크트리 <k>개 — /gld sprint retro 정리 단계가 안내합니다`; none → no line. daily never
+  names or judges them (`retro.md` Phase 7 lists them).
 - **Heartbeat age with `state`.** A ~115-minute rate-limit wait is normal; age alone would read
   as a dead run. ⚠ Render the `state` token as the supervisor writes it and translate for the
   human beside it — the shapes are `running` · `installing-deps` ·
