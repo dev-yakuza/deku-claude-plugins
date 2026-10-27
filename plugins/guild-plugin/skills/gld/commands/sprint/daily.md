@@ -157,6 +157,17 @@ say *"둘 중 하나를 닫으면 풀립니다"*; it is not a failure and needs 
 `base 의존` chain**, not from PR creation order — a child PR takes its parent's place in it
 (step 5).
 
+**The cause of each pause** — one call per member waiting on a human (`guild:needs-human`) and per
+`guild:needs-human` child of S (step 5's ▎사람 대기), each its own Bash call, no pipe or
+redirection (substitute `<n>` literally):
+```bash
+gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '.[] | select((.body // "") | contains("<!-- guild:needs-human -->")) | .body | [splits("\n")] | (map(select(test("^(defect|ambiguity|env):"))) | first) // (map(select(test("^## "))) | first) // "(원인 줄 없음)"'
+```
+One line per `<!-- guild:needs-human -->` comment — its cause line (`defect:` / `ambiguity:` /
+`env:`, `_handoff.md` Section H), else its first `## ` heading, else `(원인 줄 없음)`; the **last
+line printed** is the latest pause's cause. Step 5 groups by it (measured: #555
+`defect: CI 인프라(결제) …`; #562 → the heading fallback).
+
 **3b. Squash stacks — only when 상한 근거 is `squash-sync` or `human-override`** (`_sprint_dag.md`
 Section G), one more call. It fetches into `refs/remotes/` (and objects) only — no branch, PR or
 working tree changes:
@@ -309,6 +320,19 @@ A child that is `CLOSED` and has a same-repo `MERGED` PR in step 3's list whose 
 (the exclusion in step 5's 사람 대기 definition) gets, **instead of** that line:
 `#e 자식 #c 는 머지됐지만 done 이 아닙니다 — 다음 run 이 정리합니다(할 일 없음)` — a `/gld resume <c>`
 on a closed Issue would do nothing (qa finds the PR with `--state open` only).
+
+**Same-cause pauses are grouped** (the cause lines from step 3): members and children whose latest
+cause is `env:` with the same key share **one line**:
+`#a · #b · #c — env ci-blocked: <대표 한 줄> → 원인 해결 후 각각 <그 멤버의 한 줄이 쓸 명령>` — the
+grouped line uses **exactly the command each one's own line would use**: an ordinary member
+`/gld dev <n>` (as `#103` below), a child `/gld resume <c>` (the child line above); both continue
+from the label (`resume.md`, `dev` Phase 1), so the group never disagrees with the single lines.
+Only when some member downstream is blocked as `dep-needs-human` on one of them, add
+`그 뒤 막힌 #q… 는 sprint run 재실행으로` — a needs-human member is terminal in the run
+(`sprint-supervisor.sh`, `run.md`, `sprint_dag.py` `TERMINAL_BLOCKING`), so a re-run does not run
+it again; it only reaches what waited on it. Everything else stays one line each, as below.
+(Measured: 5 of #563's 6 pauses were one cause — the PR CI jobs never started over a billing
+limit — for three sprints running, rendered as five unrelated lines.)
 
 Guild hides children from the board (D8), so without the split-parent line the parent sits in
 `In review` with no PR to review and a `split-children` token a human has no way to decode.
@@ -567,4 +591,4 @@ markers.
   one `git`; only when a count says so, the members re-read and one child search per
   `guild:done` / `guild:children` member; only when the PR list's 완전성 판정 fails at 200, the PR
   re-read at `--limit 500`; plus step 3b's one call on a
-  squash-stack sprint. A missing source renders as "없음", not an error.
+  squash-stack sprint; plus one cause call per member and child waiting on a human (사람 대기 멤버·자식마다 원인 한 호출 — step 3). A missing source renders as "없음", not an error.

@@ -525,6 +525,23 @@ retry.
 | `recorded` | not retried (an out-of-budget `MAJOR`, or a concern carried to the PR) |
 | `dismissed` | the leader judged it wrong — **reason required** |
 
+**One line per auditor finding, the token first — the line shape is fixed** (`sprint retro`
+counts these lines by position, `retro.md` Phase 2):
+
+```
+- <looped-back|fixed|recorded|dismissed> · <severity> · <axis> · <file:line> — <finding>[ — <reason>]
+```
+
+The token comes **right after `- ` at column 0**, and is written **bare** — no backticks, no
+`**`. ` · ` and ` — ` are separators for the human reader, not machine tokens (Section K's
+ASCII requirement covers the token only — `_handoff.md` Section K). The re-statement lines
+(below) and the carried-forward lines (above) take the same shape. ⚠ **The role-axis line
+starts `role-axis: <role> <verdict> — <reason>` and never uses the four tokens** — describe its
+outcome in words. Measured before this rule: a role-axis line ending `→ fixed` /
+`→ looped-back` was counted as an auditor disposition (word_app #1700: all 4 `fixed` and 2
+`looped-back` were the role axis), and a finding id containing `-dismissed-` was counted as a
+dismissal (#349).
+
 ⚠ **Earlier blocks are never edited, so a resolution is recorded by the NEXT block, and a finding's disposition is its most recent one across all blocks.** When an attempt opens, re-state **every** finding the previous block left at `looped-back`, choosing by what is true now — not by the re-scan alone:
 
 - the re-scan no longer reports it → **`fixed`**;
@@ -646,11 +663,35 @@ Rows come from the Step 2 ledger, in this order — a changed comparison setting
 
 Same in-place-replacement rule as the auditor block below (markers are the anchor, heading text in `config.language`). ⚠ Merging out of order is not prevented by GitHub's UI — this notice and `daily`'s ordered list are the only defences, except for a `squash-sync` draft, which GitHub holds until `sync` readies it. The PR is where the **human reviewer** (M1's external reviewer) approves. **Resume-safe**: if a PR for this branch already exists (interrupted prior run), PATCH it rather than opening a duplicate. **Unattended (`GLD_UNATTENDED=1`)**: append a `## 무인 결정 로그 (GLD_UNATTENDED)` section to the PR body aggregating the leader-proxy gate decisions recorded in the analyze/design outputs (chosen interpretation · charter rationale · "사람 확인 요") — `_handoff.md` Section H — so the deferred human gate (PR review) is informed, not blind.
 
+**Central-owned files section (only when this branch changes one)** — a central-owned file (`/gld update` refreshes it from the plugin — `sprint/plan.md`, *Central-owned files*) changed here is otherwise visible only in the commit gate's `info:central-managed` note, printed to whichever session committed (usually the developer sub-agent). Measured: #586 changed `gates/rules/verification.md` that its body never named, and nothing on the PR said so. `<mb>` is 3.5a's value and does not reach this step, so **resolve it again** — its own Bash call:
+
+```bash
+git merge-base <base> HEAD
+```
+
+(`<base>` = this PR's base — the dependency's branch when stacked; the same value this step targets.) It fails → once more with `origin/<default-branch>` as `<base>`; that fails too → skip the check and put one line in the PR body: `중앙 관리 파일 점검 불가(merge-base 없음)`. Then, its own Bash call, with the literal `<mb>`:
+
+```bash
+git diff --name-only <mb>..HEAD -- .claude/guild/gates/scripts/gate_precommit.py .claude/guild/gates/rules/secrets.md .claude/guild/gates/rules/verification.md
+```
+
+Empty → no section. Otherwise add, one line per file, the gate's own wording per file:
+
+```markdown
+<!-- guild:central-owned -->
+## 중앙 관리 파일 변경
+- `.claude/guild/gates/scripts/gate_precommit.py` — /gld update 가 갱신하는 중앙 관리 파일입니다 — 기존 코드 수정은 다음 update 가 덮어쓰자고 제안하고, 새 check 추가일 때만 scripts/local/ 이관을 묻습니다. 플러그인 저장소(plugin.json 의 repository)에서 고칠 일인지 확인하세요.
+- `.claude/guild/gates/rules/<secrets.md|verification.md>` — 다음 /gld update 가 게이트 스크립트를 갱신할 때 함께 덮어씁니다. 플러그인 저장소(plugin.json 의 repository)에서 고칠 일인지 확인하세요.
+<!-- /guild:central-owned -->
+```
+
+Same in-place-replacement rule as the other sections (the PATCH path below replaces, appends or removes it). **Not a block and not needs-human** — a local change can be legitimate (#349); this is disclosure for the reviewer.
+
 **Auditor section (a reviewer-facing copy of the Step 4 Issue record; mandatory whenever that record holds at least one finding — any block other than `findings: none` / `scan: none`; NOT keyed to whether *this* invocation's auditor found anything)** — add a marker-delimited **"external auditor (execute)" section** to the PR body — the heading text itself in `config.language` (`## 외부 감사자 (execute)` on a `ko` repo), since the stable anchor is the HTML marker, not the words — wrapped in `<!-- guild:auditor:pr -->` … `<!-- /guild:auditor:pr -->` so a later write replaces that block in place instead of leaving two contradictory copies (Step 5 already PATCHes an existing PR rather than opening a duplicate, and execute can be re-entered from test/qa).
 
 ⚠ **This read-then-render sequence applies when a PR ALREADY EXISTS** (the resume-safe PATCH path, and any later re-entry). **When Step 5 is creating the PR**, there is no body to read and no `<PR_NUM>` yet: compose the body with this section already in it and pass it to `gh pr create --body-file`. Do not run the read on that path — "neither available" would be literally true and would pause a healthy run over a body that does not exist yet.
 
-⚠ **On the PATCH path, read the current PR body first — this is mandatory, not optional.** `gh pr edit --body-file` **REPLACES the entire PR body**; it does not patch it (the same hazard `qa.md` Step 2.5 documents for its `<!-- guild:manual-qa -->` section). Writing this section without reading first would silently destroy whatever else is in the body — qa's Manual Test Checklist, and the `## 무인 결정 로그 (GLD_UNATTENDED)` block written earlier in this very step (INV4). So, in order: (1) `gh pr view <PR_NUM> --repo <owner>/<repo> --json body --jq .body` (its own Bash call) — ⚠ **and check that read for truncation before using it**: a long PR body comes back as a preview, and "everything outside the markers preserved byte-for-byte" then silently drops the tail, destroying exactly what this read exists to protect. Truncated → read the persisted full-output file the tool result names; neither available → do **not** write the body: `NEEDS_HUMAN: could not read #<N>'s PR body in full` (attended) / `guild:needs-human` label + a `<!-- guild:needs-human -->` comment + `OK PAUSE: needs-human — PR body unreadable` (unattended); (2) render the full new body = the returned body with **only** the `<!-- guild:auditor:pr -->` block and the `<!-- guild:visual-changes -->` block replaced or appended (the visual block **removed** when Step 2's ledger is now `none` — a rewrite reverted after a loop-back must not stay listed), everything outside the markers preserved byte-for-byte; (3) write it with the temp-file pattern.
+⚠ **On the PATCH path, read the current PR body first — this is mandatory, not optional.** `gh pr edit --body-file` **REPLACES the entire PR body**; it does not patch it (the same hazard `qa.md` Step 2.5 documents for its `<!-- guild:manual-qa -->` section). Writing this section without reading first would silently destroy whatever else is in the body — qa's Manual Test Checklist, and the `## 무인 결정 로그 (GLD_UNATTENDED)` block written earlier in this very step (INV4). So, in order: (1) `gh pr view <PR_NUM> --repo <owner>/<repo> --json body --jq .body` (its own Bash call) — ⚠ **and check that read for truncation before using it**: a long PR body comes back as a preview, and "everything outside the markers preserved byte-for-byte" then silently drops the tail, destroying exactly what this read exists to protect. Truncated → read the persisted full-output file the tool result names; neither available → do **not** write the body: `NEEDS_HUMAN: could not read #<N>'s PR body in full` (attended) / `guild:needs-human` label + a `<!-- guild:needs-human -->` comment + `OK PAUSE: needs-human — PR body unreadable` (unattended); (2) render the full new body = the returned body with **only** the `<!-- guild:auditor:pr -->` block and the `<!-- guild:visual-changes -->` block replaced or appended (the visual block **removed** when Step 2's ledger is now `none` — a rewrite reverted after a loop-back must not stay listed), and likewise the `<!-- guild:central-owned -->` block (removed when its diff is now empty), everything outside the markers preserved byte-for-byte; (3) write it with the temp-file pattern.
 
 The section contains:
 

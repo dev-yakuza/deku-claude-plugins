@@ -144,9 +144,21 @@ def parse_members(body):
     return out
 
 
-def prs_by_issue(prs_raw, members):
+def same_repo(ref, repo):
+    """A closing reference of THIS repository (0.98.3 W8). A ref that carries `repository` and
+    names another repo (owner/name, case-insensitive) is not; a ref without `repository` is kept
+    (the pre-0.98.3 behaviour — gh's real responses always carry it)."""
+    other = ref.get("repository") if isinstance(ref, dict) else None
+    if not isinstance(other, dict) or not repo:
+        return True
+    name = "%s/%s" % (((other.get("owner") or {}).get("login") or ""), other.get("name") or "")
+    return name.lower() == repo.lower()
+
+
+def prs_by_issue(prs_raw, members, repo=None):
     """issue -> [pr]. Same attribution as the run supervisor's refresh_dag_input:
-    closingIssuesReferences first, else a unique issue-number token in the head branch."""
+    same-repository closingIssuesReferences first, else a unique issue-number token in the head
+    branch. `repo` is this repository's `owner/name` (`ctx["repo"]`)."""
     nums = set(members)
     out = {}
     for pr in prs_raw or []:
@@ -154,7 +166,8 @@ def prs_by_issue(prs_raw, members):
         if state not in ("MERGED", "OPEN", "CLOSED"):
             continue
         pr = dict(pr, state=state)
-        issues = [int(r["number"]) for r in (pr.get("closingIssuesReferences") or [])]
+        issues = [int(r["number"]) for r in (pr.get("closingIssuesReferences") or [])
+                  if same_repo(r, repo)]
         if not issues:
             head = pr.get("headRefName") or ""
             issues = [n for n in nums if re.search(r"(?<!\d)%d(?!\d)" % n, head)]
@@ -596,7 +609,7 @@ def main(argv=None):
         prs = prs_by_issue(gh_json(["pr", "list", "-R", repo, "--state", "all", "--limit", "200",
                                     "--json", "number,headRefName,headRefOid,baseRefName,state,"
                                     "mergedAt,isDraft,mergeCommit,closingIssuesReferences"]),
-                           [n for n, _ in members])
+                           [n for n, _ in members], ctx["repo"])
 
         work = []          # (issue, dep, member PR, dep's merged PRs, status, detail)
         for issue, dep in members:

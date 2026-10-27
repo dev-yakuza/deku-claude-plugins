@@ -2326,8 +2326,10 @@ RTPY
   hasfx "retro: 절단 검사용 total 을 같은 호출에서 받는다" "$RETRO" 'total: length'
   # 감사 기록은 전문이 아니라 집계로 받는다 — 루프백이 많을수록 커지는 유일한 항목이다.
   hasfx "retro: 감사 기록을 jq 로 집계한다 (전문 아님)" "$RETRO" 'match("### audit-record "'
-  # ⚠ 세 토큰은 평범한 낱말이라 단어 경계가 필요하다(`prefixed` 오검출).
-  hasfx "retro: disposition 토큰에 단어 경계를 건다" "$RETRO" 'match("\\bfixed\\b"'
+  # ⚠ 0.98.3 W3: 낱말 경계(\b)는 하이픈 토큰(#349 `QA-1-dismissed-…`)과 역할 축 `→ fixed` 를
+  #   걸렀다 — 줄머리 위치(`- ` 바로 뒤)로 센다.
+  hasfx "retro: disposition 토큰은 줄머리 위치로 센다" "$RETRO" 'match($p + "fixed" + $s;"g")'
+  lacksfx "retro: 옛 단어 경계 집계 없음" "$RETRO" 'match("\\bfixed\\b"'
   # A clean scan writes `findings: none` (0.85.2) so that a MISSING record means no attempt
   # reached the record write (auditor did not run, 3.5a stopped first, or a pre-0.85.2 run). The writer (spine), the token list (Section K) and the counter (retro) must name the
   # same literal — if one drifts, retro silently reads every clean member as unaudited again.
@@ -3278,7 +3280,8 @@ hasfx "plan: Depends on 읽기 규칙은 모든 Depends on 에" "$SPP" '**`Depen
 hasfx "plan: Depends on: 없음/none 은 의존 없음" "$SPP" 'or `Depends on: none` (any case) is **no dependency at all**'
 hasfx "plan: 의존 무시 표시" "$SPP" '`의존 무시: #e ← #d (본문: «<그 문장>»)`'
 hasfx "plan: 의존 유지 편집" "$SPP" '- **`의존 유지 #d`** → put `#d` back'
-hasfx "plan: 안내 줄에 의존 유지·목표 편집·스택 없음" "$SPP" '(드롭 / 추가 / 크기 N / 의존 유지 #d / 목표 <문장> / 재범위 / 재정렬 [/ 스택 없음] 요청 가능)'
+hasfx "plan: 안내 줄에 의존 유지·쌓기·목표 편집·스택 없음 (0.98.3 W2)" "$SPP" '(드롭 / 추가 / 크기 N / 의존 유지 #d / 쌓기 #b ← #a / 목표 <문장> / 재범위 / 재정렬 [/ 스택 없음] 요청 가능)'
+lacksfx "plan: 쌓기 없는 안내 줄 제거 (0.98.3 W2)" "$SPP" '(드롭 / 추가 / 크기 N / 의존 유지 #d / 목표 <문장> / 재범위 / 재정렬 [/ 스택 없음] 요청 가능)'
 lacksfx "plan: 스택 없음 없는 안내 줄 제거" "$SPP" '(드롭 / 추가 / 크기 N / 의존 유지 #d / 목표 <문장> / 재범위 / 재정렬 요청 가능)'
 lacksfx "plan: 목표 편집 없는 안내 줄 제거" "$SPP" '(드롭 / 추가 / 크기 N / 의존 유지 #d / 재범위 / 재정렬 요청 가능)'
 lacksfx "plan: 옛 안내 줄 제거" "$SPP" '(드롭 / 추가 / 크기 N / 재범위 / 재정렬 요청 가능)'
@@ -3964,6 +3967,178 @@ hasfx "supervisor(0.98.2 R2): children 일 때만 needs-human" "$GLD/templates/s
 # R3 — plan 의 중앙 관리 파일 정의 옆
 hasfx "plan(0.98.2 R3): 실행 중 변경은 커밋 게이트가 알림" "$P2_PLAN" '실행 중 변경은 커밋 게이트가 정보 경고로 알린다'
 
+# ── 0.98.3 (21-0983 design, W1–W11) ──────────────────────────────────────────────
+echo ""
+echo "== 0.98.3 =="
+P3_PLAN="$GLD/commands/sprint/plan.md"; P3_AN="$GLD/commands/analyze.md"; P3_HO="$GLD/commands/atoms/_handoff.md"
+P3_SP="$GLD/commands/atoms/_execute_spine.md"; P3_RETRO="$GLD/commands/sprint/retro.md"; P3_DAILY="$GLD/commands/sprint/daily.md"
+P3_QA="$GLD/commands/qa.md"; P3_EVO="$GLD/commands/evolve.md"; P3_RB="$GLD/commands/rollback.md"; P3_RV="$GLD/commands/review.md"
+# W1 — 결정 답의 전제(비멤버 후보)
+hasfx "plan(W1): PO (needs #d) 토큰 위치" "$P3_PLAN" '`- A) <answer> (needs #<d>) (recommended) — <reason>`'
+hasfx "plan(W1): 모든 답이면 prerequisite, 일부면 needs" "$P3_PLAN" 'When **every** answer needs `#<d>`, write `prerequisite: #<d>` instead (not a question); `(needs #<d>)` is for a question where only some options need it.'
+hasfx "plan(W1): TL 조건부 메모의 명시적 충족도 전제" "$P3_PLAN" 'its wording **explicitly** meeting the condition of a tech-lead `conditional: #n ← #d (조건: …)`'
+hasfx "plan(W1): 닫힌 #d 조회 호출" "$P3_PLAN" '`gh issue view <d> --json state,stateReason`'
+hasfx "plan(W1): 라벨 — 완료되지 않고 닫힘" "$P3_PLAN" '`(이 답이면 #d 선행 필요 — #d 는 완료되지 않고 닫혔습니다 — 이번 스프린트에서 빠집니다)`'
+hasfx "plan(W1): 라벨 — 에픽·자식" "$P3_PLAN" '`(이 답이면 #d 선행 필요 — #d 는 에픽(자식)이라 쌓을 수 없어 이번 스프린트에서 빠집니다)`'
+hasfx "plan(W1): 라벨 — 완료 에픽" "$P3_PLAN" '`(이 답이면 #d 선행 필요 — #d 완료 — 닫으면 담깁니다)`'
+hasfx "plan(W1): 라벨 — 담을 수 없음" "$P3_PLAN" '`(이 답이면 #d 선행 필요 — #d 는 이번 스프린트에 담을 수 없어 빠집니다)`'
+hasfx "plan(W1): 라벨 — 열린 후보" "$P3_PLAN" '`(이 답이면 #d 선행 필요 — #d 가 이번 스프린트에 담기면 그 위에 쌓이고, 아니면 빠집니다)`'
+hasfx "plan(W1): 판정 시점" "$P3_PLAN" 'Judged **once, after fill step 4 has finished and before Phase 4**'
+hasfx "plan(W1): 제외 줄" "$P3_PLAN" '`결정했지만 제외: #n (답 <X> → #d 선행 필요[ — #d 가 에픽 — 쌓이지 않음| — #d 를 담을 수 없음| — #d 미완료로 닫힘])`'
+hasfx "plan(W1): 좌석은 Drop 규칙으로 재충전" "$P3_PLAN" 'seat an excluded `#n` leaves is refilled by the Drop rule'
+hasfx "plan(W1): 재충전 없으면 shortfall supply" "$P3_PLAN" 'none → the seat stays empty, `shortfall: supply` (fewer members than `C` only'
+hasfx "plan(W1): 재충전 후보도 같은 판정" "$P3_PLAN" 'gets the same judgment (an excluded `#n` is never brought back).'
+hasfx "plan(W1): 일반 하드 의존과 일부러 다르다" "$P3_PLAN" '**Deliberately unlike an ordinary hard dependency on a non-member**'
+hasfx "plan(W1): 연쇄 제외 줄" "$P3_PLAN" '`결정했지만 제외: #n (답 <X> → #d 선행 필요 — #d 가 빠짐)`'
+hasfx "plan(W1): Add 경고" "$P3_PLAN" '`⚠ #n 의 답은 #d 를 전제합니다 — #d 없이 기본 브랜치에서 시작해 analyze 에서 멈출 수 있습니다`'
+hasfx "plan(W1): 태그 제거 목록 끝에 (needs #<d>)" "$P3_PLAN" '`(권장)` and `(이 답이면 …)`, and `(needs #<d>)`.'
+hasfx "plan(W1): 크기 매핑 태그 목록 끝에 (needs #<d>)" "$P3_PLAN" '`(권장)`, `(이 답이면 …)`, `(needs #<d>)`): an answer that maps'
+hasfx "plan(W1): 기록 답 끝에 (전제: #d)" "$P3_PLAN" '**ends with the plain text `(전제: #d)`**'
+hasfx "plan(W1): 이월 판정은 none/analyze 만" "$P3_PLAN" 'whose stage is `none` or `guild:analyze`** the leader judges it'
+hasfx "plan(W1): analyze 이후는 경고만" "$P3_PLAN" 'non-member `#d` only gets Phase 5'"'"'s `⚠ 선행 미포함` warning.'
+hasfx "plan(W1): 선행 대기(결정 전제)" "$P3_PLAN" '`선행 대기(결정 전제): #n ← #d`'
+hasfx "plan(W1): TL 프롬프트 — 전제 decided 줄은 (a) 의존" "$P3_PLAN" 'A `decided:` line ending `(전제: #<d>)` is a dependency in (a)'
+hasfx "_handoff(W1): K 에 (needs #<d>) 토큰" "$P3_HO" 'the premise token `(needs #<d>)` in the same position on an option'
+hasfx "analyze(W1): Never re-ask 예외" "$P3_AN" 'Never re-ask a question the block answers — **except** when its answer'"'"'s premise is missing (below): then it does not answer it.'
+hasfx "analyze(W1): 충족 판정 호출" "$P3_AN" "gh issue view <d> --json state,stateReason,labels,comments --jq '{state, stateReason, labels: [.labels[].name], split: ([.comments[].body | select(contains(\"<!-- guild:children:output -->\"))] | length > 0)}'"
+hasfx "analyze(W1): split 거짓일 때만 done 충족" "$P3_AN" '**or** `guild:done` in `labels` with `split` false'
+hasfx "analyze(W1): 번호 없는 기능 이름은 판정하지 않음" "$P3_AN" 'A feature name with no number is not judged this way'
+hasfx "analyze(W1): high 고정" "$P3_AN" 'stakes fixed at **high / scope-defining**'
+hasfx "analyze(W1): 재해석 금지" "$P3_AN" '**Never make a decision line fit by reading its words in another sense**'
+lacksfx "analyze(W1): v3 조상 검사 없음" "$P3_AN" 'git merge-base --is-ancestor origin/<head> HEAD'
+lacksfx "plan(W1): v3 조상 검사 없음" "$P3_PLAN" 'git merge-base --is-ancestor origin/<head> HEAD'
+# W2 — 같은 파일 병렬
+hasfx "plan(W2): 경고 줄" "$P3_PLAN" '`⚠ 같은 파일 병렬: <file> — #a · #b (서로 쌓여 있지 않음 — 뒤에 머지되는 PR 은 충돌 해소가 필요할 수 있습니다; 쌓으려면 "쌓기 #b ← #a")`'
+hasfx "plan(W2): 이미 이어진 쌍 제외" "$P3_PLAN" '**A pair already connected in Phase 4'"'"'s final graph — one an ancestor or'
+hasfx "plan(W2): 디렉터리만 겹침은 줄 없음" "$P3_PLAN" 'a pair that overlaps only as a directory gets'
+hasfx "plan(W2): 표 비고" "$P3_PLAN" '`같은 파일 <file>(#a·#b[·#c])`'
+hasfx "plan(W2): 쌓기 편집" "$P3_PLAN" '- **`쌓기 #b ← #a`** → add `#a` to `#b`'"'"'s `deps` and re-run Phase 4'
+hasfx "plan(W2): 쌓기 사이클 거절" "$P3_PLAN" 'refused, with the reason (the witness path of `--mode cycles`).'
+hasfx "plan(W2): TL soft 토큰" "$P3_PLAN" 'as a separate note `soft: #<b> after #<a> — <note>`'
+hasfx "plan(W2): 의견 줄" "$P3_PLAN" '`의견: #a 먼저 → #b (tech-lead: <note>)`'
+hasfx "_handoff(W2): K 에 soft 토큰" "$P3_HO" '`soft: #<b> after #<a> — <note>`'
+# W3 — 감사자 줄 형식
+hasfx "spine(W3): 줄 형식" "$P3_SP" '- <looped-back|fixed|recorded|dismissed> · <severity> · <axis> · <file:line> — <finding>[ — <reason>]'
+hasfx "spine(W3): 장식 없이" "$P3_SP" 'and is written **bare** — no backticks, no'
+hasfx "spine(W3): 역할 축은 토큰 금지" "$P3_SP" 'starts `role-axis: <role> <verdict> — <reason>` and never uses the four tokens'
+hasfx "_handoff(W3): K 에 위치 규칙" "$P3_HO" 'a disposition token is written bare right after `- ` at column 0 of its finding line'
+hasfx "retro(W3): 위치 접두 정규식" "$P3_RETRO" '("(?:^|\n)- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}(?![-A-Za-z0-9_])") as $s'
+hasfx "retro(W3): loose 필드" "$P3_RETRO" 'loose: ([$b | match("(?<![-A-Za-z0-9_])(looped-back|fixed|recorded|dismissed)(?![-A-Za-z0-9_])";"g")] | length)'
+hasfx "retro(W3): legacy_blocks 필드" "$P3_RETRO" 'legacy_blocks: ([$b | splits("### audit-record ")] | .[1:]'
+hasfx "retro(W3): 구 형식 판정은 legacy_blocks 만" "$P3_RETRO" '**An old-format record is judged by `legacy_blocks > 0` alone**'
+hasfx "retro(W3): 구 형식 나열" "$P3_RETRO" '`#n 구 형식 기록(블록 <k>개 · 낱말 <loose>개, 종류 구분 불가)`'
+hasfx "retro(W3): 섞임 표시" "$P3_RETRO" '`(구 형식 블록 <k>개 — 과소 가능)`'
+lacksfx "retro(W3): 옛 Word boundaries 단락 없음" "$P3_RETRO" 'Word boundaries (`\b`) on the three that are ordinary words.'
+# W3 — jq 를 실제로 돌린다 (retro.md 의 식 그대로)
+P3_JQ="$(grep -o "\-\-jq '. as \$all.*legacy_blocks.*'" "$P3_RETRO" | sed "s/^--jq '//; s/'\$//")"
+if ! command -v jq >/dev/null 2>&1; then
+  bad "retro(W3): jq 실행" "jq on PATH" "jq missing"
+elif [ -z "$P3_JQ" ]; then
+  bad "retro(W3): jq 식 추출" "one expression" "none"
+else
+  P3_T="$(mktemp -d)"; printf '%s' "$P3_JQ" > "$P3_T/q.jq"
+  # 새 형식(장식 섞음·이유 속 낱말·역할 축) + 구 형식 블록 하나 + 클린 블록
+  printf '%s' '[{"body":"<!-- guild:auditor:execute -->\n### audit-record 1\nrole-axis: tech-lead BLOCKED — x → looped-back\n- `looped-back` · MAJOR · spec · a:1 — f\n- **recorded** · MINOR · spec · b:2 — m — already fixed upstream\n### audit-record 2\n- MINOR · c — legacy — recorded\n### audit-record 3\nfindings: none\n### audit-record 4\n- fixed · MAJOR · spec · a:1 — f\n- dismissed · MINOR · spec · d:3 — QA-1-dismissed-x — reason\n<!-- /guild:auditor:execute -->"}]' > "$P3_T/new.json"
+  # #349 형: 하이픈 토큰 안의 dismissed, 역할 축 → fixed
+  printf '%s' '[{"body":"<!-- guild:auditor:execute -->\n### audit-record 1\nfindings: none\n- 역할 축: QA-1-dismissed-registry-exempts-entry-point → fixed\n<!-- /guild:auditor:execute -->"}]' > "$P3_T/r349.json"
+  P3_A="$(jq -c -f "$P3_T/q.jq" "$P3_T/new.json" 2>&1)"
+  P3_B="$(jq -c -f "$P3_T/q.jq" "$P3_T/r349.json" 2>&1)"
+  rm -rf "$P3_T"
+  [ "$P3_A" = '{"records":4,"looped_back":1,"fixed":1,"recorded":1,"dismissed":1,"loose":7,"legacy_blocks":1,"clean":1,"no_scan":0,"violation":0}' ] \
+    && ok "retro(W3): jq — 새 형식 1/1/1/1 · 구 형식 블록 1" || bad "retro(W3): jq 새 형식" "1/1/1/1 legacy 1" "$P3_A"
+  [ "$P3_B" = '{"records":1,"looped_back":0,"fixed":0,"recorded":0,"dismissed":0,"loose":1,"legacy_blocks":0,"clean":1,"no_scan":0,"violation":0}' ] \
+    && ok "retro(W3): jq — #349 형 오탐 없음" || bad "retro(W3): jq #349 형" "dismissed 0 fixed 0" "$P3_B"
+fi
+# W4 — 감사자 수의 의미 · 묶음
+hasfx "retro(W4): 멈춤 = looped_back 줄" "$P3_RETRO" '**멈춤 = the `looped_back` lines**'
+hasfx "retro(W4): 토큰 줄 수" "$P3_RETRO" '`dismissed` are **token line counts**'
+hasfx "retro(W4): 행 형식" "$P3_RETRO" '`감사자  기록 <records> · 클린 <c> · 멈춤 <l> · 줄 수 fixed <f> · recorded <r> · dismissed <d>(#n…) · 위반 <v>`'
+hasfx "retro(W4): 묶음 순서" "$P3_RETRO" '① 위반 (`violation ≥ 1`) ② 미착수 `#<c>` (a child with no PR, above) ③ 기록 없음 (`records 0`)'
+hasfx "retro(W4): 지적 없음 묶음" "$P3_RETRO" '`지적 없음(클린 k · 미스캔 m)`'
+hasfx "retro(W4): 지적 있음은 일반 멤버도 나열" "$P3_RETRO" '**— listed by number with its counts**'
+lacksfx "retro(W4): 옛 의미 문장 없음" "$P3_RETRO" 'is *how often the auditor stopped the stage over the sprint*'
+lacksfx "retro(W4): 옛 BLOCKER 예시 없음" "$P3_RETRO" '감사자 BLOCKER 제기  6건'
+# W5 — 같은 원인 묶기 · CI 기록
+hasfx "_handoff(W5): env 원인 단어" "$P3_HO" '`env: <ci-blocked|credential|service|other> — <one-line>`'
+hasfx "_handoff(W5): 묶음 표시에만" "$P3_HO" 'daily/retro 가 묶음 표시에만 쓴다'
+lacksfx "_handoff(W5): 옛 Nothing branches 문장 없음" "$P3_HO" 'branches on it (completion is judged by labels — `batch.md` Phase 4); it exists so a'
+hasfx "daily(W5): 원인 호출" "$P3_DAILY" "contains(\"<!-- guild:needs-human -->\")) | .body | [splits(\"\\n\")] | (map(select(test(\"^(defect|ambiguity|env):\"))) | first) // (map(select(test(\"^## \"))) | first) // \"(원인 줄 없음)\"'"
+hasfx "daily(W5): 묶음 줄" "$P3_DAILY" '`#a · #b · #c — env ci-blocked: <대표 한 줄> → 원인 해결 후 각각 <그 멤버의 한 줄이 쓸 명령>`'
+hasfx "daily(W5): 한 줄과 같은 명령" "$P3_DAILY" 'uses **exactly the command each one'"'"'s own line would use**'
+hasfx "daily(W5): 하류만 run 재실행" "$P3_DAILY" '`그 뒤 막힌 #q… 는 sprint run 재실행으로`'
+hasfx "daily(W5): 호출 예산" "$P3_DAILY" '사람 대기 멤버·자식마다 원인 한 호출'
+lacksfx "daily(W5): v1 묶음 줄 없음" "$P3_DAILY" '→ 해결 후 각각 /gld resume <n> (또는 sprint run 재실행)'
+hasfx "retro(W5): 사람 대기 행 env" "$P3_RETRO" '`N회 — 그중 env:<키> k회(#…)`'
+hasfx "qa(W5-b): PR CI 기록" "$P3_QA" '**`### PR CI` — one line, both modes (a record, not a gate).**'
+hasfx "qa(W5-b): Step 2.5 찾기 재사용" "$P3_QA" '`<pr>` is the result of **Step 2.5'"'"'s PR lookup**'
+hasfx "qa(W5-b): PR 없음" "$P3_QA" 'No PR → `PR CI: 없음`'
+hasfx "qa(W5-b): headRefOid" "$P3_QA" '`gh pr view <pr> --json headRefOid --jq .headRefOid`'
+hasfx "qa(W5-b): check-runs" "$P3_QA" "gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[] | {id, name, conclusion, annotations: .output.annotations_count}'"
+hasfx "qa(W5-b): annotations" "$P3_QA" "gh api repos/<owner>/<repo>/check-runs/<id>/annotations --jq '.[] | .message'"
+hasfx "qa(W5-b): 기록 형식" "$P3_QA" '`PR CI: green` / `red <name…>` / `시작되지 않음 <name…> (env: ci-blocked)` / `진행 중` / `없음`'
+hasfx "qa(W5-b): 판정 불변" "$P3_QA" '**The verdict does not change**'
+# W6 — densify
+hasfx "evolve(W6): densify 는 rewrite 가 아니다" "$P3_EVO" '**A densify merge or compression is not a rewrite**'
+hasfx "evolve(W6): HABIT_LONG 800" "$P3_EVO" 'one bullet'"'"'s ceiling is `HABIT_LONG` 800'
+hasfx "evolve(W6): rejected 기록" "$P3_EVO" '`[rejected] densify habits <role> — 압축하면 조건이 빠짐(<chars>자)`'
+hasfx "evolve(W6): 건너뛰기" "$P3_EVO" '**Skip a `habits <role>` line** when the rejections Phase 0 reads'
+hasfx "evolve(W6): 창 안 rejected 또는 carried skip-list" "$P3_EVO" '**a window run'"'"'s `[rejected]` section or the carried skip-list**'
+hasfx "evolve(W6): 400자 꼬리" "$P3_EVO" '(a new habit, or one habit rewritten — a densify merge is below)'
+# W7 — 이미 해결됨
+hasfx "plan(W7): TL resolved 토큰" "$P3_PLAN" '`resolved: #<n> — <evidence>`'
+hasfx "plan(W7): ⓪ 사유" "$P3_PLAN" '`제외: #n (이미 해결됨 — 닫기 후보: <근거>)`'
+hasfx "plan(W7): Add 경고" "$P3_PLAN" '`⚠ #n 은 tech-lead 가 이미 해결됐다고 봅니다(<근거>)`'
+hasfx "plan(W7): 묻지 않음" "$P3_PLAN" 'the tech-lead did not note `resolved: #n`'
+hasfx "_handoff(W7): K 에 resolved 토큰" "$P3_HO" '`resolved: #<n> — <evidence>` (display-only'
+# W9 — 용량 표
+hasfx "retro(W9): ≥85% · 대기 ≥2 행" "$P3_RETRO" '| 이행률 ≥ 85% · 사람 대기 ≥ 2 | 유지 — 다 해냈지만 사람 개입이 둘 이상이었다 |'
+hasfx "retro(W9): 85% 이상은 모두 덮는다" "$P3_RETRO" '85% 이상은 이제 모두 덮는다'
+# W10 — 중앙 관리 파일
+hasfx "spine(W10): merge-base 재계산" "$P3_SP" 'so **resolve it again** — its own Bash call'
+hasfx "spine(W10): origin/default 폴백" "$P3_SP" 'once more with `origin/<default-branch>` as `<base>`'
+hasfx "spine(W10): 점검 불가 줄" "$P3_SP" '`중앙 관리 파일 점검 불가(merge-base 없음)`'
+hasfx "spine(W10): diff 호출" "$P3_SP" 'git diff --name-only <mb>..HEAD -- .claude/guild/gates/scripts/gate_precommit.py .claude/guild/gates/rules/secrets.md .claude/guild/gates/rules/verification.md'
+hasfx "spine(W10): 마커" "$P3_SP" '<!-- guild:central-owned -->'
+hasfx "spine(W10): 차단 아님" "$P3_SP" '**Not a block and not needs-human**'
+hasfx "_handoff(W10): Section B 행" "$P3_HO" '| `<!-- guild:central-owned -->` … `<!-- /guild:central-owned -->` |'
+hasfx "review(W10): 중앙 관리 파일 표시" "$P3_RV" 'mark the change-unit holding it in Step 3'"'"'s plan as `중앙 관리 파일`'
+hasfx "review(W10): Step 5 한 줄" "$P3_RV" '- **중앙 관리 파일** (Step 2): when the PR changes one, one line before the 종합 판정'
+# W11 — 로컬 해시
+hasfx "evolve(W11): applied-onto 는 로컬 부모" "$P3_EVO" '`applied-onto` is **the local parent at apply time**'
+hasfx "evolve(W11): 보고의 grep 명령" "$P3_EVO" 'git log --fixed-strings --grep "chore(guild): evolve #<n> —" --format="%h %s"'
+hasfx "rollback(W11): 1순위는 커밋이 추가한 항목" "$P3_RB" '**first, the entry that commit added itself**: `git show <sha> -- .claude/guild/evolution-log.md`'
+hasfx "retro(W11): push 전 표기" "$P3_RETRO" 'is written as its hash + `(push 전)` +'
+hasfx "retro(W11): 변경 없으면 건너뜀" "$P3_RETRO" '`git diff --quiet HEAD -- .claude/guild/config.json` — exit 0'
+hasfx "retro(W11): 커밋 명령" "$P3_RETRO" '`git commit -m "chore(guild): 스프린트 #<tracker> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/config.json`'
+hasfx "retro(W11): push 금지" "$P3_RETRO" '**Do not push.**'
+
+# 0.98.3 리뷰 1차
+hasfx "plan(r1): fill 게이트에 resolved 제외" "$P3_PLAN" 'the tech-lead did not note `resolved: #n` (reason ⓪ — never taken, never asked'
+hasfx "plan(r1): 이월 전제 판정 시점·좌석" "$P3_PLAN" '*The premise check*'"'"'s: judged once after fill step 4 and before Phase 4, a candidate left out'
+hasfx "plan(r1): 전제 판정 반복" "$P3_PLAN" '(an excluded `#n` is never brought back). **Repeat until no new'
+hasfx "plan(r1): 연쇄 원인에 전제 판정 자체" "$P3_PLAN" 'cut, a slot re-arbitration or *The premise check* itself while'
+hasfx "plan(r1): 3개 이상 같은 파일" "$P3_PLAN" '`<file> — #a · #b · #c (…)`, the `쌓기` suggestion naming the first'
+hasfx "retro(r1): 예시 수 일치" "$P3_RETRO" '감사자        기록 9 · 클린 3 · 멈춤 3 · 줄 수 fixed 3 · recorded 1 · dismissed 1(#104) · 위반 0'
+hasfx "retro(r1): 커밋 전 스테이징 확인" "$P3_RETRO" '**Nothing else staged?** `git diff --cached --name-only` must print nothing (`plan.md` Phase 6'
+hasfx "retro(r1): 기본 브랜치 조회" "$P3_RETRO" '`gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name`'
+hasfx "qa(r1): check-run 0 개" "$P3_QA" '**0 check-runs** → `없음(check-run 없음 — commit status 는 보지 않음)`'
+hasfx "qa(r1): red 결론 목록" "$P3_QA" 'a run with conclusion `failure` · `timed_out` · `cancelled` · `action_required` → red'
+hasfx "qa(r1): null 은 진행 중" "$P3_QA" 'any run with conclusion `null` (still running) → `진행 중`'
+hasfx "qa(r1): neutral/skipped 는 red 아님" "$P3_QA" '(`neutral` and `skipped` are not red)'
+hasfx "rollback(r1): applied-onto 범위는 적용 시점 기준" "$P3_RB" '(적용 시점 기준 — rebase 뒤에는 성립하지 않음)'
+
+# 0.98.3 리뷰 2차
+hasfx "retro(r2): 묶음 ④–⑥" "$P3_RETRO" '④ 구 형식 (`legacy_blocks > 0` and the four sums 0, above) ⑤ 미스캔 (`no_scan == records`) ⑥ 클린 (`clean == records`)'
+hasfx "retro(r2): 묶음 ⑥b" "$P3_RETRO" '⑥b **지적 없음** — the four sums 0 and `clean + no_scan == records`'
+hasfx "retro(r2): 묶음 ⑦ 과 구 형식 섞임 표시" "$P3_RETRO" '; `legacy_blocks > 0` 이면 `(구 형식 블록 <k>개 — 과소 가능)` 을 붙인다'
+lacksfx "retro(r2): ④ 가 섞인 기록을 삼키지 않음" "$P3_RETRO" '④ 구 형식 (`legacy_blocks > 0`, above)'
+hasfx "plan(r2): resolved 게이트는 일반 후보만" "$P3_PLAN" '**for an ordinary candidate (not an epic)** — the tech-lead did not note `resolved: #n`'
+hasfx "plan(r2): TL resolved 는 에픽 아님" "$P3_PLAN" 'whole need — **not an epic'"'"'s** — is **already resolved**'
+hasfx "plan(r2): Add ⓪ 경고는 구분 문장 뒤" "$P3_PLAN" 'anything else → `other`). A candidate out as ⓪ (the tech-lead'"'"'s'
+lacksfx "plan(r2): 구분 문장 앞의 ⓪ 경고 없음" "$P3_PLAN" '`readiness: —(PO 미평가)`. A candidate out as ⓪'
+hasfx "analyze(r2): 사람의 답이 해소" "$P3_AN" 'A decision the human gives now (the attended answer, or the answer a resume brings) settles it'
+hasfx "analyze(r2): 출구 안내" "$P3_AN" '`Issue 본문의 결정 줄을 고치거나 #d 를 먼저 끝내세요`'
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -3971,7 +4146,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=1595   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=1730   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

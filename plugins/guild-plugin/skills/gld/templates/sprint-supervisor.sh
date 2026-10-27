@@ -1125,9 +1125,10 @@ refresh_dag_input() {
   git -C "$SUP" branch --format='%(refname:short)' > "$D/branches.txt" 2>/dev/null || : > "$D/branches.txt"
   [ -f "$D/failed.txt" ] || : > "$D/failed.txt"
   [ -f "$D/paused.txt" ] || : > "$D/paused.txt"
-  "$PY" - "$D" "$DEFAULT_BRANCH" 2>"$D/dag.err" <<'PY' || return 1
+  "$PY" - "$D" "$DEFAULT_BRANCH" "$OWNER_REPO" 2>"$D/dag.err" <<'PY' || return 1
 import json, os, sys
 d, default_branch = sys.argv[1], sys.argv[2]
+this_repo = (sys.argv[3] if len(sys.argv) > 3 else "").lower()
 members = json.load(open(os.path.join(d, "members.json")))     # written once by run.md
 # ⚠ SHAPE CHECK, and it earns its place: run.md Phase 3 step 1 writes this file with the Write
 # tool, and the SAME file shows the `sprint_dag.py --input` schema — `{"members": [...]}` —
@@ -1151,12 +1152,25 @@ member_nums = set(int(m["number"]) for m in members)
 # the body). It can come back empty — the design does not assume otherwise — so fall back to
 # an issue-number token in the head branch name. sprint_dag.py refuses to guess when that
 # token matches more than one branch.
+def same_repo(ref):
+    repo = ref.get("repository") if isinstance(ref, dict) else None
+    if not isinstance(repo, dict) or not this_repo:
+        return True
+    owner = ((repo.get("owner") or {}).get("login") or "")
+    name = repo.get("name") or ""
+    return ("%s/%s" % (owner, name)).lower() == this_repo
+
 prs = []
 for pr in prs_raw:
     state = "MERGED" if pr.get("mergedAt") else str(pr.get("state", "")).upper()
     if state not in ("MERGED", "OPEN", "CLOSED"):
         continue
-    issues = [int(r["number"]) for r in (pr.get("closingIssuesReferences") or [])]
+    # Same-repository references only (0.98.3 W8): a PR body can close an Issue of ANOTHER
+    # repository with the same number. A ref that carries `repository` and names a different
+    # repo (owner/name compared case-insensitively) is dropped; a ref without `repository` is
+    # kept — the pre-0.98.3 behaviour. Nothing left → the branch-token fallback below.
+    issues = [int(r["number"]) for r in (pr.get("closingIssuesReferences") or [])
+              if same_repo(r)]
     if not issues:
         head = pr.get("headRefName") or ""
         issues = [n for n in member_nums

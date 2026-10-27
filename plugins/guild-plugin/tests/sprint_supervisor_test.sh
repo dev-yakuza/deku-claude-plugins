@@ -1956,6 +1956,29 @@ else
       "'refresh_dag_input returned non-zero' is the one thing the human already knows"
 fi
 
+# (1e) Same-repository closing references only (0.98.3 W8). The heredoc python is run as it is
+#      in the template, with this repo passed as argv[3]; `prs` in run.json is the mapping.
+W8D="$WORK/w8"; mkdir -p "$W8D"
+awk '/^refresh_dag_input\(\) \{/{f=1} f&&/<<.PY. \|\| return 1$/{p=1; next} p&&/^PY$/{exit} p' "$TPL" > "$W8D/dag.py"
+hasline "I(W8): refresh_dag_input passes OWNER_REPO to the python" '"$PY" - "$D" "$DEFAULT_BRANCH" "$OWNER_REPO" 2>"$D/dag.err"'
+w8() {   # w8 <prs-json> → "issue:branch …"
+  printf '[{"number":12,"base_deps":[],"split":false},{"number":13,"base_deps":[],"split":false}]' > "$W8D/members.json"
+  printf '%s' "$1" > "$W8D/prs.json"; printf '[]' > "$W8D/labels.json"
+  : > "$W8D/branches.txt"; : > "$W8D/failed.txt"
+  "$PY" "$W8D/dag.py" "$W8D" main acme/app >/dev/null 2>&1 || { echo "python-failed"; return; }
+  "$PY" -c 'import json,sys; r=json.load(open(sys.argv[1])); print(" ".join("%d:%s" % (p["issue"], p["branch"]) for p in sorted(r["prs"], key=lambda p: p["issue"])))' "$W8D/run.json"
+}
+W8OTHER='{"number":12,"repository":{"name":"other","owner":{"login":"acme"}}}'
+w8eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "want [$3] got [$2]"; fi; }
+w8eq "I(W8): other-repo ref only + member-number branch → branch mapping" \
+  "$(w8 "[{\"number\":201,\"state\":\"OPEN\",\"headRefName\":\"feature/#13-x\",\"closingIssuesReferences\":[$W8OTHER]}]")" "13:feature/#13-x"
+w8eq "I(W8): other-repo ref only + unrelated branch → no mapping" \
+  "$(w8 "[{\"number\":202,\"state\":\"OPEN\",\"headRefName\":\"feature/misc\",\"closingIssuesReferences\":[$W8OTHER]}]")" ""
+w8eq "I(W8): ref without repository → kept (as before)" \
+  "$(w8 '[{"number":203,"state":"OPEN","headRefName":"feature/misc","closingIssuesReferences":[{"number":12}]}]')" "12:feature/misc"
+w8eq "I(W8): uppercase owner/name → the same repository" \
+  "$(w8 '[{"number":204,"state":"OPEN","headRefName":"feature/misc","closingIssuesReferences":[{"number":12,"repository":{"name":"App","owner":{"login":"ACME"}}}]}]')" "12:feature/misc"
+
 # (2) 컬럼 필드가 보드에 없으면 **보드를 끈다** — 없으면 쓰기마다 실패로 세고 22콜을 낭비했다.
 cat > "$I_WORK/ids_nocol.sh" <<'IDS'
 gh_ids() {
@@ -4611,7 +4634,7 @@ mw_case "T12f 깨진 JSON 은 실패" "[{\"id\": 1,\n" FAIL
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=356
+SUP_MIN_CHECKS=361
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

@@ -177,6 +177,14 @@ come back empty — **fall back to matching the issue number as a token in the h
 name**, and when that matches more than one branch return `BLOCKED:dep-branch-ambiguous`
 rather than guessing.
 
+⚠ **Same-repository references only** (0.98.3): a ref whose `repository` names another repo is
+dropped before the fallback — a PR can close an Issue of another repository with the same number.
+The supervisor's `refresh_dag_input` and `stack_sync.py`'s `prs_by_issue` compare `owner/name`
+**case-insensitively** and **keep a ref with no `repository`** (the older behaviour); `daily`'s
+and `retro`'s jq compare `.repository.owner.login`/`.name` **case-sensitively** and **drop** a ref
+with no `repository`. gh's real responses always carry `repository` (measured word_app ·
+one-man-company), so the mapping comes out the same in practice.
+
 ⚠ **One issue can carry several PRs**, and the state resolves `MERGED > OPEN > CLOSED`. The
 **head branch must be replaced along with the state**, not merely filled in when absent: a
 CLOSED first attempt seen earlier otherwise leaves its abandoned branch in place, and a later

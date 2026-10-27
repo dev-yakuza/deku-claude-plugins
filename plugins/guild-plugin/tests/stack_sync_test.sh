@@ -821,6 +821,27 @@ sync --done-cards
 eq "done-cards: a failed Issue read → exit 0 all the same" "$RC" "0"
 has "done-cards: a failed Issue read → an error line, not a guess" "$OUT" "done-cards error "
 
+echo "── prs_by_issue: same-repository references only (0.98.3 W8) ──"
+# -B: no .pyc beside the plugin's scripts (the pycache check below).
+pbi() {   # pbi <prs-json> → "issue:pr,pr …" sorted
+  "$PY" -B - "$(dirname "$SYNC")" "$1" <<'PBI'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import stack_sync
+out = stack_sync.prs_by_issue(json.loads(sys.argv[2]), [12, 13], "acme/app")
+print(" ".join("%d:%s" % (n, ",".join(str(p["number"]) for p in out[n])) for n in sorted(out)))
+PBI
+}
+OTHER='{"number":12,"repository":{"name":"other","owner":{"login":"acme"}}}'
+eq "W8: other-repo ref only + member-number branch → branch mapping" \
+  "$(pbi "[{\"number\":201,\"state\":\"OPEN\",\"headRefName\":\"feature/#13-x\",\"closingIssuesReferences\":[$OTHER]}]")" "13:201"
+eq "W8: other-repo ref only + unrelated branch → no mapping" \
+  "$(pbi "[{\"number\":202,\"state\":\"OPEN\",\"headRefName\":\"feature/misc\",\"closingIssuesReferences\":[$OTHER]}]")" ""
+eq "W8: ref without repository → kept (as before)" \
+  "$(pbi '[{"number":203,"state":"OPEN","headRefName":"feature/misc","closingIssuesReferences":[{"number":12}]}]')" "12:203"
+eq "W8: uppercase owner/name → the same repository" \
+  "$(pbi '[{"number":204,"state":"OPEN","headRefName":"feature/misc","closingIssuesReferences":[{"number":12,"repository":{"name":"App","owner":{"login":"ACME"}}}]}]')" "12:204"
+
 echo "── supervisor wiring (run.md --draft-stacked) ──"
 RH="$WORK/render"; mkdir -p "$RH"
 rflags() { echo --tracker 99 --owner-repo acme/app --default-branch main --container "$RH/c" \
@@ -841,7 +862,7 @@ echo
 echo "stack_sync: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when checks are added on purpose. A
 #   quote that swallows the rest of the file runs fewer checks and still ends green otherwise.
-SYNC_MIN_CHECKS=135
+SYNC_MIN_CHECKS=139
 if [ "$((PASS + FAIL))" -lt "$SYNC_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${SYNC_MIN_CHECKS}건)."
   exit 1

@@ -229,7 +229,7 @@ Sources, and **what each is honestly derived from**:
 |---|---|---|
 | 약속 이행률 | 머지된 멤버 / 계획된 멤버 | 멤버 표 + PR `mergedAt` — 머지 축(`daily.md` step 6). 에픽은 한 자리, 자식이 모두 머지돼야 머지 |
 | 캐리오버 | 결말나지 않은 멤버 (done도 아니고 머지도 안 된 것) | 라벨 + PR 상태. 에픽은 부모가 done 이 아니면 캐리오버(자식 상태 무관) |
-| 사람 대기 횟수 | `guild:needs-human`에 도달한 멤버 수 | 라벨. 에픽은 부모 또는 done 이 아닌 자식 중 하나라도 `guild:needs-human` 이면 1(`daily.md` step 5 의 **사람 대기** 정의). ⚠ 도달 수이므로 그 정의의 제외(`CLOSED` + 같은 저장소 `MERGED` PR 자식)는 여기 적용하지 않는다 — 사람이 머지한 것도 개입이다. 제외는 아래 현재 대기 목록에만 |
+| 사람 대기 횟수 | `guild:needs-human`에 도달한 멤버 수 — 표시 `N회 — 그중 env:<키> k회(#…)`(같은 원인 묶음 — `daily.md` step 3 의 원인 줄 호출을 같은 멤버·자식마다 한 번; 도달 수 정의는 그대로) | 라벨. 에픽은 부모 또는 done 이 아닌 자식 중 하나라도 `guild:needs-human` 이면 1(`daily.md` step 5 의 **사람 대기** 정의). ⚠ 도달 수이므로 그 정의의 제외(`CLOSED` + 같은 저장소 `MERGED` PR 자식)는 여기 적용하지 않는다 — 사람이 머지한 것도 개입이다. 제외는 아래 현재 대기 목록에만 |
 | ↳ 그중 분할이 멈춘 것 | **분리 집계** — 원인이 다르다 | `failures.jsonl`의 `split-stalled`. ⚠ 분할 자체는 더 이상 일시정지가 아니다(§8.7) — 감독자가 이어서 재개하므로, 이 값은 *재개가 전진을 멈춘* 횟수다. 단 가장 작은 대기 자식이 needs-human 이면 PAUSED — 근거는 completion 의 `#e (child #c)`(라벨은 `guild:children` 그대로) |
 | 감사자 루프백 | 멤버 이슈(분할 멤버는 자식 이슈)의 감사자 레코드에서 **disposition 토큰** 집계 | 멤버 이슈(분할 멤버는 자식 이슈)의 `<!-- guild:auditor:execute -->` 댓글 |
 | 의존성 차단 횟수 | 차단으로 건너뛴 횟수 | `failures.jsonl`의 `dependency-blocked` · `base-unresolved`. ⚠ `base-decision-failed`는 **세지 말 것** — 그것은 실패다 |
@@ -303,7 +303,7 @@ scales with how badly the sprint went. Measured on `dev-yakuza/one-man-company`:
 | #388 | 7,456 B | 67 B |
 
 ```bash
-gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '. as $all | [$all[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$b | match("looped-back";"g")] | length), fixed: ([$b | match("\\bfixed\\b";"g")] | length), recorded: ([$b | match("\\brecorded\\b";"g")] | length), dismissed: ([$b | match("\\bdismissed\\b";"g")] | length), clean: ([$b | match("findings: none";"g")] | length), no_scan: ([$b | match("scan: none";"g")] | length), violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)}'
+gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '. as $all | [$all[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | ("(?:^|\n)- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}(?![-A-Za-z0-9_])") as $s | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$b | match($p + "looped-back" + $s;"g")] | length), fixed: ([$b | match($p + "fixed" + $s;"g")] | length), recorded: ([$b | match($p + "recorded" + $s;"g")] | length), dismissed: ([$b | match($p + "dismissed" + $s;"g")] | length), loose: ([$b | match("(?<![-A-Za-z0-9_])(looped-back|fixed|recorded|dismissed)(?![-A-Za-z0-9_])";"g")] | length), legacy_blocks: ([$b | splits("### audit-record ")] | .[1:] | map(select((test($p + "(looped-back|fixed|recorded|dismissed)" + $s) or test("findings: none") or test("scan: none")) | not)) | length), clean: ([$b | match("findings: none";"g")] | length), no_scan: ([$b | match("scan: none";"g")] | length), violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)}'
 ```
 
 ⚠ **One object per PAGE — add them up.** `gh api --paginate --jq` runs the `jq` once per page of
@@ -323,7 +323,8 @@ while their children held 18 records, 4 of them looped-back (#532).
 - **Numbers are summed, verdicts are not.** Add `records` · `looped_back` · `fixed` · … over the
   children into the epic's row, `#e 에픽(자식 합산)`, but **judge each child on its own**: records 0
   → "기록 없음", `clean == records`, `no_scan == records`, `violation`, `dismissed` — and a child
-  that is none of these is listed with its counts (not called "mixed": that word below means a
+  that is none of these is listed with its counts, the same as an ordinary member (the groups
+  below) (not called "mixed": that word below means a
   record spanning the 0.85.2 upgrade) — every
   verdict and listing below carries the **child's** number. Shape (numbers illustrative):
   `#146 에픽(자식 합산) records 11 · looped-back 4 · 기록 없음 #<c>` — so that *"Zero and
@@ -355,11 +356,26 @@ complete; say the record is mixed.
 ⚠ `scan: none` and `findings: none` both contain `: none`, but the two `match` patterns cannot
 collide: neither literal is a substring of the other.
 
-⚠ **Word boundaries (`\b`) on the three that are ordinary words.** A bare substring count also
-matches `prefixed`, `unrecorded`, … On this corpus both forms agreed (17 = 17, 31 = 31), so this
-is prevention, not a fix — but it is free, and a silently inflated `fixed` reads as *"the auditor
-kept finding things and they kept getting fixed"*, which is a flattering error.
-⚠ `looped-back` is hyphenated and cannot collide, so it needs no boundary.
+⚠ **The four tokens are counted by POSITION — right after `- ` at the start of a line**
+(`_execute_spine.md` Step 4: `- <token> · <severity> · <axis> · <file:line> — <finding>`), with
+a decoration of up to two backticks or `*` tolerated on either side of the token (older records
+wrote `**recorded**` and `` `looped-back` ``) and no letter, digit, `-` or `_` after it; the
+separators after the token are not read. The backtick is written in the jq string as `\u0060`,
+so the shell command carries no backtick (the command-substitution heuristic, `_bash_rules.md`).
+⚠ jq's (Oniguruma) `^` is the start of the **string** only — measured on jq 1.8.2, `(?m)^`
+matched 0 times — hence `(?:^|\n)`. A substring or word-boundary count used to match a finding id
+(`QA-1-dismissed-registry-exempts-entry-point` → `dismissed 1` next to `clean 2/2`, #349) and the
+role-axis line's `→ fixed` / `→ looped-back` (word_app #1700: every `fixed` and `looped-back` was
+the role axis).
+**An old-format record is judged by `legacy_blocks > 0` alone** — a `### audit-record` block that
+has no token at a line head, no `findings: none` and no `scan: none`. The four sums 0 and
+`legacy_blocks > 0` → list it as `#n 구 형식 기록(블록 <k>개 · 낱말 <loose>개, 종류 구분 불가)`, kept out
+of every total; sums > 0 and `legacy_blocks > 0` → that member's line carries
+`(구 형식 블록 <k>개 — 과소 가능)`. `loose` (the four words anywhere, as whole words) is a number to
+show, **never a verdict**: a new-format clean or no-scan block may well carry `fixed`/`recorded`
+in a role-axis or verify-gap reason (`_execute_spine.md` Step 4, `_stagnation.md`), and a
+`dismissed` always has a reason. Members whose execute ran before the upgrade show as old format
+until they run again.
 ⚠ **`dismissed` still has to be listed with its Issue numbers** (below). The call is per member or
 per child of S, so that Issue's number is already in hand — pair it with the count; do not fold
 it into a total.
@@ -372,10 +388,24 @@ exactly these here: the block headings, the four disposition tokens and the `fin
 `scan: none` lines. Counting anything
 else yields a number that is always 0 and reads as *"the auditor never blocked"*.
 
-⚠ The comment is **cumulative across re-entries** (`_handoff.md` Section B), so `looped-back` +
-`fixed` is *how often the auditor stopped the stage over the sprint*, not *defects shipped*. Say
-which one you are reporting. A `dismissed` is a judgment the human should be able to see: list
-those with their Issue numbers rather than folding them into a total.
+⚠ **What the numbers mean.** **멈춤 = the `looped_back` lines** — finding × attempt: how many
+times an attempt was sent back over that finding, which is exact. `fixed` · `recorded` ·
+`dismissed` are **token line counts** — a carried-forward or re-stated finding is written again
+in every later block (`_execute_spine.md` Step 4), so they are not finding counts — report them
+as `줄 수` and give them no other name (a `fixed` may follow a `looped-back` or a `recorded` —
+measured #562: a MINOR recorded in record 2 and fixed in record 4 — so `looped-back` + `fixed`
+is not "how often the auditor stopped the stage"). A `dismissed` is a judgment the human should
+be able to see: list those with their Issue numbers rather than folding them into a total.
+
+**One row, and one group per Issue.** The 감사자 row:
+`감사자  기록 <records> · 클린 <c> · 멈춤 <l> · 줄 수 fixed <f> · recorded <r> · dismissed <d>(#n…) · 위반 <v>`.
+**Every member — and every child of S — falls into exactly one group, the first that applies:**
+① 위반 (`violation ≥ 1`) ② 미착수 `#<c>` (a child with no PR, above) ③ 기록 없음 (`records 0`)
+④ 구 형식 (`legacy_blocks > 0` and the four sums 0, above) ⑤ 미스캔 (`no_scan == records`) ⑥ 클린 (`clean == records`)
+⑥b **지적 없음** — the four sums 0 and `clean + no_scan == records` (a clean scan after a Step 2
+loop-back's `scan: none` is common) → `지적 없음(클린 k · 미스캔 m)` ⑦ **지적 있음** (the four sums > 0)
+**— listed by number with its counts** (`#1676 records 1 · recorded 1줄` …; `legacy_blocks > 0` 이면 `(구 형식 블록 <k>개 — 과소 가능)` 을 붙인다 — a record mixing old and new blocks, common right after the upgrade) — an ordinary member as
+much as a child (measured word_app #1708: #1676's recorded finding went unreported).
 
 **스택 따라잡기** — a member whose table row says its base is `#<dep>`'s branch but whose PR
 targets the default branch means Step 5's `git ls-remote` re-verification fired: the dependency
@@ -396,7 +426,9 @@ Sprint #99 — 결제 흐름 안정화        (13일 · run 2회 · 계획 7개)
   약속 이행률   5/7  (71%)
   캐리오버      2개 — #103(사람 대기) · #108(#103에 막힘)
   사람 대기     2회  (그중 분할 일시정지 1회)
-  감사자 BLOCKER 제기  6건 / 그중 loop-back 후 해소 6건
+  감사자        기록 9 · 클린 3 · 멈춤 3 · 줄 수 fixed 3 · recorded 1 · dismissed 1(#104) · 위반 0
+                지적 있음 #104 records 3 · 멈춤 2 · fixed 2줄 · dismissed 1줄 · #106 records 2 · 멈춤 1 · fixed 1줄 · recorded 1줄
+                지적 없음 #101(클린 1 · 미스캔 1) · 클린 #102 #105 · 기록 없음 #107
   의존성 차단   3회
   스택          최대 3단 · 자연 단축 2회
   리뷰 변경요청 2/5 PR (40%)
@@ -447,10 +479,14 @@ when none does:
 | 관측 | 권고 방향 |
 |---|---|
 | 이행률 ≥ 85% · 사람 대기 ≤ 1 | +1 |
+| 이행률 ≥ 85% · 사람 대기 ≥ 2 | 유지 — 다 해냈지만 사람 개입이 둘 이상이었다 |
 | 이행률 60~85% | 유지 |
 | 이행률 < 60% · 또는 캐리오버 ≥ 절반 | −1 |
 | 캐리오버 원인이 **하나의 이슈**에 몰림 | **숫자를 건드리지 않는다** — 원인은 용량이 아니라 선별이다. 그렇게 말한다 |
 | `capacity`가 아직 없다(`null`/부재) | **±1을 적용할 대상이 없다.** 이번 스프린트에 **실제로 머지된 수**를 첫 값으로 삼고, 그것이 기준선임을 말한다 |
+
+85% 이상은 이제 모두 덮는다 — 사람 대기 ≥ 2 가 빈칸이던 때 리더가 규칙 밖에서 "유지" 를 골랐다(word_app #1708, 12/12 · 대기 2).
+한계: 사람 대기에는 `env:` 원인(CI 결제 한도 등 코드 밖 원인 — `_handoff.md` Section H)도 세므로 계정 원인이 +1 을 막을 수 있다 — Phase 4 의 승인 질문에서 사람이 숫자를 고칠 수 있다.
 
 ⚠ The last row matters more than the arithmetic. Capacity is the human's **PR-review
 throughput** (D5), and a sprint that stalled on one unclear Issue says nothing about it.
@@ -513,6 +549,29 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
    outcome is *no outcome*.
 5. Write the full JSON back with the Write tool (2-space indent).
    **DRY**: skip 1–5 entirely and print the JSON that *would* be written.
+6. **Commit `config.json` on its own** — otherwise the next phase's evolve stops at its Phase 6
+   Step 0 clean-tree gate (`evolve.md`), and a leader measured committing it outside these rules
+   to get past it. Each its own Bash call:
+   - `git diff --quiet HEAD -- .claude/guild/config.json` — exit 0 (nothing changed: a re-run
+     writing the same values, step 3) → skip the commit and say so (`git commit`'s *nothing to
+     commit* exit 1 must not be reported as a failure).
+   - Changed → only **on the default branch**: `git branch --show-current` against the default
+     branch's name, read here with `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name`
+     (the repo is positional; Phase 7 has not read it yet) — as `plan.md` Phase 6 step 6 sub-step 3.
+   - **Nothing else staged?** `git diff --cached --name-only` must print nothing (`plan.md` Phase 6
+     step 6 sub-step 4 — the commit gate judges the whole index); anything → commit nothing, they
+     are the human's.
+   - When `config.json` also holds a line that is not Guild's, ask the same question as `plan.md`
+     Phase 6 step 6 sub-step 6.
+   - `git add -- .claude/guild/config.json`
+   - `git commit -m "chore(guild): 스프린트 #<tracker> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/config.json`
+     — `timeout` 600000, **never `--no-verify`**.
+   - **Do not push.** The next `sprint plan`'s Phase 6 step 6 sub-step 5 finds it among the
+     unpushed commits and asks whether to push it together with the record.
+   Not on the default branch, or the commit failed → commit nothing (`git restore --staged --
+   .claude/guild/config.json` after a failed commit) and say beforehand that evolve will stop at
+   its clean-tree gate until `config.json` is committed.
+   **DRY**: skip this step.
 
 ⚠ **Writing `config.json` trips the commit gate's own `--guard-config` guard**, which surfaces as
 a confirmation prompt (`_invariants.md` INV3 — the gate's control files are guarded by an `ask`, not a block). That is expected and intended, not an error — say so before
@@ -617,6 +676,10 @@ This is a **disclosure, not a projection** — no `gh project` call, no card tou
    two sprints is accurate history. So carryover needs no label surgery at all.
 2. **Append the retro comment** — `<!-- guild:sprint:retro -->` … `<!-- /guild:sprint:retro -->`,
    temp file + `--body-file`.
+   **A commit named in it** (evolve's, Phase 4 step 6's) is written as its hash + `(push 전)` +
+   its subject — it is a local commit not yet pushed, and a rebase before the push gives it
+   another hash on the default branch (measured one-man-company #572: "커밋 34621bf9" is not
+   reachable from `origin/main`); the subject is what stays findable.
    ⚠ **Appended, never replace-in-place** — the third documented exception in `_handoff.md`
    Section B. A repo's sprint history is the sequence of these comments; a replacing PATCH would
    erase the previous one.
