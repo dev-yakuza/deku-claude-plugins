@@ -96,9 +96,26 @@ Reached when the parent Issue `$1` is at `guild:children` (Phase 1) or design ju
 
 1. **Discover children** (its own Bash call — substitute the **literal** parent number for `<parent>`; do NOT splice a shell `$1` into the jq string, per `_bash_rules.md` / Section I. Ascending order = execution order):
    ```bash
-   gh issue list --label guild:child --state all --limit 200 --json number,title,body,labels --jq '[.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)"))] | sort_by(.number) | .[] | {number, title, labels: [.labels[].name]}'
+   gh issue list --label guild:child --state all --limit 200 --json number,title,body,labels,state --jq '[.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)"))] | sort_by(.number) | .[] | {number, title, state, labels: [.labels[].name]}'
    ```
    None found → `FAIL: parent #$1 is at guild:children but no child Issues reference it` (state inconsistency — report, do not guess). This should be unreachable via normal operation — `design.md`/`plan.md` only set `guild:children` **after** every child already exists, so their own flow can never produce a `guild:children` parent with zero discoverable children. Reaching this FAIL means something outside that flow set the label (a manual GitHub edit, a bug, or a `guild:child` Issue's body/label was altered after creation so the discovery query no longer finds it) — recovery: verify by hand whether children genuinely exist (`gh issue list --label guild:child --state all` and inspect bodies for a `Parent Issue: #$1` line that the query's regex might be missing), fix the mismatch, then re-run `/gld resume $1`.
+
+1b. **Clean up a child a human already merged** (0.98.2 R1). Measured (#573, #502): a child's PR was merged by a human — the Issue is `CLOSED` — while its labels still read `guild:qa,guild:needs-human`. Step 2 would re-run it from that label, and qa looks for the PR with `--state open` only, so the re-run stalls on that child. So, for each pending child (no `guild:done`) whose `state` is **`CLOSED`** — only those; an open child is step 2's — each its own Bash call:
+   ```bash
+   gh issue view <c> --json closedByPullRequestsReferences
+   ```
+   The list carries no PR state, so for **each PR in it whose `repository.owner.login`/`repository.name` is this repo** (a cross-repo reference is never evidence):
+   ```bash
+   gh pr view <p> --json state,mergedAt
+   ```
+   - **Any PR `MERGED`** → the child's work is in. Mark it done, removing only the labels the discovery output **actually shows** on it — its `guild:<stage>` label and `guild:needs-human` if present (removing a label the Issue does not carry errors — `_handoff.md` Section A's removal note), e.g. for the measured case:
+     ```bash
+     gh issue edit <c> --add-label "guild:done" --remove-label "guild:qa" --remove-label "guild:needs-human"
+     ```
+     then one line on the parent (temp-file pattern): `자식 #c 는 PR #p 로 머지되어 done 으로 정리함`. Continue with the next child.
+   - **No `MERGED` PR** (a human closed it without merging) → no action here — step 2 reaches it in order and stops on it as today. Do not stop the orchestration in this step: smaller open children must still run first.
+   A child cleaned up here counts as `guild:done` in step 2 — step 2 reads step 1's discovery labels, so treat it as done there rather than re-running it.
+   Limits: a PR merged and later reverted is still `MERGED`, so its child is cleaned up too. A **stacked** child PR does not close its Issue, so an `OPEN` child whose PR is `MERGED` but which is not `guild:done` is not handled here (qa's open-PR lookup can stall on it the same way — backlog).
 
 2. **Drive each pending child through the full spine.** For each child `C` in order whose labels do **not** include `guild:done`:
    - Announce which child is starting (of how many).
@@ -124,6 +141,7 @@ All children are `guild:done`; verify they combine into a correct whole before c
    - **Coverage** — every parent acceptance criterion is satisfied by some child (nothing dropped in the split).
    - **Cross-child consistency** — shared seams/data shapes/interfaces agree across children; no duplicated or orphaned work.
    - **DoD closure** — the parent's Definition of Done items are all addressed.
+   A child cleaned up by Phase 2b step 1b has its merged PR as its evidence; with no test output (a human merged it during execute) write `test 출력 없음 — 사람 머지` in the coverage map — that alone is not a gap.
 2. Post the result on the parent under `<!-- guild:integration:output -->` … `<!-- /guild:integration:output -->` (temp-file pattern): what was checked, coverage map (parent AC → child), any gap.
 3. **Judge**:
    - Gap found → do NOT close. Attended: `NEEDS_HUMAN: integration gap — <one-line>` (a targeted loop-back to the responsible child, or a new child). Unattended: mark `guild:needs-human` + comment, stop cleanly.

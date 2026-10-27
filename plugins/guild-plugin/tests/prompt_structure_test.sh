@@ -3396,7 +3396,7 @@ hasfx "plan: 에픽은 남은 자식 모두 ✅ 일 때만 크기 통과" "$PLAN
 hasfx "plan: 섞인 판정 자식은 ⚠" "$PLAN" 'a mixed child (above) counts as ⚠, a `⚠ depends:` child as `depends:`'
 hasfx "plan: 판정 없는 자식 사유" "$PLAN" '`제외: #e (에픽 · 자식 #c 크기 판정 없음)`'
 hasfx "plan: Epics in the fill — 모든 자식 ✅ 게이트" "$PLAN" '- **Every child to be sized ✅** (Phase 2, the epic'"'"'s size — a child at `guild:execute` or later'
-hasfx "plan: Add 경고 — 분할 예상 자식 split-stalled" "$PLAN" '`⚠ #e 의 자식 #c 는 분할 예상 — run 이 그 자식에서 멈추고 몇 번 다시 시도한 뒤 split-stalled(미완)로 끝날 수 있습니다`'
+hasfx "plan: Add 경고 — 분할 예상 자식은 일시정지 (0.98.2 R2)" "$PLAN" '`⚠ #e 의 자식 #c 는 분할 예상 — run 이 그 자식에서 사람 대기로 멈추고 에픽은 일시정지됩니다(재시도 없음)`'
 hasfx "plan: Add 경고 — 결정 필요 자식" "$PLAN" '`⚠ #e 의 자식 #c 는 결정이 필요합니다 — design 에서 정해지지 않으면 그 자식에서 멈출 수 있습니다`'
 lacksfx "plan: Add 경고 옛 문구(다시 나뉠 수 없어) 제거" "$PLAN" '자식은 다시 나뉠 수 없어 run 이 그 자식에서 멈춥니다'
 # 1-2 tech-lead satisfied 메모 → Phase 5 의견 줄 (규칙 불변)
@@ -3849,6 +3849,121 @@ lacksfx "daily(0.98.1): 옛 '500건에서 잘려' 판단 불가 문구 제거" "
 
 hasfx "retro(0.98.1 cr): 완전성 비교 방향" "$GLD/commands/sprint/retro.md" '**second line < the smallest number among the members'
 
+# 0.98.2 (1차) — 보안 문제와 run 이 멈추는 문제 (design 20)
+P2_RUN="$GLD/commands/sprint/run.md"; P2_PLAN="$GLD/commands/sprint/plan.md"; P2_DAILY="$GLD/commands/sprint/daily.md"
+P2_RETRO="$GLD/commands/sprint/retro.md"; P2_DEV="$GLD/commands/dev.md"; P2_HO="$GLD/commands/atoms/_handoff.md"
+P2_BR="$GLD/commands/atoms/_bash_rules.md"; P2_INIT="$GLD/commands/init.md"
+# S1 — init 의 dismissed.md 형식
+hasfx "init(0.98.2 S1): dismissed.md 형식은 백틱 경로" "$P2_INIT" '`` - `<path/pattern>` — <reason> `` (backticks recommended, optional)'
+hasfx "init(0.98.2 S1): 형식 줄은 불릿이 아닌 > 인용·문장" "$P2_INIT" 'as a `>` quote or a plain sentence — never as a bullet'
+lacksfx "init(0.98.2 S1): 옛 백틱 없는 형식 제거" "$P2_INIT" '(header only; `- <path/pattern> — <reason>` downgrades'
+# S3 — gh auth status 로만 판정, 값 출력 금지
+hasfx "run(0.98.2 S3): GH_TOKEN 확인은 창과 무관하게 항상, 정확히 gh auth status" "$P2_RUN" '**Always — window or not — check which GitHub credential the supervisor will inherit: `gh auth
+status`, its own Bash call, exactly that command.**'
+hasfx "run(0.98.2 S3): 출력 텍스트로 판정 (종료 코드 아님)" "$P2_RUN" 'Judge by the **output text, not the exit code** — one expired keyring
+account alone makes it exit 1:'
+hasfx "run(0.98.2 S3): X (GH_TOKEN) 은 모든 run 에서 중단" "$P2_RUN" '**Stop before the run, in every run**'
+hasfx "run(0.98.2 S3): 창 경고+질문은 ✓ (GH_TOKEN) 일 때만" "$P2_RUN" '3. **`GH_TOKEN` + a window → warn and ask** (`✓ … (GH_TOKEN)` in the `gh auth status` check above).'
+hasfx "run(0.98.2 S3): ✓ … (GH_TOKEN) → 사용 중" "$P2_RUN" '- a line `✓ … (GH_TOKEN)` → `GH_TOKEN` is in use'
+hasfx "run(0.98.2 S3): X … (GH_TOKEN) → 무효, 갱신·삭제 후 세션 재시작" "$P2_RUN" '"GH_TOKEN 을 설정한 곳(셸 프로필·Claude settings 의 env)에서
+  갱신하거나 지운 뒤 Claude 세션을 다시 시작하세요"'
+hasfx "run(0.98.2 S3): GITHUB_TOKEN 도 keyring 을 덮어씀" "$P2_RUN" '`(GITHUB_TOKEN)` overrides the keyring the same way'
+hasfx "run(0.98.2 S3): 값 출력 금지 문장" "$P2_RUN" '**Never `gh auth status --show-token`, `gh auth token`, or a command that prints a secret
+environment variable'"'"'s value (`env`, `printenv GH_TOKEN`, `echo`)**'
+hasfx "_bash_rules(0.98.2 S3): 비밀 값 출력 금지 일반 규칙" "$P2_BR" '비밀(토큰·키) 환경 변수의 값은 출력하지 않는다 — 존재·출처는 그 도구의 상태 명령으로'
+hasfx "_bash_rules(0.98.2 S3): 비밀 아닌 printenv 는 그대로" "$P2_BR" '`printenv` of a variable that is not a secret (e.g. `printenv BASH_MAX_TIMEOUT_MS`) stays as it is.'
+ST_OUT="$("$PY" - "$GLD/commands/atoms/scan_transcript.py" <<'PYX'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+s = importlib.util.spec_from_file_location("st", sys.argv[1]); m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+print(bool(m.GUILD_MANDATED_RE.match("gh auth status")), bool(m.GUILD_MANDATED_RE.match("gh auth status --show-token")),
+      bool(m.REDISCOVERY_RE.match("gh auth switch")))
+PYX
+)"
+[ "$ST_OUT" = "True False True" ] && ok "scan_transcript(0.98.2 S3): run 의 gh auth status 는 Guild 지정 호출 (재탐색 아님), 다른 형태는 그대로" \
+  || bad "scan_transcript(0.98.2 S3): gh auth status 분류" "True False True" "$ST_OUT"
+# 같은 판정을 실제 분류 경로로: 세션 4개에 반복된 `gh auth status`(지정 호출)와 대조군 `gh auth switch`
+ST_HOME="$(mktemp -d)"; mkdir -p "$ST_HOME/.claude/projects/p"
+for i in 1 2 3 4; do
+  printf '%s\n' '{"cwd":"/st/repo","type":"user","message":{"content":"hi"}}' \
+    '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"gh auth status"}},{"type":"tool_use","name":"Bash","input":{"command":"gh auth switch"}}]}}' \
+    > "$ST_HOME/.claude/projects/p/s$i.jsonl"
+done
+ST_RUN="$(HOME="$ST_HOME" "$PY" -B "$GLD/commands/atoms/scan_transcript.py" --repo-cwd /st/repo 2>/dev/null | "$PY" -c '
+import json, sys
+t = sys.stdin.read(); d = json.loads(t.split(">>> RESULT <<<", 1)[1])
+sig = d.get("signals") or []
+st = [s["class"] for s in sig if s.get("summary", "").endswith("gh auth status")]
+sw = [s["class"] for s in sig if s.get("summary", "").endswith("gh auth switch")]
+print("status=%s switch=%s" % (",".join(st) or "none", ",".join(sw) or "none"))')"
+rm -rf "$ST_HOME"
+[ "$ST_RUN" = "status=none switch=rediscovery" ] && ok "scan_transcript(0.98.2 S3): 반복된 gh auth status 는 마찰 신호가 아님 (실제 분류 경로; 대조군 gh auth switch 는 rediscovery)" \
+  || bad "scan_transcript(0.98.2 S3): 실제 분류 경로" "status=none switch=rediscovery" "$ST_RUN"
+# S4 — BODIES 는 명령으로만
+hasfx "plan(0.98.2 S4): BODIES 를 파일로 넘기지 않음" "$P2_PLAN" '⚠ **BODIES 는 명령으로만 넘긴다 — 본문을 파일로 저장해 넘기지 마라(공유 /tmp·저장소 안 모두).**'
+hasfx "plan(0.98.2 S4): 도구가 옮긴 파일은 Read 로 끝까지" "$P2_PLAN" '도구 출력이 파일로 넘어가는 것은 도구의 동작이며 Read 의 offset/limit 으로 끝까지 읽는다.'
+# R1 — 사람이 머지한 자식 정리
+hasfx "dev(0.98.2 R1): 자식 발견 쿼리에 state" "$P2_DEV" '--json number,title,body,labels,state --jq '"'"'[.[] | select((.body // "") | test("Parent Issue: #<parent>([^0-9]|$)"))] | sort_by(.number) | .[] | {number, title, state, labels: [.labels[].name]}'"'"
+hasfx "dev(0.98.2 R1): CLOSED 자식만 PR 조회" "$P2_DEV" 'whose `state` is **`CLOSED`** — only those; an open child is step 2'"'"'s'
+hasfx "dev(0.98.2 R1): closedByPullRequestsReferences 명령" "$P2_DEV" 'gh issue view <c> --json closedByPullRequestsReferences'
+hasfx "dev(0.98.2 R1): 같은 저장소 PR 마다 state,mergedAt" "$P2_DEV" 'gh pr view <p> --json state,mergedAt'
+hasfx "dev(0.98.2 R1): 실제로 있는 라벨만 제거" "$P2_DEV" 'removing only the labels the discovery output **actually shows** on it'
+hasfx "dev(0.98.2 R1): 부모 기록 한 줄" "$P2_DEV" '`자식 #c 는 PR #p 로 머지되어 done 으로 정리함`'
+hasfx "dev(0.98.2 R1): MERGED 없으면 1b 는 아무것도 안 함 (step 2 가 순서대로 멈춤)" "$P2_DEV" '**No `MERGED` PR** (a human closed it without merging) → no action here — step 2 reaches it in order and stops on it as today.'
+lacksfx "dev(0.98.2 R1): 1b 에서 조기 중단하지 않음" "$P2_DEV" 'stop here as today: report the child'
+hasfx "dev(0.98.2 R1): 1b 정리 자식은 step 2 에서 done 으로" "$P2_DEV" 'A child cleaned up here counts as `guild:done` in step 2'
+hasfx "dev(0.98.2 R1): revert·스택 한계" "$P2_DEV" 'A **stacked** child PR does not close its Issue, so an `OPEN` child whose PR is `MERGED` but which is not `guild:done` is not handled here'
+hasfx "dev(0.98.2 R1): Phase 2c 사람 머지 표기" "$P2_DEV" '`test 출력 없음 — 사람 머지`'
+hasfx "_handoff(0.98.2 R1): guild:done 예외" "$P2_HO" '자식이 같은 저장소 PR 의 머지로 사람에 의해 닫히면 dev Phase 2b 가 done 으로 정리한다(QA 를 거치지 않음)'
+hasfx "_handoff(0.98.2 R1): OK DONE 행의 예외" "$P2_HO" 'The one `guild:done` that `OK DONE` does not set'
+hasfx "_handoff(0.98.2 R1): needs-human 제거 지점 = forward-progress" "$P2_HO" 'is a forward-progress transition of this first kind — the merge is the evidence the pause was resolved.'
+hasfx "daily(0.98.2 R1): 머지됐지만 done 아닌 자식 대체 줄" "$P2_DAILY" '`#e 자식 #c 는 머지됐지만 done 이 아닙니다 — 다음 run 이 정리합니다(할 일 없음)`'
+hasfx "daily(0.98.2 R1): 대체 — needs-human 줄 대신" "$P2_DAILY" 'gets, **instead of** that line:'
+hasfx "daily(0.98.2 R1): 사람 대기 정의에서 제외" "$P2_DAILY" '**단 `CLOSED` 이면서 같은 저장소 `MERGED` PR'
+hasfx "daily(0.98.2 R1): via: branch 는 근거 아님" "$P2_DAILY" '(a `via: branch` row is not evidence — `dev` judges by `closedByPullRequestsReferences`, so the'
+hasfx "retro(0.98.2 R1): 사람 대기 횟수는 그대로 셈" "$P2_RETRO" '⚠ 도달 수이므로 그 정의의 제외(`CLOSED` + 같은 저장소 `MERGED` PR 자식)는 여기 적용하지 않는다 — 사람이 머지한 것도 개입이다. 제외는 아래 현재 대기 목록에만'
+hasfx "plan(0.98.2 R1): blocked_children — CLOSED+needs-human 자식만 PR 판정" "$P2_PLAN" 'for each `guild:needs-human` child that is closed, run
+  `gh issue view <c> --json closedByPullRequestsReferences`'
+hasfx "plan(0.98.2 R1): blocked_children — MERGED 제외" "$P2_PLAN" 'A `MERGED` one → not blocked (`dev` Phase 2b cleans the child up to `guild:done`'
+hasfx "plan(0.98.2 R1): closed-not-done 머지됨 표시" "$P2_PLAN" '`#c(머지됨 — run 이 정리)`'
+hasfx "plan(0.98.2 R1 r2): 머지됨 자식은 읽지 않고 readiness·sizing·count 에서 제외" "$P2_PLAN" 'it is not read,
+  and it is excluded from readiness, sizing and the `remaining`/`epic ×<k>` counts.'
+hasfx "plan(0.98.2 R1 r2): remaining k 에 머지됨 자식 미포함" "$P2_PLAN" 'A child marked `(머지됨 — run 이 정리)` (below) is **not counted in `k`**'
+hasfx "plan(0.98.2 R1 r2): 에픽 판정(막힘/구체화)에서 머지됨 자식 제외" "$P2_PLAN" '**Except a child marked
+`(머지됨 — run 이 정리)`**: it is not read and is no remaining child for this judgment'
+hasfx "plan(0.98.2 R1 r2): PO 프롬프트 — 머지됨 자식 읽지 않음" "$P2_PLAN" 'a `closed-not-done` one you read with `gh issue view <c> --json body` — **except one marked `(머지됨 — run 이 정리)`: do not read it, and leave it out of the readiness judgment**'
+hasfx "plan(0.98.2 R1 r2): CANDIDATES 의 closed-not-done 필드가 표시를 실음" "$P2_PLAN" '· closed-not-done <#c…|—> · 바닥 선행 미완 <#d…|—>)` — in `closed-not-done`, a child a same-repo `MERGED` PR closed is written `#c(머지됨 — run 이 정리)` (Phase 1)'
+lacksfx "plan(0.98.2 R1 r2): 표시 없이 모든 closed-not-done 을 읽으라는 옛 문구 없음" "$P2_PLAN" 'a `closed-not-done` child'"'"'s body via `gh issue view <c> --json body`.'
+TLN="$(grep -cF 'a `closed-not-done` child'"'"'s body via `gh issue view <c> --json body` — **except one marked `(머지됨 — run 이 정리)`: do not read it, do not size it, and do not count it in `epic ×<k>`**' "$P2_PLAN")"
+[ "$TLN" = 2 ] && ok "plan(0.98.2 R1 r2): tech-lead 프롬프트 2곳(선택·리팩터 슬롯) 모두 머지됨 자식 제외" || bad "plan(0.98.2 R1 r2): tech-lead 프롬프트 2곳" "2" "$TLN"
+# R2 — split 부모 PAUSED
+hasfx "run(0.98.2 R2): guild:children 행의 PAUSED 경로" "$P2_RUN" '**The one exception — PAUSED** (0.98.2 R2): when, after a pass, the parent'"'"'s smallest outstanding child'
+hasfx "run(0.98.2 R2): 하류 dep-needs-human" "$P2_RUN" 'the parent goes into `dag/paused.txt` so its dependants block as `dep-needs-human`'
+hasfx "run(0.98.2 R2): paused.txt 재실행 초기화" "$P2_RUN" "python3 -c \"open('.claude/guild/.sprint-logs/<tracker>/dag/paused.txt','w').close()\""
+hasfx "run(0.98.2 R2 r2): failed.txt 설명이 '두 누적 파일 중 하나'" "$P2_RUN" '`failed.txt` is the supervisor'"'"'s **working state for one run, not a record**, and it is one
+   of the two dag files that **accumulate across runs** (the other is `paused.txt`, below)'
+lacksfx "run(0.98.2 R2 r2): 옛 'the one dag file' 문구 없음" "$P2_RUN" 'and it is the one
+   dag file that **accumulates across runs**'
+PSO="$(awk '/the retry counts live in the run marker\./{a=NR} /Then truncate `paused.txt` the same way/{b=NR} END{print (a && b && a < b) ? "ok" : "bad"}' "$P2_RUN")"
+[ "$PSO" = ok ] && ok "run(0.98.2 R2 r2): paused.txt 문단은 failed.txt 설명 뒤" || bad "run(0.98.2 R2 r2): paused.txt 문단 위치" "after failed.txt paragraphs" "$PSO"
+hasfx "run(0.98.2 R2): 'No other dag file' 문장 갱신" "$P2_RUN" '⚠ **No other dag file needs this** — `failed.txt` and `paused.txt` are the two that'
+hasfx "run(0.98.2 R2): Do not hand it to the human 의 예외 (별도 문장)" "$P2_RUN" 'exactly as they would outside a sprint. **The one exception — PAUSED**'
+hasfx "run(0.98.2 R2): 예외 근거 문장" "$P2_RUN" '`dep-needs-human`. 단 가장 작은 대기 자식이 needs-human 이면 PAUSED — 근거는 completion 의 `#e (child #c)`(라벨은 `guild:children` 그대로).'
+hasfx "run(0.98.2 R2): label-truthful 보고의 예외 (별도 문장)" "$P2_RUN" 'Report such a member as paused on `#c`, not by the parent'"'"'s label.'
+lacksfx "run(0.98.2 R2): 영어 문장 중간에 끼운 예외 없음" "$P2_RUN" 'Do **not** hand it to the human — 단'
+hasfx "retro(0.98.2 R2): 분할 일시정지 예외" "$P2_RETRO" '단 가장 작은 대기 자식이 needs-human 이면 PAUSED — 근거는 completion 의 `#e (child #c)`(라벨은 `guild:children` 그대로)'
+hasfx "daily(0.98.2 R2): paused_issues 의 #e (child #c)" "$P2_DAILY" '`#e (child #c)` 는 자식이 needs-human — 부모 라벨은 `guild:children`'
+hasfx "plan(0.98.2 R2): 예고 문구 — 일시정지(재시도 없음)" "$P2_PLAN" 'the supervisor pauses the epic (`#e (child #c)`, no
+  re-try, not `split-stalled`)'
+lacksfx "plan(0.98.2 R2): 옛 예고 문구 제거" "$P2_PLAN" 'unattended it may re-try and end the epic `split-stalled`'
+lacksfx "plan(0.98.2 R2): 옛 Add 경고 제거" "$P2_PLAN" '몇 번 다시 시도한 뒤 split-stalled(미완)로 끝날 수 있습니다'
+hascode "supervisor(0.98.2 R2): 부모 재호출 전 새 함수" "$GLD/templates/sprint-supervisor.sh" 'SPLIT_HEAD="$(split_head_needs_human "$ISSUE")"'
+hascode "supervisor(0.98.2 R2): paused.txt 쓰기는 별도 함수" "$GLD/templates/sprint-supervisor.sh" 'record_paused "$ISSUE"'
+hascode "supervisor(0.98.2 R2): paused.txt 없으면 만든다" "$GLD/templates/sprint-supervisor.sh" '[ -f "$D/paused.txt" ] || : > "$D/paused.txt"'
+hasfx "supervisor(0.98.2 R2): children 일 때만 needs-human" "$GLD/templates/sprint-supervisor.sh" 'if line.isdigit() and terminal.get(line) == "children":'
+# R3 — plan 의 중앙 관리 파일 정의 옆
+hasfx "plan(0.98.2 R3): 실행 중 변경은 커밋 게이트가 알림" "$P2_PLAN" '실행 중 변경은 커밋 게이트가 정보 경고로 알린다'
+
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
 # ⚠ A FLOOR ON THE CHECK COUNT. This file is a long list of `hasfx`/`lacksfx` calls, and an
@@ -3856,7 +3971,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=1528   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=1595   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

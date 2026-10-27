@@ -277,8 +277,14 @@ children that are **not 머지 on step 6's merge axis**, whatever their labels. 
    - otherwise → `#e 은 자식으로 진행 중입니다(머지 안 된 자식 <n>개)`.
 
    Either way, when the epic is **사람 대기** — defined once: **the parent, or one of its children
-   without `guild:done`, carries `guild:needs-human`** (`plan.md` Phase 1's `blocked_children`, and
-   `retro.md`'s 사람 대기 row; a stopped child carries the label itself, `dev.md` Phase 2b) —
+   without `guild:done`, carries `guild:needs-human`** — **단 `CLOSED` 이면서 같은 저장소 `MERGED` PR
+   이 있는 자식은 제외**: step 3's PR list holds a `MERGED` row whose `closes` includes that child
+   (a `via: branch` row is not evidence — `dev` judges by `closedByPullRequestsReferences`, so the
+   two must agree). Such a child is not waiting on anyone — `dev` Phase 2b cleans it up to
+   `guild:done` on the next run. This is the same set as `plan.md` Phase 1's `blocked_children`
+   (which makes the same exclusion per child with `gh pr view`), and `retro.md`'s current 사람 대기
+   lists use it (its 사람 대기 횟수 counts reaches and does not exclude). A stopped child carries
+   the label itself, `dev.md` Phase 2b —
    append ` · 사람 대기 #<번호>` (the Issue that carries it). Children run one at a time, so a
    stopped epic often shows only children with no PR or already merged — that is still 사람 대기,
    and step 6 still counts it as 캐리오버.
@@ -299,6 +305,10 @@ show a child that was done with its PR still open.
 `#e 자식 #c needs-human 대기 — /gld resume <c> (그 뒤 남은 자식은 /gld dev #e 또는 sprint run 재실행)`
 (`plan.md` Phase 5's command; `/gld resume <c>` finishes only that child). The split-parent
 line's ` · 사람 대기 #c` points at it.
+A child that is `CLOSED` and has a same-repo `MERGED` PR in step 3's list whose `closes` holds it
+(the exclusion in step 5's 사람 대기 definition) gets, **instead of** that line:
+`#e 자식 #c 는 머지됐지만 done 이 아닙니다 — 다음 run 이 정리합니다(할 일 없음)` — a `/gld resume <c>`
+on a closed Issue would do nothing (qa finds the PR with `--state open` only).
 
 Guild hides children from the board (D8), so without the split-parent line the parent sits in
 `In review` with no PR to review and a `split-children` token a human has no way to decode.
@@ -449,6 +459,8 @@ makes this a large number), `cost`, `tokens`, `logs`, `run_timestamp`, and the f
   current state.
 - ⚠ **`paused_issues` first.** A paused member (`guild:needs-human`) is the one outcome that
   **requires** a human, and `paused: 1` without a number cannot be acted on days later.
+  `#e (child #c)` 는 자식이 needs-human — 부모 라벨은 `guild:children` (the supervisor paused the
+  split parent because its smallest outstanding child waits on a human); act on `#c`.
 - ⚠ **`kept_worktrees` is `{path, reason}`**, and the `reason` is git's own refusal
   (`locked` / `modified or untracked files` / `main working tree`) — three different actions,
   not re-derivable from a live `git status` days later. Render the reason.

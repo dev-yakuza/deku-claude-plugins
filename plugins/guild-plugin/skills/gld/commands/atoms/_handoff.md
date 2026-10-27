@@ -25,7 +25,7 @@ The single source of truth for "what stage is this Issue in" is its GitHub label
 | `guild:execute` | execute (implement) stage active / done | design produced `OK ADVANCE: execute` |
 | `guild:test` | test stage active / done | execute produced `OK ADVANCE: test` |
 | `guild:qa` | QA stage active / done | test's verify gate passed → `OK ADVANCE: qa` |
-| `guild:done` | Issue complete | QA gate passed |
+| `guild:done` | Issue complete | QA gate passed — one exception: 자식이 같은 저장소 PR 의 머지로 사람에 의해 닫히면 dev Phase 2b 가 done 으로 정리한다(QA 를 거치지 않음) |
 | `guild:child` | this Issue is a child of a parent Issue | design split work into multiple PRs |
 | `guild:children` | this (parent) Issue is split; its children are being driven sequentially | design decided a multi-PR split (Section I) |
 | `guild:needs-human` | **additive, not a stage** — an unattended run paused here at a high-stakes gate | Section H's pause path; removed on the next forward transition, or on a human-decided loop-back (below) |
@@ -143,7 +143,7 @@ A human moving labels by hand (`/gld rollback stage`) is neither: no block, no c
 ```bash
 gh issue edit <n> --remove-label "guild:execute" --add-label "guild:test" --remove-label "guild:needs-human"
 ```
-Check the Issue's current labels first (already read at Step 0 of every stage — analyze/design/implement/debug/refactor/qa/test all read labels before deciding whether to add their entry label) and only include `--remove-label "guild:needs-human"` when it's actually present — `gh issue edit` can error removing a label the Issue doesn't carry, so don't include it speculatively.
+Check the Issue's current labels first (already read at Step 0 of every stage — analyze/design/implement/debug/refactor/qa/test all read labels before deciding whether to add their entry label) and only include `--remove-label "guild:needs-human"` when it's actually present — `gh issue edit` can error removing a label the Issue doesn't carry, so don't include it speculatively. `dev` Phase 2b step 1b's cleanup of a human-merged child (`--add-label "guild:done"`, removing its stage label and `guild:needs-human` when present) is a forward-progress transition of this first kind — the merge is the evidence the pause was resolved.
 
 ---
 
@@ -382,7 +382,7 @@ A stage wrapper (analyze/design/implement/test) returns one line to the main ses
 |---|---|---|
 | `OK ADVANCE: <next-stage>` | stage complete, advance | transition label to `guild:<next-stage>` |
 | `OK SPLIT: <N> children` | design split the Issue into `N` child Issues | transition the **parent** to `guild:children` and enter child orchestration (dev Phase 2b — Section I) |
-| `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done` — **Guild's work is complete; the PR is open awaiting human review + merge**. Do **not** close the Issue: the PR body carries `Closes #<N>`, so **GitHub** closes it when the human merges — INV1 (nothing merges unattended; the human is the external reviewer of record). No Guild command closes a **stage** Issue deliberately. ⚠ **One exception, and it is not a stage Issue**: `/gld sprint retro` closes the sprint **tracking Issue** (`guild:sprint`). That Issue never runs the spine and has no PR of its own, so nothing else can ever close it — leaving it open would make every later `sprint plan` report an active sprint that finished weeks ago. The rule above is about work whose completion GitHub records through a merge; a container's completion is recorded by the retro that closed it. |
+| `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done` — **Guild's work is complete; the PR is open awaiting human review + merge**. Do **not** close the Issue: the PR body carries `Closes #<N>`, so **GitHub** closes it when the human merges — INV1 (nothing merges unattended; the human is the external reviewer of record). No Guild command closes a **stage** Issue deliberately. ⚠ **One exception, and it is not a stage Issue**: `/gld sprint retro` closes the sprint **tracking Issue** (`guild:sprint`). That Issue never runs the spine and has no PR of its own, so nothing else can ever close it — leaving it open would make every later `sprint plan` report an active sprint that finished weeks ago. The rule above is about work whose completion GitHub records through a merge; a container's completion is recorded by the retro that closed it. The one `guild:done` that `OK DONE` does not set: a split child whose same-repo PR a human merged (Issue `CLOSED`) — `dev` Phase 2b step 1b cleans it up to `guild:done` without QA. |
 | `OK LOOPBACK: execute` | test or qa sent the work back (the leader's own loop-back returns no token — it records it and runs execute directly) (Section A, *Backward transitions*) — the wrapper has already appended the loop-back block and moved the label to `guild:execute` | run the execute variant again (re-read the `type:` label first), then continue from test. Not a forward transition: it never removes `guild:needs-human` except when the human decided the loop-back |
 | `OK PAUSE: <one-line>` | leader/human chose to stop here | leave label as-is; report |
 | `NEEDS_HUMAN: <one-line>` | a discuss/verify gate needs a human decision | main session prompts the human (`AskUserQuestion`), then resumes |

@@ -229,8 +229,8 @@ Sources, and **what each is honestly derived from**:
 |---|---|---|
 | 약속 이행률 | 머지된 멤버 / 계획된 멤버 | 멤버 표 + PR `mergedAt` — 머지 축(`daily.md` step 6). 에픽은 한 자리, 자식이 모두 머지돼야 머지 |
 | 캐리오버 | 결말나지 않은 멤버 (done도 아니고 머지도 안 된 것) | 라벨 + PR 상태. 에픽은 부모가 done 이 아니면 캐리오버(자식 상태 무관) |
-| 사람 대기 횟수 | `guild:needs-human`에 도달한 멤버 수 | 라벨. 에픽은 부모 또는 done 이 아닌 자식 중 하나라도 `guild:needs-human` 이면 1(`daily.md` step 5 의 **사람 대기** 정의) |
-| ↳ 그중 분할이 멈춘 것 | **분리 집계** — 원인이 다르다 | `failures.jsonl`의 `split-stalled`. ⚠ 분할 자체는 더 이상 일시정지가 아니다(§8.7) — 감독자가 이어서 재개하므로, 이 값은 *재개가 전진을 멈춘* 횟수다 |
+| 사람 대기 횟수 | `guild:needs-human`에 도달한 멤버 수 | 라벨. 에픽은 부모 또는 done 이 아닌 자식 중 하나라도 `guild:needs-human` 이면 1(`daily.md` step 5 의 **사람 대기** 정의). ⚠ 도달 수이므로 그 정의의 제외(`CLOSED` + 같은 저장소 `MERGED` PR 자식)는 여기 적용하지 않는다 — 사람이 머지한 것도 개입이다. 제외는 아래 현재 대기 목록에만 |
+| ↳ 그중 분할이 멈춘 것 | **분리 집계** — 원인이 다르다 | `failures.jsonl`의 `split-stalled`. ⚠ 분할 자체는 더 이상 일시정지가 아니다(§8.7) — 감독자가 이어서 재개하므로, 이 값은 *재개가 전진을 멈춘* 횟수다. 단 가장 작은 대기 자식이 needs-human 이면 PAUSED — 근거는 completion 의 `#e (child #c)`(라벨은 `guild:children` 그대로) |
 | 감사자 루프백 | 멤버 이슈(분할 멤버는 자식 이슈)의 감사자 레코드에서 **disposition 토큰** 집계 | 멤버 이슈(분할 멤버는 자식 이슈)의 `<!-- guild:auditor:execute -->` 댓글 |
 | 의존성 차단 횟수 | 차단으로 건너뛴 횟수 | `failures.jsonl`의 `dependency-blocked` · `base-unresolved`. ⚠ `base-decision-failed`는 **세지 말 것** — 그것은 실패다 |
 | 스택 따라잡기 횟수 | base가 기본 브랜치로 폴백한 PR 수 | PR `baseRefName` ↔ 멤버 표의 기대 base |

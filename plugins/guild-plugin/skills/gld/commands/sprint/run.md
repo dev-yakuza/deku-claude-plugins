@@ -101,6 +101,26 @@ it keeps per-item approval. What remains is the same risk `batch` already ships 
 job, so a warning printed there arrives after the run has begun. Everything needed is available
 now: the flag came in with `$1`, and `config.sprint.window` is in the config this phase reads.
 
+**Always — window or not — check which GitHub credential the supervisor will inherit: `gh auth
+status`, its own Bash call, exactly that command.** It masks the token (`gho_****`) and names the
+source of every account. Judge by the **output text, not the exit code** — one expired keyring
+account alone makes it exit 1:
+- a line `✓ … (GH_TOKEN)` → `GH_TOKEN` is in use. Nothing more here; with a window, item 3
+  below warns and asks.
+- a line `X … (GH_TOKEN)` (e.g. `X Failed to log in … (GH_TOKEN)`) → `GH_TOKEN` is invalid.
+  **Stop before the run, in every run**: *"GH_TOKEN 을 설정한 곳(셸 프로필·Claude settings 의 env)에서
+  갱신하거나 지운 뒤 Claude 세션을 다시 시작하세요"*. `gh auth login` does not fix it — `GH_TOKEN`
+  overrides the keyring — and the supervisor inherits this session's environment.
+- `(GITHUB_TOKEN)` overrides the keyring the same way; read it the same way.
+- no `(GH_TOKEN)`/`(GITHUB_TOKEN)` → the keyring account is used; nothing to warn about while its
+  active account (`Active account: true`) line is `✓`. If that line is `X` → stop: "gh 로그인이
+  만료됐습니다 — `gh auth login` 후 다시 실행하세요".
+
+⚠ **Never `gh auth status --show-token`, `gh auth token`, or a command that prints a secret
+environment variable's value (`env`, `printenv GH_TOKEN`, `echo`)** — measured: a leader asked to
+"check whether GH_TOKEN is set" printed the token. `test -n "${GH_TOKEN:-}"` is forbidden too
+(`_bash_rules.md` — quoted variable substitution).
+
 Resolve the effective window first (flag > ledger > `config.sprint.window`; `none` → no window).
 Then, **when there is a window**:
 
@@ -115,7 +135,7 @@ Then, **when there is a window**:
 2. **DST warning, with the WARN.** A window that falls entirely inside the hour a
    daylight-saving transition **skips** does not open that day. This is the one exception to
    *"the window always opens within 24 hours"*.
-3. **`GH_TOKEN` + a window → warn and ask.** The supervisor inherits this session's
+3. **`GH_TOKEN` + a window → warn and ask** (`✓ … (GH_TOKEN)` in the `gh auth status` check above). The supervisor inherits this session's
    environment and `GH_TOKEN` overrides the keyring account; a GitHub App installation token
    lasts an hour. A window **structurally guarantees** an idle gap of an hour or more between
    launch and the first member — launch at 21:00 for a 22:00 window and the token is already
@@ -247,9 +267,9 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    python3 -c "open('.claude/guild/.sprint-logs/<tracker>/dag/failed.txt','w').close()"
    ```
 
-   That file is the supervisor's **working state for one run, not a record**, and it is the one
-   dag file that **accumulates across runs** — the directory survives, so every earlier
-   attempt's lines are still in it. The supervisor reads it back at start and promotes each
+   `failed.txt` is the supervisor's **working state for one run, not a record**, and it is one
+   of the two dag files that **accumulate across runs** (the other is `paused.txt`, below) —
+   the directory survives, so every earlier attempt's lines are still in it. The supervisor reads it back at start and promotes each
    line to `terminal: failed` whenever the Issue is not already terminal by label and its PR is
    not `MERGED`. Both hold for exactly the member a resume exists to retry: a member that
    stalled mid-spine keeps a **stage** label (`guild:execute`), and its PR is `OPEN`. So the
@@ -268,7 +288,20 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    ⚠ **This loses no history.** The durable per-failure record is `failures.jsonl`
    (`{"issue": 153, "class": "incomplete-mid-spine", …}`), which this step does not touch, and
    the retry counts live in the run marker.
-   ⚠ **No other dag file needs this.** The rest (`labels.json`, `prs.json`, `branches.txt`,
+
+   ⚠⚠ **Then truncate `paused.txt` the same way** (its own Bash call):
+
+   ```bash
+   python3 -c "open('.claude/guild/.sprint-logs/<tracker>/dag/paused.txt','w').close()"
+   ```
+
+   It holds the split parents the supervisor paused because their smallest outstanding child
+   waits on a human (Phase 3's `guild:children` row); the supervisor reads it back as
+   `terminal: needs-human` while the parent's label is still `guild:children`, so a stale line
+   would keep blocking that epic's dependants after the human resolved the child. It is not
+   written to `failures.jsonl` (no new class) — the run marker's `paused_issues` is its record.
+   ⚠ **No other dag file needs this** — `failed.txt` and `paused.txt` are the two that
+   accumulate. The rest (`labels.json`, `prs.json`, `branches.txt`,
    `cand.txt`, `run.json`, …) are rewritten every loop, and `comp_failed.txt`/
    `comp_incomplete.txt` are truncated by the script at completion time.
 6. **Inventory worktrees.** `git worktree list --porcelain` — note which member worktrees exist,
@@ -640,7 +673,7 @@ dirty and removal is refused.
 |---|---|
 | `guild:needs-human` | PAUSED. Worktree preserved. Next member. Checked **before** the others — the label is additive and coexists with `guild:children` |
 | `guild:done` | DONE. Release the worktree |
-| `guild:children` | **not terminal** — a split still mid-orchestration. **Continue it**: re-invoke `/gld dev <parent>`, which `dev.md` Phase 1 sends straight to Phase 2b, and Phase 2b drives only the children that are not yet `guild:done` — so each pass resumes where the last stopped. The bound is **progress**, not attempts: reset the counter whenever the number of outstanding children falls, and record `split-stalled` as INCOMPLETE after two passes with no progress. ⚠ Do **not** hand it to the human and do **not** queue the children as members — they are this member's own work and share its worktree, exactly as they would outside a sprint |
+| `guild:children` | **not terminal** — a split still mid-orchestration. **Continue it**: re-invoke `/gld dev <parent>`, which `dev.md` Phase 1 sends straight to Phase 2b, and Phase 2b drives only the children that are not yet `guild:done` — so each pass resumes where the last stopped. The bound is **progress**, not attempts: reset the counter whenever the number of outstanding children falls, and record `split-stalled` as INCOMPLETE after two passes with no progress. ⚠ Do **not** hand it to the human and do **not** queue the children as members — they are this member's own work and share its worktree, exactly as they would outside a sprint. **The one exception — PAUSED** (0.98.2 R2): when, after a pass, the parent's smallest outstanding child (no `guild:done`, whatever its state — `dev` Phase 2b's order) is `OPEN` and carries `guild:needs-human`, there is no re-invocation and no `split-stalled`: board `blocked needs-human`, completion's paused list `#e (child #c)`, and the parent goes into `dag/paused.txt` so its dependants block as `dep-needs-human`. 단 가장 작은 대기 자식이 needs-human 이면 PAUSED — 근거는 completion 의 `#e (child #c)`(라벨은 `guild:children` 그대로). A `CLOSED` smallest child → re-invoke as above (`dev` Phase 2b cleans up a human-merged child). Limit: the check runs after a pass, so a re-run with the child still unresolved spends one empty session first |
 | exit 0 mid-spine | bounded re-resume (2), then INCOMPLETE |
 | blocked | recorded as **blocked, not failed**. A dependency did not land, or the account is rate limited with a reset more than 4h away — the re-run picks those up |
 
@@ -664,6 +697,7 @@ state lives. Do **not** report outcomes for a run still in progress.
 
 1. Read the marker and the logs; report per-member outcomes (**label-truthful**: done / paused /
    blocked / incomplete / failed) with counts, plus token/cost totals.
+   단 가장 작은 대기 자식이 needs-human 이면 PAUSED — 근거는 completion 의 `#e (child #c)`(라벨은 `guild:children` 그대로). Report such a member as paused on `#c`, not by the parent's label.
 
    ⚠ **Then add one board line when `config.sprint.board` is set**, from the run marker's
    ledger: *"보드: 실패 <board_fails>건 · 버그 <board_bugs>건"*, plus the account line when

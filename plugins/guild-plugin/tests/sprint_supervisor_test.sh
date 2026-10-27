@@ -1113,6 +1113,9 @@ case "$*" in
   *"issues/99/comments"*) echo '[]' ;;
   "issue comment"*|*"-X PATCH"*) exit 0 ;;
   "pr list"*) echo '[]' ;;
+  # 0.98.2 R2: split_head_needs_human's query (its own --json list) must NOT consume the
+  # children_pending sequence below — empty = "no needs-human head" = today's behaviour.
+  "issue list"*"number,state,body,labels"*) : ;;
   "issue list"*guild:child*)
       I=$(cat "$H_IDX"); N=$(sed -n "$((I+1))p" "$H_SEQ"); [ -z "$N" ] && N=$(tail -1 "$H_SEQ")
       echo $((I+1)) > "$H_IDX"
@@ -1216,6 +1219,128 @@ if [ "${MB#*102 DEFAULT}" != "$MB" ] && [ -z "$MK" ]; then
 else
   bad "e2e: two MERGED PRs + a stale failed.txt answer DEFAULT" \
       "base=[$MB] blocked=[$MK] — the work is IN; nothing the human can do would clear a block here"
+fi
+
+# ── H4. 0.98.2 R2 — the smallest outstanding child needs a human → PAUSE, do not re-invoke ──
+# Measured (#244, #459): passes 2–4 re-invoked a split parent whose next child was waiting on a
+# human — empty sessions. Its own fake gh: the two child queries are told apart by their --json
+# field list, and both run the REAL jq the template passes against a fixture of children.
+cat > "$H/bin/gh" <<'GHR2'
+#!/bin/bash
+J=""; prev=""
+for a in "$@"; do [ "$prev" = "--jq" ] && J="$a"; prev="$a"; done
+case "$*" in
+  *"issues/99/comments"*) echo '[]' ;;
+  "issue comment"*|*"-X PATCH"*) exit 0 ;;
+  "pr list"*) echo '[]' ;;
+  "issue list"*"number,state,body,labels"*)
+      [ "${R2_FAILQ:-0}" = 1 ] && exit 1
+      jq -r "$J" "$R2_FIX" ;;
+  "issue list"*guild:child*) jq -r "$J" "$R2_FIX" ;;
+  "issue list"*) cat "$R2_LABELS" ;;
+  "issue view 101"*) echo "$R2_STATE101" ;;
+  "issue view"*) echo 'guild:done' ;;
+  "issue edit"*) exit 0 ;;
+  *) echo '[]' ;;
+esac
+GHR2
+printf '#!/bin/bash\necho "S $*" >> "$H_SPAWN"\necho %s\n' '{"type":"result","is_error":false,"usage":{}}' > "$H/bin/claude"
+chmod +x "$H/bin/gh" "$H/bin/claude"
+r2fix() { # r2fix <file> <child-json…> — children of parent #101
+  local f="$1"; shift; local IFS=,; printf '[%s]\n' "$*" > "$f"
+}
+r2c() { # r2c <n> <OPEN|CLOSED> <label…>
+  local n="$1" st="$2"; shift 2; local ls="" l
+  for l in "$@"; do ls="$ls${ls:+,}{\"name\":\"$l\"}"; done
+  printf '{"number":%s,"state":"%s","body":"Parent Issue: #101","labels":[%s]}' "$n" "$st" "$ls"
+}
+# r2_run <name> <order> <members-json> <labels-json> <state101> [failq] [seed-paused]
+#   → sets R2_OUT, R2_RC, R2_SPAWNS, R2_D
+r2_run() {
+  local name="$1"
+  hrepo "$name"
+  R2_D="$H/$name/.claude/guild/.sprint-logs/99/dag"
+  printf '%s\n' "$3" > "$R2_D/members.json"
+  printf '%s\n' "$4" > "$H/$name.labels.json"
+  [ -n "${7:-}" ] && printf '%s\n' "$7" > "$R2_D/paused.txt"
+  hrender "$H/$name" "$2" "$H/${name}_c" > "$H/$name.sh"
+  : > "$H/$name.spawn"
+  R2_OUT="$(cd "$H/neutral" && PATH="$H/bin:$PATH" R2_FIX="$H/$name.fix.json" R2_LABELS="$H/$name.labels.json" \
+            R2_STATE101="$5" R2_FAILQ="${6:-0}" H_SPAWN="$H/$name.spawn" timeout 90 "$SH" "$H/$name.sh" 2>&1)"; R2_RC=$?
+  R2_SPAWNS="$(grep -c '^S ' "$H/$name.spawn" 2>/dev/null || echo 0)"
+}
+M101='[{"number":101,"base_deps":[],"split":true}]'
+M2='[{"number":101,"base_deps":[],"split":true},{"number":102,"base_deps":[101],"split":false}]'
+L101='[{"number":101,"labels":[{"name":"guild:children"}]}]'
+L2='[{"number":101,"labels":[{"name":"guild:children"}]},{"number":102,"labels":[]}]'
+L2D='[{"number":101,"labels":[{"name":"guild:done"}]},{"number":102,"labels":[]}]'
+
+# (a) smallest outstanding child OPEN + needs-human → PAUSED, one session, not split-stalled
+r2fix "$H/r2a.fix.json" "$(r2c 200 OPEN guild:done)" "$(r2c 201 OPEN guild:design guild:needs-human)" "$(r2c 202 OPEN guild:analyze)"
+r2_run r2a 101 "$M101" "$L101" guild:children
+if [ "$R2_RC" -eq 0 ] && [ "$R2_SPAWNS" = 1 ] \
+   && case "$R2_OUT" in *"⏸ Issue #101 paused — child #201 needs-human"*) true ;; *) false ;; esac \
+   && ! grep -q split-stalled "$R2_D/../failures.jsonl" 2>/dev/null \
+   && case "$R2_OUT" in *"split orchestration stopped"*) false ;; *) true ;; esac; then
+  ok "R2a: smallest child needs-human → PAUSED after 1 session, no split-stalled"
+else
+  bad "R2a: smallest child needs-human → PAUSED" "rc=$R2_RC spawns=$R2_SPAWNS out=[$(printf '%s' "$R2_OUT" | grep -E '⏸|⚠|↻' | head -3 | tr '\n' ' ')]"
+fi
+# (b) needs-human only on a LATER child → re-invoked as before
+r2fix "$H/r2b.fix.json" "$(r2c 201 OPEN guild:design)" "$(r2c 202 OPEN guild:analyze guild:needs-human)"
+r2_run r2b 101 "$M101" "$L101" guild:children
+if [ "$R2_SPAWNS" -ge 2 ] && case "$R2_OUT" in *"paused — child"*) false ;; *) true ;; esac; then
+  ok "R2b: needs-human on a later child only → re-invoked as today ($R2_SPAWNS sessions)"
+else
+  bad "R2b: later child needs-human" "≥2 sessions, no pause" "spawns=$R2_SPAWNS"
+fi
+# (c) smallest outstanding child CLOSED (+ needs-human) → re-invoked (dev Phase 2b cleans it up)
+r2fix "$H/r2c.fix.json" "$(r2c 201 CLOSED guild:qa guild:needs-human)" "$(r2c 202 OPEN guild:analyze)"
+r2_run r2c 101 "$M101" "$L101" guild:children
+if [ "$R2_SPAWNS" -ge 2 ] && case "$R2_OUT" in *"paused — child"*) false ;; *) true ;; esac; then
+  ok "R2c: smallest child CLOSED → re-invoked as today ($R2_SPAWNS sessions)"
+else
+  bad "R2c: smallest child CLOSED" "≥2 sessions, no pause" "spawns=$R2_SPAWNS"
+fi
+# (d) the lookup fails → today's behaviour (re-invoke, then split-stalled)
+r2fix "$H/r2d.fix.json" "$(r2c 201 OPEN guild:design guild:needs-human)"
+r2_run r2d 101 "$M101" "$L101" guild:children 1
+if [ "$R2_SPAWNS" -ge 2 ] && grep -q split-stalled "$R2_D/../failures.jsonl" 2>/dev/null; then
+  ok "R2d: a failed lookup keeps today's behaviour (re-invoke → split-stalled, $R2_SPAWNS sessions)"
+else
+  bad "R2d: failed lookup" "≥2 sessions + split-stalled" "spawns=$R2_SPAWNS"
+fi
+# (e) a member depending on the PAUSED epic (label still guild:children) → dep-needs-human
+r2fix "$H/r2e.fix.json" "$(r2c 201 OPEN guild:design guild:needs-human)"
+r2_run r2e "101 102" "$M2" "$L2" guild:children
+if [ "$R2_SPAWNS" = 1 ] && case "$R2_OUT" in *"Issue #102 blocked (dep-needs-human:#101)"*) true ;; *) false ;; esac; then
+  ok "R2e: the paused epic's dependant blocks as dep-needs-human (it does not run on DEFAULT)"
+else
+  bad "R2e: dependant of a paused epic" "1 session + #102 dep-needs-human" "spawns=$R2_SPAWNS out=[$(printf '%s' "$R2_OUT" | grep -E '#102' | head -2 | tr '\n' ' ')]"
+fi
+# A blocked member keeps $D (a clean run removes it), so the run's own records are readable here.
+[ "$(cat "$R2_D/paused.txt" 2>/dev/null)" = 101 ] && ok "R2e2: record_paused wrote the parent to dag/paused.txt" \
+  || bad "R2e2: paused.txt" "101" "[$(cat "$R2_D/paused.txt" 2>/dev/null)]"
+grep -qxF '#101 (child #201)' "$R2_D/comp_paused.txt" 2>/dev/null && ok "R2e3: the completion's paused list names the child — #101 (child #201)" \
+  || bad "R2e3: completion paused entry" "#101 (child #201)" "[$(cat "$R2_D/comp_paused.txt" 2>/dev/null | tr '\n' ' ')]"
+grep -q '"class": *"paused\|split-stalled' "$R2_D/../failures.jsonl" 2>/dev/null \
+  && bad "R2e4: a pause writes no failures.jsonl class" "no paused/split-stalled class" "found" \
+  || ok "R2e4: a pause writes no failures.jsonl class (daily's class list unchanged)"
+# (f) the epic reached guild:done, a stale paused.txt remains → the dependant is NOT blocked
+r2fix "$H/r2f.fix.json" "$(r2c 201 OPEN guild:done)"
+r2_run r2f 102 "$M2" "$L2D" guild:done 0 101
+if [ "$R2_SPAWNS" = 1 ] && case "$R2_OUT" in *"#102 blocked"*) false ;; *) true ;; esac; then
+  ok "R2f: guild:done epic + stale paused.txt → its dependant runs (the label wins)"
+else
+  bad "R2f: stale paused.txt" "#102 runs" "spawns=$R2_SPAWNS out=[$(printf '%s' "$R2_OUT" | grep -E '#102' | head -2 | tr '\n' ' ')]"
+fi
+# (g) no paused.txt at all (first run, a pre-0.98.2 dag dir) → normal, never dag-input-failed
+r2fix "$H/r2g.fix.json" "$(r2c 201 OPEN guild:done)"
+r2_run r2g 102 "$M2" "$L2D" guild:done
+if [ "$R2_SPAWNS" = 1 ] && case "$R2_OUT" in *dag-input-failed*) false ;; *) true ;; esac; then
+  ok "R2g: a missing paused.txt reads as empty (no dag-input-failed)"
+else
+  bad "R2g: missing paused.txt" "normal run" "spawns=$R2_SPAWNS out=[$(printf '%s' "$R2_OUT" | grep -E 'dag-input|#102' | head -2 | tr '\n' ' ')]"
 fi
 fi
 
@@ -3405,6 +3530,8 @@ fi
 #   fall-through defect structurally impossible: the four arms cannot be touched at all.
 #   ⚠ Baseline is "immediately after this revision", not 0.66.0 — exterminating the class had to
 #   rewrite one comment line INSIDE this range, so the two requirements are mutually exclusive.
+#   ⚠ Re-pinned at the 0.98.2 R2 revision: the `*guild:children*)` arm gained the
+#   split_head_needs_human → PAUSED check (no new arm — arms.py's count/order is unchanged).
 #   ⚠ Anchors: scope to the arms region FIRST. An unscoped rindex lands on a later `esac`.
 #   ⚠ Slice = the `esac` line and its trailing newline included; four faithful readings of
 #   "the case block" give four different digests, so the endpoints are part of the contract.
@@ -3423,7 +3550,7 @@ b = sl.encode()
 print("%s %d %d" % (hashlib.sha256(b).hexdigest(), len(b), sl.count("\n")))
 PY
 K5="$("$PY" "$WORK/rlgold.py" "$TPL")"
-K5_WANT="1dfc7f61134bdcd3d73eb1b5ab85fadf3c78b3edd53916988d2fc3d7a7932715 6419 94"
+K5_WANT="9fa74163e5abf9e1d6dcedfe6561201dc611cf1ca0348f7c407dac412cbca057 6902 103"
 if [ "$K5" = "$K5_WANT" ]; then
   ok "K5: the arms case is byte-identical to the pinned original"
 else
@@ -3708,6 +3835,10 @@ ledger_set()     { :; }
 # missed were exactly `<log>/e0/guild:children`, the one pair the priority gate deliberately
 # does not protect.
 children_pending()   { echo 2; }   # ⚠ with SPLIT_PASSES seeded at its bound
+# 0.98.2 R2 — both new functions stubbed and tagged. Empty head = today's split path, so every
+# combination above keeps its meaning; R2_HEAD_STUB=<n> drives the PAUSED path (K9j).
+split_head_needs_human() { printf '%s' "${R2_HEAD_STUB:-}"; }
+record_paused()      { printf 'PAUSED_WRITE %s\\n' "$1"; }
 worktree_release()   { :; }
 board_sweep_merged() { :; }
 refresh_dag_input()  { :; }
@@ -3897,6 +4028,15 @@ if [ "$K9H" -eq 0 ]; then
 else
   bad "K9e: a healthy log was treated as a rate limit" "$K9H combination(s):$K9HL"
 fi
+# K9j — 0.98.2 R2: a split parent whose smallest outstanding child needs a human is PAUSED —
+# the paused.txt write (a separate function, never inline), the needs-human board token, a
+# break — and never reaches record_failure (no split-stalled).
+K9R="$("$SH" -c ". '$WORK/rl_reach.sh'; rl_reset; R2_HEAD_STUB=201; detect '$RCW/h_prose.log' 0 'guild:children'" 2>&1 | tr '\n' ' ')"
+case "$K9R" in
+  *FAILURE*) bad "K9j: R2 paused split parent" "no record_failure" "[$(printf '%s' "$K9R" | cut -c1-90)]" ;;
+  *"paused — child #201 needs-human"*"PAUSED_WRITE 7"*"BOARD blocked needs-human"*"BROKE"*) ok "K9j: R2 — smallest child needs-human → PAUSED_WRITE + blocked needs-human + break, no FAILURE" ;;
+  *) bad "K9j: R2 paused split parent" "paused line, PAUSED_WRITE 7, BOARD blocked needs-human, BROKE" "[$(printf '%s' "$K9R" | cut -c1-120)]" ;;
+esac
 K9U="$("$SH" -c ". '$WORK/rl_reach.sh'; rl_reset; detect '$RCW/noreset.log' 0" 2>&1 | tr '\n' ' ')"
 case "$K9U" in
   *"SLEEP=300"*) ok "K9d: a reset-less live limit is not demoted on exit 0" ;;
@@ -4471,7 +4611,7 @@ mw_case "T12f 깨진 JSON 은 실패" "[{\"id\": 1,\n" FAIL
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=345
+SUP_MIN_CHECKS=356
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

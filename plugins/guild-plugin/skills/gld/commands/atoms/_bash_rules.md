@@ -220,3 +220,9 @@ No other pattern is a sanctioned exception. Any other file claiming one should b
 ## Scope
 
 This rule set applies to every Bash tool invocation inside any Guild command, atom, stage, or role agent — including snippets shown in Guild's Markdown files. Those snippets are templates for tool calls, not literal shell scripts to paste. See "Sanctioned exceptions" above for the only three carve-outs.
+
+---
+
+## Secrets — never print a value
+
+비밀(토큰·키) 환경 변수의 값은 출력하지 않는다 — 존재·출처는 그 도구의 상태 명령으로 (예: `GH_TOKEN` → `gh auth status`, which masks the token and names its source as `(GH_TOKEN)`). `env`, `printenv <SECRET>`, `echo` of a secret, `gh auth token` and `gh auth status --show-token` put the value into the tool result — the transcript — for good (measured: a run's start check printed `GH_TOKEN`, 0.98.2 S3). A `test -n "${GH_TOKEN:-}"` is no alternative: it is the quoted-variable-substitution item above. `printenv` of a variable that is not a secret (e.g. `printenv BASH_MAX_TIMEOUT_MS`) stays as it is.

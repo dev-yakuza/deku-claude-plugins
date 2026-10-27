@@ -60,6 +60,9 @@ GUILD_MANDATED_RE = re.compile(
     r"^\s*(gh repo view --json nameWithOwner -q \.nameWithOwner"
     r"|gh repo view --json defaultBranchRef --jq \.defaultBranchRef\.name"
     r"|printenv GLD_UNATTENDED"
+    # sprint/run.md's start check (0.98.2 S3) — the one safe way to see GH_TOKEN's source.
+    # REDISCOVERY_RE would otherwise count every run as an identity probe.
+    r"|gh auth status"
     r"|printenv BASH_MAX_TIMEOUT_MS"
     r"|git log --oneline -20"
     r"|git rev-parse HEAD"

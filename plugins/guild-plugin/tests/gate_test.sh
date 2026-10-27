@@ -1090,12 +1090,185 @@ S0=$(date +%s); $G --firing-log --out "$OUTF" </dev/null >/dev/null 2>&1; S1=$(d
   || bad "M16 성능" "≤10s / 5000" "$((S1 - S0))s / $(wc -l < "$OUTF")"
 
 note ""
+note "== N. 0.98.2 — dismissed.md 앞부분만 경로 · -C 인자 해석 · 중앙 관리 파일 정보 경고 =="
+INFO_H='ℹ guild gate — 정보(차단 안 함)'
+DRAFT_H='draft 규칙 — 차단 안 함, confirm 시 차단'
+# dtok — dismissed() 가 돌려준 토큰을 | 로 잇고, 정보 경고 개수를 붙인다.
+dtok() {
+  python3 -B - "$PWD/.claude/guild/gates/scripts/gate_precommit.py" "$PWD" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1]); g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+print("|".join(g.dismissed(sys.argv[2])) + " W=%d" % len(g.dismissed_warnings()))
+PY
+}
+# commit_out — 명령을 실행해 "<rc>␟<stderr+stdout>" 를 돌려준다
+commit_out() { local o; o="$(bash -c "$1" 2>&1)"; printf '%s\037%s' "$?" "$o"; }
+want_tok() { # $1=label $2=dismissed.md 내용 $3=기대 dtok 출력
+  printf '%b' "$2" > .claude/guild/gates/dismissed.md
+  local got; got="$(dtok)"
+  if [ "$got" = "$3" ]; then ok "$1"; else bad "$1" "$3" "$got"; fi
+}
+fresh_repo
+# S1 — #349 회귀: 맨 경로 항목의 사유가 인용한 경로가 면제되면 안 된다
+want_tok "N1 사유 안 백틱 경로는 경로가 아님 (#349 회귀)" \
+  '- test/other.md — 이동: `test/t_test.py` 로 옮김\n' 'test/other.md W=0'
+R="$(commit_out "git rm -q test/t_test.py && git commit -m x")"
+[ "${R%%$'\037'*}" != 0 ] && ok "N1b 사유가 인용한 테스트 파일 삭제는 여전히 차단" || bad "N1b #349 회귀" "block" "allow"
+fresh_repo
+want_tok "N2 :310 형태(백틱 + 괄호 꼬리) 그대로" '- `env` (`distribution.p12` 등) — 사유\n' 'env W=0'
+want_tok "N3 word_app :7 형태 — dismissed() 토큰이 그대로 (…dart:494)" \
+  '- `lib/features/part_screen/controller/part_screen_controller.dart:494` (`_updateWord` 성공 시각 저장, `preferences?.setInt(k, ...)`) — 이 클래스의 다른 `preferences` 접근과 달리\n' \
+  'lib/features/part_screen/controller/part_screen_controller.dart:494 W=0'
+want_tok "N4 백틱 시작이면 구분자 무관 (- · : · en dash)" \
+  '- `a/x` - 사유\n- `b/y`: 사유\n- `c/z` – 사유\n' 'a/x|b/y|c/z W=0'
+want_tok "N5 * · + · 탭 불릿, 앞쪽 ** 강조" \
+  '* `a/x` — r\n+ `b/y` — r\n-\t`c/z` — r\n- **`d/w`** — r\n' 'a/x|b/y|c/z|d/w W=0'
+want_tok "N6 **주의** · --- · > 인용 · ONCE-B2 줄은 불릿이 아님" \
+  '**주의** `x/y` 는 면제 아님\n---\n> - `q/r` — 인용 안\nONCE-B2 | `p/q` | `s` | 사유 열자 이상입니다 | me | 2026-10-01\n' ' W=0'
+fresh_repo
+printf -- '- test/t_test.py — 레거시 스위트 폐기\n' > .claude/guild/gates/dismissed.md
+expect_commit "N7 맨 경로 항목은 그대로 면제" allow "git rm -q test/t_test.py && git commit -m x"
+fresh_repo
+printf -- '- `test/other.md` — r\n  - `test/t_test.py` — 하위 설명\n' > .claude/guild/gates/dismissed.md
+[ "$(dtok)" = "test/other.md W=1" ] && ok "N8 하위 불릿은 무시 + 정보 경고 1건" || bad "N8 하위 불릿" "test/other.md W=1" "$(dtok)"
+R="$(commit_out "git rm -q test/t_test.py && git commit -m x")"
+case "${R%%$'\037'*}:${R#*$'\037'}" in
+  0:*) bad "N8b 하위 불릿 경로 삭제는 차단 + 정보 머리말" "block" "allow" ;;
+  *"$INFO_H"*"하위 불릿"*) ok "N8b 하위 불릿 경로 삭제는 차단, 정보 머리말로 알림" ;;
+  *) bad "N8b 하위 불릿 정보 경고" "$INFO_H" "$(printf '%s' "${R#*$'\037'}" | tr '\n' ' ' | cut -c1-120)" ;;
+esac
+fresh_repo
+printf -- '- test/t_test.py (`x`) — r\n' > .claude/guild/gates/dismissed.md
+[ "$(dtok)" = " W=1" ] && ok "N9 맨 경로 + 백틱 괄호는 무시 + 정보 경고" || bad "N9 맨 경로+괄호" " W=1" "$(dtok)"
+R="$(commit_out "git rm -q test/t_test.py && git commit -m x")"
+[ "${R%%$'\037'*}" != 0 ] && ok "N9b 그 경로 삭제는 차단 (면제 안 됨)" || bad "N9b 맨 경로+괄호" "block" "allow"
+fresh_repo
+printf -- '- 설명 `README.md` — r\n' > .claude/guild/gates/dismissed.md
+printf 'more\n' >> README.md
+R="$(commit_out "git commit -am x")"
+case "${R%%$'\037'*}:${R#*$'\037'}" in
+  0:*"$DRAFT_H"*) bad "N10 정보 경고는 draft 머리말이 아님" "no WARN_HEADER" "WARN_HEADER used" ;;
+  0:*"$INFO_H"*"백틱이 섞여"*) ok "N10 통과 커밋에도 정보 머리말(WARN_HEADER 아님)로 알림" ;;
+  *) bad "N10 정보 머리말" "rc 0 + $INFO_H" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-120)" ;;
+esac
+[ "$(tr -d ' \n' < .claude/guild/gates/findings.json)" = '{"open":[]}' ] && ok "N10b 정보 경고는 findings.json 에 넣지 않음" \
+  || bad "N10b findings.json" '{"open":[]}' "$(tr -d '\n' < .claude/guild/gates/findings.json)"
+SO="$(printf 'env/a.p12\n' | $G --scan-paths --stdin 2>/dev/null)"; SE="$(printf 'env/a.p12\n' | $G --scan-paths --stdin 2>&1 >/dev/null)"
+case "$SO|$SE" in
+  "SECRET-PATH env/a.p12|"*"$INFO_H"*) ok "N11 --scan-paths 의 정보 경고는 stderr 로 (stdout 은 SECRET-PATH 줄만)" ;;
+  *) bad "N11 --scan-paths stderr" "SECRET-PATH only on stdout" "$(printf '%s|%s' "$SO" "$SE" | tr '\n' ' ' | cut -c1-120)" ;;
+esac
+
+# S2 — `git -C <arg>` 는 셸 토큰 하나로 해석, 못 하면 조기 경고만 건너뜀
+pre_out() { # $1=command-string → "<rc>␟<stderr>"
+  local o; o="$(printf '{"tool_input":{"command":%s}}' "$(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$1")" \
+    | python3 .claude/guild/gates/scripts/gate_precommit.py 2>&1 >/dev/null)"; printf '%s\037%s' "$?" "$o"
+}
+SKIPN='-C 경로를 해석하지 못해 조기 경고를 건너뜁니다'
+fresh_repo
+printf 'SECRET=abc\n' > .env; git add .env >/dev/null 2>&1
+R="$(pre_out 'd=/tmp; git -C "$d" commit -m x')"
+if [ "${R%%$'\037'*}" = 0 ] && case "${R#*$'\037'}" in *"$SKIPN"*) true ;; *) false ;; esac \
+   && [ ! -e '"$d"' ] && [ ! -e '$d' ]; then
+  ok "N12 git -C \"\$d\" commit → 건너뜀 메시지 · exit 0 · 디렉터리 생성 없음"
+else
+  bad "N12 git -C \"\$d\"" "rc 0 + skip note + no dir" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-100) / $(ls -a | tr '\n' ' ')"
+fi
+expect_pre "N13 정상 -C <절대 경로> → 그 저장소를 검사(거부)" deny "git -C $PWD commit -m x"
+expect_pre "N13b 따옴표 친 -C 경로도 따옴표를 벗겨 검사(거부)" deny "git -C \"$PWD\" commit -m x"
+R="$(HOME="$WORK" pre_out 'git -C ~/r commit -m x')"
+[ "${R%%$'\037'*}" = 2 ] && ok "N14 따옴표 없는 ~ 경로는 확장해 검사(거부)" || bad "N14 ~ 확장" "rc 2" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-100)"
+R="$(HOME="$WORK" pre_out 'git -C "~/r" commit -m x')"
+case "${R%%$'\037'*}:${R#*$'\037'}" in
+  0:*"$SKIPN"*) ok "N15 따옴표 안 \"~/r\" 는 확장하지 않음 → 건너뜀" ;;
+  *) bad "N15 따옴표 안 ~" "rc 0 + skip" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-100)" ;;
+esac
+R="$(pre_out 'git -C "/tmp/x commit -m y')"
+case "${R%%$'\037'*}:${R#*$'\037'}" in
+  0:*"$SKIPN"*) ok "N16 따옴표 불균형 → 건너뜀 · exit 0" ;;
+  *) bad "N16 따옴표 불균형" "rc 0 + skip" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-100)" ;;
+esac
+R="$(pre_out "git -C $WORK/nope-not-a-repo commit -m x")"
+case "${R%%$'\037'*}:${R#*$'\037'}" in
+  0:*"$SKIPN"*) ok "N17 저장소가 아닌 -C → cwd 로 폴백하지 않고 건너뜀" ;;
+  *) bad "N17 비저장소 -C" "rc 0 + skip (no cwd fallback)" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-100)" ;;
+esac
+git reset -q .env >/dev/null 2>&1; rm -f .env
+# `#` 이 든 경로: shlex 기본값이면 `/…/h#b` 가 `/…/h` 로 잘린다
+rm -rf "$WORK/h#b"; mkdir -p "$WORK/h#b"; (cd "$WORK/h#b" && git init -q . && cp -R "$WORK/r/.claude" . && printf 'SECRET=abc\n' > .env && git add .env >/dev/null 2>&1)
+expect_pre "N18 -C 경로의 # 은 주석이 아님 → 그 저장소를 검사(거부)" deny "git -C $WORK/h#b commit -m x"
+# 공백이 든 따옴표 경로는 GIT_COMMIT_RE 가 커밋으로 보지 않는다 — 조기층 미도달, git 훅이 검사
+rm -rf "$WORK/a b"; mkdir -p "$WORK/a b"
+(cd "$WORK/a b" && git init -q . && git config user.email t@t && git config user.name t \
+  && cp -R "$WORK/r/.claude" . && cp "$HOOK" .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit \
+  && printf 'SECRET=abc\n' > .env && git add .env >/dev/null 2>&1)
+R="$(pre_out "git -C \"$WORK/a b\" commit -m x")"
+case "${R%%$'\037'*}:${R#*$'\037'}" in
+  0:*"$SKIPN"*) bad "N19 공백 따옴표 경로는 조기층이 커밋으로 인식하지 않음" "silent allow" "skip note" ;;
+  0:*) ok "N19 공백 따옴표 경로는 조기층이 커밋으로 인식하지 않음 (지금 동작 고정)" ;;
+  *) bad "N19 공백 따옴표 경로" "rc 0" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-100)" ;;
+esac
+expect_commit "N19b 같은 커밋은 git 훅이 차단 (권위층)" block "git -C \"$WORK/a b\" commit -m x"
+# write_findings / flush_firings — git 저장소가 아니면 쓰지 않고, $PWD(논리 경로)는 그대로 쓴다
+fresh_repo
+GP="$PWD/.claude/guild/gates/scripts/gate_precommit.py"
+rm -rf "$WORK/nogit"; mkdir -p "$WORK/nogit"
+python3 -B - "$GP" "$WORK/nogit" "$PWD" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1]); g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+g.record_firing("boundary:nogit", "warn", "f")
+g.write_findings(sys.argv[2], []); g.flush_firings(sys.argv[2], "git-hook")
+g.write_findings(sys.argv[3], [g.finding("secret", "k", "logical-path")])
+PY
+[ -z "$(ls -A "$WORK/nogit")" ] && ok "N20 git 저장소가 아닌 root → findings/firings 를 쓰지 않음" || bad "N20 비저장소 쓰기" "empty dir" "$(ls -A "$WORK/nogit" | tr '\n' ' ')"
+case "$PWD" in /private/*) P_NOTE="(논리=실제)" ;; *) P_NOTE="(논리 $PWD ≠ 실제 경로일 수 있음)" ;; esac
+grep -q 'logical-path' .claude/guild/gates/findings.json 2>/dev/null && ok "N21 \$PWD 논리 경로 root 는 그대로 기록 $P_NOTE" \
+  || bad "N21 \$PWD 논리 경로" "findings.json written" "missing"
+# 다른 repo_root 호출부는 지금 동작(실패 시 cwd) 그대로
+mkdir -p "$WORK/nogit/.claude/guild/gates"; printf -- '- `env` — r\n' > "$WORK/nogit/.claude/guild/gates/dismissed.md"
+R="$(cd "$WORK/nogit" && printf 'env/a.p12\n' | python3 "$GP" --scan-paths --stdin 2>&1)"; RC=$?
+[ "$RC" = 0 ] && ok "N22 --scan-paths --stdin 은 비저장소에서 cwd 의 dismissed.md 를 그대로 읽음" || bad "N22 scan-paths cwd 폴백" "0" "$RC: $R"
+R="$(cd "$WORK/nogit" && python3 "$GP" --firing-log --out "$WORK/nogit-fl.jsonl" </dev/null 2>&1)"
+case "$R" in "ROWS 0 $WORK/nogit-fl.jsonl NOLOG") ok "N23 --firing-log 는 비저장소에서 cwd 기준 그대로 (NOLOG)" ;; *) bad "N23 firing-log cwd" "ROWS 0 … NOLOG" "$R" ;; esac
+
+# R3 — 중앙 관리 파일이 스테이지되면 정보 경고(차단 아님), 파일별 문구
+fresh_repo
+printf 'status: confirmed\n- local tweak\n' > .claude/guild/gates/rules/verification.md
+R="$(commit_out "git add .claude/guild/gates/rules/verification.md && git commit -m x")"
+case "${R%%$'\037'*}:${R#*$'\037'}" in
+  0:*"$DRAFT_H"*) bad "N24 규칙 파일 정보 경고는 WARN_HEADER 아님" "info header" "WARN_HEADER" ;;
+  0:*"$INFO_H"*"rules/verification.md 는 다음 /gld update 가 게이트 스크립트를 갱신할 때 함께 덮어씁니다"*) ok "N24 rules/verification.md 스테이지 → 정보 경고 · 통과" ;;
+  *) bad "N24 규칙 파일 정보 경고" "rc 0 + info" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-120)" ;;
+esac
+[ "$(tr -d ' \n' < .claude/guild/gates/findings.json)" = '{"open":[]}' ] && ok "N24b 중앙 관리 파일 경고는 findings.json 에 없음" || bad "N24b findings" '{"open":[]}' "$(tr -d '\n' < .claude/guild/gates/findings.json)"
+printf '# local edit\n' >> .claude/guild/gates/scripts/gate_precommit.py
+R="$(commit_out "git commit -am x")"
+case "${R%%$'\037'*}:${R#*$'\037'}" in
+  0:*"$INFO_H"*"gate_precommit.py 는 /gld update 가 갱신하는 중앙 관리 파일입니다"*"scripts/local/"*) ok "N25 게이트 스크립트 스테이지 → 스크립트용 문구 · 통과" ;;
+  *) bad "N25 게이트 스크립트 정보 경고" "rc 0 + script wording" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-120)" ;;
+esac
+printf 'status: confirmed\n' > .claude/guild/gates/rules/secrets.md; git add .claude/guild/gates/rules/secrets.md >/dev/null 2>&1
+R="$(pre_out "git commit -m x")"
+case "${R%%$'\037'*}:${R#*$'\037'}" in
+  0:*"$INFO_H"*"rules/secrets.md"*) ok "N26 PreToolUse 에서도 같은 정보 경고 · 통과" ;;
+  *) bad "N26 PreToolUse 정보 경고" "rc 0 + info" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-120)" ;;
+esac
+git commit -qm y >/dev/null 2>&1
+printf 'status: draft\n' > .claude/guild/gates/rules/boundaries.md; printf 'more\n' >> README.md
+R="$(commit_out "git add -A && git commit -m x")"
+case "${R%%$'\037'*}:${R#*$'\037'}" in
+  0:*"$INFO_H"*) bad "N27 다른 경로(boundaries.md·README)는 경고 없음" "no info" "info shown" ;;
+  0:*) ok "N27 다른 경로(boundaries.md·README)는 경고 없음" ;;
+  *) bad "N27 다른 경로" "rc 0" "$(printf '%s' "$R" | tr '\n\037' '  ' | cut -c1-100)" ;;
+esac
+
+note ""
 note "결과: PASS=$PASS FAIL=$FAIL"
 cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=167
+GATE_MIN_CHECKS=201
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

@@ -1061,6 +1061,35 @@ children_pending() {
   esac
 }
 
+# split_head_needs_human <parent> — 0.98.2 R2. Prints the number of this parent's SMALLEST
+# outstanding child (no guild:done, whatever its state — dev Phase 2b's order) when that child is
+# OPEN and carries guild:needs-human; prints nothing otherwise, including on any query failure
+# (= today's behaviour: re-invoke). Measured (#244, #459): passes 2–4 were empty sessions, each
+# re-invoking a parent whose next child was waiting on a human. A CLOSED smallest child prints
+# nothing on purpose — dev Phase 2b cleans up a human-merged child, so re-invoking gives it the
+# chance. A separate function: children_pending's contract is "a number or -1" (and stubbed).
+# ⚠ The label test is jq's `index`, never a `case` pattern — the arms check counts that pattern
+# file-wide and requires exactly one.
+split_head_needs_human() {
+  local n
+  n="$(gh issue list --repo "$OWNER_REPO" --label guild:child --state all --limit 200 \
+    --json number,state,body,labels \
+    --jq "[.[] | select((.body // \"\") | test(\"Parent Issue: #${1}([^0-9]|\$)\")) | select((.labels // []) | map(.name) | index(\"guild:done\") | not)] | sort_by(.number) | (first // empty) | select(.state == \"OPEN\" and ((.labels // []) | map(.name) | index(\"guild:needs-human\"))) | .number" \
+    2>/dev/null)" || n=""
+  case "$n" in
+    ''|*[!0-9]*) : ;;
+    *)           printf '%s' "$n" ;;
+  esac
+}
+
+# record_paused <issue> — 0.98.2 R2. The paused split parent goes into $D/paused.txt, which
+# refresh_dag_input reads back as terminal "needs-human" while the parent's label is still
+# guild:children — so its dependants block as dep-needs-human instead of running on top of an
+# unfinished epic. Not failures.jsonl: a pause is not a failure class. Best-effort, silent.
+record_paused() {
+  printf '%s\n' "$1" >> "$D/paused.txt" 2>/dev/null || true
+}
+
 # hb_sleep <seconds> — sleep in chunks, refreshing the heartbeat each chunk.
 # ⚠ This is why the rate-limit VERBATIM core below stops before the sleep. §8.2 requires a
 # heartbeat at least every 10 minutes "including inside the wait loop", and a rate-limit wait
@@ -1095,6 +1124,7 @@ refresh_dag_input() {
     > "$D/labels.json" 2>/dev/null || printf '[]' > "$D/labels.json"
   git -C "$SUP" branch --format='%(refname:short)' > "$D/branches.txt" 2>/dev/null || : > "$D/branches.txt"
   [ -f "$D/failed.txt" ] || : > "$D/failed.txt"
+  [ -f "$D/paused.txt" ] || : > "$D/paused.txt"
   "$PY" - "$D" "$DEFAULT_BRANCH" 2>"$D/dag.err" <<'PY' || return 1
 import json, os, sys
 d, default_branch = sys.argv[1], sys.argv[2]
@@ -1150,6 +1180,19 @@ for it in labels_raw:
         terminal[str(n)] = "done"
     elif "guild:children" in names:
         terminal[str(n)] = "children"
+
+# A split parent this run PAUSED (record_paused — its smallest outstanding child needs a human)
+# keeps the label guild:children, which alone reads as "split" and lets its dependants run on
+# DEFAULT on top of an unfinished epic. So: ONLY when the label-derived terminal is "children",
+# a member in paused.txt becomes "needs-human" (TERMINAL_BLOCKING → dep-needs-human). After the
+# labels, never before — a human who later made the parent guild:done must not stay blocked by a
+# stale line. Missing file = empty (a first run, or a dag dir from before 0.98.2).
+pp = os.path.join(d, "paused.txt")
+if os.path.exists(pp):
+    for line in open(pp):
+        line = line.strip()
+        if line.isdigit() and terminal.get(line) == "children":
+            terminal[line] = "needs-human"
 
 # `failed` has no label to derive it from — a failed Issue keeps whatever stage label it
 # reached — so it comes from what THIS run recorded. It must not override a terminal label:
@@ -2059,6 +2102,15 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
           #   (c) SPLIT_PREV starts at a value no count can equal, so it is a stored number and
           #       nothing else — it used to double as the "first pass" sentinel, which is what
           #       made (b) unbounded.
+          # 0.98.2 R2 — the smallest outstanding child waits on a human → PAUSE, do not re-invoke.
+          SPLIT_HEAD="$(split_head_needs_human "$ISSUE")"
+          if [ -n "$SPLIT_HEAD" ]; then
+            echo "  ⏸ Issue #$ISSUE paused — child #$SPLIT_HEAD needs-human"; PAUSED=$((PAUSED + 1))
+            PAUSED_ISSUES+=("#$ISSUE (child #$SPLIT_HEAD)")
+            record_paused "$ISSUE"
+            board_col "$ISSUE" blocked needs-human
+            break
+          fi
           SPLIT_PASSES=$((SPLIT_PASSES + 1))
           SPLIT_LEFT="$(children_pending "$ISSUE")"
           if [ "$SPLIT_LEFT" -lt 0 ]; then

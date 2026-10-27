@@ -227,6 +227,10 @@ def flush_firings(root, mode, pending=False):
     try:
         if not _FIRINGS and not os.path.exists(pp):
             return
+        # Not a git repository → write nothing (0.98.2 S2). A root that is a mis-parsed string
+        # (`"$d"`, quotes included) used to grow a stray `.claude/` tree wherever the hook ran.
+        if not is_git_repo(root):
+            return
         with _FiringsLock(root) as lk:
             if not lk.acquired:
                 return
@@ -379,6 +383,16 @@ def repo_root(cwd=None):
     return d or (cwd or os.getcwd())
 
 
+def is_git_repo(root):
+    """True when `git -C <root> rev-parse --show-toplevel` succeeds. ⚠ Success, NOT a string
+    comparison with the toplevel: a logical path and git's real path differ (macOS `/var` →
+    `/private/var`), and a caller passing `$PWD` is legitimate. Never raises."""
+    try:
+        return bool(root) and bool(sh(["git", "rev-parse", "--show-toplevel"], root=root).strip())
+    except Exception:
+        return False
+
+
 def gates_enabled(root):
     """Off-switch: config.gates.enabled == false → gate disabled. Default enabled."""
     try:
@@ -390,7 +404,23 @@ def gates_enabled(root):
         return True  # no config / unreadable → gate stays on (safe default)
 
 
-DISMISS_BACKTICK_RE = re.compile(r"`([^`]+)`")
+# A top-level Markdown bullet: the marker at column 0, then a space or a tab (CommonMark — `-`,
+# `*` and `+` are all list markers). `**주의** …` and `---` are NOT bullets: the marker must be
+# followed by whitespace.
+DISMISS_BULLET_RE = re.compile(r"^[-*+][ \t]")
+DISMISS_SUB_BULLET_RE = re.compile(r"^[ \t]+[-*+][ \t]")
+DISMISS_LEAD_TOKEN_RE = re.compile(r"`([^`]+)`")
+DISMISS_REL = ".claude/guild/gates/dismissed.md"
+# Informational notes about entries the parser refused to read (S1). Module-level so
+# `dismissed()` keeps returning a plain list — `--scan-paths` and `dismiss_matches` callers depend
+# on that shape. Rebuilt on every `dismissed()` call and cleared by `run_checks`, like _VISUAL_DROP.
+_DISMISS_WARN = []
+
+
+def dismissed_warnings():
+    """The informational findings of the last `dismissed()` call (never blocks, never written
+    to findings.json)."""
+    return list(_DISMISS_WARN)
 
 
 def dismissed(root):
@@ -402,25 +432,59 @@ def dismissed(root):
     backticks — the file's own format line and every human-written entry observed in a real
     repo do exactly that. The original parser only stripped `-*` and split on the em dash, so
     `` - `env` — reason `` yielded the literal `` `env` `` *including the backticks*, which
-    matches no path. The registry therefore silently did nothing: a human wrote down an
-    accepted risk, the gate kept blocking on it, and nothing indicated why. Take the first
-    backtick-quoted token when there is one; fall back to the pre-em-dash text otherwise.
-    A trailing parenthetical (`` `path` (`symbol` …) — reason ``) is dropped with it."""
+    matches no path. The registry therefore silently did nothing.
+
+    ⚠ The path is read from the FRONT of the entry only — never from the reason (0.98.2 S1).
+    The previous parser took the first backtick token ANYWHERE on the line, so a bare-path entry
+    whose reason quoted another path exempted the QUOTED path. Measured (#349 QA): a reason
+    citing `` `integration_test/app_test.dart` `` exempted that canonical entry point and the
+    entry-point-rename check (B5) went silently dark. The rule now:
+      1. top-level bullets only (`- `/`* `/`+ ` at column 0). An indented sub-bullet is ignored
+         with an informational note — it is usually prose under an entry, not an entry.
+      2. after the marker and any leading `**`/`__`, an entry that STARTS with a backtick token
+         is that token — whatever follows (a `(…)` tail, an em dash, `-`, `:`).
+      3. an entry that starts with plain text is the text before the first em dash (before any
+         `#`, trimmed) — unless that front part holds a backtick, in which case the entry is
+         ambiguous (`- a.dart (`x`) — r`, `- 설명 `path` — r`) and is ignored with a note."""
     entries = []
+    del _DISMISS_WARN[:]
     try:
         with open(os.path.join(root, ".claude", "guild", "gates", "dismissed.md"),
                   encoding="utf-8") as fh:
             lines = fh.readlines()
     except Exception:
         return entries
-    for ln in lines:
-        if not ln.strip().startswith(("-", "*")):
+    for i, ln in enumerate(lines, 1):
+        ln = ln.rstrip("\r\n")
+        if DISMISS_SUB_BULLET_RE.match(ln):
+            _DISMISS_WARN.append(finding(
+                "info:dismissed-sub-bullet", DISMISS_REL,
+                f"{DISMISS_REL}:{i} 들여쓴 하위 불릿은 면제 항목으로 읽지 않습니다 — 면제하려면 "
+                "0 열의 `- <경로> — <사유>` 줄로 쓰세요(경로는 백틱으로 감싸도 됨)"))
             continue
-        m = DISMISS_BACKTICK_RE.search(ln)
+        if not DISMISS_BULLET_RE.match(ln):
+            continue
+        body = ln[2:].strip()
+        lead = body
+        for mark in ("**", "__"):
+            if lead.startswith(mark):
+                lead = lead[len(mark):].lstrip()
+                break
+        m = DISMISS_LEAD_TOKEN_RE.match(lead)
         if m:
-            entries.append(m.group(1).strip())
+            tok = m.group(1).strip()
+            if tok:
+                entries.append(tok)
             continue
-        raw = ln.strip("-* \t").split("—")[0].split("#")[0].strip()
+        raw = body.split("—")[0].split("#")[0].strip()
+        if raw.startswith("**") and raw.endswith("**") and len(raw) > 4:
+            raw = raw[2:-2].strip()
+        if "`" in raw:
+            _DISMISS_WARN.append(finding(
+                "info:dismissed-ambiguous", DISMISS_REL,
+                f"{DISMISS_REL}:{i} 경로 앞부분에 백틱이 섞여 있어 면제 항목으로 읽지 않습니다 — "
+                "경로를 줄 맨 앞에 백틱으로 감싸 쓰세요 — 형식: - `<경로>` — <사유>"))
+            continue
         if raw:
             entries.append(raw)
     return entries
@@ -454,6 +518,44 @@ GIT_COMMIT_RE = re.compile(
 # `git commit-tree` is plumbing, not a commit of the index — `commit\b` alone matched it.
 GIT_COMMIT_TREE_RE = re.compile(r"\bgit\s+(?:-{1,2}[A-Za-z][A-Za-z0-9-]*(?:[=\s]+\S+)?\s+)*commit-tree\b")
 GIT_C_FLAG_RE = re.compile(r"\bgit\s+(?:-{1,2}[A-Za-z][A-Za-z0-9-]*(?:[=\s]+\S+)?\s+)*?-C\s+(\S+)")
+C_SKIP_NOTE = ("guild gate: -C 경로를 해석하지 못해 조기 경고를 건너뜁니다 — "
+               "커밋 시 git 훅이 검사합니다\n")
+
+
+def early_c_root(cmd, m):
+    """The repository a `git -C <arg> commit` names, for the EARLY-WARNING layer only — or None
+    when it cannot be resolved, and the caller then skips the early warning entirely.
+
+    ⚠ Not `m.group(1)`. That `\\S+` capture kept the shell's quotes: `git -C "$d" commit` gave
+    the literal `"$d"`, `repo_root` fell back to that string, and write_findings created a
+    `"$d"/.claude/...` directory in the hook's cwd (measured, word_app). So: ONE shell token from
+    the match position, quotes removed; `#` is not a comment there (shlex's default reads
+    `-C /tmp/a#b` as `/tmp/a`); the rest of the command (`-m it's`) is never read.
+    `~` expands only when the token was written unquoted — the shell does not expand `"~/x"`.
+    A token still holding `$` or a backtick is a shell expansion this hook cannot evaluate, and
+    a token that is not inside a git work tree is unknown. Either way: no fallback to the cwd —
+    that would judge a DIFFERENT repository's index and write its findings/pending firings.
+    The git hook (authoritative) runs in the real repository regardless."""
+    import shlex
+    rest = cmd[m.start(1):]
+    try:
+        lex = shlex.shlex(rest, posix=True)
+        lex.whitespace_split = True
+        lex.commenters = ""
+        tok = lex.get_token()
+    except ValueError:
+        return None
+    if not tok:
+        return None
+    if tok.startswith("~") and m.group(1) == tok:
+        tok = os.path.expanduser(tok)
+    if "$" in tok or "`" in tok:
+        return None
+    try:
+        top = sh(["git", "-C", tok, "rev-parse", "--show-toplevel"]).strip()
+    except GateUnavailable:
+        return None
+    return top or None
 
 
 def is_git_commit(cmd):
@@ -1178,6 +1280,9 @@ def write_findings(root, findings):
     snapshot: writing only when blocking left the last-blocked findings fossilised, and
     other readers (evolve/audit) misread that as an unresolved open item."""
     try:
+        # Not a git repository → write nothing (0.98.2 S2 — see flush_firings).
+        if not is_git_repo(root):
+            return
         p = os.path.join(root, ".claude", "guild", "gates")
         os.makedirs(p, exist_ok=True)
         # errors="backslashreplace" 는 ensure_ascii=False 와 짝이다. 경로는 unquote_git_path 의
@@ -1219,11 +1324,25 @@ def is_visual_warn(w):
     return isinstance(w, dict) and str(w.get("rule", "")) in VISUAL_RULES
 
 
+# Informational notes (0.98.2 S1·R3): an unread dismissed.md entry, a staged central-managed
+# file. They are not draft rules and never escalate — under WARN_HEADER ("confirm 시 차단") they
+# would promise a block that does not exist — and they are not violations, so they never reach
+# findings.json (evolve/audit read that file as the open-violation list).
+INFO_HEADER = "ℹ guild gate — 정보(차단 안 함):"
+INFO_RULES = {"info:dismissed-sub-bullet", "info:dismissed-ambiguous", "info:central-managed"}
+
+
+def is_info_warn(w):
+    return isinstance(w, dict) and str(w.get("rule", "")) in INFO_RULES
+
+
 def warn_message(warn):
     """The warn section(s), each under its own header. '' when there is nothing to warn."""
     parts = []
-    for header, items in ((WARN_HEADER, [w for w in warn if not is_visual_warn(w)]),
-                          (VISUAL_WARN_HEADER, [w for w in warn if is_visual_warn(w)])):
+    for header, items in ((WARN_HEADER, [w for w in warn
+                                         if not is_visual_warn(w) and not is_info_warn(w)]),
+                          (VISUAL_WARN_HEADER, [w for w in warn if is_visual_warn(w)]),
+                          (INFO_HEADER, [w for w in warn if is_info_warn(w)])):
         if items:
             parts.append(header + "\n- " + "\n- ".join(as_message(w) for w in items))
     return "\n\n".join(parts)
@@ -1398,9 +1517,42 @@ def apply_refiners(refiners, findings, ctx):
     return findings
 
 
+# Central-managed gate files (0.98.2 R3). `/gld update` overwrites them, so an edit committed
+# from a run is lost at the next update (measured #586: a run edited rules/verification.md, which
+# update would overwrite — the same file had already lost a #342 paragraph that way). Edit/Write
+# already asks via --guard-config; this covers a Bash write or an already-modified file reaching a
+# commit. Informational only: the human commits `/gld update`'s own result, which legitimately
+# stages these files. Two wordings, because the two kinds are refreshed differently
+# (update.md — the rule files follow the script, and are skipped with it).
+CENTRAL_SCRIPT_REL = ".claude/guild/gates/scripts/gate_precommit.py"
+CENTRAL_RULE_RELS = (".claude/guild/gates/rules/secrets.md",
+                     ".claude/guild/gates/rules/verification.md")
+
+
+def check_central_files(root, scope):
+    out = []
+    for name in changed_names(root, include_unstaged=scope[0]):
+        if name == CENTRAL_SCRIPT_REL:
+            out.append(finding(
+                "info:central-managed", name,
+                f"{name} 는 /gld update 가 갱신하는 중앙 관리 파일입니다 — 기존 코드 수정은 다음 "
+                "update 가 덮어쓰자고 제안하고, 새 check 추가일 때만 scripts/local/ 이관을 "
+                "묻습니다(로컬 확장은 .claude/guild/gates/scripts/local/ 로; /gld init·update "
+                "결과를 커밋하는 중이면 무시)"))
+        elif name in CENTRAL_RULE_RELS:
+            out.append(finding(
+                "info:central-managed", name,
+                f"{name} 는 다음 /gld update 가 게이트 스크립트를 갱신할 때 함께 덮어씁니다 — "
+                "로컬 규칙은 별도 규칙 파일 + scripts/local/ 모듈로(/gld init·update 결과를 "
+                "커밋하는 중이면 무시)"))
+    return out
+
+
 def run_checks(root, scope):
     del _VISUAL_DROP[:]  # B4 warnings are per run; never carry one into the next
+    del _DISMISS_WARN[:]  # likewise the dismissed.md notes (dismissed() also rebuilds them)
     dismiss = dismissed(root)
+    i_warn = dismissed_warnings() + check_central_files(root, scope)
     block = check_secrets(root, dismiss, scope) + check_verification(root, dismiss, scope)
     b_block, b_warn = check_boundaries(root, dismiss, scope)
     v_warn = check_visual_baselines(root, dismiss, scope) + list(_VISUAL_DROP)
@@ -1408,7 +1560,7 @@ def run_checks(root, scope):
     all_block = block + b_block + l_block
     if refiners:
         all_block = apply_refiners(refiners, all_block, LocalGateContext(root, dismiss, scope))
-    return all_block, b_warn + v_warn + l_warn
+    return all_block, b_warn + v_warn + l_warn + i_warn
 
 
 def main_git_hook():
@@ -1449,8 +1601,16 @@ def main_pre_tool_use():
         return 0  # not a commit → allow silently
     # honour `git -C <dir> commit` — resolving the root from the hook's own cwd inspected
     # the wrong repository entirely.
+    # ⚠ A `-C` argument that cannot be resolved skips the early warning (0.98.2 S2 — see
+    # early_c_root); `repo_root`'s cwd fallback stays for the no-`-C` case and the git hook.
     m = GIT_C_FLAG_RE.search(cmd)
-    root = repo_root(m.group(1) if m else None)
+    if m:
+        root = early_c_root(cmd, m)
+        if root is None:
+            sys.stderr.write(C_SKIP_NOTE)
+            return 0
+    else:
+        root = repo_root()
     if not gates_enabled(root):
         return 0  # off-switch
     scope = commit_scope(cmd)
@@ -1744,6 +1904,9 @@ def main_scan_paths(args):
                              "(not a git repository, or git failed) — NOT judged\n")
             return EXIT_NOT_JUDGED
     dismiss = dismissed(repo_root())
+    # stdout is parsed line by line (audit_readiness reads `SECRET-PATH` lines) — notes go to stderr.
+    for w in dismissed_warnings():
+        sys.stderr.write(f"{INFO_HEADER} {as_message(w)}\n")
     hits = 0
     for raw in names:
         name = raw.strip().replace("\\", "/")
