@@ -216,6 +216,9 @@ def plumbing(sub, args):
             return "git update-index stages content without check_commit.py --stage"
     if sub == "apply" and any(v in ("--cached", "--index") for v in vals):
         return "git apply --cached stages a patch without check_commit.py --stage"
+    if sub == "sparse-checkout" and not (vals and vals[0] == "list"):
+        return ("git sparse-checkout marks files skip-worktree (their changes would be hidden from Studio's checks) — "
+                "ask the person; if they want it, they run it themselves in a terminal")
     if sub == "checkout-index" and any(v in ("-a", "--all") for v in vals):
         return "git checkout-index --all overwrites the work tree from the index"
     return None

@@ -27,6 +27,7 @@ IMAGE_LIKE = re.compile(r"\.(?:png|jpe?g|gif|webp|avif|svg|bmp|tiff?|heic)\b|<im
 FM_KEY = re.compile(r"^([A-Za-z_][\w-]*):\s*(.*?)\s*$")
 FM_SRC_KEYS = ("src", "url", "path", "image")
 WINDOW_UP, WINDOW_DOWN = 1, 3
+SHORT_CREDIT = 80  # a credit line above an image may stand one blank line away when it is this short (R2)
 
 
 class Ref(object):
@@ -149,9 +150,15 @@ def _blank(s):
 
 def mask(lines, start):
     """The lines with frontmatter, fenced code, inline code and HTML comments blanked (positions kept)."""
+    return mask_info(lines, start)[0]
+
+
+def mask_info(lines, start):
+    """(masked lines, the 0-based line where an HTML comment opens that never closes, or None)."""
     body = list(lines)
     fence = None
     comment = False
+    opened = None
     for i in range(len(body)):
         if i < start:
             body[i] = ""
@@ -184,7 +191,7 @@ def mask(lines, start):
                     out.append(line[pos:])
                     break
                 out.append(line[pos:beg])
-                pos, comment = beg, True
+                pos, comment, opened = beg, True, i
                 end = line.find("-->", beg + 4)
                 if end < 0:
                     out.append(_blank(line[beg:]))
@@ -192,16 +199,18 @@ def mask(lines, start):
                 out.append(_blank(line[beg:end + 3]))
                 pos, comment = end + 3, False
         body[i] = "".join(out)
-    return body
+    return body, (opened if comment else None)
 
 
-def extract(text, image_keys=()):
+def extract(text, image_keys=(), credit=None):
     """[Ref] in reading order."""
-    return extract_all(text, image_keys)[0]
+    return extract_all(text, image_keys, credit)[0]
 
 
-def extract_all(text, image_keys=()):
-    """([Ref] in reading order, [line numbers that still look like an image but were not parsed])."""
+def extract_all(text, image_keys=(), credit=None):
+    """([Ref] in reading order, [line numbers that still look like an image but were not parsed], hidden) — hidden is
+    None or {"from": the line an HTML comment opens and never closes, "lines": [image-like lines it hides]}.
+    `credit(text)`: whether a line names a copyright or a source (a short one may stand a blank line above)."""
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     fm, start = frontmatter(lines)
     refs, fm_used = [], set()
@@ -210,7 +219,7 @@ def extract_all(text, image_keys=()):
             rs, used = _fm_refs(k, *fm[k])
             refs += rs
             fm_used.update(used)
-    body = mask(lines, start)
+    body, unclosed = mask_info(lines, start)
     defs = {}
     def_lines = set()
     for i, l in enumerate(body):
@@ -302,6 +311,11 @@ def extract_all(text, image_keys=()):
     def window(i, j):
         parts = []
         k = i - 1
+        up = k - 1  # a short credit line, then one blank line, then the image (R2) — unless the credit line sits right
+        # under an earlier image (then it is that image's caption)
+        if credit is not None and up >= 0 and not body[k].strip() and up not in image_lines and \
+                (up - 1) not in image_lines and 0 < len(body[up].strip()) <= SHORT_CREDIT and credit(body[up]):
+            parts.append(body[up].strip())
         while k >= max(0, i - WINDOW_UP) and body[k].strip() and k not in image_lines:
             parts.insert(0, body[k].strip())
             k -= 1
@@ -321,4 +335,8 @@ def extract_all(text, image_keys=()):
         unparsed += [n + 1 for n in range(1, start - 1) if n + 1 not in fm_used and IMAGE_LIKE.search(lines[n])]
     rest_lines = "".join(masked).split("\n")
     unparsed += [n + 1 for n, l in enumerate(rest_lines) if n not in def_lines and IMAGE_LIKE.search(l)]
-    return refs + [t[4] for t in found], unparsed
+    hidden = None
+    if unclosed is not None:  # an HTML comment that never closes hides the rest of the writing (R3)
+        hidden = {"from": unclosed + 1, "lines": [n + 1 for n in range(unclosed, len(lines))
+                                                  if IMAGE_LIKE.search(lines[n])]}
+    return refs + [t[4] for t in found], unparsed, hidden

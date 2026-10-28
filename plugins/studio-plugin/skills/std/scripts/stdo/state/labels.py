@@ -109,6 +109,15 @@ def video_dir(repo, studio_root, video):
     return found[0] if len(found) == 1 else None
 
 
+def source_commit_lines(state):
+    """The lines the ① question must show (M1e review S5): one per commit to the source after begin."""
+    src = state.get("source") if isinstance(state, dict) else None
+    commits = src.get("commits_since_begin") if isinstance(src, dict) else None
+    return ["원본이 begin 뒤에 커밋됨: %s %s (%s)" % (c.get("sha", "")[:12], c.get("subject", ""),
+                                                  c.get("stat") or "—")
+            for c in commits or [] if isinstance(c, dict)]
+
+
 def read_state(vdir):
     try:
         with open(os.path.join(vdir, "work", "state.json"), encoding="utf-8") as f:

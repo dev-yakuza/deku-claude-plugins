@@ -47,7 +47,7 @@ class RealApprove(StudioTestCase):
         from stdo.state.hashes import source_hash_repo_md
         live = source_hash_repo_md(self.repo, "docs/a.md", [])
         st["source"]["frozen_hash"] = live
-        st["brief"]["core"] = brief_core(["C-1"], [{"name": "narrator"}])
+        st["brief"]["core"] = brief_core([F.C1], [{"name": "narrator"}])
         store.create(self.vdir, st)
 
     def run_cli(self, *argv):

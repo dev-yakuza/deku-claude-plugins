@@ -7,10 +7,8 @@ current = {
   "source_live_hash", "source_text" (the frozen copy's text, for excerpts) }
 """
 
-import re
-import unicodedata
-
 from . import schema
+from ..text.normalize import Text, normalize  # noqa: F401 — the one excerpt normalization (m1-plan §7.1)
 from .tuples import OWNER, changed, tuple_for  # noqa: F401
 
 IDX = {s: i for i, s in enumerate(schema.STAGES)}
@@ -61,11 +59,6 @@ def _key(c, state, lang):
     return (IDX[c["stage"]], side)
 
 
-def normalize(text):
-    t = unicodedata.normalize("NFC", text).replace("\r\n", "\n").replace("\r", "\n")
-    return re.sub(r"\s+", " ", t).strip()
-
-
 def _source_diff(state, lang, rec1, cur):
     """`source_hash` differs from ①'s (00-plan §3.2, m0b1-plan §5)."""
     if state["source"].get("frozen_hash") != cur["source_live_hash"]:
@@ -73,9 +66,9 @@ def _source_diff(state, lang, rec1, cur):
     sd = state["langs"][lang]["approved"].get("source-diff")
     if sd and sd.get("rejected") and sd.get("tuple", {}).get("source_hash") == cur["source_hash"]:
         return {"stage": "verify", "why": ["the source diff was rejected"]}
-    text = normalize(cur.get("source_text") or "")
+    text = Text(cur.get("source_text") or "")
     excerpts = rec1.get("excerpts") or []
-    if all(normalize(e) in text for e in excerpts) and rec1["tuple"].get("content") == cur["content"]:
+    if all(text.contains(e) for e in excerpts) and rec1["tuple"].get("content") == cur["content"]:
         return {"held": "source-diff"}
     return {"stage": "script", "why": ["an approved excerpt changed or disappeared in the source"]}
 

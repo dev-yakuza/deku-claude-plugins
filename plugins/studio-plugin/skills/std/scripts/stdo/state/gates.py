@@ -268,8 +268,8 @@ def _source_diff(repo, vdir, state, lang, ctx, o, providers, hooks, argv, reject
     if not expect:
         raise store.Refused("needs --expect <hash12>", C.USAGE)
     cur = providers.collect(ctx, state, lang)
-    from .router import normalize
-    text = normalize(cur.get("source_text") or "")
+    from ..text.normalize import Text
+    text = Text(cur.get("source_text") or "")
 
     def check_state(s):
         _one_language(s)
@@ -293,7 +293,7 @@ def _source_diff(repo, vdir, state, lang, ctx, o, providers, hooks, argv, reject
             if r1 and r1["tuple"].get("source_hash") == frm:
                 moves.append((lg, "1", None))
             for p, r in (L["approved"].get("4b") or {}).items():
-                if r["tuple"].get("source_hash") == frm and all(normalize(e) in text for e in r.get("excerpts") or []):
+                if r["tuple"].get("source_hash") == frm and all(text.contains(e) for e in r.get("excerpts") or []):
                     moves.append((lg, "4b", p))
         return moves, new
 

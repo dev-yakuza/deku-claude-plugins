@@ -111,7 +111,9 @@ def begin(repo, cfg, root, o, providers, ctx_of, env=None):
         _warn("s2v has uncommitted changes: going back to this exact version later is not possible")
     s2v = {k: ver.get(k) for k in ("id", "version", "commit", "dirty")}
     st = schema.create_state(video, "public", kind, "public", lang, s2v,
-                             {"kind": "repo-md", "path": rel.replace(os.sep, "/"), "images": [], "frozen_hash": None})
+                             {"kind": "repo-md", "path": rel.replace(os.sep, "/"), "images": [], "frozen_hash": None,
+                              # the source's last commit at begin: later commits to it are shown at ① (S5)
+                              "begin_commit": last_commit(repo, [rel.replace(os.sep, "/")])})
     vdir = os.path.join(repo, root, "videos", video)
     voices = os.path.join(repo, root, "voices")
     if not os.path.isdir(voices):
@@ -149,6 +151,85 @@ def _checked_assets(vdir, copy_sha, fp):
     return images, hashes.file_sha(p), None
 
 
+def uncommitted(repo, rels):
+    """[(path, why)] of the repository files among `rels` that are not exactly as in HEAD (M1d re-review R1, M1e
+    review S4): untracked, marked assume-unchanged or skip-worktree (git would hide their changes), staged, or with
+    work-tree bytes whose blob is not HEAD's."""
+    rels = sorted(set(rels))
+    if not rels:
+        return []
+    if _git(repo, "rev-parse", "-q", "--verify", "HEAD^{commit}") is None:
+        return [(r, "no commit yet") for r in rels]
+    spec = [":(literal)" + r for r in rels]
+    flags = {}
+    for line in (_git(repo, "ls-files", "-v", "-z", "--", *spec) or "").split("\0"):
+        if len(line) > 2 and line[1] == " ":
+            flags[line[2:]] = line[0]
+    changed = _git(repo, "diff", "--name-only", "-z", "HEAD", "--", *spec)
+    changed = set((changed or "").split("\0")) - {""} if changed is not None else set(rels)
+    out = []
+    for r in rels:
+        tag = flags.get(r)
+        if tag is None:
+            out.append((r, "not committed (untracked)"))
+        elif tag in ("S", "s") or tag.islower():
+            out.append((r, "marked skip-worktree or assume-unchanged (git hides its changes) — the person clears it"))
+        elif r in changed:
+            out.append((r, "changed since the last commit"))
+        else:
+            head = (_git(repo, "rev-parse", "-q", "--verify", "HEAD:" + r) or "").strip()
+            work = (_git(repo, "hash-object", "--path=" + r, "--", r) or "").strip()
+            if not head or head != work:
+                out.append((r, "changed since the last commit"))
+    return out
+
+
+def last_commit(repo, rels):
+    """The newest commit that touched `rels` (None without one)."""
+    out = _git(repo, "log", "-1", "--format=%H", "--", *[":(literal)" + r for r in rels])
+    return (out or "").strip() or None
+
+
+def commits_since(repo, base, rels):
+    """[{"sha", "subject"}] of the commits that touched `rels` after `base` (all of them when base is None)."""
+    if not rels:
+        return []
+    rng = "%s..HEAD" % base if base else "HEAD"
+    out = _git(repo, "log", "--format=%H%x09%s", rng, "--", *[":(literal)" + r for r in sorted(set(rels))])
+    res = []
+    for line in (out or "").splitlines():
+        sha, _, subject = line.partition("\t")
+        if sha:
+            res.append({"sha": sha, "subject": subject, "stat": _diffstat(repo, sha, rels)})
+    return res
+
+
+def _diffstat(repo, sha, rels):
+    """`+A -D path, …` of one commit, limited to `rels` (M1e review T3: what the commit changed in the source)."""
+    out = _git(repo, "show", "--numstat", "--format=", sha, "--", *[":(literal)" + r for r in sorted(set(rels))])
+    parts = []
+    for line in (out or "").splitlines():
+        bits = line.split("\t")
+        if len(bits) == 3:
+            parts.append("%s %s" % (path_stat(bits[0], bits[1]), bits[2]))
+    return ", ".join(parts)
+
+
+def path_stat(added, deleted):
+    return "binary" if added == "-" else "+%s -%s" % (added, deleted)
+
+
+def source_commit_lines(state):
+    """The lines the ① question must show (S5): one per commit to the source after begin."""
+    return labels.source_commit_lines(state)
+
+
+def _dirty_refusal(found):
+    return store.Refused("Studio freezes only committed writing — %s. Ask the person to commit (or undo) these "
+                         "changes; never change or commit the person's writing yourself. Then record-source again."
+                         % "; ".join("%s: %s" % x for x in found), C.REFUSED)
+
+
 def record_source(repo, vdir, state, cfg, hooks=None, env=None):
     src = state["source"]
     if src.get("kind") != "repo-md":
@@ -157,6 +238,9 @@ def record_source(repo, vdir, state, cfg, hooks=None, env=None):
     before = hashes.file_sha(absrc)
     if before is None:
         raise store.Refused("the source is missing: %s" % src["path"], C.FAIL)
+    found = uncommitted(repo, [src["path"]])
+    if found:  # an agent could otherwise edit the person's writing before it is frozen
+        raise _dirty_refusal(found)
     dst = frozen_copy_path(vdir, src)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     tmp = "%s.tmp.%d" % (dst, os.getpid())
@@ -169,6 +253,10 @@ def record_source(repo, vdir, state, cfg, hooks=None, env=None):
     from ..source.scope import fingerprint
     fp = fingerprint(repo, cfg, dict(os.environ if env is None else env))
     images, assets_sha, note = _checked_assets(vdir, copied, fp)
+    found = uncommitted(repo, images)
+    if found:
+        os.remove(tmp)
+        raise _dirty_refusal(found)
     before_live = hashes.source_hash_repo_md(repo, src["path"], images)
     os.replace(tmp, dst)
     after_live = hashes.source_hash_repo_md(repo, src["path"], images)
@@ -176,7 +264,8 @@ def record_source(repo, vdir, state, cfg, hooks=None, env=None):
         raise store.Refused("the source or its images changed while they were recorded: run record-source again",
                             C.FAIL)
     rec = {"frozen_hash": after_live, "copy_sha": copied, "assets_sha": assets_sha, "images": images,
-           "frozen_at": schema.now()}
+           "frozen_at": schema.now(),
+           "commits_since_begin": commits_since(repo, src.get("begin_commit"), [src["path"]] + list(images))}
 
     def check(s):
         if all(L["status"] in ("done", "aborted") for L in s["langs"].values()):
@@ -187,6 +276,8 @@ def record_source(repo, vdir, state, cfg, hooks=None, env=None):
 
     store.write(vdir, dict({"event": "record-source"}, **rec), change, hooks=hooks, check=check)
     _out("source frozen %s (%d image(s))" % (after_live[:12], len(images)))
+    for line in source_commit_lines(dict(state, source=dict(src, **rec))):
+        _out("%s — put this line in the ① question" % line)
     if note:
         _out("note: %s" % note)
     return C.OK

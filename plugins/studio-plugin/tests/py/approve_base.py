@@ -40,7 +40,7 @@ class ApproveCase(StudioTestCase):
         os.makedirs(self.vdir)
         st = F.state(outputs=self.outputs, platforms=self.platforms)
         st["location"] = self.location
-        st["brief"]["core"] = brief_core(["C-1"], [{"name": "narrator"}])  # what record-brief computes
+        st["brief"]["core"] = brief_core([F.C1], [{"name": "narrator"}])  # what record-brief computes
         store.create(self.vdir, st)
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
             f.write("# script\n")
@@ -177,9 +177,10 @@ class ApproveCase(StudioTestCase):
             f.write(body if isinstance(body, str) else json.dumps(body))
 
     def brief(self, outputs, platforms):
+        F.brief_ready(self.repo, self.vdir)  # what record-brief reads (M1e)
         p = os.path.join(self.vdir, "work", "brief.json")
         with open(p, "w") as f:
-            json.dump({"claims": ["C-1"], "roles": [{"name": "narrator"}], "outputs": list(outputs),
+            json.dump({"claims": [F.C1], "roles": [{"name": "narrator"}], "outputs": list(outputs),
                        "platforms": platforms}, f)
         return p
 

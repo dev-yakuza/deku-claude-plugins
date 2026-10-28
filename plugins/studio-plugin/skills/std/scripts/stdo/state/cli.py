@@ -267,12 +267,17 @@ def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock):
         if unknown:
             raise schema.SchemaError("outputs not in the script: %s" % ", ".join(unknown))
     core = brief_core(claims, roles)
+    from ..claims.brief import BriefProblem, assets_problem, estimate
+    box = {}
 
     def check(s):  # under the lock (MINOR 4): approved outputs/platforms cannot be removed here
-        if s["source"].get("assets_sha") is None:  # the source's images are checked before the brief (M1d Q3)
-            raise store.Refused("the source's images are not checked yet (no assets_sha): run resolve_assets.py, the "
-                                "source analyst and check_scope.py, then state.py record-source %s" % s["video"],
-                                C.REFUSED)
+        why = assets_problem(vdir, s)  # the source's images are checked before the brief (J61 · J74)
+        if why:
+            raise store.Refused(why, C.REFUSED)
+        try:  # the length estimate is Studio's own (m1-plan §7.2), from the copy and source.md as they are now
+            box["estimate"] = estimate(ctx["repo"], vdir, s, claims)
+        except BriefProblem as e:
+            raise store.Refused(str(e), C.FAIL)
         removed_o = set(s["brief"]["outputs"]) - set(outputs)
         removed_p = set(s["brief"]["platforms"]) - set(platforms)
         for L in s["langs"].values():
@@ -291,9 +296,12 @@ def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock):
             L["excluded"]["outputs"] = [x for x in L["excluded"]["outputs"] if x not in outputs]
             L["excluded"]["platforms"] = [x for x in L["excluded"]["platforms"] if x not in platforms]
 
-    store.write(vdir, {"event": "record-brief", "core": core, "outputs": outputs, "platforms": platforms},
-                change, hooks=hooks, check=check, **({"flock": flock} if flock else {}))
+    store.write(vdir, lambda s: {"event": "record-brief", "core": core, "outputs": outputs, "platforms": platforms,
+                                 "estimate": box["estimate"]}, change, hooks=hooks, check=check, **({"flock": flock} if flock else {}))
     sys.stdout.write("brief_core %s\n" % core)
+    e = box["estimate"]
+    sys.stdout.write("estimated length %s s (%d characters ÷ %s per second; the format allows %s–%s s)\n"
+                     % (e["seconds"], e["chars"], e["chars_per_sec"], e["min"], e["max"]))
     return C.OK
 
 
@@ -357,6 +365,11 @@ def _stage_done(vdir, state, lang, ctx, o, providers, hooks, flock):
             stagechecks.verify(stage, stagechecks.Inputs(ctx, s, lang, scope, cur, providers), cur.get("s2v_version"))
         except stagechecks.CheckProblem as e:
             raise store.Refused(str(e), C.FAIL)
+        if stage == "script":  # the script may use only the images record-source recorded as checked (J61 · J74)
+            from ..claims.brief import assets_problem
+            why_a = assets_problem(vdir, s)
+            if why_a:
+                raise store.Refused(why_a, C.REFUSED)
         if stage == "render":
             why_r = flow.render_problem(s, lang, output, ctx["repo"])
             if why_r:

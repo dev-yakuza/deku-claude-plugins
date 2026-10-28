@@ -324,6 +324,7 @@ class Scope(SourceCase):
         self.resolve()
         with open(os.path.join(self.repo, "src", "content", "blog", "airport.md"), "a") as f:
             f.write("\nmore\n")
+        helpers.git(self.repo, "commit", "-q", "--no-verify", "-am", "more")  # only committed writing (M1e R1)
         self.assertEqual(self.state("record-source", "v1"), 0, self.err)
         self.assertEqual(self.scope(), 1)
         self.assertIn("another copy", self.err)
@@ -436,6 +437,7 @@ class FollowUps(SourceCase):
     def replace_article(self, text):
         with open(os.path.join(self.repo, "src", "content", "blog", "airport.md"), "w") as f:
             f.write(text)
+        helpers.git(self.repo, "commit", "-q", "--no-verify", "-am", "article")  # only committed writing (M1e R1)
         self.assertEqual(self.state("record-source", "v1"), 0, self.err)
 
     def test_q2_missed_references(self):
@@ -443,7 +445,7 @@ class FollowUps(SourceCase):
         self.assertEqual([(r.src, r.alt, r.title) for r in rs], [("/x.png", "a [b] c", "t"), ("/y.png", "d [e]", "")])
         fm = "---\nhero:\n  src: /h.png\n  alt: 출처 X\ngallery:\n  - /g1.png\n  - url: '/g2.png'\n    alt: two\n" \
              "flow: [/f1.png, \"/f2.png\"]\nother:\n  src: /o.png\n---\nbody\n"
-        rs, unparsed = refs.extract_all(fm, ("hero", "gallery", "flow"))
+        rs, unparsed, _hidden = refs.extract_all(fm, ("hero", "gallery", "flow"))
         self.assertEqual([(r.src, r.line, r.alt) for r in rs],
                          [("/h.png", 3, "출처 X"), ("/g1.png", 6, ""), ("/g2.png", 7, "two"), ("/f1.png", 9, ""),
                           ("/f2.png", 9, "")])
@@ -460,7 +462,7 @@ class FollowUps(SourceCase):
                           ("frontmatter", "/blog-images/airport/a.png"), ("html", "/blog-images/airport/a.png"),
                           ("markdown", "/blog-images/airport/b.jpg"), ("css", "/blog-images/airport/a.png")])
         self.assertEqual(data["images"][0]["floor"], "third-party")  # its nested alt
-        self.assertEqual(data["unparsed"], {"count": 2, "lines": [10, 25]})  # og: and the lazy <img>
+        self.assertEqual(data["unparsed"], {"count": 2, "lines": [10, 25], "hidden_by_comment": None})  # og: and the lazy <img>
         self.assertIn("2 line(s) look like an image but were not parsed (lines 10, 25)", self.out)
 
     def test_q5_case_exact_nfc(self):
@@ -485,7 +487,7 @@ class FollowUps(SourceCase):
     def test_q6_comments_masked(self):
         text = "<!-- ![a](/a.png) -->\n<!--\n![b](/b.png)\n```\n-->\n![c](/c.png) <!-- x --> ![d](/d.png)\n" \
                "`<!--` ![e](/e.png)\n<!-- open ![f](/f.png)\n"
-        rs, unparsed = refs.extract_all(text)
+        rs, unparsed, _hidden = refs.extract_all(text)
         self.assertEqual([r.src for r in rs], ["/c.png", "/d.png", "/e.png"])  # ``` inside a comment opens no fence
         self.assertEqual(unparsed, [])
 

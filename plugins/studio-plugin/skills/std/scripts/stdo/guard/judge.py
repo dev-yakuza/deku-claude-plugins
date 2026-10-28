@@ -2506,6 +2506,11 @@ def decide(hook, env, fs=None, probe=None, snapshot_loader=None):
 def _decide(ctx, hook):
     tool = hook.get("tool_name") or ""
     ti = hook.get("tool_input") or {}
+    from . import auditor
+    if auditor.is_auditor(hook):  # the external auditor only reads (J46), whatever else would allow
+        auditor.judge(ctx, tool, ti)
+        if ctx.denies:
+            return ctx.denies[0], ctx
     if tool == "Bash":
         cmd = ti.get("command")
         if isinstance(cmd, str):

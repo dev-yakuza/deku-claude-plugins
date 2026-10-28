@@ -2,9 +2,65 @@
 table, independently of stdo/state/tuples.py (m0b1-plan §7)."""
 
 import copy
+import hashlib
+import json
+import os
 
 import helpers  # noqa: F401  (import path)
 from stdo.state import schema
+
+# a video past the source stage: its checked assets.json (the bytes checkfix and brief_ready write) and their sha
+ASSETS_BYTES = b'{"images": [], "schema": 1}\n'
+ASSETS_SHA = hashlib.sha256(ASSETS_BYTES).hexdigest()
+# the source analyst's claims for the brief tests (ids are the excerpts' hashes, 00-plan §3.2)
+EXCERPTS = ("The cat sat on the mat.", "It was warm.")
+
+
+def claim_id(excerpt):
+    return "C-" + hashlib.sha256(excerpt.encode("utf-8")).hexdigest()[:8]
+
+
+C1, C2 = claim_id(EXCERPTS[0]), claim_id(EXCERPTS[1])
+FORMAT = """# Format (test)
+
+<!-- studio:criteria -->
+```json
+{"length_seconds": {"min": %s, "max": %s}, "chars_per_sec": {"ko": 5.5, "ja": 7.0, "en": 14.0},
+ "cer_max": {"ko": 0.15, "ja": 0.15, "en": 0.1}}
+```
+<!-- /studio:criteria -->
+"""
+
+
+def write_assets(vdir):
+    os.makedirs(os.path.join(vdir, "work"), exist_ok=True)
+    p = os.path.join(vdir, "work", "assets.json")
+    if not os.path.exists(p):
+        with open(p, "wb") as f:
+            f.write(ASSETS_BYTES)
+
+
+def write_format(repo, kind="youtube", length=(1, 600), commit=True):
+    d = os.path.join(repo, ".claude", "studio", "formats")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "%s.md" % kind), "w", encoding="utf-8") as f:
+        f.write(FORMAT % length)
+    if commit:
+        helpers.git(repo, "add", "-A", ".claude/studio/formats")
+        helpers.git(repo, "commit", "-q", "--no-verify", "--allow-empty", "-m", "format")
+
+
+def brief_ready(repo, vdir, source_path="docs/a.md", excerpts=EXCERPTS, length=(1, 600), source_md=None):
+    """What record-brief reads: the format, the checked assets, the frozen copy and the analyst's claims."""
+    write_format(repo, length=length)
+    write_assets(vdir)
+    d = os.path.join(vdir, "work", "source")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, os.path.basename(source_path)), "w", encoding="utf-8") as f:
+        f.write("# A\n\n" + "\n".join(excerpts) + "\n")
+    with open(os.path.join(vdir, "work", "source.md"), "w", encoding="utf-8") as f:
+        f.write(source_md if source_md is not None else "# Source\n\n## Claims\n" + "".join(
+            "- %s: claim %d\n  > %s\n" % (claim_id(e), n, e) for n, e in enumerate(excerpts, 1)))
 
 ENGINE = {"tts": "e-tts", "templates": "e-tpl", "defaults_voice": "e-dv", "composer": "e-comp",
           "renderer": "e-rend", "ffmpeg": "e-ff", "defaults_presentation": "e-dp"}
@@ -14,7 +70,7 @@ def state(outputs=("youtube",), platforms=None, langs=("ko",)):
     s = schema.create_state("v1", "public", "youtube", "public", langs[0],
                             {"id": "0.12.1+abc", "version": "0.12.1", "commit": "c0ffee", "dirty": False},
                             {"kind": "repo-md", "path": "docs/a.md", "images": [], "frozen_hash": "src1",
-                             "assets_sha": "a" * 64})  # past the source stage: its images are checked (M1d Q3)
+                             "assets_sha": ASSETS_SHA})  # past the source stage: its images are checked (M1d Q3)
     for l in langs[1:]:
         s["langs"][l] = schema.new_lang()
     s["brief"] = {"core": "brief1", "outputs": list(outputs),

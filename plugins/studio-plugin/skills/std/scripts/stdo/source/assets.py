@@ -196,7 +196,7 @@ def build(top, vdir, video, source_rel, copy_path, cfg):
         raise AssetError(1, "cannot read the source copy %s (%s) — run state.py record-source first"
                          % (os.path.relpath(copy_path, top), e))
     images = []
-    found, unparsed = refs.extract_all(text, keys)
+    found, unparsed, hidden = refs.extract_all(text, keys, credit=lambda t: has_mark(t, marks) is not None)
     for n, ref in enumerate(found, 1):
         entry = {"id": "img-%02d" % n, "ref": ref.src, "line": ref.line, "kind": ref.kind, "alt": ref.alt,
                  "title": ref.title, "caption": ref.caption, "context": ref.context, "resolved": None, "script_src": None, "sha256": None,
@@ -224,7 +224,7 @@ def build(top, vdir, video, source_rel, copy_path, cfg):
         images.append(entry)
     return {"schema": SCHEMA, "video": video, "source": source_rel,
             "source_copy_sha": hashlib.sha256(raw).hexdigest(), "images": images,
-            "unparsed": {"count": len(unparsed), "lines": unparsed}}
+            "unparsed": {"count": len(unparsed), "lines": unparsed, "hidden_by_comment": hidden}}
 
 
 def path(vdir):

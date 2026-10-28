@@ -501,6 +501,10 @@ class HoldRelease(FlowCase):
 class StageChecks(FlowCase):
     auto_checks = False
 
+    def setUp(self):
+        super().setUp()
+        F.write_assets(self.vdir)  # the checked assets the fixture state recorded (stage-done script compares them)
+
     def done(self, stage, **kw):
         args = ["stage-done", "v1", stage]
         for k, v in kw.items():

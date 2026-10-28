@@ -10,6 +10,7 @@ import contextlib
 import io
 import os
 
+import state_fixtures as F
 from stdo.state import cli, schema, stagechecks, store
 
 
@@ -94,6 +95,8 @@ def before_stage_done(repo, argv, providers):
             if (r.get("result") != "pass" or not same) and not L.get("held"):
                 render(repo, video, output, providers, lang=lang)  # the test changed the result: render "again"
             return  # a render's check result is the render's own (run_s2v.py, or render() above)
+        if stage == "script" and state["source"].get("assets_sha") == F.ASSETS_SHA:
+            F.write_assets(vdir)  # the checked assets the fixture state recorded (stage-done script compares them)
         pass_check(repo, video, stage, providers, output=output, platform=platform, lang=lang)
     except Exception:  # noqa: BLE001 — the stage-done under test reports the real problem
         return

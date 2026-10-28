@@ -12,7 +12,8 @@ import unicodedata
 TABLE = [
     ("P-STATE", ("<sr>/**/videos/*/work/state.json", "<sr>/**/videos/*/work/approvals.jsonl",
                  "<sr>/**/videos/*/work/.state.lock", "<sr>/**/videos/*/work/**/shown.json",
-                 "<sr>/**/videos/*/work/**/verify.json", "<sr>/**/videos/*/work/**/checks/**",
+                 "<sr>/**/videos/*/work/**/verify.json", "<sr>/**/videos/*/work/**/verify.md",
+                 "<sr>/**/videos/*/work/**/checks/**",
                  "<sr>/**/videos/*/work/assets.json", "<sr>/**/videos/*/work/commit-ok.json",
                  "<sr>/**/videos/*/work/source/**",
                  "<sr>/**/videos/*/work/**/pronounce-approved.json",
@@ -43,7 +44,7 @@ S2V_OWNED = {"P-VOICE", "P-AUDIO", "P-CHAR"}
 DRAFT_OK = {"P-CHAR": "character.yaml.draft"}
 # names that make a protected path when they end a dynamic word's literal tail
 TAIL_NAMES = {"local", "character", "voices", "audio", "consent", "state.json", "approvals.jsonl", "shown.json",
-              "verify.json", "CREDITS.yaml", "status.json", "approvals.json", "charter.md", "config.json",
+              "verify.json", "verify.md", "CREDITS.yaml", "status.json", "approvals.json", "charter.md", "config.json",
               "commit-ok.json", "pending-approval.json", "guard-ran.json", "last-checked.json", "assets.json",
               "pronounce-approved.json", "installed.json"}
 

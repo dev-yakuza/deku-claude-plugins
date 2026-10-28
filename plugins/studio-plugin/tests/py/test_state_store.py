@@ -41,6 +41,7 @@ class StoreCase(StudioTestCase):
         os.makedirs(self.vdir)
         st = F.state(outputs=("youtube",), platforms={"youtube": ["youtube"]})
         store.create(self.vdir, st)
+        F.brief_ready(self.repo, self.vdir)  # record-brief's inputs (M1e: the computed length, the checked assets)
         self.paths = store.paths(self.vdir)
         self.providers = Providers(inspect=lambda ctx: inspect_json(), source=lambda ctx, st: ("src1", ""))
 
@@ -56,7 +57,7 @@ class StoreCase(StudioTestCase):
         return code, out.getvalue(), err.getvalue()
 
     def brief(self, **b):
-        body = {"claims": ["C-1"], "roles": [{"name": "narrator"}], "outputs": ["youtube"],
+        body = {"claims": [F.C1], "roles": [{"name": "narrator"}], "outputs": ["youtube"],
                 "platforms": {"youtube": ["youtube"]}}
         body.update(b)
         p = os.path.join(self.vdir, "work", "brief.json")
@@ -144,9 +145,9 @@ class Commands(StoreCase):
         self.assertNotIn("Traceback", err)
 
     def test_r9_brief_core_is_recorded(self):
-        self.assertEqual(self.cli("record-brief", "v1", "--from", self.brief(claims=["C-2", "C-1"]))[0], 0)
+        self.assertEqual(self.cli("record-brief", "v1", "--from", self.brief(claims=[F.C2, F.C1]))[0], 0)
         self.assertEqual(self.state()["brief"]["core"],
-                         hashes.brief_core(["C-1", "C-2"], [{"name": "narrator"}]))
+                         hashes.brief_core([F.C1, F.C2], [{"name": "narrator"}]))
 
     def test_r10_loop_stagnation_and_reset_on_approval(self):
         self.assertEqual(self.cli("loop", "v1", "verify")[0], 0)
@@ -205,6 +206,7 @@ class Commands(StoreCase):
 
     def test_missing_frozen_copy_is_1(self):
         self.script()
+        os.remove(os.path.join(self.vdir, "work", "source", "a.md"))  # brief_ready's copy
         os.makedirs(os.path.join(self.repo, "docs"), exist_ok=True)
         with open(os.path.join(self.repo, "docs", "a.md"), "w") as f:
             f.write("# A")
@@ -212,7 +214,7 @@ class Commands(StoreCase):
         code, _, err = self.cli("next", "v1", providers=p)
         self.assertEqual(code, 1)
         self.assertIn("frozen source copy is missing", err)
-        os.makedirs(os.path.join(self.vdir, "work", "source"))
+        os.makedirs(os.path.join(self.vdir, "work", "source"), exist_ok=True)
         with open(os.path.join(self.vdir, "work", "source", "a.md"), "w") as f:
             f.write("# A")
         self.assertEqual(self.cli("next", "v1", providers=p)[0], 0)

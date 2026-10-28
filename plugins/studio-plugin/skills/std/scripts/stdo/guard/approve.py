@@ -114,13 +114,36 @@ def state_py(hook, env, ri, argv):
         key = (sid, ans.tool_use_id, idx)
         if consumed(ri, key):
             raise transcript.NoEvidence("consumed")
+        lines = _gate_lines(ri, argv)
+        if lines:
+            from ..commit.summary import norm
+            missing = [l for l in lines if norm(l) not in norm(text)]
+            if missing:
+                raise transcript.NoEvidence("gate-lines-not-shown")
     except transcript.NoEvidence as e:
-        return Verdict("G-EVIDENCE", evidence_text("state.py %s" % sub, label, e))
+        extra = ""
+        if e.code == "gate-lines-not-shown":
+            extra = " The question shows: %s" % " / ".join(_gate_lines(ri, argv))
+        return Verdict("G-EVIDENCE", evidence_text("state.py %s" % sub, label, e) + extra)
     base.update({"tool_use_id": ans.tool_use_id, "question_index": idx, "question": text, "answer": label,
                  "mode": "human"})
     if note:
         base["reason"] = note
     return Verdict(pending=base, ri=ri, reason="answer %s#%d (%s)" % (ans.tool_use_id, idx, label))
+
+
+def _gate_lines(ri, argv):
+    """The lines a gate question must show besides the label: for ①, every commit to the source after begin (M1e
+    review S5). Read from the video's state.json; an unreadable state shows nothing here (state.py refuses it)."""
+    from ..state.argv import canonical
+    c = canonical(argv)
+    if c["cmd"] != "approve" or len(c["pos"]) < 2 or c["pos"][1] != "1":
+        return []
+    try:
+        st = labels.read_state(labels.video_dir(ri.worktree, ri.studio_root, c["pos"][0]))
+        return labels.source_commit_lines(st)
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def setup_py(hook, env, ri, argv):

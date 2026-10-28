@@ -91,3 +91,11 @@ synthetic static site (PNG/JPEG headers written byte by byte, WebP/AVIF headers,
 web root, an image outside `visibility.public`). The source analyst's image classes are a JSON block in
 `work/source.md`; `record-source` records images and the assets sha only after `check_scope` passed for that copy.
 
+
+**M1e** (`SCRIPTS_VERSION` 13): `stdo/text/normalize.py` (the one excerpt normalization), `record-brief`'s computed
+length, `check_claims.py` (`--narration`: the script check; without it: verify → `verify.json` · `verify.md`) and the
+external auditor's guard rule (`G-AUDIT`). `test_m1e.py` drives a video through source, brief, script and verify with
+the fake s2v (`FlowCase`); its `--full` test runs real `s2v lint` past `maxDuration`. Test claim ids are excerpt
+hashes (`state_fixtures.C1` · `C2`, `brief_ready`), and the fixture state's `assets_sha` is the sha of
+`state_fixtures.ASSETS_BYTES`, which `checkfix` writes before `stage-done script`. `record-source` freezes only
+committed writing, so tests commit an article before recording it.

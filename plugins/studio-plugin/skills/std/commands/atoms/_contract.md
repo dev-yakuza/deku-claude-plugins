@@ -41,7 +41,10 @@ Each script has its own table; a code means only what its script's table says.
 | 1 | failed (script errors from s2v inspect, a malformed input, a hash s2v could not compute) | fix the cause, then retry |
 | 2 | usage or setup (no harness, unknown command, schema, flock unsupported) | a Studio defect or setup: stop and report |
 | 3 | `next --enter`: an earlier stage must be redone | go to the stage `next` names |
+| 1 | `record-brief`: the computed length is outside the format, a chosen claim is not in `source.md` or not in the copy | the strategist chooses again |
 | 3 | `record-brief`: approved outputs/platforms would be removed | ask the person; removing them is `exclude-output` |
+| 3 | `record-brief` · `stage-done script`: the source's images are not checked, or `assets.json` is not the recorded one | finish `/std source` |
+| 3 | `record-source`: the writing or an image it shows is not committed | ask the person to commit their writing; never change or commit it yourself |
 | 4 | waiting for a person (held state, s2v version changed, hash_version; `loop` on a held language) | ask the person |
 | 5 | the video's state lock is busy | wait and retry |
 | 6 | no usable evidence of a person's answer (`approve`, `reject-source-diff`, `repin`, `exclude-output`, `unlock`) | ask with AskUserQuestion (fixed label), then run the command once |
@@ -66,6 +69,14 @@ Each script has its own table; a code means only what its script's table says.
 | 2 | usage or setup (no harness — everything but `init`; a value or path that is not allowed; `--proxy`) | fix the command, or stop and report |
 | 3 | refused: a harness (or an earlier install's traces) exists for `init`; the folder name is taken; the value is already set; an update that would raise `s2v.min_version` while videos are in progress | tell the person |
 | 6 | no usable evidence of the person's answer (`config set` of a protected key or `s2v.path`, `narrator set`, `update apply`) | ask with AskUserQuestion (fixed label, the change line), then run the command once |
+
+**`check_claims.py`** (`--narration`: the script stage; without it: verify)
+
+| Code | Meaning | Producer |
+|---|---|---|
+| 0 | passed (the check result is written; verify also wrote `verify.json` · `verify.md`) | `stage-done` |
+| 1 | failed: the listed problems | script: the writer again · verify: `state.py loop <video> verify`, then fix and check again |
+| 2 | usage or setup (no harness, no video, no script, no s2v path) | fix the command, or stop and report |
 
 **`lock.py` and s2v**: 73 / 74 = machine / character busy → `held:lock` / `held:actor`; otherwise the child's code.
 

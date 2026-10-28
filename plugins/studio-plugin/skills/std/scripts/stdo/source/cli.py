@@ -57,6 +57,12 @@ def resolve_main(argv, cwd=None):
         sys.stdout.write("%d line(s) look like an image but were not parsed (lines %s) — check them by hand; a script "
                          "may use only usable entries of work/assets.json\n"
                          % (data["unparsed"]["count"], ", ".join(map(str, data["unparsed"]["lines"]))))
+    hidden = data["unparsed"].get("hidden_by_comment")
+    if hidden:
+        sys.stdout.write("%d image-like line(s) hidden by an HTML comment from line %d (it never closes)%s — check "
+                         "them by hand\n" % (len(hidden["lines"]), hidden["from"],
+                                              ": lines " + ", ".join(map(str, hidden["lines"])) if hidden["lines"]
+                                              else ""))
     for i in data["images"]:
         sys.stdout.write("  %s line %d %s: %s%s (floor %s)\n" % (
             i["id"], i["line"], i["ref"] or "(none)", i["status"], " — " + i["reason"] if i["reason"] else "",

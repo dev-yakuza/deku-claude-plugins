@@ -127,17 +127,19 @@ def current_platforms(state, lang):
 # of the input sha (a pass under another s2v is not reused). visual-check has no file of its own: ③'s shown record
 # binds the stills' index.json and the whole ③ tuple already (v5 S4).
 STAGE_CHECKS = {
-    "script": {"file": "script", "script": "check_claims.py", "scope": None, "s2v": True,
+    # fail_unread: whether s2v lint's `unread-word` fails the stage — information at script, a failure from cast on
+    # (M1b re-review Z3 · J32; s2vlint.run(fail_unread=…) takes it from here)
+    "script": {"file": "script", "script": "check_claims.py", "scope": None, "s2v": True, "fail_unread": False,
                "inputs": ("script", "claims_map", "format", "assets_json", "script_files")},
     "verify": {"file": "verify-claims", "script": "check_claims.py", "scope": None, "s2v": False,
                "inputs": ("verify_draft", "source_copy", "claims_map", "script")},
-    "cast": {"file": "cast", "script": "check_assets.py", "scope": None, "s2v": True,
+    "cast": {"file": "cast", "script": "check_assets.py", "scope": None, "s2v": True, "fail_unread": True,
              "inputs": ("script", "cast_roster")},
     "tts": {"file": "tts", "script": "check_tts.py", "scope": None, "s2v": True,
             "inputs": ("lock_manifest", "sentences", "format")},
     "audition": {"file": "audition", "script": "audition.py", "scope": None, "s2v": False,
                  "inputs": ("lock_manifest", "approved_2", "exemptions", "pronounce_changes", "audition_out")},
-    "board": {"file": "board", "script": "check_assets.py", "scope": "output", "s2v": True,
+    "board": {"file": "board", "script": "check_assets.py", "scope": "output", "s2v": True, "fail_unread": True,
               "inputs": ("script", "assets_json", "credits", "script_files", "config_protected", "overlay_sha",
                          "credit_approvals")},
     "render": {"file": "render", "script": "run_s2v.py", "scope": "output", "s2v": True,

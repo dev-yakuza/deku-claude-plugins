@@ -6,4 +6,4 @@ __pycache__ is left in the repository.
 
 # The scripts' own version: bumped only when scripts/ change (not with the plugin version).
 # The guard compares it with the copy in a repository's .claude/studio/scripts/ (plan §3.5).
-SCRIPTS_VERSION = "12"
+SCRIPTS_VERSION = "13"

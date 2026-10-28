@@ -35,7 +35,9 @@ def tuple_of(state, lang, cur, gate, scope):
 def artifacts(ctx, state, lang, gate, scope):
     w = os.path.join(ctx["vdir"], "work", lang)
     if gate == "1":
-        return {"verify_md": file_sha(os.path.join(w, "verify.md"))}
+        # what the person reads and what it was made from (check_claims.py writes both, m1-plan §7.4)
+        return {"verify_md": file_sha(os.path.join(w, "verify.md")),
+                "verify_json": file_sha(os.path.join(w, "verify.json"))}
     if gate == "2":
         return {"exemptions": file_sha(os.path.join(w, "exemptions.json")),
                 "pronounce_changes": file_sha(os.path.join(w, "pronounce-changes.json"))}
