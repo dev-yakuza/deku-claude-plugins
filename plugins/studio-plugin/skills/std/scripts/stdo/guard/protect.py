@@ -17,7 +17,7 @@ TABLE = [
                  "<sr>/**/videos/*/work/assets.json", "<sr>/**/videos/*/work/commit-ok.json",
                  "<sr>/**/videos/*/work/source/**",
                  "<sr>/**/videos/*/work/**/pronounce-approved.json", "<sr>/**/videos/*/work/**/exemptions.json",
-                 "<sr>/**/videos/*/work/**/gate2-lines.txt",
+                 "<sr>/**/videos/*/work/**/gate2-lines.txt", "<sr>/**/videos/*/work/**/gate4b-lines.*.txt",
                  "<sr>/**/cast/*/status.json", "<sr>/**/cast/*/approvals.json",
                  "<sr>/**/cast/*/shown.json", ".claude/studio/local/commit-ok.json",
                  ".claude/studio/local/pending-approval.json", ".claude/studio/local/guard-ran.json",

@@ -28,6 +28,17 @@ Exactly `{"sentences": [{"text": "<the sentence or on-screen text, as in s2v's o
   is `contradicted`.
 Studio's `check_claims.py` turns your draft into `verify.json` and `verify.md`; never write those.
 
+## The copy (stage copy)
+When the producer gives you a platform copy:
+1. Judge every sentence of its title and description that says something about the subject (Studio requires at least
+   every sentence with a number or a term of the excerpts) in `work/<lang>/copy-verify.<platform>.json` — exactly
+   `{"sentences": [{"text": "<the sentence as in the copy>", "kind": "fact", "verdict": "supported" | "unsupported" |
+   "contradicted", "excerpts": ["<exact excerpt>"]}]}`. Chapter lines, credit lines and required notices are not
+   judged.
+2. Set `"copy_excerpts": {"<platform>": [...]}` in `work/<lang>/claims-map.json` to exactly the union of those
+   excerpts (change nothing else of the claims map).
+`validate_copy.py` checks both against the copy and the source copy.
+
 ## Rules
 - Judge only against the copy; no outside knowledge decides a verdict.
 - Never approve, commit or run script2video approval commands.

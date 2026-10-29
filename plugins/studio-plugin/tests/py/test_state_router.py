@@ -316,7 +316,7 @@ class Review1(unittest.TestCase):
         self.assertEqual(tuple_for("4a", c, output="youtube"), dict(three, render="r-youtube"))
         self.assertEqual(tuple_for("4b", c, platform="youtube", platform_outputs=["youtube"]),
                          {"content": "c1", "source_hash": "src1", "renders": {"youtube": "r-youtube"},
-                          "copy": "cp-youtube"})
+                          "copy": "cp-youtube", "credits": "cr1"})  # M1h review Y3
 
 
 class StageDone(unittest.TestCase):

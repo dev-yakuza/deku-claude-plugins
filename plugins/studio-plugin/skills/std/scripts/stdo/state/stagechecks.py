@@ -143,6 +143,8 @@ def _chapters(inp):
 
 
 def _copy_text(inp):
+    if not schema.platform_ok(inp.scope):
+        return [("copy", "invalid platform name")]  # never a path from a name that is not one (Y1)
     L = inp.state["langs"][inp.lang]
     p = L["copies"].get(inp.scope, {}).get("path") or os.path.join(
         inp.ctx["studio_root"], "copy", inp.state["video"], inp.lang, inp.scope + ".md")
@@ -186,7 +188,10 @@ RESOLVERS = {
     "credit_approvals": lambda i: [("state:credits", hashes.hash_of(i.state.get("credits")))],
     "render_result": _render_result,
     "copy_text": _copy_text,
-    "platform_rules": lambda i: _file(i, os.path.join(i.repo, ".claude", "studio", "platforms", "%s.md" % i.scope)),
+    "copy_verify": lambda i: (_file(i, i.work("copy-verify.%s.json" % i.scope)) if schema.platform_ok(i.scope)
+                              else [("copy_verify", "invalid platform name")]),
+    "platform_rules": lambda i: (_file(i, os.path.join(i.repo, ".claude", "studio", "platforms", "%s.md" % i.scope))
+                                 if schema.platform_ok(i.scope) else [("platform_rules", "invalid platform name")]),
     "chapters": _chapters,
 }
 

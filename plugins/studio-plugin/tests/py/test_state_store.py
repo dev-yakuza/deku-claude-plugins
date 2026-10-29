@@ -42,6 +42,7 @@ class StoreCase(StudioTestCase):
         st = F.state(outputs=("youtube",), platforms={"youtube": ["youtube"]})
         store.create(self.vdir, st)
         F.brief_ready(self.repo, self.vdir)  # record-brief's inputs (M1e: the computed length, the checked assets)
+        F.more_platforms(self)  # these tests exercise several platforms (M2 names; M1 allows youtube only)
         self.paths = store.paths(self.vdir)
         self.providers = Providers(inspect=lambda ctx: inspect_json(), source=lambda ctx, st: ("src1", ""))
 

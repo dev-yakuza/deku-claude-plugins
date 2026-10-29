@@ -1,6 +1,7 @@
 """The video state file (`work/state.json`, schema 1; m0b1-plan §3)."""
 
 import datetime
+import re
 
 SCHEMA = 1
 STAGES = ["source", "brief", "script", "verify", "1", "cast", "tts", "audition", "2", "board",
@@ -51,8 +52,21 @@ DONE_STAGES = ("script", "verify", "cast", "tts", "audition", "board", "visual-c
 # later by design). Engine fields belong to the stage that consumes them: the TTS constants and
 # templates to tts (they change the synthesized audio), the screen constants to visual-check (the
 # stills are where they show; 00-plan §3.2's engine row sends their changes to ③).
+# the platforms a video kind may name in its brief (M1h review Y1: a platform name becomes a path —
+# `.claude/studio/platforms/<p>.md`, `<sr>/copy/<v>/<l>/<p>.md`); M2 adds more
+KIND_PLATFORMS = {"youtube": ("youtube",)}
+NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+
+def platform_ok(name, kind=None):
+    """A platform name that is safe as a file name (and, given a kind, one that kind allows)."""
+    if not isinstance(name, str) or not NAME.match(name):
+        return False
+    return kind is None or name in KIND_PLATFORMS.get(kind, ())
+
+
 FIELD_PRODUCER = {
-    "source_hash": "source", "brief_core": "brief", "content": "script",
+    "source_hash": "source", "brief_core": "brief", "content": "script", "credits": "board",
     "voice": "cast", "audio": "tts",
     "engine.tts": "tts", "engine.templates": "tts", "engine.defaults_voice": "tts",
     "presentation": "board",
@@ -145,7 +159,8 @@ STAGE_CHECKS = {
     "render": {"file": "render", "script": "run_s2v.py", "scope": "output", "s2v": True,
                "inputs": ("render_result",)},
     "copy": {"file": "copy", "script": "validate_copy.py", "scope": "platform", "s2v": False,
-             "inputs": ("copy_text", "platform_rules", "chapters", "credits", "overlay_sha", "claims_map",
+             "inputs": ("copy_text", "copy_verify", "platform_rules", "chapters", "credits", "overlay_sha",
+                        "claims_map",
                         "source_copy")},
 }
 NO_CHECK_FILE = ("visual-check",)

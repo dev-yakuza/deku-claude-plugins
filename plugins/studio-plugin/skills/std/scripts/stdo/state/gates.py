@@ -57,6 +57,9 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
     if gate == "2":  # the lines its question must show, computed now (conflicts too) and kept with the shown record
         from ..voice import gate2
         box["lines"] = gate2.lines(vdir, lang, _conflicts(ctx, state, lang, providers), _write_text)
+    if gate == "4b":  # the copy's facts and their excerpts (M1h review Y2)
+        from ..distribute import gate4b
+        box["lines"] = gate4b.lines(vdir, lang, scope, _write_text)
 
     def check(s):
         first = precheck(s, lang)
@@ -85,7 +88,7 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
             return
         L["shown"].setdefault(gate, {})[scope] = {"hash": shown_hash(ctx, s, lang, cur, gate, scope),
                                                   "at": schema.now()}
-        if gate == "2":
+        if gate in ("2", "4b"):
             L["shown"][gate][scope]["lines"] = list(box["lines"])
         if gate == "3":
             L["shown_pending"].pop(scope, None)
@@ -105,7 +108,7 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
         _out("begin %s" % scope)
     else:
         _out("hash12 %s" % box["hash12"] if box.get("hash12") else "shown %s (other scopes not shown yet)" % scope)
-    if gate == "2":  # the question shows each of these lines (the guard checks them — M1f review V1)
+    if gate in ("2", "4b") and not begin:  # the question shows each of these lines (the guard checks them — V1, Y2)
         for line in box["lines"]:
             _out("in the question: %s" % line)
     return C.OK

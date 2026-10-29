@@ -119,11 +119,11 @@ def source_commit_lines(state):
             for c in commits or [] if isinstance(c, dict)]
 
 
-def gate2_lines(state, lang=None):
-    """The lines the ② question must show, as `shown 2` recorded them (M1f review V1)."""
+def gate2_lines(state, lang=None, gate="2", scope="-"):
+    """The lines the ② (or ④b, per platform) question must show, as `shown` recorded them (M1f review V1, M1h Y2)."""
     langs = state.get("langs") if isinstance(state, dict) else None
     L = (langs or {}).get(lang or state.get("source_lang")) if isinstance(langs, dict) else None
-    rec = (((L or {}).get("shown") or {}).get("2") or {}).get("-") if isinstance(L, dict) else None
+    rec = (((L or {}).get("shown") or {}).get(gate) or {}).get(scope) if isinstance(L, dict) else None
     out = rec.get("lines") if isinstance(rec, dict) else None
     return [x for x in out if isinstance(x, str)] if isinstance(out, list) else []
 

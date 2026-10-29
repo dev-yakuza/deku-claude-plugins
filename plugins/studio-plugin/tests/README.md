@@ -111,3 +111,7 @@ aligner is started.
 credit-preview` · `credit` (`stdo/credits.py`, `stdo/state/credit.py`) and CREDITS.yaml. `test_m1g.BoardCase` takes a
 video from `test_m1f.VoiceCase` through ②, then board with the credits, the fake s2v's snapshot, visual-check and ③.
 The fake s2v's tts writes `tried` (the takes made) and keeps the old take when a scenario line says `keep`.
+
+**M1h** (`SCRIPTS_VERSION` 16): `validate_copy.py` (`stdo/distribute/`) and the platform rules block of
+`platforms/youtube.md`. `test_m1h.CopyCase` takes a video from `test_m1g.BoardCase` through ③, then the fake s2v's
+render, record-render, ④a, the copy (the platform file marked checked and committed in the test) and ④b.

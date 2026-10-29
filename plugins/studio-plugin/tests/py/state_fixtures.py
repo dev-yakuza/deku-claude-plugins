@@ -32,6 +32,14 @@ FORMAT = """# Format (test)
 """
 
 
+def more_platforms(case):
+    """Let a test's briefs name the platforms of the M0b tests (sns, x, tiktok) besides youtube (M1h review Y1)."""
+    from unittest import mock
+    p = mock.patch.dict(schema.KIND_PLATFORMS, {"youtube": ("youtube", "sns", "x", "tiktok")})
+    p.start()
+    case.addCleanup(p.stop)
+
+
 def write_assets(vdir):
     os.makedirs(os.path.join(vdir, "work"), exist_ok=True)
     p = os.path.join(vdir, "work", "assets.json")
@@ -83,7 +91,7 @@ def current(outputs=("youtube",), platforms=("youtube",), **over):
          "brief_core": "brief1", "content": "c1", "source_hash": "src1", "source_live_hash": "src1",
          "source_text": "The cat sat on the mat.\nIt was warm.", "voice": "v1", "audio": "a1",
          "engine": dict(ENGINE), "presentation": {o: "p-" + o for o in outputs}, "reasons": {},
-         "render": {o: "r-" + o for o in outputs}, "copy": {p: "cp-" + p for p in platforms}}
+         "render": {o: "r-" + o for o in outputs}, "copy": {p: "cp-" + p for p in platforms}, "credits": "cr1"}
     for k, v in over.items():
         c[k] = v
     return c
@@ -97,7 +105,8 @@ def literal_tuple(gate, c, o=None, p=None, p_outputs=()):
         return {"brief_core": c["brief_core"], "content": c["content"], "source_hash": c["source_hash"]}
     if gate == "4b":
         return {"content": c["content"], "source_hash": c["source_hash"],
-                "renders": {x: c["render"].get(x) for x in p_outputs}, "copy": c["copy"].get(p)}
+                "renders": {x: c["render"].get(x) for x in p_outputs}, "copy": c["copy"].get(p),
+                "credits": c.get("credits")}
     t = {"brief_core": c["brief_core"], "content": c["content"], "voice": c["voice"], "audio": c["audio"],
          "engine.tts": e["tts"], "engine.templates": e["templates"], "engine.defaults_voice": e["defaults_voice"]}
     if gate == "2":

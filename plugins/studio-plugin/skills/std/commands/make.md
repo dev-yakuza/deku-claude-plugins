@@ -1,7 +1,7 @@
 # MAKE
 
-One video end to end: `make <source> --kind youtube`. **So far (M1g) it runs to gate ③**; render, copy and the
-commit arrive with M1h–M1i — stop after ③ and tell the person what is next.
+One video end to end: `make <source> --kind youtube`. **So far (M1h) it runs to gate ④b**; the video commit
+arrives with M1i — stop after ④b and tell the person what is next.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`.
@@ -69,6 +69,10 @@ Anything that changes after `shown` (the audition, the exemptions, the readings)
 ## board · visual-check · ③
 
 `commands/board.md` (board with the credits, visual-check, gate ③).
+
+## render · ④a · copy · ④b
+
+`commands/render.md` (render, gate ④a), then `commands/copy.md` (copy, gate ④b).
 
 <!-- studio:guard-refusal -->
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way

@@ -339,7 +339,7 @@ class NumbersW2(StudioTestCase):
         self.assertEqual(numbers.values("3만 5천 원"), [35000])
         self.assertEqual(numbers.values("1만5천"), [15000])
         self.assertEqual(numbers.values("2nd and third"), [2, 3])
-        for word in ("일본", "이번", "구분", "삼성", "만나다", "천천히", "백화점", "오시는 분", "사이좋게", "일주일",
+        for word in ("일본", "이번", "구분", "삼성", "만나다", "천천히", "백화점", "오시는 분", "사이좋게",
                      "오일을 넣고", "오일에", "오시에"):  # X3: 오일 · 오시 alone are words
             self.assertEqual(numbers.values(word), [], word)
         self.assertEqual(tts.mismatch("삼월에 갑니다", "4월에 갑니다", "ko"), "numbers 3 heard as 4")

@@ -138,12 +138,14 @@ def _gate_lines(ri, argv):
     shows nothing here (state.py refuses it)."""
     from ..state.argv import canonical
     c = canonical(argv)
-    if c["cmd"] != "approve" or len(c["pos"]) < 2 or c["pos"][1] not in ("1", "2"):
+    if c["cmd"] != "approve" or len(c["pos"]) < 2 or c["pos"][1] not in ("1", "2", "4b"):
         return []
     try:
         st = labels.read_state(labels.video_dir(ri.worktree, ri.studio_root, c["pos"][0]))
         if c["pos"][1] == "1":
             return labels.source_commit_lines(st)
+        if c["pos"][1] == "4b":  # ④b: the copy's facts and their excerpts (M1h review Y2)
+            return labels.gate2_lines(st, c["opt"].get("--lang"), "4b", c["opt"].get("--platform"))
         return labels.gate2_lines(st, c["opt"].get("--lang"))  # ②: exemptions, readings, conflicts (V1)
     except Exception:  # noqa: BLE001
         return []

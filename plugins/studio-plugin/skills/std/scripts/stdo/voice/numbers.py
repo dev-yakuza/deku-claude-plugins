@@ -45,7 +45,13 @@ RANGES = {"한두": (1, 2), "두세": (2, 3), "두서너": (2, 3, 4), "서너": 
 RANGE_RE = re.compile(r"(?<![가-힣])(" + "|".join(sorted(RANGES, key=len, reverse=True)) + r")(?=\s?" + COUNTERS + ")")
 SINO_RUN = re.compile(r"(?<![가-힣])([일이삼사오육칠팔구십백천만억]*[십백천만억][일이삼사오육칠팔구십백천만억]*)"
                       r"(?=\s?" + COUNTERS + r"|[^가-힣]|$)")
-SINO_ONE = re.compile(r"(?<![가-힣])([일이삼사오육칠팔구])\s(?=(?:년|개월|시간|분|초|퍼센트|층|배|시|명|개|살|번째)(?![가-힣]))")
+SINO_ONE = re.compile(r"(?<![가-힣])([일이삼사오육칠팔구])\s(?=(?:년|개월|시간|분|초|퍼센트|층|배|시|명|개|살|번째|일)"
+                      r"(?![가-힣]))")
+# weeks and native day counts (M1g re-review NIT): 일주일 = 1주일, 이틀 = 2일
+WEEKS = re.compile(r"(?<![가-힣])([일이삼사오육칠팔구]|십)주일")
+DAYS = {"하루": 1, "이틀": 2, "사흘": 3, "나흘": 4, "닷새": 5, "엿새": 6, "이레": 7, "여드레": 8, "아흐레": 9, "열흘": 10,
+        "보름": 15}  # `하루하루` reads as one 1 on both sides — a known limit (J145)
+DAYS_RE = re.compile(r"(?<![가-힣])(" + "|".join(sorted(DAYS, key=len, reverse=True)) + ")")
 NATIVE = re.compile(r"(?<![가-힣])(" + "|".join(sorted(NATIVE_T, key=len, reverse=True)) + r")?("
                     + "|".join(sorted(NATIVE_U, key=len, reverse=True)) + r")?\s?(?=" + COUNTERS + ")")
 ALONE = re.compile(r"(?<![가-힣])(하나|둘|셋|넷)(?![가-힣])")
@@ -100,6 +106,10 @@ def values(text):
     for m in RANGE_RE.finditer(t2):
         out += list(RANGES[m.group(1)])
     t2 = RANGE_RE.sub(" ", t2)
+    out += [sino(m.group(1)) for m in WEEKS.finditer(t2)]
+    t2 = WEEKS.sub(" ", t2)
+    out += [DAYS[m.group(1)] for m in DAYS_RE.finditer(t2)]
+    t2 = DAYS_RE.sub(" ", t2)
     out += [sino(m.group(1)) for m in SINO_DATE.finditer(t2)]
     t2 = SINO_DATE.sub(" ", t2)
     t2 = re.sub(r"(?<=[가-힣])([만억])\s+(?=[일이삼사오육칠팔구십백천])", r"\1", t2)  # 삼만 오천 = 35000

@@ -4,7 +4,8 @@ ENGINE_VOICE = ("tts", "templates", "defaults_voice")
 ENGINE_SCREEN = ("composer", "renderer", "ffmpeg", "defaults_presentation")
 
 OWNER = {"brief_core": "1", "content": "1", "source_hash": "1",
-         "voice": "2", "audio": "2", "presentation": "3", "render": "4a", "renders": "4b", "copy": "4b"}
+         "voice": "2", "audio": "2", "presentation": "3", "render": "4a", "renders": "4b", "copy": "4b",
+         "credits": "4b"}
 for _k in ENGINE_VOICE:
     OWNER["engine." + _k] = "2"
 for _k in ENGINE_SCREEN:
@@ -19,7 +20,8 @@ def tuple_for(gate, cur, output=None, platform=None, platform_outputs=None):
     if gate == "4b":
         t.update(content=cur["content"], source_hash=cur["source_hash"],
                  renders={o: cur["render"].get(o) for o in (platform_outputs or [])},
-                 copy=cur["copy"].get(platform))
+                 copy=cur["copy"].get(platform),
+                 credits=cur.get("credits"))  # the credit lines the copy shows (M1h review Y3)
         return t
     t.update(brief_core=cur["brief_core"], content=cur["content"], voice=cur["voice"], audio=cur["audio"])
     for k in ENGINE_VOICE:

@@ -258,6 +258,10 @@ def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock):
         raise schema.SchemaError("not output names: %s" % ", ".join(map(str, bad)))
     if not isinstance(platforms, dict) or not platforms:
         raise schema.SchemaError("the brief has no platforms (every video kind has platform copy)")
+    bad_p = [p for p in platforms if not schema.platform_ok(p, state.get("kind"))]
+    if bad_p:
+        raise schema.SchemaError("platforms the %s kind does not have: %s (M1: %s)" % (
+            state.get("kind"), ", ".join(map(repr, bad_p)), ", ".join(schema.KIND_PLATFORMS.get(state.get("kind"), ()))))
     for p, outs in platforms.items():
         if not isinstance(outs, list) or not outs or not all(isinstance(x, str) for x in outs):
             raise schema.SchemaError("platform %s needs a list of outputs" % p)

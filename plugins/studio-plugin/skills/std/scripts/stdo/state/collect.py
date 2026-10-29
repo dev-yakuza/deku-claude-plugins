@@ -6,7 +6,7 @@ import os
 import subprocess
 
 from .. import machine
-from . import hashes
+from . import hashes, schema
 
 
 class CollectError(Exception):
@@ -112,6 +112,9 @@ class Providers(object):
                   for o in state["brief"]["outputs"]}
         copies = {}
         for p in state["brief"]["platforms"]:
+            if not schema.platform_ok(p):
+                copies[p] = None  # a name that is not a platform name never becomes a path (M1h review Y1)
+                continue
             path = L["copies"].get(p, {}).get("path") or os.path.join(copy_dir, p + ".md")
             copies[p] = hashes.file_sha(path if os.path.isabs(path) else os.path.join(ctx["repo"], path))
         return {
@@ -122,6 +125,7 @@ class Providers(object):
             "voice": h.get("voice"), "audio": h.get("audio"), "engine": h.get("engine") or {},
             "presentation": h.get("presentation_by_output") or {}, "reasons": ins.get("reasons") or {},
             "render": render, "copy": copies, "outputs_missing": missing,
+            "credits": hashes.file_sha(os.path.join(ctx["vdir"], "CREDITS.yaml")),
             # the files the script refers to (s2v lists them with their sha256): inputs of the check results
             "files": ins.get("files") if isinstance(ins.get("files"), list) else None,
         }

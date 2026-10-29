@@ -42,6 +42,7 @@ class ApproveCase(StudioTestCase):
         st["location"] = self.location
         st["brief"]["core"] = brief_core([F.C1], [{"name": "narrator"}])  # what record-brief computes
         store.create(self.vdir, st)
+        F.more_platforms(self)  # these tests exercise several platforms (M2 names; M1 allows youtube only)
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
             f.write("# script\n")
         self.claims({"excerpts": ["The cat sat on the mat."],

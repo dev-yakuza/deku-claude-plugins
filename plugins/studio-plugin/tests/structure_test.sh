@@ -60,7 +60,7 @@ for a in ("_contract", "_stages", "_auditor", "_invariants", "_actors"):
 for p in glob.glob(os.path.join(skill, "**", "*.md"), recursive=True):
     for ref in set(re.findall(r"`(?:<<SKILL_DIR>>/)?(?:commands/)?(atoms/_[a-z_]+\.md)`", open(p).read())):
         check(os.path.exists(os.path.join(skill, "commands", ref)), "%s → %s exists" % (os.path.relpath(p, skill), ref))
-IMPLEMENTED_CMDS = {"help", "init", "config", "update", "source", "brief", "script", "verify", "make", "board"}  # M1c–M1g
+IMPLEMENTED_CMDS = {"help", "init", "config", "update", "source", "brief", "script", "verify", "make", "board", "render", "copy"}  # M1c–M1h
 for c in files - IMPLEMENTED_CMDS:
     check("Not implemented yet" in open(os.path.join(skill, "commands", c + ".md")).read(),
           "commands/%s.md says not implemented yet" % c)
@@ -195,7 +195,7 @@ for d in ("commit", "hooks"):
     for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
         check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
               "%s (copied into repositories) does not import the guard (plugin only)" % os.path.relpath(p, skill))
-check(sv and sv.group(1) == "15", "SCRIPTS_VERSION is 15 (M1g: the board check, credit)")
+check(sv and sv.group(1) == "16", "SCRIPTS_VERSION is 16 (M1h: validate_copy)")
 from stdo import manifest as _man
 _mp = os.path.join(scripts, _man.NAME)
 check(os.path.exists(_mp) and open(_mp).read() == _man.render(scripts, sv.group(1)),
