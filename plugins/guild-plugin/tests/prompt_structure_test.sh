@@ -2344,7 +2344,7 @@ RTPY
   hasfx "retro: 감사 기록을 jq 로 집계한다 (전문 아님)" "$RETRO" 'match("### audit-record "'
   # ⚠ 0.98.3 W3: 낱말 경계(\b)는 하이픈 토큰(#349 `QA-1-dismissed-…`)과 역할 축 `→ fixed` 를
   #   걸렀다 — 줄머리 위치(`- ` 바로 뒤)로 센다.
-  hasfx "retro: disposition 토큰은 줄머리 위치로 센다" "$RETRO" 'match($p + "fixed" + $s;"g")'
+  hasfx "retro: disposition 토큰은 줄머리 위치로 센다" "$RETRO" 'fixed: ([$L[] | select(test($p + "fixed" + $s))] | length)'
   lacksfx "retro: 옛 단어 경계 집계 없음" "$RETRO" 'match("\\bfixed\\b"'
   # A clean scan writes `findings: none` (0.85.2) so that a MISSING record means no attempt
   # reached the record write (auditor did not run, 3.5a stopped first, or a pre-0.85.2 run). The writer (spine), the token list (Section K) and the counter (retro) must name the
@@ -4043,8 +4043,17 @@ hasfx "spine(W3): 줄 형식" "$P3_SP" '- <looped-back|fixed|recorded|dismissed>
 hasfx "spine(W3): 장식 없이" "$P3_SP" 'and is written **bare** — no backticks, no'
 hasfx "spine(W3): 역할 축은 토큰 금지" "$P3_SP" 'starts `role-axis: <role> <verdict> — <reason>` and never uses the four tokens'
 hasfx "_handoff(W3): K 에 위치 규칙" "$P3_HO" 'a disposition token is written bare right after `- ` at column 0 of its finding line'
-hasfx "retro(W3): 위치 접두 정규식" "$P3_RETRO" '("(?:^|\n)- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}(?![-A-Za-z0-9_])") as $s'
-hasfx "retro(W3): loose 필드" "$P3_RETRO" 'loose: ([$b | match("(?<![-A-Za-z0-9_])(looped-back|fixed|recorded|dismissed)(?![-A-Za-z0-9_])";"g")] | length)'
+hasfx "retro(W3): 위치 접두 정규식(줄 단위)" "$P3_RETRO" '($b | split("\n")) as $L | ("^- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}([^-A-Za-z0-9_]|$)") as $s'
+hasfx "retro(W3): loose 필드(낱말 분할)" "$P3_RETRO" 'loose: ([$b | splits("[^-A-Za-z0-9_]+")] | map(select(. == "looped-back" or . == "fixed" or . == "recorded" or . == "dismissed")) | length)'
+# 0.98.5: gh --jq 는 gojq(RE2)  (범위: 한 줄 `--jq '…'`/`--jq "…"` 형태 — Python argv·여러 줄 식은 보지 않음) — 룩어라운드·역참조를 거부해 호출이 객체 없이 오류로 끝난다
+#   (실측 0.98.4: word_app #1738·#1764 retro 둘 다). 플러그인 안 모든 --jq 식에서 금지.
+P5_LA="$(grep -rnE -- "--jq ['\"]" "$GLD" | grep -E '\(\?<?[!=]|\(\?>|\\\\[1-9ZGhkK]|[*+?}]\+' || true)"
+[ -z "$P5_LA" ] && ok "0.98.5: --jq 정규식에 룩어라운드·역참조 없음 (gojq/RE2)" \
+  || bad "0.98.5: --jq 정규식에 룩어라운드·역참조 없음" "none" "$P5_LA"
+lacksfx "retro(0.98.5): 옛 (?:^|\\n) 근거 문장 없음" "$P3_RETRO" 'hence `(?:^|\n)`'
+hasfx "retro(0.98.5): 룩어라운드 금지 이유" "$P3_RETRO" '⚠ **No look-around in a `--jq` regex.** `gh` runs its own `jq` (gojq, RE2 regexes), which rejects'
+hasfx "retro(0.98.5): 오류면 1회 재시도 뒤 정해진 FAIL" "$P3_RETRO" 'with `FAIL: could not count the auditor record of #<n> — <gh error>` — do not re-count with a pipe,'
+hasfx "retro(0.98.5): (?m) 은 엔진마다 다름" "$P3_RETRO" 'multi-line but jq 1.8.2 (Oniguruma) as dot-all (measured: `(?m)^` matched 0 times) — so'
 hasfx "retro(W3): legacy_blocks 필드" "$P3_RETRO" 'legacy_blocks: ([$b | splits("### audit-record ")] | .[1:]'
 hasfx "retro(W3): 구 형식 판정은 legacy_blocks 만" "$P3_RETRO" '**An old-format record is judged by `legacy_blocks > 0` alone**'
 hasfx "retro(W3): 구 형식 나열" "$P3_RETRO" '`#n 구 형식 기록(블록 <k>개 · 낱말 <loose>개, 종류 구분 불가)`'
@@ -4064,6 +4073,15 @@ else
   printf '%s' '[{"body":"<!-- guild:auditor:execute -->\n### audit-record 1\nfindings: none\n- 역할 축: QA-1-dismissed-registry-exempts-entry-point → fixed\n<!-- /guild:auditor:execute -->"}]' > "$P3_T/r349.json"
   P3_A="$(jq -c -f "$P3_T/q.jq" "$P3_T/new.json" 2>&1)"
   P3_B="$(jq -c -f "$P3_T/q.jq" "$P3_T/r349.json" 2>&1)"
+  # gh --jq 와 같은 엔진(gojq)이 있으면 그것으로도 — 없으면 위의 정적 검사가 대신한다
+  if command -v gojq >/dev/null 2>&1; then
+    P3_GA="$(gojq -c -f "$P3_T/q.jq" "$P3_T/new.json" 2>&1)"
+    [ "$P3_GA" = "$(printf '%s' "$P3_A" | jq -c -S .)" ] || [ "$(printf '%s' "$P3_GA" | jq -c -S . 2>/dev/null)" = "$(printf '%s' "$P3_A" | jq -c -S .)" ] \
+      && ok "retro(0.98.5): gojq 도 같은 결과" || bad "retro(0.98.5): gojq" "$P3_A" "$P3_GA"
+    P3_GB="$(gojq -c -f "$P3_T/q.jq" "$P3_T/r349.json" 2>&1)"
+    [ "$(printf '%s' "$P3_GB" | jq -c -S . 2>/dev/null)" = "$(printf '%s' "$P3_B" | jq -c -S .)" ] \
+      && ok "retro(0.98.5): gojq #349 형도 같은 결과" || bad "retro(0.98.5): gojq #349 형" "$P3_B" "$P3_GB"
+  fi
   rm -rf "$P3_T"
   [ "$P3_A" = '{"records":4,"looped_back":1,"fixed":1,"recorded":1,"dismissed":1,"loose":7,"legacy_blocks":1,"clean":1,"no_scan":0,"violation":0}' ] \
     && ok "retro(W3): jq — 새 형식 1/1/1/1 · 구 형식 블록 1" || bad "retro(W3): jq 새 형식" "1/1/1/1 legacy 1" "$P3_A"
@@ -4282,7 +4300,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=1827   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=1832   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

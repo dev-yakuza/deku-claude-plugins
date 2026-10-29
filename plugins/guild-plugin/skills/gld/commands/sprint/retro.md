@@ -310,8 +310,17 @@ scales with how badly the sprint went. Measured on `dev-yakuza/one-man-company`:
 | #388 | 7,456 B | 67 B |
 
 ```bash
-gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '. as $all | [$all[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | ("(?:^|\n)- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}(?![-A-Za-z0-9_])") as $s | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$b | match($p + "looped-back" + $s;"g")] | length), fixed: ([$b | match($p + "fixed" + $s;"g")] | length), recorded: ([$b | match($p + "recorded" + $s;"g")] | length), dismissed: ([$b | match($p + "dismissed" + $s;"g")] | length), loose: ([$b | match("(?<![-A-Za-z0-9_])(looped-back|fixed|recorded|dismissed)(?![-A-Za-z0-9_])";"g")] | length), legacy_blocks: ([$b | splits("### audit-record ")] | .[1:] | map(select((test($p + "(looped-back|fixed|recorded|dismissed)" + $s) or test("findings: none") or test("scan: none")) | not)) | length), clean: ([$b | match("findings: none";"g")] | length), no_scan: ([$b | match("scan: none";"g")] | length), violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)}'
+gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '. as $all | [$all[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | ($b | split("\n")) as $L | ("^- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}([^-A-Za-z0-9_]|$)") as $s | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$L[] | select(test($p + "looped-back" + $s))] | length), fixed: ([$L[] | select(test($p + "fixed" + $s))] | length), recorded: ([$L[] | select(test($p + "recorded" + $s))] | length), dismissed: ([$L[] | select(test($p + "dismissed" + $s))] | length), loose: ([$b | splits("[^-A-Za-z0-9_]+")] | map(select(. == "looped-back" or . == "fixed" or . == "recorded" or . == "dismissed")) | length), legacy_blocks: ([$b | splits("### audit-record ")] | .[1:] | map(select(((split("\n") | any(test($p + "(looped-back|fixed|recorded|dismissed)" + $s))) or test("findings: none") or test("scan: none")) | not)) | length), clean: ([$b | match("findings: none";"g")] | length), no_scan: ([$b | match("scan: none";"g")] | length), violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)}'
 ```
+
+⚠ **No look-around in a `--jq` regex.** `gh` runs its own `jq` (gojq, RE2 regexes), which rejects
+`(?!` · `(?=` · `(?<!` · `(?<=`, back-references and other Perl-only syntax (`\Z`, a possessive `*+`) — the call then prints an error and **no object**,
+which reads as "no record" (measured 0.98.4: both retros of `deku-word-app/word_app` #1738 · #1764
+failed on it). So the token position is checked **per line** (`^- ` · the token · a character that is
+not part of a word, or the line end) and `loose` counts whole words split on non-word runs. If this
+call errors anyway, retry once if the error looks transient (network, rate limit), then **stop**
+with `FAIL: could not count the auditor record of #<n> — <gh error>` — do not re-count with a pipe,
+a second `jq` or a `/tmp` file.
 
 ⚠ **One object per PAGE — add them up.** `gh api --paginate --jq` runs the `jq` once per page of
 comments (30 per page by default), so an Issue with more comments than that returns **one object
@@ -369,8 +378,9 @@ a decoration of up to two backticks or `*` tolerated on either side of the token
 wrote `**recorded**` and `` `looped-back` ``) and no letter, digit, `-` or `_` after it; the
 separators after the token are not read. The backtick is written in the jq string as `\u0060`,
 so the shell command carries no backtick (the command-substitution heuristic, `_bash_rules.md`).
-⚠ jq's (Oniguruma) `^` is the start of the **string** only — measured on jq 1.8.2, `(?m)^`
-matched 0 times — hence `(?:^|\n)`. A substring or word-boundary count used to match a finding id
+⚠ Without `(?m)`, `^` is the start of the **string**, and `(?m)` does not help — gojq reads it as
+multi-line but jq 1.8.2 (Oniguruma) as dot-all (measured: `(?m)^` matched 0 times) — so the joined body is split into lines
+(`split("\n")`) and each line is tested with `^- ` (the same in `gh`'s gojq and in jq 1.8.2). A substring or word-boundary count used to match a finding id
 (`QA-1-dismissed-registry-exempts-entry-point` → `dismissed 1` next to `clean 2/2`, #349) and the
 role-axis line's `→ fixed` / `→ looped-back` (word_app #1700: every `fixed` and `looped-back` was
 the role axis).
