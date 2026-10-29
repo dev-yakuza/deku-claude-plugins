@@ -104,6 +104,8 @@ def run(ctx, kind_name, target):
         tree = ctx.git.write_tree()
         claude, sid = checks.session(ctx.env)
         line, prot, _agents = summary.compute(ctx, sorted(after.studio), tree)
+        if getattr(col, "summary_extra", None):  # the video kind: skipped readings of the shared dictionary (v5 S1)
+            line += " | " + col.summary_extra
         blk = value_block(ctx, sorted(after.studio), tree)
         values.write_summary(ctx.top, blk)
         ov = blk["overflow"]

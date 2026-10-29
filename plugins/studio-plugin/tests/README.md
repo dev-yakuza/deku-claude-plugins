@@ -115,3 +115,8 @@ The fake s2v's tts writes `tried` (the takes made) and keeps the old take when a
 **M1h** (`SCRIPTS_VERSION` 16): `validate_copy.py` (`stdo/distribute/`) and the platform rules block of
 `platforms/youtube.md`. `test_m1h.CopyCase` takes a video from `test_m1g.BoardCase` through ③, then the fake s2v's
 render, record-render, ④a, the copy (the platform file marked checked and committed in the test) and ④b.
+
+**M1i** (`SCRIPTS_VERSION` 17): the commit kind `video` (`stdo/commit/video.py`) and the status warnings.
+`test_m1i.CommitCase` takes a video from `test_m1h.CopyCase` through ④b, then runs `check_commit.py --stage video`
+in-process with a `VideoKind` given the test's providers (the fake s2v) and no Claude Code session in the environment;
+the person's answer the guard would record is written into commit-ok.json by the test before `--staged` and `done`.

@@ -124,7 +124,8 @@ def verify_check(repo, vdir, state, lang, ctx, providers):
         problems.append(why)
     else:
         ins = providers.inspect(ctx)
-        problems += check.draft_problems(draft, cm, copy, providers.sentences(ctx), ins.get("screen_text"))
+        problems += check.draft_problems(draft, cm, copy, providers.sentences(ctx), ins.get("screen_text"),
+                                         [x.get("title") for x in ins.get("scenes") or [] if isinstance(x, dict)])
     for name in ("verify.json", "verify.md"):  # a failed or repeated check never leaves the last ones behind
         try:
             os.remove(os.path.join(w, name))

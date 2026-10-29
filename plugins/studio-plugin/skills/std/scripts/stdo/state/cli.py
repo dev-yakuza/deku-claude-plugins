@@ -115,7 +115,7 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
         root = cfg.get("studio_root") or "studio"
         unsafe = paths.local_problem(repo, root)
         if cmd == "status":
-            return _status(repo, root, _opts(rest, {"--json"}, set()), unsafe, providers)
+            return _status(repo, root, _opts(rest, {"--json", "--since-last"}, set()), unsafe, providers)
         if unsafe:
             raise Usage(unsafe)  # nothing machine-local is read or written through a link (m1-plan §3.1 review U1)
         o = _opts(rest, {"--json", "--proxy", "--begin", "--end"},
@@ -463,12 +463,17 @@ def _status(repo, root, o, unsafe=None, providers=None):
                     "incomplete_events": store.incomplete(vdir, st),
                     "unreadable_log_lines": sum(1 for e in store.read_log(vdir) if e.get("event") == "unreadable")})
     warns = [w for w in (unsafe, None if unsafe else _guard_ran_warning(repo)) if w]
+    warns += _setup_warnings(repo, root)  # M1i: hooks, ignore blocks, machine.json, platforms checked, range check
     hres = harnessgate.check(repo, providers=providers, ctx_of=_ctx_of(repo, _cfg_of(repo)))
     harness = hres.lines()
+    since = _since_last(repo) if o.get("--since-last") else None
+    if since is not None:
+        warns.append(since)
     if o.get("--json"):
         sys.stdout.write(json.dumps({"videos": out, "warnings": warns, "harness_uncommitted": harness,
-                                     "pronounce_leftover": hres.leftover}, ensure_ascii=False,
-                                    sort_keys=True) + "\n")
+                                     "pronounce_leftover": hres.leftover,
+                                     "claude_code": os.environ.get("CLAUDE_CODE_VERSION") or None},
+                                    ensure_ascii=False, sort_keys=True) + "\n")
     else:
         for v in out:
             if "error" in v:
@@ -506,6 +511,78 @@ def _proxy(st):
                 if isinstance(r, dict) and r.get("approved_by") == "proxy":
                     out.append("%s %s%s" % (lg, g, "(%s)" % k if k else ""))
     return out
+
+
+PLATFORM_CHECKED_DAYS = 180
+
+
+def _setup_warnings(repo, root):
+    """status (m1-plan §11): what keeps Studio from working as designed on this machine."""
+    import datetime
+    import glob as _glob
+    from .. import ignore
+    out = []
+    try:
+        if machine.s2v_path(repo) is None:
+            out.append("this machine has no s2v path (.claude/studio/local/machine.json) — /std config s2v.path")
+    except Exception as e:  # noqa: BLE001 — an unsafe local folder is reported elsewhere
+        out.append("machine.json cannot be read (%s)" % e)
+    try:
+        from ..commit.gitx import Git
+        from ..hooks import install
+        git = Git(repo)
+        git.cwd = git.toplevel()
+        hs = install.status(git, git.cwd, dict(os.environ))
+        if not hs.get("valid"):
+            out.append("the pre-commit hook: %s — run python3 .claude/studio/scripts/hooks.py install"
+                       % "; ".join(hs.get("reasons") or ["not valid"]))
+    except Exception as e:  # noqa: BLE001
+        out.append("the pre-commit hook cannot be checked (%s)" % e)
+    try:
+        with open(os.path.join(repo, ".gitignore"), encoding="utf-8") as f:
+            _rest, block = ignore.split(f.read())
+    except (OSError, ValueError):
+        block = None
+    if block is None:
+        out.append(".gitignore has no Studio block — /std init or /std update puts it back")
+    today = datetime.date.today()
+    for p in sorted(_glob.glob(os.path.join(repo, ".claude", "studio", "platforms", "*.md"))):
+        try:
+            from ..distribute import rules
+            with open(p, encoding="utf-8") as f:
+                _r, checked = rules.parse(f.read())
+        except Exception:  # noqa: BLE001 — a file without rules is the copy check's to refuse
+            continue
+        name = os.path.basename(p)[:-3]
+        try:
+            age = (today - datetime.date.fromisoformat(checked)).days if checked else None
+        except ValueError:
+            age = None
+        if age is None:
+            out.append("platforms/%s.md is not checked by a person yet (its copy cannot pass)" % name)
+        elif age > PLATFORM_CHECKED_DAYS:
+            out.append("platforms/%s.md was checked %d days ago — a person compares it with the platform's help "
+                       "again" % (name, age))
+    return out
+
+
+def _since_last(repo):
+    """The commits since the last range check (`check_commit.py --since-last`)."""
+    try:
+        with open(os.path.join(repo, ".claude", "studio", "local", "last-checked.json"), encoding="utf-8") as f:
+            last = (json.load(f) or {}).get("head")
+    except (OSError, ValueError, AttributeError):
+        last = None
+    from ..commit.gitx import Git
+    git = Git(repo)
+    if not last:
+        return "no range check yet — run python3 .claude/studio/scripts/check_commit.py --since-last"
+    try:
+        n = int(git.text("rev-list", "--count", "%s..HEAD" % last).strip() or 0)
+    except Exception:  # noqa: BLE001
+        return "the last range check's commit is not in this history — run check_commit.py --since-last"
+    return None if n == 0 else ("%d commit(s) since the last range check — run python3 .claude/studio/scripts/"
+                                "check_commit.py --since-last" % n)
 
 
 def _guard_ran_warning(repo):

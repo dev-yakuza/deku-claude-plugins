@@ -1,7 +1,7 @@
 {
   "name": "studio-plugin",
   "description": "Studio - a per-repo video production organization: turns writing that already exists in a repository into narrated videos with script2video, with fact checks against the source, four human review gates and platform copy (in development)",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "author": {
     "name": "dev-yakuza"
   },

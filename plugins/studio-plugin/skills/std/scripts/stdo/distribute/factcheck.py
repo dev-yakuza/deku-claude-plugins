@@ -28,7 +28,9 @@ def path(vdir, lang, platform):
 
 
 def sentences(title, body, skip):
-    """The copy's own sentences: the title, then the description without the lines in `skip`."""
+    """The copy's own sentences: the title, then the description without the lines in `skip`. The chapter lines are
+    skipped because they are the script's scene titles, which the script verify already judged at ① (check_claims
+    covers every on-screen text, scene titles included) — that is where a fact in a chapter title is caught."""
     text = body
     for s in sorted((x for x in skip if x), key=len, reverse=True):
         text = text.replace(s, "\n")

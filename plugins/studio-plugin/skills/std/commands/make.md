@@ -1,7 +1,6 @@
 # MAKE
 
-One video end to end: `make <source> --kind youtube`. **So far (M1h) it runs to gate ④b**; the video commit
-arrives with M1i — stop after ④b and tell the person what is next.
+One video end to end: `make <source> --kind youtube`, from begin to the video's commit (M1i).
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`.
@@ -73,6 +72,18 @@ Anything that changes after `shown` (the audition, the exemptions, the readings)
 ## render · ④a · copy · ④b
 
 `commands/render.md` (render, gate ④a), then `commands/copy.md` (copy, gate ④b).
+
+## The video's commit
+
+1. `python3 .claude/studio/scripts/check_commit.py --stage video <video>` — it checks everything again (the router,
+   the source stage, check_assets, validate_copy, a person's approvals and credits), merges the video's approved
+   readings into `.claude/studio/pronounce.json`, stages the allow-list and prints the summary line
+   (`커밋 <tree12> | …`, with `발음 사전: 충돌 N개 건너뜀 (…)` when a reading was skipped). Exit 1: fix what it lists;
+   exit 4: a person approves what was approved in the proxy mode.
+2. Ask with AskUserQuestion: `[<video>]` and the summary line **verbatim**, the staged paths; options `커밋 <tree12>`
+   and "아직". Then, in a later message and alone — never in the same message as the question — run
+   `git commit -m "<message>"`.
+3. `python3 .claude/studio/scripts/state.py done <video>`.
 
 <!-- studio:guard-refusal -->
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way

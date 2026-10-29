@@ -140,8 +140,10 @@ def picture_problems(ins, assets_data):
 
 # ---------- verify ----------
 
-def draft_problems(draft, cm, copy, sentences, screen):
-    """[problems] of the fact-checker's draft."""
+def draft_problems(draft, cm, copy, sentences, screen, titles=()):
+    """[problems] of the fact-checker's draft. `titles`: the scene titles — they become the copy's chapters, which
+    the copy check leaves out (M1h NIT), so a title that states something (the link floor: a number, a term of the
+    excerpts, a claims-map sentence) is judged here, at ①."""
     from . import linkrule
     if not isinstance(draft, dict) or not isinstance(draft.get("sentences"), list):
         return ["the draft has no list of sentences ({\"sentences\": [{\"text\", \"kind\", \"verdict\", \"claims\", "
@@ -208,6 +210,11 @@ def draft_problems(draft, cm, copy, sentences, screen):
              [x.get("text") for x in screen or [] if isinstance(x, dict)]:
         if isinstance(t, str) and t.strip() and normalize(t) not in seen:
             out.append("not judged: %s" % t[:80])
+    for t in titles or ():
+        if isinstance(t, str) and t.strip() and normalize(t) not in seen and \
+                (linkrule.has_number(t) or linkrule.term_in(t, ts) or normalize(t) in listed):
+            out.append("not judged: the scene title %s (it states something, and it becomes a chapter of the copy)"
+                       % t[:80])
     return out
 
 

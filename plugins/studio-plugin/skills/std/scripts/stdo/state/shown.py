@@ -46,6 +46,10 @@ def artifacts(ctx, state, lang, gate, scope):
                 "audition_md": file_sha(os.path.join(a, "audition.md"))}
     if gate == "3":
         return {"frames": file_sha(frames_index(ctx, state, lang, scope))}
+    if gate == "4b":  # the fact-checker's judgement of the copy is what the question's 근거 lines come from (M1h NIT)
+        from .schema import platform_ok
+        return {"copy_verify": file_sha(os.path.join(w, "copy-verify.%s.json" % scope)) if platform_ok(scope)
+                else None}
     if gate == "source-diff":
         return {"diff": file_sha(os.path.join(ctx["vdir"], "work", "source-diff.txt"))}
     return {}

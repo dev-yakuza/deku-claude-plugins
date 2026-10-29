@@ -64,6 +64,10 @@ def light_check(vdir, video):
             if rec.get("approved_by") == "proxy":
                 out.append(Problem(4, "video %s [%s]: gate %s was approved by proxy — a person must approve it "
                                       "before a commit" % (video, lang, where)))
+    for path, rec in sorted((state.get("credits") or {}).items()):  # J131: a picture's credit is a person's too
+        if isinstance(rec, dict) and rec.get("approved_by") != "human":
+            out.append(Problem(4, "video %s: the credit of %s was approved in the proxy mode — a person runs "
+                                  "\"state.py credit\" for it again before a commit" % (video, path)))
     if state.get("location") == "local":
         out.append(Problem(1, "video %s is a local (machine-only) video — it is never committed" % video))
     return out

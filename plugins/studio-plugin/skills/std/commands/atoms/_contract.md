@@ -57,7 +57,7 @@ Each script has its own table; a code means only what its script's table says.
 | 0 | passed · staged (`--stage` prints the question label `커밋 <tree12>`) · range clean · hook installed/valid | continue (after `--stage`: ask the person with that label, then `git commit`) |
 | 1 | refused: a check failed (local/ path, mixed commit, outside the allow-list, not what `--stage` prepared, video approvals, ignore blocks) · hook cannot be installed or is not valid | fix what the message says, stage again, ask again |
 | 2 | usage or setup (not a repository, no harness, config unreadable, git failed, Python < 3.9) | a Studio defect or setup: stop and report |
-| 3 | not supported yet (commit kinds `harness` M0f · `video` M1 · `actor` M3b; nothing Studio's to finish in a merge/rebase) | stop and report |
+| 3 | not supported yet (commit kind `actor` M3b; nothing Studio's to finish in a merge/rebase) | stop and report |
 | 4 | a person decides (internal overlay missing or changed · proxy approvals · a hook block proposed for a team-shared file) | ask the person |
 | 7 | the Studio guard has not run in this Claude Code session | ask the person to enable the Studio plugin; never remove the session markers |
 
