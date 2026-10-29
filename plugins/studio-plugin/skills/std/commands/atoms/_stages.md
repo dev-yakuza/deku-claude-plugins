@@ -18,7 +18,7 @@ source → brief → script → verify ─[①]→ cast → tts → audition ─
 | tts | producer | audio lock | machine lock (tts) · `check_tts` (failures retried twice, then exempted and shown at ②) |
 | audition | producer | `narrator.wav` · `audition.md` | `audition.py` (its check file) |
 | ② | person | approved voice and audio (the question shows each exempted line and reading change) | approval record · `pronounce-approved.json` |
-| board | visual director | presentation attributes · `board.md` | `s2v check` · content and voice hashes unchanged · `check_assets` |
+| board | visual director | presentation attributes · `board.md` · `CREDITS.draft.yaml` → `CREDITS.yaml` (`state.py credit`) | `check_assets --output` (s2v check · content and voice unchanged · every picture usable, unchanged and credited) |
 | visual-check | producer | stills per output | — (frozen audio, no machine lock) |
 | ③ | person | approved presentation (per output) | approval record |
 | render | producer | video, subtitles, thumbnail, chapters per output | `--frozen-audio --out-dir`; exit code and file sha per output |

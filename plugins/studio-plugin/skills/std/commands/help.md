@@ -2,8 +2,8 @@
 
 Show this in the repo's language (not initialized: the language the user writes in):
 
-**Studio is in development (0.0.x)** — `init`, `config`, `update`, `source`, `brief`, `script`, `verify` and `make`
-(up to gate ②) work; every other command answers "not implemented yet" and names the milestone that brings it.
+**Studio is in development (0.0.x)** — `init`, `config`, `update`, `source`, `brief`, `script`, `verify`, `board` and
+`make` (up to gate ③) work; every other command answers "not implemented yet" and names the milestone that brings it.
 
 **Setup** — `init` install the harness (M1) · `config [key value]` (M1) · `update` (M1)
 

@@ -106,3 +106,8 @@ through ① (evidence written as `approve_base` does) and on through cast, tts (
 `asr` · `cer` · `heard` scenario and `--retry`), audition (ffmpeg injected; `--full` joins with the real ffmpeg) and ②.
 Its `--full` real-mock test writes mock lock entries by hand and runs only the real `s2v sentences` — no TTS or
 aligner is started.
+
+**M1g** (`SCRIPTS_VERSION` 15): the board check (`check_assets.py --output`, `stdo/board.py`), `state.py
+credit-preview` · `credit` (`stdo/credits.py`, `stdo/state/credit.py`) and CREDITS.yaml. `test_m1g.BoardCase` takes a
+video from `test_m1f.VoiceCase` through ②, then board with the credits, the fake s2v's snapshot, visual-check and ③.
+The fake s2v's tts writes `tried` (the takes made) and keeps the old take when a scenario line says `keep`.

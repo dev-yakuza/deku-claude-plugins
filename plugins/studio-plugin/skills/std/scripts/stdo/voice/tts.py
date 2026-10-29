@@ -4,9 +4,10 @@
 - CER at most the format's `cer_max.<lang>` (formats/<kind>.md, P-CRIT; config.json is never read);
 - the heard text says the script's numbers (as values: `이십 분` = `20분`, voice/numbers.py) and negations.
 A failing line asks for `tts --retry`. Studio counts the retries itself (M1f review V2: s2v's `attempt` is the take
-it kept — one tts run already tries up to six): the language state keeps, per sentence id, the lock key and the take's
-wav sha when a retry was asked; a later check that finds another wav for the same key counts one retry done. After two
-retries a still failing line is written to `work/<l>/exemptions.json` (P-STATE: this script writes it, ② shows it)
+it kept — one tts run already tries up to six): the language state keeps, per sentence id, the lock key and s2v's
+`tried` (the audio manifest's highest take made for it; the kept `attempt` when an older manifest has none) when a
+retry was asked; a later check that finds `tried` grown for the same key counts one retry done — even when s2v kept
+the old take (M1f re-review W1). After two retries a still failing line is written to `work/<l>/exemptions.json` (P-STATE: this script writes it, ② shows it)
 and no longer fails the stage. The audio hash must be computable; a total length more than 30 % outside the format's
 range is a warning for ②."""
 
@@ -39,9 +40,18 @@ def mismatch(text, heard, lang):
     return None
 
 
-def judge(sentences, cer_max, lang, retries=None):
-    """(problems, retry ids, exemptions, the new retry records). `retries`: {id: {"key", "wav", "done"}} from the
-    language state."""
+def made(manifest, key, lock):
+    """How many takes s2v has made for a lock key: the manifest's `tried`, else the kept attempt."""
+    e = ((manifest or {}).get("entries") or {}).get(key) if isinstance(manifest, dict) else None
+    v = e.get("tried") if isinstance(e, dict) else None
+    if not isinstance(v, int) or isinstance(v, bool):
+        v = (lock or {}).get("attempt")
+    return int(v) if isinstance(v, int) and not isinstance(v, bool) else 0
+
+
+def judge(sentences, cer_max, lang, retries=None, manifest=None):
+    """(problems, retry ids, exemptions, the new retry records). `retries`: {id: {"key", "tried", "done"}} from the
+    language state; `manifest`: the audio lock's manifest.json."""
     problems, retry, exempt, new = [], [], [], {}
     old = retries if isinstance(retries, dict) else {}
     for s in sentences or []:
@@ -66,11 +76,11 @@ def judge(sentences, cer_max, lang, retries=None):
         if not why:
             continue
         rec = old.get(sid) if isinstance(old.get(sid), dict) else None
-        key, wav = s.get("lockKey"), lock.get("wavSha256")
+        key, tried = s.get("lockKey"), made(manifest, s.get("lockKey"), lock)
         if rec is None or rec.get("key") != key:
-            rec = {"key": key, "wav": wav, "done": 0}  # first failure of this text and voice
-        elif rec.get("wav") != wav:
-            rec = {"key": key, "wav": wav, "done": int(rec.get("done") or 0) + 1}  # a retry ran: another take
+            rec = {"key": key, "tried": tried, "done": 0}  # first failure of this text and voice
+        elif tried > int(rec.get("tried") or 0):
+            rec = {"key": key, "tried": tried, "done": int(rec.get("done") or 0) + 1}  # a retry ran: more takes
         new[sid] = rec
         if rec["done"] >= MAX_RETRIES:
             exempt.append({"id": sid, "text": s.get("text"), "heard": lock.get("heard"), "cer": cer,

@@ -90,9 +90,10 @@ def parse(label):
 
 
 # subcommands whose label is "<word> <video> <--expect>" (a 12-hex hash the question shows)
-HASHED = {"approve": approve, "reject-source-diff": reject, "repin": repin, "exclude-output": exclude}
+HASHED = {"approve": approve, "reject-source-diff": reject, "repin": repin, "exclude-output": exclude,
+          "credit": credit}
 # subcommands that need evidence but have no label yet: the milestone that brings them
-PLANNED = {"approve-actor": "M3b", "credit": "M1g", "move": "later", "rollback": "M4"}
+PLANNED = {"approve-actor": "M3b", "move": "later", "rollback": "M4"}
 
 
 class NoLabel(Exception):

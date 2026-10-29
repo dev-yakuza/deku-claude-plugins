@@ -1,7 +1,7 @@
 # MAKE
 
-One video end to end: `make <source> --kind youtube`. **So far (M1f) it runs to gate ②**; board, render, copy and
-the commit arrive with M1g–M1i — stop after ② and tell the person what is next.
+One video end to end: `make <source> --kind youtube`. **So far (M1g) it runs to gate ③**; render, copy and the
+commit arrive with M1h–M1i — stop after ③ and tell the person what is next.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`.
@@ -65,6 +65,10 @@ position. Shared rules: `atoms/_contract.md`.
 3. "고칠 곳이 있다": change readings (cast) or retry lines (tts) and go through the section again.
 
 Anything that changes after `shown` (the audition, the exemptions, the readings) needs `shown` and the question again.
+
+## board · visual-check · ③
+
+`commands/board.md` (board with the credits, visual-check, gate ③).
 
 <!-- studio:guard-refusal -->
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way

@@ -47,7 +47,8 @@ Each script has its own table; a code means only what its script's table says.
 | 3 | `record-source`: the writing or an image it shows is not committed | ask the person to commit their writing; never change or commit it yourself |
 | 4 | waiting for a person (held state, s2v version changed, hash_version; `loop` on a held language) | ask the person |
 | 5 | the video's state lock is busy | wait and retry |
-| 6 | no usable evidence of a person's answer (`approve`, `reject-source-diff`, `repin`, `exclude-output`, `unlock`) | ask with AskUserQuestion (fixed label), then run the command once |
+| 6 | no usable evidence of a person's answer (`approve`, `reject-source-diff`, `repin`, `exclude-output`, `unlock`, `credit`; `credit`'s `fields-not-shown`: the question missed one of the eight lines) | ask with AskUserQuestion (fixed label), then run the command once |
+| 1 | `credit-preview` · `credit`: the draft entry is incomplete, its floor is not the image's, a line is over 200 characters, or it changed since the preview | fix the draft, preview and ask again |
 
 **`check_commit.py`** (`--staged` is the pre-commit hook's check) **and `hooks.py`**
 

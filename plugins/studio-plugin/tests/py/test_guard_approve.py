@@ -141,10 +141,11 @@ class GuardApproval(JudgeCase):
 
     def test_credit_and_unknown_need_evidence_and_are_denied(self):
         self.turn(label="승인 v %s" % H)
-        for sub in ("credit studio/x.png --expect %s" % H, "approve-actor a definition --expect %s" % H,
-                    "frobnicate v", "rollback v"):
+        for sub in ("approve-actor a definition --expect %s" % H, "frobnicate v", "rollback v"):
             d = self.assertRule("python3 .claude/studio/scripts/state.py " + sub, "G-APPROVAL")
             self.assertIn("approval", d.message())
+        # M1g: credit has its label (출처 <video> <h12>); an answer to another label is no evidence for it
+        self.assertRule("python3 .claude/studio/scripts/state.py credit v studio/x.png --expect %s" % H, "G-EVIDENCE")
         self.assertIsNone(self.pending())
 
     def test_one_approval_per_call(self):

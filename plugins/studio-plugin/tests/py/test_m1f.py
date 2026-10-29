@@ -368,10 +368,10 @@ class TtsCheck(VoiceCase):
         self.assertEqual(tts.mismatch("삼 년 전입니다", "5 년 전입니다", "ko"), "numbers 3 heard as 5")
         # V2: a new lock key (another text or voice) starts the count again
         line = [{"id": "x", "text": "y", "lockKey": "k2", "lock": {"asr": True, "cer": 0.9, "heard": "y",
-                                                                   "wavSha256": "w2"}}]
-        p_, retry, ex, new = tts.judge(line, 0.15, "ko", {"x": {"key": "k1", "wav": "w1", "done": 2}})
-        self.assertEqual((retry, ex, new), (["x"], [], {"x": {"key": "k2", "wav": "w2", "done": 0}}))
-        p_, retry, ex, new = tts.judge(line, 0.15, "ko", {"x": {"key": "k2", "wav": "w1", "done": 1}})
+                                                                   "attempt": 2}}]
+        p_, retry, ex, new = tts.judge(line, 0.15, "ko", {"x": {"key": "k1", "tried": 1, "done": 2}})
+        self.assertEqual((retry, ex, new), (["x"], [], {"x": {"key": "k2", "tried": 2, "done": 0}}))
+        p_, retry, ex, new = tts.judge(line, 0.15, "ko", {"x": {"key": "k2", "tried": 1, "done": 1}})
         self.assertEqual((retry, [e["id"] for e in ex]), ([], ["x"]))
         self.assertEqual(tts.mismatch("we do not stop", "we do stop", "en"), "a negation is missing in what was heard")
         self.assertEqual(tts.mismatch("3 gates", "gates", "en"), "a number is missing in what was heard")

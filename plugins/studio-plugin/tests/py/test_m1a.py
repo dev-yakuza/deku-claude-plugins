@@ -248,7 +248,7 @@ class Labels(StudioTestCase):
                          ("해제 v1 ko lock", None, "v1"))
         # M1b: abandon and overlay have labels now (test_m1b.Labels)
         self.assertEqual(labels.expected(["abandon", "v1"], repo, "studio"), ("중단 v1 ko", None, "v1"))
-        for cmd, when in (("credit", "M1g"), ("move", "not part of M1")):
+        for cmd, when in (("move", "not part of M1"),):
             with self.assertRaises(labels.NoLabel) as e:
                 labels.expected([cmd, "v1", "--expect", H], repo, "studio")
             self.assertIn(when, str(e.exception))

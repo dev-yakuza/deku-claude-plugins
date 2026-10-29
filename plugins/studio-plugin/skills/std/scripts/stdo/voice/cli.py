@@ -1,8 +1,8 @@
-"""check_assets.py <video> --actors [--lang l] · check_tts.py <video> [--lang l] · audition.py <video> [--lang l]
+"""check_assets.py <video> --actors | --output <o> [--lang l] · check_tts.py <video> [--lang l] · audition.py <video> [--lang l]
 (m1-plan §8). Each writes its stage's check result (`checks/cast.json` · `checks/tts.json` · `checks/audition.json`).
 
 Exit: 0 pass · 1 fail (the result lists why; check_tts names the lines to retry) · 2 usage or setup (no harness, no
-video, no script, no s2v; check_assets without --actors: the board check arrives with M1g; audition without ffmpeg)."""
+video, no script, no s2v; check_assets without --actors or --output; audition without ffmpeg)."""
 
 import json
 import os
@@ -87,9 +87,25 @@ def _run(prog, fn, argv, cwd, *a):
 # ---------- cast ----------
 
 def _assets(argv, cwd, providers, env, runner):
+    out_opt = None
+    if "--output" in argv:  # the board check (M1g): check_assets.py <video> --output <o>
+        i = argv.index("--output")
+        if i + 1 >= len(argv):
+            raise ccli.Usage("--output needs an output name")
+        out_opt, argv = argv[i + 1], argv[:i] + argv[i + 2:]
     o, repo, root, vdir, state, lang, ctx = _setup(argv, cwd, ("--actors",))
-    if not o.get("--actors"):
-        raise ccli.Usage("check_assets.py <video> --actors (the cast check); the board check arrives with M1g")
+    if bool(o.get("--actors")) == bool(out_opt):
+        raise ccli.Usage("check_assets.py <video> --actors (cast) | --output <o> (board)")
+    if out_opt:
+        if out_opt not in schema.current_outputs(state, lang):
+            raise ccli.Usage("output %s is not in the brief" % out_opt)
+        from .. import board
+        result, details, cur = board.check(repo, vdir, state, lang, ctx, out_opt, providers, env, runner)
+        inp = stagechecks.Inputs(ctx, state, lang, out_opt, cur, providers)
+        p = stagechecks.write(vdir, lang, "board", out_opt, result, details,
+                              stagechecks.input_sha("board", inp, cur.get("s2v_version")))
+        ccli._report("board", result, details["problems"], os.path.relpath(p, repo))
+        return C.OK if result == "pass" else C.FAIL
     result, details, cur = cast.check(repo, root, vdir, state, lang, ctx, providers, env, runner, _ctx_of(repo))
     for line in pronounce.conflict_lines(details["conflicts"]):
         sys.stdout.write("reading elsewhere: %s\n" % line)
@@ -129,7 +145,7 @@ def _tts(argv, cwd, providers):
         problems.append("the format gives no cer_max for %s" % lang)
     if crit is not None and cer_max is not None:
         old = state["langs"][lang].get("tts_retries") or {}
-        p, retry, exempt, new = tts.judge(sentences, cer_max, lang, old)
+        p, retry, exempt, new = tts.judge(sentences, cer_max, lang, old, _manifest(vdir, lang))
         problems += p
         if new != old:
             _record_retries(vdir, lang, new)

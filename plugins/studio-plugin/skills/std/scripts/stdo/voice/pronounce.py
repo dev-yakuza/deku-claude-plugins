@@ -3,8 +3,9 @@ reading — `.claude/studio/pronounce.json` (shared, committed), a script's fron
 `work/<l>/pronounce-changes.json` (what the script adds or changes against HEAD's pronounce.json) and
 `work/<l>/pronounce-approved.json` (written by ② with its sha in the ② record, v5.1 T1).
 
-Conflicts (v5 S1) are informational: a written form whose reading here differs from HEAD's or from the valid
-pronounce-approved.json of another video in progress. They block nothing and are not part of any hash."""
+Conflicts (v5 S1): a written form whose reading here differs from HEAD's or from the valid pronounce-approved.json
+of another video in progress. They do not stop the video, but their lines are required in the ② question (the guard
+checks them), are not part of any hash, and are frozen when `shown 2` computes them (M1f review V1, J117)."""
 
 import json
 import os

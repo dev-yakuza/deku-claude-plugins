@@ -143,6 +143,11 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
             return _stage_done(vdir, state, lang, ctx, o, providers, hooks, flock)
         if cmd == "shown":
             return gates.shown(vdir, state, lang, ctx, o, providers, hooks)
+        if cmd in ("credit", "credit-preview"):
+            from . import credit as cr
+            if cmd == "credit-preview":
+                return cr.preview(repo, root, vdir, state, o)
+            return cr.credit(repo, vdir, state, o, hooks, list(argv), gates._with_evidence)
         if cmd == "record-source":
             return flow.record_source(repo, vdir, state, cfg, hooks)
         if cmd == "hold":

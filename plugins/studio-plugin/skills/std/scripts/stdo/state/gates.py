@@ -135,8 +135,9 @@ def _conflicts(ctx, state, lang, providers):
 
 # ---------- evidence-consuming commands ----------
 
-def _with_evidence(repo, vdir, video, argv, cmd, label_of, check_state, change, events, proxy, hooks, after=None):
-    """The one lock order of m0b2-plan §1."""
+def _with_evidence(repo, vdir, video, argv, cmd, label_of, check_state, change, events, proxy, hooks, after=None,
+                   ev_check=None):
+    """The one lock order of m0b2-plan §1. `ev_check(ev)` judges the evidence itself (credit: its question text)."""
     box = {}
 
     def check(s):
@@ -146,6 +147,8 @@ def _with_evidence(repo, vdir, video, argv, cmd, label_of, check_state, change, 
             box["ev"] = evidence.check(repo, argv, label, proxy)
         except evidence.Missing as e:
             _refuse(str(e), C.NO_EVIDENCE)
+        if ev_check:
+            ev_check(box["ev"])
 
     def consume(s):
         evidence.consume(repo, box["ev"], video, cmd)

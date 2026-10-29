@@ -622,8 +622,16 @@ function tts(script, values) {
       err(`tts: stopped by signal ${t.signal}`);
       process.exit(128 + Number(t.signal));
     }
-    const attempt = have ? have.e.attempt + 1 : 1;
     const conf = per[s.id] || {};
+    const tried = (have ? have.e.tried || have.e.attempt : 0) + 1;
+    if (have && conf.keep) {
+      // s2v made another take but kept the old one (it was not better): only `tried` grows
+      manifest.entries[key] = { ...have.e, tried };
+      synthesized++;
+      n++;
+      continue;
+    }
+    const attempt = have ? have.e.attempt + 1 : 1;
     const pick = (arr, dflt) => (Array.isArray(arr) ? arr[Math.min(attempt - 1, arr.length - 1)] : dflt);
     const asr = values['no-asr'] ? false : pick(conf.asr, true);
     const src = `${key}.${attempt}.wav`;
@@ -638,6 +646,7 @@ function tts(script, values) {
       cer: asr ? pick(conf.cer, 0) : null,
       heard: asr ? pick(conf.heard, s.text) : '',
       checks: pick(conf.checks, []),
+      tried,
     };
     synthesized++;
     n++;
