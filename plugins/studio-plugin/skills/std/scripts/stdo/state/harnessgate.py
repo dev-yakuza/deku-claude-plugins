@@ -84,9 +84,10 @@ def _video_dirs(repo, root):
     return out
 
 
-def approved_additions(repo, root, providers, ctx_of, videos=None):
+def approved_additions(repo, root, providers, ctx_of, videos=None, per_video=None):
     """{key: [values]} of the valid pronounce-approved.json of every video in progress (T1). `ctx_of(vdir, lang)`
-    gives the collect context of a video's language; `videos` (a set) receives the ids that contributed."""
+    gives the collect context of a video's language; `videos` (a set) receives the ids that contributed and
+    `per_video` (a dict) each video's own object (M1f: the cast stage's conflicts)."""
     from .store import read_state  # read-only use
     out = {}
     for vdir in _video_dirs(repo, root):
@@ -121,6 +122,8 @@ def approved_additions(repo, root, providers, ctx_of, videos=None):
                 out.setdefault(k, []).append(v)
             if data and videos is not None:
                 videos.add(st["video"])
+            if data and per_video is not None:
+                per_video.setdefault(st["video"], {}).update(data)
     return out
 
 

@@ -99,3 +99,10 @@ the fake s2v (`FlowCase`); its `--full` test runs real `s2v lint` past `maxDurat
 hashes (`state_fixtures.C1` · `C2`, `brief_ready`), and the fixture state's `assets_sha` is the sha of
 `state_fixtures.ASSETS_BYTES`, which `checkfix` writes before `stage-done script`. `record-source` freezes only
 committed writing, so tests commit an article before recording it.
+
+**M1f** (`SCRIPTS_VERSION` 14): `check_assets.py --actors`, `check_tts.py` and `audition.py` (`stdo/voice/`), gate ②'s
+`pronounce-approved.json` and the guard's tts-under-lock rule. `test_m1f.py` takes a video from `test_m1e.FlowCase`
+through ① (evidence written as `approve_base` does) and on through cast, tts (the fake s2v's `tts`, its per-sentence
+`asr` · `cer` · `heard` scenario and `--retry`), audition (ffmpeg injected; `--full` joins with the real ffmpeg) and ②.
+Its `--full` real-mock test writes mock lock entries by hand and runs only the real `s2v sentences` — no TTS or
+aligner is started.

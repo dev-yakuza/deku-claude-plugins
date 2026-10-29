@@ -1449,6 +1449,9 @@ def check_env(ctx, cmd):
 WRAPPED_S2V = (("render",), ("snapshot",), ("dev",))  # dev runs snapshot / render --draft and keeps servers up
 # pages written into a folder of the agent's choosing: refused with --out-dir (their default place is s2v's own)
 OUT_DIR_S2V = (("takes",), ("direct",))
+# s2v commands that change a video's audio lock: only under lock.py (M1f; `audio prune` deletes takes — review V5).
+# `say` takes the machine lock itself and writes nothing of a video's (s2v say.ts → Service.ensure), so it is free.
+LOCKED_S2V = (("tts",), ("audio", "prune"))
 
 
 def check_s2v_results(ctx, cmd):
@@ -1461,6 +1464,12 @@ def check_s2v_results(ctx, cmd):
                            "without --out-dir (s2v's own results folder), or use \"python3 "
                            ".claude/studio/scripts/run_s2v.py render|snapshot <video> --output <output>\"." % words[0])
         return
+    if tuple(words[:1]) in LOCKED_S2V or tuple(words[:2]) in LOCKED_S2V:
+        if "lock-child" not in (cmd.ctx or []):
+            ctx.deny("G-WRAP", "s2v %s in a Studio repository runs only under the machine lock wrapper, which records "
+                               "a busy machine as held:lock — use \"python3 .claude/studio/scripts/lock.py run --kind "
+                               "tts -- <the same s2v command>\" (m1-plan §8)." % " ".join(words[:2]))
+            return
     if words in WRAPPED_S2V or (any(x is None for x in vals[:1])):
         ctx.deny("G-WRAP", "s2v %s in a Studio repository runs only through Studio's wrapper, which sets the proxy "
                            "watermark from the approvals and records the result — use \"python3 "

@@ -38,9 +38,12 @@ def artifacts(ctx, state, lang, gate, scope):
         # what the person reads and what it was made from (check_claims.py writes both, m1-plan §7.4)
         return {"verify_md": file_sha(os.path.join(w, "verify.md")),
                 "verify_json": file_sha(os.path.join(w, "verify.json"))}
-    if gate == "2":
+    if gate == "2":  # the person hears the audition: its files are part of what was shown (v5 S4)
+        a = os.path.join(ctx["repo"], ctx["studio_root"], "out", state["video"], lang, "audition")
         return {"exemptions": file_sha(os.path.join(w, "exemptions.json")),
-                "pronounce_changes": file_sha(os.path.join(w, "pronounce-changes.json"))}
+                "pronounce_changes": file_sha(os.path.join(w, "pronounce-changes.json")),
+                "audition_wav": file_sha(os.path.join(a, "narrator.wav")),
+                "audition_md": file_sha(os.path.join(a, "audition.md"))}
     if gate == "3":
         return {"frames": file_sha(frames_index(ctx, state, lang, scope))}
     if gate == "source-diff":

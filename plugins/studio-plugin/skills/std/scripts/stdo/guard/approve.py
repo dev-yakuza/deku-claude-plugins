@@ -134,14 +134,17 @@ def state_py(hook, env, ri, argv):
 
 def _gate_lines(ri, argv):
     """The lines a gate question must show besides the label: for ①, every commit to the source after begin (M1e
-    review S5). Read from the video's state.json; an unreadable state shows nothing here (state.py refuses it)."""
+    review S5); for ②, what `shown 2` recorded (M1f review V1). Read from the video's state.json; an unreadable state
+    shows nothing here (state.py refuses it)."""
     from ..state.argv import canonical
     c = canonical(argv)
-    if c["cmd"] != "approve" or len(c["pos"]) < 2 or c["pos"][1] != "1":
+    if c["cmd"] != "approve" or len(c["pos"]) < 2 or c["pos"][1] not in ("1", "2"):
         return []
     try:
         st = labels.read_state(labels.video_dir(ri.worktree, ri.studio_root, c["pos"][0]))
-        return labels.source_commit_lines(st)
+        if c["pos"][1] == "1":
+            return labels.source_commit_lines(st)
+        return labels.gate2_lines(st, c["opt"].get("--lang"))  # ②: exemptions, readings, conflicts (V1)
     except Exception:  # noqa: BLE001
         return []
 

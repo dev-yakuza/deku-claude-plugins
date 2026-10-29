@@ -16,7 +16,8 @@ TABLE = [
                  "<sr>/**/videos/*/work/**/checks/**",
                  "<sr>/**/videos/*/work/assets.json", "<sr>/**/videos/*/work/commit-ok.json",
                  "<sr>/**/videos/*/work/source/**",
-                 "<sr>/**/videos/*/work/**/pronounce-approved.json",
+                 "<sr>/**/videos/*/work/**/pronounce-approved.json", "<sr>/**/videos/*/work/**/exemptions.json",
+                 "<sr>/**/videos/*/work/**/gate2-lines.txt",
                  "<sr>/**/cast/*/status.json", "<sr>/**/cast/*/approvals.json",
                  "<sr>/**/cast/*/shown.json", ".claude/studio/local/commit-ok.json",
                  ".claude/studio/local/pending-approval.json", ".claude/studio/local/guard-ran.json",
@@ -46,7 +47,7 @@ DRAFT_OK = {"P-CHAR": "character.yaml.draft"}
 TAIL_NAMES = {"local", "character", "voices", "audio", "consent", "state.json", "approvals.jsonl", "shown.json",
               "verify.json", "verify.md", "CREDITS.yaml", "status.json", "approvals.json", "charter.md", "config.json",
               "commit-ok.json", "pending-approval.json", "guard-ran.json", "last-checked.json", "assets.json",
-              "pronounce-approved.json", "installed.json"}
+              "pronounce-approved.json", "installed.json", "exemptions.json", "gate2-lines.txt"}
 
 READ_ALLOW = {"cat", "head", "tail", "less", "more", "ls", "stat", "file", "du", "wc", "shasum", "sha256sum",
               "sha1sum", "md5", "md5sum", "cmp", "diff", "grep", "egrep", "fgrep", "rg", "ag", "jq", "ffprobe",

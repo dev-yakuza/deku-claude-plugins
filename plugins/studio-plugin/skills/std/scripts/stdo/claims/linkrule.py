@@ -31,7 +31,7 @@ NUMBER = re.compile(
     r"|(?<![가-힣])[일이삼사오육칠팔구]?[십백천만억][일이삼사오육칠팔구]?\s?" + COUNTERS + "?"
     r"|(?<![가-힣])[일이삼사오육칠팔구]\s(?:년|개월|시간|분|초|퍼센트|층|배)(?![가-힣])"
     r"|(?<![가-힣])(?:수|몇)\s?(?:십|백|천|만)"
-    r"|(?<![가-힣])첫(?:째|\s|번)|번째"
+    r"|(?<![가-힣])첫(?:\s|번)|번째|(?<![가-힣])(?:첫|둘|셋|넷|다섯|여섯|일곱|여덟|아홉|열)째"
     r"|절반|(?<![가-힣])반\s?(?:년|개월|시간|쯤|정도|이상|이하)"
     r"|(?<![가-힣])(?:하나|둘|셋|넷)(?![가-힣])", re.I)
 PARTICLES = ("에서는", "에게서", "으로는", "에서", "으로", "에게", "부터", "까지", "처럼", "보다", "에는", "와는", "과는",
@@ -41,6 +41,7 @@ ENDINGS = ("니다", "세요", "어요", "아요", "해요", "에요", "예요",
            "는다", "라고", "다고", "냐고", "자고", "지만", "는데", "은데", "니까", "도록", "려고", "면서", "아서", "어서",
            "해서", "아야", "어야", "해야", "하게", "되게", "으면", "하면", "하고", "하며", "하여", "했던", "하는", "되는",
            "있는", "없는", "고", "게", "며", "면", "죠", "요", "다", "서")
+LONG_ENDINGS = tuple(e for e in ENDINGS if len(e) > 1)
 STOPWORDS = frozenset([
     "그래서", "하지만", "그리고", "그러나", "그런데", "그러면", "그러니까", "따라서", "때문에", "이라고", "라고", "이제",
     "정말", "진짜", "아주", "매우", "너무", "먼저", "다음", "다음으로", "다음은", "이번", "이번에는", "그럼", "또한",
@@ -60,14 +61,18 @@ def has_number(text):
 def _noun(word):
     """The noun-like stem of a Hangul word, or None (particles dropped repeatedly; verbs, adjectives, function words
     and stems under 3 syllables are none)."""
+    stripped = False
     for _ in range(3):
         for p in PARTICLES:
             if word.endswith(p) and len(word) > len(p):
-                word = word[:-len(p)]
+                word, stripped = word[:-len(p)], True
                 break
         else:
             break
-    if len(word) < 3 or word in STOPWORDS or word.endswith(ENDINGS):
+    # a word that carried a particle is a noun whatever its last syllable (세관신고서도 → 세관신고서); the one-syllable
+    # endings only judge a bare word (M1e final re-review U1)
+    endings = LONG_ENDINGS if stripped else ENDINGS
+    if len(word) < 3 or word in STOPWORDS or word.endswith(endings):
         return None
     return word
 

@@ -134,7 +134,7 @@ STAGE_CHECKS = {
     "verify": {"file": "verify-claims", "script": "check_claims.py", "scope": None, "s2v": False,
                "inputs": ("verify_draft", "source_copy", "claims_map", "script")},
     "cast": {"file": "cast", "script": "check_assets.py", "scope": None, "s2v": True, "fail_unread": True,
-             "inputs": ("script", "cast_roster")},
+             "inputs": ("script", "cast_roster", "pronounce_changes")},
     "tts": {"file": "tts", "script": "check_tts.py", "scope": None, "s2v": True,
             "inputs": ("lock_manifest", "sentences", "format")},
     "audition": {"file": "audition", "script": "audition.py", "scope": None, "s2v": False,

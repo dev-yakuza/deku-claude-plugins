@@ -14,10 +14,10 @@ source → brief → script → verify ─[①]→ cast → tts → audition ─
 | script | script writer | script · `claims-map.json` | `check_claims --narration` (s2v lint with its length warnings, claims map, narration, images) |
 | verify | fact-checker | `verify.draft.json` → `verify.json` · `verify.md` (written by `check_claims`) | no unsupported or contradicted claim · `check_claims` |
 | ① | person | approved content | approval record |
-| cast | producer / casting director | cast, pronunciation, faces | `s2v lint` · content hash unchanged · `check_assets --actors` |
-| tts | producer | audio lock | machine lock (tts) · `check_tts` (or failures handed to ②) |
-| audition | producer | audition clips | — |
-| ② | person | approved voice and audio | approval record |
+| cast | producer / casting director | cast, pronunciation (`pronounce-changes.json`), faces | `check_assets --actors` (s2v lint, content hash unchanged, the roster, the readings) |
+| tts | producer | audio lock | machine lock (tts) · `check_tts` (failures retried twice, then exempted and shown at ②) |
+| audition | producer | `narrator.wav` · `audition.md` | `audition.py` (its check file) |
+| ② | person | approved voice and audio (the question shows each exempted line and reading change) | approval record · `pronounce-approved.json` |
 | board | visual director | presentation attributes · `board.md` | `s2v check` · content and voice hashes unchanged · `check_assets` |
 | visual-check | producer | stills per output | — (frozen audio, no machine lock) |
 | ③ | person | approved presentation (per output) | approval record |

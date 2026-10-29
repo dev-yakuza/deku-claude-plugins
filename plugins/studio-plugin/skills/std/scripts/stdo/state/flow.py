@@ -195,18 +195,32 @@ def commits_since(repo, base, rels):
     if not rels:
         return []
     rng = "%s..HEAD" % base if base else "HEAD"
-    out = _git(repo, "log", "--format=%H%x09%s", rng, "--", *[":(literal)" + r for r in sorted(set(rels))])
+    spec = [":(literal)" + r for r in sorted(set(rels))]
+    # commits that changed the paths, and merges that changed them against their first parent (U2: plain path
+    # limiting drops a merge whose result equals one of its parents)
+    touched = set((_git(repo, "log", "--no-merges", "--format=%H", rng, "--", *spec) or "").split())
+    touched |= set((_git(repo, "log", "--first-parent", "--merges", "--format=%H", rng, "--", *spec) or "").split())
+    out = _git(repo, "log", "--format=%H%x09%s", rng)
     res = []
     for line in (out or "").splitlines():
         sha, _, subject = line.partition("\t")
-        if sha:
-            res.append({"sha": sha, "subject": subject, "stat": _diffstat(repo, sha, rels)})
+        if sha and sha in touched:
+            merge = len((_git(repo, "rev-list", "--parents", "-n", "1", sha) or "").split()) > 2
+            c = {"sha": sha, "subject": subject, "stat": _diffstat(repo, sha, rels, merge)}
+            if merge:
+                c["merge"] = True
+            res.append(c)
     return res
 
 
-def _diffstat(repo, sha, rels):
-    """`+A -D path, …` of one commit, limited to `rels` (M1e review T3: what the commit changed in the source)."""
-    out = _git(repo, "show", "--numstat", "--format=", sha, "--", *[":(literal)" + r for r in sorted(set(rels))])
+def _diffstat(repo, sha, rels, merge=False):
+    """`+A -D path, …` of one commit, limited to `rels` (M1e review T3: what the commit changed in the source). A merge
+    is diffed against its first parent (U2: `git show --numstat` prints nothing for one)."""
+    spec = [":(literal)" + r for r in sorted(set(rels))]
+    if merge:
+        out = _git(repo, "diff", "--numstat", sha + "^1", sha, "--", *spec)
+    else:
+        out = _git(repo, "show", "--numstat", "--format=", sha, "--", *spec)
     parts = []
     for line in (out or "").splitlines():
         bits = line.split("\t")

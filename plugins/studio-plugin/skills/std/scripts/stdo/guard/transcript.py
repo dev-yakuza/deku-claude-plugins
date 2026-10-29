@@ -53,7 +53,8 @@ REASONS = {
     "values-not-shown": "the question does not show every line of the value block as --stage printed it (the "
                         "protected values, or the overflow file and its counts)",
     "gate-lines-not-shown": "the question does not show every line the gate needs (for ①: each commit to the source "
-                            "after begin, as record-source printed it)",
+                            "after begin, as record-source printed it; for ②: each `in the question:` line shown 2 "
+                            "printed)",
 }
 
 

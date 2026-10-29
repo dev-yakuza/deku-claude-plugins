@@ -78,6 +78,14 @@ Each script has its own table; a code means only what its script's table says.
 | 1 | failed: the listed problems | script: the writer again · verify: `state.py loop <video> verify`, then fix and check again |
 | 2 | usage or setup (no harness, no video, no script, no s2v path) | fix the command, or stop and report |
 
+**`check_assets.py --actors`** · **`check_tts.py`** · **`audition.py`** (the voice section, M1f)
+
+| Code | Meaning | Producer |
+|---|---|---|
+| 0 | passed (the check result is written) | `stage-done` |
+| 1 | failed: the listed problems (`check_tts`: a `retry:` line names the lines to synthesize again) | fix, retry, check again |
+| 2 | usage or setup (no harness, video, script or s2v path; `check_assets` without `--actors`; `audition.py` without ffmpeg) | fix the command, or stop and report |
+
 **`lock.py` and s2v**: 73 / 74 = machine / character busy → `held:lock` / `held:actor`; otherwise the child's code.
 
 A Studio commit is: `check_commit.py --stage <kind> [<target>]` → AskUserQuestion whose text contains the **summary

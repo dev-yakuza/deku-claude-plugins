@@ -54,6 +54,9 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
         raise store.Refused("③ is shown with --begin before the snapshot and --end after it", C.USAGE)
     cur = providers.collect(ctx, state, lang)
     box = {}
+    if gate == "2":  # the lines its question must show, computed now (conflicts too) and kept with the shown record
+        from ..voice import gate2
+        box["lines"] = gate2.lines(vdir, lang, _conflicts(ctx, state, lang, providers), _write_text)
 
     def check(s):
         first = precheck(s, lang)
@@ -82,6 +85,8 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
             return
         L["shown"].setdefault(gate, {})[scope] = {"hash": shown_hash(ctx, s, lang, cur, gate, scope),
                                                   "at": schema.now()}
+        if gate == "2":
+            L["shown"][gate][scope]["lines"] = list(box["lines"])
         if gate == "3":
             L["shown_pending"].pop(scope, None)
         box["hash12"] = hash12(s, lang, gate)
@@ -100,7 +105,32 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
         _out("begin %s" % scope)
     else:
         _out("hash12 %s" % box["hash12"] if box.get("hash12") else "shown %s (other scopes not shown yet)" % scope)
+    if gate == "2":  # the question shows each of these lines (the guard checks them — M1f review V1)
+        for line in box["lines"]:
+            _out("in the question: %s" % line)
     return C.OK
+
+
+def _write_text(p, text):
+    from .. import writes
+    writes.check(os.path.basename(p))
+    tmp = "%s.tmp.%d" % (p, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, p)
+
+
+def _conflicts(ctx, state, lang, providers):
+    from ..voice import pronounce
+    chg, _why = pronounce.read(pronounce.path_changes(ctx["vdir"], lang))
+    if not chg:
+        return []
+    from . import cli as scli
+    cfg = scli._cfg_of(ctx["repo"])
+    items = pronounce.conflicts(ctx["repo"], ctx["studio_root"], state["video"], chg,
+                                pronounce.head_shared(ctx["repo"]) or {}, providers,
+                                lambda vd, lg: scli._ctx(ctx["repo"], cfg, vd, lg))
+    return pronounce.conflict_lines(items)
 
 
 # ---------- evidence-consuming commands ----------
@@ -205,6 +235,10 @@ def approve(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
     proxy = bool(o.get("--proxy"))
     cur = providers.collect(ctx, state, lang)
     box = {"excerpts": [], "copy": {}}
+    if gate == "2":  # what ② approves besides the tuple: the sentences heard, the readings added (m1-plan §8, T1)
+        box["sentences"] = {x.get("id"): x.get("lockKey") for x in providers.sentences(ctx) or []
+                            if isinstance(x, dict) and not x.get("recorded") and x.get("id")}
+        box["pronounce"] = _pronounce_approved(vdir, lang)
 
     def check_state(s):
         _gate_checks(s, lang, cur, gate)
@@ -226,6 +260,9 @@ def approve(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
                 rec["excerpts"] = list(box["excerpts"])
             if gate == "4b":
                 rec["excerpts"] = list(box["copy"].get(sc, []))
+            if gate == "2":
+                rec["sentences"] = dict(box["sentences"])
+                rec[schema.PRONOUNCE_SHA] = hash_sha(box["pronounce"])
             out.append((None if gate in ("1", "2") else sc, rec))
         return out
 
@@ -235,11 +272,38 @@ def approve(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
     def change(s, ev):
         for k, r in records(s, ev):
             store.apply_approval(s, lang, gate, r, k)
+        if gate == "2":  # always written anew ({} without additions); its sha is in the record (v5.1 T1)
+            _write_atomic(os.path.join(vdir, "work", lang, "pronounce-approved.json"), box["pronounce"])
 
     _with_evidence(repo, vdir, state["video"], argv, "approve", lambda s: labels.approve(s["video"], expect), check_state,
                    change, events, proxy, hooks)
     _out("approved %s %s" % (gate, lang))
     return C.OK
+
+
+def _pronounce_approved(vdir, lang):
+    """The bytes of pronounce-approved.json: the cast stage's flat changes, or {} (none, or not a flat object —
+    check_assets refuses that before ②)."""
+    from ..voice import pronounce
+    obj, _why = pronounce.read(pronounce.path_changes(vdir, lang))
+    return (json.dumps(obj or {}, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def hash_sha(data):
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
+def _write_atomic(p, data):
+    from .. import writes
+    writes.check("pronounce-approved.json")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = "%s.tmp.%d" % (p, os.getpid())
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, p)
 
 
 def _one_language(s):
