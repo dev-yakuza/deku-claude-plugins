@@ -196,7 +196,7 @@ for d in ("commit", "hooks"):
     for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
         check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
               "%s (copied into repositories) does not import the guard (plugin only)" % os.path.relpath(p, skill))
-check(sv and sv.group(1) == "18", "SCRIPTS_VERSION is 18 (M1j: the video commit by content)")
+check(sv and sv.group(1) == "19", "SCRIPTS_VERSION is 19 (M1j follow-up: pronounce keys in NFC once)")
 from stdo import manifest as _man
 _mp = os.path.join(scripts, _man.NAME)
 check(os.path.exists(_mp) and open(_mp).read() == _man.render(scripts, sv.group(1)),
@@ -234,14 +234,43 @@ for st, d in sorted(_stage_doc.items()):
     if st in _schema.DONE_STAGES:
         check(re.search(r"state\.py stage-done <video> %s\b" % re.escape(st), body) is not None,
               "commands/%s.md records %s with `state.py stage-done`" % (d, st))
+
+
+def _item(body, pos):
+    """The numbered or bulleted list item (or paragraph) of `body` that holds position `pos`."""
+    starts = [m.start() for m in re.finditer(r"(?m)^(\s*(\d+\.|-) |$|#)", body) if m.start() <= pos]
+    start = starts[-1] if starts else 0
+    m = re.compile(r"(?m)^(\s*(\d+\.|-) |$|#)").search(body, pos + 1)
+    return body[start:m.start() if m else len(body)]
+
+
+def _section(body, pos):
+    a = body.rfind("\n#", 0, pos)
+    b = body.find("\n#", pos)
+    return body[a if a >= 0 else 0:b if b >= 0 else len(body)]
+
+
+# M1j review A5: the rule is where the approval is — in the same list item as the approve command, after an
+# AskUserQuestion of the same section
 for gate, d in (("1", "verify"), ("2", "make"), ("3", "board"), ("4a", "render"), ("4b", "copy")):
     body = open(os.path.join(_cmd, d + ".md")).read()
-    check(re.search(r"state\.py approve <video> %s --expect" % gate, body) is not None and
-          "never in the same message" in body, "gate %s: commands/%s.md asks, then approves alone" % (gate, d))
+    m = re.search(r"state\.py approve <video> %s --expect" % gate, body)
+    item = _item(body, m.start()) if m else ""
+    sec = _section(body, m.start()) if m else ""
+    ok = m is not None and "never in the same message" in item and "in a later message" in item \
+        and 0 <= sec.find("AskUserQuestion") < sec.find("state.py approve <video> %s" % gate)
+    check(ok, "gate %s: commands/%s.md asks, then approves alone (the rule in the approve item)" % (gate, d))
+_c = _mk.find('`git commit -m "<message>"`')
+check(_c >= 0 and "never in the same message" in _item(_mk, _c) and "AskUserQuestion" in _item(_mk, _c),
+      "make.md: the video commit asks, then runs git commit alone")
 for p in glob.glob(os.path.join(_cmd, "*.md")):
     body = open(p).read()
-    if "lock.py run --kind tts" in body or "run_s2v.py render" in body:
-        check("run_in_background" in body, "%s runs the heavy wrappers in the background" % os.path.basename(p))
+    for w in ("lock.py run --kind tts", "run_s2v.py render"):
+        for m in re.finditer(re.escape(w), body):
+            it = _item(body, m.start())
+            if "run_in_background" in it or "python3 .claude" not in it and "`%s" % w not in it:
+                continue
+            check(False, "%s runs %s in the background (item: %s)" % (os.path.basename(p), w, it.strip()[:80]))
 
 if fails:
     print("structure: %d failure(s)" % len(fails))

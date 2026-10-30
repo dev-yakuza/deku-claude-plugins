@@ -40,6 +40,19 @@ narrator: 안녕하세요. 오늘은 공항 단어를 배워요.
 
 ::image{src="a.png"}
 
+::image{src=b.png}
+
+:::split
+![사진](c.png)
+
+공항 안내
+:::
+
+:::gallery
+![하나](d.png)
+![둘](e.png)
+:::
+
 # 끝 {#end}
 
 narrator: 고마워요!
@@ -58,6 +71,10 @@ EDITS = [
     ("scene_title", ("body", "scene_title"), lambda t: t.replace("# 시작 {#intro}", "# 처음 {#intro}"), None),
     ("screen", ("body", "screen"), lambda t: t.replace("空港\n:::", "空港です\n:::"), None),
     ("image", ("body", "image"), None, {"a.png": PNG + b"\0"}),
+    # M1j review A3: an unquoted src, and the markdown images of :::split and :::gallery (s2v parse.ts)
+    ("image_unquoted", ("body", "image"), None, {"b.png": PNG + b"\0"}),
+    ("image_split", ("body", "image"), None, {"c.png": PNG + b"\0"}),
+    ("image_gallery", ("body", "image"), None, {"d.png": PNG + b"\0"}),
     ("title", ("frontmatter", "title"), lambda t: t.replace("title: 공항 단어", "title: 공항 단어들"), None),
     ("cast.voice", ("frontmatter", "cast"), lambda t: t.replace("qwen:Sohee", "qwen:Ryan"), None),
     ("cast.style", ("frontmatter", "cast"), lambda t: t.replace("차분하게", "밝게"), None),
@@ -75,6 +92,7 @@ EDITS = [
     ("unknown", ("unknown", "unknownKey"), lambda t: _fm(t, "unknownKey: 1"), None),
 ]
 GROUPS = ("content", "voice", "presentation", "engine")
+IMAGES = ("a.png", "b.png", "c.png", "d.png", "e.png")
 
 
 def isolated_env(home):
@@ -114,7 +132,9 @@ def measure(s2v, env=None, work=None):
         def put(text, files):
             with open(script, "w", encoding="utf-8") as f:
                 f.write(text)
-            for n, b in (files or {"a.png": PNG}).items():
+            all_files = {n: PNG for n in IMAGES}
+            all_files.update(files or {})
+            for n, b in all_files.items():
                 with open(os.path.join(vdir, n), "wb") as f:
                     f.write(b)
         put(BASE, None)
@@ -145,9 +165,15 @@ def table(results, old=None):
     for name, (where, key), _e, _f in EDITS:
         changed = [g for g in results[name] if g in ("content", "voice", "presentation")]
         if results[name] == ["error"]:
+            if where != "unknown":
+                raise RuntimeError("inspect refused the edit %r" % name)
             t["unknown_keys_refused"] = True  # real inspect exits 1 on a frontmatter key it does not know
             continue
         if where == "body":
+            # one place for every form of an image (::image quoted or not, :::split, :::gallery): they must agree
+            if key in t["body"] and t["body"][key] != changed:
+                raise RuntimeError("the forms of body.%s change different groups: %s / %s" % (key, t["body"][key],
+                                                                                            changed))
             t["body"][key] = changed
         elif where == "frontmatter":
             t["frontmatter"][key] = sorted(set(t["frontmatter"].get(key, [])) | set(changed)) if key in measured \

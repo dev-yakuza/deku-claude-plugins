@@ -83,9 +83,13 @@ class E2ECase(StudioTestCase):
 
     # ---- the person ----
     def gate(self, gate, question, extra_scope=(), lines_from=None):
-        """shown → the question with the hash and every `in the question:` line → approve, alone, later."""
+        """shown → the question with the hash and every `in the question:` line → approve, alone, later. In the
+        proxy mode (`self.proxy`) the agent approves with `--proxy` and no question."""
         r = self.do(PY + "state.py shown v1 %s%s" % (gate, "".join(" " + x for x in extra_scope)))
         h = re.search(r"^hash12 ([0-9a-f]{12})$", r.out, re.M).group(1)
+        if getattr(self, "proxy", False):
+            self.do(PY + "state.py approve v1 %s --expect %s%s --proxy" % (gate, h, "".join(" " + x for x in extra_scope)))
+            return h
         lines = re.findall(r"^in the question: (.+)$", r.out, re.M) + list(lines_from or [])
         label = "승인 v1 %s" % h
         self.s.ask("[v1] %s · hash %s\n%s" % (question, h, "\n".join(lines)), [label, "고칠 곳이 있다"], label)
@@ -181,28 +185,52 @@ class FlowCase(E2ECase):
         self.gate("2", "② 오디션 — studio/out/v1/ko/audition/narrator.wav")
 
     def two_to_four_b(self):
+        self.two_to_three()
+        self.render_to_four_b()
+
+    def credit(self):
+        r = self.do(PY + "state.py credit-preview v1 %s" % IMG)
+        lines = [l for l in r.out.splitlines() if "=" in l and not l.startswith(("label", "이전"))]
+        h = re.search(r"label 출처 v1 ([0-9a-f]{12})", r.out).group(1)
+        if getattr(self, "proxy", False):
+            return self.do(PY + "state.py credit v1 %s --expect %s --proxy" % (IMG, h))
+        label = "출처 v1 %s" % h
+        self.s.ask("[v1] 출처 — %s · hash %s\n%s" % (IMG, h, "\n".join(lines)), [label, "고칠 곳이 있다"], label)
+        return self.do(PY + "state.py credit v1 %s --expect %s" % (IMG, h))
+
+    def three(self):
+        r = self.do(PY + "run_s2v.py snapshot v1 --output youtube")
+        h3 = re.search(r"hash12 ([0-9a-f]{12})", r.out).group(1)
+        self.do(PY + "state.py stage-done v1 visual-check --output youtube")
+        if getattr(self, "proxy", False):
+            self.do(PY + "state.py approve v1 3 --expect %s --output youtube --proxy" % h3)
+            return h3
+        self.s.ask("[v1] ③ 정지 화면 — youtube · hash %s" % h3, ["승인 v1 %s" % h3, "고칠 곳이 있다"], "승인 v1 %s" % h3)
+        self.do(PY + "state.py approve v1 3 --expect %s --output youtube" % h3)
+        return h3
+
+    def render(self):
+        self.do(PY + "run_s2v.py render v1 --output youtube")
+        self.do(PY + "state.py record-render v1 --output youtube")
+        self.do(PY + "state.py stage-done v1 render --output youtube")
+
+    def two_to_three(self):
         script = os.path.join(self.vdir, "script.ko.md")
         self.write("studio/videos/v1/script.ko.md", open(script).read().replace("lang: ko\n", "lang: ko\ntheme: dark\n", 1))
         self.write("studio/videos/v1/CREDITS.draft.yaml", json.dumps({"schema": 1, "items": [{
             "path": IMG, "license": "own work", "credit_line": "the author", "floor": "public/-",
             "license_checked": True, "public_ok": True, "redistribute": True, "commercial": True}]}))
-        r = self.do(PY + "state.py credit-preview v1 %s" % IMG)
-        lines = [l for l in r.out.splitlines() if "=" in l and not l.startswith(("label", "이전"))]
-        h = re.search(r"label 출처 v1 ([0-9a-f]{12})", r.out).group(1)
-        label = "출처 v1 %s" % h
-        self.s.ask("[v1] 출처 — %s · hash %s\n%s" % (IMG, h, "\n".join(lines)), [label, "고칠 곳이 있다"], label)
-        self.do(PY + "state.py credit v1 %s --expect %s" % (IMG, h))
+        self.credit()
         self.do(PY + "check_assets.py v1 --output youtube")
         self.do(PY + "state.py stage-done v1 board --output youtube")
-        r = self.do(PY + "run_s2v.py snapshot v1 --output youtube")
-        h3 = re.search(r"hash12 ([0-9a-f]{12})", r.out).group(1)
-        self.do(PY + "state.py stage-done v1 visual-check --output youtube")
-        self.s.ask("[v1] ③ 정지 화면 — youtube · hash %s" % h3, ["승인 v1 %s" % h3, "고칠 곳이 있다"], "승인 v1 %s" % h3)
-        self.do(PY + "state.py approve v1 3 --expect %s --output youtube" % h3)
-        self.do(PY + "run_s2v.py render v1 --output youtube")
-        self.do(PY + "state.py record-render v1 --output youtube")
-        self.do(PY + "state.py stage-done v1 render --output youtube")
+        self.three()
+
+    def render_to_four_b(self):
+        self.render()
         self.gate("4a", "④a 최종 — studio/out/v1/ko/youtube.ko.mp4", ("--output", "youtube"))
+        self.copy_to_four_b()
+
+    def copy_to_four_b(self):
         chapters = open(os.path.join(self.repo, "studio", "out", "v1", "ko", "youtube.ko.chapters.txt")).read().strip()
         self.write("studio/copy/v1/ko/youtube.md", COPY % {"chapters": chapters, "credit": "the author",
                                                           "notice": NOTICE, "fact": FACT})
@@ -218,11 +246,13 @@ class FlowCase(E2ECase):
 
     def video_commit(self):
         r = self.do(PY + "check_commit.py --stage video v1")
+        return self.commit_staged(r)
+
+    def commit_staged(self, r):
         line = re.search(r"put this line in the question as it is:\n(.+)\n", r.out).group(1)
         label = line.split(" | ")[0]
         self.s.ask("[v1] 영상을 커밋할까요?\n%s" % line, [label, "아직"], label)
         return self.do('git commit -m "studio: video v1"')
-
 
 
 class E1Flow(FlowCase):
@@ -361,3 +391,58 @@ class E2EVideo(FlowCase):
         self.harness_commit("studio: a guide")
         r = self.do(PY + "state.py done v1", code=None)
         self.assertNotEqual(r.code, 0)
+
+
+class E10bHandOver(FlowCase):
+    """E10 → E10b (m1-plan §4.2 hand-over, M1j review A1): ①–③ and the credit in the proxy mode (a sandbox session),
+    a marked render; then the person, in their own session: ① ② again, ③ on a new snapshot, an unmarked render, ④a,
+    copy, ④b — and the video commit, refused while the credit is the proxy's, passing once the person re-runs it."""
+
+    def proxy_session(self):
+        from stdo import paths
+        env = dict(self.env, STUDIO_SANDBOX="1")
+        with open(paths.sandbox_file(env), "w") as f:
+            json.dump({"sandbox_root": self.tmp}, f)
+        return Session(self.repo, env, dict(env, STUDIO_TEST_FAKE_S2V_SCENARIO=self.scen), "sess-e2e-m1-proxy")
+
+    def outs(self):
+        return sorted(os.listdir(os.path.join(self.repo, "studio", "out", "v1", "ko")))
+
+    def test_e10b_proxy_then_the_person_to_the_commit(self):
+        self.prepare()  # the committed harness (E10 starts from it)
+        person = self.s
+        self.prepare = lambda: None
+        self.s, self.proxy = self.proxy_session(), True
+        self.source_to_one()
+        self.one_to_two()
+        self.two_to_three()
+        self.render()
+        self.assertIn("youtube.ko.proxy.mp4", self.outs())
+        L = json.load(open(os.path.join(self.vdir, "work", "state.json")))["langs"]["ko"]
+        self.assertEqual({L["approved"]["1"]["approved_by"], L["approved"]["2"]["approved_by"],
+                          L["approved"]["3"]["youtube"]["approved_by"]}, {"proxy"})
+        # the hand-over: the person's own session (no STUDIO_SANDBOX)
+        self.s, self.proxy = person, False
+        self.gate("1", "① 대본 — studio/videos/v1/script.ko.md")
+        self.gate("2", "② 오디션 — studio/out/v1/ko/audition/narrator.wav")
+        self.three()  # a new snapshot: its printed hash12 is the one approved
+        self.render()
+        self.assertIn("youtube.ko.mp4", self.outs())
+        self.assertNotIn("youtube.ko.proxy.mp4", self.outs())
+        self.gate("4a", "④a 최종 — studio/out/v1/ko/youtube.ko.mp4", ("--output", "youtube"))
+        self.copy_to_four_b()
+        # the credit is still the proxy's: the video commit waits for the person (exit 4)
+        r = self.do(PY + "check_commit.py --stage video v1", code=4)
+        self.assertIn("approved in the proxy mode", r.err)
+        self.assertEqual(self.git("diff", "--cached", "--name-only").strip(), "")
+        self.credit()
+        r = self.do(PY + "check_commit.py --stage video v1")
+        self.commit_staged(r)
+        self.do(PY + "state.py done v1")
+        st = json.load(open(os.path.join(self.vdir, "work", "state.json")))
+        L = st["langs"]["ko"]
+        recs = [L["approved"]["1"], L["approved"]["2"], L["approved"]["3"]["youtube"], L["approved"]["4a"]["youtube"],
+                L["approved"]["4b"]["youtube"]] + list(st["credits"].values())
+        self.assertEqual({r["approved_by"] for r in recs}, {"human"})
+        self.assertFalse(L["renders"]["youtube"]["proxy"])
+        self.assertEqual(self.git("log", "-1", "--format=%s").strip(), "studio: video v1")

@@ -64,17 +64,15 @@ def merge(head_text, readings):
     """(merged text or None when nothing is added, skipped keys). Raises ValueError when HEAD's file is not a flat
     object."""
     from ..voice import pronounce
-    import unicodedata
     head = pronounce.parse(head_text) if head_text and head_text.strip() else {}
     if head is None:
         raise ValueError("HEAD's %s is not a flat object of written form → reading" % PRONOUNCE)
-    nfc = {unicodedata.normalize("NFC", k): v for k, v in head.items()}  # an NFD twin is the same written form
+    readings = pronounce.nfc_keys(readings) or {}  # parse already gives NFC keys; a caller's own dict too (A4)
     add, skipped = [], []
-    for k, v in readings.items():
-        key = unicodedata.normalize("NFC", k)
-        if key not in nfc:
+    for key, v in readings.items():
+        if key not in head:
             add.append((key, v))
-        elif nfc[key] != v:
+        elif head[key] != v:
             skipped.append(key)
     skipped.sort()
     if not add:

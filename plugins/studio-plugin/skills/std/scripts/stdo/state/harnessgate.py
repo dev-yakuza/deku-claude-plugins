@@ -11,7 +11,6 @@ one the language's current ② record holds, that record is a person's (`approve
 current one. That is what is left after a person refused a video commit (`--stage video` had merged it); the video's
 commit puts it in. Everything is compared as parsed JSON (key order, spacing and line ends do not matter, T4)."""
 
-import json
 import os
 
 from .. import paths
@@ -67,13 +66,11 @@ class Result(object):
 
 
 def _parse(data):
+    """{} for no file; the shared reader otherwise (flat, keys in NFC — M1j review A4), None when not flat."""
+    from ..voice import pronounce
     if data is None:
         return {}
-    try:
-        v = json.loads(data.decode("utf-8") if isinstance(data, bytes) else data)
-    except (ValueError, UnicodeDecodeError):
-        return None
-    return v if isinstance(v, dict) else None
+    return pronounce.parse(data)
 
 
 def _video_dirs(repo, root):

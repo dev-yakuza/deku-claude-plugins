@@ -10,6 +10,7 @@ checks them), are not part of any hash, and are frozen when `shown 2` computes t
 import json
 import os
 import subprocess
+import unicodedata
 
 from .. import paths
 from . import frontmatter
@@ -25,7 +26,20 @@ def parse(data):
         return None
     if not isinstance(v, dict) or not all(isinstance(k, str) and isinstance(x, str) and k and x for k, x in v.items()):
         return None
-    return v
+    return nfc_keys(v)
+
+
+def nfc_keys(obj):
+    """The object with its written forms in NFC — the one place keys are normalized (M1j review A4: the S2
+    exemption, the conflicts, the ② lines and the merge then compare the same strings). Two forms of one key with
+    different readings → None (not a flat object of written form → reading)."""
+    out = {}
+    for k, v in obj.items():
+        key = unicodedata.normalize("NFC", k)
+        if key in out and out[key] != v:
+            return None
+        out[key] = v
+    return out
 
 
 def read(path):
@@ -54,7 +68,7 @@ def of_script(text):
         return {}
     if not all(isinstance(v, str) and v for v in b.values()):
         return None
-    return b
+    return nfc_keys(b)
 
 
 def changes(script_map, shared):

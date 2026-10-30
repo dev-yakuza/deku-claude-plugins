@@ -205,6 +205,11 @@ function parseScript(file) {
       const body = [];
       const start = i + 1;
       for (i++; i < lines.length && !/^:::\s*$/.test(lines[i]); i++) body.push(lines[i]);
+      // s2v parse.ts: the markdown images of :::split (the picture side) and :::gallery are the block's images
+      if (open[1] === 'split' || open[1] === 'gallery')
+        body.forEach((b, k) => {
+          for (const m of b.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)) images.push({ src: m[1], line: start + k, kind: 'image' });
+        });
       scene.blocks.push({ kind: 'screen', type: open[1], text: body.join('\n').trim(), line: start });
       continue;
     }
@@ -212,7 +217,9 @@ function parseScript(file) {
     if (leaf) {
       flush();
       ensure();
-      const src = /src="([^"]+)"/.exec(leaf[2] || '');
+      // a directive attribute, quoted or not (remark): ::image{src="a.png"} · ::image{src=assets/a.png}
+      const m = /(?:^\{|\s)src=(?:"([^"]+)"|'([^']+)'|([^\s}"']+))/.exec(leaf[2] || '');
+      const src = m && [null, m[1] || m[2] || m[3]];
       // s2v's file kinds (inspect.ts): a video block, the thumbnail, else a picture
       const kind = leaf[1] === 'video' ? 'video' : leaf[1] === 'thumbnail' ? 'thumbnail' : 'image';
       if (src) images.push({ src: src[1], line: i + 1, kind });

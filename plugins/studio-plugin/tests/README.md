@@ -125,3 +125,7 @@ the person's answer the guard would record is written into commit-ok.json by the
 `voices/`, merges pronounce keys NFC. `test_e2e_m1.py` runs the M1 flow with the fake s2v and the real guard, hooks
 and git. `tests/tools/fake_table.py <s2v> --write` measures real s2v `inspect` (isolated HOME) into
 `fake_inspect_table.json`; `test_m1j.FakeTable` (`--full`) compares real, table and fake.
+
+**M1j follow-up** (`SCRIPTS_VERSION` 19): pronounce keys are NFC in the one shared reader (`pronounce.parse`,
+`of_script`; harnessgate reads through it). `test_e2e_m1.E10bHandOver` runs the proxy mode (a sandbox session: ①–③
+and the credit with `--proxy`, a marked render) and the hand-over to the person through ④b and the video commit.

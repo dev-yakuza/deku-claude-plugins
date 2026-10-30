@@ -82,6 +82,8 @@ def credit(repo, vdir, state, o, hooks, argv, with_evidence):
         box["cur"] = cur
 
     def ev_check(ev):
+        if ev.get("mode") == "proxy":
+            return  # the proxy mode asks no one (as at the gates); the video commit waits for a person's credit (J131)
         q = norm(ev.get("question") or "")
         missing = [l for l in credits.lines(e) if norm(l) not in q]
         if missing:

@@ -3,6 +3,7 @@ pronounce merge, the video kind's allow-list limited to its target, and staging 
 
 import contextlib
 import io
+import json
 import os
 import subprocess
 import time
@@ -10,6 +11,9 @@ import time
 import helpers
 from helpers import StudioTestCase
 from stdo.commit import checks, gitx, kinds, video as video_kind
+from stdo.state import cli as scli, harnessgate, schema, store
+from stdo.state.hashes import file_sha
+from stdo.voice import pronounce
 from test_m1i import CommitCase
 
 
@@ -92,6 +96,15 @@ class MergeNfc(StudioTestCase):
         text, _s = video_kind.merge("{}", {nfd: "x"})
         self.assertIn('"카드": "x"', text)  # an added key is written in NFC
 
+    def test_script_readings_are_nfc_too(self):
+        """A4: the script's frontmatter `pronounce` goes through the same normalization — an NFD written form with
+        HEAD's reading is no change (so no pronounce-changes entry, no ② line, no conflict)."""
+        import unicodedata
+        nfd = unicodedata.normalize("NFD", "출구")
+        smap = pronounce.of_script("---\nlang: ko\npronounce:\n  %s: 출꾸\n---\n\n# a\n" % nfd)
+        self.assertEqual(smap, {"출구": "출꾸"})
+        self.assertEqual(pronounce.changes(smap, {"출구": "출꾸"}), {})
+
 
 class FakeTable(StudioTestCase):
     """§12.3 (--full): real s2v `inspect --json` (S2V_TTS=mock, an isolated HOME) changes the hashes the checked-in
@@ -129,9 +142,10 @@ class FakeTable(StudioTestCase):
         script = os.path.join(vdir, "script.ko.md")
         with open(script, "w") as f:
             f.write(self.ft.BASE)
-        with open(os.path.join(vdir, "a.png"), "wb") as f:
-            f.write(self.ft.PNG)
-        keys = {}
+        for n in self.ft.IMAGES:
+            with open(os.path.join(vdir, n), "wb") as f:
+                f.write(self.ft.PNG)
+        keys, files = {}, {}
         for side, root in (("real", self.real), ("fake", self.ft.FAKE)):
             main = os.path.join(root, "packages", "cli", "dist", "main.js")
             ins = subprocess.run(["node", main, "inspect", script, "--json"], capture_output=True, text=True, env=env)
@@ -140,6 +154,10 @@ class FakeTable(StudioTestCase):
             d = json.loads(ins.stdout)
             s = json.loads(sen.stdout)
             keys[side] = (set(d), set(d["hashes"]), set(s[0]))
+            files[side] = sorted((f["path"], f["kind"]) for f in d["files"] if f["path"].endswith(".png"))
+        # A3: ::image{src=b.png} unquoted, and :::split / :::gallery markdown images are listed as kind image
+        self.assertEqual(files["real"], [(n, "image") for n in self.ft.IMAGES])
+        self.assertEqual(files["fake"], files["real"])
         studio_reads = ({"s2v_version", "stale_build", "hash_version", "lang", "hashes", "reasons", "outputs",
                          "files", "screen_text", "scenes"},
                         {"content", "voice", "audio", "presentation_by_output", "engine"},
@@ -147,3 +165,49 @@ class FakeTable(StudioTestCase):
         for side in ("real", "fake"):
             for want, have in zip(studio_reads, keys[side]):
                 self.assertTrue(want <= have, "%s lacks %s" % (side, sorted(want - have)))
+
+
+class NfdApproved(CommitCase):
+    """M1j review A4: a written form in NFD in pronounce-approved.json — the merge writes it in NFC, and after a
+    declined video commit the S2 exemption, the conflicts and the merge all see the same key."""
+
+    def setUp(self):
+        super().setUp()
+        import unicodedata
+        self.nfd = unicodedata.normalize("NFD", "출구")
+        self.assertNotEqual(self.nfd, "출구")
+        p = os.path.join(self.vdir, "work", "ko", "pronounce-approved.json")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write('{"空港": "쿠우코오", "%s": "출꾸"}' % self.nfd)
+        st = store.read_state(self.vdir)
+        st["langs"]["ko"]["approved"]["2"][schema.PRONOUNCE_SHA] = file_sha(p)
+        with open(os.path.join(self.vdir, "work", "state.json"), "w") as f:
+            json.dump(st, f)
+
+    def gate(self):
+        return harnessgate.check(self.repo, providers=self.providers,
+                                 ctx_of=scli._ctx_of(self.repo, scli._cfg_of(self.repo)))
+
+    def test_declined_commit_leftover_is_exempt(self):
+        self.assertEqual(self.cc("--stage", "video", "v1"), 0, self.err + self.out)
+        pj = os.path.join(self.repo, ".claude", "studio", "pronounce.json")
+        with open(pj, encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn('"출구": "출꾸"', text)  # written in NFC
+        self.assertNotIn(self.nfd, text)
+        helpers.git(self.repo, "reset", "-q")  # the person declined: the merged file stays in the work tree
+        res = self.gate()
+        self.assertFalse(res.blocking, res.message())
+        self.assertTrue(res.exempted)
+        # the shared reader gives NFC keys, so the merge adds nothing twice and conflicts name the NFC key
+        self.assertEqual(pronounce.read(os.path.join(self.vdir, "work", "ko", "pronounce-approved.json"))[0],
+                         {"空港": "쿠우코오", "출구": "출꾸"})
+        self.assertEqual(video_kind.merge(text, {self.nfd: "출꾸"}), (None, []))
+        got = pronounce.conflicts(self.repo, "studio", "v9", {"출구": "출구"}, {}, self.providers,
+                                  scli._ctx_of(self.repo, scli._cfg_of(self.repo)))
+        self.assertEqual([c["key"] for c in got], ["출구"])
+        self.assertEqual(got[0]["others"], [{"video": "v1", "value": "출꾸"}])
+
+    def test_two_forms_with_different_readings_are_not_flat(self):
+        self.assertIsNone(pronounce.parse('{"출구": "a", "%s": "b"}' % self.nfd))
+        self.assertEqual(pronounce.parse('{"출구": "a", "%s": "a"}' % self.nfd), {"출구": "a"})
