@@ -196,7 +196,7 @@ for d in ("commit", "hooks"):
     for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
         check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
               "%s (copied into repositories) does not import the guard (plugin only)" % os.path.relpath(p, skill))
-check(sv and sv.group(1) == "19", "SCRIPTS_VERSION is 19 (M1j follow-up: pronounce keys in NFC once)")
+check(sv and sv.group(1) == "20", "SCRIPTS_VERSION is 20 (0.0.21: description bytes, the board input of proxy credits)")
 from stdo import manifest as _man
 _mp = os.path.join(scripts, _man.NAME)
 check(os.path.exists(_mp) and open(_mp).read() == _man.render(scripts, sv.group(1)),

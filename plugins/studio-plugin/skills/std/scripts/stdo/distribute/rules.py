@@ -2,7 +2,10 @@
 checks it against the platform's own help and fills `checked` in its frontmatter; U-M1h). The rules are the JSON block
 between `<!-- studio:rules -->` and `<!-- /studio:rules -->`:
 
-    {"title_max": 100, "description_max": 5000, "hashtags_max": 15, "required": ["<notice line>", …]}
+    {"title_max": 100, "description_max_bytes": 5000, "hashtags_max": 15, "required": ["<notice line>", …]}
+
+`title_max` counts characters, `description_max_bytes` the description's UTF-8 bytes (the YouTube Data API's
+"maximum length of 5000 bytes" — the stricter of its two published limits, chosen by the person; U-M1h, J172).
 
 A missing or invalid block, or an empty `checked`, fails the copy check (the closed side)."""
 
@@ -12,7 +15,7 @@ import re
 
 BLOCK = re.compile(r"<!-- studio:rules -->\s*```json\s*\n(.*?)\n```\s*<!-- /studio:rules -->", re.S)
 CHECKED = re.compile(r"^checked:\s*[\"']?([^\"'\n]*)[\"']?\s*$", re.M)
-INTS = ("title_max", "description_max", "hashtags_max")
+INTS = ("title_max", "description_max_bytes", "hashtags_max")
 
 
 class RulesProblem(Exception):
@@ -48,6 +51,9 @@ def parse(text):
         raise RulesProblem("the rules block is not JSON (%s)" % e)
     if not isinstance(data, dict):
         raise RulesProblem("the rules block is not an object")
+    if "description_max" in data and "description_max_bytes" not in data:
+        raise RulesProblem("description_max (characters) is no longer read: the description limit is in UTF-8 bytes — "
+                           "a person replaces it with description_max_bytes (the plugin's platforms/ template)")
     for k in INTS:
         v = data.get(k)
         if not isinstance(v, int) or isinstance(v, bool) or v <= 0:

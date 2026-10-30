@@ -19,7 +19,7 @@ from test_m1g import IMG, BoardCase
 sys.path.insert(0, os.path.join(helpers.HERE, "drivers"))
 import make_harness  # noqa: E402
 
-NOTICE = "This video's narration is AI-synthesized speech."
+NOTICE = "이 영상의 내레이션은 AI 합성 음성입니다."
 FACT = "탑승권을 받으면 출국 심사를 받습니다."
 COPY = """---
 title: "공항에서 쓰는 단어"
@@ -190,7 +190,24 @@ class ValidateCopy(CopyCase):
         self.refused("the copy has no frontmatter")
         with open(os.path.join(self.repo, "studio", "copy", "v1", "ko", "youtube.md"), "w") as f:
             f.write(text + "x" * 5000)
-        self.refused("the description has")
+        self.refused("bytes in UTF-8 (at most 5000 bytes)")
+
+    def test_description_counts_utf8_bytes(self):
+        """J172: the limit is 5000 UTF-8 bytes (the Data API), not characters — Korean is 3 bytes a character."""
+        p = os.path.join(self.repo, "studio", "copy", "v1", "ko", "youtube.md")
+        self.write_copy()
+        text = open(p, encoding="utf-8").read()
+        body = text.split("---\n", 2)[2]
+        room = 5000 - len(body.encode("utf-8"))
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(text + "가" * (room // 3))  # under 5000 bytes
+        self.assertEqual(self.validate(), 0, self.out + self.err)
+        extra = room // 3 + 1  # one more Korean character: over by bytes, far under 5000 characters
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(text + "가" * extra)
+        size = len((body + "가" * extra).encode("utf-8"))
+        self.assertLess(len(body) + extra, 5000)
+        self.refused("the description is %d bytes in UTF-8 (at most 5000 bytes)" % size)
 
     def test_notice_credit_and_chapters(self):
         self.write_copy(notice="")
@@ -265,6 +282,10 @@ class ValidateCopy(CopyCase):
                         '<!-- /studio:rules -->\n')
         r, checked = rules.parse(open(rules.path(self.repo, "youtube")).read())
         self.assertEqual((r["title_max"], checked), (100, "2026-10-29"))
+        old = open(rules.path(self.repo, "youtube")).read().replace('"description_max_bytes"', '"description_max"')
+        with self.assertRaises(rules.RulesProblem) as cm:
+            rules.parse(old)  # an older harness's character limit: a person updates the file (J172)
+        self.assertIn("description_max (characters) is no longer read", str(cm.exception))
 
 
 class RouterFour(StudioTestCase):
@@ -282,6 +303,11 @@ class Template(StudioTestCase):
         r, checked = rules.parse(text.replace("{{CHECKED_DATE}}", ""))
         self.assertEqual(checked, "")
         self.assertEqual(r["required"], [NOTICE])
+        self.assertEqual((r["title_max"], r["description_max_bytes"], r["hashtags_max"]), (100, 5000, 15))
+        self.assertNotIn("description_max", r)
+        for url in ("developers.google.com/youtube/v3/docs/videos", "answer/57407", "answer/6390658",
+                    "answer/9884579", "answer/14328491"):
+            self.assertIn(url, text)
 
 
 class PlatformNames(StudioTestCase):

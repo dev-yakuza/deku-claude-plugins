@@ -21,7 +21,7 @@ from ..commit.harness import overlay_terms, term_hit
 from ..state import schema
 from . import factcheck, rules as rules_mod
 
-ANGLE = re.compile(r"[<>]")  # no HTML or placeholders in a platform's text (M1h review NIT)
+ANGLE = re.compile(r"[<>]")  # the YouTube Data API forbids < and > in snippet.title and snippet.description
 HOME = re.compile(r"/Users/[^/\s]+|/home/[^/\s]+|(?<![\w.])~/|[A-Za-z]:\\Users\\")
 HASHTAG = re.compile(r"^#[^\s#]+$")
 
@@ -91,8 +91,10 @@ def problems(repo, vdir, state, lang, ctx, platform, cfg, env, copy_path):
         return out + [str(e)]
     if not title.strip() or len(title) > rules["title_max"]:
         out.append("the title has %d characters (1–%d)" % (len(title), rules["title_max"]))
-    if len(body) > rules["description_max"]:
-        out.append("the description has %d characters (at most %d)" % (len(body), rules["description_max"]))
+    size = len(body.encode("utf-8"))  # bytes, not characters (the Data API's limit; Korean is about 3 bytes each)
+    if size > rules["description_max_bytes"]:
+        out.append("the description is %d bytes in UTF-8 (at most %d bytes)"
+                   % (size, rules["description_max_bytes"]))
     if len(tags) > rules["hashtags_max"]:
         out.append("%d hashtags (at most %d)" % (len(tags), rules["hashtags_max"]))
     out += ["%r is not one hashtag (#word, no spaces)" % t for t in tags if not HASHTAG.match(t)]

@@ -5,7 +5,7 @@ ENGINE_SCREEN = ("composer", "renderer", "ffmpeg", "defaults_presentation")
 
 OWNER = {"brief_core": "1", "content": "1", "source_hash": "1",
          "voice": "2", "audio": "2", "presentation": "3", "render": "4a", "renders": "4b", "copy": "4b",
-         "credits": "4b"}
+         "credits": "4b", "proxy_credits": "3"}
 for _k in ENGINE_VOICE:
     OWNER["engine." + _k] = "2"
 for _k in ENGINE_SCREEN:
@@ -29,6 +29,8 @@ def tuple_for(gate, cur, output=None, platform=None, platform_outputs=None):
     if gate == "2":
         return t
     t["presentation"] = cur["presentation"].get(output)
+    if cur.get("proxy_credits"):  # only while a credit is the proxy's: other tuples stay as they were (J173)
+        t["proxy_credits"] = cur["proxy_credits"]
     for k in ENGINE_SCREEN:
         t["engine." + k] = cur["engine"].get(k)
     if gate == "3":

@@ -19,7 +19,8 @@ covers (only what the script says), the chapters exactly as the render's `.chapt
 CREDITS.yaml, and every required notice of the platform rules, word for word.
 
 ## Rules
-- Within the platform's limits (title, description, hashtags); no home paths, no in-house terms.
+- Within the platform's limits (title, description, hashtags) — the description's limit may be in UTF-8 bytes
+  (YouTube: 5000 bytes, about 1,660 Korean characters); no `<` or `>`, no home paths, no in-house terms.
 - Say nothing the script does not say: the fact-checker checks the copy against the source next.
 - Never approve, commit or run script2video approval commands.
 - When the guard refuses something, stop and report it (INV9); never reach the same effect another way.

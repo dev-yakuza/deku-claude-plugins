@@ -19,7 +19,7 @@ OWN_TABLE = {
     "presentation": "board",
     "engine.composer": "visual-check", "engine.renderer": "visual-check",
     "engine.defaults_presentation": "visual-check", "engine.ffmpeg": "visual-check",
-    "render": "4a", "renders": "copy", "copy": "4b", "credits": "copy",
+    "render": "4a", "renders": "copy", "copy": "4b", "credits": "copy", "proxy_credits": "board",
 }
 
 

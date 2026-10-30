@@ -394,9 +394,9 @@ class E2EVideo(FlowCase):
 
 
 class E10bHandOver(FlowCase):
-    """E10 → E10b (m1-plan §4.2 hand-over, M1j review A1): ①–③ and the credit in the proxy mode (a sandbox session),
-    a marked render; then the person, in their own session: ① ② again, ③ on a new snapshot, an unmarked render, ④a,
-    copy, ④b — and the video commit, refused while the credit is the proxy's, passing once the person re-runs it."""
+    """E10 → E10b (m1-plan §4.2 hand-over, M1j review A1, J173): ①–③ and the credit in the proxy mode (a sandbox
+    session), a marked render; then the person, in their own session: ① ② again, board again (the proxy credit is
+    refused until the person re-runs credit), ③ on a new snapshot, an unmarked render, ④a, copy, ④b, the commit."""
 
     def proxy_session(self):
         from stdo import paths
@@ -425,17 +425,26 @@ class E10bHandOver(FlowCase):
         self.s, self.proxy = person, False
         self.gate("1", "① 대본 — studio/videos/v1/script.ko.md")
         self.gate("2", "② 오디션 — studio/out/v1/ko/audition/narrator.wav")
+        # the board pass of the proxy session does not count in the person's (J173): board runs again and asks for
+        # the person's credit before ③ — the video commit would refuse it too (exit 4, J131), but it is not reached
+        r = self.do(PY + "state.py next v1 --enter visual-check --output youtube", code=3)
+        self.assertIn("board", r.out + r.err)
+        self.do(PY + "state.py next v1 --enter board --output youtube")
+        # the proxy session's board pass is not this session's: stage-done needs the check run again
+        r = self.do(PY + "state.py stage-done v1 board --output youtube", code=None)
+        self.assertNotEqual(r.code, 0)
+        self.assertIn("checked on other inputs", r.out + r.err)
+        r = self.do(PY + "check_assets.py v1 --output youtube", code=1)
+        self.assertIn("approved in the proxy mode", r.out + r.err)
+        self.credit()
+        self.do(PY + "check_assets.py v1 --output youtube")
+        self.do(PY + "state.py stage-done v1 board --output youtube")
         self.three()  # a new snapshot: its printed hash12 is the one approved
         self.render()
         self.assertIn("youtube.ko.mp4", self.outs())
         self.assertNotIn("youtube.ko.proxy.mp4", self.outs())
         self.gate("4a", "④a 최종 — studio/out/v1/ko/youtube.ko.mp4", ("--output", "youtube"))
         self.copy_to_four_b()
-        # the credit is still the proxy's: the video commit waits for the person (exit 4)
-        r = self.do(PY + "check_commit.py --stage video v1", code=4)
-        self.assertIn("approved in the proxy mode", r.err)
-        self.assertEqual(self.git("diff", "--cached", "--name-only").strip(), "")
-        self.credit()
         r = self.do(PY + "check_commit.py --stage video v1")
         self.commit_staged(r)
         self.do(PY + "state.py done v1")

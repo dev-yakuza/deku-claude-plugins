@@ -126,9 +126,24 @@ class Providers(object):
             "presentation": h.get("presentation_by_output") or {}, "reasons": ins.get("reasons") or {},
             "render": render, "copy": copies, "outputs_missing": missing,
             "credits": hashes.file_sha(os.path.join(ctx["vdir"], "CREDITS.yaml")),
+            "proxy_credits": proxy_credits(state, ctx["repo"]),
             # the files the script refers to (s2v lists them with their sha256): inputs of the check results
             "files": ins.get("files") if isinstance(ins.get("files"), list) else None,
         }
+
+
+def proxy_credits(state, repo, env=None):
+    """"<proxy|person> <path> …" for the credits approved in the proxy mode, with the mode of this session — None when
+    every credit is a person's (0.0.21, J173). In ③'s tuple and the board check's inputs: after the hand-over the
+    person's session sees another value, so the router sends the work back to board, which asks for the person's
+    credit before ③ (not only the video commit, J131)."""
+    proxied = sorted(p for p, r in (state.get("credits") or {}).items()
+                     if isinstance(r, dict) and r.get("approved_by") != "human")
+    if not proxied:
+        return None
+    from .. import sandbox
+    mode = "proxy" if sandbox.active(dict(os.environ) if env is None else env, repo) else "person"
+    return "%s %s" % (mode, " ".join(proxied))
 
 
 def default_source(ctx, state):

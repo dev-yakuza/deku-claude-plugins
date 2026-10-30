@@ -12,7 +12,7 @@ import os
 
 from .. import SCRIPTS_VERSION, paths as _paths, writes
 from . import hashes, schema
-from .collect import CollectError, frozen_copy_path
+from .collect import CollectError, frozen_copy_path, proxy_credits
 
 SCHEMA = 1
 RESULTS = ("pass", "fail")
@@ -166,6 +166,13 @@ def _cast_roster(inp):
     return out or [("cast:status", "none")]
 
 
+def _proxy_credits(inp):
+    """The credits approved in the proxy mode and the session's mode (collect.proxy_credits, J173): nothing — the
+    input sha as before — when every credit is a person's."""
+    v = proxy_credits(inp.state, inp.repo)
+    return [("credits:proxy", v)] if v else []
+
+
 RESOLVERS = {
     "script": _script,
     "claims_map": lambda i: _file(i, i.work("claims-map.json")),
@@ -186,6 +193,7 @@ RESOLVERS = {
     "config_protected": _config,
     "overlay_sha": _overlay,
     "credit_approvals": lambda i: [("state:credits", hashes.hash_of(i.state.get("credits")))],
+    "proxy_credits": _proxy_credits,
     "render_result": _render_result,
     "copy_text": _copy_text,
     "copy_verify": lambda i: (_file(i, i.work("copy-verify.%s.json" % i.scope)) if schema.platform_ok(i.scope)

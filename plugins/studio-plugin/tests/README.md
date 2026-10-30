@@ -129,3 +129,7 @@ and git. `tests/tools/fake_table.py <s2v> --write` measures real s2v `inspect` (
 **M1j follow-up** (`SCRIPTS_VERSION` 19): pronounce keys are NFC in the one shared reader (`pronounce.parse`,
 `of_script`; harnessgate reads through it). `test_e2e_m1.E10bHandOver` runs the proxy mode (a sandbox session: ①–③
 and the credit with `--proxy`, a marked render) and the hand-over to the person through ④b and the video commit.
+
+**0.0.21** (`SCRIPTS_VERSION` 20): `platforms/youtube.md` counts the description in UTF-8 bytes
+(`description_max_bytes`); a credit approved in the proxy mode is in ③'s tuple and the board inputs with the session's
+mode, so after the hand-over the router sends the work back to board (E10b asserts it).
