@@ -223,13 +223,14 @@ function parseScript(file) {
       flush();
       continue;
     }
-    for (const m of line.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)) images.push({ src: m[1], line: i + 1 });
     if (/^\s*!\[[^\]]*\]\([^)]*\)\s*$/.test(line)) {
+      // real s2v shows no markdown image on its own line: it is an error (use ::image{src=…}) — M1j §12.3
       flush();
       ensure();
-      scene.blocks.push({ kind: 'image', line: i + 1 });
+      scene.blocks.push({ kind: 'image-line', line: i + 1 });
       continue;
     }
+    for (const m of line.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)) images.push({ src: m[1], line: i + 1 });
     ensure();
     const sp = /^([a-z][\w-]*)(\{[^}]*\})?:\s+(.*)$/.exec(line);
     if (sp) {
@@ -318,9 +319,20 @@ const fmt = (sec) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
+// the frontmatter keys real s2v knows (core/schema.ts frontmatterSchema); another key is an error — M1j §12.3
+const KNOWN_KEYS = ['title', 'lang', 'cast', 'outputs', 'pronounce', 'pacing', 'seed', 'targetDuration', 'subtitleStyle',
+  'bgm', 'theme', 'logo', 'sfx', 'transition', 'translationOf', 'allowDrift', 'acting'];
+
 function diagnostics(script) {
   const d = [];
   const dir = path.dirname(script.file);
+  for (const k of Object.keys(script.fm))
+    if (!KNOWN_KEYS.includes(k))
+      d.push({ severity: 'error', code: 'frontmatter', message: `frontmatter key "${k}" is not part of the script format` });
+  for (const s of script.scenes)
+    for (const b of s.blocks)
+      if (b.kind === 'image-line')
+        d.push({ severity: 'error', code: 'image-line', message: 'an image on its own line is not shown; use ::image{src=…}', line: b.line });
   if (!script.fm.lang) d.push({ severity: 'error', code: 'lang', message: 'frontmatter has no lang' });
   if (Object.keys(outputsOf(script)).length === 0)
     d.push({ severity: 'error', code: 'outputs', message: 'frontmatter has no outputs' });
@@ -447,7 +459,9 @@ function inspect(script, shownPath) {
   for (const [name, o] of Object.entries(outputsOf(script))) {
     const attrs = typeof o === 'object' ? o : {};
     const gone = [...files.values()].filter((f) => f.sha256 === null).map((f) => f.path);
-    presentation[name] = gone.length ? null : hashOf({ output: name, groups: groups.presentation });
+    const own = typeof o === 'object' ? { ...o } : o; // the output's own attributes, not the whole outputs map
+    for (const ig of TABLE.output_attrs_ignored) if (own && typeof own === 'object') delete own[ig];
+    presentation[name] = gone.length ? null : hashOf({ output: name, attrs: own, groups: groups.presentation });
     if (gone.length) reasons[`presentation.${name}`] = [`missing file(s): ${gone.join(', ')}`];
     outputs.push({
       name,

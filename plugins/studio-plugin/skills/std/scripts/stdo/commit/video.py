@@ -64,11 +64,19 @@ def merge(head_text, readings):
     """(merged text or None when nothing is added, skipped keys). Raises ValueError when HEAD's file is not a flat
     object."""
     from ..voice import pronounce
+    import unicodedata
     head = pronounce.parse(head_text) if head_text and head_text.strip() else {}
     if head is None:
         raise ValueError("HEAD's %s is not a flat object of written form → reading" % PRONOUNCE)
-    add = [(k, v) for k, v in readings.items() if k not in head]
-    skipped = sorted(k for k, v in readings.items() if k in head and head[k] != v)
+    nfc = {unicodedata.normalize("NFC", k): v for k, v in head.items()}  # an NFD twin is the same written form
+    add, skipped = [], []
+    for k, v in readings.items():
+        key = unicodedata.normalize("NFC", k)
+        if key not in nfc:
+            add.append((key, v))
+        elif nfc[key] != v:
+            skipped.append(key)
+    skipped.sort()
     if not add:
         return None, skipped
     body = (head_text or "{}").rstrip()
@@ -84,12 +92,31 @@ def merge(head_text, readings):
     return text, skipped
 
 
-def _changed(ctx, prefixes):
-    """Changed or new files under the prefixes (work tree and index against HEAD)."""
-    spec = [":(literal)" + p.rstrip("/") for p in prefixes]
-    raw = ctx.git.text("ls-files", "-z", "--modified", "--deleted", "--others", "--exclude-standard", "--", *spec)
-    cached = ctx.git.text("diff", "--name-only", "-z", "--no-renames", ctx.head or ctx.git.empty_tree(), "--", *spec)
-    return sorted(set(p for p in (raw + "\0" + cached).split("\0") if p))
+def state_of(ctx, rel):
+    """"same" · "changed" · "new" · "deleted" · "absent" of one file against HEAD, by content — never by the index's
+    stat cache (M1i re-review: a same-size rewrite within the same second escapes `ls-files --modified`)."""
+    full = os.path.join(ctx.top, rel)
+    head = ctx.git.text("rev-parse", "-q", "--verify", "%s:%s" % (ctx.head, rel)).strip() \
+        if ctx.head and ctx.git.ok("rev-parse", "-q", "--verify", "%s:%s" % (ctx.head, rel)) else ""
+    if not os.path.lexists(full):
+        return "deleted" if head else "absent"
+    work = ctx.git.text("hash-object", "--path=" + rel, "--", rel).strip()
+    if not head:
+        return "new"
+    return "same" if work == head else "changed"
+
+
+def _files_under(ctx, prefix):
+    """Every file under a folder: on disk, and in HEAD (so a deletion is seen)."""
+    out = set()
+    base = os.path.join(ctx.top, prefix)
+    for d, _dirs, files in os.walk(base):
+        for f in files:
+            out.add(os.path.relpath(os.path.join(d, f), ctx.top).replace(os.sep, "/"))
+    if ctx.head:
+        raw = ctx.git.text("ls-tree", "-r", "-z", "--name-only", ctx.head, "--", ":(literal)" + prefix.rstrip("/"))
+        out |= set(p for p in raw.split("\0") if p)
+    return sorted(out)
 
 
 def cast_voices(text):
@@ -118,13 +145,25 @@ class VideoKind(object):
         self.runner = runner
 
     # ---- the allow-list ----
+    def _target_of(self, ctx):
+        t = getattr(self, "_target", None)
+        if t:
+            return t
+        from . import okfile
+        ok, _why = okfile.read(ctx.top)
+        return (ok or {}).get("target") if (ok or {}).get("kind") == "video" else None
+
     def allowed(self, ctx, path):
+        """The target video's paths only (defence in depth: another video's files never ride along)."""
         if path == PRONOUNCE:
             return True
+        target = self._target_of(ctx)
         for r in ctx.roots:
-            m = re.match(r"^%s/videos/[^/]+/(.+)$" % re.escape(r), path)
+            m = re.match(r"^%s/videos/([^/]+)/(.+)$" % re.escape(r), path)
             if m:
-                rest = m.group(1)
+                if target is not None and m.group(1) != target:
+                    return False
+                rest = m.group(2)
                 return bool(re.match(r"^script\.[A-Za-z0-9-]+\.md$", rest)) or rest == credits_mod.FILE or \
                     rest.startswith("assets/")
             if path.startswith("%s/voices/_qwen/" % r) and path.endswith((".json", ".wav")):
@@ -172,18 +211,24 @@ class VideoKind(object):
                 f.write(merged)
         vprefix = voice_paths(root, speakers, langs or list(state["langs"]))
         voice_dir = "%s/voices/_qwen" % root
-        changed_voices = _changed(ctx, [voice_dir]) if os.path.isdir(os.path.join(ctx.top, voice_dir)) else []
-        ours = [p for p in changed_voices if any(p.startswith(x) for x in vprefix)]
+        voices = {p: state_of(ctx, p) for p in _files_under(ctx, voice_dir)}
+        gone = sorted(p for p, st in voices.items() if st == "deleted")
+        if gone:  # a shared base voice is never removed by a video commit (M1i re-review Z1)
+            problems.append(Problem(1, "base voices HEAD has are deleted in the work tree: %s — restore them with "
+                                       "\"git checkout -- <path>\" (a video commit never removes a shared voice)"
+                                       % ", ".join(gone[:5])))
+        moved = [p for p, st in voices.items() if st in ("new", "changed")]
+        ours = [p for p in moved if any(p.startswith(x) for x in vprefix)]
         others_used = self._other_speakers(ctx, root, target)
-        orphans = [p for p in changed_voices if p not in ours and not any(
+        orphans = [p for p in moved if p not in ours and not any(
             p.startswith(x) for x in voice_paths(root, others_used[0], others_used[1]))]
         if orphans:
             problems.append(Problem(1, "base voices no video in progress uses: %s — remove them (they came from a run "
                                        "whose cast changed)" % ", ".join(orphans[:5])))
         wanted = set(scripts) | pictures | {"%s/videos/%s/%s" % (root, target, credits_mod.FILE), PRONOUNCE}
-        changed = set(_changed(ctx, [p for p in wanted if os.path.lexists(os.path.join(ctx.top, p))
-                                     or p == PRONOUNCE]))
-        paths = sorted((changed & wanted) | set(ours))
+        changed = set(p for p in wanted if state_of(ctx, p) in ("new", "changed"))
+        paths = sorted(changed | set(ours))
+        self._target = target
         problems += self._content_problems(ctx, vdir, paths, root, target)
         if problems:
             return Collected([], problems=problems)

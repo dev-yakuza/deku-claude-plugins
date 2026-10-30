@@ -118,7 +118,7 @@ class Basics(FakeCase):
         self.scenario({})
         r = self.s2v("lint", self.script)
         self.assertEqual((r.returncode, r.stdout), (0, ""))
-        bad = self.write_script(SCRIPT.replace("narrator: 고마워요!", "guest: 고마워요!\n\n![x](missing.png)"))
+        bad = self.write_script(SCRIPT.replace("narrator: 고마워요!", "guest: 고마워요!\n\n::image{src=\"missing.png\"}"))
         r = self.s2v("lint", bad)
         self.assertEqual(r.returncode, 1)
         self.assertIn("error [cast]", r.stderr)
@@ -164,12 +164,22 @@ class Inspect(FakeCase):
                 if v != base["presentation_by_output"][o]:
                     out.add("presentation")
             return out
-        self.assertEqual(changed(SCRIPT.replace("오늘은 공항", "오늘도 공항")), {"content", "presentation"})
-        self.assertEqual(changed(SCRIPT.replace("차분하게", "밝게")), {"voice", "presentation"})
+        # the measured table (M1j §12.3: tests/tools/fake_table.py on real s2v)
+        self.assertEqual(changed(SCRIPT.replace("오늘은 공항", "오늘도 공항")), {"content", "voice"})
+        self.assertEqual(changed(SCRIPT.replace("차분하게", "밝게")), {"voice"})
         self.assertEqual(changed(SCRIPT.replace("---\n\n#", "pronounce:\n  空港: 쿠우코오\n---\n\n#", 1)), {"voice"})
         self.assertEqual(changed(SCRIPT.replace('youtube: { aspect: "16:9" }',
                                                 'youtube: { aspect: "16:9", maxDuration: 300 }')), set())
-        self.assertEqual(changed(SCRIPT.replace("---\n\n#", "unknownKey: 1\n---\n\n#", 1)), set())
+        self.write_script(SCRIPT.replace("---\n\n#", "unknownKey: 1\n---\n\n#", 1))  # real inspect refuses it
+        r = self.s2v("inspect", self.script, "--json")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('frontmatter key "unknownKey" is not part of the script format', r.stderr)
+        # real inspect refuses a markdown image on its own line too (M1j: scripts use ::image{src=…})
+        self.write_script(SCRIPT.replace("---\n\n#", "---\n\n![a](a.png)\n\n#", 1))
+        r = self.s2v("inspect", self.script, "--json")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("an image on its own line is not shown", r.stderr)
+        self.write_script(SCRIPT)
         self.assertEqual(changed(SCRIPT.replace("---\n\n#", "theme: dark\n---\n\n#", 1)), {"presentation"})
 
     def test_videos_differ_and_same_text_matches(self):
@@ -188,7 +198,7 @@ class Inspect(FakeCase):
                 f.write(body)
         text = SCRIPT.replace("---\n\n#", 'logo: { src: "logo.png" }\nbgm: { src: "m.mp3" }\n'
                               'subtitleStyle: { font: "f.ttf" }\n---\n\n#', 1)
-        text = text.replace(":::quote", '![a](a.png)\n\n::video{src="v.mp4"}\n\n::thumbnail{src="t.png"}\n\n:::quote')
+        text = text.replace(":::quote", '::image{src="a.png"}\n\n::video{src="v.mp4"}\n\n::thumbnail{src="t.png"}\n\n:::quote')
         self.write_script(text)
         kinds = {f["path"]: f["kind"] for f in self.inspect()["files"]}
         self.assertEqual(kinds, {"a.png": "image", "t.png": "thumbnail", "v.mp4": "video", "logo.png": "logo",
@@ -196,7 +206,7 @@ class Inspect(FakeCase):
         self.assertTrue(set(kinds.values()) <= set(stagechecks.S2V_FILE_KINDS))
 
     def test_missing_image_presentation_null(self):
-        self.write_script(SCRIPT.replace(":::quote", "![a](a.png)\n\n:::quote"))
+        self.write_script(SCRIPT.replace(":::quote", "::image{src=\"a.png\"}\n\n:::quote"))
         d = self.inspect()
         self.assertIsNone(d["hashes"]["presentation_by_output"]["youtube"])
         self.assertIn("missing file(s): a.png", d["reasons"]["presentation.youtube"][0])

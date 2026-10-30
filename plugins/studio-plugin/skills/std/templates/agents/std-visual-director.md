@@ -14,7 +14,7 @@ Files only: the script, `work/assets.json` (usable images: `status: ok`, their `
 `work/source.md`, the brand, the framings each actor allows, the board draft.
 
 ## Outputs
-1. Presentation attributes in the script only: images (by `script_src`, usable ones only), text-card scenes, theme,
+1. Presentation attributes in the script only: images (`::image{src="<script_src>"}`, usable ones only), text-card scenes, theme,
    transitions, Ken Burns, framing. Never change narration, on-screen text, cast or pronounce (Studio checks that
    content and voice did not change since ②).
 2. `work/<lang>/board.md` — scene by scene: what shows and why.

@@ -71,7 +71,7 @@ watermark comes from the state) and the check results `stage-done` requires (`wo
   `machine.json` at `tests/py/drivers/fake_s2v_cli`. Scenarios come from the JSON file named by
   `STUDIO_TEST_FAKE_S2V_SCENARIO` (the guard refuses `STUDIO_TEST_*` in agent commands); each call is appended to
   `calls.log` beside that file. It writes results only with `--out-dir` and never into its own folder.
-  `fake_inspect_table.json` (which hash an edit changes) is written by hand until M1j generates it from real s2v.
+  `fake_inspect_table.json` (which hash an edit changes) is measured from real s2v by `tests/tools/fake_table.py --write` (M1j).
 - **Tests that move a video along** without the stages' check scripts (they arrive in M1d–M1h) use `checkfix.py`: it
   writes the passing check result a check script would write over the current inputs (the same input sha), so
   `stage-done` keeps its own rule. `test_m1b.StageChecks` turns this off and checks the rule itself.
@@ -120,3 +120,8 @@ render, record-render, ④a, the copy (the platform file marked checked and comm
 `test_m1i.CommitCase` takes a video from `test_m1h.CopyCase` through ④b, then runs `check_commit.py --stage video`
 in-process with a `VideoKind` given the test's providers (the fake s2v) and no Claude Code session in the environment;
 the person's answer the guard would record is written into commit-ok.json by the test before `--staged` and `done`.
+
+**M1j** (`SCRIPTS_VERSION` 18): the video commit decides by content (racy-git safe), never stages deletions under
+`voices/`, merges pronounce keys NFC. `test_e2e_m1.py` runs the M1 flow with the fake s2v and the real guard, hooks
+and git. `tests/tools/fake_table.py <s2v> --write` measures real s2v `inspect` (isolated HOME) into
+`fake_inspect_table.json`; `test_m1j.FakeTable` (`--full`) compares real, table and fake.

@@ -64,7 +64,7 @@ targetDuration: %(target)s
 空港(くうこう)
 :::
 
-![gate](../../../docs/img/gate.png)
+::image{src="../../../docs/img/gate.png"}
 
 # 출국 {#exit}
 

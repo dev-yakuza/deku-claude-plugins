@@ -8,7 +8,8 @@ How this repository's videos are written. The script writer reads it; edit it as
   digits (`5일`, `3시`): Studio's number check reads them reliably.
 - Text in another script or language (for example Japanese in a Korean video) goes on screen (`:::quote`, `:::table`,
   captions); the narration reads it in the video's language.
-- Images: only the ones the source analysis marks usable, by their `script_src` path.
+- Images: only the ones the source analysis marks usable, by their `script_src` path, as a block of their own:
+  `::image{src="<script_src>"}` (s2v shows no Markdown image `![…](…)` on its own line — it is an error).
 - Length: `outputs.youtube.maxDuration` is the format's upper bound and `targetDuration` the brief's length; s2v lint
   only warns past them, Studio's check fails.
 - The claims map (`work/<lang>/claims-map.json`): every claim the script uses, its excerpt exactly as in `source.md`,

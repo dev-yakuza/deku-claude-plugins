@@ -8,10 +8,10 @@ Show this in the repo's language (not initialized: the language the user writes 
 **Setup** — `init` install the harness (M1) · `config [key value]` (M1) · `update` (M1)
 
 **Making a video** — `make <source> --kind <kind>` one video end to end (M1) ·
-`source|brief|script|verify|cast|board|render|copy <video-id>` one stage (M1; `cast` M3a)
+`source|brief|script|verify|board|render|copy <video-id>` one stage; `cast` is M3a (in M1 the voice section of `make`)
 
 **State** — `status [--unlock]` · `resume <video-id>` · `abandon <video-id> [--lang <l>]` ·
-`move <video-id>` (M1)
+`move <video-id>` (later)
 
 **Platforms & actors** — `platform list|add|remove|refresh` (M2) ·
 `cast list|add|build|audition` (M3a–M3b)

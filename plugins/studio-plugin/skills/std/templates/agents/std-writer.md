@@ -26,7 +26,8 @@ Write nothing else.
 - Say only what the excerpts say; compress, never extend.
 - Narration is in the video's language only: no kana or kanji in it (Studio checks). Japanese goes on screen
   (`:::quote`, `:::table`, captions); the narration reads it in the video's language.
-- Images: only usable entries of `work/assets.json`, by their `script_src` path (Studio checks).
+- Images: only usable entries of `work/assets.json`, as `::image{src="<script_src>"}` on a line of their own (Studio
+  checks; s2v refuses a Markdown image line).
 - Never approve, commit or run script2video approval commands.
 - When the guard refuses something, stop and report it (INV9); never reach the same effect another way.
 

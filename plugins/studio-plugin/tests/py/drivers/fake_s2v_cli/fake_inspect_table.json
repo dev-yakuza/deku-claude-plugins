@@ -1,25 +1,64 @@
 {
   "schema": 1,
-  "about": "Which inspect hash the fake s2v changes for each kind of edit. Written by hand in M1b; M1j generates it from real s2v (tests/tools/fake_table.py, m1-plan §12.3). Frontmatter keys missing here change no hash.",
+  "about": "Which inspect hash each kind of edit changes, measured on real s2v (S2V_TTS=mock) by tests/tools/fake_table.py --write (m1-plan §12.3). Frontmatter keys missing here change no hash; keys marked unmeasured come from the hand-written M1b table.",
   "frontmatter": {
-    "title": ["content"],
-    "lang": ["content", "voice", "presentation"],
-    "cast": ["voice", "presentation"],
-    "pronounce": ["voice"],
-    "pacing": ["voice"],
-    "theme": ["presentation"],
-    "transition": ["presentation"],
-    "logo": ["presentation"],
-    "subtitleStyle": ["presentation"],
-    "bgm": ["presentation"],
-    "outputs": ["presentation"],
+    "title": [
+      "content"
+    ],
+    "lang": [
+      "content",
+      "voice",
+      "presentation"
+    ],
+    "cast": [
+      "voice"
+    ],
+    "pronounce": [
+      "voice"
+    ],
+    "pacing": [
+      "voice"
+    ],
+    "theme": [
+      "presentation"
+    ],
+    "transition": [
+      "presentation"
+    ],
+    "logo": [
+      "presentation"
+    ],
+    "subtitleStyle": [
+      "presentation"
+    ],
+    "bgm": [
+      "presentation"
+    ],
+    "outputs": [],
     "targetDuration": []
   },
-  "output_attrs_ignored": ["maxDuration"],
+  "output_attrs_ignored": [
+    "maxDuration"
+  ],
   "body": {
-    "scene_title": ["content", "presentation"],
-    "paragraph": ["content", "presentation"],
-    "screen": ["content", "presentation"],
-    "image": ["presentation"]
-  }
+    "paragraph": [
+      "content",
+      "voice"
+    ],
+    "scene_title": [
+      "content"
+    ],
+    "screen": [
+      "content"
+    ],
+    "image": [
+      "presentation"
+    ]
+  },
+  "unknown_keys_refused": true,
+  "unmeasured": [
+    "bgm",
+    "lang",
+    "subtitleStyle"
+  ]
 }

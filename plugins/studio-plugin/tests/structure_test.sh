@@ -196,7 +196,7 @@ for d in ("commit", "hooks"):
     for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
         check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
               "%s (copied into repositories) does not import the guard (plugin only)" % os.path.relpath(p, skill))
-check(sv and sv.group(1) == "17", "SCRIPTS_VERSION is 17 (M1i: the video commit)")
+check(sv and sv.group(1) == "18", "SCRIPTS_VERSION is 18 (M1j: the video commit by content)")
 from stdo import manifest as _man
 _mp = os.path.join(scripts, _man.NAME)
 check(os.path.exists(_mp) and open(_mp).read() == _man.render(scripts, sv.group(1)),
@@ -212,6 +212,36 @@ _bad = [os.path.relpath(p, skill) for p in glob.glob(os.path.join(scripts, "stdo
         glob.glob(os.path.join(scripts, "stdo", "*.py")) if "/stdo/setup/" not in p and "/stdo/guard/" not in p
         and re.search(r"^\s*(from|import) .*\bsetup\b", open(p).read(), re.M)]
 check(not _bad, "the copied scripts do not import setup (plugin only): %s" % ", ".join(_bad))
+
+# M1j §12.1: make.md composes the stage documents, and the documents agree with the state machine
+_cmd = os.path.join(skill, "commands")
+_mk = open(os.path.join(_cmd, "make.md")).read()
+_order = ["source", "brief", "script", "verify", "board", "render", "copy"]
+_pos = [_mk.find("commands/%s.md" % d) for d in _order]
+check(all(p >= 0 for p in _pos) and _pos == sorted(_pos), "make.md reads the stage documents in order (%s)" % _pos)
+check(all(d in IMPLEMENTED_CMDS for d in _order + ["make"]), "every document make.md reads is implemented")
+for d in sorted(IMPLEMENTED_CMDS - {"help", "init", "config", "update"}):
+    check("<!-- studio:guard-refusal -->" in open(os.path.join(_cmd, d + ".md")).read(),
+          "commands/%s.md carries the INV9 block" % d)
+_stage_doc = {"brief": "brief", "script": "script", "verify": "verify", "cast": "make", "tts": "make",
+              "audition": "make", "board": "board", "visual-check": "board", "render": "render", "copy": "copy"}
+sys.path.insert(0, scripts)
+from stdo.state import schema as _schema
+for st, d in sorted(_stage_doc.items()):
+    body = open(os.path.join(_cmd, d + ".md")).read()
+    check(re.search(r"state\.py next <video> --enter %s\b" % re.escape(st), body) is not None,
+          "commands/%s.md enters %s with `state.py next --enter`" % (d, st))
+    if st in _schema.DONE_STAGES:
+        check(re.search(r"state\.py stage-done <video> %s\b" % re.escape(st), body) is not None,
+              "commands/%s.md records %s with `state.py stage-done`" % (d, st))
+for gate, d in (("1", "verify"), ("2", "make"), ("3", "board"), ("4a", "render"), ("4b", "copy")):
+    body = open(os.path.join(_cmd, d + ".md")).read()
+    check(re.search(r"state\.py approve <video> %s --expect" % gate, body) is not None and
+          "never in the same message" in body, "gate %s: commands/%s.md asks, then approves alone" % (gate, d))
+for p in glob.glob(os.path.join(_cmd, "*.md")):
+    body = open(p).read()
+    if "lock.py run --kind tts" in body or "run_s2v.py render" in body:
+        check("run_in_background" in body, "%s runs the heavy wrappers in the background" % os.path.basename(p))
 
 if fails:
     print("structure: %d failure(s)" % len(fails))

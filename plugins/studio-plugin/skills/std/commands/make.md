@@ -1,14 +1,28 @@
 # MAKE
 
-One video end to end: `make <source> --kind youtube`, from begin to the video's commit (M1i).
+One video end to end: `make <source> --kind youtube`, from begin to the video's commit.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`.
 
+**The flow** — read each stage's document when you reach it and do exactly what it says:
+
 1. `python3 .claude/studio/scripts/state.py begin <video> --source <path> --kind youtube` — the writing must be
    committed (exit 3 otherwise: ask the person to commit it).
-2. The stages so far, each with its own document: `commands/source.md` → `commands/brief.md` →
-   `commands/script.md` → `commands/verify.md` (ends with gate ①). Then the voice section below.
+2. `commands/source.md` → `commands/brief.md` → `commands/script.md` → `commands/verify.md` (gate ①).
+3. The voice section below: cast → tts → audition → gate ②.
+4. `commands/board.md` (board with the credits, visual-check, gate ③).
+5. `commands/render.md` (render, gate ④a) → `commands/copy.md` (copy, gate ④b).
+6. The video's commit (below), then `state.py done`.
+
+**Always**
+- On every stage: `state.py next <video> --enter <stage>` first; exit 3 means another stage comes first — go there.
+  `state.py next <video>` says where the video is after any stop (`commands/resume.md`).
+- Every person gate is the same: `state.py shown …` as you show the artifact, then AskUserQuestion with `[<video>]`,
+  the hash and every `in the question:` line, the fixed option, and the approval command alone in a later message —
+  never in the same message as the question.
+- The heavy runs — `lock.py run --kind tts -- …` and `run_s2v.py render …` — go with `run_in_background`.
+- When the guard refuses something, follow INV9 below: stop and ask; never reach the same effect another way.
 
 ## cast
 

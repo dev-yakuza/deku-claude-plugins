@@ -140,13 +140,14 @@ class Units(StudioTestCase):
 
     def test_allow_list(self):
         k = video_kind.VideoKind()
+        k._target = "v1"  # set by --stage (the hook reads it from commit-ok.json)
 
         class C(object):
             roots = ["studio"]
         for ok in ("studio/videos/v1/script.ko.md", "studio/videos/v1/CREDITS.yaml", "studio/videos/v1/assets/a.png",
                    ".claude/studio/pronounce.json", "studio/voices/_qwen/Sohee/ko-1234abcd.wav"):
             self.assertTrue(k.allowed(C(), ok), ok)
-        for bad in ("studio/videos/v1/work/state.json", "studio/videos/v1/CREDITS.draft.yaml", "studio/copy/v1/ko/x.md",
+        for bad in ("studio/videos/v2/script.ko.md", "studio/videos/v1/work/state.json", "studio/videos/v1/CREDITS.draft.yaml", "studio/copy/v1/ko/x.md",
                     "studio/videos/v1/notes.md", ".claude/studio/config.json", "studio/voices/other/x.wav"):
             self.assertFalse(k.allowed(C(), bad), bad)
 

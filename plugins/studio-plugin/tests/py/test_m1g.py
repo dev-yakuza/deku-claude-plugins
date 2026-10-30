@@ -183,7 +183,7 @@ class Credit(BoardCase):
         with open(os.path.join(self.vdir, "script.ko.md")) as f:
             text = f.read()
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
-            f.write(text.replace("![gate](%s)" % IMG, "![gate](%s)\n\n![other](../../../docs/img/other.png)" % IMG))
+            f.write(text.replace('::image{src="%s"}' % IMG, '::image{src="%s"}\n\n::image{src="../../../docs/img/other.png"}' % IMG))
         self.assertEqual(self.check_board(), 1)
         self.assertIn("../../../docs/img/other.png is not a usable image of work/assets.json", self.out)
 
@@ -212,7 +212,7 @@ class Credit(BoardCase):
     def test_x1_frontmatter_logo_is_a_picture(self):
         with open(os.path.join(self.vdir, "script.ko.md")) as f:
             text = f.read()
-        text = text.replace("![gate](%s)\n" % IMG, "")  # the image only as the logo
+        text = text.replace('::image{src="%s"}\n' % IMG, "")  # the image only as the logo
         text = text.replace("lang: ko\n", "lang: ko\ntheme: dark\nlogo: { src: \"%s\" }\n" % IMG, 1)
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
             f.write(text)
