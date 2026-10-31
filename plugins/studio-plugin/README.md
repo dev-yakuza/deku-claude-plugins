@@ -39,6 +39,9 @@ Then `/std help`. Requires script2video 0.13.0 or later (set up later by `/std i
 - **Upgrading a 0.0.x sandbox by hand** (until `/std config` arrives): delete `"path"` under `"s2v"` in
   `.claude/studio/config.json` and write `{"schema": 1, "s2v": {"path": "<absolute path>"}}` to
   `.claude/studio/local/machine.json` (a real folder, not a link).
+- **Upgrading to 0.0.23**: `/std update` refreshes Studio's ignore block (`.gitignore` and `info/exclude`) so the
+  credits draft and the audio folder no longer show as untracked; commit the `.gitignore` change with the harness
+  commit that follows the update.
 
 ## License
 

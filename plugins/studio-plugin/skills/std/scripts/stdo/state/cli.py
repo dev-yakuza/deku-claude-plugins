@@ -545,6 +545,16 @@ def _setup_warnings(repo, root):
         block = None
     if block is None:
         out.append(".gitignore has no Studio block — /std init or /std update puts it back")
+    elif ignore.outdated(block, root):  # pilot-1 P8: an older block leaves CREDITS.draft.yaml and audio/ untracked
+        out.append("the Studio block in .gitignore is older than this version — /std update")
+    try:
+        from ..commit.gitx import Git, GitError
+        with open(os.path.join(Git(repo).common_dir(), "info", "exclude"), encoding="utf-8") as f:
+            _rest, xblock = ignore.split(f.read())
+        if xblock is not None and ignore.outdated(xblock, root):
+            out.append("the Studio block in info/exclude is older than this version — /std update")
+    except (OSError, ValueError, GitError, ignore.BlockError):
+        pass  # a missing block is the hook check's (above)
     today = datetime.date.today()
     for p in sorted(_glob.glob(os.path.join(repo, ".claude", "studio", "platforms", "*.md"))):
         try:

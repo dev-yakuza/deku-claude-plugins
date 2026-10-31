@@ -18,9 +18,9 @@ position. Shared rules: `atoms/_contract.md`.
 **Always**
 - On every stage: `state.py next <video> --enter <stage>` first; exit 3 means another stage comes first — go there.
   `state.py next <video>` says where the video is after any stop (`commands/resume.md`).
-- Every person gate is the same: `state.py shown …` as you show the artifact, then AskUserQuestion with `[<video>]`,
-  the hash and every `in the question:` line, the fixed option, and the approval command alone in a later message —
-  never in the same message as the question.
+- Every person gate is the same: `state.py shown …` as you show the artifact, then AskUserQuestion whose question is
+  the `question` block `shown` printed, pasted unchanged — never retype a line (the guard compares each character) —,
+  the fixed option, and the approval command alone in a later message — never in the same message as the question.
 - The heavy runs — `lock.py run --kind tts -- …` and `run_s2v.py render …` — go with `run_in_background`.
 - When the guard refuses something, follow INV9 below: stop and ask; never reach the same effect another way.
 
@@ -72,9 +72,11 @@ position. Shared rules: `atoms/_contract.md`.
    show `audition.md` — it prints `hash12 <h12>` and `in the question: …` lines: one per exempted line
    (`면제 <id>: "<text>" → 들림 "<heard>" (CER x)`), one per reading change (`발음 <written> → <reading>`) and the
    readings that differ elsewhere — or, when there are too many, one `② 목록 파일: …` line (open that file for the
-   person).
-2. Ask with AskUserQuestion: `[<video>] ② 오디션 — <narrator.wav path> · hash <h12>`, **every `in the question:` line
-   exactly** (the guard requires each one), the length warning if any; options `승인 <video> <h12>` and "고칠 곳이 있다". Then, in a later message and alone — never in the same message
+   person) — and then the `question` block: `[<video>] ② 오디션 — <narrator.wav path> · hash <h12>` with those lines,
+   up to `end of question`.
+2. Ask with AskUserQuestion: the question is **the block between `question (…):` and `end of question`, pasted
+   unchanged** — never retype a line (the guard compares each character) — with the length warning after it if any;
+   options `승인 <video> <h12>` and "고칠 곳이 있다". Then, in a later message and alone — never in the same message
    as the question — run `python3 .claude/studio/scripts/state.py approve <video> 2 --expect <h12>`. It records the
    sentences heard and writes `work/<lang>/pronounce-approved.json` (never write it yourself).
 3. "고칠 곳이 있다": change readings (cast) or retry lines (tts) and go through the section again.

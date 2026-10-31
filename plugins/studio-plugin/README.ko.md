@@ -37,6 +37,8 @@ claude --plugin-dir plugins/studio-plugin
 - **0.0.x 샌드박스를 손으로 옮기기**(`/std config`가 생기기 전까지): `.claude/studio/config.json`의 `"s2v"` 아래
   `"path"`를 지우고, `.claude/studio/local/machine.json`(링크가 아닌 실제 폴더)에
   `{"schema": 1, "s2v": {"path": "<절대 경로>"}}`를 씁니다.
+- **0.0.23으로 올릴 때**: `/std update`가 Studio의 ignore 블록(`.gitignore`와 `info/exclude`)을 새로 써서 출처 초안과
+  오디오 폴더가 추적되지 않은 파일로 보이지 않게 합니다. `.gitignore` 변경은 갱신 뒤의 하네스 커밋에 함께 커밋합니다.
 
 ## 라이선스
 

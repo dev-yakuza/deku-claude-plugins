@@ -110,22 +110,64 @@ def video_dir(repo, studio_root, video):
     return found[0] if len(found) == 1 else None
 
 
+def _part(obj, key, kind, what):
+    """obj[key] when present (None when absent); ValueError when it is there but not `kind` (pilot-1 P4: the guard
+    denies a gate whose lines it cannot read, never skips them)."""
+    v = obj.get(key)
+    if v is not None and not isinstance(v, kind):
+        raise ValueError("%s is not %s" % (what, "a list" if kind is list else "an object"))
+    return v
+
+
 def source_commit_lines(state):
-    """The lines the ① question must show (M1e review S5): one per commit to the source after begin."""
-    src = state.get("source") if isinstance(state, dict) else None
-    commits = src.get("commits_since_begin") if isinstance(src, dict) else None
-    return ["원본이 begin 뒤에 커밋됨: %s %s (%s)%s" % (c.get("sha", "")[:12], c.get("subject", ""),
-                                                    c.get("stat") or "—", " (merge)" if c.get("merge") else "")
-            for c in commits or [] if isinstance(c, dict)]
+    """The lines the ① question must show (M1e review S5): one per commit to the source after begin. Raises
+    ValueError on a record that is there but malformed."""
+    src = _part(state, "source", dict, "source")
+    commits = _part(src, "commits_since_begin", list, "source.commits_since_begin") if src else None
+    out = []
+    for c in commits or []:
+        if not isinstance(c, dict) or not isinstance(c.get("sha", ""), str) or \
+                not isinstance(c.get("subject", ""), str):
+            raise ValueError("source.commits_since_begin has an entry that is not {sha, subject, …}")
+        out.append("원본이 begin 뒤에 커밋됨: %s %s (%s)%s" % (c.get("sha", "")[:12], c.get("subject", ""),
+                                                         c.get("stat") or "—", " (merge)" if c.get("merge") else ""))
+    return out
 
 
 def gate2_lines(state, lang=None, gate="2", scope="-"):
-    """The lines the ② (or ④b, per platform) question must show, as `shown` recorded them (M1f review V1, M1h Y2)."""
-    langs = state.get("langs") if isinstance(state, dict) else None
-    L = (langs or {}).get(lang or state.get("source_lang")) if isinstance(langs, dict) else None
-    rec = (((L or {}).get("shown") or {}).get(gate) or {}).get(scope) if isinstance(L, dict) else None
-    out = rec.get("lines") if isinstance(rec, dict) else None
-    return [x for x in out if isinstance(x, str)] if isinstance(out, list) else []
+    """The lines the ② (or ④b, per platform) question must show, as `shown` recorded them (M1f review V1, M1h Y2):
+    [] when nothing was shown; ValueError when a record is there but malformed."""
+    langs = _part(state, "langs", dict, "langs")
+    L = _part(langs, lang or state.get("source_lang"), dict, "the language") if langs else None
+    shown = _part(L, "shown", dict, "shown") if L else None
+    recs = _part(shown, gate, dict, "shown.%s" % gate) if shown else None
+    rec = _part(recs, scope, dict, "shown.%s.%s" % (gate, scope)) if recs else None
+    out = _part(rec, "lines", list, "shown.%s.%s.lines" % (gate, scope)) if rec else None
+    if any(not isinstance(x, str) for x in out or []):
+        raise ValueError("shown.%s.%s.lines has an entry that is not text" % (gate, scope))
+    return list(out or [])
+
+
+def gate4b_lines(state, lang=None):
+    """The lines a ④b question must show (pilot-1 P4): the union, in the brief's order, of what `shown 4b` recorded
+    for every current platform (the brief's minus the excluded) — so leaving out --platform skips none. Raises on a
+    state whose platforms cannot be read (the guard denies then)."""
+    lang = lang or state.get("source_lang")
+    if not isinstance(state["brief"]["platforms"], dict):
+        raise ValueError("brief.platforms is not an object")
+    from .schema import current_platforms
+    out = []
+    for p in current_platforms(state, lang):
+        out += [l for l in gate2_lines(state, lang, "4b", p) if l not in out]
+    return out
+
+
+def question_block(header, lines, after=None):
+    """The question `shown` and `credit-preview` print for the agent to paste unchanged (pilot-1 P4): the header with
+    the video and the hash, then every line the guard checks. `after` says what the agent adds below it."""
+    return (["question (paste unchanged as the AskUserQuestion question%s):" % ("; add %s after it" % after
+                                                                                 if after else "")]
+            + [header] + list(lines) + ["end of question"])
 
 
 def read_state(vdir):

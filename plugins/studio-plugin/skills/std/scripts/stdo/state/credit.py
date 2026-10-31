@@ -10,9 +10,9 @@ import os
 import sys
 
 from .. import credits, writes
-from ..commit.summary import norm
+from ..commit.summary import first_missing, missing_text
 from ..source import assets as assets_mod
-from . import commands as C, evidence, schema, store
+from . import commands as C, evidence, labels, schema, store
 
 FIELDS_NOT_SHOWN = "fields-not-shown"
 
@@ -60,6 +60,8 @@ def preview(repo, root, vdir, state, o):
     if credits.unsupported(e):
         sys.stdout.write("warning: %s — check_assets will refuse it\n" % credits.unsupported(e))
     sys.stdout.write("label 출처 %s %s\n" % (state["video"], h))
+    for line in labels.question_block("[%s] 출처 — %s · hash %s" % (state["video"], o["_"][1], h), credits.lines(e)):
+        sys.stdout.write("%s\n" % line)  # the block to paste unchanged (pilot-1 P4)
     return C.OK
 
 
@@ -84,11 +86,9 @@ def credit(repo, vdir, state, o, hooks, argv, with_evidence):
     def ev_check(ev):
         if ev.get("mode") == "proxy":
             return  # the proxy mode asks no one (as at the gates); the video commit waits for a person's credit (J131)
-        q = norm(ev.get("question") or "")
-        missing = [l for l in credits.lines(e) if norm(l) not in q]
-        if missing:
-            raise store.Refused("%s: the question did not show %s — show all eight lines exactly and ask again"
-                                % (FIELDS_NOT_SHOWN, ", ".join(l.split("=", 1)[0] for l in missing)), C.NO_EVIDENCE)
+        miss = first_missing(credits.lines(e), ev.get("question") or "")
+        if miss:
+            raise store.Refused("%s: %s" % (FIELDS_NOT_SHOWN, missing_text(miss, "credit-preview")), C.NO_EVIDENCE)
 
     def events(s, ev):
         return [{"event": "credit", "path": path, "hash": hv, "answer": evidence.answer_of(ev)}]

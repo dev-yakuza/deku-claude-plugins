@@ -597,9 +597,9 @@ def overlay_lines(raw):
 
 
 def overlay_lines_missing(raw, question):
-    from ..commit.summary import norm
-    q = norm(question or "")
-    return [l for l in overlay_lines(raw) if norm(l) not in q]
+    """first_missing's result for the overlay lines (None when the question shows them all)."""
+    from ..commit.summary import first_missing
+    return first_missing(overlay_lines(raw), question or "")
 
 
 def overlay(repo, o, hooks, argv):
@@ -626,11 +626,12 @@ def overlay(repo, o, hooks, argv):
             ev = evidence.check(repo, argv, labels.overlay(expect), False)
         except evidence.Missing as e:
             raise store.Refused(str(e), C.NO_EVIDENCE)
-        missing = overlay_lines_missing(raw, ev.get("question"))
-        if missing:
-            raise store.Refused("the person's question did not show what the overlay holds (%s) — ask again with "
-                                "each key and its number of entries (m1-plan §23.2 J29)" % "; ".join(missing),
-                                C.NO_EVIDENCE)
+        miss = overlay_lines_missing(raw, ev.get("question"))
+        if miss:
+            from ..commit.summary import missing_text
+            raise store.Refused("the person's question did not show what the overlay holds — ask again with each key "
+                                "and its number of entries (m1-plan §23.2 J29). %s"
+                                % missing_text(miss), C.NO_EVIDENCE)
         evidence.consume(repo, ev, None, "overlay")
         p = os.path.join(repo, ".claude", "studio", "local", "config.internal.json")
         os.makedirs(os.path.dirname(p), exist_ok=True)

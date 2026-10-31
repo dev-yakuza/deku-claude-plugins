@@ -20,7 +20,10 @@ CREDITS.yaml, and every required notice of the platform rules, word for word.
 
 ## Rules
 - Within the platform's limits (title, description, hashtags) — the description's limit may be in UTF-8 bytes
-  (YouTube: 5000 bytes, about 1,660 Korean characters); no `<` or `>`, no home paths, no in-house terms.
+  (YouTube: 5000 bytes, about 1,660 Korean characters; each line break inside counts 2 bytes, as CRLF — the
+  conservative count, trailing ones not counted); no `<` or `>`, no home paths, no in-house terms.
+- Save the copy as UTF-8 in NFC (composed) form: `validate_copy` refuses NFD, which breaks its credit, chapter and
+  notice checks and the title length (most compatibility ideographs U+F900–U+FAFF are refused too).
 - Say nothing the script does not say: the fact-checker checks the copy against the source next.
 - Never approve, commit or run script2video approval commands.
 - When the guard refuses something, stop and report it (INV9); never reach the same effect another way.

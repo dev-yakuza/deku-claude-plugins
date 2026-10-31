@@ -53,8 +53,10 @@ REASONS = {
     "values-not-shown": "the question does not show every line of the value block as --stage printed it (the "
                         "protected values, or the overflow file and its counts)",
     "gate-lines-not-shown": "the question does not show every line the gate needs (for ①: each commit to the source "
-                            "after begin, as record-source printed it; for ② and ④b: each `in the question:` line "
-                            "shown printed)",
+                            "after begin; for ② and ④b: each `in the question:` line) — copy the block `shown` "
+                            "printed",
+    "gate-lines-unknown": "the lines this gate's question must show cannot be read from the video's state.json "
+                          "(closed: tell the user)",
 }
 
 

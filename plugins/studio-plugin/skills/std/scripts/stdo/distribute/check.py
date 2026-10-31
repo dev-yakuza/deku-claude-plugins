@@ -15,6 +15,7 @@ filled by the fact-checker) all in the source copy — ④b records them."""
 import json
 import os
 import re
+import unicodedata
 
 from .. import credits
 from ..commit.harness import overlay_terms, term_hit
@@ -61,6 +62,14 @@ def chapter_files(ctx, state, lang, platform):
     return files
 
 
+def description_bytes(body):
+    """The description's size as uploaded (J175): UTF-8 bytes — not characters (the Data API's limit; Korean is about
+    3 bytes each) — with every line break counted as 2 (CRLF, the conservative count: at most 1 byte per break over the
+    platform's own) and trailing line breaks not counted. The file is read in text mode, so a CRLF is already one newline."""
+    b = body.replace("\r\n", "\n").rstrip("\r\n")
+    return len(b.encode("utf-8")) + b.count("\n")
+
+
 def in_order(lines, body):
     pos = 0
     for l in lines:
@@ -85,16 +94,17 @@ def problems(repo, vdir, state, lang, ctx, platform, cfg, env, copy_path):
             text = f.read()
     except OSError:
         return out + ["the copy %s is missing" % os.path.relpath(copy_path, repo)]
+    if not unicodedata.is_normalized("NFC", text):  # NFD breaks the substring checks below and the title length
+        return out + ["the copy is not in NFC (composed) form — save it as NFC"]
     try:
         title, tags, body = parse_copy(text)
     except ValueError as e:
         return out + [str(e)]
     if not title.strip() or len(title) > rules["title_max"]:
         out.append("the title has %d characters (1–%d)" % (len(title), rules["title_max"]))
-    size = len(body.encode("utf-8"))  # bytes, not characters (the Data API's limit; Korean is about 3 bytes each)
-    if size > rules["description_max_bytes"]:
-        out.append("the description is %d bytes in UTF-8 (at most %d bytes)"
-                   % (size, rules["description_max_bytes"]))
+    if description_bytes(body) > rules["description_max_bytes"]:
+        out.append("the description is %d bytes in UTF-8 (line breaks counted as 2, CRLF; at most %d bytes)"
+                   % (description_bytes(body), rules["description_max_bytes"]))
     if len(tags) > rules["hashtags_max"]:
         out.append("%d hashtags (at most %d)" % (len(tags), rules["hashtags_max"]))
     out += ["%r is not one hashtag (#word, no spaces)" % t for t in tags if not HASHTAG.match(t)]

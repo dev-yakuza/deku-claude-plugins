@@ -93,6 +93,8 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
         if gate == "3":
             L["shown_pending"].pop(scope, None)
         box["hash12"] = hash12(s, lang, gate)
+        if gate == "4b" and box["hash12"]:  # the guard checks the union over the current platforms (pilot-1 P4)
+            box["union"] = labels.gate4b_lines(s, lang)
 
     def after(s):
         _mirror_shown(vdir, s, lang)
@@ -111,7 +113,28 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
     if gate in ("2", "4b") and not begin:  # the question shows each of these lines (the guard checks them — V1, Y2)
         for line in box["lines"]:
             _out("in the question: %s" % line)
+    if gate == "1":  # ①: each commit to the source after begin (M1e review S5), as record-source printed them
+        for line in labels.source_commit_lines(state):
+            _out("in the question: %s" % line)
+    if box.get("hash12") and gate in ("1", "2", "4b"):
+        for line in _question(ctx, state, lang, gate, scope, box):
+            _out(line)
     return C.OK
+
+
+def _question(ctx, state, lang, gate, scope, box):
+    """The question block to paste unchanged (pilot-1 P4): agents retyped the lines and changed characters."""
+    v, sr = state["video"], ctx["studio_root"]
+    if gate == "1":
+        header = "[%s] ① 대본 — %s" % (v, os.path.relpath(ctx["script"], ctx["repo"]))
+        lines, after = labels.source_commit_lines(state), "the auditor's findings"
+    elif gate == "2":
+        header = "[%s] ② 오디션 — %s/out/%s/%s/audition/narrator.wav" % (v, sr, v, lang)
+        lines, after = box["lines"], "the length warning when there is one"
+    else:
+        header = "[%s] ④b 배포용 글 — %s/copy/%s/%s/%s.md" % (v, sr, v, lang, scope)
+        lines, after = box["union"], "the auditor's findings"
+    return labels.question_block("%s · hash %s" % (header, box["hash12"]), lines, after)
 
 
 def _write_text(p, text):
@@ -238,6 +261,9 @@ def approve(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
         raise store.Refused("approve needs a gate (%s) and --expect <hash12>" % "|".join(GATES), C.USAGE)
     if gate == "source-diff":
         return _source_diff(repo, vdir, state, lang, ctx, o, providers, hooks, argv, reject=False)
+    if gate == "4b" and o.get("--platform") is not None and o["--platform"] not in state["brief"]["platforms"]:
+        raise store.Refused("%s is not in the brief (④b approves every platform of the brief)" % o["--platform"],
+                            C.USAGE)
     proxy = bool(o.get("--proxy"))
     cur = providers.collect(ctx, state, lang)
     box = {"excerpts": [], "copy": {}}

@@ -43,7 +43,8 @@ class BoardCase(VoiceCase):
 
     def preview(self, path=IMG):
         code = self.state("credit-preview", "v1", path)
-        lines = [l for l in self.out.splitlines() if "=" in l and not l.startswith(("label", "이전"))]
+        head = self.out.split("\nlabel ", 1)[0]  # the eight lines, not the question block after the label
+        lines = [l for l in head.splitlines() if "=" in l and not l.startswith(("label", "이전"))]
         h = [l.split()[-1] for l in self.out.splitlines() if l.startswith("label 출처 ")]
         return code, lines, (h[0] if h else None)
 

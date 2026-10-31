@@ -199,7 +199,16 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "21", "SCRIPTS_VERSION is 21 (0.0.22: s2v no-visual fails the script and board checks)")
+check(sv and sv.group(1) == "22", "SCRIPTS_VERSION is 22 (0.0.23: pilot-1 P4 P5 P8, J175)")
+# 0.0.23 (pilot-1 P4): every gate document has the agent paste the printed question block, never retyping a line
+for _d in ("make", "copy", "verify", "board"):
+    _t = open(os.path.join(skill, "commands", _d + ".md")).read()
+    check("`question` block" in _t and "never retype a line" in _t,
+          "commands/%s.md asks with the `question` block pasted unchanged (never retype a line)" % _d)
+# 0.0.23 (pilot-1 P8): the ignore block re-includes nothing and ignores the credits draft
+_gi = open(os.path.join(skill, "templates", "studio", "gitignore.tmpl")).read()
+check(not [l for l in _gi.splitlines() if l.startswith("!")] and "/videos/*/CREDITS.draft.yaml" in _gi,
+      "gitignore.tmpl has no ! line and ignores videos/*/CREDITS.draft.yaml")
 from stdo import manifest as _man
 _mp = os.path.join(scripts, _man.NAME)
 check(os.path.exists(_mp) and open(_mp).read() == _man.render(scripts, sv.group(1)),

@@ -12,12 +12,28 @@ TEMPLATE = """# >>> studio (managed by /std init; edit with /std config) >>>
 /{{STUDIO_ROOT}}/out/
 /{{STUDIO_ROOT}}/copy/
 /{{STUDIO_ROOT}}/videos/*/work/
-/{{STUDIO_ROOT}}/videos/*/audio/**
-!/{{STUDIO_ROOT}}/videos/*/audio/*/
-!/{{STUDIO_ROOT}}/videos/*/audio/*/picks.json
+/{{STUDIO_ROOT}}/videos/*/audio/
+/{{STUDIO_ROOT}}/videos/*/CREDITS.draft.yaml
 /{{STUDIO_ROOT}}/cast/*/work/
 /{{STUDIO_ROOT}}/voices/**/candidates/
 # <<< studio <<<
+"""
+# Every line a released block had (0.0.1–0.0.22 and this version), rendered like render(): `/std update` drops the
+# ones this version's template no longer has and keeps any other line a person added to the block (pilot-1 P8).
+# The video commit commits no picks.json and s2v rewrites it on every tts run, so the audio/ folders are ignored
+# whole; M3c restores the picks.json re-include together with the video commit's allow-list.
+SHIPPED = """/{{STUDIO_ROOT}}/local/
+/.claude/studio/local/
+/{{STUDIO_ROOT}}/out/
+/{{STUDIO_ROOT}}/copy/
+/{{STUDIO_ROOT}}/videos/*/work/
+/{{STUDIO_ROOT}}/videos/*/audio/**
+!/{{STUDIO_ROOT}}/videos/*/audio/*/
+!/{{STUDIO_ROOT}}/videos/*/audio/*/picks.json
+/{{STUDIO_ROOT}}/videos/*/audio/
+/{{STUDIO_ROOT}}/videos/*/CREDITS.draft.yaml
+/{{STUDIO_ROOT}}/cast/*/work/
+/{{STUDIO_ROOT}}/voices/**/candidates/
 """
 # "# >>> studio (" — not "# >>> studio:hook" (the hook managers' block)
 _BEGIN_RE = re.compile(r"^# >>> studio(\s|$)")
@@ -26,6 +42,42 @@ _END_RE = re.compile(r"^# <<< studio(\s|$)")
 
 class BlockError(Exception):
     """Unpaired or repeated block markers."""
+
+
+def _lines(text):
+    return [l.strip() for l in (text or "").splitlines() if l.strip()]
+
+
+def shipped(studio_root):
+    """SHIPPED's lines for this studio_root, stripped."""
+    return _lines(SHIPPED.replace("{{STUDIO_ROOT}}", studio_root.strip("/")))
+
+
+def template_lines(studio_root):
+    """This version's block lines (no markers), stripped."""
+    return [l for l in _lines(render(studio_root)) if not l.startswith("#")]
+
+
+def outdated(block, studio_root):
+    """Whether a Studio block is older than this version's (the H13 logic): a template line is missing, or a line a
+    released block had and this template dropped is still there. A person's own lines never count."""
+    have = set(_lines(block))
+    want = set(template_lines(studio_root))
+    return bool(want - have) or bool(have & (set(shipped(studio_root)) - want))
+
+
+def carry(block, studio_root):
+    """(kept, removed) lines of an existing block for the new one: kept — a person's lines (not this template's, not
+    any release's, not `!`), in order; removed — the old lines the new block leaves out (a person's line equal to a
+    released one included)."""
+    want = set(template_lines(studio_root))
+    ever = set(shipped(studio_root))
+    kept, removed = [], []
+    for l in _lines(block):
+        if _BEGIN_RE.match(l) or _END_RE.match(l) or l in want:
+            continue
+        (removed if l in ever or l.startswith("!") else kept).append(l)
+    return kept, removed
 
 
 def render(studio_root, extra=()):

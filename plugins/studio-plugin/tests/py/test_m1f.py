@@ -592,6 +592,9 @@ class GateTwoLines(JudgeCase):
         deny, _ = run(base + "\n" + lines[1])
         self.assertEqual(deny.rule, "G-EVIDENCE")
         self.assertIn(lines[0], deny.message())
+        # pilot-1 P4: the refusal names that line and how many are missing, not the whole list
+        self.assertIn("lacks this line (1 of 1 missing), exactly as `shown` printed: %s." % lines[0], deny.message())
+        self.assertNotIn(" / ", deny.message())
         deny, ctx = run(base + "\n" + "\n".join(lines))
         self.assertIsNone(deny, deny and deny.message())
         self.assertTrue(ctx.allow)

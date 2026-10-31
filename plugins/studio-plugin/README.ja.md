@@ -37,6 +37,9 @@ claude --plugin-dir plugins/studio-plugin
 - **0.0.x のサンドボックスを手で移行する**(`/std config` ができるまで): `.claude/studio/config.json` の `"s2v"` の
   `"path"` を削除し、`.claude/studio/local/machine.json`(リンクではない実際のフォルダ)に
   `{"schema": 1, "s2v": {"path": "<絶対パス>"}}` を書きます。
+- **0.0.23 へ上げるとき**: `/std update` が Studio の ignore ブロック(`.gitignore` と `info/exclude`)を書き直し、
+  出典の下書きと音声フォルダが未追跡ファイルとして表示されなくなります。`.gitignore` の変更は更新後のハーネスコミットで
+  一緒にコミットします。
 
 ## ライセンス
 

@@ -190,24 +190,27 @@ class ValidateCopy(CopyCase):
         self.refused("the copy has no frontmatter")
         with open(os.path.join(self.repo, "studio", "copy", "v1", "ko", "youtube.md"), "w") as f:
             f.write(text + "x" * 5000)
-        self.refused("bytes in UTF-8 (at most 5000 bytes)")
+        self.refused("bytes in UTF-8 (line breaks counted as 2, CRLF; at most 5000 bytes)")
 
     def test_description_counts_utf8_bytes(self):
-        """J172: the limit is 5000 UTF-8 bytes (the Data API), not characters — Korean is 3 bytes a character."""
+        """J172: the limit is 5000 UTF-8 bytes (the Data API), not characters — Korean is 3 bytes a character; J175:
+        every line break inside counts 2 (CRLF)."""
         p = os.path.join(self.repo, "studio", "copy", "v1", "ko", "youtube.md")
         self.write_copy()
         text = open(p, encoding="utf-8").read()
         body = text.split("---\n", 2)[2]
-        room = 5000 - len(body.encode("utf-8"))
+        counted = len(body.encode("utf-8")) + body.count("\n")  # body ends in a line break, inside once text follows
+        room = 5000 - counted
         with open(p, "w", encoding="utf-8") as f:
             f.write(text + "가" * (room // 3))  # under 5000 bytes
         self.assertEqual(self.validate(), 0, self.out + self.err)
         extra = room // 3 + 1  # one more Korean character: over by bytes, far under 5000 characters
         with open(p, "w", encoding="utf-8") as f:
             f.write(text + "가" * extra)
-        size = len((body + "가" * extra).encode("utf-8"))
+        size = counted + 3 * extra
         self.assertLess(len(body) + extra, 5000)
-        self.refused("the description is %d bytes in UTF-8 (at most 5000 bytes)" % size)
+        self.refused("the description is %d bytes in UTF-8 (line breaks counted as 2, CRLF; at most 5000 bytes)"
+                     % size)
 
     def test_notice_credit_and_chapters(self):
         self.write_copy(notice="")

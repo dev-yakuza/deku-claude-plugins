@@ -119,6 +119,10 @@ the session's question; there is no direct terminal path (intended — 00-plan �
   `중단 <video> <lang>` (abandon), `사내설정 <sha12>` (overlay), `설정 <hash12>` (protected settings, the s2v path,
   the narrator) and `갱신 <hash12>` (update). Copy the label exactly as the command printed it. The fixed label is one
   of the options; a free-text "Other" answer is never an approval.
+- When `shown` (①, ②, ④b) or `credit-preview` prints a `question` block, paste the `question` block `shown` printed,
+  unchanged, as the question — never retype a line (the guard compares each character); add only what the block's
+  first line says after it. On a `G-EVIDENCE` refusal that names a line, tell the person which line the guard named,
+  then run `shown` again and ask the gate question again with the block — no other route (INV9).
 - Right after the answer, **in the same turn**, run the command **alone** (optionally after `cd <repo> &&`), as
   `python3 .claude/studio/scripts/state.py …` or `git commit -m …`, without environment prefixes. If the person
   writes anything before the command runs, ask again. An answer is used once in the whole repository (every worktree shares the record). Only an answer Claude Code marks as

@@ -85,8 +85,10 @@ class Repos(StudioTestCase):
         ignored = ["studio/local/x", ".claude/studio/local/x", "studio/out/v/ko/a.mp4",
                    "studio/copy/v/ko/youtube.md", "studio/videos/v/work/state.json",
                    "studio/videos/v/audio/ko/manifest.json", "studio/videos/v/audio/ko/a.wav",
-                   "studio/cast/a/work/x", "studio/voices/a/candidates/1.wav"]
-        kept = ["studio/videos/v/audio/ko/picks.json", "studio/videos/v/script.ko.md",
+                   "studio/cast/a/work/x", "studio/voices/a/candidates/1.wav",
+                   # pilot-1 P8 (0.0.23): the video commit takes neither; M3c re-includes picks.json
+                   "studio/videos/v/audio/ko/picks.json", "studio/videos/v/CREDITS.draft.yaml"]
+        kept = ["studio/videos/v/script.ko.md", "studio/videos/v/CREDITS.yaml",
                 "studio/cast/a/character/character.yaml", "studio/voices/a/ko.wav"]
         for p in ignored:
             self.assertEqual(git(repo, "check-ignore", "-q", p, check=False).returncode, 0, p)

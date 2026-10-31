@@ -204,16 +204,60 @@ def plan(top, takes_raw=None):
         if busy and not out["refused"]:
             out["refused"] = ("raising s2v.min_version (%s → %s) while videos are in progress (%s) — finish or "
                               "abandon them first (D29)" % (old_min, new_min, ", ".join(busy)))
+    ig, ig_private = _ignore_plan(top, root, inst)
+    out["ignore"] = ig
     core = {"scripts_version": out["scripts_version"], "scripts": out["scripts"],
             "templates": [[i["path"], i["state"], i["action"], i["local_sha"], i["new_sha"]] for i in items],
-            "min_version": out["min_version"], "takes": sorted(takes.items())}
+            "min_version": out["min_version"], "takes": sorted(takes.items()),
+            "ignore": {k: ig[k] for k in ("gitignore", "exclude", "kept", "removed")}}
     out["h12"] = hash_of(core)[:12]
     out["label"] = "갱신 %s" % out["h12"]
     out["conflicts"] = [i["path"] for i in items if not i["resolved"]]
     out["_values"] = vals
     out["_news"] = news
     out["_installed"] = inst
+    out["_ignore"] = ig_private
     return out
+
+
+def _ignore_plan(top, root, inst):
+    """The Studio blocks of .gitignore and info/exclude against this version's (pilot-1 P8): ({gitignore, exclude:
+    whether apply rewrites them, kept, removed, lines (what the question shows), problems}, what apply writes). In
+    .gitignore the lines a person added to the block are kept (ignore.carry); info/exclude is per clone and written
+    whole by hooks/install._ensure_exclude, so lines added there by hand are not."""
+    from .. import ignore, paths
+    from ..commit.gitx import Git
+    from ..hooks import install
+    out = {"gitignore": False, "exclude": False, "kept": [], "removed": [], "lines": [], "problems": []}
+    private = {"gitignore": None, "git": None, "extra": ()}
+    was = "%s → %s" % ((inst or {}).get("plugin_version") or "이전", render.plugin_version())
+    text = _read(top, ".gitignore") or ""
+    try:
+        _rest, blk = ignore.split(text)
+        kept, removed = ignore.carry(blk or "", root)
+        new = ignore.ensure(text, ignore.render(root, kept))
+    except ignore.BlockError as e:
+        out["problems"].append(".gitignore: %s — fix the markers by hand, then plan again" % e)
+    else:
+        if new != text:
+            out.update(gitignore=True, kept=kept, removed=removed)
+            private["gitignore"] = new
+            out["lines"].append(".gitignore Studio 블록: %s" % was)
+            out["lines"] += ["  빠지는 줄: %s" % l for l in removed] + ["  남기는 줄: %s" % l for l in kept]
+    try:
+        g = Git(top, paths.git_env())
+        g.cwd = g.toplevel()
+        extra = ("/lefthook-local.yml",) if install.detect(g, top)["manager"] == "lefthook" else ()
+        ex = install._read(os.path.join(g.common_dir(), "info", "exclude")) or ""
+        if ignore.ensure(ex, ignore.render(root, extra)) != ex:
+            out["exclude"] = True
+            private.update(git=g, extra=extra)
+            out["lines"].append("info/exclude Studio 블록: %s (이 clone만; 블록 안에 손으로 더한 줄은 남지 않음)" % was)
+    except ignore.BlockError as e:
+        out["problems"].append("info/exclude: %s — fix the markers by hand, then plan again" % e)
+    except Exception as e:  # noqa: BLE001 — no git here: the hook installer reports info/exclude
+        out["problems"].append("info/exclude cannot be read (%s)" % e)
+    return out, private
 
 
 def public(p):
@@ -226,6 +270,9 @@ def apply(top, expect, takes_raw, argv, proxy=False):
     p = plan(top, takes_raw)
     if p["refused"]:
         raise SetupError(REFUSED, p["refused"])
+    if p["ignore"]["problems"]:  # the next harness commit would fail H13 on a block apply cannot rewrite
+        raise SetupError(REFUSED, "the Studio ignore blocks cannot be updated: %s"
+                         % "; ".join(p["ignore"]["problems"]))
     if expect != p["h12"]:
         if not expect:
             raise SetupError(USAGE, "show the person the plan (update plan) and ask for \"%s\", then run this with "
@@ -249,6 +296,15 @@ def apply(top, expect, takes_raw, argv, proxy=False):
                 text = new_text
             write_text(top, rel, text)
             wrote.append(rel)
+        if p["_ignore"]["gitignore"] is not None:  # the harness commit carries it (a block-only change)
+            write_text(top, ".gitignore", p["_ignore"]["gitignore"])
+            wrote.append(".gitignore")
+        if p["_ignore"]["git"] is not None:
+            from ..hooks import install
+            w = install._ensure_exclude(p["_ignore"]["git"], read_config(top).get("studio_root") or "studio",
+                                        p["_ignore"]["extra"])
+            if w:
+                wrote.append(w)
         if p["min_version"]["raise"]:
             from .configcmd import write_config
             cfg = read_config(top)

@@ -1828,14 +1828,19 @@ def commit_evidence(ctx, cmd, ri, out):
                     raise transcript.NoEvidence("summary-not-shown")
             shown = ok.get("values_shown") or []
             if shown:
-                from ..commit import values as cvals
-                if not cvals.shown_in(shown, text):
+                from ..commit.summary import first_missing
+                miss = first_missing(shown, text)
+                if miss:
                     raise transcript.NoEvidence("values-not-shown")  # m1-plan §5.1 (v3 N1)
         except transcript.NoEvidence as e:
             what = "this Studio commit" + (" (the question must contain the line: %s)" % line if line else "")
-            if ok.get("values_shown"):
+            extra = ""
+            if e.code == "values-not-shown":  # name the first missing line (pilot-1 P4)
+                from ..commit.summary import missing_text
+                extra = " " + missing_text(miss, "check_commit.py --stage")
+            elif ok.get("values_shown"):
                 what += " and these lines: %s" % " / ".join(ok["values_shown"][:6])
-            ctx.deny("G-EVIDENCE", approve.evidence_text(what, label, e))
+            ctx.deny("G-EVIDENCE", approve.evidence_text(what, label, e) + extra)
             return
         approval.update({"mode": "human", "tool_use_id": ans.tool_use_id, "question_index": idx})
         if line:

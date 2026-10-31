@@ -15,13 +15,15 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
    brand. It changes only presentation attributes in the script and writes `work/<lang>/board.md` and
    `CREDITS.draft.yaml` (JSON).
 3. **Credits** — for every picture the script shows:
-   - `python3 .claude/studio/scripts/state.py credit-preview <video> <script_src>` prints eight `key=value` lines
-     and `label 출처 <video> <h12>` (exit 1: fix the draft as it says).
-   - Ask with AskUserQuestion (at most 4 pictures per call, one question each): `[<video>] 출처 — <script_src> · hash
-     <h12>` and **all eight lines exactly as printed**; options `출처 <video> <h12>` and "고칠 곳이 있다". Then, in a
-     later message and alone — never in the same message as the question — run
+   - `python3 .claude/studio/scripts/state.py credit-preview <video> <script_src>` prints eight `key=value` lines,
+     `label 출처 <video> <h12>` and the `question` block (`[<video>] 출처 — <script_src> · hash <h12>` and the eight
+     lines, up to `end of question`) (exit 1: fix the draft as it says).
+   - Ask with AskUserQuestion (at most 4 pictures per call, one question each): the question is **the block pasted
+     unchanged** — never retype a line (the guard compares each character); options `출처 <video> <h12>` and
+     "고칠 곳이 있다". Then, in a later message and alone — never in the same message as the question — run
      `python3 .claude/studio/scripts/state.py credit <video> <script_src> --expect <h12>`. Exit 6 with
-     `fields-not-shown`: the question missed a line — ask again.
+     `fields-not-shown`: the question missed the line it names — run `credit-preview` again and ask again with the
+     block.
    - "이전 승인 <v>" means another video approved the same entry: ask anyway (every video records its own).
 4. `python3 .claude/studio/scripts/check_assets.py <video> --output youtube` — s2v check, content and voice unchanged
    since ②, every picture usable, unchanged and credited (a third-party or unknown image needs `public_ok: true` and

@@ -143,3 +143,13 @@ video · thumbnail are leaf visuals (another leaf is `container-required`). A vi
 when added), its label content and `screen_text` (`fake_table.py` measures `visual_block` · `visual_label`). Fixture
 scenes without a visual get `::title[…]` after their last paragraph, so sentence ids stay. The script, cast and board
 checks print s2v's `no-visual` message (the scene) after the code line.
+
+**0.0.23** (`SCRIPTS_VERSION` 22, pilot 1): a G-EVIDENCE refusal at ① ② ④b, a credit, an overlay, a setup change line
+or a commit's value block names the first missing line, how many are missing and the question's closest line with
+where it differs (`commit/summary.first_missing`); `shown 1|2|4b` and `credit-preview` print the question block to paste
+unchanged (`test_e2e_m1` asks with it); ④b's lines are the union over the current platforms whatever `--platform`
+says, and lines that cannot be computed deny (fail closed). Spaced Korean numbers are joined (`열 다섯 개` = 15,
+`십 오 분` = 15). The ignore block ignores `videos/*/audio/` and `videos/*/CREDITS.draft.yaml` (no `!` line);
+`/std update` rewrites old blocks, keeping a person's own lines in `.gitignore` (`ignore.SHIPPED` lists every released
+line). The copy must be NFC, and the description's bytes count each inner line break as 2. `test_pilot1.py` covers
+all of it.

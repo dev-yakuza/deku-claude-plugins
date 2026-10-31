@@ -27,9 +27,12 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
 
 1. `python3 .claude/studio/scripts/state.py shown <video> 4b --platform youtube` right as you show the copy — it
    prints `hash12 <h12>` and `in the question: 근거: "<sentence>" ← "<excerpt>"` lines (one per fact of the copy, or one
-   `④b 근거 목록 파일: …` line when there are many — open that file for the person).
-2. Ask with AskUserQuestion: `[<video>] ④b 배포용 글 — <copy path> · hash <h12>`, **every `in the question:` line
-   exactly** (the guard requires each one), the auditor's findings; options
+   `④b 근거 목록 파일: …` line when there are many — open that file for the person), then the `question` block:
+   `[<video>] ④b 배포용 글 — <copy path> · hash <h12>` with the lines of every platform of the brief, up to
+   `end of question`.
+2. Ask with AskUserQuestion: the question is **the block between `question (…):` and `end of question`, pasted
+   unchanged** — never retype a line (the guard compares each character) — with the auditor's findings after it;
+   options
    `승인 <video> <h12>` and "고칠 곳이 있다". Then, in a later message and alone — never in the same message as the
    question — run `python3 .claude/studio/scripts/state.py approve <video> 4b --expect <h12> --platform youtube`.
 3. When the person edits the copy themselves: run steps 3–6 of copy again, then show and ask again.

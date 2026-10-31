@@ -7,7 +7,14 @@ Read: digit runs (any script, NFKC) — with the 십 · 백 · 천 · 만 · 억
 (also a single digit right before 월: `삼월에` = 3; `오일` · `오시` alone are words), English ordinals (1st, first …), (a run with 십 · 백 · 천 · 만 · 억, or a single digit before a
 spaced time or measure unit — `삼 년`; a bare `이번` · `구분` is no number), native Korean counts before a counter
 (`한 번` · `스물두 명`) and standalone 하나 · 둘 · 셋 · 넷, Japanese kanji numerals and kana counts (ひとつ … ここのつ,
-とお), and English number words. The forms follow claims.linkrule.has_number."""
+とお), and English number words. The forms follow claims.linkrule.has_number.
+
+Spaced forms (pilot-1 P5; TTS and ASR both space numbers): a native tens word and its unit are one value before a
+counter or as a standalone count (`열 다섯 개` = `열다섯 개` = 15, `서른 셋이에요` = 33, `열다섯.` = 15; 스무 is never
+joined), and space-separated Sino runs join while the run so far ends in 십 · 백 · 천 and the next run's highest place
+is lower (`십 오 분` = 15, `백 이십` = 120, `이천 이십 육 년` = 2026, `이십 오 점 삼` = 25.3) — a lone 일 or 이 joins
+only right before a counter (`십 일` · `백 일 잔치` stay 10 · 100, `십 일 일` = 11). Known false joins (`문을 열 다섯
+사람` = 15, `이십 오 사람` = 25) are accepted: the same parser reads the script and what ASR heard."""
 
 import re
 import unicodedata
@@ -54,6 +61,20 @@ DAYS = {"하루": 1, "이틀": 2, "사흘": 3, "나흘": 4, "닷새": 5, "엿새
 DAYS_RE = re.compile(r"(?<![가-힣])(" + "|".join(sorted(DAYS, key=len, reverse=True)) + ")")
 NATIVE = re.compile(r"(?<![가-힣])(" + "|".join(sorted(NATIVE_T, key=len, reverse=True)) + r")?("
                     + "|".join(sorted(NATIVE_U, key=len, reverse=True)) + r")?\s?(?=" + COUNTERS + ")")
+# spaced numbers (pilot-1 P5): native tens + unit, native compounds read alone, and Sino runs joined over a space
+PARTICLE = r"[에은는이가을를의도과와]"
+TENS = "열|스물|서른|마흔|쉰|예순|일흔|여든|아흔"  # 스무 only comes right before a counter
+ALONE_U = "하나|둘|셋|넷|다섯|여섯|일곱|여덟|아홉"
+NATIVE_JOIN = re.compile(r"(?<![가-힣])(" + TENS + r") +(?:(" + "|".join(sorted(NATIVE_U, key=len, reverse=True))
+                         + r")(?=\s?" + COUNTERS + r")|(" + ALONE_U + r")(?=" + PARTICLE + r"|[^가-힣]|$))")
+NATIVE_ALONE = re.compile(r"(?<![가-힣])(" + TENS + r")(" + ALONE_U + r")(?!\s?" + COUNTERS + r")(?=" + PARTICLE
+                          + r"|[^가-힣]|$)")
+ALONE_V = dict(STANDALONE, 다섯=5, 여섯=6, 일곱=7, 여덟=8, 아홉=9)
+SINO_SPACED = re.compile(r"(?<![가-힣])[일이삼사오육칠팔구십백천]+(?: [일이삼사오육칠팔구십백천]+)+")
+# what may follow the last run of a joined chain, and what must follow a lone 일 or 이 for it to join
+COUNTER_END = r"\s?" + COUNTERS + r"(?:" + PARTICLE + r"|[^가-힣]|$)"
+CHAIN_END = re.compile(COUNTER_END + r"|점|[^가-힣]|$")
+LONE_END = re.compile(COUNTER_END)
 ALONE = re.compile(r"(?<![가-힣])(하나|둘|셋|넷)(?![가-힣])")
 KANJI = re.compile(r"[一二三四五六七八九十百千万億]+")
 KANA_RE = re.compile("|".join(KANA))
@@ -89,6 +110,25 @@ def digit_units(run):
                               else 0)
 
 
+def _place(run):
+    """The highest place a Sino run says: 1000, 100, 10, or 1 for digits only."""
+    return max([SINO_U[c] for c in run if c in SINO_U] or [1])
+
+
+def _join_sino(m, text):
+    """One space-separated Sino match with its chains joined (`이천 이십 육` → `이천이십육`)."""
+    out, pos = [], m.start()
+    for tok in m.group(0).split(" "):
+        end = pos + len(tok)
+        if out and out[-1][-1] in "십백천" and _place(tok) < SINO_U[out[-1][-1]] \
+                and (LONE_END if tok in ("일", "이") else CHAIN_END).match(text, end):
+            out[-1] += tok
+        else:
+            out.append(tok)
+        pos = end + 1
+    return " ".join(out)
+
+
 def values(text):
     """The sorted list of the number values a text says."""
     t = unicodedata.normalize("NFKC", text or "")
@@ -99,6 +139,10 @@ def values(text):
     t = DIGIT_UNITS.sub(" ", t)
     out += [int(d) for d in DIGITS.findall(t)]
     t2 = DIGITS.sub(" ", t)
+    t2 = NATIVE_JOIN.sub(lambda m: m.group(1) + (m.group(2) or m.group(3)), t2)  # 열 다섯 개 = 열다섯 개
+    out += [NATIVE_T[m.group(1)] + ALONE_V[m.group(2)] for m in NATIVE_ALONE.finditer(t2)]  # 열다섯. = 15
+    t2 = NATIVE_ALONE.sub(" ", t2)
+    t2 = SINO_SPACED.sub(lambda m: _join_sino(m, t2), t2)  # 십 오 분 = 십오 분
     for m in SINO_POINT.finditer(t2):  # 삼 점 오 = 3.5
         whole = 0 if m.group(1) in ("영", "공") else sino(m.group(1))
         out.append(float("%d.%s" % (whole, "".join(POINT_D[c] for c in m.group(2)))))

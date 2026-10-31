@@ -28,6 +28,13 @@ PY = "python3 .claude/studio/scripts/"
 IMG = "../../../docs/img/gate.png"
 
 
+def question_block(out):
+    """The question block `shown` or `credit-preview` printed (pilot-1 P4), without its first and last lines; None
+    when there is none."""
+    m = re.search(r"^question \(paste unchanged[^\n]*\):\n(.*?)\nend of question$", out, re.M | re.S)
+    return m.group(1) if m else None
+
+
 def need_tools():
     for tool in ("node", "ffmpeg"):
         if not shutil.which(tool):
@@ -90,9 +97,14 @@ class E2ECase(StudioTestCase):
         if getattr(self, "proxy", False):
             self.do(PY + "state.py approve v1 %s --expect %s%s --proxy" % (gate, h, "".join(" " + x for x in extra_scope)))
             return h
-        lines = re.findall(r"^in the question: (.+)$", r.out, re.M) + list(lines_from or [])
         label = "승인 v1 %s" % h
-        self.s.ask("[v1] %s · hash %s\n%s" % (question, h, "\n".join(lines)), [label, "고칠 곳이 있다"], label)
+        block = question_block(r.out)
+        if block is not None:  # ① ② ④b (pilot-1 P4): the printed block, pasted unchanged
+            self.assertTrue(block.startswith("[v1] %s · hash %s" % (question, h)), block)
+            self.s.ask(block + "".join("\n" + l for l in lines_from or []), [label, "고칠 곳이 있다"], label)
+        else:
+            lines = re.findall(r"^in the question: (.+)$", r.out, re.M) + list(lines_from or [])
+            self.s.ask("[v1] %s · hash %s\n%s" % (question, h, "\n".join(lines)), [label, "고칠 곳이 있다"], label)
         self.do(PY + "state.py approve v1 %s --expect %s%s" % (gate, h, "".join(" " + x for x in extra_scope)))
         return h
 
@@ -196,7 +208,9 @@ class FlowCase(E2ECase):
         if getattr(self, "proxy", False):
             return self.do(PY + "state.py credit v1 %s --expect %s --proxy" % (IMG, h))
         label = "출처 v1 %s" % h
-        self.s.ask("[v1] 출처 — %s · hash %s\n%s" % (IMG, h, "\n".join(lines)), [label, "고칠 곳이 있다"], label)
+        block = question_block(r.out)
+        self.assertEqual(block, "[v1] 출처 — %s · hash %s\n%s" % (IMG, h, "\n".join(lines[:8])))
+        self.s.ask(block, [label, "고칠 곳이 있다"], label)
         return self.do(PY + "state.py credit v1 %s --expect %s" % (IMG, h))
 
     def three(self):
@@ -264,6 +278,9 @@ class E1Flow(FlowCase):
         self.two_to_four_b()
         self.video_commit()
         self.do(PY + "state.py done v1")
+        # pilot-1 P8: nothing left over — CREDITS.draft.yaml and the audio folder (picks.json) are ignored
+        self.assertTrue(os.path.exists(os.path.join(self.vdir, "CREDITS.draft.yaml")))
+        self.assertEqual(self.git("status", "--porcelain", "--untracked-files=all"), "")
         log = self.git("log", "--format=%s").splitlines()
         self.assertEqual(log[:2], ["studio: video v1", "an article"])
         self.assertIn("studio: the person's settings", log)
@@ -384,6 +401,9 @@ class E2EVideo(FlowCase):
         self.git("reset", "-q")
         self.do(PY + "check_commit.py --stage video v1")
         self.assertEqual(open(os.path.join(self.repo, ".claude", "studio", "pronounce.json")).read(), first)
+        # pilot-1 P8: no untracked leftovers next to what is staged
+        self.assertEqual([l for l in self.git("status", "--porcelain", "--untracked-files=all").splitlines()
+                          if l.startswith("??")], [])
 
     def test_e15_done_after_a_harness_commit(self):
         """E15: done refuses when the last Studio commit was a harness commit (kind and target differ)."""

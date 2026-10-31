@@ -126,3 +126,58 @@ def norm(text):
 
 def shown_in(summary, question):
     return bool(summary) and norm(summary) in norm(question)
+
+
+NEAR_LINES, NEAR_CHARS, NEAR_RATIO = 200, 500, 0.6
+
+
+def first_missing(lines, question):
+    """None when the question shows every line (each normalized line is in the normalized question), else
+    (the first missing line, how many are missing, the question's closest line or None, (i, j) where they first
+    differ in the line and in the closest line) — so a refusal names the line instead of the whole list (pilot-1 P4).
+    The closest line is searched only on a miss: the question's first 200 lines (500 characters each), the best
+    difflib ratio of at least 0.6."""
+    q = norm(question)
+    missing = [l for l in lines if norm(l) not in q]
+    if not missing:
+        return None
+    import difflib
+    want = norm(missing[0])
+    near, best, ops = None, NEAR_RATIO, None
+    for ql in (question or "").splitlines()[:NEAR_LINES]:
+        ql = norm(ql[:NEAR_CHARS])
+        if not ql:
+            continue
+        sm = difflib.SequenceMatcher(None, want, ql)
+        if sm.quick_ratio() < best:
+            continue
+        r = sm.ratio()
+        if r >= best and (near is None or r > best):
+            near, best, ops = ql, r, sm.get_opcodes()
+    pos = None
+    if near is not None:  # the first difference that is not text around the line (a bullet, a wrapped neighbour)
+        for tag, i1, i2, j1, j2 in ops:
+            if tag != "equal" and not (tag == "insert" and i1 in (0, len(want))):
+                pos = (i1, j1)
+                break
+        pos = pos or (len(want), len(near))
+    return missing[0], len(missing), near, pos
+
+
+def _around(text, i):
+    a, b = max(0, i - 10), min(len(text), i + 10)
+    return "%s%s%s" % ("…" if a else "", text[a:b], "…" if b < len(text) else "")
+
+
+def missing_text(miss, printed=None):
+    """The refusal sentence for first_missing's result; `printed` names the command whose output the lines come from
+    (None: the lines are not printed by a command — the overlay's counts)."""
+    line, k, near, pos = miss
+    out = "The question lacks this line (1 of %d missing)%s: %s." % (k, ", exactly as %s printed" % printed
+                                                                      if printed else "", line)
+    if near is None:
+        out += " No line in the question is close to it."
+    else:
+        out += " Closest line in the question: %s (differs at \"%s\" — expected \"%s\")." % (
+            near, _around(near, pos[1]), _around(norm(line), pos[0]))
+    return out + (" Copy the lines from the %s output; do not retype them." % printed if printed else "")

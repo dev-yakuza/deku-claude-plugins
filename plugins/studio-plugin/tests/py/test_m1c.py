@@ -962,7 +962,7 @@ class OverlayQuestion(InitCase):
         self.pend(argv, "사내설정 %s" % h, question="사내설정을 바꿀까요? %s" % h)
         code, err = run()
         self.assertEqual(code, 6)
-        self.assertIn("internal.terms: 2개", err)
+        self.assertIn("lacks this line (1 of 5 missing): internal.hosts: 1개", err)  # pilot-1 P4: the first one
         lines = "\n".join(["internal.hosts: 1개", "internal.sources: 0개", "internal.terms: 2개",
                            "internal.videos: 0개", "internal.actors: 0개"])
         self.pend(argv, "사내설정 %s" % h, question="사내설정을 바꿀까요? %s\n%s" % (h, lines.replace("2개", "3개")))

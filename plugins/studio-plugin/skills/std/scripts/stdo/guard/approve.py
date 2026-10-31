@@ -108,22 +108,27 @@ def state_py(hook, env, ri, argv):
             return Verdict("G-EVIDENCE", "state.py %s: the hook gave no session or call id." % sub)
         base.update({"tool_use_id": tid, "question_index": 0, "question": "proxy", "answer": label, "mode": "proxy"})
         return Verdict(pending=base, ri=ri, reason="proxy approval %s" % label)
+    miss = None
     try:
         ans = transcript.find(hook, env)
         idx, text, note = transcript.choose(ans, label, h12, video=video)
         key = (sid, ans.tool_use_id, idx)
         if consumed(ri, key):
             raise transcript.NoEvidence("consumed")
-        lines = _gate_lines(ri, argv)
+        try:
+            lines = _gate_lines(ri, argv)
+        except Exception as e:  # noqa: BLE001 — closed: lines that cannot be computed are never skipped (pilot-1 P4)
+            raise transcript.NoEvidence("gate-lines-unknown", "%s: %s" % (type(e).__name__, e))
         if lines:
-            from ..commit.summary import norm
-            missing = [l for l in lines if norm(l) not in norm(text)]
-            if missing:
+            from ..commit.summary import first_missing
+            miss = first_missing(lines, text)
+            if miss:
                 raise transcript.NoEvidence("gate-lines-not-shown")
     except transcript.NoEvidence as e:
         extra = ""
-        if e.code == "gate-lines-not-shown":
-            extra = " The question shows: %s" % " / ".join(_gate_lines(ri, argv))
+        if miss:
+            from ..commit.summary import missing_text
+            extra = " " + missing_text(miss, "`shown`" if _gate_of(argv) != "1" else "`shown` (and record-source)")
         return Verdict("G-EVIDENCE", evidence_text("state.py %s" % sub, label, e) + extra)
     base.update({"tool_use_id": ans.tool_use_id, "question_index": idx, "question": text, "answer": label,
                  "mode": "human"})
@@ -132,23 +137,30 @@ def state_py(hook, env, ri, argv):
     return Verdict(pending=base, ri=ri, reason="answer %s#%d (%s)" % (ans.tool_use_id, idx, label))
 
 
+def _gate_of(argv):
+    from ..state.argv import canonical
+    c = canonical(argv)
+    return c["pos"][1] if c["cmd"] == "approve" and len(c["pos"]) >= 2 else None
+
+
 def _gate_lines(ri, argv):
     """The lines a gate question must show besides the label: for ①, every commit to the source after begin (M1e
-    review S5); for ②, what `shown 2` recorded (M1f review V1). Read from the video's state.json; an unreadable state
-    shows nothing here (state.py refuses it)."""
+    review S5); for ②, what `shown 2` recorded (M1f review V1); for ④b, what `shown 4b` recorded for every current
+    platform — whatever --platform says (pilot-1 P4). Read from the video's state.json: no readable state shows
+    nothing here (state.py refuses it); a state the lines cannot be computed from raises (the caller denies)."""
     from ..state.argv import canonical
     c = canonical(argv)
     if c["cmd"] != "approve" or len(c["pos"]) < 2 or c["pos"][1] not in ("1", "2", "4b"):
         return []
-    try:
-        st = labels.read_state(labels.video_dir(ri.worktree, ri.studio_root, c["pos"][0]))
-        if c["pos"][1] == "1":
-            return labels.source_commit_lines(st)
-        if c["pos"][1] == "4b":  # ④b: the copy's facts and their excerpts (M1h review Y2)
-            return labels.gate2_lines(st, c["opt"].get("--lang"), "4b", c["opt"].get("--platform"))
-        return labels.gate2_lines(st, c["opt"].get("--lang"))  # ②: exemptions, readings, conflicts (V1)
-    except Exception:  # noqa: BLE001
+    vdir = labels.video_dir(ri.worktree, ri.studio_root, c["pos"][0])
+    st = labels.read_state(vdir) if vdir else None
+    if st is None:
         return []
+    if c["pos"][1] == "1":
+        return labels.source_commit_lines(st)
+    if c["pos"][1] == "4b":  # ④b: the copy's facts and their excerpts (M1h review Y2)
+        return labels.gate4b_lines(st, c["opt"].get("--lang"))
+    return labels.gate2_lines(st, c["opt"].get("--lang"))  # ②: exemptions, readings, conflicts (V1)
 
 
 def setup_py(hook, env, ri, argv):
@@ -180,12 +192,15 @@ def setup_py(hook, env, ri, argv):
         if consumed(ri, (sid, ans.tool_use_id, idx)):
             raise transcript.NoEvidence("consumed")
         if line is not None:
-            from ..commit.summary import norm
-            if norm(line) not in norm(text):
+            from ..commit.summary import first_missing
+            if first_missing([line], text):
                 raise transcript.NoEvidence("values-not-shown")
     except transcript.NoEvidence as e:
-        return Verdict("G-EVIDENCE", evidence_text(what, label, e) + (" The question shows: %s" % line if line
-                                                                     else ""))
+        extra = " The question shows: %s" % line if line else ""
+        if e.code == "values-not-shown":
+            from ..commit.summary import first_missing, missing_text
+            extra = " " + missing_text(first_missing([line], text), "the preview")
+        return Verdict("G-EVIDENCE", evidence_text(what, label, e) + extra)
     base.update({"tool_use_id": ans.tool_use_id, "question_index": idx, "question": text, "answer": label,
                  "mode": "human"})
     if note:
