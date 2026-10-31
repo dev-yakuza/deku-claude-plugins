@@ -26,7 +26,7 @@ with each video on the platforms you choose.
 claude --plugin-dir plugins/studio-plugin
 ```
 
-Then `/std help`. Requires script2video 0.12.1 or later (set up later by `/std init`).
+Then `/std help`. Requires script2video 0.13.0 or later (set up later by `/std init`).
 
 ## Notes
 

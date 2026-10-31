@@ -13,7 +13,7 @@ from stdo.state import cli, store
 from stdo.state.collect import CollectError, Providers, run_inspect
 
 SCRIPT = ("---\ntitle: Test\nlang: en\noutputs:\n  youtube: { aspect: \"16:9\" }\n"
-          "  shorts: { aspect: \"9:16\" }\n%s---\n\n# Intro {#intro}\n\n%s\n")
+          "  shorts: { aspect: \"9:16\" }\n%s---\n\n# Intro {#intro}\n\n%s\n\n::title[Intro]\n")
 
 
 class RealInspect(StudioTestCase):
@@ -57,7 +57,7 @@ class RealInspect(StudioTestCase):
         a = self.inspect()["hashes"]["presentation_by_output"]
         with open(self.script, "w") as f:
             f.write("---\ntitle: Test\nlang: en\noutputs:\n  youtube: { aspect: \"16:9\" }\n---\n\n"
-                    "# Intro {#intro}\n\nHello there.\n")
+                    "# Intro {#intro}\n\nHello there.\n\n::title[Intro]\n")
         b = self.inspect()["hashes"]["presentation_by_output"]
         self.assertEqual(a["youtube"], b["youtube"])
 

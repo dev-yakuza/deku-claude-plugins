@@ -63,7 +63,7 @@ class Machine(StudioTestCase):
         repo = helpers.make_repo(self.tmp)
         with open(os.path.join(repo, ".claude", "studio", "config.json")) as f:
             cfg = json.load(f)
-        self.assertEqual(cfg["s2v"], {"min_version": "0.12.1"})
+        self.assertEqual(cfg["s2v"], {"min_version": "0.13.0"})
         self.assertIn("s2v", cfg["protected_keys"])
 
     def _video_repo(self, s2v):

@@ -153,14 +153,15 @@ class FlowCase(E2ECase):
         self.write("studio/videos/v1/script.ko.md", SCRIPT % {"s1": S1, "s2": S2, "max": 600, "target": 6})
         self.write("studio/videos/v1/work/ko/claims-map.json", json.dumps({
             "claims": {cid(E1): {"excerpt": E1, "sentences": [S1, "空港(くうこう)"]},
-                       cid(E2): {"excerpt": E2, "sentences": [S2]}},
+                       cid(E2): {"excerpt": E2, "sentences": [S2, "출국"]}},
             "excerpts": [E1, E2], "copy_excerpts": {}}, ensure_ascii=False))
         self.do(PY + "check_claims.py v1 --narration")
         self.do(PY + "state.py stage-done v1 script")
         self.write("studio/videos/v1/work/ko/verify.draft.json", json.dumps({"sentences": [
             {"text": S1, "kind": "fact", "verdict": "supported", "claims": [cid(E1)], "excerpts": [E1]},
             {"text": "空港(くうこう)", "kind": "fact", "verdict": "supported", "claims": [cid(E1)], "excerpts": [E1]},
-            {"text": S2, "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]}]},
+            {"text": S2, "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]},
+            {"text": "출국", "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]}]},
             ensure_ascii=False))
         self.do(PY + "check_claims.py v1")
         self.do(PY + "state.py stage-done v1 verify")

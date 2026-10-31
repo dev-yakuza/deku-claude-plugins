@@ -3,7 +3,8 @@
 Their pass is never the agent's word: the check script runs `lint` (script · cast) or `check` (board) with this
 machine's s2v and folds the exit code and the diagnostics s2v prints on stderr (`<file>[:<line>] <severity> [<code>]
 <message>`) into its result. Every error fails, and so do the warnings Studio treats as failures — over maxDuration,
-targetDuration ±15 % (s2v `lint-budget.ts`: warnings there, exit 0) and subtitles that do not fit."""
+targetDuration ±15 % (s2v `lint-budget.ts`: warnings there, exit 0), subtitles that do not fit and, from s2v 0.13.0, a
+scene that shows only the background (`no-visual`, s2v `lint-visual.ts`; pilot-1 P1)."""
 
 import os
 import re
@@ -11,12 +12,14 @@ import subprocess
 
 DIAG = re.compile(r"^(?P<where>.+?) (?P<severity>error|warning) \[(?P<code>[\w-]+)\] (?P<message>.*)$")
 # s2v's warning codes that fail a Studio check (fixed against real s2v by the --full format comparison, §12.3)
-FAIL_WARNINGS = ("max-duration", "target-duration", "subtitle-budget", "subtitle-overflow")
+FAIL_WARNINGS = ("max-duration", "target-duration", "subtitle-budget", "subtitle-overflow", "no-visual")
 # Latin words left in Korean or Japanese narration: the TTS reads them as English (s2v lint-budget.ts) — a failure for
 # those languages (M1b review Y8)
 FAIL_WARNINGS_BY_LANG = {"ko": ("unread-word",), "ja": ("unread-word",)}
 LANG_RE = re.compile(r"^lang:\s*[\"']?([A-Za-z-]+)", re.M)
 MODES = ("lint", "check")
+# failures whose s2v message is printed too: it names what to fix (`no-visual`: the output and the scene)
+SHOWN_MESSAGES = ("no-visual",)
 
 
 class Result(object):
@@ -33,6 +36,15 @@ class Result(object):
     @property
     def passed(self):
         return self.code == 0 and not self.failures
+
+    def problems(self):
+        """The check's problem lines: `s2v <mode>: <codes>` (or the exit code), then one line per failure whose message
+        names what to fix (SHOWN_MESSAGES) — what the producer hands back to the role. Empty when it passed."""
+        if self.passed:
+            return []
+        out = ["s2v %s: %s" % (self.mode, ", ".join(sorted(set(d["code"] for d in self.failures)))
+                               or "exit %d" % self.code)]
+        return out + ["s2v %s: %s" % (self.mode, d["message"]) for d in self.failures if d["code"] in SHOWN_MESSAGES]
 
     def details(self):
         return {"mode": self.mode, "exit": self.code, "lang": self.lang, "diagnostics": self.diagnostics,

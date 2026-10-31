@@ -146,9 +146,9 @@ def _check_s2v(path, version):
     if info.get("stale_build") is not False:
         raise SetupError(USAGE, "s2v's build at %s is stale (or unknown): run yarn build there first" % path)
     from ..state.flow import _semver
-    have, want = _semver(info.get("version")), (0, 12, 1)
+    have, want = _semver(info.get("version")), (0, 13, 0)
     if have is None or have < want:
-        raise SetupError(USAGE, "s2v %s is older than 0.12.1" % info.get("version"))
+        raise SetupError(USAGE, "s2v %s is older than 0.13.0" % info.get("version"))
     return info
 
 

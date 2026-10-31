@@ -111,6 +111,11 @@ function parseFlags(key, args) {
 }
 
 // ---------- the script ----------
+// the leaf directives that are visuals (s2v parse.ts VISUAL_LEAF); ::shot · ::enter · ::exit are stage directions,
+// any other leaf (::bullets, ::pause …) is an error: it needs a container
+const VISUAL_LEAF = ['title', 'image', 'video', 'thumbnail'];
+const STAGE_DIRECTIONS = ['shot', 'enter', 'exit'];
+
 function splitInline(text) {
   // "{ voice: "qwen:Sohee", style: "a, b" }" -> {voice, style}
   const t = text.trim().replace(/^\{/, '').replace(/\}$/, '');
@@ -147,6 +152,13 @@ function scalar(v) {
   if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t);
   if (t === 'true' || t === 'false') return t === 'true';
   if (t.startsWith('{')) return splitInline(t);
+  if (/^\[.*\]$/s.test(t))
+    return t
+      .slice(1, -1)
+      .split(',')
+      .map((x) => x.trim())
+      .filter((x) => x)
+      .map(scalar);
   return t;
 }
 
@@ -213,17 +225,27 @@ function parseScript(file) {
       scene.blocks.push({ kind: 'screen', type: open[1], text: body.join('\n').trim(), line: start });
       continue;
     }
-    const leaf = /^::(\w+)(\{.*\})?\s*$/.exec(line);
+    // a leaf directive with its label, if any: ::title[공항 단어] is a visual, not narration (s2v parse.ts)
+    const leaf = /^::(\w+)(\[[^\]]*\])?(\{.*\})?\s*$/.exec(line);
     if (leaf) {
       flush();
       ensure();
+      if (STAGE_DIRECTIONS.includes(leaf[1])) {
+        scene.blocks.push({ kind: 'stage', type: leaf[1], line: i + 1 }); // not a visual (s2v parse.ts)
+        continue;
+      }
+      if (!VISUAL_LEAF.includes(leaf[1])) {
+        scene.blocks.push({ kind: 'leaf-error', type: leaf[1], line: i + 1 }); // s2v drops it with an error
+        continue;
+      }
       // a directive attribute, quoted or not (remark): ::image{src="a.png"} · ::image{src=assets/a.png}
-      const m = /(?:^\{|\s)src=(?:"([^"]+)"|'([^']+)'|([^\s}"']+))/.exec(leaf[2] || '');
+      const m = /(?:^\{|\s)src=(?:"([^"]+)"|'([^']+)'|([^\s}"']+))/.exec(leaf[3] || '');
       const src = m && [null, m[1] || m[2] || m[3]];
       // s2v's file kinds (inspect.ts): a video block, the thumbnail, else a picture
       const kind = leaf[1] === 'video' ? 'video' : leaf[1] === 'thumbnail' ? 'thumbnail' : 'image';
       if (src) images.push({ src: src[1], line: i + 1, kind });
-      scene.blocks.push({ kind: 'leaf', type: leaf[1], attrs: leaf[2] || '', line: i + 1 });
+      const label = leaf[2] ? leaf[2].slice(1, -1).trim() : '';
+      scene.blocks.push({ kind: 'leaf', type: leaf[1], label, attrs: leaf[3] || '', line: i + 1 });
       continue;
     }
     if (!line.trim()) {
@@ -311,6 +333,14 @@ function outputsOf(script) {
   return typeof script.fm.outputs === 'object' && script.fm.outputs ? script.fm.outputs : {};
 }
 
+// The scenes of one output: its `scenes: [id, …]` when it lists them (s2v stage.ts selectScenes). The fake does not
+// model a paragraph's `:only`, so every paragraph of a listed scene counts.
+function outputScenes(script, name) {
+  const o = outputsOf(script)[name];
+  const wanted = o && typeof o === 'object' && Array.isArray(o.scenes) ? o.scenes : null;
+  return script.scenes.filter((s) => !wanted || wanted.includes(s.id));
+}
+
 function estimate(script, manifest) {
   const cps = Number(SCENARIO.chars_per_sec || 7);
   let total = 0;
@@ -330,6 +360,41 @@ const fmt = (sec) => {
 const KNOWN_KEYS = ['title', 'lang', 'cast', 'outputs', 'pronounce', 'pacing', 'seed', 'targetDuration', 'subtitleStyle',
   'bgm', 'theme', 'logo', 'sfx', 'transition', 'translationOf', 'allowDrift', 'acting'];
 
+// ---------- no-visual (s2v core lint-visual.ts) ----------
+
+// Whether every cast member who speaks has character art: the presenter is then the picture of every scene. Real s2v
+// also counts the members who only react (:react{…}); the fake ignores :react and takes the paragraph casts only.
+function characterMode(script, scenes) {
+  const cast = [...new Set(scenes.flatMap((s) => s.blocks.filter((b) => b.kind === 'paragraph').map((b) => b.cast)))];
+  return cast.length > 0 && cast.every((k) => !!castSpec(script, k).character);
+}
+
+// The scene's first visual other than ::thumbnail decides: none, or a ::title without a label, is the bare background.
+function sceneHasVisual(scene, character) {
+  if (character) return true;
+  const first = scene.blocks.find((b) => (b.kind === 'leaf' || b.kind === 'screen') && b.type !== 'thumbnail');
+  return !!first && !(first.kind === 'leaf' && first.type === 'title' && !first.label);
+}
+
+// Per output (its scenes, with its own character mode), each scene with narration that shows only the background.
+function lintVisuals(script) {
+  const d = [];
+  for (const name of Object.keys(outputsOf(script))) {
+    const scenes = outputScenes(script, name);
+    const character = characterMode(script, scenes);
+    for (const s of scenes) {
+      if (!s.blocks.some((b) => b.kind === 'paragraph') || sceneHasVisual(s, character)) continue;
+      d.push({
+        severity: 'warning',
+        code: 'no-visual',
+        message: `output "${name}" scene ${s.id}: no visual — the frame shows only the background; add ::title[…], a text card (:::bullets/:::quote/…) or an image`,
+        line: s.line,
+      });
+    }
+  }
+  return d;
+}
+
 function diagnostics(script) {
   const d = [];
   const dir = path.dirname(script.file);
@@ -340,6 +405,8 @@ function diagnostics(script) {
     for (const b of s.blocks)
       if (b.kind === 'image-line')
         d.push({ severity: 'error', code: 'image-line', message: 'an image on its own line is not shown; use ::image{src=…}', line: b.line });
+      else if (b.kind === 'leaf-error')
+        d.push({ severity: 'error', code: 'container-required', message: `"${b.type}" needs a container (:::${b.type} ... :::)`, line: b.line });
   if (!script.fm.lang) d.push({ severity: 'error', code: 'lang', message: 'frontmatter has no lang' });
   if (Object.keys(outputsOf(script)).length === 0)
     d.push({ severity: 'error', code: 'outputs', message: 'frontmatter has no outputs' });
@@ -366,6 +433,7 @@ function diagnostics(script) {
         message: `"${Object.keys(outputsOf(script))[0]}" is ${fmt(secs)} (estimated), ${diff > 0 ? '+' : ''}${Math.round(diff * 100)}% from targetDuration ${fmt(target)} (tolerance ±15%)`,
       });
   }
+  d.push(...lintVisuals(script));
   for (const x of (SCENARIO.lint && SCENARIO.lint.errors) || []) d.push({ severity: 'error', ...x });
   for (const x of (SCENARIO.lint && SCENARIO.lint.warnings) || []) d.push({ severity: 'warning', ...x });
   return d;
@@ -385,7 +453,7 @@ function load(file, keepGoing) {
 
 // ---------- version ----------
 function versionInfo() {
-  const base = { version: '0.12.2', code: 'fakec0de0001', commit: 'f'.repeat(40), dirty: false, stale_build: false, stale_packages: [] };
+  const base = { version: '0.13.0', code: 'fakec0de0001', commit: 'f'.repeat(40), dirty: false, stale_build: false, stale_packages: [] };
   const v = { ...base, ...(SCENARIO.version || {}) };
   if (!('id' in (SCENARIO.version || {}))) v.id = `${v.version}+${v.code}`;
   return v;
@@ -434,7 +502,18 @@ function inspect(script, shownPath) {
       if (b.kind === 'paragraph') put(TABLE.body.paragraph, { scene: s.id, block: bi, cast: b.cast, text: b.text });
       if (b.kind === 'screen') {
         put(TABLE.body.screen, { scene: s.id, block: bi, type: b.type, text: b.text });
+        // screen_text has two shapes here: a container is one {scene, kind, text} with its whole body, a leaf label
+        // is {scene, block, directive, attr, text} as real inspect lists each piece. Studio reads only `text`.
         screen.push({ scene: s.id, kind: b.type, text: b.text });
+      }
+      if (b.kind === 'leaf') {
+        // a visual block is content (s2v inspect.ts): adding one changes content and presentation, its label content
+        put(TABLE.body.visual_block, { scene: s.id, block: bi, visual: b.type });
+        if (b.label) {
+          put(TABLE.body.visual_label, { scene: s.id, block: bi, label: b.label });
+          // the label is on-screen text, as real inspect lists it (directive · attr)
+          screen.push({ scene: s.id, block: bi, directive: b.type, attr: 'label', text: b.label });
+        }
       }
     });
   }
@@ -476,7 +555,7 @@ function inspect(script, shownPath) {
       layout: attrs.layout || 'single',
       thumbnail: (attrs.aspect || '16:9') === '16:9',
       chapters: script.scenes.length > 1,
-      scenes: script.scenes.map((s) => s.id),
+      scenes: outputScenes(script, name).map((s) => s.id),
       framing: {},
     });
   }

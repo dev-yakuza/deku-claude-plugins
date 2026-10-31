@@ -53,6 +53,13 @@
     ],
     "image": [
       "presentation"
+    ],
+    "visual_block": [
+      "content",
+      "presentation"
+    ],
+    "visual_label": [
+      "content"
     ]
   },
   "unknown_keys_refused": true,

@@ -40,9 +40,13 @@ outputs:
 
 narrator: 안녕하세요. 오늘은 공항 단어를 배워요.
 
+::title[공항 단어]
+
 # 끝 {#end}
 
 narrator: 고마워요!
+
+::title[끝]
 """
 
 
@@ -160,7 +164,7 @@ class Begin(FlowCase):
         self.ver["version"] = "0.12.0"
         self.assertEqual(self.begin(), 2)
         self.assertIn("min_version", self.last_err)
-        self.ver["version"] = "0.12.1"
+        self.ver["version"] = "0.13.0"
         self.ver["dirty"] = True
         self.assertEqual(self.begin(), 0, self.last_err)
         self.assertIn("uncommitted changes", self.last_err)
@@ -1099,6 +1103,18 @@ class Lint(StudioTestCase):
         self.assertFalse(r.passed)
         r = self.lint(SCRIPT, {"check": {"overflow": True}}, mode="check")
         self.assertEqual((r.code, r.failures[0]["code"]), (1, "subtitle-overflow"))
+
+    def test_no_visual_fails_unless_every_speaker_has_character_art(self):
+        """pilot-1 P1 (0.0.22): s2v warns `no-visual` and exits 0; the Studio check fails, in lint and check alike."""
+        bare = SCRIPT.replace("\n\n::title[끝]\n", "\n")
+        for mode in ("lint", "check"):
+            r = self.lint(bare, mode=mode)
+            self.assertEqual((r.code, [d["code"] for d in r.failures]), (0, ["no-visual"]), mode)
+            self.assertIn('output "youtube" scene end: no visual', r.failures[0]["message"])
+            self.assertFalse(r.passed)
+        art = bare.replace('style: "차분하게" }', 'style: "차분하게", character: "art/x" }')
+        r = self.lint(art)
+        self.assertTrue(r.passed, r.details())  # the presenter is the picture of every scene
 
 
 # ---------------------------------------------------------------- the guard

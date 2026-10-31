@@ -36,6 +36,8 @@ position. Shared rules: `atoms/_contract.md`.
 4. `python3 .claude/studio/scripts/check_assets.py <video> --actors` — s2v lint (`unread-word` fails from here on),
    content unchanged, the cast in the roster, the readings file. It prints `reading elsewhere: …` for readings that
    differ from HEAD or another video in progress — information for ②, not a failure. Exit 1: fix what it lists.
+   A `no-visual` failure or a content change is not fixed here: go back to `/std script <video>` as in
+   `commands/board.md` step 4 (only the block is added; the rest of the script stays).
 5. `python3 .claude/studio/scripts/state.py stage-done <video> cast`.
 
 ## tts

@@ -13,8 +13,8 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
    format's range; no cast, no acting) and
    `work/<lang>/claims-map.json`.
 3. `python3 .claude/studio/scripts/check_claims.py <video> --narration` — runs `s2v lint` (its length warnings —
-   over `maxDuration`, `targetDuration` ±15 % — fail here although s2v exits 0; `unread-word` is only information at
-   this stage), checks the claims map against the brief and the source copy, that the narration has no kana or kanji
+   over `maxDuration`, `targetDuration` ±15 % — and `no-visual`, a scene that shows only the background, fail here
+   although s2v exits 0; `unread-word` is only information at this stage), checks the claims map against the brief and the source copy, that the narration has no kana or kanji
    (Japanese goes on screen) and that every image is a usable `script_src` of `work/assets.json`. Exit 1: give the
    writer the listed problems and run it again.
 4. `python3 .claude/studio/scripts/state.py stage-done <video> script` — exit 1: run step 3 again (something

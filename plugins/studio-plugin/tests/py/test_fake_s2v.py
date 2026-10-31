@@ -37,6 +37,8 @@ narrator: 안녕하세요. 오늘은 공항 단어를 배워요.
 # 끝 {#end}
 
 narrator: 고마워요!
+
+::title[끝]
 """
 
 
@@ -129,6 +131,70 @@ class Basics(FakeCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("error [subtitle-overflow]", r.stderr)
 
+    def test_title_label_is_not_narration(self):
+        """pilot-1 P1: `::title[끝]` is a visual block with its label (s2v parse.ts), not a sentence."""
+        sents = self.json_of(self.s2v("sentences", self.script, "--json"))
+        self.assertEqual([s["text"] for s in sents], ["안녕하세요.", "오늘은 공항 단어를 배워요.", "고마워요!"])
+        self.assertEqual([s["id"] for s in sents], ["intro:0:0", "intro:0:1", "end:0:0"])
+
+    def test_no_visual(self):
+        """s2v 0.13.0 lint-visual.ts: a scene with narration whose first visual (not ::thumbnail) is missing or a
+        ::title without a label warns per output, with real s2v's message; character art for every speaker exempts."""
+        msg = ('%s:%d warning [no-visual] output "%s" scene end: no visual — the frame shows only the background; '
+               "add ::title[…], a text card (:::bullets/:::quote/…) or an image")
+        line = SCRIPT.split("\n").index("# 끝 {#end}") + 1
+        for n in ("a.png", "t.png"):
+            with open(os.path.join(self.vdir, n), "wb") as f:
+                f.write(b"\x89PNG")
+        for bare in (SCRIPT.replace("\n\n::title[끝]\n", "\n"), SCRIPT.replace("::title[끝]", "::title"),
+                     SCRIPT.replace("::title[끝]", "::thumbnail{src=\"t.png\"}\n\n::title")):
+            self.write_script(bare)
+            r = self.s2v("lint", self.script)
+            self.assertEqual(r.returncode, 0, r.stderr)  # a warning: the exit code does not change
+            for o in ("youtube", "shorts"):
+                self.assertIn(msg % (self.script, line, o), r.stderr)
+            self.assertNotIn("scene intro", r.stderr)
+        for shown in ("::title[끝]", ":::bullets\n- 끝\n:::", "::image{src=\"a.png\"}", "::shot{x}\n\n::title[끝]"):
+            self.write_script(SCRIPT.replace("::title[끝]", shown))
+            self.assertNotIn("[no-visual]", self.s2v("lint", self.script).stderr, shown)
+        # the first visual decides: a label-less title before an image still shows nothing at the scene's start
+        self.write_script(SCRIPT.replace("::title[끝]", "::title\n\n::image{src=\"a.png\"}"))
+        self.assertIn("[no-visual]", self.s2v("lint", self.script).stderr)
+        # every speaker with character art (an inline cast map): the presenter is the picture
+        art = SCRIPT.replace('style: "차분하게" }', 'style: "차분하게", character: "art/x" }')
+        self.write_script(art.replace("\n\n::title[끝]\n", "\n"))
+        self.assertNotIn("[no-visual]", self.s2v("lint", self.script).stderr)
+        # a speaker without art (an unknown cast is an error too) takes the exemption away
+        self.write_script(art.replace("\n\n::title[끝]\n", "\n").replace("narrator: 고마워요!", "guest: 고마워요!"))
+        self.assertIn("[no-visual]", self.s2v("lint", self.script).stderr)
+
+    def test_no_visual_per_output(self):
+        """Each output lints its own scenes (`scenes: [...]`, s2v stage.ts) with its own character mode."""
+        bare = SCRIPT.replace("\n\n::title[끝]\n", "\n").replace('shorts: { aspect: "9:16" }',
+                                                                     'shorts: { aspect: "9:16", scenes: [intro] }')
+        self.write_script(bare)
+        r = self.s2v("lint", self.script)
+        self.assertIn('output "youtube" scene end: no visual', r.stderr)
+        self.assertNotIn('output "shorts"', r.stderr)
+        self.assertEqual([o["scenes"] for o in self.json_of(self.s2v("inspect", self.script, "--json"))["outputs"]],
+                         [["intro", "end"], ["intro"]])
+        # the guest without art speaks only in `end`: shorts (intro only) is in character mode, youtube is not
+        art = bare.replace('style: "차분하게" }', 'style: "차분하게", character: "art/x" }\n  guest: { voice: "qwen:Ryan" }')
+        self.write_script(art.replace("narrator: 고마워요!", "guest: 고마워요!").replace(
+            "narrator: 안녕하세요. 오늘은 공항 단어를 배워요.\n\n:::quote\n空港\n:::",
+            "narrator: 안녕하세요. 오늘은 공항 단어를 배워요."))
+        r = self.s2v("lint", self.script)
+        self.assertIn('output "youtube" scene intro: no visual', r.stderr)
+        self.assertNotIn('output "shorts"', r.stderr)
+
+    def test_only_visual_leaves(self):
+        """s2v parse.ts: title · image · video · thumbnail are leaf visuals; another leaf needs a container."""
+        self.write_script(SCRIPT.replace("::title[끝]", "::bullets[끝]"))
+        r = self.s2v("lint", self.script)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('error [container-required] "bullets" needs a container (:::bullets ... :::)', r.stderr)
+        self.assertIn("[no-visual]", r.stderr)  # dropped: the scene shows nothing
+
 
 class Inspect(FakeCase):
     def inspect(self, path=None):
@@ -181,6 +247,12 @@ class Inspect(FakeCase):
         self.assertIn("an image on its own line is not shown", r.stderr)
         self.write_script(SCRIPT)
         self.assertEqual(changed(SCRIPT.replace("---\n\n#", "theme: dark\n---\n\n#", 1)), {"presentation"})
+        # 0.0.22: a visual block is content (board cannot add one); its label is content and on-screen text
+        self.assertEqual(changed(SCRIPT.replace("::title[끝]\n", "::title[끝]\n\n::title[고마워요]\n")),
+                         {"content", "presentation"})
+        self.assertEqual(changed(SCRIPT.replace("::title[끝]", "::title[마침]")), {"content"})
+        self.assertIn({"scene": "end", "block": 1, "directive": "title", "attr": "label", "text": "끝"},
+                      self.inspect()["screen_text"])
 
     def test_videos_differ_and_same_text_matches(self):
         other = os.path.join(self.repo, "studio", "videos", "v2")

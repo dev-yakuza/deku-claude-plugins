@@ -32,7 +32,8 @@ gates are approved by the person again; the wrapper then renders without the wat
    question — run `python3 .claude/studio/scripts/state.py approve <video> 4a --expect <h12> --output youtube`.
 4. "고칠 곳이 있다": back to the stage the change belongs to (board for pictures, cast/tts for the voice).
 
-A new render (any change of the mp4) needs ④a again.
+A new render (any change of the mp4) needs ④a again. The render's `*.description.md` is s2v's Markdown draft: ④a does
+not show it and it is not uploaded — the upload text is ④b's copy.
 
 <!-- studio:guard-refusal -->
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way

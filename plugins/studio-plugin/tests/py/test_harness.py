@@ -73,7 +73,7 @@ class Repos(StudioTestCase):
                     "web_roots", "allow_internal_commits", "roles", "models", "gates",
                     "commit_audio", "character_generation", "studio_root", "protected_keys"):
             self.assertIn(key, cfg)
-        self.assertEqual(cfg["s2v"]["min_version"], "0.12.1")
+        self.assertEqual(cfg["s2v"]["min_version"], "0.13.0")
         for key in ("visibility", "internal_overlay", "public_domains", "web_roots",
                     "allow_internal_commits", "s2v", "models", "gates", "roles"):
             self.assertIn(key, cfg["protected_keys"])
@@ -162,12 +162,12 @@ class S2VDetection(unittest.TestCase):
         self.assertIn("dist/main.js", helpers.resolve_s2v({"STUDIO_TEST_S2V": "/nonexistent"})[1])
 
     def test_version_rules(self):
-        ok = {"version": "0.12.1", "id": "0.12.1+abc", "stale_build": False}
+        ok = {"version": "0.13.0", "id": "0.13.0+abc", "stale_build": False}
         self.assertEqual(helpers.check_version_info(ok), [])
-        self.assertTrue(helpers.check_version_info(dict(ok, version="0.12.0")))
+        self.assertTrue(helpers.check_version_info(dict(ok, version="0.12.2")))
         self.assertTrue(helpers.check_version_info(dict(ok, stale_build=True)))
         self.assertTrue(helpers.check_version_info(dict(ok, version="x")))
-        self.assertEqual(helpers.check_version_info(dict(ok, version="0.13.0")), [])
+        self.assertEqual(helpers.check_version_info(dict(ok, version="0.14.0")), [])
 
 
 class RealS2V(StudioTestCase):

@@ -265,3 +265,16 @@ class Effects(ApproveCase):
         self.assertIn("approved by proxy", self.last_out)
         self.assertEqual(self.approve("1", h), 0)
         self.assertEqual(self.state()["langs"]["ko"]["approved"]["1"]["approved_by"], "human")
+
+
+class ClockTick(ApproveCase):
+    def test_a_tick_between_the_event_and_the_state_keeps_them_equal(self):
+        """0.0.22: approve built its record twice (event, state), each with now(); a second boundary between the
+        two left the state's `at` without a matching event, and the video commit refused it as edited by hand."""
+        from unittest import mock
+        from stdo.commit import approvals
+        from stdo.state import schema
+        ticks = iter(range(10 ** 6))
+        with mock.patch.object(schema, "now", lambda: "2026-11-01T00:%02d:%02dZ" % divmod(next(ticks) % 3600, 60)):
+            self.pass_all()
+        self.assertEqual([p.message for p in approvals.light_check(self.vdir, "v1")], [])

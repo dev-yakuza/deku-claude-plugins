@@ -15,7 +15,7 @@ from stdo.state.argv import argv_sha
 from stdo.state.collect import run_inspect
 from stdo.state.hashes import brief_core, hash_of
 
-SCRIPT = "---\ntitle: Test\nlang: en\noutputs:\n  youtube: { aspect: \"16:9\" }\n---\n\n# Intro {#intro}\n\nHello there.\n"
+SCRIPT = "---\ntitle: Test\nlang: en\noutputs:\n  youtube: { aspect: \"16:9\" }\n---\n\n# Intro {#intro}\n\nHello there.\n\n::title[Intro]\n"
 
 
 class RealApprove(StudioTestCase):

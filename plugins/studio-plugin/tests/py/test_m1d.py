@@ -21,7 +21,7 @@ from test_guard_judge import JudgeCase
 sys.path.insert(0, os.path.join(helpers.HERE, "drivers"))
 import make_harness  # noqa: E402
 
-VER = {"id": "0.12.2+x", "version": "0.12.2", "commit": "c" * 40, "dirty": False, "stale_build": False}
+VER = {"id": "0.13.0+x", "version": "0.13.0", "commit": "c" * 40, "dirty": False, "stale_build": False}
 
 
 def png(w=4, h=3):
@@ -543,5 +543,5 @@ class P6(StudioTestCase):
             self.assertEqual(code, 2, key)
             self.assertIn("exactly s2v.path", err.getvalue())
         with open(os.path.join(repo, ".claude", "studio", "config.json")) as f:
-            self.assertEqual(json.load(f)["s2v"], {"min_version": "0.12.1"})
+            self.assertEqual(json.load(f)["s2v"], {"min_version": "0.13.0"})
 

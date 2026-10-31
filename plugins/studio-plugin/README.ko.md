@@ -25,7 +25,7 @@ Claude Code용 **레포별 영상 제작 조직**입니다. Studio는 레포에 
 claude --plugin-dir plugins/studio-plugin
 ```
 
-그다음 `/std help`. script2video 0.12.1 이상이 필요합니다(나중에 `/std init`이 설정).
+그다음 `/std help`. script2video 0.13.0 이상이 필요합니다(나중에 `/std init`이 설정).
 
 ## 참고
 

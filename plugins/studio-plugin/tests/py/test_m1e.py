@@ -69,6 +69,8 @@ targetDuration: %(target)s
 # 출국 {#exit}
 
 %(s2)s
+
+::title[출국]
 """
 
 
@@ -220,6 +222,12 @@ class Brief(StoreCase):
 # ---------------------------------------------------------------- a video through source with the fake s2v
 
 class FlowCase(StudioTestCase):
+    # the source article, its pictures under docs/img (name → bytes) and the analyst's classes of its images; a
+    # subclass may add a picture (test_m1g.LogoCredit)
+    article = ARTICLE
+    pictures = {"gate.png": None}
+    analyst_images = {"img-01": {"class": "diagram", "reason": "own"}}
+
     def setUp(self):
         need_node()
         super().setUp()
@@ -235,9 +243,10 @@ class FlowCase(StudioTestCase):
         F.write_format(self.repo, length=(1, 600), commit=False)
         os.makedirs(os.path.join(self.repo, "docs", "img"))
         with open(os.path.join(self.repo, "docs", "airport.md"), "w") as f:
-            f.write(ARTICLE)
-        with open(os.path.join(self.repo, "docs", "img", "gate.png"), "wb") as f:
-            f.write(png())
+            f.write(self.article)
+        for name, data in self.pictures.items():
+            with open(os.path.join(self.repo, "docs", "img", name), "wb") as f:
+                f.write(png() if data is None else data)
         helpers.git(self.repo, "add", "-A")
         helpers.git(self.repo, "commit", "-q", "--no-verify", "-m", "site")
         self.scenario({})
@@ -272,7 +281,7 @@ class FlowCase(StudioTestCase):
             f.write("# Source\n\n## Claims\n- %s: the counter first\n  > %s\n- %s: then passport control\n  > %s\n\n"
                     "## Ruby pairs\n- 空港 → くうこう\n\n<!-- studio:images -->\n```json\n%s\n```\n"
                     "<!-- /studio:images -->\n%s" % (cid(E1), E1, cid(E2), E2,
-                                                    json.dumps({"img-01": {"class": "diagram", "reason": "own"}}),
+                                                    json.dumps(self.analyst_images),
                                                     extra))
 
     def to_brief(self):
@@ -292,7 +301,7 @@ class FlowCase(StudioTestCase):
 
     def cmap(self, **over):
         m = {"claims": {cid(E1): {"excerpt": E1, "sentences": [S1, "空港(くうこう)"]},
-                        cid(E2): {"excerpt": E2, "sentences": [S2]}},
+                        cid(E2): {"excerpt": E2, "sentences": [S2, "출국"]}},
              "excerpts": [E1, E2], "copy_excerpts": {}}
         m.update(over)
         os.makedirs(self.w, exist_ok=True)
@@ -347,6 +356,22 @@ class ScriptCheck(FlowCase):
         self.script(target=60)
         self.assertEqual(self.check("--narration"), 1)
         self.assertIn("target-duration", self.out)
+
+    def test_no_visual_fails_at_script(self):
+        """pilot-1 P1 (0.0.22): a scene that shows only the background is fixed by the writer, not at board."""
+        self.to_script()
+        with open(os.path.join(self.vdir, "script.ko.md")) as f:
+            text = f.read()
+        for bare in (text.replace("\n\n::title[출국]\n", "\n"), text.replace("::title[출국]", "::title")):
+            with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
+                f.write(bare)
+            self.assertEqual(self.check("--narration"), 1)
+            self.assertIn("s2v lint: no-visual", self.out)
+            self.assertIn('s2v lint: output "youtube" scene exit: no visual — the frame shows only the background',
+                          self.out)  # the writer is told which scene
+            self.assertEqual(self.result()["details"]["lint"]["failures"], ["no-visual"])
+        self.script()
+        self.assertEqual(self.check("--narration"), 0, self.out)
 
     def test_s6_length_follows_the_format(self):
         self.to_script()
@@ -448,6 +473,8 @@ class VerifyCheck(FlowCase):
             {"text": "空港(くうこう)", "kind": "fact", "verdict": "supported", "claims": [cid(E1)],
              "excerpts": [E1]},
             {"text": S2, "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]},
+            # the title label of scene exit: on-screen text, judged like the narration
+            {"text": "출국", "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]},
         ]
         d = {"sentences": sentences}
         d.update(over)
@@ -466,7 +493,7 @@ class VerifyCheck(FlowCase):
         self.assertEqual(self.check(), 0, self.out)
         with open(os.path.join(self.w, "verify.json")) as f:
             v = json.load(f)
-        self.assertEqual([s["text"] for s in v["sentences"]], [S1, "空港(くうこう)", S2])
+        self.assertEqual([s["text"] for s in v["sentences"]], [S1, "空港(くうこう)", S2, "출국"])
         self.assertEqual(v["from"]["draft"], file_sha(os.path.join(self.w, "verify.draft.json")))
         with open(os.path.join(self.w, "verify.md")) as f:
             md = f.read()
@@ -503,6 +530,7 @@ class VerifyCheck(FlowCase):
             (good[:2], "not judged: " + S2),
             (good[1:], "not judged: " + S1),
             ([good[0], good[2]], "not judged: 空港(くうこう)"),
+            (good[:3], "not judged: 출국"),  # 0.0.22: a title's label is on-screen text (inspect screen_text)
         ]
         for sentences, why in cases:
             self.draft(sentences=sentences)
@@ -627,12 +655,33 @@ class RealLint(StudioTestCase):
         with open(script, "w") as f:
             f.write("---\ntitle: 공항 단어\nlang: ko\ncast:\n  narrator: { voice: \"qwen:Sohee\", style: \"차분하게\" }\n"
                     "outputs:\n  youtube: { aspect: \"16:9\", maxDuration: 1 }\n---\n\n# 시작 {#intro}\n\n"
-                    "narrator: 안녕하세요. 오늘은 공항에서 쓰는 단어를 천천히 배워 볼게요. 체크인 카운터부터 시작합니다.\n")
+                    "narrator: 안녕하세요. 오늘은 공항에서 쓰는 단어를 천천히 배워 볼게요. 체크인 카운터부터 시작합니다.\n\n"
+                    "::title[공항 단어]\n")
         r = s2vlint.run(path, script, "lint", env=helpers.s2v_env(os.path.join(self.tmp, "s2v")),
                         fail_unread=schema.STAGE_CHECKS["script"]["fail_unread"])
         self.assertEqual(r.code, 0, r.stderr_tail)
         self.assertIn("max-duration", [d["code"] for d in r.failures])
         self.assertFalse(r.passed)
+
+    def test_no_visual_with_real_s2v(self):
+        """--full (0.0.22): real s2v 0.13.0 exits 0 with `no-visual` and the message the fake mirrors; Studio fails."""
+        path = helpers.s2v_path(self)
+        repo = helpers.make_repo(self.tmp)
+        script = os.path.join(repo, "studio", "videos", "v1", "script.ko.md")
+        os.makedirs(os.path.dirname(script))
+        with open(script, "w") as f:
+            f.write("---\ntitle: 공항 단어\nlang: ko\ncast:\n  narrator: { voice: \"qwen:Sohee\", style: \"차분하게\" }\n"
+                    "outputs:\n  youtube: { aspect: \"16:9\" }\n---\n\n# 시작 {#intro}\n\n"
+                    "narrator: 안녕하세요.\n\n::title[공항 단어]\n\n# 끝 {#end}\n\nnarrator: 고마워요.\n")
+        r = s2vlint.run(path, script, "lint", env=helpers.s2v_env(os.path.join(self.tmp, "s2v")),
+                        fail_unread=schema.STAGE_CHECKS["script"]["fail_unread"])
+        self.assertEqual(r.code, 0, r.stderr_tail)
+        self.assertEqual([d["code"] for d in r.failures], ["no-visual"])
+        self.assertEqual(r.failures[0]["message"],
+                         'output "youtube" scene end: no visual — the frame shows only the background; add ::title[…], '
+                         "a text card (:::bullets/:::quote/…) or an image")
+        self.assertFalse(r.passed)
+        self.assertEqual(r.problems()[1], "s2v lint: " + r.failures[0]["message"])
 
 
 # ---------------------------------------------------------------- gate ①

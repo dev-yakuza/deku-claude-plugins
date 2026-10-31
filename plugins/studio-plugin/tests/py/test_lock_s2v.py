@@ -16,7 +16,7 @@ DRIVERS = os.path.join(helpers.HERE, "drivers")
 FAKE = os.path.join(DRIVERS, "fake_s2v.py")
 LOCK_DRIVER = os.path.join(DRIVERS, "lock_driver.py")
 LOCK_PY = os.path.join(helpers.SCRIPTS, "lock.py")
-SCRIPT = "---\ntitle: Lock test\nlang: en\n---\n\n# Intro {#intro}\n\nHello there.\n"
+SCRIPT = "---\ntitle: Lock test\nlang: en\n---\n\n# Intro {#intro}\n\nHello there.\n\n::title[Intro]\n"
 MANIFEST = {"version": 1, "lang": "en", "entries": {}, "sentences": {}, "env": {}}
 
 

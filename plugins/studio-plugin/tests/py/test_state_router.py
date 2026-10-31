@@ -354,6 +354,30 @@ class StageDone(unittest.TestCase):
         F.done(s, "verify", c2)
         self.assertEqual(decide(s, "ko", c2, enter="1").enter, "allowed")
 
+    def test_script_change_after_two_goes_back_to_one_with_two_stale(self):
+        """pilot-1 P1c (0.0.22, board.md step 4): a block added at the script stage after ② changes the content;
+        `next --enter script` is allowed, the flow goes through verify to ①, and ② is stale until the cast check."""
+        s, c = F.state(), F.current()
+        F.approve_all(s, c, upto="2")
+        # board done (its check then fails on no-visual): entering script before any edit is allowed
+        F.done(s, "board", c, o="youtube")
+        self.assertEqual(decide(s, "ko", c, enter="script").enter, "allowed")
+        # the added block: content and presentation; the voice hash stays (unchanged sentences keep their audio)
+        c2 = F.changed(c, content="c2", presentation={"youtube": "p2"})
+        self.assertEqual(decide(s, "ko", c2, enter="script").enter, "allowed")
+        F.done(s, "script", c2)
+        self.assertEqual(redo(decide(s, "ko", c2)), ("verify", None, None))
+        d = decide(s, "ko", c2, enter="2")
+        self.assertEqual((d.enter, redo(d)), ("refused", ("verify", None, None)))
+        self.assertEqual(decide(s, "ko", c2, enter="board", output="youtube").enter, "refused")
+        F.done(s, "verify", c2)
+        self.assertEqual(decide(s, "ko", c2, enter="1").enter, "allowed")
+        F.approve(s, "1", c2, excerpts=["The cat sat on the mat."])
+        d = decide(s, "ko", c2)
+        self.assertEqual(redo(d), ("cast", None, None))
+        self.assertEqual(d.redo["why"], ["content changed upstream of 2"])  # ② is stale
+        self.assertEqual(decide(s, "ko", c2, enter="board", output="youtube").enter, "refused")
+
     def test_an_older_tuple_does_not_unlock(self):
         s, c = F.state(), F.current()
         F.approve_all(s, c)

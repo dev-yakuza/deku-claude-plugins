@@ -30,7 +30,7 @@ from stdo import machine, paths, writes  # noqa: E402
 
 writes.enable()  # the test process stands in for Studio's entry scripts (test_m1b checks the flag in a fresh process)
 
-MIN_S2V = (0, 12, 1)
+MIN_S2V = (0, 13, 0)
 LEAK_VARS = ("S2V_HEAVY_LOCK_TOKEN", "S2V_ACTOR_LOCK_TOKEN")
 FAKE_UV_EXIT = 97
 S2V_ENV = "STUDIO_TEST_S2V"
@@ -89,7 +89,7 @@ def check_version_info(info):
 
 
 GUIDANCE = (
-    "set %s to the absolute path of a script2video checkout (0.12.1 or later, built with "
+    "set %s to the absolute path of a script2video checkout (0.13.0 or later, built with "
     "`yarn build`) to run this test; `run_tests.sh --full` requires it" % S2V_ENV
 )
 
@@ -116,7 +116,7 @@ _s2v_cache = {}
 
 def s2v_path(case=None):
     """The checked s2v repository. Unset STUDIO_TEST_S2V: skip (default run) or fail (--full).
-    Set but unusable (missing, older than 0.12.1, stale build): fail in any mode."""
+    Set but unusable (missing, older than 0.13.0, stale build): fail in any mode."""
     if "result" not in _s2v_cache:
         unset = not os.environ.get(S2V_ENV)
         path, why = resolve_s2v()

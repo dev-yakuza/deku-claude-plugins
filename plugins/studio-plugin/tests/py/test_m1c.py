@@ -28,7 +28,7 @@ from test_guard_judge import JudgeCase
 FAKE_ROOT = os.path.join(helpers.HERE, "drivers", "fake_s2v_cli")
 SETUP = os.path.join(helpers.SCRIPTS, "setup.py")
 SID = "sess-m1c"
-VERSION = {"id": "0.12.2+fakec0de0001", "version": "0.12.2", "stale_build": False, "commit": "f" * 40, "dirty": False}
+VERSION = {"id": "0.13.0+fakec0de0001", "version": "0.13.0", "stale_build": False, "commit": "f" * 40, "dirty": False}
 
 
 def need_node():
@@ -196,7 +196,7 @@ class Init(InitCase):
     def test_apply_writes_the_harness(self):
         self.init()
         cfg = self.cfg()
-        self.assertEqual(cfg["s2v"], {"min_version": "0.12.1"})
+        self.assertEqual(cfg["s2v"], {"min_version": "0.13.0"})
         self.assertEqual(cfg["visibility"]["public"], ["src/content/blog/**", "public/blog-images/**"])
         self.assertEqual(cfg["web_roots"], {"/": "public/"})
         self.assertEqual(machine.s2v_path(self.repo), FAKE_ROOT)
@@ -254,7 +254,7 @@ class Init(InitCase):
         with open(p, "w") as f:
             json.dump(self.answers(), f)
         self.assertEqual(self.setup("init", "plan", "--answers", p), 0, self.last_err)
-        self.version["id"] = "0.12.2+changed"
+        self.version["id"] = "0.13.0+changed"
         self.assertEqual(self.setup("init", "apply"), 1)
         self.assertIn("no longer matches", self.last_err)
         self.assertFalse(os.path.exists(os.path.join(self.repo, ".claude", "studio", "config.json")))
@@ -608,7 +608,7 @@ class FirstInstall(InitCase):
         r = self.script("check_commit.py", "--stage", "harness")
         self.assertEqual(r.returncode, 0, r.stderr)
         ok, _ = okfile.read(self.repo)
-        self.assertEqual(ok["values_machine"], values.machine_lines(FAKE_ROOT, "0.12.2+fakec0de0001"))
+        self.assertEqual(ok["values_machine"], values.machine_lines(FAKE_ROOT, "0.13.0+fakec0de0001"))
         self.assertIn('visibility: (없음) → {"default":"unknown","public":["src/content/blog/**",'
                       '"public/blog-images/**"]}', ok["values_shown"])
         self.assertIn('내레이터: narrator ko qwen:Sohee "차분하게" (새로)', ok["values_shown"])
@@ -633,7 +633,7 @@ class FirstInstall(InitCase):
         self.assertIn("first-install-overflow", r.stderr)  # the warning
         with open(os.path.join(self.repo, ok["overflow"]["file"])) as f:
             body = f.read()
-        self.assertIn("s2v id: 0.12.2+fakec0de0001", body)  # the machine part is in the file
+        self.assertIn("s2v id: 0.13.0+fakec0de0001", body)  # the machine part is in the file
 
     def test_s2v_unreadable_at_first_install(self):
         self.init()
@@ -847,7 +847,7 @@ class Update(InitCase):
             json.dump({"video": "v1", "langs": {"ko": {"status": "done"}}}, f)
         p = self.plan()
         self.assertEqual(self.apply(p), 0, self.last_err)
-        self.assertEqual(self.cfg()["s2v"]["min_version"], "0.12.1")
+        self.assertEqual(self.cfg()["s2v"]["min_version"], "0.13.0")
 
 
 # ---------------------------------------------------------------- the guard
@@ -994,7 +994,7 @@ class InitE2E(InitCase):
         label = line.split(" | ")[0]
         from test_e2e_m0 import values_of
         vals = values_of(r.out)
-        self.assertIn("s2v id: 0.12.2+fakec0de0001", vals)
+        self.assertIn("s2v id: 0.13.0+fakec0de0001", vals)
         # the summary line alone is not enough
         s.ask("하네스를 커밋할까요?\n" + line, [label, "고칠 곳이 있다"], label)
         r = s.bash('git commit -m "studio: harness"')

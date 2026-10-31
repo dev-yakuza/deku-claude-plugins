@@ -25,7 +25,7 @@ Claude Code 向けの**リポジトリごとの動画制作組織**です。Stud
 claude --plugin-dir plugins/studio-plugin
 ```
 
-その後 `/std help`。script2video 0.12.1 以上が必要です(のちに `/std init` が設定します)。
+その後 `/std help`。script2video 0.13.0 以上が必要です(のちに `/std init` が設定します)。
 
 ## 補足
 

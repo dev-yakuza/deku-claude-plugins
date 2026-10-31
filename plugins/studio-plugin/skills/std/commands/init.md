@@ -12,7 +12,7 @@ real value before the call), never a variable in command position. Shared rules:
   HEAD), stop: the harness is here — offer `/std config` or `/std update`.
 - `python3 --version` — 3.9 or newer.
 - Ask the person for this machine's script2video checkout (an absolute path), then run, with that literal path:
-  `node <s2v path>/packages/cli/dist/main.js --version --json` (0.12.1 or newer, `stale_build: false`) and
+  `node <s2v path>/packages/cli/dist/main.js --version --json` (0.13.0 or newer, `stale_build: false`) and
   `node <s2v path>/packages/cli/dist/main.js doctor`. A failure: stop and tell the person what to fix (`yarn build`,
   models). Warn when Claude Code is not 2.1.304 (`claude --version`).
 

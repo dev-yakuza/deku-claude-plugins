@@ -16,9 +16,11 @@ from stdo.state import router, stagechecks, store
 from stdo.state.hashes import file_sha
 from stdo.voice import cli as vcli, numbers, tts
 from test_guard_judge import JudgeCase
+from test_m1e import ARTICLE, png
 from test_m1f import S1_ID, VoiceCase, stamp
 
 IMG = "../../../docs/img/gate.png"
+LOGO = "../../../docs/img/logo.png"  # a second picture of the source, used only as the frontmatter logo (X1)
 
 
 class BoardCase(VoiceCase):
@@ -29,8 +31,8 @@ class BoardCase(VoiceCase):
         self.to_audition()
         self.approve("2")
 
-    def credit_draft(self, **over):
-        item = {"path": IMG, "license": "own work", "credit_line": "the author", "floor": "public/-",
+    def credit_draft(self, path=IMG, **over):
+        item = {"path": path, "license": "own work", "credit_line": "the author", "floor": "public/-",
                 "license_checked": True, "public_ok": True, "redistribute": True, "commercial": True}
         item.update(over)
         for k in [k for k, v in over.items() if v is None]:
@@ -39,18 +41,18 @@ class BoardCase(VoiceCase):
             json.dump({"schema": 1, "items": [item]}, f, ensure_ascii=False)
         return item
 
-    def preview(self):
-        code = self.state("credit-preview", "v1", IMG)
+    def preview(self, path=IMG):
+        code = self.state("credit-preview", "v1", path)
         lines = [l for l in self.out.splitlines() if "=" in l and not l.startswith(("label", "이전"))]
         h = [l.split()[-1] for l in self.out.splitlines() if l.startswith("label 출처 ")]
         return code, lines, (h[0] if h else None)
 
-    def credit(self, lines=None, h=None, question=None):
+    def credit(self, lines=None, h=None, question=None, path=IMG):
         if h is None:
-            _c, lines, h = self.preview()
-        argv = ["credit", "v1", IMG, "--expect", h]
+            _c, lines, h = self.preview(path)
+        argv = ["credit", "v1", path, "--expect", h]
         self.tool += 1
-        q = question if question is not None else "[v1] 출처 — %s · hash %s\n%s" % (IMG, h, "\n".join(lines))
+        q = question if question is not None else "[v1] 출처 — %s · hash %s\n%s" % (path, h, "\n".join(lines))
         from stdo.state import evidence
         from stdo.state.argv import argv_sha
         ev = {"schema": 1, "argv_sha": argv_sha(argv), "session_id": "sess-m1f", "tool_use_id": "toolu_c%d" % self.tool,
@@ -209,18 +211,15 @@ class Credit(BoardCase):
         self.assertIn("needs license_checked: true", " ".join(problems(license="TODO", license_checked=False)))
         self.assertEqual(problems(license="see README", license_checked=True), [])
 
-    def test_x1_frontmatter_logo_is_a_picture(self):
+    def test_removing_a_block_at_board_is_a_content_change(self):
+        """0.0.22: visual blocks are in the content hash — a block removed at board goes back to script."""
+        self.to_board()
         with open(os.path.join(self.vdir, "script.ko.md")) as f:
             text = f.read()
-        text = text.replace('::image{src="%s"}\n' % IMG, "")  # the image only as the logo
-        text = text.replace("lang: ko\n", "lang: ko\ntheme: dark\nlogo: { src: \"%s\" }\n" % IMG, 1)
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
-            f.write(text)
+            f.write(text.replace('::image{src="%s"}\n' % IMG, ""))
         self.assertEqual(self.check_board(), 1)
-        self.assertIn("%s has no CREDITS entry" % IMG, self.out)
-        self.credit_draft()
-        self.assertEqual(self.credit(), 0, self.err)
-        self.assertEqual(self.check_board(), 0, self.out)
+        self.assertIn("content changed since ②", self.out)
 
     def test_x1_unknown_kinds_fail_closed_and_fonts_are_listed(self):
         self.assertTrue(board.is_picture("sticker"))
@@ -259,6 +258,19 @@ class Credit(BoardCase):
         self.assertEqual(self.check_board(), 1)
         self.assertIn("s2v check: subtitle-overflow", self.out)
 
+    def test_no_visual_fails_at_board(self):
+        """pilot-1 P1 (0.0.22): s2v check's `no-visual` warning fails the board check, with the scene named; the
+        removed block is a content change too (visual blocks are in the content hash) — both send it to script."""
+        self.to_board()
+        with open(os.path.join(self.vdir, "script.ko.md")) as f:
+            text = f.read()
+        with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
+            f.write(text.replace("\n\n::title[출국]\n", "\n"))
+        self.assertEqual(self.check_board(), 1)
+        self.assertIn("s2v check: no-visual", self.out)
+        self.assertIn('s2v check: output "youtube" scene exit: no visual', self.out)
+        self.assertIn("content changed since ②", self.out)
+
     def test_content_must_stay(self):
         self.to_board()
         with open(os.path.join(self.vdir, "script.ko.md")) as f:
@@ -267,6 +279,30 @@ class Credit(BoardCase):
             f.write(text.replace("체크인 카운터", "체크인 창구"))
         self.assertEqual(self.check_board(), 1)
         self.assertIn("content changed since ②", self.out)
+
+
+class LogoCredit(BoardCase):
+    """X1: a picture of the source used only as the frontmatter logo is a picture — it needs its credit, and once it
+    is credited board passes. The ::image block stays (a removed block is a content change, 0.0.22)."""
+    article = ARTICLE + "\n![logo](img/logo.png)\n"
+    pictures = {"gate.png": None, "logo.png": png(5, 4)}
+    analyst_images = {"img-01": {"class": "diagram", "reason": "own"}, "img-02": {"class": "diagram", "reason": "own"}}
+
+    def test_x1_frontmatter_logo_is_a_picture(self):
+        self.to_board()
+        with open(os.path.join(self.vdir, "script.ko.md")) as f:
+            text = f.read()
+        with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
+            f.write(text.replace("theme: dark\n", "theme: dark\nlogo: { src: \"%s\" }\n" % LOGO, 1))
+        self.assertEqual(self.check_board(), 1)
+        self.assertIn("%s has no CREDITS entry" % LOGO, self.out)
+        self.assertNotIn("content changed", self.out)  # the logo is presentation
+        with open(os.path.join(self.vdir, credits.DRAFT)) as f:
+            items = json.load(f)["items"]
+        with open(os.path.join(self.vdir, credits.DRAFT), "w") as f:
+            json.dump({"schema": 1, "items": items + [dict(items[0], path=LOGO)]}, f, ensure_ascii=False)
+        self.assertEqual(self.credit(path=LOGO), 0, self.err)
+        self.assertEqual(self.check_board(), 0, self.out)  # a credited logo-only picture lets board pass
 
 
 class RouterBoard(StudioTestCase):

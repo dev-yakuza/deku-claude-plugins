@@ -77,9 +77,7 @@ def check(repo, root, vdir, state, lang, ctx, providers, env, runner, ctx_of=Non
     fail_unread = schema.STAGE_CHECKS["cast"]["fail_unread"]
     lint = s2vlint.run(ctx["s2v_path"], ctx["script"], "lint", env=env, runner=runner, lang=lang,
                        fail_unread=fail_unread)
-    if not lint.passed:
-        problems.append("s2v lint: %s" % (", ".join(sorted(set(d["code"] for d in lint.failures)))
-                                          or "exit %d" % lint.code))
+    problems += lint.problems()
     ins = providers.inspect(ctx)
     cur = providers.collect(ctx, state, lang, ins=ins)
     rec1 = state["langs"][lang]["approved"].get("1")

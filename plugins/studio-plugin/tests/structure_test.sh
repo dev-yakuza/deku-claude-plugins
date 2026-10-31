@@ -196,7 +196,10 @@ for d in ("commit", "hooks"):
     for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
         check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
               "%s (copied into repositories) does not import the guard (plugin only)" % os.path.relpath(p, skill))
-check(sv and sv.group(1) == "20", "SCRIPTS_VERSION is 20 (0.0.21: description bytes, the board input of proxy credits)")
+_bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
+check("otherwise a text card" not in _bg,
+      "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
+check(sv and sv.group(1) == "21", "SCRIPTS_VERSION is 21 (0.0.22: s2v no-visual fails the script and board checks)")
 from stdo import manifest as _man
 _mp = os.path.join(scripts, _man.NAME)
 check(os.path.exists(_mp) and open(_mp).read() == _man.render(scripts, sv.group(1)),

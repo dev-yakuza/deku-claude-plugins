@@ -56,6 +56,8 @@ narrator: 안녕하세요. 오늘은 공항 단어를 배워요.
 # 끝 {#end}
 
 narrator: 고마워요!
+
+::title[끝]
 """
 PNG = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
                     "1f15c4890000000d49444154789c6360000002000100ffff03000006000557bfabd40000000049454e44ae426082")
@@ -75,6 +77,10 @@ EDITS = [
     ("image_unquoted", ("body", "image"), None, {"b.png": PNG + b"\0"}),
     ("image_split", ("body", "image"), None, {"c.png": PNG + b"\0"}),
     ("image_gallery", ("body", "image"), None, {"d.png": PNG + b"\0"}),
+    # 0.0.22 review: a visual block (a ::title with its label) is part of the content — board cannot add one
+    ("visual_added", ("body", "visual_block"),
+     lambda t: t.replace("::title[끝]\n", "::title[끝]\n\n::title[고마워요]\n"), None),
+    ("visual_label", ("body", "visual_label"), lambda t: t.replace("::title[끝]", "::title[마침]"), None),
     ("title", ("frontmatter", "title"), lambda t: t.replace("title: 공항 단어", "title: 공항 단어들"), None),
     ("cast.voice", ("frontmatter", "cast"), lambda t: t.replace("qwen:Sohee", "qwen:Ryan"), None),
     ("cast.style", ("frontmatter", "cast"), lambda t: t.replace("차분하게", "밝게"), None),

@@ -26,6 +26,13 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
 4. `python3 .claude/studio/scripts/check_assets.py <video> --output youtube` — s2v check, content and voice unchanged
    since ②, every picture usable, unchanged and credited (a third-party or unknown image needs `public_ok: true` and
    a license). Exit 1: fix what it lists (a changed entry needs `credit` again).
+   - A `no-visual` failure (a scene that shows only the background), or any fix that needs a block added or removed
+     (a dropped image too), is not fixed at board: blocks are in the content hash. Stop and go back to the script
+     stage: run `/std script <video>` again (`python3 .claude/studio/scripts/state.py next <video> --enter script`);
+     tell the writer to add (or remove) only that block and keep the rest of the script as it is — narration, cast,
+     readings and presentation attributes; no rewrite. Then verify → ① → the cast check (`check_assets.py <video>
+     --actors`, whose s2v lint fails on `no-visual` too) → tts with `check_tts.py` (unchanged sentences reuse their
+     audio) → ②, and board again.
 5. `python3 .claude/studio/scripts/state.py stage-done <video> board --output youtube`.
 
 ## visual-check

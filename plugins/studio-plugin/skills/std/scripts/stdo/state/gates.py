@@ -253,6 +253,13 @@ def approve(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
             box["excerpts"], box["copy"] = _excerpts(vdir, lang, gate, scopes(s, lang, gate))
 
     def records(s, ev):
+        # built once: the event and the state hold the same record (a second `at` a tick later made the
+        # commit check refuse the approval as edited by hand). Assumes one store.write per approve().
+        if "records" not in box:
+            box["records"] = _records(s, ev)
+        return box["records"]
+
+    def _records(s, ev):
         out = []
         for sc in scopes(s, lang, gate):
             o_, p_ = (sc if gate in ("3", "4a") else None), (sc if gate == "4b" else None)

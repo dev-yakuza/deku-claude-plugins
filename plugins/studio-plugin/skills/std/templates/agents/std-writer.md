@@ -28,6 +28,13 @@ Write nothing else.
   (`:::quote`, `:::table`, captions); the narration reads it in the video's language.
 - Images: only usable entries of `work/assets.json`, as `::image{src="<script_src>"}` on a line of their own (Studio
   checks; s2v refuses a Markdown image line).
+- Every scene shows something: its first visual is `::title[…]` with a label, a text card (`:::bullets`, `:::quote`,
+  …) or an image (Studio fails s2v's `no-visual`). Put a scene's `::title[…]` after its last paragraph: it still shows
+  from the scene's start, and the sentence ids stay. An image you cannot use (its license) is replaced here by
+  `::title[…]` or a text card — board cannot add or remove blocks.
+- A title's label is on-screen text the fact-checker judges: reuse the scene heading or a sentence of the claims map.
+- Sent back from a later stage for one block (`no-visual`, a dropped image): change only that block and keep the
+  rest of the script as it is, the cast, readings and presentation attributes the later stages added included.
 - Never approve, commit or run script2video approval commands.
 - When the guard refuses something, stop and report it (INV9); never reach the same effect another way.
 

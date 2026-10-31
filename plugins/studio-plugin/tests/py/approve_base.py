@@ -55,7 +55,7 @@ class ApproveCase(StudioTestCase):
         self.src = "src1"
         self.text = "The cat sat on the mat.\nIt was warm."
         self.old_ins = {}
-        self.ver = {"id": c["s2v_version"], "version": "0.12.1", "commit": "c0ffee", "dirty": False,
+        self.ver = {"id": c["s2v_version"], "version": "0.13.0", "commit": "c0ffee", "dirty": False,
                     "stale_build": False}
         self.providers = Providers(inspect=lambda ctx: copy.deepcopy(self.ins),
                                    source=lambda ctx, st: (self.src, self.text),

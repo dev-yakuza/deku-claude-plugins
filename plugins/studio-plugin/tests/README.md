@@ -11,7 +11,7 @@ STUDIO_TEST_S2V=/abs/path/to/script2video \
   skipped tests and why.
 - **`--full`**: runs everything and fails when `STUDIO_TEST_S2V` is unset or `npx` is missing.
   Any skipped test is a failure. It warns when `STUDIO_TEST_DENY_TERMS_FILE` is not set.
-- **`STUDIO_TEST_S2V` set but unusable** (no `dist/main.js`, older than 0.12.1, stale `dist` —
+- **`STUDIO_TEST_S2V` set but unusable** (no `dist/main.js`, older than 0.13.0, stale `dist` —
   run `yarn build`) fails in every mode; only an unset variable skips.
 - **Before every commit** of a Studio sub-item (and of each review round): run `--full`.
 - **Python**: `PY=/usr/bin/python3 bash …/run_tests.sh` runs everything with another interpreter
@@ -133,3 +133,13 @@ and the credit with `--proxy`, a marked render) and the hand-over to the person 
 **0.0.21** (`SCRIPTS_VERSION` 20): `platforms/youtube.md` counts the description in UTF-8 bytes
 (`description_max_bytes`); a credit approved in the proxy mode is in ③'s tuple and the board inputs with the session's
 mode, so after the hand-over the router sends the work back to board (E10b asserts it).
+
+**0.0.22** (`SCRIPTS_VERSION` 21, s2v 0.13.0): s2v's `no-visual` warning (a scene with narration that shows only the
+background) fails the script, cast and board checks. The fake s2v keeps a leaf directive's label (`::title[…]` is a
+visual, not narration) and warns `no-visual` with real s2v's rule and message (the first visual other than
+`::thumbnail` is missing or a label-less `::title`; exempt when every speaker has `character` art — the fake ignores
+`:react`), per output (its `scenes: [...]` and its own character mode; `:only` is not modeled). Only title · image ·
+video · thumbnail are leaf visuals (another leaf is `container-required`). A visual block is content (and presentation
+when added), its label content and `screen_text` (`fake_table.py` measures `visual_block` · `visual_label`). Fixture
+scenes without a visual get `::title[…]` after their last paragraph, so sentence ids stay. The script, cast and board
+checks print s2v's `no-visual` message (the scene) after the code line.

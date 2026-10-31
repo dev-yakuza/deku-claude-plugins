@@ -59,7 +59,8 @@ class VoiceCase(FlowCase):
         d = {"sentences": [
             {"text": S1, "kind": "fact", "verdict": "supported", "claims": [cid(E1)], "excerpts": [E1]},
             {"text": "空港(くうこう)", "kind": "fact", "verdict": "supported", "claims": [cid(E1)], "excerpts": [E1]},
-            {"text": S2, "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]}]}
+            {"text": S2, "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]},
+            {"text": "출국", "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]}]}
         with open(os.path.join(self.w, "verify.draft.json"), "w") as f:
             json.dump(d, f, ensure_ascii=False)
 
@@ -208,6 +209,18 @@ class CastCheck(VoiceCase):
         self.scenario({"lint": {"warnings": [{"code": "unread-word", "message": "\"OK\" may be read as English"}]}})
         self.assertEqual(self.actors(), 1)
         self.assertIn("s2v lint: unread-word", self.out)
+
+    def test_no_visual_names_the_scene(self):
+        """0.0.22: the cast check fails on `no-visual` too and prints s2v's message (the scene to go back for)."""
+        self.cast_script()
+        self.changes({"空港": "쿠우코오"})
+        with open(os.path.join(self.vdir, "script.ko.md")) as f:
+            text = f.read()
+        with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
+            f.write(text.replace("\n\n::title[출국]\n", "\n"))
+        self.assertEqual(self.actors(), 1)
+        self.assertIn("s2v lint: no-visual", self.out)
+        self.assertIn('s2v lint: output "youtube" scene exit: no visual', self.out)
 
     def test_refusals(self):
         self.cast_script(style="밝게")
@@ -621,7 +634,7 @@ class RealMock(StudioTestCase):
         script = os.path.join(vdir, "script.ko.md")
         with open(script, "w") as f:
             f.write("---\ntitle: 공항\nlang: ko\ncast:\n  narrator: { voice: \"qwen:Sohee\", style: \"차분하게\" }\n"
-                    "outputs:\n  youtube: { aspect: \"16:9\" }\n---\n\n# 시작 {#intro}\n\nnarrator: 안녕하세요.\n")
+                    "outputs:\n  youtube: { aspect: \"16:9\" }\n---\n\n# 시작 {#intro}\n\nnarrator: 안녕하세요.\n\n::title[공항]\n")
         env = helpers.s2v_env(os.path.join(self.tmp, "s2v"))
         run = lambda: subprocess.run(["node", helpers.s2v_main(path), "sentences", script, "--json"],
                                      capture_output=True, text=True, env=env, cwd=repo)
