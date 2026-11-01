@@ -13,7 +13,11 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
    (`third-party` when a caption names a copyright or a source, `unknown` outside the public folders). Exit 1: run
    step 1 first. Exit 2: a setting is wrong — tell the person.
 3. Spawn the source analyst (`std-source-analyst`) with the copy and `work/assets.json`. It writes
-   `work/source.md`: claims with exact excerpts, ruby pairs, and the class of every image.
+   `work/source.md`: claims with exact excerpts (each with the placeholder id `C-00000000`), ruby pairs, and the
+   class of every image.
+   3b. `python3 .claude/studio/scripts/check_claims.py <video> --source --fill` — writes each claim's real id (the
+   hash of its excerpt) into `work/source.md` and prints one line per claim. Exit 1: give the analyst the listed
+   problems (a missing excerpt, the same excerpt listed twice — make the excerpts differ) and run it again.
 4. `python3 .claude/studio/scripts/check_scope.py <video>` — the source must be public (and not internal), and every
    image gets its scope (the stricter of floor and class). Exit 1: tell the person what it says (another source, or
    the person changes `visibility` with `/std config`). Exit 4: the internal overlay is missing — ask the person to
@@ -28,4 +32,6 @@ Never edit `work/assets.json` or `work/source/` yourself (the guard refuses it);
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way
 > (another command, a script, editing the file directly, removing environment markers, retrying
 > with different flags). Tell the user what was refused and why, and ask how to proceed.
+> Exception: when the refusal itself says 'This is not a stop', do what it says — that is not
+> reaching the same effect another way.
 <!-- /studio:guard-refusal -->

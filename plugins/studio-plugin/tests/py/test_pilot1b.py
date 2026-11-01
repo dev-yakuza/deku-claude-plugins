@@ -84,14 +84,14 @@ class Docs(StudioTestCase):
         code, out, err = run_doc()
         self.assertEqual(code, 0, err)
         listed = re.findall(r"(?m)^- (\S+) — ", out)
-        self.assertEqual(listed, doc.names())
+        self.assertEqual(listed, doc.names() + ["s2v-syntax"])  # 0.0.25 P10: the fixed name comes last
         self.assertIn("- make — MAKE (make.md)", out)
         self.assertIn("- _contract — ", out)
         self.assertNotIn("<<SKILL_DIR>>", out)
 
     def test_names_are_routes_and_atoms(self):
         self.assertEqual(set(doc.names()), routed() | set(ATOMS))
-        self.assertEqual(doc.NAMES, frozenset(doc.names()))
+        self.assertEqual(doc.NAMES, frozenset(doc.names()) | {"s2v-syntax"})  # 0.0.25 P10
 
     def snapshot(self, *roots):
         out = {}
@@ -690,8 +690,9 @@ class InitText(StudioTestCase):
         self.assertEqual(bad, [])
 
     def test_rules(self):
-        for s in ('Never add an option that means "I\'ll type it"', "the question text ends with one line in the "
-                  "repository's language", "목록에 없으면 직접 입력해 주세요", "never naming a UI label",
+        for s in ('Never add an option that means "I\'ll type it"', "Only the first question says so: its text ends "
+                  "with one line in the repository's language", "the other questions do not repeat it",
+                  "목록에 없으면 직접 입력해 주세요", "never naming a UI label",
                   "at most 4 questions per call and 2–4 options per question",
                   "Only after the language is answered: the default narrator",
                   "never put a question in the same call as a question it depends on",

@@ -40,8 +40,9 @@ records no person's decision (the guard treats it as evidence-free); gates are a
 is shown (③: `--begin` right before the snapshot and `--end` right after it) → the last `shown`
 prints `hash12` → AskUserQuestion whose text starts with `[<video>]` and shows the hash, with the fixed label
 `승인 <video> <hash12>` (other options: changes, or `거부 <video> <hash12>` for a source diff) → only on that label,
-`state.py approve <video> <gate> --expect <hash12>` once — **in a later message than the question, never in the same message** (the guard refuses an
-approval sent together with its question). Anything changed after showing (upstream included) needs showing again. `source` and `brief` have their own records (the frozen copy,
+`state.py approve <video> <gate> --expect <hash12>` once — **alone as your next tool call, in the same turn, right
+after the answer — do not wait for the person; never in the same assistant message as the question** (the guard
+refuses an approval sent together with its question). Anything changed after showing (upstream included) needs showing again. `source` and `brief` have their own records (the frozen copy,
 `record-brief`).
 Each person gate is approved only with a fixed answer `승인 <video> <hash12>` (in the repo's language
 the label stays this token) to an `AskUserQuestion` that showed `[<video>]`, the artifact and its hash. The hash12

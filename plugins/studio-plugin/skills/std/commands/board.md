@@ -13,14 +13,16 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
    names.
 2. Spawn the visual director (`std-visual-director`) with the script, `work/assets.json`, `work/source.md` and the
    brand. It changes only presentation attributes in the script and writes `work/<lang>/board.md` and
-   `CREDITS.draft.yaml` (JSON).
+   `CREDITS.draft.yaml` (JSON). The spawn prompt gives it the exact command for s2v's script syntax, which it runs
+   itself: `python3 "<<SKILL_DIR>>/scripts/setup.py" doc s2v-syntax`.
 3. **Credits** — for every picture the script shows:
    - `python3 .claude/studio/scripts/state.py credit-preview <video> <script_src>` prints eight `key=value` lines,
      `label 출처 <video> <h12>` and the `question` block (`[<video>] 출처 — <script_src> · hash <h12>` and the eight
      lines, up to `end of question`) (exit 1: fix the draft as it says).
    - Ask with AskUserQuestion (at most 4 pictures per call, one question each): the question is **the block pasted
      unchanged** — never retype a line (the guard compares each character); options `출처 <video> <h12>` and
-     "고칠 곳이 있다". Then, in a later message and alone — never in the same message as the question — run
+     "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer — do not wait for the
+     person; never in the same assistant message as the question — run
      `python3 .claude/studio/scripts/state.py credit <video> <script_src> --expect <h12>`. Exit 6 with
      `fields-not-shown`: the question missed the line it names — run `credit-preview` again and ask again with the
      block.
@@ -49,8 +51,9 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
 1. External audit (public videos): as in `setup.py doc verify` step 5, with the contact sheet and the stills.
 2. Open the contact sheet and the stills (`open <path>`); the last `shown 3 … --end` printed `hash12 <h12>`.
 3. Ask with AskUserQuestion: `[<video>] ③ 정지 화면 — youtube · hash <h12>`, the auditor's findings; options
-   `승인 <video> <h12>` and "고칠 곳이 있다". Then, in a later message and alone — never in the same message as the
-   question — run `python3 .claude/studio/scripts/state.py approve <video> 3 --expect <h12> --output youtube`.
+   `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer —
+   do not wait for the person; never in the same assistant message as the question — run
+   `python3 .claude/studio/scripts/state.py approve <video> 3 --expect <h12> --output youtube`.
 4. "고칠 곳이 있다": back to board with the person's notes.
 
 Replacing an image after ③ sends the work back to board (② stays: the audio did not change).
@@ -59,4 +62,6 @@ Replacing an image after ③ sends the work back to board (② stays: the audio 
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way
 > (another command, a script, editing the file directly, removing environment markers, retrying
 > with different flags). Tell the user what was refused and why, and ask how to proceed.
+> Exception: when the refusal itself says 'This is not a stop', do what it says — that is not
+> reaching the same effect another way.
 <!-- /studio:guard-refusal -->

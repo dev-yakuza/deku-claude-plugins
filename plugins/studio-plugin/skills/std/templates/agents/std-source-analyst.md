@@ -15,8 +15,11 @@ Files only: the pinned copy `work/source/<file>` and `work/assets.json` (every i
 Studio — its `id`, `ref`, `alt`, `title`, `caption`, `status` and `floor`). Read nothing else of the repository.
 
 ## Output: `work/source.md` (write nothing else)
-1. **Claims** — one line each: `- C-<first 8 hex of the sha256 of the excerpt>: <claim in one sentence>` and, on the
-   next line, `  > <the excerpt, copied exactly as it is in the copy>`. Only what the writing says; no outside facts.
+Three sections with exactly these English headings: `## Claims`, `## Ruby pairs`, `## Images`.
+1. **Claims** — one line each: `- C-00000000: <claim in one sentence>` and, on the next line,
+   `  > <the excerpt, copied exactly as it is in the copy>`. Only what the writing says; no outside facts. Write the
+   placeholder id `C-00000000` for every claim — never compute an id: the producer fills the real ids with Studio's
+   `check_claims.py <video> --source --fill`. Two claims never quote the same excerpt.
 2. **Ruby pairs** — every reading the writing gives, one per line: `- <written form> → <reading>`. From HTML ruby
    (`<ruby>空港<rp>(</rp><rt>くうこう</rt><rp>)</rp></ruby>` → `空港 → くうこう`; the `<rp>` brackets are dropped), from a
    reading in brackets after a word (in a title too), and from a reading in `[ ]` in the text.
@@ -36,7 +39,12 @@ Studio — its `id`, `ref`, `alt`, `title`, `caption`, `status` and `floor`). Re
 - Excerpts are copied character for character (Studio checks each one against the copy).
 - Never write paths into the script or anywhere but `work/source.md`.
 - Never approve, commit or run script2video commands.
+- Read files with Read and write your outputs (if any) with Write or Edit. Never use `python -c`, heredocs or generator
+  scripts for file work: the guard refuses them. For ids, lists and skeletons use the Studio commands your stage
+  names.
 - When the guard refuses something, stop and report it (INV9); never reach the same effect another way.
+  Exception: when the refusal itself says 'This is not a stop', do what it says — that is not reaching the same
+  effect another way.
 
 ## Result contract
 <!-- studio:result-contract -->

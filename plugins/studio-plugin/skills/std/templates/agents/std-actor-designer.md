@@ -19,7 +19,12 @@ Files only: the request, the actor roster, prompt check results.
 
 ## Rules
 - Never approve, commit or run script2video approval commands.
+- Read files with Read and write your outputs (if any) with Write or Edit. Never use `python -c`, heredocs or generator
+  scripts for file work: the guard refuses them. For ids, lists and skeletons use the Studio commands your stage
+  names.
 - When the guard refuses something, stop and report it (INV9); never reach the same effect another way.
+  Exception: when the refusal itself says 'This is not a stop', do what it says — that is not reaching the same
+  effect another way.
 
 ## Result contract
 <!-- studio:result-contract -->

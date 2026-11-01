@@ -1,26 +1,41 @@
 """Deny messages (m0d1b-plan §7). English: the model reads them and tells the person."""
 
-INV9 = ("Stop: do not reach the same effect another way (INV9). Tell the user what was refused and why, "
-        "and ask how to proceed.")
-LIMIT = 1000
+INV9_FIRST = "Stop: do not reach the same effect another way (INV9)."
+INV9 = INV9_FIRST + " Tell the user what was refused and why, and ask how to proceed."
+# closing lines other than INV9 (fix-0025-plan §2): a refusal that is not a stop, and two G-EVIDENCE classes
+NONSTOP = ("This is not a stop: read a file with the Read tool (offset/limit for a line range) and write or change it "
+           "with Write or Edit — the guard checks those.")
+REASK = INV9_FIRST + (" If the person has already answered, show the question again as the stage says and run the "
+                      "command alone as your next tool call.")
+LABEL = INV9_FIRST + (" The answer does not match this option exactly: if the person chose another option, follow it; "
+                      "if the option you showed was spelled differently, ask again with the label the stage gives.")
+# 1 000 until 0.0.24 (m0d1b-plan §7); the 0.0.25 timing sentence and the re-ask/label lines would cut the first
+# missing line off a G-EVIDENCE refusal (pilot-1 P4) at 1 000
+LIMIT = 1500
 
 SNAPSHOT_NOTES = {"snapshot-unavailable": "unavailable", "snapshot-truncated": "not all read",
                   "snapshot-format-unrecognized": "format not recognized"}
 
 
 class Deny(object):
-    def __init__(self, rule, text, sources=()):
-        self.rule, self.text, self.sources = rule, text, list(sources)
+    def __init__(self, rule, text, sources=(), suffix=None):
+        self.rule, self.text, self.sources, self.suffix = rule, text, list(sources), suffix
 
-    def message(self, more=0):
+    def message(self, denies=None):
+        """`denies`: every deny of the call (None: this one alone). The closing line is this deny's suffix only when
+        every deny shares it; otherwise INV9."""
+        denies = [self] if denies is None else list(denies)
+        tail = INV9
+        if self.suffix and all(d.suffix == self.suffix for d in denies):
+            tail = self.suffix
         body = "Studio guard [%s]: %s" % (self.rule, self.text)
-        if more:
-            body += " (and %d more)" % more
+        if len(denies) > 1:
+            body += " (and %d more)" % (len(denies) - 1)
         for s in self.sources:
             body += " " + s
-        if len(body) > LIMIT - len(INV9) - 2:
-            body = body[:LIMIT - len(INV9) - 6] + " ..."
-        return body + "\n" + INV9
+        if len(body) > LIMIT - len(tail) - 2:
+            body = body[:LIMIT - len(tail) - 6] + " ..."
+        return body + "\n" + tail
 
     def __repr__(self):
         return "Deny(%s, %r)" % (self.rule, self.text)

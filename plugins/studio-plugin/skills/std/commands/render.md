@@ -28,8 +28,9 @@ gates are approved by the person again; the wrapper then renders without the wat
 2. `python3 .claude/studio/scripts/state.py shown <video> 4a --output youtube` right as you open the mp4, the
    thumbnail and the chapters (`open <path>`) — it prints `hash12 <h12>`.
 3. Ask with AskUserQuestion: `[<video>] ④a 최종 — <mp4 path> · hash <h12>`, the auditor's findings; options
-   `승인 <video> <h12>` and "고칠 곳이 있다". Then, in a later message and alone — never in the same message as the
-   question — run `python3 .claude/studio/scripts/state.py approve <video> 4a --expect <h12> --output youtube`.
+   `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer —
+   do not wait for the person; never in the same assistant message as the question — run
+   `python3 .claude/studio/scripts/state.py approve <video> 4a --expect <h12> --output youtube`.
 4. "고칠 곳이 있다": back to the stage the change belongs to (board for pictures, cast/tts for the voice).
 
 A new render (any change of the mp4) needs ④a again. The render's `*.description.md` is s2v's Markdown draft: ④a does
@@ -39,4 +40,6 @@ not show it and it is not uploaded — the upload text is ④b's copy.
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way
 > (another command, a script, editing the file directly, removing environment markers, retrying
 > with different flags). Tell the user what was refused and why, and ask how to proceed.
+> Exception: when the refusal itself says 'This is not a stop', do what it says — that is not
+> reaching the same effect another way.
 <!-- /studio:guard-refusal -->

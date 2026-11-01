@@ -135,6 +135,80 @@ MUST_DENY = [
     ("echo x > studio/CREDITS.yaml", "G-PROT"),
     ("touch .claude/studio/charter.md", "G-PROT"),
 ]
+# fix-0025 §1 (pilot-2 P11): sed shapes outside the allowlist, the 0.0.24 holes and the forms of plan reviews 1–10.
+# {root} leads from the working folder to the repository root, {v} to studio/videos/v (test_pilot2_guard runs the
+# list there too); {P} is a protected file. Rule None: the first deny depends on the folder (find's own judgement).
+SED_DENY = [
+    # the 0.0.24 holes
+    ("sed 's/a/b/e' a.txt", "G-OPAQUE"), ("sed '1e touch x' a.txt", "G-OPAQUE"),
+    ("sed -n '1w {P}' a.txt", "G-OPAQUE"), ("sed 's/a/b/w {v}work/state.json' a.txt", "G-OPAQUE"),
+    ("sed -n \"1w $S2V_STATE_DIR/heavy.lock.d/owner.json\" a.txt", "G-OPAQUE"),
+    ("sed '1r $S2V_STATE_DIR/heavy.lock.d/owner.json' a.txt", "G-OPAQUE"),
+    ("sed '1R {v}../../cast/a/character/.work/op.lock.d/owner.json' a.txt", "G-OUT"),  # the word names it
+    ("sed -n '1w {P}' -e p a.txt", "G-OPAQUE"), ("sed -i x '1w {P}' a.txt", "G-OPAQUE"),
+    ("sed -i.json s/a/b/ {v}work/state", "G-OPAQUE"), ("sed 's/[/]/;a\\x' a.txt", "G-OPAQUE"),
+    ("echo a.txt | xargs sed -n p", "G-OPAQUE"), ("find {root}src -name a.ts -exec sed -i '' s/a/b/ {{}} \\;", None),
+    ("env sed -n '1w {P}' a.txt", "G-OPAQUE"), ("command sed 's/a/b/e' a.txt", "G-OPAQUE"),
+    ("/usr/bin/sed -n '1w {P}' a.txt", "G-OPAQUE"), ("nohup sed -n '1w {P}' a.txt", "G-OPAQUE"),
+    # options
+    ("sed -ne p a.txt", "G-OPAQUE"), ("sed '-es/a/b/w {P}' a.txt", "G-OPAQUE"), ("sed -nf x.sed a.txt", "G-OPAQUE"),
+    ("sed -fevil.sed a.txt", "G-OPAQUE"), ("sed --expression=p a.txt", "G-OPAQUE"),
+    ("sed --in-place=.json s/a/b/ {v}work/state", "G-OPAQUE"), ("sed -l 5 p a.txt", "G-OPAQUE"),
+    ("sed s/a/b/ {P} -i", "G-OPAQUE"),
+    # w forms
+    ("sed -n '1!w {P}' a.txt", "G-OPAQUE"), ("sed -n '$w {P}' a.txt", "G-OPAQUE"),
+    ("sed -n '0~3w {P}' a.txt", "G-OPAQUE"),
+    ("sed -n '1,+2w {P}' a.txt", "G-OPAQUE"), ("sed -n '/x/I w {P}' a.txt", "G-OPAQUE"),
+    ("sed 's|a|b|w {P}' a.txt", "G-OPAQUE"), ("sed 's#a#b#gw {P}' a.txt", "G-OPAQUE"),
+    ("sed -n 1wfile a.txt", "G-OPAQUE"),
+    # the review-3 bracket scripts
+    ("sed 's/[]/]/;/w D/p' a.txt", "G-OPAQUE"), ("sed 's/[[:alpha:]/]/;/w D/q' a.txt", "G-OPAQUE"),
+    ("sed 's/[^]/]/;/w D/x' a.txt", "G-OPAQUE"),
+    # wrappers
+    ("xargs -I p sed -n p g", "G-OPAQUE"), ("find {root}src -name a.ts -exec sed -n '{{}}' g \\;", None),
+    ("printf a | xargs sed -n p", "G-OPAQUE"), ("find {root}src -name a.ts -okdir sed -i '' s/a/b/ {{}} \\;", None),
+    ("parallel sed -n p ::: a.txt", "G-OPAQUE"),
+    # program names (APFS is case-insensitive); package runners stay writers
+    ("SED -n '1w {P}' a.txt", "G-OPAQUE"), ("Sed 's/a/b/e' a.txt", "G-OPAQUE"),
+    ("/usr/bin/SED -i x '1w {P}' a.txt", "G-OPAQUE"), ("npx sed -n p {v}work/state.json", "G-PROT"),
+    # redirects of a read shape
+    ("sed -n p a.txt > {v}work/state.json", "G-PROT"), ("sed -n p a.txt >> {v}work/state.json", "G-PROT"),
+    # words and options
+    ("sed -n \"${{N}}p\" a.txt", "G-OPAQUE"), ("sed p *", "G-OPAQUE"), ("sed -Ei '' p a.txt", "G-OPAQUE"),
+    ("sed -iE p a.txt", "G-OPAQUE"), ("sed -n '1!!p' a.txt", "G-OPAQUE"),
+    # size and growth
+    ("sed -n '%s' a.txt" % ("p;" * 101), "G-OPAQUE"), ("sed '%s' a.txt" % ";".join(["s/.*/&&/"] * 4), "G-OPAQUE"),
+    ("sed '%s' a.txt" % ";".join([r"s/\(.*\)/\1\1/"] * 4), "G-OPAQUE"), ("sed 's/a/\\0/' a.txt", "G-OPAQUE"),
+    ("sed 'G;h;G;h;$p' a.txt", "G-OPAQUE"), ("sed x a.txt", "G-OPAQUE"),
+    # blocks and addresses BSD reads otherwise
+    ("sed -n '/x/{{p}}' a.txt", "G-OPAQUE"), ("sed -n '/a/{{p;q}}' a.txt", "G-OPAQUE"),
+    ("sed -n '1{{p;}}2p' a.txt", "G-OPAQUE"), ("sed -n '0,/b/p' a.txt", "G-OPAQUE"),
+    ("sed -n '00,/b/p' a.txt", "G-OPAQUE"), ("sed -n -i '' p a.txt", "G-OPAQUE"),
+    # review 1 B1: an unquoted empty expansion is dropped by the shell (BSD then takes `p` as the -i suffix)
+    ("X=; sed -i $X p '1w {P}' a.txt", "G-OPAQUE"), ("X=''; sed -i $X p '1w {P}' a.txt", "G-OPAQUE"),
+    ("export X=; sed -i $X p '1w {P}' a.txt", "G-OPAQUE"), ("X=; sed -i ${{X}} p '1w {P}' a.txt", "G-OPAQUE"),
+    ("X=; Y=$X; sed -i $Y p '1w {P}' a.txt", "G-OPAQUE"), ("X=; sed $X -n p a.txt", "G-OPAQUE"),
+    ("X=; sed -n p $X a.txt", "G-OPAQUE"),
+    # review 2 B2: a sed that may not be the system's is other; a system bin path is shaped whatever PATH is
+    ("PATH=/usr/bin sed -n '1w {P}' a.txt", "G-OPAQUE"), ("PATH=/usr/bin:/bin sed 's/a/b/e' a.txt", "G-OPAQUE"),
+    ("env -i sed -n '1w {P}' a.txt", "G-OPAQUE"), ("env -i /usr/bin/sed -n '1w {P}' a.txt", "G-OPAQUE"),
+    ("env -u PATH /usr/bin/sed -n '1w {P}' a.txt", "G-OPAQUE"),
+    ("export PATH=/usr/bin; sed -n '1w {P}' a.txt", "G-OPAQUE"), ("/tmp/sed -n '1w {P}' a.txt", "G-OPAQUE"),
+    ("/usr/bin/../../tmp/sed -n p {v}work/state.json", "G-OPAQUE"), ("/usr//bin/sed -n p a.txt", "G-OPAQUE"),
+    ("find {root}src -name a.ts -exec /usr/bin/../../tmp/sed -n p {{}} \\;", "G-OPAQUE"),
+    # review 1 M1: an edit of a glob (judge_glob looks at one folder)
+    ("sed -i '' s/a/b/ {root}.claude/*/config.json", "G-OPAQUE"),
+    ("sed -i '' s/a/b/ {root}.c*/studio/config.json", "G-OPAQUE"), ("sed -i '' s/a/b/ {v}w*/state.json", "G-OPAQUE"),
+    ("sed -i '' s/a/b/ {root}s*/videos/v/work/state.json", "G-OPAQUE"),
+]
+SED_P = "{root}.claude/studio/config.json"
+
+
+def sed_deny(root, v):
+    return [(t.format(P=SED_P.format(root=root), root=root, v=v), r) for t, r in SED_DENY]
+
+
+MUST_DENY += sed_deny("", "studio/videos/v/")
 NO_SNAPSHOT_DENY = ["g st", "gst", "ll", "take newdir", "g clean -fdx"]
 
 MUST_PASS = [
@@ -153,6 +227,11 @@ MUST_PASS = [
     "s2v --version --json", "s2v inspect --json studio/videos/v/script.md", "S2V_TTS=mock node test.js",
     "find . -name '*.json' -exec grep -l x {} +", "curl -o /tmp/x.json https://example.invalid/a",
     "cp a.txt studio/videos/v/", "tar -xf a.tar -C dist", "dd if=a.txt of=dist/b.txt",
+    # fix-0025 §1: the sed read and edit shapes (every form also runs on BSD /usr/bin/sed)
+    "sed -n 1,80p .claude/studio/scripts/state.py", "sed -n '/def /p' narrator.py", "sed -n '/^## A/,/^## /p' notes.md",
+    "sed -n '/a/I,/b/Ip' a.txt", "sed -n '/a/I!p' a.txt", "sed -n 01,3p a.txt",
+    "find src -name a.md -exec sed -n p {} \\;", "sed -n '$=' a.txt", "sed '1d;3q' a.txt", "sed -n '/x/{p;q;}' a.txt",
+    "sed -E -n 's/a/b/p' .claude/studio/config.json", "sed -i.bak s/a/b/ src/x.ts",
 ]
 WITH_SNAPSHOT_PASS = ["g st", "gst", "ll", "grep foo src", "find . -name x", "take newdir"]
 

@@ -16,13 +16,15 @@ the brand, exemplar scripts.
 
 ## Outputs
 1. `script.<lang>.md` — frontmatter `title`, `lang`, `outputs.youtube` with `maxDuration` (exactly the format's upper
-   bound in seconds) and `targetDuration` (within the format's range). The syntax is s2v's (`write-script/reference.md` in the s2v repository).
+   bound in seconds) and `targetDuration` (within the format's range), in s2v's syntax (see Rules).
 2. `work/<lang>/claims-map.json` — exactly: `{"claims": {"C-…": {"excerpt": "<the excerpt from work/source.md,
    unchanged>", "sentences": ["<each script sentence that says it>"]}}, "excerpts": ["<every excerpt used>"],
    "copy_excerpts": {}}`. Only the brief's claims.
 Write nothing else.
 
 ## Rules
+- The s2v syntax: run `<the doc command the producer gives you>` for the s2v syntax; if none was given, stop and
+  say so. Never open s2v's files yourself.
 - Say only what the excerpts say; compress, never extend.
 - Narration is in the video's language only: no kana or kanji in it (Studio checks). Japanese goes on screen
   (`:::quote`, `:::table`, captions); the narration reads it in the video's language.
@@ -36,7 +38,12 @@ Write nothing else.
 - Sent back from a later stage for one block (`no-visual`, a dropped image): change only that block and keep the
   rest of the script as it is, the cast, readings and presentation attributes the later stages added included.
 - Never approve, commit or run script2video approval commands.
+- Read files with Read and write your outputs (if any) with Write or Edit. Never use `python -c`, heredocs or generator
+  scripts for file work: the guard refuses them. For ids, lists and skeletons use the Studio commands your stage
+  names.
 - When the guard refuses something, stop and report it (INV9); never reach the same effect another way.
+  Exception: when the refusal itself says 'This is not a stop', do what it says — that is not reaching the same
+  effect another way.
 
 ## Result contract
 <!-- studio:result-contract -->

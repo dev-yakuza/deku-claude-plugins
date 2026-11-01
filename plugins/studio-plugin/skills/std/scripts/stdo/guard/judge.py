@@ -11,7 +11,7 @@ import stat
 
 from .. import paths, s2vcall
 from ..state import commands as state_commands
-from . import commitrule, gitprobe, hookfiles, limits, messages, protect, ranlog, recog
+from . import commitrule, gitprobe, hookfiles, limits, messages, protect, ranlog, recog, sedshape
 from . import scan as scan_command
 from . import load_snapshot
 from .messages import Deny
@@ -82,13 +82,15 @@ class Context(object):
         r = os.path.realpath(anc)
         return os.path.join(r, tail) if tail else r
 
-    def deny(self, rule, text, sources=()):
+    def deny(self, rule, text, sources=(), suffix=None):
+        """suffix: a closing line other than INV9 (messages.NONSTOP, an evidence suffix); shown only when every deny
+        of the call has the same one."""
         src = list(sources)
         if self.current is not None:
             for s in messages.alias_sources(self.current):
                 if s not in src:
                     src.insert(0, s)
-        self.denies.append(Deny(rule, text, src))
+        self.denies.append(Deny(rule, text, src, suffix=suffix))
 
     def touch(self, ri):
         if ri is not None and ri.studio and ri not in self.touched:
@@ -325,6 +327,11 @@ def check_paths(ctx, cmd, studio_infos):
         if r.target is None or r.mode not in ("write", "append", "rw"):
             continue
         check_target(ctx, cmd, r.target, r.target.value, "write", studio_infos, s2v=False)
+    if is_sed(cmd) and check_sed(ctx, cmd, studio_infos):
+        return  # its shape decided (fix-0025 §1); an unchecked sed outside a Studio repository is a writer below
+    if cmd.prog_key == "parallel" and studio_infos and parallel_runs_sed(cmd):
+        ctx.deny("G-OPAQUE", SED_WHY % "sed run by parallel", suffix=messages.NONSTOP)
+        return
     if writes_ok or role in ("read", "git"):
         if role == "git":
             check_git(ctx, cmd, studio_infos)
@@ -844,6 +851,8 @@ def is_writer(c):
     prog = c.prog or ""
     if any(r.target is not None and r.mode in ("write", "append", "rw") for r in c.redirs):
         return True
+    if is_sed(c):
+        return sed_shape(c)[0] != "read"
     if prog in protect.READ_ALLOW and prog not in ("find", "bfs"):
         return False
     if prog in ("find", "bfs"):
@@ -851,6 +860,100 @@ def is_writer(c):
     if prog == "git" and c.git is not None and c.git.sub in protect.GIT_READ:
         return False
     return True
+
+
+# ---- sed: an allowlist of shapes (fix-0025-plan §1, pilot-2 P11) ----
+# The program is sed when walk's unwrapped word (env, command, nohup, …) is sed or gsed, compared as NFC + casefold of
+# the basename (APFS is case-insensitive). Package runners (npx sed, …) are not sed: they stay writers.
+
+SED_WHY = ("%s: sed with this script or these options cannot be checked in a Studio repository — Studio checks only "
+           "plain prints (sed -n 1,80p FILE) and s/// edits with -i '' or -i.bak.")
+SED_OUT_WHY = ("sed with this script or these options cannot be checked, and it names %s, which is in a Studio "
+               "repository or is Studio's per-user files or the machine lock.")
+
+
+def is_sed(cmd):
+    return cmd.prog_key in sedshape.NAMES
+
+
+def sed_trusted(cmd):
+    """Whether the program is the system's sed: an absolute path in a system bin folder (whatever PATH is), or the
+    bare name with PATH untouched. Any other sed (a copy in /tmp, PATH=… sed, env -i sed) is never shaped: other."""
+    w0 = cmd.words[0].value
+    if "/" in w0:
+        # no `..`, `.` or `//`: /usr/bin/../../tmp/sed is not in /usr/bin
+        return os.path.isabs(w0) and os.path.normpath(w0) == w0 and recog.is_bin_dir(w0)
+    env = cmd.env
+    return not (env.cleared or env.unknown or "PATH" in env.set or "PATH" in env.unset
+                or "path-modified" in (cmd.flags or ()))
+
+
+def sed_exec_by(cmd):
+    """None, "xargs" (an xargs template: walk appends the input word) or "find" (a find -exec template)."""
+    if "exec-template" not in (cmd.ctx or ()):
+        return None
+    if any("xargs-input" in (w.dyn or ()) for w in cmd.words):
+        return "xargs"
+    return "find"
+
+
+def sed_shape(cmd):
+    if not sed_trusted(cmd):
+        return "other", "a sed that may not be the system's (its path, or PATH changed)"
+    return sedshape.classify(cmd.words[1:], sed_exec_by(cmd))
+
+
+def check_sed(ctx, cmd, studio_infos):
+    """True when the shape decided: read (the files are only read; out-of-repo reads are check_out_of_repo's), edit
+    (the files, backups and the script word are writes), other in a Studio repository (refused). False for other
+    outside one: today's writer rules, and decide_bash resolves its path pieces."""
+    shape, det = sed_shape(cmd)
+    if shape == "read":
+        return True
+    if shape == "edit":
+        for w, v in sedshape.targets(det):
+            check_target(ctx, cmd, w, v, "write", studio_infos)
+        return True
+    if studio_infos:
+        ctx.deny("G-OPAQUE", SED_WHY % det, suffix=messages.NONSTOP)
+        return True
+    return False
+
+
+def parallel_runs_sed(cmd):
+    for w in cmd.words[1:]:
+        if w.value in (":::", "::::", ":::+", "::::+"):
+            break
+        first = (w.value or "").split()
+        if first and recog.key(recog.base(first[0])) in sedshape.NAMES:
+            return True
+    return False
+
+
+def check_sed_outside(ctx, sc, n):
+    """An unchecked sed outside a Studio repository: no term matching (`/` is sed's delimiter); its path pieces are
+    resolved instead, and one that lands in a Studio repository or on Studio's per-user files is refused. `n` path
+    candidates were counted already (MAX_CANDIDATES)."""
+    for c in sc.commands:
+        if not is_sed(c) or sed_shape(c)[0] != "other":
+            continue
+        ctx.current = c
+        hit = None
+        for v in sedshape.pieces(c.words[1:]):
+            n += 1
+            if n > MAX_CANDIDATES:
+                ctx.current = None
+                ctx.deny("G-LIMIT", "the command has too many path arguments for the guard — split it.")
+                return
+            for a, real, ri in resolve_all(ctx, c, v):
+                if (ri is not None and ri.studio) or out_hit(ctx, real, "write") is not None:
+                    hit = v
+                    break
+            if hit:
+                break
+        if hit:
+            ctx.deny("G-OPAQUE", SED_OUT_WHY % hit, suffix=messages.NONSTOP)
+    ctx.current = None
 
 
 def hard_link_copy(argv):
@@ -1506,7 +1609,8 @@ def check_setup(ctx, cmd):
         return True
     v = approve.setup_py(ctx.hook, ctx.env, ri, vals)
     if v.rule:
-        ctx.deny(v.rule, v.text, messages.alias_sources(cmd))
+        ctx.deny(v.rule, v.text, messages.alias_sources(cmd),
+                 suffix=approve.evidence_suffix(v.code))  # fix-0025 §2.2
         return True
     pend = v.pending
     ctx.effects.append(("G-EVIDENCE", lambda: approve.write_pending(ri, pend)))
@@ -1577,7 +1681,8 @@ def state_approval(ctx, cmd, argv):
         return
     v = approve.state_py(ctx.hook, ctx.env, ri, argv)
     if v.rule:
-        ctx.deny(v.rule, v.text, messages.alias_sources(cmd))
+        ctx.deny(v.rule, v.text, messages.alias_sources(cmd),
+                 suffix=approve.evidence_suffix(v.code))  # fix-0025 §2.2
         return
     pend = v.pending
     ctx.effects.append(("G-EVIDENCE", lambda: approve.write_pending(ri, pend)))
@@ -1592,7 +1697,8 @@ def s2v_approval(ctx, cmd, words):
     ri = _run_repo(ctx, cmd)
     v = approve.s2v(ctx.hook, ctx.env, ri if ri is not None and ri.studio else None, words)
     if v.rule:
-        ctx.deny(v.rule, v.text, messages.alias_sources(cmd))
+        ctx.deny(v.rule, v.text, messages.alias_sources(cmd),
+                 suffix=approve.evidence_suffix(v.code))  # fix-0025 §2.2
         return
     ctx.candidates.append((cmd, "s2v", v.reason))
 
@@ -1738,6 +1844,7 @@ def decide_bash(ctx, command):
     ctx.scan = sc
     check_docs(ctx, sc)  # in any folder: the document command needs no Studio repository (0.0.24)
     if not infos:
+        check_sed_outside(ctx, sc, n)  # fix-0025 §1: a sed `w`/`r` file is not a path-like word
         return sc, infos
     if STUDIO_NAMES_RE.search(command):
         ctx.deny("G-ENV", "STUDIO_* variables are set only by the person who starts Claude.")
@@ -1917,7 +2024,8 @@ def commit_evidence(ctx, cmd, ri, out):
                 extra = " " + missing_text(miss, "check_commit.py --stage")
             elif ok.get("values_shown"):
                 what += " and these lines: %s" % " / ".join(ok["values_shown"][:6])
-            ctx.deny("G-EVIDENCE", approve.evidence_text(what, label, e) + extra)
+            ctx.deny("G-EVIDENCE", approve.evidence_text(what, label, e) + extra,
+                     suffix=approve.evidence_suffix(e.code))
             return
         approval.update({"mode": "human", "tool_use_id": ans.tool_use_id, "question_index": idx})
         if line:
@@ -2429,10 +2537,26 @@ def check_opaque(ctx, o, cmd, terms, infos, src_notes):
     if hits or lit_hit:
         what = hits[0].term if hits else lit_hit
         ctx.deny("G-OPAQUE", "%s runs code the guard cannot read, and it mentions %s — run the commands directly so "
-                             "they can be checked." % (o.kind, what), sources + src_notes)
+                             "they can be checked." % (o.kind, what), sources + src_notes,
+                 suffix=messages.NONSTOP if file_work(o, cmd, hits, lit_hit) else None)
     elif o.hits_unknown and studio_related(ctx, cmd, infos):
         ctx.deny("G-OPAQUE", "%s runs code the guard cannot read in a Studio context — run the commands directly."
                  % o.kind, sources + src_notes)
+
+
+INTERP_KINDS = ("interp-inline", "stdin-interp", "heredoc-interp", "herestring-interp")
+
+
+def file_work(o, cmd, hits, lit_hit):
+    """fix-0025 §2.1: interpreter code (not a shell's) whose first hit is a Studio path or a protected name (or, with
+    no term hit, a literal protected path) — file work the Read/Write/Edit tools do under the guard. A STUDIO_WORDS
+    hit anywhere (state.py, s2v, S2V_*, …) means the code runs Studio commands: INV9."""
+    if o.kind not in INTERP_KINDS or cmd is None or recog.interp_family(cmd.prog) in (None, "shell") \
+            or recog.key(cmd.prog) == "osascript":  # AppleScript runs programs and apps: not file work
+        return False
+    if any(h.kind == "word" for h in hits):
+        return False
+    return bool(hits or lit_hit)  # the other hit kinds are "path" and "name"
 
 
 def decide_file(ctx, tool, ti):

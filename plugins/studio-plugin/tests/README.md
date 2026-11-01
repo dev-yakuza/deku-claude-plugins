@@ -167,3 +167,17 @@ folders up), or when a warning is shown. `setup.py` imports from its real folder
 regular files under the top level, no `.env*`, vendor folders, minified or banner files; a 20 MB / 3,000-file budget).
 `test_pilot1b.py` covers all of it, with the pilot's colour counts, a FIFO behind a tracked link (with a timeout) and
 the guard's time; `structure_test.sh` checks the rule, the `doc` mentions and init.md's question rules.
+
+**0.0.25** (`SCRIPTS_VERSION` 23, pilot 2): `check_claims.py <video> --source [--fill]` lists the claim ids of
+`work/source.md` (`ok`, `placeholder`, `was C-…`; a missing excerpt or one excerpt listed twice fails) and with
+`--fill` writes the right ids atomically, with no script and no s2v; `--skeleton` (re)writes
+`work/<lang>/verify.draft.json` from s2v's sentences, screen text and the titles the verify check judges, keeping the
+entries whose normalized text is still there; `--source`, `--skeleton` and `--narration` exclude each other.
+`setup.py doc s2v-syntax` prints s2v's write-script reference through a fence (the repository found by walking up for
+`.git`, no process; `O_NOFOLLOW`, the real path under the real s2v path, the opened file the one that path names, a
+regular file of at most 25,000 characters). `state.py shown <video> 2` prints `read: <audition.md>` after `hash12`
+when the file exists (block and hash unchanged). The documents run approvals as the next tool call of the same turn,
+the guard-refusal blocks, INV9 and every role rule carry the "This is not a stop" exception, and every role but the
+auditor does file work with Read, Write and Edit. `test_pilot2.py` covers these with stub Providers (no s2v process);
+the guard's 0.0.25 changes (the sed shapes, the non-stop and re-ask suffixes) are in `test_pilot2_guard.py` and
+`test_guard_judge.py`; `structure_test.sh` checks the wording.

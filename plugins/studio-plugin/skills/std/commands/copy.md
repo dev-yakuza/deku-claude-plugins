@@ -33,8 +33,9 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
 2. Ask with AskUserQuestion: the question is **the block between `question (…):` and `end of question`, pasted
    unchanged** — never retype a line (the guard compares each character) — with the auditor's findings after it;
    options
-   `승인 <video> <h12>` and "고칠 곳이 있다". Then, in a later message and alone — never in the same message as the
-   question — run `python3 .claude/studio/scripts/state.py approve <video> 4b --expect <h12> --platform youtube`.
+   `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer —
+   do not wait for the person; never in the same assistant message as the question — run
+   `python3 .claude/studio/scripts/state.py approve <video> 4b --expect <h12> --platform youtube`.
 3. When the person edits the copy themselves: run steps 3–6 of copy again, then show and ask again.
 
 After ④b the video is ready for its commit (M1i).
@@ -43,4 +44,6 @@ After ④b the video is ready for its commit (M1i).
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way
 > (another command, a script, editing the file directly, removing environment markers, retrying
 > with different flags). Tell the user what was refused and why, and ask how to proceed.
+> Exception: when the refusal itself says 'This is not a stop', do what it says — that is not
+> reaching the same effect another way.
 <!-- /studio:guard-refusal -->

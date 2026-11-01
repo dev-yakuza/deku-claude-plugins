@@ -110,6 +110,10 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
         _out("begin %s" % scope)
     else:
         _out("hash12 %s" % box["hash12"] if box.get("hash12") else "shown %s (other scopes not shown yet)" % scope)
+        if gate == "2" and box.get("hash12"):  # the file to show the person (0.0.25 P21); not part of the block or hash
+            md = os.path.join(ctx["repo"], ctx["studio_root"], "out", state["video"], lang, "audition", "audition.md")
+            if os.path.isfile(md):
+                _out("read: %s" % os.path.relpath(md, ctx["repo"]))
     if gate in ("2", "4b") and not begin:  # the question shows each of these lines (the guard checks them — V1, Y2)
         for line in box["lines"]:
             _out("in the question: %s" % line)

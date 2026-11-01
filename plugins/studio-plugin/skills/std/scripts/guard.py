@@ -48,7 +48,7 @@ def main():
             hook = json.loads(data.decode("utf-8"))
             deny, ctx = judge.decide(hook, os.environ)
             if deny is not None:
-                out = _deny(deny.message(len(ctx.denies) - 1))
+                out = _deny(deny.message(ctx.denies))
             elif ctx.allow:
                 out = _allow(ctx.allow)
             elif ctx.warnings:

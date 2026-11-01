@@ -44,8 +44,9 @@ hooks were found" in the narrator question).
 **Options** are pickable values from step 2 or from earlier answers, each with its `from` / `evidence` as the
 description, plus one meaningful alternative where it applies (`로고 없음`, `도메인 없음`, `없음`).
 Never add an option that means "I'll type it" (`직접 입력`, `Other로 입력`, `기타`): the person can always type their
-own answer. Instead, the question text ends with one line in the repository's language saying so, e.g. "목록에 없으면
-직접 입력해 주세요" (never naming a UI label). Never invent a value: a colour, a logo, a host or a folder comes from
+own answer. Only the first question says so: its text ends with one line in the repository's language, e.g. "목록에
+없으면 직접 입력해 주세요" (never naming a UI label); the other questions do not repeat it. Never invent a value: a colour, a
+logo, a host or a folder comes from
 step 2 or from the person.
 
 **One value only → do not ask**: when there is a single value (nothing detected, so only the default; a language with
@@ -99,7 +100,8 @@ marker) and installs the pre-commit hook. Exit 3: a harness or traces of one exi
    file it names too.
 3. Ask with AskUserQuestion: the question text contains the summary line **and every value line exactly as printed**
    (each on its own line); options: the fixed label `커밋 <tree12>` and "고칠 곳이 있다".
-4. Then, in a later message and alone — never in the same message as the question — run `git commit -m "studio: harness"`.
+4. Then, alone as your next tool call, in the same turn, right after the answer — do not wait for the person; never in
+   the same assistant message as the question — run `git commit -m "studio: harness"`.
 
 If the person wants changes: `/std config` (and stage again).
 
@@ -107,4 +109,6 @@ If the person wants changes: `/std config` (and stage again).
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way
 > (another command, a script, editing the file directly, removing environment markers, retrying
 > with different flags). Tell the user what was refused and why, and ask how to proceed.
+> Exception: when the refusal itself says 'This is not a stop', do what it says — that is not
+> reaching the same effect another way.
 <!-- /studio:guard-refusal -->

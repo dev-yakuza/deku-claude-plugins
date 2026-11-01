@@ -21,13 +21,17 @@ variable in command position. Shared rules: `atoms/_contract.md`.
    are part of the `h12` the person approves.
 3. Ask with AskUserQuestion: the question shows the versions, what changes, every `ignore.lines` line (e.g.
    `.gitignore Studio 블록: 0.0.22 → 0.0.23`) and `h12`; options: the fixed label
-   `갱신 <h12>` and "그만두기". Then, in a later message and alone — never in the same message as the question — run
+   `갱신 <h12>` and "그만두기". Then, alone as your next tool call, in the same turn, right after the answer — do not wait
+   for the person; never in the same assistant message as the question — run
    `python3 <<SKILL_DIR>>/scripts/setup.py update apply --expect <h12>` (with the same `--take`).
 4. Commit like in `/std init` step 6 — a rewritten `.gitignore` block goes into this harness commit (stage, open the criteria files the value block lists, summary line and value
-   lines, `커밋 <tree12>`, then `git commit` alone in a later message).
+   lines, `커밋 <tree12>`, then `git commit` alone as your next tool call, in the same turn, right after the answer — do
+   not wait for the person; never in the same assistant message as the question).
 
 <!-- studio:guard-refusal -->
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way
 > (another command, a script, editing the file directly, removing environment markers, retrying
 > with different flags). Tell the user what was refused and why, and ask how to proceed.
+> Exception: when the refusal itself says 'This is not a stop', do what it says — that is not
+> reaching the same effect another way.
 <!-- /studio:guard-refusal -->

@@ -69,13 +69,19 @@ for c in IMPLEMENTED_CMDS - {"help"}:
     check("Not implemented yet" not in open(os.path.join(skill, "commands", c + ".md")).read(),
           "commands/%s.md is implemented (M1c)" % c)
 
-# parallel-call contract (m1-plan §3.5): every command document that runs an approval asks first and runs the
-# approval command alone in a later message
+# parallel-call contract (m1-plan §3.5; 0.0.25 P15): every command document that runs an approval asks first and runs
+# the approval command alone as the next tool call of the same turn, never in the question's assistant message
+NEXT_CALL = ("next tool call, in the same turn", "never in the same assistant message")
 for p in glob.glob(os.path.join(skill, "commands", "**", "*.md"), recursive=True):
-    body = open(p).read()
+    body = " ".join(open(p).read().split())
     if re.search(r"state\.py (approve|overlay)(?![-\w])|setup\.py (config set|narrator set|update apply)", body):
-        check("never in the same message" in body,
-              "%s: a gate is the question, then (a later message) one approval command" % os.path.relpath(p, skill))
+        check(all(s in body for s in NEXT_CALL),
+              "%s: a gate is the question, then (the next tool call) one approval command" % os.path.relpath(p, skill))
+    check("in a later message" not in body, "%s: no \"in a later message\" (0.0.25 P15)" % os.path.relpath(p, skill))
+# every P15 place (mirrors test_pilot2.P15_PLACES): abandon, resume (unlock) and init (git commit) too
+for _d in ("abandon", "verify", "make", "render", "copy", "board", "config", "update", "init", "resume", "atoms/_stages"):
+    _b = " ".join(open(os.path.join(skill, "commands", _d + ".md")).read().split())
+    check(all(s in _b for s in NEXT_CALL), "commands/%s.md: the approval runs as the next tool call (0.0.25 P15)" % _d)
 
 # no variable in command position (M1a review NIT A): a command document runs Studio's scripts (run_s2v.py, lock.py,
 # state.py, …) or a literal path — never "$S2V …", "${X} …" or a backquoted command word (the guard refuses those)
@@ -104,6 +110,28 @@ check(len({b for _, b in blocks}) == 1, "result-contract blocks are identical")
 guards = {b for p in glob.glob(os.path.join(skill, "**", "*.md"), recursive=True)
           for b in re.findall(r"<!-- studio:guard-refusal -->\n(.*?)\n<!-- /studio:guard-refusal -->", open(p).read(), re.S)}
 check(len(guards) == 1, "guard-refusal (INV9) blocks are identical")
+# 0.0.25 (P11, P14): a refusal that says "This is not a stop" is followed — in every block, the contract and every role
+NOT_A_STOP = ("Exception: when the refusal itself says 'This is not a stop', do what it says — that is not reaching the "
+              "same effect another way.")
+_nblocks = [b for p in glob.glob(os.path.join(skill, "**", "*.md"), recursive=True)
+            for b in re.findall(r"<!-- studio:guard-refusal -->\n(.*?)\n<!-- /studio:guard-refusal -->", open(p).read(), re.S)]
+check(len(_nblocks) == 16 and all(NOT_A_STOP in " ".join(b.replace(">", " ").split()) for b in _nblocks),
+      "every guard-refusal block (%d) holds the exception sentence" % len(_nblocks))
+READ_WRITE = ("Read files with Read and write your outputs (if any) with Write or Edit. Never use `python -c`, heredocs "
+              "or generator scripts for file work: the guard refuses them. For ids, lists and skeletons use the Studio "
+              "commands your stage names.")
+_ct = open(os.path.join(skill, "commands", "atoms", "_contract.md")).read()
+_ca = " ".join(_ct.split("## A.", 1)[1].split("## B.", 1)[0].split())
+check(READ_WRITE in _ca, "_contract.md §A: the Read/Write line (0.0.25 P14)")
+check(NOT_A_STOP in " ".join(open(os.path.join(skill, "commands", "atoms", "_invariants.md")).read().split()),
+      "_invariants.md: INV9 has the exception sentence")
+for p in glob.glob(os.path.join(skill, "templates", "agents", "std-*.md")):
+    _t = " ".join(open(p).read().split())
+    if p.endswith("std-auditor.md"):
+        check(READ_WRITE not in _t, "std-auditor keeps its own read-only rule")
+        continue
+    check(READ_WRITE in _t and NOT_A_STOP in _t, "%s: the Read/Write line and the guard rule's exception (0.0.25)"
+          % os.path.basename(p))
 
 # personas
 agents = sorted(glob.glob(os.path.join(skill, "templates", "agents", "std-*.md")))
@@ -199,8 +227,8 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "22", "SCRIPTS_VERSION is 22 (0.0.23: pilot-1 P4 P5 P8, J175; 0.0.24 changed only "
-      "plugin-only files: setup.py, stdo/setup/, the guard, SKILL.md, commands)")
+check(sv and sv.group(1) == "23", "SCRIPTS_VERSION is 23 (0.0.25: check_claims --source/--skeleton, the `read:` line "
+      "of shown ②)")
 # 0.0.23 (pilot-1 P4): every gate document has the agent paste the printed question block, never retyping a line
 for _d in ("make", "copy", "verify", "board"):
     _t = open(os.path.join(skill, "commands", _d + ".md")).read()
@@ -270,11 +298,12 @@ for gate, d in (("1", "verify"), ("2", "make"), ("3", "board"), ("4a", "render")
     m = re.search(r"state\.py approve <video> %s --expect" % gate, body)
     item = _item(body, m.start()) if m else ""
     sec = _section(body, m.start()) if m else ""
-    ok = m is not None and "never in the same message" in item and "in a later message" in item \
+    item = " ".join(item.split())
+    ok = m is not None and all(s in item for s in NEXT_CALL) \
         and 0 <= sec.find("AskUserQuestion") < sec.find("state.py approve <video> %s" % gate)
     check(ok, "gate %s: commands/%s.md asks, then approves alone (the rule in the approve item)" % (gate, d))
 _c = _mk.find('`git commit -m "<message>"`')
-check(_c >= 0 and "never in the same message" in _item(_mk, _c) and "AskUserQuestion" in _item(_mk, _c),
+check(_c >= 0 and all(s in " ".join(_item(_mk, _c).split()) for s in NEXT_CALL) and "AskUserQuestion" in _item(_mk, _c),
       "make.md: the video commit asks, then runs git commit alone")
 for p in glob.glob(os.path.join(_cmd, "*.md")):
     body = open(p).read()
@@ -314,6 +343,7 @@ _typeit = [w for l in _init.splitlines() if "Never add an option that means" not
            for w in re.findall(r"`([^`]+)`", l) if any(t in w for t in ("직접 입력", "Other로", "기타"))]
 check(not _typeit, "init.md has no option meaning \"I'll type it\" (%s)" % ", ".join(_typeit))
 for _s in ("Never add an option that means", "목록에 없으면 직접 입력해 주세요", "never naming a UI label",
+           "Only the first question says so", "the other questions do not repeat it",
            "at most 4 questions per call and 2–4 options per question",
            "Only after the language is answered: the default narrator", "**in a plain message**",
            "never mention hooks in a question", "`ask_husky`", "`public_domains`", "`brand_colors`", "`logos`"):

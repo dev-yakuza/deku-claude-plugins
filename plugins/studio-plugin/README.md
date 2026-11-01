@@ -58,6 +58,29 @@ Then `/std help`. Requires script2video 0.13.0 or later (set up later by `/std i
   styles — vendor builds and minified files are left out) and up to three logo files, each with where it was found.
   It reads tracked files only and never `.env*`. When nothing is found it uses Studio's default (`#2563EB`, no logo,
   no domain) and says so in the summary; you can type your own answer to any question.
+- **0.0.25 (pilot 2).** The source analyst writes the placeholder id `C-00000000` for every claim and
+  `check_claims.py <video> --source --fill` writes the real ids (`--source` alone lists them). `check_claims.py <video>
+  --skeleton` writes the verify draft with every entry to judge; the fact-checker fills it with Edit, and a second run
+  keeps what was filled. The script writer and the visual director read s2v's script syntax with
+  `setup.py doc s2v-syntax` (this work tree's s2v, a regular file inside it of at most 25,000 characters). An approval
+  command now runs as the next tool call of the same turn, right after the person's answer — never in the same
+  assistant message as the question. A refusal that says "This is not a stop" is followed instead of stopping: read with
+  Read, write with Write or Edit; role agents do all their file work that way. The guard now checks `sed` by the shape of
+  its script and options: plain prints, deletes and substitutions pass (in place too with `-i ''` or `-i.bak`, judged as writes of their files);
+  a script or option it cannot check is refused inside a Studio repository. `state.py shown <video> 2` names
+  `audition.md` on a `read:` line.
+- **Upgrading to 0.0.25**: run `/std update` and choose "new" for every changed role agent file — all `std-*` agents
+  (the Read/Write rule and the guard rule's exception), and among them `std-writer` and `std-visual-director` (the s2v
+  syntax command), `std-fact-checker` (the skeleton, the link limit, list items and dropped conditions) and
+  `std-source-analyst` (the placeholder id).
+- **What the guard still does not see (0.0.25).** awk programs and vim, ex or ed scripts; commands hidden behind some
+  runners: wrapper options it does not model, long chains of wrappers, `flock`, `setsid`, `arch`, `xcrun`,
+  `sandbox-exec`, `unshare` or `chroot`, wrapper names written in capitals, busybox or toybox applets, `script`, file
+  arguments of wrappers (`time -o`), and `watch`; a program placed under a command's name in a folder on PATH that you can
+  write to (for example `/opt/homebrew/bin`); a wildcard in a folder part of a path (`.claude/*/…`) for commands other
+  than `sed`. For a `sed` run outside a Studio repository: a file name in its
+  script that is not a plain path, its `e` and shell-run commands, and dynamic or unexpanded variables. The pre-commit
+  hook, the commit checks and the person's gates stay behind these.
 
 ## License
 

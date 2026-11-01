@@ -10,6 +10,11 @@ written with M1.
 - Other roles are spawned with their persona (`.claude/agents/std-*.md`) and receive **files
   only** as input; they write only the outputs listed for them in `_stages.md`.
 - Roles never approve, never commit and never run script2video approval commands.
+- Read files with Read and write your outputs (if any) with Write or Edit. Never use `python -c`, heredocs or generator
+  scripts for file work: the guard refuses them. For ids, lists and skeletons use the Studio commands your stage
+  names.
+- Studio's words in the person's language (Korean): 하네스 (harness), 발췌 (excerpt), 챕터 (chapter), 크레딧 (credit) —
+  spelled exactly so.
 
 ## B. Result contract
 
@@ -27,6 +32,8 @@ written with M1.
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way
 > (another command, a script, editing the file directly, removing environment markers, retrying
 > with different flags). Tell the user what was refused and why, and ask how to proceed.
+> Exception: when the refusal itself says 'This is not a stop', do what it says — that is not
+> reaching the same effect another way.
 <!-- /studio:guard-refusal -->
 
 ## D. Exit codes of the Studio scripts
@@ -71,11 +78,14 @@ Each script has its own table; a code means only what its script's table says.
 | 3 | refused: a harness (or an earlier install's traces) exists for `init`; the folder name is taken; the value is already set; an update that would raise `s2v.min_version` while videos are in progress | tell the person |
 | 6 | no usable evidence of the person's answer (`config set` of a protected key or `s2v.path`, `narrator set`, `update apply`) | ask with AskUserQuestion (fixed label, the change line), then run the command once |
 
-**`check_claims.py`** (`--narration`: the script stage; without it: verify)
+**`check_claims.py`** (`--narration`: the script stage; without it: verify; `--source [--fill]`: the claim ids of
+`work/source.md`; `--skeleton`: the verify draft — these exclude each other)
 
 | Code | Meaning | Producer |
 |---|---|---|
 | 0 | passed (the check result is written; verify also wrote `verify.json` · `verify.md`) | `stage-done` |
+| 0 | `--source`: every id is right (or `--fill` wrote them) · `--skeleton`: the draft is written | continue |
+| 1 | `--source`: a placeholder or wrong id (without `--fill`), a missing excerpt, an excerpt listed twice | `--source --fill`, or the analyst again |
 | 1 | failed: the listed problems | script: the writer again · verify: `state.py loop <video> verify`, then fix and check again |
 | 2 | usage or setup (no harness, no video, no script, no s2v path) | fix the command, or stop and report |
 

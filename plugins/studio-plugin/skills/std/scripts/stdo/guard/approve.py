@@ -11,7 +11,7 @@ import os
 
 from .. import paths
 from ..state import labels
-from . import proxy, transcript
+from . import messages, proxy, transcript
 from .repos import has_exclude_block
 
 S2V_MILESTONE = "M3b"
@@ -79,10 +79,12 @@ def in_subagent(hook):
 
 
 class Verdict(object):
-    """deny (rule, text) or an evidence record + effect."""
+    """deny (rule, text) or an evidence record + effect. `code`: the NoEvidence code of a G-EVIDENCE deny (it picks
+    the message's closing line, evidence_suffix)."""
 
-    def __init__(self, rule=None, text=None, pending=None, ri=None, reason=None):
+    def __init__(self, rule=None, text=None, pending=None, ri=None, reason=None, code=None):
         self.rule, self.text, self.pending, self.ri, self.reason = rule, text, pending, ri, reason
+        self.code = code
 
 
 def state_py(hook, env, ri, argv):
@@ -129,7 +131,7 @@ def state_py(hook, env, ri, argv):
         if miss:
             from ..commit.summary import missing_text
             extra = " " + missing_text(miss, "`shown`" if _gate_of(argv) != "1" else "`shown` (and record-source)")
-        return Verdict("G-EVIDENCE", evidence_text("state.py %s" % sub, label, e) + extra)
+        return Verdict("G-EVIDENCE", evidence_text("state.py %s" % sub, label, e) + extra, code=e.code)
     base.update({"tool_use_id": ans.tool_use_id, "question_index": idx, "question": text, "answer": label,
                  "mode": "human"})
     if note:
@@ -200,7 +202,7 @@ def setup_py(hook, env, ri, argv):
         if e.code == "values-not-shown":
             from ..commit.summary import first_missing, missing_text
             extra = " " + missing_text(first_missing([line], text), "the preview")
-        return Verdict("G-EVIDENCE", evidence_text(what, label, e) + extra)
+        return Verdict("G-EVIDENCE", evidence_text(what, label, e) + extra, code=e.code)
     base.update({"tool_use_id": ans.tool_use_id, "question_index": idx, "question": text, "answer": label,
                  "mode": "human"})
     if note:
@@ -255,8 +257,29 @@ def labels_argv_sha(argv):
 def evidence_text(what, label, e):
     return ("%s records a person's decision, and the guard found no answer \"%s\" in this turn: %s. Ask with "
             "AskUserQuestion — show the artifact and its hash, start a video's question with [<video>], and offer the "
-            "fixed option \"%s\" (each question text unique) — then run the command alone in a later message, right "
-            "after the answer." % (what, label, e.sentence(), label))
+            "fixed option \"%s\" (each question text unique) — then run it alone as your next tool call, in the same "
+            "turn, right after the answer — do not wait for the person; never in the same assistant message as the "
+            "question." % (what, label, e.sentence(), label))
+
+
+# fix-0025 §2.2 (pilot-2 P15): the closing line of a G-EVIDENCE deny by its NoEvidence code. Every code of
+# transcript.REASONS is in exactly one class (tested); an unknown code or none keeps INV9.
+REASK_CODES = frozenset(("hash-not-shown", "video-not-shown", "values-not-shown", "summary-not-shown",
+                         "gate-lines-not-shown", "questions-differ", "duplicate-questions", "no-question", "consumed",
+                         "too-old", "other-turn", "unflushed", "ambiguous", "transcript-too-large"))
+LABEL_CODES = frozenset(("label-not-chosen",))
+INV9_CODES = frozenset(("cancelled", "not-a-person", "non-interactive", "sidechain", "other-session", "format",
+                        "no-transcript", "transcript-path", "no-turn", "current-call-not-found", "record-unreadable",
+                        "gate-lines-unknown"))
+
+
+def evidence_suffix(code):
+    """messages.REASK, messages.LABEL, or None (INV9)."""
+    if code in REASK_CODES:
+        return messages.REASK
+    if code in LABEL_CODES:
+        return messages.LABEL
+    return None
 
 
 def s2v(hook, env, ri, words):

@@ -21,7 +21,8 @@ short `setup.py doc <stage>` below; never open it with Read) and do exactly what
   `state.py next <video>` says where the video is after any stop (`setup.py doc resume`).
 - Every person gate is the same: `state.py shown …` as you show the artifact, then AskUserQuestion whose question is
   the `question` block `shown` printed, pasted unchanged — never retype a line (the guard compares each character) —,
-  the fixed option, and the approval command alone in a later message — never in the same message as the question.
+  the fixed option, and the approval command alone as your next tool call, in the same turn, right after the answer —
+  do not wait for the person; never in the same assistant message as the question.
 - The heavy runs — `lock.py run --kind tts -- …` and `run_s2v.py render …` — go with `run_in_background`.
 - When the guard refuses something, follow INV9 below: stop and ask; never reach the same effect another way.
 
@@ -70,15 +71,17 @@ short `setup.py doc <stage>` below; never open it with Read) and do exactly what
 ## Gate ②
 
 1. `python3 .claude/studio/scripts/state.py shown <video> 2` right as you open `narrator.wav` (`open <path>`) and
-   show `audition.md` — it prints `hash12 <h12>` and `in the question: …` lines: one per exempted line
+   show `studio/out/<video>/<lang>/audition/audition.md` (read it with Read: the `read:` line after `hash12` names
+   it) — it prints `hash12 <h12>` and `in the question: …` lines: one per exempted line
    (`면제 <id>: "<text>" → 들림 "<heard>" (CER x)`), one per reading change (`발음 <written> → <reading>`) and the
    readings that differ elsewhere — or, when there are too many, one `② 목록 파일: …` line (open that file for the
    person) — and then the `question` block: `[<video>] ② 오디션 — <narrator.wav path> · hash <h12>` with those lines,
    up to `end of question`.
 2. Ask with AskUserQuestion: the question is **the block between `question (…):` and `end of question`, pasted
    unchanged** — never retype a line (the guard compares each character) — with the length warning after it if any;
-   options `승인 <video> <h12>` and "고칠 곳이 있다". Then, in a later message and alone — never in the same message
-   as the question — run `python3 .claude/studio/scripts/state.py approve <video> 2 --expect <h12>`. It records the
+   options `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the
+   answer — do not wait for the person; never in the same assistant message as the question — run
+   `python3 .claude/studio/scripts/state.py approve <video> 2 --expect <h12>`. It records the
    sentences heard and writes `work/<lang>/pronounce-approved.json` (never write it yourself).
 3. "고칠 곳이 있다": change readings (cast) or retry lines (tts) and go through the section again.
 
@@ -94,13 +97,17 @@ Anything that changes after `shown` (the audition, the exemptions, the readings)
 
 ## The video's commit
 
+The render (`studio/out/<video>/…`) and the copy (`studio/copy/<video>/…`) are ignored by git and never committed;
+the commit holds only what `check_commit.py` stages.
+
 1. `python3 .claude/studio/scripts/check_commit.py --stage video <video>` — it checks everything again (the router,
    the source stage, check_assets, validate_copy, a person's approvals and credits), merges the video's approved
    readings into `.claude/studio/pronounce.json`, stages the allow-list and prints the summary line
    (`커밋 <tree12> | …`, with `발음 사전: 충돌 N개 건너뜀 (…)` when a reading was skipped). Exit 1: fix what it lists;
    exit 4: a person approves what was approved in the proxy mode.
 2. Ask with AskUserQuestion: `[<video>]` and the summary line **verbatim**, the staged paths; options `커밋 <tree12>`
-   and "아직". Then, in a later message and alone — never in the same message as the question — run
+   and "아직". Then, alone as your next tool call, in the same turn, right after the answer — do not wait for the
+   person; never in the same assistant message as the question — run
    `git commit -m "<message>"`.
 3. `python3 .claude/studio/scripts/state.py done <video>`.
 
@@ -108,4 +115,6 @@ Anything that changes after `shown` (the audition, the exemptions, the readings)
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way
 > (another command, a script, editing the file directly, removing environment markers, retrying
 > with different flags). Tell the user what was refused and why, and ask how to proceed.
+> Exception: when the refusal itself says 'This is not a stop', do what it says — that is not
+> reaching the same effect another way.
 <!-- /studio:guard-refusal -->

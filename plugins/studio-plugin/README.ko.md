@@ -53,6 +53,24 @@ claude --plugin-dir plugins/studio-plugin
   (theme-color, brand/primary/accent 속성, 그다음 사이트 자체 스타일에서 가장 많이 쓴 색 — 외부 라이브러리 빌드와 압축
   파일은 제외), 로고 파일 최대 세 개를 찾은 곳과 함께 보여 줍니다. 추적되는 파일만 읽고 `.env*`는 읽지 않습니다. 찾은 것이
   없으면 Studio 기본값(`#2563EB`, 로고 없음, 도메인 없음)을 쓰고 요약에 밝힙니다. 어느 질문이든 직접 답을 입력할 수 있습니다.
+- **0.0.25(파일럿 2).** 소스 분석가는 모든 주장에 자리표시 id `C-00000000`을 쓰고, `check_claims.py <video> --source
+  --fill`이 진짜 id를 씁니다(`--source`만 쓰면 목록만 보여 줌). `check_claims.py <video> --skeleton`은 판정할 항목을 모두
+  담은 verify 초안을 쓰고, 팩트체커는 이를 Edit로 채웁니다. 다시 실행해도 채운 내용은 남습니다. 대본 작가와 비주얼
+  디렉터는 `setup.py doc s2v-syntax`로 s2v 대본 문법을 읽습니다(이 작업 트리의 s2v 안에 있는 25,000자 이하의 일반 파일).
+  승인 명령은 이제 사람의 답 바로 뒤, 같은 턴의 다음 도구 호출로 실행합니다 — 질문과 같은 어시스턴트 메시지에는 절대
+  넣지 않습니다. "This is not a stop"이라고 말하는 거부는 멈추지 않고 그대로 따릅니다: Read로 읽고 Write나 Edit로 씁니다.
+  역할 에이전트는 모든 파일 작업을 이렇게 합니다. 가드는 이제 `sed`를 스크립트와 옵션의 모양으로 판단합니다: 단순 출력 ·
+  삭제 · 치환은 통과하고(`-i ''`나 `-i.bak`로 하는 제자리 수정도 그 파일 쓰기로 판단), 판단할 수 없는 스크립트나 옵션은 Studio 레포 안에서 거부합니다.
+  `state.py shown <video> 2`는 `read:` 줄로 `audition.md`를 알려 줍니다.
+- **0.0.25로 올릴 때**: `/std update`를 실행하고 바뀐 역할 에이전트 파일마다 "new"를 고릅니다 — 모든 `std-*` 에이전트
+  (Read/Write 규칙과 가드 규칙의 예외), 그중 `std-writer`와 `std-visual-director`(s2v 문법 명령), `std-fact-checker`
+  (스켈레톤, 연결 문장 한도, 목록 항목과 빠진 조건), `std-source-analyst`(자리표시 id).
+- **가드가 아직 보지 못하는 것(0.0.25).** awk 프로그램과 vim · ex · ed 스크립트, 일부 실행기 뒤에 숨은 명령: 가드가
+  모르는 래퍼 옵션, 긴 래퍼 사슬, `flock` · `setsid` · `arch` · `xcrun` · `sandbox-exec` · `unshare` · `chroot`, 대문자로 쓴
+  래퍼 이름, busybox나 toybox 애플릿, `script`, 래퍼의 파일 인자(`time -o`), `watch`, 쓰기 가능한 PATH 폴더(예: `/opt/homebrew/bin`)에 명령
+  이름으로 놓인 프로그램, `sed` 외 명령에서 경로의 폴더 부분에 쓴 와일드카드(`.claude/*/…`). Studio 레포 밖에서 실행한 `sed`의
+  경우: 스크립트 안의 단순 경로가 아닌 파일 이름, `e`와 셸을 실행하는 명령, 동적이거나 펼쳐지지 않은 변수. 이런 경우에도
+  pre-commit 훅, 커밋 검사, 사람의 게이트가 뒤에 남아 있습니다.
 
 ## 라이선스
 

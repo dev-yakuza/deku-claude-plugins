@@ -21,10 +21,12 @@ Status: contract only (M0). Enforcement arrives with the guard and the scripts (
 | INV6 | Rules that `init` extracts start as drafts. |
 | INV7 | Committed voices and characters carry their approval records (script2video records and Studio actor approvals agree). |
 | INV8 | One heavy job at a time on the machine (the machine lock). |
-| INV9 | What the guard refused is never done another way with the same effect. Stop and ask a person. |
+| INV9 | What the guard refused is never done another way with the same effect. Stop and ask a person. Exception: when the refusal itself says 'This is not a stop', do what it says — that is not reaching the same effect another way. |
 
 <!-- studio:guard-refusal -->
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way
 > (another command, a script, editing the file directly, removing environment markers, retrying
 > with different flags). Tell the user what was refused and why, and ask how to proceed.
+> Exception: when the refusal itself says 'This is not a stop', do what it says — that is not
+> reaching the same effect another way.
 <!-- /studio:guard-refusal -->
