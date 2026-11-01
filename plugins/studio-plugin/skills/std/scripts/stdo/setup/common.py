@@ -2,12 +2,16 @@
 
 import json
 import os
+import re
 import subprocess
 
 from .. import paths
 from ..state import evidence
 
 OK, FAIL, USAGE, REFUSED, WAIT, NO_EVIDENCE = 0, 1, 2, 3, 4, 6
+# a host name as `public_domains` holds it: lowercase labels of letters, digits and inner hyphens, no empty label, a
+# letter TLD or a punycode (xn--) one; at most 253 characters. Shared by init's answers and analyze's drafts (0.0.24).
+HOST = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$")
 
 
 class SetupError(Exception):

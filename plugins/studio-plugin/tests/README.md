@@ -153,3 +153,17 @@ says, and lines that cannot be computed deny (fail closed). Spaced Korean number
 `/std update` rewrites old blocks, keeping a person's own lines in `.gitignore` (`ignore.SHIPPED` lists every released
 line). The copy must be NFC, and the description's bytes count each inner line break as 2. `test_pilot1.py` covers
 all of it.
+
+**0.0.24** (`SCRIPTS_VERSION` 22: only plugin-only files changed — `setup.py`, `stdo/setup/`, the guard, `SKILL.md`,
+the command documents; pilot 1 P6 · P7): documents are printed by `setup.py doc [<name>]` (names from
+`commands/*.md` and `commands/atoms/*.md`, looked up, never joined from the argument; `<<SKILL_DIR>>` replaced; no
+repository needed, nothing written), and `SKILL.md` pre-approves `Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py"
+doc *)` for the invoking turn. The guard allows that call in any folder through the usual allow path
+(`judge.doc_call` before the Studio-repository return, one candidate of kind `doc`, `allowrule.sole` as for state.py):
+only the two spellings of the plugin's own `setup.py` (not a link), a name in `doc.NAMES`, no allow when the run
+folder's root holds the plugin or the interpreter (a venv: the PATH result, its real path, `pyvenv.cfg` one or two
+folders up), or when a warning is shown. `setup.py` imports from its real folder. `init analyze` adds
+`public_domains`, `brand_colors`, `logos`, `ask_husky` and `partial` from tracked files only (`analyze.Walk`: lstat
+regular files under the top level, no `.env*`, vendor folders, minified or banner files; a 20 MB / 3,000-file budget).
+`test_pilot1b.py` covers all of it, with the pilot's colour counts, a FIFO behind a tracked link (with a timeout) and
+the guard's time; `structure_test.sh` checks the rule, the `doc` mentions and init.md's question rules.

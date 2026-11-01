@@ -24,7 +24,7 @@ gates are approved by the person again; the wrapper then renders without the wat
 
 ## Gate ④a
 
-1. External audit: as in `commands/verify.md` step 5, with the thumbnail, the chapters and the stills of ③.
+1. External audit: as in `setup.py doc verify` step 5, with the thumbnail, the chapters and the stills of ③.
 2. `python3 .claude/studio/scripts/state.py shown <video> 4a --output youtube` right as you open the mp4, the
    thumbnail and the chapters (`open <path>`) — it prints `hash12 <h12>`.
 3. Ask with AskUserQuestion: `[<video>] ④a 최종 — <mp4 path> · hash <h12>`, the auditor's findings; options

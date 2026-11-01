@@ -42,6 +42,22 @@ Then `/std help`. Requires script2video 0.13.0 or later (set up later by `/std i
 - **Upgrading to 0.0.23**: `/std update` refreshes Studio's ignore block (`.gitignore` and `info/exclude`) so the
   credits draft and the audio folder no longer show as untracked; commit the `.gitignore` change with the harness
   commit that follows the update.
+- **Studio's documents are printed, not opened (0.0.24).** `/std` reads its command documents by running
+  `python3 "<plugin>/skills/std/scripts/setup.py" doc <name>`, which only prints one of Studio's own documents (read
+  only; nothing is added to your settings). Opening the plugin folder with Read would ask you for every file, because
+  the plugin is outside your working directories. The skill pre-approves that command only for the turn that starts
+  `/std`; after that, Studio's guard allows exactly that call — alone in its Bash call, the plugin's own `setup.py`,
+  a known document name — in every session where the plugin is enabled (any repository, subagents too). Your deny
+  and ask rules still apply. There is no allow when the run folder's repository holds the plugin itself or its own
+  Python (a virtual environment inside it). Not covered (residual risk): conda environments, virtual environments
+  outside the repository or in additional working directories, a plugin checkout in an additional working directory.
+  `blockReadsOutsideWorkingDirectories` fences file tools, not processes, so it does not stop `doc`. An agent that
+  still opens a plugin file with Read gets the normal prompt (no hook on Read).
+- **`/std init` suggests values (0.0.24).** It offers the site's domains (CNAME files, the site settings), up to
+  three brand colours (theme-color, brand/primary/accent properties, then the most used colour of the site's own
+  styles — vendor builds and minified files are left out) and up to three logo files, each with where it was found.
+  It reads tracked files only and never `.env*`. When nothing is found it uses Studio's default (`#2563EB`, no logo,
+  no domain) and says so in the summary; you can type your own answer to any question.
 
 ## License
 

@@ -9,7 +9,8 @@ sys.dont_write_bytecode = True
 if sys.version_info < (3, 9):
     sys.stderr.write("std setup: Python 3.9 or newer is needed\n")
     sys.exit(2)
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# the real folder: a symbolic link to setup.py elsewhere never imports a `stdo` planted next to the link (0.0.24)
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from stdo.setup.cli import entry  # noqa: E402
 
 sys.exit(entry())

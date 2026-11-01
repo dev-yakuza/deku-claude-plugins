@@ -20,7 +20,7 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
    person (`checked`; until then every copy fails — tell the person), limits, required notices, every credit line, the
    render's chapters, no home path, in-house term, `<` or `>`, every sentence with a number or a term of the
    excerpts judged with excerpts in the source, and `copy_excerpts` equal to them. Exit 1: fix what it lists.
-5. External audit: as in `commands/verify.md` step 5, with the copy and the source copy.
+5. External audit: as in `setup.py doc verify` step 5, with the copy and the source copy.
 6. `python3 .claude/studio/scripts/state.py stage-done <video> copy --platform youtube`.
 
 ## Gate ④b

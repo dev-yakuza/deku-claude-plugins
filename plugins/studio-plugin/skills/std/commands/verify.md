@@ -18,9 +18,9 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
    run the fact-checker again. The third loop holds the video (`held:stagnation`, exit 4): ask the person.
 4. `python3 .claude/studio/scripts/state.py stage-done <video> verify`.
 5. **External audit**: run `git status --porcelain --untracked-files=all` and `shasum` on the files you will pass,
-   spawn `std-auditor` with the script, `verify.md` and the source copy, then run both again. If anything changed,
-   discard its result. It only reads (the guard denies its writes and its non-reading commands). Show its findings to
-   the person with ①.
+   spawn `std-auditor` with the script, `studio/videos/<video>/work/<lang>/verify.md` and the source copy, then run
+   both again. If anything changed, discard its result. It only reads (the guard denies its writes and its non-reading
+   commands). Show its findings to the person with ①.
 6. **Gate ①**: `python3 .claude/studio/scripts/state.py shown <video> 1` (right as you show `verify.md` and the
    script) prints `hash12 <h12>`, an `in the question:` line per commit to the source after begin
    (`원본이 begin 뒤에 커밋됨: <sha> <subject> (<diffstat>)`) and the `question` block (`[<video>] ① 대본 — <script

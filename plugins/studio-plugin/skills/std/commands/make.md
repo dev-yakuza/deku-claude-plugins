@@ -5,19 +5,20 @@ One video end to end: `make <source> --kind youtube`, from begin to the video's 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`.
 
-**The flow** — read each stage's document when you reach it and do exactly what it says:
+**The flow** — print each stage's document when you reach it (`python3 "<<SKILL_DIR>>/scripts/setup.py" doc <stage>`,
+short `setup.py doc <stage>` below; never open it with Read) and do exactly what it says:
 
 1. `python3 .claude/studio/scripts/state.py begin <video> --source <path> --kind youtube` — the writing must be
    committed (exit 3 otherwise: ask the person to commit it).
-2. `commands/source.md` → `commands/brief.md` → `commands/script.md` → `commands/verify.md` (gate ①).
+2. `setup.py doc source` → `setup.py doc brief` → `setup.py doc script` → `setup.py doc verify` (gate ①).
 3. The voice section below: cast → tts → audition → gate ②.
-4. `commands/board.md` (board with the credits, visual-check, gate ③).
-5. `commands/render.md` (render, gate ④a) → `commands/copy.md` (copy, gate ④b).
+4. `setup.py doc board` (board with the credits, visual-check, gate ③).
+5. `setup.py doc render` (render, gate ④a) → `setup.py doc copy` (copy, gate ④b).
 6. The video's commit (below), then `state.py done`.
 
 **Always**
 - On every stage: `state.py next <video> --enter <stage>` first; exit 3 means another stage comes first — go there.
-  `state.py next <video>` says where the video is after any stop (`commands/resume.md`).
+  `state.py next <video>` says where the video is after any stop (`setup.py doc resume`).
 - Every person gate is the same: `state.py shown …` as you show the artifact, then AskUserQuestion whose question is
   the `question` block `shown` printed, pasted unchanged — never retype a line (the guard compares each character) —,
   the fixed option, and the approval command alone in a later message — never in the same message as the question.
@@ -37,7 +38,7 @@ position. Shared rules: `atoms/_contract.md`.
    content unchanged, the cast in the roster, the readings file. It prints `reading elsewhere: …` for readings that
    differ from HEAD or another video in progress — information for ②, not a failure. Exit 1: fix what it lists.
    A `no-visual` failure or a content change is not fixed here: go back to `/std script <video>` as in
-   `commands/board.md` step 4 (only the block is added; the rest of the script stays).
+   `setup.py doc board` step 4 (only the block is added; the rest of the script stays).
 5. `python3 .claude/studio/scripts/state.py stage-done <video> cast`.
 
 ## tts
@@ -85,11 +86,11 @@ Anything that changes after `shown` (the audition, the exemptions, the readings)
 
 ## board · visual-check · ③
 
-`commands/board.md` (board with the credits, visual-check, gate ③).
+`setup.py doc board` (board with the credits, visual-check, gate ③).
 
 ## render · ④a · copy · ④b
 
-`commands/render.md` (render, gate ④a), then `commands/copy.md` (copy, gate ④b).
+`setup.py doc render` (render, gate ④a), then `setup.py doc copy` (copy, gate ④b).
 
 ## The video's commit
 

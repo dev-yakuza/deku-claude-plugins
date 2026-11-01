@@ -15,7 +15,7 @@ Rules: one command per Bash call, literal values. Shared rules: `atoms/_contract
      `state.py unlock <video> --expect <held>`.
    Every such answer is asked with AskUserQuestion, and the command runs in a later message and alone —
    never in the same message as the question.
-4. Not held: go to the stage `next` named (`commands/make.md` lists the stage documents).
+4. Not held: go to the stage `next` named (`setup.py doc make` lists the stage documents).
 
 <!-- studio:guard-refusal -->
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way

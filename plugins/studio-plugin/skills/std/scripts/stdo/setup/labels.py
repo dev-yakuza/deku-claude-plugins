@@ -67,6 +67,8 @@ def lookup(cfg, key):
 
 def needs_evidence(argv, protected_keys):
     """True when this setup.py command line records a person's decision."""
+    if argv[:1] == ["doc"]:
+        return False  # prints one of Studio's documents (plugin-only, read-only; 0.0.24): `doc --x` reaches doc.py
     if len(argv) < 2:
         return False
     try:

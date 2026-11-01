@@ -475,7 +475,7 @@ class IgnoreUpdate(InitCase):
         self.assertEqual(sorted(ig["removed"]), sorted(["/studio/videos/*/audio/**", "/studio/videos/*/audio/**",
                                                         "!/studio/videos/*/audio/*/",
                                                         "!/studio/videos/*/audio/*/picks.json"]))
-        self.assertIn(".gitignore Studio 블록: 0.0.22 → 0.0.23", ig["lines"])
+        self.assertIn(".gitignore Studio 블록: 0.0.22 → %s" % render.plugin_version(), ig["lines"])
         self.assertIn("stdo/__init__.py", p["scripts"]["replace"])  # the scripts are copied in the same apply
         self.assertTrue([l for l in ig["lines"] if l.startswith("info/exclude Studio 블록: ")], ig)
         self.assertNotEqual(p["h12"], fresh["h12"])
@@ -484,7 +484,8 @@ class IgnoreUpdate(InitCase):
         self.assertEqual(self.setup(*argv), 0, self.last_err)
         self.assertIn(".gitignore", self.out_json()["wrote"])
         self.assertEqual(update.repo_scripts_version(self.repo), int(SCRIPTS_VERSION))
-        self.assertEqual(json.load(open(os.path.join(self.repo, render.INSTALLED)))["plugin_version"], "0.0.23")
+        self.assertEqual(json.load(open(os.path.join(self.repo, render.INSTALLED)))["plugin_version"],
+                         render.plugin_version())
         self.assertEqual(ignore.split(open(gi).read()), (rest, ignore.render("studio", ["/studio/notes/"])))
         self.assertEqual(ignore.split(open(ex).read())[1], ignore.render("studio", ["/lefthook-local.yml"]))
         self.assertEqual(self.plan()["ignore"]["gitignore"], False)

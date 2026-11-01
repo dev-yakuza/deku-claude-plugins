@@ -3,7 +3,7 @@
 Show or change Studio's settings (M1c). Protected settings, this machine's s2v path, the narrator and the internal
 overlay change only with the person's answer; every change to a committed file then goes through a harness commit.
 
-Rules: one command per Bash call, literal values (replace `<<SKILL_DIR>>` and every `<…>` before the call), never a
+Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a
 variable in command position. Shared rules: `atoms/_contract.md`.
 
 ## Show

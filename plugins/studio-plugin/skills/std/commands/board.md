@@ -46,7 +46,7 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
 
 ## Gate ③
 
-1. External audit (public videos): as in `commands/verify.md` step 5, with the contact sheet and the stills.
+1. External audit (public videos): as in `setup.py doc verify` step 5, with the contact sheet and the stills.
 2. Open the contact sheet and the stills (`open <path>`); the last `shown 3 … --end` printed `hash12 <h12>`.
 3. Ask with AskUserQuestion: `[<video>] ③ 정지 화면 — youtube · hash <h12>`, the auditor's findings; options
    `승인 <video> <h12>` and "고칠 곳이 있다". Then, in a later message and alone — never in the same message as the

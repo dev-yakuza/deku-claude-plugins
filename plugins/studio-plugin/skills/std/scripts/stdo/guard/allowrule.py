@@ -142,7 +142,9 @@ def _commit_shape(cmd, ctx=None):
 
 
 def sole(ctx, sc, cmd, kind):
-    """True when the call is just `cmd` (kind: state | commit)."""
+    """True when the call is just `cmd` (kind: state | commit | s2v | doc)."""
+    if kind == "doc":
+        kind = "state"  # `setup.py doc` has the shape of a state.py approval: a plain python3 <script> call
     if sc is None or sc.status != "ok":
         return False
     for o in sc.opaque:

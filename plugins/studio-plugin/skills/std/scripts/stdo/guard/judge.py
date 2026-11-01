@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import stat
 
 from .. import paths, s2vcall
 from ..state import commands as state_commands
@@ -15,9 +16,12 @@ from . import scan as scan_command
 from . import load_snapshot
 from .messages import Deny
 from .repos import LOCK_VARS, Repos, has_exclude_block, terms_for
-from .where import FS, Where
+from .where import FS, Where, which as where_which
 
 PLUGIN_SCRIPTS = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+# the scripts folder as ${CLAUDE_PLUGIN_ROOT} spells it (guard.py puts its own unresolved folder on sys.path)
+PLUGIN_SCRIPTS_SPELLED = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DOC_SCRIPTS = (os.path.join(PLUGIN_SCRIPTS, "setup.py"), os.path.join(PLUGIN_SCRIPTS_SPELLED, "setup.py"))
 STUDIO_NAMES_RE = re.compile(r"\bSTUDIO_(SANDBOX|HOME|TEST_[A-Za-z0-9_]*)\b")
 MARKER_VARS = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID")
 S2V_APPROVALS = {("character", "pick"), ("character", "approve"), ("voice", "pick"), ("takes", "pick"),
@@ -57,7 +61,7 @@ class Context(object):
         self.denies = []
         # M0d-2: an allow needs evidence (approval commands, Studio commits) and the call being that command alone
         self.allow = None  # the reason, when the guard answers allow
-        self.candidates = []  # (cmd, kind "state" | "commit" | "s2v", reason)
+        self.candidates = []  # (cmd, kind "state" | "commit" | "s2v" | "doc", reason)
         self.bulk_ids = set()  # extractions and recursive copies in a Studio repository (W4)
         self.effects = []  # (rule, function) run only when nothing is denied
         self.warnings = []  # shown to the person and the model when there is no decision
@@ -1593,6 +1597,78 @@ def s2v_approval(ctx, cmd, words):
     ctx.candidates.append((cmd, "s2v", v.reason))
 
 
+# ---- 0.0.24 (pilot-1 P6): printing Studio's own documents ----
+
+def doc_call(ctx, cmd):
+    """The reason to allow when `cmd` is `python3 <the plugin's setup.py> doc [<name>]`, else None. The document
+    command is read-only and plugin-only, so it needs no evidence; allowing it keeps every later `doc` call of a
+    `/std` run free of prompts (the skill's allowed-tools rule lasts one turn). A mismatch only means no allow:
+    the call then gets today's judgement and the normal permission prompt."""
+    sc = cmd.script
+    if sc is None or not isinstance(sc.path, dict):
+        return None
+    args = sc.args
+    if not args or len(args) > 2 or args[0].value != "doc" or any(w.value is None for w in args):
+        return None
+    # exactly two spellings of the plugin's own setup.py (resolved, and as ${CLAUDE_PLUGIN_ROOT} spells it),
+    # never a symbolic link to it (a link elsewhere may sit next to a planted stdo/)
+    text = sc.path.get("text")
+    if text not in DOC_SCRIPTS:
+        return None
+    try:
+        if stat.S_ISLNK(os.lstat(text).st_mode):
+            return None
+    except OSError:
+        return None
+    if os.path.realpath(text) != DOC_SCRIPTS[0]:
+        return None
+    name = args[1].value if len(args) == 2 else None
+    from ..setup import doc
+    if name is not None and name != "help" and name not in doc.NAMES:
+        return None
+    # the run folder's root: the `cd <dir>` target, else the hook's cwd; its git top level, else the folder itself
+    run = cmd.run_cwds if cmd.run_cwds else [ctx.cwd]
+    if len(run) != 1 or not ctx.fs.exists(run[0]):
+        return None
+    repo = ctx.where.git_repo(run[0])
+    root = repo.worktree if repo is not None else run[0]
+    roots = (root, os.path.realpath(root))
+
+    def inside(p):
+        return any(_inside(p, r) for r in roots)
+
+    # developing Studio with the plugin enabled: the repository holds the plugin (another copy of the code)
+    if inside(PLUGIN_SCRIPTS) or inside(PLUGIN_SCRIPTS_SPELLED):
+        return None
+    # an interpreter of the repository's own (a venv in it) is the repository's code, not the person's Python
+    w0 = cmd.words[0].value if cmd.words else None
+    if w0 is None:
+        return None
+    if "/" in w0:
+        found = [w0]
+    else:
+        pvs = list(ctx.snap.paths) if getattr(ctx, "snap", None) is not None and ctx.snap.paths else []
+        found = [where_which(w0, pv, ctx.fs) for pv in [ctx.env.get("PATH", "")] + pvs]
+    for p in found:
+        if p is None:
+            return None
+        if inside(p) or inside(os.path.realpath(p)):
+            return None
+        for folder in (os.path.dirname(p), os.path.dirname(os.path.dirname(p))):
+            if os.path.exists(os.path.join(folder, "pyvenv.cfg")) and (inside(folder) or
+                                                                       inside(os.path.realpath(folder))):
+                return None
+    return "prints Studio's document %s (setup.py doc: read-only, plugin only)" % (name or "list")
+
+
+def check_docs(ctx, sc):
+    """Every `setup.py doc` call becomes an allow candidate; finish() allows only a call that is that alone."""
+    for c in sc.commands:
+        reason = doc_call(ctx, c)
+        if reason:
+            ctx.candidates.append((c, "doc", reason))
+
+
 # ---- tools ----
 
 def decide_bash(ctx, command):
@@ -1659,11 +1735,12 @@ def decide_bash(ctx, command):
     check_shell_strings(ctx, sc, infos, 0)  # adds the host `sh` of a string that extracts or copies trees
     if ctx.bulk_ids:
         bulk_then_write(ctx, sc.commands, ctx.bulk_ids)
+    ctx.scan = sc
+    check_docs(ctx, sc)  # in any folder: the document command needs no Studio repository (0.0.24)
     if not infos:
         return sc, infos
     if STUDIO_NAMES_RE.search(command):
         ctx.deny("G-ENV", "STUDIO_* variables are set only by the person who starts Claude.")
-    ctx.scan = sc
     by_id = {c.id: c for c in sc.commands}
     check_dynamic_writers(ctx, sc, terms, infos)
     for o in sc.opaque:
@@ -2554,6 +2631,8 @@ def finish(ctx):
     if len(ctx.candidates) == 1:
         from . import allowrule
         cmd, kind, reason = ctx.candidates[0]
+        if kind == "doc" and ctx.warnings:
+            return  # a warning is shown instead, with the normal prompt (defence in depth, 0.0.24)
         if allowrule.sole(ctx, ctx.scan, cmd, kind):
             allow_for(ctx, reason)
 

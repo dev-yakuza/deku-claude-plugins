@@ -5,4 +5,4 @@
 What it will do: grow the guides from recorded signals; each item approved by a person.
 
 Do nothing else. Tell the user (in their language) that `/std evolve` arrives with milestone M4,
-then show `help` (`<<SKILL_DIR>>/commands/help.md`).
+then show `help` (`python3 "<<SKILL_DIR>>/scripts/setup.py" doc help`).

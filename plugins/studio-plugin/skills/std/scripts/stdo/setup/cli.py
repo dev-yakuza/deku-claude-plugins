@@ -11,6 +11,7 @@
     setup.py narrator set <lang> --engine qwen:<X> --style <s> [--id narrator] --expect <h12>      설정 <h12>
     setup.py update plan [--take <path>=new|local,…]
     setup.py update apply --expect <h12> [--take …]               갱신 <h12>
+    setup.py doc [<name>]                                         print a Studio document (read-only, works anywhere)
 
 Output: JSON on stdout. Exit: 0 ok · 1 refused (a check failed) · 2 usage/setup (no harness: everything but init) ·
 3 refused (a harness exists, a conflict, a video in progress) · 6 no evidence of the person's answer."""
@@ -19,7 +20,7 @@ import json
 import os
 import sys
 
-from . import analyze, configcmd, initcmd, update
+from . import analyze, configcmd, doc, initcmd, update
 from .common import USAGE, SetupError, toplevel
 
 
@@ -62,6 +63,8 @@ def _load(path, what):
 
 def main(argv, cwd=None, env=None, version=None):
     env = dict(os.environ if env is None else env)
+    if argv[:1] == ["doc"]:
+        return doc.main(argv[1:])  # no repository needed, nothing written (pilot-1 P6)
     try:
         if len(argv) < 2:
             raise SetupError(USAGE, __doc__.strip().splitlines()[0])

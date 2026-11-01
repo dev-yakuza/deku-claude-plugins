@@ -14,7 +14,7 @@ import shutil
 
 from .. import ignore, machine, narrator, paths
 from . import analyze, render
-from .common import FAIL, REFUSED, USAGE, SetupError, git, write_text
+from .common import FAIL, HOST, REFUSED, USAGE, SetupError, git, write_text
 
 PLAN_SCHEMA = 1
 COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -72,7 +72,7 @@ def normalize(top, answers):
             raise SetupError(USAGE, "brand.logo is not a file in the repository: %s" % logo)
     project = _text(answers.get("project_name"), "project_name")
     doms = answers.get("public_domains") or []
-    if not isinstance(doms, list) or not all(isinstance(d, str) and re.match(r"^[a-z0-9.-]+\.[a-z]{2,}$", d)
+    if not isinstance(doms, list) or not all(isinstance(d, str) and HOST.match(d)
                                              for d in doms):
         raise SetupError(USAGE, "public_domains is a list of host names (example.com)")
     wr = answers.get("web_roots") or {}

@@ -199,7 +199,8 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "22", "SCRIPTS_VERSION is 22 (0.0.23: pilot-1 P4 P5 P8, J175)")
+check(sv and sv.group(1) == "22", "SCRIPTS_VERSION is 22 (0.0.23: pilot-1 P4 P5 P8, J175; 0.0.24 changed only "
+      "plugin-only files: setup.py, stdo/setup/, the guard, SKILL.md, commands)")
 # 0.0.23 (pilot-1 P4): every gate document has the agent paste the printed question block, never retyping a line
 for _d in ("make", "copy", "verify", "board"):
     _t = open(os.path.join(skill, "commands", _d + ".md")).read()
@@ -229,7 +230,7 @@ check(not _bad, "the copied scripts do not import setup (plugin only): %s" % ", 
 _cmd = os.path.join(skill, "commands")
 _mk = open(os.path.join(_cmd, "make.md")).read()
 _order = ["source", "brief", "script", "verify", "board", "render", "copy"]
-_pos = [_mk.find("commands/%s.md" % d) for d in _order]
+_pos = [_mk.find("`setup.py doc %s`" % d) for d in _order]
 check(all(p >= 0 for p in _pos) and _pos == sorted(_pos), "make.md reads the stage documents in order (%s)" % _pos)
 check(all(d in IMPLEMENTED_CMDS for d in _order + ["make"]), "every document make.md reads is implemented")
 for d in sorted(IMPLEMENTED_CMDS - {"help", "init", "config", "update"}):
@@ -283,6 +284,40 @@ for p in glob.glob(os.path.join(_cmd, "*.md")):
             if "run_in_background" in it or "python3 .claude" not in it and "`%s" % w not in it:
                 continue
             check(False, "%s runs %s in the background (item: %s)" % (os.path.basename(p), w, it.strip()[:80]))
+
+# 0.0.24 (pilot-1 P6): documents are printed by `setup.py doc <name>`, never opened with Read (each read of the plugin
+# folder asks the person); the skill pre-approves exactly that command for its first turn
+_skill_md = open(os.path.join(skill, "SKILL.md")).read()
+_fm = re.match(r"---\n(.*?)\n---\n", _skill_md, re.S)
+_rules = re.findall(r"(?m)^  - '(.*)'$", _fm.group(1).split("allowed-tools:", 1)[1]) if _fm and \
+    "allowed-tools:" in _fm.group(1) else []
+_rule = 'Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" doc *)'
+check(_rules == [_rule], "SKILL.md allowed-tools is exactly %s (%s)" % (_rule, _rules))
+_body = _skill_md[_fm.end():] if _fm else _skill_md
+_prefix = _rule[len("Bash("):-len("*)")]
+check(_body.count(_prefix + "<name>") >= 2, "SKILL.md runs the same quoted command as its rule (%s<name>)" % _prefix)
+check("Never use Read, Grep or Glob on the skill folder" in _body, "SKILL.md: never Read/Grep/Glob the skill folder")
+check("never `$0` itself" in _body, "SKILL.md: the name is copied from the list, never $0 itself")
+_mds = glob.glob(os.path.join(skill, "**", "*.md"), recursive=True)
+check(not [p for p in _mds if "<<SKILL_DIR>>/commands/" in open(p).read()], "no document names <<SKILL_DIR>>/commands/")
+_loose = ["%s:%d" % (os.path.relpath(p, skill), i) for p in _mds for i, l in enumerate(open(p), 1)
+          if re.search(r"commands/[A-Za-z_/]+\.md", l) and "setup.py doc" not in l]
+check(not _loose, "a commands/<name>.md mention only on a line with `setup.py doc` (%s)" % ", ".join(_loose[:5]))
+from stdo.setup import doc as _doc
+check(set(_doc.names()) == routed | {"_contract", "_stages", "_auditor", "_invariants", "_actors"},
+      "setup.py doc names == SKILL.md routing list + the five atoms")
+
+# 0.0.24 (pilot-1 P7): init asks with pickable options (mirrors test_pilot1b.InitText)
+_init = open(os.path.join(skill, "commands", "init.md")).read()
+_flat = " ".join(_init.split())
+_typeit = [w for l in _init.splitlines() if "Never add an option that means" not in l
+           for w in re.findall(r"`([^`]+)`", l) if any(t in w for t in ("직접 입력", "Other로", "기타"))]
+check(not _typeit, "init.md has no option meaning \"I'll type it\" (%s)" % ", ".join(_typeit))
+for _s in ("Never add an option that means", "목록에 없으면 직접 입력해 주세요", "never naming a UI label",
+           "at most 4 questions per call and 2–4 options per question",
+           "Only after the language is answered: the default narrator", "**in a plain message**",
+           "never mention hooks in a question", "`ask_husky`", "`public_domains`", "`brand_colors`", "`logos`"):
+    check(_s in _flat, "init.md: %s" % _s)
 
 if fails:
     print("structure: %d failure(s)" % len(fails))

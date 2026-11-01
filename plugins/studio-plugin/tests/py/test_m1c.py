@@ -119,6 +119,10 @@ class Init(InitCase):
         self.assertEqual((a["web_roots"], a["web_roots_from"]), ({"/": "public/"}, "astro.config.mjs"))
         self.assertEqual(a["content_folders"], [{"folder": "src/content/blog/", "markdown_files": 1}])
         self.assertIsNone(a["studio_root_problem"])
+        # 0.0.24 (pilot-1 P7): drafts with evidence; this site has none (test_pilot1b covers the detectors)
+        self.assertEqual((a["public_domains"], a["brand_colors"], a["logos"], a["partial"], a["ask_husky"]),
+                         ([], [], [], False, False))
+        self.assertEqual(a["hook_manager"], "plain")
         with open(os.path.join(self.repo, "astro.config.mjs"), "w") as f:
             f.write("export default { publicDir: './static' }\n")
         self.setup("init", "analyze")

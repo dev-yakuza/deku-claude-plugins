@@ -1,6 +1,6 @@
 # External auditor
 
-Status: M1e — used before ① (`commands/verify.md`); the other gates follow with their milestones.
+Status: M1e — used before ① (`setup.py doc verify`); the other gates follow with their milestones.
 
 - A reader outside the organization: no persona, no guides, no exemplar scripts. It gets the
   in-house terms list so it can recognise internal information.
