@@ -23,7 +23,23 @@ variable in command position. Shared rules: `atoms/_contract.md`.
    `python3 <<SKILL_DIR>>/scripts/setup.py config set <key> <value> --expect <h12>`.
 `studio_root` cannot be changed here (moving Studio's folder is not part of M1).
 
+Images of public posts often live outside the writing's folder (`public/blog-images/**`): put that folder in
+`visibility.public` too, or its images are `unknown` and need a licence at board. Never suggest removing such a glob.
+Videos in progress pick the change up when the source stage runs again (`/std source <video>`).
+
+## The brand
+
+`.claude/studio/brand.json` (`name`, `accent_color` `#RRGGBB`, `logo`) is edited as a file, then committed in the
+harness commit below. The logo is a PNG or JPEG file of the repository that is **already committed** (or `""` for no
+logo): the board check refuses an uncommitted brand.json or logo, and the harness commit warns about an uncommitted
+logo. Videos past board run `/std board <video>` again (its check reads the brand).
+
 ## The default narrator
+
+The speakers to offer are `narrator_candidates` of `python3 <<SKILL_DIR>>/scripts/setup.py init analyze` for the
+language: the language's native built-in speaker(s) first (suggested), then up to two others, each described as "<its
+language> native speaker — may carry an accent and fail the ② pronunciation check (CER ≤ 0.15)". The speaking style is
+its own question.
 
 `python3 <<SKILL_DIR>>/scripts/setup.py narrator preview <lang> --engine qwen:<speaker> --style "<one line>"` shows
 the line and `h12`; ask (fixed label `설정 <h12>`, the line in the question), then, alone as your next tool call, in the

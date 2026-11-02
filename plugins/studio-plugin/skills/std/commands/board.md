@@ -11,11 +11,15 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
 
 1. `python3 .claude/studio/scripts/state.py next <video> --enter board --output youtube` — exit 3: go to the stage it
    names.
-2. Spawn the visual director (`std-visual-director`) with the script, `work/assets.json`, `work/source.md` and the
-   brand. It changes only presentation attributes in the script and writes `work/<lang>/board.md` and
-   `CREDITS.draft.yaml` (JSON). The spawn prompt gives it the exact command for s2v's script syntax, which it runs
-   itself: `python3 "<<SKILL_DIR>>/scripts/setup.py" doc s2v-syntax`.
-3. **Credits** — for every picture the script shows:
+2. Spawn the visual director (`std-visual-director`) with the script, `work/assets.json`, `work/source.md` and
+   `.claude/studio/brand.json`. It changes only how the script looks — the frontmatter's `theme`, `logo`,
+   `outputs.youtube.layout` and `transition`, and the attributes of the blocks already there — and writes
+   `work/<lang>/board.md` (ending with `## Applied`) and `CREDITS.draft.yaml` (JSON). The spawn prompt gives it two
+   exact commands, which it runs itself: `python3 "<<SKILL_DIR>>/scripts/setup.py" doc s2v-syntax` (s2v's script
+   syntax) and `python3 .claude/studio/scripts/check_assets.py <video> --look --output youtube` (the brand's lines to
+   apply: the accent, the brand logo, the layout). `--look` exit 1: brand.json or its logo is not usable or not
+   committed — tell the person (a brand change is a harness commit: `/std config`).
+3. **Credits** — for every picture the script shows, the brand logo included:
    - `python3 .claude/studio/scripts/state.py credit-preview <video> <script_src>` prints eight `key=value` lines,
      `label 출처 <video> <h12>` and the `question` block (`[<video>] 출처 — <script_src> · hash <h12>` and the eight
      lines, up to `end of question`) (exit 1: fix the draft as it says).
@@ -29,7 +33,9 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
    - "이전 승인 <v>" means another video approved the same entry: ask anyway (every video records its own).
 4. `python3 .claude/studio/scripts/check_assets.py <video> --output youtube` — s2v check, content and voice unchanged
    since ②, every picture usable, unchanged and credited (a third-party or unknown image needs `public_ok: true` and
-   a license). Exit 1: fix what it lists (a changed entry needs `credit` again).
+   a license), and the brand's look: brand.json committed, `theme.accent` the brand's, the brand logo, no presenter
+   layout without character art. Exit 1: fix what it lists (a changed entry needs `credit` again); a look problem is
+   fixed in the frontmatter by the visual director (the `--look` lines) and the check runs again — no stage change.
    - A `no-visual` failure (a scene that shows only the background), or any fix that needs a block added or removed
      (a dropped image too), is not fixed at board: blocks are in the content hash. Stop and go back to the script
      stage: run `/std script <video>` again (`python3 .claude/studio/scripts/state.py next <video> --enter script`);

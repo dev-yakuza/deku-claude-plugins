@@ -19,7 +19,8 @@ the brand, exemplar scripts.
    bound in seconds) and `targetDuration` (within the format's range), in s2v's syntax (see Rules).
 2. `work/<lang>/claims-map.json` — exactly: `{"claims": {"C-…": {"excerpt": "<the excerpt from work/source.md,
    unchanged>", "sentences": ["<each script sentence that says it>"]}}, "excerpts": ["<every excerpt used>"],
-   "copy_excerpts": {}}`. Only the brief's claims.
+   "copy_excerpts": {}}`, plus `"unused_images": {"<script_src>": "<reason>"}` for any usable image the script does not
+   show. Only the brief's claims.
 Write nothing else.
 
 ## Rules
@@ -29,7 +30,12 @@ Write nothing else.
 - Narration is in the video's language only: no kana or kanji in it (Studio checks). Japanese goes on screen
   (`:::quote`, `:::table`, captions); the narration reads it in the video's language.
 - Images: only usable entries of `work/assets.json`, as `::image{src="<script_src>"}` on a line of their own (Studio
-  checks; s2v refuses a Markdown image line).
+  checks; s2v refuses a Markdown image line). Show every usable image where it fits; one you leave out goes in the
+  claims map's `unused_images` with its reason (one line, at most 200 characters) — the person reads it at ①.
+- Scene 1 is the title scene: one or two sentences of narration (the hook, from the claims map) and one visual,
+  `::title[<the frontmatter title>]`, after its narration — it becomes the thumbnail. Only `#` (level 1) headings start
+  scenes.
+- Never write `layout` yourself (board sets it); keep what board wrote.
 - Every scene shows something: its first visual is `::title[…]` with a label, a text card (`:::bullets`, `:::quote`,
   …) or an image (Studio fails s2v's `no-visual`). Put a scene's `::title[…]` after its last paragraph: it still shows
   from the scene's start, and the sentence ids stay. An image you cannot use (its license) is replaced here by

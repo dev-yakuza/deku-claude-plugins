@@ -44,6 +44,30 @@ def _rel(top, v, name, folder=False):
     return v
 
 
+LOGO_UNCOMMITTED = "commit the logo first, or choose 로고 없음 now"
+
+
+def logo_problem(top, logo):
+    """0.0.26 (fix-0026 §1.4): the brand logo is what the video shows, and board checks it against brand.json: a PNG
+    or JPEG by its bytes (matching its extension), not a symbolic link, and exactly as committed at HEAD (a repository
+    with no commit refuses too). Raises SetupError (2)."""
+    from ..source import assets
+    from ..state import flow
+    if os.path.islink(os.path.join(top, logo)):
+        raise SetupError(USAGE, "brand.logo is a symbolic link: %s — name the file itself" % logo)
+    try:
+        status, why, info = assets.judge_file(top, logo)
+    except OSError as e:
+        raise SetupError(USAGE, "brand.logo cannot be read: %s (%s)" % (logo, e))
+    if status != "ok":
+        raise SetupError(USAGE, "brand.logo %s is not a PNG or JPEG image the video can show (%s: its bytes are %s) — "
+                                "choose a PNG or JPEG logo, or 로고 없음" % (logo, why, info.get("format")))
+    bad = flow.uncommitted(top, [logo])
+    if bad:
+        why = "the repository has no commit yet" if bad[0][1] == "no commit yet" else "%s is %s" % (logo, bad[0][1])
+        raise SetupError(USAGE, "brand.logo: %s — %s" % (why, LOGO_UNCOMMITTED))
+
+
 def normalize(top, answers):
     """The validated answers (m1-plan §5.2 step 3) with defaults filled in."""
     if not isinstance(answers, dict):
@@ -70,6 +94,7 @@ def normalize(top, answers):
         _rel(top, logo, "brand.logo", folder=True)
         if not os.path.isfile(os.path.join(top, logo)):
             raise SetupError(USAGE, "brand.logo is not a file in the repository: %s" % logo)
+        logo_problem(top, logo)
     project = _text(answers.get("project_name"), "project_name")
     doms = answers.get("public_domains") or []
     if not isinstance(doms, list) or not all(isinstance(d, str) and HOST.match(d)

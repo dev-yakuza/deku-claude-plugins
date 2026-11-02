@@ -98,6 +98,20 @@ def _script_files(inp):
     return out or [("files", "none")]
 
 
+def _brand(inp):
+    """brand.json and the logo it names (0.0.26: the board check reads both — a changed brand runs it again)."""
+    from .. import look
+    out = _file(inp, os.path.join(inp.repo, ".claude", "studio", "brand.json"))
+    # the logo's sha only through look.brand_logo's checks (relative, inside the repository, a regular file under the
+    # size cap): a path to a FIFO, a device or a huge file is never read here; whether it is committed is the check's
+    bl = look.brand_logo(inp.repo, inp.vdir, committed=lambda repo, rels: [])
+    if bl is None:
+        out += [("brand_logo", None)]
+    else:
+        out += [("brand_logo:%s" % (bl.get("path") or "?"), "%s:%s" % (bl.get("status"), bl.get("sha256")))]
+    return out
+
+
 def _config(inp):
     try:
         with open(os.path.join(inp.repo, ".claude", "studio", "config.json"), encoding="utf-8") as f:
@@ -191,6 +205,7 @@ RESOLVERS = {
                                + _file(i, os.path.join(_out_dir(i), "audition", "audition.md"))),
     "credits": lambda i: _file(i, os.path.join(i.vdir, "CREDITS.yaml")),
     "config_protected": _config,
+    "brand_json": _brand,
     "overlay_sha": _overlay,
     "credit_approvals": lambda i: [("state:credits", hashes.hash_of(i.state.get("credits")))],
     "proxy_credits": _proxy_credits,

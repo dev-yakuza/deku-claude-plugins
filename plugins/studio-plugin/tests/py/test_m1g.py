@@ -16,7 +16,7 @@ from stdo.state import router, stagechecks, store
 from stdo.state.hashes import file_sha
 from stdo.voice import cli as vcli, numbers, tts
 from test_guard_judge import JudgeCase
-from test_m1e import ARTICLE, png
+from test_m1e import ARTICLE, THEME, branded, png
 from test_m1f import S1_ID, VoiceCase, stamp
 
 IMG = "../../../docs/img/gate.png"
@@ -71,7 +71,7 @@ class BoardCase(VoiceCase):
         with open(os.path.join(self.vdir, "script.ko.md")) as f:
             text = f.read()
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
-            f.write(text.replace("lang: ko\n", "lang: ko\ntheme: dark\n", 1))  # presentation only
+            f.write(branded(text))  # presentation only (the brand's look, 0.0.26)
 
     def to_board(self):
         self.themed()
@@ -237,7 +237,7 @@ class Credit(BoardCase):
         with open(os.path.join(self.vdir, "script.ko.md")) as f:
             text = f.read()
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
-            f.write(text.replace("theme: dark\n", "theme: dark\nsubtitleStyle: { font: \"f.ttf\" }\n", 1))
+            f.write(text.replace(THEME, THEME + "subtitleStyle: { font: \"f.ttf\" }\n", 1))
         self.assertEqual(self.check_board(), 0, self.out)  # a font needs no CREDITS entry
         r = stagechecks.read(self.vdir, "ko", "board", "youtube")
         self.assertEqual(r["details"]["not_pictures"], [{"path": "f.ttf", "kind": "font"}])
@@ -266,10 +266,10 @@ class Credit(BoardCase):
         with open(os.path.join(self.vdir, "script.ko.md")) as f:
             text = f.read()
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
-            f.write(text.replace("\n\n::title[출국]\n", "\n"))
+            f.write(text.replace("\n\n::title[출국]\n", "\n"))  # the title scene (airport) loses its only visual
         self.assertEqual(self.check_board(), 1)
         self.assertIn("s2v check: no-visual", self.out)
-        self.assertIn('s2v check: output "youtube" scene exit: no visual', self.out)
+        self.assertIn('s2v check: output "youtube" scene airport: no visual', self.out)
         self.assertIn("content changed since ②", self.out)
 
     def test_content_must_stay(self):
@@ -289,12 +289,25 @@ class LogoCredit(BoardCase):
     pictures = {"gate.png": None, "logo.png": png(5, 4)}
     analyst_images = {"img-01": {"class": "diagram", "reason": "own"}, "img-02": {"class": "diagram", "reason": "own"}}
 
+    def cmap(self, **over):  # the second picture is not an ::image of the script: board shows it as the logo
+        over.setdefault("unused_images", {LOGO: "the site logo — board shows it as the frontmatter logo"})
+        return super().cmap(**over)
+
     def test_x1_frontmatter_logo_is_a_picture(self):
         self.to_board()
+        # 0.0.26: a logo is the brand's (brand.json, committed) — this one is also an image of the source
+        p = os.path.join(self.repo, ".claude", "studio", "brand.json")
+        with open(p) as f:
+            brand = json.load(f)
+        brand["logo"] = "docs/img/logo.png"
+        with open(p, "w") as f:
+            json.dump(brand, f)
+        helpers.git(self.repo, "add", p)
+        helpers.git(self.repo, "commit", "-q", "--no-verify", "-m", "brand logo")
         with open(os.path.join(self.vdir, "script.ko.md")) as f:
             text = f.read()
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
-            f.write(text.replace("theme: dark\n", "theme: dark\nlogo: { src: \"%s\" }\n" % LOGO, 1))
+            f.write(text.replace(THEME, THEME + "logo: { src: \"%s\" }\n" % LOGO, 1))
         self.assertEqual(self.check_board(), 1)
         self.assertIn("%s has no CREDITS entry" % LOGO, self.out)
         self.assertNotIn("content changed", self.out)  # the logo is presentation

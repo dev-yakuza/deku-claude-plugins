@@ -146,6 +146,7 @@ class HarnessKind(object):
                 found = [p for p in found if p != PRONOUNCE]
                 warnings.append("%s: additions approved for videos in progress (%s) are left out — those videos' "
                                 "commits put them in" % (PRONOUNCE, ", ".join(verdict.videos) or "?"))
+        warnings += brand_logo_warnings(ctx)
         return Collected(sorted(set(found)), gitignore=gi, problems=problems, warnings=warnings)
 
     # --- checks on the index (stage and hook) ---
@@ -311,6 +312,28 @@ class HarnessKind(object):
                 out.append(Problem(1, "%s names an internal term (\"%s…\") — internal content stays in "
                                       ".claude/studio/local/" % (p, hit[:3]), p))
         return out
+
+
+def brand_logo_warnings(ctx):
+    """0.0.26 (P16): brand.json names a logo that is not committed — a warning, not a refusal (the board check fails
+    until the logo is committed; init refuses it already)."""
+    try:
+        with open(os.path.join(ctx.top, ".claude", "studio", "brand.json"), encoding="utf-8") as f:
+            logo = json.load(f).get("logo")
+    except (OSError, ValueError, AttributeError):
+        return []
+    if not isinstance(logo, str) or not logo.strip():
+        return []
+    rel = os.path.normpath(logo).replace(os.sep, "/")
+    if os.path.isabs(logo) or rel.startswith("../") or rel == "..":
+        return ["brand.json names %s, which is outside the repository — board will fail until it is a committed "
+                "file of the repository" % logo]
+    from ..state import flow
+    if os.path.isdir(os.path.join(ctx.top, rel)) or flow.is_tree_at_head(ctx.top, rel):
+        return ["brand.json names %s, which is a folder — name the logo file itself" % rel]
+    if not flow.uncommitted(ctx.top, [rel]):  # the board check's own rule (look.brand_logo)
+        return []
+    return ["brand.json names %s, which is not committed — board will fail until it is" % rel]
 
 
 def gitignore_block_problems(data, root):

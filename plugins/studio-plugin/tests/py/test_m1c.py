@@ -123,6 +123,13 @@ class Init(InitCase):
         self.assertEqual((a["public_domains"], a["brand_colors"], a["logos"], a["partial"], a["ask_husky"]),
                          ([], [], [], False, False))
         self.assertEqual(a["hook_manager"], "plain")
+        # 0.0.26 (pilot-2 N3 · N4 · N5; test_pilot2b_init covers the detectors): no name source but the folder, no
+        # image in the post, and every language's narrator candidates
+        self.assertEqual(a["project_names"], [{"name": "repo", "from": "folder name"}])
+        self.assertEqual((a["image_folders"], a["partial_reason"]), ([], []))
+        self.assertEqual(sorted(a["narrator_candidates"]), ["en", "ja", "ko"])
+        self.assertEqual(a["narrator_candidates"]["ko"][0],
+                         {"engine": "qwen:Sohee", "language": "ko", "native": True, "suggested": True})
         with open(os.path.join(self.repo, "astro.config.mjs"), "w") as f:
             f.write("export default { publicDir: './static' }\n")
         self.setup("init", "analyze")

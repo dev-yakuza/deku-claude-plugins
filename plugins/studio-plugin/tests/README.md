@@ -181,3 +181,18 @@ the guard-refusal blocks, INV9 and every role rule carry the "This is not a stop
 auditor does file work with Read, Write and Edit. `test_pilot2.py` covers these with stub Providers (no s2v process);
 the guard's 0.0.25 changes (the sed shapes, the non-stop and re-ask suffixes) are in `test_pilot2_guard.py` and
 `test_guard_judge.py`; `structure_test.sh` checks the wording.
+
+**0.0.26** (`SCRIPTS_VERSION` 24, pilot 2 P16 · P17): `stdo/look.py` judges the brand logo live (inside the
+repository, a regular PNG or JPEG file, brand.json and the logo committed — `flow.uncommitted`) and reads the theme,
+outputs and title from the frontmatter text (trailing comments dropped after an unquoted `#` colour is reported).
+`check_assets.py <video> --look --output <o>` prints the lines the brand asks for and writes nothing; the board check
+adds the look rules (accent, brand logo by path and sha, no `presenter`/`dialogue` without character art — absent is
+s2v's `presenter`), the brand logo is a picture whose CREDITS floor is `public/brand.json logo (committed in the
+harness)`, and brand.json with its logo joins the board's inputs (`brand_json`). The script check adds the title scene
+(only ATX level-1 headings start scenes; fences close on their own marker, also inside `:::code`), every usable image
+shown or listed in `unused_images` with a one-line reason (printed again, sanitized, after the ① question block), and
+the layout rule in script mode (absent passes). The harness commit warns when brand.json names an uncommitted logo.
+The fixture script (`test_m1e.SCRIPT`) opens with a title scene and `test_m1e.branded()` adds the look board writes;
+the fake s2v's layout default is `presenter` and it takes `logo: <path>`. `test_pilot2b.py` covers all of it with stub
+Providers; `RealInspect` runs real `s2v inspect`/`lint` only with `STUDIO_TEST_S2V` (`--full`). The init parts are in
+`test_pilot2b_init.py`.

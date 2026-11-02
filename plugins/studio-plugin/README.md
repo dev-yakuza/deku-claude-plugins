@@ -73,6 +73,27 @@ Then `/std help`. Requires script2video 0.13.0 or later (set up later by `/std i
   (the Read/Write rule and the guard rule's exception), and among them `std-writer` and `std-visual-director` (the s2v
   syntax command), `std-fact-checker` (the skeleton, the link limit, list items and dropped conditions) and
   `std-source-analyst` (the placeholder id).
+- **0.0.26 (pilot 2, the look and init).** The visual director applies the brand: `check_assets.py <video> --look
+  --output <o>` prints the frontmatter lines brand.json asks for — `theme.accent`, the brand logo (`logo.src`) and the
+  layout (`fullscreen` unless every speaker has character art; s2v's default `presenter` shows no one without it) —
+  and the board check fails until the script has them. Board may now change the frontmatter's `theme`, `logo`,
+  `outputs.<o>.layout` and `transition` (never a block). The brand logo is a picture with its own credit (floor
+  `public/brand.json logo (committed in the harness)`). brand.json and the logo must be committed: the board check
+  refuses an uncommitted one and the harness commit warns about an uncommitted logo; the logo must be PNG or JPEG.
+  At the script stage, scene 1 is a title scene (`::title[<frontmatter title>]` its only visual, so the thumbnail
+  carries the title; skipped when the script has its own `::thumbnail{src=…}`), every usable image of the post is
+  shown or has a one-line reason in the claims map's `unused_images` (printed as `unused:` lines at ①), and the
+  writer never sets a layout. `/std init` now always asks the narrator (the language's native speaker first, up to
+  two others marked as possibly accented — they may fail ②'s pronunciation check), offers the image folders the posts
+  use for `visibility.public`, offers project names from the site's title, the web manifest, package.json and the
+  origin remote's repository name (never its URL), and refuses a logo that is not committed (choose 로고 없음 or
+  commit it first).
+- **Upgrading to 0.0.26**: run `/std update` and choose "new" for `std-visual-director`, `std-writer`,
+  `guides/board.md` and `guides/script.md` (the guides may hold your own edits; the update shows the difference).
+  Make sure brand.json and its logo are committed and the logo is PNG or JPEG (or set it to `""`). Put the folder of
+  your posts' images in `visibility.public` with `/std config` if it is missing. For any video already past board,
+  run `/std board <video>` first, before render: otherwise the board check's look rules fail it at the video commit
+  and it goes back to board, then ③, the ④a render and ④a again. Videos in progress need no new source stage.
 - **What the guard still does not see (0.0.25).** awk programs and vim, ex or ed scripts; commands hidden behind some
   runners: wrapper options it does not model, long chains of wrappers, `flock`, `setsid`, `arch`, `xcrun`,
   `sandbox-exec`, `unshare` or `chroot`, wrapper names written in capitals, busybox or toybox applets, `script`, file

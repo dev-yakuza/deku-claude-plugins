@@ -227,8 +227,8 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "23", "SCRIPTS_VERSION is 23 (0.0.25: check_claims --source/--skeleton, the `read:` line "
-      "of shown ②)")
+check(sv and sv.group(1) == "24", "SCRIPTS_VERSION is 24 (0.0.26: stdo/look.py, check_assets --look, the board's look, "
+      "the script's title scene and unused images, the `unused:` lines of shown ①)")
 # 0.0.23 (pilot-1 P4): every gate document has the agent paste the printed question block, never retyping a line
 for _d in ("make", "copy", "verify", "board"):
     _t = open(os.path.join(skill, "commands", _d + ".md")).read()
@@ -348,6 +348,40 @@ for _s in ("Never add an option that means", "목록에 없으면 직접 입력�
            "Only after the language is answered: the default narrator", "**in a plain message**",
            "never mention hooks in a question", "`ask_husky`", "`public_domains`", "`brand_colors`", "`logos`"):
     check(_s in _flat, "init.md: %s" % _s)
+
+# 0.0.26 (pilot-2 N3 · N4 · N5, fix-0026 §6): init's call sequence (mirrors test_pilot2b_init.InitSequence)
+_c = [_flat.find(m) for m in ("**Call 1**", "**Purpose message**", "**Call 2**", "**Call 3**", "**Each question**")]
+check(-1 not in _c and _c == sorted(_c), "init.md: Call 1 → purpose message → Call 2 → Call 3")
+check("`web_roots`" in _flat[_c[0]:_c[1]] and "accent" not in _flat[_c[0]:_c[1]], "init.md: web_roots in call 1, accent not")
+check("logo" not in _flat[_c[2]:_c[3]] and "logo" in _flat[_c[3]:_c[4]], "init.md: the logo in call 3")
+for _s in ("The free-input line is on the language question only",
+           "may carry an accent and fail the ② pronunciation check (CER ≤ 0.15)",
+           "`narrator_candidates`", "`project_names`", "`image_folders`", "`via_web_root: true`",
+           "only `logos` entries with `video: true`", "commit the logo first, or choose 로고 없음 now",
+           "Never suggest removing a glob the analysis lists"):
+    check(_s in _flat, "init.md: %s" % _s)
+check(not [s for s in ("it is fixed", "do not ask for the speaker") if s in _flat], "init.md: no fixed narrator sentence")
+
+# 0.0.26 (pilot-2 P16 · P17): board applies the brand's look (the --look lines) and may change the frontmatter's
+# presentation; the writer opens with a title scene, gives unused images a reason and never writes the layout
+def _f(*parts):
+    return " ".join(open(os.path.join(skill, *parts)).read().split())
+_gb, _vd, _bd = _f("templates", "guides", "board.md"), _f("templates", "agents", "std-visual-director.md"), \
+    _f("commands", "board.md")
+for _n, _t in (("guides/board.md", _gb), ("std-visual-director.md", _vd), ("commands/board.md", _bd)):
+    check("--look --output" in _t, "%s names check_assets.py --look (0.0.26 P16)" % _n)
+    check(all(k in _t for k in ("`theme`", "`logo`", "`transition`")),
+          "%s lets board change the frontmatter's theme, logo and transition (0.0.26 P16)" % _n)
+check("## Applied" in _vd, "std-visual-director.md: board.md ends with ## Applied (0.0.26)")
+_wr, _gs = _f("templates", "agents", "std-writer.md"), _f("templates", "guides", "script.md")
+check("Never write `layout` yourself" in _wr and "keep what board wrote" in _wr,
+      "std-writer.md: never write layout, keep what board wrote (0.0.26)")
+for _n, _t in (("std-writer.md", _wr), ("guides/script.md", _gs)):
+    check("Scene 1 is the title scene" in _t and "unused_images" in _t,
+          "%s: the title scene and unused_images (0.0.26 P16 · P17)" % _n)
+check("unused: <script_src> — <reason>" in _f("commands", "verify.md"), "verify.md pastes the unused: lines at ①")
+_lp = [os.path.relpath(p, skill) for p in _mds if "layout: presenter" in open(p).read()]
+check(not _lp, "no shipped document writes layout: presenter (%s)" % ", ".join(_lp))
 
 if fails:
     print("structure: %d failure(s)" % len(fails))

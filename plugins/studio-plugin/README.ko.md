@@ -65,6 +65,25 @@ claude --plugin-dir plugins/studio-plugin
 - **0.0.25로 올릴 때**: `/std update`를 실행하고 바뀐 역할 에이전트 파일마다 "new"를 고릅니다 — 모든 `std-*` 에이전트
   (Read/Write 규칙과 가드 규칙의 예외), 그중 `std-writer`와 `std-visual-director`(s2v 문법 명령), `std-fact-checker`
   (스켈레톤, 연결 문장 한도, 목록 항목과 빠진 조건), `std-source-analyst`(자리표시 id).
+- **0.0.26(파일럿 2, 화면과 init).** 비주얼 디렉터가 브랜드를 적용합니다: `check_assets.py <video> --look --output <o>`가
+  brand.json이 요구하는 프런트매터 줄 — `theme.accent`, 브랜드 로고(`logo.src`), 레이아웃(모든 화자에게 캐릭터 그림이
+  없으면 `fullscreen`; s2v의 기본값 `presenter`는 그림 없이는 아무도 그리지 않음) — 을 출력하고, 대본에 이것이 없으면
+  보드 검사가 실패합니다. 보드는 이제 프런트매터의 `theme` · `logo` · `outputs.<o>.layout` · `transition`도 바꿀 수
+  있습니다(블록은 그대로). 브랜드 로고는 크레딧이 필요한 그림입니다(floor `public/brand.json logo (committed in the
+  harness)`). brand.json과 로고는 커밋되어 있어야 합니다: 커밋 안 된 것은 보드 검사가 거부하고, 하네스 커밋은 커밋
+  안 된 로고를 경고합니다. 로고는 PNG 또는 JPEG입니다. 대본 단계에서는 장면 1이 제목 장면이고(`::title[<프런트매터
+  title>]`가 유일한 시각 요소 — 썸네일에 제목이 들어감; 대본에 `::thumbnail{src=…}`가 있으면 건너뜀), 글의 쓸 수 있는
+  이미지는 모두 보여 주거나 클레임 맵의 `unused_images`에 한 줄 이유를 적으며(①에서 `unused:` 줄로 출력), 작가는
+  레이아웃을 쓰지 않습니다. `/std init`은 이제 내레이터를 항상 묻고(그 언어의 원어민 화자 먼저, 억양이 있을 수 있다고
+  표시한 다른 화자 둘까지 — ② 발음 검사에서 실패할 수 있음), 글이 쓰는 이미지 폴더를 `visibility.public` 후보로
+  보여 주며, 사이트 제목 · 웹 매니페스트 · package.json · origin 원격의 저장소 이름(URL은 출력하지 않음)에서 프로젝트
+  이름 후보를 내고, 커밋 안 된 로고는 거부합니다(로고 없음을 고르거나 먼저 커밋).
+- **0.0.26으로 올릴 때**: `/std update`를 실행하고 `std-visual-director`, `std-writer`, `guides/board.md`,
+  `guides/script.md`에서 "new"를 고릅니다(가이드에 직접 고친 내용이 있으면 업데이트가 차이를 보여 줌). brand.json과
+  로고가 커밋되어 있고 로고가 PNG 또는 JPEG인지 확인합니다(아니면 `""`). 글 이미지 폴더가 `visibility.public`에 없으면
+  `/std config`로 넣습니다. 이미 보드를 지난 영상은 렌더 전에 먼저 `/std board <video>`를 실행합니다: 그러지 않으면
+  영상 커밋에서 보드 검사의 화면 규칙이 실패해 보드로 돌아가고 ③, ④a 렌더, ④a를 다시 거칩니다. 진행 중인 영상은
+  소스 단계를 다시 할 필요가 없습니다.
 - **가드가 아직 보지 못하는 것(0.0.25).** awk 프로그램과 vim · ex · ed 스크립트, 일부 실행기 뒤에 숨은 명령: 가드가
   모르는 래퍼 옵션, 긴 래퍼 사슬, `flock` · `setsid` · `arch` · `xcrun` · `sandbox-exec` · `unshare` · `chroot`, 대문자로 쓴
   래퍼 이름, busybox나 toybox 애플릿, `script`, 래퍼의 파일 인자(`time -o`), `watch`, 쓰기 가능한 PATH 폴더(예: `/opt/homebrew/bin`)에 명령

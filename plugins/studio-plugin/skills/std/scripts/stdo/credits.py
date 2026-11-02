@@ -106,6 +106,12 @@ def unsupported(entry):
     return None
 
 
-def assets_by_src(assets_data):
-    return {i.get("script_src"): i for i in (assets_data or {}).get("images") or []
-            if isinstance(i, dict) and i.get("status") == "ok" and i.get("script_src")}
+def assets_by_src(assets_data, brand=None):
+    """{script_src: entry} of the usable images of assets.json, plus the brand logo when `brand` (look.brand_logo) is
+    ok (0.0.26: floor public, judged live — it is no image of the source); an image of the source wins."""
+    out = {i.get("script_src"): i for i in (assets_data or {}).get("images") or []
+           if isinstance(i, dict) and i.get("status") == "ok" and i.get("script_src")}
+    if brand and brand.get("status") == "ok" and brand.get("script_src"):
+        from .look import brand_asset
+        out.setdefault(brand["script_src"], brand_asset(brand))
+    return out

@@ -28,10 +28,12 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
 6. **Gate ①**: `python3 .claude/studio/scripts/state.py shown <video> 1` (right as you show `verify.md` and the
    script) prints `hash12 <h12>`, an `in the question:` line per commit to the source after begin
    (`원본이 begin 뒤에 커밋됨: <sha> <subject> (<diffstat>)`) and the `question` block (`[<video>] ① 대본 — <script
-   path> · hash <h12>` with those lines, up to `end of question`). Before asking, run `git show <sha> --
+   path> · hash <h12>` with those lines, up to `end of question`), then an `unused: <script_src> — <reason>` line for
+   each image of the source the script does not show (the claims map's `unused_images`). Before asking, run `git show <sha> --
    <source path> <image paths>` for each commit and show the person what changed. Ask with AskUserQuestion: the
    question is **the block pasted unchanged** — never retype a line (the guard compares each character) — with the
-   auditor's findings after it; options `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the
+   auditor's findings after it and every `unused:` line pasted below the block (each on its own line, as printed);
+   options `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the
    same turn, right after the answer — do not wait for the person; never in the same assistant message as the question
    — run
    `python3 .claude/studio/scripts/state.py approve <video> 1 --expect <h12>`.

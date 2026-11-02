@@ -123,7 +123,24 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
     if box.get("hash12") and gate in ("1", "2", "4b"):
         for line in _question(ctx, state, lang, gate, scope, box):
             _out(line)
+    if gate == "1" and box.get("hash12"):  # 0.0.26: the images the script does not show, and why (not hashed)
+        for line in unused_lines(vdir, lang):
+            _out(line)
     return C.OK
+
+
+def unused_lines(vdir, lang):
+    """`unused: <script_src> — <reason>` per entry of the claims map's unused_images, sanitized again (the file may
+    have changed since the check)."""
+    from ..claims.check import sanitize_reason
+    try:
+        with open(os.path.join(vdir, "work", lang, "claims-map.json"), encoding="utf-8") as f:
+            ui = json.load(f).get("unused_images")
+    except (OSError, ValueError, AttributeError):
+        return []
+    if not isinstance(ui, dict):
+        return []
+    return ["unused: %s — %s" % (sanitize_reason(k), sanitize_reason(v)) for k, v in sorted(ui.items())]
 
 
 def _question(ctx, state, lang, gate, scope, box):

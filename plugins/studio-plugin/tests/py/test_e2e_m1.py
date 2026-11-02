@@ -17,7 +17,7 @@ from e2e_runner import Session
 from helpers import StudioTestCase
 from stdo import machine
 from test_e2e_m0 import values_of
-from test_m1e import ARTICLE, E1, E2, FAKE_ROOT, S1, S2, SCRIPT, cid, png
+from test_m1e import ARTICLE, E1, E2, FAKE_ROOT, S1, S2, SCRIPT, branded, cid, png
 from test_m1h import COPY, FACT, NOTICE
 
 sys.path.insert(0, os.path.join(helpers.HERE, "drivers"))
@@ -231,7 +231,7 @@ class FlowCase(E2ECase):
 
     def two_to_three(self):
         script = os.path.join(self.vdir, "script.ko.md")
-        self.write("studio/videos/v1/script.ko.md", open(script).read().replace("lang: ko\n", "lang: ko\ntheme: dark\n", 1))
+        self.write("studio/videos/v1/script.ko.md", branded(open(script).read()))
         self.write("studio/videos/v1/CREDITS.draft.yaml", json.dumps({"schema": 1, "items": [{
             "path": IMG, "license": "own work", "credit_line": "the author", "floor": "public/-",
             "license_checked": True, "public_ok": True, "redistribute": True, "commercial": True}]}))

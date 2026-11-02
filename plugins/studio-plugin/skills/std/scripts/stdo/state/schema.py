@@ -155,7 +155,7 @@ STAGE_CHECKS = {
                  "inputs": ("lock_manifest", "approved_2", "exemptions", "pronounce_changes", "audition_out")},
     "board": {"file": "board", "script": "check_assets.py", "scope": "output", "s2v": True, "fail_unread": True,
               "inputs": ("script", "assets_json", "credits", "script_files", "config_protected", "overlay_sha",
-                         "credit_approvals", "proxy_credits")},
+                         "credit_approvals", "proxy_credits", "brand_json")},
     "render": {"file": "render", "script": "run_s2v.py", "scope": "output", "s2v": True,
                "inputs": ("render_result",)},
     "copy": {"file": "copy", "script": "validate_copy.py", "scope": "platform", "s2v": False,

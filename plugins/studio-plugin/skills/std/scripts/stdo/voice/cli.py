@@ -1,5 +1,6 @@
-"""check_assets.py <video> --actors | --output <o> [--lang l] · check_tts.py <video> [--lang l] · audition.py <video> [--lang l]
-(m1-plan §8). Each writes its stage's check result (`checks/cast.json` · `checks/tts.json` · `checks/audition.json`).
+"""check_assets.py <video> --actors | --output <o> | --look --output <o> [--lang l] · check_tts.py <video> [--lang l] ·
+audition.py <video> [--lang l] (m1-plan §8). Each writes its stage's check result (`checks/cast.json` · `checks/tts.json`
+· `checks/audition.json`) — except `--look` (0.0.26), which only prints the frontmatter the brand asks for (stdo/look.py).
 
 Exit: 0 pass · 1 fail (the result lists why; check_tts names the lines to retry) · 2 usage or setup (no harness, no
 video, no script, no s2v; check_assets without --actors or --output; audition without ffmpeg)."""
@@ -93,9 +94,16 @@ def _assets(argv, cwd, providers, env, runner):
         if i + 1 >= len(argv):
             raise ccli.Usage("--output needs an output name")
         out_opt, argv = argv[i + 1], argv[:i] + argv[i + 2:]
-    o, repo, root, vdir, state, lang, ctx = _setup(argv, cwd, ("--actors",))
+    o, repo, root, vdir, state, lang, ctx = _setup(argv, cwd, ("--actors", "--look"))
+    if o.get("--look"):  # 0.0.26 (P16): the frontmatter the brand asks for, printed only
+        if o.get("--actors") or not out_opt:
+            raise ccli.Usage("check_assets.py <video> --look --output <o>")
+        if out_opt not in schema.current_outputs(state, lang):
+            raise ccli.Usage("output %s is not in the brief" % out_opt)
+        from .. import look
+        return look.look_main(repo, vdir, ctx, out_opt, providers, sys.stdout)
     if bool(o.get("--actors")) == bool(out_opt):
-        raise ccli.Usage("check_assets.py <video> --actors (cast) | --output <o> (board)")
+        raise ccli.Usage("check_assets.py <video> --actors (cast) | --output <o> (board) | --look --output <o>")
     if out_opt:
         if out_opt not in schema.current_outputs(state, lang):
             raise ccli.Usage("output %s is not in the brief" % out_opt)

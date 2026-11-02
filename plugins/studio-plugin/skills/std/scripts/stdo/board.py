@@ -9,11 +9,14 @@ ones, and every picture the script shows (inspect's files of kind image · video
   by the person: a proxy-mode credit counts only inside the proxy session (X2);
   entries with consent · originality_checked · ai_generated: true are not supported in M1;
 - an image whose scope is third-party or unknown needs `public_ok: true` and a license (`TODO` · `see README` only
-  with `license_checked: true`)."""
+  with `license_checked: true`);
+- the brand's look (0.0.26, stdo/look.py): brand.json committed, the theme's accent, the brand logo (a picture too: its
+  CREDITS entry has the floor `public/brand.json logo (committed in the harness)`) and no presenter layout without
+  character art."""
 
 import os
 
-from . import credits, s2vlint, sandbox
+from . import credits, look, s2vlint, sandbox
 from .claims.brief import assets_problem
 from .source import assets as assets_mod, imgformat
 from .state import schema
@@ -33,7 +36,8 @@ def picture_problems(repo, vdir, state, ins, proxy=False):
     """Problems of every picture the script shows. `proxy`: this is the sandbox proxy session (a credit approved by
     proxy counts only there — M1g review X2)."""
     out = []
-    usable = credits.assets_by_src(assets_mod.read(vdir))
+    bl = look.brand_logo(repo, vdir)
+    usable = credits.assets_by_src(assets_mod.read(vdir), bl)
     cred, why = credits.read(os.path.join(vdir, credits.FILE))
     if why:
         out.append(why)
@@ -46,7 +50,8 @@ def picture_problems(repo, vdir, state, ins, proxy=False):
         p = f.get("path")
         a = usable.get(p)
         if a is None:
-            out.append("%s is not a usable image of work/assets.json (use its script_src)" % p)
+            out.append(look.logo_reason(bl, p) and "%s: %s" % (p, look.logo_reason(bl, p)) or
+                       "%s is not a usable image of work/assets.json (use its script_src)" % p)
             continue
         full = os.path.normpath(os.path.join(vdir, p))
         real = os.path.realpath(full)
@@ -63,7 +68,8 @@ def picture_problems(repo, vdir, state, ins, proxy=False):
             out.append("%s is not PNG or JPEG by its bytes" % p)
         sha = file_sha(real)
         if sha != a.get("sha256"):
-            out.append("%s changed since resolve_assets (its sha is not assets.json's) — run the source stage again"
+            out.append(("%s: the brand logo changed while checking — run the check again" % p) if a.get("brand") else
+                       "%s changed since resolve_assets (its sha is not assets.json's) — run the source stage again"
                        % p)
         e = cred.get(p)
         if e is None:
@@ -112,6 +118,12 @@ def check(repo, vdir, state, lang, ctx, output, providers, env, runner):
     if why:
         problems.append(why)
     problems += picture_problems(repo, vdir, state, ins, proxy=sandbox.active(env or {}, repo))
+    try:
+        with open(ctx["script"], encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        text = ""
+    problems += look.problems(repo, vdir, ins, text, output)  # the brand's look (0.0.26 P16)
     other = [{"path": f.get("path"), "kind": f.get("kind")} for f in ins.get("files") or []
              if isinstance(f, dict) and not is_picture(f.get("kind"))]
     details = {"check": res.details(), "fail_unread": fail_unread, "output": output, "problems": problems,

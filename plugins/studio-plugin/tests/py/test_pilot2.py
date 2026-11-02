@@ -565,9 +565,10 @@ class Wording(StudioTestCase):
 
     def test_versions(self):
         from stdo import SCRIPTS_VERSION
-        self.assertEqual(SCRIPTS_VERSION, "23")
+        self.assertGreaterEqual(int(SCRIPTS_VERSION), 23)  # 0.0.25's bump; test_pilot2b pins the current one
         with open(os.path.join(helpers.PLUGIN, ".claude-plugin", "plugin.json")) as f:
-            self.assertEqual(json.load(f)["version"], "0.0.25")
+            v = json.load(f)["version"]
+        self.assertGreaterEqual(tuple(int(x) for x in v.split(".")), (0, 0, 25))
         for n in ("README.md", "README.ko.md", "README.ja.md"):
             self.assertIn("0.0.25", read(helpers.PLUGIN, n), n)
         self.assertIn("0.0.25", read(helpers.PLUGIN, "tests", "README.md"))

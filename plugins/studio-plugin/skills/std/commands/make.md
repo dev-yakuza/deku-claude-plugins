@@ -89,7 +89,8 @@ Anything that changes after `shown` (the audition, the exemptions, the readings)
 
 ## board · visual-check · ③
 
-`setup.py doc board` (board with the credits, visual-check, gate ③).
+`setup.py doc board` (board with the credits and the brand's look — `check_assets.py <video> --look --output <o>` —,
+visual-check, gate ③).
 
 ## render · ④a · copy · ④b
 

@@ -109,20 +109,32 @@ def script_check(repo, vdir, state, lang, ctx, providers, env, runner):
                        fail_unread=fail_unread)
     problems += lint.problems()
     copy = check.copy_text(vdir, state)
-    _cm, cm_problems = check.claims_map(vdir, lang, state, copy)
+    cm, cm_problems = check.claims_map(vdir, lang, state, copy)
     problems += cm_problems
     ins = providers.inspect(ctx)
     cur = providers.collect(ctx, state, lang, ins=ins)
     sentences = providers.sentences(ctx)
     problems += check.narration_problems(sentences, lang)
-    from .. import criteria
+    from .. import criteria, look
+    with open(ctx["script"], encoding="utf-8") as f:
+        text = f.read()
     try:
         crit = criteria.read(repo, state.get("kind"))
-        with open(ctx["script"], encoding="utf-8") as f:
-            problems += check.length_problems(f.read(), schema.current_outputs(state, lang), crit, sentences, lang)
+        problems += check.length_problems(text, schema.current_outputs(state, lang), crit, sentences, lang)
     except criteria.Missing as e:
         problems.append("the format's criteria cannot be read (%s)" % e)
-    problems += check.picture_problems(ins, assets_mod.read(vdir))
+    assets_data = assets_mod.read(vdir)
+    problems += check.picture_problems(ins, assets_data)
+    # 0.0.26 (pilot-2 P16 · P17): the post's images, the title scene, no presenter layout without character art
+    problems += check.unused_problems(ins, assets_data, cm)
+    problems += check.title_scene_problems(text)
+    outs = look.outputs_of(text)
+    for o in schema.current_outputs(state, lang):
+        cast, art = look.cast_art(ins, o)
+        attrs = outs.get(o) or {}
+        lp = look.layout_problem(attrs.get("layout"), cast, art, "script", attrs.get("aspect"), o)
+        if lp:
+            problems.append(lp)
     details = {"lint": lint.details(), "fail_unread": fail_unread, "problems": problems,
                "screen_text": len(ins.get("screen_text") or []), "sentences": len(sentences or [])}
     result = "fail" if problems else "pass"

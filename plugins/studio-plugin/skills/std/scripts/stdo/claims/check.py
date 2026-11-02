@@ -1,6 +1,9 @@
 """check_claims.py's two checks (m1-plan §7.3 · §7.4).
 
 script (`--narration`): s2v lint run by Studio (its length warnings fail; `unread-word` is information here — J32),
+0.0.26: every usable image of assets.json shown or given a reason in the claims map's `unused_images`, scene 1 a title
+scene (`::title[<frontmatter title>]` its only visual, unless the script has `::thumbnail{src=…}`), and no presenter or
+dialogue layout without character art (look.layout_problem, mode "script");
 claims-map.json of the expected shape whose claims are the brief's and whose excerpts are in the source copy, no kana
 or kanji in the narration (Japanese goes on screen; `s2v sentences` is the narration, `inspect`'s `screen_text` is not
 in it), every picture the script shows a usable `script_src` of assets.json, and the checked assets still the ones
@@ -24,6 +27,9 @@ CJK = re.compile("[぀-ヿㇰ-ㇿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]")
 CJK_LANGS = ("ja", "zh")
 KINDS = ("fact", "link")
 VERDICTS = ("supported", "unsupported", "contradicted")
+REASON_MAX = 200
+END_OF_QUESTION = "end of question"  # the question block's last line (labels.question_block)
+CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 PICTURE_KINDS = ("image", "video")
 
 
@@ -87,6 +93,7 @@ def claims_map(vdir, lang, state, copy):
         excerpts = []
     if not isinstance(cx, dict) or not all(_strings(v) or v == [] for v in cx.values()):
         problems.append("copy_excerpts must be an object of platform → [excerpt] ({} until copy)")
+    problems += unused_shape_problems(cm.get("unused_images", {}))
     chosen, why = brief_claims(vdir, state)
     if why:
         problems.append(why)
@@ -316,3 +323,149 @@ def length_problems(script_text, outputs, crit, sentences, lang):
     else:
         out.append("the format gives no chars_per_sec for %s" % lang)
     return out
+
+
+# ---------- 0.0.26 (pilot-2 P16 · P17): unused images, the title scene ----------
+
+def reason_problem(src, reason):
+    """Why an unused_images reason cannot be shown in the ① question (None when it can)."""
+    if not isinstance(reason, str) or not reason.strip():
+        return "unused_images %s needs a reason (one line)" % src
+    if "\n" in reason or "\r" in reason or CONTROL.search(reason):
+        return "unused_images %s: the reason must be one line without control characters" % src
+    if len(reason) > REASON_MAX:
+        return "unused_images %s: the reason is longer than %d characters" % (src, REASON_MAX)
+    if END_OF_QUESTION in reason.lower():
+        return "unused_images %s: the reason must not say \"%s\"" % (src, END_OF_QUESTION)
+    return None
+
+
+def sanitize_reason(reason):
+    """A reason as `shown 1` prints it, whatever the file says now: one line, no control characters, no "end of
+    question", at most REASON_MAX characters."""
+    t = " ".join(str(reason or "").split())
+    t = CONTROL.sub("", t)
+    t = re.sub(re.escape(END_OF_QUESTION), "", t, flags=re.I)
+    return " ".join(t.split())[:REASON_MAX]
+
+
+def unused_shape_problems(ui):
+    """The claims map's optional `unused_images`: {script_src: reason}."""
+    if not isinstance(ui, dict) or not all(isinstance(k, str) for k in ui):
+        return ["unused_images must be an object of script_src → reason"]
+    return [p for p in (reason_problem(k, v) for k, v in sorted(ui.items())) if p]
+
+
+def unused_problems(ins, assets_data, cm):
+    """Every usable image of assets.json is shown (any file of inspect) or listed in `unused_images` with a reason."""
+    shown = set(f.get("path") for f in ins.get("files") or [] if isinstance(f, dict))
+    ui = (cm or {}).get("unused_images") if isinstance(cm, dict) else None
+    ui = ui if isinstance(ui, dict) else {}
+    usable = [i for i in (assets_data or {}).get("images") or []
+              if isinstance(i, dict) and i.get("status") == "ok" and i.get("script_src")]
+    out = []
+    for i in usable:
+        if i["script_src"] not in shown and i["script_src"] not in ui:
+            out.append("%s (%s) is usable but not shown — show it with ::image, or give a reason in the claims "
+                       "map's unused_images" % (i.get("id") or "an image", i["script_src"]))
+    known = set(i["script_src"] for i in usable)
+    out += ["unused_images names %s, which is not a usable image of work/assets.json" % k
+            for k in sorted(ui) if k not in known]
+    return out
+
+
+FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+HEADING1 = re.compile(r"^ {0,3}#(?:[ \t]|$)")
+LEAF = re.compile(r"^::([A-Za-z][\w-]*)")
+CONTAINER = re.compile(r"^:::([A-Za-z][\w-]*)")
+CLOSE = re.compile(r"^:::\s*$")
+TITLE = re.compile(r"^::title\[(.*)\](?:\{[^{}]*\})?\s*$")  # the label up to the line's last ] (a title may hold ])
+
+
+def _body(text):
+    """The script's lines after the frontmatter."""
+    lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                return lines[i + 1:]
+    return lines
+
+
+def before_first_heading(text):
+    """The non-blank lines before the first ATX level-1 heading (outside fences; one-line HTML comments aside): s2v
+    puts them into an untitled first scene (parse.ts `implicit-scene`)."""
+    out, fence = [], None
+    for line in _body(text):
+        if fence:
+            if re.match(r"^ {0,3}(%s{%d,})\s*$" % (re.escape(fence[0]), len(fence)), line):
+                fence = None
+            out.append(line)
+            continue
+        if HEADING1.match(line):
+            break
+        f = FENCE_OPEN.match(line)
+        if f:
+            fence = f.group(1)
+            out.append(line)
+            continue
+        if line.strip() and not re.match(r"^\s*<!--.*-->\s*$", line):
+            out.append(line)
+    return out
+
+
+def top_directives(text):
+    """[(scene index, directive line)] of the directives outside fences and outside container bodies; scenes start at
+    ATX level-1 headings only (s2v parse.ts); text before the first heading belongs to no scene (index -1)."""
+    out, scene, fence, inside = [], -1, None, False
+    for line in _body(text):
+        if fence:
+            m = re.match(r"^ {0,3}(%s{%d,})\s*$" % (re.escape(fence[0]), len(fence)), line)
+            if m:
+                fence = None
+            continue
+        f = FENCE_OPEN.match(line)
+        if f:
+            fence = f.group(1)
+            continue
+        if inside:
+            if CLOSE.match(line):
+                inside = False
+            continue
+        if HEADING1.match(line):
+            scene += 1
+            continue
+        if CONTAINER.match(line):
+            out.append((scene, line))
+            inside = True
+            continue
+        if LEAF.match(line):
+            out.append((scene, line))
+    return out
+
+
+def title_scene_problems(text):
+    """Scene 1 is the title scene (the thumbnail is its still): its only visual is ::title[<frontmatter title>]. A
+    script with ::thumbnail{src=…} gives its own thumbnail (the rule is skipped)."""
+    from ..look import title_of
+    dirs = top_directives(text)
+    if any(LEAF.match(l).group(1) == "thumbnail" for _s, l in dirs if LEAF.match(l)):
+        return []
+    pre = before_first_heading(text)
+    if pre:
+        return ["the script has content before its first `# ` heading (%s) — s2v puts it into an untitled first "
+                "scene: move it under a `# ` heading" % pre[0].strip()[:40]]
+    title = title_of(text)
+    if not title:
+        return ["add a frontmatter title (it is the thumbnail's title)"]
+    first = [l for s, l in dirs if s == 0 and (CONTAINER.match(l) or LEAF.match(l).group(1) not in STAGE_LEAVES)]
+    hint = "scene 1 is the title scene: one visual, ::title[%s], after its narration (it becomes the thumbnail)" % title
+    if len(first) != 1 or not TITLE.match(first[0]):
+        return ["%s — scene 1 shows %s" % (hint, ", ".join(l.split("{")[0][:40] for l in first) or "nothing")]
+    label = TITLE.match(first[0]).group(1)
+    if normalize(label) != normalize(title):
+        return ["%s — its label is %s" % (hint, label[:60])]
+    return []
+
+
+STAGE_LEAVES = ("shot", "enter", "exit")  # stage directions, not visuals (s2v parse.ts)

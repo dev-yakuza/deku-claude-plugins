@@ -565,7 +565,19 @@ class AnalyzeColors(AnalyzeCase):
         self.assertEqual(self.analyze()["brand_colors"], [])
 
 
+JPEG = b"\xff\xd8\xff\xc0\x00\x11\x08\x00\x03\x00\x04\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01\xff\xd9"
+
+
 class AnalyzeLogos(AnalyzeCase):
+    def analyze_all_logos(self):
+        from stdo.setup import analyze
+        saved = analyze.MAX_LOGOS
+        analyze.MAX_LOGOS = 99
+        try:
+            return self.analyze()["logos"]
+        finally:
+            analyze.MAX_LOGOS = saved
+
     def test_pilot_logo_first(self):
         self.put({"astro.config.mjs": "export default {}\n", "public/assets/images/logo.png": png(205, 205),
                   "public/assets/images/favicon-48.png": png(48, 48),
@@ -574,14 +586,25 @@ class AnalyzeLogos(AnalyzeCase):
         self.assertEqual([l["path"] for l in lg], ["public/assets/images/logo.png",
                                                    "public/assets/images/apple-touch-icon.png",
                                                    "public/assets/images/favicon-48.png"])
-        self.assertEqual(lg[0], {"path": "public/assets/images/logo.png", "from": "logo file name", "size": [205, 205]})
+        self.assertEqual(lg[0], {"path": "public/assets/images/logo.png", "from": "logo file name", "size": [205, 205],
+                                 "video": True})  # 0.0.26: whether the video can show it
 
     def test_order(self):
+        """0.0.26 (fix-0026 §1.4): PNG, then JPEG, then SVG/WebP — the video shows only PNG and JPEG (`video`)."""
         self.put({"public/logo-white.png": png(800, 200), "public/logo.png": png(400, 100), "public/logo.svg": "<svg/>",
                   "docs/logo.svg": "<svg/>", "astro.config.mjs": "export default {}\n"})
-        self.assertEqual([l["path"] for l in self.analyze()["logos"]], ["public/logo.svg", "public/logo.png",
-                                                                       "docs/logo.svg"])
-        self.assertIsNone(self.analyze()["logos"][0]["size"])
+        lg = self.analyze()["logos"]
+        self.assertEqual([(l["path"], l["video"]) for l in lg], [("public/logo.png", True), ("public/logo.svg", False),
+                                                                 ("docs/logo.svg", False)])
+        self.assertIsNone(lg[1]["size"])
+        os.remove(os.path.join(self.top, "public", "logo.svg"))
+        self.put({"public/logo.webp": b"RIFF\0\0\0\0WEBP", "public/logo.jpg": JPEG,
+                  "public/brand.jpeg": b"<svg/>"})
+        lg = self.analyze()["logos"]
+        self.assertEqual([(l["path"], l["video"]) for l in lg], [("public/logo.png", True), ("public/logo.jpg", True),
+                                                                 ("public/logo.webp", False)])
+        self.assertIn({"path": "public/brand.jpeg", "from": "logo file name", "size": None, "video": False},
+                      self.analyze_all_logos())  # SVG bytes under a .jpeg name: not for the video
 
     def test_fallback_by_size(self):
         self.put({"public/favicon-32.png": png(32, 32), "public/android-chrome-512x512.png": png(512, 512),
@@ -701,6 +724,7 @@ class InitText(StudioTestCase):
                   "never mention hooks in a question", "edit `.claude/studio/brand.json`",
                   "which writing is public is always asked", "`공개 글 없음`"):
             self.assertIn(s, self.text)
-        for key in ("ask_husky", "public_domains", "brand_colors", "logos"):
+        for key in ("ask_husky", "public_domains", "brand_colors", "logos", "project_names", "image_folders",
+                    "narrator_candidates", "via_web_root", "video: true"):
             self.assertIn("`%s`" % key, self.text)
         self.assertLess(self.text.find("script2video checkout"), self.text.find("## 3."))  # §1, before the interview

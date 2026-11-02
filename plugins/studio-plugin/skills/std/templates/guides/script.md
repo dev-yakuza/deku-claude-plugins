@@ -9,7 +9,14 @@ How this repository's videos are written. The script writer reads it; edit it as
 - Text in another script or language (for example Japanese in a Korean video) goes on screen (`:::quote`, `:::table`,
   captions); the narration reads it in the video's language.
 - Images: only the ones the source analysis marks usable, by their `script_src` path, as a block of their own:
-  `::image{src="<script_src>"}` (s2v shows no Markdown image `![…](…)` on its own line — it is an error).
+  `::image{src="<script_src>"}` (s2v shows no Markdown image `![…](…)` on its own line — it is an error). Show every
+  usable image where it fits; one left out goes in the claims map's `unused_images` with a one-line reason, which the
+  person reads at ①.
+- Scene 1 is the title scene: the hook in one or two sentences and one visual, `::title[<the frontmatter title>]`,
+  after its narration. s2v takes the thumbnail from it, so the thumbnail says what the video is. A title scene shorter
+  than 10 seconds joins the next chapter in the chapter list (YouTube's minimum chapter length). Only `#` (level 1)
+  headings start scenes.
+- The layout is board's: the script names no `layout` (board sets it and the script keeps it).
 - Every scene needs a visual, and its first visual is what shows from the scene's start: `::title[…]` with a label, a
   text card (`:::bullets`, `:::quote`, …) or an image. A scene with only narration shows the bare background — s2v
   warns `no-visual` and Studio's check fails. A `::title[…]` goes after the scene's last paragraph (it still shows

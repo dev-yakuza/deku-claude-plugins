@@ -490,6 +490,8 @@ function inspect(script, shownPath) {
         value[n] = copy;
       }
     }
+    // real s2v takes `logo: path` as { src: path } too (core/schema.ts logoOf)
+    if (k === 'logo' && typeof v === 'string' && v) value = { src: ref(v, 'logo') };
     if (k === 'logo' && typeof v === 'object' && v.src) value = { ...v, src: ref(v.src, 'logo') };
     if (k === 'subtitleStyle' && typeof v === 'object' && v.font) value = { ...v, font: ref(v.font, 'font') };
     if (k === 'bgm' && typeof v === 'object' && v.src) value = { ...v, src: ref(v.src, 'bgm') };
@@ -552,7 +554,7 @@ function inspect(script, shownPath) {
     outputs.push({
       name,
       aspect: attrs.aspect || '16:9',
-      layout: attrs.layout || 'single',
+      layout: attrs.layout || 'presenter', // s2v's default layout (core/schema.ts)
       thumbnail: (attrs.aspect || '16:9') === '16:9',
       chapters: script.scenes.length > 1,
       scenes: outputScenes(script, name).map((s) => s.id),

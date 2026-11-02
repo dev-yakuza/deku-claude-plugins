@@ -48,8 +48,10 @@ title: 공항 단어
 """ % (E1, E2)
 S1 = "공항에 가면 먼저 체크인 카운터를 찾습니다."
 S2 = "탑승권을 받으면 출국 심사를 받습니다."
+# scene 1 is the title scene (0.0.26 P17): its only visual is ::title[<frontmatter title>]; the title is a text the
+# draft already judges (출국), so the fact-check fixtures stay as they were
 SCRIPT = """---
-title: 공항 단어
+title: 출국
 lang: ko
 outputs:
   youtube: { maxDuration: %(max)s }
@@ -60,18 +62,28 @@ targetDuration: %(target)s
 
 %(s1)s
 
+::title[출국]
+
+# 출국 {#exit}
+
+%(s2)s
+
 :::quote
 空港(くうこう)
 :::
 
 ::image{src="../../../docs/img/gate.png"}
 
-# 출국 {#exit}
-
-%(s2)s
-
 ::title[출국]
 """
+# the brand's look board writes (0.0.26 P16): make_harness's brand is #2563EB with no logo
+THEME = 'theme: { base: dark, accent: "#2563EB" }\n'
+
+
+def branded(text):
+    """`text` with the look board applies: the brand's accent and no presenter layout (no character art)."""
+    return text.replace("lang: ko\n", "lang: ko\n" + THEME, 1).replace(
+        "youtube: { maxDuration:", "youtube: { layout: fullscreen, maxDuration:", 1)
 
 
 def png(w=4, h=3):
@@ -362,13 +374,16 @@ class ScriptCheck(FlowCase):
         self.to_script()
         with open(os.path.join(self.vdir, "script.ko.md")) as f:
             text = f.read()
-        for bare in (text.replace("\n\n::title[출국]\n", "\n"), text.replace("::title[출국]", "::title")):
+        # scene 1 (airport) is the title scene: its title removed, or left without a label (0.0.26 fixture)
+        for bare in (text.replace("\n\n::title[출국]\n\n# 출국", "\n\n# 출국", 1),
+                     text.replace("::title[출국]", "::title", 1)):
             with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
                 f.write(bare)
             self.assertEqual(self.check("--narration"), 1)
             self.assertIn("s2v lint: no-visual", self.out)
-            self.assertIn('s2v lint: output "youtube" scene exit: no visual — the frame shows only the background',
+            self.assertIn('s2v lint: output "youtube" scene airport: no visual — the frame shows only the background',
                           self.out)  # the writer is told which scene
+            self.assertIn("scene 1 is the title scene", self.out)
             self.assertEqual(self.result()["details"]["lint"]["failures"], ["no-visual"])
         self.script()
         self.assertEqual(self.check("--narration"), 0, self.out)

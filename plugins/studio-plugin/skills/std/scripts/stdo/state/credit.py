@@ -17,14 +17,18 @@ from . import commands as C, evidence, labels, schema, store
 FIELDS_NOT_SHOWN = "fields-not-shown"
 
 
-def _entry(vdir, path):
+def _entry(repo, vdir, path):
     draft, why = credits.read(os.path.join(vdir, credits.DRAFT))
     if why:
         raise store.Refused(why, C.FAIL)
     item = draft.get(path)
     if item is None:
         raise store.Refused("%s has no entry for %s" % (credits.DRAFT, path), C.FAIL)
-    asset = credits.assets_by_src(assets_mod.read(vdir)).get(path)
+    from .. import look
+    bl = look.brand_logo(repo, vdir)
+    asset = credits.assets_by_src(assets_mod.read(vdir), bl).get(path)
+    if asset is None and look.logo_reason(bl, path):  # the brand logo, not usable: say why (0.0.26)
+        raise store.Refused("%s: %s" % (path, look.logo_reason(bl, path)), C.FAIL)
     try:
         return credits.normalize(item, os.path.normpath(os.path.join(vdir, path)), asset)
     except credits.CreditError as e:
@@ -51,7 +55,7 @@ def _others(repo, root, video, hashv):
 def preview(repo, root, vdir, state, o):
     if len(o["_"]) != 2:
         raise store.Refused("credit-preview <video> <path> (the image's script_src)", C.USAGE)
-    e = _entry(vdir, o["_"][1])
+    e = _entry(repo, vdir, o["_"][1])
     h = credits.h12(e)
     for line in credits.lines(e):
         sys.stdout.write("%s\n" % line)
@@ -69,7 +73,7 @@ def credit(repo, vdir, state, o, hooks, argv, with_evidence):
     if len(o["_"]) != 2 or not o.get("--expect"):
         raise store.Refused("credit <video> <path> --expect <h12>", C.USAGE)
     path, expect = o["_"][1], o["--expect"]
-    e = _entry(vdir, path)
+    e = _entry(repo, vdir, path)
     hv = credits.entry_hash(e)
     if hv[:12] != expect:
         raise store.Refused("the entry of %s is not the one shown (its h12 is now %s): run credit-preview and ask "

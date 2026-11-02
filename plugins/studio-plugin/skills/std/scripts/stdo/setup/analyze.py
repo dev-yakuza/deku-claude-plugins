@@ -7,7 +7,11 @@ custom properties and Tailwind colours, then the most used colour of the site's 
 and icon images) and `ask_husky`. Only tracked files are read (git ls-files), never `.env*`, never through a symbolic
 link, never vendor folders, minified files or files with a vendor banner (`/*!`, `@license`), within a budget; a
 repository too big for it gives what was found with `partial: true`. Colours are #RRGGBB or #RGB in the styles
-(rgb() and named colours are not read); only chromatic ones count (HSL saturation >= 0.30, 0.15 <= lightness <= 0.85)."""
+(rgb() and named colours are not read); only chromatic ones count (HSL saturation >= 0.30, 0.15 <= lightness <= 0.85).
+
+0.0.26 (pilot-2 N3 · N4 · N5): `narrator_candidates` (each language's built-in speakers, native first), `project_names`
+and `image_folders` (drafts.py), `partial_reason`; `logos` ranks PNG, then JPEG, then SVG/WebP and says whether the
+video can show it (`video`: PNG or JPEG by its bytes, matching its extension)."""
 
 import colorsys
 import glob
@@ -16,6 +20,8 @@ import os
 import re
 import stat
 
+from .. import narrator
+from . import drafts
 from .common import HOST
 
 STATIC = (  # (settings files, how the public folder is named in them, default public folder)
@@ -201,7 +207,7 @@ def host_of(value):
     for anything that is not a public host (localhost, an IP address, example.com/org/net)."""
     v = (value or "").strip().lower()
     v = re.sub(r"^[a-z][a-z0-9+.-]*://", "", v)
-    v = re.split(r"[/?#]", v, 1)[0].rsplit("@", 1)[-1]
+    v = re.split(r"[/?#]", v, maxsplit=1)[0].rsplit("@", 1)[-1]
     v = re.sub(r":\d*$", "", v).rstrip(".")
     if not HOST.match(v):
         return None  # also localhost and IPv4 addresses (no letter TLD)
@@ -369,6 +375,7 @@ def brand_colors(walk):
 # ---- logos ----
 
 LOGO_EXT = (".svg", ".png", ".webp", ".jpg", ".jpeg")
+LOGO_RANK = {".png": 0, ".jpg": 1, ".jpeg": 1, ".svg": 2, ".webp": 2}  # 0.0.26: what the video can show first
 LOGO_NAME = re.compile(r"^(?:(?:site[-_])?logo|brand)([-_.].*)?$")
 ICON_NAME = re.compile(r"^(?:icon\.svg|favicon\.svg|apple-touch-icon.*\.png|android-chrome-512.*\.png|favicon.*\.png)$")
 MAX_LOGOS = 3
@@ -398,12 +405,39 @@ def logos(walk, roots):
             continue
         if walk.stat(rel, None) is None:  # any size: only a PNG's first 24 bytes are read
             continue
-        size = png_size(walk.read(rel, 24, None)) if ext == ".png" else None
+        head = walk.read(rel, 24, None) if ext in (".png", ".jpg", ".jpeg") else None
+        size = png_size(head) if ext == ".png" else None
+        jpeg = ext in (".jpg", ".jpeg") and bool(head) and head[:2] == b"\xff\xd8"
         area = size[0] * size[1] if size else 0
-        key = (tier, not plain, not any(rel.startswith(h) for h in homes), LOGO_EXT.index(ext if ext != ".jpeg" else
-                                                                                           ".jpg"), -area, rel)
-        found.append((key, {"path": rel, "from": "logo file name" if tier == 0 else "site icon", "size": size}))
+        video = bool(size) or jpeg
+        rank = LOGO_RANK[ext] if video or ext in (".svg", ".webp") else 3  # a .png/.jpg whose bytes are not: last
+        key = (tier, not plain, not any(rel.startswith(h) for h in homes), rank, -area, rel)
+        found.append((key, {"path": rel, "from": "logo file name" if tier == 0 else "site icon", "size": size,
+                            "video": video}))
     return [d for _k, d in sorted(found, key=lambda x: x[0])[:MAX_LOGOS]]
+
+
+# ---- narrator_candidates (0.0.26, pilot-2 N3) ----
+
+OTHERS = 2  # speakers of another language offered after the native ones
+
+
+def narrator_candidates():
+    """{lang: [{engine, language, native, suggested}]}: the language's own built-in speakers first (Studio's suggestion
+    first), then up to two speakers of other languages (en, ja, ko, zh order, then by name). Every engine passes
+    narrator.engine_ok."""
+    out = {}
+    for lang in narrator.LANGS:
+        native, others = [], []
+        for name, own in narrator.QWEN_SPEAKERS.items():
+            engine = "qwen:" + name
+            item = {"engine": engine, "language": own, "native": own == lang,
+                    "suggested": engine == narrator.SUGGESTED.get(lang)}
+            (native if own == lang else others).append(item)
+        native.sort(key=lambda d: (not d["suggested"], d["engine"]))
+        others.sort(key=lambda d: (d["language"], d["engine"]))
+        out[lang] = native + others[:OTHERS]
+    return out
 
 
 def analyze(top, git=None, studio_root="studio"):
@@ -422,5 +456,10 @@ def analyze(top, git=None, studio_root="studio"):
     out["public_domains"] = public_domains(walk, roots)
     out["brand_colors"] = brand_colors(walk)
     out["logos"] = logos(walk, roots)
+    out["narrator_candidates"] = narrator_candidates()
+    out["project_names"] = drafts.project_names(walk, roots, git, top)  # before image_folders (its own sub-budget)
+    reasons = ["the repository is too big to read whole: some drafts are missing"] if walk.partial else []
+    out["image_folders"], more = drafts.image_folders(walk, roots, [c["folder"] for c in out["content_folders"]])
     out["partial"] = walk.partial
+    out["partial_reason"] = reasons + more
     return out

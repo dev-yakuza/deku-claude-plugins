@@ -217,10 +217,10 @@ class CastCheck(VoiceCase):
         with open(os.path.join(self.vdir, "script.ko.md")) as f:
             text = f.read()
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
-            f.write(text.replace("\n\n::title[출국]\n", "\n"))
+            f.write(text.replace("\n\n::title[출국]\n", "\n"))  # the title scene (airport) loses its only visual
         self.assertEqual(self.actors(), 1)
         self.assertIn("s2v lint: no-visual", self.out)
-        self.assertIn('s2v lint: output "youtube" scene exit: no visual', self.out)
+        self.assertIn('s2v lint: output "youtube" scene airport: no visual', self.out)
 
     def test_refusals(self):
         self.cast_script(style="밝게")

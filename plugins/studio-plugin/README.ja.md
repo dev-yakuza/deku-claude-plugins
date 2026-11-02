@@ -69,6 +69,26 @@ claude --plugin-dir plugins/studio-plugin
 - **0.0.25 へ上げるとき**: `/std update` を実行し、変更された役割エージェントのファイルごとに「new」を選びます — すべての
   `std-*` エージェント(Read/Write の規則とガード規則の例外)、そのうち `std-writer` と `std-visual-director`(s2v 文法の
   コマンド)、`std-fact-checker`(スケルトン、つなぎ文の上限、リスト項目と抜けた条件)、`std-source-analyst`(仮の id)。
+- **0.0.26(パイロット 2、見た目と init)。** ビジュアルディレクターがブランドを適用します: `check_assets.py <video> --look
+  --output <o>` が brand.json の求めるフロントマターの行 — `theme.accent`、ブランドロゴ(`logo.src`)、レイアウト(すべて
+  の話者にキャラクター画像がなければ `fullscreen`。s2v の既定 `presenter` は画像なしでは誰も描かない) — を出力し、
+  台本にそれがなければボードのチェックが失敗します。ボードはフロントマターの `theme`・`logo`・`outputs.<o>.layout`・
+  `transition` も変えられるようになりました(ブロックはそのまま)。ブランドロゴはクレジットの要る画像です(floor
+  `public/brand.json logo (committed in the harness)`)。brand.json とロゴはコミット済みである必要があります:
+  コミットされていないものはボードのチェックが拒否し、ハーネスコミットはコミットされていないロゴを警告します。ロゴは
+  PNG か JPEG です。台本の段階では、シーン 1 がタイトルシーンで(`::title[<フロントマターの title>]` が唯一の
+  ビジュアル — サムネイルにタイトルが入る。台本に `::thumbnail{src=…}` があれば省略)、記事の使える画像はすべて
+  見せるか、クレームマップの `unused_images` に一行の理由を書き(① で `unused:` 行として出力)、ライターはレイアウトを
+  書きません。`/std init` はナレーターを必ず尋ね(その言語のネイティブ話者を先に、なまりがあり得ると示した他の話者を
+  二人まで — ② の発音チェックで失敗することがある)、記事が使う画像フォルダーを `visibility.public` の候補に出し、
+  サイトのタイトル・Web マニフェスト・package.json・origin リモートのリポジトリ名(URL は出力しない)からプロジェクト
+  名の候補を出し、コミットされていないロゴを拒否します(ロゴなしを選ぶか先にコミット)。
+- **0.0.26 へ上げるとき**: `/std update` を実行し、`std-visual-director`、`std-writer`、`guides/board.md`、
+  `guides/script.md` で「new」を選びます(ガイドに自分の変更があれば update が差分を示します)。brand.json とロゴが
+  コミット済みで、ロゴが PNG か JPEG であることを確かめます(そうでなければ `""`)。記事の画像フォルダーが
+  `visibility.public` になければ `/std config` で入れます。すでにボードを過ぎた動画は、レンダーの前にまず
+  `/std board <video>` を実行します: そうしないと動画のコミットでボードのチェックの見た目の規則が失敗してボードに戻り、
+  ③、④a のレンダー、④a をやり直すことになります。進行中の動画はソースの段階をやり直す必要はありません。
 - **ガードがまだ見ないもの(0.0.25)。** awk のプログラムと vim・ex・ed のスクリプト、一部の実行ツールの後ろに隠れた
   コマンド: ガードが知らないラッパーのオプション、長いラッパーの連なり、`flock`・`setsid`・`arch`・`xcrun`・
   `sandbox-exec`・`unshare`・`chroot`、大文字で書いたラッパー名、busybox や toybox のアプレット、`script`、ラッパーの

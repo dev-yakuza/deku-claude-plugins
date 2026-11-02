@@ -184,6 +184,11 @@ def uncommitted(repo, rels):
     return out
 
 
+def is_tree_at_head(repo, rel):
+    """Whether `rel` is a folder at HEAD (git cat-file -t says tree)."""
+    return (_git(repo, "cat-file", "-t", "HEAD:" + rel) or "").strip() == "tree"
+
+
 def last_commit(repo, rels):
     """The newest commit that touched `rels` (None without one)."""
     out = _git(repo, "log", "-1", "--format=%H", "--", *[":(literal)" + r for r in rels])
