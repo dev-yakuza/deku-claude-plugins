@@ -47,7 +47,7 @@ over into the next sprint. A body line just gets appended, and the previous spri
 **kept** — one Issue having passed through two sprints is accurate history.
 
 ⚠ **`gh issue edit` has no append.** It offers `--body` (full replace) and `--body-file`, so
-adding the line is read → splice → full rewrite. The **truncation check is mandatory**, exactly
+adding the line is read → splice → full rewrite, the splice — by the Write/Edit tool (never a `python3 -c`/`sed`/heredoc carrying the text: `_bash_rules.md`, #1774). The **truncation check is mandatory**, exactly
 as for the cumulative auditor record (`_execute_spine.md` Step 4): if the read comes back as a preview, read the
 persisted full-output file, and if that is unavailable do **not** write — a truncated rewrite
 destroys the member Issue's body.

@@ -174,9 +174,9 @@ Do not count it twice. The remaining **16%** is independent (test output, `git`)
 the part reading less will *not* recover.
 ---
 
-## Posting Issue/PR comments: the temp-file pattern (mandatory)
+## Posting and rewriting Issue/PR text: the temp-file pattern (mandatory)
 
-Every Guild comment body is multi-line Markdown containing `#` headers, HTML comment markers (`<!-- ... -->`), and code fences. Passed to `gh` via inline `--body "..."`, Claude Code intercepts the "newline followed by `#` inside a quoted argument" pattern and prompts — a safeguard that permission settings cannot suppress.
+**Absolute rule — Issue/PR body and comment text never goes into a shell string.** Not `--body "…"`, not `-f/-F/--field body=…` (a value), not `python3 -c "…"` or `node -e`, not `echo`/`printf`, not a heredoc (quoted or not), not a script argument. Inside double quotes `` `…` `` and `$(…)` **run as commands** and their output lands in the text (measured, #1774: a body's `` `flutter test …` `` ran the device test and left the device name and ID in the PR). Text is always written **to a file with the Write tool** and handed over only as `--body-file <path>` / `--field body=@<path>`. **The splice of a rewrite (read → splice → replace) is the same**: Read the file you read the body into, and Write the new full body; a script that only handles files (`python3 <script>.py <in> <out>` — the text is not on the command line) is allowed, but never embed the body text in that script as a literal. The commit gate's PreToolUse hook refuses a backtick the shell would run (`shell-text`). Every Guild comment body is multi-line Markdown containing `#` headers, HTML comment markers (`<!-- ... -->`), and code fences. Passed to `gh` via inline `--body "..."`, Claude Code intercepts the "newline followed by `#` inside a quoted argument" pattern and prompts — a safeguard that permission settings cannot suppress.
 
 **The only sanctioned flow** for posting/updating a comment:
 
@@ -190,9 +190,9 @@ Every Guild comment body is multi-line Markdown containing `#` headers, HTML com
    - **Empty** → create: `gh issue comment <N> --body-file <path>` (or `gh pr comment <PR> --body-file <path>`).
    - **Has id `<id>`** → update in place: `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH --field body=@<path>`.
 
-Forbidden alternatives: `gh issue comment <N> --body "<multi-line>"`, `--field body="<multi-line>"`, heredocs, `echo "..." | gh ...`, `printf ... > file && gh ...`.
+Forbidden alternatives: `gh issue comment <N> --body "<multi-line>"`, `--field body="<multi-line>"`, heredocs, `echo "..." | gh ...`, `printf ... > file && gh ...`, `python3 -c "<…body text…>"`, `node -e`, and any command line that carries the text.
 
-The same constraint applies to `gh issue create` — write the body to a temp file and pass `--body-file <path>`. Single-line `--title "..."` is safe.
+The same constraint applies to `gh issue create` — write the body to a temp file and pass `--body-file <path>`. Single-line `--title "..."` is safe **only without a backtick or `$(`**; a title carrying one goes in single quotes.
 
 ---
 

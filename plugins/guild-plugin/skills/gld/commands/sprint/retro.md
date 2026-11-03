@@ -310,7 +310,7 @@ scales with how badly the sprint went. Measured on `dev-yakuza/one-man-company`:
 | #388 | 7,456 B | 67 B |
 
 ```bash
-gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '. as $all | [$all[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | ($b | split("\n")) as $L | ("^- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}([^-A-Za-z0-9_]|$)") as $s | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$L[] | select(test($p + "looped-back" + $s))] | length), fixed: ([$L[] | select(test($p + "fixed" + $s))] | length), recorded: ([$L[] | select(test($p + "recorded" + $s))] | length), dismissed: ([$L[] | select(test($p + "dismissed" + $s))] | length), loose: ([$b | splits("[^-A-Za-z0-9_]+")] | map(select(. == "looped-back" or . == "fixed" or . == "recorded" or . == "dismissed")) | length), legacy_blocks: ([$b | splits("### audit-record ")] | .[1:] | map(select(((split("\n") | any(test($p + "(looped-back|fixed|recorded|dismissed)" + $s))) or test("findings: none") or test("scan: none")) | not)) | length), clean: ([$b | match("findings: none";"g")] | length), no_scan: ([$b | match("scan: none";"g")] | length), violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)}'
+gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '. as $all | [$all[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | ($b | split("\n")) as $L | ("^- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}([^-A-Za-z0-9_]|$)") as $s | ("disposition: [\u0060*]{0,2}") as $d | ("^(- )?role-axis") as $ra | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$L[] | select(test($p + "looped-back" + $s) or ((test($ra) | not) and test($d + "looped-back" + $s)))] | length), fixed: ([$L[] | select(test($p + "fixed" + $s) or ((test($ra) | not) and test($d + "fixed" + $s)))] | length), recorded: ([$L[] | select(test($p + "recorded" + $s) or ((test($ra) | not) and test($d + "recorded" + $s)))] | length), dismissed: ([$L[] | select(test($p + "dismissed" + $s) or ((test($ra) | not) and test($d + "dismissed" + $s)))] | length), loose: ([$b | splits("[^-A-Za-z0-9_]+")] | map(select(. == "looped-back" or . == "fixed" or . == "recorded" or . == "dismissed")) | length), legacy_blocks: ([$b | splits("### audit-record ")] | .[1:] | map(select(((split("\n") | any(test($p + "(looped-back|fixed|recorded|dismissed)" + $s) or ((test($ra) | not) and test($d + "(looped-back|fixed|recorded|dismissed)" + $s)))) or test("findings: none") or test("scan: none")) | not)) | length), variant: ([$L[] | select((test($p + "(looped-back|fixed|recorded|dismissed)" + $s) | not) and (test($ra) | not) and test($d + "(looped-back|fixed|recorded|dismissed)" + $s))] | length), clean: ([$b | match("findings: none";"g")] | length), no_scan: ([$b | match("scan: none";"g")] | length), violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)}'
 ```
 
 ⚠ **No look-around in a `--jq` regex.** `gh` runs its own `jq` (gojq, RE2 regexes), which rejects
@@ -384,6 +384,13 @@ multi-line but jq 1.8.2 (Oniguruma) as dot-all (measured: `(?m)^` matched 0 time
 (`QA-1-dismissed-registry-exempts-entry-point` → `dismissed 1` next to `clean 2/2`, #349) and the
 role-axis line's `→ fixed` / `→ looped-back` (word_app #1700: every `fixed` and `looped-back` was
 the role axis).
+**`disposition: <token>` is a recognised variant** (0.98.6, measured one-man-company #607: a re-entered
+execute wrote `- MINOR · standards · … — disposition: looped-back (…)` at the line end): a line that is not a role-axis
+line (`^(- )?role-axis`) and carries `disposition: ` + the token (the same decoration and end rule) counts toward that
+token, and toward a block not being `legacy_blocks`; `variant` counts the lines counted **only** that way. A
+`variant > 0` member's line carries `(형식 변형 <k>줄 — 쓰는 쪽 위반)` — the meaning is plain (one token after the key),
+so it is counted rather than dropped as old format, and the mark keeps the writer's slip visible. It goes in the ⑦
+findings group as usual (the W4 order is unchanged).
 **An old-format record is judged by `legacy_blocks > 0` alone** — a `### audit-record` block that
 has no token at a line head, no `findings: none` and no `scan: none`. The four sums 0 and
 `legacy_blocks > 0` → list it as `#n 구 형식 기록(블록 <k>개 · 낱말 <loose>개, 종류 구분 불가)`, kept out
@@ -627,6 +634,13 @@ damage. Phase 0 step 0 claims every phase from 4 on names DRY explicitly; this i
 - **Axis 2 `no-trend`** → evolve skips its trend-dependent outputs. Expected on a first run.
 - Otherwise → evolve's normal per-item approval gate runs. **retro does not approve anything on
   the human's behalf** and does not re-ask what evolve already asked.
+- **evolve's freshness question** (`evolve.md` Phase 0 step 2b — the local default branch is behind `origin`) is
+  the human's to answer; retro does not answer it for them. This retro's own Phase 4 commit (not pushed) is `ahead`,
+  not `behind`, so it raises no question by itself. **The human picks ① (update first)** → evolve writes nothing; retro
+  ends Phase 5 as `성장 단계 보류` and **continues to Phase 6** — it does not tell the human to run retro again (a
+  re-run finds this sprint in `history` and skips Phase 5, so evolve would never run). The retro comment (Phase 6
+  step 2) and the Return carry one line:
+  `성장 단계 보류 — 로컬 <d> 가 <behind> 커밋 뒤. 최신화 뒤 /gld evolve 를 직접 실행하세요`.
 
 Record which of these happened — the return line distinguishes them.
 
@@ -661,7 +675,25 @@ keeps a reason that may already be resolved. Say so rather than letting the huma
       다음 `sprint plan` 이 새 카드를 올립니다.
 ```
 
+**The block above only when a member is unmerged on the merge axis** (Phase 1). **Every member merged → print the short
+form below instead of the block** (measured #610: a sync had already moved all 7 cards to Done, and the block still said
+they would stay `In review`) — the clean-up hint and the sync advice stay, only "머지하신 뒤에도 In review 에 남고" goes:
+
+```
+보드: <url> — 이후 카드는 갱신되지 않습니다(멤버 모두 머지됨). 이번 retro 전에 /gld sprint sync 를 부르지 않았다면 Done 이 아닐 수 있습니다 — GitHub UI 에서 정리하십시오; 다음부터는 retro 전에 sync 를.
+```
+
 This is a **disclosure, not a projection** — no `gh project` call, no card touched.
+
+0. **머지로 끝난 멤버의 라벨 정리** — before the groups below. A member merged on the merge axis (Phase 1 — a
+   same-repo `MERGED` closing PR) that is not `guild:done`, or still carries `guild:needs-human` (measured #610:
+   #597 #603 #606 #607 #608 kept `guild:qa` + `guild:needs-human` after the human merged their PRs), gets — its own
+   Bash call each, removing only the labels it actually has (`_handoff.md` Section A's caution), and checked as
+   landed (`_handoff.md` Section F):
+   `gh issue edit <n> --remove-label <stage> --remove-label guild:needs-human --add-label guild:done`
+   then one line `라벨 정리: #597 #603 … (머지됨 → guild:done)`. No question — the same ground as `dev` Phase 2b
+   step 1b's cleanup of a merged child: the merge is the evidence (`_handoff.md` Section A, the `guild:needs-human`
+   removal points). **DRY**: run nothing; print `라벨 정리 예정: #… (머지됨 → guild:done)` only.
 
 1. **Name every member that did not land, in the group whose advice fits it** — with its reason
    and its current stage. Every unmerged member (merge axis, `daily.md` step 6; an epic is one
@@ -725,7 +757,7 @@ This is a **disclosure, not a projection** — no `gh project` call, no card tou
    ⚠ **If the close fails**, the record is already safe: report
    `NEEDS_HUMAN: retro recorded for #<tracker> but closing it failed — re-run /gld sprint retro` rather
    than retrying in a loop. Re-running retro after this point is safe by step 2's check.
-   **DRY**: skip steps 2–3 and print the carryover list and the comment that would be posted.
+   **DRY**: skip the label cleanup and steps 2–3 and print the carryover list and the comment that would be posted.
 4. **Go to Phase 7** — only when step 3 closed the tracker (or DRY skipped it). If the close
    failed, return the `NEEDS_HUMAN` above and **skip Phase 7**: the sprint is still open, so the
    re-run that closes it reaches Phase 7 then. That is why the message says *re-run*, not
@@ -958,6 +990,9 @@ refuse to develop — the pause would be undiscoverable and unclearable.
 `OK: no open sprint` ·
 `OK: unattended — retro requires a human` ·
 `NEEDS_HUMAN: <one-line>` · `FAIL: <reason>`
+
+When Phase 5 ended as `성장 단계 보류` (evolve's freshness question answered ①), the Return adds
+`· 성장 단계 보류 — 로컬 <d> 가 <behind> 커밋 뒤. 최신화 뒤 /gld evolve 를 직접 실행하세요`.
 
 Both `closed` lines end with Phase 7's tally — `· cleanup <W> worktrees, <B> branches`, plus
 `(kept <k>)` when anything was refused or excluded, or `· cleanup declined` when the human said no.

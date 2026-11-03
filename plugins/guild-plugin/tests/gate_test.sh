@@ -7,6 +7,9 @@
 #
 # Usage: bash plugins/guild-plugin/tests/gate_test.sh
 set -uo pipefail
+# 섹션 O 의 Bash 텍스트 가드는 CLAUDE_PROJECT_DIR 를 저장소 루트로 먼저 읽는다 — 이 테스트를
+# Claude Code 세션에서 돌릴 때 그 값이 실제 프로젝트를 가리켜 발동 로그를 거기 쓰지 않도록 비운다.
+unset CLAUDE_PROJECT_DIR
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GATE="${1:-$HERE/../skills/gld/gates/gate_precommit.py}"
 HOOK="${2:-$HERE/../skills/gld/gates/pre-commit.sh}"
@@ -1274,12 +1277,185 @@ case "${R%%$'\037'*}:${R#*$'\037'}" in
 esac
 
 note ""
+note "== O. Bash 텍스트 가드 (0.98.6 Y1 shell-text · Y2 bodies-save — 모든 호출, 커밋 검사 전) =="
+# 실측(Guild 세션의 실제 Bash 호출 71,590건): shell-text 34건 — 전부 셸이 실제로 치환한 호출,
+# 오탐 0; bodies-save 55건 / gh issue list 1,267건. 아래 통과 모양은 그 실측에서 오탐이던(v1)
+# 모양들이다 — 하나라도 거부로 바뀌면 사람의 일반 세션까지 막는다(추적되는 settings.json).
+# pre_full: "<rc>␟<stdout>␟<stderr>". $1=command-string, 나머지=env 할당(선택).
+pre_full() {
+  local c="$1"; shift
+  local so se rc
+  so="$(printf '{"tool_input":{"command":%s}}' "$(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$c")" \
+    | env "$@" python3 "$OG" 2>"$WORK/o_err")"; rc=$?
+  se="$(cat "$WORK/o_err")"
+  printf '%s\037%s\037%s' "$rc" "$so" "$se"
+}
+# $1=label $2=want rc(0|2) $3=command-string
+expect_o() {
+  local R; R="$(pre_full "$3")"
+  if [ "${R%%$'\037'*}" = "$2" ]; then ok "$1"; else bad "$1" "rc $2" "rc ${R%%$'\037'*}"; fi
+}
+fresh_repo
+OG="$WORK/r/.claude/guild/gates/scripts/gate_precommit.py"
+# #1774 실제 명령(줄임) — 큰따옴표 python3 -c 안의 백틱이 실기기 테스트를 돌렸다.
+read -r -d '' C1774 <<'X'
+python3 -c "p='/tmp/gld-pr-1805-body.md';b=open(p).read();add_c='- qa `DONE_WITH_CONCERNS`(F1): … `notFoundIDs` …\n';b=b.replace('- 형제 이슈: #1794',add_c+'- 형제 이슈: #1794',1);m='''\n<!-- guild:manual-qa -->\n- [ ] E2E 회귀 — `flutter test integration_test/app_test.dart` 실행\n<!-- /guild:manual-qa -->\n''';b=b.rstrip('\n')+'\n'+m;open('/tmp/gld-pr-1805-newbody.md','w').write(b)"
+X
+R="$(pre_full "$C1774")"
+RC="${R%%$'\037'*}"; REST="${R#*$'\037'}"; SO="${REST%%$'\037'*}"; SE="${REST#*$'\037'}"
+[ "$RC" = 2 ] && ok "O1 #1774 큰따옴표 python3 -c 안의 백틱 → 2" || bad "O1 #1774" "2" "$RC"
+printf '%s' "$SO" | python3 -c 'import json,sys;d=json.load(sys.stdin)["hookSpecificOutput"];sys.exit(0 if d["permissionDecision"]=="deny" and "#1774" in d["permissionDecisionReason"] else 1)' 2>/dev/null \
+  && ok "O2 deny JSON(permissionDecision deny · 사유에 #1774)" || bad "O2 deny JSON" "deny" "$(printf '%s' "$SO" | cut -c1-80)"
+case "$SE" in
+  *"커밋 거부"*|*"dismissed.md"*) bad "O3 커밋 머리·HUMAN_NOTE 없음" "absent" "present" ;;
+  *"Write/Edit 도구로 파일에"*"--body-file"*) ok "O3 메시지: 커밋 머리·dismissed.md 없음, Write/Edit·--body-file 안내" ;;
+  *) bad "O3 shell-text 메시지" "Write/Edit … --body-file" "$(printf '%s' "$SE" | cut -c1-80)" ;;
+esac
+grep -q '"rule": "shell-text", "action": "block"' "$LOGF" 2>/dev/null && grep -q '"mode": "pre-tool-use"' "$LOGF" \
+  && ok "O4 발동 로그에 shell-text · block · pre-tool-use 행" || bad "O4 발동 로그" "shell-text row" "$(cat "$LOGF" 2>/dev/null | tail -1)"
+OUT="$($G --firing-log --out "$WORK/o_fl.jsonl" </dev/null 2>&1)"
+case "$OUT" in "ROWS 1 $WORK/o_fl.jsonl") grep -q shell-text "$WORK/o_fl.jsonl" && ok "O5 --firing-log 가 shell-text 행을 그대로 출력" || bad "O5 --firing-log" "shell-text" "$(cat "$WORK/o_fl.jsonl")" ;;
+  *) bad "O5 --firing-log" "ROWS 1" "$OUT" ;; esac
+read -r -d '' C <<'X'
+python3 -c 'p="/tmp/gld-pr-1805-body.md";b=open(p).read();add="- qa `DONE_WITH_CONCERNS`(F1): `notFoundIDs`\n";open("/tmp/n.md","w").write(b+add)'
+X
+expect_o "O6 같은 텍스트를 작은따옴표로 → 0" 0 "$C"
+expect_o "O7 gh issue comment --body-file → 0" 0 "gh issue comment 1 --body-file /tmp/x.md"
+read -r -d '' C <<'X'
+cat > /tmp/gld-1-evidence.md <<'EOF'
+- `flutter test --concurrency=1` → PASS
+EOF
+X
+expect_o "O8 <<'EOF' 본문의 백틱 → 0" 0 "$C"
+read -r -d '' C <<'X'
+cat > /tmp/gld-1-evidence.md <<EOF
+- `flutter test --concurrency=1` → PASS
+EOF
+X
+expect_o "O9 <<EOF 본문의 이스케이프 안 된 백틱 → 2" 2 "$C"
+read -r -d '' C <<'X'
+cat > /tmp/gld-1-evidence.md <<EOF
+- \`flutter test\` → PASS
+- red: $(cat /tmp/red.txt)
+EOF
+X
+expect_o "O10 <<EOF 본문의 \\\` · \$(cat /tmp/red.txt) → 0" 0 "$C"
+expect_o "O11 따옴표 없는 백틱 쌍 echo \`date\` → 2" 2 'echo built at `date`'
+expect_o "O12 사람의 echo \"built at \`date\`\" → 2" 2 'echo "built at `date`"'
+expect_o "O13 백틱이 작은따옴표 안 → 0" 0 "grep -n 'use \`x\`' README.md"
+# Claude Code 기본 커밋·PR heredoc — 큰따옴표 안의 $( … ) 는 새 문맥이라 그 속 백틱은 (a) 가 아니다.
+read -r -d '' CCOMMIT <<'X'
+git commit -m "$(cat <<'EOF'
+Fix `parse()` on empty input
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+EOF
+)"
+X
+read -r -d '' CPR <<'X'
+gh pr create --title "Fix parse on empty input" --body "$(cat <<'EOF'
+## Summary
+- `parse()` returns [] for ""
+
+## Test plan
+- [ ] `pytest tests/test_parse.py`
+EOF
+)"
+X
+expect_o "O14 Claude Code 기본 PR heredoc(gh pr create --body \"\$(cat <<'EOF' … \`x\` …)\") → 0" 0 "$CPR"
+expect_o "O15 Claude Code 기본 커밋 heredoc → 0 (커밋 판정 그대로 — 깨끗한 저장소)" 0 "$CCOMMIT"
+expect_o "O16 exec \$(which lefthook) \"\$@\" → 0" 0 'exec $(which lefthook) "$@"'
+expect_o "O17 echo \"x \$(grep a b | tr '\\n' ' ')\" → 0" 0 "echo \"x \$(grep a b | tr '\\n' ' ')\""
+read -r -d '' C <<'X'
+for n in 101 102 103 104 105; do echo "issue #$n: state=$(gh issue view $n --json state --jq .state 2>/dev/null) labels=$(gh issue view $n --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null) title=$(gh issue view $n --json title --jq .title)"; done
+X
+expect_o "O18 200자 넘는 for-loop echo \"…\$(…)…\" → 0" 0 "$C"
+expect_o "O19 ls -l \"\$(git rev-parse --git-path hooks/pre-commit)\" (update.md) → 0" 0 'ls -l "$(git rev-parse --git-path hooks/pre-commit)"'
+expect_o "O20 2>/dev/null 로 읽는 일반 명령 → 0" 0 'gh issue view 12 --json body --jq .body 2>/dev/null'
+# 상태 기계 자체: 커밋 heredoc 은 커밋 경로로 가므로 함수로 직접 고정한다.
+PYCHK="$(python3 - "$OG" "$CCOMMIT" "$CPR" <<'PY'
+import importlib.util, sys
+s = importlib.util.spec_from_file_location("g", sys.argv[1]); g = importlib.util.module_from_spec(s); s.loader.exec_module(g)
+print(g.shell_text_hazard(sys.argv[2]), g.shell_text_hazard(sys.argv[3]), g.shell_text_hazard('echo "a `b` c"'))
+PY
+)"
+[ "$PYCHK" = "[] [] ['a']" ] && ok "O21 shell_text_hazard: 커밋·PR heredoc [] · 큰따옴표 백틱 ['a']" || bad "O21 shell_text_hazard" "[] [] ['a']" "$PYCHK"
+# 커밋 명령의 기존 판정 불변 (D 절과 같은 모양)
+printf 'SECRET=abc\n' > .env
+expect_o "O22 커밋: 무관한 untracked .env → 0 (불변)" 0 "git commit -m x"
+expect_o "O23 커밋: git add .env && commit → 2 (불변)" 2 "git add .env && git commit -m x"
+rm -f .env
+# ── bodies-save ──
+expect_o "O24 #1798 PO 모양: cd; gh issue list … --json …body… --jq '…' > /tmp/b.json; wc → 2" 2 \
+  "cd /x; gh issue list --state open --limit 500 --json number,title,body,labels --jq '.[] | {n:.number}' > /tmp/b.json; wc -c /tmp/b.json"
+expect_o "O25 #610 모양: > /tmp/bodies.json 2>/dev/null → 2" 2 \
+  "gh issue list --state open --limit 200 --json number,title,body,labels > /tmp/bodies.json 2>/dev/null"
+expect_o "O26 #610 모양: 2>/dev/null > /tmp/bodies.txt → 2" 2 \
+  "gh issue list --state open --limit 200 --json number,title,body 2>/dev/null > /tmp/bodies.txt"
+expect_o "O27 &> /tmp/a → 2" 2 "gh issue list --json number,body &> /tmp/a"
+expect_o "O28 | tee /tmp/a → 2" 2 "gh issue list --json number,body | tee /tmp/a"
+expect_o "O29 따옴표에 싸인 대상 > \"/tmp/b.json\" → 2" 2 "gh issue list --json number,title,body > \"/tmp/b.json\""
+expect_o "O30 --jq '…' 2>/dev/null (읽기만) → 0" 0 "gh issue list --json number,title,body --jq '.[] | .body' 2>/dev/null"
+expect_o "O31 >/dev/null → 0" 0 "gh issue list --json number,body >/dev/null"
+expect_o "O32 >&2 → 0" 0 "gh issue list --json number,body >&2"
+expect_o "O33 다른 조각의 body(gh issue view …; gh issue list --json number > f) → 0" 0 \
+  "gh issue view 1 --json body; gh issue list --json number > /tmp/x"
+expect_o "O34 --json number,labels > /tmp/a → 0" 0 "gh issue list --json number,labels > /tmp/a"
+expect_o "O35 qa.md 단건 재작성 gh pr view … > /tmp/gld-pr-1-body.md → 0" 0 \
+  "gh pr view 1 --json body --jq .body > /tmp/gld-pr-1-body.md"
+expect_o "O36 jq 안의 length > 0 → 0" 0 \
+  "gh issue list --state open --json number,body --jq '.[] | select((.body // \"\") | length > 0) | .number'"
+R="$(pre_full "gh issue list --json number,body > /tmp/b.json")"; SE="${R##*$'\037'}"
+case "$SE" in *"Issue 본문 묶음을 파일로 저장하지 마세요"*"Read offset/limit"*) ok "O37 bodies-save 메시지" ;;
+  *) bad "O37 bodies-save 메시지" "본문 묶음 …" "$(printf '%s' "$SE" | cut -c1-80)" ;; esac
+grep -q '"rule": "bodies-save", "action": "block"' "$LOGF" 2>/dev/null && ok "O38 발동 로그에 bodies-save 행" || bad "O38 bodies-save 행" "row" "$(tail -1 "$LOGF" 2>/dev/null)"
+# ── 코드 리뷰 1차: 커밋 명령이 섞여도 텍스트 가드가 먼저 · heredoc 구분자 · bodies-save 범위 ──
+# 본문이 `git commit` 을 백틱으로 언급하면 is_git_commit 이 참이 되어 가드를 건너뛰었다 —
+# 셋째(gh … --body "…`git commit …`…")는 실제로 git commit 을 돌린다. 코퍼스의 커밋 호출 1,146건에는
+# 위험 모양 0건.
+B='`'
+expect_o "O43 본문에 \`git commit …\` 언급 + python3 -c → 2" 2 "python3 -c \"p='/tmp/gld-pr-1-body.md';b=open(p).read();b+='- ran ${B}git commit -m x${B} hook';open(p,'w').write(b)\""
+expect_o "O44 증거 덧붙이기 'after git commit: \`flutter test\`' → 2" 2 "python3 -c \"open('/tmp/e.md','a').write('after git commit: ${B}flutter test${B}')\""
+expect_o "O45 gh issue comment --body \"use \`git commit --no-verify\` never\" → 2" 2 "gh issue comment 1 --body \"use ${B}git commit --no-verify${B} never\""
+expect_o "O46 git commit -m \"fix \`ls\`\" (실제 치환) → 2" 2 "git commit -m \"fix ${B}ls${B}\""
+expect_o "O47 <<\\EOF 본문의 \`make\` → 0 (백슬래시 구분자는 따옴표와 같다)" 0 "cat > /tmp/x.md <<\\EOF
+run ${B}make${B} here
+EOF"
+expect_o "O48 <<'END-BODY' 본문의 \`make\` → 0 (- 가 든 구분자)" 0 "cat > /tmp/x.md <<'END-BODY'
+run ${B}make${B} here
+END-BODY"
+expect_o "O49 { gh issue list --json …body; } > /tmp/b.json → 2" 2 "{ gh issue list --json number,body; } > /tmp/b.json"
+expect_o "O50 gh -R o/r issue list --json body >/tmp/b → 2" 2 "gh -R o/r issue list --json body >/tmp/b"
+expect_o "O51 # 주석 속 gh issue list … > f → 0" 0 "ls # gh issue list --json body > /tmp/x"
+expect_o "O52 <<'EOF' 스크립트 본문 속 gh issue list … > f → 0" 0 "cat > /tmp/s.sh <<'EOF'
+gh issue list --json number,body > /tmp/out.json
+EOF"
+# 코드 리뷰 2차: here-string `<<<` 의 둘째 `<` 가 heredoc 으로 읽혀 나머지 명령 전체가 본문으로 삼켜졌다(미탐).
+expect_o "O53 jq . <<< \"\$x\" 다음 줄의 echo \"built \`date\`\" → 2" 2 "jq . <<< \"\$x\"
+echo \"built ${B}date${B}\""
+expect_o "O54 jq . <<< \"\$x\" 다음 줄의 gh issue list … > /tmp/b.json → 2" 2 "jq . <<< \"\$x\"
+gh issue list --json number,body > /tmp/b.json"
+# ── off-switch · 저장소 밖 cwd ──
+printf '{"gates":{"enabled":false}}' > .claude/guild/config.json
+expect_o "O39 gates off → #1774 모양도 0" 0 "$C1774"
+expect_o "O40 gates off → bodies-save 모양도 0" 0 "gh issue list --json number,body > /tmp/b.json"
+OFFR="$WORK/r"
+mkdir -p "$WORK/outside"; cd "$WORK/outside"
+R="$(pre_full "$C1774" CLAUDE_PROJECT_DIR="$OFFR")"
+[ "${R%%$'\037'*}" = 0 ] && ok "O41 cwd 저장소 밖 + CLAUDE_PROJECT_DIR=gates off 저장소 → 0" || bad "O41 CLAUDE_PROJECT_DIR off" "0" "${R%%$'\037'*}"
+printf '{"gates":{"enabled":true}}' > "$OFFR/.claude/guild/config.json"
+R="$(pre_full "$C1774" CLAUDE_PROJECT_DIR="$OFFR")"
+[ "${R%%$'\037'*}" = 2 ] && [ -z "$(ls -A "$WORK/outside")" ] && ok "O42 cwd 저장소 밖 + CLAUDE_PROJECT_DIR=gates on 저장소 → 2 · cwd 에 쓰기 없음" \
+  || bad "O42 CLAUDE_PROJECT_DIR on" "2 + empty cwd" "${R%%$'\037'*} / $(ls -A "$WORK/outside" | tr '\n' ' ')"
+cd "$OFFR"
+
+note ""
 note "결과: PASS=$PASS FAIL=$FAIL"
 cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=202
+GATE_MIN_CHECKS=256
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

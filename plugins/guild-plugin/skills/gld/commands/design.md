@@ -160,5 +160,5 @@ This routes `/gld dev` into child orchestration (dev Phase 2b). The parent's exe
 
 ## Hard rules
 - **Tester independence**: the tester MUST NOT see the skeleton (spawn prompt enforces this). This is the anti-bias core of design.
-- Artifacts pass as **files** (`docs/specs/$1/`), never pasted into RESULT lines (context protection).
+- Artifacts pass as **files** (`docs/specs/$1/`), never pasted into RESULT lines (context protection). When the leader itself adds to a `docs/specs/$1/*` file (relaying an answer, recording a resolution), it does so — by the Write/Edit tool (never a `python3 -c`/`sed`/heredoc carrying the text: `_bash_rules.md`, #1774).
 - Design is read-only against source code — it writes only spec files + the Issue comment + label.

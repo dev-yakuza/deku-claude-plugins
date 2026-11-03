@@ -12,6 +12,10 @@ Runs in **two modes**, from one source of truth:
      `git commit`, checks what it can *before* the command runs, so the agent gets an
      immediate, specific reason instead of burning a turn on a commit the git hook will
      reject anyway.
+     2b. (no args, every call, before the commit check) — **Bash text guard** (0.98.6). Refuses two
+     narrow, measured shapes: a backtick the shell will run as a command inside the call's
+     text (`shell-text`), and an Issue-body bundle from `gh issue list --json …body…` saved
+     to a file (`bodies-save`). Every other call goes on (to the commit check, or allowed) after one string scan.
 
 ⚠ **Why two layers.** A `PreToolUse` hook fires *before* the command executes, so a
 compound command that creates or mutates content and commits it in one call
@@ -53,6 +57,7 @@ so mode 1 refuses and says so. Mode 2 warns and defers to the git hook.
 Exit codes:
   mode 1 (`--git-hook`): 0 = allow · 1 = block (message on stderr)
   mode 2 (PreToolUse):   0 = allow · 2 = deny (deny JSON on stdout + message on stderr)
+  mode 2b (PreToolUse, every call): same codes as mode 2
   scan / detect / firing-log modes: 0 = clean (or the answer printed) · 1 = found ·
     anything else = NOT judged (2 = could not run, 64 = usage) — see "mode 4/5" below.
 
@@ -1372,6 +1377,305 @@ def deny_pre_tool_use(reasons, warn=()):
     sys.exit(2)
 
 
+# --- mode 2b: Bash text guard (0.98.6 Y1 · Y2) ------------------------------------------
+# The PreToolUse hook already sees EVERY Bash call (settings.json `matcher: "Bash"`); a call
+# that is not a commit used to return at once. Two narrow shapes are now refused there — on every call, a commit too —
+# both measured, both missed by the prompt rules alone, and a deny is honoured unattended and
+# inside sub-agents (word_app #1117: `PreToolUse:Bash hook error` stopped a sub-agent commit).
+# Measured over 71,590 real Bash calls from Guild sessions (word_app · one-man-company):
+#   shell-text  — 34 hits, every one a command line where the shell really substituted a
+#                 backtick inside double quotes (word_app #1774: `python3 -c "…`flutter test
+#                 …`…"` ran the device test and pasted the iPhone name and ID into PR #1805's
+#                 body). 0 false positives — shapes the shell does not substitute pass.
+#   bodies-save — 55 of 1,267 `gh issue list` calls: an Issue-body bundle saved to a file
+#                 the caller named (`> /tmp/b.json`), which any process can read or replace.
+# These are NOT commit checks: they get their own deny text (no `커밋 거부` header, no
+# dismissed.md note — neither applies) and their firing rows are universal-safety rows like
+# secret/verification, outside evolve's stack/boundary scorecard.
+SHELL_TEXT_MSG = ("🚫 Guild 게이트: 명령 줄 안의 텍스트에 백틱이 있어 명령으로 실행됩니다(#1774 실측). "
+                  "본문·댓글·증거·docs/specs 에 넣을 텍스트는 Write/Edit 도구로 파일에 쓰고, "
+                  "gh 에는 --body-file / --field body=@<file> 로 넘기세요. "
+                  "치환이 의도라면 $(…) 로, 글자 그대로의 백틱이라면 작은따옴표나 스크립트 파일로 쓰세요.")
+BODIES_SAVE_MSG = ("🚫 Guild 게이트: Issue 본문 묶음을 파일로 저장하지 마세요 — 명령을 그대로 실행하고, "
+                   "출력이 길면 도구가 옮긴 파일을 Read offset/limit 로 읽으세요(S4).")
+
+# `<<EOF`, `<<-EOF`, `<<'EOF'`, `<<"END-BODY"`, `<<\EOF` (a backslash quotes the delimiter like quotes do).
+# The delimiter may hold `-` or `.`; it never starts with a digit (`$((1<<2))` is a shift, not a heredoc).
+HEREDOC_RE = re.compile(r"<<(-?)\s*(\\?)(['\"]?)([^\s'\"<>;&|()0-9][^\s'\"<>;&|()]*)\3")
+UNESC_BACKTICK_RE = re.compile(r"(?<!\\)`")
+
+
+def _heredoc_end(line, delim, strip):
+    s = line.lstrip("\t") if strip else line
+    return s.strip() == delim or (s.rstrip(')"').strip() == delim and line.strip().startswith(delim))
+
+
+def shell_text_hazard(cmd):
+    """Backticks the shell will run as a command, in three shapes — a small quoting state
+    machine, not a parser. Returns the sorted reasons ('a' | 'b' | 'c'); [] = none.
+      (a) an unescaped backtick inside a double-quoted span. `$( … )` opens a NEW context even
+          inside double quotes (closed by paren depth), so `git commit -m "$(cat <<'EOF' …`x`…
+          EOF )"` — the Claude Code default — is not (a);
+      (b) a backtick pair in unquoted context;
+      (c) an unescaped backtick in the body of an UNQUOTED heredoc (`<<EOF`). `$(` there is
+          not looked at: `$(cat /tmp/red.txt)` in an evidence file is intended.
+    Known blind spots (recorded, 0 in the corpus): ANSI-C `$'…'` quoting, `eval`/`bash -c`
+    re-parsing, and a literal `$(cmd)` inside double quotes (left to the prompt rule)."""
+    n = len(cmd)
+    i = 0
+    stack = [["none", 0]]       # [mode, paren depth] — depth > 0 = inside $( )
+    pend = []                   # heredocs opened on this line: (delim, quoted, strip_tabs)
+    reasons = set()
+    bt_open = False
+    while i < n:
+        mode, depth = stack[-1]
+        ch = cmd[i]
+        if mode == "single":
+            if ch == "'":
+                stack.pop()
+            i += 1
+            continue
+        if mode == "double":
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "`":
+                reasons.add("a")
+                i += 1
+                continue
+            if cmd.startswith("$(", i):
+                stack.append(["none", 1])
+                i += 2
+                continue
+            if ch == '"':
+                stack.pop()
+            i += 1
+            continue
+        # unquoted — top level, or inside $( )
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "'":
+            stack.append(["single", 0])
+            i += 1
+            continue
+        if ch == '"':
+            stack.append(["double", 0])
+            i += 1
+            continue
+        if cmd.startswith("$(", i):
+            stack.append(["none", 1])
+            i += 2
+            continue
+        if depth > 0 and ch == "(":
+            stack[-1][1] += 1
+            i += 1
+            continue
+        if depth > 0 and ch == ")":
+            stack[-1][1] -= 1
+            if stack[-1][1] == 0:
+                stack.pop()
+            i += 1
+            continue
+        if ch == "`":
+            if bt_open:
+                reasons.add("b")
+            bt_open = not bt_open
+            i += 1
+            continue
+        if ch == "#" and (i == 0 or cmd[i - 1] in " \t\n;&|("):
+            j = cmd.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if cmd.startswith("<<<", i):
+            i += 3  # a here-string, not a heredoc — and its 2nd `<` must not open one either
+            continue
+        m = HEREDOC_RE.match(cmd, i)
+        if m:
+            pend.append((m.group(4), bool(m.group(2) or m.group(3)), m.group(1) == "-"))
+            i = m.end()
+            continue
+        if ch == "\n" and pend:
+            i += 1
+            for delim, quoted, strip in pend:
+                body = []
+                while i < n:
+                    j = cmd.find("\n", i)
+                    j = n if j < 0 else j
+                    line = cmd[i:j]
+                    i = j + 1
+                    if _heredoc_end(line, delim, strip):
+                        break
+                    body.append(line)
+                if not quoted and UNESC_BACKTICK_RE.search("\n".join(body)):
+                    reasons.add("c")
+            pend = []
+            continue
+        i += 1
+    return sorted(reasons)
+
+
+def _blank_quoted(cmd):
+    """`cmd` with every quoted character, every backslash escape, every `#` comment and every
+    heredoc body replaced by spaces (newlines kept) — SAME LENGTH, so a span found here is the same
+    span of the original. A comment or a heredoc body is text, not a command: a `gh issue list …
+    > f` written into a script file, or mentioned after `#`, runs nothing."""
+    out = []
+    state = "none"
+    pend = []                   # heredoc delimiters opened on this line: (delim, strip_tabs)
+    i = 0
+    n = len(cmd)
+    while i < n:
+        ch = cmd[i]
+        if state != "single" and ch == "\\":
+            out.append(" " * len(cmd[i:i + 2]))
+            i += 2
+            continue
+        if state == "none":
+            if ch == "#" and (i == 0 or cmd[i - 1] in " \t\n;&|("):
+                j = cmd.find("\n", i)
+                j = n if j < 0 else j
+                out.append(" " * (j - i))
+                i = j
+                continue
+            if cmd.startswith("<<<", i):
+                out.append("<<<")  # a here-string — skip all three, or `<< "$x"` reads as a heredoc
+                i += 3
+                continue
+            m = HEREDOC_RE.match(cmd, i) if ch == "<" else None
+            if m:
+                pend.append((m.group(4), m.group(1) == "-"))
+                out.append("<<" + " " * (m.end() - i - 2))
+                i = m.end()
+                continue
+            if ch == "\n" and pend:
+                out.append("\n")
+                i += 1
+                for delim, strip in pend:
+                    while i < n:
+                        j = cmd.find("\n", i)
+                        j = n if j < 0 else j
+                        line = cmd[i:j]
+                        end = _heredoc_end(line, delim, strip)
+                        out.append(" " * (j - i) + ("\n" if j < n else ""))
+                        i = j + 1
+                        if end:
+                            break
+                pend = []
+                continue
+            if ch == "'":
+                state = "single"
+                out.append(" ")
+            elif ch == '"':
+                state = "double"
+                out.append(" ")
+            else:
+                out.append(ch)
+            i += 1
+            continue
+        if (state == "single" and ch == "'") or (state == "double" and ch == '"'):
+            state = "none"
+        out.append(" ")
+        i += 1
+    return "".join(out)[:n]
+
+
+# Pipeline pieces: newline, `;`, `&&`, `||`, a background `&` (not `&>`, `>&`, `2>&1`).
+PIECE_SEP_RE = re.compile(r"\n|;|&&|\|\||(?<![>&|])&(?![>&])")
+GH_ISSUE_LIST_RE = re.compile(r"\bgh\s+(?:(?:-R|--repo)[\s=]+\S+\s+)?issue\s+list\b")
+JSON_BODY_RE = re.compile(r"--json[ =]\S*\bbody\b")
+# A stdout redirect operator: `>`, `>>`, `1>`, `&>`, `>|`. Not `2>` (stderr), not `>&2`.
+STDOUT_REDIR_RE = re.compile(r"(?:^|[^0-9&>])(?:1|&)?>>?\|?")
+TEE_RE = re.compile(r"\|\s*tee\b")
+
+
+def _redir_target(raw, pos):
+    """The word after a redirect operator, read from the ORIGINAL text (so `> "/tmp/b.json"`
+    is a target), quotes removed. '' when there is none."""
+    rest = raw[pos:].lstrip(" \t")
+    if not rest or rest[0] in "&;|<>\n":
+        return ""
+    if rest[0] in "'\"":
+        end = rest.find(rest[0], 1)
+        return rest[1:end if end > 0 else len(rest)]
+    return re.match(r"[^\s;&|<>]*", rest).group(0)
+
+
+def bodies_save(cmd):
+    """True when ONE pipeline piece runs `gh issue list` with `body` among its `--json` fields
+    AND sends its stdout to a file (`>`, `>>`, `1>`, `&>`, `>|` — not /dev/null, not `>&2`, not
+    `2>`) or through `| tee` — or when such a piece sits inside a `{ …; }` / `( …; )` group whose
+    closing piece does. Piece boundaries come from the quote-blanked text (a `;` or `>` inside a
+    jq string, a `#` comment or a heredoc body is not one); the fields and the redirect target
+    are read from the same span of the original. Single-Issue `gh issue view`/`gh pr view`
+    redirects are not this — qa.md's body rewrite saves one body by design.
+    Known blind spots (recorded): capture into a variable written out later
+    (`x=$(gh issue list …); echo "$x" > f`), `gh api …/issues`, a script file that saves."""
+    u = _blank_quoted(cmd)
+    groups = []                 # open `{`/`(` groups: does one hold a bodies read?
+    start = 0
+    for m in list(PIECE_SEP_RE.finditer(u)) + [None]:
+        end = m.start() if m else len(u)
+        seg_u, seg_raw = u[start:end], cmd[start:end]
+        start = m.end() if m else len(u)
+        lead = seg_u.lstrip()
+        while lead[:1] in ("{", "("):
+            groups.append(False)
+            lead = lead[1:].lstrip()
+        is_read = bool(GH_ISSUE_LIST_RE.search(seg_u)) and bool(JSON_BODY_RE.search(seg_raw))
+        if is_read:
+            groups = [True] * len(groups)
+        closing = False
+        if lead[:1] in ("}", ")") and groups:
+            closing = groups.pop()
+        if not (is_read or closing):
+            continue
+        if TEE_RE.search(seg_u):
+            return True
+        for r in STDOUT_REDIR_RE.finditer(seg_u):
+            tgt = _redir_target(seg_raw, r.end())
+            if tgt and tgt not in ("/dev/null", "/dev/stdout", "/dev/stderr"):
+                return True
+    return False
+
+
+def deny_pre_tool_use_text(msg):
+    """Deny a Bash call for its text (every Bash call, a commit too): the same deny JSON + stderr + exit 2 as a commit block, but
+    with `msg` alone — `block_message`'s `커밋 거부` header and HUMAN_NOTE (dismissed.md, key
+    rotation) are about commits and would mislead here."""
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": msg,
+    }}))
+    sys.stderr.write(msg + "\n")
+    sys.exit(2)
+
+
+def main_text_guard(cmd):
+    """Mode 2b — every Bash call, before the commit check (a body text that merely mentions
+    `git commit` inside a backtick is still substituted — and in `gh … --body "…`git commit`…"`
+    the commit really runs). Returns 0 (allow / go on) or exits 2. Costs one string scan when neither shape is
+    present; only then is the off-switch read. Its root is `CLAUDE_PROJECT_DIR` (what the hook
+    command itself uses) before the cwd's repository — a call that `cd /tmp`s first still
+    belongs to the project whose settings fired the hook."""
+    if not cmd:
+        return 0
+    rule = msg = None
+    if shell_text_hazard(cmd):
+        rule, msg = "shell-text", SHELL_TEXT_MSG
+    elif bodies_save(cmd):
+        rule, msg = "bodies-save", BODIES_SAVE_MSG
+    if rule is None:
+        return 0
+    root = os.environ.get("CLAUDE_PROJECT_DIR") or repo_root()
+    if not gates_enabled(root):
+        return 0  # off-switch
+    record_firing(rule, "block", None)
+    flush_firings(root, "pre-tool-use")
+    deny_pre_tool_use_text(msg)  # exits 2
+
+
 # --- repo-local gate extensions ---------------------------------------------------------
 # This file is central-owned: `/gld update` overwrites it. That is fine for the universal
 # checks, and fatal for anything a repo added to it — observed: a repo had hand-extended this
@@ -1597,6 +1901,7 @@ def main_pre_tool_use():
         cmd = (payload.get("tool_input") or {}).get("command", "") or ""
     except Exception:
         cmd = raw  # degrade: treat the raw text as the command
+    main_text_guard(cmd)  # mode 2b — every call, a commit too; exits 2 on a hazard shape
     if not is_git_commit(cmd):
         return 0  # not a commit → allow silently
     # honour `git -C <dir> commit` — resolving the root from the hook's own cwd inspected
