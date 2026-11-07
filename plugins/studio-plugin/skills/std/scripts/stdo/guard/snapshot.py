@@ -25,9 +25,16 @@ DELEGATED_NAMES = ("find", "grep", "rg", "pkill")
 # applied by the Bash tool after `source <snapshot>` (measured, Claude Code 2.1.304; re-check on updates)
 BASH_TOOL_POSTLUDE = {"options": {"extendedglob": False, "bareglobqual": False},
                       "unalias": ("unsetenv",), "unfunction": ("unsetenv",)}
-DEFAULT_OPTIONS = {"autocd": True, "autopushd": True, "nomatch": True, "interactivecomments": True,
+# assumed when no snapshot says (None: maybe — review 10 M2: `popd` after `cd` is judged both ways)
+DEFAULT_OPTIONS = {"autocd": True, "autopushd": None, "nomatch": True, "interactivecomments": True,
                    "rcquotes": False, "shwordsplit": False, "cdablevars": False, "pushdminus": False,
                    "pushdignoredups": False, "equals": True, "rcexpandparam": False}
+# review 10 M2: the snapshot's "# Shell Options" section is zsh's `setopt` output, which lists only options not at
+# zsh's default — an option it does not list is at zsh's default (AUTO_PUSHD off). INTERACTIVE_COMMENTS is not taken
+# from it: a non-interactive shell reads comments anyway.
+ZSH_DEFAULTS = {"autocd": False, "autopushd": False, "nomatch": True, "rcquotes": False, "shwordsplit": False,
+                "cdablevars": False, "pushdminus": False, "pushdignoredups": False, "equals": True,
+                "rcexpandparam": False}
 ARGV_OPTIONS = ("rcquotes", "shwordsplit", "rcexpandparam")
 USER_FUNC_RE = re.compile(r"^(?:function\s+)?([^\s(){};|&<>'\"$`]+)\s*(?:\(\))?\s*\{")
 FUNC_ANY_RE = re.compile(r"^\s*(?:function\s+([^\s(){};|&<>'\"$`]+)\s*(?:\(\))?\s*\{|([^\s(){};|&<>'\"$`]+)\s*\(\)\s*\{)")
@@ -41,6 +48,7 @@ class Variant(object):
         self.user_functions = set()
         self.delegated = set()
         self.options = {}
+        self.explicit = {}
         self.path = None
         self.notes = []
         self.func_offsets = {}
@@ -50,7 +58,8 @@ class Variant(object):
 
     def key(self):
         d = {"a": sorted(self.aliases.items()), "g": sorted(self.global_aliases), "s": sorted(self.suffix_aliases),
-             "f": sorted(self.user_functions), "d": sorted(self.delegated), "o": sorted(self.options.items())}
+             "f": sorted(self.user_functions), "d": sorted(self.delegated), "o": sorted(self.options.items()),
+             "x": sorted(self.explicit.items())}
         return hashlib.sha256(json.dumps(d, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -128,6 +137,9 @@ def parse_snapshot(text):
                 for o in parts[1:]:
                     name, on = _option_name(o)
                     v.options[name] = on if parts[0] == "setopt" else not on
+        v.explicit = dict(v.options)  # review 19 B19-3: as set by the snapshot (HEAD read only these)
+        for k, val in ZSH_DEFAULTS.items():
+            v.options.setdefault(k, val)
     # (3) aliases (a function defined in this region is a user function)
     if alias_i is not None:
         end = claude_i if claude_i is not None else (path_i if path_i is not None else len(lines))
@@ -240,8 +252,8 @@ class Snapshot(object):
         for k in set().union(*[set(v.options) for v in variants]) if variants else ():
             vals = {v.options.get(k, DEFAULT_OPTIONS.get(k, False)) for v in variants}
             self.options[k] = True in vals
-            if len(vals) > 1:
-                self.option_conflicts.add(k)
+            if len(vals) > 1 or None in vals:
+                self.option_conflicts.add(k)  # variants disagree, or one cannot tell (review 10 M2): maybe
         for k in ARGV_OPTIONS:
             if k in self.option_conflicts:
                 self.options[k] = "both"
@@ -254,6 +266,23 @@ class Snapshot(object):
     def source(self, name, value):
         c = self.counts.get(name, {})
         return {"name": name, "value": value, "in": c.get(value, 0), "of": self.total}
+
+    def function_bodies(self, name, limit=65536):
+        """The definition text (`name () {` … the column-0 `}`) of a user function in every variant that defines it,
+        or None when a variant names it without a readable definition (review 2 conformance, R2-M1)."""
+        out = []
+        for v in self.variants:
+            off = v.func_offsets.get(name)
+            if off is None:
+                if name in v.user_functions:
+                    return None
+                continue
+            lines = v.text[off:off + limit].split("\n")
+            end = next((i for i, line in enumerate(lines[1:], 1) if line == "}"), None)
+            if end is None:
+                return None
+            out.append("\n".join(lines[:end + 1]))
+        return out or None
 
     def function_text(self, name, limit=65536):
         for v in self.variants:

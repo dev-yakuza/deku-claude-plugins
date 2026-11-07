@@ -18,7 +18,7 @@ from commit_base import SID, CommitCase
 from stdo.guard import approve, judge, messages, sedshape, transcript
 from stdo.guard.messages import INV9, LABEL, NONSTOP, REASK, Deny
 from stdo.guard.model import Word
-from test_guard_judge import JudgeCase, sed_deny
+from test_guard_judge import JudgeCase, runner_deny, sed_deny
 
 GUARD_DIR = os.path.join(helpers.SCRIPTS, "stdo", "guard")
 
@@ -178,6 +178,12 @@ class SedJudge(JudgeCase):
                 d = self.assertDeny(cmd, cwd=self.vdir)
                 if rule == "G-OPAQUE" and not cmd.startswith("find"):
                     self.assertEqual(d.rule, rule, "%s: %s" % (cmd, d.message()))
+
+    def test_runners_under_the_video_folder(self):  # G1 §5: RUNNER_DENY formatted like sed_deny
+        for mode in ("with", "none"):
+            self.mode = mode
+            for cmd, _rule in runner_deny("../../../"):
+                self.assertDeny(cmd, cwd=self.vdir)
 
     def test_still_denied(self):
         self.assertDeny("sed -i '' s/a/b/ .claude/studio/config.json", "G-PROT")

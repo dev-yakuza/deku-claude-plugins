@@ -50,6 +50,17 @@ class Word(Base):
         self.quoted = quoted
         self.alt = alt
         self.plain = plain  # unquoted, no escapes, no expansions (alias candidates)
+        # G1 §3 (argv words only): the shell drops it (an unquoted empty expansion), may drop it (unquoted expansions
+        # of unknown value only), or it may give several words or none
+        self.drop = self.maybe_empty = self.multi = False
+        self.glob_walk = self.extglob = False  # G1 §2: a glob's `**` may be expanded by listing; ^ ~ # are globs
+        # review 4 conf M-2: positions in `value` of characters zsh may read as a pattern (unquoted); None: unknown
+        # (every glob character is one)
+        self.wild = None
+        # review 9: values a dynamic word may have — the candidates of values the guard does not carry (walk.cands)
+        self.cand_values = ()
+        self.cand_loose = ()  # words of a command whose output the value is: judged when they name a protected thing
+        self.cand_complete = False  # review 10: the value is one of cand_values exactly (no unknown member)
 
     @classmethod
     def lit(cls, text):
@@ -98,10 +109,14 @@ class EnvView(Base):
 
 
 class Wrapper(Base):
-    FIELDS = ("name", "args", "effect")
+    """A runner walk unwrapped (G1 §1.2): `files` are its own file arguments [(Word, op)] with op write, read or
+    write-dir; `cwd` the run folders in effect for their relative paths (after an earlier env -C / sudo -D)."""
+    FIELDS = ("name", "args", "effect", "files", "cwd")
 
-    def __init__(self, name, args, effect="none"):
+    def __init__(self, name, args, effect="none", files=(), cwd=None):
         self.name, self.args, self.effect = name, list(args), effect
+        self.files = list(files)
+        self.cwd = list(cwd) if cwd is not None else None
 
 
 class LockWrap(Base):
@@ -117,6 +132,7 @@ class GitInfo(Base):
 
     def __init__(self):
         self.sub, self.args, self.c_dirs = None, [], []
+        self.sub_dynamic = False  # the subcommand slot holds a word the guard cannot read (G1 §3)
         self.git_dir = self.work_tree = None
         self.configs, self.env = [], {}
 
@@ -137,7 +153,7 @@ class S2vForm(Base):
 
 class Cmd(Base):
     FIELDS = ("id", "parent", "ctx", "words", "argv", "prog", "prog_key", "alt", "aliases", "wrappers", "lock",
-              "env", "redirs", "cwds", "run_cwds", "git", "script", "s2v", "flags", "span")
+              "env", "redirs", "cwds", "run_cwds", "git", "script", "s2v", "flags", "span", "files")
 
     def __init__(self, id, words, cwds, ctx=None, parent=None, span=(0, 0)):
         self.id = id
@@ -157,6 +173,10 @@ class Cmd(Base):
         self.s2v = None
         self.flags = set()
         self.span = span
+        self.files = []  # a runner that is the program (no command, refused): its own file arguments [(Word, op)]
+        self.run_words = []  # run-folder words the guard cannot read (env -C $D, sudo -D $D; G1 §1.7a)
+        self.start_folders = None  # where the program starts, before its own -C (walk.recognize)
+        self.glob_folders = []  # [(folders, pattern)]: an unknown folder a wildcard names (`cd stu?io`, review 2 M12)
 
     @property
     def argv(self):
@@ -194,6 +214,24 @@ class Opaque(Base):
         self.path, self.path_class = path, path_class
         self.cwds = list(cwds or [])
         self.alt = None
+        self.skeleton = None  # a string the guard cannot read: its text with \0 for each unknown part (G1 §1.7)
+        self.options = None   # shell options in effect for the string (emulate sh -c: posixbuiltins)
+        self.input = None     # (fd 0, {fd: description}) the string runs with (review 7 M4); False: none
+
+
+def input_key(inp):
+    """A comparable form of a nested string's input (Opaque.input; review 7 M4)."""
+    if not inp:
+        return None
+
+    def one(d):
+        if d is None:
+            return None
+        k, v = d
+        if k == "redir":
+            return (k, v.mode, v.body, v.body_dynamic)
+        return (k, v)
+    return (one(inp[0]), tuple(sorted((f, one(d)) for f, d in (inp[1] or {}).items())))
 
 
 class Scan(Base):
@@ -209,6 +247,9 @@ class Scan(Base):
         self.opaque = []
         self.notes = []
         self.stats = {}
+        # fix20: the walk stopped at a `source` / `.` (walk.mark_sourced) in some reading — later commands are not in
+        # `commands` / `opaque`: the 0.0.26 guard judges them (backstop.decide)
+        self.sourced = False
 
     def note(self, text):
         if text not in self.notes:

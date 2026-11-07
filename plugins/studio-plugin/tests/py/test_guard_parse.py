@@ -2,7 +2,7 @@
 
 import os
 
-from guard_base import GuardCase
+from guard_base import GuardCase, snapshot_text
 from stdo.guard import limits
 
 
@@ -99,6 +99,92 @@ class Structure(GuardCase):
         self.assertEqual(len(self.by_prog(r, "rm")), 2)
         r = self.ok("git(){ rm x; }; git status")
         self.assertIn("shadowed", [c for c in r.commands if c.prog == "git"][0].flags)
+
+    def test_function_with_several_names(self):  # G1 review 5 M4: `function a b { … }` defines both
+        r = self.ok("function x y { rm a; }; y")
+        self.assertIn("inline-function", self.one(r, "y").flags)
+        r = self.ok("function x y\nrm a\ny")
+        self.assertIn("inline-function", self.one(r, "y").flags)
+
+    def test_reserved_word_after_assignments(self):  # G1 review 5 R1: zsh reads `}`/`fi`/`done` after `X=v`
+        for cmd in ("{ X=v }; rm a", "f(){ X=v }; f; rm a", "if true; then X=v fi; rm a",
+                    "for i in 1; do X=v done; rm a", "{ X=v > /dev/null }; rm a", "if true; then > /dev/null fi; rm a"):
+            r = self.ok(cmd)
+            self.assertEqual(len(self.by_prog(r, "rm")), 1, cmd)
+        r = self.ok("{ rm a } always { rm b }; rm c")  # `always`: both lists run
+        self.assertEqual(len(self.by_prog(r, "rm")), 3)
+
+    def test_review6_forms(self):
+        # conf M-1: the operand after `=~` is a regular expression; balanced `( … )` and `|` are part of it
+        for cmd in ("[[ $b =~ ^feature/(.*)$ ]] && rm a", "[[ $x =~ ^v([0-9]+)$ ]] && rm a",
+                    "[[ ( $x =~ ^a(b|c)$ ) && -n $y ]] && rm a"):
+            self.assertEqual(len(self.by_prog(self.ok(cmd), "rm")), 1, cmd)
+        # M10: zsh's short loop and brace forms are unsupported (refused in a Studio repository)
+        for cmd in ("for i in x; rm a", "for ((i=0;i<1;i++)) rm a", "while (( 1 )) { rm a; break }", "if true { rm a }",
+                    "case x { (x) rm a ;; }", "until false { rm a }", "if true; then :; elif true { rm a }; fi"):
+            r = self.scan(cmd)
+            self.assertEqual((r.status, r.reason.split("@")[0][:18]), ("unparsable", "unsupported:zsh-sh"), cmd)
+        # M3: `0=…` and `1=…` are assignments; M4: an `s` modifier's text keeps its quotes
+        r = self.ok("0=x; 1=y; rm a")
+        self.assertEqual(len(self.by_prog(r, "rm")), 1)
+        r = self.ok("rm $X:s/a/'b c'/ $X:gs/a/b/")
+        self.assertEqual(len(self.by_prog(r, "rm")[0].words), 3)
+        # an alias in `$(…)` is spliced into the text: the words after it are read from the new text
+        self.use_snapshots(snapshot_text(aliases=[("ls", "'ls -G'")]))
+        r = self.ok("for f in $(ls src); do rm $f; done; echo $(ls x) b; rm \"$(ls y)\"c")
+        self.assertEqual(len(self.by_prog(r, "rm")), 2)
+        self.assertEqual([len(c.words) for c in self.by_prog(r, "echo")], [3])
+
+    def test_review7_forms(self):
+        # conf M-1: the pattern after `==` / `=` / `!=` is one word (a glob group with `|` and blanks in it)
+        for cmd in ("[[ a == (a|b) ]]; rm a", "[[ $x != (a | b)* ]] && rm a", "if [[ $x = (#b)(*)-(*) ]]; then rm a; fi",
+                    "[[ a == a && (b == (b|c)) ]] && rm a"):
+            self.assertEqual(len(self.by_prog(self.ok(cmd), "rm")), 1, cmd)
+        for cmd in ("[[ a == (a|b)|c ]]; rm a", "[[ a == (a|b ]]; rm a"):  # zsh's parse errors
+            self.assertEqual(self.scan(cmd).status, "unparsable", cmd)
+        # a lone `;` where a command is expected is an empty command (zsh 5.9); `;;` outside `case` is not
+        for cmd in ("rm a &;", "true; ; rm a", "; rm a", "for i in x; do; rm a; done", "true &&; rm a", "{ ; rm a; }"):
+            self.assertEqual(len(self.by_prog(self.ok(cmd), "rm")), 1, cmd)
+        self.assertEqual(self.scan("true;; rm a").status, "unparsable")
+        # R3: several loop names
+        r = self.ok("for i j in x y; do rm $i $j; done")
+        self.assertEqual(len(self.by_prog(r, "rm")), 1)
+
+    def test_review9_forms(self):
+        # B2: `$'…'` (with `\'`), `${(s:(:)X}` and `$(…)` with quotes are whole units in a case pattern and in parens
+        for cmd in ("case x in ($'\\'') ;; esac; rm a", "case x in (${(s:(:)X}) ;; esac; rm a",
+                    "case x in $'\\'') ;; esac; rm a", "case x in ($(print $'a\\'b'; true\n)) ;; esac; rm a",
+                    "a=($'\\'' b); rm a", "echo \"$(echo \")\")\"; rm a"):
+            self.assertEqual(len(self.by_prog(self.ok(cmd), "rm")), 1, cmd)
+        # s7#11: `$~1`, `$=1`, `$~@` are pattern expansions of positional parameters, not the text `$~1`
+        r = self.ok("ls $~1 $=2 $~@")
+        self.assertEqual([w.value for w in self.by_prog(r, "ls")[0].words[1:]], [None, None, None])
+
+    def test_review8_forms(self):
+        # M1: `time`, `!` and `coproc` with no command; the `;|` branch end; zsh's clobber / stderr redirections
+        for cmd in ("time; rm a", "time | cat; rm a", "time && rm a", "! ; rm a", "coproc ; rm a", "time\nrm a",
+                    "time ! ; rm a", "case x in (x) print;| (y) rm a;; esac", "print a &>|/dev/null; rm a"):
+            self.assertEqual(len(self.by_prog(self.ok(cmd), "rm")), 1, cmd)
+        r = self.ok("print x >>&| f; print x >&| f; print x &>>! f; print x >>& f; print x &>! f; print x >&2")
+        self.assertEqual([(x.op, x.mode) for c in r.commands for x in c.redirs],
+                         [(">>&|", "append"), (">&|", "write"), ("&>>!", "append"), (">>&", "append"), ("&>!", "write"),
+                          (">&", "dup")])
+        # conf m-1, m-2: case patterns as zsh 5.9 reads them (glob groups, an optional opener); the bodies are commands
+        for cmd in ("case $x in (#i)abc) rm a;; esac", "case $f in *.(ts|tsx)) rm a;; esac",
+                    "case $f in (*.(ts|tsx)) rm a;; esac", "case a in (a|b)) rm a;; esac", "case a in ((a|b)) rm a;; esac",
+                    "case 'a b' in (a b) rm a;; esac", "case ab in (a)b) rm a;; esac", "case x in (x|y)|z) rm a;; esac",
+                    "case x in ( x ) rm a;; esac", "case 5 in <1-9>) rm a;; esac", "case a in a | b ) rm a;; esac",
+                    "case $(echo x) in $(echo y)) rm a;; esac", "case a in a) rm a\nesac"):
+            self.assertEqual(len(self.by_prog(self.ok(cmd), "rm")), 1, cmd)
+        self.assertEqual(len(self.by_prog(self.ok("case $(rm a) in $(rm b)) :;; esac"), "rm")), 2)
+        self.assertEqual(self.scan("case x in [x)]) rm a;; esac").status, "unparsable")  # zsh's parse error too
+        # B1: a numeric glob is part of a word; other `<` are redirections
+        r = self.ok("rm -rf studi[o<->] 2<-> {a}<-> <5-> x<-9>y < in")
+        self.assertEqual(r.commands[0].argv, ["rm", "-rf", "studi[o<->]", "2<->", "{a}<->", "<5->", "x<-9>y"])
+        self.assertEqual([(x.op, x.mode) for x in r.commands[0].redirs], [("<", "read")])
+        self.assertTrue(all(w.glob for w in r.commands[0].words[2:]))
+        r = self.ok("cat <in <1-2>")
+        self.assertEqual(r.commands[0].argv, ["cat", "<1-2>"])
 
     def test_multiline_with_comments(self):
         r = self.ok("# top\nrm a  # one\n\n\n# two\nrm b\n")

@@ -85,6 +85,9 @@ def bash_problem(sc):
         return "it runs code the guard cannot read (%s)" % sc.opaque[0].kind
     for c in sc.commands:
         argv = c.argv
+        # review 11 A1/A2: a word that is one of a few known values (`if …; then v=log; else v=diff; fi; git $v`) is
+        # read by the scanner once per value — each reading is a command of its own here and must read only; a
+        # word still without a value is refused
         if not argv or any(a is None for a in argv):
             return "a command word is not a plain value"
         prog = c.prog

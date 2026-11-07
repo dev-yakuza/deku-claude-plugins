@@ -850,12 +850,13 @@ class OtherWriters(JudgeCase):
                     "X='tar -xf a.tar'; $X", "$(echo tar) -xf a.tar", "`echo tar` -xf a.tar",
                     "env -S 'tar -xf a.tar'", "env --split-string='tar -xf a.tar'", "script -q /dev/null tar -xf a.tar",
                     "script -c 'tar -xf a.tar' /dev/null", "script -q /dev/null bash s.sh",
-                    "bash d1.sh"):  # deeper than three levels: not followed, refused
+                    "bash d1.sh",  # deeper than three levels: not followed, refused
+                    "script -q /dev/null"):  # no command: script runs a shell on its input (review 5 conf m-1)
             d = self.bash(cmd)
             self.assertIsNotNone(d, cmd)
             self.assertIn(d.rule, ("G-PROT", "G-OPAQUE", "G-UNKNOWN"), "%s: %s" % (cmd, d.message()))
         for cmd in ("bash ok.sh", ". ./ok.sh", "eval 'ls dist'", "env -S 'tar -xf a.tar -C dist'",
-                    "script -q /dev/null tar -xf a.tar -C dist", "script -q /dev/null", "sh -c 'ls'"):
+                    "script -q /dev/null tar -xf a.tar -C dist", "sh -c 'ls'"):
             self.assertPass(cmd)
 
     def test_w2_shell_strings(self):

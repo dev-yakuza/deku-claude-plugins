@@ -11,7 +11,7 @@ status "unparsable" or "error" with the whole command as one opaque part.
 
 from . import limits, recog, snapshot as snapshot_mod, terms as terms_mod
 from .lex import ParseError
-from .model import NOT_ALIAS, Opaque, Scan
+from .model import NOT_ALIAS, Opaque, Scan, input_key
 from .parse import Parser
 from .scanctx import Oracle, ScanCtx
 from .walk import Walker, cwd_list, union
@@ -38,8 +38,13 @@ def _dedup(cmds, opaques):
     remap = {}
     out = []
     for c in cmds:
+        # review 10: the values a word may have count (a function body walked again where a value is one of several)
+        cv = tuple((tuple(getattr(w, "cand_values", ()) or ()), tuple(getattr(w, "cand_loose", ()) or ()))
+                   for w in c.words)
+        rv = tuple((r.target.value, tuple(getattr(r.target, "cand_values", ()) or ())) if r.target is not None else None
+                   for r in c.redirs)
         k = (c.span, tuple(c.argv), tuple(c.cwds), tuple(c.ctx), tuple(sorted(c.flags)),
-             tuple(r.mode for r in c.redirs), c.parent and remap.get(c.parent, c.parent))
+             tuple(r.mode for r in c.redirs), c.parent and remap.get(c.parent, c.parent), cv, rv)
         if k in seen:
             remap[c.id] = seen[k]
             continue
@@ -53,7 +58,7 @@ def _dedup(cmds, opaques):
     for o in opaques:
         if o.cmd in remap:
             o.cmd = remap[o.cmd]
-        k = (o.kind, o.payload, o.cmd, o.origin, o.path)
+        k = (o.kind, o.payload, o.cmd, o.origin, o.path, input_key(getattr(o, "input", None)))
         if k in oseen:
             continue
         oseen.add(k)
@@ -61,15 +66,36 @@ def _dedup(cmds, opaques):
     return out, oout
 
 
-def scan(command, cwd, env, snapshot=None, snapshot_notes=(), terms=None, fs=None, budget=None, s2v_path=None):
-    """Scan one Bash command string. `cwd` is the hook input's cwd (start of the call)."""
+def _drop_post_source(cmds, opaques):
+    """fix20: what a walk emitted after a `source` in its reading (walk.Walker.emit) is not judged here."""
+    dropped = {c.id for c in cmds if "post-source" in c.flags}
+    if not dropped and not any(getattr(o, "post_source", False) for o in opaques):
+        return cmds, opaques
+    out = [c for c in cmds if c.id not in dropped]
+    for c in out:
+        if c.parent in dropped:
+            c.parent = None
+    return out, [o for o in opaques if not getattr(o, "post_source", False) and o.cmd not in dropped]
+
+
+def scan(command, cwd, env, snapshot=None, snapshot_notes=(), terms=None, fs=None, budget=None, s2v_path=None,
+         options=None, stdin=None, home=None):
+    """Scan one Bash command string. `cwd` is the hook input's cwd (start of the call). `options`: shell options in
+    effect for a nested string (emulate sh -c: posixbuiltins). `stdin`: (fd 0, {fd: description}) a nested string
+    runs with (`eval sh <<< …`, `zsh -c sh <<< …`; review 7 M4). `home`: ("known", value) / ("unknown", text) — the
+    $HOME the string runs with when its command set it (`HOME=<repo> eval '…'`; review 8 M2)."""
     result = Scan(command)
     fs = fs or FS()
     budget = budget or limits.Budget()
     ctx = None
+    if home is not None and home[0] == "known" and home[1] != env.get("HOME"):
+        env = dict(env, HOME=home[1])
     try:
         ctx = ScanCtx(env, fs, snapshot=snapshot, snapshot_notes=snapshot_notes, terms=terms, budget=budget,
                       s2v_path=s2v_path)
+        if options:
+            ctx.options.update(options)
+            ctx.forced_options = dict(options)
         if terms:
             result.raw_hits = terms.find(command)
         if "\x00" in command:
@@ -96,10 +122,30 @@ def scan(command, cwd, env, snapshot=None, snapshot_notes=(), terms=None, fs=Non
             ctx.depth = 0
             ast = Parser(command, ctx).parse_program()
             w = Walker(ctx, result)
-            out = w.walk_list(ast, (cwd,) if cwd else None, _initial_state(w))
+            st0 = _initial_state(w)
+            if home is not None and home[0] == "unknown":
+                from .walk import DYN
+                st0.vars["HOME"] = DYN
+                st0.raw_values["HOME"] = home[1] or ""
+            if cwd:
+                # review 10: zsh -c starts with $OLDPWD at its start folder (zsh 5.9); the environment's may still be
+                # the one in effect if the tool moved the shell first — `~-` and `cd -` are one of the two
+                olds = list(dict.fromkeys(x for x in (cwd, st0.oldpwd) if x))
+                if len(olds) == 1:
+                    st0.oldpwd = olds[0]
+                else:
+                    st0.oldpwd = None
+                    st0.cands["~-"] = (tuple(olds), True)
+            if stdin:
+                st0.fds = dict(stdin[1] or {})
+                if stdin[0] is not None:
+                    st0.fds["0"] = stdin[0]
+            out = w.walk_list(ast, (cwd,) if cwd else None, st0)
             final = union(final, union(out[0], out[1])) if final is not None else None
             cmds.extend(w.cmds)
             opq.extend(w.opaque)
+            result.sourced = result.sourced or w.ever_sourced
+        cmds, opq = _drop_post_source(cmds, opq)
         cmds, opq = _dedup(cmds, opq)
         for o in opq:
             if terms is not None:
@@ -127,8 +173,10 @@ def scan(command, cwd, env, snapshot=None, snapshot_notes=(), terms=None, fs=Non
 
 
 def _initial_state(w):
-    from .walk import State
-    return State(w.ctx)
+    from .walk import State, snapshot_hooks
+    st = State(w.ctx)
+    snapshot_hooks(w.ctx, st)  # review 4 m3: TRAP* functions of the snapshot
+    return st
 
 
 def _fail(result, status, reason, terms):

@@ -283,6 +283,16 @@ class Merging(GuardCase):
         self.use_snapshots(self.text([], options=("cdablevars",)))
         self.assertEqual(self.one(self.ok("cd name; ls"), "ls").cwds, [])
 
+    def test_options_left_out_are_zsh_defaults(self):
+        # review 10 M2: an option the `setopt` list leaves out is at zsh's default; variants that disagree are "maybe"
+        self.use_snapshots(self.text([], options=("interactivecomments",)))
+        self.assertIs(self.snapshot.options["autopushd"], False)
+        self.assertNotIn("autopushd", self.snapshot.option_conflicts)
+        self.use_snapshots(self.text([], options=("autopushd",)), self.text([], options=()))
+        self.assertIn("autopushd", self.snapshot.option_conflicts)
+        from stdo.guard import snapshot as snapmod
+        self.assertIsNone(snapmod.DEFAULT_OPTIONS["autopushd"])  # no snapshot: maybe
+
     def test_exec_by_program_no_alias(self):  # NIT v7
         self.use_snapshots(self.text(DEFAULT_ALIASES))
         os.makedirs(os.path.join(self.root, ".git"))

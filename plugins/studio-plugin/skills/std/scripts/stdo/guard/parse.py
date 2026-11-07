@@ -8,12 +8,16 @@ context's oracle which alternative this parse takes; the scan runs one parse per
 import re
 
 from . import limits
-from .lex import ASSIGN_RE, PLAIN_RE, Lexer, ParseError, Unsupported
+from .lex import ASSIGN_RE, NUMGLOB_RE, PLAIN_RE, Lexer, ParseError, Unsupported, WordNode
 
 RESERVED = {"if", "then", "elif", "else", "fi", "for", "in", "do", "done", "while", "until", "case", "esac",
             "select", "function", "{", "}", "!", "[[", "]]", "time", "coproc", "repeat", "foreach", "end"}
-OPS = ["&&", "||", ";;&", ";;", ";&", "|&", "&>>", "&>", "&|", "&!", ";", "&", "|", "\n", "(", ")"]
-REDIR_OPS = ["<<<", "<<-", "<<", "<>", "<&", ">>|", ">>!", ">>", ">|", ">!", ">&", "&>>", "&>", "<", ">"]
+OPS = ["&&", "||", ";;&", ";;", ";&", ";|", "|&", "&>>", "&>", "&|", "&!", ";", "&", "|", "\n", "(", ")"]
+# zsh's redirection operators, longest first: `|` / `!` after `>` clobber, `&` sends stderr too (`>&|`, `>>&!`, `&>>|`;
+# checked in zsh 5.9, review 8 M1)
+REDIR_OPS = ["<<<", "<<-", "<<", "<>", "<&", ">>&|", ">>&!", ">>&", ">>|", ">>!", ">>", ">&|", ">&!", ">|", ">!", ">&",
+             "&>>|", "&>>!", "&>>", "&>|", "&>!", "&>", "<", ">"]
+CASE_ENDS = (";;", ";&", ";|", ";;&")
 TYPESET = {"export", "typeset", "declare", "local", "readonly", "integer", "float"}  # zsh: arguments are assignments
 CLOSERS = {"then", "elif", "else", "fi", "do", "done", "esac", "}"}
 
@@ -114,7 +118,9 @@ class Parser(Lexer):
             elif c == "'":
                 j = self.buf.find("'", self.pos + 1)
                 self.pos = len(self.buf) if j < 0 else j + 1
-            elif c == "$" and self.at(1) == "(" and self.at(2) != "(":
+            elif c == "$" and self.at(1) == "(" and (self.at(2) != "(" or self._arith_end(self.pos + 3) is None):
+                # review 10 P1: a `$((` with no matching `))` is `$( (`, a command substitution of a subshell, as zsh
+                # reads it (and as the lexer does outside ${…})
                 self.pos += 2
                 out.append(self.parse_list(stop_ops=(")",)))
                 self.expect(")")
@@ -153,11 +159,15 @@ class Parser(Lexer):
         for r in pend:
             self.read_heredoc_body(r)
 
-    def skip_newlines(self):
+    def skip_newlines(self, semi=True):
+        """Newlines, and a lone `;` where a command is expected: zsh reads it as an empty command (`a &; b`,
+        `do; b`, `a &&; b`, `; a`; checked in zsh 5.9, review 7)."""
         while True:
             self.skip_blanks()
             if self.at() == "\n":
                 self.newline()
+            elif semi and self.at() == ";" and self.at(1) not in (";", "&", "|"):
+                self.pos += 1
             else:
                 return
 
@@ -228,7 +238,7 @@ class Parser(Lexer):
             op = self.peek_op()
             if op is not None and op in stop_ops:
                 break
-            if op in (")", ";;", ";&", ";;&"):
+            if op in (")",) + CASE_ENDS:
                 if op in stop_ops:
                     break
                 raise ParseError("syntax:unexpected-%s" % op, self.orig(self.pos))
@@ -252,7 +262,7 @@ class Parser(Lexer):
                 self.skip_blanks()
                 op = self.peek_op()
                 w = self.peek_plain()
-                if self.pos < len(self.buf) and not (op in stop_ops or op in (")", ";;", ";&", ";;&")
+                if self.pos < len(self.buf) and not (op in stop_ops or op in (")",) + CASE_ENDS
                                                      or (w in stop_words) or (w == "}" and self.group_depth)):
                     raise ParseError("syntax:unexpected-token", self.orig(self.pos))
                 break
@@ -289,7 +299,11 @@ class Parser(Lexer):
                     self.skip_blanks()
             else:
                 break
-        cmds = [self.parse_command()]
+        if (timed or neg) and self.empty_here():
+            # `time;`, `time | cat`, `! ;`, `time && …`: zsh runs an empty pipeline (status 0; negated 1; review 8 M1)
+            cmds = [Compound("group", self.orig(self.pos), body=ListNode([]))]
+        else:
+            cmds = [self.parse_command()]
         while True:
             self.skip_blanks()
             op = self.peek_op()
@@ -299,6 +313,12 @@ class Parser(Lexer):
             self.skip_newlines()
             cmds.append(self.parse_command())
         return Pipeline(cmds, neg, timed)
+
+    def empty_here(self):
+        """No command follows (an operator, a newline, `)` or the end): `time`, `!` and `coproc` alone."""
+        self.skip_blanks()
+        c = self.at()
+        return c == "" or c in "\n;|)" or (c == "&" and self.at(1) != ">")
 
     def parse_command(self):
         self.ctx.depth_enter(self.orig(self.pos))
@@ -363,6 +383,8 @@ class Parser(Lexer):
                 pe = self.peek_plain_ex()
                 w = pe[0] if pe else None
                 if w is not None and not words:
+                    if (assigns or redirs) and w in CLOSERS:
+                        break  # `{ X=v }`, `then X=v fi`: zsh reads a reserved word after assignments (review 5 R1)
                     if not assigns and not redirs and w in RESERVED and w not in ("}", "]]", "in", "end"):
                         if w in CLOSERS:
                             break
@@ -387,7 +409,8 @@ class Parser(Lexer):
                         end = self._match_paren(self.pos)
                         raw = self.buf[a0:end]
                         self.pos = end
-                        value = WordNode([("dyn", "array", raw, False)], raw, a0, end)
+                        subs = self.sub_parser(raw, a0).extract_subs() if ("$(" in raw or "`" in raw) else []
+                        value = WordNode([("dyn", "array", raw, False, subs)], raw, a0, end)
                     elif self.at() not in " \t\n;&|)":
                         value = self.read_word(assign=True)
                     else:
@@ -497,8 +520,8 @@ class Parser(Lexer):
                 q = p + len(m.group(0))
             else:
                 q = p
-        if buf.startswith("<(", q) or buf.startswith(">(", q):
-            return None
+        if buf.startswith("<(", q) or buf.startswith(">(", q) or NUMGLOB_RE.match(buf, q):
+            return None  # `2<->`, `{a}<->`, `<->`: a word with a numeric glob (review 8 B1)
         op = None
         for o in REDIR_OPS:
             if buf.startswith(o, q):
@@ -545,32 +568,44 @@ class Parser(Lexer):
             self.skip_newlines()
             if not self.eat_plain("}"):
                 raise ParseError("syntax:expected-}", self.orig(self.pos))
+            self.skip_blanks()
+            if self.peek_plain() == "always":
+                # `{ try } always { always }`: both lists run, the second whatever the first did (review 5 R1)
+                self.pos += len("always")
+                self.skip_blanks()
+                if self.peek_plain() != "{":
+                    raise ParseError("syntax:expected-{", self.orig(self.pos))
+                self.pos += 1
+                self.group_depth += 1
+                more = self.parse_list(stop_words=("}",))
+                self.group_depth -= 1
+                self.skip_newlines()
+                if not self.eat_plain("}"):
+                    raise ParseError("syntax:expected-}", self.orig(self.pos))
+                body = ListNode(body.items + more.items)
             return self.compound_redirs(Compound("group", ostart, body=body))
         if w == "if":
             clauses = []
-            cond = self.parse_list(stop_words=("then",))
-            self.need("then")
+            cond = self.short_form(w, lambda: self.parse_list(stop_words=("then",)), "then")
             body = self.parse_list(stop_words=("elif", "else", "fi"))
             clauses.append((cond, body))
             else_body = None
             while True:
                 self.skip_newlines()
                 if self.eat_plain("elif"):
-                    cond = self.parse_list(stop_words=("then",))
-                    self.need("then")
+                    cond = self.short_form(w, lambda: self.parse_list(stop_words=("then",)), "then")
                     body = self.parse_list(stop_words=("elif", "else", "fi"))
                     clauses.append((cond, body))
                     continue
                 if self.eat_plain("else"):
                     else_body = self.parse_list(stop_words=("fi",))
-                    self.need("fi")
+                    self.short_form(w, lambda: None, "fi")
                     break
-                self.need("fi")
+                self.short_form(w, lambda: None, "fi")
                 break
             return self.compound_redirs(Compound("if", ostart, clauses=clauses, else_body=else_body))
         if w in ("while", "until"):
-            cond = self.parse_list(stop_words=("do",))
-            self.need("do")
+            cond = self.short_form(w, lambda: self.parse_list(stop_words=("do",)), "do")
             body = self.parse_list(stop_words=("done",))
             self.need("done")
             return self.compound_redirs(Compound("while", ostart, until=(w == "until"), cond=cond, body=body))
@@ -583,14 +618,26 @@ class Parser(Lexer):
                 raw = self.buf[self.pos + 2:end - 2]
                 self.pos = end
                 var, items = None, None
+                names = []
                 subs = self.subs_in(raw)
             else:
                 var = self.read_word()
                 if var is None or not var.plain:
                     raise ParseError("syntax:for-variable", self.orig(self.pos))
                 var = var.raw
+                names = [var]
                 subs = []
                 items = None
+                # `for i j in x y; do …; done`: several names take the items in turn (review 7 R3)
+                while True:
+                    self.skip_blanks()
+                    save = self.pos
+                    more = self.read_word() if self.at() not in ("(", ";", "\n", "") else None
+                    if more is None or not more.plain or more.raw in ("in", "do") or \
+                            not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", more.raw):
+                        self.pos = save
+                        break
+                    names.append(more.raw)
                 self.skip_blanks()
                 if self.at() == "(":
                     raise Unsupported("unsupported:zsh-for-short", self.orig(self.pos))
@@ -611,44 +658,35 @@ class Parser(Lexer):
             self.skip_newlines()
             if self.peek_plain() == "{":
                 raise Unsupported("unsupported:zsh-for-brace", self.orig(self.pos))
-            self.need("do")
+            self.short_form(w, lambda: None, "do")  # `for i in x; cmd`, `for ((…)) cmd` (review 6 M10)
             body = self.parse_list(stop_words=("done",))
             self.need("done")
-            return self.compound_redirs(Compound("for", ostart, var=var, items=items, body=body, subs=subs))
+            node = Compound("for", ostart, var=var, items=items, body=body, subs=subs)
+            node.vars = names if var is not None else []
+            return self.compound_redirs(node)
         if w == "case":
             self.skip_blanks()
             word = self.read_word()
             if word is None:
                 raise ParseError("syntax:case-word", self.orig(self.pos))
             self.skip_newlines()
-            self.need("in")
-            arms = []
+            self.short_form(w, lambda: None, "in")  # `case x { … }` (review 6 M10)
+            arms, ends = [], []
             while True:
                 self.skip_newlines()
                 if self.eat_plain("esac"):
                     break
-                if self.at() == "(":
-                    self.pos += 1
-                pats = []
-                while True:
-                    self.skip_blanks()
-                    pw = self.read_word()
-                    if pw is None:
-                        raise ParseError("syntax:case-pattern", self.orig(self.pos))
-                    pats.append(pw)
-                    self.skip_blanks()
-                    if self.at() == "|":
-                        self.pos += 1
-                        continue
-                    break
-                self.expect(")")
-                body = self.parse_list(stop_ops=(";;", ";&", ";;&"), stop_words=("esac",))
+                pats = self.case_patterns()
+                body = self.parse_list(stop_ops=CASE_ENDS, stop_words=("esac",))
                 arms.append((pats, body))
                 self.skip_blanks()
                 op = self.peek_op()
-                if op in (";;", ";&", ";;&"):
+                if op in CASE_ENDS:
                     self.pos += len(op)
-            return self.compound_redirs(Compound("case", ostart, word=word, arms=arms))
+                ends.append(op if op in CASE_ENDS else ";;")
+            node = Compound("case", ostart, word=word, arms=arms)
+            node.ends = ends  # `;&` / `;|`: the next arm's body may run after this one (review 8 M1)
+            return self.compound_redirs(node)
         if w == "function":
             self.skip_blanks()
             if self.at() in ("{", "(") and (self.at() == "(" or self.peek_plain() == "{"):
@@ -656,36 +694,132 @@ class Parser(Lexer):
             name = self.read_word()
             if name is None:
                 raise ParseError("syntax:function-name", self.orig(self.pos))
-            return self.parse_funcdef(name.raw, start, after_parens=False)
+            # `function a b { … }` defines every name with the same body (review 5 M4)
+            names = [name.raw]
+            while True:
+                self.skip_blanks()
+                if self.at() in ("{", "(", "\n", ";", "") or self.peek_plain() == "{" or self.peek_op():
+                    break
+                more = self.read_word()
+                if more is None:
+                    break
+                names.append(more.raw)
+            fd = self.parse_funcdef(name.raw, start, after_parens=False)
+            fd.names = names
+            return fd
         if w == "[[":
             words = []
             while True:
-                self.skip_newlines()
+                self.skip_newlines(semi=False)  # a `;` in `[[ ]]` is zsh's parse error
                 if self.peek_plain() == "]]":
                     self.pos += 2
                     break
                 if self.pos >= len(self.buf):
                     raise ParseError("syntax:expected-]]", self.orig(self.pos))
                 op = None
+                last = words[-1].raw if words and isinstance(words[-1], WordNode) else None
+                # review 7 conf M-1: the pattern after `==` / `=` / `!=` is one word, glob groups included
+                regex = True if last == "=~" else "pattern" if last in ("==", "=", "!=") else False
                 for o in ("&&", "||", "<", ">", "(", ")", "!"):
-                    if self.startswith(o):
+                    if self.startswith(o) and not (regex and o in "()") and \
+                            not (o == "<" and NUMGLOB_RE.match(self.buf, self.pos)):
                         op = o
                         break
                 if op:
                     self.pos += len(op)
                     words.append(op)
                     continue
-                wd = self.read_word()
+                wd = self.read_word(regex=regex)  # `=~ ^v([0-9]+)$`: a regular expression (review 6 conf M-1)
                 if wd is None:
                     raise ParseError("syntax:dbracket", self.orig(self.pos))
                 words.append(wd)
             return self.compound_redirs(Compound("dbracket", ostart, words=words))
         if w == "coproc":
-            inner = self.parse_command()
+            inner = Compound("group", ostart, body=ListNode([])) if self.empty_here() else self.parse_command()
             return Compound("coproc", ostart, cmd=inner)
         if w in ("repeat", "foreach"):
             raise Unsupported("unsupported:zsh-%s" % w, ostart)
         raise ParseError("syntax:unexpected-%s" % w, ostart)
+
+    def case_patterns(self):
+        """The patterns of one case arm, read as zsh 5.9 reads them (review 8 conf m-1/m-2): patterns, not file names,
+        so glob groups are part of them (`*.(ts|tsx))`, `(#i)abc)`, `(a|b))`, `(x|y)|z)`). A leading `(` is the
+        optional opener when its group is followed by a blank, `;`, a newline or the end (`(x) cmd`, `( x )`,
+        `((a|b)) cmd`); joined to more pattern text, a `)` or a `|` it is a group of the pattern. The list ends at the
+        first unbalanced `)`. Each alternative is a word (its expansions run)."""
+        self.skip_blanks()
+        buf, p = self.buf, self.pos
+        opener = False
+        if self.at() == "(":
+            e = self._match_paren(p)
+            j = e
+            while j < len(buf) and buf[j] in " \t":
+                j += 1
+            nxt = buf[j:j + 1]
+            opener = nxt in ("", "\n", ";", "&") or (j > e and nxt not in (")", "|"))
+        if opener:
+            s, end = p + 1, e - 1
+        else:
+            s, end = p, self._case_pattern_end(p)
+        text = buf[s:end]
+        self.pos = end + 1
+        sub = self.sub_parser(text, s)
+        pats = []
+        while True:
+            sub.skip_blanks()
+            while sub.at() == "\n":
+                sub.pos += 1
+                sub.skip_blanks()
+            if sub.pos >= len(sub.buf):
+                break
+            if sub.at() == "|" and pats:
+                sub.pos += 1
+                continue
+            pw = sub.read_word(regex="pattern")
+            if pw is None:
+                raise ParseError("syntax:case-pattern", self.orig(s + sub.pos))
+            pats.append(pw)
+        if not pats:
+            raise ParseError("syntax:case-pattern", self.orig(p))
+        return pats
+
+    def _case_pattern_end(self, i):
+        """Index of the `)` that ends a case pattern list starting at i (groups balanced, quotes respected)."""
+        depth, buf, n = 0, self.buf, len(self.buf)
+        while i < n:
+            c = buf[i]
+            if c in "\\'\"`$":
+                try:
+                    j = self.skip_unit(i)  # review 9 B2: $'…', ${(s:(:)X}, $(…) as whole units
+                except ParseError as e:
+                    raise ParseError(e.code if hasattr(e, "code") else "unterminated-quote", self.orig(i))
+                if j is not None:
+                    i = j
+                    continue
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                if depth == 0:
+                    return i
+                depth -= 1
+            elif depth == 0 and c in ";&\n":
+                raise ParseError("syntax:case-pattern", self.orig(i))
+            i += 1
+        raise ParseError("syntax:case-pattern", self.orig(i))
+
+    def short_form(self, w, head, word):
+        """Read a compound command's head and its reserved word (`then`, `do`, `in`, `fi`). When they are not
+        there, zsh may read a short form (SHORT_LOOPS, `{ … }` bodies: `for i in x; cmd`, `while (( 1 )) { … }`,
+        `if [[ … ]] { … }`, `case x { … }`) the guard does not read: unsupported, so a Studio repository refuses it
+        (G1 §1.8 M6, review 6 M10)."""
+        try:
+            out = head()
+            self.need(word)
+        except Unsupported:
+            raise
+        except ParseError as e:
+            raise Unsupported("unsupported:zsh-short-%s" % w, e.pos)
+        return out
 
     def need(self, word):
         self.skip_newlines()
@@ -704,4 +838,4 @@ class Parser(Lexer):
         if not isinstance(body, Compound):
             if isinstance(body, Simple):
                 pass  # zsh allows a simple command body: name() cmd
-        return Compound("funcdef", self.orig(start), name=name, body=body)
+        return Compound("funcdef", self.orig(start), name=name, names=[name], body=body)

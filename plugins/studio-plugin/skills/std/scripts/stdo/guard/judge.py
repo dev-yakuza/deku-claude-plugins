@@ -3,6 +3,7 @@
 Two outcomes only: deny, or no decision (the normal permission flow). Never allow, ask or defer.
 """
 
+import copy
 import fnmatch
 import json
 import os
@@ -11,11 +12,13 @@ import stat
 
 from .. import paths, s2vcall
 from ..state import commands as state_commands
-from . import commitrule, gitprobe, hookfiles, limits, messages, protect, ranlog, recog, sedshape
+from . import cmdopts, commitrule, gitprobe, hookfiles, limits, messages, protect, ranlog, recog, runners, sedshape
 from . import scan as scan_command
 from . import load_snapshot
 from .messages import Deny
+from .model import Word, input_key as model_input_key
 from .repos import LOCK_VARS, Repos, has_exclude_block, terms_for
+from .snapshot import BASH_TOOL_POSTLUDE, DEFAULT_OPTIONS as SNAP_DEFAULT_OPTIONS
 from .where import FS, Where, which as where_which
 
 PLUGIN_SCRIPTS = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
@@ -73,6 +76,29 @@ class Context(object):
         projects = os.path.join(cfg, "projects")  # transcripts: the evidence of a person's answers (M0d-2)
         self.out_items.append((self._real(projects), "transcripts"))
         self.current = None  # the command being judged (its alias sources go into messages)
+        self.commit_memo = {}  # review 17 (C17-4): the commit check of one command's readings (judge_git)
+        # review 19 (C19-2): push / commit checks of commands in nested strings, shared by identical ones (_nested_key)
+        self.nested_memo = {}
+        # fix20: a scan of this call stopped at a `source` / `.` (judge._scan) — the rest is the 0.0.26 guard's alone
+        self.sourced = False
+
+    @property
+    def current(self):
+        return self.__dict__.get("_current")
+
+    @current.setter
+    def current(self, c):
+        self._current = c
+        # review 17 (B17-3): git probes are shared only by the readings of one command (the same text in the same
+        # scan: walk's lost-folder / HEAD's / choice readings), not by later commands of the call
+        # (review 18 B18-2: a nested string's commands carry their own scan — the same text run by another command is
+        # another command)
+        sp = tuple(getattr(c, "span", None) or ()) if c is not None else ()
+        scope = None if not sp or sp == (0, 0) else (getattr(c, "scan_key", None) or id(self.scan), sp, c.prog)
+        try:
+            self.probe.scope = scope
+        except AttributeError:
+            pass
 
     def _real(self, p):
         anc, tail = p, ""
@@ -90,6 +116,9 @@ class Context(object):
             for s in messages.alias_sources(self.current):
                 if s not in src:
                     src.insert(0, s)
+        if "lost-folder" in (getattr(self.current, "ctx", None) or ()) and \
+                any(d.rule == rule and d.text == text for d in self.denies):
+            return  # the same refusal from another reading of one command (review 10: each folder it may run in)
         self.denies.append(Deny(rule, text, src, suffix=suffix))
 
     def touch(self, ri):
@@ -175,8 +204,18 @@ def candidates(cmd):
                     vals.append(v)
         if w.alt and w.alt != "\0":
             vals.append(w.alt)
+        vals.extend(v for v in list(getattr(w, "cand_values", ())) + list(getattr(w, "cand_loose", ()))
+                    if v not in vals)  # review 9
         out.append((w, vals))
     return out
+
+
+def run_folders(cmd):
+    """The folders a command's relative paths resolve against: its run folders (env -C, sudo -D, git -C, …) or its
+    own; [] when the guard cannot tell them (a dynamic or overflowed `cd`, `env -C $D`: G1 §1.7a)."""
+    if "run-unknown" in cmd.flags:
+        return []
+    return list(cmd.run_cwds or cmd.cwds or [])
 
 
 def resolve_all(ctx, cmd, value):
@@ -185,7 +224,7 @@ def resolve_all(ctx, cmd, value):
     if os.path.isabs(value):
         cwds = [None]
     else:
-        cwds = cmd.run_cwds or cmd.cwds or []
+        cwds = run_folders(cmd)
         if not cwds:
             return [(None, None, None)]
     for c in cwds:
@@ -209,7 +248,7 @@ def looks_like_path(value, cmd, ctx):
         return False
     if "/" in value or value in (".", ".."):
         return True
-    for c in (cmd.cwds or []):
+    for c in run_folders(cmd):  # where the program runs (env -C, sudo -D: M2)
         if ctx.fs.exists(os.path.join(c, value)):
             return True
     return False
@@ -217,28 +256,19 @@ def looks_like_path(value, cmd, ctx):
 
 # ---- per-command checks ----
 
-RUNNERS = {"npx": 1, "bunx": 1, "pnpx": 1}
-RUNNER_SUB = {"pnpm": ("dlx", "exec"), "yarn": ("dlx", "exec"), "npm": ("exec", "x"), "bun": ("x",)}
-
-
 def effective(cmd):
-    """(program, argument Words) with package runners unwrapped (`npx rimraf x` → rimraf, [x])."""
+    """(program, argument Words) with package runners unwrapped (`npx rimraf x` → rimraf, [x]). The options are read
+    by runners.package (G1 §1.3); a shell string (`npx -c '…'`) or a refused runner is the runner itself."""
     prog = cmd.prog or ""
     words = cmd.words[1:]
-    rest = None
-    if prog in RUNNERS:
-        rest = words
-    elif prog in RUNNER_SUB and words and words[0].value in RUNNER_SUB[prog]:
-        rest = words[1:]
-    if rest is None:
+    p, end = runners.package(cmd.prog_key, cmd.words, cmd.env.set)
+    if p is None or p.outcome != "unwrap" or "runner-unread" in cmd.flags:
         return prog, words
-    i = 0
-    while i < len(rest) and rest[i].value is not None and rest[i].value.startswith("-"):
-        i += 2 if rest[i].value in ("-p", "--package") else 1
-    if i < len(rest) and rest[i].value is not None:
-        name = rest[i].value.split("@")[0] if not rest[i].value.startswith("@") else rest[i].value
-        return os.path.basename(name), rest[i + 1:]
-    return prog, words
+    w = cmd.words[end]
+    if w.value is None:
+        return prog, words
+    name = w.value.split("@")[0] if not w.value.startswith("@") else w.value
+    return os.path.basename(name), cmd.words[end + 1:]
 
 
 FIND_NAME_TESTS = ("-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-lname")
@@ -289,7 +319,25 @@ def find_may_hit(argv, studio_infos):
     return False
 
 
+ARGV_WHY = ("%s has words that may expand to several or none (an unquoted $@, ${=X}, ${~X}, an array, or more than "
+            "three words that may be empty) — in a Studio repository the guard cannot tell its arguments; write them "
+            "literally or quote the expansions, one step per call.")
+
+
+ARGV_CHOICES_WHY = ("%s has words that are each one of several known values, with more than %d combinations of them "
+                    "— the guard judges at most %d; write the values literally or split the command, one step per "
+                    "call.")
+
+
 def check_paths(ctx, cmd, studio_infos):
+    if studio_infos and "argv-unknown" in cmd.flags:
+        if "argv-choices" in cmd.flags:  # review 12 conf m-3
+            from .walk import MAX_CHOICE_READINGS
+            ctx.deny("G-OPAQUE", ARGV_CHOICES_WHY % (cmd.prog or "the command", MAX_CHOICE_READINGS,
+                                                     MAX_CHOICE_READINGS))
+        else:
+            ctx.deny("G-OPAQUE", ARGV_WHY % (cmd.prog or "the command"))  # G1 §3
+        return
     prog, eff_words = effective(cmd)
     if cmd.lock is not None or studio_script(ctx, cmd):
         writes_ok = True
@@ -327,17 +375,29 @@ def check_paths(ctx, cmd, studio_infos):
         if r.target is None or r.mode not in ("write", "append", "rw"):
             continue
         check_target(ctx, cmd, r.target, r.target.value, "write", studio_infos, s2v=False)
+    # G1 §1.6: the runners' own file arguments (time -o, flock LOCK, script FILE, sudo -e, watch -s, …); reads only
+    # through check_out_of_repo
+    for wc, files in runner_files(cmd):
+        for w, op in files:
+            if op != "read":
+                check_target(ctx, wc, w, w.value, op, studio_infos, s2v=False)
     if is_sed(cmd) and check_sed(ctx, cmd, studio_infos):
         return  # its shape decided (fix-0025 §1); an unchecked sed outside a Studio repository is a writer below
     if cmd.prog_key == "parallel" and studio_infos and parallel_runs_sed(cmd):
         ctx.deny("G-OPAQUE", SED_WHY % "sed run by parallel", suffix=messages.NONSTOP)
         return
+    if prog in protect.READ_WRITERS and not writes_ok:
+        # G1 §1.11: READ_ALLOW programs that can write a file or run a program
+        for w, v in read_writer_targets(ctx, cmd, prog, eff_words, studio_infos):
+            check_target(ctx, cmd, w, v, "write", studio_infos)
     if writes_ok or role in ("read", "git"):
         if role == "git":
             check_git(ctx, cmd, studio_infos)
         return
     recursive = any(a and (a in ("-r", "-R", "--recursive") or re.match(r"^-[a-zA-Z]*[rR]", a)) for a in argv[1:])
-    words = eff_words
+    # G1 §2 (B1): a `**` glob zsh runs with its existing matches is replaced by them, and the operand roles are read
+    # on that argv (`mv a.txt **/work/`: every match but the last is a source)
+    words = listed_globs(ctx, cmd, eff_words)
     targets = []  # (word, value, op)
     if role in protect.DELETE_PROGS - {"rmdir"}:
         for w in words:
@@ -356,13 +416,17 @@ def check_paths(ctx, cmd, studio_infos):
         ops = [w for w in words if w.value is None or not w.value.startswith("-")]
         for w in ops[:-1]:
             targets.append((w, w.value, "delete"))
+            targets += into_targets(cmd, w, ops[-1])
         if ops:
             targets.append((ops[-1], ops[-1].value, "write"))
     elif role == "rsync":
         ops = [w for w in words if w.value is None or not w.value.startswith("-")]
         delete = any(a and a.startswith("--delete") for a in argv[1:])
+        # --remove-sent-files is its older name (review 2, M10)
+        moved = any(a and cmdopts.long_option(a, ("--remove-source-files", "--remove-sent-files")) for a in argv[1:])
         for w in ops[:-1]:
-            targets.append((w, w.value, "read"))
+            targets.append((w, w.value, "delete" if moved else "read"))  # --remove-source-files deletes the sources
+            targets += into_targets(cmd, w, ops[-1])
         if ops:
             targets.append((ops[-1], ops[-1].value, "delete" if delete else "write"))
         for w, vals in candidates(cmd):
@@ -381,8 +445,8 @@ def check_paths(ctx, cmd, studio_infos):
             for w in ops:
                 if w is tdir or w.value == dval:
                     continue
-                targets.append((w, os.path.join(dval, os.path.basename(w.value)) if (w.value and dval) else None,
-                                "write"))
+                tv = os.path.join(dval, os.path.basename(w.value)) if (w.value and dval) else None
+                targets.append((as_glob(tdir, tv) or w, tv, "write"))  # a wildcard folder keeps its reading (B-2)
         elif len(ops) >= 2:
             dest = ops[-1]
             if prog == "ln" or (prog in ("cp", "gcp") and hard_link_copy(argv)):
@@ -393,11 +457,13 @@ def check_paths(ctx, cmd, studio_infos):
             for w in ops[:-1]:
                 into = not nt and dest.value is not None and any(ctx.fs.isdir(os.path.join(c, dest.value)) if not
                                                       os.path.isabs(dest.value) else ctx.fs.isdir(dest.value)
-                                                      for c in (cmd.cwds or [None]) if c or os.path.isabs(dest.value))
+                                                      for c in (run_folders(cmd) or [None]) if c or os.path.isabs(dest.value))
                 if into and w.value is not None:
                     targets.append((dest, os.path.join(dest.value, os.path.basename(w.value.rstrip("/"))), "write"))
                 else:
                     targets.append((dest, dest.value, "write"))
+                    if not nt:
+                        targets += into_targets(cmd, w, dest)
     elif prog in EXTRACT_PROGS:
         pass  # judged by check_bulk
     elif role == "find-print":
@@ -406,16 +472,20 @@ def check_paths(ctx, cmd, studio_infos):
                 targets.append((words[i + 1], words[i + 1].value, "write"))
     elif role == "find-write":
         for w in words:
-            if w.value is None or w.value.startswith("-") or w.value in ("(", "!"):
+            if w.value is None:
+                targets.append((w, None, "delete"))  # a start the guard cannot read (or nothing): the next words
+                continue                              # may still be starts (M14)
+            if w.value.startswith("-") or w.value in ("(", "!"):
                 break
             targets.append((w, w.value, "delete"))
     else:
+        lost = studio_infos and not run_folders(cmd)  # an unknown folder: any word may be a path (§1.7a)
         for w, vals in candidates(cmd):
             if w.value is None:
                 targets.append((w, None, "write"))
                 continue
             for v in vals:
-                if looks_like_path(v, cmd, ctx) or (w.value != v):
+                if looks_like_path(v, cmd, ctx) or (w.value != v) or (lost and not v.startswith("-")):
                     targets.append((w, v, "write"))
     for w, v, op in targets:
         if op == "read":
@@ -430,6 +500,36 @@ def check_paths(ctx, cmd, studio_infos):
                 v = w.value.split("=", 1)[1]
                 if v and looks_like_path(v, cmd, ctx):
                     check_target(ctx, cmd, w, v, "write", studio_infos, s2v=is_s2v)
+
+
+def as_glob(w, text):
+    """A Word for `text` (a part of `w`, or a path built on it) that keeps w's wildcard reading, or None when `w` has
+    no wildcard (fail closed: every `*?[` of the text counts, quoted or not)."""
+    chars = "*?[<^~#" if getattr(w, "extglob", False) else "*?[<"
+    if w is None or not w.glob or not text or not any(ch in text for ch in chars):
+        return None
+    k = min(text.find(ch) for ch in chars if ch in text)
+    nw = Word(text, text, glob=True, glob_base=text[:text.rfind("/", 0, k) + 1])
+    nw.extglob = getattr(w, "extglob", False)
+    return nw
+
+
+def into_targets(cmd, src, dest):
+    """B-2 (review 2): a destination that is a wildcard, or lies in a folder the guard cannot tell, may be a folder
+    the source is copied, moved or linked into — `<dest>/<source name>` is a target too (the listing is not used:
+    the file may not exist yet)."""
+    if src.value is None or dest.value is None or dest is src:
+        return []
+    unknown = not os.path.isabs(dest.value) and not run_folders(cmd)
+    if not (dest.glob or unknown):
+        return []
+    tv = os.path.join(dest.value, os.path.basename(src.value.rstrip("/")) or ".")
+    w = as_glob(dest, tv)
+    if w is None:
+        w = Word.lit(tv)
+        if getattr(dest, "wild", None) is not None:  # the destination's quoting (review 4 conf M-2)
+            w.wild = frozenset(set(dest.wild) | set(range(len(dest.value), len(tv))))
+    return [(w, tv, "write")]
 
 
 # ---------- writers whose file list is not known in advance (m1-plan §3.1 reviews V1/W1–W4) ----------
@@ -511,16 +611,19 @@ def extract_info(prog, argv, words):
     return ext, dirs, w1
 
 
-def weak_extractor(prog, argv):
+def weak_extractor(cmd, prog, argv):
     """A reason when this is an extractor whose behaviour Studio did not measure (refused in Studio repositories)."""
     a = [x for x in argv[1:]]
+    boxes = [w.name for w in cmd.wrappers if w.name in ("busybox", "toybox")]
+    if boxes and (prog in BUSYBOX_EXTRACT or cmd.prog is None):  # G1 §1.5: an applet run through busybox/toybox
+        return "%s %s" % (boxes[-1], prog or "?")
     if prog in WEAK_7Z:
         w = next((x for x in a if x is not None and not x.startswith("-")), None)
         if w is None or w.lower() in ("x", "e"):
             return "%s extraction" % prog
     elif prog == "bsdcpio":
         return "bsdcpio"
-    elif prog == "busybox":
+    elif recog.key(prog or "") in ("busybox", "toybox") or recog.key(prog or "").startswith(("busybox.", "busybox-")):
         if a and (a[0] is None or a[0] in BUSYBOX_EXTRACT):
             return "busybox %s" % (a[0] or "?")
     elif prog == "jar":
@@ -559,11 +662,15 @@ def recursive_copy(prog, argv):
     return None
 
 
-def studio_area(ctx, cmd, value, studio_infos):
+def studio_area(ctx, cmd, value, studio_infos, word=None):
     """None, or why the folder `value` is (or holds) Studio's folders: the repository root, .claude/**, <sr>/**,
-    .git/**, the git common dir, or a folder above a Studio repository."""
+    .git/**, the git common dir, or a folder above a Studio repository. `word`: the Word `value` comes from (a
+    wildcard folder is matched as a pattern: review 2, B-2 and M11)."""
     if value is None:
         return "a folder the guard cannot read" if studio_infos else None
+    gw = word if (word is not None and word.glob and word.value == value) else as_glob(word, value)
+    if gw is not None:
+        return glob_area(ctx, cmd, gw, studio_infos)
     for a, real, ri in resolve_all(ctx, cmd, value):
         if a is None:
             if studio_infos:
@@ -593,6 +700,48 @@ def studio_area(ctx, cmd, value, studio_infos):
     return None
 
 
+def glob_area(ctx, cmd, word, studio_infos):
+    """studio_area for a wildcard folder: why some folder it may match is (or holds) Studio's folders, or None.
+    The pattern is matched from its literal base, in or above each Studio repository (fail closed: `[`, groups and
+    `**` may match anything)."""
+    value = word.value
+    segs, _links = glob_segments(word)
+    base_val = word.glob_base or ""
+    if ".." in segs:
+        segs = ["**"] + segs[len(segs) - segs[::-1].index(".."):]
+        base_val = "/" if os.path.isabs(base_val) else ""
+    # a folder word (tar -C, unzip -d, a copy's destination) is relative to where the program starts
+    start = getattr(cmd, "start_folders", None)
+    bases = [None] if os.path.isabs(base_val) else (list(start) if start is not None else run_folders(cmd))
+    if not bases:
+        return value + " (a wildcard in a folder the guard cannot tell)" if studio_infos else None
+    ext = getattr(word, "extglob", False)
+    for c in bases:
+        r = ctx.where.resolve(base_val or ".", c)
+        if r is None or r.abs is None:
+            return value
+        base_real = os.path.realpath(r.abs) if ctx.fs.exists(r.abs) else (r.real or r.abs)
+        for si in studio_infos:
+            wt = os.path.realpath(si.worktree)
+            fold = ctx.where.case_insensitive(wt)
+            inside = protect.rel_parts(base_real, wt, fold)
+            if inside is not None:
+                prefix, gparts = [], inside + segs
+            elif wt.startswith(base_real.rstrip("/") + "/"):
+                prefix, gparts = [x for x in os.path.relpath(wt, base_real).split("/") if x], segs
+            else:
+                continue
+            sr = [x for x in si.studio_root.strip("/").split("/") if x]
+            for area in ([".claude", "**"], sr + ["**"], [".git", "**"]):
+                if protect.glob_may_match(gparts, prefix + area, fold, prefix=True, extglob=ext):
+                    return value + " (a wildcard that may match Studio's folders)"
+            for root in (prefix + sr, prefix + [".claude", "studio"]):
+                for e in range(1, len(root) + 1):
+                    if protect.glob_may_match(gparts, root[:e], fold, extglob=ext):
+                        return value + " (a wildcard that may match the repository or a folder above Studio's)"
+    return None
+
+
 def _walk(root):
     """Relative entries (folders, files, links — links not followed) of a folder, or None past WALK_MAX."""
     out = []
@@ -607,7 +756,7 @@ def _walk(root):
 
 def check_bulk(ctx, cmd, prog, argv, words, studio_infos):
     """Returns True when the command is a bulk writer in a Studio context (for the later-writer rule, W4)."""
-    weak = weak_extractor(prog, argv)
+    weak = weak_extractor(cmd, prog, argv)
     if weak:
         if studio_infos:
             ctx.deny("G-PROT", "%s is not an extractor Studio has checked — in a Studio repository, extract outside "
@@ -623,9 +772,9 @@ def check_bulk(ctx, cmd, prog, argv, words, studio_infos):
         if w1 and studio_infos:
             ctx.deny("G-PROT", "%s: %s lets archive members leave the folder — not in a Studio repository." % (prog, w1))
             return True
-        folders = [v for _w, v in dirs] if dirs else (cmd.run_cwds or cmd.cwds or [None])
-        for v in folders:
-            why = studio_area(ctx, cmd, v, studio_infos)
+        folders = list(dirs) if dirs else [(None, f) for f in (run_folders(cmd) or [None])]  # [None]: unknown (M1)
+        for fw, v in folders:
+            why = studio_area(ctx, cmd, v, studio_infos, word=fw)
             if why:
                 ctx.deny("G-PROT", BULK_WHY % (prog, why))
                 return True
@@ -643,15 +792,16 @@ def check_bulk(ctx, cmd, prog, argv, words, studio_infos):
     if tdir is not None:
         dest = tdir.value.split("=", 1)[1] if tdir.value and tdir.value.startswith("--") else tdir.value
         srcs = [w for w in ops if w is not tdir and w.value != dest]
+        dword = tdir
     elif len(ops) >= 2:
-        dest, srcs = ops[-1].value, ops[:-1]
+        dest, srcs, dword = ops[-1].value, ops[:-1], ops[-1]
     else:
         return False
     no_target = prog in ("cp", "gcp") and no_target_dir(argv)
     # the destination rule always (review X2): the walk below is a snapshot and a tool's landing can differ from the
     # model (GNU -T); it only adds checks for other destinations
     for b in [dest] + [x for sw in srcs for x in _copy_bases(ctx, cmd, mode, sw.value, dest, no_target)]:
-        why = studio_area(ctx, cmd, b, studio_infos)
+        why = studio_area(ctx, cmd, b, studio_infos, word=dword)
         if why:
             ctx.deny("G-PROT", BULK_WHY % (prog, why))
             return True
@@ -720,46 +870,137 @@ SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
 SHELL_DEPTH = 3
 
 
-INNER_KINDS = ("shell-c", "eval", "env-S", "script", "source", "stdin-interp")
-SCRIPT_OPTS_VALUE = ("-t", "-T", "-I", "-O", "-B", "-E", "-m", "-c", "-F")  # script(1) options taking a value
+INNER_KINDS = ("shell-c", "eval", "env-S", "script", "source", "stdin-interp", "heredoc-interp", "herestring-interp")
+STRING_KINDS = ("shell-c", "eval", "env-S", "heredoc-interp", "herestring-interp")  # text, not script files
+RUNNER_WHY = ("%s: the guard cannot read which command this runs in a Studio repository — run the command directly, "
+              "one step per call.")
+PIECE_SPLIT = re.compile(r"[\s'\"`;|&()<>\0]+")
 
 
-def check_shell_strings(ctx, sc, infos, depth):
-    """W2 / X1: the path rules (extractions, recursive copies, later writers) for code the shell runs from text:
-    literal `sh -c` / `eval` / `env -S` strings, script files run or sourced (`bash f`, `. f`, `bash < f`) and
-    `script … <cmd>`, in the host's folder; nested up to SHELL_DEPTH. In a Studio repository, code the guard cannot
-    read (an unreadable script, a non-literal string, a command word from a variable or a substitution, `xargs … sh
-    -c`) is refused."""
+class Nested(object):
+    """A string the shell runs from text (G1 §1.7): its host command, the opaque, and its scan — or `sub` None with
+    `why` when the guard cannot read it (then `text`/`skeleton` are what is known of it)."""
+
+    def __init__(self, host, op, cwds, depth):
+        self.host, self.op, self.cwds, self.depth = host, op, list(cwds or []), depth
+        self.text = op.payload
+        self.skeleton = op.skeleton
+        self.sub = None
+        self.why = None
+        self.budget_out = False
+
+
+def _scan(ctx, *args, **kw):
+    """scan_command, noting a `source` / `.` (or eval text that may run one) where the walk stopped: what follows it is
+    judged by the 0.0.26 rules only, and the 0.0.26 guard's finish runs for the call (fix20, backstop.decide)."""
+    sub = scan_command(*args, **kw)
+    if getattr(sub, "sourced", False):
+        ctx.sourced = True
+    return sub
+
+
+def nested_scans(ctx, sc, budget, depth=0, tree=None, seen=None, home=None):
+    """The literal strings of shell-c, eval, env-S, sourced and shell-run script files and the runners' shell payloads
+    (G1 §1.7), scanned to SHELL_DEPTH with the call's budget; one command's string in one folder is scanned once (review
+    18: not one text for every command that runs it). Returns (tree, flat):
+    tree maps id(scan) to the strings of that scan, flat lists them all. `home`: the $HOME the scan `sc` ran with when
+    its own command set it (review 8 M2), inherited by its strings unless their command sets it again."""
+    if tree is None:
+        tree, seen = {}, {}
+        ctx.nested_budget_out = False
+    flat = []
     by_id = {c.id: c for c in sc.commands}
-    texts = []  # (host command, text)
+    kids = tree.setdefault(id(sc), [])
     for o in sc.opaque:
+        if o.kind not in INNER_KINDS:
+            continue
         host = by_id.get(o.cmd)
+        if host is not None and "exec-template" in (host.ctx or ()):
+            continue  # the template of an xargs/find -exec (judged as the template command)
+        if o.kind in ("script", "stdin-interp", "heredoc-interp", "herestring-interp") and (
+                host is None or os.path.basename(host.prog or "") not in SHELLS):
+            continue  # another interpreter's code (python, node, …): the opaque rules (G-OPAQUE) decide
+        cwds = run_folders(host) if host is not None else o.cwds  # env -C $D sh -c …: unknown (review 2, M1)
+        if not cwds and getattr(o, "at_cwds", None) and "run-unknown" not in (host.flags if host is not None else ()):
+            cwds = o.at_cwds  # review 7 M4: an eval-defined function's text replayed from where the eval ran
+        nd = Nested(host, o, cwds, depth)
+        text = o.payload
+        if o.kind == "shell-c" and host is not None and recog.key(recog.base(host.prog or "")) in recog.CSH:
+            nd.why = "a csh string (the guard reads zsh only)"  # G1 §1.8: refused; its literal paths are searched
+        elif o.kind in ("shell-c", "eval", "env-S") and (o.origin != "literal" or text is None or (
+                host is not None and any(w.value is None for w in host.words[1:]))) or \
+                o.kind in ("heredoc-interp", "herestring-interp") and o.origin == "dynamic":
+            nd.why = "%s with text the guard cannot read" % o.kind
+            if nd.skeleton is None and host is not None:
+                nd.skeleton = " ".join(w.skeleton for w in host.words[1:])
+        elif text is None:
+            nd.why = "a script the guard cannot read"
+        else:
+            if o.kind == "env-S":
+                text = re.sub(r"^\s*(-S|--split-string=?)\s*", "", text)
+            nd.text = text
+            if not cwds or len(cwds) != 1:
+                nd.why = "code run from a folder the guard cannot tell"
+            elif depth >= SHELL_DEPTH:
+                nd.why = "code nested deeper than %d levels" % SHELL_DEPTH
+            elif ctx.nested_budget_out:
+                nd.why, nd.budget_out = "code the guard ran out of time to read", True
+            else:
+                inp = getattr(o, "input", None) or None  # the host's input (review 7 M4)
+                hh = getattr(host, "home", None) if host is not None else None  # review 8 M2
+                nd.home = hh if hh is not None else home
+                # review 18 (B18-2): the same string run by the same command in the same folder (its readings) is
+                # scanned once; another command running it is judged again, as at HEAD (git's state may have changed
+                # in between, and each command spends HEAD's git budget)
+                key = (text, cwds[0], tuple(sorted((o.options or {}).items())), model_input_key(inp), nd.home, id(sc),
+                       tuple(host.span or ()) if host is not None else o.cmd, host.prog if host is not None else None)
+                if key in seen:
+                    continue
+                sub = _scan(ctx, text, cwds[0], ctx.env, snapshot=ctx.snap, snapshot_notes=(), terms=None, fs=ctx.fs,
+                                   budget=budget, options=o.options, stdin=inp, home=nd.home)
+                seen[key] = sub
+                for c in sub.commands:
+                    c.scan_key = id(sub)  # review 18 (Context.current: git probes are per command)
+                if sub.status == "ok":
+                    nd.sub = sub
+                elif sub.reason == "limit:budget":
+                    ctx.nested_budget_out = True
+                    nd.why, nd.budget_out = "code the guard ran out of time to read", True
+                else:
+                    nd.why = "code the guard cannot parse"
+        kids.append(nd)
+        flat.append(nd)
+        if nd.sub is not None:
+            flat += nested_scans(ctx, nd.sub, budget, depth + 1, tree, seen, getattr(nd, "home", None))[1]
+    return tree, flat
+
+
+def check_shell_strings(ctx, sc, infos, tree):
+    """W2 / X1: the path rules (extractions, recursive copies, later writers) for code the shell runs from text:
+    literal `sh -c` / `eval` / `env -S` strings, script files run or sourced (`bash f`, `. f`, `bash < f`) and the
+    runners' shell payloads (`script -c`, `flock -c`, `watch`, `npx -c`, …), in the host's folder; nested up to
+    SHELL_DEPTH (the scans are nested_scans'). In a Studio repository, code the guard cannot read (an unreadable script,
+    a non-literal string, a command word from a variable or a substitution, `xargs … sh -c`, a runner it cannot read)
+    is refused."""
+    for o in sc.opaque:
         if o.kind == "dynamic-command":
-            if infos:
+            if infos and getattr(o, "why", None):  # a pattern expansion (review 2, M13)
+                ctx.deny("G-OPAQUE", "%s — its glob qualifiers may run code the guard cannot check in a Studio "
+                                     "repository; write the file names literally, one step per call." % o.why)
+            elif infos:
                 ctx.deny("G-OPAQUE", "a command word or a shell string built at run time runs code the guard cannot "
                                      "check in a Studio repository — write the command's path literally (or use npx "
                                      "…), one step per call.")
             continue
+        if o.kind == "runner":
+            if infos:
+                ctx.deny("G-OPAQUE", RUNNER_WHY % o.payload)
+            continue
+        if o.kind == "sudo-shell":
+            unknown(ctx, infos, "a root shell (sudo -s/-i, doas -s)")
+            continue
         if o.kind == "xargs" and re.match(r"^(\S*/)?(sh|bash|zsh|dash|ksh)\b", o.payload or ""):
             unknown(ctx, infos, "xargs feeding text to a shell")
-            continue
-        if o.kind not in INNER_KINDS:
-            continue
-        if host is not None and "exec-by-program" in (host.flags or ()):
-            continue  # the template of an xargs/find -exec (judged above)
-        if o.kind in ("script", "stdin-interp") and (host is None or os.path.basename(host.prog or "") not in SHELLS):
-            continue  # another interpreter's code (python, node, …): the opaque rules (G-OPAQUE) decide
-        text = o.payload
-        if o.kind in ("shell-c", "eval", "env-S") and (o.origin != "literal" or text is None or (
-                host is not None and any(w.value is None for w in host.words[1:]))):
-            unknown(ctx, infos, "%s with text the guard cannot read" % o.kind)
-            continue
-        if text is None:
-            unknown(ctx, infos, "a script the guard cannot read")
-            continue
-        if o.kind == "env-S":
-            text = re.sub(r"^\s*(-S|--split-string=?)\s*", "", text)
-        texts.append((host, text, o.cwds))
     for c in sc.commands:
         w0 = c.words[0] if c.words else None
         if w0 is not None and ("$" in (w0.raw or "") or "`" in (w0.raw or "")) and w0.value != "":
@@ -767,39 +1008,30 @@ def check_shell_strings(ctx, sc, infos, depth):
                 ctx.deny("G-OPAQUE", "a command word taken from a variable or a substitution (%s) runs a program the "
                                      "guard cannot name in a Studio repository — write the command's path literally "
                                      "(or use npx …), one step per call." % w0.raw)
-        if c.prog == "script":
-            inner = script_inner(c)
-            if inner is None:
-                unknown(ctx, infos, "script(1) running a command the guard cannot read")
-            elif inner:
-                texts.append((c, inner, None))
-    for host, text, ocwds in texts:
-        cwds = (host.run_cwds or host.cwds) if host is not None else ocwds
-        if not cwds or len(cwds) != 1:
-            unknown(ctx, infos, "code run from a folder the guard cannot tell")
-            continue
-        if depth >= SHELL_DEPTH:
-            unknown(ctx, infos, "code nested deeper than %d levels" % SHELL_DEPTH)
-            continue
-        sub = scan_command(text, cwds[0], ctx.env, snapshot=ctx.snap, snapshot_notes=(), terms=None, fs=ctx.fs,
-                           budget=limits.Budget())
-        if sub.status != "ok":
-            unknown(ctx, infos, "code the guard cannot parse")
+    for nd in tree.get(id(sc), []):
+        if nd.sub is None:
+            if nd.budget_out:
+                if infos:
+                    ctx.deny("G-LIMIT", "the shell strings of this command take the guard too long to check in a "
+                                        "Studio repository — split it into simple commands.")
+            else:
+                unknown(ctx, infos, nd.why)
             continue
         outer, ctx.bulk_ids = ctx.bulk_ids, set()  # the inner command ids are their own
         try:
-            for c in sub.commands:
+            for c in nd.sub.commands:
                 ctx.current = c
+                check_out_of_repo(ctx, c)
                 check_paths(ctx, c, infos)
             ctx.current = None
-            check_shell_strings(ctx, sub, infos, depth + 1)
+            check_shell_strings(ctx, nd.sub, infos, tree)
             inner = ctx.bulk_ids
         finally:
             ctx.bulk_ids = outer
         if inner:
-            bulk_then_write(ctx, sub.commands, inner)
-            if host is not None:
-                ctx.bulk_ids.add(host.id)
+            bulk_then_write(ctx, nd.sub.commands, inner)
+            if nd.host is not None:
+                ctx.bulk_ids.add(nd.host.id)
 
 
 def unknown(ctx, infos, what):
@@ -808,48 +1040,224 @@ def unknown(ctx, infos, what):
                              "(literal words), one step per call." % what)
 
 
-def script_inner(c):
-    """The command script(1) runs, as shell text: '' for none, None when not literal. BSD: script [opts] [file
-    [cmd …]]; util-linux: script [opts] -c 'cmd' [file]."""
-    vals = [w.value for w in c.words[1:]]
-    if any(v is None for v in vals):
-        return None
-    i, rest = 0, []
-    while i < len(vals):
-        v = vals[i]
-        if v == "-c" and i + 1 < len(vals):
-            return vals[i + 1]
-        if v == "--":
-            rest = vals[i + 1:]
-            break
-        if v.startswith("-") and len(v) > 1:
-            i += 2 if v in SCRIPT_OPTS_VALUE else 1
+# ---- G1 §1.7, §1.7a: Studio repositories named by text the guard cannot read ----
+
+def _piece_value(ctx, v, cwds):
+    """~, $HOME and $PWD in a piece of raw or skeleton text, from the hook's environment and the host's folder."""
+    home = ctx.env.get("HOME")
+    for pre in ("~", "$HOME", "${HOME}"):
+        if v == pre or v.startswith(pre + "/"):
+            if not home:
+                return None
+            return home + v[len(pre):]
+    for pre in ("$PWD", "${PWD}"):
+        if v == pre or v.startswith(pre + "/"):
+            if not cwds or len(cwds) != 1:
+                return None
+            return cwds[0] + v[len(pre):]
+    return v
+
+
+def studio_repos_at(ctx, value, cwds):
+    """The Studio repositories `value` (a path, absolute or relative to `cwds`) lies in."""
+    out = []
+    if not value:
+        return out
+    bases = [None] if os.path.isabs(value) else list(cwds or [])
+    for c in bases:
+        r = ctx.where.resolve(value, c)
+        if r is None or r.abs is None or r.repo is None:
             continue
-        rest = vals[i:]
-        break
-    if len(rest) <= 1:
-        return ""
-    import shlex
-    return " ".join(shlex.quote(x) for x in rest[1:])
+        ri = ctx.repos.info(r.repo)
+        if ri is not None and ri.studio:
+            out.append(ri)
+    return out
+
+
+def _add_infos(infos, ris):
+    for ri in ris:
+        if ri not in infos:
+            infos.append(ri)
+
+
+def piece_search(ctx, text, cwds, infos, budget=None):
+    """piece_search_ under the searches' own file-system budget (_searching)."""
+    return _searching(ctx, piece_search_, ctx, text, cwds, infos)
+
+
+def piece_search_(ctx, text, cwds, infos):
+    """G1 §1.7 (M4): the literal pieces of text the guard cannot read — every piece holding `/` and every literal cd
+    target — resolved from the host's folder; a Studio repository found joins `infos`. Returns the pieces resolved."""
+    if not text:
+        return 0
+    count = 0
+    prev = None
+    for t in PIECE_SPLIT.split(text):
+        if not t:
+            continue
+        vals = []
+        if "/" in t or prev in ("cd", "pushd", "chdir") or t in ("~",):
+            vals.append(t)
+        if "=" in t and "/" in t.split("=", 1)[1]:
+            vals.append(t.split("=", 1)[1])
+        prev = t
+        for v in vals:
+            v = _piece_value(ctx, v, cwds)
+            if v is None:
+                continue
+            count += 1
+            if count > MAX_CANDIDATES:
+                return count
+            _add_infos(infos, studio_repos_at(ctx, v, cwds))
+    return count
+
+
+def empty_reading(ctx, skeleton, cwds, infos, budget):
+    """empty_reading_ under the searches' own file-system budget (_searching)."""
+    return _searching(ctx, empty_reading_, ctx, skeleton, cwds, infos, budget)
+
+
+def empty_reading_(ctx, skeleton, cwds, infos, budget):
+    """G1 §1.7 (review 2, D): a non-literal string read once with every unknown expansion empty; the repositories its
+    commands name join `infos` (a scan of the text; when it does not parse, piece_search is the fallback)."""
+    if not skeleton or "\0" not in skeleton or not cwds or len(cwds) != 1 or getattr(ctx, "nested_budget_out", False):
+        return
+    sub = _scan(ctx, skeleton.replace("\0", ""), cwds[0], ctx.env, snapshot=ctx.snap, snapshot_notes=(), terms=None,
+                       fs=ctx.fs, budget=budget)
+    if sub.status == "ok":
+        collect_repos(ctx, sub.commands, infos, 0, dynamic=False, quiet=True)
+
+
+def dynamic_word_search(ctx, c, w, infos):
+    """G1 §1.7a (M5): a dynamic path word or cd target — read with its unknown parts empty, and its literal pieces
+    (under the searches' own file-system budget)."""
+    return _searching(ctx, dynamic_word_search_, ctx, c, w, infos)
+
+
+def dynamic_word_search_(ctx, c, w, infos):
+    cwds = run_folders(c) or c.cwds
+    sk = w.skeleton or ""
+    n = 0
+    empty = _piece_value(ctx, sk.replace("\0", ""), cwds)
+    if empty and not re.search(r"\s", empty):  # a word with blanks is no path (a string's pieces are searched below)
+        n += 1
+        _add_infos(infos, studio_repos_at(ctx, empty, cwds))
+    return n + piece_search_(ctx, sk, cwds, infos)
+
+
+def _searching(ctx, fn, *args):
+    """Run a search for Studio repositories in text the guard cannot read with its own file-system budget (the
+    searches of one call share MAX_FS_CALLS of their own; the call's budget is not spent). Past it the search stops
+    and `ctx.search_cut` is set: in a Studio repository the call is refused (G-LIMIT); outside one the search found
+    nothing more and the call is judged as without it (review 2 conformance, MINOR 2)."""
+    fs = ctx.fs
+    used = getattr(ctx, "search_fs_calls", 0)
+    saved = (fs.calls, fs.max_calls)
+    fs.calls, fs.max_calls = 0, max(limits.MAX_FS_CALLS - used, 0)
+    try:
+        return fn(*args) or 0
+    except limits.LimitExceeded:
+        ctx.search_cut = True
+        return 0
+    finally:
+        ctx.search_fs_calls = used + fs.calls
+        fs.calls, fs.max_calls = saved
+
+
+def runner_files(cmd):
+    """(command to judge them as, [(Word, op)]): each unwrapped runner's own file arguments (resolved against the run
+    folder in effect for it) and those of a runner that is the program (G1 §1.6)."""
+    out = []
+    for wr in cmd.wrappers or ():
+        if wr.files:
+            proxy = copy.copy(cmd)
+            proxy.words = [Word.lit(wr.name)]
+            proxy.cwds = proxy.run_cwds = list(wr.cwd if wr.cwd is not None else cmd.cwds)
+            proxy.flags = set(cmd.flags) - {"run-unknown"}  # this runner's own folder is wr.cwd
+            proxy.git = proxy.s2v = proxy.script = proxy.lock = None
+            out.append((proxy, wr.files))
+    if cmd.files:
+        out.append((cmd, cmd.files))
+    return out
+
+
+def collect_repos(ctx, cmds, infos, n, dynamic=True, quiet=False):
+    """The Studio repositories commands involve: their folders, run folders, path candidates, redirect targets, the
+    runners' file arguments and (dynamic=True) what their dynamic words name (§1.7a). Returns the candidate count, or
+    None past MAX_CANDIDATES (denied G-LIMIT)."""
+    for c in cmds:
+        for d in (c.cwds or []) + (c.run_cwds or []):
+            if ctx.fs.exists(d):
+                ri = ctx.repos.info(ctx.where.git_repo(d))
+                if ri is not None and ri.studio and ri not in infos:
+                    infos.append(ri)
+        for w in getattr(c, "run_words", ()):  # env -C $D, sudo -D $D (§1.7a, M3)
+            if dynamic:
+                n += dynamic_word_search(ctx, c, w, infos)
+        for w, vals in candidates(c):
+            if w.value is None and dynamic:
+                n += dynamic_word_search(ctx, c, w, infos)
+            for v in vals:
+                if not looks_like_path(v, c, ctx):
+                    continue
+                n += 1
+                if n > MAX_CANDIDATES:
+                    break
+                for a, real, ri in resolve_all(ctx, c, v):
+                    if ri is not None and ri.studio and ri not in infos:
+                        infos.append(ri)
+        for r in c.redirs:
+            if r.target is not None and r.target.value:
+                for a, real, ri in resolve_all(ctx, c, r.target.value):
+                    if ri is not None and ri.studio and ri not in infos:
+                        infos.append(ri)
+            elif r.target is not None and r.target.value is None and dynamic and r.mode != "herestring":
+                n += dynamic_word_search(ctx, c, r.target, infos)
+        for wc, files in runner_files(c):
+            for w, _op in files:
+                n += 1
+                for a, real, ri in resolve_all(ctx, wc, w.value):
+                    if ri is not None and ri.studio and ri not in infos:
+                        infos.append(ri)
+        if n > MAX_CANDIDATES:
+            if quiet:  # a search (the empty reading): it stops, and decide_bash refuses only in a Studio repository
+                ctx.search_cut = True
+                return None
+            ctx.deny("G-LIMIT", "the command has too many path arguments for the guard — split it.")
+            return None
+    return n
 
 
 def bulk_then_write(ctx, commands, bulk_ids):
     """W4: after an extraction or a recursive copy in a Studio repository, no other writing command in the same call
     (what the bulk writer put down could be moved into Studio's folders before the guard sees it)."""
-    seen = False
+    seen = []
     for c in commands:
-        if seen and is_writer(c):
+        if seen and is_writer(c) and any(not other_reading(b, c) for b in seen):
             ctx.deny("G-PROT", "%s runs after an archive extraction or a recursive copy in the same call — run the "
                                "extraction or copy alone, then run the next step in a separate call."
                      % (c.prog or "a command"))
             return
         if c.id in bulk_ids:
-            seen = True
+            seen.append(c)
+
+
+def other_reading(a, b):
+    """review 12 conf M-1: two readings of one command with a word of several known values (walk.choice_readings):
+    zsh runs one of them, so one is not "earlier" than the other."""
+    aa, ba = a.alt or {}, b.alt or {}
+    if a.span == b.span and tuple(a.span or ()) != (0, 0) and a.prog == b.prog and \
+            ("lost-folder" in (a.ctx or ()) or "lost-folder" in (b.ctx or ())):
+        return True  # review 16: the same command judged in another folder it may run in (walk: lost folders)
+    return aa.get("group") == "choice" == ba.get("group") and a.span == b.span and tuple(a.span or ()) != (0, 0) \
+        and aa.get("index") != ba.get("index")
 
 
 def is_writer(c):
     prog = c.prog or ""
     if any(r.target is not None and r.mode in ("write", "append", "rw") for r in c.redirs):
+        return True
+    if any(op in ("write", "write-dir") for _wc, files in runner_files(c) for _w, op in files):
         return True
     if is_sed(c):
         return sed_shape(c)[0] != "read"
@@ -879,10 +1287,12 @@ def is_sed(cmd):
 def sed_trusted(cmd):
     """Whether the program is the system's sed: an absolute path in a system bin folder (whatever PATH is), or the
     bare name with PATH untouched. Any other sed (a copy in /tmp, PATH=… sed, env -i sed) is never shaped: other."""
+    if any(w.name in ("busybox", "toybox", "xcrun") for w in cmd.wrappers):
+        return False  # G1 §1.5: their sed is not the system's (shapes were measured on GNU and BSD only)
     w0 = cmd.words[0].value
     if "/" in w0:
         # no `..`, `.` or `//`: /usr/bin/../../tmp/sed is not in /usr/bin
-        return os.path.isabs(w0) and os.path.normpath(w0) == w0 and recog.is_bin_dir(w0)
+        return os.path.isabs(w0) and os.path.normpath(w0) == w0 and recog.trusted_bin_dir(w0)  # G1 §4
     env = cmd.env
     return not (env.cleared or env.unknown or "PATH" in env.set or "PATH" in env.unset
                 or "path-modified" in (cmd.flags or ()))
@@ -961,22 +1371,115 @@ def hard_link_copy(argv):
                for x in argv[1:])
 
 
+def tilde_rest(cmd, word):
+    """The path after a leading `~` when this call wrote $HOME with a value the guard cannot read (Cmd.tilde_unknown;
+    review 7 M5) — "." for the folder itself — or None."""
+    kinds = getattr(cmd, "tilde_unknown", None)
+    sk = word.skeleton or ""
+    if not kinds or len(word.dyn or ()) != 1 or word.dyn[0] not in kinds or not sk.startswith("\0") or \
+            sk.count("\0") != 1 or (len(sk) > 1 and sk[1] != "/"):
+        return None
+    return sk[1:].lstrip("/") or "."
+
+
+PWD_REF_RE = re.compile(r"^(\$PWD|\$\{PWD\}|~\+|\$\(\s*pwd(\s+-[LP])?\s*\)|`\s*pwd(\s+-[LP])?\s*`|"
+                        r"\$\(\s*git\s+rev-parse\s+--show-toplevel\s*\))(?![A-Za-z0-9_])")
+
+
+def pwd_rest(cmd, word):
+    """review 10 B1: the path after a leading `$PWD`, `~+`, `$(pwd)` or `$(git rev-parse --show-toplevel)` when the
+    folder the command runs in is unknown — "." for the folder itself — or None."""
+    if cmd.cwds:
+        return None
+    sk = word.skeleton or ""
+    raw = re.sub(r"[\"']", "", word.raw or "")
+    if not sk.startswith("\0") or sk.count("\0") != 1 or (len(sk) > 1 and sk[1] != "/") or not PWD_REF_RE.match(raw):
+        return None
+    return sk[1:].lstrip("/") or "."
+
+
+def add_candidate(ctx, item):
+    """An allow candidate (a Studio script call alone in the Bash call). review 10: a copy of a command judged in a
+    known folder the shell may still be in is not a second call."""
+    if "lost-folder" in (getattr(item[0], "ctx", None) or ()):
+        return
+    ctx.candidates.append(item)
+
+
+def cand_word(word, v):
+    """review 9: a word standing for one candidate value of a dynamic word (every wildcard character a wildcard)."""
+    w = copy.copy(word)
+    w.value, w.dynamic, w.dyn, w.skeleton, w.wild, w.alt, w.cand_values, w.cand_loose = v, False, [], v, None, None, \
+        (), ()
+    i = min([v.find(ch) for ch in "*?[<" if ch in v] or [-1])
+    w.glob = i >= 0
+    w.glob_base = (v[:i][:v[:i].rfind("/") + 1] if "/" in v[:i] else "") if i >= 0 else None
+    return w
+
+
+def loose_cands(word, infos):
+    """review 9: the words of a command whose output a value is (`X=$(ls studio)`) that name a protected thing or may
+    name a repository (an absolute path): judged as values the word may have."""
+    names = protect.UNKNOWN_FOLDER_NAMES | protect.TAIL_NAMES | {ri.studio_root for ri in infos or ()}
+    out = []
+    for v in getattr(word, "cand_loose", ()):
+        segs = [x for x in v.split("/") if x not in ("", ".", "..")]
+        if segs and (v.startswith(("/", "~")) or any(x in names for x in segs)):
+            out.append(v)
+    return out
+
+
 def check_target(ctx, cmd, word, value, op, studio_infos, s2v=False):
+    if value is None and (getattr(word, "cand_values", None) or getattr(word, "cand_loose", None)):
+        # review 9: a value the guard does not carry (an array, read, print -v, $(print …), a function's global, one
+        # of several folders): each value it may have is judged
+        n = len(ctx.denies)
+        for v in list(word.cand_values) + [x for x in loose_cands(word, studio_infos) if x not in word.cand_values]:
+            check_target(ctx, cmd, cand_word(word, v), v, op, studio_infos, s2v)
+            if len(ctx.denies) > n:
+                return
+    if value is None and studio_infos and "tilde-dir" in (word.dyn or ()):
+        # review 14 (B14-6): `~[name]` — zsh asks zsh_directory_name / zsh_directory_name_functions (a sourced file,
+        # an eval or this call may define them); the guard does not run them
+        ctx.deny("G-OPAQUE", "%s names a dynamic named directory (%s) whose folder zsh gets from a "
+                             "zsh_directory_name function the guard does not run — write the folder's path."
+                 % (cmd.prog or "the command", word.raw))
+        return
     if value is None:
+        rest = tilde_rest(cmd, word)
+        if rest is not None and studio_infos:
+            # review 7 M5: `~/<rest>` after this call wrote $HOME with a value the guard cannot read: <rest> under a
+            # folder the guard cannot tell (the text the value came from was searched for Studio repositories)
+            for sri in studio_infos:
+                judge_unknown_folder(ctx, cmd, rest, sri, op, s2v)
+            return
+        rest = pwd_rest(cmd, word)
+        if rest is not None and studio_infos:
+            # review 10 B1: `$PWD/<rest>`, `~+/<rest>`, `$(pwd)/<rest>`, `$(git rev-parse --show-toplevel)/<rest>` in
+            # a folder the guard cannot tell: <rest> under that folder, as a relative path is judged
+            for sri in studio_infos:
+                judge_unknown_folder(ctx, cmd, rest, sri, op, s2v)
+            return
         if word.dynamic and studio_infos and protect.tail_hits(word.skeleton or ""):
             ctx.deny("G-PROT" if op == "write" else "G-DEL",
                      "%s %s a path the guard cannot read (%s) that ends in a protected name."
                      % (cmd.prog or "the command", "writes" if op == "write" else "deletes", word.raw))
         return
+    glob = word.glob and word.glob_base is not None and value == word.value
+    if glob:
+        judge_glob_target(ctx, cmd, word, op, studio_infos)  # G1 §2 (folders the guard can tell)
+    unknown_done = False
     for a, real, ri in resolve_all(ctx, cmd, value):
         if a is None:
-            # unknown cwd: judge the text as if relative to each Studio repository root
+            # G1 §1.7a: the folder is unknown or overflowed — `**/<rel>` in each Studio repository
             for sri in studio_infos:
-                parts = [x for x in value.split("/") if x not in ("", ".")]
-                judge_parts(ctx, cmd, word, value, parts, sri, False, op, s2v, None)
+                judge_unknown_folder(ctx, cmd, value, sri, op, s2v, word=word)
+            if not unknown_done and not os.path.isabs(value):
+                unknown_done = True
+                judge_glob_folders(ctx, cmd, value, op, studio_infos)
             continue
         if op == "link-source":
-            if ri is not None and hookfiles.hit(ri, real, "delete"):
+            if ri is not None and hookfiles.hit(ri, real, "delete", ctx.where.case_insensitive(real)):
                 ctx.deny("G-PROT", "%s links %s, which holds %s — writing through the link would change it."
                          % (cmd.prog or "the command", value, HOOK_WHY))
                 continue
@@ -994,16 +1497,120 @@ def check_target(ctx, cmd, word, value, op, studio_infos, s2v=False):
             continue
         if op != "link-source" and hook_file_denied(ctx, cmd, ri, real, value, op):
             continue
-        if ri is None or not ri.studio:
+        if studio_infos and not op.startswith("delete") and user_config(ctx, real):
+            ctx.deny("G-HOOKOFF", "%s writes %s (git's or ssh's own settings, which can run commands) in a Studio "
+                                  "repository; %s" % (cmd.prog or "the command", value, commitrule.HOOKOFF_TAIL))
+            continue
+        if glob or ri is None or not ri.studio:
             continue
         ctx.touch(ri)
         parts, fold = rel(ctx, ri, real)
         if parts is None:
             continue
-        if word.glob and word.glob_base is not None:
-            judge_glob(ctx, cmd, word, ri, real, fold, op)
-            continue
         judge_parts(ctx, cmd, word, value, parts, ri, fold, op, s2v, real)
+
+
+def value_segments(value, word):
+    """`value` split at `/` (no empty or `.` segments). With the word's quoting known (Word.wild), each segment is a
+    protect.Seg: its quoted `(`, `[`, `*`, `?` are letters (review 4 conf M-2); else plain strings (every one a
+    wildcard)."""
+    wild = getattr(word, "wild", None) if word is not None else None
+    if wild is not None and word.value is not None and value != word.value:
+        if value.startswith(word.value + "/"):
+            wild = set(wild) | set(range(len(word.value), len(value)))  # into a folder: the source's name follows
+        else:
+            off = word.value.find(value)
+            wild = None if off < 0 or word.value.count(value) != 1 else {i - off for i in wild}
+    if word is not None and getattr(word, "glob", False):
+        out = protect.pattern_segments(value, wild)  # not split inside `[…]` (`[s/]tudio`; review 7 B1)
+    else:
+        out, pos = [], 0
+        for part in value.split("/"):
+            if part not in ("", "."):
+                out.append(part if wild is None else protect.Seg(part, {i - pos for i in wild
+                                                                       if pos <= i < pos + len(part)}))
+            pos += len(part) + 1
+    if word is not None and getattr(word, "glob", False) and getattr(word, "extglob", False):
+        out = protect.ext_cut(out, True)  # `x~*/y`: what `x` matches (review 6 conf m-1)
+    if word is not None and getattr(word, "glob", False) and getattr(word, "globstarshort", False):
+        out = star_short(out)
+    return out
+
+
+def star_short(segs):
+    """review 8 M3: under GLOB_STAR_SHORT (on, or options the guard cannot tell) zsh reads a segment `**x` / `***x` as
+    `**/*x` / `***/*x` (any depth)."""
+    out = []
+    for x in segs:
+        wild = getattr(x, "wild", None)
+        k = 3 if x.startswith("***") else 2 if x.startswith("**") else 0
+        if k and len(x) > k and all(wild is None or i in wild for i in range(k)):
+            out.append("**")
+            rest = x[k - 1:]  # `*` + the rest
+            out.append(protect.Seg(rest, {i - (k - 1) for i in wild if i >= k - 1}) if wild is not None else rest)
+        else:
+            out.append(x)
+    return out
+
+
+def judge_unknown_folder(ctx, cmd, value, ri, op, s2v, word=None):
+    """A relative write, delete or extraction folder under a folder the guard cannot tell (a dynamic or overflowed
+    `cd`, a `cd` in a function, a wildcard folder): judged as `**/<rel>` — denied when <rel> names a protected thing
+    literally (or by a wildcard that may be one) and some protected path may match (G1 §1.7a). `.`, `..` and a
+    wildcard may stand for the unknown folder itself or a folder above it, so a recursive delete or an extraction
+    there may be the studio root or an ancestor (review 2, B-1)."""
+    segs = value_segments(value, word)
+    if ".." in segs:
+        segs = segs[len(segs) - segs[::-1].index(".."):]  # `**` stands for every folder above anyway
+    o = "delete" if op == "delete" else "delete-file" if op == "delete-file" else (
+        "write-dir" if op == "write-dir" else "write")
+    fold = ctx.where.case_insensitive(ri.worktree)
+    if o == "write" and effective(cmd)[0] == "ln" and segs:
+        # review 11 (a HEAD regression after `eval`, `source` or a hook): a link whose path names one of Studio's
+        # folders may be one under the studio root, which Studio does not follow (judge_parts) — as in a known folder
+        names = {n.casefold() for n in protect.UNKNOWN_FOLDER_NAMES | {os.path.basename(ri.studio_root.rstrip("/"))}}
+        if any(x.casefold() in names for x in segs):
+            ctx.deny("G-PROT", "ln %s in a folder the guard cannot tell may make a link under %s/ (or its own "
+                               "folders), which Studio does not follow — cd to a literal folder first, in a separate "
+                               "call." % (value, ri.studio_root))
+            return
+    if not segs:
+        tid = "P-ANC" if o in ("delete", "write-dir") else None
+    else:
+        # `^x`, `*~x`, `l#ocal` while EXTENDED_GLOB may be on: wildcards too (review 5)
+        ext = word is not None and bool(getattr(word, "glob", False)) and bool(getattr(word, "extglob", False))
+        tid = protect.unknown_folder_hit(segs, ri.studio_root, fold, o, skip=protect.S2V_OWNED if s2v else (),
+                                         extglob=ext)
+    if tid is None:
+        return
+    what = "be the repository root or an ancestor of Studio's folders" if tid == "P-ANC" else \
+        "hold %s data" % protect.BY_ID[tid][2]
+    if o.startswith("delete"):
+        ctx.deny("G-DEL", "%s deletes %s in a folder the guard cannot tell, which may %s that git cannot restore — cd "
+                          "to a literal folder first, in a separate call." % (cmd.prog or "the command", value, what))
+    elif tid == "P-ANC" or o == "write-dir":
+        ctx.deny("G-PROT", "%s extracts or copies into %s in a folder the guard cannot tell, which may %s — cd to a "
+                           "literal folder first, in a separate call." % (cmd.prog or "the command", value, what))
+    else:
+        ctx.deny("G-PROT", "%s writes %s in a folder the guard cannot tell, which may be a protected Studio file (%s) "
+                           "— cd to a literal folder first, in a separate call." % (cmd.prog or "the command", value,
+                                                                                   protect.BY_ID[tid][2]))
+
+
+def judge_glob_folders(ctx, cmd, value, op, studio_infos):
+    """A relative path under a folder a wildcard names (`cd stu?io`, `env -C studio/vid*`, review 2 M12): judged as
+    the pattern `<folder pattern>/<path>` too (the unknown-folder rule above judges `**/<path>`)."""
+    pats = list(getattr(cmd, "glob_folders", None) or [])
+    pats += [(tuple(cmd.cwds or ()), w.value) for w in getattr(cmd, "run_words", ()) if w.value is not None and w.glob]
+    for bases, pat in pats:
+        if not bases and not os.path.isabs(pat):
+            continue
+        gw = as_glob(Word(pat, pat, glob=True), os.path.join(pat, value))
+        if gw is None:
+            continue
+        proxy = copy.copy(cmd)
+        proxy.run_cwds, proxy.flags = list(bases), set(cmd.flags) - {"run-unknown"}
+        judge_glob_target(ctx, proxy, gw, op, studio_infos)
 
 
 HOOK_WHY = "Studio's pre-commit hook (wiring) — only \"python3 .claude/studio/scripts/hooks.py install\" changes it"
@@ -1011,7 +1618,8 @@ HOOK_WHY = "Studio's pre-commit hook (wiring) — only \"python3 .claude/studio/
 
 def hook_file_denied(ctx, cmd, ri, real, value, op):
     """P-HOOK for Bash: any write, delete or move of an installed hook file (m0e-plan §10)."""
-    h = hookfiles.hit(ri, real, "delete" if op.startswith("delete") else "write")
+    h = hookfiles.hit(ri, real, "delete" if op.startswith("delete") else "write",
+                      real is not None and ctx.where.case_insensitive(real))
     if not h:
         return False
     if h[1] == "gitconfig":
@@ -1085,48 +1693,372 @@ def judge_parts(ctx, cmd, word, value, parts, ri, fold, op, s2v, real):
     ctx.deny("G-PROT", "%s writes %s (%s) — only %s may change it.%s" % (cmd.prog or "the command", value, cls, who, hint))
 
 
-def judge_glob(ctx, cmd, word, ri, real, fold, op):
-    sr = ri.studio_root
+def user_config(ctx, real):
+    """git's and ssh's user settings (G1 §1.9): ~/.gitconfig, $XDG_CONFIG_HOME/git/config, ~/.ssh/config."""
+    if real is None:
+        return False
+    home = ctx.env.get("HOME") or os.path.expanduser("~")
+    xdg = ctx.env.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+    fold = ctx.where.case_insensitive(real)  # ~/.GitConfig is ~/.gitconfig on a volume that ignores case (M14)
+    k = (lambda x: x.casefold()) if fold else (lambda x: x)
+    for p in (os.path.join(home, ".gitconfig"), os.path.join(xdg, "git", "config"),
+              os.path.join(home, ".config", "git", "config"), os.path.join(home, ".ssh", "config")):
+        if k(real) in (k(p), k(ctx._real(p))):
+            return True
+    return False
+
+
+GLOB_WHY = "%s %s %s, which may match %s — write the path without wildcards."
+
+
+def glob_segments(word):
+    """The pattern after the literal folder part, split on `/` (`***` is `**`), and whether it has `***`."""
+    off = len(word.glob_base or "")
+    rest = (word.value or "")[off:]
+    wild = getattr(word, "wild", None)
+    if wild is not None:
+        wild = {i - off for i in wild if i >= off}
+    # split as zsh does: not inside `[…]` (`[s/]tudio`), quoting kept (review 7 B1)
+    segs = protect.ext_cut(protect.pattern_segments(rest, wild), getattr(word, "extglob", False))
+    links = "***" in segs or (getattr(word, "globstarshort", False) and any(x.startswith("***") for x in segs))
+    if getattr(word, "globstarshort", False):
+        segs = star_short(segs)
+    return ["**" if x in ("**", "***") else x for x in segs], links
+
+
+def judge_glob_target(ctx, cmd, word, op, studio_infos):
+    """G1 §2: a glob word is denied when some path it can match would be denied as a literal path. Folders the guard
+    cannot tell are the unknown-folder rule's (check_target)."""
     base_val = word.glob_base or ""
-    cwd = (cmd.run_cwds or cmd.cwds or [None])[0]
-    base = ctx.where.resolve(base_val or ".", cwd)
-    if base is None or base.real is None:
-        return
-    bparts = protect.rel_parts(base.real, ri.worktree, fold)
-    if bparts is None:
-        return
-    rest = (word.value or "")[len(base_val):]
-    seg = rest.split("/")[0]
-    anchors = [[sr], [".claude", "studio"]]
-    for anc in anchors:
-        if len(anc) > len(bparts) and anc[:len(bparts)] == bparts:
-            nxt = anc[len(bparts)]
-            if fnmatch.fnmatchcase(nxt.casefold() if fold else nxt, seg.casefold() if fold else seg):
-                judge_parts(ctx, cmd, word, word.value, anc[:len(bparts) + 1], ri, fold,
-                            "delete" if op.startswith("delete") else op, False, None)
-                return
-    if bparts[:1] == [sr] or bparts[:2] == [".claude", "studio"]:
-        if op.startswith("delete"):
-            tid = protect.delete_hits(bparts, sr, fold, is_dir=True)
-            if tid:
-                ctx.deny("G-DEL", "%s deletes %s, which may include protected Studio data." % (cmd.prog, word.value))
-        else:
-            for tid, pats, _c, _w in protect.TABLE:
-                if tid == "P-LOCAL":
+    segs, links = glob_segments(word)
+    if ".." in segs:
+        # a `..` after a wildcard: any folder of the repository (the unknown-folder rule's reading)
+        segs = ["**"] + segs[len(segs) - segs[::-1].index(".."):]
+        base_val = "/" if os.path.isabs(base_val) else ""
+    bases = [None] if os.path.isabs(base_val) else run_folders(cmd)
+    for c in bases:
+        r = ctx.where.resolve(base_val or ".", c)
+        if r is None or r.abs is None:
+            continue
+        base_real = r.real or r.abs
+        ri = ctx.repos.info(r.repo) if r.repo is not None else None
+        if ri is not None and ri.studio:
+            fold = ctx.where.case_insensitive(ri.worktree)
+            ctx.touch(ri)
+            bparts = protect.rel_parts(base_real, ri.worktree, fold)
+            if bparts is None:
+                continue
+            if "**" in segs and not links and getattr(word, "glob_walk", False) and \
+                    not getattr(ctx, "earlier_write", True):
+                found = glob_walk(ctx, base_real, segs, fold, getattr(word, "extglob", False))
+                if found is not None:
+                    for p in found:
+                        check_target(ctx, cmd, Word.lit(p), p, op, studio_infos)
                     continue
-                if any(protect._may_contain(bparts, protect._expand(p, sr), fold) for p in pats):
-                    ctx.deny("G-PROT", "%s writes %s, which may match protected Studio files." % (cmd.prog, word.value))
+            judge_glob_static(ctx, cmd, word, ri, bparts + segs, fold, op)
+        else:
+            fold = ctx.where.case_insensitive(base_real) if ctx.fs.exists(base_real) else False
+            glob_outside(ctx, cmd, word, base_real, segs, fold, op, studio_infos)
+
+
+def listed_globs(ctx, cmd, words):
+    """`words` with each `**` glob that zsh runs with its existing matches (G1 §2: NOMATCH on, no GLOB_DOTS, nothing
+    before it in the call may write) replaced by those matches, when its folder part lies in one Studio repository
+    and the listing ends within WALK_MAX; any other word stays (judged by judge_glob_target)."""
+    out = []
+    for w in words:
+        found = None
+        if w.glob and w.glob_base is not None and w.value is not None and getattr(w, "glob_walk", False) and \
+                not getattr(ctx, "earlier_write", True):
+            segs, links = glob_segments(w)
+            bases = [None] if os.path.isabs(w.glob_base) else run_folders(cmd)
+            if "**" in segs and ".." not in segs and not links and len(bases) == 1:
+                r = ctx.where.resolve(w.glob_base or ".", bases[0])
+                ri = ctx.repos.info(r.repo) if r is not None and r.abs is not None and r.repo is not None else None
+                if ri is not None and ri.studio:
+                    found = glob_walk(ctx, r.real or r.abs, segs, ctx.where.case_insensitive(ri.worktree),
+                                      getattr(w, "extglob", False))
+        if found:
+            base = r.real or r.abs
+            out.extend(Word.lit(w.glob_base + os.path.relpath(p, base)) for p in found)
+        else:
+            out.append(w)
+    return out
+
+
+def glob_hook_hit(ctx, ri, gparts, fold, op, ext):
+    """review 6 M12 (plan §2 for P-HOOK): an installed Studio hook file (hookfiles.items, active) that the pattern
+    `gparts` may match — or, for a recursive delete, a folder above it; for Studio's runner folder, a path in it.
+    Returns (path, kind) or None."""
+    hop = "delete" if op.startswith("delete") else "write"
+    wt = os.path.realpath(ri.worktree)
+    for path, kind in hookfiles.items(ri):
+        parts = protect.rel_parts(path, wt, fold)
+        if parts is None:
+            parts = protect.rel_parts(path, ri.worktree, fold)
+        if not parts or not hookfiles._active(path, kind, ri, hop):
+            continue
+        pat = parts + ["**"] if kind == "dir" and hop == "write" else parts
+        if protect.glob_may_match(gparts, pat, fold, prefix=op in ("delete", "write-dir"), extglob=ext):
+            return path, kind
+    return None
+
+
+def judge_glob_static(ctx, cmd, word, ri, gparts, fold, op):
+    """The two-pattern rule: `gparts` (repository-relative, the base resolved) against every protected pattern."""
+    sr = ri.studio_root
+    ext = getattr(word, "extglob", False)
+    prog = cmd.prog or "the command"
+    if op == "delete":
+        for root in (protect._expand(sr, sr), [".claude", "studio"]):
+            for e in range(1, len(root) + 1):
+                if protect.glob_may_match(gparts, root[:e], fold, extglob=ext):
+                    ctx.deny("G-DEL", GLOB_WHY % (prog, "deletes", word.value,
+                                                  "the repository root or an ancestor of Studio's folders"))
                     return
+    hh = glob_hook_hit(ctx, ri, gparts, fold, op, ext)
+    if hh:
+        verb = "deletes" if op.startswith("delete") else "links" if op == "link-source" else "writes"
+        if hh[1] == "gitconfig":
+            ctx.deny("G-HOOKOFF", GLOB_WHY % (prog, verb, word.value, "git's settings of a Studio repository (hooks and "
+                                                                     "aliases live there)"))
+        else:
+            ctx.deny("G-PROT", GLOB_WHY % (prog, verb, word.value, HOOK_WHY))
+        return
+    order = [t for t in protect.TABLE if t[0] == "P-LOCAL"] + [t for t in protect.TABLE if t[0] != "P-LOCAL"]
+    if op == "write" and effective(cmd)[0] == "ln":
+        # a link in place of a folder that may hold protected files (`ln -sfn /tmp/x s*/videos/v/work`: review 2,
+        # B-2), as judge_parts does for a literal path
+        if any(protect.glob_may_match(gparts, protect._expand(p, sr), fold, prefix=True, extglob=ext)
+               for _t, pats, _c, _w in protect.TABLE for p in pats):
+            ctx.deny("G-PROT", "ln %s: Studio does not follow links under %s/ (or its own folders), and the wildcard "
+                               "may match one — reference the file by its relative path (assets.json script_src) or "
+                               "copy it." % (word.value, sr))
+            return
+    for tid, pats, cls, who in order:
+        if tid == "P-LOCAL" and not op.startswith("delete"):
+            continue
+        prefix = op in ("delete", "write-dir")
+        for p in pats:
+            if protect.glob_may_match(gparts, protect._expand(p, sr), fold, prefix=prefix, extglob=ext):
+                if op.startswith("delete"):
+                    ctx.deny("G-DEL", GLOB_WHY % (prog, "deletes", word.value, "%s data that git cannot restore"
+                                                  % cls))
+                else:
+                    ctx.deny("G-PROT", GLOB_WHY % (prog, "extracts into" if op == "write-dir" else
+                                                   "links" if op == "link-source" else "writes", word.value,
+                                                   "protected Studio files (%s) — only %s may change them"
+                                                   % (cls, who)))
+                return
+
+
+def _glob_literal(seg, extglob):
+    return not any(ch in seg for ch in "*?[(|<") and not (extglob and any(ch in seg for ch in "^~#"))
+
+
+def glob_walk(ctx, base, segs, fold, extglob):
+    """Existing paths under `base` that the pattern `segs` matches as zsh would (dot names only by a literal dot,
+    no links followed), or None past WALK_MAX listed entries, at a folder that cannot be listed, or past the walks'
+    own file-system budget (C-M1: the walks of one call share MAX_FS_CALLS of their own; the call's budget is not
+    spent, and the static rule decides past it)."""
+    key = (base, tuple(segs), fold, extglob)
+    cache = ctx.__dict__.setdefault("glob_walks", {})
+    if key in cache:
+        return cache[key]
+    fs = ctx.fs
+    used = getattr(ctx, "glob_fs_calls", 0)
+    saved = (fs.calls, fs.max_calls)
+    fs.calls, fs.max_calls = 0, max(limits.MAX_FS_CALLS - used, 0)
+    try:
+        found = _glob_walk(ctx, base, segs, fold, extglob)
+    except limits.LimitExceeded:
+        found = None
+    finally:
+        ctx.glob_fs_calls = used + fs.calls
+        fs.calls, fs.max_calls = saved
+    cache[key] = found
+    return found
+
+
+def _listdir(ctx, path):
+    """A folder's names, listed once per call for every glob walk."""
+    names = ctx.__dict__.setdefault("glob_names", {})
+    if path not in names:
+        names[path] = ctx.fs.listdir(path)
+    return names[path]
+
+
+def _glob_walk(ctx, base, segs, fold, extglob):
+    out = []
+    listed = set()  # each folder's entries count once toward WALK_MAX
+
+    def names_of(path):
+        names = _listdir(ctx, path)
+        if names is not None and path not in listed:
+            listed.add(path)
+            ctx_count[0] += len(names)
+            if ctx_count[0] > WALK_MAX:
+                raise _WalkFull()
+        return names
+    ctx_count = [0]
+
+    def rec(path, i):
+        if i == len(segs):
+            out.append(path)
+            return True
+        s = segs[i]
+        if s == "**":
+            if not rec(path, i + 1):
+                return False
+            names = names_of(path)
+            if names is None:
+                return not ctx.fs.exists(path)
+            for n in sorted(names):
+                p = os.path.join(path, n)
+                if n.startswith(".") or os.path.islink(p) or not ctx.fs.isdir(p):
+                    continue
+                if not rec(p, i):
+                    return False
+            return True
+        if _glob_literal(s, extglob):
+            p = os.path.join(path, s)
+            if os.path.lexists(p) and (i + 1 == len(segs) or ctx.fs.isdir(p)):
+                return rec(p, i + 1)
+            return True
+        names = names_of(path)
+        if names is None:
+            return not ctx.fs.exists(path)
+        for n in sorted(names):
+            if n.startswith(".") and not s.startswith("."):
+                continue
+            if not protect._seg_ok(s, n, fold, extglob):
+                continue
+            p = os.path.join(path, n)
+            if i + 1 < len(segs) and not ctx.fs.isdir(p):
+                continue
+            if not rec(p, i + 1):
+                return False
+        return True
+    try:
+        return out if rec(base, 0) else None
+    except _WalkFull:
+        return None
+
+
+class _WalkFull(Exception):
+    pass
+
+
+def glob_outside(ctx, cmd, word, base, segs, fold, op, studio_infos):
+    """A glob whose literal folder part lies outside every Studio repository: its folders are listed one segment at
+    a time; a folder in a Studio repository continues with the two-pattern rule from there (G1 §2)."""
+    ext = getattr(word, "extglob", False)
+    roots = {".claude", "studio"} | {ri.studio_root for ri in studio_infos} | set(protect.TAIL_NAMES)
+
+    def risky(rest):
+        return any(x.casefold() in {r.casefold() for r in roots} for x in rest if _glob_literal(x, ext))
+
+    count = 0
+    frontier = [(base, 0)]
+    while frontier:
+        path, i = frontier.pop()
+        if i > 0 and ctx.fs.exists(path):
+            ri = ctx.repos.info(ctx.where.git_repo(path))
+            if ri is not None and ri.studio:
+                real = ctx.fs.realpath(path)
+                bparts = protect.rel_parts(real, ri.worktree, ctx.where.case_insensitive(real))
+                if bparts is not None:
+                    ctx.touch(ri)
+                    judge_glob_static(ctx, cmd, word, ri, bparts + segs[i:], ctx.where.case_insensitive(real), op)
+                    continue
+        if i == len(segs):
+            continue
+        s = segs[i]
+        if s == "**":
+            if risky(segs[i:]):
+                ctx.deny("G-LIMIT", "%s: a wildcard above a Studio repository — write the folder names." % word.value)
+                return
+            continue
+        if _glob_literal(s, ext):
+            p = os.path.join(path, s)
+            if ctx.fs.exists(p):
+                frontier.append((p, i + 1))
+            continue
+        names = ctx.fs.listdir(path)
+        if names is None:
+            if ctx.fs.exists(path) and risky(segs[i:]):
+                ctx.deny("G-LIMIT", "%s: a wildcard above a Studio repository — write the folder names." % word.value)
+                return
+            continue
+        for n in sorted(names):
+            count += 1
+            if count > WALK_MAX:
+                if risky(segs[i:]):
+                    ctx.deny("G-LIMIT", "%s: a wildcard above a Studio repository — write the folder names."
+                             % word.value)
+                return
+            if n.startswith(".") and not s.startswith("."):
+                continue
+            if protect._seg_ok(s, n, fold, ext):
+                p = os.path.join(path, n)
+                if i + 1 < len(segs) and not ctx.fs.isdir(p):
+                    continue
+                frontier.append((p, i + 1))
 
 
 GIT_ENV_TARGET = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")
+
+
+UNKNOWN_RUN = "the folder git runs in is unknown"
+
+
+def keeps_files(g):
+    """Whether a git call in a folder the guard cannot tell changes no file Studio protects whatever the folder is: add
+    without -f, stash without -a, checkout -b, switch and reset without a discard, restore --staged."""
+    args = [w.value for w in g.args]
+    if any(a is None for a in args):
+        return False
+    flags = [a for a in args if a.startswith("-")]
+    if g.sub == "add":
+        return not any(a in ("-f", "--force") or re.match(r"^-[a-zA-Z]*f", a) for a in flags)
+    if g.sub == "stash":
+        return not any(a == "--all" or re.match(r"^-[a-zA-Z]*a[a-zA-Z]*$", a) for a in flags)
+    if g.sub == "checkout":
+        return any(a in ("-b", "-B", "--orphan") or a.startswith("--orphan=") for a in flags) and "--" not in args \
+            and not any(a in ("-f", "--force", "-p", "--patch") for a in flags)
+    if g.sub == "switch":
+        return not any(a in ("-f", "--force", "--discard-changes") for a in flags)
+    if g.sub == "reset":
+        return not any(a in ("--hard", "--merge", "--keep") for a in flags)
+    if g.sub == "restore":
+        return any(a in ("-S", "--staged") for a in flags) and not any(a in ("-W", "--worktree") for a in flags)
+    return False
+
+
+def per_folder(cmd):
+    """review 9 B1: the command once per folder it may run in (a `cd` that may fail, a conditional `cd`, PIPEFAIL):
+    copies with that one run folder; the command itself when it has one folder or none the guard can tell."""
+    run = run_folders(cmd)
+    if len(run) <= 1:
+        return [cmd]
+    out = []
+    for c in run:
+        cc = copy.copy(cmd)
+        cc.run_cwds = [c]
+        out.append(cc)
+    return out
+
+
+def git_targets(ctx, cmd):
+    """[(folder copy, git_target)] for each folder git may run in (review 9 B1)."""
+    return [(cc, git_target(ctx, cc)) for cc in per_folder(cmd)]
 
 
 def git_target(ctx, cmd):
     """(RepoInfo, run cwd, git prefix args, extra env) for a git command, or a reason string to deny.
     --git-dir/--work-tree and GIT_DIR/GIT_WORK_TREE (command first, then the inherited environment) win."""
     g = cmd.git
-    run = cmd.run_cwds or cmd.cwds or [None]
+    run = run_folders(cmd) or [None]
     run_cwd = run[0] if len(run) == 1 else None
     env_set = cmd.env.set
     extra = {}
@@ -1147,9 +2079,13 @@ def git_target(ctx, cmd):
             return "%s is not a literal" % a
     if run_cwd is None:
         if gd is None and wt is None:
-            return None
+            # a folder the guard cannot tell (cd $D, env -C $D, a wildcard -C: §1.7a, review 2 M1/M12): the repository
+            # git works in is unknown. Several folders are judged one by one (per_folder, review 9 B1).
+            return UNKNOWN_RUN
         if (gd and not os.path.isabs(gd)) or (wt and not os.path.isabs(wt)):
             return "the working folder is unknown"
+        if wt is None:
+            return UNKNOWN_RUN  # GIT_DIR alone: git's work tree is the folder it runs in (review 9 M1)
     def absol(p):
         return os.path.normpath(p if os.path.isabs(p) else os.path.join(run_cwd, p))
     pre = []
@@ -1284,7 +2220,19 @@ def check_git(ctx, cmd, studio_infos):
     g = cmd.git
     if g is None:
         return
+    if len(run_folders(cmd)) > 1:
+        # review 9 B1: a folder change that may or may not happen — git is judged in each folder it may run in
+        for cc in per_folder(cmd):
+            n = len(ctx.denies)
+            check_git(ctx, cc, studio_infos)
+            if len(ctx.denies) > n:
+                return
+        return
     dyn_global = [w.raw for w in cmd.words[1:] if w.value is None and w.raw.startswith(("--git-dir", "--work-tree"))]
+    if g.sub is None and getattr(g, "sub_dynamic", False) and not dyn_global and studio_infos:
+        ctx.deny("G-OPAQUE", "git with a subcommand the guard cannot read (a word that may be anything or nothing) in "
+                             "a Studio repository — write the subcommand literally.")  # G1 §3
+        return
     if g.sub is None or dyn_global:
         if dyn_global and studio_infos:
             ctx.deny("G-RESET", "git with %s (not a literal) cannot be checked — write the path." % dyn_global[0])
@@ -1293,7 +2241,8 @@ def check_git(ctx, cmd, studio_infos):
         return
     target = git_target(ctx, cmd)
     if isinstance(target, str):
-        if studio_infos and g.sub in ("clean", "reset", "checkout", "restore", "switch", "stash", "rm", "mv", "add", "worktree"):
+        if studio_infos and g.sub in ("clean", "reset", "checkout", "restore", "switch", "stash", "rm", "mv", "add", "worktree") \
+                and not (target == UNKNOWN_RUN and keeps_files(g)):
             ctx.deny("G-RESET" if g.sub != "clean" else "G-CLEAN",
                      "git %s cannot be checked safely (%s)." % (g.sub, target))
         return
@@ -1478,7 +2427,7 @@ def check_discard(ctx, cmd, ri, run_cwd, pre, penv, unsafe):
             if parts is None:
                 continue
             if _ancestor_or_equal(parts, sr_anchor, fold) or _ancestor_or_equal(parts, cl_anchor, fold) or \
-                    any(ch in w.value for ch in "*?["):
+                    any(ch in w.value for ch in "*?[<"):
                 covers = True
             elif _within(parts, sr_anchor, fold) or _within(parts, cl_anchor, fold):
                 tid = protect.classify(parts, ri.studio_root, fold, include_local=True)
@@ -1614,7 +2563,7 @@ def check_setup(ctx, cmd):
         return True
     pend = v.pending
     ctx.effects.append(("G-EVIDENCE", lambda: approve.write_pending(ri, pend)))
-    ctx.candidates.append((cmd, "state", v.reason))
+    add_candidate(ctx, (cmd, "state", v.reason))
     return True
 
 
@@ -1655,7 +2604,7 @@ def check_approval(ctx, cmd):
 
 
 def _run_repo(ctx, cmd):
-    run = cmd.run_cwds or cmd.cwds or []
+    run = run_folders(cmd)
     if len(run) != 1 or not ctx.fs.exists(run[0]):
         return None
     return ctx.repos.info(ctx.where.git_repo(run[0]))
@@ -1686,7 +2635,7 @@ def state_approval(ctx, cmd, argv):
         return
     pend = v.pending
     ctx.effects.append(("G-EVIDENCE", lambda: approve.write_pending(ri, pend)))
-    ctx.candidates.append((cmd, "state", v.reason))
+    add_candidate(ctx, (cmd, "state", v.reason))
 
 
 def s2v_approval(ctx, cmd, words):
@@ -1700,7 +2649,7 @@ def s2v_approval(ctx, cmd, words):
         ctx.deny(v.rule, v.text, messages.alias_sources(cmd),
                  suffix=approve.evidence_suffix(v.code))  # fix-0025 §2.2
         return
-    ctx.candidates.append((cmd, "s2v", v.reason))
+    add_candidate(ctx, (cmd, "s2v", v.reason))
 
 
 # ---- 0.0.24 (pilot-1 P6): printing Studio's own documents ----
@@ -1733,7 +2682,7 @@ def doc_call(ctx, cmd):
     if name is not None and name != "help" and name not in doc.NAMES:
         return None
     # the run folder's root: the `cd <dir>` target, else the hook's cwd; its git top level, else the folder itself
-    run = cmd.run_cwds if cmd.run_cwds else [ctx.cwd]
+    run = run_folders(cmd) if (cmd.run_cwds or "run-unknown" in cmd.flags) else [ctx.cwd]
     if len(run) != 1 or not ctx.fs.exists(run[0]):
         return None
     repo = ctx.where.git_repo(run[0])
@@ -1772,10 +2721,84 @@ def check_docs(ctx, sc):
     for c in sc.commands:
         reason = doc_call(ctx, c)
         if reason:
-            ctx.candidates.append((c, "doc", reason))
+            add_candidate(ctx, (c, "doc", reason))
 
 
 # ---- tools ----
+
+# glob qualifiers that only narrow a glob's matches (no `e`/`+` code, no `D` dot files, no `P` words, no `:` modifiers)
+QUALIFIER_AT_END_RE = re.compile(r"(?<=[^\s;&|(<>])\([^()\s]*\)(?=[\s;&|)<>]|$)")
+PLAIN_QUALIFIER_RE = re.compile(r"^\((\^?[./@=p*%\-rwxRWXAIEsStUGNnoOLmacdkhMTY0-9\[\],^]+)\)$")
+
+
+def glob_group_at(command, reason):
+    """Whether the parser stopped at a `(` inside a command's words: a zsh glob group (`rm -rf (stu)dio`, `ls (a|b)`)
+    the guard does not read (refused in a Studio repository like the other zsh glob groups)."""
+    m = re.match(r"^syntax:[\w-]+@(\d+)$", reason or "")
+    if not m:
+        return False
+    p = int(m.group(1))
+    # a `(` after a blank, or joined to a word (`[[ a == x(a|b) ]]`, review 7 conf M-1)
+    return command[p:p + 1] == "(" and p > 0 and command[p - 1] not in ";&|<>$=`(\n"
+
+
+def ksh_glob_maybe(command, snap):
+    """Whether KSH_GLOB may be on for a command: on in a snapshot, or the command may change options (setopt, set -o,
+    emulate, eval, source, the options table, a snapshot function)."""
+    opts_re = r"ksh|glob|setopt|unsetopt|emulate|options|eval|source|\bset\b|(^|[\s;&|(])\.(\s|$)"
+    if snap is not None and snap.options.get("kshglob", False) is not False:
+        return True
+    if re.search(opts_re, command):
+        return True
+    if snap is not None:
+        for w in set(re.split(r"[\s;&|()<>]+", command)):
+            if w in snap.user_functions or w in snap.alternatives or w in snap.global_aliases or (
+                    w in snap.plain and re.search(opts_re, snap.plain[w])):
+                return True
+    return False
+
+
+def bare_glob_qual_on(command, snap):
+    """review 4 bypass B2: whether a trailing `(…)` is certainly a glob qualifier — BARE_GLOB_QUAL certainly on and
+    KSH_GLOB and SH_GLOB certainly off for the whole command. Without BARE_GLOB_QUAL `studi(o)` is a pattern that
+    matches `studio`. The Bash tool turns BARE_GLOB_QUAL off after the snapshot (BASH_TOOL_POSTLUDE; checked in the
+    tool's own shell, zsh 5.9), so this holds only where a snapshot's options say otherwise."""
+    opts = snap.options if snap is not None else dict(SNAP_DEFAULT_OPTIONS, **BASH_TOOL_POSTLUDE["options"])
+    if opts.get("bareglobqual", True) is not True or opts.get("kshglob", False) is not False or \
+            opts.get("shglob", False) is not False:
+        return False
+    if snap is not None and snap.option_conflicts & {"bareglobqual", "kshglob", "shglob"}:
+        return False
+    return not ksh_glob_maybe(command, snap)
+
+
+def without_plain_qualifiers(ctx, command, sc, snap, notes, budget):
+    """review 3 conformance m-3: `ls **/*(.)` — a word ending in a glob qualifier that only narrows its matches is read
+    without it (its matches are a subset) when BARE_GLOB_QUAL is certainly on (review 4 B2); any other glob group stays
+    unparsable (G-UNPARSE in a Studio repository)."""
+    text, orig = command, sc
+    if not bare_glob_qual_on(command, snap):
+        return orig
+    for _ in range(8):
+        m = re.match(r"^unsupported:zsh-glob-group@(\d+)$", sc.reason or "") if sc.status == "unparsable" else None
+        if not m:
+            break
+        pos = int(m.group(1))
+        groups = [g for g in QUALIFIER_AT_END_RE.finditer(text) if g.start() <= pos]
+        if not groups or not PLAIN_QUALIFIER_RE.match(groups[-1].group(0)):
+            return orig
+        if text[groups[-1].start() - 1] in "!@+?*" and ksh_glob_maybe(command, snap):
+            return orig  # with KSH_GLOB, `!(x)`, `*(x)`, … are patterns, not qualifiers
+        text = text[:groups[-1].start()] + text[groups[-1].end():]
+        sub = _scan(ctx, text, ctx.cwd, ctx.env, snapshot=snap, snapshot_notes=notes, terms=None, fs=ctx.fs,
+                           budget=budget)
+        if sub.status == "ok":
+            return sub
+        if not (sub.reason or "").startswith("unsupported:zsh-glob-group@"):
+            return orig
+        sc = sub
+    return orig
+
 
 def decide_bash(ctx, command):
     ctx.command = command
@@ -1785,41 +2808,57 @@ def decide_bash(ctx, command):
         snap, notes = None, ["snapshot-unreadable:load"]
     budget = limits.Budget()
     ctx.snap = snap
-    sc = scan_command(command, ctx.cwd, ctx.env, snapshot=snap, snapshot_notes=notes, terms=None, fs=ctx.fs,
+    sc = _scan(ctx, command, ctx.cwd, ctx.env, snapshot=snap, snapshot_notes=notes, terms=None, fs=ctx.fs,
                       budget=budget)
+    sc = without_plain_qualifiers(ctx, command, sc, snap, notes, budget)
     cwd_repo = ctx.repos.info(ctx.where.git_repo(ctx.cwd)) if ctx.fs.exists(ctx.cwd) else None
     infos = []
+    ctx.infos = infos  # the Studio repositories found so far (decide: G-LIMIT only in a Studio context)
     if cwd_repo is not None and cwd_repo.studio:
         infos.append(cwd_repo)
+    # the strings the shell runs from text, scanned before the repositories are collected (G1 §1.7)
+    tree, flat = nested_scans(ctx, sc, budget)
+    nested_cmds = [c for nd in flat if nd.sub is not None for c in nd.sub.commands]
     # target repositories
-    n = 0
-    for c in sc.commands:
-        for d in (c.cwds or []) + (c.run_cwds or []):
-            if ctx.fs.exists(d):
-                ri = ctx.repos.info(ctx.where.git_repo(d))
-                if ri is not None and ri.studio and ri not in infos:
-                    infos.append(ri)
-        for w, vals in candidates(c):
-            for v in vals:
-                if not looks_like_path(v, c, ctx):
-                    continue
-                n += 1
-                if n > MAX_CANDIDATES:
-                    ctx.deny("G-LIMIT", "the command has too many path arguments for the guard — split it.")
-                    return sc, infos
-                for a, real, ri in resolve_all(ctx, c, v):
-                    if ri is not None and ri.studio and ri not in infos:
-                        infos.append(ri)
-        for r in c.redirs:
-            if r.target is not None and r.target.value:
-                for a, real, ri in resolve_all(ctx, c, r.target.value):
-                    if ri is not None and ri.studio and ri not in infos:
-                        infos.append(ri)
+    n = collect_repos(ctx, list(sc.commands) + nested_cmds, infos, 0)
+    if n is None:
+        return sc, infos
+    for nd in flat:
+        if nd.sub is None and nd.op.kind in STRING_KINDS:  # strings, not script files
+            text = nd.skeleton if nd.skeleton is not None else nd.text
+            n += piece_search(ctx, text, nd.cwds, infos)
+            empty_reading(ctx, nd.skeleton, nd.cwds, infos, budget)
+    for o in list(sc.opaque) + [o for nd in flat if nd.sub is not None for o in nd.sub.opaque]:
+        if o.kind in ("runner", "sudo-shell"):  # a refused runner's words are searched like a non-literal string (§1.2)
+            n += piece_search(ctx, o.skeleton, o.cwds, infos)
+            empty_reading(ctx, o.skeleton, o.cwds, infos, budget)
+        elif o.kind in ("dynamic-command", "var-set") and getattr(o, "skeleton", None):
+            n += piece_search(ctx, o.skeleton, o.cwds, infos)  # ${(e)X}'s value, a §1.9 variable's (m-a)
+    for c in list(sc.commands) + nested_cmds:
+        if unmodelled(ctx, c) and fallback_writes(c):  # §1.10: searched as a refused runner's words are
+            n += piece_search(ctx, " ".join(w.skeleton for w in c.words[1:]), run_folders(c), infos)
+        for text in refusal_texts(c):  # §1.9 (review 2, m-a): the command lines in options and variables
+            n += piece_search(ctx, text, run_folders(c) or c.cwds, infos)
+    if sc.status == "unparsable":
+        n += piece_search(ctx, command, [ctx.cwd], infos)
+    if n > MAX_CANDIDATES:
+        ctx.deny("G-LIMIT", "the command has too many path arguments for the guard — split it.")
+        return sc, infos
+    # review 3 B1/B-1, M3: a search cut short, a string not read for time or a scan stopped by a limit may hide a
+    # Studio repository named later in the command — refused unless nothing in it can name one (also outside one)
+    cut = getattr(ctx, "search_cut", False) or getattr(ctx, "nested_budget_out", False) or (
+        sc.status == "unparsable" and (sc.reason or "").startswith("limit:"))
+    if cut and (infos or may_name_repo(ctx, command)):
+        ctx.deny("G-LIMIT", "the text this command runs takes the guard too long to search for Studio repositories "
+                            "— split it into simpler commands, one step per call.")
+        return sc, infos
+    ctx.collected = True  # the repositories are known: a limit from here on refuses only in a Studio context
     for ri in infos:
         ctx.touch(ri)
     fold = ctx.where.case_insensitive(ctx.cwd) if ctx.fs.exists(ctx.cwd) else False
     terms = terms_for(infos, fold)
-    raw_hits = terms.find(command)
+    # G1 §1.8: a term split by quoting or backslashes (`stu''dio`, `st\udio`) still hits
+    raw_hits = terms.find(command) or terms.find(re.sub(r"['\"\\]", "", command))
     src_notes = messages.snapshot_sources(sc.notes)
     if sc.status == "error":
         if infos:
@@ -1830,15 +2869,36 @@ def decide_bash(ctx, command):
         if infos and raw_hits:
             ctx.deny("G-UNPARSE", "the guard could not parse this command (%s) and it mentions %s — split it into "
                                   "simple commands." % (sc.reason, raw_hits[0].term), src_notes)
+        elif infos and ((sc.reason or "").startswith("unsupported:zsh-") or glob_group_at(command, sc.reason)):
+            # G1 §1.8 (M6): zsh-only forms the parser does not read (glob groups and qualifiers, repeat, foreach,
+            # anonymous functions) — refused without a Studio term
+            ctx.deny("G-UNPARSE", "the guard does not read this zsh form (%s) in a Studio repository — write the "
+                                  "command without it, one step per call." % sc.reason, src_notes)
+        elif infos and unparsable_assignment(command):
+            ctx.deny("G-UNPARSE", "the guard could not parse this command (%s) and it assigns %s, which the guard "
+                                  "would follow — split it into simple commands." % (
+                                      sc.reason, unparsable_assignment(command)), src_notes)
+        elif infos and (unparsable_glob_group(command) or unparsable_verb(command, snap)):
+            # review 7 conf M-1: text the guard cannot read with a glob group or a command that deletes, moves or
+            # writes files does not pass silently in a Studio repository
+            ctx.deny("G-UNPARSE", "the guard could not parse this command (%s) and it %s — split it into simple "
+                                  "commands, one step per call." % (
+                                      sc.reason, "has a glob group (…)" if unparsable_glob_group(command) else
+                                      "runs %s" % unparsable_verb(command, snap)), src_notes)
         # out-of-repo files are judged from the text only when parsing failed
         return sc, infos
+    check_zsh(ctx, [sc] + [nd.sub for nd in flat if nd.sub is not None], infos)  # G1 §1.8, §1.9
     # always: out-of-repo protected files (and lock owner records); Studio paths when a repository is one
+    ctx.earlier_write = False  # G1 §2: a `**` glob is listed only when nothing before it in the call may write
     for c in sc.commands:
         ctx.current = c
         check_out_of_repo(ctx, c)
         check_paths(ctx, c, infos)
+        if is_writer(c) or c.wrappers:
+            ctx.earlier_write = True
     ctx.current = None
-    check_shell_strings(ctx, sc, infos, 0)  # adds the host `sh` of a string that extracts or copies trees
+    ctx.earlier_write = True  # the strings run from text: the static rule
+    check_shell_strings(ctx, sc, infos, tree)  # adds the host `sh` of a string that extracts or copies trees
     if ctx.bulk_ids:
         bulk_then_write(ctx, sc.commands, ctx.bulk_ids)
     ctx.scan = sc
@@ -1854,15 +2914,755 @@ def decide_bash(ctx, command):
         check_opaque(ctx, o, by_id.get(o.cmd), terms, infos, src_notes)
     for c in sc.commands:
         ctx.current = c
-        check_version(ctx, c)
-        check_env(ctx, c)
-        check_approval(ctx, c)
-        check_s2v_results(ctx, c)
-        check_git_rules(ctx, c, infos)
-        check_gh(ctx, c, infos)
-        check_patch(ctx, c, infos, sc)
+        per_command(ctx, c, infos, sc)
+    ctx.current = None
+    # the commands of the strings the shell runs from text, each with its own scan (G1 §1.7)
+    for nd in flat:
+        if nd.sub is None:
+            continue
+        ctx.scan, ctx.command = nd.sub, nd.text
+        sub_ids = {c.id: c for c in nd.sub.commands}
+        for o in nd.sub.opaque:
+            check_opaque(ctx, o, sub_ids.get(o.cmd), terms, infos, src_notes)
+        for c in nd.sub.commands:
+            ctx.current = c
+            per_command(ctx, c, infos, nd.sub)
+        ctx.current = None
+    ctx.scan, ctx.command = sc, command
+    for c in list(sc.commands) + nested_cmds:  # §1.10
+        if unmodelled(ctx, c):
+            ctx.current = c
+            check_fallback(ctx, c, infos)
     ctx.current = None
     return sc, infos
+
+
+ASSIGN_TEXT_RE = re.compile(r"(?:^|(?<=[\s;&|({`]))([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]\s]*\])?\+?=")
+
+
+UNPARSABLE_VERBS = ("rm", "rmdir", "unlink", "mv", "cp", "ln", "install", "rsync", "dd", "truncate", "shred", "trash",
+                    "srm", "find", "git", "tar", "unzip", "ditto", "chmod", "chown", "chflags", "sed", "perl", "tee",
+                    "touch", "mkdir", "patch", "xargs", "sh", "bash", "zsh", "eval", "source", "exec", "python",
+                    "python3", "node")
+_VERB_RE = re.compile(r"(?<![\w./=$-])(%s)(?![\w.=/-])" % "|".join(re.escape(v) for v in UNPARSABLE_VERBS))
+
+
+def _unquoted_text(command):
+    return re.sub(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"|\\.", " ", command)
+
+
+def unparsable_glob_group(command):
+    """review 7 conf M-1: whether text the guard cannot parse may hold a zsh glob group — a `(` joined to a word
+    (`stu(d|x)io`, `*.(ts|tsx)`, `(#i)x`) or a parenthesized `|` alternative outside quotes."""
+    t = _unquoted_text(command)
+    t = re.sub(r"\$\(\(|\$\(|[<>=]\(|\(\(|\)\)", " ", t)  # $(…), $((…)), <(…), =(…), ((…))
+    if re.search(r"[^\s;&|(){}<>`$=]\(", t) or re.search(r"\([^()]*\|[^()]*\)", t):
+        return True
+    return bool(re.search(r"\(#[a-zA-Z]", t))
+
+
+def unparsable_verb(command, snap=None):
+    """review 7 conf M-1: a command word in unparsable text that deletes, moves or writes files or runs code — its
+    name, or None (the text is not read, so any such word counts). review 8 M1: also in every spelling zsh accepts in
+    command position (`/bin/rm`, `=rm`, `r''m`, `r\\m`, `${:-rm}`, `$X`, an alias or function of the snapshot whose text
+    holds such a word), and a write redirection (`>`, `>|`, `>>&!`, `&>|`, …)."""
+    m = _VERB_RE.search(command)
+    if m:
+        return m.group(1)
+    words, writes, aliases = _text_commands(command)
+    for w, dyn in words:
+        r = _verb_word(w, dyn, snap, 0)
+        if r:
+            return r
+    for value in aliases:  # `alias x='r\\m -rf'` in the text itself
+        for w, dyn in _text_commands(value)[0]:
+            r = _verb_word(w, dyn, snap, 1)
+            if r:
+                return "an alias the command defines (%s)" % r
+    if writes:
+        return "a file write (%s)" % writes[0]
+    return None
+
+
+PRECOMMAND_WORDS = {"if", "then", "else", "elif", "do", "while", "until", "!", "time", "coproc", "{", "exec", "command",
+                    "builtin", "noglob", "nocorrect", "nohup", "sudo", "doas", "env", "nice", "-", "xargs", "caffeinate",
+                    "timeout", "gtimeout", "stdbuf", "watch", "repeat", "foreach", "select", "function"}
+_SAFE_REDIRECT = re.compile(r"^(/dev/null|/dev/stdout|/dev/stderr)$")
+
+
+def _text_commands(text):
+    """Rough reading of text the parser cannot read: ([(command word with its quotes and backslashes removed, whether
+    it holds an expansion)], [write redirections], [values of aliases the text defines]). A word stands in command position at the start, after `; & | ( )
+    { } ` $(` or a newline, and after reserved words, precommands and assignments."""
+    words, writes = [], []
+    toks = []  # (text, raw, kind) kind: "w" word, "s" separator, "r>" / "r<" redirection operator
+    i, n = 0, len(text)
+    cur, raw, dyn = [], [], False
+
+    def flush():
+        if raw:
+            toks.append(("".join(cur), "".join(raw), "w", dyn))
+        del cur[:], raw[:]
+    while i < n:
+        c = text[i]
+        if c == "\\" and i + 1 < n:
+            if text[i + 1] != "\n":
+                cur.append(text[i + 1])
+                raw.append(text[i:i + 2])
+            i += 2
+            continue
+        if c == "'":
+            j = text.find("'", i + 1)
+            j = n if j < 0 else j
+            cur.append(text[i + 1:j])
+            raw.append(text[i:j + 1])
+            i = j + 1
+            continue
+        if c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                if text[j] == "\\":
+                    j += 1
+                elif text[j] in "$`":
+                    dyn = True
+                j += 1
+            cur.append(text[i + 1:j].replace("\\", ""))
+            raw.append(text[i:j + 1])
+            i = j + 1
+            continue
+        if c == "$" and text.startswith("$'", i):
+            # review 9 B2: $'…' with its backslash escapes (`$'\''` is one quote character)
+            j = i + 2
+            while j < n and text[j] != "'":
+                j += 2 if text[j] == "\\" else 1
+            j = min(j, n)
+            from .lex import ansi_c
+            body, _sure = ansi_c(text[i + 2:j])
+            cur.append(body)
+            raw.append(text[i:j + 1])
+            i = j + 1
+            continue
+        if c == "$" and text.startswith("$(", i) and not text.startswith("$((", i):
+            flush()
+            dyn = False
+            toks.append(("$(", "$(", "s", False))
+            i += 2
+            continue
+        if c in "$`":
+            if c == "`":
+                flush()
+                dyn = False
+                toks.append(("`", "`", "s", False))
+                i += 1
+                continue
+            dyn = True
+            cur.append(c)
+            raw.append(c)
+            i += 1
+            continue
+        if c in " \t":
+            flush()
+            dyn = False
+            i += 1
+            continue
+        if c in ";&|(){}\n":
+            if c == "&" and text.startswith(">", i + 1):
+                flush()
+                dyn = False
+                m = re.match(r"&>>?[|!]?", text[i:])
+                toks.append((m.group(0), m.group(0), "r>", False))
+                i += len(m.group(0))
+                continue
+            if c in "{}" and raw:
+                cur.append(c)
+                raw.append(c)
+                i += 1
+                continue
+            flush()
+            dyn = False
+            toks.append((c, c, "s", False))
+            i += 1
+            continue
+        if c in "<>":
+            m = re.match(r"<[0-9]*-[0-9]*>", text[i:]) if c == "<" else None
+            if m:
+                cur.append(m.group(0))
+                raw.append(m.group(0))
+                i += m.end()
+                continue
+            if c in "<>" and text.startswith("(", i + 1):
+                flush()
+                dyn = False
+                toks.append(("(", "(", "s", False))
+                i += 2
+                continue
+            if raw and re.fullmatch(r"\d+|\{[A-Za-z_]\w*\}", "".join(raw)):
+                del cur[:], raw[:]  # an fd number
+            flush()
+            dyn = False
+            m = re.match(r"<<<|<<-?|<>|<&|<|>>?&?[|!]?|>[|!]|>&|>", text[i:])
+            toks.append((m.group(0), m.group(0), "r>" if ">" in m.group(0) and not m.group(0).startswith("<")
+                         else "r<", False))
+            i += len(m.group(0))
+            continue
+        cur.append(c)
+        raw.append(c)
+        i += 1
+    flush()
+    cmdpos = True
+    k = 0
+    aliases, in_alias = [], False
+    while k < len(toks):
+        t, r, kind, d = toks[k]
+        if kind == "w" and in_alias and not cmdpos and "=" in t:
+            aliases.append(t.split("=", 1)[1])
+        if kind == "s":
+            cmdpos = True
+            in_alias = False
+        elif kind.startswith("r"):
+            nxt = toks[k + 1] if k + 1 < len(toks) and toks[k + 1][2] == "w" else None
+            if kind == "r>":
+                target = nxt[0] if nxt is not None else ""
+                dup = t in (">&", "<&") and re.fullmatch(r"\d+|-", target or "")
+                if not dup and not _SAFE_REDIRECT.match(target or ""):
+                    writes.append(t)
+            if nxt is not None:
+                k += 1
+        elif cmdpos:
+            if re.match(r"^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?=", r):
+                pass  # an assignment: the command word follows
+            elif t in PRECOMMAND_WORDS or (t.startswith("-") and words and words[-1][0] in PRECOMMAND_WORDS):
+                pass
+            else:
+                words.append((t, d))
+                cmdpos = False
+                in_alias = t == "alias"
+        k += 1
+    return words, writes, aliases
+
+
+def _verb_word(w, dyn, snap, depth):
+    """Whether a command word (quotes removed) is, or may be, a command that deletes, moves, writes or runs code."""
+    if dyn or "$" in w:
+        return "a command word built at run time (%s)" % w
+    name = w[1:] if w.startswith("=") else w
+    base = name.rstrip("/").rsplit("/", 1)[-1]
+    if base in UNPARSABLE_VERBS:
+        return base
+    if snap is None or depth > 3 or "/" in name:
+        return None
+    vals = []
+    if name in snap.plain:
+        vals.append(snap.plain[name])
+    vals += [v for v in snap.alternatives.get(name, ()) if isinstance(v, str)]
+    for v in vals:
+        m = _VERB_RE.search(v)
+        if m:
+            return "%s (an alias for %s)" % (name, m.group(1))
+        for w2, d2 in _text_commands(v)[0]:
+            r = _verb_word(w2, d2, snap, depth + 1)
+            if r:
+                return "%s (an alias: %s)" % (name, r)
+    if name in snap.user_functions:
+        body = snap.function_text(name) or ""
+        m = _VERB_RE.search(body)
+        if m or not body:
+            return "%s (a function of yours that may run %s)" % (name, m.group(1) if m else "anything")
+    return None
+
+
+def unparsable_assignment(command):
+    """review 5 R1: a command the guard cannot parse that assigns a variable the guard follows (§1.9, a function's
+    watched names) or one the command expands later: the name, or None."""
+    from .walk import FUNC_WATCHED
+    for m in ASSIGN_TEXT_RE.finditer(command):
+        name = m.group(1)
+        if cmdopts.watched_var(name) or name in FUNC_WATCHED or name in cmdopts.CMD_VARS:
+            return name
+        if re.search(r"\$\{?(?:\([^)]*\))?[~=^+#]*%s(?![A-Za-z0-9_])" % re.escape(name), command[m.end():]):
+            return name
+    return None
+
+
+def refusal_texts(c):
+    """The texts of a command that §1.9 refuses in a Studio repository (G1 §1.7: searched for Studio repositories like
+    a refused runner's words, review 2 m-a): command-valued variables in effect, and the words of a command whose
+    options, git keys or git subcommand options run a command line."""
+    out = []
+    if not c.words or c.words[0].value is None:
+        return out
+    pm = "path-modified" in (c.flags or ()) or "PATH" in c.env.set or "PATH" in c.env.unset
+    for name, w in c.env.set.items():
+        if cmdopts.var_problem(name, w.value if w is not None else None, pm) and w is not None:
+            out.append(w.value if w.value is not None else (w.skeleton or ""))
+    prog, words = effective(c)
+    k = recog.key(prog or "")
+    vals = [w.value for w in words]
+    g = c.git
+    hit = cmdopts.program_option_problem(k, vals) or recog.key(c.prog or "") == "zstyle"
+    if not hit and k == "git" and g is not None:
+        avals = [w.value for w in g.args]
+        hit = any(cmdopts.command_key(key, val) for key, val in g.configs) or (
+            g.sub is not None and (cmdopts.git_option_problem(g.sub, avals) or
+                                   (g.sub == "clone" and any(cmdopts.command_key(kk, vv)
+                                                             for kk, vv in cmdopts.clone_configs(g.args)))))
+    if hit:
+        out.append(" ".join(w.skeleton for w in c.words[1:]))
+    return out
+
+
+def per_command(ctx, c, infos, sc):
+    check_version(ctx, c)
+    check_env(ctx, c)
+    check_approval(ctx, c)
+    check_s2v_results(ctx, c)
+    check_git_rules(ctx, c, infos)
+    check_gh(ctx, c, infos)
+    check_patch(ctx, c, infos, sc)
+    check_command_values(ctx, c, infos)
+
+
+# ---- G1 §1.8: zsh constructs the walk does not model; §1.9: command lines in options and variables ----
+
+CMDLINE_WHY = ("%s runs a command line the guard does not read (%s) in a Studio repository — run that command "
+               "directly, one step per call.")
+ZSH_WHY = ("%s changes zsh's command, alias, function or option tables in a Studio repository — the guard cannot tell "
+           "what later commands run; write the commands directly, one step per call.")
+
+
+def check_zsh(ctx, scans, infos):
+    """In a Studio repository, refused with no Studio term needed (G1 §1.8): writes to zsh's tables, prompt
+    expansion that may run `$(…)`, options set by a name the guard cannot read, autoload and zmodload outside their
+    allowlists, `zstyle -e`; and command-valued variables set in the call (§1.9)."""
+    if not infos:
+        return
+    for sc in scans:
+        by_id = {c.id: c for c in sc.commands}
+        for o in sc.opaque:
+            ctx.current = by_id.get(o.cmd)
+            if o.kind == "zsh-table":
+                ctx.deny("G-OPAQUE", ZSH_WHY % o.payload)
+            elif o.kind == "prompt-subst":
+                ctx.deny("G-OPAQUE", "%s expands a prompt while PROMPT_SUBST may be on, which runs $(…) the guard "
+                                     "does not read, in a Studio repository — print the text without prompt "
+                                     "expansion." % o.payload)
+            elif o.kind == "var-set":
+                why = cmdopts.var_problem(o.payload, getattr(o, "value", None), getattr(o, "path_modified", False))
+                if why:
+                    ctx.deny("G-OPAQUE", CMDLINE_WHY % ("setting " + o.payload, why))
+        for c in sc.commands:
+            if not c.words or c.words[0].value is None:
+                continue
+            ctx.current = c
+            k = recog.key(c.prog or "")
+            vals = [w.value for w in c.words[1:]]
+            why = None
+            if k in ("setopt", "unsetopt", "emulate") and any(v is None for v in vals):
+                why = "%s with a name the guard cannot read" % k
+            elif k == "set" and any(v in ("-o", "+o") and (i + 1 >= len(vals) or vals[i + 1] is None)
+                                    for i, v in enumerate(vals)):
+                why = "set -o with an option name the guard cannot read"
+            elif k == "autoload":
+                why = cmdopts.autoload_problem(vals)
+            elif k == "zmodload":
+                why = cmdopts.zmodload_problem(vals)
+            elif k == "zstyle" and any(v is None or re.match(r"^-[A-Za-z]*e", v or "") for v in vals[:1]):
+                why = "zstyle -e (its value is evaluated as code by zstyle -s)"
+            elif k == "zstyle":
+                why = cmdopts.zstyle_problem(vals)
+            if why:
+                ctx.deny("G-OPAQUE", "%s — the guard does not follow it in a Studio repository; run the commands "
+                                     "directly, one step per call." % why)
+    ctx.current = None
+
+
+def check_command_values(ctx, c, infos):
+    """G1 §1.9: command-valued environment variables in effect, git keys, git routes to configuration and
+    command-valued options, and the options of ssh, rsync, tar, zip, sort, man and make."""
+    if not infos or not c.words or c.words[0].value is None:
+        return
+    env = c.env
+    pm = "path-modified" in (c.flags or ()) or "PATH" in env.set or "PATH" in env.unset
+    for name, w in env.set.items():
+        why = cmdopts.var_problem(name, w.value if w is not None else None, pm)
+        if why:
+            ctx.deny("G-OPAQUE", CMDLINE_WHY % (c.prog or "the command", why))
+    prog, words = effective(c)
+    k = recog.key(prog or "")
+    vals = [w.value for w in words]
+    hit = cmdopts.program_option_problem(k, vals)
+    if hit:
+        ctx.deny("G-OPAQUE", CMDLINE_WHY % (prog, hit))
+    g = c.git
+    if k != "git" or g is None:
+        return
+    if env.unknown:
+        # m5: `eval`, env --env0-from, a function: what git reads is in effect but unknown (§1.9). (fix20: after a
+        # `source` this guard judges nothing — the 0.0.26 rules do, backstop.decide)
+        ctx.deny("G-OPAQUE", "git runs with environment variables the guard cannot read (set by `eval`, env "
+                             "--env0-from or a shell function that exports or assigns variables) in a Studio "
+                             "repository — they may move where git reads its settings, which can run commands.")
+    for key, val in g.configs:
+        why = cmdopts.command_key(key, val)
+        if why:
+            ctx.deny("G-OPAQUE", CMDLINE_WHY % ("git -c", why))
+    for name in cmdopts.git_env_problems(env.set):
+        ctx.deny("G-OPAQUE", "git runs with %s set in a Studio repository — it moves where git reads its settings "
+                             "(which can run commands); run git without it." % name)
+    run = run_folders(c)
+    for name in ("GIT_DIR", "GIT_WORK_TREE"):
+        if name not in env.set:
+            continue
+        w = env.set[name]
+        v = w.value if w is not None else None
+        inside = v is not None and (os.path.isabs(v) or len(run) == 1) and any(
+            _inside(ctx._real(os.path.normpath(v if os.path.isabs(v) else os.path.join(run[0], v))),
+                    os.path.realpath(d))
+            for ri in infos for d in (ri.worktree, ri.common_dir) if d)
+        if not inside:
+            ctx.deny("G-OPAQUE", "git runs with %s=%s, a folder outside the Studio repository — git would read "
+                                 "settings the guard does not see; run git in the repository itself."
+                     % (name, v if v is not None else "…"))
+    if g.sub is None:
+        return
+    avals = [w.value for w in g.args]
+    hit = cmdopts.git_option_problem(g.sub, avals)
+    if hit:
+        ctx.deny("G-OPAQUE", CMDLINE_WHY % ("git " + g.sub, hit))
+    if g.sub == "clone":
+        for key, val in cmdopts.clone_configs(g.args):
+            why = cmdopts.command_key(key, val)
+            if why:
+                ctx.deny("G-OPAQUE", CMDLINE_WHY % ("git clone", why))
+    if g.sub == "config":
+        for key, val in cmdopts.config_sets(avals):
+            if key in (None, "*"):
+                continue  # the hook-key rule refuses those (G-HOOKOFF)
+            why = cmdopts.command_key(key, val)
+            if why:
+                ctx.deny("G-OPAQUE", CMDLINE_WHY % ("git config", why))
+        for sec in cmdopts.config_renames(avals):  # M8: the keys of a renamed section move into it
+            why = cmdopts.command_section(sec)
+            if why:
+                ctx.deny("G-OPAQUE", CMDLINE_WHY % ("git config --rename-section",
+                                                    "%s holds settings that run commands" % why))
+
+
+# ---- G1 §1.11: READ_ALLOW programs that write files or run programs ----
+
+EXIF_ALLOW = {"-s", "-a", "-u", "-j", "-json", "-n", "-b", "-x", "-csv", "-l", "-ver", "-ee", "-r", "-f"}
+EXIF_VALUE = {"-ext", "--ext", "-d", "-c", "-charset", "-lang"}
+EXIF_KNOWN = set("""
+-@ -a -api -b -binary -c -coordformat -charset -config -csv -csvdelim -d -dateformat -decimal -delete_original
+-diff -duplicates -e -ec -ex -escapehtml -escapexml -echo -echo1 -echo2 -echo3 -echo4 -efile -efile1 -efile2
+-efile3 -efile4 -ee -extractembedded -ext -extension -execute -f -forceprint -fixbase -fast -fast2 -fast3 -fast4
+-fast5 -fileorder -g -groupheadings -geotag -geosync -geotime -globaltimeshift -h -htmlformat -hex -htmldump -i
+-ignore -if -ignoreminorerrors -j -json -k -pause -l -long -latin -lang -list -listw -listf -listr -listwf -listg
+-listd -listx -listgeo -m -n -o -out -overwrite_original -overwrite_original_in_place -p -printformat -preserve
+-password -progress -q -quiet -r -recurse -restore_original -s -short -veryshort -scanforxmp -sep -separator -sort
+-struct -srcfile -stay_open -t -tab -table -tagsfromfile -u -unknown -unknown2 -use -userparam -v -verbose
+-validate -ver -w -textout -tagout -wext -wm -writemode -x -xmlformat -exclude -z -zip -common_args -php -plot
+-all -allextract -args
+""".split())
+DOC_EXT = ("md", "txt", "pdf", "png", "jpg", "jpeg", "gif", "webp", "svg", "mp4", "mov", "m4a", "mp3", "wav", "json",
+           "yaml", "yml", "srt", "vtt", "html")
+
+
+def exiftool_problem(vals):
+    """Why an exiftool call is not a plain read (an allowlist, review 5 M2), or None."""
+    i = 0
+    while i < len(vals):
+        v = vals[i]
+        if v is None:
+            return "a word the guard cannot read"
+        if not v.startswith("-") or v == "-":
+            i += 1
+            continue
+        lv = v.lower()
+        if "=" in v or "<" in v:
+            return v
+        if lv in EXIF_VALUE:
+            # -lang and -charset take a value only when the next word is not an option (M11)
+            opt_val = lv in ("-lang", "-charset")
+            nxt = vals[i + 1] if i + 1 < len(vals) else None
+            i += 1 if opt_val and (nxt is None or nxt.startswith("-")) else 2
+            continue
+        name = re.sub(r"[0-9:]+$", "", lv.rstrip("+!#"))
+        if lv in EXIF_ALLOW or name in ("-s", "-g") or lv.startswith("-list") or re.fullmatch(r"-g[0-9:]*", lv):
+            i += 1
+            continue
+        if name in EXIF_KNOWN or lv in EXIF_KNOWN or v.startswith("--") and v[2:].lower() in ("ext",):
+            return v
+        i += 1  # a tag name to print (-Duration, -ID3:Title)
+    return None
+
+
+def open_problem(ctx, cmd, words):
+    """Why an `open` call is not `open [-R] [-g] [-W] <URL or document>…` (review 3 M2, review 4), or None."""
+    opts = True
+    for w in words:
+        v = w.value
+        if v is None:
+            return "a word the guard cannot read"
+        if opts and v.startswith("-") and v != "-":
+            if re.fullmatch(r"-[RgW]+", v):
+                continue
+            return v
+        opts = False
+        if re.match(r"^https?://", v):
+            continue
+        res = resolve_all(ctx, cmd, v)
+        for a, real, ri in res:
+            if a is None:
+                return "%s (a folder the guard cannot tell)" % v
+            r = os.path.realpath(a)
+            ext = os.path.splitext(r)[1].lower().lstrip(".")
+            if ctx.fs.isdir(r) or ext not in DOC_EXT:
+                return "%s (not a document: %s)" % (v, os.path.basename(r))
+    return None
+
+
+def _getopt_values(words, value_letters, value_longs, operands=False):
+    """A getopt_long reading of `words`: (option, Word, value) for each option that takes a value (short ones in a
+    cluster take the rest of it or the next word; long ones `--name=v` or `--name v`, unambiguous abbreviations
+    too), and with `operands`, (None, Word, value) for each operand. Other options are flags; `--` ends them."""
+    out = []
+    i, dd = 0, False
+    while i < len(words):
+        w = words[i]
+        v = w.value
+        if dd or v is None or not v.startswith("-") or v == "-":
+            if operands:
+                out.append((None, w, v))
+            i += 1
+            continue
+        if v == "--":
+            dd = True
+            i += 1
+            continue
+        if v.startswith("--"):
+            name, eq, val = v.partition("=")
+            full = next((n for n in value_longs if cmdopts.long_option(name, (n,))), None)
+            if full is not None:
+                if eq:
+                    out.append((full, w, val))
+                elif i + 1 < len(words):
+                    out.append((full, words[i + 1], words[i + 1].value))
+                    i += 1
+            i += 1
+            continue
+        for c, ch in enumerate(v[1:], 1):
+            if ch in value_letters:
+                if v[c + 1:]:
+                    out.append(("-" + ch, w, v[c + 1:]))
+                elif i + 1 < len(words):
+                    out.append(("-" + ch, words[i + 1], words[i + 1].value))
+                    i += 1
+                break
+        i += 1
+    return out
+
+
+def _cluster_has(v, letter, value_letters):
+    """Whether a short-option cluster sets `letter` before a letter that takes a value."""
+    if not v or not v.startswith("-") or v.startswith("--"):
+        return False
+    for ch in v[1:]:
+        if ch == letter:
+            return True
+        if ch in value_letters:
+            return False
+    return False
+
+
+def read_writer_targets(ctx, cmd, prog, words, studio_infos):
+    """G1 §1.11: [(Word, value)] the program writes (sort -o, uniq and xxd's second operand, tree -o); its options that
+    write or run programs are refused in a Studio repository (G-OPAQUE)."""
+    vals = [w.value for w in words]
+    out = []
+    if prog == "sort":
+        # getopt_long: -o FILE in a cluster (`-uo FILE`, `-oFILE`), --output, and its abbreviations (M10)
+        for opt, w, v in _getopt_values(words, "kStTo", ("--output", "--key", "--field-separator", "--buffer-size",
+                                                          "--temporary-directory", "--parallel", "--batch-size",
+                                                          "--compress-program", "--files0-from", "--sort",
+                                                          "--random-source")):
+            if opt in ("-o", "--output"):
+                out.append((w, v))
+    elif prog == "uniq":
+        ops = [w for opt, w, v in _getopt_values(words, "fsw", ("--skip-fields", "--skip-chars", "--check-chars"),
+                                                 operands=True) if opt is None]
+        if len(ops) >= 2:
+            out.append((ops[1], ops[1].value))
+    elif prog == "xxd":
+        # xxd reads one option per word (`-c8`, `-c 8`, `-cols 8`)
+        takes = ("-c", "-cols", "-g", "-groupsize", "-l", "-len", "-s", "-seek", "-o", "-offset", "-n", "-name",
+                 "-R")
+        ops, i, dd = [], 0, False
+        while i < len(words):
+            v = vals[i]
+            if not dd and v == "--":
+                dd = True
+            elif not dd and v in takes:
+                i += 1
+            elif not dd and v is not None and v.startswith("-") and v != "-":
+                pass
+            else:
+                ops.append(words[i])
+            i += 1
+        if len(ops) >= 2:
+            out.append((ops[1], ops[1].value))
+    elif prog == "tree":
+        # tree's own reader: each value letter of a cluster takes the next word (`-fo FILE`, `-L 2 -o FILE`)
+        i = 0
+        while i < len(words):
+            v = vals[i]
+            if v is not None and v.startswith("-") and not v.startswith("--") and len(v) > 1:
+                k = i
+                for ch in v[1:]:
+                    if ch in "LPIoHT" and k + 1 < len(words):
+                        k += 1
+                        if ch == "o":
+                            out.append((words[k], vals[k]))
+                i = k
+            elif v is not None and v.startswith("--") and "=" not in v and v in ("--charset", "--filelimit",
+                                                                                "--timefmt", "--sort", "--fromfile",
+                                                                                "--infile", "--hintro", "--houtro"):
+                i += 1
+            i += 1
+    if studio_infos:
+        why = None
+        if prog == "exiftool":
+            why = exiftool_problem(vals)
+        elif prog == "file":
+            why = next((v for v in vals if v == "--compile" or _cluster_has(v, "C", "eFfmP")), None)
+        elif prog == "ffprobe":
+            if "-report" in vals:
+                why = "-report"
+            elif "FFREPORT" in cmd.env.set or ctx.env.get("FFREPORT"):
+                why = "FFREPORT"
+        elif prog == "rg":
+            why = next((v for v in vals if v and (v in ("--pre", "--pre-glob") or
+                                                   v.startswith(("--pre=", "--pre-glob=")))), None)
+        elif prog == "open":
+            why = open_problem(ctx, cmd, words)
+        if why:
+            ctx.deny("G-OPAQUE", "%s %s writes files or runs programs the guard does not check in a Studio "
+                                 "repository — %s" % (prog, why, "open documents and web pages only" if
+                                                     prog == "open" else "read the file with plain options, one "
+                                                                         "step per call."))
+    return out
+
+
+# ---- G1 §1.10: programs the guard does not model ----
+
+# programs whose judgement the guard has (their words are not searched by the fallback)
+MODELLED = protect.READ_ALLOW | protect.DELETE_PROGS | protect.CREATORS | set(EXTRACT_PROGS) | {
+    "mv", "rsync", "dd", "tee", "touch", "mkdir", "chmod", "chown", "truncate", "zip", "gio", "sed", "gsed", "git",
+    "gh", "xargs", "parallel", "awk", "gawk", "nawk", "mawk", "find", "gfind", "bfs", "jar", "cmake", "s2v"}
+FALLBACK_WRITERS = protect.DELETE_PROGS | protect.CREATORS | {
+    "touch", "tee", "dd", "truncate", "chmod", "chown", "sed", "gsed", "perl", "ruby", "osascript", "find", "tar",
+    "gtar", "bsdtar", "unzip", "xargs", "sh", "bash", "zsh", "ksh", "dash", "fish", "csh", "tcsh", "git"}
+FALLBACK_PIECES = re.compile(r"&&|\|\||>>|[;|&()<>]|[^\s;|&()<>'\"`]+")
+FALLBACK_SEPS = (";", "|", "&", "&&", "||", "(")
+
+
+def unmodelled(ctx, c):
+    """True when the command's program is in none of the guard's tables (G1 §1.10)."""
+    if not c.words or c.words[0].value is None or c.s2v is not None or c.lock is not None:
+        return False
+    if "runner-unread" in c.flags or studio_script(ctx, c):
+        return False
+    from .scanctx import ZSH_BUILTINS
+    prog = effective(c)[0]
+    k = recog.key(prog)
+    return not ((k in MODELLED and k not in protect.READ_WRITERS) or prog in ZSH_BUILTINS or
+                recog.interp_family(prog) is not None or runners.lookup(k) is not None or k in runners.REFUSED or
+                k in runners.PACKAGE_RUNNERS)
+
+
+def _fallback_pieces(c):
+    """[(piece, command position)] of the literal words after the program."""
+    out = []
+    prev = None
+    for w in c.words[1:]:
+        if w.value is None:
+            prev = None
+            continue
+        first = True
+        for t in FALLBACK_PIECES.findall(w.value):
+            k = recog.key(recog.base(t))
+            pos = first or prev in FALLBACK_SEPS or (prev is not None and (
+                runners.lookup(prev) is not None or prev in runners.REFUSED or prev in ("nohup", "command", "exec")))
+            out.append((t, pos))
+            first = False
+            prev = k if t not in FALLBACK_SEPS else t
+    return out
+
+
+def _writer_piece(t):
+    k = recog.key(recog.base(t))
+    return t in (">", ">>") or k in FALLBACK_WRITERS or recog.PY_RE.match(k) or recog.NODE_RE.match(k)
+
+
+def _studio_piece(ctx, c, t, infos):
+    if any(s in protect.TAIL_NAMES for s in t.split("/") if s):
+        return True
+    for a, real, ri in resolve_all(ctx, c, t):
+        if ri is None or not ri.studio or real is None:
+            continue
+        parts, fold = rel(ctx, ri, real)
+        if parts and (_within(parts, [ri.studio_root], fold) or _within(parts, [".claude", "studio"], fold)):
+            return True
+    return False
+
+
+def fallback_writes(c):
+    """Whether an unmodelled command's words hold a writer piece in command position (its words are then searched for
+    Studio repositories, as a refused runner's are)."""
+    return any(pos and _writer_piece(t) or t in (">", ">>") for t, pos in _fallback_pieces(c))
+
+
+def check_fallback(ctx, c, infos):
+    """G1 §1.10: in a Studio repository, an unmodelled program whose literal words run a writer on a Studio path (or
+    git: today's git rules on the pieces that follow) is refused."""
+    pieces = _fallback_pieces(c)
+    for i, (t, pos) in enumerate(pieces):
+        k = recog.key(recog.base(t))
+        if pos and k == "git":
+            tail = []
+            for t2, _p in pieces[i:]:
+                if t2 in FALLBACK_SEPS:
+                    break
+                tail.append(t2)
+            check_synthetic(ctx, c, tail, infos)
+            continue
+        if not ((pos and _writer_piece(t)) or t in (">", ">>")):
+            continue
+        hit = next((t2 for t2, _p in pieces[i + 1:] if t2 not in FALLBACK_SEPS and _studio_piece(ctx, c, t2, infos)),
+                   None)
+        if hit is not None:
+            ctx.deny("G-OPAQUE", "%s is a program the guard does not model, and its words run %s on %s in a Studio "
+                                 "repository — run the command directly, one step per call." % (c.prog, t, hit))
+            return
+
+
+def check_synthetic(ctx, c, words, infos):
+    """`git …` pieces inside an unmodelled program's words: judged with today's git rules in the host's folder."""
+    cwds = run_folders(c)
+    if not cwds or len(cwds) != 1:
+        unknown(ctx, infos, "git run by %s from a folder the guard cannot tell" % c.prog)
+        return
+    import shlex
+    sub = _scan(ctx, " ".join(shlex.quote(x) for x in words), cwds[0], ctx.env, snapshot=None, snapshot_notes=(),
+                       terms=None, fs=ctx.fs)
+    if sub.status != "ok":
+        unknown(ctx, infos, "git run by %s" % c.prog)
+        return
+    for s in sub.commands:
+        ctx.current = s
+        check_paths(ctx, s, infos)
+        check_git_rules(ctx, s, infos)
+    ctx.current = None
 
 
 # ---- M0d-2: versions, commits, pushes, GitHub API (m0d2-plan §5, §6, §8) ----
@@ -1906,6 +3706,27 @@ def check_git_rules(ctx, cmd, infos):
     is_commit = _commit_like(g)
     cfg = commitrule.hook_config(cmd)
     if not (is_commit or cfg or sub in ("config", "push") or commitrule.plumbing(sub, g.args)):
+        return
+    if len(run_folders(cmd)) > 1:
+        # review 9 B1: judged in each folder git may run in; one repository is judged once
+        pairs = git_targets(ctx, cmd)
+        studio = sorted({t[0].worktree for _c, t in pairs if isinstance(t, tuple) and t[0].studio})
+        if is_commit and len(studio) > 1:
+            ctx.deny("G-COMMIT", "git %s cannot be checked: it may run in any of several Studio repositories (%s) "
+                                 "after a folder change that may or may not happen — cd to one literal folder first, "
+                                 "in a separate call; %s" % (sub, ", ".join(studio), commitrule.HOOKOFF_TAIL))
+            return
+        seen = set()
+        for cc, t in pairs:
+            key = (t[0].worktree, tuple(t[2]), tuple(sorted(t[3].items()))) if isinstance(t, tuple) else \
+                ("str", t) if isinstance(t, str) else None
+            if key in seen:
+                continue
+            seen.add(key)
+            n = len(ctx.denies)
+            check_git_rules(ctx, cc, infos)
+            if len(ctx.denies) > n:
+                return
         return
     target = git_target(ctx, cmd)
     if isinstance(target, str):
@@ -1958,7 +3779,21 @@ def check_git_rules(ctx, cmd, infos):
             extra["GIT_DIR"] = pre[gi]
         if wi:
             extra["GIT_WORK_TREE"] = pre[wi]
-    out = commitrule.evaluate(ri.worktree, ctx.env, extra, opts, plugin_scripts=PLUGIN_SCRIPTS)
+    scope = getattr(ctx.probe, "scope", None)
+    mkey = None if scope is None else (scope, ri.worktree, tuple(sorted(extra.items())), repr(sorted(opts.items())))
+    nkey = _nested_key(cmd, ("commit", ri.worktree, tuple(sorted(extra.items())), repr(sorted(opts.items()))))
+    out = ctx.commit_memo.get(mkey) if mkey is not None else None
+    if out is None and nkey is not None:
+        out = ctx.nested_memo.get(nkey)
+    if out is None:
+        # review 17 (C17-4): the same commit in several readings of one command (its folders) is checked once
+        # fix20 (P20-4): the 0.0.26 guard's own check (frozen), shared with it within this decision (backstop)
+        from . import backstop
+        out = backstop.shared_commit(ri.worktree, ctx.env, extra, opts, plugin_scripts=PLUGIN_SCRIPTS)
+        if mkey is not None:
+            ctx.commit_memo[mkey] = out
+        if nkey is not None:
+            ctx.nested_memo[nkey] = out
     if out.deny:
         ctx.deny(*out.deny)
         return
@@ -2040,7 +3875,7 @@ def commit_evidence(ctx, cmd, ri, out):
         if not ranlog.record(ri.worktree, sid, may_create=True):
             raise OSError("could not record that the guard ran in this session")
     ctx.effects.append(("G-COMMIT", effect))
-    ctx.candidates.append((cmd, "commit", reason))
+    add_candidate(ctx, (cmd, "commit", reason))
 
 
 def runner_version(ri):
@@ -2059,13 +3894,37 @@ def transcript_now():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _nested_key(cmd, key):
+    """review 19 (C19-2): the memo key of a push / commit check run by a command of a nested string (`sh -c 'git
+    push'` repeated), None for any other command. The guard runs nothing, so these checks read the same repository
+    for every command of one call: the same worktree, words, options and git environment give the same answer.
+    The git command's own environment (prefix assignments, `env …`) is part of the key."""
+    if getattr(cmd, "scan_key", None) is None:
+        return None
+    env = getattr(cmd, "env", None)
+    if env is not None and (getattr(env, "unknown", False) or getattr(env, "cleared", False)):
+        return None
+    sets = tuple(sorted((k, repr(getattr(v, "value", v))) for k, v in (getattr(env, "set", None) or {}).items()))
+    unsets = tuple(sorted(getattr(env, "unset", None) or ()))
+    return key + (sets, unsets)
+
+
 def check_push(ctx, cmd, ri):
-    from . import push, web
+    from . import web
     if not ri.harness:
         return
     st, data = web.overlay(ri.worktree, ri.config, ctx.env)
     ids = web.internal_items(data)[2] if st == "ok" else set()
-    deny, warns = push.check(ri.worktree, ctx.env, cmd.git.args, ids)
+    vals = tuple(w.value for w in cmd.git.args)
+    nkey = None if None in vals else _nested_key(cmd, ("push", ri.worktree, vals, tuple(sorted(ids))))
+    if nkey is not None and nkey in ctx.nested_memo:
+        deny, warns = ctx.nested_memo[nkey]
+        warns = []  # (shown once)
+    else:
+        from . import backstop  # fix20 (P20-4): the 0.0.26 check (frozen), shared with it within this decision
+        deny, warns = backstop.shared_push(ri.worktree, ctx.env, cmd.git.args, ids)
+        if nkey is not None:
+            ctx.nested_memo[nkey] = (deny, list(warns))
     if deny:
         ctx.deny("G-PUSH", deny)
     for w in warns:
@@ -2157,7 +4016,7 @@ def check_patch(ctx, cmd, infos, sc):
         return
     from . import patchtargets as PT
     tool, files, levels, directory = call
-    run = cmd.run_cwds or cmd.cwds or [None]
+    run = run_folders(cmd) or [None]
     cwd = run[0] if len(run) == 1 else None
     texts = []
     stdin = [r for r in cmd.redirs if r.mode in ("read", "heredoc", "herestring") and r.fd in (None, "0")]
@@ -2195,9 +4054,9 @@ def check_patch(ctx, cmd, infos, sc):
             return
     tops = []
     if tool.startswith("git-"):
-        t = git_target(ctx, cmd)
-        if isinstance(t, tuple):
-            tops.append(t[0].worktree)
+        for _cc, t in git_targets(ctx, cmd):
+            if isinstance(t, tuple) and t[0].worktree not in tops:
+                tops.append(t[0].worktree)
     found = [(t, PT.targets(t)) for t in texts]
     if any(t.strip() for t in texts) and not any(ts for _t, ts in found):
         ctx.deny("G-PROT", "%s applies a patch whose target files the guard cannot read (no diff headers it "
@@ -2234,6 +4093,12 @@ def check_gh(ctx, cmd, infos):
 
 
 def check_out_of_repo(ctx, c):
+    for wc, files in runner_files(c):
+        for w, _op in files:
+            for a, real, ri in resolve_all(ctx, wc, w.value):
+                if real is not None and is_owner_json(real) and (out_hit(ctx, real, "read") or "/.work/op.lock.d/" in real):
+                    ctx.deny("G-OUT", "reading %s (a lock owner record with its token) is not allowed — use "
+                                      "\"python3 .claude/studio/scripts/lock.py status\"." % w.value)
     for w, vals in candidates(c):
         for v in vals:
             if not looks_like_path(v, c, ctx):
@@ -2305,7 +4170,8 @@ def fed_inputs(sc, cmd, raw=""):
     """(file, cwd) that actually feed `cmd`: its stdin redirect, `$(cat F)` in its own words, the pipeline
     readers before an xargs/parallel, xargs -a / parallel ::::, and a while/for loop's input."""
     out = []
-    cwd = (cmd.cwds or [None])[0]
+    cwd = (cmd.cwds or [None])[0]  # redirects: the shell's folder
+    run = (run_folders(cmd) or [None])[0]  # the program's own file arguments: where it runs (M1)
     for r in cmd.redirs:
         if r.mode == "read" and r.fd in (None, "0") and r.target is not None:
             out.append((r.target.value, cwd))
@@ -2313,25 +4179,25 @@ def fed_inputs(sc, cmd, raw=""):
         if c is cmd:
             continue
         if "cmdsubst" in c.ctx and _span_in(c, cmd) and any(w.value is None for w in cmd.words):
-            out += [(f, (c.cwds or [cwd])[0]) for f in reader_files(c)]
+            out += [(f, (run_folders(c) or [None])[0]) for f in reader_files(c)]
     argv = [w.value for w in cmd.words]
     if cmd.prog in ("xargs", "parallel"):
         for i, v in enumerate(argv):
             if v in ("-a", "--arg-file") and i + 1 < len(argv):
-                out.append((argv[i + 1], cwd))
+                out.append((argv[i + 1], run))
             elif v is not None and v.startswith("--arg-file="):
-                out.append((v.split("=", 1)[1], cwd))
+                out.append((v.split("=", 1)[1], run))
         if cmd.prog == "parallel" and "::::" in argv:
             for v in argv[argv.index("::::") + 1:]:
                 if v in (":::", "::::"):
                     break
-                out.append((v, cwd))
+                out.append((v, run))
         if "pipeline" in cmd.ctx and cmd.span:
             start = statement_start(raw, cmd.span[0])
             for c in sc.commands:
                 if c is not cmd and "pipeline" in c.ctx and c.span and start <= c.span[0] and c.span[1] <= cmd.span[0] and \
                         not ("cmdsubst" in c.ctx and not _span_in(c, cmd)):
-                    out += [(f, (c.cwds or [cwd])[0]) for f in reader_files(c)]
+                    out += [(f, (run_folders(c) or [None])[0]) for f in reader_files(c)]
                     for r in c.redirs:
                         if r.mode == "read" and r.fd in (None, "0") and r.target is not None:
                             out.append((r.target.value, (c.cwds or [cwd])[0]))
@@ -2342,7 +4208,7 @@ def fed_inputs(sc, cmd, raw=""):
                     if r.mode == "read" and r.target is not None:
                         out.append((r.target.value, (c.cwds or [cwd])[0]))
             if "cmdsubst" in c.ctx and c.span and cmd.span and c.span[1] <= cmd.span[0]:
-                out += [(f, (c.cwds or [cwd])[0]) for f in reader_files(c)]
+                out += [(f, (run_folders(c) or [None])[0]) for f in reader_files(c)]
     return [(v, c) for v, c in out if v is None or not (v.startswith("/dev/") or v == "-")]
 
 
@@ -2479,6 +4345,8 @@ def studio_related(ctx, cmd, infos):
 
 
 def check_opaque(ctx, o, cmd, terms, infos, src_notes):
+    if o.kind in ("runner", "zsh-table", "prompt-subst", "var-set"):
+        return  # refused in check_shell_strings and check_zsh (G1 §1.2, §1.8, §1.9)
     if o.kind == "unknown-command":
         name = (o.payload or "").split(" ")[0]
         ctx.deny("G-UNKNOWN", "\"%s\" is not a command on PATH, a builtin or a known alias/function, and the shell "
@@ -2576,7 +4444,12 @@ def judge_file_path(ctx, path, tool, ti, mcp=False):
                  % ("writing" if not mcp else "this tool touches", path))
         return
     ri = ctx.repos.info(r.repo) if r.repo is not None else None
-    h = hookfiles.hit(ri, r.real, "write")
+    cwd_ri = ctx.repos.info(ctx.where.git_repo(ctx.cwd)) if ctx.fs.exists(ctx.cwd) else None
+    if cwd_ri is not None and cwd_ri.studio and user_config(ctx, r.real):
+        ctx.deny("G-HOOKOFF", "%s %s (git's or ssh's own settings, which can run commands) from a Studio repository; %s"
+                 % ("writing" if not mcp else "this tool touches", path, commitrule.HOOKOFF_TAIL))
+        return
+    h = hookfiles.hit(ri, r.real, "write", r.real is not None and ctx.where.case_insensitive(r.real))
     if h and h[1] == "gitconfig":
         ctx.deny("G-HOOKOFF", "%s %s (git's settings of a Studio repository) — change settings with git config; %s"
                  % ("writing" if not mcp else "this tool touches", path, commitrule.HOOKOFF_TAIL))
@@ -2707,18 +4580,115 @@ def decide_mcp(ctx, ti):
         judge_file_path(ctx, p, "mcp", ti, mcp=True)
 
 
-def decide(hook, env, fs=None, probe=None, snapshot_loader=None):
-    """(Deny | None, Context). Internal errors deny (closed side)."""
+def decide_g1(hook, env, fs=None, probe=None, snapshot_loader=None, run_finish=True):
+    """This guard alone: (Deny | None, Context, complete). Internal errors deny (closed side). `run_finish` False: no
+    evidence writes and no allow (backstop.decide runs the one finish). `complete` is False when the checks stopped
+    early (a limit outside a Studio context passes on what was found so far): then no finish of this guard runs
+    (fix20, P20-2)."""
     ctx = Context(hook, env, fs=fs, probe=probe, snapshot_loader=snapshot_loader)
     try:
-        return _decide(ctx, hook)
+        deny, ctx = _decide(ctx, hook, run_finish)
+        return deny, ctx, True
+    except limits.LimitExceeded as e:
+        return _limit_exceeded(ctx, hook, e) + (False,)
     except Exception as e:  # noqa: BLE001
-        ctx.denies.insert(0, Deny("G-ERR", "internal guard error (%s) — tell the user; this is a bug in the guard."
-                                  % type(e).__name__))
-        return ctx.denies[0], ctx
+        return _internal_error(ctx, e) + (False,)
 
 
-def _decide(ctx, hook):
+def finish_g1(ctx, hook):
+    """This guard's finish after backstop.decide chose it, in the same handlers as its decision (fix20, P20-7)."""
+    try:
+        finish(ctx)
+    except limits.LimitExceeded as e:
+        return _limit_exceeded(ctx, hook, e)[0]
+    except Exception as e:  # noqa: BLE001
+        return _internal_error(ctx, e)[0]
+    return ctx.denies[0] if ctx.denies else None
+
+
+def _limit_exceeded(ctx, hook, e):
+    # a bound of the checks (file-system calls, time) ran out while judging: refused in a Studio context, but not
+    # a bug (C-m4); outside one, the denies found so far decide (review 2 conformance, MINOR 2)
+    if studio_context(ctx, hook) or (not getattr(ctx, "collected", False) and may_name_repo_hook(ctx, hook)):
+        ctx.denies.insert(0, Deny("G-LIMIT", "the command needs more checks than the guard's limits allow (%s) — "
+                                             "split it into simpler commands, one step per call." % e.kind))
+    return (ctx.denies[0] if ctx.denies else None), ctx
+
+
+def _internal_error(ctx, e):
+    ctx.denies.insert(0, Deny("G-ERR", "internal guard error (%s) — tell the user; this is a bug in the guard."
+                              % type(e).__name__))
+    return ctx.denies[0], ctx
+
+
+LIMIT_PATHISH_RE = re.compile(r"[/~$`*?\[{\\]|\.\.")
+FOLDER_WORDS = ("cd", "chdir", "pushd", "popd")
+# review 4 R1, R4: words that set code zsh runs later by name (hooks, traps, NULLCMD, the function table)
+HOOK_WORDS = ("trap", "chpwd", "chpwd_functions", "precmd_functions", "preexec_functions", "periodic_functions",
+              "zshexit_functions", "command_not_found_handler", "NULLCMD", "READNULLCMD", "functions")
+
+
+def may_name_repo(ctx, text, depth=0, seen=()):
+    """review 3 B1/B-1: whether text the guard could not search to its end may still name a Studio repository: any
+    path piece (`/`, `~`, `..`), any expansion, wildcard, brace or backslash, a folder change, a snapshot alias whose
+    text may, a snapshot function that may change folder or that the guard cannot read (or no snapshot to tell), or a
+    word naming a folder in the working folder."""
+    if not isinstance(text, str) or LIMIT_PATHISH_RE.search(text) or depth > 3:
+        return True
+    words = {w for w in re.split(r"[\s;&|()<>=:,]+", re.sub(r"['\"]", "", text)) if w}
+    if len(words) > 4096:
+        return True
+    snap = getattr(ctx, "snap", None)
+    if snap is None:
+        return True  # any word may be an alias the guard cannot read
+    from .walk import snapshot_function_effects
+    for w in words:
+        if w in FOLDER_WORDS or w in snap.global_aliases or w in HOOK_WORDS or w.startswith("TRAP"):
+            return True
+        alias = list(snap.alternatives.get(w) or []) + ([snap.plain[w]] if w in snap.plain else [])
+        if w not in seen and any(not isinstance(a, str) or may_name_repo(ctx, a, depth + 1, set(seen) | {w})
+                                 for a in alias):
+            return True
+        if w in snap.user_functions:
+            sctx = type("FuncCtx", (), {})()
+            sctx.snapshot, sctx.env, sctx.fs, sctx.budget = snap, ctx.env, FS(), limits.Budget()
+            eff = snapshot_function_effects(sctx, w)
+            if eff is None or eff["cwd"]:
+                return True
+        for v in (w, w[2:] if w.startswith("-") and len(w) > 2 else None):
+            try:
+                if v and os.path.isdir(os.path.join(ctx.cwd, v)):
+                    return True
+            except (OSError, ValueError):
+                return True
+    return False
+
+
+def may_name_repo_hook(ctx, hook):
+    """may_name_repo for the call's input: a Bash command, or any other tool's arguments as text."""
+    ti = hook.get("tool_input") or {}
+    if hook.get("tool_name") == "Bash" and isinstance(ti, dict) and isinstance(ti.get("command"), str):
+        return may_name_repo(ctx, ti["command"])
+    return may_name_repo(ctx, json.dumps(ti))
+
+
+def studio_context(ctx, hook):
+    """Whether the call involves a Studio repository (found so far) or names Studio's per-user files or the lock."""
+    if getattr(ctx, "infos", None) or ctx.touched:
+        return True
+    ctx.fs.max_calls = ctx.fs.calls + 200  # the few checks below, after the limits ran out
+    try:
+        ri = ctx.repos.info(ctx.where.git_repo(ctx.cwd)) if os.path.isdir(ctx.cwd) else None
+    except Exception:  # noqa: BLE001 — the limits ran out: a folder the guard cannot read is a Studio context
+        return True
+    if ri is not None and ri.studio:
+        return True
+    text = json.dumps(hook.get("tool_input") or {})
+    return any(item and (item in text or (kind != "transcripts" and os.path.basename(item.rstrip("/")) in text))
+               for item, kind in ctx.out_items)
+
+
+def _decide(ctx, hook, run_finish=True):
     tool = hook.get("tool_name") or ""
     ti = hook.get("tool_input") or {}
     from . import auditor
@@ -2738,6 +4708,8 @@ def _decide(ctx, hook):
         decide_mcp(ctx, ti)
     if ctx.denies:
         return ctx.denies[0], ctx
+    if not run_finish:
+        return None, ctx
     finish(ctx)
     if ctx.denies:
         return ctx.denies[0], ctx
@@ -2803,5 +4775,9 @@ def record_run(ctx):
         local = os.path.join(ri.worktree, ".claude", "studio", "local")
         ranlog.record(ri.worktree, sid, may_create=os.path.isdir(local) or has_exclude_block(ri))
 
+
+# fix20: every call is judged by this guard and by the 0.0.26 guard (guard/legacy, frozen); `decide` IS the backstop's
+# (an alias, so the 0.0.26 guard runs at the stack depth it had in 0.0.26)
+from .backstop import decide  # noqa: E402
 
 __all__ = ["decide", "record_run", "Deny", "recog"]

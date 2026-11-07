@@ -60,20 +60,30 @@ def _active(path, kind, ri, op):
     return MARK in (_read(path) or "")
 
 
-def hit(ri, real, op):
-    """(path, kind) when `op` on `real` touches an active Studio hook file; op: write | delete."""
+def hit(ri, real, op, fold=False):
+    """(path, kind) when `op` on `real` touches an active Studio hook file; op: write | delete. fold: the volume
+    ignores case (`.git/CONFIG`, `.GIT/config` are the same file: review 2, M14)."""
     if ri is None or real is None:
         return None
-    wt = os.path.realpath(ri.worktree)
+    k = (lambda p: p.casefold()) if fold else (lambda p: p)
+    rk = k(real)
+    if getattr(ri, "studio", False) and ri.common_dir:
+        # a linked worktree's own settings (G1 §1.9, review 3 r3p8): <common dir>/worktrees/*/config.worktree
+        cd = k(os.path.realpath(ri.common_dir))
+        parts = rk[len(cd) + 1:].split("/") if rk.startswith(cd + "/") else []
+        if len(parts) == 3 and parts[0] == "worktrees" and parts[2] in ("config", "config.worktree"):
+            return real, "gitconfig"
+    wt = k(os.path.realpath(ri.worktree))
     for path, kind in items(ri):
+        pk = k(path)
         if kind == "gitconfig":
-            touch = real == path
+            touch = rk == pk
         elif op == "delete":
             # deleting a folder that holds the file; the work tree itself and its ancestors are the
             # ancestor-deletion rule's (G-DEL) — the guard reports that one
-            touch = _inside(real, path) or (_inside(path, real) and not _inside(wt, real))
+            touch = _inside(rk, pk) or (_inside(pk, rk) and not _inside(wt, rk))
         else:
-            touch = real == path or (kind == "dir" and _inside(real, path))
+            touch = rk == pk or (kind == "dir" and _inside(rk, pk))
         if touch and _active(path, kind, ri, op):
             return path, kind
     return None

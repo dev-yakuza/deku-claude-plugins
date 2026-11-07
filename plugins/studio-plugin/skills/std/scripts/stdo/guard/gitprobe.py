@@ -31,11 +31,28 @@ class Probe(object):
         self.env["GIT_TERMINAL_PROMPT"] = "0"
         self.left = budget
         self.calls = 0
+        # review 16/17: the readings of ONE command (the folders it may run in, lost folders, choices of a value) ask
+        # the same thing; answered once within that command (`scope`, set by the judge for the command it judges) —
+        # each other command spends HEAD's budget as before (review 17 B17-3)
+        self.memo = {}
+        self.scope = None
         self.runner = runner or subprocess.run
         self.git = shutil.which("git", path=self.env.get("PATH")) or ("/usr/bin/git" if os.path.exists("/usr/bin/git") else None)
 
     def run(self, cwd, args, pre=(), env=None, ok_codes=(0,)):
         """stdout text, or None (failure, timeout, no git, budget spent)."""
+        scope = getattr(self, "scope", None)
+        if scope is None:
+            return self._run(cwd, args, pre, env, ok_codes)
+        key = (scope, cwd, tuple(args), tuple(pre), tuple(sorted((env or {}).items())), tuple(ok_codes))
+        if key in self.memo:
+            return self.memo[key]
+        out = self._run(cwd, args, pre, env, ok_codes)
+        if out is not None:
+            self.memo[key] = out
+        return out
+
+    def _run(self, cwd, args, pre=(), env=None, ok_codes=(0,)):
         if self.git is None or cwd is None or self.left <= 0 or self.calls >= 6:
             return None
         self.calls += 1
@@ -127,7 +144,9 @@ class Probe(object):
 
 def unsafe(gitinfo):
     """Options that would make a preview run something: deny without previewing."""
-    for k, _v in gitinfo.configs:
+    for k, v in gitinfo.configs:
+        if k is None or v is None:
+            return "-c %s" % (k or "…")  # a key or value the guard cannot read (G1 §1.9)
         kl = (k or "").lower()
         if kl in UNSAFE_CONFIG or kl.startswith("alias."):
             return k

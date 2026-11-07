@@ -9,6 +9,20 @@ from stdo import guard
 from stdo.guard import snapshot as snapmod
 from stdo.guard.terms import Terms
 
+
+def _load_both(env, now=None, _load=snapmod.load):
+    """fix20: a snapshot the tests load is read by both guards from the same files (they are often removed right
+    after): the 0.0.26 guard's reading rides along as `legacy_view` (backstop.decide hands it to the 0.0.26 guard
+    when a test injects the snapshot)."""
+    out = _load(env, now=now)
+    if out[0] is not None and getattr(out[0], "legacy_view", None) is None:
+        from stdo.guard.legacy import snapshot as legacy_snapshot
+        out[0].legacy_view = legacy_snapshot.load(env, now=now)
+    return out
+
+
+snapmod.load = _load_both
+
 TERMS = Terms(words=["s2v", "state.py", "lock.py", "check_commit.py", "STUDIO_SANDBOX", "STUDIO_HOME"],
               paths=["studio", ".claude/studio"], names=["state.json", "verify.json", "picks.json"])
 
@@ -153,7 +167,8 @@ class GuardCase(StudioTestCase):
 
     @staticmethod
     def by_prog(r, prog):
-        return [c for c in r.commands if c.prog == prog]
+        # the primary reading: not the copies judged in a known folder the shell may still be in (review 10 B1)
+        return [c for c in r.commands if c.prog == prog and "lost-folder" not in (c.ctx or ())]
 
     def one(self, r, prog):
         cs = self.by_prog(r, prog)

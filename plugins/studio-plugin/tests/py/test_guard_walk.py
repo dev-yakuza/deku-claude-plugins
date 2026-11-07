@@ -3,7 +3,8 @@
 
 import os
 
-from guard_base import GuardCase
+from guard_base import GuardCase, snapshot_text
+from stdo import guard
 
 
 class Cwd(GuardCase):
@@ -35,7 +36,10 @@ class Cwd(GuardCase):
         self.assertEqual(self.cw(self.ok("cd nope && touch y"), "touch"), [self.R("nope")])
         self.assertEqual(self.cw(self.ok("cd nope; touch y"), "touch"), [self.R("nope"), self.root])
         self.assertEqual(self.cw(self.ok("cd x; touch y"), "touch"), [self.R("x")])
+        # review 13: judged as if the shell went on (review 12's early stop removed)
         self.assertEqual(self.cw(self.ok("cd nope || exit; touch y"), "touch"), [self.R("nope")])
+        self.assertEqual(self.cw(self.ok("mkdir nope; cd nope || exit; touch y"), "touch"), [self.R("nope")])
+        self.assertEqual(self.cw(self.ok("{ cd nope || exit; }; touch y"), "touch"), [self.R("nope")])
         self.assertEqual(sorted(self.cw(self.ok("cd nope || true; touch y"), "touch")), sorted([self.R("nope"), self.root]))
 
     def test_home_and_tilde(self):
@@ -51,9 +55,10 @@ class Cwd(GuardCase):
 
     def test_cd_dash(self):
         self.assertEqual(self.cw(self.ok("cd x; cd -; touch y"), "touch"), [self.root])
-        self.assertEqual(self.cw(self.ok("cd -; touch y"), "touch"), [])
+        # review 10: zsh -c starts with $OLDPWD at its start folder (zsh 5.9); the environment's is one more candidate
+        self.assertEqual(self.cw(self.ok("cd -; touch y"), "touch"), [self.root])
         self.env["OLDPWD"] = self.R("a")
-        self.assertEqual(self.cw(self.ok("cd -; touch y"), "touch"), [self.R("a")])
+        self.assertEqual(sorted(self.cw(self.ok("cd -; touch y"), "touch")), sorted([self.root, self.R("a")]))
 
     def test_cd_idioms(self):
         os.makedirs(self.R(".git"))
@@ -75,14 +80,24 @@ class Cwd(GuardCase):
         self.mk("a", "b")
         self.assertEqual(self.cw(self.ok("pushd a; pushd b; popd; touch c"), "touch"), [self.R("a")])
         self.assertEqual(self.cw(self.ok("pushd a; pushd; touch c"), "touch"), [self.root])
-        self.assertEqual(self.cw(self.ok("popd; touch c"), "touch"), [])
+        # review 9: an empty stack — popd fails and the shell stays (zsh 5.9: "directory stack empty")
+        self.assertEqual(self.cw(self.ok("popd; touch c"), "touch"), [self.root])
+        # review 10 conf m-2: the pushd may or may not have run — popd is judged on both stacks
+        self.assertEqual(sorted(self.cw(self.ok("[[ -e x ]] && pushd a; popd; touch c"), "touch")),
+                         sorted([self.root, self.R("a")]))
         self.assertEqual(self.cw(self.ok("pushd +1; touch c"), "touch"), [])
-        # autopushd (default on): cd pushes too
+        # review 10 M2: with no snapshot AUTO_PUSHD may be on or off — cd pushes or not
+        self.assertEqual(sorted(self.cw(self.ok("cd a; cd b; popd; touch c"), "touch")),
+                         sorted([self.root, self.R("a"), self.R("a", "b")]))
+        # autopushd on (in the snapshot): cd pushes too
+        self.use_snapshots(self.snapshot_text())
         self.assertEqual(self.cw(self.ok("cd a; cd b; popd; touch c"), "touch"), [self.R("a")])
 
     def test_autopushd_off(self):
         self.use_snapshots(self.snapshot_text(unsetopts=("autopushd",)))
-        self.assertEqual(self.cw(self.ok("cd a; cd b; popd; touch c"), "touch"), [])
+        # review 9: nothing was pushed — popd fails and the shell stays where `cd a; cd b` left it
+        self.assertEqual(self.cw(self.ok("cd a; cd b; popd; touch c"), "touch"),
+                         self.cw(self.ok("cd a; cd b; touch c"), "touch"))
 
     def snapshot_text(self, **kw):
         from guard_base import snapshot_text
@@ -122,10 +137,14 @@ class Cwd(GuardCase):
         self.assertEqual(self.cw(r, "rm"), [])
 
     def test_source(self):
+        # fix20: the walk stops at a source — what follows is judged by the 0.0.26 rules alone (backstop)
         r = self.ok("source ./env.sh; rm y")
-        self.assertEqual(self.cw(r, "rm"), [])
-        self.assertIn("env-unknown", self.one(r, "rm").flags)
-        self.assertIn("source", self.kinds(r))
+        self.assertTrue(r.sourced)
+        self.assertEqual([c.prog for c in r.commands], ["source"])
+        self.assertNotIn("source", self.kinds(r))  # the user's file is not read (the 0.0.26 guard reads it)
+        r = self.ok("rm x; source /dev/stdin <<< 'rm z'; rm y")
+        self.assertEqual([c.prog for c in r.commands], ["rm", "source"])
+        self.assertIn("source", self.kinds(r))  # code given in the call itself: judged as a nested string
 
     def test_cwd_options(self):
         for cmd, prog in (("yarn --cwd sub x", "yarn"), ("yarn --cwd=sub x", "yarn"), ("npm --prefix sub run x", "npm"),
@@ -516,7 +535,7 @@ class Opaques(GuardCase):
 
     def test_misc(self):
         self.assertEqual(self.kinds(self.ok("parallel rm ::: a b")), ["parallel"])
-        self.assertEqual(self.kinds(self.ok("watch -n1 ls")), ["watch"])
+        self.assertEqual(self.kinds(self.ok("watch -n1 ls")), ["shell-c"])  # G1 §1.3: procps runs sh -c
 
     def test_case_and_unicode_terms(self):
         from stdo.guard.terms import Terms
@@ -606,7 +625,7 @@ class Review1(GuardCase):
         r = self.ok("cd ~+/x; touch y")
         self.assertEqual(self.one(r, "touch").cwds, [self.R("x")])
         self.assertEqual(self.one(self.ok("cd x; ls ~-"), "ls").argv[1], self.root)
-        self.assertIsNone(self.one(self.ok("ls ~-"), "ls").argv[1])
+        self.assertEqual(self.one(self.ok("ls ~-"), "ls").argv[1], self.root)  # review 10: the start folder
         self.assertIsNone(self.one(self.ok("ls ~+2"), "ls").argv[1])
         r = self.ok("for d in a; do cd $d; done; ls ~+")
         self.assertIsNone(self.one(r, "ls").argv[1])
@@ -647,7 +666,13 @@ class Review1(GuardCase):
                     "setopt $opt; X=a; rm $X"):
             self.assertIsNone(self.one(self.ok(cmd), "rm").argv[1], cmd)
         self.assertEqual(self.one(self.ok('setopt shwordsplit; X=a; rm "$X"'), "rm").argv[1], "a")
-        self.assertIsNone(self.one(self.ok("setopt ignorebraces; rm {a,b}"), "rm").argv[1])
+        # a known brace option is applied (review 3 R1): IGNORE_BRACES keeps the braces, BRACE_CCL expands `{d}`
+        self.assertEqual(self.one(self.ok("setopt ignorebraces; rm {a,b}"), "rm").argv[1], "{a,b}")
+        self.assertEqual(self.one(self.ok("setopt braceccl; rm stu{d}io"), "rm").argv[1], "studio")
+        self.assertEqual(self.one(self.ok("rm {s..s}tudio"), "rm").argv[1], "studio")
+        self.assertEqual(self.one(self.ok("rm studi{o..o}"), "rm").argv[1:], ["studio"])
+        self.assertEqual(self.one(self.ok("rm {r..t}x"), "rm").argv[1:], ["rx", "sx", "tx"])
+        self.assertIsNone(self.one(self.ok("setopt $opt; rm {a,b}"), "rm").argv[1])
         self.assertEqual(self.one(self.ok("setopt autopushd; X=a; rm $X"), "rm").argv[1], "a")
 
     def test_disable_cd(self):  # NIT
@@ -673,7 +698,13 @@ class Review2(GuardCase):
         self.mk("b")
 
     def test_failing_move_leaves_stack_unknown(self):  # MINOR 1
+        # review 10 conf m-2: a move that may fail pushes or not — popd is judged on each stack the shell may have;
+        # a push from one of several folders leaves the stack unknown
         self.assertEqual(self.one(self.ok("pushd x; pushd b; popd; touch c"), "touch").cwds, [])
+        self.assertEqual(sorted(self.one(self.ok("pushd x; popd; touch c"), "touch").cwds),
+                         sorted([self.root, os.path.join(self.root, "x")]))
+        from guard_base import snapshot_text
+        self.use_snapshots(snapshot_text())  # AUTO_PUSHD on
         self.assertEqual(self.one(self.ok("cd nope; cd a; popd; touch c"), "touch").cwds, [])
         self.assertEqual(self.one(self.ok("cd a; cd ../b; popd; touch c"), "touch").cwds,
                          [os.path.join(self.root, "a")])
@@ -689,3 +720,649 @@ class Review2(GuardCase):
             self.assertEqual(self.by_prog(r, "rm")[-1].argv[1], "a", body)
         r = self.ok("f() { setopt shwordsplit }; X=a; rm $X")  # defined, never called
         self.assertEqual(self.by_prog(r, "rm")[-1].argv[1], "a")
+
+
+class G1Walk(GuardCase):
+    """guard-runners-plan §1.2–§1.5: wrappers with their files and run folders, refused runners, shell payloads,
+    precommands, `command cd`, program names in capitals."""
+
+    def setUp(self):
+        super().setUp()
+        for d in ("a", "sub"):
+            self.mk(d)
+        self.R = lambda *p: os.path.join(self.root, *p)
+
+    def test_wrapper_names_and_files(self):
+        c = self.one(self.ok("/usr/bin/time -o t.txt nice -n 5 flock lk rm x"), "rm")
+        self.assertEqual([w.name for w in c.wrappers], ["time", "nice", "flock"])
+        self.assertEqual([(w.value, op) for w, op in c.wrappers[0].files], [("t.txt", "write")])
+        self.assertEqual([(w.value, op) for w, op in c.wrappers[2].files], [("lk", "write")])
+        self.assertEqual(c.argv, ["rm", "x"])
+        c = self.one(self.ok("busybox.static env rm x"), "rm")
+        self.assertEqual([w.name for w in c.wrappers], ["busybox", "env"])
+
+    def test_wrapper_cwd(self):
+        c = self.one(self.ok("env -C a /usr/bin/time -o t ls"), "ls")
+        self.assertEqual([w.name for w in c.wrappers], ["env", "time"])
+        self.assertEqual(c.wrappers[1].cwd, [self.R("a")])
+        self.assertEqual(c.wrappers[0].cwd, [self.root])
+        self.assertEqual(c.run_cwds, [self.R("a")])
+        c = self.one(self.ok("sudo -D sub env -C ../a ls"), "ls")
+        self.assertEqual(c.run_cwds, [self.R("a")])
+        c = self.one(self.ok("env -C $X ls"), "ls")
+        self.assertEqual(c.run_cwds, [])
+
+    def test_no_command_files(self):
+        c = self.one(self.ok("sudo -e a.txt b.txt"), "sudo")
+        self.assertEqual([(w.value, op) for w, op in c.files], [("a.txt", "write"), ("b.txt", "write")])
+        self.assertEqual(c.wrappers, [])
+
+    def test_refused_runner(self):
+        for cmd, prog in (("su -c 'rm x'", "su"), ("BUILTIN rm x", "BUILTIN"), ("nohup -x rm x", "nohup"),
+                          ("timeout --sig KILL 5 rm x", "timeout"), ("xargs --max-lines 1 rm", "xargs"),
+                          ("npx --weird rimraf x", "npx"), ("exec -z rm x", "exec"),
+                          (" ".join(["nice"] * 17) + " rm x", "nice")):
+            r = self.ok(cmd)
+            c = [c for c in r.commands if c.prog == prog][-1]
+            self.assertIn("runner-unread", c.flags, cmd)
+            self.assertIn("runner", self.kinds(r), cmd)
+            self.assertEqual(self.by_prog(r, "rm"), [], cmd)
+        r = self.ok("su -c 'rm -rf /x/studio'")
+        self.assertIn("/x/studio", [o for o in r.opaque if o.kind == "runner"][0].skeleton)
+
+    def test_shell_payloads(self):
+        for cmd, prog, text in (("watch -n 1 'rm x'", "watch", "rm x"), ("flock lk -c 'rm x'", "flock", "rm x"),
+                                ("script -c 'rm x' log", "script", "rm x"), ("npx -c 'rm x'", "npx", "rm x"),
+                                ("yarn exec rm x", "yarn", "rm x")):
+            r = self.ok(cmd)
+            ops = [o for o in r.opaque if o.kind != "unknown-command"]  # flock is not on the test PATH
+            self.assertEqual([(o.kind, o.payload) for o in ops], [("shell-c", text)], cmd)
+            self.assertEqual(self.one(r, prog).id, ops[0].cmd, cmd)
+        r = self.ok("watch -n 1 rm $X")  # two readings (§3): `$X` dropped, and kept
+        self.assertEqual(sorted((o.payload or "", o.origin, o.skeleton) for o in r.opaque),
+                         [("", "dynamic", "rm \0"), ("rm", "literal", "rm")])
+        self.assertEqual(self.kinds(self.ok("watch \"rm $X\"")), ["runner"])  # a dynamic word where an option may stand
+        c = self.one(self.ok("script -q /dev/null rm x"), "rm")
+        self.assertEqual([w.name for w in c.wrappers], ["script"])
+
+    def test_command_cd(self):
+        # zsh without POSIX_BUILTINS: `command cd` is the external cd (the shell's folder stays)
+        self.assertEqual(self.one(self.ok("command cd sub; touch y"), "touch").cwds, [self.root])
+        self.assertEqual(self.one(self.ok("/usr/bin/command cd sub; touch y"), "touch").cwds, [self.root])
+        self.assertEqual(self.one(self.ok("builtin cd sub; touch y"), "touch").cwds, [self.R("sub")])
+        self.assertEqual(self.one(self.ok("setopt posixbuiltins; command cd sub; touch y"), "touch").cwds,
+                         [self.R("sub")])
+        self.assertEqual(self.one(self.ok("setopt $O; command cd sub; touch y"), "touch").cwds, [])  # chaselinks too
+        # options[…] is a write to zsh's option table (§1.8): every option may have changed, chaselinks too
+        self.assertEqual(self.one(self.ok("options[posixbuiltins]=on; command cd sub; touch y"), "touch").cwds, [])
+        r = self.ok("emulate sh -c 'command cd sub'")
+        self.assertEqual(r.opaque[0].options, {"posixbuiltins": True})
+        c = self.one(self.ok("command -v git"), "command")
+        self.assertIn("query", c.flags)
+
+    def test_name_folded(self):
+        from stdo.guard.where import FS, Where
+        if not Where(FS(), self.env).case_insensitive(self.bin):
+            self.skipTest("the test folder is on a case-sensitive volume")
+        self.exe("cd")  # an external cd (macOS has /usr/bin/cd)
+        c = self.one(self.ok("RM -rf x"), "rm")
+        self.assertIn("name-folded", c.flags)
+        self.assertEqual((c.words[0].value, c.words[0].raw), ("rm", "RM"))
+        c = self.one(self.ok("%s/RM x" % self.bin), "rm")
+        self.assertEqual(c.words[0].value, "%s/rm" % self.bin)
+        c = self.one(self.ok("ENV NOHUP Nice rm x"), "rm")
+        self.assertEqual([w.name for w in c.wrappers], ["env", "nohup", "nice"])
+        r = self.ok("CD sub; touch y")
+        self.assertIn("name-folded", self.one(r, "cd").flags)
+        self.assertEqual(self.one(r, "touch").cwds, [self.root])  # a folded name never takes the builtin path
+        r = self.ok("NOSUCHPROGRAM x")
+        self.assertNotIn("name-folded", r.commands[0].flags)
+
+
+class G1Words(GuardCase):
+    """guard-runners-plan §3 (empty words, readings, argv-unknown) and §1.8 (zsh's tables, (e), prompts, csh)."""
+
+    def gits(self, cmd):
+        return self.by_prog(self.ok(cmd), "git")
+
+    def test_dropped_empty_word(self):
+        gits = self.gits("X=; git $X status")
+        self.assertEqual(sorted(tuple(c.argv) for c in gits), [("git", "", "status"), ("git", "status")])
+        self.assertEqual([c.alt for c in gits], [None, {"group": "maybe-empty", "index": "kept"}])
+        for cmd in ("X=; git ${X} status", "X=; git $X$X status", "X=; Y=$X; git $Y status"):
+            self.assertEqual(sorted(len(c.argv) for c in self.gits(cmd)), [2, 3], cmd)
+        for cmd in ('X=; git "$X" status', "X=; git ''$X status", 'git "" status', "X=; git \"\"$X status"):
+            self.assertEqual([len(c.argv) for c in self.gits(cmd)], [3], cmd)  # a quoted empty word stays
+        # a program whose words keep their meaning: the no-drop reading only
+        self.assertEqual(self.one(self.ok("X=; ls $X src"), "ls").argv, ["ls", "src"])
+
+    def test_maybe_empty_readings(self):
+        gits = self.gits("git $A status")
+        self.assertEqual([c.argv for c in gits], [["git", "status"], ["git", None, "status"]])
+        self.assertEqual([c.alt for c in gits], [{"group": "maybe-empty", "index": 1}, None])
+        for n, cmd in ((1, "git status"), (2, "git $A status"), (4, "git $A -x $(x) status"),
+                       (8, "git $A -x ${B:-} -y $C[1] status")):
+            gits = self.gits(cmd)
+            self.assertEqual(len(gits), n, cmd)
+            self.assertFalse(any("argv-unknown" in c.flags for c in gits), cmd)
+        self.assertEqual(self.gits("git $A $B status")[0].argv, ["git", "status"])  # the most dropped first
+        for cmd in ("git $A $B $C $D status", "git $@ status", "git ${=X} status", "git $=X status",
+                    "git ${(s:,:)X} status", 'git "$@" status', "git $arr[@] status", 'git "${arr[@]}" status',
+                    "X='*'; git ${~X} status", "setopt globsubst; git $X status"):
+            gits = self.gits(cmd)
+            self.assertEqual(len(gits), 1, cmd)
+            self.assertIn("argv-unknown", gits[0].flags, cmd)
+        for cmd in ("rm -rf $A x", "rm $@ x", "touch $1 $2 $3 $4 x", "ls $A", "cd $A"):
+            c = self.ok(cmd).commands[0]
+            self.assertNotIn("argv-unknown", c.flags, cmd)
+            self.assertEqual(len(self.ok(cmd).commands), 1, cmd)
+        # words that are never empty
+        for cmd in ("git x$A status", 'git "$A" status', "git $((1)) status", "git ~ status"):
+            self.assertEqual(len(self.gits(cmd)), 1, cmd)
+
+    def test_option_value_reading_skipped(self):
+        # §1.2: the reading where the shell drops -n's value makes nice refuse `-rf` — nice fails the same way
+        r = self.ok("nice -n $A $B rm -rf x")
+        self.assertEqual([c.argv for c in self.by_prog(r, "rm")], [["rm", "-rf", "x"]])  # {A} and {B}: one command
+        self.assertEqual(self.kinds(r).count("runner"), 1)  # the no-drop reading: $B where an option may stand
+        r = self.ok("X=; timeout $X 5 rm -rf x")
+        self.assertEqual([c.argv for c in self.by_prog(r, "rm")], [["rm", "-rf", "x"]])
+
+    def test_no_drop_outside_argv(self):
+        for cmd in ('X=; [[ $X == "" ]] && echo e', "X=; (( ${#X} == 0 ))", "X=; Y=$X; echo $Y",
+                    'X=; case $X in "") echo e;; esac', "X=; cat <<< $X", "X=; for f in $X; do echo $f; done",
+                    "X=; echo x > out$X.txt"):
+            self.ok(cmd)
+        r = self.ok("X=; cat <<< $X")
+        self.assertEqual(self.one(r, "cat").redirs[0].body, "\n")
+
+    def test_split_substitution_value(self):
+        d = self.mk("a b")
+        for cmd in ("touch $(pwd)", "touch $(pwd)/x"):
+            c = self.one(self.ok(cmd, cwd=d), "touch")
+            self.assertIsNone(c.argv[1], cmd)  # unquoted, with a blank: the shell splits it
+        c = self.one(self.ok('touch "$(pwd)"', cwd=d), "touch")
+        self.assertEqual(c.argv[1], d)
+
+    def test_tables_set_shadowed(self):
+        for cmd in ("hash ls=/bin/rm; ls x", "hash -p /bin/rm ls; ls x", "commands[ls]=/bin/rm; ls x",
+                    "functions[ls]='rm x'; ls", "typeset 'commands[ls]=/bin/rm'; ls x",
+                    "x=ls; commands[$x]=/bin/rm; ls x", "read -r 'commands[ls]' <<< /bin/rm; ls x",
+                    "print -v 'commands[ls]' /bin/rm; ls x", "set -A aliases ls rm; ls x",
+                    ": ${commands[ls]::=/bin/rm}; ls x", "n='commands[ls]'; : ${(P)n::=/bin/rm}; ls x",
+                    "fpath=(/tmp/f $fpath); ls x", "options[posixbuiltins]=on; ls x",
+                    "zstyle -s ':x' k 'commands[ls]'; ls x", "zmodload zsh/stat; zstat -A commands x; ls x"):
+            r = self.ok(cmd)
+            self.assertIn("zsh-table", self.kinds(r), cmd)
+            self.assertIn("shadowed", self.by_prog(r, "ls")[-1].flags, cmd)
+        for cmd in ("echo ${+commands}", "echo ${commands[ls]}", "ls functions", "grep -rn options src",
+                    "echo $options", "stat functions", "print -r commands", "hash -r"):
+            self.assertNotIn("zsh-table", self.kinds(self.ok(cmd)), cmd)
+        # hash -d: ~name is no longer resolved
+        self.mk("d")
+        r = self.ok("x=%s; ls ~x; hash -d y=/tmp; ls ~x" % self.root)
+        self.assertEqual([c.argv[1] for c in self.by_prog(r, "ls")], [self.root, None])
+
+    def test_eval_and_prompt_forms(self):
+        self.assertIn("dynamic-command", self.kinds(self.ok("echo ${(e)X}")))
+        self.assertIn("dynamic-command", self.kinds(self.ok("echo \"${(e):-x}\"")))
+        self.assertEqual(self.kinds(self.ok("print -P '%F{red}x%f'")), [])  # PROMPT_SUBST off
+        self.assertIn("prompt-subst", self.kinds(self.ok("setopt promptsubst; print -P x")))
+        self.assertIn("prompt-subst", self.kinds(self.ok("setopt prompt_subst; echo ${(%):-x}")))
+        self.assertIn("prompt-subst", self.kinds(self.ok("setopt promptsubst; PS4='$(x)'")))
+
+    def test_csh_strings(self):
+        self.exe("csh")
+        r = self.ok("csh -c 'rm -rf x'")
+        self.assertEqual([(o.kind, o.payload) for o in r.opaque], [("shell-c", "rm -rf x")])
+
+    def test_extendedglob_operators(self):
+        c = self.one(self.ok("touch ^x.json"), "touch")
+        self.assertFalse(c.words[1].glob)
+        c = self.by_prog(self.ok("setopt extendedglob; touch ^x.json"), "touch")[-1]
+        self.assertTrue(c.words[1].glob)
+
+
+class G1Fixes(GuardCase):
+    """G1 implementation review 1: run folders (M1, M3), readings refused for another cause (M4), §1.9 variables
+    written by other routes (M6), arrays (C-M3), nested (e) flags (M12), sudo -s skeletons (m2)."""
+
+    def setUp(self):
+        super().setUp()
+        for d in ("a", "sub"):
+            self.mk(d)
+        self.R = lambda *p: os.path.join(self.root, *p)
+
+    def test_last_run_folder(self):  # M1: env -C / sudo -D given twice: the last one is the folder
+        for cmd in ("env -C sub -C a ls", "env --chdir=sub --chdir=a ls", "sudo -D sub -D a ls"):
+            self.assertEqual(self.one(self.ok(cmd), "ls").run_cwds, [self.R("a")], cmd)
+        self.assertEqual(self.one(self.ok("env -C sub env -C ../a ls"), "ls").run_cwds, [self.R("a")])
+
+    def test_unknown_run_folder(self):  # M3: a run folder the guard cannot read is unknown, not the shell's
+        for cmd in ("env -C $D ls", "sudo -D $D ls", "env -C a -C $D ls"):
+            c = self.one(self.ok(cmd), "ls")
+            self.assertIn("run-unknown", c.flags, cmd)
+            self.assertEqual([w.raw for w in c.run_words], ["$D"], cmd)
+        c = self.one(self.ok("env -C $D env -C /tmp ls"), "ls")
+        self.assertNotIn("run-unknown", c.flags)
+        self.assertNotIn("run-unknown", self.one(self.ok("env -C a ls"), "ls").flags)
+
+    def test_dropped_value_cause(self):  # M4: skipped only when the runner rejects the shifted word
+        r = self.ok("X=; timeout -s $X KILL --sig KILL 5 rm x")
+        self.assertIn("runner", self.kinds(r))  # --sig is refused whether or not -s took KILL
+        r = self.ok("nice -n $A $B rm -rf x")
+        self.assertEqual(self.kinds(r).count("runner"), 1)  # `nice -n rm`: nice rejects `rm` as a number
+        r = self.ok("X=; timeout -k $X 5 rm x")  # `-k 5`: a valid value, then `rm` the duration: no command runs
+        self.assertNotIn("runner", self.kinds(r))
+
+    def test_variables_written_by_name(self):  # M6
+        for cmd in ("read GIT_EDITOR <<< x", "for GIT_EDITOR in x; do :; done", "select GIT_EDITOR in x; do :; done",
+                    "print -v GIT_EDITOR x", "printf -v GIT_EDITOR %s x", ": ${GIT_EDITOR::=x}", "GIT_EDITOR[1,-1]=x",
+                    "set -A GIT_EDITOR x", "zformat -f GIT_EDITOR x", "vared GIT_EDITOR", "getopts x GIT_EDITOR",
+                    "echo ${X:-${GIT_EDITOR:=x}}"):
+            ops = [o for o in self.ok(cmd).opaque if o.kind == "var-set"]
+            self.assertEqual([(o.payload, o.value) for o in ops], [("GIT_EDITOR", None)], cmd)
+        c = self.one(self.ok("read HOME <<< /tmp/h; git status"), "git")
+        self.assertIsNone(c.env.set["HOME"].value)
+        for cmd in ("read -r line <<< x", "for f in a b; do :; done", "print -v out x"):
+            self.assertEqual([o for o in self.ok(cmd).opaque if o.kind == "var-set"], [], cmd)
+
+    def test_arrays_are_multi_word(self):  # C-M3
+        for cmd in ("a=(x y); git add $a", "typeset -a a; git add $a", "set -A a x y; git add $a",
+                    "git add $path"):
+            self.assertIn("argv-unknown", self.by_prog(self.ok(cmd), "git")[-1].flags, cmd)
+        for cmd in ('a=(x y); git add "$a"', "a=(x y); a=z; git add $a", "a=(x y); git add $a[1]"):
+            self.assertNotIn("argv-unknown", self.by_prog(self.ok(cmd), "git")[-1].flags, cmd)
+
+    def test_nested_eval_flags(self):  # M12
+        for cmd in ("echo ${${(e)X}}", "echo ${Y:-${(e)X}}", "echo ${X:+${(e)X}}", "echo ${X//a/${(e)X}}",
+                    "setopt extendedglob; echo ${X/(#m)*/${(e)MATCH}}"):
+            self.assertIn("dynamic-command", self.kinds(self.ok(cmd)), cmd)
+        for cmd in ("echo ${(s:e:)X}", "echo ${(j:e:)X}", "echo ${X:-e}"):
+            self.assertNotIn("dynamic-command", self.kinds(self.ok(cmd)), cmd)
+
+    def test_root_shell_skeleton(self):  # m2: searched for Studio repositories
+        o = [o for o in self.ok("sudo -s 'rm -rf /x/studio'").opaque if o.kind == "sudo-shell"][0]
+        self.assertEqual(o.skeleton, "rm -rf /x/studio")
+
+
+class G1Review2(GuardCase):
+    """G1 implementation review 2: wildcard folders (M12), templates and strings in a run folder (M1), array values
+    (M8), pattern expansions (M13), tied parameters (M4), attached names (M3), stdin shells (m-b) and the effects of
+    the snapshot's functions (R2-M1)."""
+
+    def setUp(self):
+        super().setUp()
+        for d in ("a", "studio"):
+            self.mk(d)
+        self.R = lambda *p: os.path.join(self.root, *p)
+
+    def test_wildcard_folders(self):  # M12
+        for cmd in ("cd stu?io; touch x", "pushd s*; touch x", "cd **/a && touch x"):
+            self.assertEqual(self.one(self.ok(cmd), "touch").cwds, [], cmd)
+        for cmd in ("env -C stu?io touch x", "env --chdir=s* touch x", "sudo -D s* touch x"):
+            c = self.one(self.ok(cmd), "touch")
+            self.assertIn("run-unknown", c.flags, cmd)
+            self.assertEqual(len(c.run_words), 1, cmd)
+        c = self.one(self.ok("git -C stu?io status"), "git")
+        self.assertEqual((c.git.c_dirs, "run-unknown" in c.flags), ([None], True))
+        c = self.one(self.ok('git -C "" status'), "git")
+        self.assertEqual((c.run_cwds, "run-unknown" in c.flags), ([self.root], False))
+        self.assertIn("run-unknown", self.one(self.ok("tar -xf x.tar -C stu?io"), "tar").flags)
+        self.assertEqual(self.one(self.ok("env -C a git -C studio status"), "git").run_cwds, [self.R("a", "studio")])
+
+    def test_templates_and_strings_in_the_run_folder(self):  # M1
+        r = self.ok("env -C $D find . -exec rm -rf x \\;")
+        self.assertEqual(self.one(r, "rm").cwds, [])
+        r = self.ok("env -C a xargs rm -rf < /dev/null")
+        self.assertEqual(self.one(r, "rm").cwds, [self.R("a")])
+        for cmd in ("env -C $D env -S 'rm x'", "env -C $D sudo -s 'rm x'"):
+            c = [c for c in self.ok(cmd).commands if "run-unknown" in c.flags]
+            self.assertEqual(len(c), 1, cmd)
+
+    def test_array_values(self):  # M8
+        for cmd in ("a=($(rm -rf x))", "a=(`rm -rf x`)", "a+=(b $(rm -rf x))", "typeset -a a=($(rm -rf x))"):
+            self.assertEqual(len(self.by_prog(self.ok(cmd), "rm")), 1, cmd)
+        for cmd in ('a=("${(e)X}")', "a=(${(e)X})", "a=([k]=${(e)X})", "echo ${(s(x)e)X}"):
+            self.assertIn("dynamic-command", self.kinds(self.ok(cmd)), cmd)
+        self.assertNotIn("dynamic-command", self.kinds(self.ok("a=(x y); echo ${(j: :)a}")))
+
+    def test_pattern_expansions(self):  # M13
+        for cmd in ("X='a(e:rm x:)'; echo $~X", "X='a(+f)'; echo ${~X}", "X='a(e:rm x:)'; echo ${(~)X}",
+                    "setopt globsubst; X='a(e:rm x:)'; echo $X", "echo $~UNSET", "echo ${~X:-a}"):
+            self.assertIn("dynamic-command", self.kinds(self.ok(cmd)), cmd)
+        for cmd in ("X='*.ts'; echo $~X", "X='a(e:rm x:)'; echo $X", "X='a(e:rm x:)'; echo \"$~X\""):
+            self.assertNotIn("dynamic-command", self.kinds(self.ok(cmd)), cmd)
+
+    def test_tied_parameters_and_attached_names(self):  # M4, M3
+        for cmd in ("typeset -T GIT_EDITOR ge ' '", "typeset -Tx PAGER pg", "print -vGIT_EDITOR x",
+                    "strftime -sGIT_EDITOR x 0", "zparseopts -AGIT_EDITOR a"):
+            self.assertIn(("var-set", None), [(o.kind, getattr(o, "value", "?")) for o in self.ok(cmd).opaque], cmd)
+        for cmd in ("typeset -T x commands", "print -v'commands[ls]' x", "set -Acommands ls", "set +Acommands",
+                    "zparseopts -Acommands a"):
+            self.assertIn("zsh-table", self.kinds(self.ok(cmd)), cmd)
+        self.assertEqual(self.kinds(self.ok("typeset -T MYPATH mypath :")), [])
+
+    def test_stdin_shells(self):  # m-b
+        for cmd in ("sh /dev/stdin <<< 'rm x'", "bash /dev/fd/0 <<< 'rm x'"):
+            o = [o for o in self.ok(cmd).opaque if o.kind == "herestring-interp"]
+            self.assertEqual([x.payload for x in o], ["rm x\n"], cmd)
+        o = [o for o in self.ok("sudo -E -s <<< 'rm /x/studio'").opaque if o.kind == "sudo-shell"][0]
+        self.assertEqual(o.skeleton, "rm /x/studio\n")
+
+    def test_snapshot_function_effects(self):  # R2-M1
+        from stdo.guard import walk
+        from stdo.guard.scanctx import ScanCtx
+        funcs = '''wrap () {
+	local label
+	label=x
+	command wrap "$@"
+}
+twice () {
+	wrap "$@" && cd "$1"
+}
+pick () {
+	if [[ $1 =~ ^(a|b)$ ]]
+	then
+		print a
+	fi
+}
+exp () {
+	export GIT_DIR=/x
+}
+calls () {
+	exp
+}
+glob () {
+	X=1
+}
+src () {
+	. ./x.sh
+}
+opts () {
+	setopt globsubst
+}
+lopts () {
+	emulate -L zsh
+	setopt globsubst
+}
+'''
+        # review 3 (bypass m1, conf M-1 to M-3): assignment by name, `always`, a `local` on a branch, LOCAL_OPTIONS
+        # turned off, letter options; folder changes; plain globals
+        funcs += """byname () {
+	: ${(P)1::=$2}
+}
+branchlocal () {
+	if false
+	then
+		local PATH
+	fi
+	PATH=$1:$PATH
+}
+always_ () {
+	local x
+	{ HOME=$1 } always { : }
+}
+nolocal () {
+	unsetopt localoptions
+	setopt globsubst
+}
+nolocal2 () {
+	setopt localoptions
+	setopt nolocaloptions globsubst
+}
+maybelocal () {
+	[[ -n $1 ]] && setopt localoptions
+	setopt globsubst
+}
+lettery () {
+	set -y
+}
+letter4 () {
+	set -4
+}
+letterT () {
+	set -T
+}
+lettereuo () {
+	set -euo pipefail
+}
+letterr () {
+	set -r
+}
+goes () {
+	builtin cd "$1"
+}
+callsgoes () {
+	goes "$@"
+}
+prompt_ () {
+	PROMPT="%~ %# "
+}
+loader () {
+	autoload -Uz compinit
+	unfunction x
+	alias ll='ls -l'
+}
+galias () {
+	alias -g G='| grep'
+}
+loops () {
+	local n=$1
+	for i in a b
+	do
+		n=$i
+	done
+}
+"""
+        snap = self.use_snapshots(snapshot_text(functions=funcs))
+        ctx = ScanCtx(self.env, guard.FS(), snapshot=snap)
+        E = lambda n: walk.snapshot_function_effects(ctx, n)
+        none = {"env": False, "globals": set(), "options": {}, "options_unknown": False, "local": "inherit",
+                "cwd": False, "shadowed": set()}
+        for n in ("wrap", "pick"):
+            self.assertEqual(E(n), none, n)
+        self.assertEqual(E("twice"), dict(none, cwd=True))
+        self.assertEqual(E("lopts"), dict(none, options={"globsubst": True}, local=True))
+        for n in ("exp", "calls"):
+            self.assertTrue(E(n)["env"], n)
+        self.assertEqual(E("glob")["globals"], {"X"})
+        self.assertIsNone(E("src"))
+        self.assertEqual(E("opts"), dict(none, options={"globsubst": True}))
+        self.assertIsNone(E("nosuch"))
+        self.assertIsNone(E("byname"))
+        self.assertEqual(E("branchlocal")["globals"], {"PATH"})
+        self.assertEqual(E("always_")["globals"], {"HOME"})  # `{ … } always { … }` is read (review 5 R1)
+        self.assertEqual(E("nolocal")["local"], False)
+        self.assertEqual(E("nolocal2")["local"], False)
+        self.assertEqual((E("maybelocal")["local"], E("maybelocal")["options"]), (None, {"globsubst": True}))
+        # review 10 conf M-1: `set` letters are read one by one; a letter the guard does not know is unknown
+        self.assertEqual((E("lettery")["options"], E("lettery")["options_unknown"]), ({"shwordsplit": True}, False))
+        self.assertEqual(E("letter4")["options"], {"globdots": True})
+        self.assertEqual(E("letterT")["options"], {"cdablevars": True})
+        self.assertEqual(E("lettereuo")["options"], {"pipefail": True})
+        self.assertTrue(E("letterr")["options_unknown"])
+        self.assertTrue(E("goes")["cwd"])
+        self.assertTrue(E("callsgoes")["cwd"])
+        self.assertEqual(E("prompt_"), dict(none, globals={"PROMPT"}))
+        self.assertEqual(E("loops")["globals"], {"i"})
+        self.assertEqual(E("loader")["shadowed"], {"compinit", "x", "ll"})
+        self.assertIsNone(E("galias"))
+
+
+class G1Review10(GuardCase):
+    """G1 review 10: the union rule — a folder or value that may or may not change is one of the old or new ones."""
+
+    def test_known_folders_kept(self):
+        r = self.ok("cd $X; touch y")
+        ts = [c for c in r.commands if c.prog == "touch"]
+        self.assertEqual([c.cwds for c in ts], [[], [self.root]])  # unknown, and where a failed cd leaves it
+        r = self.ok("trap 'cd /' ZERR; touch y")
+        self.assertEqual([c.cwds for c in r.commands if c.prog == "touch"], [[], [self.root]])
+        r = self.ok("cd /tmp; cd $X && touch y")
+        self.assertEqual([c.cwds for c in r.commands if c.prog == "touch"], [[]])
+
+    def test_values_kept(self):
+        def touched(cmd):
+            cs = [c for c in self.ok(cmd).commands if c.prog == "touch"]
+            if len(cs) > 1:  # review 11 M-1: one of a few known values: one reading per value
+                return None, sorted(c.words[1].value for c in cs)
+            w = self.one(self.ok(cmd), "touch").words[1]
+            return w.value, sorted(getattr(w, "cand_values", ()))
+        self.assertEqual(touched("X=s; f(){ local X=t }; f; touch $X"), ("s", []))
+        self.assertEqual(touched("X=s; [[ -e x ]] && X=t; touch $X"), (None, ["s", "t"]))
+        self.assertEqual(touched("X=s; read X < /nonexistent/x; touch $X")[1], ["s"])
+        self.assertEqual(touched("X=s; if [[ -e x ]]; then X=t; else X=u; fi; touch $X"), (None, ["t", "u"]))
+        self.assertEqual(touched("X=s; : ${X:=t}; touch $X"), (None, ["s", "t"]))
+        self.assertEqual(touched("X=s; : ${X::=t}; touch $X"), ("t", []))
+        self.assertEqual(touched("X=s; eval true; touch $X"), (None, ["s"]))
+        self.assertEqual(touched("X=s; f(){ X=t }; f; touch $X"), ("t", []))
+        self.assertEqual(touched("X=s; f(){ [[ -e x ]] && X=t }; f; touch $X"), (None, ["s", "t"]))
+
+
+class G1Review4(GuardCase):
+    """G1 implementation review 4: autoload stubs and other function bodies (B1, m1, m2, conf m-2), hooks (m3, R1),
+    pushd and while conditions (R2, R3), NULLCMD (R4), file-name generation and steering under GLOB_SUBST (conf M-1),
+    quoted pattern characters (conf M-2)."""
+
+    def setUp(self):
+        super().setUp()
+        for d in ("a", "src", "studio/local"):
+            self.mk(d)
+        self.R = lambda *p: os.path.join(self.root, *p)
+
+    def test_function_bodies(self):  # B1, m1, m2, conf m-2
+        from stdo.guard import walk
+        from stdo.guard.scanctx import ScanCtx
+        funcs = '''stub () {
+	# undefined
+	builtin autoload -XU
+}
+stubz () {
+	# undefined
+	builtin autoload -XUz
+}
+loadx () {
+	autoload -X
+}
+loadplus () {
+	autoload +X helper
+}
+tprint () {
+	typeset -p PATH > /dev/null
+	PATH=$1:$PATH
+}
+lprint () {
+	local -p HOME > /dev/null
+	HOME=$1
+}
+tmatch () {
+	typeset -m 'GIT_*'=x
+}
+arname () {
+	(( $1 = 1 ))
+}
+arinc () {
+	(( $1++ ))
+}
+arplain () {
+	(( n = 1 ))
+}
+cachekey () {
+	typeset -g "_mycache_${1}"=1
+}
+cachegit () {
+	typeset -g "GIT_${1}"=1
+}
+cacheany () {
+	typeset -g "${1}_x"=1
+}
+'''
+        snap = self.use_snapshots(snapshot_text(functions=funcs))
+        ctx = ScanCtx(self.env, guard.FS(), snapshot=snap)
+        E = lambda n: walk.snapshot_function_effects(ctx, n)
+        for n in ("stub", "stubz", "loadx", "tmatch", "arname", "arinc", "cachegit", "cacheany"):
+            self.assertIsNone(E(n), n)
+        self.assertEqual(E("loadplus")["shadowed"], {"helper"})
+        self.assertEqual(E("tprint")["globals"], {"PATH"})
+        self.assertEqual(E("lprint")["globals"], {"HOME"})
+        self.assertEqual(E("arplain")["globals"], {"n"})
+        self.assertEqual(E("cachekey")["globals"], set())
+
+    def test_hooks(self):  # m3, R1
+        r = self.ok("chpwd(){ builtin cd -q studio; }; cd a; touch x")
+        self.assertEqual(self.one(r, "touch").cwds, [])
+        for cmd in ("TRAPDEBUG(){ cd /; }; touch x", "TRAPZERR(){ cd -; }; false; touch x",
+                    "chpwd_functions=(f); touch x", "command_not_found_handler(){ cd /; }; touch x",
+                    "trap 'cd studio' ZERR; touch x", "trap \"$X\" DEBUG; touch x", "trap 'f' ERR; touch x",
+                    "trap 'cd /' INT; touch x", "g(){ cd /; }; trap g USR1; touch x", "trap g INT; g(){ cd /; }; touch x",
+                    "g(){ :; }; trap g INT; g(){ cd /; }; touch x", "f(){ trap 'cd /' EXIT; }; f; touch x",
+                    "TRAPUSR1(){ cd /; }; touch x"):
+            self.assertEqual(self.one(self.ok(cmd), "touch").cwds, [], cmd)
+        # review 10 B1/M1: an EXIT trap set at the top, precmd/zshexit (never run between the call's commands), and a
+        # hook whose body the guard reads and that does not change folder keep the folder
+        for cmd in ("trap 'rm -f /tmp/x' EXIT; touch x", "trap - EXIT; touch x", "trap '' INT; touch x",
+                    "trap 'cd /' EXIT; touch x", "TRAPEXIT(){ cd /; }; touch x", "precmd(){ cd /; }; touch x",
+                    "zshexit(){ cd /; }; touch x", "precmd_functions+=(f); touch x",
+                    "cleanup(){ rm -f /tmp/l; }; trap cleanup EXIT INT TERM; touch x",
+                    "TRAPDEBUG(){ :; }; touch x", "command_not_found_handler(){ print -r -- \"$1\"; }; touch x"):
+            self.assertEqual(self.one(self.ok(cmd), "touch").cwds, [self.root], cmd)
+        base = "show () {\n\tgit status\n}\n"
+        self.use_snapshots(snapshot_text(functions=base + "chpwd () {\n\t[[ -d studio ]] && builtin cd -q studio\n}\n"))
+        self.assertEqual(self.one(self.ok("cd a; touch x"), "touch").cwds, [])
+        self.assertEqual(self.one(self.ok("touch x"), "touch").cwds, [self.root])
+        self.use_snapshots(snapshot_text(functions=base + "chpwd () {\n\tprint -r -- moved\n}\n"))
+        self.assertEqual(self.one(self.ok("cd a; touch x"), "touch").cwds, [self.R("a")])
+        self.use_snapshots(snapshot_text(functions=base + "TRAPDEBUG () {\n\tbuiltin cd -q studio\n}\n"))
+        self.assertEqual(self.one(self.ok("touch x"), "touch").cwds, [])
+
+    def test_defined_functions_and_snapshot_functions(self):  # B3
+        self.use_snapshots(snapshot_text(functions="show () {\n\tgit status\n}\n"))
+        self.assertEqual(self.one(self.ok("show; touch x"), "touch").cwds, [self.root])
+        for cmd in ("git(){ cd studio; }; show; touch x", "f(){ :; }; show; touch x",
+                    "eval 'git(){ :; }'; show; touch x",
+                    "functions[git]='cd studio'; show; touch x", "autoload -Uz f; show; touch x"):
+            self.assertEqual(self.one(self.ok(cmd), "touch").cwds, [], cmd)
+        self.assertEqual(self.one(self.ok("alias git='cd studio'; show; touch x"), "touch").cwds, [self.root])
+
+    def test_pushd_and_loop_conditions(self):  # R2, R3; a function's `return`
+        for cmd in ("pushd -P studio; touch x", "pushd -L studio; touch x", "pushd -s studio; touch x",
+                    "pushd -- studio; touch x", "pushd -qP studio; touch x"):
+            self.assertEqual(self.one(self.ok(cmd), "touch").cwds, [self.R("studio")], cmd)
+        for cmd in ("pushd src studio; touch x", "pushd -z studio; touch x", "while cd studio; do break; done; touch x",
+                    "until cd studio; do :; done; touch x", "while ! cd studio; do :; done; touch x",
+                    "while { cd studio }; do break; done; touch x"):
+            self.assertIsNone(self.one(self.ok(cmd), "touch").cwds or None, cmd)
+        # review 10: a function this call defined is walked from where it is called — its folder there
+        self.assertEqual(self.one(self.ok("f(){ cd studio; return; }; f; touch x"), "touch").cwds, [self.R("studio")])
+        self.assertEqual(self.one(self.ok("while [[ -n $X ]]; do break; done; touch x"), "touch").cwds, [self.root])
+
+    def test_null_command(self):  # R4
+        for cmd in ("NULLCMD=sh; > /dev/null <<< 'rm -rf x'", "READNULLCMD=sh; <<< 'rm -rf x'",
+                    "NULLCMD=$X; > /dev/null <<< 'rm -rf x'"):
+            o = [o for o in self.ok(cmd).opaque if o.kind == "shell-c"]
+            self.assertEqual([x.payload for x in o], ["rm -rf x\n"], cmd)
+        for cmd in ("> /dev/null <<< 'rm -rf x'", "NULLCMD=cat; > /dev/null <<< 'rm -rf x'", "NULLCMD=sh; > out.txt"):
+            self.assertNotIn("shell-c", self.kinds(self.ok(cmd)), cmd)
+
+    def test_steered_values(self):  # conf M-1
+        def qual(cmd):
+            return any(o.kind == "dynamic-command" and getattr(o, "why", None) for o in self.ok(cmd).opaque)
+        for cmd in ("setopt globsubst; ls $X", "setopt globsubst; echo ${#X}", "setopt globsubst; [[ -n $X ]]",
+                    "setopt globsubst; local v=$X", "setopt globsubst; typeset -i n=$X", "setopt globsubst; Y=$X",
+                    "setopt globsubst; case $X in a) ;; esac", "setopt globsubst; for i in 1 2; do ls $i; done",
+                    "setopt globsubst; a=(x y); ls ${a[1]}", "setopt globsubst; cat <<< $X", "eval 'ls'; ls $X",
+                    "setopt globsubst; echo ${X:-y}"):
+            self.assertFalse(qual(cmd), cmd)
+        for cmd in ("setopt globsubst; read X < f; ls $X", "setopt globsubst; for f in *.ts; do ls $f; done",
+                    "setopt globsubst; X=$(cat f); ls $X", "eval 'X=y'; setopt globsubst; ls $X",
+                    "setopt globsubst; ls $REPLY", "setopt globsubst; ls ${X:-'*(e:x:)'}", "echo $~X",
+                    "setopt globsubst; X=$(cat f); a=($X)", "setopt globsubst; f(){ :; }; f; ls $X",
+                    "setopt globsubst; ls ${(P)X}"):
+            self.assertTrue(qual(cmd), cmd)
+        self.assertTrue(qual("setopt globsubst; X='*(e:x:)'; a=($X)"))
+        self.assertTrue(self.ok('eval "$O"; ls $X').sourced)  # fix20: the walk stops (the 0.0.26 rules judge it)
+
+    def test_quoted_pattern_characters(self):  # conf M-2
+        w = [w for w in self.one(self.ok("touch 'a(1).txt' b\\(2\\).txt c*.txt \"d[1]\"*"), "touch").words[1:]]
+        self.assertEqual([sorted(x.wild) for x in w], [[], [0, 2, 4, 5, 6, 7], [0, 1, 2, 3, 4, 5], [4]])

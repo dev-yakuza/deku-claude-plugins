@@ -184,7 +184,9 @@ class AllowLeak(JudgeCase):
         tpath = TR.transcript_path(self.env)
         t = TR.approval_turn(TR.T(), "승인 v 3f2a9c0d1e4b")
         t.write(tpath)
+        from stdo.guard.legacy import transcript as legacy_transcript
         transcript.STATS.opened = 0
+        legacy_transcript.STATS.opened = 0
         for mode in ("with", "none"):
             self.mode = mode
             for cmd in self.MUST_PASS + self.MUST_DENY:
@@ -197,18 +199,25 @@ class AllowLeak(JudgeCase):
                     self.assertIsNotNone(deny, cmd)
                 elif mode == "with":
                     self.assertIsNone(deny, "%s: %s" % (cmd, deny and deny.message()))
-        # the transcript is opened only for the approval command (once per mode)
+        # the transcript is opened only for the approval command (once per mode); fix20: the 0.0.26 guard does not
+        # run after this guard refused (the approval with a wrong value), and opens it for no other command
         self.assertEqual(transcript.STATS.opened, 2)
+        self.assertEqual(legacy_transcript.STATS.opened, 0)
 
     def test_only_one_place_says_allow(self):
+        # fix20: this guard's allow_for (judge.py) and the 0.0.26 guard's (legacy/judge.py, frozen); backstop.py only
+        # copies the 0.0.26 guard's answer, in its branch for calls the 0.0.26 rules finished (after a source)
         import glob
+        import re
         gdir = os.path.join(helpers.SCRIPTS, "stdo", "guard")
         hits = []
-        for p in sorted(glob.glob(os.path.join(gdir, "*.py"))):
+        for p in sorted(glob.glob(os.path.join(gdir, "*.py")) + glob.glob(os.path.join(gdir, "legacy", "*.py"))):
             for i, line in enumerate(open(p), 1):
-                if "ctx.allow =" in line or '"allow"' in line:
-                    hits.append("%s:%d" % (os.path.basename(p), i))
-        self.assertEqual([h.split(":")[0] for h in hits], ["judge.py"], hits)
+                if (re.search(r"\.allow\s*=(?!=)", line) and "self.allow = None" not in line) or '"allow"' in line:
+                    hits.append((os.path.relpath(p, gdir), line.strip()))
+        self.assertEqual(hits, [("backstop.py", "g.allow = lctx.allow"),
+                                ("judge.py", 'ctx.allow = "Studio guard: " + reason'),
+                                (os.path.join("legacy", "judge.py"), 'ctx.allow = "Studio guard: " + reason')], hits)
         body = open(GUARD).read()
         self.assertEqual(body.count('"permissionDecision": "allow"'), 1)
 

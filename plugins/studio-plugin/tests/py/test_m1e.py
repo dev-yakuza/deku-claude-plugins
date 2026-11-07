@@ -770,6 +770,25 @@ class Auditor(JudgeCase):
             self.assertDeny(cmd, "G-AUDIT")
 
 
+    def test_review11_choice_words(self):
+        # A1/A2 (review 11): a word that is one of a few known values is read once per value; every reading must read
+        # only; a subscript or slice of a value has no value the guard reads (refused); no crash
+        for cmd in ("if true; then v=log; else v=diff; fi; git $v", "v=a.txt; [[ -e x ]] && v=b.txt; sort $v",
+                    "v=a; [[ -e x ]] && v=b; git diff $v", "if true; then v=1; else v=0; fi; echo $v",
+                    "BASE=main; git rev-parse --verify develop >/dev/null 2>&1 && BASE=develop; "
+                    "git log --oneline $BASE..HEAD",
+                    "f=a.txt; [[ -e b.txt ]] && f=b.txt; rg TODO $f", "f=a.txt; [[ -e b.txt ]] && f=b.txt; sort $f | head"):
+            self.assertPass(cmd)
+        for cmd in ("v=x-exec; [[ -e a.txt ]] && v=y-exec; find . -name a.txt $v[2,-1] touch {}.pwn \\;",
+                    "v=x-delete; [[ -e a.txt ]] && v=y-delete; find . $v[2,-1]",
+                    "v=x-delete; [[ -e a.txt ]] && v=y-delete; find . ${v[2,-1]}",
+                    "v=x-ox; [[ -e a.txt ]] && v=y-ox; less $v[2,-1] a.txt",
+                    "v=log; [[ -e x ]] && v=push; git $v", "v=x; [[ -e x ]] && v=-delete; find . $v",
+                    "v=a.txt; [[ -e x ]] && v=out.txt; uniq a.txt $v", "v=po; [[ -e x ]] && v=pu; git ${v}sh",
+                    "v=a; [[ -e x ]] && v=-o; sort $v out.txt a.txt"):
+            self.assertDeny(cmd, "G-AUDIT")
+
+
 # ---------------------------------------------------------------- R1: only committed writing is frozen
 
 class CommittedSource(FlowCase):

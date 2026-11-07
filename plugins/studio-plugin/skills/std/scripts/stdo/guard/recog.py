@@ -6,10 +6,11 @@ import re
 import unicodedata
 
 from .. import s2vcall
-from . import where
+from . import cmdopts, where
 from .model import GitInfo, S2vForm
 
-SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "mksh", "yash", "fish"}
+SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "mksh", "yash", "fish", "csh", "tcsh"}  # csh, tcsh: G1 §1.8
+CSH = ("csh", "tcsh")  # their -c strings are csh syntax: never parsed
 PY_RE = re.compile(r"^(python|pypy)[0-9.]*$")
 NODE_RE = re.compile(r"^(node|nodejs)[0-9]*$")
 INLINE_FLAGS = {"perl": ("-e", "-E"), "ruby": ("-e",), "php": ("-r",), "lua": ("-e",), "osascript": ("-e",),
@@ -188,8 +189,10 @@ def git_info(words, run_cwd_join):
         if v is None or not v.startswith("-"):
             break
         name, eq, val = v.partition("=")
+        nw = None
         if v in GIT_WITH_VALUE:
-            nv = a[i + 1].value if i + 1 < len(a) else None
+            nw = a[i + 1] if i + 1 < len(a) else None
+            nv = nw.value if nw is not None else None
             i += 2
         elif eq and name in GIT_WITH_VALUE:
             nv = val
@@ -199,16 +202,20 @@ def git_info(words, run_cwd_join):
             i += 1
             continue
         if v == "-C":
-            g.c_dirs.append(nv)
+            g.c_dirs.append(None if nw is not None and nw.glob else nv)  # a wildcard folder: unknown (M12)
         elif v == "-c":
-            k, _, cv = (nv or "").partition("=")
-            g.configs.append((k, cv))
+            # a key or value the guard cannot read is kept as None (G1 §1.9: refused for a key, judged for a value)
+            g.configs.append(cmdopts.config_pair(nw) if nw is not None else (None, None))
+        elif v == "--config-env":
+            k = (nv or "").partition("=")[0] if nv is not None else None
+            g.configs.append((k or None, None))  # the value comes from a variable
         elif v == "--git-dir":
             g.git_dir = nv
         elif v == "--work-tree":
             g.work_tree = nv
     if i < len(a):
         g.sub = a[i].value
+        g.sub_dynamic = g.sub is None
         g.args = a[i + 1:]
     return g
 
@@ -232,11 +239,11 @@ def cwd_option(prog, words):
         for o in opts:
             if v == o and i + 1 < len(words):
                 nv = words[i + 1].value
-                out = nv if nv is not None else ""
+                out = nv if nv is not None and not words[i + 1].glob else ""  # a wildcard folder: unknown (M12)
             elif v.startswith(o + "=") and o.startswith("--"):
-                out = v[len(o) + 1:]
+                out = v[len(o) + 1:] if not w.glob else ""
             elif o == "-C" and v.startswith("-C") and len(v) > 2 and key(prog) in ("make", "gmake", "tar", "gtar", "pnpm"):
-                out = v[2:]
+                out = v[2:] if not w.glob else ""
     return out
 
 
@@ -331,3 +338,26 @@ def classify_s2v(words, cwd, s2v_path, path_values, fs):
 
 def is_bin_dir(path):
     return path is not None and path.startswith(BIN_DIRS)
+
+
+SYSTEM_BIN_DIRS = ("/bin", "/usr/bin", "/sbin", "/usr/sbin")  # the sealed system volume on macOS
+_TRUSTED = {}
+
+
+def trusted_bin_dir(path):
+    """G1 §4: a program path whose folder the agent cannot have written: a system bin folder, or /usr/local/bin and
+    /opt/homebrew/bin when they are owned by root and not group- or other-writable (cached per process)."""
+    if not path or "/" not in path:
+        return False
+    d = os.path.dirname(path)
+    if d in SYSTEM_BIN_DIRS:
+        return True
+    if d not in ("/usr/local/bin", "/opt/homebrew/bin"):
+        return False
+    if d not in _TRUSTED:
+        try:
+            st = os.stat(d)
+            _TRUSTED[d] = st.st_uid == 0 and not (st.st_mode & 0o022)
+        except OSError:
+            _TRUSTED[d] = False
+    return _TRUSTED[d]

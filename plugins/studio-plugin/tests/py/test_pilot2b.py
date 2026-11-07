@@ -679,10 +679,10 @@ class Text(unittest.TestCase):
         from stdo import SCRIPTS_VERSION
         self.assertEqual(SCRIPTS_VERSION, "24")
         with open(os.path.join(helpers.PLUGIN, ".claude-plugin", "plugin.json")) as f:
-            self.assertEqual(json.load(f)["version"], "0.0.26")
+            self.assertEqual(json.load(f)["version"], "0.0.27")
         for n in ("README.md", "README.ko.md", "README.ja.md"):
-            self.assertIn("0.0.26", read(helpers.PLUGIN, n), n)
-        self.assertIn("0.0.26", read(helpers.PLUGIN, "tests", "README.md"))
+            self.assertIn("0.0.27", read(helpers.PLUGIN, n), n)
+        self.assertIn("0.0.27", read(helpers.PLUGIN, "tests", "README.md"))
 
 
 if __name__ == "__main__":

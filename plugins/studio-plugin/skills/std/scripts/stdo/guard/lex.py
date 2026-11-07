@@ -22,8 +22,12 @@ META = set(" \t\n;&|()<>")
 NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 SPECIAL_PARAMS = set("@*#?$!-0123456789")
 MODIFIERS = set("aAcehlpPqQrstuwxWX&")
-ASSIGN_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(\[[^\]]*\])?(\+?=)")
+ASSIGN_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*|[0-9]+)(\[[^\]]*\])?(\+?=)")  # `0=…`, `1=…` too (review 6 M3)
 PLAIN_RE = re.compile(r"[^\s;&|()<>'\"\\$`]+")
+# zsh's numeric glob `<N-M>` (`<->`, `<5->`, `<-9>`): zsh's lexer reads it as part of a word wherever a `<` stands,
+# word-internal, at word start, inside `[…]`, after `^` or an fd number (lex.c isnumglob; checked in zsh 5.9, review 8
+# B1); any other `<` is a redirection
+NUMGLOB_RE = re.compile(r"<[0-9]*-[0-9]*>")
 
 
 class ParseError(Exception):
@@ -132,35 +136,53 @@ class Lexer(object):
 
     # ---- words ----
 
-    def read_word(self, assign=False):
-        """A WordNode at pos, or None when pos is at a metacharacter / end."""
+    def read_word(self, assign=False, regex=False):
+        """A WordNode at pos, or None when pos is at a metacharacter / end. `regex`: the operand after `=~` in
+        `[[ ]]` — balanced `( … )` and `|` are part of the word (zsh reads it as a regular expression, review 6
+        conf M-1); "pattern": the operand after `==`, `=` or `!=` — a glob group `( … )` with its `|`, blanks and
+        `<…>` is part of the word (`[[ $x == (a|b) ]]`; a `|` outside a group is zsh's parse error; review 7 conf
+        M-1)."""
         start = self.pos
         parts = []
         buf = self.buf
         lit = []
+        depth = 0
 
         def flush():
             if lit:
                 parts.append(("lit", "".join(lit), False))
                 del lit[:]
 
-        while self.pos < len(buf):
+        while self.pos < len(self.buf):
             self._tick()
+            buf = self.buf  # an alias in a `$(…)` of this word is spliced into the buffer (review 6)
             c = buf[self.pos]
+            if regex and (c == "(" or (c == ")" and depth > 0) or (c == "|" and (depth > 0 or regex is True)) or
+                          (regex == "pattern" and depth > 0 and c in " \t<>")):
+                depth += 1 if c == "(" else -1 if c == ")" else 0
+                lit.append(c)
+                self.pos += 1
+                continue
+            if c == "<" and NUMGLOB_RE.match(buf, self.pos):
+                m = NUMGLOB_RE.match(buf, self.pos)
+                lit.append(m.group(0))  # a numeric glob: part of the word (review 8 B1)
+                self.pos = m.end()
+                continue
             if c in META:
                 if c in "<>" and self.at(1) == "(" and self.pos == start:
                     d = c
                     self.pos += 2
                     body = self.parse_list(stop_ops=(")",))
                     self.expect(")")
-                    parts.append(("procsub", d, body, buf[start:self.pos]))
+                    parts.append(("procsub", d, body, self.buf[start:self.pos]))
                     continue
                 if c == "(" and self.pos > start:
                     sofar = buf[start:self.pos]
                     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\+?=", sofar):
                         end = self._match_paren(self.pos)
                         flush()
-                        parts.append(("dyn", "array", buf[self.pos:end], False))
+                        # the substitutions in the elements run (`a=($(…))`, review 2 M8)
+                        parts.append(("dyn", "array", buf[self.pos:end], False, self.subs_in(buf[self.pos:end])))
                         self.pos = end
                         continue
                     if re.match(r"\(\s*\)", buf[self.pos:]):
@@ -195,6 +217,17 @@ class Lexer(object):
                 flush()
                 parts.append(self.read_backtick(quoted=False))
                 continue
+            if c == "~" and self.pos == start and buf[self.pos + 1:self.pos + 2] == "[":
+                # review 14 (B14-6): `~[name]`, a dynamic named directory (zsh_directory_name): a tilde part whose
+                # folder the guard cannot tell (walk: "tilde-dir"). review 15 (B15-1/2): only a plain name between the
+                # brackets — zsh's lexer ends the word at `;`, `&`, `|`, `<`, … and runs `$(…)`, backquotes and
+                # `${…}` inside it, so any other text is lexed as before (HEAD); `~[x](#q…)` too (a glob qualifier)
+                m = re.match(r"~\[[A-Za-z0-9_.:+@%,=-]*\]", buf[self.pos:])
+                nxt = buf[self.pos + len(m.group(0)):self.pos + len(m.group(0)) + 1] if m else None
+                if m and (nxt in ("", "/") or (nxt in META and nxt != "(")):
+                    parts.append(("tilde", m.group(0)[1:]))
+                    self.pos += len(m.group(0))
+                    continue
             if c == "~" and self.pos == start:
                 m = re.match(r"~([+-]\d*|[A-Za-z0-9_.-]*)", buf[self.pos:])
                 user = m.group(1)
@@ -232,25 +265,57 @@ class Lexer(object):
         flush()
         if self.pos == start:
             return None
-        return WordNode(parts, buf[start:self.pos], start, self.pos)
+        return WordNode(parts, self.buf[start:self.pos], start, self.pos)
+
+    def skip_unit(self, i):
+        """review 9 B2: index after the quoted or expansion unit starting at buf[i] — a backslash pair, '…', $'…' (with
+        its backslash escapes), "…", `…`, ${…} (its flags' parentheses are not counted), $(…) — or None when buf[i]
+        starts none. The one scanner the paren, brace and case-pattern matchers share with the lexer's rules."""
+        buf, n = self.buf, len(self.buf)
+        c = buf[i]
+        if c == "\\":
+            return i + 2
+        if c == "'":
+            j = buf.find("'", i + 1)
+            if j < 0:
+                raise ParseError("unterminated-quote", i)
+            return j + 1
+        if c == '"':
+            return self._skip_dq(i + 1)
+        if c == "`":
+            j = i + 1
+            while j < n and buf[j] != "`":
+                j += 2 if buf[j] == "\\" else 1
+            if j >= n:
+                raise ParseError("unterminated-backtick", i)
+            return j + 1
+        if c == "$" and i + 1 < n:
+            d = buf[i + 1]
+            if d == "'":
+                j = i + 2
+                while j < n and buf[j] != "'":
+                    j += 2 if buf[j] == "\\" else 1
+                if j >= n:
+                    raise ParseError("unterminated-quote", i)
+                return j + 1
+            if d == '"':
+                return self._skip_dq(i + 2)
+            if d == "{":
+                return self._brace_end(i + 2)
+            if d == "(":
+                return self._match_paren(i + 1)
+        return None
 
     def _match_paren(self, i):
         """Index after the `)` matching buf[i] == '(' (quotes respected)."""
         depth, buf, n = 0, self.buf, len(self.buf)
         while i < n:
             c = buf[i]
-            if c == "\\":
-                i += 2
-                continue
-            if c == "'":
-                j = buf.find("'", i + 1)
-                if j < 0:
-                    raise ParseError("unterminated-quote", i)
-                i = j + 1
-                continue
-            if c == '"':
-                i = self._skip_dq(i + 1)
-                continue
+            if c in "\\'\"`$":
+                j = self.skip_unit(i)
+                if j is not None:
+                    i = j
+                    continue
             if c == "(":
                 depth += 1
             elif c == ")":
@@ -269,6 +334,9 @@ class Lexer(object):
                 continue
             if c == '"':
                 return i + 1
+            if (c == "$" and buf[i + 1:i + 2] in ("(", "{")) or c == "`":
+                i = self.skip_unit(i)  # "$(echo ")")": the substitution's own quotes (review 9 B2)
+                continue
             i += 1
         raise ParseError("unterminated-quote", i)
 
@@ -301,6 +369,7 @@ class Lexer(object):
         start = self.pos
         lit = []
         buf = self.buf
+        n0 = len(parts)
 
         def flush():
             if lit:
@@ -308,6 +377,7 @@ class Lexer(object):
                 del lit[:]
 
         while True:
+            buf = self.buf  # an alias in a `$(…)` is spliced into the buffer
             if self.pos >= len(buf):
                 if end is None:
                     break
@@ -340,6 +410,8 @@ class Lexer(object):
             lit.append(c)
             self.pos += 1
         flush()
+        if end is not None and len(parts) == n0:
+            parts.append(("lit", "", True))  # `""`: an empty quoted word stays a word (G1 §3)
 
     def read_dollar(self, parts, quoted):
         buf, p = self.buf, self.pos
@@ -371,7 +443,7 @@ class Lexer(object):
             body = self.parse_list(stop_ops=(")",))
             self.expect(")")
             self.ctx.depth_leave()
-            parts.append(("cmdsub", body, buf[p:self.pos], quoted))
+            parts.append(("cmdsub", body, self.buf[p:self.pos], quoted))
             return
         if nxt == "[":
             j = buf.find("]", p + 2)
@@ -393,7 +465,8 @@ class Lexer(object):
                 for s in subs:
                     parts.append(("cmdsub", s, "", quoted))
             return
-        if nxt in ("=", "~", "^", "+") and (NAME_RE.match(buf, p + 2) or buf.startswith(("{", "=", "~", "^"), p + 2)):
+        if nxt in ("=", "~", "^", "+") and (NAME_RE.match(buf, p + 2) or buf.startswith(("{", "=", "~", "^"), p + 2)
+                                            or (buf[p + 2:p + 3] in SPECIAL_PARAMS and buf[p + 2:p + 3])):
             q = p + 1
             while q < len(buf) and buf[q] in "=~^+":
                 q += 1
@@ -401,18 +474,22 @@ class Lexer(object):
                 q = self._brace_end(q + 1)
             else:
                 mm = NAME_RE.match(buf, q)
-                q = mm.end() if mm else q
+                if mm:
+                    q = mm.end()
+                elif q < len(buf) and buf[q].isdigit():
+                    q = re.match(r"[0-9]+", buf[q:]).end() + q  # `$~1`, `$=1` (review 9: s7#11)
+                elif q < len(buf) and buf[q] in SPECIAL_PARAMS:
+                    q += 1  # `$~@`, `$=*`
             parts.append(("dyn", "paramx", buf[p:q], quoted))
             self.pos = q
             return
         m = NAME_RE.match(buf, p + 1)
         if m:
             self.pos = m.end()
-            if self.at() == ":" and self.at(1) and self.at(1) in MODIFIERS:
+            if self.at() == ":" and self.at(1) and (self.at(1) in MODIFIERS or (self.at(1) == "g" and self.at(2) and
+                                                                          self.at(2) in "sS&")):
                 # zsh modifier ($X:h, $X:s/a/b/): the value is not the variable's
-                q = self.pos
-                while q < len(buf) and buf[q] not in META and buf[q] not in "\\'$`\"":
-                    q += 1
+                q = self._modifier_end(self.pos, quoted)
                 parts.append(("dyn", "modifier", buf[p:q], quoted))
                 self.pos = q
                 return
@@ -431,6 +508,35 @@ class Lexer(object):
             return
         parts.append(("lit", "$", quoted))
         self.pos = p + 1
+
+    def _modifier_end(self, q, quoted=False):
+        """End of an unbraced modifier chain at q (`:h:t`, `:s/a/b/`, `:gs/a/'b'/`). The text of an `s`
+        substitution is read to its third delimiter with its quotes and backslashes (zsh reads them as part of the
+        modifier: review 6 M4); an expansion in it ends the part (it is read, and runs, as its own part)."""
+        buf, n = self.buf, len(self.buf)
+        while q < n and buf[q] not in META and buf[q] not in "\\'$`\"":
+            ms = re.match(r":g?[sS](.)", buf[q:q + 4]) if buf[q] == ":" else None
+            if ms is None or ms.group(1) in META:
+                q += 1
+                continue
+            d, q, seen = ms.group(1), q + ms.end(), 0
+            while q < n and seen < 2 and buf[q] not in META:
+                c = buf[q]
+                if quoted and c == '"':
+                    break
+                if c == "\\":
+                    q += 2
+                elif c == "'" and not quoted:
+                    j = buf.find("'", q + 1)
+                    q = n if j < 0 else j + 1
+                elif c == '"' and not quoted:
+                    q = self._skip_dq(q + 1)
+                elif c in "$`":
+                    break  # an expansion in the text: read as its own part (it runs)
+                else:
+                    seen += c == d
+                    q += 1
+        return min(q, n)
 
     def _arith_end(self, i):
         """Index after the matching `))` for an arithmetic expansion starting at i, or None."""
@@ -452,17 +558,8 @@ class Lexer(object):
         depth, buf, n = 1, self.buf, len(self.buf)
         while i < n:
             c = buf[i]
-            if c == "\\":
-                i += 2
-                continue
-            if c == "'":
-                j = buf.find("'", i + 1)
-                if j < 0:
-                    raise ParseError("unterminated-quote", i)
-                i = j + 1
-                continue
-            if c == '"':
-                i = self._skip_dq(i + 1)
+            if c in "\\'\"`" or (c == "$" and buf[i + 1:i + 2] in ("'", "(")):
+                i = self.skip_unit(i)
                 continue
             if c == "{":
                 depth += 1

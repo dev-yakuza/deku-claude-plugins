@@ -200,6 +200,128 @@ probe = _sp.run([sys.executable, "-B", "-c", "import sys; sys.path.insert(0, %r)
                  "print('subprocess' in sys.modules)" % os.path.join(skill, "scripts")], capture_output=True, text=True)
 check(probe.stdout.strip() == "False", "importing stdo.guard loads no subprocess module (%s)" % probe.stdout.strip())
 
+# fix20: the 0.0.26 guard as a backstop — guard/legacy is the guard of d2028cc (0.0.26), frozen. Each file: line 1 the
+# FROZEN header, then HEAD's text with two mechanical rewrites (one more dot on `from ..` import lines; one more
+# dirname on the `os.path.abspath(__file__)` lines). Reversed, the sha256 must be HEAD's:
+#   git show d2028cc:plugins/studio-plugin/skills/std/scripts/stdo/guard/<name> | shasum -a 256
+# Regenerate only if the backstop is ever re-based on another release (tests/README.md).
+LEGACY_HEAD = {
+    "__init__.py": "af6fc43eec9a405bbadb77c576fba0d949ce4e828ce13627abf2f345615fb287",
+    "allowrule.py": "e97908090ae05f4baf51a86a0d3bb14a253b64f7225fe9d3f8db0475b071c8cd",
+    "approve.py": "2f048427bb2c36af3ecd01d9a9de6901fe004022dbe440325b165c94d59e5af9",
+    "auditor.py": "231d7e25664b625f12be565e50b75559094ff2116425fab3a82ebfdcc9eca039",
+    "commitrule.py": "de705c0b707a02c86f8f423dd06c9508927f1fc039f56e9708534f0c78de1042",
+    "gitprobe.py": "33617933cdb032c12c5e5e4caaa66f7e4a949262e6e7fca540f1d155be7fd896",
+    "hookfiles.py": "33c3dc8b307f11775aed2780be25761e8cd019e839dffa1f926d07578bc5f3c0",
+    "judge.py": "0e887364362c577bbbfdc0406efa0f5f0b21402e53079407f670515e0293f590",
+    "lex.py": "32ec72022ad312e4db27b4208a810f00b198bd0fccd13f33e11119af8201446c",
+    "limits.py": "4344adde3afd65c35e07231a533125ee7987998e10a9dc757f034d763402c7d9",
+    "messages.py": "e0cb139b1dcf76bc9b139ca7d5dcdd564357a6b439967b3b2fef064c379c6c92",
+    "model.py": "0dff811015ef96843abebf2e4652fbacfdd0b5ab381cb7abe5aa3c94cce90691",
+    "parse.py": "5816fd146e3aeff0a4158e34197d7232c7d9ca816b4951667452567578ade11a",
+    "patchtargets.py": "67781a53bb418f505bd66e9bee4a82041cb3832c314a004de5d99804fad77bde",
+    "protect.py": "2290aef58e675d2a8b583744d9f524ff04a1d9c759bb7f308a6570da1ecb4d43",
+    "proxy.py": "68edb3184e9809e61e5a8c397158339896e01cb704dcec4bd50d7ae10d78bc90",
+    "push.py": "60d54c4700b742fd3f773f504752336a0094cb6162ac49bb592bbd2a7f1d4d3a",
+    "ranlog.py": "58b6443d6b5f4ef7a821c14c68bba7c952348f89bff03e7a163caca60b3736f8",
+    "recog.py": "74c5e345cc86489b2564c1b7f404181da9b26b032ba2c8c73fb139acfc83ed42",
+    "repos.py": "816578353c6bab01938c8c32df9a72b82eb84417e59aef3349a93c7b68eb47e0",
+    "scanctx.py": "c43af0bc81b54117c0f0bf97ce67de6825c55f617cd09298190646e7945b0b43",
+    "sedshape.py": "b8f584b8859ae7d74658d94a567182f70e42d51d328f9b2caa91ad12199c13ba",
+    "snapshot.py": "78a2552bf3b975aa61822bb7d6f6f0e2834dc93d243bcd15c3467df0374a7c3b",
+    "terms.py": "3b16bc83968c75c9d84c7b31014525318c3dad673fa895c7cdf523fc85826487",
+    "transcript.py": "6d43c958516e94c94993152fcb82cb9c67a6d952fc4d43ea6a7758000a69a84d",
+    "version.py": "b67951616c634a5facdab35d3f5d92f9e84a945ff980bdfa07bac72d7e3b1002",
+    "walk.py": "67be6561f9dd0a6d0dd367a2d68087eb9fdf91322ecec39b71c9d3b7936dca26",
+    "web.py": "12bdfd1ba97bb1daa7dcfa9d7f33fe0ef4415798bed517914e75911c17d76d47",
+    "where.py": "d87213ba54b03991d7d3a7e9d69613a43108f0d757561dbf2fbd18fc222d0b5e",
+}
+ldir = os.path.join(gdir, "legacy")
+check(sorted(n for n in os.listdir(ldir)) == sorted(LEGACY_HEAD),
+      "guard/legacy holds exactly the 29 files of the 0.0.26 guard (no __pycache__, nothing else)")
+import hashlib as _hl
+for _n, _h in sorted(LEGACY_HEAD.items()):
+    _p = os.path.join(ldir, _n)
+    if not os.path.exists(_p):
+        continue
+    _lines = open(_p, encoding="utf-8").read().split("\n")
+    check(_lines[0] == "# FROZEN copy of guard/%s at d2028cc (0.0.26) \u2014 the backstop (fix20). Do not edit; see "
+          "guard/backstop.py." % _n, "legacy/%s starts with the FROZEN header" % _n)
+    _back = []
+    for _l in _lines[1:]:
+        if re.match(r"^\s*from \.\.\.", _l):
+            _l = re.sub(r"^(\s*)from \.\.\.", r"\1from ..", _l, count=1)
+        _l = _l.replace("os.path.abspath(os.path.dirname(__file__))", "os.path.abspath(__file__)")
+        _back.append(_l)
+    check(_hl.sha256("\n".join(_back).encode("utf-8")).hexdigest() == _h,
+          "legacy/%s is the 0.0.26 file but for the two rewrites (frozen: do not edit)" % _n)
+    _body = open(_p).read()
+    if _n != "gitprobe.py":
+        check("subprocess" not in _body and "os.system" not in _body and "os.popen" not in _body,
+              "legacy/%s starts no subprocess" % _n)
+    check(not re.search(r"from \.\.\.?state import .*(store|gates|backup|evidence|cli)|import store|"
+                        r"stdo\.state\.(store|gates|backup|evidence|cli)", _body),
+          "legacy/%s does not import state writers" % _n)
+    check(not re.search(r"^\s*from \.\.(?!\.)", _body, re.M), "legacy/%s imports nothing from the guard outside legacy" % _n)
+probe = _sp.run([sys.executable, "-B", "-c", "import sys; sys.path.insert(0, %r); import stdo.guard.judge, "
+                 "stdo.guard.backstop; print(any(m.startswith('stdo.guard.legacy') for m in sys.modules))"
+                 % os.path.join(skill, "scripts")], capture_output=True, text=True)
+check(probe.stdout.strip() == "False", "importing the guard does not import guard/legacy (loaded only after G1 passes, "
+      "or for its push / commit check) (%s)" % (probe.stdout.strip() or probe.stderr.strip()[-200:]))
+_jb = open(os.path.join(gdir, "judge.py")).read()
+check("push.check(" not in _jb and "commitrule.evaluate(" not in _jb and "backstop.shared_push(" in _jb and
+      "backstop.shared_commit(" in _jb, "the guard's push / commit checks are the frozen 0.0.26 ones, shared with the "
+      "backstop (backstop.shared_push / shared_commit; P20-4)")
+# P20-9: the 0.0.26 guard also runs the current non-guard modules below (its imports, and theirs). They must stay
+# what 0.0.26 shipped, or "legacy" changes silently; an intended change goes into LEGACY_DEPS_CHANGED with its reason,
+# and the backstop's stage A (legacy == 0.0.26 on the review corpora) is run again (tests/README.md).
+LEGACY_DEPS_HEAD = {
+    "stdo/__init__.py": "2d960c8d9fa81f1dbfdfb186a9d83c1ff54fcd4b5d3364afb40531887f48d085",
+    "stdo/commit/__init__.py": "bef8ad14e2731cd78c59cdccdede1b18c436be93110299702b4423353c5c4bf7",
+    "stdo/commit/approvals.py": "c9fc77c8c6d891583eb681e0204063d9a8d35777305b75f92962d44477882a83",
+    "stdo/commit/checks.py": "2db328f7702dca5a8fddb6c48ff64ab6d9ecbaa0f5b4e1a18365ca0f712ca5a1",
+    "stdo/commit/gitx.py": "e5a37e5107aa36cf6ed6dec4ef31ed0b1bcaf848ef3948ef805fd1002bbc9103",
+    "stdo/commit/inprogress.py": "bcc4048fd629006cb8932aa784d6d22671eee735d82743d6e309ab5f29d68d4d",
+    "stdo/commit/kinds.py": "f409629cd4a5ad8643a49c4cf6a5a034c407bc41cafb8f826d6f10b16943b542",
+    "stdo/commit/okfile.py": "13f8639adff61a3b502500237c9fa9e698d87555c3fc6534f7c4cb08e9f206cb",
+    "stdo/commit/rangecheck.py": "419929606f1b9aa428eb14cc55efa74e133f23682723b74d11e60977116d0222",
+    "stdo/commit/spaths.py": "d72edf6c4dceeed771b2c20809bc63d8f5b711b9fd6a6c3355b9ee12ae65409f",
+    "stdo/commit/summary.py": "34fece001d63c61500afdbddbb28fec82007471fad157d07c23017f524ddeaac",
+    "stdo/hooks/__init__.py": "08f387c86fcf2587a7f735d7b758f68ecbbfd248894568c352b9ca1967012566",
+    "stdo/hooks/templates.py": "13499e58f682671f62cd505fd8878c745a5537d0bff169e8bf2d3fb3ac8fc020",
+    "stdo/ignore.py": "94f5b3cd3b9c0cd092589331667ba2f1b9d4b0989906321ef120c38061a149e5",
+    "stdo/lockargs.py": "1f4d4377aa3c19c763d44bb07a854778d77719a40f9e6da7340f6fef8a2b480e",
+    "stdo/machine.py": "727461893226a94047e529ecbc3b4cea8a7e43036374a8a32906307c303a5f22",
+    "stdo/manifest.py": "52c83058a0c4207eab77a1a8663a5cfc13c249a243aa8b76c7292e0097151d8b",
+    "stdo/narrator.py": "cea9fca6fea4f849ef43f287f142ed3b9e831df35873381152407287f677fac8",
+    "stdo/paths.py": "3c18601f099b60cbe59c8670188e85ec7d70d8f7b835b50ab225dbf37b7dc5b4",
+    "stdo/s2vcall.py": "96e585e0a429714d0de495845d7a05c9f0817123f7537819c92c03b46088967c",
+    "stdo/sandbox.py": "2401e289a6cdff2861d5d6b34329f64adfaeb694a59d3531a97482cc24de18c9",
+    "stdo/setup/__init__.py": "535e780a0d274f6306e34626f1217b8e6b9e2dfa4af9b2b8b7563bda75e8f483",
+    "stdo/setup/doc.py": "afa4a091bc8102f2136f3f0dcb8ef6cced0c1cd44d4891a272d53d74525e86cc",
+    "stdo/setup/labels.py": "fcdcf5a013119cb6738508040b21d2b78317305aa177799ab01e270f8b199982",
+    "stdo/state/__init__.py": "df31d9840c93a3e14a9d0bcf104cedaf24b45f3d81df3041bd00a68c436eeb43",
+    "stdo/state/argv.py": "012294853f2a276a27733f78bc7917354e84712917bbebb5a71857e281e267a4",
+    "stdo/state/commands.py": "4eee67d2b50ceafe58c9364de105de76e733590241f98df39c8342bfef521476",
+    "stdo/state/hashes.py": "bc9fa3492a56bcbab622a8d6a4f31eb3cb413179b2f4df6928be2d98d82f69ca",
+    "stdo/state/labels.py": "7a2c9970c855a18284338ea987d119bc0beb918112e202f109bdc36393a84fc9",
+    "stdo/state/router.py": "ced202b482e6dd6a129e13548e4c049b9b8d132798852d6801af367f3e026e88",
+    "stdo/state/schema.py": "15ddffa9433c5e026a0441e5d5bbf45c60c7a0007b2b9f6d132b5290a895d833",
+    "stdo/state/store.py": "645591bde86c74a74a83969912fb4a895300785c0d2bd92a79fcc314395bdb01",
+    "stdo/state/tuples.py": "d4a5fa75c8863a91fe105d7c3f3811795af879045e370ccf5bfb7c54bdf6b390",
+    "stdo/text/__init__.py": "d83f94b333b2d9b7744eae6c6524d396605b58b3694ff16ef776fe12dd395e2e",
+    "stdo/text/normalize.py": "a825f44d3a56226d5ed35599a68fd59079939a87f202a831e9760af8986b55fc",
+    "stdo/writes.py": "e9c25585c4a4414fe145b901242ca4a47a2cde831bd619ddbc83cf2f11a92c56",
+}
+# intended changes since d2028cc, each with a one-line reason (none so far; SCRIPTS_VERSION in stdo/__init__.py and
+# RUNNER_VERSION in stdo/hooks/templates.py are the likely ones)
+LEGACY_DEPS_CHANGED = {}
+for _f, _h in sorted(LEGACY_DEPS_HEAD.items()):
+    _p = os.path.join(skill, "scripts", _f)
+    _cur = _hl.sha256(open(_p, "rb").read()).hexdigest() if os.path.exists(_p) else None
+    check(_cur == _h or _f in LEGACY_DEPS_CHANGED,
+          "%s, run by the 0.0.26 guard, is unchanged since 0.0.26 (or listed in LEGACY_DEPS_CHANGED)" % _f)
+
 # M0e: commit checks and the hook installer
 scripts = os.path.join(skill, "scripts")
 for name in ("check_commit.py", "hooks.py"):

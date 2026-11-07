@@ -94,14 +94,28 @@ Then `/std help`. Requires script2video 0.13.0 or later (set up later by `/std i
   your posts' images in `visibility.public` with `/std config` if it is missing. For any video already past board,
   run `/std board <video>` first, before render: otherwise the board check's look rules fail it at the video commit
   and it goes back to board, then ③, the ④a render and ④a again. Videos in progress need no new source stage.
-- **What the guard still does not see (0.0.25).** awk programs and vim, ex or ed scripts; commands hidden behind some
-  runners: wrapper options it does not model, long chains of wrappers, `flock`, `setsid`, `arch`, `xcrun`,
-  `sandbox-exec`, `unshare` or `chroot`, wrapper names written in capitals, busybox or toybox applets, `script`, file
-  arguments of wrappers (`time -o`), and `watch`; a program placed under a command's name in a folder on PATH that you can
-  write to (for example `/opt/homebrew/bin`); a wildcard in a folder part of a path (`.claude/*/…`) for commands other
-  than `sed`. For a `sed` run outside a Studio repository: a file name in its
-  script that is not a plain path, its `e` and shell-run commands, and dynamic or unexpanded variables. The pre-commit
-  hook, the commit checks and the person's gates stay behind these.
+- **0.0.27 (G1: the guard reads more).** The guard reads the options of the common runners it unwraps (env, nohup, nice,
+  timeout, time, script, flock, xargs, npx, …) and judges their file arguments. In a Studio repository it refuses
+  runners and options it cannot read, the command-valued options and variables it knows (such as `git -c core.editor`),
+  git settings that run commands through every route it knows, and zsh forms it cannot parse, such as a file-name word
+  with a glob group `(…)` (the Bash tool runs zsh with `BARE_GLOB_QUAL` off, so `studi(o)` matches `studio`). After a
+  shell function of yours or one the command defines, and after a hook (`chpwd`, `TRAP*`), what the guard cannot follow
+  is unknown: git, deletions and unquoted `$X` may then be refused. Every call is also checked by the 0.0.26 guard:
+  what it refused stays refused, its false refusals too (such as `rm -rf **/__pycache__`). After a `source` or `.`
+  (and after an `eval` whose text the guard cannot read), the rest of the call is judged by the 0.0.26 rules only;
+  stronger checks there are planned for 0.0.28. In a Studio repository a `~[name]` path that a command deletes or
+  writes is refused. Outside a Studio repository a command too
+  long for the guard's limits is refused unless nothing in it can name a repository. Details:
+  [docs/guard-limits.md](docs/guard-limits.md). The guard is part of the plugin: no `/std update` is needed.
+- **What the guard still does not see (0.0.27).** The full list is in
+  [docs/guard-limits.md](docs/guard-limits.md). In short:
+  - Programs and settings that run commands the guard does not model, such as awk programs or `NODE_OPTIONS`.
+  - Values it cannot read, such as a deletion through one (`rm -rf $X`, `f() { rm -rf $1; }; f studio`).
+  - Forms used from outside a Studio repository, such as interpreter code that names it (`python3 -c`) or a folder
+    named only in a default value (`cd ${U:-<repo>}`).
+  - Other cases, such as `chmod 000 studio` or an archive written over a protected file.
+
+  The pre-commit hook, the commit checks and the person's gates stay behind these.
 
 ## License
 

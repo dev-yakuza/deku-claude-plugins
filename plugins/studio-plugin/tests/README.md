@@ -42,7 +42,7 @@ STUDIO_TEST_S2V=/abs/path/to/script2video \
   `check_commit --staged` on a Studio commit (targets 50 ms / 300 ms; fails only above 3×).
 
 **Scripts version (M0d-2, D-M0-3)**: the guard refuses Studio commands in a repository whose copy of
-`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 12). Until `/std update` exists (M1), copy the plugin's
+`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 24). Until `/std update` exists (M1), copy the plugin's
 `skills/std/scripts/` (without `guard.py` and `stdo/guard/`) into an older sandbox repository again by hand.
 
 **M0f**: `tests/py/drivers/make_harness.py <dir>` builds a synthetic harness repository (templates, agents, a copy of
@@ -196,3 +196,120 @@ The fixture script (`test_m1e.SCRIPT`) opens with a title scene and `test_m1e.br
 the fake s2v's layout default is `presenter` and it takes `logo: <path>`. `test_pilot2b.py` covers all of it with stub
 Providers; `RealInspect` runs real `s2v inspect`/`lint` only with `STUDIO_TEST_S2V` (`--full`). The init parts are in
 `test_pilot2b_init.py`.
+
+**0.0.27** (`SCRIPTS_VERSION` 24, G1: only the guard changed, which is plugin-only): the runners the guard unwraps
+(`stdo/guard/runners.py`: one option reader per runner, refused runners, shell payloads, file arguments), program
+names in capitals, nested strings judged in any folder, folders the guard cannot tell (`**/<rel>`), the fallback for
+unmodelled programs, zsh's tables and forms the walk does not model, command-valued options and variables
+(`stdo/guard/cmdopts.py`), READ_ALLOW programs that write, wildcards in folder parts (`protect.glob_may_match`, `**`
+by listing the existing matches) and words the shell may drop (the readings of `walk_simple`). `test_guard_runners.py`
+covers the option reader, the matcher and the pin that every runner has a must-deny and a must-pass case;
+`test_guard_judge.py` holds `RUNNER_DENY`, `G1_DENY` (run again under `studio/videos/v` by `test_pilot2_guard.py`),
+`RUNNER_PASS`, `G1_PASS` and `NESTED_OUT_DENY` (from outside the repository); `test_guard_walk.py` the walk's side
+(`G1Walk`, `G1Words`). The implementation review's findings are `G1_REVIEW1_DENY` (also under `studio/videos/v`),
+`G1_REVIEW1_PASS` and the class `G1Review1` (listed `**` globs, the walks' budget, limits that are not errors),
+`G1Fixes` in `test_guard_walk.py`, and `Review1`/`CmdOpts` in `test_guard_runners.py`. Review 2's are
+`G1_REVIEW2_DENY` (also under `studio/videos/v`), `G1_REVIEW2_PASS`, the review-2 rows of `NESTED_OUT_DENY` and
+`NESTED_OUT_PASS`, the class `G1Review2` (git's and ssh's files in another letter case, the snapshot's functions with
+the fixture functions `SNAPSHOT_FUNCS`, the git refusal after an unknown environment), `G1Review2` in
+`test_guard_walk.py` and `Review2` in `test_guard_runners.py`. `test_limits_are_not_errors` (in `G1Review1`) checks
+that a command past the limits is never G-ERR: outside every Studio repository a long command passes when no limit is
+hit, in one it is G-LIMIT (outside, a limit that is hit refuses too when something in the command may name a
+repository: `G1Review3.test_limit_outside_names_nothing`). Review 3's are `G1_REVIEW3_DENY` (also under
+`studio/videos/v`), `G1_REVIEW3_PASS`, the decoy rows of `NESTED_OUT_DENY`, the class `G1Review3` (the snapshot's
+functions with `REVIEW3_FUNCS`, `REVIEW3_FUNCTION_PASS` and `REVIEW3_FUNCTION_DENY`; decoy folders and limits outside a
+Studio repository), the function-effect cases of `G1Review2.test_snapshot_function_effects` in `test_guard_walk.py`
+and `Review3` in `test_guard_runners.py`. Review 4's are `G1_REVIEW4_DENY` (also under `studio/videos/v`),
+`G1_REVIEW4_PASS`, the review-4 rows of `NESTED_OUT_DENY`, the class `G1Review4` (autoload stubs, functions the call
+redefines under a snapshot function, the snapshot's hook functions, functions the guard cannot read followed by
+unquoted values, with `REVIEW4_FUNCS`, `REVIEW4_FUNCTION_PASS`/`_DENY`, `REVIEW4_OUT_PASS`/`_DENY` and `SNAP_HOOKS`)
+and `G1Review4` in `test_guard_walk.py` (function bodies, hooks, pushd and loop conditions, NULLCMD, steered values,
+quoted pattern characters). Review 5's are `G1_REVIEW5_DENY` (also under `studio/videos/v`), `G1_REVIEW5_PASS`, the
+review-5 rows of `NESTED_OUT_DENY`, the class `G1Review5` (values after a function the guard cannot read, with
+`REVIEW5_FUNCTION_PASS`/`_DENY`), `test_function_with_several_names` and `test_reserved_word_after_assignments` in
+`test_guard_parse.py`, the auditor's pager and editor values in `test_m1e.Auditor.test_bash_reads_only`, and
+`script -q /dev/null` among the refused forms of `test_m1a.OtherWriters.test_x1_scripts_and_text_built_at_run_time`.
+Review 6's are `G1_REVIEW6_DENY` (by class: qualifiers of whole words, stdin into compound commands, functions and
+`exec`, function-table writes and nested definitions, zsh's short forms; also under `studio/videos/v`),
+`G1_REVIEW6_PASS`, the review-6 rows of `NESTED_OUT_DENY` (`$HOME` written by any route), the class `G1Review6`
+(wildcards against installed hook files with `REVIEW6_HOOK_DENY`/`_PASS`, extended-glob words after a function the
+guard cannot read with `REVIEW6_FUNCTION_PASS`/`_DENY`), `test_review6_forms` in `test_guard_parse.py` and the
+extended-glob cases of `UnknownFolder.test_matcher` in `test_guard_runners.py`. Review 7's are `G1_REVIEW7_DENY`
+(by class: bracket expressions as zsh reads them, positionals set by `N=`, stdin into `eval` and `-c` strings, the
+`[[ … == pattern ]]` operand and unparsable text, several loop names; also under `studio/videos/v`),
+`G1_REVIEW7_PASS`, the review-7 rows of `NESTED_OUT_DENY` (a `~` word after `$HOME` is written), the class
+`G1Review7` (brackets against installed hook files with `REVIEW7_HOOK_DENY`/`_PASS`), `test_review7_forms` in
+`test_guard_parse.py` and the bracket cases of `UnknownFolder.test_matcher`. Review 8's are `G1_REVIEW8_DENY` (by
+class: numeric globs `<N-M>`, redirections that may fail and `PIPEFAIL`, zsh forms the parser now reads and unparsable
+text however its command is spelled, `case` patterns and `;&`/`;|`, `GLOB_STAR_SHORT`, a function body judged from its
+call; also under `studio/videos/v`), `G1_REVIEW8_PASS`, the review-8 rows of `NESTED_OUT_DENY` (`$HOME` for `eval`,
+`-c` strings and functions), the class `G1Review8` (aliases after the new forms, with `REVIEW8_ALIAS_DENY`) and
+`test_review8_forms` in `test_guard_parse.py`. Review 9's are `G1_REVIEW9_DENY` (by class: git, `$PWD`, `~+` and
+`$(pwd)` in each folder a command may run in, `$'…'` in case patterns, several inputs on one fd, `$~1`, values the guard
+does not carry as one string; also under `studio/videos/v`), `G1_REVIEW9_PASS` (numeric globs matched as digits,
+ordinary arrays and loops), the review-9 rows of `NESTED_OUT_DENY`, the class `G1Review9` (the directory stack after a
+`pushd` that may not run), `test_review9_forms` in `test_guard_parse.py` and the numeric-glob cases of
+`UnknownFolder.test_matcher`. Review 10's (the union rule: a value or folder that may or may not change is one of the
+old and new ones) are `G1_REVIEW10_DENY` (by class: `$PWD`, `~+`, `$(pwd)` and `git rev-parse --show-toplevel` after
+a trap, a hook or a folder change the guard cannot follow; `local` and writes that may not run in a function; `read`,
+`print -v`, `${X:=…}` and assignments that may not run; `<>` on stdin; `$((` in `${…}`; also under
+`studio/videos/v`), `G1_REVIEW10_PASS` (the trap-cleanup idiom, `set -euo pipefail`, a `pushd` into a missing
+folder, ordinary branches), the review-10 rows of `NESTED_OUT_DENY`, the class `G1Review10` (the snapshot's hooks,
+options and functions), and `G1Review10` in `test_guard_walk.py` (known folders and values kept). Review 11's are
+`G1_REVIEW11_DENY` (a function the command defined and then removed or replaced — `unfunction`, `unhash -f`,
+`disable -f`, `unset -f --`, `-m` patterns, in another function, `eval`, `emulate … -c`, a sourced string, a name the
+guard cannot read, a `DEBUG` hook — and the command so named after it; also under `studio/videos/v`),
+`G1_REVIEW11_PASS` (values chosen by `if`/`&&`/`case` used by git, `cd`, `pushd` and script paths), the class
+`G1Review11` (files the command sources, function tables after code the guard cannot read, choice values) and
+`test_review11_choice_words` in `test_m1e.py` (the auditor reads each value). Review 12's are `G1_REVIEW12_DENY` (a
+real write after a recursive copy with a chosen folder; `cd X || exit` where `exit` may not end the shell or X may
+have been made; also under `studio/videos/v`), `G1_REVIEW12_PASS` (one recursive copy or extraction into a chosen
+folder; `cd X || exit` blocks) and the class `G1Review12` (sourced files that define aliases or may move the shell,
+the `**` listing after a source, `cd X || exit` from a folder without X, the message beyond 16 combinations).
+Review 13's are `G1_REVIEW13_DENY` (`cd X || exit` with X missing is judged: the rest of the list is not skipped;
+also under `studio/videos/v`), `G1_REVIEW13_PASS` and the class `G1Review13` (folders made by git, a sourced file or
+a glob qualifier before `cd X || exit`; env files then `git commit`; files that may move the shell; the `**` listing
+after any sourced file). Review 14's are `G1_REVIEW14_DENY` (a source after an extraction or a recursive copy; `~[name]`
+operands; also under `studio/videos/v`), `G1_REVIEW14_PASS` and the class `G1Review14` (sourced files are not
+followed: venv and env files then git as at HEAD; the round-14 attack files leave the folder unknown). Review 15's are
+`G1_REVIEW15_DENY` (`~[…]` with `;`, `&&`, `$(…)`, backquotes or `${…}` in the brackets; also under
+`studio/videos/v`), `G1_REVIEW15_PASS` and the class `G1Review15` (`popd`, `cd -`, `~-` and `$OLDPWD` after a source
+go where they went at HEAD; relative paths after a source are read as at HEAD, from the repository root). Review 16's
+are `G1_REVIEW16_DENY` (a `pushd` the guard cannot follow, then `popd`; also under `studio/videos/v`),
+`G1_REVIEW16_PASS` and the class `G1Review16` (after a source, `cd -`, `popd`, `~-` and `$OLDPWD` reach the folder HEAD
+knew, judged there as a known folder: wildcards, interpreter scripts, `ln` into `.git`, git path operands, also with a
+hook defined after the source). Review 17's are `G1_REVIEW17_DENY` (`$OLDPWD` that is one of several folders; a source
+and `cd -` inside a function; a shell string after a source and `cd -`; also under `studio/videos/v`),
+`G1_REVIEW17_PASS` and the class `G1Review17` (`cd ~-`, `cd $OLDPWD`, `pushd ~-`, `env -C ~-` and `$OLDPWD/…` judged
+in each folder `$OLDPWD` may hold; a source inside a function; git probes shared only by the readings of one command;
+shell scripts, shell strings and second sources after a source and `cd -` / `popd` read in the folder HEAD knew).
+Review 18's are `G1_REVIEW18_DENY` (HEAD's `$OLDPWD` after a source and a relative `cd`; `cd -` after a loop that
+moves; a shell string run again by another command; also under `studio/videos/v`), `G1_REVIEW18_PASS` and the class
+`G1Review18` (`source` and `.` as at HEAD: the attack rows HEAD refused — a function body run again after a later
+source, `cd -` after moves only G1 follows — and the everyday rows HEAD passed — venv then `cd -`, `cd "$OLDPWD"` or a
+saved `$PWD`, then commit; Studio names at the repository root after two returns; a nested `git checkout .` run by
+two commands on a clean tree).
+Review 19's are `G1_REVIEW19_DENY` and `G1_REVIEW19_PASS`, both run by the class `G1Review19` with its fixture
+(the attack rows HEAD refused stay refused; a plain snapshot wrapper such as `gh` or `take` after a venv lets git
+through; identical nested `git push` / commit checks shared within one call while `git checkout .` stays judged per
+command). Its `test_autopushd_as_head` went with fix20, which removed the model of HEAD's folder after a source.
+
+**fix20: the 0.0.26 guard as a backstop.** `stdo/guard/legacy/` is the guard of d2028cc (0.0.26), frozen;
+`stdo/guard/backstop.py` runs it after this guard (`judge.decide` is `backstop.decide`; `judge.decide_g1` is this
+guard alone, `run_finish=False` without effects). `structure_test.sh` checks that every legacy file is the 0.0.26 file
+but for the FROZEN header and the two mechanical rewrites (an extra dot on `from ..` import lines, an extra dirname on
+the `os.path.abspath(__file__)` lines), against a sha256 table taken with
+`git show d2028cc:plugins/studio-plugin/skills/std/scripts/stdo/guard/<name> | shasum -a 256`. Regenerate the copy and
+the table only if the backstop is ever based on another release. The same check holds the sha256 of the non-guard
+`stdo` modules the 0.0.26 guard runs (`LEGACY_DEPS_HEAD`): an intended change to one of them goes into
+`LEGACY_DEPS_CHANGED` with its reason, and the backstop's verification against 0.0.26 is run again.
+`test_guard_backstop.py` covers the combination (a refusal of the 0.0.26 guard is final for every tool and for the
+auditor; the 0.0.26 guard is not imported when this guard refuses; its errors keep 0.0.26's text; exactly one finish
+runs, the 0.0.26 one for calls with a source or that this guard stopped early on a limit, checked against a 0.0.26
+tree rebuilt from `legacy/`; push and commit checks shared; the time limit before the hook's), the walk stopping at a
+source (every route to one, the code before it and the code the call gives it, readings and forks) and the parity
+list `BACKSTOP_PARITY` (rows of the review corpora with and without a source, run in both snapshot modes: whatever the
+0.0.26 guard refuses is refused, and a call with a source gets its verdict except the rows of `PARITY_G1_FIRST`).
+`HEAD_REFUSED_KEPT` and `HEAD_REFUSED_FUNCS` in `test_guard_judge.py` list the rows 0.0.26 refused that this guard
+passes: `assertHeadRefusedKept` checks that `decide_g1` passes them and `decide` refuses them, so 0.0.28 can lift the
+backstop class by class.
