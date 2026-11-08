@@ -25,7 +25,7 @@ The single source of truth for "what stage is this Issue in" is its GitHub label
 | `guild:execute` | execute (implement) stage active / done | design produced `OK ADVANCE: execute` |
 | `guild:test` | test stage active / done | execute produced `OK ADVANCE: test` |
 | `guild:qa` | QA stage active / done | test's verify gate passed → `OK ADVANCE: qa` |
-| `guild:done` | Issue complete | QA gate passed — one exception: 자식이 같은 저장소 PR 의 머지로 사람에 의해 닫히면 dev Phase 2b 가 done 으로 정리한다(QA 를 거치지 않음) |
+| `guild:done` | Issue complete | QA gate passed — one exception: 자식이 같은 저장소 PR 의 머지로 사람에 의해 닫히면 dev Phase 2b 가 done 으로 정리한다(QA 를 거치지 않음); second exception: analyze 0b closed-as-decided (no PR, CLOSED — `analyze.md` Step 1 item 0b) |
 | `guild:child` | this Issue is a child of a parent Issue | design split work into multiple PRs |
 | `guild:children` | this (parent) Issue is split; its children are being driven sequentially | design decided a multi-PR split (Section I) |
 | `guild:needs-human` | **additive, not a stage** — an unattended run paused here at a high-stakes gate | Section H's pause path; removed on the next forward transition, or on a human-decided loop-back (below) |
@@ -143,13 +143,15 @@ A human moving labels by hand (`/gld rollback stage`) is neither: no block, no c
 ```bash
 gh issue edit <n> --remove-label "guild:execute" --add-label "guild:test" --remove-label "guild:needs-human"
 ```
-Check the Issue's current labels first (already read at Step 0 of every stage — analyze/design/implement/debug/refactor/qa/test all read labels before deciding whether to add their entry label) and only include `--remove-label "guild:needs-human"` when it's actually present — `gh issue edit` can error removing a label the Issue doesn't carry, so don't include it speculatively. `dev` Phase 2b step 1b's cleanup of a human-merged child (`--add-label "guild:done"`, removing its stage label and `guild:needs-human` when present) is a forward-progress transition of this first kind — the merge is the evidence the pause was resolved. `sprint/retro.md` Phase 6's cleanup of a merged member is the same kind — a forward-progress transition whose evidence is the merge.
+Check the Issue's current labels first (already read at Step 0 of every stage — analyze/design/implement/debug/refactor/qa/test all read labels before deciding whether to add their entry label) and only include `--remove-label "guild:needs-human"` when it's actually present — `gh issue edit` can error removing a label the Issue doesn't carry, so don't include it speculatively. `dev` Phase 2b step 1b's cleanup of a human-merged child (`--add-label "guild:done"`, removing its stage label and `guild:needs-human` when present) is a forward-progress transition of this first kind — the merge is the evidence the pause was resolved. `sprint/retro.md` Phase 6's cleanup of a merged member is the same kind — a forward-progress transition whose evidence is the merge. `analyze.md` Step 1 item 0b's transition is a forward one too (it removes `guild:needs-human`) — the decided close, whose evidence is the human's decision.
 
 ---
 
 ## Section B — Stage outputs = Issue comments + markers
 
 Each stage persists its output as a GitHub Issue comment wrapped in a marker pair, so later stages (and `/gld resume`) can find it. Update-in-place: if a comment with the marker already exists, PATCH it rather than appending (per `_bash_rules.md` temp-file pattern) — **four documented exceptions**: `<!-- guild:auditor:execute -->` is a **cumulative single comment** whose PATCH re-writes the *previous body plus* a new block inserted inside the marker pair; `<!-- guild:auditor-violation -->` is **one new comment per occurrence, never PATCHed**; and `<!-- guild:sprint:retro -->` is **appended once per sprint** (a sprint's history is the sequence of its retros, so replacing would erase the previous one); and, fourth, `<!-- guild:loopback -->` is **cumulative** exactly like `guild:auditor:execute` — each loop-back inserts a new block just before the closing marker and keeps every earlier one, because the cap, the stagnation comparison and the "not yet handled" test all read the earlier blocks (both lookups `--paginate`, stream form). The first two exist because losing an earlier attempt's dismissal — or an earlier violation's evidence — is the specific failure those records exist to prevent. Every other marker is replace-in-place.
+
+**Every comment Guild posts opens with a `<!-- guild:` marker** — a note that is no stage output (a pause kept on resume, a PR-created note, a status line) opens with `<!-- guild:note -->` (Section M reads an unmarked comment as the human's; measured #628 · word_app #1826: `analyze 재개 시도 … 보류 유지`, `PR #1847 생성` with no marker).
 
 ⚠ One further shape this section did not previously cover: `<!-- guild:sprint:plan -->` lives in an **Issue BODY**, not a comment, and is immutable after creation (guarded by `plan-hash`). Rewriting a body is read → splice → full replace, and `gh issue edit` has no append — so it carries a **mandatory truncation check** (`_sprint_dag.md` Section A). The rest of this section assumes a comment; that row does not.
 
@@ -173,6 +175,8 @@ Each stage persists its output as a GitHub Issue comment wrapped in a marker pai
 | `<!-- guild:loopback -->` … `<!-- /guild:loopback -->` | test / qa (or the leader, `dev.md` Phase 2) on a loop-back; `/gld rollback stage` appends a reset | one `### loopback <n>` block per loop-back — `from:` · `at:` · `branch:` · `reason:` · `signature:` (+ `decided: human` / `override: human` on the attended path, + `consumed:` once execute has handled it) — and a `### loopback-reset` block (`at:` · `by: human`) when a rollback restarts the design. ⚠ **Cumulative** (the fourth exception above). Read with the definition of *active blocks* just below this table. |
 | `<!-- guild:plan-decision -->` … `<!-- /guild:plan-decision -->` | `sprint plan` Phase 6 step 3 (a member's **Issue body**, not a comment) | the decisions the human made for this Issue in sprint planning — one line per readiness dimension, `- <Goal\|Constraint\|Success>: <question> → <answer> (<date>, sprint plan)`. One block per Issue; a later plan adds only missing dimension keys and never rewrites an existing line (a different value is a human's edit). Read by `analyze` Step 1 — an `<answer>` ending with the plain `(전제: #<d>)` names the Issue it presupposes, and `analyze` checks that premise is met. |
 | `<!-- guild:sprint:plan-decisions -->` … `<!-- /guild:sprint:plan-decisions -->` | `sprint plan` Phase 6 step 2 (tracker comment) | the same decisions for every member, `- #<n> <key>: …`, posted before any member body is touched so an interrupted creation can restore them (`plan.md` Idempotency). Replace-in-place; lowest id if several. |
+| `<!-- guild:closed-as-decided -->` … `<!-- /guild:closed-as-decided -->` | analyze (leader, Step 1 item 0b) | the human's decision that closed this Issue without code — the decision quoted, its source (plan-decision date or the time of the human's answer), why it closes. Written once. `stack_sync.py --done-cards`, `sprint retro` Phase 2 and `rollback` read it (the marker is the evidence — the Issue has no PR). |
+| `<!-- guild:note -->` | any command, for a comment that is no stage output | a one-off note (a pause kept on resume, a PR-created note, a status line). No closing marker needed, never PATCHed — one comment per note; its only job is to keep Section M from reading it as the human's. |
 | `<!-- guild:review:output -->` … `<!-- /guild:review:output -->` | review (fresh reviewer) | guided pair-review walkthrough (risk-weighted, rationale-backed). Posted to the PR only with `/gld review … --comment`; default is **session-only, nothing persisted to disk** (unlike the other stages, `review.md` never writes a `docs/specs/<issue>/` file for its own recap) — this row documents the marker's shape for that opt-in case, not a durable output. |
 
 **Loop-back record — active blocks (the single definition; test, qa, `_execute_spine.md`, `_stagnation.md`, `rollback.md`, `status.md` and `resume.md` refer here and do not restate it).**
@@ -405,7 +409,8 @@ A stage wrapper (analyze/design/implement/test) returns one line to the main ses
 |---|---|---|
 | `OK ADVANCE: <next-stage>` | stage complete, advance | transition label to `guild:<next-stage>` |
 | `OK SPLIT: <N> children` | design split the Issue into `N` child Issues | transition the **parent** to `guild:children` and enter child orchestration (dev Phase 2b — Section I) |
-| `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done` — **Guild's work is complete; the PR is open awaiting human review + merge**. Do **not** close the Issue: the PR body carries `Closes #<N>`, so **GitHub** closes it when the human merges — INV1 (nothing merges unattended; the human is the external reviewer of record). No Guild command closes a **stage** Issue deliberately. ⚠ **One exception, and it is not a stage Issue**: `/gld sprint retro` closes the sprint **tracking Issue** (`guild:sprint`). That Issue never runs the spine and has no PR of its own, so nothing else can ever close it — leaving it open would make every later `sprint plan` report an active sprint that finished weeks ago. The rule above is about work whose completion GitHub records through a merge; a container's completion is recorded by the retro that closed it. The one `guild:done` that `OK DONE` does not set: a split child whose same-repo PR a human merged (Issue `CLOSED`) — `dev` Phase 2b step 1b cleans it up to `guild:done` without QA. |
+| `OK DONE` | qa's gate passed (after test's verify gate) | transition to `guild:done` — **Guild's work is complete; the PR is open awaiting human review + merge**. Do **not** close the Issue: the PR body carries `Closes #<N>`, so **GitHub** closes it when the human merges — INV1 (nothing merges unattended; the human is the external reviewer of record). No Guild command closes a **stage** Issue deliberately. ⚠ **One exception, and it is not a stage Issue**: `/gld sprint retro` closes the sprint **tracking Issue** (`guild:sprint`). That Issue never runs the spine and has no PR of its own, so nothing else can ever close it — leaving it open would make every later `sprint plan` report an active sprint that finished weeks ago. The rule above is about work whose completion GitHub records through a merge; a container's completion is recorded by the retro that closed it. The one `guild:done` that `OK DONE` does not set: a split child whose same-repo PR a human merged (Issue `CLOSED`) — `dev` Phase 2b step 1b cleans it up to `guild:done` without QA. ⚠ **A second exception: analyze's decided close** (`OK DONE: closed-as-decided`, below) — the human decided it in plan or at discuss, and with no PR GitHub has nothing to close it by; INV1 is untouched (nothing merges). |
+| `OK DONE: closed-as-decided — <one-line>` | analyze closed the Issue by a human decision (`analyze.md` Step 1 item 0b): `guild:done`, `CLOSED`, no PR | report the decision; no review nudge (there is no PR) |
 | `OK LOOPBACK: execute` | test or qa sent the work back (the leader's own loop-back returns no token — it records it and runs execute directly) (Section A, *Backward transitions*) — the wrapper has already appended the loop-back block and moved the label to `guild:execute` | run the execute variant again (re-read the `type:` label first), then continue from test. Not a forward transition: it never removes `guild:needs-human` except when the human decided the loop-back |
 | `OK PAUSE: <one-line>` | leader/human chose to stop here | leave label as-is; report |
 | `NEEDS_HUMAN: <one-line>` | a discuss/verify gate needs a human decision | main session prompts the human (`AskUserQuestion`), then resumes |
@@ -556,6 +561,8 @@ takes for an unattended `BLOCKER`, for the same reason. "I could argue either wa
 is `high`; only classify `low/medium` when you can say **why** the decision is local
 and reversible.
 
+**`guild:needs-human` is never a stop marker** — `guild:done` is what stops the supervisor (its done arm); `needs-human` means a human owes an action (measured #1833: put on only to stop a re-run, with no cause line, and left behind after the close). A decision to close without code is `analyze.md` Step 1 item 0b.
+
 **Name the cause when you pause.** `OK PAUSE: needs-human` covers two different
 populations — a **defect** the run could not get past (red tests, a QA defect, a
 disputed auditor `BLOCKER`) and an **ambiguity** the leader refused to guess at
@@ -563,8 +570,8 @@ disputed auditor `BLOCKER`) and an **ambiguity** the leader refused to guess at
 `<!-- guild:needs-human -->` comment with the ASCII word `defect:` or `ambiguity:`
 accordingly — e.g. `OK PAUSE: needs-human — ambiguity: <the choice needed>`. A third word is
 for a cause **outside the code** that reaches every Issue it touches the same way:
-`env: <ci-blocked|credential|service|other> — <one-line>` (`ci-blocked` = the CI jobs never
-started — e.g. an account billing limit; `qa.md` Step 2's `### PR CI` record names it). Start the
+`env: <ci-blocked|base-red|credential|service|other> — <one-line>` (`ci-blocked` = the CI jobs never
+started — e.g. an account billing limit; `qa.md` Step 2's `### PR CI` record names it; `base-red` = the same check fails without this change — on the default branch's tip, on the last merged PR's head, or on an unrelated PR; the cause line names that run URL). Start the
 comment's cause line with it at column 0. For all three words, the cause line is **the first line after the marker, at column 0, before any heading** — a heading that contains the word does not count (measured: `## execute 일시정지 — …` with no cause line, and `## 사람 확인 필요 — env: ci-blocked` with the word only in the heading). Shape: `<!-- guild:needs-human -->` / `env: ci-blocked — CI 작업이 시작되지 않음(결제 한도)` / then any heading and prose. Completion never branches on it (completion is judged by labels — `batch.md` Phase 4) —
 daily/retro 가 묶음 표시에만 쓴다 (`sprint/daily.md` step 3·5, `sprint/retro.md` Phase 2 — the
 same `env:` key on several Issues is one line); it is not a `failures.jsonl` class. It exists so a
@@ -572,10 +579,11 @@ human triaging `gh issue list --label guild:needs-human` can tell the two apart 
 glance, and so an over-strict ambiguity rule shows up as a visible population instead
 of a vague sense that batch pauses a lot. The rest of the line stays in
 `config.language` (Section K) — only the cause word is ASCII.
+**Check the cause line before posting** (0.98.7 — measured #630: 4 of 7 pause comments had it in a title, after one, or with a key outside the list): write the pause comment to its file with the Write tool, then its own Bash call `grep -nE -m1 '^(defect: |ambiguity: |env: (ci-blocked|base-red|credential|service|other) — )' <file>` — output that does not start with `2:` (line 1 is the marker) → fix that file only and check once more; still not → post it as it is and say so in one line of the stage output. Which key is right (`other` vs `base-red`) is outside this check.
 
 **Decision log (mandatory when unattended)**: every gate the leader auto-resolved is recorded — analyze/design write each assumption into their output comment; the execute stage's **PR body** aggregates them under a `## 무인 결정 로그 (GLD_UNATTENDED)` heading (chosen interpretation · rationale/charter anchor · "사람 확인 요"). This makes the human's PR review **informed, not blind** — the deferred human gate lands here.
 
-**Hard rules (unchanged under unattended)**: INV1 (never merge — stop at `guild:done` = PR open) · INV2 (never weaken verification) · never fabricate a pass. `OK PAUSE: needs-human` is the honest escape hatch: mark the Issue with the **`guild:needs-human` label** (+ comment) so it is discoverable (`gh issue list --label guild:needs-human`), then stop **cleanly** (exit 0) so the supervisor counts it and moves to the next Issue.
+**Hard rules (unchanged under unattended)**: INV1 (never merge — stop at `guild:done` = PR open; the one exception: analyze 0b closed-as-decided — no PR, CLOSED, nothing merges) · INV2 (never weaken verification) · never fabricate a pass. `OK PAUSE: needs-human` is the honest escape hatch: mark the Issue with the **`guild:needs-human` label** (+ comment) so it is discoverable (`gh issue list --label guild:needs-human`), then stop **cleanly** (exit 0) so the supervisor counts it and moves to the next Issue.
 
 ---
 
@@ -706,7 +714,7 @@ nothing.
 
 - **A human directive** = words in an Issue's body, or in a comment **without** a `<!-- guild:` marker, that tell Guild to
   change one of its judgments (never judged by author — same account).
-- **Read before stopping** (each its own Bash call): this Issue's comments
+- **Read before stopping** (each its own Bash call — run these reads **exactly as given**: no `.body[0:N]`, `head` or filter, the bodies-contract's rule; measured #620 `.body[0:600]`, #621 #623 not run): this Issue's comments
   `gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '.[] | select((.body // "") | contains("<!-- guild:") | not) | {id, html_url, body}'`
   and its body (already read); for **each** `Sprint: #<t>` line in the body whose tracker is `OPEN`
   (`gh issue view <t> --json state --jq .state`), that tracker's comments in the same form (a carried-over member also
@@ -725,10 +733,11 @@ nothing.
   or epic relation, not "found while doing #m", not the same root cause, not an earlier sprint, not a directive about
   another member.
 - **Out of scope, same situation**: attended → ask, quoting it (`#244 의 "…" 지시를 이 Issue 에도 적용할까요?`);
-  unattended → `OK PAUSE: needs-human` as today, with one line after the cause line (`env: ci-blocked — …`):
+  unattended → `OK PAUSE: needs-human` as today, with one line after the cause line (`env: <key> — …`):
   `적용 가능한 사람 지시: #<m> "<한 줄>" — 이 Issue(또는 트래커 #<t>)에 남기면 다음 재개에 적용됩니다`.
 - **Applied → recorded**: in that stage's output comment (`qa:output` and the like) and the PR body, one line
   `사람 지시 적용: #<m> (<댓글 URL>) — <한 줄>`.
+- **A habit stop records the reads** — its pause comment carries, on the line right after the cause line, either `사람 지시 확인: 없음 — 읽음: #<n> · 트래커 #<t>[ · 부모 #<p>]` or the `적용 가능한 사람 지시: …` line above (a missing line shows in the same place as the cause-line check, Section H).
 
 This decides only whether the leader stops out of habit; completion (labels — `batch.md` Phase 4) and the W5 grouping
 of `env:` pauses are unchanged.

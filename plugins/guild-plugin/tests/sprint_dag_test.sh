@@ -312,6 +312,43 @@ run "dep PR closed -> block" \
   "{\"members\":[$(B 101: 102:101)],$PRS_CLOSED,$BR}" blocked 0 \
   "102 dep-pr-closed:#101"
 
+# 0.98.7 Z2 — a needs-human dep that MERGED and whose Issue closed `completed` (`closed`) is a
+# leftover label, not a pause (measured #630: #629 merged by hand, #624 blocked as dep-needs-human).
+run "Z2: needs-human + MERGED + closed -> nothing blocked (#629/#624 shape)" \
+  "{\"members\":[$(B 101: 102:101)],\"terminal\":{\"101\":\"needs-human\"},$PRS_MERGED,\"closed\":[101],$BR}" blocked 0 ""
+
+run "Z2: needs-human + MERGED, no closed key -> still dep-needs-human (X15 shape)" \
+  "{\"members\":[$(B 101: 102:101)],\"terminal\":{\"101\":\"needs-human\"},$PRS_MERGED,$BR}" blocked 0 \
+  "102 dep-needs-human:#101"
+
+run "Z2: needs-human + OPEN PR + closed -> still dep-needs-human (merge is required)" \
+  "{\"members\":[$(B 101: 102:101)],\"terminal\":{\"101\":\"needs-human\"},$PRS_OPEN,\"closed\":[101],$BR}" blocked 0 \
+  "102 dep-needs-human:#101"
+
+# 0.98.7 Z6 — closed as decided: `closed_done ∩ closed` (completed) is finished; `closed_done − closed`
+# (not planned) is never a base, even with a same-number local branch left over.
+run "Z6: closed_done + closed (COMPLETED) -> DEFAULT" \
+  "{\"members\":[$(B 101: 102:101)],\"terminal\":{\"101\":\"done\"},\"closed_done\":[101],\"closed\":[101],\"branches\":[],$DEF}" base 0 \
+  "101 DEFAULT
+102 DEFAULT"
+
+run "Z6: closed_done + closed -> nothing blocked" \
+  "{\"members\":[$(B 101: 102:101)],\"terminal\":{\"101\":\"done\"},\"closed_done\":[101],\"closed\":[101],\"branches\":[]}" blocked 0 ""
+
+run "Z6: closed_done only (NOT_PLANNED) -> dep-no-branch" \
+  "{\"members\":[$(B 101: 102:101)],\"terminal\":{\"101\":\"done\"},\"closed_done\":[101],\"branches\":[]}" blocked 0 \
+  "102 dep-no-branch:#101"
+
+run "Z6: closed_done only (NOT_PLANNED) + same-number local branch -> still dep-no-branch" \
+  "{\"members\":[$(B 101: 102:101)],\"terminal\":{\"101\":\"done\"},\"closed_done\":[101],$BR,$DEF}" base 0 \
+  "101 DEFAULT
+102 BLOCKED:dep-no-branch"
+
+run "Z6: control — no closed_done + same-number local branch -> stacks on it" \
+  "{\"members\":[$(B 101: 102:101)],$BR,$DEF}" base 0 \
+  "101 DEFAULT
+102 feature/#101-x"
+
 echo "== F. hash (§4.6) =="
 
 BODY='# Sprint: x
@@ -590,7 +627,7 @@ printf 'sprint_dag: %d passed, %d failed\n' "$PASS" "$FAIL"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-DAG_MIN_CHECKS=73
+DAG_MIN_CHECKS=81
 if [ "$((PASS + FAIL))" -lt "$DAG_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${DAG_MIN_CHECKS}건)."
   exit 1

@@ -63,9 +63,34 @@ if a[:2] == ["repo", "view"]:
     print(json.dumps({"nameWithOwner": "acme/app", "defaultBranchRef": {"name": "main"}}))
 elif a[:2] == ["issue", "view"]:
     # Only fields gh really has: a typo in --json fails here as it would on GitHub.
-    if "--json" in a and not set(a[a.index("--json") + 1].split(",")) <= {"body", "labels", "state", "stateReason"}:
+    if "--json" in a and not set(a[a.index("--json") + 1].split(",")) <= {"body", "labels", "state", "stateReason", "comments"}:
         sys.stderr.write("Unknown JSON field\n"); sys.exit(1)
+    if os.environ.get("STUB_VIEWS"):
+        open(os.environ["STUB_VIEWS"], "a").write(" ".join(sys.argv[1:]) + "\n")
     it = st["issues"][a[2]]
+    if "--jq" in a:
+        # 0.98.7 Z6 — the one --jq form stack_sync sends (DECIDED_JQ). With jq on PATH the REAL
+        # expression runs over a synthesized `--json state,labels,comments` payload (gh's shape);
+        # without it, an emulation of the same answer. STUB_FAIL_VIEW=<n> fails that one read.
+        if os.environ.get("STUB_FAIL_VIEW") == a[2]:
+            sys.stderr.write("HTTP 502\n"); sys.exit(1)
+        q = a[a.index("--jq") + 1]
+        if "closed-as-decided" not in q or "length" not in q:
+            sys.stderr.write("stub: unexpected --jq %r\n" % q); sys.exit(2)
+        payload = {"state": it.get("state", "OPEN"), "labels": [{"name": l} for l in it["labels"]],
+                   "comments": [{"body": c} for c in it.get("comments", [])]}
+        import shutil
+        if shutil.which("jq"):
+            if os.environ.get("STUB_JQ_LOG"):
+                open(os.environ["STUB_JQ_LOG"], "a").write("real-jq\n")
+            p = subprocess.run(["jq", "-c", q], input=json.dumps(payload), capture_output=True, text=True)
+            if p.returncode != 0:
+                sys.stderr.write(p.stderr); sys.exit(1)
+            sys.stdout.write(p.stdout); sys.exit(0)
+        print(json.dumps({"state": payload["state"], "labels": list(it["labels"]),
+                          "decided": sum(1 for c in it.get("comments", [])
+                                         if "<!-- guild:closed-as-decided -->" in c)}))
+        sys.exit(0)
     print(json.dumps({"body": it.get("body", ""), "labels": [{"name": l} for l in it["labels"]],
                       "state": it.get("state", "OPEN"), "stateReason": it.get("stateReason")}))
 elif a[:2] == ["pr", "list"]:
@@ -830,6 +855,51 @@ sync --done-cards
 eq "done-cards: a failed Issue read → exit 0 all the same" "$RC" "0"
 has "done-cards: a failed Issue read → an error line, not a guess" "$OUT" "done-cards error "
 
+echo "── stack_sync: --done-cards — closed as decided (0.98.7 Z6) ──"
+# #13 has no PR at all: CLOSED · guild:done · the closed-as-decided marker → Done, whatever the
+# stateReason. One `issue view --json state,labels,comments` read, never `gh api --paginate`.
+new_scenario d3
+write_state "{\"issues\":{\"10\":{\"labels\":[\"guild:sprint\"],\"body\":\"$(tracker_body 11:- 13:-)\"},
+  \"11\":{\"labels\":[\"guild:done\"],\"state\":\"CLOSED\",\"stateReason\":\"COMPLETED\"},
+  \"13\":{\"labels\":[\"guild:done\"],\"state\":\"CLOSED\",\"stateReason\":\"NOT_PLANNED\",\"comments\":[\"<!-- guild:analyze:output -->x\",\"<!-- guild:closed-as-decided -->\\n결정\\n<!-- /guild:closed-as-decided -->\"]}},
+  \"prs\":[{\"number\":101,\"state\":\"MERGED\",\"headRefName\":\"feature/#11-a\",\"headRefOid\":\"x\",\"baseRefName\":\"main\",\"mergeCommit\":{\"oid\":\"y\"},\"isDraft\":false,\"closingIssuesReferences\":[{\"number\":11}]}]}"
+printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/config.json"
+export STUB_VIEWS="$S/views.txt"; : > "$STUB_VIEWS"
+sync --check --done-cards
+eq "Z6 done-cards: no PR + CLOSED/NOT_PLANNED + guild:done + marker → listed" "$(last "$OUT")" "done-cards 11,13"
+eq "Z6 done-cards: the marker read is ONE issue view of #13" "$(grep -c '^issue view 13 ' "$STUB_VIEWS")" "1"
+has "Z6 done-cards: --json state,labels,comments" "$(grep '^issue view 13 ' "$STUB_VIEWS")" "--json state,labels,comments --jq"
+lacks "Z6 done-cards: no gh api --paginate" "$(cat "$STUB_VIEWS" "$S/calls.txt")" "api"
+eq "Z6 done-cards: --check makes no mutating gh call" "$(cat "$S/calls.txt")" ""
+mutate 'st["issues"]["13"]["comments"]=["<!-- guild:analyze:output -->x"]'
+sync --check --done-cards
+eq "Z6 done-cards: no marker → not listed" "$(last "$OUT")" "done-cards 11"
+mutate 'st["issues"]["13"]["comments"]=["<!-- guild:closed-as-decided -->"]; st["issues"]["13"]["labels"]=["guild:analyze"]'
+sync --check --done-cards
+eq "Z6 done-cards: marker but no guild:done → not listed" "$(last "$OUT")" "done-cards 11"
+mutate 'st["issues"]["13"]["labels"]=["guild:done"]; st["issues"]["13"]["state"]="OPEN"'
+sync --check --done-cards
+eq "Z6 done-cards: marker + guild:done but still OPEN → not listed" "$(last "$OUT")" "done-cards 11"
+# One PR-less member's read failing skips THAT member only — never the whole line (review r1 #5).
+mutate 'st["issues"]["13"]["state"]="CLOSED"; st["issues"]["14"]={"labels":["guild:done"],"state":"CLOSED","stateReason":"COMPLETED","comments":["<!-- guild:closed-as-decided -->"]}'
+"$PY" - "$S/state.json" "$(tracker_body 11:- 13:- 14:-)" <<'PYB'
+import json, sys
+p = sys.argv[1]; st = json.load(open(p)); st["issues"]["10"]["body"] = sys.argv[2].replace("\\n", "\n"); json.dump(st, open(p, "w"))
+PYB
+sync --check --done-cards
+eq "Z6 done-cards: two decided members → both listed" "$(last "$OUT")" "done-cards 11,13,14"
+STUB_FAIL_VIEW=13 sync --check --done-cards
+eq "Z6 done-cards: #13's read fails → #13 skipped, #14 still listed (no error line)" "$(last "$OUT")" "done-cards 11,14"
+if command -v jq >/dev/null 2>&1; then
+  export STUB_JQ_LOG="$S/jq.txt"; : > "$STUB_JQ_LOG"
+  sync --check --done-cards
+  eq "Z6 done-cards: the REAL DECIDED_JQ ran over gh-shaped JSON" "$(grep -c real-jq "$STUB_JQ_LOG")|$(last "$OUT")" "2|done-cards 11,13,14"
+  unset STUB_JQ_LOG
+else
+  bad "Z6 done-cards: real jq" "jq on PATH" "missing"
+fi
+unset STUB_VIEWS
+
 echo "── prs_by_issue: same-repository references only (0.98.3 W8) ──"
 # -B: no .pyc beside the plugin's scripts (the pycache check below).
 pbi() {   # pbi <prs-json> → "issue:pr,pr …" sorted
@@ -908,7 +978,7 @@ echo
 echo "stack_sync: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when checks are added on purpose. A
 #   quote that swallows the rest of the file runs fewer checks and still ends green otherwise.
-SYNC_MIN_CHECKS=146
+SYNC_MIN_CHECKS=157
 if [ "$((PASS + FAIL))" -lt "$SYNC_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${SYNC_MIN_CHECKS}건)."
   exit 1

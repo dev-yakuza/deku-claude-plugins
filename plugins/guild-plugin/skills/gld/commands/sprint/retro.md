@@ -34,7 +34,8 @@ Each its own Bash call.
      `OPEN` → `FAIL: #<tracker> is still open — run /gld sprint retro` (an open sprint is cleaned
      by its retro, after the record and the close). Then Phase 1's members call, child-discovery
      call and PR call for that tracker (in that order — they define S and the PR filter), then
-     **Phase 7**, skipping 2–6 entirely: nothing is measured, written or
+     **Phase 6 step 0's label cleanup** for that tracker's members (0.98.7 — the same merge axis, from the same calls; it requires the Issue `CLOSED` · `COMPLETED` too, one `gh issue view <n> --repo <owner>/<repo> --json state,stateReason` per member — a closed sprint's member may since have been reopened for rework; DRY → `라벨 정리 예정:` only), then
+     **Phase 7**, skipping the rest of 2–6: nothing is measured or
      closed. ⚠ The truncation `FAIL`s in Phase 1 are about **metrics** and do not apply
      here: in CLEANUP, when Phase 1's 완전성 판정 fails (the PR list is not complete even at 500), look up each member **and each
      child of S** on the server instead (this is the branch-confirmation path, not a count) — `gh pr list --repo <owner>/<repo> --state all --search '"Closes #<m>" in:body' --limit 100 --json number,headRefName,baseRefName,state,mergedAt,closedAt,closingIssuesReferences`
@@ -63,7 +64,7 @@ Each its own Bash call.
    one is the same waste Phase 1 was making. Fetch the chosen tracker's body **after** the human
    picks — that call was going to happen regardless, so this adds no turn in either branch.
    - None → `OK: no open sprint`. ⚠ Suggest `/gld sprint plan` (and `--cleanup <tracker>` for
-     a closed sprint whose worktrees or branches are still around), and say that a **closed** tracker is a finished sprint — a retro is not re-runnable **once it finishes**, because Phase 6 step 3 closes the Issue and `<!-- guild:sprint:retro -->` is append-only (`_handoff.md` Section B). ⚠ A retro that died **partway** is a different case and IS re-runnable: Phase 4 replaces its own `history` entry rather than appending, and Phase 6 step 2 checks for its own comment before adding one. (v10 said "step 5", which this file has never had.)
+     a closed sprint whose worktrees, branches or leftover labels are still around — it also cleans the labels of members that merged, Phase 6 step 0), and say that a **closed** tracker is a finished sprint — a retro is not re-runnable **once it finishes**, because Phase 6 step 3 closes the Issue and `<!-- guild:sprint:retro -->` is append-only (`_handoff.md` Section B). ⚠ A retro that died **partway** is a different case and IS re-runnable: Phase 4 replaces its own `history` entry rather than appending, and Phase 6 step 2 checks for its own comment before adding one. (v10 said "step 5", which this file has never had.)
    - Two or more → list them and ask which. Never retro one speculatively.
 3. **Resolve `{owner}/{repo}`** once (`_handoff.md` Section F); hold the literal value.
 4. **Is a run still in flight?** From the `<!-- guild:sprint:run -->` comment: `state` and `heartbeat`.
@@ -71,6 +72,15 @@ Each its own Bash call.
      - ⚠ **`waiting-for-window-<HHMM>` is a live run**, not a stalled one, and it can stay that way for **days**. Say why and for how long: *"#<tracker> 의 감독자가 창 밖이라 대기 중입니다 — 다음 창 <HH:MM>. 중단하시려면 `kill <pid>` 후 다시 부르십시오."* Refusing here is correct; refusing without the reason looks like a bug.
    - Same states but the heartbeat is **stale** → say so plainly (*"마지막 하트비트가 <n>분 전입니다 — run이 중단된 것으로 보입니다"*) and ask whether to retro anyway. Do not decide this alone: a stale heartbeat and a dead process look identical from here, and retro'ing a live run would close the container out from under it.
    - `finished` / `halted:*` / no marker at all → proceed.
+5. **Is the checkout the default branch?** (0.98.7 — before anything is written; **CLEANUP skips this step**.) Each its own Bash call:
+   `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>` (Phase 4 step 6 reuses this value — the same read is not made twice; the repo is positional);
+   `git branch --show-current` → `<b>` (empty = detached).
+   `<b>` ≠ `<d>` → **stop before writing anything and ask** — these two options and no other:
+   `체크아웃이 기본 브랜치 <d> 가 아닙니다(<b|detached>). 회고 기록(config.json)은 <d> 에서만 커밋되고, 성장 단계(evolve)는 지금 브랜치를 분석해 거기에 커밋하게 됩니다. ① 중단 — 직접 <d> 로 옮기신 뒤(git switch <d>) /gld sprint retro 를 다시 실행(권장 · 아직 아무것도 쓰지 않았습니다) ② 이대로 진행 — 측정·기록·종료는 하고 config.json 은 커밋하지 않으며 성장 단계는 보류`
+   **Never an option that moves the branch for the human** ("제가 옮기겠습니다" and the like — measured #1839: `main 으로 이동 후 진행 (Recommended)` became `git checkout main` + `git merge --ff-only`; the Hard rules below).
+   - ① → Return `OK: retro not started — checkout <b> is not <d>` — nothing was written, so the re-run is safe (the same ground as step 2's "partway").
+   - ② → mark **HELD-EVOLVE** and go on: Phase 4 step 6 commits nothing, Phase 5 is held.
+   - **DRY** → no question: one line `체크아웃 <b> — 실제 회고는 <d> 에서 하십시오`, then go on. `GLD_UNATTENDED=1` → the same line, no question (it stops after Phase 3 anyway).
 
 ## Phase 1 — Is the sprint actually finished?
 
@@ -219,7 +229,7 @@ proceed, stamp the record *"⚠ 미완 상태에서 회고함 — 미결 PR <n>�
 
 ⚠ **Do not use Issue open/closed as the completion signal** (`daily.md`): a stacked PR merged
 into a dependency branch does not close its Issue, because GitHub's closing keywords only fire
-on a default-branch merge. Judge by label and PR state.
+on a default-branch merge. Judge by label and PR state — except a closed-as-decided member (Phase 2 — the marker is the evidence).
 
 ## Phase 2 — Metrics (compute; do not judge yet)
 
@@ -227,7 +237,7 @@ Sources, and **what each is honestly derived from**:
 
 | 지표 | 계산 | 출처 |
 |---|---|---|
-| 약속 이행률 | 머지된 멤버 / 계획된 멤버 | 멤버 표 + PR `mergedAt` — 머지 축(`daily.md` step 6). 에픽은 한 자리, 자식이 모두 머지돼야 머지 |
+| 약속 이행률 | (머지된 멤버 + 결정대로 닫힌 멤버) / 계획된 멤버 | 멤버 표 + PR `mergedAt` — 머지 축(`daily.md` step 6). 에픽은 한 자리, 자식이 모두 머지돼야 머지. 결정대로 닫힘은 아래 판정 |
 | 캐리오버 | 결말나지 않은 멤버 (done도 아니고 머지도 안 된 것) | 라벨 + PR 상태. 에픽은 부모가 done 이 아니면 캐리오버(자식 상태 무관) |
 | 사람 대기 횟수 | `guild:needs-human`에 도달한 멤버 수 — 표시 `N회 — 그중 env:<키> k회(#…)`(같은 원인 묶음 — `daily.md` step 3 의 원인 줄 호출을 같은 멤버·자식마다 한 번; 도달 수 정의는 그대로) | 라벨. 에픽은 부모 또는 done 이 아닌 자식 중 하나라도 `guild:needs-human` 이면 1(`daily.md` step 5 의 **사람 대기** 정의). ⚠ 도달 수이므로 그 정의의 제외(`CLOSED` + 같은 저장소 `MERGED` PR 자식)는 여기 적용하지 않는다 — 사람이 머지한 것도 개입이다. 제외는 아래 현재 대기 목록에만 |
 | ↳ 그중 분할이 멈춘 것 | **분리 집계** — 원인이 다르다 | `failures.jsonl`의 `split-stalled`. ⚠ 분할 자체는 더 이상 일시정지가 아니다(§8.7) — 감독자가 이어서 재개하므로, 이 값은 *재개가 전진을 멈춘* 횟수다. 단 가장 작은 대기 자식이 needs-human 이면 PAUSED — 근거는 completion 의 `#e (child #c)`(라벨은 `guild:children` 그대로) |
@@ -236,8 +246,12 @@ Sources, and **what each is honestly derived from**:
 | 스택 따라잡기 횟수 | base가 기본 브랜치로 폴백한 PR 수 | PR `baseRefName` ↔ 멤버 표의 기대 base |
 | 리뷰 변경 요청률 | `reviewDecision == CHANGES_REQUESTED` / `reviewDecision` 이 **빈 값이 아닌** 멤버 PR — 빈 값은 0 이 아니라 **미집계**(아래) | PR |
 | 닫힌-미머지 PR | 사람이 거절한 작업 | PR `state == CLOSED` + `mergedAt == null` — **자식 PR 도 같은 범위로 센다**(멤버 PR 만이 아님) |
-| 목표 달성 | `구분 = goal` 과 `slot` 멤버가 **모두** 머지됐는가(예/아니오) + 머지된 / 계획된 (슬롯은 목표 쪽에 센다 — `daily` 와 같은 기준) | 멤버 표의 `구분` 열 + PR `mergedAt`. 열이 없는 옛 트래커 → "목표 구분 없음" |
-| 목표 외 | 머지된 other / 계획된 other | 같은 출처 |
+| 목표 달성 | `구분 = goal` 과 `slot` 멤버가 **모두** 머지됐는가(예/아니오) + 머지된 / 계획된 (슬롯은 목표 쪽에 센다 — `daily` 와 같은 기준; 결정대로 닫힌 멤버는 머지와 같이 센다) | 멤버 표의 `구분` 열 + PR `mergedAt`. 열이 없는 옛 트래커 → "목표 구분 없음" |
+| 목표 외 | 머지된 other / 계획된 other (결정대로 닫힌 other 포함) | 같은 출처 |
+
+**결정대로 닫힘** (0.98.7, D2) = 멤버 Issue `CLOSED` · `guild:done` · 귀속 PR 없음(어떤 상태로도 — Phase 1 의 PR 목록) · S 의 멤버 아님 · `<!-- guild:closed-as-decided -->` 댓글 있음 — 마지막 조건은 그 멤버만 한 호출(감사자 호출처럼 attended 1회라 허용):
+`gh issue view <n> --repo <owner>/<repo> --json state,labels,comments --jq '{state, labels: [.labels[].name], decided: ([.comments[].body | select(contains("<!-- guild:closed-as-decided -->"))] | length)}'`
+— `decided ≥ 1` 이면 결정대로 닫힘(analyze Step 1 item 0b 가 사람의 결정으로 닫은 것 — 코드가 없으니 PR 이 없다). 마커가 없으면 지금처럼 Phase 6 group 4(done·미머지 — PR 없음). 결정대로 닫힌 멤버는 약속 이행률·목표 달성·목표 외의 분자에 머지와 같이 들어가고, `history.merged` 에도 포함한다(스키마 불변 — Phase 3 이 분해해서 보인다).
 
 리뷰 변경 요청률과 스택 따라잡기만 **멤버 PR 만** 센다 — 자식 PR 은 넣지 않는다. 감사자 루프백은 이 목록에
 넣지 않는다 — PR 이 아니라 Issue 의 레코드이고, 분할 멤버는 자식 이슈를 읽는다(아래 **감사자 루프백**).
@@ -288,7 +302,7 @@ uses `tail -50` because it only needs the recent picture, `retro` needs all of i
 ```bash
 cat .claude/guild/.sprint-logs/<tracker>/failures.jsonl
 ```
-Absent → say *"이벤트 기록 없음"* for those three rows rather than reporting 0. **Zero and
+Absent → say *"이벤트 기록 없음"* for those three rows rather than reporting 0 (a run before 0.98.7, or the file could not be written — the supervisor creates it empty from its first pass); present and empty → 0. **Zero and
 unrecorded are different findings**, and only one of them is good news.
 
 **감사자 루프백** — one call per member or per child of S is acceptable here (retro is attended
@@ -377,7 +391,7 @@ collide: neither literal is a substring of the other.
 a decoration of up to two backticks or `*` tolerated on either side of the token (older records
 wrote `**recorded**` and `` `looped-back` ``) and no letter, digit, `-` or `_` after it; the
 separators after the token are not read. The backtick is written in the jq string as `\u0060`,
-so the shell command carries no backtick (the command-substitution heuristic, `_bash_rules.md`).
+so the shell command carries no backtick (the command-substitution heuristic, `_bash_rules.md`) — copy the command byte for byte: `\u0060` stays six characters (a decoded backtick works only by luck of the single quotes).
 ⚠ Without `(?m)`, `^` is the start of the **string**, and `(?m)` does not help — gojq reads it as
 multi-line but jq 1.8.2 (Oniguruma) as dot-all (measured: `(?m)^` matched 0 times) — so the joined body is split into lines
 (`split("\n")`) and each line is tested with `^- ` (the same in `gh`'s gojq and in jq 1.8.2). A substring or word-boundary count used to match a finding id
@@ -469,6 +483,8 @@ Sprint #99 — 결제 흐름 안정화        (13일 · run 2회 · 계획 7개)
     달랐습니다. 다음엔 그 결정을 먼저 Issue 에서 다듬는 것이 이 두 개를 살립니다.
   · Guild 쪽: 리뷰 변경요청 40%는 감사자가 놓친 축이 있다는 신호입니다 → 아래 성장 루프.
 ```
+
+A closed-as-decided member (Phase 2) is broken out on the 이행률 line — e.g. `약속 이행률   9/9 (100%) · 그중 결정대로 닫힘 1(#628)`.
 
 **What the retrospective must and must not do:**
 - **Separate the two owners.** A metric that reflects a human choice (readiness override, capacity
@@ -583,9 +599,9 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
    - `git diff --quiet HEAD -- .claude/guild/config.json` — exit 0 (nothing changed: a re-run
      writing the same values, step 3) → skip the commit and say so (`git commit`'s *nothing to
      commit* exit 1 must not be reported as a failure).
-   - Changed → only **on the default branch**: `git branch --show-current` against the default
-     branch's name, read here with `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name`
-     (the repo is positional; Phase 7 has not read it yet) — as `plan.md` Phase 6 step 6 sub-step 3.
+   - Changed → only **on the default branch**: `git branch --show-current` against `<d>` — the
+     default branch's name Phase 0 step 5 read (not read again) — as `plan.md` Phase 6 step 6
+     sub-step 3. HELD-EVOLVE → commit nothing (the human chose ② in Phase 0 step 5).
    - **Nothing else staged?** `git diff --cached --name-only` must print nothing (`plan.md` Phase 6
      step 6 sub-step 4 — the commit gate judges the whole index); anything → commit nothing, they
      are the human's.
@@ -596,9 +612,9 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
      — `timeout` 600000, **never `--no-verify`**.
    - **Do not push.** The next `sprint plan`'s Phase 6 step 6 sub-step 5 finds it among the
      unpushed commits and asks whether to push it together with the record.
-   Not on the default branch, or the commit failed → commit nothing (`git restore --staged --
-   .claude/guild/config.json` after a failed commit) and say beforehand that evolve will stop at
-   its clean-tree gate until `config.json` is committed.
+   Not on the default branch → commit nothing — and Phase 5 is held as below (a safety net behind Phase 0 step 5, for a human who switched branches since; Phase 5's held line gives the commit command).
+   The commit failed → commit nothing (`git restore --staged -- .claude/guild/config.json`) and
+   say beforehand that evolve will stop at its clean-tree gate until `config.json` is committed.
    **DRY**: skip this step.
 
 ⚠ **Writing `config.json` trips the commit gate's own `--guard-config` guard**, which surfaces as
@@ -610,7 +626,11 @@ their only writer. Do not tell the human to run `/gld config` for them.
 
 ## Phase 5 — Growth loop: run `evolve`, with no arguments
 
-Read `<<SKILL_DIR>>/commands/evolve.md` and execute it, **passing nothing**.
+**Held first (0.98.7).** HELD-EVOLVE (Phase 0 step 5 ②), or Phase 4 step 6 committed nothing because the checkout was not the default branch → do **not** read or execute evolve; one line, then Phase 6:
+`성장 단계 보류 — 체크아웃 <b>(기본 브랜치 아님). git switch <d> 후 git commit -m "chore(guild): 스프린트 #<t> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/config.json, 그다음 /gld evolve 를 직접 실행하세요`
+(the switch carries the modified `config.json` along — a conflict makes git refuse, and the human decides). The retro comment (Phase 6 step 2) and the Return carry this line in the same place as the freshness hold below.
+
+Otherwise read `<<SKILL_DIR>>/commands/evolve.md` and execute it, **passing nothing**.
 
 ⚠ **Do not narrow evolve's signal window to this sprint.** It has no window argument, and adding
 one would change its internals — out of scope. More importantly `_data_sufficiency.md` defines
@@ -641,6 +661,7 @@ damage. Phase 0 step 0 claims every phase from 4 on names DRY explicitly; this i
   re-run finds this sprint in `history` and skips Phase 5, so evolve would never run). The retro comment (Phase 6
   step 2) and the Return carry one line:
   `성장 단계 보류 — 로컬 <d> 가 <behind> 커밋 뒤. 최신화 뒤 /gld evolve 를 직접 실행하세요`.
+- **The checkout hold** (top of this phase) → evolve never ran; the `성장 단계 보류 — 체크아웃 <b>(기본 브랜치 아님)…` line, Phase 6.
 
 Record which of these happened — the return line distinguishes them.
 
@@ -660,30 +681,7 @@ Record which of these happened — the return line distinguishes them.
 **Order matters: write the record before closing.** A closed Issue with no retro comment loses
 the sprint entirely.
 
-⚠ **Disclose the board's freeze — one line, when `config.sprint.board` is set.** `retro` writes
-**nothing** to the board (03-sprint-board.md §7.4, and the Hard rules below repeat it), but this
-is the moment the design's largest accepted cost becomes permanent: closing the tracker means
-nothing will ever move a card again. `/gld sprint sync` moves a merged member's card to `Done`
-(`sync.md` step 5), but it only finds an **open** sprint — after this close, every `In review`
-card stays `In review` after the human merges its PR tomorrow morning, and every `Blocked` card
-keeps a reason that may already be resolved. Say so rather than letting the human discover it:
-
-```
-보드: <url> — 이 시점 이후 카드는 갱신되지 않습니다. 머지하신 뒤에도 In review 에 남고,
-      정리는 GitHub UI 에서 하십시오 (`/gld sprint sync` 는 열린 스프린트만 다룹니다).
-      다음부터는 retro 전에 `/gld sprint sync` 를 부르시면 머지된 카드가 Done 으로 갑니다.
-      다음 `sprint plan` 이 새 카드를 올립니다.
-```
-
-**The block above only when a member is unmerged on the merge axis** (Phase 1). **Every member merged → print the short
-form below instead of the block** (measured #610: a sync had already moved all 7 cards to Done, and the block still said
-they would stay `In review`) — the clean-up hint and the sync advice stay, only "머지하신 뒤에도 In review 에 남고" goes:
-
-```
-보드: <url> — 이후 카드는 갱신되지 않습니다(멤버 모두 머지됨). 이번 retro 전에 /gld sprint sync 를 부르지 않았다면 Done 이 아닐 수 있습니다 — GitHub UI 에서 정리하십시오; 다음부터는 retro 전에 sync 를.
-```
-
-This is a **disclosure, not a projection** — no `gh project` call, no card touched.
+The board's freeze is disclosed at step 3b — after the close, so the numbered steps reach it.
 
 0. **머지로 끝난 멤버의 라벨 정리** — before the groups below. A member merged on the merge axis (Phase 1 — a
    same-repo `MERGED` closing PR) that is not `guild:done`, or still carries `guild:needs-human` (measured #610:
@@ -693,7 +691,7 @@ This is a **disclosure, not a projection** — no `gh project` call, no card tou
    `gh issue edit <n> --remove-label <stage> --remove-label guild:needs-human --add-label guild:done`
    then one line `라벨 정리: #597 #603 … (머지됨 → guild:done)`. No question — the same ground as `dev` Phase 2b
    step 1b's cleanup of a merged child: the merge is the evidence (`_handoff.md` Section A, the `guild:needs-human`
-   removal points). **DRY**: run nothing; print `라벨 정리 예정: #… (머지됨 → guild:done)` only.
+   removal points). ⚠ **The merge alone is not enough — the Issue must also be `CLOSED` · `COMPLETED`** (0.98.7): one call per such member, `gh issue view <n> --repo <owner>/<repo> --json state,stateReason` — a member reopened for rework carries an old merged PR and a new `guild:needs-human` (the shape `sprint_dag.py --mode blocked` also refuses to release), so it is left as it is. A **closed-as-decided** member (Phase 2) still carrying `guild:needs-human` or a stage label gets the same command (its `guild:done` is already there — remove only what it has). **DRY**: run nothing; print `라벨 정리 예정: #… (머지됨 → guild:done)` only.
 
 1. **Name every member that did not land, in the group whose advice fits it** — with its reason
    and its current stage. Every unmerged member (merge axis, `daily.md` step 6; an epic is one
@@ -714,11 +712,11 @@ This is a **disclosure, not a projection** — no `gh project` call, no card tou
       child needs the human's call first, so that case gets no close line).
    4. **done·미머지 — PR 거절/없음(사람이 판단)**: `guild:done` with **no open PR** (for an epic,
       no open child PR) — only rejected PRs, or none; an epic's `미머지(자식 PR 거절)` and
-      `미머지(자식 PR 없음)` land here when no child PR is open.
+      `미머지(자식 PR 없음)` land here when no child PR is open. A closed-as-decided member (Phase 2 — the marker) is not here: it landed (below).
 
    (Not a group — a member that landed: an epic counted 머지 whose parent Issue is still `OPEN`
    gets one line `#e — 자식이 모두 머지됨, #e 를 닫으세요`, since retro closing the tracker ends
-   `daily`, the only other place that says it.)
+   `daily`, the only other place that says it. A closed-as-decided member (Phase 2) is in no group either — one line `#628 — 결정대로 닫힘(«<답>»)`.)
 
    The carryover **metric** (Phase 2) is unchanged by this grouping: it is groups 1 + 1b + 2 (an
    epic whose parent is not done is 캐리오버 whatever its children's state), so Phase 3's
@@ -758,6 +756,30 @@ This is a **disclosure, not a projection** — no `gh project` call, no card tou
    `NEEDS_HUMAN: retro recorded for #<tracker> but closing it failed — re-run /gld sprint retro` rather
    than retrying in a loop. Re-running retro after this point is safe by step 2's check.
    **DRY**: skip the label cleanup and steps 2–3 and print the carryover list and the comment that would be posted.
+3b. ⚠ **Disclose the board's freeze — when `config.sprint.board` is set** (0.98.7: moved here from Phase 6's head, where an unnumbered paragraph between the head and step 0 was skipped — measured #630). `retro` writes
+   **nothing** to the board (03-sprint-board.md §7.4, and the Hard rules below repeat it), but this
+   is the moment the design's largest accepted cost becomes permanent: closing the tracker means
+   nothing will ever move a card again. `/gld sprint sync` moves a merged member's card to `Done`
+   (`sync.md` step 5), but it only finds an **open** sprint — after this close, every `In review`
+   card stays `In review` after the human merges its PR tomorrow morning, and every `Blocked` card
+   keeps a reason that may already be resolved. Say so rather than letting the human discover it:
+
+   ```
+   보드: <url> — 이 시점 이후 카드는 갱신되지 않습니다. 머지하신 뒤에도 In review 에 남고,
+         정리는 GitHub UI 에서 하십시오 (`/gld sprint sync` 는 열린 스프린트만 다룹니다).
+         다음부터는 retro 전에 `/gld sprint sync` 를 부르시면 머지된 카드가 Done 으로 갑니다.
+         다음 `sprint plan` 이 새 카드를 올립니다.
+   ```
+
+   **The block above only when a member's PR is still `OPEN`** (Phase 1 — the only case where "머지하신 뒤에도 In review 에 남고" is true). **Otherwise (every member merged, closed as decided, or closed by a human without a PR) → print the short
+   form below instead of the block** (measured #610: a sync had already moved all 7 cards to Done, and the block still said
+   they would stay `In review`) — the clean-up hint and the sync advice stay, only "머지하신 뒤에도 In review 에 남고" goes:
+
+   ```
+   보드: <url> — 이후 카드는 갱신되지 않습니다(열린 PR 없음). 이번 retro 전에 /gld sprint sync 를 부르지 않았다면 Done 이 아닐 수 있습니다 — GitHub UI 에서 정리하십시오; 다음부터는 retro 전에 sync 를.
+   ```
+
+   This is a **disclosure, not a projection** — no `gh project` call, no card touched.
 4. **Go to Phase 7** — only when step 3 closed the tracker (or DRY skipped it). If the close
    failed, return the `NEEDS_HUMAN` above and **skip Phase 7**: the sprint is still open, so the
    re-run that closes it reaches Phase 7 then. That is why the message says *re-run*, not
@@ -873,7 +895,8 @@ human's.
 | row | worktree | local branch | remote branch |
 |---|---|---|---|
 | merged (any PR `MERGED`, none `OPEN`) | remove (if clean) | delete **iff tip == `headRefOid`** | delete **iff tip == `headRefOid`** |
-| carryover (a PR `OPEN`, or no PR) | remove (if clean) | **keep** | **keep** |
+| closed-as-decided (Phase 2 — no PR, the marker) | remove (if clean) | — | — |
+| carryover (a PR `OPEN`, or no PR and not closed-as-decided) | remove (if clean) | **keep** | **keep** |
 | closed-unmerged | remove (if clean) | **keep — report only** | **keep — report only** |
 | split parent (a member of S — no PR of its own) | remove (if clean) | — | — |
 | `supervisor`, `sync-<N>` | remove (if clean) | — (detached) | — |
@@ -984,15 +1007,19 @@ refuse to develop — the pause would be undiscoverable and unclearable.
 `OK: sprint #<n> closed — carryover <K>` ·
 `OK: sprint #<n> closed — evolve declined (thin data)` ·
 `OK: sprint #<n> measured (dry-run)` ·
-`OK: sprint #<n> cleanup — <W> worktrees, <B> branches` (CLEANUP mode) ·
-`OK: sprint #<n> cleanup listed (dry-run)` (CLEANUP + DRY) ·
-`OK: sprint #<n> cleanup declined` (CLEANUP, the human said no) ·
+`OK: sprint #<n> cleanup — <W> worktrees, <B> branches · labels <L>` (CLEANUP mode — `<L>` = members whose labels Phase 6 step 0 cleaned) ·
+`OK: sprint #<n> cleanup listed (dry-run) · labels <L>` (CLEANUP + DRY — `<L>` = the members `라벨 정리 예정:` named) ·
+`OK: sprint #<n> cleanup declined · labels <L>` (CLEANUP, the human said no to Phase 7 — the label cleanup ran before its question) ·
 `OK: no open sprint` ·
+`OK: retro not started — checkout <b> is not <d>` (Phase 0 step 5 ①) ·
 `OK: unattended — retro requires a human` ·
 `NEEDS_HUMAN: <one-line>` · `FAIL: <reason>`
 
 When Phase 5 ended as `성장 단계 보류` (evolve's freshness question answered ①), the Return adds
 `· 성장 단계 보류 — 로컬 <d> 가 <behind> 커밋 뒤. 최신화 뒤 /gld evolve 를 직접 실행하세요`.
+The checkout hold (Phase 5's first paragraph) adds its own line the same way: `· 성장 단계 보류 — 체크아웃 <b>(기본 브랜치 아님). …` (verbatim from Phase 5).
+
+The final report carries the board line (Phase 6 step 3b) when `config.sprint.board` is set.
 
 Both `closed` lines end with Phase 7's tally — `· cleanup <W> worktrees, <B> branches`, plus
 `(kept <k>)` when anything was refused or excluded, or `· cleanup declined` when the human said no.
@@ -1013,6 +1040,7 @@ Both `closed` lines end with Phase 7's tally — `· cleanup <W> worktrees, <B> 
 - **The retro comment is appended**, never replaced — it is the sprint history.
 - **Record before closing.** A closed tracker with no record loses the sprint.
 - **Only the tracking Issue may be closed here** — never a member, never a child.
+- **retro never moves the human's branch or history** — no `git checkout <branch>` / `switch`, `pull`, `merge`, `rebase`, `reset`, and no option that offers to (measured #1839: "main 으로 이동 후 진행 (Recommended)" → checkout + merge --ff-only). Phase 0 step 5 asks; updating the checkout is the human's. A later "push" request pushes as it is — `git push origin <d>`; rejected (non-fast-forward) → say so and stop: updating is the human's (no rebase or pull to force it in — measured #630: "push 해 주세요" became `git rebase origin/main`). Phase 7's `git worktree remove` and `branch -D` work outside the human's checkout and are outside this ban.
 - **Cleanup touches only this sprint** — worktrees inside its container, the head branches of
   confirmed member and child PRs, and this tracker's run files. Never a name-pattern search, never
   the default or current branch, never a fork's branch, never a branch that is the base of a

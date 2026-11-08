@@ -987,6 +987,14 @@ if [ ! -f "$E/repo/.claude/guild/.gld-sprint-99.sh" ]; then
 else
   bad "e2e: a clean run deletes its own script" "the script is still there after Done: 2"
 fi
+# 0.98.7 N11 — a run with no event still leaves an EMPTY failures.jsonl, so retro can tell
+# "0 events" (present, empty) from "never recorded" (absent — measured word_app #1839).
+N11_FJ="$E/repo/.claude/guild/.sprint-logs/99/failures.jsonl"
+if [ -f "$N11_FJ" ] && [ ! -s "$N11_FJ" ]; then
+  ok "e2e(N11): a run without failures leaves failures.jsonl present and empty"
+else
+  bad "e2e(N11): failures.jsonl present and empty" "exists=$([ -f "$N11_FJ" ] && echo y || echo n) lines=$(wc -l < "$N11_FJ" 2>/dev/null)"
+fi
 
 # The marker must be written at least once per issue plus the final `finished`.
 MC="$(printf '%s' "$TR" | grep -c 'MARKER_' || true)"
@@ -1979,6 +1987,28 @@ w8eq "I(W8): ref without repository → kept (as before)" \
 w8eq "I(W8): uppercase owner/name → the same repository" \
   "$(w8 '[{"number":204,"state":"OPEN","headRefName":"feature/misc","closingIssuesReferences":[{"number":12,"repository":{"name":"App","owner":{"login":"ACME"}}}]}]')" "12:feature/misc"
 
+# (1e2) 0.98.7 Z6 — closed as decided: `guild:done` · CLOSED · no PR at all · not split → run.json
+#       `closed_done`, ONLY after a successful PR read (GLD_PRS_OK=1); `closed` = CLOSED · COMPLETED.
+z6() {   # z6 <prs_ok> <labels-json> [<prs-json>] [<split of 101: true|false>] → "closed_done=…|closed=…"
+  printf '[{"number":101,"base_deps":[],"split":%s},{"number":102,"base_deps":[101],"split":false}]' "${4:-false}" > "$W8D/members.json"
+  printf '%s' "${3:-[]}" > "$W8D/prs.json"; printf '%s' "$2" > "$W8D/labels.json"
+  : > "$W8D/branches.txt"; : > "$W8D/failed.txt"; : > "$W8D/labels_extra.jsonl"; : > "$W8D/prs_tail_open.jsonl"; rm -f "$W8D/prs_tail.json"
+  GLD_PRS_OK="$1" "$PY" "$W8D/dag.py" "$W8D" main acme/app >/dev/null 2>&1 || { echo "python-failed"; return; }
+  "$PY" -c 'import json,sys; r=json.load(open(sys.argv[1])); print("closed_done=%s|closed=%s" % (",".join(map(str, r.get("closed_done", []))), ",".join(map(str, r.get("closed", [])))))' "$W8D/run.json"
+}
+Z6_DONE='[{"number":101,"labels":[{"name":"guild:done"}],"state":"CLOSED","stateReason":"COMPLETED"}]'
+w8eq "Z6: guild:done + CLOSED + no PR → closed_done (and closed)" "$(z6 1 "$Z6_DONE")" "closed_done=101|closed=101"
+w8eq "Z6: …the dependant's base is DEFAULT" "$("$PY" "$HERE/../skills/gld/commands/atoms/sprint_dag.py" --input "$W8D/run.json" --mode base 2>/dev/null | grep '^102 ')" "102 DEFAULT"
+w8eq "Z6: …and nothing is blocked" "$("$PY" "$HERE/../skills/gld/commands/atoms/sprint_dag.py" --input "$W8D/run.json" --mode blocked 2>/dev/null)" ""
+w8eq "Z6: an old fake with no state → closed_done empty (OPEN)" "$(z6 1 '[{"number":101,"labels":[{"name":"guild:done"}]}]')" "closed_done=|closed="
+w8eq "Z6: the PR read failed (GLD_PRS_OK=0) → closed_done empty" "$(z6 0 "$Z6_DONE")" "closed_done=|closed=101"
+w8eq "Z6: a PR attributed (even CLOSED) → not closed_done" \
+  "$(z6 1 "$Z6_DONE" '[{"number":301,"state":"CLOSED","headRefName":"feature/#101-x","closingIssuesReferences":[{"number":101}]}]')" "closed_done=|closed=101"
+w8eq "Z6: a split member → not closed_done" "$(z6 1 "$Z6_DONE" '[]' true)" "closed_done=|closed=101"
+w8eq "Z6: closed NOT_PLANNED → closed_done but not closed" \
+  "$(z6 1 '[{"number":101,"labels":[{"name":"guild:done"}],"state":"CLOSED","stateReason":"NOT_PLANNED"}]')" "closed_done=101|closed="
+w8eq "Z6: …its dependant is dep-no-branch" "$("$PY" "$HERE/../skills/gld/commands/atoms/sprint_dag.py" --input "$W8D/run.json" --mode blocked 2>/dev/null)" "102 dep-no-branch:#101"
+
 # (1f) 0.98.4 X15 — the run side's 200 windows. The region from the completeness helpers through
 #      refresh_dag_input is sourced as it is, against a fake gh whose `issue view` branch is
 #      SPLIT: `--json number,labels` is the label supplement, anything else the STATE read.
@@ -2042,7 +2072,10 @@ X15_OUT="$(x15_run 1)"
 w8eq "X15(a): out-of-window member's needs-human reaches terminal → dep-needs-human" \
   "$(x15_mode blocked)" "1500 dep-needs-human:#1097"
 w8eq "X15(a): the supplement asks only for the member outside the window" \
-  "$(grep '^issue view' "$X15/calls.txt" | tr '\n' ' ')" "issue view 1097 --repo acme/app --json number,labels "
+  "$(grep '^issue view' "$X15/calls.txt" | tr '\n' ' ')" "issue view 1097 --repo acme/app --json number,labels,state,stateReason "
+# 0.98.7 — the fake answers any field list, so the label WINDOW call's field list is pinned too.
+w8eq "X15(a): the label window asks for number,labels,state,stateReason" \
+  "$(grep -c -x -F 'issue list --repo acme/app --state all --limit 200 --json number,labels,state,stateReason' "$X15/calls.txt")" "1"
 # (a') the supplement answers rc 0 with text → dropped, as today — never dag-input-failed
 x15_reset
 printf 'guild:needs-human\n' > "$X15/iv_1097.txt"
@@ -2052,6 +2085,24 @@ case "$X15_OUT" in *REFRESH-FAILED*) bad "X15(a'): non-JSON supplement must not 
 w8eq "X15(a'): …and the member simply has no label (no dep-needs-human)" "$(x15_mode blocked)" ""
 grep -q 'dropped 1 unreadable supplement line' "$X15/dag/dag.err" \
   && ok "X15(a'): the dropped line is counted in dag.err" || bad "X15(a'): dag.err note" "$(cat "$X15/dag/dag.err")"
+# (a2) 0.98.7 Z2 — the same member, merged (#1098) AND closed `completed`: the leftover
+#      needs-human label is not a pause (measured #630: #629 → #624 dep-needs-human).
+x15_closed() { "$PY" -c 'import json,sys; print(",".join(str(n) for n in json.load(open(sys.argv[1])).get("closed", [])))' "$X15/dag/run.json"; }
+x15_reset
+printf '{"number":1097,"labels":[{"name":"guild:needs-human"}],"state":"CLOSED","stateReason":"COMPLETED"}\n' > "$X15/iv_1097.txt"
+X15_OUT="$(x15_run 1)"
+w8eq "X15(a2): out-of-window needs-human + MERGED + CLOSED/COMPLETED → nothing blocked" "$(x15_mode blocked)" ""
+w8eq "X15(a2): the supplement merge carries state — run.json closed holds 1097" "$(x15_closed)" "1097"
+x15_reset
+printf '{"number":1097,"labels":[{"name":"guild:needs-human"}],"state":"CLOSED","stateReason":"NOT_PLANNED"}\n' > "$X15/iv_1097.txt"
+X15_OUT="$(x15_run 1)"
+w8eq "X15(a2): …closed NOT_PLANNED → still dep-needs-human" "$(x15_mode blocked)" "1500 dep-needs-human:#1097"
+w8eq "X15(a2): …and not in run.json closed" "$(x15_closed)" ""
+x15_reset
+printf '[{"number":1500,"labels":[]},{"number":1097,"labels":[{"name":"guild:qa"},{"name":"guild:needs-human"}],"state":"CLOSED","stateReason":"COMPLETED"}]' > "$X15/labels.json"
+X15_OUT="$(x15_run 1)"
+w8eq "X15(a2): in-window needs-human + MERGED + CLOSED/COMPLETED → nothing blocked" "$(x15_mode blocked)" ""
+w8eq "X15(a2): in-window → no supplement call" "$(grep -c '^issue view' "$X15/calls.txt")" "0"
 # (b) incomplete 200 window → exactly ONE 1000 read over three refreshes; the old MERGED dep → DEFAULT
 x15_reset
 printf '{"number":1097,"labels":[]}\n' > "$X15/iv_1097.txt"
@@ -2320,6 +2371,25 @@ if [ "$I_DONE101" -eq 1 ] && [ "$I_DONE102" -eq 0 ]; then
   ok "I: sweep moves the MERGED issue to Done and leaves the OPEN one alone"
 else
   bad "I: sweep filters on MERGED" "merged=$I_DONE101 open=$I_DONE102 calls=[$(printf '%s' "$I_CALLS" | tr '\n' '|')]"
+fi
+
+# 0.98.7 Z6 — a closed-as-decided member (run.json `closed_done`) is swept to Done too; an empty
+# `closed_done` (e.g. after a failed PR read) sends nothing for it.
+printf '%s\n' '{"prs":[{"issue":102,"state":"OPEN"}],"closed_done":[103]}' > "$I_DAG/run.json"
+I_run 'board_sweep_merged'
+I_DONE103=$(printf '%s\n' "$I_CALLS" | grep -c -- '--id I_103 --project-id PVT_test --field-id F_col --single-select-option-id o_done' || true)
+I_DONE102=$(printf '%s\n' "$I_CALLS" | grep -c -- '--id I_102 --project-id PVT_test --field-id F_col --single-select-option-id o_done' || true)
+if [ "$I_DONE103" -eq 1 ] && [ "$I_DONE102" -eq 0 ]; then
+  ok "I(Z6): sweep moves a closed_done member to Done"
+else
+  bad "I(Z6): sweep closed_done" "done103=$I_DONE103 open102=$I_DONE102 calls=[$(printf '%s' "$I_CALLS" | tr '\n' '|')]"
+fi
+printf '%s\n' '{"prs":[{"issue":102,"state":"OPEN"}],"closed_done":[]}' > "$I_DAG/run.json"
+I_run 'board_sweep_merged'
+if ! printf '%s\n' "$I_CALLS" | grep -q -- 'o_done'; then
+  ok "I(Z6): an empty closed_done (PR read failed) sends no Done write"
+else
+  bad "I(Z6): empty closed_done" "calls=[$(printf '%s' "$I_CALLS" | tr '\n' '|')]"
 fi
 
 # run.json 이 없으면 sweep 은 무동작이어야 한다 — 없는 입력으로 전량을 Done 으로 쓸어버리는
@@ -4817,7 +4887,7 @@ mw_case "T12f 깨진 JSON 은 실패" "[{\"id\": 1,\n" FAIL
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=394
+SUP_MIN_CHECKS=413
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

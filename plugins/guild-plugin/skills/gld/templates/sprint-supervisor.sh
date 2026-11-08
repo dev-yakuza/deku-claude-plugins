@@ -182,6 +182,9 @@ RUNDIR="$HUMAN_REPO/.claude/guild/.sprint-logs/$TRACKER"
 D="$RUNDIR/dag"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 mkdir -p "$D"
+# 0.98.7 N11 — the failure log exists from the first pass, so retro can tell "no events" (present,
+# empty → 0) from "never recorded" (absent — a run before 0.98.7, or the file could not be written).
+: >> "$RUNDIR/failures.jsonl" 2>/dev/null || true
 
 # ── 보드 투영 (03-sprint-board.md §5.2·§7.2) ─────────────────────────────────
 # Defined HERE, before `cleanup` and the empty-queue guard, because P7 lives inside the
@@ -539,6 +542,10 @@ except Exception:
 for pr in d.get("prs") or []:
     if pr.get("state") == "MERGED" and pr.get("issue") is not None:
         print(pr["issue"])
+# 0.98.7 Z6 — a member closed as decided (`guild:done`, CLOSED, no PR) has landed too: its card
+# goes to Done. The done arm's P3 writes `in_review split-children` first; this sweep corrects it.
+for n in d.get("closed_done") or []:
+    print(n)
 PY
   while read -r n; do
     # ⚠ `if`, not `[ … ] && …`: `done` in argument position parses correctly today, but adding a
@@ -1237,7 +1244,7 @@ for n in members:
 PY
 )"
   for n in $missing; do
-    gh issue view "$n" --repo "$OWNER_REPO" --json number,labels >> "$D/labels_extra.jsonl" 2>/dev/null || true
+    gh issue view "$n" --repo "$OWNER_REPO" --json number,labels,state,stateReason >> "$D/labels_extra.jsonl" 2>/dev/null || true
     echo >> "$D/labels_extra.jsonl"
   done
 }
@@ -1248,7 +1255,9 @@ refresh_dag_input() {
   gh pr list --repo "$OWNER_REPO" --state all --limit 200 \
     --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,closingIssuesReferences \
     > "$D/prs.json" 2>/dev/null || { printf '[]' > "$D/prs.json"; prs_ok=0; }
-  gh issue list --repo "$OWNER_REPO" --state all --limit 200 --json number,labels \
+  # `state,stateReason` (0.98.7 Z2/Z6): the needs-human release and `closed_done` read them. The
+  # SAME field list as labels_supplement — a fake gh answers any field list, so a test pins both.
+  gh issue list --repo "$OWNER_REPO" --state all --limit 200 --json number,labels,state,stateReason \
     > "$D/labels.json" 2>/dev/null || { printf '[]' > "$D/labels.json"; labels_ok=0; }
   # ⚠ A failed 200 read is `[]`, which `length 0 < 200` would call complete — it is not: no
   # verdict, no tail merge (GLD_PRS_OK=0), today's behaviour (no PRs).
@@ -1329,7 +1338,13 @@ if isinstance(labels_raw, list):
         labs = o.get("labels")
         if (o["number"] not in have and isinstance(labs, list)
                 and all(isinstance(l, dict) and isinstance(l.get("name"), str) for l in labs)):
-            labels_raw.append({"number": o["number"], "labels": labs})
+            ent = {"number": o["number"], "labels": labs}
+            # 0.98.7 — carry `state`/`stateReason` too (strings only; otherwise left out = OPEN),
+            # or a member outside the window would always read OPEN and never be released.
+            for k in ("state", "stateReason"):
+                if isinstance(o.get(k), str):
+                    ent[k] = o[k]
+            labels_raw.append(ent)
             have.add(o["number"])
 if dropped:
     print("refresh_dag_input: dropped %d unreadable supplement line(s) — not a failure" % dropped,
@@ -1371,14 +1386,40 @@ for pr in prs_raw:
         if n in member_nums:
             prs.append({"issue": n, "branch": pr.get("headRefName"), "state": state})
 
+# ⚠ Computed BEFORE the label pass (0.98.7 Z2): the needs-human release below reads it.
+merged = set(p["issue"] for p in prs if p.get("state") == "MERGED")
+attributed = set(p["issue"] for p in prs)
+
+def issue_state(it):
+    # `state` absent (an older fake, a failed field) → OPEN: nothing is released on a guess.
+    st = it.get("state") if isinstance(it.get("state"), str) else "OPEN"
+    rs = it.get("stateReason") if isinstance(it.get("stateReason"), str) else ""
+    return st.upper(), rs.upper()
+
 # label -> terminal state, using the same precedence as the `case` arms below.
+# 0.98.7 Z2 — `guild:needs-human` on a member whose same-repo PR MERGED and whose Issue closed
+# `completed` is a leftover label, not a pause (measured #630: #629 merged by hand, #624 blocked
+# as dep-needs-human). MERGED alone is not enough — an Issue reopened for rework keeps an old
+# merged PR and carries a NEW pause (X15). A released member falls to the next label.
 terminal = {}
+closed = []          # members CLOSED · COMPLETED — sprint_dag.py releases needs-human / closed_done
+closed_done = []     # 0.98.7 Z6 — closed as decided: guild:done · CLOSED · no PR at all · not split
+split_nums = set(int(m["number"]) for m in members if isinstance(m, dict) and m.get("split"))
 for it in labels_raw:
     n = int(it["number"])
     if n not in member_nums:
         continue
     names = [l["name"] for l in (it.get("labels") or [])]
-    if "guild:needs-human" in names:
+    st, reason = issue_state(it)
+    if st == "CLOSED" and reason == "COMPLETED":
+        closed.append(n)
+    # ⚠ Only when the PR read succeeded: a failed read is `[]`, and every done member would then
+    # look PR-less — the same rule as the done arm's pr-unknown (do not assert what was not seen).
+    if (os.environ.get("GLD_PRS_OK") == "1" and "guild:done" in names and st == "CLOSED"
+            and n not in attributed and n not in split_nums):
+        closed_done.append(n)
+    if "guild:needs-human" in names and not (n in merged and st == "CLOSED"
+                                              and reason == "COMPLETED"):
         terminal[str(n)] = "needs-human"
     elif "guild:done" in names:
         terminal[str(n)] = "done"
@@ -1408,7 +1449,7 @@ if os.path.exists(pp):
 # work is IN — loses to a stale line in failed.txt, and `--mode blocked` reports
 # `dep-failed:#N` while `--mode base` answers DEFAULT for the same node. failed.txt accumulates
 # for as long as $D survives, so that contradiction outlives the attempt that caused it.
-merged = set(p["issue"] for p in prs if p.get("state") == "MERGED")
+# (`merged` is computed above, before the label pass.)
 for line in open(os.path.join(d, "failed.txt")):
     line = line.strip()
     if not line.isdigit():
@@ -1418,6 +1459,7 @@ for line in open(os.path.join(d, "failed.txt")):
         terminal[str(n)] = "failed"
 
 json.dump({"members": members, "prs": prs, "terminal": terminal,
+           "closed": sorted(closed), "closed_done": sorted(closed_done),
            "branches": branches, "default_branch": default_branch},
           open(os.path.join(d, "run.json"), "w"), sort_keys=True)
 PY

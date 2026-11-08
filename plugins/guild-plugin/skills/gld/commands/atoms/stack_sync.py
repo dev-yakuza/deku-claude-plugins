@@ -205,6 +205,10 @@ def pick_dep_pr(top, merged, m_head):
     return sorted(anc or merged, key=lambda p: p.get("mergedAt") or "")[-1]
 
 
+DECIDED_JQ = ('{state, labels: [.labels[].name], decided: ([.comments[].body | '
+              'select(contains("<!-- guild:closed-as-decided -->"))] | length)}')
+
+
 def done_members(ctx, members, prs):
     """Members whose board card belongs in `Done`: a MERGED PR is attributed to this member and
     the Issue is closed as `COMPLETED`. The PR attribution is `prs_by_issue`'s, the same one the
@@ -217,9 +221,34 @@ def done_members(ctx, members, prs):
     or as a duplicate — and the MERGED half can still hold for it (a stacked PR merged into a
     base that was then abandoned, or a branch name that merely contains the number). A merged
     closing PR sets `COMPLETED`; so does a human closing it as done by hand — and then the human
-    has said it is done, which is what the `Done` column means."""
+    has said it is done, which is what the `Done` column means.
+
+    0.98.7 Z6 — the second way a member lands: **closed as decided** (analyze Step 1 item 0b). No
+    PR is attributed to it in ANY state, and one read tells the rest: `CLOSED` · `guild:done` · a
+    `<!-- guild:closed-as-decided -->` comment → Done, whatever the `stateReason` (a decision not
+    to do the work is closed `not planned` and still finished). The marker is what tells it from a
+    split parent — this script does not know S. ⚠ One JSON from `issue view --json comments`: a
+    `gh api --paginate --jq` count prints one number PER PAGE and `gh_json` would fail on it."""
     out = []
     for n in members:
+        if not prs.get(n):
+            # ⚠ Per member: every PR-less member is read here (most are just not started), so one
+            # failed read must not turn the whole line into `done-cards error` — that member is
+            # skipped (not Done), the rest are still judged.
+            try:
+                got = gh_json(["issue", "view", str(n), "-R", ctx["repo"], "--json",
+                               "state,labels,comments", "--jq", DECIDED_JQ]) or {}
+            except EnvError as exc:
+                print("stack_sync: #%d closed-as-decided read failed — skipped: %s" % (n, exc),
+                      file=sys.stderr)
+                continue
+            if not isinstance(got, dict):
+                continue
+            if (str(got.get("state", "")).upper() == "CLOSED"
+                    and "guild:done" in (got.get("labels") or [])
+                    and isinstance(got.get("decided"), int) and got["decided"] >= 1):
+                out.append(n)
+            continue
         if not any(p["state"] == "MERGED" for p in prs.get(n, [])):
             continue
         st = gh_json(["issue", "view", str(n), "-R", ctx["repo"], "--json", "state,stateReason"]) or {}

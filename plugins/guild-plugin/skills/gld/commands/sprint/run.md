@@ -77,6 +77,20 @@ member**; see Phase 0 and Phase 3 step 2c.
 | Install command resolvable | `config.commands` scan | warn |
 | **Not already running** | Phase 1 step 3 | **block** |
 | Plan record committed | `git status --porcelain -uall -- docs/specs/` — any line under `docs/specs/sprint-<tracker number>/` (`-uall`: without it a never-committed `docs/specs/` collapses to one `?? docs/specs/` line). `sprint-draft/` is an uncreated proposal and a pre-0.95 `sprint-<date>/` is not this — neither counts | warn, once — *"plan 기록이 커밋되지 않았습니다: <paths> — 커밋해 두지 않으면 잊기 쉽습니다"*. Not a block: no worktree reads them (`sprint plan` Phase 6 step 6 commits them, or says why it did not) |
+| **Base CI** (0.98.7) | *Base CI* below — the default branch's check-runs, or the last merged PR's head when the branch has none | warn — the line below |
+
+**Base CI** — is the default branch already red? (Measured #630: the base was red on one test, and six members paused in qa on that same red, one after another.) Each its own Bash call:
+1. `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>` (Phase 0 has no other read of it — Phase 3's is later).
+2. `gh api repos/<owner>/<repo>/commits/<d>/check-runs --paginate --jq '.check_runs[] | {id, name, conclusion, annotations: .output.annotations_count}'` (`qa.md`'s stream form — `--paginate` reads past the 30-run page).
+3. **No run at all** (CI runs on PRs only — one-man-company) → the last merged PR:
+   `gh pr list --repo <owner>/<repo> --state merged --base <d> --limit 20 --json number,headRefOid,mergedAt --jq 'if length == 0 then null else (max_by(.mergedAt) | {number, headRefOid}) end'`
+   (the list is in creation order, so `--limit 1` may not be the last merge — the largest `mergedAt` of 20); `null` → Base CI `없음`, done. Otherwise the call of 2 for `commits/<headRefOid>/check-runs`.
+4. For each run with `conclusion == "failure"` and `annotations > 0` (at most 3), `qa.md`'s annotation call — a `was not started` message is `ci-blocked`, kept apart from red.
+
+**Which runs count**: one per check **name** — when a name appears more than once (a re-run), keep the run with the **highest `id`** (the latest attempt; measured one-man-company PR #647: an earlier failed attempt beside its green re-run). **Which verdict**: `qa.md` Step 2's *Which one* rule over those runs — conclusion `failure` · `timed_out` · `cancelled` · `action_required` → red (a never-started one → `ci-blocked`); else any `null` → still running, read as `green` with `(진행 중)`; else green (`neutral` and `skipped` are not red). The result always **names the checks it judged**, because a default branch may carry only non-code checks (measured word_app main: `validate_pr` skipped, `update_release_draft` success — `green` there says nothing about the tests):
+Result: `green(<checks…>)` · `red(<checks…>) (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>)` · `ci-blocked(<checks…>)` · `없음` · `unavailable` (a call failed). Red → the warning
+`기본 브랜치 CI red: <checks…> (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>) — 멤버마다 같은 red 로 사람 대기가 될 수 있습니다. 고치는 멤버가 있으면 다른 멤버가 그 위에 쌓였는지 확인하세요(plan 의 (a) 의존).`
+shown with the other warnings before the one ask below — the human chooses to start or stop (`run` never starts unattended). `sprint plan` Phase 2 runs the same check (`BASE CI:`). The verdict of any stage does not change.
 
 **Why only the test row blocks on verification.** Guild judges completion by the raw output of
 a test runner, refusing self-report (`_handoff.md` Section E). With no way to *run* tests that

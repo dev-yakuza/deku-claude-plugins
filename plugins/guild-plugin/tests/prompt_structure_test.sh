@@ -4100,7 +4100,7 @@ hasfx "retro(W4): 지적 있음은 일반 멤버도 나열" "$P3_RETRO" '**— l
 lacksfx "retro(W4): 옛 의미 문장 없음" "$P3_RETRO" 'is *how often the auditor stopped the stage over the sprint*'
 lacksfx "retro(W4): 옛 BLOCKER 예시 없음" "$P3_RETRO" '감사자 BLOCKER 제기  6건'
 # W5 — 같은 원인 묶기 · CI 기록
-hasfx "_handoff(W5): env 원인 단어" "$P3_HO" '`env: <ci-blocked|credential|service|other> — <one-line>`'
+hasfx "_handoff(W5): env 원인 단어 (0.98.7 base-red 추가)" "$P3_HO" '`env: <ci-blocked|base-red|credential|service|other> — <one-line>`'
 hasfx "_handoff(W5): 묶음 표시에만" "$P3_HO" 'daily/retro 가 묶음 표시에만 쓴다'
 lacksfx "_handoff(W5): 옛 Nothing branches 문장 없음" "$P3_HO" 'branches on it (completion is judged by labels — `batch.md` Phase 4); it exists so a'
 hasfx "daily(W5): 원인 호출" "$P3_DAILY" "contains(\"<!-- guild:needs-human -->\")) | .body | [splits(\"\\n\")] | (map(select(test(\"^(defect|ambiguity|env):\"))) | first) // (map(select(test(\"^## \"))) | first) // \"(원인 줄 없음)\"'"
@@ -4461,7 +4461,7 @@ hasfx "_execute_spine(Y5): 점검 명령" "$P6_SP" 'jq -Rr '"'"'select(test("^- 
 hasfx "_execute_spine(Y5): 재점검은 한 번만" "$P6_SP" '**Re-check once only** — still output → append it as it is'
 hasfx "_execute_spine(Y5): jq 실패 시 생략 한 줄" "$P6_SP" '`감사자 기록 형식 점검 생략(jq 실행 불가)`'
 hasfx "_execute_spine(Y5): 누적 본문 전체는 점검하지 않음" "$P6_SP" '**The accumulated body is never checked** — earlier'
-hasfx "_execute_spine(Y5): 재진입은 형식 줄을 다시 읽음" "$P6_SP" '**A re-entered invocation re-reads this line format (the shape above) before its first record write** — it never writes it from memory (measured #607'
+hasfx "_execute_spine(Y5): 재진입은 형식 줄을 다시 읽음 (0.98.7 점검 포함)" "$P6_SP" '**A re-entered invocation re-reads this line format (the shape above) and the check below before its first record write**'
 P6_ORD="$(awk '/Check the new block alone, then append it/{a=NR} /Then render the new comment body with the Write tool as/{b=NR} END{print (a && b && a<b) ? "y" : "n"}' "$P6_SP")"
 [ "$P6_ORD" = y ] && ok "_execute_spine(Y5): 점검이 전체 본문 Write·PATCH 앞" || bad "_execute_spine(Y5): 순서" "check before render" "$P6_ORD"
 hasfx "_handoff(Y5): 감사자 기록 행에 자기 점검" "$P6_HO" 'Each write first checks **its own new block** for those shapes'
@@ -4524,7 +4524,6 @@ hasfx "retro(Y7): 신선도 질문은 retro 가 대신 답하지 않음" "$P6_RE
 hasfx "retro(Y7): ① 이면 Phase 6 계속" "$P6_RETRO" 'ends Phase 5 as `성장 단계 보류` and **continues to Phase 6** — it does not tell the human to run retro again'
 hasfx "retro(Y7): 보류 한 줄" "$P6_RETRO" '`성장 단계 보류 — 로컬 <d> 가 <behind> 커밋 뒤. 최신화 뒤 /gld evolve 를 직접 실행하세요`.'
 hasfx "retro(Y7): Return 에 보류 줄" "$P6_RETRO" '`· 성장 단계 보류 — 로컬 <d> 가 <behind> 커밋 뒤. 최신화 뒤 /gld evolve 를 직접 실행하세요`.'
-lacksfx "retro(Y7): retro 를 다시 실행하라는 문구 없음" "$P6_RETRO" 'retro 를 다시 실행'
 # L1 — 머지된 멤버 라벨 정리
 hasfx "retro(L1): 단계 문장" "$P6_RETRO" '0. **머지로 끝난 멤버의 라벨 정리** — before the groups below.'
 hasfx "retro(L1): 명령" "$P6_RETRO" '`gh issue edit <n> --remove-label <stage> --remove-label guild:needs-human --add-label guild:done`'
@@ -4539,14 +4538,166 @@ hasfx "sprint/plan(L3): 기록은 고른 선택지의 description" "$P6_SPP" 'Th
 # L4·L5·L7
 hasfx "review(L4): 경로가 분명해도 묻는다" "$P6_RV" '— the ask is owed even when the path is obvious; wait for the answer before the first edit;'
 hasfx "review(L4): 고쳐 달라는 편집만" "$P6_RV" '**'"'"'고쳐 달라'"'"' 는 편집만이다** — merging or rebasing the base into the head, committing, and pushing each happen only when the human asked for that step'
-hasfx "retro(L5): 블록은 미머지 멤버가 있을 때만" "$P6_RETRO" '**The block above only when a member is unmerged on the merge axis** (Phase 1). **Every member merged → print the short'
+hasfx "retro(L5→N3): 블록은 열린 PR 이 있을 때만" "$P6_RETRO" '**The block above only when a member'"'"'s PR is still `OPEN`** (Phase 1'
 lacksfx "retro(L5): 둘째·셋째 줄이라는 잘못된 지칭 제거" "$P6_RETRO" 'Those second and third lines only when'
 hasfx "config(Y1): off 는 Bash 텍스트 가드도 끔" "$GLD/commands/config.md" '`off` also turns off the Bash text guard (`shell-text` · `bodies-save`'
 hasfx "init(Y1): gates.enabled false 면 텍스트 가드도 꺼짐" "$P6_INIT" '`false` = advisory only (off-switch) — and the Bash text guard (`shell-text` · `bodies-save`) is off too.'
 hasfx "_bash_rules(Y1): heredoc 은 따옴표 여부와 무관하게 금지" "$P6_BR" 'not `echo`/`printf`, not a heredoc (quoted or not), not a script argument.'
 hasfx "_invariants(Y2): bodies-save 한계 — 변수에 담아 나중에 쓰기" "$P6_INV" 'variable and written out later (`x=$(gh issue list …); echo "$x" > f`) are outside it'
-hasfx "retro(L5): 모두 머지일 때 짧은 줄" "$P6_RETRO" '보드: <url> — 이후 카드는 갱신되지 않습니다(멤버 모두 머지됨). 이번 retro 전에 /gld sprint sync 를 부르지 않았다면 Done 이 아닐 수 있습니다 — GitHub UI 에서 정리하십시오; 다음부터는 retro 전에 sync 를.'
+hasfx "retro(L5→N3): 열린 PR 없을 때 짧은 줄" "$P6_RETRO" '보드: <url> — 이후 카드는 갱신되지 않습니다(열린 PR 없음). 이번 retro 전에 /gld sprint sync 를 부르지 않았다면 Done 이 아닐 수 있습니다 — GitHub UI 에서 정리하십시오; 다음부터는 retro 전에 sync 를.'
 hasfx "_handoff(L7): 원인 줄은 마커 다음 첫 줄 · 제목 앞" "$P6_HO" 'the cause line is **the first line after the marker, at column 0, before any heading** — a heading that contains the word does not count'
+
+# ── 0.98.7 ──────────────────────────────────────────────────────────────
+P7_RUN="$GLD/commands/sprint/run.md"; P7_DEV="$GLD/commands/dev.md"; P7_SYNC="$GLD/commands/sprint/sync.md"; P7_BOARD="$GLD/commands/sprint/board.md"; P7_SS="$GLD/commands/atoms/stack_sync.py"; P7_SUP="$GLD/templates/sprint-supervisor.sh"
+# Z1 — retro 체크아웃 점검 · 보류 · Hard rule
+hasfx "retro(Z1): Phase 0 step 5 머리" "$P6_RETRO" '5. **Is the checkout the default branch?** (0.98.7 — before anything is written; **CLEANUP skips this step**.) Each its own Bash call:'
+hasfx "retro(Z1): step 5 기본 브랜치 읽기" "$P6_RETRO" '`gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>` (Phase 4 step 6 reuses this value — the same read is not made twice; the repo is positional);'
+hasfx "retro(Z1): step 5 현재 브랜치" "$P6_RETRO" '`git branch --show-current` → `<b>` (empty = detached).'
+hasfx "retro(Z1): 질문 문구 ①②" "$P6_RETRO" '`체크아웃이 기본 브랜치 <d> 가 아닙니다(<b|detached>). 회고 기록(config.json)은 <d> 에서만 커밋되고, 성장 단계(evolve)는 지금 브랜치를 분석해 거기에 커밋하게 됩니다. ① 중단 — 직접 <d> 로 옮기신 뒤(git switch <d>) /gld sprint retro 를 다시 실행(권장 · 아직 아무것도 쓰지 않았습니다) ② 이대로 진행 — 측정·기록·종료는 하고 config.json 은 커밋하지 않으며 성장 단계는 보류`'
+hasfx "retro(Z1): 옮겨 주는 선택지 금지" "$P6_RETRO" '**Never an option that moves the branch for the human** ("제가 옮기겠습니다" and the like'
+hasfx "retro(Z1): ① Return" "$P6_RETRO" '- ① → Return `OK: retro not started — checkout <b> is not <d>` — nothing was written, so the re-run is safe'
+hasfx "retro(Z1): ② HELD-EVOLVE" "$P6_RETRO" '- ② → mark **HELD-EVOLVE** and go on: Phase 4 step 6 commits nothing, Phase 5 is held.'
+hasfx "retro(Z1): DRY·무인 한 줄" "$P6_RETRO" '- **DRY** → no question: one line `체크아웃 <b> — 실제 회고는 <d> 에서 하십시오`, then go on. `GLD_UNATTENDED=1` → the same line, no question'
+hasfx "retro(Z1): Phase 4 step 6 보조 안전망" "$P6_RETRO" 'Not on the default branch → commit nothing — and Phase 5 is held as below (a safety net behind Phase 0 step 5'
+hasfx "retro(Z1): Phase 5 보류 줄(commit 명령)" "$P6_RETRO" '`성장 단계 보류 — 체크아웃 <b>(기본 브랜치 아님). git switch <d> 후 git commit -m "chore(guild): 스프린트 #<t> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/config.json, 그다음 /gld evolve 를 직접 실행하세요`'
+hasfx "retro(Z1): Phase 5 는 evolve 를 읽지도 않음" "$P6_RETRO" 'committed nothing because the checkout was not the default branch → do **not** read or execute evolve; one line, then Phase 6:'
+hasfx "retro(Z1): Return 줄" "$P6_RETRO" '`OK: retro not started — checkout <b> is not <d>` (Phase 0 step 5 ①) ·'
+hasfx "retro(Z1·N6): Hard rule" "$P6_RETRO" '- **retro never moves the human'"'"'s branch or history** — no `git checkout <branch>` / `switch`, `pull`, `merge`, `rebase`, `reset`, and no option that offers to'
+hasfx "retro(N6): push 는 있는 그대로" "$P6_RETRO" 'A later "push" request pushes as it is — `git push origin <d>`; rejected (non-fast-forward) → say so and stop: updating is the human'"'"'s'
+hasfx "retro(Z1): Phase 7 의 정리는 금지 밖" "$P6_RETRO" 'Phase 7'"'"'s `git worktree remove` and `branch -D` work outside the human'"'"'s checkout and are outside this ban.'
+P7_GC="$(grep -nE 'git checkout main|merge --ff-only|git (pull|rebase) ' "$P6_RETRO" | grep -vF "retro never moves the human's branch or history" | grep -vF 'became `git checkout main` + `git merge --ff-only`' || true)"
+[ -z "$P7_GC" ] && ok "retro(Z1): checkout main·merge --ff-only·pull/rebase 는 금지 문맥에만" || bad "retro(Z1): 브랜치 이동이 금지 문맥 밖" "none" "$(printf '%s' "$P7_GC" | cut -c1-80)"
+P7_RR="$(grep -nF 'retro 를 다시 실행' "$P6_RETRO" | grep -vF '① 중단 — 직접 <d> 로 옮기신 뒤' || true)"
+[ -z "$P7_RR" ] && ok "retro(Y7): retro 를 다시 실행하라는 문구는 Phase 0 step 5 ① 에만" || bad "retro(Y7): retro 재실행 문구가 ① 밖에" "none" "$(printf '%s' "$P7_RR" | cut -c1-80)"
+# Z2 — 머지된 needs-human dep
+hasfx "daily(Z2): 차단 아님 규칙" "$P3_DAILY" 'A dependency is **not** blocking when step 3'"'"'s PR list holds a same-repo `MERGED` row whose `closes` includes it (**a `via: branch` row is not evidence**'
+hasfx "daily(Z2): 라벨 잔존 표시" "$P3_DAILY" 'say `#629 머지됨(라벨 잔존 — retro 가 정리)` instead'
+hasfx "daily(Z2): 사람 대기 에서도 뺀다" "$P3_DAILY" 'The same member is left out of **▎사람 대기** too'
+hasfx "daily(Z2): :210 정정" "$P3_DAILY" 'which it derives by the rule in step 5 (the same one `sprint_dag.py --mode blocked` applies)'
+lacksfx "daily(Z2): 옛 already derives from the DAG" "$P3_DAILY" 'which it already derives from the DAG'
+hasfx "_sprint_dag(Z2): Section B 줄" "$P6_DAG" 'A member with a same-repo MERGED PR whose Issue is CLOSED · COMPLETED is never `needs-human` in `terminal` — the supervisor'"'"'s builder drops it, and `--mode blocked` drops it again for a hand-built input that carries `closed`; `daily` applies the same rule in prose (step 5).'
+hasfx "_sprint_dag(Z6): closed_done 스키마" "$P6_DAG" '- **`closed_done`** (0.98.7, optional) — members closed as decided'
+hasfx "analyze(Z2): :50 예외 구절" "$P3_AN" 'blocks the downstream of a hard dependency that ended needs-human/failed (unless its PR merged and the Issue closed `COMPLETED`)'
+hascode "supervisor(Z2): 라벨 창 필드" "$P7_SUP" 'gh issue list --repo "$OWNER_REPO" --state all --limit 200 --json number,labels,state,stateReason'
+hascode "supervisor(Z2): 보충 필드" "$P7_SUP" 'gh issue view "$n" --repo "$OWNER_REPO" --json number,labels,state,stateReason'
+hascode "supervisor(Z2): 해소 조건" "$P7_SUP" 'if "guild:needs-human" in names and not (n in merged and st == "CLOSED"'
+# Z3 — base-red
+hasfx "_handoff(Z3·W5): env 원인 단어" "$P3_HO" '`env: <ci-blocked|base-red|credential|service|other> — <one-line>`'
+hasfx "_handoff(Z3): base-red 정의" "$P3_HO" '`base-red` = the same check fails without this change — on the default branch'"'"'s tip, on the last merged PR'"'"'s head, or on an unrelated PR; the cause line names that run URL'
+hasfx "_handoff(Z3): Section M 예시 키" "$P3_HO" 'with one line after the cause line (`env: <key> — …`):'
+hasfx "qa(Z3): 세 갈래 원인 키" "$P3_QA" 'never started → `env: ci-blocked`; red that the base already has (shown by a run URL'
+hasfx "qa(Z3): base-red 원인 줄" "$P3_QA" '`env: base-red — <check> (근거 <run URL>)`; this PR'"'"'s own red → the cause line starts `defect: <check> — …`'
+lacksfx "qa(Z3): 옛 무조건 ci-blocked" "$P3_QA" 'starts its cause line with `env: ci-blocked`'
+hasfx "qa(Z3): 기록 형식에 base-red" "$P3_QA" '`red <name…> (env: base-red)`'
+hasfx "daily(Z3): base-red 처방" "$P3_DAILY" '`env: base-red <k>회(#…) — 고치는 PR(#<fix>) 머지 → 각 PR 에 기본 브랜치 반영(쌓인 멤버는 /gld sprint sync) → /gld dev <n>`'
+hasfx "run(Z3): Base CI 행" "$P7_RUN" '| **Base CI** (0.98.7) |'
+hasfx "run(Z3): 기본 브랜치 읽기" "$P7_RUN" '1. `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>`'
+hasfx "run(Z3): check-runs 스트림" "$P7_RUN" "2. \`gh api repos/<owner>/<repo>/commits/<d>/check-runs --paginate --jq '.check_runs[] | {id, name, conclusion, annotations: .output.annotations_count}'\`"
+hasfx "run(Z3): 0개면 마지막 머지 PR" "$P7_RUN" "\`gh pr list --repo <owner>/<repo> --state merged --base <d> --limit 20 --json number,headRefOid,mergedAt --jq 'if length == 0 then null else (max_by(.mergedAt) | {number, headRefOid}) end'\`"
+hasfx "run(Z3): was not started 분리" "$P7_RUN" 'a `was not started` message is `ci-blocked`, kept apart from red.'
+hasfx "run(Z3): 경고 문구" "$P7_RUN" '`기본 브랜치 CI red: <checks…> (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>) — 멤버마다 같은 red 로 사람 대기가 될 수 있습니다. 고치는 멤버가 있으면 다른 멤버가 그 위에 쌓였는지 확인하세요(plan 의 (a) 의존).`'
+hasfx "sprint/plan(Z3): BASE CI 줄" "$P6_SPP" '`BASE CI: <green(<checks…>)|red(<checks…>) (근거 …)|ci-blocked(<checks…>)|없음|unavailable>`'
+hasfx "sprint/plan(Z3): TL 입력에 BASE CI" "$P6_SPP" 'BASE CI: <the Base CI line above>.'
+hasfx "sprint/plan(Z3): TL 문장" "$P6_SPP" 'every other candidate whose PR runs that check gets `(a) #m ← #fix base-red` — not `soft:`, not `conditional:`'
+hasfx "sprint/plan(Z3): 보통 후보만" "$P6_SPP" 'Only ordinary candidates, on both sides — neither an epic nor an epic'"'"'s child.'
+hasfx "sprint/plan(Z3): 리더 판정" "$P6_SPP" '**only when `#fix` is a member and `EFFECTIVE_CAP ≥ 2`**'
+hasfx "sprint/plan(Z3): 고치는 후보 없음 줄" "$P6_SPP" '`기본 브랜치 CI red(<check>) — 고치는 후보 없음: 멤버마다 사람 대기가 될 수 있습니다`'
+hasfx "sprint/plan(Z3): fix 비멤버 줄" "$P6_SPP" '`기본 브랜치 CI red(<check>) — 고치는 후보 #<fix> 가 이번 멤버가 아님:'
+hasfx "sprint/plan(Z3): 상한 1 줄" "$P6_SPP" '`기본 브랜치 CI red(<check>) — 스택 상한 1 이라 #<fix> 위에 쌓을 수 없습니다: #<fix> 를 먼저 머지하지 않으면 멤버마다 사람 대기가 될 수 있습니다`'
+hasfx "sprint/plan(Z3): 스택 없음이 base-red 간선을 지움" "$P6_SPP" 'the `base-red` edges go with it (Phase 4'"'"'s leader call at `EFFECTIVE_CAP = 1`) and become the `스택 상한 1` warning line'
+# Z4 — 1b 출력
+hasfx "sprint/plan(Z4): 출력의 정의" "$P6_SPP" '**Printing means an assistant text message carrying the report verbatim, from its first line**'
+hasfx "sprint/plan(Z4): spawn 메시지가 보고로 시작" "$P6_SPP" '**and the Phase 2 spawn message itself opens with the report**'
+hasfx "sprint/plan(Z4): spawn 앞 머리" "$P6_SPP" '(header `Phase 1b 판정 보고입니다(docs/specs/sprint-draft/triage.md 에 기록)` + the report part)'
+hasfx "sprint/plan(Z4): 보조가 쓰고 리더가 출력" "$P6_SPP" '**the leader prints it** (Phase 2 precondition): reading the helper'"'"'s file is not reporting.'
+hasfx "sprint/plan(Z4): 자기 점검 기준" "$P6_SPP" 'the `1b:` line itself and a Read do not count'
+# Z5 — 비멤버 전제
+hasfx "sprint/plan(Z5): 셋째 트리거" "$P6_SPP" 'or its answer wording **explicitly names `#d` as another Issue'"'"'s result** (`#626·#627 결과만 보고 닫는다`'
+hasfx "sprint/plan(Z5): PO 닫기·정하기도 전제" "$P6_SPP" '**including an answer that closes, defers or decides this Issue by another Issue'"'"'s result**'
+hasfx "sprint/plan(Z5): 둘이면 토큰 둘" "$P6_SPP" 'Two Issues → two tokens: `(needs #626) (needs #627)`.'
+hasfx "sprint/plan(Z5): 태그 제거 each" "$P6_SPP" '`(needs #<d>)` — each one: an option with two carries two, and both go'
+hasfx "sprint/plan(Z5): 전제마다 한 줄" "$P6_SPP" 'one `(전제: #d)` per premise'
+hasfx "sprint/plan(Z5): TL conditional" "$P6_SPP" 'A body alternative that decides or closes the candidate by another candidate'"'"'s result is `conditional: #n ← #d (조건: <that option>)`, not `soft:`'
+hasfx "analyze(Z5): 전제는 각각, 모두 충족" "$P3_AN" '**each** plain `(전제: #d)` the plan writes'
+hasfx "analyze(Z5): all must be met" "$P3_AN" '— **all must be met**.'
+# Z6 — 결정대로 닫힘
+hasfx "analyze(Z6): 0b 머리" "$P3_AN" '0b. **Close as decided** (0.98.7).'
+hasfx "analyze(Z6): 무인은 plan-decision 만" "$P3_AN" 'Unattended, **only from a plan-decision line**'
+hasfx "analyze(Z6): ① analyze:output 줄" "$P3_AN" '`결정대로 닫음: «<답>» — 코드 변경 없음`'
+hasfx "analyze(Z6): ② 마커 댓글" "$P3_AN" '② a `<!-- guild:closed-as-decided -->` … `<!-- /guild:closed-as-decided -->` comment'
+hasfx "analyze(Z6): ③ 라벨" "$P3_AN" '③ `gh issue edit $1 --remove-label <Step 0'"'"'s stage> --remove-label guild:needs-human --add-label guild:done`'
+hasfx "analyze(Z6): ④ close 두 갈래" "$P3_AN" '④ `gh issue close $1 --reason "<completed|not planned>"` — `completed` when the decision says the goal **is already met**'
+hasfx "analyze(Z6): ⑤ Return" "$P3_AN" '⑤ Return `OK DONE: closed-as-decided — <한 줄>`.'
+hasfx "analyze(Z6): 정지 표식 아님" "$P3_AN" '**`guild:needs-human` is never a stop marker** — `guild:done` is what stops the supervisor (its done arm)'
+hasfx "analyze(Z6): Hard rule" "$P3_AN" 'only the Issue comment + label + the decided close (0b).'
+hasfx "analyze(Z6): NOT_PLANNED 는 충족 아님" "$P3_AN" '**and not `CLOSED`/`NOT_PLANNED`**'
+hasfx "_handoff(Z6): Section D 새 행" "$P3_HO" '| `OK DONE: closed-as-decided — <one-line>` | analyze closed the Issue by a human decision'
+hasfx "_handoff(Z6): 둘째 예외" "$P3_HO" '**A second exception: analyze'"'"'s decided close**'
+hasfx "_handoff(Z6): 마커 행" "$P3_HO" '| `<!-- guild:closed-as-decided -->` … `<!-- /guild:closed-as-decided -->` | analyze (leader, Step 1 item 0b) |'
+hasfx "_handoff(Z6): Section H 정지 표식 금지" "$P3_HO" '**`guild:needs-human` is never a stop marker**'
+hasfx "_handoff(Z6): 제거 지점 0b" "$P3_HO" '`analyze.md` Step 1 item 0b'"'"'s transition is a forward one too (it removes `guild:needs-human`)'
+hasfx "dev(Z6): OK DONE closed-as-decided" "$P7_DEV" '**`OK DONE: closed-as-decided — …`** (from analyze, `closed-as-decided`) → the Issue is closed; report the decision and stop — no PR, no `/gld review` nudge.'
+hasfx "dev(Z6): 검증 증거 예외" "$P7_DEV" '— except a decided close, which claims no code.'
+hasfx "dev(Z6): 2c 커버리지 맵" "$P7_DEV" '`결정대로 닫힘 — 코드 없음`'
+hasfx "daily(Z6): 결정대로 닫힘 판독" "$P3_DAILY" '→ **결정대로 닫힘** (`analyze.md` Step 1 item 0b) — counted with 머지 in the goal line and the progress count, shown `#628 결정대로 닫힘`'
+hasfx "retro(Z6): Phase 2 판정 문장" "$P6_RETRO" '**결정대로 닫힘** (0.98.7, D2) = 멤버 Issue `CLOSED` · `guild:done` · 귀속 PR 없음(어떤 상태로도 — Phase 1 의 PR 목록) · S 의 멤버 아님 · `<!-- guild:closed-as-decided -->` 댓글 있음'
+hasfx "retro(Z6): 마커 없으면 group 4" "$P6_RETRO" '마커가 없으면 지금처럼 Phase 6 group 4(done·미머지 — PR 없음)'
+hasfx "retro(Z6): 이행률 식" "$P6_RETRO" '| 약속 이행률 | (머지된 멤버 + 결정대로 닫힌 멤버) / 계획된 멤버 |'
+hasfx "retro(Z6): Phase 3 줄" "$P6_RETRO" '`약속 이행률   9/9 (100%) · 그중 결정대로 닫힘 1(#628)`'
+hasfx "retro(Z6): step 0 확장" "$P6_RETRO" 'A **closed-as-decided** member (Phase 2) still carrying `guild:needs-human` or a stage label gets the same command'
+hasfx "retro(Z6): Phase 7 새 행" "$P6_RETRO" '| closed-as-decided (Phase 2 — no PR, the marker) | remove (if clean) | — | — |'
+hasfx "retro(Z6): 좁힌 carryover 행" "$P6_RETRO" '| carryover (a PR `OPEN`, or no PR and not closed-as-decided) |'
+hasfx "retro(Z6): :220 예외" "$P6_RETRO" '— except a closed-as-decided member (Phase 2 — the marker is the evidence).'
+hasfx "rollback(Z6): decided 읽기" "$P3_RB" 'decided: ([.comments[].body | select(contains("<!-- guild:closed-as-decided -->"))] | length)}'"'"''
+hasfx "rollback(Z6): analyze 로 되돌림" "$P3_RB" 'it goes to `guild:analyze` (the human is changing the decision, so analyze runs again) with `gh issue reopen $2`'
+hasfx "rollback(Z6): plan-decision 경고 줄" "$P3_RB" '`본문의 plan-decision 줄(«<답>»)을 고치거나 지우지 않으면 analyze 가 같은 결정으로 다시 닫습니다`'
+hasfx "sync(Z6): PR 없는 Done 갈래" "$P7_SYNC" 'A member with **no PR at all** reaches the list one other way (0.98.7): closed as decided'
+hasfx "board(Z6): Done 두 출처" "$P7_BOARD" '**Done has two sources** (0.98.7)'
+hasfx "stack_sync(Z6): 마커 jq" "$P7_SS" 'select(contains("<!-- guild:closed-as-decided -->"))] | length)}'
+# N1 · N3 · N4 · N5 · N7 · N8 · N9 · N10 · N11
+hasfx "_execute_spine(N1): 재진입은 점검도 다시 읽음" "$P6_SP" '**A re-entered invocation re-reads this line format (the shape above) and the check below before its first record write** — it never writes it from memory (measured #607'
+hasfx "_execute_spine(N1): 모든 블록" "$P6_SP" 'Check the new block alone — **every block, `findings: none` ones included** (the arrow-token violation lives on the role-axis line — #1700'
+hasfx "retro(N3): step 3b" "$P6_RETRO" '3b. ⚠ **Disclose the board'"'"'s freeze — when `config.sprint.board` is set**'
+P7_3B="$(awk '/^3\. \*\*Close the tracking Issue\.\*\*/{a=NR} /^3b\. /{b=NR} /^## Phase 7/{c=NR} END{print (a && b && c && a<b && b<c) ? "y" : "n"}' "$P6_RETRO")"
+[ "$P7_3B" = y ] && ok "retro(N3): step 3b 가 Phase 6 step 3 뒤 · Phase 7 앞" || bad "retro(N3): step 3b 위치" "after step 3, before Phase 7" "$P7_3B"
+hasfx "retro(N3·L5): 블록은 PR 이 OPEN 일 때만" "$P6_RETRO" '**The block above only when a member'"'"'s PR is still `OPEN`** (Phase 1 — the only case where "머지하신 뒤에도 In review 에 남고" is true).'
+hasfx "retro(N3·L5): 짧은 줄" "$P6_RETRO" '보드: <url> — 이후 카드는 갱신되지 않습니다(열린 PR 없음). 이번 retro 전에 /gld sprint sync 를 부르지 않았다면 Done 이 아닐 수 있습니다 — GitHub UI 에서 정리하십시오; 다음부터는 retro 전에 sync 를.'
+lacksfx "retro(N3): 옛 짧은 줄 문구" "$P6_RETRO" '(멤버 모두 머지됨)'
+hasfx "retro(N3): Return 에 보드 줄" "$P6_RETRO" 'The final report carries the board line (Phase 6 step 3b) when `config.sprint.board` is set.'
+hasfx "_handoff(N4): 원인 줄 점검 명령" "$P3_HO" "\`grep -nE -m1 '^(defect: |ambiguity: |env: (ci-blocked|base-red|credential|service|other) — )' <file>\`"
+hasfx "_handoff(N4): 2: 로 시작" "$P3_HO" 'output that does not start with `2:` (line 1 is the marker) → fix that file only and check once more'
+hasfx "_handoff(N5): 그대로 읽기" "$P3_HO" 'run these reads **exactly as given**: no `.body[0:N]`, `head` or filter, the bodies-contract'"'"'s rule'
+hasfx "_handoff(N5): 기록 의무 줄" "$P3_HO" '`사람 지시 확인: 없음 — 읽음: #<n> · 트래커 #<t>[ · 부모 #<p>]`'
+hasfx "qa(N5): 사람 지시 확인 줄" "$P3_QA" 'and write the `사람 지시 확인:` line (Section M)'
+hasfx "_handoff(N7): 모든 댓글은 마커로 시작" "$P3_HO" '**Every comment Guild posts opens with a `<!-- guild:` marker** — a note that is no stage output (a pause kept on resume, a PR-created note, a status line) opens with `<!-- guild:note -->`'
+hasfx "_handoff(N7): note 마커 행" "$P3_HO" '| `<!-- guild:note -->` | any command, for a comment that is no stage output |'
+hasfx "dev(N7): 일시정지 메모 마커" "$P7_DEV" 'a note you post about it opens with `<!-- guild:note -->`'
+hasfx "sprint/plan(N8): 빈 Depends on 은 clear" "$P6_SPP" 'no dependency → `"<fields.depends_on>":""` (board_write clears it — the same as listing it in `clear`'
+hasfx "retro(N9): 바이트 그대로" "$P6_RETRO" 'copy the command byte for byte: `\u0060` stays six characters (a decoded backtick works only by luck of the single quotes)'
+hasfx "retro(N10): CLEANUP 이 라벨도 정리" "$P6_RETRO" '**Phase 6 step 0'"'"'s label cleanup** for that tracker'"'"'s members (0.98.7'
+hasfx "retro(N10): CLOSED·COMPLETED 요구" "$P6_RETRO" '⚠ **The merge alone is not enough — the Issue must also be `CLOSED` · `COMPLETED`** (0.98.7)'
+hasfx "retro(N10): CLEANUP Return" "$P6_RETRO" '`OK: sprint #<n> cleanup — <W> worktrees, <B> branches · labels <L>`'
+hasfx "retro(N10): None 안내" "$P6_RETRO" 'it also cleans the labels of members that merged, Phase 6 step 0'
+hasfx "retro(N11): 없음·빈 파일 구분" "$P6_RETRO" 'present and empty → 0.'
+hascode "supervisor(N11): failures.jsonl 생성" "$P7_SUP" ': >> "$RUNDIR/failures.jsonl" 2>/dev/null || true'
+
+# 0.98.7 code review r1
+hasfx "sprint/plan(r1 #1): 선행 미포함에서 base-red 간선 제외" "$P6_SPP" 'dropping or adding is the human'"'"'s edit. **A `base-red` edge is not one here** — Phase 4'"'"'s leader call decides it; a left-out one is the `기본 브랜치 CI red` line.'
+hasfx "sprint/plan(r1 #1): 에픽 확장 의존에서 base-red 간선 제외" "$P6_SPP" '(a correction only adds; a `base-red` edge is not one here — Phase 4'"'"'s leader call decides it; a left-out one is the `기본 브랜치 CI red` line),'
+hasfx "run(r1 #2): 이름별 최신 id 만" "$P7_RUN" 'one per check **name** — when a name appears more than once (a re-run), keep the run with the **highest `id`**'
+hasfx "run(r1 #2): qa 의 Which one 판정" "$P7_RUN" '**Which verdict**: `qa.md` Step 2'"'"'s *Which one* rule over those runs'
+hasfx "run(r1 #2): 결과에 check 이름" "$P7_RUN" 'Result: `green(<checks…>)` · `red(<checks…>) (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>)` · `ci-blocked(<checks…>)` · `없음` · `unavailable`'
+hasfx "_handoff(r1 #3): 라벨 표 둘째 예외" "$P3_HO" 'second exception: analyze 0b closed-as-decided (no PR, CLOSED — `analyze.md` Step 1 item 0b) |'
+hasfx "_handoff(r1 #3): INV1 줄 예외" "$P3_HO" 'stop at `guild:done` = PR open; the one exception: analyze 0b closed-as-decided — no PR, CLOSED, nothing merges)'
+hasfx "retro(r1 #4): 커밋 실패만 clean-tree 고지" "$P6_RETRO" 'The commit failed → commit nothing (`git restore --staged -- .claude/guild/config.json`) and'
+hasfx "retro(r1 #6): declined Return 에 labels" "$P6_RETRO" '`OK: sprint #<n> cleanup declined · labels <L>`'
+hasfx "retro(r1 #6): dry-run Return 에 labels" "$P6_RETRO" '`OK: sprint #<n> cleanup listed (dry-run) · labels <L>`'
+hasfx "sprint/plan(r1 #7): run.md 경로와 절만 읽기" "$P6_SPP" 'read the *Base CI* paragraph of `<<SKILL_DIR>>/commands/sprint/run.md` Phase 0 (that section only, not the whole file)'
+hasfx "daily(r1 #8): 결정대로 닫힌 dep 의 하류 규칙" "$P3_DAILY" '**its downstream is 의존성 차단 when the run recorded it so**'
+
+hasfx "rollback(r2): 네 조건 — 마커·done·CLOSED·PR 없음" "$P3_RB" '**A closed-as-decided Issue** — **all four**: `decided ≥ 1`, `stage` is `guild:done`, `state` is `CLOSED`, and **no PR attributed** to it'
+hasfx "rollback(r2): PR 귀속 확인 호출" "$P3_RB" '`gh pr list --repo <owner>/<repo> --state all --limit 200 --json number,headRefName,closingIssuesReferences --jq '"'"'[.[] | select(([.closingIssuesReferences[]? | select(.repository.owner.login == "<owner>" and .repository.name == "<repo>") | .number] | index($2)) or ((.headRefName // "") | test("(^|[^0-9])#?$2([^0-9]|$)")))] | length'"'"'`'
+hasfx "rollback(r2): 0 이 아니거나 실패면 보통 규칙" "$P3_RB" '`0` → closed as decided; anything else, or the call failed → the ordinary rule.'
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -4555,7 +4706,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=1971   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=2106   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

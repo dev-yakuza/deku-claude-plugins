@@ -379,15 +379,37 @@ def split_done_set(data):
                 out.add(int(m["number"]))
             except (TypeError, ValueError):
                 pass
+    # A member closed as decided (analyze Step 1 item 0b: `guild:done`, CLOSED, no PR of its
+    # own) whose Issue closed `completed` is finished the same way — nothing to stack on and
+    # nothing wrong. Only `closed_done ∩ closed`: one closed `not planned` decided NOT to do
+    # the work, so its downstream must not start as if the premise were met (decided_unmet).
+    out |= int_set(data, "closed_done") & int_set(data, "closed")
     return out
 
 
-def resolve_base(dep, state, branch, branches, split, ambiguous=None):
+def int_set(data, key):
+    """An optional list of issue numbers (`closed`, `closed_done`); absent → empty."""
+    out = set()
+    for v in data.get(key) or []:
+        try:
+            out.add(int(v))
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def decided_unmet(data):
+    """Members closed as decided `not planned` — `closed_done − closed`. Never a base."""
+    return int_set(data, "closed_done") - int_set(data, "closed")
+
+
+def resolve_base(dep, state, branch, branches, split, ambiguous=None, unmet=frozenset()):
     """§5.3. Returns (token, reason|None). Token is a branch name, 'DEFAULT', or 'BLOCKED'."""
     if dep is None:
         return "DEFAULT", None
     if dep in split:
-        # Completed-by-split parent: nothing to stack on, and nothing is wrong.
+        # Completed-by-split parent, or closed as decided `completed`: nothing to stack on,
+        # and nothing is wrong.
         return "DEFAULT", None
     st = state.get(dep)
     # ⚠ ORDER MATTERS, and getting it wrong made a LANDED dependency a permanent blocker.
@@ -413,6 +435,11 @@ def resolve_base(dep, state, branch, branches, split, ambiguous=None):
     # `branch` only ever has keys that `state` also has, so in this path it is always empty for
     # `dep`. An earlier version checked it anyway — dead code that read as a second, more
     # trustworthy source than it was. The local-branch inventory below is the real fallback.
+    if dep in unmet:
+        # Closed as decided `not planned` (`closed_done − closed`): the work was decided away,
+        # so there is no result to start from. Checked BEFORE the local-branch fallback — a
+        # leftover branch with the same number is not that result either.
+        return "BLOCKED", "dep-no-branch"
     cand = [x for x in branches if re.search(r"(?<!\d)%d(?!\d)" % dep, x)]
     if len(cand) == 1:
         # Fallback for an empty `closingIssuesReferences` (§5.3): match the issue number
@@ -521,8 +548,9 @@ def mode_base(data):
     # prefix (_sprint_dag.md Section D), so this mode never needs the name. It was a required
     # key that was validated and then ignored — accepted when present, no longer demanded.
     split = split_done_set(data)
+    unmet = decided_unmet(data)
     for n in sorted(nodes):
-        token, reason = resolve_base(base[n], state, branch, branches, split, pr_ambig)
+        token, reason = resolve_base(base[n], state, branch, branches, split, pr_ambig, unmet)
         if token == "BLOCKED":
             print("%d BLOCKED:%s" % (n, reason))
         else:
@@ -541,6 +569,7 @@ def mode_blocked(data):
     state, branch, pr_ambig = pr_index(data)
     branches = set(str(b) for b in (data.get("branches") or []))
     split = split_done_set(data)
+    unmet = decided_unmet(data)
     terminal = {}
     for k, v in (data.get("terminal") or {}).items():
         try:
@@ -557,6 +586,15 @@ def mode_blocked(data):
     # test) must not be able to defeat it.
     for n in [i for i, v in terminal.items() if v == "failed"]:
         if state.get(n) == "MERGED":
+            del terminal[n]
+    # `needs-human` is released only by a merge AND a closed-`completed` Issue (`closed`). A
+    # MERGED PR alone is not enough: an Issue reopened for rework carries an old merged PR and
+    # a NEW pause (sprint_supervisor_test X15). Measured #630: #629 merged by hand and closed
+    # `completed`, its leftover label still blocked #624 as `dep-needs-human`. No `closed`
+    # key → nothing is released (an older input keeps its meaning).
+    closed = int_set(data, "closed")
+    for n in [i for i, v in terminal.items() if v == "needs-human"]:
+        if state.get(n) == "MERGED" and n in closed:
             del terminal[n]
 
     # Process in chain order so a dep's status is final before its child is judged.
@@ -584,7 +622,7 @@ def mode_blocked(data):
         if t in TERMINAL_BLOCKING:
             blocked[n] = "dep-%s:#%d" % (t, dep)
             continue
-        token, reason = resolve_base(dep, state, branch, branches, split, pr_ambig)
+        token, reason = resolve_base(dep, state, branch, branches, split, pr_ambig, unmet)
         if token == "BLOCKED":
             blocked[n] = "%s:#%d" % (reason, dep)
 

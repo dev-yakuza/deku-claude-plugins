@@ -89,6 +89,11 @@ sync, but nothing else moves those cards once the run has ended (`retro.md` Phas
      Issue closed as not planned or as a duplicate never qualifies). That is the run supervisor's
      P5 attribution with the Issue half added, so these cards are a **subset** of the ones P5
      moves to `Done`, never more.
+     A member with **no PR at all** reaches the list one other way (0.98.7): closed as decided
+     (`analyze.md` Step 1 item 0b) — one `gh issue view <n> --json state,labels,comments` read finds
+     it `CLOSED`, `guild:done` and carrying a `<!-- guild:closed-as-decided -->` comment (any
+     `stateReason` — a decision not to do it is still finished). The marker is what tells it from a
+     split parent, which this script cannot see.
      ⚠ **`"read": false`, unlike `--reset`.** A read is `item-list` at the board's size —
      ~500 GraphQL points on a 500-card board, every sync — while `read: false` costs one
      idempotent `item-add` (~5 points) per listed card. A sync lists a handful.

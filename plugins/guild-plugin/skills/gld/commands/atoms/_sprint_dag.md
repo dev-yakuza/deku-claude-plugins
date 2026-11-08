@@ -96,6 +96,8 @@ of caller produces the file.
   "prs":            [{"issue": 101, "branch": "feature/#101-x", "state": "MERGED|OPEN|CLOSED"}],
   "branches":       ["feature/#101-x"],
   "terminal":       {"101": "done|needs-human|failed|children"},
+  "closed":         [101],
+  "closed_done":    [101],
   "default_branch": "develop",
   "max_depth":      3,
   "text":           "<the tracking Issue body — mode=hash only>"
@@ -108,6 +110,8 @@ of caller produces the file.
   `guild:done` with **no branch and no PR of its own** (its children carry those), so the plain
   "no PR, no branch → blocked" rule would turn a *completed* Issue into a downstream blocker.
   The script cannot see the `<!-- guild:children:output -->` comment — **the caller sets this.**
+- **`closed`** (0.98.7, optional) — members whose Issue is `CLOSED` · `COMPLETED`. A member with a same-repo MERGED PR whose Issue is CLOSED · COMPLETED is never `needs-human` in `terminal` — the supervisor's builder drops it, and `--mode blocked` drops it again for a hand-built input that carries `closed`; `daily` applies the same rule in prose (step 5). Absent → nothing is released (an older input keeps its meaning).
+- **`closed_done`** (0.98.7, optional) — members closed as decided (`analyze.md` Step 1 item 0b): `guild:done` · `CLOSED` · no PR in any state · not `split`. Those also in `closed` (closed `completed`) are finished like a split parent — `DEFAULT` for their dependants; the rest (closed `not planned`) answer `dep-no-branch` **before** the local-branch fallback — a leftover branch with the same number is not their result. The supervisor computes it only after a successful PR read.
 - **`branches`** — local branch inventory (`git branch --format='%(refname:short)'`). Section D's
   "dep has no PR but has a branch" case cannot be computed without it. ⚠ **`blocked` needs it
   too**, not only `base`: without it a dep that is finished but has no PR record reads as

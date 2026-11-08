@@ -256,6 +256,23 @@ else
   bad "H-w9 시딩" "summary=[$OUT] calls=[$(tr '\n' '|' < "$GH_CALLS")]"
 fi
 
+# ── H-w9b 빈 Depends on → --clear (0.98.7 N8 — 실측 #630 plan: `--text ""` 를 gh 가 거부, failed=8) ──
+for DEPV in '""' 'null' '"  "'; do
+  itemlist 1 '[{"content":{"number":101,"repository":"acme/widget"},"guild board":"Ready"}]'
+  run_bw '{"number":7,"owner":"@me","repo":"acme/widget","field":"Guild board",
+           "columns":'"$COLS"',"guard":true,"read":true,
+           "writes":[{"issue":101,"column":"ready","guard":false,
+                      "fields":{"Order":"1","Depends on":'"$DEPV"'}}]}'
+  if [ "$OUT" = "wrote=1 skipped=0 unknown=0 col_failed=0 failed=0 truncated=0" ] \
+     && [ "$(calls_matching '--field-id PVTF_dep --clear')" -ge 1 ] \
+     && [ "$(calls_matching '--field-id PVTF_dep --text')" -eq 0 ] \
+     && [ "$(calls_matching '--field-id PVTF_order --text 1')" -ge 1 ]; then
+    ok "H-w9b Depends on $DEPV → --clear (--text 없음, failed=0)"
+  else
+    bad "H-w9b Depends on $DEPV" "summary=[$OUT] calls=[$(tr '\n' '|' < "$GH_CALLS")]"
+  fi
+done
+
 # ── H-w10 입력 오류 → 64 ─────────────────────────────────────────────────
 run_bw '{"number":7,"owner":"@me","repo":"acme/widget","field":"Guild board",
          "columns":'"$COLS"',"writes":[{"issue":120,"column":"없는토큰"}]}'
@@ -814,7 +831,7 @@ printf '  %d passed, %d failed\n' "$PASS" "$FAIL"
 # ⚠ 검사 개수 바닥. 검사 하나가 조용히 사라져도 `FAIL=0` 이면 그린이다 — 설계가 기록한
 #   "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은 모양이다. 실측 PASS 와 같게
 #   유지하고, 의도적으로 늘릴 때만 올린다.
-BW_MIN_CHECKS=61
+BW_MIN_CHECKS=64
 if [ "$((PASS + FAIL))" -lt "$BW_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BW_MIN_CHECKS}건)."
   exit 1

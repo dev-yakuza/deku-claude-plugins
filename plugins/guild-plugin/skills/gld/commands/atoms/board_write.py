@@ -44,7 +44,9 @@ Input (JSON):
         {"issue": 121, "column": null},                     # clear -> null bucket = Issues
         {"issue": 101, "column": "ready", "guard": false,
          "fields": {"Order": "1", "Depends on": "#100", "Sprint": "99"},
-         "clear": ["Needs human"]}
+         "clear": ["Needs human"]},
+        {"issue": 102, "column": "ready", "guard": false,
+         "fields": {"Depends on": ""}}                      # empty or null = clear
       ]
     }
 
@@ -598,7 +600,14 @@ def main(argv=None):
                 # alternative is writing a value nowhere the human will find it.
                 failed += 1
                 continue
-            ok, _ = gh(base + ["--field-id", meta["id"]] + _value_flag(meta["type"], fval))
+            # 0.98.7 N8 — an empty value is a clear. gh refuses `--text ""` (measured #630 plan:
+            # `failed=8`, one per member without a dependency), and "no value" is what the caller
+            # meant — the same as listing the field in `clear`.
+            if fval is None or str(fval).strip() == "":
+                flag = ["--clear"]
+            else:
+                flag = _value_flag(meta["type"], fval)
+            ok, _ = gh(base + ["--field-id", meta["id"]] + flag)
             if ok:
                 did_any = True
             else:

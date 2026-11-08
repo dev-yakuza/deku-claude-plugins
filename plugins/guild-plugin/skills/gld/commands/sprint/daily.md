@@ -207,7 +207,7 @@ The classes the supervisor writes — **this list is the code's, verbatim**:
 ⚠ The file is named `failures.jsonl` for continuity but it records **every exceptional event**, and
 the three kinds are not interchangeable: rendering a block as a failure tells the human to
 investigate something that is working as designed. `retro` counts the blocks (§10.1); `daily`
-renders them under 의존성 차단, which it already derives from the DAG for the *current* state —
+renders them under 의존성 차단, which it derives by the rule in step 5 (the same one `sprint_dag.py --mode blocked` applies) for the *current* state —
 the log adds the count **over the whole sprint, across runs**.
 ⚠ **Do not scrape the supervisor's stdout for these.** It goes to the buffer of whatever
 launched the run; `daily` is a later, separate session and cannot read it. That is exactly why
@@ -337,6 +337,8 @@ Only when some member downstream is blocked as `dep-needs-human` on one of them,
 it again; it only reaches what waited on it. Everything else stays one line each, as below.
 (Measured: 5 of #563's 6 pauses were one cause — the PR CI jobs never started over a billing
 limit — for three sprints running, rendered as five unrelated lines.)
+**`env: base-red` gets its own prescription** (re-running alone does not help — the base is still red; measured #630):
+`env: base-red <k>회(#…) — 고치는 PR(#<fix>) 머지 → 각 PR 에 기본 브랜치 반영(쌓인 멤버는 /gld sprint sync) → /gld dev <n>`.
 
 Guild hides children from the board (D8), so without the split-parent line the parent sits in
 `In review` with no PR to review and a `split-children` token a human has no way to decode.
@@ -356,6 +358,8 @@ broken — while this line says it is fine.
 ⚠ `daily` **writes nothing to the board.** It has no way to build the supervisor's inputs and
 becoming a second writer is what 03-sprint-board.md §5.1 removed; the `daily` marker stays the
 one named exception to read-only (step 8).
+
+**의존성 차단 — the rule** (`daily` does not call `sprint_dag.py`; it applies this in prose): a member is blocked by its `base 의존` `#d` when `#d` is paused (`guild:needs-human`), failed, its PR was closed unmerged, or it cannot be resolved — and transitively below those. A dependency is **not** blocking when step 3's PR list holds a same-repo `MERGED` row whose `closes` includes it (**a `via: branch` row is not evidence** — the same as the child rule in the split-parent line above) **and** its Issue is `CLOSED` — even with `guild:needs-human` still on it (the merge is the evidence; `sprint_dag.py --mode blocked` judges the same, 0.98.7) — say `#629 머지됨(라벨 잔존 — retro 가 정리)` instead; a dependency closed-as-decided (step 6) is shown as `#d 결정대로 닫힘` — the supervisor releases it only when it was closed `completed` (`not planned` stays `dep-no-branch`; daily does not read `stateReason`, so it defers to the run's record): **its downstream is 의존성 차단 when the run recorded it so** — a `dep-no-branch` (or `dependency-blocked`) event for that member in step 4's `failures.jsonl`, or the run marker's completion listing it as blocked on `#d` — and is **not** blocked otherwise. The same member is left out of **▎사람 대기** too (the exclusion the split-parent line makes for a child — `CLOSED` + a same-repo `MERGED` closes row).
 
 ```
 Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limited-until 14:20 · 하트비트 4분 전)
@@ -519,6 +523,7 @@ to it by `closes`, plus `via: "branch"` rows only once confirmed — several bra
 - **Merge axis** (the counts — the goal line here, `retro`'s metrics): any `MERGED` PR → **머지**
   (merge time = the latest `mergedAt`; a later `OPEN` PR does not undo it) · no `MERGED`, only
   `CLOSED` → **거절** · no PR → **미착수** · otherwise (only `OPEN`) → **진행 중**.
+  One more reading (0.98.7): a member that is `CLOSED` · `guild:done` · has no PR at all · is not a member of S → **결정대로 닫힘** (`analyze.md` Step 1 item 0b) — counted with 머지 in the goal line and the progress count, shown `#628 결정대로 닫힘`; its finish axis is already done. The *"사람이 닫음"* definition (not `guild:done`) is unchanged.
 - **Finish axis** (the table above): no `OPEN` PR and not 거절. An Issue whose first PR was
   closed and a later one merged is **not** 거절 — judging PR by PR, that sprint could never finish.
 - **An epic (a member of S) is one seat.** It is 머지 ⇔ the parent is `guild:done` **and** every
