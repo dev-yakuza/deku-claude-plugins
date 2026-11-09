@@ -38,8 +38,9 @@ WIRING = [".claude/settings.json", ".claude/settings.local.json", ".claude/heral
           ".claude/herald/scripts/**"]
 LEDGER = [".claude/herald/ledger/*", ".claude/herald/ledger/**"]
 CONFIG = ".claude/herald/config.json"
+# `screenshots` holds the capture command Herald runs (design/herald/07-auto-capture.md §2.7)
 PROTECTED_CONFIG_KEYS = ("autonomy", "budget", "commands", "paths", "base_branch", "roles", "models",
-                         "translations")
+                         "translations", "screenshots")
 HERALD_PERSONAS = [
     ".claude/agents/editor-in-chief.md", ".claude/agents/content-strategist.md",
     ".claude/agents/researcher.md", ".claude/agents/writer.md", ".claude/agents/fact-checker.md",
@@ -576,6 +577,11 @@ def check_bash(root, cfg, cmd):
             protect("recording `trust` in the verification ledger skips re-verification for that article.")
         if has_kind and "withdraw-lang" in argv and ("ledger" in argv or any(x.endswith("integrity.py") for x in argv)):
             protect("recording `withdraw-lang` in the verification ledger takes a translation down without re-verification.")
+        # 1c. a captured screenshot passes to the remote only on a human's look (07-auto-capture.md
+        # §2.5): `shot confirm` / `shot demote` (argparse takes positional choices whole, never a prefix)
+        if "shot" in argv and ("confirm" in argv or "demote" in argv):
+            protect("`HRD shot %s` records that a human looked at an automatic screenshot — only the human decides."
+                    % ("confirm" if "confirm" in argv else "demote"))
         # 2. deploy
         if any(contains(canon(strip_noise(argv)), s) for s in sigs):
             if unattended():

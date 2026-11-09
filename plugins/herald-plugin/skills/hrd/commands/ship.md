@@ -135,7 +135,9 @@ skip this time and push the fix to the PR (the next ship re-verifies it, §5); o
 
 A PR with screenshots (its head's `<w>screenshots.json`, read with `git show
 <headRefOid>:.claude/herald/work/<id>/screenshots.json`; `auto-exclusion` lists `screenshots`):
-show them (file links, `mask` categories; "replaced by a human" where the blob differs from the recorded one)
+show them (file links, `mask` categories, the capture column — `human` or `auto <url>
+<captured_at>` from the PR body's `## Screenshots`; "replaced by a human" where the blob differs from the
+recorded one, shown as `human` without URL or time)
 and ask for a **separate confirmation** — "I looked at the screenshots" — before approve; no
 merge without it (`atoms/_screenshots.md` §6).
 

@@ -18,6 +18,12 @@ routes findings to `evolve`, `status` or `update`, including what the guard cann
      `work/<id>/` (spot-check the last 10).
    - `HRD integrity` on base (read-only): mismatches mean a Herald article changed outside
      `ship`.
+   - Automatic screenshots: `HRD shot audit` — `damaged` ledger lines (`ledger/captures.jsonl`,
+     `ledger/confirmations.jsonl`; a human removes the line), and `anomalies`: auto screenshots
+     captured on this machine and recorded as confirmed (local `state.json` and the
+     `origin/herald/*` branches) whose confirmation the ledger does not hold — a state edited
+     outside `shot confirm`. `no_record` (captured on another machine or before a fresh clone) is
+     reported apart, as a count, never as an anomaly.
 3. **State**: `HRD status` anomalies — held topics older than 14 days, merged-unrecorded
    articles, stale lock, unpushed Herald record commits (`HRD ahead`).
 4. **Gate**: `validate_content.py` over every `origin: herald` article and each of its

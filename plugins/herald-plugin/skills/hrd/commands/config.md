@@ -3,7 +3,8 @@
 Shows `.claude/herald/config.json` in `config.language` with what each dial does; with
 `key value` changes one dial.
 
-- Protected keys (`autonomy`, `budget`, `commands`, `paths`, `base_branch`, `roles`, `models`, `translations`)
+- Protected keys (`autonomy`, `budget`, `commands`, `paths`, `base_branch`, `roles`, `models`, `translations`,
+  `screenshots`)
   are guarded: the edit triggers an `ask` — the human approves it on the record (INV1/INV2).
   Turning on `autonomy.publish: auto` deserves a one-line warning: PRs then merge and deploy
   without per-PR approval (still excluding dismissals, assumptions, deferred audit findings, a skipped audit round, a
@@ -11,6 +12,16 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
   articles no human read before the merge/deploy confirmation; use `write --attended` to read
   them first.
 - `language` is free to change.
+- **Automatic screenshots** (`atoms/_screenshots.md`, design 07). The block
+  `"screenshots": {"capture": ["npx", "--no-install", "playwright", "screenshot",
+  "--viewport-size={w},{h}", "--color-scheme={scheme}", "--lang={lang}", "{url}", "{out}"]}` is the
+  argv Herald runs (no shell) to capture a public page; without it every screenshot is a human's.
+  Turning it on: write the block, then `HRD config-check` — its `capture_errors` (a shell or an
+  interpreter as the program, `-c`/`-e`, `{url}`/`{out}` not exactly once as a whole element, an
+  unknown placeholder) must be empty — and `HRD shot trial` (one capture of `about:blank`; the
+  result is deleted). A trial failure → show the install command (`npm i -D playwright` and `npx
+  playwright install chromium` for the default) and leave the block out. Turning it off: remove
+  the block. A template with errors never stops other commands — capture is simply off (`no-tool`).
 - **Translations**. The block:
   `"translations": {"source": "<lang>", "targets": [{"lang": "<l>", "body_pattern":
   "{content}/<l>/{slug}.md", "url_pattern": "/<l>/{slug}/"}], "glossary": "<path, optional>",

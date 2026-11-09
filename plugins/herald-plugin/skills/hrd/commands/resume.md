@@ -30,7 +30,9 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
    passed; the trim stays used). `stage` `research` with `research_fixes[-1]` `open` (a research
    fix that was held or interrupted) → run the research fix (`atoms/_stages.md` § research).
 5. With screenshots recorded, first `HRD shot status --topic <id>`: `resume_at_import` true →
-   `atoms/_screenshots.md` §5 (no writer or illustrator), then on through publish as below.
+   `atoms/_screenshots.md` §5 (no writer or illustrator: `HRD shot capture`, then `HRD shot
+   import`; screens `captured` wait for a human's confirm or demote; a `capture` refusal for a
+   template that broke since plan → as `atoms/_screenshots.md` §2 step 3), then on through publish as below.
    Budget baseline as in `write.md` §0 step 7 (a fresh baseline: resuming is the human's choice
    to spend more). Then: if `stage` is `brief` and `slug` is null, run brief as in `write.md`. Otherwise run from
    `stage` onward through publish exactly as `write.md` §1–§3 (unattended if `HRD_UNATTENDED=1`; else in-session auto by

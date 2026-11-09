@@ -54,7 +54,7 @@ an audit round (`HRD audit-round`), so after the cap only the editor and verify 
   the `id` it prints; the writer applies the request (`HRD loopback --topic <id> --human` — not
   counted; a request to change a screenshot adds `--retake <ids> --retake-kind privacy|mismatch
   --reason …`, `atoms/_screenshots.md` §3); if the writer changed the body or `<w>screenshots.json`, or the loopback had `--retake`,
-  `HRD shot plan` and, for pending screenshots, `atoms/_screenshots.md` §2 (attended); `HRD stage pass --stage draft` (runs the gate; on errors the writer fixes them under
+  `HRD shot plan` and, for pending or captured screenshots, `atoms/_screenshots.md` §2 (attended); `HRD stage pass --stage draft` (runs the gate; on errors the writer fixes them under
   the same `--human` loopback — never `--cause gate` for a human-requested revision); then
   `HRD signal --kind
   session-edit-request --topic <id> --data '{"request_id": "<that id>", "diff_summary": "...",

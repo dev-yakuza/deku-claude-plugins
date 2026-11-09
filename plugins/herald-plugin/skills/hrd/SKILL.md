@@ -52,7 +52,7 @@ scripts must match, or steps fail or record nothing.
 Shared rules: `<<SKILL_DIR>>/commands/atoms/_contract.md`
 (tooling, role handoff, unattended mode, language, tiers, loops, signals),
 `atoms/_stages.md` (stage spine), `atoms/_auditor.md`, `atoms/_invariants.md`,
-`atoms/_screenshots.md` (screenshots a human takes).
+`atoms/_screenshots.md` (screenshots a human takes, and public pages Herald captures for a human to confirm).
 Every Agent spawn sets `description` to `Herald: <role> — <task>` (`_contract.md` §B; never in the
 prompt). `HRD` = `python3 .claude/herald/scripts/hrd.py`. The scripts are copied into the repo by `init`
 and refreshed by `update`; never call scripts from the plugin cache directly.

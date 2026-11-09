@@ -43,14 +43,15 @@ Exclude `.claude/skills/**` and other local skills from every scan.
    draft: the source language, each target's `body_pattern`/`url_pattern` measured on 2–3
    existing translated articles, frontmatter conventions of translations — e.g. a `lang` field —
    and glossary candidates from terms that recur across translation pairs), YMYL topics
-   (→ subject-expert), an image/diagram pipeline in the repo's own build (→ illustrator).
+   (→ subject-expert), an image/diagram pipeline in the repo's own build (→ illustrator),
+   `playwright` or `@playwright/test` in `package.json` (→ offer automatic screenshots).
    Other deploy entry points (scripts or skills that run the deploy command) → **warn only**.
 
 ## P1.5 — Interview (attended; `AskUserQuestion`, max 4 questions per call)
 
 Promoted service/app and CTA · north-star metric · domain expertise / YMYL · hard policies
 (external mentions, promotion count, copyright rules) · confirm detected paths, deploy command,
-base URL · per-article budget (USD) · social posts too? (yes → the summary points to `/hrd social --setup`; `init` never enables `distributor` itself) · output language (default: `$1` if it is a language code, else the content language) · with locale directories: translate new articles? which languages, which is the source, auto publish translations (default no).
+base URL · per-article budget (USD) · social posts too? (yes → the summary points to `/hrd social --setup`; `init` never enables `distributor` itself) · output language (default: `$1` if it is a language code, else the content language) · with locale directories: translate new articles? which languages, which is the source, auto publish translations (default no) · with Playwright found: capture public pages for screenshots automatically (a human still confirms each one)?
 
 ## P2 — Generate (additive)
 
@@ -59,7 +60,9 @@ base URL · per-article budget (USD) · social posts too? (yes → the summary p
 2. `.claude/herald/config.json` from `templates/config.json.tmpl` with the detected/confirmed
    values (`roles.conditional` = enabled conditional roles). Translations confirmed in the
    interview → add the `translations` block (`config.md` § Translations: rules, validation,
-   build inputs) and a `docs/editorial/glossary.md` draft if candidates were found.
+   build inputs) and a `docs/editorial/glossary.md` draft if candidates were found. Automatic
+   screenshots confirmed → add the `screenshots` block (`config.md` § Automatic screenshots) and
+   run `HRD shot trial`: a failure → show the install command and leave the block out.
 3. `docs/editorial/` from `templates/editorial/*.tmpl`: charter (purpose from the interview,
    floor and priority lines verbatim), style guide (its "Not AI prose" tells: phrases in
    `config.language` that read as generated, plus any the existing articles avoid), one

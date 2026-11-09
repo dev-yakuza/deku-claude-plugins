@@ -22,7 +22,7 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.15.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.16.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -531,7 +531,9 @@ def cmd_config_check(a):
     """Config.validate's errors and warnings (`/hrd config` runs it after an edit)."""
     root, cfg = ctx(check=False)
     errors, warnings = cfg.validate()
-    emit({"ok": not errors, "errors": errors, "warnings": warnings})
+    # the capture template is checked apart: a typo there turns auto capture off, never the
+    # harness (design/herald/07-auto-capture.md §2.7) — it does not change `ok`
+    emit({"ok": not errors, "errors": errors, "warnings": warnings, "capture_errors": shots.capture_errors(cfg)})
     if errors:
         sys.exit(1)
 
@@ -1082,10 +1084,14 @@ def cmd_gate(a):
 
 
 def cmd_shot(a):
-    """Screenshots a human takes (design/herald/06-screenshots.md)."""
+    """Screenshots a human takes (design/herald/06-screenshots.md) and automatic capture of
+    public pages a human confirms (07-auto-capture.md)."""
     root, cfg = ctx()
-    if a.action in ("plan", "status", "import", "decide", "squash", "archive") and not a.topic:
+    if a.action in ("plan", "status", "import", "decide", "squash", "archive", "capture", "confirm",
+                    "demote") and not a.topic:
         raise HeraldError("shot %s needs --topic" % a.action)
+    if a.action != "demote" and (a.own or a.retake_kind):
+        raise HeraldError("--own and --retake-kind apply only to `shot demote`")
     if a.action == "plan":
         emit(shots.plan(root, cfg, a.topic, check_only=a.check))
     elif a.action == "status":
@@ -1112,6 +1118,19 @@ def cmd_shot(a):
         emit(shots.squash(root, cfg, a.topic))
     elif a.action == "archive":  # a cleaned hold: keep a human's screenshots (INV3)
         emit({"moved": shots.archive_inbox(root, a.topic, "cleaned-hold")})
+    elif a.action == "capture":
+        emit(shots.capture(root, cfg, a.topic))
+    elif a.action == "confirm":  # a human looked at the captures (refused unattended; the guard asks)
+        emit(shots.confirm(root, cfg, a.topic, a.id))
+    elif a.action == "demote":
+        emit(shots.demote(root, cfg, a.topic, a.id, kind=a.retake_kind, reason=a.reason, own=a.own))
+    elif a.action == "trial":
+        out = shots.trial(root, cfg)
+        emit(out)
+        if not out["ok"]:
+            sys.exit(1)
+    elif a.action == "audit":
+        emit(shots.audit(root, cfg))
 
 
 def cmd_social(a):
@@ -1270,9 +1289,14 @@ def build():
     p.add_argument("--retake-kind", choices=list(shots.KINDS)); p.add_argument("--reason")
     p.set_defaults(fn=cmd_loopback)
     p = sp.add_parser("shot"); p.add_argument("action", choices=["plan", "status", "import", "decide", "scan", "strip",
-                                                                "squash", "archive"])
+                                                                "squash", "archive", "capture", "confirm", "demote",
+                                                                "trial", "audit"])
     p.add_argument("--topic"); p.add_argument("--check", action="store_true", help="plan: check only, write nothing")
-    p.add_argument("--id"); p.add_argument("--without", action="store_true")
+    p.add_argument("--id", help="decide: one id; confirm/demote: ids, comma-separated")
+    p.add_argument("--without", action="store_true")
+    p.add_argument("--own", action="store_true", help="demote: use the human's inbox file instead")
+    p.add_argument("--retake-kind", choices=list(shots.KINDS), help="demote: take it again (privacy|mismatch)")
+    p.add_argument("--reason", help="demote: what to change — no secret values (300 characters)")
     p.add_argument("--slug"); p.add_argument("--path")
     p.set_defaults(fn=cmd_shot)
     p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)
