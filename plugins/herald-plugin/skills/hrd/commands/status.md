@@ -13,7 +13,11 @@ usage limit until that time — `--unlock` would end that batch; `kill <pid>` st
 article its languages from `published.json` (`translations`, `withdrawn_langs`) and, from
 `HRD integrity --report`, any `translation_added` (a translation Herald has not verified —
 adopt with `/hrd translate <slug> --adopt <l>`) or other `causes`. A hold whose `note` names a
-`refresh candidate: <slug>` → suggest `/hrd refresh <slug>`. From the same output,
+`refresh candidate: <slug>` → suggest `/hrd refresh <slug>`. A `screenshots` hold: show its note
+and the inbox `.claude/herald/inbox/<id>/` — "put the files there, then `/hrd resume <id>`"
+(`atoms/_screenshots.md` §5). `shots_removed_bytes` (moved-away screenshots kept under
+`.claude/herald/memory/shots/removed/`, never deleted by Herald): show it when it is over 50 MB,
+with the path, so the human can clean it up. From the same output,
 `supersede_pending` (old articles a newer one follows, not linked to it yet): for each, "link
 `<new>` from `<old>`" — `/hrd refresh <old>` when `refreshable`, otherwise by hand.
 

@@ -65,7 +65,11 @@ report a mismatch.
    - `no-ledger` — no ledger line on this machine: attended → ask "re-verify N articles or
      trust the committed state.json"; trust → `HRD ledger record --topic <ref> --kind trust`
      for each and continue; `--auto` → stop.
-   - `mismatch` / `missing` — re-verify (§5 procedure, on base: `.claude/herald/work/<ref>/`),
+   - `mismatch` / `missing` — `HRD shot scan --slug <slug>` first (base runs this version's scripts;
+     a slug with no screenshot records finds nothing): anything found → stop the
+     whole ship (as step 4) and tell the human to run `HRD shot strip --path <file>` on base and
+     commit (and push) the stripped files,
+     then `/hrd ship --reverify <id>`; else re-verify (§5 procedure, on base: `.claude/herald/work/<ref>/`),
      the delta artifacts are committed now.
    - `flags` (withdrawn/moved slug reappeared) — attended: explain exits (`--release-slug`,
      `--unwithdraw`, remove the files); `--auto`: stop.
@@ -129,6 +133,12 @@ them; `base-source-changed` / `base-bundle-changed` / `withdrawn-lang` → recom
 Deferred MAJORs (`## Late audit findings`) are decided here: approve accepts them; to fix one,
 skip this time and push the fix to the PR (the next ship re-verifies it, §5); or decline.
 
+A PR with screenshots (its head's `<w>screenshots.json`, read with `git show
+<headRefOid>:.claude/herald/work/<id>/screenshots.json`; `auto-exclusion` lists `screenshots`):
+show them (file links, `mask` categories; "replaced by a human" where the blob differs from the recorded one)
+and ask for a **separate confirmation** — "I looked at the screenshots" — before approve; no
+merge without it (`atoms/_screenshots.md` §6).
+
 A topic whose `auto_merged_pr` names this open PR (a session-auto stamp whose merge never
 happened): on approve or decline, `HRD auto-merged --topic <id> --clear` — a human decided it
 now.
@@ -164,10 +174,19 @@ switch and §7.1 need a clean tree.
    unsupported sentences remain, **delta research**: the researcher sources only those
    sentences and appends `C#` to `research.md`; the fact-checker adds the mappings to
    `claims-map.json`; a PR comment `herald-source: <sentence> <URL>` from a human counts as a
-   source. Image-only changes still run the gate and verify (the hash covers images).
+   source. Image-only changes still run the gate and verify (the hash covers images). First,
+   only when the PR head's scripts are 0.15.0 or later (`HRD version` on the head; an older head
+   has no `shot` command — a screenshot recorded by any topic of this slug needs 0.15.0, so an
+   older head carries none): `HRD shot scan --slug <slug>` (every topic of the slug, refresh
+   topics included; nothing recorded → nothing found), and for each
+   file it finds `HRD shot strip --path <file>` (a refusal → hold `verify-after-human-edit` with
+   its reason), then the gate and verify, so the recorded hashes cover the stripped files
+   (`atoms/_screenshots.md` §6). Tell the human now that the stripped originals stay in the PR's
+   history (§4 ran before this).
    `research_suspects` (a claim in `research.md` found wrong) fail this re-verify — no research
    fix here: the fail path below holds `verify-after-human-edit`; the human resolves it.
-3. Pass → `HRD stage pass --topic <id> --stage verify --amend`, commit the artifacts, `git push origin <branch>`,
+3. Pass → `HRD stage pass --topic <id> --stage verify --amend`, commit the artifacts (and any image
+   `shot strip` rewrote), `git push origin <branch>`,
    `git rev-parse HEAD` as its own call, then `integrity.py --record --topic <id> --kind push --sha
    <that literal SHA>` (the PR head may carry older scripts that need `--sha`; newer ones check it
    is the pushed HEAD). Fail (or the push is refused: the head moved) → discard this run's

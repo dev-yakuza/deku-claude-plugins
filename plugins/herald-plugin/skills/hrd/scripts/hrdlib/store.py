@@ -25,9 +25,12 @@ HOLD_REASONS = (
     "verify-after-human-edit",                           # after PR — PR kept open
     "reverted",                                          # after merge — removal revert
     "source-defect",                                     # tr-: the verified source fails verify — cleaned up
+    "screenshots",                                       # before PR — preserved; waits for a human's files
 )
 CLEANUP_REASONS = ("cannibalization", "research", "rejected", "source-defect")
-PRESERVE_REASONS = ("needs-human", "stagnation", "budget")
+PRESERVE_REASONS = ("needs-human", "stagnation", "budget", "screenshots")
+# holds that wait on a human's input rather than mark a writing weakness: never a growth signal
+NON_SIGNAL_HOLD_REASONS = ("verify-after-human-edit", "reverted", "screenshots")
 
 
 def paths(root):
@@ -325,6 +328,8 @@ def auto_exclusion(crit, st=None):
 # (`/hrd next`, `write --ship`): each is a decision the agents made and logged in the PR. The
 # others stay blocking: an open BLOCKER, an article changed after its last auditor round, a
 # PR whose verdict files cannot be read.
+# `screenshots` is never here: a screen may show what must not go out, so a human looks at it in
+# `/hrd ship` (design/herald/06-screenshots.md §2.10)
 CONSENT_ACCEPTS = ("decision:dismissal", "decision:assumption", "decision:deferral",
                    "audit-dismissed", "audit-log:deferred", "trimmed", "images", "framed", "translated")
 
@@ -408,6 +413,9 @@ def exclusion_reasons(root, cfg, tid, rev=None):
             reasons.append("images")
         # translations read by no editor or auditor go out only with a human, unless the repo
         # allowed it (translations.auto_publish) — derived from the diff, not from state.json
+        from .shots import excluded as shots_excluded
+        if shots_excluded(root, cfg, tid, rev, changed):
+            reasons.append("screenshots")
         tr_paths = set(cfg.translation_paths(slug).values())
         if tr_paths and not (cfg.translations() or {}).get("auto_publish") and any(f in tr_paths for f in changed):
             reasons.append("translated")
@@ -739,6 +747,11 @@ def stage_pass(root, cfg, tid, stage, amend=False):
                               "never delete or renumber" % ", ".join(gone))
         fix["status"] = "done"
         fix["done_at"] = now_iso()
+    if stage == "draft":
+        from .shots import draft_problems
+        problems = draft_problems(root, cfg, tid, st)
+        if problems:  # every listed screenshot in place before the gate (design 06 §2.7)
+            raise HeraldError("; ".join(problems))
     if stage == "draft" or (stage == "verify" and amend):
         gate = run_gate(root, cfg, st["slug"])
         if stage == "draft":
@@ -833,7 +846,12 @@ def stage_pass(root, cfg, tid, stage, amend=False):
         from .translation import on_critique_pass
         nxt = on_critique_pass(st, rec["body_hash"])
     st["stage"] = nxt
+    if stage == "draft" and st.get("screenshots"):
+        st["screenshots"]["awaiting"] = False
     save_state(root, tid, st)
+    if stage == "draft":
+        from .shots import archive_inbox
+        archive_inbox(root, tid, "imported")  # the branch holds the cleaned files now
     return st
 
 
@@ -914,6 +932,14 @@ def _sentence_bounds(text, a, b):
 def _cjk(c):
     """Kana, CJK ideographs and fullwidth forms: written without spaces (Hangul is not)."""
     return bool(c) and ("\u3000" <= c <= "\u30ff" or "\u3400" <= c <= "\u9fff" or "\uff00" <= c <= "\uffef")
+
+
+def _image_ref_re():
+    from .validate import IMG_RE
+    return IMG_RE
+
+
+_IMG_REF_RE = _image_ref_re()
 
 
 def _protected(text):
@@ -1033,6 +1059,9 @@ def trim_begin(root, cfg, tid):
                                   % (text[:80], TRIM_MAX_SENTENCE))
             if any((x < a < y) or (x < b < y) for x, y in prot):
                 raise HeraldError("%r cuts through a link, code or URL — loop back" % text[:80])
+            if any(a < m.end() and m.start() < b for m in _IMG_REF_RE.finditer(old)):
+                # trim never touches images: deleting the reference would leave the file deployed
+                raise HeraldError("%r holds an image reference — loop back" % text[:80])
             ls = old.rfind("\n", 0, a) + 1
             le = old.find("\n", b)
             mark = old[ls:a]
@@ -1530,6 +1559,11 @@ CONTEXT_KINDS = ("escalation", "incomplete")
 # Hold notes that mark a stop as environment or a human's choice, not a writing weakness: never a
 # growth signal (the last two are what 0.2.x wrote for environment stops)
 NON_SIGNAL_HOLD_NOTES = ("tooling:", "human:", "batch child did not finish", "base has foreign unpushed commits")
+
+
+def hold_is_signal(reason, note):
+    """One rule for both places a hold is recorded (`HRD state`, the batch runner)."""
+    return reason not in NON_SIGNAL_HOLD_REASONS and not str(note or "").startswith(NON_SIGNAL_HOLD_NOTES)
 
 # Closed theme list for editor REVISE and auditor findings: the editor-in-chief classifies each
 # loopback so the nudge counts recurring weaknesses, not every REVISE (one theme = one count axis).

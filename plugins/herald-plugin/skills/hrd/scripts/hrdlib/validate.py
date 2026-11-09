@@ -77,6 +77,32 @@ def load_rules(root, rev=None):
     return out
 
 
+def resolve_image_ref(root, article_rel, src, public_dir=None):
+    """The repo path an image reference in `article_rel` points to — the gate's own reading:
+    a site-absolute path under `images.public_dir`, else relative to the article file. None for
+    an external reference (http:, data:, protocol-relative)."""
+    if re.match(r"^[a-z]+:", src) or src.startswith("//"):
+        return None
+    if public_dir is None:
+        public_dir = load_rules(root)["images"].get("public_dir", "public")
+    src = re.split(r"[?#]", src, 1)[0]
+    if src.startswith("/"):
+        return "%s%s" % (public_dir.rstrip("/"), src)
+    return os.path.normpath(os.path.join(os.path.dirname(article_rel), src))
+
+
+def image_refs(root, article_rel, text):
+    """Repo paths of every local image `text` references (screenshots.py checks the manifest
+    against these)."""
+    pub = load_rules(root)["images"].get("public_dir", "public")
+    out = []
+    for m in IMG_RE.finditer(text):
+        relp = resolve_image_ref(root, article_rel, next(g for g in m.groups() if g), pub)
+        if relp is not None:
+            out.append(relp)
+    return out
+
+
 def ignored(root, rel):
     return run(["git", "check-ignore", "-q", rel], cwd=root, check=False).returncode == 0
 
@@ -164,16 +190,13 @@ def validate(root, cfg, file_path, lang=None):
                     # with url_pattern "/{slug}/" every root link looks like an article: warn only
                     (warnings if prefix == "/" else errors).append("internal link %s points to no article" % link)
     if rules["images"].get("check", True):
-        pub = rules["images"].get("public_dir", "public").rstrip("/")
+        pub = rules["images"].get("public_dir", "public")
         for m in IMG_RE.finditer(text):
             src = next(g for g in m.groups() if g)
-            if re.match(r"^[a-z]+:", src) or src.startswith("//"):  # http:, data:, protocol-relative
+            relp = resolve_image_ref(root, os.path.relpath(full, root), src, pub)
+            if relp is None:  # http:, data:, protocol-relative
                 continue
             src = re.split(r"[?#]", src, 1)[0]
-            if src.startswith("/"):
-                relp = "%s%s" % (pub, src)
-            else:  # relative to the article file
-                relp = os.path.normpath(os.path.join(os.path.dirname(os.path.relpath(full, root)), src))
             if not os.path.exists(os.path.join(root, relp)):
                 errors.append("image %s does not exist (%s)" % (src, relp))
             elif ignored(root, relp):

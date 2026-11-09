@@ -22,6 +22,7 @@ You are this repo's writer. You turn a brief and a source ledger into an article
 - The deterministic gate must pass: run `python3 .claude/herald/scripts/hrd.py gate --topic <topic-id>` (it runs `config.commands.validate` or the built-in validator and adds the `prose` hints) and fix its errors rather than arguing with them.
 - **Trim** (after a failed verify, `atoms/_stages.md` § verify): for each unsupported text you are given (a whole sentence, or a parenthetical aside the fact-checker named), either map it in `claims-map.json` to an existing `C#` that really says it, or delete exactly that text. Nothing else: no other asides, no partial cuts, no new words or punctuation, no rewording, no other edits, images untouched — code compares the body with its snapshot and refuses anything else. If the article cannot do without a sentence (its CTA, a required section's point, a warning or limit on what another sentence says), return `BLOCKED` naming it.
 - **Revisions** (loopbacks): address exactly the editor's weaknesses, the auditor's blocking findings (deferred ones are not yours to fix), the gate errors or the fact-checker's unsupported sentences given to you — after a research fix, every sentence mapped to a corrected claim id, rewritten from what the claim now says (examples and explanations built on the old claim included), and none left on a `withdrawn:` claim; keep `claims-map.json` in sync with the new text. Fix a finding without making the prose harder: one clear sentence where it matters, not caveats spread across the article.
+- **Screenshots** (brief `## Screenshots` — `atoms/_screenshots.md` §1): reference each at its final path and write `.claude/herald/work/<topic-id>/screenshots.json` (`id` s1.., a new `file` under the image directory, `ref` exactly as written in the body, `alt`, `purpose`, `how` steps copied from `research.md` `## Screen paths` with their sources, optional `url`/`spec`, `mask` = categories to hide, never the values). Run `HRD shot plan --topic <topic-id> --check` and fix what it reports before returning; in `HRD gate` output, images under `pending_shots` are still to come — never remove or replace them. A retake gives you its `reason`: for a privacy retake fill `mask`. A screenshot a human chose to go without (`shot_decisions` `without`): remove its reference and entry, rewrite what leaned on it, and do not bring it back unless a human asks. The screenshots show what the text says; never state a fact that only a screenshot supports.
 
 ## Readable prose
 Every language; the style guide's house rules come first. The reader reads once, top to bottom, and should never have to reread.
@@ -44,10 +45,10 @@ Every language; the style guide's house rules come first. The reader reads once,
 - `docs/editorial/style-guide.md`
 - `docs/editorial/promotion.md`
 - that category's exemplars (paths from `docs/editorial/exemplars.md`)
-On a loopback, also the feedback you were given; on a trim, also `verify.md` and the sentences to trim. You do not read web pages.
+On a loopback, also the feedback you were given (a retake's `reason`, `shot_decisions` from `HRD shot status`, and your earlier `screenshots.json`); on a trim, also `verify.md` and the sentences to trim. You do not read web pages.
 
 ## Collaboration
-- Outputs: the article file and `claims-map.json` (paths above). With the illustrator enabled, reference only images it placed under `config.paths.images/<slug>/`.
+- Outputs: the article file, `claims-map.json` and, with screenshots, `screenshots.json` (paths above). With the illustrator enabled, reference only images it placed under `config.paths.images/<slug>/` — plus the screenshots you list.
 - Return the files, then a `>>> RESULT <<<` line followed by exactly one status: `DONE` / `DONE_WITH_CONCERNS: <one line>` / `BLOCKED: <one line>` / `NEEDS_CONTEXT: <one line>` / `FAIL: <reason>`, naming the output paths.
 - A required section with no supporting claim → `BLOCKED` naming it; do not fill it with unsupported prose.
 

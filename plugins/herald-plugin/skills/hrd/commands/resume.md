@@ -6,13 +6,16 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
 1. `printenv HRD_UNATTENDED`; `printenv HRD_RESUME_LIMITED`; `HRD lock acquire --cmd resume` (keep the token; `HRD lock release
    --cmd resume --token <t>` on every exit path).
 2. `HRD status` → find the topic. Derived state must be `in-progress` (local branch) or a
-   stored `held:needs-human|stagnation|budget` with a preserved branch. Anything else: explain
+   stored `held:needs-human|stagnation|budget|screenshots` with a preserved branch. Anything else: explain
    (`pr-pending` → `/hrd ship`; `queued` → `/hrd write`; cleaned holds → `/hrd status
    --requeue`) and stop.
-3. Preserved hold: show the human why it stopped (last `critique.md`/`verify.md`, the hold
+3. A `screenshots` hold: no question here — after step 4, `atoms/_screenshots.md` §5.
+   Other preserved holds: show the human why it stopped (last `critique.md`/`verify.md`, the hold
    note, and whether the one reader-pass send-back is used — `state.json` `reader_revise`, with the last
    `reader.json`) and ask how to proceed — for an `open` BLOCKER (any round), dismiss or fix as in
-   `atoms/_stages.md` § critique 3, a fix always under `HRD loopback --human`; record the
+   `atoms/_stages.md` § critique 3, a fix always under `HRD loopback --human` (a screenshot to take
+   again: `HRD loopback --human --retake <ids> --retake-kind privacy|mismatch --reason …` —
+   `atoms/_screenshots.md` §3); record the
    decision in `critique.json` only after step 4's switch and version check — if step 4 stops,
    nothing is recorded and the next resume asks again (asked in every mode but unattended — a pre-flow question: a hold is resumed by a human's
    decision; after it, the rest runs without questions unless `--attended`). Unattended resume of a held topic is not allowed —
@@ -26,14 +29,16 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
    (interrupted) → `HRD trim --topic <id> --abort` first (puts back the article critique
    passed; the trim stays used). `stage` `research` with `research_fixes[-1]` `open` (a research
    fix that was held or interrupted) → run the research fix (`atoms/_stages.md` § research).
-5. Budget baseline as in `write.md` §0 step 7 (a fresh baseline: resuming is the human's choice
+5. With screenshots recorded, first `HRD shot status --topic <id>`: `resume_at_import` true →
+   `atoms/_screenshots.md` §5 (no writer or illustrator), then on through publish as below.
+   Budget baseline as in `write.md` §0 step 7 (a fresh baseline: resuming is the human's choice
    to spend more). Then: if `stage` is `brief` and `slug` is null, run brief as in `write.md`. Otherwise run from
    `stage` onward through publish exactly as `write.md` §1–§3 (unattended if `HRD_UNATTENDED=1`; else in-session auto by
    default, attended with `--attended`; `--auto` is accepted and means the default; `--ship` as in `write.md` §3) (entry checks catch stale
    artifacts: rerun the stage they name).
 6. Unattended: skip this step — the batch runner releases the hold (a child never writes base).
-   Otherwise: if the stored state is still the hold this resume lifted (`needs-human`, `stagnation` or
-   `budget` — skip if a `--session-auto` ship published it or set its own
+   Otherwise: if the stored state is still the hold this resume lifted (`needs-human`, `stagnation`,
+   `budget` or `screenshots` — skip if a `--session-auto` ship published it or set its own
    `verify-after-human-edit` hold, or if it stopped on a version mismatch), clear it once the PR
    exists (an open PR then derives
    `pr-pending`): `git switch <base>`, `HRD state --topic <id> --state queued --note "resumed

@@ -173,7 +173,7 @@ def selectable(root, cfg, prs=None):
 
 # L16 (01-multilingual.md): holds whose work is kept count as in progress — judged by reason,
 # not by the branch (a preserved branch is local to one machine)
-IN_PROGRESS_HOLDS = ("needs-human", "stagnation", "budget", "verify-after-human-edit")
+IN_PROGRESS_HOLDS = ("needs-human", "stagnation", "budget", "screenshots", "verify-after-human-edit")
 
 
 def in_progress_topics(root, cfg, prs=None):

@@ -16,13 +16,13 @@ sys.dont_write_bytecode = True  # no __pycache__ in the repo's .claude/herald/sc
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from hrdlib import commits, ghstate, integrity, lock, store  # noqa: E402
+from hrdlib import commits, ghstate, integrity, lock, shots, store  # noqa: E402
 from hrdlib.config import Config  # noqa: E402
 from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # noqa: E402
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.14.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.15.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -180,7 +180,7 @@ def cmd_status(a):
     except Exception as e:  # noqa: BLE001 — advisory
         soc = {"error": str(e)}
     out = {"topics": derived_status(root, cfg), "lock": lock.status(root), "evolve": evolve,
-           "supersede_pending": pending}
+           "supersede_pending": pending, "shots_removed_bytes": shots.removed_bytes(root)}
     if soc is not None:
         out["social"] = soc
     emit(out)
@@ -354,6 +354,16 @@ def cmd_loopback(a):
         raise HeraldError("--theme applies only to --cause revise|audit")
     if a.claims and a.cause != "research":
         raise HeraldError("--claims applies only to --cause research")
+    retake = [x.strip() for x in (a.retake or "").split(",") if x.strip()]
+    if retake:  # design/herald/06-screenshots.md §2.8
+        if not (a.human or a.cause in ("revise", "audit")) or a.lang:
+            raise HeraldError("--retake goes with --cause revise|audit or --human (never a translation loopback)")
+        if a.retake_kind not in shots.KINDS:
+            raise HeraldError("--retake needs --retake-kind privacy|mismatch")
+        if a.human and os.environ.get("HRD_UNATTENDED") == "1":
+            raise HeraldError("an uncounted retake (--human --retake) is a human's decision — not in unattended sessions")
+    elif a.retake_kind:
+        raise HeraldError("--retake-kind applies only with --retake")
     st = store.load_state(root, a.topic)
     if store.open_research_fix(st):
         raise HeraldError("a research fix is open (%s) — the researcher runs first (`atoms/_stages.md` § research); "
@@ -403,11 +413,24 @@ def cmd_loopback(a):
     if reserve:
         st["accuracy_reserve"] = True
     st["stage"] = "draft"
+    if st.get("screenshots"):  # the writer runs again: a resume must not skip it (06 §2.2 awaiting)
+        st["screenshots"]["awaiting"] = False
+    retake_files, retake_out = [], None
+    if retake:
+        # past the cap a counted loopback ends in a hold: leave the files where they are
+        cap = store.LOOP_CAP + (1 if st.get("accuracy_reserve") else 0)
+        if not a.human and store._int(st.get("loopbacks")) > cap:
+            retake_out = "skipped"
+        else:
+            retake_files = shots.mark_retake(st, shots.load_manifest(root, a.topic), retake, a.retake_kind, a.reason)
+            retake_out = retake
     if fix:  # the researcher corrects the claims first; draft, critique and verify follow
         st.setdefault("research_fixes", []).append(fix)
         st["stage"] = "research"
         st["verified_hash"] = None  # what verify vouched for rested on the claims being corrected
     store.save_state(root, a.topic, st)
+    if retake_files:  # after the state that says "pending": a cut here leaves files plan moves
+        shots.move_to_removed(root, a.topic, [f for f in retake_files if not shots.on_base(root, cfg, f)], "retake")
     n = st["loopbacks"]
     # signals below are best-effort: the loopback is already counted and must not be retried
     kind = store.LOOPBACK_CAUSES.get(a.cause)
@@ -442,8 +465,11 @@ def cmd_loopback(a):
     escalate = not a.human and (2 <= n <= store.LOOP_CAP or reserve)
     if escalate:
         store.safe_signal(root, "escalation", a.topic, {"loopback": n, "cause": a.cause})
-    emit({"loopbacks": n, "cap": store.LOOP_CAP, "exhausted": n > store.LOOP_CAP and not reserve,
-          "accuracy_reserve": bool(reserve), "escalate_tier": escalate, "stage": st["stage"]})
+    out = {"loopbacks": n, "cap": store.LOOP_CAP, "exhausted": n > store.LOOP_CAP and not reserve,
+           "accuracy_reserve": bool(reserve), "escalate_tier": escalate, "stage": st["stage"]}
+    if retake:
+        out["retake"] = retake_out
+    emit(out)
 
 
 def _translation_loopback(root, cfg, a, st, ver, langs):
@@ -531,7 +557,7 @@ def cmd_finalize(a):
 
 RESULT_STATUSES = {"pr-open", "merged"} | {"held:%s" % r for r in
                                           ("cannibalization", "research", "rejected", "needs-human", "stagnation", "budget",
-                                           "source-defect")}
+                                           "source-defect", "screenshots")}
 
 
 def cmd_result(a):
@@ -539,6 +565,8 @@ def cmd_result(a):
     root = repo_root()
     if a.status not in RESULT_STATUSES:
         raise HeraldError("unknown result status %r (one of: %s)" % (a.status, ", ".join(sorted(RESULT_STATUSES))))
+    if a.status == "held:screenshots":
+        shots.check_note(a.note)
     path = os.path.join(store.paths(root)["memory"], "batch", a.topic + ".json")
     write_json(path, {"status": a.status, "pr": a.pr, "note": a.note, "merged": a.merged or [], "at": now_iso()})
     emit({"written": path})
@@ -576,6 +604,10 @@ def cmd_scope(a):
         raise HeraldError("slug unknown for %s" % a.topic)
     led = store.ledger_latest(root, a.topic) or {}
     res = commits.scope_check(root, cfg, a.topic, slug, rev=a.rev, herald_sha=led.get("sha"))
+    extra = shots.scope_problems(root, cfg, a.topic, rev=a.rev, publish=(a.rev == "HEAD"))
+    if extra:  # screenshots (06 §2.10): a dropped file still committed; publish only — squash shape
+        res["screenshots"] = extra
+        res["ok"] = False
     emit(res)
     if not res["ok"]:
         sys.exit(1)
@@ -675,14 +707,16 @@ def cmd_state(a):
     t = store.get_topic(data, a.topic)
     if t.get("state") == "published" and a.state in ("queued", "held"):
         raise HeraldError("%s is already published — a removal revert (ship step 2, held:reverted) or `withdraw` changes that, not `state`" % a.topic)
+    if a.state == "held" and a.reason == "screenshots":
+        shots.check_note(a.note)  # base carries ids and kind codes only (06 §2.8)
     store.set_topic_state(t, a.state, a.reason, a.note)
     store.save_topics(root, data)
     # holds and ship declines are growth signals; record them where the state changes
     # (the batch runner records its own holds)
     # (not for holds caused by a human's change — a failed re-verify after their push, a revert)
     # (nor tooling stops or a human's own choice: note "tooling: …" / "human: …")
-    if a.state == "held" and a.reason not in ("verify-after-human-edit", "reverted") \
-            and not str(a.note or "").startswith(store.NON_SIGNAL_HOLD_NOTES):
+    # (nor a wait for a human's screenshots)
+    if a.state == "held" and store.hold_is_signal(a.reason, a.note):
         store.safe_signal(root, "hold", t["id"], {"reason": a.reason, "note": a.note, "by": "session"})
     elif a.state == "declined":
         store.safe_signal(root, "ship-decline", t["id"], {"reason": a.reason, "note": a.note})
@@ -719,6 +753,7 @@ def cmd_requeue(a):
         t["direction"] = rel
     store.set_topic_state(t, "queued", note="requeued (reverted_by kept)")
     store.save_topics(root, data)
+    shots.archive_inbox(root, a.topic, "requeue")  # the branch is gone: keep a human's screenshots (INV3)
     emit({"id": a.topic, "state": "queued", "reverted_by": t.get("reverted_by", [])})
 
 
@@ -730,6 +765,7 @@ def cmd_drop(a):
     t["dropped"] = True
     store.set_topic_state(t, "declined", "dropped", a.note)
     store.save_topics(root, data)
+    shots.archive_inbox(root, a.topic, "drop")
     emit({"id": a.topic, "state": "declined:dropped"})
 
 
@@ -1018,8 +1054,22 @@ def cmd_gate(a):
     writes the readability hints, with the body hash they describe, to
     memory/prose/<id>.json — the editor's input for its reader pass (gitignored)."""
     root, cfg = ctx()
-    slug = a.slug or store.load_state(root, a.topic)["slug"]
-    rep = store.run_gate(root, cfg, slug, lang=a.lang)
+    relax = not a.slug and not a.lang and not a.record
+    st = store.load_state(root, a.topic) if (relax or not a.slug) else None
+    slug = a.slug or st["slug"]
+    pending = shots.pending_files(root, a.topic, st) if relax and shots.gate_relaxed(root, cfg, a.topic, st) else []
+    custom = bool((cfg.get("commands", "validate") or "").strip())
+    if pending and custom:  # the writer's pre-check (06 §2.7): stand-ins where the screenshots will go
+        rep = shots.with_placeholders(root, pending, lambda: store.run_gate(root, cfg, slug, lang=a.lang))
+    else:
+        rep = store.run_gate(root, cfg, slug, lang=a.lang)
+    if pending:
+        if not custom:  # the built-in gate names the path: those errors are not the writer's to fix
+            missing = [e for e in rep.get("errors") or [] if "does not exist" in e and
+                       any(e.endswith("(%s)" % f) for f in pending)]
+            rep["errors"] = [e for e in rep.get("errors") or [] if e not in missing]
+            rep["ok"] = not rep["errors"]
+        rep["pending_shots"] = pending
     if a.lang:  # a translation's hints describe that file, not the source the editor reads
         rep["prose_file"] = None
     else:
@@ -1029,6 +1079,39 @@ def cmd_gate(a):
     emit(rep)
     if not rep["ok"]:
         sys.exit(1)
+
+
+def cmd_shot(a):
+    """Screenshots a human takes (design/herald/06-screenshots.md)."""
+    root, cfg = ctx()
+    if a.action in ("plan", "status", "import", "decide", "squash", "archive") and not a.topic:
+        raise HeraldError("shot %s needs --topic" % a.action)
+    if a.action == "plan":
+        emit(shots.plan(root, cfg, a.topic, check_only=a.check))
+    elif a.action == "status":
+        emit(shots.status(root, cfg, a.topic))
+    elif a.action == "import":
+        emit(shots.import_(root, cfg, a.topic))
+    elif a.action == "decide":
+        if not (a.id and a.without):
+            raise HeraldError("shot decide needs --id <s#> --without")
+        emit(shots.decide_without(root, a.topic, a.id))
+    elif a.action == "scan":
+        slug = a.slug or (store.load_state(root, a.topic)["slug"] if a.topic else None)
+        if not slug:
+            raise HeraldError("shot scan needs --slug or --topic")
+        found = shots.scan(root, cfg, slug)
+        emit({"slug": slug, "found": found})
+        if found:
+            sys.exit(1)
+    elif a.action == "strip":
+        if not a.path:
+            raise HeraldError("shot strip needs --path")
+        emit(shots.strip(root, a.path))
+    elif a.action == "squash":
+        emit(shots.squash(root, cfg, a.topic))
+    elif a.action == "archive":  # a cleaned hold: keep a human's screenshots (INV3)
+        emit({"moved": shots.archive_inbox(root, a.topic, "cleaned-hold")})
 
 
 def cmd_social(a):
@@ -1183,7 +1266,15 @@ def build():
     p.add_argument("--cause", choices=sorted(store.LOOPBACK_CAUSES)); p.add_argument("--theme")
     p.add_argument("--note"); p.add_argument("--claims", help="research: the suspect claim ids, comma-separated")
     p.add_argument("--lang", help="translation / --human: the languages to translate again, comma-separated")
+    p.add_argument("--retake", help="screenshot ids to take again, comma-separated (06-screenshots.md §2.8)")
+    p.add_argument("--retake-kind", choices=list(shots.KINDS)); p.add_argument("--reason")
     p.set_defaults(fn=cmd_loopback)
+    p = sp.add_parser("shot"); p.add_argument("action", choices=["plan", "status", "import", "decide", "scan", "strip",
+                                                                "squash", "archive"])
+    p.add_argument("--topic"); p.add_argument("--check", action="store_true", help="plan: check only, write nothing")
+    p.add_argument("--id"); p.add_argument("--without", action="store_true")
+    p.add_argument("--slug"); p.add_argument("--path")
+    p.set_defaults(fn=cmd_shot)
     p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)
     p = sp.add_parser("remap"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_remap)
     p = sp.add_parser("refresh-decision"); p.add_argument("--slug", required=True)

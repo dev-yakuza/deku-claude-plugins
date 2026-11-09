@@ -45,6 +45,16 @@ def ignored_residue(root, cfg):
     return out
 
 
+def moved_image_path(cfg, slug, path, old_slugs):
+    """An image path recorded under an old slug (`moved_from`) mapped onto the current slug's
+    image directory; other paths unchanged."""
+    for old in old_slugs:
+        prefix = cfg.image_dir(old).rstrip("/") + "/"
+        if path.startswith(prefix):
+            return cfg.image_dir(slug).rstrip("/") + "/" + path[len(prefix):]
+    return path
+
+
 def _rewrite_moved(cfg, slug, base, old_slugs):
     """Map a reference's paths under an old slug (`moved_from`) onto the current slug's paths,
     role by role. Returns (files, rewritten?)."""
@@ -56,8 +66,8 @@ def _rewrite_moved(cfg, slug, base, old_slugs):
             for old in old_slugs:
                 if role == "src" and path == cfg.body_path(old):
                     new = cfg.body_path(slug)
-                elif role == "img" and path.startswith(cfg.image_dir(old).rstrip("/") + "/"):
-                    new = cfg.image_dir(slug) + path[len(cfg.image_dir(old).rstrip("/")):]
+                elif role == "img":
+                    new = moved_image_path(cfg, slug, path, [old])
                 elif role in cfg.target_langs() and path == cfg.body_path(old, role):
                     new = cfg.body_path(slug, role)
                 if new != path:

@@ -354,6 +354,16 @@ class TrimTests(Flow):
         self.write("src/content/blog/%s.md" % slug, body)
         return self.hrd("trim", "--topic", tid, "--finish", check=False)
 
+    def test_a_sentence_holding_an_image_is_never_trimmed(self):
+        # trim never touches images: deleting the reference would leave the file deployed
+        # (design/herald/06-screenshots.md §2.7) — the old check only refused cutting through it
+        S = "See the page ![p](/blog-images/new-post/01.png) for details."
+        self.EXTRA = "\n" + S + " " + self.S2 + "\n"
+        tid, slug = self.to_verify_gap(ver={"counts": {"unsupported": 2, "contradicted": 0},
+                                            "unsupported_sentences": [S, self.S2]})
+        _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+        self.assertIn("holds an image reference", p.stderr)
+
     def test_deletion_carries_critique_over_and_verify_runs_again(self):
         tid, slug = self.to_verify_gap(ver={"counts": {"unsupported": 2, "contradicted": 0},
                                             "unsupported_sentences": ["(often called shadowing)", self.S2]})

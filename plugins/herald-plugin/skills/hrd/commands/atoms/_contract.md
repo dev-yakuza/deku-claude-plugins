@@ -63,6 +63,7 @@ Detect once per command: `printenv HRD_UNATTENDED` → `1` = unattended. The edi
 | auditor `BLOCKER` | dismiss only after the human confirms | **never dismiss** — fix or hold `needs-human` (`defect:`) |
 | verify gap, nothing contradicted, 1–3 unsupported (`_stages.md` § verify) | ask: trim / loop back / hold | trim once (delete or map only; code-checked), then loop back |
 | stagnation / loop cap / budget | stop and report (budget: warn only) | hold `stagnation` / `budget` |
+| screenshots still to take (`atoms/_screenshots.md` §2) | show the capture guide and wait | hold `screenshots` (in-session auto too — no question) |
 
 **Decision log**: every judgment between brief and critique goes into
 `work/<id>/critique.json` → `decision_log: [{"kind", "note"}]` with `kind ∈ {routine,
@@ -86,7 +87,8 @@ hold `needs-human`); there is no session approval. **Pre-flow questions — exac
 because they come before any work and the run cannot proceed safely without them: foreign
 unpushed commits on base (`write.md` §0 step 4), the base merge for an existing branch with
 older scripts (`atoms/_stages.md` § Existing branches) and, on `resume`, the decision on a held
-topic. After them the flow asks nothing, except to confirm a human-directed BLOCKER fix; every other
+topic (for a `screenshots` hold, the question in `atoms/_screenshots.md` §5, asked after the
+branch switch). After them the flow asks nothing, except to confirm a human-directed BLOCKER fix; every other
 gate follows the Unattended column above. Any other step that would ask (a `newer` version, an unexpected error) stops and reports instead —
 it never guesses. Publishing is
 the PR, then `/hrd ship` — or `ship --session-auto` right away when `autonomy.publish` is
@@ -181,7 +183,8 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
 - `dismissal` — from `critique.json` `decision_log`, on `stage pass --stage critique` and on
   `loopback --cause audit`.
 - `hold` — `HRD state --state held` (the batch runner records its own), except holds a human's
-  change caused (`verify-after-human-edit`, `reverted`) and holds whose note starts with
+  change caused (`verify-after-human-edit`, `reverted`), `screenshots` (a wait for a human's
+  files) and holds whose note starts with
   `tooling:` (environment) or `human:` (a human's choice): not writing problems.
 - `ship-decline` — `HRD state --state declined`.
 - `social-gate-failure` — `HRD social check --record` (a draft's last check, one per theme), `social-reject`

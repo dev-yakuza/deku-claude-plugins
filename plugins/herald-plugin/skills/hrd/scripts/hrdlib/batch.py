@@ -21,7 +21,7 @@ from .config import Config
 from .measure import stream_json_usd
 from .store import (CLEANUP_REASONS, HOLD_REASONS, bundle_urls, exclusion_reasons, record_published, branch_name, get_topic, load_published, load_topics,
                     paths, read_json_at, save_published, save_topics, set_topic_state, safe_signal as emit_signal,
-                    NON_SIGNAL_HOLD_NOTES, work_rel)
+                    hold_is_signal, work_rel)
 from .util import HeraldError, git, git_ok, now_iso, read_json, version_tuple, write_json
 
 CHILDREN = set()  # process-group ids of running children, for the SIGTERM handler
@@ -373,6 +373,8 @@ def cleanup_branch(root, cfg, tid):
     present = _present(root, targets)
     if present:
         git(root, "clean", "-q", "-fd", "--", *present)
+    from .shots import archive_inbox
+    archive_inbox(root, tid, "cleaned-hold")  # a human's screenshots outlive the branch (INV3)
     if branch:
         git(root, "branch", "-q", "-D", branch)
 
@@ -415,7 +417,7 @@ def record_hold(root, cfg, tid, reason, note, push=None):
     topics = load_topics(root)
     set_topic_state(get_topic(topics, tid), "held", reason, note)
     save_topics(root, topics)
-    if not str(note or "").startswith(NON_SIGNAL_HOLD_NOTES):  # a tooling stop is not a writing problem
+    if hold_is_signal(reason, note):  # a tooling stop or a wait for screenshots is not a writing problem
         emit_signal(root, "hold", tid, {"reason": reason, "note": note, "by": "batch"})
     remember(commits.commit_state(root, cfg, "runner", "chore(herald): batch hold %s (%s)" % (tid, reason), "hold",
                                   [".claude/herald/topics.json"]))

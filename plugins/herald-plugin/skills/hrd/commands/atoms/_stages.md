@@ -43,7 +43,8 @@ Every stage follows the same frame:
   `<w>search-notes.md` first; the strategist reads it).
 - **Output**: `<w>brief.md` — search intent, target reader, primary/secondary keywords, the
   distinct angle (required — scaled-content policy), outline, CTA placement, internal links,
-  and a proposed **slug** (lowercase, single hyphens, no `--`) on a line `slug: <slug>`.
+  and a proposed **slug** (lowercase, single hyphens, no `--`) on a line `slug: <slug>`; screens
+  the article needs go under `## Screenshots` (`atoms/_screenshots.md` §1).
 - Cannibalization conflict → hold `cannibalization`; when the strategist names `refresh
   candidate: <slug> — <reason>`, put it in the hold note (`status` shows it: continue with
   `/hrd refresh <slug>`).
@@ -66,7 +67,8 @@ Every stage follows the same frame:
   date, confidence. Policy from `sources.md` (banned sources, mention rules) applies. What the
   article will say about the site's own product (CTA, app features) comes from `promotion.md`
   as **owner claims** (source `docs/editorial/promotion.md`, confidence `owner`); they support
-  statements about that product only (fact-checker persona).
+  statements about that product only (fact-checker persona). With `## Screenshots` in the brief,
+  also `## Screen paths` (`atoms/_screenshots.md` §1).
 - Not enough support for the required sections → `BLOCKED` → hold `research`.
 - **Research fix** (after `HRD loopback --cause research --claims …` set `stage` to research;
   `state.json` `research_fixes`, last entry `open`): spawn the researcher (one tier up when the
@@ -89,7 +91,9 @@ Every stage follows the same frame:
 ## draft — writer (+ illustrator if enabled)
 
 Order: writer first; then the illustrator reads the draft, creates images and inserts the
-references into the article itself; then the gate.
+references into the article itself; then the gate. With `<w>screenshots.json`, the screenshots
+are collected between the illustrator and the gate (`atoms/_screenshots.md` §2) —
+`stage pass --stage draft` refuses until every one is in.
 
 - **Read list**: `<w>brief.md`, `<w>research.md`, the category guide, `style-guide.md`,
   `promotion.md`, that category's exemplars (paths from `exemplars.md`). A refresh topic
@@ -119,6 +123,8 @@ references into the article itself; then the gate.
    (its persona's Project specifics) → `<w>review-subject-expert.md`. search-discovery:
    article + `search-checklist.md` → `<w>review-search-discovery.md`.
 2. **editor** — read list: the article, category guide, `style-guide.md`, exemplars, the
+   screenshots if any (`<w>screenshots.json` and its files — `atoms/_screenshots.md` §3; a
+   retake goes through `HRD loopback … --retake`), the
    `<w>review-*.md` notes, `.claude/herald/memory/prose/<id>.json` and, from round 2,
    `<w>critique.md` (earlier rounds, including the findings sent back). Right before every
    spawn (reruns included) run `HRD gate --topic <id> --record`: it rewrites that file for
@@ -237,6 +243,9 @@ references into the article itself; then the gate.
    `R<round>-<n>` entry and the earlier one stays as is; update an outcome in place — the last entry per id
    counts) and `decision_log` are append-only across rounds (keep earlier entries when rewriting
    the file); `audit_log` is what a recheck auditor receives.
+   A human's "go without this screenshot" (`HRD shot status` `decisions`, `choice: without`)
+   goes into `decision_log` as `{"kind": "human", "id": "shot:s1", "note": "without s1"}`
+   (`atoms/_screenshots.md` §4).
    `HRD stage pass --stage critique` refuses unless verdict is PASS, `audit_round` equals the
    counted round, every BLOCKER is dismissed and every MAJOR is dismissed or (recheck rounds
    only) deferred — each deferred one logged in this round's `audit_log` with outcome
@@ -373,7 +382,8 @@ the topic to verify and this stage does not run. `translation.pending` are the l
 3. `HRD finalize --topic <id>` (entry condition: source == critique hash, bundle == verify
    hash; fixes `agent_final_hash` once).
 4. Commit on the herald branch: `git add` the article, its images, the topic's translation files
-   and `<w>` — nothing else; `HRD scope --topic <id>` must pass.
+   and `<w>` — nothing else; with screenshots, `git add -A` the image directory and run
+   `HRD shot squash --topic <id>` (`atoms/_screenshots.md` §6); `HRD scope --topic <id>` must pass.
 5. `git push -u origin <branch>`; then `python3 .claude/herald/scripts/integrity.py --record
    --topic <id> --kind push` (no `--sha`: the record reads HEAD itself).
 6. `gh pr create --base <base> --label herald --title "<title>" --body-file <tmp>` — body:
@@ -390,6 +400,7 @@ the topic to verify and this stage does not run. `translation.pending` are the l
    "Translations are checked by the fact-checker and the gate; no editor or auditor read
    them") — and the marker `<!-- herald:topic=<id> slug=<slug> langs=<l,…> -->` (`langs=`
    only with translations).
+   With screenshots the body also gets `## Screenshots` (`atoms/_screenshots.md` §6).
 7. Unattended: `HRD result --topic <id> --status pr-open --pr <n>`.
 8. `git switch <base>`.
 
@@ -418,12 +429,14 @@ version>` (SKILL.md version gate):
   follow you to base): restore tracked ones with `git checkout HEAD -- <tracked paths>`, then
   `git clean -fd -- <body path> <image dir> <translation paths> <w>` (only the paths that
   exist), then
-  `git switch <base>`, `git branch -D <branch>`. Attended: `HRD state --topic
+  `git switch <base>`, `git branch -D <branch>`, `HRD shot archive --topic <id>` (a human's
+  screenshots in the inbox are moved under `memory/shots/removed/`, never deleted). Attended: `HRD state --topic
   <id> --state held --reason <r>` (records the `hold` signal) then `HRD commit --cmd hold --kind hold -m "chore(herald):
   hold <id>" .claude/herald/topics.json` and `git push origin <base>`. Unattended: `HRD result`
   only.
 - Any hold or stop with a trim `open`: `HRD trim --topic <id> --abort` first.
-- `needs-human` / `stagnation` / `budget`: keep the branch — commit leftovers as
+- `needs-human` / `stagnation` / `budget` / `screenshots` (note: exactly `HRD shot status`'s
+  `note` — `atoms/_screenshots.md` §5): keep the branch — commit leftovers as
   `wip(herald): <id>` on it (no push), switch to base, record as above. With translations, the
   wip commit holds only the topic's PR scope (`<w>`, and for a non-`tr-` topic the source and
   images, plus the topic's own translation files); any other changed bundle file (a `tr-`
