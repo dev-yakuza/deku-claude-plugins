@@ -140,57 +140,77 @@ def illustrator_on(cfg):
     return "illustrator" in (cfg.get("roles", "conditional") or [])
 
 
-def figure_errors(cfg):
-    """`images.diagrams` and `images.figure` problems ([] when fine or unmanaged). Kept out of
-    Config.validate (L4): any of them turns diagrams and external images off (`config`)."""
+def figure_errors_by_kind(cfg):
+    """{"diagram", "licensed", "quotation": [errors]} — each list turns only its own kind off
+    (implementation review m11): a `diagrams` setting or the diagram template turns diagrams off,
+    the licensed template (and `words`) external images, the quotation template quotations. The
+    quotation template is required only where a category may quote (`quotation_categories`)."""
+    out = {"diagram": [], "licensed": [], "quotation": []}
     if not managed(cfg):
-        return []
-    errors = []
+        return out
     d = (block(cfg) or {}).get("diagrams")
     if d is not None:
         if not isinstance(d, dict):
-            errors.append("images.diagrams must be an object")
+            out["diagram"].append("images.diagrams must be an object")
         else:
             w = d.get("width", 1600)
             if not isinstance(w, int) or isinstance(w, bool) or not 320 <= w <= 4096:
-                errors.append("images.diagrams.width must be an integer from 320 to 4096")
+                out["diagram"].append("images.diagrams.width must be an integer from 320 to 4096")
             if not re.match(r"^#[0-9A-Fa-f]{6}$", str(d.get("background", "#ffffff"))):
-                errors.append("images.diagrams.background must be #RRGGBB (diagrams always have an opaque background)")
+                out["diagram"].append("images.diagrams.background must be #RRGGBB (diagrams always have an opaque "
+                                      "background)")
     f = (block(cfg) or {}).get("figure")
     if f is not None and not isinstance(f, dict):
-        return errors + ["images.figure must be an object"]
+        for k in out:
+            out[k].append("images.figure must be an object")
+        return out
     f = f or {}
+    try:
+        quoting = bool(_rules(cfg.root)["images"]["external"].get("quotation_categories"))
+    except Exception:  # noqa: BLE001 — unreadable rules: the gate reports them
+        quoting = False
     for name in ("diagram", "licensed", "quotation"):
         t = f.get(name)
         if t is None:
-            if name != "diagram" and external_on(cfg):
-                errors.append("images.figure.%s is missing — it must hold %s" % (
+            if (name == "licensed" and external_on(cfg)) or (name == "quotation" and external_on(cfg) and quoting):
+                out[name].append("images.figure.%s is missing — it must hold %s" % (
                     name, " ".join("{%s}" % x for x in FIGURE_REQUIRED[name])))
             continue
         if not isinstance(t, str) or not t.strip():
-            errors.append("images.figure.%s must be a string" % name)
+            out[name].append("images.figure.%s must be a string" % name)
             continue
         holes = set(re.findall(r"\{([^{}]*)\}", t))
         bad = sorted(holes - set(FIGURE_FIELDS))
         if bad:
-            errors.append("images.figure.%s has unknown placeholders: %s" % (name, ", ".join("{%s}" % b for b in bad)))
+            out[name].append("images.figure.%s has unknown placeholders: %s" % (
+                name, ", ".join("{%s}" % b for b in bad)))
         need = FIGURE_REQUIRED.get(name, ("ref", "alt"))
         missing = [x for x in need if x not in holes]
         if missing:
-            errors.append("images.figure.%s needs %s (attribution: license URI and source page link)" % (
+            out[name].append("images.figure.%s needs %s (attribution: license URI and source page link)" % (
                 name, ", ".join("{%s}" % m for m in missing)))
     w = f.get("words")
     if w is not None:
+        errs = []
         if not isinstance(w, dict):
-            errors.append("images.figure.words must be an object")
+            errs.append("images.figure.words must be an object")
         else:
             for k, v in w.items():
                 if k == "orientation":
                     if not isinstance(v, dict) or not all(isinstance(x, str) for x in v.values()):
-                        errors.append("images.figure.words.orientation must map landscape/portrait to strings")
+                        errs.append("images.figure.words.orientation must map landscape/portrait to strings")
                 elif not isinstance(v, str) or VALUE_BAD.search(v):
-                    errors.append("images.figure.words.%s must be a plain string" % k)
-    return errors
+                    errs.append("images.figure.words.%s must be a plain string" % k)
+        out["licensed"] += errs
+        out["quotation"] += errs
+    return out
+
+
+def figure_errors(cfg):
+    """Every `images.diagrams` and `images.figure` problem ([] when fine or unmanaged). Kept out
+    of Config.validate (L4); each turns only its own kind off (`figure_errors_by_kind`)."""
+    by = figure_errors_by_kind(cfg)
+    return list(dict.fromkeys(by["diagram"] + by["licensed"] + by["quotation"]))
 
 
 def og_errors(root, cfg):
@@ -287,7 +307,7 @@ def diagram_off(cfg):
         return "no-config"
     if not illustrator_on(cfg):
         return "no-illustrator"
-    if figure_errors(cfg) or limner.limner_errors(cfg):
+    if figure_errors_by_kind(cfg)["diagram"] or limner.limner_errors(cfg):
         return "config"
     if lang_tag(cfg) not in LANGS:
         return "lang:%s" % lang_tag(cfg)
@@ -301,7 +321,8 @@ def external_limits(root, cfg, category):
     qcats = ext.get("quotation_categories") or []
     oc = og_conf(cfg)
     fallback = True if oc is None else oc["fallback_first_image"]
-    return {"max": mx if isinstance(mx, int) else 0, "quotation": category in qcats and not fallback,
+    quoting = category in qcats and not fallback and not figure_errors_by_kind(cfg)["quotation"]
+    return {"max": mx if isinstance(mx, int) else 0, "quotation": quoting,
             "quotation_max": ext.get("quotation_max", 0), "quotation_min_chars": ext.get("quotation_min_chars", 0),
             "licenses": [x for x in ext.get("licenses") or [] if x in LICENSE_URLS], "rules": ext}
 
@@ -313,7 +334,7 @@ def external_off(root, cfg, category):
         return "no-illustrator"
     if cfg.translations():
         return "translations"
-    if figure_errors(cfg):
+    if figure_errors_by_kind(cfg)["licensed"]:
         return "config"
     if external_limits(root, cfg, category)["max"] <= 0:
         return "category"
@@ -442,6 +463,15 @@ def _candidates_section(root, tid):
     return text[m.end():m.end() + nxt.start()] if nxt else text[m.end():]
 
 
+def _candidate_urls(section):
+    """{"source_url": {image: values}, "page_url": {page: values}} — whole values of the
+    candidate lines, compared key by key (review m4: never a substring of another URL)."""
+    out = {"source_url": set(), "page_url": set()}
+    for m in re.finditer(r"(?m)^[ \t]*[-*][ \t]*(image|page)[ \t]*:[ \t]*(\S+)[ \t]*$", section):
+        out["source_url" if m.group(1) == "image" else "page_url"].add(m.group(2))
+    return out
+
+
 def research_claims(root, tid):
     """{claim id: withdrawn?} as `stage pass` reads claim lines."""
     from .store import _CLAIM_DEF_RE
@@ -465,9 +495,33 @@ def check_value(v):
     return isinstance(v, str) and v.strip() and len(v) <= VALUE_MAX and not VALUE_BAD.search(v)
 
 
-def snippet_text(cfg, it, orientation=None):
+def cur_item(root, cfg, slug, it):
+    """The item as it stands after `status --move`: `file` mapped onto the current image dir and
+    `ref` rewritten the same way (implementation review M3 — the body references the new path,
+    so an attribution built from the old `ref` would never be found)."""
+    f = it.get("file")
+    new = cur_path(root, cfg, slug, f) if f and slug else f
+    if new == f:
+        return it
+    from .validate import resolve_image_ref
+    out = dict(it, file=new)
+    ref = it.get("ref") or ""
+    for old in _old_slugs(root, slug):
+        i = ref.rfind("/%s/" % old)
+        if i >= 0:
+            cand = ref[:i] + "/%s/" % slug + ref[i + len(old) + 2:]
+            if resolve_image_ref(root, cfg.body_path(slug), cand) == new:
+                out["ref"] = cand
+                break
+    return out
+
+
+def snippet_text(cfg, it, orientation=None, root=None, slug=None):
     """The body text for one item: its `images.figure` template with the values filled in once
-    (no value is read again as a placeholder)."""
+    (no value is read again as a placeholder). With `root` and `slug`, the item's paths follow a
+    `status --move` first."""
+    if root and slug:
+        it = cur_item(root, cfg, slug, it)
     w = words(cfg)
     if it.get("kind") == "diagram":
         t = figure(cfg).get("diagram") or "![{alt}]({ref})"
@@ -505,7 +559,7 @@ def check_manifest(root, cfg, tid, st, man):
     lim = external_limits(root, cfg, cat)
     exts_ok = allowed_exts(root, cfg, slug)
     claims = research_claims(root, tid)
-    cands = _candidates_section(root, tid)
+    cands = _candidate_urls(_candidates_section(root, tid))
     rejected = {r.get("source_url") for r in st.get("image_rejects") or [] if isinstance(r, dict)}
     shot_files = set()
     try:
@@ -576,7 +630,7 @@ def check_manifest(root, cfg, tid, st, man):
         rec = prev_items.get(iid) or {}
         if rec.get("status") in ("fetched", "ready") and rec.get("key") == item_key(it) and \
                 isinstance(it.get("use"), str) and figure(cfg).get(it.get("use")):
-            sn = snippet_text(cfg, it, rec.get("orientation"))
+            sn = snippet_text(cfg, it, rec.get("orientation"), root, slug)
             c = text.count(sn)
             if c != 1:
                 errors.append("%s: the attribution (`HRD image snippet --topic %s --id %s`) must be in the article "
@@ -642,7 +696,7 @@ def _external_errors(root, cfg, where, it, lim, cands, rejected):
     for k in ("source_url", "page_url"):
         if not public_url(it.get(k)):
             errors.append("%s: %s must be a public https URL" % (where, k))
-        elif it[k] not in cands:
+        elif it[k] not in cands[k]:
             errors.append("%s: %s is not in research.md ## Image candidates — copy the candidate as written" % (where, k))
     if not check_value(it.get("credit")):
         errors.append("%s: credit must be set (at most %d characters, no < > \" [ ] \\ or line break)" % (where, VALUE_MAX))
@@ -859,9 +913,10 @@ def diagram_state(root, cfg, tid, st, it, lines, strict=True, rev=None):
     return "ready", E
 
 
-def external_state(root, tid, it, led, rev=None):
-    """`ready` (logged for this item and confirmed), `fetched` (logged only) or `pending`."""
-    h = _rev_hashes(root, rev, it.get("file"))
+def external_state(root, tid, it, led, rev=None, path=None):
+    """`ready` (logged for this item and confirmed), `fetched` (logged only) or `pending`.
+    `path`: where the file is now (after `status --move`); the key stays the manifest's."""
+    h = _rev_hashes(root, rev, path or it.get("file"))
     if not h or not led.fetch_line(h, tid, it.get("id"), item_key(it)):
         return "pending"
     return "ready" if led.confirmed(h) else "fetched"
@@ -1014,7 +1069,17 @@ def _diagram_item_errors(root, cfg, tid, st, it):
     return None
 
 
-def render(root, cfg, tid, ids=None):
+def pushed_change(root, cfg, tid, st, it, lines):
+    """ship §5 (§2.7.2 table): a human changed the diagram — its PNG is no recorded render, or
+    its SVG is not the one that render drew. Settings and manifest text are not looked at
+    (implementation review M2: a settings change alone never asks for limner after a push)."""
+    E = find_render(lines, file_hashes(root, cur_path(root, cfg, st["slug"], it.get("file"))))
+    return E is None or E.get("svg_sha256") != _svg_sha(root, tid, it.get("id"))
+
+
+def render(root, cfg, tid, ids=None, after_push=False):
+    """`HRD image render`. Without `--id` it renders what draft needs (`after_push`: only what
+    a human changed in a pushed PR — ship §5)."""
     from .store import load_state, save_state
     st = load_state(root, tid)
     if not _on_branch(root, tid, st):
@@ -1029,7 +1094,8 @@ def render(root, cfg, tid, ids=None):
     out = {"rendered": [], "failed": [], "remaining": [], "skipped": []}
     todo = []
     for it in items:
-        if not ids and diagram_state(root, cfg, tid, st, it, lines)[0] == "ready":
+        if not ids and (not pushed_change(root, cfg, tid, st, it, lines) if after_push else
+                        diagram_state(root, cfg, tid, st, it, lines)[0] == "ready"):
             out["skipped"].append(it.get("id"))
         else:
             todo.append(it)
@@ -1054,21 +1120,34 @@ def render(root, cfg, tid, ids=None):
             continue
         svg = svg_rel(tid, iid)
         try:
-            svg_texts(os.path.join(root, svg))
+            # one read: the bytes limner draws are the bytes the record's sha and text come from
+            # (implementation review m7 — the source may change while limner runs)
             with open(os.path.join(root, svg), "rb") as fh:
-                svg_sha = hashlib.sha256(fh.read()).hexdigest()
+                raw = fh.read()
+            drawn = svg_texts(raw)
         except (HeraldError, OSError) as e:
             out["failed"].append({"id": iid, "code": "svg", "class": "content", "message": str(e)})
             continue
+        svg_sha = hashlib.sha256(raw).hexdigest()
+        snap = os.path.join(sd, "herald-render", "%s-%s.svg" % (iid, limner._stamp()))
+        os.makedirs(os.path.dirname(snap), exist_ok=True)
+        with open(snap, "wb") as fh:
+            fh.write(raw)
         f = it["file"]
         h = file_hashes(root, f)
         if h and not find_render(lines, h):
             move_to_removed(root, tid, [f], "replaced", area="images")  # not Herald's render: kept (P9)
         os.makedirs(os.path.dirname(os.path.join(root, f)), exist_ok=True)
-        res = limner.run(root, cfg, ["rasterize"], [
-            ("--svg", os.path.join(os.path.realpath(root), svg)), ("--root", os.path.realpath(root)),
-            ("--state-dir", sd), ("--out", os.path.join(os.path.realpath(root), f)),
-            ("--width", conf["width"]), ("--background", conf["background"])])
+        try:
+            res = limner.run(root, cfg, ["rasterize"], [
+                ("--svg", snap), ("--root", os.path.realpath(root)),
+                ("--state-dir", sd), ("--out", os.path.join(os.path.realpath(root), f)),
+                ("--width", conf["width"]), ("--background", conf["background"])])
+        finally:
+            try:
+                os.remove(snap)
+            except OSError:
+                pass
         problems, failure = limner.classify(res)
         if failure:
             out["failed"].append(dict(failure, id=iid))
@@ -1081,8 +1160,6 @@ def render(root, cfg, tid, ids=None):
             out["failed"].append({"id": iid, "code": "record-mismatch", "class": "env",
                                   "message": "limner's out_sha256 is not the file Herald reads"})
             continue
-        with open(os.path.join(root, svg), "rb") as fh:
-            drawn = svg_texts(fh.read())
         rec = {"id": iid, "svg_sha256": svg_sha, "width": conf["width"], "background": conf["background"],
                "png_blob": h[0], "png_sha256": h[1], "texts": drawn,
                "limner": (limner.probe(root, cfg) or {}).get("limner"), "at": now_iso()}
@@ -1126,21 +1203,71 @@ class PinnedHTTPS(http.client.HTTPSConnection):
     """HTTPS to the address Herald checked, never resolved again (no DNS rebinding); the
     certificate is still checked against the host name."""
 
-    def __init__(self, host, ip, timeout):
+    def __init__(self, host, ips, timeout):
         super().__init__(host, 443, timeout=timeout, context=ssl.create_default_context())
-        self._ip = ip
+        self._ips = [ips] if isinstance(ips, str) else list(ips)
 
     def connect(self):
-        sock = socket.create_connection((self._ip, 443), self.timeout)
-        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+        # every address was checked; try them in the resolver's order, so a host whose first
+        # answer is unreachable here (IPv6 without a route) still works (review m2)
+        err = None
+        for ip in self._ips:
+            try:
+                sock = socket.create_connection((ip, 443), self.timeout)
+            except OSError as e:
+                err = e
+                continue
+            self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+            return
+        raise err or OSError("no address")
 
 
 CONNECTION = PinnedHTTPS  # tests replace it with a fake server
 
 
 def _resolve(host):
-    from .shots import _resolve as resolve
-    return resolve(host)
+    """Every address `host` resolves to, in the resolver's order (deduplicated), within the DNS
+    time limit."""
+    import threading
+    from .shots import DNS_TIMEOUT
+    box = {}
+
+    def work():
+        try:
+            box["addrs"] = list(dict.fromkeys(ai[4][0] for ai in socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)))
+        except Exception as e:  # noqa: BLE001
+            box["err"] = e
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    t.join(DNS_TIMEOUT)
+    if t.is_alive() or "err" in box or not box.get("addrs"):
+        raise OSError("%s did not resolve" % host)
+    return box["addrs"]
+
+
+def _within(deadline, conn, fn):
+    """fn() — connecting, TLS and the response headers — under the item's wall-clock deadline;
+    a server that drips its headers is cut off there (review m1), the socket closed."""
+    import threading
+    box = {}
+
+    def work():
+        try:
+            box["v"] = fn()
+        except BaseException as e:  # noqa: BLE001 — re-raised in the caller's thread
+            box["e"] = e
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    t.join(max(0.0, deadline - time.monotonic()))
+    if t.is_alive():
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+        raise _Fail("timeout")
+    if "e" in box:
+        raise box["e"]
+    return box["v"]
 
 
 class _Fail(Exception):
@@ -1178,14 +1305,18 @@ def _get(url, max_bytes, deadline, user_agent):
                 raise _Fail("redirect-refused" if hops else "dns-private")
         if time.monotonic() > deadline:
             raise _Fail("timeout")
-        conn = CONNECTION(host, addrs[0], SOCK_TIMEOUT)
+        conn = CONNECTION(host, addrs, min(SOCK_TIMEOUT, max(0.1, deadline - time.monotonic())))
         try:
             path = parts.path or "/"
             if parts.query:
                 path += "?" + parts.query
-            conn.request("GET", path, headers={"User-Agent": user_agent, "Accept": "image/png,image/jpeg,image/webp",
-                                               "Accept-Encoding": "identity"})
-            resp = conn.getresponse()
+
+            def head():
+                conn.request("GET", path, headers={"User-Agent": user_agent,
+                                                   "Accept": "image/png,image/jpeg,image/webp",
+                                                   "Accept-Encoding": "identity"})
+                return conn.getresponse()
+            resp = _within(deadline, conn, head)
             status = resp.status
             if status in (301, 302, 303, 307, 308):
                 hops += 1
@@ -1279,6 +1410,10 @@ def fetch(root, cfg, tid, ids=None, version="0"):
         raise HeraldError("external images are off here (%s)" % why)
     items = _plan_items(root, tid, ids, kind="external")
     man_errors = check_manifest(root, cfg, tid, st, load_manifest(root, tid))[0]
+    # plan's whole-manifest rules hold for a fetch too (counts, quotations, max_total — review m3)
+    general = [e for e in man_errors if not re.match(r"^([a-z][0-9]{1,3}|images\[[0-9]+\]): ", e)]
+    if general:
+        raise HeraldError("images.json: " + "; ".join(general))
     rules = external_limits(root, cfg, _category(root, cfg, st["slug"]))["rules"]
     max_bytes = int(rules.get("max_bytes") or 10485760)
     led = Ledger(root)
@@ -1352,8 +1487,8 @@ def snippet(root, cfg, tid, iid):
         if r.get("key") != item_key(it) or not r.get("orientation"):
             raise HeraldError("%s is not fetched yet — `HRD image fetch --topic %s --id %s` first (the attribution "
                               "follows the picture's orientation)" % (iid, tid, iid))
-        return {"snippet": snippet_text(cfg, it, r.get("orientation"))}
-    return {"snippet": snippet_text(cfg, it)}
+        return {"snippet": snippet_text(cfg, it, r.get("orientation"), root, st.get("slug"))}
+    return {"snippet": snippet_text(cfg, it, None, root, st.get("slug"))}
 
 
 # --- confirm / reject (§2.7.3) -----------------------------------------------------------------
@@ -1673,6 +1808,17 @@ def _accept_human_og(root, cfg, tid, path, h, pr):
         raise HeraldError("%s differs from the PR head (a local edit) — not a human's OG file" % path)
 
 
+def _settle_base_card(root, cfg, tid, path, base):
+    """Without a card of its own (`kept`, or `off` but for an accepted human file) the OG path
+    holds base's card or nothing: any other file there goes under removed/, and base's card comes
+    back when it is gone (implementation review M1 — every exit of `og`, early returns included)."""
+    cur = file_hashes(root, path)
+    if cur and cur[0] != base:
+        move_to_removed(root, tid, [path], "og-off", area="images")
+    if base and not os.path.isfile(os.path.join(root, path)):
+        git(root, "checkout", "origin/%s" % cfg.base, "--", path, check=False)
+
+
 def og(root, cfg, tid, human_push=False, pr=None):
     from .shots import image_size
     from .store import load_state, save_state
@@ -1725,6 +1871,8 @@ def og(root, cfg, tid, human_push=False, pr=None):
         if (prev.get("status") == "made" and h and h[0] == prev.get("sha")) or prev.get("status") == "kept" or \
                 (prev.get("status") == "off" and (why in OG_CONTENT_WHY or why.startswith("bad-value:") or
                                                   why == "human-file")):
+            if prev.get("status") in ("kept", "off") and why != "human-file":
+                _settle_base_card(root, cfg, tid, path, base)
             res.update(status=prev["status"], why=prev.get("why"), by=prev.get("by", by))
             return res
     refresh = _is_refresh(root, tid, st)
@@ -1748,11 +1896,7 @@ def og(root, cfg, tid, human_push=False, pr=None):
     if status == "made":
         rec["og"] = {"key": key, "status": "made", "sha": blob(root, path), "by": by}
     else:
-        cur = file_hashes(root, path)
-        if status == "off" and cur and cur[0] != base:
-            move_to_removed(root, tid, [path], "og-off", area="images")  # this topic's own card goes
-        if status in ("off", "kept") and base and not os.path.isfile(os.path.join(root, path)):
-            git(root, "checkout", "origin/%s" % cfg.base, "--", path, check=False)  # base's card is never ours to take
+        _settle_base_card(root, cfg, tid, path, base)  # this topic's own card goes; base's stays
         rec["og"] = {"key": key, "status": status, "by": by}
         if status == "off":
             rec["og"]["why"] = why
@@ -1849,7 +1993,7 @@ def status(root, cfg, tid, rev=None):
     slug = st.get("slug")
     lines, dropped = slug_renders(root, cfg, slug, rev) if slug else ([], 0)
     out_items, snippets, rows = [], [], []
-    pend = {"render": [], "fetch": [], "confirm": []}
+    pend = {"render": [], "render_after_push": [], "fetch": [], "confirm": []}
     body = _body(root, cfg, slug, rev) if slug else ""
     for it in _items(man):
         iid, kind = it.get("id"), it.get("kind")
@@ -1860,13 +2004,16 @@ def status(root, cfg, tid, rev=None):
             row.update(status=s, texts=len(E["texts"]) if E else None)
             if s == "pending":
                 pend["render"].append(iid)
+            if not rev and pushed_change(root, cfg, tid, st, it, lines):
+                pend["render_after_push"].append(iid)
             claims = sorted({c for t in it.get("texts") or [] if isinstance(t, dict) for c in t.get("claims") or []})
             rows.append("| %s | diagram | %s | %d texts%s — drawn in %s |" % (
                 iid, it.get("file"), len(it.get("texts") or []), (", claims " + ", ".join(claims)) if claims else "",
                 lang_tag(cfg)))
         elif kind == "external" and slug:
-            s = external_state(root, tid, it, led, rev)
-            h = _rev_hashes(root, rev, it.get("file"))
+            cur = cur_path(root, cfg, slug, it.get("file"))
+            s = external_state(root, tid, it, led, rev, path=cur)
+            h = _rev_hashes(root, rev, cur)
             replaced = bool(r.get("sha") and h and h[0] != r["sha"])
             row.update(status=s, use=it.get("use"), credit=it.get("credit"), license=it.get("license"),
                        page_url=it.get("page_url"), source_url=it.get("source_url"), fetched_at=r.get("fetched_at"),
@@ -1876,7 +2023,7 @@ def status(root, cfg, tid, rev=None):
             elif s == "fetched":
                 pend["confirm"].append(iid)
             if r.get("orientation") and r.get("key") == item_key(it) and figure(cfg).get(it.get("use")):
-                sn = snippet_text(cfg, it, r.get("orientation"))
+                sn = snippet_text(cfg, it, r.get("orientation"), root, slug)
                 snippets.append({"id": iid, "text": sn, "alt": it.get("alt"), "in_body": body.count(sn)})
             what = ("licensed %s" % it.get("license")) if it.get("use") == "licensed" else \
                 "**quotation — no OG/SNS use**"
@@ -1967,7 +2114,7 @@ def draft_problems(root, cfg, tid, st):
                 out.append("%s is not fetched (or not the file `HRD image fetch` wrote) — `HRD image plan`, then `HRD "
                            "image fetch --topic %s --id %s`" % (iid, tid, iid))
             elif figure(cfg).get(it.get("use")):
-                sn = snippet_text(cfg, it, r.get("orientation"))
+                sn = snippet_text(cfg, it, r.get("orientation"), root, slug)
                 if body.count(sn) != 1:
                     out.append("%s: the attribution must be in the article verbatim exactly once (found %d) — `HRD "
                                "image snippet --topic %s --id %s`" % (iid, body.count(sn), tid, iid))
@@ -2000,10 +2147,15 @@ def og_draft_problems(root, cfg, tid, st):
         return ["the OG image is not made for the current title — `HRD image og --topic %s` (it records `off` when it "
                 "cannot make one)" % tid]
     h = file_hashes(root, path)
+    base = _base_blob(root, cfg, path)
     if og_rec.get("status") == "made":
         if not h or h[0] != og_rec.get("sha"):
             return ["%s is not the OG image Herald made — `HRD image og --topic %s`" % (path, tid)]
-    elif h and h[0] != og_rec.get("sha") and h[0] != _base_blob(root, cfg, path):
+    elif base and og_rec.get("why") != "human-file" and (not h or h[0] != base):
+        # base's card is never ours to take or replace without a card of our own (review M1)
+        return ["%s must be %s's published OG card (this topic made none) — `HRD image og --topic %s` puts it "
+                "back" % (path, cfg.base, tid)]
+    elif h and h[0] != og_rec.get("sha") and h[0] != base:
         return ["%s is no OG file Herald knows — `HRD image og --topic %s` (a human's own OG goes into the PR)"
                 % (path, tid)]
     return []
@@ -2046,7 +2198,7 @@ def verify_problems(root, cfg, tid, st, ver, amend=False):
             continue
         r = (rec.get("items") or {}).get(it.get("id")) or {}
         if figure(cfg).get(it.get("use")) and r.get("orientation"):
-            sn = snippet_text(cfg, it, r.get("orientation"))
+            sn = snippet_text(cfg, it, r.get("orientation"), root, slug)
             if body.count(sn) != 1:
                 out.append("%s: the attribution is not in the article verbatim exactly once — put it back as `HRD image "
                            "snippet` gives it" % it.get("id"))
@@ -2106,7 +2258,7 @@ def scope_problems(root, cfg, tid, publish=False):
             out.append("%s: the committed file is not an external image a human confirmed — `HRD image confirm` before "
                        "publishing" % iid)
         if figure(cfg).get(it.get("use")) and r.get("orientation") and \
-                body.count(snippet_text(cfg, it, r.get("orientation"))) != 1:
+                body.count(snippet_text(cfg, it, r.get("orientation"), root, st["slug"])) != 1:
             out.append("%s: the attribution is not in the committed article exactly once" % iid)
     q = og_quotation_problem(root, cfg, st["slug"], rev="HEAD")
     if q:
@@ -2140,21 +2292,86 @@ def og_excluded(root, cfg, tid, rev, changed, slug):
     return bool((((st.get("images") or {}).get("og")) or {}).get("stale_base"))
 
 
+_BASE_EXTERNAL = {}
+
+
+def _git_run(root, args, data=None):
+    """One git process (bytes in, bytes out) — `external_on_base`'s only way to read base, so
+    tests can count what it costs."""
+    import subprocess
+    return subprocess.run(["git"] + list(args), cwd=root, input=data, capture_output=True)
+
+
+def _ref_stamp(root, base):
+    """When origin/<base> last moved, without a git process (the loose ref and packed-refs
+    files); None when .git is not a plain directory (then the cache lives for the process)."""
+    g = os.path.join(root, ".git")
+    if not os.path.isdir(g):
+        return None
+    out = []
+    for p in (os.path.join(g, "refs", "remotes", "origin", base), os.path.join(g, "packed-refs")):
+        try:
+            st = os.stat(p)
+            out.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
+def _base_external_map(root, cfg):
+    """{slug: [recorded external files]} from every committed state on origin/<base>, built
+    once per base commit and process (implementation review M4): one `git grep` finds the states
+    that record an external image at all — none (any repo that never fetched one, managed or
+    not) → empty at once —, then one `git cat-file --batch` reads only those."""
+    ref = "origin/%s" % cfg.base
+    key = (os.path.realpath(root), ref, _ref_stamp(root, cfg.base))
+    if key in _BASE_EXTERNAL:
+        return _BASE_EXTERNAL[key]
+    out = {}
+    g = _git_run(root, ["grep", "-l", "-F", '"external"', ref, "--", ".claude/herald/work"])
+    paths = [x.split(":", 1)[1] for x in g.stdout.decode("utf-8", "replace").splitlines()
+             if ":" in x and x.endswith("/state.json") and x.split(":", 1)[1].count("/") == 4]
+    if paths:
+        b = _git_run(root, ["cat-file", "--batch"], "".join("%s:%s\n" % (ref, x) for x in paths).encode())
+        data, pos = b.stdout, 0
+        while pos < len(data):
+            nl = data.find(b"\n", pos)
+            if nl < 0:
+                break
+            head = data[pos:nl].split()
+            pos = nl + 1
+            if len(head) < 3 or head[1] != b"blob":
+                continue
+            n = int(head[2])
+            raw, pos = data[pos:pos + n], pos + n + 1
+            try:
+                st = json.loads(raw.decode("utf-8"))
+            except ValueError:
+                continue
+            if not isinstance(st, dict) or not st.get("slug"):
+                continue
+            for f, m in (((st.get("images") or {}).get("files")) or {}).items():
+                if isinstance(m, dict) and m.get("kind") == "external":
+                    out.setdefault(st["slug"], []).append(f)
+    _BASE_EXTERNAL[key] = out
+    return out
+
+
 def external_on_base(root, cfg, slug):
     """Files of `slug` (moved slugs too) recorded as external images in a committed state on
-    origin/<base> and present there — the same on every machine (§2.6.7)."""
+    origin/<base> and present there — the same on every machine (§2.6.7). Costs one `git grep`
+    per command when no state on base records an external image."""
     ref = "origin/%s" % cfg.base
+    emap = _base_external_map(root, cfg)
+    if not emap:
+        return []
     olds = set(_old_slugs(root, slug)) | {slug}
-    out = []
-    for _, st in _topic_states(root, ref):
-        if st.get("slug") not in olds:
-            continue
-        for f, m in (((st.get("images") or {}).get("files")) or {}).items():
-            if isinstance(m, dict) and m.get("kind") == "external":
-                p = cur_path(root, cfg, slug, f)
-                if git_ok(root, "cat-file", "-e", "%s:%s" % (ref, p)):
-                    out.append(p)
-    return sorted(set(out))
+    cand = sorted({cur_path(root, cfg, slug, f) for s_ in olds for f in emap.get(s_, [])})
+    if not cand:
+        return []
+    chk = _git_run(root, ["cat-file", "--batch-check"], "".join("%s:%s\n" % (ref, p) for p in cand).encode())
+    lines = chk.stdout.decode("utf-8", "replace").splitlines()
+    return [p for p, line in zip(cand, lines) if not line.endswith(" missing")]
 
 
 def snippet_spans(root, cfg, tid, st, text):
@@ -2167,7 +2384,7 @@ def snippet_spans(root, cfg, tid, st, text):
     for it in _items(man):
         r = (((st.get("images") or {}).get("items")) or {}).get(it.get("id")) or {}
         if it.get("kind") == "external" and r.get("orientation") and figure(cfg).get(it.get("use")):
-            sn = snippet_text(cfg, it, r["orientation"])
+            sn = snippet_text(cfg, it, r["orientation"], root, st.get("slug"))
             i = text.find(sn)
             while i >= 0:
                 spans.append((i, i + len(sn)))

@@ -116,12 +116,12 @@ class FakeResp:
 
 
 class FakeConn:
-    """A fake HTTPS server keyed by (host, path); records (host, ip) per connection."""
+    """A fake HTTPS server keyed by (host, path); records (host, the checked addresses) per connection."""
     routes, log = {}, []
 
-    def __init__(self, host, ip, timeout):
-        self.host, self.ip = host, ip
-        FakeConn.log.append((host, ip))
+    def __init__(self, host, ips, timeout):
+        self.host, self.ips = host, list(ips)
+        FakeConn.log.append((host, self.ips))
 
     def request(self, method, path, headers=None):
         self.path, self.headers = path, headers
@@ -148,6 +148,7 @@ class ImageCase(RepoCase):
     def setUp(self):
         super().setUp()
         limner.reset_cache()
+        images._BASE_EXTERNAL.clear()
         self.lmndir = os.path.join(self.tmp, "lmn")
         os.makedirs(self.lmndir)
         self.lmn = os.path.join(self.lmndir, "lmn")
@@ -356,6 +357,15 @@ class LimnerTests(ImageCase):
         limner.probe(self.root, self.cfg)
         self.assertFalse(os.path.exists(os.path.join(sd, "herald-probe")))
 
+    def test_doctor_command_string_keeps_quoted_paths(self):
+        """m12: a path with a space stays one argv element."""
+        spaced = os.path.join(self.tmp, "Application Support")
+        os.makedirs(spaced)
+        shutil.copy(self.lmn, os.path.join(spaced, "lmn"))
+        out = limner.doctor(self.root, self.cfg, command='"%s"' % os.path.join(spaced, "lmn"))
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(out["command"], [os.path.join(spaced, "lmn")])
+
     def test_doctor_is_display_only(self):
         out = limner.doctor(self.root, self.cfg)
         self.assertTrue(out["ok"])
@@ -526,6 +536,27 @@ class PlanTests(ImageCase):
         self.write("src/content/blog/%s.md" % SLUG, BODY.format(d1="", e1=""))
         self.assertIn("exactly once", self.errors([self.d1()]))
 
+    def test_candidate_urls_match_whole_values(self):
+        """m4: a prefix of a candidate URL, or the page URL used as the image, is not a candidate."""
+        for bad in (dict(source_url="https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Lobby.jpg"),
+                    dict(source_url=PAGE), dict(page_url=SRC)):
+            self.manifest([self.d1(), self.e1(**bad)])
+            self.assertIn("Image candidates", " ".join(self.plan(check=True)["errors"]), bad)
+
+    def test_figure_errors_turn_off_their_own_kind(self):
+        """m11: a missing quotation template turns only quotations off, a diagram setting only diagrams."""
+        self.config(lambda c: c["images"].update(figure={k: v for k, v in FIGURE.items() if k != "quotation"}))
+        k = images.kinds(self.root, self.cfg, TID)
+        self.assertTrue(k["diagram"]["ok"] and k["external"]["ok"])
+        self.rules({"images": {"external": {"quotation_categories": ["guide"]}}})
+        self.assertTrue(images.figure_errors(self.cfg))
+        k = images.kinds(self.root, self.cfg, TID)
+        self.assertTrue(k["diagram"]["ok"] and k["external"]["ok"])
+        self.assertFalse(k["external"]["quotation"])
+        self.config(lambda c: c["images"].update(figure=FIGURE, diagrams={"width": 10}))
+        k = images.kinds(self.root, self.cfg, TID)
+        self.assertEqual((k["diagram"]["why"], k["external"]["ok"]), ("config", True))
+
     def test_rejected_url_and_limits(self):
         st = self.state()
         st["image_rejects"] = [{"id": "e1", "source_url": SRC, "reason": "watermark", "drop": False, "at": "x"}]
@@ -694,7 +725,7 @@ class FetchTests(ImageCase):
         self.assertEqual(recs[0]["blob"], shots.blob(self.root, "%s/e1-lobby.jpg" % IMG))
         origs = os.listdir(os.path.join(self.root, ".claude/herald/memory/images/originals", TID))
         self.assertEqual(len(origs), 1)
-        self.assertEqual(FakeConn.log, [("upload.wikimedia.org", GLOBAL[0])])
+        self.assertEqual(FakeConn.log, [("upload.wikimedia.org", GLOBAL)])
         st = self.state()["images"]["items"]["e1"]
         self.assertEqual((st["status"], st["orientation"]), ("fetched", "landscape"))
         self.assertEqual(self.state()["images"]["files"]["%s/e1-lobby.jpg" % IMG]["kind"], "external")
@@ -794,6 +825,39 @@ class FetchTests(ImageCase):
             with self.assertRaises(OSError):
                 conn.connect()
         cc.assert_called_once_with(("93.184.216.34", 443), 5)
+        # every checked address, in the resolver's order: an unreachable first one (IPv6 without a
+        # route) falls through to the next (review m2)
+        conn = images.PinnedHTTPS("upload.wikimedia.org", ["2406:da00::1", "93.184.216.34"], 5)
+        with mock.patch("socket.create_connection", side_effect=[OSError("no route"), OSError("stop")]) as cc:
+            with self.assertRaises(OSError):
+                conn.connect()
+        self.assertEqual([c.args[0] for c in cc.call_args_list], [("2406:da00::1", 443), ("93.184.216.34", 443)])
+        with mock.patch("socket.getaddrinfo", return_value=[(30, 1, 6, "", ("2406:da00::1", 443, 0, 0)),
+                                                             (2, 1, 6, "", ("93.184.216.34", 443)),
+                                                             (2, 1, 6, "", ("3.1.1.1", 443))]):
+            self.assertEqual(images._resolve("x.example.org"), ["2406:da00::1", "93.184.216.34", "3.1.1.1"])
+
+    def test_header_drip_hits_the_item_deadline(self):
+        class SlowHead(FakeConn):
+            def getresponse(self):
+                time.sleep(5)  # a server dripping its headers below the socket timeout
+                return FakeResp(*jpeg_route())
+        t0 = time.monotonic()
+        with mock.patch.object(images, "FETCH_ITEM", 0.5), mock.patch.object(images, "CONNECTION", SlowHead), \
+                mock.patch.object(images, "_resolve", return_value=GLOBAL):
+            out = images.fetch(self.root, self.cfg, TID)
+        self.assertLess(time.monotonic() - t0, 3)
+        self.assertEqual(out["failed"][0]["code"], "timeout")
+
+    def test_whole_manifest_errors_refuse_a_fetch(self):
+        self.rules({"images": {"external": {"max": 0, "per_category": {"guide": 1}}}})
+        self.manifest([self.d1(), self.e1(), self.e1(id="e2", file="%s/e2-x.jpg" % IMG, ref="/blog-images/%s/e2-x.jpg" % SLUG)])
+        self.body(e1="![a](/blog-images/new-post/e1-lobby.jpg) ![b](/blog-images/new-post/e2-x.jpg)")
+        self.route(SRC, jpeg_route())
+        with self.assertRaises(Exception) as cm:
+            self.fetch()
+        self.assertIn("this category allows 1", str(cm.exception))
+        self.assertFalse(os.path.exists(os.path.join(self.root, shots.FETCHES)))  # nothing downloaded or logged
 
     def test_rejected_before_and_order(self):
         st = self.state()
@@ -804,17 +868,14 @@ class FetchTests(ImageCase):
         st["image_rejects"] = []
         store.save_state(self.root, TID, st)
         # a cut between the ledger line and the file: the line is there, the file is not → pending, refetch
-        real = images._check_image
-
-        def boom(*a, **k):
-            raise SystemExit("cut")
         with mock.patch.object(images, "move_to_removed", side_effect=SystemExit("cut")):
             self.write("%s/e1-lobby.jpg" % IMG, b"junk", binary=True)
             with self.assertRaises(SystemExit):
                 self.fetch()
         self.assertEqual(len(shots.ledger_read(os.path.join(self.root, shots.FETCHES))[0]), 1)
         self.assertEqual(open(os.path.join(self.root, IMG, "e1-lobby.jpg"), "rb").read(), b"junk")
-        self.assertTrue(real)
+        led = shots.Ledger(self.root)
+        self.assertEqual(images.external_state(self.root, TID, self.e1(), led), "pending")  # the file is not the fetch
 
 
 class ConfirmRejectTests(ImageCase):
@@ -891,6 +952,19 @@ class StagePassTests(ImageCase):
         self.assertFalse(st["images"]["awaiting"])
         self.assertEqual(len(self.calls()), n)  # stage pass never calls limner (P14)
 
+    def test_rule_u_covers_an_outside_og_path(self):
+        """m6: an unconfirmed fetched image put at a repo generator's OG path is caught too."""
+        self.config(lambda c: c["images"].update(og={"path": "public/blog-og/{slug}.png", "command": ["gen", "{out}"]}))
+        self.fetched()
+        os.makedirs(os.path.join(self.root, "public/blog-og"))
+        shutil.copy(os.path.join(self.root, IMG, "e1-lobby.jpg"), os.path.join(self.root, "public/blog-og/%s.png" % SLUG))
+        self.assertIn("public/blog-og/%s.png" % SLUG, shots._changed_images(self.root, self.cfg, SLUG))
+        probs = shots.draft_problems(self.root, self.cfg, TID, self.state())
+        self.assertTrue(any("blog-og" in p for p in probs), probs)
+        self.commit("wip", ".")
+        hits = [p for _, p, _ in shots._range_blobs(self.root, self.cfg, SLUG)]
+        self.assertIn("public/blog-og/%s.png" % SLUG, hits)
+
     def test_rule_u_copy_under_another_name(self):
         self.fetched()
         shutil.copy(os.path.join(self.root, IMG, "e1-lobby.jpg"), os.path.join(self.root, IMG, "copy.jpg"))
@@ -924,24 +998,95 @@ class StagePassTests(ImageCase):
         self.assertEqual(self.calls() and [c for c in self.calls() if c[0] == "rasterize" and "--width" in c and
                                            "1600" in c], [])  # no render was asked for
 
-    def test_moved_slug_and_refresh_find_the_record(self):
-        self.render()
+    def move_slug(self, new="c-post"):
+        """`status --move new-post -> c-post` as a human does it: body, images and image paths
+        moved, published.json and the topic's state point at the new slug."""
+        pub = store.load_published(self.root)
+        pub.setdefault("articles", []).append({"slug": new, "path": "src/content/blog/%s.md" % new, "origin": "herald",
+                                               "moved_from": [{"slug": SLUG}], "current_topic_id": TID})
+        store.save_published(self.root, pub)
+        shutil.move(os.path.join(self.root, IMG), os.path.join(self.root, "public/blog-images", new))
+        old = os.path.join(self.root, "src/content/blog/%s.md" % SLUG)
+        body = open(old).read().replace("/blog-images/%s/" % SLUG, "/blog-images/%s/" % new)
+        os.remove(old)
+        self.write("src/content/blog/%s.md" % new, body)
+        st = self.state()
+        st["slug"] = new
+        store.save_state(self.root, TID, st)
+        return new
+
+    def test_refresh_and_moved_slug_find_the_record(self):
+        self.ready()
         lines = images.slug_renders(self.root, self.cfg, SLUG)[0]
         # a refresh topic of the same slug reads the earlier topic's records
-        st2 = store.new_state("r-0002", SLUG)
-        store.save_state(self.root, "r-0002", st2)
+        store.save_state(self.root, "r-0002", store.new_state("r-0002", SLUG))
         self.assertEqual(len(images.slug_renders(self.root, self.cfg, SLUG)[0]), len(lines))
-        self.assertTrue(images.find_render(images.slug_renders(self.root, self.cfg, SLUG)[0],
-                                           shots.file_hashes(self.root, "%s/d1-steps.png" % IMG)))
+        # after `status --move` the diagram is found by the move chain and passes base re-verify
+        new = self.move_slug()
+        st = self.state()
+        self.assertEqual(images.cur_path(self.root, self.cfg, new, self.d1()["file"]),
+                         "public/blog-images/%s/d1-steps.png" % new)
+        self.assertEqual(images.texts(self.root, self.cfg, TID)["texts"][1]["text"], "Fee 3,000 yen")
+        ver = {"images": {"texts": 2, "unsupported": []}}
+        # M3 (implementation review): the external attribution follows the move too
+        self.assertEqual(images.verify_problems(self.root, self.cfg, TID, st, ver, amend=True), [])
+        out = images.status(self.root, self.cfg, TID)
+        self.assertEqual(out["snippets"][0]["in_body"], 1)
+        self.assertEqual([i["status"] for i in out["items"]], ["ready", "ready"])
 
     def test_trim_refuses_attribution_and_image_text(self):
+        from hrdlib.hashing import worktree_hash
         self.ready()
         st = self.state()
-        sn = images.snippet_text(self.cfg, self.e1(), "landscape")
+        cur = worktree_hash(self.root, self.cfg, SLUG)
+        st["stage"] = "verify"
+        st["stages"]["critique"] = {"body_hash": cur}
+        store.save_state(self.root, TID, st)
         text = open(os.path.join(self.root, "src/content/blog/%s.md" % SLUG)).read()
         spans = images.snippet_spans(self.root, self.cfg, TID, st, text)
-        self.assertEqual(len(spans), 1)
-        self.assertEqual(text[spans[0][0]:spans[0][1]], sn)
+        self.assertEqual(text[spans[0][0]:spans[0][1]], images.snippet_text(self.cfg, self.e1(), "landscape"))
+
+        def verify(sentence, **extra):
+            self.write(W + "/verify.json", json.dumps(dict({"body_hash": cur, "counts": {
+                "supported": 1, "unsupported": 1, "contradicted": 0, "unmapped": 0},
+                "unsupported_sentences": [sentence]}, **extra)))
+        verify("Someone")  # a value inside the attribution (the credit)
+        with self.assertRaises(Exception) as cm:
+            store.trim_begin(self.root, self.cfg, TID)
+        self.assertIn("overlaps an image attribution", str(cm.exception))
+        verify("That is all.", images={"texts": 2, "unsupported": [{"id": "d1", "text": "Fee 3,000 yen", "why": "x"}]})
+        with self.assertRaises(Exception) as cm:
+            store.trim_begin(self.root, self.cfg, TID)
+        self.assertIn("unsupported text in a diagram is never trimmed", str(cm.exception))
+        verify("That is all.")  # the same sentence, nothing about images: the trim opens
+        store.trim_begin(self.root, self.cfg, TID)
+        self.assertEqual(self.state()["trim"]["status"], "open")
+
+    def test_ship5_settings_change_needs_no_render(self):
+        """M2 (implementation review): after publish the repo changes diagrams.width and a human
+        fixes a typo in the PR; ship §5 on a machine without limner must pass."""
+        self.ready()
+        st = self.state()
+        st["stage"] = "publish"
+        store.save_state(self.root, TID, st)
+        self.config(lambda c: c["images"]["diagrams"].update(width=1600))
+        os.remove(self.lmn)
+        limner.reset_cache()
+        s = images.status(self.root, self.cfg, TID)
+        self.assertEqual(s["pending"]["render_after_push"], [])
+        self.assertEqual(s["pending"]["render"], ["d1"])  # draft's strict view still sees the settings
+        out = images.render(self.root, self.cfg, TID, after_push=True)
+        self.assertEqual((out["skipped"], out["failed"]), (["d1"], []))
+        ver = {"images": {"texts": 2, "unsupported": []}}
+        self.assertEqual(images.verify_problems(self.root, self.cfg, TID, self.state(), ver, amend=True), [])
+        # the human edited the SVG: listed, and the render needs limner
+        self.write(W + "/diagrams/d1.svg", SVG.replace("Apply", "Send"))
+        self.assertEqual(images.status(self.root, self.cfg, TID)["pending"]["render_after_push"], ["d1"])
+        self.assertEqual(images.render(self.root, self.cfg, TID, after_push=True)["failed"][0]["code"], "limner:missing")
+        # the human replaced the PNG: listed too
+        self.write(W + "/diagrams/d1.svg", SVG)
+        self.write("%s/d1-steps.png" % IMG, big_png(seed=b"human"), binary=True)
+        self.assertEqual(images.status(self.root, self.cfg, TID)["pending"]["render_after_push"], ["d1"])
 
 
 class OgTests(ImageCase):
@@ -1113,6 +1258,52 @@ class OgTests(ImageCase):
         self.assertFalse(os.path.exists(os.path.join(self.root, IMG)))
         left = [f for dp, _, fns in os.walk(os.path.join(self.root, ".limner")) for f in fns]
         self.assertEqual(left, [])
+
+    def published_refresh(self):
+        """The article is published with a card on base; this topic now refreshes it."""
+        self.og()
+        sh(self.root, "git", "add", "-A")
+        sh(self.root, "git", "commit", "-q", "-m", "publish")
+        sh(self.root, "git", "push", "-q", "origin", "HEAD:main")
+        sh(self.root, "git", "fetch", "-q", "origin")
+        topics = store.load_topics(self.root)
+        topics["topics"][0]["refresh_of"] = SLUG
+        store.save_topics(self.root, topics)
+        st = self.state()
+        st["images"]["og"] = {}
+        store.save_state(self.root, TID, st)
+        return shots.blob(self.root, self.og_path)
+
+    def base_card_in_place(self, base_blob):
+        self.assertEqual(shots.blob(self.root, self.og_path), base_blob)
+        self.assertEqual(sh(self.root, "git", "status", "--porcelain", "--", self.og_path), "")
+        self.assertEqual(images.og_draft_problems(self.root, self.cfg, TID, self.state()), [])
+
+    def test_kept_never_loses_the_base_card(self):
+        """M1 (implementation review): a refresh made its own card, a loopback brought the base
+        title back — `kept` must leave base's card in place, on every path."""
+        base_blob = self.published_refresh()
+        self.write("src/content/blog/%s.md" % SLUG, BODY.replace("Renewal guide", "New title").format(d1="", e1=""))
+        self.assertEqual(self.og()["status"], "made")
+        self.assertNotEqual(shots.blob(self.root, self.og_path), base_blob)
+        self.write("src/content/blog/%s.md" % SLUG, BODY.format(d1="", e1=""))
+        self.assertEqual(self.og()["status"], "kept")
+        self.base_card_in_place(base_blob)
+        self.assertEqual(self.og()["status"], "kept")  # the early return keeps it so
+        self.base_card_in_place(base_blob)
+        # the card deleted after `kept`: stage pass refuses, and `og` (early return) puts it back
+        os.remove(os.path.join(self.root, self.og_path))
+        self.assertTrue(images.og_draft_problems(self.root, self.cfg, TID, self.state()))
+        self.assertEqual(self.og()["status"], "kept")
+        self.base_card_in_place(base_blob)
+        # a content `off` (title too long) on a refresh: base's card stays as well
+        self.write("src/content/blog/%s.md" % SLUG, BODY.replace("Renewal guide", "T3").format(d1="", e1=""))
+        with mock.patch.dict(os.environ, {"FAKE_LMN_EXIT": "4", "FAKE_LMN_PROBLEMS": '[{"code": "overflow"}]'}):
+            self.assertEqual(self.og()["why"], "title-too-long")
+        self.base_card_in_place(base_blob)
+        os.remove(os.path.join(self.root, self.og_path))
+        self.assertEqual(self.og()["why"], "title-too-long")
+        self.base_card_in_place(base_blob)
 
     def test_kept_and_stale_base(self):
         # published with a card, then refreshed
@@ -1299,9 +1490,71 @@ class GateTests(ImageCase):
         self.body(e1="![x](https://example.com/a.png)")
         rep = validate.validate(self.root, self.cfg, "src/content/blog/%s.md" % SLUG)
         self.assertTrue(any("hotlinked" in e for e in rep["errors"]))
+        self.body(e1="![x](data:image/png;base64,iVBORw0KGgo=)")  # m5: an inlined picture
+        rep = validate.validate(self.root, self.cfg, "src/content/blog/%s.md" % SLUG)
+        self.assertTrue(any("data: URI" in e for e in rep["errors"]))
         self.config(lambda c: c.pop("images"))
         rep = validate.validate(self.root, self.cfg, "src/content/blog/%s.md" % SLUG)
-        self.assertFalse(any("hotlinked" in e for e in rep["errors"]))
+        self.assertFalse(any("hotlinked" in e or "data: URI" in e for e in rep["errors"]))
+
+
+class CostTests(ImageCase):
+    def test_external_on_base_is_bounded(self):
+        """M4 (implementation review): `external_on_base` reads base once per command — one `git
+        grep` when nothing on base records an external image (any 0.16 repo), never a process per
+        topic or per call."""
+        for n in range(40):
+            st = store.new_state("t%04d" % (100 + n), "post-%d" % n)
+            store.save_state(self.root, "t%04d" % (100 + n), st)
+        sh(self.root, "git", "add", "-A")
+        sh(self.root, "git", "commit", "-q", "-m", "many topics")
+        sh(self.root, "git", "push", "-q", "origin", "HEAD:main")
+        sh(self.root, "git", "fetch", "-q", "origin")
+        calls = []
+        real = images._git_run
+
+        def count(*a, **k):
+            calls.append(a[1][0])
+            return real(*a, **k)
+        self.config(lambda c: c.pop("images"))
+        images._BASE_EXTERNAL.clear()
+        with mock.patch.object(images, "_git_run", side_effect=count):
+            for n in range(40):
+                self.assertEqual(images.external_on_base(self.root, self.cfg, "post-%d" % n), [])
+        self.assertEqual(calls, ["grep"])
+        # with external images on base: still a fixed number of processes per command
+        self.config(lambda c: c.update(images={"external": True, "figure": FIGURE}))
+        self.manifest([self.e1()])
+        self.body(d1="")
+        self.route(SRC, jpeg_route())
+        self.fetch()
+        self.put_snippet()
+        self.plan()
+        images.confirm(self.root, self.cfg, TID, "e1")
+        sh(self.root, "git", "add", "-A")
+        sh(self.root, "git", "commit", "-q", "-m", "publish")
+        sh(self.root, "git", "push", "-q", "origin", "HEAD:main")
+        sh(self.root, "git", "fetch", "-q", "origin")
+        calls.clear()
+        with mock.patch.object(images, "_git_run", side_effect=count):
+            for n in range(40):
+                images.external_on_base(self.root, self.cfg, "post-%d" % n)
+            self.assertEqual(images.external_on_base(self.root, self.cfg, SLUG), ["%s/e1-lobby.jpg" % IMG])
+        self.assertEqual(calls, ["grep", "cat-file", "cat-file"])
+
+    def test_select_and_missing_without_images_block(self):
+        """The CLI paths of a 0.16 translation repo: no `images` block → no per-topic reads."""
+        self.config(lambda c: c.pop("images"))
+        self.config(lambda c: c.update(translations={"source": "en", "targets": [
+            {"lang": "ko", "body_pattern": "{content}/ko/{slug}.md", "url_pattern": "/ko/{slug}/"}]},
+            roles={"conditional": ["illustrator", "translator"]}))
+        images._BASE_EXTERNAL.clear()
+        calls = []
+        real = images._git_run
+        with mock.patch.object(images, "_git_run", side_effect=lambda *a, **k: calls.append(1) or real(*a, **k)):
+            for n in range(25):
+                images.external_on_base(self.root, self.cfg, "post-%d" % n)
+        self.assertLessEqual(len(calls), 1)
 
 
 class TranslationBlockTests(ImageCase):
@@ -1334,6 +1587,11 @@ class TranslationBlockTests(ImageCase):
         out, _ = self.hrd("translate", "missing")
         self.assertEqual(out["blocked"][0]["reason"], "external-images")
         self.assertEqual(out["articles"], [])
+        # m10: a refresh is refused at the candidate step, with the reason
+        from hrdlib import refresh
+        pc = refresh.precheck(self.root, Config.load(self.root), SLUG, clear=False)
+        self.assertNotIn("update", pc["choices"])
+        self.assertTrue(any("external-images" in b for b in pc["blocked"]))
 
 
 @unittest.skipUnless(os.environ.get("HRD_TEST_LIMNER"), "real limner: set HRD_TEST_LIMNER to the limner argv")

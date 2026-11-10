@@ -200,8 +200,9 @@ switch and §7.1 need a clean tree.
    (`atoms/_screenshots.md` §6). Tell the human now that the stripped originals stay in the PR's
    history (§4 ran before this).
    Then, only when the PR head's scripts are 0.17.0 or later and the repo manages images
-   (`atoms/_images.md` §6): `HRD image status --topic <id>` — a diagram under `pending.render`
-   (the human changed its PNG or SVG) → `HRD image render --topic <id>` (no limner on this machine
+   (`atoms/_images.md` §6): `HRD image status --topic <id>` — a diagram under `pending.render_after_push`
+   (the human changed its PNG or SVG; a settings change alone never lists one) → `HRD image render
+   --topic <id> --after-push` (no limner on this machine
    → the fail path below with `verify-after-human-edit`; tell the human at step 4 next time that a
    PNG edit is replaced by a render of the SVG); then `HRD image og --topic <id>` (no flag; it does
    nothing when the inputs and the file are as recorded). `needs-human` (a file a human put at the

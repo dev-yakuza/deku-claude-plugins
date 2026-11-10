@@ -309,7 +309,8 @@ def doctor(root, cfg, command=None):
     and config only (it imports the generator stack and is slow)."""
     cmd = command
     if isinstance(command, str):
-        cmd = [x for x in command.split(" ") if x]
+        import shlex
+        cmd = shlex.split(command)  # a quoted path with spaces stays one element (review m12)
     p = probe(root, cfg, command=cmd, check_ignored=cmd is None)
     out = {"ok": p["ok"], "command": settings(cfg, cmd)["command"], "contract": p.get("contract"),
            "limner": p.get("limner"), "fonts": {}, "errors": list(p.get("errors") or [])}

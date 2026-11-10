@@ -209,6 +209,10 @@ def validate(root, cfg, file_path, lang=None):
                 # managed images (a config `images` block): an image is never hotlinked (08 §2.10)
                 if isinstance(cfg.get("images"), dict) and re.match(r"^(https?:|//)", src, re.I):
                     errors.append("image %s is hotlinked — external images go through `HRD image fetch`" % src[:120])
+                elif isinstance(cfg.get("images"), dict) and re.match(r"^data:", src, re.I):
+                    # an inlined picture skips the image directory, its exclusion and every record
+                    errors.append("image %s… is inlined as a data: URI — images are files under the image "
+                                  "directory" % src[:40])
                 continue
             src = re.split(r"[?#]", src, 1)[0]
             if not os.path.exists(os.path.join(root, relp)):

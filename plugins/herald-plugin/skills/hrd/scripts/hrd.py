@@ -1183,7 +1183,7 @@ def cmd_image(a):
     elif a.action == "texts":
         emit(images.texts(root, cfg, a.topic, a.id, source=a.source or "drawn"))
     elif a.action == "render":
-        emit(images.render(root, cfg, a.topic, a.id))
+        emit(images.render(root, cfg, a.topic, a.id, after_push=a.after_push))
     elif a.action == "fetch":
         emit(images.fetch(root, cfg, a.topic, a.id, version=SCRIPTS_VERSION))
     elif a.action == "snippet":
@@ -1390,6 +1390,8 @@ def build():
     p.add_argument("--source", choices=["svg", "drawn"], help="texts: the SVG source or the drawn PNG (default)")
     p.add_argument("--human-push", action="store_true", help="og: take the OG file a human pushed to the PR")
     p.add_argument("--pr", type=int); p.add_argument("--trial", action="store_true")
+    p.add_argument("--after-push", action="store_true",
+                   help="render: only diagrams a human changed in a pushed PR (ship §5) — never a settings change")
     p.add_argument("--reason", help="reject: why — nothing that must not reach a PR (300 characters)")
     p.add_argument("--drop", action="store_true"); p.add_argument("--refetch", action="store_true")
     p.add_argument("--rev"); p.add_argument("--command", help="doctor: limner's argv (one string) before config has one")

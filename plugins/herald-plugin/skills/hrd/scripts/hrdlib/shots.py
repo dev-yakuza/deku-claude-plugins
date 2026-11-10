@@ -1456,7 +1456,7 @@ def _changed_images(root, cfg, slug):
     """Every file under the image directory that differs from origin/<base> (added or changed)."""
     d = cfg.image_dir(slug)
     full = os.path.join(root, d)
-    if not os.path.isdir(full):
+    if not os.path.isdir(full) and not cfg.og_outside(slug):
         return []
     on = {}
     for line in git(root, "ls-tree", "-r", "origin/%s" % cfg.base, "--", d, check=False).splitlines():
@@ -1469,6 +1469,10 @@ def _changed_images(root, cfg, slug):
             rel = os.path.relpath(os.path.join(dp, fn), root).replace(os.sep, "/")
             if blob(root, rel) != on.get(rel):
                 out.append(rel)
+    og = cfg.og_outside(slug)  # a repo OG generator's path is the article's image too (08 review m6)
+    if og and os.path.isfile(os.path.join(root, og)) and \
+            blob(root, og) != git(root, "rev-parse", "-q", "--verify", "origin/%s:%s" % (cfg.base, og), check=False).strip():
+        out.append(og)
     return sorted(out)
 
 
@@ -1984,8 +1988,9 @@ def _range_blobs(root, cfg, slug):
     base = git(root, "merge-base", "HEAD", "origin/%s" % cfg.base, check=False).strip()
     if not base:
         return []
+    paths = [cfg.image_dir(slug)] + ([cfg.og_outside(slug)] if cfg.og_outside(slug) else [])
     log = git(root, "-c", "core.quotePath=false", "log", "--format=%H", "--raw", "--no-abbrev", "--no-renames", "-m",
-              "--full-history", "%s..HEAD" % base, "--", cfg.image_dir(slug), check=False)
+              "--full-history", "%s..HEAD" % base, "--", *paths, check=False)
     out, commit = [], None
     for line in log.splitlines():
         if re.match(r"^[0-9a-f]{40,64}$", line):
@@ -2009,8 +2014,8 @@ def history_problems(root, cfg, tid, slug, led=None):
     hits = _range_blobs(root, cfg, slug)
     if led.damaged and hits:
         return [led.damage_text()], False
-    img = cfg.image_dir(slug)
-    head = {line.split()[2] for line in git(root, "ls-tree", "-r", "HEAD", "--", img, check=False).splitlines()
+    img = [cfg.image_dir(slug)] + ([cfg.og_outside(slug)] if cfg.og_outside(slug) else [])
+    head = {line.split()[2] for line in git(root, "ls-tree", "-r", "HEAD", "--", *img, check=False).splitlines()
             if len(line.split()) >= 3}
     remote = git(root, "rev-parse", "--verify", "-q", "refs/remotes/origin/%s" % branch_name(tid, slug),
                  check=False).strip()

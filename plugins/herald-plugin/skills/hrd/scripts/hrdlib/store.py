@@ -1061,6 +1061,8 @@ def trim_begin(root, cfg, tid):
             raise HeraldError("unsupported text found %d times in the article body (need exactly once, "
                               "verbatim): %r — loop back" % (len(hits), text[:80]))
         a, b = hits[0], hits[0] + len(text)
+        if any(a < y and x < b for x, y in attribution):
+            raise HeraldError("%r overlaps an image attribution — loop back (the illustrator fixes the alt)" % text[:80])
         if aside:
             # an aside the fact-checker named as the unsupported part, never inside code or a link
             if old[a - 1:a] == "]" or any(a < y and x < b for x, y in prot):
@@ -1091,8 +1093,6 @@ def trim_begin(root, cfg, tid):
                     raise HeraldError("%r is a list item with lines attached below it — deleting it would move them "
                                       "to another item; loop back" % text[:80])
                 a = ls  # a whole list item goes with its mark
-        if any(a < y and x < b for x, y in attribution):
-            raise HeraldError("%r overlaps an image attribution — loop back (the illustrator fixes the alt)" % text[:80])
         if any(a < y and x < b for x, y in taken):
             raise HeraldError("unsupported texts overlap — loop back")
         taken.append((a, b))
