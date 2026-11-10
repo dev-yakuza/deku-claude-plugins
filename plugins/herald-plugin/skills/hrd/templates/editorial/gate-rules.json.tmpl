@@ -5,6 +5,7 @@
     "frontmatter.required: replace with the repo's required frontmatter keys. length.count: nonspace | all. per_category: one entry per category with overrides, or {}.",
     "forbidden: one object per phrase; status draft only warns, confirmed fails the gate. Rules extracted from existing articles start as draft (INV6); only a human sets confirmed. Remove the placeholder entry if there are none.",
     "images.public_dir: directory that maps to the site root, so /images/x.png resolves to <public_dir>/images/x.png.",
+    "images.max_total (optional): at most this many images in one article (screenshots, Herald images and others; the OG card not counted). images.external (only with a config images block, `/hrd config images`): max per article, per_category {category: max} (a category listed here overrides max; max 0 + per_category = only those categories), licenses (names Herald knows: CC0 1.0, Public domain, CC BY / CC BY-SA 2.0–4.0), quotation_categories (where official images of works may be quoted; empty by default), quotation_max, quotation_min_chars (body characters per quotation), min_width, min_long_side, max_bytes. Keys left out keep Herald's defaults.",
     "prose: readability hints, warnings only (never fail the gate). Optional keys: check, max_sentence (chars for ko/ja/zh, words otherwise; >= 1), max_numbers (>= 1, default 5), max_asides (>= 1, default 2), repeat_label (>= 2, default 3), stock_phrases (extra phrases to flag). A value out of range falls back to its default."
   ],
   "frontmatter": {

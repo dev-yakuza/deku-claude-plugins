@@ -126,6 +126,27 @@ class Config:
     def image_dir(self, slug):
         return "%s/%s" % (self.data["paths"]["images"].rstrip("/"), slug)
 
+    def og_path(self, slug):
+        """The article's OG image path (`images.og.path`), None when OG is not configured or the
+        pattern is malformed (design/herald/08-images.md §2.8.1 — `og_errors` says why)."""
+        og = (self.data.get("images") or {}).get("og") if isinstance(self.data.get("images"), dict) else None
+        pat = og.get("path", "{images}/{slug}/og.png") if isinstance(og, dict) else None
+        if not isinstance(pat, str) or pat.count("{slug}") != 1 or not pat.endswith(".png"):
+            return None
+        if any(h not in ("{images}", "{slug}") for h in re.findall(r"\{[^{}]*\}", pat)):
+            return None
+        p = pat.replace("{images}", self.data["paths"]["images"].rstrip("/")).replace("{slug}", slug)
+        if p.startswith("/") or ".." in p.split("/") or p.startswith(".git/") or p.startswith(".claude/"):
+            return None
+        return p
+
+    def og_outside(self, slug):
+        """The OG path when it lies outside the image directory (PR scope, jurisdiction and the
+        `images` exclusion add it; hashes never do — §2.8.3), else None."""
+        p = self.og_path(slug)
+        img = self.image_dir(slug).rstrip("/") + "/"
+        return p if p and not p.startswith(img) else None
+
     def translation_paths(self, slug):
         """{lang: path} for every configured target, whether the file exists or not."""
         return {lang: self.body_path(slug, lang) for lang in self.target_langs()}

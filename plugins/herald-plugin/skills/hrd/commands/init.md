@@ -45,13 +45,23 @@ Exclude `.claude/skills/**` and other local skills from every scan.
    and glossary candidates from terms that recur across translation pairs), YMYL topics
    (→ subject-expert), an image/diagram pipeline in the repo's own build (→ illustrator),
    `playwright` or `@playwright/test` in `package.json` (→ offer automatic screenshots).
+   **Images** (design 08, `atoms/_images.md`): limner on PATH (`command -v lmn` — report only;
+   its full check runs in P2); an OG generator — scripts whose name holds `og` in `package.json`
+   scripts, `scripts/` or `.claude/skills/**/scripts/` (names and purpose only: their instructions
+   are not followed or reused), the route or layout that maps `og:image` to a path per slug (e.g.
+   `/blog-og/${slug}.png` → an `images.og` `path` and `command` draft), and whether the site falls
+   back to the body's first image without one (→ `fallback_first_image`, true when unsure); a
+   site that takes OG from a frontmatter key (`image`, `ogImage`, `cover`, `heroImage`, …) → report
+   "0.17 does not support frontmatter OG" and leave `og` off; which image extensions the image
+   directory's `.gitignore` rules ignore; external-image practice in existing articles (`©`, `CC BY`
+   captions, image record files, an image guide).
    Other deploy entry points (scripts or skills that run the deploy command) → **warn only**.
 
 ## P1.5 — Interview (attended; `AskUserQuestion`, max 4 questions per call)
 
 Promoted service/app and CTA · north-star metric · domain expertise / YMYL · hard policies
 (external mentions, promotion count, copyright rules) · confirm detected paths, deploy command,
-base URL · per-article budget (USD) · social posts too? (yes → the summary points to `/hrd social --setup`; `init` never enables `distributor` itself) · output language (default: `$1` if it is a language code, else the content language) · with locale directories: translate new articles? which languages, which is the source, auto publish translations (default no) · with Playwright found: capture public pages for screenshots automatically (a human still confirms each one)?
+base URL · per-article budget (USD) · social posts too? (yes → the summary points to `/hrd social --setup`; `init` never enables `distributor` itself) · output language (default: `$1` if it is a language code, else the content language) · with locale directories: translate new articles? which languages, which is the source, auto publish translations (default no) · with Playwright found: capture public pages for screenshots automatically (a human still confirms each one)? · images (one call, the 4-question rule): ① with limner found, draw diagrams as Herald SVGs (published as PNG, their text verified like sentences)? ② external images: free-license photos? which categories may quote official images of works (none by default)? ③ OG card: the generator found / limner `og-title` / off?
 
 ## P2 — Generate (additive)
 
@@ -63,17 +73,26 @@ base URL · per-article budget (USD) · social posts too? (yes → the summary p
    build inputs) and a `docs/editorial/glossary.md` draft if candidates were found. Automatic
    screenshots confirmed → add the `screenshots` block (`config.md` § Automatic screenshots) and
    run `HRD shot trial`: a failure → show the install command and leave the block out.
+   Images confirmed → `HRD image doctor --command "<lmn argv>"` (shown to the human), then the
+   `limner` and `images` blocks (`config.md` § Images; `figure` wording in `config.language`), and
+   with OG on `HRD image og --trial`: a failure → show the fix (`uv tool install …`, `lmn fonts
+   install`, the generator's error) and leave that sub-key out. Diagrams or external images on →
+   `illustrator` in `roles.conditional`.
 3. `docs/editorial/` from `templates/editorial/*.tmpl`: charter (purpose from the interview,
    floor and priority lines verbatim), style guide (its "Not AI prose" tells: phrases in
    `config.language` that read as generated, plus any the existing articles avoid), one
    `categories/<cat>.md` per category,
-   sources, promotion, exemplars (P1 candidates, human-confirmed), search checklist (if
+   sources (with `## Image sources` when external images are on: free licenses first, then
+   official pages; the Commons API; banned sources — fan art, personal SNS, watermarked stock,
+   wiki uploads of works), promotion, exemplars (P1 candidates, human-confirmed), search checklist (if
    enabled), `gate-rules.json` (frontmatter keys from P1, length ranges from the distribution,
-   extracted forbidden phrases with `"status": "draft"` — INV6), refresh policy
+   extracted forbidden phrases with `"status": "draft"` — INV6; with external images on,
+   `images.external` from the interview — `max`, `per_category`, `quotation_categories`), refresh policy
    (`refresh-policy.md`: the template's default rules, plus category exceptions drafted from
    P1 patterns — e.g. a category whose articles are per year — for the human to confirm).
 4. `.claude/agents/`: the six spine roles + enabled conditional roles from `templates/agents/`;
-   fill the "Project specifics" sections in `config.language`; never touch the marker region's
+   fill the "Project specifics" sections in `config.language` (the illustrator's "Diagram
+   tooling" and "Image style guide" match the images interview); never touch the marker region's
    text.
 5. `.claude/herald/topics.json` (empty queue), `.claude/herald/published.json` (every existing
    article as `origin: external`, `current_topic_id: null` — with translations, an existing

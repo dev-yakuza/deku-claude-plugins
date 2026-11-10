@@ -19,6 +19,15 @@ Never cite or rely on these:
 ### Copyright and quoting
 {{COPYRIGHT_POLICY}}
 
+## Image sources
+<!-- only with external images on (`/hrd config images`); init or config fills it, else delete this section -->
+- Order: free licenses first (Wikimedia Commons — the API `prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=1280`
+  gives `thumburl`, `descriptionurl`, `Artist`, `LicenseShortName`), then — only in the categories
+  `gate-rules.json` `images.external.quotation_categories` names — the rights holder's official pages for a quotation.
+- Never: fan art, re-edits, watermarked stock, stills with burned-in subtitles, personal SNS posts,
+  wiki uploads of works.
+{{IMAGE_SOURCES}}
+
 ## Research rules
 - Every claim in `research.md` has a source URL, a short excerpt, an access date and a confidence.
   Exception: owner claims about this site's own product come from `promotion.md` (confidence

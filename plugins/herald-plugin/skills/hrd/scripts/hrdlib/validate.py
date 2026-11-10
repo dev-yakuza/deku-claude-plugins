@@ -17,7 +17,14 @@ DEFAULT_RULES = {
     "length": {"min_chars": 0, "max_chars": None, "count": "nonspace", "per_category": {}},
     "forbidden": [],
     "links": {"check": True},
-    "images": {"check": True, "public_dir": "public"},
+    # `external`, `max_total`: the image extension (design/herald/08-images.md §2.6.1) — read by
+    # `HRD image plan`; the gate itself only checks hotlinks, and only in managed mode
+    "images": {"check": True, "public_dir": "public", "max_total": None,
+               "external": {"max": 3, "per_category": {},
+                            "licenses": ["CC0 1.0", "Public domain", "CC BY 2.0", "CC BY 2.5", "CC BY 3.0",
+                                         "CC BY 4.0", "CC BY-SA 2.0", "CC BY-SA 2.5", "CC BY-SA 3.0", "CC BY-SA 4.0"],
+                            "quotation_categories": [], "quotation_max": 2, "quotation_min_chars": 1000,
+                            "min_width": 280, "min_long_side": 480, "max_bytes": 10485760}},
     "prose": {},
     # per-language length/forbidden overrides for translations (01-multilingual.md §6)
     "languages": {},
@@ -74,6 +81,10 @@ def load_rules(root, rev=None):
             out[k] = {**v, **given} if isinstance(given, dict) else dict(v)
         else:
             out[k] = rules.get(k, v)
+    # `images.external` merges key by key over its defaults (08 §2.6.1): `{"external": {"max": 2}}`
+    # keeps the license list and size floors; a list or object value is replaced whole
+    ext = (rules.get("images") or {}).get("external") if isinstance(rules.get("images"), dict) else None
+    out["images"]["external"] = {**DEFAULT_RULES["images"]["external"], **(ext if isinstance(ext, dict) else {})}
     return out
 
 
@@ -195,6 +206,9 @@ def validate(root, cfg, file_path, lang=None):
             src = next(g for g in m.groups() if g)
             relp = resolve_image_ref(root, os.path.relpath(full, root), src, pub)
             if relp is None:  # http:, data:, protocol-relative
+                # managed images (a config `images` block): an image is never hotlinked (08 §2.10)
+                if isinstance(cfg.get("images"), dict) and re.match(r"^(https?:|//)", src, re.I):
+                    errors.append("image %s is hotlinked — external images go through `HRD image fetch`" % src[:120])
                 continue
             src = re.split(r"[?#]", src, 1)[0]
             if not os.path.exists(os.path.join(root, relp)):

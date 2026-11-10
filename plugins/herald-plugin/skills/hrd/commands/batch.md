@@ -54,7 +54,7 @@ work on its branch, hold it `needs-human` "tooling: rate limited until … (run 
 until the reset, check the checkout/base/version/topic, then `/hrd resume <id>` with
 `HRD_RESUME_LIMITED=<run id>`, and release the hold when its PR exists; beyond 5h per wait, 6 waits
 per topic or 12h per run → stop cleanly (`rate_limited`); else one `/hrd resume` retry, else hold
-`needs-human`; a child that waits for screenshots reports `held:screenshots` (branch preserved, no
+`needs-human`; a child that waits for screenshots or external images to confirm reports `held:screenshots` (shown as "screenshots/images"; branch preserved, no
 growth signal; report its note from `HRD status` — the human puts the files in and runs `/hrd resume`) → holds committed on base
 (`Herald-Record: hold`) → ③ (auto) PR selection from PR-head `critique.json`, throttle, base
 re-sync → ④ ship child `/hrd ship --auto` with `HRD_AUTO_PRS` → ⑤ re-derive merges from GitHub,

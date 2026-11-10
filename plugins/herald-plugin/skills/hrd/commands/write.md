@@ -46,7 +46,7 @@ non-empty), verify in order per `atoms/_stages.md`. After each
 
 Show: title, slug, 5-line summary, audit findings incl. MINOR, dismissals and deferrals, verify
 counts, the framings (`verify.json` `framings`: sentences treated as the article's own example)
-the reader notes (`reader.json` `notes`) and the research corrections (`state.json` `research_fixes`) if any, the screenshots (as in `ship.md` §4 — `atoms/_screenshots.md` §6) if any, with translations each language's path, title and verify counts (`verify.json` `by_lang`) — the human may open them; no editor or auditor read them —, measured cost so far. Ask: approve / request changes / hold. Each re-run below counts
+the reader notes (`reader.json` `notes`) and the research corrections (`state.json` `research_fixes`) if any, the screenshots (as in `ship.md` §4 — `atoms/_screenshots.md` §6) and the external images (file, source page, credit, license or quotation, attribution — `atoms/_images.md` §6) if any, with translations each language's path, title and verify counts (`verify.json` `by_lang`) — the human may open them; no editor or auditor read them —, measured cost so far. Ask: approve / request changes / hold. Each re-run below counts
 an audit round (`HRD audit-round`), so after the cap only the editor and verify run again.
 
 - **Request changes**: record it right away — `HRD signal --kind session-edit-request --topic
@@ -54,7 +54,7 @@ an audit round (`HRD audit-round`), so after the cap only the editor and verify 
   the `id` it prints; the writer applies the request (`HRD loopback --topic <id> --human` — not
   counted; a request to change a screenshot adds `--retake <ids> --retake-kind privacy|mismatch
   --reason …`, `atoms/_screenshots.md` §3); if the writer changed the body or `<w>screenshots.json`, or the loopback had `--retake`,
-  `HRD shot plan` and, for pending or captured screenshots, `atoms/_screenshots.md` §2 (attended); `HRD stage pass --stage draft` (runs the gate; on errors the writer fixes them under
+  `HRD shot plan` and, for pending or captured screenshots, `atoms/_screenshots.md` §2 (attended); if the illustrator changed `<w>images.json`, `HRD image plan` and `atoms/_images.md` §2 (attended); `HRD stage pass --stage draft` (runs the gate; on errors the writer fixes them under
   the same `--human` loopback — never `--cause gate` for a human-requested revision); then
   `HRD signal --kind
   session-edit-request --topic <id> --data '{"request_id": "<that id>", "diff_summary": "...",
@@ -77,7 +77,7 @@ with this token): the interactive auto path covers only the PR this session
 just created — step 4 (per-PR question) is skipped, the auto-exclusion rules and the daily
 throttle apply (ship checks `HRD auto-exclusion` — with `--ship`, `--consent`: asking for
 this publish accepts the agents' logged decisions, a trim, framings and Herald-made images, so only its
-`blocking` list excludes — screenshots are never accepted this way, a human sees them in
+`blocking` list excludes — screenshots and external images (`external-images`) are never accepted this way, a human sees them in
 `/hrd ship`; excluded → stay PR-pending and say why), and the guard's
 merge/deploy confirmations remain.
 

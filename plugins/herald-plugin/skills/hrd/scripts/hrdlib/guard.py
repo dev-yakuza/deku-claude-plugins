@@ -37,10 +37,14 @@ PERSONAS = [".claude/agents/editor.md", ".claude/agents/fact-checker.md", ".clau
 WIRING = [".claude/settings.json", ".claude/settings.local.json", ".claude/herald/scripts/*",
           ".claude/herald/scripts/**"]
 LEDGER = [".claude/herald/ledger/*", ".claude/herald/ledger/**"]
+# a diagram's evidence: only `HRD image render` writes it (design/herald/08-images.md §2.7.2). Matched
+# by file path only, so `git clean -fd -- <w>` / `git checkout HEAD -- <w>` and commits stay free
+RENDERS = [".claude/herald/work/*/diagram-renders.jsonl"]
 CONFIG = ".claude/herald/config.json"
-# `screenshots` holds the capture command Herald runs (design/herald/07-auto-capture.md §2.7)
+# `screenshots` holds the capture command Herald runs (design/herald/07-auto-capture.md §2.7);
+# `limner` and `images` the image engine's argv, the OG generator and the attribution templates (08 §2.15)
 PROTECTED_CONFIG_KEYS = ("autonomy", "budget", "commands", "paths", "base_branch", "roles", "models",
-                         "translations", "screenshots")
+                         "translations", "screenshots", "limner", "images")
 HERALD_PERSONAS = [
     ".claude/agents/editor-in-chief.md", ".claude/agents/content-strategist.md",
     ".claude/agents/researcher.md", ".claude/agents/writer.md", ".claude/agents/fact-checker.md",
@@ -97,6 +101,8 @@ def classify_path(r):
         return "guard wiring %s" % r
     if _covers(r, LEDGER):
         return "verification ledger %s" % r
+    if commits._match(r, RENDERS):
+        return "diagram render record %s" % r
     return None
 
 
@@ -147,6 +153,8 @@ def herald_article_paths(root, cfg):
         # cannot be committed to base directly (01-multilingual.md §5)
         globs += [cfg.body_path(s), cfg.image_dir(s) + "/*", cfg.image_dir(s) + "/**"]
         globs += list(cfg.translation_paths(s).values())
+        if cfg.og_outside(s):  # a repo OG generator's path (08-images.md §2.15)
+            globs.append(cfg.og_outside(s))
     return globs
 
 
@@ -582,6 +590,10 @@ def check_bash(root, cfg, cmd):
         if "shot" in argv and ("confirm" in argv or "demote" in argv):
             protect("`HRD shot %s` records that a human looked at an automatic screenshot — only the human decides."
                     % ("confirm" if "confirm" in argv else "demote"))
+        # 1d. the same for an external image (08-images.md §2.15)
+        if "image" in argv and ("confirm" in argv or "reject" in argv):
+            protect("`HRD image %s` records a human's decision about an external image — only the human decides."
+                    % ("confirm" if "confirm" in argv else "reject"))
         # 2. deploy
         if any(contains(canon(strip_noise(argv)), s) for s in sigs):
             if unattended():

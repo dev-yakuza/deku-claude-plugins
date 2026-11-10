@@ -63,7 +63,7 @@ Detect once per command: `printenv HRD_UNATTENDED` → `1` = unattended. The edi
 | auditor `BLOCKER` | dismiss only after the human confirms | **never dismiss** — fix or hold `needs-human` (`defect:`) |
 | verify gap, nothing contradicted, 1–3 unsupported (`_stages.md` § verify) | ask: trim / loop back / hold | trim once (delete or map only; code-checked), then loop back |
 | stagnation / loop cap / budget | stop and report (budget: warn only) | hold `stagnation` / `budget` |
-| screenshots still to take (`atoms/_screenshots.md` §2) | show the capture guide and wait | hold `screenshots` (in-session auto too — no question) |
+| screenshots still to take (`atoms/_screenshots.md` §2), external images to confirm (`atoms/_images.md` §2) | show the capture guide / image list and wait | hold `screenshots` (in-session auto too — no question) |
 
 **Decision log**: every judgment between brief and critique goes into
 `work/<id>/critique.json` → `decision_log: [{"kind", "note"}]` with `kind ∈ {routine,

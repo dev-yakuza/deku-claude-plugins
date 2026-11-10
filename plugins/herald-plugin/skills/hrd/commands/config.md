@@ -4,7 +4,7 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
 `key value` changes one dial.
 
 - Protected keys (`autonomy`, `budget`, `commands`, `paths`, `base_branch`, `roles`, `models`, `translations`,
-  `screenshots`)
+  `screenshots`, `limner`, `images`)
   are guarded: the edit triggers an `ask` — the human approves it on the record (INV1/INV2).
   Turning on `autonomy.publish: auto` deserves a one-line warning: PRs then merge and deploy
   without per-PR approval (still excluding dismissals, assumptions, deferred audit findings, a skipped audit round, a
@@ -22,6 +22,35 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
   result is deleted). A trial failure → show the install command (`npm i -D playwright` and `npx
   playwright install chromium` for the default) and leave the block out. Turning it off: remove
   the block. A template with errors never stops other commands — capture is simply off (`no-tool`).
+- **Images** (`/hrd config images`; `atoms/_images.md`, design 08). The blocks:
+  `"limner": {"command": ["lmn"], "state_dir": ".limner"}` and `"images": {"diagrams": {"width":
+  1600, "background": "#ffffff"}, "external": true, "figure": {"diagram": "![{alt}]({ref})",
+  "licensed": "…{ref} {alt} {credit} {license} {license_url} {page_url}…", "quotation": "…{ref}
+  {alt} {credit} {label} {page_url}…", "words": {"licensed": "…", "quotation": "…", "source": "…",
+  "orientation": {"landscape": "…", "portrait": "…"}}}, "og": {"path": "{images}/{slug}/og.png",
+  "command": null, "subtitle": null, "fallback_first_image": true}}` — each sub-key on its own
+  (no `diagrams` → no diagrams, `external` not true → no external images, no `og` → no OG card).
+  Turning one on or changing it reuses init's P1 detection and the three P1.5 image questions, then:
+  1. `HRD config-check`: `limner_errors`, `og_errors`, `figure_errors` must be empty (each only
+     turns its own kind off — never another command); `HRD image doctor` for diagrams and a limner
+     OG; `HRD image og --trial` for OG (a repo generator: also with `--category` of each category
+     whose badge looks wrong — e.g. a slug printed as a label — and tell the human the fix belongs
+     in the repo's script).
+  2. **Conflicts with existing personas — never changed silently**: read
+     `.claude/agents/illustrator.md` ("Project specifics", "Habits"), `docs/editorial/categories/*.md`
+     and `sources.md` for sentences that forbid the kind being turned on or name another tool
+     ("no external or work images"); show each with its replacement side by side ("external images
+     only through Herald `images.json` — limits in `gate-rules.json` `images.external`"); the human
+     approves → change it; declines → do not turn that kind on.
+  3. Say: turning OG on makes every new article carry an OG file, so each gets the `images`
+     exclusion — with `autonomy.publish: auto` nothing publishes without consent. With
+     `translations` on, external images stay off, and articles that already have external images
+     on base cannot be translated or refreshed (list them: `HRD translate missing` `blocked`).
+     Official photos with no free license (tourist boards, airports) are neither `licensed` nor
+     `quotation`: those places are left out.
+  4. One commit: `HRD commit --cmd harness --kind config -m "chore(herald): config images" <config,
+     gate-rules, sources, personas, category guides, .gitignore — what changed>` → push (protected
+     files and keys: the guard asks). `.gitignore` gets `.limner/` in the herald block.
 - **Translations**. The block:
   `"translations": {"source": "<lang>", "targets": [{"lang": "<l>", "body_pattern":
   "{content}/<l>/{slug}.md", "url_pattern": "/<l>/{slug}/"}], "glossary": "<path, optional>",

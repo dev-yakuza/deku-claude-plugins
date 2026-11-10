@@ -16,13 +16,13 @@ sys.dont_write_bytecode = True  # no __pycache__ in the repo's .claude/herald/sc
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from hrdlib import commits, ghstate, integrity, lock, shots, store  # noqa: E402
+from hrdlib import commits, ghstate, images, integrity, lock, shots, store  # noqa: E402
 from hrdlib.config import Config  # noqa: E402
 from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # noqa: E402
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.16.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.17.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -156,6 +156,11 @@ def derived_status(root, cfg):
 def cmd_select(a):
     root, cfg = ctx()
     picked = ghstate.selectable(root, cfg)
+    if cfg.translations():  # 08-images.md §2.6.7 (R3-4): never pick what `begin` refuses
+        topics = {t["id"]: t for t in store.load_topics(root)["topics"]}
+        picked = [t for t in picked if not ((topics.get(t) or {}).get("translate_of") or (topics.get(t) or {}).get(
+            "refresh_of")) or not images.external_on_base(root, cfg, topics[t].get("translate_of") or
+                                                          topics[t].get("refresh_of"))]
     if a.topic:
         if a.topic not in picked:
             raise HeraldError("topic %s is not selectable (needs queued with no open/merged PR or local branch)" % a.topic)
@@ -180,7 +185,8 @@ def cmd_status(a):
     except Exception as e:  # noqa: BLE001 — advisory
         soc = {"error": str(e)}
     out = {"topics": derived_status(root, cfg), "lock": lock.status(root), "evolve": evolve,
-           "supersede_pending": pending, "shots_removed_bytes": shots.removed_bytes(root)}
+           "supersede_pending": pending, "shots_removed_bytes": shots.removed_bytes(root),
+           "images_removed_bytes": shots.removed_bytes(root, area="images")}
     if soc is not None:
         out["social"] = soc
     emit(out)
@@ -216,6 +222,14 @@ def cmd_begin(a):
         emit({"resumed": True, "state": st})
         return
     known = topic.get("refresh_of") or topic.get("slug")
+    tr_slug = topic.get("translate_of") or topic.get("refresh_of")
+    if cfg.translations() and tr_slug:
+        # an article with external images is never translated or refreshed by Herald in 0.17.0: a
+        # translation page would carry them without an attribution check (08-images.md §2.6.7)
+        ext = images.external_on_base(root, cfg, tr_slug)
+        if ext:
+            raise HeraldError("external images block translation: %s — hold cannibalization with the note `tooling: "
+                              "external images block translation` (no branch: a cleaned hold)" % ", ".join(ext))
     busy = ghstate.slug_busy(root, cfg, known, exclude=a.topic) if known and not topic.get("translate_of") else []
     if busy:  # L16 again at begin: the queue entry may be older than the other topic
         raise HeraldError("slug in progress: %s — another topic is working on %s" % (busy[0], known))
@@ -339,7 +353,12 @@ def cmd_stage(a):
             sys.exit(1)
     elif a.action == "pass":
         st = store.stage_pass(root, cfg, a.topic, a.stage, amend=a.amend)
-        emit({"stage": st["stage"], "verified_hash": st.get("verified_hash")})
+        out = {"stage": st["stage"], "verified_hash": st.get("verified_hash")}
+        if a.stage == "verify" and a.amend:  # a published diagram's SVG edited on base: warn only (08 §2.7.2)
+            warn = images.svg_drift(root, cfg, a.topic, st)
+            if warn:
+                out["image_warnings"] = warn
+        emit(out)
 
 
 def cmd_loopback(a):
@@ -415,6 +434,8 @@ def cmd_loopback(a):
     st["stage"] = "draft"
     if st.get("screenshots"):  # the writer runs again: a resume must not skip it (06 §2.2 awaiting)
         st["screenshots"]["awaiting"] = False
+    if st.get("images"):  # the same for images (08-images.md §2.9)
+        st["images"]["awaiting"] = False
     retake_files, retake_out = [], None
     if retake:
         # past the cap a counted loopback ends in a hold: leave the files where they are
@@ -524,7 +545,14 @@ def cmd_translate(a):
             raise HeraldError("check needs --slug")
         emit(translation.translate_check(root, cfg, a.slug, langs, adopt=a.adopt))
     else:
-        emit({"articles": translation.missing(root, cfg, langs)})
+        arts, blocked = [], []
+        for x in translation.missing(root, cfg, langs):
+            ext = images.external_on_base(root, cfg, x["slug"]) if isinstance(x, dict) and x.get("slug") else []
+            if ext:  # 08-images.md §2.6.7 (R3-4): reported apart, never a candidate
+                blocked.append({"slug": x["slug"], "reason": "external-images", "files": ext})
+            else:
+                arts.append(x)
+        emit({"articles": arts, "blocked": blocked})
 
 
 def cmd_config_check(a):
@@ -533,7 +561,9 @@ def cmd_config_check(a):
     errors, warnings = cfg.validate()
     # the capture template is checked apart: a typo there turns auto capture off, never the
     # harness (design/herald/07-auto-capture.md §2.7) — it does not change `ok`
-    emit({"ok": not errors, "errors": errors, "warnings": warnings, "capture_errors": shots.capture_errors(cfg)})
+    out = {"ok": not errors, "errors": errors, "warnings": warnings, "capture_errors": shots.capture_errors(cfg)}
+    out.update(images.config_errors(root, cfg))  # each turns its own image kind off (08-images.md §2.14.1)
+    emit(out)
     if errors:
         sys.exit(1)
 
@@ -609,6 +639,10 @@ def cmd_scope(a):
     extra = shots.scope_problems(root, cfg, a.topic, rev=a.rev, publish=(a.rev == "HEAD"))
     if extra:  # screenshots (06 §2.10): a dropped file still committed; publish only — squash shape
         res["screenshots"] = extra
+        res["ok"] = False
+    extra = images.scope_problems(root, cfg, a.topic, publish=(a.rev == "HEAD"))
+    if extra:  # external images confirmed, attributions in place, no quotation as OG (08 §2.13)
+        res["images"] = extra
         res["ok"] = False
     emit(res)
     if not res["ok"]:
@@ -871,6 +905,9 @@ def cmd_move(a):
         raise HeraldError("new path %s does not exist" % cfg.body_path(a.new_slug))
     if os.path.isdir(os.path.join(root, cfg.image_dir(old))) and git(root, "ls-files", "--", cfg.image_dir(old)).strip():
         raise HeraldError("tracked images still under %s — move them too" % cfg.image_dir(old))
+    og_old = cfg.og_outside(old) if images.og_conf(cfg) else None
+    if og_old and git(root, "ls-files", "--", og_old).strip():
+        raise HeraldError("tracked OG still at %s — move it too" % og_old)
     prs = ghstate.herald_prs(root, cfg)
     _, tids = _topic_articles(pub, prs, old)
     art.setdefault("moved_from", []).append({"slug": old, "moved_at": now_iso(),
@@ -1133,6 +1170,53 @@ def cmd_shot(a):
         emit(shots.audit(root, cfg))
 
 
+def cmd_image(a):
+    """Diagrams, external images and the OG card (design/herald/08-images.md)."""
+    root, cfg = ctx()
+    if a.action not in ("kinds", "doctor", "og") and not a.topic:
+        raise HeraldError("image %s needs --topic" % a.action)
+    if a.action == "kinds":
+        emit(images.kinds(root, cfg, a.topic))
+    elif a.action == "doctor":
+        from hrdlib import limner
+        emit(limner.doctor(root, cfg, command=a.command))
+    elif a.action == "texts":
+        emit(images.texts(root, cfg, a.topic, a.id, source=a.source or "drawn"))
+    elif a.action == "render":
+        emit(images.render(root, cfg, a.topic, a.id))
+    elif a.action == "fetch":
+        emit(images.fetch(root, cfg, a.topic, a.id, version=SCRIPTS_VERSION))
+    elif a.action == "snippet":
+        if not a.id:
+            raise HeraldError("image snippet needs --id")
+        emit(images.snippet(root, cfg, a.topic, a.id))
+    elif a.action == "plan":
+        out = images.plan(root, cfg, a.topic, check_only=a.check)
+        emit(out)
+        if out["errors"]:
+            sys.exit(1)
+    elif a.action == "og":
+        if a.trial:
+            out = images.og_trial(root, cfg)
+            emit(out)
+            if not out["ok"]:
+                sys.exit(1)
+            return
+        if not a.topic:
+            raise HeraldError("image og needs --topic (or --trial)")
+        if a.pr is not None and not a.human_push:
+            raise HeraldError("--pr goes with --human-push")
+        emit(images.og(root, cfg, a.topic, human_push=a.human_push, pr=a.pr))
+    elif a.action == "confirm":  # a human looked at the images (refused unattended; the guard asks)
+        emit(images.confirm(root, cfg, a.topic, a.id))
+    elif a.action == "reject":
+        if not a.id or "," in a.id:
+            raise HeraldError("image reject takes one --id")
+        emit(images.reject(root, cfg, a.topic, a.id, reason=a.reason, drop=a.drop, refetch=a.refetch))
+    elif a.action == "status":
+        emit(images.status(root, cfg, a.topic, rev=a.rev))
+
+
 def cmd_social(a):
     """SNS drafts (design/herald/03-social.md): prepare / check / close / list / lint."""
     from hrdlib import social
@@ -1299,6 +1383,17 @@ def build():
     p.add_argument("--reason", help="demote: what to change — no secret values (300 characters)")
     p.add_argument("--slug"); p.add_argument("--path")
     p.set_defaults(fn=cmd_shot)
+    p = sp.add_parser("image"); p.add_argument("action", choices=["kinds", "doctor", "texts", "render", "fetch", "snippet",
+                                                                 "plan", "og", "confirm", "reject", "status"])
+    p.add_argument("--topic"); p.add_argument("--id", help="ids, comma-separated (reject: one)")
+    p.add_argument("--check", action="store_true", help="plan: check only, write nothing")
+    p.add_argument("--source", choices=["svg", "drawn"], help="texts: the SVG source or the drawn PNG (default)")
+    p.add_argument("--human-push", action="store_true", help="og: take the OG file a human pushed to the PR")
+    p.add_argument("--pr", type=int); p.add_argument("--trial", action="store_true")
+    p.add_argument("--reason", help="reject: why — nothing that must not reach a PR (300 characters)")
+    p.add_argument("--drop", action="store_true"); p.add_argument("--refetch", action="store_true")
+    p.add_argument("--rev"); p.add_argument("--command", help="doctor: limner's argv (one string) before config has one")
+    p.set_defaults(fn=cmd_image)
     p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)
     p = sp.add_parser("remap"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_remap)
     p = sp.add_parser("refresh-decision"); p.add_argument("--slug", required=True)

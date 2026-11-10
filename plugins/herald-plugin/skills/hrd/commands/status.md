@@ -15,9 +15,14 @@ article its languages from `published.json` (`translations`, `withdrawn_langs`) 
 adopt with `/hrd translate <slug> --adopt <l>`) or other `causes`. A hold whose `note` names a
 `refresh candidate: <slug>` → suggest `/hrd refresh <slug>`. A `screenshots` hold: show its note
 and the inbox `.claude/herald/inbox/<id>/` — "put the files there, then `/hrd resume <id>`"
-(`atoms/_screenshots.md` §5). `shots_removed_bytes` (moved-away screenshots kept under
-`.claude/herald/memory/shots/removed/`, never deleted by Herald): show it when it is over 50 MB,
-with the path, so the human can clean it up. From the same output,
+(`atoms/_screenshots.md` §5); show the reason as "screenshots/images" — a note with `e1(confirm)`
+names external images waiting for the human's look (`atoms/_images.md` §5). `shots_removed_bytes`
+and `images_removed_bytes` (moved-away screenshots and images kept under
+`.claude/herald/memory/shots/removed/` and `.claude/herald/memory/images/removed/`, never deleted
+by Herald): show each when it is over 50 MB, with the path, so the human can clean it up. In a
+translation repo, `HRD translate missing` `blocked` lists articles with external images: "these
+cannot be translated or refreshed by Herald in 0.17 — to fix one, edit it on base and `/hrd ship
+--reverify`, or merge a PR that removes the external image" (`atoms/_images.md` §6). From the same output,
 `supersede_pending` (old articles a newer one follows, not linked to it yet): for each, "link
 `<new>` from `<old>`" — `/hrd refresh <old>` when `refreshable`, otherwise by hand.
 

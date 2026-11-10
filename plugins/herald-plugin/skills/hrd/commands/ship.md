@@ -20,7 +20,7 @@ that one PR, step 4 skipped; refuse if the PR was not created in this session, i
 auto-exclusion --topic <id> --rev refs/remotes/origin/pr-<n>` (after §3's fetch — the work
 files live on the PR head; with `--consent` when the caller passed it — the human asked for
 this publish, which accepts the agents' logged decisions, a trim, the fact-checker's framings
-and Herald-made images) has
+and Herald-made images — diagrams and the OG card; never screenshots or external images) has
 anything under `blocking`, or if
 `HRD throttle` shows `room` 0. Unless that run was
 `--attended` (a human approved the body in the session), the article is published without a
@@ -69,7 +69,10 @@ report a mismatch.
      a slug with no screenshot records finds nothing): anything found → stop the
      whole ship (as step 4) and tell the human to run `HRD shot strip --path <file>` on base and
      commit (and push) the stripped files,
-     then `/hrd ship --reverify <id>`; else re-verify (§5 procedure, on base: `.claude/herald/work/<ref>/`),
+     then `/hrd ship --reverify <id>`; else re-verify (§5 procedure, on base: `.claude/herald/work/<ref>/`;
+     a diagram is never rendered on base — its published PNG passes by its render record, and
+     `image_warnings` from `stage pass --stage verify --amend` ("the SVG source differs from the
+     published picture") go into the step 10 report without stopping the ship),
      the delta artifacts are committed now.
    - `flags` (withdrawn/moved slug reappeared) — attended: explain exits (`--release-slug`,
      `--unwithdraw`, remove the files); `--auto`: stop.
@@ -96,11 +99,14 @@ report a mismatch.
    of base). Move its delta artifacts to `.claude/herald/memory/reverify/<id>/`, restore
    `work/<id>/` with `git checkout -- .claude/herald/work/<id>/`, and offer the exits:
    - ⓪ intentionally removed → `/hrd status --withdraw`; slug changed → `/hrd status --move`
-   - ① fix the body outside Claude (or by PR), then `/hrd ship --reverify <id>`
+   - ① fix the body outside Claude (or by PR), then `/hrd ship --reverify <id>` (a diagram whose
+     published PNG was changed on base has no record of what it draws: fix it by a PR that edits
+     the SVG — Herald renders it — or restore it with ②)
    - ② removal/restore revert PR: branch `herald-revert/<id>` from `origin/<base>`, label
      `herald-revert` plus `herald-revert:remove` (merged-unrecorded article: revert the whole
      original PR incl. `work/<id>/`) or `herald-revert:restore` (published article: restore the
-     body/images from the latest ledger SHA, `git show <sha>:<path>`; with translations restore
+     body/images from the latest ledger SHA, `git show <sha>:<path>` — the OG path too when it lies
+     outside the image directory (from that tree, or deleted when the tree has none); with translations restore
      every bundle path that tree has and **delete** translation files it does not have); open the
      PR and let the human merge it.
 
@@ -118,7 +124,7 @@ the PR body's `## Reader notes`, `## Framings` and `## Research corrections` if 
 send back; sentences the fact-checker treated as the article's own example under a framing),
 "body differs from verified" (`HRD hash --slug <s> --rev <headRefOid>` vs `HRD ledger show` — the
 default hash is the bundle: source and translations),
-"images changed", cannibalization re-check (with the brief's exceptions: a refresh's own
+"images changed" (with the number of external images and quotations, `HRD image status --topic <id> --rev <headRefOid>`), cannibalization re-check (with the brief's exceptions: a refresh's own
 article and what follows it; a following topic's old article — `atoms/_stages.md` § brief), and
 `HRD scope --topic <id> --rev <headRefOid>`.
 With `translations` in config also: the languages and their verify counts (`verify.json`
@@ -140,6 +146,14 @@ show them (file links, `mask` categories, the capture column — `human` or `aut
 recorded one, shown as `human` without URL or time)
 and ask for a **separate confirmation** — "I looked at the screenshots" — before approve; no
 merge without it (`atoms/_screenshots.md` §6).
+
+A PR with external images (`auto-exclusion` lists `external-images`): list them from `HRD image
+status --topic <id> --rev refs/remotes/origin/pr-<n>` — file links, source page, credit, license
+or **quotation — no OG/SNS use**, "replaced by a human" where `replaced` is true — and ask for a
+**separate confirmation** "I checked the external images and their attribution" (one question
+with two items when screenshots are there too); no merge without it (`atoms/_images.md` §6). Show
+diagrams and the OG card as links (`pr_rows`); an OG line "old title kept" (`stale_base`) is
+shown as such.
 
 A topic whose `auto_merged_pr` names this open PR (a session-auto stamp whose merge never
 happened): on approve or decline, `HRD auto-merged --topic <id> --clear` — a human decided it
@@ -185,6 +199,20 @@ switch and §7.1 need a clean tree.
    its reason), then the gate and verify, so the recorded hashes cover the stripped files
    (`atoms/_screenshots.md` §6). Tell the human now that the stripped originals stay in the PR's
    history (§4 ran before this).
+   Then, only when the PR head's scripts are 0.17.0 or later and the repo manages images
+   (`atoms/_images.md` §6): `HRD image status --topic <id>` — a diagram under `pending.render`
+   (the human changed its PNG or SVG) → `HRD image render --topic <id>` (no limner on this machine
+   → the fail path below with `verify-after-human-edit`; tell the human at step 4 next time that a
+   PNG edit is replaced by a render of the SVG); then `HRD image og --topic <id>` (no flag; it does
+   nothing when the inputs and the file are as recorded). `needs-human` (a file a human put at the
+   OG path) → attended: ask "use this OG image?" — yes → `HRD image og --topic <id> --human-push
+   --pr <n>` (a refusal: tell the human why — ship from the machine that pushed, or remove the file
+   — and skip this PR this time); no → skip this PR this time (the file stays). `--auto`: this PR
+   only → the fail path below with `verify-after-human-edit` and the note `human: OG file needs a
+   human ship` (the human's file is not moved). When `og` changed the OG (file, `status` or
+   `stale_base`), this PR is **not merged this run** (attended and `--auto`): §4 approved the head
+   before it — the next ship shows it again; `--session-auto` goes on (§6 recomputes the
+   exclusions on the verified head). Commit what `render`/`og` wrote with the artifacts.
    `research_suspects` (a claim in `research.md` found wrong) fail this re-verify — no research
    fix here: the fail path below holds `verify-after-human-edit`; the human resolves it.
 3. Pass → `HRD stage pass --topic <id> --stage verify --amend`, commit the artifacts (and any image

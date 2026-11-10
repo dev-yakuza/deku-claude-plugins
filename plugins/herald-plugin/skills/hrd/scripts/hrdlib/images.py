@@ -1,0 +1,2180 @@
+"""Images Herald makes or fetches for an article (design/herald/08-images.md, 0.17.0).
+
+brief plans each image place as one kind: a screenshot (06/07 — `screenshots.json`, untouched
+here), an SVG diagram the illustrator draws and limner renders to PNG, or an external image of
+a real place, thing or work fetched from the web under a free license or as a quotation. The
+diagrams and external images are listed in `<w>images.json`; this module checks that manifest
+(`plan`), renders diagrams, fetches external images, writes the OG card, and judges every item
+from evidence, never from a state field (P13):
+
+- a diagram is `ready` when its PNG's content is in a committed render record
+  (`<w>diagram-renders.jsonl`, written only by `render`, protected by the guard) — the text drawn
+  into it is what verify checks;
+- an external image is `ready` when its content is in this machine's fetch ledger and a human
+  confirmed that content (`ledger/fetches.jsonl` + `confirmations.jsonl`, rule U of 0.16.0).
+
+A repo without an `images` config block behaves exactly as 0.16.0.
+"""
+
+import hashlib
+import http.client
+import ipaddress
+import json
+import os
+import re
+import socket
+import ssl
+import time
+import urllib.parse
+from collections import Counter
+
+from . import limner
+from .shots import (CONFIRMATIONS, FETCHES, Ledger, _bytes_hashes, blob, file_hashes, kind_of, ledger_append,
+                    move_to_removed, on_base, public_url, removed_bytes)
+from .util import HeraldError, git, git_ok, now_iso, read_json
+
+MANIFEST = "images.json"
+RENDERS = "diagram-renders.jsonl"
+ID_RES = {"diagram": re.compile(r"^d[0-9]{1,3}$"), "external": re.compile(r"^e[0-9]{1,3}$")}
+SCENE_RE = re.compile(r"^g[0-9]{1,3}$")  # 0.18.0 scene images: the prefix and kind are reserved
+EXTERNAL_EXTS = ("png", "jpg", "jpeg", "webp")
+VALUE_BAD = re.compile(r"[<>\"\[\]\\\n\r]")  # alt, credit, title go into the body without escaping
+VALUE_MAX = 300
+LANGS = ("ko", "ja", "en")
+LICENSE_URLS = {
+    "CC0 1.0": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "Public domain": "https://creativecommons.org/publicdomain/mark/1.0/",
+}
+for _v in ("2.0", "2.5", "3.0", "4.0"):
+    LICENSE_URLS["CC BY %s" % _v] = "https://creativecommons.org/licenses/by/%s/" % _v
+    LICENSE_URLS["CC BY-SA %s" % _v] = "https://creativecommons.org/licenses/by-sa/%s/" % _v
+FIGURE_FIELDS = ("ref", "alt", "credit", "license", "license_url", "page_url", "label", "source", "orientation")
+FIGURE_REQUIRED = {"licensed": ("ref", "alt", "credit", "license", "license_url", "page_url"),
+                   "quotation": ("ref", "alt", "credit", "label", "page_url")}
+WORDS = {"licensed": "Photo", "quotation": "Quotation", "source": "Source"}
+RENDER_FIELDS = ("svg_sha256", "background", "png_blob", "png_sha256")
+OG_PLACEHOLDERS = ("{title}", "{slug}", "{date}", "{category}", "{lang}", "{out}")
+OG_CONTENT_WHY = ("title-too-long", "missing_glyph", "low_contrast")
+SVG_NS = "http://www.w3.org/2000/svg"
+SVG_BANNED = ("script", "foreignObject", "image", "use", "a", "style", "title", "desc", "metadata")
+SVG_MAX = 1 << 20
+
+BUDGET = 90                 # one `render`/`fetch`/`og` call: under the Bash tool's 120 s default
+RENDER_START_MIN = 65       # 60 s limner call + 5 s cleanup
+FETCH_ITEM = 30
+FETCH_START_MIN = 35
+SOCK_TIMEOUT = 10
+MAX_REDIRECTS = 3
+MAX_SIDE = 8192
+MAX_PIXELS = 40_000_000
+OG_TOOL_TIMEOUT = 45
+
+ENV_FETCH = ("net", "tls", "dns-fail", "retry-later", "timeout")
+
+
+# --- paths and config --------------------------------------------------------------------------
+
+def _work_rel(tid, name=""):
+    from .store import work_rel
+    return work_rel(tid, name)
+
+
+def manifest_rel(tid):
+    return _work_rel(tid, MANIFEST)
+
+
+def renders_rel(tid):
+    return _work_rel(tid, RENDERS)
+
+
+def svg_rel(tid, iid):
+    return _work_rel(tid, "diagrams/%s.svg" % iid)
+
+
+def block(cfg):
+    b = cfg.get("images")
+    return b if isinstance(b, dict) else None
+
+
+def managed(cfg):
+    """Managed mode = an `images` block (§2.14.1). Without it everything is 0.16.0."""
+    return block(cfg) is not None
+
+
+def lang_tag(cfg):
+    """The source language's primary subtag (`ko-KR`, `ja_JP` → ko, ja) — what limner gets."""
+    v = str(cfg.source_lang() or "").lower()
+    return re.split(r"[-_]", v, 1)[0]
+
+
+def diagram_conf(cfg):
+    d = (block(cfg) or {}).get("diagrams")
+    if not isinstance(d, dict):
+        return None
+    return {"width": d.get("width", 1600), "background": d.get("background", "#ffffff")}
+
+
+def external_on(cfg):
+    return (block(cfg) or {}).get("external") is True
+
+
+def og_conf(cfg):
+    o = (block(cfg) or {}).get("og")
+    if not isinstance(o, dict):
+        return None
+    return {"path": o.get("path", "{images}/{slug}/og.png"), "command": o.get("command"),
+            "subtitle": o.get("subtitle"), "fallback_first_image": o.get("fallback_first_image", True)}
+
+
+def figure(cfg):
+    f = (block(cfg) or {}).get("figure")
+    return f if isinstance(f, dict) else {}
+
+
+def words(cfg):
+    w = figure(cfg).get("words")
+    return w if isinstance(w, dict) else {}
+
+
+def illustrator_on(cfg):
+    return "illustrator" in (cfg.get("roles", "conditional") or [])
+
+
+def figure_errors(cfg):
+    """`images.diagrams` and `images.figure` problems ([] when fine or unmanaged). Kept out of
+    Config.validate (L4): any of them turns diagrams and external images off (`config`)."""
+    if not managed(cfg):
+        return []
+    errors = []
+    d = (block(cfg) or {}).get("diagrams")
+    if d is not None:
+        if not isinstance(d, dict):
+            errors.append("images.diagrams must be an object")
+        else:
+            w = d.get("width", 1600)
+            if not isinstance(w, int) or isinstance(w, bool) or not 320 <= w <= 4096:
+                errors.append("images.diagrams.width must be an integer from 320 to 4096")
+            if not re.match(r"^#[0-9A-Fa-f]{6}$", str(d.get("background", "#ffffff"))):
+                errors.append("images.diagrams.background must be #RRGGBB (diagrams always have an opaque background)")
+    f = (block(cfg) or {}).get("figure")
+    if f is not None and not isinstance(f, dict):
+        return errors + ["images.figure must be an object"]
+    f = f or {}
+    for name in ("diagram", "licensed", "quotation"):
+        t = f.get(name)
+        if t is None:
+            if name != "diagram" and external_on(cfg):
+                errors.append("images.figure.%s is missing — it must hold %s" % (
+                    name, " ".join("{%s}" % x for x in FIGURE_REQUIRED[name])))
+            continue
+        if not isinstance(t, str) or not t.strip():
+            errors.append("images.figure.%s must be a string" % name)
+            continue
+        holes = set(re.findall(r"\{([^{}]*)\}", t))
+        bad = sorted(holes - set(FIGURE_FIELDS))
+        if bad:
+            errors.append("images.figure.%s has unknown placeholders: %s" % (name, ", ".join("{%s}" % b for b in bad)))
+        need = FIGURE_REQUIRED.get(name, ("ref", "alt"))
+        missing = [x for x in need if x not in holes]
+        if missing:
+            errors.append("images.figure.%s needs %s (attribution: license URI and source page link)" % (
+                name, ", ".join("{%s}" % m for m in missing)))
+    w = f.get("words")
+    if w is not None:
+        if not isinstance(w, dict):
+            errors.append("images.figure.words must be an object")
+        else:
+            for k, v in w.items():
+                if k == "orientation":
+                    if not isinstance(v, dict) or not all(isinstance(x, str) for x in v.values()):
+                        errors.append("images.figure.words.orientation must map landscape/portrait to strings")
+                elif not isinstance(v, str) or VALUE_BAD.search(v):
+                    errors.append("images.figure.words.%s must be a plain string" % k)
+    return errors
+
+
+def og_errors(root, cfg):
+    """`images.og` problems ([] when fine or absent) — OG is off by config while any is there.
+    Kept out of Config.validate (L4)."""
+    o = (block(cfg) or {}).get("og")
+    if o is None:
+        return []
+    if not isinstance(o, dict):
+        return ["images.og must be an object"]
+    errors = []
+    pat = o.get("path", "{images}/{slug}/og.png")
+    if not isinstance(pat, str) or pat.count("{slug}") != 1 or not pat.endswith(".png") or \
+            any(h not in ("{images}", "{slug}") for h in re.findall(r"\{[^{}]*\}", pat)):
+        errors.append("images.og.path takes {images} and {slug} (exactly once) and ends in .png")
+    elif cfg.og_path("x") is None:
+        errors.append("images.og.path must be a relative path outside .git/ and .claude/")
+    if o.get("subtitle") not in (None, "description"):
+        errors.append("images.og.subtitle is null or \"description\"")
+    if not isinstance(o.get("fallback_first_image", True), bool):
+        errors.append("images.og.fallback_first_image is true or false")
+    t = o.get("command")
+    if t is not None:
+        errors += _og_command_errors(root, cfg, t)
+    return errors
+
+
+def _og_command_errors(root, cfg, t):
+    from .shots import INLINE_FLAGS, SHORT_BUNDLE_RE, runner
+    if not isinstance(t, list) or not t or not all(isinstance(x, str) and x for x in t):
+        return ["images.og.command must be a non-empty array of strings (an argv — no shell)"]
+    errors = []
+    first = runner(t[0])
+    if first:
+        prog = os.path.basename(t[0]).lower()
+        if prog in ("sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh", "cmd", "cmd.exe", "powershell",
+                    "pwsh", "env", "xargs", "eval", "exec") or re.match(r"^(bash|zsh)[0-9.]+$", prog):
+            errors.append("images.og.command must not run a shell (%s)" % t[0])
+        elif len(t) < 2 or "{" in t[1] or t[1].startswith("-") or os.path.isabs(t[1]) or ".." in t[1].split("/"):
+            errors.append("images.og.command runs an interpreter: its second element must be a repo-relative script")
+        elif not git_ok(root, "cat-file", "-e", "origin/%s:%s" % (cfg.base, t[1])):
+            errors.append("images.og.command script %s is not tracked on origin/%s" % (t[1], cfg.base))
+        else:
+            base_blob = git(root, "rev-parse", "origin/%s:%s" % (cfg.base, t[1]), check=False).strip()
+            if blob(root, t[1]) != base_blob:
+                errors.append("images.og.command script %s differs from origin/%s — commit it to base first"
+                              % (t[1], cfg.base))
+    others = [x for x in t[1:] if runner(x)]
+    if others:
+        errors.append("images.og.command must not run a shell or an interpreter after the program (%s)" % ", ".join(others))
+    flags = sorted({x for x in t if x in INLINE_FLAGS or SHORT_BUNDLE_RE.match(x)})
+    if flags:
+        errors.append("images.og.command must not pass inline code (%s)" % ", ".join(flags))
+    if "{" in t[0]:
+        errors.append("images.og.command's first element is the program — no placeholder there")
+    for x in t:
+        holes = re.findall(r"\{[^{}]*\}", x)
+        bad = [h for h in holes if h not in OG_PLACEHOLDERS]
+        if bad:
+            errors.append("images.og.command has unknown placeholders: %s" % ", ".join(sorted(set(bad))))
+        elif holes and x not in OG_PLACEHOLDERS:
+            errors.append("images.og.command takes a placeholder only as a whole element (%s)" % x)
+    return errors
+
+
+# --- what is on: config alone (plan, stage pass) and with this machine (kinds) ------------------
+
+def _category(root, cfg, slug):
+    fm = _frontmatter(root, cfg.body_path(slug)) if slug else {}
+    return fm.get("category")
+
+
+def _frontmatter(root, rel, rev=None):
+    from .validate import parse_frontmatter
+    try:
+        if rev:
+            text = git(root, "show", "%s:%s" % (rev, rel))
+        else:
+            with open(os.path.join(root, rel), encoding="utf-8") as f:
+                text = f.read()
+    except (OSError, HeraldError):
+        return {}
+    return parse_frontmatter(text.replace("\r\n", "\n"))[0] or {}
+
+
+def _rules(root):
+    from .validate import load_rules
+    return load_rules(root)
+
+
+def diagram_off(cfg):
+    """Why diagrams are off by config (None: on). Never looks at this machine's limner."""
+    if not managed(cfg) or diagram_conf(cfg) is None:
+        return "no-config"
+    if not illustrator_on(cfg):
+        return "no-illustrator"
+    if figure_errors(cfg) or limner.limner_errors(cfg):
+        return "config"
+    if lang_tag(cfg) not in LANGS:
+        return "lang:%s" % lang_tag(cfg)
+    return None
+
+
+def external_limits(root, cfg, category):
+    ext = _rules(root)["images"]["external"]
+    per = ext.get("per_category") if isinstance(ext.get("per_category"), dict) else {}
+    mx = per.get(category, ext.get("max")) if category is not None else ext.get("max")
+    qcats = ext.get("quotation_categories") or []
+    oc = og_conf(cfg)
+    fallback = True if oc is None else oc["fallback_first_image"]
+    return {"max": mx if isinstance(mx, int) else 0, "quotation": category in qcats and not fallback,
+            "quotation_max": ext.get("quotation_max", 0), "quotation_min_chars": ext.get("quotation_min_chars", 0),
+            "licenses": [x for x in ext.get("licenses") or [] if x in LICENSE_URLS], "rules": ext}
+
+
+def external_off(root, cfg, category):
+    if not managed(cfg) or not external_on(cfg):
+        return "no-config"
+    if not illustrator_on(cfg):
+        return "no-illustrator"
+    if cfg.translations():
+        return "translations"
+    if figure_errors(cfg):
+        return "config"
+    if external_limits(root, cfg, category)["max"] <= 0:
+        return "category"
+    return None
+
+
+def og_on(root, cfg):
+    """OG is on by config (§2.8.1): a block, no `og_errors`, and — for limner — a language it
+    draws. plan and stage pass read only this; whether this machine can make it is `og`'s job."""
+    o = og_conf(cfg)
+    if o is None or og_errors(root, cfg):
+        return False
+    if o["command"] is None and (limner.limner_errors(cfg) or lang_tag(cfg) not in LANGS):
+        return False
+    return True
+
+
+def allowed_exts(root, cfg, slug):
+    img = cfg.image_dir(slug or "x")
+    from .validate import ignored
+    return [e for e in EXTERNAL_EXTS if not ignored(root, "%s/x.%s" % (img, e))]
+
+
+def kinds(root, cfg, tid=None):
+    """`HRD image kinds` — for prompts only (it reads this machine's limner and .gitignore)."""
+    st, slug, cat = {}, None, None
+    if tid:
+        from .store import get_topic, load_state, load_topics
+        try:
+            st = load_state(root, tid)
+        except HeraldError:
+            st = {}
+        slug = st.get("slug")
+        cat = _category(root, cfg, slug) if slug else None
+        if cat is None:
+            try:
+                cat = get_topic(load_topics(root), tid).get("category")
+            except HeraldError:
+                pass
+    out = {"screenshot": {"ok": True}, "scene": {"ok": False, "why": "0.18"}}
+    why = diagram_off(cfg)
+    if why is None:
+        p = limner.probe(root, cfg)
+        why = None if p["ok"] else ("config" if p["code"] == "config" else p["code"])
+    out["diagram"] = {"ok": why is None, "why": why}
+    why = external_off(root, cfg, cat)
+    lim = external_limits(root, cfg, cat) if managed(cfg) else {"max": 0, "quotation": False, "quotation_max": 0}
+    out["external"] = {"ok": why is None, "licensed": why is None, "quotation": why is None and lim["quotation"],
+                       "max": lim["max"], "quotation_max": lim["quotation_max"] if lim["quotation"] else 0,
+                       "exts": allowed_exts(root, cfg, slug) if why is None else [], "why": why}
+    o = og_conf(cfg)
+    og = {"ok": False, "by": None, "path": cfg.og_path(slug or "<slug>") if o else None, "why": None}
+    if o is None:
+        og["why"] = "no-config"
+    elif not og_on(root, cfg):
+        og["why"] = "config"
+    elif o["command"] is not None:
+        og.update(ok=True, by="repo")
+    else:
+        p = limner.probe(root, cfg)
+        og.update(ok=p["ok"], by="limner", why=None if p["ok"] else p["code"])
+    out["og"] = og
+    return out
+
+
+# --- manifest --------------------------------------------------------------------------------
+
+def load_manifest(root, tid, rev=None):
+    rel = manifest_rel(tid)
+    if rev:
+        if not git_ok(root, "cat-file", "-e", "%s:%s" % (rev, rel)):
+            return None
+        try:
+            data = json.loads(git(root, "show", "%s:%s" % (rev, rel)))
+        except ValueError as e:
+            raise HeraldError("%s at %s is not valid JSON: %s" % (rel, rev, e))
+    else:
+        full = os.path.join(root, rel)
+        if not os.path.isfile(full):
+            return None
+        try:
+            with open(full, encoding="utf-8") as f:
+                data = json.load(f)
+        except ValueError as e:
+            raise HeraldError("%s is not valid JSON: %s" % (rel, e))
+    if data is None:
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("images"), list):
+        raise HeraldError('%s must be {"images": [...]}' % rel)
+    return data
+
+
+def _items(man):
+    return [i for i in (man or {}).get("images") or [] if isinstance(i, dict)]
+
+
+def item_key(it):
+    """An external image's key: what it is (file, source) — polishing credit or alt never asks
+    for a new fetch."""
+    if it.get("kind") != "external":
+        return None
+    raw = json.dumps([it.get("file"), it.get("source_url")])
+    return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _read(root, rel, rev=None):
+    try:
+        if rev:
+            return git(root, "show", "%s:%s" % (rev, rel))
+        with open(os.path.join(root, rel), encoding="utf-8") as f:
+            return f.read()
+    except (OSError, HeraldError, UnicodeDecodeError):
+        return None
+
+
+def _body(root, cfg, slug, rev=None):
+    return _read(root, cfg.body_path(slug), rev) or ""
+
+
+def _candidates_section(root, tid):
+    text = _read(root, _work_rel(tid, "research.md")) or ""
+    m = re.search(r"(?m)^##[ \t]+Image candidates[ \t]*$", text)
+    if not m:
+        return ""
+    nxt = re.search(r"(?m)^##[ \t]+(?!#)", text[m.end():])
+    return text[m.end():m.end() + nxt.start()] if nxt else text[m.end():]
+
+
+def research_claims(root, tid):
+    """{claim id: withdrawn?} as `stage pass` reads claim lines."""
+    from .store import _CLAIM_DEF_RE
+    text = _read(root, _work_rel(tid, "research.md")) or ""
+    out = {}
+    for line in text.splitlines():
+        m = _CLAIM_DEF_RE.match(line)
+        if m:
+            out["C%s" % m.group(1)] = bool(re.search(r"\bwithdrawn:", line, re.I))
+    return out
+
+
+def _body_chars(root, cfg, slug):
+    from .validate import body_chars, parse_frontmatter
+    rules = _rules(root)
+    _, body = parse_frontmatter(_body(root, cfg, slug).replace("\r\n", "\n"))
+    return body_chars(body, rules["length"].get("count", "nonspace"))
+
+
+def check_value(v):
+    return isinstance(v, str) and v.strip() and len(v) <= VALUE_MAX and not VALUE_BAD.search(v)
+
+
+def snippet_text(cfg, it, orientation=None):
+    """The body text for one item: its `images.figure` template with the values filled in once
+    (no value is read again as a placeholder)."""
+    w = words(cfg)
+    if it.get("kind") == "diagram":
+        t = figure(cfg).get("diagram") or "![{alt}]({ref})"
+        use = None
+    else:
+        use = it.get("use")
+        t = figure(cfg).get(use)
+        if not isinstance(t, str):
+            raise HeraldError("images.figure.%s is not set" % use)
+    ori = orientation or "landscape"
+    omap = w.get("orientation") if isinstance(w.get("orientation"), dict) else {}
+    vals = {"ref": it.get("ref") or "", "alt": it.get("alt") or "", "credit": it.get("credit") or "",
+            "license": it.get("license") or "" if use == "licensed" else "",
+            "license_url": LICENSE_URLS.get(it.get("license"), "") if use == "licensed" else "",
+            "page_url": it.get("page_url") or "", "label": w.get(use) or WORDS.get(use, "") if use else "",
+            "source": it.get("title") or w.get("source") or WORDS["source"],
+            "orientation": omap.get(ori, ori)}
+    return re.sub(r"\{(%s)\}" % "|".join(FIGURE_FIELDS), lambda m: vals[m.group(1)], t)
+
+
+def check_manifest(root, cfg, tid, st, man):
+    """(errors, warnings) — §2.10, every rule code can check without this machine's limner."""
+    from .validate import ignored, image_refs, resolve_image_ref
+    slug = st["slug"]
+    img = cfg.image_dir(slug).rstrip("/") + "/"
+    body_rel = cfg.body_path(slug)
+    text = _body(root, cfg, slug)
+    refs = image_refs(root, body_rel, text)
+    errors, warnings = [], []
+    items = _items(man)
+    if len(items) != len((man or {}).get("images") or []):
+        errors.append("every images[] entry must be an object")
+    cat = _category(root, cfg, slug)
+    d_off, x_off = diagram_off(cfg), external_off(root, cfg, cat)
+    lim = external_limits(root, cfg, cat)
+    exts_ok = allowed_exts(root, cfg, slug)
+    claims = research_claims(root, tid)
+    cands = _candidates_section(root, tid)
+    rejected = {r.get("source_url") for r in st.get("image_rejects") or [] if isinstance(r, dict)}
+    shot_files = set()
+    try:
+        from .shots import load_manifest as shot_manifest
+        shot_files = {s.get("file") for s in (shot_manifest(root, tid) or {}).get("shots") or [] if isinstance(s, dict)}
+    except HeraldError:
+        pass
+    og = cfg.og_path(slug) if og_conf(cfg) else None
+    prev_items = ((st.get("images") or {}).get("items") or {})
+    seen, files, srefs = set(), set(), set()
+    n_ext = n_quote = 0
+    for i, it in enumerate(items):
+        iid = it.get("id")
+        where = iid if isinstance(iid, str) else "images[%d]" % i
+        kind = it.get("kind")
+        if isinstance(iid, str) and SCENE_RE.match(iid) or kind == "scene":
+            errors.append("%s: scene images arrive in 0.18 — leave that place out" % where)
+            continue
+        if kind not in ID_RES:
+            errors.append("%s: kind must be diagram or external" % where)
+            continue
+        if not isinstance(iid, str) or not ID_RES[kind].match(iid):
+            errors.append("%s: a %s id is %s1..%s999" % (where, kind, kind[0], kind[0]))
+        elif iid in seen:
+            errors.append("%s: duplicate id" % iid)
+        seen.add(iid)
+        if kind == "diagram" and d_off:
+            errors.append("%s: diagrams are off here (%s)" % (where, d_off))
+        if kind == "external" and x_off:
+            errors.append("%s: external images are off here (%s)" % (where, x_off))
+        f = it.get("file")
+        if not isinstance(f, str) or not f.startswith(img) or "/" in f[len(img):] or ".." in f.split("/") or \
+                not f[len(img):].startswith("%s-" % iid):
+            errors.append("%s: file must be %s<id>-<what>.<ext>" % (where, img))
+            continue
+        if f in files or it.get("ref") in srefs:
+            errors.append("%s: another image already uses this file or ref" % where)
+        files.add(f)
+        srefs.add(it.get("ref"))
+        ext = f.rsplit(".", 1)[-1].lower() if "." in f else ""
+        if kind == "diagram" and ext != "png":
+            errors.append("%s: a diagram is published as .png" % where)
+        if kind == "external" and ext not in exts_ok:
+            errors.append("%s: .%s is not an extension this repo publishes (gitignored or unsupported) — use one of %s"
+                          % (where, ext, ", ".join(exts_ok) or "none"))
+        if ignored(root, f):
+            errors.append("%s: %s is gitignored — it would deploy from this machine only" % (where, f))
+        if on_base(root, cfg, f):
+            errors.append("%s: %s already exists on %s — use a new file name" % (where, f, cfg.base))
+        if f == og or f in shot_files:
+            errors.append("%s: %s is the OG file or a screenshot's file" % (where, f))
+        ref = it.get("ref")
+        if not isinstance(ref, str) or resolve_image_ref(root, body_rel, ref) != f:
+            errors.append("%s: ref %r does not resolve to %s the way the gate reads images" % (where, ref, f))
+        elif refs.count(f) != 1:
+            errors.append("%s: the article must reference %s exactly once (found %d)" % (where, ref, refs.count(f)))
+        for k in ("alt", "purpose"):
+            if not check_value(it.get(k)) if k == "alt" else not (isinstance(it.get(k), str) and it.get(k).strip()):
+                errors.append("%s: %s must be set (alt: at most %d characters, no < > \" [ ] \\ or line break)"
+                              % (where, k, VALUE_MAX))
+        if kind == "diagram":
+            errors += _diagram_errors(root, tid, where, it, claims)
+            continue
+        n_ext += 1
+        errors += _external_errors(root, cfg, where, it, lim, cands, rejected)
+        if it.get("use") == "quotation":
+            n_quote += 1
+        rec = prev_items.get(iid) or {}
+        if rec.get("status") in ("fetched", "ready") and rec.get("key") == item_key(it) and \
+                isinstance(it.get("use"), str) and figure(cfg).get(it.get("use")):
+            sn = snippet_text(cfg, it, rec.get("orientation"))
+            c = text.count(sn)
+            if c != 1:
+                errors.append("%s: the attribution (`HRD image snippet --topic %s --id %s`) must be in the article "
+                              "verbatim exactly once (found %d)" % (where, tid, iid, c))
+    if n_ext and n_ext > lim["max"]:
+        errors.append("%d external images — this category allows %d" % (n_ext, lim["max"]))
+    if n_quote:
+        if n_quote > (lim["quotation_max"] or 0):
+            errors.append("%d quotations — at most %s" % (n_quote, lim["quotation_max"]))
+        chars = _body_chars(root, cfg, slug)
+        if chars < (lim["quotation_min_chars"] or 0) * n_quote:
+            errors.append("the article is %d characters — quotations need %s per quoted image (the text leads)"
+                          % (chars, lim["quotation_min_chars"]))
+    mt = _rules(root)["images"].get("max_total")
+    if isinstance(mt, int) and not isinstance(mt, bool):
+        local = [r for r in refs if r != og]
+        if len(local) > mt:
+            errors.append("%d images in the article — at most %d (images.max_total)" % (len(local), mt))
+    if managed(cfg):
+        known = files | shot_files | {og}
+        added = [p for p in git(root, "ls-files", "--others", "--exclude-standard", "--", cfg.image_dir(slug),
+                                check=False).splitlines() if p]
+        loose = sorted(p for p in added if p not in known)
+        if loose:
+            warnings.append("unmanaged images: %s — they go out under the 0.14.0 rule (the `images` exclusion a human "
+                            "may accept); the text in them is not verified" % ", ".join(loose))
+    return errors, warnings
+
+
+def _diagram_errors(root, tid, where, it, claims):
+    errors = []
+    svg = svg_rel(tid, it.get("id"))
+    if not os.path.isfile(os.path.join(root, svg)):
+        return ["%s: the SVG source %s is missing" % (where, svg)]
+    try:
+        got = svg_texts(os.path.join(root, svg))
+    except HeraldError as e:
+        return ["%s: %s" % (where, e)]
+    texts = it.get("texts")
+    if not isinstance(texts, list) or not all(isinstance(t, dict) and isinstance(t.get("text"), str) for t in texts):
+        return ["%s: texts must list [{\"text\", \"claims\"}] — copy `HRD image texts --topic %s --id %s --source svg`"
+                % (where, tid, it.get("id"))]
+    if Counter(t["text"] for t in texts) != Counter(got):
+        errors.append("%s: texts differ from the text in %s — copy `HRD image texts --source svg` exactly" % (where, svg))
+    for t in texts:
+        cl = t.get("claims")
+        if not isinstance(cl, list) or not all(isinstance(c, str) for c in cl):
+            errors.append("%s: texts[].claims must be a list of claim ids ([] for a label)" % where)
+            continue
+        for c in cl:
+            if c not in claims:
+                errors.append("%s: %r maps to %s, which research.md does not have" % (where, t["text"][:40], c))
+            elif claims[c]:
+                errors.append("%s: %r maps to %s, which is withdrawn" % (where, t["text"][:40], c))
+    return errors
+
+
+def _external_errors(root, cfg, where, it, lim, cands, rejected):
+    errors = []
+    use = it.get("use")
+    if use not in ("licensed", "quotation"):
+        return ["%s: use must be licensed or quotation" % where]
+    for k in ("source_url", "page_url"):
+        if not public_url(it.get(k)):
+            errors.append("%s: %s must be a public https URL" % (where, k))
+        elif it[k] not in cands:
+            errors.append("%s: %s is not in research.md ## Image candidates — copy the candidate as written" % (where, k))
+    if not check_value(it.get("credit")):
+        errors.append("%s: credit must be set (at most %d characters, no < > \" [ ] \\ or line break)" % (where, VALUE_MAX))
+    if it.get("title") is not None and not check_value(it.get("title")):
+        errors.append("%s: title, when given, follows the alt rules" % where)
+    if use == "licensed":
+        if it.get("license") not in lim["licenses"]:
+            errors.append("%s: license %r is not one this repo allows (%s)" % (where, it.get("license"),
+                                                                                ", ".join(lim["licenses"])))
+    else:
+        if not lim["quotation"]:
+            errors.append("%s: quotations are not allowed for this category (gate-rules images.external."
+                          "quotation_categories, and a site that never falls back to the first image — og."
+                          "fallback_first_image false)" % where)
+        if it.get("license"):
+            errors.append("%s: a quotation has no license" % where)
+    if it.get("source_url") in rejected:
+        errors.append("%s: %s was rejected by a human — use another candidate" % (where, it.get("source_url")))
+    return errors
+
+
+def managed_files(root, cfg, tid, st):
+    """Files Herald manages for this topic beyond screenshots: images.json files, recorded image
+    files and the OG path (the 0.15.0 "new images the article does not reference" warning skips them)."""
+    out = set(((st or {}).get("images") or {}).get("files") or {})
+    try:
+        out |= {i.get("file") for i in _items(load_manifest(root, tid))}
+    except HeraldError:
+        pass
+    if og_conf(cfg) and (st or {}).get("slug"):
+        out.add(cfg.og_path(st["slug"]))
+    return out
+
+
+# --- SVG rules and text (§2.5.3) ---------------------------------------------------------------
+
+def svg_texts(path_or_bytes):
+    """The text a diagram draws, in document order (each `<text>` one value, whitespace folded).
+    Refuses what Herald never passes to limner: DTDs and entities (before any parser), script,
+    foreign objects, embedded or linked images, links, style sheets, event handlers, external
+    references, hidden text (title/desc/metadata), and a root without a viewBox."""
+    import xml.etree.ElementTree as ET
+    if isinstance(path_or_bytes, (bytes, bytearray)):
+        raw = bytes(path_or_bytes)
+    else:
+        if os.path.getsize(path_or_bytes) > SVG_MAX:
+            raise HeraldError("the SVG is larger than 1 MB")
+        with open(path_or_bytes, "rb") as f:
+            raw = f.read()
+    if len(raw) > SVG_MAX:
+        raise HeraldError("the SVG is larger than 1 MB")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HeraldError("the SVG is not UTF-8")
+    if re.search(r"<!DOCTYPE|<!ENTITY", text, re.I):
+        raise HeraldError("the SVG has a DOCTYPE or ENTITY — not allowed")
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as e:
+        raise HeraldError("the SVG does not parse: %s" % e)
+    if root.tag != "{%s}svg" % SVG_NS:
+        raise HeraldError("the root element must be <svg xmlns=\"%s\">" % SVG_NS)
+    if not root.get("viewBox"):
+        raise HeraldError("the <svg> root needs a viewBox")
+    out = []
+    for el in root.iter():
+        tag = el.tag.rsplit("}", 1)[-1] if isinstance(el.tag, str) else ""
+        if tag in SVG_BANNED:
+            raise HeraldError("<%s> is not allowed in a diagram" % tag)
+        for k, v in el.attrib.items():
+            name = k.rsplit("}", 1)[-1].lower()
+            if name.startswith("on"):
+                raise HeraldError("event attribute %s is not allowed" % name)
+            if name == "href":
+                raise HeraldError("href is not allowed (no links or external references)")
+            if re.search(r"url\(\s*(?!['\"]?#)", v, re.I):
+                raise HeraldError("url(...) may only point inside the SVG (url(#id))")
+            if name == "font-family" and v.strip().strip("'\"").lower() not in ("sans-serif", "monospace"):
+                raise HeraldError("font-family must be sans-serif or monospace (limner sets the font)")
+        if tag == "text":
+            v = re.sub(r"\s+", " ", "".join(el.itertext())).strip()
+            if v:
+                out.append(v)
+    return out
+
+
+# --- diagram render records (§2.7.2) -----------------------------------------------------------
+
+def _valid_render(rec):
+    return isinstance(rec, dict) and all(isinstance(rec.get(k), str) and rec.get(k) for k in RENDER_FIELDS) and \
+        isinstance(rec.get("width"), int) and isinstance(rec.get("texts"), list) and \
+        all(isinstance(t, str) for t in rec["texts"])
+
+
+def read_renders(root, tid, rev=None):
+    """(lines, dropped): a line that is no whole record does not exist — the file only lets
+    things pass, so dropping a line only makes the judgement stricter."""
+    raw = _read(root, renders_rel(tid), rev)
+    if raw is None:
+        return [], 0
+    out, dropped = [], 0
+    for line in raw.split("\n"):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except (ValueError, RecursionError):
+            dropped += 1
+            continue
+        if _valid_render(rec):
+            out.append(rec)
+        else:
+            dropped += 1
+    return out, dropped
+
+
+def _topic_states(root, rev=None):
+    """[(tid, state)] of every work dir, in the working tree or at `rev`."""
+    out = []
+    if rev:
+        for p in git(root, "ls-tree", "-r", "--name-only", rev, "--", ".claude/herald/work", check=False).splitlines():
+            if p.endswith("/state.json") and p.count("/") == 4:
+                txt = _read(root, p, rev)
+                try:
+                    st = json.loads(txt) if txt else None
+                except ValueError:
+                    st = None
+                if isinstance(st, dict):
+                    out.append((p.split("/")[-2], st))
+        return out
+    work = os.path.join(root, ".claude/herald/work")
+    for tid in sorted(os.listdir(work)) if os.path.isdir(work) else []:
+        try:
+            st = read_json(os.path.join(work, tid, "state.json"))
+        except ValueError:
+            st = None
+        if isinstance(st, dict):
+            out.append((tid, st))
+    return out
+
+
+def _old_slugs(root, slug):
+    from .store import load_published
+    art = next((a for a in load_published(root).get("articles") or [] if a.get("slug") == slug), None) or {}
+    return [m["slug"] for m in art.get("moved_from") or [] if isinstance(m, dict) and m.get("slug")]
+
+
+def cur_path(root, cfg, slug, f):
+    """A recorded path under an old slug (`status --move`) mapped onto the current image dir."""
+    from .integrity import moved_image_path
+    return moved_image_path(cfg, slug, f, _old_slugs(root, slug)) if f else f
+
+
+def slug_renders(root, cfg, slug, rev=None):
+    """Every render line of every topic of this slug (refresh topics, moved slugs included)."""
+    olds = set(_old_slugs(root, slug)) | {slug}
+    lines, dropped = [], 0
+    for tid, st in _topic_states(root, rev):
+        if st.get("slug") in olds:
+            ls, d = read_renders(root, tid, rev)
+            lines += ls
+            dropped += d
+    return lines, dropped
+
+
+def find_render(lines, h):
+    if not h:
+        return None
+    return next((r for r in reversed(lines) if r.get("png_blob") == h[0] or r.get("png_sha256") == h[1]), None)
+
+
+def _rev_hashes(root, rev, rel):
+    """(blob, sha256) of `rel` at `rev`, or of the working-tree file."""
+    if not rev:
+        return file_hashes(root, rel)
+    b = git(root, "rev-parse", "-q", "--verify", "%s:%s" % (rev, rel), check=False).strip()
+    if not b:
+        return None
+    import subprocess
+    p = subprocess.run(["git", "cat-file", "--filters", "%s:%s" % (rev, rel)], cwd=root, capture_output=True)
+    return b, hashlib.sha256(p.stdout).hexdigest() if p.returncode == 0 else None
+
+
+def _svg_sha(root, tid, iid, rev=None):
+    rel = svg_rel(tid, iid)
+    if rev:
+        import subprocess
+        p = subprocess.run(["git", "show", "%s:%s" % (rev, rel)], cwd=root, capture_output=True)
+        return hashlib.sha256(p.stdout).hexdigest() if p.returncode == 0 else None
+    full = os.path.join(root, rel)
+    if not os.path.isfile(full):
+        return None
+    with open(full, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+# --- item state (P13) -------------------------------------------------------------------------
+
+def diagram_state(root, cfg, tid, st, it, lines, strict=True, rev=None):
+    """(`ready`|`pending`, E): ready when the PNG's content is in a render record E; `strict`
+    (draft, first verify) also wants E to be the current SVG, settings and manifest texts."""
+    f = cur_path(root, cfg, st["slug"], it.get("file"))
+    E = find_render(lines, _rev_hashes(root, rev, f))
+    if not E:
+        return "pending", None
+    if strict:
+        conf = diagram_conf(cfg) or {}
+        texts = [t.get("text") for t in it.get("texts") or [] if isinstance(t, dict)]
+        if E.get("svg_sha256") != _svg_sha(root, tid, it.get("id"), rev) or E.get("width") != conf.get("width") or \
+                str(E.get("background")).lower() != str(conf.get("background")).lower() or \
+                Counter(E.get("texts")) != Counter(texts):
+            return "pending", E
+    return "ready", E
+
+
+def external_state(root, tid, it, led, rev=None):
+    """`ready` (logged for this item and confirmed), `fetched` (logged only) or `pending`."""
+    h = _rev_hashes(root, rev, it.get("file"))
+    if not h or not led.fetch_line(h, tid, it.get("id"), item_key(it)):
+        return "pending"
+    return "ready" if led.confirmed(h) else "fetched"
+
+
+def fail_closed(tid, iid, rec, led, it=None):
+    """§2.7.4: a fetch time recorded, but no fetch line for the item on this machine."""
+    if not rec or not rec.get("fetched_at") or led.fetch_lines(tid, iid, rec.get("key")):
+        return None
+    return ("%s: no fetch record on this machine — `HRD image reject --topic %s --id %s --refetch --reason 'refetch on "
+            "this machine'`, then `HRD image fetch` and `HRD image confirm` (unattended: hold needs-human, note "
+            "`tooling: images fetch record missing %s`)" % (iid, tid, iid, iid))
+
+
+# --- plan ---------------------------------------------------------------------------------------
+
+def _hash(root, rel):
+    from .hashing import file_hash
+    return file_hash(root, rel)
+
+
+def _og_text(root, cfg, st):
+    """`fresh|stale|off` for plan's output."""
+    if not og_on(root, cfg):
+        return "off"
+    rec = ((st.get("images") or {}).get("og")) or {}
+    try:
+        key = og_key(root, cfg, st)
+    except HeraldError:
+        return "stale"
+    if rec.get("key") != key:
+        return "stale"
+    return "off" if rec.get("status") == "off" else "fresh"
+
+
+def plan(root, cfg, tid, check_only=False):
+    from .store import load_state, save_state
+    st = load_state(root, tid)
+    slug = st.get("slug")
+    if not slug:
+        raise HeraldError("no slug yet for %s" % tid)
+    man = load_manifest(root, tid)
+    out = {"errors": [], "warnings": [], "pending": {"render": [], "fetch": [], "confirm": []}, "og": _og_text(root, cfg, st)}
+    rec = st.get("images") or {}
+    if not _items(man) and not (man or {}).get("images"):
+        if check_only or not rec:
+            return out
+        files = dict(rec.get("files") or {})
+        st["images"] = {"manifest": None, "body": None, "awaiting": False, "files": files, "items": {},
+                        "og": rec.get("og")}
+        save_state(root, tid, st)
+        out["moved"] = move_to_removed(root, tid, [f for f in files if not on_base(root, cfg, f)], "unlisted",
+                                       area="images")
+        return out
+    errors, warnings = check_manifest(root, cfg, tid, st, man)
+    out["errors"], out["warnings"] = errors, warnings
+    if errors or check_only:
+        return out
+    led = Ledger(root)
+    items = _items(man)
+    led.check(sum(1 for it in items if it.get("kind") == "external" and os.path.isfile(os.path.join(root, it["file"]))),
+              warnings)
+    lines, dropped = slug_renders(root, cfg, slug)
+    if dropped:
+        warnings.append("diagram render records: %d damaged line(s) ignored" % dropped)
+    prev = rec.get("items") or {}
+    files = dict(rec.get("files") or {})
+    current = {it["file"] for it in items}
+    to_move = [f for f in files if f not in current]
+    new = {}
+    for it in items:
+        iid, f = it["id"], it["file"]
+        files[f] = {"kind": it["kind"], "use": it.get("use") if it["kind"] == "external" else None}
+        h = file_hashes(root, f)
+        if it["kind"] == "diagram":
+            status, _ = diagram_state(root, cfg, tid, st, it, lines)
+            if h and not find_render(lines, h):
+                to_move.append(f)  # not a PNG Herald rendered (a hand-drawn or edited one): P9
+            new[iid] = {"kind": "diagram", "file": f, "status": status}
+            if status == "pending":
+                out["pending"]["render"].append(iid)
+            continue
+        key = item_key(it)
+        p = prev.get(iid) or {}
+        if h and not led.fetch_line(h, tid, iid, key):
+            to_move.append(f)  # not Herald's fetch of this very item
+        status = external_state(root, tid, it, led)
+        r = {"kind": "external", "use": it.get("use"), "file": f, "key": key, "status": status}
+        if p.get("key") == key:
+            for k in ("fetched_at", "orientation", "width", "height"):
+                if p.get(k) is not None:
+                    r[k] = p[k]
+            if status == "ready":
+                r["sha"] = p.get("sha") or blob(root, f)
+        elif status != "pending":
+            r["status"] = "pending"  # another source at the same file: the old fetch moves away
+            to_move.append(f)
+        new[iid] = r
+        if r["status"] == "pending":
+            out["pending"]["fetch"].append(iid)
+        elif r["status"] == "fetched":
+            out["pending"]["confirm"].append(iid)
+    st["images"] = {"manifest": _hash(root, manifest_rel(tid)), "body": _hash(root, cfg.body_path(slug)),
+                    "awaiting": True, "files": files, "items": new, "og": rec.get("og")}
+    save_state(root, tid, st)
+    out["moved"] = move_to_removed(root, tid, [f for f in dict.fromkeys(to_move) if not on_base(root, cfg, f)],
+                                   "unlisted", area="images")
+    for it in items:  # a moved file leaves its item pending
+        if it["file"] in out["moved"] and new[it["id"]]["status"] != "pending":
+            new[it["id"]]["status"] = "pending"
+            new[it["id"]].pop("sha", None)
+    if out["moved"]:
+        save_state(root, tid, st)
+    out["og"] = _og_text(root, cfg, st)
+    return out
+
+
+def _plan_items(root, tid, ids=None, kind=None):
+    man = load_manifest(root, tid)
+    items = [i for i in _items(man) if (kind is None or i.get("kind") == kind)]
+    if ids:
+        want = [x.strip() for x in (ids if isinstance(ids, list) else str(ids).split(",")) if x.strip()]
+        by = {i.get("id"): i for i in items}
+        missing = [x for x in want if x not in by]
+        if missing:
+            raise HeraldError("not %s items in images.json: %s" % (kind or "any", ", ".join(missing)))
+        return [by[x] for x in want]
+    return items
+
+
+def _on_branch(root, tid, st):
+    from .store import branch_name
+    head = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).strip()
+    return bool(st.get("slug")) and head == branch_name(tid, st["slug"])
+
+
+# --- render (§2.5.2) ----------------------------------------------------------------------------
+
+def _diagram_item_errors(root, cfg, tid, st, it):
+    img = cfg.image_dir(st["slug"]).rstrip("/") + "/"
+    f, iid = it.get("file"), it.get("id")
+    from .validate import ignored
+    if not isinstance(iid, str) or not ID_RES["diagram"].match(iid):
+        return "id must be d1..d999"
+    if not isinstance(f, str) or not f.startswith(img) or "/" in f[len(img):] or ".." in f.split("/") or \
+            not f.endswith(".png"):
+        return "file must be a .png directly under %s" % img
+    if ignored(root, f) or on_base(root, cfg, f):
+        return "%s is gitignored or already on %s" % (f, cfg.base)
+    return None
+
+
+def render(root, cfg, tid, ids=None):
+    from .store import load_state, save_state
+    st = load_state(root, tid)
+    if not _on_branch(root, tid, st):
+        raise HeraldError("render runs on this topic's herald branch only (never on base — a published diagram "
+                          "is judged by its render record, §2.7.2)")
+    why = diagram_off(cfg)
+    if why:
+        raise HeraldError("diagrams are off here (%s)" % why)
+    conf = diagram_conf(cfg)
+    items = _plan_items(root, tid, ids, kind="diagram")
+    lines, _ = slug_renders(root, cfg, st["slug"])
+    out = {"rendered": [], "failed": [], "remaining": [], "skipped": []}
+    todo = []
+    for it in items:
+        if not ids and diagram_state(root, cfg, tid, st, it, lines)[0] == "ready":
+            out["skipped"].append(it.get("id"))
+        else:
+            todo.append(it)
+    if not todo:
+        return out
+    p = limner.probe(root, cfg)
+    if not p["ok"]:
+        code = "limner:config" if p["code"] == "config" else p["code"]
+        out["failed"] = [{"id": it.get("id"), "code": code, "class": "env",
+                          "message": "; ".join(p.get("errors") or []) or None} for it in todo]
+        return out
+    t0 = time.monotonic()  # the budget starts after the probe (§2.4.2)
+    sd = limner.state_dir_abs(root, cfg)
+    for it in todo:
+        iid = it.get("id")
+        if BUDGET - (time.monotonic() - t0) < RENDER_START_MIN:
+            out["remaining"].append(iid)
+            continue
+        bad = _diagram_item_errors(root, cfg, tid, st, it)
+        if bad:
+            out["failed"].append({"id": iid, "code": "input", "class": "content", "message": bad})
+            continue
+        svg = svg_rel(tid, iid)
+        try:
+            svg_texts(os.path.join(root, svg))
+            with open(os.path.join(root, svg), "rb") as fh:
+                svg_sha = hashlib.sha256(fh.read()).hexdigest()
+        except (HeraldError, OSError) as e:
+            out["failed"].append({"id": iid, "code": "svg", "class": "content", "message": str(e)})
+            continue
+        f = it["file"]
+        h = file_hashes(root, f)
+        if h and not find_render(lines, h):
+            move_to_removed(root, tid, [f], "replaced", area="images")  # not Herald's render: kept (P9)
+        os.makedirs(os.path.dirname(os.path.join(root, f)), exist_ok=True)
+        res = limner.run(root, cfg, ["rasterize"], [
+            ("--svg", os.path.join(os.path.realpath(root), svg)), ("--root", os.path.realpath(root)),
+            ("--state-dir", sd), ("--out", os.path.join(os.path.realpath(root), f)),
+            ("--width", conf["width"]), ("--background", conf["background"])])
+        problems, failure = limner.classify(res)
+        if failure:
+            out["failed"].append(dict(failure, id=iid))
+            continue
+        if problems:
+            out["rendered"].append({"id": iid, "file": f, "problems": problems})
+            continue
+        h = file_hashes(root, f)
+        if not h or (res["obj"] or {}).get("out_sha256") != h[1]:
+            out["failed"].append({"id": iid, "code": "record-mismatch", "class": "env",
+                                  "message": "limner's out_sha256 is not the file Herald reads"})
+            continue
+        with open(os.path.join(root, svg), "rb") as fh:
+            drawn = svg_texts(fh.read())
+        rec = {"id": iid, "svg_sha256": svg_sha, "width": conf["width"], "background": conf["background"],
+               "png_blob": h[0], "png_sha256": h[1], "texts": drawn,
+               "limner": (limner.probe(root, cfg) or {}).get("limner"), "at": now_iso()}
+        ledger_append(os.path.join(root, renders_rel(tid)), rec)
+        lines.append(rec)
+        out["rendered"].append({"id": iid, "file": f, "problems": []})
+    rec = st.get("images")
+    if rec and isinstance(rec.get("items"), dict):  # the cache only; evidence is the record
+        for r in out["rendered"]:
+            if not r["problems"] and r["id"] in rec["items"]:
+                rec["items"][r["id"]]["status"] = "ready"
+        save_state(root, tid, st)
+    return out
+
+
+def texts(root, cfg, tid, iid=None, source="drawn"):
+    from .store import load_state
+    st = load_state(root, tid)
+    items = _plan_items(root, tid, iid, kind="diagram")
+    out = {"texts": [], "errors": []}
+    lines = slug_renders(root, cfg, st["slug"])[0] if source == "drawn" else []
+    for it in items:
+        if source == "svg":
+            try:
+                out["texts"] += [{"id": it["id"], "text": t} for t in svg_texts(os.path.join(root, svg_rel(tid, it["id"])))]
+            except (HeraldError, OSError) as e:
+                out["errors"].append("%s: %s" % (it.get("id"), e))
+            continue
+        E = find_render(lines, file_hashes(root, cur_path(root, cfg, st["slug"], it.get("file"))))
+        if not E:
+            out["errors"].append("%s: its PNG is no render Herald recorded — `HRD image render --topic %s --id %s`"
+                                 % (it.get("id"), tid, it.get("id")))
+            continue
+        out["texts"] += [{"id": it["id"], "text": t} for t in E["texts"]]
+    return out
+
+
+# --- fetch (§2.6.3) -----------------------------------------------------------------------------
+
+class PinnedHTTPS(http.client.HTTPSConnection):
+    """HTTPS to the address Herald checked, never resolved again (no DNS rebinding); the
+    certificate is still checked against the host name."""
+
+    def __init__(self, host, ip, timeout):
+        super().__init__(host, 443, timeout=timeout, context=ssl.create_default_context())
+        self._ip = ip
+
+    def connect(self):
+        sock = socket.create_connection((self._ip, 443), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+CONNECTION = PinnedHTTPS  # tests replace it with a fake server
+
+
+def _resolve(host):
+    from .shots import _resolve as resolve
+    return resolve(host)
+
+
+class _Fail(Exception):
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def fetch_class(code):
+    if code in ENV_FETCH or code in ("http-408", "http-429") or (code.startswith("http-5")):
+        return "env"
+    return "content"
+
+
+def _get(url, max_bytes, deadline, user_agent):
+    """(bytes, content type, final url) or _Fail(code)."""
+    hops = 0
+    while True:
+        if not public_url(url):
+            raise _Fail("redirect-refused" if hops else "url-not-public")
+        parts = urllib.parse.urlsplit(url)
+        if (parts.port or 443) != 443:
+            raise _Fail("redirect-refused" if hops else "url-not-public")
+        host = parts.hostname
+        try:
+            addrs = _resolve(host)
+        except Exception:  # noqa: BLE001
+            raise _Fail("dns-fail")
+        for a in addrs:
+            try:
+                ok = ipaddress.ip_address(str(a).split("%")[0]).is_global
+            except ValueError:
+                ok = False
+            if not ok:
+                raise _Fail("redirect-refused" if hops else "dns-private")
+        if time.monotonic() > deadline:
+            raise _Fail("timeout")
+        conn = CONNECTION(host, addrs[0], SOCK_TIMEOUT)
+        try:
+            path = parts.path or "/"
+            if parts.query:
+                path += "?" + parts.query
+            conn.request("GET", path, headers={"User-Agent": user_agent, "Accept": "image/png,image/jpeg,image/webp",
+                                               "Accept-Encoding": "identity"})
+            resp = conn.getresponse()
+            status = resp.status
+            if status in (301, 302, 303, 307, 308):
+                hops += 1
+                loc = resp.getheader("Location")
+                if hops > MAX_REDIRECTS or not loc:
+                    raise _Fail("redirect-refused")
+                url = urllib.parse.urljoin(url, loc)
+                continue
+            if resp.getheader("Retry-After") is not None:
+                raise _Fail("retry-later")
+            if status != 200:
+                raise _Fail("http-%d" % status)
+            enc = (resp.getheader("Content-Encoding") or "").strip().lower()
+            if enc and enc != "identity":
+                raise _Fail("encoded")
+            ctype = (resp.getheader("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype not in ("image/png", "image/jpeg", "image/webp"):
+                raise _Fail("not-image")
+            try:
+                if int(resp.getheader("Content-Length") or 0) > max_bytes:
+                    raise _Fail("too-large")
+            except ValueError:
+                pass
+            chunks, n = [], 0
+            read = getattr(resp, "read1", None) or resp.read
+            while True:
+                if time.monotonic() > deadline:  # a body that drips one byte at a time (v2 #16)
+                    raise _Fail("timeout")
+                c = read(65536)
+                if not c:
+                    break
+                n += len(c)
+                if n > max_bytes:
+                    raise _Fail("too-large")
+                chunks.append(c)
+            return b"".join(chunks), ctype, url
+        except _Fail:
+            raise
+        except (ssl.SSLError, ssl.CertificateError):
+            raise _Fail("tls")
+        except (socket.timeout, TimeoutError):
+            raise _Fail("timeout")
+        except (OSError, http.client.HTTPException):
+            raise _Fail("net")
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _check_image(data, ctype, ext, rules):
+    """(cleaned bytes, width, height) or _Fail."""
+    from .shots import animated, image_size, sanitize
+    want = "jpg" if ext in ("jpg", "jpeg") else ext
+    ck = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[ctype]
+    if kind_of(data) != ck or ck != want:
+        raise _Fail("bad-format")
+    if animated(data):
+        raise _Fail("animated")
+    size = image_size(data)
+    if not size or not size[0] or not size[1]:
+        raise _Fail("bad-format")
+    w, h = size
+    if w < int(rules.get("min_width") or 0) or max(w, h) < int(rules.get("min_long_side") or 0):
+        raise _Fail("too-small")
+    if max(w, h) > MAX_SIDE or w * h > MAX_PIXELS:
+        raise _Fail("too-big")
+    try:
+        clean, _ = sanitize(data, ext, keep_icc=True)
+    except HeraldError:
+        raise _Fail("bad-format")
+    return clean, w, h
+
+
+
+
+def _originals_dir(root, tid):
+    return os.path.join(root, ".claude/herald/memory/images/originals", tid)
+
+
+def fetch(root, cfg, tid, ids=None, version="0"):
+    """`HRD image fetch`: each pending external item (or `--id`), one at a time within BUDGET
+    seconds, state saved after each. The fetch line is written before the file (rule U)."""
+    from .store import load_state, save_state
+    st = load_state(root, tid)
+    if not _on_branch(root, tid, st):
+        raise HeraldError("fetch runs on this topic's herald branch only")
+    why = external_off(root, cfg, _category(root, cfg, st["slug"]))
+    if why:
+        raise HeraldError("external images are off here (%s)" % why)
+    items = _plan_items(root, tid, ids, kind="external")
+    man_errors = check_manifest(root, cfg, tid, st, load_manifest(root, tid))[0]
+    rules = external_limits(root, cfg, _category(root, cfg, st["slug"]))["rules"]
+    max_bytes = int(rules.get("max_bytes") or 10485760)
+    led = Ledger(root)
+    led.check(len(items))
+    rejected = {r.get("source_url") for r in st.get("image_rejects") or [] if isinstance(r, dict)}
+    st.setdefault("images", {}).setdefault("items", {})
+    st["images"].setdefault("files", {})
+    out = {"fetched": [], "failed": [], "remaining": [], "skipped": []}
+    ua = "Herald/%s (+%s)" % (version, cfg.get("site", "base_url") or "")
+    t0 = time.monotonic()
+    for it in items:
+        iid = it.get("id")
+        if not ids and external_state(root, tid, it, led) != "pending":
+            out["skipped"].append(iid)
+            continue
+        if BUDGET - (time.monotonic() - t0) < FETCH_START_MIN:
+            out["remaining"].append(iid)
+            continue
+        if it.get("source_url") in rejected:
+            out["failed"].append({"id": iid, "code": "rejected-before", "class": "content"})
+            continue
+        mine = [e for e in man_errors if e.startswith("%s:" % iid) and "attribution" not in e]
+        if mine:
+            raise HeraldError("images.json: " + "; ".join(mine))
+        f = it["file"]
+        try:
+            data, ctype, final = _get(it["source_url"], max_bytes, time.monotonic() + FETCH_ITEM, ua)
+            clean, w, h = _check_image(data, ctype, f.rsplit(".", 1)[-1].lower(), rules)
+        except _Fail as e:
+            out["failed"].append({"id": iid, "code": e.code, "class": fetch_class(e.code)})
+            continue
+        ext = f.rsplit(".", 1)[-1].lower()
+        src_sha = hashlib.sha256(data).hexdigest()
+        od = _originals_dir(root, tid)
+        os.makedirs(od, exist_ok=True)
+        with open(os.path.join(od, "%s-%s.%s" % (iid, src_sha[:12], ext)), "wb") as fh:
+            fh.write(data)
+        hh = _bytes_hashes(root, f, clean)
+        at, key = now_iso(), item_key(it)
+        ledger_append(os.path.join(root, FETCHES), {
+            "topic": tid, "id": iid, "key": key, "file": f, "blob": hh[0], "sha256": hh[1], "at": at,
+            "source_url": it["source_url"], "final_url": final, "page_url": it.get("page_url"),
+            "credit": it.get("credit"), "license": it.get("license"), "use": it.get("use"),
+            "source_sha256": src_sha, "width": w, "height": h})
+        led.fetches.append({"topic": tid, "id": iid, "key": key, "blob": hh[0], "sha256": hh[1]})
+        cur = file_hashes(root, f)
+        if cur and cur != hh:
+            move_to_removed(root, tid, [f], "replaced", area="images")  # whatever sat there was not this fetch (P9)
+        dest = os.path.join(root, f)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as fh:
+            fh.write(clean)
+        ori = "portrait" if h > w else "landscape"
+        st["images"]["items"][iid] = {"kind": "external", "use": it.get("use"), "file": f, "key": key,
+                                      "status": "fetched", "fetched_at": at, "orientation": ori,
+                                      "width": w, "height": h}
+        st["images"]["files"][f] = {"kind": "external", "use": it.get("use")}
+        save_state(root, tid, st)
+        out["fetched"].append({"id": iid, "file": f, "width": w, "height": h, "bytes": len(clean), "orientation": ori})
+    return out
+
+
+def snippet(root, cfg, tid, iid):
+    from .store import load_state
+    st = load_state(root, tid)
+    it = next((i for i in _items(load_manifest(root, tid)) if i.get("id") == iid), None)
+    if not it:
+        raise HeraldError("%s is not in images.json" % iid)
+    if it.get("kind") == "external":
+        r = ((st.get("images") or {}).get("items") or {}).get(iid) or {}
+        if r.get("key") != item_key(it) or not r.get("orientation"):
+            raise HeraldError("%s is not fetched yet — `HRD image fetch --topic %s --id %s` first (the attribution "
+                              "follows the picture's orientation)" % (iid, tid, iid))
+        return {"snippet": snippet_text(cfg, it, r.get("orientation"))}
+    return {"snippet": snippet_text(cfg, it)}
+
+
+# --- confirm / reject (§2.7.3) -----------------------------------------------------------------
+
+def _human_only(what):
+    if os.environ.get("HRD_UNATTENDED") == "1":
+        raise HeraldError("`image %s` records a human's decision — not allowed in unattended sessions" % what)
+
+
+def _ids(ids):
+    out = [x.strip() for x in (ids if isinstance(ids, list) else str(ids or "").split(",")) if x and x.strip()]
+    if not out:
+        raise HeraldError("--id needs one or more external image ids (e1,e2)")
+    return list(dict.fromkeys(out))
+
+
+def confirm(root, cfg, tid, ids):
+    """A human looked at fetched images and their attribution: the confirmation line first, then
+    the state."""
+    from .shots import hold_note
+    from .store import load_state, save_state
+    _human_only("confirm")
+    ids = _ids(ids)
+    st = load_state(root, tid)
+    by = {i.get("id"): i for i in _items(load_manifest(root, tid))}
+    led = Ledger(root)
+    led.check(len(ids))
+    todo = []
+    for iid in ids:
+        it = by.get(iid)
+        if not it or it.get("kind") != "external":
+            raise HeraldError("%s is not an external image in images.json" % iid)
+        s = external_state(root, tid, it, led)
+        if s != "fetched":
+            raise HeraldError("%s is not a fetched image waiting for confirmation (%s) — `HRD image plan --topic %s` "
+                              "first if the file was changed" % (iid, s, tid))
+        todo.append((iid, it, file_hashes(root, it["file"])))
+    at = now_iso()
+    for iid, it, h in todo:
+        ledger_append(os.path.join(root, CONFIRMATIONS), {"topic": tid, "id": iid, "key": item_key(it),
+                                                           "blob": h[0], "sha256": h[1], "at": at})
+    items = st.setdefault("images", {}).setdefault("items", {})
+    for iid, it, h in todo:
+        items.setdefault(iid, {"kind": "external", "use": it.get("use"), "file": it["file"], "key": item_key(it)})
+        items[iid].update(status="ready", sha=h[0])
+    save_state(root, tid, st)
+    return {"confirmed": [t[0] for t in todo], "note": hold_note(st),
+            "items": [{"id": iid, "use": it.get("use"), "credit": it.get("credit"), "license": it.get("license"),
+                       "page_url": it.get("page_url")} for iid, it, _ in todo]}
+
+
+def reject(root, cfg, tid, iid, reason=None, drop=False, refetch=False):
+    """A human rejects a fetched image (state first, then the file moves). Without `--refetch`
+    this is the `--human` loopback's state change too: the illustrator runs next (another
+    candidate, or with `--drop` the place goes). `--refetch`: fetch it again on this machine."""
+    from .shots import hold_note
+    from .store import load_state, open_research_fix, save_state
+    _human_only("reject")
+    if drop and refetch:
+        raise HeraldError("give at most one of --drop and --refetch")
+    st = load_state(root, tid)
+    if not refetch and st.get("stage") != "draft":
+        raise HeraldError("reject is for an image waiting in draft — later, a loopback with --theme images")
+    if open_research_fix(st):
+        raise HeraldError("a research fix is open — the researcher runs first")
+    if (st.get("trim") or {}).get("status") == "open":
+        raise HeraldError("a trim is open — `HRD trim --topic %s --abort` first" % tid)
+    it = next((i for i in _items(load_manifest(root, tid)) if i.get("id") == iid), None)
+    if not it or it.get("kind") != "external":
+        raise HeraldError("%s is not an external image in images.json" % iid)
+    rec = st.setdefault("images", {})
+    items = rec.setdefault("items", {})
+    r = items.setdefault(iid, {"kind": "external", "use": it.get("use"), "file": it["file"], "key": item_key(it)})
+    r["status"] = "pending"
+    for k in ("sha", "fetched_at", "orientation", "width", "height"):
+        r.pop(k, None)
+    if not refetch:
+        st.setdefault("image_rejects", []).append({"id": iid, "source_url": it.get("source_url"),
+                                                   "reason": (reason or "")[:300], "drop": bool(drop), "at": now_iso()})
+        st["stage"] = "draft"
+        st["last_loopback"] = "human"
+        rec["awaiting"] = False
+        if st.get("screenshots"):
+            st["screenshots"]["awaiting"] = False
+        if st.get("translation"):
+            st["translation"].pop("last_loopback_langs", None)
+            st["translation"].pop("last_loopback_stage", None)
+    save_state(root, tid, st)
+    moved = move_to_removed(root, tid, [it["file"]] if not on_base(root, cfg, it["file"]) else [],
+                            "refetch" if refetch else "rejected", area="images")
+    return {"rejected": [iid] if not refetch else [], "refetch": [iid] if refetch else [], "moved": moved,
+            "note": hold_note(st),
+            "next": ("HRD image fetch --topic %s --id %s, then a human confirms it" % (tid, iid)) if refetch else
+            ("the illustrator: %s" % ("remove that place (reference, attribution, manifest entry)" if drop else
+                                      "another candidate from research.md, or leave the place out"))}
+
+
+# --- OG (§2.8) --------------------------------------------------------------------------------
+
+def _nfc(s):
+    import unicodedata
+    return unicodedata.normalize("NFC", s) if isinstance(s, str) else s
+
+
+def og_inputs(root, cfg, st, rev=None):
+    """The raw values the OG card is drawn from (frontmatter of the source body)."""
+    slug = st.get("slug")
+    fm = _frontmatter(root, cfg.body_path(slug), rev) if slug else {}
+    o = og_conf(cfg) or {}
+    return {"title": _nfc(fm.get("title")), "subtitle": _nfc(fm.get("description")) if o.get("subtitle") == "description"
+            else None, "slug": slug, "date": str(fm.get("date") or "")[:10], "category": fm.get("category"),
+            "lang": lang_tag(cfg)}
+
+
+def _used(cfg):
+    t = (og_conf(cfg) or {}).get("command")
+    if t is None:
+        return ("title", "subtitle", "lang")
+    return tuple(x[1:-1] for x in t if x in OG_PLACEHOLDERS and x != "{out}")
+
+
+def og_key(root, cfg, st, inputs=None):
+    o = og_conf(cfg) or {}
+    v = inputs or og_inputs(root, cfg, st)
+    by = "repo" if o.get("command") is not None else "limner"
+    used = {k: v.get(k) for k in _used(cfg)}
+    raw = json.dumps([by, o.get("command") or "og-title", limner.CONTRACT, v.get("title"), v.get("subtitle"),
+                      v.get("lang"), used], sort_keys=True, ensure_ascii=False)
+    return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def og_bad_value(cfg, v):
+    """The first input that cannot go into an argv or a card, or None."""
+    def text_ok(s, n):
+        return isinstance(s, str) and 1 <= len(s) <= n and not re.search(r"[\n\r\x00]", s) and not s.startswith("-")
+    for k in _used(cfg):
+        val = v.get(k)
+        if k == "title" and not text_ok(val, 120):
+            return "title"
+        if k == "subtitle" and val is not None and not text_ok(val, 200):
+            return "subtitle"
+        if k == "date" and not re.match(r"^\d{4}-\d{2}-\d{2}$", str(val or "")):
+            return "date"
+        if k == "category" and not re.match(r"^[a-z0-9-]+$", str(val or "")):
+            return "category"
+        if k == "slug" and not re.match(r"^[a-z0-9-]+$", str(val or "")):
+            return "slug"
+        if k == "lang" and not re.match(r"^[a-z]{2,3}$", str(val or "")):
+            return "lang"
+    return None
+
+
+def quotation_files(root, cfg, slug, rev=None):
+    """Every file recorded as a quotation by any topic of this slug, with its content (blob and
+    sha256 at `rev` or in the working tree). 0.18.0/0.19.0 must refuse these as a reference or
+    composition input before using one (a contract this design leaves — P16)."""
+    olds = set(_old_slugs(root, slug)) | {slug}
+    out = []
+    for _, st in _topic_states(root, rev):
+        if st.get("slug") not in olds:
+            continue
+        for f, meta in (((st.get("images") or {}).get("files")) or {}).items():
+            if isinstance(meta, dict) and meta.get("use") == "quotation":
+                p = cur_path(root, cfg, slug, f)
+                h = _rev_hashes(root, rev, p)
+                out.append({"file": p, "blob": h[0] if h else None, "sha256": h[1] if h else None})
+    # the fetch ledger knows the content even after the file moved away
+    led = Ledger(root)
+    for r in led.fetches:
+        if r.get("use") == "quotation" and r.get("file", "").startswith(cfg.image_dir(slug).rstrip("/") + "/"):
+            out.append({"file": r.get("file"), "blob": r.get("blob"), "sha256": r.get("sha256")})
+    return out
+
+
+def _is_quotation(h, q):
+    return bool(h) and any(x.get("blob") == h[0] or x.get("sha256") == h[1] for x in q if x.get("blob") or x.get("sha256"))
+
+
+def og_quotation_problem(root, cfg, slug, rev=None):
+    """P16 in code: the OG path holding a quotation image is an error no consent lifts."""
+    path = cfg.og_path(slug) if og_conf(cfg) else None
+    if not path:
+        return None
+    h = _rev_hashes(root, rev, path)
+    if h and _is_quotation(h, quotation_files(root, cfg, slug, rev)):
+        return ("%s is a quotation image — a quotation never becomes the OG card or an SNS picture: remove that file, "
+                "then `HRD image og` again (or leave OG off)" % path)
+    return None
+
+
+def _base_blob(root, cfg, rel):
+    return git(root, "rev-parse", "-q", "--verify", "origin/%s:%s" % (cfg.base, rel), check=False).strip() or None
+
+
+def _is_refresh(root, tid, st):
+    from .store import get_topic, load_topics
+    try:
+        t = get_topic(load_topics(root), tid)
+    except HeraldError:
+        t = {}
+    return bool(t.get("refresh_of") or st.get("refresh_of"))
+
+
+def _snapshot(root):
+    """(path → sha256 of the working-tree content) for every path git status lists."""
+    raw = git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all", check=False)
+    parts, out, i = raw.split("\0"), {}, 0
+    while i < len(parts):
+        e = parts[i]
+        i += 1
+        if len(e) < 4:
+            continue
+        st, path = e[:2], e[3:]
+        if "R" in st or "C" in st:
+            i += 1  # the rename's source
+        full = os.path.join(root, path)
+        if os.path.isfile(full):
+            with open(full, "rb") as f:
+                out[path] = (st, hashlib.sha256(f.read()).hexdigest())
+        else:
+            out[path] = (st, None)
+    return out
+
+
+def _og_limner(root, cfg, tid, path, v, out_abs=None, data_rel=None):
+    """(status, why, problems): `made` or `off` — a card limner draws with og-title."""
+    p = limner.probe(root, cfg)
+    if not p["ok"]:
+        return "off", "no-limner" if p["code"] == "limner:missing" else p["code"], []
+    data = {"title": v["title"], "lang": v["lang"]}
+    if v.get("subtitle"):
+        data["subtitle"] = v["subtitle"]
+    drel = data_rel or _work_rel(tid, "og.json")
+    os.makedirs(os.path.dirname(os.path.join(root, drel)), exist_ok=True)
+    with open(os.path.join(root, drel), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    rroot = os.path.realpath(root)
+    target = out_abs or os.path.join(rroot, path)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    res = limner.run(root, cfg, ["compose"], [("--template", "og-title"), ("--data", os.path.join(rroot, drel)),
+                                               ("--root", rroot), ("--state-dir", limner.state_dir_abs(root, cfg)),
+                                               ("--out", target)])
+    problems, failure = limner.classify(res)
+    if failure:
+        return "off", failure["code"], []
+    if problems:
+        codes = [x.get("code") for x in problems]
+        why = "title-too-long" if any(c in ("overflow", "too_small") for c in codes) else \
+            next((c for c in codes if c in ("missing_glyph", "low_contrast")), codes[0] or "problems")
+        return "off", why, problems
+    h = None
+    if os.path.isfile(target):
+        with open(target, "rb") as f:
+            h = hashlib.sha256(f.read()).hexdigest()
+    if not h or (res["obj"] or {}).get("out_sha256") != h:
+        return "off", "record-mismatch", []
+    return "made", None, []
+
+
+def _og_argv(cfg, v, out):
+    vals = dict({k: str(v.get(k) or "") for k in ("title", "slug", "date", "category", "lang")}, out=out)
+    return [vals[x[1:-1]] if x in OG_PLACEHOLDERS else x for x in og_conf(cfg)["command"]]
+
+
+def _og_repo(root, cfg, tid, path, v, trial=False):
+    """(status, why, problems) — the repo's generator, without a shell; anything it changes
+    besides the OG path (and new folders above it) refuses (`og:side-effects`)."""
+    from .shots import _run_tool
+    errs = og_errors(root, cfg)
+    if errs:
+        return "off", "config", []
+    rroot = os.path.realpath(root)
+    target = os.path.join(rroot, path)
+    argv = _og_argv(cfg, v, target)
+    before = _snapshot(root)
+    code = _run_tool(root, argv, os.path.join(root, ".claude/herald/memory/images/tmp/og.pgid"))
+    after = _snapshot(root)
+    changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p) and p != path)
+    if changed:
+        raise HeraldError("og:side-effects %s — the OG command changed other files (left as they are for a human). "
+                          "Attended: show them and ask; otherwise hold needs-human with the note `tooling: og "
+                          "side-effects`" % ", ".join(changed[:10]))
+    if code:
+        return "off", "repo:%s" % code, []
+    rules = external_limits(root, cfg, None)["rules"]
+    if not os.path.isfile(target) or os.path.getsize(target) == 0:
+        return "off", "repo:no-file", []
+    with open(target, "rb") as f:
+        data = f.read()
+    if kind_of(data) != "png" or len(data) > int(rules.get("max_bytes") or 10485760):
+        return "off", "repo:bad-format", []
+    return "made", None, []
+
+
+def _accept_human_og(root, cfg, tid, path, h, pr):
+    """§2.8.2 7: a file a human pushed to the PR after Herald's last push from this machine."""
+    from .store import ledger_lines
+    _human_only("og --human-push")
+    if pr is None:
+        raise HeraldError("--human-push needs --pr <n> (the PR whose head is checked out)")
+    pushes = [r for r in ledger_lines(root) if r.get("topic_id") == tid and r.get("kind") == "push" and r.get("sha")]
+    if not pushes:
+        raise HeraldError("no Herald push of %s is recorded on this machine — ship from the machine that pushed it, "
+                          "or remove the OG file from the PR; this PR is not merged now" % tid)
+    hsha = pushes[-1]["sha"]
+    ref = "refs/remotes/origin/pr-%d" % int(pr)
+    head = git(root, "rev-parse", "HEAD").strip()
+    if git(root, "rev-parse", "-q", "--verify", ref, check=False).strip() != head:
+        raise HeraldError("HEAD is not %s — `HRD fetch-pr --pr %s` and switch to it first (a local commit is no "
+                          "human's push)" % (ref, pr))
+    if not git_ok(root, "merge-base", "--is-ancestor", hsha, head):
+        raise HeraldError("Herald's last push %s is not in this PR's history" % hsha[:12])
+    came = git(root, "log", "--format=%H", "%s..%s" % (hsha, head), "--", path, check=False).split()
+    if not came:
+        raise HeraldError("%s did not come in after Herald's last push — not a human's OG file" % path)
+    if git(root, "rev-parse", "-q", "--verify", "HEAD:%s" % path, check=False).strip() != h[0]:
+        raise HeraldError("%s differs from the PR head (a local edit) — not a human's OG file" % path)
+
+
+def og(root, cfg, tid, human_push=False, pr=None):
+    from .shots import image_size
+    from .store import load_state, save_state
+    st = load_state(root, tid)
+    slug = st.get("slug")
+    if not slug:
+        raise HeraldError("no slug yet for %s" % tid)
+    o = og_conf(cfg)
+    if o is None or not og_on(root, cfg):
+        return {"status": "off", "why": "not-configured" if o is None else "config", "unknown_file": None,
+                "file": None, "by": None, "problems": [], "warnings": []}
+    if human_push:
+        _human_only("og --human-push")
+    by = "repo" if o["command"] is not None else "limner"
+    path = cfg.og_path(slug)
+    q = quotation_files(root, cfg, slug)
+    h = file_hashes(root, path)
+    if h and _is_quotation(h, q):
+        raise HeraldError(og_quotation_problem(root, cfg, slug) or "%s is a quotation image" % path)
+    rec = st.setdefault("images", {})
+    prev = rec.get("og") or {}
+    base = _base_blob(root, cfg, path)
+    v = og_inputs(root, cfg, st)
+    key = og_key(root, cfg, st, v)
+    res = {"status": None, "why": None, "unknown_file": None, "file": path, "by": by, "problems": [], "warnings": []}
+    draft = st.get("stage") == "draft" and _on_branch(root, tid, st)
+    if h and h[0] != prev.get("sha") and h[0] != base:
+        if human_push:
+            _accept_human_og(root, cfg, tid, path, h, pr)
+            with open(os.path.join(root, path), "rb") as fh:
+                size = image_size(fh.read())
+            for x in q:
+                if x.get("file") and os.path.isfile(os.path.join(root, x["file"])):
+                    with open(os.path.join(root, x["file"]), "rb") as fh:
+                        if size and image_size(fh.read()) == size:
+                            res["warnings"].append("og-size-matches-quotation")
+                            break
+            rec["og"] = {"key": key, "status": "off", "why": "human-file", "sha": h[0], "by": by}
+            save_state(root, tid, st)
+            res.update(status="off", why="human-file")
+            return res
+        if not draft:  # the PR stage: never moved, a human decides (`--human-push`)
+            res.update(status="needs-human", unknown_file=path)
+            return res
+        move_to_removed(root, tid, [path], "og-unknown", area="images")
+        h = None
+    # 3: nothing to do when the inputs and the file are as recorded
+    if prev.get("key") == key:
+        why = prev.get("why") or ""
+        if (prev.get("status") == "made" and h and h[0] == prev.get("sha")) or prev.get("status") == "kept" or \
+                (prev.get("status") == "off" and (why in OG_CONTENT_WHY or why.startswith("bad-value:") or
+                                                  why == "human-file")):
+            res.update(status=prev["status"], why=prev.get("why"), by=prev.get("by", by))
+            return res
+    refresh = _is_refresh(root, tid, st)
+    base_v = og_inputs(root, cfg, st, rev="origin/%s" % cfg.base) if base and refresh else None
+    same_as_base = base_v is not None and all(base_v.get(k) == v.get(k) for k in ("title", "subtitle", "slug", "date",
+                                                                                     "category", "lang"))
+    bad = og_bad_value(cfg, v)
+    if bad:
+        status, why, probs = "off", "bad-value:%s" % bad, []
+    elif refresh and base and same_as_base:  # 4: the base card already shows these inputs
+        status, why, probs = "kept", None, []
+    else:
+        if h and h[0] != base:  # Herald's earlier card or an accepted human file: kept under removed/ (P9)
+            move_to_removed(root, tid, [path], "og-replaced", area="images")
+            h = None
+        if by == "limner":
+            status, why, probs = _og_limner(root, cfg, tid, path, v)
+        else:
+            status, why, probs = _og_repo(root, cfg, tid, path, v)
+    res["problems"] = probs
+    if status == "made":
+        rec["og"] = {"key": key, "status": "made", "sha": blob(root, path), "by": by}
+    else:
+        cur = file_hashes(root, path)
+        if status == "off" and cur and cur[0] != base:
+            move_to_removed(root, tid, [path], "og-off", area="images")  # this topic's own card goes
+        if status in ("off", "kept") and base and not os.path.isfile(os.path.join(root, path)):
+            git(root, "checkout", "origin/%s" % cfg.base, "--", path, check=False)  # base's card is never ours to take
+        rec["og"] = {"key": key, "status": status, "by": by}
+        if status == "off":
+            rec["og"]["why"] = why
+            rec["og"]["stale_base"] = bool(refresh and base and not same_as_base)
+    save_state(root, tid, st)
+    res.update(status=status, why=why)
+    return res
+
+
+def og_trial(root, cfg):
+    """`HRD image og --trial`: one card with fixed values; nothing recorded, the result deleted
+    (limner: under the state dir; repo: the published path and any folder it created)."""
+    o = og_conf(cfg)
+    if o is None:
+        raise HeraldError("images.og is not configured")
+    errs = og_errors(root, cfg)
+    if errs:
+        return {"ok": False, "by": None, "why": "config", "errors": errs}
+    from .store import load_topics
+    import datetime
+    cats = [t.get("category") for t in load_topics(root).get("topics") or [] if t.get("category")]
+    v = {"title": "Herald OG trial", "subtitle": None, "slug": "herald-og-trial",
+         "date": datetime.date.today().isoformat(), "category": cats[0] if cats else "general", "lang": lang_tag(cfg)}
+    if o["command"] is None:
+        if limner.limner_errors(cfg):
+            return {"ok": False, "by": "limner", "why": "config", "errors": limner.limner_errors(cfg)}
+        sd = limner.state_dir_abs(root, cfg)
+        name = limner._stamp()
+        d = os.path.join(sd, limner.TRIAL_DIR)
+        os.makedirs(d, exist_ok=True)
+        try:
+            status, why, probs = _og_limner(root, cfg, "trial", None, v, out_abs=os.path.join(d, name + ".png"),
+                                            data_rel=os.path.relpath(os.path.join(d, name + ".json"),
+                                                                     os.path.realpath(root)))
+        finally:
+            limner._clean_outputs(root, cfg, limner.TRIAL_DIR)
+        return {"ok": status == "made", "by": "limner", "why": why, "problems": probs}
+    path = cfg.og_path(v["slug"])
+    full = os.path.join(root, path)
+    existing = set()
+    d = os.path.dirname(full)
+    while d.startswith(os.path.realpath(root)) or d.startswith(root):
+        if os.path.isdir(d):
+            existing.add(d)
+        if d in (root, os.path.realpath(root)):
+            break
+        d = os.path.dirname(d)
+    try:
+        status, why, probs = _og_repo(root, cfg, None, path, v)
+    finally:
+        if os.path.isfile(full):
+            os.remove(full)
+        d = os.path.dirname(full)
+        while d not in existing and d not in (root, os.path.realpath(root)) and len(d) > len(root):
+            try:
+                os.rmdir(d)
+            except OSError:
+                break
+            d = os.path.dirname(d)
+    return {"ok": status == "made", "by": "repo", "why": why, "problems": probs}
+
+
+# --- status, note, resume (§2.9, §2.13) ----------------------------------------------------------
+
+def note_items(st):
+    items = ((st or {}).get("images") or {}).get("items") or {}
+    return ["%s(confirm)" % k for k, r in sorted(items.items(), key=lambda kv: int(kv[0][1:]) if kv[0][1:].isdigit() else 0)
+            if isinstance(r, dict) and r.get("kind") == "external" and r.get("status") == "fetched"]
+
+
+def resume_at_collect(root, cfg, st):
+    rec = st.get("images") or {}
+    if st.get("stage") != "draft" or not rec.get("awaiting") or not st.get("slug"):
+        return False
+    return rec.get("manifest") == _hash(root, manifest_rel(st["topic_id"])) and \
+        rec.get("body") == _hash(root, cfg.body_path(st["slug"]))
+
+
+def _confirmed_at(led, h):
+    return next((r.get("at") for r in led.confirms if led._same(r, h)), None)
+
+
+def status(root, cfg, tid, rev=None):
+    from .shots import hold_note
+    from .store import load_state, read_json_at
+    st = (read_json_at(root, rev, _work_rel(tid, "state.json")) if rev else load_state(root, tid)) or {}
+    errors = []
+    try:
+        man = load_manifest(root, tid, rev)
+    except HeraldError as e:
+        man, errors = None, [str(e)]
+    rec = st.get("images") or {}
+    led = Ledger(root)
+    slug = st.get("slug")
+    lines, dropped = slug_renders(root, cfg, slug, rev) if slug else ([], 0)
+    out_items, snippets, rows = [], [], []
+    pend = {"render": [], "fetch": [], "confirm": []}
+    body = _body(root, cfg, slug, rev) if slug else ""
+    for it in _items(man):
+        iid, kind = it.get("id"), it.get("kind")
+        r = (rec.get("items") or {}).get(iid) or {}
+        row = {"id": iid, "kind": kind, "file": it.get("file"), "alt": it.get("alt"), "purpose": it.get("purpose")}
+        if kind == "diagram" and slug:
+            s, E = diagram_state(root, cfg, tid, st, it, lines, strict=not rev, rev=rev)
+            row.update(status=s, texts=len(E["texts"]) if E else None)
+            if s == "pending":
+                pend["render"].append(iid)
+            claims = sorted({c for t in it.get("texts") or [] if isinstance(t, dict) for c in t.get("claims") or []})
+            rows.append("| %s | diagram | %s | %d texts%s — drawn in %s |" % (
+                iid, it.get("file"), len(it.get("texts") or []), (", claims " + ", ".join(claims)) if claims else "",
+                lang_tag(cfg)))
+        elif kind == "external" and slug:
+            s = external_state(root, tid, it, led, rev)
+            h = _rev_hashes(root, rev, it.get("file"))
+            replaced = bool(r.get("sha") and h and h[0] != r["sha"])
+            row.update(status=s, use=it.get("use"), credit=it.get("credit"), license=it.get("license"),
+                       page_url=it.get("page_url"), source_url=it.get("source_url"), fetched_at=r.get("fetched_at"),
+                       replaced=replaced, why=fail_closed(tid, iid, r, led))
+            if s == "pending":
+                pend["fetch"].append(iid)
+            elif s == "fetched":
+                pend["confirm"].append(iid)
+            if r.get("orientation") and r.get("key") == item_key(it) and figure(cfg).get(it.get("use")):
+                sn = snippet_text(cfg, it, r.get("orientation"))
+                snippets.append({"id": iid, "text": sn, "alt": it.get("alt"), "in_body": body.count(sn)})
+            what = ("licensed %s" % it.get("license")) if it.get("use") == "licensed" else \
+                "**quotation — no OG/SNS use**"
+            at = _confirmed_at(led, h) if h else None
+            rows.append("| %s | external | %s | %s, %s, %s%s%s |" % (
+                iid, it.get("file"), what, it.get("credit"), it.get("page_url"),
+                ", confirmed %s" % at if at else (", confirmed" if s == "ready" else ", not confirmed"),
+                ", replaced by a human" if replaced else ""))
+        out_items.append(row)
+    og_rec = rec.get("og") or {}
+    og_line = None
+    if og_conf(cfg) and slug:
+        if og_rec.get("status") == "made":
+            og_line = "OG image: %s (%s)" % (cfg.og_path(slug), og_rec.get("by"))
+        elif og_rec.get("status") == "kept":
+            og_line = "OG image: %s (kept from %s)" % (cfg.og_path(slug), cfg.base)
+        elif og_rec.get("status") == "off" and og_rec.get("why") == "human-file":
+            og_line = "OG image: %s (a human's file)" % cfg.og_path(slug)
+        elif og_rec.get("status") == "off":
+            og_line = ("OG image: old title kept (%s)" if og_rec.get("stale_base") else "OG image: none (%s)") \
+                % og_rec.get("why")
+    pr_rows = (["| id | kind | file | content |", "|---|---|---|---|"] + rows) if rows else []
+    if og_line:
+        pr_rows.append(og_line)
+    unmanaged = []
+    if managed(cfg) and slug and not rev:
+        known = managed_files(root, cfg, tid, st)
+        try:
+            from .shots import load_manifest as shot_manifest
+            known |= {s.get("file") for s in (shot_manifest(root, tid) or {}).get("shots") or [] if isinstance(s, dict)}
+        except HeraldError:
+            pass
+        unmanaged = sorted(p for p in git(root, "ls-files", "--others", "--exclude-standard", "--",
+                                          cfg.image_dir(slug), check=False).splitlines() if p and p not in known)
+        if unmanaged:
+            pr_rows.append("Unmanaged images (0.14.0 rule, text not verified): %s" % ", ".join(unmanaged))
+    return {"items": out_items, "pending": pend, "errors": errors,
+            "all_ready": bool(out_items) and all(i.get("status") == "ready" for i in out_items),
+            "awaiting": bool(rec.get("awaiting")), "resume_at_collect": resume_at_collect(root, cfg, st) if not rev else False,
+            "note": hold_note(st), "files": rec.get("files") or {}, "snippets": snippets, "pr_rows": pr_rows,
+            "og": og_rec, "rejects": st.get("image_rejects") or [], "unmanaged": unmanaged,
+            "renders_dropped": dropped,
+            "removed_bytes": removed_bytes(root, tid, "images")}
+
+
+# --- stage pass, publish scope, exclusions (§2.10, §2.12, §2.13) ----------------------------------
+
+def draft_problems(root, cfg, tid, st):
+    out = []
+    try:
+        man = load_manifest(root, tid)
+    except HeraldError as e:
+        return [str(e)]
+    rec = st.get("images") or {}
+    items = _items(man)
+    slug = st["slug"]
+    led = Ledger(root)
+    if items:
+        if not rec.get("items") and rec.get("manifest") is None:
+            return out + ["images.json is not planned — run `HRD image plan --topic %s`" % tid]
+        if rec.get("manifest") != _hash(root, manifest_rel(tid)):
+            out.append("images.json changed since `HRD image plan` — run it again")
+        if rec.get("body") != _hash(root, cfg.body_path(slug)):
+            out.append("the article changed since `HRD image plan` — run it again")
+        if {i.get("id") for i in items} != set(rec.get("items") or {}):
+            out.append("images.json lists other images than were planned — run `HRD image plan` again")
+        if any(it.get("kind") == "external" for it in items):
+            led.check(1)
+        lines, _ = slug_renders(root, cfg, slug)
+        body = _body(root, cfg, slug)
+        for it in items:
+            iid = it.get("id")
+            r = (rec.get("items") or {}).get(iid) or {}
+            if it.get("kind") == "diagram":
+                if diagram_state(root, cfg, tid, st, it, lines)[0] != "ready":
+                    out.append("%s: %s is not the render of the current SVG and settings — `HRD image render --topic %s "
+                               "--id %s`" % (iid, it.get("file"), tid, iid))
+                continue
+            why = fail_closed(tid, iid, r, led, it)
+            if why:
+                out.append(why)
+                continue
+            s = external_state(root, tid, it, led)
+            if s == "fetched":
+                out.append("%s is waiting for a human's confirmation — look at %s, then `HRD image confirm --topic %s "
+                           "--id %s` (or `HRD image reject`)" % (iid, it.get("file"), tid, iid))
+            elif s != "ready":
+                out.append("%s is not fetched (or not the file `HRD image fetch` wrote) — `HRD image plan`, then `HRD "
+                           "image fetch --topic %s --id %s`" % (iid, tid, iid))
+            elif figure(cfg).get(it.get("use")):
+                sn = snippet_text(cfg, it, r.get("orientation"))
+                if body.count(sn) != 1:
+                    out.append("%s: the attribution must be in the article verbatim exactly once (found %d) — `HRD "
+                               "image snippet --topic %s --id %s`" % (iid, body.count(sn), tid, iid))
+    elif rec.get("items"):
+        out.append("images.json is gone but images are recorded — run `HRD image plan --topic %s`" % tid)
+    # rule U over Herald's own image files (shots.draft_problems leaves them to this function)
+    current = {i.get("file") for i in items}
+    for f in rec.get("files") or {}:
+        h = file_hashes(root, f)
+        if h and led.unconfirmed(h) and f not in current:
+            out.append("%s is an external image no human confirmed — `HRD image plan --topic %s` moves it away" % (f, tid))
+    left = [f for f in rec.get("files") or {} if f not in current and os.path.isfile(os.path.join(root, f))
+            and not on_base(root, cfg, f)]
+    if left:
+        out.append("images no longer listed are still in place: %s — run `HRD image plan --topic %s`" % (", ".join(left), tid))
+    out += og_draft_problems(root, cfg, tid, st)
+    return out
+
+
+def og_draft_problems(root, cfg, tid, st):
+    slug = st["slug"]
+    q = og_quotation_problem(root, cfg, slug)
+    if q:
+        return [q]
+    if not og_on(root, cfg):
+        return []
+    og_rec = ((st.get("images") or {}).get("og")) or {}
+    path = cfg.og_path(slug)
+    if not og_rec or og_rec.get("key") != og_key(root, cfg, st):
+        return ["the OG image is not made for the current title — `HRD image og --topic %s` (it records `off` when it "
+                "cannot make one)" % tid]
+    h = file_hashes(root, path)
+    if og_rec.get("status") == "made":
+        if not h or h[0] != og_rec.get("sha"):
+            return ["%s is not the OG image Herald made — `HRD image og --topic %s`" % (path, tid)]
+    elif h and h[0] != og_rec.get("sha") and h[0] != _base_blob(root, cfg, path):
+        return ["%s is no OG file Herald knows — `HRD image og --topic %s` (a human's own OG goes into the PR)"
+                % (path, tid)]
+    return []
+
+
+def verify_problems(root, cfg, tid, st, ver, amend=False):
+    """§2.12: the drawn text was read and supported; the drawn text is the text verified."""
+    out = []
+    try:
+        man = load_manifest(root, tid)
+    except HeraldError as e:
+        return [str(e)]
+    items = _items(man)
+    slug = st["slug"]
+    diagrams = [i for i in items if i.get("kind") == "diagram"]
+    if diagrams:
+        lines, _ = slug_renders(root, cfg, slug)
+        drawn = 0
+        for it in diagrams:
+            s, E = diagram_state(root, cfg, tid, st, it, lines, strict=not amend)
+            if not E:
+                out.append("%s: its PNG is no render Herald recorded — the drawn text is unknown (render it from the SVG: "
+                           "`HRD image render --topic %s --id %s`)" % (it.get("id"), tid, it.get("id")))
+                continue
+            if s != "ready":
+                out.append("%s: the PNG is not the render of the current SVG and settings — render it again"
+                           % it.get("id"))
+            drawn += len(E["texts"])
+        vi = (ver or {}).get("images") if isinstance((ver or {}).get("images"), dict) else {}
+        if not out and vi.get("texts") != drawn:
+            out.append("verify.json images.texts is %r but the diagrams draw %d texts — the fact-checker reads every "
+                       "one (`HRD image texts --topic %s`)" % (vi.get("texts"), drawn, tid))
+        if vi.get("unsupported"):
+            out.append("verify.json images.unsupported is not empty — `HRD loopback --cause verify --note \"image text: "
+                       "…\"` (the illustrator fixes or drops the diagram)")
+    body = _body(root, cfg, slug)
+    rec = st.get("images") or {}
+    for it in items:
+        if it.get("kind") != "external":
+            continue
+        r = (rec.get("items") or {}).get(it.get("id")) or {}
+        if figure(cfg).get(it.get("use")) and r.get("orientation"):
+            sn = snippet_text(cfg, it, r.get("orientation"))
+            if body.count(sn) != 1:
+                out.append("%s: the attribution is not in the article verbatim exactly once — put it back as `HRD image "
+                           "snippet` gives it" % it.get("id"))
+    q = og_quotation_problem(root, cfg, slug)
+    if q:
+        out.append(q)
+    return out
+
+
+def svg_drift(root, cfg, tid, st):
+    """Warnings for a published diagram whose SVG source no longer matches the drawn PNG."""
+    out = []
+    try:
+        man = load_manifest(root, tid)
+    except HeraldError:
+        return out
+    lines, dropped = slug_renders(root, cfg, st["slug"])
+    for it in _items(man):
+        if it.get("kind") != "diagram":
+            continue
+        E = find_render(lines, file_hashes(root, cur_path(root, cfg, st["slug"], it.get("file"))))
+        if E and E.get("svg_sha256") != _svg_sha(root, tid, it.get("id")):
+            out.append("%s: the SVG source differs from the published picture — the next refresh renders it again"
+                       % it.get("id"))
+    if dropped:
+        out.append("diagram render records: %d damaged line(s) ignored" % dropped)
+    return out
+
+
+def scope_problems(root, cfg, tid, publish=False):
+    """`HRD scope` at publish (no --rev — never at ship, L6): every external item's HEAD content
+    confirmed, fail-closed, attributions in place, no quotation at the OG path."""
+    if not publish:
+        return []
+    from .store import load_state
+    st = load_state(root, tid)
+    if not st.get("slug"):
+        return []
+    out = []
+    try:
+        man = load_manifest(root, tid)
+    except HeraldError as e:
+        return [str(e)]
+    rec = st.get("images") or {}
+    led = Ledger(root)
+    body = _body(root, cfg, st["slug"], "HEAD")
+    for it in _items(man):
+        if it.get("kind") != "external":
+            continue
+        iid = it.get("id")
+        r = (rec.get("items") or {}).get(iid) or {}
+        why = fail_closed(tid, iid, r, led, it)
+        if why:
+            out.append(why)
+            continue
+        if external_state(root, tid, it, led, rev="HEAD") != "ready":
+            out.append("%s: the committed file is not an external image a human confirmed — `HRD image confirm` before "
+                       "publishing" % iid)
+        if figure(cfg).get(it.get("use")) and r.get("orientation") and \
+                body.count(snippet_text(cfg, it, r.get("orientation"))) != 1:
+            out.append("%s: the attribution is not in the committed article exactly once" % iid)
+    q = og_quotation_problem(root, cfg, st["slug"], rev="HEAD")
+    if q:
+        out.append(q)
+    return out
+
+
+def excluded_external(root, cfg, tid, rev, changed):
+    """`external-images` (no consent lifts it), fail-closed (§2.13)."""
+    from .store import read_json_at
+    st = (read_json_at(root, rev, _work_rel(tid, "state.json")) if rev else
+          read_json(os.path.join(root, _work_rel(tid, "state.json")))) or {}
+    files = ((st.get("images") or {}).get("files")) or {}
+    try:
+        man = load_manifest(root, tid, rev=rev)
+    except HeraldError:
+        return bool(files)
+    if any(i.get("kind") == "external" for i in _items(man)):
+        return True
+    return any(isinstance(m, dict) and m.get("kind") == "external" and f in changed for f, m in files.items())
+
+
+def og_excluded(root, cfg, tid, rev, changed, slug):
+    """The `images` exclusion's OG part: an outside OG path in the diff, or a stale base card."""
+    from .store import read_json_at
+    out = cfg.og_outside(slug) if og_conf(cfg) else None
+    if out and out in changed and not tid.startswith("tr-"):
+        return True
+    st = (read_json_at(root, rev, _work_rel(tid, "state.json")) if rev else
+          read_json(os.path.join(root, _work_rel(tid, "state.json")))) or {}
+    return bool((((st.get("images") or {}).get("og")) or {}).get("stale_base"))
+
+
+def external_on_base(root, cfg, slug):
+    """Files of `slug` (moved slugs too) recorded as external images in a committed state on
+    origin/<base> and present there — the same on every machine (§2.6.7)."""
+    ref = "origin/%s" % cfg.base
+    olds = set(_old_slugs(root, slug)) | {slug}
+    out = []
+    for _, st in _topic_states(root, ref):
+        if st.get("slug") not in olds:
+            continue
+        for f, m in (((st.get("images") or {}).get("files")) or {}).items():
+            if isinstance(m, dict) and m.get("kind") == "external":
+                p = cur_path(root, cfg, slug, f)
+                if git_ok(root, "cat-file", "-e", "%s:%s" % (ref, p)):
+                    out.append(p)
+    return sorted(set(out))
+
+
+def snippet_spans(root, cfg, tid, st, text):
+    """(start, end) of each external item's attribution in `text` — trim never cuts into one."""
+    spans = []
+    try:
+        man = load_manifest(root, tid)
+    except HeraldError:
+        return spans
+    for it in _items(man):
+        r = (((st.get("images") or {}).get("items")) or {}).get(it.get("id")) or {}
+        if it.get("kind") == "external" and r.get("orientation") and figure(cfg).get(it.get("use")):
+            sn = snippet_text(cfg, it, r["orientation"])
+            i = text.find(sn)
+            while i >= 0:
+                spans.append((i, i + len(sn)))
+                i = text.find(sn, i + 1)
+    return spans
+
+
+def config_errors(root, cfg):
+    return {"limner_errors": limner.limner_errors(cfg), "og_errors": og_errors(root, cfg),
+            "figure_errors": figure_errors(cfg)}

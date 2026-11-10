@@ -4,7 +4,8 @@ Picks the next queued topic (planning first when the queue is empty), writes it 
 ships it: brief → … → PR → merge → deploy → URL check, one article per run. Running it is the
 human's request to publish this article without reading it first, so `ship` accepts the
 agents' logged decisions, a trim, the fact-checker's framings and Herald-made images (`--consent`, `ship.md`) — never
-screenshots: an article with screenshots stops at its PR for `/hrd ship`; a blocking
+screenshots or external images: an article with screenshots or external images (`external-images`) stops at its PR for `/hrd ship`
+(diagrams and the OG card are Herald-made images — consent accepts them); a blocking
 exclusion, a hold or the daily
 throttle still stops it, the article is recorded `human_reviewed: false` (unless `--attended`,
 where the human approves the body before the PR), and the guard's merge and deploy

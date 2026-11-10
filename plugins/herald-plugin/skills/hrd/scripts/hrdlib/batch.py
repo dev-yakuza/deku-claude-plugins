@@ -268,6 +268,8 @@ def _topic_paths(cfg, tid, slug):
     paths_ = [work_rel(tid)]
     if slug:
         paths_ += cfg.bundle_paths(slug)
+        if cfg.og_outside(slug) and not tid.startswith("tr-"):  # a repo OG generator's path (08-images.md §2.8.3)
+            paths_.append(cfg.og_outside(slug))
     return paths_
 
 

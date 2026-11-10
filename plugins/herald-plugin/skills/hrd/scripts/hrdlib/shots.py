@@ -37,12 +37,15 @@ VIEWPORT_RE = re.compile(r"^[0-9]{3,4}x[0-9]{3,4}$")
 EXTS = ("png", "jpg", "jpeg", "webp")
 KINDS = ("privacy", "mismatch")
 MAX_BYTES = 10 * 1024 * 1024
-# what a hold note on base may say: ids and kind codes only, never the agent's reason text
-NOTE_RE = re.compile(r"^screenshots:( s[0-9]{1,3}(\((retake:(privacy|mismatch)|confirm)\))?)+$")
+# what a hold note on base may say: ids and kind codes only, never the agent's reason text; an
+# external image waiting for a human's look is `e1(confirm)` (design/herald/08-images.md §2.9)
+NOTE_RE = re.compile(r"^screenshots:( (s|e)[0-9]{1,3}(\((retake:(privacy|mismatch)|confirm)\))?)+$")
 
 # --- automatic capture (design 07) ---
 CAPTURES = ".claude/herald/ledger/captures.jsonl"  # under the guard's LEDGER glob: ask attended, deny unattended
 CONFIRMATIONS = ".claude/herald/ledger/confirmations.jsonl"
+# external images Herald fetched (08 §2.7.1): rule U's "log" is captures ∪ fetches
+FETCHES = ".claude/herald/ledger/fetches.jsonl"
 LEDGER_FIELDS = ("topic", "id", "key", "blob", "sha256")
 URL_RE = re.compile(r"^https://[A-Za-z0-9\-._~:/?#\[\]@!&()*+,;=%]+$")
 LANG_RE = re.compile(r"^[a-z]{2,3}(-[A-Z][a-z]{3})?(-([A-Z]{2}|[0-9]{3}))?$")
@@ -76,14 +79,15 @@ def _stamp():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
 
-def move_to_removed(root, tid, rels, label=""):
-    """Move files (paths relative to root) under memory/shots/removed/<tid>/<UTC time>/ —
+def move_to_removed(root, tid, rels, label="", area="shots"):
+    """Move files (paths relative to root) under memory/<area>/removed/<tid>/<UTC time>/ —
     never a delete: a screenshot a human took can always be put back (INV3). A fresh time
-    folder per call, so moving the same name twice never overwrites."""
+    folder per call, so moving the same name twice never overwrites. `area` `images` keeps
+    diagrams, external images and OG files apart (design 08 §2.2)."""
     rels = [r for r in rels if r and os.path.isfile(os.path.join(root, r))]
     if not rels:
         return []
-    dest = os.path.join(root, ".claude/herald/memory/shots/removed", tid, _stamp() + (("-" + label) if label else ""))
+    dest = os.path.join(root, ".claude/herald/memory", area, "removed", tid, _stamp() + (("-" + label) if label else ""))
     out = []
     for r in rels:
         tgt = os.path.join(dest, r)
@@ -93,9 +97,9 @@ def move_to_removed(root, tid, rels, label=""):
     return out
 
 
-def removed_bytes(root, tid=None):
-    """Bytes kept under memory/shots/removed/ (one topic, or all)."""
-    d = os.path.join(root, ".claude/herald/memory/shots/removed", *([tid] if tid else []))
+def removed_bytes(root, tid=None, area="shots"):
+    """Bytes kept under memory/<area>/removed/ (one topic, or all)."""
+    d = os.path.join(root, ".claude/herald/memory", area, "removed", *([tid] if tid else []))
     return sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fns in os.walk(d) for f in fns)
 
 
@@ -271,7 +275,8 @@ def check_manifest(root, cfg, tid, st, man):
     # gate cannot read may be fine — a warning only)
     added = [p for p in git(root, "ls-files", "--others", "--exclude-standard", "--", cfg.image_dir(slug),
                             check=False).splitlines() if p]
-    loose = sorted(p for p in added if p not in refs and p not in files_seen)
+    from .images import managed_files  # 08 §2.10: images.json files and the OG file are Herald's own
+    loose = sorted(p for p in added if p not in refs and p not in files_seen and p not in managed_files(root, cfg, tid, st))
     if loose:
         warnings.append("new images the article does not reference: %s" % ", ".join(loose))
     return errors, warnings, unref
@@ -337,25 +342,37 @@ def ledger_read(path):
 
 
 class Ledger:
-    """Both ledgers, read once. Content is (git blob id, sha256 of the bytes); either one
-    matching counts as the same content, so a changed .gitattributes cannot hide a capture."""
+    """The ledgers, read once. Content is (git blob id, sha256 of the bytes); either one
+    matching counts as the same content, so a changed .gitattributes cannot hide a capture.
+    0.17.0: external images Herald fetched are logged too (`fetches`), so rule U — a logged file
+    no human confirmed — covers them with no other change (design 08 §2.7.1)."""
 
     def __init__(self, root):
         self.captures, cb = ledger_read(os.path.join(root, CAPTURES))
         self.confirms, fb = ledger_read(os.path.join(root, CONFIRMATIONS))
-        self.damaged = [(CAPTURES, n) for n in cb] + [(CONFIRMATIONS, n) for n in fb]
+        self.fetches, xb = ledger_read(os.path.join(root, FETCHES))
+        self.damaged = [(CAPTURES, n) for n in cb] + [(CONFIRMATIONS, n) for n in fb] + [(FETCHES, n) for n in xb]
 
     @property
     def idle(self):
         """Nothing to judge with: rule U is empty (a new clone, or auto capture never used)."""
-        return not self.captures and not self.damaged
+        return not self.captures and not self.fetches and not self.damaged
 
     @staticmethod
     def _same(rec, h):
         return bool(h) and (rec.get("blob") == h[0] or rec.get("sha256") == h[1])
 
     def logged(self, h):
-        return [r for r in self.captures if self._same(r, h)]
+        return [r for r in self.captures + self.fetches if self._same(r, h)]
+
+    def fetch_line(self, h, tid, eid, key):
+        """The fetch line that vouches for this very content of item (topic, id, key)."""
+        return next((r for r in self.fetches if self._same(r, h) and
+                     (r.get("topic"), r.get("id"), r.get("key")) == (tid, eid, key)), None)
+
+    def fetch_lines(self, tid, eid, key=None):
+        return [r for r in self.fetches if r.get("topic") == tid and r.get("id") == eid
+                and (key is None or r.get("key") == key)]
 
     def confirmed(self, h):
         return any(self._same(r, h) for r in self.confirms)
@@ -374,10 +391,11 @@ class Ledger:
     def damage_text(self):
         where = ", ".join("%s line %d" % w for w in self.damaged)
         first = self.damaged[0][1]
-        return ("the screenshot ledgers have a damaged line (%s) — a human removes that line (a protected path: the "
-                "guard asks). If you cannot tell which screenshot it recorded, demote the auto screenshots it may "
-                "affect or retake them with a loopback. Unattended: hold needs-human with the note "
-                "`tooling: shots ledger damaged line %d`" % (where, first))
+        images = self.damaged[0][0] == FETCHES
+        return ("the screenshot and image ledgers have a damaged line (%s) — a human removes that line (a protected "
+                "path: the guard asks). If you cannot tell which screenshot or image it recorded, demote or reject "
+                "the ones it may affect. Unattended: hold needs-human with the note `tooling: %s ledger damaged "
+                "line %d`" % (where, "images" if images else "shots", first))
 
     def check(self, n, warnings=None):
         """Damage makes every judgement that reads the ledgers undecidable: refuse when there is
@@ -432,6 +450,13 @@ def capture_template(cfg):
     return t if t is not None else None
 
 
+def runner(x):
+    """A shell or an interpreter (by program name): what an argv template must never run."""
+    prog = os.path.basename(x.replace("\\", "/")).lower()
+    return prog in SHELLS or (prog.endswith(".exe") and prog[:-4] in SHELLS) or \
+        bool(re.match(r"^(python|pypy|node|perl|ruby|bash|zsh)[0-9.]+(\.exe)?$", prog))
+
+
 def capture_errors(cfg):
     """What is wrong with `screenshots.capture` ([] when it is absent or fine). Never part of
     Config.validate or the guard: a typo here turns capture off (`no-tool`), never the harness."""
@@ -443,11 +468,6 @@ def capture_errors(cfg):
     if not t:
         return ["screenshots.capture is empty"]
     errors = []
-
-    def runner(x):
-        prog = os.path.basename(x.replace("\\", "/")).lower()
-        return prog in SHELLS or (prog.endswith(".exe") and prog[:-4] in SHELLS) or \
-            bool(re.match(r"^(python|pypy|node|perl|ruby|bash|zsh)[0-9.]+(\.exe)?$", prog))
     # any element: a wrapper (`npx sh …`, `timeout 30 bash …`) runs what follows it
     shells = [x for x in t if runner(x)]
     if shells:
@@ -717,6 +737,8 @@ def hold_note(st):
         kinds = [x.get("kind") for x in st.get("retakes") or []
                  if isinstance(x, dict) and (x.get("target") or {}).get("id") == sid and x.get("kind") in KINDS]
         parts.append("%s(retake:%s)" % (sid, kinds[-1]) if kinds else sid)
+    from .images import note_items  # external images waiting for a human's look (08 §2.9)
+    parts += note_items(st)
     return "screenshots: " + " ".join(parts) if parts else None
 
 
@@ -1474,12 +1496,15 @@ def draft_problems(root, cfg, tid, st):
     led = Ledger(root)
     shots_rec = (rec or {}).get("shots") or {}
     by_file = {s.get("file"): s.get("id") for s in (man or {}).get("shots") or [] if isinstance(s, dict)}
+    image_files = set(((st.get("images") or {}).get("files") or {}))  # images.draft_problems reports these (08 §2.10)
     if not led.idle and st.get("slug"):
         # rule U first, for every topic, records or not: the whole image directory against every capture
         changed = _changed_images(root, cfg, st["slug"])
         if led.damaged and changed:
             return [led.damage_text()]
         for f in changed:
+            if f in image_files:
+                continue
             h = file_hashes(root, f)
             if not led.unconfirmed(h):
                 continue
@@ -1641,19 +1666,20 @@ def kind_of(data):
     return None
 
 
-def sanitize(data, ext):
+def sanitize(data, ext, keep_icc=False):
     """Keep only what draws the picture; returns (bytes, warnings). Anything it cannot read is
-    refused — an unknown structure is never passed on (design §2.5)."""
+    refused — an unknown structure is never passed on (design §2.5). `keep_icc`: an external
+    image keeps its colour profile — removing it would change the picture (08-images.md §2.6.4)."""
     kind = kind_of(data)
     want = "jpg" if ext in ("jpg", "jpeg") else ext
     if kind is None:
         raise HeraldError("not a PNG, JPEG or WebP image")
     if kind != want:
         raise HeraldError("the file is a %s but is named .%s" % (kind.upper(), ext))
-    return {"png": _png, "jpg": _jpeg, "webp": _webp}[kind](data)
+    return {"png": _png, "jpg": _jpeg, "webp": _webp}[kind](data, keep_icc)
 
 
-def _png(data):
+def _png(data, keep_icc=False):
     out, pos, warn, seen_end, kept = [PNG_SIG], 8, [], False, set()
     first = True
     while pos < len(data):
@@ -1667,7 +1693,7 @@ def _png(data):
         if first and typ != b"IHDR":
             raise HeraldError("PNG does not start with IHDR")
         first = False
-        if typ in PNG_KEEP:
+        if typ in PNG_KEEP or (keep_icc and typ == b"iCCP"):
             out.append(data[pos:end])
             kept.add(typ)
         elif typ == b"iCCP" and not _srgb(data[pos + 8:pos + 8 + n], png=True):
@@ -1683,7 +1709,7 @@ def _png(data):
     return b"".join(out), warn
 
 
-def _jpeg(data):
+def _jpeg(data, keep_icc=False):
     out, pos, warn, frame, scanned = [b"\xff\xd8"], 2, [], False, False
     while True:
         if pos >= len(data) or data[pos] != 0xFF:
@@ -1720,6 +1746,8 @@ def _jpeg(data):
             out.append(bytes([0xFF, m]) + data[pos:nxt])
             frame = frame or m in JPEG_SOF
             scanned = scanned or m == 0xDA
+        elif m == 0xE2 and seg[:12] == b"ICC_PROFILE\x00" and keep_icc:
+            out.append(b"\xff\xe2" + data[pos:nxt])  # the profile only; MPF (also APP2) still goes
         elif m == 0xE2 and seg[:12] == b"ICC_PROFILE\x00":
             if ICC_WARN not in warn and not _srgb(seg[14:]):
                 warn.append(ICC_WARN)
@@ -1739,7 +1767,7 @@ def _jpeg(data):
                 break
 
 
-def _webp(data):
+def _webp(data, keep_icc=False):
     size = struct.unpack("<I", data[4:8])[0]
     if size + 8 > len(data) or size < 4:
         raise HeraldError("truncated WebP")
@@ -1757,7 +1785,7 @@ def _webp(data):
             raise HeraldError("animated WebP is not a screenshot")
         if typ == b"VP8X":
             vp8x = len(chunks)
-        if typ in WEBP_KEEP:
+        if typ in WEBP_KEEP or (keep_icc and typ == b"ICCP"):
             chunks.append(bytearray(data[pos:min(nxt, end)]))
             image = image or typ in (b"VP8 ", b"VP8L")
         elif typ == b"ICCP" and not _srgb(data[pos + 8:pos + 8 + n]):
@@ -1766,7 +1794,8 @@ def _webp(data):
     if not image:
         raise HeraldError("WebP has no image data")
     if vp8x is not None:
-        chunks[vp8x][8] &= ~(0x20 | 0x08 | 0x04 | 0x02) & 0xFF  # ICC, EXIF, XMP, animation flags off
+        drop = (0x08 | 0x04 | 0x02) | (0 if keep_icc and any(bytes(c[:4]) == b"ICCP" for c in chunks) else 0x20)
+        chunks[vp8x][8] &= ~drop & 0xFF  # ICC (unless kept), EXIF, XMP, animation flags off
     body = b"WEBP" + b"".join(bytes(c) for c in chunks)
     return b"RIFF" + struct.pack("<I", len(body)) + body, warn
 
@@ -1793,6 +1822,74 @@ def image_width(data):
     return None
 
 
+def image_size(data):
+    """(width, height) from the header (PNG IHDR, JPEG SOFn, WebP VP8/VP8L/VP8X), None when
+    unreadable (design 08 §2.6.3)."""
+    k = kind_of(data)
+    try:
+        if k == "png":
+            return struct.unpack(">II", data[16:24])
+        if k == "jpg":
+            pos = 2
+            while pos + 4 <= len(data):
+                if data[pos] != 0xFF:
+                    return None
+                m = data[pos + 1]
+                if m == 0xFF:
+                    pos += 1
+                    continue
+                if 0xD0 <= m <= 0xD7 or m == 0x01:
+                    pos += 2
+                    continue
+                n = struct.unpack(">H", data[pos + 2:pos + 4])[0]
+                if m in JPEG_SOF and m != 0xCC:
+                    h, w = struct.unpack(">HH", data[pos + 5:pos + 9])
+                    return w, h
+                if m == 0xDA:
+                    return None
+                pos += 2 + n
+            return None
+        if k == "webp":
+            typ = data[12:16]
+            if typ == b"VP8X":
+                return 1 + int.from_bytes(data[24:27], "little"), 1 + int.from_bytes(data[27:30], "little")
+            if typ == b"VP8L":
+                b = int.from_bytes(data[21:25], "little")
+                return 1 + (b & 0x3FFF), 1 + ((b >> 14) & 0x3FFF)
+            if typ == b"VP8 ":
+                return (struct.unpack("<H", data[26:28])[0] & 0x3FFF, struct.unpack("<H", data[28:30])[0] & 0x3FFF)
+    except (struct.error, IndexError):
+        return None
+    return None
+
+
+def animated(data):
+    """An APNG (`acTL` before the image data) or an animated WebP (ANIM/ANMF, or the VP8X flag)."""
+    k = kind_of(data)
+    if k == "png":
+        pos = 8
+        while pos + 8 <= len(data):
+            n = struct.unpack(">I", data[pos:pos + 4])[0]
+            typ = data[pos + 4:pos + 8]
+            if typ == b"acTL":
+                return True
+            if typ in (b"IDAT", b"IEND"):
+                return False
+            pos += 12 + n
+        return False
+    if k == "webp":
+        if data[12:16] == b"VP8X" and len(data) > 20 and data[20] & 0x02:
+            return True
+        pos = 12
+        while pos + 8 <= len(data):
+            typ = data[pos:pos + 4]
+            if typ in (b"ANIM", b"ANMF"):
+                return True
+            n = struct.unpack("<I", data[pos + 4:pos + 8])[0]
+            pos += 8 + n + (n & 1)
+    return False
+
+
 def dirty(data, ext):
     """Why a file would not pass as-is (None when clean): what scan reports."""
     try:
@@ -1805,8 +1902,10 @@ def dirty(data, ext):
 # --- scan / strip ---------------------------------------------------------------------------
 
 def slug_files(root, cfg, slug):
-    """Every screenshot recorded for this slug, by any topic (refresh topics included), with
-    paths recorded under an old slug (`status --move`) mapped onto the current image dir."""
+    """Every screenshot and Herald image recorded for this slug, by any topic (refresh topics
+    included), with paths recorded under an old slug (`status --move`) mapped onto the current
+    image dir: (file, kind, confirmed blob) — kind `screenshot`, or the `images.files` kind
+    (`diagram`/`external`), whose sha is the blob a human confirmed (08 §2.13)."""
     from .integrity import moved_image_path
     from .store import load_published
     pub = load_published(root)
@@ -1814,22 +1913,39 @@ def slug_files(root, cfg, slug):
     # `status --move` appends every old slug to the same article (A→B→C lists A and B)
     old = [m["slug"] for m in art.get("moved_from") or [] if isinstance(m, dict) and m.get("slug")]
     work = os.path.join(root, ".claude/herald/work")
-    files = []
+    files = {}
     for tid in sorted(os.listdir(work)) if os.path.isdir(work) else []:
         st = read_json(os.path.join(work, tid, "state.json")) or {}
         if st.get("slug") != slug:
             continue
         for f in _recorded_files(st):
-            files.append(moved_image_path(cfg, slug, f, old))
-    return [f for f in dict.fromkeys(files) if f.rsplit(".", 1)[-1].lower() in EXTS]
+            files.setdefault(moved_image_path(cfg, slug, f, old), ("screenshot", set()))
+        rec = st.get("images") if isinstance(st.get("images"), dict) else {}
+        shas = {}
+        for it in (rec.get("items") or {}).values():
+            if isinstance(it, dict) and it.get("file") and it.get("sha"):
+                shas.setdefault(it["file"], set()).add(it["sha"])
+        for f, meta in (rec.get("files") or {}).items():
+            kind = (meta or {}).get("kind") if isinstance(meta, dict) else None
+            cur = files.setdefault(moved_image_path(cfg, slug, f, old), (kind or "diagram", set()))
+            cur[1].update(shas.get(f, ()))
+    return [(f, k, sorted(v)) for f, (k, v) in files.items() if f.rsplit(".", 1)[-1].lower() in EXTS]
 
 
 def scan(root, cfg, slug):
     found = []
-    for f in slug_files(root, cfg, slug):
+    led = None
+    for f, kind, shas in slug_files(root, cfg, slug):
         full = os.path.join(root, f)
         if not os.path.isfile(full):
             continue
+        if kind == "external":
+            # Herald's fetched copy, as a human confirmed it: never rewritten (P15 — its colour
+            # profile stays on purpose). A replaced file falls under the 0.15.0 rule
+            led = led or Ledger(root)
+            h = file_hashes(root, f)
+            if h and (h[0] in shas or any(led._same(r, h) for r in led.fetches)):
+                continue
         with open(full, "rb") as fh:
             why = dirty(fh.read(), f.rsplit(".", 1)[-1].lower())
         if why:

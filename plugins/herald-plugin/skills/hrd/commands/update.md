@@ -40,7 +40,11 @@ only. Ported from Guild `update.md`.
    offer is not repeated on this machine (the version is kept for a future template change that
    is worth asking again). A new file only, never an edit of an existing one.
 4. **Settings/gitignore/labels**: re-merge `templates/settings.json.tmpl` (key union), the
-   gitignore block, and create missing labels.
+   gitignore block — the whole block is brought in line: an existing `# >>> herald` block gets the
+   lines it lacks (e.g. `.limner/`, 0.17.0) inside it, nothing else changes — and create missing labels.
+   **Images** (0.17.0): never added by `update` (INV4) — a repo without an `images` block behaves
+   as 0.16.0. Say once at the end: "image expansion (diagrams, external images, the OG card) is
+   turned on with `/hrd config images`".
    **Translations** (0.9.0): never added by `update` (INV4). If config has no `translations` and
    the content has locale directories, say once that `/hrd config` can turn translations on.
    A translator persona from before 0.9.0 still has `{{TRANSLATION_TARGETS}}`-style values in

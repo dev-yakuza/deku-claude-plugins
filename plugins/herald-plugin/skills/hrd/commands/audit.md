@@ -23,7 +23,12 @@ routes findings to `evolve`, `status` or `update`, including what the guard cann
      captured on this machine and recorded as confirmed (local `state.json` and the
      `origin/herald/*` branches) whose confirmation the ledger does not hold — a state edited
      outside `shot confirm`. `no_record` (captured on another machine or before a fresh clone) is
-     reported apart, as a count, never as an anomaly.
+     reported apart, as a count, never as an anomaly. The same `damaged` list covers
+     `ledger/fetches.jsonl` (external images, `atoms/_images.md`); `HRD image status --topic <id>`
+     `renders_dropped` counts damaged lines of a topic's `diagram-renders.jsonl` (ignored lines — a
+     warning: the diagram is rendered again). An external image recorded `ready` in a `state.json`
+     whose content `ledger/confirmations.jsonl` does not hold is an anomaly too (edited outside
+     `image confirm`).
 3. **State**: `HRD status` anomalies — held topics older than 14 days, merged-unrecorded
    articles, stale lock, unpushed Herald record commits (`HRD ahead`).
 4. **Gate**: `validate_content.py` over every `origin: herald` article and each of its

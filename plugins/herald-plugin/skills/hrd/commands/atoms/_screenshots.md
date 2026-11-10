@@ -38,9 +38,13 @@ Herald never deletes a screenshot.
   and fixes what it reports (no loopback), and runs `HRD gate --topic <id>`: images listed under
   `pending_shots` are the screenshots still to come — never "fix" them.
 - **illustrator** (if enabled): never creates, deletes or edits a manifest file or a file
-  `HRD shot status` lists under `files`; everything else as before.
+  `HRD shot status` lists under `files`; its own diagrams and external images follow
+  `atoms/_images.md` §1.
 
 ## 2. Collecting (inside draft, before `stage pass --stage draft`)
+
+With a config `images` block the order of the whole collection — screenshots, diagrams, external
+images, the OG card — is `atoms/_images.md` §2; the steps below are its screenshot part.
 
 After the writer (and illustrator) return:
 

@@ -329,7 +329,8 @@ def auto_exclusion(crit, st=None):
 # others stay blocking: an open BLOCKER, an article changed after its last auditor round, a
 # PR whose verdict files cannot be read.
 # `screenshots` is never here: a screen may show what must not go out, so a human looks at it in
-# `/hrd ship` (design/herald/06-screenshots.md §2.10)
+# `/hrd ship` (design/herald/06-screenshots.md §2.10); nor `external-images`: a web image and its
+# attribution are confirmed in `/hrd ship` too (08-images.md §2.13)
 CONSENT_ACCEPTS = ("decision:dismissal", "decision:assumption", "decision:deferral",
                    "audit-dismissed", "audit-log:deferred", "trimmed", "images", "framed", "translated")
 
@@ -409,8 +410,11 @@ def exclusion_reasons(root, cfg, tid, rev=None):
     if slug:
         img = cfg.image_dir(slug) + "/"
         changed = commits.changed_files(root, "origin/%s...%s" % (cfg.base, rev or "HEAD"))
-        if any(f.startswith(img) for f in changed):
-            reasons.append("images")
+        from . import images as images_mod
+        if any(f.startswith(img) for f in changed) or images_mod.og_excluded(root, cfg, tid, rev, changed, slug):
+            reasons.append("images")  # Herald-made images too: diagrams, the OG card (08-images.md §2.13)
+        if images_mod.excluded_external(root, cfg, tid, rev, changed):
+            reasons.append("external-images")
         # translations read by no editor or auditor go out only with a human, unless the repo
         # allowed it (translations.auto_publish) — derived from the diff, not from state.json
         from .shots import excluded as shots_excluded
@@ -750,6 +754,8 @@ def stage_pass(root, cfg, tid, stage, amend=False):
     if stage == "draft":
         from .shots import draft_problems
         problems = draft_problems(root, cfg, tid, st)
+        from .images import draft_problems as image_problems
+        problems += image_problems(root, cfg, tid, st)  # diagrams, external images, OG (08-images.md §2.10)
         if problems:  # every listed screenshot in place before the gate (design 06 §2.7)
             raise HeraldError("; ".join(problems))
     if stage == "draft" or (stage == "verify" and amend):
@@ -820,6 +826,8 @@ def stage_pass(root, cfg, tid, stage, amend=False):
             raise HeraldError("verify.json has unsupported or contradicted claims")
         from .translation import lang_record, verify_problems
         problems = verify_problems(root, cfg, st, ver)
+        from .images import verify_problems as image_problems
+        problems += image_problems(root, cfg, tid, st, ver, amend=amend)  # drawn diagram text (08-images.md §2.12)
         if problems:
             raise HeraldError("; ".join(problems))
         bh = bundle_hash(root, cfg, st["slug"])
@@ -848,6 +856,8 @@ def stage_pass(root, cfg, tid, stage, amend=False):
     st["stage"] = nxt
     if stage == "draft" and st.get("screenshots"):
         st["screenshots"]["awaiting"] = False
+    if stage == "draft" and st.get("images"):
+        st["images"]["awaiting"] = False
     save_state(root, tid, st)
     if stage == "draft":
         from .shots import archive_inbox
@@ -1019,6 +1029,9 @@ def trim_begin(root, cfg, tid):
     if research_suspects(ver):
         raise HeraldError("verify.json lists research_suspects — the researcher rechecks them first "
                           "(`HRD loopback --cause research --claims …`), never a trim")
+    if isinstance(ver.get("images"), dict) and ver["images"].get("unsupported"):
+        raise HeraldError("unsupported text in a diagram is never trimmed (trim deletes body sentences only) — "
+                          "`HRD loopback --cause verify` (08-images.md §2.12)")
     if not 1 <= uns <= TRIM_MAX_UNSUPPORTED:
         raise HeraldError("trim takes 1 to %d unsupported sentences, not %d — loop back"
                           % (TRIM_MAX_UNSUPPORTED, uns))
@@ -1037,6 +1050,8 @@ def trim_begin(root, cfg, tid):
     if b0 is None:
         raise HeraldError("the article's frontmatter does not close — loop back")
     prot = _protected(old)
+    from .images import snippet_spans
+    attribution = snippet_spans(root, cfg, tid, st, old)  # 08-images.md §2.6.5: never cut into one
     units, taken = [], []
     for text in sents:
         text = text.strip()
@@ -1076,6 +1091,8 @@ def trim_begin(root, cfg, tid):
                     raise HeraldError("%r is a list item with lines attached below it — deleting it would move them "
                                       "to another item; loop back" % text[:80])
                 a = ls  # a whole list item goes with its mark
+        if any(a < y and x < b for x, y in attribution):
+            raise HeraldError("%r overlaps an image attribution — loop back (the illustrator fixes the alt)" % text[:80])
         if any(a < y and x < b for x, y in taken):
             raise HeraldError("unsupported texts overlap — loop back")
         taken.append((a, b))

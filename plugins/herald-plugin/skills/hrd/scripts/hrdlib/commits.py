@@ -245,6 +245,8 @@ def pr_scope_globs(cfg, tid, slug, langs=()):
     out = [".claude/herald/work/%s/*" % tid]
     if not tid.startswith("tr-"):
         out += [cfg.body_path(slug), cfg.image_dir(slug) + "/*", cfg.image_dir(slug) + "/**"]
+        if cfg.og_outside(slug):  # a repo OG generator's path outside the image dir (08-images.md §2.8.3)
+            out.append(cfg.og_outside(slug))
     out += [cfg.body_path(slug, l) for l in langs if l in cfg.target_langs()]
     return out
 
@@ -254,6 +256,8 @@ def pr_scope_paths(cfg, tid, slug, langs=()):
     out = [".claude/herald/work/%s" % tid]
     if not tid.startswith("tr-"):
         out += [cfg.body_path(slug), cfg.image_dir(slug)]
+        if cfg.og_outside(slug):
+            out.append(cfg.og_outside(slug))
     out += [cfg.body_path(slug, l) for l in langs if l in cfg.target_langs()]
     return out
 
@@ -268,7 +272,8 @@ def scope_check(root, cfg, tid, slug, rev="HEAD", base_ref=None, herald_sha=None
         if git_ok(root, "merge-base", "--is-ancestor", herald_sha, rev):
             later = changed_files(root, herald_sha, rev)
             tampered = [p for p in later if p.startswith(".claude/herald/work/%s/" % tid)
-                        and p.rsplit("/", 1)[-1] in ("state.json", "verify.json", "critique.json")]
+                        and p.rsplit("/", 1)[-1] in ("state.json", "verify.json", "critique.json",
+                                                     "diagram-renders.jsonl")]  # 08-images.md R4-2
         else:
             tampered = ["(history rewritten after Herald's last push)"]
     return {"ok": not bad and not tampered, "files": files, "out_of_scope": bad, "tampered": tampered}
