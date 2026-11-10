@@ -84,7 +84,8 @@ def push_base(root, cfg):
 # --- selection -------------------------------------------------------------------------------
 
 def select_topics(root, cfg, n):
-    return ghstate.selectable(root, cfg)[:n]
+    from .images import drop_blocked_translations  # the same filter as `HRD select` (08-images.md R3-4)
+    return drop_blocked_translations(root, cfg, ghstate.selectable(root, cfg))[:n]
 
 
 # --- child sessions --------------------------------------------------------------------------

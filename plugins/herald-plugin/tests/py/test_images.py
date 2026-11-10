@@ -1305,6 +1305,27 @@ class OgTests(ImageCase):
         self.assertEqual(self.og()["why"], "title-too-long")
         self.base_card_in_place(base_blob)
 
+    def test_pr_stage_deletion_of_the_base_card_is_asked(self):
+        """n1 (review round 2): at the PR stage a human's deletion of base's card is a human's
+        change — `needs-human`, never silently restored."""
+        base_blob = self.published_refresh()
+        self.assertEqual(self.og()["status"], "kept")
+        st = self.state()
+        st["stage"] = "publish"
+        store.save_state(self.root, TID, st)
+        os.remove(os.path.join(self.root, self.og_path))
+        out = self.og()
+        self.assertEqual((out["status"], out["unknown_file"]), ("needs-human", "%s (deleted)" % self.og_path))
+        self.assertFalse(os.path.exists(os.path.join(self.root, self.og_path)))
+        with self.assertRaises(Exception) as cm:  # taking it needs this machine's push record
+            self.og(human_push=True, pr=1)
+        self.assertIn("no Herald push", str(cm.exception))
+        # in draft the card is Herald's to keep: put back
+        st["stage"] = "draft"
+        store.save_state(self.root, TID, st)
+        self.assertEqual(self.og()["status"], "kept")
+        self.assertEqual(shots.blob(self.root, self.og_path), base_blob)
+
     def test_kept_and_stale_base(self):
         # published with a card, then refreshed
         self.og()
@@ -1587,6 +1608,18 @@ class TranslationBlockTests(ImageCase):
         out, _ = self.hrd("translate", "missing")
         self.assertEqual(out["blocked"][0]["reason"], "external-images")
         self.assertEqual(out["articles"], [])
+        # n2 (review round 2): the batch runner's selection drops it too
+        from hrdlib import batch
+        topics = store.load_topics(self.root)
+        topics["topics"].append({"id": "tr-new-post-20261111", "title": "x", "translate_of": SLUG, "state": "queued",
+                                 "history": [], "reverted_by": []})
+        topics["topics"].append({"id": "tr-old-post-20261111", "title": "y", "translate_of": "old-post",
+                                 "state": "queued", "history": [], "reverted_by": []})
+        store.save_topics(self.root, topics)
+        cfg = Config.load(self.root)
+        self.assertEqual(batch.select_topics(self.root, cfg, 5), ["tr-old-post-20261111"])
+        topics["topics"] = topics["topics"][:1]
+        store.save_topics(self.root, topics)
         # m10: a refresh is refused at the candidate step, with the reason
         from hrdlib import refresh
         pc = refresh.precheck(self.root, Config.load(self.root), SLUG, clear=False)

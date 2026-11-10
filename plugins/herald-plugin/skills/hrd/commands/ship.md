@@ -206,7 +206,8 @@ switch and §7.1 need a clean tree.
    → the fail path below with `verify-after-human-edit`; tell the human at step 4 next time that a
    PNG edit is replaced by a render of the SVG); then `HRD image og --topic <id>` (no flag; it does
    nothing when the inputs and the file are as recorded). `needs-human` (a file a human put at the
-   OG path) → attended: ask "use this OG image?" — yes → `HRD image og --topic <id> --human-push
+   OG path, or base's card a human deleted — `unknown_file` ends in `(deleted)`) → attended: ask
+   "use this OG image?" (for a deletion: "publish without the OG card?") — yes → `HRD image og --topic <id> --human-push
    --pr <n>` (a refusal: tell the human why — ship from the machine that pushed, or remove the file
    — and skip this PR this time); no → skip this PR this time (the file stays). `--auto`: this PR
    only → the fail path below with `verify-after-human-edit` and the note `human: OG file needs a

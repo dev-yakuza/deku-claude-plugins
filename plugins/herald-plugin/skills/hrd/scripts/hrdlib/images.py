@@ -1804,8 +1804,9 @@ def _accept_human_og(root, cfg, tid, path, h, pr):
     came = git(root, "log", "--format=%H", "%s..%s" % (hsha, head), "--", path, check=False).split()
     if not came:
         raise HeraldError("%s did not come in after Herald's last push — not a human's OG file" % path)
-    if git(root, "rev-parse", "-q", "--verify", "HEAD:%s" % path, check=False).strip() != h[0]:
-        raise HeraldError("%s differs from the PR head (a local edit) — not a human's OG file" % path)
+    at_head = git(root, "rev-parse", "-q", "--verify", "HEAD:%s" % path, check=False).strip()
+    if at_head != (h[0] if h else ""):  # h None: the human deleted base's card in the PR
+        raise HeraldError("%s differs from the PR head (a local edit) — not a human's OG change" % path)
 
 
 def _settle_base_card(root, cfg, tid, path, base):
@@ -1865,13 +1866,24 @@ def og(root, cfg, tid, human_push=False, pr=None):
             return res
         move_to_removed(root, tid, [path], "og-unknown", area="images")
         h = None
+    elif not h and base and not draft and prev.get("why") != "human-deleted":
+        # the PR stage: a human removed base's card — a deletion is asked like an unknown file,
+        # never silently undone (implementation review n1)
+        if human_push:
+            _accept_human_og(root, cfg, tid, path, None, pr)
+            rec["og"] = {"key": key, "status": "off", "why": "human-deleted", "by": by}
+            save_state(root, tid, st)
+            res.update(status="off", why="human-deleted")
+            return res
+        res.update(status="needs-human", unknown_file="%s (deleted)" % path)
+        return res
     # 3: nothing to do when the inputs and the file are as recorded
     if prev.get("key") == key:
         why = prev.get("why") or ""
         if (prev.get("status") == "made" and h and h[0] == prev.get("sha")) or prev.get("status") == "kept" or \
                 (prev.get("status") == "off" and (why in OG_CONTENT_WHY or why.startswith("bad-value:") or
-                                                  why == "human-file")):
-            if prev.get("status") in ("kept", "off") and why != "human-file":
+                                                  why in ("human-file", "human-deleted"))):
+            if prev.get("status") in ("kept", "off") and why not in ("human-file", "human-deleted"):
                 _settle_base_card(root, cfg, tid, path, base)
             res.update(status=prev["status"], why=prev.get("why"), by=prev.get("by", by))
             return res
@@ -2151,7 +2163,7 @@ def og_draft_problems(root, cfg, tid, st):
     if og_rec.get("status") == "made":
         if not h or h[0] != og_rec.get("sha"):
             return ["%s is not the OG image Herald made — `HRD image og --topic %s`" % (path, tid)]
-    elif base and og_rec.get("why") != "human-file" and (not h or h[0] != base):
+    elif base and og_rec.get("why") not in ("human-file", "human-deleted") and (not h or h[0] != base):
         # base's card is never ours to take or replace without a card of our own (review M1)
         return ["%s must be %s's published OG card (this topic made none) — `HRD image og --topic %s` puts it "
                 "back" % (path, cfg.base, tid)]
@@ -2372,6 +2384,24 @@ def external_on_base(root, cfg, slug):
     chk = _git_run(root, ["cat-file", "--batch-check"], "".join("%s:%s\n" % (ref, p) for p in cand).encode())
     lines = chk.stdout.decode("utf-8", "replace").splitlines()
     return [p for p, line in zip(cand, lines) if not line.endswith(" missing")]
+
+
+def drop_blocked_translations(root, cfg, ids):
+    """Topic ids minus the translation and refresh topics `HRD begin` would refuse (an article
+    with external images on base, translation repos only — §2.6.7, R3-4). `HRD select` and the
+    batch runner's selection share it (implementation review n2); `external_on_base` reads base
+    once per process."""
+    if not cfg.translations():
+        return list(ids)
+    from .store import load_topics
+    topics = {t["id"]: t for t in load_topics(root)["topics"]}
+    out = []
+    for tid in ids:
+        t = topics.get(tid) or {}
+        slug = t.get("translate_of") or t.get("refresh_of")
+        if not slug or not external_on_base(root, cfg, slug):
+            out.append(tid)
+    return out
 
 
 def snippet_spans(root, cfg, tid, st, text):

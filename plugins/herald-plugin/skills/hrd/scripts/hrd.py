@@ -156,11 +156,7 @@ def derived_status(root, cfg):
 def cmd_select(a):
     root, cfg = ctx()
     picked = ghstate.selectable(root, cfg)
-    if cfg.translations():  # 08-images.md §2.6.7 (R3-4): never pick what `begin` refuses
-        topics = {t["id"]: t for t in store.load_topics(root)["topics"]}
-        picked = [t for t in picked if not ((topics.get(t) or {}).get("translate_of") or (topics.get(t) or {}).get(
-            "refresh_of")) or not images.external_on_base(root, cfg, topics[t].get("translate_of") or
-                                                          topics[t].get("refresh_of"))]
+    picked = images.drop_blocked_translations(root, cfg, picked)  # 08 §2.6.7 (R3-4): never what `begin` refuses
     if a.topic:
         if a.topic not in picked:
             raise HeraldError("topic %s is not selectable (needs queued with no open/merged PR or local branch)" % a.topic)
