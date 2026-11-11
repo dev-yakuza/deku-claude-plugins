@@ -2291,6 +2291,10 @@ def review(root, cfg, tid, iid, ok=False, redo=False, note=None):
         raise HeraldError("%s is not a fetched image waiting for review — `HRD image status --topic %s`" % (iid, tid))
     h = file_hashes(root, it["file"])
     key = scene_key(cfg, it) if scene else item_key(it)
+    if ok:
+        why = agent_review_refusal(st, it, iid, key, h)
+        if why:
+            raise HeraldError(why)
     r = st.setdefault("images", {}).setdefault("items", {}).setdefault(
         iid, {"kind": it["kind"], "file": it["file"], "key": key} if scene else
         {"kind": "external", "use": it.get("use"), "file": it["file"], "key": key})
@@ -2302,6 +2306,9 @@ def review(root, cfg, tid, iid, ok=False, redo=False, note=None):
         r["review_note"] = note[:300]
         if scene:
             st.setdefault("review_rejects", []).append({"id": iid, "key": key, "note": note[:300], "at": now_iso()})
+        else:  # no key turned down (a candidate is replaced), but these bytes never pass an agent again
+            st.setdefault("review_redos", []).append({"id": iid, "blob": h[0], "sha256": h[1], "note": note[:300],
+                                                      "at": now_iso()})
     save_state(root, tid, st)
     if ok:
         nxt = None
@@ -2321,6 +2328,22 @@ def agent_rejects(st, iid):
 
 
 AGENT_REJECTS_MAX = 2  # the third agent reject of one place drops it (three candidates at most)
+
+
+def agent_review_refusal(st, it, iid, key, h):
+    """Why an agent may not pass this picture (`review --ok`, `confirm --agent` — implementation
+    review 24 MAJOR-2, MINOR-1): a scene whose key a review or a human turned down, or an external
+    image whose very bytes a review sent back (`review_redos`, top-level state: a plan keeps it).
+    A human's confirm is not affected — the human judges."""
+    if it.get("kind") == "scene" and key in rejected_scene_keys(st, iid):
+        return ("%s: a review turned this picture's key down — change the seed or the prompt (a human may still "
+                "confirm it)" % iid)
+    if it.get("kind") == "external" and h and any(
+            isinstance(x, dict) and x.get("id") == iid and (x.get("blob") == h[0] or x.get("sha256") == h[1])
+            for x in st.get("review_redos") or []):
+        return ("%s: a review sent these very bytes back — `HRD image reject --agent` and another candidate (a human "
+                "may still confirm it)" % iid)
+    return None
 
 
 def snippet(root, cfg, tid, iid):
@@ -2386,6 +2409,10 @@ def confirm(root, cfg, tid, ids, agent=False):
         if agent and ((st.get("images") or {}).get("items") or {}).get(iid, {}).get("reviewed") != h[0]:
             raise HeraldError("%s: the agent review has not passed this picture as it is now — `HRD image review "
                               "--topic %s --id %s --ok` by a fresh review first" % (iid, tid, iid))
+        if agent:
+            why = agent_review_refusal(st, it, iid, scene_key(cfg, it) if it["kind"] == "scene" else item_key(it), h)
+            if why:
+                raise HeraldError(why)
         todo.append((iid, it, h))
     at = now_iso()
 
@@ -2919,7 +2946,8 @@ def status(root, cfg, tid, rev=None):
     lines, dropped = slug_renders(root, cfg, slug, rev) if slug else ([], 0)
     out_items, snippets, rows, prompts, licenses, warnings = [], [], [], [], set(), []
     agent_ok = []
-    pend = {"render": [], "render_after_push": [], "fetch": [], "generate": [], "review": [], "confirm": []}
+    pend = {"render": [], "render_after_push": [], "fetch": [], "generate": [], "review": [], "confirm": [],
+            "review_scene": [], "review_external": []}  # the two parts of `review` (each its own reviewer)
     body = _body(root, cfg, slug, rev) if slug else ""
     for it in _items(man):
         iid, kind = it.get("id"), it.get("kind")
@@ -2954,6 +2982,7 @@ def status(root, cfg, tid, rev=None):
                 pend["confirm"].append(iid)
                 if r.get("reviewed") != h[0]:
                     pend["review"].append(iid)
+                    pend["review_scene"].append(iid)
             if s == "ready" and led.confirmed_by(h, tid, iid, key) == "agent":
                 agent_ok.append({"id": iid, "kind": "scene", "note": r.get("review_note")})
             if rev and r.get("key") and r["key"] != key:  # ship §5: a human changed the prompt, not the picture
@@ -2982,6 +3011,7 @@ def status(root, cfg, tid, rev=None):
                 pend["confirm"].append(iid)
                 if not h or r.get("reviewed") != h[0]:  # 0.20.0: the agent review of a `--ship` run
                     pend["review"].append(iid)
+                    pend["review_external"].append(iid)
             if s == "ready" and led.confirmed_by(h, tid, iid, item_key(it)) == "agent":
                 agent_ok.append({"id": iid, "kind": "quotation" if it.get("use") == "quotation" else "external",
                                  "note": r.get("review_note")})
@@ -3088,7 +3118,7 @@ def draft_problems(root, cfg, tid, st):
                                "--id %s`" % (iid, it.get("file"), tid, iid))
                 continue
             if it.get("kind") == "scene":
-                out += _scene_draft_problems(root, cfg, tid, slug, it, r, led, body)
+                out += _scene_draft_problems(root, cfg, tid, slug, it, r, led, body, st)
                 continue
             why = fail_closed(tid, iid, r, led, it)
             if why:
@@ -3113,7 +3143,7 @@ def draft_problems(root, cfg, tid, st):
     for f in rec.get("files") or {}:
         h = file_hashes(root, f)
         if h and led.unconfirmed(h) and f not in current:
-            out.append("%s is an external or scene image no human confirmed — `HRD image plan --topic %s` moves it away"
+            out.append("%s is an external or scene image no human or agent confirmed — `HRD image plan --topic %s` moves it away"
                        % (f, tid))
     left = [f for f in rec.get("files") or {} if f not in current and os.path.isfile(os.path.join(root, f))
             and not on_base(root, cfg, f)]
@@ -3123,8 +3153,12 @@ def draft_problems(root, cfg, tid, st):
     return out
 
 
-def _scene_draft_problems(root, cfg, tid, slug, it, r, led, body):
+def _scene_draft_problems(root, cfg, tid, slug, it, r, led, body, st=None):
     iid = it.get("id")
+    if st is not None and scene_key(cfg, it) in rejected_scene_keys(st, iid):
+        # a picture whose key a review or a human turned down never passes draft (review 24 MAJOR-2)
+        return ["%s: this picture's key was turned down (a review's redo or a reject) — change the seed or the prompt "
+                "of %s, then `HRD image plan --topic %s`" % (iid, iid, tid)]
     why = scene_fail_closed(tid, iid, r, led)
     if why:
         return [why]

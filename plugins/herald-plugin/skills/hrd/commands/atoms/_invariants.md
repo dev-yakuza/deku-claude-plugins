@@ -20,7 +20,9 @@ auto-generated rules start as drafts; unattended runs never dismiss an auditor `
 command; `autonomy.publish: auto` merges only PRs in `HRD_AUTO_PRS` with `--match-head-commit`.
 A human's `--ship` (or `/hrd next`) is that approval for one article: its lock mark and a pass
 `HRD lock ship-pass` writes after re-checking the PR head let exactly the verified merge and the
-configured deploy through (0.20.0).
+configured deploy through (0.20.0). The guard asks on a merge or the deploy even when it
+crashes or cannot import (a stdlib fallback); it cannot when Claude Code kills it at its hook
+timeout (30 s) — then the settings alone apply, and they no longer ask before `gh pr merge`.
 
 **INV2 — nothing weakens verification.**
 Changes that loosen fact-check rules, critique criteria, exemplars (replacing is allowed,

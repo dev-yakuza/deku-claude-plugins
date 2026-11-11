@@ -249,10 +249,14 @@ runs between the stamp and the merge but the pass below).
 `--attended --ship` too, after its stamp-free approval): right after that commit (attended: right
 before the merge), `HRD lock ship-pass --topic <id> --pr <n> --rev refs/remotes/origin/pr-<n> --sha
 <verified sha>`. Code refuses unless the mark is for this topic, the ref is that sha, GitHub says
-the PR's head branch is this topic's, the topic carries this PR's stamp (not checked attended),
-and the exclusions recomputed at that head — strong — block nothing. It writes `lock.pass`; the
-guard then lets exactly the merge below through, and the deploy of §7. Refused (or GitHub not
-reachable) → go on all the same: the guard asks for the merge as before 0.20.0. If `gh pr merge` fails or is declined, check `gh pr view
+the PR's head branch is this topic's, in this repository (no fork) and targeting `<base>`, the
+topic carries this PR's stamp (not checked attended), today's throttle has room, and the
+exclusions recomputed at that head — strong — block nothing. It writes `lock.pass`; the guard then
+lets exactly the merge below through (only before the merge). Refused (or GitHub not reachable) →
+go on all the same: the guard asks for the merge as before 0.20.0. After a merge that happened
+(below, or `gh pr view` says merged) and its `HRD sync`: `HRD lock ship-pass --merged --topic <id>
+--pr <n>` — code checks GitHub says that head was merged and the merge commit is in this base;
+only then does the pass cover §7's deploy. Refused → the guard asks for the deploy. If `gh pr merge` fails or is declined, check `gh pr view
 <n> --json state,mergedAt` — a non-zero exit can come after the merge itself (branch cleanup):
 merged → continue as a successful merge (below); **not** merged → `HRD auto-merged --topic <id>
 --clear`, `HRD commit --cmd ship --kind ship -m "chore(herald): auto-merge cleared <id>"
@@ -261,7 +265,8 @@ attended `/hrd ship`, never loop back to §5 here).
 
 `gh pr merge <n> --squash --match-head-commit <verified sha> --delete-branch` — run it exactly
 like this, alone: no `cd … &&`, no `2>&1`, no redirection, no variable, no other flag (the guard
-asks for anything else; without a pass it asks anyway) (head changed → back to §5). Add to the deploy set. `HRD sync`; `git branch -D` the local herald branch.
+asks for anything else; without a pass it asks anyway) (head changed → back to §5). Add to the deploy set. `HRD sync`
+(then, in a `--ship` run with a pass, `HRD lock ship-pass --merged --topic <id> --pr <n>`); `git branch -D` the local herald branch.
 `--auto`: merge only PRs in `HRD_AUTO_PRS`, all §5 checks done for every target first; do
 **not** run `HRD sync` between merges (merging needs no local base; the runner syncs); then
 write the round result file and stop — the runner does 7–9.
@@ -273,8 +278,8 @@ write the round result file and stop — the runner does 7–9.
    (normally none) as `HRD commit --cmd ship --kind abort …` (unpushed), stop.
 2. If the deploy set (or `--deploy-only` targets) is non-empty and `config.commands.deploy` is
    set: run it once, as the configured string verbatim, on base — nothing before or after it in
-   the same call (the guard asks — confirm it is this step; in a `--ship` run with a pass from §6
-   it lets that exact string through without asking). Failure → `git checkout --
+   the same call (the guard asks — confirm it is this step; in a `--ship` run whose pass §6 marked
+   `--merged` it lets that exact string through without asking). Failure → `git checkout --
    <deploy_artifacts>`, merged articles stay merged-unrecorded, stop.
 3. A `--ship` run: when the deploy step is over (it succeeded, failed or did not run), `HRD lock
    ship-pass --clear` — on every exit after §6 too.

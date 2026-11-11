@@ -659,7 +659,7 @@ class PublishTests(AutoCase):
         self.commit("feat(herald): publish")
         self.hrd("shot", "squash", "--topic", TID)
         out, p = self.hrd("scope", "--topic", TID, check=False)
-        self.assertTrue(any("no human confirmed" in x for x in out["screenshots"]), out)
+        self.assertTrue(any("no human or agent confirmed" in x for x in out["screenshots"]), out)
         head = sh(self.root, "git", "rev-parse", "HEAD").strip()
         out, p = self.hrd("scope", "--topic", TID, "--rev", head, check=False)
         self.assertNotIn("screenshots", out or {}, p.stdout)
@@ -824,7 +824,7 @@ class ImplementationReview1Tests(AutoCase):
         out = self.plan()
         self.assertIn("%s/s1-settings.png" % IMG, out["moved"])
         self.assertEqual(self.rec()["status"], "pending")
-        self.assertFalse(any("no human confirmed" in x for x in shots.draft_problems(self.root, self.cfg, TID, self.state())))
+        self.assertFalse(any("no human or agent confirmed" in x for x in shots.draft_problems(self.root, self.cfg, TID, self.state())))
         # a capture put back under a pending item: plan, then capture/import; under a ready one: a retake
         self.manifest([self.shot("s1", "s1-settings.png", url=URL, capture="auto"),
                        self.shot("s2", "s2-token.png", url="https://app.test/t")])
@@ -835,11 +835,11 @@ class ImplementationReview1Tests(AutoCase):
         st["screenshots"]["shots"]["s1"].update(status="pending", sha=None)
         store.save_state(self.root, TID, st)
         probs = shots.draft_problems(self.root, self.cfg, TID, self.state())
-        self.assertTrue(any("no human confirmed" in x and "HRD shot plan" in x for x in probs), probs)
+        self.assertTrue(any("no human or agent confirmed" in x and "HRD shot plan" in x for x in probs), probs)
         st["screenshots"]["shots"]["s1"].update(status="ready", sha=shots.blob(self.root, "%s/s1-settings.png" % IMG))
         store.save_state(self.root, TID, st)
         probs = shots.draft_problems(self.root, self.cfg, TID, self.state())
-        self.assertTrue(any("no human confirmed" in x and "--human --retake s1" in x for x in probs), probs)
+        self.assertTrue(any("no human or agent confirmed" in x and "--human --retake s1" in x for x in probs), probs)
         self.assertTrue(cap)
 
     def test_m5_import_moves_what_sits_at_the_destination(self):

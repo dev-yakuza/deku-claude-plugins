@@ -17,6 +17,7 @@ from helpers import HERE, SCRIPTS, RepoCase, sh
 from test_auto_capture import AutoCase
 from test_core import Flow
 from test_images import IMG, TID, W, ImageCase
+from test_scenes import SceneCase
 
 from hrdlib import images, lock, shots, store
 
@@ -54,12 +55,15 @@ class LockMarkTests(RepoCase):
         self.assertEqual(lock.acquire(self.root, "ship", token=tok), tok)
         self.assertEqual(lock.acquire(self.root, "write", token=tok, ship=True, topic="t0009"), tok)
         self.assertEqual(lock.status(self.root)["topic"], "t0001")
+        self.assertEqual(lock.acquire(self.root, "write", token=tok, ship=True, topic="t0001", attended=False), tok)
+        self.assertTrue(lock.status(self.root)["attended"])  # nested: attended unchanged too
         lock.release(self.root, tok)
         self.assertFalse(lock.ship_active(self.root, "t0001"))
         # an outer command without --ship: the nested --ship adds nothing
         tok = lock.acquire(self.root, "refresh")
-        lock.acquire(self.root, "write", token=tok, ship=True, topic="t0001")
+        lock.acquire(self.root, "write", token=tok, ship=True, topic="t0001", attended=True)
         self.assertNotIn("ship", lock.status(self.root))
+        self.assertNotIn("attended", lock.status(self.root))
         lock.release(self.root, tok)
 
     def test_unattended_refuses_and_a_given_token_decides_by_its_own_flags(self):
@@ -86,6 +90,9 @@ class LockMarkTests(RepoCase):
         tok = lock.acquire(self.root, "write", ship=True, topic="t0001")
         lock.write_pass(self.root, tok, "t0001", 5, "a" * 40)
         self.assertEqual(lock.valid_pass(self.root)["pr"], 5)
+        self.assertIs(lock.valid_pass(self.root)["merged"], False)  # a merge first, a deploy after
+        lock.mark_merged(self.root, lock.valid_pass(self.root))
+        self.assertIs(lock.valid_pass(self.root)["merged"], True)
         later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2, minutes=1)
         self.assertIsNone(lock.valid_pass(self.root, now=later))  # two hours at most
         lock.write_pass(self.root, "other", "t0001", 5, "a" * 40)
@@ -134,10 +141,26 @@ class AgentImageTests(ImageCase):
         self.assertEqual(images.status(self.root, self.cfg, TID)["pending"]["review"], [])
         self.plan()  # a plan keeps the review of the same picture
         self.assertEqual(self.state()["images"]["items"]["e1"]["reviewed"], shots.blob(self.root, E1))
+        self.assertEqual(images.status(self.root, self.cfg, TID)["pending"]["review_external"], [])
         out = images.review(self.root, self.cfg, TID, "e1", redo=True, note="a watermark in the corner")
         self.assertEqual(out["redo"], ["e1"])
         self.assertNotIn("review_rejects", self.state())  # an external redo turns no key down
         self.assertNotIn("reviewed", self.state()["images"]["items"]["e1"])
+        st = images.status(self.root, self.cfg, TID)["pending"]
+        self.assertEqual((st["review_external"], st["review_scene"]), (["e1"], []))
+        # review 24 MINOR-1: the redone bytes never pass an agent again — a later reviewer either
+        self.assertEqual(self.state()["review_redos"][0]["blob"], shots.blob(self.root, E1))
+        with self.assertRaises(Exception) as c:
+            self.review_ok()
+        self.assertIn("sent these very bytes back", str(c.exception))
+        self.plan()  # survives a plan (top-level state)
+        st = self.state()
+        st["images"]["items"]["e1"]["reviewed"] = shots.blob(self.root, E1)  # even a forged review mark
+        store.save_state(self.root, TID, st)
+        ship_lock(self.root)
+        with self.assertRaises(Exception):
+            images.confirm(self.root, self.cfg, TID, "e1", agent=True)
+        self.assertEqual(images.confirm(self.root, self.cfg, TID, "e1")["by"], "human")  # a human may
 
     def test_agent_confirm_needs_the_mark_the_review_and_no_unattended(self):
         self.fetched()
@@ -297,6 +320,19 @@ class AgentShotTests(AutoCase):
         kw.setdefault("note", "a public settings page; no personal data")
         return shots.review(self.root, self.cfg, TID, "s1", **kw)
 
+    def test_review_refuses_what_is_no_capture_waiting(self):
+        self.plan()  # s1 pending: nothing captured yet
+        with self.assertRaises(Exception) as c:
+            self.review(ok=True)
+        self.assertIn("not an automatic capture waiting", str(c.exception))
+        self.cap()
+        os.remove(os.path.join(self.root, shots.CAPTURES))  # no capture line on this machine
+        with self.assertRaises(Exception) as c:
+            self.review(ok=True)
+        self.assertIn("is not the file", str(c.exception))
+        with self.assertRaises(Exception):
+            self.review(problem="privacy")
+
     def test_review_ok_then_confirm_agent(self):
         self.captured()
         self.assertEqual(shots.status(self.root, self.cfg, TID)["review"], ["s1"])
@@ -395,6 +431,70 @@ class AgentShotTests(AutoCase):
         self.assertEqual(out["by"], "agent")
 
 
+class AgentSceneTests(SceneCase):
+    """Review 24 MAJOR-2: a scene a review sent back never passes an agent, nor draft, until its key
+    changes; a human may still confirm it (0.18.0)."""
+
+    def tearDown(self):
+        lock.force_unlock(self.root)
+        super().tearDown()
+
+    def test_redone_key_is_refused_to_the_agent_and_to_draft(self):
+        self.generated()
+        images.review(self.root, self.cfg, TID, "g1", ok=True, note="fits the paragraph")
+        images.review(self.root, self.cfg, TID, "g2", redo=True, note="malformed hands")
+        self.assertEqual(images.status(self.root, self.cfg, TID)["pending"]["review_scene"], ["g2"])
+        with self.assertRaises(Exception) as c:
+            images.review(self.root, self.cfg, TID, "g2", ok=True, note="looks fine now")
+        self.assertIn("turned this picture's key down", str(c.exception))
+        ship_lock(self.root)
+        st = self.state()  # even with a forged review mark
+        st["images"]["items"]["g2"]["reviewed"] = shots.blob(self.root, self.g2()["file"])
+        store.save_state(self.root, TID, st)
+        with self.assertRaises(Exception):
+            images.confirm(self.root, self.cfg, TID, "g2", agent=True)
+        self.assertEqual(images.confirm(self.root, self.cfg, TID, "g1", agent=True)["by"], "agent")
+        self.assertEqual(images.confirm(self.root, self.cfg, TID, "g2")["by"], "human")  # a human judges
+        probs = images.draft_problems(self.root, self.cfg, TID, self.state())
+        self.assertTrue(any("g2: this picture's key was turned down" in x for x in probs), probs)
+        self.assertFalse(any(x.startswith("g1:") for x in probs), probs)
+
+
+class GuardEntryTests(RepoCase):
+    """Review 24 MAJOR-1: an entry whose `hrdlib` cannot be imported still asks for a merge and the
+    deploy (unattended: denies everything), with the stdlib alone."""
+
+    def run_entry(self, cmd, env=None, tool="Bash"):
+        import shutil
+        copy = os.path.join(self.tmp, "scripts")
+        if not os.path.isdir(copy):
+            shutil.copytree(SCRIPTS, copy, ignore=shutil.ignore_patterns("__pycache__"))
+            with open(os.path.join(copy, "hrdlib", "guard.py"), "a") as f:
+                f.write("\ndef broken(:\n")  # a SyntaxError, as a half-copied update could leave
+        e = dict(os.environ)
+        e.update(env or {})
+        payload = json.dumps({"tool_name": tool, "tool_input": {"command": cmd, "file_path": "x"}, "cwd": self.root})
+        p = subprocess.run([sys.executable, os.path.join(copy, "guard.py")], input=payload, capture_output=True,
+                           text=True, env=e, cwd=self.root, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("could not start", p.stderr)
+        return json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] if p.stdout.strip() else "none"
+
+    def test_fallback_asks_for_merge_and_deploy(self):
+        self.assertEqual(self.run_entry("gh pr merge 1 --squash"), "ask")
+        self.assertEqual(self.run_entry("gh api -X PUT repos/o/r/pulls/1/merge"), "ask")
+        self.assertEqual(self.run_entry("cd site && npm run deploy"), "ask")  # the configured deploy
+        self.assertEqual(self.run_entry("ls"), "none")
+        self.assertEqual(self.run_entry("x", tool="Write"), "none")
+        un = {"HRD_UNATTENDED": "1"}
+        self.assertEqual(self.run_entry("gh pr merge 1", un), "deny")
+        self.assertEqual(self.run_entry("ls", un), "deny")  # as main's crash path: never disabled unattended
+
+    def test_the_real_entry_still_decides(self):
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": "gh pr merge 1 --squash"}), "ask")
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": "ls"}), "none")
+
+
 # --- strong consent, images-unconfirmed (§2.4, §9 R2-5, §10 R3-2/m3) ----------------------------------
 
 class StrongConsentTests(ImageCase):
@@ -462,6 +562,24 @@ class StrongConsentTests(ImageCase):
         self.commit("og record", ".")
         self.assertNotIn(og, images.unvouched(self.root, self.cfg, TID, "HEAD", "new-post"))
 
+    def test_og_outside_the_image_dir_needs_its_record(self):
+        self.config(lambda c: c["images"].update({"og": {"path": "public/og/{slug}.png"}}))
+        og = self.cfg.og_outside("new-post")
+        self.assertEqual(og, "public/og/new-post.png")
+        self.ready()
+        self.write(og, b"\x89PNG outside card", binary=True)
+        self.commit("og", ".")
+        self.assertEqual(images.unvouched(self.root, self.cfg, TID, "HEAD", "new-post"), [og])
+        st = self.state()
+        st["images"]["og"] = {"status": "made", "sha": shots.blob(self.root, og), "by": "repo"}
+        store.save_state(self.root, TID, st)
+        self.commit("og record", ".")
+        self.assertEqual(images.unvouched(self.root, self.cfg, TID, "HEAD", "new-post"), [])
+        st["images"]["og"]["sha"] = "0" * 40  # a record of other bytes
+        store.save_state(self.root, TID, st)
+        self.commit("other record", ".")
+        self.assertEqual(images.unvouched(self.root, self.cfg, TID, "HEAD", "new-post"), [og])
+
     def test_auto_exclusion_strong_comes_from_the_lock(self):
         self.ready()
         self.write(W + "/critique.json", json.dumps({"final_round": {"verdict": "PASS"}, "audit_log": [],
@@ -495,7 +613,9 @@ class ShipPassTests(Flow):
         sh(self.root, "git", "switch", "-q", "main")
         self.set_prs([{"number": 12, "headRefName": self.branch, "state": "OPEN", "labels": ["herald"]},
                       {"number": 13, "headRefName": "herald/t0999--other", "state": "OPEN", "labels": ["herald"]},
-                      {"number": 14, "headRefName": self.branch, "state": "OPEN", "labels": ["herald"]}])
+                      {"number": 14, "headRefName": self.branch, "state": "OPEN", "labels": ["herald"]},
+                      {"number": 15, "headRefName": self.branch, "state": "OPEN", "isCrossRepository": True},
+                      {"number": 16, "headRefName": self.branch, "state": "OPEN", "baseRefName": "dev"}])
 
     def tearDown(self):
         lock.force_unlock(self.root)
@@ -530,6 +650,10 @@ class ShipPassTests(Flow):
         self.assertIn("auto-merge stamp", p.stderr)  # the stamp names PR 12
         _, p = self.ship_pass(pr="99")
         self.assertIn("cannot read", p.stderr)  # GitHub gives no answer: no pass
+        _, p = self.ship_pass(pr="15")
+        self.assertIn("another repository", p.stderr)  # a fork naming its branch like ours (MINOR-3)
+        _, p = self.ship_pass(pr="16")
+        self.assertIn("targets dev", p.stderr)
         _, p = self.ship_pass(env={"HRD_UNATTENDED": "1"})
         self.assertNotEqual(p.returncode, 0)
         self.assertFalse(os.path.exists(lock.pass_path(self.root)))
@@ -554,6 +678,66 @@ class ShipPassTests(Flow):
         ship_lock(self.root, topic=self.tid, attended=True)
         out, _ = self.ship_pass(check=True)
         self.assertEqual(out["pass"]["pr"], 12)
+        # `--attended --ship`: the guard lets the merge, then (after --merged) the deploy through too
+        merge = "gh pr merge 12 --squash --match-head-commit %s --delete-branch" % self.sha
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": merge}), "allow")
+        self.merged()
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": "npm run deploy"}), "allow")
+
+    def set_cap(self, n):
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        cur = json.load(open(cfgp))
+        cur["autonomy"]["throttle"]["max_per_day"] = n
+        with open(cfgp, "w") as f:
+            json.dump(cur, f)
+
+    def test_throttle_is_checked_again(self):
+        ship_lock(self.root, topic=self.tid)
+        self.stamp()
+        self.set_cap(0)
+        _, p = self.ship_pass()
+        self.assertIn("auto-publish limit", p.stderr)
+        self.set_cap(1)  # this topic's own stamp is the one publish of the day
+        self.assertEqual(self.ship_pass(check=True)[0]["pass"]["pr"], 12)
+        data = store.load_topics(self.root)  # another auto merge today takes the room
+        data["topics"].append({"id": "t0005", "title": "x", "state": "pr-open", "history": [], "reverted_by": [],
+                               "auto_merged_pr": 3, "auto_merged_at": store.now_iso()})
+        store.save_topics(self.root, data)
+        _, p = self.ship_pass()
+        self.assertIn("auto-publish limit", p.stderr)
+        lock.force_unlock(self.root)
+        ship_lock(self.root, topic=self.tid, attended=True)  # attended counts no stamp of its own
+        _, p = self.ship_pass()
+        self.assertIn("auto-publish limit", p.stderr)
+
+    def merged(self, merge_commit=None):
+        main = sh(self.root, "git", "rev-parse", "main").strip()
+        prs = self.gh_prs()
+        prs[0].update(state="MERGED", headRefOid=self.sha, mergeCommit={"oid": merge_commit or main})
+        self.set_prs(prs)
+        return self.hrd("lock", "ship-pass", "--merged", "--topic", self.tid, "--pr", "12", check=True)
+
+    def test_merged_turns_the_pass_from_merge_to_deploy(self):
+        ship_lock(self.root, topic=self.tid)
+        self.stamp()
+        _, p = self.hrd("lock", "ship-pass", "--merged", "--topic", self.tid, "--pr", "12", check=False)
+        self.assertIn("no valid pass", p.stderr)
+        self.ship_pass(check=True)
+        _, p = self.hrd("lock", "ship-pass", "--merged", "--topic", self.tid, "--pr", "12", check=False)
+        self.assertIn("not merged", p.stderr)  # GitHub still says OPEN
+        prs = self.gh_prs()
+        prs[0].update(state="MERGED", headRefOid=self.sha, mergeCommit={"oid": self.sha})  # not in this base
+        self.set_prs(prs)
+        _, p = self.hrd("lock", "ship-pass", "--merged", "--topic", self.tid, "--pr", "12", check=False)
+        self.assertIn("HRD sync", p.stderr)
+        prs[0].update(headRefOid="0" * 40)
+        self.set_prs(prs)
+        _, p = self.hrd("lock", "ship-pass", "--merged", "--topic", self.tid, "--pr", "12", check=False)
+        self.assertIn("not merged at the verified head", p.stderr)
+        self.assertFalse(lock.valid_pass(self.root)["merged"])
+        out, _ = self.merged()
+        self.assertTrue(out["pass"]["merged"])
+        self.assertTrue(lock.valid_pass(self.root)["merged"])
 
     def test_guard_lets_the_verified_merge_and_the_deploy_through(self):
         ship_lock(self.root, topic=self.tid)
@@ -577,6 +761,9 @@ class ShipPassTests(Flow):
                     "gh pr merge 12 -R o/r --match-head-commit %s" % self.sha):
             self.assertEqual(g(bad), "ask", bad)
         self.assertEqual(g(merge, {"HRD_UNATTENDED": "1"}), "deny")  # unattended unchanged
+        self.assertEqual(g("npm run deploy"), "ask")  # the deploy only after the merge (review 24 MINOR-4)
+        self.merged()
+        self.assertEqual(g(merge), "ask")  # the merge only before it
         # the deploy: the configured string, byte for byte, on base
         self.assertEqual(g("npm run deploy"), "allow")
         self.assertEqual(g("  npm run deploy  "), "allow")
@@ -593,8 +780,58 @@ class ShipPassTests(Flow):
         rec["at"] = "2000-01-01T00:00:00+00:00"  # expired
         with open(lock.pass_path(self.root), "w") as f:
             json.dump(rec, f)
-        self.assertEqual(g(merge), "ask")
         self.assertEqual(g("npm run deploy"), "ask")
+
+    def test_other_rules_decide_before_the_pass(self):
+        """§11 m2: a valid pass never overrides another rule — a broken `translations` block
+        (closed_rule) asks for the very merge; a deploy string writing a protected path asks."""
+        ship_lock(self.root, topic=self.tid)
+        self.stamp()
+        self.ship_pass(check=True)
+        merge = "gh pr merge 12 --squash --match-head-commit %s --delete-branch" % self.sha
+        cfgp = os.path.join(self.root, ".claude/herald/config.json")
+        good = open(cfgp).read()
+        cur = json.loads(good)
+        cur["translations"] = "broken"
+        with open(cfgp, "w") as f:
+            json.dump(cur, f)
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": merge}), "ask")
+        with open(cfgp, "w") as f:
+            f.write(good)
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": merge}), "allow")
+        self.merged()
+        cur = json.loads(good)
+        cur["commands"]["deploy"] = "npm run deploy > .claude/herald/ledger/deploy.log"
+        with open(cfgp, "w") as f:
+            json.dump(cur, f)
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": cur["commands"]["deploy"]}), "ask")
+
+
+class StrongStampTests(Flow):
+    """`auto-merged --consent` takes strong consent from the lock's mark, as `auto-exclusion` does."""
+
+    def tearDown(self):
+        lock.force_unlock(self.root)
+        super().tearDown()
+
+    def test_mark_other_topic_and_none(self):
+        tid, slug = self.run_flow()  # the PR adds 01.png — a picture no record vouches for
+        sh(self.root, "git", "add", "-A")
+        sh(self.root, "git", "commit", "-q", "-m", "pr head")
+        branch = sh(self.root, "git", "branch", "--show-current").strip()
+        sha = sh(self.root, "git", "rev-parse", branch).strip()
+        sh(self.root, "git", "switch", "-q", "main")
+        args = ("auto-merged", "--topic", tid, "--pr", "7", "--rev", branch, "--sha", sha, "--consent")
+        out, _ = self.hrd(*args)  # no mark: 0.19.0
+        self.assertEqual(out["accepted"], ["images"])
+        self.hrd("auto-merged", "--topic", tid, "--clear")
+        ship_lock(self.root, topic="t0999")  # another topic's mark: 0.19.0 too
+        self.assertEqual(self.hrd(*args)[0]["accepted"], ["images"])
+        self.hrd("auto-merged", "--topic", tid, "--clear")
+        lock.force_unlock(self.root)
+        ship_lock(self.root, topic=tid)  # its own mark: strong, and the unvouched picture blocks
+        _, p = self.hrd(*args, check=False)
+        self.assertIn("images-unconfirmed", p.stderr)
 
 
 # --- the guard: the lock files, --agent, failure (§2.5, §9 R2-3, §10 m4, §11 m2–m3) ------------------

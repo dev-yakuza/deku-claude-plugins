@@ -14,7 +14,10 @@ Decision table (attended → `ask`, unattended `HRD_UNATTENDED=1` → `deny`):
 topic (and not `--attended`), `image confirm|reject --agent` and `shot confirm --agent` pass rule
 1c/1d; with a valid `lock.pass`, the one merge command `ship` runs (checked on the raw text) and
 the configured deploy command (byte for byte) get `allow` — only after every other rule decided
-nothing. Unattended runs are unchanged. A crashing guard still asks for a merge or the deploy.
+nothing; the merge only before `ship-pass --merged`, the deploy only after. Unattended runs are
+unchanged. A crashing guard still asks for a merge or the deploy; one that cannot even import
+falls back to the same asks in `scripts/guard.py`. Known limit: a hook killed by its timeout
+decides nothing — Claude Code then applies the settings alone, which no longer ask before a merge.
 
 It is a string-pattern tripwire, not a boundary (plan §3.4 "한계"); `audit` checks after the fact.
 """
@@ -772,7 +775,8 @@ def ship_merge_ok(root, cmd):
     if method > 1 or delete > 1 or len(sha) != 1:
         return False
     p = lockmod.valid_pass(root)
-    return bool(p) and str(p.get("pr")) == str(int(argv[3])) and sha[0].strip().lower() == str(p.get("sha")).lower()
+    return bool(p) and p.get("merged") is False and str(p.get("pr")) == str(int(argv[3])) and \
+        sha[0].strip().lower() == str(p.get("sha")).lower()  # only before the merge (review 24 MINOR-4)
 
 
 def ship_deploy_ok(root, cfg, cmd):
@@ -781,7 +785,9 @@ def ship_deploy_ok(root, cfg, cmd):
     deploy = cfg.get("commands", "deploy") or ""
     if unattended() or not deploy.strip() or (cmd or "").strip() != deploy.strip():
         return False
-    return bool(lockmod.valid_pass(root)) and current_branch(root) == cfg.base
+    p = lockmod.valid_pass(root)
+    # only after `ship-pass --merged` saw the PR merged into this base (review 24 MINOR-4)
+    return bool(p) and p.get("merged") is True and current_branch(root) == cfg.base
 
 
 def check_bash(root, cfg, cmd):

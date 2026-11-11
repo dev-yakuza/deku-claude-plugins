@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Minimal fake `gh` for tests. State: JSON file at $HRD_FAKE_GH_STATE = {"prs": [...]}.
 Supports: pr list --label L --state S --json F --limit N ; pr edit N --add-label/--remove-label L ;
-pr view N --json F (exit 1 for an unknown PR or when the state says `"offline": true`).
+pr view N --json F (headRefName, isCrossRepository, baseRefName, state,
+headRefOid, mergeCommit; exit 1 for an unknown PR or when the state says `"offline": true`).
 """
 import json
 import os
@@ -40,7 +41,9 @@ elif args[:2] == ["pr", "view"]:
         sys.stderr.write("fake gh: no PR %s\n" % num)
         sys.exit(1)
     fields = (opt("--json") or "").split(",")
-    print(json.dumps({k: pr.get(k) for k in fields if k}))
+    # GitHub always answers these: a same-repository PR into main unless the state says otherwise
+    full = dict({"isCrossRepository": False, "baseRefName": "main", "state": "OPEN", "mergeCommit": None}, **pr)
+    print(json.dumps({k: full.get(k) for k in fields if k}))
 elif args[:2] == ["pr", "edit"]:
     num = int(args[2])
     for pr in state["prs"]:

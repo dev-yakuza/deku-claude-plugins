@@ -180,7 +180,16 @@ def clear_pass(root):
 
 
 def write_pass(root, token, topic, pr, sha):
-    rec = {"token": token, "topic": topic, "pr": int(pr), "sha": sha, "at": now_iso()}
+    """A pass for one merge, then one deploy (implementation review 24 MINOR-4): `merged` is false
+    until `HRD lock ship-pass --merged` saw that very PR merged into the base this checkout has —
+    the guard allows the merge only before, the deploy only after."""
+    rec = {"token": token, "topic": topic, "pr": int(pr), "sha": sha, "at": now_iso(), "merged": False}
+    write_json(pass_path(root), rec)
+    return rec
+
+
+def mark_merged(root, rec):
+    rec = dict(rec, merged=True, merged_at=now_iso())  # `at` stays: the two hours count from the pass
     write_json(pass_path(root), rec)
     return rec
 

@@ -67,8 +67,8 @@ def cmd_lock(a):
     root = repo_root()
     if a.action != "acquire" and (a.ship or a.attended):
         raise HeraldError("--ship and --attended go with `lock acquire`")
-    if a.action != "ship-pass" and (a.pr is not None or a.rev or a.sha or a.clear):
-        raise HeraldError("--pr/--rev/--sha/--clear go with `lock ship-pass`")
+    if a.action != "ship-pass" and (a.pr is not None or a.rev or a.sha or a.clear or a.merged):
+        raise HeraldError("--pr/--rev/--sha/--clear/--merged go with `lock ship-pass`")
     if a.action == "acquire":
         tok = lock.acquire(root, a.cmd, token=a.token, ship=a.ship, topic=a.topic, attended=a.attended)
         cur = lock.status(root) or {}
@@ -91,11 +91,13 @@ def _ship_pass(root, a):
     then the deploy — through without asking. Every check is made here, at the PR head; any
     refusal leaves the merge to the guard's question (0.19.0)."""
     if a.clear:
-        if a.topic or a.pr is not None or a.rev or a.sha:
+        if a.topic or a.pr is not None or a.rev or a.sha or a.merged:
             raise HeraldError("--clear takes nothing else")
         lock.clear_pass(root)
         return {"cleared": True}
     attended_only("`lock ship-pass`")
+    if a.merged:
+        return _ship_pass_merged(root, a)
     if not (a.topic and a.pr is not None and a.rev and a.sha):
         raise HeraldError("lock ship-pass needs --topic, --pr, --rev and --sha (or --clear)")
     cur = lock.status(root) or {}
@@ -105,26 +107,68 @@ def _ship_pass(root, a):
     head = git(root, "rev-parse", "-q", "--verify", "%s^{commit}" % a.rev, check=False).strip()
     if not head or head.lower() != a.sha.strip().lower():
         raise HeraldError("%s is not the verified head %s — no pass" % (a.rev, a.sha))
-    from hrdlib.util import gh_json
-    try:
-        pr = gh_json(root, "pr", "view", str(a.pr), "--json", "headRefName")
-    except Exception as e:  # noqa: BLE001 — no answer from GitHub: no pass, the guard asks (11 §4 Q2)
-        raise HeraldError("cannot read PR #%s's head branch (%s) — no pass" % (a.pr, str(e).strip()[:200]))
-    parsed = store.parse_branch((pr or {}).get("headRefName") if isinstance(pr, dict) else None)
+    cfg = Config.load(root)
+    pr = _pr_view(root, a.pr, "headRefName,isCrossRepository,baseRefName")
+    parsed = store.parse_branch(pr.get("headRefName"))
     if not parsed or parsed[0] != a.topic:
         raise HeraldError("PR #%s is not %s's herald branch — no pass" % (a.pr, a.topic))
+    if pr.get("isCrossRepository") is not False:  # a fork can name its branch like ours (review 24 MINOR-3)
+        raise HeraldError("PR #%s comes from another repository (or GitHub did not say) — no pass" % a.pr)
+    if pr.get("baseRefName") != cfg.base:
+        raise HeraldError("PR #%s targets %s, not %s — no pass" % (a.pr, pr.get("baseRefName"), cfg.base))
     if not cur.get("attended"):  # attended session-auto stamps nothing: a human approved the body
         t = store.get_topic(store.load_topics(root), a.topic)
         if str(t.get("auto_merged_pr")) != str(a.pr):
             raise HeraldError("%s carries no auto-merge stamp for PR #%s (`HRD auto-merged` first) — no pass"
                               % (a.topic, a.pr))
-    cfg = Config.load(root)
+    from hrdlib.batch import auto_published_today
+    cap = int(cfg.get("autonomy", "throttle", "max_per_day") or 0)
+    used = auto_published_today(store.load_published(root), store.load_topics(root))
+    if not cur.get("attended"):
+        used -= 1  # this topic's own stamp (checked above) is the publish being decided
+    if cap - used <= 0:  # the daily throttle, again in code (review 24 MINOR-2) — as `HRD throttle` `room`
+        raise HeraldError("no pass: today's auto-publish limit is reached (%d of %d)" % (used, cap))
     reasons = store.exclusion_reasons(root, cfg, a.topic, a.rev, vouch=True)
     blocking = store.blocking_exclusions(reasons, consent=True, strong=True)
     if blocking:
         raise HeraldError("no pass: excluded at the PR head (%s)" % ", ".join(blocking))
     rec = lock.write_pass(root, cur["token"], a.topic, a.pr, head.lower())
     return {"pass": {k: rec[k] for k in ("topic", "pr", "sha", "at")}, "accepted": reasons}
+
+
+def _pr_view(root, n, fields):
+    from hrdlib.util import gh_json
+    try:
+        pr = gh_json(root, "pr", "view", str(n), "--json", fields)
+    except Exception as e:  # noqa: BLE001 — no answer from GitHub: no pass, the guard asks (11 §4 Q2)
+        raise HeraldError("cannot read PR #%s (%s) — no pass" % (n, str(e).strip()[:200]))
+    if not isinstance(pr, dict):
+        raise HeraldError("cannot read PR #%s — no pass" % n)
+    return pr
+
+
+def _ship_pass_merged(root, a):
+    """`HRD lock ship-pass --merged --topic <id> --pr <n>` (ship §6, after the merge and `HRD
+    sync`): the pass turns from "may merge" to "may deploy" only once GitHub says that very head was
+    merged and its merge commit is in this checkout's base (review 24 MINOR-4)."""
+    if a.rev or a.sha:
+        raise HeraldError("--merged takes --topic and --pr only")
+    if not (a.topic and a.pr is not None):
+        raise HeraldError("lock ship-pass --merged needs --topic and --pr")
+    cur = lock.status(root) or {}
+    p = lock.valid_pass(root, cur)
+    if not p or p.get("topic") != a.topic or str(p.get("pr")) != str(a.pr):
+        raise HeraldError("no valid pass for %s PR #%s — the guard asks for the deploy" % (a.topic, a.pr))
+    if p.get("merged") is True:
+        return {"pass": {k: p.get(k) for k in ("topic", "pr", "sha", "at", "merged")}}
+    pr = _pr_view(root, a.pr, "state,headRefOid,mergeCommit")
+    if pr.get("state") != "MERGED" or str(pr.get("headRefOid") or "").lower() != str(p.get("sha")).lower():
+        raise HeraldError("PR #%s is not merged at the verified head %s — no deploy pass" % (a.pr, p.get("sha")))
+    mc = (pr.get("mergeCommit") or {}).get("oid") if isinstance(pr.get("mergeCommit"), dict) else None
+    if not mc or not git_ok(root, "merge-base", "--is-ancestor", mc, "HEAD"):
+        raise HeraldError("the merge commit of PR #%s is not in this checkout yet — `HRD sync` first" % a.pr)
+    rec = lock.mark_merged(root, p)
+    return {"pass": {k: rec.get(k) for k in ("topic", "pr", "sha", "at", "merged")}}
 
 
 # --- topics -----------------------------------------------------------------------------------
@@ -1474,6 +1518,7 @@ def build():
     p.add_argument("--topic", help="acquire --ship / ship-pass: the topic the mark is bound to")
     p.add_argument("--pr", type=int); p.add_argument("--rev"); p.add_argument("--sha")
     p.add_argument("--clear", action="store_true", help="ship-pass: drop the pass (after deploy)")
+    p.add_argument("--merged", action="store_true", help="ship-pass: the merge happened — the pass now covers the deploy")
     p.set_defaults(fn=cmd_lock)
 
     p = sp.add_parser("topics"); p.add_argument("action", choices=["add", "list", "show"])

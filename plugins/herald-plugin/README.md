@@ -66,7 +66,9 @@ Search Console (optional): `pip install google-auth requests`.
 - A **PreToolUse guard** (`.claude/herald/scripts/guard.py`) asks (attended) or denies
   (unattended) edits to criteria, critique/verify personas, protected config keys, the
   verification ledger, merges, deploys and out-of-scope commits. It is a tripwire, not a
-  boundary; `/hrd audit` checks after the fact.
+  boundary; `/hrd audit` checks after the fact. A guard that crashes or cannot start still asks
+  before a merge or the deploy; one killed at its hook timeout (30 s) decides nothing, and since
+  0.20.0 the settings no longer ask before `gh pr merge` themselves.
 - A **verification ledger** (local) and a **pre-deploy integrity check** compare every Herald
   article on the base branch with what was verified before any deploy.
 

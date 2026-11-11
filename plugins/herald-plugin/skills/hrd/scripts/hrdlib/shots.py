@@ -353,7 +353,7 @@ class Ledger:
     """The ledgers, read once. Content is (git blob id, sha256 of the bytes); either one
     matching counts as the same content, so a changed .gitattributes cannot hide a capture.
     0.17.0: external images Herald fetched are logged too (`fetches`), so rule U — a logged file
-    no human confirmed — covers them with no other change (design 08 §2.7.1). 0.18.0: scene
+    no human or agent confirmed — covers them with no other change (design 08 §2.7.1). 0.18.0: scene
     images limner generated (`generations`) the same way, and in `idle` and the damage checks,
     so a repo that only makes scenes still runs rule U, the history check and squash (09 R1-3)."""
 
@@ -405,7 +405,7 @@ class Ledger:
         return any(self._same(r, h) for r in self.confirms)
 
     def unconfirmed(self, h):
-        """Rule U: an automatic capture (any topic, any name) no human confirmed."""
+        """Rule U: an automatic capture (any topic, any name) no human or agent confirmed."""
         return bool(self.logged(h)) and not self.confirmed(h)
 
     @staticmethod
@@ -1746,7 +1746,7 @@ def draft_problems(root, cfg, tid, st):
                        % (tid, sid))
             else:
                 how = "take %s again: `HRD loopback --topic %s --human --retake %s --retake-kind mismatch`" % (sid, tid, sid)
-            out.append("%s is an automatic capture no human confirmed — %s" % (f, how))
+            out.append("%s is an automatic capture no human or agent confirmed — %s" % (f, how))
     for sid, r in sorted(shots_rec.items()):
         why = _fail_closed(tid, sid, r, led)
         if why:
@@ -1774,7 +1774,7 @@ def draft_problems(root, cfg, tid, st):
                            "pending), then the edited version into the inbox and `HRD shot import`"
                            % (sid, s.get("file")))
             elif r.get("capture") == "auto" and not _auto_ok(r, b):
-                out.append("%s: an automatic capture no human confirmed — `HRD shot plan --topic %s`, then confirm it"
+                out.append("%s: an automatic capture no human or agent confirmed — `HRD shot plan --topic %s`, then confirm it"
                            % (sid, tid))
     elif rec:
         out.append("screenshots.json is gone but screenshots are recorded — run `HRD shot plan --topic %s`" % tid)
@@ -2256,14 +2256,14 @@ def history_problems(root, cfg, tid, slug, led=None):
             continue
         seen.add(b)
         if b in head:
-            out.append("%s is an automatic capture no human confirmed — confirm or demote it, or take it again "
+            out.append("%s is an automatic capture no human or agent confirmed — confirm or demote it, or take it again "
                        "(`HRD loopback --human --retake …`)" % path)
         elif remote and git_ok(root, "merge-base", "--is-ancestor", commit, remote):
-            out.append("an automatic capture no human confirmed (%s) is in %s, already pushed — a human sorts it out "
+            out.append("an automatic capture no human or agent confirmed (%s) is in %s, already pushed — a human sorts it out "
                        "(needs-human)" % (path, commit[:12]))
         else:
             squashable = True
-            out.append("a past commit (%s) holds an automatic capture no human confirmed (%s) — `HRD shot squash "
+            out.append("a past commit (%s) holds an automatic capture no human or agent confirmed (%s) — `HRD shot squash "
                        "--topic %s` rewrites the history as one commit" % (commit[:12], path, tid))
     return out, squashable
 
@@ -2343,7 +2343,7 @@ def scope_problems(root, cfg, tid, rev="HEAD", publish=False):
             elif r.get("capture") == "auto" and sid in by_id:
                 b = git(root, "rev-parse", "-q", "--verify", "HEAD:%s" % by_id[sid].get("file"), check=False).strip()
                 if not _auto_ok(r, b or None):
-                    out.append("%s: an automatic capture no human confirmed in HEAD — confirm it (`HRD shot confirm`) "
+                    out.append("%s: an automatic capture no human or agent confirmed in HEAD — confirm it (`HRD shot confirm`) "
                                "before publishing" % sid)
     if not has_records(st):
         return out
