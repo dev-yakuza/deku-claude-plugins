@@ -387,8 +387,9 @@ class SpecTests(MediaCase):
         self.assertEqual(sm.image_text(s, "cards"), "Renewing in two steps\nStep one\nBook a slot online.\n"
                                                     "Read the full guide")  # never the handle (v3 R2-3)
         self.assertEqual(sm.spec_sources(s, "cards"), [dict(QUOTE[0], _where="card 2 sources")])
-        self.assertEqual(sm.image_fields(s, "cards")[2:], [("card 2 body", "Book a slot online."),
-                                                          ("card 3 message", "Read the full guide")])
+        self.assertEqual(sm.image_fields(s, "cards"), [("card 1", "Renewing in two steps"),
+                                                       ("card 2", "Step one\nBook a slot online."),
+                                                       ("card 3", "Read the full guide")])
         c = self.comic_spec(caption={"text": "Monday", "pos": "top"})
         self.assertTrue(sm.image_text(c, "comic").startswith("Monday\nGood morning\n"))
 
@@ -913,13 +914,14 @@ class GuardTests(MediaCase):
                     "env A=1 lmn compose --layout a --out b.png", "uv run --project ../limner lmn compose --layout a"):
             self.assertEqual(self.guard(cmd), "ask", cmd)
             self.assertEqual(self.guard(cmd, un), "deny", cmd)
-        for cmd in ("python3 .claude/herald/scripts/hrd.py social media --draft x", "grep lmn README.md",
+        for cmd in ("python3 .claude/herald/scripts/hrd.py social media --draft x", "grep 'lmn' README.md",
                     "which lmn"):
             self.assertEqual(self.guard(cmd), "allow", cmd)
 
-    def test_runs_limner(self):
-        self.assertTrue(guard.runs_limner(["lmn", "doctor"], self.cfg))
-        self.assertFalse(guard.runs_limner(["git", "status"], self.cfg))
+    def test_limner_in(self):
+        self.assertTrue(guard.limner_in("lmn doctor", self.cfg))
+        self.assertTrue(guard.limner_in("lmn doctor", None))
+        self.assertFalse(guard.limner_in("git status", self.cfg))
 
 
 class LfsMaterialTests(MediaCase):
@@ -1054,9 +1056,9 @@ class Review2Tests(MediaCase):
             self.assertEqual((out["state"], [e["code"] for e in out["errors"]]), ("failed", [rid]), (body, out))
             self.assertIn(card, out["errors"][0]["message"])
             res = self.check(rel)
-            mine = [f for f in res["failed"] if f.get("where") == "card 2 body"]
+            mine = [f for f in res["failed"] if f.get("where") == "card 2"]
             self.assertEqual([f["id"] for f in mine], [rid], res)
-            self.assertIn('card 2 body "%s"' % card, mine[0]["detail"])  # the human sees the picture's words
+            self.assertIn('card 2 "Step one / %s"' % card, mine[0]["detail"])  # the human sees the picture's words
             self.assertTrue(any(f["id"] == rid and "where" not in f for f in res["failed"]))  # and the post's own
         rel = self.masked("Bills rose 30% this year.", "Book a slot online.")  # the post's alone: pictures made
         self.assertEqual(self.media(rel)["state"], "done")
@@ -1089,6 +1091,74 @@ class Review2Tests(MediaCase):
         d = os.path.join(self.root, sm.media_rel("x", rel))
         open(os.path.join(d, "2.jpg"), "wb").write(b"jpeg")
         self.assertIn("media-stale", self.failed(rel))
+
+
+class Review3Tests(MediaCase):
+    """REVIEW-22 round 3."""
+
+    def cards(self, body, edit, slug=None, sources=None):
+        rel = self.prep("cards", slug=slug)["drafts"][0]
+        spec = self.cards_spec()
+        edit(spec)
+        self.mdraft(rel, body, spec, sources=sources)
+        return rel
+
+    def test_a_card_is_judged_whole(self):  # R3-1
+        for body, slug, i, fields, rid in (
+                ("A short note. #PR " + URL, "old-post", 0,
+                 {"title": "Safie Pocket", "subtitle": "Thanks to it our shop is safe at night"},
+                 "s9a-service-experience"),
+                ("Mornings are slow.", None, 1, {"heading": "Safie Pocket", "body": "Thanks to it our shop is safe at night"},
+                 "s9a-service-experience"),
+                ("Mornings are slow.", None, 1, {"heading": "According to a survey", "body": "7 of 10 owners lock up late"},
+                 "s9b-statistic")):
+            rel = self.cards(body, lambda s_: s_["cards"][i].update(fields), slug)
+            out = self.media(rel)
+            self.assertEqual((out["state"], [e["code"] for e in out["errors"]]), ("failed", [rid]), (fields, out))
+            res = self.check(rel)
+            self.assertIn((rid, "card %d" % (i + 1)), [(f["id"], f.get("where")) for f in res["failed"]], res)
+
+    def test_guard_tokens(self):  # R3-2, R3-3, R3-5
+        g = GuardTests.guard
+        un = {"HRD_UNATTENDED": "1"}
+        cc = "git commit -m \"$(cat <<'EOF'\n%s\nEOF\n)\""
+        for cmd in ("for f in a b; do lmn compose --layout $f.json --out x.png; done",
+                    "if true; then lmn compose --layout a.json --out x.png; fi", "! lmn compose --layout a",
+                    ">/tmp/log lmn compose --layout a", "2>/dev/null lmn compose --layout a",
+                    "bash -c -- 'lmn compose'", "bash <<'EOF'\nlmn compose --layout a.json --out x.png\nEOF",
+                    "echo 'lmn compose --layout a' | sh",
+                    "echo $(echo $(echo $(echo $(echo $(lmn compose --layout a.json)))))",
+                    (cc % "Herald's fix") + " && lmn compose --layout a.json --out x.png"):
+            self.assertEqual(g(self, cmd), "ask", cmd)
+            self.assertEqual(g(self, cmd, un), "deny", cmd)
+        for cmd in (cc % "fix(hrd): guard\n\n1) quote-aware split\n2) Herald calls `lmn compose` itself",
+                    cc % "fix: done :)\nsee `lmn doctor`", cc % "Herald fix", "command -v lmn",
+                    "command -v lmn >/dev/null && echo ok", "uv tool install limner", "pipx install limner",
+                    "python3 .claude/herald/scripts/hrd.py image doctor --command \"$(command -v lmn)\""):
+            self.assertEqual(g(self, cmd), "allow", cmd)
+
+    def test_other_rules_first(self):  # R3-4
+        self.write(IMG + "/new.png", png("n"), binary=True)
+        sh(self.root, "git", "add", IMG + "/new.png")
+        for cmd in ("git commit -m x", "git commit -m x && lmn --version", "lmn --version; git commit -m x"):
+            self.assertEqual(GuardTests.guard(self, cmd), "deny", cmd)
+
+    def test_daily_sources_mixed_and_override_record(self):  # R3-6
+        q = [{"text": "Renew your card in two steps online", "from": "body"}]
+        rel = self.cards("Mornings are slow.", lambda s_: s_["cards"][1].update(sources=q), sources=q)
+        out = self.media(rel)
+        self.assertEqual([e["code"] for e in out["errors"]], ["daily-sources"])
+        rel = self.cards("Mornings are slow.", lambda s_: None)
+        self.assertEqual(self.media(rel)["state"], "done")
+        with mock.patch.object(sm, "image_fields", lambda spec, fmt: [("card 2", "Up 30% this year")]):
+            res = social.check_draft(self.root, self.cfg, rel)
+            self.assertEqual([(f["id"], f.get("where")) for f in res["failed"]], [("s9b-statistic", "card 2")])
+            run = social.drafted_record(self.root, rel)["run"]
+            social.close(self.root, self.cfg, run, approved=rel, override="a figure of speech")
+        ov = social.latest_status(self.root)[rel]["override"]
+        self.assertEqual(ov["rules"], ["s9b-statistic"])
+        self.assertEqual([(p["id"], p["where"]) for p in ov["pictures"]], [("s9b-statistic", "card 2")])
+        self.assertIn("Up 30%", ov["pictures"][0]["detail"])
 
 
 class StructureTests(unittest.TestCase):

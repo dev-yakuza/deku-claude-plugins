@@ -1203,11 +1203,12 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD", media=N
 
 
 def _content_rules(unit, label, rules, pats, profile, terms, fail, warnings):
-    """Forbidden words and S9 on one text unit: the post (`label` None) or one picture field."""
+    """Forbidden words and S9 on one text unit: the post (`label` None) or one card or panel, whose
+    words are seen together — "the same sentence" there is the whole picture (review 22 R3-1)."""
     where = label
 
     def say(detail):
-        return '%s "%s": %s' % (label, unit.strip()[:80], detail) if label else detail
+        return '%s "%s": %s' % (label, " / ".join(unit.strip().split("\n"))[:120], detail) if label else detail
     for r in rules:
         pat = r.get("pattern") or ""
         if not pat:
@@ -1231,7 +1232,7 @@ def _content_rules(unit, label, rules, pats, profile, terms, fail, warnings):
             else:
                 warnings.append(say("draft rule %r matched" % pat))
     masked = mask_urls(fold(unit))
-    spans = sentence_spans(masked)
+    spans = [(0, len(masked))] if label else sentence_spans(masked)
 
     def same_sentence(a_spans, b_spans):
         for s, e in spans:
@@ -1269,7 +1270,7 @@ def _check_sources(root, cfg, rec, hdr, profile, lang, fail, extra=None):
             pic = [s.get("_where") for s in sources if s.get("_where")]
             fail("daily-sources", "a daily post states no facts — sources must be []%s"
                  % (" (%s)" % ", ".join(dict.fromkeys(pic)) if pic else ""),
-                 pic[0] if pic and len(pic) == len(sources) else None)
+                 pic[0] if pic else None)
         return
     if not sources:
         fail("sources", "a %s post needs at least one source quote" % profile)
@@ -1381,6 +1382,9 @@ def close(root, cfg, run_id, approved=None, reject_all=False, override=None, set
         entry.update(format=fmt, generated=bool((res.get("media") or {}).get("generated")), media=files)
     if soft:
         entry["override"] = {"reason": override.strip(), "rules": [f["id"] for f in soft]}
+        pics = [{"id": f["id"], "where": f["where"], "detail": f["detail"]} for f in soft if f.get("where")]
+        if pics:  # what the human accepted in a picture, its words (review 22 R3-6)
+            entry["override"]["pictures"] = pics
     _log(root, entry)
     for d in sorted(drafts):
         if d != rel:

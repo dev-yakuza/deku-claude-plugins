@@ -490,25 +490,28 @@ def image_text(spec, fmt):
 
 
 def image_fields(spec, fmt):
-    """[(label, text)] of the words drawn into the pictures, in order — the units the content rules
-    judge one by one, so a failure names the picture's words (review 22 R2-1). Never the handle."""
+    """[(label, text)] of the words drawn into the pictures: one unit a card or a panel (its text
+    fields a line each, never the handle) — what a reader sees together is judged together, so a
+    failure names the picture and its words (review 22 R2-1, R3-1)."""
     out = []
     if fmt == "cards":
         for i, c in enumerate(spec.get("cards") or [], 1):
             if isinstance(c, dict):
-                for k in ("title", "subtitle", "heading", "body", "message"):
-                    if isinstance(c.get(k), str) and c[k].strip():
-                        out.append(("card %d %s" % (i, k), c[k]))
+                t = [c[k] for k in ("title", "subtitle", "heading", "body", "message")
+                     if isinstance(c.get(k), str) and c[k].strip()]
+                if t:
+                    out.append(("card %d" % i, "\n".join(t)))
     elif fmt == "comic":
         for i, p in enumerate(spec.get("panels") or [], 1):
             if not isinstance(p, dict):
                 continue
             cap = p.get("caption")
-            if isinstance(cap, dict) and isinstance(cap.get("text"), str) and cap["text"].strip():
-                out.append(("panel %d caption" % i, cap["text"]))
-            for k, b in enumerate(p.get("bubbles") or [], 1):
-                if isinstance(b, dict) and isinstance(b.get("text"), str) and b["text"].strip():
-                    out.append(("panel %d bubble %d" % (i, k), b["text"]))
+            t = [cap["text"]] if isinstance(cap, dict) and isinstance(cap.get("text"), str) and cap["text"].strip() \
+                else []
+            t += [b["text"] for b in p.get("bubbles") or []
+                  if isinstance(b, dict) and isinstance(b.get("text"), str) and b["text"].strip()]
+            if t:
+                out.append(("panel %d" % i, "\n".join(t)))
     return out
 
 
