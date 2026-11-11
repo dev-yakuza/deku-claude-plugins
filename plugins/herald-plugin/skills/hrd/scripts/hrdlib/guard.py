@@ -786,8 +786,11 @@ def ship_deploy_ok(root, cfg, cmd):
     if unattended() or not deploy.strip() or (cmd or "").strip() != deploy.strip():
         return False
     p = lockmod.valid_pass(root)
-    # only after `ship-pass --merged` saw the PR merged into this base (review 24 MINOR-4)
-    return bool(p) and p.get("merged") is True and current_branch(root) == cfg.base
+    # only after `ship-pass --merged` saw the PR merged into this base (review 24 MINOR-4), and only
+    # while the base is still the commit it saw (R2-MINOR-1)
+    if not p or p.get("merged") is not True or not p.get("base_head") or current_branch(root) != cfg.base:
+        return False
+    return git(root, "rev-parse", "HEAD", check=False).strip() == p["base_head"]
 
 
 def check_bash(root, cfg, cmd):

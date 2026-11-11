@@ -123,9 +123,11 @@ def _ship_pass(root, a):
                               % (a.topic, a.pr))
     from hrdlib.batch import auto_published_today
     cap = int(cfg.get("autonomy", "throttle", "max_per_day") or 0)
-    used = auto_published_today(store.load_published(root), store.load_topics(root))
-    if not cur.get("attended"):
-        used -= 1  # this topic's own stamp (checked above) is the publish being decided
+    # the other topics' publishes today — this topic's own stamp is the publish being decided, and a
+    # stamp from before midnight UTC must not lend a slot (R2-MINOR-4)
+    topics = store.load_topics(root)
+    used = auto_published_today(store.load_published(root),
+                                dict(topics, topics=[t for t in topics["topics"] if t.get("id") != a.topic]))
     if cap - used <= 0:  # the daily throttle, again in code (review 24 MINOR-2) — as `HRD throttle` `room`
         raise HeraldError("no pass: today's auto-publish limit is reached (%d of %d)" % (used, cap))
     reasons = store.exclusion_reasons(root, cfg, a.topic, a.rev, vouch=True)
@@ -159,16 +161,16 @@ def _ship_pass_merged(root, a):
     p = lock.valid_pass(root, cur)
     if not p or p.get("topic") != a.topic or str(p.get("pr")) != str(a.pr):
         raise HeraldError("no valid pass for %s PR #%s — the guard asks for the deploy" % (a.topic, a.pr))
-    if p.get("merged") is True:
-        return {"pass": {k: p.get(k) for k in ("topic", "pr", "sha", "at", "merged")}}
+    if p.get("merged") is True:  # already marked: the base it saw stays the one the deploy may run on
+        return {"pass": {k: p.get(k) for k in ("topic", "pr", "sha", "at", "merged", "base_head")}}
     pr = _pr_view(root, a.pr, "state,headRefOid,mergeCommit")
     if pr.get("state") != "MERGED" or str(pr.get("headRefOid") or "").lower() != str(p.get("sha")).lower():
         raise HeraldError("PR #%s is not merged at the verified head %s — no deploy pass" % (a.pr, p.get("sha")))
     mc = (pr.get("mergeCommit") or {}).get("oid") if isinstance(pr.get("mergeCommit"), dict) else None
     if not mc or not git_ok(root, "merge-base", "--is-ancestor", mc, "HEAD"):
         raise HeraldError("the merge commit of PR #%s is not in this checkout yet — `HRD sync` first" % a.pr)
-    rec = lock.mark_merged(root, p)
-    return {"pass": {k: rec.get(k) for k in ("topic", "pr", "sha", "at", "merged")}}
+    rec = lock.mark_merged(root, p, git(root, "rev-parse", "HEAD").strip())
+    return {"pass": {k: rec.get(k) for k in ("topic", "pr", "sha", "at", "merged", "base_head")}}
 
 
 # --- topics -----------------------------------------------------------------------------------

@@ -91,7 +91,7 @@ class LockMarkTests(RepoCase):
         lock.write_pass(self.root, tok, "t0001", 5, "a" * 40)
         self.assertEqual(lock.valid_pass(self.root)["pr"], 5)
         self.assertIs(lock.valid_pass(self.root)["merged"], False)  # a merge first, a deploy after
-        lock.mark_merged(self.root, lock.valid_pass(self.root))
+        lock.mark_merged(self.root, lock.valid_pass(self.root), "b" * 40)
         self.assertIs(lock.valid_pass(self.root)["merged"], True)
         later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2, minutes=1)
         self.assertIsNone(lock.valid_pass(self.root, now=later))  # two hours at most
@@ -161,6 +161,19 @@ class AgentImageTests(ImageCase):
         with self.assertRaises(Exception):
             images.confirm(self.root, self.cfg, TID, "e1", agent=True)
         self.assertEqual(images.confirm(self.root, self.cfg, TID, "e1")["by"], "human")  # a human may
+
+    def test_redone_bytes_never_pass_under_another_id(self):
+        """R2-MINOR-3: the review's redo follows the bytes, not the id."""
+        self.fetched()
+        images.review(self.root, self.cfg, TID, "e1", redo=True, note="a watermark")
+        self.manifest([self.d1(), self.e1(id="e2", file="%s/e2-lobby.jpg" % IMG,
+                                          ref="/blog-images/new-post/e2-lobby.jpg")])
+        self.body(e1="![The office lobby](/blog-images/new-post/e2-lobby.jpg)")
+        self.assertEqual(self.plan()["errors"], [])
+        self.assertEqual([x["id"] for x in self.fetch()["fetched"]], ["e2"])
+        with self.assertRaises(Exception) as c:
+            images.review(self.root, self.cfg, TID, "e2", ok=True, note="fine")
+        self.assertIn("sent these very bytes back", str(c.exception))
 
     def test_agent_confirm_needs_the_mark_the_review_and_no_unattended(self):
         self.fetched()
@@ -399,6 +412,30 @@ class AgentShotTests(AutoCase):
         self.assertEqual(shots.confirm(self.root, self.cfg, TID, "s1")["confirmed"], ["s1"])
         self.assertEqual(shots.Ledger(self.root).damaged, [])  # not a Ledger file
 
+    def test_state_after_a_truncated_problem_ledger(self):
+        """A `--problem` cut mid-write (its state never written): the agent is refused until a later
+        `--problem` cuts the broken tail; a human's confirm is never affected (§10 m1)."""
+        self.captured()
+        p = os.path.join(self.root, shots.PROBLEMS)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(b'{"topic": "t0001", "id": "s1", "kind": "priv')
+        self.assertEqual(shots.read_problems(self.root)[1], [1])
+        self.assertNotIn("review_problem", self.rec())  # the cut write never reached the state
+        with self.assertRaises(Exception) as c:
+            self.review(ok=True)
+        self.assertIn("damaged", str(c.exception))
+        out = self.review(problem="mismatch", note="the wrong page")  # the next problem cuts the tail
+        self.assertEqual(out["problem"]["kind"], "mismatch")
+        recs, bad = shots.read_problems(self.root)
+        self.assertEqual(([r["kind"] for r in recs], bad), (["mismatch"], []))
+        self.assertEqual(self.rec()["review_problem"], "mismatch")
+        self.assertIn("s1(review:mismatch)", shots.hold_note(self.state()))
+        ship_lock(self.root)
+        with self.assertRaises(Exception):
+            shots.confirm(self.root, self.cfg, TID, "s1", agent=True)
+        self.assertEqual(shots.confirm(self.root, self.cfg, TID, "s1")["by"], "human")
+
     def test_problem_ledger_reader_and_appender(self):
         p = os.path.join(self.root, shots.PROBLEMS)
         rec = {"topic": "t1", "id": "s1", "key": "k", "blob": "b", "sha256": "s", "kind": "privacy", "note": "n",
@@ -454,10 +491,24 @@ class AgentSceneTests(SceneCase):
         with self.assertRaises(Exception):
             images.confirm(self.root, self.cfg, TID, "g2", agent=True)
         self.assertEqual(images.confirm(self.root, self.cfg, TID, "g1", agent=True)["by"], "agent")
-        self.assertEqual(images.confirm(self.root, self.cfg, TID, "g2")["by"], "human")  # a human judges
         probs = images.draft_problems(self.root, self.cfg, TID, self.state())
         self.assertTrue(any("g2: this picture's key was turned down" in x for x in probs), probs)
         self.assertFalse(any(x.startswith("g1:") for x in probs), probs)
+        h = shots.file_hashes(self.root, self.g2()["file"])  # an agent's line (forged) never lets it pass
+        shots.ledger_append(os.path.join(self.root, shots.CONFIRMATIONS),
+                            {"topic": TID, "id": "g2", "key": images.scene_key(self.cfg, self.g2()), "blob": h[0],
+                             "sha256": h[1], "at": "x", "by": "agent", "note": "forged"})
+        probs = images.draft_problems(self.root, self.cfg, TID, self.state())
+        self.assertTrue(any("g2: this picture's key was turned down" in x for x in probs), probs)
+        cp = os.path.join(self.root, shots.CONFIRMATIONS)  # take the forged line out again
+        with open(cp) as f:
+            kept = [x for x in f if '"forged"' not in x]
+        with open(cp, "w") as f:
+            f.writelines(kept)
+        # a human's look at this very picture: draft takes it (R2-MINOR-2), as the refusal text says
+        self.assertEqual(images.confirm(self.root, self.cfg, TID, "g2")["by"], "human")
+        probs = images.draft_problems(self.root, self.cfg, TID, self.state())
+        self.assertFalse(any("turned down" in x for x in probs), probs)
 
 
 class GuardEntryTests(RepoCase):
@@ -709,6 +760,14 @@ class ShipPassTests(Flow):
         ship_lock(self.root, topic=self.tid, attended=True)  # attended counts no stamp of its own
         _, p = self.ship_pass()
         self.assertIn("auto-publish limit", p.stderr)
+        # R2-MINOR-4: a stamp from before midnight UTC lends no slot — only the other topics count
+        lock.force_unlock(self.root)
+        ship_lock(self.root, topic=self.tid)
+        data = store.load_topics(self.root)
+        store.get_topic(data, self.tid)["auto_merged_at"] = "2000-01-01T23:59:58+00:00"
+        store.save_topics(self.root, data)
+        _, p = self.ship_pass()
+        self.assertIn("limit is reached (1 of 1)", p.stderr)
 
     def merged(self, merge_commit=None):
         main = sh(self.root, "git", "rev-parse", "main").strip()
@@ -781,6 +840,19 @@ class ShipPassTests(Flow):
         with open(lock.pass_path(self.root), "w") as f:
             json.dump(rec, f)
         self.assertEqual(g("npm run deploy"), "ask")
+
+    def test_deploy_only_on_the_base_merged_saw(self):
+        """R2-MINOR-1: a pass `--merged` marked covers the deploy of that base commit only."""
+        ship_lock(self.root, topic=self.tid)
+        self.stamp()
+        self.ship_pass(check=True)
+        out, _ = self.merged()
+        self.assertEqual(out["pass"]["base_head"], sh(self.root, "git", "rev-parse", "HEAD").strip())
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": "npm run deploy"}), "allow")
+        sh(self.root, "git", "commit", "-q", "--allow-empty", "-m", "someone's later change synced in")
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": "npm run deploy"}), "ask")
+        self.assertEqual(self.merged()[0]["pass"]["base_head"], out["pass"]["base_head"])  # never moved forward
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": "npm run deploy"}), "ask")
 
     def test_other_rules_decide_before_the_pass(self):
         """§11 m2: a valid pass never overrides another rule — a broken `translations` block

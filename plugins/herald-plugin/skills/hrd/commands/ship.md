@@ -255,8 +255,9 @@ exclusions recomputed at that head — strong — block nothing. It writes `lock
 lets exactly the merge below through (only before the merge). Refused (or GitHub not reachable) →
 go on all the same: the guard asks for the merge as before 0.20.0. After a merge that happened
 (below, or `gh pr view` says merged) and its `HRD sync`: `HRD lock ship-pass --merged --topic <id>
---pr <n>` — code checks GitHub says that head was merged and the merge commit is in this base;
-only then does the pass cover §7's deploy. Refused → the guard asks for the deploy. If `gh pr merge` fails or is declined, check `gh pr view
+--pr <n>` — code checks GitHub says that head was merged and the merge commit is in this base,
+and records that base commit; only then does the pass cover §7's deploy, and only while base is
+still that commit (anything synced later is asked about). Refused → the guard asks for the deploy. If `gh pr merge` fails or is declined, check `gh pr view
 <n> --json state,mergedAt` — a non-zero exit can come after the merge itself (branch cleanup):
 merged → continue as a successful merge (below); **not** merged → `HRD auto-merged --topic <id>
 --clear`, `HRD commit --cmd ship --kind ship -m "chore(herald): auto-merge cleared <id>"

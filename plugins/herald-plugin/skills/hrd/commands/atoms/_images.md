@@ -155,8 +155,9 @@ straight to the tooling hold of `atoms/_stages.md` § Holds, note `tooling: imag
 4b. **Scene review**: `HRD image status --topic <id>` `pending.review_scene` not empty → spawn the
    illustrator in **scene** review mode once (§1; read list: the files of exactly those scene ids,
    each one's `alt`, `purpose`, `prompt`, the paragraph it serves — never an external image) — not
-   a loopback. Any `redo` → from step 2 again (a redone key is never passed: `review --ok`, `confirm
-   --agent` and draft refuse it until the seed or prompt changes). External images
+   a loopback. Any `redo` → from step 2 again (a redone key is never passed by an agent: `review
+   --ok` and `confirm --agent` refuse it, and draft until the seed or prompt changes — or a human
+   confirms that very picture). External images
    (`pending.review_external`) are reviewed only in a `--ship` run, by their own reviewer (§2a
    step 2); otherwise the human looks at step 7.
 5. `HRD image og --topic <id>` whenever `HRD image kinds` `og.why` is neither `no-config` nor
@@ -219,7 +220,7 @@ without `--ship` stay at step 7 above. At step 7, instead of holding, while some
    step 7 comes back here with a new reviewer. The place's third agent reject must be `--drop`
    (code refuses another; three candidates at most): the illustrator removes the place (§4),
    `DONE_WITH_CONCERNS`, and §2 from step 1. A `--redo` is recorded against those bytes
-   (`review_redos`): no later review passes them — never skip the reject.
+   (`review_redos`): no later review passes them, under any id — never skip the reject.
 3. **Automatic screenshots** `captured` (`HRD shot status` `review`): a fresh illustrator in
    screenshot review mode. `--ok` → `HRD shot confirm --topic <id> --id s1 --agent`.
    `--problem` → no confirmation: hold `screenshots` (§5) with the note `HRD shot status` gives

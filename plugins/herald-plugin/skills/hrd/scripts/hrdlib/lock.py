@@ -188,8 +188,10 @@ def write_pass(root, token, topic, pr, sha):
     return rec
 
 
-def mark_merged(root, rec):
-    rec = dict(rec, merged=True, merged_at=now_iso())  # `at` stays: the two hours count from the pass
+def mark_merged(root, rec, base_head):
+    """`base_head`: the base commit `--merged` saw — the deploy is allowed only while HEAD is still
+    that commit (review 24 R2-MINOR-1: no second deploy after base moved on)."""
+    rec = dict(rec, merged=True, merged_at=now_iso(), base_head=base_head)  # `at` stays: two hours from the pass
     write_json(pass_path(root), rec)
     return rec
 

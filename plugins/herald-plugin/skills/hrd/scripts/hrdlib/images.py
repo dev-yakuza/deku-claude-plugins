@@ -2333,13 +2333,14 @@ AGENT_REJECTS_MAX = 2  # the third agent reject of one place drops it (three can
 def agent_review_refusal(st, it, iid, key, h):
     """Why an agent may not pass this picture (`review --ok`, `confirm --agent` — implementation
     review 24 MAJOR-2, MINOR-1): a scene whose key a review or a human turned down, or an external
-    image whose very bytes a review sent back (`review_redos`, top-level state: a plan keeps it).
+    image whose very bytes a review sent back (`review_redos`, top-level state: a plan keeps it;
+    matched by content, whatever id they come back under).
     A human's confirm is not affected — the human judges."""
     if it.get("kind") == "scene" and key in rejected_scene_keys(st, iid):
         return ("%s: a review turned this picture's key down — change the seed or the prompt (a human may still "
                 "confirm it)" % iid)
-    if it.get("kind") == "external" and h and any(
-            isinstance(x, dict) and x.get("id") == iid and (x.get("blob") == h[0] or x.get("sha256") == h[1])
+    if it.get("kind") == "external" and h and any(  # the bytes, at any place (R2-MINOR-3)
+            isinstance(x, dict) and (x.get("blob") == h[0] or x.get("sha256") == h[1])
             for x in st.get("review_redos") or []):
         return ("%s: a review sent these very bytes back — `HRD image reject --agent` and another candidate (a human "
                 "may still confirm it)" % iid)
@@ -3155,10 +3156,14 @@ def draft_problems(root, cfg, tid, st):
 
 def _scene_draft_problems(root, cfg, tid, slug, it, r, led, body, st=None):
     iid = it.get("id")
-    if st is not None and scene_key(cfg, it) in rejected_scene_keys(st, iid):
-        # a picture whose key a review or a human turned down never passes draft (review 24 MAJOR-2)
+    key = scene_key(cfg, it)
+    if st is not None and key in rejected_scene_keys(st, iid) and \
+            led.confirmed_by(file_hashes(root, it.get("file") or ""), tid, iid, key) != "human":
+        # a key a review or a human turned down passes draft only on a human's look at this very
+        # picture — never on an agent's (review 24 MAJOR-2, R2-MINOR-2)
         return ["%s: this picture's key was turned down (a review's redo or a reject) — change the seed or the prompt "
-                "of %s, then `HRD image plan --topic %s`" % (iid, iid, tid)]
+                "of %s, then `HRD image plan --topic %s`; or a human looks at it and confirms it (`HRD image confirm`, "
+                "never --agent)" % (iid, iid, tid)]
     why = scene_fail_closed(tid, iid, r, led)
     if why:
         return [why]
