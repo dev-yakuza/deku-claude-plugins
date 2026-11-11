@@ -34,8 +34,11 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
    import`; screens `captured` wait for a human's confirm or demote; a `capture` refusal for a
    template that broke since plan → as `atoms/_screenshots.md` §2 step 3), then on through publish as below.
    Likewise `HRD image status --topic <id>` when `<w>images.json` exists: `resume_at_collect` true →
-   no writer or illustrator, continue at `atoms/_images.md` §2 step 3 (render, fetch, OG, then the
-   screenshot steps; external images under `pending.confirm` wait for a human's confirm or reject).
+   no writer or illustrator, continue at `atoms/_images.md` §2 step 3 (render, fetch, scene
+   generation — `HRD image generate` takes over the run a hold left going, or receives what it
+   finished —, the scene review, OG, then the screenshot steps; external images and scenes under
+   `pending.confirm` wait for a human's confirm or reject). A `tooling: limner …` hold resumes
+   here too, once the machine is free or can generate.
    Budget baseline as in `write.md` §0 step 7 (a fresh baseline: resuming is the human's choice
    to spend more). Then: if `stage` is `brief` and `slug` is null, run brief as in `write.md`. Otherwise run from
    `stage` onward through publish exactly as `write.md` §1–§3 (unattended if `HRD_UNATTENDED=1`; else in-session auto by

@@ -44,7 +44,9 @@ only. Ported from Guild `update.md`.
    lines it lacks (e.g. `.limner/`, 0.17.0) inside it, nothing else changes — and create missing labels.
    **Images** (0.17.0): never added by `update` (INV4) — a repo without an `images` block behaves
    as 0.16.0. Say once at the end: "image expansion (diagrams, external images, the OG card) is
-   turned on with `/hrd config images`".
+   turned on with `/hrd config images`". **Scene images** (0.18.0): never turned on by `update`
+   either — a repo with an `images` block but no `images.scenes` behaves as 0.17.0. Say once:
+   "scene images can be turned on — `/hrd config images`".
    **Translations** (0.9.0): never added by `update` (INV4). If config has no `translations` and
    the content has locale directories, say once that `/hrd config` can turn translations on.
    A translator persona from before 0.9.0 still has `{{TRANSLATION_TARGETS}}`-style values in

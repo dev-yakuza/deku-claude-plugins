@@ -27,7 +27,8 @@ Guild `_execute_spine.md` 3.5a.
 - the article file and the images it references (paths); for screenshots
   (`<w>screenshots.json`), each image's `mask` list, quoted, and which ones Herald captured from a
   public web page (`capture: auto`); for `<w>images.json` (`atoms/_images.md` §3), each diagram's
-  `texts` and each external image's `use`, `credit`, `license` and `page_url`, quoted
+  `texts`, each external image's `use`, `credit`, `license` and `page_url`, and each scene's
+  `prompt` and `alt`, quoted
 - the charter's **purpose** line (what the article promotes) and the **hard policies** from
   `docs/editorial/sources.md` and `promotion.md` (quoted, so intended policy is not reported
   as a defect)

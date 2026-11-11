@@ -152,8 +152,10 @@ status --topic <id> --rev refs/remotes/origin/pr-<n>` — file links, source pag
 or **quotation — no OG/SNS use**, "replaced by a human" where `replaced` is true — and ask for a
 **separate confirmation** "I checked the external images and their attribution" (one question
 with two items when screenshots are there too); no merge without it (`atoms/_images.md` §6). Show
-diagrams and the OG card as links (`pr_rows`); an OG line "old title kept" (`stale_base`) is
-shown as such.
+diagrams, scenes and the OG card as links (`pr_rows`; a scene with "replaced by a human" when
+`replaced` — no separate confirmation, a human confirmed it in draft); an OG line "old title kept"
+(`stale_base`) is shown as such, and `HRD image status --rev` `warnings` (a scene whose prompt or
+seed a human changed without a new picture) are shown too.
 
 A topic whose `auto_merged_pr` names this open PR (a session-auto stamp whose merge never
 happened): on approve or decline, `HRD auto-merged --topic <id> --clear` — a human decided it
@@ -205,7 +207,8 @@ switch and §7.1 need a clean tree.
    --topic <id> --after-push` (no limner on this machine
    → the fail path below with `verify-after-human-edit`; tell the human at step 4 next time that a
    PNG edit is replaced by a render of the SVG); then `HRD image og --topic <id>` (no flag; it does
-   nothing when the inputs and the file are as recorded). `needs-human` (a file a human put at the
+   nothing when the inputs and the file are as recorded). Scenes are never generated here: a scene
+   PNG a human replaced is a human's image (scan, strip, `images`). `needs-human` (a file a human put at the
    OG path, or base's card a human deleted — `unknown_file` ends in `(deleted)`) → attended: ask
    "use this OG image?" (for a deletion: "publish without the OG card?") — yes → `HRD image og --topic <id> --human-push
    --pr <n>` (a refusal: tell the human why — ship from the machine that pushed, or remove the file

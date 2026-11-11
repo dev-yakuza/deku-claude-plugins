@@ -10,7 +10,8 @@ The full flow is `/hrd write`; continuing a stopped flow is `/hrd resume`.
 3. Entry condition: `HRD stage check --topic <topic-id> --stage draft` — if it names an earlier
    stage, stop and tell the user to rerun that stage first. Do not edit `state.json`.
 4. Execute the stage exactly as `atoms/_stages.md` § draft describes (read list, role, outputs,
-   checks, `HRD stage pass`). Screenshots and external images are collected the attended way —
-   guide, list and wait (`atoms/_screenshots.md` §2, `atoms/_images.md` §2).
+   checks, `HRD stage pass`). Screenshots, external images and scenes are collected the attended
+   way — guide, list and wait; a scene generation is waited for in this session and a long one is
+   asked about (`atoms/_screenshots.md` §2, `atoms/_images.md` §2).
 5. Report the result and the next stage. A body change invalidates later stages: after
    `draft`, both `critique` and `verify` must run again before `publish`.

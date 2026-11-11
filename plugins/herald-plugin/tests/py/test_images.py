@@ -148,7 +148,7 @@ class ImageCase(RepoCase):
     def setUp(self):
         super().setUp()
         limner.reset_cache()
-        images._BASE_EXTERNAL.clear()
+        images._BASE_MANAGED.clear()
         self.lmndir = os.path.join(self.tmp, "lmn")
         os.makedirs(self.lmndir)
         self.lmn = os.path.join(self.lmndir, "lmn")
@@ -280,10 +280,10 @@ class KindsTests(ImageCase):
         k = images.kinds(self.root, self.cfg, TID)
         self.assertEqual([k[x]["why"] for x in ("diagram", "external", "og")], ["no-config"] * 3)
         self.assertTrue(k["screenshot"]["ok"])
-        self.assertEqual(k["scene"], {"ok": False, "why": "0.18"})
+        self.assertEqual(k["scene"]["why"], "no-config")  # 0.18.0: scenes need images.scenes
         self.assertEqual(self.calls(), [])  # no limner call at all
         self.assertEqual(images.config_errors(self.root, self.cfg),
-                         {"limner_errors": [], "og_errors": [], "figure_errors": []})
+                         {"limner_errors": [], "og_errors": [], "figure_errors": [], "scene_errors": []})
 
     def test_each_kind_alone(self):
         k = images.kinds(self.root, self.cfg, TID)
@@ -489,7 +489,7 @@ class PlanTests(ImageCase):
     def test_clean_plan_records_pending(self):
         out = self.plan()
         self.assertEqual(out["errors"], [], out)
-        self.assertEqual(out["pending"], {"render": ["d1"], "fetch": ["e1"], "confirm": []})
+        self.assertEqual(out["pending"], {"render": ["d1"], "fetch": ["e1"], "generate": [], "confirm": []})
         rec = self.state()["images"]
         self.assertTrue(rec["awaiting"])
         self.assertEqual(rec["files"]["%s/e1-lobby.jpg" % IMG], {"kind": "external", "use": "licensed"})
@@ -511,8 +511,8 @@ class PlanTests(ImageCase):
 
     def test_each_error(self):
         cases = [
-            ([self.d1(id="g1", kind="diagram")], "0.18"),
-            ([self.d1(kind="scene")], "0.18"),
+            ([self.d1(id="g1", kind="diagram")], "a diagram id"),
+            ([self.d1(kind="scene")], "scene images are off here (no-config)"),
             ([self.d1(id="e9")], "a diagram id"),
             ([self.d1(file="%s/x.png" % IMG)], "file must be"),
             ([self.d1(file="%s/d1-steps.jpg" % IMG, ref="/blog-images/%s/d1-steps.jpg" % SLUG)], "published as .png"),
@@ -1538,10 +1538,10 @@ class CostTests(ImageCase):
             calls.append(a[1][0])
             return real(*a, **k)
         self.config(lambda c: c.pop("images"))
-        images._BASE_EXTERNAL.clear()
+        images._BASE_MANAGED.clear()
         with mock.patch.object(images, "_git_run", side_effect=count):
             for n in range(40):
-                self.assertEqual(images.external_on_base(self.root, self.cfg, "post-%d" % n), [])
+                self.assertEqual(images.managed_on_base(self.root, self.cfg, "post-%d" % n), [])
         self.assertEqual(calls, ["grep"])
         # with external images on base: still a fixed number of processes per command
         self.config(lambda c: c.update(images={"external": True, "figure": FIGURE}))
@@ -1559,8 +1559,8 @@ class CostTests(ImageCase):
         calls.clear()
         with mock.patch.object(images, "_git_run", side_effect=count):
             for n in range(40):
-                images.external_on_base(self.root, self.cfg, "post-%d" % n)
-            self.assertEqual(images.external_on_base(self.root, self.cfg, SLUG), ["%s/e1-lobby.jpg" % IMG])
+                images.managed_on_base(self.root, self.cfg, "post-%d" % n)
+            self.assertEqual(images.managed_on_base(self.root, self.cfg, SLUG), ["%s/e1-lobby.jpg" % IMG])
         self.assertEqual(calls, ["grep", "cat-file", "cat-file"])
 
     def test_select_and_missing_without_images_block(self):
@@ -1569,12 +1569,12 @@ class CostTests(ImageCase):
         self.config(lambda c: c.update(translations={"source": "en", "targets": [
             {"lang": "ko", "body_pattern": "{content}/ko/{slug}.md", "url_pattern": "/ko/{slug}/"}]},
             roles={"conditional": ["illustrator", "translator"]}))
-        images._BASE_EXTERNAL.clear()
+        images._BASE_MANAGED.clear()
         calls = []
         real = images._git_run
         with mock.patch.object(images, "_git_run", side_effect=lambda *a, **k: calls.append(1) or real(*a, **k)):
             for n in range(25):
-                images.external_on_base(self.root, self.cfg, "post-%d" % n)
+                images.managed_on_base(self.root, self.cfg, "post-%d" % n)
         self.assertLessEqual(len(calls), 1)
 
 
@@ -1585,8 +1585,8 @@ class TranslationBlockTests(ImageCase):
         sh(self.root, "git", "commit", "-q", "-m", "publish")
         sh(self.root, "git", "push", "-q", "origin", "HEAD:main")
         sh(self.root, "git", "fetch", "-q", "origin")
-        self.assertEqual(images.external_on_base(self.root, self.cfg, SLUG), ["%s/e1-lobby.jpg" % IMG])
-        self.assertEqual(images.external_on_base(self.root, self.cfg, "old-post"), [])
+        self.assertEqual(images.managed_on_base(self.root, self.cfg, SLUG), ["%s/e1-lobby.jpg" % IMG])
+        self.assertEqual(images.managed_on_base(self.root, self.cfg, "old-post"), [])
         sh(self.root, "git", "switch", "-q", "main")
         sh(self.root, "git", "merge", "-q", "--ff-only", "origin/main")
         self.config(lambda c: c.update(translations={"source": "en", "targets": [

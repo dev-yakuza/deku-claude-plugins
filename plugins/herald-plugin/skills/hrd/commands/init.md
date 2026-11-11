@@ -61,7 +61,7 @@ Exclude `.claude/skills/**` and other local skills from every scan.
 
 Promoted service/app and CTA · north-star metric · domain expertise / YMYL · hard policies
 (external mentions, promotion count, copyright rules) · confirm detected paths, deploy command,
-base URL · per-article budget (USD) · social posts too? (yes → the summary points to `/hrd social --setup`; `init` never enables `distributor` itself) · output language (default: `$1` if it is a language code, else the content language) · with locale directories: translate new articles? which languages, which is the source, auto publish translations (default no) · with Playwright found: capture public pages for screenshots automatically (a human still confirms each one)? · images (one call, the 4-question rule): ① with limner found, draw diagrams as Herald SVGs (published as PNG, their text verified like sentences)? ② external images: free-license photos? which categories may quote official images of works (none by default)? ③ OG card: the generator found / limner `og-title` / off?
+base URL · per-article budget (USD) · social posts too? (yes → the summary points to `/hrd social --setup`; `init` never enables `distributor` itself) · output language (default: `$1` if it is a language code, else the content language) · with locale directories: translate new articles? which languages, which is the source, auto publish translations (default no) · with Playwright found: capture public pages for screenshots automatically (a human still confirms each one)? · images (one call, the 4-question rule): ① with limner found, draw diagrams as Herald SVGs (published as PNG, their text verified like sentences)? ② external images: free-license photos? which categories may quote official images of works (none by default)? ③ OG card: the generator found / limner `og-title` / off? ④ with limner able to generate (P2's doctor): scene images — on or off, the picture style (pick one of 2–3 English drafts or write one), the most per article (default 2)?
 
 ## P2 — Generate (additive)
 
@@ -76,8 +76,13 @@ base URL · per-article budget (USD) · social posts too? (yes → the summary p
    Images confirmed → `HRD image doctor --command "<lmn argv>"` (shown to the human), then the
    `limner` and `images` blocks (`config.md` § Images; `figure` wording in `config.language`), and
    with OG on `HRD image og --trial`: a failure → show the fix (`uv tool install …`, `lmn fonts
-   install`, the generator's error) and leave that sub-key out. Diagrams or external images on →
-   `illustrator` in `roles.conditional`.
+   install`, the generator's error) and leave that sub-key out. Scenes confirmed → `HRD image kinds`
+   (`scene.ok`; `generate:env` → show "`lmn setup` — about 54 GB download", or "a shared model is
+   already in `~/.cache/models`"), the `images.scenes` block and `figure.scene`/`words.scene` in
+   `config.language` (`config.md` § Images), and the trial picture of `config.md` § Images 1; a
+   failure leaves `scenes` out. Diagrams, external images or scenes on → `illustrator` in
+   `roles.conditional`, and its "Image style guide" gets the scene rules (`atoms/_images.md` §8,
+   in short).
 3. `docs/editorial/` from `templates/editorial/*.tmpl`: charter (purpose from the interview,
    floor and priority lines verbatim), style guide (its "Not AI prose" tells: phrases in
    `config.language` that read as generated, plus any the existing articles avoid), one

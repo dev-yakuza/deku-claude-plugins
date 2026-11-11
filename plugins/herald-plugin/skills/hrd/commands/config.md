@@ -28,14 +28,28 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
   "licensed": "…{ref} {alt} {credit} {license} {license_url} {page_url}…", "quotation": "…{ref}
   {alt} {credit} {label} {page_url}…", "words": {"licensed": "…", "quotation": "…", "source": "…",
   "orientation": {"landscape": "…", "portrait": "…"}}}, "og": {"path": "{images}/{slug}/og.png",
-  "command": null, "subtitle": null, "fallback_first_image": true}}` — each sub-key on its own
-  (no `diagrams` → no diagrams, `external` not true → no external images, no `og` → no OG card).
-  Turning one on or changing it reuses init's P1 detection and the three P1.5 image questions, then:
-  1. `HRD config-check`: `limner_errors`, `og_errors`, `figure_errors` must be empty (each only
-     turns its own kind off — never another command); `HRD image doctor` for diagrams and a limner
-     OG; `HRD image og --trial` for OG (a repo generator: also with `--category` of each category
-     whose badge looks wrong — e.g. a slug printed as a label — and tell the human the fix belongs
-     in the repo's script).
+  "command": null, "subtitle": null, "fallback_first_image": true}, "scenes": {"max": 2,
+  "per_category": {}, "style": "<English, one line>", "wait_minutes": 30}}` (0.18.0; `figure` may
+  add `"scene": "![{alt}]({ref})\n*{label}*"` — `{ref}`, `{alt}` and `{label}` all required — and
+  `words.scene`, the AI label, 1–60 characters; without them the default template and the source
+  language's label: ko "AI 생성 이미지", ja "AI生成画像", en "AI-generated image") — each sub-key on
+  its own (no `diagrams` → no diagrams, `external` not true → no external images, no `og` → no OG
+  card, no `scenes` → no scene images). `scenes`: `max` and `per_category` values 0–6, `style` at
+  most 300 printable ASCII characters (the repo's one picture style, appended to every scene
+  prompt), `wait_minutes` 5–120 (how long one collect step waits for generation). Scenes also need
+  the illustrator, no `translations`, and — on a site that falls back to the first image as its SNS
+  card (`fallback_first_image`, assumed without an `og` block) — OG on (`why: og-fallback`).
+  Turning one on or changing it reuses init's P1 detection and the P1.5 image questions, then:
+  1. `HRD config-check`: `limner_errors`, `og_errors`, `figure_errors`, `scene_errors` must be
+     empty (each only turns its own kind off — never another command); `HRD image doctor` for
+     diagrams and a limner OG; `HRD image og --trial` for OG (a repo generator: also with
+     `--category` of each category whose badge looks wrong — e.g. a slug printed as a label — and
+     tell the human the fix belongs in the repo's script). Scenes: `HRD image kinds` `scene.ok`
+     (else its `why`: `generate:env` → "`lmn setup` — about 54 GB; a model already in
+     `~/.cache/models` is shared"), then **one trial picture**: `HRD image generate --trial --wait
+     240` again while `running` (a cold model load passes 240 s) — show the human the `file` (under
+     the state dir, never the image dir; no ledger) and ask whether the style is right; change
+     `style` and try again, or turn scenes off. Turning scenes off: remove `scenes`.
   2. **Conflicts with existing personas — never changed silently**: read
      `.claude/agents/illustrator.md` ("Project specifics", "Habits"), `docs/editorial/categories/*.md`
      and `sources.md` for sentences that forbid the kind being turned on or name another tool
@@ -43,7 +57,9 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
      only through Herald `images.json` — limits in `gate-rules.json` `images.external`"); the human
      approves → change it; declines → do not turn that kind on.
   3. Say: turning OG on makes every new article carry an OG file, so each gets the `images`
-     exclusion — with `autonomy.publish: auto` nothing publishes without consent. With
+     exclusion — with `autonomy.publish: auto` nothing publishes without consent. Scenes: each one
+     takes minutes on this machine (a model load too), a human confirms each in draft (batch:
+     a `screenshots` hold), every picture shows the AI label, and its prompt goes into the PR body. With
      `translations` on, external images stay off, and articles that already have external images
      on base cannot be translated or refreshed (list them: `HRD translate missing` `blocked`).
      Official photos with no free license (tourist boards, airports) are neither `licensed` nor

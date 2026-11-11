@@ -16,11 +16,15 @@ adopt with `/hrd translate <slug> --adopt <l>`) or other `causes`. A hold whose 
 `refresh candidate: <slug>` → suggest `/hrd refresh <slug>`. A `screenshots` hold: show its note
 and the inbox `.claude/herald/inbox/<id>/` — "put the files there, then `/hrd resume <id>`"
 (`atoms/_screenshots.md` §5); show the reason as "screenshots/images" — a note with `e1(confirm)`
-names external images waiting for the human's look (`atoms/_images.md` §5). `shots_removed_bytes`
+or `g1(confirm)` names external or scene images waiting for the human's look (`atoms/_images.md`
+§5). Held topics whose note is `tooling: limner busy` or `tooling: limner generating <run_id>` are
+shown apart as "resume when the machine is free" (display only — a batch never picks them; the
+human's `/hrd resume` does). `shots_removed_bytes`
 and `images_removed_bytes` (moved-away screenshots and images kept under
 `.claude/herald/memory/shots/removed/` and `.claude/herald/memory/images/removed/`, never deleted
 by Herald): show each when it is over 50 MB, with the path, so the human can clean it up. In a
-translation repo, `HRD translate missing` `blocked` lists articles with external images: "these
+translation repo, `HRD translate missing` `blocked` lists articles with external images
+(`external-images`) or scene images (`scene-images`): "these
 cannot be translated or refreshed by Herald in 0.17 — to fix one, edit it on base and `/hrd ship
 --reverify`, or merge a PR that removes the external image" (`atoms/_images.md` §6). From the same output,
 `supersede_pending` (old articles a newer one follows, not linked to it yet): for each, "link

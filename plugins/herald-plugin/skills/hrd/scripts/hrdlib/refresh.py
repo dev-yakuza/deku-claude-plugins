@@ -78,14 +78,16 @@ def precheck(root, cfg, slug, for_translation=False, clear=True):
         choices.remove("update")
         blocked.append("update: %s is already in progress on this article — finish or close it first" % ", ".join(same))
     if cfg.translations() and "update" in choices:
-        # 08-images.md §2.6.7 (R3-4, implementation review m10): an article with external images on
-        # base is never refreshed by Herald in a translation repo — reported here, before a topic exists
-        from .images import external_on_base
-        ext = external_on_base(root, cfg, slug)
+        # 08-images.md §2.6.7 (R3-4, implementation review m10), 09 §2.9: an article with external or
+        # scene images on base is never refreshed by Herald in a translation repo — reported here,
+        # before a topic exists
+        from .images import blocked_reason, managed_on_base
+        ext = managed_on_base(root, cfg, slug, kinds=True)
         if ext:
             choices.remove("update")
-            blocked.append("update: external-images (%s) — 0.17 cannot refresh it in a translation repo; edit it on "
-                           "base and `/hrd ship --reverify`, or merge a PR that removes them" % ", ".join(ext))
+            blocked.append("update: %s (%s) — Herald cannot refresh it in a translation repo; edit it on base and "
+                           "`/hrd ship --reverify`, or merge a PR that removes them"
+                           % (blocked_reason(ext), ", ".join(f for f, _ in ext)))
     follows = [t["id"] for t in topics if t.get("follows") in names and t["id"] in busy_ids]
     if follows:
         choices.remove("new")

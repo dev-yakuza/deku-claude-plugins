@@ -98,8 +98,9 @@ Every stage follows the same frame:
 
 Order: writer first; then the illustrator reads the draft, creates images and inserts the
 references into the article itself; then the gate. With `<w>screenshots.json` or
-`<w>images.json` (or OG turned on), screenshots, diagrams, external images and the OG card are
-collected between the illustrator and the gate in the order of `atoms/_images.md` §2 —
+`<w>images.json` (or OG turned on), screenshots, diagrams, external images, scene images (limner
+generates them while the editor-in-chief waits, then the illustrator reviews them) and the OG card
+are collected between the illustrator and the gate in the order of `atoms/_images.md` §2 —
 `stage pass --stage draft` refuses until every one is in.
 
 - **Read list**: `<w>brief.md`, `<w>research.md`, the category guide, `style-guide.md`,
@@ -460,7 +461,9 @@ version>` (SKILL.md version gate):
 - Any hold or stop with a trim `open`: `HRD trim --topic <id> --abort` first.
 - `needs-human` / `stagnation` / `budget` / `screenshots` (note: exactly `HRD shot status`'s
   `note` — `atoms/_screenshots.md` §5; it also names external images waiting for a human, as
-  `e1(confirm)` — `atoms/_images.md` §5; a tooling stop of images: `tooling: images <render|fetch>
+  `e1(confirm)` and scenes as `g1(confirm)` — `atoms/_images.md` §5; a scene generation that
+  waited too long, a busy machine or one that cannot generate: `tooling: limner generating <run_id>`,
+  `tooling: limner busy`, `tooling: limner unavailable (<why>)`; a tooling stop of images: `tooling: images <render|fetch>
   <code>`, `tooling: limner unavailable (<code>)`, `tooling: og side-effects`): keep the branch — commit leftovers as
   `wip(herald): <id>` on it (no push), switch to base, record as above. With translations, the
   wip commit holds only the topic's PR scope (`<w>`, and for a non-`tr-` topic the source and

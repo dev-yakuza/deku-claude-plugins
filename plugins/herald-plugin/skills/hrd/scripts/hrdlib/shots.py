@@ -38,14 +38,17 @@ EXTS = ("png", "jpg", "jpeg", "webp")
 KINDS = ("privacy", "mismatch")
 MAX_BYTES = 10 * 1024 * 1024
 # what a hold note on base may say: ids and kind codes only, never the agent's reason text; an
-# external image waiting for a human's look is `e1(confirm)` (design/herald/08-images.md §2.9)
-NOTE_RE = re.compile(r"^screenshots:( (s|e)[0-9]{1,3}(\((retake:(privacy|mismatch)|confirm)\))?)+$")
+# external or scene image waiting for a human's look is `e1(confirm)`, `g1(confirm)`
+# (design/herald/08-images.md §2.9, 09-scenes.md §2.7.3)
+NOTE_RE = re.compile(r"^screenshots:( (s|e|g)[0-9]{1,3}(\((retake:(privacy|mismatch)|confirm)\))?)+$")
 
 # --- automatic capture (design 07) ---
 CAPTURES = ".claude/herald/ledger/captures.jsonl"  # under the guard's LEDGER glob: ask attended, deny unattended
 CONFIRMATIONS = ".claude/herald/ledger/confirmations.jsonl"
 # external images Herald fetched (08 §2.7.1): rule U's "log" is captures ∪ fetches
 FETCHES = ".claude/herald/ledger/fetches.jsonl"
+# scene images limner generated and Herald received (09 §2.6.1): in rule U's "log" too
+GENERATIONS = ".claude/herald/ledger/generations.jsonl"
 LEDGER_FIELDS = ("topic", "id", "key", "blob", "sha256")
 URL_RE = re.compile(r"^https://[A-Za-z0-9\-._~:/?#\[\]@!&()*+,;=%]+$")
 LANG_RE = re.compile(r"^[a-z]{2,3}(-[A-Z][a-z]{3})?(-([A-Z]{2}|[0-9]{3}))?$")
@@ -345,25 +348,29 @@ class Ledger:
     """The ledgers, read once. Content is (git blob id, sha256 of the bytes); either one
     matching counts as the same content, so a changed .gitattributes cannot hide a capture.
     0.17.0: external images Herald fetched are logged too (`fetches`), so rule U — a logged file
-    no human confirmed — covers them with no other change (design 08 §2.7.1)."""
+    no human confirmed — covers them with no other change (design 08 §2.7.1). 0.18.0: scene
+    images limner generated (`generations`) the same way, and in `idle` and the damage checks,
+    so a repo that only makes scenes still runs rule U, the history check and squash (09 R1-3)."""
 
     def __init__(self, root):
         self.captures, cb = ledger_read(os.path.join(root, CAPTURES))
         self.confirms, fb = ledger_read(os.path.join(root, CONFIRMATIONS))
         self.fetches, xb = ledger_read(os.path.join(root, FETCHES))
-        self.damaged = [(CAPTURES, n) for n in cb] + [(CONFIRMATIONS, n) for n in fb] + [(FETCHES, n) for n in xb]
+        self.generations, gb = ledger_read(os.path.join(root, GENERATIONS))
+        self.damaged = [(CAPTURES, n) for n in cb] + [(CONFIRMATIONS, n) for n in fb] + \
+            [(FETCHES, n) for n in xb] + [(GENERATIONS, n) for n in gb]
 
     @property
     def idle(self):
         """Nothing to judge with: rule U is empty (a new clone, or auto capture never used)."""
-        return not self.captures and not self.fetches and not self.damaged
+        return not self.captures and not self.fetches and not self.generations and not self.damaged
 
     @staticmethod
     def _same(rec, h):
         return bool(h) and (rec.get("blob") == h[0] or rec.get("sha256") == h[1])
 
     def logged(self, h):
-        return [r for r in self.captures + self.fetches if self._same(r, h)]
+        return [r for r in self.captures + self.fetches + self.generations if self._same(r, h)]
 
     def fetch_line(self, h, tid, eid, key):
         """The fetch line that vouches for this very content of item (topic, id, key)."""
@@ -373,6 +380,16 @@ class Ledger:
     def fetch_lines(self, tid, eid, key=None):
         return [r for r in self.fetches if r.get("topic") == tid and r.get("id") == eid
                 and (key is None or r.get("key") == key)]
+
+    def gen_line(self, h, tid, gid, key):
+        """The generation line that vouches for this very content of scene item (topic, id, key)."""
+        return next((r for r in self.generations if self._same(r, h) and
+                     (r.get("topic"), r.get("id"), r.get("key")) == (tid, gid, key)), None)
+
+    def gen_has(self, tid, gid, key, b):
+        """A generation line of (topic, id, key) for exactly this blob (09 §2.4.3 2, R3-2)."""
+        return any((r.get("topic"), r.get("id"), r.get("key"), r.get("blob")) == (tid, gid, key, b)
+                   for r in self.generations)
 
     def confirmed(self, h):
         return any(self._same(r, h) for r in self.confirms)
@@ -391,7 +408,7 @@ class Ledger:
     def damage_text(self):
         where = ", ".join("%s line %d" % w for w in self.damaged)
         first = self.damaged[0][1]
-        images = self.damaged[0][0] == FETCHES
+        images = self.damaged[0][0] in (FETCHES, GENERATIONS)
         return ("the screenshot and image ledgers have a damaged line (%s) — a human removes that line (a protected "
                 "path: the guard asks). If you cannot tell which screenshot or image it recorded, demote or reject "
                 "the ones it may affect. Unattended: hold needs-human with the note `tooling: %s ledger damaged "

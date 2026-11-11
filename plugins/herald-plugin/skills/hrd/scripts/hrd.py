@@ -22,7 +22,7 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.17.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.18.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -220,12 +220,14 @@ def cmd_begin(a):
     known = topic.get("refresh_of") or topic.get("slug")
     tr_slug = topic.get("translate_of") or topic.get("refresh_of")
     if cfg.translations() and tr_slug:
-        # an article with external images is never translated or refreshed by Herald in 0.17.0: a
-        # translation page would carry them without an attribution check (08-images.md §2.6.7)
-        ext = images.external_on_base(root, cfg, tr_slug)
+        # an article with external or scene images is never translated or refreshed by Herald: a
+        # translation page would carry them without an attribution or AI-label check (08-images.md
+        # §2.6.7, 09-scenes.md §2.9)
+        ext = images.managed_on_base(root, cfg, tr_slug, kinds=True)
         if ext:
-            raise HeraldError("external images block translation: %s — hold cannibalization with the note `tooling: "
-                              "external images block translation` (no branch: a cleaned hold)" % ", ".join(ext))
+            what = "external images" if images.blocked_reason(ext) == "external-images" else "scene images"
+            raise HeraldError("%s block translation: %s — hold cannibalization with the note `tooling: %s block "
+                              "translation` (no branch: a cleaned hold)" % (what, ", ".join(f for f, _ in ext), what))
     busy = ghstate.slug_busy(root, cfg, known, exclude=a.topic) if known and not topic.get("translate_of") else []
     if busy:  # L16 again at begin: the queue entry may be older than the other topic
         raise HeraldError("slug in progress: %s — another topic is working on %s" % (busy[0], known))
@@ -543,9 +545,10 @@ def cmd_translate(a):
     else:
         arts, blocked = [], []
         for x in translation.missing(root, cfg, langs):
-            ext = images.external_on_base(root, cfg, x["slug"]) if isinstance(x, dict) and x.get("slug") else []
-            if ext:  # 08-images.md §2.6.7 (R3-4): reported apart, never a candidate
-                blocked.append({"slug": x["slug"], "reason": "external-images", "files": ext})
+            ext = images.managed_on_base(root, cfg, x["slug"], kinds=True) if isinstance(x, dict) and x.get("slug") \
+                else []
+            if ext:  # 08-images.md §2.6.7 (R3-4), 09 §2.9: reported apart, never a candidate
+                blocked.append({"slug": x["slug"], "reason": images.blocked_reason(ext), "files": [f for f, _ in ext]})
             else:
                 arts.append(x)
         emit({"articles": arts, "blocked": blocked})
@@ -1167,9 +1170,10 @@ def cmd_shot(a):
 
 
 def cmd_image(a):
-    """Diagrams, external images and the OG card (design/herald/08-images.md)."""
+    """Diagrams, external images, the OG card (design/herald/08-images.md) and scene images
+    (09-scenes.md)."""
     root, cfg = ctx()
-    if a.action not in ("kinds", "doctor", "og") and not a.topic:
+    if a.action not in ("kinds", "doctor", "og") and not a.topic and not (a.action == "generate" and a.trial):
         raise HeraldError("image %s needs --topic" % a.action)
     if a.action == "kinds":
         emit(images.kinds(root, cfg, a.topic))
@@ -1203,12 +1207,27 @@ def cmd_image(a):
         if a.pr is not None and not a.human_push:
             raise HeraldError("--pr goes with --human-push")
         emit(images.og(root, cfg, a.topic, human_push=a.human_push, pr=a.pr))
+    elif a.action == "generate":  # scenes: start or take over limner's run, wait, take in (09 §2.4.3)
+        wait = images.GEN_WAIT if a.wait is None else a.wait
+        if a.trial:
+            emit(images.generate_trial(root, cfg, wait=wait))
+        elif a.reset_wait:
+            emit(images.reset_wait(root, cfg, a.topic))
+        else:
+            emit(images.generate(root, cfg, a.topic, wait=wait))
+    elif a.action == "cancel":
+        emit(images.cancel(root, cfg, a.topic))
+    elif a.action == "review":  # the illustrator's look before a human's — state only (09 §2.7.2)
+        if not a.id or "," in a.id:
+            raise HeraldError("image review takes one --id")
+        emit(images.review(root, cfg, a.topic, a.id, ok=a.ok, redo=a.redo, note=a.note))
     elif a.action == "confirm":  # a human looked at the images (refused unattended; the guard asks)
         emit(images.confirm(root, cfg, a.topic, a.id))
     elif a.action == "reject":
         if not a.id or "," in a.id:
             raise HeraldError("image reject takes one --id")
-        emit(images.reject(root, cfg, a.topic, a.id, reason=a.reason, drop=a.drop, refetch=a.refetch))
+        emit(images.reject(root, cfg, a.topic, a.id, reason=a.reason, drop=a.drop, refetch=a.refetch,
+                           regenerate=a.regenerate))
     elif a.action == "status":
         emit(images.status(root, cfg, a.topic, rev=a.rev))
 
@@ -1380,7 +1399,8 @@ def build():
     p.add_argument("--slug"); p.add_argument("--path")
     p.set_defaults(fn=cmd_shot)
     p = sp.add_parser("image"); p.add_argument("action", choices=["kinds", "doctor", "texts", "render", "fetch", "snippet",
-                                                                 "plan", "og", "confirm", "reject", "status"])
+                                                                 "plan", "og", "generate", "cancel", "review",
+                                                                 "confirm", "reject", "status"])
     p.add_argument("--topic"); p.add_argument("--id", help="ids, comma-separated (reject: one)")
     p.add_argument("--check", action="store_true", help="plan: check only, write nothing")
     p.add_argument("--source", choices=["svg", "drawn"], help="texts: the SVG source or the drawn PNG (default)")
@@ -1390,6 +1410,11 @@ def build():
                    help="render: only diagrams a human changed in a pushed PR (ship §5) — never a settings change")
     p.add_argument("--reason", help="reject: why — nothing that must not reach a PR (300 characters)")
     p.add_argument("--drop", action="store_true"); p.add_argument("--refetch", action="store_true")
+    p.add_argument("--regenerate", action="store_true", help="reject: a scene generated again on this machine")
+    p.add_argument("--wait", type=int, help="generate: seconds to wait this call (default 240, at most 540)")
+    p.add_argument("--reset-wait", action="store_true", help="generate: the collect step's wait starts again")
+    p.add_argument("--ok", action="store_true"); p.add_argument("--redo", action="store_true")
+    p.add_argument("--note", help="review: one line — what the reviewer saw")
     p.add_argument("--rev"); p.add_argument("--command", help="doctor: limner's argv (one string) before config has one")
     p.set_defaults(fn=cmd_image)
     p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)

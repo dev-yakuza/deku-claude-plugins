@@ -92,7 +92,22 @@ def _covers(r, globs):
     return bool(r) and any(g.startswith(r + "/") for g in globs)
 
 
-def classify_path(r):
+def limner_state_globs(cfg):
+    """limner's whole state dir (design/herald/09-scenes.md §2.13, R2-3): its records vouch for a
+    generated scene, and `tmp/` holds records limner adopts into `records/`; Herald's own job and
+    output folders live there too. Matched by path only; the default `.limner` without config."""
+    sd = ".limner"
+    try:
+        blk = cfg.get("limner") if cfg is not None else None
+        v = blk.get("state_dir") if isinstance(blk, dict) else None
+    except Exception:  # noqa: BLE001 — no readable config: the default
+        v = None
+    if isinstance(v, str) and v.strip("/ ") and not os.path.isabs(v) and ".." not in v.split("/"):
+        sd = v.strip("/")
+    return [sd, sd + "/*", sd + "/**"]
+
+
+def classify_path(r, cfg=None):
     if _covers(r, CRITERIA):  # a directory holding criteria too (`rm -r docs/editorial/channels`)
         return "criteria file %s" % r
     if r in PERSONAS:
@@ -103,6 +118,8 @@ def classify_path(r):
         return "verification ledger %s" % r
     if commits._match(r, RENDERS):
         return "diagram render record %s" % r
+    if r and _covers(r, limner_state_globs(cfg)):
+        return "limner state %s" % r
     return None
 
 
@@ -198,7 +215,7 @@ def staged_after(root, argv, pending=()):
 
 def check_edit(root, cfg, tool, ti):
     r = rel(root, ti.get("file_path") or ti.get("notebook_path") or "")
-    what = classify_path(r)
+    what = classify_path(r, cfg)
     if what:
         protect("editing the %s changes Herald's verification baseline or enforcement." % what)
     if r == CONFIG and config_change_protected(root, ti, tool):
@@ -601,7 +618,7 @@ def check_bash(root, cfg, cmd):
             decide("ask", "running the deploy command publishes the whole base branch — confirm this is `ship` step 7.")
         # 3. writes to protected paths through the shell (actual write targets only)
         for token in write_targets(seg):
-            what = classify_path(rel(root, token))
+            what = classify_path(rel(root, token), cfg)
             if what:
                 protect("shell write to the %s." % what)
             if rel(root, token) == CONFIG:

@@ -754,8 +754,9 @@ def stage_pass(root, cfg, tid, stage, amend=False):
     if stage == "draft":
         from .shots import draft_problems
         problems = draft_problems(root, cfg, tid, st)
-        from .images import draft_problems as image_problems
+        from .images import draft_problems as image_problems, label_problems
         problems += image_problems(root, cfg, tid, st)  # diagrams, external images, OG (08-images.md §2.10)
+        problems += label_problems(root, cfg, tid, st)  # every scene of the slug keeps its AI label (09 §2.8)
         if problems:  # every listed screenshot in place before the gate (design 06 §2.7)
             raise HeraldError("; ".join(problems))
     if stage == "draft" or (stage == "verify" and amend):
@@ -826,8 +827,9 @@ def stage_pass(root, cfg, tid, stage, amend=False):
             raise HeraldError("verify.json has unsupported or contradicted claims")
         from .translation import lang_record, verify_problems
         problems = verify_problems(root, cfg, st, ver)
-        from .images import verify_problems as image_problems
+        from .images import label_problems, verify_problems as image_problems
         problems += image_problems(root, cfg, tid, st, ver, amend=amend)  # drawn diagram text (08-images.md §2.12)
+        problems += label_problems(root, cfg, tid, st)  # outside run_gate, `--amend` too (09 §2.8)
         if problems:
             raise HeraldError("; ".join(problems))
         bh = bundle_hash(root, cfg, st["slug"])

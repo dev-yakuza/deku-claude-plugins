@@ -1,17 +1,22 @@
-"""Images Herald makes or fetches for an article (design/herald/08-images.md, 0.17.0).
+"""Images Herald makes or fetches for an article (design/herald/08-images.md, 0.17.0;
+09-scenes.md, 0.18.0).
 
 brief plans each image place as one kind: a screenshot (06/07 — `screenshots.json`, untouched
-here), an SVG diagram the illustrator draws and limner renders to PNG, or an external image of
-a real place, thing or work fetched from the web under a free license or as a quotation. The
-diagrams and external images are listed in `<w>images.json`; this module checks that manifest
-(`plan`), renders diagrams, fetches external images, writes the OG card, and judges every item
-from evidence, never from a state field (P13):
+here), an SVG diagram the illustrator draws and limner renders to PNG, an external image of a
+real place, thing or work fetched from the web under a free license or as a quotation, or a
+scene image — a mood or situation that need not be real — limner generates without any text in
+it. The diagrams, external and scene images are listed in `<w>images.json`; this module checks
+that manifest (`plan`), renders diagrams, fetches external images, generates scenes, writes the
+OG card, and judges every item from evidence, never from a state field (P13):
 
 - a diagram is `ready` when its PNG's content is in a committed render record
   (`<w>diagram-renders.jsonl`, written only by `render`, protected by the guard) — the text drawn
   into it is what verify checks;
 - an external image is `ready` when its content is in this machine's fetch ledger and a human
-  confirmed that content (`ledger/fetches.jsonl` + `confirmations.jsonl`, rule U of 0.16.0).
+  confirmed that content (`ledger/fetches.jsonl` + `confirmations.jsonl`, rule U of 0.16.0);
+- a scene is `ready` when its content is in this machine's generation ledger (lines Herald wrote
+  from what limner reported for this very job) and a human confirmed that content
+  (`ledger/generations.jsonl` + `confirmations.jsonl`) — its body text always carries the AI label.
 
 A repo without an `images` config block behaves exactly as 0.16.0.
 """
@@ -29,14 +34,15 @@ import urllib.parse
 from collections import Counter
 
 from . import limner
-from .shots import (CONFIRMATIONS, FETCHES, Ledger, _bytes_hashes, blob, file_hashes, kind_of, ledger_append,
-                    move_to_removed, on_base, public_url, removed_bytes)
+from .shots import (CONFIRMATIONS, FETCHES, GENERATIONS, Ledger, _bytes_hashes, blob, file_hashes, kind_of,
+                    ledger_append, move_to_removed, on_base, public_url, removed_bytes)
 from .util import HeraldError, git, git_ok, now_iso, read_json
 
 MANIFEST = "images.json"
 RENDERS = "diagram-renders.jsonl"
-ID_RES = {"diagram": re.compile(r"^d[0-9]{1,3}$"), "external": re.compile(r"^e[0-9]{1,3}$")}
-SCENE_RE = re.compile(r"^g[0-9]{1,3}$")  # 0.18.0 scene images: the prefix and kind are reserved
+ID_RES = {"diagram": re.compile(r"^d[0-9]{1,3}$"), "external": re.compile(r"^e[0-9]{1,3}$"),
+          "scene": re.compile(r"^g[0-9]{1,3}$")}
+SCENE_RE = ID_RES["scene"]
 EXTERNAL_EXTS = ("png", "jpg", "jpeg", "webp")
 VALUE_BAD = re.compile(r"[<>\"\[\]\\\n\r]")  # alt, credit, title go into the body without escaping
 VALUE_MAX = 300
@@ -70,6 +76,24 @@ MAX_PIXELS = 40_000_000
 OG_TOOL_TIMEOUT = 45
 
 ENV_FETCH = ("net", "tls", "dns-fail", "retry-later", "timeout")
+
+# scene images (09-scenes.md §2.2): sizes are code constants — a size changes the generation time
+SCENE_SIZES = {"landscape": (1024, 576), "square": (896, 896), "portrait": (720, 896)}
+NO_TEXT = ("No text, no letters, no numbers, no writing, no logos, no watermarks; any signs, screens and papers "
+           "are blank.")  # appended to every scene prompt; no setting changes it (P21)
+SCENE_PROMPT_MAX = 1000     # limner takes 1500; the rest is the style and NO_TEXT
+SCENE_STYLE_MAX = 300
+SCENE_TEXT_RE = re.compile(r"^[\x20\x21\x23-\x5b\x5d-\x7e]*$")  # printable ASCII without " and \
+SCENE_LABELS = {"ko": "AI 생성 이미지", "ja": "AI生成画像", "en": "AI-generated image"}
+SCENE_FIGURE = "![{alt}]({ref})\n*{label}*"
+SCENE_FIELDS = ("ref", "alt", "label")
+SEED_MAX = 2 ** 32 - 1
+GEN_WAIT = 240              # one `generate` call's default budget; the caller's Bash timeout is (wait + 60) s
+GEN_WAIT_MAX = 540          # limner's own `status --wait-seconds` ceiling
+GEN_RUN_TIMEOUT = 60        # `run --wait 30` ends by itself while the machine is busy
+GEN_CANCEL_WAIT = 30
+GEN_RETRY = ("memory", "metal", "crashed")  # and `signal:*` — retried once in the same call
+TRIAL_PROMPT = "A cup of tea on a wooden table by a window"
 
 
 # --- paths and config --------------------------------------------------------------------------
@@ -141,11 +165,12 @@ def illustrator_on(cfg):
 
 
 def figure_errors_by_kind(cfg):
-    """{"diagram", "licensed", "quotation": [errors]} — each list turns only its own kind off
-    (implementation review m11): a `diagrams` setting or the diagram template turns diagrams off,
-    the licensed template (and `words`) external images, the quotation template quotations. The
-    quotation template is required only where a category may quote (`quotation_categories`)."""
-    out = {"diagram": [], "licensed": [], "quotation": []}
+    """{"diagram", "licensed", "quotation", "scene": [errors]} — each list turns only its own kind
+    off (implementation review m11): a `diagrams` setting or the diagram template turns diagrams
+    off, the licensed template (and `words`) external images, the quotation template quotations,
+    the scene template and `words.scene` scenes (09 §2.8). The quotation template is required only
+    where a category may quote (`quotation_categories`)."""
+    out = {"diagram": [], "licensed": [], "quotation": [], "scene": []}
     if not managed(cfg):
         return out
     d = (block(cfg) or {}).get("diagrams")
@@ -169,6 +194,19 @@ def figure_errors_by_kind(cfg):
         quoting = bool(_rules(cfg.root)["images"]["external"].get("quotation_categories"))
     except Exception:  # noqa: BLE001 — unreadable rules: the gate reports them
         quoting = False
+    t = f.get("scene")
+    if t is not None:
+        if not isinstance(t, str) or not t.strip():
+            out["scene"].append("images.figure.scene must be a string")
+        else:
+            holes = set(re.findall(r"\{([^{}]*)\}", t))
+            bad = sorted(holes - set(SCENE_FIELDS))
+            if bad:
+                out["scene"].append("images.figure.scene has unknown placeholders: %s" % ", ".join("{%s}" % b for b in bad))
+            missing = [x for x in SCENE_FIELDS if x not in holes]
+            if missing:
+                out["scene"].append("images.figure.scene needs %s (the AI label is never left out — P19)"
+                                    % ", ".join("{%s}" % m for m in missing))
     for name in ("diagram", "licensed", "quotation"):
         t = f.get(name)
         if t is None:
@@ -196,7 +234,11 @@ def figure_errors_by_kind(cfg):
             errs.append("images.figure.words must be an object")
         else:
             for k, v in w.items():
-                if k == "orientation":
+                if k == "scene":
+                    if not isinstance(v, str) or not v.strip() or len(v) > 60 or VALUE_BAD.search(v):
+                        out["scene"].append("images.figure.words.scene is the AI label: 1–60 characters, no < > \" [ ] "
+                                            "\\ or line break")
+                elif k == "orientation":
                     if not isinstance(v, dict) or not all(isinstance(x, str) for x in v.values()):
                         errs.append("images.figure.words.orientation must map landscape/portrait to strings")
                 elif not isinstance(v, str) or VALUE_BAD.search(v):
@@ -211,6 +253,55 @@ def figure_errors(cfg):
     of Config.validate (L4); each turns only its own kind off (`figure_errors_by_kind`)."""
     by = figure_errors_by_kind(cfg)
     return list(dict.fromkeys(by["diagram"] + by["licensed"] + by["quotation"]))
+
+
+def scene_conf(cfg):
+    """`images.scenes` with its defaults, or None (scenes are off by config)."""
+    c = (block(cfg) or {}).get("scenes")
+    if not isinstance(c, dict):
+        return None
+    return {"max": c.get("max", 2), "per_category": c.get("per_category") if isinstance(c.get("per_category"), dict)
+            else {}, "style": c.get("style") or "", "wait_minutes": c.get("wait_minutes", 30)}
+
+
+def _small_int(v, lo, hi):
+    return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
+
+
+def scene_errors(cfg):
+    """`images.scenes`, `figure.scene` and `words.scene` problems (09 §2.11) — [] when fine or when
+    the repo has no scenes. Kept out of Config.validate and the guard (L4): any turns scenes off."""
+    if not managed(cfg) or "scenes" not in (block(cfg) or {}):
+        return []
+    c = block(cfg)["scenes"]
+    if not isinstance(c, dict):
+        return ["images.scenes must be an object"]
+    errors = []
+    if not _small_int(c.get("max", 2), 0, 6):
+        errors.append("images.scenes.max must be an integer from 0 to 6")
+    per = c.get("per_category", {})
+    if not isinstance(per, dict) or not all(isinstance(k, str) and _small_int(v, 0, 6) for k, v in per.items()):
+        errors.append("images.scenes.per_category maps a category to an integer from 0 to 6")
+    st = c.get("style", "")
+    if not isinstance(st, str) or len(st) > SCENE_STYLE_MAX or not SCENE_TEXT_RE.match(st):
+        errors.append("images.scenes.style is at most %d printable ASCII characters (English), without \" \\ or a line "
+                      "break" % SCENE_STYLE_MAX)
+    if not _small_int(c.get("wait_minutes", 30), 5, 120):
+        errors.append("images.scenes.wait_minutes must be an integer from 5 to 120")
+    return errors + figure_errors_by_kind(cfg)["scene"]
+
+
+def scene_label(cfg):
+    """The AI label `{label}`: `words.scene`, else the source language's default, else None."""
+    w = words(cfg).get("scene")
+    if isinstance(w, str) and w.strip():
+        return w
+    return SCENE_LABELS.get(lang_tag(cfg))
+
+
+def scene_template(cfg):
+    t = figure(cfg).get("scene")
+    return t if isinstance(t, str) and t.strip() else SCENE_FIGURE
 
 
 def og_errors(root, cfg):
@@ -341,6 +432,36 @@ def external_off(root, cfg, category):
     return None
 
 
+def scene_limit(cfg, category):
+    c = scene_conf(cfg) or {}
+    per = c.get("per_category") or {}
+    mx = per.get(category, c.get("max", 2)) if category is not None else c.get("max", 2)
+    return mx if _small_int(mx, 0, 6) else 0
+
+
+def scene_off(root, cfg, category):
+    """Why scenes are off by config (None: on) — never looks at this machine's limner (09 §2.1).
+    `og-fallback`: a site that may use the first image as its SNS card while OG is off by config
+    would show an AI picture without its label there (§2.10; no og block counts as falling back,
+    as for quotations)."""
+    if not managed(cfg) or scene_conf(cfg) is None:
+        return "no-config"
+    if not illustrator_on(cfg):
+        return "no-illustrator"
+    if cfg.translations():
+        return "translations"
+    if scene_errors(cfg) or limner.limner_errors(cfg):
+        return "config"
+    oc = og_conf(cfg)
+    if (True if oc is None else oc["fallback_first_image"]) and not og_on(root, cfg):
+        return "og-fallback"
+    if scene_label(cfg) is None:
+        return "label:%s" % lang_tag(cfg)
+    if scene_limit(cfg, category) <= 0:
+        return "category"
+    return None
+
+
 def og_on(root, cfg):
     """OG is on by config (§2.8.1): a block, no `og_errors`, and — for limner — a language it
     draws. plan and stage pass read only this; whether this machine can make it is `og`'s job."""
@@ -374,7 +495,7 @@ def kinds(root, cfg, tid=None):
                 cat = get_topic(load_topics(root), tid).get("category")
             except HeraldError:
                 pass
-    out = {"screenshot": {"ok": True}, "scene": {"ok": False, "why": "0.18"}}
+    out = {"screenshot": {"ok": True}}
     why = diagram_off(cfg)
     if why is None:
         p = limner.probe(root, cfg)
@@ -397,6 +518,12 @@ def kinds(root, cfg, tid=None):
         p = limner.probe(root, cfg)
         og.update(ok=p["ok"], by="limner", why=None if p["ok"] else p["code"])
     out["og"] = og
+    why = scene_off(root, cfg, cat)
+    if why is None:
+        p = limner.gen_probe(root, cfg)
+        why = None if p["ok"] else p["code"]
+    out["scene"] = {"ok": why is None, "max": scene_limit(cfg, cat) if why is None else 0,
+                    "sizes": list(SCENE_SIZES) if why is None else [], "why": why}
     return out
 
 
@@ -438,6 +565,35 @@ def item_key(it):
         return None
     raw = json.dumps([it.get("file"), it.get("source_url")])
     return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def full_prompt(cfg, it):
+    """The prompt limner gets: the item's prompt, the repo's style, then NO_TEXT (09 §2.2)."""
+    style = (scene_conf(cfg) or {}).get("style")
+    return " ".join([str(it.get("prompt") or "")] + ([style] if style else []) + [NO_TEXT])
+
+
+def scene_key(cfg, it):
+    """A scene's key: what limner is asked to draw (full prompt, size, seed, model) — not `file`
+    (R3-3: renaming the file must not bring a rejected picture back), not alt or purpose."""
+    w, h = SCENE_SIZES.get(it.get("size"), (None, None))
+    raw = json.dumps([full_prompt(cfg, it), w, h, it.get("seed"), limner.GEN_MODEL])
+    return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def rejected_scene_keys(st, iid=None):
+    """Keys a review (`review_rejects`) or a human (`image_rejects` `job`) turned down — plan
+    refuses a scene item with one of them (§2.7.2: the redo loop cannot return to the same picture)."""
+    out = [r.get("key") for r in st.get("review_rejects") or [] if isinstance(r, dict) and
+           (iid is None or r.get("id") == iid)]
+    out += [r.get("job") for r in st.get("image_rejects") or [] if isinstance(r, dict) and r.get("job") and
+            (iid is None or r.get("id") == iid)]
+    return [k for k in out if k]
+
+
+def scene_attempts(st, iid):
+    """1 + the decisions that turned a picture of this place down (R2-1 — never ledger lines)."""
+    return 1 + len(set(rejected_scene_keys(st, iid)))
 
 
 def _read(root, rel, rev=None):
@@ -523,6 +679,9 @@ def snippet_text(cfg, it, orientation=None, root=None, slug=None):
     if root and slug:
         it = cur_item(root, cfg, slug, it)
     w = words(cfg)
+    if it.get("kind") == "scene":  # the AI label always goes with the picture (P19)
+        vals = {"ref": it.get("ref") or "", "alt": it.get("alt") or "", "label": scene_label(cfg) or ""}
+        return re.sub(r"\{(ref|alt|label)\}", lambda m: vals[m.group(1)], scene_template(cfg))
     if it.get("kind") == "diagram":
         t = figure(cfg).get("diagram") or "![{alt}]({ref})"
         use = None
@@ -556,11 +715,13 @@ def check_manifest(root, cfg, tid, st, man):
         errors.append("every images[] entry must be an object")
     cat = _category(root, cfg, slug)
     d_off, x_off = diagram_off(cfg), external_off(root, cfg, cat)
+    g_off = scene_off(root, cfg, cat) if any(i.get("kind") == "scene" for i in items) else None
     lim = external_limits(root, cfg, cat)
     exts_ok = allowed_exts(root, cfg, slug)
     claims = research_claims(root, tid)
     cands = _candidate_urls(_candidates_section(root, tid))
-    rejected = {r.get("source_url") for r in st.get("image_rejects") or [] if isinstance(r, dict)}
+    rejected = {r.get("source_url") for r in st.get("image_rejects") or [] if isinstance(r, dict) and r.get("source_url")}
+    rejected_keys = set(rejected_scene_keys(st))
     shot_files = set()
     try:
         from .shots import load_manifest as shot_manifest
@@ -570,19 +731,17 @@ def check_manifest(root, cfg, tid, st, man):
     og = cfg.og_path(slug) if og_conf(cfg) else None
     prev_items = ((st.get("images") or {}).get("items") or {})
     seen, files, srefs = set(), set(), set()
-    n_ext = n_quote = 0
+    n_ext = n_quote = n_scene = 0
     for i, it in enumerate(items):
         iid = it.get("id")
         where = iid if isinstance(iid, str) else "images[%d]" % i
         kind = it.get("kind")
-        if isinstance(iid, str) and SCENE_RE.match(iid) or kind == "scene":
-            errors.append("%s: scene images arrive in 0.18 — leave that place out" % where)
-            continue
         if kind not in ID_RES:
-            errors.append("%s: kind must be diagram or external" % where)
+            errors.append("%s: kind must be diagram, external or scene" % where)
             continue
         if not isinstance(iid, str) or not ID_RES[kind].match(iid):
-            errors.append("%s: a %s id is %s1..%s999" % (where, kind, kind[0], kind[0]))
+            pre = {"diagram": "d", "external": "e", "scene": "g"}[kind]
+            errors.append("%s: a %s id is %s1..%s999" % (where, kind, pre, pre))
         elif iid in seen:
             errors.append("%s: duplicate id" % iid)
         seen.add(iid)
@@ -590,6 +749,8 @@ def check_manifest(root, cfg, tid, st, man):
             errors.append("%s: diagrams are off here (%s)" % (where, d_off))
         if kind == "external" and x_off:
             errors.append("%s: external images are off here (%s)" % (where, x_off))
+        if kind == "scene" and g_off:
+            errors.append("%s: scene images are off here (%s) — leave that place out" % (where, g_off))
         f = it.get("file")
         if not isinstance(f, str) or not f.startswith(img) or "/" in f[len(img):] or ".." in f.split("/") or \
                 not f[len(img):].startswith("%s-" % iid):
@@ -600,8 +761,8 @@ def check_manifest(root, cfg, tid, st, man):
         files.add(f)
         srefs.add(it.get("ref"))
         ext = f.rsplit(".", 1)[-1].lower() if "." in f else ""
-        if kind == "diagram" and ext != "png":
-            errors.append("%s: a diagram is published as .png" % where)
+        if kind in ("diagram", "scene") and ext != "png":
+            errors.append("%s: a %s is published as .png" % (where, kind))
         if kind == "external" and ext not in exts_ok:
             errors.append("%s: .%s is not an extension this repo publishes (gitignored or unsupported) — use one of %s"
                           % (where, ext, ", ".join(exts_ok) or "none"))
@@ -623,6 +784,15 @@ def check_manifest(root, cfg, tid, st, man):
         if kind == "diagram":
             errors += _diagram_errors(root, tid, where, it, claims)
             continue
+        if kind == "scene":
+            n_scene += 1
+            errors += _scene_errors(cfg, where, it, rejected_keys)
+            if not g_off and scene_label(cfg):
+                c = text.count(snippet_text(cfg, it, None, root, slug))
+                if c != 1:
+                    errors.append("%s: the picture with its AI label (`HRD image snippet --topic %s --id %s`) must be in "
+                                  "the article verbatim exactly once (found %d)" % (where, tid, iid, c))
+            continue
         n_ext += 1
         errors += _external_errors(root, cfg, where, it, lim, cands, rejected)
         if it.get("use") == "quotation":
@@ -637,6 +807,8 @@ def check_manifest(root, cfg, tid, st, man):
                               "verbatim exactly once (found %d)" % (where, tid, iid, c))
     if n_ext and n_ext > lim["max"]:
         errors.append("%d external images — this category allows %d" % (n_ext, lim["max"]))
+    if n_scene and not g_off and n_scene > scene_limit(cfg, cat):
+        errors.append("%d scene images — this category allows %d" % (n_scene, scene_limit(cfg, cat)))
     if n_quote:
         if n_quote > (lim["quotation_max"] or 0):
             errors.append("%d quotations — at most %s" % (n_quote, lim["quotation_max"]))
@@ -685,6 +857,24 @@ def _diagram_errors(root, tid, where, it, claims):
                 errors.append("%s: %r maps to %s, which research.md does not have" % (where, t["text"][:40], c))
             elif claims[c]:
                 errors.append("%s: %r maps to %s, which is withdrawn" % (where, t["text"][:40], c))
+    return errors
+
+
+def _scene_errors(cfg, where, it, rejected_keys):
+    errors = []
+    if "refs" in it:
+        errors.append("%s: a scene takes no refs (0.18 draws from the prompt alone)" % where)
+    if it.get("size") not in SCENE_SIZES:
+        errors.append("%s: size must be one of %s" % (where, ", ".join(SCENE_SIZES)))
+    if not _small_int(it.get("seed"), 0, SEED_MAX):
+        errors.append("%s: seed must be an integer from 0 to %d" % (where, SEED_MAX))
+    pr = it.get("prompt")
+    if not isinstance(pr, str) or not pr.strip() or len(pr) > SCENE_PROMPT_MAX or not SCENE_TEXT_RE.match(pr):
+        errors.append("%s: prompt is English, 1–%d printable ASCII characters, without \" \\ or a line break (a "
+                      "Japanese or Korean word makes the model draw letters)" % (where, SCENE_PROMPT_MAX))
+    elif scene_key(cfg, it) in rejected_keys:
+        errors.append("%s: this prompt, seed and size were turned down before (review or a human) — change the seed "
+                      "or the prompt" % where)
     return errors
 
 
@@ -931,6 +1121,27 @@ def fail_closed(tid, iid, rec, led, it=None):
             "`tooling: images fetch record missing %s`)" % (iid, tid, iid, iid))
 
 
+def scene_state(root, cfg, tid, it, led, rev=None, path=None):
+    """`ready` (a generation line of this item and key for this content, and a human confirmed
+    it), `generated` (the line only) or `pending` (09 §2.5)."""
+    h = _rev_hashes(root, rev, path or it.get("file"))
+    if not h or not led.gen_line(h, tid, it.get("id"), scene_key(cfg, it)):
+        return "pending"
+    return "ready" if led.confirmed(h) else "generated"
+
+
+def scene_fail_closed(tid, iid, rec, led):
+    """§2.5 (v4 R3-2): the state says this topic generated a picture here (`generated_blob`), but
+    this machine's ledger has no line of that very content — another machine made it."""
+    b = (rec or {}).get("generated_blob")
+    if not b or led.gen_has(tid, iid, rec.get("key"), b):
+        return None
+    return ("%s: no generation record of this picture on this machine — resume on the machine that generated it, or "
+            "`HRD image reject --topic %s --id %s --regenerate --reason 'regenerate on this machine'`, then `HRD image "
+            "generate` and `HRD image confirm` (unattended: hold needs-human, note `tooling: images generation record "
+            "missing %s`)" % (iid, tid, iid, iid))
+
+
 # --- plan ---------------------------------------------------------------------------------------
 
 def _hash(root, rel):
@@ -959,7 +1170,8 @@ def plan(root, cfg, tid, check_only=False):
     if not slug:
         raise HeraldError("no slug yet for %s" % tid)
     man = load_manifest(root, tid)
-    out = {"errors": [], "warnings": [], "pending": {"render": [], "fetch": [], "confirm": []}, "og": _og_text(root, cfg, st)}
+    out = {"errors": [], "warnings": [], "pending": {"render": [], "fetch": [], "generate": [], "confirm": []},
+           "og": _og_text(root, cfg, st)}
     rec = st.get("images") or {}
     if not _items(man) and not (man or {}).get("images"):
         if check_only or not rec:
@@ -967,6 +1179,8 @@ def plan(root, cfg, tid, check_only=False):
         files = dict(rec.get("files") or {})
         st["images"] = {"manifest": None, "body": None, "awaiting": False, "files": files, "items": {},
                         "og": rec.get("og")}
+        if rec.get("gen"):
+            st["images"]["gen"] = rec["gen"]
         save_state(root, tid, st)
         out["moved"] = move_to_removed(root, tid, [f for f in files if not on_base(root, cfg, f)], "unlisted",
                                        area="images")
@@ -977,8 +1191,8 @@ def plan(root, cfg, tid, check_only=False):
         return out
     led = Ledger(root)
     items = _items(man)
-    led.check(sum(1 for it in items if it.get("kind") == "external" and os.path.isfile(os.path.join(root, it["file"]))),
-              warnings)
+    led.check(sum(1 for it in items if it.get("kind") in ("external", "scene") and
+                  os.path.isfile(os.path.join(root, it["file"]))), warnings)
     lines, dropped = slug_renders(root, cfg, slug)
     if dropped:
         warnings.append("diagram render records: %d damaged line(s) ignored" % dropped)
@@ -998,6 +1212,25 @@ def plan(root, cfg, tid, check_only=False):
             new[iid] = {"kind": "diagram", "file": f, "status": status}
             if status == "pending":
                 out["pending"]["render"].append(iid)
+            continue
+        if it["kind"] == "scene":
+            key = scene_key(cfg, it)
+            p = prev.get(iid) or {}
+            if h and not led.gen_line(h, tid, iid, key):
+                to_move.append(f)  # not Herald's copy of what limner made for this very item and key
+            status = scene_state(root, cfg, tid, it, led)
+            r = {"kind": "scene", "file": f, "key": key, "status": status}
+            if p.get("key") == key:  # a new key drops the old picture's marks (R3-2)
+                for k in ("generated_at", "generated_blob", "reviewed", "review_note"):
+                    if p.get(k) is not None:
+                        r[k] = p[k]
+                if status == "ready":
+                    r["sha"] = p.get("sha") or blob(root, f)
+            new[iid] = r
+            if status == "pending":
+                out["pending"]["generate"].append(iid)
+            elif status == "generated":
+                out["pending"]["confirm"].append(iid)
             continue
         key = item_key(it)
         p = prev.get(iid) or {}
@@ -1021,6 +1254,8 @@ def plan(root, cfg, tid, check_only=False):
             out["pending"]["confirm"].append(iid)
     st["images"] = {"manifest": _hash(root, manifest_rel(tid)), "body": _hash(root, cfg.body_path(slug)),
                     "awaiting": True, "files": files, "items": new, "og": rec.get("og")}
+    if rec.get("gen"):
+        st["images"]["gen"] = rec["gen"]  # the scene run this topic follows (§2.4.3)
     save_state(root, tid, st)
     out["moved"] = move_to_removed(root, tid, [f for f in dict.fromkeys(to_move) if not on_base(root, cfg, f)],
                                    "unlisted", area="images")
@@ -1476,6 +1711,428 @@ def fetch(root, cfg, tid, ids=None, version="0"):
     return out
 
 
+# --- generate scenes (09 §2.4) -------------------------------------------------------------------
+
+LIVE = ("starting", "running")
+
+
+def _num(iid):
+    return int(iid[1:]) if isinstance(iid, str) and iid[1:].isdigit() else 0
+
+
+def _gen_paths(root, cfg, tid):
+    """(state dir, its root-relative spelling, the job file, the output folder's relative path)."""
+    sd = limner.state_dir_abs(root, cfg)
+    sd_rel = limner.rel_to_root(root, sd)
+    return sd, sd_rel, os.path.join(sd, limner.JOBS_DIR, "%s.json" % tid), "%s/%s/%s" % (sd_rel, limner.OUT_DIR, tid)
+
+
+def _job_entry(cfg, it, out_rel):
+    w, h = SCENE_SIZES[it["size"]]
+    return {"id": it["id"], "out": out_rel, "width": w, "height": h, "prompt": full_prompt(cfg, it), "refs": [],
+            "seed": it["seed"]}
+
+
+def _write_job(path, jobs):
+    """The job file (rewritten on every call — the same jobs give the same bytes and run_id)."""
+    data = json.dumps({"version": 1, "model": limner.GEN_MODEL, "jobs": jobs}, sort_keys=True).encode("utf-8")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    return hashlib.sha256(data).hexdigest()
+
+
+def _verify_record(root, cfg, out_rel, job):
+    """(bytes, record, None) or (None, record, code) — §2.6.2: limner's record of this output says
+    it generated these bytes from this very job. The model name is not compared (the record names
+    the quantized model, R1-1)."""
+    try:
+        with open(os.path.join(root, out_rel), "rb") as f:
+            data = f.read()
+    except OSError:
+        return None, None, "record-mismatch"
+    rec = limner.read_record(root, cfg, out_rel)
+    if rec is None:
+        return None, None, "record-mismatch"
+    if rec.get("generator") != "mflux":
+        if rec.get("generator") == "fake" and limner.fake_allowed():
+            pass
+        else:
+            return None, rec, "fake-generator" if rec.get("generator") == "fake" else "record-mismatch"
+    ok = rec.get("kind") == "generate" and rec.get("contract") == limner.CONTRACT and \
+        isinstance(rec.get("job_sha"), str) and rec.get("job_sha") and \
+        isinstance(rec.get("out"), str) and os.path.normpath(rec["out"]) == os.path.normpath(out_rel) and \
+        rec.get("out_sha256") == hashlib.sha256(data).hexdigest() and rec.get("prompt") == job["prompt"] and \
+        rec.get("seed") == job["seed"] and rec.get("width") == job["width"] and rec.get("height") == job["height"] and \
+        rec.get("refs") == []
+    return (data, rec, None) if ok else (None, rec, "record-mismatch")
+
+
+def _receive(root, cfg, tid, st, it, job, led, res, run_id):
+    """§2.4.3 8: one item limner reported finished — record verified, then the ledger line (once
+    per (topic, id, key, blob), R2-1), then the published file (atomically; another file there goes
+    under removed/, P9). Ledger → file, as for a fetch."""
+    iid, f = it["id"], it["file"]
+    data, rec, bad = _verify_record(root, cfg, job["out"], job)
+    if bad:
+        res["failed"].append({"id": iid, "code": bad, "class": "env",
+                              "message": "limner's record does not vouch for %s (%s)" % (job["out"], bad)})
+        return
+    key = scene_key(cfg, it)
+    hh = _bytes_hashes(root, f, data)
+    new = False
+    if not led.gen_has(tid, iid, key, hh[0]):
+        line = {"topic": tid, "id": iid, "key": key, "file": f, "blob": hh[0], "sha256": hh[1], "at": now_iso(),
+                "run_id": run_id, "job_sha": rec.get("job_sha"),
+                "model": rec.get("model") if isinstance(rec.get("model"), dict) else {},
+                "lora": rec.get("lora") if isinstance(rec.get("lora"), dict) else {},
+                "model_license": rec.get("model_license") or "", "generator": rec.get("generator"),
+                "seed": job["seed"], "width": job["width"], "height": job["height"], "prompt": job["prompt"],
+                "limner": rec.get("limner"), "mflux": rec.get("mflux"), "seconds": rec.get("seconds")}
+        ledger_append(os.path.join(root, GENERATIONS), line)
+        led.generations.append(line)
+        new = True
+    cur = file_hashes(root, f)
+    copied = False
+    if cur != hh:
+        if cur:
+            move_to_removed(root, tid, [f], "replaced", area="images")  # a human's or an old key's file (P9)
+        dest = os.path.join(root, f)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        tmp = os.path.join(os.path.dirname(dest), ".%s.hrd-tmp" % os.path.basename(dest))
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, dest)
+        copied = True
+    items = st["images"].setdefault("items", {})
+    r = items.setdefault(iid, {"kind": "scene", "file": f})
+    if r.get("generated_blob") != hh[0]:
+        r["generated_at"] = now_iso()
+        r.pop("reviewed", None)
+        r.pop("review_note", None)
+    r.update(kind="scene", file=f, key=key, generated_blob=hh[0], status="ready" if led.confirmed(hh) else "generated")
+    st["images"].setdefault("files", {})[f] = {"kind": "scene", "use": None}
+    if new or copied:
+        res["generated"].append({"id": iid, "file": f, "seconds": rec.get("seconds")})
+    else:
+        res["skipped"].append(iid)
+
+
+def _retryable(code):
+    return code in GEN_RETRY or code.startswith("signal:")
+
+
+def _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, partial=False, can_retry=False):
+    """Read a limner result: receive `done ∪ skipped ∪ adopted` and — unless `partial` (a run
+    still going) — map the rest by the §2.4.3 table. Returns True when only machine failures
+    (memory, metal, signal, crashed) are left: one more `run` in this call resumes the work."""
+    by = {it["id"]: it for it in todo}
+    done_ids = [d.get("id") for d in obj.get("done") or [] if isinstance(d, dict)]
+    for jid in done_ids + list(obj.get("skipped") or []) + list(obj.get("adopted") or []):
+        if jid in by and jid not in received:
+            received.add(jid)
+            _receive(root, cfg, tid, st, by[jid], jobs[jid], led, res, run_id)
+    for g in obj.get("regenerated") or []:
+        if isinstance(g, dict) and g.get("id") in by and g["id"] not in res["regenerated"]:
+            res["regenerated"].append(g["id"])  # limner's lock changed: drawn again (shown at confirm, R2-5)
+    if partial:
+        return False
+    fails, general = {}, None
+    for x in obj.get("failed") or []:
+        if not isinstance(x, dict):
+            continue
+        reason = str(x.get("reason") or "error")
+        code = "env" if reason == "environment" else reason
+        entry = (code, str(x.get("message") or "")[:300] or None)
+        if x.get("id") is None:
+            general = entry
+        elif x["id"] in by:
+            fails[x["id"]] = entry
+    for jid in list(obj.get("modified") or []) + list(obj.get("untracked") or []) + \
+            [b.get("id") for b in obj.get("blocked") or [] if isinstance(b, dict)]:
+        if jid in by:
+            fails[jid] = ("race", "the output folder %s was changed by someone else" % jobs[jid]["out"])
+    state = obj.get("state")
+    if state == "crashed":
+        general = general or ("crashed", "limner's worker ended without a result")
+    elif state == "orphan_child":
+        _cancel_run(root, cfg, run_id)
+        general = ("orphan_child", "limner's generator outlived its worker — cancelled")
+    elif state == "cancelled":
+        general = general or ("cancelled", "the run was cancelled")
+    elif state == "busy":
+        general = ("busy", str((obj.get("busy") or {}).get("holder") or "the machine is busy")[:300])
+    left = [it["id"] for it in todo if it["id"] not in received and it["id"] not in fails]
+    if left and general is None:
+        general = ("crashed", "limner's run ended without a result for it")
+    codes = [c for c, _ in fails.values()] + ([general[0]] if general and left else [])
+    if can_retry and codes and all(_retryable(c) for c in codes):
+        return True
+    for jid, (code, msg) in sorted(fails.items(), key=lambda kv: _num(kv[0])):
+        if jid not in received:
+            res["failed"].append({"id": jid, "code": code, "class": "env", "message": msg})
+    if general:
+        for jid in left:
+            res["failed"].append({"id": jid, "code": general[0], "class": "env", "message": general[1]})
+    return False
+
+
+def _cancel_run(root, cfg, run_id):
+    sd = limner.state_dir_abs(root, cfg)
+    return limner.gen_call(root, cfg, "cancel", [("--run-id", run_id), ("--root", os.path.realpath(root)),
+                                                 ("--state-dir", sd), ("--wait-seconds", GEN_CANCEL_WAIT)],
+                           GEN_CANCEL_WAIT + 30)
+
+
+def _fail_all(res, ids, code, message=None):
+    for iid in ids:
+        res["failed"].append({"id": iid, "code": code, "class": "env", "message": message})
+
+
+def _gen_state(res, live=False):
+    res["state"] = "running" if live or res["running"] else ("failed" if res["failed"] else "done")
+    return res
+
+
+def generate(root, cfg, tid, wait=GEN_WAIT):
+    """`HRD image generate` (§2.4.3): start or take over limner's run of this topic's scenes,
+    wait at most `wait` seconds, take in what it finished. Never on base; never `--force` or
+    `--accept` (a human's file is moved away by Herald first, P9)."""
+    from .store import load_state, save_state
+    st = load_state(root, tid)
+    if not _on_branch(root, tid, st):
+        raise HeraldError("generate runs on this topic's herald branch only (never on base — the worker writes "
+                          "under the state dir, Herald copies from there on this branch)")
+    if not _small_int(wait, 0, GEN_WAIT_MAX):
+        raise HeraldError("--wait is 0 to %d seconds" % GEN_WAIT_MAX)
+    rec = st.get("images") or {}
+    man = load_manifest(root, tid)
+    if not rec.get("manifest") or rec.get("manifest") != _hash(root, manifest_rel(tid)) or \
+            rec.get("body") != _hash(root, cfg.body_path(st["slug"])):
+        raise HeraldError("images.json or the article changed since `HRD image plan` — run `HRD image plan --topic %s` "
+                          "first" % tid)
+    scenes = sorted([i for i in _items(man) if i.get("kind") == "scene"], key=lambda i: _num(i.get("id")))
+    led = Ledger(root)
+    led.check(len(scenes))
+    gen = rec.get("gen") if isinstance(rec.get("gen"), dict) else {}
+    res = {"state": "done", "generated": [], "skipped": [], "failed": [], "running": [], "regenerated": [],
+           "waited_s": gen.get("waited_s", 0), "run_id": gen.get("run_id")}
+    items = rec.setdefault("items", {})
+    todo, pending = [], []
+    for it in scenes:  # 2: what to make — before any probe (R2-4, R3-1)
+        iid, key = it.get("id"), scene_key(cfg, it)
+        s = scene_state(root, cfg, tid, it, led)
+        if s == "ready":
+            continue
+        r = items.get(iid) or {}
+        if r.get("key") == key and scene_fail_closed(tid, iid, r, led):
+            res["failed"].append({"id": iid, "code": "record-missing", "class": "env",
+                                  "message": scene_fail_closed(tid, iid, r, led)})
+            continue
+        todo.append(it)
+        if s == "pending":
+            pending.append(iid)
+    if not pending:  # generated pictures are in the ledger and in place already: nothing to start
+        return _gen_state(res)
+    why = scene_off(root, cfg, _category(root, cfg, st["slug"]))  # 3
+    if why is None:
+        p = limner.gen_probe(root, cfg)
+        if not p["ok"]:
+            why = p["code"]
+            res["message"] = p.get("message") or "; ".join(p.get("errors") or []) or None
+    if why:
+        res.update(state="off", why=why)
+        return res
+    t0 = time.monotonic()
+    sd, _, job_path, out_dir = _gen_paths(root, cfg, tid)
+    jobs = {it["id"]: _job_entry(cfg, it, "%s/%s.png" % (out_dir, it["id"])) for it in todo}
+    job_sha = _write_job(job_path, [jobs[it["id"]] for it in todo])
+    rroot = os.path.realpath(root)
+    base_opts = [("--job", job_path), ("--root", rroot), ("--state-dir", sd)]
+    chk = limner.gen_call(root, cfg, "run", [("--check", None)] + base_opts, limner.GEN_PROBE_TIMEOUT)
+    run_id = (chk["obj"] or {}).get("run_id")
+    if chk["code"] or chk["exit"] != 0 or not isinstance(run_id, str):
+        _fail_all(res, [it["id"] for it in todo], chk["code"] or "contract", chk["message"])
+        return _gen_state(res)
+    res["run_id"] = run_id
+    if gen.get("run_id") and gen["run_id"] != run_id:  # 4: the jobs changed — stop Herald's old run
+        c = _cancel_run(root, cfg, gen["run_id"])
+        if c["code"] not in (None, "not-found"):
+            _fail_all(res, [it["id"] for it in todo], c["code"], c["message"])
+            return _gen_state(res)
+        if c["code"] is None and (c["exit"] == 10 or (c["obj"] or {}).get("state") in LIVE):
+            _fail_all(res, [it["id"] for it in todo], "busy", "Herald's earlier run %s has not stopped yet" % gen["run_id"])
+            return _gen_state(res)
+        gen = {}
+    received, retried, again, live = set(), False, False, False
+    while True:
+        r = limner.gen_call(root, cfg, "run", base_opts + [("--wait", 30)], GEN_RUN_TIMEOUT)  # 5
+        if r["code"]:
+            _fail_all(res, [it["id"] for it in todo if it["id"] not in received], r["code"], r["message"])
+            break
+        obj = r["obj"] or {}
+        if obj.get("attempt") is None or obj.get("state") not in LIVE:
+            if _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, can_retry=not retried):
+                retried = True
+                continue
+            break
+        same = gen.get("run_id") == run_id
+        gen = {"run_id": run_id, "attempt": obj.get("attempt"), "job_sha256": job_sha,
+               "started_at": gen.get("started_at") if same and gen.get("started_at") else now_iso(),
+               "waited_s": gen.get("waited_s", 0) if same else 0}
+        st.setdefault("images", rec)["gen"] = gen
+        save_state(root, tid, st)
+        left = wait - (time.monotonic() - t0)  # 6
+        ws = int(left - 20) if left >= 30 else 0
+        t1 = time.monotonic()
+        s_ = limner.gen_call(root, cfg, "status", [("--run-id", run_id), ("--root", rroot), ("--state-dir", sd),
+                                                  ("--wait-seconds", ws)], ws + 20)
+        gen["waited_s"] = int(gen.get("waited_s", 0) + round(time.monotonic() - t1))
+        if s_["code"] == "not-found" and not again:  # 12: the state dir lost the run — once more from 5
+            again = True
+            gen = {}
+            st["images"].pop("gen", None)
+            continue
+        if s_["code"]:
+            _fail_all(res, [it["id"] for it in todo if it["id"] not in received], s_["code"], s_["message"])
+            break
+        sobj = s_["obj"] or {}
+        if sobj.get("state") in LIVE:  # 7: still going — take in what it finished so far
+            _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, partial=True)
+            res["running"] = [it["id"] for it in todo if it["id"] not in received]
+            live = True
+            break
+        if _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, can_retry=not retried):
+            retried = True
+            continue
+        break
+    if gen:
+        st["images"]["gen"] = gen
+        res["waited_s"] = gen.get("waited_s", 0)
+    save_state(root, tid, st)  # 9
+    return _gen_state(res, live)
+
+
+def reset_wait(root, cfg, tid):
+    """`generate --reset-wait`: the collect step starts counting this run's wait again (R1-6)."""
+    from .store import load_state, save_state
+    st = load_state(root, tid)
+    g = (st.get("images") or {}).get("gen")
+    if isinstance(g, dict):
+        g["waited_s"] = 0
+        save_state(root, tid, st)
+    return {"ok": True}
+
+
+def cancel(root, cfg, tid):
+    """`HRD image cancel`: stop this topic's run (abandon, trim, a deleted topic). Not guarded —
+    stopping a generation forges no human decision (§2.4.4)."""
+    from .store import load_state
+    st = load_state(root, tid)
+    g = (st.get("images") or {}).get("gen") or {}
+    if not g.get("run_id"):
+        return {"cancelled": False, "state": None}
+    c = _cancel_run(root, cfg, g["run_id"])
+    state = (c["obj"] or {}).get("state") if c["code"] in (None,) else None
+    out = {"cancelled": state == "cancelled", "state": state}
+    if c["code"] and c["code"] != "not-found":
+        out["error"] = c["code"]
+    return out
+
+
+def generate_trial(root, cfg, wait=GEN_WAIT):
+    """`HRD image generate --trial`: one fixed picture with the repo's style under the state dir
+    (never the image dir), no ledger. A `running` answer is taken over by calling it again (the
+    same job, the same run_id)."""
+    if not _small_int(wait, 0, GEN_WAIT_MAX):
+        raise HeraldError("--wait is 0 to %d seconds" % GEN_WAIT_MAX)
+    errs = scene_errors(cfg) + limner.limner_errors(cfg)
+    if errs:
+        return {"state": "off", "why": "config", "errors": errs, "file": None, "run_id": None}
+    p = limner.gen_probe(root, cfg)
+    if not p["ok"]:
+        return {"state": "off", "why": p["code"], "message": p.get("message"), "file": None, "run_id": None}
+    sd = limner.state_dir_abs(root, cfg)
+    sd_rel = limner.rel_to_root(root, sd)
+    out_rel = "%s/%s/scene.png" % (sd_rel, limner.TRIAL_DIR)
+    it = {"prompt": TRIAL_PROMPT, "size": "square", "seed": 1}
+    job = _job_entry(cfg, dict(it, id="trial"), out_rel)
+    jpath = os.path.join(sd, limner.TRIAL_DIR, "scene.json")
+    _write_job(jpath, [job])
+    rroot = os.path.realpath(root)
+    base_opts = [("--job", jpath), ("--root", rroot), ("--state-dir", sd)]
+    t0 = time.monotonic()
+    out = {"state": "failed", "file": out_rel, "run_id": None}
+    chk = limner.gen_call(root, cfg, "run", [("--check", None)] + base_opts, limner.GEN_PROBE_TIMEOUT)
+    if chk["code"] or chk["exit"] != 0:
+        out.update(code=chk["code"] or "contract", message=chk["message"])
+        return out
+    out["run_id"] = (chk["obj"] or {}).get("run_id")
+    r = limner.gen_call(root, cfg, "run", base_opts + [("--wait", 30)], GEN_RUN_TIMEOUT)
+    if r["code"]:
+        out.update(code=r["code"], message=r["message"])
+        return out
+    obj = r["obj"] or {}
+    if obj.get("attempt") is not None and obj.get("state") in LIVE:
+        left = wait - (time.monotonic() - t0)
+        ws = int(left - 20) if left >= 30 else 0
+        s_ = limner.gen_call(root, cfg, "status", [("--run-id", out["run_id"]), ("--root", rroot), ("--state-dir", sd),
+                                                  ("--wait-seconds", ws)], ws + 20)
+        if s_["code"]:
+            out.update(code=s_["code"], message=s_["message"])
+            return out
+        obj = s_["obj"] or {}
+        if obj.get("state") in LIVE:
+            out["state"] = "running"
+            return out
+    ids = [d.get("id") for d in obj.get("done") or [] if isinstance(d, dict)] + list(obj.get("skipped") or []) + \
+        list(obj.get("adopted") or [])
+    if "trial" not in ids:
+        f = (obj.get("failed") or [{}])[0] if obj.get("failed") else {}
+        out.update(code=(f.get("reason") if isinstance(f, dict) else None) or obj.get("state") or "crashed",
+                   message=(f.get("message") if isinstance(f, dict) else None))
+        return out
+    _, _, bad = _verify_record(root, cfg, out_rel, job)
+    if bad:
+        out.update(code=bad)
+        return out
+    out["state"] = "done"
+    return out
+
+
+def review(root, cfg, tid, iid, ok=False, redo=False, note=None):
+    """`HRD image review` (§2.7.2) — the illustrator's look before a human's: `--ok` marks the
+    picture reviewed, `--redo` turns its key down (plan then refuses the same prompt, seed and
+    size). State only — never a pass decision (P13: the human's confirmation is)."""
+    from .store import load_state, save_state
+    if ok == redo:
+        raise HeraldError("give exactly one of --ok and --redo")
+    if not isinstance(note, str) or not note.strip():
+        raise HeraldError("--note says in one line what the reviewer saw")
+    st = load_state(root, tid)
+    it = next((i for i in _items(load_manifest(root, tid)) if i.get("id") == iid), None)
+    if not it or it.get("kind") != "scene":
+        raise HeraldError("%s is not a scene image in images.json" % iid)
+    led = Ledger(root)
+    if scene_state(root, cfg, tid, it, led) != "generated":
+        raise HeraldError("%s is not a generated scene waiting for review — `HRD image status --topic %s`" % (iid, tid))
+    h = file_hashes(root, it["file"])
+    key = scene_key(cfg, it)
+    r = st.setdefault("images", {}).setdefault("items", {}).setdefault(iid, {"kind": "scene", "file": it["file"],
+                                                                            "key": key})
+    if ok:
+        r["reviewed"] = h[0]
+        r["review_note"] = note[:300]
+    else:
+        r.pop("reviewed", None)
+        r["review_note"] = note[:300]
+        st.setdefault("review_rejects", []).append({"id": iid, "key": key, "note": note[:300], "at": now_iso()})
+    save_state(root, tid, st)
+    return {"reviewed": [iid] if ok else [], "redo": [iid] if redo else [], "attempts": scene_attempts(st, iid),
+            "next": None if ok else ("change the seed (or the prompt) of %s, then `HRD image plan --topic %s --check`"
+                                     % (iid, tid))}
+
+
 def snippet(root, cfg, tid, iid):
     from .store import load_state
     st = load_state(root, tid)
@@ -1501,13 +2158,13 @@ def _human_only(what):
 def _ids(ids):
     out = [x.strip() for x in (ids if isinstance(ids, list) else str(ids or "").split(",")) if x and x.strip()]
     if not out:
-        raise HeraldError("--id needs one or more external image ids (e1,e2)")
+        raise HeraldError("--id needs one or more external or scene image ids (e1,g1)")
     return list(dict.fromkeys(out))
 
 
 def confirm(root, cfg, tid, ids):
-    """A human looked at fetched images and their attribution: the confirmation line first, then
-    the state."""
+    """A human looked at fetched images and their attribution, or at generated scenes and their AI
+    label: the confirmation line first, then the state."""
     from .shots import hold_note
     from .store import load_state, save_state
     _human_only("confirm")
@@ -1519,55 +2176,75 @@ def confirm(root, cfg, tid, ids):
     todo = []
     for iid in ids:
         it = by.get(iid)
-        if not it or it.get("kind") != "external":
-            raise HeraldError("%s is not an external image in images.json" % iid)
-        s = external_state(root, tid, it, led)
-        if s != "fetched":
-            raise HeraldError("%s is not a fetched image waiting for confirmation (%s) — `HRD image plan --topic %s` "
-                              "first if the file was changed" % (iid, s, tid))
+        if not it or it.get("kind") not in ("external", "scene"):
+            raise HeraldError("%s is not an external or scene image in images.json" % iid)
+        if it["kind"] == "scene":
+            s = scene_state(root, cfg, tid, it, led)
+            if s != "generated":
+                raise HeraldError("%s is not a generated scene waiting for confirmation (%s) — `HRD image plan --topic "
+                                  "%s` first if the file was changed" % (iid, s, tid))
+        else:
+            s = external_state(root, tid, it, led)
+            if s != "fetched":
+                raise HeraldError("%s is not a fetched image waiting for confirmation (%s) — `HRD image plan --topic "
+                                  "%s` first if the file was changed" % (iid, s, tid))
         todo.append((iid, it, file_hashes(root, it["file"])))
     at = now_iso()
+
+    def key_of(it):
+        return scene_key(cfg, it) if it["kind"] == "scene" else item_key(it)
     for iid, it, h in todo:
-        ledger_append(os.path.join(root, CONFIRMATIONS), {"topic": tid, "id": iid, "key": item_key(it),
+        ledger_append(os.path.join(root, CONFIRMATIONS), {"topic": tid, "id": iid, "key": key_of(it),
                                                            "blob": h[0], "sha256": h[1], "at": at})
     items = st.setdefault("images", {}).setdefault("items", {})
     for iid, it, h in todo:
-        items.setdefault(iid, {"kind": "external", "use": it.get("use"), "file": it["file"], "key": item_key(it)})
+        items.setdefault(iid, {"kind": it["kind"], "use": it.get("use"), "file": it["file"], "key": key_of(it)})
         items[iid].update(status="ready", sha=h[0])
     save_state(root, tid, st)
     return {"confirmed": [t[0] for t in todo], "note": hold_note(st),
-            "items": [{"id": iid, "use": it.get("use"), "credit": it.get("credit"), "license": it.get("license"),
-                       "page_url": it.get("page_url")} for iid, it, _ in todo]}
+            "items": [{"id": iid, "kind": it["kind"], "use": it.get("use"), "credit": it.get("credit"),
+                       "license": it.get("license"), "page_url": it.get("page_url")} for iid, it, _ in todo]}
 
 
-def reject(root, cfg, tid, iid, reason=None, drop=False, refetch=False):
-    """A human rejects a fetched image (state first, then the file moves). Without `--refetch`
-    this is the `--human` loopback's state change too: the illustrator runs next (another
-    candidate, or with `--drop` the place goes). `--refetch`: fetch it again on this machine."""
+def reject(root, cfg, tid, iid, reason=None, drop=False, refetch=False, regenerate=False):
+    """A human rejects a fetched image or a generated scene (state first, then the file moves).
+    Without `--refetch`/`--regenerate` this is the `--human` loopback's state change too: the
+    illustrator runs next (another candidate, a scene's other seed or prompt, or with `--drop` the
+    place goes). `--refetch`: fetch it again on this machine; `--regenerate`: generate a scene again
+    on this machine (§2.5 — the way out of a missing generation record; no rejected key)."""
     from .shots import hold_note
     from .store import load_state, open_research_fix, save_state
     _human_only("reject")
-    if drop and refetch:
-        raise HeraldError("give at most one of --drop and --refetch")
+    if sum(map(bool, (drop, refetch, regenerate))) > 1:
+        raise HeraldError("give at most one of --drop, --refetch and --regenerate")
+    again = refetch or regenerate
     st = load_state(root, tid)
-    if not refetch and st.get("stage") != "draft":
+    if not again and st.get("stage") != "draft":
         raise HeraldError("reject is for an image waiting in draft — later, a loopback with --theme images")
     if open_research_fix(st):
         raise HeraldError("a research fix is open — the researcher runs first")
     if (st.get("trim") or {}).get("status") == "open":
         raise HeraldError("a trim is open — `HRD trim --topic %s --abort` first" % tid)
     it = next((i for i in _items(load_manifest(root, tid)) if i.get("id") == iid), None)
-    if not it or it.get("kind") != "external":
-        raise HeraldError("%s is not an external image in images.json" % iid)
+    scene = bool(it) and it.get("kind") == "scene"
+    if not it or it.get("kind") not in ("external", "scene"):
+        raise HeraldError("%s is not an external or scene image in images.json" % iid)
+    if refetch and scene or regenerate and not scene:
+        raise HeraldError("--refetch is for an external image, --regenerate for a scene")
+    key = scene_key(cfg, it) if scene else item_key(it)
     rec = st.setdefault("images", {})
     items = rec.setdefault("items", {})
-    r = items.setdefault(iid, {"kind": "external", "use": it.get("use"), "file": it["file"], "key": item_key(it)})
+    r = items.setdefault(iid, {"kind": it["kind"], "use": it.get("use"), "file": it["file"], "key": key})
     r["status"] = "pending"
-    for k in ("sha", "fetched_at", "orientation", "width", "height"):
+    for k in ("sha", "fetched_at", "orientation", "width", "height", "generated_at", "generated_blob", "reviewed",
+              "review_note"):
         r.pop(k, None)
-    if not refetch:
-        st.setdefault("image_rejects", []).append({"id": iid, "source_url": it.get("source_url"),
-                                                   "reason": (reason or "")[:300], "drop": bool(drop), "at": now_iso()})
+    if not again:
+        rj = {"id": iid, "source_url": it.get("source_url"), "reason": (reason or "")[:300], "drop": bool(drop),
+              "at": now_iso()}
+        if scene:  # the key turned down: plan refuses the same prompt, seed and size (§2.6.3)
+            rj = {"id": iid, "job": key, "reason": rj["reason"], "drop": rj["drop"], "at": rj["at"]}
+        st.setdefault("image_rejects", []).append(rj)
         st["stage"] = "draft"
         st["last_loopback"] = "human"
         rec["awaiting"] = False
@@ -1578,12 +2255,19 @@ def reject(root, cfg, tid, iid, reason=None, drop=False, refetch=False):
             st["translation"].pop("last_loopback_stage", None)
     save_state(root, tid, st)
     moved = move_to_removed(root, tid, [it["file"]] if not on_base(root, cfg, it["file"]) else [],
-                            "refetch" if refetch else "rejected", area="images")
-    return {"rejected": [iid] if not refetch else [], "refetch": [iid] if refetch else [], "moved": moved,
-            "note": hold_note(st),
-            "next": ("HRD image fetch --topic %s --id %s, then a human confirms it" % (tid, iid)) if refetch else
-            ("the illustrator: %s" % ("remove that place (reference, attribution, manifest entry)" if drop else
-                                      "another candidate from research.md, or leave the place out"))}
+                            "refetch" if refetch else "regenerate" if regenerate else "rejected", area="images")
+    if refetch:
+        nxt = "HRD image fetch --topic %s --id %s, then a human confirms it" % (tid, iid)
+    elif regenerate:
+        nxt = "HRD image generate --topic %s on this machine, then a human confirms it" % tid
+    elif drop:
+        nxt = "the illustrator: remove that place (reference, %s, manifest entry)" % (
+            "AI label" if scene else "attribution")
+    else:
+        nxt = "the illustrator: %s" % ("change the seed or the prompt of %s, or leave the place out" % iid if scene else
+                                       "another candidate from research.md, or leave the place out")
+    return {"rejected": [iid] if not again else [], "refetch": [iid] if refetch else [],
+            "regenerate": [iid] if regenerate else [], "moved": moved, "note": hold_note(st), "next": nxt}
 
 
 # --- OG (§2.8) --------------------------------------------------------------------------------
@@ -1974,9 +2658,11 @@ def og_trial(root, cfg):
 # --- status, note, resume (§2.9, §2.13) ----------------------------------------------------------
 
 def note_items(st):
+    """External and scene images waiting for a human's look: `e1(confirm)`, `g1(confirm)`."""
     items = ((st or {}).get("images") or {}).get("items") or {}
-    return ["%s(confirm)" % k for k, r in sorted(items.items(), key=lambda kv: int(kv[0][1:]) if kv[0][1:].isdigit() else 0)
-            if isinstance(r, dict) and r.get("kind") == "external" and r.get("status") == "fetched"]
+    wait = {"external": "fetched", "scene": "generated"}
+    return ["%s(confirm)" % k for k, r in sorted(items.items(), key=lambda kv: ("eg".find(kv[0][:1]), _num(kv[0])))
+            if isinstance(r, dict) and wait.get(r.get("kind")) == r.get("status")]
 
 
 def resume_at_collect(root, cfg, st):
@@ -2004,8 +2690,8 @@ def status(root, cfg, tid, rev=None):
     led = Ledger(root)
     slug = st.get("slug")
     lines, dropped = slug_renders(root, cfg, slug, rev) if slug else ([], 0)
-    out_items, snippets, rows = [], [], []
-    pend = {"render": [], "render_after_push": [], "fetch": [], "confirm": []}
+    out_items, snippets, rows, prompts, licenses, warnings = [], [], [], [], set(), []
+    pend = {"render": [], "render_after_push": [], "fetch": [], "generate": [], "review": [], "confirm": []}
     body = _body(root, cfg, slug, rev) if slug else ""
     for it in _items(man):
         iid, kind = it.get("id"), it.get("kind")
@@ -2022,6 +2708,37 @@ def status(root, cfg, tid, rev=None):
             rows.append("| %s | diagram | %s | %d texts%s — drawn in %s |" % (
                 iid, it.get("file"), len(it.get("texts") or []), (", claims " + ", ".join(claims)) if claims else "",
                 lang_tag(cfg)))
+        elif kind == "scene" and slug:
+            cur = cur_path(root, cfg, slug, it.get("file"))
+            key = scene_key(cfg, it)
+            s = scene_state(root, cfg, tid, it, led, rev, path=cur)
+            h = _rev_hashes(root, rev, cur)
+            replaced = bool(r.get("sha") and h and h[0] != r["sha"])
+            line = led.gen_line(h, tid, iid, key) if h else None
+            row.update(status=s, size=it.get("size"), seed=it.get("seed"), prompt=it.get("prompt"),
+                       generated_at=r.get("generated_at"), replaced=replaced, why=scene_fail_closed(tid, iid, r, led),
+                       reviewed=bool(h and r.get("reviewed") == h[0]), review_note=r.get("review_note"),
+                       attempts=scene_attempts(st, iid))
+            if s == "pending":
+                pend["generate"].append(iid)
+            elif s == "generated":
+                pend["confirm"].append(iid)
+                if r.get("reviewed") != h[0]:
+                    pend["review"].append(iid)
+            if rev and r.get("key") and r["key"] != key:  # ship §5: a human changed the prompt, not the picture
+                warnings.append("%s: the manifest and the picture differ — the next refresh generates it again" % iid)
+            if scene_label(cfg):
+                sn = snippet_text(cfg, it, None, root, slug)
+                snippets.append({"id": iid, "text": sn, "alt": it.get("alt"), "in_body": body.count(sn)})
+            model = ((line or {}).get("model") or {}).get("name") or limner.GEN_MODEL
+            if (line or {}).get("model_license"):
+                licenses.add("%s: %s" % (model, line["model_license"]))
+            at = _confirmed_at(led, h) if h else None
+            rows.append("| %s | scene (AI-generated) | %s | %s seed %s · %s · %s%s |" % (
+                iid, it.get("file"), model, it.get("seed"), it.get("size"),
+                "confirmed %s" % at if at else ("confirmed" if s == "ready" else "not confirmed"),
+                ", replaced by a human" if replaced else ""))
+            prompts.append("- %s: %s" % (iid, it.get("prompt")))
         elif kind == "external" and slug:
             cur = cur_path(root, cfg, slug, it.get("file"))
             s = external_state(root, tid, it, led, rev, path=cur)
@@ -2058,6 +2775,14 @@ def status(root, cfg, tid, rev=None):
             og_line = ("OG image: old title kept (%s)" if og_rec.get("stale_base") else "OG image: none (%s)") \
                 % og_rec.get("why")
     pr_rows = (["| id | kind | file | content |", "|---|---|---|---|"] + rows) if rows else []
+    if prompts:  # what the model was asked (style and NO_TEXT are the repo's, not shown)
+        pr_rows += ["<details><summary>Scene prompts</summary>", ""] + prompts + ["", "</details>"]
+        if licenses:
+            pr_rows.append("Scene model license: %s" % "; ".join(sorted(licenses)))
+        oc = og_conf(cfg)
+        if oc and oc["fallback_first_image"] and og_rec.get("status") == "off":
+            first = next((x["id"] for x in out_items if x.get("kind") == "scene"), "g1")
+            og_line = "OG image: none — the site may use the first image (AI-generated %s) as the card" % first
     if og_line:
         pr_rows.append(og_line)
     unmanaged = []
@@ -2077,8 +2802,17 @@ def status(root, cfg, tid, rev=None):
             "awaiting": bool(rec.get("awaiting")), "resume_at_collect": resume_at_collect(root, cfg, st) if not rev else False,
             "note": hold_note(st), "files": rec.get("files") or {}, "snippets": snippets, "pr_rows": pr_rows,
             "og": og_rec, "rejects": st.get("image_rejects") or [], "unmanaged": unmanaged,
-            "renders_dropped": dropped,
+            "renders_dropped": dropped, "warnings": warnings, "gen": rec.get("gen"),
+            "gen_out_bytes": _gen_out_bytes(root, cfg, tid) if not rev else 0,
             "removed_bytes": removed_bytes(root, tid, "images")}
+
+
+def _gen_out_bytes(root, cfg, tid):
+    """The bytes in limner's output folder for this topic (shown, never deleted — §2.4.4)."""
+    if limner.limner_errors(cfg, check_ignored=False) or not limner.configured(cfg):
+        return 0
+    d = os.path.join(_gen_paths(root, cfg, tid)[0], limner.OUT_DIR, tid)
+    return sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fns in os.walk(d) for f in fns)
 
 
 # --- stage pass, publish scope, exclusions (§2.10, §2.12, §2.13) ----------------------------------
@@ -2102,7 +2836,7 @@ def draft_problems(root, cfg, tid, st):
             out.append("the article changed since `HRD image plan` — run it again")
         if {i.get("id") for i in items} != set(rec.get("items") or {}):
             out.append("images.json lists other images than were planned — run `HRD image plan` again")
-        if any(it.get("kind") == "external" for it in items):
+        if any(it.get("kind") in ("external", "scene") for it in items):
             led.check(1)
         lines, _ = slug_renders(root, cfg, slug)
         body = _body(root, cfg, slug)
@@ -2113,6 +2847,9 @@ def draft_problems(root, cfg, tid, st):
                 if diagram_state(root, cfg, tid, st, it, lines)[0] != "ready":
                     out.append("%s: %s is not the render of the current SVG and settings — `HRD image render --topic %s "
                                "--id %s`" % (iid, it.get("file"), tid, iid))
+                continue
+            if it.get("kind") == "scene":
+                out += _scene_draft_problems(root, cfg, tid, slug, it, r, led, body)
                 continue
             why = fail_closed(tid, iid, r, led, it)
             if why:
@@ -2137,13 +2874,34 @@ def draft_problems(root, cfg, tid, st):
     for f in rec.get("files") or {}:
         h = file_hashes(root, f)
         if h and led.unconfirmed(h) and f not in current:
-            out.append("%s is an external image no human confirmed — `HRD image plan --topic %s` moves it away" % (f, tid))
+            out.append("%s is an external or scene image no human confirmed — `HRD image plan --topic %s` moves it away"
+                       % (f, tid))
     left = [f for f in rec.get("files") or {} if f not in current and os.path.isfile(os.path.join(root, f))
             and not on_base(root, cfg, f)]
     if left:
         out.append("images no longer listed are still in place: %s — run `HRD image plan --topic %s`" % (", ".join(left), tid))
     out += og_draft_problems(root, cfg, tid, st)
     return out
+
+
+def _scene_draft_problems(root, cfg, tid, slug, it, r, led, body):
+    iid = it.get("id")
+    why = scene_fail_closed(tid, iid, r, led)
+    if why:
+        return [why]
+    s = scene_state(root, cfg, tid, it, led)
+    if s == "generated":
+        return ["%s is waiting for a human's confirmation — look at %s, then `HRD image confirm --topic %s --id %s` (or "
+                "`HRD image reject`)" % (iid, it.get("file"), tid, iid)]
+    if s != "ready":
+        return ["%s is not generated (or not the file `HRD image generate` wrote) — `HRD image plan`, then `HRD image "
+                "generate --topic %s`" % (iid, tid)]
+    if scene_label(cfg):
+        c = body.count(snippet_text(cfg, it, None, root, slug))
+        if c != 1:
+            return ["%s: the picture with its AI label must be in the article verbatim exactly once (found %d) — `HRD "
+                    "image snippet --topic %s --id %s`" % (iid, c, tid, iid)]
+    return []
 
 
 def og_draft_problems(root, cfg, tid, st):
@@ -2206,6 +2964,11 @@ def verify_problems(root, cfg, tid, st, ver, amend=False):
     body = _body(root, cfg, slug)
     rec = st.get("images") or {}
     for it in items:
+        if it.get("kind") == "scene" and scene_label(cfg):
+            if body.count(snippet_text(cfg, it, None, root, slug)) != 1:
+                out.append("%s: the picture with its AI label is not in the article verbatim exactly once — put it back "
+                           "as `HRD image snippet` gives it" % it.get("id"))
+            continue
         if it.get("kind") != "external":
             continue
         r = (rec.get("items") or {}).get(it.get("id")) or {}
@@ -2258,9 +3021,21 @@ def scope_problems(root, cfg, tid, publish=False):
     led = Ledger(root)
     body = _body(root, cfg, st["slug"], "HEAD")
     for it in _items(man):
+        iid = it.get("id")
+        if it.get("kind") == "scene":
+            r = (rec.get("items") or {}).get(iid) or {}
+            why = scene_fail_closed(tid, iid, r, led)
+            if why:
+                out.append(why)
+                continue
+            if scene_state(root, cfg, tid, it, led, rev="HEAD") != "ready":
+                out.append("%s: the committed file is not a generated scene a human confirmed — `HRD image confirm` "
+                           "before publishing" % iid)
+            if scene_label(cfg) and body.count(snippet_text(cfg, it, None, root, st["slug"])) != 1:
+                out.append("%s: the picture with its AI label is not in the committed article exactly once" % iid)
+            continue
         if it.get("kind") != "external":
             continue
-        iid = it.get("id")
         r = (rec.get("items") or {}).get(iid) or {}
         why = fail_closed(tid, iid, r, led, it)
         if why:
@@ -2275,6 +3050,7 @@ def scope_problems(root, cfg, tid, publish=False):
     q = og_quotation_problem(root, cfg, st["slug"], rev="HEAD")
     if q:
         out.append(q)
+    out += label_problems(root, cfg, tid, st, rev="HEAD")
     return out
 
 
@@ -2304,11 +3080,12 @@ def og_excluded(root, cfg, tid, rev, changed, slug):
     return bool((((st.get("images") or {}).get("og")) or {}).get("stale_base"))
 
 
-_BASE_EXTERNAL = {}
+_BASE_MANAGED = {}
+MANAGED_ON_BASE = ("external", "scene")  # kinds a translation repo cannot carry (08 §2.6.7, 09 §2.9)
 
 
 def _git_run(root, args, data=None):
-    """One git process (bytes in, bytes out) — `external_on_base`'s only way to read base, so
+    """One git process (bytes in, bytes out) — `managed_on_base`'s only way to read base, so
     tests can count what it costs."""
     import subprocess
     return subprocess.run(["git"] + list(args), cwd=root, input=data, capture_output=True)
@@ -2330,17 +3107,17 @@ def _ref_stamp(root, base):
     return tuple(out)
 
 
-def _base_external_map(root, cfg):
-    """{slug: [recorded external files]} from every committed state on origin/<base>, built
-    once per base commit and process (implementation review M4): one `git grep` finds the states
-    that record an external image at all — none (any repo that never fetched one, managed or
-    not) → empty at once —, then one `git cat-file --batch` reads only those."""
+def _base_managed_map(root, cfg):
+    """{slug: [(recorded file, kind)]} of external and scene images from every committed state on
+    origin/<base>, built once per base commit and process (implementation review M4): one `git
+    grep` finds the states that record one at all — none (any repo that never fetched or generated
+    one, managed or not) → empty at once —, then one `git cat-file --batch` reads only those."""
     ref = "origin/%s" % cfg.base
     key = (os.path.realpath(root), ref, _ref_stamp(root, cfg.base))
-    if key in _BASE_EXTERNAL:
-        return _BASE_EXTERNAL[key]
+    if key in _BASE_MANAGED:
+        return _BASE_MANAGED[key]
     out = {}
-    g = _git_run(root, ["grep", "-l", "-F", '"external"', ref, "--", ".claude/herald/work"])
+    g = _git_run(root, ["grep", "-l", "-F", "-e", '"external"', "-e", '"scene"', ref, "--", ".claude/herald/work"])
     paths = [x.split(":", 1)[1] for x in g.stdout.decode("utf-8", "replace").splitlines()
              if ":" in x and x.endswith("/state.json") and x.split(":", 1)[1].count("/") == 4]
     if paths:
@@ -2363,34 +3140,45 @@ def _base_external_map(root, cfg):
             if not isinstance(st, dict) or not st.get("slug"):
                 continue
             for f, m in (((st.get("images") or {}).get("files")) or {}).items():
-                if isinstance(m, dict) and m.get("kind") == "external":
-                    out.setdefault(st["slug"], []).append(f)
-    _BASE_EXTERNAL[key] = out
+                if isinstance(m, dict) and m.get("kind") in MANAGED_ON_BASE:
+                    out.setdefault(st["slug"], []).append((f, m["kind"]))
+    _BASE_MANAGED[key] = out
     return out
 
 
-def external_on_base(root, cfg, slug):
-    """Files of `slug` (moved slugs too) recorded as external images in a committed state on
-    origin/<base> and present there — the same on every machine (§2.6.7). Costs one `git grep`
-    per command when no state on base records an external image."""
+def managed_on_base(root, cfg, slug, kinds=False):
+    """Files of `slug` (moved slugs too) recorded as external or scene images in a committed
+    state on origin/<base> and present there — the same on every machine (08 §2.6.7, 09 §2.9;
+    0.17.0's `external_on_base` widened). `kinds`: [(file, kind)] instead of files. Costs one
+    `git grep` per command when no state on base records such an image."""
     ref = "origin/%s" % cfg.base
-    emap = _base_external_map(root, cfg)
+    emap = _base_managed_map(root, cfg)
     if not emap:
         return []
     olds = set(_old_slugs(root, slug)) | {slug}
-    cand = sorted({cur_path(root, cfg, slug, f) for s_ in olds for f in emap.get(s_, [])})
+    by = {}
+    for s_ in olds:
+        for f, k in emap.get(s_, []):
+            by.setdefault(cur_path(root, cfg, slug, f), k)
+    cand = sorted(by)
     if not cand:
         return []
     chk = _git_run(root, ["cat-file", "--batch-check"], "".join("%s:%s\n" % (ref, p) for p in cand).encode())
     lines = chk.stdout.decode("utf-8", "replace").splitlines()
-    return [p for p, line in zip(cand, lines) if not line.endswith(" missing")]
+    found = [p for p, line in zip(cand, lines) if not line.endswith(" missing")]
+    return [(p, by[p]) for p in found] if kinds else found
+
+
+def blocked_reason(found):
+    """`external-images` when any external image blocks, else `scene-images` ([(file, kind)])."""
+    return "external-images" if any(k == "external" for _, k in found) else "scene-images"
 
 
 def drop_blocked_translations(root, cfg, ids):
     """Topic ids minus the translation and refresh topics `HRD begin` would refuse (an article
-    with external images on base, translation repos only — §2.6.7, R3-4). `HRD select` and the
-    batch runner's selection share it (implementation review n2); `external_on_base` reads base
-    once per process."""
+    with external or scene images on base, translation repos only — 08 §2.6.7, R3-4; 09 §2.9).
+    `HRD select` and the batch runner's selection share it (implementation review n2);
+    `managed_on_base` reads base once per process."""
     if not cfg.translations():
         return list(ids)
     from .store import load_topics
@@ -2399,8 +3187,66 @@ def drop_blocked_translations(root, cfg, ids):
     for tid in ids:
         t = topics.get(tid) or {}
         slug = t.get("translate_of") or t.get("refresh_of")
-        if not slug or not external_on_base(root, cfg, slug):
+        if not slug or not managed_on_base(root, cfg, slug):
             out.append(tid)
+    return out
+
+
+def scene_files(root, cfg, slug):
+    """Every file recorded as a scene by any topic of this slug — the working tree's states and
+    origin/<base>'s, moved slugs included (09 §2.8, R1-4: a refresh topic cannot list base's scenes
+    in its own manifest, so the label check is tied to the slug, not to a topic)."""
+    olds = set(_old_slugs(root, slug)) | {slug}
+    out = set()
+    for _, st in _topic_states(root):
+        if st.get("slug") in olds:
+            for f, m in (((st.get("images") or {}).get("files")) or {}).items():
+                if isinstance(m, dict) and m.get("kind") == "scene":
+                    out.add(cur_path(root, cfg, slug, f))
+    base = _base_managed_map(root, cfg)
+    for s_ in olds:
+        out |= {cur_path(root, cfg, slug, f) for f, k in base.get(s_, []) if k == "scene"}
+    return sorted(out)
+
+
+def label_regex(cfg, ref):
+    """The AI label's pattern for one reference: `figure.scene` escaped, `{ref}` the reference,
+    `{alt}` any text on the line (no `"` or `<` in an HTML template), `{label}` the label."""
+    t = scene_template(cfg)
+    alt = r'[^"<\n]*?' if "<" in t else r"[^\n]*?"
+    vals = {"ref": re.escape(ref), "alt": alt, "label": re.escape(scene_label(cfg) or "")}
+    return re.sub(r"\\\{(ref|alt|label)\\\}", lambda m: vals[m.group(1)], re.escape(t))
+
+
+def label_problems(root, cfg, tid, st, rev=None):
+    """The AI label next to every scene picture of this slug (09 §2.8, Q4) — outside `run_gate`
+    (whatever `commands.validate` runs), for every topic of the slug, at draft, verify (`--amend`
+    too) and publish `scope`: each reference in the source body that resolves to a scene file is
+    matched by the label pattern exactly as many times as it is referenced."""
+    if not managed(cfg) or not st.get("slug"):
+        return []
+    slug = st["slug"]
+    files = set(scene_files(root, cfg, slug))
+    if not files:
+        return []
+    if not scene_label(cfg):
+        return ["scene images of %s need their AI label, and this language has no default — set "
+                "images.figure.words.scene" % slug]
+    from .validate import IMG_RE, resolve_image_ref
+    body_rel = cfg.body_path(slug)
+    body = _body(root, cfg, slug, rev)
+    pub = _rules(root)["images"].get("public_dir", "public")
+    refs = Counter()
+    for m in IMG_RE.finditer(body):
+        raw = next(g for g in m.groups() if g)
+        if resolve_image_ref(root, body_rel, raw, pub) in files:
+            refs[raw] += 1
+    out = []
+    for raw, n in sorted(refs.items()):
+        found = len(re.findall(label_regex(cfg, raw), body))
+        if found != n:
+            out.append("%s: a scene picture must carry its AI label as `HRD image snippet` gives it (%d of %d "
+                       "references have it) — put the label back" % (raw, found, n))
     return out
 
 
@@ -2413,8 +3259,12 @@ def snippet_spans(root, cfg, tid, st, text):
         return spans
     for it in _items(man):
         r = (((st.get("images") or {}).get("items")) or {}).get(it.get("id")) or {}
+        sn = None
         if it.get("kind") == "external" and r.get("orientation") and figure(cfg).get(it.get("use")):
             sn = snippet_text(cfg, it, r["orientation"], root, st.get("slug"))
+        elif it.get("kind") == "scene" and scene_label(cfg):  # the AI label is never trimmed away (§2.8)
+            sn = snippet_text(cfg, it, None, root, st.get("slug"))
+        if sn:
             i = text.find(sn)
             while i >= 0:
                 spans.append((i, i + len(sn)))
@@ -2424,4 +3274,4 @@ def snippet_spans(root, cfg, tid, st, text):
 
 def config_errors(root, cfg):
     return {"limner_errors": limner.limner_errors(cfg), "og_errors": og_errors(root, cfg),
-            "figure_errors": figure_errors(cfg)}
+            "figure_errors": figure_errors(cfg), "scene_errors": scene_errors(cfg)}

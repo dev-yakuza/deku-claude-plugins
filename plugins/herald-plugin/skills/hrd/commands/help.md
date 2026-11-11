@@ -2,11 +2,11 @@
 
 Show this in `config.language` (not initialized: the language rule in SKILL.md):
 
-**Setup** — `init [lang]` install the harness · `config [key value]` dials (`config images`: SVG diagrams, external images and the OG card, with limner) · `update [--check]`
+**Setup** — `init [lang]` install the harness · `config [key value]` dials (`config images`: SVG diagrams, external images, scene images and the OG card, with limner) · `update [--check]`
 adopt central improvements
 
 **Writing** — `plan [--n N] [--auto]` build the topic queue (`--auto`: the editor-in-chief picks) · `write <id> [--attended] [--ship]` one article to a PR (no questions until the PR; `--attended`: ask at each gate and approve before the PR; `--ship`: publish it right away) ·
-`brief|research|draft|critique|verify|publish <id>` one stage · `resume <id> [--attended] [--ship]` continue (a `screenshots` hold: put the files in `.claude/herald/inbox/<id>/` first, as the capture guide says — or look at the external images it lists) ·
+`brief|research|draft|critique|verify|publish <id>` one stage · `resume <id> [--attended] [--ship]` continue (a `screenshots` hold: put the files in `.claude/herald/inbox/<id>/` first, as the capture guide says — or look at the external images and scenes it lists) ·
 `batch [--n N]` unattended writing (and auto publish if enabled)
 
 **Publishing** — `next [--attended]` one more article published end to end (plans first if the queue is empty; the guard still confirms merge and deploy) · `ship [ids|PRs]` approve, re-verify, merge, deploy, confirm, record ·
