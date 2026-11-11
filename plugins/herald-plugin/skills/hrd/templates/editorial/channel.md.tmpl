@@ -4,8 +4,10 @@
 {"name": "{{SNS}}", "aliases": [{{ALIASES}}], "lang": "{{LANG}}",
  "max_chars": {{MAX_CHARS}}, "count": "{{COUNT}}", "url_len": {{URL_LEN}}, "hashtags": [{{HASHTAGS_MIN}}, {{HASHTAGS_MAX}}],
  "link": "{{LINK}}",
+ "formats": [{{FORMATS}}], "image_aspect": "{{IMAGE_ASPECT}}", "max_images": {{MAX_IMAGES}},
  "disclosure": [{{DISCLOSURE_ITEMS}}],
  "disclosure_waiver": null,
+ "ai_disclosure": {{AI_DISCLOSURE}},
  "forbidden": [],
  "house": {},
  "researched_at": "{{RESEARCHED_AT}}"}
@@ -19,8 +21,15 @@
      - disclosure: [{"kind": "ad"|"operator", "required": true|false, "text": "…",
        "where": "post"|"setting"|"profile"}] — at least one required ad item in the post or as a
        platform setting; otherwise only a human writes disclosure_waiver (`/hrd social --edit`).
+     - formats: the post formats the channel takes — "text", "image" (one picture), "cards" (a
+       carousel), "comic"; image_aspect (4x5 | 1x1 | 16x9) is a single picture's shape;
+       max_images (1–20) the carousel's limit. Without formats: text only.
+     - ai_disclosure: how a post with an AI-generated picture says so — {"where": "post", "text":
+       "…"} (in every such post's text) or {"where": "setting", "text": "the platform's label"}; a
+       human approves it. Without it no generated picture is used. Only a human writes
+       {"waiver": {"reason": "…", "approved_at": "YYYY-MM-DD"}} (`/hrd social --edit`).
      - forbidden entries start "status": "draft"; a human confirms them.
-     - house (humans and evolve): narrows max_chars, hashtags or link for this account.
+     - house (humans and evolve): narrows max_chars, hashtags, link or formats for this account.
      Between the researched markers: rewritten by `/hrd social --refresh`. After them: house rules,
      owned by the humans and `/hrd evolve`. Delete this comment. -->
 
@@ -38,6 +47,9 @@
 
 ### Ad and operator disclosure
 - {{DISCLOSURE_RULES}}
+
+### Image formats and AI-generated pictures
+- {{IMAGE_FORMATS}}
 
 ### Sources
 - {{SOURCES}}

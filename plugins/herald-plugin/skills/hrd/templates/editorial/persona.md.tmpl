@@ -3,6 +3,7 @@
 <!-- herald:social-persona
 {"service_terms": [{{SERVICE_TERMS}}],
  "mix": {"promo": 1, "daily": 3},
+ "appearance": "{{APPEARANCE}}",
  "forbidden": []}
 -->
 
@@ -16,6 +17,9 @@
        service ({"term": "세이프", "exclude": ["세이프티"]}). The site's domain counts already.
        A post that names the service is checked like an ad.
      - mix: promotional : daily posts (default 1 : 3), counted over approved posts.
+     - appearance: how the persona looks in a comic, one English line (printable ASCII, at most
+       300 characters — age range, hair, clothes, a prop); never a real person or a known
+       character. Leave the key out when the account makes no comics.
      - forbidden: entries start "status": "draft"; a human confirms them.
      This file is committed with the repo, which may be public. Delete this comment. -->
 

@@ -14,13 +14,16 @@ uploads the post the human picked. Interactive only: refuse when `HRD_UNATTENDED
 | `--persona` | change the persona or its empathy notes |
 | `--remove <sns>` | delete a channel guide (local drafts stay) |
 | `--list` | channels, their state and the recent post mix |
-| `<sns> <slug> [--n N]` | N promotional drafts (1–5, default 3) for a published article |
-| `<sns> --daily [--theme "…"] [--n N]` | N daily drafts |
+| `<sns> <slug> [--n N] [--format F]` | N promotional drafts (1–5, default 3) for a published article |
+| `<sns> --daily [--theme "…"] [--n N] [--format F]` | N daily drafts |
 | `--final <draft>` | record the text actually uploaded for an approved draft |
 | `<sns>` alone | show this table and stop |
 
 Options may come in any order; the first positional argument after `<sns>` is the slug. A slug
-together with `--daily` is an error. `<sns>` is matched case-insensitively against guide names
+together with `--daily` is an error. `--format` (0.19.0): `text` (default — the post alone),
+`image` (one picture + the post), `cards` (a card-news carousel + the post) or `comic` (one comic
+of 4 or 6 panels + the post; one draft per run). The channel guide's `formats` lists what the
+channel takes; the pictures are composed by limner, never drawn with text by a model. `<sns>` is matched case-insensitively against guide names
 and their aliases; an unknown name → "`/hrd social --add <sns>` first".
 
 Translate `HRD` output into `config.language`; keep ids, paths, rule ids and commands as they are.
@@ -72,7 +75,7 @@ the empathy notes are committed with the repo, which may be public.
    posts), voice, point of view, daily themes, things it never says; the service terms — the
    service's names, product and feature names, their spelling in each language the channels will
    use (transliterations), official account handles; the mix of promotional to daily posts
-   (default 1 : 3). Lay out `pending/persona.md` from `<<SKILL_DIR>>/templates/editorial/persona.md.tmpl`,
+   (default 1 : 3); for comics, how the persona looks (`appearance`, optional — see `--persona`). Lay out `pending/persona.md` from `<<SKILL_DIR>>/templates/editorial/persona.md.tmpl`,
    filled in `config.language`, every `{{…}}` replaced.
 4. Spawn **researcher** for the empathy notes: the persona file; output `pending/persona-notes.md`
    laid out from `persona-notes.md.tmpl`.
@@ -97,7 +100,8 @@ the empathy notes are committed with the repo, which may be public.
    `config.language`) — say so.
 3. Lay out `pending/channels/<sns>.md` from `<<SKILL_DIR>>/templates/editorial/channel.md.tmpl`
    (name, aliases, lang filled) and spawn **researcher** (channel research) with that path, the
-   persona and the language line.
+   persona and the language line. It also researches the image formats (`formats`,
+   `image_aspect`, `max_images`) and how the platform wants AI-generated pictures disclosed.
 4. `lint --mode add`. Typical decisions:
    - no required ad disclosure (post text or platform setting) — ask the human: add one (its text
      and where), or waive it for this channel. A waiver is written by you, from the human's own
@@ -105,7 +109,12 @@ the empathy notes are committed with the repo, which may be public.
      `--allow-floor disclosure_waiver`. Research finding no rule is not a reason;
    - a language without default checks (`s9:<lang>`) — the statistics and service-experience
      checks are off for this channel; only the human accepts that;
-   - a warning that no service term is written in this channel's script → offer `--persona`.
+   - a warning that no service term is written in this channel's script → offer `--persona`;
+   - the AI disclosure (`ai_disclosure`): research proposes one (`{"where": "post", "text": …}` or
+     `{"where": "setting", "text": …}`); ask the human to approve it as it is, change it, or leave it
+     out (then `image`/`cards` posts use no generated or scene picture and `comic` is off). A waiver
+     (`{"waiver": {"reason": "…", "approved_at": "<today>"}}`) only from the human's own reason,
+     with `--allow-floor ai_disclosure:waiver`.
 5. Show the guide, approve, copy, lint, commit, push, release. Any `where: profile` disclosure →
    give the human the profile checklist (what to put in the account profile).
 
@@ -119,7 +128,10 @@ the empathy notes are committed with the repo, which may be public.
    rules, the waiver and every existing rule's status stay; new `forbidden` rules join as
    `draft`; a disclosure that would get weaker stays as it was. It writes
    `pending/channels/<sns>.merged.md` and prints `changed`, `added_rules`, `disclosure_added`
-   and `floor_changes` (each with `applied: false`).
+   and `floor_changes` (each with `applied: false`); `ai_disclosure_added` when the guide had no
+   AI disclosure and research proposes one (it is in the merged file — ask the human about it like
+   a new disclosure; a weaker AI disclosure is a floor change like the others, a waiver never comes
+   from research).
 3. Show the human what changed, field by field, and each floor change separately, in plain
    words (what posts lose). The human picks what to take: run `merge` again with `--accept
    <field|region …>` (only those) and `--accept-floor <token>` for each floor change the human
@@ -141,6 +153,9 @@ the diff, approve, copy, lint, commit, push, release.
 No persona on base → `--setup`. Copy `persona.md` (and `persona-notes.md` when it changes) to
 `pending/`, apply the change, `lint --mode persona` for each, show the diff, approve, copy,
 lint, commit, push, release. Removing a service term or adding an exclusion is a floor change.
+`appearance` (0.19.0, optional): how the persona looks in a comic — one English line (printable
+ASCII, at most 300 characters: age range, hair, clothes, a prop); never a real person or a known
+character. Every comic panel showing the persona carries it word for word.
 
 ### `--remove <sns>`
 Ask the human to confirm. `rm docs/editorial/channels/<sns>.md` (the guard asks; not `git rm`),
@@ -156,21 +171,52 @@ on; the recent mix of approved posts against the persona's `mix`.
 
 After the common start:
 
-1. `HRD social prepare --sns <sns> [--slug <slug>] --n <N>`. A refusal names the reason and the
-   next step (`/hrd ship`, `/hrd translate …`, `/hrd config`, `--setup`, `--add`, `--edit`) —
-   relay it, release, stop. Show the warnings; an article published without a human reading it →
-   ask whether to go on.
+1. `HRD social prepare --sns <sns> [--slug <slug>] --n <N> [--format <F>]`. A refusal names the
+   reason and the next step (`/hrd ship`, `/hrd translate …`, `/hrd config`, `--setup`, `--add`,
+   `--edit`, `--refresh`, `/hrd image doctor`) — relay it, release, stop. Show the warnings; an
+   article published without a human reading it → ask whether to go on.
 2. Spawn **distributor** with: `run`, `kind`, `slug`, `lang`, the draft paths (`drafts` — one file
    each), `limits`, `disclosure`, `daily_service_allowed`, the read list (`read`), the theme
-   (`--theme`, daily), and the language line (`atoms/_contract.md` §D).
+   (`--theme`, daily), and the language line (`atoms/_contract.md` §D). A format other than
+   `text` adds `format`, `media_paths` (one spec per draft), `materials`, `gen_size` or
+   `panel_size`, `ai_disclosure`, `appearance` and `handles`.
+2a. **Pictures** (format ≠ `text`), per draft: `HRD social media --draft <draft>` with the Bash
+   timeout `(wait + 60) × 1000` ms (`--wait` default 240). Never run `lmn` yourself — Herald calls
+   limner, and the guard asks before a direct call. The result's `state`:
+   - `running` (a picture is still being generated; `remaining`) → call it again (the same
+     command takes the run over); after about 15 minutes ask the human: wait more, `--format text`,
+     or stop;
+   - `failed` — by `errors[].class`: `content` (the spec, a material, or the words drawn into the
+     pictures broke a post rule — checked before anything is generated) → back to the distributor
+     with the errors, then `media` again; `env` (limner, the generator, the machine) and `internal`
+     (Herald's own layout refused by limner — a Herald bug) → tell the human and ask: retry later,
+     `--format text`, or stop; `human` (`redraw-limit`: the draft drew 4 pictures again already) →
+     ask the human;
+   - `done` with `problems` (limner's checks: `overflow`, `too_small`, `overlap`, `tail_crosses`,
+     `low_contrast`, `missing_glyph`, `off_canvas`) → the distributor fixes only those (shorter
+     words, moved bubbles) and `media` again — at most twice; still there → show the human (check
+     reports `media-problems`; the first five may be accepted with `--override`, the last two never).
+   **A comic** has two steps: the distributor writes the panels (prompts, seeds, `persona`, the
+   words without coordinates) → `HRD social media --draft <d> --stage panels` → the distributor
+   looks at `preview` and each `panels[].path` (Read): a panel with fake writing, a deformed body,
+   another country's signs or the wrong scene gets a new seed (`--stage panels` again — at most 4
+   pictures drawn again in the whole draft); then it places the bubbles and captions in each
+   panel's box (`panel_size`, top left 0,0) → `HRD social media --draft <d>`.
 3. `HRD social check --file <every draft>`. A draft that fails: send its failed rules back to the
    distributor once for that draft, then check it again with `--record` (the last check; a rule
    still failing becomes a growth signal). Still failing → keep it, marked.
    `basis-changed` (the article or the guide's language changed on base since prepare) and
    `check-error` (no such draft, or not a draft prepare laid out) are not writing problems: never
    send them to the distributor — `basis-changed` → run `prepare` again; `check-error` → relay it.
+   `media-missing` and `media-stale` (the spec, a picture or a material changed after `HRD social
+   media`, or a picture is not the one limner's record vouches for) are not writing problems either
+   → `HRD social media --draft <d>` again (2a). `media-spec` and `disclosure-ai` are the
+   distributor's to fix.
 4. Show the human every draft: the text, its profile (`promo`, `daily`, or `daily+service` — a
-   daily post naming the service, checked like an ad), failed rules and warnings, its
+   daily post naming the service, checked like an ad; the words in its pictures count), the
+   format with the picture paths in order (`media.files` — the human opens and looks at each), and
+   whether a picture is generated (`media.generated`) with the channel's AI disclosure (in the
+   post text, or the platform setting to turn on), failed rules and warnings, its
    `from: promotion` quotes highlighted (the human judges what code cannot: claims beyond the
    quotes, comparisons), and the mix line (`recent_mix` against the persona's `mix`). Ask
    (`AskUserQuestion`):
@@ -183,14 +229,17 @@ After the common start:
      a signal is evidence about the distributor's writing);
    - **pick one** — rules marked `overridable: false` cannot be approved (rewrite or pick another).
      Overridable failures (`length`, `hashtags`, `link-position`, `s9b-statistic`,
-     `s9a-service-experience` on promotional posts) → ask the human to accept each, with their
-     reason → `--override "<reason>"`. Each `settings_to_confirm` → ask the human to turn that
-     platform disclosure setting on for this post → `--setting-confirmed <kind>` only on a yes.
+     `s9a-service-experience` on promotional posts, `media-problems` marked overridable) → ask the
+     human to accept each, with their reason → `--override "<reason>"`. Each `settings_to_confirm`
+     → ask the human to turn that platform disclosure setting on for this post (`ai`: the
+     platform's AI label) → `--setting-confirmed <kind>` only on a yes.
      Then `HRD social close --run <run> --approved <draft> […]` (it checks the draft again);
    - **reject all** — `HRD social close --run <run> --reject-all` (it records the growth signal).
 5. Release. Show the approved post ready to paste, the platform settings to turn on, and say
    that Herald does not post — and that after uploading, `/hrd social --final <draft>` records
-   the text actually posted (optional; a changed text teaches evolve).
+   the text actually posted (optional; a changed text teaches evolve). With pictures: "upload the
+   pictures in `<close's media paths>` in this order" (the approved copies — exactly the bytes the
+   human saw).
 
 ## `--final <draft>`
 
@@ -198,8 +247,10 @@ No lock (local records only). The draft must be approved. Ask the human to paste
 posted; write it, body only, to `.claude/herald/memory/social/final/<sns>/<draft file name>`,
 then `HRD social final --draft <draft> --final-file <that path>`. It records `uploaded`, compares
 the text with the approved copy (a change becomes a `social-final` signal; small changes are
-evidence, not problems) and checks it for information. `fix_live_post` non-empty (a
-disclosure missing, another URL; `setting:<kind>` — the text now names the service, so the
-platform's `<kind>` disclosure setting must be turned on for the live post) → tell the human
-plainly to fix the live post. `check_incomplete: true` → the post could not be checked (the
+evidence, not problems) and checks it for information — with the approved profile and, for a
+post with a generated picture, the AI disclosure carried over (the pictures went up with the
+text). `fix_live_post` non-empty (a disclosure missing, `disclosure-ai` — the AI disclosure is not
+in the text, another URL; `setting:<kind>` — the text now names the service, so the platform's
+`<kind>` disclosure setting must be turned on for the live post; `setting:ai` — the platform's AI
+label) → tell the human plainly to fix the live post. `check_incomplete: true` → the post could not be checked (the
 channel's guide is gone or invalid on base): ask the human to verify the disclosure by hand.

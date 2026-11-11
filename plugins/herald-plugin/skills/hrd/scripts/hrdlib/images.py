@@ -1847,31 +1847,22 @@ def _settle(res, pre, jid, received):
         res["skipped"].append(jid)
 
 
-def _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, pre, partial=False, can_retry=False,
+def _final(root, cfg, obj, todo, jobs, res, run_id, received, pre, take, partial=False, can_retry=False,
            room=None):
     """Read a limner result: receive `done ∪ skipped ∪ adopted` of the items not confirmed yet and
     — unless `partial` (a run still going) — map the rest by the §2.4.3 table; items generated or
     ready before this call are never failures (review round 1 m2). Returns True when only machine
-    failures (memory, metal, signal, crashed) are left: one more `run` resumes the work."""
+    failures (memory, metal, signal, crashed) are left: one more `run` resumes the work.
+    `take(id, regenerated, run_id)` receives one finished item (0.19: the topic's `_receive` or the
+    social draft's own — design/herald/10-social-media.md §2.3 3); `regenerated`: limner listed it
+    as drawn again."""
     by = {it["id"]: it for it in todo}
-    # limner's own update: it drew again a job Herald did not change (the key had a line already)
-    updated = set()
-    for g in obj.get("regenerated") or []:
-        jid = g.get("id") if isinstance(g, dict) else None
-        if jid not in by:
-            continue
-        prior = led.gen_lines_key(tid, jid, scene_key(cfg, by[jid]))
-        rec = limner.read_record(root, cfg, jobs[jid]["out"]) or {}
-        drawn = (rec.get("model"), rec.get("lora"))
-        # a line of this key drawn with another model or LoRA revision: limner's lock changed (a
-        # seed changed by hand and back is no update — review round 2 n7)
-        if prior and all((x.get("model"), x.get("lora")) != drawn for x in prior):
-            updated.add(jid)
+    regen = {g.get("id") for g in obj.get("regenerated") or [] if isinstance(g, dict)}
     done_ids = [d.get("id") for d in obj.get("done") or [] if isinstance(d, dict)]
     for jid in done_ids + list(obj.get("skipped") or []) + list(obj.get("adopted") or []):
         if jid in by and jid not in received and pre.get(jid) != "ready":
             received.add(jid)
-            _receive(root, cfg, tid, st, by[jid], jobs[jid], led, res, run_id, updated=jid in updated)
+            take(jid, jid in regen, run_id)
     if partial:
         return False
     fails, general = {}, None
@@ -2009,7 +2000,7 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
     res = {"state": "done", "generated": [], "skipped": [], "failed": [], "running": [], "regenerated": [],
            "waited_s": gen.get("waited_s", 0), "run_id": gen.get("run_id")}
     items = rec.setdefault("items", {})
-    sd, _, job_path, out_dir = _gen_paths(root, cfg, tid)
+    _, _, job_path, out_dir = _gen_paths(root, cfg, tid)
     live_ids = set()
     if gen.get("run_id"):  # the job file is the last job written — the run Herald follows
         try:
@@ -2051,6 +2042,45 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
         res.update(state="off", why=why)
         return res
     jobs = {it["id"]: _job_entry(cfg, it, "%s/%s.png" % (out_dir, it["id"])) for it in todo}
+
+    def take(jid, regen, run_id):
+        it = next(i for i in todo if i["id"] == jid)
+        updated = False
+        if regen:  # limner's own update: it drew again a job Herald did not change (the key had a line already)
+            prior = led.gen_lines_key(tid, jid, scene_key(cfg, it))
+            r = limner.read_record(root, cfg, jobs[jid]["out"]) or {}
+            drawn = (r.get("model"), r.get("lora"))
+            # a line of this key drawn with another model or LoRA revision: limner's lock changed (a
+            # seed changed by hand and back is no update — review round 2 n7)
+            updated = bool(prior) and all((x.get("model"), x.get("lora")) != drawn for x in prior)
+        _receive(root, cfg, tid, st, it, jobs[jid], led, res, run_id, updated=updated)
+
+    def save_gen(g):
+        if g:
+            st.setdefault("images", rec)["gen"] = g
+        else:
+            st.setdefault("images", rec).pop("gen", None)
+        save_state(root, tid, st)
+    out = drive(root, cfg, todo, jobs, job_path, pre, res, gen, save_gen, take, t0, wait, room, cap)
+    if out is None:
+        return _gen_state(res)
+    gen, live = out
+    if gen:
+        st["images"]["gen"] = gen
+        res["waited_s"] = gen.get("waited_s", 0)
+    else:
+        st["images"].pop("gen", None)  # the run is over: nothing to take over or cancel
+    save_state(root, tid, st)  # 9
+    return _gen_state(res, live)
+
+
+def drive(root, cfg, todo, jobs, job_path, pre, res, gen, save_gen, take, t0, wait, room, cap):
+    """Steps 4–8 of §2.4.3 for any set of jobs (0.19: a topic's scenes or a social draft's
+    pictures — 10-social-media.md §2.3 3): write the job file, start or take over limner's run,
+    wait within the budget, hand each finished item to `take`. `pre[id]` is `pending` (to make),
+    `generated` or `ready`; `gen` the run Herald follows ({} for none), `save_gen(gen or None)`
+    persists it. Returns None when the run could not start (`res` says why), else (gen, live)."""
+    sd = limner.state_dir_abs(root, cfg)
     job_sha = _write_job(job_path, [jobs[it["id"]] for it in todo])
     rroot = os.path.realpath(root)
     base_opts = [("--job", job_path), ("--root", rroot), ("--state-dir", sd)]
@@ -2059,15 +2089,15 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
     received = set()
     if chk["code"] or chk["exit"] != 0 or not isinstance(run_id, str):
         _fail_pending(res, todo, pre, received, chk["code"] or "contract", chk["message"])
-        return _gen_state(res)
+        return None
     res["run_id"] = run_id
     if gen.get("run_id") and gen["run_id"] != run_id:  # 4: the jobs changed — stop Herald's old run
         _, fail = _stop_run(root, cfg, gen["run_id"], room)
         if fail:
             _fail_pending(res, todo, pre, received, fail[0], fail[1])
-            return _gen_state(res)
+            return None
         gen = {}
-        rec.pop("gen", None)
+        save_gen(None)
     retried, again, live = False, False, False
 
     def more():
@@ -2084,7 +2114,7 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
             _fail_pending(res, todo, pre, received, r["code"], r["message"])
             break
         if obj.get("attempt") is None or obj.get("state") not in LIVE:
-            if _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, pre, can_retry=not retried,
+            if _final(root, cfg, obj, todo, jobs, res, run_id, received, pre, take, can_retry=not retried,
                       room=room):
                 retried = True
                 if more():
@@ -2096,8 +2126,7 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
         gen = {"run_id": run_id, "attempt": obj.get("attempt"), "job_sha256": job_sha,
                "started_at": gen.get("started_at") if same and gen.get("started_at") else now_iso(),
                "waited_s": gen.get("waited_s", 0) if same else 0}
-        st.setdefault("images", rec)["gen"] = gen
-        save_state(root, tid, st)
+        save_gen(gen)
         left = t0 + wait - time.monotonic()  # 6
         ws = int(left - 20) if left >= 30 else 0
         t1 = time.monotonic()
@@ -2108,7 +2137,7 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
         if s_["code"] == "not-found" and not again:  # 12: the state dir lost the run — once more from 5
             again = True
             gen = {}
-            st["images"].pop("gen", None)
+            save_gen(None)
             if more():
                 continue
             live = True
@@ -2117,26 +2146,20 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
             _fail_pending(res, todo, pre, received, s_["code"], s_["message"])
             break
         if sobj.get("state") in LIVE:  # 7: still going — take in what it finished so far
-            _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, pre, partial=True, room=room)
+            _final(root, cfg, sobj, todo, jobs, res, run_id, received, pre, take, partial=True, room=room)
             res["running"] = [it["id"] for it in todo if it["id"] not in received and pre[it["id"]] == "pending"]
             live = True
             break
         # ended — whatever the exit code (2, 73, 11, 5), the attempt's lists are read (m2)
-        if _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, pre, can_retry=not retried,
-                      room=room):
+        if _final(root, cfg, sobj, todo, jobs, res, run_id, received, pre, take, can_retry=not retried,
+                  room=room):
             retried = True
             if more():
                 continue
             live = True
         gen = {}
         break
-    if gen:
-        st["images"]["gen"] = gen
-        res["waited_s"] = gen.get("waited_s", 0)
-    else:
-        st["images"].pop("gen", None)  # the run is over: nothing to take over or cancel
-    save_state(root, tid, st)  # 9
-    return _gen_state(res, live)
+    return gen, live
 
 
 def reset_wait(root, cfg, tid):

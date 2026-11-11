@@ -222,6 +222,27 @@ def check_edit(root, cfg, tool, ti):
         protect("changing protected config keys (%s)." % ", ".join(PROTECTED_CONFIG_KEYS))
 
 
+def runs_limner(argv, cfg):
+    """A shell call of limner itself (10-social-media.md §10 R3-1): the configured command (its
+    executable name, or the whole argv when it has arguments), `lmn`, or `lmn` under uv/uvx/pipx.
+    Herald calls limner from Python, so its own commands never match."""
+    if not argv:
+        return False
+    if argv[0] in ("lmn", "limner"):
+        return True
+    if argv[0] in ("uv", "uvx", "pipx") and ("lmn" in argv or "limner" in argv):
+        return True
+    try:
+        from . import limner
+        cmd = limner.settings(cfg)["command"] if cfg is not None else None
+    except Exception:  # noqa: BLE001 — no readable config: `lmn` alone
+        cmd = None
+    if isinstance(cmd, list) and cmd and all(isinstance(x, str) for x in cmd):
+        want = [os.path.basename(cmd[0])] + list(cmd[1:])
+        return argv[:len(want)] == want
+    return False
+
+
 def segments(cmd):
     # `&&`, `||`, `;`, newlines, pipes and a lone `&` (background) all start a new command
     return [s.strip() for s in re.split(r"&&|\|\||;|\n|\||(?<![>&])&(?![>&])", cmd) if s.strip()]
@@ -611,6 +632,11 @@ def check_bash(root, cfg, cmd):
         if "image" in argv and ("confirm" in argv or "reject" in argv):
             protect("`HRD image %s` records a human's decision about an external image — only the human decides."
                     % ("confirm" if "confirm" in argv else "reject"))
+        # 1e. limner itself: Herald's pictures and the records that vouch for them are written only
+        # through Herald (10-social-media.md §10 R3-1 — a direct `lmn compose` could redraw them)
+        if runs_limner(argv, cfg):
+            protect("running limner directly — Herald calls it (`HRD image …`, `HRD social media`); a direct call "
+                    "can redraw a picture and the record Herald checks it against.")
         # 2. deploy
         if any(contains(canon(strip_noise(argv)), s) for s in sigs):
             if unattended():

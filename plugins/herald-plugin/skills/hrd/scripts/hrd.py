@@ -22,7 +22,7 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.18.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.19.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -1233,16 +1233,25 @@ def cmd_image(a):
 
 
 def cmd_social(a):
-    """SNS drafts (design/herald/03-social.md): prepare / check / close / list / lint."""
+    """SNS drafts (design/herald/03-social.md): prepare / check / close / list / lint; 0.19 media
+    (10-social-media.md): a draft's pictures."""
     from hrdlib import social
 
     root, cfg = ctx()
-    if a.action in ("prepare", "check", "close", "merge", "final") and os.environ.get("HRD_UNATTENDED") == "1":
+    if a.action in ("prepare", "check", "close", "merge", "final", "media") and os.environ.get("HRD_UNATTENDED") == "1":
         raise HeraldError("/hrd social is interactive only (a human picks every post)")
     if a.action == "prepare":
         if not a.sns:
             raise HeraldError("prepare needs --sns")
-        emit(social.prepare(root, cfg, a.sns, slug=a.slug, n=a.n))
+        emit(social.prepare(root, cfg, a.sns, slug=a.slug, n=a.n, fmt=a.format))
+    elif a.action == "media":
+        from hrdlib import social_media
+        if not a.draft:
+            raise HeraldError("media needs --draft <draft>")
+        out = social_media.media(root, cfg, a.draft, wait=a.wait, stage=a.stage)
+        emit(out)
+        if out["state"] == "failed":
+            sys.exit(1)
     elif a.action == "check":
         if not a.file:
             raise HeraldError("check needs --file <draft> …")
@@ -1489,7 +1498,9 @@ def build():
     p.add_argument("--record", action="store_true", help="record a failure as a gate-failure signal (pre-editor check)")
     p.set_defaults(fn=cmd_gate)
     p = sp.add_parser("social")
-    p.add_argument("action", choices=["prepare", "check", "close", "list", "lint", "merge", "final"])
+    p.add_argument("action", choices=["prepare", "check", "close", "list", "lint", "merge", "final", "media"])
+    p.add_argument("--format", choices=["text", "image", "cards", "comic"])
+    p.add_argument("--wait", type=int, default=240); p.add_argument("--stage", choices=["panels", "compose"])
     p.add_argument("--record", action="store_true", help="check: record failures as social-gate-failure signals")
     p.add_argument("--researched"); p.add_argument("--accept", nargs="*"); p.add_argument("--accept-floor", action="append")
     p.add_argument("--draft"); p.add_argument("--final-file")

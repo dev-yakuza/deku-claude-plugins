@@ -46,7 +46,10 @@ only. Ported from Guild `update.md`.
    as 0.16.0. Say once at the end: "image expansion (diagrams, external images, the OG card) is
    turned on with `/hrd config images`". **Scene images** (0.18.0): never turned on by `update`
    either — a repo with an `images` block but no `images.scenes` behaves as 0.17.0. Say once:
-   "scene images can be turned on — `/hrd config images`".
+   "scene images can be turned on — `/hrd config images`". **SNS formats** (0.19.0): a channel
+   guide without `formats` takes text posts only, as before (nothing changes on update). If any
+   channel guide lacks `formats`, say once: "`/hrd social --refresh <sns>` researches the image
+   formats (single image, card news, comic) and the channel's AI disclosure".
    **Translations** (0.9.0): never added by `update` (INV4). If config has no `translations` and
    the content has locale directories, say once that `/hrd config` can turn translations on.
    A translator persona from before 0.9.0 still has `{{TRANSLATION_TARGETS}}`-style values in

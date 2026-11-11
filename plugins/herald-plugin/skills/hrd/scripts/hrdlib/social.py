@@ -10,6 +10,10 @@ The distributor writes post drafts; this module decides everything a prompt coul
 - `check` runs the post rules (S6, S7, S9, S10) on a draft, reading every source from HEAD;
 - `close` re-checks the chosen draft and records the decision.
 
+0.19.0 (design/herald/10-social-media.md): a run has a format — `text`, or a single image, card
+news or a comic (`social_media`); the words drawn into the pictures are checked with the post
+text (P23), and a post with a generated picture carries the channel's AI disclosure (P25).
+
 Drafts, records and copies stay local under `.claude/herald/memory/social/` (gitignored).
 """
 
@@ -43,8 +47,9 @@ PERSONA_RE = re.compile(r"<!--\s*herald:social-persona\s*(\{.*?\})\s*-->", re.S)
 RESEARCHED_START = "<!-- herald:researched:start -->"
 RESEARCHED_END = "<!-- herald:researched:end -->"
 
-RESEARCH_FIELDS = ("max_chars", "count", "url_len", "hashtags", "link", "researched_at")
-HOUSE_KEYS = ("max_chars", "hashtags", "link")
+RESEARCH_FIELDS = ("max_chars", "count", "url_len", "hashtags", "link", "researched_at",
+                   "formats", "image_aspect", "max_images")  # the last three: 0.19 (10-social-media §2.1)
+HOUSE_KEYS = ("max_chars", "hashtags", "link", "formats")
 LINK_VALUES = ("end", "start", "any", "none")
 WHERE_STRENGTH = {"post": 3, "setting": 2, "profile": 1}
 MODES = ("setup", "add", "edit", "persona", "refresh", "evolve")
@@ -67,10 +72,13 @@ DIGIT_RE = re.compile(r"\d")
 
 # Rule ids `check` emits. Overridable ones may pass with `close --override` after a human said so.
 OVERRIDABLE = ("length", "hashtags", "link-position", "s9b-statistic")  # + s9a on promo only
+# (+ `media-problems` of the kinds social_media.OVERRIDABLE_PROBLEMS names — §10 R3-3)
 RULE_IDS = ("length", "hashtags", "link-position", "s9a-service-experience", "s9b-statistic",
             "disclosure", "forbidden-confirmed", "forbidden-invalid", "sources", "promotion-quote-not-found",
             "promotion-lang", "promo-url", "promo-link-missing", "daily-url", "daily-sources",
-            "service-mention-not-allowed", "header-mismatch", "guide-invalid", "basis-changed", "check-error")
+            "service-mention-not-allowed", "header-mismatch", "guide-invalid", "basis-changed", "check-error",
+            "disclosure-ai", "media-spec", "media-missing", "media-stale", "media-problems")
+PROFILE_ORDER = {"daily": 0, "daily+service": 1, "promo": 2}
 
 _URLCH = r"A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%"
 # Top-level labels a bare domain is a link with even without a path. English words (`.today`,
@@ -471,6 +479,7 @@ def channel_problems(h, name, cfg=None, persona=None, others=None):
     if not any(isinstance(d, dict) and d.get("kind") == "ad" and d.get("required") is True
                and d.get("where") in ("post", "setting") for d in disc) and not waiver:
         errors.append("no required ad disclosure in the post or as a platform setting, and no disclosure_waiver (S10)")
+    errors += _media_field_problems(h, house)
     e, w = _forbidden_problems(h.get("forbidden", []), "channel")
     errors += e
     warnings += w
@@ -480,6 +489,57 @@ def channel_problems(h, name, cfg=None, persona=None, others=None):
             warnings.append("persona service_terms has no term in this channel's script (%s) — add the "
                             "transliteration the posts will use" % lang)
     return errors, warnings
+
+
+def _formats_ok(v):
+    from .social_media import FORMATS
+    return isinstance(v, list) and bool(v) and len(set(v)) == len(v) and all(x in FORMATS for x in v)
+
+
+def ai_disclosure_problems(a):
+    """The AI disclosure (10-social-media.md §2.6): {where: post|setting, text} or {waiver:
+    {reason, approved_at}} — apart from the ad disclosure, so it never stands in for it (v2 R1-1)."""
+    if a is None:
+        return []
+    if not isinstance(a, dict):
+        return ["ai_disclosure must be {where, text} or {waiver: {reason, approved_at}}"]
+    if "waiver" in a:
+        w = a.get("waiver")
+        if set(a) != {"waiver"} or not (isinstance(w, dict) and isinstance(w.get("reason"), str) and w["reason"].strip()
+                                        and isinstance(w.get("approved_at"), str) and DATE_RE.match(w["approved_at"])):
+            return ["ai_disclosure waiver must be {waiver: {reason, approved_at: YYYY-MM-DD}} alone"]
+        return []
+    if set(a) - {"where", "text"} or a.get("where") not in ("post", "setting") or not isinstance(a.get("text"), str):
+        return ["ai_disclosure needs where post|setting and a text"]
+    t = unicodedata.normalize("NFKC", a["text"])
+    if not t.strip():
+        return ["ai_disclosure needs a text"]
+    if a["where"] == "post" and find_urls(t):
+        return ["ai_disclosure text contains a URL — post checks never read text inside links"]
+    if a["where"] == "post" and HANDLE_RE.search(t):
+        return ["ai_disclosure text contains an @handle — a handle is never read as a disclosure"]
+    return []
+
+
+def _media_field_problems(h, house):
+    """0.19 research fields `formats`, `image_aspect`, `max_images`, house `formats` (narrowing
+    only) and `ai_disclosure` (10-social-media.md §2.1, §2.6)."""
+    from .social_media import ASPECTS, MAX_IMAGES
+    errors = []
+    if "formats" in h and not _formats_ok(h["formats"]):
+        errors.append("formats must be a non-empty list of text, image, cards, comic")
+    if "image_aspect" in h and h["image_aspect"] not in ASPECTS:
+        errors.append("image_aspect must be one of %s" % ", ".join(ASPECTS))
+    if "max_images" in h and not (isinstance(h["max_images"], int) and not isinstance(h["max_images"], bool)
+                                  and MAX_IMAGES[0] <= h["max_images"] <= MAX_IMAGES[1]):
+        errors.append("max_images must be an integer %d–%d" % MAX_IMAGES)
+    if "formats" in house:
+        if not _formats_ok(house["formats"]):
+            errors.append("house.formats must be a non-empty list of text, image, cards, comic")
+        elif not set(house["formats"]) <= set(h.get("formats") or ["text"]):
+            errors.append("house.formats only narrows the researched formats (%s)" % ", ".join(h.get("formats") or ["text"]))
+    errors += ai_disclosure_problems(h.get("ai_disclosure"))
+    return errors
 
 
 def _script_matches(term, lang):
@@ -528,6 +588,11 @@ def persona_problems(p, cfg=None):
     if not (isinstance(mix, dict) and isinstance(mix.get("promo"), int) and isinstance(mix.get("daily"), int)
             and mix["promo"] >= 0 and mix["daily"] >= 0 and mix["promo"] + mix["daily"] > 0):
         errors.append("mix must be {promo: n, daily: m}")
+    if "appearance" in p:  # a comic's persona, in words only (10-social-media.md §2.7)
+        from .images import SCENE_TEXT_RE
+        a = p["appearance"]
+        if not isinstance(a, str) or not a.strip() or len(a) > 300 or not SCENE_TEXT_RE.match(a):
+            errors.append("appearance must be English, printable ASCII without \" \\ `, at most 300 characters")
     e, w = _forbidden_problems(p.get("forbidden", []), "persona")
     return errors + e, warnings + w
 
@@ -589,10 +654,14 @@ def _load_committed(root, cfg, sns, rev="HEAD"):
 def effective(h):
     """Research fields with the house overrides (house wins; only HOUSE_KEYS)."""
     eff = {"max_chars": h.get("max_chars"), "count": h.get("count", "chars"), "url_len": h.get("url_len", 23),
-           "hashtags": h.get("hashtags", [0, 30]), "link": h.get("link", "any")}
+           "hashtags": h.get("hashtags", [0, 30]), "link": h.get("link", "any"),
+           "formats": list(h.get("formats") or ["text"]), "image_aspect": h.get("image_aspect", "4x5"),
+           "max_images": h.get("max_images", 10)}
     house = h.get("house") if isinstance(h.get("house"), dict) else {}
     for k, v in house.items():
-        if k in HOUSE_KEYS:
+        if k == "formats":  # narrows only: research ∩ house (10-social-media.md §2.1)
+            eff[k] = [x for x in eff["formats"] if isinstance(v, list) and x in v]
+        elif k in HOUSE_KEYS:
             eff[k] = v
     return eff
 
@@ -642,6 +711,9 @@ def _log(root, rec):
     rec.setdefault("at", now_iso())
     append_jsonl(log_path(root), rec)
     return rec
+
+
+log_event = _log
 
 
 def latest_status(root):
@@ -768,7 +840,8 @@ def _run_id(root):
     return "%s-%d" % (run_id, n)
 
 
-def prepare(root, cfg, sns, slug=None, n=3):
+def prepare(root, cfg, sns, slug=None, n=3, fmt=None):
+    from . import limner, social_media as sm
     on_base(root, cfg)
     if not 1 <= int(n) <= MAX_N:
         raise HeraldError("--n must be 1–%d" % MAX_N)
@@ -778,6 +851,30 @@ def prepare(root, cfg, sns, slug=None, n=3):
     lang = h["lang"]
     plang = promo_lang(cfg, lang)
     warnings = []
+    fmt = fmt or "text"
+    eff = effective(h)
+    if fmt not in sm.FORMATS:
+        raise HeraldError("--format must be one of %s" % ", ".join(sm.FORMATS))
+    if fmt not in eff["formats"]:
+        raise HeraldError("the %s guide takes %s posts only — `/hrd social --refresh %s` researches the image formats"
+                          % (sns, ", ".join(eff["formats"]), sns))
+    gen_ok = False
+    if fmt != "text":  # 10-social-media.md §2.1
+        if primary(lang) not in sm.COMPOSE_LANGS:
+            raise HeraldError("limner draws text in ko, ja and en only — the %s guide's language is %s" % (sns, lang))
+        p = limner.probe(root, cfg)
+        if not p["ok"]:
+            raise HeraldError("the %s format needs limner here (%s) — `/hrd image doctor`, or --format text"
+                              % (fmt, p["code"]))
+        gen_ok, why = sm.gen_available(root, cfg, h)
+        if fmt == "comic":
+            if not gen_ok:
+                raise HeraldError("a comic is drawn by the generator: %s — %s" % (why, (
+                    "add the channel's ai_disclosure with `/hrd social --edit %s`" % sns) if why == "ai-disclosure"
+                    else "this machine cannot generate (`/hrd image doctor`)"))
+            if int(n) != 1:
+                warnings.append("a comic run has one draft (--n 1)")
+            n = 1
     if _stale(h):
         warnings.append("the %s guide was researched on %s (over %d days ago) — `/hrd social --refresh %s` when "
                         "convenient" % (sns, h.get("researched_at"), STALE_DAYS, sns))
@@ -793,13 +890,14 @@ def prepare(root, cfg, sns, slug=None, n=3):
         basis["body_blob"] = git(root, "rev-parse", "HEAD:%s" % basis["body"]).strip()
         if basis["unread"]:
             warnings.append("%s was published without a human reading it (auto publish) — read it before promoting" % slug)
+    mats = sm.materials(root, cfg, slug, gen_ok, sm.ai_ok(h)) if fmt != "text" else []
     run_id = _run_id(root)
     drafts = [memory_rel(sns, "%s-%s-%d.md" % (run_id, slug or "daily", i)) for i in range(1, int(n) + 1)]
     date = run_id[:8]
     for d in drafts:
         _log(root, {"event": "status", "status": "drafted", "run": run_id, "sns": sns, "kind": kind, "slug": slug,
                     "draft": d, "lang": lang, "url": basis.get("url"), "body": basis.get("body"),
-                    "body_blob": basis.get("body_blob"),
+                    "body_blob": basis.get("body_blob"), "format": fmt,
                     "signal_topic": "social:%s:%s" % (sns, date)})
     os.makedirs(os.path.join(memory_dir(root), sns), exist_ok=True)
     read = {"guide": guide_rel(sns), "persona": PERSONA, "promotion": PROMOTION,
@@ -808,12 +906,22 @@ def prepare(root, cfg, sns, slug=None, n=3):
         read.update({"body": basis["body"], "url": basis["url"], "brief": basis["brief"]})
     else:
         read["notes"] = NOTES if git_ok(root, "cat-file", "-e", "HEAD:%s" % NOTES) else None
-    eff = effective(h)
-    return {"run": run_id, "sns": sns, "kind": kind, "slug": slug, "lang": lang, "drafts": drafts, "read": read,
-            "daily_service_allowed": daily_service_allowed(cfg, lang),
-            "limits": eff, "disclosure": h.get("disclosure"), "disclosure_waiver": h.get("disclosure_waiver"),
-            "mix": persona.get("mix", {"promo": 1, "daily": 3}), "recent_mix": recent_mix(root),
-            "signal_topic": "social:%s:%s" % (sns, date), "warnings": warnings}
+    out = {"run": run_id, "sns": sns, "kind": kind, "slug": slug, "lang": lang, "drafts": drafts, "read": read,
+           "daily_service_allowed": daily_service_allowed(cfg, lang),
+           "limits": eff, "disclosure": h.get("disclosure"), "disclosure_waiver": h.get("disclosure_waiver"),
+           "mix": persona.get("mix", {"promo": 1, "daily": 3}), "recent_mix": recent_mix(root),
+           "signal_topic": "social:%s:%s" % (sns, date), "warnings": warnings, "format": fmt}
+    if fmt != "text":
+        out.update(media_paths=[sm.spec_rel(d) for d in drafts], materials=mats,
+                   ai_disclosure=h.get("ai_disclosure"), appearance=persona.get("appearance"),
+                   handles=sm._handles(persona) if kind == "promo" else [])
+        if fmt == "image":
+            out["gen_size"] = list(sm.ASPECTS[eff["image_aspect"]][1])
+        elif fmt == "cards":
+            out["gen_size"] = list(sm.COVER_SIZE)
+        else:
+            out["panel_size"] = {k: v["panel_size"] for k, v in sm.STRIPS.items()}
+    return out
 
 
 # --- check (S6, S7, S9, S10) ------------------------------------------------------------------
@@ -857,7 +965,8 @@ def _overridable(rid, profile):
 
 
 # which theme a failed rule is evidence for (S13); rules absent here are not writing problems
-RULE_THEMES = {"length": "length", "hashtags": "hashtags", "disclosure": "disclosure",
+RULE_THEMES = {"length": "length", "hashtags": "hashtags", "disclosure": "disclosure", "disclosure-ai": "disclosure",
+               "media-spec": "format", "media-problems": "format",
                "sources": "fact", "promotion-quote-not-found": "fact", "promotion-lang": "fact", "daily-sources": "fact",
                "s9a-service-experience": "persona", "s9b-statistic": "persona", "service-mention-not-allowed": "persona",
                "promo-url": "format", "promo-link-missing": "format", "link-position": "format", "daily-url": "format",
@@ -882,7 +991,28 @@ def check_draft(root, cfg, rel, record=True, record_signal=False):
         raw = open(os.path.join(root, rel), "rb").read()
     except OSError:
         raise HeraldError("draft %s does not exist" % rel)
-    res = evaluate(root, cfg, rec, raw.decode("utf-8-sig", errors="replace"))
+    media = None
+    fmt = rec.get("format") or "text"
+    if fmt != "text":  # 10-social-media.md §2.9
+        from . import social_media as sm
+        try:
+            mi = sm.media_input(root, cfg, rec, rel)
+        except HeraldError as e:  # the guide or persona: evaluate reports guide-invalid
+            mi = {"errors": [], "spec": None, "text": "", "sources": [], "generated": False, "raw": None,
+                  "mats": {}, "invalid": str(e)}
+        media = mi
+    res = evaluate(root, cfg, rec, raw.decode("utf-8-sig", errors="replace"), media=media)
+    if media is not None and not media.get("invalid"):
+        from . import social_media as sm
+        for e in media["errors"]:
+            res["failed"].append({"id": "media-spec", "overridable": False, "detail": e})
+        pv = sm.media_rel(rec["sns"], rel, "preview", "preview.png")
+        info = {"format": fmt, "files": [], "preview": pv if os.path.isfile(os.path.join(root, pv)) else None,
+                "generated": media["generated"]}
+        if media["spec"] is not None and not media["errors"]:
+            fails, info = sm.freshness(root, cfg, rec, rel, media)
+            res["failed"] += fails
+        res["media"] = info
     out = _result(root, rel, raw, rec, res, record)
     if record_signal and not out["ok"]:
         out["signals"] = _gate_failure_signals(root, rec, rel, out["failed"])
@@ -910,11 +1040,17 @@ def _gate_failure_signals(root, rec, rel, failed):
     return out
 
 
-def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD"):
+def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD", media=None, profile_floor=None):
     """The rules on one post text against its `drafted` basis. `sources=False` skips the quote
-    checks (a final text checked off base). Returns {profile, failed, warnings, settings}."""
+    checks (a final text checked off base). Returns {profile, failed, warnings, settings}.
+    0.19 (10-social-media.md): `media` = {text, sources, generated} of the draft's pictures — the
+    words drawn into them join the post text for the profile and the content rules (S6, S7 quotes,
+    S9, forbidden; v2 R1-2) while length, hashtags, links and disclosures stay the post text's; a
+    post with a generated picture needs the AI disclosure whatever its profile (§2.6).
+    `profile_floor`: the approved profile a final text never falls below (v3 R2-1)."""
     failed, warnings = [], []
     profile = rec.get("kind")
+    media = media or {}
 
     def fail(rid, detail):
         failed.append({"id": rid, "overridable": _overridable(rid, profile), "detail": detail})
@@ -927,6 +1063,8 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD"):
         for k in ("sns", "kind", "slug", "run"):
             if (hdr.get(k) or None) != (rec.get(k) or None):
                 fail("header-mismatch", "header %s=%r but prepare recorded %r" % (k, hdr.get(k), rec.get(k)))
+        if (hdr.get("format") or "text") != (rec.get("format") or "text"):  # v2 R1-11
+            fail("header-mismatch", "header format=%r but prepare recorded %r" % (hdr.get("format"), rec.get("format")))
     sns = rec["sns"]
     try:
         h, persona = _load_committed(root, cfg, sns, rev)
@@ -947,17 +1085,26 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD"):
     urls = find_urls(unicodedata.normalize("NFKC", post))  # `Ｓａｆｉｅ．ｃｏｍ` is a URL once normalized
     terms = service_terms(persona, cfg)
     masked = mask_urls(norm)
-    mentions = term_spans(masked, terms)
+    # the content rules read the post and the words in its pictures, a field a line (P23)
+    words = post + ("\n" + media["text"] if media.get("text") else "")
+    cmasked = mask_urls(fold(words)) if media.get("text") else masked
+    mentions = term_spans(cmasked, terms)
     if rec.get("kind") == "promo":
         profile = "promo"
     else:
         profile = "daily+service" if mentions else "daily"
+    if profile_floor in PROFILE_ORDER and PROFILE_ORDER[profile_floor] > PROFILE_ORDER.get(profile, 0):
+        profile = profile_floor
     # length and hashtags
     n = post_length(post, eff["count"], eff["url_len"])
     if eff.get("max_chars") and n > eff["max_chars"]:
         fail("length", "%d > %d (%s)" % (n, eff["max_chars"], eff["count"]))
     disc = h.get("disclosure") or []
-    disc_tags = {fold(d.get("text") or "").strip() for d in disc if fold(d.get("text") or "").strip().startswith("#")}
+    ai = h.get("ai_disclosure") if isinstance(h.get("ai_disclosure"), dict) else {}
+    ai_text = ai.get("text") if ai.get("where") == "post" else None
+    # disclosure texts are neither counted as hashtags nor content after the link (§2.6, v3 R2-4)
+    disc_texts = [d.get("text") or "" for d in disc] + ([ai_text] if ai_text else [])
+    disc_tags = {fold(t).strip() for t in disc_texts if fold(t).strip().startswith("#")}
     tags = [t for t in HASHTAG_RE.findall(masked) if t not in disc_tags]
     lo, hi = eff["hashtags"]
     if not lo <= len(tags) <= hi:
@@ -980,8 +1127,8 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD"):
             nf = unicodedata.normalize("NFKC", post)
             if urls and eff["link"] == "end":
                 tail = nf[urls[-1][1]:]
-                for d in disc:
-                    tail = tail.replace(unicodedata.normalize("NFKC", d.get("text") or "") or "\0", " ")
+                for t in disc_texts:
+                    tail = tail.replace(unicodedata.normalize("NFKC", t) or "\0", " ")
                 tail = HASHTAG_RE.sub(" ", tail)
                 if re.search(r"\w", tail):
                     fail("link-position", "the link must come last (only hashtags after it)")
@@ -1002,12 +1149,20 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD"):
                         warnings.append("optional %s disclosure %r not in the post" % (d.get("kind"), d.get("text")))
             elif d.get("where") == "setting" and d.get("required"):
                 settings.append(d.get("kind"))
+    if media.get("generated"):  # an AI picture, whatever the profile — daily comics too (P25)
+        if not ai:
+            fail("disclosure-ai", "a generated picture but the %s guide has no ai_disclosure — `/hrd social --edit %s`"
+                 % (sns, sns))
+        elif ai.get("where") == "post" and not disclosure_present(mask_handles(masked), ai_text or ""):
+            fail("disclosure-ai", "missing the AI disclosure %r" % ai_text)
+        elif ai.get("where") == "setting":
+            settings.append("ai")
     if profile == "daily+service" and not daily_service_allowed(cfg, lang):
         fail("service-mention-not-allowed", "posts in %s may not mention the service (promotion.md is in %s)"
              % (lang, cfg.get("language")))
     # sources (S7)
     if sources:
-        _check_sources(root, cfg, rec, hdr, profile, lang, fail)
+        _check_sources(root, cfg, rec, hdr, profile, lang, fail, extra=media.get("sources"))
     # forbidden
     try:
         gate = _gate_forbidden(root, cfg, lang, rev)
@@ -1021,7 +1176,7 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD"):
             continue
         if r.get("regex"):
             try:
-                hit = re.search(pat, post)
+                hit = re.search(pat, words)
             except re.error as e:
                 if r.get("status") == "confirmed":
                     fail("forbidden-invalid", "confirmed rule %r does not compile (%s)" % (pat, e))
@@ -1029,7 +1184,7 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD"):
                     warnings.append("draft rule %r does not compile (%s)" % (pat, e))
                 continue
         else:
-            hit = pat in post
+            hit = pat in words
         if hit:
             if r.get("status") == "confirmed":
                 fail("forbidden-confirmed", "forbidden %r%s" % (pat, " (%s)" % r["note"] if r.get("note") else ""))
@@ -1037,40 +1192,43 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD"):
                 warnings.append("draft rule %r matched" % pat)
     # S9
     pats = PATTERNS.get(primary(lang))
-    spans = sentence_spans(masked)
+    spans = sentence_spans(cmasked)
 
     def same_sentence(a_spans, b_spans):
         for s, e in spans:
             if any(s <= a < e for a, _ in a_spans) and any(s <= b < e for b, _ in b_spans):
-                return masked[s:e].strip()
+                return cmasked[s:e].strip()
         return None
 
     if pats:
-        exp = [m.span() for m in re.finditer(pats["experience"], masked, re.I)]
+        exp = [m.span() for m in re.finditer(pats["experience"], cmasked, re.I)]
         hit = same_sentence(mentions, exp)
         if hit:
             fail("s9a-service-experience", "the service told as a personal experience: %r" % hit[:120])
     else:
         warnings.append("no default S9 patterns for %s — check statistics and service-experience sentences by hand" % lang)
     if profile in ("daily", "daily+service"):
-        unit = [m.group(0) for m in UNIT_RE.finditer(masked)] + [m.group(0) for m in BAE_RE.finditer(masked)]
+        unit = [m.group(0) for m in UNIT_RE.finditer(cmasked)] + [m.group(0) for m in BAE_RE.finditer(cmasked)]
         if unit:
             fail("s9b-statistic", "statistic-like numbers in a daily post: %s" % ", ".join(unit[:3]))
         if pats:
-            vocab = [m.span() for m in re.finditer(pats["stats"], masked, re.I)]
-            digits = [m.span() for m in DIGIT_RE.finditer(masked)]
+            vocab = [m.span() for m in re.finditer(pats["stats"], cmasked, re.I)]
+            digits = [m.span() for m in DIGIT_RE.finditer(cmasked)]
             hit = same_sentence(vocab, digits)
             if hit:
                 fail("s9b-statistic", "statistics wording with a number: %r" % hit[:120])
     return {"profile": profile, "failed": failed, "warnings": warnings, "settings": settings}
 
 
-def _check_sources(root, cfg, rec, hdr, profile, lang, fail):
+def _check_sources(root, cfg, rec, hdr, profile, lang, fail, extra=None):
+    """S7 quotes: the header's `sources` ∪ the media spec's (`extra` — facts drawn into a picture
+    are quoted in the spec, 10-social-media.md §2.9)."""
     sources = hdr.get("sources") if isinstance(hdr, dict) else None
     sources = sources if sources is not None else []
     if not isinstance(sources, list) or not all(isinstance(s, dict) for s in sources):
         fail("header-mismatch", "sources must be a JSON list of {text, from}")
         return
+    sources = sources + list(extra or [])
     if profile == "daily":
         if sources:
             fail("daily-sources", "a daily post states no facts — sources must be []")
@@ -1110,6 +1268,8 @@ def _result(root, rel, raw, rec, res, record):
     out = {"draft": rel, "run": rec.get("run"), "sns": rec.get("sns"), "profile": profile,
            "ok": not failed, "failed": failed, "warnings": res["warnings"], "settings_to_confirm": res["settings"],
            "sha256": hashlib.sha256(raw).hexdigest()}
+    if res.get("media") is not None:
+        out["media"] = res["media"]
     if record:
         _log(root, {"event": "check", "run": rec.get("run"), "sns": rec.get("sns"), "draft": rel,
                     "sha256": out["sha256"], "result": "pass" if out["ok"] else "fail", "profile": profile,
@@ -1147,6 +1307,7 @@ def close(root, cfg, run_id, approved=None, reject_all=False, override=None, set
     rec = latest[rel]
     read = [guide_rel(rec["sns"]), PERSONA, PROMOTION, GATE_RULES, ".claude/herald/config.json"] + \
         ([rec["body"]] if rec.get("body") else [])
+    fmt = drafted_record(root, rel).get("format") or "text"
     dirty = git(root, "status", "--porcelain", "--", *read).strip()
     if dirty:
         raise HeraldError("the sources this draft was checked against have local edits — commit or discard them first:\n%s" % dirty)
@@ -1166,6 +1327,17 @@ def close(root, cfg, run_id, approved=None, reject_all=False, override=None, set
     shutil.copyfile(os.path.join(root, rel), os.path.join(root, dest))
     entry = dict(base, event="status", status="approved", draft=rel, profile=res["profile"], approved_copy=dest,
                  sha256=res["sha256"], settings_confirmed=sorted(set(settings_confirmed or ())))
+    if fmt != "text":  # the bytes the human saw (P26, §10 R3-4) — `--final` reads `generated`
+        mdest = memory_rel("approved", rec["sns"], os.path.basename(rel)[:-3])
+        shutil.rmtree(os.path.join(root, mdest), ignore_errors=True)
+        os.makedirs(os.path.join(root, mdest))
+        files = []
+        for i, f in enumerate((res.get("media") or {}).get("files") or [], 1):
+            shutil.copyfile(os.path.join(root, f), os.path.join(root, mdest, os.path.basename(f)))
+            with open(os.path.join(root, f), "rb") as fh:
+                files.append({"i": i, "sha256": hashlib.sha256(fh.read()).hexdigest(),
+                              "copy": "%s/%s" % (mdest, os.path.basename(f))})
+        entry.update(format=fmt, generated=bool((res.get("media") or {}).get("generated")), media=files)
     if soft:
         entry["override"] = {"reason": override.strip(), "rules": [f["id"] for f in soft]}
     _log(root, entry)
@@ -1173,7 +1345,8 @@ def close(root, cfg, run_id, approved=None, reject_all=False, override=None, set
         if d != rel:
             _log(root, dict(base, event="status", status="unused", draft=d))
     return {"run": run_id, "approved": rel, "copy": dest, "profile": res["profile"],
-            "override": entry.get("override"), "unused": sorted(d for d in drafts if d != rel)}
+            "override": entry.get("override"), "unused": sorted(d for d in drafts if d != rel),
+            "media": [m["copy"] for m in entry.get("media") or []], "generated": entry.get("generated", False)}
 
 
 # --- list ----------------------------------------------------------------------------------------
@@ -1193,6 +1366,7 @@ def listing(root, cfg):
                         "stale": _stale(h), "daily_only": plang is None,
                         "daily_service_allowed": daily_service_allowed(cfg, h.get("lang")),
                         "disclosure": h.get("disclosure"), "disclosure_waiver": h.get("disclosure_waiver"),
+                        "ai_disclosure": h.get("ai_disclosure"), "formats": effective(h)["formats"],
                         "limits": effective(h), "errors": errors, "warnings": warnings})
         rows.append(row)
     persona = show(root, "HEAD", PERSONA)
@@ -1276,6 +1450,30 @@ def _floor_disclosure(old, new, need):
     for _, _, losses in pairs:
         for tok, what in losses:
             need(tok, what)
+
+
+AI_STRENGTH = {"post": 2, "setting": 1}
+
+
+def ai_losses(old, new):
+    """[(token, what)] of an AI disclosure change that weakens it (10-social-media.md §2.6, v3
+    R2-4): removed, moved from the post to a setting, its text changed, a waiver added or changed."""
+    old = old if isinstance(old, dict) else None
+    new = new if isinstance(new, dict) else None
+    if old is None:
+        return [("ai_disclosure:waiver", "AI disclosure waived")] if new and "waiver" in new else []
+    if new is None:
+        return [("ai_disclosure:removed", "AI disclosure removed")]
+    if "waiver" in new:
+        return [] if new == old else [("ai_disclosure:waiver", "AI disclosure waived" if "waiver" not in old
+                                       else "AI disclosure waiver changed")]
+    if "waiver" in old:
+        return []  # a waiver replaced by a disclosure: stronger
+    if AI_STRENGTH.get(new.get("where"), 0) < AI_STRENGTH.get(old.get("where"), 0):
+        return [("ai_disclosure:moved", "AI disclosure moved from %s to %s" % (old.get("where"), new.get("where")))]
+    if new.get("where") == old.get("where") and fold(new.get("text") or "").strip() != fold(old.get("text") or "").strip():
+        return [("ai_disclosure:text", "AI disclosure text changed")]
+    return []
 
 
 def removed_version(root, target):
@@ -1401,9 +1599,13 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
                         strong("forbidden:%s" % k, "new rule %r starts confirmed" % r.get("pattern"))
                 if h.get("disclosure_waiver"):
                     need("disclosure_waiver", "the guide starts with an ad disclosure waiver")
+                for tok, what in ai_losses(None, h.get("ai_disclosure")):
+                    need(tok, what)
             else:
                 _floor_forbidden(old.get("forbidden"), h.get("forbidden"), need, strong)
                 _floor_disclosure(old.get("disclosure"), h.get("disclosure"), need)
+                for tok, what in ai_losses(old.get("ai_disclosure"), h.get("ai_disclosure")):
+                    need(tok, what)
                 if old.get("disclosure_waiver") != h.get("disclosure_waiver") and h.get("disclosure_waiver"):
                     need("disclosure_waiver", "ad disclosure waiver added or changed")
                 if mode in ("edit", "evolve"):
@@ -1418,6 +1620,10 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
                         errors.append("%s change only through --edit: %s" % ("identity fields", ", ".join(moved)))
                     if old.get("disclosure_waiver") != h.get("disclosure_waiver"):
                         errors.append("the disclosure waiver changes only through --edit (a human)")
+                    ow, nw = [(x or {}).get("waiver") if isinstance(x, dict) else None
+                              for x in (old.get("ai_disclosure"), h.get("ai_disclosure"))]
+                    if ow != nw:
+                        errors.append("the AI disclosure waiver changes only through --edit (a human)")
                     om, nm = _forbidden_map(old.get("forbidden")), _forbidden_map(h.get("forbidden"))
                     for k, r in nm.items():
                         if k not in om and r.get("status") != "draft":
@@ -1434,6 +1640,8 @@ def lint_text(root, cfg, mode, text, target, head, allow_floor=(), strengthen=()
                     if order.get(b.get("link"), 2) > order.get(a.get("link"), 2) or \
                             (b.get("link") != a.get("link") and order.get(b.get("link")) == order.get(a.get("link"))):
                         loose.append("link")
+                    if not set(b.get("formats") or []) <= set(a.get("formats") or []):
+                        loose.append("formats")
                     if loose:
                         errors.append("evolve only narrows the account's limits — loosened: %s" % ", ".join(loose))
                 if mode == "refresh":
@@ -1627,6 +1835,8 @@ def merge(root, cfg, sns, researched, accept=None, accept_floor=()):
     pairs, additions = _disclosure_pairs(old.get("disclosure"), new.get("disclosure"))
     accept_floor = {t.split("::", 1)[1] if t.startswith(sns + "::") else t for t in accept_floor or ()}
     known = {tok for _, _, losses in pairs for tok, _ in losses}
+    if isinstance(new.get("ai_disclosure"), dict) and "waiver" not in new["ai_disclosure"]:
+        known |= {tok for tok, _ in ai_losses(old.get("ai_disclosure"), new["ai_disclosure"])}
     stray = sorted(accept_floor - known)
     if stray:
         raise HeraldError("--accept-floor names no change the research proposes: %s (proposed: %s)"
@@ -1641,6 +1851,20 @@ def merge(root, cfg, sns, researched, accept=None, accept_floor=()):
         elif n is not None:
             disclosure.append(n)
     merged["disclosure"] = disclosure + additions
+    # the AI disclosure moves like an ad one (v3 R2-4): taken when the guide has none, a weaker
+    # research value only on the human's yes; a waiver is never research's to add or drop
+    ai_added = None
+    old_ai, new_ai = old.get("ai_disclosure"), new.get("ai_disclosure")
+    if isinstance(new_ai, dict) and "waiver" not in new_ai and new_ai != old_ai and \
+            not (isinstance(old_ai, dict) and "waiver" in old_ai):
+        losses = ai_losses(old_ai, new_ai)
+        ok = all(tok in accept_floor for tok, _ in losses)
+        for tok, what in losses:
+            floor_changes.append({"token": tok, "what": what, "applied": ok})
+        if ok:
+            merged["ai_disclosure"] = new_ai
+            if old_ai is None:
+                ai_added = new_ai
     out_text = _replace_head(head, merged)
     if "region" in accepted and researched_region(out_text) is not None:
         out_text = _replace_region(out_text, region)
@@ -1652,6 +1876,7 @@ def merge(root, cfg, sns, researched, accept=None, accept_floor=()):
     diff = "".join(difflib.unified_diff(head.splitlines(True), out_text.splitlines(True), rel, out_rel))
     return {"out": out_rel, "target": rel, "changed": proposed, "accepted": sorted(accepted),
             "added_rules": [r.get("pattern") for r in added_rules], "disclosure_added": additions,
+            "ai_disclosure_added": ai_added,
             "floor_changes": floor_changes, "diff": diff,
             "next": "HRD social lint --mode refresh --file %s --target %s%s" % (
                 out_rel, rel, "".join(" --allow-floor %s" % c["token"] for c in floor_changes if c["applied"]))}
@@ -1660,7 +1885,7 @@ def merge(root, cfg, sns, researched, accept=None, accept_floor=()):
 # --- the final text (S11, S13) -----------------------------------------------------------------
 
 LIVE_POST_RULES = ("disclosure", "promo-url", "promo-link-missing", "daily-url", "forbidden-confirmed",
-                   "service-mention-not-allowed")
+                   "service-mention-not-allowed", "disclosure-ai")
 
 
 def final(root, cfg, draft, final_file):
@@ -1710,11 +1935,17 @@ def final(root, cfg, draft, final_file):
         head = "---\n%s\n---\n" % "\n".join(
             "%s: %s" % (k, json.dumps(v, ensure_ascii=False) if k == "sources" else (v or ""))
             for k, v in hdr.items())
-        res = evaluate(root, cfg, rec, head + final_text, sources=False, basis=False, rev=cfg.base)
+        # the approved profile and AI picture carry over: the human pastes the text only, the
+        # pictures' words and the generator stay in the post (10-social-media.md §2.9, v3 R2-1)
+        res = evaluate(root, cfg, rec, head + final_text, sources=False, basis=False, rev=cfg.base,
+                       media={"generated": bool(latest.get("generated"))}, profile_floor=latest.get("profile"))
         check = {"profile": res["profile"], "failed": res["failed"], "warnings": res["warnings"]}
+        ad = [k for k in res["settings"] if k != "ai"]
         if latest.get("profile") == "daily" and res["profile"] != "daily":
             # the human made a daily post name the service: an ad now, with settings nobody confirmed
-            check["settings_to_confirm"] = res["settings"]
+            check["settings_to_confirm"] = ad
+        if "ai" in res["settings"] and "ai" not in (latest.get("settings_confirmed") or []):
+            check["settings_to_confirm"] = list(check.get("settings_to_confirm") or []) + ["ai"]
     incomplete = "skipped" in check or any(f["id"] in ("guide-invalid", "forbidden-invalid") for f in check.get("failed", []))
     if incomplete:
         check.pop("profile", None)  # unknown: keep the approved profile for the mix

@@ -21,6 +21,13 @@ FAKE_LMN_FAIL_ALWAYS=1) · FAKE_LMN_STATE (the ended attempt's state: crashed, c
 orphan_child, busy) · FAKE_LMN_RECORD (JSON merged into each record) · FAKE_LMN_LOCK (part of
 job_sha: change it and finished jobs are regenerated) · FAKE_LMN_CANCEL_EXIT=10 (a cancel that
 does not stop in time).
+
+`compose --layout` (0.19, design/herald/10-social-media.md): limner's record — `layout`,
+`layout_sha256`, `resolved_layout_sha256`, `inputs` [{path, sha256}] of every image `src`, `fonts`,
+`out_sha256`, `out`, `prev` — and its answer (`record` an absolute path, `problems`, `layers`); a
+missing `src` is exit 2 with limner's message. FAKE_LMN_EXIT=4 with FAKE_LMN_PROBLEMS gives
+problems; FAKE_LMN_COMPOSE_EXIT (exit for `--layout` composes only) and FAKE_LMN_COMPOSE_INPUT
+(a path read as one more input — a picture Herald did not give) for the tests.
 """
 import hashlib
 import json
@@ -331,6 +338,68 @@ def generator(cmd):
         emit(st, 0 if st["state"] == "cancelled" else exit_code(st))
 
 
+def compose_layout():
+    """limner's `compose --layout` (compose/command.py cmd_compose): the record as limner writes it."""
+    root, sd = os.path.realpath(opt("--root")), os.path.realpath(opt("--state-dir"))
+
+    def real(p):
+        return os.path.realpath(p if os.path.isabs(p) else os.path.join(root, p))
+
+    def rel(p):
+        return os.path.relpath(p, root)
+    code = int(os.environ.get("FAKE_LMN_COMPOSE_EXIT", os.environ.get("FAKE_LMN_EXIT", "0")))
+    if code not in (0, 4):
+        emit({"contract": CONTRACT, "error": os.environ.get("FAKE_LMN_ERROR", "layers[0]: box must be [x0, y0, x1, y1]")},
+             code)
+    lp = real(opt("--layout"))
+    layout = json.load(open(lp, encoding="utf-8"))
+    inputs = {}
+    for i, layer in enumerate(layout.get("layers") or []):
+        if isinstance(layer, dict) and isinstance(layer.get("src"), str):
+            p = real(layer["src"])
+            if not os.path.isfile(p):
+                emit({"contract": CONTRACT, "error": "layers[%d].src %s does not exist" % (i, layer["src"]),
+                      "missing_input": layer["src"]}, 2)
+            inputs[p] = sha_file(p)
+    if os.environ.get("FAKE_LMN_COMPOSE_INPUT"):
+        p = real(os.environ["FAKE_LMN_COMPOSE_INPUT"])
+        inputs[p] = sha_file(p)
+    out = real(opt("--out"))
+    rp = os.path.join(sd, "records", rel(out) + ".json")
+    old = None
+    try:
+        old = json.load(open(rp))
+    except (OSError, ValueError):
+        pass
+    if isinstance(old, dict) and old.get("kind") != "compose":
+        emit({"contract": CONTRACT, "error": "--out %s was written by %s (its record): choose another path"
+              % (opt("--out"), old.get("kind"))}, 2)
+    data = png(open(lp, "rb").read().decode("utf-8") + "".join(sorted(v for v in inputs.values())))
+    prev = None
+    if os.path.exists(out):
+        prev = os.path.join(sd, "prev", rel(out)[:-4] + ".20261111T000000Z.png")
+        os.makedirs(os.path.dirname(prev), exist_ok=True)
+        os.replace(out, prev)
+        if os.path.exists(rp):
+            os.replace(rp, prev[:-4] + ".json")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    open(out, "wb").write(data)
+    texts = [x for x in layout.get("layers") or [] if isinstance(x, dict) and x.get("type") in ("text", "caption",
+                                                                                                   "bubble")]
+    rec = {"limner": "0.1.0", "contract": CONTRACT, "kind": "compose", "layout": rel(lp),
+           "layout_sha256": sha_file(lp), "resolved_layout_sha256": hashlib.sha256(canonical(layout).encode()).hexdigest(),
+           "inputs": [{"path": rel(p), "sha256": h} for p, h in sorted(inputs.items())],
+           "fonts": [{"file": "NotoSansJP[wght].ttf", "sha256": "c2f3" * 16}] if texts else [],
+           "pillow": "12.3.0", "freetype": "2.14.3", "layout_engine": "basic", "created_at": "2026-11-11T00:00:00Z",
+           "out_sha256": hashlib.sha256(data).hexdigest(), "out": rel(out), "prev": rel(prev) if prev else None}
+    os.makedirs(os.path.dirname(rp), exist_ok=True)
+    json.dump(rec, open(rp, "w"))
+    problems = json.loads(os.environ.get("FAKE_LMN_PROBLEMS") or "[]") if code == 4 else []
+    emit({"contract": CONTRACT, "out": rel(out), "out_sha256": rec["out_sha256"], "record": rp, "problems": problems,
+          "layers": [{"index": i, "type": x.get("type")} for i, x in enumerate(layout.get("layers") or [])
+                     if isinstance(x, dict)]}, 4 if problems else 0)
+
+
 if args == ["--version"]:
     emit({"contract": CONTRACT, "limner": os.environ.get("FAKE_LMN_VERSION", "0.1.0")})
 if args[:1] == ["doctor"]:
@@ -351,6 +420,8 @@ if not probe and os.environ.get("FAKE_LMN_SLEEP"):
 code = int(os.environ.get("FAKE_LMN_EXIT", "0")) if not probe else 0
 if code not in (0, 4):
     emit({"contract": CONTRACT, "error": os.environ.get("FAKE_LMN_ERROR", "bad input")}, code)
+if cmd == "compose" and opt("--layout"):
+    compose_layout()
 if cmd == "rasterize":
     src = open(opt("--svg"), "rb").read()
     seed = hashlib.sha256(src).hexdigest() + str(opt("--width")) + str(opt("--background"))
