@@ -806,8 +806,9 @@ class GuideLintTests(MediaCase):
         e = "\n".join(self.lint(bad)["errors"])
         for want in ("formats must be", "image_aspect must be", "max_images must be"):
             self.assertIn(want, e)
-        e = "\n".join(self.lint(media_head(formats=["text", "image"], house={"formats": ["comic"]}))["errors"])
-        self.assertIn("house.formats only narrows", e)
+        out = self.lint(media_head(formats=["text", "image"], house={"formats": ["comic", "text"]}), mode="refresh")
+        self.assertIn("house.formats only narrows", "\n".join(out["warnings"]))  # never a conflict (review 22 #8)
+        self.assertFalse(any("house.formats" in e for e in out["errors"]))
         out = self.lint(media_head(house={"formats": ["text", "image"]}))
         self.assertTrue(out["ok"], out)
         self.assertEqual(social.effective(media_head(house={"formats": ["comic", "text"]}))["formats"], ["text", "comic"])
@@ -953,6 +954,82 @@ class CliTests(MediaCase):
         t = self.prep("text")["drafts"][0]
         _, p = self.hrd("social", "media", "--draft", t, check=False)
         self.assertIn("text draft", p.stderr)
+
+
+class Review1Tests(MediaCase):
+    """REVIEW-22 round 1."""
+
+    def test_text_final_is_018(self):  # 1 [MAJOR]
+        rel = self.prep("text", slug=None)["drafts"][0]
+        self.mdraft(rel, "Rainy day. Safie keeps your camera footage safe in the cloud. #PR", None, sources=PROMO_Q)
+        run = social.drafted_record(self.root, rel)["run"]
+        self.assertEqual(social.close(self.root, self.cfg, run, approved=rel)["profile"], "daily+service")
+        p = social.memory_rel("final", "x", os.path.basename(rel))
+        self.write(p, "Rainy day.")
+        out = social.final(self.root, self.cfg, rel, p)
+        self.assertEqual((out["check"]["profile"], out["fix_live_post"]), ("daily", []))
+        self.assertEqual(social.latest_status(self.root)[rel]["profile"], "daily")
+
+    def test_body_only_overridable_does_not_hold_pictures(self):  # 2
+        rel = self.prep("cards", slug=None)["drafts"][0]
+        self.mdraft(rel, "Most people here say 30% of mornings start late.", self.cards_spec())
+        self.assertEqual(self.media(rel)["state"], "done")
+        res = self.check(rel)
+        self.assertEqual([(f["id"], f["overridable"]) for f in res["failed"]], [("s9b-statistic", True)])
+        run = social.drafted_record(self.root, rel)["run"]
+        self.assertTrue(social.close(self.root, self.cfg, run, approved=rel, override="a figure of speech")["media"])
+        # the same statistic drawn into a card still holds the pictures back
+        rel = self.prep("cards", slug=None)["drafts"][0]
+        self.mdraft(rel, "Most people here say 30% of mornings start late.", self.cards_spec(body="Up 40% this year"))
+        self.assertEqual([e["code"] for e in self.media(rel)["errors"]], ["s9b-statistic"])
+
+    def test_guard_shell_forms(self):  # 3
+        g = GuardTests.guard
+        for cmd in ("python3 -m limner compose --layout a.json --root . --state-dir .limner --out x.png",
+                    "bash -c 'lmn compose --layout a.json --out x.png'",
+                    "sh -c \"%s compose --layout a --out b.png\"" % self.lmn,
+                    "echo $(lmn compose --layout a --out b.png)", "echo `lmn doctor`",
+                    "find . -name a.json -exec lmn compose --layout {} --out b.png \\;",
+                    "eval lmn compose --layout a", "(lmn compose --layout a)", "ls | xargs lmn compose --layout"):
+            self.assertEqual(g(self, cmd), "ask", cmd)
+            self.assertEqual(g(self, cmd, {"HRD_UNATTENDED": "1"}), "deny", cmd)
+        self.assertEqual(g(self, "bash -c 'git status'"), "allow")
+
+    def test_hidden_files_are_not_stale(self):  # 4
+        rel = self.promo_image()
+        self.media(rel)
+        d = os.path.join(self.root, sm.media_rel("x", rel))
+        open(os.path.join(d, ".DS_Store"), "wb").write(b"finder")
+        self.assertEqual(self.failed(rel), [])
+        open(os.path.join(d, "2.png"), "wb").write(png("extra"))
+        self.assertIn("media-stale", self.failed(rel))
+
+    def test_image_without_materials_refused(self):  # 5
+        self.guide(ai_disclosure=None)
+        p = self.prep("image", slug=None, check=False)
+        self.assertIn("no picture for --format image", p.stderr)
+        self.assertIn("--edit x", p.stderr)
+        self.prep("cards", slug=None)  # a card set needs no picture
+
+    def test_preview_budget(self):  # 6
+        rel = self.daily_comic()
+        with mock.patch.object(sm, "COMPOSE_START_MIN", 10 ** 6):
+            out = self.media(rel, stage="panels")
+        self.assertEqual((out["state"], out["remaining"]), ("running", ["preview"]))
+
+    def test_redraw_counts_every_draw(self):  # 7
+        rel = self.promo_image(spec_from=None)
+        for k, seed in enumerate((9, 10, 9, 10, 9, 10)):
+            self.mdraft(rel, "x #PR #AIgenerated " + URL,
+                        {"version": 1, "format": "image", "image": {"from": "gen", "prompt": P, "seed": seed}})
+            out = self.media(rel)
+            self.assertEqual(out["state"], "done" if k < 5 else "failed", (k, out))
+        self.assertEqual(out["errors"][0]["code"], "redraw-limit")
+
+    def test_no_text_format(self):  # 8
+        self.guide(formats=["image", "cards"])
+        p = self.hrd("social", "prepare", "--sns", "x", "--n", "1", check=False)[1]
+        self.assertIn("no text-only posts — use --format image | cards", p.stderr)
 
 
 class StructureTests(unittest.TestCase):

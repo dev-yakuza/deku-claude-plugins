@@ -750,9 +750,13 @@ def media(root, cfg, draft, wait=images.GEN_WAIT, stage=None):
             fail("media-spec", "content", e)
         return out
     res = evaluate(root, cfg, rec, text, media=mi)
+    # an overridable failure the post text alone has stays the human's to accept at close (review
+    # 22 #2); one the pictures' words cause, and every hard one, holds the pictures back
+    body_only = {(f["id"], f["detail"]) for f in evaluate(root, cfg, rec, text)["failed"] if f["overridable"]}
     for f in res["failed"]:
-        if f["id"] not in POST_ONLY_RULES:
-            fail(f["id"], "content", f["detail"])
+        if f["id"] in POST_ONLY_RULES or (f["overridable"] and (f["id"], f["detail"]) in body_only):
+            continue
+        fail(f["id"], "content", f["detail"])
     if out["errors"]:
         return out
     spec, mats = mi["spec"], mi["mats"]
@@ -794,13 +798,16 @@ def media(root, cfg, draft, wait=images.GEN_WAIT, stage=None):
     def save(g):
         _write_gen(gpath, {"gen": g or None, "drawn": drawn})
     if jobs and "pending" in pre.values():
-        new = {job_key(j) for j in jobs if pre[j["id"]] == "pending"} - set(drawn)
-        if len(set(drawn) | new) - len(jobs) > REDRAW_MAX:
+        # every picture drawn counts, the same key drawn again too (review 22 #7)
+        pending = sum(1 for j in jobs if pre[j["id"]] == "pending")
+        if len(drawn) + pending - len(jobs) > REDRAW_MAX:
             return fail("redraw-limit", "human", "this draft drew %d pictures again already (at most %d) — ask the "
                         "human: go on, another format, or stop" % (len(drawn) - len(jobs), REDRAW_MAX))
         p = limner.gen_probe(root, cfg)
         if not p["ok"]:
             return fail(p["code"], "env", p.get("message") or "this machine cannot generate pictures")
+
+        counted = set()
 
         def take(jid, regen, rid):
             j = next(x for x in jobs if x["id"] == jid)
@@ -810,7 +817,8 @@ def media(root, cfg, draft, wait=images.GEN_WAIT, stage=None):
                                         "message": "limner's record does not vouch for %s (%s)" % (j["out"], bad)})
                 return
             done[jid] = sha_bytes(data)
-            if job_key(j) not in drawn:
+            if pre.get(jid) == "pending" and jid not in counted:  # drawn by this call's run
+                counted.add(jid)
                 drawn.append(job_key(j))
             res_g["generated"].append({"id": jid, "seconds": (r or {}).get("seconds")})
         os.makedirs(jobs_dir, exist_ok=True)
@@ -846,6 +854,9 @@ def media(root, cfg, draft, wait=images.GEN_WAIT, stage=None):
     mdir = os.path.join(root, media_rel(rec["sns"], rel))
     # 4: a comic's panels alone, for the distributor to place the words on (v3 R2-6)
     if stage == "panels":
+        if room() < COMPOSE_START_MIN:  # review 22 #6
+            out.update(state="running", remaining=["preview"])
+            return out
         lay = layouts(spec, fmt, lang, src, preview=True)[0]
         target = "%s/preview.png" % out_dir
         code, probs, err = _compose(root, cfg, sd, rroot, jobs_dir, _job_base(run_id, n) + "-preview", lay, target,
@@ -992,7 +1003,9 @@ def freshness(root, cfg, rec, rel, mi):
         stale.append("the spec cannot be laid out")
     files = {f.get("i"): f for f in ev.get("files") or [] if isinstance(f, dict)}
     mdir = os.path.join(root, media_rel(rec["sns"], rel))
-    present = sorted(x for x in (os.listdir(mdir) if os.path.isdir(mdir) else []) if x != "preview")
+    # pictures only: a Finder `.DS_Store` or other hidden file never goes up (review 22 #4)
+    present = sorted(x for x in (os.listdir(mdir) if os.path.isdir(mdir) else [])
+                     if not x.startswith(".") and x.lower().endswith(".png"))
     want = ["%d.png" % i for i in range(1, len(lays) + 1)]
     if lays and present != want:
         stale.append("the media folder holds %s, not %s" % (", ".join(present) or "nothing", ", ".join(want)))

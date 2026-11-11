@@ -479,7 +479,9 @@ def channel_problems(h, name, cfg=None, persona=None, others=None):
     if not any(isinstance(d, dict) and d.get("kind") == "ad" and d.get("required") is True
                and d.get("where") in ("post", "setting") for d in disc) and not waiver:
         errors.append("no required ad disclosure in the post or as a platform setting, and no disclosure_waiver (S10)")
-    errors += _media_field_problems(h, house)
+    e, w = _media_field_problems(h, house)
+    errors += e
+    warnings += w
     e, w = _forbidden_problems(h.get("forbidden", []), "channel")
     errors += e
     warnings += w
@@ -522,10 +524,12 @@ def ai_disclosure_problems(a):
 
 
 def _media_field_problems(h, house):
-    """0.19 research fields `formats`, `image_aspect`, `max_images`, house `formats` (narrowing
-    only) and `ai_disclosure` (10-social-media.md §2.1, §2.6)."""
+    """(errors, warnings) of the 0.19 research fields `formats`, `image_aspect`, `max_images`, house
+    `formats` (narrowing only — wider than research is a warning: `effective` takes research ∩
+    house, so a refresh that narrows research never breaks the guide; review 22 #8) and
+    `ai_disclosure` (10-social-media.md §2.1, §2.6)."""
     from .social_media import ASPECTS, MAX_IMAGES
-    errors = []
+    errors, warnings = [], []
     if "formats" in h and not _formats_ok(h["formats"]):
         errors.append("formats must be a non-empty list of text, image, cards, comic")
     if "image_aspect" in h and h["image_aspect"] not in ASPECTS:
@@ -537,9 +541,10 @@ def _media_field_problems(h, house):
         if not _formats_ok(house["formats"]):
             errors.append("house.formats must be a non-empty list of text, image, cards, comic")
         elif not set(house["formats"]) <= set(h.get("formats") or ["text"]):
-            errors.append("house.formats only narrows the researched formats (%s)" % ", ".join(h.get("formats") or ["text"]))
+            warnings.append("house.formats only narrows the researched formats (%s) — the others are ignored"
+                            % ", ".join(h.get("formats") or ["text"]))
     errors += ai_disclosure_problems(h.get("ai_disclosure"))
-    return errors
+    return errors, warnings
 
 
 def _script_matches(term, lang):
@@ -856,6 +861,9 @@ def prepare(root, cfg, sns, slug=None, n=3, fmt=None):
     if fmt not in sm.FORMATS:
         raise HeraldError("--format must be one of %s" % ", ".join(sm.FORMATS))
     if fmt not in eff["formats"]:
+        if fmt == "text":
+            raise HeraldError("the %s guide takes no text-only posts — use --format %s"
+                              % (sns, " | ".join(eff["formats"])))
         raise HeraldError("the %s guide takes %s posts only — `/hrd social --refresh %s` researches the image formats"
                           % (sns, ", ".join(eff["formats"]), sns))
     gen_ok = False
@@ -891,6 +899,11 @@ def prepare(root, cfg, sns, slug=None, n=3, fmt=None):
         if basis["unread"]:
             warnings.append("%s was published without a human reading it (auto publish) — read it before promoting" % slug)
     mats = sm.materials(root, cfg, slug, gen_ok, sm.ai_ok(h)) if fmt != "text" else []
+    if fmt == "image" and not mats:  # nothing a single image could show (review 22 #5)
+        why = ("the guide has no ai_disclosure, so nothing may be generated — add one with `/hrd social --edit %s`"
+               % sns) if not sm.ai_ok(h) else "this machine cannot generate pictures (`/hrd image doctor`)"
+        raise HeraldError("no picture for --format image: %s%s; or use --format cards|text" % (
+            why, ", and %s has no diagram, limner OG card or confirmed scene" % slug if slug else ""))
     run_id = _run_id(root)
     drafts = [memory_rel(sns, "%s-%s-%d.md" % (run_id, slug or "daily", i)) for i in range(1, int(n) + 1)]
     date = run_id[:8]
@@ -1935,10 +1948,12 @@ def final(root, cfg, draft, final_file):
         head = "---\n%s\n---\n" % "\n".join(
             "%s: %s" % (k, json.dumps(v, ensure_ascii=False) if k == "sources" else (v or ""))
             for k, v in hdr.items())
-        # the approved profile and AI picture carry over: the human pastes the text only, the
-        # pictures' words and the generator stay in the post (10-social-media.md §2.9, v3 R2-1)
+        # a post with pictures: the approved profile and AI picture carry over — the human pastes
+        # the text only, the pictures' words and the generator stay in the post (10-social-media.md
+        # §2.9, v3 R2-1); a text post is all in its final text, as in 0.18 (review 22 #1)
         res = evaluate(root, cfg, rec, head + final_text, sources=False, basis=False, rev=cfg.base,
-                       media={"generated": bool(latest.get("generated"))}, profile_floor=latest.get("profile"))
+                       media={"generated": bool(latest.get("generated"))},
+                       profile_floor=latest.get("profile") if (latest.get("format") or "text") != "text" else None)
         check = {"profile": res["profile"], "failed": res["failed"], "warnings": res["warnings"]}
         ad = [k for k in res["settings"] if k != "ai"]
         if latest.get("profile") == "daily" and res["profile"] != "daily":

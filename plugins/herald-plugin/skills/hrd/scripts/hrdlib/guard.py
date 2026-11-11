@@ -230,6 +230,9 @@ def runs_limner(argv, cfg):
         return False
     if argv[0] in ("lmn", "limner"):
         return True
+    if re.match(r"^python[0-9.]*$", argv[0]) and ("-mlimner" in argv or any(
+            x == "-m" and y in ("limner", "limner.cli") for x, y in zip(argv, argv[1:]))):
+        return True
     if argv[0] in ("uv", "uvx", "pipx") and ("lmn" in argv or "limner" in argv):
         return True
     try:
@@ -241,6 +244,44 @@ def runs_limner(argv, cfg):
         want = [os.path.basename(cmd[0])] + list(cmd[1:])
         return argv[:len(want)] == want
     return False
+
+
+SUBST_RE = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
+SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
+
+
+def limner_in(seg, cfg, depth=0):
+    """`runs_limner` through what the shell would run inside this segment (review 22 #3): `$( )` and
+    backticks, `bash|sh|zsh -c '<cmd>'`, `eval <cmd>`, `find … -exec|-execdir <cmd>`, a leading
+    `(` or `{`, and `python -m limner`; `xargs` and env wrappers are unwrapped by `normalize`."""
+    if depth > 3:
+        return False
+    for m in SUBST_RE.finditer(seg):
+        if any(limner_in(x, cfg, depth + 1) for x in segments(m.group(1) or m.group(2) or "")):
+            return True
+    argv = normalize(seg.lstrip("({ \t"))
+    if not argv:
+        return False
+    if runs_limner(argv, cfg):
+        return True
+    inner = []
+    if argv[0] in SHELLS:
+        i = next((k for k, x in enumerate(argv[1:], 1) if x == "-c" or (x.startswith("-") and "c" in x[1:]
+                                                                        and not x.startswith("--"))), None)
+        if i is not None and i + 1 < len(argv):
+            inner.append(argv[i + 1])
+    elif argv[0] == "eval":
+        inner.append(" ".join(argv[1:]))
+    elif argv[0] == "find":
+        for k, x in enumerate(argv):
+            if x in ("-exec", "-execdir", "-ok", "-okdir"):
+                rest = []
+                for y in argv[k + 1:]:
+                    if y in (";", "\\;", "+"):
+                        break
+                    rest.append(y)
+                inner.append(" ".join(shlex.quote(y) for y in rest))
+    return any(limner_in(x, cfg, depth + 1) for c in inner for x in segments(c))
 
 
 def segments(cmd):
@@ -634,7 +675,7 @@ def check_bash(root, cfg, cmd):
                     % ("confirm" if "confirm" in argv else "reject"))
         # 1e. limner itself: Herald's pictures and the records that vouch for them are written only
         # through Herald (10-social-media.md §10 R3-1 — a direct `lmn compose` could redraw them)
-        if runs_limner(argv, cfg):
+        if limner_in(seg, cfg):
             protect("running limner directly — Herald calls it (`HRD image …`, `HRD social media`); a direct call "
                     "can redraw a picture and the record Herald checks it against.")
         # 2. deploy
