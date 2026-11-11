@@ -20,7 +20,9 @@ that one PR, step 4 skipped; refuse if the PR was not created in this session, i
 auto-exclusion --topic <id> --rev refs/remotes/origin/pr-<n>` (after §3's fetch — the work
 files live on the PR head; with `--consent` when the caller passed it — the human asked for
 this publish, which accepts the agents' logged decisions, a trim, the fact-checker's framings
-and Herald-made images — diagrams and the OG card; never screenshots or external images) has
+and Herald-made images — diagrams and the OG card; screenshots and external images only when the
+caller's lock carries the `--ship` mark for this topic (`strong: true` in the output: the agent
+review confirmed them in draft — never `images-unconfirmed`, a file nobody vouched for) has
 anything under `blocking`, or if
 `HRD throttle` shows `room` 0. Unless that run was
 `--attended` (a human approved the body in the session), the article is published without a
@@ -241,15 +243,25 @@ auto-merged --topic <id> --pr <n> --rev refs/remotes/origin/pr-<n> --sha <verifi
 exclusions there, refuses if any blocks, and keeps the accepted ones for the published
 record — refused: do not merge and do not `--clear`; the PR stays pending, report why, stop) and `HRD commit --cmd ship --kind ship -m "chore(herald):
 auto-merge <id>" .claude/herald/topics.json` (local only — §9's push carries it out; nothing
-runs between the stamp and the merge). If `gh pr merge` fails or is declined, check `gh pr view
+runs between the stamp and the merge but the pass below).
+
+`--session-auto` with `--consent` from a `--ship` run (0.20.0 — the lock carries the ship mark;
+`--attended --ship` too, after its stamp-free approval): right after that commit (attended: right
+before the merge), `HRD lock ship-pass --topic <id> --pr <n> --rev refs/remotes/origin/pr-<n> --sha
+<verified sha>`. Code refuses unless the mark is for this topic, the ref is that sha, GitHub says
+the PR's head branch is this topic's, the topic carries this PR's stamp (not checked attended),
+and the exclusions recomputed at that head — strong — block nothing. It writes `lock.pass`; the
+guard then lets exactly the merge below through, and the deploy of §7. Refused (or GitHub not
+reachable) → go on all the same: the guard asks for the merge as before 0.20.0. If `gh pr merge` fails or is declined, check `gh pr view
 <n> --json state,mergedAt` — a non-zero exit can come after the merge itself (branch cleanup):
 merged → continue as a successful merge (below); **not** merged → `HRD auto-merged --topic <id>
 --clear`, `HRD commit --cmd ship --kind ship -m "chore(herald): auto-merge cleared <id>"
 .claude/herald/topics.json`, and stop (a changed head means a human pushed: leave it to an
 attended `/hrd ship`, never loop back to §5 here).
 
-`gh pr merge <n> --squash --match-head-commit <verified sha> --delete-branch` (head changed →
-back to §5). Add to the deploy set. `HRD sync`; `git branch -D` the local herald branch.
+`gh pr merge <n> --squash --match-head-commit <verified sha> --delete-branch` — run it exactly
+like this, alone: no `cd … &&`, no `2>&1`, no redirection, no variable, no other flag (the guard
+asks for anything else; without a pass it asks anyway) (head changed → back to §5). Add to the deploy set. `HRD sync`; `git branch -D` the local herald branch.
 `--auto`: merge only PRs in `HRD_AUTO_PRS`, all §5 checks done for every target first; do
 **not** run `HRD sync` between merges (merging needs no local base; the runner syncs); then
 write the round result file and stop — the runner does 7–9.
@@ -260,8 +272,12 @@ write the round result file and stop — the runner does 7–9.
    untracked build inputs, no residue). Not ok → no deploy; commit any records not yet committed
    (normally none) as `HRD commit --cmd ship --kind abort …` (unpushed), stop.
 2. If the deploy set (or `--deploy-only` targets) is non-empty and `config.commands.deploy` is
-   set: run it once (the guard asks — confirm it is this step). Failure → `git checkout --
+   set: run it once, as the configured string verbatim, on base — nothing before or after it in
+   the same call (the guard asks — confirm it is this step; in a `--ship` run with a pass from §6
+   it lets that exact string through without asking). Failure → `git checkout --
    <deploy_artifacts>`, merged articles stay merged-unrecorded, stop.
+3. A `--ship` run: when the deploy step is over (it succeeded, failed or did not run), `HRD lock
+   ship-pass --clear` — on every exit after §6 too.
 
 ## 8. URL check
 
@@ -290,8 +306,10 @@ publish: any failed URL leaves the article merged-unrecorded. Failures stay merg
 
 Summarize what was published, declined, held and left merged-unrecorded. For a `--session-auto`
 publish nobody approved, also list what was accepted unread (the `accepted` exclusions, the
-deferred MAJORs and dismissals with their reasons, the trimmed sentences, the framings) — the human sees
-them now at the latest. A published topic that `follows` an older article: say that the older
+deferred MAJORs and dismissals with their reasons, the trimmed sentences, the framings, and in a
+`--ship` run the images and screenshots the agent review confirmed or turned down — id, kind, its
+one-line note, from `HRD image status --topic <id> --rev <head>` `agent` and `HRD shot status`
+`agent_confirmed`; nobody looked at them) — the human sees them now at the latest. A published topic that `follows` an older article: say that the older
 one now has `superseded` set and, while `HRD status` lists it under `supersede_pending`, how to
 link it — `/hrd refresh <old>` (`refreshable: true`), or by hand. Then
 `HRD evolve-readiness`: only when `tier` is `sufficient`, end with one line in

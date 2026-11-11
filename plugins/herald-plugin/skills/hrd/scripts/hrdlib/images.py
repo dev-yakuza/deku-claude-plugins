@@ -1110,9 +1110,11 @@ def external_state(root, tid, it, led, rev=None, path=None):
     """`ready` (logged for this item and confirmed), `fetched` (logged only) or `pending`.
     `path`: where the file is now (after `status --move`); the key stays the manifest's."""
     h = _rev_hashes(root, rev, path or it.get("file"))
-    if not h or not led.fetch_line(h, tid, it.get("id"), item_key(it)):
+    key = item_key(it)
+    if not h or not led.fetch_line(h, tid, it.get("id"), key):
         return "pending"
-    return "ready" if led.confirmed(h) else "fetched"
+    # a human's line of this content, or an agent's line of this very item (11-ship-consent.md P25)
+    return "ready" if led.confirmed_for(h, tid, it.get("id"), key) else "fetched"
 
 
 def fail_closed(tid, iid, rec, led, it=None):
@@ -1128,9 +1130,10 @@ def scene_state(root, cfg, tid, it, led, rev=None, path=None):
     """`ready` (a generation line of this item and key for this content, and a human confirmed
     it), `generated` (the line only) or `pending` (09 §2.5)."""
     h = _rev_hashes(root, rev, path or it.get("file"))
-    if not h or not led.gen_line(h, tid, it.get("id"), scene_key(cfg, it)):
+    key = scene_key(cfg, it)
+    if not h or not led.gen_line(h, tid, it.get("id"), key):
         return "pending"
-    return "ready" if led.confirmed(h) else "generated"
+    return "ready" if led.confirmed_for(h, tid, it.get("id"), key) else "generated"
 
 
 def scene_fail_closed(tid, iid, rec, led):
@@ -1229,6 +1232,8 @@ def plan(root, cfg, tid, check_only=False):
                         r[k] = p[k]
                 if status == "ready":
                     r["sha"] = p.get("sha") or blob(root, f)
+                    if led.confirmed_by(h, tid, iid, key) == "agent":
+                        r["confirmed_by"] = "agent"  # who confirmed follows the ledger (11 §2.2 5)
             new[iid] = r
             if status == "pending":
                 out["pending"]["generate"].append(iid)
@@ -1242,11 +1247,15 @@ def plan(root, cfg, tid, check_only=False):
         status = external_state(root, tid, it, led)
         r = {"kind": "external", "use": it.get("use"), "file": f, "key": key, "status": status}
         if p.get("key") == key:
-            for k in ("fetched_at", "orientation", "width", "height"):
+            for k in ("fetched_at", "orientation", "width", "height", "reviewed", "review_note"):
                 if p.get(k) is not None:
                     r[k] = p[k]
+            if r.get("reviewed") and (not h or r["reviewed"] != h[0]):
+                r.pop("reviewed")  # a review follows the bytes it looked at (11 §9 m3)
             if status == "ready":
                 r["sha"] = p.get("sha") or blob(root, f)
+                if led.confirmed_by(h, tid, iid, key) == "agent":
+                    r["confirmed_by"] = "agent"
         elif status != "pending":
             r["status"] = "pending"  # another source at the same file: the old fetch moves away
             to_move.append(f)
@@ -1818,11 +1827,17 @@ def _receive(root, cfg, tid, st, it, job, led, res, run_id, updated=False):
         r["generated_at"] = now_iso()
         r.pop("reviewed", None)
         r.pop("review_note", None)
+        r.pop("confirmed_by", None)  # a confirmation follows the content (11 §9 m3)
         if updated:
             r["regenerated"] = True
         else:
             r.pop("regenerated", None)
-    r.update(kind="scene", file=f, key=key, generated_blob=hh[0], status="ready" if led.confirmed(hh) else "generated")
+    r.update(kind="scene", file=f, key=key, generated_blob=hh[0],
+             status="ready" if led.confirmed_for(hh, tid, iid, key) else "generated")
+    if led.confirmed_by(hh, tid, iid, key) == "agent":
+        r["confirmed_by"] = "agent"
+    else:
+        r.pop("confirmed_by", None)
     st["images"].setdefault("files", {})[f] = {"kind": "scene", "use": None}
     if updated and iid not in res["regenerated"]:
         res["regenerated"].append(iid)
@@ -2255,8 +2270,10 @@ def generate_trial(root, cfg, wait=GEN_WAIT):
 
 def review(root, cfg, tid, iid, ok=False, redo=False, note=None):
     """`HRD image review` (§2.7.2) — the illustrator's look before a human's: `--ok` marks the
-    picture reviewed, `--redo` turns its key down (plan then refuses the same prompt, seed and
-    size). State only — never a pass decision (P13: the human's confirmation is)."""
+    picture reviewed, `--redo` turns a scene's key down (plan then refuses the same prompt, seed
+    and size). 0.20.0 (11-ship-consent.md §2.2): a fetched external image or quotation too — its
+    `--redo` turns down nothing (another candidate replaces it through `reject`). State only —
+    never a pass decision (P13: the human's confirmation is, or in a `--ship` run `confirm --agent`)."""
     from .store import load_state, save_state
     if ok == redo:
         raise HeraldError("give exactly one of --ok and --redo")
@@ -2264,26 +2281,46 @@ def review(root, cfg, tid, iid, ok=False, redo=False, note=None):
         raise HeraldError("--note says in one line what the reviewer saw")
     st = load_state(root, tid)
     it = next((i for i in _items(load_manifest(root, tid)) if i.get("id") == iid), None)
-    if not it or it.get("kind") != "scene":
-        raise HeraldError("%s is not a scene image in images.json" % iid)
+    if not it or it.get("kind") not in ("scene", "external"):
+        raise HeraldError("%s is not a scene or external image in images.json" % iid)
     led = Ledger(root)
-    if scene_state(root, cfg, tid, it, led) != "generated":
+    scene = it["kind"] == "scene"
+    if scene and scene_state(root, cfg, tid, it, led) != "generated":
         raise HeraldError("%s is not a generated scene waiting for review — `HRD image status --topic %s`" % (iid, tid))
+    if not scene and external_state(root, tid, it, led) != "fetched":
+        raise HeraldError("%s is not a fetched image waiting for review — `HRD image status --topic %s`" % (iid, tid))
     h = file_hashes(root, it["file"])
-    key = scene_key(cfg, it)
-    r = st.setdefault("images", {}).setdefault("items", {}).setdefault(iid, {"kind": "scene", "file": it["file"],
-                                                                            "key": key})
+    key = scene_key(cfg, it) if scene else item_key(it)
+    r = st.setdefault("images", {}).setdefault("items", {}).setdefault(
+        iid, {"kind": it["kind"], "file": it["file"], "key": key} if scene else
+        {"kind": "external", "use": it.get("use"), "file": it["file"], "key": key})
     if ok:
         r["reviewed"] = h[0]
         r["review_note"] = note[:300]
     else:
         r.pop("reviewed", None)
         r["review_note"] = note[:300]
-        st.setdefault("review_rejects", []).append({"id": iid, "key": key, "note": note[:300], "at": now_iso()})
+        if scene:
+            st.setdefault("review_rejects", []).append({"id": iid, "key": key, "note": note[:300], "at": now_iso()})
     save_state(root, tid, st)
-    return {"reviewed": [iid] if ok else [], "redo": [iid] if redo else [], "attempts": scene_attempts(st, iid),
-            "next": None if ok else ("change the seed (or the prompt) of %s, then `HRD image plan --topic %s --check`"
-                                     % (iid, tid))}
+    if ok:
+        nxt = None
+    elif scene:
+        nxt = "change the seed (or the prompt) of %s, then `HRD image plan --topic %s --check`" % (iid, tid)
+    else:
+        nxt = "`HRD image reject --topic %s --id %s --agent --reason …` (a `--ship` run), then another candidate" % (
+            tid, iid)
+    return {"reviewed": [iid] if ok else [], "redo": [iid] if redo else [],
+            "attempts": scene_attempts(st, iid) if scene else agent_rejects(st, iid), "next": nxt}
+
+
+def agent_rejects(st, iid):
+    """How many times the agent review turned this place's image down (11-ship-consent.md §2.3 2)."""
+    return sum(1 for r in st.get("image_rejects") or [] if isinstance(r, dict) and r.get("id") == iid
+               and r.get("by") == "agent")
+
+
+AGENT_REJECTS_MAX = 2  # the third agent reject of one place drops it (three candidates at most)
 
 
 def snippet(root, cfg, tid, iid):
@@ -2315,12 +2352,16 @@ def _ids(ids):
     return list(dict.fromkeys(out))
 
 
-def confirm(root, cfg, tid, ids):
+def confirm(root, cfg, tid, ids, agent=False):
     """A human looked at fetched images and their attribution, or at generated scenes and their AI
-    label: the confirmation line first, then the state."""
-    from .shots import hold_note
+    label: the confirmation line first, then the state. `agent` (0.20.0, 11-ship-consent.md §2.2):
+    in a `--ship` run the agent review stands in for that look — only for images a review marked
+    `--ok` as they are now; the line says `by: agent` and vouches for this item only (P25)."""
+    from .shots import _agent_allowed, hold_note
     from .store import load_state, save_state
     _human_only("confirm")
+    if agent:
+        _agent_allowed(root, tid)
     ids = _ids(ids)
     st = load_state(root, tid)
     by = {i.get("id"): i for i in _items(load_manifest(root, tid))}
@@ -2341,35 +2382,52 @@ def confirm(root, cfg, tid, ids):
             if s != "fetched":
                 raise HeraldError("%s is not a fetched image waiting for confirmation (%s) — `HRD image plan --topic "
                                   "%s` first if the file was changed" % (iid, s, tid))
-        todo.append((iid, it, file_hashes(root, it["file"])))
+        h = file_hashes(root, it["file"])
+        if agent and ((st.get("images") or {}).get("items") or {}).get(iid, {}).get("reviewed") != h[0]:
+            raise HeraldError("%s: the agent review has not passed this picture as it is now — `HRD image review "
+                              "--topic %s --id %s --ok` by a fresh review first" % (iid, tid, iid))
+        todo.append((iid, it, h))
     at = now_iso()
 
     def key_of(it):
         return scene_key(cfg, it) if it["kind"] == "scene" else item_key(it)
-    for iid, it, h in todo:
-        ledger_append(os.path.join(root, CONFIRMATIONS), {"topic": tid, "id": iid, "key": key_of(it),
-                                                           "blob": h[0], "sha256": h[1], "at": at})
     items = st.setdefault("images", {}).setdefault("items", {})
+    for iid, it, h in todo:
+        line = {"topic": tid, "id": iid, "key": key_of(it), "blob": h[0], "sha256": h[1], "at": at}
+        if agent:
+            line.update(by="agent", note=((items.get(iid) or {}).get("review_note") or "")[:300])
+        ledger_append(os.path.join(root, CONFIRMATIONS), line)
     for iid, it, h in todo:
         items.setdefault(iid, {"kind": it["kind"], "use": it.get("use"), "file": it["file"], "key": key_of(it)})
         items[iid].update(status="ready", sha=h[0])
+        if agent:
+            items[iid]["confirmed_by"] = "agent"
+        else:
+            items[iid].pop("confirmed_by", None)
     save_state(root, tid, st)
-    return {"confirmed": [t[0] for t in todo], "note": hold_note(st),
+    return {"confirmed": [t[0] for t in todo], "by": "agent" if agent else "human", "note": hold_note(st),
             "items": [{"id": iid, "kind": it["kind"], "use": it.get("use"), "credit": it.get("credit"),
                        "license": it.get("license"), "page_url": it.get("page_url")} for iid, it, _ in todo]}
 
 
-def reject(root, cfg, tid, iid, reason=None, drop=False, refetch=False, regenerate=False):
+def reject(root, cfg, tid, iid, reason=None, drop=False, refetch=False, regenerate=False, agent=False):
     """A human rejects a fetched image or a generated scene (state first, then the file moves).
     Without `--refetch`/`--regenerate` this is the `--human` loopback's state change too: the
     illustrator runs next (another candidate, a scene's other seed or prompt, or with `--drop` the
     place goes). `--refetch`: fetch it again on this machine; `--regenerate`: generate a scene again
-    on this machine (§2.5 — the way out of a missing generation record; no rejected key)."""
-    from .shots import hold_note
+    on this machine (§2.5 — the way out of a missing generation record; no rejected key).
+    `agent` (0.20.0, 11-ship-consent.md §2.2): the agent review of a `--ship` run turns a picture
+    down — an external image for another candidate (its third reject must `--drop`), a scene only
+    with `--drop` (a scene is drawn again through `review --redo`); recorded `by: agent`."""
+    from .shots import _agent_allowed, hold_note
     from .store import load_state, open_research_fix, save_state
     _human_only("reject")
     if sum(map(bool, (drop, refetch, regenerate))) > 1:
         raise HeraldError("give at most one of --drop, --refetch and --regenerate")
+    if agent:
+        _agent_allowed(root, tid)
+        if refetch or regenerate:
+            raise HeraldError("--refetch and --regenerate are a human's way out — not with --agent")
     again = refetch or regenerate
     st = load_state(root, tid)
     if not again and st.get("stage") != "draft":
@@ -2384,22 +2442,31 @@ def reject(root, cfg, tid, iid, reason=None, drop=False, refetch=False, regenera
         raise HeraldError("%s is not an external or scene image in images.json" % iid)
     if refetch and scene or regenerate and not scene:
         raise HeraldError("--refetch is for an external image, --regenerate for a scene")
+    if agent and scene and not drop:
+        raise HeraldError("an agent rejects a scene only with --drop — another picture comes from `HRD image review "
+                          "--redo`")
+    if agent and not scene and not drop and agent_rejects(st, iid) >= AGENT_REJECTS_MAX:
+        raise HeraldError("%s was turned down by the agent review %d times — the next reject is `--drop` (three "
+                          "candidates at most)" % (iid, AGENT_REJECTS_MAX))
     key = scene_key(cfg, it) if scene else item_key(it)
     rec = st.setdefault("images", {})
     items = rec.setdefault("items", {})
     r = items.setdefault(iid, {"kind": it["kind"], "use": it.get("use"), "file": it["file"], "key": key})
     r["status"] = "pending"
     for k in ("sha", "fetched_at", "orientation", "width", "height", "generated_at", "generated_blob", "reviewed",
-              "review_note"):
+              "review_note", "confirmed_by"):
         r.pop(k, None)
     if not again:
         rj = {"id": iid, "source_url": it.get("source_url"), "reason": (reason or "")[:300], "drop": bool(drop),
               "at": now_iso()}
         if scene:  # the key turned down: plan refuses the same prompt, seed and size (§2.6.3)
             rj = {"id": iid, "job": key, "reason": rj["reason"], "drop": rj["drop"], "at": rj["at"]}
+        if agent:
+            rj["by"] = "agent"
         st.setdefault("image_rejects", []).append(rj)
         st["stage"] = "draft"
-        st["last_loopback"] = "human"
+        # an agent's reject is no human loopback: a later gate failure stays a signal (11 §2.2)
+        st["last_loopback"] = "agent" if agent else "human"
         rec["awaiting"] = False
         if st.get("screenshots"):
             st["screenshots"]["awaiting"] = False
@@ -2826,8 +2893,15 @@ def resume_at_collect(root, cfg, st):
         rec.get("body") == _hash(root, cfg.body_path(st["slug"]))
 
 
-def _confirmed_at(led, h):
-    return next((r.get("at") for r in led.confirms if led._same(r, h)), None)
+def _confirmed_text(led, h, tid, iid, key, ready):
+    """The PR row's confirmation (11-ship-consent.md §2.4): the item's own line first (a human's
+    before an agent's), else a human's line of the same content; an agent's shows its review."""
+    line = led.confirm_line(h, tid, iid, key) if h else None
+    if line and line.get("by") == "agent":
+        return "agent-reviewed (no human look): %s" % (line.get("note") or "")
+    if line:
+        return "confirmed %s" % line.get("at")
+    return "confirmed" if ready else "not confirmed"
 
 
 def status(root, cfg, tid, rev=None):
@@ -2844,6 +2918,7 @@ def status(root, cfg, tid, rev=None):
     slug = st.get("slug")
     lines, dropped = slug_renders(root, cfg, slug, rev) if slug else ([], 0)
     out_items, snippets, rows, prompts, licenses, warnings = [], [], [], [], set(), []
+    agent_ok = []
     pend = {"render": [], "render_after_push": [], "fetch": [], "generate": [], "review": [], "confirm": []}
     body = _body(root, cfg, slug, rev) if slug else ""
     for it in _items(man):
@@ -2879,6 +2954,8 @@ def status(root, cfg, tid, rev=None):
                 pend["confirm"].append(iid)
                 if r.get("reviewed") != h[0]:
                     pend["review"].append(iid)
+            if s == "ready" and led.confirmed_by(h, tid, iid, key) == "agent":
+                agent_ok.append({"id": iid, "kind": "scene", "note": r.get("review_note")})
             if rev and r.get("key") and r["key"] != key:  # ship §5: a human changed the prompt, not the picture
                 warnings.append("%s: the manifest and the picture differ — the next refresh generates it again" % iid)
             if scene_label(cfg):
@@ -2887,11 +2964,9 @@ def status(root, cfg, tid, rev=None):
             model = ((line or {}).get("model") or {}).get("name") or limner.GEN_MODEL
             if (line or {}).get("model_license"):
                 licenses.add("%s: %s" % (model, line["model_license"]))
-            at = _confirmed_at(led, h) if h else None
             rows.append("| %s | scene (AI-generated) | %s | %s seed %s · %s · %s%s |" % (
                 iid, it.get("file"), model, it.get("seed"), it.get("size"),
-                "confirmed %s" % at if at else ("confirmed" if s == "ready" else "not confirmed"),
-                ", replaced by a human" if replaced else ""))
+                _confirmed_text(led, h, tid, iid, key, s == "ready"), ", replaced by a human" if replaced else ""))
             prompts.append("- %s: `%s`" % (iid, str(it.get("prompt")).replace("`", "'")))
         elif kind == "external" and slug:
             cur = cur_path(root, cfg, slug, it.get("file"))
@@ -2905,15 +2980,19 @@ def status(root, cfg, tid, rev=None):
                 pend["fetch"].append(iid)
             elif s == "fetched":
                 pend["confirm"].append(iid)
+                if not h or r.get("reviewed") != h[0]:  # 0.20.0: the agent review of a `--ship` run
+                    pend["review"].append(iid)
+            if s == "ready" and led.confirmed_by(h, tid, iid, item_key(it)) == "agent":
+                agent_ok.append({"id": iid, "kind": "quotation" if it.get("use") == "quotation" else "external",
+                                 "note": r.get("review_note")})
             if r.get("orientation") and r.get("key") == item_key(it) and figure(cfg).get(it.get("use")):
                 sn = snippet_text(cfg, it, r.get("orientation"), root, slug)
                 snippets.append({"id": iid, "text": sn, "alt": it.get("alt"), "in_body": body.count(sn)})
             what = ("licensed %s" % it.get("license")) if it.get("use") == "licensed" else \
                 "**quotation — no OG/SNS use**"
-            at = _confirmed_at(led, h) if h else None
-            rows.append("| %s | external | %s | %s, %s, %s%s%s |" % (
+            rows.append("| %s | external | %s | %s, %s, %s, %s%s |" % (
                 iid, it.get("file"), what, it.get("credit"), it.get("page_url"),
-                ", confirmed %s" % at if at else (", confirmed" if s == "ready" else ", not confirmed"),
+                _confirmed_text(led, h, tid, iid, item_key(it), s == "ready"),
                 ", replaced by a human" if replaced else ""))
         out_items.append(row)
     og_rec = rec.get("og") or {}
@@ -2928,7 +3007,12 @@ def status(root, cfg, tid, rev=None):
         elif og_rec.get("status") == "off":
             og_line = ("OG image: old title kept (%s)" if og_rec.get("stale_base") else "OG image: none (%s)") \
                 % og_rec.get("why")
+    agent_no = [{"id": x.get("id"), "drop": bool(x.get("drop")), "reason": x.get("reason")}
+                for x in st.get("image_rejects") or [] if isinstance(x, dict) and x.get("by") == "agent"]
     pr_rows = (["| id | kind | file | content |", "|---|---|---|---|"] + rows) if rows else []
+    for x in agent_no:  # a place the agent review left out (11-ship-consent.md §2.4)
+        if x["drop"]:
+            pr_rows.append("%s: left out after the agent review (no human look): %s" % (x["id"], x["reason"] or ""))
     if prompts:  # what the model was asked (style and NO_TEXT are the repo's, not shown)
         pr_rows += ["<details><summary>Scene prompts</summary>", ""] + prompts + ["", "</details>"]
         if licenses:
@@ -2956,6 +3040,7 @@ def status(root, cfg, tid, rev=None):
             "awaiting": bool(rec.get("awaiting")), "resume_at_collect": resume_at_collect(root, cfg, st) if not rev else False,
             "note": hold_note(st), "files": rec.get("files") or {}, "snippets": snippets, "pr_rows": pr_rows,
             "og": og_rec, "rejects": st.get("image_rejects") or [], "unmanaged": unmanaged,
+            "agent": {"confirmed": agent_ok, "rejected": agent_no},
             "renders_dropped": dropped, "warnings": warnings, "gen": rec.get("gen"),
             "gen_out_bytes": _gen_out_bytes(root, cfg, tid) if not rev else 0,
             "removed_bytes": removed_bytes(root, tid, "images")}
@@ -3232,6 +3317,72 @@ def og_excluded(root, cfg, tid, rev, changed, slug):
     st = (read_json_at(root, rev, _work_rel(tid, "state.json")) if rev else
           read_json(os.path.join(root, _work_rel(tid, "state.json")))) or {}
     return bool((((st.get("images") or {}).get("og")) or {}).get("stale_base"))
+
+
+def unvouched(root, cfg, tid, rev, slug):
+    """`images-unconfirmed` (11-ship-consent.md §9 R2-5, §10 R3-2, m3): the files a PR adds or
+    changes under the image directory (and an OG path outside it), each judged by its content at
+    `rev` — a diagram by a render record, the OG card by its record, an external image or scene by
+    a confirmation line (a human's of this content, or an agent's of this very item), a human's
+    screenshot by its import record, an automatic one by a confirmation line. Anything else — a
+    file no record knows, a record of other bytes — is returned. Deleted paths are not judged; a
+    rename is judged at its new path."""
+    from . import shots as shots_mod
+    from .store import read_json_at
+    rng = "origin/%s...%s" % (cfg.base, rev or "HEAD")
+    names = [p for p in git(root, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=d", rng,
+                            check=False).split("\0") if p]
+    img = cfg.image_dir(slug).rstrip("/") + "/"
+    og_out = cfg.og_outside(slug)
+    targets = [p for p in names if p.startswith(img) or (og_out and p == og_out)]
+    if not targets:
+        return []
+    st = (read_json_at(root, rev, _work_rel(tid, "state.json")) if rev else
+          read_json(os.path.join(root, _work_rel(tid, "state.json")))) or {}
+    try:
+        man = load_manifest(root, tid, rev)
+    except HeraldError:
+        man = None
+    try:
+        sman = shots_mod.load_manifest(root, tid, rev=rev) if rev else shots_mod.load_manifest(root, tid)
+    except HeraldError:
+        sman = None
+    led = Ledger(root)
+    lines, _ = slug_renders(root, cfg, slug, rev)
+    ogp = cfg.og_path(slug) if og_conf(cfg) else None
+    og_rec = ((st.get("images") or {}).get("og")) or {}
+    by_file = {}
+    for it in _items(man):
+        for f in {it.get("file"), cur_path(root, cfg, slug, it.get("file"))}:
+            if f:
+                by_file[f] = ("image", it)
+    for x in (sman or {}).get("shots") or []:
+        if isinstance(x, dict) and x.get("file"):
+            by_file.setdefault(x["file"], ("shot", x))
+    shot_recs = ((st.get("screenshots") or {}).get("shots")) or {}
+    out = []
+    for p in targets:
+        h = _rev_hashes(root, rev, p)
+        ok = False
+        if h and h[1]:
+            what, it = by_file.get(p, (None, None))
+            if ogp and p == ogp:
+                ok = bool(og_rec.get("sha")) and og_rec.get("sha") == h[0]
+            elif what == "image" and it.get("kind") == "diagram":
+                ok = find_render(lines, h) is not None
+            elif what == "image" and it.get("kind") == "external":
+                ok = led.confirmed_for(h, tid, it.get("id"), item_key(it))
+            elif what == "image" and it.get("kind") == "scene":
+                ok = led.confirmed_for(h, tid, it.get("id"), scene_key(cfg, it))
+            elif what == "shot":
+                r = shot_recs.get(it.get("id")) or {}
+                if r.get("capture") == "auto" or led.logged(h):
+                    ok = led.confirmed_for(h, tid, it.get("id"), r.get("key"))
+                else:  # a human's screenshot: the blob `HRD shot import` recorded
+                    ok = r.get("status") == "ready" and bool(r.get("sha")) and r.get("sha") == h[0]
+        if not ok:
+            out.append(p)
+    return sorted(out)
 
 
 _BASE_MANAGED = {}

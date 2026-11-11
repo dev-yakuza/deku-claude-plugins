@@ -3,11 +3,14 @@
 **Not a command.** The stages (`atoms/_stages.md`), `write`, `resume`, `draft`, `ship` and the
 batch child follow this file when an article needs screenshots. Design and reasons:
 design/herald/06-screenshots.md (0.15.0 — screenshots a human takes) and
-design/herald/07-auto-capture.md (0.16.0 — Herald captures public pages, a human confirms each).
+design/herald/07-auto-capture.md (0.16.0 — Herald captures public pages, a human confirms each),
+design/herald/11-ship-consent.md (0.20.0 — in a `--ship` run an agent review confirms a capture).
 
 Principles: a screenshot **shows** what the article says — it is never the evidence for a fact
 (verify reads sentences only). A screenshot leaves the machine only after critique and a human
-have seen it — an automatic capture too: it counts only once a human confirmed it. The human
+have seen it — an automatic capture too: it counts only once a human confirmed it (in a `--ship`
+run: once a fresh agent review passed it — `atoms/_images.md` §2a; a screenshot a human takes still
+needs the human). The human
 only drops files into a local folder — never git.
 
 `<w>` = `.claude/herald/work/<id>/`. Inbox = `.claude/herald/inbox/<id>/` (gitignored, this
@@ -75,7 +78,10 @@ After the writer (and illustrator) return:
      screenshot" (pick ids) → § 4 / "Later" → hold (§ 5). `confirm` and `demote` are a human's
      answer only: the guard asks before each, and they are refused unattended.
    - **in-session auto (default)**: show the guide (and the `captured` screens to look at),
-     hold `screenshots` (§ 5) — no question — and end with `/hrd resume <id>`.
+     hold `screenshots` (§ 5) — no question — and end with `/hrd resume <id>`. A `--ship` run
+     first lets the agent review the `captured` screens (`atoms/_images.md` §2a step 3: `HRD shot
+     review`, then `HRD shot confirm --agent`); a review `--problem` or a `pending` screen still
+     holds.
    - **unattended**: `HRD result --topic <id> --status held:screenshots --note "<status.note>"`
      (a `captured` screen shows as `s1(confirm)`), stop. A refusal naming a damaged ledger line
      → `held:needs-human` with the note it gives (`tooling: shots ledger damaged line <n>`); a
@@ -136,23 +142,30 @@ The writer does not bring such a screen back unless a human asks for it.
 ## 5. The hold `screenshots`
 
 Preserved like `needs-human` (`atoms/_stages.md` § Holds: WIP commit on the branch, no push,
-back to base). The note is exactly `status.note` (e.g. `screenshots: s1 s2(retake:privacy)`) —
+back to base). The note is exactly `status.note` (e.g. `screenshots: s1 s2(retake:privacy)`; a
+capture the agent review of a `--ship` run flagged: `s1(review:privacy)`) —
 `HRD state`/`HRD result` refuse any other text, so no reason sentence reaches base before the
 PR. It is never a growth signal. `/hrd status` shows the note and the inbox path.
 
 **Resume** (`resume.md`): no decision question up front. After the branch switch and version
 check, `HRD shot status --topic <id>`: `resume_at_import` true → skip the writer and
-illustrator: `HRD shot capture` (while `remaining`), then `HRD shot import`; all ready → gate →
-`stage pass --stage draft` and on, without questions; still pending or captured → show the
-guide (and the captured screens) and ask "I put them in / I looked at the automatic screenshots /
+illustrator: `HRD shot capture` (while `remaining`), then `HRD shot import` (a `--ship` resume:
+then the agent review of the `captured` screens with no `review:` mark, `atoms/_images.md` §2a);
+all ready → gate → `stage pass --stage draft` and on, without questions; still pending or captured → show the
+guide (and the captured screens — a `review:` one with the review's note: the reviewer suspected
+personal data or the wrong screen; the agent can no longer pass that capture, only a human's
+`confirm`, `demote` or a retake) and ask "I put them in / I looked at the automatic screenshots /
 Take it again / Use my own file / Go without this screenshot / Keep holding" (each as in § 2) (the resume decision `_contract.md` §C allows; unattended → `held:screenshots`
 result). "Keep holding" = the preserve procedure of `atoms/_stages.md` § Holds again, with the
 note `status.note` gives now (fewer ids once some are in). `resume_at_import` false → continue from `stage` as usual.
 
 ## 6. Publishing
 
-- A PR with screenshots is excluded from auto publish as `screenshots`, and no consent
-  (`/hrd next`, `--ship`) lifts it: it waits for `/hrd ship`.
+- A PR with screenshots is excluded from auto publish as `screenshots`; `--consent` alone never
+  lifts it. 0.20.0: a `--ship` run (the lock's ship mark for this topic) accepts it — its captures
+  were confirmed by the agent review and its own screenshots by the human who took them — unless
+  `images-unconfirmed` (a file in the PR no record vouches for: `atoms/_images.md` §6), which
+  waits for `/hrd ship`.
 - Publish step 4 for a topic with screenshots (`HRD shot status` lists `files`): add the image
   directory with `git add -A -- <image dir>`, then `HRD shot squash --topic <id>` (one commit, so
   WIP commits holding unreviewed screens never reach the remote) before `HRD scope`; `scope`
@@ -160,7 +173,8 @@ note `status.note` gives now (fewer ids once some are in). `resume_at_import` fa
   confirmed in any commit the push carries (in HEAD → confirm or demote; only in past commits →
   `HRD shot squash`, even for a topic with no records; already pushed → `needs-human`). The PR
   body gets `## Screenshots` (id, file, `mask` categories, and a "capture" column: `shot_col`
-  from `HRD shot status` — `human`, or `auto <url> <captured_at>`) and, if `status` lists `unreferenced_base_images`, those as "existing images
+  from `HRD shot status` — `human`, or `auto <url> <captured_at>`, followed by `· agent-reviewed
+  (no human look): <note>` for a capture the agent review confirmed) and, if `status` lists `unreferenced_base_images`, those as "existing images
   no longer referenced in the body's image syntax — check frontmatter or components before
   removing any".
 - `/hrd ship` step 4 lists the screenshots (file links, `mask`, the capture column — `human` or

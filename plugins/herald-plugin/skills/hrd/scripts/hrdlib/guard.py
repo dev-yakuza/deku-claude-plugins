@@ -9,6 +9,13 @@ Decision table (attended → `ask`, unattended `HRD_UNATTENDED=1` → `deny`):
 - base-branch commits that touch Herald paths outside the allowed set (unattended: any
   base commit or push) and herald/* commits outside the PR file scope.
 
+0.20.0 (design/herald/11-ship-consent.md §2.5, §9–§11): a `--ship` run marks its checkout lock
+(`.claude/herald/memory/lock`, protected here with `lock.pass`). With that mark for the command's
+topic (and not `--attended`), `image confirm|reject --agent` and `shot confirm --agent` pass rule
+1c/1d; with a valid `lock.pass`, the one merge command `ship` runs (checked on the raw text) and
+the configured deploy command (byte for byte) get `allow` — only after every other rule decided
+nothing. Unattended runs are unchanged. A crashing guard still asks for a merge or the deploy.
+
 It is a string-pattern tripwire, not a boundary (plan §3.4 "한계"); `audit` checks after the fact.
 """
 
@@ -18,7 +25,7 @@ import re
 import shlex
 import sys
 
-from . import commits
+from . import commits, lock as lockmod
 from .config import Config
 from .store import load_published, load_topics, parse_branch
 from .util import git, read_json
@@ -40,6 +47,8 @@ LEDGER = [".claude/herald/ledger/*", ".claude/herald/ledger/**"]
 # a diagram's evidence: only `HRD image render` writes it (design/herald/08-images.md §2.7.2). Matched
 # by file path only, so `git clean -fd -- <w>` / `git checkout HEAD -- <w>` and commits stay free
 RENDERS = [".claude/herald/work/*/diagram-renders.jsonl"]
+# the checkout lock carries a `--ship` run's mark, `lock.pass` the merge/deploy pass (11 §2.5 1, §9 m2)
+LOCKS = [".claude/herald/memory/lock", ".claude/herald/memory/lock.pass"]
 CONFIG = ".claude/herald/config.json"
 # `screenshots` holds the capture command Herald runs (design/herald/07-auto-capture.md §2.7);
 # `limner` and `images` the image engine's argv, the OG generator and the attribution templates (08 §2.15)
@@ -118,6 +127,8 @@ def classify_path(r, cfg=None):
         return "verification ledger %s" % r
     if commits._match(r, RENDERS):
         return "diagram render record %s" % r
+    if _covers(r, LOCKS):
+        return "checkout lock %s" % r
     if r and _covers(r, limner_state_globs(cfg)):
         return "limner state %s" % r
     return None
@@ -687,9 +698,102 @@ def push_targets(argv):
     return (pos[0] if pos else None), pos[1:]
 
 
+# options of `HRD image` / `HRD shot` that take a value: a token right after one is that value
+# (`--note=--agent` sets a note — never the flag)
+VALUE_OPTS = ("--topic", "--id", "--source", "--pr", "--reason", "--wait", "--note", "--rev", "--command",
+              "--retake-kind", "--slug", "--path", "--problem")
+
+
+def _prefix_of(x, name, least=3):
+    """argparse takes any unambiguous prefix (`--ag`): does token `x` (no `=value`) name `name`?"""
+    return x.startswith("--") and "=" not in x and len(x) >= least and name.startswith(x)
+
+
+def _agent_pass(root, seg):
+    """1c/1d's `--agent` way (11 §2.5 2, §11 m3): the segment carries the flag `--agent` itself (not
+    as some option's value) and the lock carries a ship mark for its `--topic`, not attended.
+    Read failures are "no mark"."""
+    if unattended():  # unattended runs never pass (11 §1): 0.19.0's deny
+        return False
+    raw = normalize(seg, split=False)
+    agent, topic, i = False, None, 0
+    while i < len(raw):
+        x = raw[i]
+        if x.startswith("--topic=") or (x.startswith("--to") and "=" in x and "--topic".startswith(x.split("=")[0])):
+            topic = x.split("=", 1)[1]
+        elif _prefix_of(x, "--topic") and i + 1 < len(raw):
+            topic = raw[i + 1]
+            i += 1
+        elif _prefix_of(x, "--agent"):
+            agent = True
+        elif "=" not in x and any(_prefix_of(x, o) for o in VALUE_OPTS):
+            i += 1  # its value, whatever it looks like
+        i += 1
+    if not agent or not topic:
+        return False
+    try:
+        return lockmod.agent_ok(root, topic)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+MERGE_META = re.compile(r"[;&|<>$`()\n]")
+MERGE_METHODS = ("--squash", "--merge", "--rebase")
+
+
+def ship_merge_ok(root, cmd):
+    """R2-1: the raw command is exactly `gh pr merge <n> [--squash|--merge|--rebase]
+    [--delete-branch] --match-head-commit <sha>` — no shell syntax, no env prefix, nothing else —
+    and <n>, <sha> are the valid `lock.pass`'s. Never unattended."""
+    if unattended() or not cmd or MERGE_META.search(cmd):
+        return False
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        return False
+    if argv[:3] != ["gh", "pr", "merge"] or len(argv) < 4 or not argv[3].isdigit():
+        return False
+    method = delete = 0
+    sha, i = [], 4
+    while i < len(argv):
+        x = argv[i]
+        if x in MERGE_METHODS:
+            method += 1
+        elif x == "--delete-branch":
+            delete += 1
+        elif x == "--match-head-commit" and i + 1 < len(argv):
+            sha.append(argv[i + 1])
+            i += 1
+        elif x.startswith("--match-head-commit="):
+            sha.append(x.split("=", 1)[1])
+        else:
+            return False
+        i += 1
+    if method > 1 or delete > 1 or len(sha) != 1:
+        return False
+    p = lockmod.valid_pass(root)
+    return bool(p) and str(p.get("pr")) == str(int(argv[3])) and sha[0].strip().lower() == str(p.get("sha")).lower()
+
+
+def ship_deploy_ok(root, cfg, cmd):
+    """R2-2: the raw command is the configured deploy, byte for byte (no normalizing), a valid
+    `lock.pass` exists and the checkout is on the base branch (11 §10 m2). Never unattended."""
+    deploy = cfg.get("commands", "deploy") or ""
+    if unattended() or not deploy.strip() or (cmd or "").strip() != deploy.strip():
+        return False
+    return bool(lockmod.valid_pass(root)) and current_branch(root) == cfg.base
+
+
 def check_bash(root, cfg, cmd):
     base = cfg.base
     sigs = deploy_signatures((cfg.get("commands", "deploy") or "").strip())
+    # a `--ship` run's merge or deploy: only rules 1 and 2 stand aside; `allow` comes at the very
+    # end, after every other rule decided nothing (11 §11 m2)
+    try:
+        ship_merge = ship_merge_ok(root, cmd)
+        ship_deploy = not ship_merge and ship_deploy_ok(root, cfg, cmd)
+    except Exception:  # noqa: BLE001 — a pass that cannot be read is no pass
+        ship_merge = ship_deploy = False
     pending = set()  # paths earlier `git add/rm/mv` segments of this same command will stage
     branch = current_branch(root)  # updated by switch/checkout segments
     for seg in segments(cmd):
@@ -700,7 +804,7 @@ def check_bash(root, cfg, cmd):
         if argv[:2] == ["gh", "api"] and re.search(r"/pulls/\d+/merge\b", joined):
             argv = ["gh", "pr", "merge"] + re.findall(r"/pulls/(\d+)/merge", joined)  # same rules as a merge
         # 1. merges
-        if argv[:3] == ["gh", "pr", "merge"]:
+        if argv[:3] == ["gh", "pr", "merge"] and not ship_merge:
             if not unattended():
                 decide("ask", "merging a PR publishes content — confirm this is the approved `ship` step.")
             if cfg.get("autonomy", "publish") != "auto":
@@ -718,15 +822,17 @@ def check_bash(root, cfg, cmd):
             protect("recording `withdraw-lang` in the verification ledger takes a translation down without re-verification.")
         # 1c. a captured screenshot passes to the remote only on a human's look (07-auto-capture.md
         # §2.5): `shot confirm` / `shot demote` (argparse takes positional choices whole, never a prefix)
-        if "shot" in argv and ("confirm" in argv or "demote" in argv):
+        # 0.20.0: `shot confirm --agent` in a `--ship` run of that topic passes this segment (never demote)
+        if "shot" in argv and ("confirm" in argv or "demote" in argv) and not (
+                "demote" not in argv and _agent_pass(root, seg)):
             protect("`HRD shot %s` records that a human looked at an automatic screenshot — only the human decides."
                     % ("confirm" if "confirm" in argv else "demote"))
-        # 1d. the same for an external image (08-images.md §2.15)
-        if "image" in argv and ("confirm" in argv or "reject" in argv):
+        # 1d. the same for an external image (08-images.md §2.15); `--agent` as for 1c
+        if "image" in argv and ("confirm" in argv or "reject" in argv) and not _agent_pass(root, seg):
             protect("`HRD image %s` records a human's decision about an external image — only the human decides."
                     % ("confirm" if "confirm" in argv else "reject"))
         # 2. deploy
-        if any(contains(canon(strip_noise(argv)), s) for s in sigs):
+        if not ship_deploy and any(contains(canon(strip_noise(argv)), s) for s in sigs):
             if unattended():
                 decide("deny", "unattended sessions may not deploy (the batch runner does).")
             decide("ask", "running the deploy command publishes the whole base branch — confirm this is `ship` step 7.")
@@ -824,6 +930,9 @@ def check_bash(root, cfg, cmd):
     if limner_in(cmd, cfg):
         protect("running limner directly — Herald calls it (`HRD image …`, `HRD social media`); a direct call "
                 "can redraw a picture and the record Herald checks it against.")
+    if ship_merge or ship_deploy:  # nothing above decided: the verified merge / the deploy of a `--ship` run
+        decide("allow", "the %s of a `--ship` run, checked against its pass (lock.pass)."
+               % ("merge" if ship_merge else "deploy"))
 
 
 def closed_rule(root, cfg, tool, ti):
@@ -850,16 +959,43 @@ def closed_rule(root, cfg, tool, ti):
     return True
 
 
+MERGE_TEXT = re.compile(r"\bgh\b[\s\S]*\bmerge\b")
+
+
+def _ask_publish_on_failure(payload, root=None):
+    """R2-3 (11 §9, §10 m4): the settings no longer ask before `gh pr merge`, so a guard that
+    fails (or finds no config) still asks for a merge — and for the deploy when config is
+    readable — before falling open as in 0.19.0. Attended only."""
+    if unattended() or payload.get("tool_name") != "Bash":
+        return
+    cmd = (payload.get("tool_input") or {}).get("command") or ""
+    if not isinstance(cmd, str):
+        return
+    if MERGE_TEXT.search(cmd):
+        decide("ask", "merging a PR publishes content — the guard could not check this command, confirm it.")
+    try:
+        deploy = (read_json(os.path.join(root, CONFIG)) or {}).get("commands", {}).get("deploy") if root else None
+    except Exception:  # noqa: BLE001 — no readable config: the merge pattern only
+        deploy = None
+    if isinstance(deploy, str) and deploy.strip() and deploy.strip() in cmd:
+        decide("ask", "running the deploy command publishes the whole base branch — the guard could not check "
+                      "this command, confirm it.")
+
+
 def main():
     raw = sys.stdin.read() if not sys.stdin.isatty() else ""
     try:
         payload = json.loads(raw) if raw.strip() else {}
     except ValueError:
         payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    root = None
     try:
         from .util import repo_root
         root = repo_root(payload.get("cwd"))
         if read_json(os.path.join(root, CONFIG)) is None:
+            _ask_publish_on_failure(payload)
             sys.exit(0)
         cfg = Config.load(root)
         tool = payload.get("tool_name", "")
@@ -876,4 +1012,10 @@ def main():
         if unattended():
             decide("deny", "guard error (%s) — refusing while unattended" % e)
         sys.stderr.write("Herald guard warning: %s\n" % e)
+        try:
+            _ask_publish_on_failure(payload, root)
+        except SystemExit:
+            raise
+        except Exception:  # noqa: BLE001
+            pass
     sys.exit(0)

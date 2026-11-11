@@ -3,8 +3,9 @@
 Continues from `state.json.stage` on the topic's local herald branch. Works for interrupted
 runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
 
-1. `printenv HRD_UNATTENDED`; `printenv HRD_RESUME_LIMITED`; `HRD lock acquire --cmd resume` (keep the token; `HRD lock release
-   --cmd resume --token <t>` on every exit path).
+1. `printenv HRD_UNATTENDED`; `printenv HRD_RESUME_LIMITED`; `HRD lock acquire --cmd resume` — with
+   `--ship`: `--ship --topic <id>` (plus `--attended` when given; only when the human wrote `--ship`,
+   as `write.md` says) — keep the token; `HRD lock release --cmd resume --token <t>` on every exit path.
 2. `HRD status` → find the topic. Derived state must be `in-progress` (local branch) or a
    stored `held:needs-human|stagnation|budget|screenshots` with a preserved branch. Anything else: explain
    (`pr-pending` → `/hrd ship`; `queued` → `/hrd write`; cleaned holds → `/hrd status
@@ -23,7 +24,8 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
    `HRD_UNATTENDED=1` and `HRD_RESUME_LIMITED` equal to the `(run <id>)` in the hold's note (a
    `tooling: rate limited …` hold the same batch run recorded when a usage limit cut the topic off),
    continue without questions — there is no human decision to make.
-4. A `tr-` id: continue with `translate.md` § C (its steps skip what is done). Otherwise
+4. A `tr-` id: continue with `translate.md` § C (its steps skip what is done; with this token —
+   its acquire nests and keeps the mark). Otherwise
    `git switch herald/<topic-id>--<slug>`; read `.claude/herald/work/<topic-id>/state.json`.
    Then the version check in `atoms/_stages.md` § Existing branches. A `trim` still `open`
    (interrupted) → `HRD trim --topic <id> --abort` first (puts back the article critique
@@ -37,7 +39,9 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
    no writer or illustrator, continue at `atoms/_images.md` §2 step 3 (render, fetch, scene
    generation — `HRD image generate` takes over the run a hold left going, or receives what it
    finished —, the scene review, OG, then the screenshot steps; external images and scenes under
-   `pending.confirm` wait for a human's confirm or reject). A `tooling: limner …` hold resumes
+   `pending.confirm` wait for a human's confirm or reject — in a `--ship` run the agent review of
+   `atoms/_images.md` §2a stands in, except for a capture a review already flagged
+   (`review:<kind>` in the note): only a human passes that one). A `tooling: limner …` hold resumes
    here too, once the machine is free or can generate — and every such entry first runs `HRD
    image generate --topic <id> --reset-wait` (the wait limit counts from this resume).
    Budget baseline as in `write.md` §0 step 7 (a fresh baseline: resuming is the human's choice

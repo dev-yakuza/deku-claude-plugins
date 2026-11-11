@@ -4,8 +4,8 @@ Decides how to bring a published article up to date — same URL (`update`), a n
 (`new`, the old one stays) or nothing (`none`) — and continues with that work. The content
 strategist recommends; **the human decides**, in every mode. Interactive only (it writes base).
 
-1. `HRD lock acquire --cmd refresh` (keep the token; release on every exit path); base clean;
-   `HRD sync`.
+1. `HRD lock acquire --cmd refresh` (keep the token; release on every exit path; never `--ship`
+   here — `write` marks its own lock in step 7); base clean; `HRD sync`.
 2. Gather why: Search Console data if connected (`.claude/herald/secrets/` present — see
    `monitoring.md`; the article's rows: `gsc.py show --slug <slug>`), else the human's reason.
 3. **Precheck**: `HRD refresh-decision --slug <slug> --precheck [--for-translation]` — the
@@ -48,7 +48,7 @@ strategist recommends; **the human decides**, in every mode. Interactive only (i
    human overturned the recommendation), `git push origin <base>`, and **release the lock**.
 7. Continue:
    - `update` / `new`: run `write.md` for the new topic id (in-session auto, `--attended` and
-     `--ship` as `refresh` got them). A refresh topic's differences — refresh brief, its own
+     `--ship` as `refresh` got them — `write` acquires with `--ship --topic <new id>`). A refresh topic's differences — refresh brief, its own
      article outside the cannibalization check, the fixed slug, a draft from the current body,
      the `direction` — come from the stage spine (`atoms/_stages.md`), whichever command runs it.
    - `none`: done — say so with the reason.

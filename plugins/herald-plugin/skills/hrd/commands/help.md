@@ -5,11 +5,11 @@ Show this in `config.language` (not initialized: the language rule in SKILL.md):
 **Setup** — `init [lang]` install the harness · `config [key value]` dials (`config images`: SVG diagrams, external images, scene images and the OG card, with limner) · `update [--check]`
 adopt central improvements
 
-**Writing** — `plan [--n N] [--auto]` build the topic queue (`--auto`: the editor-in-chief picks) · `write <id> [--attended] [--ship]` one article to a PR (no questions until the PR; `--attended`: ask at each gate and approve before the PR; `--ship`: publish it right away) ·
+**Writing** — `plan [--n N] [--auto]` build the topic queue (`--auto`: the editor-in-chief picks) · `write <id> [--attended] [--ship]` one article to a PR (no questions until the PR; `--attended`: ask at each gate and approve before the PR; `--ship`: publish it right away — no human look: a fresh agent review stands in for the image and screenshot confirmations, and the guard lets the verified merge and the deploy through; an article with a defect still stops at its PR) ·
 `brief|research|draft|critique|verify|publish <id>` one stage · `resume <id> [--attended] [--ship]` continue (a `screenshots` hold: put the files in `.claude/herald/inbox/<id>/` first, as the capture guide says — or look at the external images and scenes it lists) ·
 `batch [--n N]` unattended writing (and auto publish if enabled)
 
-**Publishing** — `next [--attended]` one more article published end to end (plans first if the queue is empty; the guard still confirms merge and deploy) · `ship [ids|PRs]` approve, re-verify, merge, deploy, confirm, record ·
+**Publishing** — `next [--attended]` one more article published end to end, as `write --ship` (plans first if the queue is empty) · `ship [ids|PRs]` approve, re-verify, merge, deploy, confirm, record ·
 `ship --reverify <id>` · `ship --deploy-only <id …>` · `ship <PR> --session-auto [--consent]` · `review <id|slug|PR>` independent audit ·
 `refresh <slug> [--attended] [--ship] [--direction <id>] [--force-update] [--for-translation]` bring an article up to date — the strategist recommends update (same URL), new article or nothing; you decide · `translate <slug> [--lang l,…] [--adopt l,…]` add languages to a published article (`--missing`: every article lacking one; `--resume <id>` continue)
 

@@ -3,8 +3,15 @@
 Commands run inside an LLM session, so a pid identifies nothing — the owner is a nonce created
 when the command starts. `batch` holds the lock for the whole run and hands the nonce to its
 children through HRD_LOCK_TOKEN; a matching token re-enters.
+
+0.20.0 (design/herald/11-ship-consent.md): a `--ship` run marks the lock it creates (`ship`,
+`topic`, `attended`) — the only evidence the code and the guard read for "this run may skip a
+human's look". The mark lives and dies with the lock (a nested acquire never changes it), and the
+merge/deploy pass sits next to it in `lock.pass`, valid only for the lock that wrote it. Both
+files are guard-protected.
 """
 
+import datetime
 import os
 import secrets
 
@@ -71,8 +78,14 @@ def waiting(root, cur=None):
     return {"pid": w.get("pid"), "until": w.get("until"), "kind": w.get("kind") or "limit"}
 
 
-def acquire(root, command, token=None):
+def acquire(root, command, token=None, ship=False, topic=None, attended=False):
+    """`ship`/`topic`/`attended` are written only when this call creates the lock: a nested
+    acquire (same token) returns the lock as it is — the outer command decided (11 §2.1)."""
     token = token or os.environ.get("HRD_LOCK_TOKEN")
+    if ship and os.environ.get("HRD_UNATTENDED") == "1":
+        raise HeraldError("--ship is a human's request in this session — not allowed in unattended sessions")
+    if ship and not topic:
+        raise HeraldError("--ship needs --topic <id> (the mark is bound to one topic)")
     cur = status(root)
     if cur:
         if token and cur.get("token") == token:
@@ -87,7 +100,15 @@ def acquire(root, command, token=None):
             % (cur.get("command"), cur.get("at"))
         )
     token = token or secrets.token_hex(8)
-    write_json(lock_path(root), {"token": token, "command": command, "at": now_iso()})
+    rec = {"token": token, "command": command, "at": now_iso()}
+    if ship:
+        rec["ship"] = True
+    if topic:
+        rec["topic"] = topic
+    if attended:
+        rec["attended"] = True
+    clear_pass(root)  # a pass never outlives the lock it was written for
+    write_json(lock_path(root), rec)
     # Re-read: a concurrent writer may have raced us between the check and the write.
     if (status(root) or {}).get("token") != token:
         raise HeraldError("lost the lock race — another command started at the same moment")
@@ -107,12 +128,79 @@ def release(root, token, owner=False, command=None):
         return False
     if cur.get("token") != token:
         raise HeraldError("lock is held by another command (%s); not releasing" % cur.get("command"))
+    clear_pass(root)
     os.remove(lock_path(root))
     return True
 
 
 def force_unlock(root):
     cur = status(root)
+    clear_pass(root)
     if cur:
         os.remove(lock_path(root))
     return cur
+
+
+# --- the ship mark and the merge/deploy pass (design/herald/11-ship-consent.md §2.1, §2.5) -------
+
+PASS_TTL = 2 * 3600  # seconds a pass stays valid (11 §10 m2)
+
+
+def _safe_status(root):
+    """The lock, or None when it cannot be read — a read failure is "no mark", never an error."""
+    try:
+        cur = status(root)
+    except Exception:  # noqa: BLE001
+        return None
+    return cur if isinstance(cur, dict) else None
+
+
+def ship_active(root, topic, cur=None):
+    """The lock exists, carries the ship mark and is bound to `topic` (11 §10 R3-1)."""
+    cur = cur if cur is not None else _safe_status(root)
+    return bool(cur) and cur.get("ship") is True and bool(topic) and cur.get("topic") == topic
+
+
+def agent_ok(root, topic, cur=None):
+    """`--agent` may stand in for a human's look: a ship mark for this topic and no `--attended`
+    (attended runs ask the human at every gate — 11 §11 m3)."""
+    cur = cur if cur is not None else _safe_status(root)
+    return ship_active(root, topic, cur) and not cur.get("attended")
+
+
+def pass_path(root):
+    return os.path.join(paths(root)["memory"], "lock.pass")
+
+
+def clear_pass(root):
+    try:
+        os.remove(pass_path(root))
+    except OSError:
+        pass
+
+
+def write_pass(root, token, topic, pr, sha):
+    rec = {"token": token, "topic": topic, "pr": int(pr), "sha": sha, "at": now_iso()}
+    write_json(pass_path(root), rec)
+    return rec
+
+
+def valid_pass(root, cur=None, now=None):
+    """The pass, when it belongs to the lock now held: same token, the lock carries the ship mark,
+    the same topic, written within PASS_TTL. Anything unreadable → None (no pass)."""
+    try:
+        cur = cur if cur is not None else _safe_status(root)
+        p = read_json(pass_path(root))
+        if not cur or not isinstance(p, dict) or cur.get("ship") is not True:
+            return None
+        if not p.get("token") or p.get("token") != cur.get("token") or p.get("topic") != cur.get("topic"):
+            return None
+        at = datetime.datetime.fromisoformat(str(p.get("at")).replace("Z", "+00:00"))
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=datetime.timezone.utc)
+        age = ((now or datetime.datetime.now(datetime.timezone.utc)) - at).total_seconds()
+        if age < 0 or age > PASS_TTL:
+            return None
+        return p
+    except Exception:  # noqa: BLE001
+        return None

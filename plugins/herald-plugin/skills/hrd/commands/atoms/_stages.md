@@ -255,7 +255,9 @@ are collected between the illustrator and the gate in the order of `atoms/_image
    A human's "go without this screenshot" (`HRD shot status` `decisions`, `choice: without`)
    goes into `decision_log` as `{"kind": "human", "id": "shot:s1", "note": "without s1"}`
    (`atoms/_screenshots.md` §4). A human's "go without this image" (`state.json` `image_rejects`
-   with `drop: true`) likewise as `{"kind": "human", "id": "image:e1", "note": "without e1"}`.
+   with `drop: true`) likewise as `{"kind": "human", "id": "image:e1", "note": "without e1"}` — one
+   the agent review of a `--ship` run dropped (`by: agent`, `atoms/_images.md` §2a) as `{"kind":
+   "agent", "id": "image:e1", "note": "<its reason>"}` (no exclusion reason; never `human`).
    `HRD stage pass --stage critique` refuses unless verdict is PASS, `audit_round` equals the
    counted round, every BLOCKER is dismissed and every MAJOR is dismissed or (recheck rounds
    only) deferred — each deferred one logged in this round's `audit_log` with outcome
@@ -461,7 +463,8 @@ version>` (SKILL.md version gate):
 - Any hold or stop with a trim `open`: `HRD trim --topic <id> --abort` first.
 - `needs-human` / `stagnation` / `budget` / `screenshots` (note: exactly `HRD shot status`'s
   `note` — `atoms/_screenshots.md` §5; it also names external images waiting for a human, as
-  `e1(confirm)` and scenes as `g1(confirm)` — `atoms/_images.md` §5; a scene generation that
+  `e1(confirm)` and scenes as `g1(confirm)` — `atoms/_images.md` §5 — and a capture a `--ship`
+  run's review flagged as `s1(review:privacy|mismatch)`; a scene generation that
   waited too long, a busy machine or one that cannot generate: `tooling: limner generating <run_id>`,
   `tooling: limner busy`, `tooling: limner unavailable (<why>)`; a tooling stop of images: `tooling: images <render|fetch>
   <code>`, `tooling: limner unavailable (<code>)`, `tooling: og side-effects`): keep the branch — commit leftovers as

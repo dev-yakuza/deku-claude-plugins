@@ -335,8 +335,18 @@ CONSENT_ACCEPTS = ("decision:dismissal", "decision:assumption", "decision:deferr
                    "audit-dismissed", "audit-log:deferred", "trimmed", "images", "framed", "translated")
 
 
-def blocking_exclusions(reasons, consent=False):
-    return [r for r in reasons if not (consent and r in CONSENT_ACCEPTS)]
+# 0.20.0 (design/herald/11-ship-consent.md §2.4, §9 R2-5): a `--ship` run (the lock's ship mark for
+# this topic — `strong`, never passed by a caller) also accepts screenshots and external images: an
+# agent review stood in for the human's look in draft. Never while a file in the PR is one nobody
+# vouched for (`images-unconfirmed` — blocking whatever the consent).
+STRONG_ACCEPTS = ("external-images", "screenshots")
+
+
+def blocking_exclusions(reasons, consent=False, strong=False):
+    accepts = CONSENT_ACCEPTS
+    if consent and strong and "images-unconfirmed" not in reasons:
+        accepts = CONSENT_ACCEPTS + STRONG_ACCEPTS
+    return [r for r in reasons if not (consent and r in accepts)]
 
 
 def _git_blob(root, rev, relpath):
@@ -359,11 +369,12 @@ def _blob_hash(root, rev, relpath):
     return "sha256:" + hashlib.sha256(proc.stdout).hexdigest() if proc.returncode == 0 else None
 
 
-def exclusion_reasons(root, cfg, tid, rev=None):
+def exclusion_reasons(root, cfg, tid, rev=None, vouch=False):
     """auto_exclusion for one topic, read from a PR head (`rev`; on base the work files are not
     there) or the working tree, plus what only the repo shows: a critique.json changed after
     critique passed, and images the PR adds or changes (they go out unseen). A PR whose verdict
-    files cannot be read is never eligible."""
+    files cannot be read is never eligible. `vouch` (a `--ship` run's strong consent, 0.20.0): also
+    `images-unconfirmed` when a changed image file is one no record vouches for at that head."""
     from . import commits
 
     rel = work_rel(tid, "critique.json")
@@ -420,6 +431,8 @@ def exclusion_reasons(root, cfg, tid, rev=None):
         from .shots import excluded as shots_excluded
         if shots_excluded(root, cfg, tid, rev, changed):
             reasons.append("screenshots")
+        if vouch and images_mod.unvouched(root, cfg, tid, rev, slug):
+            reasons.append("images-unconfirmed")
         tr_paths = set(cfg.translation_paths(slug).values())
         if tr_paths and not (cfg.translations() or {}).get("auto_publish") and any(f in tr_paths for f in changed):
             reasons.append("translated")
@@ -1496,6 +1509,11 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
             art.pop("auto_accepted", None)
         if origin == "herald":
             art["human_reviewed"] = not auto
+            agent = agent_confirmed(root, tid)
+            if agent:  # images an agent review confirmed in a `--ship` run (11-ship-consent.md P25)
+                art["agent_confirmed"] = agent
+            else:
+                art.pop("agent_confirmed", None)
     if translated:
         if "first_published_at" not in art:
             # the earliest publish the topics remember; unknown for pre-Herald history (R4 MN-7)
@@ -1534,6 +1552,21 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
     save_published(root, pub)
     save_topics(root, data)
     return art
+
+
+def agent_confirmed(root, tid):
+    """Ids of the topic's images and screenshots an agent review confirmed (state `confirmed_by`)."""
+    try:
+        st = read_json(state_path(root, tid))
+    except ValueError:
+        st = None
+    if not isinstance(st, dict):
+        return []
+    out = [k for k, r in (((st.get("images") or {}).get("items")) or {}).items()
+           if isinstance(r, dict) and r.get("confirmed_by") == "agent"]
+    out += [k for k, r in (((st.get("screenshots") or {}).get("shots")) or {}).items()
+            if isinstance(r, dict) and r.get("confirmed_by") == "agent"]
+    return sorted(out)
 
 
 def _published_langs(root, cfg, tid, t):

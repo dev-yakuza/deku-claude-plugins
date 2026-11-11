@@ -40,7 +40,8 @@ MAX_BYTES = 10 * 1024 * 1024
 # what a hold note on base may say: ids and kind codes only, never the agent's reason text; an
 # external or scene image waiting for a human's look is `e1(confirm)`, `g1(confirm)`
 # (design/herald/08-images.md §2.9, 09-scenes.md §2.7.3)
-NOTE_RE = re.compile(r"^screenshots:( (s|e|g)[0-9]{1,3}(\((retake:(privacy|mismatch)|confirm)\))?)+$")
+# 0.20.0: an automatic capture the agent review found a problem in (a `--ship` run) is `s1(review:privacy)`
+NOTE_RE = re.compile(r"^screenshots:( (s|e|g)[0-9]{1,3}(\((retake:(privacy|mismatch)|review:(privacy|mismatch)|confirm)\))?)+$")
 
 # --- automatic capture (design 07) ---
 CAPTURES = ".claude/herald/ledger/captures.jsonl"  # under the guard's LEDGER glob: ask attended, deny unattended
@@ -49,6 +50,10 @@ CONFIRMATIONS = ".claude/herald/ledger/confirmations.jsonl"
 FETCHES = ".claude/herald/ledger/fetches.jsonl"
 # scene images limner generated and Herald received (09 §2.6.1): in rule U's "log" too
 GENERATIONS = ".claude/herald/ledger/generations.jsonl"
+# what the agent review of a `--ship` run found wrong in a capture (11-ship-consent.md §9 R2-6): bound
+# to the content; "the agent may not pass this one" — never a reason to publish, so not in Ledger
+PROBLEMS = ".claude/herald/ledger/review-problems.jsonl"
+PROBLEM_FIELDS = ("topic", "id", "key", "blob", "sha256", "kind", "note", "at")
 LEDGER_FIELDS = ("topic", "id", "key", "blob", "sha256")
 URL_RE = re.compile(r"^https://[A-Za-z0-9\-._~:/?#\[\]@!&()*+,;=%]+$")
 LANG_RE = re.compile(r"^[a-z]{2,3}(-[A-Z][a-z]{3})?(-([A-Z]{2}|[0-9]{3}))?$")
@@ -395,11 +400,50 @@ class Ledger:
         return [r for r in self.generations if (r.get("topic"), r.get("id"), r.get("key")) == (tid, gid, key)]
 
     def confirmed(self, h):
+        """Rule U's "confirmed": any confirmation line of this content — a human's or, in a `--ship`
+        run, an agent's (both mean "may go to the remote" — 11-ship-consent.md §2.2 4)."""
         return any(self._same(r, h) for r in self.confirms)
 
     def unconfirmed(self, h):
         """Rule U: an automatic capture (any topic, any name) no human confirmed."""
         return bool(self.logged(h)) and not self.confirmed(h)
+
+    @staticmethod
+    def _agent(rec):
+        return rec.get("by") == "agent"
+
+    def human_confirmed(self, h):
+        """A human's confirmation line of this content (0.19.0 lines carry no `by`)."""
+        return any(self._same(r, h) and not self._agent(r) for r in self.confirms)
+
+    def unconfirmed_by_human(self, h):
+        """A logged file no human confirmed — never taken as a human's own screenshot (11 §9 m4)."""
+        return bool(self.logged(h)) and not self.human_confirmed(h)
+
+    def _own(self, r, tid, iid, key):
+        return (r.get("topic"), r.get("id"), r.get("key")) == (tid, iid, key)
+
+    def confirmed_for(self, h, tid, iid, key):
+        """An item's confirmation (P25): a human's line of this content, or an agent's line of this
+        content for this very topic, id and key — an agent's look never vouches elsewhere."""
+        return any(self._same(r, h) and (not self._agent(r) or self._own(r, tid, iid, key)) for r in self.confirms)
+
+    def confirmed_by(self, h, tid, iid, key):
+        """`human`, `agent` (only this item's own agent line) or None."""
+        if not h:
+            return None
+        if self.human_confirmed(h):
+            return "human"
+        return "agent" if self.confirmed_for(h, tid, iid, key) else None
+
+    def confirm_line(self, h, tid, iid, key):
+        """The line a PR row shows: this item's own lines first (a human's before an agent's), then
+        a human's line of the same content."""
+        own = [r for r in self.confirms if self._same(r, h) and self._own(r, tid, iid, key)]
+        own.sort(key=self._agent)
+        if own:
+            return own[0]
+        return next((r for r in self.confirms if self._same(r, h) and not self._agent(r)), None)
 
     def own_line(self, h, tid, sid, key):
         return next((r for r in self.logged(h) if (r.get("topic"), r.get("id"), r.get("key")) == (tid, sid, key)), None)
@@ -674,12 +718,12 @@ def _inherit(r, key, cap, code, reasons, asked_auto, h, led, tid, sid, now):
         return pending(r["waiting_since"] if was_pending else now), False
     if (r.get("capture") == "auto" and cap == "human" and asked_auto and reasons
             and set(reasons) <= set(CONFIG_REASONS) and r.get("sha") and fb
-            and fb == r["sha"] == r.get("confirmed_sha") and led.confirmed(h)):
+            and fb == r["sha"] == r.get("confirmed_sha") and led.confirmed_for(h, tid, sid, r.get("key"))):
         # 5b: a config change never throws away a screen a human confirmed
         return dict(base, capture="auto", note=None, status="ready", sha=fb, captured_at=r.get("captured_at"),
                     confirmed_sha=fb), False
     if (r.get("status") == "captured" and cap == "auto" and h and r.get("sha") and fb == r["sha"]
-            and led.own_line(h, tid, sid, key) and led.confirmed(h)):
+            and led.own_line(h, tid, sid, key) and led.confirmed_for(h, tid, sid, key)):
         # a confirm cut after its ledger line: still `captured` — confirm again completes it
         return dict(base, status="captured", sha=fb, captured_at=r.get("captured_at")
                     or led.own_line(h, tid, sid, key).get("at")), False
@@ -722,6 +766,11 @@ def plan(root, cfg, tid, check_only=False):
         cap, code, reasons = verdict(root, cfg, tid, st, s)
         h = file_hashes(root, s["file"])
         new, move = _inherit(r, key, cap, code, reasons, s.get("capture") == "auto", h, led, tid, s["id"], now)
+        if new.get("sha") and new.get("sha") == r.get("sha") and new.get("key") == r.get("key"):
+            # the same capture keeps its agent review and who confirmed it (11-ship-consent.md §2.2)
+            for k in ("reviewed", "review_note", "review_problem", "confirmed_by"):
+                if r.get(k) is not None and (k != "confirmed_by" or new["status"] == "ready"):
+                    new[k] = r[k]
         if new["status"] == "pending" and not r.get("sha") and retakes_for(st, s):
             move = True  # a retake cut off before its file moved (0.15.0)
         if move and h:
@@ -750,7 +799,8 @@ def hold_note(st):
     parts = []
     for sid, r in sorted((rec.get("shots") or {}).items(), key=lambda kv: int(kv[0][1:])):
         if r.get("status") == "captured":
-            parts.append("%s(confirm)" % sid)
+            kind = r.get("review_problem")
+            parts.append("%s(review:%s)" % (sid, kind) if kind in KINDS else "%s(confirm)" % sid)
             continue
         if r.get("status") != "pending":
             continue
@@ -797,11 +847,19 @@ def status(root, cfg, tid):
                       "mask": s.get("mask"), "alt": s.get("alt"),
                       "retake": ({"kind": rts[-1].get("kind"), "reason": rts[-1].get("reason")} if rts else None),
                       "capture": r.get("capture") or "human", "capture_note": r.get("note"),
-                      "captured_at": r.get("captured_at"), "shot_col": shot_col(root, s, r)})
+                      "captured_at": r.get("captured_at"), "shot_col": shot_col(root, s, r),
+                      "reviewed": bool(r.get("sha") and r.get("reviewed") == r.get("sha")),
+                      "review_note": r.get("review_note"), "review_problem": r.get("review_problem"),
+                      "confirmed_by": r.get("confirmed_by")})
     return {"inbox": inbox_rel(tid), "shots": items, "removed_bytes": removed_bytes(root, tid),
             "pending": [i["id"] for i in items if i["status"] == "pending"],
             "auto": [i["id"] for i in items if i["status"] == "pending" and i["capture"] == "auto"],
             "captured": [i["id"] for i in items if i["status"] == "captured"],
+            # 0.20.0: captures the agent review has not looked at yet, and those it confirmed (`--ship`)
+            "review": [i["id"] for i in items if i["status"] == "captured" and not i["reviewed"]
+                       and not i["review_problem"]],
+            "agent_confirmed": [{"id": i["id"], "note": i["review_note"]} for i in items
+                                if i["status"] == "ready" and i["confirmed_by"] == "agent"],
             "all_ready": bool(items) and all(i["status"] == "ready" for i in items),
             "awaiting": bool(rec.get("awaiting")), "resume_at_import": resume_at_import(root, cfg, st),
             "note": hold_note(st), "files": _recorded_files(st),
@@ -814,7 +872,10 @@ def shot_col(root, shot, r):
     capture itself — a file a human replaced shows `human`, without URL or time."""
     if r.get("capture") == "auto" and r.get("captured_at") and shot.get("file") and \
             blob(root, shot["file"]) == r.get("sha"):
-        return "auto %s %s" % (shot.get("url"), r["captured_at"])
+        col = "auto %s %s" % (shot.get("url"), r["captured_at"])
+        if r.get("confirmed_by") == "agent":  # 11-ship-consent.md §2.4
+            col += " · agent-reviewed (no human look): %s" % (r.get("review_note") or "")
+        return col
     return "human"
 
 
@@ -869,7 +930,7 @@ def _human_first(root, tid, r, s, led, inbox, names):
         p = os.path.join(inbox, n)
         if since is not None and os.path.getmtime(p) < since:
             continue
-        if led.unconfirmed(_inbox_hashes(root, inbox, n, s["file"])):
+        if led.unconfirmed_by_human(_inbox_hashes(root, inbox, n, s["file"])):
             continue
         r.update(capture="human", capture_lock="own", note="own")
         return True
@@ -893,7 +954,7 @@ def import_(root, cfg, tid):
         if r.get("status") == "captured":  # waits for a human's look: never a silent move or a replacement
             for n in [n for n in names if n.rsplit(".", 1)[0] == sid and not n.startswith(".")]:
                 own = led.own_line(_inbox_hashes(root, inbox, n, s["file"]), tid, sid, r.get("key"))
-                if own or led.unconfirmed(_inbox_hashes(root, inbox, n, s["file"])):
+                if own or led.unconfirmed_by_human(_inbox_hashes(root, inbox, n, s["file"])):
                     problems.append(_own_capture_text(sid, tid, own, "captured"))
                 else:
                     warnings.append("%s is an automatic capture waiting for confirmation — %s is not used; to use your "
@@ -946,7 +1007,8 @@ def import_(root, cfg, tid):
         except HeraldError as e:
             problems.append("%s: %s — %s" % (sid, name, e))
             continue
-        if led.unconfirmed(_bytes_hashes(root, s["file"], clean)):  # 07 §2.2: never as a human's file
+        # 07 §2.2: never as a human's file — an agent's confirmation does not make it one (11 §9 m4)
+        if led.unconfirmed_by_human(_bytes_hashes(root, s["file"], clean)):
             problems.append(_own_capture_text(sid, tid, False, "pending"))
             continue
         warnings += ["%s: %s" % (sid, w) for w in warn]
@@ -1319,16 +1381,21 @@ def _ids(ids):
     return list(dict.fromkeys(out))
 
 
-def confirm(root, cfg, tid, ids):
-    """A human looked at captured screenshots: the confirmation line first, then the state."""
+def confirm(root, cfg, tid, ids, agent=False):
+    """A human looked at captured screenshots: the confirmation line first, then the state.
+    `agent` (0.20.0, 11-ship-consent.md §2.2): in a `--ship` run the agent review stands in for
+    that look — only for captures it marked `--ok` as they are now, with no problem recorded."""
     from .store import load_state, save_state
     _human_only("confirm")
+    if agent:
+        _agent_allowed(root, tid)
     ids = _ids(ids)
     st = load_state(root, tid)
     rec = st.get("screenshots") or {}
     by_id = {s.get("id"): s for s in (load_manifest(root, tid) or {}).get("shots") or [] if isinstance(s, dict)}
     led = Ledger(root)
     led.check(len(ids))
+    problems = _problems_or_refuse(root) if agent else []
     todo = []
     for sid in ids:
         r, s = (rec.get("shots") or {}).get(sid), by_id.get(sid)
@@ -1343,15 +1410,151 @@ def confirm(root, cfg, tid, ids):
         if not led.own_line(h, tid, sid, r.get("key")):
             raise HeraldError("%s: no capture record on this machine — `HRD shot demote --topic %s --id %s` (with --own "
                               "or --retake-kind) so a human takes it" % (sid, tid, sid))
+        if agent:
+            if r.get("reviewed") != h[0]:
+                raise HeraldError("%s: the agent review has not passed this capture as it is now — `HRD shot review "
+                                  "--topic %s --id %s --ok` by a fresh review first" % (sid, tid, sid))
+            if _has_problem(problems, h):
+                raise HeraldError("%s: the agent review found a problem in this capture — a human looks at it "
+                                  "(`/hrd resume %s`)" % (sid, tid))
         todo.append((sid, r, h))
     at = now_iso()
     for sid, r, h in todo:
-        ledger_append(os.path.join(root, CONFIRMATIONS), {"topic": tid, "id": sid, "key": r["key"], "blob": h[0],
-                                                          "sha256": h[1], "at": at})
+        line = {"topic": tid, "id": sid, "key": r["key"], "blob": h[0], "sha256": h[1], "at": at}
+        if agent:
+            line.update(by="agent", note=(r.get("review_note") or "")[:300])
+        ledger_append(os.path.join(root, CONFIRMATIONS), line)
     for sid, r, h in todo:
         r.update(status="ready", confirmed_sha=r["sha"])
+        if agent:
+            r["confirmed_by"] = "agent"
+        else:
+            r.pop("confirmed_by", None)
     save_state(root, tid, st)
-    return {"confirmed": [t[0] for t in todo], "note": hold_note(st)}
+    return {"confirmed": [t[0] for t in todo], "by": "agent" if agent else "human", "note": hold_note(st)}
+
+
+def _agent_allowed(root, tid):
+    """`--agent` (11-ship-consent.md §2.2 1–2, §11 m3): never unattended, and only inside a
+    `--ship` run of this topic that is not `--attended`."""
+    from . import lock
+    if os.environ.get("HRD_UNATTENDED") == "1":
+        raise HeraldError("--agent is refused in unattended sessions")
+    if not lock.agent_ok(root, tid):
+        raise HeraldError("--agent needs a --ship run (the lock carries no ship mark for %s, or the run is "
+                          "--attended — a human looks then)" % tid)
+
+
+# --- the agent review of a capture (11-ship-consent.md §2.2, §9 R2-6, §10 m1, §11 m1) ------------
+
+def _problem_ok(rec):
+    return isinstance(rec, dict) and all(isinstance(rec.get(k), str) for k in PROBLEM_FIELDS) and \
+        all(rec.get(k) for k in ("topic", "id", "blob", "sha256", "kind", "at")) and rec.get("kind") in KINDS
+
+
+def _parse_problem(raw):
+    try:
+        rec = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return None
+    return rec if _problem_ok(rec) else None
+
+
+def read_problems(root):
+    """(records, damaged line numbers) of the problem ledger — its own reader: any line that is not
+    a whole record is damage, an unterminated last one too (a `--problem` cut off mid-write)."""
+    path = os.path.join(root, PROBLEMS)
+    if not os.path.isfile(path):
+        return [], []
+    with open(path, "rb") as f:
+        lines = f.read().split(b"\n")
+    last = lines.pop()
+    out, bad = [], []
+    for n, raw in enumerate(lines + ([last] if last.strip() else []), 1):
+        if not raw.strip():
+            continue
+        rec = _parse_problem(raw)
+        if rec is None:
+            bad.append(n)
+        else:
+            out.append(rec)
+    return out, bad
+
+
+def append_problem(root, rec):
+    """One line, fsynced, before the state — as `ledger_append`, the tail judged by this ledger's
+    own field check (a whole record without its newline is kept, anything else cut)."""
+    path = os.path.join(root, PROBLEMS)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    with os.fdopen(fd, "r+b") as f:
+        data = f.read()
+        if data and not data.endswith(b"\n"):
+            cut = data.rfind(b"\n") + 1
+            if _parse_problem(data[cut:]) is not None:
+                f.seek(0, 2)
+                f.write(b"\n")
+            else:
+                f.truncate(cut)
+        f.seek(0, 2)
+        f.write(json.dumps(rec, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _problems_or_refuse(root):
+    recs, bad = read_problems(root)
+    if bad:  # fail-closed (11 §10 m1): no agent pass while a problem line cannot be read
+        raise HeraldError("the review problem ledger (%s) has a damaged line (%s) — the agent may not pass a capture "
+                          "now; a human confirms (`HRD shot confirm` without --agent) or removes that line (a protected "
+                          "path: the guard asks)" % (PROBLEMS, ", ".join(map(str, bad))))
+    return recs
+
+
+def _has_problem(recs, h):
+    return any(r.get("blob") == h[0] or r.get("sha256") == h[1] for r in recs)
+
+
+def review(root, cfg, tid, sid, ok=False, problem=None, note=None):
+    """`HRD shot review` — the agent's look at an automatic capture in a `--ship` run (a fresh
+    illustrator in review mode): `--ok` marks the capture as it is now reviewed; `--problem
+    privacy|mismatch` records the problem in the protected ledger first (bound to the content, so
+    no agent passes it later), then in the state. State only — never a confirmation."""
+    from .store import load_state, save_state
+    if bool(ok) == bool(problem):
+        raise HeraldError("give exactly one of --ok and --problem privacy|mismatch")
+    if problem and problem not in KINDS:
+        raise HeraldError("--problem must be privacy or mismatch")
+    if not isinstance(note, str) or not note.strip():
+        raise HeraldError("--note says in one line what the reviewer saw (nothing that must not reach a PR)")
+    st = load_state(root, tid)
+    r = ((st.get("screenshots") or {}).get("shots") or {}).get(sid)
+    s = next((x for x in (load_manifest(root, tid) or {}).get("shots") or [] if isinstance(x, dict) and x.get("id") == sid),
+             None)
+    if not r or not s:
+        raise HeraldError("%s is not a planned screenshot" % sid)
+    if r.get("status") != "captured":
+        raise HeraldError("%s is not an automatic capture waiting for a look (status %s)" % (sid, r.get("status")))
+    h = file_hashes(root, s["file"])
+    led = Ledger(root)
+    led.check(1)
+    if not h or h[0] != r.get("sha") or not led.own_line(h, tid, sid, r.get("key")):
+        raise HeraldError("%s: %s is not the file `HRD shot capture` wrote — `HRD shot plan --topic %s` first"
+                          % (sid, s["file"], tid))
+    note = note.strip()[:300]
+    if ok:
+        if _has_problem(_problems_or_refuse(root), h):
+            raise HeraldError("%s: a review already found a problem in this capture — a human looks at it" % sid)
+        r.update(reviewed=h[0], review_note=note)
+        r.pop("review_problem", None)
+    else:
+        append_problem(root, {"topic": tid, "id": sid, "key": r.get("key") or "", "blob": h[0], "sha256": h[1],
+                              "kind": problem, "note": note, "at": now_iso()})
+        r.pop("reviewed", None)
+        r.update(review_note=note, review_problem=problem)
+    save_state(root, tid, st)
+    return {"reviewed": [sid] if ok else [], "problem": {"id": sid, "kind": problem} if problem else None,
+            "note": hold_note(st)}
 
 
 def _just_before(ts):
@@ -1395,7 +1598,7 @@ def demote(root, cfg, tid, ids, kind=None, reason=None, own=False):
             if len(cands) != 1:
                 raise HeraldError("%s: put exactly one file named %s.<ext> into %s first" % (sid, sid, inbox_rel(tid)))
             h = _inbox_hashes(root, inbox, cands[0], by_id[sid]["file"])
-            if led.unconfirmed(h):
+            if led.unconfirmed_by_human(h):
                 raise HeraldError(_own_capture_text(sid, tid, led.own_line(h, tid, sid, rec["shots"][sid].get("key")),
                                                     "captured"))
             since[sid] = _just_before(os.path.getmtime(os.path.join(inbox, cands[0])))

@@ -9,7 +9,7 @@ or redoes translations.
 ## A. One article (`/hrd translate <slug>`)
 
 1. `HRD lock acquire --cmd translate` (keep the token; `HRD lock release --cmd translate --token
-   <t>` on every exit path); base clean; `HRD sync`.
+   <t>` on every exit path; never `--ship` here — § C marks its own lock); base clean; `HRD sync`.
 2. `HRD translate check --slug <slug> [--lang <l,…>] [--adopt]` — the preconditions, in code: a
    published Herald article (an external article has no research to verify a translation
    against → suggest `/hrd refresh <slug> --for-translation` and stop — that refresh can only
@@ -37,7 +37,9 @@ defect with no refresh since). Show the list; attended → ask which to queue; t
 
 ## C. Run a tr- topic (`/hrd translate --resume <id>` — also what `batch`, `next`, `write` and `resume` route a `tr-` id to)
 
-Preflight as `write.md` §0 (`HRD lock acquire --cmd write` — inherited from the batch runner
+Preflight as `write.md` §0 (`HRD lock acquire --cmd write` — with `--ship`: `--ship --topic <id>`
+(and `--attended` when given); `--token <t>` when `write`/`resume` routed a `tr-` id here, which
+nests and keeps their mark; inherited from the batch runner
 when unattended; `HRD lock release --cmd write --token <t>` on every exit path; base clean; `HRD sync`; `HRD ahead`; budget baseline). Unattended runs never write
 base: every stop is `HRD result`.
 
@@ -72,7 +74,7 @@ base: every stop is `HRD result`.
    `HRD loopback` refuses every other cause on a `tr-` topic.
 6. Publish (`atoms/_stages.md` § publish: `git add` only `<w>` and the topic's translation files;
    `HRD scope` refuses the source) and, with `--ship` or `autonomy.publish: auto`, ship as
-   `write.md` §3 (approval, `--consent` and `--session-auto` exactly as there). The PR is
+   `write.md` §3 (approval, `--consent`, `--session-auto` and the `--ship` pass exactly as there). The PR is
    excluded from auto publish as `translated` unless `translations.auto_publish`.
 
 After ship the `tr-` topic is the slug's reference topic; the ledger line and `published.json`

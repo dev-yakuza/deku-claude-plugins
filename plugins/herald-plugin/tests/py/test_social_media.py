@@ -1168,7 +1168,9 @@ class StructureTests(unittest.TestCase):
         mk = json.load(open(os.path.join(plugin, "..", "..", ".claude-plugin", "marketplace.json")))
         import hrd
         herald = next(p for p in mk["plugins"] if p["name"] == pj["name"])
-        self.assertEqual({pj["version"], herald["version"], hrd.SCRIPTS_VERSION}, {"0.19.0"})
+        versions = {pj["version"], herald["version"], hrd.SCRIPTS_VERSION}
+        self.assertEqual(len(versions), 1)  # one version everywhere, 0.19.0 (SNS formats) or later
+        self.assertGreaterEqual(tuple(map(int, versions.pop().split("."))), (0, 19, 0))
         skill = os.path.join(plugin, "skills", "hrd")
         text = open(os.path.join(skill, "commands", "social.md")).read()
         for want in ("HRD social media --draft", "--stage panels", "--format", "media-stale", "setting-confirmed"):

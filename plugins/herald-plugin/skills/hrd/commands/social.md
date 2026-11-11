@@ -178,7 +178,9 @@ After the common start:
 2. Spawn **distributor** with: `run`, `kind`, `slug`, `lang`, the draft paths (`drafts` — one file
    each), `limits`, `disclosure`, `daily_service_allowed`, the read list (`read`), the theme
    (`--theme`, daily), and the language line (`atoms/_contract.md` §D). A format other than
-   `text` adds `format`, `media_paths` (one spec per draft), `materials`, `gen_size` or
+   `text` adds `format`, `media_paths` (one spec per draft), `materials` (a scene marked
+   `agent_reviewed` was confirmed by a `--ship` run's agent review, not a human — say so when the
+   human picks a post that uses it), `gen_size` or
    `panel_size`, `ai_disclosure`, `appearance` and `handles`.
 2a. **Pictures** (format ≠ `text`), per draft: `HRD social media --draft <draft>` with the Bash
    timeout `(wait + 60) × 1000` ms (`--wait` default 240). Never run `lmn` yourself — Herald calls

@@ -63,12 +63,13 @@ Detect once per command: `printenv HRD_UNATTENDED` → `1` = unattended. The edi
 | auditor `BLOCKER` | dismiss only after the human confirms | **never dismiss** — fix or hold `needs-human` (`defect:`) |
 | verify gap, nothing contradicted, 1–3 unsupported (`_stages.md` § verify) | ask: trim / loop back / hold | trim once (delete or map only; code-checked), then loop back |
 | stagnation / loop cap / budget | stop and report (budget: warn only) | hold `stagnation` / `budget` |
-| screenshots still to take (`atoms/_screenshots.md` §2), external images to confirm (`atoms/_images.md` §2) | show the capture guide / image list and wait | hold `screenshots` (in-session auto too — no question) |
+| screenshots still to take (`atoms/_screenshots.md` §2), external images to confirm (`atoms/_images.md` §2) | show the capture guide / image list and wait | hold `screenshots` (in-session auto too — no question; a `--ship` run first lets a fresh agent review stand in, `atoms/_images.md` §2a) |
 
 **Decision log**: every judgment between brief and critique goes into
 `work/<id>/critique.json` → `decision_log: [{"kind", "note"}]` with `kind ∈ {routine,
-dismissal, assumption, deferral, human}` (`human`: a human's decision on a last-round BLOCKER,
-with its `id` — `atoms/_stages.md` § critique 3). verify and publish make no judgments — they
+dismissal, assumption, deferral, human, agent}` (`human`: a human's decision on a last-round BLOCKER,
+with its `id` — `atoms/_stages.md` § critique 3; `agent`: a place a `--ship` run's agent review
+left out, `image:<id>` — no exclusion reason, listed in the PR body and the ship report). verify and publish make no judgments — they
 only hold — except the trim (§F), recorded in `state.json` `trim` and excluding the PR from
 auto publish as `trimmed`, and the fact-checker's framings (`verify.json` `framings`: sentences
 treated as the article's own example), excluding it as `framed`. Both are accepted by
@@ -93,7 +94,13 @@ gate follows the Unattended column above. Any other step that would ask (a `newe
 it never guesses. Publishing is
 the PR, then `/hrd ship` — or `ship --session-auto` right away when `autonomy.publish` is
 `auto`, or when the human asked for this article to be published (`write --ship`,
-`resume --ship`, `/hrd next`).
+`resume --ship`, `/hrd next`). **`--ship`** (0.20.0) is that request and nothing less: the run
+publishes with no human look — a fresh agent review confirms images and automatic screenshots
+(`atoms/_images.md` §2a), the exclusions accept screenshots and external images, and the guard
+lets the verified merge and the deploy through. The flag's only proof is the checkout lock's mark
+(`HRD lock acquire --ship --topic <id>`), so it is added **only when the human wrote it** for this
+command (or ran `/hrd next`) — never to get past a hold or a question. Defects still stop the
+article at its PR (blocking exclusions, holds, the throttle).
 
 Unattended children never write the base branch: they record their outcome with
 `HRD result --topic <id> --status pr-open --pr <n>` or `--status held:<reason> --note "..."`

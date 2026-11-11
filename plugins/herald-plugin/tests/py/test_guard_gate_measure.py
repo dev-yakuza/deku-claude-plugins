@@ -252,7 +252,11 @@ class GuardCase(RepoCase):
 
     def test_uninitialized_repo_is_ignored(self):
         os.remove(os.path.join(self.root, ".claude/herald/config.json"))
-        self.assertEqual(self.guard("Bash", {"command": "gh pr merge 1"}), "allow")
+        self.assertEqual(self.guard("Bash", {"command": "git push origin main"}), "allow")
+        # 0.20.0 (11-ship-consent.md §10 m4): settings no longer ask before a merge — the guard does,
+        # even without a config (attended); unattended stays as before
+        self.assertEqual(self.guard("Bash", {"command": "gh pr merge 1"}), "ask")
+        self.assertEqual(self.guard("Bash", {"command": "gh pr merge 1"}, {"HRD_UNATTENDED": "1"}), "allow")
 
 
 class GateCase(RepoCase):

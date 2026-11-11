@@ -22,7 +22,7 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.19.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.20.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -65,8 +65,17 @@ def attended_only(what):
 
 def cmd_lock(a):
     root = repo_root()
+    if a.action != "acquire" and (a.ship or a.attended):
+        raise HeraldError("--ship and --attended go with `lock acquire`")
+    if a.action != "ship-pass" and (a.pr is not None or a.rev or a.sha or a.clear):
+        raise HeraldError("--pr/--rev/--sha/--clear go with `lock ship-pass`")
     if a.action == "acquire":
-        emit({"token": lock.acquire(root, a.cmd, token=a.token)})
+        tok = lock.acquire(root, a.cmd, token=a.token, ship=a.ship, topic=a.topic, attended=a.attended)
+        cur = lock.status(root) or {}
+        # a nested acquire keeps the outer command's mark: say which one this run has
+        emit({"token": tok, "ship": cur.get("ship") is True, "topic": cur.get("topic")})
+    elif a.action == "ship-pass":
+        emit(_ship_pass(root, a))
     elif a.action == "release":
         emit({"released": lock.release(root, a.token, command=a.cmd if a.cmd != "cli" else None)})
     elif a.action == "status":
@@ -74,6 +83,48 @@ def cmd_lock(a):
         emit({"lock": cur, "waiting": lock.waiting(root, cur)})
     elif a.action == "unlock":
         emit({"removed": lock.force_unlock(root)})
+
+
+def _ship_pass(root, a):
+    """`HRD lock ship-pass` (design/herald/11-ship-consent.md §2.5, §9 R2-4, §10 R3-1/m2): right
+    before `gh pr merge` in a `--ship` run, the pass the guard needs to let that very merge — and
+    then the deploy — through without asking. Every check is made here, at the PR head; any
+    refusal leaves the merge to the guard's question (0.19.0)."""
+    if a.clear:
+        if a.topic or a.pr is not None or a.rev or a.sha:
+            raise HeraldError("--clear takes nothing else")
+        lock.clear_pass(root)
+        return {"cleared": True}
+    attended_only("`lock ship-pass`")
+    if not (a.topic and a.pr is not None and a.rev and a.sha):
+        raise HeraldError("lock ship-pass needs --topic, --pr, --rev and --sha (or --clear)")
+    cur = lock.status(root) or {}
+    if not lock.ship_active(root, a.topic, cur):
+        raise HeraldError("no pass: the lock carries no ship mark for %s (not a `--ship` run of this topic) — the "
+                          "guard asks for the merge" % a.topic)
+    head = git(root, "rev-parse", "-q", "--verify", "%s^{commit}" % a.rev, check=False).strip()
+    if not head or head.lower() != a.sha.strip().lower():
+        raise HeraldError("%s is not the verified head %s — no pass" % (a.rev, a.sha))
+    from hrdlib.util import gh_json
+    try:
+        pr = gh_json(root, "pr", "view", str(a.pr), "--json", "headRefName")
+    except Exception as e:  # noqa: BLE001 — no answer from GitHub: no pass, the guard asks (11 §4 Q2)
+        raise HeraldError("cannot read PR #%s's head branch (%s) — no pass" % (a.pr, str(e).strip()[:200]))
+    parsed = store.parse_branch((pr or {}).get("headRefName") if isinstance(pr, dict) else None)
+    if not parsed or parsed[0] != a.topic:
+        raise HeraldError("PR #%s is not %s's herald branch — no pass" % (a.pr, a.topic))
+    if not cur.get("attended"):  # attended session-auto stamps nothing: a human approved the body
+        t = store.get_topic(store.load_topics(root), a.topic)
+        if str(t.get("auto_merged_pr")) != str(a.pr):
+            raise HeraldError("%s carries no auto-merge stamp for PR #%s (`HRD auto-merged` first) — no pass"
+                              % (a.topic, a.pr))
+    cfg = Config.load(root)
+    reasons = store.exclusion_reasons(root, cfg, a.topic, a.rev, vouch=True)
+    blocking = store.blocking_exclusions(reasons, consent=True, strong=True)
+    if blocking:
+        raise HeraldError("no pass: excluded at the PR head (%s)" % ", ".join(blocking))
+    rec = lock.write_pass(root, cur["token"], a.topic, a.pr, head.lower())
+    return {"pass": {k: rec[k] for k in ("topic", "pr", "sha", "at")}, "accepted": reasons}
 
 
 # --- topics -----------------------------------------------------------------------------------
@@ -562,9 +613,47 @@ def cmd_config_check(a):
     # harness (design/herald/07-auto-capture.md §2.7) — it does not change `ok`
     out = {"ok": not errors, "errors": errors, "warnings": warnings, "capture_errors": shots.capture_errors(cfg)}
     out.update(images.config_errors(root, cfg))  # each turns its own image kind off (08-images.md §2.14.1)
+    out["settings_warnings"] = settings_warnings(root, cfg)  # never changes `ok` (11-ship-consent.md §2.6)
     emit(out)
     if errors:
         sys.exit(1)
+
+
+MERGE_ASK = "Bash(gh pr merge:*)"
+
+
+def _rule_hits(rule, cmd):
+    """A settings `Bash(…)` rule that would match `cmd` (prefix `…:*`, exact, or bare `Bash`)."""
+    if rule == "Bash":
+        return True
+    if not (isinstance(rule, str) and rule.startswith("Bash(") and rule.endswith(")")):
+        return False
+    body = rule[5:-1]
+    return cmd.startswith(body[:-2]) if body.endswith(":*") else cmd == body
+
+
+def settings_warnings(root, cfg):
+    """Ask rules a PreToolUse `allow` cannot pass, so a `--ship` run would still be asked: the
+    0.19.0 template's merge rule (`/hrd update` offers to remove it) and a rule for the deploy
+    command — in settings.json and settings.local.json, every time (never remembered)."""
+    out = []
+    deploy = (cfg.get("commands", "deploy") or "").strip()
+    for name in ("settings.json", "settings.local.json"):
+        rel = ".claude/%s" % name
+        try:
+            data = read_json(os.path.join(root, rel))
+        except ValueError:
+            out.append("%s is not JSON — its ask rules cannot be checked" % rel)
+            continue
+        perms = data.get("permissions") if isinstance(data, dict) else None
+        ask = perms.get("ask") if isinstance(perms, dict) else None
+        ask = ask if isinstance(ask, list) else []
+        if MERGE_ASK in ask:
+            out.append("%s asks before `gh pr merge` (%s): a `--ship` run's merge is still asked once — `/hrd "
+                       "update` offers to remove it (the guard asks for every other merge)" % (rel, MERGE_ASK))
+        if deploy and any(r != MERGE_ASK and _rule_hits(r, deploy) for r in ask):
+            out.append("%s has an ask rule matching the deploy command: a `--ship` run's deploy is still asked" % rel)
+    return out
 
 
 def cmd_audit_round(a):
@@ -1043,7 +1132,8 @@ def cmd_record_published(a):
     root, cfg = ctx()
     attended_only("`record-published`")
     art = store.record_published(root, cfg, a.topic, a.slug, pr=a.pr, auto=a.auto)
-    out = {"published": a.slug, "human_reviewed": art.get("human_reviewed")}
+    out = {"published": a.slug, "human_reviewed": art.get("human_reviewed"),
+           "agent_confirmed": art.get("agent_confirmed") or []}
     if cfg.translations():
         # per published entry: ship §9 records human-edit signals with each one's own value
         out["entries"] = {}
@@ -1069,8 +1159,10 @@ def cmd_auto_merged(a):
         if git(root, "rev-parse", a.rev).strip() != a.sha.strip():
             raise HeraldError("%s is not the verified head %s — fetch the PR again" % (a.rev, a.sha))
         cfg = Config.load(root)
-        reasons = store.exclusion_reasons(root, cfg, a.topic, a.rev)
-        blocking = store.blocking_exclusions(reasons, consent=a.consent)
+        # strong consent comes from the lock's ship mark for this topic, never from the caller (11 §2.4)
+        strong = bool(a.consent) and lock.ship_active(root, a.topic)
+        reasons = store.exclusion_reasons(root, cfg, a.topic, a.rev, vouch=strong)
+        blocking = store.blocking_exclusions(reasons, consent=a.consent, strong=strong)
         if blocking:
             raise HeraldError("refusing to stamp an auto merge: excluded (%s)" % ", ".join(blocking))
         accepted = reasons
@@ -1124,10 +1216,14 @@ def cmd_shot(a):
     public pages a human confirms (07-auto-capture.md)."""
     root, cfg = ctx()
     if a.action in ("plan", "status", "import", "decide", "squash", "archive", "capture", "confirm",
-                    "demote") and not a.topic:
+                    "demote", "review") and not a.topic:
         raise HeraldError("shot %s needs --topic" % a.action)
     if a.action != "demote" and (a.own or a.retake_kind):
         raise HeraldError("--own and --retake-kind apply only to `shot demote`")
+    if a.agent and a.action != "confirm":
+        raise HeraldError("--agent applies only to `shot confirm`")
+    if a.action != "review" and (a.ok or a.problem or a.note):
+        raise HeraldError("--ok, --problem and --note apply only to `shot review`")
     if a.action == "plan":
         emit(shots.plan(root, cfg, a.topic, check_only=a.check))
     elif a.action == "status":
@@ -1157,7 +1253,11 @@ def cmd_shot(a):
     elif a.action == "capture":
         emit(shots.capture(root, cfg, a.topic))
     elif a.action == "confirm":  # a human looked at the captures (refused unattended; the guard asks)
-        emit(shots.confirm(root, cfg, a.topic, a.id))
+        emit(shots.confirm(root, cfg, a.topic, a.id, agent=a.agent))  # --agent: a `--ship` run's review
+    elif a.action == "review":  # the agent's look in a `--ship` run — state and the problem ledger only
+        if not a.id or "," in a.id:
+            raise HeraldError("shot review takes one --id")
+        emit(shots.review(root, cfg, a.topic, a.id, ok=a.ok, problem=a.problem, note=a.note))
     elif a.action == "demote":
         emit(shots.demote(root, cfg, a.topic, a.id, kind=a.retake_kind, reason=a.reason, own=a.own))
     elif a.action == "trial":
@@ -1175,6 +1275,8 @@ def cmd_image(a):
     root, cfg = ctx()
     if a.action not in ("kinds", "doctor", "og") and not a.topic and not (a.action == "generate" and a.trial):
         raise HeraldError("image %s needs --topic" % a.action)
+    if a.agent and a.action not in ("confirm", "reject"):
+        raise HeraldError("--agent applies only to `image confirm` and `image reject`")
     if a.action == "kinds":
         emit(images.kinds(root, cfg, a.topic))
     elif a.action == "doctor":
@@ -1222,12 +1324,12 @@ def cmd_image(a):
             raise HeraldError("image review takes one --id")
         emit(images.review(root, cfg, a.topic, a.id, ok=a.ok, redo=a.redo, note=a.note))
     elif a.action == "confirm":  # a human looked at the images (refused unattended; the guard asks)
-        emit(images.confirm(root, cfg, a.topic, a.id))
+        emit(images.confirm(root, cfg, a.topic, a.id, agent=a.agent))  # --agent: a `--ship` run's review
     elif a.action == "reject":
         if not a.id or "," in a.id:
             raise HeraldError("image reject takes one --id")
         emit(images.reject(root, cfg, a.topic, a.id, reason=a.reason, drop=a.drop, refetch=a.refetch,
-                           regenerate=a.regenerate))
+                           regenerate=a.regenerate, agent=a.agent))
     elif a.action == "status":
         emit(images.status(root, cfg, a.topic, rev=a.rev))
 
@@ -1344,10 +1446,11 @@ def cmd_evolve_mark(a):
 
 def cmd_auto_exclusion(a):
     root, cfg = ctx()
-    reasons = store.exclusion_reasons(root, cfg, a.topic, a.rev)
-    blocking = store.blocking_exclusions(reasons, consent=a.consent)
+    strong = bool(a.consent) and lock.ship_active(root, a.topic)  # 11-ship-consent.md §2.4
+    reasons = store.exclusion_reasons(root, cfg, a.topic, a.rev, vouch=strong)
+    blocking = store.blocking_exclusions(reasons, consent=a.consent, strong=strong)
     emit({"reasons": reasons, "blocking": blocking,
-          "accepted": [r for r in reasons if r not in blocking]})
+          "accepted": [r for r in reasons if r not in blocking], "strong": strong})
 
 
 def cmd_trim(a):
@@ -1364,8 +1467,14 @@ def build():
     ap = argparse.ArgumentParser(allow_abbrev=False, prog="hrd.py")
     sp = ap.add_subparsers(dest="group", required=True)
 
-    p = sp.add_parser("lock"); p.add_argument("action", choices=["acquire", "release", "status", "unlock"])
-    p.add_argument("--cmd", default="cli"); p.add_argument("--token"); p.set_defaults(fn=cmd_lock)
+    p = sp.add_parser("lock"); p.add_argument("action", choices=["acquire", "release", "status", "unlock", "ship-pass"])
+    p.add_argument("--cmd", default="cli"); p.add_argument("--token")
+    p.add_argument("--ship", action="store_true", help="acquire: this run publishes without a human's look (11 §2.1)")
+    p.add_argument("--attended", action="store_true", help="acquire: the run asks at every gate")
+    p.add_argument("--topic", help="acquire --ship / ship-pass: the topic the mark is bound to")
+    p.add_argument("--pr", type=int); p.add_argument("--rev"); p.add_argument("--sha")
+    p.add_argument("--clear", action="store_true", help="ship-pass: drop the pass (after deploy)")
+    p.set_defaults(fn=cmd_lock)
 
     p = sp.add_parser("topics"); p.add_argument("action", choices=["add", "list", "show"])
     p.add_argument("--file"); p.add_argument("--state"); p.add_argument("--topic"); p.set_defaults(fn=cmd_topics)
@@ -1398,7 +1507,7 @@ def build():
     p.set_defaults(fn=cmd_loopback)
     p = sp.add_parser("shot"); p.add_argument("action", choices=["plan", "status", "import", "decide", "scan", "strip",
                                                                 "squash", "archive", "capture", "confirm", "demote",
-                                                                "trial", "audit"])
+                                                                "trial", "audit", "review"])
     p.add_argument("--topic"); p.add_argument("--check", action="store_true", help="plan: check only, write nothing")
     p.add_argument("--id", help="decide: one id; confirm/demote: ids, comma-separated")
     p.add_argument("--without", action="store_true")
@@ -1406,6 +1515,9 @@ def build():
     p.add_argument("--retake-kind", choices=list(shots.KINDS), help="demote: take it again (privacy|mismatch)")
     p.add_argument("--reason", help="demote: what to change — no secret values (300 characters)")
     p.add_argument("--slug"); p.add_argument("--path")
+    p.add_argument("--agent", action="store_true", help="confirm: the agent review of a `--ship` run (11 §2.2)")
+    p.add_argument("--ok", action="store_true"); p.add_argument("--problem", choices=list(shots.KINDS))
+    p.add_argument("--note", help="review: one line — what the reviewer saw (300 characters)")
     p.set_defaults(fn=cmd_shot)
     p = sp.add_parser("image"); p.add_argument("action", choices=["kinds", "doctor", "texts", "render", "fetch", "snippet",
                                                                  "plan", "og", "generate", "cancel", "review",
@@ -1425,6 +1537,7 @@ def build():
     p.add_argument("--ok", action="store_true"); p.add_argument("--redo", action="store_true")
     p.add_argument("--note", help="review: one line — what the reviewer saw")
     p.add_argument("--rev"); p.add_argument("--command", help="doctor: limner's argv (one string) before config has one")
+    p.add_argument("--agent", action="store_true", help="confirm/reject: the agent review of a `--ship` run (11 §2.2)")
     p.set_defaults(fn=cmd_image)
     p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)
     p = sp.add_parser("remap"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_remap)

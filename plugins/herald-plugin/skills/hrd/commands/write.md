@@ -2,8 +2,11 @@
 
 brief → research → draft → critique → translation (topics with translation languages) → verify →
 publish (PR). Publishing itself is `/hrd ship`;
-`--ship` (also what `/hrd next` runs) ships the PR right away (§3).
+`--ship` (also what `/hrd next` runs) ships the PR right away, with no human look at all (§3).
 Rules: `atoms/_contract.md`, `atoms/_stages.md`.
+
+`--ship` is the human's consent for this one article: add it **only** when the human wrote it in
+this command (or ran `/hrd next`) — never on your own, never to get past a question or a hold.
 
 ## 0. Preflight (each its own call)
 
@@ -11,9 +14,12 @@ Rules: `atoms/_contract.md`, `atoms/_stages.md`.
    (asks at every gate, session approval before the PR); else **in-session auto**, the default
    (`atoms/_contract.md` §C — no questions until the PR; `--auto` is accepted and means the
    same).
-2. `HRD lock acquire --cmd write` → keep the token (unattended: inherits `HRD_LOCK_TOKEN`).
-   Release with `HRD lock release --token <t>` on every exit path below (an inherited batch
-   lock is left to the runner — release is then a no-op).
+2. `HRD lock acquire --cmd write` → keep the token (unattended: inherits `HRD_LOCK_TOKEN`); with
+   `--ship`: `HRD lock acquire --cmd write --ship --topic <id>` (plus `--attended` when given) — the
+   lock then carries the ship mark the image confirmations, the exclusions and the guard's merge
+   and deploy pass read (refused unattended). Release with `HRD lock release --token <t>` on every
+   exit path below (an inherited batch lock is left to the runner — release is then a no-op;
+   releasing ends the mark).
 3. `git status --porcelain --untracked-files=no` must be empty; `git switch <base>`;
    `HRD sync` (fetch + merge origin; a conflict stops; unattended: fast-forward only).
 4. `HRD ahead` — any `needs_human` commit: attended or in-session auto (a pre-flow question) →
@@ -24,7 +30,8 @@ Rules: `atoms/_contract.md`, `atoms/_stages.md`.
    (roles read the harness from the herald branch = `origin/<base>`).
 6. `HRD select --topic <id>` must list the topic (queued, no open/merged PR, no local
    branch). An existing local branch means `resume`, not `write`. A `tr-` id (a later
-   translation) has no brief or draft: run `translate.md` § C for it instead (same flags).
+   translation) has no brief or draft: run `translate.md` § C for it instead (same flags, and
+   this command's token — its acquire nests and keeps the mark).
 7. Budget: `config.budget.per_article_usd` (0 = none). Run `python3
    .claude/herald/scripts/measure.py` now and keep its `total_usd` as the baseline and its
    `session` id (the session may already have spent on other work); at each stage end run
@@ -77,9 +84,13 @@ with this token): the interactive auto path covers only the PR this session
 just created — step 4 (per-PR question) is skipped, the auto-exclusion rules and the daily
 throttle apply (ship checks `HRD auto-exclusion` — with `--ship`, `--consent`: asking for
 this publish accepts the agents' logged decisions, a trim, framings and Herald-made images, so only its
-`blocking` list excludes — screenshots and external images (`external-images`) are never accepted this way, a human sees them in
-`/hrd ship`; excluded → stay PR-pending and say why), and the guard's
-merge/deploy confirmations remain.
+`blocking` list excludes; and since the lock carries the ship mark, also screenshots and external
+images (`external-images`), which the agent review confirmed in draft (`atoms/_images.md` §2a) —
+never a file in the PR nobody vouched for (`images-unconfirmed`); excluded → stay PR-pending and
+say why). Without `--ship` (`autonomy.publish: auto` alone) the guard's merge/deploy confirmations
+remain; with it, `ship` §6 writes the pass (`HRD lock ship-pass`) that lets the guard through for
+the verified merge and the deploy — nothing is asked. A blocking exclusion, a hold (a screenshot a
+human must take, a capture the review flagged) or the throttle still stops it at the PR.
 
 ## 4. Unattended specifics
 

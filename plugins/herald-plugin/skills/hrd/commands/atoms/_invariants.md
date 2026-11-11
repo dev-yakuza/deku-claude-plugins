@@ -18,6 +18,9 @@ The charter's priority order is never an `evolve` proposal target; only a human 
 auto-generated rules start as drafts; unattended runs never dismiss an auditor `BLOCKER`.
 *Mechanically*: guard `ask` (attended) / `deny` (unattended) on `gh pr merge` and the deploy
 command; `autonomy.publish: auto` merges only PRs in `HRD_AUTO_PRS` with `--match-head-commit`.
+A human's `--ship` (or `/hrd next`) is that approval for one article: its lock mark and a pass
+`HRD lock ship-pass` writes after re-checking the PR head let exactly the verified merge and the
+configured deploy through (0.20.0).
 
 **INV2 — nothing weakens verification.**
 Changes that loosen fact-check rules, critique criteria, exemplars (replacing is allowed,

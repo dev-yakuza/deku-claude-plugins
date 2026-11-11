@@ -42,6 +42,13 @@ only. Ported from Guild `update.md`.
 4. **Settings/gitignore/labels**: re-merge `templates/settings.json.tmpl` (key union), the
    gitignore block — the whole block is brought in line: an existing `# >>> herald` block gets the
    lines it lacks (e.g. `.limner/`, 0.17.0) inside it, nothing else changes — and create missing labels.
+   **Merge ask rule** (0.20.0): a key union never removes anything, so when `.claude/settings.json`
+   `permissions.ask` holds exactly `"Bash(gh pr merge:*)"` (the 0.19.0 template's rule), show the
+   diff that removes that one entry — nothing else — and apply it on approval (guard wiring: the
+   guard asks too). Say why: the guard asks before every merge itself, the same as before, and the
+   rule would also stop a `--ship` run's verified merge (a hook's `allow` cannot pass an ask rule).
+   Declined → say a `--ship` run's merge will ask once; not remembered (`HRD config-check`
+   `settings_warnings` says it every time, for `settings.local.json` too).
    **Images** (0.17.0): never added by `update` (INV4) — a repo without an `images` block behaves
    as 0.16.0. Say once at the end: "image expansion (diagrams, external images, the OG card) is
    turned on with `/hrd config images`". **Scene images** (0.18.0): never turned on by `update`

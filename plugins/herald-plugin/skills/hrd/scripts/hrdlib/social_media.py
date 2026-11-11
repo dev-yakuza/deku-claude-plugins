@@ -224,6 +224,8 @@ def materials(root, cfg, slug, gen_ok, scenes_ok=True):
                 h = images._rev_hashes(root, "HEAD", p)
                 if h and h[0] == it["sha"]:
                     add(p, "scene", h)
+                    if it.get("confirmed_by") == "agent" and p in seen:  # a `--ship` run's (11 §2.4)
+                        seen[p]["agent_reviewed"] = True
     if gen_ok:
         out.append({"path": "gen", "kind": "gen", "blob": None, "sha256": None})
     return out
