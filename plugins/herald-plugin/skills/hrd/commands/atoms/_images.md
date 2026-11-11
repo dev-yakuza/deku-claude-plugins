@@ -114,8 +114,9 @@ straight to the tooling hold of `atoms/_stages.md` § Holds, note `tooling: imag
    yet: spawn the illustrator once for **that only** (read list: the article, `images.json`, the
    `HRD image snippet` output of those ids; task: replace those references with the snippet,
    touch nothing else) — not a loopback — then go on from step 2.
-4a. **Scenes** (`<w>images.json` has a `kind: scene` item): on entering this step (from step 1 —
-   not on a repeat), `HRD image generate --topic <id> --reset-wait`. Then `HRD image generate
+4a. **Scenes** (`<w>images.json` has a `kind: scene` item): every time the collect step is entered
+   — from step 1, or at step 3 on a resume — first `HRD image generate --topic <id> --reset-wait`
+   (never when repeating 4a). Then `HRD image generate
    --topic <id> --wait 240` with the Bash `timeout` at `(wait + 60) × 1000` ms. By `state`:
    - `done` → 4b.
    - `running` → the same command again, until `waited_s` passes `images.scenes.wait_minutes` ×
@@ -129,7 +130,9 @@ straight to the tooling hold of `atoms/_stages.md` § Holds, note `tooling: imag
    - `off` (this machine cannot generate — `why`, e.g. `generate:env` "`lmn setup`") → hold
      `needs-human`, note `tooling: limner unavailable (<why>)`. **Never drop the scene** — a human
      resumes on a machine that can, or decides to go without it (`reject --drop`).
-   `regenerated` ids were drawn again because limner was updated: say so at the confirmation.
+   `regenerated` ids (and `HRD image status` items with `regenerated: true`) were drawn again
+   because limner itself was updated — the same prompt, seed and size: say so at the confirmation.
+   A picture made again after a redo or reject is never `regenerated`.
 4b. **Scene review**: `HRD image status --topic <id>` `pending.review` not empty → spawn the
    illustrator in review mode once (§1; read list: those files, each item's `alt`, `purpose`,
    `prompt`, the paragraph it serves) — not a loopback. Any `redo` → from step 2 again.
@@ -148,7 +151,7 @@ straight to the tooling hold of `atoms/_stages.md` § Holds, note `tooling: imag
      "quotation", and the attribution text from `snippets`; for a quotation also the conditions
      (§4) and "I checked these conditions"; per **scene** the file path, `alt`, `purpose`, the
      prompt (without style and the fixed no-text sentence), the review line, the body text with
-     the label, "drawn again after a limner update" when `regenerated`, and the checks: no letters
+     the label, "drawn again after a limner update" when the item's `regenerated` is true, and the checks: no letters
      or logo-like marks, nothing that looks like a real person, place, brand or work, it fits the
      paragraph. Ask (`AskUserQuestion`) with the 0.16.0 choices plus:
      "I checked the external images / scenes" (pick ids) → `HRD image confirm --topic <id> --id

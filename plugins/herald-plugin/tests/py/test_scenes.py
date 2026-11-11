@@ -287,10 +287,11 @@ class GenerateTests(SceneCase):
             rid = out["run_id"]
             out = self.gen()
             self.assertEqual((out["run_id"], [x["id"] for x in out["generated"]], out["skipped"]), (rid, ["g2"], ["g1"]))
-            out = self.gen()  # the run ends; then `run` reports attempt null
-            self.assertEqual(out["state"], "done")
-            out = self.gen()
-        self.assertEqual((out["state"], out["run_id"]), ("done", rid))
+            out = self.gen()  # the run ends
+            self.assertEqual((out["state"], out["run_id"]), ("done", rid))
+            n = len(self.calls())
+            out = self.gen()  # nothing left to make, no run going: no limner call at all
+        self.assertEqual((out["state"], self.calls()[n:]), ("done", []))
         self.assertEqual(self.gcalls("cancel"), [])
         self.assertEqual(sorted(x["id"] for x in self.gen_lines()), ["g1", "g2"])  # R2-1: one line each
         self.assertEqual(images.status(self.root, self.cfg, TID)["items"][0]["attempts"], 1)
@@ -779,7 +780,7 @@ class PublishTests(SceneCase):
         self.assertIn("| g1 | scene (AI-generated) | %s/g1-counter.png | qwen-image-edit-2511-q4 seed 41 · "
                       "landscape · confirmed " % IMG, rows)
         self.assertIn("<details><summary>Scene prompts</summary>", rows)
-        self.assertIn("- g1: %s" % P1, rows)
+        self.assertIn("- g1: `%s`" % P1, rows)
         self.assertNotIn(images.NO_TEXT, rows)
         self.assertIn("Apache-2.0", rows)
         # an unconfirmed committed picture is refused at publish
@@ -918,6 +919,213 @@ class ReapTests(SceneCase):
             for p in (owner, child):
                 if p.poll() is None:
                     p.kill()
+
+
+class ReviewRound1Tests(SceneCase):
+    """REVIEW-20 round 1: ended old runs, mixed results, `regenerated`, confirmation mid-run,
+    the call budget, the label's reach, prompts in the PR body."""
+
+    def fresh(self, **kw):
+        p = os.path.join(self.lmndir, "runs.json")
+        if os.path.exists(p):
+            os.remove(p)
+        self.manifest([self.g1(**kw), self.g2()])
+        self.plan()
+
+    def test_old_run_ended_busy_or_env_is_passed(self):
+        """M1: the old run's last attempt ended busy (cancel answers 73) or on an environment
+        failure (2) — judged by its state, it is over: the new run starts."""
+        self.plan()
+        out = self.gen(env={"FAKE_LMN_RUN_EXIT": "73"})
+        self.assertEqual({x["code"] for x in out["failed"]}, {"busy"})
+        old = out["run_id"]
+        self.assertNotIn("gen", self.state()["images"])  # the run ended: nothing to take over
+        st = self.state()  # as if a live run had been recorded before it ended busy
+        st["images"]["gen"] = {"run_id": old, "waited_s": 0}
+        store.save_state(self.root, TID, st)
+        self.manifest([self.g1(seed=5), self.g2()])
+        self.plan()
+        out = self.gen()
+        self.assertEqual(out["state"], "done", out)
+        c = self.gcalls("cancel")[-1]
+        self.assertEqual(c[c.index("--run-id") + 1], old)
+        # an attempt that ended on an environment failure (cancel answers 2)
+        with mock.patch.dict(os.environ, {"FAKE_LMN_FAIL": '[{"id": null, "reason": "environment", "message": "x"}]',
+                                          "FAKE_LMN_STATUS": "10,0"}):
+            self.fresh(seed=6)
+            rid = self.gen()["run_id"]
+            out = self.gen()
+            self.assertEqual({x["code"] for x in out["failed"]}, {"env"})
+        st = self.state()
+        st["images"]["gen"] = {"run_id": rid, "waited_s": 0}
+        store.save_state(self.root, TID, st)
+        self.manifest([self.g1(seed=7), self.g2()])
+        self.plan()
+        self.assertEqual(self.gen()["state"], "done")
+        st = self.state()
+        st["images"]["gen"] = {"run_id": rid, "waited_s": 0}
+        store.save_state(self.root, TID, st)
+        self.assertEqual(images.cancel(self.root, self.cfg, TID), {"cancelled": False, "state": "failed"})
+
+    def test_mixed_result_takes_in_what_is_done(self):
+        """m2: an attempt with g1 done and g2 failed `environment` (status exit 2) gives g1; an
+        already generated scene is never a failure (run 73 afterwards)."""
+        self.plan()
+        out = self.gen(env={"FAKE_LMN_FAIL": '[{"id": "g2", "reason": "environment", "message": "mflux api"}]'})
+        self.assertEqual(([x["id"] for x in out["generated"]], [(x["id"], x["code"]) for x in out["failed"]]),
+                         (["g1"], [("g2", "env")]))
+        self.assertEqual(len(self.gen_lines()), 1)
+        out = self.gen(env={"FAKE_LMN_RUN_EXIT": "73"})
+        self.assertEqual(([(x["id"], x["code"]) for x in out["failed"]], out["skipped"]), ([("g2", "busy")], ["g1"]))
+
+    def test_regenerated_only_for_a_limner_update(self):
+        """m3: a redo's new seed is drawn again by limner (job_changed) but is no limner update."""
+        self.generated()
+        images.review(self.root, self.cfg, TID, "g1", redo=True, note="letters")
+        self.manifest([self.g1(seed=42), self.g2()])
+        self.plan()
+        out = self.gen()
+        self.assertEqual((out["state"], out["regenerated"]), ("done", []))
+        self.assertFalse(images.status(self.root, self.cfg, TID)["items"][0]["regenerated"])
+        os.remove(os.path.join(self.root, IMG, "g2-platform.png"))
+        out = self.gen(env={"FAKE_LMN_LOCK": "lock2"})  # limner updated: both drawn again, same jobs
+        self.assertEqual(out["regenerated"], ["g1", "g2"])
+        self.assertTrue(images.status(self.root, self.cfg, TID)["items"][1]["regenerated"])
+
+    def test_confirm_mid_run_keeps_the_run_and_a_drop_stops_it(self):
+        """m4: confirming g1 while g2 is drawn keeps the job (no cancel, the same run_id); when
+        nothing is left to make, the run Herald left going is stopped."""
+        self.plan()
+        with mock.patch.dict(os.environ, {"FAKE_LMN_STATUS": "10,10,10", "FAKE_LMN_PER_POLL": "1"}):
+            rid = self.gen()["run_id"]
+            images.confirm(self.root, self.cfg, TID, "g1")
+            self.plan()
+            out = self.gen()
+            self.assertEqual((out["run_id"], self.gcalls("cancel")), (rid, []))
+            self.assertEqual(out["state"], "running")
+        os.remove(os.path.join(self.lmndir, "runs.json"))
+        shutil.rmtree(os.path.join(self.root, ".limner"))
+        self.fresh(seed=9)
+        with mock.patch.dict(os.environ, {"FAKE_LMN_STATUS": "10", "FAKE_LMN_PER_POLL": "1"}):
+            rid = self.gen()["run_id"]  # g1 done, g2 still drawn
+            images.reject(self.root, self.cfg, TID, "g2", reason="not needed", drop=True)
+            self.manifest([self.g1(seed=9)])
+            self.scene_body(g2="")
+            self.plan()
+            self.assertEqual(self.gen()["state"], "done")
+        c = self.gcalls("cancel")
+        self.assertEqual(c[-1][c[-1].index("--run-id") + 1], rid)
+        self.assertNotIn("gen", self.state()["images"])
+
+    def test_budget_bounds_retries_and_timeouts(self):
+        """m7: no `run` again once the call has no room; every limner call's limit fits the call."""
+        self.plan()
+        seen = []
+        real = limner.run
+
+        def spy(root, cfg, sub, opts=(), timeout=60, command=None):
+            seen.append(timeout)
+            return real(root, cfg, sub, opts, timeout=timeout, command=command)
+        with mock.patch.object(images, "GEN_SLACK", 5), mock.patch.object(limner, "run", side_effect=spy):
+            out = self.gen(env={"FAKE_LMN_FAIL": '[{"id": "g1", "reason": "memory"}]'})
+        self.assertEqual(out["state"], "running", out)  # the retry is left to the next call
+        self.assertEqual(len([c for c in self.gcalls("run") if "--check" not in c]), 1)
+        self.assertTrue(all(t <= 10 for t in seen[2:]), seen)  # after the probe: capped to the call's room
+        out = self.gen()
+        self.assertEqual(out["state"], "done", out)
+
+    def test_label_reach(self):
+        """m8: a site-absolute URL of a scene, and another article's scene, need the label too —
+        also where a repo validator replaces the gate (the check runs outside run_gate)."""
+        self.ready()
+        st = self.state()
+        self.scene_body(g1="![x](https://example.test%s)" % self.g1()["ref"])
+        self.assertTrue(images.label_problems(self.root, self.cfg, TID, st))
+        self.scene_body(g1="![x](https://example.test%s)\n*%s*" % (self.g1()["ref"], LABEL))
+        self.assertEqual(images.label_problems(self.root, self.cfg, TID, st), [])
+        # another article (slug old-post) shows new-post's scene without the label
+        self.write("src/content/blog/old-post.md", "---\ntitle: Old\nslug: old-post\n---\n![a](%s)\n" % self.g1()["ref"])
+        other = {"slug": "old-post", "topic_id": "t0009"}
+        self.assertTrue(images.label_problems(self.root, self.cfg, "t0009", other))
+        self.write("src/content/blog/old-post.md", "---\ntitle: Old\nslug: old-post\n---\n%s\n" % self.snip(self.g1()))
+        self.assertEqual(images.label_problems(self.root, self.cfg, "t0009", other), [])
+        # stage pass with a repo validator and the real run_gate: still refused by the label
+        self.scene_body(g2="![x](https://example.test%s)" % self.g2()["ref"])
+        self.config(lambda c: c["commands"].update(validate="true"))
+        with self.assertRaises(Exception) as cm:
+            store.stage_pass(self.root, self.cfg, TID, "draft")
+        self.assertIn("must carry its AI label", str(cm.exception))
+
+    def test_stage_pass_paths_call_the_label_check(self):
+        """§11-24: draft, verify `--amend` and trim keep the label (each call site pinned)."""
+        self.ready()
+        self.made_og()
+        calls = []
+        with mock.patch.object(images, "label_problems", side_effect=lambda *a, **k: calls.append(a[2]) or ["LABEL"]):
+            with mock.patch.object(store, "run_gate", return_value={"ok": True, "errors": [], "warnings": [],
+                                                                     "prose": {"warnings": [], "stats": {}}}):
+                with self.assertRaises(Exception) as cm:
+                    store.stage_pass(self.root, self.cfg, TID, "draft")
+                self.assertIn("LABEL", str(cm.exception))
+                from hrdlib.hashing import bundle_hash
+                self.write(W + "/verify.md", "ok\n")
+                self.write(W + "/verify.json", json.dumps({"body_hash": bundle_hash(self.root, self.cfg, SLUG),
+                                                           "counts": {"supported": 1, "unsupported": 0,
+                                                                      "contradicted": 0, "unmapped": 0}}))
+                st = self.state()
+                st["stage"] = "verify"
+                store.save_state(self.root, TID, st)
+                with self.assertRaises(Exception) as cm:
+                    store.stage_pass(self.root, self.cfg, TID, "verify", amend=True)
+                self.assertIn("LABEL", str(cm.exception))
+        self.assertEqual(calls, [TID, TID])
+        text = open(os.path.join(self.root, "src/content/blog/%s.md" % SLUG)).read()
+        self.assertIn((text.index(self.snip(self.g1())), text.index(self.snip(self.g1())) + len(self.snip(self.g1()))),
+                      images.snippet_spans(self.root, self.cfg, TID, self.state(), text))
+
+    def test_trim_refuses_the_label(self):
+        from hrdlib.hashing import worktree_hash
+        self.ready()
+        st = self.state()
+        cur = worktree_hash(self.root, self.cfg, SLUG)
+        st["stage"] = "verify"
+        st["stages"]["critique"] = {"body_hash": cur}
+        store.save_state(self.root, TID, st)
+        self.write(W + "/verify.json", json.dumps({"body_hash": cur, "counts": {
+            "supported": 1, "unsupported": 1, "contradicted": 0, "unmapped": 0},
+            "unsupported_sentences": [self.g1()["alt"]]}))
+        with self.assertRaises(Exception) as cm:
+            store.trim_begin(self.root, self.cfg, TID)
+        self.assertIn("overlaps an image attribution", str(cm.exception))
+
+    def test_batch_select_drops_scene_articles(self):
+        self.ready()
+        self.made_og()
+        sh(self.root, "git", "add", "-A")
+        sh(self.root, "git", "commit", "-q", "-m", "publish")
+        sh(self.root, "git", "push", "-q", "origin", "HEAD:main")
+        sh(self.root, "git", "fetch", "-q", "origin")
+        images._BASE_MANAGED.clear()
+        self.config(lambda c: c.update(translations={"source": "en", "targets": [
+            {"lang": "ko", "body_pattern": "{content}/ko/{slug}.md", "url_pattern": "/ko/{slug}/"}]},
+            roles={"conditional": ["illustrator", "translator"]}))
+        topics = store.load_topics(self.root)
+        topics["topics"] = [dict(topics["topics"][0], state="published"),
+                            {"id": "tr-new-post-20261112", "title": "x", "translate_of": SLUG, "state": "queued",
+                             "history": [], "reverted_by": []},
+                            {"id": "tr-old-post-20261112", "title": "y", "translate_of": "old-post", "state": "queued",
+                             "history": [], "reverted_by": []}]
+        store.save_topics(self.root, topics)
+        from hrdlib import batch
+        self.assertEqual(batch.select_topics(self.root, Config.load(self.root), 5), ["tr-old-post-20261112"])
+
+    def test_prompt_in_the_pr_body_is_a_code_span(self):
+        self.manifest([self.g1(prompt="A traveler `at` a counter"), self.g2()])
+        self.assertIn("prompt is English", " ".join(self.plan(check=True)["errors"]))
+        self.manifest([self.g1(prompt="A traveler @someone <b>at</b> [x](https://x.test) a counter"), self.g2()])
+        self.assertEqual(self.plan()["errors"], [])
+        rows = "\n".join(images.status(self.root, self.cfg, TID)["pr_rows"])
+        self.assertIn("- g1: `A traveler @someone <b>at</b> [x](https://x.test) a counter`", rows)
 
 
 class StructureTests(unittest.TestCase):

@@ -83,7 +83,9 @@ NO_TEXT = ("No text, no letters, no numbers, no writing, no logos, no watermarks
            "are blank.")  # appended to every scene prompt; no setting changes it (P21)
 SCENE_PROMPT_MAX = 1000     # limner takes 1500; the rest is the style and NO_TEXT
 SCENE_STYLE_MAX = 300
-SCENE_TEXT_RE = re.compile(r"^[\x20\x21\x23-\x5b\x5d-\x7e]*$")  # printable ASCII without " and \
+# printable ASCII without " \ and ` — the PR body shows each prompt as one code span, so a mention,
+# HTML or a link in it stays text (review round 1 m9)
+SCENE_TEXT_RE = re.compile(r"^[\x20\x21\x23-\x5b\x5d-\x5f\x61-\x7e]*$")
 SCENE_LABELS = {"ko": "AI 생성 이미지", "ja": "AI生成画像", "en": "AI-generated image"}
 SCENE_FIGURE = "![{alt}]({ref})\n*{label}*"
 SCENE_FIELDS = ("ref", "alt", "label")
@@ -92,6 +94,7 @@ GEN_WAIT = 240              # one `generate` call's default budget; the caller's
 GEN_WAIT_MAX = 540          # limner's own `status --wait-seconds` ceiling
 GEN_RUN_TIMEOUT = 60        # `run --wait 30` ends by itself while the machine is busy
 GEN_CANCEL_WAIT = 30
+GEN_SLACK = 55              # a call ends by `wait` + this; the caller's Bash timeout is `wait` + 60
 GEN_RETRY = ("memory", "metal", "crashed")  # and `signal:*` — retried once in the same call
 TRIAL_PROMPT = "A cup of tea on a wooden table by a window"
 
@@ -284,8 +287,8 @@ def scene_errors(cfg):
         errors.append("images.scenes.per_category maps a category to an integer from 0 to 6")
     st = c.get("style", "")
     if not isinstance(st, str) or len(st) > SCENE_STYLE_MAX or not SCENE_TEXT_RE.match(st):
-        errors.append("images.scenes.style is at most %d printable ASCII characters (English), without \" \\ or a line "
-                      "break" % SCENE_STYLE_MAX)
+        errors.append("images.scenes.style is at most %d printable ASCII characters (English), without \" \\ ` or a "
+                      "line break" % SCENE_STYLE_MAX)
     if not _small_int(c.get("wait_minutes", 30), 5, 120):
         errors.append("images.scenes.wait_minutes must be an integer from 5 to 120")
     return errors + figure_errors_by_kind(cfg)["scene"]
@@ -870,7 +873,7 @@ def _scene_errors(cfg, where, it, rejected_keys):
         errors.append("%s: seed must be an integer from 0 to %d" % (where, SEED_MAX))
     pr = it.get("prompt")
     if not isinstance(pr, str) or not pr.strip() or len(pr) > SCENE_PROMPT_MAX or not SCENE_TEXT_RE.match(pr):
-        errors.append("%s: prompt is English, 1–%d printable ASCII characters, without \" \\ or a line break (a "
+        errors.append("%s: prompt is English, 1–%d printable ASCII characters, without \" \\ ` or a line break (a "
                       "Japanese or Korean word makes the model draw letters)" % (where, SCENE_PROMPT_MAX))
     elif scene_key(cfg, it) in rejected_keys:
         errors.append("%s: this prompt, seed and size were turned down before (review or a human) — change the seed "
@@ -1733,9 +1736,13 @@ def _job_entry(cfg, it, out_rel):
             "seed": it["seed"]}
 
 
+def _job_bytes(jobs):
+    return json.dumps({"version": 1, "model": limner.GEN_MODEL, "jobs": jobs}, sort_keys=True).encode("utf-8")
+
+
 def _write_job(path, jobs):
     """The job file (rewritten on every call — the same jobs give the same bytes and run_id)."""
-    data = json.dumps({"version": 1, "model": limner.GEN_MODEL, "jobs": jobs}, sort_keys=True).encode("utf-8")
+    data = _job_bytes(jobs)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
@@ -1768,10 +1775,11 @@ def _verify_record(root, cfg, out_rel, job):
     return (data, rec, None) if ok else (None, rec, "record-mismatch")
 
 
-def _receive(root, cfg, tid, st, it, job, led, res, run_id):
+def _receive(root, cfg, tid, st, it, job, led, res, run_id, updated=False):
     """§2.4.3 8: one item limner reported finished — record verified, then the ledger line (once
     per (topic, id, key, blob), R2-1), then the published file (atomically; another file there goes
-    under removed/, P9). Ledger → file, as for a fetch."""
+    under removed/, P9). Ledger → file, as for a fetch. `updated`: limner drew this very job again
+    because its own lock changed (shown at the confirmation, R2-5)."""
     iid, f = it["id"], it["file"]
     data, rec, bad = _verify_record(root, cfg, job["out"], job)
     if bad:
@@ -1806,12 +1814,18 @@ def _receive(root, cfg, tid, st, it, job, led, res, run_id):
         copied = True
     items = st["images"].setdefault("items", {})
     r = items.setdefault(iid, {"kind": "scene", "file": f})
-    if r.get("generated_blob") != hh[0]:
+    if r.get("generated_blob") != hh[0]:  # another picture: review again, say why it changed
         r["generated_at"] = now_iso()
         r.pop("reviewed", None)
         r.pop("review_note", None)
+        if updated:
+            r["regenerated"] = True
+        else:
+            r.pop("regenerated", None)
     r.update(kind="scene", file=f, key=key, generated_blob=hh[0], status="ready" if led.confirmed(hh) else "generated")
     st["images"].setdefault("files", {})[f] = {"kind": "scene", "use": None}
+    if updated and iid not in res["regenerated"]:
+        res["regenerated"].append(iid)
     if new or copied:
         res["generated"].append({"id": iid, "file": f, "seconds": rec.get("seconds")})
     else:
@@ -1822,19 +1836,31 @@ def _retryable(code):
     return code in GEN_RETRY or code.startswith("signal:")
 
 
-def _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, partial=False, can_retry=False):
-    """Read a limner result: receive `done ∪ skipped ∪ adopted` and — unless `partial` (a run
-    still going) — map the rest by the §2.4.3 table. Returns True when only machine failures
-    (memory, metal, signal, crashed) are left: one more `run` in this call resumes the work."""
+def _status_obj(obj):
+    """limner's attempt status (a final verdict or `attempt: null`) — not an `{"error"}` answer."""
+    return isinstance(obj, dict) and "state" in obj and "run_id" in obj
+
+
+def _settle(res, pre, jid, received):
+    """An item this call need not make (generated or ready before it): never a failure."""
+    if pre.get(jid) == "generated" and jid not in received and jid not in res["skipped"]:
+        res["skipped"].append(jid)
+
+
+def _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, pre, partial=False, can_retry=False):
+    """Read a limner result: receive `done ∪ skipped ∪ adopted` of the items not confirmed yet and
+    — unless `partial` (a run still going) — map the rest by the §2.4.3 table; items generated or
+    ready before this call are never failures (review round 1 m2). Returns True when only machine
+    failures (memory, metal, signal, crashed) are left: one more `run` resumes the work."""
     by = {it["id"]: it for it in todo}
+    # limner's own update: it drew again a job Herald did not change (the key had a line already)
+    updated = {g.get("id") for g in obj.get("regenerated") or [] if isinstance(g, dict) and g.get("id") in by and
+               led.gen_lines_key(tid, g["id"], scene_key(cfg, by[g["id"]]))}
     done_ids = [d.get("id") for d in obj.get("done") or [] if isinstance(d, dict)]
     for jid in done_ids + list(obj.get("skipped") or []) + list(obj.get("adopted") or []):
-        if jid in by and jid not in received:
+        if jid in by and jid not in received and pre.get(jid) != "ready":
             received.add(jid)
-            _receive(root, cfg, tid, st, by[jid], jobs[jid], led, res, run_id)
-    for g in obj.get("regenerated") or []:
-        if isinstance(g, dict) and g.get("id") in by and g["id"] not in res["regenerated"]:
-            res["regenerated"].append(g["id"])  # limner's lock changed: drawn again (shown at confirm, R2-5)
+            _receive(root, cfg, tid, st, by[jid], jobs[jid], led, res, run_id, updated=jid in updated)
     if partial:
         return False
     fails, general = {}, None
@@ -1852,17 +1878,24 @@ def _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, part
             [b.get("id") for b in obj.get("blocked") or [] if isinstance(b, dict)]:
         if jid in by:
             fails[jid] = ("race", "the output folder %s was changed by someone else" % jobs[jid]["out"])
+    for jid in list(fails):
+        if pre.get(jid) != "pending":
+            fails.pop(jid)
+            _settle(res, pre, jid, received)
     state = obj.get("state")
     if state == "crashed":
         general = general or ("crashed", "limner's worker ended without a result")
     elif state == "orphan_child":
-        _cancel_run(root, cfg, run_id)
+        _stop_run(root, cfg, run_id, 60)
         general = ("orphan_child", "limner's generator outlived its worker — cancelled")
     elif state == "cancelled":
         general = general or ("cancelled", "the run was cancelled")
     elif state == "busy":
         general = ("busy", str((obj.get("busy") or {}).get("holder") or "the machine is busy")[:300])
     left = [it["id"] for it in todo if it["id"] not in received and it["id"] not in fails]
+    for jid in [j for j in left if pre.get(j) != "pending"]:
+        left.remove(jid)
+        _settle(res, pre, jid, received)
     if left and general is None:
         general = ("crashed", "limner's run ended without a result for it")
     codes = [c for c, _ in fails.values()] + ([general[0]] if general and left else [])
@@ -1877,16 +1910,49 @@ def _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, part
     return False
 
 
-def _cancel_run(root, cfg, run_id):
+FINAL_STATES = ("done", "failed", "busy", "cancelled", "crashed")
+
+
+def _cancel_run(root, cfg, run_id, timeout=GEN_CANCEL_WAIT + 30):
     sd = limner.state_dir_abs(root, cfg)
+    ws = max(0, min(GEN_CANCEL_WAIT, int(timeout - 10)))
     return limner.gen_call(root, cfg, "cancel", [("--run-id", run_id), ("--root", os.path.realpath(root)),
-                                                 ("--state-dir", sd), ("--wait-seconds", GEN_CANCEL_WAIT)],
-                           GEN_CANCEL_WAIT + 30)
+                                                 ("--state-dir", sd), ("--wait-seconds", ws)], timeout)
 
 
-def _fail_all(res, ids, code, message=None):
-    for iid in ids:
-        res["failed"].append({"id": iid, "code": code, "class": "env", "message": message})
+def _stop_run(root, cfg, run_id, timeout):
+    """Stop a run Herald no longer needs and judge it by the result's `state` (design R1-5 — never
+    the exit code: `cancel` of an ended attempt answers that attempt's code, 73 for one that ended
+    busy, 2 for one that ended on an environment failure). (state, None) when it is over — gone,
+    finished or cancelled —, else (state, failure): `busy` while it still runs, or the code of an
+    answer with no status. `orphan_child` is cancelled once more."""
+    for n in range(2):
+        c = _cancel_run(root, cfg, run_id, timeout)
+        if c["code"] == "not-found":
+            return None, None
+        obj = c["obj"] or {}
+        state = obj.get("state") if _status_obj(obj) else None
+        if state in FINAL_STATES:
+            return state, None
+        if state == "orphan_child" and n == 0:
+            continue
+        if state in LIVE or c["exit"] == 10 or c["code"] == "timeout":
+            return state, ("busy", "Herald's earlier run %s has not stopped yet" % run_id)
+        return state, (state or c["code"] or "crashed", c["message"])
+    return "orphan_child", ("orphan_child", "limner's generator outlived its worker")
+
+
+def _fail_pending(res, todo, pre, received, code, message=None):
+    """A failure with no attempt status to read: the items still to make fail with it; those
+    already generated stay as they are (review round 1 m2)."""
+    for it in todo:
+        jid = it["id"]
+        if jid in received:
+            continue
+        if pre.get(jid) == "pending":
+            res["failed"].append({"id": jid, "code": code, "class": "env", "message": message})
+        else:
+            _settle(res, pre, jid, received)
 
 
 def _gen_state(res, live=False):
@@ -1897,8 +1963,17 @@ def _gen_state(res, live=False):
 def generate(root, cfg, tid, wait=GEN_WAIT):
     """`HRD image generate` (§2.4.3): start or take over limner's run of this topic's scenes,
     wait at most `wait` seconds, take in what it finished. Never on base; never `--force` or
-    `--accept` (a human's file is moved away by Herald first, P9)."""
+    `--accept` (a human's file is moved away by Herald first, P9). The whole call stays within
+    `wait` + GEN_SLACK seconds — the caller's Bash timeout is `wait` + 60 (review round 1 m7)."""
     from .store import load_state, save_state
+    t0 = time.monotonic()
+    deadline = t0 + wait + GEN_SLACK if isinstance(wait, int) else t0
+
+    def cap(n):
+        return max(1, int(min(n, deadline - time.monotonic())))
+
+    def room():
+        return deadline - time.monotonic()
     st = load_state(root, tid)
     if not _on_branch(root, tid, st):
         raise HeraldError("generate runs on this topic's herald branch only (never on base — the worker writes "
@@ -1918,21 +1993,33 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
     res = {"state": "done", "generated": [], "skipped": [], "failed": [], "running": [], "regenerated": [],
            "waited_s": gen.get("waited_s", 0), "run_id": gen.get("run_id")}
     items = rec.setdefault("items", {})
-    todo, pending = [], []
+    sd, _, job_path, out_dir = _gen_paths(root, cfg, tid)
+    todo, pre = [], {}
     for it in scenes:  # 2: what to make — before any probe (R2-4, R3-1)
         iid, key = it.get("id"), scene_key(cfg, it)
         s = scene_state(root, cfg, tid, it, led)
-        if s == "ready":
-            continue
         r = items.get(iid) or {}
-        if r.get("key") == key and scene_fail_closed(tid, iid, r, led):
+        if s != "ready" and r.get("key") == key and scene_fail_closed(tid, iid, r, led):
             res["failed"].append({"id": iid, "code": "record-missing", "class": "env",
                                   "message": scene_fail_closed(tid, iid, r, led)})
             continue
+        if s == "ready" and not os.path.isfile(os.path.join(root, out_dir, "%s.png" % iid)):
+            continue  # confirmed, and limner's output is gone: never drawn again for nothing
+        # a confirmed picture whose output is still there stays in the job, so a confirmation
+        # never changes the run_id of a run in progress (review round 1 m4); limner skips it
         todo.append(it)
-        if s == "pending":
-            pending.append(iid)
-    if not pending:  # generated pictures are in the ledger and in place already: nothing to start
+        pre[iid] = s
+    if "pending" not in pre.values():
+        # nothing to make: generated pictures are in the ledger and in place already. A run Herald
+        # left going for other jobs is no longer needed (a place was dropped) — stop it (review
+        # round 1 m4); one for these very jobs is only finishing
+        now_sha = hashlib.sha256(_job_bytes([_job_entry(cfg, it, "%s/%s.png" % (out_dir, it["id"]))
+                                             for it in todo])).hexdigest() if todo else None
+        if gen.get("run_id") and gen.get("job_sha256") != now_sha:
+            _, fail = _stop_run(root, cfg, gen["run_id"], cap(GEN_CANCEL_WAIT + 30))
+            if not fail:
+                rec.pop("gen", None)
+                save_state(root, tid, st)
         return _gen_state(res)
     why = scene_off(root, cfg, _category(root, cfg, st["slug"]))  # 3
     if why is None:
@@ -1943,38 +2030,46 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
     if why:
         res.update(state="off", why=why)
         return res
-    t0 = time.monotonic()
-    sd, _, job_path, out_dir = _gen_paths(root, cfg, tid)
     jobs = {it["id"]: _job_entry(cfg, it, "%s/%s.png" % (out_dir, it["id"])) for it in todo}
     job_sha = _write_job(job_path, [jobs[it["id"]] for it in todo])
     rroot = os.path.realpath(root)
     base_opts = [("--job", job_path), ("--root", rroot), ("--state-dir", sd)]
-    chk = limner.gen_call(root, cfg, "run", [("--check", None)] + base_opts, limner.GEN_PROBE_TIMEOUT)
+    chk = limner.gen_call(root, cfg, "run", [("--check", None)] + base_opts, cap(limner.GEN_PROBE_TIMEOUT))
     run_id = (chk["obj"] or {}).get("run_id")
+    received = set()
     if chk["code"] or chk["exit"] != 0 or not isinstance(run_id, str):
-        _fail_all(res, [it["id"] for it in todo], chk["code"] or "contract", chk["message"])
+        _fail_pending(res, todo, pre, received, chk["code"] or "contract", chk["message"])
         return _gen_state(res)
     res["run_id"] = run_id
     if gen.get("run_id") and gen["run_id"] != run_id:  # 4: the jobs changed — stop Herald's old run
-        c = _cancel_run(root, cfg, gen["run_id"])
-        if c["code"] not in (None, "not-found"):
-            _fail_all(res, [it["id"] for it in todo], c["code"], c["message"])
-            return _gen_state(res)
-        if c["code"] is None and (c["exit"] == 10 or (c["obj"] or {}).get("state") in LIVE):
-            _fail_all(res, [it["id"] for it in todo], "busy", "Herald's earlier run %s has not stopped yet" % gen["run_id"])
+        _, fail = _stop_run(root, cfg, gen["run_id"], cap(GEN_CANCEL_WAIT + 30))
+        if fail:
+            _fail_pending(res, todo, pre, received, fail[0], fail[1])
             return _gen_state(res)
         gen = {}
-    received, retried, again, live = set(), False, False, False
+        rec.pop("gen", None)
+    retried, again, live = False, False, False
+
+    def more():
+        """Another `run` only while the call has room for it (m7); else the next call goes on."""
+        if room() >= 15:
+            return True
+        res["running"] = [it["id"] for it in todo if it["id"] not in received and pre[it["id"]] == "pending"]
+        return False
     while True:
-        r = limner.gen_call(root, cfg, "run", base_opts + [("--wait", 30)], GEN_RUN_TIMEOUT)  # 5
-        if r["code"]:
-            _fail_all(res, [it["id"] for it in todo if it["id"] not in received], r["code"], r["message"])
-            break
+        r = limner.gen_call(root, cfg, "run", base_opts + [("--wait", max(0, min(30, int(room() - 30))))],
+                            cap(GEN_RUN_TIMEOUT))  # 5
         obj = r["obj"] or {}
+        if r["code"] and not _status_obj(obj):
+            _fail_pending(res, todo, pre, received, r["code"], r["message"])
+            break
         if obj.get("attempt") is None or obj.get("state") not in LIVE:
-            if _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, can_retry=not retried):
+            if _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, pre, can_retry=not retried):
                 retried = True
-                continue
+                if more():
+                    continue
+                live = True
+            gen = {}
             break
         same = gen.get("run_id") == run_id
         gen = {"run_id": run_id, "attempt": obj.get("attempt"), "job_sha256": job_sha,
@@ -1982,33 +2077,42 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
                "waited_s": gen.get("waited_s", 0) if same else 0}
         st.setdefault("images", rec)["gen"] = gen
         save_state(root, tid, st)
-        left = wait - (time.monotonic() - t0)  # 6
+        left = t0 + wait - time.monotonic()  # 6
         ws = int(left - 20) if left >= 30 else 0
         t1 = time.monotonic()
         s_ = limner.gen_call(root, cfg, "status", [("--run-id", run_id), ("--root", rroot), ("--state-dir", sd),
-                                                  ("--wait-seconds", ws)], ws + 20)
+                                                  ("--wait-seconds", ws)], cap(ws + 20))
         gen["waited_s"] = int(gen.get("waited_s", 0) + round(time.monotonic() - t1))
+        sobj = s_["obj"] or {}
         if s_["code"] == "not-found" and not again:  # 12: the state dir lost the run — once more from 5
             again = True
             gen = {}
             st["images"].pop("gen", None)
-            continue
-        if s_["code"]:
-            _fail_all(res, [it["id"] for it in todo if it["id"] not in received], s_["code"], s_["message"])
-            break
-        sobj = s_["obj"] or {}
-        if sobj.get("state") in LIVE:  # 7: still going — take in what it finished so far
-            _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, partial=True)
-            res["running"] = [it["id"] for it in todo if it["id"] not in received]
+            if more():
+                continue
             live = True
             break
-        if _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, can_retry=not retried):
+        if s_["code"] and not _status_obj(sobj):
+            _fail_pending(res, todo, pre, received, s_["code"], s_["message"])
+            break
+        if sobj.get("state") in LIVE:  # 7: still going — take in what it finished so far
+            _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, pre, partial=True)
+            res["running"] = [it["id"] for it in todo if it["id"] not in received and pre[it["id"]] == "pending"]
+            live = True
+            break
+        # ended — whatever the exit code (2, 73, 11, 5), the attempt's lists are read (m2)
+        if _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, pre, can_retry=not retried):
             retried = True
-            continue
+            if more():
+                continue
+            live = True
+        gen = {}
         break
     if gen:
         st["images"]["gen"] = gen
         res["waited_s"] = gen.get("waited_s", 0)
+    else:
+        st["images"].pop("gen", None)  # the run is over: nothing to take over or cancel
     save_state(root, tid, st)  # 9
     return _gen_state(res, live)
 
@@ -2032,11 +2136,10 @@ def cancel(root, cfg, tid):
     g = (st.get("images") or {}).get("gen") or {}
     if not g.get("run_id"):
         return {"cancelled": False, "state": None}
-    c = _cancel_run(root, cfg, g["run_id"])
-    state = (c["obj"] or {}).get("state") if c["code"] in (None,) else None
+    state, fail = _stop_run(root, cfg, g["run_id"], GEN_CANCEL_WAIT + 30)
     out = {"cancelled": state == "cancelled", "state": state}
-    if c["code"] and c["code"] != "not-found":
-        out["error"] = c["code"]
+    if fail:
+        out["error"] = fail[0]
     return out
 
 
@@ -2046,6 +2149,11 @@ def generate_trial(root, cfg, wait=GEN_WAIT):
     same job, the same run_id)."""
     if not _small_int(wait, 0, GEN_WAIT_MAX):
         raise HeraldError("--wait is 0 to %d seconds" % GEN_WAIT_MAX)
+    t0 = time.monotonic()
+    deadline = t0 + wait + GEN_SLACK  # within the caller's Bash timeout of `wait` + 60 (m6, m7)
+
+    def cap(n):
+        return max(1, int(min(n, deadline - time.monotonic())))
     errs = scene_errors(cfg) + limner.limner_errors(cfg)
     if errs:
         return {"state": "off", "why": "config", "errors": errs, "file": None, "run_id": None}
@@ -2061,14 +2169,14 @@ def generate_trial(root, cfg, wait=GEN_WAIT):
     _write_job(jpath, [job])
     rroot = os.path.realpath(root)
     base_opts = [("--job", jpath), ("--root", rroot), ("--state-dir", sd)]
-    t0 = time.monotonic()
     out = {"state": "failed", "file": out_rel, "run_id": None}
-    chk = limner.gen_call(root, cfg, "run", [("--check", None)] + base_opts, limner.GEN_PROBE_TIMEOUT)
+    chk = limner.gen_call(root, cfg, "run", [("--check", None)] + base_opts, cap(limner.GEN_PROBE_TIMEOUT))
     if chk["code"] or chk["exit"] != 0:
         out.update(code=chk["code"] or "contract", message=chk["message"])
         return out
     out["run_id"] = (chk["obj"] or {}).get("run_id")
-    r = limner.gen_call(root, cfg, "run", base_opts + [("--wait", 30)], GEN_RUN_TIMEOUT)
+    r = limner.gen_call(root, cfg, "run", base_opts + [("--wait", max(0, min(30, int(deadline - time.monotonic() - 30))))],
+                        cap(GEN_RUN_TIMEOUT))
     if r["code"]:
         out.update(code=r["code"], message=r["message"])
         return out
@@ -2077,7 +2185,7 @@ def generate_trial(root, cfg, wait=GEN_WAIT):
         left = wait - (time.monotonic() - t0)
         ws = int(left - 20) if left >= 30 else 0
         s_ = limner.gen_call(root, cfg, "status", [("--run-id", out["run_id"]), ("--root", rroot), ("--state-dir", sd),
-                                                  ("--wait-seconds", ws)], ws + 20)
+                                                  ("--wait-seconds", ws)], cap(ws + 20))
         if s_["code"]:
             out.update(code=s_["code"], message=s_["message"])
             return out
@@ -2718,6 +2826,7 @@ def status(root, cfg, tid, rev=None):
             row.update(status=s, size=it.get("size"), seed=it.get("seed"), prompt=it.get("prompt"),
                        generated_at=r.get("generated_at"), replaced=replaced, why=scene_fail_closed(tid, iid, r, led),
                        reviewed=bool(h and r.get("reviewed") == h[0]), review_note=r.get("review_note"),
+                       regenerated=bool(r.get("regenerated")),
                        attempts=scene_attempts(st, iid))
             if s == "pending":
                 pend["generate"].append(iid)
@@ -2738,7 +2847,7 @@ def status(root, cfg, tid, rev=None):
                 iid, it.get("file"), model, it.get("seed"), it.get("size"),
                 "confirmed %s" % at if at else ("confirmed" if s == "ready" else "not confirmed"),
                 ", replaced by a human" if replaced else ""))
-            prompts.append("- %s: %s" % (iid, it.get("prompt")))
+            prompts.append("- %s: `%s`" % (iid, str(it.get("prompt")).replace("`", "'")))
         elif kind == "external" and slug:
             cur = cur_path(root, cfg, slug, it.get("file"))
             s = external_state(root, tid, it, led, rev, path=cur)
@@ -3192,21 +3301,18 @@ def drop_blocked_translations(root, cfg, ids):
     return out
 
 
-def scene_files(root, cfg, slug):
-    """Every file recorded as a scene by any topic of this slug — the working tree's states and
-    origin/<base>'s, moved slugs included (09 §2.8, R1-4: a refresh topic cannot list base's scenes
-    in its own manifest, so the label check is tied to the slug, not to a topic)."""
-    olds = set(_old_slugs(root, slug)) | {slug}
+def all_scene_files(root, cfg):
+    """Every file recorded as a scene by any topic — the working tree's states and origin/<base>'s
+    — so a reference from another article needs the label too (review round 1 m8)."""
     out = set()
     for _, st in _topic_states(root):
-        if st.get("slug") in olds:
-            for f, m in (((st.get("images") or {}).get("files")) or {}).items():
-                if isinstance(m, dict) and m.get("kind") == "scene":
-                    out.add(cur_path(root, cfg, slug, f))
-    base = _base_managed_map(root, cfg)
-    for s_ in olds:
-        out |= {cur_path(root, cfg, slug, f) for f, k in base.get(s_, []) if k == "scene"}
-    return sorted(out)
+        slug = st.get("slug")
+        for f, m in (((st.get("images") or {}).get("files")) or {}).items():
+            if isinstance(m, dict) and m.get("kind") == "scene":
+                out.add(cur_path(root, cfg, slug, f) if slug else f)
+    for slug, fs in _base_managed_map(root, cfg).items():
+        out |= {cur_path(root, cfg, slug, f) for f, k in fs if k == "scene"}
+    return out
 
 
 def label_regex(cfg, ref):
@@ -3219,14 +3325,15 @@ def label_regex(cfg, ref):
 
 
 def label_problems(root, cfg, tid, st, rev=None):
-    """The AI label next to every scene picture of this slug (09 §2.8, Q4) — outside `run_gate`
-    (whatever `commands.validate` runs), for every topic of the slug, at draft, verify (`--amend`
-    too) and publish `scope`: each reference in the source body that resolves to a scene file is
-    matched by the label pattern exactly as many times as it is referenced."""
+    """The AI label next to every scene picture in this slug's source body (09 §2.8, Q4) — outside
+    `run_gate` (whatever `commands.validate` runs), for every topic of the slug, at draft, verify
+    (`--amend` too) and publish `scope`: each reference that resolves to any article's scene file
+    (a site-absolute URL of this site too) is matched by the label pattern exactly as many times
+    as it is referenced."""
     if not managed(cfg) or not st.get("slug"):
         return []
     slug = st["slug"]
-    files = set(scene_files(root, cfg, slug))
+    files = all_scene_files(root, cfg)
     if not files:
         return []
     if not scene_label(cfg):
@@ -3236,10 +3343,12 @@ def label_problems(root, cfg, tid, st, rev=None):
     body_rel = cfg.body_path(slug)
     body = _body(root, cfg, slug, rev)
     pub = _rules(root)["images"].get("public_dir", "public")
+    site = str(cfg.get("site", "base_url") or "").rstrip("/")
     refs = Counter()
     for m in IMG_RE.finditer(body):
         raw = next(g for g in m.groups() if g)
-        if resolve_image_ref(root, body_rel, raw, pub) in files:
+        path = raw[len(site):] if site and raw.startswith(site + "/") else raw  # the site's own absolute URL
+        if resolve_image_ref(root, body_rel, path, pub) in files:
             refs[raw] += 1
     out = []
     for raw, n in sorted(refs.items()):

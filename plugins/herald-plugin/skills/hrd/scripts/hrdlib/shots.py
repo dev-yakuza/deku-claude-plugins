@@ -391,6 +391,9 @@ class Ledger:
         return any((r.get("topic"), r.get("id"), r.get("key"), r.get("blob")) == (tid, gid, key, b)
                    for r in self.generations)
 
+    def gen_lines_key(self, tid, gid, key):
+        return [r for r in self.generations if (r.get("topic"), r.get("id"), r.get("key")) == (tid, gid, key)]
+
     def confirmed(self, h):
         return any(self._same(r, h) for r in self.confirms)
 

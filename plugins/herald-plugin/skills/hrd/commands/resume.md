@@ -38,7 +38,8 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
    generation — `HRD image generate` takes over the run a hold left going, or receives what it
    finished —, the scene review, OG, then the screenshot steps; external images and scenes under
    `pending.confirm` wait for a human's confirm or reject). A `tooling: limner …` hold resumes
-   here too, once the machine is free or can generate.
+   here too, once the machine is free or can generate — and every such entry first runs `HRD
+   image generate --topic <id> --reset-wait` (the wait limit counts from this resume).
    Budget baseline as in `write.md` §0 step 7 (a fresh baseline: resuming is the human's choice
    to spend more). Then: if `stage` is `brief` and `slug` is null, run brief as in `write.md`. Otherwise run from
    `stage` onward through publish exactly as `write.md` §1–§3 (unattended if `HRD_UNATTENDED=1`; else in-session auto by

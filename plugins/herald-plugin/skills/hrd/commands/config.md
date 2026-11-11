@@ -47,7 +47,7 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
      tell the human the fix belongs in the repo's script). Scenes: `HRD image kinds` `scene.ok`
      (else its `why`: `generate:env` → "`lmn setup` — about 54 GB; a model already in
      `~/.cache/models` is shared"), then **one trial picture**: `HRD image generate --trial --wait
-     240` again while `running` (a cold model load passes 240 s) — show the human the `file` (under
+     240` with the Bash `timeout` at 300000 ms, again while `running` (a cold model load passes 240 s) — show the human the `file` (under
      the state dir, never the image dir; no ledger) and ask whether the style is right; change
      `style` and try again, or turn scenes off. Turning scenes off: remove `scenes`.
   2. **Conflicts with existing personas — never changed silently**: read

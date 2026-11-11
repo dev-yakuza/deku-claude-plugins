@@ -12,7 +12,8 @@ FAKE_LMN_RAW (stdout as given) · FAKE_LMN_SLEEP (seconds) · FAKE_LMN_BADSHA=1 
 The generator (no worker process: the "worker" moves on each `status` call; runs live in
 $FAKE_LMN_DIR/runs.json, records and outputs where limner writes them):
 FAKE_LMN_GEN_ENV (`run --check`/`run` exit 2 with this error — models missing, RAM) ·
-FAKE_LMN_RUN_EXIT (73 busy, 70, 2, 1 — `run` without `--check`) · FAKE_LMN_STATUS (a sequence per
+FAKE_LMN_RUN_EXIT (73 busy — the attempt is kept, closed `busy`, as limner does; 70, 2, 1 — `run`
+without `--check`) · FAKE_LMN_STATUS (a sequence per
 run, e.g. `10,10,0`: 10 = still running, 12 = no such run, anything else = the attempt ends) ·
 FAKE_LMN_PER_POLL (jobs finished per running poll, 0) · FAKE_LMN_FAIL (JSON list of
 {"id", "reason", "message"} for the attempt's `failed`; consumed by the first attempt only unless
@@ -261,10 +262,7 @@ def generator(cmd):
         if "--check" in args:
             emit({"contract": CONTRACT, "check": "ok", "run_id": run_id, "jobs": len(spec["jobs"]), "stages": 1})
         code = int(os.environ.get("FAKE_LMN_RUN_EXIT", "0"))
-        if code == 73:
-            emit(new_status(run_id, "b" * 16, "busy", busy={"reason": "lock", "holder": "s2v tts server (pid 4242)"}),
-                 73)
-        if code:
+        if code and code != 73:
             emit({"contract": CONTRACT, "error": os.environ.get("FAKE_LMN_ERROR", "run failed")}, code)
         cur = runs.get(run_id)
         if cur and cur["status"]["state"] in LIVE:
@@ -283,6 +281,15 @@ def generator(cmd):
         attempt = hashlib.sha256((run_id + str(len(runs)) + str(time.time())).encode()).hexdigest()[:16]
         sf = os.path.join(sd, "runs", run_id, "attempts", attempt, "status.json")
         os.makedirs(os.path.dirname(sf), exist_ok=True)
+        if code == 73:  # the machine stays busy for --wait: limner closes the attempt `busy`, and it
+            # stays the run's current attempt (a later cancel of this run answers 73)
+            st = new_status(run_id, attempt, "busy", busy={"reason": "lock", "holder": "s2v tts server (pid 4242)"},
+                            status_file=sf)
+            st["pending"] = [j["id"] for j in spec["jobs"]]
+            runs[run_id] = {"status": st, "jobs": spec["jobs"], "root": root, "state_dir": sd, "polls": 0,
+                            "fail": False, "fail_used": True}
+            save_runs(runs)
+            emit(st, 73)
         st = new_status(run_id, attempt, "starting", status_file=sf)
         st["pending"] = [j["id"] for j in spec["jobs"]]
         first = not any(r.get("fail_used") for r in runs.values())
