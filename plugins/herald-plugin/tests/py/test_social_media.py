@@ -386,7 +386,9 @@ class SpecTests(MediaCase):
         s["cards"][1]["sources"] = QUOTE
         self.assertEqual(sm.image_text(s, "cards"), "Renewing in two steps\nStep one\nBook a slot online.\n"
                                                     "Read the full guide")  # never the handle (v3 R2-3)
-        self.assertEqual(sm.spec_sources(s, "cards"), QUOTE)
+        self.assertEqual(sm.spec_sources(s, "cards"), [dict(QUOTE[0], _where="card 2 sources")])
+        self.assertEqual(sm.image_fields(s, "cards")[2:], [("card 2 body", "Book a slot online."),
+                                                          ("card 3 message", "Read the full guide")])
         c = self.comic_spec(caption={"text": "Monday", "pos": "top"})
         self.assertTrue(sm.image_text(c, "comic").startswith("Monday\nGood morning\n"))
 
@@ -1030,6 +1032,63 @@ class Review1Tests(MediaCase):
         self.guide(formats=["image", "cards"])
         p = self.hrd("social", "prepare", "--sns", "x", "--n", "1", check=False)[1]
         self.assertIn("no text-only posts — use --format image | cards", p.stderr)
+
+
+class Review2Tests(MediaCase):
+    """REVIEW-22 round 2."""
+
+    def masked(self, body, card_body, slug=None):
+        rel = self.prep("cards", slug=slug)["drafts"][0]
+        self.mdraft(rel, body, self.cards_spec(body=card_body))
+        return rel
+
+    def test_picture_words_judged_on_their_own(self):  # R2-1 [MAJOR]
+        for body, card, rid, slug in (
+                ("Bills rose 10%, 20% and 30% this year.", "Up 90% this year", "s9b-statistic", None),
+                ("According to the survey 3 of us are late.", "According to a survey, 7 in 10 owners agree",
+                 "s9b-statistic", None),
+                ("Thanks to Safie I sleep well. #PR " + URL, "Thanks to Safie our shop is safe",
+                 "s9a-service-experience", "old-post")):
+            rel = self.masked(body, card, slug)
+            out = self.media(rel)
+            self.assertEqual((out["state"], [e["code"] for e in out["errors"]]), ("failed", [rid]), (body, out))
+            self.assertIn(card, out["errors"][0]["message"])
+            res = self.check(rel)
+            mine = [f for f in res["failed"] if f.get("where") == "card 2 body"]
+            self.assertEqual([f["id"] for f in mine], [rid], res)
+            self.assertIn('card 2 body "%s"' % card, mine[0]["detail"])  # the human sees the picture's words
+            self.assertTrue(any(f["id"] == rid and "where" not in f for f in res["failed"]))  # and the post's own
+        rel = self.masked("Bills rose 30% this year.", "Book a slot online.")  # the post's alone: pictures made
+        self.assertEqual(self.media(rel)["state"], "done")
+
+    def test_guard_quote_aware(self):  # R2-2, R2-3
+        g = GuardTests.guard
+        for cmd in ("bash -c 'lmn compose --layout a.json --out x.png; true'",
+                    "sh -c 'lmn compose --layout a --out b.png | cat'",
+                    "echo $(lmn compose --layout a --out b.png | tail -1)",
+                    "bash -c 'lmn compose --layout a && echo ok'", 'echo "$(lmn doctor)"'):
+            self.assertEqual(g(self, cmd), "ask", cmd)
+            self.assertEqual(g(self, cmd, {"HRD_UNATTENDED": "1"}), "deny", cmd)
+        for cmd in ("git commit -m 'docs: run `lmn doctor` before compose'",
+                    "git commit -F - <<'EOF'\nHerald calls `lmn compose` itself\nEOF",
+                    "grep -n '`lmn compose`' docs/x.md", "echo 'see $(lmn doctor) output'"):
+            self.assertEqual(g(self, cmd), "allow", cmd)
+
+    def test_disjoint_house_formats(self):  # R2-4
+        p = social.memory_rel("pending", "channels", "x.md")
+        self.write(p, guide_text(media_head(formats=["text", "image"], house={"formats": ["comic"]})))
+        out = social.lint(self.root, self.cfg, "edit", p, "docs/editorial/channels/x.md")
+        self.assertIn("house.formats leaves no format", "\n".join(out["errors"]))
+        self.write(p, guide_text(media_head(formats=["text", "image"], house={"formats": ["comic", "text"]})))
+        out = social.lint(self.root, self.cfg, "refresh", p, "docs/editorial/channels/x.md")
+        self.assertFalse(any("house.formats" in e for e in out["errors"]))
+
+    def test_any_other_file_is_stale(self):  # R2-5
+        rel = self.promo_image()
+        self.media(rel)
+        d = os.path.join(self.root, sm.media_rel("x", rel))
+        open(os.path.join(d, "2.jpg"), "wb").write(b"jpeg")
+        self.assertIn("media-stale", self.failed(rel))
 
 
 class StructureTests(unittest.TestCase):

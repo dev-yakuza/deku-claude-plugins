@@ -104,10 +104,6 @@ COMPOSE_TIMEOUT = 60
 COMPOSE_START_MIN = 15
 # limner `problems` a human may accept with a reason (`close --override`, §10 R3-3); the others never
 OVERRIDABLE_PROBLEMS = ("overflow", "too_small", "low_contrast", "overlap", "tail_crosses")
-# rules on the post text alone: they never hold a picture back (the words in the pictures are
-# judged before anything is drawn — v2 R1-12, v4 R3-2 — the rest waits for check)
-POST_ONLY_RULES = ("length", "hashtags", "link-position", "promo-url", "promo-link-missing", "daily-url",
-                   "disclosure", "disclosure-ai")
 CONTROL_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f  ]")
 
 
@@ -493,12 +489,37 @@ def image_text(spec, fmt):
     return "\n".join(out)
 
 
+def image_fields(spec, fmt):
+    """[(label, text)] of the words drawn into the pictures, in order — the units the content rules
+    judge one by one, so a failure names the picture's words (review 22 R2-1). Never the handle."""
+    out = []
+    if fmt == "cards":
+        for i, c in enumerate(spec.get("cards") or [], 1):
+            if isinstance(c, dict):
+                for k in ("title", "subtitle", "heading", "body", "message"):
+                    if isinstance(c.get(k), str) and c[k].strip():
+                        out.append(("card %d %s" % (i, k), c[k]))
+    elif fmt == "comic":
+        for i, p in enumerate(spec.get("panels") or [], 1):
+            if not isinstance(p, dict):
+                continue
+            cap = p.get("caption")
+            if isinstance(cap, dict) and isinstance(cap.get("text"), str) and cap["text"].strip():
+                out.append(("panel %d caption" % i, cap["text"]))
+            for k, b in enumerate(p.get("bubbles") or [], 1):
+                if isinstance(b, dict) and isinstance(b.get("text"), str) and b["text"].strip():
+                    out.append(("panel %d bubble %d" % (i, k), b["text"]))
+    return out
+
+
 def spec_sources(spec, fmt):
+    """The spec's quotes, each tagged with its card or panel (`_where`) for the failure detail."""
     items = (spec.get("cards") if fmt == "cards" else spec.get("panels") if fmt == "comic" else None) or []
     out = []
-    for x in items:
+    for i, x in enumerate(items, 1):
         if isinstance(x, dict) and isinstance(x.get("sources"), list):
-            out += [s for s in x["sources"] if isinstance(s, dict)]
+            out += [dict(s, _where="%s %d sources" % ("card" if fmt == "cards" else "panel", i))
+                    for s in x["sources"] if isinstance(s, dict)]
     return out
 
 
@@ -527,7 +548,8 @@ def media_input(root, cfg, rec, rel, text=None, stage="compose"):
     """{spec, raw, errors, text, sources, generated, mats} of one draft's media (check's and
     media's shared reading). `errors` are `media-spec` lines."""
     from .social import _load_committed, effective
-    out = {"spec": None, "raw": None, "errors": [], "text": "", "sources": [], "generated": False, "mats": {}}
+    out = {"spec": None, "raw": None, "errors": [], "text": "", "fields": [], "sources": [], "generated": False,
+           "mats": {}}
     fmt = rec.get("format") or "text"
     raw, spec, err = load_spec(root, rel)
     out["raw"] = raw
@@ -542,6 +564,7 @@ def media_input(root, cfg, rec, rel, text=None, stage="compose"):
     out["spec"] = spec
     out["errors"] = spec_problems(spec, fmt, rec.get("kind"), mats, persona, stage, effective(h)["max_images"])
     out["text"] = image_text(spec, fmt)
+    out["fields"] = image_fields(spec, fmt)
     out["sources"] = spec_sources(spec, fmt)
     out["generated"] = spec_generated(spec, fmt, mats)
     return out
@@ -749,14 +772,13 @@ def media(root, cfg, draft, wait=images.GEN_WAIT, stage=None):
         for e in mi["errors"]:
             fail("media-spec", "content", e)
         return out
+    # the words in the pictures are judged on their own (the profile is the whole post's) and any
+    # failure they cause holds the pictures back; the post text's own failures wait for check, where
+    # a human may still accept an overridable one (review 22 #2, R2-1)
     res = evaluate(root, cfg, rec, text, media=mi)
-    # an overridable failure the post text alone has stays the human's to accept at close (review
-    # 22 #2); one the pictures' words cause, and every hard one, holds the pictures back
-    body_only = {(f["id"], f["detail"]) for f in evaluate(root, cfg, rec, text)["failed"] if f["overridable"]}
     for f in res["failed"]:
-        if f["id"] in POST_ONLY_RULES or (f["overridable"] and (f["id"], f["detail"]) in body_only):
-            continue
-        fail(f["id"], "content", f["detail"])
+        if f.get("where"):
+            fail(f["id"], "content", f["detail"])
     if out["errors"]:
         return out
     spec, mats = mi["spec"], mi["mats"]
@@ -1003,9 +1025,10 @@ def freshness(root, cfg, rec, rel, mi):
         stale.append("the spec cannot be laid out")
     files = {f.get("i"): f for f in ev.get("files") or [] if isinstance(f, dict)}
     mdir = os.path.join(root, media_rel(rec["sns"], rel))
-    # pictures only: a Finder `.DS_Store` or other hidden file never goes up (review 22 #4)
+    # every file but hidden ones (a Finder `.DS_Store`) and the preview folder: anything else in the
+    # folder is not what Herald made (review 22 #4, R2-5)
     present = sorted(x for x in (os.listdir(mdir) if os.path.isdir(mdir) else [])
-                     if not x.startswith(".") and x.lower().endswith(".png"))
+                     if not x.startswith(".") and x != "preview")
     want = ["%d.png" % i for i in range(1, len(lays) + 1)]
     if lays and present != want:
         stale.append("the media folder holds %s, not %s" % (", ".join(present) or "nothing", ", ".join(want)))

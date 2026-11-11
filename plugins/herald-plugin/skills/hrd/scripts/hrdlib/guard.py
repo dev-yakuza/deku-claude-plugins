@@ -246,42 +246,188 @@ def runs_limner(argv, cfg):
     return False
 
 
-SUBST_RE = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
 SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
+CMD_SEPS = (";", "&", "|", "\n", "(", ")")
 
 
-def limner_in(seg, cfg, depth=0):
-    """`runs_limner` through what the shell would run inside this segment (review 22 #3): `$( )` and
-    backticks, `bash|sh|zsh -c '<cmd>'`, `eval <cmd>`, `find … -exec|-execdir <cmd>`, a leading
-    `(` or `{`, and `python -m limner`; `xargs` and env wrappers are unwrapped by `normalize`."""
-    if depth > 3:
-        return False
-    for m in SUBST_RE.finditer(seg):
-        if any(limner_in(x, cfg, depth + 1) for x in segments(m.group(1) or m.group(2) or "")):
-            return True
-    argv = normalize(seg.lstrip("({ \t"))
-    if not argv:
-        return False
-    if runs_limner(argv, cfg):
-        return True
-    inner = []
-    if argv[0] in SHELLS:
-        i = next((k for k, x in enumerate(argv[1:], 1) if x == "-c" or (x.startswith("-") and "c" in x[1:]
-                                                                        and not x.startswith("--"))), None)
-        if i is not None and i + 1 < len(argv):
-            inner.append(argv[i + 1])
-    elif argv[0] == "eval":
-        inner.append(" ".join(argv[1:]))
-    elif argv[0] == "find":
-        for k, x in enumerate(argv):
-            if x in ("-exec", "-execdir", "-ok", "-okdir"):
-                rest = []
-                for y in argv[k + 1:]:
-                    if y in (";", "\\;", "+"):
+def _balanced(cmd, i):
+    """The end index (after the `)`) of a `$(` whose body starts at i, quotes respected."""
+    depth, q = 1, None
+    while i < len(cmd):
+        c = cmd[i]
+        if q == "'":
+            q = None if c == "'" else q
+        elif c == "\\":
+            i += 1
+        elif q == '"':
+            q = None if c == '"' else q
+        elif c in "'\"":
+            q = c
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return len(cmd)
+
+
+def shell_words(cmd):
+    """(commands, substitutions) of a shell line as the shell would run it (review 22 R2-2/R2-3):
+    words of each simple command, split at `; & | && || ( )` and newlines outside quotes, quotes
+    removed; `$( )` and backticks outside single quotes collected for their own reading; nothing
+    inside single quotes or a quoted heredoc's body is a command (an unquoted body only yields its
+    substitutions)."""
+    cmds, subs, words, cur, have = [], [], [], [], False
+    heredocs = []
+    i, n = 0, len(cmd)
+
+    def end_word():
+        nonlocal cur, have
+        if have:
+            words.append("".join(cur))
+        cur, have = [], False
+
+    def end_cmd():
+        nonlocal words
+        end_word()
+        if words:
+            cmds.append(words)
+        words = []
+    while i < n:
+        c = cmd[i]
+        if c == "\\" and i + 1 < n:
+            if cmd[i + 1] != "\n":
+                cur.append(cmd[i + 1])
+                have = True
+            i += 2
+            continue
+        if c == "'":
+            k = cmd.find("'", i + 1)
+            k = n if k < 0 else k
+            cur.append(cmd[i + 1:k])
+            have = True
+            i = k + 1
+            continue
+        if c == '"':
+            i += 1
+            while i < n and cmd[i] != '"':
+                if cmd[i] == "\\" and i + 1 < n:
+                    cur.append(cmd[i + 1])
+                    i += 2
+                    continue
+                if cmd.startswith("$(", i):
+                    k = _balanced(cmd, i + 2)
+                    subs.append(cmd[i + 2:k - 1])
+                    cur.append(cmd[i:k])
+                    i = k
+                    continue
+                if cmd[i] == "`":
+                    k = cmd.find("`", i + 1)
+                    k = n if k < 0 else k
+                    subs.append(cmd[i + 1:k])
+                    cur.append(cmd[i:k + 1])
+                    i = k + 1
+                    continue
+                cur.append(cmd[i])
+                i += 1
+            have = True
+            i += 1
+            continue
+        if cmd.startswith("$(", i):
+            k = _balanced(cmd, i + 2)
+            subs.append(cmd[i + 2:k - 1])
+            cur.append(cmd[i:k])
+            have = True
+            i = k
+            continue
+        if c == "`":
+            k = cmd.find("`", i + 1)
+            k = n if k < 0 else k
+            subs.append(cmd[i + 1:k])
+            cur.append(cmd[i:k + 1])
+            have = True
+            i = k + 1
+            continue
+        if c == "#" and not have:  # a comment to the end of the line
+            k = cmd.find("\n", i)
+            i = n if k < 0 else k
+            continue
+        if cmd.startswith("<<", i) and not cmd.startswith("<<<", i):
+            end_word()
+            m = re.match(r"<<-?\s*(['\"]?)([A-Za-z0-9_.-]+)\1", cmd[i:])
+            if m:
+                heredocs.append((m.group(2), bool(m.group(1))))
+                i += m.end()
+                continue
+        if c == "\n" and heredocs:
+            end_cmd()
+            i += 1
+            for delim, quoted in heredocs:  # the bodies, line by line, up to each delimiter
+                while i < n:
+                    k = cmd.find("\n", i)
+                    k = n if k < 0 else k
+                    line = cmd[i:k]
+                    i = k + 1
+                    if line.strip() == delim:
                         break
-                    rest.append(y)
-                inner.append(" ".join(shlex.quote(y) for y in rest))
-    return any(limner_in(x, cfg, depth + 1) for c in inner for x in segments(c))
+                    if not quoted:
+                        subs += shell_words(line)[1]
+            heredocs = []
+            continue
+        if c in CMD_SEPS or (c in "{}" and not have):
+            end_cmd()
+            i += 1
+            continue
+        if c in " \t":
+            end_word()
+            i += 1
+            continue
+        cur.append(c)
+        have = True
+        i += 1
+    end_cmd()
+    return cmds, subs
+
+
+def limner_in(cmd, cfg, depth=0):
+    """A call of limner anywhere the shell would run it (review 22 #3, R2-2/R2-3): a command word
+    that is `lmn`, the configured limner command or `python -m limner` (wrappers such as `env`,
+    `timeout`, `xargs` unwrapped), also inside `bash|sh|zsh -c '<script>'`, `eval`, `find -exec` and
+    `$( )`/backticks outside single quotes. Text the shell only passes on (quoted arguments, commit
+    messages, heredoc bodies) is never a call."""
+    if depth > 4:
+        return False
+    cmds, subs = shell_words(cmd)
+    if any(limner_in(x, cfg, depth + 1) for x in subs):
+        return True
+    for words in cmds:
+        argv = unwrap(list(words))
+        if not argv:
+            continue
+        if runs_limner(argv, cfg):
+            return True
+        inner = []
+        if argv[0] in SHELLS:
+            k = next((k for k, x in enumerate(argv[1:], 1) if x == "-c" or (x.startswith("-") and not x.startswith("--")
+                                                                           and "c" in x[1:])), None)
+            if k is not None and k + 1 < len(argv):
+                inner.append(argv[k + 1])
+        elif argv[0] == "eval":
+            inner.append(" ".join(argv[1:]))
+        elif argv[0] == "find":
+            for k, x in enumerate(argv):
+                if x in ("-exec", "-execdir", "-ok", "-okdir"):
+                    rest = []
+                    for y in argv[k + 1:]:
+                        if y in (";", "+"):
+                            break
+                        rest.append(y)
+                    inner.append(" ".join(shlex.quote(y) for y in rest))
+        if any(limner_in(x, cfg, depth + 1) for x in inner):
+            return True
+    return False
 
 
 def segments(cmd):
@@ -640,6 +786,11 @@ def check_bash(root, cfg, cmd):
     sigs = deploy_signatures((cfg.get("commands", "deploy") or "").strip())
     pending = set()  # paths earlier `git add/rm/mv` segments of this same command will stage
     branch = current_branch(root)  # updated by switch/checkout segments
+    # 1e. limner itself: Herald's pictures and the records that vouch for them are written only
+    # through Herald (10-social-media.md §10 R3-1 — a direct `lmn compose` could redraw them)
+    if limner_in(cmd, cfg):
+        protect("running limner directly — Herald calls it (`HRD image …`, `HRD social media`); a direct call "
+                "can redraw a picture and the record Herald checks it against.")
     for seg in segments(cmd):
         argv = normalize(seg)
         if not argv:
@@ -673,11 +824,6 @@ def check_bash(root, cfg, cmd):
         if "image" in argv and ("confirm" in argv or "reject" in argv):
             protect("`HRD image %s` records a human's decision about an external image — only the human decides."
                     % ("confirm" if "confirm" in argv else "reject"))
-        # 1e. limner itself: Herald's pictures and the records that vouch for them are written only
-        # through Herald (10-social-media.md §10 R3-1 — a direct `lmn compose` could redraw them)
-        if limner_in(seg, cfg):
-            protect("running limner directly — Herald calls it (`HRD image …`, `HRD social media`); a direct call "
-                    "can redraw a picture and the record Herald checks it against.")
         # 2. deploy
         if any(contains(canon(strip_noise(argv)), s) for s in sigs):
             if unattended():

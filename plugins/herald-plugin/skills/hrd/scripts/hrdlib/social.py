@@ -540,6 +540,9 @@ def _media_field_problems(h, house):
     if "formats" in house:
         if not _formats_ok(house["formats"]):
             errors.append("house.formats must be a non-empty list of text, image, cards, comic")
+        elif not set(house["formats"]) & set(h.get("formats") or ["text"]):  # review 22 R2-4
+            errors.append("house.formats leaves no format the research allows (%s)"
+                          % ", ".join(h.get("formats") or ["text"]))
         elif not set(house["formats"]) <= set(h.get("formats") or ["text"]):
             warnings.append("house.formats only narrows the researched formats (%s) — the others are ignored"
                             % ", ".join(h.get("formats") or ["text"]))
@@ -1065,8 +1068,11 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD", media=N
     profile = rec.get("kind")
     media = media or {}
 
-    def fail(rid, detail):
-        failed.append({"id": rid, "overridable": _overridable(rid, profile), "detail": detail})
+    def fail(rid, detail, where=None):
+        f = {"id": rid, "overridable": _overridable(rid, profile), "detail": detail}
+        if where:  # caused by the words in a picture (10-social-media.md P23)
+            f["where"] = where
+        failed.append(f)
 
     hdr, body, herr = parse_draft(text)
     if herr:
@@ -1098,7 +1104,7 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD", media=N
     urls = find_urls(unicodedata.normalize("NFKC", post))  # `Ｓａｆｉｅ．ｃｏｍ` is a URL once normalized
     terms = service_terms(persona, cfg)
     masked = mask_urls(norm)
-    # the content rules read the post and the words in its pictures, a field a line (P23)
+    # the profile reads the post and the words in its pictures, a field a line (P23)
     words = post + ("\n" + media["text"] if media.get("text") else "")
     cmasked = mask_urls(fold(words)) if media.get("text") else masked
     mentions = term_spans(cmasked, terms)
@@ -1171,66 +1177,82 @@ def evaluate(root, cfg, rec, text, sources=True, basis=True, rev="HEAD", media=N
         elif ai.get("where") == "setting":
             settings.append("ai")
     if profile == "daily+service" and not daily_service_allowed(cfg, lang):
-        fail("service-mention-not-allowed", "posts in %s may not mention the service (promotion.md is in %s)"
-             % (lang, cfg.get("language")))
+        named = [label for label, t in media.get("fields") or [] if term_spans(mask_urls(fold(t)), terms)]
+        fail("service-mention-not-allowed", "posts in %s may not mention the service (promotion.md is in %s)%s"
+             % (lang, cfg.get("language"), "" if term_spans(masked, terms) else ": %s" % ", ".join(named)),
+             where=None if term_spans(masked, terms) else (named[0] if named else None))
     # sources (S7)
     if sources:
         _check_sources(root, cfg, rec, hdr, profile, lang, fail, extra=media.get("sources"))
-    # forbidden
+    # forbidden and S9 — on the post text, then on each field drawn into a picture on its own, so a
+    # failure names the words that cause it and a picture's own failure is told apart from the
+    # post's (`where`, review 22 R2-1); a field is one line, so no sentence spans two units
     try:
         gate = _gate_forbidden(root, cfg, lang, rev)
     except HeraldError as e:
         gate = []
         fail("forbidden-invalid", str(e))
     rules = list(h.get("forbidden") or []) + list(persona.get("forbidden") or []) + gate
+    pats = PATTERNS.get(primary(lang))
+    if not pats:
+        warnings.append("no default S9 patterns for %s — check statistics and service-experience sentences by hand" % lang)
+    units = [(None, post)] + [(label, t) for label, t in media.get("fields") or [] if isinstance(t, str) and t.strip()]
+    for label, unit in units:
+        _content_rules(unit, label, rules, pats, profile, terms, fail, warnings)
+    return {"profile": profile, "failed": failed, "warnings": warnings, "settings": settings}
+
+
+def _content_rules(unit, label, rules, pats, profile, terms, fail, warnings):
+    """Forbidden words and S9 on one text unit: the post (`label` None) or one picture field."""
+    where = label
+
+    def say(detail):
+        return '%s "%s": %s' % (label, unit.strip()[:80], detail) if label else detail
     for r in rules:
         pat = r.get("pattern") or ""
         if not pat:
             continue
         if r.get("regex"):
             try:
-                hit = re.search(pat, words)
+                hit = re.search(pat, unit)
             except re.error as e:
-                if r.get("status") == "confirmed":
-                    fail("forbidden-invalid", "confirmed rule %r does not compile (%s)" % (pat, e))
-                else:
-                    warnings.append("draft rule %r does not compile (%s)" % (pat, e))
+                if label is None:  # said once, with the post
+                    if r.get("status") == "confirmed":
+                        fail("forbidden-invalid", "confirmed rule %r does not compile (%s)" % (pat, e))
+                    else:
+                        warnings.append("draft rule %r does not compile (%s)" % (pat, e))
                 continue
         else:
-            hit = pat in words
+            hit = pat in unit
         if hit:
             if r.get("status") == "confirmed":
-                fail("forbidden-confirmed", "forbidden %r%s" % (pat, " (%s)" % r["note"] if r.get("note") else ""))
+                fail("forbidden-confirmed", say("forbidden %r%s" % (pat, " (%s)" % r["note"] if r.get("note") else "")),
+                     where)
             else:
-                warnings.append("draft rule %r matched" % pat)
-    # S9
-    pats = PATTERNS.get(primary(lang))
-    spans = sentence_spans(cmasked)
+                warnings.append(say("draft rule %r matched" % pat))
+    masked = mask_urls(fold(unit))
+    spans = sentence_spans(masked)
 
     def same_sentence(a_spans, b_spans):
         for s, e in spans:
             if any(s <= a < e for a, _ in a_spans) and any(s <= b < e for b, _ in b_spans):
-                return cmasked[s:e].strip()
+                return masked[s:e].strip()
         return None
-
     if pats:
-        exp = [m.span() for m in re.finditer(pats["experience"], cmasked, re.I)]
-        hit = same_sentence(mentions, exp)
+        exp = [m.span() for m in re.finditer(pats["experience"], masked, re.I)]
+        hit = same_sentence(term_spans(masked, terms), exp)
         if hit:
-            fail("s9a-service-experience", "the service told as a personal experience: %r" % hit[:120])
-    else:
-        warnings.append("no default S9 patterns for %s — check statistics and service-experience sentences by hand" % lang)
+            fail("s9a-service-experience", say("the service told as a personal experience: %r" % hit[:120]), where)
     if profile in ("daily", "daily+service"):
-        unit = [m.group(0) for m in UNIT_RE.finditer(cmasked)] + [m.group(0) for m in BAE_RE.finditer(cmasked)]
-        if unit:
-            fail("s9b-statistic", "statistic-like numbers in a daily post: %s" % ", ".join(unit[:3]))
+        found = [m.group(0) for m in UNIT_RE.finditer(masked)] + [m.group(0) for m in BAE_RE.finditer(masked)]
+        if found:
+            fail("s9b-statistic", say("statistic-like numbers in a daily post: %s" % ", ".join(found[:3])), where)
         if pats:
-            vocab = [m.span() for m in re.finditer(pats["stats"], cmasked, re.I)]
-            digits = [m.span() for m in DIGIT_RE.finditer(cmasked)]
+            vocab = [m.span() for m in re.finditer(pats["stats"], masked, re.I)]
+            digits = [m.span() for m in DIGIT_RE.finditer(masked)]
             hit = same_sentence(vocab, digits)
             if hit:
-                fail("s9b-statistic", "statistics wording with a number: %r" % hit[:120])
-    return {"profile": profile, "failed": failed, "warnings": warnings, "settings": settings}
+                fail("s9b-statistic", say("statistics wording with a number: %r" % hit[:120]), where)
 
 
 def _check_sources(root, cfg, rec, hdr, profile, lang, fail, extra=None):
@@ -1244,7 +1266,10 @@ def _check_sources(root, cfg, rec, hdr, profile, lang, fail, extra=None):
     sources = sources + list(extra or [])
     if profile == "daily":
         if sources:
-            fail("daily-sources", "a daily post states no facts — sources must be []")
+            pic = [s.get("_where") for s in sources if s.get("_where")]
+            fail("daily-sources", "a daily post states no facts — sources must be []%s"
+                 % (" (%s)" % ", ".join(dict.fromkeys(pic)) if pic else ""),
+                 pic[0] if pic and len(pic) == len(sources) else None)
         return
     if not sources:
         fail("sources", "a %s post needs at least one source quote" % profile)
@@ -1257,23 +1282,26 @@ def _check_sources(root, cfg, rec, hdr, profile, lang, fail, extra=None):
         return cache[rel]
 
     for s in sources:
-        quote, origin = s.get("text"), s.get("from")
+        quote, origin, w = s.get("text"), s.get("from"), s.get("_where")  # `_where`: a picture's quote
+
+        def bad(rid, detail):
+            fail(rid, "%s: %s" % (w, detail) if w else detail, w)
         if not isinstance(quote, str) or len(re.sub(r"\s", "", plain(quote))) < 10:
-            fail("sources", "a quote needs at least 10 characters: %r" % (quote,))
+            bad("sources", "a quote needs at least 10 characters: %r" % (quote,))
             continue
         q = plain(quote)
         if profile == "daily+service" and origin != "promotion":
-            fail("sources", "a daily post mentioning the service quotes promotion.md only: %r" % quote[:80])
+            bad("sources", "a daily post mentioning the service quotes promotion.md only: %r" % quote[:80])
         elif origin == "body":
             if q not in text_of(rec.get("body") or ""):
-                fail("sources", "not in the verified article (%s): %r" % (rec.get("body"), quote[:80]))
+                bad("sources", "not in the verified article (%s): %r" % (rec.get("body"), quote[:80]))
         elif origin == "promotion":
             if not daily_service_allowed(cfg, lang):
-                fail("promotion-lang", "promotion.md is in %s; a %s post quotes the article only" % (cfg.get("language"), lang))
+                bad("promotion-lang", "promotion.md is in %s; a %s post quotes the article only" % (cfg.get("language"), lang))
             elif q not in text_of(PROMOTION):
-                fail("promotion-quote-not-found", "not in promotion.md: %r" % quote[:80])
+                bad("promotion-quote-not-found", "not in promotion.md: %r" % quote[:80])
         else:
-            fail("sources", "from must be body or promotion: %r" % (origin,))
+            bad("sources", "from must be body or promotion: %r" % (origin,))
 
 
 def _result(root, rel, raw, rec, res, record):
