@@ -114,7 +114,9 @@ straight to the tooling hold of `atoms/_stages.md` § Holds, note `tooling: imag
    yet: spawn the illustrator once for **that only** (read list: the article, `images.json`, the
    `HRD image snippet` output of those ids; task: replace those references with the snippet,
    touch nothing else) — not a loopback — then go on from step 2.
-4a. **Scenes** (`<w>images.json` has a `kind: scene` item): every time the collect step is entered
+4a. **Scenes** (`<w>images.json` has a `kind: scene` item, **or** `HRD image status` shows a `gen` —
+   the last scene place was just removed and its run may still be drawing: `generate` stops it
+   and answers `done`): every time the collect step is entered
    — from step 1, or at step 3 on a resume — first `HRD image generate --topic <id> --reset-wait`
    (never when repeating 4a). Then `HRD image generate
    --topic <id> --wait 240` with the Bash `timeout` at `(wait + 60) × 1000` ms. By `state`:

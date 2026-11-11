@@ -287,12 +287,14 @@ class GenerateTests(SceneCase):
             rid = out["run_id"]
             out = self.gen()
             self.assertEqual((out["run_id"], [x["id"] for x in out["generated"]], out["skipped"]), (rid, ["g2"], ["g1"]))
-            out = self.gen()  # the run ends
+            self.assertEqual(self.gcalls("cancel"), [])
+            out = self.gen()  # nothing left to make: the run, only finishing, is stopped (round 2 m5)
             self.assertEqual((out["state"], out["run_id"]), ("done", rid))
+            self.assertEqual(len(self.gcalls("cancel")), 1)
+            self.assertNotIn("gen", self.state()["images"])
             n = len(self.calls())
             out = self.gen()  # nothing left to make, no run going: no limner call at all
         self.assertEqual((out["state"], self.calls()[n:]), ("done", []))
-        self.assertEqual(self.gcalls("cancel"), [])
         self.assertEqual(sorted(x["id"] for x in self.gen_lines()), ["g1", "g2"])  # R2-1: one line each
         self.assertEqual(images.status(self.root, self.cfg, TID)["items"][0]["attempts"], 1)
 
@@ -1126,6 +1128,110 @@ class ReviewRound1Tests(SceneCase):
         self.assertEqual(self.plan()["errors"], [])
         rows = "\n".join(images.status(self.root, self.cfg, TID)["pr_rows"])
         self.assertIn("- g1: `A traveler @someone <b>at</b> [x](https://x.test) a counter`", rows)
+
+
+class ReviewRound2Tests(SceneCase):
+    def test_label_after_a_move(self):
+        """m1: a state still on the old slug — its scenes follow the move chain."""
+        self.ready()
+        shutil.move(os.path.join(self.root, IMG), os.path.join(self.root, "public/blog-images/c-post"))
+        old = os.path.join(self.root, "src/content/blog/%s.md" % SLUG)
+        body = open(old).read().replace("/blog-images/%s/" % SLUG, "/blog-images/c-post/")
+        os.remove(old)
+        store.save_published(self.root, {"articles": [{"slug": "c-post", "path": "src/content/blog/c-post.md",
+                                                       "origin": "herald", "moved_from": [{"slug": SLUG}]}]})
+        st = {"slug": "c-post", "topic_id": "r-0002"}
+        self.write("src/content/blog/c-post.md", body)
+        self.assertEqual(images.label_problems(self.root, self.cfg, "r-0002", st), [])
+        self.write("src/content/blog/c-post.md", body.replace("*%s*" % LABEL, "", 1))
+        self.assertTrue(images.label_problems(self.root, self.cfg, "r-0002", st))
+
+    def test_plan_keeps_regenerated(self):
+        """m2"""
+        self.generated()
+        for f in ("g1-counter.png", "g2-platform.png"):
+            os.remove(os.path.join(self.root, IMG, f))
+        self.assertEqual(sorted(self.gen(env={"FAKE_LMN_LOCK": "lock2"})["regenerated"]), ["g1", "g2"])
+        self.plan()
+        self.assertEqual([i["regenerated"] for i in images.status(self.root, self.cfg, TID)["items"]], [True, True])
+
+    def test_orphan_stop_within_the_call(self):
+        """m3: the orphan_child stop is capped to the call's room too."""
+        self.plan()
+        seen = []
+        real = limner.run
+
+        def spy(root, cfg, sub, opts=(), timeout=60, command=None):
+            seen.append((sub[0], timeout))
+            return real(root, cfg, sub, opts, timeout=timeout, command=command)
+        with mock.patch.object(images, "GEN_SLACK", 5), mock.patch.object(limner, "run", side_effect=spy):
+            self.gen(env={"FAKE_LMN_STATE": "orphan_child"})
+        cancels = [t for sub, t in seen if sub == "cancel"]
+        # after the probe (`--version`, `run --check`, before the call's budget logic): all capped
+        self.assertTrue(all(t <= 5 for _, t in seen[2:]), seen)
+        self.assertLessEqual(len(cancels), 2)
+
+    def test_last_place_removed_stops_the_run(self):
+        """m4: the only scene dropped while drawn — generate (no scene left) stops the run."""
+        self.manifest([self.g1()])
+        self.scene_body(g2="")
+        self.plan()
+        with mock.patch.dict(os.environ, {"FAKE_LMN_STATUS": "10"}):
+            rid = self.gen()["run_id"]
+        images.reject(self.root, self.cfg, TID, "g1", reason="not needed", drop=True)
+        self.manifest([])
+        self.scene_body(g1="", g2="")
+        self.plan()
+        self.assertEqual(self.gen()["state"], "done")
+        c = self.gcalls("cancel")
+        self.assertEqual(c[-1][c[-1].index("--run-id") + 1], rid)
+        self.assertNotIn("gen", self.state()["images"])
+
+    def test_new_run_never_redraws_confirmed(self):
+        """m5: a confirmed scene stays out of a new run's job."""
+        self.generated()
+        images.confirm(self.root, self.cfg, TID, "g1")
+        self.manifest([self.g1(), self.g2(seed=8)])
+        self.plan()
+        out = self.gen(env={"FAKE_LMN_LOCK": "lock2"})
+        self.assertEqual((out["state"], out["regenerated"]), ("done", []), out)
+        job = json.load(open(os.path.join(self.root, ".limner/herald-jobs/%s.json" % TID)))
+        self.assertEqual([j["id"] for j in job["jobs"]], ["g2"])
+
+    def test_label_url_variants(self):
+        """m6"""
+        self.ready()
+        st = self.state()
+        r = self.g1()["ref"]
+        for form in ("![x](https://example.test%s)", "![x](http://example.test%s)", "![x](//example.test%s)",
+                     "![x](https://EXAMPLE.test%s)", "![x](https://www.example.test%s)", "![x](%s?v=2)",
+                     "![x][a]\n\n[a]: %s", "<img src=%s alt=x>"):
+            with self.subTest(form=form):
+                self.scene_body(g1=form % r)
+                self.assertTrue(images.label_problems(self.root, self.cfg, TID, st), form)
+        self.scene_body(g1="![x](https://elsewhere.test%s)" % r)  # another host: the gate's hotlink rule
+        self.assertEqual(images.label_problems(self.root, self.cfg, TID, st), [])
+
+    def test_seed_back_and_forth_is_no_update(self):
+        """n7: a seed changed by hand and back — drawn again, but no limner update."""
+        self.generated()
+        self.manifest([self.g1(seed=42), self.g2()])
+        self.plan()
+        self.gen()
+        self.manifest([self.g1(), self.g2()])
+        self.plan()
+        out = self.gen()
+        self.assertEqual((out["state"], out["regenerated"]), ("done", []), out)
+
+    def test_other_machines_run_is_forgotten(self):
+        """n8: a recorded run this machine cannot reach (no limner) is forgotten, not retried."""
+        self.generated()
+        st = self.state()
+        st["images"]["gen"] = {"run_id": "f" * 16, "job_sha256": "x", "waited_s": 0}
+        store.save_state(self.root, TID, st)
+        os.remove(self.lmn)
+        self.assertEqual(self.gen()["state"], "done")
+        self.assertNotIn("gen", self.state()["images"])
 
 
 class StructureTests(unittest.TestCase):

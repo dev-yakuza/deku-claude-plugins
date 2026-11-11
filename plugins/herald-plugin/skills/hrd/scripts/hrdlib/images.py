@@ -1224,7 +1224,7 @@ def plan(root, cfg, tid, check_only=False):
             status = scene_state(root, cfg, tid, it, led)
             r = {"kind": "scene", "file": f, "key": key, "status": status}
             if p.get("key") == key:  # a new key drops the old picture's marks (R3-2)
-                for k in ("generated_at", "generated_blob", "reviewed", "review_note"):
+                for k in ("generated_at", "generated_blob", "reviewed", "review_note", "regenerated"):
                     if p.get(k) is not None:
                         r[k] = p[k]
                 if status == "ready":
@@ -1847,15 +1847,26 @@ def _settle(res, pre, jid, received):
         res["skipped"].append(jid)
 
 
-def _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, pre, partial=False, can_retry=False):
+def _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, pre, partial=False, can_retry=False,
+           room=None):
     """Read a limner result: receive `done ∪ skipped ∪ adopted` of the items not confirmed yet and
     — unless `partial` (a run still going) — map the rest by the §2.4.3 table; items generated or
     ready before this call are never failures (review round 1 m2). Returns True when only machine
     failures (memory, metal, signal, crashed) are left: one more `run` resumes the work."""
     by = {it["id"]: it for it in todo}
     # limner's own update: it drew again a job Herald did not change (the key had a line already)
-    updated = {g.get("id") for g in obj.get("regenerated") or [] if isinstance(g, dict) and g.get("id") in by and
-               led.gen_lines_key(tid, g["id"], scene_key(cfg, by[g["id"]]))}
+    updated = set()
+    for g in obj.get("regenerated") or []:
+        jid = g.get("id") if isinstance(g, dict) else None
+        if jid not in by:
+            continue
+        prior = led.gen_lines_key(tid, jid, scene_key(cfg, by[jid]))
+        rec = limner.read_record(root, cfg, jobs[jid]["out"]) or {}
+        drawn = (rec.get("model"), rec.get("lora"))
+        # a line of this key drawn with another model or LoRA revision: limner's lock changed (a
+        # seed changed by hand and back is no update — review round 2 n7)
+        if prior and all((x.get("model"), x.get("lora")) != drawn for x in prior):
+            updated.add(jid)
     done_ids = [d.get("id") for d in obj.get("done") or [] if isinstance(d, dict)]
     for jid in done_ids + list(obj.get("skipped") or []) + list(obj.get("adopted") or []):
         if jid in by and jid not in received and pre.get(jid) != "ready":
@@ -1886,7 +1897,7 @@ def _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, pre,
     if state == "crashed":
         general = general or ("crashed", "limner's worker ended without a result")
     elif state == "orphan_child":
-        _stop_run(root, cfg, run_id, 60)
+        _stop_run(root, cfg, run_id, room)
         general = ("orphan_child", "limner's generator outlived its worker — cancelled")
     elif state == "cancelled":
         general = general or ("cancelled", "the run was cancelled")
@@ -1920,15 +1931,20 @@ def _cancel_run(root, cfg, run_id, timeout=GEN_CANCEL_WAIT + 30):
                                                  ("--state-dir", sd), ("--wait-seconds", ws)], timeout)
 
 
-def _stop_run(root, cfg, run_id, timeout):
+def _stop_run(root, cfg, run_id, room=None):
     """Stop a run Herald no longer needs and judge it by the result's `state` (design R1-5 — never
     the exit code: `cancel` of an ended attempt answers that attempt's code, 73 for one that ended
     busy, 2 for one that ended on an environment failure). (state, None) when it is over — gone,
     finished or cancelled —, else (state, failure): `busy` while it still runs, or the code of an
-    answer with no status. `orphan_child` is cancelled once more."""
+    answer with no status. `orphan_child` is cancelled once more. `room()`: the seconds the call has
+    left, read again before each cancel (review round 2 m3) — none left: not stopped now (the next
+    call or `HRD image cancel` does). Not found or no limner here: not this machine's run, gone."""
     for n in range(2):
+        timeout = GEN_CANCEL_WAIT + 30 if room is None else int(min(GEN_CANCEL_WAIT + 30, room()))
+        if timeout < 2:
+            return None, ("busy", "no time left in this call to stop run %s" % run_id)
         c = _cancel_run(root, cfg, run_id, timeout)
-        if c["code"] == "not-found":
+        if c["code"] in ("not-found", "limner:missing"):
             return None, None
         obj = c["obj"] or {}
         state = obj.get("state") if _status_obj(obj) else None
@@ -1982,11 +1998,11 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
         raise HeraldError("--wait is 0 to %d seconds" % GEN_WAIT_MAX)
     rec = st.get("images") or {}
     man = load_manifest(root, tid)
-    if not rec.get("manifest") or rec.get("manifest") != _hash(root, manifest_rel(tid)) or \
-            rec.get("body") != _hash(root, cfg.body_path(st["slug"])):
+    scenes = sorted([i for i in _items(man) if i.get("kind") == "scene"], key=lambda i: _num(i.get("id")))
+    if scenes and (not rec.get("manifest") or rec.get("manifest") != _hash(root, manifest_rel(tid)) or
+                   rec.get("body") != _hash(root, cfg.body_path(st["slug"]))):
         raise HeraldError("images.json or the article changed since `HRD image plan` — run `HRD image plan --topic %s` "
                           "first" % tid)
-    scenes = sorted([i for i in _items(man) if i.get("kind") == "scene"], key=lambda i: _num(i.get("id")))
     led = Ledger(root)
     led.check(len(scenes))
     gen = rec.get("gen") if isinstance(rec.get("gen"), dict) else {}
@@ -1994,6 +2010,12 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
            "waited_s": gen.get("waited_s", 0), "run_id": gen.get("run_id")}
     items = rec.setdefault("items", {})
     sd, _, job_path, out_dir = _gen_paths(root, cfg, tid)
+    live_ids = set()
+    if gen.get("run_id"):  # the job file is the last job written — the run Herald follows
+        try:
+            live_ids = {j.get("id") for j in (read_json(job_path) or {}).get("jobs") or [] if isinstance(j, dict)}
+        except ValueError:
+            live_ids = set()
     todo, pre = [], {}
     for it in scenes:  # 2: what to make — before any probe (R2-4, R3-1)
         iid, key = it.get("id"), scene_key(cfg, it)
@@ -2003,20 +2025,18 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
             res["failed"].append({"id": iid, "code": "record-missing", "class": "env",
                                   "message": scene_fail_closed(tid, iid, r, led)})
             continue
-        if s == "ready" and not os.path.isfile(os.path.join(root, out_dir, "%s.png" % iid)):
-            continue  # confirmed, and limner's output is gone: never drawn again for nothing
-        # a confirmed picture whose output is still there stays in the job, so a confirmation
-        # never changes the run_id of a run in progress (review round 1 m4); limner skips it
+        if s == "ready" and iid not in live_ids:
+            continue  # confirmed: a new run never draws it (review round 2 m5)
+        # confirmed while the run Herald follows has it in its job: kept, so a confirmation never
+        # changes the run_id of a run in progress (review round 1 m4); limner skips it
         todo.append(it)
         pre[iid] = s
     if "pending" not in pre.values():
         # nothing to make: generated pictures are in the ledger and in place already. A run Herald
-        # left going for other jobs is no longer needed (a place was dropped) — stop it (review
-        # round 1 m4); one for these very jobs is only finishing
-        now_sha = hashlib.sha256(_job_bytes([_job_entry(cfg, it, "%s/%s.png" % (out_dir, it["id"]))
-                                             for it in todo])).hexdigest() if todo else None
-        if gen.get("run_id") and gen.get("job_sha256") != now_sha:
-            _, fail = _stop_run(root, cfg, gen["run_id"], cap(GEN_CANCEL_WAIT + 30))
+        # still follows can only be drawing what is taken in, confirmed or dropped — stop it (review
+        # round 1 m4, round 2 m4/m5); an ended run, or another machine's, is simply forgotten
+        if gen.get("run_id"):
+            _, fail = _stop_run(root, cfg, gen["run_id"], room)
             if not fail:
                 rec.pop("gen", None)
                 save_state(root, tid, st)
@@ -2042,7 +2062,7 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
         return _gen_state(res)
     res["run_id"] = run_id
     if gen.get("run_id") and gen["run_id"] != run_id:  # 4: the jobs changed — stop Herald's old run
-        _, fail = _stop_run(root, cfg, gen["run_id"], cap(GEN_CANCEL_WAIT + 30))
+        _, fail = _stop_run(root, cfg, gen["run_id"], room)
         if fail:
             _fail_pending(res, todo, pre, received, fail[0], fail[1])
             return _gen_state(res)
@@ -2064,7 +2084,8 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
             _fail_pending(res, todo, pre, received, r["code"], r["message"])
             break
         if obj.get("attempt") is None or obj.get("state") not in LIVE:
-            if _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, pre, can_retry=not retried):
+            if _final(root, cfg, tid, st, obj, todo, jobs, led, res, run_id, received, pre, can_retry=not retried,
+                      room=room):
                 retried = True
                 if more():
                     continue
@@ -2096,12 +2117,13 @@ def generate(root, cfg, tid, wait=GEN_WAIT):
             _fail_pending(res, todo, pre, received, s_["code"], s_["message"])
             break
         if sobj.get("state") in LIVE:  # 7: still going — take in what it finished so far
-            _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, pre, partial=True)
+            _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, pre, partial=True, room=room)
             res["running"] = [it["id"] for it in todo if it["id"] not in received and pre[it["id"]] == "pending"]
             live = True
             break
         # ended — whatever the exit code (2, 73, 11, 5), the attempt's lists are read (m2)
-        if _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, pre, can_retry=not retried):
+        if _final(root, cfg, tid, st, sobj, todo, jobs, led, res, run_id, received, pre, can_retry=not retried,
+                      room=room):
             retried = True
             if more():
                 continue
@@ -2136,7 +2158,7 @@ def cancel(root, cfg, tid):
     g = (st.get("images") or {}).get("gen") or {}
     if not g.get("run_id"):
         return {"cancelled": False, "state": None}
-    state, fail = _stop_run(root, cfg, g["run_id"], GEN_CANCEL_WAIT + 30)
+    state, fail = _stop_run(root, cfg, g["run_id"])
     out = {"cancelled": state == "cancelled", "state": state}
     if fail:
         out["error"] = fail[0]
@@ -3304,15 +3326,53 @@ def drop_blocked_translations(root, cfg, ids):
 def all_scene_files(root, cfg):
     """Every file recorded as a scene by any topic — the working tree's states and origin/<base>'s
     — so a reference from another article needs the label too (review round 1 m8)."""
+    from .integrity import moved_image_path
+    from .store import load_published
+    now, olds = {}, {}  # old slug → the article's slug today; today's slug → its old slugs
+    for a in load_published(root).get("articles") or []:
+        chain = [m["slug"] for m in a.get("moved_from") or [] if isinstance(m, dict) and m.get("slug")]
+        if a.get("slug") and chain:
+            olds[a["slug"]] = chain
+            for o in chain:
+                now[o] = a["slug"]
+
+    def path(slug, f):
+        # through the move chain whatever slug the state still has (review round 2 m1)
+        cur = now.get(slug, slug)
+        return moved_image_path(cfg, cur, f, olds.get(cur, [])) if cur else f
     out = set()
     for _, st in _topic_states(root):
-        slug = st.get("slug")
         for f, m in (((st.get("images") or {}).get("files")) or {}).items():
             if isinstance(m, dict) and m.get("kind") == "scene":
-                out.add(cur_path(root, cfg, slug, f) if slug else f)
+                out.add(path(st.get("slug"), f))
     for slug, fs in _base_managed_map(root, cfg).items():
-        out |= {cur_path(root, cfg, slug, f) for f, k in fs if k == "scene"}
+        out |= {path(slug, f) for f, k in fs if k == "scene"}
     return out
+
+
+# what the label check counts as a reference (review round 2 m6): the gate's inline forms, a
+# reference-style definition and an unquoted `src=`
+REF_DEF_RE = re.compile(r"(?m)^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*<?([^\s>]+)>?")
+SRC_BARE_RE = re.compile(r"<img[^>]*\ssrc=([^\s\"'>]+)")
+
+
+def _host(h):
+    h = (h or "").lower()
+    return h[4:] if h.startswith("www.") else h
+
+
+def _local_ref(cfg, raw):
+    """`raw` as a path on this site: an absolute URL of this site (any scheme, protocol-relative,
+    host case and `www.` ignored) loses its origin; another host gives None."""
+    import urllib.parse
+    if not (re.match(r"^[a-z][a-z0-9+.-]*:", raw, re.I) or raw.startswith("//")):
+        return raw
+    u = urllib.parse.urlsplit(raw)
+    site = urllib.parse.urlsplit(str(cfg.get("site", "base_url") or ""))
+    if u.scheme.lower() not in ("", "http", "https") or not u.hostname or _host(u.hostname) != _host(site.hostname):
+        return None
+    return u.path or "/"
+
 
 
 def label_regex(cfg, ref):
@@ -3343,12 +3403,12 @@ def label_problems(root, cfg, tid, st, rev=None):
     body_rel = cfg.body_path(slug)
     body = _body(root, cfg, slug, rev)
     pub = _rules(root)["images"].get("public_dir", "public")
-    site = str(cfg.get("site", "base_url") or "").rstrip("/")
+    raws = [next(g for g in m.groups() if g) for m in IMG_RE.finditer(body)]
+    raws += [m.group(1) for m in SRC_BARE_RE.finditer(body)] + [m.group(1) for m in REF_DEF_RE.finditer(body)]
     refs = Counter()
-    for m in IMG_RE.finditer(body):
-        raw = next(g for g in m.groups() if g)
-        path = raw[len(site):] if site and raw.startswith(site + "/") else raw  # the site's own absolute URL
-        if resolve_image_ref(root, body_rel, path, pub) in files:
+    for raw in raws:
+        path = _local_ref(cfg, raw)
+        if path is not None and resolve_image_ref(root, body_rel, path, pub) in files:
             refs[raw] += 1
     out = []
     for raw, n in sorted(refs.items()):

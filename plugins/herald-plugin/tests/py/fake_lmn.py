@@ -165,7 +165,9 @@ def make(root, sd, j, st, reason):
     open(out, "wb").write(data)
     rec = {"limner": "0.1.0", "contract": CONTRACT, "kind": "generate",
            "generator": os.environ.get("FAKE_LMN_GENERATOR", "mflux"), "mflux": "0.18.0", "mlx": "0.32.3",
-           "machine": "fake", "model": dict(QUANT), "lora": dict(LORA), "model_license": "Apache-2.0", "steps": 8,
+           "machine": "fake", "model": dict(QUANT, revision=QUANT["revision"] + (
+               "" if os.environ.get("FAKE_LMN_LOCK", "lock1") == "lock1" else "-" + os.environ["FAKE_LMN_LOCK"])),
+           "lora": dict(LORA), "model_license": "Apache-2.0", "steps": 8,
            "guidance": 1.0, "multi_ref": "picture_prefix", "skip_negative": True, "width": j["width"],
            "height": j["height"], "seed": j["seed"], "prompt": j["prompt"], "refs": [], "blank": "#E0E0E0",
            "letterbox": 1, "out_sha256": hashlib.sha256(data).hexdigest(), "job_sha": job_sha(j),
