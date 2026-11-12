@@ -481,8 +481,11 @@ draft. `ok: false` → leave the place out as before (`why`: `off:…`, `subject
 `human-drop`, `refused`, `spent`, `scene-max`, `not-yet`).
 A candidate opened and found unfit: `HRD image skip --topic <id> --place <key> --url <image URL>
 --reason "<one line>"` — only a URL fetched on this machine, never in a `--ship` run (there the
-agent review's `--redo` → `reject --agent` is the way). An agent drops a place's photo
-(`reject --agent --drop`) only after two rejects of it.
+agent review's `--redo` → `reject --agent` is the way). On an `external (place|thing)` line an
+agent drops a place's photo (`reject --agent --drop`) only after two rejects of it — elsewhere as
+in 0.20.0. That is pacing, not a guard: every candidate URL an agent rejects counts toward
+`used-up`, so a place with one candidate opens a stand-in after one reject; the PR row shows each
+candidate's fate.
 Decorative: an external decorative item is `use: licensed`; a decorative scene follows §8; either
 gets `"decorative": true`. Code refuses a stand-in or decorative picture before the first `##`
 section or as the article's first image, and a decorative one that is not right before a section

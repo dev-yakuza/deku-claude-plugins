@@ -721,20 +721,26 @@ def _repass_refusal(root, tid, st, stage, rerun):
     again only on a research fix or a human's `--rerun` (refused unattended and in a `--ship` run
     here, in code — the guard only asks, §R4-m2). draft, critique, translation, verify (`--amend`
     too) and publish are as in 0.20.0."""
-    if stage not in ("brief", "research") or st.get("stage") not in ORDER or \
-            ORDER.index(stage) >= ORDER.index(st["stage"]):
-        return None
-    if stage == "research" and open_research_fix(st):
+    if rerun:  # whatever it re-passes — the flag itself lifts the fixed candidates (review 26 M3)
+        if os.environ.get("HRD_UNATTENDED") == "1":
+            return "--rerun is a human's decision — not in unattended sessions"
+        from . import lock
+        if lock.ship_active(root, tid):
+            return "--rerun is a human's decision — not in a `--ship` run"
+    if not _is_repass(st, stage):
         return None
     if not rerun:
         return ("%s passed already (the topic is at %s) — a human reruns it with `/hrd %s` (`--rerun`)"
                 % (stage, st["stage"], stage))
-    if os.environ.get("HRD_UNATTENDED") == "1":
-        return "--rerun is a human's decision — not in unattended sessions"
-    from . import lock
-    if lock.ship_active(root, tid):
-        return "--rerun is a human's decision — not in a `--ship` run"
     return None
+
+
+def _is_repass(st, stage):
+    """brief or research passing again behind the topic's stage, outside a research fix."""
+    if stage not in ("brief", "research") or st.get("stage") not in ORDER or \
+            ORDER.index(stage) >= ORDER.index(st["stage"]):
+        return False
+    return not (stage == "research" and open_research_fix(st))
 
 
 def _orphaned(root, tid, st):
@@ -753,6 +759,7 @@ def stage_pass(root, cfg, tid, stage, amend=False, rerun=False):
     why = _repass_refusal(root, tid, st, stage, rerun)
     if why:
         raise HeraldError(why)
+    rerun = rerun and _is_repass(st, stage)  # only a real re-pass lifts what a re-pass may change
     if (st.get("trim") or {}).get("status") == "open":
         raise HeraldError("a trim is open — `HRD trim --topic %s --finish` or `--abort` first" % tid)
     if stage != "research" and open_research_fix(st):
@@ -922,8 +929,11 @@ def stage_pass(root, cfg, tid, stage, amend=False, rerun=False):
                 st["stages"].setdefault("translation", {}).setdefault("outputs", {})["@translations"] = \
                     artifact_hash(root, cfg, st, "@translations")
     st["stages"][stage] = rec
-    if stage == "brief" and rerun and _orphaned(root, tid, st):
-        st["stand_in_orphaned"] = True  # the whole topic goes without stand-ins (12 §R2-M1)
+    if stage == "brief" and rerun:
+        if _orphaned(root, tid, st):
+            st["stand_in_orphaned"] = True  # the whole topic goes without stand-ins (12 §R2-M1)
+        # a new brief has new place keys: the research that follows fixes its candidates anew (review 26 M4)
+        st.pop("candidates_hash", None)
     if stage == "draft":
         st.pop("human_loopback", None)  # 12 §R2-M3: the human loopback ends with the draft that passes
     nxt = ORDER[ORDER.index(stage) + 1]

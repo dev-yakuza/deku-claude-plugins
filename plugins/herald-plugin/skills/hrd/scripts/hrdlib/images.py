@@ -588,10 +588,24 @@ def full_prompt(cfg, it):
 
 def scene_key(cfg, it):
     """A scene's key: what limner is asked to draw (full prompt, size, seed, model) — not `file`
-    (R3-3: renaming the file must not bring a rejected picture back), not alt or purpose."""
-    w, h = SCENE_SIZES.get(it.get("size"), (None, None))
-    raw = json.dumps([full_prompt(cfg, it), w, h, it.get("seed"), limner.GEN_MODEL])
+    (R3-3: renaming the file must not bring a rejected picture back), not alt or purpose. 0.21.0
+    (review 26 B1): a stand-in's or decorative picture's role is part of it — moved to another
+    brief line, it is a new picture to generate, review and confirm (a plain scene's key is 0.20's)."""
+    raw = json.dumps(_key_parts(cfg, it))
+    role = stand_in.item_role(it)
+    if role in ("decorative",) or stand_in.is_stand_in(role):
+        raw = json.dumps([raw, role])
     return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def base_scene_key(cfg, it):
+    """The key without the role — what a stand-in's picture is, whatever line it moves to."""
+    return "sha256:" + hashlib.sha256(json.dumps(_key_parts(cfg, it)).encode("utf-8")).hexdigest()
+
+
+def _key_parts(cfg, it):
+    w, h = SCENE_SIZES.get(it.get("size"), (None, None))
+    return [full_prompt(cfg, it), w, h, it.get("seed"), limner.GEN_MODEL]
 
 
 def rejected_scene_keys(st, iid=None):
@@ -1162,6 +1176,8 @@ def stand_in_block(root, cfg, tid, st, it, config=True, subject=True):
     """Why this stand-in may not go on (None: it may, or it is no stand-in) — the shared check of
     12 §R1-B1: the records (a human's drop, a refusal, spent, the subject check), and with `config`
     the settings (§R2-m7). Read from the item's display copy, which plan holds to the brief."""
+    if stand_in.borrowed(st, it):  # a scene a review found redrawing a blocked place (review 26 M2)
+        return "refused"
     if not stand_in.is_stand_in(stand_in.item_role(it)):
         return None
     p = it.get("place")
@@ -1278,7 +1294,7 @@ def plan(root, cfg, tid, check_only=False):
             r = {"kind": "scene", "file": f, "key": key, "status": status}
             if role and role != "scene":
                 r["role"] = role
-            if p.get("key") == key:  # a new key drops the old picture's marks (R3-2)
+            if p.get("key") == key and p.get("role") == r.get("role"):  # a new key or role drops the marks (R3-2)
                 for k in ("generated_at", "generated_blob", "reviewed", "review_note", "regenerated",
                           "reviewed_generic"):
                     if p.get(k) is not None:
@@ -1327,6 +1343,9 @@ def plan(root, cfg, tid, check_only=False):
         if stand_in.is_stand_in(roles.get(it["id"])):
             names = st.setdefault("stand_in_names", {}).setdefault(it["place"], [])
             names += [n for n in it["stand_in"].get("names") or [] if n not in names]
+            mk = {"place": it["place"], "key": base_scene_key(cfg, it), "file": it["file"], "role": roles[it["id"]]}
+            if mk not in st.setdefault("stand_in_marks", []):  # the picture and file stay a stand-in (review 26 B1)
+                st["stand_in_marks"].append(mk)
     sc = stand_in.pending_subject(st, items, roles)
     if sc:  # 4-pre (12 §R1-m2)
         out["pending"]["subject_check"] = sc
@@ -1702,8 +1721,10 @@ def _check_image(data, ctype, ext, rules):
     from .shots import animated, image_size, sanitize
     want = "jpg" if ext in ("jpg", "jpeg") else ext
     ck = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[ctype]
-    if kind_of(data) != ck or ck != want:
+    if kind_of(data) != ck:
         raise _Fail("bad-format")
+    if ck != want:  # the manifest's extension, not the candidate: never evidence against it (12 review 26 M1)
+        raise _Fail("ext-mismatch")
     if animated(data):
         raise _Fail("animated")
     size = image_size(data)
@@ -1773,7 +1794,7 @@ def fetch(root, cfg, tid, ids=None, version="0"):
             clean, w, h = _check_image(data, ctype, f.rsplit(".", 1)[-1].lower(), rules)
         except _Fail as e:
             out["failed"].append({"id": iid, "code": e.code, "class": fetch_class(e.code)})
-            if fetch_class(e.code) == "content":  # what makes a place's candidates used up (12 §R2)
+            if fetch_class(e.code) == "content" and e.code != "ext-mismatch":  # a candidate's own fault (12 §R2)
                 st.setdefault("fetch_failures", []).append({"id": iid, "place": it.get("place"), "source_url":
                                                             it["source_url"], "code": e.code, "at": now_iso()})
                 save_state(root, tid, st)
@@ -1804,6 +1825,8 @@ def fetch(root, cfg, tid, ids=None, version="0"):
                                       "status": "fetched", "fetched_at": at, "orientation": ori,
                                       "width": w, "height": h}
         st["images"]["files"][f] = {"kind": "external", "use": it.get("use")}
+        if it["source_url"] not in (st.get("fetch_ok") or []):  # a success beats an earlier failure (review 26 M1)
+            st.setdefault("fetch_ok", []).append(it["source_url"])
         save_state(root, tid, st)
         out["fetched"].append({"id": iid, "file": f, "width": w, "height": h, "bytes": len(clean), "orientation": ori})
     return out
@@ -2471,9 +2494,14 @@ def _subject_review(root, cfg, tid, st, it, subject_ok, note, human, place):
         rec["origin"] = "stand-in"
         nxt = "the illustrator: remove %s (entry, reference, label) — no stand-in and no other picture for this place" % iid
     else:  # a normal or decorative scene that redraws a blocked place (§R2-M2 rule 2)
-        if not place:
-            raise HeraldError("--place names the blocked place this scene redraws (`HRD image status` `blocked_places`)")
+        keys = {x["place"] for x in stand_in.places(root, tid, st) or []}
+        if not place or place not in keys or place == p:
+            raise HeraldError("--place names the blocked place this scene redraws — another place of brief.md (`HRD "
+                              "image status` `blocked_places`)")
         rec.update(origin="borrowed", borrowed=place)
+        # its key is turned down too: the same picture never comes back under this place (review 26 M2)
+        st.setdefault("review_rejects", []).append({"id": iid, "key": scene_key(cfg, it), "note": note[:300],
+                                                    "at": now_iso(), "place": p, "role": role})
         nxt = "the illustrator: remove %s (entry, reference, label) — it redraws a place that is left out" % iid
     st.setdefault("stand_in_refused", []).append(rec)
     images = st.setdefault("images", {})
@@ -2591,7 +2619,12 @@ def confirm(root, cfg, tid, ids, agent=False):
         why = stand_in_block(root, cfg, tid, st, it)
         if why:  # a human too: `HRD image stand-in --allow` is the human's way back (12 §R1-B1, §R1-m13)
             raise HeraldError("%s: this stand-in may not go on (%s) — the illustrator removes it" % (iid, why))
-        if agent and ((st.get("images") or {}).get("items") or {}).get(iid, {}).get("reviewed") != h[0]:
+        rec_i = ((st.get("images") or {}).get("items") or {}).get(iid, {})
+        if agent and (stand_in.is_stand_in(stand_in.item_role(it)) or stand_in.item_role(it) == "decorative") and \
+                rec_i.get("reviewed_generic") != h[0]:
+            raise HeraldError("%s: a stand-in or decorative picture passes an agent only after `review --ok "
+                              "--generic-checked` of this very picture" % iid)
+        if agent and rec_i.get("reviewed") != h[0]:
             raise HeraldError("%s: the agent review has not passed this picture as it is now — `HRD image review "
                               "--topic %s --id %s --ok` by a fresh review first" % (iid, tid, iid))
         if agent:
@@ -2667,12 +2700,14 @@ def reject(root, cfg, tid, iid, reason=None, drop=False, refetch=False, regenera
     if agent and not scene and not drop and agent_rejects(st, iid, place) >= AGENT_REJECTS_MAX:
         raise HeraldError("%s was turned down by the agent review %d times — the next reject is `--drop` (three "
                           "candidates at most)" % (iid, AGENT_REJECTS_MAX))
-    if agent and not scene and drop and place and agent_rejects(st, iid, place) < AGENT_REJECTS_MAX:
+    line = next((p for p in stand_in.places(root, tid, st) or [] if p["place"] == place), None) if place else None
+    standable = bool(line) and line["kind"] == "external" and line["subject"] in stand_in.STAND_IN_SUBJECTS
+    # only where a drop can open a stand-in; elsewhere 0.20.0's drop as it was (review 26 m5)
+    if agent and not scene and drop and standable and agent_rejects(st, iid, place) < AGENT_REJECTS_MAX:
         raise HeraldError("reject without --drop first — another candidate (an agent drops a place only after %d "
                           "rejects)" % AGENT_REJECTS_MAX)
     if as_stand_in:
-        line = next((p for p in stand_in.places(root, tid, st) or [] if p["place"] == place), None) if place else None
-        if scene or not line or line["kind"] != "external" or line["subject"] not in stand_in.STAND_IN_SUBJECTS:
+        if scene or not standable:
             raise HeraldError("--stand-in is for an external image on an `external (place)` or `external (thing)` "
                               "brief line")
     role = stand_in.item_role(it)
@@ -3754,6 +3789,8 @@ def unvouched(root, cfg, tid, rev, slug):
 def _head_block(root, tid, st, it):
     """The record-based block of a stand-in at a PR head (the head's state; the candidate URLs
     are not read — a drop matched by URL was recorded with its place since 0.21.0)."""
+    if stand_in.borrowed(st, it):
+        return "refused"
     if not stand_in.is_stand_in(stand_in.item_role(it)) or not it.get("place"):
         return None
     return stand_in.record_block(st, it["place"])
@@ -3901,6 +3938,13 @@ def all_scene_files(root, cfg):
             if isinstance(m, dict) and m.get("kind") == "scene":
                 p = path(st.get("slug"), f)
                 out[p] = out.get(p) or m.get("role")
+        for mk in stand_in.marks(st):  # once a stand-in, always its label (review 26 B1)
+            if mk.get("file"):
+                out[path(st.get("slug"), mk["file"])] = mk.get("role") or "stand-in:place"
+    for slug, fs in _base_managed_map(root, cfg).items():
+        for f, k, role in fs:
+            if k == "scene" and stand_in.is_stand_in(role):
+                out[path(slug, f)] = role
     return out
 
 

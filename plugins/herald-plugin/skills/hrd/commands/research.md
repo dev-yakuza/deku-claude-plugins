@@ -12,7 +12,9 @@ The full flow is `/hrd write`; continuing a stopped flow is `/hrd resume`.
 4. Execute the stage exactly as `atoms/_stages.md` § research describes (read list, role, outputs,
    checks, `HRD stage pass`). When the topic is already past research, this is a human's rerun:
    `HRD stage pass --topic <topic-id> --stage research --rerun` (0.21.0 — the guard asks; refused
-   unattended and in a `--ship` run). Tell the human first: an image place a human left out or
-   refused that has no line in the new brief turns AI stand-ins off for this whole topic. A research fix is no rerun (no `--rerun`).
+   unattended and in a `--ship` run). Tell the human first: a rerun may change `## Image candidates`
+   (fixed otherwise after the first pass), and the new candidates decide which places may get an AI
+   stand-in. A research fix is no rerun (no `--rerun`). Right after a brief rerun the topic is at
+   research again: a plain `stage pass` (no `--rerun`) fixes the new candidates.
 5. Report the result and the next stage. A body change invalidates later stages: after
    `draft`, both `critique` and `verify` must run again before `publish`.

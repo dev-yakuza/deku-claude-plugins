@@ -37,7 +37,11 @@ STAND_IN_LABELS = {
     "en": {"place": "AI-generated image (not the actual place)", "thing": "AI-generated image (not the actual object)"},
 }
 # a figure template that hides its label from readers (§2.8) — cheap and mechanical
-HIDDEN_RE = re.compile(r"\b(?:hidden|sr-only|visually-hidden)\b|display\s*:\s*none", re.I)
+# the opening tag that holds `{label}`: a hiding class, style or attribute (`overflow: hidden` and an
+# icon's `aria-hidden` elsewhere in the template are not the label — review 26 m2)
+HIDE_CLASS_RE = re.compile(r"""\bclass\s*=\s*["']?[^"'>]*\b(?:hidden|sr-only|visually-hidden)(?![\w-])""", re.I)
+HIDE_STYLE_RE = re.compile(r"(?:display\s*:\s*none|visibility\s*:\s*hidden)", re.I)
+HIDE_ATTR_RE = re.compile(r"""(?:^|\s)(?:hidden|aria-hidden\s*=\s*["']?true)(?=[\s>/=]|$)""", re.I)
 # R1-m1 + R3-M2: tokens that name no particular place
 COMMON = {"temple", "shrine", "castle", "park", "station", "street", "dera", "jinja", "jingu", "ji", "tower",
           "bridge", "garden", "market", "japan", "japanese", "nihon", "tokyo", "kyoto", "osaka", "hokkaido",
@@ -84,7 +88,26 @@ def template(cfg):
 
 
 def hidden_label(t):
-    return isinstance(t, str) and "{label}" in t and bool(HIDDEN_RE.search(t))
+    """`{label}` readers never see: inside an HTML comment or a tag (an attribute value — `alt`,
+    `title`), or in an element whose opening tag hides it (review 26 m2, m3)."""
+    if not isinstance(t, str) or "{label}" not in t:
+        return False
+    before = t[:t.index("{label}")]
+    if before.rfind("<!--") > before.rfind("-->"):
+        return True
+    if before.rfind("<") > before.rfind(">"):
+        return True
+    depth, holders = 0, []
+    for m in reversed(list(re.finditer(r"<(/?)([A-Za-z][\w-]*)([^<>]*)>", before))):
+        if m.group(1):
+            depth += 1
+        elif m.group(3).rstrip().endswith("/"):
+            continue
+        elif depth:
+            depth -= 1
+        else:
+            holders.append(m.group(3))  # an element still open around the label
+    return any(HIDE_CLASS_RE.search(a) or HIDE_STYLE_RE.search(a) or HIDE_ATTR_RE.search(a) for a in holders)
 
 
 def stand_in_errors(cfg):
@@ -206,7 +229,13 @@ def parse_brief(text):
     """[{place, line, what, kind, subject, decorative, scene_first}] — only `- … — kind: <k> — …`
     lines; the same line twice gets two keys (its position among equal lines is in the hash)."""
     out, seen = [], {}
-    for raw in (text or "").replace("\r\n", "\n").split("\n"):
+    text = (text or "").replace("\r\n", "\n")
+    m = re.search(r"(?m)^##[ \t]+Images[ \t]*$", text)  # the `## Images` section only (review 26 m6)
+    if not m:
+        return out
+    nxt = re.search(r"(?m)^##?[ \t]+(?!#)", text[m.end():])
+    text = text[m.end():m.end() + nxt.start()] if nxt else text[m.end():]
+    for raw in text.split("\n"):
         m = LINE_RE.match(raw)
         if not m or " — " not in m.group(1):
             continue
@@ -495,7 +524,7 @@ def used_up(st, b, licenses, during_loopback=True):
     skips made during a human loopback (§R3-m4)."""
     if not b or not b["images"]:
         return False
-    gone = {r.get("source_url") for r in _recs(st, "fetch_failures")}
+    gone = {r.get("source_url") for r in _recs(st, "fetch_failures")} - set(st.get("fetch_ok") or [])
     gone |= {r.get("source_url") for r in _recs(st, "image_rejects") if r.get("source_url")}
     gone |= _skips(st, b.get("place"), during_loopback)
     for u in b["images"]:
@@ -531,6 +560,17 @@ def blocked_places(st, pl, blocks):
         if r.get("borrowed"):
             out.add(r["borrowed"])
     return out
+
+
+def borrowed(st, it):
+    """A review found this scene redraws a blocked place (`--problem subject --place`)."""
+    return any(r.get("origin") == "borrowed" and r.get("place") == it.get("place") and r.get("place")
+               for r in _recs(st, "stand_in_refused"))
+
+
+def marks(st):
+    """What was ever a stand-in in this topic — its picture (role-less key) and file stay one."""
+    return _recs(st, "stand_in_marks")
 
 
 # --- roles (§R1-M1) -------------------------------------------------------------------------------
@@ -780,6 +820,12 @@ def manifest_errors(root, cfg, tid, st, items, text, cat):
         if kind == "scene":
             if any(r.get("borrowed") and r.get("place") == p for r in _recs(st, "stand_in_refused")):
                 errors.append("%s: a review found this scene redraws a blocked place — left out" % iid)
+            if not is_stand_in(role):  # a stand-in's picture never loses its label on another line (review 26 B1)
+                from .images import base_scene_key
+                bk = base_scene_key(cfg, it)
+                if any(m.get("key") == bk or m.get("file") == it.get("file") for m in marks(st)):
+                    errors.append("%s: this picture (or file) was a stand-in — it keeps that role and its label; draw "
+                                  "a new picture under a new file name" % iid)
             if pool is None:
                 pool = blocked_pool(st, pl, blocks)
             # every scene against the topic's pool (§R2-M2 rule 1); a stand-in's own names were checked above
@@ -860,6 +906,9 @@ def stand_in_cmd(root, cfg, tid, place, allow=False, reason=None):
         raise HeraldError("%s is no place of brief.md — `HRD image places --topic %s`" % (place, tid))
     if allow:
         _human_only("stand-in --allow")
+        from . import lock
+        if lock.ship_active(root, tid):
+            raise HeraldError("--allow is a human's decision — not in a `--ship` run")
         if not isinstance(reason, str) or not reason.strip():
             raise HeraldError("--allow needs --reason (one line)")
         if any(r.get("by") == "human" for r in refusals(st, place)):
@@ -976,6 +1025,9 @@ def first_notice(root, cfg):
     from .util import read_json, write_json
     if not managed(cfg) or _scenes(cfg) is None or (_scenes(cfg) or {}).get("stand_in") is False:
         return None
+    w = stand_in_off(root, cfg, None)
+    if w and not w.startswith("category"):  # stand-ins are not on in this repo at all (review 26 m9)
+        return None
     p = os.path.join(root, ".claude/herald/memory/notices.json")
     try:
         seen = read_json(p) or {}
@@ -996,16 +1048,25 @@ def first_notice(root, cfg):
 # --- §R4-m5: the records only grow -----------------------------------------------------------------
 
 GROWING = ("image_rejects", "review_rejects", "stand_in_refused", "candidate_skips", "fetch_failures",
-           "subject_checks")
+           "subject_checks", "stand_in_marks", "stand_in_allowed")
 
 
-def _sizes(st):
-    return {k: len(st.get(k) or []) if isinstance(st.get(k), list) else 0 for k in GROWING}
+def _lists(st):
+    return {k: st.get(k) if isinstance(st.get(k), list) else [] for k in GROWING}
+
+
+def _shrank(prev, cur):
+    """A list that is not its earlier self plus new entries (a record removed or edited — review
+    26 m4), or the topic-wide `stand_in_orphaned` switched back off."""
+    if any(cur[0][k][:len(prev[0][k])] != prev[0][k] for k in GROWING):
+        return True
+    return bool(prev[1]) and not cur[1]
 
 
 def records_shrank(root, cfg, tid, rev):
-    """The commits of base..rev that shortened one of the topic's growing record lists (a
-    `--ship` run's ship-pass blocks on it — `stand-in-records-shrank`)."""
+    """The commits of base..rev that removed or changed an entry of one of the topic's growing
+    record lists, or turned `stand_in_orphaned` off (a `--ship` run's ship-pass blocks on it —
+    `stand-in-records-shrank`)."""
     from .store import work_rel
     rel = work_rel(tid, "state.json")
     revs = git(root, "rev-list", "--reverse", "origin/%s..%s" % (cfg.base, rev or "HEAD"), "--", rel,
@@ -1019,8 +1080,8 @@ def records_shrank(root, cfg, tid, rev):
             st = None
         if not isinstance(st, dict):
             continue
-        cur = _sizes(st)
-        if prev is not None and any(cur[k] < prev[k] for k in GROWING):
+        cur = (_lists(st), st.get("stand_in_orphaned"))
+        if prev is not None and _shrank(prev, cur):
             out.append(c)
         prev = cur
     return out

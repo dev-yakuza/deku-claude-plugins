@@ -540,6 +540,43 @@ class ReviewTests(StandInCase):
             images.review(self.root, self.cfg, TID, "e1", problem="subject", note="x")
 
 
+    def test_a_blocked_stand_in_is_refused_everywhere_until_removed(self):
+        # R1-B1's points with a picture in place: review --ok, confirm (human and --agent), the draft pass
+        self.assertEqual(self.plan()["errors"], [])
+        self.subject_ok()
+        self.assertEqual(self.gen()["state"], "done")
+        self.push_state(image_rejects=[{"id": "e1", "place": key(TEMPLE), "drop": True, "via": "human-push"}])
+        with self.assertRaises(HeraldError) as cm:
+            images.review(self.root, self.cfg, TID, "g3", ok=True, generic_checked=True, note="fine")
+        self.assertIn("human-drop", str(cm.exception))
+        with self.assertRaises(HeraldError):
+            images.confirm(self.root, self.cfg, TID, "g3")
+        ship_lock(self.root)
+        with self.assertRaises(HeraldError):
+            images.confirm(self.root, self.cfg, TID, "g3", agent=True)
+        lock.force_unlock(self.root)
+        _, p = self.hrd("stage", "pass", "--topic", TID, "--stage", "draft", check=False)
+        self.assertIn("this stand-in may not go on (human-drop)", p.stderr)
+        # the illustrator removes it: nothing about it is left
+        self.manifest([self.g1(place=key(COUNTER))])
+        self.body3(g3="")
+        self.assertEqual(self.plan()["errors"], [])
+        self.assertNotIn("g3", " ".join(images.draft_problems(self.root, self.cfg, TID, self.state())))
+
+    def test_an_agent_never_passes_a_stand_in_without_the_generic_look(self):
+        self.assertEqual(self.plan()["errors"], [])
+        self.subject_ok()
+        self.assertEqual(self.gen()["state"], "done")
+        images.review(self.root, self.cfg, TID, "g3", ok=True, generic_checked=True, note="generic")
+        st = self.state()
+        st["images"]["items"]["g3"].pop("reviewed_generic")
+        store.save_state(self.root, TID, st)
+        ship_lock(self.root)
+        with self.assertRaises(HeraldError) as cm:
+            images.confirm(self.root, self.cfg, TID, "g3", agent=True)
+        self.assertIn("--generic-checked", str(cm.exception))
+
+
 # --- reject (§2.7, §R1-M7) ---------------------------------------------------------------------------
 
 class RejectTests(StandInCase):
@@ -583,25 +620,46 @@ class RejectTests(StandInCase):
         self.assertEqual(out["why"], "human-drop")
 
     def test_an_agent_drops_only_after_two_rejects(self):
+        src2 = "https://upload.wikimedia.org/wikipedia/commons/b/bb/Lobby2.jpg"
+        self.inputs(None, research(lobby="- image: %s\n- page: %s\n- license: CC BY-SA 3.0\n- image: %s\n- page: %s\n"
+                                         "- license: CC BY-SA 3.0" % (SRC, PAGE, src2, PAGE)))
+        self.assertEqual(self.plan()["errors"], [])
         ship_lock(self.root)
         with self.assertRaises(HeraldError) as cm:
             images.reject(self.root, self.cfg, TID, "e1", reason="x", drop=True, agent=True)
         self.assertIn("reject without --drop first", str(cm.exception))
         with self.assertRaises(HeraldError):
             images.reject(self.root, self.cfg, TID, "e1", reason="x", drop=True, agent=True, as_stand_in=True)
+        # the real path: a fresh review's redo, then the agent's reject — twice, one id after another
+        images.review(self.root, self.cfg, TID, "e1", redo=True, note="watermark")
         images.reject(self.root, self.cfg, TID, "e1", reason="watermark", agent=True)
-        st = self.state()
-        st["stage"] = "draft"
-        store.save_state(self.root, TID, st)
-        e2 = dict(self.e, id="e2", file="%s/e2-lobby.jpg" % IMG, ref="/blog-images/%s/e2-lobby.jpg" % SLUG)
+        e2 = dict(self.e, id="e2", file="%s/e2-lobby.jpg" % IMG, ref="/blog-images/%s/e2-lobby.jpg" % SLUG,
+                  source_url=src2)
         self.manifest([self.g1(place=key(COUNTER)), e2])
+        self.write("src/content/blog/%s.md" % SLUG, BODY.format(g1=self.snip(self.g1(place=key(COUNTER))),
+                                                                g3="![The office lobby](%s)" % e2["ref"], dec=""))
+        self.route(src2, jpeg_route())
+        self.assertEqual(self.fetch()["failed"], [])
         self.assertEqual(images.agent_rejects(self.state(), "e2", key(LOBBY)), 1)  # another id: the same place
-        st = self.state()
-        st["image_rejects"].append({"id": "e2", "place": key(LOBBY), "by": "agent", "drop": False})
-        store.save_state(self.root, TID, st)
-        images.reject(self.root, self.cfg, TID, "e2", reason="still wrong", drop=True, agent=True)
+        out, _ = self.hrd("image", "stand-in", "--topic", TID, "--place", key(LOBBY))
+        self.assertEqual(out["why"], "not-yet")  # src2 is still usable
+        images.review(self.root, self.cfg, TID, "e2", redo=True, note="another country's lobby")
+        images.reject(self.root, self.cfg, TID, "e2", reason="another country's lobby", agent=True)
+        self.assertEqual(images.agent_rejects(self.state(), "e2", key(LOBBY)), 2)
         out, _ = self.hrd("image", "stand-in", "--topic", TID, "--place", key(LOBBY))
         self.assertEqual((out["ok"], out["why"]), (True, "used-up"))  # the agent's rejects used it up
+
+    def test_an_agent_drops_a_work_at_once(self):
+        brief = BRIEF.replace(LOBBY, LOBBY.replace("external (place)", "external (work)"))
+        res = research().replace(key(LOBBY), next(p["place"] for p in stand_in.parse_brief(brief)
+                                                   if "lobby" in p["line"]))
+        self.inputs(brief, res)
+        k = next(p["place"] for p in stand_in.parse_brief(brief) if "lobby" in p["line"])
+        self.manifest([self.g1(place=key(COUNTER)), dict(self.e, place=k)])
+        self.put_lobby()
+        self.assertEqual(self.plan()["errors"], [])
+        ship_lock(self.root)
+        images.reject(self.root, self.cfg, TID, "e1", reason="a mascot's rights", drop=True, agent=True)  # as 0.20.0
 
 
 # --- records: human loopback, fetch failures, skip (§R1-M3, §R2-M3, §R2-M4, §R3-m4) -----------------
@@ -851,3 +909,187 @@ class OutputTests(StandInCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --- implementation review round 1 (design/herald/REVIEW-26, B1, M1–M4, m2–m9) ------------------------
+
+class ReviewRoundOneTests(StandInCase):
+    def confirmed(self):
+        self.assertEqual(self.plan()["errors"], [])
+        images.review(self.root, self.cfg, TID, "g3", subject_ok=True, note="a temple")
+        self.assertEqual(self.gen()["state"], "done")
+        images.review(self.root, self.cfg, TID, "g3", ok=True, generic_checked=True, note="generic")
+        images.review(self.root, self.cfg, TID, "g1", ok=True, note="fine")
+        images.confirm(self.root, self.cfg, TID, "g1,g3")
+
+    def test_b1_a_stand_in_moved_to_a_scene_line_keeps_its_role(self):
+        hill_line = "- a hillside view — kind: scene — the temple paragraph — Second"
+        brief = BRIEF.replace(STREET, hill_line + "\n" + STREET)
+        self.inputs(brief, research())
+        hill = next(p["place"] for p in stand_in.parse_brief(brief) if p["line"] == hill_line)
+        self.confirmed()
+        g3 = self.g3(place=hill)
+        g3.pop("stand_in")
+        self.manifest([self.g1(place=key(COUNTER)), g3])
+        self.body3(g3=self.snip(g3, label=LABEL))
+        self.assertIn("was a stand-in", " | ".join(self.plan()["errors"]))
+        self.assertTrue(images.label_problems(self.root, self.cfg, TID, self.state()))  # its label stays
+        self.assertNotEqual(images.scene_key(self.cfg, g3), images.scene_key(self.cfg, self.g3()))
+        # a new picture under a new file name is a new scene
+        g5 = dict(g3, id="g5", file="%s/g5-hill.png" % IMG, ref="/blog-images/%s/g5-hill.png" % SLUG, seed=7,
+                  prompt="A green hillside with a few pine trees under a pale sky")
+        self.manifest([self.g1(place=key(COUNTER)), g5])
+        self.body3(g3=self.snip(g5, label=LABEL))
+        self.assertEqual(self.plan()["errors"], [])
+
+    def test_b1_a_scene_moved_to_a_stand_in_line_is_a_new_picture(self):
+        self.manifest([self.g1(place=key(COUNTER))])
+        self.body3(g3="")
+        self.assertEqual(self.plan()["errors"], [])
+        self.assertEqual(self.gen()["state"], "done")
+        images.review(self.root, self.cfg, TID, "g1", ok=True, note="fine")
+        moved = self.g1(place=key(TEMPLE), stand_in={"subject": "place", "names": ["清水寺"], "why": "no-candidates"})
+        g2 = self.g2(place=key(COUNTER))
+        self.manifest([g2, moved])
+        self.body3(g1=self.snip(g2), g3=self.snip(moved))
+        self.assertEqual(self.plan()["errors"], [])
+        st = self.state()
+        self.assertEqual(st["images"]["items"]["g1"]["status"], "pending")  # a new key: no picture, no review
+        self.assertNotIn("reviewed", st["images"]["items"]["g1"])
+
+    def test_m1_a_wrong_extension_is_no_evidence(self):
+        e = self.e1(place=key(LOBBY), file="%s/e1-lobby.png" % IMG, ref="/blog-images/%s/e1-lobby.png" % SLUG)
+        self.manifest([self.g1(place=key(COUNTER)), e])
+        self.write("src/content/blog/%s.md" % SLUG, BODY.format(g1=self.snip(self.g1(place=key(COUNTER))),
+                                                                g3="![The office lobby](%s)" % e["ref"], dec=""))
+        self.plan()
+        self.route(SRC, jpeg_route())
+        self.assertEqual(self.fetch()["failed"][0]["code"], "ext-mismatch")
+        self.assertEqual(self.state().get("fetch_failures") or [], [])
+        out, _ = self.hrd("image", "stand-in", "--topic", TID, "--place", key(LOBBY))
+        self.assertEqual(out["why"], "not-yet")
+        # an earlier failure does not outlive a successful fetch of the same URL
+        self.push_state(fetch_failures=[{"id": "e1", "place": key(LOBBY), "source_url": SRC, "code": "http-404"}])
+        e = self.e1(place=key(LOBBY))
+        self.manifest([self.g1(place=key(COUNTER)), e])
+        self.write("src/content/blog/%s.md" % SLUG, BODY.format(g1=self.snip(self.g1(place=key(COUNTER))),
+                                                                g3="![The office lobby](%s)" % e["ref"], dec=""))
+        self.assertEqual(self.fetch()["failed"], [])
+        out, _ = self.hrd("image", "stand-in", "--topic", TID, "--place", key(LOBBY))
+        self.assertEqual(out["why"], "not-yet")
+
+    def test_m2_a_borrowed_refusal_holds_everywhere(self):
+        self.assertEqual(self.plan()["errors"], [])
+        images.review(self.root, self.cfg, TID, "g3", subject_ok=True, note="ok")
+        self.assertEqual(self.gen()["state"], "done")
+        with self.assertRaises(HeraldError):  # the blocked place must be another place of the brief (m7)
+            images.review(self.root, self.cfg, TID, "g1", problem="subject", note="x", place="nope")
+        images.review(self.root, self.cfg, TID, "g1", problem="subject", note="redraws", place=key(LOBBY))
+        out = self.gen()
+        self.assertEqual(out["state"], "blocked")
+        self.assertIn({"id": "g1", "why": "refused"}, out["blocked"])
+        self.assertIn("g1: this stand-in may not go on (refused)",
+                      " ".join(images.draft_problems(self.root, self.cfg, TID, self.state())))
+        self.assertEqual(images._head_block(self.root, TID, self.state(), self.g1(place=key(COUNTER))), "refused")
+        self.assertIn(images.scene_key(self.cfg, self.g1(place=key(COUNTER))),
+                      images.rejected_scene_keys(self.state(), "g1"))  # the same picture never comes back
+
+    def test_m3_rerun_in_a_research_fix_is_refused_unattended_or_shipping(self):
+        self.assertEqual(self.plan()["errors"], [])
+        st = self.state()
+        st["research_fixes"] = [{"status": "open", "claims": ["C1"], "ids_before": ["C1"], "research_before": "x"}]
+        st["stage"] = "research"
+        store.save_state(self.root, TID, st)
+        self.write(W + "/research.md", research(lobby="- none: nothing — searched: https://commons.wikimedia.org/x")
+                   .replace("3,000", "3,500"))
+        _, p = self.hrd("stage", "pass", "--topic", TID, "--stage", "research", "--rerun", check=False,
+                        env={"HRD_UNATTENDED": "1"})
+        self.assertIn("unattended", p.stderr)
+        ship_lock(self.root)
+        _, p = self.hrd("stage", "pass", "--topic", TID, "--stage", "research", "--rerun", check=False)
+        self.assertIn("--ship", p.stderr)
+        lock.force_unlock(self.root)
+        _, p = self.hrd("stage", "pass", "--topic", TID, "--stage", "research", "--rerun", check=False)
+        self.assertIn("image candidates are fixed", p.stderr)  # a fix is no re-pass: the flag lifts nothing
+
+    def test_m4_research_after_a_brief_rerun(self):
+        self.assertEqual(self.plan()["errors"], [])
+        nb = BRIEF.replace(LOBBY, "- the station lobby — kind: external (place) — the lobby paragraph — First")
+        self.write(W + "/brief.md", nb)
+        self.hrd("stage", "pass", "--topic", TID, "--stage", "brief", "--rerun")
+        k = next(x["place"] for x in stand_in.parse_brief(nb) if "station" in x["line"])
+        self.write(W + "/research.md", research().replace(key(LOBBY), k))
+        out, _ = self.hrd("stage", "pass", "--topic", TID, "--stage", "research")
+        self.assertEqual(out["stage"], "draft")
+        h = self.state()["candidates_hash"]
+        self.assertEqual(h, stand_in.candidates_hash(research().replace(key(LOBBY), k)))
+
+    def test_m2_m3_hidden_labels(self):
+        for t, hidden in (('<figure style="overflow:hidden"><img src="{ref}" alt="{alt}"><i aria-hidden="true">*</i>'
+                           '<figcaption>{label}</figcaption></figure>', False),
+                          ('<img src="{ref}" alt="{alt}" class="hidden-xs"><p>{label}</p>', False),
+                          ('<img src="{ref}" alt="{alt}"><p class="caption sr-only">{label}</p>', True),
+                          ('<img src="{ref}" alt="{alt}"><p hidden>{label}</p>', True),
+                          ('<img src="{ref}" alt="{alt}"><div style="visibility: hidden"><b>{label}</b></div>', True),
+                          ('<img src="{ref}" alt="{alt} {label}">', True),
+                          ('![{alt}]({ref})\n<!-- {label} -->', True),
+                          ('<p class="hidden">x</p><img src="{ref}" alt="{alt}"><p>{label}</p>', False)):
+            self.assertEqual(stand_in.hidden_label(t), hidden, t)
+
+    def test_m6_only_the_images_section(self):
+        text = "# Brief\n\n## Notes\n%s\n\n## Images\n%s\n\n## Other\n%s\n" % (TEMPLE, LOBBY, COUNTER)
+        self.assertEqual([p["line"] for p in stand_in.parse_brief(text)], [LOBBY])
+
+    def test_m9_no_notice_where_stand_ins_cannot_run(self):
+        self.config(lambda c: c["images"].update(external=False))
+        self.assertIsNone(stand_in.first_notice(self.root, self.cfg))
+        self.config(lambda c: c["images"].update(external=True))
+        self.assertIn("stand-ins on", stand_in.first_notice(self.root, self.cfg))
+        self.assertIsNone(stand_in.first_notice(self.root, self.cfg))  # once
+
+    def test_m4_records_edited_or_switched_back(self):
+        self.push_state(image_rejects=[{"id": "e1", "place": key(LOBBY), "drop": True}], stand_in_orphaned=True)
+        self.commit("work")
+        self.push_state(image_rejects=[{"id": "e1", "place": key(LOBBY), "drop": False},
+                                       {"id": "e2", "place": key(LOBBY), "drop": True}])
+        edited = self.commit("edit a record and add one")
+        self.assertIn(edited, stand_in.records_shrank(self.root, self.cfg, TID, "HEAD"))
+        self.push_state(stand_in_orphaned=False)
+        off = self.commit("switch back")
+        self.assertIn(off, stand_in.records_shrank(self.root, self.cfg, TID, "HEAD"))
+
+    def test_m8_a_swap_with_a_usable_photo_is_recorded(self):
+        e = self.e1(place=key(LOBBY))
+        self.manifest([self.g1(place=key(COUNTER)), self.g3(), e])
+        self.write("src/content/blog/%s.md" % SLUG, BODY.replace("That is all.", "{e1}\n\nThat is all.").format(
+            g1=self.snip(self.g1(place=key(COUNTER))), g3=self.snip(self.g3()), dec="",
+            e1="![The office lobby](%s)" % e["ref"]))
+        self.assertEqual(self.plan()["errors"], [])
+        self.hrd("loopback", "--topic", TID, "--human")
+        lobby = self.g3(id="g5", file="%s/g5-lobby.png" % IMG, ref="/blog-images/%s/g5-lobby.png" % SLUG,
+                        place=key(LOBBY), alt="An office lobby", prompt="A bright office lobby with a reception desk",
+                        stand_in={"subject": "place", "names": ["Marunouchi Building"], "why": "used-up"})
+        self.manifest([self.g1(place=key(COUNTER)), self.g3(), lobby])
+        self.body3(dec=self.snip(lobby) + "\n\nMore.\n\n")
+        self.plan()  # its own check refuses the swap (a usable photo) — the record is made anyway
+        rj = [r for r in self.state()["image_rejects"] if r.get("via") == "human-loopback"]
+        self.assertEqual([r["place"] for r in rj], [key(LOBBY)])
+
+    def test_m8_fetch_failure_row_translations_and_a_later_setting(self):
+        self.push_state(fetch_failures=[{"id": "e9", "place": key(LOBBY), "source_url": SRC, "code": "http-404"}])
+        self.assertIn("e9: fetch failed (http-404)", "\n".join(images.status(self.root, self.cfg, TID)["pr_rows"]))
+        self.push_state(fetch_failures=[])
+        # a stand-in confirmed before the setting turned off is no unvouched file in its PR
+        self.confirmed()
+        self.commit("pictures")
+        self.config(lambda c: c["images"]["scenes"].update(stand_in=False))
+        self.assertEqual(images.unvouched(self.root, self.cfg, TID, "HEAD", SLUG), [])
+        self.assertIn("stand-ins are now off", " ".join(images.status(self.root, self.cfg, TID)["warnings"]))
+        # a translation repo: no stand-in, no decorative picture
+        self.config(lambda c: c["images"]["scenes"].update(stand_in=True, decorative=2) or c.update(
+            roles={"conditional": ["illustrator", "translator"]}, translations={
+                "source": "en", "targets": [{"lang": "ko", "body_pattern": "{content}/ko/{slug}.md",
+                                             "url_pattern": "/ko/{slug}/"}]}))
+        k = images.kinds(self.root, self.cfg, TID)
+        self.assertEqual((k["scene"]["stand_in"]["ok"], k["scene"]["decorative"]["max"], k["external"]["decorative"]),
+                         (False, 0, False))
