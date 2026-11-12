@@ -1035,7 +1035,9 @@ class ReviewRoundOneTests(StandInCase):
                           ('<img src="{ref}" alt="{alt}"><div style="visibility: hidden"><b>{label}</b></div>', True),
                           ('<img src="{ref}" alt="{alt} {label}">', True),
                           ('![{alt}]({ref})\n<!-- {label} -->', True),
-                          ('<p class="hidden">x</p><img src="{ref}" alt="{alt}"><p>{label}</p>', False)):
+                          ('<p class="hidden">x</p><img src="{ref}" alt="{alt}"><p>{label}</p>', False),
+                          ('<img src="{ref}" alt="{alt}"><img src="/i.svg" aria-hidden="true"><p>{label}</p>', False),
+                          ('<img src="{ref}" alt="{alt}"><br hidden>{label}', False)):
             self.assertEqual(stand_in.hidden_label(t), hidden, t)
 
     def test_m6_only_the_images_section(self):

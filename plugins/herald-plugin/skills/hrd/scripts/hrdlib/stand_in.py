@@ -87,6 +87,9 @@ def template(cfg):
     return t if isinstance(t, str) and t.strip() else scene_template(cfg)
 
 
+VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+
+
 def hidden_label(t):
     """`{label}` readers never see: inside an HTML comment or a tag (an attribute value — `alt`,
     `title`), or in an element whose opening tag hides it (review 26 m2, m3)."""
@@ -101,8 +104,8 @@ def hidden_label(t):
     for m in reversed(list(re.finditer(r"<(/?)([A-Za-z][\w-]*)([^<>]*)>", before))):
         if m.group(1):
             depth += 1
-        elif m.group(3).rstrip().endswith("/"):
-            continue
+        elif m.group(3).rstrip().endswith("/") or m.group(2).lower() in VOID_TAGS:
+            continue  # self-closing or void (`<img aria-hidden="true">`): wraps nothing
         elif depth:
             depth -= 1
         else:
