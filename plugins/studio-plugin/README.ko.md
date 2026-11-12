@@ -103,6 +103,28 @@ claude --plugin-dir plugins/studio-plugin
   - 그 밖의 경우(`chmod 000 studio`, 보호 파일 위에 쓰는 아카이브 등).
 
   이런 경우에도 pre-commit 훅, 커밋 검사, 사람의 게이트가 뒤에 남아 있습니다.
+- **0.0.28 (파일럿 3).** `state.py next <video> --enter script`가 작가가 그대로 옮길 frontmatter 줄을 출력합니다: 기본
+  내레이터의 `cast:` 블록(s2v의 콘텐츠 해시에 들어가므로 처음부터 대본에 있고, 캐스트 단계는 더 이상 고치지 않음), 출력별
+  `aspect`와 `maxDuration`, `targetDuration`의 범위(ceil(min ÷ 0.85)부터 floor(max ÷ 1.15)까지: youtube는 212–417이라
+  s2v lint를 통과한 대본은 형식의 길이 안에 있음). `check_claims --narration`은 cast 블록을 검사하고 s2v의 실패 메시지를
+  모두 출력합니다. 클레임 맵은 클레임을 말하는 대본의 모든 텍스트(화면 텍스트와 제목 포함)를 나열하고, 검증 메시지는 그
+  텍스트와 위치를 밝힙니다. `check_claims --source`는 사본에 없거나 태그 안 또는 문장 중간에서 끊긴 발췌를 거부합니다.
+  `record-brief --from`은 레포 루트 기준 경로도 받습니다(영상 폴더 안만). ② 질문에는 오디션이 재생하는 문장과 `read:`
+  줄이 들어가고, `shown 3`과 `shown 4a`도 질문 블록을 출력합니다(④a는 소리·자막·그림이 함께 맞는지 확인을 요청). `assets.json`은
+  CREDITS용 `floor_text`를 담습니다. `record-source --url <https://<공개 도메인>/…>`이 글의 주소를 기록하고, 배포용 글
+  설명에는 `원문: <url>`이 있어야 합니다. 하네스 커밋의 값 블록에 brand.json의 이름·색·로고가 나옵니다.
+  `begin --ask-before tts,render`(그리고 `state.py ask-before`)가 사람이 묻고 멈추라고 한 단계를 기록합니다. 모든 명령
+  문서의 Rules 줄은 명령을 그대로 실행하고, 반복하지 않고, `open`만 쓰라고 합니다.
+- **확인 요청 줄이기(0.0.28).** `default` 권한 모드에서 가드는 이제 Studio 자신의 스크립트 호출(레포 사본이 바뀌지 않고
+  온전하며, 리터럴 인자로 단독 실행)과 각 역할이 자기 출력 파일에 쓰는 것을, 모든 조건이 맞을 때 확인 요청 없이
+  허용합니다. 조건이 하나라도 맞지 않으면 평소처럼 확인을 요청합니다. `run_s2v.py`, `lock.py`, `check_commit.py`,
+  `state.py ask-before`는 계속 확인을 요청합니다. Claude는 레포 폴더에서 시작하세요. 조건과 한계:
+  [docs/guard-limits.ko.md](docs/guard-limits.ko.md).
+- **0.0.28로 올릴 때**: `/std update`를 실행하고(스크립트 버전 25) `std-writer`, `std-source-analyst`,
+  `std-visual-director`, `std-distributor`, `guides/script.md`, `formats/youtube.md`(새 `source_label`)에서 "new"를
+  고릅니다. `"`나 `\`가 들어간 내레이터 스타일은 이제 `/std config` 내레이터에서 거부되니 거기서 바꿉니다. 아직 대본 단계에
+  있는 영상은 대본에 cast 블록이 필요합니다(대본 검사가 알려 줌). 블록 없이 ①을 승인받은 영상은 대본 단계로 돌아갑니다
+  (`/std script <video>` 후 검증과 ①을 다시). 캐스트를 지난 영상은 이미 있는 블록을 그대로 씁니다.
 
 ## 라이선스
 

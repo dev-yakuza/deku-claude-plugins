@@ -5,6 +5,9 @@ audio, then the person approves the video, its thumbnail and its chapters.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`. The video id is the first argument of `/std render`.
+Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only
+`cd <repo> &&`), and read the whole output. Do not repeat a call whose output is already in the conversation. Show
+files to the person with `open <path>` only (never `code`, `vim` or another editor).
 
 ## render
 
@@ -26,9 +29,11 @@ gates are approved by the person again; the wrapper then renders without the wat
 
 1. External audit: as in `setup.py doc verify` step 5, with the thumbnail, the chapters and the stills of ③.
 2. `python3 .claude/studio/scripts/state.py shown <video> 4a --output youtube` right as you open the mp4, the
-   thumbnail and the chapters (`open <path>`) — it prints `hash12 <h12>`.
-3. Ask with AskUserQuestion: `[<video>] ④a 최종 — <mp4 path> · hash <h12>`, the auditor's findings; options
-   `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer —
+   thumbnail and the chapters (`open <path>`) — it prints `hash12 <h12>` and the `question` block:
+   `[<video>] ④a 최종 — <mp4 path> · hash <h12>` and a line asking the person to play the video and check sound,
+   subtitles and pictures together (the auditor cannot play it), up to `end of question`.
+3. Ask with AskUserQuestion: the question is **the block pasted unchanged**, then the auditor's findings (quote file
+   paths rather than retyping long Japanese terms); options `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer —
    do not wait for the person; never in the same assistant message as the question — run
    `python3 .claude/studio/scripts/state.py approve <video> 4a --expect <h12> --output youtube`.
 4. "고칠 곳이 있다": back to the stage the change belongs to (board for pictures, cast/tts for the voice).

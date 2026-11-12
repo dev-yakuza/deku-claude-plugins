@@ -2,6 +2,7 @@
 
 The summary line names the protected keys only; the person also sees what they change to. Two parts:
 - **settings**: one line per changed protected key of config.json, `<key>: <old canonical JSON | (없음)> → <new …>`,
+  the brand's lines (`brand.name` · `brand.accent_color` · `brand.logo` when brand.json is new or changed — 0.0.28 Q12)
   and the builtin narrators' lines (narrator.lines). The pre-commit hook recomputes this part from HEAD and the index.
 - **machine** (first install only): this machine's s2v path (machine.json) and the `id` s2v reports there. Computed by
   `--stage` (which runs s2v); the hook never runs node — the guard compares these lines with the question.
@@ -104,9 +105,32 @@ def crit_parts(crit):
     return lines, files, cnt
 
 
-def settings(old_cfg, new_cfg, keys, narrators=(), crit=()):
-    """(lines, longest value length). `narrators` = [(id, old status, new status)]; `crit` = the criteria files."""
-    kl = key_lines(old_cfg, new_cfg, keys)
+BRAND_KEYS = ("name", "accent_color", "logo")
+
+
+def _brand(blob):
+    try:
+        v = json.loads(blob.decode("utf-8") if isinstance(blob, bytes) else blob) if blob is not None else None
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
+def brand_lines(brand):
+    """[(line, value texts)] for brand.json's keys that differ: `brand` = (HEAD blob or None, index blob or None), or
+    None when the commit does not touch brand.json."""
+    if not brand:
+        return []
+    old, new = _brand(brand[0]), _brand(brand[1])
+    return [(l, v) for l, v in key_lines({"brand." + k: old[k] for k in BRAND_KEYS if k in old},
+                                         {"brand." + k: new[k] for k in BRAND_KEYS if k in new},
+                                         ["brand." + k for k in BRAND_KEYS])]
+
+
+def settings(old_cfg, new_cfg, keys, narrators=(), crit=(), brand=None):
+    """(lines, longest value length). `narrators` = [(id, old status, new status)]; `crit` = the criteria files;
+    `brand` = brand.json's (HEAD blob, index blob) when the commit changes it."""
+    kl = key_lines(old_cfg, new_cfg, keys) + brand_lines(brand)
     lines = [l for l, _v in kl]
     longest = max([len(x) for _l, v in kl for x in v] or [0])
     cl, fl, _cnt = crit_parts(crit)
@@ -171,10 +195,10 @@ def file_line(rel, sha12):
     return "값 블록 파일: %s (sha %s)" % (rel, sha12)
 
 
-def block(old_cfg, new_cfg, keys, narrators, machine, tree, first_install, crit=()):
+def block(old_cfg, new_cfg, keys, narrators, machine, tree, first_install, crit=(), brand=None):
     """The block for commit-ok.json: {"settings", "machine", "shown", "overflow"}. `shown` is what the question must
     contain; overflow = {"file", "sha12", "reason"} or None."""
-    lines, longest = settings(old_cfg, new_cfg, keys, narrators, crit)
+    lines, longest = settings(old_cfg, new_cfg, keys, narrators, crit, brand)
     mach = list(machine or [])
     longest = max([longest] + [len(l) for l in mach])
     full = lines + mach
@@ -188,7 +212,7 @@ def block(old_cfg, new_cfg, keys, narrators, machine, tree, first_install, crit=
     reason = FIRST_INSTALL_OVERFLOW if first_install else "overflow"
     _cl, crit_files, crit_counts = crit_parts(crit)
     shown = [file_line(rel, sha12)] + counts(old_cfg, new_cfg, keys) + crit_counts + crit_files + \
-        [l for l in lines if l.startswith("내레이터:")]
+        [l for l in lines if l.startswith(("내레이터:", "brand."))]
     if first_install:
         shown.append("%s: 첫 설치의 설정이 질문에 다 보이지 않는다 — 파일을 열어 확인할 것" % FIRST_INSTALL_OVERFLOW)
     return {"settings": lines, "machine": mach, "shown": shown,

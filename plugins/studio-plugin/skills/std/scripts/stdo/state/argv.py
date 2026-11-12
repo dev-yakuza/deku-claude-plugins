@@ -5,7 +5,7 @@ agent wrote). Flags that take no value are listed in FLAGS."""
 
 from .hashes import hash_of
 
-FLAGS = frozenset(["--proxy", "--begin", "--end", "--json"])
+FLAGS = frozenset(["--proxy", "--begin", "--end", "--json", "--since-last"])
 
 
 def canonical(argv):

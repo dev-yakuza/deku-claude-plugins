@@ -7,6 +7,7 @@ import glob
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from test_m1e import FAKE_ROOT, S1, S2, FlowCase, cid, E1, E2
 
 SESSION = "sess-m1f"
 MAIN_JS = os.path.join(FAKE_ROOT, "packages", "cli", "dist", "main.js")
+CAST_BLOCK = re.compile(r"^cast:\n  narrator: \{[^\n]*\}\n", re.M)
 S1_ID, S2_ID = "airport:0:0", "exit:0:0"
 
 
@@ -86,6 +88,7 @@ class VoiceCase(FlowCase):
     def cast_script(self, voice=None, style=None, pron=(("空港", "쿠우코오"),), extra=""):
         with open(os.path.join(self.vdir, "script.ko.md")) as f:
             text = f.read()
+        text = CAST_BLOCK.sub("", text, count=1)  # 0.0.28: the script stage wrote the default narrator's block already
         head = "cast:\n  narrator: { voice: \"%s\", style: \"%s\" }\n" % (voice or self.voice, style or self.style)
         if pron:
             head += "pronounce:\n" + "".join("  %s: %s\n" % kv for kv in pron)
@@ -251,6 +254,10 @@ class CastCheck(VoiceCase):
         self.assertEqual(self.run_v(vcli.assets_main, "v1", providers=self.providers), 2)  # the board check: M1g
 
     def test_no_cast(self):
+        with open(os.path.join(self.vdir, "script.ko.md")) as f:
+            text = f.read()
+        with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
+            f.write(CAST_BLOCK.sub("", text, count=1))
         self.changes({})
         self.assertEqual(self.actors(), 1)
         self.assertIn("the script has no cast", self.out)
@@ -522,7 +529,11 @@ class GateTwo(VoiceCase):
             json.dump({"schema": 1, "lines": [{"id": S1_ID, "text": S1, "heard": "공항에 가면", "cer": 0.4}]}, f,
                       ensure_ascii=False)
         self.show("2")
-        want = ["면제 %s: \"%s\" → 들림 \"공항에 가면\" (CER 0.4)" % (S1_ID, S1), "발음 空港 → 쿠우코오"]
+        # 0.0.28 Q9: first the sentences narrator.wav plays, last the read: line
+        played = [l for l in labels_of(self.vdir) if l.startswith("- \"")]
+        self.assertTrue(played)
+        read = "read: studio/out/v1/ko/audition/audition.md"
+        want = played + ["면제 %s: \"%s\" → 들림 \"공항에 가면\" (CER 0.4)" % (S1_ID, S1), "발음 空港 → 쿠우코오", read]
         for l in want:
             self.assertIn("in the question: %s" % l, self.out)
         from stdo.state import labels
@@ -533,10 +544,12 @@ class GateTwo(VoiceCase):
             json.dump({"schema": 1, "lines": many}, f, ensure_ascii=False)
         self.show("2")
         lines = labels.gate2_lines(store.read_state(self.vdir))
-        self.assertEqual(len(lines), 1)
-        self.assertRegex(lines[0], r"^② 목록 파일: work/ko/gate2-lines.txt \(sha [0-9a-f]{12}\) · 면제 50 · 발음 1 · 다른 읽기 0$")
+        self.assertEqual(len(lines), 2)  # the read: line stays out of the file
+        self.assertRegex(lines[0], r"^② 목록 파일: work/ko/gate2-lines.txt \(sha [0-9a-f]{12}\) · 재생 %d · 면제 50 · "
+                                   r"발음 1 · 다른 읽기 0$" % len(played))
+        self.assertEqual(lines[1], read)
         with open(os.path.join(self.w, "gate2-lines.txt")) as f:
-            self.assertEqual(f.read().count("\n"), 51)
+            self.assertEqual(f.read().count("\n"), 51 + len(played))
 
     def test_conflicts_recomputed_at_shown(self):
         self.to_audition()
@@ -548,6 +561,11 @@ class GateTwo(VoiceCase):
 
 
 # ---------------------------------------------------------------- the router around ②
+
+def labels_of(vdir):
+    from stdo.state import labels
+    return labels.gate2_lines(store.read_state(vdir))
+
 
 class RouterVoice(StudioTestCase):
     def test_reading_change_goes_to_tts_and_rework_stales_the_render(self):

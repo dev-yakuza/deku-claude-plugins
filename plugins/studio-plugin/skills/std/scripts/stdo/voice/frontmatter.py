@@ -8,6 +8,12 @@ TOP = re.compile(r"^([A-Za-z_][\w-]*):\s*(.*?)\s*$")
 CHILD = re.compile(r"^(\s+)([^\s:][^:]*?):\s*(.*?)\s*$")
 
 
+def style_ok(style, limit=200):
+    """A cast style a script can carry as it is (0.0.28 Q2): one line, at most `limit` characters (narrator.STYLE_MAX),
+    no `"` or `\\` — this reader does not unescape."""
+    return isinstance(style, str) and len(style) <= limit and not any(c in style for c in "\n\r\"\\")
+
+
 def head(text):
     """The frontmatter's lines (without the --- lines)."""
     lines = (text or "").replace("\r\n", "\n").split("\n")

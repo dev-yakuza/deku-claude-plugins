@@ -4,6 +4,9 @@ Adopt this plugin's Studio into the repository (M1c): its scripts and, three way
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a
 variable in command position. Shared rules: `atoms/_contract.md`.
+Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only
+`cd <repo> &&`), and read the whole output. Do not repeat a call whose output is already in the conversation. Show
+files to the person with `open <path>` only (never `code`, `vim` or another editor).
 
 1. `python3 <<SKILL_DIR>>/scripts/setup.py update plan` — the scripts' versions (repository → plugin), the scripts it
    replaces, adds and removes, every template's state (`same` · `update` · `keep-local` · `conflict` ·

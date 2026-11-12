@@ -11,6 +11,7 @@ import json
 import os
 
 from .. import machine, narrator
+from ..voice import frontmatter
 from ..commit.summary import FIXED_PROTECTED
 from . import labels as L
 from .common import REFUSED, USAGE, SetupError, read_config, with_evidence, write_text
@@ -147,8 +148,9 @@ def narrator_preview(top, lang, engine, style, nid="narrator"):
     if not narrator.engine_ok(engine):
         raise SetupError(USAGE, "the engine must be qwen:<built-in speaker> (%s)" % ", ".join(sorted(
             narrator.QWEN_SPEAKERS)))
-    if not isinstance(style, str) or len(style) > narrator.STYLE_MAX or "\n" in style:
-        raise SetupError(USAGE, "the style is one line of at most %d characters" % narrator.STYLE_MAX)
+    if not frontmatter.style_ok(style, narrator.STYLE_MAX):
+        raise SetupError(USAGE, "the style is one line of at most %d characters, without \" or \\"
+                         % narrator.STYLE_MAX)
     _base, sp = _narrator_paths(top, root, nid)
     try:
         with open(sp, "rb") as f:

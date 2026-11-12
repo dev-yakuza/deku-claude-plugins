@@ -8,7 +8,7 @@ import glob
 import os
 
 from .. import narrator, s2vlint
-from ..state import schema
+from ..state import schema, stagechecks
 from . import frontmatter, pronounce
 
 
@@ -44,7 +44,7 @@ def actor_problems(text, lang, sentences, actors):
         want = (spec.get("voice"), spec.get("style") or None)
         hit = [nid for nid, st in sorted(actors.items())
                if ((st.get("voice") or {}).get(lang) or {}).get("engine") == want[0]
-               and ((st.get("voice") or {}).get(lang) or {}).get("style") == want[1]]
+               and (((st.get("voice") or {}).get(lang) or {}).get("style") or None) == want[1]]  # "" is no style
         if not hit:
             out.append("cast.%s (%s, %s) is no actor of the roster for %s — use an actor's voice and style exactly"
                        % (role, want[0], want[1], lang))
@@ -77,7 +77,7 @@ def check(repo, root, vdir, state, lang, ctx, providers, env, runner, ctx_of=Non
     fail_unread = schema.STAGE_CHECKS["cast"]["fail_unread"]
     lint = s2vlint.run(ctx["s2v_path"], ctx["script"], "lint", env=env, runner=runner, lang=lang,
                        fail_unread=fail_unread)
-    problems += lint.problems()
+    problems += lint.problems(os.path.relpath(stagechecks.path(vdir, lang, "cast"), repo))
     ins = providers.inspect(ctx)
     cur = providers.collect(ctx, state, lang, ins=ins)
     rec1 = state["langs"][lang]["approved"].get("1")

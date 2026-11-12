@@ -22,6 +22,8 @@ never a name built from anything else) and execute the document it prints. Pass 
   `render`, `copy`, `status`, `resume`, `abandon`, `move`, `platform`, `review`, `evolve`,
   `rollback`, `audit`, `config`, `update`, `help`.
 - Empty `$0` → `doc help`. Unknown `$0` → say so, then `doc help`.
+- Words in the request that ask to stop before a step (`make … — stop and ask before tts and render`) are the person's
+  pause requests: `make` passes them to `state.py begin` as `--ask-before` (`doc make`).
 
 **Development status (0.0.x)**: Studio is being built milestone by milestone. A command whose
 document says "Not implemented yet" must do nothing else: tell the user which milestone brings it,

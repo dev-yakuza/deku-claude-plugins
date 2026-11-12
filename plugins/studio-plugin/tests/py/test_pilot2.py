@@ -12,7 +12,6 @@ import json
 import os
 import re
 import stat
-from unittest import mock
 
 import helpers
 import state_fixtures as F
@@ -21,7 +20,6 @@ from helpers import StudioTestCase
 from stdo import machine
 from stdo.claims import check as ccheck, cli as ccli, linkrule, sourcemd
 from stdo.setup import doc
-from stdo.state import gates
 from stdo.state.collect import Providers
 import test_pilot1b
 
@@ -74,6 +72,10 @@ class SourceIds(ClaimsCase):
             f.write("# Source\n\n## Claims\n" + body + "\n## Ruby pairs\n")
 
     def three(self):
+        from stdo.state import store
+        from stdo.state.collect import frozen_copy_path
+        with open(frozen_copy_path(self.vdir, store.read_state(self.vdir)["source"]), "a", encoding="utf-8") as f:
+            f.write("\n%s\n" % E3)  # 0.0.28 Q8: every excerpt is in the copy
         self.write_source("- C-00000000: the cat\n  > %s\n- C-1234abcd: warm\n  > %s\n- %s: dogs\n  > %s\n"
                           % (E1, E2, F.claim_id(E3), E3))
 
@@ -225,7 +227,8 @@ class Skeleton(ClaimsCase):
         self.assertTrue(probs)
         self.assertEqual([p for p in probs if "has no verdict" not in p], [])
         first = draft["sentences"][0]
-        self.assertEqual(list(first), ["text", "kind", "claims", "excerpts", "verdict", "note"])  # text first, no sort
+        self.assertEqual(list(first), ["text", "from", "kind", "claims", "excerpts", "verdict", "note"])  # no sort
+        self.assertEqual(first["from"], "narration")  # 0.0.28 Q7
         self.assertEqual((first["kind"], first["claims"], first["excerpts"], first["verdict"], first["note"]),
                          ("fact", [F.C1], [E1], "", ""))
         self.assertEqual(draft["sentences"][1]["claims"], [])
@@ -462,24 +465,15 @@ class AuditionRead(ApproveCase):
             self.assertEqual(self.cli("stage-done", "v1", st), 0, self.last_err)
         return md
 
-    def test_read_line_after_hash12(self):
-        md = self.to_two()
-        real = os.path.isfile
-        with mock.patch.object(gates.os.path, "isfile", lambda p: False if p == md else real(p)):
-            self.assertEqual(self.cli("shown", "v1", "2"), 0, self.last_err)
-        without = self.last_out
-        self.assertNotIn("read: ", without)
+    def test_read_line_in_the_block(self):
+        """0.0.28 Q9: the `read:` line is the ② block's last line (recorded, so the guard compares it), always."""
+        self.to_two()
         self.assertEqual(self.cli("shown", "v1", "2"), 0, self.last_err)
         lines = self.last_out.splitlines()
-        i = [n for n, l in enumerate(lines) if l.startswith("hash12 ")][0]
-        self.assertEqual(lines[i + 1], "read: studio/out/v1/ko/audition/audition.md")
-        self.assertEqual("\n".join(lines[:i + 1] + lines[i + 2:]) + "\n", without)  # block and hash unchanged
-
-    def test_no_line_without_the_file(self):
-        md = self.to_two()
-        os.remove(md)
-        self.assertEqual(self.cli("shown", "v1", "2"), 0, self.last_err)
-        self.assertNotIn("read: ", self.last_out)
+        i = lines.index("end of question")
+        self.assertEqual(lines[i - 1], "read: studio/out/v1/ko/audition/audition.md")
+        self.assertIn("in the question: read: studio/out/v1/ko/audition/audition.md", lines)
+        self.assertEqual(len([l for l in lines if l.startswith("read: ")]), 1)  # no separate line outside the block
 
     def test_make_names_the_path(self):
         mk = flat(read(COMMANDS, "make.md"))

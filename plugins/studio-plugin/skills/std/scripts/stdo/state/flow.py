@@ -19,7 +19,7 @@ from . import commands, evidence, harnessgate, hashes, labels, schema, stagechec
 from .collect import CollectError, frozen_copy_path
 
 C = commands
-VIDEO_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+VIDEO_ID = store.VIDEO_ID
 KINDS = ("youtube",)  # M1: one video kind (U-M1-4)
 REASON_MAX = 500
 OVERLAY_MAX = 64 * 1024
@@ -59,7 +59,7 @@ def _semver(text):
 
 
 def begin(repo, cfg, root, o, providers, ctx_of, env=None):
-    """`begin <video> --source <path> --kind youtube [--lang l]`."""
+    """`begin <video> --source <path> --kind youtube [--lang l] [--ask-before tts,render]`."""
     if len(o["_"]) != 1:
         raise Usage("begin needs one video id: begin <video> --source <path> --kind youtube [--lang l]")
     video = o["_"][0]
@@ -74,6 +74,7 @@ def begin(repo, cfg, root, o, providers, ctx_of, env=None):
     lang = o.get("--lang") or cfg.get("language")
     if not isinstance(lang, str) or not re.match(r"^[a-z]{2,3}(-[A-Za-z0-9]+)?$", lang):
         raise Usage("cannot tell the video's language (--lang, or language in config.json): %r" % (lang,))
+    ask = ask_steps(o["--ask-before"]) if "--ask-before" in o else []
     why = harness_refusal(repo, providers, ctx_of, env)
     if why:
         raise store.Refused(why, C.REFUSED)
@@ -114,12 +115,47 @@ def begin(repo, cfg, root, o, providers, ctx_of, env=None):
                              {"kind": "repo-md", "path": rel.replace(os.sep, "/"), "images": [], "frozen_hash": None,
                               # the source's last commit at begin: later commits to it are shown at ① (S5)
                               "begin_commit": last_commit(repo, [rel.replace(os.sep, "/")])})
+    st["ask_before"] = ask
     vdir = os.path.join(repo, root, "videos", video)
     voices = os.path.join(repo, root, "voices")
     if not os.path.isdir(voices):
         os.makedirs(voices, exist_ok=True)  # S7: the first tts must not make voices/ at the repository root
     store.create(vdir, st)
     _out("begun %s (%s, %s) from %s" % (video, kind, lang, st["source"]["path"]))
+    if ask:
+        _out("ask before: %s" % ", ".join(ask))
+    return C.OK
+
+
+# ---------- ask-before (0.0.28 Q15) ----------
+
+ASK_STEPS = ("tts", "render", "copy", "commit")  # stages of schema.STAGES a person may ask to be asked before
+
+
+def ask_steps(value):
+    """The steps of `tts,render` (`none`: no step), in ASK_STEPS order; Usage for anything else."""
+    v = (value or "").strip()
+    if v == "none":
+        return []
+    parts = [p.strip() for p in v.split(",")]
+    bad = [p for p in parts if p not in ASK_STEPS]
+    if not v or bad:
+        raise Usage("ask-before takes steps of %s, comma-separated, or none (got %r)" % (", ".join(ASK_STEPS), value))
+    return [s for s in ASK_STEPS if s in parts]
+
+
+def ask_before(vdir, o, hooks=None):
+    """`ask-before <video> <steps|none>`: a person's later pause request replaces the list (no evidence: the guard
+    leaves it to the person's prompt in default mode — §1 NO_AUTO)."""
+    if len(o["_"]) != 2:
+        raise Usage("ask-before needs the video and the steps: ask-before <video> <%s | none>" % ",".join(ASK_STEPS))
+    steps = ask_steps(o["_"][1])
+
+    def change(s):
+        s["ask_before"] = list(steps)
+
+    store.write(vdir, {"event": "ask-before", "steps": steps}, change, hooks=hooks)
+    _out("ask before: %s" % (", ".join(steps) or "nothing"))
     return C.OK
 
 
@@ -249,7 +285,45 @@ def _dirty_refusal(found):
                          % "; ".join("%s: %s" % x for x in found), C.REFUSED)
 
 
-def record_source(repo, vdir, state, cfg, hooks=None, env=None):
+SOURCE_URL_MAX = 500
+# a query key that may carry a credential never goes into the copy
+SECRET_KEY = re.compile(r"(token|key|secret|pass|auth|sig|session|code|credential|cookie)", re.I)
+
+
+def source_url(value, cfg):
+    """The source's public URL as stored (None: `none`), or Usage: `https://<one of public_domains>/…`, no user, port
+    or fragment, no query key that may carry a credential (0.0.28 Q11 — record-source gets the guard's allow, so the
+    value is bounded here)."""
+    from urllib.parse import parse_qsl, urlsplit
+    if value == "none":
+        return None
+    doms = [d for d in (cfg.get("public_domains") or []) if isinstance(d, str)]
+    v = value or ""
+    if len(v) > SOURCE_URL_MAX or any(ord(c) < 33 or ord(c) == 127 or c in "<>\"'`\\" for c in v):
+        raise Usage("--url must be one https URL without spaces, quotes or < > (at most %d characters)"
+                    % SOURCE_URL_MAX)
+    try:
+        u = urlsplit(v)
+        port = u.port
+    except ValueError:
+        raise Usage("--url is not a URL: %s" % v)
+    if u.scheme != "https" or u.netloc.lower() != (u.hostname or "") or port is not None \
+            or u.hostname not in [d.lower() for d in doms]:
+        raise Usage("--url must be https://<one of public_domains>/… (%s)"
+                    % (", ".join(doms) or "none set: /std config"))
+    if u.fragment or "#" in v:
+        raise Usage("--url takes no #fragment")
+    if not u.path.startswith("/"):
+        raise Usage("--url needs the page's path: https://%s/…" % u.hostname)
+    bad = [k for k, _v in parse_qsl(u.query, keep_blank_values=True) if SECRET_KEY.search(k)]
+    if bad:
+        raise Usage("--url has a query key that may carry a credential: %s" % ", ".join(bad))
+    return v
+
+
+def record_source(repo, vdir, state, cfg, hooks=None, env=None, url=False):
+    """`url`: the --url value (False: not given — a stored URL stays; `none` removes it)."""
+    url_rec = {} if url is False or url is None else {"url": source_url(url, cfg)}
     src = state["source"]
     if src.get("kind") != "repo-md":
         raise store.Refused("source kind %r is not supported yet" % src.get("kind"), C.USAGE)
@@ -285,6 +359,7 @@ def record_source(repo, vdir, state, cfg, hooks=None, env=None):
     rec = {"frozen_hash": after_live, "copy_sha": copied, "assets_sha": assets_sha, "images": images,
            "frozen_at": schema.now(),
            "commits_since_begin": commits_since(repo, src.get("begin_commit"), [src["path"]] + list(images))}
+    rec.update(url_rec)
 
     def check(s):
         if all(L["status"] in ("done", "aborted") for L in s["langs"].values()):
@@ -295,6 +370,8 @@ def record_source(repo, vdir, state, cfg, hooks=None, env=None):
 
     store.write(vdir, dict({"event": "record-source"}, **rec), change, hooks=hooks, check=check)
     _out("source frozen %s (%d image(s))" % (after_live[:12], len(images)))
+    if url_rec:
+        _out("source url: %s" % (url_rec["url"] or "none"))
     for line in source_commit_lines(dict(state, source=dict(src, **rec))):
         _out("%s — put this line in the ① question" % line)
     if note:

@@ -64,7 +64,8 @@ class Context(object):
         self.denies = []
         # M0d-2: an allow needs evidence (approval commands, Studio commits) and the call being that command alone
         self.allow = None  # the reason, when the guard answers allow
-        self.candidates = []  # (cmd, kind "state" | "commit" | "s2v" | "doc", reason)
+        self.candidates = []  # (cmd, kind "state" | "commit" | "s2v" | "doc" | "script" | "work", reason)
+        self.script_calls = {}  # id(cmd) → (worktree, studio_root, video, sub) of a "script" candidate (0.0.28 §1.1)
         self.bulk_ids = set()  # extractions and recursive copies in a Studio repository (W4)
         self.effects = []  # (rule, function) run only when nothing is denied
         self.warnings = []  # shown to the person and the model when there is no decision
@@ -2638,6 +2639,31 @@ def state_approval(ctx, cmd, argv):
     add_candidate(ctx, (cmd, "state", v.reason))
 
 
+def check_script(ctx, cmd):
+    """0.0.28 §1.1: a repository copy of Studio's read-and-record scripts (scriptrun.AUTO_SCRIPTS; state.py only for
+    evidence-free subcommands but ask-before) becomes an allow candidate; finish() allows only a call that is that
+    alone and that scriptrun.trusted accepts. No deny comes from here."""
+    from . import scriptrun
+    if ctx.hook.get("permission_mode") != "default":
+        return
+    real = studio_script(ctx, cmd)
+    if real is None or os.path.dirname(real) == PLUGIN_SCRIPTS or os.path.basename(real) not in scriptrun.AUTO_SCRIPTS:
+        return
+    args = cmd.script.args
+    if any(w.value is None for w in args):
+        return
+    name = os.path.basename(real)
+    got = scriptrun.shape(name, [w.value for w in args])
+    if got is None:
+        return
+    video, sub = got
+    ri = _run_repo(ctx, cmd)
+    if ri is None or not ri.harness or ri.config_error:
+        return
+    add_candidate(ctx, (cmd, "script", scriptrun.describe(name, sub, video)))
+    ctx.script_calls[id(cmd)] = (ri.worktree, ri.studio_root, video, sub)
+
+
 def s2v_approval(ctx, cmd, words):
     from . import approve
     what = "s2v " + " ".join(words)
@@ -3215,6 +3241,7 @@ def per_command(ctx, c, infos, sc):
     check_version(ctx, c)
     check_env(ctx, c)
     check_approval(ctx, c)
+    check_script(ctx, c)
     check_s2v_results(ctx, c)
     check_git_rules(ctx, c, infos)
     check_gh(ctx, c, infos)
@@ -4433,6 +4460,23 @@ def decide_file(ctx, tool, ti):
     if not isinstance(path, str) or not path:
         return
     judge_file_path(ctx, path, tool, ti)
+    if ctx.denies or "agent_id" not in ctx.hook:
+        return
+    # 0.0.28 §1.2: a role writing its own output files (roleout.TABLE) — an allow candidate, never a deny
+    try:
+        r = ctx.where.resolve(path, ctx.cwd)
+        ri = ctx.repos.info(r.repo) if r is not None and r.real is not None and r.repo is not None else None
+        if ri is None or not ri.harness or ri.config_error or not ri.studio:
+            return
+        parts, fold = rel(ctx, ri, r.real)
+    except limits.LimitExceeded:
+        return  # no allow; the checks above already judged the write
+    from . import roleout
+    if parts is None or protect.classify(parts, ri.studio_root, fold) is not None:
+        return
+    reason = roleout.owned(ctx.hook, tool, path, ri.worktree, ri.studio_root)
+    if reason:
+        add_candidate(ctx, (None, "work", reason))
 
 
 def judge_file_path(ctx, path, tool, ti, mcp=False):
@@ -4725,11 +4769,17 @@ def finish(ctx):
             ctx.deny(rule, "could not record the checked answer (%s: %s) — ask the person again." % (type(e).__name__, e))
             return
     if len(ctx.candidates) == 1:
-        from . import allowrule
+        from . import allowrule, scriptrun
         cmd, kind, reason = ctx.candidates[0]
-        if kind == "doc" and ctx.warnings:
-            return  # a warning is shown instead, with the normal prompt (defence in depth, 0.0.24)
-        if allowrule.sole(ctx, ctx.scan, cmd, kind):
+        if kind in ("doc", "script", "work") and ctx.warnings:
+            return  # a warning is shown instead, with the normal prompt (defence in depth, 0.0.24; 0.0.28 §1.1 m1)
+        if kind == "work":
+            ok = cmd is None  # a Write/Edit: roleout.owned checked the path (allowrule.sole is for Bash calls)
+        else:
+            ok = allowrule.sole(ctx, ctx.scan, cmd, kind)
+            if ok and kind == "script":
+                ok = scriptrun.trusted(ctx, cmd, *ctx.script_calls[id(cmd)])
+        if ok:
             allow_for(ctx, reason)
 
 

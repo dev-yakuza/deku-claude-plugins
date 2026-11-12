@@ -18,8 +18,10 @@ FAIL_WARNINGS = ("max-duration", "target-duration", "subtitle-budget", "subtitle
 FAIL_WARNINGS_BY_LANG = {"ko": ("unread-word",), "ja": ("unread-word",)}
 LANG_RE = re.compile(r"^lang:\s*[\"']?([A-Za-z-]+)", re.M)
 MODES = ("lint", "check")
-# failures whose s2v message is printed too: it names what to fix (`no-visual`: the output and the scene)
-SHOWN_MESSAGES = ("no-visual",)
+# every failure's s2v message is printed too: it names what to fix (`no-visual`: the output and the scene;
+# `target-duration`: the estimate and the difference — 0.0.28 Q4), each cut, and at most this many lines
+MESSAGE_MAX = 300
+MESSAGES_SHOWN = 10
 
 
 class Result(object):
@@ -37,18 +39,28 @@ class Result(object):
     def passed(self):
         return self.code == 0 and not self.failures
 
-    def problems(self):
-        """The check's problem lines: `s2v <mode>: <codes>` (or the exit code), then one line per failure whose message
-        names what to fix (SHOWN_MESSAGES) — what the producer hands back to the role. Empty when it passed."""
+    def problems(self, checks=None):
+        """The check's problem lines: `s2v <mode>: <codes>` (or the exit code), then one line per failure with s2v's
+        message (cut at MESSAGE_MAX characters, at most MESSAGES_SHOWN lines, then `… N more in <checks>`: the check
+        file that keeps them all) — what the producer hands back to the role. Empty when it passed."""
         if self.passed:
             return []
         out = ["s2v %s: %s" % (self.mode, ", ".join(sorted(set(d["code"] for d in self.failures)))
                                or "exit %d" % self.code)]
-        return out + ["s2v %s: %s" % (self.mode, d["message"]) for d in self.failures if d["code"] in SHOWN_MESSAGES]
+        msgs = ["s2v %s: %s" % (self.mode, _cut(d["message"])) for d in self.failures]
+        out += msgs[:MESSAGES_SHOWN]
+        if len(msgs) > MESSAGES_SHOWN:
+            out.append("… %d more in %s" % (len(msgs) - MESSAGES_SHOWN, checks or "the check file"))
+        return out
 
     def details(self):
         return {"mode": self.mode, "exit": self.code, "lang": self.lang, "diagnostics": self.diagnostics,
                 "failures": [d["code"] for d in self.failures], "stderr_tail": self.stderr_tail}
+
+
+def _cut(message):
+    m = str(message or "")
+    return m if len(m) <= MESSAGE_MAX else m[:MESSAGE_MAX - 1] + "…"
 
 
 def parse(stderr):

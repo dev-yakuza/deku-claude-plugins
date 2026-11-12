@@ -199,6 +199,52 @@ person's gates stay behind everything listed here.
   repository: no path, expansion, wildcard, folder change, hook, or alias or function that may change folder. With no
   shell snapshot, any such command is refused.
 
+## What the guard allows without a prompt (0.0.28)
+
+- Only in the `default` permission mode, the guard answers allow for:
+  - Studio's own scripts that read and record, from the repository copy: `state.py` (the subcommands that need no
+    answer of yours, except `ask-before`), `check_assets.py`, `check_claims.py`, `check_scope.py`, `check_tts.py`,
+    `resolve_assets.py`, `validate_copy.py` and `audition.py`. The call must be that script alone (optionally after
+    `cd <repo> &&`), with literal arguments and a valid video id. `run_s2v.py`, `lock.py`, `check_commit.py`,
+    `hooks.py` and `setup.py` (other than `doc`) keep their prompt.
+  - A Studio role's Write or Edit of its own output files: the source analyst's `work/source.md`, the strategist's
+    `work/brief.json` and `work/brief.md`, the writer's `script.<lang>.md` and `work/<lang>/claims-map.json`, the
+    translator's `script.<lang>.md` for another language than the source, the visual director's script edits,
+    `CREDITS.draft.yaml` and `work/<lang>/board.md`, the distributor's `copy/<video>/<lang>/<platform>.md`. The
+    fact-checker's, the auditor's and the main session's writes keep their prompt.
+- When a check fails you get the normal prompt, never a refusal. Choosing "allow all edits this session" switches the
+  session out of `default`; from then on these allows stop for that session.
+- You also get the normal prompt when:
+  - the repository copy of Studio's scripts is not exactly the plugin's copy of the same version — one extra file is
+    enough (a `.DS_Store`, a `__pycache__` folder, a link): run `/std update`;
+  - Claude was started above the repository (`~`, `~/projects`): the s2v checkout and the folders on `PATH` are then
+    inside what the model may write to. Start Claude in the repository;
+  - `python3`, `node`, `git` or `ffmpeg` is a script or a shim (asdf, mise, volta), or a pyenv shim that would choose
+    anything but the `system` Python (`PYENV_VERSION`, a `.python-version`, the global version file);
+  - a folder on `PATH` is empty, relative or inside the repository, the working folder or the project folder; a Python,
+    Node or git variable that changes what runs is set (`PYTHONPATH`, `NODE_OPTIONS`, `GIT_DIR`, `GIT_CONFIG_*`, …);
+    the session's environment file sets anything;
+  - the repository's own git settings run a program (filters, textconv, `core.fsmonitor`, `core.hooksPath`, includes,
+    a partial clone) or it has submodules.
+- Not seen (residual risk):
+  - A broad allow rule of yours that can write files, such as `Bash(git:*)` or `Bash(gh:*)` (`git diff --output=<file>`
+    writes any file): with it, the model can change code that a Studio allow later runs (pyenv's files, nvm, the s2v
+    checkout) without a prompt.
+  - Folders outside the project that you can write to: `/opt/homebrew/bin`, a system git config you can write to (for
+    example Homebrew's), pyenv's hook folders (`<root>/pyenv.d`, `<prefix>/pyenv.d`, `/opt/homebrew/etc/pyenv.d`,
+    `/etc/pyenv.d`, the plugins' hook folders). In the `default` mode the model cannot change them without a prompt,
+    except through a rule as above.
+  - Folders added with `--add-dir`: the guard does not know them, so it does not count them as folders the model may
+    write to.
+  - Other programs the scripts run (`ps`, and `ffprobe` through s2v) are checked only through the `PATH` rule.
+  - When the guard itself runs through a pyenv shim, the values pyenv sets for that run (`PYENV_VERSION` `system`,
+    `PYENV_DIR` the working folder, `PYENV_HOOK_PATH` of pyenv's own hook folders) are taken as pyenv's, not as yours.
+  - A role can write wrong content into its own files without a prompt, and the main session can start a role with any
+    instructions and so have that role's files written without a prompt. The gates and Studio's checks judge the
+    content, as before.
+  - In auto mode nobody sees a prompt, so a later `state.py ask-before` that removes a pause you asked for is not shown
+    to you (in the `default` mode it keeps its prompt).
+
 ## What the guard does not see
 
 ### Programs and settings that run commands the guard does not model

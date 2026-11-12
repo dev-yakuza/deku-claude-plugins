@@ -13,6 +13,10 @@ written with M1.
 - Read files with Read and write your outputs (if any) with Write or Edit. Never use `python -c`, heredocs or generator
   scripts for file work: the guard refuses them. For ids, lists and skeletons use the Studio commands your stage
   names.
+- Shell habits (the producer; 0.0.28 Q13 · Q14): run Studio commands exactly as written — no `| head`, `; echo $?`,
+  `2>&1 | …`, variables or `&&` chains (only the documented `cd <repo> &&`) — and read the whole output; do not repeat
+  a call whose output is already in the conversation; show files to the person with `open <path>` only (never `code`,
+  `vim` or another editor: the guard refuses an editor on a protected file as a write).
 - Studio's words in the person's language (Korean): 하네스 (harness), 발췌 (excerpt), 챕터 (chapter), 크레딧 (credit) —
   spelled exactly so.
 
@@ -129,7 +133,7 @@ the session's question; there is no direct terminal path (intended — 00-plan �
   `중단 <video> <lang>` (abandon), `사내설정 <sha12>` (overlay), `설정 <hash12>` (protected settings, the s2v path,
   the narrator) and `갱신 <hash12>` (update). Copy the label exactly as the command printed it. The fixed label is one
   of the options; a free-text "Other" answer is never an approval.
-- When `shown` (①, ②, ④b) or `credit-preview` prints a `question` block, paste the `question` block `shown` printed,
+- When `shown` (①, ②, ③, ④a, ④b) or `credit-preview` prints a `question` block, paste the `question` block `shown` printed,
   unchanged, as the question — never retype a line (the guard compares each character); add only what the block's
   first line says after it. On a `G-EVIDENCE` refusal that names a line, tell the person which line the guard named,
   then run `shown` again and ask the gate question again with the block — no other route (INV9).

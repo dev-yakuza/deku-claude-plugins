@@ -6,6 +6,9 @@ script.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`. The video id is the first argument of `/std verify`.
+Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only
+`cd <repo> &&`), and read the whole output. Do not repeat a call whose output is already in the conversation. Show
+files to the person with `open <path>` only (never `code`, `vim` or another editor).
 
 1. `python3 .claude/studio/scripts/state.py next <video> --enter verify` — exit 3: go to the stage it names.
 2. `python3 .claude/studio/scripts/check_claims.py <video> --skeleton` — (re)writes `work/<lang>/verify.draft.json`

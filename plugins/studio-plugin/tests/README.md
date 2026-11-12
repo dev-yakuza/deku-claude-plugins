@@ -42,7 +42,7 @@ STUDIO_TEST_S2V=/abs/path/to/script2video \
   `check_commit --staged` on a Studio commit (targets 50 ms / 300 ms; fails only above 3×).
 
 **Scripts version (M0d-2, D-M0-3)**: the guard refuses Studio commands in a repository whose copy of
-`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 24). Until `/std update` exists (M1), copy the plugin's
+`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 25). Until `/std update` exists (M1), copy the plugin's
 `skills/std/scripts/` (without `guard.py` and `stdo/guard/`) into an older sandbox repository again by hand.
 
 **M0f**: `tests/py/drivers/make_harness.py <dir>` builds a synthetic harness repository (templates, agents, a copy of
@@ -313,3 +313,13 @@ list `BACKSTOP_PARITY` (rows of the review corpora with and without a source, ru
 `HEAD_REFUSED_KEPT` and `HEAD_REFUSED_FUNCS` in `test_guard_judge.py` list the rows 0.0.26 refused that this guard
 passes: `assertHeadRefusedKept` checks that `decide_g1` passes them and `decide` refuses them, so 0.0.28 can lift the
 backstop class by class.
+
+**0.0.28** (`SCRIPTS_VERSION` 25, pilot 3, fix-0028-plan §2–§14): `test_pilot3.py` covers the writer's frontmatter
+lines of `state.py next --enter script` (`stdo/state/scriptlines.py`: the default narrator's cast block, each output's
+aspect and maxDuration, the targetDuration range) and the narration check of the cast block; `record-brief --from`
+forms; every s2v failure message (`s2vlint.Result.problems`); the targetDuration range (`claims.check.target_range`,
+s2v's ±15 %); the S7 message, the skeleton's `from` and the on-screen hint; the `--source` excerpt checks with the
+pilot's 緑の通路 line; the ② block's played sentences and `read:` line (also compared by the guard); `floor_text`;
+`record-source --url` and the copy's source line; brand lines in the value block; `--ask-before` / `ask-before` (no deny
+and no allow from the guard); the ③ and ④a question blocks. The m1e fixture `SCRIPT` has the default narrator's cast
+block from the start (test_m1f's `CAST_BLOCK` replaces it at cast). The guard's §1 allows are tested with the guard.

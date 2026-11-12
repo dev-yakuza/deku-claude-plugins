@@ -48,11 +48,14 @@ title: 공항 단어
 """ % (E1, E2)
 S1 = "공항에 가면 먼저 체크인 카운터를 찾습니다."
 S2 = "탑승권을 받으면 출국 심사를 받습니다."
+# 0.0.28 Q2: the default narrator's cast block is in the script from the script stage (make_harness's narrator).
 # scene 1 is the title scene (0.0.26 P17): its only visual is ::title[<frontmatter title>]; the title is a text the
 # draft already judges (출국), so the fact-check fixtures stay as they were
 SCRIPT = """---
 title: 출국
 lang: ko
+cast:
+  narrator: { voice: "qwen:Sohee", style: "차분하게" }
 outputs:
   youtube: { maxDuration: %(max)s }
 targetDuration: %(target)s
@@ -400,7 +403,7 @@ class ScriptCheck(FlowCase):
                     .replace("targetDuration: 6\n", ""))
         self.assertEqual(self.check("--narration"), 1)
         self.assertIn("maxDuration must be the format's upper bound 600 (it is missing)", self.out)
-        self.assertIn("targetDuration must be a number within the format's 1–600 s (it is missing)", self.out)
+        self.assertIn("targetDuration must be a number within 2–521 s (it is missing)", self.out)
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
             f.write(text.replace("  youtube: { maxDuration: 300 }", "  youtube:\n    maxDuration: 600"))
         self.assertEqual(self.check("--narration"), 0, self.out)  # a nested block counts too
@@ -408,10 +411,10 @@ class ScriptCheck(FlowCase):
         self.assertEqual(self.check("--narration"), 1)
         self.assertIn("targetDuration must be a number within", self.out)
         F.write_format(self.repo, length=(30, 600))  # the narration itself: about 8 s
-        self.script(target=30)
+        self.script(target=36)  # 0.0.28: ceil(30 ÷ 0.85)
         self.assertEqual(self.check("--narration"), 1)
         self.assertIn("the narration comes to about 8 s", self.out)
-        self.assertNotIn("targetDuration", self.out)
+        self.assertNotIn("targetDuration must", self.out)  # Studio's range holds; s2v's own estimate fails it
 
     def test_unread_word_is_information_at_script(self):
         """J32: pinned in STAGE_CHECKS (script False, cast and board True), and the script check uses it."""
@@ -541,7 +544,8 @@ class VerifyCheck(FlowCase):
             (with_(0, verdict=None), "has no verdict"),
             (with_(0, kind="opinion"), "needs text and a kind"),
             (with_(1, excerpts=["空港(くうこう)"]), "not the excerpt of a claim it cites"),  # S7
-            (with_(0, claims=[cid(E2)], excerpts=[E2]), "not among the sentences of %s" % cid(E2)),  # S7
+            (with_(0, claims=[cid(E2)], excerpts=[E2]),  # S7 (0.0.28 Q7: the text and where it is)
+             "sentence 1 (narration): \"%s\" — %s does not list it in the claims map" % (S1, cid(E2))),
             (good[:2], "not judged: " + S2),
             (good[1:], "not judged: " + S1),
             ([good[0], good[2]], "not judged: 空港(くうこう)"),

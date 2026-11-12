@@ -111,6 +111,30 @@ claude --plugin-dir plugins/studio-plugin
   - その他(`chmod 000 studio`、保護ファイルの上に書くアーカイブなど)。
 
   これらの場合も、pre-commit フック、コミットの検査、人のゲートが後ろに残ります。
+- **0.0.28(パイロット 3)。** `state.py next <video> --enter script` が、ライターがそのまま写す frontmatter の行を出力
+  します: 既定のナレーターの `cast:` ブロック(s2v のコンテンツハッシュに入るので最初から台本にあり、キャストの段階では
+  もう編集しない)、出力ごとの `aspect` と `maxDuration`、`targetDuration` の範囲(ceil(min ÷ 0.85) から
+  floor(max ÷ 1.15) まで: youtube は 212–417 で、s2v lint を通った台本はフォーマットの長さに収まる)。
+  `check_claims --narration` は cast ブロックを検査し、s2v の失敗メッセージをすべて出力します。クレームマップは
+  クレームを述べる台本のすべてのテキスト(画面のテキストとタイトルも)を挙げ、検証のメッセージはそのテキストと場所を
+  示します。`check_claims --source` は、コピーにない抜粋、タグの中や文の途中で切れた抜粋を拒否します。
+  `record-brief --from` はリポジトリのルートからのパスも受け付けます(動画フォルダーの中だけ)。② の質問には
+  オーディションが再生する文と `read:` の行が入り、`shown 3` と `shown 4a` も質問ブロックを出力します(④a は音・字幕・
+  絵が合っているかの確認を求める)。`assets.json` は CREDITS 用の `floor_text` を持ちます。
+  `record-source --url <https://<公開ドメイン>/…>` が記事のアドレスを記録し、配信用テキストの説明には `원문: <url>`
+  (動画の言語のラベル)が必要です。ハーネスのコミットの値ブロックに brand.json の名前・色・ロゴが出ます。
+  `begin --ask-before tts,render`(と `state.py ask-before`)が、人が止まって聞くように頼んだ段階を記録します。すべての
+  コマンド文書の Rules の行は、コマンドをそのまま実行し、繰り返さず、`open` だけを使うよう求めます。
+- **確認の削減(0.0.28)。** `default` の権限モードで、ガードは Studio 自身のスクリプト呼び出し(リポジトリのコピーが
+  変更されず完全で、リテラルの引数で単独に実行)と、各ロールが自分の出力ファイルに書くことを、すべての条件が満たされる
+  とき確認なしで許可します。一つでも満たされなければ通常どおり確認します。`run_s2v.py`、`lock.py`、`check_commit.py`、
+  `state.py ask-before` は引き続き確認します。Claude はリポジトリのフォルダーで起動してください。条件と限界:
+  [docs/guard-limits.ja.md](docs/guard-limits.ja.md)。
+- **0.0.28 へ上げるとき**: `/std update` を実行し(スクリプトのバージョン 25)、`std-writer`、`std-source-analyst`、
+  `std-visual-director`、`std-distributor`、`guides/script.md`、`formats/youtube.md`(新しい `source_label`)で「new」を
+  選びます。`"` や `\` を含むナレーターのスタイルは `/std config` のナレーターで拒否されるので、そこで変えます。まだ台本の
+  段階にある動画は台本に cast ブロックが必要です(台本の検査が知らせる)。ブロックなしで ① を承認した動画は台本の段階へ
+  戻ります(`/std script <video>` の後、検証と ① をもう一度)。キャストを過ぎた動画はすでにあるブロックを使います。
 
 ## ライセンス
 

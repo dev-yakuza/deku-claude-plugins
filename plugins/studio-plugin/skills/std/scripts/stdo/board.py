@@ -19,7 +19,7 @@ import os
 from . import credits, look, s2vlint, sandbox
 from .claims.brief import assets_problem
 from .source import assets as assets_mod, imgformat
-from .state import schema
+from .state import schema, stagechecks
 from .state.hashes import file_sha
 
 # every kind s2v inspect lists is a picture except these (s2v inspect.ts files.sha(…, kind)); a kind Studio does not
@@ -104,7 +104,7 @@ def check(repo, vdir, state, lang, ctx, output, providers, env, runner):
     fail_unread = schema.STAGE_CHECKS["board"]["fail_unread"]
     res = s2vlint.run(ctx["s2v_path"], ctx["script"], "check", env=env, runner=runner, lang=lang,
                       fail_unread=fail_unread)
-    problems += res.problems()
+    problems += res.problems(os.path.relpath(stagechecks.path(vdir, lang, "board", output), repo))
     ins = providers.inspect(ctx)
     cur = providers.collect(ctx, state, lang, ins=ins)
     rec2 = state["langs"][lang]["approved"].get("2")

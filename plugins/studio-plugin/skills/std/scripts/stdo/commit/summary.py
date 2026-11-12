@@ -92,12 +92,25 @@ def crit_files(ctx, studio_paths):
     return out
 
 
+BRAND = ".claude/studio/brand.json"
+
+
+def brand_files(ctx, studio_paths):
+    """(HEAD blob or None, index blob or None) of brand.json when this commit changes it, else None (0.0.28 Q12)."""
+    if BRAND not in studio_paths:
+        return None
+    status = dict((p, st) for st, p in ctx.git.staged(ctx.base))
+    old = ctx.git.show("%s:%s" % (ctx.head, BRAND)) if ctx.head else None
+    new = ctx.git.show(":" + BRAND) if status.get(BRAND) != "D" else None
+    return (old, new)
+
+
 def settings_lines(ctx, studio_paths):
     """The settings part of the value block, from HEAD and the index (the hook recomputes it the same way)."""
     from . import values
     old, new = configs(ctx, studio_paths)
     return values.settings(old, new, protected_keys(old, new), narrators(ctx, studio_paths),
-                           crit_files(ctx, studio_paths))[0]
+                           crit_files(ctx, studio_paths), brand_files(ctx, studio_paths))[0]
 
 
 def compute(ctx, studio_paths, tree):

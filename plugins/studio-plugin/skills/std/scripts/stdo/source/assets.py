@@ -21,7 +21,7 @@ import re
 import unicodedata
 from urllib.parse import unquote
 
-from .. import writes
+from .. import credits, writes
 from . import imgformat, refs
 
 SCHEMA = 1
@@ -221,6 +221,7 @@ def build(top, vdir, video, source_rel, copy_path, cfg):
             entry["script_src"] = os.path.relpath(os.path.join(top, rel), vdir).replace(os.sep, "/")
         fl, why = floor(ref, rel if status == "ok" or reason in ("format", "ext-mismatch") else None, cfg, marks)
         entry.update(status=status, reason=reason, floor=fl, floor_reason=why)
+        entry["floor_text"] = credits.floor_of(entry)  # the CREDITS `floor` exactly (0.0.28 Q10: never "public/null")
         images.append(entry)
     return {"schema": SCHEMA, "video": video, "source": source_rel,
             "source_copy_sha": hashlib.sha256(raw).hexdigest(), "images": images,

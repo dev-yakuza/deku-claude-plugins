@@ -11,12 +11,14 @@ Distributor — stage: copy. You write what goes beside the video on a platform:
 
 ## Inputs
 Files only: `work/brief.md`, the script, the render of the same output (its `.chapters.txt`), the platform rules
-(`.claude/studio/platforms/<platform>.md`), `CREDITS.yaml`, the engines used.
+(`.claude/studio/platforms/<platform>.md`), `CREDITS.yaml`, the engines used, and the source link line when the
+producer gives one.
 
 ## Output: `studio/copy/<video>/<lang>/<platform>.md` (write nothing else)
 Frontmatter `title: "<title>"` and `hashtags: ["#a", "#b"]` (JSON, one line), then the description: what the video
 covers (only what the script says), the chapters exactly as the render's `.chapters.txt`, every `credit_line` of
-CREDITS.yaml, and every required notice of the platform rules, word for word.
+CREDITS.yaml, every required notice of the platform rules, word for word, and — when the producer gives a source link
+line (`원문: <url>`, its label in the video's language) — that line on its own, exactly (Studio checks it).
 
 ## Rules
 - Within the platform's limits (title, description, hashtags) — the description's limit may be in UTF-8 bytes

@@ -13,7 +13,9 @@ verify: the fact-checker's `verify.draft.json` — every narration sentence and 
 mapped to claims of the claims map with excerpts that are in the source copy, no `unsupported` or `contradicted` —
 then `verify.json` (P-STATE) and `verify.md` (made from verify.json: what the person reads is what was judged)."""
 
+import fractions
 import json
+import math
 import os
 import re
 
@@ -164,6 +166,7 @@ def draft_problems(draft, cm, copy, sentences, screen, titles=()):
             if isinstance(t, str):
                 listed.setdefault(normalize(t), set()).add(cid)
     ts = linkrule.terms((cm or {}).get("excerpts") if isinstance((cm or {}).get("excerpts"), list) else [])
+    origin = origins(sentences, screen, titles)
     seen, links, judged = set(), 0, 0
     for n, s in enumerate(draft["sentences"], 1):
         if not isinstance(s, dict) or not isinstance(s.get("text"), str) or s.get("kind") not in KINDS:
@@ -197,9 +200,11 @@ def draft_problems(draft, cm, copy, sentences, screen, titles=()):
             ids = []
         cited = [c for c in ids if c in claims]
         out += ["sentence %d: %s is not a claim of the claims map" % (n, c) for c in ids if c not in claims]
-        for c in cited:  # S7: the claim lists this sentence
+        for c in cited:  # S7: the claim lists this sentence (0.0.28 Q7: the message names the text and where it is)
             if c not in listed.get(key, ()):
-                out.append("sentence %d is not among the sentences of %s in the claims map" % (n, c))
+                src = s.get("from") if s.get("from") in FROM else origin.get(key, "narration")
+                out.append("sentence %d (%s): \"%s\" — %s does not list it in the claims map; add it to that claim's "
+                           "sentences" % (n, src, _short(s["text"]), c))
         if not _strings(s.get("excerpts")):
             out.append("sentence %d (fact) quotes no excerpt" % n)
             continue
@@ -222,6 +227,50 @@ def draft_problems(draft, cm, copy, sentences, screen, titles=()):
                 (linkrule.has_number(t) or linkrule.term_in(t, ts) or normalize(t) in listed):
             out.append("not judged: the scene title %s (it states something, and it becomes a chapter of the copy)"
                        % t[:80])
+    return out
+
+
+FROM = ("narration", "screen", "title")  # where a judged text is in the script (the skeleton's `from`)
+
+
+def _short(t, n=60):
+    t = " ".join(str(t or "").split())
+    return t if len(t) <= n else t[:n - 1] + "…"
+
+
+def origins(sentences, screen, titles=()):
+    """{normalized text: narration | screen | title} — the first place a text is in (narration first)."""
+    out = {}
+    for kind, items in (("narration", [x.get("text") for x in sentences or [] if isinstance(x, dict)]),
+                        ("screen", [x.get("text") for x in screen or [] if isinstance(x, dict)]),
+                        ("title", list(titles or ()))):
+        for t in items:
+            if isinstance(t, str) and t.strip():
+                out.setdefault(normalize(t), kind)
+    return out
+
+
+KANJI = re.compile("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")  # CJK ideographs (kanji), not kana
+
+
+def screen_warnings(screen, cm):
+    """0.0.28 Q7 (a hint at the script stage, never a failure): on-screen texts with digits or kanji that no claim of
+    the claims map lists — verify judges them, and a fact there needs its claim's `sentences` to list it."""
+    claims = (cm or {}).get("claims") if isinstance(cm, dict) else None
+    listed = set()
+    for c in (claims or {}).values() if isinstance(claims, dict) else []:
+        for t in (c.get("sentences") if isinstance(c, dict) and isinstance(c.get("sentences"), list) else []):
+            if isinstance(t, str):
+                listed.add(normalize(t))
+    out, seen = [], set()
+    for x in screen or []:
+        t = x.get("text") if isinstance(x, dict) else None
+        if not isinstance(t, str) or not t.strip() or normalize(t) in listed or normalize(t) in seen:
+            continue
+        if re.search(r"\d", t) or KANJI.search(t):
+            seen.add(normalize(t))
+            out.append("on-screen text \"%s\" has digits or kanji and no claim lists it — if it states a fact, add it "
+                       "to that claim's sentences" % _short(t))
     return out
 
 
@@ -261,6 +310,69 @@ def file_shas(ctx, vdir, lang, state):
             "draft": hashes.file_sha(os.path.join(vdir, "work", lang, "verify.draft.json"))}
 
 
+# ---------- excerpts (0.0.28 Q8) ----------
+
+OPEN_TAG = re.compile(r"<([A-Za-z][\w-]*)\b[^<>]*?(/?)>")
+CLOSE_TAG = re.compile(r"</([A-Za-z][\w-]*)\s*>")
+VOID = ("br", "img", "wbr", "hr", "input", "meta", "link", "source")
+SENTENCE_END = "。．.！!？?…"
+TRAILERS = "\"'”’」』）)]】*_ \t"
+
+
+def open_tag_at_end(excerpt):
+    """True when the excerpt ends inside a tag (`…<stro`) or with an element still open (`<strong><ruby>緑`)."""
+    e = excerpt or ""
+    if re.search(r"<[/A-Za-z][^<>]*$", e):  # `3 < 5` is text, not a tag
+        return True
+    stack = []
+    for m in re.finditer(r"</?[A-Za-z][^<>]*>", e):
+        tag = m.group(0)
+        c = CLOSE_TAG.match(tag)
+        if c:
+            name = c.group(1).lower()
+            if name in stack:
+                del stack[len(stack) - 1 - stack[::-1].index(name):]
+            continue
+        o = OPEN_TAG.match(tag)
+        if o and not o.group(2) and o.group(1).lower() not in VOID:
+            stack.append(o.group(1).lower())
+    return bool(stack)
+
+
+def _ends_sentence(text):
+    t = re.sub(r"</?[A-Za-z][^<>]*>", "", text or "").rstrip(TRAILERS)
+    return bool(t) and t[-1] in SENTENCE_END
+
+
+def stops_mid_sentence(excerpt, copy_raw):
+    """True when the excerpt, found as written in the copy, does not end a sentence while its line goes on to one."""
+    e = excerpt or ""
+    if not e or _ends_sentence(e):
+        return False
+    i = (copy_raw or "").find(e)
+    if i < 0:
+        return False  # found only as normalized text: nothing to compare with
+    rest = copy_raw[i + len(e):].split("\n", 1)[0]
+    rest = re.sub(r"</?[A-Za-z][^<>]*>", "", rest)
+    rest = re.sub(r"https?://\S+", "", rest)  # dots inside a URL end no sentence
+    return any(ch in SENTENCE_END and (ch != "." or k + 1 == len(rest) or rest[k + 1].isspace())
+               for k, ch in enumerate(rest))
+
+
+def excerpt_problems(cid, excerpt, copy, copy_raw):
+    """The --source problems of one claim's excerpt: in the copy, not ending inside a tag or mid-sentence."""
+    if copy is None:
+        return ["no frozen copy of the source — run state.py record-source"]
+    if not copy.contains(excerpt):
+        return ["the excerpt of %s is not in the source copy (copy whole sentences as they are, markup included): %s"
+                % (cid, _short(excerpt, 80))]
+    if open_tag_at_end(excerpt):
+        return ["excerpt of %s stops inside a tag — copy up to the end of the sentence, markup included" % cid]
+    if stops_mid_sentence(excerpt, copy_raw):
+        return ["excerpt of %s stops mid-sentence — copy the whole sentence" % cid]
+    return []
+
+
 # ---------- length (M1e review S6) ----------
 
 def _frontmatter(text):
@@ -298,9 +410,26 @@ def max_duration(fm, output):
     return None
 
 
-def length_problems(script_text, outputs, crit, sentences, lang):
-    """maxDuration is the format's upper bound for every output of the brief, targetDuration lies in the format's
-    range, and the narration itself (normalized characters ÷ chars_per_sec) does too."""
+# s2v lint passes a script whose own timeline estimate is within ±15 % of targetDuration (s2v lint-budget.ts
+# TARGET_TOLERANCE). Studio bounds targetDuration so that such a pass puts s2v's estimate inside the format's range
+# (0.0.28 Q6: targetDuration 185 let a 157 s estimate pass a 180 s minimum).
+S2V_TARGET_TOLERANCE = 0.15
+
+
+def target_range(ls):
+    """(lo, hi): the whole seconds targetDuration may be — ceil(min ÷ 0.85) to floor(max ÷ 1.15) — or None when the
+    format's range is too narrow for any (max ÷ min under about 1.353)."""
+    tol = fractions.Fraction(str(S2V_TARGET_TOLERANCE))
+    lo = math.ceil(fractions.Fraction(str(ls["min"])) / (1 - tol))
+    hi = math.floor(fractions.Fraction(str(ls["max"])) / (1 + tol))
+    return (lo, hi) if lo <= hi else None
+
+
+def length_problems(script_text, outputs, crit, sentences, lang, fmt="the format file"):
+    """maxDuration is the format's upper bound for every output of the brief, targetDuration lies in target_range
+    (so that s2v lint's pass means its estimate is in the format's range), and the narration itself (normalized
+    characters ÷ chars_per_sec) is in the format's range too — Studio's own estimate, which catches a far-off script
+    before lint. `fmt`: the format file, named when its range is too narrow."""
     ls, cps = crit["length_seconds"], crit["chars_per_sec"].get(lang)
     fm = _frontmatter(script_text or "")
     out = []
@@ -311,9 +440,17 @@ def length_problems(script_text, outputs, crit, sentences, lang):
                        % (o, ls["max"], "missing" if md is None else md))
     m = re.search(r"^targetDuration:\s*(\S+)", fm, re.M)
     target = _number(m.group(1)) if m else None
-    if target is None or not ls["min"] <= target <= ls["max"]:
-        out.append("targetDuration must be a number within the format's %s–%s s (it is %s)"
-                   % (ls["min"], ls["max"], "missing" if m is None else m.group(1)))
+    rng = target_range(ls)
+    if rng is None:
+        out.append("the format's length range %s–%s s is too narrow for s2v's ±%d %% targetDuration tolerance (max ÷ "
+                   "min must be at least about 1.353): a person widens length_seconds in %s"
+                   % (ls["min"], ls["max"], round(S2V_TARGET_TOLERANCE * 100), fmt))
+    elif target is None or not rng[0] <= target <= rng[1]:
+        out.append("targetDuration must be a number within %d–%d s (it is %s): s2v lint passes when its estimate is "
+                   "within ±%d %% of targetDuration, and only this range keeps that estimate inside the format's "
+                   "%s–%s s — lengthen the script with the brief's claims, never move targetDuration out of it"
+                   % (rng[0], rng[1], "missing" if m is None else m.group(1), round(S2V_TARGET_TOLERANCE * 100),
+                      ls["min"], ls["max"]))
     if cps:
         n = sum(len(normalize(s.get("text") or "")) for s in sentences or [] if isinstance(s, dict))
         secs = n / float(cps)

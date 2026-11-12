@@ -12,7 +12,8 @@ a change shows up in the harness commit question). The values are starting point
 {
   "length_seconds": {"min": 180, "max": 480},
   "chars_per_sec": {"ko": 5.5, "ja": 7.0, "en": 14.0},
-  "cer_max": {"ko": 0.15, "ja": 0.15, "en": 0.1}
+  "cer_max": {"ko": 0.15, "ja": 0.15, "en": 0.1},
+  "source_label": {"ko": "원문", "ja": "原文", "en": "Source"}
 }
 ```
 <!-- /studio:criteria -->
@@ -22,3 +23,5 @@ a change shows up in the harness commit question). The values are starting point
 - `chars_per_sec`: normalized characters spoken per second, per language (ko measured by the first sessions).
 - `cer_max`: the largest ASR round-trip character error rate a synthesized sentence may have (s2v's take checks use
   the same values).
+- `source_label` (optional): the label of the copy's source link line (`<label>: <url>`), per language, when the
+  source stage recorded the source's public URL.

@@ -10,6 +10,7 @@ import errno
 import fcntl
 import json
 import os
+import re
 import secrets
 import time
 
@@ -45,8 +46,15 @@ def _check_writes():
     writes.check("a video's state")
 
 
+VIDEO_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")  # flow.VIDEO_ID (flow imports this module)
+
+
 def video_dir(repo, studio_root, video):
-    """The video's folder: exactly one of public and local."""
+    """The video's folder: exactly one of public and local. An id that is not a video id is a usage error (0.0.28:
+    defence in depth behind the guard's allow — no `..`, `/` or other path parts reach a join)."""
+    if not isinstance(video, str) or not VIDEO_ID.match(video):
+        raise schema.SchemaError("not a video id (lowercase letters, digits and -, at most 64 characters): %r"
+                                 % (video,), 2)
     pub = os.path.join(repo, studio_root, "videos", video)
     loc = os.path.join(repo, studio_root, "local", "videos", video)
     found = [d for d in (pub, loc) if os.path.isdir(d)]

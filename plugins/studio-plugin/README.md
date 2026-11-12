@@ -116,6 +116,30 @@ Then `/std help`. Requires script2video 0.13.0 or later (set up later by `/std i
   - Other cases, such as `chmod 000 studio` or an archive written over a protected file.
 
   The pre-commit hook, the commit checks and the person's gates stay behind these.
+- **0.0.28 (pilot 3).** `state.py next <video> --enter script` prints the frontmatter lines the writer copies: the
+  default narrator's `cast:` block (part of the script from the start — s2v's content hash includes it, so the cast
+  stage no longer edits it), each output's `aspect` and `maxDuration`, and the range for `targetDuration`
+  (ceil(min ÷ 0.85) to floor(max ÷ 1.15): youtube 212–417, so a script s2v lint passes is inside the format's length).
+  `check_claims --narration` checks the cast block and prints every s2v failure message; the claims map lists every
+  script text that says a claim (on-screen text and titles too), and the verify message names the text and where it
+  is. `check_claims --source` refuses an excerpt that is not in the copy, stops inside a tag or mid-sentence.
+  `record-brief --from` also takes a path from the repository root (inside the video folder only). The ② question
+  lists the sentences the audition plays and the `read:` line; `shown 3` and `shown 4a` print their question blocks
+  (④a asks the person to check sound, subtitles and pictures together). `assets.json` carries each image's
+  `floor_text` for CREDITS. `record-source --url <https://<public domain>/…>` records the writing's address and the
+  copy's description must carry `원문: <url>`. The harness commit's value block shows brand.json's name, colour and
+  logo. `begin --ask-before tts,render` (and `state.py ask-before`) records the steps the person asked to be asked
+  before. Every command document's Rules line now asks for exact commands, no repeats and `open` only.
+- **Fewer prompts (0.0.28).** In `default` permission mode the guard now allows Studio's own script calls (the
+  repository copy, unchanged and whole, run alone with literal arguments) and each role's writes to its own output
+  files without a prompt, when every condition holds; otherwise the normal prompt stays. `run_s2v.py`, `lock.py`,
+  `check_commit.py` and `state.py ask-before` still prompt. Start Claude in the repository itself. Conditions and
+  limits: [docs/guard-limits.md](docs/guard-limits.md).
+- **Upgrading to 0.0.28**: run `/std update` (the scripts' version is 25) and choose "new" for `std-writer`,
+  `std-source-analyst`, `std-visual-director`, `std-distributor`, `guides/script.md` and `formats/youtube.md` (its new
+  `source_label`). A narrator style with `"` or `\` is refused by `/std config` narrator now; change it there. A video
+  still at the script stage needs the cast block in its script (the script check says so); one approved at ① without
+  it goes back to the script stage (`/std script <video>`, then verify and ① again); videos past cast keep theirs.
 
 ## License
 

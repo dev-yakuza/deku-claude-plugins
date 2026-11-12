@@ -4,12 +4,18 @@ One video end to end: `make <source> --kind youtube`, from begin to the video's 
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`.
+Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only
+`cd <repo> &&`), and read the whole output. Do not repeat a call whose output is already in the conversation. Show
+files to the person with `open <path>` only (never `code`, `vim` or another editor).
 
 **The flow** — print each stage's document when you reach it (`python3 "<<SKILL_DIR>>/scripts/setup.py" doc <stage>`,
 short `setup.py doc <stage>` below; never open it with Read) and do exactly what it says:
 
 1. `python3 .claude/studio/scripts/state.py begin <video> --source <path> --kind youtube` — the writing must be
-   committed (exit 3 otherwise: ask the person to commit it).
+   committed (exit 3 otherwise: ask the person to commit it). When the request asks to stop before steps ("tts 전에
+   멈추고 물어봐", "stop before render"), add `--ask-before <steps>` with those of `tts`, `render`, `copy`, `commit`
+   (comma-separated), and show the parsed list in your first reply. A later request changes it:
+   `python3 .claude/studio/scripts/state.py ask-before <video> <steps|none>`.
 2. `setup.py doc source` → `setup.py doc brief` → `setup.py doc script` → `setup.py doc verify` (gate ①).
 3. The voice section below: cast → tts → audition → gate ②.
 4. `setup.py doc board` (board with the credits, visual-check, gate ③).
@@ -24,14 +30,19 @@ short `setup.py doc <stage>` below; never open it with Read) and do exactly what
   the fixed option, and the approval command alone as your next tool call, in the same turn, right after the answer —
   do not wait for the person; never in the same assistant message as the question.
 - The heavy runs — `lock.py run --kind tts -- …` and `run_s2v.py render …` — go with `run_in_background`.
+- When `state.py next` prints `ask the person before <step> (they asked)`, ask with AskUserQuestion before the stage's
+  first command, and go on only after the answer.
+- After a gate approval, continue to the next stage in the same turn. Stop only at a gate, an ask-before step or an
+  error, and end the turn with a question — never with a statement that sounds like work continues ("TTS 전에
+  멈추고 여쭙겠습니다").
 - When the guard refuses something, follow INV9 below: stop and ask; never reach the same effect another way.
 
 ## cast
 
 1. `python3 .claude/studio/scripts/state.py next <video> --enter cast` — exit 3: go to the stage it names.
-2. Write the default narrator into the script's frontmatter, one entry per speaker of the narration, with the voice
-   and style of an actor of `studio/cast/<id>/status.json` exactly: `cast:` / `  narrator: { voice: "qwen:Sohee",
-   style: "<its style>" }`. Change nothing else of the script (its content hash must stay ①'s).
+2. The `cast:` block is already in the script (the writer put the default narrator there at the script stage, and ①
+   approved it): do not change it. A different narrator after ①, or a script approved without the block (before
+   0.0.28), goes back to the script stage (`/std script <video>`): the cast is part of the script the person approved.
 3. Readings: for each Japanese or other word the narration must read in a set way, add it under the frontmatter
    `pronounce:` (`  空港: 쿠우코오`), and write `work/<lang>/pronounce-changes.json` — a flat JSON object of exactly
    what `pronounce` adds or changes against `.claude/studio/pronounce.json` (`{}` when nothing).
@@ -71,12 +82,12 @@ short `setup.py doc <stage>` below; never open it with Read) and do exactly what
 ## Gate ②
 
 1. `python3 .claude/studio/scripts/state.py shown <video> 2` right as you open `narrator.wav` (`open <path>`) and
-   show `studio/out/<video>/<lang>/audition/audition.md` (read it with Read: the `read:` line after `hash12` names
-   it) — it prints `hash12 <h12>` and `in the question: …` lines: one per exempted line
-   (`면제 <id>: "<text>" → 들림 "<heard>" (CER x)`), one per reading change (`발음 <written> → <reading>`) and the
-   readings that differ elsewhere — or, when there are too many, one `② 목록 파일: …` line (open that file for the
-   person) — and then the `question` block: `[<video>] ② 오디션 — <narrator.wav path> · hash <h12>` with those lines,
-   up to `end of question`.
+   show `studio/out/<video>/<lang>/audition/audition.md` (read it with Read: the block's `read:` line names it) — it
+   prints `hash12 <h12>` and `in the question: …` lines: one per sentence `narrator.wav` plays (`- "<text>" — <why>`,
+   at most 8), one per exempted line (`면제 <id>: "<text>" → 들림 "<heard>" (CER x)`), one per reading change
+   (`발음 <written> → <reading>`) and the readings that differ elsewhere — or, when there are too many, one
+   `② 목록 파일: …` line (open that file for the person) — then `read: <audition.md>`, and then the `question` block:
+   `[<video>] ② 오디션 — <narrator.wav path> · hash <h12>` with those lines, up to `end of question`.
 2. Ask with AskUserQuestion: the question is **the block between `question (…):` and `end of question`, pasted
    unchanged** — never retype a line (the guard compares each character) — with the length warning after it if any;
    options `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the

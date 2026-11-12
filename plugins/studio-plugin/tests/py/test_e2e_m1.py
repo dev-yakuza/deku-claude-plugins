@@ -23,6 +23,8 @@ from test_m1h import COPY, FACT, NOTICE
 sys.path.insert(0, os.path.join(helpers.HERE, "drivers"))
 import make_harness  # noqa: E402
 
+CAST_BLOCK = re.compile(r"^cast:\n  narrator: \{[^\n]*\}\n", re.M)  # 0.0.28: SCRIPT has the narrator from the start
+
 SID = "sess-e2e-m1"
 PY = "python3 .claude/studio/scripts/"
 IMG = "../../../docs/img/gate.png"
@@ -183,8 +185,9 @@ class FlowCase(E2ECase):
         st = json.load(open(os.path.join(self.repo, "studio", "cast", "narrator", "status.json")))
         v = st["voice"]["ko"]
         script = os.path.join(self.vdir, "script.ko.md")
-        text = open(script).read().replace("lang: ko\n", "lang: ko\ncast:\n  narrator: { voice: \"%s\", style: \"%s\" }"
-                                           "\npronounce:\n  空港: 쿠우코오\n" % (v["engine"], v["style"]), 1)
+        text = CAST_BLOCK.sub("", open(script).read(), count=1).replace(
+            "lang: ko\n", "lang: ko\ncast:\n  narrator: { voice: \"%s\", style: \"%s\" }"
+            "\npronounce:\n  空港: 쿠우코오\n" % (v["engine"], v["style"]), 1)
         self.write("studio/videos/v1/script.ko.md", text)
         self.write("studio/videos/v1/work/ko/pronounce-changes.json", json.dumps({"空港": "쿠우코오"}, ensure_ascii=False))
         self.do(PY + "check_assets.py v1 --actors")
@@ -367,7 +370,7 @@ class E2EVideo(FlowCase):
         st = json.load(open(os.path.join(self.repo, "studio", "cast", "narrator", "status.json")))
         v = st["voice"]["ko"]
         script = os.path.join(self.vdir, "script.ko.md")
-        self.write("studio/videos/v1/script.ko.md", open(script).read().replace(
+        self.write("studio/videos/v1/script.ko.md", CAST_BLOCK.sub("", open(script).read(), count=1).replace(
             "lang: ko\n", "lang: ko\ncast:\n  narrator: { voice: \"%s\", style: \"%s\" }\n" % (v["engine"], v["style"]), 1))
         self.write("studio/videos/v1/work/ko/pronounce-changes.json", "{}")
         self.do(PY + "check_assets.py v1 --actors")

@@ -20,7 +20,7 @@ import sys
 from .. import machine, paths, s2vlint, writes
 from ..source import assets as assets_mod
 from ..state import cli as scli, commands as C, schema, stagechecks, store
-from ..state.collect import CollectError, Providers
+from ..state.collect import CollectError, Providers, frozen_copy_path
 from ..text.normalize import normalize
 from . import check, linkrule, sourcemd
 
@@ -107,7 +107,7 @@ def script_check(repo, vdir, state, lang, ctx, providers, env, runner):
     fail_unread = schema.STAGE_CHECKS["script"]["fail_unread"]
     lint = s2vlint.run(ctx["s2v_path"], ctx["script"], "lint", env=env, runner=runner, lang=lang,
                        fail_unread=fail_unread)
-    problems += lint.problems()
+    problems += lint.problems(os.path.relpath(stagechecks.path(vdir, lang, "script"), repo))
     copy = check.copy_text(vdir, state)
     cm, cm_problems = check.claims_map(vdir, lang, state, copy)
     problems += cm_problems
@@ -120,7 +120,8 @@ def script_check(repo, vdir, state, lang, ctx, providers, env, runner):
         text = f.read()
     try:
         crit = criteria.read(repo, state.get("kind"))
-        problems += check.length_problems(text, schema.current_outputs(state, lang), crit, sentences, lang)
+        problems += check.length_problems(text, schema.current_outputs(state, lang), crit, sentences, lang,
+                                          os.path.relpath(criteria.path(repo, state.get("kind")), repo))
     except criteria.Missing as e:
         problems.append("the format's criteria cannot be read (%s)" % e)
     assets_data = assets_mod.read(vdir)
@@ -135,14 +136,42 @@ def script_check(repo, vdir, state, lang, ctx, providers, env, runner):
         lp = look.layout_problem(attrs.get("layout"), cast, art, "script", attrs.get("aspect"), o)
         if lp:
             problems.append(lp)
-    details = {"lint": lint.details(), "fail_unread": fail_unread, "problems": problems,
+    # the cast block the writer copied from `next --enter script` (0.0.28 Q2): s2v's content hash includes it
+    problems += cast_problems(repo, ctx["studio_root"], lang, text)
+    warnings = check.screen_warnings(ins.get("screen_text"), cm)  # 0.0.28 Q7: a hint, never a failure
+    details = {"lint": lint.details(), "fail_unread": fail_unread, "problems": problems, "warnings": warnings,
                "screen_text": len(ins.get("screen_text") or []), "sentences": len(sentences or [])}
     result = "fail" if problems else "pass"
     inp = stagechecks.Inputs(ctx, state, lang, None, cur, providers)
     p = stagechecks.write(vdir, lang, "script", None, result, details,
                           stagechecks.input_sha("script", inp, cur.get("s2v_version")))
+    for w in warnings:
+        sys.stdout.write("warning: %s\n" % w)
     _report("script", result, problems, os.path.relpath(p, repo))
     return C.OK if result == "pass" else C.FAIL
+
+
+def cast_problems(repo, root, lang, text):
+    """The script's `cast:` is exactly the default narrator's block (key, voice and style) — read from the frontmatter
+    as voice/cast.py does (s2v inspect --json shows no cast style)."""
+    from ..state import scriptlines
+    from ..voice import frontmatter
+    try:
+        want = scriptlines.cast_lines(repo, root, lang)
+    except scriptlines.NotReady as e:
+        return [str(e)]
+    expected = " / ".join(want)
+    nid, st = scriptlines.default_narrator(repo, root)
+    v = st["voice"][lang]
+    cast = frontmatter.block(text, "cast")
+    spec = cast.get("narrator") if isinstance(cast, dict) else None
+    ok = isinstance(cast, dict) and set(cast) == {"narrator"} and isinstance(spec, dict) and \
+        set(spec) <= {"voice", "style"} and spec.get("voice") == v["engine"] and \
+        (spec.get("style") or None) == (v.get("style") or None)
+    if ok:
+        return []
+    return ["the script's cast must be the default narrator's block exactly (%s/cast/%s) — the frontmatter lines `%s`, "
+            "as state.py next --enter script printed them" % (root, nid, expected)]
 
 
 def verify_check(repo, vdir, state, lang, ctx, providers):
@@ -213,7 +242,7 @@ def claims_section(text):
     return out
 
 
-def source_check(repo, vdir, fill):
+def source_check(repo, vdir, fill, state=None):
     p = sourcemd.path(vdir)
     rel = os.path.relpath(p, repo)
     try:
@@ -223,13 +252,19 @@ def source_check(repo, vdir, fill):
         sys.stdout.write("source: FAIL — %s is missing: the source analyst writes it\n" % rel)
         return C.FAIL
     claims = source_ids(text)
+    copy = check.copy_text(vdir, state) if state is not None else None
+    try:
+        with open(frozen_copy_path(vdir, state["source"]), encoding="utf-8") as f:
+            copy_raw = f.read()
+    except (OSError, TypeError, KeyError):
+        copy_raw = None
     problems, out, seen, fixes = 0, [], {}, {}
     for n, l in claims_section(text):
         if LOOSE_CLAIM.match(l) and not sourcemd.CLAIM.match(l):  # a mistyped id is never skipped silently
             problems += 1
             out.append("line %d  not a claim line (`- C-<8 hex digits>: <claim>`, e.g. `- C-00000000: …`): %s"
                        % (n, l.strip()[:80]))
-    for line, written, right, _excerpt in claims:
+    for line, written, right, excerpt in claims:
         if right is None:
             problems += 1
             out.append("line %d  %s  no excerpt (`  > …` on the next line)" % (line, written))
@@ -246,6 +281,11 @@ def source_check(repo, vdir, fill):
             st += " — listed twice (line %d) — make the excerpts differ" % seen[right]
         else:
             seen[right] = line
+        if state is not None:  # 0.0.28 Q8: the excerpt is in the copy as it is, and does not stop mid-sentence
+            ex = check.excerpt_problems(right, excerpt, copy, copy_raw)
+            if ex:
+                problems += 1
+                st += " — " + "; ".join(ex)
         out.append("line %d  %s  %s" % (line, right, st))
     if not claims:
         problems += 1
@@ -270,7 +310,8 @@ def source_check(repo, vdir, fill):
 
 def skeleton_texts(ins, sentences, cm):
     """The texts the verify check judges, in order: every narration sentence and on-screen text, and a scene title
-    only when it states something (draft_problems' title rule); one per normalized text."""
+    only when it states something (draft_problems' title rule); one per normalized text. Also {normalized text: where
+    it is} (check.origins: narration, screen or title — the skeleton's `from`)."""
     claims = (cm or {}).get("claims") if isinstance(cm, dict) else None
     claims = claims if isinstance(claims, dict) else {}
     listed = {}
@@ -294,7 +335,9 @@ def skeleton_texts(ins, sentences, cm):
         t = x.get("title") if isinstance(x, dict) else None
         if isinstance(t, str) and (linkrule.has_number(t) or linkrule.term_in(t, ts) or normalize(t) in listed):
             add(t)
-    return out, listed, claims
+    origin = check.origins(sentences, ins.get("screen_text"),
+                           [x.get("title") for x in ins.get("scenes") or [] if isinstance(x, dict)])
+    return out, listed, claims, origin
 
 
 def skeleton(repo, vdir, lang, ctx, providers):
@@ -302,7 +345,7 @@ def skeleton(repo, vdir, lang, ctx, providers):
     p = os.path.join(w, "verify.draft.json")
     cm, _why = check._read_json(os.path.join(w, "claims-map.json"), "claims-map.json")
     ins = providers.inspect(ctx)
-    texts, listed, claims = skeleton_texts(ins, providers.sentences(ctx), cm)
+    texts, listed, claims, origin = skeleton_texts(ins, providers.sentences(ctx), cm)
     old, why = check._read_json(p, "work/%s/verify.draft.json" % lang)
     have, dupes = {}, []
     if old is not None:
@@ -317,12 +360,12 @@ def skeleton(repo, vdir, lang, ctx, providers):
     entries, kept, added = [], 0, 0
     for t in texts:
         k = normalize(t)
-        if k in have:
-            entries.append(have.pop(k))
+        if k in have:  # the skeleton keeps `from` (0.0.28 Q7: the S7 message says where the text is)
+            entries.append(dict(have.pop(k), **{"from": origin.get(k, "narration")}))
             kept += 1
             continue
         cids = listed.get(k, [])
-        entries.append({"text": t, "kind": "fact", "claims": list(cids),
+        entries.append({"text": t, "from": origin.get(k, "narration"), "kind": "fact", "claims": list(cids),
                         "excerpts": [claims[c].get("excerpt") for c in cids
                                      if isinstance(claims[c], dict) and isinstance(claims[c].get("excerpt"), str)],
                         "verdict": "", "note": ""})
@@ -354,7 +397,7 @@ def main(argv, providers=None, env=None, cwd=None, runner=None):
     try:
         o, repo, vdir, state, lang, ctx = _setup(argv, cwd or os.getcwd())
         if o.get("--source"):
-            return source_check(repo, vdir, o.get("--fill"))
+            return source_check(repo, vdir, o.get("--fill"), state)
         if o.get("--skeleton"):
             return skeleton(repo, vdir, lang, ctx, providers)
         if o.get("--narration"):

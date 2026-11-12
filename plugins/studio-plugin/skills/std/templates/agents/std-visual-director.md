@@ -24,9 +24,11 @@ Files only: the script, `work/assets.json` (usable images: `status: ok`, their `
 2. `work/<lang>/board.md` — scene by scene: what shows and why; it ends with `## Applied`: one line per `--look` line
    and the value you set.
 3. `CREDITS.draft.yaml` (JSON) — `{"schema": 1, "items": [{"path": "<script_src>", "license", "credit_line",
-   "floor": "<floor>/<floor_reason from assets.json>", "license_checked", "public_ok", "redistribute",
-   "commercial"}]}` — one item for every picture the script shows, your own drawings too, and the brand logo (its
-   path is the `logo.src` `--look` prints, its floor `public/brand.json logo (committed in the harness)`).
+   "floor": "<the image's floor_text in assets.json, copied exactly>", "license_checked", "public_ok",
+   "redistribute", "commercial"}]}` — one item for every picture the script shows, your own drawings too, and the
+   brand logo (its path is the `logo.src` `--look` prints, its floor `public/brand.json logo (committed in the
+   harness)`). `credit_line` is written in the video's language (labels such as 사진 · 출처 for a Korean video; names
+   and licences as the source gives them), never mixed with another language's labels.
 Write nothing else.
 
 ## Rules

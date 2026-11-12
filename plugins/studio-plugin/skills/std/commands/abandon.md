@@ -3,6 +3,9 @@
 Stop a video, or one of its languages (M1i). The video id is the first argument of `/std abandon`.
 
 Rules: one command per Bash call, literal values. Shared rules: `atoms/_contract.md`.
+Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only
+`cd <repo> &&`), and read the whole output. Do not repeat a call whose output is already in the conversation. Show
+files to the person with `open <path>` only (never `code`, `vim` or another editor).
 
 1. `python3 .claude/studio/scripts/state.py status <video>` — show the person what stops (the language, its stage).
 2. Ask with AskUserQuestion: `[<video>] 중단 — <lang>`, what is kept (a committed script stays; the work files stay

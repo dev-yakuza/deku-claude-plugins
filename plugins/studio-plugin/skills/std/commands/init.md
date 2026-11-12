@@ -5,6 +5,9 @@ it is committed, no video starts (`begin` refuses an uncommitted harness).
 
 Rules for every step: one command per Bash call, literal paths only (replace every `<…>` with the real value before the
 call), never a variable in command position. Shared rules: `atoms/_contract.md`.
+Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only
+`cd <repo> &&`), and read the whole output. Do not repeat a call whose output is already in the conversation. Show
+files to the person with `open <path>` only (never `code`, `vim` or another editor).
 
 ## 1. Check (read only)
 

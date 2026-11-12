@@ -240,6 +240,8 @@ def _audition(argv, cwd, providers, runner):
     md = aud.markdown(state["video"], lang, clips, lines, changes=chg or {})
     _plain_write(os.path.join(d, "audition.md"), md)  # out/ is not a protected record (its sha is in the check)
     details = {"problems": problems, "clips": [[s.get("id"), w] for s, w in clips],
+               # what narrator.wav plays, for the ② question (0.0.28 Q9: state.py shown 2 lists them)
+               "played": [{"id": s.get("id"), "text": s.get("text"), "why": w} for s, w in clips],
                "narrator_wav": os.path.relpath(out, repo)}
     code = _write("audition", "audition", repo, vdir, state, lang, ctx, providers, "fail" if problems else "pass",
                   details)

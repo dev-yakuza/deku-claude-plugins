@@ -24,7 +24,13 @@ How this repository's videos are written. The script writer reads it; edit it as
   `::title[…]` or a text card here, at the script stage: board cannot add or remove blocks.
 - A title's label is on-screen text, judged at ① like the narration: reuse the scene heading or a sentence of the
   claims map rather than a new statement.
-- Length: `outputs.youtube.maxDuration` is the format's upper bound and `targetDuration` the brief's length; s2v lint
-  only warns past them, Studio's check fails.
+- Frontmatter: the lines `state.py next <video> --enter script` prints, exactly — the default narrator's `cast:`
+  block (part of the script from the start: s2v's content hash includes it) and `outputs.<output>` with `aspect` and
+  `maxDuration`.
+- Length: `outputs.youtube.maxDuration` is the format's upper bound. `targetDuration` comes from the brief's estimate,
+  within the printed range: s2v lint passes a script within ±15 % of it, and only that range keeps s2v's own estimate
+  inside the format's range. Too short: lengthen with claims from the brief, never by lowering `targetDuration` below
+  the range. s2v lint only warns past them, Studio's check fails.
 - The claims map (`work/<lang>/claims-map.json`): every claim the script uses, its excerpt exactly as in `source.md`,
-  and the sentences that say it.
+  and every text of the script that says it — narration sentences, on-screen text (table cells, bullets, captions,
+  quotes) and titles that state something. Write it whole with one Write; on a change, rewrite it with one Write.

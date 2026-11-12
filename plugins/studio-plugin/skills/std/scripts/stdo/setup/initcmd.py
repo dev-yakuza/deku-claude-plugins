@@ -13,6 +13,7 @@ import re
 import shutil
 
 from .. import ignore, machine, narrator, paths
+from ..voice import frontmatter
 from . import analyze, render
 from .common import FAIL, HOST, REFUSED, USAGE, SetupError, git, write_text
 
@@ -125,6 +126,8 @@ def normalize(top, answers):
         raise SetupError(USAGE, "narrator.engine must be qwen:<built-in speaker> (%s)"
                          % ", ".join(sorted(narrator.QWEN_SPEAKERS)))
     style = _text(nar.get("style", ""), "narrator.style", empty_ok=True, maximum=narrator.STYLE_MAX)
+    if not frontmatter.style_ok(style, narrator.STYLE_MAX):  # the script's cast block carries it as it is (0.0.28 Q2)
+        raise SetupError(USAGE, "narrator.style must not hold \" or \\")
     s2v = answers.get("s2v_path")
     if not isinstance(s2v, str) or not os.path.isabs(s2v):
         raise SetupError(USAGE, "s2v_path must be the absolute path of this machine's script2video checkout")

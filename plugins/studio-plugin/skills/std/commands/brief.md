@@ -5,11 +5,15 @@ structure, and Studio itself computes the expected length from the chosen excerp
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`. The video id is the first argument of `/std brief`.
+Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only
+`cd <repo> &&`), and read the whole output. Do not repeat a call whose output is already in the conversation. Show
+files to the person with `open <path>` only (never `code`, `vim` or another editor).
 
 1. `python3 .claude/studio/scripts/state.py next <video> --enter brief` — exit 3: go to the stage it names.
 2. Spawn the content strategist (`std-strategist`) with `work/source.md`, `.claude/studio/formats/<kind>.md` and the
    platform rules. It writes `work/brief.json` (`claims` · `roles` · `outputs` · `platforms`) and `work/brief.md`.
-3. `python3 .claude/studio/scripts/state.py record-brief <video> --from work/brief.json` — it prints
+3. `python3 .claude/studio/scripts/state.py record-brief <video> --from work/brief.json` (the path relative to the
+   video folder; one from the repository root works too, and either must be inside the video folder) — it prints
    `estimated length <s> s`: the normalized characters of the chosen excerpts ÷ the format's `chars_per_sec`. The
    strategist's own estimate is never used.
    - Exit 1: the estimate is outside the format's length range, a chosen claim is not in `work/source.md` (or its

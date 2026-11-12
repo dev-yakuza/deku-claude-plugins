@@ -197,6 +197,52 @@ README には要約があり、このファイルには詳細があります。�
   通します: パス、展開、ワイルドカード、フォルダ移動、フック、フォルダを変えうるエイリアスや関数がないときです。
   シェルのスナップショットがなければ、そうしたコマンドはすべて拒否します。
 
+## ガードがプロンプトなしで許可するもの(0.0.28)
+
+- `default` の権限モードでだけ、ガードは次を allow と答えます:
+  - リポジトリのコピーにある、読んで記録するだけの Studio のスクリプト: `state.py`(あなたの回答が要らないサブコマンド。
+    `ask-before` を除く)、`check_assets.py`、`check_claims.py`、`check_scope.py`、`check_tts.py`、`resolve_assets.py`、
+    `validate_copy.py`、`audition.py`。呼び出しはそのスクリプトだけ(前に `cd <repo> &&` があってもよい)で、引数は
+    リテラル、動画 ID は正しい形である必要があります。`run_s2v.py`、`lock.py`、`check_commit.py`、`hooks.py`、
+    `setup.py`(`doc` 以外)はこれまでどおりプロンプトが出ます。
+  - Studio のロールが自分の出力ファイルに行う Write と Edit: source analyst の `work/source.md`、strategist の
+    `work/brief.json` と `work/brief.md`、writer の `script.<lang>.md` と `work/<lang>/claims-map.json`、translator の
+    ソース以外の言語の `script.<lang>.md`、visual director の台本の編集・`CREDITS.draft.yaml`・`work/<lang>/board.md`、
+    distributor の `copy/<video>/<lang>/<platform>.md`。fact-checker、auditor、メインセッションの書き込みはこれまで
+    どおりプロンプトが出ます。
+- 検査に一つでも通らなければ通常のプロンプトになり、拒否にはなりません。「このセッションのすべての編集を許可」を
+  選ぶとセッションは `default` ではなくなり、そのセッションではこれらの allow は止まります。
+- 次の場合も通常のプロンプトになります:
+  - リポジトリにある Studio スクリプトのコピーが、同じバージョンのプラグインのコピーとちょうど同じでないとき。
+    余分なファイル一つで足ります(`.DS_Store`、`__pycache__` フォルダ、リンク)。`/std update` を実行してください;
+  - Claude をリポジトリより上(`~`、`~/projects`)で起動したとき。s2v のチェックアウトや `PATH` 上のフォルダが、
+    モデルが書き込める範囲に入ってしまいます。Claude はリポジトリで起動してください;
+  - `python3`、`node`、`git`、`ffmpeg` がスクリプトやシム(asdf、mise、volta)であるとき。または `system` 以外の
+    Python を選ぶ pyenv のシムであるとき(`PYENV_VERSION`、`.python-version`、グローバルのバージョンファイル);
+  - `PATH` のフォルダが空、相対、またはリポジトリ・作業フォルダ・プロジェクトフォルダの中にあるとき。実行される
+    ものを変える Python・Node・git の変数(`PYTHONPATH`、`NODE_OPTIONS`、`GIT_DIR`、`GIT_CONFIG_*` など)が設定されて
+    いるとき。セッションの環境ファイルが何かを設定するとき;
+  - リポジトリ自身の git 設定がプログラムを実行するとき(フィルター、textconv、`core.fsmonitor`、`core.hooksPath`、
+    include、部分クローン)、またはサブモジュールがあるとき。
+- 見ないもの(残るリスク):
+  - ファイルを書けるあなたの広い allow ルール(`Bash(git:*)` や `Bash(gh:*)` など。`git diff --output=<file>` は
+    どのファイルにも書けます)。これがあると、モデルは Studio の allow が後で実行するコード(pyenv のファイル、nvm、
+    s2v のチェックアウト)をプロンプトなしで変えられます。
+  - あなたが書き込めるプロジェクト外のフォルダ: `/opt/homebrew/bin`、書き込めるシステムの git 設定(Homebrew の
+    ものなど)、pyenv のフックフォルダ(`<root>/pyenv.d`、`<prefix>/pyenv.d`、`/opt/homebrew/etc/pyenv.d`、
+    `/etc/pyenv.d`、プラグインのフックフォルダ)。`default` モードでは、上のようなルールを通さない限り、モデルは
+    プロンプトなしにこれらを変えられません。
+  - `--add-dir` で追加したフォルダ: ガードはこれを知らないので、モデルが書き込めるフォルダに数えません。
+  - スクリプトが実行するほかのプログラム(`ps`、s2v 経由の `ffprobe`)は `PATH` の規則でだけ確かめます。
+  - ガード自身が pyenv のシム経由で動くとき、pyenv がその実行のために設定する値(`PYENV_VERSION` の `system`、
+    作業フォルダの `PYENV_DIR`、pyenv 自身のフックフォルダだけの `PYENV_HOOK_PATH`)は、あなたの設定ではなく
+    pyenv のものとみなします。
+  - ロールは自分のファイルに誤った内容をプロンプトなしで書けます。またメインセッションは任意の指示でロールを起動
+    でき、そのロールのファイルをプロンプトなしで書かせられます。内容はこれまでどおりゲートと Studio の検査が判定
+    します。
+  - auto モードでは誰もプロンプトを見ないので、あなたが頼んだ一時停止を後の `state.py ask-before` が外しても、
+    あなたには示されません(`default` モードではプロンプトが出ます)。
+
 ## ガードが見ないもの
 
 ### ガードがモデル化しない方法でコマンドを実行するプログラムと設定

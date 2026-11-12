@@ -188,6 +188,48 @@ README에는 요약이 있고, 이 파일에는 자세한 내용이 있습니다
   확장, 와일드카드, 폴더 이동, 훅, 폴더를 바꿀 수 있는 별칭이나 함수가 없을 때입니다. 셸 스냅숏이 없으면 그런 명령은
   모두 거부합니다.
 
+## 가드가 프롬프트 없이 허용하는 것(0.0.28)
+
+- `default` 권한 모드에서만, 가드는 다음을 allow로 답합니다:
+  - 레포 사본에 있는, 읽고 기록하기만 하는 Studio 스크립트: `state.py`(사용자의 답이 필요 없는 하위 명령. `ask-before`는
+    제외), `check_assets.py`, `check_claims.py`, `check_scope.py`, `check_tts.py`, `resolve_assets.py`,
+    `validate_copy.py`, `audition.py`. 호출은 그 스크립트 하나뿐이어야 하고(앞에 `cd <repo> &&`는 있어도 됨), 인자는
+    리터럴, 비디오 ID는 올바른 형식이어야 합니다. `run_s2v.py`, `lock.py`, `check_commit.py`, `hooks.py`,
+    `setup.py`(`doc` 외)는 지금처럼 프롬프트가 뜹니다.
+  - Studio 역할이 자기 출력 파일에 하는 Write와 Edit: source analyst의 `work/source.md`, strategist의
+    `work/brief.json`과 `work/brief.md`, writer의 `script.<lang>.md`와 `work/<lang>/claims-map.json`, translator의 원문
+    외 언어 `script.<lang>.md`, visual director의 대본 편집·`CREDITS.draft.yaml`·`work/<lang>/board.md`, distributor의
+    `copy/<video>/<lang>/<platform>.md`. fact-checker, auditor, 메인 세션의 쓰기는 지금처럼 프롬프트가 뜹니다.
+- 검사를 하나라도 통과하지 못하면 보통 프롬프트가 뜨고, 거부되지는 않습니다. "이 세션의 모든 편집 허용"을 고르면
+  세션이 `default`가 아니게 되어, 그 세션에서는 이 allow가 멈춥니다.
+- 다음 경우에도 보통 프롬프트가 뜹니다:
+  - 레포에 있는 Studio 스크립트 사본이 같은 버전의 플러그인 사본과 정확히 같지 않을 때. 남는 파일 하나로도
+    충분합니다(`.DS_Store`, `__pycache__` 폴더, 링크). `/std update`를 실행하세요;
+  - Claude를 레포보다 위(`~`, `~/projects`)에서 시작했을 때. s2v 체크아웃과 `PATH`의 폴더가 모델이 쓸 수 있는
+    범위에 들어갑니다. Claude는 레포에서 시작하세요;
+  - `python3`, `node`, `git`, `ffmpeg`이 스크립트나 심(asdf, mise, volta)일 때. 또는 `system`이 아닌 Python을 고르는
+    pyenv 심일 때(`PYENV_VERSION`, `.python-version`, 전역 버전 파일);
+  - `PATH`의 폴더가 비어 있거나 상대 경로이거나 레포·작업 폴더·프로젝트 폴더 안에 있을 때. 실행되는 것을 바꾸는
+    Python·Node·git 변수(`PYTHONPATH`, `NODE_OPTIONS`, `GIT_DIR`, `GIT_CONFIG_*` 등)가 설정되어 있을 때. 세션의
+    환경 파일이 무언가를 설정할 때;
+  - 레포 자체의 git 설정이 프로그램을 실행할 때(필터, textconv, `core.fsmonitor`, `core.hooksPath`, include, 부분
+    클론), 또는 서브모듈이 있을 때.
+- 보지 못하는 것(남는 위험):
+  - 파일을 쓸 수 있는 사용자의 넓은 allow 규칙(`Bash(git:*)`, `Bash(gh:*)` 등. `git diff --output=<file>`은 어떤 파일에도
+    씁니다). 이 규칙이 있으면 모델은 Studio의 allow가 나중에 실행하는 코드(pyenv 파일, nvm, s2v 체크아웃)를 프롬프트
+    없이 바꿀 수 있습니다.
+  - 사용자가 쓸 수 있는 프로젝트 밖 폴더: `/opt/homebrew/bin`, 쓸 수 있는 시스템 git 설정(Homebrew의 것 등), pyenv의
+    훅 폴더(`<root>/pyenv.d`, `<prefix>/pyenv.d`, `/opt/homebrew/etc/pyenv.d`, `/etc/pyenv.d`, 플러그인 훅 폴더).
+    `default` 모드에서는 위와 같은 규칙을 거치지 않는 한, 모델이 프롬프트 없이 이것들을 바꿀 수 없습니다.
+  - `--add-dir`로 추가한 폴더: 가드는 이를 모르므로 모델이 쓸 수 있는 폴더로 세지 않습니다.
+  - 스크립트가 실행하는 다른 프로그램(`ps`, s2v를 거친 `ffprobe`)은 `PATH` 규칙으로만 확인합니다.
+  - 가드 자신이 pyenv 심을 거쳐 실행될 때, pyenv가 그 실행을 위해 설정하는 값(`PYENV_VERSION`의 `system`, 작업 폴더인
+    `PYENV_DIR`, pyenv 자체 훅 폴더만 있는 `PYENV_HOOK_PATH`)은 사용자의 설정이 아니라 pyenv의 것으로 봅니다.
+  - 역할은 자기 파일에 틀린 내용을 프롬프트 없이 쓸 수 있습니다. 또 메인 세션은 어떤 지시로든 역할을 시작해 그 역할의
+    파일을 프롬프트 없이 쓰게 할 수 있습니다. 내용은 지금처럼 게이트와 Studio의 검사가 판정합니다.
+  - auto 모드에서는 아무도 프롬프트를 보지 않으므로, 사용자가 요청한 일시 정지를 나중의 `state.py ask-before`가
+    없애도 사용자에게 보이지 않습니다(`default` 모드에서는 프롬프트가 뜹니다).
+
 ## 가드가 보지 못하는 것
 
 ### 가드가 모델링하지 않는 방식으로 명령을 실행하는 프로그램과 설정

@@ -8,6 +8,8 @@ import re
 
 BLOCK = re.compile(r"<!-- studio:criteria -->\s*```json\s*\n(.*?)\n```\s*<!-- /studio:criteria -->", re.S)
 KEYS = ("length_seconds", "chars_per_sec", "cer_max")
+# the label of the copy's source link line (`<label>: <url>`, 0.0.28 Q11) when the format file names none for a language
+SOURCE_LABELS = {"ko": "원문", "ja": "原文", "en": "Source"}
 
 
 class Missing(Exception):
@@ -53,7 +55,18 @@ def parse(text, langs=()):
         missing = [l for l in langs if l not in v]
         if missing:
             raise Missing("%s has no value for %s (a language this repository uses)" % (k, ", ".join(missing)))
+    sl = data.get("source_label")
+    if sl is not None and not (isinstance(sl, dict) and all(isinstance(v, str) and v.strip() and "\n" not in v
+                                                             for v in sl.values())):
+        raise Missing("source_label must map each language to one line of text")
     return data
+
+
+def source_label(crit, lang):
+    """The source link's label for `lang`: the format's `source_label`, else SOURCE_LABELS, else English."""
+    sl = (crit or {}).get("source_label") or {}
+    base = (lang or "").split("-")[0]
+    return sl.get(lang) or sl.get(base) or SOURCE_LABELS.get(base) or SOURCE_LABELS["en"]
 
 
 def repo_langs(repo):

@@ -315,7 +315,13 @@ LEGACY_DEPS_HEAD = {
 }
 # intended changes since d2028cc, each with a one-line reason (none so far; SCRIPTS_VERSION in stdo/__init__.py and
 # RUNNER_VERSION in stdo/hooks/templates.py are the likely ones)
-LEGACY_DEPS_CHANGED = {}
+LEGACY_DEPS_CHANGED = {
+    "stdo/__init__.py": "0.0.28: SCRIPTS_VERSION 25",
+    "stdo/state/argv.py": "0.0.28 (fix-0028 §1): --since-last is a flag (status takes no value for it)",
+    "stdo/state/commands.py": "0.0.28 (fix-0028 §13): ask-before is evidence-free and implemented (no deny)",
+    "stdo/commit/summary.py": "0.0.28 (fix-0028 §11): the value block shows brand.json's name, accent and logo",
+    "stdo/state/store.py": "0.0.28 (fix-0028 §1.1): video_dir refuses an id that is not a video id (exit 2)",
+}
 for _f, _h in sorted(LEGACY_DEPS_HEAD.items()):
     _p = os.path.join(skill, "scripts", _f)
     _cur = _hl.sha256(open(_p, "rb").read()).hexdigest() if os.path.exists(_p) else None
@@ -349,13 +355,25 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "24", "SCRIPTS_VERSION is 24 (0.0.26: stdo/look.py, check_assets --look, the board's look, "
-      "the script's title scene and unused images, the `unused:` lines of shown ①)")
+check(sv and sv.group(1) == "25", "SCRIPTS_VERSION is 25 (0.0.28: the writer's frontmatter lines from next --enter "
+      "script, the targetDuration range, every s2v message, ask-before, record-source --url, the ② ③ ④a question "
+      "blocks, floor_text, the copy's source line, brand lines in the value block)")
 # 0.0.23 (pilot-1 P4): every gate document has the agent paste the printed question block, never retyping a line
 for _d in ("make", "copy", "verify", "board"):
     _t = open(os.path.join(skill, "commands", _d + ".md")).read()
     check("`question` block" in _t and "never retype a line" in _t,
           "commands/%s.md asks with the `question` block pasted unchanged (never retype a line)" % _d)
+# 0.0.28 (pilot-3 Q13 · Q14): every command document's Rules paragraph has the three shell-habit clauses
+for _p in sorted(glob.glob(os.path.join(skill, "commands", "*.md"))):
+    _t = open(_p).read()
+    _m = re.search(r"^Rules[^\n]*(?:\n(?!\n)[^\n]*)*", _t, re.M)
+    if _m:
+        _r = " ".join(_m.group(0).split())
+        check("Run Studio commands exactly as written: no `| head`" in _r and
+              "Do not repeat a call whose output is already in the conversation" in _r and
+              "with `open <path>` only" in _r,
+              "commands/%s's Rules line has the three shell-habit clauses (exact commands, no repeats, open only)"
+              % os.path.basename(_p))
 # 0.0.23 (pilot-1 P8): the ignore block re-includes nothing and ignores the credits draft
 _gi = open(os.path.join(skill, "templates", "studio", "gitignore.tmpl")).read()
 check(not [l for l in _gi.splitlines() if l.startswith("!")] and "/videos/*/CREDITS.draft.yaml" in _gi,

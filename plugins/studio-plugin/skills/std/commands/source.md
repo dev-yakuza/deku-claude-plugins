@@ -5,6 +5,9 @@ its claims, readings and images, check what a public video may use, and record i
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`. The video id is the first argument of `/std source`.
+Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only
+`cd <repo> &&`), and read the whole output. Do not repeat a call whose output is already in the conversation. Show
+files to the person with `open <path>` only (never `code`, `vim` or another editor).
 
 1. `python3 .claude/studio/scripts/state.py record-source <video>` — pins a copy of the writing
    (`work/source/<file>`).
@@ -13,17 +16,21 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
    (`third-party` when a caption names a copyright or a source, `unknown` outside the public folders). Exit 1: run
    step 1 first. Exit 2: a setting is wrong — tell the person.
 3. Spawn the source analyst (`std-source-analyst`) with the copy and `work/assets.json`. It writes
-   `work/source.md`: claims with exact excerpts (each with the placeholder id `C-00000000`), ruby pairs, and the
-   class of every image.
+   `work/source.md`: claims with exact excerpts (each with the placeholder id `C-00000000`; whole sentences, markup
+   included), ruby pairs, and the class of every image.
    3b. `python3 .claude/studio/scripts/check_claims.py <video> --source --fill` — writes each claim's real id (the
    hash of its excerpt) into `work/source.md` and prints one line per claim. Exit 1: give the analyst the listed
-   problems (a missing excerpt, the same excerpt listed twice — make the excerpts differ) and run it again.
+   problems (a missing excerpt, the same excerpt listed twice — make the excerpts differ; an excerpt not in the copy,
+   or one that stops inside a tag or mid-sentence — copy the whole sentence) and run it again.
 4. `python3 .claude/studio/scripts/check_scope.py <video>` — the source must be public (and not internal), and every
    image gets its scope (the stricter of floor and class). Exit 1: tell the person what it says (another source, or
    the person changes `visibility` with `/std config`). Exit 4: the internal overlay is missing — ask the person to
    recreate it (`/std config`).
 5. `python3 .claude/studio/scripts/state.py record-source <video>` again — now it records the images and
-   `assets.json`. It says "note: …" when something is still missing; do what it says.
+   `assets.json`. It says "note: …" when something is still missing; do what it says. Ask the person once, with
+   AskUserQuestion, for the writing's public address: candidates `https://<public_domains[0]>/<slug>` (the slug from
+   the source's file name) and "없음". With an address, add `--url <https url>` to this call (only
+   `https://<one of public_domains>/…`, no `#` part): the copy's description then carries it (`원문: <url>`).
 6. `python3 .claude/studio/scripts/state.py next <video>` — the next stage (brief).
 
 Never edit `work/assets.json` or `work/source/` yourself (the guard refuses it); run the scripts again instead.

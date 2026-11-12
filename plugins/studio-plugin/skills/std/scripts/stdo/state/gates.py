@@ -56,7 +56,8 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
     box = {}
     if gate == "2":  # the lines its question must show, computed now (conflicts too) and kept with the shown record
         from ..voice import gate2
-        box["lines"] = gate2.lines(vdir, lang, _conflicts(ctx, state, lang, providers), _write_text)
+        md = os.path.join(ctx["studio_root"], "out", state["video"], lang, "audition", "audition.md")
+        box["lines"] = gate2.lines(vdir, lang, _conflicts(ctx, state, lang, providers), _write_text, read=md)
     if gate == "4b":  # the copy's facts and their excerpts (M1h review Y2)
         from ..distribute import gate4b
         box["lines"] = gate4b.lines(vdir, lang, scope, _write_text)
@@ -110,17 +111,13 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
         _out("begin %s" % scope)
     else:
         _out("hash12 %s" % box["hash12"] if box.get("hash12") else "shown %s (other scopes not shown yet)" % scope)
-        if gate == "2" and box.get("hash12"):  # the file to show the person (0.0.25 P21); not part of the block or hash
-            md = os.path.join(ctx["repo"], ctx["studio_root"], "out", state["video"], lang, "audition", "audition.md")
-            if os.path.isfile(md):
-                _out("read: %s" % os.path.relpath(md, ctx["repo"]))
     if gate in ("2", "4b") and not begin:  # the question shows each of these lines (the guard checks them — V1, Y2)
         for line in box["lines"]:
             _out("in the question: %s" % line)
     if gate == "1":  # ①: each commit to the source after begin (M1e review S5), as record-source printed them
         for line in labels.source_commit_lines(state):
             _out("in the question: %s" % line)
-    if box.get("hash12") and gate in ("1", "2", "4b"):
+    if box.get("hash12") and gate in ("1", "2", "3", "4a", "4b"):
         for line in _question(ctx, state, lang, gate, scope, box):
             _out(line)
     if gate == "1" and box.get("hash12"):  # 0.0.26: the images the script does not show, and why (not hashed)
@@ -152,10 +149,44 @@ def _question(ctx, state, lang, gate, scope, box):
     elif gate == "2":
         header = "[%s] ② 오디션 — %s/out/%s/%s/audition/narrator.wav" % (v, sr, v, lang)
         lines, after = box["lines"], "the length warning when there is one"
+    elif gate in ("3", "4a"):  # 0.0.28 Q17: printed, so the model writes less (no guard comparison for these yet)
+        return labels.question_block("%s · hash %s" % (_header34(ctx, state, lang, gate, scope), box["hash12"]),
+                                     _lines34(ctx, state, lang, gate, scope), "the auditor's findings")
     else:
         header = "[%s] ④b 배포용 글 — %s/copy/%s/%s/%s.md" % (v, sr, v, lang, scope)
         lines, after = box["union"], "the auditor's findings"
     return labels.question_block("%s · hash %s" % (header, box["hash12"]), lines, after)
+
+
+GATE34 = {"3": "③ 정지 화면", "4a": "④a 최종"}
+PLAY_CHECK = "영상을 처음부터 끝까지 재생해 소리·자막·그림이 함께 맞는지 확인해 주세요 (감수 에이전트는 영상을 재생할 수 없습니다)"
+
+
+def _artifact34(ctx, state, lang, gate, scope):
+    """The stills folder (③) or the recorded mp4 (④a) of one output, relative to the repository."""
+    if gate == "3":
+        return os.path.relpath(os.path.dirname(frames_index(ctx, state, lang, scope)), ctx["repo"])
+    rec = (state["langs"][lang].get("renders") or {}).get(scope)
+    return rec.get("file") if isinstance(rec, dict) and isinstance(rec.get("file"), str) else \
+        "%s (no render recorded)" % scope
+
+
+def _outs34(state, lang, gate, scope):
+    """The outputs one ③/④a question covers: the asked output when one is named (its hash), else all."""
+    outs = scopes(state, lang, gate)
+    return [scope] if scope in outs else outs
+
+
+def _header34(ctx, state, lang, gate, scope=None):
+    outs = _outs34(state, lang, gate, scope)
+    where = _artifact34(ctx, state, lang, gate, outs[0]) if len(outs) == 1 else ", ".join(outs)
+    return "[%s] %s — %s" % (state["video"], GATE34[gate], where)
+
+
+def _lines34(ctx, state, lang, gate, scope=None):
+    outs = _outs34(state, lang, gate, scope)
+    lines = ["%s: %s" % (o, _artifact34(ctx, state, lang, gate, o)) for o in outs] if len(outs) > 1 else []
+    return lines + ([PLAY_CHECK] if gate == "4a" else [])
 
 
 def _write_text(p, text):

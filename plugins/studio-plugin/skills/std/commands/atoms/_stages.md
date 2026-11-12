@@ -11,13 +11,13 @@ source → brief → script → verify ─[①]→ cast → tts → audition ─
 |---|---|---|---|
 | source | source analyst | `source/` (pinned copy) · `source.md` · `source_hash` | `check_scope` · `resolve_assets` |
 | brief | content strategist | `brief.md` · `brief_core` · output list | expected length within the format · `state.py record-brief` |
-| script | script writer | script · `claims-map.json` | `check_claims --narration` (s2v lint with its length warnings, claims map, narration, images) |
+| script | script writer | script (with the default narrator's `cast:` block) · `claims-map.json` | `check_claims --narration` (s2v lint with its length warnings, the targetDuration range, the cast block, claims map, narration, images) |
 | verify | fact-checker | `verify.draft.json` → `verify.json` · `verify.md` (written by `check_claims`) | no unsupported or contradicted claim · `check_claims` |
 | ① | person | approved content | approval record |
-| cast | producer / casting director | cast, pronunciation (`pronounce-changes.json`), faces | `check_assets --actors` (s2v lint, content hash unchanged, the roster, the readings) |
+| cast | producer / casting director | pronunciation (`pronounce-changes.json`), faces (the cast block is the script's, from ①) | `check_assets --actors` (s2v lint, content hash unchanged, the roster, the readings) |
 | tts | producer | audio lock | machine lock (tts) · `check_tts` (failures retried twice, then exempted and shown at ②) |
 | audition | producer | `narrator.wav` · `audition.md` | `audition.py` (its check file) |
-| ② | person | approved voice and audio (the question shows each exempted line and reading change) | approval record · `pronounce-approved.json` |
+| ② | person | approved voice and audio (the question shows the sentences played, each exempted line and reading change, and `read:` audition.md) | approval record · `pronounce-approved.json` |
 | board | visual director | presentation (the frontmatter's theme · logo · layout · transition, block attributes; `check_assets --look`) · `board.md` · `CREDITS.draft.yaml` → `CREDITS.yaml` (`state.py credit`) | `check_assets --output` (s2v check · content and voice unchanged · every picture usable, unchanged and credited · the brand's look) |
 | visual-check | producer | stills per output | — (frozen audio, no machine lock) |
 | ③ | person | approved presentation (per output) | approval record |

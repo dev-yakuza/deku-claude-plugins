@@ -6,6 +6,9 @@ the person approves them.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`. The video id is the first argument of `/std board`.
+Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only
+`cd <repo> &&`), and read the whole output. Do not repeat a call whose output is already in the conversation. Show
+files to the person with `open <path>` only (never `code`, `vim` or another editor).
 
 ## board
 
@@ -55,9 +58,11 @@ position. Shared rules: `atoms/_contract.md`. The video id is the first argument
 ## Gate ③
 
 1. External audit (public videos): as in `setup.py doc verify` step 5, with the contact sheet and the stills.
-2. Open the contact sheet and the stills (`open <path>`); the last `shown 3 … --end` printed `hash12 <h12>`.
-3. Ask with AskUserQuestion: `[<video>] ③ 정지 화면 — youtube · hash <h12>`, the auditor's findings; options
-   `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer —
+2. Open the contact sheet and the stills (`open <path>`); the last `shown 3 … --end` (printed by the snapshot) printed
+   `hash12 <h12>` and the `question` block: `[<video>] ③ 정지 화면 — <stills folder> · hash <h12>`, up to
+   `end of question`.
+3. Ask with AskUserQuestion: the question is **the block pasted unchanged**, then the auditor's findings (quote file
+   paths rather than retyping long Japanese terms); options `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer —
    do not wait for the person; never in the same assistant message as the question — run
    `python3 .claude/studio/scripts/state.py approve <video> 3 --expect <h12> --output youtube`.
 4. "고칠 곳이 있다": back to board with the person's notes.

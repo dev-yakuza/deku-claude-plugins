@@ -134,6 +134,9 @@ def problems(repo, vdir, state, lang, ctx, platform, cfg, env, copy_path):
     hit = term_hit(text, terms) if terms else None
     if hit:
         out.append("the copy uses an in-house term (%s)" % hit)
+    src_line = source_line(repo, state, lang)
+    if src_line and src_line not in body:
+        out.append("the source link line is missing: %s" % src_line)
     chapter_lines = []
     for p in chapter_files(ctx, state, lang, platform):
         try:
@@ -141,10 +144,24 @@ def problems(repo, vdir, state, lang, ctx, platform, cfg, env, copy_path):
                 chapter_lines += [l.rstrip() for l in f.read().splitlines() if l.strip()]
         except OSError:
             pass
-    skip = chapter_lines + list(rules["required"]) + [e.get("credit_line") for e in (cred or {}).values()
-                                                       if isinstance(e.get("credit_line"), str)]
+    skip = chapter_lines + ([src_line] if src_line else []) + list(rules["required"]) + [
+        e.get("credit_line") for e in (cred or {}).values() if isinstance(e.get("credit_line"), str)]
     out += excerpt_problems(vdir, lang, state, platform, factcheck.sentences(title, body, skip))
     return out
+
+
+def source_line(repo, state, lang):
+    """`<label>: <url>` when record-source stored the source's public URL (0.0.28 Q11), else None. The label comes
+    from the format file (criteria.source_label)."""
+    from .. import criteria
+    url = (state.get("source") or {}).get("url")
+    if not isinstance(url, str) or not url:
+        return None
+    try:
+        crit = criteria.read(repo, state.get("kind"))
+    except criteria.Missing:
+        crit = None
+    return "%s: %s" % (criteria.source_label(crit, lang), url)
 
 
 def excerpt_problems(vdir, lang, state, platform, own):

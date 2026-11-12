@@ -5,8 +5,10 @@
     state.py loop <video> <verify|1|3|4a|copy> [--lang l]
     state.py status [<video>] [--json]
     state.py sync                     (M3b)
-    state.py begin <video> --source <path> --kind youtube [--lang l]       (M1b; the harness must be committed)
-    state.py record-source <video>
+    state.py begin <video> --source <path> --kind youtube [--lang l] [--ask-before tts,render]
+                                                                           (M1b; the harness must be committed)
+    state.py record-source <video> [--url https://<public domain>/…]
+    state.py ask-before <video> <tts,render,copy,commit | none>            (0.0.28: the person's pause requests)
     state.py hold <video> lock --reason <busy line> [--lang l]
     state.py release-lock <video> [--lang l]
     state.py record-render <video> --output o [--lang l]                   (reads run_s2v.py's check file)
@@ -23,8 +25,8 @@ import re
 import subprocess
 import sys
 
-from .. import machine, paths
-from . import backup, commands, flow, gates, harnessgate, schema, stagechecks, store
+from .. import criteria, machine, paths
+from . import backup, commands, flow, gates, harnessgate, schema, scriptlines, stagechecks, store
 from .collect import CollectError, Providers
 from .hashes import brief_core
 from .router import decide, decide_without_script, precheck, section_tuple
@@ -120,7 +122,7 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
             raise Usage(unsafe)  # nothing machine-local is read or written through a link (m1-plan §3.1 review U1)
         o = _opts(rest, {"--json", "--proxy", "--begin", "--end"},
                   {"--lang", "--enter", "--output", "--platform", "--from", "--expect", "--source", "--kind",
-                   "--reason"})
+                   "--reason", "--ask-before", "--url"})
         if cmd == "begin":
             return flow.begin(repo, cfg, root, o, providers, _ctx_of(repo, cfg))
         if cmd == "overlay":
@@ -136,7 +138,7 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
         if cmd == "next":
             return _next(state, lang, ctx, o, providers)
         if cmd == "record-brief":
-            return _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock)
+            return _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock, cwd)
         if cmd == "loop":
             return _loop(vdir, lang, o, hooks, flock)
         if cmd == "stage-done":
@@ -149,7 +151,9 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
                 return cr.preview(repo, root, vdir, state, o)
             return cr.credit(repo, vdir, state, o, hooks, list(argv), gates._with_evidence)
         if cmd == "record-source":
-            return flow.record_source(repo, vdir, state, cfg, hooks)
+            return flow.record_source(repo, vdir, state, cfg, hooks, url=o.get("--url"))
+        if cmd == "ask-before":
+            return flow.ask_before(vdir, o, hooks)
         if cmd == "hold":
             return flow.hold(vdir, lang, o, hooks)
         if cmd == "release-lock":
@@ -209,6 +213,32 @@ def _next(state, lang, ctx, o, providers):
         cur = providers.collect(ctx, state, lang)
         d = decide(state, lang, cur, enter=enter, output=output, platform=platform)
     res = d.as_dict()
+    # 0.0.28 Q2 · Q4 · Q5: the frontmatter lines the writer copies (the cast block from the start, aspect, maxDuration)
+    fm_lines, notes = [], []
+    if enter == "script" and not (d.done or d.stop or d.held) and d.enter not in ("refused", "null-hash"):
+        try:
+            fm_lines = scriptlines.cast_lines(ctx["repo"], ctx["studio_root"], lang)
+            more, notes = scriptlines.output_lines(ctx["repo"], state.get("kind"), schema.current_outputs(state, lang),
+                                                   schema.current_platforms(state, lang))
+            fm_lines += more
+        except scriptlines.NotReady as e:
+            _err(str(e))
+            return C.FAIL
+        except criteria.Missing as e:
+            _err("the format's criteria cannot be read (%s)" % e)
+            return C.FAIL
+        res["frontmatter"] = fm_lines
+    src_line = None
+    if enter == "copy" and not (d.done or d.stop or d.held) and d.enter not in ("refused", "null-hash"):
+        from ..distribute.check import source_line
+        src_line = source_line(ctx["repo"], state, lang)  # 0.0.28 Q11: the description's source link line
+        if src_line:
+            res["source_line"] = src_line
+    # 0.0.28 Q15: the steps the person asked to be asked before
+    step = enter or (d.redo or {}).get("stage")
+    ask = step if step in (state.get("ask_before") or []) and not (d.done or d.stop or d.held) else None
+    if ask:
+        res["ask_before"] = ask
     if d.done:
         _print(res, o.get("--json"), "%s: finished" % lang)
         return C.OK
@@ -229,17 +259,49 @@ def _next(state, lang, ctx, o, providers):
             _print(res, o.get("--json"), "%s: cannot enter (a hash is missing)" % enter)
             return C.FAIL
         _print(res, o.get("--json"), "%s: go" % enter)
+        _extra(o, fm_lines, notes, ask, src_line)
         return C.OK
     _print(res, o.get("--json"), "%s: next %s" % (lang, where or "nothing to redo"))
+    _extra(o, fm_lines, notes, ask)
     return C.OK
 
 
-def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock):
+def _extra(o, fm_lines, notes, ask, src_line=None):
+    """next's lines after its verdict (text mode; --json carries them as `frontmatter` and `ask_before`)."""
+    if o.get("--json"):
+        return
+    if fm_lines:
+        sys.stdout.write("frontmatter (the writer puts these lines in the script exactly; targetDuration: a number "
+                         "in that range):\n%s\n" % "\n".join("  " + l for l in fm_lines))
+    for n in notes:
+        _err(n)
+    if src_line:
+        sys.stdout.write("in the description: %s\n" % src_line)
+    if ask:
+        sys.stdout.write("ask the person before %s (they asked) — AskUserQuestion before the stage's first command\n"
+                         % ask)
+
+
+def brief_path(src, vdir, cwd):
+    """The brief file `--from` names (0.0.28 Q3): a relative path against the current folder when the file exists
+    there, else against the video folder; every form must resolve inside the video folder (record-brief gets the
+    guard's allow, so it reads nothing else). Usage names the tried paths."""
+    tried = [src] if os.path.isabs(src) else [os.path.join(cwd, src), os.path.join(vdir, src)]
+    p = tried[0] if os.path.isabs(src) or os.path.isfile(tried[0]) else tried[1]
+    if not os.path.isfile(p):
+        raise Usage("no brief file at %s" % " or ".join(tried))
+    if not os.path.realpath(p).startswith(os.path.realpath(vdir) + os.sep):
+        raise Usage("the brief must be a file inside the video folder %s (tried %s)" % (vdir, " then ".join(tried)))
+    return p
+
+
+def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock, cwd=None):
     src = o.get("--from")
     if not src:
         raise Usage("record-brief needs --from <brief.json>")
+    p = brief_path(src, vdir, cwd or os.getcwd())
     try:
-        with open(src if os.path.isabs(src) else os.path.join(vdir, src), encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             b = json.load(f)
     except (OSError, ValueError) as e:
         raise schema.SchemaError("cannot read the brief: %s" % e)

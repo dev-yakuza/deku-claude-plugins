@@ -6,13 +6,17 @@ the person approves it.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`. The video id is the first argument of `/std copy`.
+Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only
+`cd <repo> &&`), and read the whole output. Do not repeat a call whose output is already in the conversation. Show
+files to the person with `open <path>` only (never `code`, `vim` or another editor).
 
 ## copy
 
 1. `python3 .claude/studio/scripts/state.py next <video> --enter copy --platform youtube` — exit 3: go to the stage
-   it names.
+   it names. When the source stage recorded the source's public URL it prints `in the description: <label>: <url>`.
 2. Spawn the distributor (`std-distributor`) with `work/brief.md`, the script, the render's `.chapters.txt`,
-   `.claude/studio/platforms/youtube.md` and `CREDITS.yaml`. It writes `studio/copy/<video>/<lang>/youtube.md`.
+   `.claude/studio/platforms/youtube.md`, `CREDITS.yaml` and that source link line, if any. It writes
+   `studio/copy/<video>/<lang>/youtube.md`.
 3. Spawn the fact-checker (`std-fact-checker`) with the copy, `work/<lang>/claims-map.json` and the source copy: it
    judges the copy's sentences in `work/<lang>/copy-verify.youtube.json` and sets `copy_excerpts.youtube` in the
    claims map to exactly their excerpts.

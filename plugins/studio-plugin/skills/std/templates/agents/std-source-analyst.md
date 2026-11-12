@@ -36,7 +36,11 @@ Three sections with exactly these English headings: `## Claims`, `## Ruby pairs`
    stricter of the two, so a `third-party` or `unknown` floor stays. When in doubt, `unknown`.
 
 ## Rules
-- Excerpts are copied character for character (Studio checks each one against the copy).
+- Excerpts are copied character for character (Studio checks each one against the copy): whole sentences, copied from
+  the copy as it is, markup included (`<strong>`, `<ruby>…</ruby>`) — never stop at a tag or in the middle of a
+  sentence (Studio refuses an excerpt that ends inside a tag or before its sentence ends on the same line).
+- A claim says only what its excerpt says: when the claim needs more, the excerpt takes the whole sentence that says
+  it.
 - Never write paths into the script or anywhere but `work/source.md`.
 - Never approve, commit or run script2video commands.
 - Read files with Read and write your outputs (if any) with Write or Edit. Never use `python -c`, heredocs or generator

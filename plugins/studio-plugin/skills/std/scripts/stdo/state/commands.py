@@ -5,7 +5,9 @@ evidence-free needs a person's answer (closed side)."""
 # a held state and recording a stage's results need no evidence either; leaving one (unlock), stopping a video
 # (abandon) and a person's settings (overlay) do.
 EVIDENCE_FREE = frozenset(["next", "record-brief", "loop", "status", "sync", "shown", "stage-done", "credit-preview",
-                           "begin", "record-source", "hold", "release-lock", "record-render", "done"])
+                           "begin", "record-source", "hold", "release-lock", "record-render", "done",
+                           # 0.0.28 §13: a person's later pause request; the guard's allow skips it (NO_AUTO)
+                           "ask-before"])
 # M0b-2: these record a person's decision and consume the guard's evidence (exit 6 without it)
 APPROVAL = frozenset(["approve", "reject-source-diff", "repin", "exclude-output", "unlock", "abandon", "overlay",
                       "credit"])
@@ -17,7 +19,9 @@ IMPLEMENTED = frozenset(["next", "record-brief", "loop", "status", "sync", "stag
                          "begin", "record-source", "hold", "release-lock", "record-render", "done", "abandon",
                          "overlay",
                          # M1g
-                         "credit", "credit-preview"])
+                         "credit", "credit-preview",
+                         # 0.0.28
+                         "ask-before"])
 
 
 def needs_evidence(name):

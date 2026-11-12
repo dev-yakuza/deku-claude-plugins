@@ -69,6 +69,15 @@ class StoreCase(StudioTestCase):
     def state(self):
         return store.read_state(self.vdir)
 
+    def narrator(self):
+        """The default narrator `next --enter script` prints the cast block of (0.0.28 Q2)."""
+        from stdo import narrator
+        os.makedirs(os.path.join(self.repo, "studio", "cast", "narrator"), exist_ok=True)
+        with open(os.path.join(self.repo, "studio", "cast", "narrator", "status.json"), "w") as f:
+            f.write(narrator.dumps(narrator.record("narrator", {"ko": ("qwen:Sohee", "")})))
+        helpers.git(self.repo, "add", "-A", "studio/cast")  # a harness file: committed, as init's
+        helpers.git(self.repo, "commit", "-q", "--no-verify", "-m", "narrator")
+
     def script(self):
         with open(os.path.join(self.vdir, "script.ko.md"), "w") as f:
             f.write("# a script exists\n")
@@ -127,8 +136,12 @@ class Commands(StoreCase):
         st["source"]["assets_sha"] = None
         store.create(os.path.join(self.repo, "studio", "videos", "v2"), dict(st, video="v2"))
         p = self.brief()
+        p2 = os.path.join(self.repo, "studio", "videos", "v2", "work", "brief.json")  # 0.0.28 Q3: its own folder
+        os.makedirs(os.path.dirname(p2), exist_ok=True)
+        with open(p2, "w") as f:
+            f.write(open(p).read())
         seq = store.read_state(os.path.join(self.repo, "studio", "videos", "v2"))["last_seq"]
-        code, _, err = self.cli("record-brief", "v2", "--from", p)
+        code, _, err = self.cli("record-brief", "v2", "--from", p2)
         self.assertEqual(code, 3)
         self.assertIn("no assets_sha", err)
         self.assertIn("record-source v2", err)
@@ -224,6 +237,10 @@ class Commands(StoreCase):
         boom = Providers(inspect=lambda ctx: (_ for _ in ()).throw(AssertionError("inspect called")))
         code, out, _ = self.cli("next", "v1", "--json", providers=boom)
         self.assertEqual((code, json.loads(out)["redo"]["stage"]), (0, "script"))
+        code, _out, err = self.cli("next", "v1", "--enter", "script", providers=boom)
+        self.assertEqual(code, 1)  # 0.0.28 Q2: the writer needs the default narrator's cast block
+        self.assertIn("no default narrator", err)
+        self.narrator()
         self.assertEqual(self.cli("next", "v1", "--enter", "script", providers=boom)[0], 0)
         self.assertEqual(self.cli("next", "v1", "--enter", "source", providers=boom)[0], 0)
         self.assertEqual(self.cli("next", "v1", "--enter", "verify", providers=boom)[0], 3)
@@ -313,6 +330,7 @@ class Commands(StoreCase):
         self.assertEqual(json.loads(out)["redo"]["stage"], "script")
         self.assertEqual(self.cli("next", "v1", "--enter", "tts")[0], 3)
         self.assertEqual(self.cli("next", "v1", "--enter", "board")[0], 2)  # needs --output
+        self.narrator()
         self.assertEqual(self.cli("next", "v1", "--enter", "script")[0], 0)
         p = Providers(inspect=lambda ctx: inspect_json(s2v_version="0.13.0+x"), source=lambda ctx, st: ("src1", ""))
         self.assertEqual(self.cli("next", "v1", providers=p)[0], 4)

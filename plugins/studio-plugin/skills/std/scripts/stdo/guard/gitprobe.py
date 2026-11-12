@@ -72,6 +72,25 @@ class Probe(object):
             return None
         return out.stdout if out.returncode == 0 else ""
 
+    def config_list(self, cwd):
+        """`git config --list --show-scope -z` text, or None (0.0.28 §1.1). Run without SAFE's `-c` overrides: they would
+        show as the command scope, and core.fsmonitor is what the guard reads here. Listing the config runs no hook,
+        filter or fsmonitor."""
+        if self.git is None or cwd is None or self.left <= 0 or self.calls >= 6:
+            return None
+        self.calls += 1
+        import time
+        start = time.monotonic()
+        try:
+            out = self.runner([self.git, "--no-pager", "config", "--list", "--show-scope", "-z"], cwd=cwd,
+                              env=dict(self.env), stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                              timeout=min(TIMEOUT, self.left))
+        except (OSError, subprocess.SubprocessError):
+            return None
+        finally:
+            self.left -= time.monotonic() - start
+        return out.stdout if out.returncode == 0 else None
+
     def clean_preview(self, cwd, configs, args, pre=(), env=None):
         """Paths `git clean` would remove (absolute), or None."""
         cfg = []
