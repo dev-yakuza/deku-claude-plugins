@@ -490,6 +490,8 @@ Decorative: an external decorative item is `use: licensed`; a decorative scene f
 gets `"decorative": true`. Code refuses a stand-in or decorative picture before the first `##`
 section or as the article's first image, and a decorative one that is not right before a section
 heading, stacked on another picture or sharing a boundary with another.
+A picture or file that was ever a stand-in stays one: on another line plan refuses it — draw a new
+picture under a new file name. A picture turned down (redo, reject) is refused in every role.
 Names: plan refuses a stand-in whose `alt` or `prompt` carries one of its `names`, and any scene
 that carries a name of a place left out or drawn elsewhere — never reword around it with
 another spelling (the fact-checker and the reviewers catch those).

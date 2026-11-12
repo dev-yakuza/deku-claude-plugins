@@ -41,7 +41,7 @@ STAND_IN_LABELS = {
 # icon's `aria-hidden` elsewhere in the template are not the label — review 26 m2)
 HIDE_CLASS_RE = re.compile(r"""\bclass\s*=\s*["']?[^"'>]*\b(?:hidden|sr-only|visually-hidden)(?![\w-])""", re.I)
 HIDE_STYLE_RE = re.compile(r"(?:display\s*:\s*none|visibility\s*:\s*hidden)", re.I)
-HIDE_ATTR_RE = re.compile(r"""(?:^|\s)(?:hidden|aria-hidden\s*=\s*["']?true)(?=[\s>/=]|$)""", re.I)
+HIDE_ATTR_RE = re.compile(r"""(?:^|\s)(?:hidden|aria-hidden\s*=\s*["']?true)(?=["'\s>/=]|$)""", re.I)
 # R1-m1 + R3-M2: tokens that name no particular place
 COMMON = {"temple", "shrine", "castle", "park", "station", "street", "dera", "jinja", "jingu", "ji", "tower",
           "bridge", "garden", "market", "japan", "japanese", "nihon", "tokyo", "kyoto", "osaka", "hokkaido",
@@ -1048,7 +1048,7 @@ def first_notice(root, cfg):
 # --- §R4-m5: the records only grow -----------------------------------------------------------------
 
 GROWING = ("image_rejects", "review_rejects", "stand_in_refused", "candidate_skips", "fetch_failures",
-           "subject_checks", "stand_in_marks", "stand_in_allowed")
+           "subject_checks", "stand_in_marks", "stand_in_allowed", "fetch_ok")
 
 
 def _lists(st):

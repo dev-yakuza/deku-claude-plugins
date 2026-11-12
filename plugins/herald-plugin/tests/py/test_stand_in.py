@@ -1030,6 +1030,8 @@ class ReviewRoundOneTests(StandInCase):
                           ('<img src="{ref}" alt="{alt}" class="hidden-xs"><p>{label}</p>', False),
                           ('<img src="{ref}" alt="{alt}"><p class="caption sr-only">{label}</p>', True),
                           ('<img src="{ref}" alt="{alt}"><p hidden>{label}</p>', True),
+                          ('<img src="{ref}" alt="{alt}"><span aria-hidden="true">{label}</span>', True),
+                          ("<img src='{ref}' alt='{alt}'><span aria-hidden='true'>{label}</span>", True),
                           ('<img src="{ref}" alt="{alt}"><div style="visibility: hidden"><b>{label}</b></div>', True),
                           ('<img src="{ref}" alt="{alt} {label}">', True),
                           ('![{alt}]({ref})\n<!-- {label} -->', True),
@@ -1093,3 +1095,57 @@ class ReviewRoundOneTests(StandInCase):
         k = images.kinds(self.root, self.cfg, TID)
         self.assertEqual((k["scene"]["stand_in"]["ok"], k["scene"]["decorative"]["max"], k["external"]["decorative"]),
                          (False, 0, False))
+
+
+class ReviewRoundTwoTests(StandInCase):
+    """r2-M1: a picture turned down in one role never comes back in another (REVIEW-26 round 2)."""
+
+    def setUp(self):
+        super().setUp()
+        self.config(lambda c: c["images"]["scenes"].update(decorative=1))
+
+    def test_e8_a_decorative_redo_does_not_return_as_a_plain_scene(self):
+        hill_line = "- a hillside view — kind: scene — the temple paragraph — Second"
+        brief = BRIEF.replace("## Images\n", "## Images\n" + hill_line + "\n")
+        self.inputs(brief, None)
+        hill = next(p["place"] for p in stand_in.parse_brief(brief) if p["line"] == hill_line)
+        dec = self.dec()
+        self.manifest([self.g1(place=key(COUNTER)), self.g3(), dec])
+        self.body3(dec=self.snip(dec) + "\n\n")
+        self.assertEqual(self.plan()["errors"], [])
+        images.review(self.root, self.cfg, TID, "g3", subject_ok=True, note="ok")
+        self.assertEqual(self.gen()["state"], "done")
+        images.review(self.root, self.cfg, TID, "g4", redo=True, note="looks like Kiyomizu's stage")
+        g4 = self.dec(place=hill)
+        g4.pop("decorative")
+        self.manifest([self.g1(place=key(COUNTER)), self.g3(), g4])
+        self.body3(dec=self.snip(g4, label=LABEL) + "\n\n")
+        self.assertIn("g4: this prompt, seed and size were turned down before", self.errors())
+
+    def test_e8b_a_plain_redo_does_not_return_as_decorative(self):
+        self.assertEqual(self.plan()["errors"], [])
+        images.review(self.root, self.cfg, TID, "g3", subject_ok=True, note="ok")
+        self.assertEqual(self.gen()["state"], "done")
+        images.review(self.root, self.cfg, TID, "g1", redo=True, note="a landmark")
+        g4 = self.g1(id="g4", place=key(STREET), decorative=True, file="%s/g4-counter.png" % IMG,
+                     ref="/blog-images/%s/g4-counter.png" % SLUG)
+        g1 = self.g1(place=key(COUNTER), seed=77)
+        self.manifest([g1, self.g3(), g4])
+        self.body3(g1=self.snip(g1), dec=self.snip(g4) + "\n\n")
+        self.assertIn("g4: this prompt, seed and size were turned down before", self.errors())
+
+    def test_a_stand_in_redo_does_not_return_as_another_subject(self):
+        thing_line = "- a boxed lunch — kind: external (thing) — the lunch paragraph — Second"
+        brief = BRIEF.replace("## Images\n", "## Images\n" + thing_line + "\n")
+        thing = next(p["place"] for p in stand_in.parse_brief(brief) if p["line"] == thing_line)
+        res = research().replace("\n\n## Other", "\n\n### IC3 — a boxed lunch — place: %s\n- none: none — searched: "
+                                                  "%s\n\n## Other" % (thing, SEARCHED))
+        self.inputs(brief, res)
+        self.assertEqual(self.plan()["errors"], [])
+        images.review(self.root, self.cfg, TID, "g3", subject_ok=True, note="ok")
+        self.assertEqual(self.gen()["state"], "done")
+        images.review(self.root, self.cfg, TID, "g3", redo=True, note="the real stage")
+        g3 = self.g3(place=thing, stand_in={"subject": "thing", "names": ["Ekiben"], "why": "no-candidates"})
+        self.manifest([self.g1(place=key(COUNTER)), g3])
+        self.body3(g3=self.snip(g3, label="AI-generated image (not the actual object)"))
+        self.assertIn("turned down before", self.errors())

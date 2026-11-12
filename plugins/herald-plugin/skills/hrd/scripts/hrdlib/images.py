@@ -618,6 +618,14 @@ def rejected_scene_keys(st, iid=None):
     return [k for k in out if k]
 
 
+def rejected_base_keys(st):
+    """The role-free keys of every picture turned down (review 26 r2-M1): a picture refused in one
+    role — decorative, stand-in, plain — never comes back in another (since 0.21.0; older records
+    carry none and their role key is 0.20's)."""
+    return {r.get("base") for k in ("review_rejects", "image_rejects") for r in st.get(k) or []
+            if isinstance(r, dict) and r.get("base")}
+
+
 def scene_attempts(st, iid):
     """1 + the decisions that turned a picture of this place down (R2-1 — never ledger lines)."""
     return 1 + len(set(rejected_scene_keys(st, iid)))
@@ -755,7 +763,7 @@ def check_manifest(root, cfg, tid, st, man, roles_out=None):
     claims = research_claims(root, tid)
     cands = _candidate_urls(_candidates_section(root, tid))
     rejected = {r.get("source_url") for r in st.get("image_rejects") or [] if isinstance(r, dict) and r.get("source_url")}
-    rejected_keys = set(rejected_scene_keys(st))
+    rejected_keys = set(rejected_scene_keys(st)) | rejected_base_keys(st)
     shot_files = set()
     try:
         from .shots import load_manifest as shot_manifest
@@ -911,7 +919,7 @@ def _scene_errors(cfg, where, it, rejected_keys):
     if not isinstance(pr, str) or not pr.strip() or len(pr) > SCENE_PROMPT_MAX or not SCENE_TEXT_RE.match(pr):
         errors.append("%s: prompt is English, 1–%d printable ASCII characters, without \" \\ ` or a line break (a "
                       "Japanese or Korean word makes the model draw letters)" % (where, SCENE_PROMPT_MAX))
-    elif scene_key(cfg, it) in rejected_keys:
+    elif scene_key(cfg, it) in rejected_keys or base_scene_key(cfg, it) in rejected_keys:
         errors.append("%s: this prompt, seed and size were turned down before (review or a human) — change the seed "
                       "or the prompt" % where)
     return errors
@@ -2439,7 +2447,7 @@ def review(root, cfg, tid, iid, ok=False, redo=False, note=None, generic_checked
         r.pop("reviewed_generic", None)
         r["review_note"] = note[:300]
         if scene:
-            rr = {"id": iid, "key": key, "note": note[:300], "at": now_iso()}
+            rr = {"id": iid, "key": key, "base": base_scene_key(cfg, it), "note": note[:300], "at": now_iso()}
             if it.get("place"):  # a stand-in's attempts are counted by place (12 §2.10)
                 rr.update(place=it["place"], role=role)
             st.setdefault("review_rejects", []).append(rr)
@@ -2500,7 +2508,8 @@ def _subject_review(root, cfg, tid, st, it, subject_ok, note, human, place):
                               "image status` `blocked_places`)")
         rec.update(origin="borrowed", borrowed=place)
         # its key is turned down too: the same picture never comes back under this place (review 26 M2)
-        st.setdefault("review_rejects", []).append({"id": iid, "key": scene_key(cfg, it), "note": note[:300],
+        st.setdefault("review_rejects", []).append({"id": iid, "key": scene_key(cfg, it),
+                                                    "base": base_scene_key(cfg, it), "note": note[:300],
                                                     "at": now_iso(), "place": p, "role": role})
         nxt = "the illustrator: remove %s (entry, reference, label) — it redraws a place that is left out" % iid
     st.setdefault("stand_in_refused", []).append(rec)
@@ -2723,7 +2732,8 @@ def reject(root, cfg, tid, iid, reason=None, drop=False, refetch=False, regenera
         rj = {"id": iid, "source_url": it.get("source_url"), "reason": (reason or "")[:300], "drop": bool(drop),
               "at": now_iso()}
         if scene:  # the key turned down: plan refuses the same prompt, seed and size (§2.6.3)
-            rj = {"id": iid, "job": key, "reason": rj["reason"], "drop": rj["drop"], "at": rj["at"]}
+            rj = {"id": iid, "job": key, "base": base_scene_key(cfg, it), "reason": rj["reason"], "drop": rj["drop"],
+                  "at": rj["at"]}
         if place:  # 12 §R1-0: every decision is the place's, whatever id comes next
             rj.update(place=place, role=role)
         if as_stand_in:
