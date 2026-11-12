@@ -1,6 +1,6 @@
 # MOVE
 
-**Not implemented yet** (Studio 0.0.x). Milestone: **later** (not part of M1).
+**Not implemented yet**. It arrives in a later version.
 
 What it will do: move an in-house video to its git-ignored location; asks first.
 

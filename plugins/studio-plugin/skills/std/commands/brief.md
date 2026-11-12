@@ -1,6 +1,6 @@
 # BRIEF
 
-The brief stage of a video whose source is recorded (M1e): the content strategist chooses the claims and the role
+The brief stage of a video whose source is recorded: the content strategist chooses the claims and the role
 structure, and Studio itself computes the expected length from the chosen excerpts.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command

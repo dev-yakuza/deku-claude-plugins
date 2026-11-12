@@ -1,8 +1,5 @@
 # Studio プラグイン
 
-> **開発中(0.0.x)。** Studio はまだマーケットプレイスになく、コマンドは「まだ実装されていません」と
-> 答えます。実際のリポジトリでは使わないでください。
-
 Claude Code 向けの**リポジトリごとの動画制作組織**です。Studio はリポジトリに制作ハーネスを
 インストールし、そのリポジトリに特化した役割エージェントのチームが、リポジトリにすでにある文章
 (ブログ・ドキュメント・アプリ紹介ページ)を [script2video](https://github.com/dev-yakuza/script2video)
@@ -19,13 +16,70 @@ Claude Code 向けの**リポジトリごとの動画制作組織**です。Stud
 - **生成のみで公開はしません** — アップロードするのは人です。
 - **レンダリングは script2video が担当** — Studio は計画・検査・質問・コミットを担当します。
 
-## ローカルで試す
+## 必要なもの
 
-```bash
-claude --plugin-dir plugins/studio-plugin
+- **Claude Code**: Claude Code 2.1.304、2.1.308、2.1.311 でテストしました(2.1.304 未満か 2.1.311 超では `/std init` が警告)。
+- **git**、そしてフックが見る `PATH` に **python3** 3.9 以上。
+- **script2video** 0.13.0 以上とその要件(Node 22+、Yarn 4、uv、ffmpeg、`yarn build`、モデル):
+  [script2video の README](https://github.com/dev-yakuza/script2video#readme) を見てください。
+- **ガードはすべての呼び出しで動きます。** Studio を有効にしたプロジェクトのすべてのセッションで(`/std init` の前も)、
+  Studio のガードフックが Bash、Write、Edit、MultiEdit、NotebookEdit、WebFetch、WebSearch、MCP ツールの呼び出しを
+  一つずつ検査します。`onFailure: block` で動くため、フックのエラーやタイムアウトはその呼び出しを止め(測定済み)、
+  `python3` がないときも止めると見込んでいます(測定していません)。`python3` が pyenv や asdf 方式の shim だと、ガードの
+  呼び出しごとに遅くなり、0.0.28 のガード自身の許可がオフになります([docs/guard-limits.ja.md](docs/guard-limits.ja.md))。
+  Command Line Tools のない macOS では、`/usr/bin/python3` がフックの 20 秒のタイムアウトまで待つことがあります。
+- **呼び出しごとのコスト**(マシン 1 台、Apple silicon の Mac): ハーネスのないリポジトリでの Bash `git status` に対するガードは
+  約 80 ms(p50、Python 3.9.9 と 3.15.2)、macOS の `/usr/bin/python3` 3.9.6 では約 155 ms でした
+  (`tests/py/test_guard_entry.py`、`PerfNoHarness`)。
+
+## インストール
+
+Claude Code で:
+
+```text
+/plugin marketplace add dev-yakuza/deku-claude-plugins
+/plugin install studio-plugin@deku-claude-plugins --scope project
 ```
 
-その後 `/std help`。script2video 0.13.0 以上が必要です(のちに `/std init` が設定します)。
+Claude Code のドキュメントによると、project スコープはプロジェクトの `.claude/settings.json`(コミットされる
+ファイル)の `enabledPlugins` に `"studio-plugin@deku-claude-plugins": true` を書きます。リポジトリで作業するすべての人に Studio とそのガードが有効に
+なります。このリポジトリで自分だけに有効にするには `--scope local`(`.claude/settings.local.json`、コミットしません)を
+使います。
+
+このリポジトリのチェックアウトから: `claude --plugin-dir plugins/studio-plugin`。
+
+## 最初の実行
+
+1. リポジトリの最上位フォルダーで Claude Code を起動します。
+2. `/std init` — このマシンの script2video のチェックアウトを尋ね、リポジトリを読み、いくつか質問して計画を見せます。
+   確認すると、それが最初のハーネスコミットです。
+3. `/std make <source> --kind <kind>` — 一つの文章から一本の動画(`/std help` がコマンドを示します)。
+4. レビュー ① 台本 ② オーディション ③ 静止画 ④ 最終(④a 動画・④b 配布用テキスト)、その後に動画のコミット。
+
+承認の質問: 示された選択肢から一つを選びます。AskUserQuestion の許可ルールを追加せず、Studio を bypass の権限モードで
+動かさないでください。
+
+## 新しい clone やワークツリー
+
+ハーネスはコミットされていますが、このマシンの s2v のパスと pre-commit フックはそうではありません。新しい clone や
+ワークツリーで一度だけ:
+
+```text
+/std config s2v.path <このマシンの script2video のチェックアウトの絶対パス>
+```
+
+そしてターミナルで、その最上位フォルダーから:
+
+```bash
+python3 .claude/studio/scripts/hooks.py install
+```
+
+どちらかが欠けていれば `/std status` が知らせます。
+
+## Studio を外す
+
+正確なコマンドつきの手順(まず動画とバックアップを残す、すべてのワークツリー、フック、リポジトリの外のフォルダー):
+[docs/removing.ja.md](docs/removing.ja.md)。
 
 ## 補足
 
@@ -34,7 +88,10 @@ claude --plugin-dir plugins/studio-plugin
 - **承認の回答はリポジトリ全体で一度だけ**使えます。同じリポジトリのワークツリーはその記録を共有しますが、別に取得した
   clone(別の `git clone`)は共有しません。動画の回答はその動画とハッシュを含むので別の clone に当てはまることはまれで、
   動画を持たない回答(設定・更新)だけが残るケースです。0.0.9 以前がワークツリーごとに残した記録は無視されます。
-- **0.0.x のサンドボックスを手で移行する**(`/std config` ができるまで): `.claude/studio/config.json` の `"s2v"` の
+
+## バージョンノート
+
+- **初期のサンドボックス(スクリプト 8 以下)を手で移行する**: `.claude/studio/config.json` の `"s2v"` の
   `"path"` を削除し、`.claude/studio/local/machine.json`(リンクではない実際のフォルダ)に
   `{"schema": 1, "s2v": {"path": "<絶対パス>"}}` を書きます。
 - **0.0.23 へ上げるとき**: `/std update` が Studio の ignore ブロック(`.gitignore` と `info/exclude`)を書き直し、
@@ -135,6 +192,8 @@ claude --plugin-dir plugins/studio-plugin
   選びます。`"` や `\` を含むナレーターのスタイルは `/std config` のナレーターで拒否されるので、そこで変えます。まだ台本の
   段階にある動画は台本に cast ブロックが必要です(台本の検査が知らせる)。ブロックなしで ① を承認した動画は台本の段階へ
   戻ります(`/std script <video>` の後、検証と ① をもう一度)。キャストを過ぎた動画はすでにあるブロックを使います。
+- **0.1.0**: マーケットプレイスへの登録。0.0.28 から上げるときは `/std update` は不要です(スクリプトの
+  バージョンは 25 のまま)。
 
 ## ライセンス
 

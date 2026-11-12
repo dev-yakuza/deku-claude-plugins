@@ -2,21 +2,22 @@
 
 Show this in the repo's language (not initialized: the language the user writes in):
 
-**Studio is in development (0.0.x)** — `init`, `config`, `update`, `make`, `source`, `brief`, `script`, `verify`, `board`,
-`render`, `copy`, `status`, `resume` and `abandon` work; every other command answers "not implemented yet" and names the milestone that brings it.
+**Studio** — `init`, `config`, `update`, `make`, `source`, `brief`, `script`, `verify`, `board`, `render`, `copy`,
+`status`, `resume` and `abandon` work; every other command answers "not implemented yet": it arrives in a later version.
 
-**Setup** — `init` install the harness (M1) · `config [key value]` (M1) · `update` (M1)
+**Setup** — `init` install the harness · `config [key value]` · `update`
 
-**Making a video** — `make <source> --kind <kind>` one video end to end (M1) ·
-`source|brief|script|verify|board|render|copy <video-id>` one stage; `cast` is M3a (in M1 the voice section of `make`)
+**Making a video** — `make <source> --kind <kind>` one video end to end ·
+`source|brief|script|verify|board|render|copy <video-id>` one stage; `cast` comes later (for now the voice section of
+`make`)
 
 **State** — `status [--unlock]` · `resume <video-id>` · `abandon <video-id> [--lang <l>]` ·
 `move <video-id>` (later)
 
-**Platforms & actors** — `platform list|add|remove|refresh` (M2) ·
-`cast list|add|build|audition` (M3a–M3b)
+**Platforms & actors** — `platform list|add|remove|refresh` (later) ·
+`cast list|add|build|audition` (later)
 
-**Growth & checks** — `review <video-id>` · `evolve` · `rollback` · `audit` (M4)
+**Growth & checks** — `review <video-id>` · `evolve` · `rollback` · `audit` (later)
 
-Flow (when built): `init` → `make` → review gates ① script ② audition ③ stills ④ final → commit.
+Flow: `init` → `make` → review gates ① script ② audition ③ stills ④ final → commit.
 Studio generates files only; a person uploads them.

@@ -323,3 +323,15 @@ pilot's 緑の通路 line; the ② block's played sentences and `read:` line (al
 `record-source --url` and the copy's source line; brand lines in the value block; `--ask-before` / `ask-before` (no deny
 and no allow from the guard); the ③ and ④a question blocks. The m1e fixture `SCRIPT` has the default narrator's cast
 block from the start (test_m1f's `CAST_BLOCK` replaces it at cast). The guard's §1 allows are tested with the guard.
+
+**0.1.0** (`SCRIPTS_VERSION` 25, m1k-plan, marketplace registration): `test_m1k.py` runs the commands of
+`docs/removing.md` as written (the shell blocks after `<!-- run: … -->`, read from the English document; the Korean and
+Japanese documents must hold the same blocks) on an init fixture with two worktrees — the clone's plain-git hook is a
+hand-written one Studio chained, the second worktree uses lefthook — under bash for one worktree and zsh (when
+installed) for the other; a husky clone (`core.hooksPath=.husky`) whose tracked hook carries the Studio block, which step 2
+must leave as it is; the refusals (staged changes, unpaired markers); a changed `.claude/settings.json` in the removal
+commit. `test_guard_entry.PerfNoHarness` prints the guard's cost on a Bash `git status` in a
+repository without a harness (the README's "Cost per call"; target p50 300 ms, fails above 900 ms, max printed only),
+with the test's own interpreter. `structure_test.sh` requires the marketplace entry (same version, source and
+description as plugin.json), the same number of `##` headings in the three READMEs, and no "in development",
+"0.0.x", "not in the marketplace" or milestone names in the shipped documents (READMEs: outside `## Version notes`).

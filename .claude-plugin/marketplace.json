@@ -27,6 +27,12 @@
       "source": "./plugins/herald-plugin",
       "description": "Herald - per-repo editorial organization: plans topics, writes and verifies professional articles, ships them through PR review, and grows its guides from real usage",
       "version": "0.21.0"
+    },
+    {
+      "name": "studio-plugin",
+      "source": "./plugins/studio-plugin",
+      "description": "Studio - a per-repo video production organization: turns writing that already exists in a repository into narrated videos with script2video, with fact checks against the source, four human review gates and platform copy",
+      "version": "0.1.0"
     }
   ]
 }

@@ -1,6 +1,6 @@
 # INIT
 
-Install Studio's harness into this repository (M1c). The person's confirmation is the **first harness commit**: until
+Install Studio's harness into this repository. The person's confirmation is the **first harness commit**: until
 it is committed, no video starts (`begin` refuses an uncommitted harness).
 
 Rules for every step: one command per Bash call, literal paths only (replace every `<…>` with the real value before the
@@ -18,7 +18,8 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
   AskUserQuestion (there is nothing to pick from). Then run, with the path they gave, quoted as given:
   `node <s2v path>/packages/cli/dist/main.js --version --json` (0.13.0 or newer, `stale_build: false`) and
   `node <s2v path>/packages/cli/dist/main.js doctor`. A failure: stop and tell the person what to fix (`yarn build`,
-  models). Warn when Claude Code is not 2.1.304 (`claude --version`).
+  models). Run `claude --version`: below 2.1.304 or above 2.1.311, warn that Studio was not tested with this
+  version (tested: 2.1.304, 2.1.308 and 2.1.311).
 
 ## 2. Analyze (read only)
 
@@ -33,7 +34,7 @@ with writing (`content_folders`), the hook manager, LFS, whether `studio/` is fr
 
 ## 3. Interview (AskUserQuestion — the person's choices, not evidence)
 
-Ask only what M1 needs, in the repository's language (before init: the language the person writes in).
+Ask only what this version needs, in the repository's language (before init: the language the person writes in).
 AskUserQuestion takes at most 4 questions per call and 2–4 options per question.
 
 **Order** — never put a question in the same call as a question it depends on. Three calls, with one plain message

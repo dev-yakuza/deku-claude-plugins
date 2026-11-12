@@ -1,6 +1,6 @@
 # RENDER
 
-The render stage and gate ④a (M1h), per output (`youtube` in M1): the approved script rendered from the locked
+The render stage and gate ④a, per output (`youtube` for now): the approved script rendered from the locked
 audio, then the person approves the video, its thumbnail and its chapters.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command

@@ -1,6 +1,6 @@
 # UPDATE
 
-Adopt this plugin's Studio into the repository (M1c): its scripts and, three ways, its templates. Asks first.
+Adopt this plugin's Studio into the repository: its scripts and, three ways, its templates. Asks first.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a
 variable in command position. Shared rules: `atoms/_contract.md`.

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Structural checks for the Studio plugin (m0-plan §2).
 #
-# - plugin.json fields; SCRIPTS_VERSION is a whole number; marketplace entry (when registered) matches
+# - plugin.json fields; SCRIPTS_VERSION is a whole number; the marketplace entry matches plugin.json
+# - released wording in the shipped documents; the three READMEs have the same ## headings count (m1k-plan item 7)
 # - hooks/hooks.json registers the guard (M0d-1b); the commit checks and hook templates (M0e)
 # - SKILL.md routing list == commands/*.md; atom references exist
 # - the result-contract block is byte-identical wherever it appears
@@ -43,10 +44,39 @@ if os.path.exists(hj):
 sv = re.search(r'SCRIPTS_VERSION = "([^"]+)"', open(os.path.join(skill, "scripts", "stdo", "__init__.py")).read())
 check(bool(sv) and sv.group(1).isdigit(), "SCRIPTS_VERSION is a whole number (bumped only when scripts/ change)")
 mp = os.path.normpath(os.path.join(plugin, "..", "..", ".claude-plugin", "marketplace.json"))
-if os.path.exists(mp):
-    entries = [p for p in json.load(open(mp)).get("plugins", []) if p.get("name") == "studio-plugin"]
-    check(not entries or entries[0].get("version") == pj.get("version"),
-          "marketplace entry absent (before registration) or same version")
+entries = [p for p in json.load(open(mp)).get("plugins", []) if p.get("name") == "studio-plugin"] \
+    if os.path.exists(mp) else []
+check(len(entries) == 1, "the marketplace has one studio-plugin entry (0.1.0, m1k-plan item 7)")
+for k, want in (("version", pj.get("version")), ("description", pj.get("description")),
+                ("source", "./plugins/studio-plugin")):
+    check(bool(entries) and entries[0].get(k) == want, "the marketplace entry's %s is plugin.json's" % k)
+
+# the released wording (m1k-plan item 2): no development banner, no 0.0.x, no "not in the marketplace", no internal
+# milestone names in what a person or the model reads — the READMEs outside their version notes
+VERSION_NOTES = {"README.md": "## Version notes", "README.ko.md": "## 버전 노트", "README.ja.md": "## バージョンノート"}
+UNRELEASED = [(re.compile(r"in development", re.I), "in development"), (re.compile("開発中"), "開発中"),
+              (re.compile("개발 중"), "개발 중"), (re.compile(r"0\.0\.x"), "0.0.x"),
+              (re.compile(r"not in the marketplace", re.I), "not in the marketplace"),
+              (re.compile("마켓플레이스에 없"), "마켓플레이스에 없"), (re.compile("マーケットプレイスにな"), "マーケットプレイスにない"),
+              (re.compile(r"\bM\d+[a-z]?\b"), "a milestone name")]
+heads = {}
+for n, notes in VERSION_NOTES.items():
+    text = open(os.path.join(plugin, n), encoding="utf-8").read()
+    heads[n] = len(re.findall(r"(?m)^## ", text))
+    check(notes in text, "%s has its version notes (%s)" % (n, notes))
+check(len(set(heads.values())) == 1, "the three READMEs have the same number of ## headings (%s)" % heads)
+shipped_docs = [os.path.join(skill, "SKILL.md"), os.path.join(plugin, ".claude-plugin", "plugin.json")] + \
+    glob.glob(os.path.join(skill, "commands", "*.md")) + glob.glob(os.path.join(skill, "commands", "atoms", "*.md")) + \
+    glob.glob(os.path.join(plugin, "docs", "*.md"))
+texts = {os.path.relpath(p, plugin): open(p, encoding="utf-8").read() for p in shipped_docs}
+for n, notes in VERSION_NOTES.items():
+    text = open(os.path.join(plugin, n), encoding="utf-8").read()
+    before, _sep, after = text.partition(notes)
+    texts[n + " (outside the version notes)"] = before + ("\n## " + after.split("\n## ", 1)[1] if "\n## " in after
+                                                          else "")
+for rel, text in sorted(texts.items()):
+    found = [label for rx, label in UNRELEASED if rx.search(text)]
+    check(not found, "%s: no unreleased wording (%s)" % (rel, ", ".join(found) or "none"))
 
 # routing
 text = open(os.path.join(skill, "SKILL.md")).read()

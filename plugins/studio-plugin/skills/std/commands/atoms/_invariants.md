@@ -1,6 +1,6 @@
 # Floors and invariants
 
-Status: contract only (M0). Enforcement arrives with the guard and the scripts (M0–M1).
+Status: the contract; the guard, the scripts and the pre-commit hook enforce it.
 
 ## Floors (charter)
 

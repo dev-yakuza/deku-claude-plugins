@@ -1,0 +1,216 @@
+# リポジトリから Studio を外す
+
+[English](removing.md) · [한국어](removing.ko.md)
+
+これらのコマンドは Claude Code ではなくターミナルで実行します。各ワークツリーがチェックアウトしているブランチから
+Studio を外し、あなたのファイルはそのまま残します。リポジトリにはワークツリーが複数あることがあります
+(`git worktree list`)。**ワークツリーごと**とある手順はそれぞれのワークツリーで、**clone ごと**とある手順はその clone の
+どれか一つのワークツリーで一度だけ実行します。どのブロックもワークツリーの最上位フォルダーから始めます。ブロックは bash、zsh、sh 用です(fish は不可)。
+ブロックは一つずつ丸ごと貼り付けます。
+
+扱わないもの:
+
+- ほかのブランチにはハーネスが残っています。そのブランチをマージまたはチェックアウトすると戻ってきます。そこでも同じ
+  方法で外します。
+- すでに削除または移動したワークツリーの `studio-backup/<repo_key>/` は見つけられません(フォルダー名はワークツリーの
+  パスのハッシュ)。ディスクを使うだけなので、`~/.claude/studio-backup/`(または `$CLAUDE_CONFIG_DIR/studio-backup/`)
+  の下で日付から探します。
+
+## Studio のフォルダー(ワークツリーごと、ターミナルごと)
+
+Studio はリポジトリの外にもファイルを置き、そのフォルダー名はキーです。ワークツリーの実際のパス(`<repo_key>`)または
+clone の git 共通フォルダー(`<common_key>`)の sha256 の先頭 16 桁(16 進数)です。このブロックはそれらのフォルダーと
+`studio_root`(リポジトリ内の Studio のフォルダー。別に選んでいなければ `studio`)を見つけます。後の手順と同じターミナルで、
+Claude Code と同じ `CLAUDE_CONFIG_DIR` で最初に実行します。git と python3 だけで動くので、ハーネスのないブランチの
+ワークツリーでも使えます。
+
+<!-- run: folders -->
+```sh
+cd "$(git rev-parse --show-toplevel)"
+unset sr wt_key wt_backup clone_backup
+eval "$(python3 -B - <<'EOF'
+import hashlib, json, os, shlex, subprocess
+
+def git(*args):
+    return subprocess.run(("git",) + args, capture_output=True, text=True, check=True).stdout.strip()
+
+def key(path):
+    return hashlib.sha256(os.path.realpath(path).encode("utf-8")).hexdigest()[:16]
+
+home = os.environ.get("STUDIO_HOME") or os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+backups = os.path.join(home, "studio-backup")
+top = git("rev-parse", "--show-toplevel")
+common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+sr = None
+for f in (".claude/studio/config.json", os.path.join(backups, key(common), "marker")):
+    try:
+        with open(f, encoding="utf-8") as fh:
+            sr = sr or json.load(fh).get("studio_root")
+    except (OSError, ValueError, AttributeError):
+        pass
+sr = (sr if isinstance(sr, str) else "studio").strip("/") or "studio"
+if os.path.isabs(sr) or ".." in sr.split("/") or sr == ".":
+    raise SystemExit("studio_root %r looks wrong: stop and check it" % sr)
+for name, value in (("sr", sr), ("wt_key", key(top)), ("wt_backup", os.path.join(backups, key(top))),
+                    ("clone_backup", os.path.join(backups, key(common)))):
+    print("%s=%s" % (name, shlex.quote(value)))
+EOF
+)"
+printf 'studio_root:   %s\nthis worktree: %s\nthis clone:    %s\n' "$sr" "$wt_backup" "$clone_backup"
+```
+
+`this worktree` は `studio-backup/<repo_key>/`(git が無視する動画のバックアップ、内部オーバーレイのハッシュ)、
+`this clone` は `studio-backup/<common_key>/`(ここに Studio をインストールしたというマーカー)です。
+
+## 0. 残すものを残す(ワークツリーごと、手順 1 の前に)
+
+`studio_root` フォルダー全体(コミットした動画と git が無視する動画、`local/videos`、`out/` のレンダー、`copy/` の
+テキスト)、二つのバックアップフォルダー、`.claude/studio/local/config.internal.json`(入力した内部オーバーレイ)を
+`~/studio-kept/<repo_key>/` にコピーします。このフォルダーはまだ存在していてはいけません。別の場所に残すには
+`$HOME/studio-kept` をリポジトリの外の別のパスに変えます。
+
+<!-- run: keep -->
+```sh
+keep="$HOME/studio-kept/${wt_key:?run the folders block first}"
+mkdir -p "$HOME/studio-kept" && mkdir "$keep" &&
+  { [ ! -d "$sr" ] || cp -Rp "$sr" "$keep/studio-root"; } &&
+  { [ ! -d "$wt_backup" ] || cp -Rp "$wt_backup" "$keep/studio-backup-worktree"; } &&
+  { [ ! -d "$clone_backup" ] || cp -Rp "$clone_backup" "$keep/studio-backup-clone"; } &&
+  { [ ! -f .claude/studio/local/config.internal.json ] ||
+    cp -p .claude/studio/local/config.internal.json "$keep/config.internal.json"; } &&
+  echo "kept in $keep"
+```
+
+このワークツリーで Studio が使うフック管理(手順 2 と 3 で必要。ハーネスのないブランチには `hooks.py` がありません):
+
+<!-- run: hook-status -->
+```sh
+python3 .claude/studio/scripts/hooks.py status
+```
+
+## 1. プラグインをアンインストールする
+
+Claude Code で、リポジトリの中で:
+
+```text
+/plugin uninstall studio-plugin@deku-claude-plugins --scope project
+```
+
+インストールしたときのスコープを使います(代わりに `--scope local` や `--scope user`)。`.claude/settings.json` の
+`enabledPlugins` に `"studio-plugin@deku-claude-plugins"` がまだあれば、JSON が正しく保たれるようにその項目を削除
+します。手順 3 がその変更をコミットします。次の手順の前に Claude Code を終了します。
+
+## 2. フック(clone ごとに一度)
+
+Studio の pre-commit shim を外し、それが続けて実行していたフックを戻します(plain git の場合。shim がなければ何も
+せず、追跡されているフックファイル — husky、リポジトリ内のフックフォルダー — には触れません)。`pre-commit.legacy` も確かめます(pre-commit フレームワークを Studio の後に入れ直すと、そこにあったフックを
+この名前に移します)。そして Studio の runner フォルダー(`<git common dir>/studio/`。使った承認の回答の記録もここ)と
+`info/exclude` の Studio ブロックを削除します。`pre-commit.studio-chained` が残ったと表示したら、`pre-commit` は
+Studio の shim ではなく、そのファイルは以前のフックです。手で戻します。
+
+<!-- run: clone -->
+```sh
+cd "$(git rev-parse --show-toplevel)"
+(
+  set -e
+  h=$(git rev-parse --git-path hooks)
+  shim() { grep -qs "Studio's pre-commit shim" "$1" && ! git ls-files --error-unmatch -- "$1" >/dev/null 2>&1; }
+  if shim "$h/pre-commit"; then
+    rm "$h/pre-commit"
+    [ ! -e "$h/pre-commit.studio-chained" ] || mv "$h/pre-commit.studio-chained" "$h/pre-commit"
+  fi
+  if shim "$h/pre-commit.legacy"; then
+    rm "$h/pre-commit.legacy"
+    if grep -qs 'File generated by pre-commit' "$h/pre-commit.studio-chained"; then
+      rm "$h/pre-commit.studio-chained"
+    elif [ -e "$h/pre-commit.studio-chained" ]; then
+      mv "$h/pre-commit.studio-chained" "$h/pre-commit.legacy"
+    fi
+  fi
+  [ ! -e "$h/pre-commit.studio-chained" ] || echo "left: $h/pre-commit.studio-chained (your earlier hook; put it back by hand)"
+  c=$(git rev-parse --path-format=absolute --git-common-dir)
+  rm -rf "$c/studio"
+  if [ -f "$c/info/exclude" ]; then
+    if [ "$(grep -c '^# >>> studio ' "$c/info/exclude")" != "$(grep -c '^# <<< studio <<<' "$c/info/exclude")" ]; then
+      echo "info/exclude: Studio's block markers are unpaired: fix them by hand, then run this again" >&2; exit 1
+    fi
+    sed '/^# >>> studio /,/^# <<< studio <<</d' "$c/info/exclude" > "$c/info/exclude.studio-tmp"
+    mv "$c/info/exclude.studio-tmp" "$c/info/exclude"
+  fi
+)
+```
+
+`hooks.py status` が **global-path**(リポジトリの外の `core.hooksPath`)と言ったなら、そのフックに Studio の行を手で
+加えたはずです。手順 3 の前に変えます: `sh "$(git rev-parse --git-common-dir)/studio/pre-commit" || exit $?`。ほかのリポジトリがまだ Studio を
+使っているなら
+`if [ -f "$(git rev-parse --git-common-dir)/studio/pre-commit" ]; then sh "$(git rev-parse --git-common-dir)/studio/pre-commit" || exit $?; fi`
+に置き換え、そうでなければ削除します。
+
+## 3. リポジトリの中のファイル(ワークツリーごと)
+
+`lefthook-local.yml` の Studio ブロック(lefthook の場合。ほかに何もなければファイルも削除)、Studio の追跡ファイルと
+git が無視するファイル(`.claude/studio/`、`.claude/agents/std-*.md`、`studio_root` フォルダー)、`.gitignore` の
+Studio ブロック(空の `.gitignore` は削除)を削除し、手順 1 で変えたなら `.claude/settings.json` をステージして
+コミットします。手順 2 を先に行います。Studio のフックがこのコミットを拒否するためです。ステージされた変更がない状態で
+始めます(あればブロックが拒否するので、コミットには Studio の削除だけが入ります)。Studio ブロックの目印の行が対に
+なっていなければ、何も変えずに止まります。
+
+<!-- run: worktree -->
+```sh
+cd "$(git rev-parse --show-toplevel)"
+(
+  set -e
+  : "${sr:?run the folders block first}"
+  git diff --cached --quiet || { echo "Studio removal: changes are already staged: commit or unstage them first" >&2; exit 1; }
+  unpaired() { [ -f "$1" ] && [ "$(grep -c "$2" "$1")" != "$(grep -c "$3" "$1")" ]; }
+  if unpaired lefthook-local.yml '^# >>> studio:hook >>>' '^# <<< studio:hook <<<' ||
+      unpaired .gitignore '^# >>> studio ' '^# <<< studio <<<'; then
+    echo "Studio's block markers are unpaired in lefthook-local.yml or .gitignore: fix them by hand, then run this again" >&2
+    exit 1
+  fi
+  if [ -f lefthook-local.yml ]; then
+    sed '/^# >>> studio:hook >>>/,/^# <<< studio:hook <<</d' lefthook-local.yml > lefthook-local.yml.studio-tmp
+    mv lefthook-local.yml.studio-tmp lefthook-local.yml
+    [ -n "$(tr -d '[:space:]' < lefthook-local.yml)" ] || rm lefthook-local.yml
+  fi
+  git rm -r -q -f --ignore-unmatch .claude/studio '.claude/agents/std-*.md' "$sr"
+  rm -rf .claude/studio "${sr:?run the folders block first}"
+  if [ -f .gitignore ]; then
+    sed '/^# >>> studio /,/^# <<< studio <<</d' .gitignore > .gitignore.studio-tmp
+    mv .gitignore.studio-tmp .gitignore
+    if [ -n "$(tr -d '[:space:]' < .gitignore)" ]; then git add .gitignore; else git rm -q -f --ignore-unmatch .gitignore; rm -f .gitignore; fi
+  fi
+  git diff --quiet -- .claude/settings.json || git add .claude/settings.json
+  git commit -q -m "Remove Studio"
+)
+```
+
+ハーネスのないブランチではコミットするものがありません(git がそう伝えます)。
+
+`hooks.py status` が **husky** や **custom-tracked** と言ったなら、追跡されている `.husky/pre-commit`(またはフック
+フォルダーの `pre-commit`)に `# >>> studio:hook >>>` と `# <<< studio:hook <<<` の間の Studio ブロックがあります。この
+ブロックは Studio を設定していない場所では何も実行しません。すべてのブランチから Studio がなくなったときだけ削除します。
+
+## 4. リポジトリの外のフォルダー
+
+ワークツリーごと、手順 3 の後に:
+
+<!-- run: backups-worktree -->
+```sh
+rm -rf "${wt_backup:?run the folders block first}"
+```
+
+clone ごと、最後のワークツリーの後に:
+
+<!-- run: backups-clone -->
+```sh
+rm -rf "${clone_backup:?run the folders block first}"
+```
+
+このマシンから Studio を完全に外すとき(すべてのリポジトリの後に): サンドボックスのファイルと空のバックアップ
+フォルダーも削除します。
+
+```sh
+rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/studio-sandbox.json"
+rmdir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/studio-backup"
+```

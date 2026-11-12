@@ -1,0 +1,209 @@
+# 레포에서 Studio 지우기
+
+[English](removing.md) · [日本語](removing.ja.md)
+
+이 명령들은 Claude Code가 아니라 터미널에서 실행합니다. 각 워크트리가 체크아웃한 브랜치에서 Studio를 꺼내고, 여러분의
+파일은 그대로 둡니다. 레포에는 워크트리가 여럿 있을 수 있습니다(`git worktree list`). **워크트리마다**라고 적은 단계는
+워크트리 하나하나에서, **clone마다**라고 적은 단계는 그 clone의 아무 워크트리에서 한 번 실행합니다. 모든 블록은
+워크트리의 최상위 폴더에서 시작합니다. 블록은 bash, zsh, sh용입니다(fish는 안 됨). 블록 하나를 통째로 붙여 넣습니다.
+
+다루지 않는 것:
+
+- 다른 브랜치에는 하네스가 남아 있습니다. 그 브랜치를 머지하거나 체크아웃하면 다시 생깁니다. 거기서도 같은 방법으로
+  지웁니다.
+- 이미 지웠거나 옮긴 워크트리의 `studio-backup/<repo_key>/`는 찾을 수 없습니다(폴더 이름이 워크트리 경로의 해시).
+  디스크만 차지하므로, `~/.claude/studio-backup/`(또는 `$CLAUDE_CONFIG_DIR/studio-backup/`) 아래에서 날짜로 찾습니다.
+
+## Studio의 폴더(워크트리마다, 터미널마다)
+
+Studio는 레포 밖에도 파일을 두며, 그 폴더 이름은 키입니다. 워크트리의 실제 경로(`<repo_key>`) 또는 clone의 git 공통
+폴더(`<common_key>`)의 sha256 앞 16자리(16진수)입니다. 이 블록은 그 폴더들과 `studio_root`(레포 안 Studio 폴더, 따로
+고르지 않았으면 `studio`)를 찾습니다. 뒤의 단계와 같은 터미널에서, Claude Code와 같은 `CLAUDE_CONFIG_DIR`로 먼저
+실행합니다. git과 python3만 있으면 되므로 하네스가 없는 브랜치의 워크트리에서도 동작합니다.
+
+<!-- run: folders -->
+```sh
+cd "$(git rev-parse --show-toplevel)"
+unset sr wt_key wt_backup clone_backup
+eval "$(python3 -B - <<'EOF'
+import hashlib, json, os, shlex, subprocess
+
+def git(*args):
+    return subprocess.run(("git",) + args, capture_output=True, text=True, check=True).stdout.strip()
+
+def key(path):
+    return hashlib.sha256(os.path.realpath(path).encode("utf-8")).hexdigest()[:16]
+
+home = os.environ.get("STUDIO_HOME") or os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+backups = os.path.join(home, "studio-backup")
+top = git("rev-parse", "--show-toplevel")
+common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+sr = None
+for f in (".claude/studio/config.json", os.path.join(backups, key(common), "marker")):
+    try:
+        with open(f, encoding="utf-8") as fh:
+            sr = sr or json.load(fh).get("studio_root")
+    except (OSError, ValueError, AttributeError):
+        pass
+sr = (sr if isinstance(sr, str) else "studio").strip("/") or "studio"
+if os.path.isabs(sr) or ".." in sr.split("/") or sr == ".":
+    raise SystemExit("studio_root %r looks wrong: stop and check it" % sr)
+for name, value in (("sr", sr), ("wt_key", key(top)), ("wt_backup", os.path.join(backups, key(top))),
+                    ("clone_backup", os.path.join(backups, key(common)))):
+    print("%s=%s" % (name, shlex.quote(value)))
+EOF
+)"
+printf 'studio_root:   %s\nthis worktree: %s\nthis clone:    %s\n' "$sr" "$wt_backup" "$clone_backup"
+```
+
+`this worktree`는 `studio-backup/<repo_key>/`(git이 무시하는 영상의 백업, 내부 오버레이의 해시),
+`this clone`은 `studio-backup/<common_key>/`(여기에 Studio가 설치되었다는 마커)입니다.
+
+## 0. 남길 것 남기기(워크트리마다, 1단계 전에)
+
+`studio_root` 폴더 전체(커밋한 영상과 git이 무시하는 영상, `local/videos`, `out/`의 렌더, `copy/`의 글), 두 백업 폴더,
+`.claude/studio/local/config.internal.json`(직접 입력한 내부 오버레이)을 `~/studio-kept/<repo_key>/`에 복사합니다.
+이 폴더는 아직 없어야 합니다. 다른 곳에 남기려면 `$HOME/studio-kept`를 레포 밖의 다른 경로로 바꿉니다.
+
+<!-- run: keep -->
+```sh
+keep="$HOME/studio-kept/${wt_key:?run the folders block first}"
+mkdir -p "$HOME/studio-kept" && mkdir "$keep" &&
+  { [ ! -d "$sr" ] || cp -Rp "$sr" "$keep/studio-root"; } &&
+  { [ ! -d "$wt_backup" ] || cp -Rp "$wt_backup" "$keep/studio-backup-worktree"; } &&
+  { [ ! -d "$clone_backup" ] || cp -Rp "$clone_backup" "$keep/studio-backup-clone"; } &&
+  { [ ! -f .claude/studio/local/config.internal.json ] ||
+    cp -p .claude/studio/local/config.internal.json "$keep/config.internal.json"; } &&
+  echo "kept in $keep"
+```
+
+이 워크트리에서 Studio가 쓰는 훅 관리자(2단계와 3단계에서 필요. 하네스가 없는 브랜치에는 `hooks.py`가 없음):
+
+<!-- run: hook-status -->
+```sh
+python3 .claude/studio/scripts/hooks.py status
+```
+
+## 1. 플러그인 제거
+
+Claude Code에서, 레포 안에서:
+
+```text
+/plugin uninstall studio-plugin@deku-claude-plugins --scope project
+```
+
+설치할 때 쓴 범위를 씁니다(대신 `--scope local`이나 `--scope user`). `.claude/settings.json`의 `enabledPlugins`에
+`"studio-plugin@deku-claude-plugins"`가 아직 있으면 JSON이 올바르게 남도록 그 항목을 지웁니다. 3단계가 그 변경을
+커밋합니다. 다음 단계 전에 Claude Code를 종료합니다.
+
+## 2. 훅(clone마다 한 번)
+
+Studio의 pre-commit shim을 빼고 그것이 이어 실행하던 훅을 되돌립니다(plain git의 경우. shim이 없으면 아무것도 하지
+않고, 추적되는 훅 파일 — husky, 레포 안의 훅 폴더 — 은 건드리지 않음). `pre-commit.legacy`도 확인합니다(pre-commit 프레임워크를 Studio 뒤에 다시 설치하면 거기 있던 훅을 이 이름으로
+옮김). 그리고 Studio의 runner 폴더(`<git common dir>/studio/`, 사용한 승인 답의 기록도 여기)와 `info/exclude`의
+Studio 블록을 지웁니다. `pre-commit.studio-chained`가 남았다고 출력하면 `pre-commit`이 Studio의 shim이 아니라는
+뜻이고, 그 파일은 예전 훅입니다. 손으로 되돌립니다.
+
+<!-- run: clone -->
+```sh
+cd "$(git rev-parse --show-toplevel)"
+(
+  set -e
+  h=$(git rev-parse --git-path hooks)
+  shim() { grep -qs "Studio's pre-commit shim" "$1" && ! git ls-files --error-unmatch -- "$1" >/dev/null 2>&1; }
+  if shim "$h/pre-commit"; then
+    rm "$h/pre-commit"
+    [ ! -e "$h/pre-commit.studio-chained" ] || mv "$h/pre-commit.studio-chained" "$h/pre-commit"
+  fi
+  if shim "$h/pre-commit.legacy"; then
+    rm "$h/pre-commit.legacy"
+    if grep -qs 'File generated by pre-commit' "$h/pre-commit.studio-chained"; then
+      rm "$h/pre-commit.studio-chained"
+    elif [ -e "$h/pre-commit.studio-chained" ]; then
+      mv "$h/pre-commit.studio-chained" "$h/pre-commit.legacy"
+    fi
+  fi
+  [ ! -e "$h/pre-commit.studio-chained" ] || echo "left: $h/pre-commit.studio-chained (your earlier hook; put it back by hand)"
+  c=$(git rev-parse --path-format=absolute --git-common-dir)
+  rm -rf "$c/studio"
+  if [ -f "$c/info/exclude" ]; then
+    if [ "$(grep -c '^# >>> studio ' "$c/info/exclude")" != "$(grep -c '^# <<< studio <<<' "$c/info/exclude")" ]; then
+      echo "info/exclude: Studio's block markers are unpaired: fix them by hand, then run this again" >&2; exit 1
+    fi
+    sed '/^# >>> studio /,/^# <<< studio <<</d' "$c/info/exclude" > "$c/info/exclude.studio-tmp"
+    mv "$c/info/exclude.studio-tmp" "$c/info/exclude"
+  fi
+)
+```
+
+`hooks.py status`가 **global-path**(레포 밖의 `core.hooksPath`)라고 했다면, 그 훅에 Studio의 줄을 직접 넣었을
+것입니다. 3단계 전에 바꿉니다: `sh "$(git rev-parse --git-common-dir)/studio/pre-commit" || exit $?`. 다른 레포가 아직 Studio를 쓰면
+`if [ -f "$(git rev-parse --git-common-dir)/studio/pre-commit" ]; then sh "$(git rev-parse --git-common-dir)/studio/pre-commit" || exit $?; fi`로
+바꾸고, 아니면 지웁니다.
+
+## 3. 레포 안의 파일(워크트리마다)
+
+`lefthook-local.yml`의 Studio 블록(lefthook의 경우. 다른 내용이 없으면 파일도 지움), Studio의 추적 파일과 git이 무시하는
+파일(`.claude/studio/`, `.claude/agents/std-*.md`, `studio_root` 폴더), `.gitignore`의 Studio 블록(빈 `.gitignore`는
+지움)을 지우고, 1단계에서 바꿨다면 `.claude/settings.json`을 스테이지한 뒤 커밋합니다. 2단계를 먼저 합니다. Studio의
+훅이 이 커밋을 거부하기 때문입니다. 스테이지된 변경이 없는 상태에서 시작합니다(있으면 블록이 거부하므로 커밋에는
+Studio를 지운 것만 들어감). Studio 블록의 표시 줄이 짝이 맞지 않으면 아무것도 바꾸지 않고 멈춥니다.
+
+<!-- run: worktree -->
+```sh
+cd "$(git rev-parse --show-toplevel)"
+(
+  set -e
+  : "${sr:?run the folders block first}"
+  git diff --cached --quiet || { echo "Studio removal: changes are already staged: commit or unstage them first" >&2; exit 1; }
+  unpaired() { [ -f "$1" ] && [ "$(grep -c "$2" "$1")" != "$(grep -c "$3" "$1")" ]; }
+  if unpaired lefthook-local.yml '^# >>> studio:hook >>>' '^# <<< studio:hook <<<' ||
+      unpaired .gitignore '^# >>> studio ' '^# <<< studio <<<'; then
+    echo "Studio's block markers are unpaired in lefthook-local.yml or .gitignore: fix them by hand, then run this again" >&2
+    exit 1
+  fi
+  if [ -f lefthook-local.yml ]; then
+    sed '/^# >>> studio:hook >>>/,/^# <<< studio:hook <<</d' lefthook-local.yml > lefthook-local.yml.studio-tmp
+    mv lefthook-local.yml.studio-tmp lefthook-local.yml
+    [ -n "$(tr -d '[:space:]' < lefthook-local.yml)" ] || rm lefthook-local.yml
+  fi
+  git rm -r -q -f --ignore-unmatch .claude/studio '.claude/agents/std-*.md' "$sr"
+  rm -rf .claude/studio "${sr:?run the folders block first}"
+  if [ -f .gitignore ]; then
+    sed '/^# >>> studio /,/^# <<< studio <<</d' .gitignore > .gitignore.studio-tmp
+    mv .gitignore.studio-tmp .gitignore
+    if [ -n "$(tr -d '[:space:]' < .gitignore)" ]; then git add .gitignore; else git rm -q -f --ignore-unmatch .gitignore; rm -f .gitignore; fi
+  fi
+  git diff --quiet -- .claude/settings.json || git add .claude/settings.json
+  git commit -q -m "Remove Studio"
+)
+```
+
+하네스가 없는 브랜치에서는 커밋할 것이 없습니다(git이 알려 줌).
+
+`hooks.py status`가 **husky**나 **custom-tracked**라고 했다면, 추적되는 `.husky/pre-commit`(또는 훅 폴더의
+`pre-commit`)에 `# >>> studio:hook >>>`과 `# <<< studio:hook <<<` 사이의 Studio 블록이 있습니다. 이 블록은 Studio가
+설정되지 않은 곳에서는 아무것도 실행하지 않습니다. 모든 브랜치에서 Studio가 사라졌을 때만 지웁니다.
+
+## 4. 레포 밖의 폴더
+
+워크트리마다, 3단계 뒤에:
+
+<!-- run: backups-worktree -->
+```sh
+rm -rf "${wt_backup:?run the folders block first}"
+```
+
+clone마다, 마지막 워크트리 뒤에:
+
+<!-- run: backups-clone -->
+```sh
+rm -rf "${clone_backup:?run the folders block first}"
+```
+
+이 기기에서 Studio를 완전히 지울 때(모든 레포 뒤에): 샌드박스 파일과 빈 백업 폴더도 지웁니다.
+
+```sh
+rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/studio-sandbox.json"
+rmdir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/studio-backup"
+```

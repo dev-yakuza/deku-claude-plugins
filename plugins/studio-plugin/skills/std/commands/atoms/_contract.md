@@ -1,7 +1,7 @@
 # Contract (shared rules)
 
-Status: contract only (M0). The handoff details (prompts, model tiers, loops, signals) are
-written with M1.
+Status: the shared contract. The handoff details (prompts, model tiers, loops, signals) are in each command's
+document.
 
 ## A. Roles
 
@@ -68,7 +68,7 @@ Each script has its own table; a code means only what its script's table says.
 | 0 | passed · staged (`--stage` prints the question label `커밋 <tree12>`) · range clean · hook installed/valid | continue (after `--stage`: ask the person with that label, then `git commit`) |
 | 1 | refused: a check failed (local/ path, mixed commit, outside the allow-list, not what `--stage` prepared, video approvals, ignore blocks) · hook cannot be installed or is not valid | fix what the message says, stage again, ask again |
 | 2 | usage or setup (not a repository, no harness, config unreadable, git failed, Python < 3.9) | a Studio defect or setup: stop and report |
-| 3 | not supported yet (commit kind `actor` M3b; nothing Studio's to finish in a merge/rebase) | stop and report |
+| 3 | not supported yet (commit kind `actor`; nothing Studio's to finish in a merge/rebase) | stop and report |
 | 4 | a person decides (internal overlay missing or changed · proxy approvals · a hook block proposed for a team-shared file) | ask the person |
 | 7 | the Studio guard has not run in this Claude Code session | ask the person to enable the Studio plugin; never remove the session markers |
 
@@ -93,7 +93,7 @@ Each script has its own table; a code means only what its script's table says.
 | 1 | failed: the listed problems | script: the writer again · verify: `state.py loop <video> verify`, then fix and check again |
 | 2 | usage or setup (no harness, no video, no script, no s2v path) | fix the command, or stop and report |
 
-**`check_assets.py --actors`** · **`check_tts.py`** · **`audition.py`** (the voice section, M1f)
+**`check_assets.py --actors`** · **`check_tts.py`** · **`audition.py`** (the voice section)
 
 | Code | Meaning | Producer |
 |---|---|---|
@@ -101,12 +101,12 @@ Each script has its own table; a code means only what its script's table says.
 | 1 | failed: the listed problems (`check_tts`: a `retry:` line names the lines to synthesize again) | fix, retry, check again |
 | 2 | usage or setup (no harness, video, script or s2v path; `check_assets` without `--actors`; `audition.py` without ffmpeg) | fix the command, or stop and report |
 
-**`validate_copy.py`** (M1h)
+**`validate_copy.py`**
 
 | Code | Meaning | Producer |
 |---|---|---|
 | 0 | passed (the check result is written) | `stage-done copy` |
-| 1 | failed: the listed problems (an unchecked platform file: the person checks it — U-M1h) | fix the copy, or ask the person |
+| 1 | failed: the listed problems (an unchecked platform file: the person checks it) | fix the copy, or ask the person |
 | 2 | usage or setup (no harness, video or script; the platform is not in the brief) | fix the command, or stop and report |
 
 **`lock.py` and s2v**: 73 / 74 = machine / character busy → `held:lock` / `held:actor`; otherwise the child's code.

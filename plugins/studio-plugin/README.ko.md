@@ -1,8 +1,5 @@
 # Studio 플러그인
 
-> **개발 중(0.0.x).** Studio는 아직 마켓플레이스에 없고, 커맨드는 "아직 구현되지 않음"으로
-> 답합니다. 실제 레포에서 쓰지 마세요.
-
 Claude Code용 **레포별 영상 제작 조직**입니다. Studio는 레포에 제작 하네스를 설치하고, 그 레포에
 특화된 역할 에이전트 팀이 레포에 이미 있는 글(블로그 · 문서 · 앱 소개 페이지)을
 [script2video](https://github.com/dev-yakuza/script2video)로 내레이션 영상으로 만들고, 고른
@@ -19,13 +16,68 @@ Claude Code용 **레포별 영상 제작 조직**입니다. Studio는 레포에 
 - **생성만 하고 게시하지 않습니다** — 올리는 것은 사람입니다.
 - **렌더링은 script2video가** — Studio는 계획 · 검사 · 질문 · 커밋을 맡습니다.
 
-## 로컬에서 써 보기
+## 요구 사항
 
-```bash
-claude --plugin-dir plugins/studio-plugin
+- **Claude Code**: Claude Code 2.1.304, 2.1.308, 2.1.311에서 테스트했습니다(2.1.304 미만이나 2.1.311 초과이면 `/std init`이 경고).
+- **git**, 그리고 훅이 보는 `PATH`에 **python3** 3.9 이상.
+- **script2video** 0.13.0 이상과 그 요구 사항(Node 22+, Yarn 4, uv, ffmpeg, `yarn build`, 모델):
+  [script2video README](https://github.com/dev-yakuza/script2video#readme)를 보세요.
+- **가드는 모든 호출에서 실행됩니다.** Studio가 활성화된 프로젝트의 모든 세션에서(`/std init` 전에도) Studio 가드 훅이
+  Bash, Write, Edit, MultiEdit, NotebookEdit, WebFetch, WebSearch, MCP 도구 호출을 하나하나 검사합니다.
+  `onFailure: block`으로 실행되므로 훅의 오류나 시간 초과는 그 호출을 막고(측정함), `python3`가 없을 때도 막을 것으로
+  봅니다(측정하지 않음). `python3`가 pyenv나 asdf 방식의 shim이면 가드 호출마다 느려지고 0.0.28의 가드 자체 허용이
+  꺼집니다([docs/guard-limits.ko.md](docs/guard-limits.ko.md)). Command Line Tools가 없는 macOS에서는
+  `/usr/bin/python3`가 훅의 20초 시간 제한까지 기다릴 수 있습니다.
+- **호출당 비용**(기기 한 대, Apple silicon Mac): 하네스가 없는 레포에서 Bash `git status`에 대한 가드는 약 80 ms(p50,
+  Python 3.9.9와 3.15.2), macOS의 `/usr/bin/python3` 3.9.6으로는 약 155 ms 걸렸습니다
+  (`tests/py/test_guard_entry.py`, `PerfNoHarness`).
+
+## 설치
+
+Claude Code에서:
+
+```text
+/plugin marketplace add dev-yakuza/deku-claude-plugins
+/plugin install studio-plugin@deku-claude-plugins --scope project
 ```
 
-그다음 `/std help`. script2video 0.13.0 이상이 필요합니다(나중에 `/std init`이 설정).
+Claude Code 문서에 따르면 project 범위는 프로젝트의 `.claude/settings.json`(커밋되는 파일)의 `enabledPlugins`에
+`"studio-plugin@deku-claude-plugins": true`를 씁니다. 레포에서 일하는 모든 사람에게 Studio와 그 가드가 켜집니다. 이
+레포에서 나에게만 켜려면 `--scope local`(`.claude/settings.local.json`, 커밋하지 않음)을 씁니다.
+
+이 레포의 체크아웃에서: `claude --plugin-dir plugins/studio-plugin`.
+
+## 처음 실행
+
+1. 레포의 최상위 폴더에서 Claude Code를 시작합니다.
+2. `/std init` — 이 기기의 script2video 체크아웃을 묻고, 레포를 읽고, 몇 가지를 물은 뒤 계획을 보여 줍니다. 확인하면
+   그것이 첫 하네스 커밋입니다.
+3. `/std make <source> --kind <kind>` — 글 하나에서 영상 하나(`/std help`가 커맨드를 보여 줌).
+4. 검수 ① 대본 ② 오디션 ③ 정지 화면 ④ 최종(④a 영상 · ④b 배포용 글), 그다음 영상 커밋.
+
+승인 질문: 제시된 선택지 중 하나를 고릅니다. AskUserQuestion 허용 규칙을 더하지 말고, Studio를 bypass 권한 모드로
+실행하지 마세요.
+
+## 새 clone이나 워크트리
+
+하네스는 커밋되어 있지만, 이 기기의 s2v 경로와 pre-commit 훅은 그렇지 않습니다. 새 clone이나 워크트리에서 한 번:
+
+```text
+/std config s2v.path <이 기기의 script2video 체크아웃 절대 경로>
+```
+
+그리고 터미널에서, 그 최상위 폴더에서:
+
+```bash
+python3 .claude/studio/scripts/hooks.py install
+```
+
+둘 중 하나가 없으면 `/std status`가 알려 줍니다.
+
+## Studio 지우기
+
+정확한 명령과 함께 단계별로(먼저 영상과 백업 남기기, 모든 워크트리, 훅, 레포 밖의 폴더):
+[docs/removing.ko.md](docs/removing.ko.md).
 
 ## 참고
 
@@ -34,7 +86,10 @@ claude --plugin-dir plugins/studio-plugin
 - **승인 답은 레포 하나에서 한 번만** 쓰입니다. 같은 레포의 워크트리는 그 기록을 나누지만, 따로 받은 clone(별도
   `git clone`)은 나누지 않습니다. 영상의 답은 그 영상과 해시를 담고 있어 다른 clone에 맞는 일이 드물고, 영상이 없는
   답(설정 · 갱신)만 남는 경우입니다. 0.0.9 이하가 워크트리마다 남긴 기록은 무시됩니다.
-- **0.0.x 샌드박스를 손으로 옮기기**(`/std config`가 생기기 전까지): `.claude/studio/config.json`의 `"s2v"` 아래
+
+## 버전 노트
+
+- **초기 샌드박스(스크립트 8 이하)를 손으로 옮기기**: `.claude/studio/config.json`의 `"s2v"` 아래
   `"path"`를 지우고, `.claude/studio/local/machine.json`(링크가 아닌 실제 폴더)에
   `{"schema": 1, "s2v": {"path": "<절대 경로>"}}`를 씁니다.
 - **0.0.23으로 올릴 때**: `/std update`가 Studio의 ignore 블록(`.gitignore`와 `info/exclude`)을 새로 써서 출처 초안과
@@ -125,6 +180,8 @@ claude --plugin-dir plugins/studio-plugin
   고릅니다. `"`나 `\`가 들어간 내레이터 스타일은 이제 `/std config` 내레이터에서 거부되니 거기서 바꿉니다. 아직 대본 단계에
   있는 영상은 대본에 cast 블록이 필요합니다(대본 검사가 알려 줌). 블록 없이 ①을 승인받은 영상은 대본 단계로 돌아갑니다
   (`/std script <video>` 후 검증과 ①을 다시). 캐스트를 지난 영상은 이미 있는 블록을 그대로 씁니다.
+- **0.1.0**: 마켓플레이스 등록. 0.0.28에서 올릴 때는 `/std update`가 필요 없습니다(스크립트 버전은
+  그대로 25).
 
 ## 라이선스
 

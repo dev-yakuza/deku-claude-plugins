@@ -1,6 +1,6 @@
 # STATUS
 
-Where every video stands, and what keeps Studio from working as designed here (M1i).
+Where every video stands, and what keeps Studio from working as designed here.
 
 Rules: one command per Bash call, literal values. Shared rules: `atoms/_contract.md`.
 Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only

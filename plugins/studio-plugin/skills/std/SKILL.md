@@ -1,6 +1,6 @@
 ---
 name: std
-description: "Studio installs a video production harness into a repository and runs a per-repo production organization (producer, source analyst, content strategist, script writer, fact-checker, visual director, distributor, plus conditional casting director, actor designer, translator) that turns writing already in the repo into narrated videos with script2video, checks every fact against the source, takes each video through four human review gates (script, audition, stills, final) and drafts platform copy. In development: commands answer that they are not implemented yet."
+description: "Studio installs a video production harness into a repository and runs a per-repo production organization (producer, source analyst, content strategist, script writer, fact-checker, visual director, distributor, plus conditional casting director, actor designer, translator) that turns writing already in the repo into narrated videos with script2video, checks every fact against the source, takes each video through four human review gates (script, audition, stills, final) and drafts platform copy. Commands not built yet say so."
 argument-hint: "<command> [video-id|args]"
 user-invocable: true
 allowed-tools:
@@ -25,9 +25,8 @@ never a name built from anything else) and execute the document it prints. Pass 
 - Words in the request that ask to stop before a step (`make … — stop and ask before tts and render`) are the person's
   pause requests: `make` passes them to `state.py begin` as `--ask-before` (`doc make`).
 
-**Development status (0.0.x)**: Studio is being built milestone by milestone. A command whose
-document says "Not implemented yet" must do nothing else: tell the user which milestone brings it,
-then show `help`. Never improvise the command from the plan.
+**Commands not built yet**: a command whose document says "Not implemented yet" must do nothing else: tell the user
+it arrives in a later version, then show `help`. Never improvise the command.
 
 **Language**: these instructions are in English; everything you say to the user is in the
 repo's language (`language` in `.claude/studio/config.json`; before `init`, the language the

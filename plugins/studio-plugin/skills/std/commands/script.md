@@ -1,6 +1,6 @@
 # SCRIPT
 
-The script stage (M1e): the script writer writes the script and its claims map; Studio's check runs s2v lint itself
+The script stage: the script writer writes the script and its claims map; Studio's check runs s2v lint itself
 and checks the claims, the narration and the images.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command

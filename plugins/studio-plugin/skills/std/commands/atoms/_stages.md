@@ -1,7 +1,7 @@
 # Stage spine
 
-Status: contract only (M0). Entry checks, hashes and routing are implemented by `state.py`
-(M0b); the stage procedures are written with M1.
+Status: the stage spine. Entry checks, hashes and routing are implemented by `state.py`; the stage procedures are in
+each stage's command document.
 
 ```
 source → brief → script → verify ─[①]→ cast → tts → audition ─[②]→ board → visual-check ─[③]→ render ─[④a]→ copy ─[④b]→ commit
@@ -34,7 +34,7 @@ deterministic checks passed). That records the stage's completion against its se
 hashes, so the next stage of the section (up to the gate) may be entered even while the gate's
 approval is stale; a later change of those hashes makes the record stale again. `stage-done`
 records no person's decision (the guard treats it as evidence-free); gates are approved only with
-`state.py approve` (M0b-2).
+`state.py approve`.
 
 **A person gate**: `state.py shown <video> <gate> [--output o | --platform p]` for every scope as the artifact
 is shown (③: `--begin` right before the snapshot and `--end` right after it) → the last `shown`

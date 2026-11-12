@@ -1,6 +1,6 @@
 # RESUME
 
-Continue a video after a stop (M1i). The video id is the first argument of `/std resume`.
+Continue a video after a stop. The video id is the first argument of `/std resume`.
 
 Rules: one command per Bash call, literal values. Shared rules: `atoms/_contract.md`.
 Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only

@@ -1,6 +1,6 @@
 # SOURCE
 
-The source stage of a video that was begun (M1d): pin the writing, resolve its images, have the source analyst list
+The source stage of a video that was begun: pin the writing, resolve its images, have the source analyst list
 its claims, readings and images, check what a public video may use, and record it.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command

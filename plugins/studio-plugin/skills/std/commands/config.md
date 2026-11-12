@@ -1,6 +1,6 @@
 # CONFIG
 
-Show or change Studio's settings (M1c). Protected settings, this machine's s2v path, the narrator and the internal
+Show or change Studio's settings. Protected settings, this machine's s2v path, the narrator and the internal
 overlay change only with the person's answer; every change to a committed file then goes through a harness commit.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a
@@ -24,7 +24,7 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
    "그만두기". Then, alone as your next tool call, in the same turn, right after the answer — do not wait for the person;
    never in the same assistant message as the question — run
    `python3 <<SKILL_DIR>>/scripts/setup.py config set <key> <value> --expect <h12>`.
-`studio_root` cannot be changed here (moving Studio's folder is not part of M1).
+`studio_root` cannot be changed here (moving Studio's folder comes in a later version).
 
 Images of public posts often live outside the writing's folder (`public/blog-images/**`): put that folder in
 `visibility.public` too, or its images are `unknown` and need a licence at board. Never suggest removing such a glob.

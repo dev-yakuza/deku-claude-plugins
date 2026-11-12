@@ -1,6 +1,6 @@
 # Cast and actors
 
-Status: contract only (M0). Casting arrives with M3a, actor making with M3b, acting with M3c.
+Status: contract only. Casting, actor making and acting arrive in later versions.
 
 - **Casting** (per video) and **actor making** (new actors in the roster) are separate.
   Actor making runs outside `make` (`/std cast add|build`) and commits on its own.

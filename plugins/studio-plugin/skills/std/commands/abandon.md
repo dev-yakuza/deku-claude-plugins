@@ -1,6 +1,6 @@
 # ABANDON
 
-Stop a video, or one of its languages (M1i). The video id is the first argument of `/std abandon`.
+Stop a video, or one of its languages. The video id is the first argument of `/std abandon`.
 
 Rules: one command per Bash call, literal values. Shared rules: `atoms/_contract.md`.
 Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only

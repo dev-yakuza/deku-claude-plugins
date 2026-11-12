@@ -1,6 +1,6 @@
 # COPY
 
-The copy stage and gate ④b (M1h), per platform (`youtube` in M1): the distributor writes the title, description
+The copy stage and gate ④b, per platform (`youtube` for now): the distributor writes the title, description
 and hashtags, Studio checks them against the platform rules, the fact-checker checks the copy against the source, and
 the person approves it.
 
@@ -42,7 +42,7 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
    `python3 .claude/studio/scripts/state.py approve <video> 4b --expect <h12> --platform youtube`.
 3. When the person edits the copy themselves: run steps 3–6 of copy again, then show and ask again.
 
-After ④b the video is ready for its commit (M1i).
+After ④b the video is ready for its commit.
 
 <!-- studio:guard-refusal -->
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way

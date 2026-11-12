@@ -200,3 +200,33 @@ class PerfRealistic(JudgeCase):
         self.assertTrue(os.path.isdir(os.path.join(self.tmp, "plugin-data", "pycache")))
         found = [d for d, _s, _f in os.walk(helpers.PLUGIN) if d.endswith("__pycache__")]
         self.assertEqual(found, [])
+
+
+class PerfNoHarness(helpers.StudioTestCase):
+    """The cost the README states (m1k-plan item 6): the guard process on a Bash `git status` in a git repository
+    without a harness — what every Bash call pays in a project where Studio is enabled but not set up. Temporary
+    STUDIO_HOME and CLAUDE_CONFIG_DIR (StudioTestCase), CLAUDE_PLUGIN_DATA set (the bytecode cache warm after the first
+    run, which is dropped), then 12 runs. The interpreter is the test's own (sys.executable), not the python3 the hooks
+    find on PATH: a slower interpreter or a pyenv/asdf shim adds its own start-up. Target p50 300 ms; the test fails
+    above 900 ms (3×) and only prints the max. The numbers it printed on one machine are the README's (Cost per call)."""
+
+    RUNS = 12
+
+    def test_git_status_without_a_harness(self):
+        repo = helpers.make_repo(self.tmp, name="plain", harness=False)
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_DATA"] = os.path.join(self.tmp, "plugin-data")
+        hook = json.dumps(helpers.hook_input("Bash", {"command": "git status"}, repo))
+        times = []
+        for i in range(self.RUNS + 1):
+            t = time.perf_counter()
+            r = subprocess.run([sys.executable, GUARD], input=hook, capture_output=True, text=True, env=env,
+                               timeout=60)
+            if i:
+                times.append(time.perf_counter() - t)
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        times.sort()
+        p50 = times[len(times) // 2]
+        sys.stderr.write("\n[perf] %s: guard.py on `git status` without a harness: p50 %.0f ms, max %.0f ms (%d runs)\n"
+                         % (sys.version.split()[0], p50 * 1000, times[-1] * 1000, len(times)))
+        self.assertLess(p50, 0.9)

@@ -1,6 +1,6 @@
 # BOARD
 
-The board stage, visual-check and gate ③ (M1g), per output (`youtube` in M1): the visual director decides how the
+The board stage, visual-check and gate ③, per output (`youtube` for now): the visual director decides how the
 approved script looks, the person approves each picture's credits, Studio checks every picture, s2v takes stills, and
 the person approves them.
 

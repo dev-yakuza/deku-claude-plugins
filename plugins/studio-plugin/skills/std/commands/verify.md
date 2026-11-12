@@ -1,6 +1,6 @@
 # VERIFY
 
-The verify stage and gate ① (M1e): the fact-checker judges every sentence against the source copy, Studio's check
+The verify stage and gate ①: the fact-checker judges every sentence against the source copy, Studio's check
 turns its draft into `verify.json` and `verify.md`, an external auditor reads the result, and the person approves the
 script.
 

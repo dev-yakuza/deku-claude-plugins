@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'plugins/sdd-plugin/.claude-plugin/plugin.json'
+      - 'plugins/studio-plugin/.claude-plugin/plugin.json'
       - '.claude-plugin/marketplace.json'
   push:
     branches:
@@ -26,6 +27,18 @@ jobs:
           echo "marketplace.json version: $MARKET_V"
           if [ "$PLUGIN_V" != "$MARKET_V" ]; then
             echo "::error::Version mismatch — plugin.json ($PLUGIN_V) and marketplace.json ($MARKET_V) must match. See CLAUDE.md."
+            exit 1
+          fi
+          echo "Versions match: $PLUGIN_V"
+
+      - name: Check studio-plugin's plugin.json and marketplace.json versions match
+        run: |
+          PLUGIN_V=$(jq -r .version plugins/studio-plugin/.claude-plugin/plugin.json)
+          MARKET_V=$(jq -r '.plugins[] | select(.name=="studio-plugin") | .version' .claude-plugin/marketplace.json)
+          echo "plugin.json version:      $PLUGIN_V"
+          echo "marketplace.json version: $MARKET_V"
+          if [ "$PLUGIN_V" != "$MARKET_V" ]; then
+            echo "::error::Version mismatch — studio-plugin's plugin.json ($PLUGIN_V) and marketplace.json ($MARKET_V) must match."
             exit 1
           fi
           echo "Versions match: $PLUGIN_V"

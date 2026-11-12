@@ -1,8 +1,5 @@
 # Studio Plugin
 
-> **In development (0.0.x).** Studio is not in the marketplace yet and its commands answer
-> "not implemented yet". Do not use it on a real repository.
-
 A **per-repo video production organization** for Claude Code. Studio installs a production
 harness into a repository; a team of role agents specialized to that repo turns writing that
 already exists there (blog posts, docs, app pages) into narrated videos with
@@ -20,13 +17,70 @@ with each video on the platforms you choose.
 - **Generate, never publish** — Studio makes the files; a person uploads them.
 - **script2video does the rendering** — Studio plans, checks, asks and commits.
 
-## Try it locally
+## Requirements
 
-```bash
-claude --plugin-dir plugins/studio-plugin
+- **Claude Code**, tested on Claude Code 2.1.304, 2.1.308 and 2.1.311 (`/std init` warns below 2.1.304 or above
+  2.1.311).
+- **git**, and **python3** 3.9 or newer on the `PATH` the hooks see.
+- **script2video** 0.13.0 or later with its own requirements (Node 22+, Yarn 4, uv, ffmpeg, `yarn build`, the models):
+  see [its README](https://github.com/dev-yakuza/script2video#readme).
+- **The guard runs on every call.** In every session of a project where Studio is enabled — also before `/std init` —
+  Studio's guard hook checks each Bash, Write, Edit, MultiEdit, NotebookEdit, WebFetch, WebSearch and MCP tool call.
+  It runs with `onFailure: block`: a hook error or timeout blocks those calls (measured), and a missing `python3` is
+  expected to block them too (not measured). A pyenv- or asdf-style shim as `python3` makes each guard call slower and
+  turns off the guard's own allows of 0.0.28 ([docs/guard-limits.md](docs/guard-limits.md)). On macOS without the
+  Command Line Tools, `/usr/bin/python3` may wait until the hook's 20 s timeout.
+- **Cost per call** (one machine, an Apple silicon Mac): the guard on a Bash `git status` in a repository without a harness
+  took about 80 ms (p50, Python 3.9.9 and 3.15.2) and about 155 ms with macOS's `/usr/bin/python3` 3.9.6
+  (`tests/py/test_guard_entry.py`, `PerfNoHarness`).
+
+## Install
+
+In Claude Code:
+
+```text
+/plugin marketplace add dev-yakuza/deku-claude-plugins
+/plugin install studio-plugin@deku-claude-plugins --scope project
 ```
 
-Then `/std help`. Requires script2video 0.13.0 or later (set up later by `/std init`).
+Claude Code documents that project scope writes `"studio-plugin@deku-claude-plugins": true` under `enabledPlugins` in
+the project's `.claude/settings.json`, which is committed: everyone who works in the repository gets Studio and its
+guard. To enable it only for yourself in this repository, use `--scope local` (`.claude/settings.local.json`, not
+committed).
+
+From a checkout of this repository: `claude --plugin-dir plugins/studio-plugin`.
+
+## First run
+
+1. Start Claude Code in the repository's top folder.
+2. `/std init` — asks for this machine's script2video checkout, reads the repository, asks a few questions and shows
+   the plan; your confirmation is the first harness commit.
+3. `/std make <source> --kind <kind>` — one video from one piece of writing (`/std help` lists the commands).
+4. The review gates ① script ② audition ③ stills ④ final (④a video · ④b copy), then the video commit.
+
+Approval questions: choose one of the options offered. Do not add an allow rule for AskUserQuestion and do not run
+Studio in a bypass permission mode.
+
+## New clone or worktree
+
+The harness is committed; this machine's s2v path and the pre-commit hook are not. In a new clone or worktree, once:
+
+```text
+/std config s2v.path <absolute path of this machine's script2video checkout>
+```
+
+and in a terminal, from its top folder:
+
+```bash
+python3 .claude/studio/scripts/hooks.py install
+```
+
+`/std status` says when either is missing.
+
+## Removing Studio
+
+The steps, with the exact commands (keep your videos and backups first, every worktree, the hook, the folders outside
+the repository): [docs/removing.md](docs/removing.md).
 
 ## Notes
 
@@ -36,7 +90,10 @@ Then `/std help`. Requires script2video 0.13.0 or later (set up later by `/std i
   clones (another `git clone`) do not. A video's answer still names that video and its hash, so it rarely fits
   another clone; answers without a video (settings, updates) are the remaining case. Records kept per worktree by
   0.0.9 and earlier are ignored.
-- **Upgrading a 0.0.x sandbox by hand** (until `/std config` arrives): delete `"path"` under `"s2v"` in
+
+## Version notes
+
+- **Upgrading an early sandbox (scripts ≤ 8) by hand**: delete `"path"` under `"s2v"` in
   `.claude/studio/config.json` and write `{"schema": 1, "s2v": {"path": "<absolute path>"}}` to
   `.claude/studio/local/machine.json` (a real folder, not a link).
 - **Upgrading to 0.0.23**: `/std update` refreshes Studio's ignore block (`.gitignore` and `info/exclude`) so the
@@ -140,6 +197,7 @@ Then `/std help`. Requires script2video 0.13.0 or later (set up later by `/std i
   `source_label`). A narrator style with `"` or `\` is refused by `/std config` narrator now; change it there. A video
   still at the script stage needs the cast block in its script (the script check says so); one approved at ① without
   it goes back to the script stage (`/std script <video>`, then verify and ① again); videos past cast keep theirs.
+- **0.1.0**: marketplace registration. Upgrading from 0.0.28 needs no `/std update` (the scripts' version stays 25).
 
 ## License
 
