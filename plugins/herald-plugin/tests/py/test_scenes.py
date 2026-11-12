@@ -126,7 +126,8 @@ class SceneCase(ImageCase):
 class KindsTests(SceneCase):
     def test_codes(self):
         k = images.kinds(self.root, self.cfg, TID)
-        self.assertEqual(k["scene"], {"ok": True, "max": 2, "sizes": ["landscape", "square", "portrait"], "why": None})
+        self.assertEqual({x: v for x, v in k["scene"].items() if x not in ("stand_in", "decorative")},  # 0.21 parts
+                         {"ok": True, "max": 2, "sizes": ["landscape", "square", "portrait"], "why": None})
         self.assertTrue(k["diagram"]["ok"] and k["external"]["ok"])  # 0.17 kinds as they were
         gen = [c for c in self.calls() if c[0] == "run"]
         self.assertEqual(len(gen), 1)

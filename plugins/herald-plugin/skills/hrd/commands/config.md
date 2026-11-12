@@ -39,8 +39,26 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
   prompt), `wait_minutes` 5–120 (how long one collect step waits for generation). Scenes also need
   the illustrator, no `translations`, and — on a site that falls back to the first image as its SNS
   card (`fallback_first_image`, assumed without an `og` block) — OG on (`why: og-fallback`).
+  0.21.0 (`atoms/_images.md` §9, design 12): `scenes` may add `"stand_in": false` (stand-ins are
+  **on by default** wherever scenes and external images are both on: an external place on an
+  `external (place|thing)` brief line with no usable photo becomes a generic AI scene labelled
+  "not the actual place"), `"stand_in_per_category": {"<cat>": true|false}` (a category in
+  `gate-rules` `quotation_categories` is off unless named `true`), `"decorative": 0–3` (default 0 —
+  opt-in decorative pictures between sections, within the scene, external and total limits) and
+  `"decorative_per_category": {"<cat>": 0–3}`; `figure.words` may set the stand-in labels
+  `scene_place` / `scene_thing` (1–60 characters, never the same as `words.scene`; defaults: ko
+  "AI 생성 이미지(실제 장소 아님)" / "AI 생성 이미지(실물 아님)", ja "AI生成画像（実在の場所ではありません）" /
+  "AI生成画像（実物ではありません）", en "AI-generated image (not the actual place)" / "AI-generated image
+  (not the actual object)"), and `figure.stand_in` a template of its own (`{ref}`, `{alt}`,
+  `{label}`; default `figure.scene`). A template that hides `{label}` (`hidden`, `sr-only`,
+  `visually-hidden`, `display:none`) is an error. A mistake in these keys turns only stand-ins
+  (`stand_in_errors`) or decorative pictures (`decorative_errors`) off — never the scenes.
+  Changing a stand-in label: ask the human "does this text say it is not the actual place /
+  object?" first.
   Turning one on or changing it reuses init's P1 detection and the P1.5 image questions, then:
-  1. `HRD config-check`: `limner_errors`, `og_errors`, `figure_errors`, `scene_errors` must be
+  1. `HRD config-check`: `limner_errors`, `og_errors`, `figure_errors`, `scene_errors` (and
+     0.21.0's `stand_in_errors`, `decorative_errors`; `HRD image kinds` `scene.stand_in.ok`,
+     `scene.decorative.max`) must be
      empty (each only turns its own kind off — never another command); `HRD image doctor` for
      diagrams and a limner OG; `HRD image og --trial` for OG (a repo generator: also with
      `--category` of each category whose badge looks wrong — e.g. a slug printed as a label — and
@@ -55,7 +73,13 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
      and `sources.md` for sentences that forbid the kind being turned on or name another tool
      ("no external or work images"); show each with its replacement side by side ("external images
      only through Herald `images.json` — limits in `gate-rules.json` `images.external`"); the human
-     approves → change it; declines → do not turn that kind on.
+     approves → change it; declines → do not turn that kind on. The same for stand-ins and
+     decorative pictures: a sentence such as "no decorative images" or "never draw a real place
+     with AI" is shown with a replacement ("decorative pictures only within
+     `images.scenes.decorative`, between sections — no text, real person or work, never first") —
+     declined → `decorative: 0` / `stand_in: false`. "Photos only under free licenses" is a photo
+     rule, no conflict. A decorative picture or stand-in is a scene: the same generation time,
+     human confirmation, AI label and PR prompt.
   3. Say: turning OG on makes every new article carry an OG file, so each gets the `images`
      exclusion — with `autonomy.publish: auto` nothing publishes without consent. Scenes: each one
      takes minutes on this machine (a model load too), a human confirms each in draft (batch:

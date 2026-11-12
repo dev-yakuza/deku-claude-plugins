@@ -218,6 +218,8 @@ def materials(root, cfg, slug, gen_ok, scenes_ok=True):
             for it in (rec.get("items") or {}).values() if scenes_ok else ():
                 if not isinstance(it, dict) or it.get("kind") != "scene" or not it.get("sha"):
                     continue
+                if str(it.get("role") or "").startswith("stand-in:"):
+                    continue  # "not the actual place" never travels to SNS without its caption (12 §2.13)
                 if it.get("sha") != it.get("generated_blob"):  # replaced or adopted by a human: not Herald's
                     continue
                 p = images.cur_path(root, cfg, slug, it.get("file"))

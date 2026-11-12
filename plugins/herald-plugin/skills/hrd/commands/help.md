@@ -2,7 +2,7 @@
 
 Show this in `config.language` (not initialized: the language rule in SKILL.md):
 
-**Setup** — `init [lang]` install the harness · `config [key value]` dials (`config images`: SVG diagrams, external images, scene images and the OG card, with limner) · `update [--check]`
+**Setup** — `init [lang]` install the harness · `config [key value]` dials (`config images`: SVG diagrams, external images, scene images, stand-ins for places with no photo, decorative pictures and the OG card, with limner) · `update [--check]`
 adopt central improvements
 
 **Writing** — `plan [--n N] [--auto]` build the topic queue (`--auto`: the editor-in-chief picks) · `write <id> [--attended] [--ship]` one article to a PR (no questions until the PR; `--attended`: ask at each gate and approve before the PR; `--ship`: publish it right away — no human look: a fresh agent review stands in for the image and screenshot confirmations, and the guard lets the verified merge and the deploy through; an article with a defect still stops at its PR) ·

@@ -704,7 +704,7 @@ def push_targets(argv):
 # options of `HRD image` / `HRD shot` that take a value: a token right after one is that value
 # (`--note=--agent` sets a note — never the flag)
 VALUE_OPTS = ("--topic", "--id", "--source", "--pr", "--reason", "--wait", "--note", "--rev", "--command",
-              "--retake-kind", "--slug", "--path", "--problem")
+              "--retake-kind", "--slug", "--path", "--problem", "--stage", "--place", "--url")
 
 
 def _prefix_of(x, name, least=3):
@@ -738,6 +738,21 @@ def _agent_pass(root, seg):
         return lockmod.agent_ok(root, topic)
     except Exception:  # noqa: BLE001
         return False
+
+
+def _has_flag(seg, name):
+    """The segment carries the flag `name` itself — any prefix argparse takes (3+ characters), never
+    some option's value (`--note=--rerun`, `--note --rerun`) — 12 §R3-m1, §R4-m2."""
+    raw = normalize(seg, split=False)
+    i = 0
+    while i < len(raw):
+        x = raw[i]
+        if _prefix_of(x, name):
+            return True
+        if "=" not in x and any(_prefix_of(x, o) for o in VALUE_OPTS):
+            i += 1  # its value, whatever it looks like
+        i += 1
+    return False
 
 
 MERGE_META = re.compile(r"[;&|<>$`()\n]")
@@ -840,6 +855,18 @@ def check_bash(root, cfg, cmd):
         if "image" in argv and ("confirm" in argv or "reject" in argv) and not _agent_pass(root, seg):
             protect("`HRD image %s` records a human's decision about an external image — only the human decides."
                     % ("confirm" if "confirm" in argv else "reject"))
+        # 1e. 0.21.0 (12 §R3-m1, §R2-m4, §R1-m4): a human reruns brief/research, judges a place's subject,
+        # or lifts a "go without" — unattended and `--ship` refusals are the commands' own (§R4-m2)
+        if "stage" in argv and "pass" in argv and _has_flag(seg, "--rerun"):
+            protect("brief/research를 다시 통과시킵니다. 옛 이미지 자리 기록(사람의 ‘없이 감’·대상 거부)이 새 brief에 없으면 "
+                    "이 글감 전체에서 AI 대체 그림이 꺼집니다. (Re-passing brief/research: if a human's old image-place "
+                    "record has no line in the new brief, AI stand-ins turn off for this whole topic.)")
+        if "image" in argv and "review" in argv and _has_flag(seg, "--human"):
+            protect("`HRD image review --problem subject --human` records a human's judgement that a place is a work, "
+                    "a person, a logo or text — only the human decides.")
+        if "image" in argv and "stand-in" in argv and _has_flag(seg, "--allow"):
+            protect("`HRD image stand-in --allow` lifts a human's \"go without\" (or a review's refusal) for that "
+                    "place — only the human decides. Check its brief line and the refusal note in `HRD image status`.")
         # 2. deploy
         if not ship_deploy and any(contains(canon(strip_noise(argv)), s) for s in sigs):
             if unattended():

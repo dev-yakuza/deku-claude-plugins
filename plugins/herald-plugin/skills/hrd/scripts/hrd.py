@@ -16,13 +16,13 @@ sys.dont_write_bytecode = True  # no __pycache__ in the repo's .claude/herald/sc
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from hrdlib import commits, ghstate, images, integrity, lock, shots, store  # noqa: E402
+from hrdlib import commits, ghstate, images, integrity, lock, shots, stand_in, store  # noqa: E402
 from hrdlib.config import Config  # noqa: E402
 from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # noqa: E402
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.20.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.21.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 
 
 def _vtuple(v):
@@ -282,6 +282,12 @@ def cmd_status(a):
            "images_removed_bytes": shots.removed_bytes(root, area="images")}
     if soc is not None:
         out["social"] = soc
+    try:  # 0.21.0: once on this machine, stand-ins are on (12 §R1-m14)
+        note = stand_in.first_notice(root, cfg)
+    except Exception:  # noqa: BLE001 — advisory
+        note = None
+    if note:
+        out["notice"] = note
     emit(out)
 
 
@@ -447,7 +453,7 @@ def cmd_stage(a):
         if problems:
             sys.exit(1)
     elif a.action == "pass":
-        st = store.stage_pass(root, cfg, a.topic, a.stage, amend=a.amend)
+        st = store.stage_pass(root, cfg, a.topic, a.stage, amend=a.amend, rerun=a.rerun)
         out = {"stage": st["stage"], "verified_hash": st.get("verified_hash")}
         if a.stage == "verify" and a.amend:  # a published diagram's SVG edited on base: warn only (08 §2.7.2)
             warn = images.svg_drift(root, cfg, a.topic, st)
@@ -522,6 +528,8 @@ def cmd_loopback(a):
     if not a.human:
         st["loopbacks"] = int(st.get("loopbacks", 0)) + 1
     st["last_loopback"] = "human" if a.human else a.cause
+    if a.human:  # what plan records as a human's "go without" while it is set (12 §R2-M3)
+        st["human_loopback"] = True
     if reader:
         st["reader_revise"] = True
     if reserve:
@@ -1323,6 +1331,10 @@ def cmd_image(a):
         raise HeraldError("image %s needs --topic" % a.action)
     if a.agent and a.action not in ("confirm", "reject"):
         raise HeraldError("--agent applies only to `image confirm` and `image reject`")
+    if a.stand_in and a.action != "reject":
+        raise HeraldError("--stand-in applies only to `image reject --drop`")
+    if (a.generic_checked or a.subject_ok or a.problem or a.human) and a.action != "review":
+        raise HeraldError("--generic-checked, --subject-ok, --problem and --human apply only to `image review`")
     if a.action == "kinds":
         emit(images.kinds(root, cfg, a.topic))
     elif a.action == "doctor":
@@ -1368,16 +1380,32 @@ def cmd_image(a):
     elif a.action == "review":  # the illustrator's look before a human's — state only (09 §2.7.2)
         if not a.id or "," in a.id:
             raise HeraldError("image review takes one --id")
-        emit(images.review(root, cfg, a.topic, a.id, ok=a.ok, redo=a.redo, note=a.note))
+        emit(images.review(root, cfg, a.topic, a.id, ok=a.ok, redo=a.redo, note=a.note,
+                           generic_checked=a.generic_checked, subject_ok=a.subject_ok, problem=a.problem,
+                           human=a.human, place=a.place))
     elif a.action == "confirm":  # a human looked at the images (refused unattended; the guard asks)
         emit(images.confirm(root, cfg, a.topic, a.id, agent=a.agent))  # --agent: a `--ship` run's review
     elif a.action == "reject":
         if not a.id or "," in a.id:
             raise HeraldError("image reject takes one --id")
         emit(images.reject(root, cfg, a.topic, a.id, reason=a.reason, drop=a.drop, refetch=a.refetch,
-                           regenerate=a.regenerate, agent=a.agent))
+                           regenerate=a.regenerate, agent=a.agent, as_stand_in=a.stand_in))
     elif a.action == "status":
         emit(images.status(root, cfg, a.topic, rev=a.rev))
+    elif a.action == "places":  # 0.21.0: the brief's image places and their keys (12 §R1-0)
+        emit(stand_in.places_cmd(root, cfg, a.topic))
+    elif a.action == "stand-in":
+        if not a.place:
+            raise HeraldError("image stand-in needs --place")
+        emit(stand_in.stand_in_cmd(root, cfg, a.topic, a.place, allow=a.allow, reason=a.reason))
+    elif a.action == "skip":
+        if not (a.place and a.url):
+            raise HeraldError("image skip needs --place and --url")
+        emit(stand_in.skip(root, cfg, a.topic, a.place, a.url, a.reason))
+    elif a.action == "removed":  # ship §5: a human's push that took a picture out (12 §R1-M3)
+        if not a.rev:
+            raise HeraldError("image removed needs --rev <PR head>")
+        emit(stand_in.removed(root, cfg, a.topic, a.rev))
 
 
 def cmd_social(a):
@@ -1543,7 +1571,9 @@ def build():
     p.set_defaults(fn=cmd_branch)
     p = sp.add_parser("stage"); p.add_argument("action", choices=["check", "pass"])
     p.add_argument("--topic", required=True); p.add_argument("--stage", required=True)
-    p.add_argument("--amend", action="store_true"); p.set_defaults(fn=cmd_stage)
+    p.add_argument("--amend", action="store_true")
+    p.add_argument("--rerun", action="store_true", help="pass: a human reruns brief or research (12 §R2-M1; the guard asks)")
+    p.set_defaults(fn=cmd_stage)
     p = sp.add_parser("loopback"); p.add_argument("--topic", required=True)
     p.add_argument("--human", action="store_true", help="human-requested revision: not counted")
     p.add_argument("--cause", choices=sorted(store.LOOPBACK_CAUSES)); p.add_argument("--theme")
@@ -1568,7 +1598,8 @@ def build():
     p.set_defaults(fn=cmd_shot)
     p = sp.add_parser("image"); p.add_argument("action", choices=["kinds", "doctor", "texts", "render", "fetch", "snippet",
                                                                  "plan", "og", "generate", "cancel", "review",
-                                                                 "confirm", "reject", "status"])
+                                                                 "confirm", "reject", "status", "places", "stand-in",
+                                                                 "skip", "removed"])
     p.add_argument("--topic"); p.add_argument("--id", help="ids, comma-separated (reject: one)")
     p.add_argument("--check", action="store_true", help="plan: check only, write nothing")
     p.add_argument("--source", choices=["svg", "drawn"], help="texts: the SVG source or the drawn PNG (default)")
@@ -1585,6 +1616,16 @@ def build():
     p.add_argument("--note", help="review: one line — what the reviewer saw")
     p.add_argument("--rev"); p.add_argument("--command", help="doctor: limner's argv (one string) before config has one")
     p.add_argument("--agent", action="store_true", help="confirm/reject: the agent review of a `--ship` run (11 §2.2)")
+    # 0.21.0 (design/herald/12-generated-fallback-and-decorative.md)
+    p.add_argument("--place", help="stand-in/skip: a brief place key (`image places`); review --problem: the blocked place")
+    p.add_argument("--url", help="skip: the candidate image URL the illustrator opened")
+    p.add_argument("--allow", action="store_true", help="stand-in: a human lifts a drop or a review's refusal")
+    p.add_argument("--stand-in", dest="stand_in", action="store_true",
+                   help="reject --drop: a human chooses a generic AI picture instead")
+    p.add_argument("--generic-checked", action="store_true", help="review --ok of a stand-in or decorative picture")
+    p.add_argument("--subject-ok", action="store_true", help="review: the stand-in's subject checked before generating")
+    p.add_argument("--problem", choices=["subject"], help="review: the place is a work, person, logo or text")
+    p.add_argument("--human", action="store_true", help="review --problem subject: a human's decision")
     p.set_defaults(fn=cmd_image)
     p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)
     p = sp.add_parser("remap"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_remap)

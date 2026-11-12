@@ -209,7 +209,9 @@ switch and §7.1 need a clean tree.
    --topic <id> --after-push` (no limner on this machine
    → the fail path below with `verify-after-human-edit`; tell the human at step 4 next time that a
    PNG edit is replaced by a render of the SVG); then `HRD image og --topic <id>` (no flag; it does
-   nothing when the inputs and the file are as recorded). Scenes are never generated here: a scene
+   nothing when the inputs and the file are as recorded); with PR head scripts 0.21.0 or later also
+   `HRD image removed --topic <id> --rev <head>` (a picture the human's push took out is that
+   human's "go without" for its place — `atoms/_images.md` §6). Scenes are never generated here: a scene
    PNG a human replaced is a human's image (scan, strip, `images`). `needs-human` (a file a human put at the
    OG path, or base's card a human deleted — `unknown_file` ends in `(deleted)`) → attended: ask
    "use this OG image?" (for a deletion: "publish without the OG card?") — yes → `HRD image og --topic <id> --human-push

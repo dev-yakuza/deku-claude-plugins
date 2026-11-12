@@ -30,6 +30,9 @@ cannot be translated or refreshed by Herald in 0.17 — to fix one, edit it on b
 `supersede_pending` (old articles a newer one follows, not linked to it yet): for each, "link
 `<new>` from `<old>`" — `/hrd refresh <old>` when `refreshable`, otherwise by hand.
 
+A `notice` field (0.21.0, once per machine — stand-ins are on by default): show it as one line.
+The batch summary shows it the same way when its `HRD status` carried one.
+
 Last, one line from the `evolve` field of the same `HRD status` output (absent with scripts
 older than 0.3.0 — `status` runs without the version gate — then omit the line) (`tier` is a machine
 token — branch on it, never show it raw): `sufficient` → "growth signals are enough

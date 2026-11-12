@@ -283,7 +283,8 @@ class KindsTests(ImageCase):
         self.assertEqual(k["scene"]["why"], "no-config")  # 0.18.0: scenes need images.scenes
         self.assertEqual(self.calls(), [])  # no limner call at all
         self.assertEqual(images.config_errors(self.root, self.cfg),
-                         {"limner_errors": [], "og_errors": [], "figure_errors": [], "scene_errors": []})
+                         {"limner_errors": [], "og_errors": [], "figure_errors": [], "scene_errors": [],
+                          "stand_in_errors": [], "decorative_errors": []})
 
     def test_each_kind_alone(self):
         k = images.kinds(self.root, self.cfg, TID)

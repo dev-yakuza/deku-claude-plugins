@@ -433,6 +433,10 @@ def exclusion_reasons(root, cfg, tid, rev=None, vouch=False):
             reasons.append("screenshots")
         if vouch and images_mod.unvouched(root, cfg, tid, rev, slug):
             reasons.append("images-unconfirmed")
+        if vouch:  # 12 §R4-m5: the stand-in records only grow — a commit that shortened one blocks
+            from .stand_in import records_shrank
+            if records_shrank(root, cfg, tid, rev):
+                reasons.append("stand-in-records-shrank")
         tr_paths = set(cfg.translation_paths(slug).values())
         if tr_paths and not (cfg.translations() or {}).get("auto_publish") and any(f in tr_paths for f in changed):
             reasons.append("translated")
@@ -712,10 +716,43 @@ def record_gate_failure(root, st, tid, stage, gate, amend=False, lang=None):
         safe_signal(root, "gate-failure", tid, data)
 
 
-def stage_pass(root, cfg, tid, stage, amend=False):
+def _repass_refusal(root, tid, st, stage, rerun):
+    """12 §R3-M1 (§R2-M1 rule 1 narrowed): brief and research — what a stand-in rests on — pass
+    again only on a research fix or a human's `--rerun` (refused unattended and in a `--ship` run
+    here, in code — the guard only asks, §R4-m2). draft, critique, translation, verify (`--amend`
+    too) and publish are as in 0.20.0."""
+    if stage not in ("brief", "research") or st.get("stage") not in ORDER or \
+            ORDER.index(stage) >= ORDER.index(st["stage"]):
+        return None
+    if stage == "research" and open_research_fix(st):
+        return None
+    if not rerun:
+        return ("%s passed already (the topic is at %s) — a human reruns it with `/hrd %s` (`--rerun`)"
+                % (stage, st["stage"], stage))
+    if os.environ.get("HRD_UNATTENDED") == "1":
+        return "--rerun is a human's decision — not in unattended sessions"
+    from . import lock
+    if lock.ship_active(root, tid):
+        return "--rerun is a human's decision — not in a `--ship` run"
+    return None
+
+
+def _orphaned(root, tid, st):
+    """After a brief rerun: a human's place record no line of the new brief has (12 §R2-M1)."""
+    from .stand_in import places
+    keys = {p["place"] for p in places(root, tid, st) or []}
+    recs = [r for r in st.get("image_rejects") or [] if isinstance(r, dict) and r.get("drop") and not r.get("by")]
+    recs += [r for r in st.get("stand_in_refused") or [] if isinstance(r, dict)]
+    return any(r.get("place") and r["place"] not in keys for r in recs)
+
+
+def stage_pass(root, cfg, tid, stage, amend=False, rerun=False):
     st = load_state(root, tid)
     if stage not in PRODUCES:
         raise HeraldError("unknown stage %s" % stage)
+    why = _repass_refusal(root, tid, st, stage, rerun)
+    if why:
+        raise HeraldError(why)
     if (st.get("trim") or {}).get("status") == "open":
         raise HeraldError("a trim is open — `HRD trim --topic %s --finish` or `--abort` first" % tid)
     if stage != "research" and open_research_fix(st):
@@ -756,6 +793,18 @@ def stage_pass(root, cfg, tid, stage, amend=False):
     if fix and fix.get("research_before") and fix["research_before"] == artifact_hash(root, cfg, st, "research.md"):
         raise HeraldError("research.md is unchanged since the research fix opened — the researcher marks each listed "
                           "claim corrected:, rechecked: or withdrawn:")
+    if stage == "research":  # 12 §R2-M1 rule 3, §R4-m3: the image candidates are fixed at the first pass
+        from .stand_in import candidates_hash
+        try:
+            with open(os.path.join(root, work_rel(tid, "research.md")), encoding="utf-8") as f:
+                ch = candidates_hash(f.read())
+        except OSError:
+            ch = None
+        if st.get("candidates_hash") and ch != st["candidates_hash"] and not rerun:
+            raise HeraldError("image candidates are fixed after the first research pass — a research fix corrects "
+                              "claims only (put `## Image candidates` back as it was)")
+        if ch:
+            st["candidates_hash"] = ch
     if fix:
         # a correction rewrites the listed claims in place: no claim id disappears or is renumbered
         gone = [c for c in fix.get("ids_before") or [] if c not in research_claim_ids(root, tid)]
@@ -854,6 +903,15 @@ def stage_pass(root, cfg, tid, stage, amend=False):
         # line (01-multilingual.md §3, basis 3)
         if cfg.translations():
             st["verified_files"] = bundle_files(root, cfg, st["slug"])
+        if amend and st.get("candidates_hash"):  # 12 §R3-m2: before research.md is anchored again
+            from .stand_in import candidates_hash
+            try:
+                with open(os.path.join(root, work_rel(tid, "research.md")), encoding="utf-8") as f:
+                    ch = candidates_hash(f.read())
+            except OSError:
+                ch = None
+            if ch != st["candidates_hash"]:
+                raise HeraldError("image candidates are fixed — the delta research may change claims only")
         if amend:
             # delta research rewrote research.md / claims-map.json: re-anchor their producers
             for producer, name in (("research", "research.md"), ("draft", "claims-map.json")):
@@ -864,6 +922,10 @@ def stage_pass(root, cfg, tid, stage, amend=False):
                 st["stages"].setdefault("translation", {}).setdefault("outputs", {})["@translations"] = \
                     artifact_hash(root, cfg, st, "@translations")
     st["stages"][stage] = rec
+    if stage == "brief" and rerun and _orphaned(root, tid, st):
+        st["stand_in_orphaned"] = True  # the whole topic goes without stand-ins (12 §R2-M1)
+    if stage == "draft":
+        st.pop("human_loopback", None)  # 12 §R2-M3: the human loopback ends with the draft that passes
     nxt = ORDER[ORDER.index(stage) + 1]
     if stage == "critique":
         from .translation import on_critique_pass
@@ -1514,6 +1576,11 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
                 art["agent_confirmed"] = agent
             else:
                 art.pop("agent_confirmed", None)
+            pics = stand_in_record(root, tid)
+            if pics:  # stand-ins and decorative pictures (12-generated-fallback-and-decorative.md §2.13)
+                art["images"] = pics
+            else:
+                art.pop("images", None)
     if translated:
         if "first_published_at" not in art:
             # the earliest publish the topics remember; unknown for pre-Herald history (R4 MN-7)
@@ -1552,6 +1619,26 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
     save_published(root, pub)
     save_topics(root, data)
     return art
+
+
+def stand_in_record(root, tid):
+    """`published.json` `images`: {"stand_ins": [{id, place, names, why}], "decorative": [ids]}."""
+    from .images import _items, load_manifest
+    from .stand_in import is_stand_in, item_role
+    try:
+        man = load_manifest(root, tid)
+    except HeraldError:
+        return None
+    stands, dec = [], []
+    for it in _items(man):
+        role = item_role(it)
+        if is_stand_in(role):
+            si = it.get("stand_in") or {}
+            stands.append({"id": it.get("id"), "of": it.get("place"), "names": si.get("names") or [],
+                           "why": si.get("why")})
+        elif role == "decorative":
+            dec.append(it.get("id"))
+    return {"stand_ins": stands, "decorative": dec} if stands or dec else None
 
 
 def agent_confirmed(root, tid):

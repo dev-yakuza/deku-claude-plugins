@@ -86,6 +86,7 @@ Every stage follows the same frame:
   supports any more gets `withdrawn: <date> — <why>` (no sentence may rest on it; `stage pass`
   refuses an unchanged `research.md`). New claims are
   appended; no id is deleted or renumbered (`stage pass` refuses that; a pass closes the fix,
+  and refuses a changed `## Image candidates` — never touch that section in a fix, 0.21.0;
   and until then draft, critique and verify refuse to pass). A claim id counts where a line
   starts with it (`C9.`, `**C9.**`, `### C9`). `BLOCKED` in a fix (source gone, or the
   corrected claim no longer carries a required section) → hold `needs-human` with the reason,
