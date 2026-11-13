@@ -252,13 +252,32 @@ def audit_round(root, cfg, tid):
     cur = worktree_hash(root, cfg, st["slug"]) if st.get("slug") else None
     n = _int(st.get("audit_rounds"))
     repeat = n >= 1 and cur is not None and st.get("audit_round_body") == cur
-    if not repeat:
-        n += 1
+    sh = _audit_scope_hash(root, cfg, tid)
+    if not repeat or st.get("scope_hash") != sh:
+        if not repeat:
+            n += 1
         st["audit_rounds"] = n
         st["audit_round_body"] = cur
+        # the scope this round's auditor gets: `stage pass` compares critique.json's scope_hash with it
+        # (0.22.0, review 28 m5 — computed here, on this machine, never taken from the editor)
+        if sh:
+            st["scope_hash"] = sh
+        else:
+            st.pop("scope_hash", None)
         save_state(root, tid, st)
     mode = "full" if n == 1 else ("recheck" if n <= AUDIT_ROUND_CAP else "skip")
-    return {"round": n, "mode": mode, "last": n == AUDIT_ROUND_CAP, "cap": AUDIT_ROUND_CAP, "repeat": repeat}
+    out = {"round": n, "mode": mode, "last": n == AUDIT_ROUND_CAP, "cap": AUDIT_ROUND_CAP, "repeat": repeat}
+    if sh:
+        out["scope_hash"] = sh  # final_round.scope_hash of this round (refresh topics with a known scope)
+    return out
+
+
+def _audit_scope_hash(root, cfg, tid):
+    try:
+        from .scope import refresh_scope
+        return refresh_scope(root, cfg, tid).get("scope_hash")
+    except Exception:  # noqa: BLE001 — no readable scope: the refresh audits in full
+        return None
 
 
 def _int(v):
@@ -622,6 +641,9 @@ def research_claim_ids(root, tid):
 _WITHDRAWN_RE = re.compile(r"(?mi)^[ \t]*(?:[-*+][ \t]+|[0-9]+[.)][ \t]+)?(?:\*\*|__|\*|_)?withdrawn(?:\*\*|__|\*|_)?[ \t]*:")
 
 
+_WITHDRAWN_INLINE_RE = re.compile(r"(?i)(?:^|[\s|(—–-])(?:\*\*|__|\*|_)?withdrawn(?:\*\*|__|\*|_)?[ \t]*:")
+
+
 def research_withdrawn_ids(root, tid):
     """Claims marked withdrawn (13 §R2-3, §R3-3): a block runs from a claim's definition line to the
     line before the next definition."""
@@ -633,9 +655,12 @@ def research_withdrawn_ids(root, tid):
     defs = list(_CLAIM_DEF_RE.finditer(text))
     out = set()
     for i, m in enumerate(defs):
-        start = text.find("\n", m.start())
-        block = text[start + 1 if start >= 0 else len(text):defs[i + 1].start() if i + 1 < len(defs) else len(text)]
-        if _WITHDRAWN_RE.search(block):
+        end = defs[i + 1].start() if i + 1 < len(defs) else len(text)
+        nl = text.find("\n", m.end())
+        nl = end if nl < 0 or nl > end else nl
+        # on the definition line itself (a one-line claim, a table row) anywhere after the id; below it
+        # at the head of a line (review 28 m9)
+        if _WITHDRAWN_INLINE_RE.search(text[m.end():nl]) or _WITHDRAWN_RE.search(text[nl:end]):
             out.add("C%s" % m.group(1))
     return sorted(out, key=lambda c: int(c[1:]))
 
@@ -1592,6 +1617,7 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
         # a different article reuses a withdrawn slug: the old one's refresh history is not its own
         art.pop("superseded", None)
         art.pop("last_refresh_decision", None)
+        art.pop("refresh_candidates", None)  # the old article's findings are not the new one's
     translated = bool(cfg.translations())
     now = now_iso()
     prev_published = art.get("published_at")

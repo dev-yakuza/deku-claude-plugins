@@ -188,7 +188,8 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
   translation`, `langs`). A translation gate refusal records `gate-failure` with `stage:
   translation` and `lang`.
 - `dismissal` — from `critique.json` `decision_log`, on `stage pass --stage critique` and on
-  `loopback --cause audit`.
+  `loopback --cause audit`; a dismissal's `grounds` (research claims, 0.22.0) also counts it on the
+  secondary axis `dismissal:grounded-unseen` — it stays a `dismissal`.
 - `hold` — `HRD state --state held` (the batch runner records its own), except holds a human's
   change caused (`verify-after-human-edit`, `reverted`), `screenshots` (a wait for a human's
   files) and holds whose note starts with
@@ -198,8 +199,10 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
   — `HRD social close --reject-all`, `social-final` — `HRD social final` (only when the uploaded text
   differs; a change of ≤ 10% of the characters is baseline). `topic_id` `social:<sns>:<YYYYMMDD>`,
   `data.theme` from `tone|length|format|persona|hashtags|disclosure|fact|other`.
-- `escalation` (loopbacks 2 and 3, and the accuracy reserve) and `incomplete` (a batch child that ended without a result;
-  the runner) — context: listed for evolve, never counted by the nudge.
+- `escalation` (loopbacks 2 and 3, and the accuracy reserve), `incomplete` (a batch child that ended without a result;
+  the runner) and `out-of-scope-finding` (0.22.0: an out-of-scope MAJOR of a refresh, with the
+  dismissals — it may be recorded before `stage pass` checked its quote) — context: listed for
+  evolve, never counted by the nudge.
 
 **Recorded with `HRD signal --kind <kind> --topic <id> --data '<json>'`** (they need a judgment
 or a diff only the session has): `session-edit-request` (write approval edits), `human-edit`
@@ -215,4 +218,5 @@ never counted; `tier` none | watching | sufficient — sufficient at ≥ 3 signa
 ≥ 2 topics, including one no completed evolve scan has seen. The same count drives evolve's
 starting point, the `ship`
 report nudge and the `status` line. Only a decided evolve proposal consumes signals
-(`HRD evolve-mark --consume`).
+(`HRD evolve-mark --consume`), and only a human's decision in an evolve run retires them
+(`HRD evolve-mark --retire`, 0.22.0 — `--unretire` puts them back).

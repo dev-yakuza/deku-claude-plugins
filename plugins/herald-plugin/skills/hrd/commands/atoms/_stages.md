@@ -189,11 +189,11 @@ are collected between the illustrator and the gate in the order of `atoms/_image
      — is **deferred**: not fixed now, listed in the PR body under `## Late audit findings` for
      the human at ship, logged as `decision_log` `kind: deferral`. A `BLOCKER` is never
      deferred.
-   - **refresh topics** (0.22.0): a `BLOCKER`/`MAJOR`/`MINOR` the auditor tagged `out-of-scope`
+   - **refresh topics** (0.22.0): a `MAJOR`/`MINOR` the auditor tagged `out-of-scope`
      (text the refresh did not touch, outside its scope — `atoms/_auditor.md` § Out of scope) is
      not fixed now, in any round: logged with outcome `out-of-scope`, `scope: "out"` and its
-     `quote`, it goes to the next refresh (`published.json` `refresh_candidates`). A `BLOCKER` is
-     never out of scope; an `unfixed`/`regression` finding neither. A MAJOR that looks like a
+     `quote`, it goes to the next refresh (`published.json` `refresh_candidates`). A `BLOCKER` so
+     tagged stays a BLOCKER (never out of scope); an `unfixed`/`regression` finding neither. A MAJOR that looks like a
      factual error goes to the fact-checker as a pointer, as a deferred one does (below).
    - `skip` (past the cap): do not spawn the auditor; write `final_round` with `audit`,
      `dismissed` and `deferred` empty (earlier decisions stay in `audit_log`) and say so in
@@ -264,8 +264,8 @@ are collected between the illustrator and the gate in the order of `atoms/_image
    in scope; `open` for a BLOCKER held for a human; `out-of-scope` (refresh topics, any severity
    but BLOCKER) with `"scope": "out"` and `"quote": "<the sentence, as the auditor quoted it>"`
    (at most 500 characters), counted for MAJORs in `final_round.out_of_scope.major`; while
-   `audit_log` holds one, `final_round.scope_hash` is the `scope_hash` `HRD refresh-scope` returned
-   for the audit (a skip round keeps it); a finding re-raised as `unfixed`/`regression` gets a new
+   `audit_log` holds one, `final_round.scope_hash` is the `scope_hash` `HRD audit-round` returned
+   for this round (it records the same value; a skip round's `audit-round` returns it too); a finding re-raised as `unfixed`/`regression` gets a new
    `R<round>-<n>` entry and the earlier one stays as is; update an outcome in place — the last entry per id
    counts) and `decision_log` are append-only across rounds (keep earlier entries when rewriting
    the file); `audit_log` is what a recheck auditor receives.
@@ -326,7 +326,7 @@ the topic to verify and this stage does not run. `translation.pending` are the l
 
 - **Read list**: the article, `<w>claims-map.json`, `<w>research.md`,
   `docs/editorial/promotion.md` (only to check `owner` claims), and any pointers from deferred
-  auditor findings about facts (§ critique 3). With `<w>images.json`: `HRD image texts --topic
+  or out-of-scope auditor findings about facts (§ critique 3). With `<w>images.json`: `HRD image texts --topic
   <id>` (the text each diagram **draws** — an `errors` entry means a diagram was never rendered:
   do not start verify) and the `texts[].claims` of `<w>images.json`, and `HRD image status
   --topic <id>` `snippets` (attributions: only their `alt` is a sentence to check). With translations: every translation file of the
@@ -349,7 +349,7 @@ the topic to verify and this stage does not run. `translation.pending` are the l
   ["<sentence>", …]}], "research_suspects": [{"claim": "C9", "reason": "<what is wrong>",
   "sentences": ["<sentence>", …]}]}` — `research_suspects` lists claims in `research.md` the
   fact-checker found wrong in themselves (their own excerpt says otherwise, or they contradict
-  another claim) or that a pointer from a deferred auditor finding names, with the
+  another claim) or that a pointer from a deferred or out-of-scope auditor finding names, with the
   sentences that rest on them (fact-checker persona); `framings` lists every framing the fact-checker applied (also under
   `## Framings` in `verify.md`; a non-empty list excludes the PR from auto publish as `framed`,
   accepted by `--consent`); `unmapped` is a subset already counted in

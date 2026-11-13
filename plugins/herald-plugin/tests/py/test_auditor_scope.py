@@ -93,6 +93,37 @@ class QuoteTests(unittest.TestCase):
         self.assertIn("text this refresh wrote", self.ok("closed all day long"))  # a table cell is no sentence
         self.assertIn("text this refresh wrote", self.ok("Opening hours are listed"))
 
+    def test_what_a_reader_sees_passes(self):
+        """review 28 M1, m1, m2: inline code read as text, footnotes, reference links, entities,
+        escapes, a missing final stop, and the three ruby readings — the same on both sides."""
+        cases = [
+            ("Run `npm install` before building the project today. Then go.\n",
+             ["Run npm install before building the project today.", "Run `npm install` before building the project today."]),
+            ("The station opened in 1998 after many years.[^1] Next one.\n\n[^1]: source\n",
+             ["The station opened in 1998 after many years."]),
+            ("See the [official guide][g] for the full timetable today. Next.\n\n[g]: https://x.test\n",
+             ["See the official guide for the full timetable today."]),
+            ("Tom &amp; Jerry visit the museum every summer holiday. Next.\n",
+             ["Tom & Jerry visit the museum every summer holiday."]),
+            ("Prices are 5\\* cheaper than last year in total. Next.\n", ["Prices are 5* cheaper than last year in total."]),
+            ("이 글은 **서울**의 [지하철](https://x.test \"t\") 요금을 정리합니다. 다음.\n",
+             ["이 글은 서울의 지하철 요금을 정리합니다", "이 글은 서울의 지하철 요금을 정리합니다."]),
+            ("<ruby>空港<rp>（</rp><rt>くうこう</rt><rp>）</rp></ruby>までは**電車**で[30分](https://x.test)ほどかかります。次。\n",
+             ["空港までは電車で30分ほどかかります。", "空港（くうこう）までは電車で30分ほどかかります。",
+              "空港くうこうまでは電車で30分ほどかかります。"]),
+        ]
+        for body, quotes in cases:
+            for q in quotes:
+                self.assertIsNone(self.ok(q, body, body), q)
+
+    def test_a_changed_reading_is_a_change(self):
+        base = "<ruby>生<rt>なま</rt></ruby>ビールの値段は五百円でした、今年もそうです。\n"
+        self.assertIn("paragraph changed", self.ok("生ビールの値段は五百円でした、今年もそうです。", base,
+                                                   base.replace("なま", "せい")))
+        code = "Run `npm install` before building the project today.\n"
+        self.assertIn("changed after", self.ok("Run npm install before building the project today.", code,
+                                               code.replace("npm install", "npm ci")))
+
     def test_hash_is_the_normalised_quote(self):
         self.assertEqual(scope.quote_hash("Entry is **free** for children under six."),
                          scope.quote_hash("Entry is free for  children under six."))
@@ -181,6 +212,14 @@ class CritiqueTests(RefreshCase):
             p = self.crit(log, scope_hash=sh_, **fr)
             self.assertNotEqual(p.returncode, 0, msg)
             self.assertIn(msg, p.stderr)
+        p = self.crit([out_entry(), out_entry("R1-2")], audit={"major": 2}, out_of_scope={"major": 2})
+        self.assertIn("quote the same sentence", p.stderr)
+        c = json.loads(json.dumps(CRIT_PASS))  # a made-up hash: not the scope audit-round recorded
+        c["final_round"].update(audit={"major": 1}, out_of_scope={"major": 1}, scope_hash="sha256:" + "ab" * 32)
+        c["audit_log"] = [out_entry()]
+        write_machine(self, TID, "critique.json", c, SLUG)
+        p = self.hrd("stage", "pass", "--topic", TID, "--stage", "critique", check=False)[1]
+        self.assertIn("not the scope `HRD audit-round` recorded", p.stderr)
         p = self.crit([out_entry()], audit={"major": 1})  # not counted out: still an open MAJOR
         self.assertIn("does not record a PASS", p.stderr)
 
@@ -271,9 +310,11 @@ class ScopeTests(RefreshCase):
              "quote": "The fee was 1,000 yen in 2025.", "quote_hash": "y"}]
         store.save_published(self.root, pub)
         self.write(".claude/herald/work/%s/brief.md" % TID,
-                   "## Refresh candidates\nadopted: r-old-post-20260501/R1-3\n- adopted: r-old-post-20260501/R1-4\n")
+                   "## Refresh candidates\nadopted: r-old-post-20260501/R1-3 — the parking line\n"
+                   "- adopted: `r-old-post-20260501/R1-4`\nadopted: the fee one\n")
         self.write(BODY, CUR)
-        out, _ = self.hrd("refresh-scope", "--topic", TID)
+        out, p = self.hrd("refresh-scope", "--topic", TID)
+        self.assertIn("names no candidate", p.stderr)  # `adopted: the fee one`
         self.assertIn("- parking line is stale", out["quoted"])
         self.assertEqual([(a["id"], a["status"]) for a in out["adopted"]], [("R1-3", "unchanged"), ("R1-4", "resolved")])
         pc = self.hrd("refresh-decision", "--slug", SLUG, "--precheck")[0]
@@ -310,7 +351,8 @@ class CandidateTests(RefreshCase):
         body = CUR.replace("Late entry ends at five.", "Late entry ends at five today.")
         log = [out_entry("R2-1", "Entry is **free** for children under six.", rnd=2),
                out_entry("R1-5", RUBY_SENTENCE, sev="MINOR", summary="s" * 300),
-               dict(out_entry("R1-6"), outcome="fixed", scope=None)]
+               dict(out_entry("R1-6"), outcome="fixed", scope=None),
+               out_entry("R1-7", "The fee was 1,000 yen in 2025.")]  # changed after critique: no candidate
         out = self.publish(log=log, brief="adopted: %s/R1-3\n" % old, body=body)
         self.assertEqual([(c["from"], c["id"]) for c in out],
                          [(old, "R1-1"), (old, "R1-3"), (TID, "R2-1"), (TID, "R1-5")])
@@ -318,6 +360,16 @@ class CandidateTests(RefreshCase):
         self.assertEqual((out[3]["severity"], len(out[3]["summary"])), ("MINOR", 200))
         self.seed([{"from": old, "id": "R%d" % i, "summary": "x", "quote": RUBY_SENTENCE + " " * i} for i in range(25)])
         self.assertEqual(len(self.publish(log=[out_entry("R9-9", "Entry is free for children under six.")])), 20)
+
+    def test_a_reused_withdrawn_slug_drops_them(self):
+        self.seed([{"from": "r-x", "id": "R1-1", "summary": "old", "quote": RUBY_SENTENCE}])
+        pub = store.load_published(self.root)
+        store.find_article(pub, SLUG)["withdrawn"] = True
+        store.save_published(self.root, pub)
+        data = store.load_topics(self.root)
+        data["topics"].append({"id": "t0003", "title": "x", "state": "pr-open", "history": [], "reverted_by": []})
+        store.save_topics(self.root, data)
+        self.assertIsNone(self.publish(tid="t0003"))
 
     def test_other_publishes_leave_them(self):
         self.seed([{"from": "r-x", "id": "R1-1", "summary": "kept", "quote": "The fee was 1,000 yen in 2025."}])
@@ -344,6 +396,9 @@ C4 — Shuttle hourly.
 *withdrawn*: not true any more
 C5. Garden open.
 Note: C5 was rechecked; it was not withdrawn: fine.
+C6. Fees in 2024 were lower — withdrawn: superseded by C1
+| C7 | Museum hours | withdrawn: page gone |
+| C8 | Garden hours | https://d.test |
 """
 
 
@@ -354,8 +409,8 @@ class GroundsTests(RepoCase):
 
     def test_withdrawn_blocks_and_emphasis(self):
         self.write(".claude/herald/work/t0001/research.md", RESEARCH)
-        self.assertEqual(store.research_claim_ids(self.root, "t0001"), ["C1", "C2", "C3", "C4", "C5"])
-        self.assertEqual(store.research_withdrawn_ids(self.root, "t0001"), ["C1", "C2", "C4"])
+        self.assertEqual(store.research_claim_ids(self.root, "t0001"), ["C%d" % i for i in range(1, 9)])
+        self.assertEqual(store.research_withdrawn_ids(self.root, "t0001"), ["C1", "C2", "C4", "C6", "C7"])
 
     def test_grounds_normalised_filtered_and_counted_twice(self):
         for t in ("t0001", "t0002", "t0003"):
@@ -537,10 +592,16 @@ class GuardTests(RepoCase):
         g = lambda c, env=None: guard_decision(self.root, "Bash", {"command": c}, env)  # noqa: E731
         for c in ("evolve-mark --retire abc --reason 'x y z w v u' --token t", "evolve-mark --ret abc --token t",
                   "evolve-mark --unretire abc --token t", "evolve-mark --unr abc --token t",
-                  "evolve-mark --reason because --retire abc --token t"):
+                  "evolve-mark --reason because --retire abc --token t",
+                  # review 28 B1: `=` forms, which argparse takes for these list options
+                  "evolve-mark --retire=abc --reason 'x y z w v u k' --token t", "evolve-mark --unretire=abc --token t",
+                  "evolve-mark --ret=abc --reason 'xxxxxxxxxxxx' --token t", "evolve-mark --u=abc --token t",
+                  "lock acquire --cmd evolve", "lock acquire --cmd=evolve", "lock acquire --cm evolve"):
             self.assertEqual(g(hrd + c), "ask", c)
             self.assertEqual(g(hrd + c, {"HRD_UNATTENDED": "1"}), "deny", c)
-        for c in ("evolve-mark --consume abc", "evolve-mark --scan --token t", "evolve-readiness --list"):
+        for c in ("evolve-mark --consume abc", "evolve-mark --scan --token t", "evolve-readiness --list",
+                  "lock acquire --cmd write", "lock release --cmd evolve --token t", "lock status",
+                  "evolve-mark --consume abc --token=evolve"):
             self.assertEqual(g(hrd + c), "none", c)
         for rel in (".claude/herald/memory/evolve-state.json", ".claude/herald/memory/evolve-scan.json",
                     ".claude/herald/signals.jsonl"):
@@ -549,6 +610,24 @@ class GuardTests(RepoCase):
             self.assertEqual(guard_decision(self.root, "Edit", {"file_path": path}, {"HRD_UNATTENDED": "1"}), "deny")
             self.assertEqual(g("echo '{}' > %s" % rel), "ask", rel)
         self.assertEqual(g("cat .claude/herald/signals.jsonl"), "none")
+
+    def test_reviewer_reproduction_needs_two_human_prompts(self):
+        """review 28 B1 end to end: an agent taking the evolve lock and retiring with `--retire=<id>` —
+        both commands now ask the human (and are denied unattended); the `=` form really retires."""
+        rec = {"at": "2026-10-10T00:00:00+00:00", "kind": "dismissal", "topic_id": "t0001", "data": {"note": "real"}}
+        with open(os.path.join(self.root, ".claude/herald/signals.jsonl"), "a") as f:
+            f.write(json.dumps(rec) + "\n")
+        sid = store.signal_id(rec)
+        hrd = "python3 .claude/herald/scripts/hrd.py "
+        take, retire = "lock acquire --cmd evolve", "evolve-mark --retire=%s --reason 'agent wants quiet' --token %s"
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": hrd + take}), "ask")
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": hrd + take}, {"HRD_UNATTENDED": "1"}), "deny")
+        tok = self.hrd(*take.split())[0]["token"]
+        cmd = hrd + retire % (sid, tok)
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": cmd}), "ask")
+        self.assertEqual(guard_decision(self.root, "Bash", {"command": cmd}, {"HRD_UNATTENDED": "1"}), "deny")
+        out, _ = self.hrd("evolve-mark", "--retire=%s" % sid, "--reason", "agent wants quiet", "--token", tok)
+        self.assertEqual(out["retired"], [sid])  # the form the guard must see is a real one
 
 
 if __name__ == "__main__":

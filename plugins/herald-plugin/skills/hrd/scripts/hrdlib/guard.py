@@ -714,8 +714,10 @@ VALUE_OPTS = ("--topic", "--id", "--source", "--pr", "--reason", "--wait", "--no
 
 
 def _prefix_of(x, name, least=3):
-    """argparse takes any unambiguous prefix (`--ag`): does token `x` (no `=value`) name `name`?"""
-    return x.startswith("--") and "=" not in x and len(x) >= least and name.startswith(x)
+    """argparse takes any unambiguous prefix (`--ag`), with or without `=value` (`--retire=<id>`,
+    `--ret=<id>` — review 28 B1): does token `x` name `name`?"""
+    h = x.split("=", 1)[0]
+    return h.startswith("--") and len(h) >= least and name.startswith(h)
 
 
 def _agent_pass(root, seg):
@@ -730,7 +732,7 @@ def _agent_pass(root, seg):
         x = raw[i]
         if x.startswith("--topic=") or (x.startswith("--to") and "=" in x and "--topic".startswith(x.split("=")[0])):
             topic = x.split("=", 1)[1]
-        elif _prefix_of(x, "--topic") and i + 1 < len(raw):
+        elif "=" not in x and _prefix_of(x, "--topic") and i + 1 < len(raw):
             topic = raw[i + 1]
             i += 1
         elif _prefix_of(x, "--agent"):
@@ -744,6 +746,24 @@ def _agent_pass(root, seg):
         return lockmod.agent_ok(root, topic)
     except Exception:  # noqa: BLE001
         return False
+
+
+def _opt_values(seg, name):
+    """The values the segment gives option `name` (`--cmd evolve`, `--cmd=evolve`, `--cm evolve`)."""
+    raw = normalize(seg, split=False)
+    out, i = [], 0
+    while i < len(raw):
+        x = raw[i]
+        if _prefix_of(x, name):
+            if "=" in x:
+                out.append(x.split("=", 1)[1])
+            elif i + 1 < len(raw):
+                out.append(raw[i + 1])
+                i += 1
+        elif "=" not in x and any(_prefix_of(x, o) for o in VALUE_OPTS):
+            i += 1
+        i += 1
+    return out
 
 
 def _has_flag(seg, name):
@@ -875,6 +895,11 @@ def check_bash(root, cfg, cmd):
                     "place — only the human decides. Check its brief line and the refusal note in `HRD image status`.")
         # 1f. 0.22.0 (13 §3.2, §R1-M3): retiring signals takes growth evidence out of the count without a
         # proposal — the human confirms here (the command itself checks the evolve lock)
+        # the evolve lock is what `--retire` checks: a human starts every evolve run, so taking it is asked too
+        # — otherwise an agent could take it and retire alone (review 28 B1)
+        if "lock" in argv and "acquire" in argv and "evolve" in _opt_values(seg, "--cmd"):
+            protect("`/hrd evolve`를 시작합니다 — evolve는 언제나 사람이 시작합니다. (Starting `/hrd evolve` — evolve is "
+                    "always started by a human; its lock lets the run retire growth signals.)")
         if "evolve-mark" in argv and (_has_flag(seg, "--retire") or _has_flag(seg, "--unretire")):
             protect("퇴역은 성장 증거를 제안 없이 지웁니다 — 사람의 결정인지 확인하세요. (Retiring removes growth evidence "
                     "without a proposal — confirm this is the human's decision.)")

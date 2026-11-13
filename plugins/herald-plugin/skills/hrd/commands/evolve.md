@@ -13,7 +13,8 @@ target.
 
 ## Phase 0 — Preflight
 
-`HRD lock acquire --cmd evolve` (keep the token; `HRD lock release --cmd evolve --token <t>` on
+`HRD lock acquire --cmd evolve` (the guard asks the human — evolve is always a human's run, and
+its lock is what lets it retire signals; keep the token; `HRD lock release --cmd evolve --token <t>` on
 every exit path); base clean; `HRD sync`. Read `.claude/herald/evolution-log.md`:
 run number `n` = existing entries + 1; earlier rejected proposals must not be re-proposed
 unchanged; the targets applied in the last 3 runs (regression watch).
@@ -36,7 +37,8 @@ unchanged; the targets applied in the last 3 runs (regression watch).
   - `secondary` — `dismissal:grounded-unseen`: dismissals whose reason was a research claim the
     auditor cannot see (`grounds`); they also stay in `dismissal`, and the totals count each
     record once. `out-of-scope-finding` records in `list` (auditor findings a refresh left for the
-    next one) are context, like escalations.
+    next one) are context, like escalations — one may be recorded at an audit loopback
+    before its quote was checked.
 - `--snapshot` keeps the listed ids locally, tagged with the token. The run marks them as seen
   only when it ends normally (`HRD evolve-mark --scan --token <t>` in Phase 3 for `--dry-run`,
   Phase 7 otherwise); a snapshot left by an aborted run is never used by another run. After
