@@ -2525,7 +2525,7 @@ def check_s2v_results(ctx, cmd):
         if "lock-child" not in (cmd.ctx or []):
             ctx.deny("G-WRAP", "s2v %s in a Studio repository runs only under the machine lock wrapper, which records "
                                "a busy machine as held:lock — use \"python3 .claude/studio/scripts/lock.py run --kind "
-                               "tts -- <the same s2v command>\" (m1-plan §8)." % " ".join(words[:2]))
+                               "tts -- <the same s2v command>\"." % " ".join(words[:2]))
             return
     if words in WRAPPED_S2V or (any(x is None for x in vals[:1])):
         ctx.deny("G-WRAP", "s2v %s in a Studio repository runs only through Studio's wrapper, which sets the proxy "

@@ -99,7 +99,7 @@ class SourceDiff(ApproveCase):
         h = self.show("source-diff")
         before = self.state()
         self.assertEqual(self.approve("source-diff", h), 4)
-        self.assertIn("needs M3a", self.last_err)
+        self.assertIn("is not supported yet (translation arrives in a later version)", self.last_err)
         self.assertEqual(self.state()["langs"], before["langs"])
 
     def test_approve_source_diff_needs_a_waiting_diff(self):

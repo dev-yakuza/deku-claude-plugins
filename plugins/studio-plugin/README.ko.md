@@ -30,7 +30,9 @@ Claude Code용 **레포별 영상 제작 조직**입니다. Studio는 레포에 
   `/usr/bin/python3`가 훅의 20초 시간 제한까지 기다릴 수 있습니다.
 - **호출당 비용**(기기 한 대, Apple silicon Mac): 하네스가 없는 레포에서 Bash `git status`에 대한 가드는 약 80 ms(p50,
   Python 3.9.9와 3.15.2), macOS의 `/usr/bin/python3` 3.9.6으로는 약 155 ms 걸렸습니다
-  (`tests/py/test_guard_entry.py`, `PerfNoHarness`).
+  (`tests/py/test_guard_entry.py`, `PerfNoHarness`). 가드는 Claude Code의 셸 스냅숏(최근 세션마다 하나, 각 ~280 KB)도
+  읽습니다. 스냅숏이 13개일 때 같은 호출은 약 140 ms(3.15.2), 약 170 ms(3.9.9) 걸렸고, 파일이 하나 늘 때마다 약 5 ms가
+  더 듭니다(`PerfSnapshots`).
 
 ## 설치
 
@@ -182,6 +184,16 @@ python3 .claude/studio/scripts/hooks.py install
   (`/std script <video>` 후 검증과 ①을 다시). 캐스트를 지난 영상은 이미 있는 블록을 그대로 씁니다.
 - **0.1.0**: 마켓플레이스 등록. 0.0.28에서 올릴 때는 `/std update`가 필요 없습니다(스크립트 버전은
   그대로 25).
+- **0.1.1**: 가드가 셸 스냅숏을 약 절반의 시간에 읽습니다. 스냅숏 13개에서 호출당 전체 시간이 약 3분의 1 줄었습니다(이
+  기기에서 Python 3.15.2로 210 → 140 ms, 3.9.9로 300 → 170 ms; 판정은 같음). 메시지와 템플릿에 내부 마일스톤 이름이 더는
+  나오지 않습니다. pre-commit shim의 안내는 `hooks.py install`만 가리킵니다. 환경 변수 몇 개와 pyenv의 PATH도 가드
+  자체 허용을 끕니다 — 셸에 전역 `PYTHONPYCACHEPREFIX`나 `GIT_CEILING_DIRECTORIES`가 있으면 Studio 스크립트 호출은
+  다시 확인을 요청합니다. 이 검사는 셸 스냅숏 어디에 있는 `NAME=`에도(함수 본문 포함) 걸립니다.
+- **0.1.1로 올릴 때**: `/std update`를 실행합니다(스크립트 버전 26). `platforms/youtube.md`의 `checked`를 채웠다면
+  "local"을 고릅니다. 날짜가 그대로 남고, 예전 문장은 내부 마일스톤 이름만 담고 있었습니다("new"는 `checked`를 비우고,
+  다시 채울 때까지 `validate_copy.py`가 모든 카피를 거부합니다). 고친 `formats/youtube.md`도 "local"을 고릅니다. 그
+  밖에 바뀐 템플릿은 레포에 설치되지 않는 플러그인 파일입니다(할 일 없음). 0.1.0이 쓴 클론의 pre-commit shim은 그대로
+  유효하며, `hooks.py install`이 새 내용을 씁니다.
 
 ## 라이선스
 

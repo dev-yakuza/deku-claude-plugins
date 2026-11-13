@@ -30,7 +30,9 @@ Claude Code 向けの**リポジトリごとの動画制作組織**です。Stud
   Command Line Tools のない macOS では、`/usr/bin/python3` がフックの 20 秒のタイムアウトまで待つことがあります。
 - **呼び出しごとのコスト**(マシン 1 台、Apple silicon の Mac): ハーネスのないリポジトリでの Bash `git status` に対するガードは
   約 80 ms(p50、Python 3.9.9 と 3.15.2)、macOS の `/usr/bin/python3` 3.9.6 では約 155 ms でした
-  (`tests/py/test_guard_entry.py`、`PerfNoHarness`)。
+  (`tests/py/test_guard_entry.py`、`PerfNoHarness`)。ガードは Claude Code のシェルスナップショット(最近のセッションごとに
+  一つ、各 ~280 KB)も読みます。13 個あるとき同じ呼び出しは約 140 ms(3.15.2)、約 170 ms(3.9.9)で、ファイルが一つ
+  増えるごとに約 5 ms 増えます(`PerfSnapshots`)。
 
 ## インストール
 
@@ -194,6 +196,17 @@ python3 .claude/studio/scripts/hooks.py install
   戻ります(`/std script <video>` の後、検証と ① をもう一度)。キャストを過ぎた動画はすでにあるブロックを使います。
 - **0.1.0**: マーケットプレイスへの登録。0.0.28 から上げるときは `/std update` は不要です(スクリプトの
   バージョンは 25 のまま)。
+- **0.1.1**: ガードがシェルスナップショットを約半分の時間で読みます。スナップショット 13 個で、呼び出しごとの全体の時間が
+  約 3 分の 1 減りました(このマシンで Python 3.15.2 は 210 → 140 ms、3.9.9 は 300 → 170 ms。判定は同じ)。メッセージと
+  テンプレートに内部のマイルストーン名が出なくなりました。pre-commit の shim の案内は `hooks.py install` だけを示します。
+  いくつかの環境変数と pyenv の PATH でもガード自身の許可がオフになります — シェルにグローバルな `PYTHONPYCACHEPREFIX`
+  や `GIT_CEILING_DIRECTORIES` があると、Studio のスクリプト呼び出しはまた確認を求めます。この検査はシェルスナップショットの
+  どこにある `NAME=` にも(関数の本体も含めて)かかります。
+- **0.1.1 へ上げるとき**: `/std update` を実行します(スクリプトのバージョン 26)。`platforms/youtube.md` の `checked` を
+  埋めてあれば「local」を選びます。日付はそのまま残り、古い文は内部のマイルストーン名を示していただけです(「new」は
+  `checked` を空にし、埋め直すまで `validate_copy.py` がすべてのコピーを拒否します)。編集した `formats/youtube.md` も
+  「local」を選びます。そのほかの変わったテンプレートはリポジトリにインストールされないプラグインのファイルです(作業は
+  ありません)。0.1.0 が書いたクローンの pre-commit の shim はそのまま有効で、`hooks.py install` が新しい内容を書きます。
 
 ## ライセンス
 

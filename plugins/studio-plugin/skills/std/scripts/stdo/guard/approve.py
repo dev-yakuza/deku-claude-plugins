@@ -14,8 +14,6 @@ from ..state import labels
 from . import messages, proxy, transcript
 from .repos import has_exclude_block
 
-S2V_MILESTONE = "M3b"
-
 
 def _now():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -283,11 +281,11 @@ def evidence_suffix(code):
 
 
 def s2v(hook, env, ri, words):
-    """s2v approval commands: allowed only in the sandbox proxy mode until actors (M3b)."""
+    """s2v approval commands: allowed only in the sandbox proxy mode until actors arrive (a later version)."""
     what = "s2v " + " ".join(words)
     if in_subagent(hook):
         return Verdict("G-MAIN", "%s runs only in the main session." % what)
     if ri is not None and proxy.active(env, ri.worktree):
         return Verdict(reason="proxy mode: %s" % what)
-    return Verdict("G-APPROVAL", "%s records a person's decision: actor approvals arrive with actors (%s). Ask the "
-                                 "user; do not run it another way." % (what, S2V_MILESTONE))
+    return Verdict("G-APPROVAL", "%s records a person's decision: actor approvals arrive with actors in a later "
+                                 "version. Ask the user; do not run it another way." % what)

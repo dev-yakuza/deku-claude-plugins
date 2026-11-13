@@ -112,7 +112,7 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
         if cmd not in C.IMPLEMENTED:
             raise Usage("%s is not available in this version of state.py" % cmd)
         if cmd == "sync":
-            raise Usage("sync arrives with actors (M3b)")
+            raise Usage("sync arrives with actors in a later version")
         repo, cfg = _repo(cwd)
         root = cfg.get("studio_root") or "studio"
         unsafe = paths.local_problem(repo, root)
@@ -322,7 +322,7 @@ def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock, cwd=None):
         raise schema.SchemaError("the brief has no platforms (every video kind has platform copy)")
     bad_p = [p for p in platforms if not schema.platform_ok(p, state.get("kind"))]
     if bad_p:
-        raise schema.SchemaError("platforms the %s kind does not have: %s (M1: %s)" % (
+        raise schema.SchemaError("platforms the %s kind does not have: %s (this version: %s)" % (
             state.get("kind"), ", ".join(map(repr, bad_p)), ", ".join(schema.KIND_PLATFORMS.get(state.get("kind"), ()))))
     for p, outs in platforms.items():
         if not isinstance(outs, list) or not outs or not all(isinstance(x, str) for x in outs):

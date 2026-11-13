@@ -97,12 +97,12 @@ def h12(entry):
 
 
 def unsupported(entry):
-    """Why an entry is not supported in M1, or None."""
+    """Why an entry is not supported in this version, or None."""
     for k in UNSUPPORTED:
         if k in entry:
-            return "%s is not supported in M1 (no consent or originality records yet)" % k
+            return "%s is not supported in this version (no consent or originality records yet)" % k
     if entry.get("ai_generated") is True:
-        return "ai_generated images are not supported in M1"
+        return "ai_generated images are not supported in this version"
     return None
 
 

@@ -1,4 +1,4 @@
-"""setup.py — install and maintain Studio's harness (m1-plan §5). Plugin-only (never copied into a repository).
+"""setup.py — install and maintain Studio's harness. Plugin-only (never copied into a repository).
 
     setup.py init analyze [--studio-root R]                       drafts for the interview (read-only)
     setup.py init plan --answers <json file> [--out <file>]       what init will write (no writes but the plan)

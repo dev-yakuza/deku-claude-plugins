@@ -8,7 +8,7 @@ outputs:
 ---
 # In-house sharing
 
-Status: format only (M0); the rules are written and checked with M1.
+Status: format only; the rules are not written yet.
 
 ## Copy
 - Title: (rule)

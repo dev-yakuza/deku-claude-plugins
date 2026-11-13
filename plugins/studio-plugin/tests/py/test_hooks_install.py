@@ -76,6 +76,24 @@ class Plain(CommitCase):
         self.assertEqual(open(self.p(HOOKS, "pre-commit")).read(), T.shim())
         self.assertEqual(open(self.p(HOOKS, T.CHAINED)).read(), "#!/bin/sh\n# prev\n")
 
+    def test_shim_of_0_1_0_stays_valid(self):  # fix-0029 §2: only the hint changed; install writes the new text
+        import hashlib
+        old = T.shim().replace('hooks.py install" >&2', 'hooks.py install   (or /std init --hooks)" >&2')
+        self.assertEqual(hashlib.sha256(old.encode("utf-8")).hexdigest(), T.SHIM_0_1_0_SHA256)
+        self.assertEqual(self.hooks("install").returncode, 0)
+        self.assertEqual(self.hooks("status").returncode, 0)  # the new shim
+        with open(self.p(HOOKS, "pre-commit"), "w") as f:
+            f.write(old)
+        self.assertEqual(self.hooks("status").returncode, 0, self.hooks("status").stdout)  # the 0.1.0 shim
+        with open(self.p(HOOKS, "pre-commit"), "w") as f:
+            f.write(old.replace("exit 1", "exit 0"))
+        self.assertNotEqual(self.hooks("status").returncode, 0)  # any other text is not
+        with open(self.p(HOOKS, "pre-commit"), "w") as f:
+            f.write(old)
+        self.assertEqual(self.hooks("install").returncode, 0)
+        self.assertEqual(open(self.p(HOOKS, "pre-commit")).read(), T.shim())
+        self.assertNotIn("--hooks", T.shim())
+
     def test_runner_missing_message(self):
         self.exe(self.p(HOOKS, "pre-commit"), "#!/bin/sh\nexit 0\n")
         self.assertEqual(self.hooks("install").returncode, 0)
@@ -87,6 +105,7 @@ class Plain(CommitCase):
         self.assertIn("rm \"", out.stderr)
         self.assertIn("mv \"", out.stderr)
         self.assertIn(T.CHAINED, out.stderr)
+        self.assertIn("Reinstall it: python3 .claude/studio/scripts/hooks.py install\n", out.stderr)
 
     def test_hooks_path_outside_or_tracked(self):
         outside = os.path.join(self.tmp, "global-hooks")

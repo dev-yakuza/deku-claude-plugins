@@ -56,8 +56,7 @@ def _old_new(top, cfg, key, raw):
         raise SetupError(USAGE, "studio_root is not changed by config (moving Studio's folder is `move`, later)")
     new = L.parse_value(raw)
     if key.startswith("s2v.path") and key != "s2v.path":
-        raise SetupError(USAGE, "%s is not a setting: this machine's s2v path is exactly s2v.path (M1c review P6)"
-                         % key)
+        raise SetupError(USAGE, "%s is not a setting: this machine's s2v path is exactly s2v.path" % key)
     if key == "s2v.path":
         if not isinstance(new, str) or not os.path.isabs(new):
             raise SetupError(USAGE, "s2v.path is the absolute path of this machine's script2video checkout")
@@ -68,7 +67,7 @@ def _old_new(top, cfg, key, raw):
     top_key = key.split(".", 1)[0]
     if key == "s2v" and isinstance(new, dict) and "path" in new:
         raise SetupError(USAGE, "this machine's s2v path is not in config.json (the old format) — set it with "
-                                "config set s2v.path <absolute path> (machine.json, M1a)")
+                                "config set s2v.path <absolute path> (machine.json)")
     if top_key not in _known_top(cfg):
         raise SetupError(USAGE, "%s is not a Studio setting (config.json keys: %s)"
                          % (top_key, ", ".join(sorted(_known_top(cfg)))))
@@ -158,7 +157,8 @@ def narrator_preview(top, lang, engine, style, nid="narrator"):
     except OSError:
         status = None
     if status is not None and not narrator.is_builtin(status):
-        raise SetupError(REFUSED, "%s/cast/%s is not a builtin narrator (an actor: M3)" % (root, nid))
+        raise SetupError(REFUSED, "%s/cast/%s is not a builtin narrator (actors arrive in a later version)"
+                         % (root, nid))
     old = narrator._voice(status, lang) if status else None
     new = (engine, style)
     h = L.narrator_hash(nid, lang, list(old) if old else None, list(new))

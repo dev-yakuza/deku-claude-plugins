@@ -8,17 +8,56 @@ from helpers import StudioTestCase
 from stdo import guard
 from stdo.guard import snapshot as snapmod
 from stdo.guard.terms import Terms
+import snapref
 
 
 def _load_both(env, now=None, _load=snapmod.load):
     """fix20: a snapshot the tests load is read by both guards from the same files (they are often removed right
     after): the 0.0.26 guard's reading rides along as `legacy_view` (backstop.decide hands it to the 0.0.26 guard
-    when a test injects the snapshot)."""
+    when a test injects the snapshot). fix-0029 §1.7: every load is also compared with the 0.1.0 parse (snapref.py),
+    so every snapshot text the tests build checks the memos and the prefilter. `_load` (the last default) is the
+    original `snapshot.load`."""
+    now = time.time() if now is None else now
     out = _load(env, now=now)
+    check_parity(out, snapref.load(env, now=now))
     if out[0] is not None and getattr(out[0], "legacy_view", None) is None:
         from stdo.guard.legacy import snapshot as legacy_snapshot
         out[0].legacy_view = legacy_snapshot.load(env, now=now)
     return out
+
+
+def variant_fields(v):
+    """The named fields of one Variant (fix-0029 §1.7), comparable across the two modules."""
+    return {"aliases": dict(v.aliases), "global_aliases": sorted(v.global_aliases),
+            "suffix_aliases": sorted(v.suffix_aliases), "user_functions": sorted(v.user_functions),
+            "delegated": sorted(v.delegated), "options": dict(v.options), "explicit": dict(v.explicit),
+            "path": v.path, "notes": list(v.notes), "func_offsets": dict(v.func_offsets), "text": v.text,
+            "weight": v.weight, "extra_paths": list(v.extra_paths)}
+
+
+def load_fields(out):
+    """The named fields of a load's (Snapshot | None, notes): every variant's and the merged Snapshot's."""
+    snap, notes = out
+    if snap is None:
+        return None, list(notes)
+    return {"variants": [variant_fields(v) for v in snap.variants], "files": list(snap.files),
+            "notes": list(snap.notes), "partial": snap.partial, "plain": dict(snap.plain),
+            "alternatives": {k: list(x) for k, x in snap.alternatives.items()}, "counts": snap.counts,
+            "total": snap.total, "global_aliases": sorted(snap.global_aliases),
+            "suffix_aliases": sorted(snap.suffix_aliases), "user_functions": sorted(snap.user_functions),
+            "delegated": sorted(snap.delegated), "options": dict(snap.options),
+            "option_conflicts": sorted(snap.option_conflicts), "paths": list(snap.paths)}, list(notes)
+
+
+class ParityError(AssertionError):
+    pass
+
+
+def check_parity(out, ref):
+    a, b = load_fields(out), load_fields(ref)
+    if a != b:
+        raise ParityError("snapshot.load differs from the 0.1.0 parse (snapref.py): %r != %r" % (
+            str(a)[:400], str(b)[:400]))
 
 
 snapmod.load = _load_both
@@ -97,6 +136,53 @@ def snapshot_text(aliases=None, functions=DEFAULT_FUNCS, options=("autocd", "aut
     if path is not None:
         text += "export PATH='%s'\n" % path
     return text
+
+
+PERF_FUNC = '''f_%(n)d () {
+	local _x="${1:-.}" _n=%(n)d _i
+	if [[ -z $_x ]]
+	then
+		print -u2 "f_%(n)d: no folder given and no default folder" && return 1
+	fi
+	for _i in 1 2 3
+	do
+		print -r -- "$_x:$_i: checking the folder and its entries for the summary" > /dev/null
+	done
+	case $_x in
+		(-*) echo "option given where a folder was expected: $_x" >&2 ;;
+		(*) : ;;
+	esac
+	command ls -l --color=never "$_x" 2> /dev/null | head -n $_n | sed -e "s/^/  /"
+	local _y="${_x%%/*}"
+	[[ -d $_y ]] && cd "$_y"
+	export F_LAST="${_y:-none}" F_LAST_TIME="$(date +%%s)"
+	print -r -- "${#_x}" > /dev/null
+	while read -r _i
+	do
+		[[ $_i == q ]] && break || print -r -- "line: $_i" > /dev/null
+	done < /dev/null
+	return 0
+}'''
+
+
+def perf_snapshot_text(i, path="/usr/bin:/bin", functions=400, aliases=250):
+    """fix-0029 §1.6: one of the snapshot files PerfSnapshots generates, shaped like a real one (~280 KB: ~10,500
+    typeset -f lines in 400 functions, about a quarter of them with a `{`; 250 alias lines with mixed quoting; Claude
+    Code's sections and PATH). File `i` differs from the others in one function-body line only: the texts differ, the
+    variant key is the same (one variant)."""
+    funcs = [PERF_FUNC % {"n": n} for n in range(functions)]
+    funcs[0] = funcs[0].replace("\tlocal ", "\t: file %d\n\tlocal " % i, 1)
+    al = []
+    for k in range(aliases):
+        if k % 4 == 0:
+            al.append(("a%d" % k, "'git log --oneline -n %d'" % k))
+        elif k % 4 == 1:
+            al.append(("b%d" % k, '"ls -l %d"' % k))
+        elif k % 4 == 2:
+            al.append(("c%d" % k, "grep\\ -n\\ x%d" % k))
+        else:
+            al.append(("d%d" % k, "'echo '\\''x%d'\\'''" % k))
+    return snapshot_text(aliases=al, functions="\n".join(funcs) + "\n", path=path)
 
 
 class GuardCase(StudioTestCase):

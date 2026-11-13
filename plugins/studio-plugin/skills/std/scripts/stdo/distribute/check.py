@@ -88,7 +88,7 @@ def problems(repo, vdir, state, lang, ctx, platform, cfg, env, copy_path):
         return ["the platform rules: %s — a person fixes .claude/studio/platforms/%s.md" % (e, platform)]
     if not checked:
         out.append("platforms/%s.md is not checked yet (its `checked` date is empty): a person compares it with the "
-                   "platform's own help and fills it in (U-M1h)" % platform)
+                   "platform's own help and fills it in" % platform)
     try:
         with open(copy_path, encoding="utf-8") as f:
             text = f.read()

@@ -1,4 +1,4 @@
-"""hooks.py — Studio's pre-commit hook (M0e; m0e-plan §3).
+"""hooks.py — Studio's pre-commit hook.
 
     hooks.py install [--husky-apply] [--json]
     hooks.py status [--json]

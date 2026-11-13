@@ -13,8 +13,10 @@ from unittest import mock
 
 import helpers
 from stdo import manifest
+from guard_base import snapshot_text
 from stdo.guard import backstop, judge, roleout, scriptrun
-from test_guard_judge import JudgeCase
+from stdo.guard import snapshot as snapmod
+from test_guard_judge import ALIASES, JudgeCase
 
 S = ".claude/studio/scripts/"
 FAKE_BINARY = b"\xcf\xfa\xed\xfe fake program (never run)\n"
@@ -263,6 +265,30 @@ class ScriptAllow(AllowCase):
         write(self.env["CLAUDE_ENV_FILE"], "python3() { :; }\n")
         self.assertPrompt(cmd)
 
+    def test_environment_0_1_1(self):  # fix-0029 §4.1: seventeen more names, in the hook env and in a snapshot
+        cmd = "python3 %sstate.py next v" % S
+        added = ("PYTHONPLATLIBDIR", "PYTHONPYCACHEPREFIX", "GIT_EXTERNAL_DIFF", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                 "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_REPLACE_REF_BASE", "GIT_SHALLOW_FILE",
+                 "GIT_GRAFT_FILE", "GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS",
+                 "GIT_ICASE_PATHSPECS", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_NAMESPACE")
+        self.assertEqual(len(added), 17)
+        self.assertTrue(set(added) <= set(scriptrun.ENV_OFF))
+        self.assertAllow(cmd)
+        for k in added:
+            self.env[k] = os.path.join(self.tmp, "x")
+            self.assertNoAllow(cmd)
+            del self.env[k]
+        self.assertAllow(cmd)
+        d = os.path.join(self.env["CLAUDE_CONFIG_DIR"], "shell-snapshots")
+        for k in added + ("",):
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "snapshot-zsh-1-a.sh"), "w") as f:
+                f.write(snapshot_text(aliases=ALIASES, path=self.env["PATH"]) +
+                        ("export %s=%s\n" % (k, os.path.join(self.tmp, "x")) if k else ""))
+            self.snap_with = snapmod.load(self.env)
+            shutil.rmtree(d)
+            (self.assertNoAllow if k else self.assertAllow)(cmd)
+
     def test_path(self):
         cmd = "python3 %sstate.py next v" % S
         base = self.env["PATH"]
@@ -433,6 +459,24 @@ class ScriptAllow(AllowCase):
         write(os.path.join(root, "plugins", "p", "bin", "python3"), "#!/bin/sh\n", 0o755)
         self.assertNoAllow(cmd)
         shutil.rmtree(os.path.join(root, "plugins"))
+        # fix-0029 §4.2: the script inherits that PATH, so node, git and ffmpeg are looked up on it too
+        for prog in ("git", "node", "ffmpeg"):
+            write(os.path.join(root, "plugins", "x", "bin", prog), "#!/bin/sh\n", 0o755)
+            self.assertNoAllow(cmd)
+            write(os.path.join(root, "plugins", "x", "bin", prog), FAKE_BINARY, 0o755)  # a real-named binary
+            self.assertAllow(cmd)
+            shutil.rmtree(os.path.join(root, "plugins"))
+        write(os.path.join(prefix, "plugins", "y", "bin", "git"), "#!/bin/sh\n", 0o755)
+        self.assertNoAllow(cmd)
+        shutil.rmtree(os.path.join(prefix, "plugins"))
+        # a front folder inside the area (the repository): no allow
+        os.makedirs(os.path.join(self.repo, "pyenv-plugin", "bin"))
+        os.makedirs(os.path.join(root, "plugins"))
+        os.symlink(os.path.join(self.repo, "pyenv-plugin"), os.path.join(root, "plugins", "in-repo"))
+        self.assertNoAllow(cmd)
+        shutil.rmtree(os.path.join(root, "plugins"))
+        shutil.rmtree(os.path.join(self.repo, "pyenv-plugin"))
+        self.assertAllow(cmd)
         # the system python3 itself
         write(os.path.join(sysbin, "python3"), "#!/bin/sh\n", 0o755)
         self.assertNoAllow(cmd)

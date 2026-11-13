@@ -4,7 +4,10 @@
 import os
 import time
 
-from guard_base import CLAUDE_SECTIONS, DEFAULT_ALIASES, GuardCase, snapshot_text
+from guard_base import (CLAUDE_SECTIONS, DEFAULT_ALIASES, GuardCase, _load_both, load_fields, perf_snapshot_text,
+                        snapshot_text, variant_fields)
+import snapref  # noqa: E402 (after guard_base: helpers puts the scripts on sys.path)
+from stdo.guard import limits
 from stdo.guard import snapshot as snapmod
 
 
@@ -373,3 +376,102 @@ class Review2Snapshot(GuardCase):
     def test_format_unrecognized_note(self):  # NIT
         self.use_snapshots("just text\nno markers () {\n:\n}\n")
         self.assertIn("snapshot-format-unrecognized", self.ok("ls").notes)
+
+
+class ParseParity(GuardCase):
+    """fix-0029 §1.2, §1.7: the line memo, the text memo and the `{` prefilter give what the 0.1.0 parse gave
+    (snapref.py, HEAD's text at 1cac964). Every load through the tests' patch is compared too (guard_base)."""
+
+    ORIGINAL = staticmethod(_load_both.__defaults__[-1])  # snapshot.load itself, not the tests' patch
+
+    def edge_texts(self):
+        p = self.bin
+        deep = "alias -- deep=" + "$(" * 70 + ")" * 70
+        return [
+            snapshot_text(path=p),
+            snapshot_text(functions="nl ()\n{\n\techo x\n}\n", path=p),  # `{` on the next line
+            snapshot_text(functions="function f {\n\techo f\n}\nfunction g() {\n\t:\n}\n", path=p),
+            snapshot_text(functions="q () {\n\techo '{'\n\techo \"{ x }\"\n}\n", path=p),  # `{` inside quotes
+            snapshot_text(functions="c () {\n\t:\n}\n}\n{\n", path=p),  # a column-0 `}` and `{`
+            snapshot_text(path=p).replace("\n", "\r\n"),  # CRLF
+            snapshot_text(path=p).replace("# Aliases\n", "# Aliases\nalias -- zz=one\n# Aliases\n"),
+            "# Functions\nf () {\n\t:\n}\nalias -- g=git\nexport PATH='/x'\n",  # no markers
+            snapshot_text(path=p, extra_alias_lines=["alias -- g=git", "alias -g G='| grep'", "alias -s txt=cat",
+                                                     "alias -- a='b' c=\"d e\" f=g\\ h", "alias -- 'q=1'"]),
+            snapshot_text(path=p, extra_alias_lines=[deep]),  # LimitExceeded: the file is unreadable
+            snapshot_text(path=p).replace("unalias find 2>/dev/null || true", "unalias -m find g 2>/dev/null"),
+            perf_snapshot_text(0, path=p), perf_snapshot_text(1, path=p),
+        ]
+
+    def test_parse_parity(self):
+        memo = {}
+        for i, t in enumerate(self.edge_texts()):
+            try:
+                want = variant_fields(snapref.parse_snapshot(t))
+            except limits.LimitExceeded as e:
+                for m in (None, memo):
+                    with self.assertRaises(limits.LimitExceeded) as cm:
+                        snapmod.parse_snapshot(t, m)
+                    self.assertEqual(cm.exception.kind, e.kind)
+                continue
+            self.assertEqual(variant_fields(snapmod.parse_snapshot(t)), want, i)
+            self.assertEqual(variant_fields(snapmod.parse_snapshot(t, memo)), want, i)  # memo shared across texts
+
+    def test_line_memo(self):
+        memo = {}
+        a = snapmod.split_line("alias -- g=git ll='ls -l'", memo)
+        a.append("x")
+        self.assertEqual(snapmod.split_line("alias -- g=git ll='ls -l'", memo), ["alias", "--", "g=git", "ll=ls -l"])
+        deep = "alias -- deep=" + "$(" * 70 + ")" * 70
+        for _ in range(2):
+            with self.assertRaises(limits.LimitExceeded):
+                snapmod.split_line(deep, memo)
+        self.assertNotIn(deep, memo)
+
+    def write(self, texts, ages=None, names=None):
+        d = os.path.join(self.env["CLAUDE_CONFIG_DIR"], "shell-snapshots")
+        if os.path.isdir(d):
+            for f in os.listdir(d):
+                os.remove(os.path.join(d, f))
+        os.makedirs(d, exist_ok=True)
+        now = time.time()
+        for i, t in enumerate(texts):
+            q = os.path.join(d, names[i] if names else "snapshot-zsh-%d-p%03d.sh" % (1792000000000 + i, i))
+            with open(q, "w", newline="") as f:
+                f.write(t)
+            age = ages[i] if ages else 60 * (i + 1)
+            os.utime(q, (now - age, now - age))
+        return now
+
+    def assertLoadParity(self, now):
+        got = load_fields(self.ORIGINAL(self.env, now=now))
+        self.assertEqual(got, load_fields(snapref.load(self.env, now=now)))
+        return got
+
+    def test_load_parity(self):
+        p = self.bin
+        a = snapshot_text(path=p)
+        a2 = snapshot_text(path="/opt/x:" + p)  # the same key, another PATH
+        b = snapshot_text(aliases=[("g", "other")], path=p)
+        deep = snapshot_text(path=p, extra_alias_lines=["alias -- deep=" + "$(" * 70 + ")" * 70])
+        cases = [[a, a, a], [a, a2, a, a2], [a, b, a, b, a], [a, deep, a], [deep, deep],
+                 [perf_snapshot_text(i, path=p) for i in range(4)] + [perf_snapshot_text(0, path=p)],
+                 self.edge_texts()]
+        for texts in cases:
+            now = self.write(texts)
+            got = self.assertLoadParity(now)
+            if got[0] is not None:
+                self.assertEqual(sum(v["weight"] for v in got[0]["variants"]),
+                                 len(texts) - sum(1 for n in got[0]["notes"] if n.startswith("snapshot-unreadable")))
+
+    def test_three_loads_keep_the_weights(self):
+        p = self.bin
+        now = self.write([snapshot_text(path=p)] * 2 + [snapshot_text(path="/opt/y:" + p)])
+        for _ in range(3):
+            got = self.assertLoadParity(now)
+            self.assertEqual([v["weight"] for v in got[0]["variants"]], [3])
+            self.assertEqual(got[0]["paths"], [p, "/opt/y:" + p])
+        for _ in range(3):  # the tests' patch too (G1 and the 0.0.26 reading)
+            snap, _notes = snapmod.load(self.env, now=now)
+            self.assertEqual([v.weight for v in snap.variants], [3])
+            self.assertEqual([v.weight for v in snap.legacy_view[0].variants], [3])

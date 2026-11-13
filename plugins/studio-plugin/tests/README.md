@@ -42,8 +42,8 @@ STUDIO_TEST_S2V=/abs/path/to/script2video \
   `check_commit --staged` on a Studio commit (targets 50 ms / 300 ms; fails only above 3×).
 
 **Scripts version (M0d-2, D-M0-3)**: the guard refuses Studio commands in a repository whose copy of
-`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 25). Until `/std update` exists (M1), copy the plugin's
-`skills/std/scripts/` (without `guard.py` and `stdo/guard/`) into an older sandbox repository again by hand.
+`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 26). Run `/std update` in an older sandbox repository,
+or copy the plugin's `skills/std/scripts/` (without `guard.py` and `stdo/guard/`) into it again by hand.
 
 **M0f**: `tests/py/drivers/make_harness.py <dir>` builds a synthetic harness repository (templates, agents, a copy of
 the scripts, ignore blocks, the hook, a first commit made outside any session) — the end-to-end tests and the sandbox
@@ -335,3 +335,22 @@ repository without a harness (the README's "Cost per call"; target p50 300 ms, f
 with the test's own interpreter. `structure_test.sh` requires the marketplace entry (same version, source and
 description as plugin.json), the same number of `##` headings in the three READMEs, and no "in development",
 "0.0.x", "not in the marketplace" or milestone names in the shipped documents (READMEs: outside `## Version notes`).
+
+**0.1.1** (`SCRIPTS_VERSION` 26, fix-0029): `test_guard_entry.PerfSnapshots` times the same `git status` call as
+`PerfNoHarness` with 13 generated shell snapshots in `CLAUDE_CONFIG_DIR` (`guard_base.perf_snapshot_text`: ~280 KB,
+~10,500 function lines, 250 alias lines; the texts differ, the variant key is one), a `guard.py` subprocess (target
+p50 160 ms, fails above 480 ms), and prints the in-process `judge.decide` too — with the original `snapshot.load` set
+as `snapmod.load` and no loader passed, as in production (`snapshot_loader=` would leave the 0.0.26 guard without a
+snapshot). G1's `snapshot.load` keeps two memos for one call (a line's `split_line` words; the Variant of a
+byte-identical file) and reads the function-name pattern only on lines with a `{`; `tests/py/snapref.py` is the 0.1.0
+parse (1cac964, imports rewritten), and `guard_base._load_both` compares every load the tests make with it
+(`test_guard_snapshot.ParseParity` adds the edge texts, duplicate files and three loads in a row). The backstop wraps
+the frozen `snapshot.split_line` once (`backstop._SPLIT`, only while `decide` runs, at most 4,096 lines; exceptions
+never kept): `test_guard_backstop.SplitShared` uses real snapshot files and no injected `legacy_view`, and
+`structure_test.sh` checks that the backstop changes exactly `push.check`, `commitrule.evaluate` and
+`snapshot.split_line` of the frozen copy. `structure_test.sh` also scans the templates (every folder), the atoms and
+the strings the scripts print (an AST scan outside `guard/legacy/`, plus the docstring lines the CLIs print as usage)
+for milestone names, plan names and plan sections. `LEGACY_DEPS_HEAD` adds `commit/harness.py`, `commit/video.py` and
+`credits.py` (kinds.registry imports the first two lazily; video.py loads credits.py), and
+`test_guard_backstop.LegacyDepsClosure` runs the frozen paths in a subprocess and checks that every non-guard module
+they load is pinned.

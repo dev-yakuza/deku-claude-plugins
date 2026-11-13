@@ -244,7 +244,7 @@ def status(git, top, env):
             reasons.append("no pre-commit hook")
         elif T.MARK not in h:
             reasons.append("the pre-commit hook was overwritten%s" % (" by " + det["detail"] if det.get("detail") else ""))
-        elif h != T.shim():
+        elif not T.shim_current(h):
             reasons.append("the pre-commit shim differs from this version's")
         elif not os.access(p, os.X_OK):
             reasons.append("the pre-commit shim is not executable")

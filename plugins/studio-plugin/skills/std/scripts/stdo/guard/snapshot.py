@@ -70,8 +70,18 @@ def _option_name(o):
     return o, True
 
 
-def split_line(line):
-    """Literal words of one simple shell line (quote removal only)."""
+def split_line(line, memo=None):
+    """Literal words of one simple shell line (quote removal only). `memo` (fix-0029 §1.2a): line → words for one
+    `load`; a hit returns a new list. A line that raises stores nothing (the exception is raised again next time)."""
+    if memo is not None:
+        words = memo.get(line)
+        if words is None:
+            words = memo[line] = _split_line(line)
+        return list(words)
+    return _split_line(line)
+
+
+def _split_line(line):
     from .parse import Parser
     from .scanctx import LexCtx
     p = Parser(line, LexCtx())
@@ -94,7 +104,8 @@ def split_line(line):
     return out
 
 
-def parse_snapshot(text):
+def parse_snapshot(text, memo=None):
+    """The Variant of one snapshot text. `memo`: split_line's line memo, shared by the files of one `load`."""
     v = Variant()
     v.text = text
     lines = text.split("\n")
@@ -121,7 +132,9 @@ def parse_snapshot(text):
     head_end = opt_i if opt_i is not None else (alias_i if alias_i is not None else len(lines))
     offset = 0
     for i, line in enumerate(lines[:head_end]):
-        m = USER_FUNC_RE.match(line)  # anchored at column 0: nested (indented) definitions are not names
+        # anchored at column 0: nested (indented) definitions are not names; the pattern needs a literal `{`, so a
+        # line without one cannot match (fix-0029 §1.2b: most typeset -f lines are skipped without the regex)
+        m = USER_FUNC_RE.match(line) if "{" in line else None
         if m:
             name = m.group(1)
             if name not in ("if", "while", "for", "case", "{"):
@@ -149,7 +162,7 @@ def parse_snapshot(text):
                 v.user_functions.add(fm.group(1) or fm.group(2))
             if not line.startswith("alias "):
                 continue
-            words = split_line(line)
+            words = split_line(line, memo)
             kind = None
             i = 1
             while i < len(words) and words[i] is not None and words[i].startswith("-") and words[i] != "--":
@@ -175,7 +188,7 @@ def parse_snapshot(text):
         for line in lines[claude_i:end]:
             s = line.strip()
             if s.startswith("unalias "):
-                for w in split_line(s)[1:]:
+                for w in split_line(s, memo)[1:]:
                     if w and not w.startswith("-"):
                         v.aliases.pop(w, None)
             m = FUNC_ANY_RE.match(line)
@@ -198,7 +211,7 @@ def parse_snapshot(text):
                     v.user_functions.add(name)
     # (5) PATH
     if path_i is not None:
-        w = split_line(lines[path_i][len("export "):])
+        w = split_line(lines[path_i][len("export "):], memo)
         if w and w[0] and w[0].startswith("PATH="):
             v.path = w[0][5:]
     # Bash tool postlude
@@ -323,6 +336,10 @@ def load(env, now=None):
         entries = entries[:MAX_FILES]
     by_key = {}
     seen_files = {}
+    # fix-0029 §1.2a/c: memos for this call only (nothing kept across calls, nothing on disk): split_line's words per
+    # line, and the Variant of a byte-identical text (it then takes the equal-key branch below, as a new parse would)
+    line_memo = {}
+    text_memo = {}
     for mtime, n, size, p in entries:
         fkey = (n, size, mtime)
         if fkey in seen_files:
@@ -333,7 +350,9 @@ def load(env, now=None):
         try:
             with open(p, "rb") as f:
                 text = f.read(MAX_SIZE + 1).decode("utf-8", "replace")
-            v = parse_snapshot(text)
+            v = text_memo.get(text)
+            if v is None:
+                v = text_memo[text] = parse_snapshot(text, line_memo)
         except Exception:  # noqa: BLE001 — a broken file is one unreadable variant
             notes.append("snapshot-unreadable:%s" % n)
             continue

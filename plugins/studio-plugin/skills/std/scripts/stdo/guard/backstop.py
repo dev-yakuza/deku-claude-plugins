@@ -7,9 +7,11 @@ frozen in guard/legacy (d2028cc; tests/structure_test.sh checks the copy). Anyth
     `source` / `.` (what follows it was judged by the 0.0.26 rules only) or stopped early on a limit.
 
 `judge.decide` is `decide` (an alias): the 0.0.26 code runs at the stack depth it had in 0.0.26 (P20-3). Nothing here
-changes a module of the frozen copy except its push and commit checks, wrapped once so that the two guards share one
-run of each within a decision (P20-4: G1 calls the frozen checks themselves, through `shared_push` and
-`shared_commit`)."""
+changes a module of the frozen copy except three functions, each wrapped once: its push and commit checks, so that the
+two guards share one run of each within a decision (P20-4: G1 calls the frozen checks themselves, through
+`shared_push` and `shared_commit`), and its snapshot `split_line`, so that a shell line repeated across the snapshot
+files is split once per decision (fix-0029 §1.3; the frozen function still computes every first answer, with its own
+lexer — the two guards never share a parse)."""
 
 import time
 import types
@@ -19,13 +21,18 @@ import types
 # (onFailure "block", m0-measure X6), but without a message
 DEADLINE = 9.0
 _MEMO = {}
+# fix-0029 §1.3: the frozen snapshot.split_line's answers (line → words), only while `decide` runs (`_SPLIT_ON`)
+_SPLIT = {}
+_SPLIT_ON = []
+SPLIT_MAX = 4096
 _LEGACY = []  # [legacy package, legacy judge, _decide without finish]: imported on first use, after G1 judged
 
 
 def _legacy():
     if not _LEGACY:
-        from .legacy import commitrule as lc, judge as lj, push as lp
+        from .legacy import commitrule as lc, judge as lj, push as lp, snapshot as ls
         _install(lp, lc)
+        _install_split(ls)
         # HEAD's own _decide, its code object unchanged: only the name `finish` it looks up is a no-op here (no
         # module of the frozen copy changes; test_guard_backstop checks the code and the lines after the finish)
         g = dict(vars(lj))
@@ -46,6 +53,8 @@ def decide(hook, env, fs=None, probe=None, snapshot_loader=None, legacy_snapshot
     from . import judge
     t0 = time.monotonic()
     _MEMO.clear()
+    _SPLIT.clear()
+    _SPLIT_ON[:] = [True]
     try:
         g_deny, g, complete = judge.decide_g1(hook, env, fs=fs, probe=probe, snapshot_loader=snapshot_loader,
                                               run_finish=False)
@@ -67,6 +76,8 @@ def decide(hook, env, fs=None, probe=None, snapshot_loader=None, legacy_snapshot
             l_deny = lctx.denies[0]
     finally:
         _MEMO.clear()
+        _SPLIT.clear()
+        del _SPLIT_ON[:]
     _merge(g, lctx)
     if l_deny is not None:
         g.denies = list(lctx.denies)
@@ -158,6 +169,29 @@ def _install(lp, lc):
     check._shared = evaluate._shared = True
     check.__wrapped__, evaluate.__wrapped__ = push_check, commit_eval
     lp.check, lc.evaluate = check, evaluate
+
+
+def _install_split(ls):
+    """Wrap the frozen snapshot.split_line once (fix-0029 §1.3). The frozen parse_snapshot looks the name up as a
+    module global at each call (alias, `unalias` and PATH lines), so it calls this wrapper. Inside `decide` a line's
+    words are kept (at most SPLIT_MAX lines; a new list is returned each time); an exception is never kept. Outside
+    `decide` (tests loading snapshots) it passes every call through. `__wrapped__` is looked up at each call."""
+    if getattr(ls.split_line, "_shared", False):
+        return
+
+    def split_line(line):
+        if not _SPLIT_ON:
+            return split_line.__wrapped__(line)
+        words = _SPLIT.get(line)
+        if words is None:
+            words = split_line.__wrapped__(line)
+            if len(_SPLIT) < SPLIT_MAX:
+                _SPLIT[line] = words
+        return list(words)
+
+    split_line._shared = True
+    split_line.__wrapped__ = ls.split_line
+    ls.split_line = split_line
 
 
 def _frozen_checks():

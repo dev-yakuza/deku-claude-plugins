@@ -2,6 +2,7 @@
 a repository must rebuild them to check they are intact without the plugin. Every file carries MARK — the
 guard protects a hook file only when it carries it (m0d1b-plan §5.1)."""
 
+import hashlib
 import re
 
 MARK = "studio:hook"
@@ -12,6 +13,9 @@ BLOCK_BEGIN = "# >>> studio:hook >>>"
 BLOCK_END = "# <<< studio:hook <<<"
 CHAINED = "pre-commit.studio-chained"
 RUNNER_REL = "studio/pre-commit"  # under the git common dir
+# 0.1.1 (fix-0029 §2): the shim 0.1.0 wrote, whose hint also named a `/std init --hooks` that never existed. Its logic
+# is this version's, so `status` accepts it as valid; `install` writes the new text.
+SHIM_0_1_0_SHA256 = "cec3d08b822e66d63c6fa9b3fe77460ae94f214d51cc7b303cfdd6dc48423b7f"
 
 
 def ere(text):
@@ -90,11 +94,16 @@ fi
 runner="$(git rev-parse --git-common-dir)/%(runner)s"
 if [ -f "$runner" ]; then exec sh "$runner" "$@"; fi
 echo "Studio pre-commit: Studio's hook runner is missing ($runner)." >&2
-echo "  Reinstall it: python3 .claude/studio/scripts/hooks.py install   (or /std init --hooks)" >&2
+echo "  Reinstall it: python3 .claude/studio/scripts/hooks.py install" >&2
 echo "  Or take Studio's hook out of this clone: rm \\"$hooks_dir/pre-commit\\"" >&2
 echo "  and, when it exists, put the previous hook back: mv \\"$hooks_dir/%(chained)s\\" \\"$hooks_dir/pre-commit\\"" >&2
 exit 1
 """ % {"mark": MARK, "ver": VERSION, "chained": CHAINED, "runner": RUNNER_REL}
+
+
+def shim_current(text):
+    """The installed shim is this version's: the text shim() writes, or the 0.1.0 text (only its hint differs)."""
+    return text == shim() or hashlib.sha256(text.encode("utf-8", "surrogateescape")).hexdigest() == SHIM_0_1_0_SHA256
 
 
 def husky_block():

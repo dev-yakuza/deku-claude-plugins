@@ -4,8 +4,8 @@ format: youtube
 # Format: YouTube (16:9)
 
 The criteria Studio's checks read for a `youtube` video. **Only a person changes this file** (the guard protects it;
-a change shows up in the harness commit question). The values are starting points: the first real sessions measure them
-(m1-plan Q1 · Q2), then a person edits them here.
+a change shows up in the harness commit question). The values are starting points: the first real sessions measure them,
+then a person edits them here.
 
 <!-- studio:criteria -->
 ```json

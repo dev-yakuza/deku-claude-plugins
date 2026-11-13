@@ -46,7 +46,7 @@ check(bool(sv) and sv.group(1).isdigit(), "SCRIPTS_VERSION is a whole number (bu
 mp = os.path.normpath(os.path.join(plugin, "..", "..", ".claude-plugin", "marketplace.json"))
 entries = [p for p in json.load(open(mp)).get("plugins", []) if p.get("name") == "studio-plugin"] \
     if os.path.exists(mp) else []
-check(len(entries) == 1, "the marketplace has one studio-plugin entry (0.1.0, m1k-plan item 7)")
+check(len(entries) == 1, "the marketplace has one studio-plugin entry (0.1.1, m1k-plan item 7)")
 for k, want in (("version", pj.get("version")), ("description", pj.get("description")),
                 ("source", "./plugins/studio-plugin")):
     check(bool(entries) and entries[0].get(k) == want, "the marketplace entry's %s is plugin.json's" % k)
@@ -59,6 +59,10 @@ UNRELEASED = [(re.compile(r"in development", re.I), "in development"), (re.compi
               (re.compile(r"not in the marketplace", re.I), "not in the marketplace"),
               (re.compile("마켓플레이스에 없"), "마켓플레이스에 없"), (re.compile("マーケットプレイスにな"), "マーケットプレイスにない"),
               (re.compile(r"\bM\d+[a-z]?\b"), "a milestone name")]
+# fix-0029 §3.4: what a person or the model reads names no milestone, plan or plan section — the shipped documents
+# (templates and atoms included) and the strings the scripts print
+INTERNAL_NAMES = [(re.compile(r"\b(U-)?M\d+[a-z]?\b"), "a milestone name"),
+                  (re.compile(r"\b(m\d[a-z0-9]*|\d\d)-plan\b"), "a plan name"), (re.compile(r"§\d"), "a plan section")]
 heads = {}
 for n, notes in VERSION_NOTES.items():
     text = open(os.path.join(plugin, n), encoding="utf-8").read()
@@ -67,7 +71,9 @@ for n, notes in VERSION_NOTES.items():
 check(len(set(heads.values())) == 1, "the three READMEs have the same number of ## headings (%s)" % heads)
 shipped_docs = [os.path.join(skill, "SKILL.md"), os.path.join(plugin, ".claude-plugin", "plugin.json")] + \
     glob.glob(os.path.join(skill, "commands", "*.md")) + glob.glob(os.path.join(skill, "commands", "atoms", "*.md")) + \
-    glob.glob(os.path.join(plugin, "docs", "*.md"))
+    glob.glob(os.path.join(plugin, "docs", "*.md")) + \
+    glob.glob(os.path.join(skill, "templates", "**", "*.md"), recursive=True) + \
+    glob.glob(os.path.join(skill, "templates", "**", "*.tmpl"), recursive=True)
 texts = {os.path.relpath(p, plugin): open(p, encoding="utf-8").read() for p in shipped_docs}
 for n, notes in VERSION_NOTES.items():
     text = open(os.path.join(plugin, n), encoding="utf-8").read()
@@ -75,8 +81,38 @@ for n, notes in VERSION_NOTES.items():
     texts[n + " (outside the version notes)"] = before + ("\n## " + after.split("\n## ", 1)[1] if "\n## " in after
                                                           else "")
 for rel, text in sorted(texts.items()):
-    found = [label for rx, label in UNRELEASED if rx.search(text)]
+    found = sorted({label for rx, label in UNRELEASED + INTERNAL_NAMES if rx.search(text)})
     check(not found, "%s: no unreleased wording (%s)" % (rel, ", ".join(found) or "none"))
+_tpl_n = len([r for r in texts if r.startswith("skills/std/templates/")])
+check(_tpl_n == len([p for d, _s, fs in os.walk(os.path.join(skill, "templates")) for p in fs
+                     if p.endswith((".md", ".tmpl"))]) and _tpl_n >= 20,
+      "the wording scan reads every template (%d), in every folder" % _tpl_n)
+# ...and the strings the scripts print (outside the frozen guard/legacy): every non-docstring string constant, and the
+# docstring lines a CLI prints as its usage (`__doc__.strip().splitlines()[i]`, the index read from the call)
+import ast as _ast
+_said = []
+for _p in sorted(glob.glob(os.path.join(skill, "scripts", "**", "*.py"), recursive=True)):
+    _rel = os.path.relpath(_p, os.path.join(skill, "scripts"))
+    if _rel.startswith(os.path.join("stdo", "guard", "legacy") + os.sep):
+        continue
+    _src = open(_p, encoding="utf-8").read()
+    _tree = _ast.parse(_src)
+    _docs = set()
+    for _n in _ast.walk(_tree):
+        if isinstance(_n, (_ast.Module, _ast.ClassDef, _ast.FunctionDef, _ast.AsyncFunctionDef)) and _n.body and \
+                isinstance(_n.body[0], _ast.Expr) and isinstance(getattr(_n.body[0], "value", None), _ast.Constant):
+            _docs.add(id(_n.body[0].value))
+    _strs = [(_n.lineno, _n.value) for _n in _ast.walk(_tree) if isinstance(_n, _ast.Constant)
+             and isinstance(_n.value, str) and id(_n) not in _docs]
+    _doc = _ast.get_docstring(_tree, clean=False) or ""
+    _strs += [("doc[%s]" % _i, _doc.strip().splitlines()[int(_i)])
+              for _i in re.findall(r"__doc__\.strip\(\)\.splitlines\(\)\[(\d+)\]", _src)]
+    for _ln, _s in _strs:
+        for _rx, _label in INTERNAL_NAMES:
+            if _rx.search(_s):
+                _said.append("%s:%s %s (%s)" % (_rel, _ln, _label, _s[:60]))
+check(not _said, "the scripts' messages and printed usage lines name no milestone, plan or plan section (%s)"
+      % "; ".join(_said[:5]))
 
 # routing
 text = open(os.path.join(skill, "SKILL.md")).read()
@@ -302,6 +338,23 @@ _jb = open(os.path.join(gdir, "judge.py")).read()
 check("push.check(" not in _jb and "commitrule.evaluate(" not in _jb and "backstop.shared_push(" in _jb and
       "backstop.shared_commit(" in _jb, "the guard's push / commit checks are the frozen 0.0.26 ones, shared with the "
       "backstop (backstop.shared_push / shared_commit; P20-4)")
+# fix-0029 §1.3: the backstop changes exactly three functions of the frozen copy (push.check, commitrule.evaluate,
+# snapshot.split_line), each a wrapper around the frozen one; no other module attribute of guard/legacy changes
+probe = _sp.run([sys.executable, "-B", "-c", r"""
+import importlib, os, pkgutil, sys
+sys.path.insert(0, sys.argv[1])
+from stdo.guard import legacy, backstop
+mods = {n: importlib.import_module("stdo.guard.legacy." + n) for _f, n, _p in pkgutil.iter_modules(legacy.__path__)}
+before = {(n, k): v for n, m in mods.items() for k, v in vars(m).items()}
+backstop._legacy()
+after = {(n, k): v for n, m in mods.items() for k, v in vars(m).items()}
+changed = sorted("%s.%s" % k for k in set(before) | set(after) if before.get(k) is not after.get(k))
+ok = all(after[tuple(c.split("."))].__wrapped__ is before[tuple(c.split("."))] for c in changed)
+print(" ".join(changed), ok)
+""", os.path.join(skill, "scripts")], capture_output=True, text=True)
+check(probe.stdout.strip() == "commitrule.evaluate push.check snapshot.split_line True",
+      "backstop wraps exactly push.check, commitrule.evaluate and snapshot.split_line of the frozen copy (%s)"
+      % (probe.stdout.strip() or probe.stderr.strip()[-200:]))
 # P20-9: the 0.0.26 guard also runs the current non-guard modules below (its imports, and theirs). They must stay
 # what 0.0.26 shipped, or "legacy" changes silently; an intended change goes into LEGACY_DEPS_CHANGED with its reason,
 # and the backstop's stage A (legacy == 0.0.26 on the review corpora) is run again (tests/README.md).
@@ -311,12 +364,15 @@ LEGACY_DEPS_HEAD = {
     "stdo/commit/approvals.py": "c9fc77c8c6d891583eb681e0204063d9a8d35777305b75f92962d44477882a83",
     "stdo/commit/checks.py": "2db328f7702dca5a8fddb6c48ff64ab6d9ecbaa0f5b4e1a18365ca0f712ca5a1",
     "stdo/commit/gitx.py": "e5a37e5107aa36cf6ed6dec4ef31ed0b1bcaf848ef3948ef805fd1002bbc9103",
+    "stdo/commit/harness.py": "6ef4aac31fc6f20a1df687ccb676c19d276ac8ecb1a92acd1f9abc137ed05327",
     "stdo/commit/inprogress.py": "bcc4048fd629006cb8932aa784d6d22671eee735d82743d6e309ab5f29d68d4d",
     "stdo/commit/kinds.py": "f409629cd4a5ad8643a49c4cf6a5a034c407bc41cafb8f826d6f10b16943b542",
     "stdo/commit/okfile.py": "13f8639adff61a3b502500237c9fa9e698d87555c3fc6534f7c4cb08e9f206cb",
     "stdo/commit/rangecheck.py": "419929606f1b9aa428eb14cc55efa74e133f23682723b74d11e60977116d0222",
     "stdo/commit/spaths.py": "d72edf6c4dceeed771b2c20809bc63d8f5b711b9fd6a6c3355b9ee12ae65409f",
     "stdo/commit/summary.py": "34fece001d63c61500afdbddbb28fec82007471fad157d07c23017f524ddeaac",
+    "stdo/commit/video.py": "d2e42b8fe3d67fff1b02084210728a339537e9d83102d8c99aaf2215daeb29e2",
+    "stdo/credits.py": "0bc790af45495807308563c2982ebbfe6dd4e3bdc55d72eb0b853af18e3ff9b5",
     "stdo/hooks/__init__.py": "08f387c86fcf2587a7f735d7b758f68ecbbfd248894568c352b9ca1967012566",
     "stdo/hooks/templates.py": "13499e58f682671f62cd505fd8878c745a5537d0bff169e8bf2d3fb3ac8fc020",
     "stdo/ignore.py": "94f5b3cd3b9c0cd092589331667ba2f1b9d4b0989906321ef120c38061a149e5",
@@ -343,10 +399,16 @@ LEGACY_DEPS_HEAD = {
     "stdo/text/normalize.py": "a825f44d3a56226d5ed35599a68fd59079939a87f202a831e9760af8986b55fc",
     "stdo/writes.py": "e9c25585c4a4414fe145b901242ca4a47a2cde831bd619ddbc83cf2f11a92c56",
 }
-# intended changes since d2028cc, each with a one-line reason (none so far; SCRIPTS_VERSION in stdo/__init__.py and
-# RUNNER_VERSION in stdo/hooks/templates.py are the likely ones)
+# the closure is found by running the frozen paths (fix-0029 §3.1: kinds.registry imports commit/harness.py and
+# commit/video.py lazily, and video.py loads credits.py; the closure test below runs them). Intended changes since
+# d2028cc, each with a one-line reason:
 LEGACY_DEPS_CHANGED = {
-    "stdo/__init__.py": "0.0.28: SCRIPTS_VERSION 25",
+    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26",
+    "stdo/hooks/templates.py": "0.1.1 (fix-0029 §2): the shim's hint names hooks.py install only",
+    "stdo/state/labels.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
+    "stdo/commit/kinds.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
+    "stdo/commit/harness.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
+    "stdo/credits.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
     "stdo/state/argv.py": "0.0.28 (fix-0028 §1): --since-last is a flag (status takes no value for it)",
     "stdo/state/commands.py": "0.0.28 (fix-0028 §13): ask-before is evidence-free and implemented (no deny)",
     "stdo/commit/summary.py": "0.0.28 (fix-0028 §11): the value block shows brand.json's name, accent and logo",
@@ -378,6 +440,11 @@ for nm, text in (("runner", _tpl.runner(["studio"])), ("shim", _tpl.shim()), ("h
                  ("lefthook", _tpl.lefthook_block())):
     check(_tpl.MARK in text, "hook template %s carries the studio:hook mark" % nm)
     check(not re.search(r"/(Users|home)/[A-Za-z]", text) and "~/" not in text, "hook template %s has no home path" % nm)
+    # fix-0029 §2: a command a hook names exists (0.1.0's shim named a `/std init --hooks` that never existed)
+    _named = re.findall(r"/std ([a-z-]+)", text)
+    check(all(os.path.exists(os.path.join(skill, "commands", c + ".md")) for c in _named) and "--hooks" not in text,
+          "hook template %s names only existing /std commands, no --hooks (%s)" % (nm, ", ".join(_named) or "none"))
+check("hooks.py install\" >&2" in _tpl.shim(), "the shim's hint names python3 .claude/studio/scripts/hooks.py install")
 for d in ("commit", "hooks"):
     for p in glob.glob(os.path.join(scripts, "stdo", d, "*.py")):
         check(not re.search(r"\bguard\b", "".join(l for l in open(p) if l.startswith(("from", "import")))),
@@ -385,9 +452,9 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "25", "SCRIPTS_VERSION is 25 (0.0.28: the writer's frontmatter lines from next --enter "
-      "script, the targetDuration range, every s2v message, ask-before, record-source --url, the ② ③ ④a question "
-      "blocks, floor_text, the copy's source line, brand lines in the value block)")
+check(sv and sv.group(1) == "26", "SCRIPTS_VERSION is 26 (0.1.1: hooks/ as a whole — the shim's hint in "
+      "templates.py, install.py's status accepting the 0.1.0 shim, cli.py's usage line — and no milestone names in "
+      "the messages of state/, commit/, credits.py and distribute/check.py)")
 # 0.0.23 (pilot-1 P4): every gate document has the agent paste the printed question block, never retyping a line
 for _d in ("make", "copy", "verify", "board"):
     _t = open(os.path.join(skill, "commands", _d + ".md")).read()

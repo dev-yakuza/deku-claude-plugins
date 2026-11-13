@@ -32,9 +32,12 @@ def problem(worktree, uses_repo_copy):
         return None
     if have == "unreadable":
         return "the repository copy of Studio's scripts has no readable SCRIPTS_VERSION"
+    # 0.1.1 (fix-0029 §3): the frozen copy (legacy/version.py, legacy/approve.py) keeps its milestone wording; G1
+    # checks the same conditions with the same inputs first, so its text is the one shown, except after a `source`
+    # (where only the 0.0.26 rules judge)
     if have < mine:
         return ("the repository's Studio scripts are version %d and the plugin's are %d — update them with "
-                "/std update (M1; until then copy the plugin's scripts again)" % (have, mine))
+                "/std update" % (have, mine))
     if have > mine:
         return ("the repository's Studio scripts (version %d) are newer than the plugin's (%d) — update the "
                 "plugin first" % (have, mine))
@@ -42,7 +45,7 @@ def problem(worktree, uses_repo_copy):
     if _manifest(os.path.join(worktree, ".claude", "studio", "scripts", "MANIFEST.sha256")) != \
             _manifest(os.path.join(PLUGIN_SCRIPTS, "MANIFEST.sha256")):
         return ("the repository's copy of Studio's scripts differs from the plugin's of the same version (edited, or "
-                "another build) — /std update (M1; until then copy the plugin's scripts again)")
+                "another build) — /std update")
     edited = _edited(os.path.join(worktree, ".claude", "studio", "scripts"))
     if edited:
         return ("the repository's copy of Studio's scripts was edited (%s) — ask the person to restore it in a "

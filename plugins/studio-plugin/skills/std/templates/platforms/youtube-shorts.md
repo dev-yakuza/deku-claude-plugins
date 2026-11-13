@@ -9,7 +9,7 @@ outputs:
 ---
 # YouTube Shorts
 
-Status: format only (M0); the rules are written and checked with M2.
+Status: format only; the rules are not written yet.
 
 ## Copy
 - Title: (rule)

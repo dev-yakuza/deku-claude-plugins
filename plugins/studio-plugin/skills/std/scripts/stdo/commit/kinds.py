@@ -8,7 +8,7 @@ import os
 
 from . import approvals
 
-PLANNED = {"actor": "M3b"}
+PLANNED = {"actor": "a later version"}
 TEST_ENV = "STUDIO_TEST_COMMIT_KIND"  # test only (the guard refuses STUDIO_TEST_* in agent commands)
 
 

@@ -40,8 +40,14 @@ SUFFIX = "/.claude/studio/scripts/"
 # what the scripts run from PATH, and the real file's name each must have (no asdf, pyenv, mise or volta shim: they
 # choose what runs from repository files such as .tool-versions or mise.toml)
 PROGRAMS = (("node", re.compile(r"^node$")), ("git", re.compile(r"^git$")), ("ffmpeg", re.compile(r"^ffmpeg$")))
+# no allow when the environment changes what the scripts run or load, or what git reads (which objects, refs, index,
+# paths or repository): a set name costs a prompt, never a refusal (fix-0029 §4.1 added the last seventeen)
 ENV_OFF = ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT", "PYTHONUSERBASE", "NODE_OPTIONS", "NODE_PATH",
-           "GIT_DIR", "GIT_WORK_TREE", "GIT_EXEC_PATH", "GIT_ATTR_SOURCE")
+           "GIT_DIR", "GIT_WORK_TREE", "GIT_EXEC_PATH", "GIT_ATTR_SOURCE",
+           "PYTHONPLATLIBDIR", "PYTHONPYCACHEPREFIX", "GIT_EXTERNAL_DIFF", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+           "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_REPLACE_REF_BASE", "GIT_SHALLOW_FILE",
+           "GIT_GRAFT_FILE", "GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS",
+           "GIT_ICASE_PATHSPECS", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_NAMESPACE")
 PYENV_ENV = ("PYENV_VERSION", "PYENV_DIR", "PYENV_HOOK_PATH", "_PYENV_SHIM_PATH", "BASH_ENV", "ENV", "BASHOPTS",
              "SHELLOPTS")
 GIT_SCOPES = ("local", "worktree", "command")
@@ -293,7 +299,8 @@ def _python_version_near(folders):
 
 
 def pyenv_target(shim, path_value, ctx, area, folders):
-    """The file pyenv's `system` lookup would run for this shim on this PATH, or None (no allow)."""
+    """(the file pyenv's `system` lookup would run for this shim on this PATH, the folders libexec/pyenv puts in front
+    of PATH), or None (no allow). The script runs with those folders first (fix-0029 §4.2)."""
     root = os.path.dirname(os.path.dirname(shim))
     data = _read(os.path.realpath(shim), 65536)
     if data is None:
@@ -325,7 +332,7 @@ def pyenv_target(shim, path_value, ctx, area, folders):
         return None
     shims = os.path.join(root, "shims")
     entries = [d for d in front + path_value.split(":") if d != shims]
-    return _which(os.path.basename(shim), ":".join(entries))
+    return _which(os.path.basename(shim), ":".join(entries)), front
 
 
 def _is_shim(path):
@@ -334,14 +341,21 @@ def _is_shim(path):
 
 
 def python_ok(w0, path_value, ctx, area, folders):
+    """The PATH the script will see when its interpreter passes, else None. Through pyenv's shim that is libexec/pyenv's
+    front folders, then `path_value` (pyenv-which drops `<root>/shims` only for its own lookup: they stay)."""
     found = w0 if "/" in w0 else _which(w0, path_value)
     if found is None:
-        return False
+        return None
+    seen = path_value
     if _is_shim(found):
         if area.inside(found):
-            return False
-        found = pyenv_target(found, path_value, ctx, area, folders)
-    return program_ok(found, PY_NAME, area)
+            return None
+        got = pyenv_target(found, path_value, ctx, area, folders)
+        if got is None:
+            return None
+        found, front = got
+        seen = ":".join(front + [path_value])
+    return seen if program_ok(found, PY_NAME, area) else None
 
 
 # ---- the repository copy ----
@@ -539,10 +553,12 @@ def _trusted(ctx, cmd, worktree, studio_root, video, sub):
     for pv in pvs:
         if not _path_ok(pv, area):
             return False
-        if not python_ok(w0, pv, ctx, area, folders):
+        seen = python_ok(w0, pv, ctx, area, folders)
+        # the programs are looked up on the PATH the script sees (pyenv's front folders first), every entry checked
+        if seen is None or not _path_ok(seen, area):
             return False
         for prog, name_re in PROGRAMS:
-            if not program_ok(_which(prog, pv), name_re, area):
+            if not program_ok(_which(prog, seen), name_re, area):
                 return False
     # the interpreter is not the repository's own (a venv in it)
     found = [w0] if "/" in w0 else [_which(w0, pv) for pv in pvs]

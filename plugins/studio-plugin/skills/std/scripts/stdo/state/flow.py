@@ -712,7 +712,7 @@ def overlay(repo, o, hooks, argv):
         if miss:
             from ..commit.summary import missing_text
             raise store.Refused("the person's question did not show what the overlay holds — ask again with each key "
-                                "and its number of entries (m1-plan §23.2 J29). %s"
+                                "and its number of entries. %s"
                                 % missing_text(miss), C.NO_EVIDENCE)
         evidence.consume(repo, ev, None, "overlay")
         p = os.path.join(repo, ".claude", "studio", "local", "config.internal.json")

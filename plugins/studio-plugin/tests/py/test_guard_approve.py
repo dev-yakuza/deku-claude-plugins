@@ -267,7 +267,8 @@ class GuardApproval(JudgeCase):
     def test_s2v_approvals_in_the_persons_mode(self):
         self.turn(label="승인 v %s" % H)
         d = self.assertRule("s2v character approve a", "G-APPROVAL")
-        self.assertIn("M3b", d.message())
+        self.assertIn("actor approvals arrive with actors in a later version", d.message())
+        self.assertNotIn("M3b", d.message())
         self.assertRule("python3 .claude/studio/scripts/lock.py actor-op a -- s2v character approve a", "G-APPROVAL")
 
 

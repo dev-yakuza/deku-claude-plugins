@@ -230,3 +230,61 @@ class PerfNoHarness(helpers.StudioTestCase):
         sys.stderr.write("\n[perf] %s: guard.py on `git status` without a harness: p50 %.0f ms, max %.0f ms (%d runs)\n"
                          % (sys.version.split()[0], p50 * 1000, times[-1] * 1000, len(times)))
         self.assertLess(p50, 0.9)
+
+
+class PerfSnapshots(helpers.StudioTestCase):
+    """fix-0029 §1.6: the same `git status` call as PerfNoHarness with 13 shell snapshots in CLAUDE_CONFIG_DIR — what
+    the snapshot parse adds to every Bash call (Claude Code keeps one file per recent session). Each file is
+    guard_base.perf_snapshot_text: ~280 KB, ~10,500 typeset -f lines, 250 alias lines; the texts differ in one
+    function-body line, the variant key is the same. The main figure is a guard.py subprocess (it never imports
+    guard_base: the original snapshot.load). Target p50 160 ms; fails above 480 ms (3×). Also prints the in-process
+    `judge.decide` (min of 10) with the original load set as snapshot.load and no loader passed (production-equal)."""
+
+    RUNS = 12
+    FILES = 13
+
+    def test_git_status_with_13_snapshots(self):
+        import guard_base
+        from stdo.guard import snapshot as snapmod
+        repo = helpers.make_repo(self.tmp, name="plain", harness=False)
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_DATA"] = os.path.join(self.tmp, "plugin-data")
+        d = os.path.join(env["CLAUDE_CONFIG_DIR"], "shell-snapshots")
+        os.makedirs(d)
+        now = time.time()
+        for i in range(self.FILES):
+            p = os.path.join(d, "snapshot-zsh-%d-p%03d.sh" % (1792000000000 + i, i))
+            with open(p, "w") as f:
+                f.write(guard_base.perf_snapshot_text(i, path=env.get("PATH", "/usr/bin:/bin")))
+            os.utime(p, (now - 60 * (i + 1), now - 60 * (i + 1)))
+        hook = helpers.hook_input("Bash", {"command": "git status"}, repo)
+        times = []
+        for i in range(self.RUNS + 1):
+            t = time.perf_counter()
+            r = subprocess.run([sys.executable, GUARD], input=json.dumps(hook), capture_output=True, text=True,
+                               env=env, timeout=60)
+            if i:
+                times.append(time.perf_counter() - t)
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        times.sort()
+        p50 = times[len(times) // 2]
+        # in process: the original load as snapshot.load (not the tests' patch, which also loads the 0.0.26 reading
+        # and the 0.1.0 reference), no loader passed — `snapshot_loader=` would leave the 0.0.26 guard without one
+        patch = snapmod.load
+        snapmod.load = guard_base._load_both.__defaults__[-1]
+        try:
+            snap, _notes = snapmod.load(env)
+            self.assertEqual((len(snap.variants), snap.total), (1, self.FILES))
+            inproc = []
+            for _ in range(11):
+                t = time.perf_counter()
+                deny, _ctx = judge.decide(hook, env)
+                inproc.append(time.perf_counter() - t)
+                self.assertIsNone(deny)
+        finally:
+            snapmod.load = patch
+        sys.stderr.write("\n[perf] %s: guard.py on `git status` with %d shell snapshots: p50 %.0f ms, max %.0f ms "
+                         "(%d runs); in process judge.decide min %.0f ms\n"
+                         % (sys.version.split()[0], self.FILES, p50 * 1000, times[-1] * 1000, len(times),
+                            min(inproc[1:]) * 1000))
+        self.assertLess(p50, 0.48)

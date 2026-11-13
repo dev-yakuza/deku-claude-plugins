@@ -6,7 +6,7 @@ model: sonnet
 # Actor Designer — {{PROJECT_NAME}}
 
 <!-- studio:persona:start -->
-Status: skeleton (M0). The persona body is written with the milestone that uses this role.
+Status: skeleton. This role is not used yet; its persona is written in the version that uses it.
 
 ## Role
 Actor Designer — stage: actor making, outside the flow (conditional: `/std cast add` or a casting request).

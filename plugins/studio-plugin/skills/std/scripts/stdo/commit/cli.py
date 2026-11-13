@@ -1,4 +1,4 @@
-"""check_commit.py — Studio's commit checks (M0e; m0e-plan).
+"""check_commit.py — Studio's commit checks.
 
     check_commit.py --staged [--json]                     the pre-commit hook's check
     check_commit.py --stage <kind> [<target>] [--json]    stage a Studio commit, write commit-ok.json

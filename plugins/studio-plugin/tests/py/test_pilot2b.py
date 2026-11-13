@@ -677,15 +677,15 @@ class Text(unittest.TestCase):
 
     def test_versions(self):
         from stdo import SCRIPTS_VERSION
-        self.assertEqual(SCRIPTS_VERSION, "25")
+        self.assertEqual(SCRIPTS_VERSION, "26")
         with open(os.path.join(helpers.PLUGIN, ".claude-plugin", "plugin.json")) as f:
-            self.assertEqual(json.load(f)["version"], "0.1.0")
+            self.assertEqual(json.load(f)["version"], "0.1.1")
         for n, notes in (("README.md", "## Version notes"), ("README.ko.md", "## 버전 노트"),
                          ("README.ja.md", "## バージョンノート")):
             text = read(helpers.PLUGIN, n)
             self.assertIn(notes, text, n)
-            self.assertIn("0.1.0", text.split(notes)[1], n)
-        self.assertIn("0.1.0", read(helpers.PLUGIN, "tests", "README.md"))
+            self.assertIn("0.1.1", text.split(notes)[1], n)
+        self.assertIn("0.1.1", read(helpers.PLUGIN, "tests", "README.md"))
 
 
 if __name__ == "__main__":

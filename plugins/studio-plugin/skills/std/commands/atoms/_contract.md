@@ -121,9 +121,9 @@ person's removal procedure**, done in a terminal (remove the installed hook and 
 `LEFTHOOK=0` / `SKIP`, `-c core.hooksPath` or a `git config` change of hooks or aliases).
 
 Approval-type commands work only from a Claude session with the guard's evidence: a person answers
-the session's question; there is no direct terminal path (intended — 00-plan §3.4).
+the session's question; there is no direct terminal path (intended).
 
-**How to ask for an approval** (the guard reads the answer from the transcript — m0d2-plan §2–§4):
+**How to ask for an approval** (the guard reads the answer from the transcript):
 - Ask in the **main session** (never from a subagent), with AskUserQuestion. Show the artifact and its hash.
 - Each question's text is unique within the call and **contains the hash** of its fixed option. A question about
   a video **starts with the video id in brackets, literally `[<video>]`** (e.g. `[v1] ① 대본 — … · hash

@@ -217,7 +217,7 @@ class HarnessKind(object):
                     out.append(OLD_FORMAT)  # the committed blob (the work tree copy may say otherwise)
                 old = _json(git.show("%s:%s" % (ctx.head, spaths.CONFIG))) if ctx.head else None
                 if isinstance(old, dict) and (old.get("studio_root") or "studio") != (cfg.get("studio_root") or "studio"):
-                    out.append(Problem(3, "studio_root changes — moving Studio's folder is not supported yet (M1)",
+                    out.append(Problem(3, "studio_root changes — moving Studio's folder is not supported yet",
                                        spaths.CONFIG))
         # H2 · H3 · H4 on content and config files
         texts = {}

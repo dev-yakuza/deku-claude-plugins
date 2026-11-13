@@ -32,7 +32,9 @@ with each video on the platforms you choose.
   Command Line Tools, `/usr/bin/python3` may wait until the hook's 20 s timeout.
 - **Cost per call** (one machine, an Apple silicon Mac): the guard on a Bash `git status` in a repository without a harness
   took about 80 ms (p50, Python 3.9.9 and 3.15.2) and about 155 ms with macOS's `/usr/bin/python3` 3.9.6
-  (`tests/py/test_guard_entry.py`, `PerfNoHarness`).
+  (`tests/py/test_guard_entry.py`, `PerfNoHarness`). The guard also reads Claude Code's shell snapshots (Claude Code
+  keeps one per recent session, ~280 KB each): with 13 of them the same call took about 140 ms (3.15.2) and about
+  170 ms (3.9.9), and each more file adds about 5 ms (`PerfSnapshots`).
 
 ## Install
 
@@ -198,6 +200,17 @@ the repository): [docs/removing.md](docs/removing.md).
   still at the script stage needs the cast block in its script (the script check says so); one approved at ① without
   it goes back to the script stage (`/std script <video>`, then verify and ① again); videos past cast keep theirs.
 - **0.1.0**: marketplace registration. Upgrading from 0.0.28 needs no `/std update` (the scripts' version stays 25).
+- **0.1.1**: the guard parses shell snapshots in about half the time, about a third less per call end to end with 13
+  snapshots (210 → 140 ms here with Python 3.15.2, 300 → 170 ms with 3.9.9; the same decisions); messages and
+  templates no longer name internal milestones; the pre-commit shim's hint names `hooks.py install`; more environment
+  names and pyenv's PATH turn off the guard's own allow — a global `PYTHONPYCACHEPREFIX` or `GIT_CEILING_DIRECTORIES`
+  in your shell means Studio's script calls prompt again. The check also matches `NAME=` anywhere in a shell
+  snapshot, function bodies included.
+- **Upgrading to 0.1.1**: run `/std update` (scripts version 26). If your `platforms/youtube.md` has `checked` filled
+  in, choose "local": the date stays, and the old sentence only named an internal milestone ("new" empties `checked`,
+  and `validate_copy.py` refuses every copy until it is filled in again). For an edited `formats/youtube.md`, choose
+  "local" too. The other changed templates are plugin files that are not installed in repositories (nothing to do).
+  A clone's pre-commit shim written by 0.1.0 stays valid; `hooks.py install` writes the new one.
 
 ## License
 

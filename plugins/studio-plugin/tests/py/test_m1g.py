@@ -162,10 +162,10 @@ class Credit(BoardCase):
         with open(os.path.join(self.vdir, credits.DRAFT), "w") as f:
             json.dump({"schema": 1, "items": [item]}, f)
         _c, lines, h = self.preview()
-        self.assertIn("warning: consent is not supported in M1", self.out)
+        self.assertIn("warning: consent is not supported in this version", self.out)
         self.assertEqual(self.credit(lines, h), 0, self.err)
         self.assertEqual(self.check_board(), 1)
-        self.assertIn("consent is not supported in M1", self.out)
+        self.assertIn("consent is not supported in this version", self.out)
 
     def test_block_yaml_refused(self):
         with open(os.path.join(self.vdir, credits.DRAFT), "w") as f:

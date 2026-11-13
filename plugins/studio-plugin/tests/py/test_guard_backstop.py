@@ -707,3 +707,180 @@ class SourceSkip(BackstopCase):
                     msg = f.message(fctx.denies)
                     self.assertTrue(msg.startswith("Studio guard ["), msg[:80])
                     self.assertLessEqual(len(msg), 1500)
+
+
+class SplitShared(JudgeCase):
+    """fix-0029 §1.3: the frozen snapshot.split_line, wrapped once by the backstop. Real loads: snapshot files in a
+    real CLAUDE_CONFIG_DIR, `judge.decide` with no loader (as in production; no injected `legacy_view`)."""
+
+    def setUp(self):
+        super().setUp()
+        backstop._legacy()
+        from stdo.guard.legacy import snapshot as ls
+        self.ls = ls
+        self.orig = ls.split_line.__wrapped__
+        d = os.path.join(self.env["CLAUDE_CONFIG_DIR"], "shell-snapshots")
+        os.makedirs(d, exist_ok=True)
+        aliases = ALIASES + [("q%d" % i, "'echo %d'" % i) for i in range(20)]
+        for i in range(3):  # three files: two texts, and the same alias lines in each
+            with open(os.path.join(d, "snapshot-zsh-%d-s.sh" % i), "w") as f:
+                f.write(snapshot_text(aliases=aliases, path=self.env["PATH"] + ("" if i < 2 else ":/opt/s")))
+        self.lines = [l for l in snapshot_text(aliases=aliases, path=self.env["PATH"]).split("\n")
+                      if l.startswith("alias ")]
+        self.lines += ["unalias find 2>/dev/null || true", "unalias grep 2>/dev/null || true",
+                       "unalias pkill 2>/dev/null || true",
+                       "PATH='%s'" % self.env["PATH"], "PATH='%s:/opt/s'" % self.env["PATH"]]
+
+    def tearDown(self):
+        self.ls.split_line.__wrapped__ = self.orig
+        super().tearDown()
+
+    def test_installed_once(self):
+        w = self.ls.split_line
+        self.assertTrue(getattr(w, "_shared", False))
+        self.assertIs(w.__wrapped__, self.orig)
+        backstop._install_split(self.ls)
+        backstop._legacy()
+        self.assertIs(self.ls.split_line, w)
+        self.assertEqual(backstop.SPLIT_MAX, 4096)
+
+    def test_same_answers(self):
+        backstop._SPLIT_ON[:] = [True]  # as inside decide
+        try:
+            for line in self.lines + ["alias -- a='b' c=\"d e\" f=g\\ h", "alias -g G='| grep'", ""]:
+                for _ in range(2):
+                    got = self.ls.split_line(line)
+                    self.assertEqual(got, self.orig(line), line)
+                    got.append("changed")  # a new list each time
+                self.assertEqual(self.ls.split_line(line), self.orig(line), line)
+        finally:
+            del backstop._SPLIT_ON[:]
+            backstop._SPLIT.clear()
+
+    def test_exception_never_kept(self):
+        deep = "alias -- deep=" + "$(" * 70 + ")" * 70
+        n = []
+
+        def counting(line):
+            n.append(line)
+            return self.orig(line)
+        self.ls.split_line.__wrapped__ = counting
+        backstop._SPLIT_ON[:] = [True]
+        try:
+            from stdo.guard.legacy import limits as llimits
+            for _ in range(3):
+                with self.assertRaises(llimits.LimitExceeded):
+                    self.ls.split_line(deep)
+            self.assertNotIn(deep, backstop._SPLIT)
+            self.assertEqual(len(n), 3)
+        finally:
+            del backstop._SPLIT_ON[:]
+            backstop._SPLIT.clear()
+
+    def test_outside_decide_nothing_kept(self):
+        n = []
+
+        def counting(line):
+            n.append(line)
+            return self.orig(line)
+        self.ls.split_line.__wrapped__ = counting
+        for _ in range(2):
+            self.ls.load(self.env)  # the 0.0.26 load outside decide (as the tests' guard_base patch)
+        self.assertEqual(backstop._SPLIT, {})
+        self.assertGreater(len(n), len(set(n)))  # every file's lines went through: no memo outside decide
+
+    def test_one_call_per_distinct_line(self):  # like test 7: one real decision
+        n = []
+
+        def counting(line):
+            n.append(line)
+            return self.orig(line)
+        self.ls.split_line.__wrapped__ = counting
+        self.assertEqual(backstop._SPLIT, {})
+        deny, _ctx = judge.decide(self.hook("Bash", {"command": "ls"}), self.env)
+        self.assertIsNone(deny)
+        self.assertEqual(backstop._SPLIT, {})
+        self.assertEqual(sorted(n), sorted(set(n)))  # each line once
+        self.assertEqual(set(n), set(self.lines))  # alias lines, stripped unalias lines, the PATH arguments
+
+    def test_memo_empty_after_every_ending(self):
+        for cmd in ("ls", "rm -rf studio/local"):  # a pass, a G1 deny
+            judge.decide(self.hook("Bash", {"command": cmd}), self.env)
+            self.assertEqual((backstop._SPLIT, backstop._SPLIT_ON), ({}, []), cmd)
+        lj, _dec = backstop._legacy()
+        saved = list(backstop._LEGACY)
+
+        def boom(ctx, hook):
+            self.ls.load(self.env)
+            self.assertTrue(backstop._SPLIT)  # filled during decide
+            raise KeyError("x")
+        backstop._LEGACY[1] = boom
+        try:
+            deny, _ctx = judge.decide(self.hook("Bash", {"command": "ls"}), self.env)
+        finally:
+            backstop._LEGACY[:] = saved
+        self.assertEqual(deny.rule, "G-ERR")
+        self.assertEqual((backstop._SPLIT, backstop._SPLIT_ON), ({}, []))
+        # an exception out of G1 itself (the adapter's caller sees it): still cleared
+        g1 = judge.decide_g1
+
+        def bad(*a, **kw):
+            backstop._SPLIT["x"] = ["x"]
+            raise RuntimeError("g1")
+        judge.decide_g1 = bad
+        try:
+            with self.assertRaises(RuntimeError):
+                judge.decide(self.hook("Bash", {"command": "ls"}), self.env)
+        finally:
+            judge.decide_g1 = g1
+        self.assertEqual((backstop._SPLIT, backstop._SPLIT_ON), ({}, []))
+
+
+class LegacyDepsClosure(JudgeCase):
+    """fix-0029 §3.1: the non-guard `stdo` modules the 0.0.26 guard runs are all pinned (structure_test.sh,
+    LEGACY_DEPS_HEAD). An import-only check proves nothing (kinds.registry imports harness.py and video.py lazily), so a
+    subprocess runs the frozen paths: the frozen judge, push and commitrule imported, `kinds.registry({})`, one real
+    frozen commit check on a staged Studio change, and a few 0.0.26 decisions with a snapshot. G1's modules
+    (`stdo.guard.*` outside legacy/) are left out by name; this covers the paths it runs, not every import."""
+
+    def test_every_module_the_frozen_paths_run_is_pinned(self):
+        with open(os.path.join(helpers.PLUGIN, "tests", "structure_test.sh"), encoding="utf-8") as f:
+            st = f.read()
+        block = st.split("LEGACY_DEPS_HEAD = {", 1)[1].split("}", 1)[0]
+        pinned = {m.replace("/", ".")[:-3].replace(".__init__", "") for m in re.findall(r'"(stdo/[^"]+\.py)"', block)}
+        with open(os.path.join(self.repo, "studio", "videos", "v", "script.md"), "a") as f:
+            f.write("more\n")
+        helpers.git(self.repo, "add", "studio/videos/v/script.md")
+        d = os.path.join(self.env["CLAUDE_CONFIG_DIR"], "shell-snapshots")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "snapshot-zsh-1-a.sh"), "w") as f:
+            f.write(snapshot_text(aliases=ALIASES, path=self.env["PATH"]))
+        code = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1])
+sys.dont_write_bytecode = True
+repo, hook = sys.argv[2], json.loads(sys.argv[3])
+import os
+from stdo.guard.legacy import commitrule as lc, judge as lj, push as lp
+from stdo.commit import kinds
+kinds.registry({})
+o = lc.evaluate(repo, dict(os.environ), {}, lc.parse_commit([]))
+out = [o.deny and o.deny[0], o.studio]
+for cmd in ("git commit -qm x", "git push origin HEAD", "ls studio", "python3 .claude/studio/scripts/state.py next v"):
+    hook["tool_input"] = {"command": cmd}
+    d, _ctx = lj.decide(hook, dict(os.environ))
+    out.append(d and d.rule)
+print(json.dumps([out, sorted(m for m in sys.modules if m.startswith("stdo"))]))
+"""
+        hook = self.hook("Bash", {"command": "ls"})
+        r = subprocess.run([sys.executable, "-B", "-c", code, helpers.SCRIPTS, self.repo, json.dumps(hook)],
+                           capture_output=True, text=True, env=dict(self.env, PYTHONDONTWRITEBYTECODE="1"),
+                           cwd=self.repo, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        out, mods = json.loads(r.stdout)
+        self.assertEqual(out[:2], ["G-COMMIT", ["studio/videos/v/script.md"]])  # the frozen check ran to commit-ok
+        self.assertEqual(len(out), 6)
+        loaded = {m for m in mods if m != "stdo.guard" and not m.startswith("stdo.guard.")}  # the guards' own
+        for m in ("stdo.commit.harness", "stdo.commit.video", "stdo.credits"):
+            self.assertIn(m, loaded)  # the lazy imports did run
+        self.assertEqual(sorted(loaded - pinned), [])

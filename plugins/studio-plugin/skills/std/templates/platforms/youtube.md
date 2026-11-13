@@ -8,8 +8,8 @@ outputs:
 ---
 # YouTube
 
-**Drafted by the agent (M1h) and revised against the sources listed at the end — a person checks it against
-YouTube's own help, fixes what differs, and fills `checked` above with the date (U-M1h).** Until then `validate_copy.py` refuses every copy for this platform. Only a
+**Drafted by the agent and revised against the sources listed at the end — a person checks it against
+YouTube's own help, fixes what differs, and fills `checked` above with the date.** Until then `validate_copy.py` refuses every copy for this platform. Only a
 person changes this file (the guard protects it; a change shows up in the harness commit question).
 
 <!-- studio:rules -->

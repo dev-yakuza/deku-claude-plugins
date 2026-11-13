@@ -398,11 +398,12 @@ def _write_atomic(p, data):
 
 
 def _one_language(s):
-    """Until M3a (translation), tuple rewrites support one active language only: with more,
+    """Until translation arrives (a later version), tuple rewrites support one active language only: with more,
     refuse rather than move some languages' fields."""
     active = [k for k, L in s["langs"].items() if L["status"] == "active"]
     if len(active) > 1:
-        _refuse("rewriting approvals of several languages (%s) needs M3a" % ", ".join(active), C.WAIT)
+        _refuse("rewriting approvals of several languages (%s) is not supported yet (translation arrives in a later "
+                "version)" % ", ".join(active), C.WAIT)
 
 
 def _from_hash(s):

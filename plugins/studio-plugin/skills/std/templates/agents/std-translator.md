@@ -6,7 +6,7 @@ model: sonnet
 # Translator — {{PROJECT_NAME}}
 
 <!-- studio:persona:start -->
-Status: skeleton (M0). The persona body is written with the milestone that uses this role.
+Status: skeleton. This role is not used yet; its persona is written in the version that uses it.
 
 ## Role
 Translator — stage: after ① (conditional: two or more languages).

@@ -93,7 +93,7 @@ def parse(label):
 HASHED = {"approve": approve, "reject-source-diff": reject, "repin": repin, "exclude-output": exclude,
           "credit": credit}
 # subcommands that need evidence but have no label yet: the milestone that brings them
-PLANNED = {"approve-actor": "M3b", "move": "later", "rollback": "M4"}
+PLANNED = {"approve-actor": "a later version", "move": "later", "rollback": "a later version"}
 
 
 class NoLabel(Exception):
@@ -234,5 +234,5 @@ def expected(argv, repo, studio_root):
     if cmd in PLANNED:
         when = PLANNED[cmd]
         raise NoLabel("state.py %s %s — there is no approval label for it yet" % (
-            cmd, "is not part of M1" if when == "later" else "arrives in %s" % when))
+            cmd, "is not supported" if when == "later" else "arrives in %s" % when))
     raise NoLabel("state.py %s is not an approval command the guard knows" % cmd)
