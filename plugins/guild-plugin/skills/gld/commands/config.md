@@ -157,20 +157,34 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
 - **Cost.** A local pass saves the implementation part of the developer's work. A **fallback costs
   more than not using this** — the tests-only spawn, then the full developer spawn, plus a leader
   turn per `wait` call. Check `report`'s pass rate before leaving it on.
-- Skipped automatically for loop-backs, `refactor` Issues and Issues with visual cases. A job
-  without `docs/specs/<N>/skeleton.md` is `ineligible:no_skeleton` — with only the tests to go
-  on, a 27B model was measured reasoning until `max_output_tokens` on every attempt.
+- Skipped automatically for loop-backs, `refactor` Issues, Issues with visual cases and Issues
+  without a (non-empty) `docs/specs/<N>/skeleton.md` — with only the tests to go on, a 27B model
+  was measured reasoning until `max_output_tokens` on every attempt (`ineligible:no_skeleton`).
+  The tests must be committed or staged with nothing unstaged on top: an untracked test is
+  `ineligible:test_untracked`, one with unstaged edits `ineligible:tests_unstaged` (the model is
+  checked against the working tree, the leader commits the index).
+  A check run that changes a test file (an inline snapshot filled in, a formatter in
+  `lint_cmd`) does not count as a pass: the test is put back and the job falls back with
+  `tests_modified`.
 - A reasoning model's thinking counts against `max_output_tokens` (`output_cap` in `report`).
-  An attempt cut off there raises the cap of every later attempt to `max_output_tokens_retry`:
+  An attempt cut off there raises the cap of every later attempt to `max_output_tokens_retry`
+  (as far as `num_ctx` allows — below; a value under `max_output_tokens` means no raise):
   most passes fit the first cap, a few need more, and starting high only lets a runaway hold the
-  model longer. Input and output share `num_ctx`, so a retry cap that leaves no room for the
-  prompt is a config error; `report` warns when, at the speed it observed, the retry cap cannot
-  be generated within `attempt_timeout_min` (raise that, or lower the cap). `report`'s
-  `raised_cap_outcomes` shows whether the raised attempts actually pass. An attempt cut off
-  while still reasoning — no edit written yet — usually has its answer in the reasoning, so the
-  next attempt is handed that reasoning's last 12,000 characters and runs with reasoning off
-  (`think: false`, sent only to a model that showed it reasons); `num_ctx` must leave room for
-  that tail too.
+  model longer. An attempt cut off while still reasoning — no edit block written yet — usually
+  has its answer in the reasoning, so the next attempt that gets an answer is handed that
+  reasoning's last 12,000 characters (beside the last test failure, if any), and reasoning stays
+  off for the rest of the job (`think: false`, sent only to a model that showed it reasons).
+- Input and output share `num_ctx`. A job is `ineligible:context_too_large` when its prompt
+  (skeleton, test diff, implementation files) plus `max_output_tokens` plus ~7k tokens of
+  feedback and margin does not fit. What is left goes first to the reasoning tail, then to the
+  raised cap — so with a small `num_ctx` the raised cap is lowered per job (at the start never
+  below `max_output_tokens`) and the tail shortened or dropped, never an error. Defaults
+  (`num_ctx` 65536) leave both in full for prompts up to about 30k tokens. Earlier attempts'
+  edits stay in the files, so each attempt re-checks the fit and shortens the tail, then the
+  cap; a job whose files outgrow `num_ctx` falls back with `context_overflow`.
+- `report` warns when, at the speed it observed, `max_output_tokens_retry` cannot be generated
+  within `attempt_timeout_min` (raise that, or lower the cap); `raised_cap_outcomes` shows
+  whether the raised attempts actually pass, `observed_tok_per_s` the measured speed.
 - An attended job keeps the model until it ends (so it never waits between attempts); a session
   closed mid-job leaves its worker running to its own end, bounded by `total_timeout_min` of
   active time — other jobs queue behind it meanwhile.
@@ -178,7 +192,9 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
   line per job — each attempt's outcome, the fallback reason, queue wait and active time — and
   each job folder keeps the prompts, the replies and, on a fallback, the model's last diff.
   `python3 <<SKILL_DIR>>/commands/atoms/local_dev.py report` aggregates it (fallback reasons,
-  pass-at-attempt-k, attempt outcomes, and what happened to passes later — `after_pass`).
+  pass-at-attempt-k, attempt outcomes, what happened to passes later — `after_pass` — and the
+  raised-cap and speed fields above). A `local_developer` value of the wrong type (e.g. a
+  non-integer `num_ctx`) makes every call exit 65 — the leader records a `tool error` fallback.
 
 ## Notes
 - M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, visual{baselines[], tests[], matchers[], packages[], config_files[], runnable, env, create, run_file}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, refactor_slot, history[], board, window}, local_developer{enabled, model, ollama_url, max_attempts, max_output_tokens, max_output_tokens_retry, attempt_timeout_min, total_timeout_min, num_ctx, test_cmd, lint_cmd} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.

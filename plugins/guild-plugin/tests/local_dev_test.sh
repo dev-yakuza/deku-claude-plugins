@@ -175,11 +175,16 @@ eq "an untracked test → ineligible:test_untracked" "ineligible:test_untracked:
 rm "$R/test/new_test.txt"
 R="$WORK/r4b"; mkrepo "$R" 4 "$(LDJSON)"; rm "$R/docs/specs/4/skeleton.md"
 eq "no skeleton → ineligible:no_skeleton" "ineligible:no_skeleton" "$(start "$R" 4 | field reason)"
-R="$WORK/r5"; mkrepo "$R" 5 "$(LDJSON '{"num_ctx": 20100, "max_output_tokens": 1000, "max_output_tokens_retry": 1000}')"
+R="$WORK/r5"; mkrepo "$R" 5 "$(LDJSON '{"num_ctx": 7500, "max_output_tokens": 1000}')"
 eq "a prompt over the context budget → ineligible" "ineligible:context_too_large" "$(start "$R" 5 | field reason)"
-R="$WORK/r5b"; mkrepo "$R" 7 "$(LDJSON '{"num_ctx": 21000, "max_output_tokens": 1000, "max_output_tokens_retry": 1000}')"
+R="$WORK/r5b"; mkrepo "$R" 7 "$(LDJSON '{"num_ctx": 14000, "max_output_tokens": 1000}')"
 "$PY" -c 'import sys; open(sys.argv[1],"a").write("설계 " * 4000)' "$R/docs/specs/7/skeleton.md"; git -C "$R" commit -qam big
-eq "CJK text is counted near 1 token/char — 12k chars of Korean overflow a 1k prompt budget" "ineligible:context_too_large" "$(start "$R" 7 | field reason)"
+eq "CJK text is counted near 1 token/char — 12k chars of Korean overflow a 6k prompt budget" "ineligible:context_too_large" "$(start "$R" 7 | field reason)"
+R="$WORK/r5c"; mkrepo "$R" 7 "$(LDJSON '{"num_ctx": 14000, "max_output_tokens": 1000}')"
+"$PY" -c 'import sys; open(sys.argv[1],"a").write("plan " * 2400)' "$R/docs/specs/7/skeleton.md"; git -C "$R" commit -qam big
+eq "…while 12k chars of ASCII fit it" "queued" "$(start "$R" 7 | field state)"; waitjob "$R" 7 >/dev/null; ld "$R" ack --issue 7 >/dev/null
+R="$WORK/r4c"; mkrepo "$R" 4 "$(LDJSON)"; printf '  \n' > "$R/docs/specs/4/skeleton.md"; git -C "$R" commit -qam empty
+eq "an empty skeleton → ineligible:no_skeleton" "ineligible:no_skeleton" "$(start "$R" 4 | field reason)"
 R="$WORK/r6"; mkrepo "$R" 6 "$(LDJSON)"; printf 'status = FIXED\n' > "$R/impl.txt"; git -C "$R" commit -qam already
 start "$R" 6 >/dev/null
 eq "tests already green before any edit → ineligible:tests_already_green" "ineligible:tests_already_green" "$(waitjob "$R" 6 | field reason)"
@@ -233,6 +238,11 @@ start "$R" 19 >/dev/null; OUT="$(waitjob "$R" 19)"
 eq "staged (uncommitted) red tests are accepted and the job passes" "local_pass|uncommitted" "$(echo "$OUT" | field state)|$(echo "$OUT" | field tree)"
 grep -q "expects FIXED" "$FAKE/last_prompt.txt" && ok "…and the staged test diff reaches the model" || bad "staged test diff in prompt" "present" "absent"
 eq "…the staged tests are left as they were" "M  test/impl_test.txt" "$(git -C "$R" status --porcelain -- test)"
+R="$WORK/r10u"; mkrepo "$R" 19 "$(LDJSON)"; printf 'v3 — unstaged\n' >> "$R/test/impl_test.txt"
+eq "a test with unstaged edits → ineligible:tests_unstaged (the leader commits the index)" "ineligible:tests_unstaged:test/impl_test.txt" "$(start "$R" 19 | field reason)"
+R="$WORK/r10m"; mkrepo "$R" 19 "$(LDJSON)"; chmod +x "$R/test/impl_test.txt"
+case "$(start "$R" 19 | field reason)" in *tests_unstaged*) bad "a file-mode change alone" "eligible" "tests_unstaged";; *) ok "a file-mode change alone is not an unstaged test edit";; esac
+waitjob "$R" 19 >/dev/null; ld "$R" ack --issue 19 >/dev/null
 
 # ---------------------------------------------------------------- 3. three failures → fallback
 echo "== fallback after max_attempts"
@@ -254,7 +264,7 @@ eq "the cap stays at max_output_tokens until an attempt hits it" "8000 8000 8000
 
 # an attempt cut off at the cap raises the cap of the next one
 R="$WORK/r11c"; mkrepo "$R" 18 "$(LDJSON)"; : > "$FAKE/replies.jsonl"
-reply "thinking forever" length; reply "$FIX_BLOCK" stop 1
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = BROKEN' length; reply "$FIX_BLOCK" stop 1
 OUT="$(start "$R" 18 >/dev/null; waitjob "$R" 18)"
 eq "output_cap → the next attempt runs at max_output_tokens_retry and passes" "8000 16000 local_pass" \
   "$(echo "$OUT" | field attempts.0.num_predict) $(echo "$OUT" | field attempts.1.num_predict) $(echo "$OUT" | field state)"
@@ -263,7 +273,7 @@ REP="$(ld "$R" report)"
 eq "report counts how raised-cap attempts ended" "1" "$(echo "$REP" | field raised_cap_outcomes.pass)"
 case "$(echo "$REP" | field warnings.0)" in *"over attempt_timeout_min"*) ok "report warns when the retry cap cannot be generated in attempt_timeout_min";;
   *) bad "retry-cap time warning" "a warning" "$(echo "$REP" | field warnings)";; esac
-eq "an attempt cut off with some edit text keeps reasoning on" "None" "$(echo "$OUT" | field attempts.1.think)"
+eq "an attempt cut off mid-block keeps reasoning on (it was already writing edits)" "None" "$(echo "$OUT" | field attempts.1.think)"
 
 # cut off while still reasoning, no edit written: the next attempt gets the reasoning's tail, reasoning off
 R="$WORK/r11d"; mkrepo "$R" 17 "$(LDJSON)"; : > "$FAKE/replies.jsonl"
@@ -272,9 +282,53 @@ OUT="$(start "$R" 17 >/dev/null; waitjob "$R" 17)"
 eq "reasoning cut off → the next attempt runs with think false and passes" "None False local_pass" \
   "$(echo "$OUT" | field attempts.0.think) $(echo "$OUT" | field attempts.1.think) $(echo "$OUT" | field state)"
 eq "…think: false reached the model" "false" "$(cat "$FAKE/last_think.json")"
-grep -q "PLAN-TAIL: replace BROKEN with FIXED" "$FAKE/last_prompt.txt" && grep -q "Your earlier analysis" "$FAKE/last_prompt.txt" \
+grep -q "PLAN-TAIL: replace BROKEN with FIXED" "$FAKE/last_prompt.txt" && grep -q "Your analysis from the attempt that hit the output limit" "$FAKE/last_prompt.txt" \
   && ok "…its prompt carries the cut-off reasoning's tail" || bad "carried reasoning" "tail in prompt" "missing"
 eq "…only the last CARRY_CHARS of it" "True" "$("$PY" -c 'import re,sys; print(max(map(len, re.findall("x+", open(sys.argv[1]).read()))) < 12000)' "$FAKE/last_prompt.txt")"
+# prose but no block before the cut is still "no edit written"; the test feedback of an earlier
+# attempt rides along with the carry; a failed model call does not spend the carry
+R="$WORK/r11f"; mkrepo "$R" 15 "$(LDJSON '{"max_attempts": 4}')"; : > "$FAKE/replies.jsonl"
+reply "$WRONG_BLOCK"
+"$PY" -c 'import json; print(json.dumps({"content": "Let me think about it", "thinking": "PLAN-TAIL2", "done_reason": "length"}))' >> "$FAKE/replies.jsonl"
+"$PY" -c 'import json; print(json.dumps({"content": "x", "done_reason": "stop", "sleep": 40}))' >> "$FAKE/replies.jsonl"
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = STILL_BROKEN\n=======\nstatus = FIXED\n>>>>>>> REPLACE'
+OUT="$(start "$R" 15 >/dev/null; waitjob "$R" 15 90)"
+eq "prose without a block before the cut → reasoning off; a timed-out call keeps the carry" "test_fail output_cap attempt_timeout pass local_pass False" \
+  "$(for k in 0 1 2 3; do echo "$OUT" | field attempts.$k.outcome; done | tr '\n' ' ')$(echo "$OUT" | field state) $(echo "$OUT" | field attempts.3.think)"
+grep -q "PLAN-TAIL2" "$FAKE/last_prompt.txt" && grep -q "expected FIXED" "$FAKE/last_prompt.txt" \
+  && ok "…the last prompt carries both the reasoning tail and the earlier test failure" || bad "carry + feedback" "both in prompt" "$(grep -c "PLAN-TAIL2\|expected FIXED" "$FAKE/last_prompt.txt")"
+R="$WORK/r11g"; mkrepo "$R" 14 "$(LDJSON)"; : > "$FAKE/replies.jsonl"
+reply "$WRONG_BLOCK"; "$PY" -c 'import json; print(json.dumps({"content": "still going", "thinking": "", "done_reason": "length"}))' >> "$FAKE/replies.jsonl"
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = STILL_BROKEN\n=======\nstatus = FIXED\n>>>>>>> REPLACE'
+OUT="$(start "$R" 14 >/dev/null; waitjob "$R" 14)"
+grep -q "expected FIXED" "$FAKE/last_prompt.txt" && grep -q "hit the output limit" "$FAKE/last_prompt.txt" \
+  && ok "a cut-off without reasoning keeps the last test failure beside the output-limit note" || bad "test failure after a cut-off" "both" "$(tail -5 "$FAKE/last_prompt.txt")"
+# earlier edits grow the files: the next attempt's cap shrinks to fit num_ctx, or the job falls back
+GROW() { "$PY" -c 'import sys; print("impl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n=======\nstatus = STILL_BROKEN\n# " + "y" * int(sys.argv[1]) + "\n>>>>>>> REPLACE")' "$1"; }
+R="$WORK/rfit1"; mkrepo "$R" 13 "$(LDJSON '{"num_ctx": 12000, "max_output_tokens": 2000, "max_output_tokens_retry": 2000}')"; : > "$FAKE/replies.jsonl"
+reply "$(GROW 30000)"; reply $'impl.txt\n<<<<<<< SEARCH\nstatus = STILL_BROKEN\n=======\nstatus = FIXED\n>>>>>>> REPLACE'
+OUT="$(start "$R" 13 >/dev/null; waitjob "$R" 13)"
+eq "a prompt grown by earlier edits gets a smaller cap, never past num_ctx" "local_pass True" \
+  "$(echo "$OUT" | field state) $(echo "$OUT" | field attempts.1.num_predict | "$PY" -c 'import sys; v=int(sys.stdin.read()); print(1000 <= v < 2000)')"
+R="$WORK/rfit2"; mkrepo "$R" 13 "$(LDJSON '{"num_ctx": 12000, "max_output_tokens": 2000, "max_output_tokens_retry": 2000}')"; : > "$FAKE/replies.jsonl"
+reply "$(GROW 36000)"
+eq "…and one that no longer fits falls back with context_overflow" "fallback context_overflow" "$(OUT="$(start "$R" 13 >/dev/null; waitjob "$R" 13)"; echo "$(echo "$OUT" | field state) $(echo "$OUT" | field reason)")"
+# the carry is shortened before the cap when a grown prompt no longer fits
+R="$WORK/rfit3"; mkrepo "$R" 13 "$(LDJSON '{"num_ctx": 16000, "max_output_tokens": 2000, "max_output_tokens_retry": 2000}')"; : > "$FAKE/replies.jsonl"
+reply "$(GROW 36000)"; reply_cut "$("$PY" -c 'print("z" * 11000 + " CARRY-END")')"
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = STILL_BROKEN\n=======\nstatus = FIXED\n>>>>>>> REPLACE'
+OUT="$(start "$R" 13 >/dev/null; waitjob "$R" 13)"
+eq "a grown prompt with a carry: the carry shrinks, the cap stays" "local_pass 2000" "$(echo "$OUT" | field state) $(echo "$OUT" | field attempts.2.num_predict)"
+grep -q "CARRY-END" "$FAKE/last_prompt.txt" && ok "…and the carry's tail is what remains" || bad "carry tail kept" "CARRY-END" "missing"
+eq "…shortened below its eligibility length" "True" "$("$PY" -c 'import re,sys; print(max(map(len, re.findall("z+", open(sys.argv[1]).read()))) < 6000)' "$FAKE/last_prompt.txt")"
+eq "a context_overflow fallback leaves an attempt record" "context_overflow" "$(ld "$WORK/rfit2" status --issue 13 --last | field attempts.1.outcome)"
+# a check run that rewrites a test file (a snapshot, a formatter) is not a pass
+R="$WORK/rtm"; mkrepo "$R" 9 "$(LDJSON '{"max_attempts": 1, "test_cmd": "sh -c \"echo touched >> test/impl_test.txt; sh check.sh\" {files}"}')"; : > "$FAKE/replies.jsonl"
+reply "$FIX_BLOCK"
+OUT="$(start "$R" 9 >/dev/null; waitjob "$R" 9)"
+eq "a test file changed by a check run → fallback tests_modified" "fallback tests_modified" "$(echo "$OUT" | field state) $(echo "$OUT" | field reason)"
+eq "…and the test is put back as it was at start" "" "$(git -C "$R" status --porcelain -- test)"
+grep -q touched "$R/$(echo "$OUT" | field job_dir)/tests-changed/test/impl_test.txt" 2>/dev/null && ok "…what changed it is kept in the job folder" || bad "changed test kept" "tests-changed/ copy" "missing"
 eq "a first attempt sends no think field" "null" "$(R2="$WORK/r11e"; mkrepo "$R2" 16 "$(LDJSON)"; : > "$FAKE/replies.jsonl"; reply "$FIX_BLOCK"; start "$R2" 16 >/dev/null; waitjob "$R2" 16 >/dev/null; cat "$FAKE/last_think.json")"
 
 # ---------------------------------------------------------------- 4. reply parsing
@@ -317,7 +371,76 @@ eq "blocks drafted before an inline </think> are ignored — only the final answ
 R="$WORK/r12i"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
 reply "$FIX_BLOCK"$'\n</think>\nDone.'
 eq "…but a </think> with no block after it does not discard the blocks before it" "local_pass" "$(start "$R" 12 >/dev/null; waitjob "$R" 12 | field state)"
+R="$WORK/r12j"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n=======\nstatus = HALF\n</think>\n>>>>>>> REPLACE\n<<<<<<< SEARCH\nstatus = HALF\n=======\nstatus = FIXED\n>>>>>>> REPLACE'
+eq "a </think> line inside a block body is code, not a cut" "local_pass|status = FIXED </think>" "$(start "$R" 12 >/dev/null; waitjob "$R" 12 | field state)|$(tr '\n' ' ' < "$R/impl.txt" | sed 's/ $//')"
 
+R="$WORK/r12k"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n=======\nstatus = WRONG\nhmm, no\n</think>\n'"$FIX_BLOCK"
+eq "a draft block left unclosed before </think> is dropped, not applied up to the next REPLACE" "local_pass|status = FIXED" "$(start "$R" 12 >/dev/null; waitjob "$R" 12 | field state)|$(cat "$R/impl.txt")"
+R="$WORK/r12l"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+reply "$WRONG_BLOCK"$'\nno, that is wrong.</think>\n'"$FIX_BLOCK"
+eq "a </think> glued to the end of a prose line still cuts" "local_pass|status = FIXED" "$(start "$R" 12 >/dev/null; waitjob "$R" 12 | field state)|$(cat "$R/impl.txt")"
+R="$WORK/r12m"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+reply $'I will write a\n<<<<<<< SEARCH\nblock now.\n\n'"$FIX_BLOCK"
+eq "a lone SEARCH line in prose before a real block → refused (ambiguous), nothing written" "fallback" "$(start "$R" 12 >/dev/null; waitjob "$R" 12 | field state)"
+R="$WORK/r12n"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+printf 'DOC = """\n<<<<<<< SEARCH\n"""\nstatus = BROKEN\n' > "$R/impl.txt"; git -C "$R" commit -qam doc
+reply $'impl.txt\n<<<<<<< SEARCH\nDOC = """\n<<<<<<< SEARCH\n"""\nstatus = BROKEN\n=======\nDOC = """\n<<<<<<< SEARCH\n"""\nstatus = FIXED\n>>>>>>> REPLACE'
+eq "a block whose body holds a SEARCH line (a file documenting the format) still applies" "local_pass" "$(start "$R" 12 >/dev/null; waitjob "$R" 12 | field state)"
+# an unclosed draft for an allowed file, rewritten without a </think> between: the draft goes
+R="$WORK/r12o"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n=======\nstatus = WRONG\n'"$FIX_BLOCK"
+eq "an unclosed draft with its divider, then the real block → refused, the file untouched" "fallback|status = BROKEN" "$(start "$R" 12 >/dev/null; waitjob "$R" 12 | field state)|$(cat "$R/impl.txt")"
+R="$WORK/r12p"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n'"$FIX_BLOCK"
+eq "…a draft cut before its divider too" "fallback|status = BROKEN" "$(start "$R" 12 >/dev/null; waitjob "$R" 12 | field state)|$(cat "$R/impl.txt")"
+R="$WORK/r12q"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+printf 'a = 1\nstatus = BROKEN\n' > "$R/impl.txt"; git -C "$R" commit -qam two
+reply $'impl.txt\n<<<<<<< SEARCH\na = 1\n=======\na = 2\n>>>>>>> REPLACE\n<<<<<<< SEARCH\nstatus = BROKEN\n=======\nstatus = WRONG\n<<<<<<< SEARCH\nstatus = BROKEN\n=======\nstatus = FIXED\n>>>>>>> REPLACE'
+eq "…an unnamed second block's draft is refused, never applied with its markers (no path is handed on)" "fallback|a = 1 status = BROKEN" "$(start "$R" 12 >/dev/null; waitjob "$R" 12 | field state)|$(tr '\n' ' ' < "$R/impl.txt" | sed 's/ $//')"
+eq "drop_tokens removes the shortest head worth n estimated tokens (ASCII and CJK)" "True True True" "$("$PY" -c '
+import importlib.util,sys
+sp=importlib.util.spec_from_file_location("ld",sys.argv[1]); m=importlib.util.module_from_spec(sp); sp.loader.exec_module(m)
+a=all(len(m.drop_tokens("x"*(3*n+10), n))==10 for n in range(1,500))
+c=len(m.drop_tokens("설"*50, 10))==40
+e=all(m.estimate_tokens(t)-m.estimate_tokens(m.drop_tokens(t,7))>=7 for t in ["ab설cd"*20,"설계 plan "*30])
+print(a,c,e)' "$LD")"
+R="$WORK/r12r"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+printf 'DOC = """\n<<<<<<< SEARCH\n"""\nstatus = BROKEN\n' > "$R/impl.txt"; git -C "$R" commit -qam doc
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n\nother.txt\n<<<<<<< SEARCH\nkeep me\n=======\nchanged\n>>>>>>> REPLACE\nimpl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n=======\nstatus = FIXED\n>>>>>>> REPLACE'
+eq "a draft in a file that documents the format, then a block for another file → refused, neither file written" "fallback|keep me" \
+  "$(ld "$R" start --issue 12 --base main --files impl.txt other.txt --tests test/impl_test.txt >/dev/null; waitjob "$R" 12 | field state)|$(cat "$R/other.txt")"
+R="$WORK/r12s"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+printf 'Example:\nother.txt\n<<<<<<< SEARCH\nkeep me\n=======\nx\nstatus = BROKEN\n' > "$R/impl.txt"; git -C "$R" commit -qam doc
+reply $'impl.txt\n<<<<<<< SEARCH\nExample:\nother.txt\n<<<<<<< SEARCH\nkeep me\n=======\nstatus = FIXED\n>>>>>>> REPLACE'
+eq "a doc quoting another allowed file's block is edited as the doc — the content decides, the other file is untouched" "local_pass|keep me" \
+  "$(ld "$R" start --issue 12 --base main --files impl.txt other.txt --tests test/impl_test.txt >/dev/null; waitjob "$R" 12 | field state)|$(cat "$R/other.txt")"
+R="$WORK/r12t"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+printf 'DOC = """\n<<<<<<< SEARCH\n"""\nstatus = BROKEN\n' > "$R/impl.txt"; git -C "$R" commit -qam doc
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n=======\nstatus = WRONG\n\nother.txt\n<<<<<<< SEARCH\nkeep me\n=======\nchanged\n>>>>>>> REPLACE\nimpl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n=======\nstatus = FIXED\n>>>>>>> REPLACE'
+eq "a draft with a divider in a file that documents the format never takes the next block as its REPLACE" "fallback|keep me|0" \
+  "$(ld "$R" start --issue 12 --base main --files impl.txt other.txt --tests test/impl_test.txt >/dev/null; waitjob "$R" 12 | field state)|$(cat "$R/other.txt")|$(grep -c 'other.txt' "$R/impl.txt")"
+R="$WORK/r12u"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+printf 'FIX = """\nother.txt\n<<<<<<< SEARCH\nkeep me\n=======\nchanged\n>>>>>>> REPLACE\n"""\nstatus = BROKEN\n' > "$R/impl.txt"; git -C "$R" commit -qam doc
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n=======\nFIX2 = """\nother.txt\n<<<<<<< SEARCH\nkeep me\n=======\nchanged\n"""\nstatus = FIXED\n>>>>>>> REPLACE'
+OUT="$(ld "$R" start --issue 12 --base main --files impl.txt other.txt --tests test/impl_test.txt >/dev/null; waitjob "$R" 12)"
+eq "a marker written into the REPLACE text is refused — never applied to another file" "fallback|keep me" "$(echo "$OUT" | field state)|$(cat "$R/other.txt")"
+R="$WORK/r12v"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+reply $'impl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n'"$FIX_BLOCK"
+OUT="$(start "$R" 12 >/dev/null; waitjob "$R" 12)"
+grep -q "Write each block once" "$R/$(echo "$OUT" | field job_dir)/job.json" && ok "a refused draft tells the model to write each block once, complete" || bad "nested-SEARCH feedback" "message" "missing"
+R="$WORK/r12w"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+printf 'Example:\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\nstatus = BROKEN\n' > "$R/impl.txt"; git -C "$R" commit -qam doc
+reply $'impl.txt\n<<<<<<< SEARCH\nExample:\n<<<<<<< SEARCH\nold\n=======\nExample:\n<<<<<<< SEARCH\nnewer\n\nother.txt\n<<<<<<< SEARCH\nkeep me\n=======\nchanged\n>>>>>>> REPLACE'
+eq "a block for a file that documents the format, missing its REPLACE, never takes the next block in" "fallback|keep me|0" \
+  "$(ld "$R" start --issue 12 --base main --files impl.txt other.txt --tests test/impl_test.txt >/dev/null; waitjob "$R" 12 | field state)|$(cat "$R/other.txt")|$(grep -c 'other.txt' "$R/impl.txt")"
+R="$WORK/r12x"; mkrepo "$R" 12 "$(LDJSON '{"max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+printf 'status = BROKEN\nq = 0\n' > "$R/impl.txt"; printf 'keep me\nq = 0\n' > "$R/other.txt"; git -C "$R" commit -qam two
+A=$'impl.txt\n<<<<<<< SEARCH\nstatus = BROKEN\n=======\nstatus = FIXED\n>>>>>>> REPLACE\n'; B=$'other.txt\n<<<<<<< SEARCH\nkeep me\n=======\nchanged\n>>>>>>> REPLACE\n'
+reply "$A$B$A"$'<<<<<<< SEARCH\nq = 0\n=======\nq = 9\n>>>>>>> REPLACE'
+eq "an unnamed block after a removed duplicate belongs to the duplicate's file" "local_pass|q = 9|q = 0" \
+  "$(ld "$R" start --issue 12 --base main --files impl.txt other.txt --tests test/impl_test.txt >/dev/null; waitjob "$R" 12 | field state)|$(tail -1 "$R/impl.txt")|$(tail -1 "$R/other.txt")"
 # ---------------------------------------------------------------- 5. lint gate + checks
 echo "== lint and checks"
 R="$WORK/r13"; mkrepo "$R" 13 "$(LDJSON '{"max_attempts": 1}')" "! grep -q TODO impl.txt"; : > "$FAKE/replies.jsonl"
@@ -417,10 +540,16 @@ eq "report: pass at attempt 2" "1" "$(ld "$WORK/r21" report | field pass_at_atte
 ld "$WORK/r10" start --issue 1 >/dev/null 2>&1; eq "usage error → exit 64" "64" "$?"
 mkdir -p "$WORK/nocfg" && git -C "$WORK/nocfg" init -q
 ld "$WORK/nocfg" status --issue 1 >/dev/null 2>&1; eq "no Guild config → exit 65" "65" "$?"
-R="$WORK/rcap1"; mkrepo "$R" 1 "$(LDJSON '{"max_output_tokens_retry": 4000}')"
-ld "$R" status --issue 1 >/dev/null 2>&1; eq "a retry cap below max_output_tokens → exit 65" "65" "$?"
-R="$WORK/rcap2"; mkrepo "$R" 1 "$(LDJSON '{"max_output_tokens_retry": 60000}')"
-ld "$R" status --issue 1 >/dev/null 2>&1; eq "a retry cap leaving no room for the prompt in num_ctx → exit 65" "65" "$?"
+R="$WORK/rcap1"; mkrepo "$R" 1 "$(LDJSON '{"max_output_tokens_retry": 4000}')"; : > "$FAKE/replies.jsonl"
+reply "thinking forever" length; reply "$FIX_BLOCK"
+eq "a retry cap below max_output_tokens is not an error — the cap just stays" "8000 8000 local_pass" \
+  "$(OUT="$(start "$R" 1 >/dev/null; waitjob "$R" 1)"; echo "$(echo "$OUT" | field attempts.0.num_predict) $(echo "$OUT" | field attempts.1.num_predict) $(echo "$OUT" | field state)")"
+R="$WORK/rcap2"; mkrepo "$R" 1 "$(LDJSON '{"num_ctx": 32768}')"; : > "$FAKE/replies.jsonl"
+reply "thinking forever" length; reply "$FIX_BLOCK"
+OUT="$(start "$R" 1 >/dev/null; waitjob "$R" 1)"
+eq "num_ctx 32768 (valid before the retry cap existed) still runs" "local_pass" "$(echo "$OUT" | field state)"
+eq "…its raised cap shrinks to what num_ctx leaves beside the prompt and the carry" "True" \
+  "$(echo "$OUT" | field attempts.1.num_predict | "$PY" -c 'import sys; v=int(sys.stdin.read()); print(8000 <= v < 16000)')"
 
 echo
 echo "local_dev: $PASS passed, $FAIL failed"

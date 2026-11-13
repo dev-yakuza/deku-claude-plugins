@@ -31,7 +31,9 @@ tokens. Contract: `_execute_spine.md` Step 1L · config `local_developer` (`conf
 Every subcommand prints a `>>> LOCAL-DEV <<<` sentinel line and then ONE JSON object. `state` is
 `queued` (waiting for the model) / `running` (not terminal) or `local_pass` / `fallback`
 (terminal) or `none`. A `fallback` carries `reason`: `ineligible:<why>` · `server_down` ·
-`queue_busy` (attended only) · `max_attempts` · `total_timeout` · `worker_died` · `worker_error`.
+`queue_busy` (attended only) · `max_attempts` · `context_overflow` (earlier edits grew the
+files past what `num_ctx` holds) · `tests_modified` (a check run changed a test file — it is
+put back as it was at start) · `total_timeout` · `worker_died` · `worker_error`.
 A `local_pass` carries `tree`: `uncommitted` (commit it) · `committed` (a resumed leader already
 did) · `restored` (it was reverted).
 
@@ -58,8 +60,9 @@ is never held behind a sprint between two attempts either.
 
 Attempt outcomes (runs.jsonl, per attempt): `pass` · `apply_fail` · `lint_fail` · `test_fail` ·
 `output_cap` (the model hit its output cap — every later attempt then runs at
-`max_output_tokens_retry`; one cut off while still reasoning, before any edit, hands the next
-attempt its reasoning's tail and turns reasoning off — `think: false`) · `attempt_timeout` (the model call passed
+`max_output_tokens_retry`, lowered per job to what `num_ctx` leaves beside the prompt; one cut
+off while still reasoning, before any edit, hands the next answered attempt its reasoning's tail
+and turns reasoning off for the rest of the job — `think: false`) · `attempt_timeout` (the model call passed
 `attempt_timeout_min`) · `model_error`. A fallback restores every `--files` path to its bytes
 before the job and saves what the model last wrote as `last-local.diff`; the tests the Sonnet
 developer wrote are never touched (edits outside `--files` are refused, whole reply).
@@ -69,6 +72,7 @@ Files: `.claude/guild/memory/local-dev/` (gitignored with the rest of memory/):
     <issue>/<job>/job.json             live state (the worker is its only writer until terminal)
     <issue>/<job>/attempt<k>.prompt.txt · .response.txt · .checks.txt
     <issue>/<job>/last-local.diff      on fallback · test-output.txt on pass · worker.log
+    <issue>/<job>/tests-changed/       a test as a check run left it, before it was put back
 
 Exit: 0 ok (the state is in the JSON) · 64 usage · 65 config or repository error.
 """
@@ -105,7 +109,9 @@ DEFAULTS = {
     "lint_cmd": None,
 }
 FEEDBACK_CHARS = 6000          # failure output handed back to the model per attempt
+FIT_MARGIN = 500               # chat template and estimate slack kept free in num_ctx
 CARRY_CHARS = 12000            # tail of a cut-off attempt's reasoning handed to the next one
+MIN_CARRY_CHARS = 2000         # less room than this → no carry (and reasoning stays on)
 EXCERPT_CHARS = 4000           # failure output kept in runs.jsonl
 POLL_SECONDS = 2.0
 
@@ -199,11 +205,6 @@ def load_config(repo):
     for key in ("max_attempts", "max_output_tokens", "max_output_tokens_retry", "num_ctx"):
         if not isinstance(ld[key], int) or isinstance(ld[key], bool) or ld[key] < 1:
             raise RepoError(f"local_developer.{key} must be an integer >= 1")
-    if ld["max_output_tokens_retry"] < ld["max_output_tokens"]:
-        raise RepoError("local_developer.max_output_tokens_retry must be >= max_output_tokens")
-    if ld["max_output_tokens_retry"] + FEEDBACK_CHARS + CARRY_CHARS + 1000 >= ld["num_ctx"]:
-        raise RepoError("local_developer.max_output_tokens_retry leaves no room for the prompt "
-                        "in num_ctx (input and output share the context window)")
     for key in ("attempt_timeout_min", "total_timeout_min"):
         if not isinstance(ld[key], (int, float)) or isinstance(ld[key], bool) or ld[key] <= 0:
             raise RepoError(f"local_developer.{key} must be a number > 0")
@@ -470,6 +471,10 @@ def eligibility(repo, cfg, args):
         # red tests, so they may wait in the index and go into the leader's commit of the pass
         if git(repo, "ls-files", "--error-unmatch", "--", t, check=False) == "":
             return f"ineligible:test_untracked:{t}", {}
+        # the model is checked against the working tree, the leader commits the index: they
+        # must be the same tests
+        if git(repo, "-c", "core.fileMode=false", "diff", "--name-only", "--", t).strip():
+            return f"ineligible:tests_unstaged:{t}", {}
     mb = git(repo, "merge-base", args.base, "HEAD", check=False).strip()
     if not mb:
         return "ineligible:no_merge_base", {}
@@ -482,16 +487,26 @@ def eligibility(repo, cfg, args):
     skeleton_path = os.path.join(repo, "docs", "specs", str(args.issue), "skeleton.md")
     if not os.path.isfile(skeleton_path):
         return "ineligible:no_skeleton", {}
-    skeleton = open(skeleton_path, encoding="utf-8").read()
+    with open(skeleton_path, encoding="utf-8") as fh:
+        skeleton = fh.read()
+    if not skeleton.strip():
+        return "ineligible:no_skeleton", {}
     text = SYSTEM + skeleton + (args.note or "") + git(repo, "diff", mb, "--", *tests)
     for f in files:
         with open(os.path.join(repo, f), encoding="utf-8") as fh:
             text += fh.read()
-    # a retry repeats the whole prompt plus the failure output — it must fit too
-    budget = cfg["num_ctx"] - cfg["max_output_tokens_retry"] - FEEDBACK_CHARS - CARRY_CHARS - 1000
-    if estimate_tokens(text) > budget:
+    # a retry repeats the whole prompt plus the failure output — it must fit at the first cap
+    room = cfg["num_ctx"] - estimate_tokens(text) - FEEDBACK_CHARS - 1000
+    if room < cfg["max_output_tokens"]:
         return "ineligible:context_too_large", {}
-    return None, {"mb": mb, "skeleton_path": skeleton_path if skeleton else None}
+    # what is left goes to the raised cap and the reasoning carry (chars count as at least one
+    # token each), the carry first: it is what turned a cut-off job into a pass (2026-11). A
+    # config that leaves too little for either gets less, never an error — an old num_ctx keeps
+    # working as it did before both existed
+    retry_cap = max(cfg["max_output_tokens"], min(cfg["max_output_tokens_retry"], room - CARRY_CHARS))
+    carry = min(CARRY_CHARS, room - retry_cap)
+    return None, {"mb": mb, "skeleton_path": skeleton_path, "retry_cap": retry_cap,
+                  "carry_chars": carry if carry >= MIN_CARRY_CHARS else 0}
 
 
 def new_job_id():
@@ -542,9 +557,10 @@ def cmd_start(repo, args):
             append_run(repo, job, cfg)
             emit(public(repo, job))
             return 0
-        job.update(mb=ctx["mb"], skeleton_path=ctx["skeleton_path"])
-        for f in args.files:
-            dst = os.path.join(jd, "originals", f)
+        job.update(mb=ctx["mb"], skeleton_path=ctx["skeleton_path"], retry_cap=ctx["retry_cap"],
+                   carry_chars=ctx["carry_chars"])
+        for f in args.files + args.tests:
+            dst = os.path.join(jd, "originals" if f in args.files else "test-originals", f)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             with open(os.path.join(repo, f), "rb") as src, open(dst, "wb") as out:
                 out.write(src.read())
@@ -576,6 +592,30 @@ def restore(repo, jd, files):
             out.write(data)
 
 
+def restore_changed_tests(repo, jd, tests):
+    """Put back any test whose bytes differ from the start of the job; True when one did.
+    Jobs started before test copies were kept have none to compare — nothing changes."""
+    changed = False
+    for t in tests:
+        src = os.path.join(jd, "test-originals", t)
+        if not os.path.exists(src):
+            continue
+        with open(src, "rb") as fh:
+            data = fh.read()
+        cur = os.path.join(repo, t)
+        if not os.path.exists(cur) or open(cur, "rb").read() != data:
+            if os.path.exists(cur):        # what changed it is kept, never just overwritten
+                keep = os.path.join(jd, "tests-changed", t)
+                os.makedirs(os.path.dirname(keep), exist_ok=True)
+                with open(cur, "rb") as fh, open(keep, "wb") as out:
+                    out.write(fh.read())
+            os.makedirs(os.path.dirname(cur) or ".", exist_ok=True)
+            with open(cur, "wb") as out:
+                out.write(data)
+            changed = True
+    return changed
+
+
 def save_diff(repo, jd, files):
     diff = git(repo, "diff", "HEAD", "--", *files, check=False)
     with open(os.path.join(jd, "last-local.diff"), "w", encoding="utf-8") as fh:
@@ -599,6 +639,7 @@ def settle_dead(repo, job, cfg):
             return fresh
         save_diff(repo, jd, fresh["files"])
         restore(repo, jd, fresh["files"])
+        restore_changed_tests(repo, jd, fresh.get("tests", []))
         fresh.update(state="fallback", reason="worker_died", finished=now_iso(),
                      last_diff=os.path.relpath(os.path.join(jd, "last-local.diff"), repo))
         write_json(os.path.join(jd, "job.json"), fresh)
@@ -606,6 +647,25 @@ def settle_dead(repo, job, cfg):
         return fresh
     finally:
         os.close(fd)
+
+
+def drop_tokens(text, n):
+    """`text` without the shortest head whose estimate_tokens is at least `n`."""
+    units = 0                              # thirds of a token, as estimate_tokens counts
+    for i, ch in enumerate(text):
+        if units >= 3 * n:
+            return text[i:]
+        units += 3 if ord(ch) > 127 else 1
+    return ""
+
+
+def with_checked(checked, note):
+    """A note about a cut-off or failed call, after what the last check said about the edits
+    still in the files — within the same FEEDBACK_CHARS."""
+    room = FEEDBACK_CHARS - len(note) - 2
+    if not checked or room <= 0:
+        return note[:FEEDBACK_CHARS]
+    return checked[-room:] + "\n\n" + note
 
 
 def build_prompt(repo, job, feedback=None, carry=None):
@@ -621,19 +681,29 @@ def build_prompt(repo, job, feedback=None, carry=None):
     for f in job["files"]:
         with open(os.path.join(repo, f), encoding="utf-8") as fh:
             parts.append(f"## Current implementation: {f}\n```\n" + fh.read() + "\n```")
-    if carry:
-        parts.append("## Your earlier analysis (cut off at the output limit before any edit was "
-                     "written — its last part)\n" + carry
-                     + "\n\nDo not analyse again. Write the SEARCH/REPLACE blocks now, against the "
-                     "files above.")
-    elif feedback:
+    if feedback:
         parts.append("## Previous attempt failed\nThe files above already contain your previous "
                      "edits. Verification said:\n" + feedback
                      + "\n\nFix it with new SEARCH/REPLACE blocks against the CURRENT files.")
+    if carry:
+        parts.append("## Your analysis from the attempt that hit the output limit (its last "
+                     "part — no edit of it was written)\n" + carry
+                     + "\n\nDo not analyse again. Write the SEARCH/REPLACE blocks now, against the "
+                     "CURRENT files above.")
     return "\n\n".join(parts)
 
 
-def parse_blocks(text):
+def swallows(search, repl):
+    """True when a REPLACE text looks like it holds the head of a further block."""
+    s_marks = sum(1 for l in search.split("\n") if l.strip() == SEARCH_MARK)
+    r_lines = repl.split("\n")
+    r_marks = [n for n, l in enumerate(r_lines) if l.strip() == SEARCH_MARK]
+    if len(r_marks) > s_marks:
+        return True
+    return any(l.rstrip() == DIVIDER for n in r_marks for l in r_lines[n + 1:])
+
+
+def parse_blocks(text, marked=()):
     """[(path, [search candidates...], replace-candidates aligned)] from a reply.
 
     Line-based. The path is the nearest non-empty, non-fence line above `<<<<<<< SEARCH`.
@@ -641,36 +711,92 @@ def parse_blocks(text):
     every split is kept as a candidate and apply_blocks takes the one that matches once.
 
     A reasoning model run with reasoning off may still reason inline, drafting blocks before a
-    `</think>` line and writing them again after it — only the part after the last one counts
-    when it holds blocks. A block repeated verbatim is the same edit stated twice (measured
-    2026-11: the second copy failed to match and sank a reply that passed every test once
-    deduplicated), so only its first occurrence is kept."""
-    tail = text.rsplit(THINK_END, 1)[-1]
-    if THINK_END in text and SEARCH_MARK in tail:
-        text = tail
+    `</think>` line and writing them again after it — only the part after the last such line
+    counts when it holds blocks. A line ending in `</think>` is that cut unless it sits inside a
+    closed block body (the nearest marker above is a SEARCH, the nearest below a REPLACE), so
+    code that contains the tag is edited like any other while a draft left unclosed, or a
+    `</think>` glued to a line of prose, still cuts. (Prose in the final answer that ends with
+    the tag cuts too — the blocks before it are lost and the tests catch what they did.)
+
+    A SEARCH line before a block's REPLACE is ambiguous — code inside the block, or a new block
+    after an unfinished draft — and no reading of it is safe in general (each guess was shown to
+    write one block's text into another file). It is read as code only in the one case the file
+    itself settles: the file holds such a line (`marked`) and the marker is in the SEARCH text (a
+    divider below it), so the SEARCH must match the file, marker included. Any other block with
+    a SEARCH line inside is refused with a message asking for each block once, complete — an
+    attempt is spent, never wrong code written. (Measured 2026-11: no real reply needed more —
+    the drafts it wrote all stood before a `</think>` line, which the cut above handles.) Read
+    as code, a replacement holding a marker that could open a further block (more markers than
+    the SEARCH, or one with a divider below it) is refused too — so a few genuine edits to such
+    an example are refused, and a swallowed draft with no divider of its own is
+    indistinguishable from an edit that adds a marker line and is applied as written.
+
+    A block repeated verbatim is the same edit stated twice (measured 2026-11: the second copy
+    failed to match and sank a reply that passed every test once deduplicated), so only its
+    first occurrence is kept."""
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    blocks, i = [], 0
+    kinds = [l.strip() if l.strip() in (SEARCH_MARK, REPLACE_MARK) else None for l in lines]
+    prev_mark, nxt, search_after = [None] * len(lines), [None] * len(lines), [False] * len(lines)
+    m = None
+    for n, kind in enumerate(kinds):
+        prev_mark[n], m = m, kind or m
+    m, seen = None, False
+    for n in range(len(lines) - 1, -1, -1):
+        nxt[n], search_after[n] = m, seen
+        m = kinds[n] or m
+        seen = seen or kinds[n] == SEARCH_MARK
+    cut = None
+    for n, line in enumerate(lines):
+        if kinds[n] or not line.rstrip().endswith(THINK_END):
+            continue
+        if prev_mark[n] == SEARCH_MARK and nxt[n] == REPLACE_MARK:
+            continue                       # inside a closed block body: it is code
+        if search_after[n]:
+            cut = n
+    if cut is not None:
+        lines, kinds = lines[cut + 1:], kinds[cut + 1:]
+    blocks, i, last_path = [], 0, None     # last_path: every parsed block's, duplicates too
     while i < len(lines):
-        if lines[i].strip() != SEARCH_MARK:
+        if kinds[i] != SEARCH_MARK:
             i += 1
             continue
         k = i - 1
         while k >= 0 and (not lines[k].strip() or FENCE_RE.match(lines[k])):
             k -= 1
-        if k >= 0 and lines[k].strip() == REPLACE_MARK and blocks:
-            path = blocks[-1][0]           # a second block for the same file, name not repeated
+        if k >= 0 and kinds[k] == REPLACE_MARK and last_path is not None:
+            path = last_path               # a second block for the same file, name not repeated
         else:
             path = lines[k].strip().strip("`").strip() if k >= 0 else ""
         j = i + 1
-        while j < len(lines) and lines[j].strip() != REPLACE_MARK:
+        while j < len(lines) and kinds[j] != REPLACE_MARK:
             j += 1
+        inner = next((x for x in range(i + 1, j) if kinds[x] == SEARCH_MARK), None)
+        if inner is not None and not (
+                path in marked and j < len(lines)
+                and any(l.rstrip() == DIVIDER for l in lines[inner + 1:j])):
+            return None, (f"{'a block for ' + path[:200] if path else 'an unnamed block'} has another {SEARCH_MARK} line before its "
+                          f"{REPLACE_MARK} — an unfinished draft? Write each block once, "
+                          f"complete, with nothing drafted before it")
         if j >= len(lines):
             return None, "a SEARCH block is not closed by >>>>>>> REPLACE"
         body = lines[i + 1:j]
-        divs = [n for n, l in enumerate(body) if l.rstrip() == DIVIDER]
+        divs = [n for n, l in enumerate(body) if l.rstrip() == DIVIDER
+                and (inner is None or i + 1 + n > inner)]
         if not divs:
-            return None, f"a block for {path} has no ======= divider"
+            return None, f"a block for {path[:200]} has no ======= divider"
         cands = [("\n".join(body[:n]), "\n".join(body[n + 1:])) for n in divs]
+        if inner is not None:
+            # read as code, a split must not carry a later block in as its REPLACE: no more
+            # markers there than in its SEARCH, and no marker with a divider below it
+            kept = [(a, b) for a, b in cands if not swallows(a, b)]
+            if not kept:
+                return None, (f"a block for {path[:200]} has a {SEARCH_MARK} line in its "
+                              f"replacement that could start another block — ambiguous, so "
+                              f"nothing was applied. If a block is unfinished, write each block "
+                              f"once, complete; if the file's example really needs that line, "
+                              f"make the edit in smaller blocks that leave it unchanged")
+            cands = kept
+        last_path = path
         if (path, cands) not in blocks:
             blocks.append((path, cands))
         i = j + 1
@@ -682,17 +808,31 @@ def parse_blocks(text):
 def apply_blocks(repo, allowed, text):
     """All-or-nothing: (ok, message). Nothing is written unless every block applies.
     Files are read and written byte-exact in their own line-ending style."""
-    blocks, err = parse_blocks(text)
+    current = {}
+    for f in allowed:
+        with open(os.path.join(repo, f), encoding="utf-8", newline="") as fh:
+            current[f] = fh.read()
+    marked = {f for f, c in current.items() if any(l.strip() == SEARCH_MARK for l in c.splitlines())}
+    blocks, err = parse_blocks(text, marked)
     if err:
         return False, err
+    ok, msg, pending = plan_blocks(allowed, current, blocks)
+    if ok:
+        for path, content in pending.items():
+            with open(os.path.join(repo, path), "w", encoding="utf-8", newline="") as fh:
+                fh.write(content)
+    return ok, msg
+
+
+def plan_blocks(allowed, current, blocks):
+    """(ok, message, {path: new content}) — the edits applied in memory."""
     pending, crlf = {}, {}
     for path, cands in blocks:
         if path not in allowed:
-            return False, (f"edit to a file outside the allowed set: {path!r} — the only "
-                           f"editable files are {', '.join(allowed)}")
+            return False, (f"edit to a file outside the allowed set: {path[:200]!r} — the only "
+                           f"editable files are {', '.join(allowed)}"), None
         if path not in pending:
-            with open(os.path.join(repo, path), encoding="utf-8", newline="") as fh:
-                pending[path] = fh.read()
+            pending[path] = current[path]
             crlf[path] = "\r\n" in pending[path]
         cur = pending[path]
         chosen, counts = None, []
@@ -708,13 +848,10 @@ def apply_blocks(repo, allowed, text):
             if n == 1 and (chosen is None or len(search) > len(chosen[0])):
                 chosen = (search, repl)
         if chosen is None:
-            return False, f"SEARCH matched {counts[0]} times in {path}:\n{cands[0][0][:400]}"
+            return False, f"SEARCH matched {counts[0]} times in {path}:\n{cands[0][0][:400]}", None
         search, repl = chosen
         pending[path] = repl if search == "" else cur.replace(search, repl, 1)
-    for path, content in pending.items():
-        with open(os.path.join(repo, path), "w", encoding="utf-8", newline="") as fh:
-            fh.write(content)
-    return True, f"applied {len(blocks)} block(s) to {len(pending)} file(s)"
+    return True, f"applied {len(blocks)} block(s) to {len(pending)} file(s)", pending
 
 
 def kill_group(pid):
@@ -798,6 +935,11 @@ class Worker:
         return self.cfg["total_timeout_min"] * 60 - self.active
 
     def finish(self, state, reason=None):
+        # the model cannot edit tests, but its checks run them and the lint command: a snapshot
+        # filled in or a formatter's rewrite would change what the pass is judged by — put the
+        # tests back as the test author left them, and do not call that a pass
+        if restore_changed_tests(self.repo, self.jd, self.job["tests"]) and state == "local_pass":
+            state, reason = "fallback", "tests_modified"
         if state == "fallback":
             save_diff(self.repo, self.jd, self.job["files"])
             restore(self.repo, self.jd, self.job["files"])
@@ -836,7 +978,7 @@ class Worker:
                 fcntl.flock(lk, fcntl.LOCK_EX)
                 t0 = time.monotonic()
                 try:
-                    d = chat(self.cfg, prompt, timeout, self.cap, self.think)
+                    d = chat(self.cfg, prompt, timeout, self.send, self.think)
                     return d, None, time.monotonic() - t0
                 except (TimeoutError, OSError) as exc:  # socket timeout, refused, reset
                     secs = time.monotonic() - t0
@@ -893,24 +1035,44 @@ class Worker:
         reason = self.baseline()
         if reason:
             return self.finish("fallback", reason)
+        if restore_changed_tests(self.repo, self.jd, self.job["tests"]):
+            return self.finish("fallback", "tests_modified")   # before a single model call
         feedback = None
         # an attempt cut off at the output cap raises the cap for every later attempt: most
         # passes fit max_output_tokens, a few need more (measured 2026-11: 8 of 10 under 8k,
         # the rest 8.7k and 10.2k), and starting high lets a runaway hold the model for longer
         self.cap = self.cfg["max_output_tokens"]
+        retry_cap = self.job.get("retry_cap", self.cfg["max_output_tokens_retry"])
+        carry_chars = self.job.get("carry_chars", CARRY_CHARS)
         # a reasoning model cut off before writing any edit has usually reached its answer in
         # the reasoning (measured 2026-11: a fresh retry re-derived it and was cut off again),
         # so the next attempt gets that reasoning's tail and runs with reasoning off; like the
         # raised cap this sticks for the rest of the job
-        self.think, carry = None, None
+        # the carry stands beside the last verification feedback: an earlier attempt's edits
+        # stay in the files, and what the tests said about them still holds
+        self.think, carry, checked = None, None, None
         for n in range(1, self.cfg["max_attempts"] + 1):
             prompt = build_prompt(self.repo, self.job, feedback, carry)
-            carry = None
+            # earlier attempts' edits stay in the files, so a late prompt can outgrow what
+            # eligibility measured: shorten the carry, then the cap, never overflow num_ctx
+            over = (estimate_tokens(SYSTEM + prompt) + self.cap + FIT_MARGIN
+                    - self.cfg["num_ctx"])
+            while over > 0 and carry:
+                carry = drop_tokens(carry, over)
+                prompt = build_prompt(self.repo, self.job, feedback, carry or None)
+                over = (estimate_tokens(SYSTEM + prompt) + self.cap + FIT_MARGIN
+                        - self.cfg["num_ctx"])
+            self.send = self.cap - max(0, over)
+            if self.send < min(1000, self.cfg["max_output_tokens"]):
+                self.job["attempts"].append({"n": n, "started": now_iso(), "outcome":
+                                             "context_overflow", "num_predict": max(0, self.send),
+                                             "over_tokens": over})
+                return self.finish("fallback", "context_overflow")
             with open(os.path.join(self.jd, f"attempt{n}.prompt.txt"), "w", encoding="utf-8") as fh:
                 fh.write(prompt)
             d, err, secs = self.call_model(prompt)
             self.active += secs
-            rec = {"n": n, "gen_s": round(secs, 1), "started": now_iso(), "num_predict": self.cap,
+            rec = {"n": n, "gen_s": round(secs, 1), "started": now_iso(), "num_predict": self.send,
                    "think": self.think}
             if err == "total_timeout":
                 self.job["attempts"].append({**rec, "outcome": err})
@@ -918,8 +1080,11 @@ class Worker:
             if d is None:
                 rec["outcome"] = err.split(":")[0]
                 rec["error"] = err
-                feedback = f"The model call failed: {err}. Answer more briefly."
+                # a carry still pending is retried as it was, with the feedback it came with
+                feedback = checked if carry else with_checked(
+                    checked, f"The model call failed: {err}. Answer more briefly.")
             else:
+                carry = None               # spent only once the model answered
                 msg = d.get("message") or {}
                 text = msg.get("content") or ""
                 with open(os.path.join(self.jd, f"attempt{n}.response.txt"), "w",
@@ -929,19 +1094,29 @@ class Worker:
                            output_tokens=d.get("eval_count"), done_reason=d.get("done_reason"))
                 if d.get("done_reason") == "length":
                     rec["outcome"] = "output_cap"
-                    self.cap = self.cfg["max_output_tokens_retry"]
+                    self.cap = retry_cap
                     thinking = msg.get("thinking") or ""
-                    if thinking.strip() and not text.strip():
-                        self.think, carry = False, thinking[-CARRY_CHARS:]
-                    feedback = ("Your answer hit the output limit before it finished. Reason less "
-                                "and output only the SEARCH/REPLACE blocks.")
+                    if thinking.strip() and SEARCH_MARK not in text and carry_chars:
+                        self.think, carry = False, thinking[-carry_chars:]
+                        feedback = checked
+                    else:
+                        feedback = with_checked(checked, "Your answer hit the output limit before "
+                                                "it finished. Reason less and output only the "
+                                                "SEARCH/REPLACE blocks.")
                 else:
                     ok, msg_ = apply_blocks(self.repo, self.job["files"], text)
                     if not ok:
                         rec.update(outcome="apply_fail", error=msg_[:EXCERPT_CHARS])
-                        feedback = f"Your edits could not be applied: {msg_}"
+                        feedback = checked = f"Your edits could not be applied: {msg_}"[:FEEDBACK_CHARS]
                     else:
                         outcome, out = self.checks()
+                        if restore_changed_tests(self.repo, self.jd, self.job["tests"]):
+                            with open(os.path.join(self.jd, f"attempt{n}.checks.txt"), "w",
+                                      encoding="utf-8") as fh:
+                                fh.write(out)
+                            rec["outcome"] = "tests_modified"
+                            self.job["attempts"].append(rec)
+                            return self.finish("fallback", "tests_modified")
                         with open(os.path.join(self.jd, f"attempt{n}.checks.txt"), "w",
                                   encoding="utf-8") as fh:
                             fh.write(out)
@@ -958,7 +1133,7 @@ class Worker:
                         if outcome == "total_timeout":
                             self.job["attempts"].append(rec)
                             return self.finish("fallback", "total_timeout")
-                        feedback = out[-FEEDBACK_CHARS:]
+                        feedback = checked = out[-FEEDBACK_CHARS:]
             self.job["attempts"].append(rec)
             self.save()
             if self.budget() <= 0:
