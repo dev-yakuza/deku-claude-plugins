@@ -47,7 +47,7 @@ all of them keep the article out of auto publish (`images`).
   (`none`) clauses; a line whose clauses are all rule 1 reads `none`:
   ```
   - guide: "<the line, verbatim>" → <reading>[; <reading>…]
-    <reading> = names <kinds> [≤n] | only <kinds> [≤n] | cap <n> | forbids <kind> | unsure <kinds> [≤n]   (whole line: none)
+    <reading> = names <kinds> [≤n] | only <kinds> [≤n] | cap <n> [(unsure)] | forbids <kind> | unsure <kinds> [≤n]   (whole line: none)
   ```
   e.g. `- guide: "illustrator 활성: 상황 동선 도해 1장. 외부 사진·장면 가능. 장식 그림은 1장까지, 섹션
   사이에만." → names diagram ≤1; names external, scene; names decorative ≤1`. The line's effect is
@@ -78,8 +78,17 @@ all of them keep the article out of auto publish (`images`).
      "Xは控える" / "prefer Y to X" (X a kind: photos, AI pictures/scenes, diagrams) → `forbids X`,
      section images included. A preference between diagram styles ("표보다 흐름도") is style → rule 1.
      "충분" / "十分" / "is enough", "중심" / "を中心に" / "mainly" → `names` of the kinds it lists.
-  5. **cap** on images as a whole: 이미지는 … 까지/이하/최대, 画像は…まで/以下, "at most n images" (the
-     subject is images, not a kind) → `cap n`.
+  5. **cap** on images as a whole — only when the clause's subject is the bare word for images
+     (이미지는/그림은 … 까지/이하/최대, 画像は…まで/以下, "at most n images"; never 장식 그림, AI 그림 or
+     another kind word — "장식 그림은 1장까지" is `names decorative ≤1`, rule 6, never `cap 1`) →
+     `cap n`. A count in a clause that names neither a kind nor that word ("본문 길이에 맞춰 1~3장")
+     binds to the kinds of the nearest earlier clause **that names a kind** in the same line →
+     `names <those kinds> ≤n`; when that clause already carries its own count ("도해 1장. 본문 길이에
+     따라 2~3장.") → `cap n`, written `cap n (unsure)` and asked or shown like an `unsure` clause
+     (below); when no earlier clause names a kind → `cap n`. Readings of one kind merge, the counted
+     one setting the count (two counts → the smaller): e.g.
+     `"비교표·흐름도·대화 카드 중심. 글자는 한국어+일본어(후리가나 포함), 본문 길이에 맞춰 1~3장." →
+     names diagram; names diagram ≤3` (diagrams ≤3), never `cap 3`.
   6. **names**: one or more kinds with an optional count or range ("도해 1장", "비교표·흐름도 … 1~3장",
      "장식 그림은 1장까지", "比較図解1〜2枚") → `names <kinds> ≤n`: the count caps **those** kinds only
      (a count in a clause that lists kinds is bound to them — the kinds named earlier in the same
@@ -92,7 +101,8 @@ all of them keep the article out of auto publish (`images`).
      brief); in in-session auto, `--ship` and batch runs it is listed in the PR
      body's `## Images` (§6) and the ship report, so an unseen fallback is visible.
   `names` caps only the kinds it names and `none` limits nothing; `only` and `unsure` rule out
-  every kind they do not name (and cap the named ones at ≤n), `cap` caps all images, `forbids`
+  every kind they do not name (and cap the named ones at ≤n), `cap` caps all images (a `cap n
+  (unsure)` is a `cap n`, not an `unsure` clause), `forbids`
   rules out its kind — a kind ruled out counts as `ok: false`, never replaced by another. The
   illustrator and the editor follow these lines and never derive the reading again; a forbidding
   clause the brief missed is a MAJOR finding (theme `images`) of the editor, not a silent re-read.
@@ -471,7 +481,7 @@ picture no fresh review passed, and never spawn the review from the spawn that p
   g1) as the card" when OG is off on a first-image site — and any unmanaged images). 0.23.0: a
   brief `guide:` line with a clause still `unsure` (no human answered it at the brief approval)
   adds a prose paragraph after the rows — never inside `pr_rows`, which code builds —: each such
-  line quoted, its `unsure` clause read as `only <kinds> [≤n]` (the fail-safe), and that the guide
+  line quoted, its `unsure` clause read as `only <kinds> [≤n]` (a `cap n (unsure)` as `cap n`) — the fail-safe —, and that the guide
   line is the human's to clarify; `## Images` is made for it when there are no rows.
 - `/hrd ship` step 4: external images listed (file links, source page, credit, license/quotation,
   "replaced by a human" from `HRD image status --rev <head>` `replaced`) with a **separate

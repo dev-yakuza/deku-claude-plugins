@@ -62,9 +62,10 @@ Every stage follows the same frame:
   candidate: <slug> — <reason>`, put it in the hold note (`status` shows it: continue with
   `/hrd refresh <slug>`).
 - With `guide:` lines (0.23.0, `atoms/_images.md` §1): an attended approval shows them and asks
-  about each `unsure` clause; the answer replaces that clause's reading (`names`, `only`, `cap`,
-  `forbids`, or dropped as `none`) before `stage pass`. Otherwise an `unsure` clause stays, read
-  as `only` its kinds — the PR body (§ publish 6) and the ship report list it.
+  about each `unsure` clause and each `cap n (unsure)`; the answer replaces that clause's reading
+  (`names`, `only`, `cap`, `forbids`, or dropped as `none`) before `stage pass`. Otherwise it
+  stays — an `unsure` clause read as `only` its kinds, a `cap n (unsure)` as `cap n` — and the PR
+  body (§ publish 6) and the ship report list it.
 - Approval (§C table), then `HRD branch --topic <id> --slug <slug>` (branches from
   `origin/<base>`), then `HRD stage pass --topic <id> --stage brief`. `HRD branch` refusing with
   `slug in progress: <id>` (translation repos: one topic in flight per slug) → hold
