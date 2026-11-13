@@ -12,6 +12,26 @@ only. Ported from Guild `update.md`.
    command = older than 0.3.0). `newer` → stop: the plugin is older than the repo; update the
    installed plugin and restart instead (an update now would downgrade the repo for everyone).
    `equal` → only personas/settings may differ; continue (`--check` reports only).
+1a. **Image kinds reading** (0.23.0 — before step 2, so no 0.23.0 script runs with the old
+   reading): with an `images` block and no `image-kinds-reading` key in
+   `.claude/herald/memory/update-declined.json`, scan `docs/editorial/categories/*.md` `## Images`
+   and the "Project specifics" and "Habits" of `.claude/agents/illustrator.md` and
+   `content-strategist.md`; read each image line, clause by clause, by the `guide:` rules of
+   `atoms/_images.md` §1; list once (file:line and its readings) every line with a clause read as
+   `only`, `cap`, `forbids`, `names` or `unsure` — unless it
+   already allows section photos or scenes explicitly or carries init's clause "other kinds
+   (photos, scenes) within Herald `images` limits". Nothing listed → nothing to ask. Otherwise
+   say: "From 0.23.0 a line such as '도해 1장' no longer keeps photos and scenes out — section
+   images are planned by default." and ask once, batched: (a) **keep** — the lines are read as
+   listed (nothing written); (b) **keep the listed categories to diagrams** — gate-rules
+   `images.external.per_category` 0 and config.json `images.scenes.per_category` 0 (the guard
+   asks), showing per category what else that turns off (scenes 0: its stand-ins and decorative
+   pictures; external 0: its quotations) — never offered for a `quotation_categories` category;
+   (c) **clarify** — add that clause to the listed lines. (b) and (c) are written in step 5's
+   commit. The answer is recorded only at the end, after step 5's push — `{"image-kinds-reading":
+   "<plugin version>"}` in `update-declined.json` (this machine only) — and never asked again; an
+   interrupted update keeps its lock until a human unlocks, and the next update asks again.
+   `--check` lists the lines only.
 2. **Scripts**: diff `<<SKILL_DIR>>/scripts/` against `.claude/herald/scripts/`; show the
    changed files; on approval copy them (the guard asks — these are guard wiring). Never keep a
    locally edited central script silently: if a local copy differs from both the old and new
@@ -79,4 +99,5 @@ only. Ported from Guild `update.md`.
    0.12.0 reserves the channel names `persona` and `persona-notes`: a channel guide with either name
    → say it must be removed (`/hrd social --remove`) and added again under another name.
 5. Show a summary; on approval `HRD commit --cmd harness --kind update -m "chore(herald):
-   update to <v>" <paths>`, `git push origin <base>`.
+   update to <v>" <paths>`, `git push origin <base>`. Then record step 1a's answer, if one was
+   given.

@@ -79,7 +79,13 @@ Shows `.claude/herald/config.json` in `config.language` with what each dial does
      `images.scenes.decorative`, between sections — no text, real person or work, never first") —
      declined → `decorative: 0` / `stand_in: false`. "Photos only under free licenses" is a photo
      rule, no conflict. A decorative picture or stand-in is a scene: the same generation time,
-     human confirmation, AI label and PR prompt.
+     human confirmation, AI label and PR prompt. 0.23.0: when a kind is turned on, also run
+     `update.md`'s image-kinds scan (step 1a) — every image line read by `atoms/_images.md` §1's
+     `guide:` rules, so a line that only names what a category usually gets ("도해 1장") is seen
+     before section images are planned around it — and offer the same (a) keep / (b) diagrams
+     only by `per_category` 0 / (c) clarify choice for the listed lines. An existing
+     `image-kinds-reading` key in `.claude/herald/memory/update-declined.json` skips the question
+     (the lines are still shown); config's answer is recorded there the same way, after its push.
   3. Say: turning OG on makes every new article carry an OG file, so each gets the `images`
      exclusion — with `autonomy.publish: auto` nothing publishes without consent. Scenes: each one
      takes minutes on this machine (a model load too), a human confirms each in draft (batch:

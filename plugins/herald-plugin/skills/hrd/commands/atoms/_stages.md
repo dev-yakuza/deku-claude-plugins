@@ -44,16 +44,27 @@ Every stage follows the same frame:
   excluded — translations are the same articles + `brief.md` of open Herald PRs
   via `gh pr list --label herald --state open` / `git show origin/<branch>:<w>brief.md`),
   `docs/editorial/search-checklist.md` if search-discovery is enabled (search-discovery writes
-  `<w>search-notes.md` first; the strategist reads it).
+  `<w>search-notes.md` first; the strategist reads it). With an `images` config block also
+  `.claude/agents/illustrator.md` when it exists — its "Project specifics" and "Habits" sections
+  only, never the persona region (their image lines go into the brief's `guide:` lines,
+  `atoms/_images.md` §1, 0.23.0) — and, on a brief rerun (`--rerun`), `HRD image status --topic
+  <id>` (its `rejects`) and the output of `HRD image places --topic <id>`, run before spawning
+  while the passed brief is still on disk (a place a human chose to go without is not planned
+  again — `atoms/_images.md` § Section images).
 - **Output**: `<w>brief.md` — search intent, target reader, primary/secondary keywords, the
   distinct angle (required — scaled-content policy), outline, CTA placement, internal links,
   and a proposed **slug** (lowercase, single hyphens, no `--`) on a line `slug: <slug>`; screens
   the article needs go under `## Screenshots` (`atoms/_screenshots.md` §1). With an `images`
   config block, run `HRD image kinds --topic <id>` before spawning and add its output to the read
-  list: image places go under `## Images`, one kind each (`atoms/_images.md` §1).
+  list: image places go under `## Images`, one kind each, after the `guide:` lines
+  (`atoms/_images.md` §1).
 - Cannibalization conflict → hold `cannibalization`; when the strategist names `refresh
   candidate: <slug> — <reason>`, put it in the hold note (`status` shows it: continue with
   `/hrd refresh <slug>`).
+- With `guide:` lines (0.23.0, `atoms/_images.md` §1): an attended approval shows them and asks
+  about each `unsure` clause; the answer replaces that clause's reading (`names`, `only`, `cap`,
+  `forbids`, or dropped as `none`) before `stage pass`. Otherwise an `unsure` clause stays, read
+  as `only` its kinds — the PR body (§ publish 6) and the ship report list it.
 - Approval (§C table), then `HRD branch --topic <id> --slug <slug>` (branches from
   `origin/<base>`), then `HRD stage pass --topic <id> --stage brief`. `HRD branch` refusing with
   `slug in progress: <id>` (translation repos: one topic in flight per slug) → hold
@@ -138,7 +149,8 @@ are collected between the illustrator and the gate in the order of `atoms/_image
 2. **editor** — read list: the article, category guide, `style-guide.md`, exemplars, the
    screenshots if any (`<w>screenshots.json` and its files — `atoms/_screenshots.md` §3; a
    retake goes through `HRD loopback … --retake`), `<w>images.json`, its files and the OG file
-   if any (`atoms/_images.md` §3), the
+   if any (`atoms/_images.md` §3), the brief's `## Images` section (`<w>brief.md` — its `guide:`
+   lines are the reading the editor judges kinds by, 0.23.0), the
    `<w>review-*.md` notes, `.claude/herald/memory/prose/<id>.json` and, from round 2,
    `<w>critique.md` (earlier rounds, including the findings sent back). Right before every
    spawn (reruns included) run `HRD gate --topic <id> --record`: it rewrites that file for
@@ -448,7 +460,8 @@ the topic to verify and this stage does not run. `translation.pending` are the l
    With screenshots the body also gets `## Screenshots` (`atoms/_screenshots.md` §6; its capture
    column is `HRD shot status`'s `shot_col` — `human` or `auto <url> <captured_at>`). With
    `<w>images.json` or an OG record, `## Images` from `HRD image status --topic <id>` `pr_rows`
-   (`atoms/_images.md` §6).
+   (`atoms/_images.md` §6); a brief `guide:` line with a clause still `unsure` adds its prose paragraph after
+   those rows, never inside them (`atoms/_images.md` §6, 0.23.0).
 7. Unattended: `HRD result --topic <id> --status pr-open --pr <n>`.
 8. `git switch <base>`.
 

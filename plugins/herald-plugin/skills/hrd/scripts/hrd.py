@@ -23,7 +23,7 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.22.1"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.23.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 store.PLUGIN_VERSION = SCRIPTS_VERSION  # new signal records carry it (`v`, 13 §3.4)
 
 

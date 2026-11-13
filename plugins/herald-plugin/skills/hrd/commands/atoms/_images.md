@@ -4,7 +4,8 @@
 `config` and the batch child follow this file when the repo manages images (a config `images`
 block). Design and reasons: design/herald/08-images.md (0.17.0), 09-scenes.md (0.18.0 scenes),
 11-ship-consent.md (0.20.0 — the agent review of a `--ship` run), 12-generated-fallback-and-decorative.md
-(0.21.0 — stand-ins and decorative pictures, §9).
+(0.21.0 — stand-ins and decorative pictures, §9), 14-section-images.md (0.23.0 — the brief's `guide:`
+lines, section images, `external (sign)`).
 Without an `images` block nothing here applies and Herald behaves as 0.16.0 (screenshots:
 `atoms/_screenshots.md`); without `images.scenes` there are no scene images (0.17.0).
 
@@ -27,16 +28,110 @@ all of them keep the article out of auto publish (`images`).
 ## 1. Planning
 
 - **brief**: before spawning the strategist, run `HRD image kinds --topic <id>` and put its output
-  in the read list. The strategist writes `## Images` only where an image really helps the text:
-  one line per place — `- <what it shows> — kind: <screenshot|diagram|external|scene> — <the
+  in the read list. The strategist writes `## Images`: first the `guide:` lines (below), then one
+  line per place — `- <what it shows> — kind: <screenshot|diagram|external|scene> — <the
   paragraph it helps> — <roughly where>` (`external (quotation)` for an official image of a work).
-  A kind with `ok: false` is never planned (never another kind instead). A **scene** only where a
-  situation the text describes really helps the reader (e.g. "a traveler handing a passport at an
-  immigration counter" for the phrases used there) — never a decorative or mood picture at the
-  top; at most `scene.max` per article. `## Screenshots` still works and counts as `kind:
+  A kind with `ok: false` is never planned (never another kind instead). Outside section images
+  (below — there the section's point decides the kind, not the principles' order), a **scene**
+  only where a situation the text describes really helps the reader (e.g. "a traveler handing a
+  passport at an immigration counter" for the phrases used there) — never a decorative or mood
+  picture at the top; at most `scene.max` per article. `## Screenshots` still works and counts as `kind:
   screenshot`. No section → nothing below happens. 0.21.0: an external line names what the place
-  **is** — `external (place|thing|work|person|quotation)` — and `decorative` / `decorative (scene)`
-  lines may plan decorative pictures between sections (§9.1).
+  **is** — `external (place|thing|work|person|quotation|sign)` — and `decorative` / `decorative
+  (scene)` lines may plan decorative pictures between sections (§9.1).
+- **The brief's `guide:` lines** (0.23.0): the strategist reads every image line of its inputs —
+  the category guide's `## Images`, its own and the illustrator's "Project specifics" and "Habits"
+  (never a persona region) — once, and writes one `guide:` line per guide line as the first lines
+  of `## Images`, quoting the **whole guide line (one bullet)**. A line may hold several clauses:
+  read each clause by the rules below and join their readings with "; ", leaving out rule-1
+  (`none`) clauses; a line whose clauses are all rule 1 reads `none`:
+  ```
+  - guide: "<the line, verbatim>" → <reading>[; <reading>…]
+    <reading> = names <kinds> [≤n] | only <kinds> [≤n] | cap <n> | forbids <kind> | unsure <kinds> [≤n]   (whole line: none)
+  ```
+  e.g. `- guide: "illustrator 활성: 상황 동선 도해 1장. 외부 사진·장면 가능. 장식 그림은 1장까지, 섹션
+  사이에만." → names diagram ≤1; names external, scene; names decorative ≤1`. The line's effect is
+  all its clauses together. An em dash in the quoted line is written " - " (a `guide:` line never
+  contains " — ", so it is never taken for a place). A subject marker in a guide line (e.g.
+  `(external place/thing)`) never decides a section image's subject — the section's point does
+  (below). The rules, per clause, in
+  this order (ko / ja / en markers) — rule 1 too ("장면 캡처는 금지" is a work-still clause → `none`,
+  never `forbids scene`):
+  1. **Not about kinds → `none`**: a source rule ("작품 이미지는 공식 페이지 이미지만 인용", "photos only
+     under free licenses") — a count inside a source rule ("공식 이미지만 인용(글당 최대 2장)") is not a
+     cap —, a work-still rule ("장면 캡처는 금지" = stills from a work, not the `scene` kind), a rule
+     about what a picture contains ("글자·실존 인물·작품은 넣지 않고"), a placement or position rule
+     ("장식 그림은 … 섹션 사이에만 쓴다", "첫 이미지로 쓰지 않는다", "between sections", "never first"),
+     whether images are required ("Images are optional unless the illustrator role is enabled … the
+     editor must not flag the absence of images"), style, format, path. A placement inside a clause
+     that also has a count → `names` of that count ("장식 그림은 섹션 사이 1장까지" → `names decorative
+     ≤1`).
+  2. **only** (before forbids — "외/以外/other than/except" negations are `only`): 만, 뿐, 외에는 쓰지
+     않는다, 외 이미지 없음 / のみ, だけ, 以外は使わない, 以外の画像なし / only, nothing but, no images other
+     than — attached to the kind word itself ("도해만", "図解のみ", "diagrams only", "도해 외에는 쓰지
+     않는다", "도해 외 이미지 없음", "図解以外の画像なし", "no images other than diagrams"), never elsewhere
+     in a line whose subject is a kind ("섹션 사이에만" is placement, rule 1); "이미지만 인용" binds a
+     source, not a kind → rule 1.
+  3. **forbids** a kind: 금지, 쓰지 않는다, 넣지 않는다, 없음 / 禁止, 使わない, 入れない / no, never, don't use —
+     bound to a kind word, with no "외/以外/other than/except" (those are rule 2).
+  4. **Hedges** between image kinds: "X 대신 Y" / "Xの代わりにY" / "avoid X" / "X는 되도록 쓰지 않는다" /
+     "Xは控える" / "prefer Y to X" (X a kind: photos, AI pictures/scenes, diagrams) → `forbids X`,
+     section images included. A preference between diagram styles ("표보다 흐름도") is style → rule 1.
+     "충분" / "十分" / "is enough", "중심" / "を中心に" / "mainly" → `names` of the kinds it lists.
+  5. **cap** on images as a whole: 이미지는 … 까지/이하/최대, 画像は…まで/以下, "at most n images" (the
+     subject is images, not a kind) → `cap n`.
+  6. **names**: one or more kinds with an optional count or range ("도해 1장", "비교표·흐름도 … 1~3장",
+     "장식 그림은 1장까지", "比較図解1〜2枚") → `names <kinds> ≤n`: the count caps **those** kinds only
+     (a count in a clause that lists kinds is bound to them — the kinds named earlier in the same
+     clause —, never to the article); every other kind follows `kinds` and its limits. A per-place count
+     (씩, …마다, ずつ, …ごとに, each, per section) caps each place, not the kind → `names <kinds>` with
+     no ≤n.
+  7. Anything else → `unsure <the kinds it names> [≤n]`, read as `only <those kinds> [≤n]` (the
+     fail-safe) — like `only`, it rules out every kind it does not name and caps the named ones at
+     ≤n; an `unsure` clause that names no kind is `none`. An attended brief approval asks about each `unsure` clause (`atoms/_stages.md` §
+     brief); in in-session auto, `--ship` and batch runs it is listed in the PR
+     body's `## Images` (§6) and the ship report, so an unseen fallback is visible.
+  `names` caps only the kinds it names and `none` limits nothing; `only` and `unsure` rule out
+  every kind they do not name (and cap the named ones at ≤n), `cap` caps all images, `forbids`
+  rules out its kind — a kind ruled out counts as `ok: false`, never replaced by another. The
+  illustrator and the editor follow these lines and never derive the reading again; a forbidding
+  clause the brief missed is a MAJOR finding (theme `images`) of the editor, not a silent re-read.
+  Verify and the auditor do not judge kinds. Machine-enforced instead: gate-rules
+  `images.external.per_category` `{"<cat>": 0}` and config.json `images.scenes.per_category`
+  `{"<cat>": 0}` — scenes 0 also turns that category's stand-ins and decorative pictures off,
+  external 0 also its quotations (never offered for a `quotation_categories` category).
+- **Section images** (0.23.0 — replaces "only where an image really helps" for these sections):
+  when the article's sections are real-world places or situations the reader will be in (a
+  station, a hotel front desk, a shop counter, a restaurant entrance), plan **one explanatory image
+  per such section**, in section order, until the limits are used. Other sections (grammar,
+  method, "how to use this list") keep "only where an image really helps the text". The kind
+  follows the section's **point**, decided once:
+  - the **written words** the reader will see (a sign, 免税 printed on a counter, a station-name
+    board) → `external (sign)`: a free-licensed photo (§9.1 — no stand-in, never a scene: text is
+    never generated). No photo → the section gets none. The line's `<what it shows>` quotes the
+    words exactly as the text will write them, in the same script (e.g. `「免税」 printed on a shop
+    counter`) — the researcher, the reviewers and step 7 check the photo against those words.
+  - the **situation** (checking in, ordering, paying) → `scene` only; `scene.ok` false or
+    `scene.max` used → none.
+  - a real place's or thing's **look** (a ticket gate, a temple, an onsen street) → `external
+    (place|thing)`, with §9's stand-in route when no photo.
+  Never another kind instead. With translations on, `kinds` has external and scene off: nothing
+  is planned there. The line's `<the paragraph it helps>` is the section's paragraph that uses the
+  words, `<roughly where>` that section. A first-section place gets no stand-in unless a diagram or
+  screenshot comes before it (never first, §9.3). Section images are explanatory: they count
+  against `external.max`, `images.scenes.max` (`kinds` `scene.max`) and `max_total`; decorative
+  pictures take only what is left — the brief says when a `decorative.max` slot went unused for
+  this reason. A brief rerun (`--rerun`) never plans again a place a human chose to go without:
+  before spawning the strategist (the passed brief still on disk) run `HRD image places --topic
+  <id>` and add its output and `HRD image status --topic <id>` to the rerun read list; a `rejects`
+  entry with `drop: true` and no `by` → its `place` → that place's `line` in the `image places`
+  output → its `what` (the text before the first " — ") is not planned again (place keys change
+  with the line). Such a reject whose `place` has no entry in that output (an older brief, e.g.
+  after an earlier rerun) is never silently ignored: an attended rerun shows it to the human, and
+  the brief lists it under `## Images` as `- earlier drop, place not matched: <its id> - <its
+  reason>` (an em dash in the reason written " - ", so it is never taken for a place); a place
+  whose `what` matches that reason is not planned. A refresh brief may add section images to an article published without them
+  (the human chose the refresh) and lists them as added.
 - **research**: with an `external` place, the researcher adds `## Image candidates` to
   `research.md` — per place 1–3 candidates:
   ```
@@ -55,8 +150,11 @@ all of them keep the article out of auto publish (`images`).
   posts or wiki uploads of works (`docs/editorial/sources.md` `## Image sources`). Candidates are
   not claims. 0.21.0: every external place gets a block — none found → `- none: <where you looked
   and why> — searched: <https URL>[, …]` (§9.2); a decorative place takes free-licensed landscape
-  photos only (no quotation, no recognisable person). The `## Image candidates` section is fixed
-  after the first research pass: a research fix never touches it.
+  photos only (no quotation, no recognisable person). 0.23.0: an `external (sign)` place takes
+  close-ups of the sign or counter without people or railway/brand logos (a face is a BLOCKER),
+  where the words its brief line quotes can be read.
+  The `## Image candidates` section is fixed after the first research pass: a research fix never
+  touches it.
 - **illustrator** (draft, after the writer):
   - **diagram**: write `<w>diagrams/<id>.svg` (§7), run `HRD image texts --topic <id> --id d1
     --source svg` and copy each text into the manifest entry's `texts` with its claim ids (`[]`
@@ -75,7 +173,12 @@ all of them keep the article out of auto publish (`images`).
     the next candidate (at most three) → none left: remove the place (entry, reference) and
     return `DONE_WITH_CONCERNS`. An `env` failure never removes it: return `BLOCKED: tooling
     images fetch <code>`. After a fetch, replace the reference with `HRD image snippet --topic
-    <id> --id e1` **verbatim** (it carries the attribution; never edit it).
+    <id> --id e1` **verbatim** (it carries the attribution; never edit it). 0.23.0, an `external
+    (sign)` image: the words its brief line's `<what it shows>` quotes (as the paragraph writes
+    them) are readable when the image is scaled to 800 px wide, in the same script as written
+    (kanji or kana) — else the next candidate; **the text is never changed to match a photo** (the
+    photo is never evidence). Its `alt` describes the scene and names the words only when a claim
+    backs them (the fact-checker checks the alt as a sentence).
   - **scene** (0.18.0): write the entry (`file` `<images>/<slug>/g1-<what>.png`, `ref`, `alt`,
     `purpose`, `size` `landscape|square|portrait`, `seed` — any integer, first pick 0–9999 —,
     `prompt` in English by §8; no `refs`), put `HRD image snippet --topic <id> --id g1` in the body
@@ -95,8 +198,9 @@ all of them keep the article out of auto publish (`images`).
     work the text names; no watermark, foreign logo or burned-in subtitle; no identifiable face or
     personal data; for a quotation also §4's conditions (the category allows quotations, the text
     leads and the image follows within `quotation_max`, quotation and source shown, nothing but
-    size changed). Per image `HRD image review --topic <id> --id e1 --ok --note "<line>"` or
-    `--redo --note "<why>"`. Nothing else: the editor-in-chief confirms or rejects.
+    size changed); for an `external (sign)` image the words its brief line's `<what it shows>`
+    quotes (shown next to it) readable at 800 px wide, in the same script as written (§3). Per
+    image `HRD image review --topic <id> --id e1 --ok --note "<line>"` or `--redo --note "<why>"`. Nothing else: the editor-in-chief confirms or rejects.
   - **screenshot review mode** (0.20.0, a `--ship` run only): open each listed captured screen
     with Read and judge it: personal data (names, e-mails, phone numbers, addresses, account ids,
     tokens, URL query values, faces) and whether it is the screen the body describes. Per screen
@@ -189,7 +293,9 @@ straight to the tooling hold of `atoms/_stages.md` § Holds, note `tooling: imag
    - **attended, `/hrd draft`**: the capture guide (screenshots) and the **external image list**
      — per image: the file path (the human opens it), the source page, the credit, the license or
      "quotation", and the attribution text from `snippets`; for a quotation also the conditions
-     (§4) and "I checked these conditions"; per **scene** the file path, `alt`, `purpose`, the
+     (§4) and "I checked these conditions"; for an `external (sign)` image the words its brief
+     line's `<what it shows>` quotes next to it and the check "these words are readable at 800 px
+     wide, in the same script" (0.23.0, §3); per **scene** the file path, `alt`, `purpose`, the
      prompt (without style and the fixed no-text sentence), the review line, the body text with
      the label, "drawn again after a limner update" when the item's `regenerated` is true, and the checks: no letters
      or logo-like marks, nothing that looks like a real person, place, brand or work, it fits the
@@ -200,8 +306,8 @@ straight to the tooling hold of `atoms/_stages.md` § Holds, note `tooling: imag
      then the illustrator (not the writer; for a scene another seed or prompt) and this section
      from step 1 / "Go without this image"
      → `HRD image reject --topic <id> --id e1 --drop --reason "…"`, then the illustrator and step 1.
-     0.21.0 (§9.5): for an external image on an `external (place|thing)` line also "A generic AI
-     picture instead" → `HRD image reject --topic <id> --id e1 --drop --stand-in --reason "…"`;
+     0.21.0 (§9.5): for an external image on an `external (place|thing)` line (never `external
+     (sign)`) also "A generic AI picture instead" → `HRD image reject --topic <id> --id e1 --drop --stand-in --reason "…"`;
      for a stand-in also "This place is a work, person, logo or text — never drawn instead" →
      `HRD image review --topic <id> --id g3 --problem subject --human --note "…"`. A stand-in is
      shown as "<place> stand-in — not the real place" with its label, the extra checks of §9.4
@@ -236,7 +342,8 @@ without `--ship` stay at step 7 above. At step 7, instead of holding, while some
 2. **External images and quotations** under `pending.review_external`: spawn a **fresh** illustrator in
    external review mode (§1; read list: those files, each item's `use`, `credit`, `license`,
    `page_url`, `alt`, `purpose`, the paragraph it serves, the snippet; with a quotation the
-   category's `quotation_max`). `--ok` → `HRD image confirm --topic <id> --id e1 --agent`.
+   category's `quotation_max`; with an `external (sign)` image the words its brief line's `<what
+   it shows>` quotes). `--ok` → `HRD image confirm --topic <id> --id e1 --agent`.
    `--redo` → `HRD image reject --topic <id> --id e1 --agent --reason "<the note>"`, then the
    illustrator (the picking one) takes another candidate and fetches it, and §2 from step 1 — its
    step 7 comes back here with a new reviewer. The place's third agent reject must be `--drop`
@@ -267,7 +374,10 @@ picture no fresh review passed, and never spawn the review from the spawn that p
   the OG file when made. Checks: a diagram states the same numbers, names and order as the text,
   does more than repeat it, and reads (size, contrast, overlap) — else **MAJOR** (theme
   `images`); an external image shows the very place, thing or work the text names, carries no
-  watermark, foreign logo or burned-in subtitle, and has its attribution — else MAJOR; a
+  watermark, foreign logo or burned-in subtitle, and has its attribution — else MAJOR; 0.23.0, an
+  `external (sign)` image whose words (quoted in its brief line's `<what it shows>`) are not
+  readable when the image is scaled to 800 px wide, in the same script as written (kanji or kana)
+  — MAJOR (the illustrator takes the next candidate; the text is never changed to match a photo); a
   quotation whose surrounding paragraphs do not treat the work directly, or whose article would
   not stand without it — MAJOR; an identifiable face or personal data — **BLOCKER**; an OG card
   whose title is cut or unreadable — MINOR (a note: the writer cannot fix the generator). A
@@ -294,7 +404,9 @@ picture no fresh review passed, and never spawn the review from the spawn that p
   allows quotations; the text leads and the image follows (at most `quotation_max`, enough text
   per quotation); the quotation and source are shown; nothing but size was changed (Herald never
   changes pixels); **a quotation never becomes an OG card, an SNS image, a card news page or a
-  comic** — and ask "I checked these conditions".
+  comic** — and ask "I checked these conditions". For an `external (sign)` image (0.23.0) also the
+  words its brief line's `<what it shows>` quotes, next to the image: readable at 800 px wide, in the same script as
+  written — else "Use another image".
 - Before a human confirms a scene, show what §2 step 7 lists. A confirmation follows the content:
   polishing `alt` or `purpose` keeps it; a new prompt, seed, size or style makes a new picture to
   confirm.
@@ -356,7 +468,11 @@ picture no fresh review passed, and never spawn the review from the spawn that p
   `agent-reviewed (no human look): <note>` instead, and a place the agent review dropped gets a
   line of its own —, their prompts in a `<details>`
   block and the model license; then the OG line — "the site may use the first image (AI-generated
-  g1) as the card" when OG is off on a first-image site — and any unmanaged images).
+  g1) as the card" when OG is off on a first-image site — and any unmanaged images). 0.23.0: a
+  brief `guide:` line with a clause still `unsure` (no human answered it at the brief approval)
+  adds a prose paragraph after the rows — never inside `pr_rows`, which code builds —: each such
+  line quoted, its `unsure` clause read as `only <kinds> [≤n]` (the fail-safe), and that the guide
+  line is the human's to clarify; `## Images` is made for it when there are no rows.
 - `/hrd ship` step 4: external images listed (file links, source page, credit, license/quotation,
   "replaced by a human" from `HRD image status --rev <head>` `replaced`) with a **separate
   confirmation** "I checked the external images and their attribution" — one question with two
@@ -448,6 +564,7 @@ strategist what is on. The kind says what the place **is** — what the picture 
 | `external (work)` — a work, character, branded product, logo is the subject | never |
 | `external (person)` — a real person is the subject | never |
 | `external (quotation)` — an official image of a work | never |
+| `external (sign)` — the point is the written words (a sign, a counter's print, a station-name board; 0.23.0) | never — no photo, no picture (never a scene) |
 | `external` (unmarked, a 0.20.0 brief) | never |
 | `decorative` — a photo first, else a generic scene | — |
 | `decorative (scene)` — a generic scene from the start | — |
@@ -456,8 +573,10 @@ A shrine photo whose subject is a festival poster or a character statue is `work
 stage is `person`; unsure → `work`. A decorative line's `<where>` is `after "<section heading>"`
 (never before the first section or after the last), its `<paragraph>` is `—`; it never names a
 particular place (that is an `external (place)` line). Decorative pictures come only after the
-explanatory ones, within `decorative.max` — the article's scene, external and total limits still
-count them. A stricter sentence in the repo's own persona or category guide wins over `kinds`.
+explanatory ones (section images included, §1), within `decorative.max` — the article's scene,
+external and total limits still count them. The brief's `guide:` lines (§1) are the one reading
+of the repo's image lines: `only`, `unsure`, `cap` and `forbids` limit `kinds` further; `names`
+and `none` keep no kind out.
 
 ### 9.2 research
 

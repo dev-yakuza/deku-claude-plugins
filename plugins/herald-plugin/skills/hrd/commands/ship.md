@@ -320,7 +320,11 @@ publish nobody approved, also list what was accepted unread (the `accepted` excl
 deferred and out-of-scope MAJORs and dismissals with their reasons, the trimmed sentences, the framings, and in a
 `--ship` run the images and screenshots the agent review confirmed or turned down — id, kind, its
 one-line note, from `HRD image status --topic <id> --rev <head>` `agent` and `HRD shot status`
-`agent_confirmed`; nobody looked at them) — the human sees them now at the latest. A published topic that `follows` an older article: say that the older
+`agent_confirmed`; nobody looked at them) — the human sees them now at the latest. A published
+topic whose brief kept a `guide:` clause `unsure` (0.23.0 — read from `<w>brief.md` `## Images`
+at the PR head, `git show <headRefOid>:<w>brief.md`, or from the PR body's `## Images` paragraph,
+`atoms/_images.md` §6): quote each such line and say which clause was read as `only <kinds>`
+(the fail-safe) — clarifying that guide line is the human's. A published topic that `follows` an older article: say that the older
 one now has `superseded` set and, while `HRD status` lists it under `supersede_pending`, how to
 link it — `/hrd refresh <old>` (`refreshable: true`), or by hand. Then
 `HRD evolve-readiness`: only when `tier` is `sufficient`, end with one line in

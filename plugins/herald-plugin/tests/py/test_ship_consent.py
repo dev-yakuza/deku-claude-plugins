@@ -1007,7 +1007,7 @@ class SettingsTests(RepoCase):
         self.assertEqual(len(self.hrd("config-check")[0]["settings_warnings"]), 2)  # never remembered
 
     def test_version(self):
-        self.assertEqual(self.hrd("version")[0]["version"], "0.22.1")
+        self.assertEqual(self.hrd("version")[0]["version"], "0.23.0")
 
 
 if __name__ == "__main__":

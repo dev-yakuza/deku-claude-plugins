@@ -676,6 +676,69 @@ class RejectTests(StandInCase):
         images.reject(self.root, self.cfg, TID, "e1", reason="a mascot's rights", drop=True, agent=True)  # as 0.20.0
 
 
+# --- section images: `external (sign)` (design/herald/14-section-images.md D2, 0.23.0) ---------------
+
+class SignTests(StandInCase):
+    """A section whose point is written words gets a photo of the sign or nothing — never a picture
+    drawn instead (P28: text is never generated)."""
+
+    def setUp(self):
+        super().setUp()
+        self.sign = LOBBY.replace("the office lobby", "the 免税 sign at the counter").replace(
+            "external (place)", "external (sign)")
+        self.brief = BRIEF.replace(LOBBY, self.sign)
+        self.k = next(p["place"] for p in stand_in.parse_brief(self.brief) if p["line"] == self.sign)
+        self.inputs(self.brief, research().replace(key(LOBBY), self.k))
+        self.e = self.e1(place=self.k)
+        self.manifest([self.g1(place=key(COUNTER)), self.e])
+        self.write("src/content/blog/%s.md" % SLUG, BODY.format(g1=self.snip(self.g1(place=key(COUNTER))),
+                                                                g3="![The tax-free sign](%s)" % self.e["ref"], dec=""))
+        self.route(SRC, jpeg_route())
+        self.assertEqual(self.fetch()["failed"], [])
+        sn = images.snippet(self.root, self.cfg, TID, "e1")["snippet"]
+        self.write("src/content/blog/%s.md" % SLUG, BODY.format(g1=self.snip(self.g1(place=key(COUNTER))), g3=sn, dec=""))
+        self.assertEqual(self.plan()["errors"], [])
+
+    def test_a_sign_line_parses_and_a_guide_line_is_no_place(self):
+        guide = '- guide: "illustrator on: one route diagram - the usual" → names diagram ≤1'
+        pl = stand_in.parse_brief(self.brief.replace("## Images\n", "## Images\n%s\n" % guide))
+        self.assertEqual(next(p for p in pl if p["place"] == self.k)["subject"], "sign")
+        self.assertFalse(any(p["line"].startswith("- guide:") for p in pl))
+        self.assertTrue(stand_in.marked(pl))
+        self.assertIn("sign", stand_in.SUBJECTS)
+        self.assertNotIn("sign", stand_in.STAND_IN_SUBJECTS)
+
+    def test_no_stand_in_for_a_sign(self):
+        out, _ = self.hrd("image", "stand-in", "--topic", TID, "--place", self.k)
+        self.assertEqual((out["ok"], out["why"]), (False, "subject:sign"))
+        with self.assertRaises(HeraldError) as cm:
+            images.reject(self.root, self.cfg, TID, "e1", reason="no good photo", drop=True, as_stand_in=True)
+        self.assertIn("--stand-in is for", str(cm.exception))
+        images.reject(self.root, self.cfg, TID, "e1", reason="go without", drop=True)  # going without works
+        out, _ = self.hrd("image", "stand-in", "--topic", TID, "--place", self.k)
+        self.assertFalse(out["ok"])
+
+    def test_a_scene_cannot_fill_a_sign_line(self):
+        line = next(p for p in stand_in.parse_brief(self.brief) if p["place"] == self.k)
+        self.assertEqual(line["subject"], "sign")  # the subject path, not an unmarked external line
+        g = self.g3(id="g3", place=self.k, stand_in={"subject": "sign", "names": ["免税"], "why": "no-candidates"})
+        self.assertIsNone(stand_in.role_of(g, line))
+        place = dict(line, subject="place")  # the same line as `external (place)` is a stand-in's
+        self.assertEqual(stand_in.role_of(self.g3(), place), "stand-in:place")
+        self.assertIn("cannot fill", self.errors([self.g1(place=key(COUNTER)), g]))
+        self.assertIn("cannot fill", self.errors([self.g1(place=key(COUNTER)), self.g3(place=self.k, stand_in=None)]))
+
+    def test_image_places_shows_the_sign_subject(self):
+        out, _ = self.hrd("image", "places", "--topic", TID)
+        self.assertEqual(next(p for p in out["places"] if p["place"] == self.k)["subject"], "sign")
+
+    def test_no_quotation_on_a_sign_line(self):
+        q = dict(self.e, use="quotation")
+        q.pop("license", None)
+        self.assertIn("a quotation fills an `external (quotation)` line only",
+                      self.errors([self.g1(place=key(COUNTER)), q]))
+
+
 # --- records: human loopback, fetch failures, skip (§R1-M3, §R2-M3, §R2-M4, §R3-m4) -----------------
 
 class RecordTests(StandInCase):

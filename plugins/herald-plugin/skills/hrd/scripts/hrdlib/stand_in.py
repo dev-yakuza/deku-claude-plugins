@@ -23,7 +23,7 @@ import unicodedata
 
 from .util import HeraldError, git, now_iso
 
-SUBJECTS = ("place", "thing", "work", "person", "quotation")
+SUBJECTS = ("place", "thing", "work", "person", "quotation", "sign")  # sign (0.23.0): written words — never drawn
 STAND_IN_SUBJECTS = ("place", "thing")
 KINDS = ("external", "scene", "diagram", "screenshot", "decorative")
 WHYS = ("no-candidates", "used-up", "human-chose")

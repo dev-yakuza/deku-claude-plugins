@@ -86,7 +86,10 @@ base URL · per-article budget (USD) · social posts too? (yes → the summary p
 3. `docs/editorial/` from `templates/editorial/*.tmpl`: charter (purpose from the interview,
    floor and priority lines verbatim), style guide (its "Not AI prose" tells: phrases in
    `config.language` that read as generated, plus any the existing articles avoid), one
-   `categories/<cat>.md` per category,
+   `categories/<cat>.md` per category (its `{{IMAGE_REQUIREMENTS}}`: what this category usually
+   gets, each count next to its kind — "도해 1~2장" —, plus the fixed clause, in `config.language`,
+   "other kinds (photos, scenes) within Herald `images` limits"; never an exclusive list unless the
+   human asked for one, and then with an `only` marker — "도해만" — 0.23.0, `atoms/_images.md` §1),
    sources (with `## Image sources` when external images are on: free licenses first, then
    official pages; the Commons API; banned sources — fan art, personal SNS, watermarked stock,
    wiki uploads of works), promotion, exemplars (P1 candidates, human-confirmed), search checklist (if
@@ -97,7 +100,10 @@ base URL · per-article budget (USD) · social posts too? (yes → the summary p
    P1 patterns — e.g. a category whose articles are per year — for the human to confirm).
 4. `.claude/agents/`: the six spine roles + enabled conditional roles from `templates/agents/`;
    fill the "Project specifics" sections in `config.language` (the illustrator's "Diagram
-   tooling" and "Image style guide" match the images interview); never touch the marker region's
+   tooling" and "Image style guide" match the images interview — `{{IMAGE_STYLE}}` the same way
+   as `{{IMAGE_REQUIREMENTS}}`: what the repo usually draws, counts next to their kinds, plus the
+   fixed clause "other kinds (photos, scenes) within Herald `images` limits", never an exclusive
+   list unless the human asked, then with an `only` marker); never touch the marker region's
    text.
 5. `.claude/herald/topics.json` (empty queue), `.claude/herald/published.json` (every existing
    article as `origin: external`, `current_topic_id: null` — with translations, an existing
