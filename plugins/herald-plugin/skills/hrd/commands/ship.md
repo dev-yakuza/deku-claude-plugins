@@ -119,7 +119,8 @@ PR first `HRD fetch-pr --pr <n>` (a human may have pushed to it; the head then l
 `refs/remotes/origin/pr-<n>`) and use that ref below. For each
 (or the ones named): summary — title, category, audit summary (from `critique.json` at the PR
 head) with any deferred MAJORs listed one per line (`audit_log` outcome `deferred` — the
-human decides them here), latest `/hrd review` finding for it if any (unresolved BLOCKER → warning), verify counts,
+human decides them here) and, for a refresh, any out-of-scope MAJORs one per line likewise
+(outcome `out-of-scope`, with the quoted sentence — left for the next refresh), latest `/hrd review` finding for it if any (unresolved BLOCKER → warning), verify counts,
 the trimmed sentences (`state.json` `trim.removed` at the PR head while `trim.status` is `done`
 — critique's verdict was carried over to that shorter body unseen by the editor and auditor),
 the PR body's `## Reader notes`, `## Framings` and `## Research corrections` if any (readability notes the editor did not
@@ -138,7 +139,9 @@ them; `base-source-changed` / `base-bundle-changed` / `withdrawn-lang` → recom
 
 ## 4. Per-PR human approval (skipped by `--auto`)
 
-Deferred MAJORs (`## Late audit findings`) are decided here: approve accepts them; to fix one,
+Deferred MAJORs (`## Late audit findings`) and out-of-scope MAJORs (`## Out-of-scope audit
+findings (next refresh)` — they stay as candidates for the next refresh) are decided here:
+approve accepts them; to fix one,
 skip this time and push the fix to the PR (the next ship re-verifies it, §5); or decline.
 
 A PR with screenshots (its head's `<w>screenshots.json`, read with `git show
@@ -314,7 +317,7 @@ publish: any failed URL leaves the article merged-unrecorded. Failures stay merg
 
 Summarize what was published, declined, held and left merged-unrecorded. For a `--session-auto`
 publish nobody approved, also list what was accepted unread (the `accepted` exclusions, the
-deferred MAJORs and dismissals with their reasons, the trimmed sentences, the framings, and in a
+deferred and out-of-scope MAJORs and dismissals with their reasons, the trimmed sentences, the framings, and in a
 `--ship` run the images and screenshots the agent review confirmed or turned down — id, kind, its
 one-line note, from `HRD image status --topic <id> --rev <head>` `agent` and `HRD shot status`
 `agent_confirmed`; nobody looked at them) — the human sees them now at the latest. A published topic that `follows` an older article: say that the older

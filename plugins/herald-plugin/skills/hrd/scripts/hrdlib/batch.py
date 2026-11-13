@@ -586,6 +586,9 @@ def main(argv):
     from .util import repo_root
     root = repo_root()
     cfg = Config.load_checked(root)
+    from . import store as store_mod
+    if store_mod.PLUGIN_VERSION is None:  # signals the runner records carry the scripts' version (13 §3.4)
+        store_mod.PLUGIN_VERSION = scripts_version(root)
     logs_dir = os.path.join(paths(root)["memory"], "batch-logs")
     os.makedirs(logs_dir, exist_ok=True)
     if a.detach:

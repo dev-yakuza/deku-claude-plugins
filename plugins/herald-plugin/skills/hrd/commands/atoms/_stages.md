@@ -25,7 +25,11 @@ Every stage follows the same frame:
 - **Refresh topics** (`refresh_of: X` — from `/hrd refresh`, plan, or a queue another command
   picked): the brief is a **refresh brief** — start from
   the topic's `refresh_decision.stale` (else find what is stale), keep the URL/slug `X`, new
-  keywords; the strategist also reads X's current body. In the cannibalization check X itself
+  keywords; the strategist also reads X's current body and X's `refresh_candidates` in
+  `published.json` (auditor findings an earlier refresh left out of its scope, 0.22.0): the brief
+  gets a `## Refresh candidates` section — each one taken into this refresh on a line of its own,
+  `adopted: <from>/<id>` (adopted ones become part of the auditor's scope), the rest left with a
+  word why. In the cannibalization check X itself
   and any article or topic that `follows` X are not conflicts (the brief says how they differ
   and where X links to the newer one). `HRD branch` uses `--slug X` (code refuses another).
 - **Following topics** (`follows: X` — a new article chosen instead of refreshing X): X (and
@@ -185,6 +189,12 @@ are collected between the illustrator and the gate in the order of `atoms/_image
      — is **deferred**: not fixed now, listed in the PR body under `## Late audit findings` for
      the human at ship, logged as `decision_log` `kind: deferral`. A `BLOCKER` is never
      deferred.
+   - **refresh topics** (0.22.0): a `BLOCKER`/`MAJOR`/`MINOR` the auditor tagged `out-of-scope`
+     (text the refresh did not touch, outside its scope — `atoms/_auditor.md` § Out of scope) is
+     not fixed now, in any round: logged with outcome `out-of-scope`, `scope: "out"` and its
+     `quote`, it goes to the next refresh (`published.json` `refresh_candidates`). A `BLOCKER` is
+     never out of scope; an `unfixed`/`regression` finding neither. A MAJOR that looks like a
+     factual error goes to the fact-checker as a pointer, as a deferred one does (below).
    - `skip` (past the cap): do not spawn the auditor; write `final_round` with `audit`,
      `dismissed` and `deferred` empty (earlier decisions stay in `audit_log`) and say so in
      `critique.md`. The editor's PASS and verify still apply; the PR is never
@@ -233,7 +243,8 @@ are collected between the illustrator and the gate in the order of `atoms/_image
 ```json
 {"final_round": {"round": 2, "audit_round": 2, "verdict": "PASS", "body_hash": "sha256:…",
                  "audit": {"blocker": 0, "major": 2, "minor": 1},
-                 "dismissed": {"blocker": 0, "major": 1}, "deferred": {"major": 1}},
+                 "dismissed": {"blocker": 0, "major": 1}, "deferred": {"major": 1},
+                 "out_of_scope": {"major": 0}, "scope_hash": "sha256:…"},
  "audit_log": [{"round": 1, "id": "R1-1", "severity": "MAJOR", "summary": "…", "outcome": "fixed"},
                {"round": 2, "id": "R2-1", "severity": "MAJOR", "tag": "new", "summary": "…",
                 "outcome": "deferred"},
@@ -243,13 +254,18 @@ are collected between the illustrator and the gate in the order of `atoms/_image
                 "outcome": "noted"}],
  "decision_log": [{"kind": "routine", "note": "brief approved"},
                   {"kind": "dismissal", "note": "R2-2: app mention count is policy"},
+                  {"kind": "dismissal", "note": "R1-3: the fee is research C9", "grounds": ["C9"]},
                   {"kind": "deferral", "note": "R2-1: …"}]}
 ```
 
    `final_round` describes only the round that evaluated the current article; `audit_round` is
    the number `HRD audit-round` returned for it. `audit_log` (every finding with its outcome:
-   `fixed` / `dismissed` / `deferred` / `open` / `noted` — `noted` for every MINOR; `open` for a
-   BLOCKER held for a human; a finding re-raised as `unfixed`/`regression` gets a new
+   `fixed` / `dismissed` / `deferred` / `open` / `noted` / `out-of-scope` — `noted` for every MINOR
+   in scope; `open` for a BLOCKER held for a human; `out-of-scope` (refresh topics, any severity
+   but BLOCKER) with `"scope": "out"` and `"quote": "<the sentence, as the auditor quoted it>"`
+   (at most 500 characters), counted for MAJORs in `final_round.out_of_scope.major`; while
+   `audit_log` holds one, `final_round.scope_hash` is the `scope_hash` `HRD refresh-scope` returned
+   for the audit (a skip round keeps it); a finding re-raised as `unfixed`/`regression` gets a new
    `R<round>-<n>` entry and the earlier one stays as is; update an outcome in place — the last entry per id
    counts) and `decision_log` are append-only across rounds (keep earlier entries when rewriting
    the file); `audit_log` is what a recheck auditor receives.
@@ -260,9 +276,12 @@ are collected between the illustrator and the gate in the order of `atoms/_image
    the agent review of a `--ship` run dropped (`by: agent`, `atoms/_images.md` §2a) as `{"kind":
    "agent", "id": "image:e1", "note": "<its reason>"}` (no exclusion reason; never `human`).
    `HRD stage pass --stage critique` refuses unless verdict is PASS, `audit_round` equals the
-   counted round, every BLOCKER is dismissed and every MAJOR is dismissed or (recheck rounds
+   counted round, every BLOCKER is dismissed and every MAJOR is dismissed, (recheck rounds
    only) deferred — each deferred one logged in this round's `audit_log` with outcome
-   `deferred` and tag `new` (any tag on the last round) — and `body_hash` equals the current article hash (a verdict file left over
+   `deferred` and tag `new` (any tag on the last round) — or (refresh topics, any round) out of
+   scope — each logged in this round with outcome `out-of-scope`, and every `out-of-scope` entry
+   of `audit_log` still a whole, unchanged sentence of an unchanged paragraph in the body at the
+   merge-base and now, with `scope_hash` set — and `body_hash` equals the current article hash (a verdict file left over
    from an earlier round cannot vouch for a changed body).
 
 ## translation — translator (topics with translation languages)
@@ -411,8 +430,10 @@ the topic to verify and this stage does not run. `translation.pending` are the l
 5. `git push -u origin <branch>`; then `python3 .claude/herald/scripts/integrity.py --record
    --topic <id> --kind push` (no `--sha`: the record reads HEAD itself).
 6. `gh pr create --base <base> --label herald --title "<title>" --body-file <tmp>` — body:
-   summary, sources count, audit summary, MINOR findings, `## Late audit findings` (deferred
-   MAJORs) if any, `## Unattended decisions` if any (`human` entries go under `## Human decisions`),
+   summary, sources count, audit summary, MINOR findings (in scope), `## Late audit findings` (deferred
+   MAJORs) if any, `## Out-of-scope audit findings (next refresh)` (refresh topics: every
+   `out-of-scope` finding, any severity, with its quote; then one line per candidate the brief
+   adopted — `HRD refresh-scope` `adopted`: `resolved` or `unchanged`) if any, `## Unattended decisions` if any (`human` entries go under `## Human decisions`),
    `## Trimmed sentences` (`state.json` `trim.removed`, `trim.status` `done`) if the trim
    deleted anything, `## Reader notes` (`reader.json` `notes` of the final round, and whether the one
    reader-pass send-back was used — `state.json` `reader_revise`) if any, `## Framings` (the

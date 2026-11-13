@@ -270,15 +270,19 @@ def _int(v):
 
 def critique_passed(crit):
     """critique.json final round: editor PASS and no BLOCKER/MAJOR left open. A MAJOR is closed
-    by a dismissal, or — on a recheck round (audit_round 2+) — by deferring it to the PR."""
+    by a dismissal, or — on a recheck round (audit_round 2+) — by deferring it to the PR; 0.22.0:
+    on a refresh, in any round, by ruling it out of scope (text the refresh did not touch —
+    `audit_log_problems` checks the quote; 13 §1.3)."""
     fr = (crit or {}).get("final_round") or {}
     audit = fr.get("audit") or {}
     dism = fr.get("dismissed") or {}
     deferred = fr.get("deferred") or {}
+    out = fr.get("out_of_scope") or {}
     rnd = fr.get("audit_round")
     recheck = isinstance(rnd, int) and not isinstance(rnd, bool) and rnd >= 2
     blocker = _int(audit.get("blocker")) - _int(dism.get("blocker"))
-    major = _int(audit.get("major")) - _int(dism.get("major")) - (_int(deferred.get("major")) if recheck else 0)
+    major = _int(audit.get("major")) - _int(dism.get("major")) - (_int(deferred.get("major")) if recheck else 0) \
+        - (_int(out.get("major")) if isinstance(out, dict) else 0)
     return fr.get("verdict") == "PASS" and blocker <= 0 and major <= 0
 
 
@@ -321,6 +325,11 @@ def auto_exclusion(crit, st=None):
             reasons.append("audit-log:deferred-blocker")  # a BLOCKER is never deferred; never accepted unread
         elif _sev(e) in ("BLOCKER", "MAJOR") and e.get("outcome") in ("deferred", "open"):
             reasons.append("audit-log:%s" % e.get("outcome"))
+        if e.get("outcome") == "out-of-scope" or e.get("scope") == "out":  # 13 §1.4, §R1-m3
+            if _sev(e) == "BLOCKER":
+                reasons.append("audit-log:out-of-scope-blocker")  # never accepted unread
+            elif _sev(e) == "MAJOR":
+                reasons.append("audit-log:out-of-scope")
     return sorted(set(reasons))
 
 
@@ -331,8 +340,11 @@ def auto_exclusion(crit, st=None):
 # `screenshots` is never here: a screen may show what must not go out, so a human looks at it in
 # `/hrd ship` (design/herald/06-screenshots.md §2.10); nor `external-images`: a web image and its
 # attribution are confirmed in `/hrd ship` too (08-images.md §2.13)
+# `audit-log:out-of-scope` (0.22.0, 13 §1.4): a MAJOR in text a refresh did not touch, left for the
+# next refresh — the same trust as a deferred one
 CONSENT_ACCEPTS = ("decision:dismissal", "decision:assumption", "decision:deferral",
-                   "audit-dismissed", "audit-log:deferred", "trimmed", "images", "framed", "translated")
+                   "audit-dismissed", "audit-log:deferred", "audit-log:out-of-scope", "trimmed", "images", "framed",
+                   "translated")
 
 
 # 0.20.0 (design/herald/11-ship-consent.md §2.4, §9 R2-5): a `--ship` run (the lock's ship mark for
@@ -459,7 +471,7 @@ def _sev(e):
 
 def _count_problems(fr):
     problems = []
-    for group in ("audit", "dismissed", "deferred"):
+    for group in ("audit", "dismissed", "deferred", "out_of_scope"):
         g = fr.get(group)
         if g is None:
             continue
@@ -472,11 +484,11 @@ def _count_problems(fr):
     return problems
 
 
-def audit_log_problems(crit, rnd):
+def audit_log_problems(crit, rnd, root=None, cfg=None, tid=None):
     """What `stage pass --stage critique` checks beyond the verdict: counts are integers; a
     deferred MAJOR is logged as deferred in this round (tag `new`, any tag on the last round); a
     BLOCKER from the last round is closed only by a human's recorded decision; a skip round ran
-    no auditor."""
+    no auditor. With `root`: out-of-scope findings (0.22.0, `scope.audit_problems`)."""
     fr = (crit or {}).get("final_round") or {}
     log = audit_entries(crit)
     problems = _count_problems(fr)
@@ -511,8 +523,11 @@ def audit_log_problems(crit, rnd):
         elif _sev(e) in ("BLOCKER", "MAJOR") and e.get("outcome") == "open" and r < AUDIT_ROUND_CAP:
             problems.append("audit_log %s is open (held for a human): resolve it to fixed or dismissed with the "
                             "human before passing" % e.get("id"))
+    if root is not None:
+        from .scope import audit_problems
+        problems += audit_problems(root, cfg, tid, crit, rnd, log)
     if rnd > AUDIT_ROUND_CAP:
-        for group in ("audit", "dismissed", "deferred"):
+        for group in ("audit", "dismissed", "deferred", "out_of_scope"):
             if any(_int(v) for v in (fr.get(group) or {}).values()):
                 problems.append("audit round %d is past the cap: no auditor ran, final_round.%s must be empty "
                                 "(earlier decisions stay in audit_log)" % (rnd, group))
@@ -600,6 +615,29 @@ def research_claim_ids(root, tid):
             return sorted({"C%s" % m for m in _CLAIM_DEF_RE.findall(f.read())}, key=lambda c: int(c[1:]))
     except OSError:
         return []
+
+
+# a claim's own `withdrawn:` line (research fix, `atoms/_stages.md`): at the head of a line inside the
+# claim's block, after spaces, a list mark or emphasis (`- **withdrawn:** …`, `*withdrawn*: …`)
+_WITHDRAWN_RE = re.compile(r"(?mi)^[ \t]*(?:[-*+][ \t]+|[0-9]+[.)][ \t]+)?(?:\*\*|__|\*|_)?withdrawn(?:\*\*|__|\*|_)?[ \t]*:")
+
+
+def research_withdrawn_ids(root, tid):
+    """Claims marked withdrawn (13 §R2-3, §R3-3): a block runs from a claim's definition line to the
+    line before the next definition."""
+    try:
+        with open(os.path.join(root, work_rel(tid, "research.md")), encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return []
+    defs = list(_CLAIM_DEF_RE.finditer(text))
+    out = set()
+    for i, m in enumerate(defs):
+        start = text.find("\n", m.start())
+        block = text[start + 1 if start >= 0 else len(text):defs[i + 1].start() if i + 1 < len(defs) else len(text)]
+        if _WITHDRAWN_RE.search(block):
+            out.add("C%s" % m.group(1))
+    return sorted(out, key=lambda c: int(c[1:]))
 
 
 def current_verify(root, cfg, tid, st):
@@ -870,12 +908,12 @@ def stage_pass(root, cfg, tid, stage, amend=False, rerun=False):
         if claimed_round != rounds:
             raise HeraldError("critique.json final_round.audit_round is %r but this article's audit round is %d"
                               % (claimed_round, rounds))
-        problems = audit_log_problems(crit, rounds)
+        problems = audit_log_problems(crit, rounds, root, cfg, tid)
         if problems:
             raise HeraldError("; ".join(problems))
         if not critique_passed(crit):
             raise HeraldError("critique.json does not record a PASS with no BLOCKER/MAJOR left open "
-                              "(dismissed, or a MAJOR deferred on a recheck round)")
+                              "(dismissed, a MAJOR deferred on a recheck round, or on a refresh out of scope)")
         if reader_blockers(root, cfg, tid, st):
             raise HeraldError(_reader_pass_refusal(st, "before this pass"))
         rec["body_hash"] = worktree_hash(root, cfg, st["slug"])
@@ -887,6 +925,7 @@ def stage_pass(root, cfg, tid, stage, amend=False, rerun=False):
         # dismissals are recorded from the decision log, not from memory (abuse watch, auditor
         # prompt material); also on audit loopbacks, so a topic that never passes keeps them
         record_dismissals(root, tid, crit)
+        record_out_of_scope(root, tid, crit)
     if stage == "verify":
         ver = load_machine(root, tid, "verify.json")
         if research_suspects(ver):
@@ -1591,6 +1630,13 @@ def record_published(root, cfg, tid, slug, pr=None, auto=False, origin="herald")
                 art["images"] = pics
             else:
                 art.pop("images", None)
+            if t.get("refresh_of"):  # what this refresh left for the next one (13 §1.5, §R1-M5)
+                from .scope import update_candidates
+                try:
+                    update_candidates(root, cfg, tid, t, art)
+                except Exception as e:  # noqa: BLE001 — the publish record never fails on them
+                    import sys
+                    sys.stderr.write("hrd: warning: refresh candidates not updated: %s\n" % e)
     if translated:
         if "first_published_at" not in art:
             # the earliest publish the topics remember; unknown for pre-Herald history (R4 MN-7)
@@ -1699,10 +1745,12 @@ SIGNAL_KINDS = (
     "social-reject",        # the human discarded every draft of a run (HRD social close --reject-all)
     "social-gate-failure",  # a draft still failing the post checks after its retry (HRD social check --record)
     "social-final",         # the uploaded text differs from the approved draft (HRD social final)
+    "out-of-scope-finding",  # 0.22.0: an auditor MAJOR a refresh left for the next one (13 §R2-1)
 )
 # listed for evolve but never counted toward the nudge: an escalation accompanies a loopback that
-# is already counted; an incomplete child is usually environment, not writing
-CONTEXT_KINDS = ("escalation", "incomplete")
+# is already counted; an incomplete child is usually environment, not writing; an out-of-scope
+# finding is old text a refresh did not touch — nothing evolve could change
+CONTEXT_KINDS = ("escalation", "incomplete", "out-of-scope-finding")
 
 
 # Hold notes that mark a stop as environment or a human's choice, not a writing weakness: never a
@@ -1766,17 +1814,68 @@ def record_dismissals(root, tid, crit):
             return _json.dumps({k: data[k] for k in ("severity", "finding") if k in data}, sort_keys=True)
         existing = {note_of(r.get("data")) for r in read_jsonl(paths(root)["signals"])
                     if isinstance(r, dict) and r.get("kind") == "dismissal" and r.get("topic_id") == tid}
+        valid = None
         for d in log:
             if isinstance(d, dict) and d.get("kind") == "dismissal":
                 data = {k: d[k] for k in ("note", "severity", "finding", "round") if k in d}
                 if isinstance(data.get("note"), str):
                     data["note"] = data["note"][:500]
                 key = note_of(data)
+                if key in existing:
+                    continue
+                if "grounds" in d:  # 13 §2.2: research claims the auditor could not see
+                    if valid is None:
+                        valid = set(research_claim_ids(root, tid)) - set(research_withdrawn_ids(root, tid))
+                    grounds = _grounds(d.get("grounds"))
+                    dropped = [c for c in grounds if c not in valid]
+                    if dropped:
+                        sys.stderr.write("hrd: warning: dismissal grounds %s are not live claims in research.md "
+                                         "(missing or withdrawn) — left out of the signal\n" % ", ".join(dropped))
+                    grounds = [c for c in grounds if c in valid]
+                    if grounds:
+                        data["grounds"] = grounds
                 if key not in existing:
                     signal(root, "dismissal", tid, data)
                     existing.add(key)
     except Exception as e:  # noqa: BLE001
         sys.stderr.write("hrd: warning: could not record dismissal signals: %s\n" % e)
+
+
+def _grounds(raw):
+    """`grounds`: claim ids `C<n>`, de-duplicated in order, at most 20; anything else is dropped."""
+    out = []
+    for x in raw if isinstance(raw, list) else []:
+        c = x.strip() if isinstance(x, str) else ""
+        if re.fullmatch(r"C[0-9]+", c) and c not in out:
+            out.append(c)
+    return out[:20]
+
+
+def record_out_of_scope(root, tid, crit):
+    """`out-of-scope-finding` (13 §R2-1): one context record per out-of-scope MAJOR — listed for
+    evolve, never counted toward the nudge. Once per (topic, id, quote_hash)."""
+    import sys
+    try:
+        from .scope import quote_hash
+        seen = {(r.get("topic_id"), (r.get("data") or {}).get("id"), (r.get("data") or {}).get("quote_hash"))
+                for r in read_jsonl(paths(root)["signals"])
+                if isinstance(r, dict) and r.get("kind") == "out-of-scope-finding" and isinstance(r.get("data"), dict)}
+        for e in audit_entries(crit if isinstance(crit, dict) else {}):
+            if e.get("outcome") != "out-of-scope" or _sev(e) != "MAJOR" or not isinstance(e.get("quote"), str):
+                continue
+            data = {"id": str(e.get("id")), "quote_hash": quote_hash(e["quote"]),
+                    "summary": str(e.get("summary") or "")[:200], "round": e.get("round")}
+            key = (tid, data["id"], data["quote_hash"])
+            if key not in seen:
+                signal(root, "out-of-scope-finding", tid, data)
+                seen.add(key)
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write("hrd: warning: could not record out-of-scope signals: %s\n" % e)
+
+
+# the plugin version new signal records carry (`v`, 0.22.0 — 13 §3.4, §R1-m7): hrd.py and the batch
+# runner set it from SCRIPTS_VERSION (the literal stays in hrd.py); None writes no `v`
+PLUGIN_VERSION = None
 
 
 def signal(root, kind, tid=None, data=None, human_reviewed=None):
@@ -1785,6 +1884,8 @@ def signal(root, kind, tid=None, data=None, human_reviewed=None):
     import uuid
     # the nonce makes every record (and so its id) unique, even two identical events in one second
     rec = {"at": now_iso(), "kind": kind, "topic_id": tid, "data": data or {}, "nonce": uuid.uuid4().hex[:12]}
+    if PLUGIN_VERSION:
+        rec["v"] = PLUGIN_VERSION
     if human_reviewed is not None:
         rec["human_reviewed"] = bool(human_reviewed)
     append_jsonl(paths(root)["signals"], rec)
@@ -1817,7 +1918,15 @@ def load_evolve_state(root):
     st.setdefault("last_scan", None)
     for k in ("consumed", "seen"):
         st[k] = [c for c in st.get(k) or [] if isinstance(c, str)]
+    # 0.22.0 (13 §3.1): signals a human retired without a proposal, group by group, and the record of
+    # what was put back — kept apart from `consumed`, so they can be listed and undone
+    for k in ("retired", "unretired"):
+        st[k] = [e for e in st.get(k) or [] if isinstance(e, dict) and isinstance(e.get("ids"), list)]
     return st
+
+
+def retired_ids(st):
+    return {i for e in st.get("retired") or [] for i in e.get("ids") or [] if isinstance(i, str)}
 
 
 def signal_id(rec):
@@ -1901,7 +2010,7 @@ def evolve_signals(root):
     grouping, so a recurrence after an applied fix starts a new group. A group's listed `data`
     merges its records in order (a session edit request's diff joins its request)."""
     st = load_evolve_state(root)
-    consumed = set(st["consumed"])
+    consumed = set(st["consumed"]) | retired_ids(st)  # a retired signal is used like a consumed one
     groups, baseline = {}, []
     records = read_jsonl(paths(root)["signals"])
     request_ids, asked = set(), set()
@@ -1937,15 +2046,19 @@ def evolve_signals(root):
         key = _dedup_key(rec)
         if key[0] == "session-edit-request" and key[3] in consumed:
             continue  # the diff of a request a decided proposal already used
-        g = groups.setdefault(key, {"ids": [], "rec": dict(rec), "data": {}})
+        g = groups.setdefault(key, {"ids": [], "rec": dict(rec), "data": {}, "v": False})
         g["ids"].append(sid)
         g["data"].update(rec.get("data") or {})
+        g["v"] = g["v"] or bool(rec.get("v"))
     out = []
     for g in groups.values():
         r = g["rec"]
         r["data"] = g["data"]
         r["id"] = g["ids"][0]
         r["ids"] = g["ids"]
+        r.pop("v", None)
+        if not g["v"]:
+            r["legacy"] = True  # no record of the group says which plugin wrote it (13 §3.4, §R1-m7)
         out.append(r)
     return out, baseline, st
 
@@ -1966,6 +2079,16 @@ def signal_theme(rec):
     return rec["kind"]
 
 
+def secondary_themes(rec):
+    """Count axes a record adds on top of its theme (13 §R1-M2, §R2-7): a dismissal grounded in
+    research claims stays a `dismissal` and also counts as `dismissal:grounded-unseen` — the
+    auditor never sees research, the reader may not either."""
+    data = rec.get("data") or {}
+    if rec.get("kind") == "dismissal" and isinstance(data.get("grounds"), list) and data["grounds"]:
+        return ["dismissal:grounded-unseen"]
+    return []
+
+
 def evolve_readiness(root, cfg=None, listing=False):
     """Deterministic, advisory count per theme (see signal_theme) over unconsumed signals.
     `tier` (machine token): sufficient — some theme has >= 3 signals from >= 2 topics AND at
@@ -1974,19 +2097,21 @@ def evolve_readiness(root, cfg=None, listing=False):
     none — no signals."""
     sigs, baseline, st = evolve_signals(root)
     seen = set(st["seen"])
-    themes, kinds = {}, {}
+    themes, kinds, secondary = {}, {}, {}
     for r in sigs:
         kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
         if r["kind"] in CONTEXT_KINDS:
             continue
-        k = themes.setdefault(signal_theme(r), {"count": 0, "topics": set(), "new": 0})
-        k["count"] += 1
-        if r.get("topic_id"):
-            k["topics"].add(r["topic_id"])
-        if not seen.intersection(r["ids"]):
-            k["new"] += 1
-    ready = sorted(n for n, k in themes.items() if k["count"] >= MIN_SIGNALS and len(k["topics"]) >= MIN_TOPICS)
-    fresh = [n for n in ready if themes[n]["new"] > 0]
+        for axes, name in [(themes, signal_theme(r))] + [(secondary, n) for n in secondary_themes(r)]:
+            k = axes.setdefault(name, {"count": 0, "topics": set(), "new": 0})
+            k["count"] += 1
+            if r.get("topic_id"):
+                k["topics"].add(r["topic_id"])
+            if not seen.intersection(r["ids"]):
+                k["new"] += 1
+    both = dict(themes, **secondary)  # a secondary axis may be ready on its own; totals stay per record
+    ready = sorted(n for n, k in both.items() if k["count"] >= MIN_SIGNALS and len(k["topics"]) >= MIN_TOPICS)
+    fresh = [n for n in ready if both[n]["new"] > 0]
     total = sum(k["count"] for k in themes.values())
     every = set().union(*[k["topics"] for k in themes.values()]) if themes else set()
     # the summary counts articles; social signals count SNS days (03-social.md S13)
@@ -2005,9 +2130,14 @@ def evolve_readiness(root, cfg=None, listing=False):
         "kinds": dict(sorted(kinds.items())),
         "threshold": {"signals": MIN_SIGNALS, "topics": MIN_TOPICS},
     }
+    if secondary:
+        out["secondary"] = {n: {"count": k["count"], "topics": len(k["topics"]), "new": k["new"]}
+                            for n, k in sorted(secondary.items())}
     if listing:
         out["list"] = sigs
         out["baseline"] = baseline
+        ret = st.get("retired") or []
+        out["retired"] = {"groups": len(ret), "ids": len(retired_ids(st)), "entries": ret}
     return out
 
 
@@ -2023,21 +2153,25 @@ def evolve_snapshot(root, sigs, token=None):
                                       "ids": sorted({i for r in sigs for i in r["ids"]})})
 
 
-def evolve_mark(root, scan=False, consume=(), token=None):
+def evolve_mark(root, scan=False, consume=(), token=None, retire=(), unretire=(), reason=None, by=None, run=None):
     """evolve's local bookkeeping: `scan` records which signals the run saw (the Phase 1
     snapshot if present, else the current list); `consume` marks signal ids (from
     `evolve-readiness --list`) as used by a decided proposal. Known ids are consumed with their
-    whole group; unknown ones are reported, not fatal. Both prune ids whose records are gone."""
+    whole group; unknown ones are reported, not fatal. Both prune ids whose records are gone.
+    0.22.0 (13 §3.1): `retire` takes groups out of the count without a proposal (a human's
+    decision, recorded with its reason); `unretire` puts back every group holding one of the ids.
+    The caller (`cmd_evolve_mark`) checks that this is an attended evolve run's lock."""
     st = load_evolve_state(root)
     sigs, _, _ = evolve_signals(root)
     present = {signal_id(r) for r in read_jsonl(paths(root)["signals"]) if isinstance(r, dict)}
-    unknown, baseline_cited, already = [], [], []
+    unknown, baseline_cited, already, already_retired = [], [], [], []
+    known = {}
+    for r in sigs:
+        for i in r["ids"]:
+            known[i] = r["ids"]
+    base_ids = {signal_id(r) for r in read_jsonl(paths(root)["signals"]) if baseline_signal(r)} \
+        if consume or retire else set()
     if consume:
-        known = {}
-        for r in sigs:
-            for i in r["ids"]:
-                known[i] = r["ids"]
-        base_ids = {signal_id(r) for r in read_jsonl(paths(root)["signals"]) if baseline_signal(r)}
         add = []
         for i in consume:
             if i in known:
@@ -2046,9 +2180,44 @@ def evolve_mark(root, scan=False, consume=(), token=None):
                 baseline_cited.append(i)  # baseline evidence is cited, never consumed
             elif i in st["consumed"] or i in add:
                 already.append(i)
+            elif i in retired_ids(st):
+                already_retired.append(i)
             else:
                 unknown.append(i)
         st["consumed"] = sorted(set(st["consumed"]) | set(add))
+    retired_now = []
+    if retire:
+        groups, seen_ids = [], set()
+        for i in retire:
+            if i in seen_ids:
+                continue
+            if i in known:
+                groups.append(list(known[i]))
+                seen_ids.update(known[i])
+            elif i in base_ids:
+                baseline_cited.append(i)  # nothing to retire: baseline is never counted
+            elif i in retired_ids(st):
+                already_retired.append(i)
+            elif i in st["consumed"]:
+                already.append(i)
+            else:
+                unknown.append(i)
+        for ids in groups:
+            st["retired"].append({"ids": ids, "reason": reason, "at": now_iso(), "by": by,
+                                  "version": PLUGIN_VERSION, "run": run})
+            retired_now.extend(ids)
+    unretired_now = []
+    if unretire:
+        want = set(unretire)
+        keep = []
+        for e in st["retired"]:
+            if want & set(e.get("ids") or []):
+                unretired_now.extend(e["ids"])
+                st["unretired"].append({"ids": list(e["ids"]), "reason": e.get("reason"), "at": now_iso(), "by": by})
+            else:
+                keep.append(e)
+        st["retired"] = keep
+        unknown += sorted(want - set(unretired_now))
     if scan:
         try:
             snap = read_json(_snapshot_path(root), None)
@@ -2064,6 +2233,11 @@ def evolve_mark(root, scan=False, consume=(), token=None):
             os.remove(_snapshot_path(root))
     st["consumed"] = sorted(set(st["consumed"]) & present)
     st["seen"] = sorted((set(st["seen"]) & present) - set(st["consumed"]))
+    for e in st["retired"]:  # an entry whose records are all gone stays as the record of a decision
+        e["ids"] = [i for i in e["ids"] if i in present]
     write_json(_evolve_state_path(root), st)
-    return {"last_scan": st["last_scan"], "consumed": len(st["consumed"]), "unknown": unknown,
-            "baseline_cited": baseline_cited, "already_consumed": already}
+    out = {"last_scan": st["last_scan"], "consumed": len(st["consumed"]), "unknown": unknown,
+           "baseline_cited": baseline_cited, "already_consumed": already}
+    if retire or unretire or already_retired:
+        out.update(retired=retired_now, already_retired=already_retired, unretired=unretired_now)
+    return out

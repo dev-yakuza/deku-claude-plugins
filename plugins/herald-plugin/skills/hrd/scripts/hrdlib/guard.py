@@ -52,6 +52,10 @@ LEDGER = [".claude/herald/ledger/*", ".claude/herald/ledger/**"]
 RENDERS = [".claude/herald/work/*/diagram-renders.jsonl"]
 # the checkout lock carries a `--ship` run's mark, `lock.pass` the merge/deploy pass (11 §2.5 1, §9 m2)
 LOCKS = [".claude/herald/memory/lock", ".claude/herald/memory/lock.pass"]
+# evolve's local ledgers and the signals they count (0.22.0, 13 §R1-M3): only HRD writes them — a
+# direct edit could retire or consume growth evidence with nobody asked
+MEMORY_LEDGERS = [".claude/herald/memory/evolve-state.json", ".claude/herald/memory/evolve-scan.json",
+                  ".claude/herald/signals.jsonl"]
 CONFIG = ".claude/herald/config.json"
 # `screenshots` holds the capture command Herald runs (design/herald/07-auto-capture.md §2.7);
 # `limner` and `images` the image engine's argv, the OG generator and the attribution templates (08 §2.15)
@@ -132,6 +136,8 @@ def classify_path(r, cfg=None):
         return "diagram render record %s" % r
     if _covers(r, LOCKS):
         return "checkout lock %s" % r
+    if _covers(r, MEMORY_LEDGERS):
+        return "evolve ledger %s" % r
     if r and _covers(r, limner_state_globs(cfg)):
         return "limner state %s" % r
     return None
@@ -867,6 +873,11 @@ def check_bash(root, cfg, cmd):
         if "image" in argv and "stand-in" in argv and _has_flag(seg, "--allow"):
             protect("`HRD image stand-in --allow` lifts a human's \"go without\" (or a review's refusal) for that "
                     "place — only the human decides. Check its brief line and the refusal note in `HRD image status`.")
+        # 1f. 0.22.0 (13 §3.2, §R1-M3): retiring signals takes growth evidence out of the count without a
+        # proposal — the human confirms here (the command itself checks the evolve lock)
+        if "evolve-mark" in argv and (_has_flag(seg, "--retire") or _has_flag(seg, "--unretire")):
+            protect("퇴역은 성장 증거를 제안 없이 지웁니다 — 사람의 결정인지 확인하세요. (Retiring removes growth evidence "
+                    "without a proposal — confirm this is the human's decision.)")
         # 2. deploy
         if not ship_deploy and any(contains(canon(strip_noise(argv)), s) for s in sigs):
             if unattended():

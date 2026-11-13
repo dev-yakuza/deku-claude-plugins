@@ -10,6 +10,7 @@ failed precondition.
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.dont_write_bytecode = True  # no __pycache__ in the repo's .claude/herald/scripts
@@ -22,7 +23,8 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.21.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.22.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+store.PLUGIN_VERSION = SCRIPTS_VERSION  # new signal records carry it (`v`, 13 §3.4)
 
 
 def _vtuple(v):
@@ -288,6 +290,11 @@ def cmd_status(a):
         note = None
     if note:
         out["notice"] = note
+    try:  # 0.22.0 (13 §1.5): articles with findings left for their next refresh — a count, no nudge
+        out["refresh_candidates"] = sum(1 for x in store.load_published(root).get("articles") or []
+                                        if isinstance(x, dict) and x.get("refresh_candidates") and not x.get("withdrawn"))
+    except Exception:  # noqa: BLE001 — advisory
+        pass
     emit(out)
 
 
@@ -444,6 +451,16 @@ def cmd_refresh_decision(a):
         raise HeraldError("one of --precheck, --check, --decide, --signal")
 
 
+def cmd_refresh_scope(a):
+    """13 §1.1: what this refresh was meant to change, quoted by code for the auditor (read-only)."""
+    from hrdlib import scope
+    root, cfg = ctx()
+    out = scope.refresh_scope(root, cfg, a.topic)
+    for w in out.get("warnings") or []:
+        sys.stderr.write("hrd: warning: %s\n" % w)
+    emit(out)
+
+
 def cmd_stage(a):
     root, cfg = ctx()
     st = store.load_state(root, a.topic)
@@ -584,7 +601,9 @@ def cmd_loopback(a):
                 data["counts"] = counts
         store.safe_signal(root, kind, a.topic, data)
     if a.cause == "audit":
-        store.record_dismissals(root, a.topic, store.safe_machine(root, a.topic, "critique.json"))
+        crit = store.safe_machine(root, a.topic, "critique.json")
+        store.record_dismissals(root, a.topic, crit)
+        store.record_out_of_scope(root, a.topic, crit)
     # the retry tier bump (contract §E); past the cap only for the accuracy reserve
     escalate = not a.human and (2 <= n <= store.LOOP_CAP or reserve)
     if escalate:
@@ -1513,9 +1532,35 @@ def cmd_evolve_mark(a):
     root = repo_root()
     if os.environ.get("HRD_UNATTENDED") == "1":
         raise HeraldError("evolve bookkeeping is attended only (evolve is always started by a human)")
-    if not a.scan and not a.consume:
-        raise HeraldError("give --scan and/or --consume <id …>")
-    emit(store.evolve_mark(root, scan=a.scan, consume=a.consume or (), token=a.token))
+    if not a.scan and not a.consume and not a.retire and not a.unretire:
+        raise HeraldError("give --scan, --consume <id …>, --retire <id …> or --unretire <id …>")
+    if a.retire and a.unretire:
+        raise HeraldError("--retire and --unretire are separate decisions — one per call")
+    if (a.reason is not None or a.run is not None) and not a.retire:
+        raise HeraldError("--reason and --run go with --retire")
+    by = None
+    if a.retire or a.unretire:
+        _retire_allowed(root, a)
+        by = git(root, "config", "user.name", check=False).strip() or None
+    emit(store.evolve_mark(root, scan=a.scan, consume=a.consume or (), token=a.token, retire=a.retire or (),
+                           unretire=a.unretire or (), reason=a.reason, by=by, run=a.run))
+
+
+def _retire_allowed(root, a):
+    """13 §3.1, §R1-M3: retiring takes growth evidence out of the count without a proposal — only
+    inside an attended `/hrd evolve` run: the lock is evolve's, the token is its own (`lock status`
+    prints tokens, so the command is checked too), no `--ship` mark. The guard asks the human."""
+    what = "--retire" if a.retire else "--unretire"
+    if a.retire and len(re.sub(r"\s", "", a.reason or "")) < 10:
+        raise HeraldError("--retire needs --reason \"<why these signals are evidence of nothing evolve could change>\" "
+                          "(10+ characters)")
+    if not a.token:
+        raise HeraldError("%s needs --token <the evolve lock token>" % what)
+    cur = lock.status(root) or {}
+    if cur.get("command") != "evolve" or cur.get("token") != a.token:
+        raise HeraldError("%s runs only inside `/hrd evolve` — the checkout lock is not this evolve run's" % what)
+    if cur.get("ship") is True:
+        raise HeraldError("%s is a human's decision — not in a `--ship` run" % what)
 
 
 def cmd_auto_exclusion(a):
@@ -1563,6 +1608,9 @@ def build():
     p.set_defaults(fn=cmd_evolve_readiness)
     p = sp.add_parser("evolve-mark"); p.add_argument("--scan", action="store_true"); p.add_argument("--consume", nargs="+")
     p.add_argument("--token")
+    p.add_argument("--retire", nargs="+", help="a human's decision: these groups count no more (13 §3.1)")
+    p.add_argument("--unretire", nargs="+", help="put the retired groups holding these ids back")
+    p.add_argument("--reason"); p.add_argument("--run", type=int, help="--retire: the evolve run number")
     p.set_defaults(fn=cmd_evolve_mark)
 
     p = sp.add_parser("begin"); p.add_argument("--topic", required=True); p.add_argument("--force", action="store_true")
@@ -1629,6 +1677,7 @@ def build():
     p.set_defaults(fn=cmd_image)
     p = sp.add_parser("audit-round"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_audit_round)
     p = sp.add_parser("remap"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_remap)
+    p = sp.add_parser("refresh-scope"); p.add_argument("--topic", required=True); p.set_defaults(fn=cmd_refresh_scope)
     p = sp.add_parser("refresh-decision"); p.add_argument("--slug", required=True)
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--precheck", action="store_true"); g.add_argument("--check", action="store_true")

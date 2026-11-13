@@ -112,7 +112,9 @@ def precheck(root, cfg, slug, for_translation=False, clear=True):
             "source_defects": notes, "origin": art.get("origin"),
             "evidence": {"source_published_at": _source_time(art) or None, "first_published_at": first},
             "last_refresh_decision": art.get("last_refresh_decision"),
-            "superseded": art.get("superseded")}
+            "superseded": art.get("superseded"),
+            # 0.22.0 (13 §1.5): auditor findings an earlier refresh left out of its scope
+            "refresh_candidates": [c for c in art.get("refresh_candidates") or [] if isinstance(c, dict)]}
 
 
 # --- the recommendation (§2) ------------------------------------------------------------------

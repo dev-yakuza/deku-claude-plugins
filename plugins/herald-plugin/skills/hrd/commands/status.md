@@ -31,6 +31,8 @@ cannot be translated or refreshed by Herald in 0.17 — to fix one, edit it on b
 `<new>` from `<old>`" — `/hrd refresh <old>` when `refreshable`, otherwise by hand.
 
 A `notice` field (0.21.0, once per machine — stand-ins are on by default): show it as one line.
+`refresh_candidates` > 0 (0.22.0): "N articles have auditor findings left for their next refresh
+(`/hrd refresh <slug>` shows them)" — a count only, never a reminder to refresh.
 The batch summary shows it the same way when its `HRD status` carried one.
 
 Last, one line from the `evolve` field of the same `HRD status` output (absent with scripts

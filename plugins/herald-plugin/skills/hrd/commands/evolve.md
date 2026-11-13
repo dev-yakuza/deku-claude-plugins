@@ -29,7 +29,14 @@ unchanged; the targets applied in the last 3 runs (regression watch).
     nothing, and uploaded social texts that changed at most 10% of the approved draft, with ids. Never counted as problems: use them only for exemplar promotion and as
     the denominator of edit rates; citing them consumes nothing.
   - Already excluded: malformed records, human-edit records without `human_reviewed: true`
-    (also out of exemplar denominators), and signals an earlier decided proposal consumed.
+    (also out of exemplar denominators), signals an earlier decided proposal consumed, and
+    signals a human retired (`retired` — groups, ids and each entry's reason, person, date).
+  - `legacy: true` on a group none of whose records says which plugin version wrote it (records
+    from 0.22.0 on carry `v`) — a hint, not a verdict: nearly every old signal is legacy.
+  - `secondary` — `dismissal:grounded-unseen`: dismissals whose reason was a research claim the
+    auditor cannot see (`grounds`); they also stay in `dismissal`, and the totals count each
+    record once. `out-of-scope-finding` records in `list` (auditor findings a refresh left for the
+    next one) are context, like escalations.
 - `--snapshot` keeps the listed ids locally, tagged with the token. The run marks them as seen
   only when it ends normally (`HRD evolve-mark --scan --token <t>` in Phase 3 for `--dry-run`,
   Phase 7 otherwise); a snapshot left by an aborted run is never used by another run. After
@@ -39,6 +46,23 @@ unchanged; the targets applied in the last 3 runs (regression watch).
 - **Data sufficiency** (Guild `_data_sufficiency.md`): a theme needs ≥ 3 independent signals
   from ≥ 2 topics; otherwise report it as "watching", never propose it. Watching signals stay
   unconsumed and count again next run.
+
+## Phase 1b — Retirement candidates (decisions only)
+
+Some signals are evidence of nothing evolve could change: traces of a rule fixed long ago (e.g.
+"repeat of B2/C4" dismissals from before 0.4.0 capped audit rounds and made the recheck's
+"settled" list), findings that were outside a refresh's scope before 0.22.0, dismissals that
+pointed to research the auditor never sees. They keep the nudge on for ever.
+
+- From `list`, group what looks like such traces: for each bundle, the ids, the count, and the
+  grounds in one or two plain sentences (which change, in which version, stopped the cause — or
+  why no change could). `legacy`, `at` and the note (round ids past C, "repeat of") help; the
+  human decides. Show the current `retired` entries too.
+- `AskUserQuestion` per bundle: retire / keep (recommend retire only when the grounds are clear);
+  and per retired entry the human may want back: put back / leave. **Nothing is retired
+  automatically, and nothing is written here**: the decisions are kept for Phase 6 step 3, and
+  the bundles to retire are left out of the evidence of Phases 2–3 in this run.
+- `--dry-run`: show the candidates only — no question, no decision kept.
 
 ## Phase 2 — Themes
 
@@ -64,6 +88,14 @@ guide's house rules (outside the researched region) and its `house` limits (`max
 Habits. Never: the researched region or research fields (that is `--refresh`), name, aliases or
 language, the waiver (only a human adds or removes it), the disclosure items except to strengthen
 them, widening `house` (it only narrows), confirming a rule (a human does it), removing a service term or adding an exclusion — the social floor (INV2).
+
+`dismissal:grounded-unseen` (a secondary axis): dismissed findings whose sentence rests on a
+research claim the reader is never shown. The usual target is the repo's style guide or the
+writer's Habits — "a number or a fact from research names its source in or next to the sentence,
+within `sources.md`'s policy" — a rule that tightens, never loosens. When the repo has a house
+rule against sources or verification paragraphs in the body (often in a refresh's direction),
+propose only a form that keeps it (an inline link, a source in brackets); if every form clashes,
+report the theme as watching. Never a change to the auditor's prompt.
 
 Auditor findings that point at the auditor itself (its prompt, its severity scale) are not
 applied here — the auditor deliberately reads no repo guides — list them in the report as
@@ -130,10 +162,12 @@ ledger's skip list.
    per-file approval). Re-run `tests` that exist for the harness (`validate_content.py` on the
    last 3 published articles must still pass; every changed channel guide, `persona.md` or
    `persona-notes.md` must pass `HRD social lint --mode evolve --file <path> --target <path>`). Failure → revert the working tree for this run,
-   report, and stop without committing, consuming or stamping the scan (the evidence stays
+   report, and stop without committing, consuming, retiring or stamping the scan (the evidence stays
    pending and the nudge stays as it was; the same holds if the human aborts the run).
-2. No item was decided (nothing proposed, nothing survived the panel) → no commit, no log row;
-   go to Phase 7. Otherwise append the run to `evolution-log.md` (n, date, applied items with
+2. No item was decided (nothing proposed, nothing survived the panel) and nothing was retired or
+   put back in Phase 1b → no commit, no log row; go to Phase 7. Otherwise append the run to
+   `evolution-log.md` (n, date, each retired bundle — count, reason, who decided — and each one
+   put back as "unretired", applied items with
    evidence, target files and the wording applied — draft, panel-revised or human-edited —
    rejected items with their Phase 3 draft (and the version on the table when it differed, so
    an unchanged draft is not proposed again), and for each decided item the panel's
@@ -141,16 +175,23 @@ ledger's skip list.
    `HRD commit --cmd harness --kind evolve -m "chore(herald): evolve #<n> — <summary>" <files>`,
    `git push origin <base>`.
 3. After the commit (even if the push was refused; if `HRD commit` itself fails, revert as in
-   step 1 and stop without consuming or stamping): `HRD evolve-mark --consume <ids>` with the
+   step 1 and stop without consuming, retiring or stamping): `HRD evolve-mark --consume <ids>` with the
    signal ids cited as evidence by every **decided** item (applied or rejected). Panel-dropped
    proposals and watching themes consume nothing. `--dry-run` never consumes. Ids it reports as
    `unknown` were not in the Phase 1 list (mistyped or invented) — report them; the known ones
    are consumed regardless; `baseline_cited` ids are fine (baseline is never consumed), and so
    are `already_consumed` ids (another decided item cited the same evidence).
+   Then, at the same point and under the same rule (never after a failed test, an abort or a
+   failed `HRD commit`), the Phase 1b decisions: per bundle `HRD evolve-mark --retire <ids> --reason
+   "<the grounds>" --run <n> --token <t>` and per entry put back `HRD evolve-mark --unretire <id>
+   --token <t>`. Both run only with this evolve run's lock (not in a `--ship` run, never
+   unattended), and the guard asks the human once more — that prompt is the approval. Report
+   `unknown` ids; `already_retired` and `baseline_cited` are fine.
 
 ## Phase 7 — Report
 
 `HRD evolve-mark --scan --token <t>` (the run completed). Then report in plain language (no
 "Phase"/"INV" jargon): what changed, what was rejected, what is being watched. Only when a
 commit was made: `/hrd rollback evolve#<n>` undoes the run (a rollback does not un-consume
-signals: re-proposing the reverted change needs new evidence).
+signals: re-proposing the reverted change needs new evidence; nor does it put back retired ones —
+that is `--unretire` in a later evolve run).

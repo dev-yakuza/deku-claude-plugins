@@ -11,15 +11,17 @@ strategist recommends; **the human decides**, in every mode. Interactive only (i
 3. **Precheck**: `HRD refresh-decision --slug <slug> --precheck [--for-translation]` — the
    article must be in `published.json`. It prints `choices` (the decisions possible now),
    `blocked` (why others are not), `required` (`source-defect` or `for-translation`: only
-   `update` — the article has to be fixed), `source_defects`, the publish times and the last
-   decision on this article. Exit 1 (no choice left) → show its reasons and the next step
+   `update` — the article has to be fixed), `source_defects`, the publish times, the last
+   decision on this article and its `refresh_candidates` (auditor findings an earlier refresh left
+   out of its scope, 0.22.0). Exit 1 (no choice left) → show its reasons and the next step
    (finish the topic in progress first; a slug outside Herald's format cannot be refreshed in
    place) and stop.
 4. **Decision** — skipped with `--force-update` or `--direction <id>` (the human already
    decided: go to step 5 with `--source forced` / `--source direction --direction <id>`):
    - Spawn **content-strategist** for a refresh recommendation (persona § Refresh
      recommendation) with: the article body (`config.paths.body_pattern`), the precheck output
-     (its `choices` — recommend only among them), the Search Console row if any, the reason
+     (its `choices` — recommend only among them; its `refresh_candidates` — say which belong in
+     what is stale; the human decides, and the refresh brief takes them up again), the Search Console row if any, the reason
      from step 2, the source defects if any, `docs/editorial/refresh-policy.md` (absent in a
      repo set up before 0.10.0: use the template's default rules,
      `<<SKILL_DIR>>/templates/editorial/refresh-policy.md.tmpl`).

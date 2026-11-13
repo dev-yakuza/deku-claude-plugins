@@ -164,30 +164,35 @@ def _paragraphs(body, offset=0):
 def _sentences(body, offset=0):
     """(file line where the sentence starts, sentence)."""
     for para in _paragraphs(body, offset):
-        text, starts = "", []
-        for line, piece in para:
-            if text:
-                text += " "
-            starts.append((len(text), line))
-            text += piece
+        yield from _para_sentences(para)
 
-        def line_at(at):
-            return max(ln for off, ln in starts if off <= at)
 
-        start, out = 0, []
-        for m in SENT_END_RE.finditer(text):
-            piece = text[start:m.end()]
-            if ABBREV_RE.search(piece):
-                continue  # "e.g." ends no sentence
-            if sum(piece.count(c) for c in QUOTE_OPEN) > sum(piece.count(c) for c in QUOTE_CLOSE):
-                continue  # inside 「…」 dialogue
-            out.append((start, m.end()))
-            start = m.end()
-        out.append((start, len(text)))
-        for a, b in out:
-            piece = text[a:b]
-            if piece.strip():
-                yield line_at(a + len(piece) - len(piece.lstrip())), piece.strip()
+def _para_sentences(para):
+    """The sentences of one `_paragraphs` paragraph, as (file line, sentence)."""
+    text, starts = "", []
+    for line, piece in para:
+        if text:
+            text += " "
+        starts.append((len(text), line))
+        text += piece
+
+    def line_at(at):
+        return max(ln for off, ln in starts if off <= at)
+
+    start, out = 0, []
+    for m in SENT_END_RE.finditer(text):
+        piece = text[start:m.end()]
+        if ABBREV_RE.search(piece):
+            continue  # "e.g." ends no sentence
+        if sum(piece.count(c) for c in QUOTE_OPEN) > sum(piece.count(c) for c in QUOTE_CLOSE):
+            continue  # inside 「…」 dialogue
+        out.append((start, m.end()))
+        start = m.end()
+    out.append((start, len(text)))
+    for a, b in out:
+        piece = text[a:b]
+        if piece.strip():
+            yield line_at(a + len(piece) - len(piece.lstrip())), piece.strip()
 
 
 def _asides(sentence, lang):

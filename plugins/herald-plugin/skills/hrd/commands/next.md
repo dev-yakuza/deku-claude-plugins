@@ -29,8 +29,8 @@ no lock itself: `plan` and `write` take their own.
    accepted exclusions, the deferred auditor findings, dismissals and assumptions with their
    reasons, the trimmed sentences, the framings and the sentences they covered, the Herald-made images,
    the images and screenshots the agent review confirmed or turned down — id, kind, its one-line
-   note (`HRD image status` `agent`, `HRD shot status` `agent_confirmed`) — a deferred MAJOR is published as
-   is, so name each one) — or where it stopped and what to do next
+   note (`HRD image status` `agent`, `HRD shot status` `agent_confirmed`) — a deferred or
+   out-of-scope MAJOR is published as is, so name each one) — or where it stopped and what to do next
    (a capture the review flagged — `s1(review:<kind>)` in a `screenshots` hold → `/hrd resume <id>`
    **without** `--ship`: a human looks at it; a screenshot only a human can take → put it in, then
    `/hrd resume <id> --ship`; any other preserved hold — `needs-human`, `stagnation`, `budget`,
