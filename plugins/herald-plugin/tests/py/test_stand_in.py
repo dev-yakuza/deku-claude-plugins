@@ -421,6 +421,20 @@ class DecorativeTests(StandInCase):
                                                                   g3=self.snip(self.g3()), dec=snip + "\n\n"))
         self.assertIn("right before a section heading", self.errors())
 
+    def test_external_decorative_with_multiline_caption(self):
+        """A decorative photo's whole figure (picture line plus caption lines) is what must sit right before
+        the heading — not just its reference line (a figcaption template is no misplacement)."""
+        self.config(lambda c: c["images"]["scenes"].update(decorative=1))
+        e = self.e1(id="e2", place=key(STREET), decorative=True, file="%s/e2-street.jpg" % IMG,
+                    ref="/blog-images/%s/e2-street.jpg" % SLUG, alt="A quiet street")
+        sn = images.snippet_text(self.cfg, e, "landscape")
+        self.assertIn("\n", sn)  # the licensed template carries a caption line after the picture
+        self.manifest([self.g1(place=key(COUNTER)), self.g3(), e])
+        self.body3(dec=sn + "\n\n")
+        self.assertNotIn("right before a section heading", self.errors())
+        self.body3(dec=sn + "\n\nA stray paragraph.\n\n")
+        self.assertIn("e2: a decorative picture goes right before a section heading", self.errors())
+
     def test_one_per_boundary_and_external_decorative(self):
         self.config(lambda c: c["images"]["scenes"].update(decorative=2))
         brief = BRIEF + "- a river bank — kind: decorative (scene) — — — after \"Second\"\n"

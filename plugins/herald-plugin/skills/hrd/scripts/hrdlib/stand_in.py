@@ -659,15 +659,17 @@ def position_problems(root, cfg, tid, slug, items, body):
     lvl = {i: n for i, n in heads}
     first_head = min(i for i, n in heads if n == L)
     starts = {}  # line of each managed snippet's start/end
-    for it in items:
-        try:
-            sn = snippet_text(cfg, it, None, root, slug) if it.get("kind") == "scene" else None
-        except Exception:  # noqa: BLE001
-            sn = None
-        if sn and sn in text:
-            a = text.index(sn)
-            starts[it.get("id")] = (text.count("\n", 0, a), text.count("\n", 0, a + len(sn)))
-    for it in items:  # an external item's snippet depends on its orientation: find its reference line
+    for it in items:  # an external item's snippet depends on its orientation: try each one
+        for ori in ((None,) if it.get("kind") == "scene" else (None, "landscape", "portrait", "square")):
+            try:
+                sn = snippet_text(cfg, it, ori, root, slug) if it.get("kind") in ("scene", "external") else None
+            except Exception:  # noqa: BLE001
+                sn = None
+            if sn and sn in text:
+                a = text.index(sn)
+                starts[it.get("id")] = (text.count("\n", 0, a), text.count("\n", 0, a + len(sn)))
+                break
+    for it in items:  # no snippet found as written: fall back to its reference line
         if it.get("id") not in starts and it.get("ref") and it.get("ref") in text:
             a = text.index(it["ref"])
             n = text.count("\n", 0, a)
