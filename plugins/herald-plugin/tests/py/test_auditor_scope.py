@@ -124,6 +124,18 @@ class QuoteTests(unittest.TestCase):
         self.assertIn("changed after", self.ok("Run npm install before building the project today.", code,
                                                code.replace("npm install", "npm ci")))
 
+    def test_line_heads_are_read_as_written(self):
+        """review 28 n1: a line starting with a code span, `&gt;` or `\\#` stays in its paragraph, so
+        changing it changes the paragraph."""
+        same = "The header stays the same in every version we ship."
+        for old, new in (("`#include <stdio.h>` was the old way to start.", "`#include <cstdio>` is the new way now."),
+                         ("&gt; was the old comparison operator here.", "&gt; is now the comparison we recommend."),
+                         ("\\# old count of users was ten.", "\\# new count of users is twenty."),
+                         ("Old line that the refresh will change now.", "New line the refresh wrote instead.")):
+            self.assertIn("paragraph changed", self.ok(same, old + "\n" + same + "\n", new + "\n" + same + "\n"), old)
+        fenced = "```js\nconst a = 1;\n```\n\n" + same + "\n"
+        self.assertIsNone(self.ok(same, fenced, fenced.replace("a = 1", "a = 2")))  # a fence stays a fence
+
     def test_hash_is_the_normalised_quote(self):
         self.assertEqual(scope.quote_hash("Entry is **free** for children under six."),
                          scope.quote_hash("Entry is free for  children under six."))
@@ -599,6 +611,13 @@ class GuardTests(RepoCase):
                   "lock acquire --cmd evolve", "lock acquire --cmd=evolve", "lock acquire --cm evolve"):
             self.assertEqual(g(hrd + c), "ask", c)
             self.assertEqual(g(hrd + c, {"HRD_UNATTENDED": "1"}), "deny", c)
+        # review 28 n2: inside a command substitution the last word carries `)` or a backtick
+        for c in ("T=$(%slock acquire --cmd evolve)", "T=`%slock acquire --cmd evolve`",
+                  "echo $(%sevolve-mark --retire abc --reason 'xxxxxxxxxxxx' --token t)",
+                  "T=$(%sstage pass --topic t0001 --stage brief --rerun)", "T=`%sstage pass --topic t --rerun`"):
+            c = c % hrd
+            self.assertEqual(g(c), "ask", c)
+            self.assertEqual(g(c, {"HRD_UNATTENDED": "1"}), "deny", c)
         for c in ("evolve-mark --consume abc", "evolve-mark --scan --token t", "evolve-readiness --list",
                   "lock acquire --cmd write", "lock release --cmd evolve --token t", "lock status",
                   "evolve-mark --consume abc --token=evolve"):

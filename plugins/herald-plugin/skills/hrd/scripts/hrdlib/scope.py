@@ -39,21 +39,32 @@ _END_RE = re.compile(r"[.。!?！？]+$")
 # a ruby reading and its fallback brackets survive `_clean` as private-use marks, so each reading can
 # be taken from the same paragraphs: as written (reading and brackets), without the brackets, without both
 _RT_A, _RT_B, _RP_A, _RP_B = "\ue000", "\ue001", "\ue002", "\ue003"
+_CODE_MARK = "\ue004"  # an inline code span's backticks in a body, so `_clean` keeps its text
 READINGS = (0, 1, 2)
 _ADOPTED_LINE_RE = re.compile(r"(?mi)^[ \t]*(?:[-*+][ \t]+)?adopted:(.*)$")
 _ADOPTED_RE = re.compile(r"^[ \t]*`?([^\s/`]+)/([^\s`,;:]+)`?(?:[ \t,;:].*)?$")
 
 
-def _pre(text):
-    """What a reader does not see as text, the same for a quote and for a body."""
+def _ruby_marks(t):
+    t = _RT_RE.sub(lambda m: _RT_A + m.group(1) + _RT_B, t)
+    return _RP_RE.sub(lambda m: _RP_A + m.group(1) + _RP_B, t)
+
+
+def _pre_piece(t):
+    """What a reader does not see as text inside a line: footnote marks, reference links, escapes,
+    entities. A body's lines are classified (heading, quote, table, list) before this, on the text
+    as written — `\\#`, `&gt;` or an expanded code span never turn a line into something else
+    (review 28 n1)."""
     import html
-    t = _CODE_RE.sub(r"\2", text or "")
     t = _FOOTNOTE_RE.sub("", t)
     t = _REFLINK_RE.sub(r"\1", t)
     t = _ESCAPE_RE.sub(r"\1", t)
-    t = _RT_RE.sub(lambda m: _RT_A + m.group(1) + _RT_B, t)
-    t = _RP_RE.sub(lambda m: _RP_A + m.group(1) + _RP_B, t)
     return html.unescape(t)
+
+
+def _pre(text):
+    """A quote, the same way a body's sentences are read."""
+    return _pre_piece(_ruby_marks(_CODE_RE.sub(r"\2", text or "")))
 
 
 def _reading(text, r):
@@ -61,7 +72,7 @@ def _reading(text, r):
         text = re.sub("%s[^%s]*%s" % (_RP_A, _RP_B, _RP_B), "", text)
     if r >= 2:
         text = re.sub("%s[^%s]*%s" % (_RT_A, _RT_B, _RT_B), "", text)
-    return re.sub("[%s%s%s%s]" % (_RT_A, _RT_B, _RP_A, _RP_B), "", text)
+    return re.sub("[%s%s%s%s%s]" % (_RT_A, _RT_B, _RP_A, _RP_B, _CODE_MARK), "", text)
 
 
 def _k(text, r=0):
@@ -81,9 +92,12 @@ def quote_hash(quote):
 
 def _units(body):
     """[(paragraph key as written, {reading: its sentence keys})] of a body."""
-    text = _pre(_FM_RE.sub("", (body or "").replace("\r\n", "\n"), count=1))
+    text = _ruby_marks(_FM_RE.sub("", (body or "").replace("\r\n", "\n"), count=1))
+    text = "\n".join(l if prose.FENCE_RE.match(l) else _CODE_RE.sub(lambda m: _CODE_MARK + m.group(2) + _CODE_MARK, l)
+                     for l in text.split("\n"))
     paras = []
     for para in prose._paragraphs(text):
+        para = [(ln, _pre_piece(t)) for ln, t in para]
         sents = [s for _, s in prose._para_sentences(para)]
         paras.append((_k(" ".join(t for _, t in para)), {r: {_k(x, r) for x in sents} for r in READINGS}))
     return paras

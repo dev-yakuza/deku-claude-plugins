@@ -437,6 +437,9 @@ def normalize(seg, split=True):
         argv = shlex.split(seg)
     except ValueError:
         argv = seg.split()
+    # the end of a command substitution sticks to the last word (`$(… --cmd evolve)`, `` `… --rerun` ``):
+    # a word is read without the shell punctuation after it (review 28 n2)
+    argv = [x for x in (a.rstrip(")`;'\"") for a in argv) if x]
     argv = unwrap(argv)
     if argv and argv[0] == "git":
         i = 1
