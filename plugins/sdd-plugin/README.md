@@ -8,7 +8,7 @@ AI collaborative development process for Claude Code. Manages the full developme
 
 ```bash
 claude /plugin marketplace add dev-yakuza/deku-claude-plugins
-claude /plugin install deku-claude-plugins@sdd-plugin
+claude /plugin install sdd-plugin@deku-claude-plugins
 ```
 
 ## Quick Start

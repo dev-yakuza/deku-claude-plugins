@@ -8,7 +8,7 @@ Claude Code를 활용한 AI 협업 개발 프로세스입니다. GitHub Issue를
 
 ```bash
 claude /plugin marketplace add dev-yakuza/deku-claude-plugins
-claude /plugin install deku-claude-plugins@sdd-plugin
+claude /plugin install sdd-plugin@deku-claude-plugins
 ```
 
 ## 빠른 시작

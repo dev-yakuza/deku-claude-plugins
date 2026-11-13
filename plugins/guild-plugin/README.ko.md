@@ -17,7 +17,7 @@ Claude Code를 위한 **자기진화 에이전트 조직**. Guild는 레포에 �
 
 ```bash
 claude /plugin marketplace add dev-yakuza/deku-claude-plugins
-claude /plugin install deku-claude-plugins@guild-plugin
+claude /plugin install guild-plugin@deku-claude-plugins
 ```
 
 ## 빠른 시작

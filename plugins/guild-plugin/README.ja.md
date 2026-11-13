@@ -17,7 +17,7 @@ Claude Code のための**自己進化するエージェント組織**。Guild �
 
 ```bash
 claude /plugin marketplace add dev-yakuza/deku-claude-plugins
-claude /plugin install deku-claude-plugins@guild-plugin
+claude /plugin install guild-plugin@deku-claude-plugins
 ```
 
 ## クイックスタート

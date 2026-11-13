@@ -17,7 +17,7 @@ A self-evolving **agent organization** for Claude Code. Guild builds an operatin
 
 ```bash
 claude /plugin marketplace add dev-yakuza/deku-claude-plugins
-claude /plugin install deku-claude-plugins@guild-plugin
+claude /plugin install guild-plugin@deku-claude-plugins
 ```
 
 ## Quick Start
