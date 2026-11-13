@@ -122,6 +122,7 @@ docs/adr/ , docs/specs/
 | 역할 에이전트(습관) | `.claude/agents/*.md` |
 | 코드베이스 사실(⑥, 관련분만 검색) | `.claude/guild/knowledge/` |
 | 날것 경험 기억 | `.claude/guild/memory/`(gitignore) |
+| 로컬 developer 작업 로그 (옵트인) | `.claude/guild/memory/local-dev/`(gitignore) |
 | 진화 원장 + 게이트 + 설정 | `.claude/guild/` |
 | 큐레이션 표준(charter·architecture…) | `docs/standards/` |
 

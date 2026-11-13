@@ -76,6 +76,7 @@ a loop-back reason on that axis** — a role reason (tech-lead `BLOCKED`, gate f
 for the role axis, a triggering `BLOCKER`/`MAJOR` set for the auditor axis. What that means for
 the common shapes:
 - a clean **advancing** block (`findings: none`, no role reason) → no reason on either axis; skipped on both;
+- a block carrying `local-pass: <job_id>` (the opt-in local model's work was sent back — `_execute_spine.md` Step 4, *A local pass that is sent back*) → skipped on both axes; the miss was not the developer's, so it is no one's prior;
 - a block that only settles earlier findings `fixed`/`recorded` → skipped on the auditor axis (and on the role axis unless it also records a role reason);
 - a **`scan: none`** block → skipped on the **auditor** axis (nothing was scanned), but it was itself written by a loop-back — Step 2's evidence cross-check — so it normally **carries the verify-gap reason and is read on the role axis**;
 - a `findings: none` block whose attempt looped back on a role `BLOCKED` → read on the role axis, skipped on the auditor axis.

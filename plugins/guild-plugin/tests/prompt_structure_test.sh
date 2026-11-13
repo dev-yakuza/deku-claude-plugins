@@ -1700,7 +1700,7 @@ EXPECT = {
     ("_bash_rules.md", 204): "A generated OS-level",
     ("_bash_rules.md", 206): "guild:auditor-violation",
     ("board_write.py", 4):  "Why this is code and not a series of Bash calls",
-    ("config.md", 15):      "unknown/unsupported config key",
+    ("config.md", 16):      "unknown/unsupported config key",
     ("init.md", 163):       "normalized, simple-bash-safe",
     ("run.md", 78):         "Not already running",
     ("sprint.md", 32):      "unknown subcommand",
@@ -1976,8 +1976,8 @@ for f in sorted(SCAN):
         total += 1
         if [strip(x) for x in body[a+1:b]] != canon:
             problems.append("%s:%d drifted from canonical" % (rel, a+2))
-if total != 12:
-    problems.append("found %d result-contract copies, expected exactly 12 — one appeared or "
+if total != 13:
+    problems.append("found %d result-contract copies, expected exactly 13 — one appeared or "
                     "vanished; update this number deliberately" % total)
 # 스폰 프롬프트 안의 센티널은 **정확히 하나** 여야 한다. 펜스 본문이 정본과 같아도, 펜스 밖
 # 블록쿼트에 다른 센티널을 적어 넣으면 서브에이전트는 그것을 따른다.
@@ -2015,21 +2015,21 @@ print("OK %d" % total if not problems else "PROBLEMS " + " | ".join(problems))
 PYC
 OUTC="$("$PY" "$WORK3/contract.py" "$GLD")"
 case "$OUTC" in
-  "OK 12") ok "result-contract: 트리 전체에서 사본 12개, 전부 정본과 바이트 동일" ;;
-  OK*)     bad "result-contract: 사본 12개" "OK 12" "$OUTC" ;;
-  *)       bad "result-contract: 사본이 정본과 동일" "OK 12" "$OUTC" ;;
+  "OK 13") ok "result-contract: 트리 전체에서 사본 13개, 전부 정본과 바이트 동일" ;;
+  OK*)     bad "result-contract: 사본 13개" "OK 13" "$OUTC" ;;
+  *)       bad "result-contract: 사본이 정본과 동일" "OK 13" "$OUTC" ;;
 esac
 
 # 펜스가 블록 *끝* 에 붙으면 `_execute_spine.md:6` 의 언어 불변조건("모든 스폰 프롬프트는
 # `Write output in \`config.language\`.` 로 끝난다")이 조용히 깨진다 — 계약은 전달되고 언어
-# 지시만 밀려난다. 12개 사본 중 10곳이 그 불변조건의 대상이다(0.97.1: sprint plan 의 PO 프롬프트도
+# 지시만 밀려난다. 13개 사본 중 11곳이 그 불변조건의 대상이다(0.99.0: execute 의 tests-only developer(Step 1L) 추가. 0.97.1: sprint plan 의 PO 프롬프트도
 # 언어 줄로 끝난다 — 리더가 직접 덧붙여야 했다(dry-run 2차). plan 계열 나머지 2곳은 파일 머리의
 # "Output language" 줄로 대신하므로 그 줄의 존재를 대신 단언한다).
 cat > "$WORK3/lang.py" <<'PYL'
 import os, re, sys
 gld = sys.argv[1]
 EXPECT = {"commands/test.md":1, "commands/design.md":3, "commands/qa.md":2,
-          "commands/analyze.md":1, "commands/atoms/_execute_spine.md":2,
+          "commands/analyze.md":1, "commands/atoms/_execute_spine.md":3,
           "commands/plan.md":0, "commands/sprint/plan.md":1}
 OPEN = "<!-- guild:result-contract -->"
 TAIL = "Write output in `config.language`."
@@ -2064,8 +2064,8 @@ print("OK %d" % total if not problems else "PROBLEMS " + " | ".join(problems))
 PYL
 OUTL="$("$PY" "$WORK3/lang.py" "$GLD")"
 case "$OUTL" in
-  "OK 10") ok "스폰 프롬프트 10곳이 여전히 언어 지시로 끝난다 (펜스가 뒤에 붙지 않았다)" ;;
-  *)      bad "스폰 프롬프트가 언어 지시로 끝난다" "OK 10" "$OUTL" ;;
+  "OK 11") ok "스폰 프롬프트 11곳이 여전히 언어 지시로 끝난다 (펜스가 뒤에 붙지 않았다)" ;;
+  *)      bad "스폰 프롬프트가 언어 지시로 끝난다" "OK 11" "$OUTL" ;;
 esac
 
 # 은퇴한 문구가 정본 파일에 남아 있지 않은가 — 같은 규칙의 두 판본이 남으면 하나만 검사를 받는다.
@@ -3578,7 +3578,7 @@ lacksfx "plan(0.98.4 X2): 권장 옵션 뒤 이유만 떼던 옛 규칙 제거" 
 hasfx "plan(0.98.4 X2): 크기 매핑도 같은 제거 규칙" "$PLAN" '  is settled — the mapping reads the chosen option'"'"'s draft line with the same tags removed as'
 lacksfx "plan(0.98.4 X2): 크기 매핑 옛 문구 제거" "$PLAN" 'the mapping reads the option'"'"'s wording with its tags removed'
 hasfx "_handoff(0.97.2): K 에 (recommended) 토큰" "$HOMD" 'the recommended-option token `(recommended)` on one `## questions` option line'
-# E. 재스폰 프롬프트 전체 템플릿 (결과 계약 펜스 없음 — 사본 12개 유지)
+# E. 재스폰 프롬프트 전체 템플릿 (결과 계약 펜스 없음 — 사본 13개 유지)
 hasfx "plan(0.97.2): 재스폰 subagent_type 줄" "$PLAN" '`description`: `tech-lead sprint slot re-spawn`'
 hasfx "plan(0.97.2): 재스폰 템플릿 — Refactor slot 절만 읽기" "$PLAN" 'produce **(c) only** — one refactor-slot proposal (rules: the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md` — read that section before writing (c), not the whole file); do not redo (a) or (b).'
 hasfx "plan(0.97.2): 재스폰 템플릿 — 에픽 파일 회피 조건부" "$PLAN" '<only when epic members are selected: Do not touch the epic members'"'"' files: <their files>.>'

@@ -102,7 +102,11 @@ case where anything held only in context is gone:
      (`_stagnation.md` Section C files it under the same stage). **Plus 1 `correction`** per
      un-dismissed auditor `BLOCKER` that a later block of this invocation shows the redo
      resolved (the deferred capture). An auditor `MAJOR`, a dismissed finding, or an unacted-on
-     one owes **nothing** (the table's volume guard).
+     one owes **nothing** (the table's volume guard). ⚠ A block carrying `local-pass: <job_id>`
+     (the opt-in local model's work sent back — `_execute_spine.md` Step 4) owes **nothing** on
+     either axis, and neither does the deferred capture of a `BLOCKER` that such a block first
+     raised: the miss was the local model's, and `_model_tiering.md` Section C reads every
+     execute capture as a rejected Sonnet attempt. Its record is the local-dev log's note.
    - **test**: 1 `verify-gap` per verify gap / failed verify — or 1 `stagnation` instead.
    - **qa**: 1 `correction` per QA/designer blocking defect — or 1 `stagnation` instead.
      The "or 1 `stagnation` instead" applies only when the loop-back procedure actually **stopped**

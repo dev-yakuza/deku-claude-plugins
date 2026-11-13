@@ -79,6 +79,10 @@ GUILD_MANDATED_RE = re.compile(
     # alternative, leaving Guild's per-candidate call unlisted, would emit a friction signal on
     # every resumed execute, which is the noise this whitelist exists to keep out.
     r"|git log \S+\.\.\S+ --oneline"
+    # _execute_spine.md Step 1L — the leader re-issues the SAME `wait` call until the local job
+    # is terminal, by contract; unlisted, every local job would read as repeated-cmd friction.
+    r"|python3 \S+/local_dev\.py (status|ack) --issue \d+( --last)?"
+    r"|python3 \S+/local_dev\.py wait --issue \d+ --max-seconds \d+(?:\.\d+)?"
     r")\s*$")
 
 

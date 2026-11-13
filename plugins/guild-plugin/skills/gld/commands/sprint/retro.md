@@ -311,6 +311,7 @@ and runs once). The calls grow with the number of children — the same per-Issu
 it is exactly the shape that comes back as page 1 only — and a truncated read produces a
 plausible small number, not an error (`_execute_spine.md` Step 4 states the same requirement for
 the same comment):
+⚠ **A block carrying `local-pass:` is counted like any other here** — it is a real loop-back of the sprint, but its miss was the opt-in local model's, not the developer's (`_execute_spine.md` Step 4). When `local_developer.enabled` is on, say so next to the number and read `local_dev.py report`'s `after_pass` for how many were the local model's.
 ⚠⚠ **Count in `jq`, do not pull the bodies back to count them by eye.** Only these are
 used here — the `### audit-record ` heading count, four disposition tokens and the clean-scan /
 no-scan lines (`findings: none` / `scan: none`) — and that comment

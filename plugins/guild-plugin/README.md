@@ -122,6 +122,7 @@ docs/adr/ , docs/specs/
 | Role agents (habits) | `.claude/agents/*.md` |
 | Codebase facts (⑥, retrieved relevant-only) | `.claude/guild/knowledge/` |
 | Raw episodic memory | `.claude/guild/memory/` (gitignored) |
+| Local-developer job log (opt-in) | `.claude/guild/memory/local-dev/` (gitignored) |
 | Evolution ledger + gates + config | `.claude/guild/` |
 | Curated standards (charter, architecture, …) | `docs/standards/` |
 

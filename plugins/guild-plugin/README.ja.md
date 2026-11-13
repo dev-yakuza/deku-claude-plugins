@@ -123,6 +123,7 @@ docs/adr/ , docs/specs/
 | ロールエージェント（習慣） | `.claude/agents/*.md` |
 | コードベースの事実（⑥、関連分のみ検索） | `.claude/guild/knowledge/` |
 | 生のエピソード記憶 | `.claude/guild/memory/`（gitignore） |
+| ローカル developer のジョブログ（オプトイン） | `.claude/guild/memory/local-dev/`（gitignore） |
 | 進化台帳 + ゲート + 設定 | `.claude/guild/` |
 | キュレーション標準（charter・architecture…） | `docs/standards/` |
 
