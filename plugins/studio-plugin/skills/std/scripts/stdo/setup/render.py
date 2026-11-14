@@ -19,7 +19,8 @@ PLUGIN = os.path.dirname(os.path.dirname(SKILL))
 # the agents init installs: the six spine roles and the external auditor (the conditional ones come with M3)
 AGENTS = ("std-source-analyst", "std-strategist", "std-writer", "std-fact-checker", "std-visual-director",
           "std-distributor", "std-auditor")
-PROTECTED_PERSONAS = (".claude/agents/std-fact-checker.md", ".claude/agents/std-source-analyst.md")  # P-PERS
+PROTECTED_PERSONAS = (".claude/agents/std-fact-checker.md", ".claude/agents/std-source-analyst.md",
+                      ".claude/agents/std-auditor.md")  # P-PERS (the auditor from 0.1.2)
 PERSONA_START = "<!-- studio:persona:start -->"
 PERSONA_END = "<!-- studio:persona:end -->"
 INSTALLED = ".claude/studio/installed.json"

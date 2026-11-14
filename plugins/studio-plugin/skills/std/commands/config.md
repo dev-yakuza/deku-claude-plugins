@@ -50,6 +50,27 @@ same turn, right after the answer — do not wait for the person; never in the s
 `python3 <<SKILL_DIR>>/scripts/setup.py narrator set <lang> --engine qwen:<speaker> --style "<one line>" --expect <h12>`.
 Videos already cast keep their narrator; new videos use the new one.
 
+## Role models
+
+Each role runs on the `model:` line of its file `.claude/agents/std-<role>.md` (every role starts at `sonnet`; Claude
+Code uses it when the spawn passes no model of its own, `atoms/_contract.md`). Show each role's current `model:` (Read
+the seven files), then ask which role and which model: `haiku`, `sonnet`, `opus` or `inherit` (the session's model).
+Say what it costs: a cheaper model is cheaper per call, and a cheaper fact-checker misses more — ① still has the
+auditor and the person.
+
+`python3 <<SKILL_DIR>>/scripts/setup.py agent-model preview <role> <model>` shows the line
+(`설정 <role> model: <old> → <new>`) and `h12`; ask (fixed label `설정 <h12>`, the line in the question), then, alone
+as your next tool call, in the same turn, right after the answer — do not wait for the person; never in the same
+assistant message as the question — `python3 <<SKILL_DIR>>/scripts/setup.py agent-model set <role> <model> --expect
+<h12>` (it refuses, exit 6, an answer whose question lacked the line, and that answer stays unused). Only the `model:`
+line changes; `/std update` keeps it. Then the harness commit below (its question shows `모델 <role>: <old> → <new>`).
+
+What this does not cover: the fact-checker, the source analyst and the auditor are protected personas (an Edit of their
+file is refused; the model changes only here). The other roles' files can still be edited, so their model can change
+by an Edit, seen only in the harness commit's `모델` line; a model passed on the spawn itself wins over the file; and
+after a `source` in a Bash call only the 0.0.26 guard judges, which does not protect `std-auditor.md` (it protects
+the other two personas).
+
 ## The internal overlay (internal hosts, sources, terms, video and actor ids)
 
 The overlay file is written by the person (outside the repository). Compute its sha256 (`shasum -a 256 <file>`), then
@@ -69,7 +90,7 @@ answer whose question did not show those lines).
 
 ## Then: the harness commit
 
-A change to `.claude/studio/**` or the narrator is committed like in `/std init` step 6 (stage, open the criteria files
+A change to `.claude/studio/**`, a role file or the narrator is committed like in `/std init` step 6 (stage, open the criteria files
 the value block lists, show the summary line and every value line, `커밋 <tree12>`, then `git commit` alone
 as your next tool call, in the same turn, right after the answer — do not wait for the person; never in the same
 assistant message as the question). `s2v.path` and the overlay are this

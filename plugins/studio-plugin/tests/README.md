@@ -42,7 +42,7 @@ STUDIO_TEST_S2V=/abs/path/to/script2video \
   `check_commit --staged` on a Studio commit (targets 50 ms / 300 ms; fails only above 3×).
 
 **Scripts version (M0d-2, D-M0-3)**: the guard refuses Studio commands in a repository whose copy of
-`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 26). Run `/std update` in an older sandbox repository,
+`.claude/studio/scripts/` has another `SCRIPTS_VERSION` (now 27). Run `/std update` in an older sandbox repository,
 or copy the plugin's `skills/std/scripts/` (without `guard.py` and `stdo/guard/`) into it again by hand.
 
 **M0f**: `tests/py/drivers/make_harness.py <dir>` builds a synthetic harness repository (templates, agents, a copy of
@@ -354,3 +354,25 @@ for milestone names, plan names and plan sections. `LEGACY_DEPS_HEAD` adds `comm
 `credits.py` (kinds.registry imports the first two lazily; video.py loads credits.py), and
 `test_guard_backstop.LegacyDepsClosure` runs the frozen paths in a subprocess and checks that every non-guard module
 they load is pinned.
+
+**0.1.2** (`SCRIPTS_VERSION` 27, fix-0102): `test_notes.py` covers teaching notes — `claims/notes.py` on what the fake
+s2v gives (placement, plain text, the same-text rule, cards by position with the equal-count rule, scenes matched to s2v's by title — an underlined heading, an untitled
+scene or a `# ` inside a multi-line comment refuses a marked card —, the walk read as CommonMark and remark-directive do
+(indented and `::::` cards, backtick fences, HTML blocks of types 1, 6 and 7) and, under it, the root guard (the
+mapped block must show the marked card's own text; no empty card of that name beside it),
+the caps, `blocks` for the ① binding), the text rules and terms, `draft_problems` for `note` entries (the link cap
+counts no notes), verify.json / verify.md without notes against `tests/py/verifyref.py` (0.1.1's two functions, copied
+from f60349f), the copy check, a video with a marked card through the script check, the skeleton, verify, `shown 1`
+and `approve 1` (the script refuses a recorded question without the note line, or without a question, and a malformed
+record; a proxy approval is not checked), the router (`notes` in ①'s tuple only with markers), and the comment rule on
+real s2v (`STUDIO_TEST_S2V`). `FakeMatchesReal` compares the fake's `screen_text` and sentence ids with real s2v's: the
+fake now lists, as real inspect does, the frontmatter title, the speaking casts' names, every scene title (`heading`),
+one `paragraph` entry per narration sentence and one entry per bullet item, table cell and markdown block, and drops a
+top-level HTML comment (ending the paragraph above it). The drafts of `test_m1e`, `test_m1f` and `test_e2e_m1` judge
+the first scene's title (`TITLE1`, listed by the claims map) and the speaker's name (a link) for that reason
+(`test_m1e.rendered`). `test_agentmodel.py` covers `setup.py agent-model` (the script checks the question's line before
+the answer is used up), the harness commit's `모델` line, `/std update` keeping the model, std-auditor.md as a protected
+persona, and G1 and the 0.0.26 guard on the same calls. `structure_test.sh` pins the spawn rule of
+`atoms/_contract.md` and that no document spawns a role with a model; `LEGACY_DEPS_CHANGED` lists `state/tuples.py`,
+`state/router.py`, `state/schema.py` (① binds the notes) and `setup/labels.py` (`agent-model set`), and extends the
+reasons of `commit/summary.py` and `commit/harness.py` — run `test_guard_backstop.py` again after a change there.

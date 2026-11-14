@@ -9,6 +9,8 @@
     setup.py config set <key> <value> [--expect <h12>]            protected keys and s2v.path: 설정 <h12>
     setup.py narrator preview <lang> --engine qwen:<X> --style <s> [--id narrator]
     setup.py narrator set <lang> --engine qwen:<X> --style <s> [--id narrator] --expect <h12>      설정 <h12>
+    setup.py agent-model preview <role> <haiku|sonnet|opus|inherit>   the label and line of a role's model change
+    setup.py agent-model set <role> <model> --expect <h12>        the role file's model: line — 설정 <h12>
     setup.py update plan [--take <path>=new|local,…]
     setup.py update apply --expect <h12> [--take …]               갱신 <h12>
     setup.py doc [<name>]                                         print a Studio document (read-only, works anywhere)
@@ -20,7 +22,7 @@ import json
 import os
 import sys
 
-from . import analyze, configcmd, doc, initcmd, update
+from . import agentmodel, analyze, configcmd, doc, initcmd, update
 from .common import USAGE, SetupError, toplevel
 
 
@@ -125,6 +127,16 @@ def main(argv, cwd=None, env=None, version=None):
                 return 0
             _print(configcmd.narrator_set(top, o["_"][0], o["--engine"], o["--style"], o.get("--expect"),
                                           list(argv), nid, proxy=bool(o.get("--proxy"))))
+            return 0
+        if group == "agent-model" and sub in ("preview", "set"):
+            o = _opts(rest, ("--expect",))
+            if len(o["_"]) != 2:
+                raise SetupError(USAGE, "agent-model %s <role> <model>" % sub)
+            if sub == "preview":
+                _print(agentmodel.preview(top, *o["_"]))
+                return 0
+            _print(agentmodel.set_(top, o["_"][0], o["_"][1], o.get("--expect"), list(argv),
+                                   proxy=bool(o.get("--proxy"))))
             return 0
         if group == "update" and sub in ("plan", "apply"):
             o = _opts(rest, ("--take", "--expect"))

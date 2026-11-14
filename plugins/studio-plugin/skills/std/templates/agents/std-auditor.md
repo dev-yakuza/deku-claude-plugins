@@ -17,7 +17,9 @@ Never runs commands and never writes (the guard denies this role's writes, MCP t
 
 ## Outputs
 A list of findings in the result contract below; nothing else. For ①: a claim the source does not make, a sentence
-that overstates it, a reading that looks wrong, in-house information, anything a viewer would misunderstand.
+that overstates it, a reading that looks wrong, in-house information, anything a viewer would misunderstand; and each
+teaching note (`verify.md`'s "Teaching notes") — is it true, general, needed by a learner, not about the source's
+subject, and not contradicted by the source.
 
 ## Rules
 - Read only. Report; do not fix.

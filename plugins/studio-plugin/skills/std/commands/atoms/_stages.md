@@ -12,7 +12,7 @@ source → brief → script → verify ─[①]→ cast → tts → audition ─
 | source | source analyst | `source/` (pinned copy) · `source.md` · `source_hash` | `check_scope` · `resolve_assets` |
 | brief | content strategist | `brief.md` · `brief_core` · output list | expected length within the format · `state.py record-brief` |
 | script | script writer | script (with the default narrator's `cast:` block) · `claims-map.json` | `check_claims --narration` (s2v lint with its length warnings, the targetDuration range, the cast block, claims map, narration, images) |
-| verify | fact-checker | `verify.draft.json` → `verify.json` · `verify.md` (written by `check_claims`) | no unsupported or contradicted claim · `check_claims` |
+| verify | fact-checker | `verify.draft.json` (kinds `fact` · `link` · `note`) → `verify.json` · `verify.md` (written by `check_claims`) | no unsupported or contradicted claim · teaching notes as marked, each with a basis · `check_claims` |
 | ① | person | approved content | approval record |
 | cast | producer / casting director | pronunciation (`pronounce-changes.json`), faces (the cast block is the script's, from ①) | `check_assets --actors` (s2v lint, content hash unchanged, the roster, the readings) |
 | tts | producer | audio lock | machine lock (tts) · `check_tts` (failures retried twice, then exempted and shown at ②) |

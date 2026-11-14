@@ -24,7 +24,7 @@ from stdo.state.argv import argv_sha
 from stdo.state.hashes import file_sha
 from stdo.voice import audition as aud, cli as vcli, frontmatter, pronounce, tts
 from test_guard_judge import JudgeCase
-from test_m1e import FAKE_ROOT, S1, S2, FlowCase, cid, E1, E2
+from test_m1e import FAKE_ROOT, S1, S2, FlowCase, cid, E1, E2, rendered
 
 SESSION = "sess-m1f"
 MAIN_JS = os.path.join(FAKE_ROOT, "packages", "cli", "dist", "main.js")
@@ -62,7 +62,7 @@ class VoiceCase(FlowCase):
             {"text": S1, "kind": "fact", "verdict": "supported", "claims": [cid(E1)], "excerpts": [E1]},
             {"text": "空港(くうこう)", "kind": "fact", "verdict": "supported", "claims": [cid(E1)], "excerpts": [E1]},
             {"text": S2, "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]},
-            {"text": "출국", "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]}]}
+            {"text": "출국", "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]}] + rendered()}
         with open(os.path.join(self.w, "verify.draft.json"), "w") as f:
             json.dump(d, f, ensure_ascii=False)
 

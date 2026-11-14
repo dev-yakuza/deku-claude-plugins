@@ -88,6 +88,9 @@ python3 .claude/studio/scripts/hooks.py install
 - **승인 답은 레포 하나에서 한 번만** 쓰입니다. 같은 레포의 워크트리는 그 기록을 나누지만, 따로 받은 clone(별도
   `git clone`)은 나누지 않습니다. 영상의 답은 그 영상과 해시를 담고 있어 다른 clone에 맞는 일이 드물고, 영상이 없는
   답(설정 · 갱신)만 남는 경우입니다. 0.0.9 이하가 워크트리마다 남긴 기록은 무시됩니다.
+- **역할마다의 모델**은 그 역할 파일 `.claude/agents/std-<role>.md`의 `model:` 줄입니다(모든 역할이 `sonnet`으로
+  시작하고, `/std config`로 바꿉니다). Claude Code는 세션이 spawn에 자기 모델을 넘기지 않을 때 이 값을 쓰며, Claude
+  Code 자체의 모델 설정이 이를 덮어쓸 수 있습니다 — [sub-agents](https://code.claude.com/docs/en/sub-agents) 참고.
 
 ## 버전 노트
 
@@ -194,6 +197,20 @@ python3 .claude/studio/scripts/hooks.py install
   다시 채울 때까지 `validate_copy.py`가 모든 카피를 거부합니다). 고친 `formats/youtube.md`도 "local"을 고릅니다. 그
   밖에 바뀐 템플릿은 레포에 설치되지 않는 플러그인 파일입니다(할 일 없음). 0.1.0이 쓴 클론의 pre-commit shim은 그대로
   유효하며, `hooks.py install`이 새 내용을 씁니다.
+- **0.1.2**: 원문 밖 설명(teaching note) — 작가가 원문에 없지만 학습자에게 필요한 일반 지식(읽는 법, 문법 규칙)을
+  문단이나 텍스트 카드 위에 `<!-- studio:note -->`로 표시해 넣을 수 있습니다. 팩트체커는 이를 일반 지식으로 검사해
+  근거를 남기고, ①은 설명마다 근거(그리고 설명이 담은 원문의 낱말)를 보여 주며, ①을 승인하면 설명도 함께
+  승인됩니다. 표시한 블록은 4개, 설명 텍스트는 8개까지(표 칸이나 글머리 항목 하나가 하나), 숫자나 날짜는 안 되고,
+  배포용 글에는 넣지 않습니다. 역할마다의 모델을 `/std config`로 바꿀 수 있습니다(`.claude/agents/std-<role>.md`의
+  `model:`; `/std update`가 유지). `std-auditor`가 보호된 페르소나가 됩니다. Bash 호출에서 `source` 뒤로는 0.0.26
+  가드만 판단하는데, 그 가드는 `std-auditor.md`를 보호하지 않습니다(나머지 두 페르소나는 전처럼 보호합니다).
+- **0.1.2로 올릴 때**: `/std update`를 실행합니다(스크립트 버전 27). `std-fact-checker`와 `std-auditor`는 보호된
+  페르소나라(auditor는 0.1.2부터) update가 둘 다 묻습니다. `new`를 고릅니다(페르소나 블록만 바뀌고, 고른 `model:`과
+  auditor의 `tools:`는 남습니다). frontmatter를 모두 되돌리려는 게 아니면 `new-file`은 고르지 않습니다. 손대지 않은
+  파일은 묻지 않고 갱신됩니다. `std-writer`, `std-distributor`, `guides/script.md`, `guides/copy.md`가 충돌로 나오면
+  `new`를, 고친 가이드라면 `local`을 고르고 원문 밖 설명 줄을 직접 더합니다. `std-fact-checker`를 `local`로 두면
+  안전하지만 설명을 쓸 수 없습니다. 그 팩트체커는 설명을 모르므로 검사가 표시된 텍스트를 모두 거부합니다. 진행 중인
+  영상은 승인을 유지하고, 표시가 없는 대본은 전과 같이 동작합니다.
 
 ## 라이선스
 

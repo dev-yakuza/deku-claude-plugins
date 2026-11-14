@@ -105,12 +105,31 @@ def brand_files(ctx, studio_paths):
     return (old, new)
 
 
+def agent_models(ctx, studio_paths):
+    """[(role, HEAD model, index model)] of the staged role files (`.claude/agents/std-*.md`) that exist at HEAD and in
+    the index (0.1.2: a first install shows no model line)."""
+    from . import values
+    status = dict((p, st) for st, p in ctx.git.staged(ctx.base))
+    out = []
+    for p in sorted(studio_paths):
+        if not (p.startswith(AGENT_PREFIX + "std-") and p.endswith(".md")) or status.get(p) == "D" or not ctx.head:
+            continue
+        old = ctx.git.show("%s:%s" % (ctx.head, p))
+        new = ctx.git.show(":" + p)
+        if old is None or new is None:
+            continue
+        dec = [x.decode("utf-8", "replace") if isinstance(x, bytes) else x for x in (old, new)]
+        out.append((p[len(AGENT_PREFIX):-3], values.read_model(dec[0]), values.read_model(dec[1])))
+    return out
+
+
 def settings_lines(ctx, studio_paths):
     """The settings part of the value block, from HEAD and the index (the hook recomputes it the same way)."""
     from . import values
     old, new = configs(ctx, studio_paths)
     return values.settings(old, new, protected_keys(old, new), narrators(ctx, studio_paths),
-                           crit_files(ctx, studio_paths), brand_files(ctx, studio_paths))[0]
+                           crit_files(ctx, studio_paths), brand_files(ctx, studio_paths),
+                           agent_models(ctx, studio_paths))[0]
 
 
 def compute(ctx, studio_paths, tree):

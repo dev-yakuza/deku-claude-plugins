@@ -28,7 +28,8 @@ TABLE = [
      "state", "state.py, the Studio check scripts (run_s2v.py, …), check_commit.py and the guard"),
     ("P-CRIT", (".claude/studio/charter.md", ".claude/studio/formats/**", ".claude/studio/platforms/**"),
      "criteria", "the person"),
-    ("P-PERS", (".claude/agents/std-fact-checker.md", ".claude/agents/std-source-analyst.md"), "persona", "the person"),
+    ("P-PERS", (".claude/agents/std-fact-checker.md", ".claude/agents/std-source-analyst.md",
+                ".claude/agents/std-auditor.md"), "persona", "the person"),  # the auditor from 0.1.2 (a gate role)
     ("P-WIRE", (".claude/studio/scripts/**", ".claude/studio/installed.json"), "wiring",
      "the person (/std update; installed.json: setup.py)"),
     ("P-CONF", (".claude/studio/config.json",), "config", "the person (protected keys)"),

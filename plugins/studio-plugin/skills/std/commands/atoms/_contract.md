@@ -9,6 +9,8 @@ document.
   (script2video, the Studio scripts), judges results and asks people. It is not spawned.
 - Other roles are spawned with their persona (`.claude/agents/std-*.md`) and receive **files
   only** as input; they write only the outputs listed for them in `_stages.md`.
+- Spawn a role by its name (`std-…`) without a `model` parameter: its file's `model:` line decides (the person sets
+  it with `/std config`; Claude Code takes the call's own model first).
 - Roles never approve, never commit and never run script2video approval commands.
 - Read files with Read and write your outputs (if any) with Write or Edit. Never use `python -c`, heredocs or generator
   scripts for file work: the guard refuses them. For ids, lists and skeletons use the Studio commands your stage
@@ -80,7 +82,7 @@ Each script has its own table; a code means only what its script's table says.
 | 1 | refused: a check failed (`--expect` is not this change's hash, the plan changed since it was shown) | show the person again |
 | 2 | usage or setup (no harness — everything but `init`; a value or path that is not allowed; `--proxy`) | fix the command, or stop and report |
 | 3 | refused: a harness (or an earlier install's traces) exists for `init`; the folder name is taken; the value is already set; an update that would raise `s2v.min_version` while videos are in progress | tell the person |
-| 6 | no usable evidence of the person's answer (`config set` of a protected key or `s2v.path`, `narrator set`, `update apply`) | ask with AskUserQuestion (fixed label, the change line), then run the command once |
+| 6 | no usable evidence of the person's answer (`config set` of a protected key or `s2v.path`, `narrator set`, `agent-model set`, `update apply`) | ask with AskUserQuestion (fixed label, the change line), then run the command once |
 
 **`check_claims.py`** (`--narration`: the script stage; without it: verify; `--source [--fill]`: the claim ids of
 `work/source.md`; `--skeleton`: the verify draft — these exclude each other)

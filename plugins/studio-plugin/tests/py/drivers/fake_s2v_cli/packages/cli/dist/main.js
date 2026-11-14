@@ -203,26 +203,52 @@ function parseScript(file) {
   };
   for (; i < lines.length; i++) {
     const line = lines[i];
-    const h = /^# (.*?)(?:\s*\{#([\w-]+)\})?\s*$/.exec(line);
+    const h = headingOf(line);
     if (h) {
       flush();
       scene = { id: h[2] || `scene-${scenes.length + 1}`, title: h[1].trim(), line: i + 1, blocks: [] };
       scenes.push(scene);
       continue;
     }
-    const open = /^:::(\w+)(\{.*\})?\s*$/.exec(line);
+    // a container: 0-3 spaces, 3 or more colons; it closes at a line of at least as many colons (remark-directive)
+    const open = /^ {0,3}(?::{3,})(\w+)(\{.*\})?\s*$/.exec(line);
+    const colons = open ? /:+/.exec(line)[0].length : 0;
     if (open) {
       flush();
       ensure();
       const body = [];
       const start = i + 1;
-      for (i++; i < lines.length && !/^:::\s*$/.test(lines[i]); i++) body.push(lines[i]);
+      const closes = (l) => {
+        const c = /^ {0,3}(:{3,})\s*$/.exec(l);
+        return !!c && c[1].length >= colons;
+      };
+      for (i++; i < lines.length && !closes(lines[i]); i++) body.push(lines[i]);
       // s2v parse.ts: the markdown images of :::split (the picture side) and :::gallery are the block's images
       if (open[1] === 'split' || open[1] === 'gallery')
         body.forEach((b, k) => {
           for (const m of b.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)) images.push({ src: m[1], line: start + k, kind: 'image' });
         });
-      scene.blocks.push({ kind: 'screen', type: open[1], text: body.join('\n').trim(), line: start });
+      scene.blocks.push({ kind: 'screen', type: open[1], text: body.join('\n').trim(), body, attrs: open[2] || '', line: start });
+      continue;
+    }
+    // a top-level HTML comment (real s2v parse.ts drops it); a one-line comment still ends the paragraph above it
+    // (CommonMark HTML block type 2 interrupts a paragraph), so the next text is another block
+    if (/^ {0,3}<!--.*-->\s*$/.test(line)) {
+      flush();
+      continue;
+    }
+    // a comment over several lines is dropped whole (a `# ` inside it is no heading)
+    if (/^ {0,3}<!--/.test(line)) {
+      flush();
+      for (i++; i < lines.length && !lines[i].includes('-->'); i++);
+      continue;
+    }
+    // an underlined level-1 heading (setext) starts a scene with the paragraph above as its title (real s2v)
+    if (/^ {0,3}=+\s*$/.test(line) && para) {
+      const title = para.text.trim();
+      para = null;
+      scene = { id: `scene-${scenes.length + 1}`, title, line: i, blocks: [] };
+      scenes.push(scene);
       continue;
     }
     // a leaf directive with its label, if any: ::title[공항 단어] is a visual, not narration (s2v parse.ts)
@@ -273,11 +299,136 @@ function parseScript(file) {
   return { file, text, fm, fmLine, scenes, images, casts };
 }
 
-const plain = (t) =>
+// inline HTML tags and emphasis marks are not text (remark: their text is)
+const unmark = (t) =>
   t
+    .replace(/<\/?[A-Za-z][^<>]*>/g, '')
+    .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, '$2')
+    .replace(/\*(?=\S)(.+?)(?<=\S)\*/g, '$1');
+
+// an ATX level-1 heading as real s2v reads it: 0-3 spaces, `#` then a space or tab; CommonMark's closing #s are
+// dropped first (only at the line's end), then `{#id}`; backslash escapes and inline marks are text
+function headingOf(line) {
+  const m = /^ {0,3}#(?:[ \t]+(.*))?$/.exec(line);
+  if (!m) return null;
+  let t = (m[1] || '').replace(/[ \t]+#+[ \t]*$/, '').replace(/^#+[ \t]*$/, '').trim();
+  const id = /\s*\{#([\w-]+)\}\s*$/.exec(t);
+  if (id) t = t.slice(0, id.index);
+  t = unmark(t.replace(/\\([!-/:-@[-`{-~])/g, '$1')).trim();
+  return [line, t, id ? id[1] : undefined];
+}
+
+const plain = (t) =>
+  unmark(t)
     .replace(/:\w+\{[^}]*\}/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+// markdown inline marks dropped (real s2v's text() of a piece of screen text)
+const inline = (t) =>
+  t
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__|\*|_|`)/g, '')
+    .trim();
+
+const attrOf = (attrs, name) => {
+  const m = new RegExp(`(?:^\\{|\\s)${name}=(?:"([^"]*)"|'([^']*)'|([^\\s}"']+))`).exec(attrs || '');
+  return m ? m[1] ?? m[2] ?? m[3] : undefined;
+};
+
+// the markdown blocks of a card body as real s2v lists them: {kind: p | h | li, text}
+function mdBlocks(lines) {
+  const out = [];
+  let para = null;
+  const end = () => {
+    if (para) out.push({ kind: 'p', text: para.join('\n') });
+    para = null;
+  };
+  for (const raw of lines) {
+    const l = raw.trim();
+    if (!l) {
+      end();
+      continue;
+    }
+    if (/^!\[[^\]]*\]\([^)]*\)$/.test(l)) {
+      end();
+      continue;
+    }
+    const h = /^#{1,6}\s+(.*)$/.exec(l);
+    const li = /^(?:[-*+]|\d{1,9}[.)])\s+(.*)$/.exec(l);
+    if (h || li) {
+      end();
+      out.push({ kind: h ? 'h' : 'li', text: inline((h || li)[1]) });
+      continue;
+    }
+    (para = para || []).push(inline(l));
+  }
+  end();
+  return out;
+}
+
+// one entry per piece of a text card, as real inspect's visualScreenText: [{attr, text}]
+function cardText(b) {
+  const lines = b.body || [];
+  const rows = () =>
+    lines
+      .filter((l) => /^\s*\|/.test(l) && !/^\s*\|?\s*:?-{2,}/.test(l))
+      .map((l) =>
+        l
+          .trim()
+          .replace(/^\|/, '')
+          .replace(/\|$/, '')
+          .split('|')
+          .map((c) => inline(c)),
+      );
+  const out = [];
+  const push = (attr, text) => out.push({ attr, text });
+  switch (b.type) {
+    case 'quote': {
+      const items = [];
+      let cur = [];
+      for (const l of lines) {
+        if (l.trim()) cur.push(l.trim());
+        else if (cur.length) items.push(cur.join('\n')), (cur = []);
+      }
+      if (cur.length) items.push(cur.join('\n'));
+      items.forEach((t) => push('text', t));
+      const by = attrOf(b.attrs, 'by');
+      if (by) push('by', by);
+      break;
+    }
+    case 'table':
+    case 'chart':
+      rows().forEach((r) => r.forEach((c) => push('cell', c)));
+      if (b.type === 'chart' && attrOf(b.attrs, 'unit')) push('unit', attrOf(b.attrs, 'unit'));
+      break;
+    case 'bullets':
+      for (const l of lines) {
+        const m = /^\s*[-*+]\s*(.*)$/.exec(l);
+        if (m && inline(m[1])) push('item', inline(m[1])); // an empty item is no item (real s2v)
+      }
+      break;
+    case 'compare':
+      for (const l of lines) {
+        const t = /^\s*#{1,6}\s+(.*)$/.exec(l);
+        const it = /^\s*[-*+]\s+(.*)$/.exec(l);
+        if (t) push('title', inline(t[1]));
+        else if (it) push('item', inline(it[1]));
+      }
+      break;
+    case 'gallery':
+    case 'split':
+    case 'markdown':
+      mdBlocks(lines).forEach((x) => push(x.kind, x.text));
+      for (const l of lines)
+        for (const m of l.matchAll(/!\[([^\]]+)\]\([^)]*\)/g)) if (b.type !== 'markdown') push('caption', m[1]);
+      break;
+    default:
+      if (b.text) push('body', b.text);
+  }
+  return out;
+}
 
 function sentencesOf(script) {
   const out = [];
@@ -497,16 +648,31 @@ function inspect(script, shownPath) {
     if (k === 'bgm' && typeof v === 'object' && v.src) value = { ...v, src: ref(v.src, 'bgm') };
     put(kinds, { [k]: value });
   }
+  // screen_text as real inspect lists it (inspect.ts contentOf): the frontmatter title, the speaking casts' names,
+  // then per scene its title (`heading`), one `paragraph` entry per narration sentence and one entry per piece of
+  // a visual — {scene, block, directive, attr, text}
   const screen = [];
+  if (script.fm.title !== undefined && script.fm.title !== '')
+    screen.push({ scene: '', directive: 'frontmatter', attr: 'title', text: String(script.fm.title) });
+  const speaking = new Set(sentencesOf(script).map((x) => x.cast));
+  for (const c of Object.keys(typeof script.fm.cast === 'object' ? script.fm.cast : {}).filter((k) => speaking.has(k)))
+    screen.push({ scene: '', directive: 'speaker', attr: c, text: String(castSpec(script, c).name || c) });
+  const credit = typeof script.fm.bgm === 'object' ? script.fm.bgm.credit : undefined;
+  if (credit) screen.push({ scene: '', directive: 'description', attr: 'bgm.credit', text: String(credit) });
   for (const s of script.scenes) {
     put(TABLE.body.scene_title, { scene: s.id, title: s.title });
+    if (s.title) screen.push({ scene: s.id, directive: 'heading', attr: 'title', text: s.title });
     s.blocks.forEach((b, bi) => {
-      if (b.kind === 'paragraph') put(TABLE.body.paragraph, { scene: s.id, block: bi, cast: b.cast, text: b.text });
+      if (b.kind === 'paragraph') {
+        put(TABLE.body.paragraph, { scene: s.id, block: bi, cast: b.cast, text: b.text });
+        plain(b.text)
+          .split(/(?<=[.!?。？！])\s+/)
+          .filter((x) => x)
+          .forEach((t) => screen.push({ scene: s.id, block: bi, directive: 'paragraph', attr: b.cast, text: t }));
+      }
       if (b.kind === 'screen') {
         put(TABLE.body.screen, { scene: s.id, block: bi, type: b.type, text: b.text });
-        // screen_text has two shapes here: a container is one {scene, kind, text} with its whole body, a leaf label
-        // is {scene, block, directive, attr, text} as real inspect lists each piece. Studio reads only `text`.
-        screen.push({ scene: s.id, kind: b.type, text: b.text });
+        for (const x of cardText(b)) screen.push({ scene: s.id, block: bi, directive: b.type, attr: x.attr, text: x.text });
       }
       if (b.kind === 'leaf') {
         // a visual block is content (s2v inspect.ts): adding one changes content and presentation, its label content

@@ -92,6 +92,9 @@ the repository): [docs/removing.md](docs/removing.md).
   clones (another `git clone`) do not. A video's answer still names that video and its hash, so it rarely fits
   another clone; answers without a video (settings, updates) are the remaining case. Records kept per worktree by
   0.0.9 and earlier are ignored.
+- **Each role's model** is the `model:` line of its file `.claude/agents/std-<role>.md` (every role starts at
+  `sonnet`; change one with `/std config`). Claude Code uses it when the session passes no model of its own on the
+  spawn, and its own model settings can override it — see [sub-agents](https://code.claude.com/docs/en/sub-agents).
 
 ## Version notes
 
@@ -211,6 +214,21 @@ the repository): [docs/removing.md](docs/removing.md).
   and `validate_copy.py` refuses every copy until it is filled in again). For an edited `formats/youtube.md`, choose
   "local" too. The other changed templates are plugin files that are not installed in repositories (nothing to do).
   A clone's pre-commit shim written by 0.1.0 stays valid; `hooks.py install` writes the new one.
+- **0.1.2**: teaching notes — the writer may add general knowledge a learner needs (a reading, a grammar rule) that the
+  source does not say, marked `<!-- studio:note -->` above a paragraph or a text card. The fact-checker checks it as
+  general knowledge and records a basis; ① shows each note with its basis (and any word of the source it names), and
+  approving ① approves them. At most 4 marked blocks and 8 note texts (each table cell or bullet counts as one), no
+  numbers or dates, never in the copy. Each role's model can be changed with `/std config` (`model:` in
+  `.claude/agents/std-<role>.md`; `/std update` keeps it). `std-auditor` becomes a protected persona; after a `source`
+  in a Bash call only the 0.0.26 guard judges, and it does not protect `std-auditor.md` (it does protect the other
+  two, as before).
+- **Upgrading to 0.1.2**: run `/std update` (scripts version 27). `std-fact-checker` and `std-auditor` are protected
+  personas (the auditor is new in 0.1.2), so update asks about both: choose `new` (the persona block only; your
+  `model:` and the auditor's `tools:` stay), never `new-file` unless you want every frontmatter line reset. Files you
+  never edited are updated without a question; when `std-writer`, `std-distributor`, `guides/script.md` or
+  `guides/copy.md` is listed as a conflict, choose `new`, or for an edited guide `local` and add the teaching-note line
+  by hand. Keeping `local` for `std-fact-checker` is safe but blocks notes: its fact-checker does not know them, so the
+  check refuses every marked text. Videos in progress keep their approvals; a script without markers behaves as before.
 
 ## License
 

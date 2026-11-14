@@ -13,13 +13,17 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
 1. `python3 .claude/studio/scripts/state.py next <video> --enter verify` — exit 3: go to the stage it names.
 2. `python3 .claude/studio/scripts/check_claims.py <video> --skeleton` — (re)writes `work/<lang>/verify.draft.json`
    with one entry for every narration sentence, on-screen text and scene title to judge (claims and excerpts from the
-   claims map, an empty verdict); an entry still in the script keeps what the fact-checker wrote. It prints
+   claims map, an empty verdict; a text the script marks as a teaching note gets `kind: "note"`, an empty `basis` and,
+   when it holds words of the excerpts, their `terms`); an entry still in the script keeps what the fact-checker wrote
+   (one that was marked or unmarked since starts again). It prints
    `kept N · added M · dropped K`. Then spawn the fact-checker (`std-fact-checker`) with the script, `s2v inspect`'s
    screen text, `s2v sentences`, `work/<lang>/claims-map.json`, `work/source.md`, `work/source/` and the draft. It
    fills the draft with Edit and writes nothing else.
 3. `python3 .claude/studio/scripts/check_claims.py <video>` — every excerpt in the source copy, no `unsupported` or
    `contradicted`, every `fact` mapped to claims, every sentence and on-screen text judged, at most 2 link sentences,
-   or a quarter of the judged entries (rounded down) when that is more. It writes `verify.json` and `verify.md` (never
+   or a quarter of the judged entries (rounded down) when that is more; exactly the marked texts are `note` entries,
+   each `supported` with a one-line `basis` that names its `terms`, and the teaching-note checks of the script stage
+   pass again. It writes `verify.json` and `verify.md` (never
    write them yourself). Exit 1: `python3 .claude/studio/scripts/state.py loop <video> verify`, then fix the script or
    the claims (the writer) and go back to step 2 (`--skeleton`, then the fact-checker). The third loop holds the
    video (`held:stagnation`, exit 4): ask the person.
@@ -30,16 +34,20 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
    commands). Show its findings to the person with ①.
 6. **Gate ①**: `python3 .claude/studio/scripts/state.py shown <video> 1` (right as you show `verify.md` and the
    script) prints `hash12 <h12>`, an `in the question:` line per commit to the source after begin
-   (`원본이 begin 뒤에 커밋됨: <sha> <subject> (<diffstat>)`) and the `question` block (`[<video>] ① 대본 — <script
+   (`원본이 begin 뒤에 커밋됨: <sha> <subject> (<diffstat>)`), one per teaching note (`원문 밖 설명: "<text>" — 근거:
+   <basis>`, with `— 원문 용어: <words>` when it names words of the source) and the `question` block (`[<video>] ① 대본 — <script
    path> · hash <h12>` with those lines, up to `end of question`), then an `unused: <script_src> — <reason>` line for
-   each image of the source the script does not show (the claims map's `unused_images`). Before asking, run `git show <sha> --
+   each image of the source the script does not show (the claims map's `unused_images`). Tell the person the
+   `원문 밖 설명` lines are not from the source: general knowledge the fact-checker gave a basis for, which `승인`
+   approves too. Before asking, run `git show <sha> --
    <source path> <image paths>` for each commit and show the person what changed. Ask with AskUserQuestion: the
    question is **the block pasted unchanged** — never retype a line (the guard compares each character) — with the
    auditor's findings after it and every `unused:` line pasted below the block (each on its own line, as printed);
    options `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the
    same turn, right after the answer — do not wait for the person; never in the same assistant message as the question
    — run
-   `python3 .claude/studio/scripts/state.py approve <video> 1 --expect <h12>`.
+   `python3 .claude/studio/scripts/state.py approve <video> 1 --expect <h12>` (it refuses, exit 6, when the question
+   lacked a source-commit or teaching-note line: show it and ask again).
    "고칠 곳이 있다": take the person's notes back to the script stage.
 
 Anything that changes after `shown` (the script, `verify.json`, `verify.md`) needs `shown` and the question again.

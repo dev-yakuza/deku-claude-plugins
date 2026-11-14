@@ -191,6 +191,11 @@ def plan(top, takes_raw=None):
     news = render.templated(vals)
     base_tpl = (inst or {}).get("templates") or {}
     items = [_template_item(rel, _read(top, rel), base_tpl.get(rel), news[rel], takes.get(rel)) for rel in news]
+    from ..commit.values import read_model
+    for i in items:  # 0.1.2: the role's model the person chose (`new` keeps it; `new-file` resets it)
+        local = _read(top, i["path"]) if i["path"].startswith(".claude/agents/") else None
+        if local is not None and read_model(local) != read_model(news[i["path"]]):
+            i["model"] = {"local": read_model(local), "new": read_model(news[i["path"]])}
     out["templates"] = items
     out["installed_missing"] = inst is None
     # s2v.min_version

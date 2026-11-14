@@ -26,13 +26,21 @@ the brand, exemplar scripts.
    "copy_excerpts": {}}`, plus `"unused_images": {"<script_src>": "<reason>"}` for any usable image the script does not
    show. Only the brief's claims. A claim's `sentences` list every text of the script that says it: narration
    sentences, on-screen text (table cells, bullets, captions, quotes) and titles that state something. Write the whole
-   claims map with one Write; on a change, rewrite it with one Write (no per-claim Edits).
+   claims map with one Write; on a change, rewrite it with one Write (no per-claim Edits). A teaching note's text is
+   never in a claim's `sentences`.
 Write nothing else.
 
 ## Rules
 - The s2v syntax: run `<the doc command the producer gives you>` for the s2v syntax; if none was given, stop and
   say so. Never open s2v's files yourself.
 - Say only what the excerpts say; compress, never extend.
+- Teaching notes: general knowledge a learner needs and the source does not say (a reading, a grammar rule) may go in
+  a marked block — `<!-- studio:note -->` alone on its line, a blank line (or the scene's `#` heading) above it, and
+  right below it a narration paragraph or a `:::bullets`, `:::table` or `:::markdown` card (never a quote, a title or
+  scene 1). Plain text only (no speaker prefix, directive or markup); no number, date or statement about the
+  source's subject. At most 4 marked blocks and 8 note texts (each sentence, bullet item or table cell counts as one),
+  each at most 120 characters, and at most 15 % of the narration — never a way to reach the length. The person
+  approves each note at ①.
 - Length: pick `targetDuration` from the brief's estimate within the printed range (s2v lint passes within ±15 % of
   it, and only that range keeps s2v's estimate inside the format's range). Too short: lengthen with claims from the
   brief, never by moving `targetDuration` below the range. A failed check prints s2v's own message (its estimate and

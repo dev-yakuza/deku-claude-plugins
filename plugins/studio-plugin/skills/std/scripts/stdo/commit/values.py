@@ -3,7 +3,8 @@
 The summary line names the protected keys only; the person also sees what they change to. Two parts:
 - **settings**: one line per changed protected key of config.json, `<key>: <old canonical JSON | (없음)> → <new …>`,
   the brand's lines (`brand.name` · `brand.accent_color` · `brand.logo` when brand.json is new or changed — 0.0.28 Q12)
-  and the builtin narrators' lines (narrator.lines). The pre-commit hook recomputes this part from HEAD and the index.
+  the builtin narrators' lines (narrator.lines) and, for a role file that exists at HEAD, its model change
+  (`모델 <role>: <old> → <new>`, 0.1.2). The pre-commit hook recomputes this part from HEAD and the index.
 - **machine** (first install only): this machine's s2v path (machine.json) and the `id` s2v reports there. Computed by
   `--stage` (which runs s2v); the hook never runs node — the guard compares these lines with the question.
 
@@ -19,6 +20,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 
 from .. import narrator, paths
 
@@ -127,9 +129,39 @@ def brand_lines(brand):
                                          ["brand." + k for k in BRAND_KEYS])]
 
 
-def settings(old_cfg, new_cfg, keys, narrators=(), crit=(), brand=None):
+MODEL_LINE = re.compile(r"^model:[ \t]*(.*?)(?:[ \t]+#.*)?[ \t]*$")  # a YAML ` # comment` is not the value
+
+
+def model_lines(text):
+    """[(line index, value)] of the `model:` lines of an agent file's frontmatter, or None when it has no frontmatter
+    (`---` first, a closing `---`)."""
+    lines = (text or "").replace("\r\n", "\n").split("\n")  # CRLF read as LF; rewrite keeps the file's endings
+    if not lines or lines[0].rstrip() != "---":
+        return None
+    for end in range(1, len(lines)):
+        if lines[end].rstrip() == "---":
+            break
+    else:
+        return None
+    return [(i, MODEL_LINE.match(lines[i]).group(1).strip("\"'")) for i in range(1, end) if MODEL_LINE.match(lines[i])]
+
+
+def read_model(text):
+    """The `model:` of an agent file's frontmatter (`.claude/agents/std-*.md`), or None (no frontmatter, no line, or
+    more than one). Shared by setup.py agent-model, the guard and the harness commit's value block."""
+    found = model_lines(text)
+    return found[0][1] if found and len(found) == 1 else None
+
+
+def model_value_lines(models):
+    """`모델 <role>: <old> → <new>` per role whose model changes; `models` = [(role, old, new)]."""
+    return ["모델 %s: %s → %s" % (role, old or NONE, new or NONE) for role, old, new in sorted(models) if old != new]
+
+
+def settings(old_cfg, new_cfg, keys, narrators=(), crit=(), brand=None, models=()):
     """(lines, longest value length). `narrators` = [(id, old status, new status)]; `crit` = the criteria files;
-    `brand` = brand.json's (HEAD blob, index blob) when the commit changes it."""
+    `brand` = brand.json's (HEAD blob, index blob) when the commit changes it; `models` = [(role, HEAD model, index
+    model)] of the role files present at HEAD."""
     kl = key_lines(old_cfg, new_cfg, keys) + brand_lines(brand)
     lines = [l for l, _v in kl]
     longest = max([len(x) for _l, v in kl for x in v] or [0])
@@ -141,6 +173,9 @@ def settings(old_cfg, new_cfg, keys, narrators=(), crit=(), brand=None):
         for l in narrator.lines(nid, old, new):
             lines.append(l)
             longest = max(longest, len(l))
+    for l in model_value_lines(models):
+        lines.append(l)
+        longest = max(longest, len(l))
     return lines, longest
 
 
@@ -195,10 +230,10 @@ def file_line(rel, sha12):
     return "값 블록 파일: %s (sha %s)" % (rel, sha12)
 
 
-def block(old_cfg, new_cfg, keys, narrators, machine, tree, first_install, crit=(), brand=None):
+def block(old_cfg, new_cfg, keys, narrators, machine, tree, first_install, crit=(), brand=None, models=()):
     """The block for commit-ok.json: {"settings", "machine", "shown", "overflow"}. `shown` is what the question must
     contain; overflow = {"file", "sha12", "reason"} or None."""
-    lines, longest = settings(old_cfg, new_cfg, keys, narrators, crit, brand)
+    lines, longest = settings(old_cfg, new_cfg, keys, narrators, crit, brand, models)
     mach = list(machine or [])
     longest = max([longest] + [len(l) for l in mach])
     full = lines + mach
@@ -212,7 +247,7 @@ def block(old_cfg, new_cfg, keys, narrators, machine, tree, first_install, crit=
     reason = FIRST_INSTALL_OVERFLOW if first_install else "overflow"
     _cl, crit_files, crit_counts = crit_parts(crit)
     shown = [file_line(rel, sha12)] + counts(old_cfg, new_cfg, keys) + crit_counts + crit_files + \
-        [l for l in lines if l.startswith(("내레이터:", "brand."))]
+        [l for l in lines if l.startswith(("내레이터:", "brand.", "모델 "))]
     if first_install:
         shown.append("%s: 첫 설치의 설정이 질문에 다 보이지 않는다 — 파일을 열어 확인할 것" % FIRST_INSTALL_OVERFLOW)
     return {"settings": lines, "machine": mach, "shown": shown,

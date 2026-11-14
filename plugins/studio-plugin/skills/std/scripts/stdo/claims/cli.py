@@ -22,7 +22,7 @@ from ..source import assets as assets_mod
 from ..state import cli as scli, commands as C, schema, stagechecks, store
 from ..state.collect import CollectError, Providers, frozen_copy_path
 from ..text.normalize import normalize
-from . import check, linkrule, sourcemd
+from . import check, linkrule, notes, sourcemd
 
 USAGE = "check_claims.py <video> [--narration | --skeleton | --source [--fill]] [--lang l]"
 MODES = ("--narration", "--skeleton", "--source")
@@ -138,9 +138,14 @@ def script_check(repo, vdir, state, lang, ctx, providers, env, runner):
             problems.append(lp)
     # the cast block the writer copied from `next --enter script` (0.0.28 Q2): s2v's content hash includes it
     problems += cast_problems(repo, ctx["studio_root"], lang, text)
-    warnings = check.screen_warnings(ins.get("screen_text"), cm)  # 0.0.28 Q7: a hint, never a failure
+    # 0.1.2: teaching notes — placement, matching, the caps, no number, never a claims-map sentence
+    nts, note_problems = notes.marked(text, sentences, ins)
+    problems += note_problems + notes.text_problems(nts, cm)
+    warnings = check.screen_warnings(ins.get("screen_text"), cm, nts)  # 0.0.28 Q7: a hint, never a failure
     details = {"lint": lint.details(), "fail_unread": fail_unread, "problems": problems, "warnings": warnings,
                "screen_text": len(ins.get("screen_text") or []), "sentences": len(sentences or [])}
+    if nts:
+        details["notes"] = len(nts)
     result = "fail" if problems else "pass"
     inp = stagechecks.Inputs(ctx, state, lang, None, cur, providers)
     p = stagechecks.write(vdir, lang, "script", None, result, details,
@@ -183,8 +188,14 @@ def verify_check(repo, vdir, state, lang, ctx, providers):
         problems.append(why)
     else:
         ins = providers.inspect(ctx)
-        problems += check.draft_problems(draft, cm, copy, providers.sentences(ctx), ins.get("screen_text"),
-                                         [x.get("title") for x in ins.get("scenes") or [] if isinstance(x, dict)])
+        sentences = providers.sentences(ctx)
+        # the notes again (placement, matching, the same-text rule, the caps): a marker changed after ① sends the
+        # video here, not to the script stage
+        nts, note_problems = notes.marked(_script_text(ctx), sentences, ins)
+        problems += note_problems
+        problems += check.draft_problems(draft, cm, copy, sentences, ins.get("screen_text"),
+                                         [x.get("title") for x in ins.get("scenes") or [] if isinstance(x, dict)],
+                                         nts)
     for name in ("verify.json", "verify.md"):  # a failed or repeated check never leaves the last ones behind
         try:
             os.remove(os.path.join(w, name))
@@ -203,6 +214,11 @@ def verify_check(repo, vdir, state, lang, ctx, providers):
         sys.stdout.write("next: python3 .claude/studio/scripts/state.py loop %s verify%s, then the fact-checker "
                          "again\n" % (state["video"], "" if lang == state["source_lang"] else " --lang " + lang))
     return C.OK if result == "pass" else C.FAIL
+
+
+def _script_text(ctx):
+    with open(ctx["script"], encoding="utf-8") as f:
+        return f.read()
 
 
 # ---------- --source (0.0.25 P9) ----------
@@ -345,7 +361,10 @@ def skeleton(repo, vdir, lang, ctx, providers):
     p = os.path.join(w, "verify.draft.json")
     cm, _why = check._read_json(os.path.join(w, "claims-map.json"), "claims-map.json")
     ins = providers.inspect(ctx)
-    texts, listed, claims, origin = skeleton_texts(ins, providers.sentences(ctx), cm)
+    sentences = providers.sentences(ctx)
+    texts, listed, claims, origin = skeleton_texts(ins, sentences, cm)
+    marked = set(normalize(t) for t in notes.marked(_script_text(ctx), sentences, ins)[0])
+    ts = notes.excerpt_terms(cm)
     old, why = check._read_json(p, "work/%s/verify.draft.json" % lang)
     have, dupes = {}, []
     if old is not None:
@@ -360,9 +379,26 @@ def skeleton(repo, vdir, lang, ctx, providers):
     entries, kept, added = [], 0, 0
     for t in texts:
         k = normalize(t)
-        if k in have:  # the skeleton keeps `from` (0.0.28 Q7: the S7 message says where the text is)
-            entries.append(dict(have.pop(k), **{"from": origin.get(k, "narration")}))
+        if k in have and (have[k].get("kind") == "note") == (k in marked):
+            # the skeleton keeps `from` (0.0.28 Q7: the S7 message says where the text is); a note's terms are computed
+            e = dict(have.pop(k), **{"from": origin.get(k, "narration")})
+            if k in marked:
+                e.pop("terms", None)
+                terms = notes.terms_of(t, cm, ts)
+                if terms:
+                    e["terms"] = terms
+            entries.append(e)
             kept += 1
+            continue
+        have.pop(k, None)  # marked or unmarked since: the script decides the kind, the entry starts again
+        if k in marked:  # 0.1.2: a teaching note, judged as general knowledge
+            e = {"text": t, "from": origin.get(k, "narration"), "kind": "note", "verdict": "", "basis": "",
+                 "claims": [], "excerpts": []}
+            terms = notes.terms_of(t, cm, ts)
+            if terms:
+                e["terms"] = terms
+            entries.append(e)
+            added += 1
             continue
         cids = listed.get(k, [])
         entries.append({"text": t, "from": origin.get(k, "narration"), "kind": "fact", "claims": list(cids),

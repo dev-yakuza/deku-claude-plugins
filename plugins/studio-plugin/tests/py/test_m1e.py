@@ -98,6 +98,16 @@ def cid(e):
     return sourcemd.claim_id(e)
 
 
+# s2v's screen_text also lists every scene title (`heading`) and the speaking cast's name (`speaker`), and so does the
+# fake from 0.1.2: the drafts judge them — the first scene's title as a fact the claims map lists, the name as a link
+TITLE1 = "공항"
+
+
+def rendered():
+    return [{"text": TITLE1, "kind": "fact", "verdict": "supported", "claims": [cid(E1)], "excerpts": [E1]},
+            {"text": "narrator", "kind": "link", "note": "the speaker's name on screen"}]
+
+
 # ---------------------------------------------------------------- §7.1 normalization
 
 class Normalize(StudioTestCase):
@@ -315,7 +325,7 @@ class FlowCase(StudioTestCase):
             f.write(SCRIPT % {"s1": s1, "s2": s2, "max": max, "target": target})
 
     def cmap(self, **over):
-        m = {"claims": {cid(E1): {"excerpt": E1, "sentences": [S1, "空港(くうこう)"]},
+        m = {"claims": {cid(E1): {"excerpt": E1, "sentences": [S1, "空港(くうこう)", TITLE1]},
                         cid(E2): {"excerpt": E2, "sentences": [S2, "출국"]}},
              "excerpts": [E1, E2], "copy_excerpts": {}}
         m.update(over)
@@ -493,7 +503,7 @@ class VerifyCheck(FlowCase):
             {"text": S2, "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]},
             # the title label of scene exit: on-screen text, judged like the narration
             {"text": "출국", "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]},
-        ]
+        ] + rendered()
         d = {"sentences": sentences}
         d.update(over)
         with open(os.path.join(self.w, "verify.draft.json"), "w") as f:
@@ -511,7 +521,7 @@ class VerifyCheck(FlowCase):
         self.assertEqual(self.check(), 0, self.out)
         with open(os.path.join(self.w, "verify.json")) as f:
             v = json.load(f)
-        self.assertEqual([s["text"] for s in v["sentences"]], [S1, "空港(くうこう)", S2, "출국"])
+        self.assertEqual([s["text"] for s in v["sentences"]], [S1, "空港(くうこう)", S2, "출국", TITLE1, "narrator"])
         self.assertEqual(v["from"]["draft"], file_sha(os.path.join(self.w, "verify.draft.json")))
         with open(os.path.join(self.w, "verify.md")) as f:
             md = f.read()
@@ -561,7 +571,7 @@ class VerifyCheck(FlowCase):
         with open(os.path.join(self.w, "verify.md")) as f:
             md = f.read()
         self.assertIn("## Link sentences", md)
-        self.assertIn("1. 이번에는 출국을 봅시다.\n   - why a link: a transition", md)
+        self.assertIn("2. 이번에는 출국을 봅시다.\n   - why a link: a transition", md)
         self.assertLess(md.index("## Facts"), md.index(S1))
         self.assertLess(md.index(S1), md.index("## Link sentences"))
         self.draft(sentences="x")
@@ -591,8 +601,9 @@ class VerifyCheck(FlowCase):
         self.draft(sentences=good + [{"text": "이번에는 출국을 봅시다.", "kind": "link"}])
         self.assertEqual(self.check(), 1)
         self.assertIn("needs a note", self.out)
-        many = good + [dict(text="이제 넘어가 볼게요 %s." % w, kind="link", **note) for w in ("가", "나", "다")]
-        self.draft(sentences=many)  # 6 judged: at most max(2, 25 %) = 2 links
+        # the speaker's name is a link already (rendered()): two more make 3 of 8 judged — at most max(2, 25 %) = 2
+        many = good + [dict(text="이제 넘어가 볼게요 %s." % w, kind="link", **note) for w in ("가", "나")]
+        self.draft(sentences=many)
         self.assertEqual(self.check(), 1)
         self.assertIn("3 link sentences — at most 2", self.out)
         self.draft(sentences=many[:-1])

@@ -32,6 +32,14 @@ exactly `{"sentences": [{"text": "<the sentence or on-screen text, as in s2v's o
   `unsupported`.
 - Readings: a Korean reading of a Japanese word must match the source's ruby pair (`work/source.md`); a wrong reading
   is `contradicted`.
+- `note` (the skeleton writes `kind: "note"` for a text the script marks as a teaching note; never change a kind):
+  general knowledge the source does not say, judged as such. `supported` only when a standard reference (a
+  dictionary, a grammar, an official guide) would say so; `basis`: one line (at most 200 characters) naming the kind
+  of reference and what it says; `claims` and `excerpts` stay empty. `unsupported` when it is not general, is about
+  the source's subject, or the source itself says it (then it is a fact with a claim); `contradicted` when it is
+  wrong. A note listed with `terms` (words of the excerpts): the basis names each term and the general fact about it
+  (how it is read, written or used); a note saying what the source says about the term is `unsupported`. The person
+  reads each note with its basis at ①.
 Studio's `check_claims.py` turns your draft into `verify.json` and `verify.md`; never write those.
 
 ## The copy (stage copy)
@@ -41,13 +49,14 @@ When the producer gives you a platform copy:
    `{"sentences": [{"text": "<the sentence as in the copy>", "kind": "fact", "verdict": "supported" | "unsupported" |
    "contradicted", "excerpts": ["<exact excerpt>"]}]}`. Chapter lines, credit lines and required notices are not
    judged. Judge a list item together with its heading; a sentence that drops a condition or limit stated in its
-   excerpt is `unsupported`.
+   excerpt is `unsupported`. A sentence stating general knowledge the source lacks (a teaching note's reading or
+   rule) is `unsupported`: teaching notes stay in the video.
 2. Set `"copy_excerpts": {"<platform>": [...]}` in `work/<lang>/claims-map.json` to exactly the union of those
    excerpts (change nothing else of the claims map).
 `validate_copy.py` checks both against the copy and the source copy.
 
 ## Rules
-- Judge only against the copy; no outside knowledge decides a verdict.
+- Judge only against the copy; no outside knowledge decides a verdict — except a teaching note's (`kind: "note"`).
 - Never approve, commit or run script2video approval commands.
 - Read files with Read and write your outputs (if any) with Write or Edit. Never use `python -c`, heredocs or generator
   scripts for file work: the guard refuses them. For ids, lists and skeletons use the Studio commands your stage

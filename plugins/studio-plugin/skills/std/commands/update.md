@@ -19,7 +19,8 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
 2. Every item that is not `same` carries `diff`: `unified` (for an agent, of its persona block) and, for a format,
    `criteria` (`criteria.<kind>.<key>: old → new`). Show the person each of them. For each `conflict` and
    `protected-needs-choice` ask which to keep: `new` (an agent: its persona block only — the repository's frontmatter
-   stays), `new-file` (the whole new file) or `local`. Run the plan again with the choices:
+   stays), `new-file` (the whole new file) or `local`. An agent item with `model` (`local` → `new`) has a role model the
+   person chose (`/std config`): show it, and say that `new` keeps it while `new-file` resets it to the template's. Run the plan again with the choices:
    `python3 <<SKILL_DIR>>/scripts/setup.py update plan --take <path>=new,<path>=local` (comma-separated) — the choices
    are part of the `h12` the person approves.
 3. Ask with AskUserQuestion: the question shows the versions, what changes, every `ignore.lines` line (e.g.

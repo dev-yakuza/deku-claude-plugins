@@ -46,7 +46,7 @@ check(bool(sv) and sv.group(1).isdigit(), "SCRIPTS_VERSION is a whole number (bu
 mp = os.path.normpath(os.path.join(plugin, "..", "..", ".claude-plugin", "marketplace.json"))
 entries = [p for p in json.load(open(mp)).get("plugins", []) if p.get("name") == "studio-plugin"] \
     if os.path.exists(mp) else []
-check(len(entries) == 1, "the marketplace has one studio-plugin entry (0.1.1, m1k-plan item 7)")
+check(len(entries) == 1, "the marketplace has one studio-plugin entry (0.1.2, m1k-plan item 7)")
 for k, want in (("version", pj.get("version")), ("description", pj.get("description")),
                 ("source", "./plugins/studio-plugin")):
     check(bool(entries) and entries[0].get(k) == want, "the marketplace entry's %s is plugin.json's" % k)
@@ -403,15 +403,21 @@ LEGACY_DEPS_HEAD = {
 # commit/video.py lazily, and video.py loads credits.py; the closure test below runs them). Intended changes since
 # d2028cc, each with a one-line reason:
 LEGACY_DEPS_CHANGED = {
-    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26",
+    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26 · 0.1.2: SCRIPTS_VERSION 27",
     "stdo/hooks/templates.py": "0.1.1 (fix-0029 §2): the shim's hint names hooks.py install only",
     "stdo/state/labels.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
     "stdo/commit/kinds.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
-    "stdo/commit/harness.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
+    "stdo/commit/harness.py": "0.1.1 (fix-0029 §3): no milestone names in messages · 0.1.2 (fix-0102 §2.4): "
+                              "std-auditor.md is a protected persona",
     "stdo/credits.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
     "stdo/state/argv.py": "0.0.28 (fix-0028 §1): --since-last is a flag (status takes no value for it)",
     "stdo/state/commands.py": "0.0.28 (fix-0028 §13): ask-before is evidence-free and implemented (no deny)",
-    "stdo/commit/summary.py": "0.0.28 (fix-0028 §11): the value block shows brand.json's name, accent and logo",
+    "stdo/commit/summary.py": "0.0.28 (fix-0028 §11) · 0.1.2 (fix-0102 §2.4): the value block shows brand.json's "
+                              "name, accent and logo, and role model changes",
+    "stdo/state/tuples.py": "0.1.2 (fix-0102 §1.6): ① binds the teaching notes",
+    "stdo/state/router.py": "0.1.2 (fix-0102 §1.6): ① binds the teaching notes",
+    "stdo/state/schema.py": "0.1.2 (fix-0102 §1.6): ① binds the teaching notes",
+    "stdo/setup/labels.py": "0.1.2 (fix-0102 §2): agent-model set is a 설정 command",
     "stdo/state/store.py": "0.0.28 (fix-0028 §1.1): video_dir refuses an id that is not a video id (exit 2)",
 }
 for _f, _h in sorted(LEGACY_DEPS_HEAD.items()):
@@ -452,7 +458,9 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "26", "SCRIPTS_VERSION is 26 (0.1.1: hooks/ as a whole — the shim's hint in "
+check(sv and sv.group(1) == "27", "SCRIPTS_VERSION is 27 (0.1.2: teaching notes — claims/ with the new notes.py, "
+      "distribute/factcheck.py, state/ gates, collect, tuples, router, schema — and role models in commit/ summary, "
+      "values, harness; 0.1.1: hooks/ as a whole — the shim's hint in "
       "templates.py, install.py's status accepting the 0.1.0 shim, cli.py's usage line — and no milestone names in "
       "the messages of state/, commit/, credits.py and distribute/check.py)")
 # 0.0.23 (pilot-1 P4): every gate document has the agent paste the printed question block, never retyping a line
@@ -460,6 +468,18 @@ for _d in ("make", "copy", "verify", "board"):
     _t = open(os.path.join(skill, "commands", _d + ".md")).read()
     check("`question` block" in _t and "never retype a line" in _t,
           "commands/%s.md asks with the `question` block pasted unchanged (never retype a line)" % _d)
+# 0.1.2 (fix-0102 §2.4): a role is spawned without a `model` parameter — its file's `model:` decides
+_ct = open(os.path.join(skill, "commands", "atoms", "_contract.md")).read()
+check("Spawn a role by its name (`std-…`) without a `model` parameter" in _ct,
+      "atoms/_contract.md: a role is spawned by its name without a model parameter")
+_passes = re.compile(r"(?i)\b(spawn\w*|agent call)\b[^\n]*(\bmodel\s*[:=]\s*`?\w|with (a|the) `?model\b|`?\bmodel`? "
+                     r"parameter)")
+_bad = ["%s:%d" % (os.path.relpath(_p, skill), _n) for _p in sorted(glob.glob(os.path.join(skill, "commands", "*.md")) +
+                                                                   glob.glob(os.path.join(skill, "commands", "atoms",
+                                                                                          "*.md")))
+        for _n, _l in enumerate(open(_p, encoding="utf-8"), 1)
+        if _passes.search(_l) and "without a `model` parameter" not in _l]
+check(not _bad, "no command or atom spawns a role with a model of its own (%s)" % (", ".join(_bad) or "none"))
 # 0.0.28 (pilot-3 Q13 · Q14): every command document's Rules paragraph has the three shell-habit clauses
 for _p in sorted(glob.glob(os.path.join(skill, "commands", "*.md"))):
     _t = open(_p).read()

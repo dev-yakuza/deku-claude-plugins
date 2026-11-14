@@ -8,7 +8,9 @@ claims map must be judged by the fact-checker in `work/<l>/copy-verify.<p>.json`
 
 with excerpts that are in the source copy; no entry may be unsupported or contradicted; and the claims map's
 `copy_excerpts.<p>` must be exactly the union of the fact entries' excerpts (④b records them, and the source diff
-judges the copy by them)."""
+judges the copy by them).
+
+A teaching note (verify.json's `note` entries, 0.1.2) is not copy material: a copy sentence that contains one fails."""
 
 import json
 import os
@@ -18,6 +20,10 @@ from ..claims import linkrule
 from ..text.normalize import normalize
 
 SPLIT = re.compile(r"(?<=[.!?。？！])\s+|\n+")
+# a copy sentence repeats a teaching note when it is the note (whitespace aside) or contains a note of at least this
+# many characters (whitespace not counted): a table cell or bullet note is often one ordinary word (읽기, 뜻), which a
+# copy may well use; a phrase that long is the note itself
+NOTE_IN_COPY_MIN = 8
 
 
 def path(vdir, lang, platform):
@@ -84,13 +90,32 @@ def problems(vdir, lang, platform, cm, copy, own):
             continue
         judged[normalize(e["text"])] = e
         union += [x for x in ex if x not in union]
+    note_texts = notes_of(vdir, lang)
     for s in own:
+        own_t = re.sub(r"\s+", "", normalize(s))
+        hit = next((t for t in note_texts if t == own_t or (len(t) >= NOTE_IN_COPY_MIN and t in own_t)), None)
+        if hit:
+            out.append("a teaching note is not copy material: the copy says only what the source says (%s)" % s[:80])
         if must_be_fact(s, terms, listed) and normalize(s) not in judged:
             out.append("a sentence of the copy states something to check and is not judged (copy-verify): %s"
                        % s[:80])
     cx = ((cm or {}).get("copy_excerpts") or {}).get(platform) if isinstance(cm, dict) else None
     if not isinstance(cx, list) or sorted(set(cx)) != sorted(set(union)):
         out.append("claims-map copy_excerpts.%s must be exactly the excerpts of copy-verify's facts" % platform)
+    return out
+
+
+def notes_of(vdir, lang):
+    """The teaching-note texts of verify.json, normalized without whitespace (none without the file)."""
+    try:
+        with open(os.path.join(vdir, "work", lang, "verify.json"), encoding="utf-8") as f:
+            entries = (json.load(f) or {}).get("sentences") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+    out = []
+    for e in entries if isinstance(entries, list) else []:
+        if isinstance(e, dict) and e.get("kind") == "note" and isinstance(e.get("text"), str) and normalize(e["text"]):
+            out.append(re.sub(r"\s+", "", normalize(e["text"])))
     return out
 
 

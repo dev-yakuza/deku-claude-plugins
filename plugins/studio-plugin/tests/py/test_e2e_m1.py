@@ -17,7 +17,7 @@ from e2e_runner import Session
 from helpers import StudioTestCase
 from stdo import machine
 from test_e2e_m0 import values_of
-from test_m1e import ARTICLE, E1, E2, FAKE_ROOT, S1, S2, SCRIPT, branded, cid, png
+from test_m1e import ARTICLE, E1, E2, FAKE_ROOT, S1, S2, SCRIPT, TITLE1, branded, cid, png, rendered
 from test_m1h import COPY, FACT, NOTICE
 
 sys.path.insert(0, os.path.join(helpers.HERE, "drivers"))
@@ -166,7 +166,7 @@ class FlowCase(E2ECase):
         self.do(PY + "state.py record-brief v1 --from work/brief.json")
         self.write("studio/videos/v1/script.ko.md", SCRIPT % {"s1": S1, "s2": S2, "max": 600, "target": 6})
         self.write("studio/videos/v1/work/ko/claims-map.json", json.dumps({
-            "claims": {cid(E1): {"excerpt": E1, "sentences": [S1, "空港(くうこう)"]},
+            "claims": {cid(E1): {"excerpt": E1, "sentences": [S1, "空港(くうこう)", TITLE1]},
                        cid(E2): {"excerpt": E2, "sentences": [S2, "출국"]}},
             "excerpts": [E1, E2], "copy_excerpts": {}}, ensure_ascii=False))
         self.do(PY + "check_claims.py v1 --narration")
@@ -175,7 +175,7 @@ class FlowCase(E2ECase):
             {"text": S1, "kind": "fact", "verdict": "supported", "claims": [cid(E1)], "excerpts": [E1]},
             {"text": "空港(くうこう)", "kind": "fact", "verdict": "supported", "claims": [cid(E1)], "excerpts": [E1]},
             {"text": S2, "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]},
-            {"text": "출국", "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]}]},
+            {"text": "출국", "kind": "fact", "verdict": "supported", "claims": [cid(E2)], "excerpts": [E2]}] + rendered()},
             ensure_ascii=False))
         self.do(PY + "check_claims.py v1")
         self.do(PY + "state.py stage-done v1 verify")

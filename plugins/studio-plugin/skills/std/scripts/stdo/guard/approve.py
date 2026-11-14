@@ -145,7 +145,7 @@ def _gate_of(argv):
 
 def _gate_lines(ri, argv):
     """The lines a gate question must show besides the label: for ①, every commit to the source after begin (M1e
-    review S5); for ②, what `shown 2` recorded (M1f review V1); for ④b, what `shown 4b` recorded for every current
+    review S5) and every teaching note `shown 1` recorded; for ②, what `shown 2` recorded (M1f review V1); for ④b, what `shown 4b` recorded for every current
     platform — whatever --platform says (pilot-1 P4). Read from the video's state.json: no readable state shows
     nothing here (state.py refuses it); a state the lines cannot be computed from raises (the caller denies)."""
     from ..state.argv import canonical
@@ -156,8 +156,8 @@ def _gate_lines(ri, argv):
     st = labels.read_state(vdir) if vdir else None
     if st is None:
         return []
-    if c["pos"][1] == "1":
-        return labels.source_commit_lines(st)
+    if c["pos"][1] == "1":  # and the teaching notes `shown 1` recorded (0.1.2)
+        return labels.source_commit_lines(st) + labels.gate2_lines(st, c["opt"].get("--lang"), "1")
     if c["pos"][1] == "4b":  # ④b: the copy's facts and their excerpts (M1h review Y2)
         return labels.gate4b_lines(st, c["opt"].get("--lang"))
     return labels.gate2_lines(st, c["opt"].get("--lang"))  # ②: exemptions, readings, conflicts (V1)
@@ -177,8 +177,8 @@ def setup_py(hook, env, ri, argv):
     try:
         label, h12 = sl.expected(argv)
     except labels.NoLabel as e:
-        return Verdict("G-APPROVAL", "%s. Run the preview (setup.py config preview / narrator preview / update plan) "
-                                     "and ask the person first." % e)
+        return Verdict("G-APPROVAL", "%s. Run the preview (setup.py config preview / narrator preview / agent-model "
+                                     "preview / update plan) and ask the person first." % e)
     line = None
     try:
         line = _setup_line(ri, argv, sl)
@@ -209,7 +209,7 @@ def setup_py(hook, env, ri, argv):
 
 
 def _setup_line(ri, argv, sl):
-    """The change line a config/narrator question must show (None for update apply)."""
+    """The change line a config/narrator/agent-model question must show (None for update apply)."""
     from ..state.argv import canonical
     c = canonical(argv)
     words = [c["cmd"]] + c["pos"]
@@ -244,6 +244,20 @@ def _setup_line(ri, argv, sl):
         except OSError:
             st = None
         return sl.narrator_line(nid, words[2], nar._voice(st, words[2]) if st else None, (engine, style))
+    if words[:2] == ["agent-model", "set"]:  # 0.1.2: the role first (no path is built from another value)
+        if len(words) != 4:
+            raise ValueError("agent-model set <role> <model>")
+        from ..setup import render
+        if words[2] not in render.AGENTS:
+            raise ValueError("%r is not a Studio role (%s)" % (words[2], ", ".join(render.AGENTS)))
+        from ..commit.values import read_model
+        rel = ".claude/agents/%s.md" % words[2]
+        try:
+            with open(os.path.join(ri.worktree, rel), encoding="utf-8") as f:
+                old = read_model(f.read())
+        except (OSError, UnicodeDecodeError):
+            raise ValueError("%s is missing" % rel)
+        return sl.agent_model_line(words[2], old, words[3])
     return None
 
 

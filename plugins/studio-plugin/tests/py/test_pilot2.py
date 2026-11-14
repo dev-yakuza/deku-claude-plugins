@@ -506,7 +506,8 @@ class Wording(StudioTestCase):
         st = flat(read(COMMANDS, "atoms", "_stages.md"))
         for s in NEXT_CALL:
             self.assertIn(s, st)
-        self.assertEqual(flat(read(COMMANDS, "config.md")).count("next tool call, in the same turn"), 4)
+        # protected settings, the narrator, the overlay, role models (0.1.2) and the harness commit
+        self.assertEqual(flat(read(COMMANDS, "config.md")).count("next tool call, in the same turn"), 5)
         self.assertEqual(flat(read(COMMANDS, "make.md")).count("next tool call, in the same turn"), 3)
         for p in glob.glob(os.path.join(COMMANDS, "**", "*.md"), recursive=True):
             self.assertNotIn("in a later message", flat(read(p)), p)

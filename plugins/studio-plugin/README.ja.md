@@ -90,6 +90,9 @@ python3 .claude/studio/scripts/hooks.py install
 - **承認の回答はリポジトリ全体で一度だけ**使えます。同じリポジトリのワークツリーはその記録を共有しますが、別に取得した
   clone(別の `git clone`)は共有しません。動画の回答はその動画とハッシュを含むので別の clone に当てはまることはまれで、
   動画を持たない回答(設定・更新)だけが残るケースです。0.0.9 以前がワークツリーごとに残した記録は無視されます。
+- **役割ごとのモデル**は、その役割のファイル `.claude/agents/std-<role>.md` の `model:` 行です(どの役割も `sonnet` で
+  始まり、`/std config` で変えます)。Claude Code はセッションが spawn に自分のモデルを渡さないときにこの値を使い、
+  Claude Code 自身のモデル設定がこれを上書きすることがあります — [sub-agents](https://code.claude.com/docs/en/sub-agents) を参照。
 
 ## バージョンノート
 
@@ -207,6 +210,21 @@ python3 .claude/studio/scripts/hooks.py install
   `checked` を空にし、埋め直すまで `validate_copy.py` がすべてのコピーを拒否します)。編集した `formats/youtube.md` も
   「local」を選びます。そのほかの変わったテンプレートはリポジトリにインストールされないプラグインのファイルです(作業は
   ありません)。0.1.0 が書いたクローンの pre-commit の shim はそのまま有効で、`hooks.py install` が新しい内容を書きます。
+- **0.1.2**: 原文外の説明(teaching note) — ライターは、原文にはないが学習者に必要な一般知識(読み方、文法の規則)を、
+  段落やテキストカードの上に `<!-- studio:note -->` と印を付けて入れられます。ファクトチェッカーはそれを一般知識として
+  確かめて根拠を残し、① は説明ごとに根拠(と説明が含む原文の語)を示し、① を承認すると説明も承認されます。印を付けた
+  ブロックは 4 つ、説明のテキストは 8 つまで(表のセルや箇条書きの項目 1 つが 1 つ)、数字や日付は不可で、配信用の
+  文には入れません。役割ごとのモデルを `/std config` で変えられます(`.claude/agents/std-<role>.md` の `model:`。
+  `/std update` は保ちます)。`std-auditor` は保護されたペルソナになります。Bash 呼び出しで `source` の後は 0.0.26 の
+  ガードだけが判定し、そのガードは `std-auditor.md` を保護しません(ほかの 2 つのペルソナはこれまでどおり保護します)。
+- **0.1.2 へ上げるとき**: `/std update` を実行します(スクリプトのバージョン 27)。`std-fact-checker` と `std-auditor`
+  は保護されたペルソナなので(auditor は 0.1.2 から)、update は両方を尋ねます。`new` を選びます(ペルソナのブロック
+  だけが変わり、選んだ `model:` と auditor の `tools:` は残ります)。frontmatter をすべて戻したいのでなければ
+  `new-file` は選びません。編集していないファイルは尋ねずに更新されます。`std-writer`、`std-distributor`、
+  `guides/script.md`、`guides/copy.md` が衝突として出たら `new` を、編集したガイドなら `local` を選んで原文外の説明の
+  行を手で加えます。`std-fact-checker` を `local` のままにすると安全ですが説明は使えません。そのファクトチェッカーは
+  説明を知らないので、チェックが印の付いたテキストをすべて拒否します。進行中の動画は承認を保ち、印のない台本は
+  これまでどおりに動きます。
 
 ## ライセンス
 

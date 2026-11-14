@@ -98,3 +98,10 @@ def term_in(text, ts):
         if x in (low if x.isascii() else t):
             return x
     return None
+
+
+def terms_in(text, ts):
+    """Every term of `ts` the text holds, sorted (term_in gives the first only)."""
+    t = normalize(text)
+    low = t.lower()
+    return sorted(x for x in ts if x in (low if x.isascii() else t))

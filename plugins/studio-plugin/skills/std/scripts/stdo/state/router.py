@@ -20,6 +20,7 @@ OWN_TABLE = {
     "engine.composer": "visual-check", "engine.renderer": "visual-check",
     "engine.defaults_presentation": "visual-check", "engine.ffmpeg": "visual-check",
     "render": "4a", "renders": "copy", "copy": "4b", "credits": "copy", "proxy_credits": "board",
+    "notes": "verify",  # 0.1.2: a teaching-note marker added or removed after ①
 }
 
 

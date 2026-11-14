@@ -117,7 +117,7 @@ class Providers(object):
                 continue
             path = L["copies"].get(p, {}).get("path") or os.path.join(copy_dir, p + ".md")
             copies[p] = hashes.file_sha(path if os.path.isabs(path) else os.path.join(ctx["repo"], path))
-        return {
+        out = {
             "s2v_version": ins.get("s2v_version"), "stale_build": ins.get("stale_build"),
             "hash_version": ins.get("hash_version"), "outputs": names,
             "brief_core": state["brief"]["core"], "content": h.get("content"),
@@ -130,6 +130,22 @@ class Providers(object):
             # the files the script refers to (s2v lists them with their sha256): inputs of the check results
             "files": ins.get("files") if isinstance(ins.get("files"), list) else None,
         }
+        notes = script_notes(ctx.get("script"))
+        if notes is not None:  # 0.1.2: only when the script marks teaching notes (① binds them; s2v drops the marker)
+            out["notes"] = notes
+        return out
+
+
+def script_notes(script):
+    """The hash of the script's marked teaching-note blocks (claims/notes.blocks: the markers only, no s2v), or None
+    when it marks none."""
+    from ..claims import notes  # notes imports claims.check, which imports this module
+    try:
+        with open(script, encoding="utf-8") as f:
+            blocks = notes.blocks(f.read())
+    except (OSError, TypeError, UnicodeDecodeError):
+        return None
+    return hashes.hash_of(blocks) if blocks else None
 
 
 def proxy_credits(state, repo, env=None):

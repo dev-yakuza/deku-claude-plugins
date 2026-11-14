@@ -5,7 +5,7 @@ ENGINE_SCREEN = ("composer", "renderer", "ffmpeg", "defaults_presentation")
 
 OWNER = {"brief_core": "1", "content": "1", "source_hash": "1",
          "voice": "2", "audio": "2", "presentation": "3", "render": "4a", "renders": "4b", "copy": "4b",
-         "credits": "4b", "proxy_credits": "3"}
+         "credits": "4b", "proxy_credits": "3", "notes": "1"}
 for _k in ENGINE_VOICE:
     OWNER["engine." + _k] = "2"
 for _k in ENGINE_SCREEN:
@@ -16,6 +16,8 @@ def tuple_for(gate, cur, output=None, platform=None, platform_outputs=None):
     t = {}
     if gate in ("1",):
         t.update(brief_core=cur["brief_core"], content=cur["content"], source_hash=cur["source_hash"])
+        if cur.get("notes") is not None:  # 0.1.2: the teaching notes (a script without them keeps the old tuple)
+            t["notes"] = cur["notes"]
         return t
     if gate == "4b":
         t.update(content=cur["content"], source_hash=cur["source_hash"],

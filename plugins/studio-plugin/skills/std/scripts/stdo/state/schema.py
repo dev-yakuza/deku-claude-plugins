@@ -73,6 +73,7 @@ FIELD_PRODUCER = {
     "engine.composer": "visual-check", "engine.renderer": "visual-check", "engine.ffmpeg": "visual-check",
     "engine.defaults_presentation": "visual-check",
     "render": "render", "renders": "render", "copy": "copy", "proxy_credits": "board",
+    "notes": "script",  # 0.1.2: the teaching-note markers are the script's
 }
 
 

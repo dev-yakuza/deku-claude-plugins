@@ -26,7 +26,8 @@ line (`원문: <url>`, its label in the video's language) — that line on its o
   conservative count, trailing ones not counted); no `<` or `>`, no home paths, no in-house terms.
 - Save the copy as UTF-8 in NFC (composed) form: `validate_copy` refuses NFD, which breaks its credit, chapter and
   notice checks and the title length (most compatibility ideographs U+F900–U+FAFF are refused too).
-- Say nothing the script does not say: the fact-checker checks the copy against the source next.
+- Say nothing the script does not say: the fact-checker checks the copy against the source next. Teaching notes
+  (`verify.md`'s "Teaching notes": general knowledge the source does not say) are not copy material.
 - Never approve, commit or run script2video approval commands.
 - Read files with Read and write your outputs (if any) with Write or Edit. Never use `python -c`, heredocs or generator
   scripts for file work: the guard refuses them. For ids, lists and skeletons use the Studio commands your stage

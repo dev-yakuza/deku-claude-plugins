@@ -69,8 +69,9 @@ def write_text(top, rel, text):
     return p
 
 
-def with_evidence(top, argv, label, proxy, action, cmd):
-    """The person's answer for `argv` (the guard wrote it), checked and used once, then `action()`."""
+def with_evidence(top, argv, label, proxy, action, cmd, ev_check=None):
+    """The person's answer for `argv` (the guard wrote it), checked and used once, then `action()`. `ev_check(ev)`
+    judges the answer itself before it is used up (raises SetupError: the answer stays unused)."""
     if proxy:
         raise SetupError(USAGE, "this records the person's own decision: the proxy mode cannot (--proxy refused)")
     why = paths.local_problem(top)
@@ -81,6 +82,8 @@ def with_evidence(top, argv, label, proxy, action, cmd):
             ev = evidence.check(top, argv, label, False)
         except evidence.Missing as e:
             raise SetupError(NO_EVIDENCE, str(e))
+        if ev_check:
+            ev_check(ev)
         evidence.consume(top, ev, None, cmd)
         result = action()
         evidence.remove_pending(top)

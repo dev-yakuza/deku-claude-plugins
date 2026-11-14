@@ -18,7 +18,7 @@ SCRIPTS = ".claude/studio/scripts/"
 PRONOUNCE = ".claude/studio/pronounce.json"
 MANIFEST = SCRIPTS + manifest.NAME
 NO_DELETE = (spaths.CONFIG, MANIFEST, ".claude/studio/charter.md", ".claude/agents/std-fact-checker.md",
-             ".claude/agents/std-source-analyst.md")
+             ".claude/agents/std-source-analyst.md", ".claude/agents/std-auditor.md")
 CONTENT = (".claude/studio/charter.md", ".claude/studio/brand.json", ".claude/studio/config.json",
            ".claude/studio/pronounce.json", ".claude/studio/evolution-log.md")
 CONTENT_DIRS = (".claude/studio/formats/", ".claude/studio/platforms/", ".claude/studio/guides/")

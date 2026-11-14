@@ -61,6 +61,8 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
     if gate == "4b":  # the copy's facts and their excerpts (M1h review Y2)
         from ..distribute import gate4b
         box["lines"] = gate4b.lines(vdir, lang, scope, _write_text)
+    if gate == "1":  # 0.1.2: one line per teaching note of verify.json (not from the source: approving ① approves it)
+        box["lines"] = note_lines(vdir, lang)
 
     def check(s):
         first = precheck(s, lang)
@@ -89,7 +91,7 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
             return
         L["shown"].setdefault(gate, {})[scope] = {"hash": shown_hash(ctx, s, lang, cur, gate, scope),
                                                   "at": schema.now()}
-        if gate in ("2", "4b"):
+        if gate in ("2", "4b") or (gate == "1" and box["lines"]):  # ①: only with notes (shown.json stays as it was)
             L["shown"][gate][scope]["lines"] = list(box["lines"])
         if gate == "3":
             L["shown_pending"].pop(scope, None)
@@ -114,8 +116,8 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
     if gate in ("2", "4b") and not begin:  # the question shows each of these lines (the guard checks them — V1, Y2)
         for line in box["lines"]:
             _out("in the question: %s" % line)
-    if gate == "1":  # ①: each commit to the source after begin (M1e review S5), as record-source printed them
-        for line in labels.source_commit_lines(state):
+    if gate == "1":  # ①: each commit to the source after begin (M1e review S5), as record-source printed them, then
+        for line in labels.source_commit_lines(state) + box["lines"]:  # the teaching notes (0.1.2)
             _out("in the question: %s" % line)
     if box.get("hash12") and gate in ("1", "2", "3", "4a", "4b"):
         for line in _question(ctx, state, lang, gate, scope, box):
@@ -124,6 +126,31 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
         for line in unused_lines(vdir, lang):
             _out(line)
     return C.OK
+
+
+NOTE_LINE = "원문 밖 설명: \"%s\" — 근거: %s"
+
+
+def note_lines(vdir, lang):
+    """`원문 밖 설명: "<text>" — 근거: <basis>[ — 원문 용어: <t1, t2>]` per teaching note of verify.json, sanitized as
+    the unused-image reasons (one line, no control characters, no "end of question")."""
+    from ..claims.check import sanitize_reason
+    try:
+        with open(os.path.join(vdir, "work", lang, "verify.json"), encoding="utf-8") as f:
+            entries = json.load(f).get("sentences")
+    except (OSError, ValueError, AttributeError):
+        return []
+    out = []
+    for e in entries if isinstance(entries, list) else []:
+        if not isinstance(e, dict) or e.get("kind") != "note":
+            continue
+        line = NOTE_LINE % (sanitize_reason(e.get("text")), sanitize_reason(e.get("basis")))
+        terms = [sanitize_reason(t) for t in e.get("terms") or [] if isinstance(t, str)] \
+            if isinstance(e.get("terms"), list) else []
+        if terms:
+            line += " — 원문 용어: %s" % ", ".join(terms)
+        out.append(line)
+    return out
 
 
 def unused_lines(vdir, lang):
@@ -145,7 +172,7 @@ def _question(ctx, state, lang, gate, scope, box):
     v, sr = state["video"], ctx["studio_root"]
     if gate == "1":
         header = "[%s] ① 대본 — %s" % (v, os.path.relpath(ctx["script"], ctx["repo"]))
-        lines, after = labels.source_commit_lines(state), "the auditor's findings"
+        lines, after = labels.source_commit_lines(state) + box["lines"], "the auditor's findings"
     elif gate == "2":
         header = "[%s] ② 오디션 — %s/out/%s/%s/audition/narrator.wav" % (v, sr, v, lang)
         lines, after = box["lines"], "the length warning when there is one"
@@ -329,6 +356,22 @@ def approve(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
         _shown_checks(ctx, s, lang, cur, gate, expect)
         if gate in ("1", "4b"):
             box["excerpts"], box["copy"] = _excerpts(vdir, lang, gate, scopes(s, lang, gate))
+        box["state"] = s
+
+    def ev_check(ev):
+        """①: the recorded question shows every source-commit line and every note line `shown 1` recorded — the
+        script checks it itself (after a `source` the 0.0.26 guard checks only the label and the source lines)."""
+        if gate != "1" or ev.get("mode") == "proxy":
+            return  # the proxy mode asks no one (credit.py does the same)
+        try:
+            lines = labels.source_commit_lines(box["state"]) + labels.gate2_lines(box["state"], lang, "1")
+        except ValueError as e:
+            _refuse("gate-lines-unknown: the lines ① must show cannot be read (%s)" % e, C.NO_EVIDENCE)
+        from ..commit.summary import first_missing, missing_text
+        q = ev.get("question")
+        miss = first_missing(lines, q if isinstance(q, str) else "")  # a missing or odd question shows nothing
+        if miss:
+            _refuse("gate-lines-not-shown: %s" % missing_text(miss, "`shown` (and record-source)"), C.NO_EVIDENCE)
 
     def records(s, ev):
         # built once: the event and the state hold the same record (a second `at` a tick later made the
@@ -367,7 +410,7 @@ def approve(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
             _write_atomic(os.path.join(vdir, "work", lang, "pronounce-approved.json"), box["pronounce"])
 
     _with_evidence(repo, vdir, state["video"], argv, "approve", lambda s: labels.approve(s["video"], expect), check_state,
-                   change, events, proxy, hooks)
+                   change, events, proxy, hooks, ev_check=ev_check)
     _out("approved %s %s" % (gate, lang))
     return C.OK
 

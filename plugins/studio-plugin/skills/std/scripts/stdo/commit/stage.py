@@ -158,7 +158,7 @@ def value_block(ctx, studio_paths, tree):
         mach = values.machine_lines(p, ver["id"])
     return values.block(old, new, summary.protected_keys(old, new), summary.narrators(ctx, studio_paths), mach,
                         tree, bool(first), summary.crit_files(ctx, studio_paths),
-                        summary.brand_files(ctx, studio_paths))
+                        summary.brand_files(ctx, studio_paths), summary.agent_models(ctx, studio_paths))
 
 
 class _Undo(Exception):

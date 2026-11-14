@@ -29,8 +29,11 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
    default narrator's, checks the claims map against the brief and the source copy, that the narration has no kana or kanji
    (Japanese goes on screen), that every image is a usable `script_src` of `work/assets.json`, that every usable image
    is shown or has a one-line reason in `unused_images`, that scene 1 is the title scene (its only visual
-   `::title[<frontmatter title>]`; skipped when the script has its own `::thumbnail{src=…}`) and that no presenter or
-   dialogue layout is set without character art. Exit 1: give the
+   `::title[<frontmatter title>]`; skipped when the script has its own `::thumbnail{src=…}`), that no presenter or
+   dialogue layout is set without character art, and the teaching notes (`<!-- studio:note -->` blocks: a blank line
+   above the marker, a narration paragraph or a bullets/table/markdown card right below it, not in scene 1, plain
+   text found as it is in s2v's output, no number or date, never a claims-map sentence, at most 4 blocks and 8 texts of
+   at most 120 characters each, at most 15 % of the narration). Exit 1: give the
    writer the listed problems and run it again. A `warning:` line (on-screen text with digits or kanji no claim lists)
    is a hint for the writer, not a failure.
 4. `python3 .claude/studio/scripts/state.py stage-done <video> script` — exit 1: run step 3 again (something

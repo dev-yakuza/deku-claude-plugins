@@ -3,6 +3,11 @@
 How this repository's videos are written. The script writer reads it; edit it as the channel finds its voice.
 
 - Say what the source says. Every claim in the narration maps to an excerpt of the source (`claims-map.json`).
+- Teaching notes: general knowledge a learner needs and the source does not say (a reading, a grammar rule) goes in a
+  marked block — `<!-- studio:note -->` on its own line, a blank line above it, a narration paragraph or a
+  `:::bullets` / `:::table` / `:::markdown` card right below it. Plain text, no numbers or dates; at most 4 marked
+  blocks and 8 note texts (each table cell or bullet counts), never in scene 1 or a quote, and never a way to reach
+  the length. The fact-checker gives each a basis and the person approves them at ①.
 - One idea per scene; a scene title is a short noun phrase.
 - Narration is for the ear: short sentences, no parentheses, numbers as they are spoken. Write dates and hours with
   digits (`5일`, `3시`): Studio's number check reads them reliably.

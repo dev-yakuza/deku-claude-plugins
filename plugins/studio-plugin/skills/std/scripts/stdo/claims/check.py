@@ -27,7 +27,7 @@ from . import sourcemd
 # kana, kanji and half-width katakana: never in a Korean (or other non-CJK) narration
 CJK = re.compile("[぀-ヿㇰ-ㇿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]")
 CJK_LANGS = ("ja", "zh")
-KINDS = ("fact", "link")
+KINDS = ("fact", "link", "note")  # note: a teaching note (0.1.2), marked in the script
 VERDICTS = ("supported", "unsupported", "contradicted")
 REASON_MAX = 200
 END_OF_QUESTION = "end of question"  # the question block's last line (labels.question_block)
@@ -149,10 +149,11 @@ def picture_problems(ins, assets_data):
 
 # ---------- verify ----------
 
-def draft_problems(draft, cm, copy, sentences, screen, titles=()):
+def draft_problems(draft, cm, copy, sentences, screen, titles=(), notes=()):
     """[problems] of the fact-checker's draft. `titles`: the scene titles — they become the copy's chapters, which
     the copy check leaves out (M1h NIT), so a title that states something (the link floor: a number, a term of the
-    excerpts, a claims-map sentence) is judged here, at ①."""
+    excerpts, a claims-map sentence) is judged here, at ①. `notes`: the texts the script marks as teaching notes
+    (notes.marked) — exactly these are `note` entries, judged as general knowledge with a one-line basis."""
     from . import linkrule
     if not isinstance(draft, dict) or not isinstance(draft.get("sentences"), list):
         return ["the draft has no list of sentences ({\"sentences\": [{\"text\", \"kind\", \"verdict\", \"claims\", "
@@ -167,16 +168,27 @@ def draft_problems(draft, cm, copy, sentences, screen, titles=()):
                 listed.setdefault(normalize(t), set()).add(cid)
     ts = linkrule.terms((cm or {}).get("excerpts") if isinstance((cm or {}).get("excerpts"), list) else [])
     origin = origins(sentences, screen, titles)
+    marked = set(normalize(t) for t in notes or ())
     seen, links, judged = set(), 0, 0
     for n, s in enumerate(draft["sentences"], 1):
         if not isinstance(s, dict) or not isinstance(s.get("text"), str) or s.get("kind") not in KINDS:
-            out.append("sentence %d needs text and a kind (fact | link)" % n)
+            out.append("sentence %d needs text and a kind (fact | link | note)" % n)
             continue
-        judged += 1
         key = normalize(s["text"])
         seen.add(key)
+        if key in marked and s["kind"] != "note":
+            out.append("sentence %d is a teaching note in the script — its kind is note: %s" % (n, _short(s["text"])))
+            continue
+        if s["kind"] == "note" and key not in marked:
+            out.append("sentence %d (note) is not marked as a teaching note in the script: %s" % (n, _short(s["text"])))
+            continue
+        if s["kind"] != "note":
+            judged += 1  # the link cap counts judged entries without notes
         if s.get("verdict") in ("unsupported", "contradicted"):
             out.append("sentence %d is %s: %s" % (n, s["verdict"], s["text"][:80]))
+            continue
+        if s["kind"] == "note":
+            out += note_problems(n, s, cm, ts)
             continue
         if s["kind"] == "link":
             links += 1
@@ -230,6 +242,46 @@ def draft_problems(draft, cm, copy, sentences, screen, titles=()):
     return out
 
 
+def basis_problem(n, basis):
+    """Why a note's basis cannot be shown in the ① question (None when it can): the reason_problem rule."""
+    if not isinstance(basis, str) or not basis.strip():
+        return "sentence %d (note) needs a basis: one line naming the kind of reference and what it says" % n
+    if "\n" in basis or "\r" in basis or CONTROL.search(basis):
+        return "sentence %d (note): the basis must be one line without control characters" % n
+    if len(basis) > REASON_MAX:
+        return "sentence %d (note): the basis is longer than %d characters" % (n, REASON_MAX)
+    if END_OF_QUESTION in basis.lower():
+        return "sentence %d (note): the basis must not say \"%s\"" % (n, END_OF_QUESTION)
+    return None
+
+
+def note_problems(n, s, cm, ts):
+    """A teaching note's entry: supported, no claims and no excerpts, a basis ① can show, no number, not a claims-map
+    sentence, and — when it holds terms of the excerpts — `terms` as the skeleton computed them, each named in the
+    basis."""
+    from . import notes as notes_mod
+    out = []
+    if s.get("verdict") != "supported":
+        out.append("sentence %d (note) has no verdict" % n)
+    if s.get("claims") or s.get("excerpts"):
+        out.append("sentence %d (note) cites claims or excerpts — a teaching note rests on general knowledge, not on "
+                   "the source (a text the source says is a fact)" % n)
+    b = basis_problem(n, s.get("basis"))
+    if b:
+        out.append(b)
+    out += ["sentence %d: %s" % (n, p) for p in notes_mod.text_problems([s["text"]], cm)]
+    terms = notes_mod.terms_of(s["text"], cm, ts)
+    if (s.get("terms") or []) != terms:
+        out.append("sentence %d (note): terms must be %s, as the skeleton writes them (check_claims.py --skeleton)"
+                   % (n, json.dumps(terms, ensure_ascii=False)))
+    if not b:
+        missing = [t for t in terms if t.lower() not in normalize(s["basis"]).lower()]
+        if missing:
+            out.append("sentence %d (note) uses %s from the excerpts: the basis names %s and the general fact about "
+                       "it (a reading, a writing, a use)" % (n, ", ".join(terms), ", ".join(missing)))
+    return out
+
+
 FROM = ("narration", "screen", "title")  # where a judged text is in the script (the skeleton's `from`)
 
 
@@ -253,16 +305,17 @@ def origins(sentences, screen, titles=()):
 KANJI = re.compile("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")  # CJK ideographs (kanji), not kana
 
 
-def screen_warnings(screen, cm):
+def screen_warnings(screen, cm, notes=()):
     """0.0.28 Q7 (a hint at the script stage, never a failure): on-screen texts with digits or kanji that no claim of
-    the claims map lists — verify judges them, and a fact there needs its claim's `sentences` to list it."""
+    the claims map lists — verify judges them, and a fact there needs its claim's `sentences` to list it. Teaching
+    notes (`notes`) are skipped."""
     claims = (cm or {}).get("claims") if isinstance(cm, dict) else None
     listed = set()
     for c in (claims or {}).values() if isinstance(claims, dict) else []:
         for t in (c.get("sentences") if isinstance(c, dict) and isinstance(c.get("sentences"), list) else []):
             if isinstance(t, str):
                 listed.add(normalize(t))
-    out, seen = [], set()
+    out, seen = [], set(normalize(t) for t in notes or ())
     for x in screen or []:
         t = x.get("text") if isinstance(x, dict) else None
         if not isinstance(t, str) or not t.strip() or normalize(t) in listed or normalize(t) in seen:
@@ -275,9 +328,11 @@ def screen_warnings(screen, cm):
 
 
 def verify_json(state, lang, draft, shas):
+    def keys(s):  # a teaching note also keeps its basis and terms (fact and link entries keep their keys)
+        return ("text", "kind", "verdict", "claims", "excerpts", "note") + (("basis", "terms") if s.get("kind") == "note"
+                                                                           else ())
     return {"schema": 1, "video": state["video"], "lang": lang, "from": shas,
-            "sentences": [{k: s.get(k) for k in ("text", "kind", "verdict", "claims", "excerpts", "note")
-                           if s.get(k) is not None} for s in draft["sentences"]]}
+            "sentences": [{k: s.get(k) for k in keys(s) if s.get(k) is not None} for s in draft["sentences"]]}
 
 
 def verify_md(v):
@@ -300,6 +355,14 @@ def verify_md(v):
         lines.append("   - why a link: %s" % s.get("note"))
     if not links:
         lines.append("(none)")
+    notes = [s for s in v["sentences"] if s["kind"] == "note"]
+    if notes:  # 0.1.2: only with notes (a video without them gets 0.1.1's file)
+        lines += ["", "## Teaching notes (general knowledge, not from the source — approved at ①)", ""]
+        for n, s in enumerate(notes, 1):
+            lines.append("%d. %s" % (n, s["text"]))
+            lines.append("   - basis: %s" % s.get("basis"))
+            if s.get("terms"):
+                lines.append("   - words of the source: %s" % ", ".join(s["terms"]))
     return "\n".join(lines) + "\n"
 
 
