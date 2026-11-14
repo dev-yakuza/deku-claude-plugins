@@ -77,13 +77,13 @@ an audit round (`HRD audit-round`), so after the cap only the editor and verify 
 
 `atoms/_stages.md` § publish (finalize → commit → scope → push → ledger push record → PR).
 Report the PR URL (in-session auto: also the decisions it made, any deferred findings,
-trimmed sentences, framings, reader notes and research corrections) and remind: "publish with `/hrd ship`". If `--ship` was given or
+trimmed sentences and narrowings, framings, reader notes and research corrections) and remind: "publish with `/hrd ship`". If `--ship` was given or
 `config.autonomy.publish` is `auto`, instead run `/hrd ship <that PR> --session-auto` (plus
 `--consent` with `--ship`) right away, before releasing this command's lock (ship nests on it
 with this token): the interactive auto path covers only the PR this session
 just created — step 4 (per-PR question) is skipped, the auto-exclusion rules and the daily
 throttle apply (ship checks `HRD auto-exclusion` — with `--ship`, `--consent`: asking for
-this publish accepts the agents' logged decisions, a trim, framings and Herald-made images, so only its
+this publish accepts the agents' logged decisions, trims (narrowings included), framings and Herald-made images, so only its
 `blocking` list excludes; and since the lock carries the ship mark, also screenshots and external
 images (`external-images`), which the agent review confirmed in draft (`atoms/_images.md` §2a) —
 never a file in the PR nobody vouched for (`images-unconfirmed`); excluded → stay PR-pending and

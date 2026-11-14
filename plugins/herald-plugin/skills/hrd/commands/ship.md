@@ -19,7 +19,7 @@ no-op while nested — the caller's own release ends the lock): all steps for
 that one PR, step 4 skipped; refuse if the PR was not created in this session, if `HRD
 auto-exclusion --topic <id> --rev refs/remotes/origin/pr-<n>` (after §3's fetch — the work
 files live on the PR head; with `--consent` when the caller passed it — the human asked for
-this publish, which accepts the agents' logged decisions, a trim, the fact-checker's framings
+this publish, which accepts the agents' logged decisions, trims (narrowings included), the fact-checker's framings
 and Herald-made images — diagrams and the OG card; screenshots and external images only when the
 caller's lock carries the `--ship` mark for this topic (`strong: true` in the output: the agent
 review confirmed them in draft — never `images-unconfirmed`, a file nobody vouched for) has
@@ -121,8 +121,9 @@ PR first `HRD fetch-pr --pr <n>` (a human may have pushed to it; the head then l
 head) with any deferred MAJORs listed one per line (`audit_log` outcome `deferred` — the
 human decides them here) and, for a refresh, any out-of-scope MAJORs one per line likewise
 (outcome `out-of-scope`, with the quoted sentence — left for the next refresh), latest `/hrd review` finding for it if any (unresolved BLOCKER → warning), verify counts,
-the trimmed sentences (`state.json` `trim.removed` at the PR head while `trim.status` is `done`
-— critique's verdict was carried over to that shorter body unseen by the editor and auditor),
+the trimmed sentences (every `done` trim in `state.json` `trims` at the PR head — or a pre-0.24.0
+head's single `trim` —: deletions from `removed`, narrowings as before → after from `narrowed`;
+critique's verdict was carried over to that shorter body unseen by the editor and auditor),
 the PR body's `## Reader notes`, `## Framings` and `## Research corrections` if any (readability notes the editor did not
 send back; sentences the fact-checker treated as the article's own example under a framing),
 "body differs from verified" (`HRD hash --slug <s> --rev <headRefOid>` vs `HRD ledger show` — the
@@ -225,6 +226,9 @@ switch and §7.1 need a clean tree.
    `stale_base`), this PR is **not merged this run** (attended and `--auto`): §4 approved the head
    before it — the next ship shows it again; `--session-auto` goes on (§6 recomputes the
    exclusions on the verified head). Commit what `render`/`og` wrote with the artifacts.
+   Only when the PR head's scripts are 0.24.0 or later, the fact-checker also gives a verdict for
+   every claims-map entry (`verdicts` — `atoms/_stages.md` § verify) and `stage pass --amend`
+   checks that coverage; an older head is re-verified as before (no trim here either way).
    `research_suspects` (a claim in `research.md` found wrong) fail this re-verify — no research
    fix here: the fail path below holds `verify-after-human-edit`; the human resolves it.
 3. Pass → `HRD stage pass --topic <id> --stage verify --amend`, commit the artifacts (and any image
@@ -317,7 +321,8 @@ publish: any failed URL leaves the article merged-unrecorded. Failures stay merg
 
 Summarize what was published, declined, held and left merged-unrecorded. For a `--session-auto`
 publish nobody approved, also list what was accepted unread (the `accepted` exclusions, the
-deferred and out-of-scope MAJORs and dismissals with their reasons, the trimmed sentences, the framings, and in a
+deferred and out-of-scope MAJORs and dismissals with their reasons, the trimmed sentences and the narrowings (before →
+after), the framings, and in a
 `--ship` run the images and screenshots the agent review confirmed or turned down — id, kind, its
 one-line note, from `HRD image status --topic <id> --rev <head>` `agent` and `HRD shot status`
 `agent_confirmed`; nobody looked at them) — the human sees them now at the latest. A published

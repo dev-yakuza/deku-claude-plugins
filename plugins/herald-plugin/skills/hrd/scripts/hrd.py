@@ -23,7 +23,7 @@ from hrdlib.hashing import bundle_hash, lang_hash, tree_hash, worktree_hash  # n
 from hrdlib.util import HeraldError, emit, git, git_ok, now_iso, read_json, repo_root, write_json  # noqa: E402
 
 
-SCRIPTS_VERSION = "0.23.3"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
+SCRIPTS_VERSION = "0.24.0"  # == plugin.json version (structure test); SKILL.md compares repo vs plugin
 store.PLUGIN_VERSION = SCRIPTS_VERSION  # new signal records carry it (`v`, 13 §3.4)
 
 
@@ -472,6 +472,14 @@ def cmd_stage(a):
     elif a.action == "pass":
         st = store.stage_pass(root, cfg, a.topic, a.stage, amend=a.amend, rerun=a.rerun)
         out = {"stage": st["stage"], "verified_hash": st.get("verified_hash")}
+        if a.stage == "draft" and not cfg.translations():  # 15 D1: the writer's to fix, never a refusal
+            warn = store.map_text_warnings(root, cfg, a.topic, st["slug"])
+            if warn:
+                out["map_warnings"] = warn
+        if a.stage == "verify" and (st["stages"].get("verify") or {}).get("unplaced"):
+            out["unplaced"] = st["stages"]["verify"]["unplaced"]  # map entries without a place: for the PR body
+            if st["stages"]["verify"].get("unplaced_warning"):
+                out["unplaced_warning"] = st["stages"]["verify"]["unplaced_warning"]
         if a.stage == "verify" and a.amend:  # a published diagram's SVG edited on base: warn only (08 §2.7.2)
             warn = images.svg_drift(root, cfg, a.topic, st)
             if warn:
@@ -511,6 +519,10 @@ def cmd_loopback(a):
         raise HeraldError("verify.json lists research_suspects (%s) — the researcher rechecks them first: "
                           "`HRD loopback --cause research --claims %s`"
                           % (", ".join(store.research_suspects(ver)), ",".join(store.research_suspects(ver))))
+    if a.cause == "verify" and ver:  # 15 D1: a verdict for every map entry before the writer acts on it
+        cov = store.verify_coverage(root, cfg, a.topic, st, ver)
+        if cov["problems"]:
+            raise HeraldError("; ".join(cov["problems"][:4]) + " — run verify again")
     fix = None
     if a.cause == "research":
         claims, ids = store.research_fix_claims(root, cfg, a.topic, st, a.claims)
@@ -523,7 +535,7 @@ def cmd_loopback(a):
         raise HeraldError("reader.json lists blocking reader-pass problems, but readability can no longer send this "
                           "article back (its one send-back is used, or the loopback budget is spent) — move them "
                           "to `notes` in reader.json (the editor's verdict stands), then go on")
-    if (st.get("trim") or {}).get("status") == "open":
+    if store.open_trim(st):
         raise HeraldError("a trim is open — `HRD trim --topic %s --abort` first (it restores the article)" % a.topic)
     if a.cause == "audit" and store._int(st.get("audit_rounds")) >= store.AUDIT_ROUND_CAP:
         raise HeraldError("no audit loopback on the last audit round: a MAJOR is deferred, a BLOCKER is held "
@@ -577,7 +589,7 @@ def cmd_loopback(a):
     kind = store.LOOPBACK_CAUSES.get(a.cause)
     if a.cause == "verify":  # a trim that was tried on this very verify result already recorded the gap
         ver = store.safe_machine(root, a.topic, "verify.json")
-        if ver.get("body_hash") and (st.get("trim") or {}).get("base_hash") == ver.get("body_hash"):
+        if ver.get("body_hash") and (store.trims_of(st) or [{}])[-1].get("base_hash") == ver.get("body_hash"):
             kind = None
     if kind:  # gate failures are recorded by `stage pass` where they happen
         data = {"note": (a.note or "")[:500], "loopback": n}
@@ -1273,6 +1285,10 @@ def cmd_gate(a):
             rep["errors"] = [e for e in rep.get("errors") or [] if e not in missing]
             rep["ok"] = not rep["errors"]
         rep["pending_shots"] = pending
+    if a.topic and not a.lang and not cfg.translations():  # the writer fixes its map in its own pass (15 D1)
+        warn = store.map_text_warnings(root, cfg, a.topic, slug)
+        if warn:
+            rep["map_warnings"] = warn
     if a.lang:  # a translation's hints describe that file, not the source the editor reads
         rep["prose_file"] = None
     else:
@@ -1574,10 +1590,12 @@ def cmd_auto_exclusion(a):
 
 def cmd_trim(a):
     root, cfg = ctx()
-    if a.force and not a.abort:
-        raise HeraldError("--force goes with --abort")
+    if a.force and not (a.abort or a.revert):
+        raise HeraldError("--force goes with --abort or --revert")
     if a.abort:
         emit(store.trim_abort(root, cfg, a.topic, force=a.force))
+    elif a.revert:
+        emit(store.trim_revert(root, cfg, a.topic, force=a.force))
     else:
         emit((store.trim_begin if a.begin else store.trim_finish)(root, cfg, a.topic))
 
@@ -1767,7 +1785,7 @@ def build():
     p.add_argument("--consent", action="store_true"); p.set_defaults(fn=cmd_auto_exclusion)
     p = sp.add_parser("trim"); p.add_argument("--topic", required=True)
     g = p.add_mutually_exclusive_group(required=True)
-    for flag in ("--begin", "--finish", "--abort"):
+    for flag in ("--begin", "--finish", "--abort", "--revert"):
         g.add_argument(flag, action="store_true")
     p.add_argument("--force", action="store_true"); p.set_defaults(fn=cmd_trim)
     return ap

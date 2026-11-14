@@ -10,6 +10,8 @@ The full flow is `/hrd write`; continuing a stopped flow is `/hrd resume`.
 3. Entry condition: `HRD stage check --topic <topic-id> --stage verify` — if it names an earlier
    stage, stop and tell the user to rerun that stage first. Do not edit `state.json`.
 4. Execute the stage exactly as `atoms/_stages.md` § verify describes (read list, role, outputs,
-   checks, `HRD stage pass`).
+   checks, `HRD stage pass`): a verdict for every claims-map entry (0.24.0 — `stage pass` refuses a
+   `verify.json` without them); after a trim this run is its full re-verify with the before/after
+   pairs, and a narrowed text judged contradicted → `HRD trim --topic <topic-id> --revert` first.
 5. Report the result and the next stage. A body change invalidates later stages: after
    `draft`, both `critique` and `verify` must run again before `publish`.

@@ -61,7 +61,7 @@ Detect once per command: `printenv HRD_UNATTENDED` → `1` = unattended. The edi
 | auditor `MAJOR` | may dismiss with a recorded reason | may dismiss with a recorded reason (`kind: dismissal`) |
 | auditor `MAJOR` on a recheck round (`_stages.md` § critique 3) | `new` → defer to the PR (`kind: deferral`); `unfixed`/`regression` → fix (last round: any `MAJOR` → defer) | same |
 | auditor `BLOCKER` | dismiss only after the human confirms | **never dismiss** — fix or hold `needs-human` (`defect:`) |
-| verify gap, nothing contradicted, 1–3 unsupported (`_stages.md` § verify) | ask: trim / loop back / hold | trim once (delete or map only; code-checked), then loop back |
+| verify gap, nothing contradicted, 1–3 unsupported (`_stages.md` § verify) | ask: trim / loop back / hold | trim (delete, map or narrow; code-checked; up to 3 per article), then loop back |
 | stagnation / loop cap / budget | stop and report (budget: warn only) | hold `stagnation` / `budget` |
 | screenshots still to take (`atoms/_screenshots.md` §2), external images to confirm (`atoms/_images.md` §2) | show the capture guide / image list and wait | hold `screenshots` (in-session auto too — no question; a `--ship` run first lets a fresh agent review stand in, `atoms/_images.md` §2a) |
 
@@ -70,9 +70,9 @@ Detect once per command: `printenv HRD_UNATTENDED` → `1` = unattended. The edi
 dismissal, assumption, deferral, human, agent}` (`human`: a human's decision on a last-round BLOCKER,
 with its `id` — `atoms/_stages.md` § critique 3; `agent`: a place a `--ship` run's agent review
 left out, `image:<id>` — no exclusion reason, listed in the PR body and the ship report). verify and publish make no judgments — they
-only hold — except the trim (§F), recorded in `state.json` `trim` and excluding the PR from
-auto publish as `trimmed`, and the fact-checker's framings (`verify.json` `framings`: sentences
-treated as the article's own example), excluding it as `framed`. Both are accepted by
+only hold — except the trims (§F), recorded in `state.json` `trims` and excluding the PR from
+auto publish as `trimmed` (a narrowing also as `narrowed`), and the fact-checker's framings (`verify.json` `framings`: sentences
+treated as the article's own example), excluding it as `framed`. All are accepted by
 `--consent`.
 `dismissal`, `assumption` and `deferral` exclude a PR from auto publish. The PR body repeats the log under
 `## Unattended decisions` (`human` entries under `## Human decisions`).
@@ -163,12 +163,14 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
   revisions included (`HRD audit-round` counts them; round 1 full, then recheck, then skip).
   A fresh auditor always finds something new, so later rounds block only on BLOCKERs, unfixed
   findings and regressions; the rest goes to the human at ship.
-- **Trim** (`_stages.md` § verify): a verify gap of 1–3 unsupported sentences with nothing
-  contradicted is first repaired by deleting those sentences (or mapping them to an existing
-  claim, or dropping only a parenthetical aside the fact-checker named) — once per article, not counted as a
-  loopback, checked in code (`HRD trim`). The
-  agents settle it among themselves this way instead of holding; accepting an unsupported
-  sentence as true is never theirs to decide.
+- **Trim** (`_stages.md` § verify): a verify gap of 1–3 unsupported texts with nothing
+  contradicted is first repaired by deleting them (or mapping them to an existing claim, dropping
+  only a parenthetical aside the fact-checker named, or narrowing a sentence — deleting whole words
+  inside it) — up to 3 per article (an aborted or reverted one counts), never counted as a
+  loopback, checked in code (`HRD trim`), before a loopback and after the 3 are spent alike;
+  `trim --begin` decides eligibility. The agents settle it among themselves this way instead of
+  holding; accepting an unsupported sentence as true is never theirs to decide. A full re-verify
+  judges each narrowing before → after; one judged contradicted is reverted (`HRD trim --revert`).
 - **Reader pass** (`_stages.md` § critique 2): readability problems alone send an article back
   in one round only — one of the 3 counted loopbacks (`HRD loopback --cause revise` reads the
   editor's `reader.json` and sets state `reader_revise`); after that, or once only the last
@@ -177,7 +179,8 @@ tokens, code, paths and markers in English." Unattended runs add, immediately be
   readability alone — its verdict stands and costs a loopback).
 - **Stagnation guard**: if a loopback's reason repeats the previous one (same weakness or the
   same unsupported sentence), do not loop again — hold `stagnation` (attended: stop and show
-  both rounds).
+  both rounds). For a verify gap this guard and the exhaustion hold apply only when no trim is
+  eligible (`trim --begin` refuses) or this gap's trim was aborted or reverted.
 
 ## G. Signals
 

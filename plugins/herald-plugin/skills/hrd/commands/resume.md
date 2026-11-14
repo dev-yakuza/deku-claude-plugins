@@ -27,9 +27,13 @@ runs and for preserved holds (`needs-human`, `stagnation`, `budget`).
 4. A `tr-` id: continue with `translate.md` § C (its steps skip what is done; with this token —
    its acquire nests and keeps the mark). Otherwise
    `git switch herald/<topic-id>--<slug>`; read `.claude/herald/work/<topic-id>/state.json`.
-   Then the version check in `atoms/_stages.md` § Existing branches. A `trim` still `open`
-   (interrupted) → `HRD trim --topic <id> --abort` first (puts back the article critique
-   passed; the trim stays used). `stage` `research` with `research_fixes[-1]` `open` (a research
+   Then the version check in `atoms/_stages.md` § Existing branches. A trim still `open`
+   (interrupted; `state.json` `trims`, or an older state's `trim`) → `HRD trim --topic <id> --abort`
+   first (puts back the article critique passed; the trim stays counted). A `done` trim whose
+   re-verify has not run (`verify.json` does not evaluate the current article) → run that verify
+   first; one whose current re-verify judges a narrowed text `contradicted` → `HRD trim --topic <id>
+   --revert` first (`atoms/_stages.md` § verify). A `verify.json` without `verdicts` (made before 0.24.0) → verify runs again (`stage pass`
+   refuses it). `stage` `research` with `research_fixes[-1]` `open` (a research
    fix that was held or interrupted) → run the research fix (`atoms/_stages.md` § research).
 5. With screenshots recorded, first `HRD shot status --topic <id>`: `resume_at_import` true →
    `atoms/_screenshots.md` §5 (no writer or illustrator: `HRD shot capture`, then `HRD shot

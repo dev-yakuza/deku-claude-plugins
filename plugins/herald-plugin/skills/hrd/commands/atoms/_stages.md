@@ -338,8 +338,9 @@ the topic to verify and this stage does not run. `translation.pending` are the l
 ## verify — fact-checker
 
 - **Read list**: the article, `<w>claims-map.json`, `<w>research.md`,
-  `docs/editorial/promotion.md` (only to check `owner` claims), and any pointers from deferred
-  or out-of-scope auditor findings about facts (§ critique 3). With `<w>images.json`: `HRD image texts --topic
+  `docs/editorial/promotion.md` (only to check `owner` claims), any pointers from deferred
+  or out-of-scope auditor findings about facts (§ critique 3), and after a trim its before/after
+  pairs (`state.json` `trims[-1]`: `removed`, `narrowed` before → after). With `<w>images.json`: `HRD image texts --topic
   <id>` (the text each diagram **draws** — an `errors` entry means a diagram was never rendered:
   do not start verify) and the `texts[].claims` of `<w>images.json`, and `HRD image status
   --topic <id>` `snippets` (attributions: only their `alt` is a sentence to check). With translations: every translation file of the
@@ -360,7 +361,27 @@ the topic to verify and this stage does not run. `translation.pending` are the l
   "counts": {"supported": n, "unsupported": n, "contradicted": n, "unmapped": n},
   "unsupported_sentences": ["<verbatim>", …], "framings": [{"framing": "<text>", "covers":
   ["<sentence>", …]}], "research_suspects": [{"claim": "C9", "reason": "<what is wrong>",
-  "sentences": ["<sentence>", …]}]}` — `research_suspects` lists claims in `research.md` the
+  "sentences": ["<sentence>", …]}], "verdicts": [{"text": "<verbatim>", "verdict":
+  "supported|unsupported|contradicted|not-factual", "claims": ["C1"], "why": "<one line when not
+  supported>"}]}` — `verdicts` (0.24.0) has one per `claims-map.json` entry (an alt that is a map
+  entry included) plus one per factual text outside the map (`unsupported`, counted in
+  `unmapped`); no verdict is carried between rounds, every verify judges every entry. Code
+  matches by **body span**: entries take their spans longest first and exclusively (a copy
+  inside a longer entry's sentence belongs to that entry), a listed text marks every entry it
+  overlaps (an aside or one sentence of a multi-sentence entry marks the entry), a listed text
+  found more than once is refused unless it equals a map entry that is itself repeated (then all
+  its occurrences share the verdict); a text not found verbatim is matched markdown-insensitively
+  (ruby, emphasis, links — as a translation repo's draft gate does); an entry with no place of its
+  own (not in the body — the frontmatter, a paraphrase — or only inside a longer entry) needs no
+  verdict and a verdict on it is not placed: `stage pass` lists such entries as `unplaced` for the
+  PR body, never refuses them (the writer sees them earlier as `map_warnings` of `HRD gate` and of
+  `stage pass --stage draft`, which refuses more than max(3, 10% of the entries) — a map that does
+  not match would switch the coverage off; at verify that bound is only `unplaced_warning`); `supported + unsupported + contradicted` = the factual
+  verdicts, `unsupported_sentences` = the texts of the unsupported ones; `not-factual` on a map
+  entry only for a label or table header (no sentence end), else under a framing's `covers`.
+  `stage pass`, `trim --begin` and `loopback --cause verify` refuse a `verify.json` that misses an
+  entry or breaks these rules (with translations: each `by_lang` entry whose language has a claims
+  map carries its own `verdicts`) — `research_suspects` lists claims in `research.md` the
   fact-checker found wrong in themselves (their own excerpt says otherwise, or they contradict
   another claim) or that a pointer from a deferred or out-of-scope auditor finding names, with the
   sentences that rest on them (fact-checker persona); `framings` lists every framing the fact-checker applied (also under
@@ -380,37 +401,60 @@ the topic to verify and this stage does not run. `translation.pending` are the l
 - `research_suspects` listed → `HRD loopback --topic <id> --cause research --claims <ids>
   --note "<first reason>"` (records `research-error`) → § research, Research fix. No trim, no
   `--cause verify`: both refuse, since the writer cannot fix a sentence from a wrong claim.
-- Otherwise any unsupported/contradicted → first the **trim**, once per article, when nothing is
-  contradicted and 1–3 sentences are unsupported (`--attended`: ask the human — trim, loop back
-  or hold; otherwise no question):
-  1. `HRD trim --topic <id> --begin` — refuses when the counts or the state do not qualify, a
-     listed text is not found once verbatim in the body (frontmatter excluded), a listed
-     sentence is not whole (it starts a paragraph, a list item or heading, or follows a
-     sentence end; it ends with a sentence end; one paragraph, at most 400 characters) or cuts
-     through code, a URL or a link, a listed aside sits inside one, a listed text is a warning
-     or limit (`unsupported_qualifiers`), a whole heading, or a list item with lines attached
-     below it, a translator is enabled, or the article was
-     trimmed before (→ loop back below). It snapshots the article and records `verify-gap`
-     itself.
+- Otherwise any unsupported/contradicted → first `HRD trim --topic <id> --begin`, before any
+  loopback, after the loopbacks are spent and in place of a stagnation hold alike (`--attended`:
+  first ask the human — trim, loop back or hold; a trim chosen → `--begin` as here); only when it
+  refuses, or this gap's trim is aborted or reverted, the stagnation and exhaustion checks of
+  `_contract.md` §F and the loopback below.
+  Up to **three trims per article** (an aborted or reverted one counts), none counted as a loopback:
+  1. `HRD trim --topic <id> --begin` decides eligibility itself from `verify.json` and the state —
+     refuses unless the gap is only unsupported texts: 1–3 listed, nothing contradicted, no
+     `research_suspects`, no image text, no `unsupported_qualifiers`, the verdicts complete (above),
+     each listed text found once verbatim in the body (frontmatter excluded; never a map entry written
+     twice) and whole (a sentence starts a paragraph, a list item or heading, or follows a sentence
+     end; ends with a sentence end; one paragraph, at most 400 characters; never through code, a URL
+     or a link; an aside never inside one), not a whole heading, not a list item with lines attached
+     below it; also the fourth trim, a second trim of the same verify result, a translator. It
+     snapshots the article, claims map, `verify.json`, `verify.md` and the hashes critique passed,
+     records `verify-gap` itself and returns the texts and `may_narrow`.
   2. Spawn the **writer** for the trim — read list: the article, `<w>claims-map.json`,
      `<w>research.md`, `<w>verify.md`, the texts `--begin` returned. Each is mapped to an
-     existing claim that says it or deleted whole; nothing else changes. A text the article
-     cannot do without (its CTA, a required section's point) → `BLOCKED` (→ abort, loop back).
-  3. `HRD trim --topic <id> --finish` — code checks that the body equals the snapshot minus
-     listed texts byte for byte (at a seam only the whitespace the deletion left may change,
-     never the line breaks or indentation around it; a list item goes with its mark),
-     the claims map changed only for the listed texts, the images and critique files are
-     unchanged and the gate passes; critique's verdict then carries over to the shorter body. Refused → `HRD trim
-     --topic <id> --abort` (puts back the article, claims map and images critique passed) and
-     loop back below (snapshot lost → `--abort --force`, which only closes the trim). While a
-     trim is open, `loopback`, `stage check` and `stage pass` refuse; a hold or stop aborts it
-     first.
-  4. Verify again (new hash, new `verify.json`); a gap again → loop back below.
-  The trim is not a loopback (not counted) and runs no editor or auditor round: deletions add
-  no claim to check. It is the agents' decision, so it excludes the PR from auto publish
-  (`trimmed`) unless the human asked for this publish (`--consent`); the PR body lists the
-  deleted passages (`state.json` `trim.removed`, while `trim.status` is `done` — a later
-  critique of a rewritten body marks it `superseded`).
+     existing claim that says it, deleted whole, or — when in `may_narrow` — **narrowed**: whole
+     whitespace-separated words deleted inside it, nothing else changes. A text the article cannot do
+     without (its CTA, a required section's point) → `BLOCKED` (→ abort, the routes below).
+  3. `HRD trim --topic <id> --finish` — code checks that outside the listed texts the body equals the
+     snapshot byte for byte (at a seam only the whitespace a deletion left may change, never the line
+     breaks or indentation around it; a list item goes with its mark); a narrowed text is the
+     original minus whole tokens (single spaces at the seams collapse, no line break added or
+     removed), the rest non-empty and still ending with its sentence end, and no removed token holds
+     a digit, a markup or link character (`<>[]()`, backtick), an emphasis, table, quote or title
+     character (`*_~|`, 「」『』“”‘’《》〈〉"'), lies in a quotation (「…」『…』“…”‘…’《…》〈…〉"…")
+     or is a negation (en: the word not, no, never, without, cannot, none, nor, neither, nothing,
+     nobody, except, unless, hardly, or a word ending in n't; ko: a token holding 않·없·아니·아닌·
+     아님·아냐·마세요·마라·맙시다, 안 or 못 alone, 못하-/못했-/못한-/못할-, or 말고-/말라-/말아-/말자-
+     after a -지 word); an aside, a heading sentence, a span narrowed
+     by an earlier trim and an article in a language written without spaces (ja, zh) are deleted or
+     mapped only; the claims map changed only for the listed texts; the images and critique files
+     unchanged; the gate passes. Code then keeps the claims map in step (an entry that was a deleted
+     text goes, a narrowed one takes its narrowed text) and critique's verdict carries over to the
+     shorter body. Refused →
+     `HRD trim --topic <id> --abort` (puts back the article, claims map and images critique passed)
+     and the routes below (snapshot lost → `--abort --force`, which only closes the trim). While a
+     trim is open, `loopback`, `stage check` and `stage pass` refuse; a hold or stop aborts it first.
+  4. Verify again — mandatory and in full (every entry judged again), the trim's before/after pairs
+     in the read list. Rule for a narrowed text: it may drop the unsupported content, never broaden or
+     strengthen anything else (negation, qualifier, condition, attribution, degree) — else
+     `contradicted`. A narrowed text judged `contradicted` → `HRD trim --topic <id> --revert` (puts
+     back the pre-trim article, claims map, `verify.json`, `verify.md` and hashes; the trim stays
+     counted, that gap is never trimmed again), then the routes below act on the restored gap (a
+     loopback, or a hold at exhaustion); snapshot lost (the trim dir is local) → `--revert --force`,
+     then hold `needs-human`. The revert also drops the re-verify's other findings — the next verify
+     finds them again. Any other gap → this bullet again.
+  The trim runs no editor or auditor round: it adds no claim to check. It is the agents' decision, so
+  it excludes the PR from auto publish (`trimmed`, a narrowing also `narrowed`) unless the human
+  asked for this publish (`--consent` accepts both — the full before/after verify and the revert are
+  the safeguard); the PR body lists every `done` trim (`state.json` `trims` — a later critique of a
+  rewritten body marks it `superseded`; an older state's single `trim` reads the same).
 - Otherwise → `HRD loopback --topic <id> --cause verify --note "<first unsupported
   sentence>"` (records `verify-gap` with the counts), back to draft. Past the shared 3, a
   contradicted sentence (or a research fix) still gets the one accuracy reserve
@@ -447,8 +491,10 @@ the topic to verify and this stage does not run. `translation.pending` are the l
    MAJORs) if any, `## Out-of-scope audit findings (next refresh)` (refresh topics: every
    `out-of-scope` finding, any severity, with its quote; then one line per candidate the brief
    adopted — `HRD refresh-scope` `adopted`: `resolved` or `unchanged`) if any, `## Unattended decisions` if any (`human` entries go under `## Human decisions`),
-   `## Trimmed sentences` (`state.json` `trim.removed`, `trim.status` `done`) if the trim
-   deleted anything, `## Reader notes` (`reader.json` `notes` of the final round, and whether the one
+   `## Trimmed sentences` (every `done` trim in `state.json` `trims`, or an older state's `trim`:
+   deletions from `removed`, narrowings as before → after from `narrowed`) if a trim changed anything,
+   `## Unplaced claims-map entries` (`state.json` `stages.verify.unplaced`: map texts with no place in
+   the body, which no verdict covered — information) if any, `## Reader notes` (`reader.json` `notes` of the final round, and whether the one
    reader-pass send-back was used — `state.json` `reader_revise`) if any, `## Framings` (the
    framings the fact-checker applied and the sentences each covered, from `verify.md`) if any,
    `## Research corrections` (`state.json` `research_fixes`: each claim, the fact-checker's
