@@ -12,6 +12,7 @@ no close, no cleanup) · `--cleanup <tracker>` (Phase 7 alone, for a sprint alre
 > `--body-file`. Membership · order · base: `_sprint_dag.md`. Stage derivation: `_handoff.md`
 > Section A (**list form**). Termination axes: `sprint/daily.md` step 6 — **the same two**, do not
 > invent a third. Growth loop: `commands/evolve.md`.
+> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: `config.language` (`_handoff.md` Section K); counts, paths, `#N` and
 > machine tokens stay ASCII.
 
@@ -56,13 +57,15 @@ Each its own Bash call.
 1. **Guild initialized?** `ls .claude/guild/config.json` — absent → `FAIL: Guild not initialized (run /gld init first)`. This command needs `config.language` and writes `config.sprint`.
 2. **Find the sprint.**
    ```bash
-   gh issue list --label guild:sprint --state open --limit 20 --json number,title,body --jq '{count: length, sprints: [.[] | {number, title}], body: (if length == 1 then .[0].body else null end)}'
+   gh issue list --label guild:sprint --state open --limit 20 --json number,title,body,createdAt --jq '{count: length, sprints: [.[] | {number, title}], body: (if length == 1 then .[0].body else null end), createdAt: (if length == 1 then .[0].createdAt else null end)}'
    ```
    ⚠ **The body comes back only when there is exactly one open sprint** — which is the normal
    case, and then nothing extra is needed. With two or more, `body` is `null` on purpose: you
    have to ask which one anyway, and pulling every candidate's member table to discard all but
    one is the same waste Phase 1 was making. Fetch the chosen tracker's body **after** the human
-   picks — that call was going to happen regardless, so this adds no turn in either branch.
+   picks — that call was going to happen regardless, so this adds no turn in either branch
+   (`gh issue view <tracker> --json body,createdAt` — `createdAt` is Phase 2's line between this
+   sprint's children and an earlier one's).
    - None → `OK: no open sprint`. ⚠ Suggest `/gld sprint plan` (and `--cleanup <tracker>` for
      a closed sprint whose worktrees, branches or leftover labels are still around — it also cleans the labels of members that merged, Phase 6 step 0), and say that a **closed** tracker is a finished sprint — a retro is not re-runnable **once it finishes**, because Phase 6 step 3 closes the Issue and `<!-- guild:sprint:retro -->` is append-only (`_handoff.md` Section B). ⚠ A retro that died **partway** is a different case and IS re-runnable: Phase 4 replaces its own `history` entry rather than appending, and Phase 6 step 2 checks for its own comment before adding one. (v10 said "step 5", which this file has never had.)
    - Two or more → list them and ask which. Never retro one speculatively.
@@ -325,7 +328,7 @@ scales with how badly the sprint went. Measured on `dev-yakuza/one-man-company`:
 | #388 | 7,456 B | 67 B |
 
 ```bash
-gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '. as $all | [$all[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | ($b | split("\n")) as $L | ("^- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}([^-A-Za-z0-9_]|$)") as $s | ("disposition: [\u0060*]{0,2}") as $d | ("^(- )?role-axis") as $ra | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$L[] | select(test($p + "looped-back" + $s) or ((test($ra) | not) and test($d + "looped-back" + $s)))] | length), fixed: ([$L[] | select(test($p + "fixed" + $s) or ((test($ra) | not) and test($d + "fixed" + $s)))] | length), recorded: ([$L[] | select(test($p + "recorded" + $s) or ((test($ra) | not) and test($d + "recorded" + $s)))] | length), dismissed: ([$L[] | select(test($p + "dismissed" + $s) or ((test($ra) | not) and test($d + "dismissed" + $s)))] | length), loose: ([$b | splits("[^-A-Za-z0-9_]+")] | map(select(. == "looped-back" or . == "fixed" or . == "recorded" or . == "dismissed")) | length), legacy_blocks: ([$b | splits("### audit-record ")] | .[1:] | map(select(((split("\n") | any(test($p + "(looped-back|fixed|recorded|dismissed)" + $s) or ((test($ra) | not) and test($d + "(looped-back|fixed|recorded|dismissed)" + $s)))) or test("findings: none") or test("scan: none")) | not)) | length), variant: ([$L[] | select((test($p + "(looped-back|fixed|recorded|dismissed)" + $s) | not) and (test($ra) | not) and test($d + "(looped-back|fixed|recorded|dismissed)" + $s))] | length), clean: ([$b | match("findings: none";"g")] | length), no_scan: ([$b | match("scan: none";"g")] | length), violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)}'
+gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '. as $all | [$all[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | ($b | split("\n")) as $L | ("^- [" + ([96] | implode) + "*]{0,2}") as $p | ("[" + ([96] | implode) + "*]{0,2}([^-A-Za-z0-9_]|$)") as $s | ("disposition: [" + ([96] | implode) + "*]{0,2}") as $d | ("^(- )?role-axis") as $ra | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$L[] | select(test($p + "looped-back" + $s) or ((test($ra) | not) and test($d + "looped-back" + $s)))] | length), fixed: ([$L[] | select(test($p + "fixed" + $s) or ((test($ra) | not) and test($d + "fixed" + $s)))] | length), recorded: ([$L[] | select(test($p + "recorded" + $s) or ((test($ra) | not) and test($d + "recorded" + $s)))] | length), dismissed: ([$L[] | select(test($p + "dismissed" + $s) or ((test($ra) | not) and test($d + "dismissed" + $s)))] | length), loose: ([$b | splits("[^-A-Za-z0-9_]+")] | map(select(. == "looped-back" or . == "fixed" or . == "recorded" or . == "dismissed")) | length), legacy_blocks: ([$b | splits("### audit-record ")] | .[1:] | map(select(((split("\n") | any(test($p + "(looped-back|fixed|recorded|dismissed)" + $s) or ((test($ra) | not) and test($d + "(looped-back|fixed|recorded|dismissed)" + $s)))) or test("findings: none") or test("scan: none")) | not)) | length), variant: ([$L[] | select((test($p + "(looped-back|fixed|recorded|dismissed)" + $s) | not) and (test($ra) | not) and test($d + "(looped-back|fixed|recorded|dismissed)" + $s))] | length), clean: ([$b | match("findings: none";"g")] | length), no_scan: ([$b | match("scan: none";"g")] | length), violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)}'
 ```
 
 ⚠ **No look-around in a `--jq` regex.** `gh` runs its own `jq` (gojq, RE2 regexes), which rejects
@@ -351,6 +354,7 @@ member of S whose children were found**, and every child of S instead (a member 
 child found is an ordinary member — Phase 1 — and is looked up as one). A parent never runs
 execute, so its own record is always `records: 0` — measured: #146 and #483 reported *"기록 없음"*
 while their children held 18 records, 4 of them looped-back (#532).
+- **Only this sprint's children** (0.99.2): a child of S is excluded only when its PR merged — or it closed — **before this tracker was created** (`gh issue view <tracker> --json createdAt`, the same call that reads its body adds the field — Phase 0 step 2); **an open one counts**. An excluded one is an earlier sprint's work: list it as `이전 스프린트에 끝난 자식 <k>개(#506) — 셈에서 제외` (measured retro #649: #506, a child of epic #161 merged 10-27 in an earlier sprint, added its 5 records to the auditor total and the child count). A child's PR is judged by its `mergedAt`/`closedAt` from Phase 1's PR list; a `CLOSED` child with no PR by its own `closedAt` — `gh issue view <c> --repo <owner>/<repo> --json closedAt --jq .closedAt`, its own call (the child discovery query carries no `closedAt`). The member itself (the epic) keeps its one place.
 - **Numbers are summed, verdicts are not.** Add `records` · `looped_back` · `fixed` · … over the
   children into the epic's row, `#e 에픽(자식 합산)`, but **judge each child on its own**: records 0
   → "기록 없음", `clean == records`, `no_scan == records`, `violation`, `dismissed` — and a child
@@ -391,8 +395,8 @@ collide: neither literal is a substring of the other.
 (`_execute_spine.md` Step 4: `- <token> · <severity> · <axis> · <file:line> — <finding>`), with
 a decoration of up to two backticks or `*` tolerated on either side of the token (older records
 wrote `**recorded**` and `` `looped-back` ``) and no letter, digit, `-` or `_` after it; the
-separators after the token are not read. The backtick is written in the jq string as `\u0060`,
-so the shell command carries no backtick (the command-substitution heuristic, `_bash_rules.md`) — copy the command byte for byte: `\u0060` stays six characters (a decoded backtick works only by luck of the single quotes).
+separators after the token are not read. The backtick is built in jq as `[96] | implode`,
+so the command carries neither a backtick (the command-substitution heuristic, `_bash_rules.md`) nor an escape to decode (measured three retros decoding the earlier six-character escape into a literal backtick — it worked only by luck of the single quotes).
 ⚠ Without `(?m)`, `^` is the start of the **string**, and `(?m)` does not help — gojq reads it as
 multi-line but jq 1.8.2 (Oniguruma) as dot-all (measured: `(?m)^` matched 0 times) — so the joined body is split into lines
 (`split("\n")`) and each line is tested with `^- ` (the same in `gh`'s gojq and in jq 1.8.2). A substring or word-boundary count used to match a finding id
@@ -916,6 +920,8 @@ human's.
 Show one table — worktree path (relative to the container), branch, PR, row, action — plus the
 exclusions and their reasons, and ask. The human may approve all, approve by row numbers, or
 decline; **nothing is removed without that answer.** An unanswered or ambiguous reply is a decline.
+**Every invocation asks for itself** — this run's table and this run's answer. An approval or a delegation given in an earlier command (another tracker's `--cleanup`, "판단해서 정리해 주세요" in that conversation) is never carried into a new `/gld` invocation (measured `--cleanup 630` right after `--cleanup 545`: no table, an untracked file `rm`'d, `branch -D`).
+**A delegation approves the table's rows, never what the table keeps.** "판단해서 해 주세요" removes what the rows say `remove`/`delete`; it does not reach a worktree git refused as dirty (its contents — `git restore`, `rm`, `git clean` of a tracked edit or an untracked file — need that file **named** with `git -C <path> status --short` and its own yes), nor a branch kept for tip ≠ `headRefOid` (that one needs both SHAs shown and its own yes; `git cherry` agreeing is evidence to show, not a reason to skip the ask) (measured `--cleanup 545`).
 ⚠ `git branch -D` and `git push origin --delete` are in the template's `permissions.ask`
 (`settings.json.tmpl`), and `rm`, `rmdir` and `hostname` are in no allow list, so each raises a
 prompt — expected, not an error; say so first. ⚠ That is true only once the repo's
@@ -944,7 +950,7 @@ branch -D`) slips past the `ask` entry that is the harness's half of INV1.
    `locked` one is refused and preserved. For each refusal run `git -C <path> status --short` and
    report whether what is left is source or only untracked docs (`daily.md` makes the same
    distinction — an execute-stage ADR is left untracked by design), plus the command the human
-   can run themselves. Then `rmdir <container>` — it fails harmlessly while anything is left.
+   can run themselves — and stop there for that worktree: removing what is left is the human's, or the named yes above. Then `rmdir <container>` — it fails harmlessly while anything is left.
    ⚠ **`git worktree prune` only when every `prunable` entry is inside the container.** prune is
    repo-global and would drop the registration of one of the human's worktrees that is merely on
    an unmounted volume (`sprint-supervisor.sh` `prune_safe`). If any prunable entry is outside it,
@@ -1041,7 +1047,8 @@ Both `closed` lines end with Phase 7's tally — `· cleanup <W> worktrees, <B> 
 - **The retro comment is appended**, never replaced — it is the sprint history.
 - **Record before closing.** A closed tracker with no record loses the sprint.
 - **Only the tracking Issue may be closed here** — never a member, never a child.
-- **retro never moves the human's branch or history** — no `git checkout <branch>` / `switch`, `pull`, `merge`, `rebase`, `reset`, and no option that offers to (measured #1839: "main 으로 이동 후 진행 (Recommended)" → checkout + merge --ff-only). Phase 0 step 5 asks; updating the checkout is the human's. A later "push" request pushes as it is — `git push origin <d>`; rejected (non-fast-forward) → say so and stop: updating is the human's (no rebase or pull to force it in — measured #630: "push 해 주세요" became `git rebase origin/main`). Phase 7's `git worktree remove` and `branch -D` work outside the human's checkout and are outside this ban.
+- **Approval is per invocation and per listed item** — `_checkout.md` Section F: an earlier command's yes or "판단해서" never reaches a new invocation, nor what Phase 7's table keeps.
+- **retro never moves the human's branch or history** — no `git checkout <branch>` / `switch`, `pull`, `merge`, `rebase`, `reset`, and no option that offers to (measured #1839: "main 으로 이동 후 진행 (Recommended)" → checkout + merge --ff-only). Phase 0 step 5 asks; updating the checkout is never on its own; on a human request, `_checkout.md`'s request form — Guild runs only a hash-preserving update (`git pull --ff-only` / `--no-rebase`), a rewriting one the human runs, and a switch after a yes (measured #649: "pull 과 push" became `git pull --rebase origin main` — the record commit `76affe6b` became `c8272e40`, told only afterwards). A later "push" request pushes as it is — `git push origin <d>`; rejected (non-fast-forward) → say so and stop: updating is the human's — asked to update first, the request form (no rebase or pull to force it in — measured #630: "push 해 주세요" became `git rebase origin/main`). Phase 7's `git worktree remove` and `branch -D` work outside the human's checkout and are outside this ban.
 - **Cleanup touches only this sprint** — worktrees inside its container, the head branches of
   confirmed member and child PRs, and this tracker's run files. Never a name-pattern search, never
   the default or current branch, never a fork's branch, never a branch that is the base of a

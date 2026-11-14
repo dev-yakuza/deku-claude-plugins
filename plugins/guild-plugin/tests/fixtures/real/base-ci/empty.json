@@ -1,0 +1,14 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [],
+  "head": "main",
+  "gh_commands": [
+   "gh api repos/<o>/<r>/commits/<ref>/check-runs --paginate"
+  ],
+  "synthetic": [],
+  "note": "one-man-company main: CI runs on PRs only",
+  "fails_before": "base_ci.py is new in 0.99.2; the 0.98.7 prose order read annotations before the dedupe — #616's first three failures with annotations in stream order are two `Conventional 접두어 검증` duplicates and `수동 검증 …`, never `Analyze & Test`"
+ },
+ "check_runs": []
+}

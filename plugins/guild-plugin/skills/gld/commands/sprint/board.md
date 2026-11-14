@@ -10,6 +10,7 @@ retired and lives in `$2`, so it is matched on the whole argument list, not on `
 Phase 0 step 0.
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/labels: `_handoff.md`.
+> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K).
 > Machine tokens (column tokens, reason tokens, `state:` values) stay ASCII.
 
@@ -363,7 +364,7 @@ they are not.
 | `Needs human` | TEXT | A **classification token** — the set below, never prose: `needs-human` · `failed:<class>` (one per `record_failure` site) · `split-children` · `interrupted` · `pr-unknown` (the PR list could not be read, so *"there is a PR to review"* is not something we know) · `dep-unresolved` (the run ended with this member's dependency still not landed, so it will not move again by itself) · `branch-ambiguous` · `base-unresolved` (the other two end-of-run block classes — they are **not** dependency waits and their repairs differ, so they do not share `dep-unresolved`'s token) · `account-rate-limited` (the account was rate limited with a reset more than 4h away, or six waits were spent — **not a failure**: the member is untouched and the re-run picks it up). `Blocked` says *"your turn"*; this says which turn |
 | `Sprint` | NUMBER | Boards are not recreated per sprint, so cards accumulate. This is how a human filters to one sprint |
 
-**Done has two sources** (0.98.7): a member whose PR merged, and a member **closed as decided** (`analyze.md` Step 1 item 0b — `guild:done`, `CLOSED`, no PR at all). The supervisor's done arm writes `In review` · `split-children` for a PR-less done member first (P3), and its merged sweep (P5, `board_sweep_merged` — it reads `run.json`'s `closed_done`) corrects that card to `Done` in the same pass; `sync --done-cards` finds the same member by its `<!-- guild:closed-as-decided -->` comment.
+**Done has two sources** (0.98.7): a member whose PR merged, and a member **closed as decided** (`analyze.md` Step 1 item 0b — `guild:done`, `CLOSED`, no PR at all). The supervisor's done arm writes `In review` · `split-children` for a PR-less done member first (P3), and its merged sweep (P5, `board_sweep_merged` — it reads `run.json`'s `closed_done`) corrects that card to `Done` in the same pass; `sync --done-cards` finds the same member by its `<!-- guild:closed-as-decided -->` comment. A third source (0.99.2) reaches `Done` only through `sync --done-cards`: a split parent whose integration passed and the human closed (`guild:done` · `CLOSED`/`COMPLETED` · an `<!-- guild:integration:output -->` comment · no PR of its own) — the supervisor's sweep does not see it (a run ends before the parent is closed; measured #161), and the sync's write clears its `Needs human` with the column.
 
 ### 6. Record the config
 

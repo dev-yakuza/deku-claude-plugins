@@ -12,10 +12,12 @@ Runs in **two modes**, from one source of truth:
      `git commit`, checks what it can *before* the command runs, so the agent gets an
      immediate, specific reason instead of burning a turn on a commit the git hook will
      reject anyway.
-     2b. (no args, every call, before the commit check) — **Bash text guard** (0.98.6). Refuses two
+     2b. (no args, every call, before the commit check) — **Bash text guard** (0.98.6). Refuses four
      narrow, measured shapes: a backtick the shell will run as a command inside the call's
-     text (`shell-text`), and an Issue-body bundle from `gh issue list --json …body…` saved
-     to a file (`bodies-save`). Every other call goes on (to the commit check, or allowed) after one string scan.
+     text (`shell-text`), an Issue-body bundle from `gh issue list --json …body…` saved
+     to a file (`bodies-save`), and (0.99.2) a read of the unmarked comments that slices their
+     bodies (`directive-slice`) and — unattended only — a comment posted from a body file whose
+     first line is no `<!-- guild:` marker (`unmarked-comment`). Every other call goes on (to the commit check, or allowed) after one string scan.
 
 ⚠ **Why two layers.** A `PreToolUse` hook fires *before* the command executes, so a
 compound command that creates or mutates content and commits it in one call
@@ -1379,7 +1381,9 @@ def deny_pre_tool_use(reasons, warn=()):
 
 # --- mode 2b: Bash text guard (0.98.6 Y1 · Y2) ------------------------------------------
 # The PreToolUse hook already sees EVERY Bash call (settings.json `matcher: "Bash"`); a call
-# that is not a commit used to return at once. Two narrow shapes are now refused there — on every call, a commit too —
+# that is not a commit used to return at once. Narrow shapes are now refused there — on every call, a commit too —
+# (two in 0.98.6, below; two more in 0.99.2 — `directive-slice` and the unattended-only
+# `unmarked-comment`, at their functions) —
 # both measured, both missed by the prompt rules alone, and a deny is honoured unattended and
 # inside sub-agents (word_app #1117: `PreToolUse:Bash hook error` stopped a sub-agent commit).
 # Measured over 71,590 real Bash calls from Guild sessions (word_app · one-man-company):
@@ -1639,6 +1643,125 @@ def bodies_save(cmd):
     return False
 
 
+DIRECTIVE_SLICE_MSG = ("🚫 Guild 게이트: 사람 지시(마커 없는 댓글)는 잘라 읽지 마세요 — 범위를 좁히는 문장이 뒤에 "
+                       "있습니다(#244 실측). 명령을 그대로 실행하고, 길면 도구가 옮긴 파일을 Read offset/limit 로 읽으세요.")
+UNMARKED_COMMENT_MSG = ("🚫 Guild 게이트: 무인 실행의 댓글은 <!-- guild:note --> 같은 마커로 시작해야 합니다 — "
+                        "마커 없는 댓글은 사람 지시로 읽힙니다(Section M).")
+
+GH_READ_RE = re.compile(r"\bgh\s+(?:(?:-R|--repo)[\s=]+\S+\s+)?(?:api|issue\s+view|pr\s+view)\b")
+# The `| not` must negate the MARKER test itself — `test("<!-- guild:")) | not`,
+# `contains("<!-- guild:") | not` — not some later filter (`select(.user.login|test("bot")|not)`
+# after a marker SELECT is not a directive read). A `\"` (jq inside a double-quoted shell
+# string) is the same quote.
+UNMARKED_FILTER_RE = re.compile(r'<!-- guild:[^"]*\\?"\s*\)\s*\)?\s*\|\s*not\b')
+# A cut of the body: `.body[n:m]`, `.body | .[n:m]`, `(.body // "")[n:m]`, and a `.body` pipe chain
+# ending in `| .[n:m]` (`((.body // "") | .[0:300])`, `(.body | gsub("\n";" ") | .[0:300])`) — the
+# chain stays inside one object field (no `{`, `}` or `,` between).
+_SL = r"\[\s*-?\d*\s*:\s*-?\d*\s*\]"
+BODY_SLICE_RE = re.compile(r"\.body\s*(?:\|\s*\.)?" + _SL
+                           + r'|\(\s*\.body\s*//\s*\\?"\\?"\s*\)\s*(?:\|\s*\.)?' + _SL
+                           + r"|\.body\b[^{},]*?\|\s*\." + _SL)
+# …or the whole output cut by the shell, outside the quotes: `… {id, body}' | head -c 2000`.
+SHELL_CUT_RE = re.compile(r"\|\s*(?:head|cut)\s+(?:-\w+\s+)*-c")
+
+
+def directive_slice(cmd):
+    """0.99.2 A10 (D1) — True when ONE pipeline piece reads comments/bodies with `gh` (`api`,
+    `issue view`, `pr view`), keeps only the UNMARKED ones (`<!-- guild:` with `| not` / `) not`
+    — Section M's directive read) and slices the body (`.body[<n>:<m>]`, `.body | .[<n>:<m>]`,
+    `.body[:<m>]`). A directive's scope exclusion sits after its first sentence: measured #244
+    (425 chars) cut at 300 lost `잡이 실행된 뒤 실패한 red는 이 지시의 대상이 아니다` — the
+    directive read wider than it was. Measured: 10 of 77,194 real Bash calls had this shape, all
+    of them Section M reads (#648 · #649 `.body[0:300]`/`[0:400]`, #161 · #511 `(.body | .[0:300])`,
+    #630 · #620 `(.body | .[0:600])`). The `gh` command is found in the quote-blanked piece (a
+    commit message or an echo that only mentions it runs nothing); the marker, the filter and
+    the slice are read from the same span of the original (they live inside the jq string).
+    Out of scope (recorded): a cut read with no marker filter (not a directive read — Section M
+    has its own command), a script file that does it."""
+    u = _blank_quoted(cmd)
+    start = 0
+    for m in list(PIECE_SEP_RE.finditer(u)) + [None]:
+        end = m.start() if m else len(u)
+        seg_u, seg_raw = u[start:end], cmd[start:end]
+        start = m.end() if m else len(u)
+        if not GH_READ_RE.search(seg_u):
+            continue
+        if (UNMARKED_FILTER_RE.search(seg_raw)
+                and (BODY_SLICE_RE.search(seg_raw) or SHELL_CUT_RE.search(seg_u))):
+            return True
+    return False
+
+
+# `gh issue comment` / `gh pr comment` with a body file; `gh api` comment create (POST to
+# `…/issues/<n>/comments`) or update (`…/issues/comments/<id>` with PATCH) with `-F`/`--field
+# body=@<file>`. Review comments (`…/pulls/<n>/comments`) and inline `--body` are outside.
+GH_COMMENT_RE = re.compile(r"\bgh\s+(?:(?:-R|--repo)[\s=]+\S+\s+)?(?:issue|pr)\s+comment\b")
+BODY_FILE_FLAG_RE = re.compile(r"(?:^|\s)(?:--body-file|-F)(?=[\s=])")
+GH_API_RE = re.compile(r"\bgh\s+api\b")
+API_CREATE_PATH_RE = re.compile(r"(?:^|[\s/])repos/[^/\s]+/[^/\s]+/issues/\d+/comments(?=[\s?]|$)")
+API_UPDATE_PATH_RE = re.compile(r"(?:^|[\s/])repos/[^/\s]+/[^/\s]+/issues/comments/\d+(?=[\s?]|$)")
+API_PATCH_RE = re.compile(r"(?:^|\s)(?:-X\s*|--method[\s=]+)PATCH\b", re.I)   # `-XPATCH` too
+FIELD_FLAG_RE = re.compile(r"(?:^|\s)(?:-F|--field)(?=[\s=])")
+
+
+def _arg_at(raw, pos):
+    """The shell word starting at `pos` (after spaces or one `=`), unquoted; "" when none."""
+    rest = raw[pos:]
+    rest = rest[1:] if rest[:1] == "=" else rest.lstrip(" \t")
+    if not rest:
+        return ""
+    if rest[0] in "'\"":
+        end = rest.find(rest[0], 1)
+        return rest[1:end if end > 0 else len(rest)]
+    return re.match(r"[^\s;&|<>]*", rest).group(0)
+
+
+def _first_line_marked(path):
+    """True/False for the file's first non-empty line opening with `<!-- guild:`; None when the
+    file cannot be read (a path typo — gh fails on it; the gate does not refuse what it cannot
+    see)."""
+    try:
+        with open(os.path.expanduser(path), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.strip():
+                    return line.lstrip().startswith("<!-- guild:")
+    except OSError:
+        return None
+    return None
+
+
+def unmarked_comment(cmd):
+    """0.99.2 A11 (D1) — unattended only (`GLD_UNATTENDED=1`, checked by the caller): True when a
+    piece posts or updates an Issue/PR comment from a file whose first non-empty line is not a
+    `<!-- guild:` marker. Unattended there is no human, so an unmarked comment is always a defect
+    — Section M reads it as the human's directive (measured: 64 of 1,554 `--body-file` posts in
+    sprint worktree sessions had no marker, all Guild-written — a PR CI note, a merge-order
+    note). Attended is never checked: a comment the human asked Claude to write as theirs
+    (`## 사람 지시 — …`) is rightly unmarked. Out of scope (recorded): inline `--body`, a body
+    written by a heredoc or a script file, `-f/--raw-field body=@F` (gh sends the text `@F` —
+    a defect of its own, A18)."""
+    u = _blank_quoted(cmd)
+    start = 0
+    for m in list(PIECE_SEP_RE.finditer(u)) + [None]:
+        end = m.start() if m else len(u)
+        seg_u, seg_raw = u[start:end], cmd[start:end]
+        start = m.end() if m else len(u)
+        paths = []
+        if GH_COMMENT_RE.search(seg_u):
+            paths += [_arg_at(seg_raw, f.end()) for f in BODY_FILE_FLAG_RE.finditer(seg_u)]
+        elif GH_API_RE.search(seg_u) and (
+                API_CREATE_PATH_RE.search(seg_raw)
+                or (API_UPDATE_PATH_RE.search(seg_raw) and API_PATCH_RE.search(seg_u))):
+            for f in FIELD_FLAG_RE.finditer(seg_u):
+                v = _arg_at(seg_raw, f.end())
+                if v.startswith("body=@"):
+                    paths.append(v[len("body=@"):])
+        for pth in paths:
+            if pth and pth != "-" and _first_line_marked(pth) is False:
+                return True
+    return False
+
+
 def deny_pre_tool_use_text(msg):
     """Deny a Bash call for its text (every Bash call, a commit too): the same deny JSON + stderr + exit 2 as a commit block, but
     with `msg` alone — `block_message`'s `커밋 거부` header and HUMAN_NOTE (dismissed.md, key
@@ -1666,6 +1789,10 @@ def main_text_guard(cmd):
         rule, msg = "shell-text", SHELL_TEXT_MSG
     elif bodies_save(cmd):
         rule, msg = "bodies-save", BODIES_SAVE_MSG
+    elif directive_slice(cmd):
+        rule, msg = "directive-slice", DIRECTIVE_SLICE_MSG
+    elif os.environ.get("GLD_UNATTENDED") == "1" and unmarked_comment(cmd):
+        rule, msg = "unmarked-comment", UNMARKED_COMMENT_MSG
     if rule is None:
         return 0
     root = os.environ.get("CLAUDE_PROJECT_DIR") or repo_root()

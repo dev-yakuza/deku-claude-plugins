@@ -24,7 +24,13 @@ Read-only. Never writes transcripts. Prints a `>>> RESULT <<<` line then a JSON 
 import argparse, glob, json, os, re, sys
 from collections import defaultdict
 
-PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
+def projects_dir():
+    """The transcript root: `$CLAUDE_CONFIG_DIR/projects`, default `~/.claude/projects`. Read at
+    call time (from `main()`), not at import, so a test can change the environment (0.99.2 A6 —
+    measured word_app evolve #30–#32 with CLAUDE_CONFIG_DIR=~/.claude-personal:
+    `0/95 transcripts parsed` — the 95 were another config dir's sessions, every run)."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    return os.path.join(base, "projects")
 
 # --- friction signatures (kill-gate validated) -------------------------------
 PERMISSION_RE = re.compile(
@@ -83,6 +89,42 @@ GUILD_MANDATED_RE = re.compile(
     # is terminal, by contract; unlisted, every local job would read as repeated-cmd friction.
     r"|python3 \S+/local_dev\.py (status|ack) --issue \d+( --last)?"
     r"|python3 \S+/local_dev\.py wait --issue \d+ --max-seconds \d+(?:\.\d+)?"
+    # 0.99.2 A6 — what reading the right transcript dir surfaced (measured one-man-company: 188
+    # signals over 182 transcripts, the top ones all Guild's own): the bundled atom calls, the
+    # leader reading its own instruction files, the config read, the worktree list, the
+    # remote-tracking fetch (no backreference: `\1` inside this outer group is `cannot refer to
+    # an open group` and the import dies), the checkout checks (`_checkout.md`, plan Phase 0
+    # step 6, retro Phase 0 step 5, evolve 2b), the positional-repo default-branch read, and the
+    # conflict pre-check. Argument slots are shapes; everything else is exact.
+    r"|python3 \S+/commands/atoms/\w+\.py( .*)?"
+    r"|(cat|sed -n \S+) \S+/skills/gld/commands/\S+\.md"
+    r"|cat (\S*/)?\.claude/guild/config\.json"
+    r"|git worktree list --porcelain"
+    r"|git fetch origin \+?(refs/heads/)?\S+:refs/remotes/origin/\S+"
+    r"|git branch --show-current"
+    r"|gh repo view [\w.-]+/[\w.-]+ --json defaultBranchRef --jq \.defaultBranchRef\.name"
+    r"|git rev-list --left-right --count \S+\.\.\.\S+"
+    r"|git merge-tree --write-tree( --name-only)? \S+ \S+"
+    # code review r1 — what still topped one-man-company's list after the fix (179 transcripts, 146
+    # signals): reads the command files instruct, in the forms the leader actually runs (the
+    # absolute config path, `--jq` beside `-q`, evolve's ledger staging). NOT a bare
+    # `git fetch origin <branch>`: `_execute_spine.md` Step 0 forbids it (it does not update
+    # `origin/<b>` in a single-branch clone) — only the instructed `<base>:<base>` form is Guild's.
+    r"|ls \.claude/guild/config\.json"
+    r"|cat (\S*/)?\.claude/guild/memory/review-nudge-state\.json"
+    r"|gh issue list --label guild:sprint --state open --limit 20 --json \S+( --jq .*)?"
+    r"|gh issue list --label guild:child --state all --limit (200|500) --json \S+( --jq .*)?"
+    r"|gh label list --limit 200 --json name --jq '\[\.\[\]\.name\]'"
+    r"|gh repo view --json nameWithOwner (-q|--jq) \.nameWithOwner"
+    r"|printenv GLD_[A-Z_]+"
+    r"|git fetch origin (?P<lb>[\w./-]+):(?P=lb)"
+    r"|git add \.claude/guild/evolution-log\.md( \.claude/guild/evolution-log\.archive\.md)?"
+    r"|git ls-remote origin refs/heads/\S+"
+    r"|git (-C \S+ )?status --porcelain( -uall)?( -- docs/specs/)?"
+    r"|git diff --cached --name-only"
+    r"|hostname"
+    r"|ls -A \.claude/guild/"
+    r"|python3 \.claude/guild/gates/scripts/gate_precommit\.py --git-hook"
     r")\s*$")
 
 
@@ -207,19 +249,20 @@ def main():
 
     repo_cwd = os.path.abspath(os.path.expanduser(args.repo_cwd))
 
-    if not os.path.isdir(PROJECTS_DIR):
-        sys.stderr.write("no ~/.claude/projects dir — transcript source unavailable\n")
+    root = projects_dir()
+    if not os.path.isdir(root):
+        sys.stderr.write(f"no {root} dir — transcript source unavailable\n")
         emit("0/0 transcripts parsed", True, [],
-             "no ~/.claude/projects directory — transcript source unavailable")
+             f"no {root} directory — transcript source unavailable")
         return 2
 
-    files = glob.glob(os.path.join(PROJECTS_DIR, "*", "*.jsonl"))
+    files = glob.glob(os.path.join(root, "*", "*.jsonl"))
     matched = [f for f in files if file_matches_repo(f, repo_cwd)]
     if not matched:
         sys.stderr.write(f"no transcripts matched cwd={repo_cwd} (lossy encoding / none this repo)\n")
         # Not the same as "no friction": a session started in a subdirectory, through a symlinked
         # path, or in a worktree records a different `cwd` and is dropped here silently.
-        emit(f"0/{len(files)} transcripts parsed for {repo_cwd}", True, [],
+        emit(f"0/{len(files)} transcripts in {root} parsed for {repo_cwd}", True, [],
              f"no transcript recorded cwd={repo_cwd} — sessions started from a subdirectory, "
              f"a symlinked path, or a worktree record a different cwd and are not matched")
         return 3

@@ -1,0 +1,64 @@
+{
+ "_source": {
+  "repo": "deku-word-app/word_app",
+  "numbers": [],
+  "head": "main",
+  "gh_commands": [
+   "gh api repos/<o>/<r>/commits/<ref>/check-runs --paginate"
+  ],
+  "synthetic": [
+   "only id, name, conclusion and output.annotations_count are kept"
+  ],
+  "fails_before": "base_ci.py is new in 0.99.2; the 0.98.7 prose order read annotations before the dedupe — #616's first three failures with annotations in stream order are two `Conventional 접두어 검증` duplicates and `수동 검증 …`, never `Analyze & Test`"
+ },
+ "check_runs": [
+  {
+   "id": 132249623773,
+   "name": "Dependabot",
+   "conclusion": "success",
+   "output": {
+    "annotations_count": 1
+   }
+  },
+  {
+   "id": 132249623005,
+   "name": "Dependabot",
+   "conclusion": "success",
+   "output": {
+    "annotations_count": 1
+   }
+  },
+  {
+   "id": 132249622336,
+   "name": "Dependabot",
+   "conclusion": "success",
+   "output": {
+    "annotations_count": 1
+   }
+  },
+  {
+   "id": 132249622008,
+   "name": "Dependabot",
+   "conclusion": "success",
+   "output": {
+    "annotations_count": 1
+   }
+  },
+  {
+   "id": 131898673871,
+   "name": "validate_pr",
+   "conclusion": "skipped",
+   "output": {
+    "annotations_count": 0
+   }
+  },
+  {
+   "id": 131898672146,
+   "name": "update_release_draft",
+   "conclusion": "success",
+   "output": {
+    "annotations_count": 11
+   }
+  }
+ ]
+}

@@ -5,6 +5,7 @@
 `$1` = what to undo: a **PR number**, a **commit SHA**, or the literal word `stage` (move an Issue back one stage). When `$1 == "stage"`, `$2` = the **Issue number** to move back — per `SKILL.md`'s routing (`$1`, `$2`… are space-separated tokens passed positionally), `/gld rollback stage 42` arrives as `$1="stage"`, `$2="42"`; there is no single two-word `$1`.
 
 > **Bash**: `_bash_rules.md`. State/handoff + owner/repo: `_handoff.md`.
+> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K).
 
 ---

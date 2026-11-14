@@ -1,0 +1,94 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [
+   244,
+   573,
+   574,
+   575,
+   587
+  ],
+  "snapshot_at": "2026-10-25T06:00:00Z",
+  "gh_commands": [
+   "gh issue list --label guild:child --state all --json number,title,body,labels,state",
+   "gh issue view 573 --json closedByPullRequestsReferences",
+   "gh pr view 587 --json state,mergedAt"
+  ],
+  "synthetic": [
+   "titles are 't'; bodies are the one line 'Parent Issue: #244'"
+  ],
+  "fails_before": "none — R1 shipped in 0.98.2; this replays the discovery jq and split_head_needs_human on the real shape (no fix in 0.99.2)"
+ },
+ "children": [
+  {
+   "number": 575,
+   "title": "t",
+   "state": "OPEN",
+   "body": "Parent Issue: #244",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:analyze"
+    }
+   ]
+  },
+  {
+   "number": 574,
+   "title": "t",
+   "state": "OPEN",
+   "body": "Parent Issue: #244",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:analyze"
+    }
+   ]
+  },
+  {
+   "number": 573,
+   "title": "t",
+   "state": "CLOSED",
+   "body": "Parent Issue: #244",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:qa"
+    },
+    {
+     "name": "guild:needs-human"
+    },
+    {
+     "name": "type:chore"
+    }
+   ]
+  }
+ ],
+ "closed_by": {
+  "573": {
+   "closedByPullRequestsReferences": [
+    {
+     "number": 587,
+     "repository": {
+      "name": "app",
+      "owner": {
+       "login": "acme"
+      }
+     },
+     "url": "https://github.com/acme/app/pull/587"
+    }
+   ]
+  }
+ },
+ "pr_view": {
+  "587": {
+   "mergedAt": "2026-10-25T02:02:49Z",
+   "state": "MERGED"
+  }
+ }
+}

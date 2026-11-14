@@ -5,6 +5,7 @@
 `$1` = **a design-doc file path** *or* **an Issue number/URL** (auto-detected). `$2` = `--create` (default = **dry-run**: propose only, create nothing).
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. Handoff / owner-repo / labels / parent-child: `<<SKILL_DIR>>/commands/atoms/_handoff.md` (Sections A, F, I). Roles: product-owner + tech-lead personas.
+> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output (proposal, discuss, report) in `config.language` (`_handoff.md` Section K). Machine tokens / `file:line` / `#N` stay ASCII.
 
 > **This is a MULTI-TURN, attended flow** (Phase 2 discuss). It runs in the **main session** — decomposing a backlog is a high-judgment decision the human refines before anything is created.

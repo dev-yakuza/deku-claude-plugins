@@ -1435,10 +1435,134 @@ expect_o "O53 jq . <<< \"\$x\" 다음 줄의 echo \"built \`date\`\" → 2" 2 "j
 echo \"built ${B}date${B}\""
 expect_o "O54 jq . <<< \"\$x\" 다음 줄의 gh issue list … > /tmp/b.json → 2" 2 "jq . <<< \"\$x\"
 gh issue list --json number,body > /tmp/b.json"
+# ── 0.99.2 B6 — 실측 거부·통과 재생 (word_app · one-man-company transcript `input.command`, 경로·저장소 중립화) ──
+# #618 따옴표 없는 `<<E` — 백틱은 모두 이스케이프했는데 끝의 "\n```\n" 하나만 맨 채였다 → (c).
+read -r -d '' C <<'X'
+cd /x/issue-1; F=test/a_test.dart
+T1='placeholder test name'
+cat > /tmp/gld-1-cov.py <<E
+rows=[]
+def a(i,t): rows.append(f"CASE: {i}\nVERDICT: automated\nTEST_FILE: $F\nTEST_NAME: {t}")
+T1='$T1'
+a('A-1',T1)
+open('docs/specs/1/test-coverage.md','w').write("""# #1 placeholder
+
+placeholder \`$F\` placeholder \`verify-evidence.md\` placeholder (\`repro.md\`).
+
+\`\`\`case-coverage
+"""+"\n\n".join(rows)+"\n```\n")
+E
+python3 /tmp/gld-1-cov.py; echo rc=$?
+X
+expect_o "O55 #618 따옴표 없는 <<E 의 맨 펜스 하나 → 2" 2 "$C"
+expect_o "O56 #618 대조: 마지막 펜스도 이스케이프 → 0" 0 "${C//\"\\n\`\`\`\\n\")/\"\\n\\\`\\\`\\\`\\n\")}"
+expect_o "O57 #618 대조: <<'E' (따옴표 구분자) → 0" 0 "${C/<<E/<<\'E\'}"
+# #620 큰따옴표 grep 패턴 안의 ``` → (a); 작은따옴표판은 통과.
+read -r -d '' C <<'X'
+grep -n "case-declaration\|CASE\|^```\|^## \|^### " docs/specs/1/test-cases.md
+X
+expect_o "O58 #620 grep \"…^\`\`\`…\" → 2" 2 "$C"
+read -r -d '' C <<'X'
+grep -n 'case-declaration\|CASE\|^```\|^## \|^### ' docs/specs/1/test-cases.md
+X
+expect_o "O59 #620 대조: 같은 패턴을 작은따옴표로 → 0" 0 "$C"
+# #610 PO 모양 전체 — cd; cat … | head; gh issue list … --json …body… --jq '…' 2>/dev/null > /tmp/bodies.txt; wc
+read -r -d '' C <<'X'
+cd /x; cat .claude/agents/product-owner.md | head -60; gh issue list --state open --limit 200 --json number,title,body,labels --jq 'length, (.[] | {number, title, labels: [.labels[].name], body})' 2>/dev/null > /tmp/bodies.txt; wc -c /tmp/bodies.txt
+X
+expect_o "O60 #610 전체 꼴(… 2>/dev/null > /tmp/bodies.txt) → 2" 2 "$C"
+# Claude Code 기본 꼴 — 커밋·PR heredoc 은 통과해야 한다(<<'EOF' 안의 백틱·$(…)·따옴표·표·마커 주석).
+read -r -d '' C <<'X'
+git commit -m "$(cat <<'EOF'
+fix: placeholder `parse()` placeholder
+
+- placeholder `a|b` and $(not run) and "quotes"
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+EOF
+)"
+X
+expect_o "O61 Claude Code 기본 커밋 heredoc(<<'EOF' 안의 백틱·\$(…)·\"…\") → 0" 0 "$C"
+read -r -d '' C <<'X'
+gh pr create --base develop --draft --title "fix(components): Placeholder title" --body "$(cat <<'EOF'
+<!-- placeholder comment -->
+
+# Section
+
+Placeholder `--color-token-name` placeholder.
+[#1 placeholder](https://github.com/o/r/pull/1#discussion_r1) placeholder.
+
+- placeholder `label/alpha-base/tertiary` placeholder
+- #1 / #2 placeholder
+
+| a | b | c |
+| ---- | ---- | -------- |
+| x | `y` | z |
+
+<!-- placeholder comment -->
+EOF
+)"
+X
+expect_o "O62 Claude Code 기본 PR heredoc(마커 주석·표·백틱 여러 쌍·#discussion 링크) → 0" 0 "$C"
+# ── 0.99.2 A10 (D1) directive-slice — 마커 없는 댓글만 고르며 본문을 잘라 읽는 명령 ──
+# 실측 네 꼴(f971abce #648·#649, 885261e3 #161·#511 — 저장소·번호만 acme/app·1 로)
+expect_o "O63 실측 f971abce: test(\"<!-- guild:\")) | not + .body[0:300] → 2" 2 "gh api --paginate repos/acme/app/issues/1/comments --jq '.[] | select((.body | test(\"<!-- guild:\")) | not) | {id, user: .user.login, body: .body[0:300]}'"
+expect_o "O64 실측 f971abce: 트래커 .body[0:400] → 2" 2 "gh api --paginate repos/acme/app/issues/1/comments --jq '.[] | select((.body | test(\"<!-- guild:\")) | not) | {id, user: .user.login, body: .body[0:400]}'"
+expect_o "O65 실측 885261e3: (.body // \"\") | test(…) | not + (.body | .[0:300]) → 2" 2 "gh api --paginate repos/acme/app/issues/1/comments --jq '.[] | select((.body // \"\") | test(\"<!-- guild:\") | not) | {created_at, author: .user.login, body: (.body | .[0:300])}'"
+expect_o "O66 실측 885261e3: 자식 #511 꼴 → 2" 2 "gh api --paginate repos/acme/app/issues/1/comments --jq '.[] | select((.body // \"\") | test(\"<!-- guild:\") | not) | {created_at, body: (.body | .[0:300])}'"
+expect_o "O67 .body[:300] (시작 생략) → 2" 2 "gh issue view 1 --json comments --jq '.comments[] | select(.body | contains(\"<!-- guild:\") | not) | .body[:300]'"
+R="$(pre_full "gh api --paginate repos/acme/app/issues/1/comments --jq '.[] | select((.body | test(\"<!-- guild:\")) | not) | {id, body: .body[0:300]}'")"; SE="${R##*$'\037'}"
+case "$SE" in *"사람 지시(마커 없는 댓글)는 잘라 읽지 마세요"*"#244"*"Read offset/limit"*) ok "O68 directive-slice 메시지(#244 · Read offset/limit)" ;;
+  *) bad "O68 directive-slice 메시지" "사람 지시 … #244" "$(printf '%s' "$SE" | cut -c1-80)" ;; esac
+grep -q '"rule": "directive-slice", "action": "block"' "$LOGF" 2>/dev/null && ok "O69 발동 로그에 directive-slice 행" || bad "O69 directive-slice 행" "row" "$(tail -1 "$LOGF" 2>/dev/null)"
+expect_o "O70 대조: 같은 명령에서 슬라이스만 뺀 것 → 0" 0 "gh api --paginate repos/acme/app/issues/1/comments --jq '.[] | select((.body | test(\"<!-- guild:\")) | not) | {id, user: .user.login, body: .body}'"
+expect_o "O71 대조: 마커 필터 없는 .body[0:1500] (지시 읽기 아님) → 0" 0 "gh issue view 1 --json body --jq '.body[0:1500]'"
+expect_o "O72 대조: | not 없는 마커 선택 contains(\"<!-- guild:sprint:run -->\") + 슬라이스 → 0" 0 "gh api repos/acme/app/issues/1/comments --jq '.[] | select(.body | contains(\"<!-- guild:sprint:run -->\")) | .body[0:300]'"
+expect_o "O73 대조: Section M 의 명령 그대로(전문) → 0" 0 "gh api repos/acme/app/issues/1/comments --paginate --jq '.[] | select((.body // \"\") | contains(\"<!-- guild:\") | not) | {id, html_url, body}'"
+read -r -d '' C <<'X'
+git commit -m "$(cat <<'EOF'
+docs: never gh api x --jq 'select(.body | test("<!-- guild:") | not) | .body[0:300]'
+EOF
+)"
+X
+expect_o "O74 대조: 커밋 메시지 heredoc 속 언급 → 0" 0 "$C"
+# ── 0.99.2 A11 (D1) unmarked-comment — 무인(GLD_UNATTENDED=1)일 때만, 본문 파일 첫 줄 마커 ──
+expect_ou() { local R; R="$(pre_full "$3" "${@:4}")"; if [ "${R%%$'\037'*}" = "$2" ]; then ok "$1"; else bad "$1" "rc $2" "rc ${R%%$'\037'*}"; fi; }
+UM="$WORK/um"; mkdir -p "$UM"
+printf '### PR CI red — head abc\n\nx\n' > "$UM/bare.md"
+printf '\n<!-- guild:note -->\nPR CI red — head abc\n' > "$UM/marked.md"
+expect_ou "O75 실측 꼴 gh pr comment --body-file(첫 줄 ### PR CI red) + 무인 → 2" 2 "gh pr comment 1 --body-file $UM/bare.md" GLD_UNATTENDED=1
+R="$(pre_full "gh issue comment 1 --body-file $UM/bare.md" GLD_UNATTENDED=1)"; SE="${R##*$'\037'}"
+case "$SE" in *"무인 실행의 댓글은 <!-- guild:note --> 같은 마커로 시작해야 합니다"*"Section M"*) ok "O76 unmarked-comment 메시지" ;;
+  *) bad "O76 unmarked-comment 메시지" "무인 실행의 댓글은 …" "$(printf '%s' "$SE" | cut -c1-80)" ;; esac
+grep -q '"rule": "unmarked-comment", "action": "block"' "$LOGF" 2>/dev/null && ok "O77 발동 로그에 unmarked-comment 행" || bad "O77 unmarked-comment 행" "row" "$(tail -1 "$LOGF" 2>/dev/null)"
+expect_ou "O78 같은 파일 attended(GLD_UNATTENDED 없음) → 0 (사람 지시 대필이 정당)" 0 "gh pr comment 1 --body-file $UM/bare.md" -u GLD_UNATTENDED
+expect_ou "O79 <!-- guild:note --> 로 시작(앞 빈 줄) + 무인 → 0" 0 "gh pr comment 1 --body-file $UM/marked.md" GLD_UNATTENDED=1
+expect_ou "O80 파일 없음(경로 오타) + 무인 → 0 (gh 가 실패한다)" 0 "gh issue comment 1 --body-file $UM/nope.md" GLD_UNATTENDED=1
+expect_ou "O81 인라인 --body + 무인 → 이 모양 밖 → 0" 0 "gh issue comment 1 --body x" GLD_UNATTENDED=1
+expect_ou "O82 gh api …/issues/1/comments -F body=@bare + 무인 → 2" 2 "gh api repos/acme/app/issues/1/comments -F body=@$UM/bare.md" GLD_UNATTENDED=1
+expect_ou "O83 gh api …/issues/comments/9 -X PATCH --field body=@bare + 무인 → 2" 2 "gh api repos/acme/app/issues/comments/9 -X PATCH --field body=@$UM/bare.md" GLD_UNATTENDED=1
+expect_ou "O84 gh api …/issues/comments/9 -X PATCH -F body=@marked + 무인 → 0" 0 "gh api repos/acme/app/issues/comments/9 -X PATCH -F body=@$UM/marked.md" GLD_UNATTENDED=1
+expect_ou "O85 리뷰 댓글 …/pulls/1/comments -F body=@bare + 무인 → 이 모양 밖 → 0" 0 "gh api repos/acme/app/pulls/1/comments -F body=@$UM/bare.md" GLD_UNATTENDED=1
+expect_ou "O86 따옴표에 싸인 --body-file \"…bare.md\" + 무인 → 2" 2 "gh issue comment 1 --body-file \"$UM/bare.md\"" GLD_UNATTENDED=1
+expect_ou "O87 echo 속 언급(gh 를 실행하지 않음) + 무인 → 0" 0 "echo \"gh pr comment 1 --body-file $UM/bare.md\"" GLD_UNATTENDED=1
+# 코드 리뷰 1차 — Section M 정본 명령의 자연스러운 변형(잘라 읽기 넷)은 막고, 마커를 고르는 읽기(오탐 둘)는 통과
+SMC="gh api repos/acme/app/issues/1/comments --paginate --jq '.[] | select((.body // \"\") | contains(\"<!-- guild:\") | not) | "
+expect_o "O90 정본 + (.body // \"\")[0:300] → 2" 2 "${SMC}{id, body: (.body // \"\")[0:300]}'"
+expect_o "O91 정본 + ((.body // \"\") | .[0:300]) → 2" 2 "${SMC}{id, body: ((.body // \"\") | .[0:300])}'"
+expect_o "O92 정본 + (.body | gsub(…) | .[0:300]) → 2" 2 "${SMC}{id, body: (.body | gsub(\"\\n\";\" \") | .[0:300])}'"
+expect_o "O93 정본 + ' | head -c 2000 → 2" 2 "${SMC}{id, body}' | head -c 2000"
+expect_o "O94 오탐 대조: run 마커 startswith 선택 + 다른 필터의 | not + .body[0:500] → 0" 0 "gh api repos/acme/app/issues/1/comments --jq '.[] | select(.body|startswith(\"<!-- guild:sprint:run -->\")) | select(.user.login|test(\"bot\")|not) | .body[0:500]'"
+expect_o "O95 오탐 대조: auditor 마커 선택 + legacy 의 | not + .body[0:80] → 0" 0 "gh api repos/acme/app/issues/1/comments --jq '.[] | select((.body|contains(\"<!-- guild:auditor-record\")) and ((.body|contains(\"legacy\")) | not)) | .body[0:80]'"
+expect_ou "O96 gh api …/issues/comments/9 -XPATCH(붙여 씀) -F body=@bare + 무인 → 2" 2 "gh api repos/acme/app/issues/comments/9 -XPATCH -F body=@$UM/bare.md" GLD_UNATTENDED=1
+expect_ou "O97 gh issue comment -F <file>(짧은 꼴) bare + 무인 → 2" 2 "gh issue comment 1 -F $UM/bare.md" GLD_UNATTENDED=1
+expect_ou "O98 gh issue comment -F <file> marked + 무인 → 0" 0 "gh issue comment 1 -F $UM/marked.md" GLD_UNATTENDED=1
 # ── off-switch · 저장소 밖 cwd ──
 printf '{"gates":{"enabled":false}}' > .claude/guild/config.json
 expect_o "O39 gates off → #1774 모양도 0" 0 "$C1774"
 expect_o "O40 gates off → bodies-save 모양도 0" 0 "gh issue list --json number,body > /tmp/b.json"
+expect_o "O88 gates off → directive-slice 모양도 0" 0 "gh api --paginate repos/acme/app/issues/1/comments --jq '.[] | select((.body | test(\"<!-- guild:\")) | not) | {id, body: .body[0:300]}'"
+expect_ou "O89 gates off → unmarked-comment 모양도 0" 0 "gh pr comment 1 --body-file $UM/bare.md" GLD_UNATTENDED=1
 OFFR="$WORK/r"
 mkdir -p "$WORK/outside"; cd "$WORK/outside"
 R="$(pre_full "$C1774" CLAUDE_PROJECT_DIR="$OFFR")"
@@ -1455,7 +1579,7 @@ cd /; rm -rf "$WORK"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-GATE_MIN_CHECKS=256
+GATE_MIN_CHECKS=300
 if [ "$((PASS + FAIL))" -lt "$GATE_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${GATE_MIN_CHECKS}건)."
   exit 1

@@ -205,8 +205,9 @@ def pick_dep_pr(top, merged, m_head):
     return sorted(anc or merged, key=lambda p: p.get("mergedAt") or "")[-1]
 
 
-DECIDED_JQ = ('{state, labels: [.labels[].name], decided: ([.comments[].body | '
-              'select(contains("<!-- guild:closed-as-decided -->"))] | length)}')
+DONE_JQ = ('{state, stateReason, labels: [.labels[].name], decided: ([.comments[].body | '
+           'select(contains("<!-- guild:closed-as-decided -->"))] | length), '
+           'integrated: ([.comments[].body | select(contains("<!-- guild:integration:output -->"))] | length)}')
 
 
 def done_members(ctx, members, prs):
@@ -228,7 +229,17 @@ def done_members(ctx, members, prs):
     `<!-- guild:closed-as-decided -->` comment → Done, whatever the `stateReason` (a decision not
     to do the work is closed `not planned` and still finished). The marker is what tells it from a
     split parent — this script does not know S. ⚠ One JSON from `issue view --json comments`: a
-    `gh api --paginate --jq` count prints one number PER PAGE and `gh_json` would fail on it."""
+    `gh api --paginate --jq` count prints one number PER PAGE and `gh_json` would fail on it.
+
+    0.99.2 A5 — the third way: **a split parent that landed** — no PR of its own, `CLOSED` ·
+    `COMPLETED` · `guild:done` · at least one `<!-- guild:integration:output -->` comment.
+    `guild:done` is put on a split parent only after `dev.md` Phase 2c judged it clean, and
+    `CLOSED`/`COMPLETED` is the human closing it; a parent that passed 2c while its children's
+    PRs are still open (`guild:done` · `OPEN`) still belongs in In review. Measured #161: Done
+    by hand, `Needs human` left on the card, and no `done-cards` line ever named it. The same
+    one read (`DONE_JQ` — it holds both verdicts) carries `stateReason` and the integration
+    count. `retro.md` Phase 2's jq copy is the closed-as-decided half only — retro counts
+    decided closes, not landed parents."""
     out = []
     for n in members:
         if not prs.get(n):
@@ -237,16 +248,19 @@ def done_members(ctx, members, prs):
             # skipped (not Done), the rest are still judged.
             try:
                 got = gh_json(["issue", "view", str(n), "-R", ctx["repo"], "--json",
-                               "state,labels,comments", "--jq", DECIDED_JQ]) or {}
+                               "state,stateReason,labels,comments", "--jq", DONE_JQ]) or {}
             except EnvError as exc:
                 print("stack_sync: #%d closed-as-decided read failed — skipped: %s" % (n, exc),
                       file=sys.stderr)
                 continue
             if not isinstance(got, dict):
                 continue
-            if (str(got.get("state", "")).upper() == "CLOSED"
-                    and "guild:done" in (got.get("labels") or [])
-                    and isinstance(got.get("decided"), int) and got["decided"] >= 1):
+            closed_done = (str(got.get("state", "")).upper() == "CLOSED"
+                           and "guild:done" in (got.get("labels") or []))
+            if closed_done and isinstance(got.get("decided"), int) and got["decided"] >= 1:
+                out.append(n)
+            elif (closed_done and str(got.get("stateReason") or "").upper() == "COMPLETED"
+                    and isinstance(got.get("integrated"), int) and got["integrated"] >= 1):
                 out.append(n)
             continue
         if not any(p["state"] == "MERGED" for p in prs.get(n, [])):

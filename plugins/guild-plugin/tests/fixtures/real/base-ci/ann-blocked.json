@@ -1,0 +1,28 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [
+   614,
+   615,
+   616
+  ],
+  "check_run": 124275953567,
+  "gh_commands": [
+   "gh api repos/<o>/<r>/check-runs/<id>/annotations"
+  ],
+  "synthetic": [
+   "only annotation_level and message are kept"
+  ],
+  "fails_before": "base_ci.py is new in 0.99.2; the 0.98.7 prose order read annotations before the dedupe — #616's first three failures with annotations in stream order are two `Conventional 접두어 검증` duplicates and `수동 검증 …`, never `Analyze & Test`"
+ },
+ "annotations": [
+  {
+   "annotation_level": "failure",
+   "message": "The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings"
+  },
+  {
+   "annotation_level": "notice",
+   "message": "\"The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748\""
+  }
+ ]
+}

@@ -1,0 +1,137 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [
+   649,
+   161,
+   638,
+   656,
+   650,
+   651
+  ],
+  "snapshot_at": "2026-11-14T00:50:00Z",
+  "gh_commands": [
+   "gh issue view 161 --json state,stateReason,labels,comments",
+   "gh issue view 638 --json state,stateReason,labels",
+   "gh pr view 656/650/651 --json state,mergedAt,headRefName,closingIssuesReferences",
+   "gh project item-list (Guild board, Needs human)"
+  ],
+  "synthetic": [
+   "comment bodies are the marker line plus 'x'",
+   "repo normalized to acme/app",
+   "sprint649 is #649's member table reduced to the two members of this case"
+  ],
+  "fails_before": "confirmed 2026-11-14: 0.99.1 HEAD stack_sync --done-cards → `done-cards 638` (161 never listed); the supervisor builder/sweep pins are unchanged behaviour (HEAD passes)"
+ },
+ "members": [
+  {
+   "number": 161,
+   "base_deps": [],
+   "split": true,
+   "kind": "goal"
+  },
+  {
+   "number": 638,
+   "base_deps": [],
+   "split": false,
+   "kind": "goal"
+  }
+ ],
+ "prs_gh": [
+  {
+   "number": 656,
+   "state": "MERGED",
+   "mergedAt": "2026-11-12T05:30:10Z",
+   "headRefName": "feature/508-token-limit-notification",
+   "baseRefName": "main",
+   "reviewDecision": "",
+   "closingIssuesReferences": [
+    {
+     "number": 508,
+     "repository": {
+      "name": "app",
+      "owner": {
+       "login": "acme"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "number": 650,
+   "state": "MERGED",
+   "mergedAt": "2026-11-12T03:21:19Z",
+   "headRefName": "feature/507-notification-center-panel",
+   "baseRefName": "main",
+   "reviewDecision": "",
+   "closingIssuesReferences": [
+    {
+     "number": 507,
+     "repository": {
+      "name": "app",
+      "owner": {
+       "login": "acme"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "number": 651,
+   "state": "MERGED",
+   "mergedAt": "2026-11-13T12:04:19Z",
+   "headRefName": "fix/638-usage-tick-fake-async",
+   "baseRefName": "main",
+   "reviewDecision": "",
+   "closingIssuesReferences": [
+    {
+     "number": 638,
+     "repository": {
+      "name": "app",
+      "owner": {
+       "login": "acme"
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "labels_gh": [
+  {
+   "number": 638,
+   "state": "CLOSED",
+   "stateReason": "COMPLETED",
+   "labels": [
+    {
+     "name": "guild:done"
+    }
+   ]
+  }
+ ],
+ "supplement": {
+  "161": {
+   "number": 161,
+   "labels": [
+    {
+     "name": "guild:done"
+    },
+    {
+     "name": "type:feature"
+    },
+    {
+     "name": "area:notification"
+    }
+   ],
+   "state": "CLOSED",
+   "stateReason": "COMPLETED"
+  }
+ },
+ "comments": {
+  "161": [
+   "<!-- guild:children:output -->\nx",
+   "<!-- guild:integration:output -->\nx",
+   "<!-- guild:needs-human -->\nx",
+   "<!-- guild:integration:output -->\nx"
+  ]
+ }
+}

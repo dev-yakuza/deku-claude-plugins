@@ -10,6 +10,7 @@
 Read `language` from `.claude/guild/config.json` first; respond to the user in that language (`ko`/`ja`/`en`) for all messages. (Same convention as other `/gld` commands.)
 
 > **Bash**: the generated batch script is written to a file and run as **one** Bash call (background) — this is the sanctioned exception to `_bash_rules.md` atomic-bash (shell variable expansion inside the generated `.sh` is fine; the rule governs direct Bash-tool invocations, not an OS-level script). State/labels: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
+> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 
 > ⚠️ **Security**: each child runs with `--dangerously-skip-permissions` — bypasses all permission prompts and the sandbox in the child so test runners, commit hooks, `git push`, `gh pr create` run unattended. All tool calls are logged to `.claude/guild/.batch-logs/`. Use only when you accept unattended tool execution.
 

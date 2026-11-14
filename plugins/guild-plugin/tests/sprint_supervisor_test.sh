@@ -2198,6 +2198,124 @@ x15_run 2 >/dev/null
 w8eq "X15: complete windows → no 1000 read, no supplement, no pr view" \
   "$(x15_n '--limit 1000'):$(x15_n 'issue view'):$(x15_n 'pr view')" "0:0:0"
 
+# (1h) 0.99.2 Part B — real replays. Minimal copies of real cases (tests/fixtures/real/*.json —
+#      numbers, labels, states, branch names and SHAs as they were; no body, title or comment
+#      prose; the repo normalized to acme/app) run through the REAL code paths: the X15 region
+#      (completeness helpers + refresh_dag_input) → run.json → sprint_dag.py, board_sweep_merged,
+#      and children_pending/split_head_needs_human. The supervisor shell is not changed by
+#      0.99.2 — these pin what it does on the shapes that were measured.
+RR="$WORK/rr"; mkdir -p "$RR/bin"
+REAL="$HERE/fixtures/real"
+real_case() {   # real_case <name> <dir> — split one fixture into the files the fake gh serves
+  rm -rf "$2"; mkdir -p "$2/dag"; : > "$2/calls.txt"
+  "$PY" - "$REAL/$1.json" "$2" <<'PYR'
+import json, os, sys
+d = json.load(open(sys.argv[1], encoding="utf-8")); o = sys.argv[2]
+def w(n, v): json.dump(v, open(os.path.join(o, n), "w"))
+w("members.json", d.get("members", [])); w("dag/members.json", d.get("members", []))
+prs = list(d.get("prs_gh", []))
+f = d.get("prs_filler")
+if f:   # the 200-window filler is generated, never stored: chore/filler-9<n> holds no member token
+    nums = list(f.get("numbers", [])) + list(range(f["range"][0], f["range"][1] - 1, -1))
+    prs += [{"number": n, "state": f["state"], "mergedAt": f.get("mergedAt"),
+             "headRefName": f["headRefName"].replace("<n>", str(n)), "baseRefName": "main",
+             "reviewDecision": "", "closingIssuesReferences": []} for n in nums]
+w("prs.json", prs)
+w("labels.json", d.get("labels_gh", []))
+for n, v in (d.get("supplement") or {}).items():
+    w("iv_%s.json" % n, v)
+for k in ("children", "children_after", "children_closed"):
+    if k in d:
+        w(k + ".json", d[k])
+if "paused" in d:
+    open(os.path.join(o, "dag", "paused.txt"), "w").write("".join("%d\n" % n for n in d["paused"]))
+PYR
+}
+cat > "$RR/bin/gh" <<'GHRR'
+#!/bin/bash
+echo "$*" >> "$RR_DIR/calls.txt"
+J=""; prev=""; for a in "$@"; do [ "$prev" = "--jq" ] && J="$a"; prev="$a"; done
+case "$*" in
+  "pr list"*)                           cat "$RR_DIR/prs.json" ;;
+  "issue list"*"guild:child"*)          jq -r "$J" "$RR_DIR/${RR_CHILDREN:-children}.json" ;;
+  "issue list"*)                        cat "$RR_DIR/labels.json" ;;
+  "issue view"*"--json number,labels"*) cat "$RR_DIR/iv_$3.json" 2>/dev/null ;;
+  "pr view"*)                           echo '{}' ;;
+  *)                                    echo '[]' ;;
+esac
+GHRR
+chmod +x "$RR/bin/gh"
+awk '/^board_sweep_merged\(\) \{/{f=1} f{print} f&&/^}$/{exit}' "$TPL" > "$RR/sweep.sh"
+awk '/^children_pending\(\) \{/{f=1} f{print} /^split_head_needs_human\(\) \{/{g=1} g&&/^}$/{exit}' "$TPL" > "$RR/split.sh"
+rr_refresh() {  # rr_refresh <dir> [<sup-dir>] — one refresh_dag_input over the case
+  RR_DIR="$1" PATH="$RR/bin:$PATH" D="$1/dag" OWNER_REPO=acme/app PY="$PY" SUP="${2:-$1/no-sup}" \
+    DEFAULT_BRANCH=main "$SH" -c 'set -uo pipefail; . "$1"; refresh_dag_input || echo REFRESH-FAILED' _ "$X15/fn.sh" 2>&1
+}
+rr_mode() { "$PY" "$HERE/../skills/gld/commands/atoms/sprint_dag.py" --input "$1/dag/run.json" --mode "$2" 2>/dev/null; }
+rr_key() { "$PY" -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])).get(sys.argv[2]), sort_keys=True, separators=(",", ":")))' "$1/dag/run.json" "$2"; }
+rr_sweep() { D="$1/dag" PY="$PY" BOARD_NUMBER=7 "$SH" -c '. "$1"; board_col() { echo "board_col $*"; }; board_sweep_merged' _ "$RR/sweep.sh" 2>&1 | tr '\n' ' '; }
+rr_split() { RR_DIR="$1" RR_CHILDREN="${3:-children}" PATH="$RR/bin:$PATH" OWNER_REPO=acme/app "$SH" -c '. "$1"; '"$2" _ "$RR/split.sh" 2>&1; }
+rr_lbl() {      # rr_lbl <dir> <n> <python expr on the label row r> — vary one real row
+  "$PY" - "$1/labels.json" "$2" "$3" <<'PYV'
+import json, sys
+p, n, ex = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+rows = json.load(open(p))
+for r in rows:
+    if r["number"] == n:
+        exec(ex)
+json.dump(rows, open(p, "w"))
+PYV
+}
+[ -s "$RR/sweep.sh" ] && [ -s "$RR/split.sh" ] && grep -q '^split_head_needs_human() {' "$RR/split.sh" \
+  && ok "B: board_sweep_merged and children_pending + split_head_needs_human are cut from the template" \
+  || bad "B: region cuts" "sweep.sh / split.sh"
+# B1 — Z2: #629 CLOSED/COMPLETED (PR #632 merged 2 s earlier) still carrying guild:qa + guild:needs-human
+real_case z2-629 "$RR/z2"; rr_refresh "$RR/z2" >/dev/null
+w8eq "B1(Z2) #629 COMPLETED → run.json closed [629]" "$(rr_key "$RR/z2" closed)" "[629]"
+w8eq "B1(Z2) …terminal has no 629" "$(rr_key "$RR/z2" terminal | grep -c '"629"' | tr -d ' ')" "0"
+w8eq "B1(Z2) …--mode blocked is empty" "$(rr_mode "$RR/z2" blocked)" ""
+w8eq "B1(Z2) …624 starts from the default branch" "$(rr_mode "$RR/z2" base | grep '^624 ')" "624 DEFAULT"
+real_case z2-629 "$RR/z2"; rr_lbl "$RR/z2" 629 'r["stateReason"] = "NOT_PLANNED"'; rr_refresh "$RR/z2" >/dev/null
+w8eq "B1(Z2) variant NOT_PLANNED → 624 dep-needs-human:#629" "$(rr_mode "$RR/z2" blocked)" "624 dep-needs-human:#629"
+real_case z2-629 "$RR/z2"; rr_lbl "$RR/z2" 629 'r["state"] = "OPEN"; r["stateReason"] = ""'; rr_refresh "$RR/z2" >/dev/null
+w8eq "B1(Z2) variant OPEN (reopened) → 624 dep-needs-human:#629" "$(rr_mode "$RR/z2" blocked)" "624 dep-needs-human:#629"
+# B2 — Z6: #628 closed as decided (no PR, guild:done), made-up downstream #9001
+real_case z6-628 "$RR/z6"; rr_refresh "$RR/z6" >/dev/null
+w8eq "B2(Z6) #628 COMPLETED → closed [628] · closed_done [628]" "$(rr_key "$RR/z6" closed)|$(rr_key "$RR/z6" closed_done)" "[628]|[628]"
+w8eq "B2(Z6) …9001 DEFAULT, nothing blocked" "$(rr_mode "$RR/z6" base | grep '^9001 ')|$(rr_mode "$RR/z6" blocked)" "9001 DEFAULT|"
+w8eq "B2(Z6) …the sweep moves 628 to Done" "$(rr_sweep "$RR/z6")" "board_col 628 done "
+real_case z6-628 "$RR/z6"; rr_lbl "$RR/z6" 628 'r["stateReason"] = "NOT_PLANNED"'
+git init -q "$RR/z6/sup" && git -C "$RR/z6/sup" -c user.email=t@t -c user.name=t commit -q --allow-empty -m x \
+  && git -C "$RR/z6/sup" branch chore/628-close-as-decided
+rr_refresh "$RR/z6" "$RR/z6/sup" >/dev/null
+w8eq "B2(Z6) variant NOT_PLANNED → closed [] · closed_done [628]" "$(rr_key "$RR/z6" closed)|$(rr_key "$RR/z6" closed_done)" "[]|[628]"
+w8eq "B2(Z6) …9001 BLOCKED:dep-no-branch even with a local chore/628-… branch" "$(rr_mode "$RR/z6" base | grep '^9001 ')" "9001 BLOCKED:dep-no-branch"
+w8eq "B2(Z6) …the sweep still moves 628 to Done" "$(rr_sweep "$RR/z6")" "board_col 628 done "
+# B4 — R2: epic #161 PAUSED on child #508 (needs-human), #161 OUTSIDE the 200 label window
+real_case r2-161 "$RR/r2"
+w8eq "B4(R2) split_head_needs_human 161 → 508 (smallest outstanding child, OPEN + needs-human)" "$(rr_split "$RR/r2" 'split_head_needs_human 161')" "508"
+w8eq "B4(R2) children_pending 161 → 5" "$(rr_split "$RR/r2" 'children_pending 161')" "5"
+w8eq "B4(R2) after 10:02Z (#508 needs-human removed) → nothing (re-invoke)" "$(rr_split "$RR/r2" 'split_head_needs_human 161' children_after)" ""
+w8eq "B4(R2) #508 CLOSED (R1 shape) → nothing (re-invoke so dev 2b cleans it up)" "$(rr_split "$RR/r2" 'split_head_needs_human 161' children_closed)" ""
+rr_refresh "$RR/r2" >/dev/null
+w8eq "B4(R2) builder + paused.txt → terminal {161: needs-human}" "$(rr_key "$RR/r2" terminal)" '{"161":"needs-human"}'
+w8eq "B4(R2) …9002 dep-needs-human:#161" "$(rr_mode "$RR/r2" blocked)" "9002 dep-needs-human:#161"
+w8eq "B4(R2) …the supplement is exactly one issue view 161" "$(grep '^issue view' "$RR/r2/calls.txt" | tr '\n' ' ')" "issue view 161 --repo acme/app --json number,labels,state,stateReason "
+real_case r2-161 "$RR/r2"; rm -f "$RR/r2/dag/paused.txt"; rr_refresh "$RR/r2" >/dev/null
+w8eq "B4(R2) no paused.txt → nothing blocked" "$(rr_mode "$RR/r2" blocked)" ""
+# B8 — X15: word_app #1045 outside the label window, the PR window complete (minimum #1019 < #1045)
+real_case x15-1045 "$RR/x15"; rr_refresh "$RR/x15" >/dev/null
+w8eq "B8(X15) PR window complete → no --limit 1000 read" "$(grep -c -- '--limit 1000' "$RR/x15/calls.txt" | tr -d ' ')" "0"
+w8eq "B8(X15) …the supplement is exactly issue view 1045 and 1060" "$(grep '^issue view' "$RR/x15/calls.txt" | awk '{print $3}' | sort | tr '\n' ' ')" "1045 1060 "
+w8eq "B8(X15) …terminal {1045: needs-human, 1780: done}" "$(rr_key "$RR/x15" terminal)" '{"1045":"needs-human","1780":"done"}'
+w8eq "B8(X15) …1045 and 1060 stack on refactor/#1780-restore-guard-unify (the real log line)" \
+  "$(rr_mode "$RR/x15" base | grep -E '^(1045|1060) ' | tr '\n' ' ')" "1045 refactor/#1780-restore-guard-unify 1060 refactor/#1780-restore-guard-unify "
+# B9 — #161's board card: the supervisor's builder and sweep move only #638 (A5 is stack_sync's;
+#      the supervisor is unchanged — a run ends before the human closes the parent)
+real_case board-161 "$RR/b9"; rr_refresh "$RR/b9" >/dev/null
+w8eq "B9 builder: closed [161, 638] · closed_done [] (a split parent is never closed_done)" "$(rr_key "$RR/b9" closed)|$(rr_key "$RR/b9" closed_done)" "[161,638]|[]"
+w8eq "B9 sweep: only board_col 638 done" "$(rr_sweep "$RR/b9")" "board_col 638 done "
+
 # (1g) 0.98.4 X5 — the cost total is printed with two decimals, only when it is number-shaped.
 CST="$WORK/cost"; mkdir -p "$CST/run"
 awk '/^TOTAL_IN=0; TOTAL_OUT=0/{f=1} f{print} f&&/^esac$/{exit}' "$TPL" > "$CST/loop.sh"
@@ -4845,6 +4963,26 @@ else
   if [ "$RC11" = "71" ]; then ok "T11 낡은 .rc 를 지우고, 부재 시 71(불명) — 0 이 아니다"
   else bad "T11 낡은 .rc 삭제 + 부재 시 71" "런처가 $RC11 을 냈다 (0 이면 낡은 rc 를 읽어 죽은 런을 성공으로 보고한다)"; fi
   rm -rf "$W11"
+
+  # ④ 0.99.2 A7 — **이번 실행의 시작 오프셋부터** 흘린다. supervisor.log 는 O_APPEND 로 열리고
+  #    지워지지 않는다 — offset 0 부터 읽으면 재실행 때 이전 run 의 배너(`Stop: kill <옛 pid>`)가
+  #    먼저 흘러나왔다(실측 word_app run 2). 같은 tracker 로 두 번 띄운다.
+  W12="$(mktemp -d)"; mkdir -p "$W12/.claude/guild/.sprint-logs/999"
+  printf '#!/usr/bin/env bash
+echo RUN-1
+' > "$W12/.claude/guild/.gld-sprint-999.sh"
+  OUT12A="$(run_capped 20 "$PY" "$SPAWN" --human-repo "$W12" --tracker 999 --poll 0.2 2>/dev/null)"
+  printf '#!/usr/bin/env bash
+echo RUN-2
+' > "$W12/.claude/guild/.gld-sprint-999.sh"
+  OUT12B="$(run_capped 20 "$PY" "$SPAWN" --human-repo "$W12" --tracker 999 --poll 0.2 2>/dev/null)"
+  LOG12="$W12/.claude/guild/.sprint-logs/999/supervisor.log"
+  case "$OUT12A" in *RUN-1*) ok "T11(A7) 첫 실행(빈 로그)은 그대로 흘린다" ;; *) bad "T11(A7) 첫 실행" "stdout 에 RUN-1 없음: [$OUT12A]" ;; esac
+  case "$OUT12B" in *RUN-1*) bad "T11(A7) 재실행 stdout 에 이전 run 이 없다" "RUN-1 이 다시 흘렀다: [$OUT12B]" ;;
+    *RUN-2*) ok "T11(A7) 재실행 stdout 에 이전 run 이 없다 · 이번 run 은 있다" ;;
+    *) bad "T11(A7) 재실행 stdout" "RUN-2 없음: [$OUT12B]" ;; esac
+  [ "$(grep -c '^RUN-[12]$' "$LOG12" 2>/dev/null | tr -d ' ')" = 2 ] && ok "T11(A7) 로그 파일에는 두 run 이 다 남는다"     || bad "T11(A7) 로그 보존" "$(cat "$LOG12" 2>/dev/null | tr '\n' '|')"
+  rm -rf "$W12"
 fi
 
 # ── T12: 진행 기록(marker) 조회가 여러 페이지여도 깨지지 않는다 ─────────────────
@@ -4887,7 +5025,7 @@ mw_case "T12f 깨진 JSON 은 실패" "[{\"id\": 1,\n" FAIL
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=413
+SUP_MIN_CHECKS=443
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

@@ -50,7 +50,7 @@ member**; see Phase 0 and Phase 3 step 2c.
 > the sanctioned exception (`:85`) — variable expansion, redirection and heredocs *inside* it
 > are fine; the rule governs the Bash tool call (`bash <path>`), not what a script does once
 > running. State/labels/unattended: `_handoff.md` Sections A/H. Graph · base · membership:
-> `_sprint_dag.md`. Base injection into the spine: `_execute_spine.md` (`<base>` resolution).
+> `_sprint_dag.md`. Base injection into the spine: `_execute_spine.md` (`<base>` resolution). **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: `config.language`; machine tokens stay ASCII.
 
 > ⚠️ **Security**: each child runs `claude -p --dangerously-skip-permissions` — all permission
@@ -79,16 +79,8 @@ member**; see Phase 0 and Phase 3 step 2c.
 | Plan record committed | `git status --porcelain -uall -- docs/specs/` — any line under `docs/specs/sprint-<tracker number>/` (`-uall`: without it a never-committed `docs/specs/` collapses to one `?? docs/specs/` line). `sprint-draft/` is an uncreated proposal and a pre-0.95 `sprint-<date>/` is not this — neither counts | warn, once — *"plan 기록이 커밋되지 않았습니다: <paths> — 커밋해 두지 않으면 잊기 쉽습니다"*. Not a block: no worktree reads them (`sprint plan` Phase 6 step 6 commits them, or says why it did not) |
 | **Base CI** (0.98.7) | *Base CI* below — the default branch's check-runs, or the last merged PR's head when the branch has none | warn — the line below |
 
-**Base CI** — is the default branch already red? (Measured #630: the base was red on one test, and six members paused in qa on that same red, one after another.) Each its own Bash call:
-1. `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>` (Phase 0 has no other read of it — Phase 3's is later).
-2. `gh api repos/<owner>/<repo>/commits/<d>/check-runs --paginate --jq '.check_runs[] | {id, name, conclusion, annotations: .output.annotations_count}'` (`qa.md`'s stream form — `--paginate` reads past the 30-run page).
-3. **No run at all** (CI runs on PRs only — one-man-company) → the last merged PR:
-   `gh pr list --repo <owner>/<repo> --state merged --base <d> --limit 20 --json number,headRefOid,mergedAt --jq 'if length == 0 then null else (max_by(.mergedAt) | {number, headRefOid}) end'`
-   (the list is in creation order, so `--limit 1` may not be the last merge — the largest `mergedAt` of 20); `null` → Base CI `없음`, done. Otherwise the call of 2 for `commits/<headRefOid>/check-runs`.
-4. For each run with `conclusion == "failure"` and `annotations > 0` (at most 3), `qa.md`'s annotation call — a `was not started` message is `ci-blocked`, kept apart from red.
-
-**Which runs count**: one per check **name** — when a name appears more than once (a re-run), keep the run with the **highest `id`** (the latest attempt; measured one-man-company PR #647: an earlier failed attempt beside its green re-run). **Which verdict**: `qa.md` Step 2's *Which one* rule over those runs — conclusion `failure` · `timed_out` · `cancelled` · `action_required` → red (a never-started one → `ci-blocked`); else any `null` → still running, read as `green` with `(진행 중)`; else green (`neutral` and `skipped` are not red). The result always **names the checks it judged**, because a default branch may carry only non-code checks (measured word_app main: `validate_pr` skipped, `update_release_draft` success — `green` there says nothing about the tests):
-Result: `green(<checks…>)` · `red(<checks…>) (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>)` · `ci-blocked(<checks…>)` · `없음` · `unavailable` (a call failed). Red → the warning
+**Base CI** — is the default branch already red? (Measured #630: the base was red on one test, and six members paused in qa on that same red, one after another.) **One call**: `python3 <<SKILL_DIR>>/commands/atoms/base_ci.py --repo <owner>/<repo>` — print its line verbatim as the Phase 0 row's result (`Base CI: green(Analyze & Test, Conventional 접두어 검증, 수동 검증 신선도·케이스 커버리지 검사 (PR 브랜치 스코프))` — never paraphrased; measured #649 `green(PR #647 기준)`, word_app no line). The script reads the default branch's check-runs, and only when it has none the last merged PR's head (word_app main has runs — reading the last merged PR there was a wasted call); it keeps one run per check name (the highest `id` — measured one-man-company PR #616: `Conventional 접두어 검증` three times; word_app main: `Dependabot` four times) **before** reading at most three failures' annotations, and judges by `qa.md` Step 2's *Which one* rule (its docstring holds the order and the rule). The result always **names the checks it judged**, because a default branch may carry only non-code checks (measured word_app main: `validate_pr` skipped, `update_release_draft` success — `green` there says nothing about the tests):
+Result: `green(<checks…>)` · `green(<checks…>) (진행 중)` · `red(<checks…>) (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>)` · `ci-blocked(<checks…>)` · `없음` · `unavailable` (a call failed; exit 65) — red mixed with never-started checks adds a second line `ci-blocked: <checks…>`, printed as it is too. Red → the warning
 `기본 브랜치 CI red: <checks…> (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>) — 멤버마다 같은 red 로 사람 대기가 될 수 있습니다. 고치는 멤버가 있으면 다른 멤버가 그 위에 쌓였는지 확인하세요(plan 의 (a) 의존).`
 shown with the other warnings before the one ask below — the human chooses to start or stop (`run` never starts unattended). `sprint plan` Phase 2 runs the same check (`BASE CI:`). The verdict of any stage does not change.
 
@@ -248,7 +240,7 @@ ask and do not start: return `OK: unattended — starting a sprint run requires 
    two that cannot be re-derived; enumerate them explicitly when you write this.
 
    ⚠⚠ **UPDATE THE EXISTING COMMENT IN PLACE — never post a new one.** Use
-   `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH -f body=@<file>`. If the tracker
+   `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH -F body=@<file>` (`-F`: only it reads `@<file>` — `-f` sends the text `@<file>` and the marker is gone). If the tracker
    has **more than one** comment carrying `<!-- guild:sprint:run -->`, take the one with the
    **LOWEST id**. That is not a preference: the supervisor does exactly this
    (`target = min(found, key=id)`, so a run's history is not orphaned), and a new comment

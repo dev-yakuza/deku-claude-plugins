@@ -1,0 +1,358 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [
+   161,
+   506,
+   507,
+   508,
+   509,
+   510,
+   511,
+   512
+  ],
+  "snapshot_at": "2026-11-11T05:00:00Z",
+  "gh_commands": [
+   "gh api repos/<o>/<r>/issues/<n>/events (label history of #506–#512, rebuilt at 05:00Z)",
+   "gh issue view 161 --json number,labels,state,stateReason"
+  ],
+  "synthetic": [
+   "#9002 is a made-up downstream member of #161 (#161's sprint had none)",
+   "child bodies are the one line 'Parent Issue: #161'",
+   "the label window holds only #9002 — #161 is outside it (the real window's minimum was #309)",
+   "variants after (10:02Z, #508 needs-human removed → guild:test) and closed (#508 CLOSED, R1 shape) are in children_after / children_closed"
+  ],
+  "fails_before": "confirmed 2026-11-14: f96f64c (0.98.3) supervisor builder — terminal {} and 9002 not blocked (no supplement read for a parent outside the window); c127023~1 blocks but reads `--json number,labels` only; HEAD passes"
+ },
+ "members": [
+  {
+   "number": 161,
+   "base_deps": [],
+   "split": true,
+   "kind": "goal"
+  },
+  {
+   "number": 9002,
+   "base_deps": [
+    161
+   ],
+   "split": false,
+   "kind": "other"
+  }
+ ],
+ "prs_gh": [],
+ "labels_gh": [
+  {
+   "number": 9002,
+   "state": "OPEN",
+   "stateReason": "",
+   "labels": []
+  }
+ ],
+ "supplement": {
+  "161": {
+   "number": 161,
+   "labels": [
+    {
+     "name": "guild:children"
+    },
+    {
+     "name": "type:feature"
+    },
+    {
+     "name": "area:notification"
+    }
+   ],
+   "state": "OPEN",
+   "stateReason": ""
+  }
+ },
+ "paused": [
+  161
+ ],
+ "children": [
+  {
+   "number": 512,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:design"
+    }
+   ]
+  },
+  {
+   "number": 511,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:design"
+    }
+   ]
+  },
+  {
+   "number": 510,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:design"
+    }
+   ]
+  },
+  {
+   "number": 509,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:analyze"
+    }
+   ]
+  },
+  {
+   "number": 508,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:execute"
+    },
+    {
+     "name": "guild:needs-human"
+    }
+   ]
+  },
+  {
+   "number": 507,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:done"
+    }
+   ]
+  },
+  {
+   "number": 506,
+   "state": "CLOSED",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:done"
+    }
+   ]
+  }
+ ],
+ "children_after": [
+  {
+   "number": 512,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:design"
+    }
+   ]
+  },
+  {
+   "number": 511,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:design"
+    }
+   ]
+  },
+  {
+   "number": 510,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:design"
+    }
+   ]
+  },
+  {
+   "number": 509,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:analyze"
+    }
+   ]
+  },
+  {
+   "number": 508,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:test"
+    }
+   ]
+  },
+  {
+   "number": 507,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:done"
+    }
+   ]
+  },
+  {
+   "number": 506,
+   "state": "CLOSED",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:done"
+    }
+   ]
+  }
+ ],
+ "children_closed": [
+  {
+   "number": 512,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:design"
+    }
+   ]
+  },
+  {
+   "number": 511,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:design"
+    }
+   ]
+  },
+  {
+   "number": 510,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:design"
+    }
+   ]
+  },
+  {
+   "number": 509,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:analyze"
+    }
+   ]
+  },
+  {
+   "number": 508,
+   "state": "CLOSED",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:qa"
+    },
+    {
+     "name": "guild:needs-human"
+    }
+   ]
+  },
+  {
+   "number": 507,
+   "state": "OPEN",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:done"
+    }
+   ]
+  },
+  {
+   "number": 506,
+   "state": "CLOSED",
+   "body": "Parent Issue: #161",
+   "labels": [
+    {
+     "name": "guild:child"
+    },
+    {
+     "name": "guild:done"
+    }
+   ]
+  }
+ ]
+}

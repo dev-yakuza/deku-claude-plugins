@@ -7,6 +7,7 @@
 > **Test vs QA (distinct)**: `test` = tester, automated correctness proof (white-box, AC-driven, verify gate). **QA** = qa role, holistic quality (black-box, user flows, exploratory, E2E, usability). QA builds on test's coverage; it does not repeat it.
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/handoff: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
+> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K); sub-agent prompts carry that instruction.
 
 ---

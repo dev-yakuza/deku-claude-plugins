@@ -1,0 +1,47 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [
+   506,
+   507,
+   508,
+   639,
+   648
+  ],
+  "snapshot_at": "2026-11-14T00:50:00Z",
+  "gh_commands": [
+   "gh api repos/<o>/<r>/issues/<n>/comments --paginate"
+  ],
+  "synthetic": [
+   "finding text is 'placeholder'; the record shapes are the real ones (plain token at line start, disposition: variant, role-axis line, legacy prose block, clean block, violation comment, a non-auditor comment)",
+   "the backtick- and bold-wrapped tokens of record 2 are made up — real records no longer wrap tokens"
+  ],
+  "fails_before": "no defect — equivalence: the 0.99.2 `[96] | implode` jq gives the same object as the old six-character escape form and the decoded form (HEAD has only the escape form)"
+ },
+ "comments": [
+  {
+   "id": 1,
+   "body": "<!-- guild:auditor:execute -->\n### audit-record 1\n- looped-back · MINOR · spec · lib/a.dart:1 — placeholder\n- recorded · MINOR · standards · lib/b.dart:2 — placeholder\nrole-axis: disposition: fixed (not counted)\n<!-- /guild:auditor:execute -->"
+  },
+  {
+   "id": 2,
+   "body": "<!-- guild:auditor:execute -->\n### audit-record 2\n- `fixed` · MINOR · spec · lib/a.dart:1 — placeholder\n- **recorded** · MAJOR · spec · lib/c.dart:3 — placeholder\n- finding text · disposition: `dismissed`\n<!-- /guild:auditor:execute -->"
+  },
+  {
+   "id": 3,
+   "body": "<!-- guild:auditor:execute -->\n### audit-record 3\nfindings: none\nrole-axis: placeholder\n<!-- /guild:auditor:execute -->"
+  },
+  {
+   "id": 4,
+   "body": "<!-- guild:auditor:execute -->\n### audit-record 4\nold prose record mentioning fixed in a sentence\n<!-- /guild:auditor:execute -->"
+  },
+  {
+   "id": 5,
+   "body": "<!-- guild:auditor-violation -->\nplaceholder"
+  },
+  {
+   "id": 6,
+   "body": "<!-- guild:qa:output -->\n- fixed · not an auditor record"
+  }
+ ]
+}

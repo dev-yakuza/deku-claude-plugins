@@ -1,0 +1,36 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [
+   657,
+   647,
+   617
+  ],
+  "snapshot_at": "2026-11-14T00:50:00Z",
+  "gh_commands": [
+   "gh pr list --repo <o>/<r> --state merged --base main --limit 20 --json number,headRefOid,mergedAt"
+  ],
+  "synthetic": [
+   "mergedAt values are made up, in merge order — the largest is #657 (today's real last merge)",
+   "headRefOid shortened to the real 8-char prefix"
+  ],
+  "fails_before": "base_ci.py is new in 0.99.2; the 0.98.7 prose order read annotations before the dedupe — #616's first three failures with annotations in stream order are two `Conventional 접두어 검증` duplicates and `수동 검증 …`, never `Analyze & Test`"
+ },
+ "prs": [
+  {
+   "number": 657,
+   "headRefOid": "3cc675c4",
+   "mergedAt": "2026-11-11T11:00:00Z"
+  },
+  {
+   "number": 647,
+   "headRefOid": "01b62094",
+   "mergedAt": "2026-11-08T07:44:03Z"
+  },
+  {
+   "number": 617,
+   "headRefOid": "abbdcc4e",
+   "mergedAt": "2026-11-02T13:30:00Z"
+  }
+ ]
+}

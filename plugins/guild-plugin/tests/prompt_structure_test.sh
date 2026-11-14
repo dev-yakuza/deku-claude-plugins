@@ -871,7 +871,7 @@ need = {
         "**Never `--no-verify`.**"],
     8: ["git push <remote> HEAD:<merge>", "timeout", "git ls-remote <remote> <merge>",
         "must equal the commit just\n      made", "git rev-parse HEAD", "git reset --soft HEAD~1",
-        "git restore --staged -- <path>", "**Never `--force`, never pull or rebase"],
+        "git restore --staged -- <path>", "**Never `--force`; never pull or rebase on its own — on a"],
 }
 for n, items in need.items():
     body = sub(n)
@@ -888,7 +888,7 @@ if "**Retry by hand**" not in st:
     errs.append("no retry line")
 # a forbidden spelling may appear only right after "never"/"Never" (with an optional backtick)
 for bad in (r"git add \.", r"git add -A", r"--all\b", r"--no-verify", r"--force", r"(?<![\w-])-a(?:m)?\b",
-            r"git reset --(?:hard|mixed|merge|keep)", r"git stash", r"git push`", r"git pull",
+            r"git reset --(?:hard|mixed|merge|keep)", r"git stash", r"git push`", r"git pull(?! --ff-only| --no-rebase)",
             r"git diff -- \.claude", r"Behind → (?!stop)", r"--amend", r"git reset (?!--soft)",
             r"git push (?!<remote> HEAD:<merge>)"):
     for m in re.finditer(bad, st):
@@ -2158,8 +2158,9 @@ for f in sorted(glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)
             problems.append("%s:%d names %s, not in Section C" % (rel, n, ",".join(sorted(toks - TABLE))))
 # ⚠ 라운드 9 의 규칙 ①(바닥선은 측정값과 같게)이 여기만 빠져 있었다 — 8번째 축소 사이트가
 #   생겨도 통과했다. 0.98.6 Y3: sprint plan 의 PO 프롬프트(규칙 밖 부분 읽기 → `BLOCKED: partial read`)가 8번째.
-if sites != 8:
-    problems.append("found %d reduction sites, expected exactly 8 — one appeared or was dropped"
+#   0.99.2 A16: developer 프롬프트의 게이트 거부 줄(`BLOCKED: gate INV2 — …`)이 9번째.
+if sites != 9:
+    problems.append("found %d reduction sites, expected exactly 9 — one appeared or was dropped"
                     % sites)
 print("OK %d" % sites if not problems else "PROBLEMS " + " | ".join(problems))
 PYE
@@ -3914,7 +3915,7 @@ for i in 1 2 3 4; do
     '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"gh auth status"}},{"type":"tool_use","name":"Bash","input":{"command":"gh auth switch"}}]}}' \
     > "$ST_HOME/.claude/projects/p/s$i.jsonl"
 done
-ST_RUN="$(HOME="$ST_HOME" "$PY" -B "$GLD/commands/atoms/scan_transcript.py" --repo-cwd /st/repo 2>/dev/null | "$PY" -c '
+ST_RUN="$(env -u CLAUDE_CONFIG_DIR HOME="$ST_HOME" "$PY" -B "$GLD/commands/atoms/scan_transcript.py" --repo-cwd /st/repo 2>/dev/null | "$PY" -c '
 import json, sys
 t = sys.stdin.read(); d = json.loads(t.split(">>> RESULT <<<", 1)[1])
 sig = d.get("signals") or []
@@ -4045,7 +4046,7 @@ hasfx "spine(W3): 줄 형식" "$P3_SP" '- <looped-back|fixed|recorded|dismissed>
 hasfx "spine(W3): 장식 없이" "$P3_SP" 'and is written **bare** — no backticks, no'
 hasfx "spine(W3): 역할 축은 토큰 금지" "$P3_SP" 'starts `role-axis: <role> <verdict> — <reason>` and never uses the four tokens'
 hasfx "_handoff(W3): K 에 위치 규칙" "$P3_HO" 'a disposition token is written bare right after `- ` at column 0 of its finding line'
-hasfx "retro(W3): 위치 접두 정규식(줄 단위)" "$P3_RETRO" '($b | split("\n")) as $L | ("^- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}([^-A-Za-z0-9_]|$)") as $s'
+hasfx "retro(W3→A12): 위치 접두 정규식(줄 단위) — 백틱은 [96] | implode" "$P3_RETRO" '($b | split("\n")) as $L | ("^- [" + ([96] | implode) + "*]{0,2}") as $p | ("[" + ([96] | implode) + "*]{0,2}([^-A-Za-z0-9_]|$)") as $s'
 hasfx "retro(W3): loose 필드(낱말 분할)" "$P3_RETRO" 'loose: ([$b | splits("[^-A-Za-z0-9_]+")] | map(select(. == "looped-back" or . == "fixed" or . == "recorded" or . == "dismissed")) | length)'
 # 0.98.5: gh --jq 는 gojq(RE2)  (범위: 한 줄 `--jq '…'`/`--jq "…"` 형태 — Python argv·여러 줄 식은 보지 않음) — 룩어라운드·역참조를 거부해 호출이 객체 없이 오류로 끝난다
 #   (실측 0.98.4: word_app #1738·#1764 retro 둘 다). 플러그인 안 모든 --jq 식에서 금지.
@@ -4320,7 +4321,7 @@ hasfx "qa(Y1): 마커 밖에 줄을 끼우지 않음" "$P6_QA" 'Insert no line o
 hasfx "_execute_spine(Y1): PR 본문 PATCH (2) 에 구절" "$P6_SP" 'everything outside the markers preserved byte-for-byte — by the Write/Edit tool'
 hasfx "_execute_spine(Y1): 증거 파일" "$P6_SP" '- Body: the raw runner summary line(s) the developer captured, written to the evidence file — by the Write/Edit tool'
 hasfx "_handoff(Y1): Section E 증거 파일" "$P6_HO" 'the evidence file is written and updated — by the Write/Edit tool'
-hasfx "init(Y1): P4 요약에 PreToolUse 텍스트 가드" "$P6_INIT" '+ PreToolUse 가 명령 줄 텍스트의 백틱 치환·Issue 본문 묶음 저장을 막음 (`shell-text` · `bodies-save`)'
+hasfx "init(Y1): P4 요약에 PreToolUse 텍스트 가드" "$P6_INIT" '+ PreToolUse 가 명령 줄 텍스트의 백틱 치환·Issue 본문 묶음 저장·마커 없는 댓글 잘라 읽기·무인 실행의 마커 없는 댓글을 막음 (`shell-text` · `bodies-save` · `directive-slice` · `unmarked-comment`)'
 hasfx "_invariants(Y1): off-switch 문장에 텍스트 가드 — 커밋 포함 모든 호출" "$P6_INV" 'whether the separate Bash text guard refuses any Bash call, a commit too — see the gate'"'"'s limits below) —'
 hasfx "_invariants(Y1): 텍스트 가드 불릿 — 커밋 검사 전 모든 호출" "$P6_INV" '  every Bash call, a commit too, before the commit check (0.98.6): it refuses a backtick the shell would run as a command'
 lacksfx "_invariants(Y1): 커밋 아닌 호출만이라는 옛 문구(1)" "$P6_INV" 'refuses a non-commit call'
@@ -4329,8 +4330,8 @@ hasfx "gate(Y1): 거부 함수 docstring — 커밋 포함 모든 호출" "$GLD/
 lacksfx "gate(Y1): 커밋 아닌 호출만이라는 옛 docstring" "$GLD/gates/gate_precommit.py" 'Deny a non-commit Bash call'
 hasfx "evolve(Y7): gh repo view 실패도 원격 확인 불가" "$P6_EVO" '`gh repo view` fails (a non-GitHub remote, no `gh` auth) or the fetch fails → one line'
 hasfx "_invariants(Y1): 게이트 한계에 텍스트 가드 불릿" "$P6_INV" '- Separate from the commit gate, the same `PreToolUse(Bash)` hook runs a **Bash text guard** on'
-hasfx "evolve(Y1): rule HR 에서 shell-text·bodies-save 제외" "$P6_EVO" 'The Bash text guard'"'"'s `shell-text` and `bodies-save` rows are excluded the same way'
-hasfx "audit(Y1): rule health 에서 shell-text·bodies-save 제외" "$P6_AUD" 'nor the Bash text guard'"'"'s `shell-text`/`bodies-save` rows, which are universal-safety rules like them'
+hasfx "evolve(Y1): rule HR 에서 shell-text·bodies-save 제외" "$P6_EVO" 'The Bash text guard'"'"'s `shell-text`, `bodies-save`, `directive-slice` and `unmarked-comment` rows are excluded the same way'
+hasfx "audit(Y1): rule health 에서 shell-text·bodies-save 제외" "$P6_AUD" 'nor the Bash text guard'"'"'s `shell-text`/`bodies-save`/`directive-slice`/`unmarked-comment` rows, which are universal-safety rules like them'
 # Y1 — Guild 자신의 명령이 가드에 걸리지 않는다: commands/ 의 ```bash 펜스 전수 + spine 의 python3 -c 줄
 cat > "$WORK3/own_cmds.py" <<'PYOWN'
 import glob, importlib.util, os, re, sys
@@ -4351,7 +4352,7 @@ if len(mb) != 1 or "`" in mb[0]:
     hits.append("_execute_spine.md: the mutation-before python3 -c line is missing or carries a backtick")
 print("OK %d" % n if n >= 150 and not hits else "PROBLEMS %d %s" % (n, " | ".join(hits)))
 PYOWN
-P6_OWN="$("$PY" "$WORK3/own_cmds.py" "$GLD")"
+P6_OWN="$("$PY" -B "$WORK3/own_cmds.py" "$GLD")"
 case "$P6_OWN" in OK*) ok "gate(Y1·Y2): Guild 명령의 bash 펜스 전수와 spine python3 -c 줄이 텍스트 가드에 안 걸림 ($P6_OWN)" ;;
   *) bad "gate(Y1·Y2): Guild 명령이 텍스트 가드에 걸림" "OK" "$P6_OWN" ;; esac
 # Y2 — bodies-contract 펜스: 정본 1줄 · 사본 정확히 5개 · 바이트 동일 (result-contract 검사와 같은 방식, 트리 전체)
@@ -4513,12 +4514,14 @@ hasfx "evolve(Y7): 기본 브랜치 조회" "$P6_EVO" '1. The default branch: `g
 hasfx "evolve(Y7): refspec fetch" "$P6_EVO" '`git fetch origin <d>:refs/remotes/origin/<d>` (the refspec form'
 hasfx "evolve(Y7): fetch 실패면 2·3 건너뜀" "$P6_EVO" 'fetch fails → one line `원격 확인 불가 — 로컬 기준으로 분석합니다` and **skip 2 and 3**'
 hasfx "evolve(Y7): rev-list" "$P6_EVO" '`git rev-list --left-right --count <d>...origin/<d>` → `<ahead> <behind>`.'
-hasfx "evolve(Y7): 질문 문구" "$P6_EVO" '① 직접 최신화(pull/rebase)하신 뒤 /gld evolve 를 다시 실행(권장) ② 이대로 진행`.'
+hasfx "evolve(Y7→A1): 질문 문구 — 해시를 지키는 갱신" "$P6_EVO" '① 직접 최신화(git pull --ff-only — 로컬 커밋이 있으면 git pull --no-rebase; rebase 는 로컬 커밋 해시를 바꿉니다)하신 뒤 /gld evolve 를 다시 실행(권장) ② 이대로 진행`.'
 hasfx "evolve(Y7): behind 만 본다" "$P6_EVO" '**Only `behind` is asked about** — `ahead`'
 hasfx "evolve(Y7): ① 이면 아무것도 쓰지 않음" "$P6_EVO" '① → evolve writes nothing and ends (no ledger entry, no'
 hasfx "evolve(Y7): Hard rule" "$P6_EVO" '- **evolve never moves the human'"'"'s branch or history** — no `git pull`, `rebase`, `merge`, `reset`, `checkout <branch>` / `switch` (INV3)'
 hasfx "evolve(Y7): 파일 복원 예외" "$P6_EVO" 'Phase 6'"'"'s file restore `git checkout -- <file>` (the per-item automatic rollback) is outside this ban.'
-P6_GP="$(grep -nE 'git (pull|rebase)' "$P6_EVO" | grep -vF "evolve never moves the human's branch or history" || true)"
+P6_GP="$(grep -nE 'git (pull|rebase)' "$P6_EVO" | grep -vF "evolve never moves the human's branch or history" | grep -vE 'git pull (--ff-only|--no-rebase)' || true)"
+P6_GP2="$(grep -nE 'git pull --rebase|git rebase ' "$P6_EVO" | grep -vF "evolve never moves the human's branch or history" | grep -vF 'rebase 는 로컬 커밋 해시를 바꿉니다' || true)"
+[ -z "$P6_GP2" ] && ok "evolve(A1): pull --rebase·git rebase 는 Hard rule 줄 밖에 없음" || bad "evolve(A1): pull --rebase·git rebase 밖" "none" "$(printf '%s' "$P6_GP2" | cut -c1-80)"
 [ -z "$P6_GP" ] && ok "evolve(Y7): git pull/rebase 는 금지 문장에만" || bad "evolve(Y7): git pull/rebase 금지 맥락 밖" "none" "$(printf '%s' "$P6_GP" | cut -c1-80)"
 hasfx "retro(Y7): 신선도 질문은 retro 가 대신 답하지 않음" "$P6_RETRO" '- **evolve'"'"'s freshness question** (`evolve.md` Phase 0 step 2b — the local default branch is behind `origin`) is'
 hasfx "retro(Y7): ① 이면 Phase 6 계속" "$P6_RETRO" 'ends Phase 5 as `성장 단계 보류` and **continues to Phase 6** — it does not tell the human to run retro again'
@@ -4540,8 +4543,8 @@ hasfx "review(L4): 경로가 분명해도 묻는다" "$P6_RV" '— the ask is ow
 hasfx "review(L4): 고쳐 달라는 편집만" "$P6_RV" '**'"'"'고쳐 달라'"'"' 는 편집만이다** — merging or rebasing the base into the head, committing, and pushing each happen only when the human asked for that step'
 hasfx "retro(L5→N3): 블록은 열린 PR 이 있을 때만" "$P6_RETRO" '**The block above only when a member'"'"'s PR is still `OPEN`** (Phase 1'
 lacksfx "retro(L5): 둘째·셋째 줄이라는 잘못된 지칭 제거" "$P6_RETRO" 'Those second and third lines only when'
-hasfx "config(Y1): off 는 Bash 텍스트 가드도 끔" "$GLD/commands/config.md" '`off` also turns off the Bash text guard (`shell-text` · `bodies-save`'
-hasfx "init(Y1): gates.enabled false 면 텍스트 가드도 꺼짐" "$P6_INIT" '`false` = advisory only (off-switch) — and the Bash text guard (`shell-text` · `bodies-save`) is off too.'
+hasfx "config(Y1): off 는 Bash 텍스트 가드도 끔" "$GLD/commands/config.md" '`off` also turns off the Bash text guard (`shell-text` · `bodies-save` · `directive-slice` · `unmarked-comment`'
+hasfx "init(Y1): gates.enabled false 면 텍스트 가드도 꺼짐" "$P6_INIT" '`false` = advisory only (off-switch) — and the Bash text guard (`shell-text` · `bodies-save` · `directive-slice` · `unmarked-comment`) is off too.'
 hasfx "_bash_rules(Y1): heredoc 은 따옴표 여부와 무관하게 금지" "$P6_BR" 'not `echo`/`printf`, not a heredoc (quoted or not), not a script argument.'
 hasfx "_invariants(Y2): bodies-save 한계 — 변수에 담아 나중에 쓰기" "$P6_INV" 'variable and written out later (`x=$(gh issue list …); echo "$x" > f`) are outside it'
 hasfx "retro(L5→N3): 열린 PR 없을 때 짧은 줄" "$P6_RETRO" '보드: <url> — 이후 카드는 갱신되지 않습니다(열린 PR 없음). 이번 retro 전에 /gld sprint sync 를 부르지 않았다면 Done 이 아닐 수 있습니다 — GitHub UI 에서 정리하십시오; 다음부터는 retro 전에 sync 를.'
@@ -4591,10 +4594,10 @@ lacksfx "qa(Z3): 옛 무조건 ci-blocked" "$P3_QA" 'starts its cause line with 
 hasfx "qa(Z3): 기록 형식에 base-red" "$P3_QA" '`red <name…> (env: base-red)`'
 hasfx "daily(Z3): base-red 처방" "$P3_DAILY" '`env: base-red <k>회(#…) — 고치는 PR(#<fix>) 머지 → 각 PR 에 기본 브랜치 반영(쌓인 멤버는 /gld sprint sync) → /gld dev <n>`'
 hasfx "run(Z3): Base CI 행" "$P7_RUN" '| **Base CI** (0.98.7) |'
-hasfx "run(Z3): 기본 브랜치 읽기" "$P7_RUN" '1. `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>`'
-hasfx "run(Z3): check-runs 스트림" "$P7_RUN" "2. \`gh api repos/<owner>/<repo>/commits/<d>/check-runs --paginate --jq '.check_runs[] | {id, name, conclusion, annotations: .output.annotations_count}'\`"
-hasfx "run(Z3): 0개면 마지막 머지 PR" "$P7_RUN" "\`gh pr list --repo <owner>/<repo> --state merged --base <d> --limit 20 --json number,headRefOid,mergedAt --jq 'if length == 0 then null else (max_by(.mergedAt) | {number, headRefOid}) end'\`"
-hasfx "run(Z3): was not started 분리" "$P7_RUN" 'a `was not started` message is `ci-blocked`, kept apart from red.'
+hasfx "run(Z3→A9): Base CI 는 base_ci.py 한 호출" "$P7_RUN" '**One call**: `python3 <<SKILL_DIR>>/commands/atoms/base_ci.py --repo <owner>/<repo>` — print its line verbatim as the Phase 0 row'"'"'s result'
+hasfx "run(Z3→A9): 그대로 싣기 — 실제 이름 예시" "$P7_RUN" '(`Base CI: green(Analyze & Test, Conventional 접두어 검증, 수동 검증 신선도·케이스 커버리지 검사 (PR 브랜치 스코프))` — never paraphrased; measured #649 `green(PR #647 기준)`, word_app no line)'
+hascode "base_ci(Z3→A9): 0개면 마지막 머지 PR — 같은 jq" "$GLD/commands/atoms/base_ci.py" 'LAST_MERGED_JQ = ("if length == 0 then null else (max_by(.mergedAt) | {number, headRefOid}) end")'
+hasfx "base_ci(Z3→A9): was not started 는 failure 수준만 — ci-blocked 로 분리" "$GLD/commands/atoms/base_ci.py" 'contains `was not started` makes that check `ci-blocked` (never started — billing), kept'
 hasfx "run(Z3): 경고 문구" "$P7_RUN" '`기본 브랜치 CI red: <checks…> (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>) — 멤버마다 같은 red 로 사람 대기가 될 수 있습니다. 고치는 멤버가 있으면 다른 멤버가 그 위에 쌓였는지 확인하세요(plan 의 (a) 의존).`'
 hasfx "sprint/plan(Z3): BASE CI 줄" "$P6_SPP" '`BASE CI: <green(<checks…>)|red(<checks…>) (근거 …)|ci-blocked(<checks…>)|없음|unavailable>`'
 hasfx "sprint/plan(Z3): TL 입력에 BASE CI" "$P6_SPP" 'BASE CI: <the Base CI line above>.'
@@ -4653,7 +4656,8 @@ hasfx "rollback(Z6): analyze 로 되돌림" "$P3_RB" 'it goes to `guild:analyze`
 hasfx "rollback(Z6): plan-decision 경고 줄" "$P3_RB" '`본문의 plan-decision 줄(«<답>»)을 고치거나 지우지 않으면 analyze 가 같은 결정으로 다시 닫습니다`'
 hasfx "sync(Z6): PR 없는 Done 갈래" "$P7_SYNC" 'A member with **no PR at all** reaches the list one other way (0.98.7): closed as decided'
 hasfx "board(Z6): Done 두 출처" "$P7_BOARD" '**Done has two sources** (0.98.7)'
-hasfx "stack_sync(Z6): 마커 jq" "$P7_SS" 'select(contains("<!-- guild:closed-as-decided -->"))] | length)}'
+hasfx "stack_sync(Z6→A5): 마커 jq (DONE_JQ)" "$P7_SS" 'select(contains("<!-- guild:closed-as-decided -->"))] | length), '"'"
+hasfx "stack_sync(A5): DONE_JQ 에 integration:output 수" "$P7_SS" 'integrated: ([.comments[].body | select(contains("<!-- guild:integration:output -->"))] | length)}'
 # N1 · N3 · N4 · N5 · N7 · N8 · N9 · N10 · N11
 hasfx "_execute_spine(N1): 재진입은 점검도 다시 읽음" "$P6_SP" '**A re-entered invocation re-reads this line format (the shape above) and the check below before its first record write** — it never writes it from memory (measured #607'
 hasfx "_execute_spine(N1): 모든 블록" "$P6_SP" 'Check the new block alone — **every block, `findings: none` ones included** (the arrow-token violation lives on the role-axis line — #1700'
@@ -4667,13 +4671,14 @@ hasfx "retro(N3): Return 에 보드 줄" "$P6_RETRO" 'The final report carries t
 hasfx "_handoff(N4): 원인 줄 점검 명령" "$P3_HO" "\`grep -nE -m1 '^(defect: |ambiguity: |env: (ci-blocked|base-red|credential|service|other) — )' <file>\`"
 hasfx "_handoff(N4): 2: 로 시작" "$P3_HO" 'output that does not start with `2:` (line 1 is the marker) → fix that file only and check once more'
 hasfx "_handoff(N5): 그대로 읽기" "$P3_HO" 'run these reads **exactly as given**: no `.body[0:N]`, `head` or filter, the bodies-contract'"'"'s rule'
-hasfx "_handoff(N5): 기록 의무 줄" "$P3_HO" '`사람 지시 확인: 없음 — 읽음: #<n> · 트래커 #<t>[ · 부모 #<p>]`'
+hasfx "_handoff(N5): 기록 의무 줄" "$P3_HO" '`사람 지시 확인: 없음 — 읽음: #<n> · 트래커 #<t>[ · 부모 #<p>] (마커 없는 댓글 <k>개, 전문)`'
 hasfx "qa(N5): 사람 지시 확인 줄" "$P3_QA" 'and write the `사람 지시 확인:` line (Section M)'
 hasfx "_handoff(N7): 모든 댓글은 마커로 시작" "$P3_HO" '**Every comment Guild posts opens with a `<!-- guild:` marker** — a note that is no stage output (a pause kept on resume, a PR-created note, a status line) opens with `<!-- guild:note -->`'
 hasfx "_handoff(N7): note 마커 행" "$P3_HO" '| `<!-- guild:note -->` | any command, for a comment that is no stage output |'
 hasfx "dev(N7): 일시정지 메모 마커" "$P7_DEV" 'a note you post about it opens with `<!-- guild:note -->`'
 hasfx "sprint/plan(N8): 빈 Depends on 은 clear" "$P6_SPP" 'no dependency → `"<fields.depends_on>":""` (board_write clears it — the same as listing it in `clear`'
-hasfx "retro(N9): 바이트 그대로" "$P6_RETRO" 'copy the command byte for byte: `\u0060` stays six characters (a decoded backtick works only by luck of the single quotes)'
+hasfx "retro(N9→A12): 백틱을 jq 에서 만든다" "$P6_RETRO" 'The backtick is built in jq as `[96] | implode`,'
+lacksfx "retro(A12): \\u0060 이스케이프 없음" "$P6_RETRO" '\u0060'
 hasfx "retro(N10): CLEANUP 이 라벨도 정리" "$P6_RETRO" '**Phase 6 step 0'"'"'s label cleanup** for that tracker'"'"'s members (0.98.7'
 hasfx "retro(N10): CLOSED·COMPLETED 요구" "$P6_RETRO" '⚠ **The merge alone is not enough — the Issue must also be `CLOSED` · `COMPLETED`** (0.98.7)'
 hasfx "retro(N10): CLEANUP Return" "$P6_RETRO" '`OK: sprint #<n> cleanup — <W> worktrees, <B> branches · labels <L>`'
@@ -4684,20 +4689,341 @@ hascode "supervisor(N11): failures.jsonl 생성" "$P7_SUP" ': >> "$RUNDIR/failur
 # 0.98.7 code review r1
 hasfx "sprint/plan(r1 #1): 선행 미포함에서 base-red 간선 제외" "$P6_SPP" 'dropping or adding is the human'"'"'s edit. **A `base-red` edge is not one here** — Phase 4'"'"'s leader call decides it; a left-out one is the `기본 브랜치 CI red` line.'
 hasfx "sprint/plan(r1 #1): 에픽 확장 의존에서 base-red 간선 제외" "$P6_SPP" '(a correction only adds; a `base-red` edge is not one here — Phase 4'"'"'s leader call decides it; a left-out one is the `기본 브랜치 CI red` line),'
-hasfx "run(r1 #2): 이름별 최신 id 만" "$P7_RUN" 'one per check **name** — when a name appears more than once (a re-run), keep the run with the **highest `id`**'
-hasfx "run(r1 #2): qa 의 Which one 판정" "$P7_RUN" '**Which verdict**: `qa.md` Step 2'"'"'s *Which one* rule over those runs'
-hasfx "run(r1 #2): 결과에 check 이름" "$P7_RUN" 'Result: `green(<checks…>)` · `red(<checks…>) (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>)` · `ci-blocked(<checks…>)` · `없음` · `unavailable`'
+hasfx "base_ci(r1 #2→A9): 이름별 최신 id 만 — dedupe 가 annotations 앞" "$GLD/commands/atoms/base_ci.py" '4. **Dedupe by check name — keep the run with the highest `id`**'
+hasfx "base_ci(r1 #2→A9): qa 의 Which one 판정" "$GLD/commands/atoms/base_ci.py" '5. The verdict — the same rule as `qa.md` Step 2'"'"'s *Which one*'
+hasfx "run(r1 #2→A9): 결과에 check 이름" "$P7_RUN" 'Result: `green(<checks…>)` · `green(<checks…>) (진행 중)` · `red(<checks…>) (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>)` · `ci-blocked(<checks…>)` · `없음` · `unavailable`'
 hasfx "_handoff(r1 #3): 라벨 표 둘째 예외" "$P3_HO" 'second exception: analyze 0b closed-as-decided (no PR, CLOSED — `analyze.md` Step 1 item 0b) |'
 hasfx "_handoff(r1 #3): INV1 줄 예외" "$P3_HO" 'stop at `guild:done` = PR open; the one exception: analyze 0b closed-as-decided — no PR, CLOSED, nothing merges)'
 hasfx "retro(r1 #4): 커밋 실패만 clean-tree 고지" "$P6_RETRO" 'The commit failed → commit nothing (`git restore --staged -- .claude/guild/config.json`) and'
 hasfx "retro(r1 #6): declined Return 에 labels" "$P6_RETRO" '`OK: sprint #<n> cleanup declined · labels <L>`'
 hasfx "retro(r1 #6): dry-run Return 에 labels" "$P6_RETRO" '`OK: sprint #<n> cleanup listed (dry-run) · labels <L>`'
-hasfx "sprint/plan(r1 #7): run.md 경로와 절만 읽기" "$P6_SPP" 'read the *Base CI* paragraph of `<<SKILL_DIR>>/commands/sprint/run.md` Phase 0 (that section only, not the whole file)'
+hasfx "sprint/plan(r1 #7→A9): base_ci.py 같은 호출" "$P6_SPP" 'run `python3 <<SKILL_DIR>>/commands/atoms/base_ci.py --repo <owner>/<repo>` (the same call as `run` Phase 0 — one Bash call; its docstring holds the rule) and pass its lines (one or two) to the tech-lead'
 hasfx "daily(r1 #8): 결정대로 닫힌 dep 의 하류 규칙" "$P3_DAILY" '**its downstream is 의존성 차단 when the run recorded it so**'
 
 hasfx "rollback(r2): 네 조건 — 마커·done·CLOSED·PR 없음" "$P3_RB" '**A closed-as-decided Issue** — **all four**: `decided ≥ 1`, `stage` is `guild:done`, `state` is `CLOSED`, and **no PR attributed** to it'
 hasfx "rollback(r2): PR 귀속 확인 호출" "$P3_RB" '`gh pr list --repo <owner>/<repo> --state all --limit 200 --json number,headRefName,closingIssuesReferences --jq '"'"'[.[] | select(([.closingIssuesReferences[]? | select(.repository.owner.login == "<owner>" and .repository.name == "<repo>") | .number] | index($2)) or ((.headRefName // "") | test("(^|[^0-9])#?$2([^0-9]|$)")))] | length'"'"'`'
 hasfx "rollback(r2): 0 이 아니거나 실패면 보통 규칙" "$P3_RB" '`0` → closed as decided; anything else, or the call failed → the ordinary rule.'
+
+# ── 0.99.2 ──────────────────────────────────────────────────────────────
+Q_CO="$GLD/commands/atoms/_checkout.md"; Q_SK="$GLD/SKILL.md"; Q_RS="$GLD/commands/resume.md"
+Q_SYNC="$GLD/commands/sprint/sync.md"; Q_BOARD="$GLD/commands/sprint/board.md"; Q_DEV="$GLD/commands/dev.md"
+Q_SPP="$GLD/commands/sprint/plan.md"; Q_RETRO="$GLD/commands/sprint/retro.md"; Q_EVO="$GLD/commands/evolve.md"
+Q_RV="$GLD/commands/review.md"; Q_HO="$GLD/commands/atoms/_handoff.md"; Q_SP="$GLD/commands/atoms/_execute_spine.md"
+Q_RUN="$GLD/commands/sprint/run.md"; Q_SIG="$GLD/commands/atoms/_signals.md"; Q_ST="$GLD/commands/atoms/scan_transcript.py"
+Q_SPAWN="$GLD/commands/atoms/spawn_supervisor.py"; Q_BR="$GLD/commands/atoms/_bash_rules.md"; Q_INV="$GLD/commands/atoms/_invariants.md"
+Q_REAL="$HERE/fixtures/real"
+# A1 — the human's checkout: the canonical atom
+hasfx "_checkout(A1): 원칙 ① 브랜치에서 떼기" "$Q_CO" '1. **Moving the human'"'"'s checkout off its branch** — `git checkout <branch>` / `git switch <branch>` to another branch, detaching.'
+hasfx "_checkout(A1): 원칙 ② 남의 브랜치 커밋 이동·재작성" "$Q_CO" '2. **Moving or rewriting a commit already on a branch Guild did not create** — `git pull`, a `merge` into it, `rebase`, `reset` (except `--soft HEAD~1` of Guild'"'"'s own unpushed commit), `commit --amend`, `cherry-pick` / `am` onto it, `update-ref refs/heads/<that branch>`.'
+hasfx "_checkout(A1): 원칙 ③ 미커밋 변경 버리기·숨기기" "$Q_CO" '3. **Discarding or hiding the human'"'"'s uncommitted changes** — `git stash`, `git checkout -- .`, `git restore` / `git checkout -- <f>` / `git clean` / `rm` of a file Guild did not edit.'
+hasfx "_checkout(A1): 권하는 선택지도 금지" "$Q_CO" '**And no option that offers any of these** — `main 으로 이동 후 진행 (Recommended)`, `제가 최신화하겠습니다` and the like'
+hasfx "_checkout(A1): 예외 하나 — execute 의 Issue 브랜치" "$Q_CO" '**The branch of the Issue the execute stage is executing** — `/gld dev`·`resume`·`implement`·`debug`·`refactor` invoked directly (`implement.md`), an epic'"'"'s children (`dev.md` Phase 2b → `_execute_spine.md`), and the integration-fix child (`dev.md` Phase 2c) included'
+hasfx "_checkout(A1): 허용 — fetch 전반" "$Q_CO" '- **Every fetch** — `git fetch origin <d>:refs/remotes/origin/<d>`, `git fetch origin pull/<p>/head <baseRefName>` → `FETCH_HEAD` (`rollback.md`), `git fetch <remote>` (`sprint/plan.md`)'
+hasfx "_checkout(A1): 허용 — 현재 브랜치의 새 커밋" "$Q_CO" '- **A new commit on the current branch** — the developer'"'"'s Issue-branch commits, plan/retro/evolve'"'"'s record commits, rollback'"'"'s `git revert --no-commit` → commit and `git revert --abort`.'
+hasfx "_checkout(A1): 허용 — Guild 가 편집한 파일 복원" "$Q_CO" '`git checkout <branch> -- <files>`, `git rm -f`, `git mv` (`refactor.md`, evolve'"'"'s rollback); `git rm --cached` (`init.md`).'
+hasfx "_checkout(A1): 허용 — 자기 미푸시 커밋 reset --soft" "$Q_CO" '- **`git reset --soft HEAD~1` of Guild'"'"'s own unpushed commit** (`sprint/plan.md` Phase 6 step 8).'
+hasfx "_checkout(A1): 허용 — Guild 워크트리·멤버 브랜치" "$Q_CO" '`stack_sync.py`'"'"'s `update-ref refs/heads/<member branch>`, a merge in a sprint worktree; `sprint/retro.md` Phase 7'"'"'s cleanup.'
+hasfx "_checkout(A1): batch 의 기존 한계" "$Q_CO" '`batch.md`'"'"'s child sessions run in the checkout the human handed to batch (no isolation — its `stash -u` defence)'
+hasfx "_checkout(A1): 요청 꼴 — 상태 읽기" "$Q_CO" '`git rev-list --left-right --count HEAD...origin/<b>` → `<ahead> <behind>`; `ahead > 0` → `git log --oneline origin/<b>..HEAD`.'
+hasfx "_checkout(A1): 요청 꼴 블록" "$Q_CO" '실행할 명령(순서대로):'
+hasfx "_checkout(A1): 결과 문구 ① fast-forward" "$Q_CO" '- `fast-forward — 바뀌는 커밋 없음`'
+hasfx "_checkout(A1): 결과 문구 ② 머지 커밋" "$Q_CO" '- `머지 커밋 1개가 생깁니다 — 기존 커밋 해시는 그대로`'
+hasfx "_checkout(A1): 결과 문구 ③ 해시 변경" "$Q_CO" '- `해시가 바뀌는 로컬 커밋 <k>개: <sha> <제목> …(이 해시를 인용한 Guild 댓글·기록은 옛 해시를 가리키게 됩니다)`'
+hasfx "_checkout(A1): 결과 문구 ④ 미커밋 파일" "$Q_CO" '- `커밋 안 된 파일 <n>개가 그대로 따라갑니다(충돌하면 git 이 거부합니다)`'
+hasfx "_checkout(A1): git pull 은 늘 명시 꼴" "$Q_CO" '**`git pull` is always written in an explicit form** (`--ff-only` / `--no-rebase`) — a bare `git pull` can rebase, depending on the `pull.rebase` setting.'
+hasfx "_checkout(A1): D2 — 해시를 지키는 두 꼴만 실행" "$Q_CO" '**Guild runs only an update that keeps every hash** (the human'"'"'s rule: only hash-preserving updates): `ahead = 0` → `git pull --ff-only origin <b>`; `ahead > 0` → `git pull --no-rebase origin <b>` (a merge commit).'
+hasfx "_checkout(A1): 재작성 꼴은 사람이" "$Q_CO" '**A form that rewrites local commits (`git pull --rebase`, `git rebase`) is never an option Guild runs**'
+hasfx "_checkout(A1): --no-rebase 조건 (i) 미커밋" "$Q_CO" '- (i) `git status --porcelain` is not empty (the human'"'"'s uncommitted changes) → `--no-rebase` is not made an option'
+hasfx "_checkout(A1): --no-rebase 조건 (ii) pull.ff=only" "$Q_CO" '`pull.ff=only 설정이라 머지 갱신이 거부되었습니다 — 직접 하십시오(git pull --no-rebase --no-ff origin <b> 또는 설정 변경)`'
+hasfx "_checkout(A1): --no-rebase 조건 (iii) behind 0" "$Q_CO" '`갱신할 것이 없습니다(origin/<b> 와 같거나 앞섬)`'
+hasfx "_checkout(A1): merge-tree 사전 점검" "$Q_CO" 'the read-only `git merge-tree --write-tree HEAD origin/<b>` (git ≥ 2.38; exit 1 = conflict). Conflict expected → do not run; one line `충돌 예상 — <파일…>: 머지는 사람이 하십시오(git pull --no-rebase origin <b>)`.'
+hasfx "_checkout(A1): 판정 불가 종료 코드" "$Q_CO" 'Any exit code other than 0 or 1 (git < 2.38'"'"'s unknown option, say) → the check cannot judge → do not run, show the command only.'
+hasfx "_checkout(A1): 실행 중 충돌은 merge --abort 하나뿐" "$Q_CO" '**the only next command allowed is `git merge --abort`**; report and stop.'
+hasfx "_checkout(A1): --force·reset --hard 없음" "$Q_CO" '**`--force` and `reset --hard` never, in any case** (INV3).'
+hasfx "_checkout(A1): fetch 실패·upstream 없음" "$Q_CO" '`원격 상태를 읽지 못했습니다 — 직접 하십시오: …`'
+hasfx "_checkout(A1): switch 요청은 예 뒤에만" "$Q_CO" 'a switch changes no hash, so under the same rule **Guild runs it only after an explicit yes**'
+hasfx "_checkout(A1): 다른 브랜치 일은 review 워크트리 — sync conflict 는 경로" "$Q_CO" 'so what that line carries is **the conflicted paths**, not a worktree — make the review worktree for that member'"'"'s PR.'
+hasfx "_checkout(A1·A3): 승인 범위" "$Q_CO" '**An approval reaches only the list shown in that command.** A new `/gld …` invocation asks again; "알아서 판단해서 해 주세요" approves the items of the list that was shown — it never widens to what the procedure **decided to keep**'
+hasfx "SKILL(A1): 사람 체크아웃 단락" "$Q_SK" '**The checkout `/gld` runs in is the human'"'"'s.** On its own, Guild never (1) moves it off its branch'
+hasfx "SKILL(A1): 단락 안의 예외 — 다섯 명령·에픽 자식" "$Q_SK" '**The one exception**: the execute stage (`/gld dev`·`resume`·`implement`·`debug`·`refactor`, an epic'"'"'s children included) creates or switches to the branch of the Issue it is executing in this checkout, including `refactor.md`'"'"'s detach-and-return net proof'
+hasfx "SKILL(A1): 해시를 지키는 갱신·switch 는 예 뒤에" "$Q_SK" 'Guild runs only an update that keeps every hash, after a yes — and a switch (it keeps every hash) after a yes — a rewriting one the human runs (`<<SKILL_DIR>>/commands/atoms/_checkout.md`'
+Q_D2="never on its own; on a human request, \`_checkout.md\`'s request form — Guild runs only a hash-preserving update (\`git pull --ff-only\` / \`--no-rebase\`), a rewriting one the human runs"
+hasfx "retro(A1): Hard rule 의 D2 꼴 · 예 뒤의 switch" "$Q_RETRO" "Phase 0 step 5 asks; updating the checkout is $Q_D2, and a switch after a yes (measured #649"
+hasfx "retro(A1): push 거부는 멈춤 — 갱신 요청이면 요청 꼴" "$Q_RETRO" 'say so and stop: updating is the human'"'"'s — asked to update first, the request form (no rebase'
+hasfx "evolve(A1): Hard rule 의 D2 꼴 · 예 뒤의 switch" "$Q_EVO" "(INV3); updating the checkout is $Q_D2, and a switch after a yes (Phase 0 step 2b asks)."
+hasfx "evolve(A1): 2b 의 D2 꼴" "$Q_EVO" "evolve never updates the checkout itself — $Q_D2 (Hard rules — INV3)."
+hasfx "sprint/plan(A1): sub-step 8 의 D2 꼴" "$Q_SPP" '**Never `--force`; never pull or rebase on its own — on a'
+hasfx "sprint/plan(A1 r1): step 5 — --no-rebase 는 깨끗한 트리에서만" "$Q_SPP" '`--no-rebase` only on a clean tree, `_checkout.md` (i): here the record files and `config.json` are still uncommitted, so it is shown, not run).'
+hasfx "sprint/plan(A1): step 5 Behind — 요청 꼴" "$Q_SPP" '`_checkout.md`'"'"'s request form (Guild runs only `git pull --ff-only <remote> <merge>`, or'
+hasfx "sprint/plan(A1): Retry by hand 의 명시 꼴" "$Q_SPP" 'Stopped behind at sub-step 5 → put `git pull --ff-only <remote> <merge>` first'
+lacksfx "retro(A1): 옛 단독 문장 없음" "$Q_RETRO" "Phase 0 step 5 asks; updating the checkout is the human's."
+lacksfx "evolve(A1): 옛 단독 문장 없음(Hard rule)" "$Q_EVO" "(INV3); updating the checkout is the human's (Phase 0 step 2b asks)."
+lacksfx "evolve(A1): 옛 단독 문장 없음(2b)" "$Q_EVO" 'evolve never updates the checkout itself (Hard rules — INV3).'
+lacksfx "sprint/plan(A1): 옛 쉼표 문장 없음" "$Q_SPP" '**Never `--force`, never pull or rebase on the human'"'"'s'
+lacksfx "sprint/plan(A1): 옛 the human pulls first 없음" "$Q_SPP" 'the human pulls first.'
+hasfx "resume(A1): Notes — 머지 결과를 보려고 체크아웃을 옮기지 않음" "$Q_RS" '- **Resume never updates the checkout to see merged work** — dev Phase 2c judges from the PRs; running the merged result is the human'"'"'s (`dev.md` Phase 2c).'
+hasfx "sync(A1): conflict 는 Guild 워크트리에서" "$Q_SYNC" '- **A request to resolve a `conflict` is worked in a Guild worktree, never in the human'"'"'s checkout** — `review.md`'"'"'s worktree for that member'"'"'s PR'
+hasfx "review(A1): 공통 규칙 가리킴" "$Q_RV" 'The common rule this applies: `_checkout.md` (a request to work on another branch).'
+# A1 — every listed command carries the head line; none runs a rewrite/move outside a negated context
+for Q_C in dev resume plan qa review evolve init update rollback batch analyze design implement debug refactor test sprint/plan sprint/retro sprint/sync sprint/daily sprint/board sprint/run; do
+  Q_F="$GLD/commands/$Q_C.md"
+  case "$Q_C" in dev|resume|implement|debug|refactor)
+    hasfx "$Q_C(A1 r1): 머리 줄에 Issue 브랜치 예외" "$Q_F" "then ask) — the Issue's own branch is the one exception (\`_checkout.md\` Section C)." ;; esac
+  if [ -f "$Q_F" ] && head -60 "$Q_F" | grep -E '^>' | grep -qF "**Checkout**: never move the human's branch or history — \`_checkout.md\` (a pull/sync/switch request: show the commands and which commits change hash, then ask)"; then
+    ok "$Q_C(A1): 머리 블록인용에 Checkout 줄"
+  else bad "$Q_C(A1): 머리 블록인용에 Checkout 줄" "present in the first 60 lines" "missing: $Q_F"; fi
+  # the negation must sit in the 40 characters before the command (a long line elsewhere saying `never` proves nothing)
+  Q_NEG="$("$PY" - "$Q_F" <<'PYN'
+import re, sys
+for n, l in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
+    for m in re.finditer(r"git pull --rebase|git rebase origin|git checkout main", l):
+        # a negation, or the quotation of a measured defect (`measured #161: …`, `… became …`)
+        if not re.search(r"no |never|Never|금지|not |measured|became", l[max(0, m.start() - 40):m.start()]):
+            print("%d:%s" % (n, l.strip()[:120]))
+PYN
+)"
+  [ -z "$Q_NEG" ] && ok "$Q_C(A1): pull --rebase·rebase origin·checkout main 은 부정 문맥에만" \
+    || bad "$Q_C(A1): 부정 문맥 밖" "none" "$(printf '%s' "$Q_NEG" | head -1 | cut -c1-80)"
+done
+# A2 — plan Phase 0 step 6
+hasfx "sprint/plan(A2): step 6 머리" "$Q_SPP" '6. **Is the checkout the default branch, and level on `config.json`?** (0.99.2 — before anything'
+hasfx "sprint/plan(A2): 기본 브랜치 읽기(재사용)" "$Q_SPP" '`gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>` (Phase 2'"'"'s `DEFAULT BRANCH` and Phase 6 step 3 reuse this value'
+hasfx "sprint/plan(A2): 현재 브랜치" "$Q_SPP" '`git branch --show-current` → `<b>` (empty = detached).'
+hasfx "sprint/plan(A2): 질문 ①② 문구" "$Q_SPP" '`체크아웃이 기본 브랜치 <d> 가 아닙니다(<b|detached>). plan 은 이 브랜치의 .claude/guild/config.json(용량 이력·리팩토링 슬롯 이력)으로 구성하고, 구성 기록은 <d> 에서만 커밋됩니다. ① 중단 — 직접 <d> 로 옮기신 뒤(git switch <d>) /gld sprint plan 을 다시 실행(권장 · 아직 아무것도 쓰지 않았습니다) ② 이대로 진행 — 이 브랜치의 설정으로 구성하고 기록은 커밋하지 않음`'
+hasfx "sprint/plan(A2): ① Return" "$Q_SPP" '① → Return `OK: plan not started — checkout <b> is not <d>`.'
+hasfx "sprint/plan(A2): Phase 5 고정 줄" "$Q_SPP" 'When Phase 0 step 6 went on with ②, the fixed line `⚠ 체크아웃 <b> 의 config.json 으로 구성 — 용량 이력·슬롯 이력이 <d> 와 다를 수 있습니다` comes right under the `1b:` line.'
+hasfx "sprint/plan(A2): behind + config 차이(세 점)" "$Q_SPP" '`behind > 0` **and** `git diff --quiet HEAD...origin/<d> -- .claude/guild/config.json` exits 1'
+hasfx "sprint/plan(A2): 최신화 질문 문구" "$Q_SPP" '`로컬 <d> 가 origin 보다 <behind> 커밋 뒤이고 config.json 이 다릅니다 — 최신 용량 이력이 origin 에 있습니다. ① 중단 — 직접 최신화(git pull --ff-only, 로컬 커밋이 있으면 git pull --no-rebase)하신 뒤 다시 실행(권장) ② 이대로 진행`.'
+hasfx "sprint/plan(A2): Phase 2 fetch 는 step 6 이 했으면 건너뜀" "$Q_SPP" '**Phase 0 step 6 already'
+hasfx "sprint/plan(A2): Phase 6 step 3 보조 안전망" "$Q_SPP" '3. **On the default branch?** (Phase 0 step 6 already asked — this catches a switch since.)'
+hasfx "sprint/plan(A2): Return 목록" "$Q_SPP" '`OK: plan not started — checkout <b> is not <d>`
+(Phase 0 step 6 ①'
+Q_SW="$(grep -nF 'git switch <d>' "$Q_SPP" | grep -vF '① 중단 — 직접 <d> 로 옮기신 뒤(git switch <d>)' || true)"
+[ -z "$Q_SW" ] && ok "sprint/plan(A2): git switch <d> 는 질문 문구(사람이 할 일) 안에만" || bad "sprint/plan(A2): git switch <d> 가 질문 밖" "none" "$(printf '%s' "$Q_SW" | cut -c1-80)"
+# A3 — --cleanup approval scope
+hasfx "retro(A3): 호출마다 다시 묻는다" "$Q_RETRO" '**Every invocation asks for itself** — this run'"'"'s table and this run'"'"'s answer.'
+hasfx "retro(A3): 위임은 표의 행만" "$Q_RETRO" '**A delegation approves the table'"'"'s rows, never what the table keeps.**'
+hasfx "retro(A3): cherry 는 증거일 뿐" "$Q_RETRO" '`git cherry` agreeing is evidence to show, not a reason to skip the ask) (measured `--cleanup 545`).'
+hasfx "retro(A3): step 3 거부 뒤 멈춤" "$Q_RETRO" '— and stop there for that worktree: removing what is left is the human'"'"'s, or the named yes above.'
+hasfx "retro(A3): Hard rule 승인 범위" "$Q_RETRO" '- **Approval is per invocation and per listed item** — `_checkout.md` Section F'
+# A4 — epic parent integration
+hasfx "dev(A4): Phase 2c 는 사람 체크아웃에서 머지 결과를 돌리지 않음" "$Q_DEV" '**Phase 2c never checks out, pulls or runs merged code in the human'"'"'s checkout** (`_checkout.md`; measured resume #161'
+hasfx "dev(A4): 갭 — 열린 PR 경로" "$Q_DEV" '`#<c> 의 PR #<p> 에서 고칩니다: /gld review <p> 후 "고쳐 주세요"(review 가 자기 워크트리에서 편집 — review.md), 또는 직접 수정. 머지 순서: <순서>. 머지 뒤 /gld resume <parent>`'
+hasfx "dev(A4): 갭 — 머지됨 → 통합 수정 자식 질문" "$Q_DEV" '`통합 수정 자식 이슈를 만들까요? — [Guild子] 통합 수정 — <한 줄> (Parent Issue: #<parent>) · 만들면 /gld resume <parent> 가 Phase 2b 에서 이것을 실행하고 2c 를 다시 봅니다`'
+hasfx "dev(A4): 갭 — 무인 경로 줄" "$Q_DEV" '`통합 수정 자식을 만들거나(/gld dev <parent> 가 묻습니다) 직접 고친 뒤 /gld resume <parent>`'
+hasfx "dev(A4): done 자식에 dev/resume 금지" "$Q_DEV" '**Never suggest `/gld dev <child>` or `/gld resume <child>` for a `guild:done` child** — dev refuses a done Issue (Phase 1)'
+hasfx "dev(A4): 원인 줄은 Section H 형식" "$Q_DEV" '**The comment is in `_handoff.md` Section H'"'"'s form** — the first line after the marker is the cause line `defect: <one-line>`'
+hasfx "dev(A4·A11): PR 메모는 guild:note" "$Q_DEV" 'A note this phase leaves on a child PR (a merge-order warning, say) opens with `<!-- guild:note -->`'
+hasfx "_handoff(A4): Section I 새 문장" "$Q_HO" 'A gap → `NEEDS_HUMAN` with the path `dev.md` Phase 2c names by the child PR'"'"'s state — a fix on the open PR, or a new integration-fix child; never a loop-back into a `guild:done` child'
+lacksfx "_handoff(A4): 옛 loop-back 갈래 없음" "$Q_HO" 'or a targeted loop-back to the relevant child'
+lacksfx "dev(A4): 옛 loop-back 갈래 없음" "$Q_DEV" 'a targeted loop-back to the responsible child'
+# A5 — the third source of Done
+hasfx "sync(A5): 셋째 출처" "$Q_SYNC" 'a split parent whose integration passed and the human closed (`guild:done` · `CLOSED`/`COMPLETED` · an `<!-- guild:integration:output -->` comment · no PR of its own)'
+hasfx "board(A5): 셋째 출처" "$Q_BOARD" 'A third source (0.99.2) reaches `Done` only through `sync --done-cards`: a split parent whose integration passed and the human closed'
+hasfx "stack_sync(A5): docstring — retro 사본은 decided 만" "$P7_SS" '`retro.md` Phase 2'"'"'s jq copy is the closed-as-decided half only'
+# A6 — scan_transcript reads $CLAUDE_CONFIG_DIR
+hasfx "_signals(A6): 경로 표기" "$Q_SIG" 'CC transcript `$CLAUDE_CONFIG_DIR/projects/<enc-cwd>/*.jsonl` (default `~/.claude/projects`)'
+hascode "scan_transcript(A6): 실행 시점의 projects_dir()" "$Q_ST" 'base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")'
+lacksfx "scan_transcript(A6): import 시점 상수 없음" "$Q_ST" 'PROJECTS_DIR = os.path.expanduser("~/.claude/projects")'
+if "$PY" -c 'import importlib.util as u, sys; sys.dont_write_bytecode = True; s=u.spec_from_file_location("st", sys.argv[1]); m=u.module_from_spec(s); s.loader.exec_module(m)' "$Q_ST" 2>/dev/null; then
+  ok "scan_transcript(A6): import·정규식 컴파일 성공 (역참조 없는 GUILD_MANDATED_RE)"
+else bad "scan_transcript(A6): import" "exit 0" "import failed"; fi
+Q_T="$(mktemp -d)"
+q_sess() {  # q_sess <projects-dir> <cmd>… — four sessions, each running every <cmd>
+  mkdir -p "$1/p"; local i c js
+  for i in 1 2 3 4; do
+    js=""; for c in "${@:2}"; do js="$js,$("$PY" -c 'import json,sys; print(json.dumps({"type":"tool_use","name":"Bash","input":{"command":sys.argv[1]}}))' "$c")"; done
+    printf '%s\n' '{"cwd":"/st/repo","type":"user","message":{"content":"hi"}}' "{\"type\":\"assistant\",\"message\":{\"content\":[${js#,}]}}" > "$1/p/s$i.jsonl"
+  done
+}
+q_sig() { "$PY" -c '
+import json, sys
+t = sys.stdin.read()
+if ">>> RESULT <<<" not in t: print("NO-RESULT"); raise SystemExit
+d = json.loads(t.split(">>> RESULT <<<", 1)[1])
+print(";".join(sorted(s.get("summary", "") for s in d.get("signals") or [])) or "none")'; }
+q_sess "$Q_T/cfg/projects" "git worktree list"
+mkdir -p "$Q_T/home"
+Q_A="$(CLAUDE_CONFIG_DIR="$Q_T/cfg" HOME="$Q_T/home" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
+case "$Q_A" in *"git worktree list"*) ok "scan_transcript(A6) ①: CLAUDE_CONFIG_DIR/projects 를 읽는다 (HOME 은 비어 있음)" ;; *) bad "scan_transcript(A6) ①" "a signal" "$Q_A" ;; esac
+q_sess "$Q_T/home2/.claude/projects" "git worktree list"
+Q_B="$(env -u CLAUDE_CONFIG_DIR HOME="$Q_T/home2" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
+case "$Q_B" in *"git worktree list"*) ok "scan_transcript(A6) ②: 미설정이면 \$HOME/.claude/projects" ;; *) bad "scan_transcript(A6) ②" "a signal" "$Q_B" ;; esac
+mkdir -p "$Q_T/emptycfg/projects"
+Q_C3="$(CLAUDE_CONFIG_DIR="$Q_T/emptycfg" HOME="$Q_T/home2" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
+[ "$Q_C3" = none ] && ok "scan_transcript(A6) ③: 둘 다 있으면 CLAUDE_CONFIG_DIR 우선 (HOME 쪽 세션을 읽지 않음)" || bad "scan_transcript(A6) ③" "none" "$Q_C3"
+rm -rf "$Q_T/cfg"; q_sess "$Q_T/cfg/projects" "python3 /p/skills/gld/commands/atoms/stack_sync.py --tracker 1 --check" "cat /p/skills/gld/commands/dev.md" \
+  "sed -n 1,80p /p/skills/gld/commands/sprint/run.md" "cat .claude/guild/config.json" "git worktree list --porcelain" \
+  "git fetch origin main:refs/remotes/origin/main" "git fetch origin +refs/heads/f:refs/remotes/origin/f" "git branch --show-current" \
+  "gh repo view acme/app --json defaultBranchRef --jq .defaultBranchRef.name" "git rev-list --left-right --count main...origin/main" \
+  "git merge-tree --write-tree --name-only HEAD origin/main"
+Q_D="$(CLAUDE_CONFIG_DIR="$Q_T/cfg" HOME="$Q_T/home" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
+[ "$Q_D" = none ] && ok "scan_transcript(A6): Guild 자신의 명령 11꼴을 4세션 반복해도 신호 0" || bad "scan_transcript(A6): Guild 명령 신호" "none" "$(printf '%s' "$Q_D" | cut -c1-120)"
+rm -rf "$Q_T/cfg"; q_sess "$Q_T/cfg/projects" "cat .claude/guild/memory/review-nudge-state.json" "ls .claude/guild/config.json" \
+  "cat /abs/repo/.claude/guild/config.json" "gh issue list --label guild:sprint --state open --limit 20 --json number,title,body --jq '{count: length}'" \
+  "git fetch origin main:main" "git add .claude/guild/evolution-log.md .claude/guild/evolution-log.archive.md" "git add .claude/guild/evolution-log.md" "gh issue list --label guild:child --state all --limit 500 --json number,title,body,labels,state --jq 'length'" \
+  "gh label list --limit 200 --json name --jq '[.[].name]'" "gh repo view --json nameWithOwner --jq .nameWithOwner" "printenv GLD_SPRINT_BASE" \
+  "git -C /abs/repo status --porcelain" "git ls-remote origin refs/heads/main" "hostname"
+Q_R1="$(CLAUDE_CONFIG_DIR="$Q_T/cfg" HOME="$Q_T/home" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
+[ "$Q_R1" = none ] && ok "scan_transcript(A6 r1): 리뷰가 측정한 Guild 명령 14꼴(절대 config 경로·--jq·git fetch origin <d> …)도 신호 0" || bad "scan_transcript(A6 r1): Guild 명령 신호" "none" "$(printf '%s' "$Q_R1" | cut -c1-160)"
+rm -rf "$Q_T/cfg"; q_sess "$Q_T/cfg/projects" "git fetch origin main"
+Q_BF="$(CLAUDE_CONFIG_DIR="$Q_T/cfg" HOME="$Q_T/home" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
+case "$Q_BF" in *"git fetch origin main"*) ok "scan_transcript(A6 r2): 금지된 맨 git fetch origin <base> 는 신호로 남는다 (_execute_spine Step 0)" ;; *) bad "scan_transcript(A6 r2): 맨 fetch" "a signal" "$Q_BF" ;; esac
+rm -rf "$Q_T/cfg"; q_sess "$Q_T/cfg/projects" "git worktree list" "cat docs/x.md"
+Q_E="$(CLAUDE_CONFIG_DIR="$Q_T/cfg" HOME="$Q_T/home" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
+case "$Q_E" in *"cat docs/x.md"*"git worktree list"*|*"git worktree list"*"cat docs/x.md"*) ok "scan_transcript(A6): 대조 — 인자 없는 worktree list·cat docs 반복은 신호" ;; *) bad "scan_transcript(A6) 대조" "two signals" "$Q_E" ;; esac
+rm -rf "$Q_T"
+# A7 — spawn streams from this run's start offset
+hasfx "spawn_supervisor(A7): docstring" "$Q_SPAWN" 'It **streams from this run'"'"'s start offset** — the file keeps earlier runs above it'
+hascode "spawn_supervisor(A7): seek" "$Q_SPAWN" 'f.seek(0 if os.path.getsize(log_path) < start else start)'
+# A8 — every PO candidate judged
+hasfx "sprint/plan(A8 r2): 전수 점검 — 항목 줄머리 #n 만" "$Q_SPP" "its own Bash call \`grep -nE '^(## |[-*0-9.]* *#[0-9]+)' docs/specs/sprint-draft/po.md\`"
+hasfx "sprint/plan(A8 r2): 줄 안의 prerequisite·needs·decide-in 은 판정 아님" "$Q_SPP" 'a `prerequisite: #d`, `(needs #d)` or `decide-in: #c` inside a line is not a verdict'
+hasfx "sprint/plan(A2 r2): 무인 항목이 먼저 · 두 질문은 attended" "$Q_SPP" 'then go on — the two questions below are attended only.'
+lacksfx "_checkout(r2): 설계 내부 표지 D2 없음" "$Q_CO" 'D2'
+lacksfx "resume(r2): 설계 내부 표지 (A4) 없음" "$Q_RS" '(A4)'
+
+hasfx "sprint/plan(A8): SendMessage 재요청" "$Q_SPP" '`po.md 에 #<n…> 의 판정이 없습니다 — 각 번호를 goal-picks / other-ranked / not-ranked 중 하나로 po.md 에 추가하고 같은 RESULT 줄을 다시 보내세요(본문 규칙 그대로)`'
+hasfx "sprint/plan(A8): Phase 5 고정 줄" "$Q_SPP" '- `PO 판정 누락: #<n…> — 이번 채우기에서 빠졌습니다(넣으려면 "추가 #n")` —'
+hasfx "sprint/plan(A8): SendMessage 불가면 바로 Phase 5 줄" "$Q_SPP" 'or SendMessage is unavailable (the agent was already released) → straight to the Phase 5 fixed line'
+# A9 — base_ci.py
+lacksfx "run(A9): 옛 #647 측정 문장 없음" "$Q_RUN" '#647: an earlier failed attempt'
+hasfx "run(A9): 측정 문장 정정" "$Q_RUN" '(the highest `id` — measured one-man-company PR #616: `Conventional 접두어 검증` three times; word_app main: `Dependabot` four times)'
+hasfx "_bash_rules(A9): Used by 에 base_ci.py" "$Q_BR" '`base_ci.py` (the Base CI line for `sprint/run.md` Phase 0 and `sprint/plan.md` Phase 2'
+# A10 — Section M cut reads
+hasfx "_handoff(A10): 이유 구절" "$Q_HO" '— a directive'"'"'s scope exclusion sits after its first sentence (measured #244: cut at 300, the line `잡이 실행된 뒤 실패한 red는 이 지시의 대상이 아니다` was gone)'
+hasfx "_handoff(A10): 게이트가 잘라 읽기를 거부" "$Q_HO" 'the commit gate refuses that cut read (`directive-slice` — `_invariants.md`)'
+hasfx "_invariants(A10·A11): 네 모양" "$Q_INV" 'Four narrow measured shapes, a heuristic'
+hasfx "_invariants(A11): unmarked-comment 는 무인만" "$Q_INV" '(`unmarked-comment` — 64 of 1,554 measured; attended is not checked'
+lacksfx "_invariants(A10): 옛 두 모양 문장 없음" "$Q_INV" 'Two narrow measured shapes'
+hasfx "gate(A10): 모듈 docstring 네 모양" "$GLD/gates/gate_precommit.py" 'Refuses four
+     narrow, measured shapes'
+hascode "gate(A10): directive-slice 규칙 이름" "$GLD/gates/gate_precommit.py" 'rule, msg = "directive-slice", DIRECTIVE_SLICE_MSG'
+hascode "gate(A11): unmarked-comment 는 GLD_UNATTENDED=1 일 때만" "$GLD/gates/gate_precommit.py" 'elif os.environ.get("GLD_UNATTENDED") == "1" and unmarked_comment(cmd):'
+# A11 — marked comments
+hasfx "_handoff(A11): Section B — 습관 댓글·PR 메모도 마커" "$Q_HO" '— **including a comment a repo habit asks for** (a PR CI note, a PR-created note: measured one-man-company and word_app `leader.md` habits, 7 unmarked PR comments in #649) **and a note on a PR** (`gh pr comment`); a habit'"'"'s wording never drops the marker.'
+hasfx "_handoff(A11): 사람 지시 대필만 마커 없음" "$Q_HO" 'A comment the human asked you to write **as theirs** (`## 사람 지시 — …`) is the one that stays unmarked — it is a directive (Section M).'
+hasfx "evolve(A11): 습관 작성 규칙" "$Q_EVO" '- **A habit that has the leader post a comment says it opens with `<!-- guild:note -->`**'
+hasfx "evolve(A11): Phase 1 신호" "$Q_EVO" "\`grep -rnE 'PR 댓글|댓글에 남긴다|gh pr comment' .claude/agents/\` — a hit inside a role's habits section"
+hasfx "evolve(A11): 제안 문구" "$Q_EVO" '`③ habit` patch candidate `댓글 습관에 마커가 없습니다(Section B)`'
+# A13 — densify outcomes
+hasfx "evolve(A13): 기준 초과 줄마다 densify: 줄" "$Q_EVO" '**Every over-bar line `harness_size.py` printed gets a `densify:` line in Phase 3'"'"'s list**'
+hasfx "evolve(A13): 네 결말" "$Q_EVO" '`densify: <line> → 제안 #k` or `densify: <line> → [rejected] 기록` — and every line after those three is `densify: <line> → 다음 run(상위 3 밖)` — these four and no other outcome'
+hasfx "evolve(A13): 건너뜀 결말" "$Q_EVO" '`densify: <line> → 건너뜀(이전 [rejected], 글자 수 그대로)` and does not count toward the three'
+hasfx "evolve(A13): Phase 7 원장 densify 줄" "$Q_EVO" '- **Densify** — one `densify:` line per over-bar line, the four outcomes of Phase 3 as they are'
+hasfx "evolve(A13): Phase 4 전 자기 점검" "$Q_EVO" '**Before Phase 4**: the `densify:` lines number exactly the over-bar lines `harness_size.py` printed, and none of the first three taken says `다음 run`'
+# A14 — every Write is a new check
+hasfx "_execute_spine(A14): 파일을 쓸 때마다 점검" "$Q_SP" '— **every Write of that file is a new check**, the second and later Writes in one session too (an epic'"'"'s children run one after another in one session: each child'"'"'s execute is a fresh invocation — measured resume #508)'
+hasfx "dev(A14): 자식마다 기록 형식 다시 읽기" "$Q_DEV" 'Each child'"'"'s execute is its own invocation — `_execute_spine.md` Step 4'"'"'s record format and its check are re-read before that child'"'"'s first record write'
+# A15 — only this sprint's children
+hasfx "retro(A15): 트래커 생성 전에 끝난 자식만 제외" "$Q_RETRO" 'a child of S is excluded only when its PR merged — or it closed — **before this tracker was created** (`gh issue view <tracker> --json createdAt`, the same call that reads its body adds the field'
+hasfx "retro(A15): 열린 자식은 센다" "$Q_RETRO" '**an open one counts**.'
+hasfx "retro(A15): PR 없는 자식의 closedAt 은 자기 호출" "$Q_RETRO" '`gh issue view <c> --repo <owner>/<repo> --json closedAt --jq .closedAt`, its own call (the child discovery query carries no `closedAt`)'
+lacksfx "retro(A15): 옛 '뒤에만 센다' 문장 없음" "$Q_RETRO" 'counts here only when its PR merged'
+hasfx "retro(A15): 제외 줄" "$Q_RETRO" '`이전 스프린트에 끝난 자식 <k>개(#506) — 셈에서 제외`'
+hasfx "retro(A15): Phase 0 읽기에 createdAt" "$Q_RETRO" '--json number,title,body,createdAt --jq'
+# A16 — a gate refusal is never routed around
+hasfx "_execute_spine(A16): developer 프롬프트에 우회 금지" "$Q_SP" '  > **A gate refusal is never routed around** — do not rename or move a file onto a deleted test'"'"'s path, split the commit, or restructure so the gate stops seeing a deletion.'
+hasfx "_execute_spine(A16): BLOCKED 꼴" "$Q_SP" 'return `BLOCKED: gate INV2 — <test path> (subject removed: <path>)`; the leader asks the human (attended) or pauses (unattended).'
+hasfx "_execute_spine(A16): Hard rule 에도" "$Q_SP" 'Step 4'"'"'s *Developer `BLOCKED: gate INV2`* bullet is the leader'"'"'s side.'
+hasfx "_execute_spine(A16): Step 4 갈래" "$Q_SP" '- **Developer `BLOCKED: gate INV2 — <path> (subject removed: <path>)`** (0.99.2'
+hasfx "_execute_spine(A16): 안내 — 그 Issue 브랜치의 dismissed.md 한 줄" "$Q_SP" '그 Issue 브랜치 <branch> 에서 .claude/guild/gates/dismissed.md 에 한 줄'
+hasfx "_execute_spine(A16): 그 파일만 커밋" "$Q_SP" 'git commit -m "<메시지>" -- .claude/guild/gates/dismissed.md 로 그 파일만 커밋하신 뒤'
+hasfx "_execute_spine(A16): 등록 전 재호출 없음" "$Q_SP" '등록 전에는 developer 를 다시 부르지 않습니다'
+hasfx "_execute_spine(A16): 강한 모델 재시도 없음" "$Q_SP" '**no stronger-model retry** (`_model_tiering.md`'"'"'s escalation is for a quality failure)'
+hasfx "_execute_spine(A16): 무인 — 워크트리 안내" "$Q_SP" '(브랜치가 <wt> 에 체크아웃돼 있으면 그 경로에서 — 스프린트가 남긴 멤버 워크트리;'
+hasfx "_execute_spine(A16): 재진입 점검 — 게이트와 같은 줄머리 판독" "$Q_SP" "\`\`grep -nE '^[-*+] +\`?<path>\`?( |—|\$)' <worktree>/.claude/guild/gates/dismissed.md\`\`"
+hasfx "_execute_spine(A16 r1): 재진입 또는 답 뒤 같은 단계 재실행" "$Q_SP" '  - **On re-entry (resume) or the same stage re-run after the answer** (dev Phase 2'"'"'s attended `NEEDS_HUMAN` re-runs it inline), before the developer is spawned again:'
+hasfx "sprint/plan(A9 r1): 둘째 ci-blocked 줄도 넘김" "$Q_SPP" 'plus its `ci-blocked: <checks…>` second line when it printed one'
+hasfx "_execute_spine(A16): 한계 — 한 줄 꼴만 인식" "$Q_SP" 'This check knows only the guidance'"'"'s one-line form'
+hasfx "_execute_spine(A16): :253 이 그 갈래를 가리킴" "$Q_SP" '(a `BLOCKED: gate INV2 — …` → Step 4'"'"'s *Developer `BLOCKED: gate INV2`* bullet)'
+hasfx "_execute_spine(A16): 감사자 INV2 렌즈" "$Q_SP" 'A test file whose old content was replaced by unrelated tests under the'
+hasfx "review(A16): 감사자 INV2 렌즈(코어 사본)" "$Q_RV" 'A test file whose old content was replaced by unrelated tests under the'
+# A18 — -F body=@<file>, never -f
+hasfx "run(A18): run 마커 PATCH 는 -F" "$Q_RUN" '`gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH -F body=@<file>`'
+Q_RF="$(grep -rlF -- '-f body=@' "$GLD/commands" "$GLD/SKILL.md" "$GLD/templates" 2>/dev/null || true)"
+[ -z "$Q_RF" ] && ok "A18: 명령 파일 어디에도 -f body=@ 없음 (gh 는 -f 의 @<file> 을 읽지 않는다)" || bad "A18: -f body=@" "none" "$Q_RF"
+# ── 0.99.2 Part B — md 안의 jq 를 실데이터로 실행 ──
+Q_W="$(mktemp -d)"
+# B2 — retro's decided jq and PR attribution jq over #628 / #630's real PRs
+Q_DJ="$(grep -o "\-\-jq '{state, labels: \[.labels\[\].name\], decided: [^']*'" "$Q_RETRO" | head -1 | sed "s/^--jq '//; s/'\$//")"
+if [ -z "$Q_DJ" ]; then bad "retro(B2): decided jq 추출" "one expression" "none"; else
+  "$PY" - "$Q_REAL/z6-628.json" "$Q_W" <<'PYQ'
+import json, os, sys
+d = json.load(open(sys.argv[1], encoding="utf-8")); o = sys.argv[2]
+iv = {"state": "CLOSED", "labels": [{"name": "type:chore"}, {"name": "guild:done"}], "comments": [{"body": c} for c in d["comments"]["628"]]}
+json.dump(iv, open(os.path.join(o, "iv628.json"), "w"))
+iv["comments"] = [c for c in iv["comments"] if "closed-as-decided" not in c["body"]]
+json.dump(iv, open(os.path.join(o, "iv628-none.json"), "w"))
+json.dump(d["retro630"]["prs"], open(os.path.join(o, "prs630.json"), "w"))
+open(os.path.join(o, "m630.txt"), "w").write(",".join(map(str, d["retro630"]["members"])))
+PYQ
+  [ "$(jq -c "$Q_DJ" "$Q_W/iv628.json" | jq -c '{decided}')" = '{"decided":1}' ] && ok "retro(B2): decided jq — #628 + 마커 → decided 1" || bad "retro(B2): decided jq" '{"decided":1}' "$(jq -c "$Q_DJ" "$Q_W/iv628.json")"
+  [ "$(jq -c "$Q_DJ" "$Q_W/iv628-none.json" | jq -c '{decided}')" = '{"decided":0}' ] && ok "retro(B2): decided jq — 오늘의 #628(마커 없음) → 0" || bad "retro(B2): decided jq 마커 없음" '{"decided":0}' "$(jq -c "$Q_DJ" "$Q_W/iv628-none.json")"
+fi
+Q_PJ="$(grep -o "gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,closedAt,reviewDecision,closingIssuesReferences --jq '.*'" "$Q_RETRO" | head -1 | sed "s/^.*--jq '//; s/'\$//")"
+if [ -z "$Q_PJ" ]; then bad "retro(B2): PR 귀속 jq 추출" "one expression" "none"; else
+  Q_M="$(cat "$Q_W/m630.txt")"
+  Q_PJ="${Q_PJ//\[<m1>,<m2>,<c1>\]/[$Q_M]}"; Q_PJ="${Q_PJ//(<m1>|<m2>|<c1>)/(${Q_M//,/|})}"; Q_PJ="${Q_PJ//<owner>/acme}"; Q_PJ="${Q_PJ//<repo>/app}"
+  Q_PO="$(jq -c "$Q_PJ" "$Q_W/prs630.json" 2>&1)"
+  Q_PN="$(printf '%s\n' "$Q_PO" | tail -n +3 | jq -r 'select(.state == "MERGED") | .number' 2>/dev/null | sort | tr '\n' ' ')"
+  [ "$Q_PN" = "631 632 633 634 635 636 637 647 " ] && ok "retro(B2): PR 귀속 jq — #630 실제 PR 8건 머지 귀속 (실제 retro 의 8/9)" || bad "retro(B2): PR 귀속 jq" "8 merged" "$(printf '%s' "$Q_PO" | head -c 200)"
+  case "$Q_PO" in *'"628"'*|*'628]'*|*'[628'*) bad "retro(B2): #628 귀속 없음" "absent" "present" ;; *) ok "retro(B2): PR 귀속 jq — #628 에는 PR 이 없다 (결정대로 닫힘)" ;; esac
+fi
+# B5 — dev Phase 2b's child discovery jq over #244's real children
+Q_CJ="$(grep -o "\-\-jq '\[.\[\] | select((.body // \"\") | test(\"Parent Issue: #<parent>(\[^0-9\]|\$)\"))\] | sort_by(.number) | .\[\] | {number, title, state, labels: \[.labels\[\].name\]}'" "$Q_DEV" | head -1 | sed "s/^--jq '//; s/'\$//")"
+if [ -z "$Q_CJ" ]; then bad "dev(B5): 자식 발견 jq 추출" "one expression" "none"; else
+  "$PY" -c 'import json,sys; json.dump(json.load(open(sys.argv[1]))["children"], open(sys.argv[2],"w"))' "$Q_REAL/r1-244.json" "$Q_W/ch244.json"
+  Q_CO2="$(jq -c "${Q_CJ//<parent>/244}" "$Q_W/ch244.json" | tr '\n' ' ')"
+  case "$Q_CO2" in '{"number":573,"title":"t","state":"CLOSED","labels":["guild:child","guild:qa","guild:needs-human","type:chore"]} {"number":574,'*) ok "dev(B5): #244 자식 발견 — 573 이 CLOSED·라벨 그대로 먼저 (1b 정리 대상)" ;;
+    *) bad "dev(B5): #244 자식 발견" "573 CLOSED first" "$(printf '%s' "$Q_CO2" | cut -c1-160)" ;; esac
+fi
+# B7 — Section M's read over #244's comments (the directive's structure kept, its text neutral)
+Q_MJ="$(grep -o "\-\-jq '.\[\] | select((.body // \"\") | contains(\"<!-- guild:\") | not) | {id, html_url, body}'" "$Q_HO" | head -1 | sed "s/^--jq '//; s/'\$//")"
+if [ -z "$Q_MJ" ]; then bad "_handoff(B7): Section M jq 추출" "one expression" "none"; else
+  "$PY" -c 'import json,sys; d=json.load(open(sys.argv[1])); json.dump(d["comments"], open(sys.argv[2],"w")); open(sys.argv[3],"w").write(d["scope_exclusion_line"])' "$Q_REAL/section-m-244.json" "$Q_W/c244.json" "$Q_W/excl.txt"
+  Q_MO="$(jq -c "$Q_MJ" "$Q_W/c244.json" 2>&1)"; Q_MRC=$?
+  [ "$Q_MRC" = 0 ] && ok "_handoff(B7): Section M jq 가 null 본문(③)에서 죽지 않는다" || bad "_handoff(B7): null 본문" "rc 0" "$Q_MO"
+  [ "$(printf '%s\n' "$Q_MO" | jq -r .id | tr '\n' ' ')" = "2 3 " ] && ok "_handoff(B7): 나오는 것은 지시 ②(와 null ③)뿐 — 마커 댓글 ①④ 제외" || bad "_handoff(B7): 고른 댓글" "2 3" "$(printf '%s\n' "$Q_MO" | jq -r .id | tr '\n' ' ')"
+  Q_ML="$(printf '%s\n' "$Q_MO" | jq -r 'select(.id == 2) | .body | length')"
+  [ "$Q_ML" = 425 ] && ok "_handoff(B7): ② 본문 길이 = 원본 425자 (전문)" || bad "_handoff(B7): 전문" "425" "$Q_ML"
+  printf '%s\n' "$Q_MO" | jq -r 'select(.id == 2) | .body' | grep -qF -- "$(cat "$Q_W/excl.txt")" && ok "_handoff(B7): 범위 제외 줄이 들어 있다" || bad "_handoff(B7): 범위 제외 줄" "present" "missing"
+  jq -r '.[] | select((.body | test("<!-- guild:")) | not) | .body[0:300]' "$Q_W/c244.json" 2>/dev/null | grep -qF -- "$(cat "$Q_W/excl.txt")" \
+    && bad "_handoff(B7): 측정된 .body[0:300] 꼴은 범위 제외 줄을 잃는다(결함 기록)" "line lost" "line kept" || ok "_handoff(B7): 측정된 .body[0:300] 꼴은 범위 제외 줄을 잃는다 (결함 기록)"
+  Q_DS="$("$PY" - "$GLD/gates/gate_precommit.py" <<'PYQ'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+s = importlib.util.spec_from_file_location("g", sys.argv[1]); g = importlib.util.module_from_spec(s); s.loader.exec_module(g)
+print(g.directive_slice("gh api --paginate repos/acme/app/issues/1/comments --jq '.[] | select((.body | test(\"<!-- guild:\")) | not) | {id, user: .user.login, body: .body[0:300]}'"),
+      g.directive_slice("gh api repos/acme/app/issues/1/comments --paginate --jq '.[] | select((.body // \"\") | contains(\"<!-- guild:\") | not) | {id, html_url, body}'"))
+PYQ
+)"
+  [ "$Q_DS" = "True False" ] && ok "gate(B7): 측정 꼴은 directive_slice, Section M 의 명령 그대로는 아님" || bad "gate(B7): directive_slice" "True False" "$Q_DS"
+fi
+# B10 — retro's auditor jq: the [96]|implode form = the old ` form = the decoded form
+Q_AJ="$(grep -o "\-\-jq '. as \$all.*legacy_blocks.*'" "$Q_RETRO" | sed "s/^--jq '//; s/'\$//")"
+if [ -z "$Q_AJ" ]; then bad "retro(B10): 감사자 jq 추출" "one expression" "none"; else
+  "$PY" -c 'import json,sys; json.dump(json.load(open(sys.argv[1]))["comments"], open(sys.argv[2],"w"))' "$Q_REAL/auditor-records.json" "$Q_W/aud.json"
+  Q_IMP='" + ([96] | implode) + "'
+  Q_OLD="${Q_AJ//"$Q_IMP"/\\u0060}"; Q_DEC="${Q_AJ//"$Q_IMP"/\`}"
+  case "$Q_OLD" in *'\u0060*]{0,2}'*) ok "retro(B10): 옛 \\u0060 판을 새 식에서 되살렸다 (비교가 공허하지 않음)" ;; *) bad "retro(B10): 옛 판 재구성" "\\u0060 present" "$(printf '%s' "$Q_OLD" | cut -c1-80)" ;; esac
+  Q_WANT='{"records":4,"looped_back":1,"fixed":1,"recorded":2,"dismissed":1,"loose":7,"legacy_blocks":1,"variant":1,"clean":1,"no_scan":0,"violation":1}'
+  Q_N1="$(jq -c "$Q_AJ" "$Q_W/aud.json" 2>&1)"; Q_N2="$(jq -c "$Q_OLD" "$Q_W/aud.json" 2>&1)"; Q_N3="$(jq -c "$Q_DEC" "$Q_W/aud.json" 2>&1)"
+  [ "$Q_N1" = "$Q_WANT" ] && ok "retro(B10): 새 jq([96]|implode) — 실제 레코드 모양 기대값" || bad "retro(B10): 새 jq" "$Q_WANT" "$Q_N1"
+  [ "$Q_N2" = "$Q_N1" ] && [ "$Q_N3" = "$Q_N1" ] && ok "retro(B10): 옛 \\u0060 판·디코드판과 출력 동일" || bad "retro(B10): 등가" "$Q_N1" "old=$Q_N2 dec=$Q_N3"
+  case "$Q_AJ" in *'`'*|*'`'*) bad "retro(B10): 새 jq 에 이스케이프·백틱 없음" "none" "present" ;; *) ok "retro(B10): 새 jq 에 이스케이프도 백틱도 없다" ;; esac
+  Q_SH="$("$PY" - "$GLD/gates/gate_precommit.py" "$Q_AJ" "$Q_DEC" <<'PYQ'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+s = importlib.util.spec_from_file_location("g", sys.argv[1]); g = importlib.util.module_from_spec(s); s.loader.exec_module(g)
+pre = "gh api repos/acme/app/issues/1/comments --paginate --jq "
+print(g.shell_text_hazard(pre + "'" + sys.argv[2] + "'"),
+      g.shell_text_hazard(pre + '"' + sys.argv[3].replace('"', '\\"') + '"'))
+PYQ
+)"
+  [ "$Q_SH" = "[] ['a']" ] && ok "gate(B10): 명령 문자열 — 새 jq 는 [], 큰따옴표 디코드판은 ['a']" || bad "gate(B10): shell_text_hazard" "[] ['a']" "$Q_SH"
+fi
+rm -rf "$Q_W"
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -4706,7 +5032,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=2106   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=2322   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

@@ -1,0 +1,44 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [
+   244,
+   574
+  ],
+  "comment_ids": [
+   6482747416
+  ],
+  "snapshot_at": "2026-11-14T00:50:00Z",
+  "gh_commands": [
+   "gh api repos/<o>/<r>/issues/244/comments --paginate"
+  ],
+  "synthetic": [
+   "the directive's text is a neutral stand-in with the same per-line character counts (425 chars, the scope-exclusion line at the same offset, past 300)",
+   "comment ③'s null body and ④'s guild:note are shapes the read must survive; ids and urls are 1–4"
+  ],
+  "fails_before": "no code fix — Section M's jq is replayed as it is (HEAD passes); the measured `.body[0:300]` cut loses the scope-exclusion line, and HEAD's gate lets that cut read through (0.99.2 directive-slice refuses it — gate_test O63–O67 fail on HEAD)"
+ },
+ "scope_exclusion_line": "- 범위 제외: 이 줄이 지시의 대상 밖을 말한다 가가가가가가가가가가",
+ "comments": [
+  {
+   "id": 1,
+   "html_url": "https://github.com/acme/app/issues/244#issuecomment-1",
+   "body": "<!-- guild:analyze:output -->\nx"
+  },
+  {
+   "id": 2,
+   "html_url": "https://github.com/acme/app/issues/244#issuecomment-2",
+   "body": "## 사람 지시 — 가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가\n\n- 내용 가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가\n\n- 내용 가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가\n- 내용 가가가가가가가가가가가가가가가가가가가가가가가가가\n- 내용 가가가가가가가가가가가가가가가가\n- 내용 가가가가가\n- 내용 가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가\n- 범위 제외: 이 줄이 지시의 대상 밖을 말한다 가가가가가가가가가가\n- 다시 묻지 않는다 가가가가가가가가\n"
+  },
+  {
+   "id": 3,
+   "html_url": "https://github.com/acme/app/issues/244#issuecomment-3",
+   "body": null
+  },
+  {
+   "id": 4,
+   "html_url": "https://github.com/acme/app/issues/244#issuecomment-4",
+   "body": "<!-- guild:note -->\nx"
+  }
+ ]
+}

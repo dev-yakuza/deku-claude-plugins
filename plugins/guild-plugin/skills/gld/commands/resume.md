@@ -5,6 +5,7 @@ Continue an in-progress Issue from where it left off. Guild's state lives in Git
 `$1` = Issue number.
 
 > **Bash**: `_bash_rules.md`.
+> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask) — the Issue's own branch is the one exception (`_checkout.md` Section C).
 
 ---
 
@@ -31,6 +32,7 @@ Continue an in-progress Issue from where it left off. Guild's state lives in Git
    - `"none"` (no `guild:*` stage label) → nothing to resume; suggest `/gld dev $1` to start fresh.
 
 ## Notes
+- **Resume never updates the checkout to see merged work** — dev Phase 2c judges from the PRs; running the merged result is the human's (`dev.md` Phase 2c).
 - **Resume == dev from a mid-spine label.** There is no separate resume state — the label is the checkpoint. This is why interruption is safe (labels are the state; no local file to corrupt).
 - If a stage previously returned `NEEDS_HUMAN` or `OK PAUSE`, resume re-enters that stage; the leader re-runs the gate and prompts the human again as needed. Such an Issue also carries `guild:needs-human` — additive on top of its stage label, so `stage` is unaffected and routing above is unchanged. Resume never strips it; it is removed by the stage's own next forward transition, or by a loop-back the human decided (`_handoff.md` Section A).
 - A test/qa loop-back moves the label back to `guild:execute` (`_handoff.md` Section A, *Backward transitions*), so resume routes to execute, which reads the reason from the `<!-- guild:loopback -->` record. A loop-back that was recorded but whose label move was interrupted leaves the label at `guild:test`/`guild:qa`; resume routes there, and that stage's Step 0 finishes the move (*Interrupted loop-back*) without re-running anything. Report the active loop-back count the way `status.md` does.

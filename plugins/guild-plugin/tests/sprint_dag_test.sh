@@ -325,6 +325,21 @@ run "Z2: needs-human + OPEN PR + closed -> still dep-needs-human (merge is requi
   "{\"members\":[$(B 101: 102:101)],\"terminal\":{\"101\":\"needs-human\"},$PRS_OPEN,\"closed\":[101],$BR}" blocked 0 \
   "102 dep-needs-human:#101"
 
+# 0.99.2 B1 — the same rule on the REAL #629/#624 shape (tests/fixtures/real/z2-629.json): a hand-built
+# input — the merged PR #632's branch as it was, #629's leftover needs-human — with and without `closed`.
+Z2R="$("$PY" - "$HERE/fixtures/real/z2-629.json" <<'PYZ'
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+pr = d["prs_gh"][0]
+print(json.dumps({"members": [{k: m[k] for k in ("number", "base_deps", "split")} for m in d["members"]],
+                  "prs": [{"issue": 629, "branch": pr["headRefName"], "state": pr["state"]}],
+                  "terminal": {"629": "needs-human"}, "branches": []}))
+PYZ
+)"
+run "B1(Z2 real): #629 needs-human + #632 MERGED, no closed key -> 624 dep-needs-human" "$Z2R" blocked 0 \
+  "624 dep-needs-human:#629"
+run "B1(Z2 real): …closed [629] (CLOSED/COMPLETED) -> nothing blocked" "${Z2R%\}},\"closed\":[629]}" blocked 0 ""
+
 # 0.98.7 Z6 — closed as decided: `closed_done ∩ closed` (completed) is finished; `closed_done − closed`
 # (not planned) is never a base, even with a same-number local branch left over.
 run "Z6: closed_done + closed (COMPLETED) -> DEFAULT" \
@@ -627,7 +642,7 @@ printf 'sprint_dag: %d passed, %d failed\n' "$PASS" "$FAIL"
 # ⚠ 검사 개수 바닥. 이 파일도 긴 목록이고, 검사 하나가 조용히 사라져도 `FAIL=0` 이면
 #   그린이다 — 설계가 기록한 "190 통과가 옛 바닥선 184를 넘어 4건 소실이 묻혔다" 와 같은
 #   모양이다. 실측 PASS 와 같게 유지하고, 의도적으로 늘릴 때만 올린다.
-DAG_MIN_CHECKS=81
+DAG_MIN_CHECKS=83
 if [ "$((PASS + FAIL))" -lt "$DAG_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${DAG_MIN_CHECKS}건)."
   exit 1

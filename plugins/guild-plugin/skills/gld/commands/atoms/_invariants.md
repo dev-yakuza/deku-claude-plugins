@@ -102,10 +102,17 @@ The commit gate constrains commits made through git **in this working copy**:
 - Separate from the commit gate, the same `PreToolUse(Bash)` hook runs a **Bash text guard** on
   every Bash call, a commit too, before the commit check (0.98.6): it refuses a backtick the shell would run as a command
   inside the call's text (`shell-text`, #1774) and an Issue-body bundle from `gh issue list --json
-  …body…` saved to a file (`bodies-save`). Two narrow measured shapes, a heuristic — a script
-  file, `eval`, `bash -c '…'`, `gh api`, ANSI-C `$'…'` quoting, and a body list captured into a
-  variable and written out later (`x=$(gh issue list …); echo "$x" > f`) are outside it; the prompt rules (`_bash_rules.md`,
-  `_handoff.md` Section C bodies-contract) still carry the rest.
+  …body…` saved to a file (`bodies-save`); since 0.99.2 also a read that keeps only the unmarked
+  comments and slices their bodies (`directive-slice` — Section M's directive read, #244: the scope
+  exclusion sat after the cut) and, **unattended only** (`GLD_UNATTENDED=1`), an Issue/PR comment
+  posted or PATCHed from a body file whose first line is no `<!-- guild:` marker
+  (`unmarked-comment` — 64 of 1,554 measured; attended is not checked: a directive the human asked
+  Claude to write as theirs is rightly unmarked). Four narrow measured shapes, a heuristic — for
+  the first two a script file, `eval`, `bash -c '…'`, `gh api`, ANSI-C `$'…'` quoting, and a body list captured into a
+  variable and written out later (`x=$(gh issue list …); echo "$x" > f`) are outside it; for
+  `directive-slice` a cut read with no marker filter and a script file; for `unmarked-comment` an
+  inline `--body`, a heredoc-written body and a missing file (the gate does not refuse what it
+  cannot read). The prompt rules (`_bash_rules.md`, `_handoff.md` Sections B·C·M) still carry the rest.
 
 Its **firing log** (what evolve's rule scorecard and audit's rule health count) records each
 commit once, not exactly: a PreToolUse pass that does not block parks its rows as *pending*; the

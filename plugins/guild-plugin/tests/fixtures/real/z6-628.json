@@ -1,0 +1,342 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [
+   618,
+   619,
+   620,
+   621,
+   623,
+   624,
+   625,
+   628,
+   629,
+   630,
+   631,
+   632,
+   633,
+   634,
+   635,
+   636,
+   637,
+   647
+  ],
+  "snapshot_at": "2026-11-14T04:10:00Z",
+  "gh_commands": [
+   "gh issue view 628 --json state,stateReason,labels,closedByPullRequestsReferences,comments",
+   "gh issue view 630 --json body",
+   "gh pr list --state all --limit 1000 --json number,headRefName,closingIssuesReferences",
+   "gh issue view 630 --json body (member numbers only) · gh pr list --state all --limit 200 (the 8 PRs attributed to #630's members)"
+  ],
+  "synthetic": [
+   "#628 has no closed-as-decided comment in reality (closed before 0.98.7) — the marker comment is added here; the no-marker variant is today's real shape",
+   "#9001 is a made-up downstream member (no member of #630 depends on #628)",
+   "comment bodies are the marker line plus 'x'",
+   "sprint630: #630's member table and the two merged PRs of its members, for stack_sync --done-cards; repo normalized to acme/app",
+   "retro630: #630's nine members and the eight PRs attributed to them (the real retro counted 8 merged of 9; #628 has none) — only number/branch/state/dates/closing refs, repo normalized"
+  ],
+  "fails_before": "confirmed 2026-11-14: c127023~1 (0.98.6) supervisor — no closed/closed_done, `9001 BLOCKED:dep-no-branch` + `dep-no-branch:#628`, the sweep writes nothing for 628, and with a local chore/628-… branch 9001 is based on it; HEAD passes. The stack_sync half (done-cards 629,624,628) is 0.98.7 behaviour, replayed here"
+ },
+ "members": [
+  {
+   "number": 628,
+   "base_deps": [],
+   "split": false,
+   "kind": "other"
+  },
+  {
+   "number": 9001,
+   "base_deps": [
+    628
+   ],
+   "split": false,
+   "kind": "other"
+  }
+ ],
+ "prs_gh": [],
+ "labels_gh": [
+  {
+   "number": 628,
+   "state": "CLOSED",
+   "stateReason": "COMPLETED",
+   "labels": [
+    {
+     "name": "type:chore"
+    },
+    {
+     "name": "guild:done"
+    }
+   ]
+  },
+  {
+   "number": 9001,
+   "state": "OPEN",
+   "stateReason": "",
+   "labels": []
+  }
+ ],
+ "comments": {
+  "628": [
+   "<!-- guild:needs-human -->\nx",
+   "<!-- guild:analyze:output -->\nx",
+   "<!-- guild:closed-as-decided -->\nx\n<!-- /guild:closed-as-decided -->"
+  ]
+ },
+ "sprint630": {
+  "tracker": 630,
+  "members": [
+   [
+    629,
+    null
+   ],
+   [
+    624,
+    629
+   ],
+   [
+    628,
+    null
+   ]
+  ],
+  "issues": {
+   "629": {
+    "labels": [
+     "type:refactor",
+     "area:skill",
+     "guild:qa",
+     "guild:needs-human"
+    ],
+    "state": "CLOSED",
+    "stateReason": "COMPLETED"
+   },
+   "624": {
+    "labels": [
+     "guild:done",
+     "type:bug",
+     "area:skill"
+    ],
+    "state": "CLOSED",
+    "stateReason": "COMPLETED"
+   },
+   "628": {
+    "labels": [
+     "guild:done",
+     "type:chore"
+    ],
+    "state": "CLOSED",
+    "stateReason": "COMPLETED"
+   }
+  },
+  "prs": [
+   {
+    "number": 632,
+    "state": "MERGED",
+    "headRefName": "refactor/629-execution-history-detail-header",
+    "baseRefName": "main",
+    "closingIssuesReferences": [
+     {
+      "number": 629,
+      "repository": {
+       "name": "app",
+       "owner": {
+        "login": "acme"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "number": 647,
+    "state": "MERGED",
+    "headRefName": "fix/624-detail-started-at-format",
+    "baseRefName": "main",
+    "closingIssuesReferences": [
+     {
+      "number": 624,
+      "repository": {
+       "name": "app",
+       "owner": {
+        "login": "acme"
+       }
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "retro630": {
+  "members": [
+   618,
+   629,
+   619,
+   620,
+   621,
+   623,
+   624,
+   625,
+   628
+  ],
+  "prs": [
+   {
+    "number": 647,
+    "headRefName": "fix/624-detail-started-at-format",
+    "baseRefName": "main",
+    "state": "MERGED",
+    "mergedAt": "2026-11-08T07:44:03Z",
+    "closedAt": "2026-11-08T07:44:03Z",
+    "reviewDecision": "",
+    "closingIssuesReferences": [
+     {
+      "number": 624,
+      "repository": {
+       "name": "app",
+       "owner": {
+        "login": "acme"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "number": 637,
+    "headRefName": "chore/625-verification-caseid-limits",
+    "baseRefName": "main",
+    "state": "MERGED",
+    "mergedAt": "2026-11-07T08:05:54Z",
+    "closedAt": "2026-11-07T08:05:54Z",
+    "reviewDecision": "",
+    "closingIssuesReferences": [
+     {
+      "number": 625,
+      "repository": {
+       "name": "app",
+       "owner": {
+        "login": "acme"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "number": 636,
+    "headRefName": "feature/623-startup-migration-failure-guide",
+    "baseRefName": "main",
+    "state": "MERGED",
+    "mergedAt": "2026-11-07T07:56:13Z",
+    "closedAt": "2026-11-07T07:56:13Z",
+    "reviewDecision": "",
+    "closingIssuesReferences": [
+     {
+      "number": 623,
+      "repository": {
+       "name": "app",
+       "owner": {
+        "login": "acme"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "number": 635,
+    "headRefName": "fix/621-e2e-sns-token-isolation",
+    "baseRefName": "main",
+    "state": "MERGED",
+    "mergedAt": "2026-11-07T06:25:52Z",
+    "closedAt": "2026-11-07T06:25:52Z",
+    "reviewDecision": "",
+    "closingIssuesReferences": [
+     {
+      "number": 621,
+      "repository": {
+       "name": "app",
+       "owner": {
+        "login": "acme"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "number": 634,
+    "headRefName": "fix/620-status-panel-large-text",
+    "baseRefName": "main",
+    "state": "MERGED",
+    "mergedAt": "2026-11-07T06:20:18Z",
+    "closedAt": "2026-11-07T06:20:18Z",
+    "reviewDecision": "",
+    "closingIssuesReferences": [
+     {
+      "number": 620,
+      "repository": {
+       "name": "app",
+       "owner": {
+        "login": "acme"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "number": 633,
+    "headRefName": "fix/619-status-panel-header-semantics",
+    "baseRefName": "main",
+    "state": "MERGED",
+    "mergedAt": "2026-11-07T04:07:42Z",
+    "closedAt": "2026-11-07T04:07:42Z",
+    "reviewDecision": "",
+    "closingIssuesReferences": [
+     {
+      "number": 619,
+      "repository": {
+       "name": "app",
+       "owner": {
+        "login": "acme"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "number": 632,
+    "headRefName": "refactor/629-execution-history-detail-header",
+    "baseRefName": "main",
+    "state": "MERGED",
+    "mergedAt": "2026-11-07T03:59:22Z",
+    "closedAt": "2026-11-07T03:59:22Z",
+    "reviewDecision": "",
+    "closingIssuesReferences": [
+     {
+      "number": 629,
+      "repository": {
+       "name": "app",
+       "owner": {
+        "login": "acme"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "number": 631,
+    "headRefName": "fix/618-local-notifier-setup-in-wiring-test",
+    "baseRefName": "main",
+    "state": "MERGED",
+    "mergedAt": "2026-11-07T00:35:01Z",
+    "closedAt": "2026-11-07T00:35:01Z",
+    "reviewDecision": "",
+    "closingIssuesReferences": [
+     {
+      "number": 618,
+      "repository": {
+       "name": "app",
+       "owner": {
+        "login": "acme"
+       }
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -136,8 +136,8 @@ Labels are created by `/gld init`.
    a failure: it writes no loop-back block and does not count against the cap.
 
 A human moving labels by hand (`/gld rollback stage`) is neither: no block, no count (`rollback.md`).
-`dev.md` Phase 2c's "targeted loop-back to the responsible child" is out of scope too — it re-opens a
-`done` child and always goes through a human (`NEEDS_HUMAN`) first.
+`dev.md` Phase 2c's gap path is out of scope too — it never re-opens a `done` child (a fix on the
+child's open PR, or a new integration-fix child), and always goes through a human (`NEEDS_HUMAN`) first.
 
 **`guild:needs-human` removal.** This label is *additive* to whatever `guild:<stage>` label the Issue already carries (Section H) — a paused Issue keeps its stage label and gains this one on top. It is added by the unattended-mode pause path; it must also be **removed** somewhere, or a resolved pause stays permanently mis-reported to `batch`/`monitoring`/`status`, which all poll it as a first-class state. There are exactly two removal points: **whenever the main session performs ANY successful forward-progress label transition on an Issue that currently carries `guild:needs-human`**, and **a loop-back transition the human decided** — one whose block carries `decided: human` (Section B, loop-back procedure step 6), whether test, qa or the leader asked, and including its *Interrupted loop-back* completion; the human's answer is the resolution. The forward case: — an `OK ADVANCE`/`OK SPLIT`/`OK DONE` after the human resolved the pause and a re-run/`resume` made real progress, whether the transition is between two spine stages (`guild:<stage>` → `guild:<next-stage>`) or into/out of the `guild:children` orchestration state (which Section A above already notes is *not itself* a stage, but still counts as forward progress) — remove `guild:needs-human` as part of that same transition. The advance itself is the evidence the pause was resolved:
 ```bash
@@ -151,7 +151,7 @@ Check the Issue's current labels first (already read at Step 0 of every stage �
 
 Each stage persists its output as a GitHub Issue comment wrapped in a marker pair, so later stages (and `/gld resume`) can find it. Update-in-place: if a comment with the marker already exists, PATCH it rather than appending (per `_bash_rules.md` temp-file pattern) — **four documented exceptions**: `<!-- guild:auditor:execute -->` is a **cumulative single comment** whose PATCH re-writes the *previous body plus* a new block inserted inside the marker pair; `<!-- guild:auditor-violation -->` is **one new comment per occurrence, never PATCHed**; and `<!-- guild:sprint:retro -->` is **appended once per sprint** (a sprint's history is the sequence of its retros, so replacing would erase the previous one); and, fourth, `<!-- guild:loopback -->` is **cumulative** exactly like `guild:auditor:execute` — each loop-back inserts a new block just before the closing marker and keeps every earlier one, because the cap, the stagnation comparison and the "not yet handled" test all read the earlier blocks (both lookups `--paginate`, stream form). The first two exist because losing an earlier attempt's dismissal — or an earlier violation's evidence — is the specific failure those records exist to prevent. Every other marker is replace-in-place.
 
-**Every comment Guild posts opens with a `<!-- guild:` marker** — a note that is no stage output (a pause kept on resume, a PR-created note, a status line) opens with `<!-- guild:note -->` (Section M reads an unmarked comment as the human's; measured #628 · word_app #1826: `analyze 재개 시도 … 보류 유지`, `PR #1847 생성` with no marker).
+**Every comment Guild posts opens with a `<!-- guild:` marker** — a note that is no stage output (a pause kept on resume, a PR-created note, a status line) opens with `<!-- guild:note -->` (Section M reads an unmarked comment as the human's; measured #628 · word_app #1826: `analyze 재개 시도 … 보류 유지`, `PR #1847 생성` with no marker). — **including a comment a repo habit asks for** (a PR CI note, a PR-created note: measured one-man-company and word_app `leader.md` habits, 7 unmarked PR comments in #649) **and a note on a PR** (`gh pr comment`); a habit's wording never drops the marker. A comment the human asked you to write **as theirs** (`## 사람 지시 — …`) is the one that stays unmarked — it is a directive (Section M). Unattended, the commit gate refuses an unmarked `--body-file` comment (`unmarked-comment` — `_invariants.md`).
 
 ⚠ One further shape this section did not previously cover: `<!-- guild:sprint:plan -->` lives in an **Issue BODY**, not a comment, and is immutable after creation (guarded by `plan-hash`). Rewriting a body is read → splice → full replace, and `gh issue edit` has no append — so it carries a **mandatory truncation check** (`_sprint_dag.md` Section A). The rest of this section assumes a comment; that row does not.
 
@@ -611,7 +611,7 @@ gh issue list --label guild:child --state all --limit 200 --json number,title,la
 
 **Leaf-only invariant:** a child is a leaf — it is **not** re-split. If a `guild:child` Issue's design flags a further split, that is a scoping error: return `NEEDS_HUMAN: child #<n> cannot be re-split — re-scope the parent #<parent>` rather than recursing.
 
-**Parent integration & completion:** the parent stays at `guild:children` while any child is open. When **every** child is `guild:done`, the leader runs a **parent-integration** check (dev Phase 2c): does the union of children satisfy every parent acceptance criterion? are the children mutually consistent (no seam/data-shape mismatch, no duplicated or orphaned work)? are all parent DoD items closed? Post the result under `<!-- guild:integration:output -->` on the parent. A gap → `NEEDS_HUMAN` (or a targeted loop-back to the relevant child); clean → transition the parent `guild:children` → `guild:done`.
+**Parent integration & completion:** the parent stays at `guild:children` while any child is open. When **every** child is `guild:done`, the leader runs a **parent-integration** check (dev Phase 2c): does the union of children satisfy every parent acceptance criterion? are the children mutually consistent (no seam/data-shape mismatch, no duplicated or orphaned work)? are all parent DoD items closed? Post the result under `<!-- guild:integration:output -->` on the parent. A gap → `NEEDS_HUMAN` with the path `dev.md` Phase 2c names by the child PR's state — a fix on the open PR, or a new integration-fix child; never a loop-back into a `guild:done` child; clean → transition the parent `guild:children` → `guild:done`.
 
 ---
 
@@ -714,7 +714,7 @@ nothing.
 
 - **A human directive** = words in an Issue's body, or in a comment **without** a `<!-- guild:` marker, that tell Guild to
   change one of its judgments (never judged by author — same account).
-- **Read before stopping** (each its own Bash call — run these reads **exactly as given**: no `.body[0:N]`, `head` or filter, the bodies-contract's rule; measured #620 `.body[0:600]`, #621 #623 not run): this Issue's comments
+- **Read before stopping** (each its own Bash call — run these reads **exactly as given**: no `.body[0:N]`, `head` or filter, the bodies-contract's rule; measured #620 `.body[0:600]`, #621 #623 not run — a directive's scope exclusion sits after its first sentence (measured #244: cut at 300, the line `잡이 실행된 뒤 실패한 red는 이 지시의 대상이 아니다` was gone); the commit gate refuses that cut read (`directive-slice` — `_invariants.md`)): this Issue's comments
   `gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '.[] | select((.body // "") | contains("<!-- guild:") | not) | {id, html_url, body}'`
   and its body (already read); for **each** `Sprint: #<t>` line in the body whose tracker is `OPEN`
   (`gh issue view <t> --json state --jq .state`), that tracker's comments in the same form (a carried-over member also
@@ -737,7 +737,7 @@ nothing.
   `적용 가능한 사람 지시: #<m> "<한 줄>" — 이 Issue(또는 트래커 #<t>)에 남기면 다음 재개에 적용됩니다`.
 - **Applied → recorded**: in that stage's output comment (`qa:output` and the like) and the PR body, one line
   `사람 지시 적용: #<m> (<댓글 URL>) — <한 줄>`.
-- **A habit stop records the reads** — its pause comment carries, on the line right after the cause line, either `사람 지시 확인: 없음 — 읽음: #<n> · 트래커 #<t>[ · 부모 #<p>]` or the `적용 가능한 사람 지시: …` line above (a missing line shows in the same place as the cause-line check, Section H).
+- **A habit stop records the reads** — its pause comment carries, on the line right after the cause line, either `사람 지시 확인: 없음 — 읽음: #<n> · 트래커 #<t>[ · 부모 #<p>] (마커 없는 댓글 <k>개, 전문)` — `<k>` = the unmarked comments those reads returned, each read whole (a cut read cannot say this) — or the `적용 가능한 사람 지시: …` line above (a missing line shows in the same place as the cause-line check, Section H).
 
 This decides only whether the leader stops out of habit; completion (labels — `batch.md` Phase 4) and the W5 grouping
 of `env:` pauses are unchanged.

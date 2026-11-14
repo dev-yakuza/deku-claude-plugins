@@ -1,0 +1,58 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [
+   616
+  ],
+  "head": "da1f90e5",
+  "gh_commands": [
+   "gh api repos/<o>/<r>/commits/<ref>/check-runs --paginate"
+  ],
+  "synthetic": [
+   "only id, name, conclusion and output.annotations_count are kept"
+  ],
+  "fails_before": "base_ci.py is new in 0.99.2; the 0.98.7 prose order read annotations before the dedupe — #616's first three failures with annotations in stream order are two `Conventional 접두어 검증` duplicates and `수동 검증 …`, never `Analyze & Test`"
+ },
+ "check_runs": [
+  {
+   "id": 124403030936,
+   "name": "Conventional 접두어 검증",
+   "conclusion": "failure",
+   "output": {
+    "annotations_count": 2
+   }
+  },
+  {
+   "id": 124396484426,
+   "name": "Conventional 접두어 검증",
+   "conclusion": "failure",
+   "output": {
+    "annotations_count": 2
+   }
+  },
+  {
+   "id": 124396379917,
+   "name": "수동 검증 신선도·케이스 커버리지 검사 (PR 브랜치 스코프)",
+   "conclusion": "failure",
+   "output": {
+    "annotations_count": 2
+   }
+  },
+  {
+   "id": 124396379663,
+   "name": "Analyze & Test",
+   "conclusion": "failure",
+   "output": {
+    "annotations_count": 2
+   }
+  },
+  {
+   "id": 124396379554,
+   "name": "Conventional 접두어 검증",
+   "conclusion": "failure",
+   "output": {
+    "annotations_count": 2
+   }
+  }
+ ]
+}

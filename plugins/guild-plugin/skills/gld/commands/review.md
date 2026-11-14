@@ -5,6 +5,7 @@
 `$1` = Issue number (preferred) or PR number. Optional `$2 = --comment` to post a recap to the PR at the end.
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
+> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: conduct the walkthrough (narration, questions, recap) in `config.language` (`_handoff.md` Section K). Machine tokens / `file:line` refs stay ASCII.
 
 > **This is a MULTI-TURN, interactive flow.** It runs in the **main session** (it must pause and wait for the human between units — a sub-agent cannot). The command *initiates* the walkthrough and presents the plan + first unit; each subsequent turn presents the next unit after the human responds. Track the current unit index in your reasoning (like an FSM). If interrupted, re-running `/gld review $1` restarts, or the human can say "continue from unit N".
@@ -16,7 +17,7 @@
 > **⚠ When a requested edit happens outside this checkout** — the PR head is not the branch checked out here. **Never switch the human's checkout to another branch.** Each command its own Bash call:
 > - **The head is already checked out in another worktree** (`git worktree list --porcelain` shows `branch refs/heads/<head>` — a leftover sprint worktree, say) → do not make a new one: tell the human that path and ask before editing **in that worktree** — the ask is owed even when the path is obvious; wait for the answer before the first edit; when `git -C <path> status --short` shows uncommitted changes there, show them and ask first.
 > - **Otherwise** `git fetch origin +refs/heads/<head>:refs/remotes/origin/<head>` (the refspec `stack_sync.py` uses). Read the PR's head with its own call, `gh pr view <pr> --repo <owner>/<repo> --json headRefOid --jq .headRefOid`; a local branch `<head>` whose tip (`git rev-parse <head>`) differs from that `headRefOid` → show both SHAs and ask the human (the posture of `sprint/retro.md` Phase 7) — never pick one silently. Then `git worktree add <repo-parent>/.gld-<repo>-review-<pr> <head>` — no local branch → `git worktree add -b <head> <repo-parent>/.gld-<repo>-review-<pr> origin/<head>` (the only case with an upstream: its push target is that PR head). Never `--force`.
-> - **The end condition** (review has no commit or push step of its own): the human's request covered committing and pushing, and both landed → `git worktree remove <path>` (never `--force`). **An edit left uncommitted or unpushed is not removed** — Step 5's recap carries one line: the path, `git -C <path> status --short`, and what is left for the human (commit or discard, then `git worktree remove <path>`). A refused `remove` → the same line. Remove only a worktree this review created — an existing one is never touched.
+> - **The end condition** (review has no commit or push step of its own): the human's request covered committing and pushing, and both landed → `git worktree remove <path>` (never `--force`). **An edit left uncommitted or unpushed is not removed** — Step 5's recap carries one line: the path, `git -C <path> status --short`, and what is left for the human (commit or discard, then `git worktree remove <path>`). A refused `remove` → the same line. Remove only a worktree this review created — an existing one is never touched. The common rule this applies: `_checkout.md` (a request to work on another branch).
 
 ---
 
@@ -91,6 +92,9 @@ As the leader, spawn in one parallel message — **then wait for every one of th
   >           adding skip/focus directives — is always a BLOCKER, whatever its
   >           apparent consequence. A newly added but weak assertion is not that
   >           case; grade it by consequence like anything else.
+  >           A test file whose old content was replaced by unrelated tests under the
+  >           same path is a deletion (INV2) — measured #511: the new test was moved onto
+  >           the deleted test's path and the gate saw a modification.
   > MAJOR   = a real defect with a bounded consequence — e.g. an edge case or one branch
   >           of a requirement left unmet, a degraded behavior, or a broken rule
   >           that has teeth — where the change still delivers its purpose and none

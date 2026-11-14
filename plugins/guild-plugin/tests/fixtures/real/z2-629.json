@@ -1,0 +1,92 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [
+   629,
+   624,
+   632
+  ],
+  "snapshot_at": "2026-11-07T08:16:01Z",
+  "gh_commands": [
+   "gh issue view 629 --json state,stateReason,labels",
+   "gh issue view 624 --json state,labels",
+   "gh pr view 632 --json state,mergedAt,headRefName,baseRefName,closingIssuesReferences"
+  ],
+  "synthetic": [
+   "closingIssuesReferences repository normalized to acme/app (the test's OWNER_REPO)",
+   "the NOT_PLANNED and OPEN variants are made by the test from this snapshot"
+  ],
+  "fails_before": "confirmed 2026-11-14: c127023~1 (0.98.6) and f96f64c (0.98.3) supervisors — run.json has no `closed`, terminal keeps 629, --mode blocked prints `624 dep-needs-human:#629`; HEAD (0.99.1) passes"
+ },
+ "members": [
+  {
+   "number": 629,
+   "base_deps": [],
+   "split": false,
+   "kind": "slot"
+  },
+  {
+   "number": 624,
+   "base_deps": [
+    629
+   ],
+   "split": false,
+   "kind": "other"
+  }
+ ],
+ "prs_gh": [
+  {
+   "number": 632,
+   "state": "MERGED",
+   "mergedAt": "2026-11-07T03:59:22Z",
+   "headRefName": "refactor/629-execution-history-detail-header",
+   "baseRefName": "main",
+   "reviewDecision": "",
+   "closingIssuesReferences": [
+    {
+     "number": 629,
+     "repository": {
+      "name": "app",
+      "owner": {
+       "login": "acme"
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "labels_gh": [
+  {
+   "number": 629,
+   "state": "CLOSED",
+   "stateReason": "COMPLETED",
+   "labels": [
+    {
+     "name": "type:refactor"
+    },
+    {
+     "name": "area:skill"
+    },
+    {
+     "name": "guild:qa"
+    },
+    {
+     "name": "guild:needs-human"
+    }
+   ]
+  },
+  {
+   "number": 624,
+   "state": "OPEN",
+   "stateReason": "",
+   "labels": [
+    {
+     "name": "type:bug"
+    },
+    {
+     "name": "area:skill"
+    }
+   ]
+  }
+ ]
+}

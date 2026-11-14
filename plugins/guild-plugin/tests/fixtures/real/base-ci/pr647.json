@@ -1,0 +1,51 @@
+{
+ "_source": {
+  "repo": "1-man-company/one-man-company",
+  "numbers": [
+   647
+  ],
+  "head": "01b62094",
+  "gh_commands": [
+   "gh api repos/<o>/<r>/commits/<ref>/check-runs --paginate"
+  ],
+  "synthetic": [
+   "only id, name, conclusion and output.annotations_count are kept",
+   "two Conventional runs, both success today (the 0.98.7 note of an earlier failed attempt does not reproduce)"
+  ],
+  "fails_before": "base_ci.py is new in 0.99.2; the 0.98.7 prose order read annotations before the dedupe — #616's first three failures with annotations in stream order are two `Conventional 접두어 검증` duplicates and `수동 검증 …`, never `Analyze & Test`"
+ },
+ "check_runs": [
+  {
+   "id": 128660646109,
+   "name": "Conventional 접두어 검증",
+   "conclusion": "success",
+   "output": {
+    "annotations_count": 1
+   }
+  },
+  {
+   "id": 128657133516,
+   "name": "Analyze & Test",
+   "conclusion": "success",
+   "output": {
+    "annotations_count": 2
+   }
+  },
+  {
+   "id": 128657133422,
+   "name": "수동 검증 신선도·케이스 커버리지 검사 (PR 브랜치 스코프)",
+   "conclusion": "success",
+   "output": {
+    "annotations_count": 2
+   }
+  },
+  {
+   "id": 128656162217,
+   "name": "Conventional 접두어 검증",
+   "conclusion": "success",
+   "output": {
+    "annotations_count": 1
+   }
+  }
+ ]
+}

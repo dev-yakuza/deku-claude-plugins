@@ -5,6 +5,7 @@
 `$1` (optional): `--check` (show the version gap + what's available, change nothing) · `--migrate-personas` (draw the central/local boundary in existing persona files so the normal update can refresh them — see the section at the end) · default = interactive update.
 
 > **Bash**: `_bash_rules.md`. Handoff + owner/repo: `_handoff.md`.
+> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K).
 
 ---

@@ -49,6 +49,10 @@ WHAT IT DOES
    exactly as before, and the harness still gets an exit to re-invoke Phase 4 on.
    If the launcher is killed, only the streaming stops. The supervisor keeps running and
    keeps writing to the log.
+   It **streams from this run's start offset** — the file keeps earlier runs above it
+   (`O_APPEND`, never truncated, so a re-run's history stays), and reading from offset 0 printed
+   the previous run first (measured word_app run 2: the previous run's `Stop: kill <pid>` banner
+   came first). A file that shrank meanwhile (the human emptied it) is read from 0.
 
    ⚠⚠ **The double fork costs us `wait()`.** The supervisor is no longer this process's child,
    so `Popen.poll()` cannot report its exit code — a naive double-fork patch would make this
@@ -259,6 +263,8 @@ def main():
         os.close(os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644))
     except OSError as e:
         die("cannot open log %s: %s" % (log_path, e), 70)
+    # This run's start offset — taken before the spawn, so nothing this run writes is skipped.
+    start = os.path.getsize(log_path)
 
     # The rc wrapper runs inside the grandchild, so the code is recorded even when this
     # launcher is killed mid-stream. See `_RC_WRAPPER`.
@@ -279,6 +285,7 @@ def main():
     # Stream the log for as long as we are alive. Being killed here is a supported outcome,
     # not an error: the supervisor is in its own session and keeps going.
     with open(log_path, "rb") as f:
+        f.seek(0 if os.path.getsize(log_path) < start else start)
         while True:
             chunk = f.read(65536)
             if chunk:

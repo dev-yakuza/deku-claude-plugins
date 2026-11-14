@@ -10,6 +10,7 @@ subcommand routes to.
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. Stage derivation: `_handoff.md`
 > Section A (**list form**). Membership · order · base: `_sprint_dag.md`. Render conventions
 > reused from `monitoring.md` (actionable-first).
+> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: `config.language`; counts, paths, `#N` and machine tokens stay ASCII.
 
 ---

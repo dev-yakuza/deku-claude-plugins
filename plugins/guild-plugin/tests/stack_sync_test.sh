@@ -77,7 +77,9 @@ elif a[:2] == ["issue", "view"]:
         q = a[a.index("--jq") + 1]
         if "closed-as-decided" not in q or "length" not in q:
             sys.stderr.write("stub: unexpected --jq %r\n" % q); sys.exit(2)
-        payload = {"state": it.get("state", "OPEN"), "labels": [{"name": l} for l in it["labels"]],
+        # 0.99.2 A5 — DONE_JQ also reads stateReason and the integration:output count.
+        payload = {"state": it.get("state", "OPEN"), "stateReason": it.get("stateReason"),
+                   "labels": [{"name": l} for l in it["labels"]],
                    "comments": [{"body": c} for c in it.get("comments", [])]}
         import shutil
         if shutil.which("jq"):
@@ -87,9 +89,12 @@ elif a[:2] == ["issue", "view"]:
             if p.returncode != 0:
                 sys.stderr.write(p.stderr); sys.exit(1)
             sys.stdout.write(p.stdout); sys.exit(0)
-        print(json.dumps({"state": payload["state"], "labels": list(it["labels"]),
+        print(json.dumps({"state": payload["state"], "stateReason": payload["stateReason"],
+                          "labels": list(it["labels"]),
                           "decided": sum(1 for c in it.get("comments", [])
-                                         if "<!-- guild:closed-as-decided -->" in c)}))
+                                         if "<!-- guild:closed-as-decided -->" in c),
+                          "integrated": sum(1 for c in it.get("comments", [])
+                                            if "<!-- guild:integration:output -->" in c)}))
         sys.exit(0)
     print(json.dumps({"body": it.get("body", ""), "labels": [{"name": l} for l in it["labels"]],
                       "state": it.get("state", "OPEN"), "stateReason": it.get("stateReason")}))
@@ -868,7 +873,7 @@ export STUB_VIEWS="$S/views.txt"; : > "$STUB_VIEWS"
 sync --check --done-cards
 eq "Z6 done-cards: no PR + CLOSED/NOT_PLANNED + guild:done + marker → listed" "$(last "$OUT")" "done-cards 11,13"
 eq "Z6 done-cards: the marker read is ONE issue view of #13" "$(grep -c '^issue view 13 ' "$STUB_VIEWS")" "1"
-has "Z6 done-cards: --json state,labels,comments" "$(grep '^issue view 13 ' "$STUB_VIEWS")" "--json state,labels,comments --jq"
+has "Z6 done-cards: --json state,stateReason,labels,comments (0.99.2 A5: one read, both verdicts)" "$(grep '^issue view 13 ' "$STUB_VIEWS")" "--json state,stateReason,labels,comments --jq"
 lacks "Z6 done-cards: no gh api --paginate" "$(cat "$STUB_VIEWS" "$S/calls.txt")" "api"
 eq "Z6 done-cards: --check makes no mutating gh call" "$(cat "$S/calls.txt")" ""
 mutate 'st["issues"]["13"]["comments"]=["<!-- guild:analyze:output -->x"]'
@@ -893,12 +898,87 @@ eq "Z6 done-cards: #13's read fails → #13 skipped, #14 still listed (no error 
 if command -v jq >/dev/null 2>&1; then
   export STUB_JQ_LOG="$S/jq.txt"; : > "$STUB_JQ_LOG"
   sync --check --done-cards
-  eq "Z6 done-cards: the REAL DECIDED_JQ ran over gh-shaped JSON" "$(grep -c real-jq "$STUB_JQ_LOG")|$(last "$OUT")" "2|done-cards 11,13,14"
+  eq "Z6 done-cards: the REAL DONE_JQ ran over gh-shaped JSON" "$(grep -c real-jq "$STUB_JQ_LOG")|$(last "$OUT")" "2|done-cards 11,13,14"
   unset STUB_JQ_LOG
 else
   bad "Z6 done-cards: real jq" "jq on PATH" "missing"
 fi
 unset STUB_VIEWS
+
+echo "── stack_sync: --done-cards — real replays (0.99.2 B2 · B9 · A5) ──"
+# real_state <fixture> <key> — the state file for --tracker 10 from a real fixture (numbers, labels,
+# states, branches as they were; comment bodies are the marker line + `x`; repo acme/app).
+real_state() {
+  "$PY" - "$HERE/fixtures/real/$1.json" "$2" "$S/state.json" <<'PYR'
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8")); key = sys.argv[2]
+rows = ""
+if key == "sprint630":
+    sp = d["sprint630"]; issues = {k: dict(v) for k, v in sp["issues"].items()}
+    members, prs = sp["members"], sp["prs"]
+    issues["628"]["comments"] = d["comments"]["628"]
+else:   # board-161: #649 reduced to this case's two members; #161's own read is the supplement row
+    members = [[m["number"], None] for m in d["members"]]
+    issues = {"161": {"labels": [l["name"] for l in d["supplement"]["161"]["labels"]],
+                      "state": d["supplement"]["161"]["state"], "stateReason": d["supplement"]["161"]["stateReason"],
+                      "comments": d["comments"]["161"]},
+              "638": {"labels": [l["name"] for l in d["labels_gh"][0]["labels"]], "state": "CLOSED", "stateReason": "COMPLETED"}}
+    prs = d["prs_gh"]
+for n, dep in members:
+    rows += "| x | #%d | %s | %s | |\n" % (n, "#%d" % dep if dep else "—", "#%d" % dep if dep else "—")
+issues["10"] = {"labels": ["guild:sprint"], "body": "# Sprint\n<!-- guild:sprint:plan -->\n| # | 이슈 | base 의존 | 원래 의존 | 비고 |\n|---|---|---|---|---|\n" + rows + "<!-- /guild:sprint:plan -->\n"}
+out = []
+for p in prs:
+    p = {k: p[k] for k in ("number", "state", "headRefName", "baseRefName", "closingIssuesReferences")}
+    p.update({"headRefOid": "x", "mergeCommit": {"oid": "y"}, "isDraft": False})
+    out.append(p)
+json.dump({"issues": issues, "prs": out}, open(sys.argv[3], "w"))
+PYR
+}
+# B2 — #630's real member table (#629 · #624 on #629 · #628), #628 closed as decided (the marker is
+# the fixture's — #628 closed before 0.98.7 and has none in reality)
+new_scenario rz6; real_state z6-628 sprint630
+printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/config.json"
+sync --check --done-cards
+eq "B2(Z6) #630 shape + the marker → done-cards 629,624,628 (table order)" "$(last "$OUT")" "done-cards 629,624,628"
+mutate 'st["issues"]["628"]["comments"]=[c for c in st["issues"]["628"]["comments"] if "closed-as-decided" not in c]'
+sync --check --done-cards
+eq "B2(Z6) …today's real #628 (no marker) → done-cards 629,624" "$(last "$OUT")" "done-cards 629,624"
+# B9 — #161, the split parent of sprint #649: integration passed (two integration:output comments),
+# the human closed it COMPLETED, no PR of its own. Before 0.99.2: `done-cards 638` — never 161.
+new_scenario rb9; real_state board-161 -
+printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/config.json"
+export STUB_VIEWS="$S/views.txt"; : > "$STUB_VIEWS"
+sync --check --done-cards
+eq "B9(A5) #161 landed split parent → done-cards 161,638 (members order)" "$(last "$OUT")" "done-cards 161,638"
+eq "B9(A5) …#161 is read ONCE" "$(grep -c '^issue view 161 ' "$STUB_VIEWS" | tr -d ' ')" "1"
+has "B9(A5) …with --json state,stateReason,labels,comments" "$(grep '^issue view 161 ' "$STUB_VIEWS")" "--json state,stateReason,labels,comments --jq"
+lacks "B9(A5) …and no gh api --paginate" "$(cat "$STUB_VIEWS" "$S/calls.txt")" "api"
+mutate 'st["issues"]["161"]["state"]="OPEN"; st["issues"]["161"]["stateReason"]=None'
+sync --check --done-cards
+eq "B9(A5) variant OPEN · guild:done · integrated (child PRs still open) → not listed" "$(last "$OUT")" "done-cards 638"
+mutate 'st["issues"]["161"]["state"]="CLOSED"; st["issues"]["161"]["stateReason"]="NOT_PLANNED"'
+sync --check --done-cards
+eq "B9(A5) variant CLOSED/NOT_PLANNED · integrated → not listed" "$(last "$OUT")" "done-cards 638"
+mutate 'st["issues"]["161"]["stateReason"]="COMPLETED"; st["issues"]["161"]["comments"]=[c for c in st["issues"]["161"]["comments"] if "integration:output" not in c]'
+sync --check --done-cards
+eq "B9(A5) variant no integration:output → not listed" "$(last "$OUT")" "done-cards 638"
+mutate 'st["issues"]["161"]["comments"]=["<!-- guild:integration:output -->\nx"]; st["issues"]["161"]["labels"]=["guild:children"]'
+sync --check --done-cards
+eq "B9(A5) variant without guild:done (2c not passed) → not listed" "$(last "$OUT")" "done-cards 638"
+unset STUB_VIEWS
+# The stub's jq-less fallback emits the same keys as the real DONE_JQ (else the new branch is
+# judged on a missing key and passes or fails for nothing).
+FBK="$("$PY" - "$SYNC" <<'PYK'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"DONE_JQ = \((.*?)\)\n", src, re.S)
+q = "".join(re.findall(r"'([^']*)'", m.group(1)))
+print(",".join(sorted(re.findall(r"(?:^\{|, )(\w+)(?=[,:}])", q))))
+PYK
+)"
+STUBK="$(grep -A6 'print(json.dumps({"state": payload\["state"\]' "$WORK/bin/gh" | grep -oE '"(state|stateReason|labels|decided|integrated)":' | tr -d '":' | sort | tr '\n' ',' | sed 's/,$//')"
+eq "B9(A5) stub fallback keys = DONE_JQ keys" "$STUBK" "$FBK"
 
 echo "── prs_by_issue: same-repository references only (0.98.3 W8) ──"
 # -B: no .pyc beside the plugin's scripts (the pycache check below).
@@ -978,7 +1058,7 @@ echo
 echo "stack_sync: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when checks are added on purpose. A
 #   quote that swallows the rest of the file runs fewer checks and still ends green otherwise.
-SYNC_MIN_CHECKS=157
+SYNC_MIN_CHECKS=168
 if [ "$((PASS + FAIL))" -lt "$SYNC_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${SYNC_MIN_CHECKS}건)."
   exit 1
