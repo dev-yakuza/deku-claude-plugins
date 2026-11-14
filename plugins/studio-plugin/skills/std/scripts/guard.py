@@ -34,19 +34,41 @@ def _deny(reason):
                                               "permissionDecisionReason": reason}}, ensure_ascii=False)
 
 
+def _disarm():
+    """fix-0103 §3: stop the process timer before any stdout write; never raises."""
+    try:
+        limits = sys.modules.get("stdo.guard.limits")
+        if limits is not None and hasattr(limits, "disarm"):
+            limits.disarm()
+    except BaseException:  # noqa: BLE001
+        pass
+
+
+def _is_deadline(e):
+    limits = sys.modules.get("stdo.guard.limits")
+    return limits is not None and isinstance(e, getattr(limits, "HookDeadline", ()))
+
+
 def main():
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from stdo.guard import judge
+        from stdo.guard import judge, limits
+        try:
+            if hasattr(limits, "arm"):  # tests run this file over the rebuilt 0.0.26 tree, which has none
+                limits.arm()  # fix-0103 §3: past HOOK_DEADLINE (15 s) the call is refused, G-LIMIT
+        except Exception:  # noqa: BLE001 — no timer on this platform: judged as before, never G-ERR for every call
+            pass
         from stdo.guard.messages import INV9
         if os.environ.get("STUDIO_TEST_GUARD_RAISE") == "1":
             raise RuntimeError("test: injected failure")
         data = sys.stdin.buffer.read(MAX_INPUT + 1)
         if len(data) > MAX_INPUT:
+            _disarm()
             out = _deny("Studio guard [G-LIMIT]: the tool input is too large for the guard.\n" + INV9)
         else:
             hook = json.loads(data.decode("utf-8"))
             deny, ctx = judge.decide(hook, os.environ)
+            _disarm()  # the record and the output are outside the timer (a deadline from here on would lose them)
             if deny is not None:
                 out = _deny(deny.message(ctx.denies))
             elif ctx.allow:
@@ -64,7 +86,15 @@ def main():
             sys.stdout.flush()
         return 0
     except BaseException as e:  # noqa: BLE001 — closed side
+        _disarm()
         try:
+            if _is_deadline(e):
+                sys.stdout.write(_deny("Studio guard [G-LIMIT]: the call needs more checks than the guard's time "
+                                       "allows — split it into simpler steps.\nStop: do not reach the same effect "
+                                       "another way (INV9). Tell the user what was refused and why, and ask how to "
+                                       "proceed.") + "\n")
+                sys.stdout.flush()
+                return 0
             sys.stdout.write(_deny("Studio guard [G-ERR]: internal guard error (%s) — tell the user; this is a bug "
                                    "in the guard.\nStop: do not reach the same effect another way (INV9). Tell the "
                                    "user what was refused and why, and ask how to proceed." % type(e).__name__) + "\n")

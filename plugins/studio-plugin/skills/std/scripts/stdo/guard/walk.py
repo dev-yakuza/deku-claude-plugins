@@ -2328,8 +2328,10 @@ class Walker(object):
         follow (M6)."""
         for n in cmdopts.paramx_assigned(raw):
             text, op = _paramx_value(raw, n)
-            if op == "::=" and text is not None and re.fullmatch(r"(?:[^$`'\"\\~*?\[]|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)*",
-                                                               text):
+            # fix-0103 §1: a name after `$` ends where the name ends, so `${a}` has one reading (linear)
+            if op == "::=" and text is not None and re.fullmatch(r"(?:[^$`'\"\\~*?\[]|\$(?:\{[A-Za-z_][A-Za-z0-9_]*"
+                                                               r"(?:\}|(?![A-Za-z0-9_}]))|[A-Za-z_][A-Za-z0-9_]*"
+                                                               r"(?![A-Za-z0-9_])))*", text):
                 text = self.resolve_text(text, state, cwds)  # `X=<R>; : ${HOME::=$X}` (review 7 M5)
             known = text if op == "::=" and text is not None and not re.search(r"[$`'\"\\~*?\[]", text) else None
             vmark = ValueMark(state) if op != "::=" else None
@@ -2717,7 +2719,7 @@ class Walker(object):
                 f = self.first_operand(args, ("-f",))
                 scripts = [f] if f is not None else []
             for s in scripts:
-                if s and re.search(r"(^|[;{}\n])\s*(\d+|\$|/[^/]*/)?\s*e(\s|;|$)", s):
+                if s and re.search(r"(^|[;{}\n])[^\S\n]*(?:(?:\d+|\$|/[^/]*/)\s*)?e(\s|;|$)", s):
                     self.emit_later(deferred, Opaque("sed-exec", payload=s, cwds=cwd_list(cwds)), cmd)
         elif k in ("eval",):
             pass
@@ -3034,9 +3036,9 @@ def _run_of(cmd, cwds):
 
 
 NULLCMD_OK = ("cat", ":", "true", "more", "less", "")
-SAFE_ARRAY_RE = re.compile(r"^\(\s*(?:[A-Za-z0-9_./,:@%=-]+\s*)*\)$")
+SAFE_ARRAY_RE = re.compile(r"^\([\sA-Za-z0-9_./,:@%=-]*\)$")
 STDIN_FILES = ("/dev/stdin", "/dev/fd/0", "/proc/self/fd/0")
-QUAL_CODE_RE = r"\([^)]*[e+]"  # a glob qualifier that may run code (`(e:…:)`, `(+f)`)
+QUAL_CODE_RE = r"\([^()e+]*[e+]"  # a glob qualifier that may run code (`(e:…:)`, `(+f)`)
 DECL_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?=")
 # parameters zsh sets itself from a command's input (review 4 conf M-1)
 IMPLICIT_PARAMS = {"REPLY", "reply", "match", "MATCH", "MBEGIN", "MEND", "mbegin", "mend", "OPTARG", "OPTIND",
@@ -3657,6 +3659,7 @@ FUNC_LOCALS = ("local", "typeset", "declare", "integer", "float", "readonly", "p
 FUNC_PRECOMMANDS = ("builtin", "command", "noglob", "nocorrect", "-", "exec", "time", "nohup")
 FUNC_CD = ("cd", "chdir", "pushd", "popd")
 # an arithmetic assignment (or ++/--) to a parameter named by an expansion (review 4 m2)
+ARITH_MAX = 512  # fix-0103 §2: longer `(( … ))` text in a function body: its effects are unknown (closed side)
 ARITH_DYN_ASSIGN_RE = re.compile(r"\$\{?[^\s=]*\}?\s*(\[[^\]]*\])?\s*((\*\*|<<|>>|[-+*/%&|^])?=(?!=)|\+\+|--)|"
                                  r"(\+\+|--)\s*\$")
 ARITH_ASSIGN_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*(\[[^\]]*\])?\s*(?:\*\*|<<|>>|[-+*/%&|^])?=(?!=)|"
@@ -3916,6 +3919,8 @@ class _FuncScan(object):
             self.globals.add(base)
 
     def arith(self, raw):
+        if len(raw or "") > ARITH_MAX:
+            raise _Unknown()  # fix-0103 §2: the two searches below are quadratic on long text (14 ms at 512)
         if ARITH_DYN_ASSIGN_RE.search(raw or ""):
             raise _Unknown()  # `(( $1 = 1 ))`: a name the guard cannot read is assigned (review 4 m2)
         for m in ARITH_ASSIGN_RE.finditer(raw or ""):
@@ -5320,7 +5325,7 @@ def note_definitions(state, payload, cwds=None):
         state.defs_unknown = True
         if payload is None:
             return
-    names = set(re.findall(r"([^\s;&|(){}<>'\"]+)\s*\(\s*\)", payload))
+    names = set(re.findall(r"(?<![^\s;&|(){}<>'\"])([^\s;&|(){}<>'\"]+)\s*\(\s*\)", payload))
     for m in re.finditer(r"\bfunction\s+([^;&|(){}<>'\"]+)", payload):
         names.update(m.group(1).split())
     for n in names:

@@ -325,7 +325,7 @@ def git_env_problems(env_set):
     if "GIT_CONFIG_PARAMETERS" in env_set:
         w = env_set["GIT_CONFIG_PARAMETERS"]
         v = w.value if w is not None else None
-        pairs = re.findall(r"'([^'=]*)'?=?'?([^']*)'", v or "")
+        pairs = re.findall(r"'(?=[^']*')([^'=]*)'?=?'?([^']*)'", v or "")  # fix-0103 §2: linear
         if v is None or not pairs or any(command_key(k, val) for k, val in pairs):
             out.append("GIT_CONFIG_PARAMETERS")
     for name, w in env_set.items():

@@ -16,6 +16,7 @@ person's gates stay behind everything listed here.
 - These are planned to be lifted in 0.0.28, class by class, together with stronger checks after a source.
 - The checks of `git push` and of a Studio commit run once for both guards. A call that needs more time than both
   guards have is refused (G-LIMIT) well before the hook's 20-second limit, which would block it without a message.
+- A call the two guards cannot finish within 15 seconds is refused (G-LIMIT), with a message (0.1.3).
 
 ## How it judges functions, hooks and options
 

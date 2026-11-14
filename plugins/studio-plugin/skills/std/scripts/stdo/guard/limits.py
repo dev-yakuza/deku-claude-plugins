@@ -19,6 +19,43 @@ MAX_FS_CALLS = 2000
 CPU_BUDGET = 1.5                 # seconds of process time
 WALL_BUDGET = 8.0                # seconds of wall time (hook timeout is 20 s)
 CHECK_EVERY = 256
+# fix-0103 §3: the guard process's own bound (guard.py arms it; in process nothing is armed). 15 s, then every
+# HOOK_REFIRE, so an exception a check swallows fires again; well under the hook's 20 s (hooks.json)
+HOOK_DEADLINE = 15.0
+HOOK_REFIRE = 0.25
+_ARMED = []
+
+
+class HookDeadline(BaseException):
+    """The guard process ran past HOOK_DEADLINE: not an Exception, so no `except Exception` of either guard turns it
+    into G-ERR; guard.py answers it with G-LIMIT."""
+
+
+def _late(signum, frame):
+    if _ARMED:  # a signal already queued when disarm() ran does nothing
+        raise HookDeadline()
+
+
+def arm():
+    """Starts the process timer (SIGALRM). Raises when the platform has none: the caller then runs without it."""
+    import signal
+    signal.signal(signal.SIGALRM, _late)
+    signal.setitimer(signal.ITIMER_REAL, HOOK_DEADLINE, HOOK_REFIRE)
+    _ARMED[:] = [True]  # only once the timer runs
+
+
+def disarm():
+    """Stops the timer; a no-op when it is not armed. Never raises (a deadline that fires meanwhile is dropped)."""
+    for _i in range(8):
+        try:
+            if not _ARMED:
+                return
+            del _ARMED[:]  # from here on the handler does nothing
+            import signal
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            return
+        except BaseException:  # noqa: BLE001 — HookDeadline before the flag was cleared, or a signal error
+            continue
 
 
 class LimitExceeded(Exception):

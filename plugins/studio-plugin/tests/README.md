@@ -376,3 +376,16 @@ persona, and G1 and the 0.0.26 guard on the same calls. `structure_test.sh` pins
 `atoms/_contract.md` and that no document spawns a role with a model; `LEGACY_DEPS_CHANGED` lists `state/tuples.py`,
 `state/router.py`, `state/schema.py` (① binds the notes) and `setup/labels.py` (`agent-model set`), and extends the
 reasons of `commit/summary.py` and `commit/harness.py` — run `test_guard_backstop.py` again after a change there.
+
+**0.1.3** (`SCRIPTS_VERSION` 27, fix-0103): `test_guard_regex.py`. `RegexBudget` collects every regex of
+`stdo/guard/*.py` and `stdo/guard/legacy/*.py` (literals passed to `re.*`, `NAME_RE` strings, and the compiled patterns
+the modules hold at import time), takes each one's ops from its call sites (none found: search, match and fullmatch),
+and runs it through `drivers/regex_budget.py` on adversarial inputs at its call site's bound (4 KB; 512 characters for
+the `ARITH_*` patterns behind `walk.ARITH_MAX`), each input under its own 2 s timer: under 50 ms, and no input whose time
+grows more than 24-fold from 4 KB to 32 KB (linear is about 8, quadratic about 64; at least 5 ms at 32 KB, re-timed before failing). `ALLOW` lists the patterns the
+budget does not hold, each with its reason (the frozen sed regex; both copies of the snapshot's function-line
+patterns). `RegexEquivalence` checks each rewrite against its old text on 30,000 random strings. `HookDeadline` runs
+guard.py past `limits.HOOK_DEADLINE`: in a plain folder on a sed script with 6,000 blank lines (G-LIMIT after 15 s,
+started when the module loads so the other tests overlap it), and through `drivers/guard_deadline.py` with a 3 s
+deadline and 5 s sleeps patched in (a slow G1, a slow deny write, a slow too-large write, a slow 0.0.26 guard on an
+approval — no evidence —, a slow record after a pass and after a deny, a deadline swallowed once, no timer).

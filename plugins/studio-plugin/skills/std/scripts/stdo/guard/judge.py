@@ -2982,7 +2982,7 @@ def unparsable_glob_group(command):
     (`stu(d|x)io`, `*.(ts|tsx)`, `(#i)x`) or a parenthesized `|` alternative outside quotes."""
     t = _unquoted_text(command)
     t = re.sub(r"\$\(\(|\$\(|[<>=]\(|\(\(|\)\)", " ", t)  # $(…), $((…)), <(…), =(…), ((…))
-    if re.search(r"[^\s;&|(){}<>`$=]\(", t) or re.search(r"\([^()]*\|[^()]*\)", t):
+    if re.search(r"[^\s;&|(){}<>`$=]\(", t) or re.search(r"\([^()|]*\|[^()]*\)", t):
         return True
     return bool(re.search(r"\(#[a-zA-Z]", t))
 
@@ -3414,7 +3414,7 @@ def exiftool_problem(vals):
             nxt = vals[i + 1] if i + 1 < len(vals) else None
             i += 1 if opt_val and (nxt is None or nxt.startswith("-")) else 2
             continue
-        name = re.sub(r"[0-9:]+$", "", lv.rstrip("+!#"))
+        name = lv.rstrip("+!#").rstrip("0123456789:")
         if lv in EXIF_ALLOW or name in ("-s", "-g") or lv.startswith("-list") or re.fullmatch(r"-g[0-9:]*", lv):
             i += 1
             continue

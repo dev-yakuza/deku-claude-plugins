@@ -229,6 +229,14 @@ the repository): [docs/removing.md](docs/removing.md).
   `guides/copy.md` is listed as a conflict, choose `new`, or for an edited guide `local` and add the teaching-note line
   by hand. Keeping `local` for `std-fact-checker` is safe but blocks notes: its fact-checker does not know them, so the
   check refuses every marked text. Videos in progress keep their approvals; a script without markers behaves as before.
+- **0.1.3**: the guard no longer hangs on a few command shapes (an array of paths with a quoted variable, a long
+  `${X::=…}` value, a sed script with many blank lines, very long `git -c` parameters or `( | … )` text): before, the
+  call was blocked when the hook timed out at 20 s, without a message. Every call now has a 15-second limit and is
+  refused with a message (G-LIMIT) instead; a call that used to pass after 15–20 s of checks is now refused that way
+  too (the closed side; rare). Some calls the guard refused before as too slow (G-LIMIT after 9 s) are now judged in
+  time and may pass — the answer they should have had. A shell function with a `(( … ))` over 512 characters is now
+  treated as unreadable (closed side). The same decisions otherwise. No `/std update` (scripts
+  version stays 27).
 
 ## License
 

@@ -16,6 +16,8 @@ lexer — the two guards never share a parse)."""
 import time
 import types
 
+from . import limits as limits_mod
+
 # P20-8: when G1 alone took this long, the 0.0.26 guard is not started and the call is refused (G-LIMIT) — the hook
 # times out at 20 s (hooks.json), and both guards together could pass it; a hook that times out blocks the call
 # (onFailure "block", m0-measure X6), but without a message
@@ -85,10 +87,12 @@ def decide(hook, env, fs=None, probe=None, snapshot_loader=None, legacy_snapshot
     if g.sourced or not complete:
         # what follows a source (or what G1 did not reach) was judged by the 0.0.26 rules alone: their effects
         # and allow, exactly as in 0.0.26; G1's effects and candidates are dropped
+        limits_mod.disarm()  # fix-0103 §3: a finish writes evidence; it is not cut by the process timer
         _legacy_finish(lj, lctx)
         g.allow = lctx.allow
         g.denies = list(lctx.denies)
         return (g.denies[0] if g.denies else None), g
+    limits_mod.disarm()
     return judge.finish_g1(g, hook), g
 
 
