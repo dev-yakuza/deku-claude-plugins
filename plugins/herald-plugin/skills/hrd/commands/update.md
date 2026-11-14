@@ -25,8 +25,12 @@ only. Ported from Guild `update.md`.
    images are planned by default." and ask once, batched: (a) **keep** — the lines are read as
    listed (nothing written); (b) **keep the listed categories to diagrams** — gate-rules
    `images.external.per_category` 0 and config.json `images.scenes.per_category` 0 (the guard
-   asks), showing per category what else that turns off (scenes 0: its stand-ins and decorative
-   pictures; external 0: its quotations) — never offered for a `quotation_categories` category;
+   asks). (b) covers only the listed categories **not** in gate-rules `quotation_categories`: name
+   those excluded ones in the option text ("<cat> stays as it is — its external 0 would turn its
+   quotations off"); every listed category is a quotation category → no (b). The option text
+   lists, per covered category, what else turns off with it (scenes 0: its stand-ins and
+   decorative pictures). A human who asks for a quotation category anyway: scenes 0 only, never
+   external 0;
    (c) **clarify** — add that clause to the listed lines. (b) and (c) are written in step 5's
    commit. The answer is recorded only at the end, after step 5's push — `{"image-kinds-reading":
    "<plugin version>"}` in `update-declined.json` (this machine only) — and never asked again; an
