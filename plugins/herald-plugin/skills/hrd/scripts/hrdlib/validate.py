@@ -49,8 +49,13 @@ def parse_frontmatter(text):
     return fm, m.group(2)
 
 
+RUBY_AID_RE = re.compile(r"<(rt|rp)\b[^>]*>.*?</\1\s*>", re.S | re.I)
+
+
 def body_chars(body, mode):
-    text = re.sub(r"<[^>]+>", "", body)
+    # a ruby reading (`<rt>`) and its fallback brackets (`<rp>`) are reading aids, not prose: 漢字 counts once
+    text = RUBY_AID_RE.sub("", body)
+    text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
     if mode == "all":

@@ -275,6 +275,15 @@ class GateCase(RepoCase):
         self.write("src/content/blog/p1.md", open(os.path.join(self.root, "src/content/blog/p1.md")).read() + " Wikipedia")
         self.assertFalse(validate(self.root, self.cfg, "src/content/blog/p1.md")["ok"])
 
+    def test_ruby_readings_not_counted(self):
+        from hrdlib.validate import body_chars
+        ruby = "<ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby>です"
+        self.assertEqual(body_chars(ruby, "nonspace"), len("漢字です"))
+        self.assertEqual(body_chars("<ruby>緑<RT class='r'>みどり</RT></ruby> 色", "all"), len("緑 色"))
+        self.rules({"length": {"min_chars": 1, "max_chars": 8}})
+        self.write("src/content/blog/r1.md", "---\ntitle: a\ndescription: d\nslug: r1\ndate: x\n---\n" + ruby * 2 + "\n")
+        self.assertTrue(validate(self.root, self.cfg, "src/content/blog/r1.md")["ok"])  # 8 counted, 20 with readings
+
     def test_ignored_or_missing_image_fails(self):
         self.rules({})
         self.write("src/content/blog/p2.md", "---\ntitle: a\ndescription: d\nslug: p2\ndate: x\n---\n![a](/blog-images/p2/01.webp)\n")
