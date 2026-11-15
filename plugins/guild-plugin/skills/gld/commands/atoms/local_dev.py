@@ -88,6 +88,7 @@ Exit: 0 ok (the state is in the JSON) · 64 usage · 65 config or repository err
 import argparse
 import datetime
 import fcntl
+import fnmatch
 import hashlib
 import json
 import os
@@ -120,6 +121,7 @@ DEFAULTS = {
     "max_turns": 30,
     "agent_think": False,
     "test_cmd": None,
+    "test_file_patterns": ["*_test.*", "*.test.*", "*.spec.*", "*_spec.*", "test_*.py"],
     "lint_cmd": None,
 }
 FEEDBACK_CHARS = 6000          # failure output handed back to the model per attempt
@@ -226,6 +228,9 @@ def load_config(repo):
     for key in ("attempt_timeout_min", "total_timeout_min"):
         if not isinstance(ld[key], (int, float)) or isinstance(ld[key], bool) or ld[key] <= 0:
             raise RepoError(f"local_developer.{key} must be a number > 0")
+    pats = ld["test_file_patterns"]
+    if not isinstance(pats, list) or not all(isinstance(p, str) and p for p in pats):
+        raise RepoError("local_developer.test_file_patterns must be a list of glob strings")
     for key in ("persona", "agent_think"):
         if not isinstance(ld[key], bool):
             raise RepoError(f"local_developer.{key} must be true or false")
@@ -1057,8 +1062,18 @@ def run_cmds(repo, cmds, budget_s):
     return True, "\n".join(out), False, time.monotonic() - t0, 0
 
 
+def runnable_tests(job, cfg):
+    """The `--tests` a runner can load. The list may also hold helpers the new tests import
+    (a fixture, a capture utility) — they are protected and committed with the tests, but a
+    runner handed a helper fails to load it every time (measured 2026-11: a job that could
+    never turn green). No match at all → all of them, as before."""
+    pats = cfg.get("test_file_patterns") or []
+    hits = [t for t in job["tests"] if any(fnmatch.fnmatch(os.path.basename(t), p) for p in pats)]
+    return hits or list(job["tests"])
+
+
 def test_cmds(job, cfg):
-    files = " ".join(shlex.quote(t) for t in job["tests"])
+    files = " ".join(shlex.quote(t) for t in runnable_tests(job, cfg))
     return [c.replace("{files}", files) for c in as_cmd_list(cfg["test_cmd"])]
 
 

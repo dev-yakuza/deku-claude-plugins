@@ -144,6 +144,7 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
   "max_turns": 30,
   "agent_think": false,
   "test_cmd": "<runner> {files}",
+  "test_file_patterns": ["*_test.*", "*.test.*", "*.spec.*", "*_spec.*", "test_*.py"],
   "lint_cmd": null
 }
 ```
@@ -157,6 +158,9 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
   their paths go (e.g. `flutter test {files}`, `npx jest {files}`). Without `{files}` every job
   falls back with `ineligible:no_test_cmd` — a whole-suite run would make one unrelated red test
   fail every attempt. The leader still runs the full `commands.test` after a local pass.
+  `{files}` gets only the `--tests` whose file name matches `test_file_patterns` — a helper the
+  new tests import (passed in `--tests` so it is protected and committed) is not loadable as a
+  test, and handing it to the runner fails every check; no match → all of `--tests`.
   `lint_cmd` `null` → `commands.lint`; lint counts only when it is green before the model edits.
 - **Cost.** A local pass saves the implementation part of the developer's work. A **fallback costs
   more than not using this** — the tests-only spawn, then the full developer spawn, plus a leader
@@ -232,6 +236,6 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
   non-integer `num_ctx`) makes every call exit 65 — the leader records a `tool error` fallback.
 
 ## Notes
-- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, visual{baselines[], tests[], matchers[], packages[], config_files[], runnable, env, create, run_file}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, refactor_slot, history[], board, window}, local_developer{enabled, model, ollama_url, max_attempts, max_output_tokens, max_output_tokens_retry, attempt_timeout_min, total_timeout_min, num_ctx, persona, mode, max_turns, agent_think, test_cmd, lint_cmd} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
+- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, visual{baselines[], tests[], matchers[], packages[], config_files[], runnable, env, create, run_file}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, refactor_slot, history[], board, window}, local_developer{enabled, model, ollama_url, max_attempts, max_output_tokens, max_output_tokens_retry, attempt_timeout_min, total_timeout_min, num_ctx, persona, mode, max_turns, agent_think, test_cmd, test_file_patterns, lint_cmd} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
 - `roles` is edited by init (and by evolve HR later), not by `config` in M1 — editing the active roster manually is possible but unsupported as a config command yet.
 - `commands` (test/lint/typecheck/build/e2e/vrt), `visual.*`, `sprint.capacity`/`sprint.history` and `sprint.board` have the **same gap** (⚠ `sprint.window` does **not** — it has a `--window=` setter): they are part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for them (`sprint.max_stack_depth` and `sprint.refactor_slot` do have one) — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.

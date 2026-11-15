@@ -906,6 +906,16 @@ print("|".join(w.rstrip(" {") if w == "class A {" else w for w in want) if sorte
 PY2
 )"
 
+# a helper passed with the tests is protected but never handed to the runner
+R="$WORK/rh1"; mkrepo "$R" 72 "$(LDJSON '{"test_cmd": "sh -c '"'"'echo \"$*\" >> ran.log; sh check.sh'"'"' x {files}"}')"
+printf 'helper v1\n' > "$R/test/capture_helper.txt"; git -C "$R" add test/capture_helper.txt; git -C "$R" commit -qm helper
+printf 'ran.log\n' >> "$R/.git/info/exclude"; : > "$FAKE/replies.jsonl"; reply "$FIX_BLOCK"
+OUT="$(ld "$R" start --issue 72 --base main --files impl.txt --tests test/impl_test.txt test/capture_helper.txt >/dev/null; waitjob "$R" 72)"
+eq "runner gets the test files only, not a helper passed with them" "local_pass 0" "$(echo "$OUT" | field state) $(grep -c capture_helper "$R/ran.log")"
+grep -q "test/impl_test.txt" "$R/ran.log" && ok "…the real test is still run" || bad "test run" "impl_test" "$(cat "$R/ran.log")"
+R="$WORK/rh2"; mkrepo "$R" 73 "$(LDJSON '{"test_file_patterns": "x"}')"
+start "$R" 73 >/dev/null 2>&1; eq "test_file_patterns must be a list → exit 65" "65" "$?"
+
 # restore never writes through a planted symlink (all modes)
 printf 'precious\n' > "$WORK/precious.txt"
 printf '#!/bin/sh\ngrep -q FIXED impl.txt && { rm impl.txt; ln -s "$1" impl.txt; }\nexit 1\n' > "$WORK/swap.sh"
