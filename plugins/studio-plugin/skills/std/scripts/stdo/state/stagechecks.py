@@ -10,7 +10,7 @@ import glob
 import json
 import os
 
-from .. import SCRIPTS_VERSION, paths as _paths, writes
+from .. import SCRIPTS_VERSION, paths as _paths, vpaths, writes
 from . import hashes, schema
 from .collect import CollectError, frozen_copy_path, proxy_credits
 
@@ -133,7 +133,7 @@ def _overlay(inp):
 
 
 def _out_dir(inp):
-    return os.path.join(inp.repo, inp.ctx["studio_root"], "out", inp.state["video"], inp.lang)
+    return vpaths.out_dir(inp.repo, inp.ctx["studio_root"], inp.state, inp.lang)
 
 
 def _render_result(inp):
@@ -160,8 +160,8 @@ def _copy_text(inp):
     if not schema.platform_ok(inp.scope):
         return [("copy", "invalid platform name")]  # never a path from a name that is not one (Y1)
     L = inp.state["langs"][inp.lang]
-    p = L["copies"].get(inp.scope, {}).get("path") or os.path.join(
-        inp.ctx["studio_root"], "copy", inp.state["video"], inp.lang, inp.scope + ".md")
+    p = L["copies"].get(inp.scope, {}).get("path") or vpaths.copy_file("", inp.ctx["studio_root"], inp.state, inp.lang,
+                                                                     inp.scope)
     return _file(inp, p if os.path.isabs(p) else os.path.join(inp.repo, p))
 
 

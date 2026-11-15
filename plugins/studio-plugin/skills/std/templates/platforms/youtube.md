@@ -1,5 +1,6 @@
 ---
 platform: youtube
+audience: public
 checked: "{{CHECKED_DATE}}"
 outputs:
   - name: youtube
@@ -23,7 +24,7 @@ person changes this file (the guard protects it; a change shows up in the harnes
 ```
 <!-- /studio:rules -->
 
-## Copy (`studio/copy/<video>/<lang>/youtube.md`)
+## Copy (`youtube.md` in the `copy:` folder `state.py next` prints)
 - Frontmatter: `title` (at most 100 characters — the Data API's `snippet.title`) and `hashtags` (a JSON list on one
   line, each `#word` with no spaces).
 - Hashtags: **at most 15 is Studio's own limit**, stricter than YouTube's. YouTube itself ignores all of a video's

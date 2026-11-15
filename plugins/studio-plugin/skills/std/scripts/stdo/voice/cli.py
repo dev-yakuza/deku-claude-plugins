@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 
-from .. import criteria, paths, writes
+from .. import criteria, paths, vpaths, writes
 from ..claims import cli as ccli
 from ..state import cli as scli, commands as C, schema, stagechecks, store
 from ..state.collect import CollectError, Providers
@@ -199,7 +199,7 @@ def _ffmpeg(argv):
 
 
 def out_dir(repo, root, state, lang):
-    return os.path.join(repo, root, "out", state["video"], lang, "audition")
+    return vpaths.audition_dir(repo, root, state, lang)
 
 
 def _audition(argv, cwd, providers, runner):

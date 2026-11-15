@@ -5,7 +5,7 @@
     state.py loop <video> <verify|1|3|4a|copy> [--lang l]
     state.py status [<video>] [--json]
     state.py sync                     (M3b)
-    state.py begin <video> --source <path> --kind youtube [--lang l] [--ask-before tts,render]
+    state.py begin <video> --source <path> --kind youtube|sns|onboarding|explainer [--lang l] [--ask-before tts,render]
                                                                            (M1b; the harness must be committed)
     state.py record-source <video> [--url https://<public domain>/…]
     state.py ask-before <video> <tts,render,copy,commit | none>            (0.0.28: the person's pause requests)
@@ -25,7 +25,7 @@ import re
 import subprocess
 import sys
 
-from .. import criteria, machine, paths
+from .. import criteria, machine, paths, vpaths
 from . import backup, commands, flow, gates, harnessgate, schema, scriptlines, stagechecks, store
 from .collect import CollectError, Providers
 from .hashes import brief_core
@@ -161,7 +161,7 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
         if cmd == "record-render":
             return flow.record_render(repo, vdir, state, lang, o, hooks)
         if cmd == "done":
-            return flow.done(repo, vdir, state, lang, hooks, root=root)
+            return flow.done(repo, vdir, state, lang, hooks, root=root, ctx=ctx, providers=providers)
         if cmd == "abandon":
             return flow.abandon(repo, vdir, state, lang, o, hooks, list(argv))
         handler = {"approve": gates.approve, "reject-source-diff": gates.reject_source_diff,
@@ -239,12 +239,16 @@ def _next(state, lang, ctx, o, providers):
     ask = step if step in (state.get("ask_before") or []) and not (d.done or d.stop or d.held) else None
     if ask:
         res["ask_before"] = ask
+    res.update(_where(ctx, state, lang))
+    where_lines = ["scope: %s%s" % (res["scope"], " (no external audit before ③)" if res["scope"] == "internal"
+                                    else ""), "out: " + res["out"], "copy: " + res["copy"]]
     if d.done:
         _print(res, o.get("--json"), "%s: finished" % lang)
         return C.OK
     if d.stop or d.held:
         what = d.stop["stop"] if d.stop else d.held.get("state")
         _print(res, o.get("--json"), "%s: waiting for a person (%s)" % (lang, what))
+        _extra(o, [], [], None, where=where_lines)
         return C.WAIT
     where = ""
     if d.redo:
@@ -259,17 +263,30 @@ def _next(state, lang, ctx, o, providers):
             _print(res, o.get("--json"), "%s: cannot enter (a hash is missing)" % enter)
             return C.FAIL
         _print(res, o.get("--json"), "%s: go" % enter)
-        _extra(o, fm_lines, notes, ask, src_line)
+        _extra(o, fm_lines, notes, ask, src_line, where=where_lines)
         return C.OK
     _print(res, o.get("--json"), "%s: next %s" % (lang, where or "nothing to redo"))
-    _extra(o, fm_lines, notes, ask)
+    _extra(o, fm_lines, notes, ask, where=where_lines)
     return C.OK
 
 
-def _extra(o, fm_lines, notes, ask, src_line=None):
-    """next's lines after its verdict (text mode; --json carries them as `frontmatter` and `ask_before`)."""
+def _where(ctx, state, lang):
+    """The video's scope and the folders of its renders and copy for this language (repository-relative; a local
+    video's are under <sr>/local/). An internal video has no external audit before ③ and its auditor does not count
+    internal information as a finding (commands/board.md, atoms/_auditor.md)."""
+    def rel(p):
+        return p.replace(os.sep, "/") + "/"
+    return {"scope": state.get("scope"), "out": rel(vpaths.out_dir("", ctx["studio_root"], state, lang)),
+            "copy": rel(vpaths.copy_dir("", ctx["studio_root"], state, lang))}
+
+
+def _extra(o, fm_lines, notes, ask, src_line=None, where=()):
+    """next's lines after its verdict (text mode; --json carries them as `frontmatter`, `ask_before`, `scope`, `out`
+    and `copy`)."""
     if o.get("--json"):
         return
+    for line in where:
+        sys.stdout.write(line + "\n")
     if fm_lines:
         sys.stdout.write("frontmatter (the writer puts these lines in the script exactly; targetDuration: a number "
                          "in that range):\n%s\n" % "\n".join("  " + l for l in fm_lines))
@@ -320,10 +337,21 @@ def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock, cwd=None):
         raise schema.SchemaError("not output names: %s" % ", ".join(map(str, bad)))
     if not isinstance(platforms, dict) or not platforms:
         raise schema.SchemaError("the brief has no platforms (every video kind has platform copy)")
-    bad_p = [p for p in platforms if not schema.platform_ok(p, state.get("kind"))]
+    bad_p = [p for p in platforms if not schema.platform_ok(p)]
     if bad_p:
-        raise schema.SchemaError("platforms the %s kind does not have: %s (this version: %s)" % (
-            state.get("kind"), ", ".join(map(repr, bad_p)), ", ".join(schema.KIND_PLATFORMS.get(state.get("kind"), ()))))
+        raise schema.SchemaError("not platform names: %s" % ", ".join(map(repr, bad_p)))
+    want = schema.KINDS.get(state.get("kind"))
+    from ..distribute import rules as rules_mod
+    for p in sorted(platforms):  # the only platform-file reads for the audience (the guard reads none)
+        aud = rules_mod.audience(ctx["repo"], p)
+        if aud is None:
+            raise schema.SchemaError(
+                ".claude/studio/platforms/%s.md has no audience line (or cannot be read): a person adds `audience: "
+                "%s` to its frontmatter if the platform is for %s videos — a %s video may name only such platforms"
+                % (p, want, want, state.get("kind")))
+        if aud != want:
+            raise schema.SchemaError("platform %s is for %s videos (its audience), and %s is a %s kind"
+                                     % (p, aud, state.get("kind"), want))
     for p, outs in platforms.items():
         if not isinstance(outs, list) or not outs or not all(isinstance(x, str) for x in outs):
             raise schema.SchemaError("platform %s needs a list of outputs" % p)

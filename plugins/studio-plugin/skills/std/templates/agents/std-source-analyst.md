@@ -31,8 +31,9 @@ Three sections with exactly these English headings: `## Claims`, `## Ruby pairs`
 ```
 <!-- /studio:images -->
 
-   `class` is one of `diagram` · `photo` · `screenshot` (the owner's own), `third-party` (made by someone else), or
-   `unknown`. Give the reason in a few words. **You can only make an image stricter than its `floor`**: Studio takes the
+   `class` is one of `diagram` · `photo` · `screenshot` (the owner's own), `third-party` (made by someone else),
+   `internal` (made inside the organization, not for the public — a public video cannot show it), or `unknown`. Give
+   the reason in a few words. **You can only make an image stricter than its `floor`**: Studio takes the
    stricter of the two, so a `third-party` or `unknown` floor stays. When in doubt, `unknown`.
 
 ## Rules

@@ -15,6 +15,8 @@ import re
 
 BLOCK = re.compile(r"<!-- studio:rules -->\s*```json\s*\n(.*?)\n```\s*<!-- /studio:rules -->", re.S)
 CHECKED = re.compile(r"^checked:\s*[\"']?([^\"'\n]*)[\"']?\s*$", re.M)
+AUDIENCE = re.compile(r"^audience:\s*[\"']?([^\"'\n]*)[\"']?\s*$", re.M)
+AUDIENCES = ("public", "internal")
 INTS = ("title_max", "description_max_bytes", "hashtags_max")
 
 
@@ -34,12 +36,28 @@ def path(repo, platform):
     return p
 
 
-def parse(text):
-    """(rules, checked date or "")."""
-    head = ""
+def _head(text):
     if text.startswith("---"):
         end = text.find("\n---", 3)
-        head = text[3:end] if end > 0 else ""
+        return text[3:end] if end > 0 else ""
+    return ""
+
+
+def audience(repo, platform):
+    """The frontmatter's `audience` (`public` | `internal`), or None when the file has none, another value or cannot be
+    read (the closed side: record-brief refuses)."""
+    try:
+        with open(path(repo, platform), encoding="utf-8") as f:
+            m = AUDIENCE.search(_head(f.read()))
+    except (OSError, UnicodeDecodeError, RulesProblem):
+        return None
+    v = m.group(1).strip() if m else None
+    return v if v in AUDIENCES else None
+
+
+def parse(text):
+    """(rules, checked date or "")."""
+    head = _head(text)
     m = CHECKED.search(head)
     checked = m.group(1).strip() if m else ""
     b = BLOCK.search(text)

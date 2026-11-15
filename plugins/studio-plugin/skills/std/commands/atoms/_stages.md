@@ -23,9 +23,9 @@ source → brief → script → verify ─[①]→ cast → tts → audition ─
 | ③ | person | approved presentation (per output) | approval record |
 | render | producer | video, subtitles, thumbnail, chapters per output | `--frozen-audio --out-dir`; exit code and file sha per output |
 | ④a | person | approved render (per output) | approval record |
-| copy | distributor | `copy/<video-id>/<lang>/<platform>.md` · claims-map `copy_excerpts` (fact-checker) | `validate_copy` (platform rules checked by a person · limits · notices · credits · chapters · excerpts) |
+| copy | distributor | `<platform>.md` in the `copy:` folder `state.py next` prints · claims-map `copy_excerpts` (fact-checker) | `validate_copy` (platform rules checked by a person · limits · notices · credits · chapters · excerpts) |
 | ④b | person | approved copy (per platform) | approval record |
-| commit | producer | one commit per language | every hash and approval matches · `check_commit` |
+| commit | producer | one commit per language (an internal video: `state.py done`, no commit) | every hash and approval matches · `check_commit` (internal: `done` checks the same, without a commit) |
 
 Every stage calls `state.py next --enter <stage>` on entry: when an upstream hash differs from its
 approved value, the flow goes back to the stage that must be redone and never past it.

@@ -4,8 +4,10 @@
     copy.1/ copy.2/ copy.3/   the last three copies (copy.1 newest), each with manifest.json
     complete/                 the last copy that fit under the size cap (outside the rotation)
     status.json               the last result (warnings shown by `state.py status`)
-The whole video folder is copied except audio wav files; files unchanged since the previous copy
-are hard-linked. No .git anywhere.
+The whole video folder is copied except audio wav files, and with it the video's renders and copy
+(`<sr>/local/out/<id>/` as `_out/`, `<sr>/local/copy/<id>/` as `_copy/`; text first, so a render over
+the size cap is what is left out); files unchanged since the previous copy are hard-linked. No .git
+anywhere.
 """
 
 import json
@@ -35,22 +37,35 @@ def root(repo, video):
     return os.path.join(base, paths.repo_key(repo), "videos", video)
 
 
-def _files(vdir):
-    keep, skip = [], []
-    for d, dirs, files in os.walk(vdir):
-        dirs.sort()
-        for n in sorted(files):
-            p = os.path.join(d, n)
-            rel = os.path.relpath(p, vdir)
-            parts = rel.split(os.sep)
-            if parts[0] == "audio" and n.endswith(".wav"):
-                skip.append({"path": rel, "why": "audio wav (made again from the lock)"})
-            elif n == ".state.lock" or ".tmp." in n:
-                skip.append({"path": rel, "why": "lock or temporary file"})
-            else:
-                keep.append(rel)
+def local_dirs(repo, root, state):
+    """[(name in the backup, folder)] of a local video's renders and copy (stdo/vpaths.py; `root`: the studio root)."""
+    from .. import vpaths
+    return [("_out", vpaths.out_root(repo, root, state)), ("_copy", vpaths.copy_root(repo, root, state))]
+
+
+def _files(vdir, extra=()):
+    """([rel], {rel: source path}, [skipped]) of the video folder and the `extra` folders (under their names)."""
+    keep, skip, src = [], [], {}
+    for prefix, top in [(None, vdir)] + list(extra):
+        if prefix is not None and not os.path.isdir(top):
+            continue
+        for d, dirs, files in os.walk(top):
+            dirs.sort()
+            for n in sorted(files):
+                p = os.path.join(d, n)
+                rel = os.path.relpath(p, top)
+                parts = rel.split(os.sep)
+                if prefix is not None:
+                    rel = os.path.join(prefix, rel)
+                if prefix is None and parts[0] == "audio" and n.endswith(".wav"):
+                    skip.append({"path": rel, "why": "audio wav (made again from the lock)"})
+                elif n == ".state.lock" or ".tmp." in n:
+                    skip.append({"path": rel, "why": "lock or temporary file"})
+                else:
+                    keep.append(rel)
+                    src[rel] = p
     keep.sort(key=lambda r: (not r.endswith(TEXT_FIRST), r))
-    return keep, skip
+    return keep, src, skip
 
 
 def _previous(base):
@@ -61,21 +76,21 @@ def _previous(base):
         return {}
 
 
-def run(repo, vdir, video, cap=CAP):
-    """Copy now. Returns the status written (never raises for an ordinary failure)."""
+def run(repo, vdir, video, cap=CAP, extra=()):
+    """Copy now (`extra`: local_dirs). Returns the status written (never raises for an ordinary failure)."""
     try:
         base = root(repo, video)
     except Inside as e:
         return {"at": schema.now(), "complete": False, "bytes": 0, "warning": "backup skipped: %s" % e}
     try:
         os.makedirs(base, exist_ok=True)
-        keep, skip = _files(vdir)
+        keep, src_of, skip = _files(vdir, extra)
         prev = _previous(base)
         tmp = os.path.join(base, ".tmp.%s" % secrets.token_hex(4))
         os.makedirs(tmp)
         files, total, complete = [], 0, True
         for rel in keep:
-            src = os.path.join(vdir, rel)
+            src = src_of[rel]
             size = os.path.getsize(src)
             if total + size > cap:
                 complete = False

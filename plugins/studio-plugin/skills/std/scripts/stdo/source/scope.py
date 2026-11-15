@@ -5,8 +5,13 @@
   overlay's internal sources (`internal.sources[]` — an entry's `path` glob, or its `url` equal to the path). Else 1.
 - Each image's scope is the stricter of its floor (resolve_assets) and the source analyst's class (`work/source.md`, the
   JSON block between `<!-- studio:images -->` and `<!-- /studio:images -->`: `{"img-01": {"class": …, "reason": …}}`).
-  Classes: diagram · photo · screenshot (the owner's: public), third-party, unknown. An image the analyst did not
-  classify, or classified with another word, is `unknown`.
+  Classes: diagram · photo · screenshot (the owner's: public), third-party, unknown, internal (made inside the
+  organization, not for the public: level unknown and the `internal` flag). An image the analyst did not classify, or
+  classified with another word, is `unknown`.
+- Being internal is a flag beside the level, never a level (`stricter` must not turn it into third-party): set when the
+  analyst classes the image internal or its file is an overlay internal source. A public video cannot use such an image
+  whatever its level — its entry becomes unusable (reason `internal`); the source itself does not fail (the script,
+  board and commit checks refuse the image where it is used). An internal video ignores the flag.
 The result goes into assets.json (`scope` per image, `scope_check` for the source copy it judged, with the visibility,
 web_roots and internal overlay sha it judged with); record-source records the images and assets.json's sha only when
 that check passed for the current copy and none of those changed since."""
@@ -20,7 +25,7 @@ from .. import SCRIPTS_VERSION
 from . import assets
 
 CLASSES = {"diagram": "public", "photo": "public", "screenshot": "public", "third-party": "third-party",
-           "unknown": "unknown"}
+           "unknown": "unknown", "internal": "unknown"}
 BLOCK = re.compile(r"<!-- studio:images -->\s*```json\s*\n(.*?)\n```\s*<!-- /studio:images -->", re.S)
 
 
@@ -100,12 +105,18 @@ def check(top, vdir, state, cfg, copy_sha, overlay_state, overlay_data, fp):
                              % (source_rel, hit))
     classes, note = analyst_classes(vdir)
     for img in data["images"]:
+        if img.get("reason") == "internal":  # this check's own mark from an earlier run: judged again below
+            img["status"], img["reason"] = "ok", None
         c = classes.get(img["id"]) or {}
         cls = c.get("class")
         mapped = CLASSES.get(cls, "unknown")
         img["analyst_class"] = cls if cls in CLASSES else None
         img["analyst_reason"] = c.get("reason") if isinstance(c.get("reason"), str) else None
         img["scope"] = assets.stricter(img.get("floor") or "unknown", mapped)
+        res = img.get("resolved")
+        img["internal"] = cls == "internal" or bool(isinstance(res, str) and internal_source(res, overlay_data))
+        if img["internal"] and state.get("scope") != "internal" and img.get("status") == "ok":
+            img["status"], img["reason"] = "unusable", "internal"
     data["scope_check"] = {"result": "pass", "source_copy_sha": copy_sha, "scripts_version": SCRIPTS_VERSION,
                            "video_scope": state.get("scope"), "note": note}
     data["scope_check"].update(fp)

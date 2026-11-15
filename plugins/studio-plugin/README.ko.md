@@ -235,6 +235,15 @@ python3 .claude/studio/scripts/hooks.py install
   자체를 지우므로 거부하고, `rm -f .claude/studio/config.json$X`, `rm -f studio/local/tmp-$X.txt`도 리터럴로 쓴 경우처럼
   거부합니다. 빈 값에서 멈추려면 `"${X:?}"`로 쓰세요. `find ./$X -name '*.pyc' -delete`와 `rm -rf ./$X`는
   `find ./ …`가 통과하고 rm이 `.`을 거부하므로 통과합니다. `/std update`는 필요 없습니다(스크립트 버전은 27 그대로).
+- **0.2.0**: 영상 종류가 4개가 되었습니다 — `youtube`와 `sns`(공개), `onboarding`과 `explainer`(사내용: 문서를 다른
+  구성원에게 설명하는 영상). 종류마다 형식 파일(`.claude/studio/formats/<kind>.md`, 길이는 사람이 고치는 시작값)이
+  있습니다. 사내용 영상은 모든 것을 `studio/local/` 아래에 둡니다(영상 폴더, 렌더, 배포용 글. 백업되고 커밋되지
+  않습니다). 그리고 커밋 없이 `state.py done`으로 끝납니다(사람의 승인은 여전히 필요하고 대리 승인은 거부합니다).
+  `state.py next`는 영상의 `scope:`, `out:`, `copy:` 폴더를 출력합니다. 플랫폼 파일은 `audience`(`public` |
+  `internal`)를 가지며 브리프에는 그 종류의 audience인 플랫폼만 쓸 수 있습니다. `/std update`는
+  `platforms/youtube.md`에 그 줄을 더하고 새 형식을 제안합니다. 사내용 영상은 배포용 글에 사내 용어를 쓸 수 있고
+  크레딧에 `public_ok`가 필요 없습니다. 공개 영상은 소스 분석가가 `internal`로 분류한 이미지를 보여 줄 수 없습니다.
+  `/std update`가 필요합니다(스크립트 버전 28).
 
 ## 라이선스
 

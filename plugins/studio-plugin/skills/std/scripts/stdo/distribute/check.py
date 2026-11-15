@@ -1,4 +1,5 @@
-"""`validate_copy.py <video> --platform <p>` (m1-plan §10): the platform copy `<sr>/copy/<v>/<l>/<p>.md` —
+"""`validate_copy.py <video> --platform <p>` (m1-plan §10): the platform copy `<sr>/copy/<v>/<l>/<p>.md` (a local
+video's under `<sr>/local/copy/`, stdo/vpaths.py) —
 
     ---
     title: "<title>"
@@ -9,7 +10,8 @@
 is checked against the platform's rules (rules.py): the platform file is `checked` by a person; title, description and
 hashtag counts within the limits; every required notice and every CREDITS `credit_line` in the description; the
 render's chapters (`<o>.<l>[.proxy].chapters.txt` of each output the platform uses) in the description, line by line
-in order; no home path; no in-house term of the internal overlay; and the copy's excerpts (claims-map `copy_excerpts`,
+in order; no home path; no in-house term of the internal overlay (an internal video's copy may use them; the overlay
+must still be present); and the copy's excerpts (claims-map `copy_excerpts`,
 filled by the fact-checker) all in the source copy — ④b records them."""
 
 import json
@@ -17,7 +19,7 @@ import os
 import re
 import unicodedata
 
-from .. import credits
+from .. import credits, vpaths
 from ..commit.harness import overlay_terms, term_hit
 from ..state import schema
 from . import factcheck, rules as rules_mod
@@ -53,7 +55,7 @@ def parse_copy(text):
 
 def chapter_files(ctx, state, lang, platform):
     L = state["langs"][lang]
-    out_dir = os.path.join(ctx["repo"], ctx["studio_root"], "out", state["video"], lang)
+    out_dir = vpaths.out_dir(ctx["repo"], ctx["studio_root"], state, lang)
     files = []
     for o in sorted(x for x in state["brief"]["platforms"].get(platform, []) if x in schema.current_outputs(state,
                                                                                                             lang)):
@@ -131,7 +133,7 @@ def problems(repo, vdir, state, lang, ctx, platform, cfg, env, copy_path):
     st, terms = overlay_terms(repo, cfg, env)
     if st == "missing":
         out.append("the internal overlay is missing or changed — the person recreates it (/std config)")
-    hit = term_hit(text, terms) if terms else None
+    hit = term_hit(text, terms) if terms and state.get("scope") != "internal" else None  # internal copy may use them
     if hit:
         out.append("the copy uses an in-house term (%s)" % hit)
     src_line = source_line(repo, state, lang)

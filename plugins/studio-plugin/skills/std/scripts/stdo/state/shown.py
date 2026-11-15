@@ -4,6 +4,7 @@ re-approval, a new render) needs showing again."""
 
 import os
 
+from .. import vpaths
 from . import schema
 from .hashes import file_sha, hash_of
 from .router import section_tuple
@@ -21,7 +22,7 @@ def scopes(state, lang, gate):
 
 
 def frames_index(ctx, state, lang, output):
-    return os.path.join(ctx["repo"], ctx["studio_root"], "out", state["video"], lang,
+    return os.path.join(vpaths.out_dir(ctx["repo"], ctx["studio_root"], state, lang),
                         "%s.%s.frames" % (output, lang), "index.json")
 
 
@@ -39,7 +40,7 @@ def artifacts(ctx, state, lang, gate, scope):
         return {"verify_md": file_sha(os.path.join(w, "verify.md")),
                 "verify_json": file_sha(os.path.join(w, "verify.json"))}
     if gate == "2":  # the person hears the audition: its files are part of what was shown (v5 S4)
-        a = os.path.join(ctx["repo"], ctx["studio_root"], "out", state["video"], lang, "audition")
+        a = vpaths.audition_dir(ctx["repo"], ctx["studio_root"], state, lang)
         return {"exemptions": file_sha(os.path.join(w, "exemptions.json")),
                 "pronounce_changes": file_sha(os.path.join(w, "pronounce-changes.json")),
                 "audition_wav": file_sha(os.path.join(a, "narrator.wav")),

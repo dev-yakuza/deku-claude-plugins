@@ -421,3 +421,17 @@ literal start plus any name — by judging the command again with each such word
 The rows refused are `EMPTY_TAIL_DENY` and `SUBTREE_DENY` in `MustDeny` (both snapshot modes); the rows that must
 still pass are listed in `EMPTY_TAIL_PASS`. Parity (fix-0105 §5): the 1,872-row corpus in both snapshot modes and
 the pilot-3 replay give the same verdicts as 0.1.4.
+
+**0.2.0** (`SCRIPTS_VERSION` 28, m2-plan M2a): `test_m2a.py` — `begin` per kind (`schema.KINDS`: scope and location;
+an internal kind's video is local), begin's refusal of an id with a leftover `out`/`copy` folder in either location,
+`state.py next`'s `scope:` / `out:` / `copy:` lines, the audience check at `record-brief` (a platform of the other
+audience, and one without `audience`, are refused; `state_fixtures.write_platforms` writes public platform files for
+`brief_ready`), the distributor's role output under `<sr>/local/copy/` for a local video only, a local video's renders,
+stills, audition and copy under `<sr>/local/` (`approve_base.sub`), its backups with `_out/` and `_copy/`, local
+`done` (no commit; proxy gates and credits → 4), check_scope's `internal` flag (class `internal` = level unknown +
+flag; a public video's internal image becomes unusable without failing the source), board credits per scope, in-house
+terms in internal copy, the new format templates (init leaves them out, `render.INIT_SKIP`; update offers each as
+`optional`) and update's `audience` line. `structure_test.sh` checks that no
+module but `stdo/vpaths.py` joins `out` or `copy` to the studio root (an AST walk) and that every kind has a format
+template init installs; `stdo/vpaths.py` joins `LEGACY_DEPS_HEAD` (the frozen guard's commit check imports
+`commit/video.py`, which uses it).

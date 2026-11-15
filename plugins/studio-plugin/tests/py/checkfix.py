@@ -11,6 +11,7 @@ import io
 import os
 
 import state_fixtures as F
+from stdo import vpaths
 from stdo.state import cli, schema, stagechecks, store
 
 
@@ -48,7 +49,7 @@ def render(repo, video, output, providers, lang=None, body=None, watermark=False
     vdir = store.video_dir(repo, root, video)
     state = store.read_state(vdir)
     lang = lang or state["source_lang"]
-    d = os.path.join(repo, root, "out", video, lang)
+    d = vpaths.out_dir(repo, root, state, lang)
     os.makedirs(d, exist_ok=True)
     mp4 = os.path.join(d, "%s.%s.%smp4" % (output, lang, "proxy." if watermark else ""))
     if body is not None or not os.path.exists(mp4):

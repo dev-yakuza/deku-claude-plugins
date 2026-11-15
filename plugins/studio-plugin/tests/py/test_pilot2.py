@@ -478,7 +478,7 @@ class AuditionRead(ApproveCase):
     def test_make_names_the_path(self):
         mk = flat(read(COMMANDS, "make.md"))
         gate2 = mk.split("## Gate ②", 1)[1].split("## ", 1)[0]
-        self.assertIn("`studio/out/<video>/<lang>/audition/audition.md`", gate2)
+        self.assertIn("`audition/audition.md` of the `out:` folder", gate2)  # 0.2.0: next prints the folder
 
 
 # ---------------------------------------------------------------- N1 · N6 · N12 · P14 · P15 wording
@@ -551,8 +551,8 @@ class Wording(StudioTestCase):
     def test_n12_commit_names_both_folders(self):
         mk = read(COMMANDS, "make.md")
         sec = flat(mk.split("## The video's commit", 1)[1])
-        self.assertIn("`studio/out/<video>/…`", sec)
-        self.assertIn("`studio/copy/<video>/…`", sec)
+        self.assertIn("The render (the `out:` folder)", sec)  # 0.2.0: next prints both (local videos: studio/local/)
+        self.assertIn("the copy (the `copy:` folder)", sec)
         self.assertIn("never committed", sec)
         gi = read(SKILL, "templates", "studio", "gitignore.tmpl")
         self.assertIn("/{{STUDIO_ROOT}}/out/", gi)

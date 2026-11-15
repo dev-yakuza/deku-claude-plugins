@@ -216,7 +216,7 @@ README에는 요약이 있고, 이 파일에는 자세한 내용이 있습니다
   - Studio 역할이 자기 출력 파일에 하는 Write와 Edit: source analyst의 `work/source.md`, strategist의
     `work/brief.json`과 `work/brief.md`, writer의 `script.<lang>.md`와 `work/<lang>/claims-map.json`, translator의 원문
     외 언어 `script.<lang>.md`, visual director의 대본 편집·`CREDITS.draft.yaml`·`work/<lang>/board.md`, distributor의
-    `copy/<video>/<lang>/<platform>.md`. fact-checker, auditor, 메인 세션의 쓰기는 지금처럼 프롬프트가 뜹니다.
+    `copy/<video>/<lang>/<platform>.md`(사내용 영상은 `local/copy/…`, 다른 쪽에는 허용하지 않음). fact-checker, auditor, 메인 세션의 쓰기는 지금처럼 프롬프트가 뜹니다.
 - 검사를 하나라도 통과하지 못하면 보통 프롬프트가 뜨고, 거부되지는 않습니다. "이 세션의 모든 편집 허용"을 고르면
   세션이 `default`가 아니게 되어, 그 세션에서는 이 allow가 멈춥니다.
 - 다음 경우에도 보통 프롬프트가 뜹니다:

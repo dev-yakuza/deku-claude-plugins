@@ -5,7 +5,7 @@ Exit: 0 pass · 1 fail (the result lists why) · 2 usage or setup (no harness, n
 import os
 import sys
 
-from .. import writes
+from .. import vpaths, writes
 from ..claims import cli as ccli
 from ..state import cli as scli, commands as C, schema, stagechecks
 from . import check
@@ -19,12 +19,11 @@ def main(argv, cwd=None, env=None):
         i = argv.index("--platform")
         platform, rest = argv[i + 1], argv[:i] + argv[i + 2:]
         o, repo, vdir, state, lang, ctx = ccli._setup(rest, cwd or os.getcwd())
-        if not schema.platform_ok(platform, state.get("kind")) or platform not in schema.current_platforms(state, lang):
+        if not schema.platform_ok(platform) or platform not in schema.current_platforms(state, lang):
             raise ccli.Usage("platform %r is not a platform of this video's brief" % (platform,))
         cfg = scli._cfg_of(repo)
         L = state["langs"][lang]
-        p = L["copies"].get(platform, {}).get("path") or os.path.join(
-            ctx["studio_root"], "copy", state["video"], lang, platform + ".md")
+        p = L["copies"].get(platform, {}).get("path") or vpaths.copy_file("", ctx["studio_root"], state, lang, platform)
         copy_path = p if os.path.isabs(p) else os.path.join(repo, p)
         problems = check.problems(repo, vdir, state, lang, ctx, platform, cfg, env, copy_path)
     except ccli.Usage as e:

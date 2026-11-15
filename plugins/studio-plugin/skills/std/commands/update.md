@@ -10,21 +10,26 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
 
 1. `python3 <<SKILL_DIR>>/scripts/setup.py update plan` — the scripts' versions (repository → plugin), the scripts it
    replaces, adds and removes, every template's state (`same` · `update` · `keep-local` · `conflict` ·
-   `protected-needs-choice` · `missing`), `s2v.min_version`, `ignore`, `refused` and `h12`. If `refused` is set, stop
+   `protected-needs-choice` · `missing` · `optional` · `declined`), `s2v.min_version`, `ignore`, `refused` and `h12`. If `refused` is set, stop
    and tell the person why. `ignore` says whether the Studio blocks of `.gitignore` and `info/exclude` are rewritten
    for this version: lines a person added to the `.gitignore` block are kept (`kept`), lines older versions shipped
    are dropped (`removed`); `info/exclude` is written whole (this clone only). If `ignore.problems` is set (broken
    block markers), stop and tell the person: `update apply` refuses (3) until they fix the markers by hand and the
    plan is run again.
 2. Every item that is not `same` carries `diff`: `unified` (for an agent, of its persona block) and, for a format,
-   `criteria` (`criteria.<kind>.<key>: old → new`). Show the person each of them. For each `conflict` and
+   `criteria` (`criteria.<kind>.<key>: old → new`). Show the person each of them. An `optional` file is the
+   format of a video kind this repository does not make yet (`sns`, `onboarding`, `explainer`; its `diff` is the
+   criteria only): ask whether the repository makes that kind — `--take <path>=new` adds the format, `--take
+   <path>=decline` records the answer so later updates do not ask again (`declined`) until the plugin's format changes. For each `conflict` and
    `protected-needs-choice` ask which to keep: `new` (an agent: its persona block only — the repository's frontmatter
    stays), `new-file` (the whole new file) or `local`. An agent item with `model` (`local` → `new`) has a role model the
    person chose (`/std config`): show it, and say that `new` keeps it while `new-file` resets it to the template's. Run the plan again with the choices:
    `python3 <<SKILL_DIR>>/scripts/setup.py update plan --take <path>=new,<path>=local` (comma-separated) — the choices
    are part of the `h12` the person approves.
 3. Ask with AskUserQuestion: the question shows the versions, what changes, every `ignore.lines` line (e.g.
-   `.gitignore Studio 블록: 0.0.22 → 0.0.23`) and `h12`; options: the fixed label
+   `.gitignore Studio 블록: 0.0.22 → 0.0.23`), every `audience` item's `line` (a shipped platform's copy without an
+   `audience` frontmatter line gets only that line; a brief may name only platforms whose audience is the video
+   kind's) and `h12`; options: the fixed label
    `갱신 <h12>` and "그만두기". Then, alone as your next tool call, in the same turn, right after the answer — do not wait
    for the person; never in the same assistant message as the question — run
    `python3 <<SKILL_DIR>>/scripts/setup.py update apply --expect <h12>` (with the same `--take`).

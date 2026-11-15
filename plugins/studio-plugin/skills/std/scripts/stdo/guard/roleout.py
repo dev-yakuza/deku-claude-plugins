@@ -18,7 +18,8 @@ from .scriptrun import VIDEO_ID, _inside, _no_link_below, _read, _real_dir
 LANG = re.compile(r"^[a-z]{2,3}(-[A-Za-z0-9]+)?$")
 TOOLS = ("Write", "Edit", "MultiEdit")
 # agent_type → the files it owns, relative to <repo>/<studio_root>/. `videos/<v>/…` means the video's folder wherever
-# store.video_dir finds it (public or local); `copy/<v>/…` stays under <studio_root>/copy (distribute/cli.py).
+# store.video_dir finds it (public or local); `copy/<v>/…` is <studio_root>/copy for a public video and
+# <studio_root>/local/copy for a local one (stdo/vpaths.py) — the other spelling gets no allow.
 # No dotfile and no lock file is ever listed.
 TABLE = {
     "std-source-analyst": ("videos/<v>/work/source.md",),
@@ -102,7 +103,9 @@ def _owned(hook, tool, path, worktree, studio_root):
         return None
     under = rel[len(sr):]
     if under[:1] == ["copy"]:
-        loc, v, rest = None, under[1] if len(under) > 1 else "", under
+        loc, v, rest = "videos", under[1] if len(under) > 1 else "", under
+    elif under[:2] == ["local", "copy"]:
+        loc, v, rest = "local", under[2] if len(under) > 2 else "", under[1:]
     elif under[:1] == ["videos"]:
         loc, v, rest = "videos", under[1] if len(under) > 1 else "", ["videos"] + under[1:]
     elif under[:2] == ["local", "videos"]:
@@ -144,7 +147,7 @@ def _owned(hook, tool, path, worktree, studio_root):
         brief = state.get("brief") if isinstance(state.get("brief"), dict) else {}
         plats = brief.get("platforms") or []
         plats = list(plats) if isinstance(plats, (dict, list)) else []  # {platform: [output, …]} (state.json brief)
-        if not schema.platform_ok(platform, state.get("kind")) or platform not in plats:
+        if not schema.platform_ok(platform) or platform not in plats:
             return None
     try:
         st = os.lstat(real)

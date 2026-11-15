@@ -421,12 +421,16 @@ LEGACY_DEPS_HEAD = {
     "stdo/text/__init__.py": "d83f94b333b2d9b7744eae6c6524d396605b58b3694ff16ef776fe12dd395e2e",
     "stdo/text/normalize.py": "a825f44d3a56226d5ed35599a68fd59079939a87f202a831e9760af8986b55fc",
     "stdo/writes.py": "e9c25585c4a4414fe145b901242ca4a47a2cde831bd619ddbc83cf2f11a92c56",
+    "stdo/vpaths.py": "e306c288abad8e7dd7a5eaf8b498935ca4d5158053d4fab931b091febf1a635a",  # new in 0.2.0
 }
 # the closure is found by running the frozen paths (fix-0029 §3.1: kinds.registry imports commit/harness.py and
 # commit/video.py lazily, and video.py loads credits.py; the closure test below runs them). Intended changes since
 # d2028cc, each with a one-line reason:
 LEGACY_DEPS_CHANGED = {
-    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26 · 0.1.2: SCRIPTS_VERSION 27",
+    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26 · 0.1.2: SCRIPTS_VERSION 27 · 0.2.0: SCRIPTS_VERSION 28",
+    "stdo/commit/approvals.py": "0.2.0: light_check(local_done=True) for a local video's done (the default unchanged)",
+    "stdo/commit/video.py": "0.2.0: the copy path through stdo/vpaths.py (unchanged for a public video); a public "
+                            "video's assets.json from a check_scope without the internal flag is not checked",
     "stdo/hooks/templates.py": "0.1.1 (fix-0029 §2): the shim's hint names hooks.py install only",
     "stdo/state/labels.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
     "stdo/commit/kinds.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
@@ -439,7 +443,8 @@ LEGACY_DEPS_CHANGED = {
                               "name, accent and logo, and role model changes",
     "stdo/state/tuples.py": "0.1.2 (fix-0102 §1.6): ① binds the teaching notes",
     "stdo/state/router.py": "0.1.2 (fix-0102 §1.6): ① binds the teaching notes",
-    "stdo/state/schema.py": "0.1.2 (fix-0102 §1.6): ① binds the teaching notes",
+    "stdo/state/schema.py": "0.1.2 (fix-0102 §1.6): ① binds the teaching notes · 0.2.0: four kinds, platform_ok "
+                            "by name only",
     "stdo/setup/labels.py": "0.1.2 (fix-0102 §2): agent-model set is a 설정 command",
     "stdo/state/store.py": "0.0.28 (fix-0028 §1.1): video_dir refuses an id that is not a video id (exit 2)",
 }
@@ -481,7 +486,8 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "27", "SCRIPTS_VERSION is 27 (0.1.2: teaching notes — claims/ with the new notes.py, "
+check(sv and sv.group(1) == "28", "SCRIPTS_VERSION is 28 (0.2.0: four video kinds, a local video's files under "
+      "<sr>/local/ (vpaths.py), per-scope checks, local done; 0.1.2: teaching notes — claims/ with the new notes.py, "
       "distribute/factcheck.py, state/ gates, collect, tuples, router, schema — and role models in commit/ summary, "
       "values, harness; 0.1.1: hooks/ as a whole — the shim's hint in "
       "templates.py, install.py's status accepting the 0.1.0 shim, cli.py's usage line — and no milestone names in "
@@ -662,6 +668,38 @@ for _n, _t in (("std-writer.md", _wr), ("guides/script.md", _gs)):
 check("unused: <script_src> — <reason>" in _f("commands", "verify.md"), "verify.md pastes the unused: lines at ①")
 _lp = [os.path.relpath(p, skill) for p in _mds if "layout: presenter" in open(p).read()]
 check(not _lp, "no shipped document writes layout: presenter (%s)" % ", ".join(_lp))
+
+# 0.2.0: every out and copy path of scripts/ is built by stdo/vpaths.py (a local video's are under <sr>/local/): outside
+# vpaths.py no os.path.join gets an "out" or "copy" argument, and no string other than a docstring holds `/out/` or
+# `/copy/` (an AST walk; ignore.py's .gitignore block names the ignored folders by design)
+import ast as _ast2
+_VP_STR_OK = {os.path.join("stdo", "ignore.py")}
+_vp_bad = []
+for _p in glob.glob(os.path.join(skill, "scripts", "**", "*.py"), recursive=True):
+    _r = os.path.relpath(_p, os.path.join(skill, "scripts"))
+    if _r == os.path.join("stdo", "vpaths.py") or os.sep + "legacy" + os.sep in _r:
+        continue
+    _t = _ast2.parse(open(_p, encoding="utf-8").read())
+    _docs = set()
+    for _n in _ast2.walk(_t):
+        if isinstance(_n, (_ast2.Module, _ast2.FunctionDef, _ast2.AsyncFunctionDef, _ast2.ClassDef)) and _n.body \
+                and isinstance(_n.body[0], _ast2.Expr) and isinstance(_n.body[0].value, _ast2.Constant):
+            _docs.add(id(_n.body[0].value))
+    for _n in _ast2.walk(_t):
+        if isinstance(_n, _ast2.Call) and isinstance(_n.func, _ast2.Attribute) and _n.func.attr == "join" and \
+                isinstance(_n.func.value, _ast2.Attribute) and _n.func.value.attr == "path" and \
+                any(isinstance(_a, _ast2.Constant) and _a.value in ("out", "copy") for _a in _n.args):
+            _vp_bad.append("%s:%d" % (_r, _n.lineno))
+        elif isinstance(_n, _ast2.Constant) and isinstance(_n.value, str) and id(_n) not in _docs and \
+                _r not in _VP_STR_OK and re.search(r"/(out|copy)/", _n.value):
+            _vp_bad.append("%s:%d (string)" % (_r, _n.lineno))
+check(not _vp_bad, "out and copy paths only through stdo/vpaths.py (%s)" % ", ".join(_vp_bad))
+sys.path.insert(0, os.path.join(skill, "scripts"))
+from stdo.state import schema as _sch
+from stdo.setup import render as _rnd
+_nofmt = [k for k in _sch.KINDS if ".claude/studio/formats/%s.md" % k not in _rnd.TEMPLATED
+          or not os.path.isfile(os.path.join(skill, "templates", "formats", "%s.md" % k))]
+check(not _nofmt, "every video kind has a format template that init or update installs (%s)" % ", ".join(_nofmt))
 
 if fails:
     print("structure: %d failure(s)" % len(fails))

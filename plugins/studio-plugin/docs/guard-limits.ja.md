@@ -226,7 +226,7 @@ README には要約があり、このファイルには詳細があります。�
   - Studio のロールが自分の出力ファイルに行う Write と Edit: source analyst の `work/source.md`、strategist の
     `work/brief.json` と `work/brief.md`、writer の `script.<lang>.md` と `work/<lang>/claims-map.json`、translator の
     ソース以外の言語の `script.<lang>.md`、visual director の台本の編集・`CREDITS.draft.yaml`・`work/<lang>/board.md`、
-    distributor の `copy/<video>/<lang>/<platform>.md`。fact-checker、auditor、メインセッションの書き込みはこれまで
+    distributor の `copy/<video>/<lang>/<platform>.md`(社内向けの動画は `local/copy/…`、もう一方には許可しません)。fact-checker、auditor、メインセッションの書き込みはこれまで
     どおりプロンプトが出ます。
 - 検査に一つでも通らなければ通常のプロンプトになり、拒否にはなりません。「このセッションのすべての編集を許可」を
   選ぶとセッションは `default` ではなくなり、そのセッションではこれらの allow は止まります。

@@ -9,8 +9,11 @@ three ways, with installed.json as the base.
   a new block only when the person chose it.
 - The plugin's `s2v.min_version` (config template) higher than the repository's → raised, unless a video is in
   progress (D29: refused, 3).
+- The shipped platforms' copies (youtube.md, internal.md) without an `audience` frontmatter line get only that line
+  (record-brief refuses a platform without it); the rest of a person's file stays.
 `update apply` needs the person's `갱신 <h12>` answer; then a harness commit (its question shows what changed)."""
 
+import collections
 import json
 import os
 import re
@@ -23,7 +26,10 @@ from .common import REFUSED, USAGE, SetupError, read_config, with_evidence, writ
 VERSION_RE = re.compile(r'^SCRIPTS_VERSION = "(\d+)"\s*$', re.M)
 # new: the plugin's template (for an agent: its persona block only — the person's frontmatter and notes stay);
 # new-file: the whole new file (an agent's frontmatter too); local: keep the repository's (M1c review P2)
-CHOICES = ("new", "new-file", "local")
+CHOICES = ("new", "new-file", "local", "decline")  # decline: an optional format the repository does not want
+# the shipped platform files and the audience their copies get when they have none (record-brief needs it)
+AUDIENCE = collections.OrderedDict([(".claude/studio/platforms/internal.md", "internal"),
+                                    (".claude/studio/platforms/youtube.md", "public")])
 
 
 def repo_scripts_version(top):
@@ -40,9 +46,10 @@ def parse_takes(raw):
     out = {}
     for item in [x for x in (raw or "").split(",") if x]:
         path, sep, choice = item.rpartition("=")
-        if not sep or choice not in CHOICES or path not in render.TEMPLATED:
-            raise SetupError(USAGE, "--take is <path>=new|new-file|local, comma-separated, for the files the plan "
-                             "lists: %r" % item)
+        if not sep or choice not in CHOICES or path not in render.TEMPLATED or \
+                choice == "decline" and path not in render.INIT_SKIP:
+            raise SetupError(USAGE, "--take is <path>=new|new-file|local (decline: an optional format only), "
+                             "comma-separated, for the files the plan lists: %r" % item)
         out[path] = choice
     return out
 
@@ -93,6 +100,30 @@ def _in_progress(top, root):
     return out
 
 
+def add_audience(text, audience):
+    """The text with `audience: <audience>` added to its frontmatter (after the `platform:` line), or None when the
+    file has no frontmatter or an audience line already."""
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    if end < 0 or re.search(r"^audience:", text[3:end], re.M):
+        return None
+    m = re.search(r"^platform:[^\n]*\n", text[:end + 1], re.M)
+    at = m.end() if m else text.find("\n") + 1
+    return text[:at] + "audience: %s\n" % audience + text[at:]
+
+
+def _audience_plan(top, items):
+    """[{path, audience}] of the shipped platforms' copies that get the audience line (none rewritten whole now)."""
+    rewritten = {i["path"] for i in items if i["action"] in ("write-new", "write-new-file")}
+    out = []
+    for rel, aud in AUDIENCE.items():
+        text = _read(top, rel)
+        if rel not in rewritten and text is not None and add_audience(text, aud) is not None:
+            out.append({"path": rel, "audience": aud, "line": "%s: audience: %s 추가" % (rel, aud)})
+    return out
+
+
 def _semver(t):
     from ..state.flow import _semver as sv
     return sv(t)
@@ -109,7 +140,11 @@ def _template_item(rel, local, base_ent, new_text, take):
         new_part, local_part, base = new_text, local, (base_ent or {}).get("sha")
     new_sha = render.sha(new_part) if new_part is not None else None
     local_sha = render.sha(local_part) if local_part is not None else None
-    if local is None:
+    if local is None and rel in render.INIT_SKIP:
+        # a newer kind's format the repository does not have: added only when taken (`new`); a person's `decline` of
+        # this very template is kept in installed.json and not asked again until the template changes
+        state = "declined" if (base_ent or {}).get("declined") == new_sha else "optional"
+    elif local is None:
         state = "missing"
     elif agent and local_part is None:
         state = "conflict"  # the persona markers are gone: only the person can say what to do
@@ -133,10 +168,17 @@ def _template_item(rel, local, base_ent, new_text, take):
         action = "keep"
     else:
         action = "write-new" if state == "update" else "keep"
-    resolved = state in ("same", "update", "keep-local") or take is not None
+    if take == "decline" and state not in ("optional", "declined"):
+        raise SetupError(USAGE, "%s is not an optional format here — decline is for those only" % rel)
+    resolved = state in ("same", "update", "keep-local", "optional", "declined") or take is not None
     item = {"path": rel, "state": state, "action": action, "take": take, "local_sha": local_sha,
             "new_sha": new_sha, "base_after": new_sha if resolved else base, "resolved": resolved}
-    if state != "same":
+    if take == "decline" or state == "declined" and take is None:
+        item["declined"] = new_sha
+    if state in ("optional", "declined"):  # the criteria only (the whole template is the plugin's own text)
+        if state == "optional":
+            item["diff"] = {"criteria": _diff(rel, None, new_part, None, new_text).get("criteria", [])}
+    elif state != "same":
         item["diff"] = _diff(rel, local_part if agent else local, new_part, local, new_text)
     return item
 
@@ -211,7 +253,9 @@ def plan(top, takes_raw=None):
                               "abandon them first (D29)" % (old_min, new_min, ", ".join(busy)))
     ig, ig_private = _ignore_plan(top, root, inst)
     out["ignore"] = ig
+    out["audience"] = _audience_plan(top, items)
     core = {"scripts_version": out["scripts_version"], "scripts": out["scripts"],
+            "audience": [[a["path"], a["audience"]] for a in out["audience"]],
             "templates": [[i["path"], i["state"], i["action"], i["local_sha"], i["new_sha"]] for i in items],
             "min_version": out["min_version"], "takes": sorted(takes.items()),
             "ignore": {k: ig[k] for k in ("gitignore", "exclude", "kept", "removed")}}
@@ -301,6 +345,11 @@ def apply(top, expect, takes_raw, argv, proxy=False):
                 text = new_text
             write_text(top, rel, text)
             wrote.append(rel)
+        for a in p["audience"]:  # the frontmatter line only (the person's edits stay)
+            text = add_audience(_read(top, a["path"]) or "", a["audience"])
+            if text is not None:
+                write_text(top, a["path"], text)
+                wrote.append(a["path"])
         if p["_ignore"]["gitignore"] is not None:  # the harness commit carries it (a block-only change)
             write_text(top, ".gitignore", p["_ignore"]["gitignore"])
             wrote.append(".gitignore")
@@ -325,6 +374,8 @@ def apply(top, expect, takes_raw, argv, proxy=False):
                     del inst["templates"][i["path"]]
                 else:
                     inst["templates"][i["path"]] = prev
+            elif i.get("declined"):
+                inst["templates"][i["path"]]["declined"] = i["declined"]
         write_text(top, render.INSTALLED, render.dump_json(inst))
         wrote.append(render.INSTALLED)
         return wrote

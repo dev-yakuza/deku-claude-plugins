@@ -1,5 +1,6 @@
 ---
 platform: youtube-shorts
+audience: public
 checked: "{{CHECKED_DATE}}"
 outputs:
   - name: shorts

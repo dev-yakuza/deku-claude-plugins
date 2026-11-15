@@ -4,8 +4,8 @@
     run_s2v.py snapshot <video> --output o [--lang l] [--begin-end]
 
 The wrapper puts the command line together itself (`node <machine.json's s2v>/packages/cli/dist/main.js …`, the
-frozen audio, the results folder `<sr>/out/<video>/<lang>/`); the agent chooses nothing in it. The proxy watermark
-comes from the state only: it is added when this is a proxy session (the guard's own rule, STUDIO_SANDBOX) or when
+frozen audio, the results folder `<sr>/out/<video>/<lang>/`, a local video's under `<sr>/local/`); the agent chooses
+nothing in it. The proxy watermark comes from the state only: it is added when this is a proxy session (the guard's own rule, STUDIO_SANDBOX) or when
 any of ①, ② and ③ (this output) has no current record of a person (`approved_by: human`) — ④a's own record is not
 looked at, so a person can approve ④a on an unmarked render once ①–③ are theirs (the hand-over, v3 N3 · v4 R5).
 
@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 
-from . import machine, paths, sandbox
+from . import machine, paths, sandbox, vpaths
 from .state import cli as scli, commands, schema, stagechecks, store
 from .state.collect import CollectError, Providers
 
@@ -166,7 +166,7 @@ def main(argv, providers=None, env=None, cwd=None, runner=None):
         ctx = scli._ctx(repo, cfg, vdir, lang)
         if not os.path.isfile(ctx["script"]):
             raise Usage("no script yet: %s" % os.path.relpath(ctx["script"], repo))
-        out_dir = os.path.join(repo, root, "out", state["video"], lang)
+        out_dir = vpaths.out_dir(repo, root, state, lang)
         lock_path = os.path.join(vdir, "work", lang, ".run_s2v.%s.lock" % output)
         os.makedirs(os.path.dirname(lock_path), exist_ok=True)
         with store.Lock(lock_path, wait=0.0):

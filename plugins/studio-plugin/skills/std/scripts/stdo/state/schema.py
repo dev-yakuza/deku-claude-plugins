@@ -52,17 +52,22 @@ DONE_STAGES = ("script", "verify", "cast", "tts", "audition", "board", "visual-c
 # later by design). Engine fields belong to the stage that consumes them: the TTS constants and
 # templates to tts (they change the synthesized audio), the screen constants to visual-check (the
 # stills are where they show; 00-plan §3.2's engine row sends their changes to ③).
-# the platforms a video kind may name in its brief (M1h review Y1: a platform name becomes a path —
-# `.claude/studio/platforms/<p>.md`, `<sr>/copy/<v>/<l>/<p>.md`); M2 adds more
-KIND_PLATFORMS = {"youtube": ("youtube",)}
+# the video kinds and their scope (D20: fixed at begin). An internal kind's video is local: it lives under
+# `<sr>/local/` and is never committed; a platform file's `audience` must equal the kind's scope (record-brief)
+KINDS = {"youtube": "public", "sns": "public", "onboarding": "internal", "explainer": "internal"}
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
-def platform_ok(name, kind=None):
-    """A platform name that is safe as a file name (and, given a kind, one that kind allows)."""
-    if not isinstance(name, str) or not NAME.match(name):
-        return False
-    return kind is None or name in KIND_PLATFORMS.get(kind, ())
+def location_of(kind):
+    """`public` or `local` (where a video of this kind lives)."""
+    return "local" if KINDS.get(kind) == "internal" else "public"
+
+
+def platform_ok(name):
+    """A platform name that is safe as a file name (M1h review Y1: it becomes a path — `.claude/studio/platforms/
+    <p>.md`, the copy file). Name only: the guard calls it and reads no platform file; the kind's audience is checked
+    where the brief is recorded."""
+    return isinstance(name, str) and bool(NAME.match(name))
 
 
 FIELD_PRODUCER = {

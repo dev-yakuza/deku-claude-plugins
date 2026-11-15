@@ -31,11 +31,18 @@ PRONOUNCE = ".claude/studio/pronounce.json"
 TEMPLATED = collections.OrderedDict([
     (".claude/studio/charter.md", "studio/charter.md.tmpl"),
     (".claude/studio/formats/youtube.md", "formats/youtube.md"),
+    (".claude/studio/formats/sns.md", "formats/sns.md"),
+    (".claude/studio/formats/onboarding.md", "formats/onboarding.md"),
+    (".claude/studio/formats/explainer.md", "formats/explainer.md"),
     (".claude/studio/platforms/youtube.md", "platforms/youtube.md"),
     (".claude/studio/guides/script.md", "guides/script.md"),
     (".claude/studio/guides/board.md", "guides/board.md"),
     (".claude/studio/guides/copy.md", "guides/copy.md"),
 ] + [(".claude/agents/%s.md" % a, "agents/%s.md" % a) for a in AGENTS])
+# the formats of the newer video kinds: init leaves them out (with all four, the first harness commit's value block no
+# longer fits its question); `update` offers each as `missing` and the person adds the kinds the repository makes
+INIT_SKIP = (".claude/studio/formats/sns.md", ".claude/studio/formats/onboarding.md",
+             ".claude/studio/formats/explainer.md")
 
 
 class RenderError(Exception):
@@ -120,7 +127,7 @@ def harness_files(answers):
         "ACCENT_COLOR": brand["accent_color"],
         "LOGO": json.dumps(brand.get("logo") or "", ensure_ascii=False)[1:-1]})  # "" = no logo
     json.loads(out[".claude/studio/brand.json"])  # a template slip must not reach a repository
-    out.update(templated(vals))
+    out.update((k, v) for k, v in templated(vals).items() if k not in INIT_SKIP)
     out[PRONOUNCE] = "{}\n"  # the shared pronunciation dictionary: a flat object, reading by written form
     nar = answers["narrator"]
     base = "%s/cast/%s/" % (answers["studio_root"], nar["id"])

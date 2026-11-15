@@ -254,6 +254,15 @@ python3 .claude/studio/scripts/hooks.py install
   リテラルで書いた場合と同じく拒否します。空の値で止めるには `"${X:?}"` と書いてください。
   `find ./$X -name '*.pyc' -delete` と `rm -rf ./$X` は、`find ./ …` が通り rm が `.` を拒否するため通ります。
   `/std update` は不要です(スクリプトのバージョンは 27 のまま)。
+- **0.2.0**: 動画の種類が 4 つになりました — `youtube` と `sns`(公開)、`onboarding` と `explainer`(社内向け:
+  文書を他のメンバーに説明する動画)。種類ごとにフォーマットファイル(`.claude/studio/formats/<kind>.md`、長さは
+  人が直す初期値)があります。社内向けの動画はすべてを `studio/local/` の下に置き(動画のフォルダ、レンダー、
+  配信用テキスト。バックアップされ、コミットはされません)、コミットなしの `state.py done` で終わります(人の承認は
+  引き続き必要で、代理の承認は拒否します)。`state.py next` は動画の `scope:`、`out:`、`copy:` のフォルダを表示します。
+  プラットフォームファイルは `audience`(`public` | `internal`)を持ち、ブリーフに書けるのはその種類の audience の
+  プラットフォームだけです。`/std update` は `platforms/youtube.md` にその行を足し、新しいフォーマットを提案します。
+  社内向けの動画は配信用テキストに社内用語を使え、クレジットに `public_ok` は不要です。公開動画は、ソースアナリストが
+  `internal` と分類した画像を表示できません。`/std update` が必要です(スクリプトのバージョン 28)。
 
 ## ライセンス
 

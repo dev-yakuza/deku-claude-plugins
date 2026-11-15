@@ -104,8 +104,12 @@ class ApproveCase(StudioTestCase):
 
     # ---------- moving a video along ----------
 
+    def sub(self, *parts):
+        """A path under the studio root for this video's location (a local video's out and copy are under local/)."""
+        return (("local",) if self.location == "local" else ()) + parts
+
     def frames(self, o, content=b'{"stills": 1}'):
-        d = os.path.join(self.repo, "studio", "out", "v1", "ko", "%s.ko.frames" % o)
+        d = os.path.join(self.repo, "studio", *self.sub("out", "v1", "ko", "%s.ko.frames" % o))
         os.makedirs(d, exist_ok=True)
         p = os.path.join(d, "index.json")
         tmp = p + ".new"
@@ -160,13 +164,13 @@ class ApproveCase(StudioTestCase):
                 return
 
     def render_files(self, o, body=b"mp4"):
-        d = os.path.join(self.repo, "studio", "out", "v1", "ko")
+        d = os.path.join(self.repo, "studio", *self.sub("out", "v1", "ko"))
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "%s.ko.mp4" % o), "wb") as f:
             f.write(body)
 
     def copy_file(self, p, body="copy"):
-        d = os.path.join(self.repo, "studio", "copy", "v1", "ko")
+        d = os.path.join(self.repo, "studio", *self.sub("copy", "v1", "ko"))
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "%s.md" % p), "w") as f:
             f.write(body)

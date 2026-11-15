@@ -229,7 +229,7 @@ person's gates stay behind everything listed here.
   - A Studio role's Write or Edit of its own output files: the source analyst's `work/source.md`, the strategist's
     `work/brief.json` and `work/brief.md`, the writer's `script.<lang>.md` and `work/<lang>/claims-map.json`, the
     translator's `script.<lang>.md` for another language than the source, the visual director's script edits,
-    `CREDITS.draft.yaml` and `work/<lang>/board.md`, the distributor's `copy/<video>/<lang>/<platform>.md`. The
+    `CREDITS.draft.yaml` and `work/<lang>/board.md`, the distributor's `copy/<video>/<lang>/<platform>.md` (`local/copy/…` for an internal video, never the other). The
     fact-checker's, the auditor's and the main session's writes keep their prompt.
 - When a check fails you get the normal prompt, never a refusal. Choosing "allow all edits this session" switches the
   session out of `default`; from then on these allows stop for that session.

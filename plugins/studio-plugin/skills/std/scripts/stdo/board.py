@@ -8,8 +8,10 @@ ones, and every picture the script shows (inspect's files of kind image · video
 - a CREDITS.yaml entry whose sha256 is the file's and whose hash is the one the person approved (`state.py credit`) —
   by the person: a proxy-mode credit counts only inside the proxy session (X2);
   entries with consent · originality_checked · ai_generated: true are not supported in M1;
-- an image whose scope is third-party or unknown needs `public_ok: true` and a license (`TODO` · `see README` only
-  with `license_checked: true`);
+- in a public video, an image whose scope is third-party or unknown needs `public_ok: true` and a license (`TODO` ·
+  `see README` only with `license_checked: true`), and an internal image (check_scope's flag) is refused whatever its
+  credit; in an internal video only third-party needs a license and nothing needs `public_ok` (every picture still
+  needs the person's CREDITS entry, J131);
 - the brand's look (0.0.26, stdo/look.py): brand.json committed, the theme's accent, the brand logo (a picture too: its
   CREDITS entry has the floor `public/brand.json logo (committed in the harness)`) and no presenter layout without
   character art."""
@@ -37,7 +39,13 @@ def picture_problems(repo, vdir, state, ins, proxy=False):
     proxy counts only there — M1g review X2)."""
     out = []
     bl = look.brand_logo(repo, vdir)
-    usable = credits.assets_by_src(assets_mod.read(vdir), bl)
+    data = assets_mod.read(vdir)
+    usable = credits.assets_by_src(data, bl)
+    public = state.get("scope") != "internal"  # the closed side: anything but internal is checked as public
+    internal = {i.get("script_src") for i in (data or {}).get("images") or []
+                if isinstance(i, dict) and i.get("internal") is True and i.get("script_src")}
+    unjudged = {i.get("script_src") for i in (data or {}).get("images") or []  # a video begun before the flag
+                if isinstance(i, dict) and "internal" not in i and i.get("script_src")}
     cred, why = credits.read(os.path.join(vdir, credits.FILE))
     if why:
         out.append(why)
@@ -49,6 +57,13 @@ def picture_problems(repo, vdir, state, ins, proxy=False):
             continue
         p = f.get("path")
         a = usable.get(p)
+        if public and p in internal:
+            out.append("%s is an internal image (made inside the organization): a public video cannot show it" % p)
+            continue
+        if public and p in unjudged:
+            out.append("%s was checked before images could be internal — run check_scope.py again (the source "
+                       "stage)" % p)
+            continue
         if a is None:
             out.append(look.logo_reason(bl, p) and "%s: %s" % (p, look.logo_reason(bl, p)) or
                        "%s is not a usable image of work/assets.json (use its script_src)" % p)
@@ -73,7 +88,8 @@ def picture_problems(repo, vdir, state, ins, proxy=False):
                        % p)
         e = cred.get(p)
         if e is None:
-            out.append("%s has no CREDITS entry (every picture of a public video needs one, your own too)" % p)
+            out.append("%s has no CREDITS entry (every picture of a%s video needs one, your own too)"
+                       % (p, " public" if public else "n internal"))
             continue
         rec = approved.get(p)
         if not isinstance(rec, dict) or rec.get("hash") != credits.entry_hash(e):
@@ -87,8 +103,8 @@ def picture_problems(repo, vdir, state, ins, proxy=False):
         if u:
             out.append("%s: %s" % (p, u))
         scope = a.get("scope") or a.get("floor") or "unknown"
-        if scope in ("third-party", "unknown"):
-            if e.get("public_ok") is not True:
+        if scope in ("third-party", "unknown") and (public or scope == "third-party"):
+            if public and e.get("public_ok") is not True:
                 out.append("%s is %s: a public video needs public_ok: true in its CREDITS entry" % (p, scope))
             lic = e.get("license")
             if not isinstance(lic, str) or not lic.strip():

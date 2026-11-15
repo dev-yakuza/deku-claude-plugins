@@ -22,7 +22,7 @@ import json
 import os
 import re
 
-from .. import credits as credits_mod
+from .. import credits as credits_mod, vpaths
 from .approvals import Problem
 from . import approvals
 from .kinds import Collected
@@ -249,7 +249,8 @@ class VideoKind(object):
         out = []
         self._files = []
         _imgs, _sha, note = flow._checked_assets(vdir, state["source"].get("copy_sha"),
-                                                 scope.fingerprint(ctx.top, cfg, ctx.env))
+                                                 scope.fingerprint(ctx.top, cfg, ctx.env),
+                                                 public=state.get("scope") != "internal")
         if note or state["source"].get("assets_sha") is None:
             out.append(Problem(1, "video %s: the source's images are not checked as recorded (%s) — run the source "
                                   "stage again" % (video, note or "no assets_sha")))
@@ -275,8 +276,7 @@ class VideoKind(object):
                         for p in details["problems"]]
             for p in schema.current_platforms(state, lang):
                 L = state["langs"][lang]
-                cp = L["copies"].get(p, {}).get("path") or os.path.join(
-                    sctx["studio_root"], "copy", state["video"], lang, p + ".md")
+                cp = L["copies"].get(p, {}).get("path") or vpaths.copy_file("", sctx["studio_root"], state, lang, p)
                 cp = cp if os.path.isabs(cp) else os.path.join(ctx.top, cp)
                 out += [Problem(1, "video %s [%s] %s: validate_copy: %s" % (video, lang, p, x))
                         for x in copy_check.problems(ctx.top, vdir, state, lang, sctx, p, cfg, ctx.env, cp)]

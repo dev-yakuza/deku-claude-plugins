@@ -57,7 +57,8 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
 
 ## Gate ③
 
-1. External audit (public videos): as in `setup.py doc verify` step 5, with the contact sheet and the stills.
+1. External audit (public videos — `scope: public` in `state.py next`; none for `scope: internal`): as in
+   `setup.py doc verify` step 5, with the contact sheet and the stills.
 2. Open the contact sheet and the stills (`open <path>`); the last `shown 3 … --end` (printed by the snapshot) printed
    `hash12 <h12>` and the `question` block: `[<video>] ③ 정지 화면 — <stills folder> · hash <h12>`, up to
    `end of question`.

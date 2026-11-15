@@ -16,7 +16,8 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
    it names. When the source stage recorded the source's public URL it prints `in the description: <label>: <url>`.
 2. Spawn the distributor (`std-distributor`) with `work/brief.md`, the script, the render's `.chapters.txt`,
    `.claude/studio/platforms/youtube.md`, `CREDITS.yaml` and that source link line, if any. It writes
-   `studio/copy/<video>/<lang>/youtube.md`.
+   `youtube.md` in the `copy:` folder `state.py next` printed (`studio/copy/<video>/<lang>/` for a public video,
+   `studio/local/copy/<video>/<lang>/` for an internal one).
 3. Spawn the fact-checker (`std-fact-checker`) with the copy, `work/<lang>/claims-map.json` and the source copy: it
    judges the copy's sentences in `work/<lang>/copy-verify.youtube.json` and sets `copy_excerpts.youtube` in the
    claims map to exactly their excerpts.

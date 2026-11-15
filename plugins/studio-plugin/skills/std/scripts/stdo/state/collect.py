@@ -5,7 +5,7 @@ import json
 import os
 import subprocess
 
-from .. import machine
+from .. import machine, vpaths
 from . import hashes, schema
 
 
@@ -106,8 +106,8 @@ class Providers(object):
         h = ins["hashes"]
         live, text = self.source(ctx, state)
         L = state["langs"][lang]
-        out_dir = os.path.join(ctx["repo"], ctx["studio_root"], "out", state["video"], lang)
-        copy_dir = os.path.join(ctx["repo"], ctx["studio_root"], "copy", state["video"], lang)
+        out_dir = vpaths.out_dir(ctx["repo"], ctx["studio_root"], state, lang)
+        copy_dir = vpaths.copy_dir(ctx["repo"], ctx["studio_root"], state, lang)
         render = {o: hashes.render_sha(out_dir, o, lang, proxy=bool(L["renders"].get(o, {}).get("proxy")))
                   for o in state["brief"]["outputs"]}
         copies = {}

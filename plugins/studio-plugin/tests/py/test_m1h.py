@@ -322,8 +322,8 @@ class PlatformNames(StudioTestCase):
             self.assertFalse(schema.platform_ok(bad), bad)
             with self.assertRaises(rules.RulesProblem):
                 rules.path("/repo", bad)
-        self.assertTrue(schema.platform_ok("youtube", "youtube"))
-        self.assertFalse(schema.platform_ok("tiktok", "youtube"))
+        self.assertTrue(schema.platform_ok("youtube"))
+        self.assertTrue(schema.platform_ok("tiktok"))  # name only: the kind's audience is record-brief's (M2a)
         from stdo.distribute import factcheck
         with self.assertRaises(ValueError):
             factcheck.path("/v", "ko", "../x")
@@ -348,7 +348,7 @@ class BriefPlatforms(StudioTestCase):
         os.makedirs(vdir)
         store.create(vdir, F.state())
         F.brief_ready(repo, vdir)
-        for bad in ("../../../../tmp/p", "/tmp/p", "tiktok"):
+        for bad in ("../../../../tmp/p", "/tmp/p", "nope"):
             p = os.path.join(vdir, "work", "brief.json")
             with open(p, "w") as f:
                 json.dump({"claims": [F.C1], "roles": [{"name": "narrator"}], "outputs": ["youtube"],
@@ -357,7 +357,7 @@ class BriefPlatforms(StudioTestCase):
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 code = cli.main(["record-brief", "v1", "--from", p], cwd=repo)
             self.assertEqual(code, 1, bad)
-            self.assertIn("platforms the youtube kind does not have", err.getvalue())
+            self.assertIn("not platform names" if "/" in bad else "has no audience line", err.getvalue())
 
 
 class NumbersNit(StudioTestCase):

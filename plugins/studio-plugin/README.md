@@ -258,6 +258,15 @@ the repository): [docs/removing.md](docs/removing.md).
   `rm -f studio/local/tmp-$X.txt`, as their literal forms already were. Write `"${X:?}"` to stop on an empty value.
   `find ./$X -name '*.pyc' -delete` and `rm -rf ./$X` pass, as `find ./ …` passes and rm refuses `.`. No
   `/std update` (scripts version stays 27).
+- **0.2.0**: four video kinds — `youtube` and `sns` (public), `onboarding` and `explainer` (internal: explaining a
+  document to other members) — each with its format file (`.claude/studio/formats/<kind>.md`, starting lengths a
+  person edits). An internal video keeps everything under `studio/local/` (its folder, renders and copy; backed up,
+  never committed) and ends with `state.py done` without a commit (a person's approvals are still required, proxy ones
+  are refused); `state.py next` prints the video's `scope:`, `out:` and `copy:` folders. A platform file names its
+  `audience` (`public` | `internal`) and a brief may name only platforms of its kind's audience; `/std update` adds
+  that line to `platforms/youtube.md` and offers the new formats. An internal video may use in-house terms in its copy
+  and needs no `public_ok` credits; a public video cannot show an image the source analyst classes `internal`.
+  Needs `/std update` (scripts version 28).
 
 ## License
 

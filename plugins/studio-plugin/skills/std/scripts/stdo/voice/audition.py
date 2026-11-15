@@ -1,9 +1,9 @@
 """`audition.py <video>` (m1-plan §8): the clips a person listens to at ② — fixed samples (the longest sentence, the
 first sentence with a number or a proper noun), the first sentence with each reading change (V4), every sentence
 whose lock entry changed since the last ② approval
-(its `sentences` {id: lockKey}), and every exempted line — joined by ffmpeg into `out/<v>/<l>/audition/narrator.wav`
-with `audition.md` beside it, then `checks/audition.json` over its inputs and those two files (v5 S4: touching the
-files never passes it)."""
+(its `sentences` {id: lockKey}), and every exempted line — joined by ffmpeg into
+`[local/]out/<v>/<l>/audition/narrator.wav` with `audition.md` beside it, then `checks/audition.json` over its inputs
+and those two files (v5 S4: touching the files never passes it)."""
 
 import os
 import re

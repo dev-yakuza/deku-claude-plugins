@@ -22,7 +22,8 @@ def _ev_matches(rec, ev_rec):
     return True
 
 
-def light_check(vdir, video):
+def light_check(vdir, video, local_done=False):
+    """`local_done`: for `state.py done` of a local video (never committed), so its location is no problem here."""
     out = []
     try:
         state = store.read_state(vdir)
@@ -68,7 +69,7 @@ def light_check(vdir, video):
         if isinstance(rec, dict) and rec.get("approved_by") != "human":
             out.append(Problem(4, "video %s: the credit of %s was approved in the proxy mode — a person runs "
                                   "\"state.py credit\" for it again before a commit" % (video, path)))
-    if state.get("location") == "local":
+    if state.get("location") == "local" and not local_done:
         out.append(Problem(1, "video %s is a local (machine-only) video — it is never committed" % video))
     return out
 

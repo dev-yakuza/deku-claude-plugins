@@ -1,5 +1,6 @@
 ---
 platform: internal
+audience: internal
 checked: "{{CHECKED_DATE}}"
 outputs:
   - name: youtube

@@ -22,6 +22,8 @@ teaching note (`verify.md`'s "Teaching notes") — is it true, general, needed b
 subject, and not contradicted by the source.
 
 ## Rules
+- When the producer says the video is internal (for members of the organization only), internal information is not a
+  finding; everything else is.
 - Read only. Report; do not fix.
 - Quote the file and line for every finding.
 

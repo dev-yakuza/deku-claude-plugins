@@ -8,6 +8,7 @@ import json
 import os
 import sys
 
+from .. import vpaths
 from . import backup, commands, evidence, labels, schema, store
 from .collect import CollectError
 from .hashes import hash_of
@@ -56,7 +57,7 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
     box = {}
     if gate == "2":  # the lines its question must show, computed now (conflicts too) and kept with the shown record
         from ..voice import gate2
-        md = os.path.join(ctx["studio_root"], "out", state["video"], lang, "audition", "audition.md")
+        md = os.path.join(vpaths.audition_dir("", ctx["studio_root"], state, lang), "audition.md")
         box["lines"] = gate2.lines(vdir, lang, _conflicts(ctx, state, lang, providers), _write_text, read=md)
     if gate == "4b":  # the copy's facts and their excerpts (M1h review Y2)
         from ..distribute import gate4b
@@ -167,6 +168,10 @@ def unused_lines(vdir, lang):
     return ["unused: %s — %s" % (sanitize_reason(k), sanitize_reason(v)) for k, v in sorted(ui.items())]
 
 
+def _rel(p):
+    return p.replace(os.sep, "/")
+
+
 def _question(ctx, state, lang, gate, scope, box):
     """The question block to paste unchanged (pilot-1 P4): agents retyped the lines and changed characters."""
     v, sr = state["video"], ctx["studio_root"]
@@ -174,13 +179,13 @@ def _question(ctx, state, lang, gate, scope, box):
         header = "[%s] ① 대본 — %s" % (v, os.path.relpath(ctx["script"], ctx["repo"]))
         lines, after = labels.source_commit_lines(state) + box["lines"], "the auditor's findings"
     elif gate == "2":
-        header = "[%s] ② 오디션 — %s/out/%s/%s/audition/narrator.wav" % (v, sr, v, lang)
+        header = "[%s] ② 오디션 — %s/narrator.wav" % (v, _rel(vpaths.audition_dir("", sr, state, lang)))
         lines, after = box["lines"], "the length warning when there is one"
     elif gate in ("3", "4a"):  # 0.0.28 Q17: printed, so the model writes less (no guard comparison for these yet)
         return labels.question_block("%s · hash %s" % (_header34(ctx, state, lang, gate, scope), box["hash12"]),
                                      _lines34(ctx, state, lang, gate, scope), "the auditor's findings")
     else:
-        header = "[%s] ④b 배포용 글 — %s/copy/%s/%s/%s.md" % (v, sr, v, lang, scope)
+        header = "[%s] ④b 배포용 글 — %s" % (v, _rel(vpaths.copy_file("", sr, state, lang, scope)))
         lines, after = box["union"], "the auditor's findings"
     return labels.question_block("%s · hash %s" % (header, box["hash12"]), lines, after)
 
@@ -266,7 +271,9 @@ def _with_evidence(repo, vdir, video, argv, cmd, label_of, check_state, change, 
         if after:
             after(s)
         if s["location"] == "local":
-            st = backup.run(repo, vdir, video)
+            from .cli import _cfg_of  # the studio root the video was found under (cli imports this module)
+            root = _cfg_of(repo).get("studio_root") or "studio"
+            st = backup.run(repo, vdir, video, extra=backup.local_dirs(repo, root, s))
             if st.get("warning"):
                 sys.stderr.write("warning: %s\n" % st["warning"])
 
@@ -687,7 +694,7 @@ def exclude_output(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
         for lg in s["langs"]:
             try:
                 _mirror_shown(vdir, s, lg)
-                d = os.path.join(ctx["repo"], ctx["studio_root"], "out", s["video"], lg)
+                d = vpaths.out_dir(ctx["repo"], ctx["studio_root"], s, lg)
                 if not os.path.isdir(d):
                     continue
                 for n in os.listdir(d):

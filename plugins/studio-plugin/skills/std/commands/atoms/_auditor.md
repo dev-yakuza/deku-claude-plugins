@@ -7,8 +7,10 @@ Status: used before ① (`setup.py doc verify`); the other gates follow in later
 - Spawned as `std-auditor` (tools: Read, Grep, Glob). The guard denies its Write · Edit · NotebookEdit, every MCP
   tool and any Bash that is not a reading command (`G-AUDIT`). The producer still compares the state of `studio/`
   and `.claude/studio/` before and after and discards the result if anything changed.
-- When: before ① (script), before ③ (stills, public videos only), before ④a (thumbnail,
-  chapters, frames), after copy, and before a generated character candidate is chosen.
+- When: before ① (script), before ③ (stills, public videos only — `state.py next` prints `scope:`), before ④a
+  (thumbnail, chapters, frames), after copy, and before a generated character candidate is chosen.
+- For an internal video (`scope: internal`) tell the auditor the video is internal: internal information is then not
+  a finding; everything else is judged as for a public video.
 - It cannot hear audio; number and negation mismatches in the heard text are checked by
   `check_tts` instead.
 

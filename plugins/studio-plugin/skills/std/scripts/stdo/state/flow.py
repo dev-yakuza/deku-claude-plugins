@@ -13,14 +13,14 @@ import stat
 import subprocess
 import sys
 
-from .. import locks, machine, paths
+from .. import locks, machine, paths, vpaths
 from ..commit import okfile
 from . import commands, evidence, harnessgate, hashes, labels, schema, stagechecks, store
 from .collect import CollectError, frozen_copy_path
 
 C = commands
 VIDEO_ID = store.VIDEO_ID
-KINDS = ("youtube",)  # M1: one video kind (U-M1-4)
+KINDS = tuple(schema.KINDS)
 REASON_MAX = 500
 OVERLAY_MAX = 64 * 1024
 OVERLAY_KEYS = ("hosts", "sources", "terms", "videos", "actors")
@@ -59,15 +59,15 @@ def _semver(text):
 
 
 def begin(repo, cfg, root, o, providers, ctx_of, env=None):
-    """`begin <video> --source <path> --kind youtube [--lang l] [--ask-before tts,render]`."""
+    """`begin <video> --source <path> --kind <kind> [--lang l] [--ask-before tts,render]`."""
     if len(o["_"]) != 1:
-        raise Usage("begin needs one video id: begin <video> --source <path> --kind youtube [--lang l]")
+        raise Usage("begin needs one video id: begin <video> --source <path> --kind %s [--lang l]" % "|".join(KINDS))
     video = o["_"][0]
     if not VIDEO_ID.match(video):
         raise Usage("a video id is lowercase letters, digits and -, at most 64 characters: %r" % video)
     kind = o.get("--kind")
     if kind not in KINDS:
-        raise Usage("--kind must be one of %s in this version (got %r)" % (", ".join(KINDS), kind))
+        raise Usage("--kind must be one of %s (got %r)" % (", ".join(KINDS), kind))
     src = o.get("--source")
     if not src:
         raise Usage("begin needs --source <the Markdown file in this repository>")
@@ -78,7 +78,7 @@ def begin(repo, cfg, root, o, providers, ctx_of, env=None):
     why = harness_refusal(repo, providers, ctx_of, env)
     if why:
         raise store.Refused(why, C.REFUSED)
-    for d in (os.path.join(repo, root, "videos", video), os.path.join(repo, root, "local", "videos", video)):
+    for d in vpaths.leftovers(repo, root, video):  # a folder, or an abandoned video's renders or copy
         if os.path.lexists(d):
             raise store.Refused("a video %s exists already (%s)" % (video, os.path.relpath(d, repo)), C.REFUSED)
     real_repo = os.path.realpath(repo)
@@ -111,17 +111,19 @@ def begin(repo, cfg, root, o, providers, ctx_of, env=None):
     elif ver.get("dirty"):
         _warn("s2v has uncommitted changes: going back to this exact version later is not possible")
     s2v = {k: ver.get(k) for k in ("id", "version", "commit", "dirty")}
-    st = schema.create_state(video, "public", kind, "public", lang, s2v,
+    st = schema.create_state(video, schema.location_of(kind), kind, schema.KINDS[kind], lang, s2v,
                              {"kind": "repo-md", "path": rel.replace(os.sep, "/"), "images": [], "frozen_hash": None,
                               # the source's last commit at begin: later commits to it are shown at ① (S5)
                               "begin_commit": last_commit(repo, [rel.replace(os.sep, "/")])})
     st["ask_before"] = ask
-    vdir = os.path.join(repo, root, "videos", video)
+    vdir = vpaths.video_dir(repo, root, st)
     voices = os.path.join(repo, root, "voices")
     if not os.path.isdir(voices):
         os.makedirs(voices, exist_ok=True)  # S7: the first tts must not make voices/ at the repository root
     store.create(vdir, st)
-    _out("begun %s (%s, %s) from %s" % (video, kind, lang, st["source"]["path"]))
+    _out("begun %s (%s, %s, %s) from %s" % (video, kind, st["scope"], lang, st["source"]["path"]))
+    if st["location"] == "local":
+        _out("an internal video: its files stay under %s/local/ on this machine (backed up, never committed)" % root)
     if ask:
         _out("ask before: %s" % ", ".join(ask))
     return C.OK
@@ -161,9 +163,28 @@ def ask_before(vdir, o, hooks=None):
 
 # ---------- record-source ----------
 
-def _checked_assets(vdir, copy_sha, fp):
+INTERNAL_CHECK = 28  # the SCRIPTS_VERSION whose check_scope sets each image's `internal` flag
+
+
+def stale_scope_check(data, public):
+    """A note when a public video's assets.json was checked by a check_scope without the internal-image flag (a video
+    begun before it): its images must be judged again. None otherwise."""
+    if not public or not isinstance(data, dict):
+        return None
+    sc = data.get("scope_check") if isinstance(data.get("scope_check"), dict) else {}
+    try:
+        old = int(sc.get("scripts_version")) < INTERNAL_CHECK
+    except (TypeError, ValueError):
+        old = True
+    if old or any(isinstance(i, dict) and "internal" not in i for i in data.get("images") or []):
+        return "work/assets.json was checked before images could be internal: run check_scope.py again"
+    return None
+
+
+def _checked_assets(vdir, copy_sha, fp, public=True):
     """(images, assets.json sha, note): the usable images of assets.json when check_scope passed for this very copy of
-    the source (m1-plan §6, M1d); else no images and a note saying what to run."""
+    the source (m1-plan §6, M1d) — for a public video by a check_scope that sets the internal flag; else no images and
+    a note saying what to run."""
     p = os.path.join(vdir, "work", "assets.json")
     try:
         with open(p, encoding="utf-8") as f:
@@ -182,6 +203,9 @@ def _checked_assets(vdir, copy_sha, fp):
     if changed:
         return [], None, "%s changed since check_scope.py: run check_scope.py again, then record-source again" \
             % ", ".join(changed)
+    stale = stale_scope_check(data, public)
+    if stale:
+        return [], None, stale + ", then record-source again"
     images = sorted(set(i["resolved"] for i in data.get("images") or []
                         if isinstance(i, dict) and i.get("status") == "ok" and isinstance(i.get("resolved"), str)))
     return images, hashes.file_sha(p), None
@@ -345,7 +369,7 @@ def record_source(repo, vdir, state, cfg, hooks=None, env=None, url=False):
     # the images the source refers to are part of its hash once assets.json is checked for this copy (M1d)
     from ..source.scope import fingerprint
     fp = fingerprint(repo, cfg, dict(os.environ if env is None else env))
-    images, assets_sha, note = _checked_assets(vdir, copied, fp)
+    images, assets_sha, note = _checked_assets(vdir, copied, fp, public=state.get("scope") != "internal")
     found = uncommitted(repo, images)
     if found:
         os.remove(tmp)
@@ -535,11 +559,14 @@ def _commit_of_tree(repo, tree):
     return None
 
 
-def done(repo, vdir, state, lang, hooks=None, root="studio"):
+def done(repo, vdir, state, lang, hooks=None, root="studio", ctx=None, providers=None):
     """After the video commit: its commit record must say kind video, this video, a person's answer and this state's
     seq, and that commit must be in HEAD's history with the video's committed paths unchanged since (m1-plan §4.1, M2;
-    M1b review Y3: the record the hook kept in the video's folder, so later commits do not block done)."""
+    M1b review Y3: the record the hook kept in the video's folder, so later commits do not block done). A local video
+    is never committed: _done_local."""
     video = state["video"]
+    if state.get("location") == "local":
+        return _done_local(repo, vdir, state, lang, hooks, ctx, providers)
     ok = okfile.read_video_record(repo, root, video)
     if ok is None:
         ok, why = okfile.read(repo)
@@ -590,6 +617,48 @@ def done(repo, vdir, state, lang, hooks=None, root="studio"):
                        "commit_ok": {"kind": ok.get("kind"), "target": ok.get("target")}},
                 change, hooks=hooks, check=check)
     _out("%s: done" % lang)
+    return C.OK
+
+
+def _done_local(repo, vdir, state, lang, hooks, ctx, providers):
+    """`done` of a local (internal) video: the commit's checks without a commit — every gate approved by a person
+    (a proxy approval or a proxy credit: 4, as before a commit), nothing held, the router with current hashes says
+    nothing to redo — then `done` and a last backup. No evidence: the gates hold the person's answers."""
+    from ..commit import approvals
+    video = state["video"]
+    probs = approvals.light_check(vdir, video, local_done=True)
+    if not probs:
+        try:
+            cur = providers.collect(ctx, state, lang)
+        except CollectError as e:
+            raise store.Refused("not done: %s" % e, e.code)
+        probs = approvals.full_check(state, lang, cur, video)
+    if probs:
+        raise store.Refused("not done: " + "; ".join(p.message for p in probs),
+                            C.WAIT if any(p.code == 4 for p in probs) else C.FAIL)
+    seq = state.get("last_seq")
+
+    def check(s):
+        L = s["langs"][lang]
+        if L["status"] != "active":
+            raise store.Refused("%s is %s already" % (lang, L["status"]), C.USAGE)
+        if s.get("last_seq") != seq:
+            raise store.Refused("the video's state changed meanwhile", C.FAIL)
+
+    def change(s):
+        L = s["langs"][lang]
+        L["status"] = "done"
+        L["stage"] = "commit"
+
+    def post(s):
+        from . import backup
+        st = backup.run(repo, vdir, video, extra=backup.local_dirs(repo, ctx["studio_root"], s))
+        if st.get("warning"):
+            _warn(st["warning"])
+
+    store.write(vdir, {"event": "done", "lang": lang, "local": True}, change, hooks=hooks, check=check,
+                after_write=post)
+    _out("%s: done (a local video: not committed; backed up)" % lang)
     return C.OK
 
 

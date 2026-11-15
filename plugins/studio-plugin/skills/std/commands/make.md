@@ -1,6 +1,13 @@
 # MAKE
 
-One video end to end: `make <source> --kind youtube`, from begin to the video's commit.
+One video end to end: `make <source> --kind <kind>`, from begin to the video's commit (or, for an internal video, its
+end on this machine).
+
+Kinds: `youtube` and `sns` are public; `onboarding` and `explainer` (explaining a document to other members) are
+internal. The kind is fixed at begin (another kind is `abandon` and a new begin). An internal video is local: its
+folder, renders and copy stay under `studio/local/` on this machine (backed up, never committed). Each kind's lengths
+are in `.claude/studio/formats/<kind>.md` (`sns`, `onboarding` and `explainer` are added with `/std update`; without
+the file the brief stops); the brief may name only platforms whose file says the kind's `audience`.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`.
@@ -11,7 +18,7 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
 **The flow** — print each stage's document when you reach it (`python3 "<<SKILL_DIR>>/scripts/setup.py" doc <stage>`,
 short `setup.py doc <stage>` below; never open it with Read) and do exactly what it says:
 
-1. `python3 .claude/studio/scripts/state.py begin <video> --source <path> --kind youtube` — the writing must be
+1. `python3 .claude/studio/scripts/state.py begin <video> --source <path> --kind <kind>` — the writing must be
    committed (exit 3 otherwise: ask the person to commit it). When the request asks to stop before steps ("tts 전에
    멈추고 물어봐", "stop before render"), add `--ask-before <steps>` with those of `tts`, `render`, `copy`, `commit`
    (comma-separated), and show the parsed list in your first reply. A later request changes it:
@@ -20,11 +27,13 @@ short `setup.py doc <stage>` below; never open it with Read) and do exactly what
 3. The voice section below: cast → tts → audition → gate ②.
 4. `setup.py doc board` (board with the credits, visual-check, gate ③).
 5. `setup.py doc render` (render, gate ④a) → `setup.py doc copy` (copy, gate ④b).
-6. The video's commit (below), then `state.py done`.
+6. The video's commit (below), then `state.py done`; an internal video ends without a commit (below).
 
 **Always**
 - On every stage: `state.py next <video> --enter <stage>` first; exit 3 means another stage comes first — go there.
-  `state.py next <video>` says where the video is after any stop (`setup.py doc resume`).
+  `state.py next <video>` says where the video is after any stop (`setup.py doc resume`). It also prints `scope:`
+  (`public` or `internal`), `out:` (the folder of the renders and the audition) and `copy:` (the folder of the platform
+  copy) — use those folders, never a path of your own.
 - Every person gate is the same: `state.py shown …` as you show the artifact, then AskUserQuestion whose question is
   the `question` block `shown` printed, pasted unchanged — never retype a line (the guard compares each character) —,
   the fixed option, and the approval command alone as your next tool call, in the same turn, right after the answer —
@@ -76,13 +85,13 @@ short `setup.py doc <stage>` below; never open it with Read) and do exactly what
 1. `python3 .claude/studio/scripts/state.py next <video> --enter audition`.
 2. `python3 .claude/studio/scripts/audition.py <video>` — joins the longest sentence, a sentence with a number or a
    name, a sentence with each reading change, every sentence changed since the last ②, and every exempted line into
-   `studio/out/<video>/<lang>/audition/narrator.wav` with `audition.md`. Exit 2: ffmpeg is missing (tell the person).
+   `audition/narrator.wav` with `audition.md` in the `out:` folder `state.py next` prints. Exit 2: ffmpeg is missing (tell the person).
 3. `python3 .claude/studio/scripts/state.py stage-done <video> audition`.
 
 ## Gate ②
 
 1. `python3 .claude/studio/scripts/state.py shown <video> 2` right as you open `narrator.wav` (`open <path>`) and
-   show `studio/out/<video>/<lang>/audition/audition.md` (read it with Read: the block's `read:` line names it) — it
+   show `audition/audition.md` of the `out:` folder (read it with Read: the block's `read:` line names it) — it
    prints `hash12 <h12>` and `in the question: …` lines: one per sentence `narrator.wav` plays (`- "<text>" — <why>`,
    at most 8), one per exempted line (`면제 <id>: "<text>" → 들림 "<heard>" (CER x)`), one per reading change
    (`발음 <written> → <reading>`) and the readings that differ elsewhere — or, when there are too many, one
@@ -109,8 +118,9 @@ visual-check, gate ③).
 
 ## The video's commit
 
-The render (`studio/out/<video>/…`) and the copy (`studio/copy/<video>/…`) are ignored by git and never committed;
-the commit holds only what `check_commit.py` stages.
+The render (the `out:` folder) and the copy (the `copy:` folder) are ignored by git and never committed; the commit
+holds only what `check_commit.py` stages. An internal video (`scope: internal`) is never committed: see "An internal
+video's end" below.
 
 1. `python3 .claude/studio/scripts/check_commit.py --stage video <video>` — it checks everything again (the router,
    the source stage, check_assets, validate_copy, a person's approvals and credits), merges the video's approved
@@ -122,6 +132,17 @@ the commit holds only what `check_commit.py` stages.
    person; never in the same assistant message as the question — run
    `git commit -m "<message>"`.
 3. `python3 .claude/studio/scripts/state.py done <video>`.
+
+## An internal video's end
+
+No `check_commit.py` (it refuses a local video). After ④b:
+
+1. Ask with AskUserQuestion: `[<video>]` and that the video is finished on this machine (its files stay under
+   `studio/local/`, backed up, not committed); options `완료 <video>` and "아직".
+2. `완료 <video>`: `python3 .claude/studio/scripts/state.py done <video>` — it checks what a commit would (every gate
+   approved by a person, every credit a person's, nothing held, nothing to redo), then records `done` and takes a last
+   backup. Exit 4: a person is needed first — a gate or a credit approved in the proxy mode (a person approves it
+   again) or a stopped video (the message names the stop; `setup.py doc resume`); exit 1: fix what it lists.
 
 <!-- studio:guard-refusal -->
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way

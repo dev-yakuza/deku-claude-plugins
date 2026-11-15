@@ -32,12 +32,26 @@ FORMAT = """# Format (test)
 """
 
 
+PLATFORMS = ("youtube", "sns", "x", "tiktok")  # the platforms of the M0b tests
+
+
 def more_platforms(case):
-    """Let a test's briefs name the platforms of the M0b tests (sns, x, tiktok) besides youtube (M1h review Y1)."""
-    from unittest import mock
-    p = mock.patch.dict(schema.KIND_PLATFORMS, {"youtube": ("youtube", "sns", "x", "tiktok")})
-    p.start()
-    case.addCleanup(p.stop)
+    """Kept for the callers: a platform name is checked by name only now; record-brief reads each platform file's
+    `audience` (brief_ready writes the files)."""
+
+
+def write_platforms(repo, names=PLATFORMS, audience="public", commit=True):
+    """Platform files with an `audience` (what record-brief reads); an existing file is kept."""
+    d = os.path.join(repo, ".claude", "studio", "platforms")
+    os.makedirs(d, exist_ok=True)
+    for n in names:
+        p = os.path.join(d, "%s.md" % n)
+        if not os.path.exists(p):
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("---\nplatform: %s\naudience: %s\nchecked: \"\"\n---\n# %s\n" % (n, audience, n))
+    if commit:
+        helpers.git(repo, "add", "-A", ".claude/studio/platforms")
+        helpers.git(repo, "commit", "-q", "--no-verify", "--allow-empty", "-m", "platforms")
 
 
 def write_assets(vdir):
@@ -59,7 +73,9 @@ def write_format(repo, kind="youtube", length=(1, 600), commit=True):
 
 
 def brief_ready(repo, vdir, source_path="docs/a.md", excerpts=EXCERPTS, length=(1, 600), source_md=None):
-    """What record-brief reads: the format, the checked assets, the frozen copy and the analyst's claims."""
+    """What record-brief reads: the format, the platform files, the checked assets, the frozen copy and the analyst's
+    claims."""
+    write_platforms(repo)
     write_format(repo, length=length)
     write_assets(vdir)
     d = os.path.join(vdir, "work", "source")
