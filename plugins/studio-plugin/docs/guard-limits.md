@@ -1,4 +1,4 @@
-# Studio guard: what it judges and what it does not see (0.1.4)
+# Studio guard: what it judges and what it does not see (0.1.5)
 
 The README gives the summary. This file lists the details. The pre-commit hook, the commit checks and the
 person's gates stay behind everything listed here.
@@ -301,9 +301,17 @@ person's gates stay behind everything listed here.
 ### Values the guard cannot read
 
 - A deletion of a path the guard cannot read (`rm -rf $X`), unless its literal end names a protected folder below the
-  studio root. `$X/studio/local` is refused; `$X/studio`, `./$X/studio` and `<repo>$X/studio` are not.
-- A deletion through an expansion after or around a protected name (`rm -rf studio$X`, `$(ls)studio`, `${:-studio}`,
-  `${X:a}`, `${~X}`, `$X:s/…/'…'/`).
+  studio root (`$X/studio/local`), the path with its unknown values empty is protected, or its literal start is already
+  inside a protected folder. Since 0.1.5 `rm -rf studio/local/$X` (it is `studio/local/` when `$X` is empty),
+  `rm -f .claude/studio/config.json$X`, `./$X/studio`, `<repo>$X/studio`, `rm -rf studio/$X*` (read as `studio/*`) and
+  `rm -f studio/local/tmp-$X.txt` (any name in `studio/local/`) are refused, and a write follows the same rule. A value
+  is taken as possibly empty unless it is `${X:?}`, a default with a name (`${X:-tmp}`) or a number; after `setopt
+  shwordsplit` write it quoted (`"${X:?}"`). Not refused: `$X/studio`, `$ROOT/studio/videos/v/work/$X` (no literal start
+  and no protected name at the end), and a value that is itself `/`, `.` or `..`.
+- A deletion through an expansion after or around a protected name (`$(ls)studio`, `${:-studio}`, `${X:a}`, `${~X}`,
+  `$X:s/…/'…'/`).
+- The target folder of `cp -t DIR`, `install -t DIR` and `--target-directory=DIR`, literal or not
+  (`cp -t studio/local a.txt`).
 - A function's arguments (`f() { rm -rf $1; }; f studio`, `() { … } studio`).
 - A value a command computes from text that does not name the protected thing (`X=$(echo c3R1ZGlv | base64 -d)`,
   `X=$(ls)`), one an expansion changes (`${X/a/b}`, `${(U)X}`), one the text it came from spells with an expansion
@@ -423,3 +431,7 @@ person's gates stay behind everything listed here.
   too many path arguments (G-LIMIT): each word is judged in every folder the shell may be in.
 - After `cd` into a folder and `cd -` with a command between them that may fail, a `**` deletion is judged by its
   literal parts (`cd src && pytest && cd - && rm -rf **/__pycache__` is refused).
+- A path with a value the guard cannot read is also judged with that value empty, and inside a protected folder as any
+  name there (0.1.5), so these are refused: `mkdir -p x; rm -rf studio/local/$_` (the guard does not follow `$_`),
+  `rm -rf ~/$X` (your home folder when `$X` is empty), and after a shell function of yours that may change the folder
+  (`nvm use 20`) `rm -rf studio/videos/v/out/$F` or `…/work/"${X:?}"`, as the same path written literally is.

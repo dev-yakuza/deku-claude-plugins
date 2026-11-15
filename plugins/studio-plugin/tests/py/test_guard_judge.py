@@ -90,7 +90,7 @@ class JudgeCase(GuardCase):
     def assertHeadRefusedKept(self, cmd, rule=None, cwd=None):
         """fix20: 0.0.26 refused it and this guard passes it. 0.1.4: a call with no source (class N) is this guard's
         alone — it passes; a call still routed to the 0.0.26 guard (a source, effects this guard cannot read) keeps
-        that guard's verdict until 0.1.5 (`rule`: then its refusal)."""
+        that guard's verdict until 0.1.6 (`rule`: then its refusal)."""
         deny, ctx, _c = judge.decide_g1(self.hook("Bash", {"command": cmd}, cwd), self.env, snapshot_loader=self.loader,
                                         run_finish=False)
         self.assertIsNone(deny, "this guard alone should pass: %s (%s): %s" % (cmd, self.mode,
@@ -1409,6 +1409,93 @@ G1_REVIEW13_PASS = [
     "cd src || exit 1; git status", "cd src || exit 1; cd ..; git commit -m x",
     "set -a; source /dev/null; set +a; git commit -m x",
 ]
+# fix-0105 §4.1: a path word whose expansions may all be empty is also judged as its empty reading (the literal twin):
+# `rm -rf studio/local/$X` deletes studio/local/ when $X is empty
+EMPTY_TAIL_DENY = [(c, "G-DEL") for c in [
+    'echo ""; rm -rf studio/local/$_', "rm -rf studio/local/$_", "rm -rf studio/local/$REPLY",
+    "X=$(cat a.txt); rm -rf studio/local/$X", "read x < a.txt; rm -rf studio/local/$x", "rm -rf studio/local/$MATCH",
+    "ls; rm -rf studio/videos/v/work/$_", "mkdir -p x; rm -rf studio/local/$_",
+    "rm -rf studio/local/$X", 'rm -rf "studio/local/$X"', "rm -rf studio/local/${X}", "rm -rf studio/local/${X:-}",
+    "rm -rf studio/local/${X-}", "rm -rf studio/local/${X?}", "rm -rf studio/local/${X:+y}",
+    "rm -rf studio/local/${X:-/}", "rm -rf studio/local/${X:-$Y}", "rm -rf studio/local/$1", "rm -rf studio/local/$@",
+    'rm -rf "studio/local/$@"', "rm -rf studio/local/$*", "rm -rf studio/local/$(cat a.txt)",
+    "rm -rf studio/local/`cat a.txt`", "rm -rf studio/local/$(<a.txt)", "rm -rf studio/local/${X%%/*}",
+    "rm -rf studio/local/${X/a/b}", "rm -rf studio/local/$X:t", "rm -rf studio/local/${(f)X}",
+    "rm -rf studio/local/${(s: :)X}", "rm -rf studio/local/${=X:?}", "rm -rf studio/local/$arr[1]",
+    "rm -rf studio/local/${X[@]}", "rm -rf studio/local/$A/$B", 'rm -rf "studio/local/$A$B"', "rm -rf studio/local/$X/",
+    "rm -rf studio/local/''$X", "rm -rf studio/local$X", "rm -rf studio/local//$X", "rm -rf studio/./local/$X",
+    "rm -rf {studio/local/,}$X", "rm -rf -- studio/local/$X", "rm -rf studio/${A}local/$B",
+    "rm -rf studio/lo${A}cal/$B", "f(){ rm -rf studio/local/$1; }; f",
+    'for f in "$(cat a.txt)"; do rm -rf studio/local/$f; done', "rm -rf studio/local/$A studio/local/$B",
+    "rm -rf studio/local/$X; rm -rf build/$Y",
+    "rm -rf studio/videos/v/work/$X", "rm -rf studio/videos/$V", "rm -rf studio/$X", "rm -rf studio$X",
+    "rm -rf studio/cast/a/character/$X", "rm -rf studio/voices/$X", "rm -rf .claude/studio/local/$X",
+    "rm -rf .claude/studio/scripts/$X", "rm -rf .claude/$X", "rm -rf .claude/studio$X",
+    "rm -rf studio/$X*", "rm -rf .claude/studio/$X*", "rm -rf studio/videos/v/work/$X*", "rm -rf studio/videos/v/work/*$X",
+    "setopt shwordsplit; rm -rf studio/videos/v/work/${X:?}", "set -y; rm -rf studio/videos/v/work/${X:-tmp}",
+    "rm -rf studio/videos/v/work/${(z)X:?}", "rm -rf studio/videos/v/work/${X:-.}",
+    "rm -rf studio/videos/v/work/${X:-./}",
+    "cd studio && rm -rf local/$X", "cd studio/videos/v && rm -rf work/$X", "rm -rf ./studio/local/$X",
+    'rm -rf "$PWD/studio/local/$X"', "rm -rf ~+/studio/local/$X", 'rm -rf "$(pwd)/studio/local/$X"',
+    'rm -rf "$(git rev-parse --show-toplevel)/studio/local/$X"', "cd $D; rm -rf studio/local/$X",
+    "rm -rf $ROOT/studio/local/$X", 'rm -rf "$ROOT/studio/local/$X"', "rm -rf ${ROOT:-.}/studio/local/$X",
+    "rm -f .claude/studio/config.json$X", "rm -f studio/CREDITS.yaml$X", 'rm -f .claude/studio/charter.md"$X"',
+    "unlink .claude/studio/config.json$X", "rmdir studio/local/$X", "find studio/local/$X -delete",
+    "find studio/local/$X -type f -delete", "find studio/videos/v/work/$X -name '*.tmp' -delete",
+    "find studio/videos/$V -name '*.tmp' -delete", "mv studio/local/$X /tmp/old", "mv studio/local/$A studio/local/$B",
+    "mv .claude/studio/config.json$X /tmp/c.json", "trash studio/local/$X", "source missing.sh; rm -rf studio/local/$X",
+]] + [(c, "G-PROT") for c in [
+    "echo x > .claude/studio/config.json$X", "echo x >> .claude/studio/charter.md$X", "echo x >| .claude/studio/config.json$X",
+    "cp a.txt .claude/studio/config.json$X", "mv a.txt .claude/studio/config.json$X",
+    "truncate -s 0 .claude/studio/config.json$X", "echo x | tee .claude/studio/config.json$X",
+    "sort -o .claude/studio/config.json$X a.txt", "dd if=a.txt of=.claude/studio/config.json$X",
+    "ln -sfn a studio/local/$X", "ln -s -t studio/local/$X a.txt", "mv a.txt -t studio/local/$X",
+    # implementation review m1: the output files of git, Studio's scripts and s2v are twinned too
+    "git diff > .claude/studio/config.json$X", "git status >> .claude/studio/charter.md$X",
+    "git log > studio/voices/$X.wav", "s2v status > .claude/studio/config.json$X",
+    "python3 .claude/studio/scripts/state.py status v > .claude/studio/config.json$X",
+    "git archive -o .claude/studio/config.json$X HEAD",
+]]
+# fix-0105 §3: a literal start already inside a protected folder names protected data whatever the value
+SUBTREE_DENY = [(c, "G-DEL") for c in [
+    "rm -f studio/local/tmp-$X.txt", "rm -f studio/local/$X.tmp", "rm -rf studio/local/${X:?}",
+    "rm -rf studio/local/${X:?no name}", "rm -rf studio/local/${X:-tmp}", "rm -rf studio/local/$((1+2))",
+    "rm -rf studio/local/$((X))", "rm -rf studio/local/$[X]", "rm -rf studio/local/$#", "rm -rf studio/local/$#X",
+    "rm -rf studio/local/${#X}", "rm -rf studio/local/$X/cache", "rm -rf studio/local/$X*", "rm -rf studio/local/$X/*",
+    "cd studio && rm -rf local/tmp-$X", "cd studio/local && rm -rf ./$X", 'rm -rf "$PWD/studio/local/tmp-$X.txt"',
+    "rm -rf studio/local/./$X",
+]] + [("cp a.txt studio/voices/$X.wav", "G-PROT"), ("chmod 644 studio/voices/$X.wav", "G-PROT")]
+EMPTY_TAIL_PASS = [
+    "rm -rf build/$X", "rm -rf dist/$X", "rm -rf node_modules/$X", "rm -rf node_modules/.cache/$X", "rm -rf src/$X",
+    "rm -rf src/gen/$X", "rm -rf ./build-$X", "rm -f ./$F.log", "rm -rf .claude/worktrees/$X", "rm -rf $X",
+    'rm -rf "$X"', "rm -rf $HOME/.cache/$X", "X=$(mktemp -d); rm -rf $X/",
+    "cd $D && rm -rf build/$X", 'if [ -n "$Y" ]; then X=a; else X=b; fi; rm -rf dist/$X',
+    "mkdir -p build/$X && cd build/$X", "echo x > dist/$X", "cp a.txt dist/$X", "mv a.txt dist/$X",
+    "rm -f dist/tmp-$X.txt", "rm -rf build/$X dist/$Y node_modules/$Z", "rm -rf build/${X:?}",
+    # review 1 M1: find answers as its literal twin does (`find ./ -name '*.pyc' -delete` passes)
+    "find ./$X -name '*.pyc' -delete", "find ./$D -type d -name __pycache__ -exec rm -rf {} +",
+    "find dist/$X -name '*.map' -delete", "find . -name '*.tmp' -exec rm -f {} +", "xargs rm -rf < a.txt",
+    # review 1 m4: rm and rmdir refuse `.` and `..`
+    "rm -rf ./$X", 'rm -rf ./"$OUT"', 'rm -rf "./${OUT}"', "rm -rf ./${OUT:?}", "cp a.txt ./$X", "echo x > ./$X",
+    # video folders are not protected subtrees; known non-empty forms (review 2 m3: word splitting off)
+    "rm -f studio/videos/v/work/tmp-$X.txt", "rm -rf studio/videos/v/work/tmp-$X", "rm -f studio/videos/v/work/$F",
+    "rm -rf studio/videos/v/work/${X:?}", "rm -rf studio/videos/v/work/${X:-tmp}", "rm -rf studio/videos/v/work/$((1+2))",
+    "rm -rf studio/videos/v/work/$#", 'rm -rf studio/videos/v/work/"${X:?}"',
+    'setopt shwordsplit; rm -rf studio/videos/v/work/"${X:?}"', "emulate -L zsh; rm -rf studio/videos/v/work/${X:?}",
+    "setopt noshwordsplit; rm -rf studio/videos/v/work/${X:?}", "f(){ :; }; rm -rf studio/videos/v/work/${X:?}",
+    "rm -rf studio/videos/v/out/$F", "mv studio/videos/v/out/$F /tmp/", "cp a.txt studio/videos/v/out/$F",
+    "rm -rf studio/videos/$V/out", "rm -rf studio/videos/$V/work/preview.mp4", "rm -rf studio/loc$X",
+    "rm -rf studio/videos/$1/work",
+    # under studio/local/: reads, and the writes the literal form is allowed (writes there are not protected)
+    "touch studio/local/$X", "cat studio/local/$X", "ls studio/local/$X", "chmod -R 000 studio/local/$X",
+    "cp a.txt studio/local/$X", "cp a.txt studio/local/tmp-$X", "echo x > studio/local/tmp-$X.txt",
+    "mv a.txt studio/local/$X.bak", "mkdir -p studio/local/$X", "cd studio/local/$X && ls", "wc -l studio/local/$X",
+    "tee build/$X.log < a.txt", "touch src/$F", "git add src/$F", "git diff src/$F", "npm run build -- --out-dir build/$X",
+    # implementation review m2: a folder only named like a protected one, outside a Studio root
+    'rm -rf "$CACHE/local/$X"', "rm -rf $(mktemp -d)/local/$X", "rm -rf $D/voices/$X", "rm -rf $D/audio/$X",
+    "rm -rf $D/character/$X", "rm -rf $D/consent/$X", "cp a.txt $D/voices/$X", "echo x > $LOGDIR/local/$X",
+    "git diff > build/diff-$X.txt", "git log > dist/$X",
+]
 
 
 def g1_deny(root):
@@ -1425,6 +1512,7 @@ def g1_deny(root):
 
 
 MUST_DENY += g1_deny("")
+MUST_DENY += EMPTY_TAIL_DENY + SUBTREE_DENY
 
 
 def runner_deny(root):
@@ -4044,3 +4132,35 @@ class G1Review19(JudgeCase):
         self.assertEqual(len(calls), 1)
         subprocess.run(["git", "checkout", "-q", "--", "."], cwd=self.repo, check=True)
         self.assertDeny("sh -c 'git checkout .'; git stash pop; sh -c 'git checkout .'", "G-RESET")
+
+
+class LiteralTwin(JudgeCase):
+    """fix-0105: literal twins. EMPTY_TAIL_DENY and SUBTREE_DENY run in MustDeny; here the rows that keep passing, the
+    message, and the state a twin run must not leave behind."""
+
+    def test_rows_that_keep_passing(self):
+        for mode in ("with", "none"):
+            self.mode = mode
+            for cmd in EMPTY_TAIL_PASS:
+                self.assertPass(cmd)
+
+    def test_message_names_the_word(self):
+        m = self.assertDeny("rm -rf studio/local/$X", "G-DEL").message()
+        for part in ("studio/local/$X", "When $X is empty", "word splitting", '"${X:?}"'):
+            self.assertIn(part, m)
+        for cmd in ("rm -f studio/local/tmp-$X.txt", "rm -rf studio/local/$X*", "rm -rf studio/local/$A studio/local/$B"):
+            m = self.assertDeny(cmd, "G-DEL").message()
+            self.assertNotIn("\x01", m)
+            self.assertNotIn("<any name>", m)
+        self.assertIn("expansions after it are empty", self.assertDeny("rm -rf $ROOT/studio/local/$X", "G-DEL").message())
+
+    def test_twin_runs_keep_refusals_only(self):
+        for cmd in ("rm -rf build/$X; find . -name '*.pyc' -delete", "cp -R src/$X dist/; echo x > a.txt",
+                    "rm -rf build/$X; rm -rf **/__pycache__", "rm -rf dist/$X && ls"):
+            got, want = self.bash(cmd), self.bash(cmd.replace("$X", "x"))
+            self.assertEqual(got and got.rule, want and want.rule, cmd)
+        deny, ctx, _c = judge.decide_g1(self.hook("Bash", {"command": "rm -rf build/$X"}), self.env,
+                                        snapshot_loader=self.loader, run_finish=False)
+        self.assertIsNone(deny)
+        self.assertEqual((ctx.candidates, ctx.warnings, ctx.bulk_ids), ([], [], set()))
+        self.assertLessEqual(ctx.twin_fs_calls, judge.limits.TWIN_FS_CALLS)

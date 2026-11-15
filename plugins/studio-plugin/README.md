@@ -28,7 +28,7 @@ with each video on the platforms you choose.
   Studio's guard hook checks each Bash, Write, Edit, MultiEdit, NotebookEdit, WebFetch, WebSearch and MCP tool call.
   It runs with `onFailure: block`: a hook error or timeout blocks those calls (measured), and a missing `python3` is
   expected to block them too (not measured). A pyenv- or asdf-style shim as `python3` makes each guard call slower and
-  turns off the guard's own allows of 0.0.28 (what the guard judges, 0.1.4:
+  turns off the guard's own allows of 0.0.28 (what the guard judges, 0.1.5:
   [docs/guard-limits.md](docs/guard-limits.md)). On macOS without the Command Line Tools, `/usr/bin/python3` may wait
   until the hook's 20 s timeout.
 - **Cost per call** (one machine, an Apple silicon Mac): the guard on a Bash `git status` in a repository without a harness
@@ -252,6 +252,12 @@ the repository): [docs/removing.md](docs/removing.md).
   Bash call is about 45 ms faster with 13 shell snapshots (147 → 103 ms here with Python 3.15.2, 165 → 110 ms with
   3.9.9). When one of your shell functions names a Studio file, calls of your shell functions are refused in a Studio
   repository (rename or drop that function). No `/std update` (scripts version stays 27).
+- **0.1.5**: a path the guard cannot read is also judged with its unknown values empty, and, when its literal start is
+  already inside a protected folder, as any name there: `rm -rf studio/local/$X` (also with `$REPLY`, `$_`, `$(cat f)`)
+  is refused, because an empty value removes `studio/local/` itself, and so are `rm -f .claude/studio/config.json$X` and
+  `rm -f studio/local/tmp-$X.txt`, as their literal forms already were. Write `"${X:?}"` to stop on an empty value.
+  `find ./$X -name '*.pyc' -delete` and `rm -rf ./$X` pass, as `find ./ …` passes and rm refuses `.`. No
+  `/std update` (scripts version stays 27).
 
 ## License
 

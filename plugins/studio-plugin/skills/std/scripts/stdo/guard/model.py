@@ -57,6 +57,9 @@ class Word(Base):
         # review 4 conf M-2: positions in `value` of characters zsh may read as a pattern (unquoted); None: unknown
         # (every glob character is one)
         self.wild = None
+        # fix-0105 §1.2: per part of a dynamic word, (kind "l" literal | "g" glob character | "d" expansion, text,
+        # whether the expansion may give nothing) — the literal twins judge.twin_readings builds; None: not dynamic
+        self.twin_parts = None
         # review 9: values a dynamic word may have — the candidates of values the guard does not carry (walk.cands)
         self.cand_values = ()
         self.cand_loose = ()  # words of a command whose output the value is: judged when they name a protected thing

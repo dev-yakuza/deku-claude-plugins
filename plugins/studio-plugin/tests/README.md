@@ -411,3 +411,13 @@ auditor's own rows). `assertPassAfterSource` (test_guard_judge) passes a row HEA
 guard refuses it with the source made a no-op. `PerfSnapshots` has a snapshot-function call and eight calls in a 1.9
 MB snapshot; `PerfSourced` times a sourced call (both guards). `structure_test.sh` checks that `backstop.decide` returns
 a class N answer before the frozen guard is loaded and that G1's push and commit checks are its own modules.
+
+**0.1.5** (`SCRIPTS_VERSION` 27, fix-0105): a path word this guard cannot read is also judged as its literal twins —
+the word with every expansion that may be empty removed (`walk.may_be_empty`: `${X:?}`, a default with a name and the
+number forms are not, unless SH_WORD_SPLIT is set explicitly or a `=`/`z`/`s` flag splits), and the folder of its
+literal start plus any name — by judging the command again with each such word replaced (`judge.check_paths`,
+`twin_readings`; all words of one kind at once, each twin value once, with its own file-system budget
+`limits.TWIN_FS_CALLS` and `check_target` as the fallback past it; git, Studio's scripts and s2v keep their own rules).
+The rows refused are `EMPTY_TAIL_DENY` and `SUBTREE_DENY` in `MustDeny` (both snapshot modes); the rows that must
+still pass are listed in `EMPTY_TAIL_PASS`. Parity (fix-0105 §5): the 1,872-row corpus in both snapshot modes and
+the pilot-3 replay give the same verdicts as 0.1.4.

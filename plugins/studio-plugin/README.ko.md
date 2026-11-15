@@ -26,7 +26,7 @@ Claude Code용 **레포별 영상 제작 조직**입니다. Studio는 레포에 
   Bash, Write, Edit, MultiEdit, NotebookEdit, WebFetch, WebSearch, MCP 도구 호출을 하나하나 검사합니다.
   `onFailure: block`으로 실행되므로 훅의 오류나 시간 초과는 그 호출을 막고(측정함), `python3`가 없을 때도 막을 것으로
   봅니다(측정하지 않음). `python3`가 pyenv나 asdf 방식의 shim이면 가드 호출마다 느려지고 0.0.28의 가드 자체 허용이
-  꺼집니다(가드가 판정하는 것, 0.1.4: [docs/guard-limits.ko.md](docs/guard-limits.ko.md)). Command Line Tools가
+  꺼집니다(가드가 판정하는 것, 0.1.5: [docs/guard-limits.ko.md](docs/guard-limits.ko.md)). Command Line Tools가
   없는 macOS에서는 `/usr/bin/python3`가 훅의 20초 시간 제한까지 기다릴 수 있습니다.
 - **호출당 비용**(기기 한 대, Apple silicon Mac): 하네스가 없는 레포에서 Bash `git status`에 대한 가드는 약 70 ms(p50,
   Python 3.9.9와 3.15.2), macOS의 `/usr/bin/python3` 3.9.6으로는 약 125 ms 걸렸습니다
@@ -230,6 +230,11 @@ python3 .claude/studio/scripts/hooks.py install
   `bash scripts/x.sh`). 셸 스냅숏이 13개일 때 Bash 호출마다 약 45 ms 빨라졌습니다(여기서 Python 3.15.2로 147 → 103 ms,
   3.9.9로 165 → 110 ms). 사용자 셸 함수 하나가 Studio 파일을 가리키면 Studio 레포에서 사용자 셸 함수의 호출을
   거부합니다(그 함수의 이름을 바꾸거나 없애세요). `/std update`는 필요 없습니다(스크립트 버전은 27 그대로).
+- **0.1.5**: 가드가 읽을 수 없는 경로를 모르는 값을 비운 경우로도, 리터럴 앞부분이 이미 보호 폴더 안이면 그 안의
+  아무 이름으로도 판정합니다: `rm -rf studio/local/$X`(`$REPLY`, `$_`, `$(cat f)`도)는 빈 값이면 `studio/local/`
+  자체를 지우므로 거부하고, `rm -f .claude/studio/config.json$X`, `rm -f studio/local/tmp-$X.txt`도 리터럴로 쓴 경우처럼
+  거부합니다. 빈 값에서 멈추려면 `"${X:?}"`로 쓰세요. `find ./$X -name '*.pyc' -delete`와 `rm -rf ./$X`는
+  `find ./ …`가 통과하고 rm이 `.`을 거부하므로 통과합니다. `/std update`는 필요 없습니다(스크립트 버전은 27 그대로).
 
 ## 라이선스
 

@@ -46,7 +46,7 @@ check(bool(sv) and sv.group(1).isdigit(), "SCRIPTS_VERSION is a whole number (bu
 mp = os.path.normpath(os.path.join(plugin, "..", "..", ".claude-plugin", "marketplace.json"))
 entries = [p for p in json.load(open(mp)).get("plugins", []) if p.get("name") == "studio-plugin"] \
     if os.path.exists(mp) else []
-check(len(entries) == 1, "the marketplace has one studio-plugin entry (0.1.4, m1k-plan item 7)")
+check(len(entries) == 1, "the marketplace has one studio-plugin entry (0.1.5, m1k-plan item 7)")
 for k, want in (("version", pj.get("version")), ("description", pj.get("description")),
                 ("source", "./plugins/studio-plugin")):
     check(bool(entries) and entries[0].get(k) == want, "the marketplace entry's %s is plugin.json's" % k)

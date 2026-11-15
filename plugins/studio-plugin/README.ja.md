@@ -26,7 +26,7 @@ Claude Code 向けの**リポジトリごとの動画制作組織**です。Stud
   Studio のガードフックが Bash、Write、Edit、MultiEdit、NotebookEdit、WebFetch、WebSearch、MCP ツールの呼び出しを
   一つずつ検査します。`onFailure: block` で動くため、フックのエラーやタイムアウトはその呼び出しを止め(測定済み)、
   `python3` がないときも止めると見込んでいます(測定していません)。`python3` が pyenv や asdf 方式の shim だと、ガードの
-  呼び出しごとに遅くなり、0.0.28 のガード自身の許可がオフになります(ガードが判定するもの、0.1.4:
+  呼び出しごとに遅くなり、0.0.28 のガード自身の許可がオフになります(ガードが判定するもの、0.1.5:
   [docs/guard-limits.ja.md](docs/guard-limits.ja.md))。
   Command Line Tools のない macOS では、`/usr/bin/python3` がフックの 20 秒のタイムアウトまで待つことがあります。
 - **呼び出しごとのコスト**(マシン 1 台、Apple silicon の Mac): ハーネスのないリポジトリでの Bash `git status` に対するガードは
@@ -248,6 +248,12 @@ python3 .claude/studio/scripts/hooks.py install
   147 → 103 ms、3.9.9 で 165 → 110 ms)。ユーザーのシェル関数の一つが Studio のファイルを指すと、Studio リポジトリでは
   ユーザーのシェル関数の呼び出しを拒否します(その関数の名前を変えるか消してください)。`/std update` は不要です
   (スクリプトのバージョンは 27 のまま)。
+- **0.1.5**: ガードが読めないパスを、分からない値を空にした場合としても、リテラルの先頭がすでに保護フォルダの中なら
+  その中の任意の名前としても判定します: `rm -rf studio/local/$X`(`$REPLY`、`$_`、`$(cat f)` も)は空の値なら
+  `studio/local/` そのものを消すため拒否し、`rm -f .claude/studio/config.json$X`、`rm -f studio/local/tmp-$X.txt` も
+  リテラルで書いた場合と同じく拒否します。空の値で止めるには `"${X:?}"` と書いてください。
+  `find ./$X -name '*.pyc' -delete` と `rm -rf ./$X` は、`find ./ …` が通り rm が `.` を拒否するため通ります。
+  `/std update` は不要です(スクリプトのバージョンは 27 のまま)。
 
 ## ライセンス
 

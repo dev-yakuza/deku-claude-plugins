@@ -16,6 +16,7 @@ ALT_TOTAL = 64                   # alternative parses of one command
 MAX_FILE_READ = 256 * 1024
 MAX_FILE_READS = 8
 MAX_FS_CALLS = 2000
+TWIN_FS_CALLS = 1000             # fix-0105 §1.3: the literal twins of one call, their own file-system calls
 CPU_BUDGET = 1.5                 # seconds of process time
 WALL_BUDGET = 8.0                # seconds of wall time (hook timeout is 20 s)
 CHECK_EVERY = 256

@@ -35,6 +35,33 @@ PRECOMMANDS = ("builtin", "command", "exec", "noglob", "nocorrect", "-")  # zsh 
 ARRAY_PARAMS = ("argv", "path", "fpath", "cdpath", "manpath", "module_path", "pipestatus")  # zsh's own arrays
 
 
+NONEMPTY_DEFAULT_RE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=]([A-Za-z0-9_./,@%+-]+)\}$")
+PARAM_FLAGS_RE = re.compile(r"^\$\{\(([^)]*)\)")
+NONEMPTY_SPECIAL = ("$#", "$?", "$$", "$!", "$-", "${#}", "${?}", "${$}", "${!}")
+
+
+def may_be_empty(dk, text, split):
+    """fix-0105 §2: whether an expansion may give nothing (or, split, leave the literal before it as its own word).
+    `split`: an unquoted part while SH_WORD_SPLIT is on for certain (an explicit setopt / set -y)."""
+    t = text or ""
+    if dk in ("arith", "procsub", "equals", "tilde", "tilde-user", "tilde-dir", "find-path", "xargs-input"):
+        return False
+    if dk == "special" and t in NONEMPTY_SPECIAL:
+        return False
+    if dk == "paramx":
+        flags = PARAM_FLAGS_RE.match(t)
+        if split or t.startswith(("$=", "${=")) or (flags is not None and re.search(r"[=zs]", flags.group(1))):
+            return True
+        if t.startswith(("${#", "${+")):
+            return False
+        if re.match(r"^\$\{[A-Za-z_][A-Za-z0-9_]*:\?", t):
+            return False
+        m = NONEMPTY_DEFAULT_RE.match(t)
+        if m is not None and m.group(1).strip("./"):
+            return False  # a default with a character other than `/` and `.` (`${X:-/}` gives the folder itself)
+    return True
+
+
 def _multi_word(dk, raw):
     """An expansion that may give several words (or none) whether quoted or not: $@, ${arr[@]}, ${=X}, ${~X}, the
     (s…) (z) (f) (0) (@) flags (G1 §3, §1.8)."""
@@ -540,6 +567,7 @@ class Walker(object):
             self.qualifier_word(wn.raw, qp, state, cwds)
         braces = {o: self.option_maybe(state, o) for o in BRACE_OPTIONS}
         ws = self.build_words(wn, segs, split=fngen, seg_cands=seg_c,
+                              split_on=fngen and self.option_maybe(state, "shwordsplit") is True,
                               brace_unknown=(state.brace_opts_changed and state.options_unknown) or
                               None in braces.values() or bool(braces["shfileexpansion"] or
                                                                braces["ignoreclosebraces"]),
@@ -558,7 +586,7 @@ class Walker(object):
         return ws
 
     def build_words(self, wn, segs, brace_unknown=False, unq=None, globsubst=False, extglob=False, braceccl=False,
-                    nobraces=False, split=True, seg_cands=None):
+                    nobraces=False, split=True, seg_cands=None, split_on=False):
         unq = unq if unq is not None else [False] * len(segs)
         template = []
         for i, s in enumerate(segs):
@@ -581,6 +609,7 @@ class Walker(object):
             only_unq = True  # every part is an unquoted expansion
             empty_ok = True  # every known unquoted expansion is empty and every unknown one may be
             multi = False
+            tparts = []  # fix-0105 §1.2
             wild, vlen = set(), 0  # positions in value zsh may read as a pattern (review 4 conf M-2)
             for ch in t:
                 o = ord(ch)
@@ -588,6 +617,7 @@ class Walker(object):
                     k, text, a, dk = segs[o - PUA]
                     u = unq[o - PUA]
                     if k == "d":
+                        tparts.append(("d", text, may_be_empty(dk, text, split_on and u)))
                         dynamic = True
                         dyn.append(dk)
                         dcands.append((seg_cands or {}).get(o - PUA))
@@ -601,6 +631,7 @@ class Walker(object):
                         elif not (dk.startswith("param:") or dk in MAYBE_EMPTY_KINDS):
                             empty_ok = False
                     else:
+                        tparts.append(("l", text, False))
                         if not u:
                             quoted = True
                             lit = True
@@ -617,6 +648,7 @@ class Walker(object):
                         alt.append(a if a is not None else text)
                         has_alt = has_alt or a is not None
                 else:
+                    tparts.append(("g" if ch in glob_ch else "l", ch, False))
                     lit = True
                     only_unq = False
                     wild.add(vlen)
@@ -643,6 +675,7 @@ class Walker(object):
             w = Word(wn.raw, v, dynamic=dynamic, dyn=dyn, skeleton=sk, glob=glob, glob_base=gb,
                      quoted=quoted, alt=altv, plain=wn.plain)
             w.wild = frozenset(wild) if v is not None else None
+            w.twin_parts = tparts if dynamic else None
             if v is None and any(dcands):
                 w.cand_values, w.cand_loose = _cand_values(sk, dcands)
                 # review 10: every part is one of a complete set of exact values (`if …; then v=1; else v=0; fi`)
@@ -3297,6 +3330,7 @@ def _choice_word(word, v):
     w.cand_values, w.cand_loose, w.cand_complete = (), (), False
     w.drop = w.maybe_empty = w.multi = False
     w.wild = frozenset()
+    w.twin_parts = None
     return w
 
 

@@ -342,6 +342,22 @@ class PerfSnapshots(helpers.StudioTestCase):
                          % (sys.version.split()[0], base[0] * 1000, call[0] * 1000, (call[0] - base[0]) * 1000))
         self.assertLess(call[0], base[0] + 0.05)
 
+    def test_literal_twins(self):
+        """fix-0105 §1.3: a call with many path words the guard cannot read is judged again once per kind of twin, each
+        twin value once — linear: cp / mv with 50 unknown sources and 200 globs with an unknown part each stay within
+        `git status` + 150 ms (p50, guard.py, 13 snapshots) and are never G-LIMIT."""
+        repo, env = self.studio_env("studiotwins")
+        write_perf_snapshots(env, self.FILES)
+        base = guard_p50(self, helpers.hook_input("Bash", {"command": "git status"}, repo), env, self.RUNS)
+        rows = {"cp, 50 unknown sources": " ".join(["cp"] + ["src/$A%d" % i for i in range(50)] + ["dist/"]),
+                "mv, 50 unknown sources": " ".join(["mv"] + ["src/$A%d" % i for i in range(50)] + ["dist/"]),
+                "200 globs": " ".join(["rm", "-rf"] + ["build/$X%d*" % i for i in range(200)])}
+        for name, cmd in rows.items():
+            got = guard_p50(self, helpers.hook_input("Bash", {"command": cmd}, repo), env, self.RUNS)
+            sys.stderr.write("\n[perf] %s: guard.py, %s: p50 %.0f ms (`git status` %.0f ms)\n"
+                             % (sys.version.split()[0], name, got[0] * 1000, base[0] * 1000))
+            self.assertLess(got[0], base[0] + 0.15, name)
+
     def test_many_function_calls_in_a_large_snapshot(self):
         repo, env = self.studio_env("studio19")
         d = os.path.join(env["CLAUDE_CONFIG_DIR"], "shell-snapshots")

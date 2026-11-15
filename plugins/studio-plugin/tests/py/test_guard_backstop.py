@@ -271,7 +271,7 @@ LEGACY_FALSE_UNSOURCED = {
                                                  "lines included; this guard every function body, not the alias lines",
 }
 # 0.1.4: rows with a source the 0.0.26 guard refuses and this guard alone passes (they stay refused in 0.1.4, as a
-# call with a source is judged by both) — each a 0.0.26 false refusal: row: reason (the evidence 0.1.5 needs)
+# call with a source is judged by both) — each a 0.0.26 false refusal: row: reason (the evidence 0.1.6 needs)
 LEGACY_FALSE_AFTER_SOURCE = {
     "command pushd studio/videos/v; f(){ cd {R}; }; f; source {R}/e.sh; rm -rf work":
         "`command pushd` is the external pushd: the shell is in the repository root, whose work holds nothing Studio's",
@@ -1040,7 +1040,7 @@ class Parity(BackstopCase):
         for cmd in list(PARITY_G1_FIRST) + list(LEGACY_FALSE_AFTER_SOURCE):
             self.assertIn(cmd, BACKSTOP_PARITY + [c for c, _r in MUST_DENY] + list(MUST_PASS), cmd)
 
-    def test_parity_g1_alone_after_source(self):  # 0.1.4 §1.7: the evidence 0.1.5 needs
+    def test_parity_g1_alone_after_source(self):  # 0.1.4 §1.7: the evidence 0.1.6 needs
         rows = [r for r in BACKSTOP_PARITY] + [c for c, _r in MUST_DENY] + list(MUST_PASS)
         rows = [r for r in dict.fromkeys(rows) if re.search(r"(^|[\s;&|({])(source|\.)\s", r)]
         seen = set()

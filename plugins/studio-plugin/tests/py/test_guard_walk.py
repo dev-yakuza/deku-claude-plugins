@@ -1375,3 +1375,37 @@ cacheany () {
     def test_quoted_pattern_characters(self):  # conf M-2
         w = [w for w in self.one(self.ok("touch 'a(1).txt' b\\(2\\).txt c*.txt \"d[1]\"*"), "touch").words[1:]]
         self.assertEqual([sorted(x.wild) for x in w], [[], [0, 2, 4, 5, 6, 7], [0, 1, 2, 3, 4, 5], [4]])
+
+
+class TwinParts(GuardCase):
+    """fix-0105 §1.2 / §2: the parts of a dynamic word the literal twins are built from, and which expansions may be
+    empty."""
+
+    def word(self, text, prefix=""):
+        return self.one(self.ok(prefix + "ls " + text), "ls").words[1]
+
+    def empty_ok(self, text, prefix=""):
+        return [p[2] for p in self.word(text, prefix).twin_parts if p[0] == "d"]
+
+    def test_may_be_empty(self):
+        for text in ("a/$X", "a/${X}", "a/${X:-}", "a/${X-}", "a/${X?}", "a/${X:+y}", "a/${X:-/}", "a/${X:-.}",
+                     "a/${X:-./}", "a/${X:-$Y}", "a/$1", "a/$@", "a/$(cat f)", "a/${X%%/*}", "a/$X:t", "a/${(f)X}",
+                     "a/${(s: :)X}", "a/${(z)X:?}", "a/${=X:?}", "a/$_", "a/$REPLY"):
+            self.assertEqual(self.empty_ok(text), [True], text)
+        for text in ("a/${X:?}", "a/${X:?no}", "a/${X:-tmp}", "a/${#X}", "a/$#", "a/$((1+2))", 'a/"${X:?}"'):
+            self.assertEqual(self.empty_ok(text), [False], text)
+        # SH_WORD_SPLIT set explicitly splits an unquoted ${X:?}; options the guard cannot tell do not
+        self.assertEqual(self.empty_ok("a/${X:?}", "setopt shwordsplit; "), [True])
+        self.assertEqual(self.empty_ok('a/"${X:?}"', "setopt shwordsplit; "), [False])
+        self.assertEqual(self.empty_ok("a/${X:?}", "emulate -L zsh; "), [False])
+
+    def test_parts(self):
+        from stdo.guard import judge
+        w = self.word("studio/${A}local/$B")
+        self.assertEqual(judge.twin_readings(w, "rm"), ("studio/local/", "studio/" + judge.TWIN_ANY))
+        self.assertEqual(judge.twin_readings(self.word("./$X"), "rm"), (None, "./" + judge.TWIN_ANY))
+        self.assertEqual(judge.twin_readings(self.word("./$X"), "cp")[0], "./")
+        self.assertEqual(judge.twin_readings(self.word("$X/studio"), "rm"), (None, None))
+        self.assertEqual(judge.twin_readings(self.word("../$X/a"), "rm")[1], None)
+        self.assertEqual(judge.twin_readings(self.word("studio/$X*"), "rm")[0], "studio/*")
+        self.assertIsNone(self.word("plain").twin_parts)

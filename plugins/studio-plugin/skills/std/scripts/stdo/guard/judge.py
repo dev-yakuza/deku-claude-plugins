@@ -333,7 +333,197 @@ ARGV_CHOICES_WHY = ("%s has words that are each one of several known values, wit
                     "call.")
 
 
+TWIN_ANY = "\x01any"  # fix-0105 §3: one name in a folder, matching only `*` / `**` pattern segments
+
+
+def empty_tail(word):
+    """fix-0105 §1.2a: for a word that starts with an expansion, the last literal stretch when only expansions that may
+    be empty and `/` follow it ("" otherwise)."""
+    tp = getattr(word, "twin_parts", None)
+    if not tp or tp[0][0] != "d":
+        return ""
+    i = len(tp)
+    while i and ((tp[i - 1][0] == "d" and tp[i - 1][2]) or (tp[i - 1][0] == "l" and tp[i - 1][1] == "/")):
+        i -= 1
+    if i == len(tp) or i == 0:
+        return ""
+    j = i
+    while j and tp[j - 1][0] != "d":
+        j -= 1
+    return "\0" + "".join(p[1] for p in tp[j:i])
+
+
+def studio_tail_hits(word, studio_infos):
+    """fix-0105 §1.2a (implementation review m2): the last literal stretch names a protected thing below a Studio root
+    it names itself (`$ROOT/studio/local/$X`, `$D/.claude/studio/local/$X`); a folder merely named like a protected
+    one (`$CACHE/local/$X`, `$D/voices/$X`) is not."""
+    segs = [x for x in empty_tail(word).replace("\0", "").split("/") if x not in ("", ".")]
+    roots = [[x for x in ri.studio_root.split("/") if x] for ri in studio_infos or ()] + [[".claude", "studio"]]
+    for root in roots:
+        n = len(root)
+        for i in range(len(segs) - n):
+            if segs[i:i + n] == root and protect.tail_hits("\0/" + "/".join(segs[i + n:])):
+                return True
+    return False
+
+
+def twin_readings(word, prog):
+    """fix-0105 §1.2, §3: (empty, inside) — the word with every expansion empty, when each may be and the word starts
+    with literal text (`studio/${A}local/$B` → `studio/local/`; for rm and rmdir not when that reading ends in `.` or
+    `..`, which they refuse), and the folder its literal start is in plus one name (`studio/local/tmp-$X` →
+    `studio/local/` + TWIN_ANY); None for either one it does not have."""
+    tp = getattr(word, "twin_parts", None)
+    if not tp or getattr(word, "cand_complete", False) or tp[0][0] != "l":
+        return None, None
+    i = 0
+    while i < len(tp) and tp[i][0] == "l":
+        i += 1
+    lit = "".join(p[1] for p in tp[:i])
+    empty = None
+    if all(p[0] != "d" or p[2] for p in tp):
+        empty = "".join(p[1] for p in tp if p[0] != "d")
+        segs = [x for x in empty.split("/") if x]
+        if prog in ("rm", "rmdir") and segs and segs[-1] in (".", ".."):
+            empty = None  # rm and rmdir refuse a `.` or `..` operand (`rm -rf ./$X` deletes nothing when X is empty)
+    inside = None
+    d = lit[:lit.rfind("/") + 1] if "/" in lit else ""
+    if d and ".." not in "".join(p[1] for p in tp).split("/"):
+        inside = d + TWIN_ANY
+    return empty, inside
+
+
+def _twin_message(d, reps):
+    """The text of a twin's refusal: the original word in place of its twin value, and why (never TWIN_ANY)."""
+    text = d.text
+    notes, done = [], set()
+    for v, word, kind in sorted(reps, key=lambda r: -len(r[0])):
+        if v in done:
+            continue
+        done.add(v)
+        shown = v.replace(TWIN_ANY, "") or v
+        names = ", ".join(p[1] for p in word.twin_parts if p[0] == "d")
+        verb = "are" if "," in names else "is"
+        if v in text:
+            text = text.replace(v, word.raw, 1)
+        elif shown.rstrip("/") and shown.rstrip("/") in text:
+            text = text.replace(shown.rstrip("/"), word.raw, 1)
+        else:
+            continue
+        if kind == "empty":
+            notes.append("When %s %s empty, or word splitting leaves only \"%s\", this is %s itself: check the value "
+                         "first (\"${X:?}\", quoted) or write the path literally." % (names, verb, shown, shown))
+        else:
+            notes.append("%s is inside %s whatever %s %s." % (word.raw, shown, names, verb))
+    if not notes:
+        v, word, kind = reps[0]
+        text = "%s, read as %s: %s" % (word.raw, v.replace(TWIN_ANY, "<any name>"), text)
+    else:
+        text = text.rstrip() + " " + " ".join(notes)
+    d.text = text.replace(TWIN_ANY, "<any name>")
+
+
 def check_paths(ctx, cmd, studio_infos):
+    """fix-0105 §1.1: today's checks, then — when they refuse nothing — the same checks on the command's literal
+    twins: every argument word and redirection target the guard cannot read replaced by its empty reading (one
+    command), then by `<folder of its literal start>/<any name>` (another); a refusal of either is the command's."""
+    n0 = len(ctx.denies)
+    outer, ctx.target_log = getattr(ctx, "target_log", None), {}
+    try:
+        _check_paths(ctx, cmd, studio_infos)
+        roles = ctx.target_log  # id(word) → the op the command's own checks judged it with (its role)
+    finally:
+        ctx.target_log = outer
+    if len(ctx.denies) > n0 or not studio_infos or getattr(cmd, "twin", False):
+        return
+    prog = effective(cmd)[0]
+    spots = [("r", k, r.target) for k, r in enumerate(cmd.redirs)
+             if r.target is not None and r.target.value is None and r.target.twin_parts]
+    if prog == "git" or cmd.lock is not None or cmd.s2v is not None or studio_script(ctx, cmd):
+        # git's path rules refuse a pathspec they cannot read; Studio's scripts and s2v have their own argument
+        # checks and allows. Their output files (redirections, `-o FILE` / `--output=FILE`) are twinned as writes
+        # (implementation review m1), judged alone without running the command's own checks again
+        spots += [("w", k, w) for k, w in enumerate(cmd.words) if k > 1 and w.value is None and w.twin_parts and
+                  (cmd.words[k - 1].value in ("-o", "--output") or (w.raw or "").startswith(("--output=", "-o")))]
+        for kind, slot in (("empty", 0), ("inside", 1)):
+            for where_, k, w in spots:
+                v = twin_readings(w, prog)[slot]
+                if v is None:
+                    continue
+                if (w.raw or "").startswith(("--output=", "-o")) and where_ == "w":
+                    v = v.split("=", 1)[1] if v.startswith("--output=") else v[2:]
+                check_target(ctx, cmd, cand_word(w, v), v, "write", studio_infos)
+                if len(ctx.denies) > n0:
+                    for d in ctx.denies[n0:]:
+                        _twin_message(d, [(v, w, kind)])
+                    return
+        return
+    spots = [("w", k, w) for k, w in enumerate(cmd.words) if k > 0 and w.value is None and w.twin_parts] + spots
+    if not spots:
+        return
+    readings = [(s, twin_readings(s[2], prog)) for s in spots]
+    for kind, slot in (("empty", 0), ("inside", 1)):
+        reps = [(s, r[slot]) for s, r in readings if r[slot] is not None]
+        if reps and _twin_run(ctx, cmd, studio_infos, reps, kind, n0, roles):
+            return
+
+
+def _twin_run(ctx, cmd, studio_infos, reps, kind, n0, roles):
+    """One twin command (fix-0105 §1.3): judged with its own file-system budget (TWIN_FS_CALLS for all twins of a
+    call); a twin run keeps its refusals only. Past the budget each replaced word is judged alone as a deletion
+    (redirection targets as writes) with check_target."""
+    proxy = copy.copy(cmd)
+    proxy.twin = True
+    proxy.words, proxy.redirs = list(cmd.words), list(cmd.redirs)
+    msg, seen = [], set()
+    last = len(cmd.words) - 1
+    for (where_, k, w), v in reps:
+        if v in seen and not (where_ == "w" and k == last):
+            continue  # the same twin value is judged once (200 `build/$X*` words: one `build/*`)
+        seen.add(v)
+        tw = cand_word(w, v)
+        if where_ == "w":
+            proxy.words[k] = tw
+        else:
+            r2 = copy.copy(cmd.redirs[k])
+            r2.target = tw
+            proxy.redirs[k] = r2
+        msg.append((v, w, kind))
+    saved = (list(ctx.candidates), dict(ctx.script_calls), set(ctx.bulk_ids), list(ctx.warnings), list(ctx.touched),
+             list(ctx.effects), getattr(ctx, "search_fs_calls", 0), getattr(ctx, "search_cut", False))
+    fs = ctx.fs
+    used = getattr(ctx, "twin_fs_calls", 0)
+    budget = (fs.calls, fs.max_calls)
+    fs.calls, fs.max_calls = 0, max(limits.TWIN_FS_CALLS - used, 0)
+    out = False
+    try:
+        _check_paths(ctx, proxy, studio_infos)
+    except limits.LimitExceeded as e:
+        if e.kind != "fs-calls":
+            raise
+        out = True
+    finally:
+        ctx.twin_fs_calls = used + fs.calls
+        fs.calls, fs.max_calls = budget
+        ctx.candidates[:], ctx.bulk_ids, ctx.warnings[:], ctx.touched[:], ctx.effects[:] = \
+            saved[0], saved[2], saved[3], saved[4], saved[5]
+        ctx.script_calls.clear()
+        ctx.script_calls.update(saved[1])
+        ctx.search_fs_calls, ctx.search_cut = saved[6], saved[7]
+    if out:
+        del ctx.denies[n0:]
+        for (where_, k, w), v in reps:
+            op = roles.get(id(w))  # implementation review m3: only a word the command deletes or writes
+            if op is None or op == "read":
+                continue
+            check_target(ctx, cmd, cand_word(w, v), v, op, studio_infos)
+            if len(ctx.denies) > n0:
+                break
+    for d in ctx.denies[n0:]:
+        _twin_message(d, msg)
+    return len(ctx.denies) > n0
+
+
+def _check_paths(ctx, cmd, studio_infos):
     if studio_infos and "argv-unknown" in cmd.flags:
         if "argv-choices" in cmd.flags:  # review 12 conf m-3
             from .walk import MAX_CHOICE_READINGS
@@ -1447,6 +1637,7 @@ def cand_word(word, v):
     i = min([v.find(ch) for ch in "*?[<" if ch in v] or [-1])
     w.glob = i >= 0
     w.glob_base = (v[:i][:v[:i].rfind("/") + 1] if "/" in v[:i] else "") if i >= 0 else None
+    w.twin_parts = None
     return w
 
 
@@ -1463,6 +1654,9 @@ def loose_cands(word, infos):
 
 
 def check_target(ctx, cmd, word, value, op, studio_infos, s2v=False):
+    log = getattr(ctx, "target_log", None)
+    if log is not None:
+        log.setdefault(id(word), op)
     if value is None and (getattr(word, "cand_values", None) or getattr(word, "cand_loose", None)):
         # review 9: a value the guard does not carry (an array, read, print -v, $(print …), a function's global, one
         # of several folders): each value it may have is judged
@@ -1496,6 +1690,13 @@ def check_target(ctx, cmd, word, value, op, studio_infos, s2v=False):
         if word.dynamic and studio_infos and protect.tail_hits(word.skeleton or ""):
             ctx.deny("G-PROT" if op == "write" else "G-DEL",
                      "%s %s a path the guard cannot read (%s) that ends in a protected name."
+                     % (cmd.prog or "the command", "writes" if op == "write" else "deletes", word.raw))
+        elif word.dynamic and studio_infos and studio_tail_hits(word, studio_infos):
+            # fix-0105 §1.2a: no literal start, but the last literal stretch is followed only by expansions that may be
+            # empty (`$ROOT/studio/local/$X`)
+            ctx.deny("G-PROT" if op == "write" else "G-DEL",
+                     "%s %s a path the guard cannot read (%s) that ends in a protected name when the expansions after "
+                     "it are empty — check them first (\"${X:?}\") or write the path literally."
                      % (cmd.prog or "the command", "writes" if op == "write" else "deletes", word.raw))
         return
     glob = word.glob and word.glob_base is not None and value == word.value
