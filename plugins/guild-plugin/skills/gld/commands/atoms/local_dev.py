@@ -27,13 +27,21 @@ tokens. Contract: `_execute_spine.md` Step 1L · config `local_developer` (`conf
                                       record what happened to this Issue's newest job AFTER it
                                       ended (a pass rejected in review, a later loop-back)
     local_dev.py report               failure analysis over every run in runs.jsonl
+    local_dev.py lessons [--since ISO]
+                                      what `evolve` may grow into the developer's habits: a
+                                      diagnostic recurring across Issues, a local pass sent
+                                      back later — and, apart, the model's own `friction`
 
 Every subcommand prints a `>>> LOCAL-DEV <<<` sentinel line and then ONE JSON object. `state` is
 `queued` (waiting for the model) / `running` (not terminal) or `local_pass` / `fallback`
 (terminal) or `none`. A `fallback` carries `reason`: `ineligible:<why>` · `server_down` ·
 `queue_busy` (attended only) · `max_attempts` · `context_overflow` (earlier edits grew the
 files past what `num_ctx` holds) · `tests_modified` (a check run changed a test file — it is
-put back as it was at start) · `total_timeout` · `worker_died` · `worker_error`.
+put back as it was at start) · `total_timeout` · `worker_died` · `worker_error` · `restore_failed`
+(a file could not be put back — a human must look; `revert` reports it the same way) — and in
+the agent mode (`local_dev_agent.py`) also `max_turns` · `stuck` · `attempt_timeout` ·
+`out_of_scope_write` (a check changed a file outside `--files` and the tests; put back) ·
+`model_error` (two failed calls in a row) · `ineligible:model_no_tools`.
 A `local_pass` carries `tree`: `uncommitted` (commit it) · `committed` (a resumed leader already
 did) · `restored` (it was reverted).
 
@@ -71,6 +79,7 @@ Files: `.claude/guild/memory/local-dev/` (gitignored with the rest of memory/):
     runs.jsonl                         one line per finished job (+ `followup` lines from `note`)
     <issue>/<job>/job.json             live state (the worker is its only writer until terminal)
     <issue>/<job>/attempt<k>.prompt.txt · .response.txt · .checks.txt
+    <issue>/<job>/persona.md           the developer persona's repo-grown part, as at start
     <issue>/<job>/last-local.diff      on fallback · test-output.txt on pass · worker.log
     <issue>/<job>/tests-changed/       a test as a check run left it, before it was put back
 
@@ -86,6 +95,7 @@ import re
 import secrets
 import shlex
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -105,6 +115,10 @@ DEFAULTS = {
     "attempt_timeout_min": 20,
     "total_timeout_min": 60,
     "num_ctx": 65536,
+    "persona": True,
+    "mode": "oneshot",
+    "max_turns": 30,
+    "agent_think": False,
     "test_cmd": None,
     "lint_cmd": None,
 }
@@ -114,6 +128,9 @@ CARRY_CHARS = 12000            # tail of a cut-off attempt's reasoning handed to
 MIN_CARRY_CHARS = 2000         # less room than this → no carry (and reasoning stays on)
 EXCERPT_CHARS = 4000           # failure output kept in runs.jsonl
 POLL_SECONDS = 2.0
+PERSONA_CHARS = 8000           # the developer persona's repo-grown part, whole or not at all
+PERSONA_PATH = os.path.join(".claude", "agents", "developer.md")
+PERSONA_END = "<!-- guild:persona:end -->"
 
 SYSTEM = """You are the developer of a spec-driven workflow. The design skeleton is fixed and \
 the failing tests are already written. Change the implementation so those tests \
@@ -202,12 +219,18 @@ def load_config(repo):
         raise RepoError(f"config.json is not valid JSON: {exc}")
     ld = dict(DEFAULTS)
     ld.update(cfg.get("local_developer") or {})
-    for key in ("max_attempts", "max_output_tokens", "max_output_tokens_retry", "num_ctx"):
+    for key in ("max_attempts", "max_output_tokens", "max_output_tokens_retry", "num_ctx",
+                "max_turns"):
         if not isinstance(ld[key], int) or isinstance(ld[key], bool) or ld[key] < 1:
             raise RepoError(f"local_developer.{key} must be an integer >= 1")
     for key in ("attempt_timeout_min", "total_timeout_min"):
         if not isinstance(ld[key], (int, float)) or isinstance(ld[key], bool) or ld[key] <= 0:
             raise RepoError(f"local_developer.{key} must be a number > 0")
+    for key in ("persona", "agent_think"):
+        if not isinstance(ld[key], bool):
+            raise RepoError(f"local_developer.{key} must be true or false")
+    if ld["mode"] not in ("oneshot", "agent", "auto"):
+        raise RepoError('local_developer.mode must be "oneshot", "agent" or "auto"')
     if ld["lint_cmd"] is None:
         ld["lint_cmd"] = (cfg.get("commands") or {}).get("lint")
     return ld
@@ -295,6 +318,10 @@ def public(repo, job):
                        for a in job.get("attempts") or []]
     out["attempt_count"] = len(job.get("attempts") or [])
     out["job_dir"] = job.get("job_dir")
+    out["mode"] = job.get("mode", "oneshot")
+    for k in ("out_of_scope", "stray", "restore_failed"):
+        if job.get(k):
+            out[k] = job[k]
     if job.get("consumed") and job.get("state") == "local_pass":
         # true only while the acked local code is untouched AND has not been sent back yet:
         # the exemption it grants (Step 4, a local pass sent back) is spent by the first note
@@ -325,10 +352,14 @@ def append_run(repo, job, cfg):
         "queue_wait_s": round(job.get("queue_wait_s") or 0, 1),
         "active_s": round(job.get("active_s") or 0, 1),
         "files": job.get("files"), "tests": job.get("tests"),
+        "persona": job.get("persona"), "mode": job.get("mode", "oneshot"),
         "attempts": job.get("attempts") or [],
         "config": {k: cfg.get(k) for k in ("max_attempts", "max_output_tokens",
                                            "max_output_tokens_retry", "attempt_timeout_min",
-                                           "total_timeout_min", "num_ctx")},
+                                           "total_timeout_min", "num_ctx", "persona",
+                                           "max_turns", "agent_think")},
+        **{k: job[k] for k in ("turns", "edit_misses", "out_of_scope", "stray", "restore_failed",
+                               "rechecked") if job.get(k)},
     })
 
 
@@ -424,6 +455,23 @@ def check_server(cfg):
     return "ineligible:model_not_pulled"
 
 
+def post_json(cfg, path, body, timeout):
+    req = urllib.request.Request(cfg["ollama_url"].rstrip("/") + path, json.dumps(body).encode(),
+                                 {"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
+
+
+def model_has_tools(cfg):
+    """True only when Ollama says the model takes tools — an Ollama too old to list
+    capabilities is taken as no."""
+    try:
+        d = post_json(cfg, "/api/show", {"model": cfg["model"]}, 10)
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+    return "tools" in (d.get("capabilities") or [])
+
+
 def normalize(repo, paths):
     """Repo-relative, normalized paths; None for one that escapes the repo."""
     real_repo = os.path.realpath(repo)
@@ -436,6 +484,32 @@ def normalize(repo, paths):
             return None, p
         out.append(os.path.relpath(rp, real_repo))
     return out, None
+
+
+def persona_excerpt(repo, cfg):
+    """(status, text): the part of the developer persona below `guild:persona:end` — the
+    project specifics and the habits `evolve` grows. The template part above it describes the
+    Sonnet developer's own workflow (stages, hand-offs, return lines), which a model that only
+    answers with edits cannot follow. A part over PERSONA_CHARS is left out, not cut: a habit
+    cut in half reads as a different rule."""
+    if not cfg["persona"]:
+        return "off", ""
+    path = os.path.join(repo, PERSONA_PATH)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except (FileNotFoundError, IsADirectoryError, UnicodeDecodeError):
+        return "missing", ""
+    lines = text.split("\n")
+    ends = [i for i, l in enumerate(lines) if l.strip() == PERSONA_END]
+    if len(ends) != 1:
+        return "no_marker", ""
+    part = re.sub(r"<!--.*?-->", "", "\n".join(lines[ends[0] + 1:]), flags=re.S).strip()
+    if not part:
+        return "empty", ""
+    if len(part) > PERSONA_CHARS:
+        return "too_long", ""
+    return "used", part
 
 
 def eligibility(repo, cfg, args):
@@ -495,9 +569,20 @@ def eligibility(repo, cfg, args):
     for f in files:
         with open(os.path.join(repo, f), encoding="utf-8") as fh:
             text += fh.read()
-    # a retry repeats the whole prompt plus the failure output — it must fit at the first cap
+    # a retry repeats the whole prompt plus the failure output — it must fit at the first cap.
+    # The persona is guidance, not material: a job it would push out runs without it
+    persona_status, persona = persona_excerpt(repo, cfg)
+    if cfg["mode"] == "agent":
+        return agent_eligibility(repo, cfg, args, mb, skeleton_path, persona_status, persona)
     room = cfg["num_ctx"] - estimate_tokens(text) - FEEDBACK_CHARS - 1000
+    if persona and room - estimate_tokens(persona) >= cfg["max_output_tokens"]:
+        room -= estimate_tokens(persona)
+    elif persona:
+        persona_status, persona = "no_room", ""
     if room < cfg["max_output_tokens"]:
+        if cfg["mode"] == "auto":          # what the agent mode is for: a file too big to send
+            persona_status, persona = persona_excerpt(repo, cfg)
+            return agent_eligibility(repo, cfg, args, mb, skeleton_path, persona_status, persona)
         return "ineligible:context_too_large", {}
     # what is left goes to the raised cap and the reasoning carry (chars count as at least one
     # token each), the carry first: it is what turned a cut-off job into a pass (2026-11). A
@@ -506,7 +591,28 @@ def eligibility(repo, cfg, args):
     retry_cap = max(cfg["max_output_tokens"], min(cfg["max_output_tokens_retry"], room - CARRY_CHARS))
     carry = min(CARRY_CHARS, room - retry_cap)
     return None, {"mb": mb, "skeleton_path": skeleton_path, "retry_cap": retry_cap,
-                  "carry_chars": carry if carry >= MIN_CARRY_CHARS else 0}
+                  "carry_chars": carry if carry >= MIN_CARRY_CHARS else 0,
+                  "persona_status": persona_status, "persona": persona, "mode": "oneshot"}
+
+
+def agent_eligibility(repo, cfg, args, mb, skeleton_path, persona_status, persona):
+    """The agent mode never sends a large file whole: what must fit is the first message (task,
+    skeleton, test diff, small files or an outline) plus room to read and test in."""
+    import local_dev_agent as ag
+    for f in args.files:                   # its edits write in place: a hardlink would carry
+        if os.stat(os.path.join(repo, f)).st_nlink > 1:     # them into the linked file
+            return f"ineligible:file_hardlinked:{f}", {}
+    probe = {"issue": args.issue, "files": args.files, "tests": args.tests, "note": args.note,
+             "mb": mb, "skeleton_path": skeleton_path}
+    if persona and not ag.fits(sys.modules[__name__], cfg, ag.initial_user(
+            sys.modules[__name__], repo, probe, persona)):
+        persona_status, persona = "no_room", ""
+    if not ag.fits(sys.modules[__name__], cfg, ag.initial_user(sys.modules[__name__], repo,
+                                                               probe, persona or None)):
+        return "ineligible:context_too_large", {}
+    return None, {"mb": mb, "skeleton_path": skeleton_path,
+                  "retry_cap": cfg["max_output_tokens"], "carry_chars": 0,
+                  "persona_status": persona_status, "persona": persona, "mode": "agent"}
 
 
 def new_job_id():
@@ -537,9 +643,11 @@ def cmd_start(repo, args):
             "attempts": [], "queue_wait_s": 0.0, "active_s": 0.0, "consumed": False,
         }
         reason, ctx = eligibility(repo, cfg, args)
-        job.update(files=args.files, tests=args.tests)
+        job.update(files=args.files, tests=args.tests, mode=ctx.get("mode", "oneshot"))
         if reason is None:
             reason = check_server(cfg)
+        if reason is None and ctx["mode"] == "agent" and not model_has_tools(cfg):
+            reason = "ineligible:model_no_tools"
         attended_ticket = None
         queue = Queue() if reason is None else None
         if reason is None and args.attended:
@@ -558,7 +666,12 @@ def cmd_start(repo, args):
             emit(public(repo, job))
             return 0
         job.update(mb=ctx["mb"], skeleton_path=ctx["skeleton_path"], retry_cap=ctx["retry_cap"],
-                   carry_chars=ctx["carry_chars"])
+                   carry_chars=ctx["carry_chars"], persona=ctx["persona_status"],
+                   modes={f: os.stat(os.path.join(repo, f)).st_mode for f in args.files})
+        if ctx["persona"]:                 # a snapshot: an evolve run mid-job changes nothing
+            with open(os.path.join(jd, "persona.md"), "w", encoding="utf-8") as fh:
+                fh.write(ctx["persona"])
+            job["persona_path"] = os.path.relpath(os.path.join(jd, "persona.md"), repo)
         for f in args.files + args.tests:
             dst = os.path.join(jd, "originals" if f in args.files else "test-originals", f)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -584,12 +697,46 @@ def cmd_start(repo, args):
 
 # --------------------------------------------------------------------------- worker
 
-def restore(repo, jd, files):
+def restore(repo, jd, files, modes=None):
+    """Put `files` back as they were at start; the paths that could not be (a parent that now
+    leads out of the repo, a directory in the file's place). A symlink planted in a file's place
+    is removed — never written through — and the file made again, with its mode."""
+    failed, real_repo = [], os.path.realpath(repo)
     for f in files:
         with open(os.path.join(jd, "originals", f), "rb") as src:
             data = src.read()
-        with open(os.path.join(repo, f), "wb") as out:
-            out.write(data)
+        p = os.path.join(repo, f)
+        # every directory on the way must still be the real one: a symlinked parent — even one
+        # pointing inside the repo — would carry the write somewhere else
+        if os.path.realpath(os.path.dirname(p)) != os.path.normpath(
+                os.path.join(real_repo, os.path.dirname(f))):
+            failed.append(f)
+            continue
+        try:
+            os.makedirs(os.path.dirname(p) or ".", exist_ok=True)   # a check removed the dir
+            try:
+                st = os.lstat(p)
+            except FileNotFoundError:
+                st = None
+            if st is not None and stat.S_ISDIR(st.st_mode):
+                failed.append(f)
+                continue
+            if st is not None and (not stat.S_ISREG(st.st_mode) or st.st_nlink > 1):
+                os.unlink(p)               # a link is removed, never written through
+                st = None
+            mode = (modes or {}).get(f)
+            if st is None:
+                fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             (mode or 0o644) & 0o7777)
+            else:
+                fd = os.open(p, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+            with os.fdopen(fd, "wb") as out:
+                out.write(data)
+            if mode is not None:
+                os.chmod(p, mode & 0o7777)
+        except OSError:
+            failed.append(f)
+    return failed
 
 
 def restore_changed_tests(repo, jd, tests):
@@ -638,9 +785,19 @@ def settle_dead(repo, job, cfg):
         if fresh["state"] in TERMINAL:
             return fresh
         save_diff(repo, jd, fresh["files"])
-        restore(repo, jd, fresh["files"])
+        if fresh.get("mode") == "agent":   # what the dead worker's last check left behind
+            import local_dev_agent
+            try:
+                local_dev_agent.settle_scope(sys.modules[__name__], repo, jd, fresh)
+            except Exception as exc:  # noqa: BLE001 — settling must still finish
+                fresh["scope_error"] = f"{type(exc).__name__}: {exc}"
+        failed = restore(repo, jd, fresh["files"], fresh.get("modes"))
         restore_changed_tests(repo, jd, fresh.get("tests", []))
-        fresh.update(state="fallback", reason="worker_died", finished=now_iso(),
+        if failed:
+            fresh["restore_failed"] = sorted(set(fresh.get("restore_failed") or []) | set(failed))
+        fresh.update(state="fallback", reason="restore_failed" if fresh.get("restore_failed")
+                     else "worker_died",
+                     finished=now_iso(),
                      last_diff=os.path.relpath(os.path.join(jd, "last-local.diff"), repo))
         write_json(os.path.join(jd, "job.json"), fresh)
         append_run(repo, fresh, cfg)
@@ -668,9 +825,16 @@ def with_checked(checked, note):
     return checked[-room:] + "\n\n" + note
 
 
-def build_prompt(repo, job, feedback=None, carry=None):
+def build_prompt(repo, job, feedback=None, carry=None, persona=True):
     parts = [f"## Task\nIssue #{job['issue']} — implement against the skeleton so the new "
              f"tests pass."]
+    if persona and job.get("persona_path"):
+        with open(os.path.join(repo, job["persona_path"]), encoding="utf-8") as fh:
+            parts.append("## This repository's developer conventions and lessons\n"
+                         "Some of these describe steps of a wider workflow (writing evidence "
+                         "files, running or mutating tests, committing) that are not yours "
+                         "here. Apply what bears on the code you write; the rules above come "
+                         "first.\n\n" + fh.read())
     if job.get("note"):
         parts.append("## Note from the test author\n" + job["note"])
     if job.get("skeleton_path"):
@@ -907,11 +1071,7 @@ def chat(cfg, prompt, timeout_s, num_predict, think=None):
     }
     if think is not None:                  # sent only to a model that showed it reasons
         req_body["think"] = think
-    body = json.dumps(req_body).encode()
-    req = urllib.request.Request(cfg["ollama_url"].rstrip("/") + "/api/chat", body,
-                                 {"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout_s) as r:
-        return json.load(r)
+    return post_json(cfg, "/api/chat", req_body, timeout_s)
 
 
 class Worker:
@@ -940,9 +1100,15 @@ class Worker:
         # tests back as the test author left them, and do not call that a pass
         if restore_changed_tests(self.repo, self.jd, self.job["tests"]) and state == "local_pass":
             state, reason = "fallback", "tests_modified"
+        if self.job.get("restore_failed"):  # a scope put-back failed: a human must look
+            state, reason = "fallback", "restore_failed"
         if state == "fallback":
             save_diff(self.repo, self.jd, self.job["files"])
-            restore(self.repo, self.jd, self.job["files"])
+            failed = restore(self.repo, self.jd, self.job["files"], self.job.get("modes"))
+            if failed:
+                self.job["restore_failed"] = sorted(set(self.job.get("restore_failed") or [])
+                                                    | set(failed))
+                reason = "restore_failed"
             self.job["last_diff"] = os.path.relpath(os.path.join(self.jd, "last-local.diff"),
                                                     self.repo)
         self.job.update(state=state, reason=reason, finished=now_iso())
@@ -1030,6 +1196,9 @@ class Worker:
         return None
 
     def run(self):
+        if self.job.get("mode") == "agent":
+            import local_dev_agent
+            return local_dev_agent.run(self, sys.modules[__name__])
         self.job["state"] = "running"
         self.save()
         reason = self.baseline()
@@ -1051,15 +1220,23 @@ class Worker:
         # the carry stands beside the last verification feedback: an earlier attempt's edits
         # stay in the files, and what the tests said about them still holds
         self.think, carry, checked = None, None, None
+        persona = bool(self.job.get("persona_path"))
         for n in range(1, self.cfg["max_attempts"] + 1):
-            prompt = build_prompt(self.repo, self.job, feedback, carry)
+            prompt = build_prompt(self.repo, self.job, feedback, carry, persona)
             # earlier attempts' edits stay in the files, so a late prompt can outgrow what
-            # eligibility measured: shorten the carry, then the cap, never overflow num_ctx
+            # eligibility measured: shorten the carry, then leave out the persona (for the rest
+            # of the job), then the cap — never overflow num_ctx
             over = (estimate_tokens(SYSTEM + prompt) + self.cap + FIT_MARGIN
                     - self.cfg["num_ctx"])
             while over > 0 and carry:
                 carry = drop_tokens(carry, over)
-                prompt = build_prompt(self.repo, self.job, feedback, carry or None)
+                prompt = build_prompt(self.repo, self.job, feedback, carry or None, persona)
+                over = (estimate_tokens(SYSTEM + prompt) + self.cap + FIT_MARGIN
+                        - self.cfg["num_ctx"])
+            if over > 0 and persona:
+                persona = False
+                self.job["persona"] = "dropped"
+                prompt = build_prompt(self.repo, self.job, feedback, carry or None, persona)
                 over = (estimate_tokens(SYSTEM + prompt) + self.cap + FIT_MARGIN
                         - self.cfg["num_ctx"])
             self.send = self.cap - max(0, over)
@@ -1073,7 +1250,7 @@ class Worker:
             d, err, secs = self.call_model(prompt)
             self.active += secs
             rec = {"n": n, "gen_s": round(secs, 1), "started": now_iso(), "num_predict": self.send,
-                   "think": self.think}
+                   "think": self.think, "persona": persona}
             if err == "total_timeout":
                 self.job["attempts"].append({**rec, "outcome": err})
                 return self.finish("fallback", err)
@@ -1190,7 +1367,13 @@ def cmd_revert(repo, args):
               "error": "only an un-acknowledged local_pass can be reverted"})
         return 0
     git(repo, "reset", "-q", "HEAD", "--", *job["files"], check=False)   # unstage
-    restore(repo, os.path.join(repo, job["job_dir"]), job["files"])
+    failed = restore(repo, os.path.join(repo, job["job_dir"]), job["files"], job.get("modes"))
+    if failed:                             # the leader must not hand this tree to anyone
+        job.update(state="fallback", reason="restore_failed", restore_failed=failed)
+        write_json(os.path.join(repo, job["job_dir"], "job.json"), job)
+        append_line(repo, {"type": "followup", "ts": now_iso(), "issue": job["issue"],
+                           "job_id": job["job_id"], "job_final": "local_pass",
+                           "event": "restore_failed: " + ", ".join(failed)})
     emit(public(repo, job))
     return 0
 
@@ -1238,19 +1421,33 @@ def cmd_report(repo, args):
                 else:
                     runs.append(r)
     finals, reasons, outcomes, pass_at, raised = {}, {}, {}, {}, {}
+    by_mode = {}
     wait = active = 0.0
     tokens = gen = 0.0
     for r in runs:
         finals[r["final"]] = finals.get(r["final"], 0) + 1
+        mode = r.get("mode") or "oneshot"      # lines from before the agent mode are oneshot
+        bm = by_mode.setdefault(mode, {"runs": 0, "final": {}, "fallback_reasons": {}})
+        bm["runs"] += 1
+        bm["final"][r["final"]] = bm["final"].get(r["final"], 0) + 1
         if r["final"] == "fallback":
             parts = (r.get("reason") or "?").split(":")
             key = ":".join(parts[:2]) if parts[0] == "ineligible" else parts[0]
             reasons[key] = reasons.get(key, 0) + 1
-        else:
+            bm["fallback_reasons"][key] = bm["fallback_reasons"].get(key, 0) + 1
+        elif mode == "oneshot":            # an agent job's checks are not attempts
             k = len(r.get("attempts") or [])
             pass_at[k] = pass_at.get(k, 0) + 1
+        if mode == "agent":
+            bm["turns"] = bm.get("turns", 0) + len(r.get("turns") or [])
+            bm["edit_misses"] = bm.get("edit_misses", 0) + (r.get("edit_misses") or 0)
         base_cap = (r.get("config") or {}).get("max_output_tokens")
+        bm["active_s"] = bm.get("active_s", 0) + (r.get("active_s") or 0)
         for a in r.get("attempts") or []:
+            bo = bm.setdefault("attempt_outcomes", {})
+            bo[a.get("outcome")] = bo.get(a.get("outcome"), 0) + 1
+            if mode != "oneshot":          # the top-level numbers stay one-shot attempts
+                continue
             outcomes[a.get("outcome")] = outcomes.get(a.get("outcome"), 0) + 1
             if base_cap and (a.get("num_predict") or 0) > base_cap:
                 raised[a.get("outcome")] = raised.get(a.get("outcome"), 0) + 1
@@ -1259,6 +1456,8 @@ def cmd_report(repo, args):
                 gen += a["gen_s"]
         wait += r.get("queue_wait_s") or 0
         active += r.get("active_s") or 0
+    for bm in by_mode.values():
+        bm["avg_active_s"] = round(bm.pop("active_s", 0) / bm["runs"], 1) if bm["runs"] else 0
     warnings = []
     cfg = load_config(repo)
     if gen:
@@ -1273,9 +1472,87 @@ def cmd_report(repo, args):
           "pass_at_attempt": {str(k): v for k, v in sorted(pass_at.items())},
           "attempt_outcomes": outcomes, "raised_cap_outcomes": raised,
           "observed_tok_per_s": round(tokens / gen, 1) if gen else None,
-          "warnings": warnings, "after_pass": followups,
+          "warnings": warnings, "after_pass": followups, "by_mode": by_mode,
           "avg_queue_wait_s": round(wait / len(runs), 1) if runs else 0,
           "avg_active_s": round(active / len(runs), 1) if runs else 0})
+    return 0
+
+
+DIAG_RE = re.compile(r"\b(error|warning)\b", re.I)
+SUMMARY_RE = re.compile(r"^\s*(\d+ (issues?|errors?|warnings?) found|some tests failed|\[exit \d+\])",
+                        re.I)
+
+
+def diag_key(line):
+    """A diagnostic line with what varies between Issues taken out: locations, quoted names,
+    numbers. Two Issues tripping the same rule then read as one key."""
+    line = re.sub(r"(file://)?[\w./~-]+\.\w+(:\d+)+", "<loc>", line.strip())
+    # a quote mark inside a word (isn't) opens nothing
+    line = re.sub(r"(?<!\w)('[^']*'|\"[^\"]*\"|`[^`]*`)(?!\w)", "'…'", line)
+    line = re.sub(r"\d+", "N", line)
+    return re.sub(r"\s+", " ", line)[:160]
+
+
+def read_runs(repo, since=None):
+    path = os.path.join(state_dir(repo), "runs.jsonl")
+    runs, followups = [], []
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if since and (r.get("ts") or "") < since:
+                    continue
+                (followups if r.get("type") == "followup" else runs).append(r)
+    return runs, followups
+
+
+def cmd_lessons(repo, args):
+    """What `evolve` may grow into the developer's habits from the local model's record.
+
+    A habit has to be about the code, so only two things qualify: a diagnostic (lint or
+    compiler line) that recurs across at least two Issues, and a local pass that a later
+    stage sent back. How the model failed to answer — a SEARCH that did not match, the output
+    cap, a timeout — is about the model and this tool, not the code: it is counted under
+    `friction` for the human, never offered as a habit."""
+    runs, followups = read_runs(repo, args.since)
+    diags, friction = {}, {}
+    for r in runs:
+        if r.get("final") == "fallback" and not (r.get("attempts") or []):
+            key = (r.get("reason") or "?").split(":")
+            key = ":".join(key[:2]) if key[0] == "ineligible" else key[0]
+            friction[key] = friction.get(key, 0) + 1
+        for a in r.get("attempts") or []:
+            out = a.get("outcome")
+            if a.get("intermediate"):          # an agent's check of half-done work teaches nothing
+                continue
+            if out in ("lint_fail", "test_fail"):
+                seen = set()
+                for line in (a.get("error") or "").splitlines():
+                    if not DIAG_RE.search(line) or SUMMARY_RE.match(line):
+                        continue
+                    k = diag_key(line)
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    d = diags.setdefault(k, {"key": k, "issues": [], "attempts": 0,
+                                             "sample": line.strip()[:300], "outcome": out})
+                    d["attempts"] += 1
+                    if r["issue"] not in d["issues"]:
+                        d["issues"].append(r["issue"])
+            elif out and out != "pass":
+                if out == "apply_fail":
+                    out += ":" + diag_key((a.get("error") or "?").splitlines()[0]).split(" in ")[0]
+                friction[out] = friction.get(out, 0) + 1
+    recurring = sorted((d for d in diags.values() if len(d["issues"]) >= 2),
+                       key=lambda d: (-len(d["issues"]), -d["attempts"]))
+    rejected = [{"issue": f["issue"], "job_id": f.get("job_id"), "event": f.get("event"),
+                 "ts": f.get("ts")} for f in followups if f.get("job_final") == "local_pass"]
+    emit({"since": args.since, "runs": len(runs), "recurring_diagnostics": recurring,
+          "rejected_passes": rejected, "friction": dict(sorted(friction.items(),
+                                                              key=lambda kv: -kv[1]))})
     return 0
 
 
@@ -1304,6 +1581,8 @@ def main(argv=None):
     nt.add_argument("--issue", type=int, required=True)
     nt.add_argument("--event", required=True)
     sub.add_parser("report")
+    ls = sub.add_parser("lessons")
+    ls.add_argument("--since", default=None)
     try:
         args = ap.parse_args(argv)
     except SystemExit as exc:
@@ -1312,7 +1591,8 @@ def main(argv=None):
         repo = repo_root()
         load_config(repo)      # every subcommand needs an initialized Guild and a valid block
         return {"start": cmd_start, "wait": cmd_wait, "status": cmd_status, "ack": cmd_ack,
-                "revert": cmd_revert, "note": cmd_note, "report": cmd_report}[args.cmd](repo, args)
+                "revert": cmd_revert, "note": cmd_note, "report": cmd_report,
+                "lessons": cmd_lessons}[args.cmd](repo, args)
     except RepoError as exc:
         print(f"local_dev.py: {exc}", file=sys.stderr)
         return 65

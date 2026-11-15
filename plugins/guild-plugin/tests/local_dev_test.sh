@@ -74,17 +74,30 @@ class H(BaseHTTPRequestHandler):
         self._send({"models": [{"name": n} for n in open(os.path.join(D, "models")).read().split()]})
     def do_POST(self):
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/api/show":
+            cp = os.path.join(D, "caps")
+            caps = open(cp).read().split() if os.path.exists(cp) else ["completion", "tools"]
+            return self._send({"capabilities": caps} if caps != ["none"] else {})
         user = req["messages"][-1]["content"]
-        issue = user.split("Issue #", 1)[1].split(" ", 1)[0] if "Issue #" in user else "?"
+        firsts = [m.get("content") or "" for m in req["messages"] if "Issue #" in (m.get("content") or "")]
+        issue = firsts[0].split("Issue #", 1)[1].split(" ", 1)[0] if firsts else "?"
         with LOCK:
             open(os.path.join(D, "order"), "a").write(issue + "\n")
             open(os.path.join(D, "last_options.json"), "w").write(json.dumps(req.get("options")))
             open(os.path.join(D, "last_prompt.txt"), "w").write(user)
             open(os.path.join(D, "last_think.json"), "w").write(json.dumps(req.get("think")))
+            open(os.path.join(D, "last_request.json"), "w").write(json.dumps(req))
+            qd = os.environ.get("GLD_LOCAL_DEV_QUEUE_DIR", "")
+            n = len([f for f in os.listdir(qd) if f.endswith(".ticket")]) if os.path.isdir(qd) else 0
+            open(os.path.join(D, "tickets_at_call"), "a").write(f"{n}\n")
+            names = sorted(f for f in os.listdir(qd) if f.endswith(".ticket")) if os.path.isdir(qd) else []
+            open(os.path.join(D, "ticket_names"), "a").write(",".join(names) + "\n")
         r = pop()
         time.sleep(r.get("sleep", 0))
-        self._send({"message": {"role": "assistant", "content": r["content"],
-                                "thinking": r.get("thinking", "hmm")},
+        msg = {"role": "assistant", "content": r["content"], "thinking": r.get("thinking", "hmm")}
+        if r.get("tool_calls"):
+            msg["tool_calls"] = r["tool_calls"]
+        self._send({"message": msg,
                     "done_reason": r.get("done_reason", "stop"),
                     "prompt_eval_count": 100, "eval_count": 10})
 s = ThreadingHTTPServer(("127.0.0.1", 0), H)
@@ -530,6 +543,385 @@ OUT="$(waitjob "$R" 30 5)"
 eq "a dead worker becomes fallback worker_died" "worker_died" "$(echo "$OUT" | field reason)"
 eq "…and the implementation is restored" "status = BROKEN" "$(cat "$R/impl.txt")"
 eq "two concurrent settlers write ONE record" "1" "$(grep -c worker_died "$R/.claude/guild/memory/local-dev/runs.jsonl")"
+
+# ---------------------------------------------------------------- 8b. the developer persona
+echo "== persona"
+# persona <repo> [extra] — a developer persona: template part (above the end marker) and the
+# repo-grown part below it, optionally padded with [extra]
+persona() {
+  mkdir -p "$1/.claude/agents"
+  "$PY" - "$1/.claude/agents/developer.md" "${2:-}" <<'PY2'
+import sys
+open(sys.argv[1], "w").write("---\nname: developer\n---\n# Developer\n<!-- guild:persona:start -->\n"
+  "TEMPLATE-ONLY return >>> RESULT <<<\n<!-- guild:persona:end -->\n\n## Project specifics\n"
+  "- PROJECT-RULE import order dart: first\n\n## Habits\n<!-- guild:persona:habits -->\n"
+  "- HABIT-LESSON check every guard\n" + sys.argv[2])
+PY2
+}
+lastrun() { "$PY" -c 'import json,sys; r=[json.loads(l) for l in open(sys.argv[1]) if "\"run\"" in l][-1]; v=r
+for k in sys.argv[2].split("."): v=v[int(k)] if isinstance(v,list) else v.get(k)
+print(v)' "$1/.claude/guild/memory/local-dev/runs.jsonl" "$2"; }
+R="$WORK/rp1"; mkrepo "$R" 21 "$(LDJSON)"; persona "$R"; : > "$FAKE/replies.jsonl"; reply "$FIX_BLOCK" stop 2
+start "$R" 21 >/dev/null
+printf -- '- EDITED-MID-JOB\n' >> "$R/.claude/agents/developer.md"
+OUT="$(waitjob "$R" 21)"
+grep -q "PROJECT-RULE" "$FAKE/last_prompt.txt" && grep -q "HABIT-LESSON" "$FAKE/last_prompt.txt" \
+  && ok "the persona's repo-grown part reaches the model" || bad "persona in prompt" "PROJECT-RULE + HABIT-LESSON" "missing"
+grep -q "TEMPLATE-ONLY\|guild:persona" "$FAKE/last_prompt.txt" \
+  && bad "template part left out" "absent" "present" || ok "…its template part and markers do not"
+grep -q "EDITED-MID-JOB" "$FAKE/last_prompt.txt" \
+  && bad "persona snapshot" "start-time copy" "edited copy" || ok "…as it was at start (an evolve run mid-job changes nothing)"
+eq "runs.jsonl records the persona as used, and per attempt" "local_pass used True" \
+  "$(echo "$OUT" | field state) $(lastrun "$R" persona) $(lastrun "$R" attempts.0.persona)"
+R="$WORK/rp2"; mkrepo "$R" 22 "$(LDJSON '{"persona": false}')"; persona "$R"; : > "$FAKE/replies.jsonl"; reply "$FIX_BLOCK"
+start "$R" 22 >/dev/null; waitjob "$R" 22 >/dev/null
+grep -q "PROJECT-RULE" "$FAKE/last_prompt.txt" && bad "persona off" "absent" "present" || ok "persona: false keeps it out"
+eq "…recorded as off" "off" "$(lastrun "$R" persona)"
+R="$WORK/rp3"; mkrepo "$R" 23 "$(LDJSON)"; : > "$FAKE/replies.jsonl"; reply "$FIX_BLOCK"
+start "$R" 23 >/dev/null
+eq "no persona file → the job runs without it (missing)" "local_pass missing" "$(echo "$(waitjob "$R" 23 | field state) $(lastrun "$R" persona)")"
+R="$WORK/rp4"; mkrepo "$R" 24 "$(LDJSON)"; persona "$R"; sed -i.bak '/persona:end/d' "$R/.claude/agents/developer.md"; : > "$FAKE/replies.jsonl"; reply "$FIX_BLOCK"
+start "$R" 24 >/dev/null
+eq "a persona without its end marker is left out (no_marker)" "local_pass no_marker" "$(echo "$(waitjob "$R" 24 | field state) $(lastrun "$R" persona)")"
+R="$WORK/rp5"; mkrepo "$R" 25 "$(LDJSON)"; persona "$R" "$("$PY" -c 'print("- long habit\n" * 700)')"; : > "$FAKE/replies.jsonl"; reply "$FIX_BLOCK"
+start "$R" 25 >/dev/null; waitjob "$R" 25 >/dev/null
+eq "a repo-grown part over 8000 chars is left out whole, never cut (too_long)" "too_long" "$(lastrun "$R" persona)"
+grep -q "HABIT-LESSON" "$FAKE/last_prompt.txt" && bad "too_long persona" "absent" "present" || ok "…and none of it is sent"
+R="$WORK/rp6"; mkrepo "$R" 26 "$(LDJSON '{"num_ctx": 14000, "max_output_tokens": 1000}')"; persona "$R" "$("$PY" -c 'print("설" * 5800)')"; : > "$FAKE/replies.jsonl"; reply "$FIX_BLOCK"
+eq "a persona that would push the job out of num_ctx is dropped, the job still runs (no_room)" "queued" "$(start "$R" 26 | field state)"
+waitjob "$R" 26 >/dev/null
+eq "…recorded as no_room" "no_room" "$(lastrun "$R" persona)"
+# earlier edits grow the files: the persona goes before the cap shrinks, for the rest of the job
+R="$WORK/rp7"; mkrepo "$R" 27 "$(LDJSON '{"num_ctx": 12000, "max_output_tokens": 2000, "max_output_tokens_retry": 2000}')"
+persona "$R" "$("$PY" -c 'print("p" * 6000)')"; : > "$FAKE/replies.jsonl"
+reply "$(GROW 30000)"; reply $'impl.txt\n<<<<<<< SEARCH\nstatus = STILL_BROKEN\n=======\nstatus = FIXED\n>>>>>>> REPLACE'
+OUT="$(start "$R" 27 >/dev/null; waitjob "$R" 27)"
+eq "a grown prompt drops the persona first: attempt 1 with it, attempt 2 without" "local_pass True False dropped" \
+  "$(echo "$OUT" | field state) $(lastrun "$R" attempts.0.persona) $(lastrun "$R" attempts.1.persona) $(lastrun "$R" persona)"
+grep -q "HABIT-LESSON" "$FAKE/last_prompt.txt" && bad "dropped persona" "absent" "present" || ok "…and the second prompt carries none of it"
+R="$WORK/rp8"; mkrepo "$R" 28 "$(LDJSON '{"persona": "yes"}')"
+start "$R" 28 >/dev/null 2>&1; eq "persona must be a boolean → exit 65" "65" "$?"
+: > "$FAKE/replies.jsonl"
+
+# ---------------------------------------------------------------- 8c. lessons for evolve
+echo "== lessons"
+R="$WORK/rl"; mkrepo "$R" 31 "$(LDJSON)"; mkdir -p "$R/.claude/guild/memory/local-dev"
+"$PY" - "$R/.claude/guild/memory/local-dev/runs.jsonl" <<'PY2'
+import json, sys
+def run(issue, ts, final, attempts, reason=None):
+    return {"type": "run", "ts": ts, "issue": issue, "final": final, "reason": reason, "attempts": attempts}
+L1 = "  error • The getter 'fooBar' isn't defined for the type 'Sync' • lib/a/sync.dart:120:7 • undefined_getter\n2 issues found.\n[exit 1]"
+L2 = "  error • The getter 'other' isn't defined for the type 'Iap' • lib/b/iap.dart:9:3 • undefined_getter\n  warning • Unused import: 'x.dart' • lib/b/iap.dart:1:8 • unused_import"
+rows = [
+    run(1, "2026-11-01T00:00:00+09:00", "local_pass", [{"outcome": "lint_fail", "error": L1}, {"outcome": "pass"}]),
+    run(2, "2026-11-02T00:00:00+09:00", "fallback", [{"outcome": "lint_fail", "error": L2},
+        {"outcome": "apply_fail", "error": "SEARCH matched 0 times in lib/b/iap.dart:\n  x"},
+        {"outcome": "output_cap"}], "max_attempts"),
+    run(3, "2026-11-03T00:00:00+09:00", "fallback", [], "ineligible:context_too_large"),
+    {"type": "followup", "ts": "2026-11-04T00:00:00+09:00", "issue": 1, "job_id": "j1", "job_final": "local_pass", "event": "loopback-review: null check missing"},
+    {"type": "followup", "ts": "2026-11-04T00:00:00+09:00", "issue": 2, "job_id": "j2", "job_final": "fallback", "event": "loopback-test: x"},
+]
+open(sys.argv[1], "w").write("".join(json.dumps(r) + "\n" for r in rows))
+PY2
+OUT="$(ld "$R" lessons)"
+eq "the same diagnostic in two Issues (different names, places) is one recurring key" "1 [1, 2]" \
+  "$(echo "$OUT" | "$PY" -c 'import json,sys; d=json.loads(sys.stdin.read().split(">>> LOCAL-DEV <<<\n")[-1]); r=d["recurring_diagnostics"]; print(len(r), r[0]["issues"])')"
+eq "…a diagnostic seen in one Issue only is not offered" "False" \
+  "$(echo "$OUT" | "$PY" -c 'import json,sys; d=json.loads(sys.stdin.read().split(">>> LOCAL-DEV <<<\n")[-1]); print(any("unused_import" in r["key"] for r in d["recurring_diagnostics"]))')"
+eq "…nor a runner's summary line" "False" \
+  "$(echo "$OUT" | "$PY" -c 'import json,sys; d=json.loads(sys.stdin.read().split(">>> LOCAL-DEV <<<\n")[-1]); print(any("found" in r["key"] for r in d["recurring_diagnostics"]))')"
+eq "a local pass sent back later is a lesson; a fallback's follow-up is not" "[1]" \
+  "$(echo "$OUT" | "$PY" -c 'import json,sys; d=json.loads(sys.stdin.read().split(">>> LOCAL-DEV <<<\n")[-1]); print([r["issue"] for r in d["rejected_passes"]])')"
+eq "how the model failed to answer is friction, never a lesson" "1 1 1" \
+  "$(echo "$OUT" | "$PY" -c 'import json,sys; f=json.loads(sys.stdin.read().split(">>> LOCAL-DEV <<<\n")[-1])["friction"]; print(f.get("apply_fail:SEARCH matched N times"), f.get("output_cap"), f.get("ineligible:context_too_large"))')"
+eq "--since leaves older runs out" "0 []" \
+  "$(ld "$R" lessons --since 2026-11-02T12:00:00 | "$PY" -c 'import json,sys; d=json.loads(sys.stdin.read().split(">>> LOCAL-DEV <<<\n")[-1]); print(len(d["recurring_diagnostics"]), [r["issue"] for r in d["rejected_passes"]][:0])')"
+eq "no runs.jsonl → an empty lesson set, exit 0" "0 0" \
+  "$(R2="$WORK/rl2"; mkrepo "$R2" 32 "$(LDJSON)"; ld "$R2" lessons | field runs) $?"
+
+# ---------------------------------------------------------------- 8d. agent mode
+echo "== agent mode"
+# tcall NAME ARGS_JSON [NAME ARGS_JSON ...] — one reply with tool calls through the API
+tcall() { "$PY" -c 'import json,sys; a=sys.argv[1:]; print(json.dumps({"content": "", "tool_calls": [{"function": {"name": a[i], "arguments": json.loads(a[i+1])}} for i in range(0, len(a), 2)]}))' "$@" >> "$FAKE/replies.jsonl"; }
+treply() { "$PY" -c 'import json,sys; d={"content": sys.argv[1], "done_reason": sys.argv[2]}; d.update({"thinking": sys.argv[3]} if len(sys.argv)>3 else {}); print(json.dumps(d))' "$@" >> "$FAKE/replies.jsonl"; }
+AG='{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000}'
+EDIT_OK='{"path": "impl.txt", "search": "status = BROKEN", "replace": "status = FIXED"}'
+tool_results() { "$PY" -c 'import json,sys; m=json.load(open(sys.argv[1]))["messages"]; print("\n=====\n".join(x["content"] for x in m if x["role"]=="tool"))' "$FAKE/last_request.json"; }
+transcript_tools() { "$PY" -c 'import json,sys; print("\n=====\n".join(json.loads(l)["content"] for l in open(sys.argv[1]) if json.loads(l)["role"]=="tool"))' "$1/$(ld "$1" status --issue "$2" --last | field job_dir)/transcript.jsonl"; }
+
+R="$WORK/ra1"; mkrepo "$R" 41 "$(LDJSON "$AG")"; : > "$FAKE/replies.jsonl"
+tcall read_file '{"path": "impl.txt"}'; tcall edit_file "$EDIT_OK"; tcall run_tests '{}'
+OUT="$(start "$R" 41 >/dev/null; waitjob "$R" 41)"
+eq "agent: read → edit → run_tests green → local_pass" "local_pass agent status = FIXED" "$(echo "$OUT" | field state) $(echo "$OUT" | field mode) $(cat "$R/impl.txt")"
+eq "…every request carries the tools and keep_alive, reasoning off by default" "5 30m False" \
+  "$("$PY" -c 'import json,sys; r=json.load(open(sys.argv[1])); print(len(r["tools"]), r["keep_alive"], r["think"])' "$FAKE/last_request.json")"
+eq "…runs.jsonl: mode agent, three turns, one final check" "agent 3 pass False" "$(lastrun "$R" mode) $(lastrun "$R" turns | "$PY" -c 'import ast,sys; print(len(ast.literal_eval(sys.stdin.read())))') $(lastrun "$R" attempts.0.outcome) $(lastrun "$R" attempts.0.intermediate)"
+grep -q "status = BROKEN" "$R/$(echo "$OUT" | field job_dir)/transcript.jsonl" && ok "…the transcript keeps what the model read" || bad "transcript" "read result" "missing"
+eq "a oneshot request sends no keep_alive (oneshot unchanged)" "None" \
+  "$(R2="$WORK/ra1b"; mkrepo "$R2" 42 "$(LDJSON)"; : > "$FAKE/replies.jsonl"; reply "$FIX_BLOCK"; start "$R2" 42 >/dev/null; waitjob "$R2" 42 >/dev/null; "$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("keep_alive"))' "$FAKE/last_request.json")"
+
+# what the tools refuse
+R="$WORK/ra2"; mkrepo "$R" 43 "$(LDJSON "$AG")"; : > "$FAKE/replies.jsonl"
+printf 'secret\n' > "$R/untracked.txt"; mkdir -p "$R/.claude/guild/memory/x"; printf 'other job\n' > "$R/.claude/guild/memory/x/p.txt"
+printf 'outside\n' > "$WORK/outside.txt"; ln -s "$WORK" "$R/linkdir"; ln -s .claude "$R/dotlink"
+tcall edit_file '{"path": "other.txt", "search": "keep me", "replace": "changed"}' \
+      edit_file '{"path": "test/impl_test.txt", "search": "v2", "replace": "v3"}' \
+      read_file '{"path": "untracked.txt"}' read_file '{"path": ".claude/guild/memory/x/p.txt"}' \
+      read_file '{"path": "../outside.txt"}' read_file '{"path": "linkdir/outside.txt"}' \
+      read_file '{"path": "dotlink/guild/memory/x/p.txt"}' read_file '{"path": ".GIT/config"}'
+tcall read_file '{"path": "test/impl_test.txt"}' read_file '{"path": ".CLAUDE/guild/memory/x/p.txt"}'
+tcall search '{"pattern": "-Otouch pwned"}' search '{"pattern": "keep", "path": ":(exclude)impl.txt"}' search '{"pattern": "keep", "path": "."}'
+tcall edit_file "$EDIT_OK" run_tests '{}'
+OUT="$(start "$R" 43 >/dev/null; waitjob "$R" 43)"
+T="$(transcript_tools "$R" 43)"
+eq "agent: still passes after the refused calls" "local_pass" "$(echo "$OUT" | field state)"
+eq "…a file outside --files and a test are not editable" "keep me|v2 — expects FIXED" "$(cat "$R/other.txt")|$(cat "$R/test/impl_test.txt")"
+eq "…refusals: untracked, memory dir, ../, symlinked dir, symlink into .claude, .GIT and .CLAUDE case" "7" \
+  "$(echo "$T" | grep -v "(exclude)" | grep -c "not a tracked file\|cannot be read\|outside the repository\|does not exist\|is a directory")"
+echo "$T" | grep -q "secret\|other job\|^outside" && bad "no forbidden content read" "none" "leaked" || ok "…and none of their content reaches the model"
+echo "$T" | grep -q "v2 — expects FIXED" && ok "…a test file can be read" || bad "test readable" "content" "missing"
+[ -e "$R/pwned" ] || [ -e "$R/touch" ] && bad "search pattern as option" "no file" "created" || ok "search: a pattern starting with - is a pattern, not an option"
+echo "$T" | grep -q "other.txt:1:keep me" && ok "…search over . finds tracked text" || bad "search ." "other.txt:1" "$(echo "$T" | grep -n keep | head -3)"
+echo "$T" | grep -q "(exclude)" && ok "…a pathspec-magic path is taken literally (refused)" || bad "pathspec magic" "refused" "$(echo "$T" | sed -n '/exclude/p')"
+
+# edit misses: 0 matches → nearest region; 2 matches → line numbers; near_line picks; CRLF kept
+R="$WORK/ra3"; mkrepo "$R" 44 "$(LDJSON "$AG")"
+"$PY" -c 'import sys; open(sys.argv[1],"w").write("status = BROKEN\n" + "pad\n"*30 + "dup line\n" + "pad\n"*30 + "dup line\n")' "$R/impl.txt"
+git -C "$R" commit -qam dup; : > "$FAKE/replies.jsonl"
+tcall edit_file '{"path": "impl.txt", "search": "status  =  BROKEN\nzzz", "replace": "x"}' \
+      edit_file '{"path": "impl.txt", "search": "dup line", "replace": "one"}' \
+      edit_file '{"path": "impl.txt", "search": "dup line", "replace": "picked", "near_line": 60}'
+tcall edit_file "$EDIT_OK"; tcall run_tests '{}'
+OUT="$(start "$R" 44 >/dev/null; waitjob "$R" 44)"
+T="$(transcript_tools "$R" 44)"
+echo "$T" | grep -q "closest place (line 1)" && ok "edit: 0 matches → the closest region's current text" || bad "nearest" "closest place" "$(echo "$T" | head -3)"
+echo "$T" | grep -q "matches 2 times in impl.txt, starting at lines \[32, 63\]" && ok "…2 matches → their line numbers" || bad "two matches" "[32, 63]" "$(echo "$T" | grep matches)"
+eq "…near_line far enough apart picks the nearest one" "1 picked" "$(grep -c '^dup line$' "$R/impl.txt") $(sed -n 63p "$R/impl.txt")"
+eq "…misses are counted apart from checks" "2 1" "$(lastrun "$R" edit_misses) $(lastrun "$R" attempts | "$PY" -c 'import ast,sys; print(len(ast.literal_eval(sys.stdin.read())))')"
+R="$WORK/ra4"; mkrepo "$R" 45 "$(LDJSON "$AG")"; printf 'status = BROKEN\r\nnext\r\n' > "$R/impl.txt"; git -C "$R" commit -qam crlf; : > "$FAKE/replies.jsonl"
+tcall edit_file '{"path": "impl.txt", "search": "status = BROKEN\nnext", "replace": "status = FIXED\nnext"}' run_tests '{}'
+start "$R" 45 >/dev/null; waitjob "$R" 45 >/dev/null
+eq "edit keeps a CRLF file CRLF, no \\r\\r\\n" "status = FIXED\r\nnext\r\n" "$("$PY" -c 'import sys; print(repr(open(sys.argv[1],"rb").read().decode())[1:-1])' "$R/impl.txt")"
+
+# text replies
+R="$WORK/ra5"; mkrepo "$R" 46 "$(LDJSON "$AG")"; : > "$FAKE/replies.jsonl"
+treply "I think I am done." stop
+treply 'For example {"name": "edit_file", "arguments": {"path": "impl.txt", "search": "status = BROKEN", "replace": "status = FIXED"}} would work.' stop
+treply '<think>maybe <tool_call>{"name": "run_tests", "arguments": {}}</tool_call></think>Now: <tool_call>{"name": "edit_file", "arguments": {"path": "impl.txt", "search": "status = BROKEN", "replace": "status = FIXED"}}</tool_call>' stop
+treply "Done now." stop
+OUT="$(start "$R" 46 >/dev/null; waitjob "$R" 46)"
+eq "text: a call written as <tool_call> after the reasoning runs; a done-claim after an edit triggers the check" "local_pass 1 False" \
+  "$(echo "$OUT" | field state) $(lastrun "$R" attempts | "$PY" -c 'import ast,sys; print(len(ast.literal_eval(sys.stdin.read())))') $(lastrun "$R" attempts.0.intermediate)"
+eq "…a JSON example inside prose is not executed, and an unchanged done-claim runs no check" "None 1" \
+  "$(lastrun "$R" turns.1.text_calls) $(lastrun "$R" turns.2.text_calls)"
+
+# stuck, max_turns, length cut, timeouts
+R="$WORK/ra6"; mkrepo "$R" 47 "$(LDJSON "$AG")"; : > "$FAKE/replies.jsonl"
+for _ in 1 2 3 4 5 6 7; do tcall read_file '{"path": "impl.txt"}'; done
+OUT="$(start "$R" 47 >/dev/null; waitjob "$R" 47)"
+eq "the same read again and again → stuck after 6 turns without progress" "fallback stuck 7" "$(echo "$OUT" | field state) $(echo "$OUT" | field reason) $(lastrun "$R" turns | "$PY" -c 'import ast,sys; print(len(ast.literal_eval(sys.stdin.read())))')"
+grep -q "unchanged — same as your read_file result at turn 1" "$R/$(echo "$OUT" | field job_dir)/transcript.jsonl" && ok "…a repeated read of an intact result is answered by reference" || bad "read dedupe" "reference" "missing"
+R="$WORK/ra7"; mkrepo "$R" 48 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "max_turns": 2}')"; : > "$FAKE/replies.jsonl"
+tcall edit_file '{"path": "impl.txt", "search": "status = BROKEN", "replace": "status = HALF"}'; tcall read_file '{"path": "impl.txt"}'
+OUT="$(start "$R" 48 >/dev/null; waitjob "$R" 48)"
+eq "max_turns → fallback, files restored, the model's diff kept" "fallback max_turns status = BROKEN" "$(echo "$OUT" | field state) $(echo "$OUT" | field reason) $(cat "$R/impl.txt")"
+grep -q "status = HALF" "$R/$(ld "$R" status --issue 48 --last | field last_diff)" && ok "…last-local.diff has the half-done edit" || bad "last diff" "HALF" "missing"
+R="$WORK/ra8"; mkrepo "$R" 49 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "agent_think": true}')"; : > "$FAKE/replies.jsonl"
+treply "" length "PLAN-TAIL the fix is to set FIXED"; tcall edit_file "$EDIT_OK" run_tests '{}'
+OUT="$(start "$R" 49 >/dev/null; waitjob "$R" 49)"
+eq "a turn cut off while reasoning: its tail is carried, reasoning off after" "local_pass False" "$(echo "$OUT" | field state) $(cat "$FAKE/last_think.json" | "$PY" -c 'import json,sys; print(json.load(sys.stdin))')"
+grep -q "PLAN-TAIL" "$FAKE/last_prompt.txt" "$FAKE/last_request.json" && ok "…and the carry reached the next request" || bad "carry" "PLAN-TAIL" "missing"
+R="$WORK/ra9"; mkrepo "$R" 50 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "attempt_timeout_min": 0.02}')"; : > "$FAKE/replies.jsonl"
+reply "slow" stop 3; reply "slow" stop 3
+OUT="$(start "$R" 50 >/dev/null; waitjob "$R" 50 60)"
+eq "two timed-out calls in a row → fallback attempt_timeout" "fallback attempt_timeout" "$(echo "$OUT" | field state) $(echo "$OUT" | field reason)"
+sleep 4; : > "$FAKE/replies.jsonl"
+
+# writes outside the editable set
+R="$WORK/ra10"; mkrepo "$R" 51 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "test_cmd": "sh -c \"mktemp ./stray.XXXXXX >/dev/null; mkdir -p failures; mktemp failures/g.XXXXXX >/dev/null; sh check.sh\" {files}"}')"; : > "$FAKE/replies.jsonl"
+tcall run_tests '{}'; tcall edit_file "$EDIT_OK" run_tests '{}'
+OUT="$(start "$R" 51 >/dev/null; waitjob "$R" 51)"
+eq "a check's new untracked files are moved into the job folder; baseline artifacts may change — no fallback" "local_pass" "$(echo "$OUT" | field state)"
+eq "…none left in the tree" "" "$(git -C "$R" status --porcelain -- . ':!.claude' | grep -v '^ M impl.txt' | grep -v '^M  impl.txt')"
+[ -n "$(ls "$R/$(echo "$OUT" | field job_dir)/stray" 2>/dev/null)" ] && ok "…they are kept under stray/" || bad "stray kept" "files" "none"
+eq "…a green check that lost a file is run again before it counts" "1" "$(lastrun "$R" rechecked)"
+eq "…and the leader sees what was moved" "True" "$(echo "$OUT" | "$PY" -c 'import json,sys; d=json.loads(sys.stdin.read().split(">>> LOCAL-DEV <<<\n")[-1]); print(bool(d.get("stray")))')"
+R="$WORK/ra11"; mkrepo "$R" 52 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "test_cmd": "sh -c \"grep -q FIXED impl.txt && echo hacked > other.txt; sh check.sh\" {files}"}')"; : > "$FAKE/replies.jsonl"
+tcall edit_file "$EDIT_OK" run_tests '{}'
+OUT="$(start "$R" 52 >/dev/null; waitjob "$R" 52)"
+eq "a check that changes a tracked file → fallback out_of_scope_write, the file put back" "fallback out_of_scope_write keep me other.txt" \
+  "$(echo "$OUT" | field state) $(echo "$OUT" | field reason) $(cat "$R/other.txt") $(echo "$OUT" | field out_of_scope.0)"
+R="$WORK/ra12"; mkrepo "$R" 53 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "test_cmd": "sh -c \"date +%N >> other.txt; sh check.sh\" {files}"}')"; : > "$FAKE/replies.jsonl"
+tcall edit_file "$EDIT_OK" run_tests '{}'
+OUT="$(start "$R" 53 >/dev/null; waitjob "$R" 53)"
+eq "a tracked file the runner changes every run (baseline too, like a lock file) — reference is after baseline" "fallback out_of_scope_write" "$(echo "$OUT" | field state) $(echo "$OUT" | field reason)"
+R="$WORK/ra12b"; mkrepo "$R" 54 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "test_cmd": "sh -c \"echo lock > other.txt; sh check.sh\" {files}"}')"; : > "$FAKE/replies.jsonl"
+tcall edit_file "$EDIT_OK" run_tests '{}'
+eq "…one the baseline already changed the same way is not a fallback" "local_pass" "$(start "$R" 54 >/dev/null; waitjob "$R" 54 | field state)"
+
+# the unattended ticket is let go while checks run
+R="$WORK/ra13"; mkrepo "$R" 55 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "test_cmd": "sh -c \"ls \\\"$GLD_LOCAL_DEV_QUEUE_DIR\\\" | grep -c ticket >> tickets.log; sh check.sh\" {files}"}')"
+printf 'tickets.log\n' >> "$R/.git/info/exclude"; : > "$FAKE/replies.jsonl"
+tcall edit_file "$EDIT_OK" run_tests '{}'
+start "$R" 55 >/dev/null; waitjob "$R" 55 >/dev/null
+eq "unattended: no ticket is held while the checks run" "0" "$(sort -u "$R/tickets.log" | tr '\n' ' ' | xargs)"
+: > "$FAKE/tickets_at_call"; : > "$FAKE/ticket_names"; R="$WORK/ra13b"; mkrepo "$R" 63 "$(LDJSON "$AG")"; : > "$FAKE/replies.jsonl"
+tcall read_file '{"path": "impl.txt"}'; tcall edit_file "$EDIT_OK"; tcall run_tests '{}'
+start "$R" 63 >/dev/null; waitjob "$R" 63 >/dev/null
+eq "…and one is held during every model turn" "1" "$(sort -u "$FAKE/tickets_at_call" | tr '\n' ' ' | xargs)"
+eq "…the same ticket across consecutive turns (not re-taken per call — the prefix cache)" "1" "$(sort -u "$FAKE/ticket_names" | grep -c .)"
+
+# context: one batched elision, a re-read of an elided result gets the text again
+R="$WORK/ra14"; mkrepo "$R" 56 "$(LDJSON '{"mode": "agent", "num_ctx": 40000, "max_output_tokens": 1000, "max_turns": 14}')"
+"$PY" -c 'import sys; open(sys.argv[1],"w").write("status = BROKEN\n" + "".join(f"line {i} " + "x"*90 + "\n" for i in range(2,1300)))' "$R/impl.txt"
+git -C "$R" commit -qam big; : > "$FAKE/replies.jsonl"
+for s in 1 101 201 301 401 501 601 701 801 901 1001; do tcall read_file "{\"path\": \"impl.txt\", \"start_line\": $s, \"end_line\": $((s+99))}"; done
+tcall read_file '{"path": "impl.txt", "start_line": 1, "end_line": 100}'; tcall edit_file "$EDIT_OK" run_tests '{}'
+OUT="$(start "$R" 56 >/dev/null; waitjob "$R" 56)"
+eq "agent: many reads in a small num_ctx still pass (old results elided)" "local_pass" "$(echo "$OUT" | field state)"
+grep -q "elided to save context" "$FAKE/last_request.json" && ok "…old tool results were elided" || bad "elision" "marker" "none"
+eq "…and a re-read of an elided result returns the text, not a reference" "True" \
+  "$("$PY" -c 'import json,sys; t=[m["content"] for m in json.load(open(sys.argv[1]))["messages"] if m["role"]=="tool"]; print(any("     1| status = BROKEN" in x for x in t[-3:]))' "$FAKE/last_request.json")"
+eq "…elision happened in one batch, not every turn" "1" "$(lastrun "$R" turns | "$PY" -c 'import ast,sys; print(sum(1 for t in ast.literal_eval(sys.stdin.read()) if t.get("elided")))')"
+
+# eligibility and config
+R="$WORK/ra15"; mkrepo "$R" 57 "$(LDJSON "$AG")"; echo "completion" > "$FAKE/caps"
+eq "a model without tools → ineligible:model_no_tools" "ineligible:model_no_tools" "$(start "$R" 57 | field reason)"
+echo "none" > "$FAKE/caps"; ld "$R" ack --issue 57 >/dev/null
+eq "…also when Ollama lists no capabilities at all" "ineligible:model_no_tools" "$(start "$R" 57 | field reason)"
+rm -f "$FAKE/caps"
+R="$WORK/ra16"; mkrepo "$R" 58 "$(LDJSON '{"mode": "agent", "num_ctx": 20000, "max_output_tokens": 1000}')"
+eq "agent with a num_ctx too small for its working room → ineligible:context_too_large (not a config error)" "ineligible:context_too_large" "$(start "$R" 58 | field reason)"
+R="$WORK/ra17"; mkrepo "$R" 59 "$(LDJSON '{"mode": "auto", "num_ctx": 40000, "max_output_tokens": 1000}')"; : > "$FAKE/replies.jsonl"; reply "$FIX_BLOCK"
+eq "auto: a job that fits one-shot runs one-shot" "oneshot" "$(start "$R" 59 | field mode)"; waitjob "$R" 59 >/dev/null
+R="$WORK/ra18"; mkrepo "$R" 60 "$(LDJSON '{"mode": "auto", "num_ctx": 40000, "max_output_tokens": 1000}')"
+"$PY" -c 'import sys; open(sys.argv[1],"w").write("status = BROKEN\n" + "y"*100000 + "\n")' "$R/impl.txt"; git -C "$R" commit -qam big; : > "$FAKE/replies.jsonl"
+tcall edit_file "$EDIT_OK" run_tests '{}'
+eq "auto: a file too big for one-shot runs as agent" "agent" "$(start "$R" 60 | field mode)"; waitjob "$R" 60 >/dev/null
+for bad_cfg in '{"mode": "swarm"}' '{"max_turns": 0}' '{"agent_think": "no"}'; do
+  R="$WORK/ra19"; rm -rf "$R"; mkrepo "$R" 61 "$(LDJSON "$bad_cfg")"; start "$R" 61 >/dev/null 2>&1
+  eq "config $bad_cfg → exit 65" "65" "$?"
+done
+
+# more agent behaviour
+R="$WORK/ra21"; mkrepo "$R" 64 "$(LDJSON "$AG")"; : > "$FAKE/empty.txt"; cp "$FAKE/empty.txt" "$R/empty.txt"; printf 'caf\xe9\n' > "$R/latin.txt"
+git -C "$R" add empty.txt latin.txt; git -C "$R" commit -qm extra; : > "$FAKE/replies.jsonl"
+tcall read_file '{"path": "empty.txt"}' read_file '{"path": "impl.txt", "start_line": "abc"}' search '{"pattern": "x", "context": "x"}' read_file '{"path": "impl.txt", "start_line": 1e400}'
+"$PY" -c 'import json; print(json.dumps({"content": "", "tool_calls": [{"function": {"name": ["read_file"], "arguments": {}}}, {"function": {"name": "edit_file", "arguments": {"path": "impl.txt", "search": "status = BROKEN", "replace": "status = FIXED", "near_line": True}}}, "junk"]}))' >> "$FAKE/replies.jsonl"
+tcall edit_file "$EDIT_OK" run_tests '{}'
+OUT="$(start "$R" 64 >/dev/null; waitjob "$R" 64)"
+T="$(transcript_tools "$R" 64)"
+eq "bad arguments, an empty file, an odd tool name: error strings, the job goes on and passes" "local_pass" "$(echo "$OUT" | field state)"
+echo "$T" | grep -q "empty.txt is empty (0 lines)" && ok "…an empty file reads as empty" || bad "empty read" "0 lines" "$(echo "$T" | head -2)"
+eq "…each bad argument named back to the model" "5" "$(echo "$T" | grep -c "must be an integer\|unknown tool")"
+echo "$T" | grep -q "edited impl.txt. Lines 1-1 now:" && echo "$T" | grep -q "     1| status = FIXED" && ok "…an applied edit returns the region with its line numbers" || bad "edit reply" "Lines 1-1 + numbered" "$(echo "$T" | grep -A2 edited)"
+R="$WORK/ra22"; mkrepo "$R" 65 "$(LDJSON "$AG")"
+"$PY" -c 'import sys; open(sys.argv[1],"w").write("status = BROKEN\n" + "dup line\n" + "pad\n"*5 + "dup line\n" + "a\nb\nc\n")' "$R/impl.txt"; git -C "$R" commit -qam dup2; : > "$FAKE/replies.jsonl"
+tcall edit_file '{"path": "impl.txt", "search": "dup line", "replace": "z", "near_line": 2}' edit_file '{"path": "impl.txt", "search": "a\n", "replace": "A\n"}' edit_file '{"path": "impl.txt", "search": "b\n", "replace": "B\n"}' edit_file '{"path": "impl.txt", "search": "c\n", "replace": "C\n"}'
+tcall edit_file "$EDIT_OK"; tcall run_tests '{}'
+OUT="$(start "$R" 65 >/dev/null; waitjob "$R" 65)"
+eq "near_line too close to the other match is not applied" "2" "$(grep -c '^dup line$' "$R/impl.txt")"
+eq "three edits without run_tests → one automatic check, marked intermediate" "red True" \
+  "$(lastrun "$R" attempts.0.outcome | sed 's/test_fail/red/') $(lastrun "$R" attempts.0.intermediate)"
+R="$WORK/ra23"; mkrepo "$R" 67 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "max_turns": 3}')"
+printf '#!/bin/sh\n[ -L impl.txt ] || { rm impl.txt; ln -s other.txt impl.txt; }\nexit 1\n' > "$WORK/linkit.sh"
+J="$(printf '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "max_turns": 2, "test_cmd": "sh %s {files}"}' "$WORK/linkit.sh")"
+R="$WORK/ra23"; rm -rf "$R"; mkrepo "$R" 67 "$(LDJSON "$J")"; : > "$FAKE/replies.jsonl"
+tcall edit_file "$EDIT_OK"; tcall edit_file "$EDIT_OK"
+OUT="$(start "$R" 67 >/dev/null; waitjob "$R" 67)"
+grep -q "not a plain file\|not editable" "$R/$(echo "$OUT" | field job_dir)/transcript.jsonl" && ok "edit_file refuses a --files path a check turned into a symlink" || bad "symlink edit" "refused" "$(tail -2 "$R/$(echo "$OUT" | field job_dir)/transcript.jsonl")"
+eq "…the link target is untouched and the file is remade at fallback" "keep me regular status = BROKEN" "$(cat "$R/other.txt") $([ -L "$R/impl.txt" ] && echo link || echo regular) $(cat "$R/impl.txt")"
+R="$WORK/ra24"; mkrepo "$R" 68 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "agent_think": true, "attempt_timeout_min": 0.02}')"; : > "$FAKE/replies.jsonl"
+reply "slow" stop 3; tcall edit_file "$EDIT_OK" run_tests '{}'
+OUT="$(start "$R" 68 >/dev/null; waitjob "$R" 68 60)"
+eq "one timed-out call: a shorter retry with reasoning off, then a pass" "local_pass False" "$(echo "$OUT" | field state) $("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["think"])' "$FAKE/last_request.json")"
+grep -q "The previous call failed (attempt_timeout)" "$FAKE/last_request.json" && ok "…the retry says why" || bad "timeout note" "present" "missing"
+sleep 3; : > "$FAKE/replies.jsonl"
+AGENT_PY="$HERE/../skills/gld/commands/atoms"
+eq "check signature ignores timings (jest ms, dart reporter clock)" "True True" "$("$PY" -c '
+import sys; sys.path.insert(0, sys.argv[1]); import local_dev_agent as a
+j1 = a.check_signature("test_fail", "  ✕ adds (3 ms)\n  ✕ subs (12 ms)")
+j2 = a.check_signature("test_fail", "  ✕ adds (7 ms)\n  ✕ subs (1 ms)")
+d1 = a.check_signature("test_fail", "00:03 +1 -1: x [E]\nSome tests failed.")
+d2 = a.check_signature("test_fail", "01:09 +1 -1: x [E]\nSome tests failed.")
+print(j1 == j2, d1 == d2)' "$AGENT_PY")"
+eq "lessons ignore an agent's intermediate checks" "0" "$(R2="$WORK/rl3"; mkrepo "$R2" 69 "$(LDJSON)"; mkdir -p "$R2/.claude/guild/memory/local-dev"
+  "$PY" -c 'import json,sys
+L = "  error • The getter x isnt defined • lib/a.dart:1:1 • undefined_getter"
+rows = [{"type": "run", "ts": "t", "issue": i, "final": "local_pass", "mode": "agent", "attempts": [{"outcome": "lint_fail", "error": L, "intermediate": True}, {"outcome": "pass", "intermediate": False}]} for i in (1, 2)]
+open(sys.argv[1], "w").write("".join(json.dumps(r) + "\n" for r in rows))' "$R2/.claude/guild/memory/local-dev/runs.jsonl"
+  ld "$R2" lessons | "$PY" -c 'import json,sys; print(len(json.loads(sys.stdin.read().split(">>> LOCAL-DEV <<<\n")[-1])["recurring_diagnostics"]))')"
+eq "restore: a symlinked parent (even inside the repo) is not written through → restore_failed" "['lib/a.txt'] other-content" "$("$PY" -c '
+import os, sys, tempfile; sys.path.insert(0, sys.argv[1]); import local_dev as ld
+r = tempfile.mkdtemp(); jd = os.path.join(r, "job")
+os.makedirs(os.path.join(jd, "originals", "lib")); open(os.path.join(jd, "originals", "lib", "a.txt"), "w").write("orig")
+os.makedirs(os.path.join(r, "other")); open(os.path.join(r, "other", "a.txt"), "w").write("other-content")
+os.symlink("other", os.path.join(r, "lib"))
+print(ld.restore(r, jd, ["lib/a.txt"]), open(os.path.join(r, "other", "a.txt")).read())' "$AGENT_PY")"
+eq "restore: a removed parent is made again; a directory in the file's place is restore_failed, not a crash" "['b.txt'] o" "$("$PY" -c '
+import os, sys, tempfile; sys.path.insert(0, sys.argv[1]); import local_dev as ld
+r = tempfile.mkdtemp(); jd = os.path.join(r, "job")
+for f in ("x/a.txt", "b.txt"):
+    os.makedirs(os.path.dirname(os.path.join(jd, "originals", f)), exist_ok=True); open(os.path.join(jd, "originals", f), "w").write("o")
+os.makedirs(os.path.join(r, "b.txt"))
+print(ld.restore(r, jd, ["x/a.txt", "b.txt"]), open(os.path.join(r, "x", "a.txt")).read())' "$AGENT_PY")"
+
+R="$WORK/ra25"; mkrepo "$R" 70 "$(LDJSON "$AG")"; ln "$R/impl.txt" "$WORK/hardlink.txt"
+eq "agent: a hardlinked --files entry is ineligible (its edits would reach the link)" "ineligible:file_hardlinked:impl.txt" "$(start "$R" 70 | field reason)"
+R="$WORK/ra26"; mkrepo "$R" 71 "$(LDJSON "$AG")"; printf 'impl.txt\n' >> "$R/.gitignore"; git -C "$R" add .gitignore; git -C "$R" commit -qm ign; : > "$FAKE/replies.jsonl"
+tcall read_file '{"path": "impl.txt"}' edit_file "$EDIT_OK" run_tests '{}'
+eq "an ignore pattern over a tracked --files entry does not lock the model out of it" "local_pass" "$(start "$R" 71 >/dev/null; waitjob "$R" 71 | field state)"
+eq "a dead agent worker's scope is settled by listing, never by putting files back" "changed-later ['other.txt']" "$("$PY" - "$AGENT_PY" <<'PY2'
+import json, os, subprocess, sys, tempfile
+sys.path.insert(0, sys.argv[1]); import local_dev as ld, local_dev_agent as ag
+r = tempfile.mkdtemp(); g = lambda *a: subprocess.run(["git", "-C", r, *a], capture_output=True)
+g("init", "-q"); open(os.path.join(r, "other.txt"), "w").write("keep\n"); open(os.path.join(r, "impl.txt"), "w").write("x\n")
+g("add", "-A"); g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "b")
+jd = os.path.join(r, ".claude", "guild", "memory", "local-dev", "1", "j"); os.makedirs(jd)
+job = {"files": ["impl.txt"], "tests": []}
+sc = ag.Scope(ld, r, jd, job); sc.before_baseline(); sc.after_baseline()
+open(os.path.join(r, "other.txt"), "w").write("changed-later\n")   # a human, after the worker died
+ag.settle_scope(ld, r, jd, job)
+print(open(os.path.join(r, "other.txt")).read().strip(), job.get("restore_failed"))
+PY2
+)"
+eq "outline: typed and untyped methods in, calls and test DSL out" "class A|  int add(int a) {|    render() {|  const A({super.key});|const useX = () => {" "$("$PY" - "$AGENT_PY" <<'PY2'
+import sys; sys.path.insert(0, sys.argv[1]); import local_dev_agent as ag
+src = """class A {
+  const A({super.key});
+  int add(int a) {
+    setState(() {
+    });
+    showDialog(
+    return a;
+  }
+    render() {
+  it('works', () => {
+}
+const useX = () => {
+"""
+got = [l for _, l in ag.outline_lines(src)]
+want = ["class A {", "  int add(int a) {", "    render() {", "  const A({super.key});", "const useX = () => {"]
+print("|".join(w.rstrip(" {") if w == "class A {" else w for w in want) if sorted(got) == sorted(want) else got)
+PY2
+)"
+
+# restore never writes through a planted symlink (all modes)
+printf 'precious\n' > "$WORK/precious.txt"
+printf '#!/bin/sh\ngrep -q FIXED impl.txt && { rm impl.txt; ln -s "$1" impl.txt; }\nexit 1\n' > "$WORK/swap.sh"
+J="$(printf '{"max_attempts": 1, "test_cmd": "sh %s %s {files}"}' "$WORK/swap.sh" "$WORK/precious.txt")"
+R="$WORK/ra20"; mkrepo "$R" 62 "$(LDJSON "$J")"
+chmod 755 "$R/impl.txt"; git -C "$R" commit -qam mode; : > "$FAKE/replies.jsonl"; reply "$FIX_BLOCK"
+OUT="$(start "$R" 62 >/dev/null; waitjob "$R" 62)"
+eq "a fallback after a check swapped a file for a symlink: link removed, file remade, target untouched" "fallback regular status = BROKEN precious" \
+  "$(echo "$OUT" | field state) $([ -L "$R/impl.txt" ] && echo link || echo regular) $(cat "$R/impl.txt") $(cat "$WORK/precious.txt")"
+eq "…with its mode kept" "755" "$(stat -f %Lp "$R/impl.txt" 2>/dev/null || stat -c %a "$R/impl.txt")"
+
+# report and lessons
+printf '%s\n' '{"type": "run", "issue": 1, "final": "local_pass", "attempts": [{"outcome": "pass"}]}' >> "$WORK/ra14/.claude/guild/memory/local-dev/runs.jsonl"
+eq "report splits by mode; a line without mode counts as oneshot; agent checks stay out of the top-level outcomes" "1 1 1" \
+  "$(ld "$WORK/ra14" report | "$PY" -c 'import json,sys; d=json.loads(sys.stdin.read().split(">>> LOCAL-DEV <<<\n")[-1]); print(d["by_mode"]["agent"]["runs"], d["by_mode"]["oneshot"]["runs"], sum(d["attempt_outcomes"].values()))')"
+: > "$FAKE/replies.jsonl"
 
 # ---------------------------------------------------------------- 9. report + usage
 echo "== report"

@@ -139,6 +139,10 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
   "attempt_timeout_min": 20,
   "total_timeout_min": 60,
   "num_ctx": 65536,
+  "persona": true,
+  "mode": "oneshot",
+  "max_turns": 30,
+  "agent_think": false,
   "test_cmd": "<runner> {files}",
   "lint_cmd": null
 }
@@ -182,6 +186,37 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
   (`num_ctx` 65536) leave both in full for prompts up to about 30k tokens. Earlier attempts'
   edits stay in the files, so each attempt re-checks the fit and shortens the tail, then the
   cap; a job whose files outgrow `num_ctx` falls back with `context_overflow`.
+- `persona` (default `true`) hands the model the part of `.claude/agents/developer.md` below
+  `<!-- guild:persona:end -->` — the project specifics and the habits `evolve` grows — so a
+  lesson learned by the developer role reaches the local model too. The template part above the
+  marker (stages, hand-offs, return lines) is the Sonnet developer's own workflow and is never
+  sent. It is copied into the job at start (an `evolve` mid-job changes nothing) and is
+  guidance, not material: a part over 8,000 characters is left out whole (`too_long`), one that
+  would make the job `context_too_large` is left out (`no_room`), and a prompt grown by earlier
+  edits drops it before the cap shrinks (`dropped`). `runs.jsonl` records which (`persona`, and
+  per attempt) — compare pass rates with it on and off before trusting it. The other half of
+  the loop: `evolve` reads `local_dev.py lessons` (a diagnostic recurring across Issues, a local
+  pass sent back later) and may grow it into a developer habit there — which this then sends.
+- `mode` — `"oneshot"` (default): one request with the implementation files whole, SEARCH/REPLACE
+  blocks back, up to `max_attempts`. `"agent"`: the model works in turns through tools —
+  `read_file`/`outline`/`search` over files git tracks, `edit_file` on the `--files` only,
+  `run_tests` — so a large file is read in parts instead of sent whole (`local_dev_agent.py`).
+  `"auto"`: oneshot, and agent only for a job oneshot finds `context_too_large`. ⚠ The agent mode
+  is **experimental** — keep `oneshot` until its measurements (cache reuse, pass rate, time) are in.
+  It needs a model Ollama lists with the `tools` capability (`ineligible:model_no_tools`) and
+  room to work beside the first message (~28k tokens — `num_ctx` 131072 is the practical
+  setting; too small → `context_too_large`). `max_turns` (default 30) bounds its model calls;
+  `agent_think` (default `false`) turns reasoning on for its turns (14 tok/s makes each reasoned
+  turn minutes long). `max_attempts` and `max_output_tokens_retry` do not apply to it, and its
+  `attempt_count` counts check runs. Its own fallbacks: `max_turns`, `stuck` (six turns without
+  progress, or six missed edits on one file), `attempt_timeout` (two timed-out calls in a row),
+  `out_of_scope_write` (a check run changed a tracked file outside `--files` and the tests — put
+  back, listed as `out_of_scope`; a new untracked file is moved into the job folder's `stray/`
+  instead). An attended agent job holds the model to its end like any attended job; an
+  unattended one holds it across consecutive model turns (the prefix cache) and lets go while
+  its checks run and after 15 minutes. A human must not edit the checkout while a job runs.
+- `restore_failed` (any mode): a file the job must put back was replaced by a directory or now
+  sits under a path leading out of the repo — the leader hands the Issue to a human.
 - `report` warns when, at the speed it observed, `max_output_tokens_retry` cannot be generated
   within `attempt_timeout_min` (raise that, or lower the cap); `raised_cap_outcomes` shows
   whether the raised attempts actually pass, `observed_tok_per_s` the measured speed.
@@ -197,6 +232,6 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
   non-integer `num_ctx`) makes every call exit 65 — the leader records a `tool error` fallback.
 
 ## Notes
-- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, visual{baselines[], tests[], matchers[], packages[], config_files[], runnable, env, create, run_file}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, refactor_slot, history[], board, window}, local_developer{enabled, model, ollama_url, max_attempts, max_output_tokens, max_output_tokens_retry, attempt_timeout_min, total_timeout_min, num_ctx, test_cmd, lint_cmd} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
+- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, visual{baselines[], tests[], matchers[], packages[], config_files[], runnable, env, create, run_file}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, refactor_slot, history[], board, window}, local_developer{enabled, model, ollama_url, max_attempts, max_output_tokens, max_output_tokens_retry, attempt_timeout_min, total_timeout_min, num_ctx, persona, mode, max_turns, agent_think, test_cmd, lint_cmd} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
 - `roles` is edited by init (and by evolve HR later), not by `config` in M1 — editing the active roster manually is possible but unsupported as a config command yet.
 - `commands` (test/lint/typecheck/build/e2e/vrt), `visual.*`, `sprint.capacity`/`sprint.history` and `sprint.board` have the **same gap** (⚠ `sprint.window` does **not** — it has a `--window=` setter): they are part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for them (`sprint.max_stack_depth` and `sprint.refactor_slot` do have one) — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.
