@@ -127,7 +127,7 @@ for p in glob.glob(os.path.join(skill, "**", "*.md"), recursive=True):
     for ref in set(re.findall(r"`(?:<<SKILL_DIR>>/)?(?:commands/)?(atoms/_[a-z_]+\.md)`", open(p).read())):
         check(os.path.exists(os.path.join(skill, "commands", ref)), "%s → %s exists" % (os.path.relpath(p, skill), ref))
 IMPLEMENTED_CMDS = {"help", "init", "config", "update", "source", "brief", "script", "verify", "make", "board", "render", "copy", "status", "resume",
-                    "abandon"}  # M1c–M1i
+                    "abandon", "platform"}  # M1c–M1i; platform 0.2.1
 for c in files - IMPLEMENTED_CMDS:
     check("Not implemented yet" in open(os.path.join(skill, "commands", c + ".md")).read(),
           "commands/%s.md says not implemented yet" % c)
@@ -177,11 +177,12 @@ guards = {b for p in glob.glob(os.path.join(skill, "**", "*.md"), recursive=True
           for b in re.findall(r"<!-- studio:guard-refusal -->\n(.*?)\n<!-- /studio:guard-refusal -->", open(p).read(), re.S)}
 check(len(guards) == 1, "guard-refusal (INV9) blocks are identical")
 # 0.0.25 (P11, P14): a refusal that says "This is not a stop" is followed — in every block, the contract and every role
+# (17 blocks from 0.2.1: platform.md has one)
 NOT_A_STOP = ("Exception: when the refusal itself says 'This is not a stop', do what it says — that is not reaching the "
               "same effect another way.")
 _nblocks = [b for p in glob.glob(os.path.join(skill, "**", "*.md"), recursive=True)
             for b in re.findall(r"<!-- studio:guard-refusal -->\n(.*?)\n<!-- /studio:guard-refusal -->", open(p).read(), re.S)]
-check(len(_nblocks) == 16 and all(NOT_A_STOP in " ".join(b.replace(">", " ").split()) for b in _nblocks),
+check(len(_nblocks) == 17 and all(NOT_A_STOP in " ".join(b.replace(">", " ").split()) for b in _nblocks),
       "every guard-refusal block (%d) holds the exception sentence" % len(_nblocks))
 READ_WRITE = ("Read files with Read and write your outputs (if any) with Write or Edit. Never use `python -c`, heredocs "
               "or generator scripts for file work: the guard refuses them. For ids, lists and skeletons use the Studio "
@@ -427,12 +428,12 @@ LEGACY_DEPS_HEAD = {
 # commit/video.py lazily, and video.py loads credits.py; the closure test below runs them). Intended changes since
 # d2028cc, each with a one-line reason:
 LEGACY_DEPS_CHANGED = {
-    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26 · 0.1.2: SCRIPTS_VERSION 27 · 0.2.0: SCRIPTS_VERSION 28",
+    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26 · 0.1.2: SCRIPTS_VERSION 27 · 0.2.0: SCRIPTS_VERSION 28 · 0.2.1: 29",
     "stdo/commit/approvals.py": "0.2.0: light_check(local_done=True) for a local video's done (the default unchanged)",
     "stdo/commit/video.py": "0.2.0: the copy path through stdo/vpaths.py (unchanged for a public video); a public "
                             "video's assets.json from a check_scope without the internal flag is not checked",
     "stdo/hooks/templates.py": "0.1.1 (fix-0029 §2): the shim's hint names hooks.py install only",
-    "stdo/state/labels.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
+    "stdo/state/labels.py": "0.1.1 (fix-0029 §3): no milestone names in messages · 0.2.1: the 플랫폼 <h12> label",
     "stdo/commit/kinds.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
     "stdo/commit/harness.py": "0.1.1 (fix-0029 §3): no milestone names in messages · 0.1.2 (fix-0102 §2.4): "
                               "std-auditor.md is a protected persona",
@@ -445,7 +446,8 @@ LEGACY_DEPS_CHANGED = {
     "stdo/state/router.py": "0.1.2 (fix-0102 §1.6): ① binds the teaching notes",
     "stdo/state/schema.py": "0.1.2 (fix-0102 §1.6): ① binds the teaching notes · 0.2.0: four kinds, platform_ok "
                             "by name only",
-    "stdo/setup/labels.py": "0.1.2 (fix-0102 §2): agent-model set is a 설정 command",
+    "stdo/setup/labels.py": "0.1.2 (fix-0102 §2): agent-model set is a 설정 command · 0.2.1: platform "
+                            "apply|remove need 플랫폼 <h12>",
     "stdo/state/store.py": "0.0.28 (fix-0028 §1.1): video_dir refuses an id that is not a video id (exit 2)",
 }
 for _f, _h in sorted(LEGACY_DEPS_HEAD.items()):
@@ -486,7 +488,8 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "28", "SCRIPTS_VERSION is 28 (0.2.0: four video kinds, a local video's files under "
+check(sv and sv.group(1) == "29", "SCRIPTS_VERSION is 29 (0.2.1: platform rules v2 — distribute/rules.py and check.py, "
+      "record-brief's unchecked-platform warning; 0.2.0: four video kinds, a local video's files under "
       "<sr>/local/ (vpaths.py), per-scope checks, local done; 0.1.2: teaching notes — claims/ with the new notes.py, "
       "distribute/factcheck.py, state/ gates, collect, tuples, router, schema — and role models in commit/ summary, "
       "values, harness; 0.1.1: hooks/ as a whole — the shim's hint in "
@@ -607,7 +610,15 @@ _fm = re.match(r"---\n(.*?)\n---\n", _skill_md, re.S)
 _rules = re.findall(r"(?m)^  - '(.*)'$", _fm.group(1).split("allowed-tools:", 1)[1]) if _fm and \
     "allowed-tools:" in _fm.group(1) else []
 _rule = 'Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" doc *)'
-check(_rules == [_rule], "SKILL.md allowed-tools is exactly %s (%s)" % (_rule, _rules))
+# 0.2.1: the read-only platform lines (no prompt; platform.md runs them exactly so)
+_platform_rules = ['Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" platform list)',
+                   'Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" platform preview *)']
+check(_rules == [_rule] + _platform_rules, "SKILL.md allowed-tools is exactly %s (%s)"
+      % ([_rule] + _platform_rules, _rules))
+_pm = open(os.path.join(skill, "commands", "platform.md")).read()
+check('`python3 "<<SKILL_DIR>>/scripts/setup.py" platform list`' in _pm and
+      '`python3 "<<SKILL_DIR>>/scripts/setup.py" platform preview <name>`' in _pm,
+      "platform.md runs platform list and platform preview as the allowed-tools patterns spell them")
 _body = _skill_md[_fm.end():] if _fm else _skill_md
 _prefix = _rule[len("Bash("):-len("*)")]
 check(_body.count(_prefix + "<name>") >= 2, "SKILL.md runs the same quoted command as its rule (%s<name>)" % _prefix)

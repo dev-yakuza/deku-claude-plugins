@@ -230,8 +230,13 @@ def _next(state, lang, ctx, o, providers):
         res["frontmatter"] = fm_lines
     src_line = None
     if enter == "copy" and not (d.done or d.stop or d.held) and d.enter not in ("refused", "null-hash"):
+        from ..distribute import rules as rules_mod
         from ..distribute.check import source_line
-        src_line = source_line(ctx["repo"], state, lang)  # 0.0.28 Q11: the description's source link line
+        try:  # the platform's rules may say the description has no link (link: none)
+            link = rules_mod.read(ctx["repo"], platform)[0]["link"]
+        except rules_mod.RulesProblem:
+            link = "body"  # validate_copy reports the rules
+        src_line = source_line(ctx["repo"], state, lang) if link == "body" else None  # 0.0.28 Q11
         if src_line:
             res["source_line"] = src_line
     # 0.0.28 Q15: the steps the person asked to be asked before
@@ -312,6 +317,22 @@ def brief_path(src, vdir, cwd):
     return p
 
 
+def audience_missing(repo, platform, want, kind):
+    """The refusal for a platform file without `audience`: the exact lines a person adds or changes."""
+    from ..distribute import rules as rules_mod
+    lines = ["audience: %s" % want]
+    try:
+        with open(rules_mod.path(repo, platform), encoding="utf-8") as f:
+            outs = rules_mod.frontmatter(f.read()).get("outputs") or []
+        if platform == "internal" and any(isinstance(o, dict) and o.get("name") == "youtube" for o in outs):
+            lines.append("- name: internal  (instead of `- name: youtube` under outputs)")
+    except (OSError, UnicodeDecodeError, rules_mod.RulesProblem):
+        pass
+    return (".claude/studio/platforms/%s.md has no audience line (or cannot be read) — a %s video may name only "
+            "platforms for %s videos. A person adds to its frontmatter: %s; or runs /std platform refresh %s (its "
+            "draft shows the lines to check)" % (platform, kind, want, "; ".join(lines), platform))
+
+
 def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock, cwd=None):
     src = o.get("--from")
     if not src:
@@ -342,16 +363,22 @@ def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock, cwd=None):
         raise schema.SchemaError("not platform names: %s" % ", ".join(map(repr, bad_p)))
     want = schema.KINDS.get(state.get("kind"))
     from ..distribute import rules as rules_mod
+    unchecked = []
     for p in sorted(platforms):  # the only platform-file reads for the audience (the guard reads none)
         aud = rules_mod.audience(ctx["repo"], p)
         if aud is None:
-            raise schema.SchemaError(
-                ".claude/studio/platforms/%s.md has no audience line (or cannot be read): a person adds `audience: "
-                "%s` to its frontmatter if the platform is for %s videos — a %s video may name only such platforms"
-                % (p, want, want, state.get("kind")))
+            raise schema.SchemaError(audience_missing(ctx["repo"], p, want, state.get("kind")))
         if aud != want:
             raise schema.SchemaError("platform %s is for %s videos (its audience), and %s is a %s kind"
                                      % (p, aud, state.get("kind"), want))
+        try:
+            if not rules_mod.read(ctx["repo"], p)[1]:
+                unchecked.append(p)
+        except rules_mod.RulesProblem:
+            unchecked.append(p)
+    for p in unchecked:  # copy fails until a person checks it; the brief may come first
+        sys.stderr.write("warning: platforms/%s.md is not checked yet — the copy fails until a person checks it "
+                         "(/std platform refresh %s)\n" % (p, p))
     for p, outs in platforms.items():
         if not isinstance(outs, list) or not outs or not all(isinstance(x, str) for x in outs):
             raise schema.SchemaError("platform %s needs a list of outputs" % p)

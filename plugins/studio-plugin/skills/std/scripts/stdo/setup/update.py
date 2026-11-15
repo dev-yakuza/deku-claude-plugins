@@ -11,6 +11,9 @@ three ways, with installed.json as the base.
   progress (D29: refused, 3).
 - The shipped platforms' copies (youtube.md, internal.md) without an `audience` frontmatter line get only that line
   (record-brief refuses a platform without it); the rest of a person's file stays.
+- Additive (INV4): a missing template file is added (`missing`); a kind's format or a shipped platform the repository
+  did not pick is `optional` (`--take <path>=new` adds it, `decline` stops the question until the template changes);
+  a person's changed platform file is never replaced (`person-platform`: /std platform refresh drafts it instead).
 `update apply` needs the person's `갱신 <h12>` answer; then a harness commit (its question shows what changed)."""
 
 import collections
@@ -47,7 +50,7 @@ def parse_takes(raw):
     for item in [x for x in (raw or "").split(",") if x]:
         path, sep, choice = item.rpartition("=")
         if not sep or choice not in CHOICES or path not in render.TEMPLATED or \
-                choice == "decline" and path not in render.INIT_SKIP:
+                choice == "decline" and path not in render.OPTIONAL:
             raise SetupError(USAGE, "--take is <path>=new|new-file|local (decline: an optional format only), "
                              "comma-separated, for the files the plan lists: %r" % item)
         out[path] = choice
@@ -140,12 +143,12 @@ def _template_item(rel, local, base_ent, new_text, take):
         new_part, local_part, base = new_text, local, (base_ent or {}).get("sha")
     new_sha = render.sha(new_part) if new_part is not None else None
     local_sha = render.sha(local_part) if local_part is not None else None
-    if local is None and rel in render.INIT_SKIP:
+    if local is None and rel in render.OPTIONAL:
         # a newer kind's format the repository does not have: added only when taken (`new`); a person's `decline` of
         # this very template is kept in installed.json and not asked again until the template changes
         state = "declined" if (base_ent or {}).get("declined") == new_sha else "optional"
     elif local is None:
-        state = "missing"
+        state = "missing"  # added (INV4: update adds what is missing; `--take <path>=local` leaves it out)
     elif agent and local_part is None:
         state = "conflict"  # the persona markers are gone: only the person can say what to do
     elif local_sha == new_sha:
@@ -158,6 +161,12 @@ def _template_item(rel, local, base_ent, new_text, take):
         state = "keep-local"
     else:
         state = "conflict"
+    platform = rel.startswith(".claude/studio/platforms/")
+    if platform and state == "conflict":
+        state = "person-platform"  # a person's platform file: never replaced here (/std platform refresh drafts it)
+    if platform and local is not None and take in ("new", "new-file"):
+        raise SetupError(USAGE, "%s is the person's platform file: update never replaces it — /std platform refresh %s "
+                         "drafts it from the plugin's template" % (rel, rel.rsplit("/", 1)[1][:-3]))
     if agent and take == "new" and local is not None and local_part is None:
         raise SetupError(USAGE, "%s has no persona block to replace — choose new-file (the whole file) or local" % rel)
     if take == "new-file":
@@ -167,10 +176,11 @@ def _template_item(rel, local, base_ent, new_text, take):
     elif take == "local":
         action = "keep"
     else:
-        action = "write-new" if state == "update" else "keep"
+        action = "write-new" if state in ("update", "missing") else "keep"
     if take == "decline" and state not in ("optional", "declined"):
         raise SetupError(USAGE, "%s is not an optional format here — decline is for those only" % rel)
-    resolved = state in ("same", "update", "keep-local", "optional", "declined") or take is not None
+    resolved = state in ("same", "update", "keep-local", "optional", "declined", "missing", "person-platform") or \
+        take is not None
     item = {"path": rel, "state": state, "action": action, "take": take, "local_sha": local_sha,
             "new_sha": new_sha, "base_after": new_sha if resolved else base, "resolved": resolved}
     if take == "decline" or state == "declined" and take is None:

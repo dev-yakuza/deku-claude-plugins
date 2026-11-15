@@ -335,6 +335,8 @@ class DocsGuard(JudgeCase):
 # ---------------------------------------------------------------- P6: the skill's text
 
 RULE = 'Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" doc *)'
+PLATFORM_LIST = 'Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" platform list)'
+PLATFORM_PREVIEW = 'Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" platform preview *)'
 
 
 class SkillText(StudioTestCase):
@@ -351,7 +353,8 @@ class SkillText(StudioTestCase):
             if not line.startswith("  - "):
                 break
             items.append(line[4:])
-        self.assertEqual(items, ["'%s'" % RULE])  # YAML single quotes around the rule
+        self.assertEqual(items, ["'%s'" % r for r in (RULE, PLATFORM_LIST, PLATFORM_PREVIEW)])  # YAML single quotes
+        # (0.2.1: the two read-only platform lines join the doc rule)
 
     def test_body(self):
         cmd = 'python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" doc <name>'
@@ -390,7 +393,7 @@ class SkillText(StudioTestCase):
                                                           "copy")]
         self.assertTrue(all(p >= 0 for p in pos) and pos == sorted(pos), pos)
         self.assertIn("never open it with Read", mk)
-        for stub in ("move", "platform", "review", "evolve", "rollback", "audit", "cast"):
+        for stub in ("move", "review", "evolve", "rollback", "audit", "cast"):  # platform: implemented in 0.2.1
             self.assertIn('`python3 "<<SKILL_DIR>>/scripts/setup.py" doc help`',
                           open(os.path.join(COMMANDS, stub + ".md"), encoding="utf-8").read(), stub)
         for d in ("init", "config", "update"):

@@ -12,7 +12,7 @@ HASH12 = re.compile(r"^[0-9a-f]{12}$")
 
 # The label template (m1-plan §3.2, D-M1-1): a video's labels name the video, so an answer about one video never
 # approves another (two videos with the same content still have different hash12s, since hash12 hashes the video,
-# the language and the gate too). Labels without a video (`사내설정` · `설정` · `갱신` · `커밋`) rely on the
+# the language and the gate too). Labels without a video (`사내설정` · `설정` · `갱신` · `커밋` · `플랫폼`) rely on the
 # repository-wide one-use record (paths.consumed_log).
 
 
@@ -56,6 +56,10 @@ def update(h12):
     return "갱신 %s" % h12
 
 
+def platform(h12):
+    return "플랫폼 %s" % h12
+
+
 def commit(tree12):
     return "커밋 %s" % tree12
 
@@ -65,7 +69,8 @@ TEMPLATE = {"승인": ("approve", ("video", "h12")), "거부": ("reject", ("vide
             "재고정": ("repin", ("video", "h12")), "제외": ("exclude", ("video", "h12")),
             "해제": ("unlock", ("video", "lang", "held")), "출처": ("credit", ("video", "h12")),
             "중단": ("abandon", ("video", "lang")), "사내설정": ("overlay", ("sha12",)),
-            "설정": ("setting", ("h12",)), "갱신": ("update", ("h12",)), "커밋": ("commit", ("tree12",))}
+            "설정": ("setting", ("h12",)), "갱신": ("update", ("h12",)), "커밋": ("commit", ("tree12",)),
+            "플랫폼": ("platform", ("h12",))}
 _WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 
 

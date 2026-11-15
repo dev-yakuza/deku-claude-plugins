@@ -165,9 +165,11 @@ def _gate_lines(ri, argv):
 
 def setup_py(hook, env, ri, argv):
     """Verdict for the plugin's `setup.py <argv>` approval commands (m1-plan §5.1, D-M1-5): `config set` of a protected
-    key or s2v.path and `narrator set` (설정 <h12>), `update apply` (갱신 <h12>). Never in the proxy mode. A config
-    or narrator question must also show the change as a line `설정 <key>: <old> → <new>` — the old value is read here
-    (config.json, machine.json, the narrator's status.json), the new one from the command line."""
+    key or s2v.path and `narrator set` (설정 <h12>), `update apply` (갱신 <h12>), `platform apply|remove` (플랫폼 <h12>,
+    0.2.1). Never in the proxy mode. A config or narrator question must also show the change as a line `설정 <key>:
+    <old> → <new>` — the old value is read here (config.json, machine.json, the narrator's status.json), the new one
+    from the command line; a platform question every line `platform preview` prints, computed here from the draft (or,
+    for remove, the platform file)."""
     from ..setup import labels as sl
     what = "setup.py %s" % " ".join(argv[:2])
     if in_subagent(hook):
@@ -178,12 +180,13 @@ def setup_py(hook, env, ri, argv):
         label, h12 = sl.expected(argv)
     except labels.NoLabel as e:
         return Verdict("G-APPROVAL", "%s. Run the preview (setup.py config preview / narrator preview / agent-model "
-                                     "preview / update plan) and ask the person first." % e)
+                                     "preview / platform preview / update plan) and ask the person first." % e)
     line = None
     try:
         line = _setup_line(ri, argv, sl)
     except ValueError as e:
         return Verdict("G-APPROVAL", "%s: %s" % (what, e))
+    lines = line if isinstance(line, list) else [line] if line is not None else []
     sid = hook.get("session_id")
     base = {"schema": 1, "argv_sha": labels_argv_sha(argv), "session_id": sid, "written_at": _now()}
     try:
@@ -191,15 +194,15 @@ def setup_py(hook, env, ri, argv):
         idx, text, note = transcript.choose(ans, label, h12, video=None)
         if consumed(ri, (sid, ans.tool_use_id, idx)):
             raise transcript.NoEvidence("consumed")
-        if line is not None:
+        if lines:
             from ..commit.summary import first_missing
-            if first_missing([line], text):
+            if first_missing(lines, text):
                 raise transcript.NoEvidence("values-not-shown")
     except transcript.NoEvidence as e:
-        extra = " The question shows: %s" % line if line else ""
+        extra = " The question shows: %s" % " / ".join(lines) if lines else ""
         if e.code == "values-not-shown":
             from ..commit.summary import first_missing, missing_text
-            extra = " " + missing_text(first_missing([line], text), "the preview")
+            extra = " " + missing_text(first_missing(lines, text), "the preview")
         return Verdict("G-EVIDENCE", evidence_text(what, label, e) + extra, code=e.code)
     base.update({"tool_use_id": ans.tool_use_id, "question_index": idx, "question": text, "answer": label,
                  "mode": "human"})
@@ -258,6 +261,25 @@ def _setup_line(ri, argv, sl):
         except (OSError, UnicodeDecodeError):
             raise ValueError("%s is missing" % rel)
         return sl.agent_model_line(words[2], old, words[3])
+    if words[:2] in (["platform", "apply"], ["platform", "remove"]):  # 0.2.1: the name first, then one file
+        from ..setup import platform as pf
+        from ..state.schema import NAME
+        if len(words) != 3 or not NAME.match(words[2]):
+            raise ValueError("platform %s <name>" % words[1])
+        rel = pf.draft_rel(words[2]) if words[1] == "apply" else pf.file_rel(words[2])
+        try:
+            with open(os.path.join(ri.worktree, rel), encoding="utf-8") as f:
+                text = f.read(pf.MAX_CHARS + 1)
+        except (OSError, UnicodeDecodeError):
+            raise ValueError("%s is missing" % rel)
+        if len(text) > pf.MAX_CHARS:
+            raise ValueError("%s is longer than %d characters" % (rel, pf.MAX_CHARS))
+        if words[1] == "remove":
+            return pf.remove_lines(words[2], text)
+        try:
+            return pf.preview_lines(words[2], text)
+        except pf.PlatformProblem as e:
+            raise ValueError("the draft %s: %s" % (rel, e))
     return None
 
 

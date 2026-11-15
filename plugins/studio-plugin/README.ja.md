@@ -263,6 +263,16 @@ python3 .claude/studio/scripts/hooks.py install
   プラットフォームだけです。`/std update` は `platforms/youtube.md` にその行を足し、新しいフォーマットを提案します。
   社内向けの動画は配信用テキストに社内用語を使え、クレジットに `public_ok` は不要です。公開動画は、ソースアナリストが
   `internal` と分類した画像を表示できません。`/std update` が必要です(スクリプトのバージョン 28)。
+- **0.2.1**: `/std platform list | add | refresh | remove` でプラットフォームファイルを管理します: エージェントが
+  プラットフォーム自身のヘルプページから規則の下書きを書き、`setup.py platform preview` が規則ごとに 1 行を表示し、
+  すべての行を質問に入れた人の `플랫폼 <h12>` の回答で `setup.py platform apply` が今日の `checked` 付きでファイルを
+  書きます(`remove` も同様。進行中の動画がそのプラットフォームを使っていれば拒否します)。規則には、タイトルがない
+  (`"title_max": null`)、説明を文字数で数える(`description_max_chars`)、チャプターなし(`"chapters": "none"`)、
+  ソースのリンク行なし(`"link": "none"`)を書けるようになりました。以前のブロックはこれまでどおり読みます。YouTube
+  Shorts と社内共有の規則を書きました(どちらも配信用テキストが通る前に人の `refresh` が必要です。社内共有の出力名は
+  `internal`)。`/std init` はリポジトリが作る動画の種類と使う同梱プラットフォームを尋ね、それだけを入れます。
+  `/std update` は足りないファイルを足し、選ばなかった種類とプラットフォームを提案し(`decline` で尋ねなくなります)、
+  人が変えたプラットフォームファイルは置き換えません。`/std update` が必要です(スクリプトのバージョン 29)。
 
 ## ライセンス
 

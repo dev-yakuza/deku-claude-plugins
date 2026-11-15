@@ -14,7 +14,7 @@ Show this in the repo's language (not initialized: the language the user writes 
 **State** — `status [--unlock]` · `resume <video-id>` · `abandon <video-id> [--lang <l>]` ·
 `move <video-id>` (later)
 
-**Platforms & actors** — `platform list|add|remove|refresh` (later) ·
+**Platforms & actors** — `platform list|add|refresh|remove` the platform rules ·
 `cast list|add|build|audition` (later)
 
 **Growth & checks** — `review <video-id>` · `evolve` · `rollback` · `audit` (later)

@@ -5,6 +5,8 @@ argument-hint: "<command> [video-id|args]"
 user-invocable: true
 allowed-tools:
   - 'Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" doc *)'
+  - 'Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" platform list)'
+  - 'Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/setup.py" platform preview *)'
 ---
 
 # Studio (`/std`)

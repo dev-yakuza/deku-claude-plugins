@@ -6,6 +6,8 @@
     update apply --expect <h12> [--take a=new,b=local]
                                                     갱신 <h12>  h12 = the update plan's (with the choices)
     agent-model set <role> <model> --expect <h12>   설정 <h12>  h12 = H("agent-model" · role · old · new) (0.1.2)
+    platform apply|remove <name> --expect <h12>     플랫폼 <h12>  h12 = H(action · name · the draft's / file's sha)
+                                                    (0.2.1; the question shows every `platform preview` line)
 
 A protected `config set` question must also show the line `설정 <key>: <old> → <new>` (canonical JSON; the guard
 reads the old value itself and compares); an `agent-model set` question the line `설정 <role> model: <old> → <new>`. Everything else of setup.py needs no evidence: `init` (the first harness
@@ -15,7 +17,7 @@ import json
 
 from ..state.argv import canonical
 from ..state.hashes import hash_of
-from ..state.labels import HASH12, NoLabel, setting, update
+from ..state.labels import HASH12, NoLabel, platform, setting, update
 
 NONE = "(없음)"
 SPECIAL = ("s2v.path",)  # machine.json: decides which code runs as s2v (m1-plan §3.1)
@@ -61,6 +63,10 @@ def agent_model_line(role, old, new):
     return "설정 %s model: %s → %s" % (role, old or NONE, new)
 
 
+def platform_label(h12):
+    return platform(h12)
+
+
 def is_protected(key, protected_keys):
     return key in SPECIAL or key.split(".", 1)[0] in protected_keys
 
@@ -88,7 +94,8 @@ def needs_evidence(argv, protected_keys):
     pos = [c["cmd"]] + c["pos"]
     if pos[:2] == ["config", "set"]:
         return len(pos) >= 3 and is_protected(pos[2], protected_keys)
-    return pos[:2] in (["narrator", "set"], ["update", "apply"], ["agent-model", "set"])
+    return pos[:2] in (["narrator", "set"], ["update", "apply"], ["agent-model", "set"], ["platform", "apply"],
+                       ["platform", "remove"])
 
 
 def expected(argv):
@@ -105,4 +112,6 @@ def expected(argv):
         return update(expect), expect
     if pos[:2] in (["config", "set"], ["narrator", "set"], ["agent-model", "set"]):
         return setting(expect), expect
+    if pos[:2] in (["platform", "apply"], ["platform", "remove"]):
+        return platform(expect), expect
     raise NoLabel("setup.py %s is not an approval command" % " ".join(pos[:2]))

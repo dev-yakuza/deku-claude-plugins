@@ -53,6 +53,7 @@ between the first two:
    - the image folders (`image_folders`; skipped when none is left to offer);
    - the accent colour (when `brand_colors` has more than one).
 4. **Call 3**:
+   - the video kinds and their platforms;
    - the logo (when at least one `logos` entry has `video: true`);
    - `public_domains` (when there is more than one);
    - the hooks (only when `ask_husky` is true);
@@ -106,13 +107,20 @@ What to ask:
   false, never mention hooks in a question (the plan summary shows what init installs).
 - **the notices**: that they know them — videos are rendered with Remotion (its license) and the narration is a
   synthetic voice (platforms ask to mark it); options `확인했습니다` and `자세히 알려 주세요`.
+- **video kinds and platforms** (`kinds`, `platforms`; `multiSelect`): which kinds the repository makes — `youtube`
+  (public, 3–8 minutes), `sns` (public, short), `onboarding` and `explainer` (internal: they stay on this machine and
+  are never committed) — and where they go — `youtube`, `youtube-shorts` (public) and `internal` (the organization's
+  own sharing; for internal kinds). `youtube` with `youtube` is the suggestion. Every chosen kind needs a platform of
+  its audience and every platform a kind (the plan refuses otherwise). Other platforms are added later with
+  `/std platform add`; the kinds not chosen can be added with `/std update`.
 - **brand name**: not asked — it is the project name.
 
 ## 4. Plan
 
 Write the answers as a JSON file **outside the repository** (the system's temporary folder), with the keys
 `language`, `studio_root`, `project_name`, `purpose`, `brand` {`name`, `accent_color`, `logo`}, `public_domains`,
-`web_roots`, `visibility_public`, `narrator` {`id`, `engine`, `style`}, `husky`, `s2v_path`. Then:
+`web_roots`, `visibility_public`, `narrator` {`id`, `engine`, `style`}, `husky`, `s2v_path`, `kinds`, `platforms`.
+Then:
 
 `python3 <<SKILL_DIR>>/scripts/setup.py init plan --answers <answers file>`
 

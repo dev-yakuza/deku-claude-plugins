@@ -11,6 +11,11 @@
     setup.py narrator set <lang> --engine qwen:<X> --style <s> [--id narrator] --expect <h12>      설정 <h12>
     setup.py agent-model preview <role> <haiku|sonnet|opus|inherit>   the label and line of a role's model change
     setup.py agent-model set <role> <model> --expect <h12>        the role file's model: line — 설정 <h12>
+    setup.py platform list                                        the repository's platform files (read-only)
+    setup.py platform preview <name>                              the draft's lines, h12 and label (read-only)
+    setup.py platform remove-preview <name>                       the removal's line, h12 and label (read-only)
+    setup.py platform apply <name> --expect <h12>                 the draft becomes the platform file — 플랫폼 <h12>
+    setup.py platform remove <name> --expect <h12>                the platform file goes — 플랫폼 <h12>
     setup.py update plan [--take <path>=new|local,…]
     setup.py update apply --expect <h12> [--take …]               갱신 <h12>
     setup.py doc [<name>]                                         print a Studio document (read-only, works anywhere)
@@ -22,7 +27,7 @@ import json
 import os
 import sys
 
-from . import agentmodel, analyze, configcmd, doc, initcmd, update
+from . import agentmodel, analyze, configcmd, doc, initcmd, platform, update
 from .common import USAGE, SetupError, toplevel
 
 
@@ -127,6 +132,21 @@ def main(argv, cwd=None, env=None, version=None):
                 return 0
             _print(configcmd.narrator_set(top, o["_"][0], o["--engine"], o["--style"], o.get("--expect"),
                                           list(argv), nid, proxy=bool(o.get("--proxy"))))
+            return 0
+        if group == "platform" and sub in ("list", "preview", "remove-preview", "apply", "remove"):
+            o = _opts(rest, ("--expect",))
+            if sub == "list":
+                if o["_"]:
+                    raise SetupError(USAGE, "platform list takes no arguments")
+                _print(platform.list_(top))
+                return 0
+            if len(o["_"]) != 1:
+                raise SetupError(USAGE, "platform %s <name>" % sub)
+            if sub in ("preview", "remove-preview"):
+                _print(platform.preview(top, o["_"][0], remove=sub == "remove-preview", env=env))
+                return 0
+            fn = platform.apply if sub == "apply" else platform.remove
+            _print(fn(top, o["_"][0], o.get("--expect"), list(argv), proxy=bool(o.get("--proxy")), env=env))
             return 0
         if group == "agent-model" and sub in ("preview", "set"):
             o = _opts(rest, ("--expect",))

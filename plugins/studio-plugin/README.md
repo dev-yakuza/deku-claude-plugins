@@ -267,6 +267,16 @@ the repository): [docs/removing.md](docs/removing.md).
   that line to `platforms/youtube.md` and offers the new formats. An internal video may use in-house terms in its copy
   and needs no `public_ok` credits; a public video cannot show an image the source analyst classes `internal`.
   Needs `/std update` (scripts version 28).
+- **0.2.1**: `/std platform list | add | refresh | remove` manages the platform files: the agent drafts the rules from
+  the platform's own help pages, `setup.py platform preview` prints one line per rule, and the person's `플랫폼 <h12>`
+  answer — with every line in the question — lets `setup.py platform apply` write the file with today's `checked`
+  (`remove` likewise; refused while a video in progress names the platform). The rules may now say a platform has no
+  title (`"title_max": null`), count the description in characters (`description_max_chars`), take no chapters
+  (`"chapters": "none"`) or no source link (`"link": "none"`); older blocks read as before. The YouTube Shorts and
+  in-house sharing rules are written (each needs a person's `refresh` before its copy passes; the in-house output is
+  named `internal`). `/std init` asks which video kinds the repository makes and which shipped platforms it uses, and
+  installs only those; `/std update` adds missing files, offers the kinds and platforms not picked (`decline` stops
+  the question) and never replaces a platform file a person changed. Needs `/std update` (scripts version 29).
 
 ## License
 

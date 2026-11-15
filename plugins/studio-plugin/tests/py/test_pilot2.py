@@ -517,7 +517,7 @@ class Wording(StudioTestCase):
         blocks = []
         for p in glob.glob(os.path.join(SKILL, "**", "*.md"), recursive=True):
             blocks += re.findall(r"<!-- studio:guard-refusal -->\n(.*?)\n<!-- /studio:guard-refusal -->", read(p), re.S)
-        self.assertEqual(len(blocks), 16)
+        self.assertEqual(len(blocks), 17)  # 0.2.1: platform.md
         self.assertEqual(len(set(blocks)), 1)
         self.assertIn(NOT_A_STOP, flat(blocks[0].replace(">", " ")))
         self.assertIn(NOT_A_STOP, flat(read(COMMANDS, "atoms", "_contract.md").replace("\n>", "\n")))

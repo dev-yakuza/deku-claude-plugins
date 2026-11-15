@@ -74,7 +74,7 @@ def normalize(top, answers):
     if not isinstance(answers, dict):
         raise SetupError(USAGE, "the answers are a JSON object")
     known = {"language", "studio_root", "project_name", "purpose", "priorities", "brand", "public_domains",
-             "web_roots", "visibility_public", "narrator", "husky", "s2v_path"}
+             "web_roots", "visibility_public", "narrator", "husky", "s2v_path", "kinds", "platforms"}
     extra = sorted(set(answers) - known)
     if extra:
         raise SetupError(USAGE, "unknown answers: %s" % ", ".join(extra))
@@ -128,6 +128,7 @@ def normalize(top, answers):
     style = _text(nar.get("style", ""), "narrator.style", empty_ok=True, maximum=narrator.STYLE_MAX)
     if not frontmatter.style_ok(style, narrator.STYLE_MAX):  # the script's cast block carries it as it is (0.0.28 Q2)
         raise SetupError(USAGE, "narrator.style must not hold \" or \\")
+    kinds, plats = kinds_and_platforms(answers)
     s2v = answers.get("s2v_path")
     if not isinstance(s2v, str) or not os.path.isabs(s2v):
         raise SetupError(USAGE, "s2v_path must be the absolute path of this machine's script2video checkout")
@@ -138,7 +139,33 @@ def normalize(top, answers):
             "brand": {"name": _text(brand.get("name") or project, "brand.name"), "accent_color": color, "logo": logo},
             "public_domains": sorted(set(doms)), "web_roots": dict(sorted(wr.items())), "visibility_public": list(vis),
             "narrator": {"id": nid, "engine": engine, "style": style}, "husky": bool(answers.get("husky")),
-            "s2v_path": os.path.normpath(s2v)}
+            "s2v_path": os.path.normpath(s2v), "kinds": kinds, "platforms": plats}
+
+
+def kinds_and_platforms(answers):
+    """The video kinds the repository makes and the shipped platforms it uses (defaults: youtube and youtube): every
+    kind needs a platform of its audience, every platform a kind of its audience."""
+    from ..state.schema import KINDS
+    kinds = answers.get("kinds") or list(render.DEFAULT_KINDS)
+    plats = answers.get("platforms") or list(render.DEFAULT_PLATFORMS)
+    if not isinstance(kinds, list) or not all(k in KINDS for k in kinds) or len(set(kinds)) != len(kinds):
+        raise SetupError(USAGE, "kinds is a list of video kinds (%s)" % ", ".join(KINDS))
+    if not isinstance(plats, list) or not all(p in render.SHIPPED_PLATFORMS for p in plats) or \
+            len(set(plats)) != len(plats):
+        raise SetupError(USAGE, "platforms is a list of the shipped platforms (%s); add others later with /std "
+                                "platform add" % ", ".join(render.SHIPPED_PLATFORMS))
+    scopes = {KINDS[k] for k in kinds}
+    auds = {p: render.template_audience(p) for p in plats}
+    lonely = [k for k in kinds if KINDS[k] not in auds.values()]
+    if lonely:
+        raise SetupError(USAGE, "no platform for %s (a %s kind needs a platform with that audience)"
+                         % (", ".join(lonely), "/".join(sorted({KINDS[k] for k in lonely}))))
+    unused = [p for p in plats if auds[p] not in scopes]
+    if unused:
+        raise SetupError(USAGE, "no kind for platform %s (its audience is %s)"
+                         % (", ".join(unused), ", ".join(sorted({auds[p] for p in unused}))))
+    order = list(KINDS)
+    return sorted(kinds, key=order.index), sorted(plats, key=list(render.SHIPPED_PLATFORMS).index)
 
 
 def existing(top):
@@ -199,7 +226,8 @@ def plan(top, answers, version=None, check_s2v=True):
     vals = render.values_of(a)
     plan_ = {"schema": PLAN_SCHEMA, "answers": a, "s2v": s2v,
              "files": {rel: render.sha(text) for rel, text in files.items()},
-             "installed": render.installed(vals), "scripts": render.script_files(),
+             "installed": render.installed(vals, declined=set(render.OPTIONAL) - render.chosen(a)),
+             "scripts": render.script_files(),
              "local": [machine.REL.replace(os.sep, "/"), ".claude/studio/local/config.internal.json"],
              "gitignore": "Studio's block in .gitignore and in info/exclude", "hooks": "hooks.py install%s"
              % (" --husky-apply" if a["husky"] else "")}

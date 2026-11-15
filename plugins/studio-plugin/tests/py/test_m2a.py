@@ -424,7 +424,8 @@ class CopyTerms(StudioTestCase):
         copy = os.path.join(self.tmp, "copy.md")
         with open(copy, "w") as f:
             f.write("---\ntitle: \"t\"\nhashtags: []\n---\nAbout Zorblax today.\n")
-        rules = ({"title_max": 100, "description_max_bytes": 5000, "hashtags_max": 5, "required": []}, "2026-11-01")
+        rules = ({"title_max": 100, "description_max_bytes": 5000, "hashtags_max": 5, "required": [],
+                  "chapters": "required", "link": "body"}, "2026-11-01")
         for sc, overlay, hit in (("public", "ok", True), ("internal", "ok", False), ("internal", "missing", False)):
             st = F.state()
             st["scope"] = sc
@@ -482,14 +483,13 @@ class Templates(StudioTestCase):
         self.assertNotEqual(update.plan(repo)["h12"], before)
 
     def test_new_formats_are_optional(self):
-        """init leaves the newer kinds' formats out (the first commit's value block must fit its question); update
-        offers each as `optional` (no conflict), and adds it when the person takes it."""
-        self.assertEqual(set(render.INIT_SKIP), {".claude/studio/formats/%s.md" % k for k in schema.KINDS
-                                                 if k != "youtube"})
+        """init installs only the kinds and platforms the person picks (0.2.1; 0.2.0 left the newer formats out);
+        update offers each missing one as `optional` (no conflict), and adds it when the person takes it."""
+        self.assertTrue({".claude/studio/formats/%s.md" % k for k in schema.KINDS} <= set(render.OPTIONAL))
         repo = helpers.make_repo(self.tmp)
         p = update.plan(repo)
         states = {i["path"]: i["state"] for i in p["templates"]}
-        for rel in render.INIT_SKIP:
+        for rel in render.OPTIONAL:
             self.assertEqual(states[rel], "optional")
             self.assertNotIn(rel, p["conflicts"])
         self.assertEqual(set(p["templates"][[i["path"] for i in p["templates"]].index(
@@ -503,7 +503,7 @@ class Templates(StudioTestCase):
         repo = helpers.make_repo(self.tmp)
         sns = ".claude/studio/formats/sns.md"
         with self.assertRaises(Exception):
-            update.plan(repo, ".claude/studio/formats/youtube.md=decline")  # decline is for optional formats only
+            update.plan(repo, ".claude/studio/guides/copy.md=decline")  # decline is for optional files only
         with mock.patch.object(update, "with_evidence", lambda top, argv, label, proxy, fn, cmd: fn()):
             p = update.plan(repo, sns + "=decline")
             update.apply(repo, p["h12"], sns + "=decline", ["update", "apply"])

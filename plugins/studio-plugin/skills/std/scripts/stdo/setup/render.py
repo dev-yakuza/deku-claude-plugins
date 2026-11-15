@@ -35,14 +35,42 @@ TEMPLATED = collections.OrderedDict([
     (".claude/studio/formats/onboarding.md", "formats/onboarding.md"),
     (".claude/studio/formats/explainer.md", "formats/explainer.md"),
     (".claude/studio/platforms/youtube.md", "platforms/youtube.md"),
+    (".claude/studio/platforms/youtube-shorts.md", "platforms/youtube-shorts.md"),
+    (".claude/studio/platforms/internal.md", "platforms/internal.md"),
     (".claude/studio/guides/script.md", "guides/script.md"),
     (".claude/studio/guides/board.md", "guides/board.md"),
     (".claude/studio/guides/copy.md", "guides/copy.md"),
 ] + [(".claude/agents/%s.md" % a, "agents/%s.md" % a) for a in AGENTS])
-# the formats of the newer video kinds: init leaves them out (with all four, the first harness commit's value block no
-# longer fits its question); `update` offers each as `missing` and the person adds the kinds the repository makes
-INIT_SKIP = (".claude/studio/formats/sns.md", ".claude/studio/formats/onboarding.md",
-             ".claude/studio/formats/explainer.md")
+# the shipped platforms; a repository has the formats of the kinds it makes and the platforms the person picked at init
+SHIPPED_PLATFORMS = ("youtube", "youtube-shorts", "internal")
+DEFAULT_KINDS = ("youtube",)
+DEFAULT_PLATFORMS = ("youtube",)
+
+
+def format_rel(kind):
+    return ".claude/studio/formats/%s.md" % kind
+
+
+def platform_rel(name):
+    return ".claude/studio/platforms/%s.md" % name
+
+
+# the files init writes only when chosen (a kind's format, a shipped platform); `update` offers a missing one as
+# `optional` until the person adds it or declines it (an answer kept in installed.json)
+OPTIONAL = tuple(r for r in TEMPLATED if r.startswith((".claude/studio/formats/", ".claude/studio/platforms/")))
+
+
+def chosen(answers):
+    """The optional files of the kinds and platforms the person picked."""
+    return {format_rel(k) for k in answers.get("kinds") or DEFAULT_KINDS} | \
+        {platform_rel(p) for p in answers.get("platforms") or DEFAULT_PLATFORMS}
+
+
+def template_audience(name):
+    """The `audience` of a shipped platform template."""
+    from ..distribute import rules
+    with open(os.path.join(TEMPLATES, "platforms", "%s.md" % name), encoding="utf-8") as f:
+        return rules.frontmatter(f.read()).get("audience")
 
 
 class RenderError(Exception):
@@ -127,7 +155,8 @@ def harness_files(answers):
         "ACCENT_COLOR": brand["accent_color"],
         "LOGO": json.dumps(brand.get("logo") or "", ensure_ascii=False)[1:-1]})  # "" = no logo
     json.loads(out[".claude/studio/brand.json"])  # a template slip must not reach a repository
-    out.update((k, v) for k, v in templated(vals).items() if k not in INIT_SKIP)
+    pick = chosen(answers)
+    out.update((k, v) for k, v in templated(vals).items() if k not in OPTIONAL or k in pick)
     out[PRONOUNCE] = "{}\n"  # the shared pronunciation dictionary: a flat object, reading by written form
     nar = answers["narrator"]
     base = "%s/cast/%s/" % (answers["studio_root"], nar["id"])
@@ -137,12 +166,15 @@ def harness_files(answers):
     return out
 
 
-def installed(values, texts=None):
-    """installed.json: each three-way file's base (its rendered text's sha; for an agent its persona block's sha)."""
+def installed(values, texts=None, declined=()):
+    """installed.json: each three-way file's base (its rendered text's sha; for an agent its persona block's sha);
+    `declined`: the optional files the person did not pick (update does not offer them until the template changes)."""
     texts = texts if texts is not None else templated(values)
     tpl = collections.OrderedDict()
     for rel, text in texts.items():
         ent = {"sha": sha(text)}
+        if rel in declined:
+            ent["declined"] = ent["sha"]
         if rel.startswith(".claude/agents/"):
             blk = persona_block(text)
             ent["persona"] = sha(blk) if blk is not None else None

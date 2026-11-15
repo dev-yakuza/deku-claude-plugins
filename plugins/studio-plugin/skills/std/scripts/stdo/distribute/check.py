@@ -29,8 +29,8 @@ HOME = re.compile(r"/Users/[^/\s]+|/home/[^/\s]+|(?<![\w.])~/|[A-Za-z]:\\Users\\
 HASHTAG = re.compile(r"^#[^\s#]+$")
 
 
-def parse_copy(text):
-    """(title, hashtags, description) — raises ValueError."""
+def parse_copy(text, title_needed=True):
+    """(title or None, hashtags, description) — raises ValueError. `title_needed`: the platform has a title."""
     if not text.startswith("---"):
         raise ValueError("the copy has no frontmatter (title, hashtags)")
     end = text.find("\n---", 3)
@@ -39,10 +39,13 @@ def parse_copy(text):
     head, body = text[3:end], text[end + 4:].lstrip("\n")
     m = re.search(r"^title:\s*(.+?)\s*$", head, re.M)
     if not m:
-        raise ValueError("the copy has no title")
-    title = m.group(1)
-    if len(title) >= 2 and title[0] in "\"'" and title[-1] == title[0]:
-        title = title[1:-1]
+        if title_needed:
+            raise ValueError("the copy has no title")
+        title = None
+    else:
+        title = m.group(1)
+        if len(title) >= 2 and title[0] in "\"'" and title[-1] == title[0]:
+            title = title[1:-1]
     h = re.search(r"^hashtags:\s*(\[.*?\])\s*$", head, re.M)
     try:
         tags = json.loads(h.group(1)) if h else []
@@ -62,6 +65,11 @@ def chapter_files(ctx, state, lang, platform):
         proxy = bool(L["renders"].get(o, {}).get("proxy"))
         files.append(os.path.join(out_dir, "%s.%s.%schapters.txt" % (o, lang, "proxy." if proxy else "")))
     return files
+
+
+def description_chars(body):
+    """The description's characters (trailing line breaks not counted)."""
+    return len(body.replace("\r\n", "\n").rstrip("\r\n"))
 
 
 def description_bytes(body):
@@ -99,14 +107,21 @@ def problems(repo, vdir, state, lang, ctx, platform, cfg, env, copy_path):
     if not unicodedata.is_normalized("NFC", text):  # NFD breaks the substring checks below and the title length
         return out + ["the copy is not in NFC (composed) form — save it as NFC"]
     try:
-        title, tags, body = parse_copy(text)
+        title, tags, body = parse_copy(text, title_needed=rules["title_max"] is not None)
     except ValueError as e:
         return out + [str(e)]
-    if not title.strip() or len(title) > rules["title_max"]:
+    if rules["title_max"] is None:
+        if title is not None:
+            out.append("this platform has no title (title_max: null) — the copy has none either")
+        title = ""
+    elif not title.strip() or len(title) > rules["title_max"]:
         out.append("the title has %d characters (1–%d)" % (len(title), rules["title_max"]))
-    if description_bytes(body) > rules["description_max_bytes"]:
+    if "description_max_bytes" in rules and description_bytes(body) > rules["description_max_bytes"]:
         out.append("the description is %d bytes in UTF-8 (line breaks counted as 2, CRLF; at most %d bytes)"
                    % (description_bytes(body), rules["description_max_bytes"]))
+    if "description_max_chars" in rules and description_chars(body) > rules["description_max_chars"]:
+        out.append("the description has %d characters (at most %d)"
+                   % (description_chars(body), rules["description_max_chars"]))
     if len(tags) > rules["hashtags_max"]:
         out.append("%d hashtags (at most %d)" % (len(tags), rules["hashtags_max"]))
     out += ["%r is not one hashtag (#word, no spaces)" % t for t in tags if not HASHTAG.match(t)]
@@ -116,7 +131,7 @@ def problems(repo, vdir, state, lang, ctx, platform, cfg, env, copy_path):
         out.append(why)
     out += ["the credit line of %s is missing: %s" % (p, e.get("credit_line")) for p, e in sorted((cred or {}).items())
             if isinstance(e.get("credit_line"), str) and e["credit_line"] not in body]
-    for p in chapter_files(ctx, state, lang, platform):
+    for p in chapter_files(ctx, state, lang, platform) if rules["chapters"] == "required" else ():
         try:
             with open(p, encoding="utf-8") as f:
                 lines = [l.rstrip() for l in f.read().splitlines() if l.strip()]
@@ -136,11 +151,11 @@ def problems(repo, vdir, state, lang, ctx, platform, cfg, env, copy_path):
     hit = term_hit(text, terms) if terms and state.get("scope") != "internal" else None  # internal copy may use them
     if hit:
         out.append("the copy uses an in-house term (%s)" % hit)
-    src_line = source_line(repo, state, lang)
+    src_line = source_line(repo, state, lang) if rules["link"] == "body" else None
     if src_line and src_line not in body:
         out.append("the source link line is missing: %s" % src_line)
     chapter_lines = []
-    for p in chapter_files(ctx, state, lang, platform):
+    for p in chapter_files(ctx, state, lang, platform) if rules["chapters"] == "required" else ():
         try:
             with open(p, encoding="utf-8") as f:
                 chapter_lines += [l.rstrip() for l in f.read().splitlines() if l.strip()]

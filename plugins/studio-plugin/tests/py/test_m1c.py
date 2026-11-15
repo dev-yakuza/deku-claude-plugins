@@ -724,7 +724,7 @@ class Update(InitCase):
     def test_versions(self):
         p = self.plan()
         self.assertEqual(p["scripts"], {"replace": [], "add": [], "remove": []})
-        self.assertTrue(all(i["state"] in ("same", "optional") for i in p["templates"]))  # 0.2.0: new kinds
+        self.assertTrue(all(i["state"] in ("same", "optional", "declined") for i in p["templates"]))  # 0.2.x: kinds
         self.set_version(int(SCRIPTS_VERSION) + 1)
         p = self.plan()
         self.assertIn("newer than this plugin", p["refused"])

@@ -244,6 +244,15 @@ python3 .claude/studio/scripts/hooks.py install
   `platforms/youtube.md`에 그 줄을 더하고 새 형식을 제안합니다. 사내용 영상은 배포용 글에 사내 용어를 쓸 수 있고
   크레딧에 `public_ok`가 필요 없습니다. 공개 영상은 소스 분석가가 `internal`로 분류한 이미지를 보여 줄 수 없습니다.
   `/std update`가 필요합니다(스크립트 버전 28).
+- **0.2.1**: `/std platform list | add | refresh | remove`로 플랫폼 파일을 관리합니다: 에이전트가 플랫폼의 자체 도움말
+  페이지에서 규칙 초안을 쓰고, `setup.py platform preview`가 규칙마다 한 줄을 출력하며, 모든 줄을 질문에 넣은 사람의
+  `플랫폼 <h12>` 답으로 `setup.py platform apply`가 오늘 날짜의 `checked`와 함께 파일을 씁니다(`remove`도 같고, 진행
+  중인 영상이 그 플랫폼을 쓰면 거부합니다). 규칙에 제목이 없음(`"title_max": null`), 설명을 글자 수로 셈
+  (`description_max_chars`), 챕터 없음(`"chapters": "none"`), 원본 링크 줄 없음(`"link": "none"`)을 쓸 수 있습니다.
+  예전 블록은 그대로 읽습니다. YouTube Shorts와 사내 공유 규칙을 썼습니다(둘 다 배포용 글이 통과하기 전에 사람의
+  `refresh`가 필요하고, 사내 공유의 출력 이름은 `internal`). `/std init`은 레포가 만드는 영상 종류와 쓰는 기본
+  플랫폼을 묻고 그것만 설치합니다. `/std update`는 빠진 파일을 더하고, 고르지 않은 종류와 플랫폼을 제안하며
+  (`decline`이면 다시 묻지 않음), 사람이 바꾼 플랫폼 파일은 바꾸지 않습니다. `/std update`가 필요합니다(스크립트 버전 29).
 
 ## 라이선스
 

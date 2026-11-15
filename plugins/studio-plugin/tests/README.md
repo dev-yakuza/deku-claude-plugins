@@ -435,3 +435,14 @@ terms in internal copy, the new format templates (init leaves them out, `render.
 module but `stdo/vpaths.py` joins `out` or `copy` to the studio root (an AST walk) and that every kind has a format
 template init installs; `stdo/vpaths.py` joins `LEGACY_DEPS_HEAD` (the frozen guard's commit check imports
 `commit/video.py`, which uses it).
+
+**0.2.1** (`SCRIPTS_VERSION` 29, m2-plan M2b): `test_m2b.py` — the rules block v1 and v2 (`title_max: null`,
+`description_max_chars`, `hashtags_max: 0`, `chapters`, `link`) and the platform frontmatter (`rules.frontmatter`),
+validate_copy following them, `platform.preview_lines` (one line per key; http sources, unknown aspects and layouts,
+a mismatched name refused), `setup.py platform list | preview | apply | remove-preview | remove` with the person's
+`플랫폼 <h12>` answer (a question missing a line → 6; refresh of an unchanged file changes only `checked`; remove
+refused while a video in progress names the platform, `exclude-output` named only for a platform alone on its
+output), the labels, init's kinds and platforms (each kind needs a platform of its audience; unpicked files are
+`declined` in installed.json), update adding missing files and keeping a person's platform file (`person-platform`),
+record-brief's unchecked warning and the `internal.md` lines, and the guard computing the preview lines from the
+draft. `structure_test.sh` checks the two read-only allowed-tools entries and that platform.md runs them as spelled.

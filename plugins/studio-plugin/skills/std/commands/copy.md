@@ -1,8 +1,10 @@
 # COPY
 
-The copy stage and gate ④b, per platform (`youtube` for now): the distributor writes the title, description
-and hashtags, Studio checks them against the platform rules, the fact-checker checks the copy against the source, and
-the person approves it.
+The copy stage and gate ④b, per platform of the brief: the distributor writes the title (when the platform has
+one), description and hashtags, Studio checks them against the platform rules (`.claude/studio/platforms/<p>.md`: the
+limits, the notices, whether chapters and the source link line belong in the description; the steps below say
+`youtube` — run them for every platform of the brief with its name), the fact-checker checks the copy against the
+source, and the person approves it.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`. The video id is the first argument of `/std copy`.
