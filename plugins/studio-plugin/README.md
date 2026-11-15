@@ -277,6 +277,15 @@ the repository): [docs/removing.md](docs/removing.md).
   named `internal`). `/std init` asks which video kinds the repository makes and which shipped platforms it uses, and
   installs only those; `/std update` adds missing files, offers the kinds and platforms not picked (`decline` stops
   the question) and never replaces a platform file a person changed. Needs `/std update` (scripts version 29).
+- **0.2.2**: vertical (9:16) and square (1:1) outputs. A brief's platforms share an output by name: its aspect comes
+  from the platform files (a platform may use another's output when it accepts that aspect), two files giving one name
+  different aspects are refused, and every output plays the whole script — its `maxDuration` is the smallest limit of
+  its platforms, and a platform whose limit is too short for the video kind's length range is refused (YouTube Shorts
+  come from `sns` videos). The script lines give a 9:16 output word subtitles; board's `--look` line sets `shorts` for
+  9:16 and 1:1 (without a character it draws like `fullscreen` with word subtitles), and the board guide has a section
+  per aspect (safe area, pictures, no thumbnail or chapters for vertical). A video whose brief was recorded earlier
+  may now stop at `next --enter script` or the script check with an output message: record the brief again
+  (`/std brief`), or `exclude-output` when that output is already approved. Needs `/std update` (scripts version 30).
 
 ## License
 

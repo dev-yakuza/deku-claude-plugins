@@ -18,9 +18,10 @@ the brand, exemplar scripts.
 ## Outputs
 1. `script.<lang>.md` — frontmatter `title`, `lang`, then the lines the producer gives you from `state.py next
    <video> --enter script`, exactly: the `cast:` block (the default narrator — s2v's content hash includes it, so it is
-   there from the start), `outputs.<output>` with `aspect` (from the platform file, e.g. youtube "16:9") and
-   `maxDuration` (the format's upper bound), and top-level `targetDuration`, a number in the range that output prints
-   (from the brief's estimate) — in s2v's syntax (see Rules).
+   there from the start), `outputs.<output>` with `aspect` (from the brief's platform files, e.g. youtube "16:9"),
+   `subtitles: word` for a 9:16 output, a `layout` or `shot` only where a platform file names one, and `maxDuration`
+   (the format's upper bound, or a platform's smaller limit), and top-level `targetDuration`, a number in the range
+   that output prints (from the brief's estimate) — in s2v's syntax (see Rules).
 2. `work/<lang>/claims-map.json` — exactly: `{"claims": {"C-…": {"excerpt": "<the excerpt from work/source.md,
    unchanged>", "sentences": ["<every script text that says it>"]}}, "excerpts": ["<every excerpt used>"],
    "copy_excerpts": {}}`, plus `"unused_images": {"<script_src>": "<reason>"}` for any usable image the script does not
@@ -53,7 +54,7 @@ Write nothing else.
 - Scene 1 is the title scene: one or two sentences of narration (the hook, from the claims map) and one visual,
   `::title[<the frontmatter title>]`, after its narration — it becomes the thumbnail. Only `#` (level 1) headings start
   scenes.
-- Never write `layout` yourself (board sets it); keep what board wrote.
+- Never write a `layout` the printed lines do not give (board sets it); keep what board wrote.
 - Every scene shows something: its first visual is `::title[…]` with a label, a text card (`:::bullets`, `:::quote`,
   …) or an image (Studio fails s2v's `no-visual`). Put a scene's `::title[…]` after its last paragraph: it still shows
   from the scene's start, and the sentence ids stay. An image you cannot use (its license) is replaced here by

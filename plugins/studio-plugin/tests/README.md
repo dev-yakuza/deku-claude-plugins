@@ -446,3 +446,14 @@ output), the labels, init's kinds and platforms (each kind needs a platform of i
 `declined` in installed.json), update adding missing files and keeping a person's platform file (`person-platform`),
 record-brief's unchecked warning and the `internal.md` lines, and the guard computing the preview lines from the
 draft. `structure_test.sh` checks the two read-only allowed-tools entries and that platform.md runs them as spelled.
+
+**0.2.2** (`SCRIPTS_VERSION` 30, m2-plan M2c): `test_m2c.py` — the output plan (`scriptlines.output_plan`): outputs
+shared by name (a declaration counts only for the outputs the brief maps its platform to; an unnamed use takes
+the most permissive declaration of the aspect), conflicting aspects (and layouts) under one name refused, a platform limit below the format's lower
+bound (or too close to it for any targetDuration) refused, an output a platform does not accept, files without
+outputs; record-brief refusing and recording nothing; the script lines for 9:16 (`subtitles: word`, `shot`, the
+smallest limit, the targetDuration range under it); the script check's maxDuration and aspect; the look rules for 9:16
+and 1:1. `--full`: real s2v, mock voice, fonts copied from the person's cache (a missing font fails rather than
+downloads) — a 9:16 `shorts` snapshot equals `fullscreen` + `subtitles: word` and differs from plain `fullscreen`.
+`state_fixtures.write_platforms` files declare outputs (`youtube` 16:9, `shorts` 9:16, one named after the
+platform).

@@ -21,7 +21,8 @@ How this repository's videos are written. The script writer reads it; edit it as
   after its narration. s2v takes the thumbnail from it, so the thumbnail says what the video is. A title scene shorter
   than 10 seconds joins the next chapter in the chapter list (YouTube's minimum chapter length). Only `#` (level 1)
   headings start scenes.
-- The layout is board's: the script names no `layout` (board sets it and the script keeps it).
+- The layout is board's: the script names no `layout` beyond the printed lines (board sets it and the script keeps
+  it).
 - Every scene needs a visual, and its first visual is what shows from the scene's start: `::title[…]` with a label, a
   text card (`:::bullets`, `:::quote`, …) or an image. A scene with only narration shows the bare background — s2v
   warns `no-visual` and Studio's check fails. A `::title[…]` goes after the scene's last paragraph (it still shows
@@ -30,9 +31,10 @@ How this repository's videos are written. The script writer reads it; edit it as
 - A title's label is on-screen text, judged at ① like the narration: reuse the scene heading or a sentence of the
   claims map rather than a new statement.
 - Frontmatter: the lines `state.py next <video> --enter script` prints, exactly — the default narrator's `cast:`
-  block (part of the script from the start: s2v's content hash includes it) and `outputs.<output>` with `aspect` and
-  `maxDuration`.
-- Length: `outputs.youtube.maxDuration` is the format's upper bound. `targetDuration` comes from the brief's estimate,
+  block (part of the script from the start: s2v's content hash includes it) and `outputs.<output>` with `aspect`,
+  `maxDuration` and, where they apply, `subtitles: word` (9:16), a platform's `layout` or `shot`.
+- Length: every output plays the whole script. `maxDuration` is the format's upper bound, or a platform's smaller
+  limit (then the `targetDuration` range ends below it too). `targetDuration` comes from the brief's estimate,
   within the printed range: s2v lint passes a script within ±15 % of it, and only that range keeps s2v's own estimate
   inside the format's range. Too short: lengthen with claims from the brief, never by lowering `targetDuration` below
   the range. s2v lint only warns past them, Studio's check fails.

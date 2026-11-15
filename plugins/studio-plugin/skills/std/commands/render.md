@@ -1,7 +1,8 @@
 # RENDER
 
-The render stage and gate ④a, per output (`youtube` for now): the approved script rendered from the locked
-audio, then the person approves the video, its thumbnail and its chapters.
+The render stage and gate ④a, per output of the brief (the steps below say `youtube` — run them for every output
+with its name): the approved script rendered from the locked audio, then the person approves the video, its thumbnail
+and its chapters (a 9:16 or 1:1 output has neither: s2v makes them for 16:9 only).
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`. The video id is the first argument of `/std render`.

@@ -11,13 +11,17 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
 
 1. `python3 .claude/studio/scripts/state.py next <video> --enter script` — exit 3: go to the stage it names.
    On go it prints the `frontmatter` lines: the `cast:` block of the default narrator, `outputs:` with each output's
-   `aspect` and `maxDuration`, and the `targetDuration` range. Exit 1 "no ready voice": run the narrator setup of
-   `/std init` (or `/std config` narrator) first.
+   `aspect` and `maxDuration` (and `subtitles: word` for 9:16, a platform's `layout` or `shot`), and the
+   `targetDuration` range. Exit 1 with a platform file's name: the brief's platform files no longer give each output
+   one shape — a person fixes the file (`/std platform refresh <name>`) or the brief is recorded again (a brief
+   recorded before 0.2.2 may need this: `/std brief` again, or `exclude-output` when that output is already
+   approved). Exit 1 "no
+   ready voice": run the narrator setup of `/std init` (or `/std config` narrator) first.
 2. Spawn the script writer (`std-writer`) with `work/brief.md`, `work/brief.json`, `work/source.md`,
    `work/assets.json`, `.claude/studio/guides/script.md`, the brand and the `frontmatter` lines step 1 printed,
    pasted unchanged. It writes `script.<lang>.md` (frontmatter `title` · `lang` · those lines exactly — the cast block
-   included, no acting, no `layout` — with `targetDuration` a number in the printed range; scene 1 the title scene
-   with `::title[<title>]` as its only visual) and `work/<lang>/claims-map.json` (each claim's `sentences` list every
+   included, no acting, no `layout` beyond those lines — with `targetDuration` a number in the printed range; scene 1
+   the title scene with `::title[<title>]` as its only visual) and `work/<lang>/claims-map.json` (each claim's `sentences` list every
    script text that says it — narration, on-screen text, titles; the whole file in one Write; `unused_images` for any
    usable image it does not show). The spawn prompt gives the writer the exact command for s2v's script syntax, which
    it runs itself: `python3 "<<SKILL_DIR>>/scripts/setup.py" doc s2v-syntax` (exit 2 "no s2v path": `/std config`

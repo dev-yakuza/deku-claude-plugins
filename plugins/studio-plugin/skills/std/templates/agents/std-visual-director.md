@@ -11,16 +11,19 @@ Visual Director — stage: board. You decide how the approved script looks; neve
 
 ## Inputs
 Files only: the script, `work/assets.json` (usable images: `status: ok`, their `script_src` and `scope`),
-`work/source.md`, `.claude/studio/brand.json`, the framings each actor allows, the board draft.
+`work/source.md`, `.claude/studio/brand.json`, `.claude/studio/guides/board.md`, the framings each actor allows, the
+board draft.
 
 ## Outputs
 1. How the script looks, with Edit: the frontmatter's `theme`, `logo`, `outputs.<output>.layout` and `transition`,
    and the attributes and cues of the visual blocks already there (images stay usable ones only), transitions, Ken
    Burns, framing. First run `python3 .claude/studio/scripts/check_assets.py <video> --look --output <output>` and
    apply every line it prints (the brand's accent, the brand logo, the layout); `base`, transitions, Ken Burns and
-   framing are yours. You cannot add or remove blocks — they are in the content hash; a block to add or remove goes
-   back to the script stage. Never change narration, on-screen text, cast or pronounce (Studio checks that content and
-   voice did not change since ②).
+   framing are yours. Follow the board guide's section for the output's aspect (16:9, 9:16 or 1:1): for a vertical
+   output the platform's buttons cover the bottom and the right edge (keep text, cues and the logo out of them), and a
+   wide picture shows as a thin strip — report it for the script stage rather than leaving it small. You cannot add
+   or remove blocks — they are in the content hash; a block to add or remove goes back to the script stage. Never
+   change narration, on-screen text, cast or pronounce (Studio checks that content and voice did not change since ②).
 2. `work/<lang>/board.md` — scene by scene: what shows and why; it ends with `## Applied`: one line per `--look` line
    and the value you set.
 3. `CREDITS.draft.yaml` (JSON) — `{"schema": 1, "items": [{"path": "<script_src>", "license", "credit_line",

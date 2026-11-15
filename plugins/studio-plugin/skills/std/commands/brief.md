@@ -18,6 +18,11 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
    strategist's own estimate is never used.
    - Exit 1: the estimate is outside the format's length range, a chosen claim is not in `work/source.md` (or its
      excerpt is not in the source copy), or the format cannot be read — spawn the strategist again with the message.
+   - Exit 1 naming a platform file (`.claude/studio/platforms/<name>.md`: unreadable, no `outputs`, a bad aspect or
+     shot, an output name twice): tell the person — only a person fixes it (`/std platform refresh <name>`).
+   - Exit 1 on the outputs (an output no platform of it declares, two shapes for one output, a platform that does not
+     accept the output's aspect, or a platform whose length limit does not fit this kind): spawn the strategist again
+     with the message.
    - Exit 3: the source's images are not checked (run `/std source` to its end), or approved outputs would be removed
      (ask the person; removing them is `exclude-output`).
 4. `python3 .claude/studio/scripts/state.py next <video>` — the next stage (script).

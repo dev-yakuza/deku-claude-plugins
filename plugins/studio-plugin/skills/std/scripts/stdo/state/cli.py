@@ -219,9 +219,9 @@ def _next(state, lang, ctx, o, providers):
         try:
             fm_lines = scriptlines.cast_lines(ctx["repo"], ctx["studio_root"], lang)
             more, notes = scriptlines.output_lines(ctx["repo"], state.get("kind"), schema.current_outputs(state, lang),
-                                                   schema.current_platforms(state, lang))
+                                                   current_platform_map(state, lang))
             fm_lines += more
-        except scriptlines.NotReady as e:
+        except (scriptlines.NotReady, scriptlines.PlanProblem) as e:
             _err(str(e))
             return C.FAIL
         except criteria.Missing as e:
@@ -333,6 +333,14 @@ def audience_missing(repo, platform, want, kind):
             "draft shows the lines to check)" % (platform, kind, want, "; ".join(lines), platform))
 
 
+def current_platform_map(state, lang):
+    """{platform: [output, …]} of the brief without the language's excluded outputs and platforms."""
+    outs = set(schema.current_outputs(state, lang))
+    m = {p: [x for x in state["brief"]["platforms"].get(p) or [] if x in outs]
+         for p in schema.current_platforms(state, lang)}
+    return {p: v for p, v in m.items() if v}
+
+
 def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock, cwd=None):
     src = o.get("--from")
     if not src:
@@ -385,6 +393,16 @@ def _record_brief(vdir, state, lang, ctx, o, providers, hooks, flock, cwd=None):
         stray = [x for x in outs if x not in outputs]
         if stray:
             raise schema.SchemaError("platform %s uses outputs outside the brief: %s" % (p, ", ".join(stray)))
+    # outputs are shared by name; one shape per output; the whole script plays in every output, so a platform whose
+    # limit is below the format's lower bound cannot be used for this kind (state/scriptlines.py)
+    try:
+        length = criteria.read(ctx["repo"], state.get("kind"))["length_seconds"]
+    except criteria.Missing as e:
+        raise schema.SchemaError("the format's criteria cannot be read (%s)" % e)
+    try:
+        scriptlines.output_plan(ctx["repo"], platforms, outputs, length)
+    except scriptlines.PlanProblem as e:
+        raise schema.SchemaError(str(e))
     if os.path.exists(ctx["script"]):
         # the brief comes before the script: only once a script exists are its outputs checked
         # (and `next` checks them on every call)

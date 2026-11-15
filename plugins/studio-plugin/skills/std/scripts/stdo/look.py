@@ -5,7 +5,8 @@ and whether the script has it.
   file, PNG or JPEG by its bytes, and brand.json and the logo committed (brand.json is not protected; a committed one
   is the person's, through a harness commit).
 - `check_assets.py <video> --look --output <o>` (`look_main`): the frontmatter lines the brand asks for — the theme's
-  accent, the logo, and the layout (no presenter layout without character art) — printed only, nothing written.
+  accent, the logo, and the layout (no presenter layout without character art; 9:16 and 1:1 outputs `shorts`) —
+  printed only, nothing written.
 - `problems(…)`: the board check's look rules; `layout_problem(…)`: the layout rule, shared with the script check
   (`mode="script"`: the layout from the frontmatter text, absent is fine; `mode="board"`: inspect's layout, where
   absent is s2v's default `presenter`).
@@ -26,6 +27,7 @@ FLOOR_REASON = "brand.json logo (committed in the harness)"
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 BASES = ("light", "dark")
 NEEDS_ART = ("presenter", "dialogue")
+PLAIN = ("fullscreen", "shorts")  # layouts that need no character art
 WIDE = "16:9"
 MAX_LOGO = 5 * 1024 * 1024  # a logo is small: a larger file is never read (nor hashed for the board's inputs)
 UNQUOTED_HASH = re.compile(r"""(?:^|[\s{,])accent\s*:\s*#""")
@@ -216,19 +218,26 @@ def cast_art(ins, output):
     return cast, art
 
 
+def plain_layout(aspect):
+    """The layout of an output without character art: fullscreen for 16:9; shorts for 9:16 and 1:1 — measured with s2v
+    0.13.2 (mock voice, no character): a vertical shorts and a fullscreen output differ only in the subtitles
+    (shorts defaults to word subtitles), and presenter draws the same as fullscreen."""
+    return "fullscreen" if (aspect or WIDE) == WIDE else "shorts"
+
+
 def layout_problem(layout, cast, art, mode, aspect=WIDE, output="youtube"):
-    """The layout rule: a 16:9 output shows no presenter or dialogue layout unless every speaking cast member has
-    character art (without art s2v draws no one). mode "script": an absent layout is fine (board sets it); "board":
-    absent is s2v's default presenter."""
-    if (aspect or WIDE) != WIDE or layout == "shorts":
+    """The layout rule, for every aspect: no presenter or dialogue layout unless every speaking cast member has
+    character art (without art s2v draws no one; dialogue draws circles). mode "script": an absent layout is fine
+    (board sets it); "board": absent is s2v's default presenter."""
+    if layout in PLAIN:
         return None
     if layout is None:
         if mode == "script":
             return None
         layout = "presenter"
     if layout in NEEDS_ART and not (cast and cast <= art):
-        return ("outputs.%s.layout is %s, which shows no one without character art — use fullscreen "
-                "(check_assets.py <video> --look --output %s)" % (output, layout, output))
+        return ("outputs.%s.layout is %s, which shows no one without character art — use %s "
+                "(check_assets.py <video> --look --output %s)" % (output, layout, plain_layout(aspect), output))
     return None
 
 
@@ -244,9 +253,15 @@ def required(bl, brand, ins, output):
     out = [("theme.accent", '"%s"' % brand["accent_color"])]
     out.append(("logo.src", '"%s"' % bl["script_src"]) if bl else ("logo", "none"))
     info = _output_info(ins, output)
-    if (info.get("aspect") or WIDE) == WIDE and info.get("layout") != "shorts":
-        cast, art = cast_art(ins, output)
-        out.append(("outputs.%s.layout" % output, "presenter" if cast and cast <= art else "fullscreen"))
+    cast, art = cast_art(ins, output)
+    if (info.get("aspect") or WIDE) == WIDE:
+        if info.get("layout") != "shorts":
+            out.append(("outputs.%s.layout" % output, "presenter" if cast and cast <= art else "fullscreen"))
+    else:  # 9:16 and 1:1: a line only to change the layout — to shorts (a platform's fullscreen stays; presenter or
+        # dialogue only with every speaker's art)
+        lay = info.get("layout")
+        if not (lay in PLAIN or (lay in NEEDS_ART and cast and cast <= art)):
+            out.append(("outputs.%s.layout" % output, plain_layout(info.get("aspect"))))
     return out
 
 

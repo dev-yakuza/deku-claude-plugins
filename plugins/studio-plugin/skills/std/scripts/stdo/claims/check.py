@@ -488,26 +488,39 @@ def target_range(ls):
     return (lo, hi) if lo <= hi else None
 
 
-def length_problems(script_text, outputs, crit, sentences, lang, fmt="the format file"):
-    """maxDuration is the format's upper bound for every output of the brief, targetDuration lies in target_range
-    (so that s2v lint's pass means its estimate is in the format's range), and the narration itself (normalized
-    characters ÷ chars_per_sec) is in the format's range too — Studio's own estimate, which catches a far-off script
-    before lint. `fmt`: the format file, named when its range is too narrow."""
+def length_problems(script_text, outputs, crit, sentences, lang, fmt="the format file", maxes=None, check_max=True):
+    """maxDuration is the format's upper bound for every output of the brief — or `maxes[output]` when a platform of
+    the brief allows less (state/scriptlines.output_plan) —, targetDuration lies in target_range of the format's range
+    up to the smallest of them (so that s2v lint's pass means its estimate is in that range: the whole script plays in
+    every output), and the narration itself (normalized characters ÷ chars_per_sec) is in the format's range too —
+    Studio's own estimate, which catches a far-off script before lint. `fmt`: the format file, named when its range is
+    too narrow. `check_max=False`: the outputs' shapes are unknown (the platform files are reported instead), so no
+    maxDuration line is judged."""
     ls, cps = crit["length_seconds"], crit["chars_per_sec"].get(lang)
+    fmt_range = ls
     fm = _frontmatter(script_text or "")
     out = []
-    for o in outputs:
-        md = max_duration(fm, o)
-        if md != ls["max"]:
-            out.append("outputs.%s.maxDuration must be the format's upper bound %s (it is %s)"
-                       % (o, ls["max"], "missing" if md is None else md))
+    maxes = maxes or {}
+    for o in outputs if check_max else ():
+        md, want = max_duration(fm, o), maxes.get(o, ls["max"])
+        if md != want:
+            out.append("outputs.%s.maxDuration must be %s %s (it is %s)"
+                       % (o, "the format's upper bound" if want == ls["max"] else "the smallest platform limit",
+                          want, "missing" if md is None else md))
+    top = min([ls["max"]] + [maxes.get(o, ls["max"]) for o in outputs])
+    if top != ls["max"]:
+        ls = {"min": ls["min"], "max": top}
     m = re.search(r"^targetDuration:\s*(\S+)", fm, re.M)
     target = _number(m.group(1)) if m else None
     rng = target_range(ls)
-    if rng is None:
+    if rng is None and target_range(fmt_range) is not None:  # only the platform limit leaves no room
+        out.append("the length range %s–%s s (up to the smallest platform limit) is too narrow for s2v's ±%d %% "
+                   "targetDuration tolerance: record the brief again without that platform (record-brief refuses it "
+                   "now)" % (ls["min"], ls["max"], round(S2V_TARGET_TOLERANCE * 100)))
+    elif rng is None:
         out.append("the format's length range %s–%s s is too narrow for s2v's ±%d %% targetDuration tolerance (max ÷ "
                    "min must be at least about 1.353): a person widens length_seconds in %s"
-                   % (ls["min"], ls["max"], round(S2V_TARGET_TOLERANCE * 100), fmt))
+                   % (fmt_range["min"], fmt_range["max"], round(S2V_TARGET_TOLERANCE * 100), fmt))
     elif target is None or not rng[0] <= target <= rng[1]:
         out.append("targetDuration must be a number within %d–%d s (it is %s): s2v lint passes when its estimate is "
                    "within ±%d %% of targetDuration, and only this range keeps that estimate inside the format's "

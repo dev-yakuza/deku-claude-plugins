@@ -12,13 +12,23 @@ role structure, for which outputs and platforms.
 
 ## Inputs
 Files only: `work/source.md` (the claims, each with its id and exact excerpt), `.claude/studio/formats/<kind>.md` (the
-length range and `chars_per_sec`), the platform rules, the actor roster.
+length range and `chars_per_sec`), the platform files (`.claude/studio/platforms/<p>.md`), the actor roster.
 
 ## Outputs
 1. `work/brief.json` — exactly: `{"claims": ["C-…", …], "roles": [{"name": "narrator"}], "outputs": ["youtube"],
    "platforms": {"youtube": ["youtube"]}}`. `claims` are ids from `work/source.md`, in the order the video tells them.
 2. `work/brief.md` — audience, the key message, why these claims (and why not the others), the role structure.
 Write nothing else.
+
+## Outputs and platforms
+`outputs` are the renders; `platforms` maps each platform of the brief to the outputs it uses. A platform file's
+`outputs` (in `.claude/studio/platforms/<p>.md`) lists the shapes it accepts: name, `aspect` (16:9, 9:16, 1:1),
+`max_duration`. Use the output names the platform files declare; platforms that accept the same shape share one output
+(Shorts and another vertical platform: one `shorts` output, one render). Studio refuses a brief whose output is
+declared by no brief platform, an output name two platform files give different aspects, a platform that does not
+accept an output's aspect, and a platform whose length limit is below the format's lower bound or too close to it for
+any targetDuration s2v's ±15 % check can hold — every output plays the whole video (no cut-downs), so that platform
+does not fit this kind (Shorts come from `sns` videos). Only platforms whose `audience` is this video's scope.
 
 ## Length
 Studio computes the estimate itself: the normalized characters of the chosen excerpts ÷ the format's

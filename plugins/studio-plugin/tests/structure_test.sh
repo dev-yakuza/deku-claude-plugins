@@ -428,7 +428,7 @@ LEGACY_DEPS_HEAD = {
 # commit/video.py lazily, and video.py loads credits.py; the closure test below runs them). Intended changes since
 # d2028cc, each with a one-line reason:
 LEGACY_DEPS_CHANGED = {
-    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26 · 0.1.2: SCRIPTS_VERSION 27 · 0.2.0: SCRIPTS_VERSION 28 · 0.2.1: 29",
+    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26 · 0.1.2: SCRIPTS_VERSION 27 · 0.2.0: SCRIPTS_VERSION 28 · 0.2.1: 29 · 0.2.2: 30",
     "stdo/commit/approvals.py": "0.2.0: light_check(local_done=True) for a local video's done (the default unchanged)",
     "stdo/commit/video.py": "0.2.0: the copy path through stdo/vpaths.py (unchanged for a public video); a public "
                             "video's assets.json from a check_scope without the internal flag is not checked",
@@ -488,7 +488,9 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "29", "SCRIPTS_VERSION is 29 (0.2.1: platform rules v2 — distribute/rules.py and check.py, "
+check(sv and sv.group(1) == "30", "SCRIPTS_VERSION is 30 (0.2.2: outputs shared by name, their shapes from the "
+      "platform files at record-brief and in the script lines, vertical and square look rules — state/scriptlines.py "
+      "and cli.py, claims/ check and cli, look.py; 0.2.1: platform rules v2 — distribute/rules.py and check.py, "
       "record-brief's unchecked-platform warning; 0.2.0: four video kinds, a local video's files under "
       "<sr>/local/ (vpaths.py), per-scope checks, local done; 0.1.2: teaching notes — claims/ with the new notes.py, "
       "distribute/factcheck.py, state/ gates, collect, tuples, router, schema — and role models in commit/ summary, "
@@ -671,8 +673,8 @@ for _n, _t in (("guides/board.md", _gb), ("std-visual-director.md", _vd), ("comm
           "%s lets board change the frontmatter's theme, logo and transition (0.0.26 P16)" % _n)
 check("## Applied" in _vd, "std-visual-director.md: board.md ends with ## Applied (0.0.26)")
 _wr, _gs = _f("templates", "agents", "std-writer.md"), _f("templates", "guides", "script.md")
-check("Never write `layout` yourself" in _wr and "keep what board wrote" in _wr,
-      "std-writer.md: never write layout, keep what board wrote (0.0.26)")
+check("Never write a `layout` the printed lines do not give" in _wr and "keep what board wrote" in _wr,
+      "std-writer.md: no layout beyond the printed lines, keep what board wrote (0.0.26; 0.2.2 a platform's layout)")
 for _n, _t in (("std-writer.md", _wr), ("guides/script.md", _gs)):
     check("Scene 1 is the title scene" in _t and "unused_images" in _t,
           "%s: the title scene and unused_images (0.0.26 P16 · P17)" % _n)

@@ -40,15 +40,26 @@ def more_platforms(case):
     `audience` (brief_ready writes the files)."""
 
 
+# the outputs every test platform file declares (record-brief reads them, 0.2.2): the tests' output names, plus one
+# named after the platform
+OUTPUTS = (("youtube", "16:9"), ("shorts", "9:16"))
+
+
+def platform_outputs(name):
+    outs = list(OUTPUTS) + ([] if name in dict(OUTPUTS) else [(name, "16:9")])
+    return "outputs:\n" + "".join("  - name: %s\n    aspect: \"%s\"\n    max_duration: null\n" % o for o in outs)
+
+
 def write_platforms(repo, names=PLATFORMS, audience="public", commit=True):
-    """Platform files with an `audience` (what record-brief reads); an existing file is kept."""
+    """Platform files with an `audience` and `outputs` (what record-brief reads); an existing file is kept."""
     d = os.path.join(repo, ".claude", "studio", "platforms")
     os.makedirs(d, exist_ok=True)
     for n in names:
         p = os.path.join(d, "%s.md" % n)
         if not os.path.exists(p):
             with open(p, "w", encoding="utf-8") as f:
-                f.write("---\nplatform: %s\naudience: %s\nchecked: \"\"\n---\n# %s\n" % (n, audience, n))
+                f.write("---\nplatform: %s\naudience: %s\nchecked: \"\"\n%s---\n# %s\n"
+                        % (n, audience, platform_outputs(n), n))
     if commit:
         helpers.git(repo, "add", "-A", ".claude/studio/platforms")
         helpers.git(repo, "commit", "-q", "--no-verify", "--allow-empty", "-m", "platforms")

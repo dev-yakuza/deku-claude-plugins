@@ -1,8 +1,9 @@
 # BOARD
 
-The board stage, visual-check and gate ③, per output (`youtube` for now): the visual director decides how the
-approved script looks, the person approves each picture's credits, Studio checks every picture, s2v takes stills, and
-the person approves them.
+The board stage, visual-check and gate ③, per output of the brief (the steps below say `youtube` — run them for every
+output with its name; a 9:16 or 1:1 output's layout is `shorts`, the `--look` line): the visual director decides how
+the approved script looks, the person approves each picture's credits, Studio checks every picture, s2v takes stills,
+and the person approves them.
 
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`. The video id is the first argument of `/std board`.

@@ -183,7 +183,8 @@ class Layout(unittest.TestCase):
         self.assertIsNone(look.layout_problem("fullscreen", *no_art, mode="board"))
         self.assertIsNone(look.layout_problem("presenter", {"a"}, {"a"}, mode="board"))  # every speaker has art
         self.assertIsNotNone(look.layout_problem("presenter", {"a", "b"}, {"a"}, mode="board"))
-        self.assertIsNone(look.layout_problem("presenter", *no_art, mode="board", aspect="9:16"))
+        # 0.2.2: 9:16 and 1:1 too — shorts there
+        self.assertIn("use shorts", look.layout_problem("presenter", *no_art, mode="board", aspect="9:16"))
         self.assertIsNone(look.layout_problem("shorts", *no_art, mode="board"))
 
     def test_invalid_art_does_not_count(self):
@@ -660,7 +661,7 @@ class Text(unittest.TestCase):
     def test_writer_and_script_guide(self):
         w = flat(read(SKILL, "templates", "agents", "std-writer.md"))
         s = flat(read(SKILL, "templates", "guides", "script.md"))
-        self.assertIn("Never write `layout` yourself", w)
+        self.assertIn("Never write a `layout` the printed lines do not give", w)
         self.assertIn("keep what board wrote", w)
         for t in (w, s):
             self.assertIn("Scene 1 is the title scene", t)
@@ -677,15 +678,15 @@ class Text(unittest.TestCase):
 
     def test_versions(self):
         from stdo import SCRIPTS_VERSION
-        self.assertEqual(SCRIPTS_VERSION, "29")
+        self.assertEqual(SCRIPTS_VERSION, "30")
         with open(os.path.join(helpers.PLUGIN, ".claude-plugin", "plugin.json")) as f:
-            self.assertEqual(json.load(f)["version"], "0.2.1")
+            self.assertEqual(json.load(f)["version"], "0.2.2")
         for n, notes in (("README.md", "## Version notes"), ("README.ko.md", "## 버전 노트"),
                          ("README.ja.md", "## バージョンノート")):
             text = read(helpers.PLUGIN, n)
             self.assertIn(notes, text, n)
-            self.assertIn("0.2.1", text.split(notes)[1], n)
-        self.assertIn("0.2.1", read(helpers.PLUGIN, "tests", "README.md"))
+            self.assertIn("0.2.2", text.split(notes)[1], n)
+        self.assertIn("0.2.2", read(helpers.PLUGIN, "tests", "README.md"))
 
 
 if __name__ == "__main__":

@@ -118,10 +118,20 @@ def script_check(repo, vdir, state, lang, ctx, providers, env, runner):
     from .. import criteria, look
     with open(ctx["script"], encoding="utf-8") as f:
         text = f.read()
+    from ..state import scriptlines
+    outputs = schema.current_outputs(state, lang)
+    plan, planned = {}, True
     try:
         crit = criteria.read(repo, state.get("kind"))
-        problems += check.length_problems(text, schema.current_outputs(state, lang), crit, sentences, lang,
-                                          os.path.relpath(criteria.path(repo, state.get("kind")), repo))
+        try:  # the shapes `next --enter script` printed (the brief's platform files)
+            plan = scriptlines.output_plan(repo, scli.current_platform_map(state, lang), outputs,
+                                           crit["length_seconds"])
+        except scriptlines.PlanProblem as e:
+            problems.append(str(e))
+            planned = False  # no maxDuration verdict on shapes that are not known
+        problems += check.length_problems(text, outputs, crit, sentences, lang,
+                                          os.path.relpath(criteria.path(repo, state.get("kind")), repo),
+                                          maxes={o: x["max"] for o, x in plan.items()}, check_max=planned)
     except criteria.Missing as e:
         problems.append("the format's criteria cannot be read (%s)" % e)
     assets_data = assets_mod.read(vdir)
@@ -130,9 +140,13 @@ def script_check(repo, vdir, state, lang, ctx, providers, env, runner):
     problems += check.unused_problems(ins, assets_data, cm)
     problems += check.title_scene_problems(text)
     outs = look.outputs_of(text)
-    for o in schema.current_outputs(state, lang):
+    for o in outputs:
         cast, art = look.cast_art(ins, o)
         attrs = outs.get(o) or {}
+        want = (plan.get(o) or {}).get("aspect")
+        if want and attrs.get("aspect") and attrs.get("aspect") != want:  # a missing aspect: s2v lint's error
+            problems.append("outputs.%s.aspect must be \"%s\" (the brief's platform files; it is %s) — the line "
+                            "`state.py next <video> --enter script` prints" % (o, want, attrs.get("aspect")))
         lp = look.layout_problem(attrs.get("layout"), cast, art, "script", attrs.get("aspect"), o)
         if lp:
             problems.append(lp)
