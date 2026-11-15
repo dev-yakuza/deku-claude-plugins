@@ -33,8 +33,8 @@ def problem(worktree, uses_repo_copy):
     if have == "unreadable":
         return "the repository copy of Studio's scripts has no readable SCRIPTS_VERSION"
     # 0.1.1 (fix-0029 §3): the frozen copy (legacy/version.py, legacy/approve.py) keeps its milestone wording; G1
-    # checks the same conditions with the same inputs first, so its text is the one shown, except after a `source`
-    # (where only the 0.0.26 rules judge)
+    # checks the same conditions with the same inputs first, so its text is the one shown (0.1.4: after a `source`
+    # too — G1 judges the rest of the call before the 0.0.26 guard)
     if have < mine:
         return ("the repository's Studio scripts are version %d and the plugin's are %d — update them with "
                 "/std update" % (have, mine))

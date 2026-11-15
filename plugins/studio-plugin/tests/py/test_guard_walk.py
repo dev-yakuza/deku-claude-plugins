@@ -137,14 +137,21 @@ class Cwd(GuardCase):
         self.assertEqual(self.cw(r, "rm"), [])
 
     def test_source(self):
-        # fix20: the walk stops at a source — what follows is judged by the 0.0.26 rules alone (backstop)
+        # fix20: a source routes the call to the 0.0.26 guard too; 0.1.4 (fix-0104 §1.4): the walk goes on — a file it
+        # cannot read (here: none) leaves the folder unknown, or the folder before (judged there too)
         r = self.ok("source ./env.sh; rm y")
         self.assertTrue(r.sourced)
-        self.assertEqual([c.prog for c in r.commands], ["source"])
-        self.assertNotIn("source", self.kinds(r))  # the user's file is not read (the 0.0.26 guard reads it)
+        self.assertEqual([c.prog for c in r.commands], ["source", "rm", "rm"])
+        self.assertEqual(sorted(tuple(c.cwds) for c in r.commands if c.prog == "rm"), [(), (self.root,)])
+        self.assertNotIn("source", self.kinds(r))  # nothing read: no text to search
+        with open(os.path.join(self.root, "env2.sh"), "w") as f:
+            f.write("export A=1\ncd sub\n")
+        r = self.ok("source ./env2.sh; rm y")  # a file it can read: walked in this shell
+        self.assertEqual([c.prog for c in r.commands], ["export", "cd", "source", "rm"])
+        self.assertEqual(self.cw(r, "rm"), [self.R("sub")])
         r = self.ok("rm x; source /dev/stdin <<< 'rm z'; rm y")
-        self.assertEqual([c.prog for c in r.commands], ["rm", "source"])
-        self.assertIn("source", self.kinds(r))  # code given in the call itself: judged as a nested string
+        self.assertEqual([c.prog for c in r.commands], ["rm", "rm", "source", "rm"])
+        self.assertIn("source", self.kinds(r))  # code given in the call itself: judged as a nested string too
 
     def test_cwd_options(self):
         for cmd, prog in (("yarn --cwd sub x", "yarn"), ("yarn --cwd=sub x", "yarn"), ("npm --prefix sub run x", "npm"),
@@ -1361,7 +1368,9 @@ cacheany () {
                     "setopt globsubst; ls ${(P)X}"):
             self.assertTrue(qual(cmd), cmd)
         self.assertTrue(qual("setopt globsubst; X='*(e:x:)'; a=($X)"))
-        self.assertTrue(self.ok('eval "$O"; ls $X').sourced)  # fix20: the walk stops (the 0.0.26 rules judge it)
+        r = self.ok('eval "$O"; ls $X')
+        self.assertTrue(r.sourced)  # fix20: routed to the 0.0.26 guard too; 0.1.4: the walk goes on
+        self.assertTrue(qual('eval "$O"; ls $X'))
 
     def test_quoted_pattern_characters(self):  # conf M-2
         w = [w for w in self.one(self.ok("touch 'a(1).txt' b\\(2\\).txt c*.txt \"d[1]\"*"), "touch").words[1:]]

@@ -46,7 +46,7 @@ check(bool(sv) and sv.group(1).isdigit(), "SCRIPTS_VERSION is a whole number (bu
 mp = os.path.normpath(os.path.join(plugin, "..", "..", ".claude-plugin", "marketplace.json"))
 entries = [p for p in json.load(open(mp)).get("plugins", []) if p.get("name") == "studio-plugin"] \
     if os.path.exists(mp) else []
-check(len(entries) == 1, "the marketplace has one studio-plugin entry (0.1.3, m1k-plan item 7)")
+check(len(entries) == 1, "the marketplace has one studio-plugin entry (0.1.4, m1k-plan item 7)")
 for k, want in (("version", pj.get("version")), ("description", pj.get("description")),
                 ("source", "./plugins/studio-plugin")):
     check(bool(entries) and entries[0].get(k) == want, "the marketplace entry's %s is plugin.json's" % k)
@@ -342,12 +342,25 @@ for _n, _h in sorted(LEGACY_HEAD.items()):
 probe = _sp.run([sys.executable, "-B", "-c", "import sys; sys.path.insert(0, %r); import stdo.guard.judge, "
                  "stdo.guard.backstop; print(any(m.startswith('stdo.guard.legacy') for m in sys.modules))"
                  % os.path.join(skill, "scripts")], capture_output=True, text=True)
-check(probe.stdout.strip() == "False", "importing the guard does not import guard/legacy (loaded only after G1 passes, "
-      "or for its push / commit check) (%s)" % (probe.stdout.strip() or probe.stderr.strip()[-200:]))
+check(probe.stdout.strip() == "False", "importing the guard does not import guard/legacy (loaded only for a call "
+      "with a source, after effects G1 cannot read, or that G1 stopped early) (%s)"
+      % (probe.stdout.strip() or probe.stderr.strip()[-200:]))
 _jb = open(os.path.join(gdir, "judge.py")).read()
+_bs = open(os.path.join(gdir, "backstop.py")).read()
 check("push.check(" not in _jb and "commitrule.evaluate(" not in _jb and "backstop.shared_push(" in _jb and
-      "backstop.shared_commit(" in _jb, "the guard's push / commit checks are the frozen 0.0.26 ones, shared with the "
-      "backstop (backstop.shared_push / shared_commit; P20-4)")
+      "backstop.shared_commit(" in _jb and "from . import commitrule as gc, push as gp" in _bs and
+      "_own_checks()[0].check(" in _bs and "_own_checks()[1].evaluate(" in _bs,
+      "the guard's push / commit checks are its own, shared with the backstop (backstop.shared_push / shared_commit; "
+      "P20-4, 0.1.4)")
+# 0.1.4: a call with no source, judged to its end by G1 (class N), never reaches the frozen guard — in backstop.decide
+# the return guarded by `not g.unread and complete` comes before the only `_legacy()` call
+import ast as _ast
+_dec = next(n for n in _ast.parse(_bs).body if isinstance(n, _ast.FunctionDef) and n.name == "decide")
+_ret = [n for n in _ast.walk(_dec) if isinstance(n, _ast.If) and _ast.unparse(n.test) == "not g.unread and complete"
+        and isinstance(n.body[-1], _ast.Return)] if hasattr(_ast, "unparse") else []
+_leg = [n for n in _ast.walk(_dec) if isinstance(n, _ast.Call) and getattr(n.func, "id", None) == "_legacy"]
+check(len(_ret) == 1 and len(_leg) == 1 and _ret[0].lineno < _leg[0].lineno,
+      "backstop.decide returns G1's answer for a class N call before the frozen guard is loaded (0.1.4)")
 # fix-0029 §1.3: the backstop changes exactly three functions of the frozen copy (push.check, commitrule.evaluate,
 # snapshot.split_line), each a wrapper around the frozen one; no other module attribute of guard/legacy changes
 probe = _sp.run([sys.executable, "-B", "-c", r"""

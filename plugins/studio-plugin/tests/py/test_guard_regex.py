@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -289,7 +290,9 @@ class ArithCap(GuardCase):
 # ---- the process timer (fix-0103 §3) ----
 
 DEADLINE_TEXT = "Studio guard [G-LIMIT]: the call needs more checks than the guard's time allows"
-SED_ROW = "sed -n -e '" + "\n" * 6000 + "p' a.txt"  # the frozen copy's sed regex is cubic on blank lines
+# the frozen copy's sed regex is cubic on blank lines; 0.1.4: a source in a function the call defines (never called)
+# routes the call to it (G1 alone is linear) and leaves its sed check as without it
+SED_ROW = "f(){ source /dev/null; }; sed -n -e '" + "\n" * 6000 + "p' a.txt"
 _PLAIN = {}
 
 
@@ -306,7 +309,15 @@ def setUpModule():
     t0 = time.monotonic()
     p.stdin.write(json.dumps(hook).encode())  # ~6 KB: within the pipe's buffer
     p.stdin.close()
-    _PLAIN.update(root=root, proc=p, t0=t0)
+    p.stdin = None  # written and closed (Python 3.9's communicate flushes it otherwise)
+
+    def collect():
+        # the process's own run time, not the time until its test is reached (the module's other tests run first)
+        _PLAIN["result"] = p.communicate(timeout=60)
+        _PLAIN["dt"] = time.monotonic() - t0
+    th = threading.Thread(target=collect, daemon=True)
+    th.start()
+    _PLAIN.update(root=root, proc=p, t0=t0, thread=th)
 
 
 def tearDownModule():
@@ -365,9 +376,9 @@ class HookDeadline(TB.BackstopCase):
 
     def test_plain_folder_sed_row(self):
         p = _PLAIN["proc"]
-        p.stdin = None  # written and closed in setUpModule (Python 3.9's communicate flushes it otherwise)
-        out, err = p.communicate(timeout=60)
-        dt = time.monotonic() - _PLAIN["t0"]
+        _PLAIN["thread"].join(60)
+        out, err = _PLAIN["result"]
+        dt = _PLAIN["dt"]
         self.assertEqual(p.returncode, 0, err[-800:])
         lines = _deny_lines(out.decode())
         self.assertEqual(len(lines), 1)
@@ -389,7 +400,7 @@ class HookDeadline(TB.BackstopCase):
         self.assertGreaterEqual(dt, 5.0)
 
     def test_frozen_overrun_has_no_effects(self):
-        r, dt = self.drive("legacy_sleep", TB.APPROVE)
+        r, dt = self.drive("legacy_sleep", TB.APPROVE + "; source /dev/null")  # 0.1.4: both guards judge it
         self.assert_limit(r, dt)
         self.assertFalse(os.path.exists(self.local("pending-approval.json")))
         self.assertFalse(os.path.exists(self.local("guard-ran.json")))

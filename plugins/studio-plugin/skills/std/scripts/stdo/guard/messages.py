@@ -52,6 +52,9 @@ def alias_sources(cmd):
             out.append('alias "%s" is "%s" in %d of %d recent shell snapshots%s — write "%s" directly.'
                        % (s["name"], s["value"], s["in"], s["of"],
                           (" and differs or is absent in %d" % rest) if rest else "", s["value"]))
+    via = getattr(cmd, "via_source", None)
+    if via:
+        out.append("(run by %s, which this command sources.)" % via)  # fix-0104 §1.4: a file walked in this shell
     return out
 
 

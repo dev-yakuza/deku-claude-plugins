@@ -80,8 +80,11 @@ class Context(object):
         self.commit_memo = {}  # review 17 (C17-4): the commit check of one command's readings (judge_git)
         # review 19 (C19-2): push / commit checks of commands in nested strings, shared by identical ones (_nested_key)
         self.nested_memo = {}
-        # fix20: a scan of this call stopped at a `source` / `.` (judge._scan) — the rest is the 0.0.26 guard's alone
+        # fix20, fix-0104 §1.5: a scan of this call ran a `source` / `.` (judge._scan); `unread`: that, or effects this
+        # guard cannot read (a function, a hook) — the 0.0.26 guard judges the call too (backstop.decide)
         self.sourced = False
+        self.unread = False
+        self.fn_memo = {}  # fix-0104 §1.4d: the snapshot's function text, searched once per call (check_opaque)
 
     @property
     def current(self):
@@ -892,11 +895,14 @@ class Nested(object):
 
 
 def _scan(ctx, *args, **kw):
-    """scan_command, noting a `source` / `.` (or eval text that may run one) where the walk stopped: what follows it is
-    judged by the 0.0.26 rules only, and the 0.0.26 guard's finish runs for the call (fix20, backstop.decide)."""
+    """scan_command, noting a `source` / `.` (or eval text that may run one) or effects this guard cannot read in any
+    scan of the call, nested strings included: the 0.0.26 guard then judges the call too, and its finish runs (fix20,
+    fix-0104 §1.5, backstop.decide)."""
     sub = scan_command(*args, **kw)
     if getattr(sub, "sourced", False):
         ctx.sourced = True
+    if getattr(sub, "unread", False) or getattr(sub, "sourced", False):
+        ctx.unread = True
     return sub
 
 
@@ -913,8 +919,8 @@ def nested_scans(ctx, sc, budget, depth=0, tree=None, seen=None, home=None):
     by_id = {c.id: c for c in sc.commands}
     kids = tree.setdefault(id(sc), [])
     for o in sc.opaque:
-        if o.kind not in INNER_KINDS:
-            continue
+        if o.kind not in INNER_KINDS or (o.kind == "source" and o.origin == "file"):
+            continue  # fix-0104 §1.4: a sourced file not walked is searched for Studio terms only (check_opaque)
         host = by_id.get(o.cmd)
         if host is not None and "exec-template" in (host.ctx or ()):
             continue  # the template of an xargs/find -exec (judged as the template command)
@@ -1234,6 +1240,8 @@ def bulk_then_write(ctx, commands, bulk_ids):
     (what the bulk writer put down could be moved into Studio's folders before the guard sees it)."""
     seen = []
     for c in commands:
+        if "source-read" in c.flags and all(getattr(b, "via_source", None) for b in seen):
+            continue  # fix-0104 §1.4: the file's own extraction is followed by its own commands, not by the `source`
         if seen and is_writer(c) and any(not other_reading(b, c) for b in seen):
             ctx.deny("G-PROT", "%s runs after an archive extraction or a recursive copy in the same call — run the "
                                "extraction or copy alone, then run the next step in a separate call."
@@ -1269,6 +1277,30 @@ def is_writer(c):
     if prog == "git" and c.git is not None and c.git.sub in protect.GIT_READ:
         return False
     return True
+
+
+# fix-0104 §1.4 (review 1 M3): builtins that change only the shell's own state, and the programs a virtual
+# environment's activate (or a similar file) asks about the system without writing a file
+SHELL_STATE = {"export", "unset", "hash", "typeset", "declare", "local", "readonly", "integer", "float", "alias",
+               "unalias", "set", "setopt", "unsetopt", "shift", "return", "unfunction", "rehash", "true", "false", ":",
+               "test", "[", "[[", "uname", "cygpath", "id", "whoami", "hostname", "tty", "locale"}
+
+
+def sourced_writer(c):
+    """For the `**` listing (G1 §2): a `source` the guard read (walk.b_source: classes 1-3) writes nothing itself —
+    the file's own commands, walked in this shell, count; among them a builtin that changes only the shell's state,
+    a call of a function defined here (its body's commands count) and an assignment write no file, and an output to
+    /dev/null is no write."""
+    if "source-read" in c.flags:
+        return False
+    if any(r.target is not None and r.mode in ("write", "append", "rw") and r.target.value != "/dev/null"
+           for r in c.redirs):
+        return True
+    if c.wrappers:
+        return True
+    if not c.words or "inline-function" in c.flags or (c.prog in SHELL_STATE and not c.wrappers):
+        return False
+    return is_writer(c)
 
 
 # ---- sed: an allowlist of shapes (fix-0025-plan §1, pilot-2 P11) ----
@@ -2920,7 +2952,8 @@ def decide_bash(ctx, command):
         ctx.current = c
         check_out_of_repo(ctx, c)
         check_paths(ctx, c, infos)
-        if is_writer(c) or c.wrappers:
+        if sourced_writer(c) if (getattr(c, "via_source", None) or "source-read" in c.flags) else \
+                (is_writer(c) or c.wrappers):
             ctx.earlier_write = True
     ctx.current = None
     ctx.earlier_write = True  # the strings run from text: the static rule
@@ -3297,6 +3330,11 @@ def check_zsh(ctx, scans, infos):
                 why = "zstyle -e (its value is evaluated as code by zstyle -s)"
             elif k == "zstyle":
                 why = cmdopts.zstyle_problem(vals)
+            elif "shadowed-name" in c.flags:
+                # fix-0104 §1.4b: a name a function of yours (or this call) hashed, autoloaded or turned off — what it
+                # runs here is not the program the guard reads, by any route (command, exec, env, a subshell, …)
+                why = "\"%s\" may run something else than the command so named (a shell function hashed, autoloaded " \
+                      "or disabled it)" % c.prog
             if why:
                 ctx.deny("G-OPAQUE", "%s — the guard does not follow it in a Studio repository; run the commands "
                                      "directly, one step per call." % why)
@@ -3324,8 +3362,8 @@ def check_command_values(ctx, c, infos):
     if k != "git" or g is None:
         return
     if env.unknown:
-        # m5: `eval`, env --env0-from, a function: what git reads is in effect but unknown (§1.9). (fix20: after a
-        # `source` this guard judges nothing — the 0.0.26 rules do, backstop.decide)
+        # m5: `eval`, env --env0-from, a function, a sourced file the guard does not read: what git reads is in effect
+        # but unknown (§1.9)
         ctx.deny("G-OPAQUE", "git runs with environment variables the guard cannot read (set by `eval`, env "
                              "--env0-from or a shell function that exports or assigns variables) in a Studio "
                              "repository — they may move where git reads its settings, which can run commands.")
@@ -4418,16 +4456,32 @@ def check_opaque(ctx, o, cmd, terms, infos, src_notes):
         if not (work or "tmp" in cls or "scratch" in cls):
             return
     hits = terms.find(o.payload) if o.payload is not None else []
+    shared = getattr(o, "shared_text", None)
+    if not hits and shared is not None:
+        # fix-0104 §1.4d: a snapshot function call carries the text of every snapshot function — searched once per
+        # call, whatever the number of calls
+        key = ("hits", id(shared), id(terms))
+        if key not in ctx.fn_memo:
+            ctx.fn_memo[key] = (shared, terms.find(shared))
+        hits = ctx.fn_memo[key][1]
     lit_hit = None
     if cmd is not None:
         for lit in o.literals or []:
             if "/" not in lit:
                 continue
-            for a, real, ri in resolve_all(ctx, cmd, lit):
-                if ri is not None and ri.studio and real is not None:
-                    parts, fold = rel(ctx, ri, real)
-                    if parts is not None and protect.classify(parts, ri.studio_root, fold, include_local=True):
-                        lit_hit = lit
+            if literal_protected(ctx, cmd, lit):
+                lit_hit = lit
+        for lit in getattr(o, "shared_literals", None) or ():
+            if lit_hit is not None:
+                break
+            if "/" not in lit:
+                continue
+            key = ("lit", lit, tuple(run_folders(cmd)) if not os.path.isabs(lit) else None,
+                   getattr(cmd, "home", None) if lit.startswith("~") else None)
+            if key not in ctx.fn_memo:
+                ctx.fn_memo[key] = literal_protected(ctx, cmd, lit)  # review 7 NIT: each literal once per call
+            if ctx.fn_memo[key]:
+                lit_hit = lit
     sources = messages.alias_sources(cmd) if cmd is not None else []
     if hits or lit_hit:
         what = hits[0].term if hits else lit_hit
@@ -4437,6 +4491,17 @@ def check_opaque(ctx, o, cmd, terms, infos, src_notes):
     elif o.hits_unknown and studio_related(ctx, cmd, infos):
         ctx.deny("G-OPAQUE", "%s runs code the guard cannot read in a Studio context — run the commands directly."
                  % o.kind, sources + src_notes)
+
+
+def literal_protected(ctx, cmd, lit):
+    """Whether a literal path in code the guard cannot read names a protected Studio file from the command's
+    folders."""
+    for _a, real, ri in resolve_all(ctx, cmd, lit):
+        if ri is not None and ri.studio and real is not None:
+            parts, fold = rel(ctx, ri, real)
+            if parts is not None and protect.classify(parts, ri.studio_root, fold, include_local=True):
+                return True
+    return False
 
 
 INTERP_KINDS = ("interp-inline", "stdin-interp", "heredoc-interp", "herestring-interp")
@@ -4826,7 +4891,8 @@ def record_run(ctx):
         ranlog.record(ri.worktree, sid, may_create=os.path.isdir(local) or has_exclude_block(ri))
 
 
-# fix20: every call is judged by this guard and by the 0.0.26 guard (guard/legacy, frozen); `decide` IS the backstop's
+# fix20: the 0.0.26 guard (guard/legacy, frozen) as a backstop; fix-0104 §2.4: it judges only a call with a source,
+# after effects this guard cannot read, or that this guard stopped early (backstop.decide). `decide` IS the backstop's
 # (an alias, so the 0.0.26 guard runs at the stack depth it had in 0.0.26)
 from .backstop import decide  # noqa: E402
 

@@ -318,3 +318,13 @@ class GuardAgentModel(JudgeCase):
         d = self.decide("Edit", {"file_path": os.path.join(self.repo, ".claude", "agents", "std-writer.md"),
                                  "old_string": "a", "new_string": "b"})
         self.assertIsNone(d, d and d.message())  # the other roles stay editable (the harness commit shows a model)
+
+    def test_the_auditor_file_after_a_source(self):
+        """0.1.4 (std-auditor.md after a source, fix-0102 §2.4): this guard walks on after a `source` — a file it can
+        read (class 3) and one it cannot (class 4) both keep the literal persona path refused."""
+        with open(os.path.join(self.repo, "e.sh"), "w") as f:
+            f.write("export A=1\n")
+        for cmd in ("source e.sh; echo x > %s" % AU, "source missing.sh; cp x %s" % AU):
+            deny, _ = self.run_hook(cmd)
+            self.assertIsNotNone(deny, cmd)
+            self.assertEqual(deny.rule, "G-PROT", cmd)

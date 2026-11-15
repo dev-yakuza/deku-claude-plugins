@@ -196,6 +196,9 @@ def isolated_env(root, base=None):
     env["GIT_CONFIG_GLOBAL"] = gitconfig
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # the guard runs under a shell that exported `_` (zsh and bash set it to the program they start): its value must
+    # never be read as the call's `$_` (0.1.4 review P1) — set as in production, not left to the test runner's shell
+    env["_"] = "/usr/bin/python3"
     return env
 
 

@@ -19,6 +19,13 @@ MAX_FS_CALLS = 2000
 CPU_BUDGET = 1.5                 # seconds of process time
 WALL_BUDGET = 8.0                # seconds of wall time (hook timeout is 20 s)
 CHECK_EVERY = 256
+# fix-0104 §1.4: a file a `source` / `.` runs is read and walked in this shell up to SOURCE_WALK_MAX characters; each
+# such walk has its own CPU and token bounds, and all of a call's together SOURCE_WALK_TOTAL_CPU (and half of every
+# counter's remainder at the first one) — past any of them the file's effects are unknown (not G-LIMIT)
+SOURCE_WALK_MAX = 64 * 1024
+SOURCE_WALK_CPU = 0.3
+SOURCE_WALK_TOKENS = 20000
+SOURCE_WALK_TOTAL_CPU = 0.8
 # fix-0103 §3: the guard process's own bound (guard.py arms it; in process nothing is armed). 15 s, then every
 # HOOK_REFIRE, so an exception a check swallows fires again; well under the hook's 20 s (hooks.json)
 HOOK_DEADLINE = 15.0

@@ -271,6 +271,8 @@ class Snapshot(object):
             if k in self.option_conflicts:
                 self.options[k] = "both"
         self.paths = [v.path for v in variants if v.path]
+        self._all_text = None  # fix-0104 §1.4d: all_function_text, built on first use
+        self._all_literals = None
         for v in variants:
             for nt in v.notes:
                 if nt not in self.notes:
@@ -303,6 +305,53 @@ class Snapshot(object):
             if off is not None:
                 return v.text[off:off + limit]
         return None
+
+    def all_function_text(self):
+        """fix-0104 §1.4d: the text of every user function of every variant, searched with each snapshot function
+        call (a function it calls is in it, whatever its spelling, nesting or order). Per distinct variant text: the
+        whole functions region (the first column-0 function line to `# Shell Options`, `# Aliases` or the end), then
+        each function line after it (the alias and Claude regions) to its closing `}` or the end. No body boundary
+        inside the region: `typeset -f` prints a heredoc or a multi-line string verbatim, so a `}` line can sit inside a
+        body. Built once per snapshot (one pass per text)."""
+        if self._all_text is None:
+            parts, seen = [], set()
+            for v in self.variants:
+                if v.text in seen:
+                    continue
+                seen.add(v.text)
+                parts.append(_function_text(v.text))
+            self._all_text = "\n".join(p for p in parts if p)
+        return self._all_text
+
+    def all_function_literals(self):
+        """The string literals of all_function_text (terms.literals), once per snapshot."""
+        if self._all_literals is None:
+            from .terms import literals
+            self._all_literals = literals(self.all_function_text())
+        return self._all_literals
+
+
+def _function_text(text):
+    lines = text.split("\n")
+    head_end = len(lines)
+    for i, line in enumerate(lines):
+        if line in ("# Shell Options", "# Aliases"):
+            head_end = i
+            break
+    first = next((i for i, line in enumerate(lines[:head_end]) if "{" in line and USER_FUNC_RE.match(line)), None)
+    out = lines[first:head_end] if first is not None else []
+    i = head_end
+    while i < len(lines):
+        line = lines[i]
+        if "{" in line and FUNC_ANY_RE.match(line):
+            j = i
+            if not line.rstrip().endswith("}"):
+                j = next((k for k in range(i + 1, len(lines)) if lines[k].strip() == "}"), len(lines) - 1)
+            out.extend(lines[i:j + 1])
+            i = j + 1
+            continue
+        i += 1
+    return "\n".join(out)
 
 
 def snapshot_dir(env):

@@ -71,7 +71,10 @@ class Oracle(object):
 class ScanCtx(LexCtx):
     def __init__(self, env, fs, snapshot=None, snapshot_notes=(), terms=None, budget=None, s2v_path=None):
         LexCtx.__init__(self)
-        self.env = dict(env)
+        # fix-0104 (review P1): parameters zsh sets itself ($_, $REPLY, …) are never the guard's own environment's
+        # values (any shell that starts python3 exports `_`): unknown, as in the call's shell
+        from .walk import IMPLICIT_PARAMS
+        self.env = {k: v for k, v in env.items() if k not in IMPLICIT_PARAMS}
         self.fs = fs
         self.where = where.Where(fs, self.env)
         self.snapshot = snapshot
@@ -86,6 +89,8 @@ class ScanCtx(LexCtx):
             self.options.update(BASH_TOOL_POSTLUDE["options"])
         self.oracle = None
         self.inline_functions = set()
+        # fix-0104 §1.5: effects this guard cannot read ran (a function, a hook): the 0.0.26 guard judges the call too
+        self.unread = False
 
     # ---- PATH ----
 

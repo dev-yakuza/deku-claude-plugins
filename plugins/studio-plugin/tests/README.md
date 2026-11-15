@@ -303,16 +303,14 @@ the `os.path.abspath(__file__)` lines), against a sha256 table taken with
 the table only if the backstop is ever based on another release. The same check holds the sha256 of the non-guard
 `stdo` modules the 0.0.26 guard runs (`LEGACY_DEPS_HEAD`): an intended change to one of them goes into
 `LEGACY_DEPS_CHANGED` with its reason, and the backstop's verification against 0.0.26 is run again.
-`test_guard_backstop.py` covers the combination (a refusal of the 0.0.26 guard is final for every tool and for the
-auditor; the 0.0.26 guard is not imported when this guard refuses; its errors keep 0.0.26's text; exactly one finish
-runs, the 0.0.26 one for calls with a source or that this guard stopped early on a limit, checked against a 0.0.26
-tree rebuilt from `legacy/`; push and commit checks shared; the time limit before the hook's), the walk stopping at a
-source (every route to one, the code before it and the code the call gives it, readings and forks) and the parity
-list `BACKSTOP_PARITY` (rows of the review corpora with and without a source, run in both snapshot modes: whatever the
-0.0.26 guard refuses is refused, and a call with a source gets its verdict except the rows of `PARITY_G1_FIRST`).
-`HEAD_REFUSED_KEPT` and `HEAD_REFUSED_FUNCS` in `test_guard_judge.py` list the rows 0.0.26 refused that this guard
-passes: `assertHeadRefusedKept` checks that `decide_g1` passes them and `decide` refuses them, so 0.0.28 can lift the
-backstop class by class.
+`test_guard_backstop.py` covers the combination (since 0.1.4 the 0.0.26 guard judges only a call with a source, after
+effects this guard cannot read, or that this guard stopped early on a limit: there a refusal of the 0.0.26 guard is
+final; the 0.0.26 guard is not imported when this guard refuses or judges the call alone; its errors keep 0.0.26's
+text; exactly one finish runs, the 0.0.26 one for those calls, checked against a 0.0.26 tree rebuilt from `legacy/`;
+push and commit checks shared; the time limit before the hook's) and the parity list `BACKSTOP_PARITY` (rows of the
+review corpora with and without a source, run in both snapshot modes). `HEAD_REFUSED_KEPT` and `HEAD_REFUSED_FUNCS`
+in `test_guard_judge.py` list the rows 0.0.26 refused that this guard passes: `assertHeadRefusedKept` checks that
+`decide_g1` passes them, and `decide` too when the 0.0.26 guard does not judge the call.
 
 **0.0.28** (`SCRIPTS_VERSION` 25, pilot 3, fix-0028-plan §2–§14): `test_pilot3.py` covers the writer's frontmatter
 lines of `state.py next --enter script` (`stdo/state/scriptlines.py`: the default narrator's cast block, each output's
@@ -389,3 +387,27 @@ guard.py past `limits.HOOK_DEADLINE`: in a plain folder on a sed script with 6,0
 started when the module loads so the other tests overlap it), and through `drivers/guard_deadline.py` with a 3 s
 deadline and 5 s sleeps patched in (a slow G1, a slow deny write, a slow too-large write, a slow 0.0.26 guard on an
 approval — no evidence —, a slow record after a pass and after a deny, a deadline swallowed once, no timer).
+
+**0.1.4** (`SCRIPTS_VERSION` 27, fix-0104): this guard walks on after a `source` / `.` — `test_guard_backstop.SourceWalk`
+covers the four classes of a source (`/dev/null` and an empty file do nothing; a readable file of at most 64 KB that
+nothing earlier in the call may have written is walked in this shell, with the real `python3 -m venv` activate of
+3.9 and 3.12 in `tests/fixtures/sourced/`; code the call gives the source is judged as a shell string and walked too;
+anything else leaves its effects unknown, with the values before it kept as candidates), the routes that route a call
+to the 0.0.26 guard (`ctx.sourced`, `ctx.unread`: a source anywhere, also in a body or hook the call defines, an EXIT
+hook or a nested string; a snapshot function or hook this guard cannot read, that may change folder or that shadows a
+command), the files that may be stale, sources nested three deep, the walk's own bounds (`limits.SOURCE_WALK_*`: a
+file shaped like oh-my-zsh's diagnostics.zsh, eight heavy siblings, a nested chain, more than half the commands, file
+probes or `cd`s — each class 4, never G-LIMIT), the walk on a copy and the message naming the file. The class N
+evidence runs as tests: `Parity.test_parity` (on an unsourced row the final verdict is this guard's, a 0.0.26 refusal
+it does not give is in `LEGACY_FALSE_UNSOURCED`, `HEAD_REFUSED_KEPT` or `HEAD_REFUSED_FUNCS`, its repositories and
+warnings are this guard's; a sourced row stricter than the 0.0.26 guard is in `PARITY_G1_FIRST`),
+`test_parity_g1_alone_after_source` (on every sourced corpus row this guard alone refuses what the 0.0.26 guard does,
+but `LEGACY_FALSE_AFTER_SOURCE`, the evidence for removing the frozen guard), `test_parity_tools` (the file, web and MCP
+tools on every fixture path) and `SnapshotParity` (each under its own snapshot: functions that change nothing — a
+0.0.26 false refusal class —, `typeset +x`, every route to a name a function hashed or autoloaded, folder history after
+an unreadable `pyenv`/`nvm`/`dyn` wrapper or eval, a function calling another by every spelling and order with the
+whole function text searched, the kept refusal when one body names a Studio file, the no-snapshot PATH writes, the
+auditor's own rows). `assertPassAfterSource` (test_guard_judge) passes a row HEAD passed after a source unless this
+guard refuses it with the source made a no-op. `PerfSnapshots` has a snapshot-function call and eight calls in a 1.9
+MB snapshot; `PerfSourced` times a sourced call (both guards). `structure_test.sh` checks that `backstop.decide` returns
+a class N answer before the frozen guard is loaded and that G1's push and commit checks are its own modules.

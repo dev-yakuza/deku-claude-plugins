@@ -430,7 +430,7 @@ class GuardPush(CommitCase):
         self.assertIn("pattern", d.message())
 
     def test_first_publish_checks_local_paths_only(self):
-        from stdo.guard.legacy import push  # fix20: the guard's push check is the frozen 0.0.26 one
+        from stdo.guard import push  # 0.1.4: the guard's own push check (the frozen copy's code)
         fresh = os.path.join(self.tmp, "fresh.git")
         subprocess.run(["git", "init", "-q", "--bare", fresh], check=True, env=self.env)
         self.git("remote", "add", "fresh", fresh)
@@ -498,7 +498,7 @@ class GuardPush(CommitCase):
     def test_evil_merge_is_seen(self):
         """A machine-only file added only by a merge commit: both the commit-by-commit path and the over-the-cap
         `git log -m` path see it."""
-        from stdo.guard.legacy import push  # fix20: the guard's push check is the frozen 0.0.26 one
+        from stdo.guard import push  # 0.1.4: the guard's own push check (the frozen copy's code)
         self.evil_merge()
         self.assertEqual(self.gate("git push")[0].rule, "G-PUSH")  # rangecheck: differs from every parent
         old = push.MAX_COMMITS
@@ -511,7 +511,7 @@ class GuardPush(CommitCase):
             push.MAX_COMMITS = old
 
     def test_ignorecase_paths_over_the_cap(self):
-        from stdo.guard.legacy import push  # fix20: the guard's push check is the frozen 0.0.26 one
+        from stdo.guard import push  # 0.1.4: the guard's own push check (the frozen copy's code)
         self.git("config", "core.ignorecase", "true")
         self.git("checkout", "-q", "-b", "case")
         self.add_commit("src/c0.ts", "c0")
@@ -534,7 +534,7 @@ class GuardPush(CommitCase):
 
     def test_over_the_cap_checks_internal_ids_too(self):
         """Review MAJOR-3: the single git log of the over-the-cap path covers internal video/actor folders."""
-        from stdo.guard.legacy import push  # fix20: the guard's push check is the frozen 0.0.26 one
+        from stdo.guard import push  # 0.1.4: the guard's own push check (the frozen copy's code)
         self.overlay()
         p = os.path.join(self.repo, ".claude", "studio", "local", "config.internal.json")
         with open(p, "w") as f:
@@ -554,7 +554,7 @@ class GuardPush(CommitCase):
             push.MAX_COMMITS = old
 
     def test_unclear_or_too_many_is_refused(self):
-        from stdo.guard.legacy import push  # fix20: the guard's push check is the frozen 0.0.26 one
+        from stdo.guard import push  # 0.1.4: the guard's own push check (the frozen copy's code)
         self.git("checkout", "-q", "-b", "many")
         for i in range(5):
             self.add_commit("src/n%d.ts" % i, "n%d" % i)

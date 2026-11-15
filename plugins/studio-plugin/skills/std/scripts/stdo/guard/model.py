@@ -247,9 +247,10 @@ class Scan(Base):
         self.opaque = []
         self.notes = []
         self.stats = {}
-        # fix20: the walk stopped at a `source` / `.` (walk.mark_sourced) in some reading — later commands are not in
-        # `commands` / `opaque`: the 0.0.26 guard judges them (backstop.decide)
+        # fix20, fix-0104 §1.5: a `source` / `.` ran in some reading (walk.mark_sourced; the walk goes on); `unread`:
+        # that, or effects this guard cannot read (a function, a hook) — the 0.0.26 guard judges the call too
         self.sourced = False
+        self.unread = False
 
     def note(self, text):
         if text not in self.notes:

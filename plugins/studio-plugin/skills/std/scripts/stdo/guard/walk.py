@@ -213,6 +213,9 @@ class State(object):
         self.oldpwd = env.get("OLDPWD")
         self.dirstack = []
         self.paths = ctx.path_values()
+        # fix-0104 §1.4c: the PATH strings before a write that left PATH unknown (paths_unknown): without a complete
+        # shell snapshot a name not found there is still unknown (runnable)
+        self.paths_before = None
         self.path_modified = False
         self.cdpath = bool(env.get("CDPATH"))
         self._env_unknown = False
@@ -220,6 +223,7 @@ class State(object):
         self.aliases_defined = set()
         self.alias_src = set()  # fix20 (P20-5): aliases this call defined whose text may run source / `.` / eval
         self.shadowed = set()
+        self.fn_shadowed = set()  # fix-0104 §1.4b: names a shell function's effects shadowed (hash NAME=…, autoload)
         self.allexport = False
         self.after_exec = False
         self.written = {}
@@ -273,33 +277,13 @@ class State(object):
         for k in ("vars", "funcs", "written", "opts", "raw_values", "fds", "defs_src", "cands", "complete",
                   "funcs_disabled"):
             setattr(s, k, dict(getattr(self, k)))
-        for k in ("env_ops", "dirstack", "paths"):
+        for k in ("env_ops", "dirstack", "paths", "paths_before"):
             v = getattr(self, k)
             setattr(s, k, v if isinstance(v, StackAlts) else list(v) if v is not None else None)
         for k in ("aliases_defined", "shadowed", "named_dirs_unknown", "arrays", "steer_names", "safe_values",
-                  "trap_names", "alias_src"):
+                  "trap_names", "alias_src", "fn_shadowed"):
             setattr(s, k, set(getattr(self, k)))
         return s
-
-
-class Readings(object):
-    """fix20 (P20-5): readings of one command (its folders, lost folders, choices of a value, dropped words, the
-    definitions of a function in force) each start from the walk's `sourced` flag before the command; after each,
-    the flag is whether any reading so far ran a source (the rest of the call is then the 0.0.26 rules' alone)."""
-
-    def __init__(self, w):
-        self.w = w
-        self.flag0 = self.any = w.sourced
-
-    def start(self):
-        self.w.sourced = self.flag0
-
-    def end(self):
-        self.any = self.any or self.w.sourced
-        self.w.sourced = self.any
-
-    def done(self):
-        self.w.sourced = self.any
 
 
 class Walker(object):
@@ -322,11 +306,12 @@ class Walker(object):
         self.lost = []  # review 10 B1: known folders of a folder set that became unknown (note_lost)
         _lost_sink[0] = self.lost
         self.list_depth = 0
-        # fix20: a `source` / `.` (or eval text that may run one) ran in this reading: the walk stops there — what
-        # follows is judged by the 0.0.26 rules alone (backstop.decide). `ever_sourced`: in any reading (Scan.sourced)
-        self.sourced = False
+        # fix-0104 §1.5: a `source` / `.` (or eval / emulate -c text that may run one) ran in some reading, a dry run
+        # or a definition included (Scan.sourced; the 0.0.26 guard also judges the call, backstop.decide). The walk
+        # goes on with what the file leaves (b_source)
         self.ever_sourced = False
-        self.emit_ok = False  # the command a builtin just ran (a `source` itself is judged) — emit()
+        self.via_source = []  # the files being walked as sourced (b_source): the commands they run name them
+        self.cmd_cap = None  # fix-0104 §1.4: the commands a sourced file's walk may emit (its share of MAX_COMMANDS)
 
     # ---- emission ----
 
@@ -337,17 +322,15 @@ class Walker(object):
     def emit(self, cmd):
         if self.dry:
             return
-        if self.sourced and not self.emit_ok:
-            cmd.flags.add("post-source")  # fix20: after a source in this reading — dropped by scan()
-        if len(self.cmds) >= limits.MAX_COMMANDS:
+        if self.via_source and self.via_source[-1] and getattr(cmd, "via_source", None) is None:
+            cmd.via_source = self.via_source[-1]  # fix-0104 §1.4: run by a file this command sources
+        if len(self.cmds) >= (self.cmd_cap if self.cmd_cap is not None else limits.MAX_COMMANDS):
             raise limits.LimitExceeded("commands")
         self.cmds.append(cmd)
 
     def emit_opaque(self, op, cmd=None):
         if self.dry:
             return
-        if self.sourced and not self.emit_ok:
-            op.post_source = True  # fix20: after a source in this reading — dropped by scan()
         if cmd is not None:
             op.cmd = cmd.id
             op.alt = cmd.alt
@@ -782,15 +765,11 @@ class Walker(object):
                 # that fails: `f > /x/y` where f cds): the rest is judged from the folders it would leave too
                 self.forks += 1
                 self.push("may-fail")
-                rd = Readings(self)  # fix20 (P20-5): another reading of the rest — the main one is walked below
                 try:
-                    rd.start()
                     self.walk_list(ListNode(lst.items[idx + 1:]), hint, state.copy())
-                    rd.end()
                 finally:
                     self.pop()
                     self.forks -= 1
-                    self.sourced = rd.flag0
             if nxt != ():
                 cur = nxt
             if nxt and self.list_depth == 1 and not self.forks and not state.hook_cwd:
@@ -885,8 +864,6 @@ class Walker(object):
     # ---- commands ----
 
     def walk_command(self, node, cwds, state, stdin):
-        if self.sourced:
-            return (cwds, cwds)  # fix20: after a `source` in this reading — the 0.0.26 rules judge it (not walked)
         self.ctx.budget.tick()
         if state.hook_cwd:
             note_lost(cwds)  # review 10 B1: or the hook did not move the shell
@@ -1053,15 +1030,19 @@ class Walker(object):
                 self.define_hook(state, name, eff)
             state.defs_maybe = True  # snapshot functions may now run it (review 4 B3)
             self.push("function-body")
+            # fix-0104 §1.4, §1.5: a source in an EXIT hook runs after every command of the call (its file is read as
+            # unknown); a source anywhere in a body defined here routes the call (ever_sourced is kept)
+            exit_hook = any(hook_kind(n) == "exit" or n in ("zshexit",) for n in names_)
+            if exit_hook:
+                self.push("exit-hook")
             self.func_depth += 1
-            # fix20: a source in a body defined here stops the walk only where the function is called
-            flags0 = (self.sourced, self.ever_sourced)
             try:
                 self.walk_command(node.body, cwds, state.copy(), None)
             finally:
+                if exit_hook:
+                    self.pop()
                 self.pop()
                 self.func_depth -= 1
-                self.sourced, self.ever_sourced = flags0
             out = (cwds, ())
         elif k == "dbracket":
             prev = None
@@ -1164,16 +1145,12 @@ class Walker(object):
             # review 9 B1: $PWD, ~+, $(pwd), `git rev-parse --show-toplevel` after a folder change that may or may not
             # happen: the command is walked once in each folder it may run in (each folder one possible value)
             outs, copies = [], []
-            rd = Readings(self)
             for i, c in enumerate(cwds):
                 last = i == len(cwds) - 1
                 st = state if last else state.copy()
-                rd.start()
                 outs.append(self._walk_simple_fail(node, (c,), st, stdin))
-                rd.end()
                 if not last:
                     copies.append(st)
-            rd.done()
             merge_states(state, copies, self.ctx)
             S = F = ()
             for s_, f_ in outs:
@@ -1186,20 +1163,14 @@ class Walker(object):
             # judged in each of those as well as in a folder the guard cannot tell
             folders = tuple(lost[:limits.MAX_CWDS])
             copies = [state.copy() for _c in folders]
-            rd = Readings(self)
-            rd.start()
             outs = [self._walk_simple_fail(node, None, state, stdin)]
-            rd.end()
             top = self.last_top
             self.push("lost-folder")
             try:
                 for c, st in zip(folders, copies):
-                    rd.start()
                     outs.append(self._walk_simple_fail(node, (c,), st, stdin))
-                    rd.end()
             finally:
                 self.pop()
-                rd.done()
             self.last_top = top
             merge_states(state, copies, self.ctx)
             S = F = ()
@@ -1271,16 +1242,7 @@ class Walker(object):
         for name, sub, op, val, valnode in assigns:
             prefix.append(EnvOp("prefix", "set", name + sub, val))
 
-        rd = Readings(self)  # fix20 (P20-5): each reading of the command starts from the flag before it
-
         def run(ws, base, alt_=alt, flags=(), dropped=None):
-            rd.start()
-            try:
-                return _run(ws, base, alt_, flags, dropped)
-            finally:
-                rd.end()
-
-        def _run(ws, base, alt_=alt, flags=(), dropped=None):
             st = base
             local_paths = None
             for name, sub, op, val, valnode in assigns:
@@ -1289,12 +1251,21 @@ class Walker(object):
             if local_paths is not None or any(n == "PATH" for n, _, _, _, _ in assigns):
                 st = base.copy()
                 st.paths = local_paths
+                if local_paths is None:
+                    st.paths_before = None  # fix-0104 §1.4c: the program's own PATH, as the call wrote it
                 st.path_modified = True
             if not ws:
                 # every word dropped: zsh runs no command, the assignments stay in this shell
                 for name, sub, op, val, valnode in assigns:
                     self.set_var(base, name, sub, op, val, valnode, "assign")
                 return (cwds, cwds)
+            if assigns and ws[0].value in PRECOMMANDS and all(w.value is not None and (
+                    w.value in PRECOMMANDS or w.value.startswith("-")) for w in ws):
+                # 0.1.4 review MINOR 1: `HOME=/tmp/x exec` (a precommand and no command word) keeps its assignments in
+                # this shell — exported ones (HOME) stay exported for later commands (the closed side for the
+                # precommands zsh may treat otherwise)
+                for name, sub, op, val, valnode in assigns:
+                    self.set_var(base, name, sub, op, val, valnode, "assign")
             return self.process(ws, cwds, st, prefix, redirs, stdin, alt=alt_, aliases=aliases,
                                 span=(node.start, node.end), outer_state=base, extra_flags=flags, dropped=dropped)
 
@@ -1458,6 +1429,7 @@ class Walker(object):
         if text is None:
             state.cands.pop(name, None)
             return
+        self.ctx.budget.tick()  # fix-0104 §1.4: candidate loops count (a sourced file's own budget)
         vals, exact = text_cands(text, state, lambda n: self.lookup(n, state, cwds), exclude=exclude)
         if vals:
             state.cands[name] = (vals, exact)
@@ -1465,6 +1437,7 @@ class Walker(object):
             state.cands.pop(name, None)
 
     def set_var(self, state, name, sub, op, val, valnode, via):
+        self.ctx.budget.tick()  # fix-0104 §1.4: assignments and their candidate loops count (_oldpwd_targets too)
         raw_val = valnode.raw if valnode is not None else ""
         state.safe_values.discard(name)
         if val.value is not None and not sub and op == "=":
@@ -1517,9 +1490,15 @@ class Walker(object):
             if name == "PATH" and not sub and op == "=" and val.value is not None:
                 state.paths = [val.value]
             elif name == "path" and not sub and raw_val.startswith("("):
+                before = state.paths
                 state.paths = self.path_array(raw_val, state, op)
+                if state.paths is None:
+                    state.paths = before
+                    paths_unknown(state, keep=self.func_depth > 0)
             else:
-                state.paths = None
+                # fix-0104 §1.4c: an assignment the call itself makes (outside function bodies and sourced files)
+                # drops the PATH before; any other keeps it
+                paths_unknown(state, keep=self.func_depth > 0)
         if name == "dirstack":
             state.dirstack = None  # `dirstack=(…)`: zsh's stack; its folders are not followed (review 9: popd)
         if name in ("CDPATH", "cdpath"):
@@ -1763,6 +1742,11 @@ class Walker(object):
         cmd.wrappers = wrappers
         cmd.env = EnvView(env_ops)
         flags = cmd.flags
+        if cmd.words and cmd.words[0].value is not None and "/" not in cmd.words[0].value and \
+                cmd.prog in outer.fn_shadowed:
+            # fix-0104 §1.4b: a name a shell function's effects shadowed (hash NAME=…, autoload NAME, …), by any route
+            # (command, exec, noglob, env, a subshell, …): a program the guard cannot read (judge.py)
+            flags.add("shadowed-name")
         self._run_folder(cmd, run, run_words)
         cmd.home = self.home_of(cmd, outer)
         if "HOME" in outer.vars and outer.raw_values.get("HOME") is not None and cmd.words and (
@@ -1847,11 +1831,12 @@ class Walker(object):
                     self.last_top = cmd
                     return (None, None)
                 if prog in outer.alias_src:
-                    # fix20 (P20-5): an alias this call defined that may run source / `.` / eval: the walk stops here
+                    # fix20 (P20-5): an alias this call defined that may run source / `.` / eval; fix-0104 §1.4: what
+                    # it runs is not read — the rest is walked with its effects unknown (class 4)
                     self.emit(cmd)
                     self.last_top = cmd
                     mark_sourced(self)
-                    return (None, None)
+                    return source_unknown(self, outer, cwds)
             if prog in outer.funcs:
                 flags.add("inline-function")
                 if prog in ("cd", "pushd", "popd", "builtin", "command") or prog in ("git", "rm", "cp", "mv"):
@@ -1859,7 +1844,6 @@ class Walker(object):
                 self.emit(cmd)
                 self.last_top = cmd
                 eff = outer.funcs[prog]
-                call_flag0 = self.sourced
                 res = self.inline_call(cmd, prog, eff, cwds, outer, stdin, prefix_ops)
                 alts, unknown = _call_alternatives(eff)
                 if not (unknown or None in alts) or self.dry:
@@ -1869,16 +1853,12 @@ class Walker(object):
                 # review 11 B1 (R1): the function may be gone (or replaced by code the guard cannot read) — the name
                 # then runs the command so named, judged too
                 ent = outer.funcs.pop(prog, None)
-                rd = Readings(self)  # fix20 (P20-5): the other reading of this call starts from the flag before it
-                rd.flag0, rd.any = call_flag0, self.sourced
                 try:
-                    rd.start()
                     res2 = self.process(words, cwds, state, prefix_ops, redirs, stdin, alt=alt, aliases=aliases,
                                         span=span, via_program=via_program, parent=parent, extra_ctx=extra_ctx,
                                         lock_depth=lock_depth, outer_state=outer_state, extra_flags=extra_flags,
                                         dropped=dropped)
                 finally:
-                    rd.end()
                     if ent is not None:
                         outer.funcs[prog] = ent
                 return (union(res[0], res2[0]), union(res[1], res2[1]))
@@ -1895,7 +1875,11 @@ class Walker(object):
                 if self.effective_stdin(cmd.redirs, stdin, outer, cmd.cwds) is not None:
                     text = self._stdin(cmd, stdin, outer)[0]
                     payload += "\n" + (text or "")  # its input, searched like its words (review 6 M6)
-                self.emit_opaque(Opaque("function", payload=payload, cwds=cwd_list(cwds)), cmd)
+                fop = Opaque("function", payload=payload, cwds=cwd_list(cwds))
+                # fix-0104 §1.4d: and the text of every snapshot function (a function it calls, by any spelling,
+                # nesting or order, is in it), built once per snapshot and searched once per call (judge.py)
+                fop.shared_text = snap.all_function_text()
+                self.emit_opaque(fop, cmd)
                 # R2-M1 (review 2), review 3 M-1 to M-4: what the body (or a function it calls) may change for later
                 # commands — the environment when it exports or sets a global git or the guard reads, the options it
                 # sets (all of them when it cannot name them), the folder when it may change folder; a body the guard
@@ -1924,7 +1908,7 @@ class Walker(object):
             shell_builtin = False  # `command cd /tmp` is the external cd: the shell's folder stays
             if prog in ("source", ".") and by_shell and not folded and not is_path:
                 # fix20 (P20-5): `command .` / `command source` — the external command in zsh (POSIX_BUILTINS off);
-                # read as a source all the same (the walk stops; the 0.0.26 rules judge the rest)
+                # read as a source all the same (fix-0104: the 0.0.26 guard judges the call too)
                 shell_builtin = True
         if shell_builtin and prog in BUILTINS:
             self.cur_stdin = stdin
@@ -1935,14 +1919,10 @@ class Walker(object):
                 if out[0] is None and any(w.value is None or w.glob or "(" in w.value for w in cmd.words[1:]):
                     outer.pwd_steered = True  # $PWD may now be a folder this call named (review 4 conf M-1)
                 out = self.after_chpwd(outer, out)
-            ok, self.emit_ok = self.emit_ok, True  # fix20: the builtin's own command (a `source` too) is judged
-            try:
-                self.emit(cmd)
-                self.last_top = cmd
-                for f in deferred:
-                    f()
-            finally:
-                self.emit_ok = ok
+            self.emit(cmd)
+            self.last_top = cmd
+            for f in deferred:
+                f()
             return out
         out = self.recognize(cmd, cwds, outer, stdin, lock_depth, deferred)
         self.emit(cmd)
@@ -1968,18 +1948,14 @@ class Walker(object):
                 outer.env_unknown = True
             keep_candidates(self.ctx, outer)
             funcs_unknown(outer)
-            outer.dirstack = None
-            outer.oldpwd = None
-            outer.cands.pop("~-", None)
+            history_unknown(outer, cwds)  # fix-0104 §1.4a
+            self.ctx.unread = True  # fix-0104 §1.5: the 0.0.26 guard judges the call too
             note_lost(cwds)  # or the name runs no function: the shell stays (judged there too)
             return (None, None)
         before = dict(outer.funcs)
         results = []
-        rd = Readings(self)  # fix20 (P20-5): each definition in force is a reading of the call
         for a in alts:
-            rd.start()
             results.append((a, None if a is None else self.call_body(prog, a, cmd, cwds, outer, stdin, prefix_ops)))
-            rd.end()
         if any(a and a.get("options") for a in alts):
             _options_unknown(outer)
         self.inline_function_env(outer, eff)
@@ -2283,7 +2259,8 @@ class Walker(object):
         if name in HOOK_ARRAYS:
             self.hook_array(state, name)
         if name in ("PATH", "path"):
-            state.paths, state.path_modified = None, True
+            paths_unknown(state)  # fix-0104 §1.4c: read, for, ${PATH:=…}, …: the PATH before stays
+            state.path_modified = True
         if name == "dirstack":
             state.dirstack = None
         if not cmdopts.watched_var(name):
@@ -2465,18 +2442,19 @@ class Walker(object):
                 else:
                     state.cands.pop(name, None)
             if name in ("PATH", "path"):
-                state.paths, state.path_modified = None, True
+                paths_unknown(state)  # fix-0104 §1.4c: a function's write
+                state.path_modified = True
             elif name == "dirstack":
                 state.dirstack = None
             elif name == "OLDPWD":
-                state.oldpwd = None
-                state.cands.pop("~-", None)
+                history_unknown(state, None)  # fix-0104 §1.4a
             elif name in HOOK_ARRAYS:
                 self.hook_array(state, name)
             if function_watched(self.ctx, state, name):
                 state.env_ops.append(EnvOp("function", "set", name, _unknown_value(name)))
         if eff.get("paths"):
-            state.paths, state.path_modified = None, True
+            paths_unknown(state)  # fix-0104 §1.4c
+            state.path_modified = True
         if eff.get("hook"):
             # review 10: the body set a trap or hook that may change the folder (an EXIT trap set in a function runs
             # when it returns)
@@ -2624,6 +2602,11 @@ class Walker(object):
         if snap is not None and (prog in snap.user_functions or prog in snap.delegated):
             return True
         if state.paths is None:
+            before = getattr(state, "paths_before", None)
+            if before is not None and (snap is None or snap.partial):
+                # fix-0104 §1.4c: PATH written in a way the guard does not follow, other than by the call's own
+                # assignment: looked up in the PATH before (`read PATH <<< /tmp; foo`, a function's write)
+                return any(where.which(prog, pv, self.ctx.fs) for pv in before)
             return True  # PATH unknown: cannot tell
         return self.which(prog, state) is not None
 
@@ -3227,6 +3210,33 @@ def _oldpwd_union(state, a, b):
         state.cands.pop("~-", None)
 
 
+def paths_unknown(state, keep=True):
+    """fix-0104 §1.4c: PATH is unknown after a write. `keep`: the PATH before it stays the one names are looked up in
+    without a complete snapshot (every write but the call's own assignment statements, eval, `unset PATH` and a
+    file the guard does not read: functions' effects, read, for, ${PATH:=…}, …); otherwise it is dropped."""
+    if not keep:
+        state.paths_before = None
+    elif state.paths is not None:
+        state.paths_before = list(state.paths)
+    state.paths = None
+
+
+def history_unknown(state, cwds):
+    """fix-0104 §1.4a: code the guard cannot read ran in this shell (a sourced file, an eval, a function): $OLDPWD,
+    `~-` and the stack may now hold a folder the guard cannot tell — or $OLDPWD's value before it (or its candidates),
+    or one of the folders the shell was in before it (`cwds`: what a cd inside it writes into $OLDPWD). Kept as the
+    candidates of a set that is not complete: a rule that needs the whole set (_oldpwd_targets) reads it as unknown,
+    a deletion rule refuses when any candidate is a Studio folder. The stack is unknown (its folders are not kept)."""
+    vals = _oldpwd_vals(state.oldpwd, state.cands.get("~-"))[0] + tuple(cwds or ())
+    vals = tuple(dict.fromkeys(vals))
+    state.oldpwd = None
+    if vals:
+        state.cands["~-"] = (vals[:MAX_CANDS], False)
+    else:
+        state.cands.pop("~-", None)
+    state.dirstack = None
+
+
 def _stack_unsure(state, mark):
     """review 9 B1: code that may or may not have run changed the directory stack: review 10 (the union rule) — it
     is one of the stacks before or after; unknown when either is."""
@@ -3590,7 +3600,11 @@ def merge_states(state, copies, ctx=None):
         if c.oldpwd != state.oldpwd or c.cands.get("~-") != state.cands.get("~-"):
             _oldpwd_union(state, (c.oldpwd, c.cands.get("~-")), (state.oldpwd, state.cands.get("~-")))
         if c.paths != state.paths:
+            # fix-0104 §1.4c: one of the readings' PATHs (each the one before when unknown)
+            pa, pb = (c.paths if c.paths is not None else c.paths_before), \
+                (state.paths if state.paths is not None else state.paths_before)
             state.paths, state.path_modified = None, True
+            state.paths_before = list(dict.fromkeys(pa + pb)) if pa is not None and pb is not None else None
         if c.env_unknown:
             state.env_unknown = True
         # review 11 B1: a function one reading removed or replaced may still be there in another
@@ -3977,6 +3991,10 @@ class _FuncScan(object):
             while i < len(texts) and texts[i] is not None and texts[i].startswith("-") and texts[i] != "-":
                 i += 1  # command -p, exec -c, …
         if i >= len(texts):
+            for name, sub, _op, _val, _ws in n.assigns:
+                # `HOME=/tmp/x exec` (or another precommand with no command word): the assignments are taken to stay
+                # in this shell (review MINOR 1; the closed side for the precommands zsh may treat otherwise)
+                self.assigned(name + (sub or ""))
             return
         prog = texts[i]
         args = texts[i + 1:]
@@ -4155,6 +4173,8 @@ class _FuncScan(object):
             a = "".join(p[1] for p in w.parts) if all(p[0] == "lit" for p in w.parts) else None
             if a is not None and a[:1] in "-+" and "=" not in a and len(a) > 1:
                 flags |= set(a[1:]) if a[0] == "-" else set()
+                if a[0] == "+" and "x" in a[1:]:
+                    self.env = True  # fix-0104 §1.4b: `typeset +x HOME` unexports a name (or makes a local: kept strict)
                 continue
             if "p" in flags and (a is None or "=" not in a) and not (lead and "=" in lead):
                 continue  # typeset -p NAME, local -p NAME: prints, declares nothing (review 4 m1)
@@ -4365,10 +4385,9 @@ def unknown_values(state, ctx=None):
         keep_candidates(ctx, state)
     for k in list(state.vars):
         state.vars[k] = DYN
-    state.cands.pop("~-", None)
     state.dirstack = None  # review 9: popd fails only on a stack known to be empty
     state.env_unknown = True
-    state.paths = None
+    paths_unknown(state)  # fix-0104 §1.4c: a function's effects keep the PATH before
     _options_unknown(state)
     funcs_unknown(state)  # review 11 B1: it may remove or replace functions of this call
 
@@ -4377,14 +4396,16 @@ def apply_function_effects(ctx, state, eff, cwds):
     """A snapshot user function ran (snapshot_function_effects): the caller's state after it; returns its folders."""
     if eff is None:
         unknown_values(state, ctx)
-        state.dirstack = None
-        state.oldpwd = None
-        state.cands.pop("~-", None)
+        history_unknown(state, cwds)  # fix-0104 §1.4a
+        ctx.unread = True  # fix-0104 §1.5: the 0.0.26 guard judges the call too
         return (None, None)
     if eff["env"]:
         state.env_unknown = True
+    if eff["shadowed"]:
+        ctx.unread = True  # fix-0104 §1.4b, §1.5: belt and braces for the shadowed-name rule
     for name in eff["shadowed"]:
         state.shadowed.add(name)
+        state.fn_shadowed.add(name)  # a snapshot function's, a hook's or a trap action's (review MINOR 2)
     funcs_unknown(state, set(eff["shadowed"]))  # review 11 B1: it unfunctions or autoloads a function of this call
     for name in eff["globals"]:
         # review 10 B2: the function may not write it (a branch, `local` on a branch): the caller's values stay
@@ -4400,21 +4421,20 @@ def apply_function_effects(ctx, state, eff, cwds):
         if function_watched(ctx, state, name):
             state.env_unknown = True
         if name in ("PATH", "path"):
-            state.paths, state.path_modified = None, True
+            paths_unknown(state)  # fix-0104 §1.4c
+            state.path_modified = True
         elif name == "dirstack":
             state.dirstack = None
         elif name == "OLDPWD":
-            state.oldpwd = None
-            state.cands.pop("~-", None)
+            history_unknown(state, cwds)  # fix-0104 §1.4a
     if eff["local"] is not True:
         if eff["options_unknown"]:
             _options_unknown(state)
         for name, on in sorted(eff["options"].items()):
             _set_option(state, name, on if eff["local"] in (False, "inherit") else None)
     if eff["cwd"]:
-        state.dirstack = None
-        state.oldpwd = None
-        state.cands.pop("~-", None)
+        history_unknown(state, cwds)  # fix-0104 §1.4a
+        ctx.unread = True  # fix-0104 §1.5
         return (None, None)
     return (cwds, cwds)
 
@@ -4856,7 +4876,7 @@ def b_unset(w, cmd, cwds, state):
         state.vars[v] = DYN
         state.env_ops.append(EnvOp("unset", "unset", v))
         if v in ("PATH", "path"):
-            state.paths = None
+            paths_unknown(state, keep=w.func_depth > 0)  # fix-0104 §1.4c: the call's own `unset PATH` drops it
             state.path_modified = True
         if v in ("CDPATH", "cdpath"):
             state.cdpath = False
@@ -4871,7 +4891,7 @@ def b_alias(w, cmd, cwds, state):
         name, _, val = v.partition("=")
         state.aliases_defined.add(name)
         if EVAL_SOURCE_RE.search(val):
-            state.alias_src.add(name)  # fix20 (P20-5): using it runs a source — the walk stops there
+            state.alias_src.add(name)  # fix20 (P20-5): using it runs a source (class 4 there, fix-0104)
         w.emit_opaque(Opaque("alias", payload=val, cwds=cwd_list(cwds)), cmd)
     return (cwds, cwds)
 
@@ -4881,25 +4901,225 @@ def b_noop(w, cmd, cwds, state):
 
 
 def mark_sourced(w):
-    """fix20: a `source` / `.` (or eval / emulate -c text that may run one) ran in this reading — the walk stops
-    here; what follows is judged by the 0.0.26 rules alone (backstop.decide). A dry run (a reading being tried, a
-    function's effects) does not stop it."""
-    if not w.dry:
-        w.sourced = w.ever_sourced = True
+    """fix20, fix-0104 §1.5: a `source` / `.` (or eval / emulate -c text that may run one) ran in some reading — a dry
+    run (a function's effects, a hook) and a body defined here count too. The walk goes on (b_source); the call is
+    also judged by the 0.0.26 guard (backstop.decide)."""
+    w.ever_sourced = True
+
+
+SOURCE_DEPTH = 3  # judge.SHELL_DEPTH: a source in a sourced file is read to this depth (fix-0104 §1.4)
+STDIN_NAMES = ("/dev/stdin", "/dev/fd/0", "-")
+
+
+class SourceBudget(object):
+    """fix-0104 §1.4: the CPU a sourced file's walk may take — limits.SOURCE_WALK_CPU, within the walk around it and
+    within limits.SOURCE_WALK_TOTAL_CPU for all of a call's. Past it LimitExceeded('source-cpu'): the file's effects
+    are unknown (class 4). Every tick and check is the call's budget's too (its own G-LIMIT stays)."""
+
+    def __init__(self, parent, cpu):
+        self.parent = parent
+        self.root = getattr(parent, "root", parent)
+        self.cpu_clock = self.root.cpu_clock
+        self.wall_clock = self.root.wall_clock
+        self.cpu0 = self.cpu_clock()
+        self.cpu_limit = cpu
+        self.ticks = 0
+
+    def tick(self):
+        self.parent.tick()
+        self.ticks += 1
+        if self.ticks % 16 == 0:
+            self.check()
+
+    def check(self):
+        self.parent.check()
+        if self.remaining() < 0:
+            raise limits.LimitExceeded("source-cpu")
+
+    def remaining(self):
+        return self.cpu_limit - (self.cpu_clock() - self.cpu0)
+
+    def used(self):
+        return self.cpu_clock() - self.cpu0
+
+    def elapsed_ms(self):
+        return self.root.elapsed_ms()
+
+
+def _source_shares(w):
+    """fix-0104 §1.4: the shares of the call's counters all sourced files of it may use — half of what each had left
+    at the first one (the other half is the rest of the call's): (commands of this walk, file-system calls, tokens)."""
+    ctx, fs = w.ctx, w.ctx.fs
+    if getattr(w, "source_cmd_share", None) is None:
+        n = len(w.cmds)
+        w.source_cmd_share = n + max(limits.MAX_COMMANDS - n, 0) // 2
+    if getattr(fs, "source_share", None) is None:
+        fs.source_share = fs.calls + max(fs.max_calls - fs.calls, 0) // 2
+    if getattr(ctx, "source_tok_share", None) is None:
+        ctx.source_tok_share = ctx.tokens + max(limits.MAX_TOKENS - ctx.tokens, 0) // 2
+    return w.source_cmd_share, fs.source_share, ctx.source_tok_share
+
+
+def _source_cut(ast):
+    """A top-level `return` ends a sourced file: the commands after it are not run (`[[ … ]] && return` may not
+    return: those stay)."""
+    for i, (ao, _sep) in enumerate(ast.items):
+        if not ao.rest and len(ao.first.cmds) == 1 and isinstance(ao.first.cmds[0], Simple) and \
+                not ao.first.neg:
+            node = ao.first.cmds[0]
+            if node.words and node.words[0].raw == "return" and not node.assigns:
+                return ListNode(ast.items[:i + 1])
+    return ast
+
+
+def source_walk(w, cmd, text, cwds, state, name):
+    """fix-0104 §1.4 classes 1 and 3: the code a `source` runs, walked in this shell as a body defined and called
+    here — its commands are this call's (judged by every rule, named as run by `name`), and what it defines, exports,
+    assigns, sets and moves holds after it. Walked on a copy of the state under its own budget and shares; returns
+    (outcome, state after), or None when it cannot be read (a parse or internal error, a bound or share reached, too
+    deep): what it emitted is cut back and the caller applies class 4. The call's own CPU / wall budget stays G-LIMIT."""
+    from .lex import ParseError
+    from .parse import Parser
+    from .scanctx import Oracle
+    ctx, fs = w.ctx, w.ctx.fs
+    if len(w.via_source) >= SOURCE_DEPTH:
+        w.note("source-unread:%s:depth" % (name or "-"))
+        return None
+    cmd_share, fs_share, tok_share = _source_shares(w)
+    parent = ctx.budget
+    root = getattr(parent, "root", parent)
+    used = getattr(root, "source_cpu_used", 0.0)
+    cpu = min(limits.SOURCE_WALK_CPU, limits.SOURCE_WALK_TOTAL_CPU - used)
+    if isinstance(parent, SourceBudget):
+        cpu = min(cpu, parent.remaining())
+    if cpu <= 0:
+        w.note("source-unread:%s:source-cpu" % (name or "-"))
+        return None
+    sub = SourceBudget(parent, cpu)
+    n_cmds, n_op = len(w.cmds), len(w.opaque)
+    saved = (ctx.oracle, ctx.depth, w.cmd_cap, fs.max_calls)
+    tok0 = ctx.tokens
+    st = state.copy()
+    out = None
+    ctx.budget = sub
+    try:
+        try:
+            ctx.oracle, ctx.depth = Oracle([], lambda taken, n: False), 0  # the main parse's schedule is not used
+            ast = Parser(text, ctx).parse_program()
+            if ctx.tokens - tok0 > limits.SOURCE_WALK_TOKENS or ctx.tokens > tok_share:
+                raise limits.LimitExceeded("source-tokens")
+        finally:
+            ctx.oracle, ctx.depth = saved[0], saved[1]
+        w.cmd_cap = cmd_share if saved[2] is None else min(cmd_share, saved[2])
+        fs.max_calls = min(saved[3], fs_share)
+        w.func_depth += 1
+        w.push("sourced-file")
+        w.via_source.append(name)
+        try:
+            out = w.walk_list(_source_cut(ast), cwds, st)
+        finally:
+            w.via_source.pop()
+            w.pop()
+            w.func_depth -= 1
+    except limits.LimitExceeded as e:
+        if e.kind == "budget":
+            raise  # the call's own CPU / wall budget: G-LIMIT as for any command
+        out, why = None, e.kind
+    except ParseError:
+        out, why = None, "parse"
+    except RecursionError:
+        out, why = None, "depth"
+    except Exception as e:  # noqa: BLE001 — an internal error in the file's walk: its effects are unknown (class 4)
+        out, why = None, "internal:%s" % type(e).__name__
+    finally:
+        ctx.budget = parent
+        w.cmd_cap, fs.max_calls = saved[2], saved[3]
+        if not isinstance(parent, SourceBudget):
+            root.source_cpu_used = used + sub.used()
+    if out is None:
+        del w.cmds[n_cmds:]
+        del w.opaque[n_op:]
+        ctx.tokens = tok0
+        w.note("source-unread:%s:%s" % (name or "-", why))  # class 4 (tests read the reason)
+        return None
+    return out, st
+
+
+def source_unknown(w, state, cwds):
+    """fix-0104 §1.4 class 4: code run in this shell that the guard does not read (a file it cannot read, a name it
+    cannot tell, an eval or alias text): the folder is the one before or unknown, the environment, PATH, options and
+    the function table unknown, every value the call set unknown with what it may still hold as candidates
+    (keep_candidates), $OLDPWD / `~-` / the stack as history_unknown. The rules for unknown values judge the rest."""
+    state.env_unknown = True
+    paths_unknown(state, keep=False)  # fix-0104 §1.4c: as at HEAD (no PATH before)
+    state.glob_cwd = None
+    state.defs_maybe = True  # the file may define functions (review 4 B3)
+    funcs_unknown(state)  # review 11 B1: it may remove or replace functions of this call
+    keep_candidates(w.ctx, state)
+    _options_unknown(state)
+    history_unknown(state, cwds)
+    out = union(cwds, None)  # the folder before (judged there too: Walker.lost) or one the guard cannot tell
+    return (out, out)
+
+
+def _written_before(w, res, state):
+    """fix-0104 §1.4 (freshness): whether an earlier command of the call may have written the file — its realpath is
+    a write target (a file the call wrote, a redirection, a word of a command), or an earlier command runs code the
+    guard reads apart (a script, a runner, a command word built at run time, a shell string)."""
+    fs = w.ctx.fs
+    real = res.real or res.abs
+    if res.abs in state.written or any(fs.realpath(p) == real for p in state.written):
+        return True
+    for o in w.opaque:
+        if o.kind in ("script", "runner", "dynamic-command", "shell-c", "eval", "env-S", "sudo-shell"):
+            return True
+    base = os.path.basename(res.abs)
+    for c in w.cmds:
+        cwd = c.cwds[0] if c.cwds else None
+        for r in c.redirs:
+            if r.mode not in ("write", "append", "rw") or r.target is None:
+                continue
+            v = r.target.value
+            if v is None:
+                return True  # a file the guard cannot name
+            a = w.where.absolute(v, cwd) if cwd or os.path.isabs(v) else None
+            if a is None or a == res.abs or fs.realpath(a) == real:
+                return True
+        if c.prog in ("source", "."):
+            continue
+        for wd in c.words[1:]:
+            v = wd.value
+            if v is None or os.path.basename(v.rstrip("/")) != base:
+                continue
+            a = w.where.absolute(v, cwd) if cwd or os.path.isabs(v) else None
+            if a is None or a == res.abs or fs.realpath(a) == real:
+                return True
+    return False
 
 
 def b_source(w, cmd, cwds, state):
-    """`source FILE` / `. FILE` (fix20): code given in the call itself — the input (`source /dev/stdin <<< …`, a
-    heredoc) or a file this call wrote — is judged as a nested string; then the walk stops (mark_sourced). A file of
-    the user's is not read: the 0.0.26 guard judges it and everything after it, as in 0.0.26."""
+    """`source FILE` / `. FILE` (fix20; fix-0104 §1.4): what follows is walked with the state the file leaves, by
+    class —
+      1. code the call gives it (stdin, a heredoc, a file the call wrote): judged as a nested string, and walked in
+         this shell as class 3;
+      2. /dev/null or an empty regular file: nothing;
+      3. a file the guard can read (a regular file, not binary, at most limits.SOURCE_WALK_MAX, not written by an
+         earlier command of the call, not inside a dry run, a fork or an EXIT hook): walked in this shell
+         (source_walk);
+      4. anything else, or a class 1/3 walk that fails: its effects unknown (source_unknown); a file's text, when
+         read, is searched for Studio terms (an Opaque `source`, origin "file")."""
     args = _args(cmd)
     deferred = []
     if not args:
         return (cwds, cwds)
+    mark_sourced(w)
     p = args[0]
-    res = None
-    if p.value in ("/dev/stdin", "/dev/fd/0", "-"):
+    res = fop = None
+    text, name, fresh = None, p.value, True
+    if p.value in STDIN_NAMES:
         w.stdin_opaque(cmd, cwds, state, getattr(w, "cur_stdin", None), deferred, "source", kind_override="source")
+        t, _origin, _kind, dyn = w._stdin(cmd, getattr(w, "cur_stdin", None), state)
+        text = None if dyn else t
     else:
         cwd = cmd.cwds[0] if cmd.cwds else None
         res = w.where.resolve(p.value, cwd) if p.value is not None and (cwd or os.path.isabs(p.value)) else None
@@ -4907,24 +5127,43 @@ def b_source(w, cmd, cwds, state):
             op = Opaque("source", payload=state.written[res.abs], origin="linked-heredoc", cwds=cwd_list(cwds),
                         path=res.abs, path_class=w.where.path_class(res.real, w.ctx.env) if res.real else ["other"])
             deferred.append(lambda: w.emit_opaque(op, cmd))
+            text = state.written[res.abs]
     for f in deferred:
         f()
-    # what a dry run (a function's effects: a hook, a definition) reads after it: the folder, the environment, PATH,
-    # $OLDPWD, the stack and the function table unknown
-    state.env_unknown = True
-    state.paths = None
-    state.glob_cwd = None
-    state.oldpwd = None
-    state.cands.pop("~-", None)
-    state.dirstack = None
-    state.defs_maybe = True  # the file may define functions (review 4 B3)
-    funcs_unknown(state)  # review 11 B1: it may remove or replace functions of this call
-    if p.value in ("/dev/stdin", "/dev/fd/0", "-") or (res is not None and res.abs in state.written):
-        note_definitions(state, None if p.value in ("/dev/stdin", "/dev/fd/0", "-") else state.written[res.abs], cwds)
     w.steer_event(state, args, getattr(w, "cur_stdin", None), cmd.redirs)
+    if text is None and res is not None and p.value is not None:
+        if res.abs == "/dev/null" or res.real == "/dev/null":
+            cmd.flags.add("source-read")
+            return (cwds, cwds)  # class 2
+        if res.exists and w.ctx.fs.isfile(res.abs):
+            fresh = not _written_before(w, res, state)
+            ftext = w.ctx.fs.read(res.abs)
+            if ftext == "":
+                cmd.flags.add("source-read")
+                return (cwds, cwds)  # class 2: an empty file
+            if ftext is not None:
+                # class 4 reads it for Studio terms (as the 0.0.26 guard does), never as a nested string
+                fop = Opaque("source", payload=ftext, origin="file", cwds=cwd_list(cwds), path=res.abs,
+                             path_class=w.where.path_class(res.real, w.ctx.env) if res.real else ["other"])
+                if fresh and "\x00" not in ftext[:512] and len(ftext) <= limits.SOURCE_WALK_MAX:
+                    text = ftext
+                else:
+                    w.emit_opaque(fop, cmd)
+    exit_hook = "exit-hook" in w.labels
+    if text is not None and fresh and not w.dry and not w.forks and not exit_hook:
+        done = source_walk(w, cmd, text, cwds, state, name if p.value not in STDIN_NAMES else None)
+        if done is not None:
+            out, st = done
+            state.__dict__.clear()
+            state.__dict__.update(st.__dict__)
+            cmd.flags.add("source-read")  # its commands were walked: the `source` itself writes nothing (judge)
+            return out
+    if fop is not None and text is fop.payload:
+        w.emit_opaque(fop, cmd)  # not walked after all (a dry run, a fork, an EXIT hook, a bound): its text is searched
+    if p.value in STDIN_NAMES or (res is not None and res.abs in state.written):
+        note_definitions(state, None if p.value in STDIN_NAMES else state.written[res.abs], cwds)
     w.note("env-unknown-after:#%d" % cmd.id)
-    mark_sourced(w)
-    return (None, None)
+    return source_unknown(w, state, cwds)
 
 
 def b_eval(w, cmd, cwds, state):
@@ -4944,21 +5183,22 @@ def b_eval(w, cmd, cwds, state):
         if text_may_change_funcs(w.ctx, payload):
             funcs_unknown(state)  # review 11 B1: `eval 'unfunction f'`, `eval 'f(){ :; }'`
         state.env_unknown = True
-        state.paths = None
+        paths_unknown(state, keep=w.func_depth > 0)  # fix-0104 §1.4c: the call's own eval drops the PATH before
         state.argv_opts_changed = True
-        state.dirstack = None
-        state.oldpwd = None
-        state.cands.pop("~-", None)
         keep_candidates(w.ctx, state)  # the string may assign any parameter — or not (review 10: the union rule)
+        history_unknown(state, cwds)  # fix-0104 §1.4a: `cd studio; eval 'cd videos'; rm -rf ~-`
         # review 8 M2: $HOME too (`eval 'HOME=<repo>'; rm -rf ~/studio`): later `~` words are judged as written
         state.vars["HOME"] = DYN
         state.raw_values["HOME"] = payload if payload is not None else (op.skeleton or "")
         if payload is None or eval_may_set_options(w.ctx, payload):
             _options_unknown(state)  # GLOB_SUBST may be on afterwards (review 3, M-4)
         if payload is None or EVAL_SOURCE_RE.search(payload):
-            # fix20: text the guard cannot read, or text that may run source / `.` in this shell: the walk stops
-            # (the string itself is judged above, as a nested string)
+            # fix20: text the guard cannot read, or text that may run source / `.` in this shell (the string itself
+            # is judged above, as a nested string); fix-0104 §1.4: the walk goes on with the effects unknown (class
+            # 4: the folder the one before or unknown) and the 0.0.26 guard judges the call too
             mark_sourced(w)
+            out = union(cwds, None)
+            return (out, out)
         return (None, None)
     return (cwds, cwds)
 
@@ -5043,15 +5283,33 @@ def b_emulate(w, cmd, cwds, state):
         op.options = {"posixbuiltins": posix}
         if code is None and i + 1 < len(vals):
             op.skeleton = _args(cmd)[i + 1].skeleton
-        w.emit_opaque(op, cmd)
+        if code is not None and EVAL_SOURCE_RE.search(code) and not w.dry and not w.forks and \
+                "exit-hook" not in w.labels:
+            # fix-0104 §1.6: literal text that may source (`emulate zsh -c 'source .venv/bin/activate'`) is walked in
+            # this shell as code the call gives a source (class 1); the call is routed to the 0.0.26 guard too
+            mark_sourced(w)
+            done = source_walk(w, cmd, code, cwds, state, None)
+            w.emit_opaque(op, cmd)  # (after the walk: the string is no earlier writer of the file it sources)
+            if done is not None:
+                state.__dict__.clear()
+                state.__dict__.update(done[1].__dict__)
+                state.defs_maybe = state.steer_all = True
+                return done[0]
+        else:
+            w.emit_opaque(op, cmd)
         state.defs_maybe = state.steer_all = True  # review 4 B3, conf M-1
         note_definitions(state, code, cwds)
         if text_may_change_funcs(w.ctx, code):
             funcs_unknown(state)  # review 11 B1
         state.env_unknown = True
-        state.paths = None
+        paths_unknown(state, keep=w.func_depth > 0)  # fix-0104 §1.4c: as eval
         if code is None or EVAL_SOURCE_RE.search(code):
-            mark_sourced(w)  # fix20 (P20-5): as eval
+            # fix20 (P20-5): as eval; fix-0104 §1.4: class 4 (the walk goes on)
+            mark_sourced(w)
+            keep_candidates(w.ctx, state)
+            history_unknown(state, cwds)
+            out = union(cwds, None)
+            return (out, out)
         return (None, None)
     if "-L" in vals or any(v and re.match(r"^-[a-zA-Z]*L", v) for v in vals):
         state.opts["localoptions"] = True
@@ -5205,6 +5463,8 @@ def b_trap(w, cmd, cwds, state):
     if args:
         w.emit_opaque(Opaque("trap", payload=args[0].value, cwds=cwd_list(cwds)), cmd)
         act = args[0].value
+        if act is None or EVAL_SOURCE_RE.search(act):
+            mark_sourced(w)  # fix-0104 §1.5: an action that may source (EXIT hooks too): the 0.0.26 guard judges too
         if act is None or (act not in ("", "-") and not (act.startswith("-") and len(args) == 1)):
             # review 4 R1: zsh runs the action after later commands (DEBUG, ZERR, ERR) or at a signal or exit
             kinds = {trap_kind(a.value) for a in args[1:]} or {None}

@@ -67,9 +67,7 @@ line changes; `/std update` keeps it. Then the harness commit below (its questio
 
 What this does not cover: the fact-checker, the source analyst and the auditor are protected personas (an Edit of their
 file is refused; the model changes only here). The other roles' files can still be edited, so their model can change
-by an Edit, seen only in the harness commit's `모델` line; a model passed on the spawn itself wins over the file; and
-after a `source` in a Bash call only the 0.0.26 guard judges, which does not protect `std-auditor.md` (it protects
-the other two personas).
+by an Edit, seen only in the harness commit's `모델` line; and a model passed on the spawn itself wins over the file.
 
 ## The internal overlay (internal hosts, sources, terms, video and actor ids)
 

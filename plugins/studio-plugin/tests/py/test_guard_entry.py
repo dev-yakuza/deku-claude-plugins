@@ -232,13 +232,47 @@ class PerfNoHarness(helpers.StudioTestCase):
         self.assertLess(p50, 0.9)
 
 
+def guard_p50(test, hook, env, runs):
+    """p50 and max (s) of `runs` guard.py subprocesses on one hook input (a first run, warming the bytecode cache, is
+    dropped); each must pass."""
+    times = []
+    for i in range(runs + 1):
+        t = time.perf_counter()
+        r = subprocess.run([sys.executable, GUARD], input=json.dumps(hook), capture_output=True, text=True, env=env,
+                           timeout=60)
+        if i:
+            times.append(time.perf_counter() - t)
+        test.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+    times.sort()
+    return times[len(times) // 2], times[-1]
+
+
+def write_perf_snapshots(env, files, **kw):
+    import guard_base
+    d = os.path.join(env["CLAUDE_CONFIG_DIR"], "shell-snapshots")
+    os.makedirs(d, exist_ok=True)
+    now = time.time()
+    for i in range(files):
+        p = os.path.join(d, "snapshot-zsh-%d-p%03d.sh" % (1792000000000 + i, i))
+        with open(p, "w") as f:
+            f.write(guard_base.perf_snapshot_text(i, path=env.get("PATH", "/usr/bin:/bin"), **kw))
+        os.utime(p, (now - 60 * (i + 1), now - 60 * (i + 1)))
+
+
 class PerfSnapshots(helpers.StudioTestCase):
     """fix-0029 §1.6: the same `git status` call as PerfNoHarness with 13 shell snapshots in CLAUDE_CONFIG_DIR — what
     the snapshot parse adds to every Bash call (Claude Code keeps one file per recent session). Each file is
     guard_base.perf_snapshot_text: ~280 KB, ~10,500 typeset -f lines, 250 alias lines; the texts differ in one
     function-body line, the variant key is the same. The main figure is a guard.py subprocess (it never imports
-    guard_base: the original snapshot.load). Target p50 160 ms; fails above 480 ms (3×). Also prints the in-process
-    `judge.decide` (min of 10) with the original load set as snapshot.load and no loader passed (production-equal)."""
+    guard_base: the original snapshot.load). 0.1.4 (no source: this guard alone, the 0.0.26 guard not loaded): target
+    p50 110 ms; fails above 330 ms (3×). Also prints the in-process `judge.decide` (min of 10) with the original load
+    set as snapshot.load and no loader passed (production-equal).
+    0.1.4 (fix-0104 §1.4d): a call that runs a snapshot function carries the text of every snapshot function — two
+    more cases in a Studio repository, each against `git status` there: a 400-function snapshot (the same 13 files
+    plus a function that changes nothing) and `nvm_normalize_version 1; git status`, printed, failing above that
+    `git status` + 50 ms; four distinct ~470 KB variants (~1.9 MB of function text, no Studio term) and one command
+    with 8 snapshot-function calls (the text built and searched once), failing above + 150 ms, under CPU_BUDGET and
+    never G-LIMIT."""
 
     RUNS = 12
     FILES = 13
@@ -287,4 +321,83 @@ class PerfSnapshots(helpers.StudioTestCase):
                          "(%d runs); in process judge.decide min %.0f ms\n"
                          % (sys.version.split()[0], self.FILES, p50 * 1000, times[-1] * 1000, len(times),
                             min(inproc[1:]) * 1000))
+        self.assertLess(p50, 0.33)
+
+    def studio_env(self, name):
+        repo = helpers.make_repo(self.tmp, name=name, harness=True)
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_DATA"] = os.path.join(self.tmp, "plugin-data")
+        env["CLAUDE_CONFIG_DIR"] = os.path.join(self.tmp, name + "-cfg")
+        return repo, env
+
+    def test_snapshot_function_call(self):
+        nvm = "nvm_normalize_version () {\n\tlocal v=\"${1#v}\"\n\tprint -r -- \"v${v}\"\n}\n"
+        repo, env = self.studio_env("studio400")
+        write_perf_snapshots(env, self.FILES, extra=nvm)
+        base = guard_p50(self, helpers.hook_input("Bash", {"command": "git status"}, repo), env, self.RUNS)
+        call = guard_p50(self, helpers.hook_input("Bash", {"command": "nvm_normalize_version 1; git status"}, repo),
+                         env, self.RUNS)
+        sys.stderr.write("\n[perf] %s: guard.py in a Studio repository, 13 snapshots of 400 functions: `git status` "
+                         "p50 %.0f ms, `nvm_normalize_version 1; git status` p50 %.0f ms (+%.0f ms)\n"
+                         % (sys.version.split()[0], base[0] * 1000, call[0] * 1000, (call[0] - base[0]) * 1000))
+        self.assertLess(call[0], base[0] + 0.05)
+
+    def test_many_function_calls_in_a_large_snapshot(self):
+        repo, env = self.studio_env("studio19")
+        d = os.path.join(env["CLAUDE_CONFIG_DIR"], "shell-snapshots")
+        os.makedirs(d)
+        import guard_base
+        for v in range(4):  # four distinct variants (other function names): ~1.9 MB of function text in all
+            funcs = "".join(guard_base.PERF_FUNC.replace("f_%(n)d", "v%d_%%(n)d" % v) % {"n": n} for n in range(700))
+            funcs += "".join("q%d_%d () {\n\tprint -r -- \"q %d\"\n}\n" % (v, k, k) for k in range(8))
+            with open(os.path.join(d, "snapshot-zsh-%d-big%d.sh" % (1792000000000 + v, v)), "w") as f:
+                f.write(guard_base.snapshot_text(functions=funcs, path=env.get("PATH", "/usr/bin:/bin")))
+        from stdo.guard import snapshot as snapmod
+        snap = guard_base._load_both.__defaults__[-1](env)[0]
+        self.assertEqual(len(snap.variants), 4)
+        text = snap.all_function_text()
+        self.assertGreater(len(text), 1800 * 1024)
+        self.assertNotIn("studio", text)
+        cmd = "; ".join("q%d_%d" % (k % 4, k) for k in range(8)) + "; git status"
+        base = guard_p50(self, helpers.hook_input("Bash", {"command": "git status"}, repo), env, 6)
+        call = guard_p50(self, helpers.hook_input("Bash", {"command": cmd}, repo), env, 6)
+        patch = snapmod.load
+        snapmod.load = guard_base._load_both.__defaults__[-1]
+        try:
+            hook = helpers.hook_input("Bash", {"command": cmd}, repo)
+            c0 = time.process_time()
+            deny, ctx = judge.decide(hook, env)
+            cpu = time.process_time() - c0
+        finally:
+            snapmod.load = patch
+        self.assertIsNone(deny, deny and deny.message())
+        sys.stderr.write("\n[perf] %s: guard.py in a Studio repository, 4 variants (%.1f MB of function text): `git "
+                         "status` p50 %.0f ms, 8 function calls p50 %.0f ms (+%.0f ms); in process %.0f ms CPU\n"
+                         % (sys.version.split()[0], len(text) / 1048576.0, base[0] * 1000, call[0] * 1000,
+                            (call[0] - base[0]) * 1000, cpu * 1000))
+        self.assertLess(call[0], base[0] + 0.15)
+        from stdo.guard import limits
+        self.assertLess(cpu, limits.CPU_BUDGET)
+
+
+class PerfSourced(helpers.StudioTestCase):
+    """0.1.4: a call with a `source` is judged by both guards (the 0.0.26 one parses the snapshots again) and walks
+    the file (a real venv activate): `source .venv/bin/activate; git status` with the 13 PerfSnapshots files, a
+    guard.py subprocess — printed, fails above 480 ms."""
+
+    def test_sourced_git_status(self):
+        repo = helpers.make_repo(self.tmp, name="plain", harness=False)
+        with open(os.path.join(helpers.PLUGIN, "tests", "fixtures", "sourced", "activate-3.12")) as f:
+            text = f.read().replace("__VENV__", os.path.join(repo, ".venv"))
+        os.makedirs(os.path.join(repo, ".venv", "bin"))
+        with open(os.path.join(repo, ".venv", "bin", "activate"), "w") as f:
+            f.write(text)
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_DATA"] = os.path.join(self.tmp, "plugin-data")
+        write_perf_snapshots(env, PerfSnapshots.FILES)
+        p50, mx = guard_p50(self, helpers.hook_input("Bash", {"command": "source .venv/bin/activate; git status"},
+                                                     repo), env, PerfSnapshots.RUNS)
+        sys.stderr.write("\n[perf] %s: guard.py on `source .venv/bin/activate; git status` with %d shell snapshots: "
+                         "p50 %.0f ms, max %.0f ms\n" % (sys.version.split()[0], PerfSnapshots.FILES, p50 * 1000,
+                                                       mx * 1000))
         self.assertLess(p50, 0.48)

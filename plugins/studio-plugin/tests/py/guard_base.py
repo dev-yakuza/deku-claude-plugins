@@ -165,12 +165,12 @@ PERF_FUNC = '''f_%(n)d () {
 }'''
 
 
-def perf_snapshot_text(i, path="/usr/bin:/bin", functions=400, aliases=250):
+def perf_snapshot_text(i, path="/usr/bin:/bin", functions=400, aliases=250, extra=""):
     """fix-0029 §1.6: one of the snapshot files PerfSnapshots generates, shaped like a real one (~280 KB: ~10,500
     typeset -f lines in 400 functions, about a quarter of them with a `{`; 250 alias lines with mixed quoting; Claude
     Code's sections and PATH). File `i` differs from the others in one function-body line only: the texts differ, the
-    variant key is the same (one variant)."""
-    funcs = [PERF_FUNC % {"n": n} for n in range(functions)]
+    variant key is the same (one variant). `extra`: more function text after them."""
+    funcs = [PERF_FUNC % {"n": n} for n in range(functions)] + ([extra.rstrip("\n")] if extra else [])
     funcs[0] = funcs[0].replace("\tlocal ", "\t: file %d\n\tlocal " % i, 1)
     al = []
     for k in range(aliases):

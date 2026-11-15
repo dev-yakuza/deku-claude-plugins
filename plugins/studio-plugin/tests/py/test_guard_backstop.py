@@ -1,7 +1,8 @@
-"""fix20: the 0.0.26 guard as a backstop (guard/backstop.py, guard/legacy). Every call is judged by this guard (G1)
-and by the frozen 0.0.26 guard; anything either refuses is refused. After a `source` / `.` (or eval text that may run
-one) G1 judges nothing more: the 0.0.26 rules alone judge the rest, and the 0.0.26 guard's finish runs. Real git only
-in temporary repositories; the 0.0.26 tree for test_sourced_approval_as_0026 is rebuilt from guard/legacy (the
+"""fix20: the 0.0.26 guard as a backstop (guard/backstop.py, guard/legacy). 0.1.4: this guard (G1) walks on after a
+`source` / `.` (the file read in this shell, or its effects unknown); the frozen 0.0.26 guard judges only a call with a
+source, after effects G1 cannot read, or that G1 stopped early (class S / L: anything either refuses is refused, and
+the 0.0.26 guard's finish runs) — every other call is G1's alone (class N; the frozen guard is not imported). Real git
+only in temporary repositories; the 0.0.26 tree for test_sourced_approval_as_0026 is rebuilt from guard/legacy (the
 structure test proves the copy is the 0.0.26 code)."""
 
 import json
@@ -205,11 +206,90 @@ BACKSTOP_PARITY = [
     "take build && cd .. && git clean -n",
     "take build && cd .. && git worktree list",
 ]
-# rows with a source where the final verdict may be stricter than the 0.0.26 guard's: this guard's own refusal of the
-# code before the source, or of code the call gives the source itself (the stdin / heredoc payload) — row: reason
+# rows routed to the 0.0.26 guard (a source, or effects this guard cannot read) where the final verdict is stricter
+# than the 0.0.26 guard's: this guard's own refusal — of the code before the source, of the code the call gives the
+# source, or (0.1.4) of what follows it, walked with what the file does; each refused by this guard with the source
+# removed too (the 0.0.26 guard missed it after the source) — row: reason
+_AFTER = "after the source, judged as without it (0.0.26 judged the rest without the folder or values before it)"
 PARITY_G1_FIRST = {
     "{ source /dev/stdin } <<< 'rm -rf studio/local'": "the code the call gives the source (here-string): this guard's",
     "f(){ source /dev/stdin }; f <<< 'rm -rf studio/local'": "the input the call gives the sourcing function: this guard's",
+    "cd studio/videos/v; f(){ cd {R}/studio/videos/v; }; functions -c f h; h; source {R}/e.sh; rm -rf work": _AFTER,
+    "cd studio/videos/v; f(){ cd {R}/studio/videos/v; }; functions -c f h; h; source {R}/e.sh; git checkout .": _AFTER,
+    "cd studio/videos/v; source e.sh; cd -; cd -; git checkout .": _AFTER,
+    "cd studio/videos/v; source e.sh; cd -; cd -; rm -rf work": _AFTER,
+    "cd src; f(){ cd ..; }; cd ..; source e.sh; cd {R}/src; f; git reset --hard": _AFTER,
+    "f(){ bash -c 'rm -rf work'; }; cd src; source e.sh; cd -; f; cd {R}/studio/videos/v; ( source e.sh; f )": _AFTER,
+    "f(){ bash -c 'rm -rf work'; }; cd src; source e.sh; cd -; f; cd {R}/studio/videos/v; source e.sh; f": _AFTER,
+    "cd studio/videos/v; source e.sh; rm -rf work": _AFTER + " (guard-limits' own example)",
+    "f(){ bash -c 'rm -rf work'; }; cd studio/videos/v; source e.sh; f": _AFTER,
+    "cd src; source e.sh; cd -; f(){ bash x.sh; }; f; cd {R}/studio/videos/v; source e.sh; f &": _AFTER,
+    "cd src; source e.sh; cd -; f(){ bash x.sh; }; f; cd {R}/studio/videos/v; nvm use 20; f": _AFTER,
+    "cd studio/videos/v; source e.sh; f(){ cd -; }; f; git checkout .": _AFTER,
+    "cd src; source e.sh; f(){ cd -; }; f; git checkout .": _AFTER,
+    "noglob source {R}/e.sh; git checkout .": _AFTER + " (a Studio change not committed)",
+    "eval 'source e.sh'; git checkout .": _AFTER + " (a Studio change not committed)",
+    "source /dev/null; echo x > ~[x]/studio/videos/v/work/state.json": _AFTER + " (`~[x]`: a folder it cannot tell)",
+    "source /dev/null; rm -rf ~[x]/studio": _AFTER + " (`~[x]`: a folder it cannot tell)",
+    "f(){ source e.sh; }; f; git checkout .": _AFTER + " (a Studio change not committed)",
+    "source .venv/bin/activate && cd src && pytest && cd - && rm -rf **/__pycache__":
+        _AFTER + " (pytest may write before the `**` listing)",
+    "alias bx='bash x.sh'\ncd src; source e.sh; cd -; bx\ncd {R}/studio/videos/v; source e.sh; bx":
+        _AFTER + " (no snapshot: an alias of the call on its line)",
+    "alias bx='bash x.sh'\ncd src; source e.sh; cd -; bx\ncd {R}/studio/videos/v && source e.sh && bx":
+        _AFTER + " (no snapshot: an alias of the call on its line)",
+    "pushd -q studio/videos/v; pushd -q {R}/scripts; pushd -q {R}; cd src; source e.sh; popd -q; popd -q; bash x.sh":
+        _AFTER + " (no snapshot: AUTO_PUSHD may be on)",
+    "pushd -q studio/videos/v; pushd -q {R}/scripts; pushd -q {R}; cd src; source e.sh; popd; popd; bash x.sh":
+        _AFTER + " (no snapshot: AUTO_PUSHD may be on)",
+    "source .venv/bin/activate && prompt_info && for f in src/*.ts; do wc -l $f; done":
+        _AFTER + " (no snapshot: a function name it cannot find)",
+    "source .venv/bin/activate; take build; cd ..; for f in src/*.ts; do echo $f; done":
+        _AFTER + " (no snapshot: a function name it cannot find)",
+    "source .venv/bin/activate; for i in a b; do mkcd $i; cd ..; done; echo $X":
+        _AFTER + " (no snapshot: a function name it cannot find)",
+    "take build && cd .. && git clean -n": "a snapshot function that changes folder (routed): git clean where it may run",
+    "take build && cd .. && git worktree list": "a snapshot function that changes folder (routed): git where it may run",
+}
+# 0.1.4 (class N): rows the 0.0.26 guard refuses, this guard passes, and the final verdict is this guard's — each a
+# 0.0.26 false refusal (with HEAD_REFUSED_KEPT / HEAD_REFUSED_FUNCS of test_guard_judge) — row or class: reason
+LEGACY_FALSE_UNSOURCED = {
+    "cd -; bash x.sh": "a new shell has no $OLDPWD: `cd -` fails and the shell stays (x.sh at the root is `echo ok`)",
+    "popd -q; bash x.sh": "the stack is empty: popd fails and the shell stays (x.sh at the root is `echo ok`)",
+    "cd src; command cd {R}/studio/videos/v; rm -rf work": "`command cd` runs the external cd (POSIX_BUILTINS off): "
+                                                          "the shell stays in src",
+    "cd src; command cd {R}/studio/videos/v; git checkout .": "`command cd` runs the external cd: the shell stays in src",
+    "f(){ cd {R}; }; cd {R}/studio/videos/v; f; bash studio/videos/v/x.sh": "x.sh's `rm -rf work` runs in the "
+                                                                          "repository root, which has no work folder",
+    "rm -rf **/__pycache__ **/*.pyc **/.pytest_cache **/.mypy_cache": "the `**` listing holds no Studio data (0.0.26 "
+                                                                       "refused every `**` deletion)",
+    # classes, each with its rows under its own snapshot (SnapshotParity)
+    "class: environment unknown after any snapshot function": "0.0.26 made the environment unknown after every shell "
+                                                             "function of yours; this guard only after one that "
+                                                             "exports, unexports or writes a watched name",
+    "class: payload to the end of the snapshot": "0.0.26 searched a function's text to the end of the snapshot, alias "
+                                                 "lines included; this guard every function body, not the alias lines",
+}
+# 0.1.4: rows with a source the 0.0.26 guard refuses and this guard alone passes (they stay refused in 0.1.4, as a
+# call with a source is judged by both) — each a 0.0.26 false refusal: row: reason (the evidence 0.1.5 needs)
+LEGACY_FALSE_AFTER_SOURCE = {
+    "command pushd studio/videos/v; f(){ cd {R}; }; f; source {R}/e.sh; rm -rf work":
+        "`command pushd` is the external pushd: the shell is in the repository root, whose work holds nothing Studio's",
+    "cd src; f(){ cd ..; }; cd ..; source e.sh; cd {R}/src; f; bash studio/videos/v/x.sh":
+        "x.sh's `rm -rf work` runs in the repository root",
+    "f(){ source \"$1\"; }; cd src; source e.sh; cd -; f e.sh; cd {R}; { source e.sh; f bad.sh; }":
+        "bad.sh does not exist; nothing follows",
+    "pushd -q src; source e.sh; f(){ bash x.sh; }; popd -q; f; cd {R}/studio/videos/v; source e.sh; alias h=f; h":
+        "an alias defined on the line it is used on is not expanded",
+    "cd src; . ./e.sh; function f { bash x.sh }; cd ~-; f; cd {R}/studio/videos/v; source e.sh; alias h=f; h":
+        "an alias defined on the line it is used on is not expanded",
+    "cd studio/videos/v; f(){ [[ -n $Z ]] && return; cd {R}; cd src; source e.sh; cd -; }; f || true; bash x.sh":
+        "$Z is unset in the hook's environment; this guard passes the row without the source too",
+    "rm -rf studio<->; source e.sh": "`<->` matches digits only (HEAD_REFUSED_KEPT)",
+    "source .venv/bin/activate; python3 .claude/studio/scripts/state.py status":
+        "0.0.26 read it as python3 writing state.py; this guard passes it without the source too",
+    "source /dev/null && popd && rm -rf studio/videos/v/work": "the stack is empty: popd fails and rm never runs",
+    "cd src; source /dev/null; cd ../scripts; cd -; git worktree add studio/x": "it runs in src",
 }
 
 
@@ -287,39 +367,66 @@ class BackstopCase(JudgeCase):
 
 
 class Combination(BackstopCase):
-    def test_legacy_deny_is_final_for_every_tool(self):  # plan §5.2 test 1
-        calls = [("Bash", {"command": "ls"}), ("Write", {"file_path": os.path.join(self.repo, "src", "n.ts"),
-                                                         "content": "x"}),
+    def test_legacy_deny_is_final_for_a_sourced_call(self):  # plan §5.2 test 1; 0.1.4: class S only
+        calls = [("Bash", {"command": "source /dev/null; ls"}), ("Bash", {"command": "f(){ source e.sh; }; ls"}),
+                 ("Bash", {"command": "trap '. x' DEBUG; ls"})]
+        saved = self.forced_legacy_deny()
+        try:
+            for tool, ti in calls:
+                deny, ctx = self.final(tool, ti)
+                self.assertTrue(ctx.unread, ti)
+                self.assertIsNotNone(deny, ti)
+                self.assertEqual(deny.rule, "G-DEL", ti)
+                # the 0.0.26 guard's own message (its messages module), tagged and cut as in 0.0.26
+                from stdo.guard.legacy import messages as lm
+                self.assertIsInstance(deny, lm.Deny, ti)
+                msg = deny.message(ctx.denies)
+                self.assertTrue(msg.startswith("Studio guard [G-DEL]: forced by the test"), msg)
+                self.assertLessEqual(len(msg), lm.LIMIT)
+            hook = self.hook("Bash", {"command": "source /dev/null; ls"})
+            hook.update({"agent_id": "a1", "agent_type": "std-auditor"})
+            deny, _ctx = judge.decide(hook, self.env, snapshot_loader=self.loader)
+            self.assertEqual(deny and deny.rule, "G-AUDIT")  # this guard's own refusal comes first
+        finally:
+            backstop._LEGACY[:] = saved
+        self.assertIsNone(self.bash("source /dev/null; ls"))
+
+    def test_unsourced_call_is_g1s_alone(self):  # 0.1.4 §2.4 (class N): a frozen refusal does not change the verdict
+        calls = [("Bash", {"command": "ls"}), ("Bash", {"command": "git status"}),
+                 ("Write", {"file_path": os.path.join(self.repo, "src", "n.ts"), "content": "x"}),
                  ("WebFetch", {"url": "https://example.com", "prompt": "x"}), ("mcp__fs__read", {"path": "a.txt"})]
         saved = self.forced_legacy_deny()
         try:
             for tool, ti in calls:
                 deny, ctx = self.final(tool, ti)
-                self.assertIsNotNone(deny, tool)
-                self.assertEqual(deny.rule, "G-DEL", tool)
-                # the 0.0.26 guard's own message (its messages module), tagged and cut as in 0.0.26
-                from stdo.guard.legacy import messages as lm
-                self.assertIsInstance(deny, lm.Deny, tool)
-                msg = deny.message(ctx.denies)
-                self.assertTrue(msg.startswith("Studio guard [G-DEL]: forced by the test"), msg)
-                self.assertLessEqual(len(msg), lm.LIMIT)
+                self.assertIsNone(deny, (tool, ti, deny))
+                self.assertFalse(ctx.unread, ti)
             hook = self.hook("Bash", {"command": "ls"})
             hook.update({"agent_id": "a1", "agent_type": "std-auditor"})
             deny, _ctx = judge.decide(hook, self.env, snapshot_loader=self.loader)
-            self.assertEqual(deny and deny.rule, "G-DEL")
+            self.assertIsNone(deny)
         finally:
             backstop._LEGACY[:] = saved
-        self.assertIsNone(self.bash("ls"))
 
     def test_g1_deny_does_not_import_legacy(self):  # test 2 (and P20-4: the push / commit memo is lazy)
         code = ("import json, sys; sys.path.insert(0, %r); from stdo.guard import judge; "
                 "hook = json.loads(sys.argv[1]); d, ctx = judge.decide(hook, dict(__import__('os').environ)); "
                 "print(d and d.rule, any(m.startswith('stdo.guard.legacy') for m in sys.modules))" % helpers.SCRIPTS)
         env = dict(self.env, PYTHONDONTWRITEBYTECODE="1")
-        for cmd, want in (("rm -rf studio/local", "G-DEL False"), ("ls", "None True")):
-            out = subprocess.run([sys.executable, "-B", "-c", code, json.dumps(self.hook("Bash", {"command": cmd}))],
+        # 0.1.4 (review 3 m4): a call with no source imports nothing frozen — its push and commit checks too
+        cases = (("Bash", {"command": "rm -rf studio/local"}, "G-DEL False"), ("Bash", {"command": "ls"}, "None False"),
+                 ("Bash", {"command": "git status"}, "None False"),
+                 ("Bash", {"command": "git commit -m x"}, None), ("Bash", {"command": "git push"}, None),
+                 ("Edit", {"file_path": os.path.join(self.repo, "src", "a.ts"), "old_string": "x", "new_string": "y"},
+                  "None False"),
+                 ("Bash", {"command": "source /dev/null; ls"}, "None True"))
+        for tool, ti, want in cases:
+            out = subprocess.run([sys.executable, "-B", "-c", code, json.dumps(self.hook(tool, ti))],
                                  capture_output=True, text=True, env=env, cwd=self.repo)
-            self.assertEqual(out.stdout.strip(), want, out.stderr[-800:])
+            if want is None:
+                self.assertTrue(out.stdout.strip().endswith(" False"), (ti, out.stdout, out.stderr[-800:]))
+            else:
+                self.assertEqual(out.stdout.strip(), want, (ti, out.stderr[-800:]))
 
     def test_legacy_error_is_head_text(self):  # test 3, Q4
         lj, _dec = backstop._legacy()
@@ -329,7 +436,7 @@ class Combination(BackstopCase):
             raise KeyError("x")
         backstop._LEGACY[1] = boom
         try:
-            deny, ctx = self.final("Bash", {"command": "ls"})
+            deny, ctx = self.final("Bash", {"command": "source /dev/null; ls"})
         finally:
             backstop._LEGACY[:] = saved
         self.assertEqual(deny.rule, "G-ERR")
@@ -343,7 +450,8 @@ class Combination(BackstopCase):
         backstop._merge = bad
         try:
             with self.assertRaises(RuntimeError):
-                self.final("Bash", {"command": "ls"})
+                self.final("Bash", {"command": "source /dev/null; ls"})
+            self.assertIsNone(self.final("Bash", {"command": "ls"})[0])  # class N: no merge
         finally:
             backstop._merge = merge
 
@@ -380,15 +488,20 @@ class Combination(BackstopCase):
         backstop._merge(g, lctx)
         self.assertEqual([x.worktree for x in g.touched], ["/r/a", "/r/b"])
         self.assertEqual(g.warnings, ["w1", "w2"])
-        # guard.py's record: once per repository
-        deny, ctx = self.final("Bash", {"command": "ls studio"})
+        # guard.py's record: once per repository (a class S call: both guards' repositories)
+        deny, ctx = self.final("Bash", {"command": "source /dev/null; ls studio"})
         self.assertIsNone(deny)
         judge.record_run(ctx)
         with open(os.path.join(self.repo, ".claude", "studio", "local", "guard-ran.json")) as f:
             self.assertIn("sess-1", json.load(f)["sessions"])
 
-    def test_shared_checks(self):  # test 7 (P20-4)
-        lp, lc = backstop._frozen_checks()
+    def test_shared_checks(self):  # test 7 (P20-4); 0.1.4: G1's own checks, the frozen ones wrapped with the same memo
+        lp, lc = backstop._own_checks()
+        flp, flc = backstop._frozen_checks()
+        self.assertTrue(getattr(lp.check, "_shared", False) and getattr(flp.check, "_shared", False))
+        from stdo.guard import commitrule as gc, push as gp
+        self.assertIs(lp, gp)
+        self.assertIs(lc, gc)
         calls = []
         orig_p, orig_c = lp.check.__wrapped__, lc.evaluate.__wrapped__
 
@@ -406,7 +519,7 @@ class Combination(BackstopCase):
             args = [W(value="push"), W(value="origin")]
             for _ in range(2):
                 self.assertEqual(backstop.shared_push("/r", {"A": "1"}, args, set()), (None, ["w"]))
-                self.assertEqual(lp.check("/r", {"A": "1"}, args, set()), (None, ["w"]))  # the 0.0.26 guard's call
+                self.assertEqual(flp.check("/r", {"A": "1"}, args, set()), (None, ["w"]))  # the 0.0.26 guard's call
             backstop.shared_push("/r", {"A": "2"}, args, set())
             backstop.shared_push("/s", {"A": "1"}, args, set())
             self.assertEqual([c[0] for c in calls], ["push"] * 3)
@@ -416,24 +529,33 @@ class Combination(BackstopCase):
         finally:
             lp.check.__wrapped__, lc.evaluate.__wrapped__ = orig_p, orig_c
             backstop._MEMO.clear()
-        # one decision: the check runs once for both guards (a real push)
+        # one decision: the check runs once for both guards (a real push in a class S call), once for G1 alone
         n = []
+        forig = flp.check.__wrapped__
 
         def counting(*a, **kw):
             n.append(1)
             return orig_p(*a, **kw)
-        lp.check.__wrapped__ = counting
-        try:
-            self.bash("git push")
-        finally:
-            lp.check.__wrapped__ = orig_p
-        self.assertEqual(len(n), 1)
 
-    def test_deadline(self):  # P20-8
+        def fcounting(*a, **kw):
+            n.append(2)
+            return forig(*a, **kw)
+        lp.check.__wrapped__, flp.check.__wrapped__ = counting, fcounting
+        try:
+            self.bash("source /dev/null; git push")
+            self.assertEqual(len(n), 1, n)
+            del n[:]
+            self.bash("git push")
+            self.assertEqual(n, [1])
+        finally:
+            lp.check.__wrapped__, flp.check.__wrapped__ = orig_p, forig
+
+    def test_deadline(self):  # P20-8; 0.1.4: only a call the 0.0.26 guard also judges
         old = backstop.DEADLINE
         backstop.DEADLINE = -1.0
         try:
-            deny = self.bash("ls")
+            deny = self.bash("source /dev/null; ls")
+            self.assertIsNone(self.bash("ls"))  # class N: G1's own budget, not the sum of both
         finally:
             backstop.DEADLINE = old
         self.assertEqual(deny.rule, "G-LIMIT")
@@ -497,11 +619,11 @@ class Effects(BackstopCase):
         self.assertTrue(ctx.allow)
         self.assertEqual(n, {"g1": 1, "legacy": 0})
 
-    def test_no_effects_when_legacy_denies(self):  # test 4
+    def test_no_effects_when_legacy_denies(self):  # test 4 (0.1.4: a call the 0.0.26 guard also judges)
         n, saved = self.writes()
         saved_l = self.forced_legacy_deny()
         try:
-            deny, ctx = self.final("Bash", {"command": APPROVE})
+            deny, ctx = self.final("Bash", {"command": APPROVE + "; source /dev/null"})
         finally:
             backstop._LEGACY[:] = saved_l
             self.restore(saved)
@@ -604,30 +726,65 @@ def build_0026_scripts(dest):
     shutil.rmtree(leg)
 
 
-class SourceSkip(BackstopCase):
+FIXTURES = os.path.join(helpers.PLUGIN, "tests", "fixtures", "sourced")
+# a file shaped like oh-my-zsh's lib/diagnostics.zsh (functions with loops, locals and candidate assignments; not its
+# text): its walk takes more than its own CPU bound (limits.SOURCE_WALK_CPU) on any machine this runs on
+HEAVY = "".join("f%d(){ local a=$1 b=$2; for v in a b c d; do X=$v; [[ -n $a ]] && cd $b; done; }\n" % i
+                for i in range(400))
+
+
+class SourceWalk(BackstopCase):
+    """0.1.4 §1.4: this guard walks on after a `source` / `.` — the four classes of a source, the shares and bounds of
+    a sourced file's walk, the routing to the 0.0.26 guard (`ctx.sourced`, `ctx.unread`)."""
+
     def g1ctx(self, cmd, cwd=None):
         d, ctx, _c = judge.decide_g1(self.hook("Bash", {"command": cmd}, cwd), self.env, snapshot_loader=self.loader,
                                      run_finish=False)
         return d, ctx
 
-    def test_routes_to_a_source(self):  # §3.2, P20-5
+    def write(self, name, text):
+        p = os.path.join(self.repo, name)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            f.write(text)
+        return p
+
+    def walked(self, ctx):
+        """The files whose commands were walked in this shell (class 3) and those read as unknown (class 4)."""
+        sc = ctx.scan
+        via = {c.via_source for c in sc.commands if getattr(c, "via_source", None)}
+        unread = {n.split(":")[1] for n in sc.notes if n.startswith("source-unread:")}
+        return via, unread
+
+    def venv(self, version):
+        with open(os.path.join(FIXTURES, "activate-%s" % version)) as f:
+            text = f.read().replace("__VENV__", os.path.join(self.repo, ".venv"))
+        self.write(".venv/bin/activate", text)
+
+    def test_routes_to_a_source(self):  # §3.2, P20-5; 0.1.4: routed (sourced) and walked on
         for cmd in ("source x; ls", ". x; ls", "builtin source x; ls", "noglob source x; ls", "command . x; ls",
                     "command source x; ls", "alias act='source .venv/bin/activate'\nact; ls",
                     "alias act='. x'\nact; ls", "emulate zsh -c 'source x'; ls", "emulate sh -c \"$X\"; ls",
                     'eval "$(pyenv init -)"; ls', "eval 'source x'; ls", "eval '. x'; ls",
                     "f(){ source x; }; f; ls", "if true; then source x; fi; ls", "( source x ); ls",
-                    "for i in 1; do source x; done; ls", "source x | cat; ls"):
+                    "for i in 1; do source x; done; ls", "source x | cat; ls",
+                    # a source in a body defined here, an EXIT hook or a nested string routes the call too
+                    "sh -c 'source x'; ls", "f(){ source x; }; ls", "trap 'source x' EXIT; ls",
+                    "TRAPEXIT(){ source x; }; ls", "zshexit_functions+=(g); g(){ source x; }; ls",
+                    "chpwd(){ source x; }; cd src; ls"):
             _d, ctx = self.g1ctx(cmd)
             self.assertTrue(ctx.sourced, cmd)
-            self.assertNotIn("ls", [c.prog for c in ctx.scan.commands], cmd)
-        for cmd in ("./x.sh; ls", "sh -c 'source x'; ls", "f(){ source x; }; ls", "eval 'X=1'; ls",
-                    "alias a='ls -l'\na; ls", "trap 'source x' EXIT; ls", "echo source; ls"):
-            _d, ctx = self.g1ctx(cmd)
+            self.assertTrue(ctx.unread, cmd)
             self.assertIn("ls", [c.prog for c in ctx.scan.commands], cmd)
-        # a nested string's source ends only that string (its own commands after it are not this guard's)
-        _d, ctx = self.g1ctx("sh -c 'source x; rm -rf studio'; ls")
+        for cmd in ("./x.sh; ls", "eval 'X=1'; ls", "alias a='ls -l'\na; ls", "echo source; ls"):
+            _d, ctx = self.g1ctx(cmd)
+            self.assertFalse(ctx.sourced, cmd)
+            self.assertFalse(ctx.unread, cmd)
+            self.assertIn("ls", [c.prog for c in ctx.scan.commands], cmd)
+        # a nested string's own commands after its source are judged too
+        d, ctx = self.g1ctx("sh -c 'source x; rm -rf studio'; ls")
         self.assertTrue(ctx.sourced)
-        self.assertIn("ls", [c.prog for c in ctx.scan.commands])
+        self.assertEqual(d and d.rule, "G-DEL")
 
     def test_before_the_source_and_its_payload(self):
         for cmd, rule in (("{ source /dev/stdin } <<< 'rm -rf studio/local'", "G-DEL"),
@@ -640,21 +797,101 @@ class SourceSkip(BackstopCase):
             self.assertEqual(d and d.rule, rule, cmd)
             self.assertEqual(self.bash(cmd).rule, rule, cmd)
 
-    def test_after_the_source_is_0026s(self):
-        for cmd in ("source x; rm -rf studio/videos/v/work", "source .venv/bin/activate && git commit -m x",
-                    "source /dev/null; echo x > ~[x]/studio/videos/v/work/state.json",
-                    "source .venv/bin/activate && runit npm test && git status",
-                    "if true; then source x; else rm -rf studio/local; fi"):
+    def test_four_classes(self):
+        self.write("empty.sh", "")
+        self.write("big.sh", "# " + "x" * (limits.SOURCE_WALK_MAX + 1000) + "\nexport A=1\n")
+        self.write("nv.sh", "nvm(){ eval \"$1\"; }\nnvm use 20\n")
+        # class 2: nothing (any spelling of /dev/null, an empty regular file)
+        for cmd in ("source /dev/null; git status", ". /dev/../dev/null; git status", "source empty.sh; git status"):
             d, ctx = self.g1ctx(cmd)
-            self.assertTrue(ctx.sourced, cmd)
             self.assertIsNone(d, cmd)
-            f = self.bash(cmd)
-            l, lctx = self.legacy_only("Bash", {"command": cmd})
-            self.assertEqual(f is None, l is None, cmd)
-            if l is not None:
-                self.assertEqual(f.message(), l.message(), cmd)  # 0.0.26's message, byte for byte
+            self.assertEqual(self.walked(ctx), (set(), set()), cmd)
+            self.assertIn("source-read", [c for c in ctx.scan.commands if c.prog in ("source", ".")][0].flags)
+        # class 3: walked in this shell
+        d, ctx = self.g1ctx("source e.sh; git status")
+        self.assertIsNone(d)
+        self.assertEqual(self.walked(ctx), ({"e.sh"}, set()))
+        self.assertIn(["export", "A=1"], [c.argv for c in ctx.scan.commands])
+        for version in ("3.9", "3.12"):  # the real `python3 -m venv` activate
+            self.venv(version)
+            for cmd in ("source .venv/bin/activate && git commit -m x", "source .venv/bin/activate && git status",
+                        "source .venv/bin/activate && git add -A",
+                        "source .venv/bin/activate; gh pr view 1; for f in src/*.ts; do git add $f; done",
+                        "source .venv/bin/activate && python3 -m pytest"):
+                d, ctx = self.g1ctx(cmd)
+                self.assertIsNone(d, (version, cmd, d))
+                self.assertEqual(self.walked(ctx), ({".venv/bin/activate"}, set()), cmd)
+                self.assertIsNone(self.bash(cmd), cmd)
+            self.assertEqual(self.g1ctx("source .venv/bin/activate && rm -rf studio/local")[0].rule, "G-DEL")
+        # class 4: a file over SOURCE_WALK_MAX, a missing file, a name the guard cannot read, a file whose own code
+        # it cannot read (an nvm.sh-like function with eval): the environment unknown, git not checked
+        for cmd, unread in (("source big.sh; ls", "big.sh"), ("source missing.sh; ls", None), ("source $F; ls", None)):
+            d, ctx = self.g1ctx(cmd)
+            self.assertIsNone(d, cmd)
+            via, _u = self.walked(ctx)
+            self.assertEqual(via, set(), cmd)
+            files = [o.path for o in ctx.scan.opaque if o.kind == "source" and o.origin == "file"]
+            self.assertEqual([os.path.basename(f) for f in files], [unread] if unread else [], cmd)
+            self.assertEqual(self.g1ctx(cmd.replace("; ls", "; git status"))[0].rule, "G-OPAQUE", cmd)
+        d, ctx = self.g1ctx("source nv.sh; git status")
+        self.assertEqual(d and d.rule, "G-OPAQUE")
+        self.assertEqual(self.walked(ctx)[0], {"nv.sh"})
 
-    def test_c20_1_rows_pass(self):  # C20-1: 0.0.26 passes them; this guard no longer judges after the source
+    def test_guard_limits_holes_now_refused(self):
+        self.write("env.sh", "export A=1\n")
+        for cmd, rule in (("source e.sh; git clean -fdx", "G-CLEAN"),
+                          ("source e.sh; cd studio/videos/v; git clean -fdx", "G-CLEAN"),
+                          ("cd studio/videos/v; source e.sh; rm -rf work", "G-DEL"),
+                          ("cd src; source /dev/null; rm -rf ~-/studio/videos/v/work", "G-DEL"),
+                          ("source e.sh; rm -rf stu*", "G-DEL"),
+                          ("f(){ cd studio/videos/v; }; source env.sh; f; git clean -fdx", "G-CLEAN"),
+                          ("eval 'source e.sh'; git checkout .", "G-RESET"),
+                          ("noglob source %s/e.sh; git checkout ." % self.repo, "G-RESET")):
+            d, ctx = self.g1ctx(cmd)
+            self.assertEqual(d and d.rule, rule, cmd)
+            self.assertTrue(ctx.unread, cmd)
+            self.assertEqual(self.bash(cmd).rule, rule, cmd)
+
+    def test_what_the_file_does_holds_after_it(self):
+        self.write("cdv.sh", "cd studio/videos/v\n")
+        self.write("gd.sh", "export GIT_DIR=/tmp/x\n")
+        self.write("gs.sh", "setopt globsubst\n")
+        self.write("src/m.sh", "pushd -q ../scripts; popd -q\n")
+        self.write("scripts/x.sh", "rm -rf ../studio\n")
+        self.write("al.sh", "alias ls='rm -rf studio'\nls\n")
+        self.write("ret.sh", "return\ncd studio/videos/v\n")
+        self.write("noret.sh", "cd studio/videos/v\n")
+        for cmd, rule in (("source cdv.sh; git checkout .", "G-RESET"), ("source gd.sh; git status", "G-OPAQUE"),
+                          ("source gs.sh; X='s*o'; rm -rf $X", "G-DEL"),
+                          ("cd src; source m.sh; cd -; bash x.sh", "G-DEL"),  # the folder `cd -` goes to is the file's
+                          ("source al.sh; ls", None),  # review 1 M4: refused (the alias's text names studio)
+                          ("source noret.sh; rm -rf work", "G-DEL")):
+            d, _ctx = self.g1ctx(cmd)
+            self.assertIsNotNone(d, cmd)
+            if rule:
+                self.assertEqual(d.rule, rule, cmd)
+        d, ctx = self.g1ctx("source ret.sh; rm -rf work")  # a `return` at the top: the rest of the file is not run
+        self.assertIsNone(d)
+        self.assertEqual(self.walked(ctx), ({"ret.sh"}, set()))
+
+    def test_must_pass(self):
+        self.venv("3.12")
+        for cmd in ("source .venv/bin/activate && git commit -m x", "source /dev/null; git status",
+                    "set -a; source /dev/null; set +a; git commit -m x", "source e.sh && git status",
+                    # review 1 M2: an ordinary program before the source does not make the file stale (class 3 kept)
+                    "mkdir -p build && source .venv/bin/activate && git status",
+                    "npm ci && source .venv/bin/activate && git status",
+                    "pip install -e . && source .venv/bin/activate && git status",
+                    "uv venv && source .venv/bin/activate && pytest && git status",
+                    # review 1 M3: a class 2 / 3 source writes nothing before a `**` listing
+                    "source /dev/null && rm -rf **/__pycache__", ". /dev/null; rm -rf **/__pycache__"):
+            self.assertPass(cmd)
+            if ".venv" in cmd:
+                self.assertEqual(self.walked(self.g1ctx(cmd)[1]), ({".venv/bin/activate"}, set()), cmd)
+        self.write(".venv/bin/activate", "export VIRTUAL_ENV=x\n")
+        self.assertPass("source .venv/bin/activate && rm -rf **/__pycache__")
+
+    def test_c20_1_rows_pass(self):  # C20-1: 0.0.26 passes them, and this guard walking after the source too
         self.use_snapshot(functions=C20_FUNCS)
         for cmd in ("source .venv/bin/activate; gh pr view 1; for f in src/*.ts; do npx prettier --write $f; done",
                     "source .venv/bin/activate; gh pr view 1; for f in src/*.ts; do git add $f; done",
@@ -663,18 +900,83 @@ class SourceSkip(BackstopCase):
                     "source .venv/bin/activate; for p in 1 2; do gh pr view $p; done; cat $LOG",
                     "source .venv/bin/activate; for i in a b; do mkcd $i; cd ..; done; echo $X"):
             self.assertPass(cmd)
+            self.assertIsNone(self.g1ctx(cmd)[0], cmd)
 
-    def test_uncalled_function_and_walk_order(self):
-        _d, ctx = self.g1ctx("f(){ source x; rm -rf studio/local; }; ls")
-        self.assertFalse(ctx.sourced)
-        self.assertIn("ls", [c.prog for c in ctx.scan.commands])
-        # a hook defined before the source runs after later commands; its body is read where it is defined (the
-        # one walk order != run order the guard keeps; guard-limits): chpwd's source does not stop the walk
-        _d, ctx = self.g1ctx("chpwd(){ source x; }; cd src; ls")
-        self.assertFalse(ctx.sourced)
-        # an EXIT trap runs at the end: its text is a nested string (its source ends that string only)
-        _d, ctx = self.g1ctx("trap 'source x; rm -rf studio' EXIT; ls")
-        self.assertIn("ls", [c.prog for c in ctx.scan.commands])
+    def test_class_4_when_the_file_may_be_stale(self):
+        self.write("gen.sh", "echo export A=1\n")
+        os.symlink(os.path.join(self.repo, "e.sh"), os.path.join(self.repo, "lnk.sh"))
+        for i in range(1, 6):
+            self.write("s%d.sh" % i, "source s%d.sh\nexport D%d=1\n" % (i + 1, i))
+        self.write("s6.sh", "export D6=1\n")
+        for cmd, name in (("cp scripts/e.sh x2.sh; source x2.sh; ls", "x2.sh"),
+                          ("python3 gen.py > x3.sh; source x3.sh; ls", "x3.sh"),
+                          ("python3 gen.py > lnk.sh; source e.sh; ls", "e.sh"),  # the same file through a link
+                          ("bash gen.sh; source e.sh; ls", "e.sh")):  # an earlier script may have written it
+            self.write(name, "export B=1\n") if name != "e.sh" else None
+            _d, ctx = self.g1ctx(cmd)
+            via, _u = self.walked(ctx)
+            self.assertNotIn(name, via, cmd)
+            self.assertTrue([o for o in ctx.scan.opaque if o.kind == "source" and o.origin == "file"], cmd)
+        # nested sources: read to depth 3 (SHELL_DEPTH), the fourth unknown
+        _d, ctx = self.g1ctx("source s1.sh; ls")
+        self.assertEqual(self.walked(ctx), ({"s1.sh", "s2.sh", "s3.sh"}, {"s4.sh"}))
+        # a source in a dry run (a chpwd hook's effects) is not read, and routes the call
+        _d, ctx = self.g1ctx("chpwd(){ source e.sh; }; cd src; ls")
+        self.assertTrue(ctx.unread)
+        # an EXIT hook's source runs after every command: not read
+        _d, ctx = self.g1ctx("TRAPEXIT(){ source e.sh; }; ls")
+        self.assertEqual(self.walked(ctx)[0], set())
+
+    def test_bounds(self):  # review 1 M1, review 4 m3, review 5 m2
+        import time
+        self.write("heavy.sh", HEAVY)
+        for k in range(8):
+            self.write("h%d.sh" % k, HEAVY)
+        self.write("n1.sh", "source n2.sh\n" + HEAVY)
+        self.write("n2.sh", "source n3.sh\n" + HEAVY)
+        self.write("n3.sh", HEAVY)
+        self.write("many.sh", ":\n" * (limits.MAX_COMMANDS // 2 + 100))  # more than its share of the commands
+        self.write("cds.sh", "cd src; cd ..\n" * (limits.MAX_COMMANDS // 4 + 50))
+        self.write("probes.sh", "".join("bash nx%d.sh\n" % i for i in range(limits.MAX_FS_CALLS // 3)))  # file probes
+        for cmd in ("source heavy.sh; ls", "; ".join("source h%d.sh" % k for k in range(8)) + "; ls",
+                    "source n1.sh; ls", "source many.sh; ls", "source cds.sh; ls", "source probes.sh; ls"):
+            t0 = time.monotonic()
+            d, ctx = self.g1ctx(cmd)
+            self.assertLess(time.monotonic() - t0, 2.0, cmd)
+            self.assertIsNone(d, (cmd, d))  # class 4, not G-LIMIT
+            via, unread = self.walked(ctx)
+            self.assertEqual(via, set(), cmd)
+            self.assertTrue(unread, cmd)
+            self.assertEqual(self.g1ctx(cmd.replace("; ls", "; git status"))[0].rule, "G-OPAQUE", cmd)
+        # the same text inline in the call: the call's own bounds (G-LIMIT), within its wall budget
+        t0 = time.monotonic()
+        d, _ctx = self.g1ctx(HEAVY + "ls")
+        self.assertEqual(d and d.rule, "G-LIMIT")
+        self.assertLess(time.monotonic() - t0, limits.WALL_BUDGET)
+
+    def test_walk_on_a_copy(self):  # review 1 m2
+        self.write("half.sh", "rm -rf studio/local\nexport A=1\nif then fi (((\n")
+        d, ctx = self.g1ctx("source half.sh; ls")
+        self.assertNotIn("rm", [c.prog for c in ctx.scan.commands])
+        self.assertEqual(self.walked(ctx), (set(), {"half.sh"}))
+        self.assertEqual(self.g1ctx("source half.sh; git status")[0].rule, "G-OPAQUE")  # class 4's state
+
+    def test_message_names_the_file(self):
+        self.write("rm.sh", "rm -rf studio/local\n")
+        d, _ctx = self.g1ctx("source rm.sh")
+        self.assertEqual(d.rule, "G-DEL")
+        self.assertIn("(run by rm.sh, which this command sources.)", d.message())
+
+    def test_source_in_a_defined_body(self):  # review 3 m6
+        d, ctx = self.g1ctx("TRAPEXIT(){ source e.sh; rm -rf studio/videos; }; ls")
+        self.assertEqual(d and d.rule, "G-DEL")
+        self.assertTrue(ctx.unread)
+        d, ctx = self.g1ctx("f(){ source e.sh; }; ls")
+        self.assertIsNone(d)
+        self.assertTrue(ctx.unread)
+        self.assertIsNone(self.bash("f(){ source e.sh; }; ls"))
+        # review 3 NIT: refused by this guard itself now, as without the source
+        self.assertEqual(self.g1ctx("f(){ source e.sh; rm -rf studio/local; }; ls")[0].rule, "G-DEL")
 
     def test_readings_keep_the_code_before_the_source(self):  # P20-5: forks and readings
         # several folders: the reading of each starts before the source
@@ -687,31 +989,303 @@ class SourceSkip(BackstopCase):
             d, ctx = self.g1ctx(cmd)
             self.assertEqual(d and d.rule, "G-DEL", cmd)
 
-    def test_parity(self):  # test 11
+
+
+class Parity(BackstopCase):
+    """0.1.4 §2.2, §2.5: the evidence for class N as tests — on the parity corpus, a call the 0.0.26 guard no longer
+    judges loses no refusal but the listed 0.0.26 false refusals; a call it still judges keeps its verdict."""
+
+    def g1(self, cmd):
+        return judge.decide_g1(self.hook("Bash", {"command": cmd}), self.env, snapshot_loader=self.loader,
+                               run_finish=False)
+
+    def test_parity(self):  # test 11; 0.1.4 §2.5
         from stdo.guard.legacy.messages import Deny as LDeny
-        rows = [(r, "repo") for r in BACKSTOP_PARITY]
-        rows += [(c, "repo") for c, _r in MUST_DENY[::10]] + [(c, "repo") for c in MUST_PASS[::12]]
+        from test_guard_judge import HEAD_REFUSED_FUNCS, HEAD_REFUSED_KEPT
+        rows = [(r, "parity") for r in BACKSTOP_PARITY]
+        rows += [(c, "deny") for c, _r in MUST_DENY[::10]] + [(c, "pass") for c in MUST_PASS[::12]]
         for mode in ("with", "none"):
             self.mode = mode
-            for cmd, _cwd in rows:
+            for cmd, kind in rows:
                 text = cmd.replace("{R}", self.repo)
                 f, fctx = self.final("Bash", {"command": text})
+                g, gctx, complete = self.g1(text)
                 l, lctx = self.legacy_only("Bash", {"command": text})
+                why = "%s (%s): final %s, G1 %s, 0.0.26 %s" % (cmd, mode, f, g, l)
+                if not gctx.unread and complete:
+                    # class N: the final verdict is this guard's; a 0.0.26 refusal it does not give is a listed
+                    # 0.0.26 false refusal; its repositories and warnings are this guard's
+                    self.assertFalse(fctx.unread, why)
+                    self.assertEqual(f is None, g is None, why)
+                    if l is not None and g is None:
+                        self.assertTrue(cmd in LEGACY_FALSE_UNSOURCED or cmd in HEAD_REFUSED_KEPT[mode] or
+                                        cmd in HEAD_REFUSED_FUNCS, "a 0.0.26 refusal lost: " + why)
+                    if l is None and g is None:
+                        g_trees = {getattr(ri, "worktree", None) for ri in gctx.touched}
+                        self.assertLessEqual({getattr(ri, "worktree", None) for ri in lctx.touched}, g_trees, why)
+                        self.assertEqual([w for w in lctx.warnings if w not in gctx.warnings], [], why)
+                    continue
                 if l is not None:
-                    self.assertIsNotNone(f, "0.0.26 refuses, the final passes: %s (%s)" % (cmd, mode))
-                if fctx.sourced and cmd not in PARITY_G1_FIRST:
-                    self.assertEqual(f is None, l is None, "%s (%s): %s / %s" % (cmd, mode, f, l))
+                    self.assertIsNotNone(f, "0.0.26 refuses, the final passes: " + why)
+                if kind == "parity" and l is None:
+                    self.assertTrue(f is None or cmd in PARITY_G1_FIRST, "stricter than 0.0.26, not listed: " + why)
                 if f is not None and isinstance(f, LDeny):  # the 0.0.26 guard's answer: its message, byte for byte
                     self.assertEqual(f.message(fctx.denies), l.message(lctx.denies), cmd)
                 if f is not None:
                     msg = f.message(fctx.denies)
                     self.assertTrue(msg.startswith("Studio guard ["), msg[:80])
                     self.assertLessEqual(len(msg), 1500)
+        for cmd in LEGACY_FALSE_UNSOURCED:
+            self.assertTrue(cmd.startswith("class: ") or cmd in BACKSTOP_PARITY, cmd)
+        for cmd in list(PARITY_G1_FIRST) + list(LEGACY_FALSE_AFTER_SOURCE):
+            self.assertIn(cmd, BACKSTOP_PARITY + [c for c, _r in MUST_DENY] + list(MUST_PASS), cmd)
+
+    def test_parity_g1_alone_after_source(self):  # 0.1.4 §1.7: the evidence 0.1.5 needs
+        rows = [r for r in BACKSTOP_PARITY] + [c for c, _r in MUST_DENY] + list(MUST_PASS)
+        rows = [r for r in dict.fromkeys(rows) if re.search(r"(^|[\s;&|({])(source|\.)\s", r)]
+        seen = set()
+        for mode in ("with", "none"):
+            self.mode = mode
+            for cmd in rows:
+                text = cmd.replace("{R}", self.repo)
+                g, gctx, _c = self.g1(text)
+                if not gctx.sourced:
+                    continue
+                seen.add(cmd)
+                l, _lctx = self.legacy_only("Bash", {"command": text})
+                if l is not None and g is None:
+                    self.assertIn(cmd, LEGACY_FALSE_AFTER_SOURCE, "0.0.26 refuses after a source, this guard "
+                                                                  "passes: %s (%s): %s" % (cmd, mode, l))
+        self.assertGreater(len(seen), 100)
+        self.assertLessEqual(set(LEGACY_FALSE_AFTER_SOURCE), seen)
+
+    def test_parity_tools(self):  # 0.1.4 §2.2: the file, web and MCP tools — this guard's refusals ⊇ 0.0.26's
+        paths = []
+        for d, ds, fs in os.walk(self.repo):
+            if os.sep + ".git" in d:
+                continue
+            paths += [os.path.join(d, n) for n in fs + ds]
+        home = self.env["HOME"]
+        extra = [".claude/agents/std-auditor.md", ".claude/agents/std-writer.md", ".claude/agents/std-fact-checker.md",
+                 ".claude/settings.json", ".claude/settings.local.json", ".claude/studio/scripts/state.py",
+                 ".claude/studio/MANIFEST", ".claude/studio/local/x.json", ".git/hooks/pre-commit", ".git/config",
+                 "studio/videos/v/work/state.json", "studio/videos/v/script.md", "studio/videos/v/approvals.json",
+                 "studio/local/a", "src/a.ts", "README.md", os.path.join(home, ".claude/settings.json"),
+                 os.path.join(home, ".gitconfig"), "/tmp/x.txt",
+                 os.path.join(self.env["CLAUDE_CONFIG_DIR"], "settings.json")]
+        paths += [p if os.path.isabs(p) else os.path.join(self.repo, p) for p in extra]
+        inputs = []
+        for p in sorted(set(paths)):
+            inputs += [("Write", {"file_path": p, "content": "x"}),
+                       ("Edit", {"file_path": p, "old_string": "a", "new_string": "b"}),
+                       ("MultiEdit", {"file_path": p, "edits": [{"old_string": "a", "new_string": "b"}]}),
+                       ("NotebookEdit", {"notebook_path": p, "new_source": "x"}),
+                       ("mcp__fs__write_file", {"path": p, "content": "x"})]
+        inputs += [("WebFetch", {"url": u, "prompt": "x"}) for u in
+                   ("https://example.com/", "http://localhost:8080/", "file:///etc/passwd", "https://internal.example/")]
+        inputs += [("WebSearch", {"query": "studio"})]
+        both = 0
+        for tool, ti in inputs:
+            g, gctx, complete = judge.decide_g1(self.hook(tool, ti), self.env, snapshot_loader=self.loader,
+                                                run_finish=False)
+            self.assertFalse(gctx.unread, (tool, ti))
+            l, _lctx = self.legacy_only(tool, ti)
+            if l is not None:
+                self.assertIsNotNone(g, "0.0.26 refuses, this guard passes: %s %s (%s)" % (tool, ti, l.rule))
+                both += 1
+        self.assertGreater(both, 100)
+
+# 0.1.4 §1.4b, §2.5: harmless and shadowing shell functions (review 3 m1/m3, review 4 m1; neutral fixtures)
+REV4_FUNCS = """take () {
+\tmkdir -p $@ && cd ${@:$#}
+}
+pv () {
+\techo version
+}
+u1 () {
+\ttypeset +x HOME
+}
+p3 () {
+\thash sed=/tmp/sed
+}
+p4 () {
+\tautoload -Uz sed
+}
+pa () {
+\tpath=(/tmp $path)
+}
+k1 () {
+\tHOME=/tmp/x exec
+}
+"""
+# review 1 B1: pyenv-, nvm- and conda-style wrappers (an eval, a source, an export PATH) and `"$@"`
+PYENV_FUNCS = """pyenv () {
+\tlocal command=${1:-}
+\t[ "$#" -gt 0 ] && shift
+\tcase "$command" in
+\t\t(rehash|shell) eval "$(pyenv "sh-$command" "$@")" ;;
+\t\t(*) command pyenv "$command" "$@" ;;
+\tesac
+}
+nvm () {
+\tsource ~/.nvm/nvm.sh
+\tnvm "$@"
+}
+conda () {
+\texport PATH="/opt/conda/bin:$PATH"
+\t\\command conda "$@"
+}
+dyn () {
+\t"$@"
+}
+"""
+ZZ = "zz () {\n\trm -rf studio/videos/$1/work\n}\n"
+SED = "sed -i '' s/a/b/ studio/videos/v/script.md"
+# review 4 m1: every route to a name a function's effects shadowed (`hash sed=…`)
+SHADOW_ROUTES = ["p3; " + SED, "p3; sed -n 1p studio/videos/v/script.md", "p4; " + SED,
+                 "p4; sed -n 1p studio/videos/v/script.md", "p3; command " + SED, "p3; exec " + SED,
+                 "p3; noglob " + SED, "p3; nocorrect " + SED, "p3; time " + SED, "p3; X=1 " + SED,
+                 "p3; command -p " + SED, "p3; (%s)" % SED, "p3; { %s; }" % SED, "p3; if true; then %s; fi" % SED,
+                 "p3; f(){ %s; }; f" % SED, "p4; command " + SED,
+                 # kept on purpose (review 5 NIT): env finds sed on PATH (0.0.26 refused it too: the rule is on the
+                 # name); xargs of a list the guard cannot read is refused for its own reason
+                 "p3; env " + SED, "p3; xargs sed -i '' s/a/b/ < l.txt"]
+# review 4-7 (§1.4d): a function calling a later or earlier one, by any spelling — `aa; ls` must deny either way
+AA_BODIES = ["zz v", "x=$(zz v)", "(zz v)", "cat <(zz v)", "z''z v", 'z""z v', 'z"z" v', "z\\z v", "x=$(z''z v)",
+             "x=$(${:-z}z v)", "x=$($'\\x7az' v)", "{z,}z v", "x=$({z,}z v)", "x=$(eval z${:-z} v)",
+             "x=$(command eval z$X)", "x=$(z? v)"]
+
+
+class SnapshotParity(BackstopCase):
+    """0.1.4 §1.4a-d, §2.5: the class N evidence under snapshots of the rev-4 reviews (each its own fixture) and the no-
+    snapshot PATH rows: this guard alone refuses what the 0.0.26 guard refuses there, but the listed classes."""
+
+    def g1(self, cmd):
+        return judge.decide_g1(self.hook("Bash", {"command": cmd}), self.env, snapshot_loader=self.loader,
+                               run_finish=False)
+
+    def deny_both(self, cmd, rule=None, routed=None):
+        g, ctx, _c = self.g1(cmd)
+        self.assertIsNotNone(g, "this guard alone should refuse: %s (%s)" % (cmd, self.mode))
+        if rule:
+            self.assertEqual(g.rule, rule, "%s: %s" % (cmd, g.message()))
+        if routed is not None:
+            self.assertEqual(ctx.unread, routed, cmd)
+        self.assertIsNotNone(self.bash(cmd), cmd)
+        return ctx
+
+    def legacy_false(self, cmd):
+        """A 0.0.26 false refusal of a LEGACY_FALSE_UNSOURCED class: the 0.0.26 guard refuses, this guard passes."""
+        g, ctx, _c = self.g1(cmd)
+        self.assertIsNone(g, "%s: %s" % (cmd, g and g.message()))
+        self.assertIsNotNone(self.legacy_only("Bash", {"command": cmd})[0], cmd)
+        if not ctx.unread:
+            self.assertIsNone(self.bash(cmd), cmd)  # class N: the final verdict is this guard's
+
+    def test_functions_that_change_nothing_or_shadow(self):  # §1.4b
+        self.use_snapshot(functions=REV4_FUNCS)
+        with open(os.path.join(self.repo, "l.txt"), "w") as f:
+            f.write("studio/videos/v/script.md\n")
+        for cmd in ("u1; s2v status", "u1; python3 .claude/studio/scripts/lock.py status",
+                    # review MINOR 1: assignments before a bare `exec` stay in the shell (HOME exported)
+                    "k1; s2v status", "k1; python3 .claude/studio/scripts/lock.py status"):
+            self.deny_both(cmd, "G-ENV")  # `typeset +x` unexports (or makes a local: kept strict)
+        for cmd in SHADOW_ROUTES:
+            ctx = self.deny_both(cmd, "G-OPAQUE")
+            self.assertTrue(ctx.unread, cmd)  # belt and braces: routed to the 0.0.26 guard in 0.1.4
+        for cmd in ("p3; ls", "p3; git status"):
+            self.assertIsNone(self.g1(cmd)[0], cmd)
+        # the frozen judge's three walker inputs: env.unknown, path-modified, exec-by-program
+        self.deny_both("pa; " + SED, "G-OPAQUE")
+        for cmd in ("env bash -c 'rm -rf studio/local'", "nohup sh -c 'rm -rf studio/local'"):
+            self.deny_both(cmd, "G-DEL")
+        self.assertIn("class: environment unknown after any snapshot function", LEGACY_FALSE_UNSOURCED)
+        for cmd in ("pv; s2v status", "pv; python3 .claude/studio/scripts/lock.py status", "pv; " + SED,
+                    "pv; bash scripts/x.sh", "take x; s2v status"):
+            self.legacy_false(cmd)
+
+    def test_history_after_unreadable_effects(self):  # §1.4a (review 1 B1, review 3 m5)
+        self.use_snapshot(functions=REV4_FUNCS + PYENV_FUNCS)
+        for cmd, rule in (("cd studio/videos/v; take x; rm -rf ~-/studio", "G-DEL"),
+                          ("cd studio/videos/v; cd /tmp; take y; rm -rf ~-/work", "G-DEL"),
+                          ("cd studio/videos/v; pyenv version; rm -rf ~-/studio", "G-DEL"),
+                          ("cd studio/videos/v; pyenv version; rm -rf $OLDPWD/studio", "G-DEL"),
+                          ("cd studio/videos/v; pyenv version; echo x > ~-/.claude/studio/local/a", "G-PROT"),
+                          ("pushd -q studio/videos/v; nvm use 20; popd; git checkout .", "G-RESET"),
+                          ("cd studio/videos/v; dyn true; rm -rf ~-/studio", "G-DEL")):
+            self.deny_both(cmd, rule, routed=True)
+        for cmd in ("chpwd_functions+=(g); g(){ source e.sh; }; cd src; ls", "trap '. x' ZERR; ls",
+                    "trap '. x' DEBUG; ls"):
+            self.assertTrue(self.g1(cmd)[1].unread, cmd)
+        # an eval drops `~-` in both guards at HEAD: this guard keeps its candidates (PARITY_G1_FIRST class)
+        for cmd in ("cd studio; eval 'cd videos'; rm -rf ~-", "cd studio/videos/v; eval 'echo hi'; rm -rf ~-/studio",
+                    "cd studio/videos/v; eval 'echo hi'; rm -rf $OLDPWD/studio"):
+            self.assertEqual(self.g1(cmd)[0].rule, "G-DEL", cmd)
+
+    def test_function_text_is_every_function(self):  # §1.4d (reviews 3-7, option b)
+        for body in AA_BODIES:
+            for funcs in ("aa () {\n\t%s\n}\n%s" % (body, ZZ), "%saa () {\n\t%s\n}\n" % (ZZ, body)):
+                self.use_snapshot(functions=REV4_FUNCS + funcs)
+                for cmd in ("aa", "aa; ls"):
+                    g, _ctx, _c = self.g1(cmd)
+                    self.assertEqual(g and g.rule, "G-OPAQUE", (body, funcs.startswith("aa"), cmd))
+        # review 7 m1: a `}` line inside a heredoc or a quoted string ends no body
+        self.use_snapshot(functions="aa () {\n\tcat <<EOF\n}\nEOF\n\trm -rf studio/videos/v/work\n}\n"
+                                    "bb () {\n\tx='\n}\n'\n\trm -rf studio/videos/v/work\n}\n" + REV4_FUNCS)
+        for cmd in ("aa", "bb", "aa; ls", "pv"):
+            self.deny_both(cmd, "G-OPAQUE")
+        # kept new refusal (guard-limits): one body naming a Studio file puts it in every function call's text
+        self.use_snapshot(functions="pv0 () {\n\techo version\n}\nh1 () {\n\tcat config.json\n}\nh2 () {\n\th1\n}\n"
+                                    "pv1 () {\n\techo version\n}\n")
+        for cmd in ("h1", "h2", "pv0", "pv1"):
+            self.assertEqual(self.g1(cmd)[0].rule, "G-OPAQUE", cmd)
+        # LEGACY_FALSE_UNSOURCED: 0.0.26's text ran to the end of the snapshot, alias lines included
+        self.assertIn("class: payload to the end of the snapshot", LEGACY_FALSE_UNSOURCED)
+        self.use_snapshot(functions=REV4_FUNCS, extra_alias_lines=["alias -- sclean='rm -rf studio/local'"])
+        for cmd in ("pv; ls", "pv; git status"):
+            self.legacy_false(cmd)
+
+    def test_path_writes_without_a_snapshot(self):  # §1.4c (review 2 M3, reviews 3-6)
+        self.mode = "none"
+        deny = ["read PATH <<< /tmp", "while read PATH; do :; done <<< /tmp", "for PATH in /tmp; do :; done",
+                "select PATH in /tmp; do break; done", "print -v PATH /tmp", "printf -v PATH /tmp", "getopts PATH x",
+                ": ${PATH:=/tmp}", ": ${path::=/tmp}", ": ${(A)path::=/tmp}", "set -A path /tmp",
+                "IFS=: read -A path <<< /tmp", "vared PATH", "zparseopts -A PATH x:", "f(){ PATH=/tmp; }; f",
+                "f(){ PATH=$1; }; f /tmp", "f(){ path=(/tmp); }; f", "f(){ export PATH=/tmp; }; f",
+                "f(){ PATH=$(echo /tmp); }; f", "f(){ export PATH=\"$(pwd)/bin:$PATH\"; }; f",
+                "f(){ local PATH=/tmp; }; f", "f(){ unset PATH; }; f", "f(){ eval 'PATH=/tmp'; }; f", "PATH=/tmp",
+                "path=(/tmp)", "export PATH=/tmp", "typeset -g PATH=/tmp", "strftime -s PATH", "sysread PATH"]
+        passing = ["PATH=$(echo /tmp):$PATH", "PATH=${X:-/tmp}", "PATH+=:/tmp", "path[1]=/tmp", "eval 'PATH=/tmp'",
+                   "unset PATH", "path+=(~/bin)", "path=(~/bin(N) $path)", "path=($^path/x(N))",
+                   "path=($HOME/bin $path)", "PATH=${PATH%:*}", "PATH=${PATH//:\\/tmp/}",
+                   "PATH=\"${PATH:+$PATH:}/opt/bin\"", "PATH=`echo /tmp`:$PATH", "PATH=$X", "PATH=$1:$PATH",
+                   "PATH=$(getconf PATH)", "PATH=${PATH:-/usr/bin}", "path[1,0]=/tmp", "typeset PATH=$X",
+                   "local PATH=$X"]
+        for pre in deny:
+            self.assertEqual(self.g1(pre + "; foo_unknown")[0].rule, "G-UNKNOWN", pre)
+        for pre in passing:
+            self.assertIsNone(self.g1(pre + "; foo_unknown")[0], pre)
+        for cmd in ("env PATH=/tmp foo_unknown", "PATH=$(npm bin):$PATH; eslint",
+                    "export PATH=\"$(pwd)/node_modules/.bin:$PATH\"; npm test"):
+            self.assertIsNone(self.g1(cmd)[0], cmd)
+        self.assertEqual(self.g1("PATH=$PATH:~-/bin; foo_unknown")[0].rule, "G-UNKNOWN")  # stricter, unchanged
+
+    def test_std_auditor_rows(self):  # review 3 NIT: the auditor's own refusal, in both guards
+        self.use_snapshot(functions=REV4_FUNCS)
+        for cmd in ("echo x > .claude/agents/std-auditor.md", "pv; echo x > .claude/agents/std-auditor.md",
+                    "source e.sh; echo x > .claude/agents/std-auditor.md", "cp x .claude/agents/std-fact-checker.md"):
+            hook = self.hook("Bash", {"command": cmd})
+            hook.update({"agent_id": "a1", "agent_type": "std-auditor"})
+            g, _ctx, _c = judge.decide_g1(hook, self.env, snapshot_loader=self.loader, run_finish=False)
+            from stdo.guard.legacy import judge as lj
+            l, _lctx = lj.decide(hook, self.env, snapshot_loader=self.legacy_loader)
+            self.assertEqual((g and g.rule, l and l.rule), ("G-AUDIT", "G-AUDIT"), cmd)
 
 
 class SplitShared(JudgeCase):
     """fix-0029 §1.3: the frozen snapshot.split_line, wrapped once by the backstop. Real loads: snapshot files in a
-    real CLAUDE_CONFIG_DIR, `judge.decide` with no loader (as in production; no injected `legacy_view`)."""
+    real CLAUDE_CONFIG_DIR, `judge.decide` with no loader (as in production; no injected `legacy_view`). 0.1.4: on a
+    call the 0.0.26 guard judges (a source); a class N call loads no frozen snapshot."""
 
     def setUp(self):
         super().setUp()
@@ -797,14 +1371,23 @@ class SplitShared(JudgeCase):
             return self.orig(line)
         self.ls.split_line.__wrapped__ = counting
         self.assertEqual(backstop._SPLIT, {})
-        deny, _ctx = judge.decide(self.hook("Bash", {"command": "ls"}), self.env)
-        self.assertIsNone(deny)
-        self.assertEqual(backstop._SPLIT, {})
-        self.assertEqual(sorted(n), sorted(set(n)))  # each line once
-        self.assertEqual(set(n), set(self.lines))  # alias lines, stripped unalias lines, the PATH arguments
+        import guard_base
+        patch = snapmod.load
+        snapmod.load = guard_base._load_both.__defaults__[-1]  # production's load (the tests' also loads 0.0.26's)
+        try:
+            deny, _ctx = judge.decide(self.hook("Bash", {"command": "source /dev/null; ls"}), self.env)
+            self.assertIsNone(deny)
+            self.assertEqual(backstop._SPLIT, {})
+            self.assertEqual(sorted(n), sorted(set(n)))  # each line once
+            self.assertEqual(set(n), set(self.lines))  # alias lines, stripped unalias lines, the PATH arguments
+            del n[:]
+            self.assertIsNone(judge.decide(self.hook("Bash", {"command": "ls"}), self.env)[0])
+            self.assertEqual(n, [])  # class N: the frozen guard does not parse the snapshot
+        finally:
+            snapmod.load = patch
 
     def test_memo_empty_after_every_ending(self):
-        for cmd in ("ls", "rm -rf studio/local"):  # a pass, a G1 deny
+        for cmd in ("ls", "rm -rf studio/local", "source /dev/null; ls"):  # a pass, a G1 deny, a class S pass
             judge.decide(self.hook("Bash", {"command": cmd}), self.env)
             self.assertEqual((backstop._SPLIT, backstop._SPLIT_ON), ({}, []), cmd)
         lj, _dec = backstop._legacy()
@@ -816,7 +1399,7 @@ class SplitShared(JudgeCase):
             raise KeyError("x")
         backstop._LEGACY[1] = boom
         try:
-            deny, _ctx = judge.decide(self.hook("Bash", {"command": "ls"}), self.env)
+            deny, _ctx = judge.decide(self.hook("Bash", {"command": "source /dev/null; ls"}), self.env)
         finally:
             backstop._LEGACY[:] = saved
         self.assertEqual(deny.rule, "G-ERR")

@@ -1,22 +1,25 @@
-# Studio guard: what it judges and what it does not see (0.0.27)
+# Studio guard: what it judges and what it does not see (0.1.4)
 
 The README gives the summary. This file lists the details. The pre-commit hook, the commit checks and the
 person's gates stay behind everything listed here.
 
 ## The 0.0.26 guard as a backstop
 
-- Every call is also judged by the guard of 0.0.26, kept unchanged in the plugin. Anything either guard refuses is
-  refused. When only the 0.0.26 guard refuses, its message is the one it gave in 0.0.26.
-- So 0.0.27 refuses everything 0.0.26 refused, its false refusals too:
-  - `**` deletions and writes in a Studio repository (`rm -rf **/__pycache__`, `rm -f **/*.pyc`);
-  - reading very many files at once, which can be the 0.0.26 guard's internal error (G-ERR);
-  - git or `open` after a shell function of yours whose text mentions studio or that 0.0.26 could not read
-    (`gh pr view 1; git commit -m 'studio: v script'`, `diff a.txt src/a.ts; git status`);
-  - commands not on `PATH` when there is no shell snapshot (`flock /tmp/build.lock make`).
-- These are planned to be lifted in 0.0.28, class by class, together with stronger checks after a source.
-- The checks of `git push` and of a Studio commit run once for both guards. A call that needs more time than both
-  guards have is refused (G-LIMIT) well before the hook's 20-second limit, which would block it without a message.
-- A call the two guards cannot finish within 15 seconds is refused (G-LIMIT), with a message (0.1.3).
+- The guard of 0.0.26, kept unchanged in the plugin, also judges a call with a `source` or `.` (in the command, in a
+  function or hook the command defines, or in an `eval` or `emulate … -c` string that may run one), a call after a
+  shell function of yours or a hook the guard cannot read, one that may change the folder or that hides a command
+  name (`hash sed=…`), and a call this guard stopped early on a limit. There anything either guard refuses is
+  refused, and when only the 0.0.26 guard refuses, its message is the one it gave in 0.0.26. Such calls keep its false
+  refusals until it is removed.
+- Every other call is judged by this guard alone, so 0.0.26's false refusals elsewhere are gone: `**` deletions with
+  nothing written before them (`rm -rf **/__pycache__`), `cd -` or `popd` in a new shell, `command cd`, commands not on
+  `PATH` without a shell snapshot (`flock /tmp/build.lock make`), and `s2v`, `lock.py`, `sed` or `bash scripts/x.sh`
+  after a shell function of yours that changes nothing (0.0.26 took the environment as unknown after any of them, and
+  searched a function's text to the end of the snapshot, alias lines included).
+- The checks of `git push` and of a Studio commit run once per call, for both guards when both judge it. A call both
+  guards judge that needs more time than they have is refused (G-LIMIT) well before the hook's 20-second limit, which
+  would block it without a message.
+- A call the guards cannot finish within 15 seconds is refused (G-LIMIT), with a message (0.1.3).
 
 ## How it judges functions, hooks and options
 
@@ -25,8 +28,14 @@ person's gates stay behind everything listed here.
     name already exported), source a file or eval. Examples: an `nvm` or `pyenv` wrapper.
   - A commit, `git config`, git's discarding forms and `open` are refused after one that may change the folder
     (`cd`, `pushd`). The same holds after a folder change the guard cannot follow (`cd -1`, `cd $(mktemp -d)`).
-  - Wrappers such as `gh`, `diff` or a prompt helper do not count (`gh pr create --fill && git push` passes), unless
-    the 0.0.26 guard refuses them (the backstop above).
+  - Wrappers such as `gh`, `diff` or a prompt helper do not count (`gh pr create --fill && git push` passes).
+  - When one of your shell functions names a Studio file (`h1(){ cat config.json }`), every call of a shell function
+    of yours is refused in a Studio repository (`h1`, `h2(){ h1 }`, and unrelated ones such as `pv`): a call is
+    searched with the text of all of them, so that a function it calls by any spelling is seen. Rename or drop that
+    function, or run the command without your functions.
+  - A name a function or hook of yours, or a trap action, hashes, autoloads or turns off (`p(){ hash sed=/tmp/sed }`,
+    `trap 'hash git=/tmp/g' DEBUG`) is a program the guard cannot read after it, however it is reached (`p; sed -n 1p
+    studio/videos/v/script.md`, also with `command`, `env` or in a subshell): refused in a Studio repository.
 - **Hook functions of yours.** A `chpwd` or `TRAP*` function that may change the folder makes the folder unknown for
   every later command. One that exports, or that calls a function the guard cannot read, makes git refused after any
   `cd` (`cd src && git status`). `TRAPEXIT`, and a signal trap the guard cannot read (`TRAPWINCH(){ zle && zle -R }`),
@@ -63,19 +72,28 @@ person's gates stay behind everything listed here.
   `cleanup(){ rm -f $tmp; }; trap cleanup EXIT; git commit -m x` passes). Set inside a function, an EXIT trap runs
   when the function returns and counts as a hook. `precmd`, `preexec`, `periodic`, `zshaddhistory` and `zshexit` (and
   their `*_functions` arrays) never run between the Bash tool's commands. The action's text is searched as before.
-- **Files the command sources.** After a `source` or `.` the rest of the call is judged by the 0.0.26 rules only (the
-  backstop above); stronger checks there are planned for 0.0.28.
-  - The same holds when the source is reached through an alias the command defines, `builtin`, `command` or
-    `noglob`, a function the command defines and calls, or an `eval` or `emulate … -c` string that may run one.
-    It also holds after an `eval` whose text the guard cannot read (`eval "$(pyenv init -)"`).
-  - Code before the source is judged as usual, and so is code the call itself gives the source: its input
-    (`source /dev/stdin <<< …`, a heredoc) or a file the call wrote. `{ source /dev/stdin } <<< 'rm -rf studio/local'`
-    is refused.
-  - A source inside a subshell, a branch, a loop or a pipeline also ends the stricter checks for the rest of the
-    call: `if [[ -n $CI ]]; then source ci.sh; else rm -rf studio/local; fi` is judged by the 0.0.26 rules (refused).
-  - A function that sources and is never called does not end them. Nor does a `chpwd` function or a trap that
-    sources: its body is read where it is defined.
-  - This guard does not read your file; the 0.0.26 guard searches its text as it did.
+- **Files the command sources.** The rest of the call after a `source` or `.` is judged with what the file does:
+  - a file the guard can read — a regular file of at most 64 KB, not binary, that nothing earlier in the call may have
+    written (a redirection, a word of a command naming it, a script, a runner or a shell string run before it) — is
+    read and walked in this shell: its commands are judged as the call's (a refusal names the file), and what it
+    defines, exports, assigns, sets and moves holds after it. A real virtual environment's `activate` passes
+    (`source .venv/bin/activate && git commit -m x`); `source env.sh; git clean -fdx`,
+    `cd studio/videos/v; source env.sh; rm -rf work` and `source env.sh; git status` with `export GIT_DIR=/tmp/x`
+    in `env.sh` are refused. A source inside it is read the same way, three deep.
+  - `/dev/null` and an empty file do nothing. Code the call gives the source (its input, a heredoc, a file the call
+    wrote) is judged as a shell string and walked in this shell too.
+  - Anything else — a file over 64 KB, binary, unparsable, missing, named by a word the guard cannot read, too slow or
+    too large to walk, a source in an EXIT hook or in a function's effects — leaves its effects unknown: the folder is
+    the one before or unknown, the environment, `PATH`, options and functions unknown, every value the call set one
+    of its old values or unknown, and `cd -` / `~-` / `$OLDPWD` one of the folders before it or unknown. The rules for
+    unknown values judge the rest (git is refused there, as with an `nvm` wrapper); a file the guard read is searched
+    for Studio names, as 0.0.26 did.
+  - After a source every check applies as without it. A call 0.0.26 and 0.1.3 passed only because this guard stopped
+    at the source is refused when the same call without the source is
+    (`source .venv/bin/activate && cd src && pytest && cd - && rm -rf **/__pycache__`: pytest may write before the
+    `**` listing; `source /dev/null; cd $D; git commit -m x`: git in a folder the guard cannot tell).
+  - Such a call is also judged by the 0.0.26 guard (above), and so are a source in a function or hook the command
+    defines and in a nested string.
 - **Dynamic named directories.** zsh resolves `~[name]` through a `zsh_directory_name` function or
   `zsh_directory_name_functions`, which the command, a sourced file or an `eval` may define; the guard does not run
   them. In a Studio repository a `~[name]` path that a command deletes or writes is refused, and `cd ~[name]` makes
@@ -326,21 +344,13 @@ person's gates stay behind everything listed here.
   `unhash -dfm f`).
 - With more than 16 combinations of known values, a git subcommand built from a value is judged as before
   (`git $a -fdx $b $c $d $e`).
-- After `source` or `.` the 0.0.26 rules alone judge the rest of the call, with their gaps: git is not checked while
-  the folder is unknown because of the source, and a file that moves the shell, exports `GIT_DIR` or `HOME`, or sets
-  options is not seen
-  (`source env.sh; git clean -fdx`, `source env.sh; cd studio/videos/v; git clean -fdx`,
-  `source env.sh; rm -f .git/hooks/pre-commit`, `source f; X='s*o'; rm -rf $X` with `setopt globsubst` in `f`); a
-  wildcard there is read by its literal parts (`source env.sh; rm -rf stu*`), and a script run by an interpreter other
-  than a shell is not read (`source env.sh; python3 ev.py`). `cd -`, `popd`, `~-` and `$OLDPWD` go to the folder they
-  named before the source, also when the file changed them (`cd src; source env.sh; cd -; bash x.sh` with
-  `pushd ../scripts; popd` in `env.sh`), and a function the command defines that may move the shell leaves the folder
-  unknown (`f(){ cd studio/videos/v; }; source env.sh; f; git clean -fdx`).
-- After an `eval` whose text the guard cannot read, the rest of the call is judged by the 0.0.26 rules only, as after
-  a source. Common prefixes do this: `eval "$(pyenv init -)"`, `eval "$(ssh-agent -s)"`,
-  `eval "$(direnv export zsh)"`, `eval "$(brew shellenv)"`. So
-  `eval "$(pyenv init -)"; X=<repo>/studio; rm -rf $X/videos/v/work` run from outside the repository passes, as in
-  0.0.26. Planned for 0.0.28.
+- After `source` or `.` of a file the guard does not read (over 64 KB, unparsable, or changed earlier in the call), the
+  rest is judged by the rules for unknown values: a folder or environment the file sets is seen only as unknown, not
+  as the folder or value it is. A file changed by another process between the guard's check and the shell's read is
+  not seen (as for a script a call runs).
+- After an `eval` whose text the guard cannot read the rest is walked with its effects unknown (the folder the one
+  before or unknown, values one of the old ones or unknown): `eval "$(pyenv init -)"; X=<repo>/studio;
+  rm -rf $X/videos/v/work` is refused from outside the repository too.
 - A discarding git command in a shell string run again after `git stash pop` is checked against the work tree as it
   is before the call (`zsh -c 'git restore .'; git stash pop; zsh -c 'git restore .'` on a clean tree).
 - An operand that starts with a parameter the guard cannot read, such as an environment variable, and ends in a Studio

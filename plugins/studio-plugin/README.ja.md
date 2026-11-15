@@ -26,13 +26,15 @@ Claude Code 向けの**リポジトリごとの動画制作組織**です。Stud
   Studio のガードフックが Bash、Write、Edit、MultiEdit、NotebookEdit、WebFetch、WebSearch、MCP ツールの呼び出しを
   一つずつ検査します。`onFailure: block` で動くため、フックのエラーやタイムアウトはその呼び出しを止め(測定済み)、
   `python3` がないときも止めると見込んでいます(測定していません)。`python3` が pyenv や asdf 方式の shim だと、ガードの
-  呼び出しごとに遅くなり、0.0.28 のガード自身の許可がオフになります([docs/guard-limits.ja.md](docs/guard-limits.ja.md))。
+  呼び出しごとに遅くなり、0.0.28 のガード自身の許可がオフになります(ガードが判定するもの、0.1.4:
+  [docs/guard-limits.ja.md](docs/guard-limits.ja.md))。
   Command Line Tools のない macOS では、`/usr/bin/python3` がフックの 20 秒のタイムアウトまで待つことがあります。
 - **呼び出しごとのコスト**(マシン 1 台、Apple silicon の Mac): ハーネスのないリポジトリでの Bash `git status` に対するガードは
-  約 80 ms(p50、Python 3.9.9 と 3.15.2)、macOS の `/usr/bin/python3` 3.9.6 では約 155 ms でした
+  約 70 ms(p50、Python 3.9.9 と 3.15.2)、macOS の `/usr/bin/python3` 3.9.6 では約 125 ms でした
   (`tests/py/test_guard_entry.py`、`PerfNoHarness`)。ガードは Claude Code のシェルスナップショット(最近のセッションごとに
-  一つ、各 ~280 KB)も読みます。13 個あるとき同じ呼び出しは約 140 ms(3.15.2)、約 170 ms(3.9.9)で、ファイルが一つ
-  増えるごとに約 5 ms 増えます(`PerfSnapshots`)。
+  一つ、各 ~280 KB)も読みます。13 個あるとき同じ呼び出しは約 100 ms(3.15.2)、約 110 ms(3.9.9)で、ファイルが一つ
+  増えるごとに約 2–3 ms 増えます(`PerfSnapshots`)。`source` のある呼び出しはスナップショットを読み直す 0.0.26 の
+  ガードも判定するので、以前とほぼ同じです(スナップショット 13 個で約 155 ms、`PerfSourced`)。
 
 ## インストール
 
@@ -233,6 +235,19 @@ python3 .claude/studio/scripts/hooks.py install
   通ることがあります — 本来受けるべき答えです。512 文字を超える `(( … ))` を含むシェル関数は、今は読めないものとして
   扱います(閉じた側)。それ以外の判定は同じです。`/std update` は不要です(スクリプトの
   バージョンは 27 のまま)。
+- **0.1.4**: ガードは `source` や `.` で止まらなくなりました: ファイルを読み(64 KB まで、呼び出しの前の部分がその
+  ファイルを変ええないとき)、ファイルがすることとともに呼び出しの残りを判定します。読めないファイルはフォルダと値を
+  不明にします。今は拒否: `source env.sh; git clean -fdx`、`cd studio/videos/v; source env.sh; rm -rf work`、source の
+  後で `std-auditor.md` に書くこと。ガードが source で止まっていたためだけに通っていた呼び出しは、source のない同じ
+  呼び出しが拒否されるなら拒否します。0.0.26 のガードは source のある呼び出し(またはガードが読めないか、
+  フォルダを変えうるかコマンド名を隠しうるユーザーのシェル関数やフックの後の呼び出し)だけを判定するようになり、
+  ほかの場所での誤った拒否はなくなりました
+  (`rm -rf **/__pycache__`、`gh pr view 1; git commit -m …`、シェルのスナップショットがないときの
+  `flock /tmp/build.lock make`、何も変えないユーザーのシェル関数の後の `s2v`・`lock.py`・`sed`・`bash scripts/x.sh`)。
+  シェルのスナップショットが 13 個あるとき、Bash の呼び出しごとに約 45 ms 速くなりました(ここで Python 3.15.2 で
+  147 → 103 ms、3.9.9 で 165 → 110 ms)。ユーザーのシェル関数の一つが Studio のファイルを指すと、Studio リポジトリでは
+  ユーザーのシェル関数の呼び出しを拒否します(その関数の名前を変えるか消してください)。`/std update` は不要です
+  (スクリプトのバージョンは 27 のまま)。
 
 ## ライセンス
 

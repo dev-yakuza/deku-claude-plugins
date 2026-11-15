@@ -1,22 +1,24 @@
-# Studio 가드: 판정하는 것과 보지 못하는 것(0.0.27)
+# Studio 가드: 판정하는 것과 보지 못하는 것(0.1.4)
 
 README에는 요약이 있고, 이 파일에는 자세한 내용이 있습니다. 여기 적은 모든 경우에도 pre-commit 훅, 커밋 검사, 사람의
 게이트가 뒤에 남아 있습니다.
 
 ## 0.0.26 가드를 백스톱으로
 
-- 모든 호출은 플러그인 안에 바꾸지 않고 둔 0.0.26 가드로도 판정합니다. 두 가드 중 하나라도 거부하면 거부합니다.
-  0.0.26 가드만 거부하면 그 메시지는 0.0.26에서 보여 준 것과 같습니다.
-- 그래서 0.0.27은 0.0.26이 거부한 것을 모두 거부하며, 그 잘못된 거부도 그대로입니다:
-  - Studio 레포에서 `**`로 지우거나 쓰는 것(`rm -rf **/__pycache__`, `rm -f **/*.pyc`);
-  - 아주 많은 파일을 한 번에 읽는 것. 0.0.26 가드의 내부 오류(G-ERR)가 될 수 있습니다;
-  - 텍스트가 studio를 언급하거나 0.0.26이 읽지 못한 사용자 셸 함수 뒤의 git이나 `open`
-    (`gh pr view 1; git commit -m 'studio: v script'`, `diff a.txt src/a.ts; git status`);
-  - 셸 스냅숏이 없을 때 `PATH`에 없는 명령(`flock /tmp/build.lock make`).
-- 이들은 0.0.28에서 source 뒤의 더 강한 검사와 함께, 종류별로 풀 예정입니다.
-- `git push`와 Studio 커밋의 검사는 두 가드에 한 번만 실행합니다. 두 가드가 쓸 수 있는 시간보다 오래 걸리는 호출은
-  훅의 20초 한도보다 훨씬 전에 거부합니다(G-LIMIT). 훅이 시간을 넘기면 메시지 없이 막히기 때문입니다.
-- 두 가드가 15초 안에 끝내지 못하는 호출은 메시지와 함께 거부합니다(G-LIMIT, 0.1.3).
+- 플러그인 안에 바꾸지 않고 둔 0.0.26 가드는 `source`나 `.`가 있는 호출(명령 안, 명령이 정의한 함수나 훅 안, 또는
+  source를 실행할 수 있는 `eval`이나 `emulate … -c` 문자열 안), 가드가 읽을 수 없는 사용자 셸 함수나 훅 뒤의 호출,
+  폴더를 바꿀 수 있거나 명령 이름을 가리는(`hash sed=…`) 함수 뒤의 호출, 그리고 이 가드가 한도 때문에 일찍 멈춘
+  호출도 판정합니다. 이런 호출은 두 가드 중 하나라도 거부하면 거부하고, 0.0.26 가드만 거부하면 그 메시지는
+  0.0.26에서 보여 준 것과 같습니다. 이런 호출에는 0.0.26 가드를 없앨 때까지 그 잘못된 거부가 남습니다.
+- 그 밖의 호출은 이 가드만으로 판정하므로, 다른 곳의 0.0.26의 잘못된 거부는 없어졌습니다: 앞에 쓰는 것이 없는
+  `**` 삭제(`rm -rf **/__pycache__`), 새 셸의 `cd -`나 `popd`, `command cd`, 셸 스냅숏이 없을 때 `PATH`에 없는
+  명령(`flock /tmp/build.lock make`), 아무것도 바꾸지 않는 사용자 셸 함수 뒤의 `s2v` · `lock.py` · `sed` ·
+  `bash scripts/x.sh`(0.0.26은 어떤 함수 뒤에서든 환경을 알 수 없다고 보았고, 함수의 텍스트를 별칭 줄까지 포함해
+  스냅숏 끝까지 검색했습니다).
+- `git push`와 Studio 커밋의 검사는 한 호출에 한 번만 실행하며, 두 가드가 판정하는 호출에서는 두 가드가 함께 씁니다.
+  두 가드가 판정하는 호출이 둘이 쓸 수 있는 시간보다 오래 걸리면 훅의 20초 한도보다 훨씬 전에 거부합니다(G-LIMIT).
+  훅이 시간을 넘기면 메시지 없이 막히기 때문입니다.
+- 가드가 15초 안에 끝내지 못하는 호출은 메시지와 함께 거부합니다(G-LIMIT, 0.1.3).
 
 ## 함수, 훅, 옵션을 판정하는 방식
 
@@ -25,8 +27,14 @@ README에는 요약이 있고, 이 파일에는 자세한 내용이 있습니다
     source하거나 eval할 수 있는 함수 뒤에서는 git을 거부합니다. 예: `nvm`이나 `pyenv` 래퍼.
   - 폴더를 바꿀 수 있는 함수(`cd`, `pushd`) 뒤에서는 커밋, `git config`, 변경을 버리는 git 형식, `open`을 거부합니다.
     가드가 따라갈 수 없는 폴더 이동(`cd -1`, `cd $(mktemp -d)`) 뒤에서도 마찬가지입니다.
-  - `gh` · `diff` · 프롬프트 도우미 같은 래퍼는 해당하지 않습니다(`gh pr create --fill && git push`는 통과). 0.0.26
-    가드가 거부하는 경우는 예외입니다(위의 백스톱).
+  - `gh` · `diff` · 프롬프트 도우미 같은 래퍼는 해당하지 않습니다(`gh pr create --fill && git push`는 통과).
+  - 사용자 셸 함수 하나가 Studio 파일을 가리키면(`h1(){ cat config.json }`) Studio 레포에서 사용자 셸 함수의 모든
+    호출을 거부합니다(`h1`, `h2(){ h1 }`, `pv` 같은 상관없는 함수도). 어떤 표기로 부르는 함수든 보도록, 호출은 모든
+    함수의 텍스트와 함께 검색하기 때문입니다. 그 함수의 이름을 바꾸거나 없애거나, 사용자 함수 없이 명령을 실행하세요.
+  - 사용자 함수나 훅, 트랩 동작이 hash · autoload하거나 끈 이름(`p(){ hash sed=/tmp/sed }`,
+    `trap 'hash git=/tmp/g' DEBUG`)은 그 뒤에서 어떤 경로로 부르든
+    (`p; sed -n 1p studio/videos/v/script.md`, `command` · `env`나 서브셸로도) 가드가 읽을 수 없는 프로그램입니다:
+    Studio 레포에서는 거부합니다.
 - **사용자의 훅 함수.** 폴더를 바꿀 수 있는 `chpwd`나 `TRAP*` 함수가 있으면 그 뒤의 모든 명령에서 폴더를 알 수 없는
   것으로 봅니다. export하거나 가드가 읽을 수 없는 함수를 부르는 것이면 어떤 `cd` 뒤에서든 git을 거부합니다
   (`cd src && git status`). `TRAPEXIT`와 가드가 읽을 수 없는 시그널 트랩(`TRAPWINCH(){ zle && zle -R }`)은 명령
@@ -61,19 +69,27 @@ README에는 요약이 있고, 이 파일에는 자세한 내용이 있습니다
   거부, `cleanup(){ rm -f $tmp; }; trap cleanup EXIT; git commit -m x`는 통과). 함수 안에서 건 EXIT 트랩은 함수가
   돌아갈 때 실행되므로 훅으로 봅니다. `precmd`, `preexec`, `periodic`, `zshaddhistory`, `zshexit`(와 그
   `*_functions` 배열)는 Bash 도구의 명령 사이에서 실행되지 않습니다. 동작의 텍스트는 이전처럼 검색합니다.
-- **명령이 source하는 파일.** `source`나 `.` 뒤의 나머지는 0.0.26 규칙만으로 판정합니다(위의 백스톱). 거기서의 더
-  강한 검사는 0.0.28에서 할 예정입니다.
-  - 명령이 정의한 별칭, `builtin` · `command` · `noglob`, 명령이 정의하고 호출한 함수, source를 실행할 수 있는
-    `eval`이나 `emulate … -c` 문자열을 거쳐 source에 닿을 때도 같습니다. 가드가 텍스트를 읽을 수 없는 `eval` 뒤에도
-    같습니다(`eval "$(pyenv init -)"`).
-  - source 앞의 코드는 평소처럼 판정하고, 호출 자체가 source에 준 코드도 판정합니다: 그 입력
-    (`source /dev/stdin <<< …`, heredoc)이나 호출이 쓴 파일. `{ source /dev/stdin } <<< 'rm -rf studio/local'`는
-    거부합니다.
-  - 서브셸, 분기, 반복문, 파이프라인 안의 source도 호출의 나머지에 대한 더 강한 검사를 끝냅니다:
-    `if [[ -n $CI ]]; then source ci.sh; else rm -rf studio/local; fi`는 0.0.26 규칙으로 판정합니다(거부).
-  - source하지만 호출하지 않는 함수는 이를 끝내지 않습니다. source하는 `chpwd` 함수나 트랩도 마찬가지입니다: 그
-    본문은 정의한 곳에서 읽습니다.
-  - 이 가드는 사용자의 파일을 읽지 않습니다. 0.0.26 가드가 이전처럼 그 텍스트를 검색합니다.
+- **명령이 source하는 파일.** `source`나 `.` 뒤의 나머지는 파일이 하는 일과 함께 판정합니다:
+  - 가드가 읽을 수 있는 파일 — 64 KB 이하의 바이너리가 아닌 일반 파일로, 호출에서 앞의 어떤 것도 쓰지 않았을 수
+    있는 파일(리다이렉션, 그 파일을 가리키는 명령의 단어, 앞에서 실행한 스크립트 · 러너 · 셸 문자열이 없을 때) —
+    은 읽어서 이 셸에서 따라갑니다: 그 명령은 호출의 명령으로 판정하고(거부 메시지에 파일 이름이 나옵니다), 파일이
+    정의 · export · 대입 · 설정 · 이동한 것은 그 뒤에도 유지됩니다. 실제 가상 환경의 `activate`는 통과하고
+    (`source .venv/bin/activate && git commit -m x`), `source env.sh; git clean -fdx`,
+    `cd studio/videos/v; source env.sh; rm -rf work`, `env.sh`에 `export GIT_DIR=/tmp/x`가 있을 때
+    `source env.sh; git status`는 거부합니다. 그 안의 source도 같은 방식으로 세 단계까지 읽습니다.
+  - `/dev/null`과 빈 파일은 아무 일도 하지 않습니다. 호출이 source에 준 코드(입력, heredoc, 호출이 쓴 파일)는 셸
+    문자열로 판정하고 이 셸에서도 따라갑니다.
+  - 그 밖의 경우 — 64 KB를 넘거나 바이너리이거나 파싱할 수 없거나 없거나, 가드가 읽을 수 없는 단어로 가리키거나,
+    따라가기에 너무 느리거나 크거나, EXIT 훅이나 함수의 효과 안의 source — 는 효과를 알 수 없는 것으로 봅니다: 폴더는
+    이전 폴더이거나 알 수 없고, 환경 · `PATH` · 옵션 · 함수는 알 수 없으며, 호출이 설정한 값은 이전 값 중 하나이거나
+    알 수 없고, `cd -` / `~-` / `$OLDPWD`는 그 전의 폴더 중 하나이거나 알 수 없습니다. 나머지는 알 수 없는 값의
+    규칙으로 판정하고(거기서는 `nvm` 래퍼 뒤처럼 git을 거부), 가드가 읽은 파일은 0.0.26처럼 Studio 이름을 검색합니다.
+  - source 뒤에도 모든 검사가 source가 없을 때처럼 적용됩니다. 이 가드가 source에서 멈췄기 때문에만 0.0.26과
+    0.1.3이 통과시킨 호출은, source가 없는 같은 호출이 거부되면 거부합니다
+    (`source .venv/bin/activate && cd src && pytest && cd - && rm -rf **/__pycache__`: `**` 목록 전에 pytest가 쓸 수
+    있음, `source /dev/null; cd $D; git commit -m x`: 가드가 알 수 없는 폴더의 git).
+  - 이런 호출은 0.0.26 가드도 판정하며(위), 명령이 정의한 함수나 훅 안의 source, 중첩 문자열 안의 source도
+    마찬가지입니다.
 - **동적 이름 디렉터리.** zsh는 `~[name]`을 `zsh_directory_name` 함수나 `zsh_directory_name_functions`로 풀며, 이는
   명령이나 source한 파일, `eval`이 정의할 수 있습니다. 가드는 이를 실행하지 않습니다. Studio 레포에서 명령이 지우거나
   쓰는 `~[name]` 경로는 거부하고, `cd ~[name]`은 폴더를 알 수 없게 합니다.
@@ -306,20 +322,12 @@ README에는 요약이 있고, 이 파일에는 자세한 내용이 있습니다
   (`a=STUDIO; typeset -l a; git checkout $a`).
 - zsh가 거부하는 옵션을 준 제거 명령을 함수를 지운 것으로 보는 경우(`unfunction -a f`, `unhash -dfm f`).
 - 알려진 값의 조합이 16개를 넘을 때 값으로 만든 git 하위 명령은 이전처럼 판정합니다(`git $a -fdx $b $c $d $e`).
-- `source`나 `.` 뒤의 나머지는 0.0.26 규칙만이 그 빈틈과 함께 판정합니다: source 때문에 폴더를 알 수 없는 동안
-  git은 검사하지 않고, 셸을 옮기거나 `GIT_DIR`, `HOME`을 export하거나 옵션을 바꾸는 파일은 보지 못합니다
-  (`source env.sh; git clean -fdx`, `source env.sh; cd studio/videos/v; git clean -fdx`,
-  `source env.sh; rm -f .git/hooks/pre-commit`, `f`에 `setopt globsubst`가 있을 때 `source f; X='s*o'; rm -rf $X`).
-  그곳의 와일드카드는 리터럴 부분으로 읽고(`source env.sh; rm -rf stu*`), 셸이 아닌 인터프리터가 실행하는 스크립트는
-  읽지 않습니다(`source env.sh; python3 ev.py`). `cd -`, `popd`, `~-`, `$OLDPWD`는 파일이 이를 바꿨더라도 source 전에
-  가리키던 폴더로 갑니다(`env.sh`에 `pushd ../scripts; popd`가 있을 때 `cd src; source env.sh; cd -; bash x.sh`).
-  셸을 옮길 수 있는, 명령이 정의한 함수는 폴더를 알 수 없게 합니다
-  (`f(){ cd studio/videos/v; }; source env.sh; f; git clean -fdx`).
-- 가드가 텍스트를 읽을 수 없는 `eval` 뒤의 나머지는 source 뒤처럼 0.0.26 규칙만으로 판정합니다. 흔한 접두가
-  그렇습니다: `eval "$(pyenv init -)"`, `eval "$(ssh-agent -s)"`, `eval "$(direnv export zsh)"`,
-  `eval "$(brew shellenv)"`. 그래서 레포 밖에서 실행한
-  `eval "$(pyenv init -)"; X=<repo>/studio; rm -rf $X/videos/v/work`는 0.0.26처럼 통과합니다. 0.0.28에서 다룰
-  예정입니다.
+- 가드가 읽지 않는 파일(64 KB 초과, 파싱 불가, 호출 앞부분에서 바뀜)을 `source`나 `.`한 뒤의 나머지는 알 수 없는
+  값의 규칙으로 판정합니다: 파일이 정한 폴더나 환경은 그 폴더나 값으로 보지 못하고 알 수 없는 것으로만 봅니다. 가드의
+  검사와 셸의 읽기 사이에 다른 프로세스가 바꾼 파일은 보지 못합니다(호출이 실행하는 스크립트와 같습니다).
+- 가드가 텍스트를 읽을 수 없는 `eval` 뒤의 나머지는 효과를 알 수 없는 것으로 보고 따라갑니다(폴더는 이전 폴더이거나
+  알 수 없고, 값은 이전 값 중 하나이거나 알 수 없음): `eval "$(pyenv init -)"; X=<repo>/studio;
+  rm -rf $X/videos/v/work`는 레포 밖에서 실행해도 거부합니다.
 - `git stash pop` 뒤에 다시 실행하는 셸 문자열 속 버리는 git 명령은 호출 전의 작업 트리로 검사합니다
   (깨끗한 트리에서 `zsh -c 'git restore .'; git stash pop; zsh -c 'git restore .'`).
 - 가드가 읽을 수 없는 매개변수(환경 변수 등)로 시작해 Studio 이름으로 끝나는 피연산자(`rm -rf $Y/studio`).

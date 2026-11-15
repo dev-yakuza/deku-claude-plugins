@@ -14,6 +14,8 @@ from stdo import SCRIPTS_VERSION, paths
 from stdo.guard import judge
 from stdo.guard import snapshot as snapmod
 
+# a `source FILE` / `. FILE` word pair (assertPassAfterSource)
+SOURCE_WORD_RE = re.compile(r"(?:(?:builtin|command|noglob) )?(?<![\w./-])(?:source|\.) [^\s;&|)}]+")
 FAKE_TOOLS = ("npm", "yarn", "pnpm", "make", "npx", "node", "gh", "python3", "rg", "s2v", "ffprobe", "open",
               "tsc", "curl", "jq", "tree", "trash", "watchexec", "entr", "nodemon", "nproc", "exiftool", "firebase")
 ALIASES = DEFAULT_ALIASES + [("gst", "'git status'")]
@@ -86,13 +88,17 @@ class JudgeCase(GuardCase):
         return self.assertPass(cmd, cwd)
 
     def assertHeadRefusedKept(self, cmd, rule=None, cwd=None):
-        """fix20: 0.0.26 refused it and this guard passes it — refused in 0.0.27 by the backstop (decide), passed by
-        this guard alone (decide_g1: kept for 0.0.28, which lifts the backstop class by class)."""
-        g = self.g1(cmd, cwd)
-        self.assertIsNone(g, "this guard alone should pass: %s (%s): %s" % (cmd, self.mode, g and g.message()))
+        """fix20: 0.0.26 refused it and this guard passes it. 0.1.4: a call with no source (class N) is this guard's
+        alone — it passes; a call still routed to the 0.0.26 guard (a source, effects this guard cannot read) keeps
+        that guard's verdict until 0.1.5 (`rule`: then its refusal)."""
+        deny, ctx, _c = judge.decide_g1(self.hook("Bash", {"command": cmd}, cwd), self.env, snapshot_loader=self.loader,
+                                        run_finish=False)
+        self.assertIsNone(deny, "this guard alone should pass: %s (%s): %s" % (cmd, self.mode,
+                                                                                 deny and deny.message()))
         d = self.bash(cmd, cwd)
-        self.assertIsNotNone(d, "the 0.0.26 guard should refuse: %s (%s)" % (cmd, self.mode))
-        if rule:
+        if not ctx.unread and _c:
+            self.assertIsNone(d, "0.1.4 passes it (class N): %s (%s): %s" % (cmd, self.mode, d and d.message()))
+        elif rule and d is not None:
             self.assertEqual(d.rule, rule, "%s: %s" % (cmd, d.message()))
         return d
 
@@ -107,8 +113,24 @@ class JudgeCase(GuardCase):
         d = self.bash(cmd, cwd)
         self.assertIsNone(d, "should pass: %s (%s): %s" % (cmd, self.mode, d and d.message()))
 
+    def assertPassAfterSource(self, cmd, cwd=None):
+        """fix-0104 §1.6: a row with a source HEAD passed because this guard stopped at the source and the 0.0.26
+        guard passed what followed. 0.1.4 walks on: it passes unless this guard refuses the same row with each source
+        made a no-op (`:`) — then the source had hidden it (a kept new refusal, not a regression of the walk)."""
+        stripped = SOURCE_WORD_RE.sub(":", cmd)
+        if stripped != cmd and self.g1(stripped, cwd) is not None:
+            return self.assertDeny(cmd, None, cwd)
+        return self.assertPass(cmd, cwd)
+
 
 MUST_DENY = [
+    # 0.1.4 review P1: `$_` is the shell's last argument, never the guard's own environment's `_`
+    ("ls -d studio && cd $_ && rm -rf local", "G-DEL"), ("mkdir -p studio/videos/v && cd $_ && rm -rf work", "G-DEL"),
+    ("echo studio; rm -rf $_/local", "G-DEL"),
+    # 0.1.4 review MINOR 1 / 2: assignments before a bare `exec` stay; a trap action's `hash NAME=…` shadows NAME
+    ("HOME=/tmp/x exec; git status", "G-OPAQUE"), ("HOME=/tmp/x builtin exec; s2v status", "G-ENV"),
+    ("f(){ HOME=/tmp/x exec; }; f; s2v status", "G-ENV"), ("trap 'hash git=/tmp/g' DEBUG; git status", None),
+    ("trap 'hash rm=/tmp/r' DEBUG; rm -f a.txt", None), ("trap 'hash git=/tmp/g' ZERR; git status", None),
     ("echo x > studio/videos/v/work/state.json", "G-PROT"),
     ("sed -i '' s/a/b/ .claude/studio/config.json", "G-PROT"),
     ("cp a.txt studio/voices/x.wav", "G-PROT"),
@@ -1166,8 +1188,11 @@ _R11_GONE = ["unfunction f", "disable -f f", "unhash -f f", "unset -f -- f", "un
              "TRAPDEBUG(){ unfunction f 2>/dev/null; }", "trap 'unfunction f' DEBUG",
              "source /dev/stdin <<< 'f(){ :; }'", "u=unfunction; $u f", "functions -c f g; unfunction f",
              "disable -f f; enable -f f; disable -f f", "if [[ -e x ]]; then unfunction f; fi"]
-G1_REVIEW11_DENY = [("f(){ cd /tmp; }; %s; f; rm -rf <root>studio" % g, "G-DEL") for g in _R11_GONE] + \
-    [("X=<root>studio; f(){ X=a; }; %s; f; rm -rf -- $X" % g, "G-DEL") for g in _R11_GONE] + [
+# (0.1.4 review MINOR 2: a trap action that unfunctions f makes `f` a name the guard cannot read — any refusal)
+G1_REVIEW11_DENY = [("f(){ cd /tmp; }; %s; f; rm -rf <root>studio" % g, None if g.startswith("trap ") else "G-DEL")
+                    for g in _R11_GONE] + \
+    [("X=<root>studio; f(){ X=a; }; %s; f; rm -rf -- $X" % g, None if g.startswith("trap ") else "G-DEL")
+     for g in _R11_GONE] + [
     ("g(){ unfunction f; }; f(){ cd /tmp; }; g; f; rm -rf <root>studio", "G-DEL"),
     ("f(){ cd /tmp; }; unfunction f; f; mv <root>studio /tmp/x", "G-DEL"),
     ("f(){ cd /tmp; }; unfunction f; f; find <root>studio -delete", "G-DEL"),
@@ -1330,7 +1355,7 @@ G1_REVIEW18_DENY = [
     ("cd <root>src; source /dev/null; rm -rf ~-/<root>studio/videos/v/work", "G-DEL"),
     # HEAD did not know the folder after a loop that moves: `cd -` after a source goes to a folder it cannot tell
     ("for d in <root>src; do cd $d; cd ..; done; cd src; source /dev/null; cd -; bash -c 'rm -rf <root>studio/videos/v/work'",
-     "G-OPAQUE"),
+     None),  # 0.1.4: this guard's G-DEL (it follows the folder), 0.0.26's G-OPAQUE
     ("sh -c 'git checkout .'; git stash pop; sh -c 'git checkout .'", "G-RESET"),  # B18-2 (also: G1Review18)
 ]
 G1_REVIEW18_PASS = [
@@ -1360,8 +1385,8 @@ G1_REVIEW19_DENY = [
     ("for d in src; do cd $d; cd ..; done; f(){ cd {R}/studio/videos/v; }; source {R}/e.sh; cd {R}/studio/videos/v; f; "
      "git checkout .", "G-RESET"),
     ("for d in src; do cd $d; cd ..; done; cd studio/videos/v; source {R}/e.sh; cd {R}; cd -; git checkout .",
-     "G-OPAQUE"),
-    ("for d in src; do cd $d; cd ..; done; cd studio/videos/v; source {R}/e.sh; cd {R}; cd -; rm -rf work", "G-OPAQUE"),
+     None),
+    ("for d in src; do cd $d; cd ..; done; cd studio/videos/v; source {R}/e.sh; cd {R}; cd -; rm -rf work", None),
     ("f(){ set -e; }; source {R}/e.sh; f; cd {R}/studio/videos/v; git checkout .", "G-RESET"),
     ("source {R}/e.sh; f(){ set -x; }; f; pushd -q {R}/studio/videos/v; rm -rf work", "G-DEL"),
 ]
@@ -1696,7 +1721,8 @@ class MustDeny(JudgeCase):
 
 
 # fix20: MUST_PASS rows the 0.0.26 guard refused — refused again in 0.0.27 by the backstop; this guard alone still
-# passes them (assertHeadRefusedKept). Per snapshot mode.
+# passes them (assertHeadRefusedKept); 0.1.4 passes them (no source: the 0.0.26 guard does not judge them). Per
+# snapshot mode.
 HEAD_REFUSED_KEPT = {
     "with": ["rm -rf **/__pycache__", "rm -f **/*.pyc", "rm -f */*.log", "rm studio/videos/v/out/*.mp4",
              "rm -rf studio<->", "X=studio; : ${X::=build}; rm -rf -- $X"],
@@ -2596,7 +2622,10 @@ class G1Review1(JudgeCase):
 
 
 # fix20: snapshot-function rows the 0.0.26 guard refused (G-OPAQUE: it reads the function's text, which mentions studio
-# or cannot be read) — refused again by the backstop in 0.0.27; this guard alone passes them (assertPassOrKept)
+# or cannot be read) — refused again by the backstop in 0.0.27; this guard alone passes them (assertPassOrKept).
+# 0.1.4 (fix-0104 §1.4d, a kept new refusal): a function call is searched with the text of every snapshot function, so
+# with `seteditor` (its body names studio) in the snapshot this guard refuses them too; they pass without it
+# (term_free), where 0.1.4 passes them
 HEAD_REFUSED_FUNCS = {
     "diff a.txt src/a.ts; git status", "diff a.txt src/a.ts || git diff", "gh repo view --json visibility; git remote -v",
     "gh pr list && git status", "gh pr view 1; git log --oneline -3", "gh pr create --fill && git push",
@@ -2686,6 +2715,19 @@ allexport () {
 	set -a
 }
 '''
+SETEDITOR = """seteditor () {
+	export GIT_EDITOR='rm -rf studio #'
+}
+"""
+
+
+def term_free(funcs):
+    """The snapshot functions without `seteditor`, whose body names a Studio path (fix-0104 §1.4d: every call of a
+    snapshot function is then refused in a Studio repository; guard-limits) — and without callsbad, which calls it."""
+    assert SETEDITOR in funcs
+    return funcs.replace(SETEDITOR, "").replace("callsbad () {\n\tseteditor\n}\n", "")
+
+
 FUNCTION_PASS = ["diff a.txt src/a.ts; git status", "diff a.txt src/a.ts || git diff",
                  "gh repo view --json visibility; git remote -v", "gh pr list && git status",
                  "gh pr view 1; git log --oneline -3", "gh pr create --fill && git push", "nvm use 20 && git status",
@@ -2699,19 +2741,23 @@ class G1Review2(JudgeCase):
     """G1 implementation review 2: user config and git files in another letter case (M14), shell functions of the
     snapshot (R2-M1), the message of the m5 refusal (MINOR 4)."""
 
-    def use_functions(self):
+    def use_functions(self, functions=SNAPSHOT_FUNCS):
         d = os.path.join(self.env["CLAUDE_CONFIG_DIR"], "shell-snapshots")
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "snapshot-zsh-1-a.sh"), "w") as f:
-            f.write(snapshot_text(aliases=ALIASES, path=self.env["PATH"], functions=SNAPSHOT_FUNCS))
+            f.write(snapshot_text(aliases=ALIASES, path=self.env["PATH"], functions=functions))
         self.snap_with = snapmod.load(self.env)
         shutil.rmtree(d)
         self.mode = "with"
 
     def test_snapshot_functions(self):  # R2-M1
-        self.use_functions()
+        self.use_functions(term_free(SNAPSHOT_FUNCS))
         for cmd in FUNCTION_PASS:
             self.assertPassOrKept(cmd, HEAD_REFUSED_FUNCS)
+        self.use_functions()
+        for cmd in FUNCTION_PASS:  # 0.1.4 (fix-0104 §1.4d): seteditor's body names studio
+            d = self.assertDeny(cmd, "G-OPAQUE")
+            self.assertIn("mentions studio", d.message())
         for cmd in FUNCTION_DENY:
             d = self.assertDeny(cmd, "G-OPAQUE")
             self.assertIn("cannot read", d.message())
@@ -2835,21 +2881,24 @@ class G1Review3(JudgeCase):
     """G1 implementation review 3: snapshot functions (conf M-1 to M-4, bypass M4, m1) and limits outside a Studio
     repository (B1/B-1, M3)."""
 
-    def use_functions(self):
+    def use_functions(self, functions=REVIEW3_FUNCS):
         d = os.path.join(self.env["CLAUDE_CONFIG_DIR"], "shell-snapshots")
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "snapshot-zsh-1-a.sh"), "w") as f:
-            f.write(snapshot_text(aliases=ALIASES, path=self.env["PATH"], functions=REVIEW3_FUNCS))
+            f.write(snapshot_text(aliases=ALIASES, path=self.env["PATH"], functions=functions))
         self.snap_with = snapmod.load(self.env)
         shutil.rmtree(d)
         self.mode = "with"
 
     def test_snapshot_functions(self):
-        self.use_functions()
+        self.use_functions(term_free(REVIEW3_FUNCS))
         for cmd in REVIEW3_FUNCTION_PASS + FUNCTION_PASS:
             self.assertPassOrKept(cmd, HEAD_REFUSED_FUNCS)
         for cmd, rule in REVIEW3_FUNCTION_DENY:
             self.assertDeny(cmd, rule)
+        self.use_functions()
+        for cmd, rule in REVIEW3_FUNCTION_DENY:
+            self.assertDeny(cmd)  # (a function call's text names studio here: G-OPAQUE may come first)
         for cmd in FUNCTION_DENY:
             self.assertDeny(cmd, "G-OPAQUE")
 
@@ -3026,13 +3075,16 @@ class G1Review4(JudgeCase):
         self.mode = "with"
 
     def test_snapshot_functions(self):
-        self.use(REVIEW4_FUNCS)
+        self.use(term_free(REVIEW4_FUNCS))
         for cmd in REVIEW4_FUNCTION_PASS:
             self.assertPassOrKept(cmd, HEAD_REFUSED_FUNCS)
-        for cmd, rule in REVIEW4_FUNCTION_DENY:
-            self.assertDeny(cmd.replace("<R>", self.repo), rule)
         for cmd in REVIEW4_OUT_PASS:
             self.assertPassOrKept(cmd.replace("<R>", self.repo), HEAD_REFUSED_FUNCS, cwd=self.tmp)
+        for cmd, rule in REVIEW4_FUNCTION_DENY:
+            self.assertDeny(cmd.replace("<R>", self.repo), rule)
+        self.use(REVIEW4_FUNCS)
+        for cmd, rule in REVIEW4_FUNCTION_DENY:
+            self.assertDeny(cmd.replace("<R>", self.repo))  # (G-OPAQUE may come first: seteditor names studio)
         for cmd, rule in REVIEW4_OUT_DENY:
             self.assertDeny(cmd.replace("<R>", self.repo), rule, cwd=self.tmp)
 
@@ -3090,9 +3142,10 @@ class G1Review5(JudgeCase):
     use = G1Review4.use
 
     def test_snapshot_functions(self):
-        self.use(REVIEW4_FUNCS)
+        self.use(term_free(REVIEW4_FUNCS))
         for cmd in REVIEW5_FUNCTION_PASS:
             self.assertPass(cmd)
+        self.use(REVIEW4_FUNCS)
         for cmd, rule in REVIEW5_FUNCTION_DENY:
             self.assertDeny(cmd, rule)
 
@@ -3169,18 +3222,20 @@ class G1Review11(JudgeCase):
                     "source env.sh && git commit -m x", "cd src && source ../env.sh && git status",
                     "source envcd.sh && git status", "source env.sh; rm -rf build"):
             self.assertPass(cmd)
-        # review 14: files are never followed; git after a source is judged as at HEAD (not checked: the folder and
-        # the environment are the source's), whatever the file says
+        # review 14: files were never followed (git after a source was judged as at HEAD); 0.1.4: a file the guard can
+        # read is walked in this shell — what it exports, and an alias it defines and uses, hold for git after it
         outside = os.path.join(self.tmp, "outside.sh")
         with open(outside, "w") as f:
             f.write("export FOO=1\n")
-        for cmd in ("source envgit.sh && git status", "source envhome.sh && git status",
-                    "source envalias.sh && git status",
-                    "source %s && git status" % outside, "source envcd.sh && git commit -m x"):
+        for cmd in ("source %s && git status" % outside, "source envcd.sh && git commit -m x",
+                    # an alias the call defines and uses whose text names no Studio path: not followed (guard-limits)
+                    "source envalias.sh && git status"):
             self.assertPass(cmd)
+        for cmd in ("source envgit.sh && git status", "source envhome.sh && git status"):
+            self.assertDeny(cmd, "G-OPAQUE")
         self.assertDeny("source enveval.sh && git status", "G-OPAQUE")  # the file's eval (its text is searched)
         self.assertDeny("source missing.sh && git status", "G-OPAQUE")  # a file the guard cannot read, as at HEAD
-        self.assertDeny("source envx.sh; rm -rf -- $X", "G-OPAQUE")  # $X unknown after it, as at HEAD
+        self.assertDeny("source envx.sh; rm -rf -- $X", "G-DEL")  # 0.1.4: $X is the file's studio
         self.assertDeny("f(){ cd /tmp; }; source envfn.sh; f; rm -rf studio", "G-DEL")
         self.assertDeny("source envcd.sh; rm -rf studio", "G-DEL", cwd=os.path.join(self.repo, "src"))
 
@@ -3247,8 +3302,11 @@ class G1Review12(JudgeCase):
                         "source up6.sh; rm -rf studio", "source h1.sh; rm -rf studio", "source h2.sh; rm -rf studio",
                         "source n1.sh; rm -rf studio", "source n2.sh; rm -rf studio", "source q4.sh; rm -rf studio",
                         "source q8.sh; rm -rf studio", "myup(){ cd ..; }; source f1.sh; rm -rf studio"):
-                self.assertDeny(cmd, "G-DEL", cwd=self.src)
-            self.assertDeny("source up.sh; echo x > studio/videos/v/work/state.json", "G-PROT", cwd=self.src)
+                # 0.1.4: the file is walked in this shell — without a snapshot, a name its alias gives is unknown first
+                d = self.assertDeny(cmd, None, cwd=self.src)
+                self.assertIn(d.rule, ("G-DEL",) if mode == "with" else ("G-DEL", "G-UNKNOWN"), (cmd, d.message()))
+            d = self.assertDeny("source up.sh; echo x > studio/videos/v/work/state.json", None, cwd=self.src)
+            self.assertIn(d.rule, ("G-PROT",) if mode == "with" else ("G-PROT", "G-UNKNOWN"))
             self.assertPass("source ok.sh; rm -rf build", cwd=self.src)
             # the typed form zsh runs the same way
             self.assertDeny("HOME=.. pushd; rm -rf studio", "G-DEL", cwd=self.src)
@@ -3277,8 +3335,8 @@ class G1Review12(JudgeCase):
             for cmd in ("source /dev/null; rm -rf **/__pycache__", "source src/ok.sh; rm -rf **/__pycache__"):
                 self.assertPass(cmd)
             self.assertDeny("touch a; rm -rf **/__pycache__", "G-DEL")  # a writer before it
-            # review 14: after a source the folder is unknown and `**` is judged as at HEAD
-            self.assertPass("source src/ok.sh; touch a; rm -rf **/__pycache__")
+            # review 14: after a source the folder was unknown and `**` judged as at HEAD; 0.1.4: as without it
+            self.assertDeny("source src/ok.sh; touch a; rm -rf **/__pycache__", "G-DEL")
 
     def test_cd_or_exit(self):
         os.makedirs(os.path.join(self.repo, "sub"))
@@ -3356,20 +3414,29 @@ class G1Review13(JudgeCase):
                 self.assertPass('source scripts/%s && git add -A && git commit -m "fix: x"' % n)
                 self.assertPass("set -a; source scripts/%s; set +a; git commit -m x" % n)
             for n in sorted(k for k in _R13_FILES if k.startswith("m")):
-                # review 14: files are not followed; git after a source is not checked, as at HEAD
-                self.assertPass("source scripts/%s; git commit -m x" % n)
+                # review 14: files were not followed; 0.1.4: the file is walked in this shell — git after it is judged
+                # as after the same text written in the call
+                self.assertEqual(self.g1("source scripts/%s; git commit -m x" % n) is None,
+                                 self.g1(_R13_FILES[n] + "git commit -m x") is None, n)
                 self.assertDeny("source scripts/%s; rm -rf studio" % n, "G-DEL", cwd=os.path.join(self.repo, "src"))
             src = os.path.join(self.repo, "src")
             for n in ("m2.sh", "m3.sh", "m7.sh", "m8.sh", "m9.sh"):
                 self.assertDeny("source ../scripts/%s; cd; rm -rf studio" % n, "G-DEL", cwd=src)
 
     def test_listing_after_source(self):
-        # review 14: whatever the file holds, the folder after it is unknown and `**` is judged as at HEAD; a source
-        # is a writer for the bulk-writer rule (W4) as at HEAD
+        # review 14: the folder after a source was unknown and `**` judged as at HEAD; 0.1.4: the file is walked in
+        # this shell — the `**` listing after it as after the same text in the call (a file that may write: refused);
+        # a source is a writer for the bulk-writer rule (W4) as at HEAD
         for mode in ("with", "none"):
             self.mode = mode
             for n in sorted(_R13_FILES):
-                self.assertPass("source scripts/%s; rm -rf **/__pycache__" % n)
+                if n.startswith("env"):
+                    self.assertPass("source scripts/%s; rm -rf **/__pycache__" % n)
+                elif self.g1("source scripts/%s; rm -rf **/__pycache__" % n) is not None:
+                    # never stricter than the file's text in the call (where a shell-state builtin is a writer too)
+                    self.assertIsNotNone(self.g1(_R13_FILES[n] + "rm -rf **/__pycache__"), (n, mode))
+            for n in ("q1.sh", "q2.sh", "q3.sh"):  # files that may write before the listing
+                self.assertDeny("source scripts/%s; rm -rf **/__pycache__" % n, "G-DEL")
             self.assertDeny("cp -R /tmp/stage/. .venv; source scripts/env1.sh", "G-PROT")
 
 
@@ -3404,7 +3471,7 @@ class G1Review14(JudgeCase):
         for mode in ("with", "none"):
             self.mode = mode
             for cmd in G1_REVIEW14_PASS:
-                self.assertPass(cmd)
+                self.assertPassAfterSource(cmd)
 
     def test_review14_attacks(self):
         src = os.path.join(self.repo, "src")
@@ -3415,7 +3482,9 @@ class G1Review14(JudgeCase):
                         "source c1.sh; cd .claude; rm -rf studio", "setopt extendedglob; source q1.sh; rm -rf studio",
                         "source ap.sh; rm -rf studio", "source e.sh; cd -; rm -rf studio", "source e.sh; popd; rm -rf studio",
                         "source e.sh; rm -rf .claude/studio"):
-                self.assertDeny(cmd, "G-DEL", cwd=src)
+                # 0.1.4: the files are walked in this shell — without a snapshot an alias they define is unknown first
+                d = self.assertDeny(cmd, None, cwd=src)
+                self.assertIn(d.rule, ("G-DEL",) if mode == "with" else ("G-DEL", "G-UNKNOWN"), (cmd, d.message()))
             self.assertDeny("source e.sh; echo x > studio/videos/v/work/state.json", "G-PROT", cwd=src)
             for cmd in ("source z1.sh; rm -rf ~[x]/studio", "source z1.sh; rm -rf ~[x]/.husky",
                         "source z1.sh; echo x > ~[x]/studio/videos/v/work/state.json"):
@@ -3424,7 +3493,8 @@ class G1Review14(JudgeCase):
             self.assertPass("source e.sh; rm -rf dist/*", cwd=self.repo)
             # review 18: HEAD did not know the folder after the function: the input runs from a folder the guard
             # cannot tell, as at HEAD
-            self.assertDeny("f(){ cd studio/videos/v; }; f; source /dev/stdin <<< ':'; git clean -fdx", "G-OPAQUE",
+            # 0.1.4: the walk goes on — git clean is judged in studio/videos/v
+            self.assertDeny("f(){ cd studio/videos/v; }; f; source /dev/stdin <<< ':'; git clean -fdx", "G-CLEAN",
                             cwd=self.repo)
             for cmd in ("cp -R /tmp/stage/. .venv; source .venv/bin/activate", "tar -xf /tmp/s.tar -C .venv; source .venv/bin/activate",
                         "cp -R /tmp/stage/. dist; source src/e1.sh", "cp -R /tmp/stage/. src; source src/e.sh"):
@@ -3485,7 +3555,7 @@ class G1Review15(JudgeCase):
         for mode in ("with", "none"):
             self.mode = mode
             for cmd in G1_REVIEW15_PASS:
-                self.assertPass(cmd)
+                self.assertPassAfterSource(cmd)
             src = os.path.join(self.repo, "src")
             v = os.path.join(self.repo, "studio/videos/v")
             self.assertDeny("source e.sh && rm -rf studio", "G-DEL", cwd=src)
@@ -3595,7 +3665,7 @@ class G1Review16(JudgeCase):
             self.assertDeny("source .venv/bin/activate && pushd src && popd && echo x > .claude/studio/scripts/state.py",
                             "G-PROT")
             for cmd in G1_REVIEW16_PASS:
-                self.assertPass(cmd)
+                self.assertPassAfterSource(cmd)
 
 
 class G1Review17(JudgeCase):
@@ -3798,9 +3868,10 @@ class G1Review6(JudgeCase):
                 self.assertPass(cmd)
 
     def test_extended_glob_after_functions(self):
-        self.use(REVIEW4_FUNCS)
+        self.use(term_free(REVIEW4_FUNCS))
         for cmd in REVIEW6_FUNCTION_PASS:
             self.assertPass(cmd)
+        self.use(REVIEW4_FUNCS)
         for cmd, rule in REVIEW6_FUNCTION_DENY:
             self.assertDeny(cmd, rule)
 
@@ -3834,7 +3905,7 @@ class G1Review18(JudgeCase):
             for cmd, rule in G1_REVIEW18_DENY:
                 self.assertDeny(cmd.replace("<root>", ""), rule)
             for cmd in G1_REVIEW18_PASS:
-                self.assertPass(cmd)
+                self.assertPassAfterSource(cmd)
 
     def test_attacks_head_refused(self):
         v = "%s/studio/videos/v" % self.repo
@@ -3842,12 +3913,12 @@ class G1Review18(JudgeCase):
             self.mode = mode
             # B18-1: a function body run again after a later source (no refusal is dropped any more)
             for body in ("bash x.sh", "bash -c 'rm -rf work'", "source x.sh", "bash < x.sh"):
-                self.assertDeny("cd src; source e.sh; f(){ %s; }; cd -; f; cd %s; source e.sh; f" % (body, v), "G-OPAQUE")
+                self.assertDeny("cd src; source e.sh; f(){ %s; }; cd -; f; cd %s; source e.sh; f" % (body, v), None)
             # B18-3: G1 follows the folder through a loop / a function / `set -k`; HEAD did not, and its verdict stays
             for pre in ("for d in src; do cd $d; cd ..; done; ", "for d in src; do pushd -q $d; popd -q; done; ",
                         "f(){ cd src; }; f; cd ..; ", "set -k; "):
-                self.assertDeny(pre + "cd src; source m.sh; cd -; bash x.sh", "G-OPAQUE")
-            self.assertDeny("set -A dirstack %s; cd src; source m.sh; popd; bash x.sh" % v, "G-OPAQUE")
+                self.assertDeny(pre + "cd src; source m.sh; cd -; bash x.sh", None)  # 0.1.4: this guard's rule
+            self.assertDeny("set -A dirstack %s; cd src; source m.sh; popd; bash x.sh" % v, None)
             # HEAD's $OLDPWD / stack after a source
             for cmd in ("cd src; source e.sh; cd scripts; cd -; git clean -fdx", "pushd src; source e.sh; popd; git clean -fdx",
                         "cd src && source ../.venv/bin/activate && cd - && git clean -fdx"):
@@ -3870,11 +3941,13 @@ class G1Review18(JudgeCase):
                         "cd ~- && bash scripts/release.sh",
                         "source .venv/bin/activate && pushd src && npm test && popd && git add -A && git commit -m x",
                         "(cd src && source ../.venv/bin/activate && npm test && cd -) && git add -A && git commit -m x",
-                        "cd src; source m.sh; cd -; bash x.sh", "source e.sh; cd $D; git commit -m x",
+                        "source e.sh; cd $D; git commit -m x",
                         "cd src; source e.sh; cd -; cd -; git checkout .", "source .venv/bin/activate && git push -u origin HEAD"):
-                self.assertPass(cmd)
+                self.assertPassAfterSource(cmd)
             for cmd in ("source ok.sh; rm -rf work", "source ../e.sh && python3 ../.claude/studio/scripts/state.py status"):
-                self.assertPass(cmd, cwd=src)
+                self.assertPassAfterSource(cmd, cwd=src)
+            # 0.1.4: m.sh's pushd / popd leave $OLDPWD at scripts — `cd -` goes there and x.sh deletes ../studio
+            self.assertDeny("cd src; source m.sh; cd -; bash x.sh", "G-DEL")
 
     def test_nested_string_per_command(self):
         # B18-2: on a clean tree HEAD probed each `git checkout .` (and refused when its budget ran out); the same string
@@ -3944,18 +4017,19 @@ class G1Review19(JudgeCase):
     def test_everyday_head_passed(self):
         self.use_snap(functions=DEFAULT_FUNCS + _R19_FUNCS)
         for cmd in G1_REVIEW19_PASS:
-            self.assertPass(cmd.replace("{R}", self.repo))
+            cmd = cmd.replace("{R}", self.repo)
+            (self.assertPassAfterSource if SOURCE_WORD_RE.search(cmd) else self.assertPass)(cmd)
         # a wrapper whose own body exports stays refused (the documented snapshot class; HEAD passed it); after a
-        # source the 0.0.26 rules alone judge it (fix20): HEAD's verdict, pass
+        # source: as without it (0.1.4, the walk goes on)
         self.use_snap(functions=DEFAULT_FUNCS + "runit () {\n\texport NODE_ENV=test\n\t\"$@\"\n}\n")
         self.assertDeny("runit npm test && git status", "G-OPAQUE")
-        self.assertPass("source .venv/bin/activate && runit npm test && git status")
+        self.assertPassAfterSource("source .venv/bin/activate && runit npm test && git status")
 
     def test_nested_checks_shared(self):
         # C19-2: identical nested pushes are checked once (the same answer); B18-2 stays: discard checks per command
         # fix20 (P20-4): the check is the frozen 0.0.26 one, shared with the 0.0.26 guard: one run for both guards
         from stdo.guard import backstop
-        pushmod = backstop._frozen_checks()[0]
+        pushmod = backstop._own_checks()[0]  # 0.1.4: G1's own check (the same code), one run per call
         calls = []
         orig = pushmod.check.__wrapped__
 

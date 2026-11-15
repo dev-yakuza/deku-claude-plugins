@@ -66,18 +66,6 @@ def _dedup(cmds, opaques):
     return out, oout
 
 
-def _drop_post_source(cmds, opaques):
-    """fix20: what a walk emitted after a `source` in its reading (walk.Walker.emit) is not judged here."""
-    dropped = {c.id for c in cmds if "post-source" in c.flags}
-    if not dropped and not any(getattr(o, "post_source", False) for o in opaques):
-        return cmds, opaques
-    out = [c for c in cmds if c.id not in dropped]
-    for c in out:
-        if c.parent in dropped:
-            c.parent = None
-    return out, [o for o in opaques if not getattr(o, "post_source", False) and o.cmd not in dropped]
-
-
 def scan(command, cwd, env, snapshot=None, snapshot_notes=(), terms=None, fs=None, budget=None, s2v_path=None,
          options=None, stdin=None, home=None):
     """Scan one Bash command string. `cwd` is the hook input's cwd (start of the call). `options`: shell options in
@@ -145,13 +133,17 @@ def scan(command, cwd, env, snapshot=None, snapshot_notes=(), terms=None, fs=Non
             cmds.extend(w.cmds)
             opq.extend(w.opaque)
             result.sourced = result.sourced or w.ever_sourced
-        cmds, opq = _drop_post_source(cmds, opq)
+        result.unread = result.sourced or ctx.unread  # fix-0104 §1.5
         cmds, opq = _dedup(cmds, opq)
         for o in opq:
             if terms is not None:
                 o.hits = terms.find(o.payload)
             o.hits_unknown = o.payload is None
             o.literals = (o.literals or []) + terms_mod.literals(o.payload)
+            # fix-0104 §1.4d: the snapshot's function text a function call carries is searched apart (judge.py), once
+            # per call; its literals are the snapshot's, computed once
+            if getattr(o, "shared_text", None) is not None and snapshot is not None:
+                o.shared_literals = snapshot.all_function_literals()
         result.commands, result.opaque = cmds, opq
         result.stats["final_cwds"] = cwd_list(final)
     except ParseError as e:
@@ -163,6 +155,7 @@ def scan(command, cwd, env, snapshot=None, snapshot_notes=(), terms=None, fs=Non
     except Exception as e:  # noqa: BLE001 — never raise out of the scanner
         _fail(result, "error", "internal:%s" % type(e).__name__, terms)
     if ctx is not None:
+        result.unread = result.unread or result.sourced or ctx.unread
         for n in list(snapshot_notes) + ctx.notes:
             result.note(n)
         if snapshot is None:

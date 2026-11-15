@@ -397,7 +397,11 @@ class ScriptAllow(AllowCase):
             lctx.denies.append(lj.Deny("G-PROT", "refused by the 0.0.26 rules (test)"))
             return lctx.denies[0], lctx
         with mock.patch.object(backstop, "_legacy", lambda: [lj, legacy_refuses]):
+            # 0.1.4: a Studio script call with no source is this guard's alone — the 0.0.26 refusal does not apply
             deny, ctx = self.run_hook(cmd)
+            self.assertIsNone(deny)
+            self.assertTrue(ctx.allow)
+            deny, ctx = self.run_hook("source /dev/null && " + cmd)  # a call the 0.0.26 guard judges too
             self.assertIsNotNone(deny)
             self.assertIsNone(ctx.allow)
         # the 0.0.26 guard's finish is chosen (after a source): no allow

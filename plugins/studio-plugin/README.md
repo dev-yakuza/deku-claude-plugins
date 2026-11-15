@@ -28,13 +28,16 @@ with each video on the platforms you choose.
   Studio's guard hook checks each Bash, Write, Edit, MultiEdit, NotebookEdit, WebFetch, WebSearch and MCP tool call.
   It runs with `onFailure: block`: a hook error or timeout blocks those calls (measured), and a missing `python3` is
   expected to block them too (not measured). A pyenv- or asdf-style shim as `python3` makes each guard call slower and
-  turns off the guard's own allows of 0.0.28 ([docs/guard-limits.md](docs/guard-limits.md)). On macOS without the
-  Command Line Tools, `/usr/bin/python3` may wait until the hook's 20 s timeout.
+  turns off the guard's own allows of 0.0.28 (what the guard judges, 0.1.4:
+  [docs/guard-limits.md](docs/guard-limits.md)). On macOS without the Command Line Tools, `/usr/bin/python3` may wait
+  until the hook's 20 s timeout.
 - **Cost per call** (one machine, an Apple silicon Mac): the guard on a Bash `git status` in a repository without a harness
-  took about 80 ms (p50, Python 3.9.9 and 3.15.2) and about 155 ms with macOS's `/usr/bin/python3` 3.9.6
+  took about 70 ms (p50, Python 3.9.9 and 3.15.2) and about 125 ms with macOS's `/usr/bin/python3` 3.9.6
   (`tests/py/test_guard_entry.py`, `PerfNoHarness`). The guard also reads Claude Code's shell snapshots (Claude Code
-  keeps one per recent session, ~280 KB each): with 13 of them the same call took about 140 ms (3.15.2) and about
-  170 ms (3.9.9), and each more file adds about 5 ms (`PerfSnapshots`).
+  keeps one per recent session, ~280 KB each): with 13 of them the same call took about 100 ms (3.15.2) and about
+  110 ms (3.9.9), and each more file adds about 2–3 ms (`PerfSnapshots`). A call with a `source` is also judged by the
+  0.0.26 guard, which reads the snapshots again: it costs about as before (about 155 ms with 13 snapshots,
+  `PerfSourced`).
 
 ## Install
 
@@ -237,6 +240,18 @@ the repository): [docs/removing.md](docs/removing.md).
   time and may pass — the answer they should have had. A shell function with a `(( … ))` over 512 characters is now
   treated as unreadable (closed side). The same decisions otherwise. No `/std update` (scripts
   version stays 27).
+- **0.1.4**: the guard no longer stops at a `source` or `.`: it reads the file (up to 64 KB, when nothing earlier in
+  the call may have changed it) and judges the rest of the call with what the file does; a file it cannot read leaves
+  the folder and values unknown. Refused now: `source env.sh; git clean -fdx`, `cd studio/videos/v; source env.sh;
+  rm -rf work`, a write to `std-auditor.md` after a source; a call that passed before only because the guard stopped
+  at its source is refused when the same call without the source is. The 0.0.26 guard now judges only calls with a
+  source (or after a shell function or hook of yours it cannot read, or one that may change the folder or hide a
+  command name), so its false refusals elsewhere are gone
+  (`rm -rf **/__pycache__`, `gh pr view 1; git commit -m …`, `flock /tmp/build.lock make` without a shell snapshot,
+  and `s2v` / `lock.py` / `sed` / `bash scripts/x.sh` after a shell function of yours that changes nothing), and each
+  Bash call is about 45 ms faster with 13 shell snapshots (147 → 103 ms here with Python 3.15.2, 165 → 110 ms with
+  3.9.9). When one of your shell functions names a Studio file, calls of your shell functions are refused in a Studio
+  repository (rename or drop that function). No `/std update` (scripts version stays 27).
 
 ## License
 

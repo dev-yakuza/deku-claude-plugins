@@ -26,13 +26,14 @@ Claude Code용 **레포별 영상 제작 조직**입니다. Studio는 레포에 
   Bash, Write, Edit, MultiEdit, NotebookEdit, WebFetch, WebSearch, MCP 도구 호출을 하나하나 검사합니다.
   `onFailure: block`으로 실행되므로 훅의 오류나 시간 초과는 그 호출을 막고(측정함), `python3`가 없을 때도 막을 것으로
   봅니다(측정하지 않음). `python3`가 pyenv나 asdf 방식의 shim이면 가드 호출마다 느려지고 0.0.28의 가드 자체 허용이
-  꺼집니다([docs/guard-limits.ko.md](docs/guard-limits.ko.md)). Command Line Tools가 없는 macOS에서는
-  `/usr/bin/python3`가 훅의 20초 시간 제한까지 기다릴 수 있습니다.
-- **호출당 비용**(기기 한 대, Apple silicon Mac): 하네스가 없는 레포에서 Bash `git status`에 대한 가드는 약 80 ms(p50,
-  Python 3.9.9와 3.15.2), macOS의 `/usr/bin/python3` 3.9.6으로는 약 155 ms 걸렸습니다
+  꺼집니다(가드가 판정하는 것, 0.1.4: [docs/guard-limits.ko.md](docs/guard-limits.ko.md)). Command Line Tools가
+  없는 macOS에서는 `/usr/bin/python3`가 훅의 20초 시간 제한까지 기다릴 수 있습니다.
+- **호출당 비용**(기기 한 대, Apple silicon Mac): 하네스가 없는 레포에서 Bash `git status`에 대한 가드는 약 70 ms(p50,
+  Python 3.9.9와 3.15.2), macOS의 `/usr/bin/python3` 3.9.6으로는 약 125 ms 걸렸습니다
   (`tests/py/test_guard_entry.py`, `PerfNoHarness`). 가드는 Claude Code의 셸 스냅숏(최근 세션마다 하나, 각 ~280 KB)도
-  읽습니다. 스냅숏이 13개일 때 같은 호출은 약 140 ms(3.15.2), 약 170 ms(3.9.9) 걸렸고, 파일이 하나 늘 때마다 약 5 ms가
-  더 듭니다(`PerfSnapshots`).
+  읽습니다. 스냅숏이 13개일 때 같은 호출은 약 100 ms(3.15.2), 약 110 ms(3.9.9) 걸렸고, 파일이 하나 늘 때마다 약
+  2–3 ms가 더 듭니다(`PerfSnapshots`). `source`가 있는 호출은 스냅숏을 다시 읽는 0.0.26 가드도 판정하므로 이전과 비슷하게
+  듭니다(스냅숏 13개에서 약 155 ms, `PerfSourced`).
 
 ## 설치
 
@@ -218,6 +219,17 @@ python3 .claude/studio/scripts/hooks.py install
   G-LIMIT) 중 일부는 이제 제시간에 판단되어 통과할 수 있습니다 — 원래 받았어야 할 답입니다. 512자를 넘는 `(( … ))`가 든 셸 함수는
   이제 읽을 수 없는 것으로 다룹니다(닫힌 쪽). 그 밖의 판단은 같습니다.
   `/std update`는 필요 없습니다(스크립트 버전은 27 그대로).
+- **0.1.4**: 가드가 `source`나 `.`에서 더 이상 멈추지 않습니다: 파일을 읽고(64 KB까지, 호출의 앞부분이 그 파일을
+  바꿨을 수 없을 때) 파일이 하는 일과 함께 호출의 나머지를 판정합니다. 읽을 수 없는 파일은 폴더와 값을 알 수 없게
+  합니다. 이제 거부: `source env.sh; git clean -fdx`, `cd studio/videos/v; source env.sh; rm -rf work`, source 뒤에
+  `std-auditor.md`를 쓰는 것. 가드가 source에서 멈췄기 때문에만 통과하던 호출은, source가 없는 같은 호출이 거부되면
+  거부합니다. 0.0.26 가드는 이제 source가 있는 호출(또는 가드가 읽을 수 없거나 폴더를 바꾸거나 명령 이름을 가릴 수 있는 사용자 셸
+  함수나 훅 뒤의 호출)만 판정하므로,
+  다른 곳의 잘못된 거부는 없어졌습니다(`rm -rf **/__pycache__`, `gh pr view 1; git commit -m …`, 셸 스냅숏이 없을 때의
+  `flock /tmp/build.lock make`, 아무것도 바꾸지 않는 사용자 셸 함수 뒤의 `s2v` · `lock.py` · `sed` ·
+  `bash scripts/x.sh`). 셸 스냅숏이 13개일 때 Bash 호출마다 약 45 ms 빨라졌습니다(여기서 Python 3.15.2로 147 → 103 ms,
+  3.9.9로 165 → 110 ms). 사용자 셸 함수 하나가 Studio 파일을 가리키면 Studio 레포에서 사용자 셸 함수의 호출을
+  거부합니다(그 함수의 이름을 바꾸거나 없애세요). `/std update`는 필요 없습니다(스크립트 버전은 27 그대로).
 
 ## 라이선스
 

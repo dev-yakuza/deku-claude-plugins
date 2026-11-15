@@ -1,17 +1,23 @@
-"""fix20: the 0.0.26 guard as a backstop. Every call is judged by this guard (G1) and by the 0.0.26 guard, kept
-frozen in guard/legacy (d2028cc; tests/structure_test.sh checks the copy). Anything either refuses is refused.
+"""fix20: the 0.0.26 guard as a backstop, kept frozen in guard/legacy (d2028cc; tests/structure_test.sh checks the
+copy). fix-0104 §2: it judges only the calls this guard (G1) cannot judge alone — a call with a `source` / `.` (or eval
+/ emulate -c text that may run one) in any reading, a hook or a body defined in it, a call after effects G1 cannot read
+(a shell function it cannot read, one that may change folder or that shadows a command; `ctx.unread`), and a call G1
+stopped early on a limit (`complete` False). Every other call (class N, every non-Bash tool among them) is G1's alone:
+the frozen guard is not imported, its snapshot not parsed, its warnings and touched repositories not merged, and the
+DEADLINE below does not apply (G1's own budget and guard.py's 15 s timer do).
 
     G1 judges first, without its effects. When it refuses, its answer stands (the 0.0.26 guard is not imported).
+    Class N: G1's finish (evidence writes, then allow) and its answer.
     Otherwise the 0.0.26 guard judges, without its effects. When it refuses, its own message is the answer.
-    Otherwise exactly one finish runs (evidence writes, then allow): G1's, or the 0.0.26 guard's when G1 stopped at a
-    `source` / `.` (what follows it was judged by the 0.0.26 rules only) or stopped early on a limit.
+    Otherwise exactly one finish runs: the 0.0.26 guard's (what follows a source is judged by both, and the evidence
+    is 0.0.26's).
 
 `judge.decide` is `decide` (an alias): the 0.0.26 code runs at the stack depth it had in 0.0.26 (P20-3). Nothing here
 changes a module of the frozen copy except three functions, each wrapped once: its push and commit checks, so that the
-two guards share one run of each within a decision (P20-4: G1 calls the frozen checks themselves, through
-`shared_push` and `shared_commit`), and its snapshot `split_line`, so that a shell line repeated across the snapshot
-files is split once per decision (fix-0029 §1.3; the frozen function still computes every first answer, with its own
-lexer — the two guards never share a parse)."""
+two guards share one run of each within a decision (P20-4; G1 calls its own checks, the same code, through
+`shared_push` and `shared_commit`, fix-0104 §2.4), and its snapshot `split_line`, so that a shell line repeated across
+the snapshot files is split once per decision (fix-0029 §1.3; the frozen function still computes every first answer,
+with its own lexer — the two guards never share a parse)."""
 
 import time
 import types
@@ -56,12 +62,16 @@ def decide(hook, env, fs=None, probe=None, snapshot_loader=None, legacy_snapshot
     t0 = time.monotonic()
     _MEMO.clear()
     _SPLIT.clear()
-    _SPLIT_ON[:] = [True]
     try:
         g_deny, g, complete = judge.decide_g1(hook, env, fs=fs, probe=probe, snapshot_loader=snapshot_loader,
                                               run_finish=False)
         if g_deny is not None:
             return g_deny, g
+        if not g.unread and complete:
+            # fix-0104 §2.4 (class N): G1 judged the whole call — its finish and answer alone; nothing frozen runs
+            limits_mod.disarm()  # fix-0103 §3: a finish writes evidence; it is not cut by the process timer
+            return judge.finish_g1(g, hook), g
+        _SPLIT_ON[:] = [True]  # the frozen snapshot parse of this decision (fix-0029 §1.3): S and L only
         _release(g)
         if time.monotonic() - t0 > DEADLINE:
             g.denies.insert(0, judge.Deny("G-LIMIT", "the command needs more checks than the guard's time allows — "
@@ -84,16 +94,13 @@ def decide(hook, env, fs=None, probe=None, snapshot_loader=None, legacy_snapshot
     if l_deny is not None:
         g.denies = list(lctx.denies)
         return l_deny, g
-    if g.sourced or not complete:
-        # what follows a source (or what G1 did not reach) was judged by the 0.0.26 rules alone: their effects
-        # and allow, exactly as in 0.0.26; G1's effects and candidates are dropped
-        limits_mod.disarm()  # fix-0103 §3: a finish writes evidence; it is not cut by the process timer
-        _legacy_finish(lj, lctx)
-        g.allow = lctx.allow
-        g.denies = list(lctx.denies)
-        return (g.denies[0] if g.denies else None), g
-    limits_mod.disarm()
-    return judge.finish_g1(g, hook), g
+    # class S / L: the 0.0.26 guard's effects and allow, exactly as in 0.0.26 (a call with a source, after effects G1
+    # cannot read, or one G1 did not judge to its end); G1's effects and candidates are dropped
+    limits_mod.disarm()  # fix-0103 §3: a finish writes evidence; it is not cut by the process timer
+    _legacy_finish(lj, lctx)
+    g.allow = lctx.allow
+    g.denies = list(lctx.denies)
+    return (g.denies[0] if g.denies else None), g
 
 
 def _legacy_finish(lj, lctx):
@@ -147,9 +154,10 @@ def _env_key(env):
 
 
 def _install(lp, lc):
-    """Wrap the frozen push.check and commitrule.evaluate once: the two guards ask the same question with the same
-    inputs (the code is the frozen one for both), and the repository does not change in between (the guards run
-    nothing). Keys are every input of the checks; push reads only the words' values (push.parse)."""
+    """Wrap push.check and commitrule.evaluate once (the frozen modules and G1's own, one memo): the two guards ask
+    the same question with the same inputs (the code is the same for both), and the repository does not change in
+    between (the guards run nothing). Keys are every input of the checks; push reads only the words' values
+    (push.parse)."""
     if getattr(lp.check, "_shared", False):
         return
     push_check, commit_eval = lp.check, lc.evaluate
@@ -204,11 +212,20 @@ def _frozen_checks():
     return lp, lc
 
 
+def _own_checks():
+    """fix-0104 §2.4: G1's own push and commit checks (the frozen copies' code, textually: the FROZEN header and the
+    import dots aside), wrapped with the same memo — a class N call imports nothing frozen, and a class S call runs
+    each git probe once for both guards."""
+    from . import commitrule as gc, push as gp
+    _install(gp, gc)
+    return gp, gc
+
+
 def shared_push(worktree, env, args, internal_ids):
-    """G1's push check: the frozen 0.0.26 one (shared with the 0.0.26 guard within this decision)."""
-    return _frozen_checks()[0].check(worktree, env, args, internal_ids)
+    """G1's push check (shared with the 0.0.26 guard within this decision)."""
+    return _own_checks()[0].check(worktree, env, args, internal_ids)
 
 
 def shared_commit(worktree, env, extra_env, opts, plugin_scripts=None):
-    """G1's commit check: the frozen 0.0.26 one (shared with the 0.0.26 guard within this decision)."""
-    return _frozen_checks()[1].evaluate(worktree, env, extra_env, opts, plugin_scripts=plugin_scripts)
+    """G1's commit check (shared with the 0.0.26 guard within this decision)."""
+    return _own_checks()[1].evaluate(worktree, env, extra_env, opts, plugin_scripts=plugin_scripts)
