@@ -24,6 +24,7 @@ What still holds, and how:
 
 Design and review record: design/guild/local-dev-agent-mode.md (sdd-plugin, not shipped).
 """
+import difflib
 import fcntl
 import hashlib
 import http.client
@@ -45,7 +46,9 @@ FIT_MARGIN_AGENT = 2000
 KEEP_RECENT = 2              # tool results never elided
 LOW_WATER = 0.6              # elide down to this share of the limit in one go
 STUCK_TURNS = 6
-EDIT_MISS_LIMIT = 6
+EDIT_MISS_LIMIT = 8           # per file, per segment (a restart resets it)
+MIN_SUFFIX = 2000            # a restart that cannot carry this much of where it stands is blind
+PRIOR_CHARS = 4000           # a failed one-shot attempt's diff, carried into an escalated job
 EDITS_BEFORE_CHECK = 3
 CALLS_PER_TURN = 8           # tool calls run from one reply; the rest are refused
 HOLD_S = 900                 # an unattended job yields the model after this long
@@ -67,6 +70,8 @@ Rules:
 with `read_file`, change them with `edit_file` (its `search` text must be copied from what you \
 just read — exactly, once in the file), then call `run_tests`. When the tests pass you are done.
 - After an edit, line numbers below it move: rely on what `edit_file` returned, or read again.
+- If the tests cannot pass because of something outside the editable files, say so with
+`report_blocker` (it is refused unless the checks show it).
 - Answer with tool calls. Keep any prose short."""
 
 
@@ -89,6 +94,10 @@ TOOLS = [
         {"path": {"type": "string"}, "search": {"type": "string"}, "replace": {"type": "string"},
          "near_line": {"type": "integer"}}, ["path", "search", "replace"]),
     _fn("run_tests", "Run the lint and the new tests against the current files.", {}, []),
+    _fn("report_blocker", "Only when the tests cannot pass because of something outside the files "
+        "you may edit (the test setup, a runner or config error that was there before your "
+        "edits). Ends your work with your diagnosis. Refused unless the checks show it.",
+        {"reason": {"type": "string"}, "evidence": {"type": "string"}}, ["reason", "evidence"]),
 ]
 SCHEMA = {t["function"]["name"]: t["function"]["parameters"] for t in TOOLS}
 DENY = (".git", os.path.join(".claude", "guild", "memory"))
@@ -260,7 +269,7 @@ def read_text(repo, rel):
         return fh.read()
 
 
-def initial_user(ld, repo, job, persona=None, bodies=None):
+def initial_user(ld, repo, job, persona=None, bodies=None, label=None):
     """The task message. `bodies` — the --files as they were at start — is passed once the job
     runs, so a rebuild (the persona dropped) still shows what its label says."""
     parts = [f"## Task\nIssue #{job['issue']} — implement against the skeleton so the new tests "
@@ -281,11 +290,11 @@ def initial_user(ld, repo, job, persona=None, bodies=None):
     for f, body in bodies.items():
         n = body.count("\n") + (0 if body.endswith("\n") or not body else 1)
         if total <= INLINE_CHARS:
-            parts.append(f"## {f} ({n} lines) — content at the start; after an edit use "
-                         f"read_file for the current text\n```\n{body}\n```")
+            parts.append(f"## {f} ({n} lines) — content {label or 'at the start'}; after an edit "
+                         f"use read_file for the current text\n```\n{body}\n```")
         else:
-            parts.append(f"## {f} ({n} lines at the start) — outline (read_file the parts you "
-                         f"need)\n" + outline_text(body, OUTLINE_CAP))
+            parts.append(f"## {f} ({n} lines {label or 'at the start'}) — outline (read_file the "
+                         f"parts you need)\n" + outline_text(body, OUTLINE_CAP))
     return "\n\n".join(parts)
 
 
@@ -423,6 +432,7 @@ class Scope:
         self.s0 = {}
         self.s1 = {}
         self.artifacts = set()
+        self.s1_taken = False
         self.moved, self.out_of_scope, self.unrestored = [], [], []
 
     def _paths(self):
@@ -431,7 +441,8 @@ class Scope:
 
     def save(self):
         with open(os.path.join(self.jd, "scope.json"), "w", encoding="utf-8") as fh:
-            json.dump({"s1": self.s1, "artifacts": sorted(self.artifacts), "moved": self.moved,
+            json.dump({"s0": self.s0, "s1": self.s1, "s1_taken": self.s1_taken,
+                       "artifacts": sorted(self.artifacts), "moved": self.moved,
                        "out_of_scope": self.out_of_scope, "unrestored": self.unrestored}, fh)
 
     @classmethod
@@ -442,7 +453,9 @@ class Scope:
         sc = cls(ld, repo, jd, job)
         with open(path, encoding="utf-8") as fh:
             d = json.load(fh)
+        sc.s0 = d.get("s0") or {}
         sc.s1 = {k: tuple(v) for k, v in d["s1"].items()}
+        sc.s1_taken = bool(d.get("s1_taken"))
         sc.artifacts = set(d["artifacts"])
         sc.moved, sc.out_of_scope = d["moved"], d["out_of_scope"]
         sc.unrestored = d.get("unrestored", [])
@@ -450,6 +463,7 @@ class Scope:
 
     def before_baseline(self):
         self.s0 = self._paths()
+        self.save()                        # an auto job takes S0 before its one-shot part
 
     def after_baseline(self):
         for p, k in self._paths().items():
@@ -462,6 +476,7 @@ class Scope:
                 dst = os.path.join(self.jd, "s1", p)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(full, dst)
+        self.s1_taken = True
         self.save()
 
     def _move(self, p):
@@ -550,7 +565,7 @@ class Scope:
 def settle_scope(ld, repo, jd, job):
     """For `settle_dead`: the dead agent worker's last check may have left writes behind."""
     sc = Scope.load(ld, repo, jd, job)
-    if sc is None:
+    if sc is None or not sc.s1_taken:      # died before its reference existed: nothing to compare
         return
     sc.check(act=False)                    # listed for a human (restore_failed), never acted on
     record(job, sc)
@@ -607,6 +622,12 @@ class Tools:
             return f"error: unknown tool {name!r} — use one of {', '.join(SCHEMA)}", False, None
         if name == "run_tests":            # the tool's own check: a failure there is the
             return self.t_run_tests()      # worker's (worker_error), not the model's
+        if name == "report_blocker":
+            try:
+                kw = coerce(name, SCHEMA[name]["properties"], args)
+            except BadArg as exc:
+                return f"error: {name}: {exc}", False, None
+            return self.t_report_blocker(**kw)
         try:
             kw = coerce(name, SCHEMA[name]["properties"], args)
             return getattr(self, "t_" + name)(**kw)
@@ -800,6 +821,9 @@ class Tools:
     def t_run_tests(self):
         return self.run.check(intermediate=True)
 
+    def t_report_blocker(self, reason, evidence):
+        return self.run.blocker(reason, evidence)
+
 
 # --------------------------------------------------------------------------- the loop
 
@@ -820,8 +844,26 @@ def check_signature(outcome, out):
     return outcome, hashlib.sha256(TIME_RE.sub("", tail).encode()).hexdigest()
 
 
+LOAD_RE = re.compile(r"Failed to load|failed to compile|Compilation failed|No tests (?:ran|found|were "
+                     r"found)|\b0 tests?\b|Tests:\s+0 total|Test suite failed to run|Cannot find "
+                     r"module|ImportError|ModuleNotFoundError|SyntaxError|Error: Could not", re.I)
+LOC_RE = re.compile(r"((?:file://)?(?:[\w.@~+-]*/)*[\w.@+-]+\.\w{1,8}):\d+(?::\d+)?[:\s]+(.*)")
+# a located line counts as an error only with an error marker of its own — never a stack or
+# traceback frame (`at f (<file>:<line>:<col>)`, `<file>:<line>: in <module>`, `#3  main (…)`)
+ERR_MARK = re.compile(r"\b(?:error|Error|ERROR)\b|error TS\d+|^E\s")
+FRAME = re.compile(r"^\s*(?:at\s|#\d+\s)|:\s*in\s<|\(\S+:\d+:\d+\)\s*$")
+
+
+def cut_middle(text, n):
+    """`text` within n chars, keeping its head and its tail."""
+    if len(text) <= n:
+        return text
+    h = max(0, n // 2 - 20)
+    return text[:h] + "\n… [cut] …\n" + text[len(text) - (n - h - 12):] if n > 40 else text[:n]
+
+
 class Run:
-    def __init__(self, ld, worker):
+    def __init__(self, ld, worker, prior=None):
         self.ld, self.w = ld, worker
         self.cfg, self.job, self.repo, self.jd = worker.cfg, worker.job, worker.repo, worker.jd
         self.messages = []
@@ -834,12 +876,21 @@ class Run:
         if self.job.get("persona_path"):
             with open(os.path.join(self.repo, self.job["persona_path"]), encoding="utf-8") as fh:
                 self.persona = fh.read()
+        self.prior = ("## A previous one-shot attempt (failed) — for reference only\n```diff\n"
+                      + cut_middle(prior, PRIOR_CHARS) + "\n```") if prior else ""
         self.bodies = None
+        self.label = None
+        self.suffix = ""
+        self.seg = 1
+        self.restarts = 0
+        self.no_restart = False
+        self.history = []                  # every agent check: {seg, sig, digest, out}
+        self.refusals = 0
         self.last_sig = None
         self.checked_digest = None
         self.n_check = 0
         self.turn = 0
-        self.ended = None                  # (state, reason) once a check decides the job
+        self.ended = None                  # (state, reason) once a check or a blocker decides
 
     # ---- messages
     def add(self, msg):
@@ -855,6 +906,20 @@ class Run:
 
     def wire(self):
         return [{k: v for k, v in m.items() if not k.startswith("_")} for m in self.messages]
+
+    def first_message(self, suffix=None):
+        parts = [initial_user(self.ld, self.repo, self.job, self.persona, self.bodies, self.label)]
+        if self.prior:
+            parts.append(self.prior)
+        suffix = self.suffix if suffix is None else suffix
+        if suffix:
+            parts.append(suffix)
+        return "\n\n".join(parts)
+
+    def start_segment(self):
+        self.messages = []
+        self.add({"role": "system", "content": AGENT_SYSTEM})
+        self.add({"role": "user", "content": self.first_message()})
 
     def fit(self):
         high = self.cfg["num_ctx"] - self.cfg["max_output_tokens"] - FIT_MARGIN_AGENT
@@ -885,10 +950,9 @@ class Run:
                                       f"+{str(a.get('replace', '')).count(chr(10)) + 1} lines"}
                     elided += 1
         if est_tokens(self.ld, self.messages) > low and self.persona:
-            self.persona = None
+            self.persona = None            # the restart suffix and the prior stay: first_message()
             self.job["persona"] = "dropped"
-            self.messages[1]["content"] = initial_user(self.ld, self.repo, self.job,
-                                                       bodies=self.bodies)
+            self.messages[1]["content"] = self.first_message()
             elided += 1
         return est_tokens(self.ld, self.messages) <= high, elided
 
@@ -945,7 +1009,7 @@ class Run:
         with open(os.path.join(self.jd, f"checks{self.n_check}.txt"), "w", encoding="utf-8") as fh:
             fh.write(out)
         rec = {"n": self.n_check, "outcome": outcome, "intermediate": intermediate,
-               "started": self.ld.now_iso()}
+               "seg": self.seg, "started": self.ld.now_iso()}
         if outcome != "pass":
             rec["error"] = out[-self.ld.EXCERPT_CHARS:]
         self.job["attempts"].append(rec)
@@ -961,6 +1025,9 @@ class Run:
         if self.scope.unrestored:
             self.ended = ("fallback", "restore_failed")
         sig = check_signature(outcome, out)
+        # (L)'s evidence is parsed now, from the whole output — the stored text is only a tail
+        self.history.append({"seg": self.seg, "sig": sig, "digest": self.checked_digest,
+                             "out": out[-20000:], "pairs": self.load_pairs(out)})
         progress = sig != self.last_sig
         self.last_sig = sig
         note = (f"\n[files created outside the editable set were moved away: {', '.join(moved)}]"
@@ -978,14 +1045,151 @@ class Run:
             return "out_of_scope_write", out + f"\n[changed outside the editable set: {bad}]", moved
         return outcome, out, moved
 
+    # ---- report_blocker
+    def load_pairs(self, out):
+        """(normalised message, repo path) of each located error line — only paths that are
+        tracked files of this repo outside --files and every --tests entry."""
+        real = os.path.realpath(self.repo)
+        own = set(self.job["files"]) | set(self.job["tests"])
+        pairs = set()
+        lines = out.splitlines()
+        for i, line in enumerate(lines):
+            m = LOC_RE.search(line)
+            if not m or FRAME.search(line) or not ERR_MARK.search(line):
+                continue
+            # the load failure must be this error's own: on its line or the three before it
+            if not any(LOAD_RE.search(l) for l in lines[max(0, i - 3):i + 1]):
+                continue
+            path = m.group(1)
+            if path.startswith("file://"):
+                path = path[len("file://"):]
+            if os.path.isabs(path):
+                rp = os.path.realpath(path)
+                if not rp.startswith(real + os.sep):
+                    continue
+                path = os.path.relpath(rp, real)
+            path = os.path.normpath(path)
+            if path in own or path.startswith("..") or not tracked(self.repo, path):
+                continue
+            msg = re.sub(r"\d+", "N", m.group(2).strip())[:200]
+            if msg:
+                pairs.add((msg, path))
+        return pairs
+
+    def blocker_holds(self):
+        """'L' / 'P' when the record shows a wall the model cannot move, else None."""
+        if not self.history:
+            return None
+        last = self.history[-1]
+        if last["pairs"]:                  # (L) a wall that was there before any edit
+            try:
+                with open(os.path.join(self.jd, "baseline.checks.txt"), encoding="utf-8") as fh:
+                    base = self.load_pairs(fh.read())
+            except OSError:
+                base = set()
+            for pair in last["pairs"] & base:
+                if any(h["digest"] != last["digest"] and pair in h["pairs"]
+                       for h in self.history[:-1]):
+                    return "L"
+        if self.seg > 1:                   # (P) the same failure however the files change
+            cur = [h for h in self.history if h["seg"] == self.seg][-3:]
+            if len(cur) == 3 and len({h["sig"] for h in cur}) == 1 \
+                    and len({h["digest"] for h in cur}) >= 2:
+                return "P"
+        return None
+
+    def blocker(self, reason, evidence):
+        checked = ""
+        if self.ld.files_digest(self.repo, self.job["files"]) != self.checked_digest:
+            text, _, _ = self.check(intermediate=True)    # judge on the files as they are
+            if self.ended:
+                return text, True, None
+            checked = "\n\nThe check just run on your current files:\n" + text
+        kind = self.blocker_holds()
+        if kind is None:
+            self.refusals += 1
+            if self.refusals == 1:
+                return ("refused: report_blocker is accepted only when (a) a load/compile error "
+                        "at a path outside the editable files and the tests was already in the "
+                        "baseline run and survived your edits, or (b) after a restart, the last "
+                        "three checks fail the same way although the files changed. Keep "
+                        "working on the editable files." + checked), False, None
+            return "refused — keep working on the editable files." + checked, False, None
+        self.job["blocker"] = {"reason": reason[:2000], "evidence": evidence[:2000],
+                               "signature": str(self.history[-1]["sig"])[:300], "kind": kind}
+        self.ended = ("fallback", "blocked")
+        return "accepted — your diagnosis is handed on.", True, None
+
+    # ---- restart
+    def where_you_are(self, budget_tokens):
+        diffs = []
+        for f in self.job["files"]:
+            try:
+                with open(os.path.join(self.jd, "originals", f), encoding="utf-8") as fh:
+                    a = fh.read().splitlines(keepends=True)
+            except (OSError, UnicodeDecodeError):
+                a = []
+            b = read_text(self.repo, f).splitlines(keepends=True)
+            diffs.append("".join(difflib.unified_diff(a, b, "a/" + f, "b/" + f)))
+        diff = "".join(diffs) or "(no change yet)"
+        tail = self.history[-1]["out"][-self.ld.FEEDBACK_CHARS:] if self.history else "(no check yet)"
+        k = self.restarts + 1
+        head = (f"## Where you are (restart {k} of {self.cfg['max_restarts']})\n"
+                "The files above are as they are now. Your edits so far, against the files before "
+                "you started:\n```diff\n")
+        mid, tail_head = "\n```\n\nThe last check said:\n```\n", "\n```"
+        dn, tn = len(diff), len(tail)
+        while True:
+            text = head + cut_middle(diff, dn) + mid + cut_middle(tail, tn) + tail_head
+            cut = dn < len(diff) or tn < len(tail)
+            if self.ld.estimate_tokens(text) <= budget_tokens:
+                # cut down below MIN_SUFFIX, it no longer says where the work stands
+                return "" if cut and len(text) < MIN_SUFFIX else text
+            if dn < 200 and tn < 200:
+                return ""
+            if dn >= 200:                  # the diff gives way first, then the check's tail
+                dn = dn * 2 // 3
+            else:
+                tn = tn * 2 // 3
+
+    def restart(self):
+        """A fresh conversation on the same job: same scope, same files, same attempts."""
+        if self.restarts >= self.cfg["max_restarts"] or \
+                self.w.budget() < 0.25 * self.cfg["total_timeout_min"] * 60:
+            return False
+        bodies, label = self.bodies, self.label
+        self.bodies = {f: read_text(self.repo, f) for f in self.job["files"]}
+        self.label = f"now (restart {self.restarts + 1})"
+        base = est_tokens(self.ld, [{"role": "system", "content": AGENT_SYSTEM},
+                                    {"role": "user", "content": self.first_message(suffix="")}])
+        slack = self.cfg["num_ctx"] - base - self.cfg["max_output_tokens"] - reserve(self.ld)
+        suffix = self.where_you_are(slack) if slack > 0 else ""
+        if not suffix:
+            self.bodies, self.label = bodies, label
+            return False
+        self.suffix = suffix
+        self.restarts += 1
+        self.seg += 1
+        self.job["restarts"] = self.restarts
+        self.tools.reads, self.tools.ranges = {}, set()
+        self.tools.edit_misses, self.tools.edits_since_check = {}, 0
+        self.last_sig, self.ended, self.refusals = None, None, 0
+        self.start_segment()
+        return True
+
     # ---- main
+    def final_check(self, state, reason):
+        """The last edit was never checked — it may pass."""
+        if state == "fallback" and reason in ("max_turns", "stuck", "context_overflow") \
+                and not self.ended \
+                and self.ld.files_digest(self.repo, self.job["files"]) != self.checked_digest:
+            self.check(intermediate=False)
+            if self.ended:
+                return self.ended
+        return state, reason
+
     def end(self, state, reason=None):
         self.release()
-        if state == "fallback" and reason in ("max_turns", "stuck") and not self.ended \
-                and self.ld.files_digest(self.repo, self.job["files"]) != self.checked_digest:
-            self.check(intermediate=False)  # the last edit was never checked — it may pass
-            if self.ended:
-                state, reason = self.ended
         if self.job["attempts"]:
             self.job["attempts"][-1]["intermediate"] = False
         self.scope.finish()
@@ -996,47 +1200,62 @@ class Run:
         w = self.w
         self.job["state"] = "running"
         w.save()
-        self.scope.before_baseline()
+        if self.job.get("escalated_from"):  # S0 was taken before the one-shot part
+            saved = Scope.load(self.ld, self.repo, self.jd, self.job)
+            self.scope.s0 = saved.s0 if saved else {}
+        else:
+            self.scope.before_baseline()
         reason = w.baseline()
         if reason:
             return self.end("fallback", reason)
         if self.ld.restore_changed_tests(self.repo, self.jd, self.job["tests"]):
             return self.end("fallback", "tests_modified")
         self.scope.after_baseline()
+        if self.job.get("escalated_from"):  # only now is it an agent job a settler can scope
+            self.job["mode"] = "agent"
+            w.save()
         self.checked_digest = self.ld.files_digest(self.repo, self.job["files"])
         self.bodies = {f: read_text(self.repo, f) for f in self.job["files"]}
-        self.job["turns"] = []
-        self.add({"role": "system", "content": AGENT_SYSTEM})
-        self.add({"role": "user", "content": initial_user(self.ld, self.repo, self.job,
-                                                         self.persona, self.bodies)})
+        self.job.setdefault("turns", [])
+        self.start_segment()
+        while True:
+            state, reason = self.segment()
+            state, reason = self.final_check(state, reason)
+            if state == "fallback" and reason in ("max_turns", "stuck", "context_overflow") \
+                    and not self.no_restart and self.restart():
+                continue
+            return self.end(state, reason)
+
+    def segment(self):
+        """One conversation: (state, reason) when it ends."""
+        w = self.w
         idle, timeouts = 0, 0
         for n in range(1, self.cfg["max_turns"] + 1):
             self.turn = n
             ok, elided = self.fit()
             if not ok:
-                self.job["turns"].append({"n": n, "outcome": "context_overflow", "elided": elided})
-                return self.end("fallback", "context_overflow")
+                self.job["turns"].append({"n": n, "seg": self.seg, "outcome": "context_overflow",
+                                          "elided": elided})
+                return "fallback", "context_overflow"
             d, err, secs = self.call_model()
             w.active += secs
-            turn = {"n": n, "gen_s": round(secs, 1), "think": self.think, "elided": elided}
+            turn = {"n": n, "seg": self.seg, "gen_s": round(secs, 1), "think": self.think,
+                    "elided": elided}
             self.job["turns"].append(turn)
             if err == "total_timeout":
                 turn["outcome"] = err
-                return self.end("fallback", err)
+                return "fallback", err
             if d is None:
                 turn["outcome"] = err.split(":")[0]
                 timeouts += 1
                 if timeouts >= 2:
-                    return self.end("fallback", "attempt_timeout" if err == "attempt_timeout"
-                                    else "model_error")
+                    return "fallback", ("attempt_timeout" if err == "attempt_timeout"
+                                        else "model_error")
                 self.think = False
                 self.feedback(f"The previous call failed ({err}). Answer more briefly — one "
                               "tool call.")
-                idle += 1
-                if idle >= STUCK_TURNS:
-                    return self.end("fallback", "stuck")
-                continue
-            timeouts = 0
+                continue                   # two failures in a row end the job above
+            timeouts = 0                   # the model answers: scattered call failures reset
             msg = d.get("message") or {}
             content = msg.get("content") if isinstance(msg.get("content"), str) else ""
             thinking = msg.get("thinking") if isinstance(msg.get("thinking"), str) else ""
@@ -1076,7 +1295,7 @@ class Run:
                     else:
                         t0 = time.monotonic()
                         text, prog, key = self.tools.call(name, f.get("arguments") or {})
-                        if name != "run_tests":        # checks count their own time
+                        if name not in ("run_tests", "report_blocker"):   # checks count their own
                             w.active += time.monotonic() - t0
                     i = self.add({"role": "tool", "content": text,
                                   "tool_name": name if isinstance(name, str) else "?"})
@@ -1084,20 +1303,20 @@ class Run:
                         self.tools.reads[key] = (i, n)
                     progress = progress or prog
                     if self.ended:
-                        return self.end(*self.ended)
+                        return self.ended
                 if self.tools.edits_since_check >= EDITS_BEFORE_CHECK:
                     text, prog, _ = self.check(intermediate=True)
                     self.feedback("(checks run automatically after several edits)\n" + text)
                     progress = progress or prog
                     if self.ended:
-                        return self.end(*self.ended)
+                        return self.ended
             else:
                 if content.strip():
                     self.add({"role": "assistant", "content": content})
                 if self.ld.files_digest(self.repo, self.job["files"]) != self.checked_digest:
                     text, prog, _ = self.check(intermediate=False)
                     if self.ended:
-                        return self.end(*self.ended)
+                        return self.ended
                     self.feedback("The checks are still red:\n" + text
                                   + "\n\nContinue with the tools.")
                     progress = prog
@@ -1108,19 +1327,19 @@ class Run:
             w.save()
             if idle >= STUCK_TURNS or any(v >= EDIT_MISS_LIMIT
                                           for v in self.tools.edit_misses.values()):
-                return self.end("fallback", "stuck")
+                return "fallback", "stuck"
             if w.budget() <= 0:
-                return self.end("fallback", "total_timeout")
-        return self.end("fallback", "max_turns")
+                return "fallback", "total_timeout"
+        return "fallback", "max_turns"
 
 
-def run(worker, ld):
-    r = Run(ld, worker)
+def run(worker, ld, prior=None):
+    r = Run(ld, worker, prior)
     try:
         return r.run()
     except Exception:
         try:                               # what the crashed turn's checks left behind
-            if r.scope.s1 or r.scope.artifacts:
+            if r.scope.s1_taken:
                 r.scope.check()
                 r.scope.finish()
                 record(r.job, r.scope)

@@ -44,6 +44,10 @@ INSTALL_CMDS=(<INSTALL_CMDS>)
 # the default branch opens its PR as a draft, and `/gld sprint sync` readies it after its base
 # merged. Literal 0/1 from render_supervisor.py.
 DRAFT_STACKED=<DRAFT_STACKED>
+# 1 = `config.sprint.stage_groups`: each member runs as up to three grouped sessions
+# (analyze+design | execute | test+qa — dev.md "Grouped sessions") instead of one session for
+# the whole spine, so a later group does not carry an earlier one's context. Literal 0/1.
+STAGE_GROUPS=<STAGE_GROUPS>
 
 # ── Board projection config (03-sprint-board.md §7.2) ────────────────────────
 # ⚠ THESE TEN VALUES NEVER TOUCH SHELL SOURCE. They come from `config.sprint.board`, i.e. from
@@ -1059,6 +1063,28 @@ record_event()   { _record "$1" "$2" "$3" ""; }
 # the next PR stacks on top of broken work.
 record_failure() { _record "$1" "$2" "$3" "$D/failed.txt"; }
 
+# stage_of — the spine stage named in a `guild:` label list (empty when none / unreadable).
+stage_of() {
+  case ",$1," in
+    *,guild:analyze,*) echo analyze ;; *,guild:design,*) echo design ;;
+    *,guild:execute,*) echo execute ;; *,guild:test,*) echo test ;; *,guild:qa,*) echo qa ;;
+    *) echo "" ;;
+  esac
+}
+
+# loopback_mark — "<blocks>/<consumed>" of the Issue's loop-back record, so a grouped session
+# that sent work back (or completed an interrupted loop-back) reads as progress although its
+# start and end labels match. Empty when the read fails — and empty is never progress.
+loopback_mark() {
+  local body
+  body="$(gh api --paginate "repos/$OWNER_REPO/issues/$1/comments" \
+    --jq '.[] | select((.body // "") | contains("<!-- guild:loopback -->")) | .body' 2>/dev/null)" || return 0
+  # `^### loopback` also counts `### loopback-reset` — on purpose: this is change detection, not
+  # the cap count (§B counts active blocks itself), and a reset is a change.
+  printf '%s/%s\n' "$(printf '%s\n' "$body" | grep -c '^### loopback')" \
+    "$(printf '%s\n' "$body" | grep -c '^consumed:')"
+}
+
 # children_pending <parent> — how many of this parent's children are NOT yet guild:done.
 # Used as the progress signal for a mid-orchestration split. Prints a number, always.
 # ⚠ Prints a NUMBER or `-1`, never an empty string. `|| echo 0` only covers a non-zero exit;
@@ -2052,6 +2078,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   # A value no child count can equal, so the first pass always reads as progress without
   # SPLIT_PREV having to double as a sentinel (that dual role was BLOCKER B1).
   SPLIT_PREV=999999; SPLIT_STALL=0; SPLIT_PASSES=0
+  GSESS=0; G_START=""; G_LB=""
   RETRIES="$(ledger_get "retries.$ISSUE" 0)"
   echo "[$PROCESSED/$TOTAL] Issue #$ISSUE → base $BASE_REF → $WT"
 
@@ -2081,7 +2108,39 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     # measured above ten minutes run in the foreground instead of having nowhere to go.
     SPRINT_DRAFT=0
     if [ "$DRAFT_STACKED" = 1 ] && [ "$BASE_REF" != "origin/$DEFAULT_BRANCH" ]; then SPRINT_DRAFT=1; fi
+    STAGE_SCOPE=""
+    if [ "${STAGE_GROUPS:-0}" = 1 ]; then
+      STAGE_SCOPE=group
+      # A member's later groups are new sessions, possibly hours later: each one starts inside the
+      # approved window (INV1) — waiting HERE, in place, never requeued (re-popping would redo
+      # PROCESSED, the base decision and the install, and reset this member's counters).
+      # Every grouped launch — rate-limit retries included — starts inside the window.
+      if [ -n "${WIN_START:-}" ] && ! in_window; then
+        # Same shape as wait_for_window (which stays the ONE wait before a pop): the strike
+        # budget first, one heartbeat before the first sleep, short TERM-friendly chunks.
+        echo "  ⏸ Issue #$ISSUE — next group waits for the run window ($WIN_RAW). Stop with: kill $$"
+        MARKER_FAILS=0; MARKER_MAX="$WAIT_MARKER_MAX"
+        heartbeat "waiting-for-window-$WIN_TOKEN"
+        G_N=0
+        while ! in_window; do
+          sleep "$WAIT_CHUNK"; G_N=$((G_N + 1))
+          if [ "$((G_N % 10))" -eq 0 ]; then heartbeat "waiting-for-window-$WIN_TOKEN"; fi
+        done
+        MARKER_MAX=3; MARKER_FAILS=0
+        # a long wait can outlive a $TMPDIR container — the same re-check as wait_for_window
+        if ! ensure_container || [ ! -d "$WT" ]; then
+          HALT_REASON="container-lost"
+          marker_write "halted:container-lost" 2>/dev/null || true
+          exit 1
+        fi
+        heartbeat "running"
+      fi
+      G_START="$(stage_of "$(gh issue view "$ISSUE" --repo "$OWNER_REPO" --json labels \
+        --jq '[.labels[].name] | map(select(startswith("guild:"))) | join(",")' 2>/dev/null || true)")"
+      G_LB="$(loopback_mark "$ISSUE")"
+    fi
     ( cd "$WT" && GLD_UNATTENDED=1 GLD_SPRINT_BASE="$BASE_REF" GLD_SPRINT_DRAFT="$SPRINT_DRAFT" \
+        GLD_STAGE_SCOPE="$STAGE_SCOPE" \
         CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
         BASH_DEFAULT_TIMEOUT_MS=600000 BASH_MAX_TIMEOUT_MS=3600000 \
         claude -p --verbose --output-format stream-json --dangerously-skip-permissions \
@@ -2212,6 +2271,12 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       STATE=$(gh issue view "$ISSUE" --repo "$OWNER_REPO" --json labels \
         --jq '[.labels[].name] | map(select(startswith("guild:"))) | join(",")' 2>/dev/null || true)
     fi
+    # Grouped sessions: one index row per session — every exit, terminal ones included — for the
+    # per-group cost measurement (attempt, start stage, end labels, exit code, rate limited, log).
+    if [ "${STAGE_GROUPS:-0}" = 1 ]; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$ATTEMPT" "${G_START:-?}" "${STATE:-?}" "$EXIT_CODE" \
+        "${RATE_LIMITED:-0}" "$LOG" >> "$RUNDIR/groups-${ISSUE}.tsv" 2>/dev/null || true
+    fi
     # Priority gate: a member that reached a terminal label BEATS a rate limit found in its log.
     # ⚠ One arm, two patterns, and a SPACE before the closing paren. Without that space this
     # arm's text is byte-identical to an arm literal further down, and `arms.py` requires each
@@ -2286,6 +2351,29 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       # .sh cannot use that jq projection, so the rule appears here as `case` ordering:
       # guild:needs-human MUST be tested BEFORE guild:done AND guild:children, because bash
       # `case` fires the FIRST matching arm and those labels coexist on one Issue.
+      #
+      # Grouped sessions (STAGE_GROUPS=1): a session that moved the member to another mid-spine
+      # stage — or wrote/consumed a loop-back block — PROGRESSED: next group, no re-resume
+      # counted, no ledger retry. Terminal, paused and split states fall through to the arms
+      # below unchanged. Bounded by 12 grouped sessions per member. An unreadable start label
+      # or loop-back record is never progress.
+      if [ "${STAGE_GROUPS:-0}" = 1 ] && [[ "$STATE" != *guild:needs-human* ]] \
+          && [[ "$STATE" != *guild:done* ]] && [[ "$STATE" != *guild:children* ]]; then
+        GSESS=$((GSESS + 1))
+        G_NOW="$(stage_of "$STATE")"; G_LB_NOW="$(loopback_mark "$ISSUE")"
+        if [ -n "$G_START" ] && [ -n "$G_NOW" ] && { [ "$G_NOW" != "$G_START" ] \
+            || { [ -n "$G_LB" ] && [ -n "$G_LB_NOW" ] && [ "$G_LB_NOW" != "$G_LB" ]; }; }; then
+          if [ "$GSESS" -lt 12 ]; then      # the 12th session is the last one started
+            echo "  ↦ Issue #$ISSUE group session $GSESS: $G_START → $G_NOW — next group"
+            RESUME_TRIES=0
+            continue
+          fi
+          echo "  ⚠ Issue #$ISSUE INCOMPLETE (12 grouped sessions without finishing)"
+          record_failure "$ISSUE" incomplete-mid-spine "12 grouped sessions, stopped at $G_NOW"
+          board_col "$ISSUE" blocked failed:incomplete-mid-spine   # P4
+          INCOMPLETE=$((INCOMPLETE + 1)); INCOMPLETE_ISSUES+=("#$ISSUE (${G_NOW})"); break
+        fi
+      fi
       case "$STATE" in
         *guild:needs-human*)
           echo "  ⏸ Issue #$ISSUE paused (needs-human)"; PAUSED=$((PAUSED + 1))

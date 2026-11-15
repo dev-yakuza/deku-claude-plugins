@@ -413,7 +413,7 @@ inside its own worktree.
    rejection is the second safety net behind it, not the remedy.
 
    ```bash
-   python3 <<SKILL_DIR>>/commands/atoms/render_supervisor.py --tracker <tracker> --owner-repo <owner/repo> --default-branch <branch> --container <container> --human-repo <abs path of the human's checkout> --dag-path <<SKILL_DIR>>/commands/atoms/sprint_dag.py --order <n> --order <n> --install-cmd <cmd> [--draft-stacked]
+   python3 <<SKILL_DIR>>/commands/atoms/render_supervisor.py --tracker <tracker> --owner-repo <owner/repo> --default-branch <branch> --container <container> --human-repo <abs path of the human's checkout> --dag-path <<SKILL_DIR>>/commands/atoms/sprint_dag.py --order <n> --order <n> --install-cmd <cmd> [--draft-stacked] [--stage-groups]
    ```
 
    | Argument | Value |
@@ -425,6 +425,7 @@ inside its own worktree.
    | `--container` | `<repo-parent>/.gld-<repo-basename>-sprint-<tracker>` (repo name included so two sibling repos with the same sprint number cannot collide — a worktree registers by basename) |
    | `--human-repo` | absolute path of the human's checkout. The output path is **assembled** from this plus `--tracker`; there is no `--out <path>` form. Rejected if it is **not absolute** (the supervisor never `cd`s and is launched in the background, so a relative value would resolve the board/window conf and log dir against an inherited cwd) or **not an existing directory**. Both are typo guards, not containment — the same model call supplies the value |
    | `--dag-path` | absolute path of `commands/atoms/sprint_dag.py` |
+   | `--stage-groups` | present when `config.sprint.stage_groups` is `true`: each member runs as up to three grouped sessions (analyze+design · execute · test+qa — `dev.md` Phase 2 *Grouped sessions*) instead of one session for the whole spine, so a later group does not carry an earlier one's context. The supervisor waits for the window before each later group, counts a stage change (or a new loop-back record) as progress, and stops a member at 12 grouped sessions |
    | `--draft-stacked` | present **only** when the tracker's 상한 근거 is `squash-sync` (Phase 0). The supervisor then sets `GLD_SPRINT_DRAFT=1` for a member whose base is not the default branch, and the spine opens that PR as a draft (`_execute_spine.md` Step 5) |
    | `--install-cmd` | **repeated once per command** from `config.commands`, passed **raw and unquoted** — the renderer applies `shlex.quote`. ⚠ **Do not pre-quote.** A pre-quoted `'yarn install'` becomes `''\''yarn install'\'''` and the template's `eval "$IC"` then looks for a command literally named `yarn install`. Zero occurrences renders `INSTALL_CMDS=()`. Each value must be a **simple command** — `init.md:163` normalizes `config.commands` so they MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections, and that normalization is the whole reason the template's `eval "$IC"` is safe; the renderer re-checks **that list and only that list** |
 

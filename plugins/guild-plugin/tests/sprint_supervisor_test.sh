@@ -5032,5 +5032,39 @@ if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   exit 1
 fi
 
+# ── G: grouped sessions (config.sprint.stage_groups) ─────────────────────────
+echo "== G. grouped sessions =="
+GR="$("$PY" "$RS" --tracker 98 --human-repo "$RSH" --out - $(rsbase) 2>/dev/null | grep -E '^STAGE_GROUPS=')"
+[ "$GR" = "STAGE_GROUPS=0" ] && ok "G1: default render → STAGE_GROUPS=0" || bad "G1 default" "STAGE_GROUPS=0" "$GR"
+GR="$("$PY" "$RS" --tracker 98 --human-repo "$RSH" --out - $(rsbase) --stage-groups 2>/dev/null | grep -E '^STAGE_GROUPS=')"
+[ "$GR" = "STAGE_GROUPS=1" ] && ok "G1: --stage-groups → STAGE_GROUPS=1" || bad "G1 flag" "STAGE_GROUPS=1" "$GR"
+G2="$("$PY" - "$TPL" <<'PY'
+import sys
+t = open(sys.argv[1]).read()
+arms = t.index("<!-- guild:supervisor-core:arms -->")
+case = t.rindex('case "$STATE" in')
+br = t.index('if [ "${STAGE_GROUPS:-0}" = 1 ] && [[ "$STATE" != *guild:needs-human* ]]')
+gate = t.index('*guild:needs-human*|*guild:done* ) : ;;')
+ok = gate < arms < br < case
+cap = '[ "$GSESS" -lt 12 ]' in t
+win = 'if [ -n "${WIN_START:-}" ] && ! in_window; then' in t and '"$GSESS" -gt 0 ] && [ -n "${WIN_START' not in t
+env = 'GLD_STAGE_SCOPE="$STAGE_SCOPE"' in t
+print("OK" if ok and cap and win and env else f"pos={ok} cap={cap} win={win} env={env}")
+PY
+)"
+[ "$G2" = OK ] && ok "G2: branch after the priority gate, inside arms, before case; cap 12; every launch checks the window; scope passed" || bad "G2" OK "$G2"
+GF="$WORK/gfuncs.sh"; sed -n '/^stage_of() {/,/^}/p;/^loopback_mark() {/,/^}/p' "$TPL" > "$GF"
+G3="$(bash -c '. "$1"; for l in "guild:execute" "guild:needs-human,guild:test" "guild:qa,guild:sprint" "" "guild:done"; do printf "[%s]" "$(stage_of "$l")"; done' _ "$GF")"
+[ "$G3" = "[execute][test][qa][][]" ] && ok "G3: stage_of reads the stage, empty when there is none" || bad "G3" "[execute][test][qa][][]" "$G3"
+G4="$(bash -c '. "$1"; OWNER_REPO=a/b
+gh() { printf "%s\n" "<!-- guild:loopback -->" "### loopback 1" "from: test" "consumed: 2026-11-15T00:00:00Z" "### loopback 2" "from: leader"; }
+printf "%s|" "$(loopback_mark 7)"
+gh() { return 1; }; printf "%s" "$(loopback_mark 7)"' _ "$GF")"
+[ "$G4" = "2/1|" ] && ok "G4: loopback_mark counts blocks/consumed; a failed read is empty (never progress)" || bad "G4" "2/1|" "$G4"
+DEV="$HERE/../skills/gld/commands/dev.md"; HO="$HERE/../skills/gld/commands/atoms/_handoff.md"
+if grep -q 'printenv GLD_UNATTENDED GLD_STAGE_SCOPE' "$DEV"; then bad "G5: dev.md reads one variable per printenv" "separate calls" "multi-argument printenv"
+else ok "G5: dev.md reads one variable per printenv (macOS prints only the first)"; fi
+grep -q '`OK STAGE-END: <next-stage>`' "$HO" && grep -q 'OK STAGE-END' "$DEV" && ok "G6: OK STAGE-END is in §D and dev.md" || bad "G6" "STAGE-END in both" "missing"
+
 printf '\nsprint_supervisor: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

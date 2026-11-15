@@ -653,7 +653,7 @@ R="$WORK/ra1"; mkrepo "$R" 41 "$(LDJSON "$AG")"; : > "$FAKE/replies.jsonl"
 tcall read_file '{"path": "impl.txt"}'; tcall edit_file "$EDIT_OK"; tcall run_tests '{}'
 OUT="$(start "$R" 41 >/dev/null; waitjob "$R" 41)"
 eq "agent: read → edit → run_tests green → local_pass" "local_pass agent status = FIXED" "$(echo "$OUT" | field state) $(echo "$OUT" | field mode) $(cat "$R/impl.txt")"
-eq "…every request carries the tools and keep_alive, reasoning off by default" "5 30m False" \
+eq "…every request carries the tools and keep_alive, reasoning off by default" "6 30m False" \
   "$("$PY" -c 'import json,sys; r=json.load(open(sys.argv[1])); print(len(r["tools"]), r["keep_alive"], r["think"])' "$FAKE/last_request.json")"
 eq "…runs.jsonl: mode agent, three turns, one final check" "agent 3 pass False" "$(lastrun "$R" mode) $(lastrun "$R" turns | "$PY" -c 'import ast,sys; print(len(ast.literal_eval(sys.stdin.read())))') $(lastrun "$R" attempts.0.outcome) $(lastrun "$R" attempts.0.intermediate)"
 grep -q "status = BROKEN" "$R/$(echo "$OUT" | field job_dir)/transcript.jsonl" && ok "…the transcript keeps what the model read" || bad "transcript" "read result" "missing"
@@ -716,7 +716,7 @@ eq "…a JSON example inside prose is not executed, and an unchanged done-claim 
   "$(lastrun "$R" turns.1.text_calls) $(lastrun "$R" turns.2.text_calls)"
 
 # stuck, max_turns, length cut, timeouts
-R="$WORK/ra6"; mkrepo "$R" 47 "$(LDJSON "$AG")"; : > "$FAKE/replies.jsonl"
+R="$WORK/ra6"; mkrepo "$R" 47 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "max_restarts": 0}')"; : > "$FAKE/replies.jsonl"
 for _ in 1 2 3 4 5 6 7; do tcall read_file '{"path": "impl.txt"}'; done
 OUT="$(start "$R" 47 >/dev/null; waitjob "$R" 47)"
 eq "the same read again and again → stuck after 6 turns without progress" "fallback stuck 7" "$(echo "$OUT" | field state) $(echo "$OUT" | field reason) $(lastrun "$R" turns | "$PY" -c 'import ast,sys; print(len(ast.literal_eval(sys.stdin.read())))')"
@@ -915,6 +915,105 @@ eq "runner gets the test files only, not a helper passed with them" "local_pass 
 grep -q "test/impl_test.txt" "$R/ran.log" && ok "…the real test is still run" || bad "test run" "impl_test" "$(cat "$R/ran.log")"
 R="$WORK/rh2"; mkrepo "$R" 73 "$(LDJSON '{"test_file_patterns": "x"}')"
 start "$R" 73 >/dev/null 2>&1; eq "test_file_patterns must be a list → exit 65" "65" "$?"
+
+# persistence: restart, blocker, auto escalation
+R="$WORK/rs1"; mkrepo "$R" 80 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "max_turns": 2, "max_restarts": 1}')"; : > "$FAKE/replies.jsonl"
+tcall read_file '{"path": "impl.txt"}'; tcall edit_file '{"path": "impl.txt", "search": "status = BROKEN", "replace": "status = HALF"}'
+tcall edit_file '{"path": "impl.txt", "search": "status = HALF", "replace": "status = FIXED"}' run_tests '{}'
+OUT="$(start "$R" 80 >/dev/null; waitjob "$R" 80)"
+eq "restart: a segment that ran out of turns starts over and passes" "local_pass 1" "$(echo "$OUT" | field state) $(lastrun "$R" restarts)"
+"$PY" -c 'import json,sys; m=json.load(open(sys.argv[1]))["messages"]; u=m[1]["content"]; sys.exit(0 if "## Where you are (restart 1 of 1)" in u and "status = HALF" in u and "content now (restart 1)" in u and len(m) < 8 else 1)' "$FAKE/last_request.json" \
+  && ok "…the new conversation starts from the current files, its diff and the last check" || bad "restart message" "where-you-are + current" "$(head -c 300 "$FAKE/last_request.json")"
+eq "…turns carry their segment; the final check of segment 1 ran before the restart" "2 test_fail" "$(lastrun "$R" turns.2.seg) $(lastrun "$R" attempts.0.outcome)"
+R="$WORK/rs2"; mkrepo "$R" 81 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "max_turns": 1, "max_restarts": 0}')"; : > "$FAKE/replies.jsonl"
+tcall read_file '{"path": "impl.txt"}'
+eq "max_restarts 0 → no restart" "fallback max_turns" "$(OUT="$(start "$R" 81 >/dev/null; waitjob "$R" 81)"; echo "$(echo "$OUT" | field state) $(echo "$OUT" | field reason)")"
+R="$WORK/rs3"; mkrepo "$R" 82 "$(LDJSON "$AG")"; : > "$FAKE/replies.jsonl"
+tcall report_blocker '{"reason": "the test is wrong", "evidence": "x"}'; tcall edit_file "$EDIT_OK" run_tests '{}'
+OUT="$(start "$R" 82 >/dev/null; waitjob "$R" 82)"
+eq "blocker: refused without evidence in the checks — the job goes on" "local_pass" "$(echo "$OUT" | field state)"
+grep -q "refused: report_blocker is accepted only when" "$R/$(echo "$OUT" | field job_dir)/transcript.jsonl" && ok "…the refusal names the rule" || bad "refusal" "rule text" "missing"
+printf '#!/bin/sh\necho "Error: Compilation failed"\necho "conf/runner.cfg:3:1: Error: unknown key runner_mode"\nexit 1\n' > "$WORK/wall.sh"
+J="$(printf '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "test_cmd": "sh %s {files}"}' "$WORK/wall.sh")"
+R="$WORK/rs4"; mkrepo "$R" 83 "$(LDJSON "$J")"; mkdir -p "$R/conf"; printf 'runner_mode=x\n' > "$R/conf/runner.cfg"; git -C "$R" add conf; git -C "$R" commit -qm conf; : > "$FAKE/replies.jsonl"
+tcall edit_file '{"path": "impl.txt", "search": "status = BROKEN", "replace": "status = A"}' run_tests '{}'
+tcall edit_file '{"path": "impl.txt", "search": "status = A", "replace": "status = B"}' run_tests '{}'
+tcall report_blocker '{"reason": "runner config rejects the key", "evidence": "conf/runner.cfg:3"}'
+OUT="$(start "$R" 83 >/dev/null; waitjob "$R" 83)"
+eq "blocker (L): a load error at an out-of-scope path, there since the baseline and surviving edits → blocked" "fallback blocked L" \
+  "$(echo "$OUT" | field state) $(echo "$OUT" | field reason) $(echo "$OUT" | field blocker.kind)"
+eq "…not restarted, files restored" "None status = BROKEN" "$(lastrun "$R" restarts) $(cat "$R/impl.txt")"
+printf '#!/bin/sh\necho "Error: Compilation failed"\necho "impl.txt:1:1: Error: Expected a declaration"\nexit 1\n' > "$WORK/ownbreak.sh"
+J="$(printf '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "max_turns": 4, "max_restarts": 0, "test_cmd": "sh %s {files}"}' "$WORK/ownbreak.sh")"
+R="$WORK/rs5"; mkrepo "$R" 84 "$(LDJSON "$J")"; : > "$FAKE/replies.jsonl"
+tcall edit_file '{"path": "impl.txt", "search": "status = BROKEN", "replace": "status = A"}' run_tests '{}'
+tcall edit_file '{"path": "impl.txt", "search": "status = A", "replace": "status = B"}' run_tests '{}'
+tcall report_blocker '{"reason": "cannot compile", "evidence": "x"}'
+OUT="$(start "$R" 84 >/dev/null; waitjob "$R" 84)"
+eq "blocker (L): a compile error located in the editable file is refused (the model's own)" "max_turns" "$(echo "$OUT" | field reason)"
+grep -q "refused: report_blocker is accepted only when" "$R/$(echo "$OUT" | field job_dir)/transcript.jsonl" && ok "…refused by the rule, not as an unknown tool" || bad "rs5 refusal" "rule text" "missing"
+R="$WORK/rs6"; mkrepo "$R" 85 "$(LDJSON '{"mode": "auto", "max_attempts": 1}')"; : > "$FAKE/replies.jsonl"
+reply "$WRONG_BLOCK"; tcall read_file '{"path": "impl.txt"}'; tcall edit_file "$EDIT_OK" run_tests '{}'
+OUT="$(start "$R" 85 >/dev/null; waitjob "$R" 85)"
+eq "auto, unattended: a one-shot that ran out goes on as an agent job and passes" "local_pass agent oneshot 1 1" \
+  "$(echo "$OUT" | field state) $(lastrun "$R" mode) $(lastrun "$R" escalated_from) $(lastrun "$R" oneshot_attempts | "$PY" -c 'import ast,sys; print(len(ast.literal_eval(sys.stdin.read())))') $(lastrun "$R" attempts | "$PY" -c 'import ast,sys; print(len(ast.literal_eval(sys.stdin.read())))')"
+eq "…one runs.jsonl line, the one-shot diff kept and shown to the agent" "1 True" \
+  "$(grep -c '"type": "run"' "$R/.claude/guild/memory/local-dev/runs.jsonl") $("$PY" -c 'import json,sys; print("A previous one-shot attempt" in json.load(open(sys.argv[1]))["messages"][1]["content"])' "$FAKE/last_request.json")"
+[ -s "$R/$(echo "$OUT" | field job_dir)/oneshot-last.diff" ] && ok "…oneshot-last.diff saved" || bad "oneshot diff" "file" "missing"
+eq "…report counts it as escalated and passed" "1 1" "$(ld "$R" report | "$PY" -c 'import json,sys; b=json.loads(sys.stdin.read().split(">>> LOCAL-DEV <<<\n")[-1])["by_mode"]["agent"]; print(b.get("escalated"), b.get("escalated_pass"))')"
+R="$WORK/rs7"; mkrepo "$R" 86 "$(LDJSON '{"mode": "auto", "max_attempts": 1}')"; : > "$FAKE/replies.jsonl"; reply "$WRONG_BLOCK"
+OUT="$(start "$R" 86 --attended >/dev/null; waitjob "$R" 86)"
+eq "auto, attended: no escalation (a human is waiting)" "fallback max_attempts oneshot" "$(echo "$OUT" | field state) $(echo "$OUT" | field reason) $(echo "$OUT" | field mode)"
+R="$WORK/rs8"; mkrepo "$R" 87 "$(LDJSON '{"mode": "auto", "max_attempts": 1}')"; : > "$FAKE/replies.jsonl"; reply "$WRONG_BLOCK"; echo "completion" > "$FAKE/caps"
+OUT="$(start "$R" 87 >/dev/null; waitjob "$R" 87)"; rm -f "$FAKE/caps"
+eq "auto: escalation refused (model has no tools) → the original fallback, last_diff = the one-shot's diff" "fallback max_attempts oneshot-last.diff" \
+  "$(echo "$OUT" | field state) $(echo "$OUT" | field reason) $(basename "$(echo "$OUT" | field last_diff)")"
+R="$WORK/rs9"; mkrepo "$R" 88 "$(LDJSON '{"max_restarts": -1}')"; start "$R" 88 >/dev/null 2>&1; eq "max_restarts < 0 → exit 65" "65" "$?"
+eq "settle_scope skips a scope.json taken before S1 (no spurious restore_failed)" "None" "$("$PY" - "$AGENT_PY" <<'PY2'
+import json, os, subprocess, sys, tempfile
+sys.path.insert(0, sys.argv[1]); import local_dev as ld, local_dev_agent as ag
+r = tempfile.mkdtemp(); g = lambda *a: subprocess.run(["git", "-C", r, *a], capture_output=True)
+g("init", "-q"); open(os.path.join(r, "o.txt"), "w").write("x\n"); open(os.path.join(r, "impl.txt"), "w").write("x\n")
+g("add", "-A"); g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "b")
+jd = os.path.join(r, ".claude", "guild", "memory", "local-dev", "1", "j"); os.makedirs(jd)
+job = {"files": ["impl.txt"], "tests": []}
+ag.Scope(ld, r, jd, job).before_baseline()            # S0 only — died in the one-shot part
+open(os.path.join(r, "o.txt"), "w").write("changed\n")
+ag.settle_scope(ld, r, jd, job); print(job.get("restore_failed"))
+PY2
+)"
+
+printf '#!/bin/sh\necho "Error: Compilation failed"\necho "test/impl_test.txt:1:1: Error: Undefined name status"\nexit 1\n' > "$WORK/testwall.sh"
+J="$(printf '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "max_turns": 3, "max_restarts": 0, "test_cmd": "sh %s {files}"}' "$WORK/testwall.sh")"
+R="$WORK/rs10"; mkrepo "$R" 89 "$(LDJSON "$J")"; : > "$FAKE/replies.jsonl"
+tcall edit_file '{"path": "impl.txt", "search": "status = BROKEN", "replace": "status = A"}' run_tests '{}'
+tcall edit_file '{"path": "impl.txt", "search": "status = A", "replace": "status = B"}' run_tests '{}'
+tcall report_blocker '{"reason": "test does not compile", "evidence": "x"}'
+eq "blocker (L): a load error located in a test file is the red baseline, not a wall → refused" "max_turns" "$(start "$R" 89 >/dev/null; waitjob "$R" 89 | field reason)"
+R="$WORK/rs11"; mkrepo "$R" 90 "$(LDJSON "$AG")"; : > "$FAKE/replies.jsonl"
+tcall edit_file "$EDIT_OK" report_blocker '{"reason": "x", "evidence": "y"}'
+eq "blocker: the pre-accept check of an unchecked edit can turn into the pass" "local_pass" "$(start "$R" 90 >/dev/null; waitjob "$R" 90 | field state)"
+R="$WORK/rs12"; mkrepo "$R" 91 "$(LDJSON '{"mode": "agent", "num_ctx": 65536, "max_output_tokens": 2000, "max_turns": 4, "max_restarts": 1}')"; : > "$FAKE/replies.jsonl"
+tcall edit_file '{"path": "impl.txt", "search": "status = BROKEN", "replace": "status = A"}' run_tests '{}'
+tcall report_blocker '{"reason": "same failure", "evidence": "x"}'; tcall read_file '{"path": "impl.txt"}'; tcall read_file '{"path": "other.txt"}'
+for nxt in B C D; do prev=$( [ $nxt = B ] && echo A || ([ $nxt = C ] && echo B || echo C) )
+  tcall edit_file "{\"path\": \"impl.txt\", \"search\": \"status = $prev\", \"replace\": \"status = $nxt\"}" run_tests '{}'; done
+tcall report_blocker '{"reason": "fails the same however I change it", "evidence": "expected FIXED x3"}'
+OUT="$(start "$R" 91 >/dev/null; waitjob "$R" 91)"
+eq "blocker (P): refused in the first segment, accepted after a restart with 3 same-signature checks on changed files" "fallback blocked P 1" \
+  "$(echo "$OUT" | field state) $(echo "$OUT" | field reason) $(echo "$OUT" | field blocker.kind) $(lastrun "$R" restarts)"
+eq "load_pairs: stack/traceback frames are not errors; an error line with a load failure is" "[] 1" "$("$PY" - "$AGENT_PY" <<'PY2'
+import os, subprocess, sys, tempfile
+sys.path.insert(0, sys.argv[1]); import local_dev_agent as ag
+r = tempfile.mkdtemp(); g = lambda *a: subprocess.run(["git", "-C", r, *a], capture_output=True)
+g("init", "-q"); os.makedirs(os.path.join(r, "src/pkg")); open(os.path.join(r, "src/pkg/__init__.py"), "w").write("x\n")
+g("add", "-A"); g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "b")
+run = ag.Run.__new__(ag.Run); run.repo = r; run.job = {"files": ["src/pkg/foo.py"], "tests": ["t/test_x.py"]}
+frames = "ImportError while importing test module\nsrc/pkg/__init__.py:3: in <module>\n    at f (src/pkg/__init__.py:3:1)\n"
+real = "Error: Compilation failed\nsrc/pkg/__init__.py:3:1: Error: cannot import name bar\n"
+print(sorted(run.load_pairs(frames)), len(run.load_pairs(real)))
+PY2
+)"
 
 # restore never writes through a planted symlink (all modes)
 printf 'precious\n' > "$WORK/precious.txt"

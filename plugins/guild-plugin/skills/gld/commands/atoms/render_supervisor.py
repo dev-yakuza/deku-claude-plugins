@@ -104,6 +104,7 @@ _TOKENS = (
     "<DAG_PATH>",
     "<INSTALL_CMDS>",
     "<DRAFT_STACKED>",
+    "<STAGE_GROUPS>",
 )
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -180,6 +181,7 @@ def main():
     ap.add_argument("--install-cmd", action="append", default=[])
     # squash-sync sprints only (run.md Phase 0): stacked PRs open as drafts.
     ap.add_argument("--draft-stacked", action="store_true")
+    ap.add_argument("--stage-groups", action="store_true")
     ap.add_argument("--out", default=None, help="only the literal '-' (stdout) is accepted")
     ap.add_argument(
         "--print-template-path",
@@ -263,6 +265,7 @@ def main():
         "<DAG_PATH>": shlex.quote(args.dag_path),
         "<INSTALL_CMDS>": array_literal(args.install_cmd),
         "<DRAFT_STACKED>": "1" if args.draft_stacked else "0",
+        "<STAGE_GROUPS>": "1" if args.stage_groups else "0",
     }
     # 단일 패스. 순차 replace 는 먼저 치환한 값 안에 들어 있던 토큰을 뒤 패스가 다시 치환한다
     # (`--owner-repo '<HUMAN_REPO>'` → OWNER_REPO 가 human-repo 값으로 조용히 바뀌었다).

@@ -117,6 +117,14 @@ human approval, not set here — they are shown by "Show current config" and hav
 same gap `commands` has (see Notes). ⚠ **`sprint.window` is not in that set** — it has a setter
 (above), so do not add it to the "no setter" list.
 
+`sprint.stage_groups` (default `false`, edited in `config.json` directly — no setter) runs each
+sprint member as up to three **grouped sessions** — analyze+design · execute · test+qa — instead
+of one session for the whole spine (`dev.md` Phase 2 *Grouped sessions*). A later group then does
+not carry an earlier one's context, which is most of the leader's cost (measured: 99.7% of it is
+re-reading accumulated context). Each later group starts inside the window (waiting in place when
+it is closed), and a member stops at 12 grouped sessions. Attended `/gld dev` and `batch` are
+unaffected. Experimental — compare a sprint's cost with and without it before keeping it on.
+
 ### `--local-dev=<on|off>`
 
 The **local developer** (`local_developer.enabled`, default `false`; an absent block means off).
@@ -143,6 +151,8 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
   "mode": "oneshot",
   "max_turns": 30,
   "agent_think": false,
+  "max_restarts": 2,
+  "auto_escalate": true,
   "test_cmd": "<runner> {files}",
   "test_file_patterns": ["*_test.*", "*.test.*", "*.spec.*", "*_spec.*", "test_*.py"],
   "lint_cmd": null
@@ -205,7 +215,11 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
   blocks back, up to `max_attempts`. `"agent"`: the model works in turns through tools —
   `read_file`/`outline`/`search` over files git tracks, `edit_file` on the `--files` only,
   `run_tests` — so a large file is read in parts instead of sent whole (`local_dev_agent.py`).
-  `"auto"`: oneshot, and agent only for a job oneshot finds `context_too_large`. ⚠ The agent mode
+  `"auto"`: oneshot, and agent for a job oneshot finds `context_too_large` — and, unattended
+  with `auto_escalate` (default `true`), for a one-shot job that ends `max_attempts` or
+  `context_overflow`: the same job goes on as an agent job from the original files (its own
+  budget, the one-shot's last diff shown for reference, one runs.jsonl line with
+  `oneshot_attempts`). Attended jobs never escalate (a human is waiting). ⚠ The agent mode
   is **experimental** — keep `oneshot` until its measurements (cache reuse, pass rate, time) are in.
   It needs a model Ollama lists with the `tools` capability (`ineligible:model_no_tools`) and
   room to work beside the first message (~28k tokens — `num_ctx` 131072 is the practical
@@ -213,12 +227,20 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
   `agent_think` (default `false`) turns reasoning on for its turns (14 tok/s makes each reasoned
   turn minutes long). `max_attempts` and `max_output_tokens_retry` do not apply to it, and its
   `attempt_count` counts check runs. Its own fallbacks: `max_turns`, `stuck` (six turns without
-  progress, or six missed edits on one file), `attempt_timeout` (two timed-out calls in a row),
+  progress, or eight missed edits on one file), `attempt_timeout` (two timed-out calls in a row),
   `out_of_scope_write` (a check run changed a tracked file outside `--files` and the tests — put
   back, listed as `out_of_scope`; a new untracked file is moved into the job folder's `stray/`
   instead). An attended agent job holds the model to its end like any attended job; an
   unattended one holds it across consecutive model turns (the prefix cache) and lets go while
   its checks run and after 15 minutes. A human must not edit the checkout while a job runs.
+- **Persistence (agent mode)**: a conversation that ends `stuck`, `max_turns` or
+  `context_overflow` starts over as a fresh one on the same job — the current files, the diff so
+  far and the last check, nothing else — up to `max_restarts` (default 2, `0` = off) while a
+  quarter of the budget remains. The model may end its work with `report_blocker` only when the
+  checks show a wall outside the files it may edit (a load/compile error at another path that was
+  already in the baseline run and survives its edits; or, after a restart, the same failure three
+  times with changed files) → fallback `blocked`, with its diagnosis in `blocker` (unverified —
+  `report` lists them). `attempt_count` = one-shot attempts + agent check runs.
 - `restore_failed` (any mode): a file the job must put back was replaced by a directory or now
   sits under a path leading out of the repo — the leader hands the Issue to a human.
 - `report` warns when, at the speed it observed, `max_output_tokens_retry` cannot be generated
@@ -236,6 +258,6 @@ Only `enabled` has a setter; the rest of the block is edited in `config.json` di
   non-integer `num_ctx`) makes every call exit 65 — the leader records a `tool error` fallback.
 
 ## Notes
-- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, visual{baselines[], tests[], matchers[], packages[], config_files[], runnable, env, create, run_file}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, refactor_slot, history[], board, window}, local_developer{enabled, model, ollama_url, max_attempts, max_output_tokens, max_output_tokens_retry, attempt_timeout_min, total_timeout_min, num_ctx, persona, mode, max_turns, agent_think, test_cmd, test_file_patterns, lint_cmd} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
+- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, visual{baselines[], tests[], matchers[], packages[], config_files[], runnable, env, create, run_file}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, refactor_slot, stage_groups, history[], board, window}, local_developer{enabled, model, ollama_url, max_attempts, max_output_tokens, max_output_tokens_retry, attempt_timeout_min, total_timeout_min, num_ctx, persona, mode, max_turns, agent_think, max_restarts, auto_escalate, test_cmd, test_file_patterns, lint_cmd} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
 - `roles` is edited by init (and by evolve HR later), not by `config` in M1 — editing the active roster manually is possible but unsupported as a config command yet.
 - `commands` (test/lint/typecheck/build/e2e/vrt), `visual.*`, `sprint.capacity`/`sprint.history` and `sprint.board` have the **same gap** (⚠ `sprint.window` does **not** — it has a `--window=` setter): they are part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for them (`sprint.max_stack_depth` and `sprint.refactor_slot` do have one) — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.

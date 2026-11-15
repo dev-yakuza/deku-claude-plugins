@@ -41,7 +41,8 @@ put back as it was at start) · `total_timeout` · `worker_died` · `worker_erro
 (a file could not be put back — a human must look; `revert` reports it the same way) — and in
 the agent mode (`local_dev_agent.py`) also `max_turns` · `stuck` · `attempt_timeout` ·
 `out_of_scope_write` (a check changed a file outside `--files` and the tests; put back) ·
-`model_error` (two failed calls in a row) · `ineligible:model_no_tools`.
+`model_error` (two failed calls in a row) · `blocked` (the model showed a wall outside the files
+it may edit — `blocker` carries its diagnosis, unverified) · `ineligible:model_no_tools`.
 A `local_pass` carries `tree`: `uncommitted` (commit it) · `committed` (a resumed leader already
 did) · `restored` (it was reverted).
 
@@ -120,6 +121,8 @@ DEFAULTS = {
     "mode": "oneshot",
     "max_turns": 30,
     "agent_think": False,
+    "max_restarts": 2,
+    "auto_escalate": True,
     "test_cmd": None,
     "test_file_patterns": ["*_test.*", "*.test.*", "*.spec.*", "*_spec.*", "test_*.py"],
     "lint_cmd": None,
@@ -231,7 +234,10 @@ def load_config(repo):
     pats = ld["test_file_patterns"]
     if not isinstance(pats, list) or not all(isinstance(p, str) and p for p in pats):
         raise RepoError("local_developer.test_file_patterns must be a list of glob strings")
-    for key in ("persona", "agent_think"):
+    if not isinstance(ld["max_restarts"], int) or isinstance(ld["max_restarts"], bool) \
+            or ld["max_restarts"] < 0:
+        raise RepoError("local_developer.max_restarts must be an integer >= 0")
+    for key in ("persona", "agent_think", "auto_escalate"):
         if not isinstance(ld[key], bool):
             raise RepoError(f"local_developer.{key} must be true or false")
     if ld["mode"] not in ("oneshot", "agent", "auto"):
@@ -321,10 +327,13 @@ def public(repo, job):
     out["attempts"] = [{k: a.get(k) for k in ("n", "outcome", "gen_s", "output_tokens",
                                               "num_predict", "think")}
                        for a in job.get("attempts") or []]
-    out["attempt_count"] = len(job.get("attempts") or [])
+    # an escalated job's one-shot attempts count too (the Step 2 author line reads this)
+    out["attempt_count"] = len(job.get("attempts") or []) + len(job.get("oneshot_attempts") or [])
+    if job.get("oneshot_attempts"):
+        out["oneshot_attempt_count"] = len(job["oneshot_attempts"])
     out["job_dir"] = job.get("job_dir")
     out["mode"] = job.get("mode", "oneshot")
-    for k in ("out_of_scope", "stray", "restore_failed"):
+    for k in ("out_of_scope", "stray", "restore_failed", "blocker", "restarts", "escalated_from"):
         if job.get(k):
             out[k] = job[k]
     if job.get("consumed") and job.get("state") == "local_pass":
@@ -362,9 +371,12 @@ def append_run(repo, job, cfg):
         "config": {k: cfg.get(k) for k in ("max_attempts", "max_output_tokens",
                                            "max_output_tokens_retry", "attempt_timeout_min",
                                            "total_timeout_min", "num_ctx", "persona",
-                                           "max_turns", "agent_think")},
+                                           "max_turns", "agent_think", "max_restarts",
+                                           "auto_escalate")},
         **{k: job[k] for k in ("turns", "edit_misses", "out_of_scope", "stray", "restore_failed",
-                               "rechecked") if job.get(k)},
+                               "rechecked", "restarts", "blocker", "oneshot_attempts",
+                               "escalated_from", "escalated_reason", "oneshot_active_s",
+                               "escalation_refused") if job.get(k)},
     })
 
 
@@ -1098,6 +1110,7 @@ class Worker:
         self.job["worker_pid"] = os.getpid()
         self.queue = Queue()
         self.active = 0.0          # seconds of model calls + checks — never queue wait
+        self.offset = 0.0          # active time spent before an escalation
         self.fixed_ticket = os.environ.get("GLD_LOCAL_DEV_TICKET")
         if self.fixed_ticket:      # an attended job: the ticket start took and handed down
             self.queue.held[self.fixed_ticket] = int(os.environ["GLD_LOCAL_DEV_TICKET_FD"])
@@ -1107,7 +1120,8 @@ class Worker:
         write_json(os.path.join(self.jd, "job.json"), self.job)
 
     def budget(self):
-        return self.cfg["total_timeout_min"] * 60 - self.active
+        # an escalated job's agent part gets a budget of its own: `offset` is where it began
+        return self.cfg["total_timeout_min"] * 60 - (self.active - self.offset)
 
     def finish(self, state, reason=None):
         # the model cannot edit tests, but its checks run them and the lint command: a snapshot
@@ -1124,8 +1138,8 @@ class Worker:
                 self.job["restore_failed"] = sorted(set(self.job.get("restore_failed") or [])
                                                     | set(failed))
                 reason = "restore_failed"
-            self.job["last_diff"] = os.path.relpath(os.path.join(self.jd, "last-local.diff"),
-                                                    self.repo)
+            self.job["last_diff"] = self.job.get("last_diff_override") or os.path.relpath(
+                os.path.join(self.jd, "last-local.diff"), self.repo)
         self.job.update(state=state, reason=reason, finished=now_iso())
         self.save()
         append_run(self.repo, self.job, self.cfg)
@@ -1216,6 +1230,10 @@ class Worker:
             return local_dev_agent.run(self, sys.modules[__name__])
         self.job["state"] = "running"
         self.save()
+        if self.can_escalate():            # S0 before the one-shot baseline: its red runs'
+            import local_dev_agent         # artifacts must read as the runner's, not the model's
+            local_dev_agent.Scope(sys.modules[__name__], self.repo, self.jd,
+                                  self.job).before_baseline()
         reason = self.baseline()
         if reason:
             return self.finish("fallback", reason)
@@ -1259,7 +1277,7 @@ class Worker:
                 self.job["attempts"].append({"n": n, "started": now_iso(), "outcome":
                                              "context_overflow", "num_predict": max(0, self.send),
                                              "over_tokens": over})
-                return self.finish("fallback", "context_overflow")
+                return self.end_oneshot("context_overflow")
             with open(os.path.join(self.jd, f"attempt{n}.prompt.txt"), "w", encoding="utf-8") as fh:
                 fh.write(prompt)
             d, err, secs = self.call_model(prompt)
@@ -1330,7 +1348,57 @@ class Worker:
             self.save()
             if self.budget() <= 0:
                 return self.finish("fallback", "total_timeout")
-        return self.finish("fallback", "max_attempts")
+        return self.end_oneshot("max_attempts")
+
+    def can_escalate(self):
+        return self.cfg["mode"] == "auto" and self.cfg["auto_escalate"] \
+            and not self.job.get("attended") and self.job.get("mode") == "oneshot"
+
+    def end_oneshot(self, reason):
+        """`auto`, unattended: a one-shot job that ran out goes on as an agent job — same job, one
+        runs.jsonl line — when the agent mode can take it; otherwise the fallback as before."""
+        if not self.can_escalate():
+            return self.finish("fallback", reason)
+        import local_dev_agent as ag
+        mod = sys.modules[__name__]
+        diff = git(self.repo, "diff", "HEAD", "--", *self.job["files"], check=False)
+        prior = os.path.join(self.jd, "oneshot-last.diff")
+        with open(prior, "w", encoding="utf-8") as fh:
+            fh.write(diff)
+        bodies = {}
+        for f in self.job["files"]:        # the agent starts from the originals: measure those
+            with open(os.path.join(self.jd, "originals", f), encoding="utf-8", newline="") as fh:
+                bodies[f] = fh.read()
+        persona = None
+        if self.job.get("persona_path"):
+            with open(os.path.join(self.repo, self.job["persona_path"]), encoding="utf-8") as fh:
+                persona = fh.read()
+        prior_text = ag.cut_middle(diff, ag.PRIOR_CHARS)
+
+        def fits_with(p):                  # the prior one-shot diff rides in the first message
+            return ag.fits(mod, self.cfg, ag.initial_user(mod, self.repo, self.job, p, bodies)
+                           + "\n\n" + prior_text)
+        ok = model_has_tools(self.cfg) and all(
+            os.stat(os.path.join(self.repo, f)).st_nlink <= 1 for f in self.job["files"])
+        drop = bool(ok and persona and not fits_with(persona))   # as agent_eligibility does:
+        ok = ok and fits_with(None if drop else persona)        # the persona gives way
+        if ok and drop:                    # recorded only for an escalation that happens
+            self.job["persona"] = "no_room"
+            self.job.pop("persona_path", None)
+        if not ok:                         # the reference Sonnet gets is the one-shot's last diff
+            self.job["last_diff_override"] = os.path.relpath(prior, self.repo)
+            self.job["escalation_refused"] = True
+            return self.finish("fallback", reason)
+        failed = restore(self.repo, self.jd, self.job["files"], self.job.get("modes"))
+        if failed:
+            self.job["restore_failed"] = failed
+            return self.finish("fallback", "restore_failed")
+        self.job.update(oneshot_attempts=self.job["attempts"], attempts=[],
+                        escalated_from="oneshot", escalated_reason=reason,
+                        oneshot_active_s=round(self.active, 1))
+        self.offset = self.active
+        self.save()
+        return ag.run(self, mod, prior=diff)
 
 
 def cmd_worker(jd):
@@ -1456,12 +1524,21 @@ def cmd_report(repo, args):
         if mode == "agent":
             bm["turns"] = bm.get("turns", 0) + len(r.get("turns") or [])
             bm["edit_misses"] = bm.get("edit_misses", 0) + (r.get("edit_misses") or 0)
+            bm["restarts"] = bm.get("restarts", 0) + (r.get("restarts") or 0)
+            if r.get("escalated_from"):   # how often the one-shot's leftovers became a pass
+                bm["escalated"] = bm.get("escalated", 0) + 1
+                if r["final"] == "local_pass":
+                    bm["escalated_pass"] = bm.get("escalated_pass", 0) + 1
         base_cap = (r.get("config") or {}).get("max_output_tokens")
         bm["active_s"] = bm.get("active_s", 0) + (r.get("active_s") or 0)
-        for a in r.get("attempts") or []:
-            bo = bm.setdefault("attempt_outcomes", {})
-            bo[a.get("outcome")] = bo.get(a.get("outcome"), 0) + 1
-            if mode != "oneshot":          # the top-level numbers stay one-shot attempts
+        # an escalated job's one-shot part counts with the one-shot numbers
+        shots = [(a, "oneshot") for a in r.get("oneshot_attempts") or []] + \
+            [(a, mode) for a in r.get("attempts") or []]
+        for a, amode in shots:
+            if amode == mode:              # an escalated job's one-shot part is not agent work
+                bo = bm.setdefault("attempt_outcomes", {})
+                bo[a.get("outcome")] = bo.get(a.get("outcome"), 0) + 1
+            if amode != "oneshot":         # the top-level numbers stay one-shot attempts
                 continue
             outcomes[a.get("outcome")] = outcomes.get(a.get("outcome"), 0) + 1
             if base_cap and (a.get("num_predict") or 0) > base_cap:
@@ -1488,6 +1565,9 @@ def cmd_report(repo, args):
           "attempt_outcomes": outcomes, "raised_cap_outcomes": raised,
           "observed_tok_per_s": round(tokens / gen, 1) if gen else None,
           "warnings": warnings, "after_pass": followups, "by_mode": by_mode,
+          "blocked": [{"issue": r["issue"], "kind": (r.get("blocker") or {}).get("kind"),
+                       "reason": (r.get("blocker") or {}).get("reason")}
+                      for r in runs if r.get("reason") == "blocked"],
           "avg_queue_wait_s": round(wait / len(runs), 1) if runs else 0,
           "avg_active_s": round(active / len(runs), 1) if runs else 0})
     return 0
@@ -1535,11 +1615,12 @@ def cmd_lessons(repo, args):
     runs, followups = read_runs(repo, args.since)
     diags, friction = {}, {}
     for r in runs:
-        if r.get("final") == "fallback" and not (r.get("attempts") or []):
+        if r.get("final") == "fallback" and (r.get("reason") == "blocked" or not (
+                r.get("attempts") or r.get("oneshot_attempts"))):
             key = (r.get("reason") or "?").split(":")
             key = ":".join(key[:2]) if key[0] == "ineligible" else key[0]
             friction[key] = friction.get(key, 0) + 1
-        for a in r.get("attempts") or []:
+        for a in (r.get("oneshot_attempts") or []) + (r.get("attempts") or []):
             out = a.get("outcome")
             if a.get("intermediate"):          # an agent's check of half-done work teaches nothing
                 continue
