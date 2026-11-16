@@ -66,7 +66,7 @@ class B1MarkerNeutralization(unittest.TestCase):
 
     def test_every_renderer_neutralizes(self):
         outs = [
-            loopback.render_block(1, "test", AT, QUOTE, QUOTE, "s"),
+            loopback.render_block(1, "test", AT, "fix/b", QUOTE, QUOTE),
             needs_human.render(needs_human.cause_line("defect", QUOTE), prose=QUOTE),
             followups.render(QUOTE, [followups.parse_item("- unfiled — %s — x" % QUOTE)]),
             followups.render_pr_notice(3, [QUOTE]),
@@ -143,7 +143,7 @@ class M3GateFailsClosed(unittest.TestCase):
         tl = [{"event": "unlabeled", "label": {"name": "guild:needs-human"}, "created_at": "2026-11-16T10:00:00Z",
                "actor": {"login": "alice"}}]
         c = _util.comment("guild-answer: D7 stop", 20, "2026-11-16T10:01:00Z", "MEMBER", "bob")
-        return dec.accepted_answer(blk, [c], tl)
+        return dec.accepted_answer(blk, [c], tl)[1:]
 
     def test_missing_kind_is_a_gate(self):
         a, rej = self.run_case(self.block(kind=None))
@@ -173,7 +173,7 @@ class M4ConflictingAnswers(unittest.TestCase):
     def test_same_author_correction_latest_wins(self):
         cs = [_util.comment("guild-answer: D7 stop", 50, "2026-11-16T10:00:00Z", "OWNER", "alice"),
               _util.comment("sorry, wrong one\nguild-answer: D7 loop-back", 51, "2026-11-16T10:04:00Z", "OWNER", "alice")]
-        a, rej = dec.accepted_answer(self.blk, cs, self.tl)
+        _st, a, rej = dec.accepted_answer(self.blk, cs, self.tl)
         self.assertEqual((a.token, a.comment_id), ("loop-back", 51))
         self.assertEqual([(r[0].comment_id, r[1]) for r in rej], [(50, "superseded by a later answer")])
 
@@ -182,7 +182,7 @@ class M4ConflictingAnswers(unittest.TestCase):
         tl = self.tl + [dict(self.tl[0], actor={"login": "bob"})]
         cs = [_util.comment("guild-answer: D7 stop", 50, "2026-11-16T10:00:00Z", "OWNER", "alice"),
               _util.comment("guild-answer: D7 loop-back", 51, "2026-11-16T10:04:00Z", "MEMBER", "bob")]
-        a, rej = dec.accepted_answer(blk, cs, tl)
+        _st, a, rej = dec.accepted_answer(blk, cs, tl)
         self.assertIsNone(a)
         self.assertEqual(sorted(r[1] for r in rej), ["conflicting answers"] * 2)
 

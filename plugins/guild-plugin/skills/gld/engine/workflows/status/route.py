@@ -50,6 +50,10 @@ class Route(object):
             if p.get("options"):
                 ln += " [options: %s]" % " | ".join(p["options"])
             lines.append(ln)
+            if p.get("conflict"):
+                lines.append("  conflicting answers: " + ", ".join(
+                    "#%s %s (%s)" % (c["comment_id"], c["token"], c["author"]) for c in p["conflicting"])
+                    + " — left for a human to settle")
             if p.get("answer"):
                 lines.append("  answered: guild-answer: %s %s (comment %s)" % (
                     p["id"], p["answer"]["token"], p["answer"]["comment_id"]))
@@ -115,9 +119,13 @@ def route_snapshot(gh, snap, cfg=None, unattended=False, own_writes=()):
             alive, _why = dec.live(b, st, timeline, own_writes)
             if not alive:
                 continue
-            ans, _rej = dec.accepted_answer(b, snap.comments, timeline, unattended, assoc)
+            st_a, ans, rej = dec.accepted_answer(b, snap.comments, timeline, unattended, assoc)
+            conflicts = [{"comment_id": a.comment_id, "token": a.token, "author": a.author}
+                         for a, why in rej if why == "conflicting answers"]
             r.pending.append({"id": b.id, "kind": b.get("kind"), "point": b.get("point"),
                               "question": b.get("question"), "options": b.options(),
+                              "answer_status": st_a, "conflict": st_a == "conflict",
+                              "conflicting": conflicts,
                               "answer": ({"token": ans.token, "comment_id": ans.comment_id}
                                          if ans else None)})
     return r

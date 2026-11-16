@@ -89,7 +89,7 @@ class Answers(unittest.TestCase):
         return _util.comment(body, cid, at, assoc, login)
 
     def test_accepted(self):
-        a, rej = decisions.accepted_answer(self.block, [self.ans()], self.unlabel)
+        _st, a, rej = decisions.accepted_answer(self.block, [self.ans()], self.unlabel)
         self.assertEqual((a.token, rej), ("loop-back", []))
 
     def test_each_rejection(self):
@@ -99,17 +99,17 @@ class Answers(unittest.TestCase):
                  (self.ans(), [], "not removed"),
                  (self.ans(login="someone-else"), self.unlabel, "label remover")]
         for c, tl, why in cases:
-            a, rej = decisions.accepted_answer(self.block, [c], tl)
+            _st, a, rej = decisions.accepted_answer(self.block, [c], tl)
             with self.subTest(why=why):
                 self.assertIsNone(a)
                 self.assertIn(why, rej[0][1])
 
     def test_attended_skips_timeline_checks(self):
-        a, _ = decisions.accepted_answer(self.block, [self.ans(login="x")], [], unattended=False)
+        _st, a, _ = decisions.accepted_answer(self.block, [self.ans(login="x")], [], unattended=False)
         self.assertEqual(a.token, "loop-back")
 
     def test_marked_comment_is_not_an_answer(self):
-        a, rej = decisions.accepted_answer(self.block, [self.ans(body="<!-- guild:note -->\nguild-answer: D1 stop")], self.unlabel)
+        _st, a, rej = decisions.accepted_answer(self.block, [self.ans(body="<!-- guild:note -->\nguild-answer: D1 stop")], self.unlabel)
         self.assertEqual((a, rej), (None, []))
 
 

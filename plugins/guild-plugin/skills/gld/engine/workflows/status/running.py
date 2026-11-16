@@ -15,6 +15,7 @@ the downgrade runbook's safety check).
 
 import errno
 import glob
+import time
 import json
 import os
 import re
@@ -23,6 +24,9 @@ import subprocess
 from guildcore import journal
 from guildcore.decisions import DecisionLog
 from guildcore.state import list_snapshots
+
+
+STALE_S = 600
 
 
 class RunningError(Exception):
@@ -81,8 +85,8 @@ def probe(lock):
     try:
         with open(lock, encoding="utf-8") as fh:
             raw = fh.read()
-    except (IOError, UnicodeDecodeError):
-        return False, {}
+    except (IOError, OSError, UnicodeDecodeError):
+        return True, {"mode": "unreadable-lock"}        # fail toward "running" (K0-m18)
     try:
         info = json.loads(raw or "{}")
     except ValueError:
@@ -90,7 +94,14 @@ def probe(lock):
     if not isinstance(info, dict):
         info = {}
     if info.get("pid") is None:
-        return True, dict(info, mode=info.get("mode") or "unknown-holder")
+        # A holder that died before writing its JSON leaves this forever; tell the two apart by
+        # age so a human can clear a stale one (K1 writes the JSON atomically — k0-notes).
+        try:
+            age = time.time() - os.path.getmtime(lock)
+        except OSError:
+            age = 0
+        mode = "stale-unknown" if age > STALE_S else "unknown-holder"
+        return True, dict(info, mode=info.get("mode") or mode)
     return pid_alive(info["pid"]), info
 
 
