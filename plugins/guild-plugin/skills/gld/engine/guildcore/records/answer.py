@@ -1,7 +1,9 @@
 """guildcore.records.answer — the human's `guild-answer: D<k> <token>` line (§2.5, C13).
 
-Grammar only: `^guild-answer: D(\\d+) ([a-z0-9:_-]+)` on any line of a comment that carries no
-Guild marker at its start. Whether an answer is ACCEPTED (association, time, token, timeline) is
+Grammar only: a whole line `guild-answer: D<k> <token>` (nothing after the token but blanks),
+outside fenced code and `>` quotes, in a comment with no `<!-- guild:` ANYWHERE — the stricter of
+§2.5 ("does not start with") and Section M ("contains"), so a quote-reply of a Guild comment is
+never an answer (K0-m4). Whether an answer is ACCEPTED (association, time, token, timeline) is
 `guildcore.decisions.accepted_answer`.
 """
 
@@ -9,7 +11,7 @@ import re
 
 from guildcore.records import markers
 
-ANSWER_RE = re.compile(r"^guild-answer: D(\d+) ([a-z0-9:_-]+)", re.M)
+ANSWER_RE = re.compile(r"^guild-answer: D(\d+) ([a-z0-9:_-]+)[ \t]*$")
 
 
 class Answer(object):
@@ -25,9 +27,21 @@ class Answer(object):
 
 def parse(comment):
     body = markers.body_of(comment)
-    if body.startswith("<!-- guild:"):
+    if "<!-- guild:" in body:
         return []
-    return [Answer(int(m.group(1)), m.group(2), comment) for m in ANSWER_RE.finditer(body.replace("\r", ""))]
+    out, fence = [], None
+    for ln in body.replace("\r", "").split("\n"):
+        f = re.match(r"^\s*(```+|~~~+)", ln)
+        if f:
+            mark = f.group(1)[0] * 3
+            fence = None if fence and mark == fence else (fence or mark)
+            continue
+        if fence or ln.lstrip().startswith(">"):
+            continue
+        m = ANSWER_RE.match(ln)
+        if m:
+            out.append(Answer(int(m.group(1)), m.group(2), comment))
+    return out
 
 
 def from_comments(comments):

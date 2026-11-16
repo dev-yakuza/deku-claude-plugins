@@ -89,9 +89,12 @@ class JournalView(object):
         return [e for e in self.entries if e["kind"] == "intent" and key_of(e) not in done]
 
     def own_label_writes(self):
-        """(event, label, created_at) the engine journaled — excluded from `decisions.live`."""
-        return [(e.get("event"), e.get("label"), e.get("created_at"))
-                for e in self.entries if e["kind"] == "write" and e.get("op") == "label"]
+        """Timeline event ids of the engine's own label writes — excluded from `decisions.live`.
+        Format decision (K0-m10): after a label write is verified, K1 journals
+        `{"kind":"write","op":"label","event_id":<timeline event id>,…}`; the server id, never the
+        engine's clock, is the match key."""
+        return [e.get("event_id") for e in self.entries
+                if e["kind"] == "write" and e.get("op") == "label" and e.get("event_id") is not None]
 
     def last_checkpoint(self):
         cps = [e for e in self.entries if e["kind"] == "checkpoint"]

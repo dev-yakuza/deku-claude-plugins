@@ -9,6 +9,8 @@ from guildcore.records import answer as answer_rec
 from guildcore.records import decisions as fmt
 from guildcore.records import markers
 
+from guildcore.records.decisions import ASK_KINDS
+
 DEFAULT_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
 # §2.5: kinds whose answer must come from the human who removed the label
 GATE_KINDS = ("gate-inv2", "disputed-blocker", "loopback", "close-decided", "readiness",
@@ -69,15 +71,23 @@ class DecisionLog(object):
         return [b for b in self.blocks if b.get("by") == "human" and b.get("point") == "directive"]
 
 
+def is_gate(block, kind=None):
+    """§2.5 gate kinds need "answer author = label remover". Fail CLOSED (K0-M3): a missing or
+    unknown `kind:` is a gate, and so is `stakes: high` (a judgment property, not a kind)."""
+    kind = kind or block.get("kind")
+    return kind not in ASK_KINDS or kind in GATE_KINDS or block.get("stakes") == "high"
+
+
 def live(block, state, timeline, own_writes=()):
     """§2.5 rule 1b: a pending block is alive iff its `stage:` equals the derived stage AND the
     timeline has no stage-label event (labeled/unlabeled `guild:<stage>`) after its `at_server:`
-    (else `at:`) other than the engine's own journaled writes. `own_writes` = iterable of
-    (event, label, created_at). Returns (alive, reason)."""
+    (else `at:`) other than the engine's own journaled writes. `own_writes` = timeline event ids
+    the engine journaled after its own label writes (K0-m10 — server ids, never the engine's
+    clock). Returns (alive, reason)."""
     if block.get("stage") != state.stage:
         return False, "stage changed outside engine (%s → %s)" % (block.get("stage"), state.stage)
     since = block.get("at_server") or block.get("at") or ""
-    own = set(tuple(w) for w in own_writes)
+    own = set(own_writes)
     for ev in timeline or []:
         kind = ev.get("event")
         if kind not in ("labeled", "unlabeled"):
@@ -85,7 +95,7 @@ def live(block, state, timeline, own_writes=()):
         lb = _ev_label(ev)
         if lb not in STAGE_LABELS or (ev.get("created_at") or "") <= since:
             continue
-        if (kind, lb, ev.get("created_at")) in own:
+        if ev.get("id") is not None and ev.get("id") in own:
             continue
         return False, "stage changed outside engine (%s %s)" % (kind, lb)
     return True, None
@@ -93,13 +103,18 @@ def live(block, state, timeline, own_writes=()):
 
 def accepted_answer(block, comments, timeline, unattended=True, associations=DEFAULT_ASSOCIATIONS,
                     kind=None):
-    """§2.5 channel 1: the first `guild-answer:` for this block passing every check, or None.
-    Returns (answer|None, rejected[(answer, why)])."""
+    """§2.5 channel 1. Returns (answer|None, rejected[(answer, why)]).
+
+    Several answers can pass every check (K0-M4 — §2.5 sets no order). Then: all from ONE author
+    → that author's latest answer wins (a correction), the earlier ones are rejected as
+    superseded; from different authors with different tokens → no answer, every one rejected as
+    `conflicting answers` (the question stays pending — a human must settle it). Different
+    authors agreeing on one token → the latest is taken."""
     k = int(block.id[1:]) if block.id[1:].isdigit() else block.n
     since = block.get("at_server") or block.get("at") or ""
     opts = block.options()
-    kind = kind or block.get("kind")
-    rejected = []
+    gate = is_gate(block, kind)
+    rejected, passed = [], []
     unlabels = [ev for ev in timeline or [] if ev.get("event") == "unlabeled"
                 and _ev_label(ev) == "guild:needs-human" and (ev.get("created_at") or "") > since]
     for a in answer_rec.from_comments(comments):
@@ -116,10 +131,17 @@ def accepted_answer(block, comments, timeline, unattended=True, associations=DEF
             # "그 이후" = after the question was asked (the block's at_server/at)
             if not unlabels:
                 why = "guild:needs-human not removed"
-            elif kind in GATE_KINDS and not any(_ev_actor(ev) == a.author for ev in unlabels):
+            elif gate and not any(_ev_actor(ev) == a.author for ev in unlabels):
                 why = "gate answer: author is not the label remover"
         if why:
             rejected.append((a, why))
             continue
-        return a, rejected
-    return None, rejected
+        passed.append(a)
+    if not passed:
+        return None, rejected
+    passed.sort(key=lambda a: (a.created_at, a.comment_id or 0))
+    authors = set(a.author for a in passed)
+    tokens = set(a.token for a in passed)
+    if len(authors) > 1 and len(tokens) > 1:
+        return None, rejected + [(a, "conflicting answers") for a in passed]
+    return passed[-1], rejected + [(a, "superseded by a later answer") for a in passed[:-1]]
