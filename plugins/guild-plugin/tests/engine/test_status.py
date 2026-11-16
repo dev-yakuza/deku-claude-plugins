@@ -256,7 +256,7 @@ class EntryPoint(unittest.TestCase):
     def test_unknown_workflow_and_usage(self):
         self.assertEqual(self.run_entry("dev", "run", "--issue", "1")[0], 64)
         self.assertEqual(self.run_entry()[0], 64)
-        self.assertEqual(self.run_entry("version")[1], "guild engine K0\n")
+        self.assertEqual(self.run_entry("version")[1], "guild engine K1\n")
 
     def test_old_python_halts_6(self):
         code = ("import sys; sys.path.insert(0, %r); import gld_engine as g; g.MIN_PY = (99, 0); "
