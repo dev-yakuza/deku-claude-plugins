@@ -165,8 +165,11 @@ class WriteRules(unittest.TestCase):
         dc = decisions.DecisionComment(out)
         self.assertEqual([b.n for b in dc.blocks], [1, 2])
         self.assertTrue(out.endswith("</details>\n<!-- /guild:decisions -->"))
-        with self.assertRaises(ValueError):
-            decisions.insert(body, decisions.render_block(2, {"by": "code", "reason": "가" * 61000}))
+        big = body
+        with self.assertRaises(ValueError):               # rollover comes from many capped blocks
+            for i in range(2, 200):
+                big = decisions.insert(big, decisions.render_block(i, {"by": "code", "reason": "가" * 5000}))
+        self.assertLess(len(big), decisions.ROLLOVER_CHARS)
         with self.assertRaises(ValueError):
             decisions.render_block(3, {"by": "robot"})
 

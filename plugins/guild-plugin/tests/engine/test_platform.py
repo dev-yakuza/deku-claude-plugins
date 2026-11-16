@@ -73,9 +73,11 @@ class Live(unittest.TestCase):
         self.assertFalse(decisions.live(self.block, state.derive(["guild:qa"]), tl)[0])
 
     def test_events_before_at_server_and_own_writes_ignored(self):
-        tl = [ev("labeled", "guild:qa", "2026-11-15T05:00:01Z"), ev("labeled", "guild:qa", "2026-11-15T08:00:00Z")]
-        own = [("labeled", "guild:qa", "2026-11-15T08:00:00Z")]
-        self.assertTrue(decisions.live(self.block, state.derive(["guild:qa"]), tl, own)[0])
+        own_ev = dict(ev("labeled", "guild:qa", "2026-11-15T08:00:00Z"), id=777)
+        tl = [ev("labeled", "guild:qa", "2026-11-15T05:00:01Z"), own_ev]
+        self.assertTrue(decisions.live(self.block, state.derive(["guild:qa"]), tl, [777])[0])
+        # K0-m10: matching is by server event id — the same label/time without our id kills it
+        self.assertFalse(decisions.live(self.block, state.derive(["guild:qa"]), tl, [778])[0])
 
 
 class Answers(unittest.TestCase):
@@ -196,7 +198,7 @@ class Journal(unittest.TestCase):
         lines = [journal.render("entry", "t0", issue=42, entry_id="e1", stage="test", loopback_blocks=1),
                  journal.render("intent", "t1", **k), journal.render("done", "t2", **k),
                  journal.render("intent", "t3", **dict(k, op="label", target="guild:qa")),
-                 journal.render("write", "t4", op="label", event="unlabeled", label="guild:test", created_at="t4"),
+                 journal.render("write", "t4", op="label", event_id=555, label="guild:test"),
                  '{"kind":"intent","t":"t5","iss']                      # torn tail
         with open(os.path.join(d, "journal.jsonl"), "w") as fh:
             fh.write("\n".join(lines))
@@ -204,7 +206,7 @@ class Journal(unittest.TestCase):
         self.assertEqual(v.torn, 1)
         self.assertEqual(v.open_entry()["entry_id"], "e1")
         self.assertEqual([e["target"] for e in v.intent_only()], ["guild:qa"])
-        self.assertEqual(v.own_label_writes(), [("unlabeled", "guild:test", "t4")])
+        self.assertEqual(v.own_label_writes(), [555])
         self.assertEqual(lines[1], json.dumps(json.loads(lines[1]), sort_keys=True, separators=(",", ":")))
         self.assertTrue(journal.lock_path(cd, 42).endswith("/guild/engine/42.lock"))
         with self.assertRaises(ValueError):

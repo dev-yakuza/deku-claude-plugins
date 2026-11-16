@@ -75,6 +75,25 @@ class StatusMdExamples(unittest.TestCase):
         self.assertEqual(got[:len(want)], want)
 
 
+class HandDerived(unittest.TestCase):
+    """K0-m9: expected text derived by hand from status.md's rule table + §2.10 C-F-18, not
+    pinned from engine output."""
+
+    def test_103_decided_close(self):
+        # labels [guild:done]; markers: analyze + closed-as-decided; no PR
+        want = ("Issue #103: Decided close\nStage: done\n- [x] Analyze: completed\n"
+                "- [ ] Design: 결정대로 닫힘 — 해당 없음\n- [ ] Execute: 결정대로 닫힘 — 해당 없음\n"
+                "- [ ] Test: 결정대로 닫힘 — 해당 없음\n- [ ] QA: 결정대로 닫힘 — 해당 없음\n"
+                "PR: none\nMode: legacy-started\n")
+        self.assertEqual(show.show(FakeGh(_util.GH_STATUS), 103), want)
+
+    def test_101_execute_completed_by_open_pr_rule(self):
+        # Execute row: evidence present AND (label ≥ test OR PR open) — label is execute, PR #201 open
+        out = show.show(FakeGh(_util.GH_STATUS), 101).split("\n")
+        self.assertEqual(out[1:5], ["Stage: execute", "- [x] Analyze: completed",
+                                    "- [x] Design: completed", "- [x] Execute: completed"])
+
+
 class PinnedOutputs(unittest.TestCase):
     def test_every_fixture_issue(self):
         fx = _util.fixture()

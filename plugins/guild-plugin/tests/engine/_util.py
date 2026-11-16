@@ -25,6 +25,7 @@ os.makedirs(_NOGH, exist_ok=True)
 with open(os.path.join(_NOGH, "gh"), "w") as _fh:
     _fh.write("#!/bin/sh\necho 'gh is blocked in engine tests (use GLD_ENGINE_GH_FIXTURE)' >&2\nexit 97\n")
 os.chmod(os.path.join(_NOGH, "gh"), 0o755)
+os.environ["GLD_ENGINE_TEST"] = "1"      # lets GLD_ENGINE_GH_FIXTURE serve the fake GitHub
 if not os.environ.get("PATH", "").startswith(_NOGH + os.pathsep):
     os.environ["PATH"] = _NOGH + os.pathsep + os.environ.get("PATH", "")
 

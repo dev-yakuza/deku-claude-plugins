@@ -45,6 +45,24 @@ class RoundTrip(unittest.TestCase):
                 n += 1
         self.assertGreaterEqual(n, 34)
 
+    # K0-m9: a round trip is tautological for a line splitter — also demand STRUCTURE (the
+    # number of blocks each record really has, counted by hand from the fixture files).
+    BLOCKS = {"loopback/0.98.5/omc-601.md": 1, "loopback/0.98.7/omc-161.md": 2,
+              "loopback/0.98.7/wa-1884.md": 1, "loopback/0.101.0/prose-reset-human.md": 4,
+              "auditor-execute/0.99.2/wa-1909.md": 1, "auditor-execute/0.99.1/wa-1823.md": 2,
+              "auditor-execute/0.98.7/omc-507.md": 2, "auditor-execute/0.98.7/omc-161.md": 1,
+              "auditor-execute/0.101.0/prose-catalog-grammar.md": 3}
+
+    def test_block_structure(self):
+        for rel, n in self.BLOCKS.items():
+            body = _util.record(rel)
+            parser = loopback.LoopbackRecord if rel.startswith("loopback") else audit.AuditRecord
+            rec = parser.parse(body)
+            with self.subTest(rel=rel):
+                self.assertEqual(len(rec.blocks), n)
+                raw = [getattr(b, "block", b) for b in rec.blocks]      # AuditBlock wraps a Block
+                self.assertTrue(all(b.fields() for b in raw))
+
     def test_crlf_survives(self):
         body = _util.record("loopback/0.98.7/omc-161.md").replace("\n", "\r\n")
         rec = loopback.LoopbackRecord.parse(body)
