@@ -242,9 +242,11 @@ def reset_clone(clone):
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def base_env(env_dirs, endpoint):
+def base_env(env_dirs, endpoint, real_home=False):
+    """`real_home=True` keeps the operator's real HOME (K1r4-M1: a fake HOME without
+    ~/.gitconfig hid that denyRead on it breaks every git command)."""
     return {
-        "HOME": env_dirs["home"], "TMPDIR": env_dirs["tmp"] + "/", "SHELL": "/bin/bash",
+        "HOME": os.path.expanduser("~") if real_home else env_dirs["home"], "TMPDIR": env_dirs["tmp"] + "/", "SHELL": "/bin/bash",
         "PATH": os.pathsep.join([env_dirs["shims"], "/usr/bin", "/bin", "/usr/sbin", "/sbin",
                                  "/opt/homebrew/bin"]),
         "LANG": "en_US.UTF-8", "CLAUDE_CONFIG_DIR": env_dirs["cfg"],

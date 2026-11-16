@@ -215,7 +215,7 @@ def tracked_top_level(worktree):
 
 
 def role_sandbox(role_key, worktree, run_dir, issue=None, homes=(), config_dir=None,
-                 toolchain=False):
+                 toolchain=False, tool_writes=()):
     """The Q23 sandbox block, forced AFTER the merge (a user/local `enabled:false`,
     `excludedCommands` or `allowUnsandboxedCommands` cannot weaken it). denyWrite beats
     allowWrite in the CLI sandbox (verified), which every rule below relies on.
@@ -290,12 +290,23 @@ def role_sandbox(role_key, worktree, run_dir, issue=None, homes=(), config_dir=N
             deny_r.append(os.path.join(h, rel))
     if config_dir:
         deny_r.append(os.path.abspath(config_dir))
+    if role_key in WRITER_ROLES or toolchain:
+        allow_w += list(tool_writes)
     deny_w = list(dict.fromkeys(deny_w))
     deny_r = list(dict.fromkeys(deny_r))
+    weaker_net = (role_key in WRITER_ROLES and bool(worktree)
+                  and os.path.exists(os.path.join(worktree, "pubspec.yaml")))
     return {"enabled": True, "allowUnsandboxedCommands": False, "autoAllowBashIfSandboxed": False,
             "excludedCommands": [],
+            # Dart (pub) verifies TLS through macOS trustd, unreachable in the sandbox without
+            # this (measured: CERTIFICATE_VERIFY_FAILED; curl unaffected) — writers of Flutter
+            # repos only (K1r4-M2); the CLI documents it as a weaker isolation (trustd channel)
+            "enableWeakerNetworkIsolation": weaker_net,
             "filesystem": {"allowWrite": allow_w, "denyWrite": deny_w, "denyRead": deny_r},
-            "network": {"allowedDomains": registry_domains(worktree) if role_key in WRITER_ROLES else []}}
+            # loopback binding: test runners (flutter_tester, jest workers) serve on localhost —
+            # measured: `flutter test` fails at HttpServer.bind without it (K1r4-M2)
+            "network": {"allowedDomains": registry_domains(worktree) if role_key in WRITER_ROLES else [],
+                        "allowLocalBinding": True}}
 
 
 HOOK_RUNNERS = ("python3", "python", "sh", "bash", "node", "ruby", "perl")
@@ -319,7 +330,7 @@ def base_only_hooks(worktree, base_sha, hooks):
             for hk in g.get("hooks") or []:
                 cmd = hk.get("command")
                 if not isinstance(cmd, str):
-                    dropped.append(json.dumps(hk))
+                    dropped.append({"event": event, "matcher": g.get("matcher"), "hook": hk})
                     continue
                 gates_root = os.path.join(engine_home(common), "gates")
                 ok = True
@@ -338,7 +349,7 @@ def base_only_hooks(worktree, base_sha, hooks):
                 launcher_ok = os.path.basename(first) in HOOK_RUNNERS or first.startswith(engine_home(common))
                 refs_engine = engine_home(common) in cmd or gates_root in cmd
                 if not ok or "CLAUDE_PROJECT_DIR" in cmd or not launcher_ok or not refs_engine:
-                    dropped.append(hk.get("command"))
+                    dropped.append({"event": event, "matcher": g.get("matcher"), "hook": hk})
                     continue
                 keep.append(dict(hk, command=cmd))
             if keep:
@@ -384,6 +395,101 @@ def export_tree_readonly(worktree, base_sha, rel_dir, dest):
     with open(stamp, "w") as fh:
         fh.write(digest + "\n")
     return dest, digest
+
+
+SAFE_GIT_KEYS = re.compile(r"^(init\.defaultbranch|core\.autocrlf|core\.symlinks|core\.ignorecase|"
+                           r"core\.precomposeunicode|core\.quotepath|filter\.lfs\.[a-z]+|"
+                           r"pull\.rebase|merge\.conflictstyle|diff\.algorithm|color\.[a-z.]+)$")
+
+
+def render_gitconfig(worktree, dest):
+    """The role's GLOBAL git config (K1r4-M1): `~/.gitconfig` is denyRead and git aborts on an
+    unreadable global config (rc 128), so the engine — outside the sandbox — writes a SAFE one:
+    user.name/email as resolved for this worktree (includeIf honoured) and a short list of
+    harmless keys. Never credential helpers, aliases, includes, url rewrites, hooksPath,
+    sshCommand or signing (keys are denyRead)."""
+    lines = []
+    p = subprocess.run(["git", "config", "--global", "--list"], cwd=worktree or None,
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    kept = {}
+    for ln in p.stdout.decode("utf-8", "replace").splitlines():
+        if "=" not in ln:
+            continue
+        k, v = ln.split("=", 1)
+        if SAFE_GIT_KEYS.match(k.lower()):
+            kept[k.lower()] = v
+    for k in ("user.name", "user.email"):
+        q = subprocess.run(["git", "config", "--get", k], cwd=worktree or None,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        v = q.stdout.decode().strip()
+        if v:
+            kept[k] = v
+    sections = {}
+    for k, v in sorted(kept.items()):
+        parts = k.split(".")
+        sec = parts[0] if len(parts) == 2 else '%s "%s"' % (parts[0], ".".join(parts[1:-1]))
+        sections.setdefault(sec, []).append((parts[-1], v))
+    for sec, kvs in sections.items():
+        lines.append("[%s]" % sec)
+        lines += ["\t%s = %s" % (k, v.replace("\\", "\\\\").replace('"', '\\"')) for k, v in kvs]
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with open(dest, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    return {"GIT_CONFIG_GLOBAL": dest, "GIT_CONFIG_NOSYSTEM": "1"}
+
+
+def flutter_sdk(worktree):
+    """The Flutter SDK a worktree uses (`.fvm/flutter_sdk`, `.fvmrc`, or `flutter` on PATH)."""
+    if not worktree or not os.path.exists(os.path.join(worktree, "pubspec.yaml")):
+        return None
+    link = os.path.join(worktree, ".fvm", "flutter_sdk")
+    if os.path.exists(link):
+        return os.path.realpath(link)
+    try:
+        with open(os.path.join(worktree, ".fvmrc"), encoding="utf-8") as fh:
+            v = json.load(fh).get("flutter")
+        cand = os.path.join(os.path.expanduser("~"), "fvm", "versions", str(v))
+        if v and os.path.isdir(cand):
+            return cand
+    except (IOError, OSError, ValueError):
+        pass
+    import shutil as _sh
+    f = _sh.which("flutter")
+    if f:
+        return os.path.dirname(os.path.dirname(os.path.realpath(f)))
+    return None
+
+
+TOOLCHAIN_CACHES = {
+    "pubspec.yaml": (".pub-cache", ".dart-tool", ".dartServer", ".flutter", ".flutter-devtools",
+                     ".config/flutter", "fvm", "Library/Caches/flutter_engine"),
+    "package.json": (".npm", ".yarn", "Library/Caches/Yarn", "Library/pnpm", ".cache/node-gyp"),
+    "pyproject.toml": (".cache/pip", "Library/Caches/pip", ".cache/uv"),
+    "requirements.txt": (".cache/pip", "Library/Caches/pip"),
+    "go.mod": ("go/pkg/mod", "Library/Caches/go-build"),
+    "Cargo.toml": (".cargo/registry", ".cargo/git"),
+}
+
+
+def toolchain_writes(worktree, user_sandbox=None, home=None):
+    """Tool caches a toolchain writes on EVERY run (K1r4-M2, measured with word_app): the SDK
+    itself (`bin/cache` stamps), the per-manifest caches, plus the user's own
+    `sandbox.filesystem.allowWrite` entries (this user listed fvm, pub-cache, gradle, Xcode,
+    cocoapods for exactly this reason). Never anything under SECRET_READ_PATHS."""
+    home = home or os.path.expanduser("~")
+    out = []
+    sdk = flutter_sdk(worktree)
+    if sdk:
+        out.append(sdk + "/**")
+    for f, rels in TOOLCHAIN_CACHES.items():
+        if worktree and os.path.exists(os.path.join(worktree, f)):
+            out += [os.path.join(home, r) + "/**" for r in rels]
+    for a in ((user_sandbox or {}).get("filesystem") or {}).get("allowWrite") or []:
+        a2 = os.path.expanduser(a)
+        homes_ = {home, os.path.expanduser("~")}
+        if not any(a2.startswith(os.path.join(h, sec)) for h in homes_ for sec in SECRET_READ_PATHS):
+            out.append(a2 if a2.endswith("/**") else a2.rstrip("/") + "/**")
+    return list(dict.fromkeys(out))
 
 
 def gates_home(common_dir, base_sha):
@@ -488,9 +594,11 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
     if sandbox:
         e = env or os.environ
         homes = [x for x in (e.get("HOME"),) if x]
+        tw = toolchain_writes(worktree, merged_sandbox, home=os.path.expanduser("~"))
         forced = role_sandbox(rk, worktree, run_dir, issue, homes=homes,
                               config_dir=e.get("CLAUDE_CONFIG_DIR"),
-                              toolchain="C4" in (permissions.ROLE_CLASSES.get(rk) or ()))
+                              toolchain="C4" in (permissions.ROLE_CLASSES.get(rk) or ()),
+                              tool_writes=tw)
         out["sandbox"] = forced      # Q23: the role sandbox is the engine's, not merged
     elif merged_sandbox is not None:
         out["sandbox"] = merged_sandbox
@@ -507,6 +615,31 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
             h = {}
         if h:
             out["hooks"] = copy.deepcopy(h)
+    wrapped, skipped = [], []
+    if dropped and isinstance(dropped[0], dict):
+        # K1r4 (a): a hook that must run worktree code (`npx prettier`, `npm run format`) runs
+        # inside the role's own sandbox via sandbox-exec instead of being dropped
+        from guildcore.checks import SANDBOX_EXEC, sandbox_profile
+        if run_dir and out.get("sandbox") and os.path.exists(SANDBOX_EXEC):
+            prof = os.path.join(run_dir, "in", "hook-sandbox.sb")
+            os.makedirs(os.path.dirname(prof), exist_ok=True)
+            with open(prof, "w") as fh:
+                fh.write(sandbox_profile(out["sandbox"]))
+            os.chmod(prof, 0o444)
+            hk = out.setdefault("hooks", {})
+            for d in dropped:
+                cmd = d["hook"].get("command")
+                if not isinstance(cmd, str):
+                    skipped.append(d)
+                    continue
+                new_cmd = "%s -f '%s' /bin/sh -c %s" % (SANDBOX_EXEC, prof, "'" + cmd.replace("'", "'\\''") + "'")
+                grp = {"hooks": [dict(d["hook"], command=new_cmd)]}
+                if d.get("matcher") is not None:
+                    grp["matcher"] = d["matcher"]
+                hk.setdefault(d["event"], []).append(grp)
+                wrapped.append(cmd)
+        else:
+            skipped = list(dropped)
     if extra_hooks:
         hk = out.setdefault("hooks", {})
         for ev, groups in extra_hooks.items():
@@ -514,7 +647,9 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
             hk[ev] = list(hk[ev]) + list(groups)
     meta = {"user_settings": user_p, "project_base": base, "project_base_sha": base_sha,
             "local_settings": local_p, "main_checkout": main, "gates_dir": gates_dir,
-            "gates_digest": gates_digest, "hook_files": hook_files, "hooks_dropped": dropped,
+            "gates_digest": gates_digest, "hook_files": hook_files,
+            "hooks_sandboxed": wrapped,
+            "hooks_skipped": [d["hook"].get("command") if isinstance(d, dict) else d for d in skipped],
             "routing_in_settings_env": sorted(k for k in merged_env if k in ROUTING_KEYS)}
     path = None
     if run_dir:

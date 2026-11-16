@@ -141,13 +141,19 @@ class B2BaseOnlyHooks(unittest.TestCase):
         rd = S.render("developer", "implement", worktree=r, base="HEAD",
                       run_dir=os.path.join(tmpdir(self), "run"), user_settings=os.path.join(tmpdir(self), "u"))
         cmds = [h["command"] for g in rd.settings["hooks"].get("PreToolUse", []) for h in g["hooks"]]
-        self.assertEqual(len(cmds), 1)
-        self.assertNotIn("PostToolUse", rd.settings["hooks"])
-        path = cmds[0].split('"')[1]
+        base_cmds = [c for c in cmds if "sandbox-exec" not in c]
+        self.assertEqual(len(base_cmds), 1)
+        # K1r4 (a): the worktree-running hooks are wrapped in the role sandbox, not dropped
+        self.assertEqual(len([c for c in cmds if "sandbox-exec" in c]), 2)
+        post = [h["command"] for g in rd.settings["hooks"].get("PostToolUse", []) for h in g["hooks"]]
+        self.assertTrue(post and all(c.startswith("/usr/bin/sandbox-exec -f ") for c in post))
+        path = base_cmds[0].split('"')[1]
         self.assertTrue(path.startswith(os.path.join(r, ".git", "guild", "engine", "hooks")))
         self.assertEqual(open(path).read(), "echo base\n")
         self.assertFalse(os.access(path, os.W_OK))
-        self.assertEqual(len(rd.meta["hooks_dropped"]), 3)
+        self.assertEqual(sorted(rd.meta["hooks_sandboxed"]),
+                         sorted(["npx prettier --check .", "./scripts/fmt.sh", "npm run format"]))
+        self.assertEqual(rd.meta["hooks_skipped"], [])
         fs = rd.settings["sandbox"]["filesystem"]
         self.assertTrue(any(path.startswith(d[:-3]) for d in fs["denyWrite"] if d.endswith("/**")))
 

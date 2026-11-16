@@ -312,3 +312,39 @@ _RELEASE = re.compile(r"(^|/)(release|hotfix)[/-]?v?\d+(\.\d+)+$|^v?\d+\.\d+\.\d
 def branch_candidates(n, branches):
     rx = re.compile(r"(?<![0-9.])%d(?![0-9])" % int(n))
     return [b for b in branches if rx.search(b) and not _RELEASE.search(b)]
+
+
+# K1r4-M2: the engine's explicit dependency step — before roles and checks — with network to
+# these hosts only (through checks.netproxy; sandbox-exec itself allows loopback only).
+# Measured with word_app: pub needs pub.dev; the sqlite3 native-assets build hook downloads a
+# prebuilt binary from GitHub RELEASES (github.com → release-assets.githubusercontent.com,
+# read-only GETs; api.github.com is never listed).
+DEPS_HOSTS = {
+    "pubspec.yaml": ("pub.dev", "pub.dartlang.org", "storage.googleapis.com", "github.com",
+                     "objects.githubusercontent.com", "release-assets.githubusercontent.com"),
+    "package.json": ("registry.npmjs.org", "registry.yarnpkg.com"),
+    "pyproject.toml": ("pypi.org", "files.pythonhosted.org"),
+    "requirements.txt": ("pypi.org", "files.pythonhosted.org"),
+    "go.mod": ("proxy.golang.org", "sum.golang.org"),
+    "Cargo.toml": ("crates.io", "static.crates.io", "index.crates.io"),
+}
+
+
+def deps_hosts(worktree):
+    out = []
+    for f, hosts in DEPS_HOSTS.items():
+        if os.path.exists(os.path.join(worktree, f)):
+            out += [h for h in hosts if h not in out]
+    return out
+
+
+def deps_step(cmds, worktree, sandbox, tmp, env=None, hosts=None, timeout_s=1800):
+    """Run dependency commands (e.g. `flutter pub get`, a `--no-pub` warm-up test, `npm ci`)
+    under the role's sandbox profile with network limited to `hosts` via the allowlist proxy.
+    Returns (CheckResult, proxy summary {host:port allowed|DENIED: n})."""
+    from guildcore.checks.netproxy import AllowlistProxy
+    with AllowlistProxy(hosts if hosts is not None else deps_hosts(worktree)) as px:
+        e = dict(env or os.environ)
+        e.update(px.env())
+        r = run_command(cmds, timeout_s, cwd=worktree, env=e, sandbox=sandbox, tmp=tmp)
+        return r, px.summary()

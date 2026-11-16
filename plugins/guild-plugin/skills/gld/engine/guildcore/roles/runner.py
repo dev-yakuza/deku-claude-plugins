@@ -73,6 +73,16 @@ def result_contract():
     return text[a:b]
 
 
+def write_env_file(path, values):
+    import shlex
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        for k, v in sorted(values.items()):
+            fh.write("export %s=%s\n" % (k, shlex.quote(str(v))))
+    os.chmod(path, 0o444)
+    return path
+
+
 def git_identity(worktree):
     """The commit identity, read by the ENGINE (outside the sandbox) and passed as env — the
     role cannot read ~/.gitconfig."""
@@ -346,7 +356,8 @@ class Runner(object):
         for r in results:
             if viol:
                 r.notes.append("was %s" % r.status)
-                r.status, r.line, r.violations = "SCOPE", SC.render_pause_line(r.status, viol), viol
+                who = roles[0] if len(roles) == 1 else "one of " + ",".join(roles)   # K1r4-m1
+                r.status, r.line, r.violations = "SCOPE", SC.render_pause_line(who, viol), viol
             r.notes += SC.watch_warnings(before, after) + SC.remote_warnings(before, after)
         self._set_baseline(wt, issue, after)
         return results
@@ -420,7 +431,17 @@ class Runner(object):
         endpoint = C.endpoint_guard(self.parent_env, rendered.env, self.allow_local,
                                     self.allowed_endpoints)
         env = C.child_env(self.parent_env, rendered.env, cache=spec.cache, role_dir=run_dir)
-        env.update(git_identity(spec.worktree))      # ~/.gitconfig is denyRead (K1r3-M5)
+        # ~/.gitconfig is denyRead and git aborts on an unreadable global config (rc 128): the
+        # engine renders a SAFE global config and the commit identity (K1r3-M5, K1r4-M1). The
+        # CLI's subprocess env scrub drops such variables from the Bash env (measured), so they
+        # travel in CLAUDE_ENV_FILE — sourced by the Bash tool after the scrub; the file is in
+        # <run>/in (denyWrite for the role).
+        gitenv = dict(git_identity(spec.worktree))
+        gitenv.update(S.render_gitconfig(spec.worktree, os.path.join(run_dir, "in", "gitconfig")))
+        env.update(gitenv)
+        env["CLAUDE_ENV_FILE"] = write_env_file(os.path.join(run_dir, "in", "env.sh"), gitenv)
+        hook_notes = (["hook runs in the role sandbox: %s" % c for c in rendered.meta.get("hooks_sandboxed") or []] +
+                      ["hook SKIPPED (shown to the human): %s" % c for c in rendered.meta.get("hooks_skipped") or []])
         task = render_task(spec, run_dir, staged)
         with open(os.path.join(run_dir, "in", "task.md"), "w", encoding="utf-8") as fh:
             fh.write(task)
@@ -448,7 +469,7 @@ class Runner(object):
             return None
         deadline = self.now() + spec.timeout_s          # ONE budget for every session (K1-M4)
         deny = rendered.settings["permissions"]["deny"]
-        st_ = {"sid": str(uuid.uuid4()), "notes": [], "denials": [], "cost": 0.0, "rls": [],
+        st_ = {"sid": str(uuid.uuid4()), "notes": list(hook_notes), "denials": [], "cost": 0.0, "rls": [],
                "timed_out": False, "halted": False}
 
         def session(stdin, tag, kind, resume=None, session_id=None):

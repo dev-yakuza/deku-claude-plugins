@@ -359,7 +359,9 @@ class RenderedSettings(unittest.TestCase):
         self.assertIn(self.r + "/**", fs["allowWrite"])
         self.assertIn(run + "/out/**", fs["allowWrite"])
         self.assertNotIn(run + "/**", fs["allowWrite"])
-        self.assertNotIn("/a/**", fs["allowWrite"])            # user/local cannot widen
+        # the user's own tool-cache allowWrite entries are merged (K1r4-M2) — never a secret path
+        self.assertIn("/a/**", fs["allowWrite"])
+        self.assertFalse([a for a in fs["allowWrite"] if "/.ssh" in a or "/.config/gh" in a])
         common = os.path.join(self.r, ".git")
         self.assertNotIn(common + "/**", fs["allowWrite"])
         self.assertFalse([a for a in fs["allowWrite"] if a.startswith(common + "/guild")])
