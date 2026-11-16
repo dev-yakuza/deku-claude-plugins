@@ -1,0 +1,418 @@
+"""K1 — claude adapter (argv, env contract, endpoint guard, processes, stream-json), §5.1 permission
+rules, rendered settings, the after-role scope check and the schema validator."""
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+import unittest
+
+import _k1
+from _k1 import git, repo, tmpdir
+
+from guildcore import schema as SCH
+from guildcore.adapters import claude as C
+from guildcore.roles import permissions as P
+from guildcore.roles import scope as SC
+from guildcore.roles import settings as S
+
+STREAMS = os.path.join(_k1.K1FX, "streams")
+
+
+class EndpointGuard(unittest.TestCase):
+    def test_default_endpoint_passes(self):
+        self.assertEqual(C.endpoint_guard({}, {}), C.DEFAULT_ENDPOINT)
+        self.assertEqual(C.endpoint_guard({"ANTHROPIC_BASE_URL": "https://api.anthropic.com/"}), C.DEFAULT_ENDPOINT)
+
+    def test_parent_env_override_halts(self):
+        with self.assertRaises(C.EnvHalt) as cm:
+            C.endpoint_guard({"ANTHROPIC_BASE_URL": "http://127.0.0.1:11434"})
+        self.assertEqual(cm.exception.reason, "endpoint")
+        self.assertTrue(str(cm.exception).startswith("halted: env endpoint"))
+
+    def test_settings_env_override_halts(self):
+        with self.assertRaises(C.EnvHalt):
+            C.endpoint_guard({}, {"ANTHROPIC_BASE_URL": "http://10.0.0.1"})
+
+    def test_other_routing_keys_halt(self):
+        for k in ("CLAUDE_CODE_USE_BEDROCK", "ANTHROPIC_MODEL", "CLAUDE_CODE_USE_VERTEX"):
+            with self.assertRaises(C.EnvHalt):
+                C.endpoint_guard({k: "1"})
+
+    def test_allow_local_flag(self):
+        self.assertEqual(C.endpoint_guard({"ANTHROPIC_BASE_URL": "http://127.0.0.1:11434"}, allow_local=True),
+                         "http://127.0.0.1:11434")
+
+    def test_registered_gateway_only_for_base_url(self):
+        e = {"ANTHROPIC_BASE_URL": "https://gw.example.invalid/"}
+        self.assertEqual(C.endpoint_guard(e, allowed_endpoints=["https://gw.example.invalid"]),
+                         "https://gw.example.invalid")
+        with self.assertRaises(C.EnvHalt):
+            C.endpoint_guard(dict(e, ANTHROPIC_MODEL="x"), allowed_endpoints=["https://gw.example.invalid"])
+
+
+class EnvContract(unittest.TestCase):
+    def test_contract_wins_over_parent_and_settings(self):
+        env = C.child_env({"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "600000", "X": "1"},
+                          {"BASH_DEFAULT_TIMEOUT_MS": "1", "DISABLE_TELEMETRY": "1"})
+        for k, v in C.ENV_CONTRACT.items():
+            self.assertEqual(env[k], v)
+        self.assertEqual(env["X"], "1")
+        self.assertEqual(env["DISABLE_TELEMETRY"], "1")
+
+    def test_cache_modes(self):
+        self.assertEqual(C.child_env({}, cache="5m")["FORCE_PROMPT_CACHING_5M"], "1")
+        e = C.child_env({"FORCE_PROMPT_CACHING_5M": "1", "ENABLE_PROMPT_CACHING_1H": "1"}, cache="off")
+        self.assertEqual(e["DISABLE_PROMPT_CACHING"], "1")
+        self.assertNotIn("FORCE_PROMPT_CACHING_5M", e)
+        self.assertNotIn("ENABLE_PROMPT_CACHING_1H", e)
+
+    def test_judge_env(self):
+        e = C.child_env({}, judge=True, cache="off")
+        self.assertEqual(e["CLAUDE_CODE_DISABLE_CLAUDE_MDS"], "1")
+        self.assertEqual(e["CLAUDE_CODE_DISABLE_AUTO_MEMORY"], "1")
+
+    def test_suite_ceiling(self):
+        self.assertEqual(C.child_env({}, suite_ceiling_ms=7200000)["BASH_MAX_TIMEOUT_MS"], "7200000")
+
+
+class Argv(unittest.TestCase):
+    def test_role_argv_contract(self):
+        a = C.role_argv("sonnet", "persona", ["Bash(ls:*)"], ["Agent"], "/r", "/r/in/settings.json",
+                        session_id="u-1")
+        for f in ("--permission-mode", "dontAsk", "--setting-sources", "", "--strict-mcp-config",
+                  "--add-dir", "--append-system-prompt", "--session-id", "--output-format", "stream-json"):
+            self.assertIn(f, a)
+        self.assertEqual(a[a.index("--model") + 1], "sonnet")
+        self.assertNotIn("--dangerously-skip-permissions", a)
+
+    def test_resume_replaces_session_id(self):
+        a = C.role_argv("sonnet", "", [], [], None, "/s.json", session_id="u", resume="u")
+        self.assertIn("--resume", a)
+        self.assertNotIn("--session-id", a)
+
+    def test_judge_argv_inline_schema(self):
+        a = C.judge_argv("haiku", "sys", {"type": "object"}, "/s.json")
+        self.assertEqual(a[a.index("--json-schema") + 1], '{"type":"object"}')
+        self.assertEqual(a[a.index("--tools") + 1], "")
+        for f in ("--no-session-persistence", "--disable-slash-commands", "--system-prompt"):
+            self.assertIn(f, a)
+
+    def test_forbidden_flags_refused(self):
+        for f in C.FORBIDDEN_FLAGS:
+            with self.assertRaises(ValueError):
+                C.check_argv(["claude", "-p", "--model", "x", "--setting-sources", "", "--settings", "s", f])
+        with self.assertRaises(ValueError):
+            C.check_argv(["claude", "-p", "--model", "x"])
+
+
+class Processes(unittest.TestCase):
+    def test_timeout_kills_the_group(self):
+        d = tmpdir(self)
+        script = "import subprocess,time; subprocess.Popen(['sleep','60']); time.sleep(60)"
+        rec = {}
+        p = C.run_process([sys.executable, "-c", script], dict(os.environ), d, "", os.path.join(d, "o"),
+                          os.path.join(d, "e"), 1.5, on_start=lambda r: rec.update(r), poll_s=0.1)
+        self.assertTrue(p.timed_out)
+        self.assertEqual(p.killed_by, "timeout")
+        with self.assertRaises(OSError):
+            os.killpg(rec["pgid"], 0)
+
+    def test_halt_check_kills(self):
+        d = tmpdir(self)
+        p = C.run_process([sys.executable, "-c", "import time; time.sleep(30)"], dict(os.environ), d, "",
+                          os.path.join(d, "o"), os.path.join(d, "e"), 60, halt_check=lambda: True, poll_s=0.1)
+        self.assertEqual(p.killed_by, "halt")
+
+    def test_safe_kill_refuses_on_mismatch(self):
+        p = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(lambda: (p.kill(), p.wait()))
+        rec = {"pid": p.pid, "pgid": os.getpgid(p.pid), "start_time": "Mon Jan  1 00:00:00 2001"}
+        self.assertEqual(C.safe_kill_group(rec), "mismatch")
+        rec2 = dict(rec, start_time=C.process_start(p.pid), session_id="not-in-cmdline")
+        self.assertEqual(C.safe_kill_group(rec2), "mismatch")
+        self.assertIsNone(p.poll())
+        rec3 = dict(rec, start_time=C.process_start(p.pid))
+        self.assertEqual(C.safe_kill_group(rec3, grace_s=2), "killed")
+
+    def test_gone_process(self):
+        self.assertEqual(C.safe_kill_group({"pid": 999999, "pgid": 999999, "start_time": "x"}), "gone")
+
+
+class Streams(unittest.TestCase):
+    def test_real_result_file_stream(self):
+        st = C.read_stream(os.path.join(STREAMS, "explorer-result-file.jsonl"))
+        self.assertIsNotNone(st.init)
+        self.assertTrue(st.session_id)
+        self.assertEqual([t["name"] for t in st.tool_uses], ["Read", "Write", "Write"])
+        self.assertTrue(all(d["decision"] == "accept" for d in st.decisions.values()))
+        self.assertIn(">>> RESULT <<<", st.last_text)
+        self.assertEqual(st.result["subtype"], "success")
+
+    def test_real_denial_stream(self):
+        st = C.read_stream(os.path.join(STREAMS, "developer-push-denied.jsonl"))
+        ds = st.denial_records()
+        self.assertEqual(len(ds), 1)
+        self.assertEqual(ds[0]["command"], "git push origin HEAD")
+        self.assertEqual(ds[0]["reason_type"], "subcommandResults")
+
+    def test_torn_lines_counted(self):
+        st = C.parse_stream('{"type":"result","result":"x"}\n{"type":"assi')
+        self.assertEqual(st.torn, 1)
+        self.assertEqual(st.last_text, "x")
+
+    def test_permission_denials_fallback(self):
+        st = C.parse_stream(json.dumps({"type": "result", "permission_denials": [
+            {"tool_name": "Bash", "tool_use_id": "t", "tool_input": {"command": "env"}}]}))
+        self.assertEqual(st.denial_records()[0]["command"], "env")
+
+    def test_missing_file(self):
+        self.assertEqual(C.read_stream("/nonexistent/x").events, 0)
+
+
+class Permissions(unittest.TestCase):
+    def test_always_deny_everywhere(self):
+        for role, task in (("developer", "implement"), ("qa", None), ("explorer", None),
+                           ("tester", "verify"), ("auditor", None)):
+            allow, deny = P.role_rules(role, task)
+            for d in P.ALWAYS_DENY:
+                self.assertIn(d, deny, (role, d))
+
+    def test_gh_api_not_in_c2(self):
+        allow, deny = P.role_rules("developer", "implement")
+        self.assertFalse([a for a in allow if a.startswith("Bash(gh api")])
+        self.assertIn("Bash(gh api -X*)", deny)
+        self.assertIn("Bash(gh api * --method*)", deny)
+
+    def test_developer_paths_scoped(self):
+        allow, _ = P.role_rules("developer", "implement", worktree="/w", run_dir="/r")
+        self.assertIn("Write(//w/**)", allow)
+        self.assertIn("Edit(//w/**)", allow)
+        self.assertNotIn("Write", allow)
+        self.assertIn("Read(//r/in/**)", allow)
+        self.assertIn("Write(//r/out/**)", allow)
+
+    def test_readers_cannot_sed_in_place(self):
+        _, deny = P.role_rules("tester", "verify")
+        self.assertIn("Bash(sed -i:*)", deny)
+        allow, _ = P.role_rules("tester", "verify")
+        self.assertNotIn("Bash(mkdir:*)", allow)
+
+    def test_scopes(self):
+        a, _ = P.role_rules("tester", "cases", worktree="/w", issue=12)
+        self.assertIn("Write(//w/docs/specs/12/test-cases.md)", a)
+        a, _ = P.role_rules("qa", None, worktree="/w")
+        self.assertIn("Write(//w/test/**)", a)
+        a, _ = P.role_rules("auditor", None, run_dir="/r")
+        self.assertEqual(a, ["Read", "Grep", "Glob", "Read(//r/in/**)"])
+
+    def test_toolchain(self):
+        d = repo(self, {"pubspec.yaml": "name: x\n", "scripts/run.sh": "#!/bin/sh\n", "package.json": "{}"})
+        os.chmod(os.path.join(d, "scripts", "run.sh"), 0o755)
+        t = P.toolchain_prefixes(d, {"test": ["flutter test --x", "npx cspell '**' --x"]}, {"lint_cmd": "flutter analyze"},
+                                 git(d, "ls-files").split("\n"))
+        for want in ("flutter test", "npx cspell", "flutter analyze", "flutter", "dart", "npm",
+                     "scripts/run.sh", "./scripts/run.sh", "timeout"):
+            self.assertIn(want, t)
+
+    def test_role_key(self):
+        self.assertEqual(P.role_key("tech-lead", "conformance"), "tech-lead-review")
+        self.assertEqual(P.role_key("security", None), "reviewer")
+
+    def test_summary_mentions_limits(self):
+        s = P.summary("developer", "implement", ["flutter test"])
+        self.assertIn("Never push", s)
+        self.assertIn("BLOCKED: permission", s)
+        self.assertIn("Read, Grep and Glob", P.summary("auditor"))
+
+
+class RenderedSettings(unittest.TestCase):
+    def setUp(self):
+        self.r = repo(self, {".claude/settings.json": {
+            "permissions": {"allow": ["Bash(git:*)"], "deny": ["Bash(rm -rf .git:*)"]},
+            "env": {"PROJ": "1", "PATH": "/evil"},
+            "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command",
+                      "command": "python3 \"${CLAUDE_PROJECT_DIR}/.claude/guild/gates/scripts/g.py\""}]}]}},
+            ".claude/guild/gates/scripts/g.py": "print(1)\n"})
+        self.base = git(self.r, "rev-parse", "HEAD")
+        self.user = os.path.join(tmpdir(self), "settings.json")
+        with open(self.user, "w") as fh:
+            json.dump({"permissions": {"allow": ["Bash(*)"], "deny": ["Bash(cat ~/.ssh/*)"]},
+                       "env": {"DISABLE_TELEMETRY": "1"},
+                       "sandbox": {"filesystem": {"allowWrite": ["/a/**"]}},
+                       "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify"}]}]}}, fh)
+        with open(os.path.join(self.r, ".claude", "settings.local.json"), "w") as fh:
+            json.dump({"permissions": {"deny": ["Bash(sudo:*)"], "allow": ["Bash(x:*)"]},
+                       "sandbox": {"enabled": False, "filesystem": {"allowWrite": ["/b/**"]}}}, fh)
+
+    def render(self, **kw):
+        run = os.path.join(tmpdir(self), "run")
+        return S.render("developer", "implement", worktree=self.r, base=self.base, run_dir=run,
+                        user_settings=self.user, **kw), run
+
+    def test_deny_union_allow_not_carried(self):
+        rd, _ = self.render()
+        deny, allow = rd.settings["permissions"]["deny"], rd.settings["permissions"]["allow"]
+        for d in ("Bash(cat ~/.ssh/*)", "Bash(rm -rf .git:*)", "Bash(sudo:*)", "Bash(git push:*)"):
+            self.assertIn(d, deny)
+        for a in ("Bash(*)", "Bash(git:*)", "Bash(x:*)"):
+            self.assertNotIn(a, allow)
+
+    def test_env_returned_not_written(self):
+        rd, run = self.render()
+        self.assertEqual(rd.env["DISABLE_TELEMETRY"], "1")
+        self.assertEqual(rd.env["PROJ"], "1")
+        on_disk = json.load(open(os.path.join(run, "in", "settings.json")))
+        self.assertNotIn("env", on_disk)
+
+    def test_sandbox_merged(self):
+        rd, _ = self.render()
+        self.assertEqual(rd.settings["sandbox"], {"filesystem": {"allowWrite": ["/a/**", "/b/**"]}, "enabled": False})
+
+    def test_hooks_from_base_with_exported_gates(self):
+        # a branch commit that changes the hook must not reach the rendered settings
+        sp = os.path.join(self.r, ".claude", "settings.json")
+        cur = json.load(open(sp))
+        cur["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = "echo branch"
+        json.dump(cur, open(sp, "w"))
+        git(self.r, "commit", "-qam", "branch hook")
+        rd, run = self.render()
+        cmd = rd.settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        self.assertIn(os.path.join(run, "in", "gates") + "/scripts/g.py", cmd)
+        self.assertNotIn("CLAUDE_PROJECT_DIR", cmd)
+        self.assertTrue(os.path.isfile(os.path.join(run, "in", "gates", "scripts", "g.py")))
+        self.assertNotIn("Stop", rd.settings["hooks"])        # user hooks are never carried
+        self.assertEqual(rd.meta["project_base_sha"], self.base)
+
+    def test_no_hooks_for_judges(self):
+        rd, _ = self.render(hooks=False)
+        self.assertNotIn("hooks", rd.settings)
+
+    def test_routing_keys_reported(self):
+        with open(self.user, "w") as fh:
+            json.dump({"env": {"ANTHROPIC_BASE_URL": "http://x"}}, fh)
+        rd, _ = self.render()
+        self.assertEqual(rd.meta["routing_in_settings_env"], ["ANTHROPIC_BASE_URL"])
+
+    def test_unknown_base(self):
+        with self.assertRaises(S.SettingsError):
+            S.render("developer", "implement", worktree=self.r, base="nope", user_settings=self.user)
+
+    def test_extra_hooks(self):
+        rd, _ = self.render(extra_hooks={"PermissionDenied": [{"matcher": "*", "hooks": []}]})
+        self.assertIn("PermissionDenied", rd.settings["hooks"])
+
+
+class Scope(unittest.TestCase):
+    def setUp(self):
+        self.r = repo(self, {"lib/a.dart": "a\n", "docs/specs/7/test-cases.md": "x\n", "test/a_test.dart": "t\n"})
+        git(self.r, "switch", "-q", "-c", "feat")
+
+    def snap(self):
+        return SC.snapshot(self.r)
+
+    def write(self, rel, text="z\n"):
+        p = os.path.join(self.r, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "a") as fh:
+            fh.write(text)
+
+    def test_reader_writing_is_a_violation(self):
+        b = self.snap()
+        self.write("lib/a.dart")
+        v = SC.check(self.r, b, self.snap(), ["reviewer"])
+        self.assertTrue(v and "lib/a.dart" in v[0])
+
+    def test_second_edit_of_dirty_file_seen(self):
+        self.write("lib/a.dart")
+        b = self.snap()
+        self.write("lib/a.dart", "again\n")
+        self.assertEqual(SC.changed_paths(b, self.snap()), ["lib/a.dart"])
+
+    def test_tester_cases_scope(self):
+        b = self.snap()
+        self.write("docs/specs/7/test-cases.md")
+        self.assertEqual(SC.check(self.r, b, self.snap(), ["tester-cases"], issue=7), [])
+
+    def test_parallel_union_and_attribution(self):
+        b = self.snap()
+        self.write("docs/specs/7/test-cases.md")
+        self.write("lib/a.dart")
+        v = SC.check(self.r, b, self.snap(), ["tester-cases", "tech-writer", "reviewer"], issue=7)
+        self.assertEqual(len(v), 1)
+        self.assertIn("one of tester-cases,tech-writer,reviewer wrote lib/a.dart", v[0])
+
+    def test_protected_paths_for_everyone(self):
+        b = self.snap()
+        self.write(".claude/settings.json", "{}")
+        v = SC.check(self.r, b, self.snap(), ["developer"], branch="feat")
+        self.assertTrue(any("protected" in x for x in v))
+
+    def test_developer_ff_commit_ok(self):
+        b = self.snap()
+        self.write("lib/a.dart")
+        git(self.r, "commit", "-qam", "dev")
+        self.assertEqual(SC.check(self.r, b, self.snap(), ["developer"], branch="feat"), [])
+
+    def test_qa_commit_outside_scope(self):
+        b = self.snap()
+        self.write("lib/a.dart")
+        git(self.r, "commit", "-qam", "qa")
+        v = SC.check(self.r, b, self.snap(), ["qa"], branch="feat")
+        self.assertTrue(any("lib/a.dart" in x for x in v))
+
+    def test_reader_commit_and_branch_creation(self):
+        b = self.snap()
+        git(self.r, "branch", "side")
+        v = SC.check(self.r, b, self.snap(), ["explorer"])
+        self.assertTrue(any("refs/heads/side created" in x for x in v))
+
+    def test_developer_left_detached(self):
+        b = self.snap()
+        git(self.r, "switch", "-q", "--detach")
+        v = SC.check(self.r, b, self.snap(), ["developer"], branch="feat")
+        self.assertTrue(any("HEAD is" in x for x in v))
+
+    def test_non_ff_move(self):
+        b = self.snap()
+        git(self.r, "commit", "-q", "--amend", "-m", "rewritten")
+        v = SC.check(self.r, b, self.snap(), ["developer"], branch="feat")
+        self.assertTrue(any("non-fast-forward" in x for x in v))
+
+    def test_pause_line(self):
+        self.assertTrue(SC.render_pause_line("qa", ["qa wrote lib/a.dart"]).startswith("qa wrote outside its scope — "))
+
+
+class Schema(unittest.TestCase):
+    S1 = {"type": "object", "required": ["a"], "additionalProperties": False,
+          "properties": {"a": {"type": "string", "enum": ["x", "unsure"]},
+                         "b": {"type": "array", "items": {"type": "integer"}, "minItems": 1}}}
+
+    def test_valid(self):
+        self.assertTrue(SCH.valid({"a": "x", "b": [1]}, self.S1))
+
+    def test_errors(self):
+        e = SCH.errors({"a": "y", "b": ["1"], "c": 1}, self.S1)
+        self.assertTrue(any("not in" in x for x in e))
+        self.assertTrue(any("$.b[0]" in x for x in e))
+        self.assertTrue(any("unexpected key c" in x for x in e))
+        self.assertTrue(SCH.errors({}, self.S1))
+
+    def test_bool_is_not_integer(self):
+        self.assertTrue(SCH.errors(True, {"type": "integer"}))
+
+    def test_anyof_oneof(self):
+        s = {"anyOf": [{"type": "string"}, {"type": "null"}]}
+        self.assertTrue(SCH.valid(None, s))
+        self.assertFalse(SCH.valid(1, s))
+        self.assertFalse(SCH.valid(1, {"oneOf": [{"type": "integer"}, {"type": "number"}]}))
+
+    def test_unknown_keyword_is_a_schema_error(self):
+        with self.assertRaises(SCH.SchemaError):
+            SCH.check_schema({"type": "object", "if": {}})
+
+
+if __name__ == "__main__":
+    unittest.main()

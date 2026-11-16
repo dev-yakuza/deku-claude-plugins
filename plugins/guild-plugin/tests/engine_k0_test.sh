@@ -31,7 +31,7 @@ command -v jq >/dev/null 2>&1 || gld_skip "jq is not installed — the consumer-
 WORK="$(mktemp -d)" || { echo "mktemp -d failed" >&2; exit 1; }
 trap 'rm -rf "$WORK"' EXIT
 OUT="$WORK/unittest.out"
-( cd "$HERE/engine" && PYTHONDONTWRITEBYTECODE=1 TMPDIR="$WORK" "$PY" -m unittest discover -s . -p 'test_*.py' -v ) >"$OUT" 2>&1
+( cd "$HERE/engine" && PYTHONDONTWRITEBYTECODE=1 TMPDIR="$WORK" "$PY" -m unittest discover -s . -p 'test_[!k]*.py' -v ) >"$OUT" 2>&1
 RC=$?
 grep -E '\.\.\. (ok|FAIL|ERROR|skipped)' "$OUT" | sed -E 's/^(.*) \.\.\. ok$/  PASS  \1/; s/^(.*) \.\.\. (FAIL|ERROR)$/  FAIL  \1/; s/^(.*) \.\.\. skipped.*$/  SKIP  \1/'
 PASS=$(grep -cE '\.\.\. ok$' "$OUT")
