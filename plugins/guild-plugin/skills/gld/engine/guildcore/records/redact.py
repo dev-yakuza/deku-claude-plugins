@@ -33,7 +33,7 @@ def patterns():
 # headers or blank lines) or a PuTTY key file — is replaced WHOLE by the token. Record structure
 # survives because every other field is a separate value; a renderer whose only free text is one
 # prose value (a pause body) loses that whole prose — a pasted key must not be posted.
-KEY_VALUE_RE = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|PuTTY-User-Key-File-\d+:")
+KEY_VALUE_RE = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|PuTTY-User-Key-File-\d+:")
 
 
 def redact(text):

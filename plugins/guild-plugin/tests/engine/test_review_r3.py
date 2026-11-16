@@ -17,6 +17,7 @@ SHAPES = {
     "blank-line-inside": "-----BEGIN PRIVATE KEY-----\n" + B64 + "\n\n" + B64 + "\n-----END PRIVATE KEY-----",
     "encrypted-pkcs8": "-----BEGIN ENCRYPTED PRIVATE KEY-----\n" + B64 + "\n-----END ENCRYPTED PRIVATE KEY-----",
     "putty": "PuTTY-User-Key-File-3: ssh-rsa\nEncryption: none\nPrivate-Lines: 1\n" + B64,
+    "pgp": "-----BEGIN PGP PRIVATE KEY BLOCK-----\n\n" + B64 + "\n-----END PGP PRIVATE KEY BLOCK-----",  # K0-m22
 }
 
 
