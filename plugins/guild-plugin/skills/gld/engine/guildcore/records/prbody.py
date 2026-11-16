@@ -11,7 +11,6 @@ byte-identical (§6.1 — review reads it).
 import re
 
 from guildcore.records import markers
-from guildcore.records.redact import redact
 
 UNATTENDED = "unattended-log"
 UNATTENDED_HEADING = "## 무인 결정 로그 (GLD_UNATTENDED)"
@@ -28,7 +27,7 @@ def migrate_unattended(body):
     """Wrap a bare unattended-log section in its markers. Idempotent: a body that already has
     the marker, or has no heading, is returned unchanged."""
     body = body or ""
-    if markers.open_tag(UNATTENDED) in body:
+    if markers.marker_span(body, UNATTENDED) is not None:
         return body
     lines = body.split("\n")
     start = None
@@ -39,8 +38,16 @@ def migrate_unattended(body):
     if start is None:
         return body
     end = len(lines)
+    fence = None
     for j in range(start + 1, len(lines)):
         c = markers.clean(lines[j])
+        f = re.match(r"^\s*(```+|~~~+)", c)
+        if f:                                   # a `## ` inside fenced code is no heading (K0-m7)
+            mark = f.group(1)[0] * 3
+            fence = None if fence and mark == fence else (fence or mark)
+            continue
+        if fence:
+            continue
         if c.startswith("## ") or c.startswith("<!-- guild:") or c.startswith("<!-- /guild:"):
             end = j
             break
@@ -56,8 +63,8 @@ def migrate_unattended(body):
 def render_unattended(entries):
     """`entries` = [str] one line each (interpretation · rationale · "사람 확인 요")."""
     lines = [UNATTENDED_HEADING] + ["- " + " ".join(e.split()) for e in entries]
-    return "\n".join([markers.open_tag(UNATTENDED), redact("\n".join(lines)),
-                      markers.close_tag(UNATTENDED)])
+    return markers.assert_own_markers("\n".join([markers.open_tag(UNATTENDED), markers.finish("\n".join(lines)),
+                                                  markers.close_tag(UNATTENDED)]), UNATTENDED)
 
 
 def unattended_entries(body):

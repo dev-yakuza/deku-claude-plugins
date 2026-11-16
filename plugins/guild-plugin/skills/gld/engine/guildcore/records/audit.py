@@ -19,7 +19,6 @@ line (a legacy re-statement may move it). Token recognition mirrors sprint/retro
 import re
 
 from guildcore.records import markers
-from guildcore.records.redact import redact
 
 NAME = "auditor:execute"
 VIOLATION = "auditor-violation"
@@ -105,8 +104,25 @@ class AuditRecord(object):
         return out
 
 
+def all_from_comments(comments):
+    """Every auditor:execute comment's record in id order — what sprint/retro.md's jq joins and
+    counts (K0-m6: a duplicate comment left by a write race still counts there)."""
+    return [AuditRecord.parse(markers.body_of(c), [c.get("id")])
+            for c in sorted(markers.containing(comments, NAME), key=lambda c: c.get("id") or 0)]
+
+
+def counts_all(comments):
+    """retro's view: counts summed over every auditor:execute comment."""
+    tot = {}
+    for r in all_from_comments(comments):
+        for k, v in r.counts().items():
+            tot[k] = tot.get(k, 0) + v
+    return tot
+
+
 def from_comments(comments):
-    """The lowest-id record comment (§2.7). Returns None when absent."""
+    """The canonical record: the lowest-id comment (§2.7). Returns None when absent. Note
+    `counts()` on it is the canonical comment's view; `counts_all()` is retro's."""
     c = markers.find(comments, NAME, pick="lowest")
     if c is None:
         return None
@@ -139,7 +155,7 @@ def render_block(n, invocation, head, findings=(), role_axis=(), local_pass=None
         lines.append("findings: none")
     lines.extend(findings)
     lines.extend(role_axis)
-    return redact("\n".join(lines))
+    return markers.assert_own_markers(markers.finish("\n".join(lines)))
 
 
 def lint_block(block_text):

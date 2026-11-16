@@ -57,27 +57,86 @@ def is_guild_comment(body):
     return "<!-- guild:" in (body or "")
 
 
+ZWSP = "\u200b"
+_NEUTRAL_RE = re.compile(r"<!--(\s*/?)guild:")
+# bare names status.md step 2 tests with `test("guild:<x>")` over all bodies
+_BARE_RE = re.compile(r"guild:(?=(?:analyze|design|test|qa|children|integration):output"
+                      r"|test-evidence:step-)")
+
+
+def neutralize(text):
+    """K0-B1: a value must never carry a live Guild marker. `<!-- guild:` / `<!-- /guild:` and
+    the bare output names status presence reads get a zero-width space after `guild`, so no
+    reader (engine or the prose's jq) can mistake a quoted marker for a record."""
+    text = _NEUTRAL_RE.sub(lambda m: "<!--" + m.group(1) + "guild" + ZWSP + ":", text or "")
+    return _BARE_RE.sub("guild" + ZWSP + ":", text)
+
+
+def finish(text):
+    """The last step of every engine renderer over the text it fills in: redact (INV5), then
+    neutralize (K0-B1)."""
+    from guildcore.records.redact import redact
+    return neutralize(redact(text))
+
+
+def assert_own_markers(out, name=None):
+    """Post-render check: the only Guild markers in `out` are `name`'s own open/close lines
+    (none at all when name is None — a bare block), and no secret survived."""
+    from guildcore.records.redact import has_secret
+    own = {open_tag(name), close_tag(name)} if name else set()
+    for m in re.finditer(r"<!--\s*/?guild:[^>]*-->", out):
+        if m.group(0) not in own:
+            raise ValueError("rendered record carries a foreign marker: %s" % m.group(0))
+    if name is None and _BARE_RE.search(out):
+        raise ValueError("rendered block carries a bare output marker name")
+    if has_secret(out):
+        raise ValueError("rendered record still carries a secret")
+    return out
+
+
+def _line_spans(body, line):
+    """(start, end) offsets of every line equal to `line` (a trailing \r tolerated)."""
+    out, pos = [], 0
+    for ln in body.split("\n"):
+        if clean(ln) == line:
+            out.append((pos, pos + len(clean(ln))))     # a CRLF line's \r stays outside
+        pos += len(ln) + 1
+    return out
+
+
+def marker_span(body, name):
+    """K0-M2: the marker block anchored on WHOLE LINES — a quoted inline occurrence is never a
+    marker. Returns (start, end) of open-line start .. close-line end, or None. Two real blocks,
+    or an open line without a close line, raise ValueError (never guess which to touch)."""
+    opens = _line_spans(body, open_tag(name))
+    if not opens:
+        return None
+    if len(opens) > 1:
+        raise ValueError("marker %s appears on %d lines — refusing to choose" % (name, len(opens)))
+    closes = [c for c in _line_spans(body, close_tag(name)) if c[0] > opens[0][0]]
+    if not closes:
+        raise ValueError("marker %s has no closing marker" % name)
+    return opens[0][0], closes[0][1]
+
+
 def inner(body, name):
-    """Text strictly between the first opening marker and its closing marker, or None."""
-    o, c = open_tag(name), close_tag(name)
-    i = body.find(o)
-    if i < 0:
+    """Text strictly between the line-anchored opening and closing marker lines, or None."""
+    sp = marker_span(body or "", name)
+    if sp is None:
         return None
-    j = body.find(c, i + len(o))
-    if j < 0:
-        return None
-    return body[i + len(o):j]
+    blk = body[sp[0]:sp[1]]          # open line … close line (always two distinct lines)
+    return blk[blk.index("\n") + 1:blk.rindex("\n") + 1]
 
 
 def splice(body, name, block):
     """INV4: replace the `<name>` marker block of a PR body with `block` (which carries its own
-    markers), remove it when `block` is None, or append it when absent. Every byte outside the
-    marker pair is preserved. An opening marker without its closing one is NOT spliced — the
-    caller gets ValueError (a truncated read must never be written back, qa.md Step 2.5)."""
+    markers), remove it when `block` is None, or append it when absent. Markers count only as
+    whole lines (K0-M2); every byte outside the block is preserved. Two blocks, or an opening
+    line without its closing one, are NOT spliced — ValueError (a truncated read must never be
+    written back, qa.md Step 2.5)."""
     body = body or ""
-    o, c = open_tag(name), close_tag(name)
-    i = body.find(o)
-    if i < 0:
+    sp = marker_span(body, name)
+    if sp is None:
         if block is None:
             return body
         if not body or body.endswith("\n\n"):
@@ -87,10 +146,7 @@ def splice(body, name, block):
         else:
             sep = "\n\n"
         return body + sep + block
-    j = body.find(c, i + len(o))
-    if j < 0:
-        raise ValueError("marker %s has no closing marker" % name)
-    end = j + len(c)
+    i, end = sp
     if block is None:
         # drop the pair and one following newline so no blank-line residue piles up
         if body[end:end + 1] == "\n":
@@ -175,6 +231,10 @@ class BlockDoc(object):
     def insert(self, block_text):
         """Append a rendered block immediately before the tail (H§B write rule)."""
         new = BlockDoc.parse(block_text, self.heading_re, self.tail_re)
+        if any(l.endswith("\r") for l in self.head + self.tail + [x for b in self.blocks for x in b.lines]):
+            for nb in new.blocks:                    # match the body's CRLF line ends (K0-m3)
+                nb.heading = nb.heading if nb.heading.endswith("\r") else nb.heading + "\r"
+                nb.lines = [l if l.endswith("\r") else l + "\r" for l in nb.lines]
         self.blocks.extend(new.blocks)
         if new.head and any(clean(x) for x in new.head):
             raise ValueError("block text must start with its heading")

@@ -10,7 +10,6 @@ CR-M10), `ran-at:` (qa:output, C5).
 import re
 
 from guildcore.records import markers
-from guildcore.records.redact import redact
 
 STAGE_OUTPUTS = ("analyze:output", "design:output", "test-evidence:step-1", "test:output",
                  "qa:output")
@@ -70,10 +69,11 @@ def qa_last_ran(comments):
 
 def render_loopback_lines(reason, signature):
     sig = signature if isinstance(signature, str) else ",".join(sorted(signature))
-    return "loopback-reason: %s\nloopback-signature: %s" % (" ".join(reason.split()), sig)
+    return markers.assert_own_markers(markers.finish(
+        "loopback-reason: %s\nloopback-signature: %s" % (" ".join(reason.split()), " ".join(sig.split()))))
 
 
 def render_recheck_note(ts, green, summary):
     """C12: `/gld test N` on done records only this note (no test:output, label or loopback)."""
-    return "%s\nrecheck test %s: %s — %s" % (markers.open_tag("note"), ts,
-                                             "green" if green else "red", redact(" ".join(summary.split())))
+    return markers.assert_own_markers("%s\n%s" % (markers.open_tag("note"), markers.finish(
+        "recheck test %s: %s — %s" % (ts, "green" if green else "red", " ".join(summary.split())))), "note")

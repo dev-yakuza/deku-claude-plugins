@@ -10,7 +10,6 @@ blocks after the last reset. `<n>` of a new block = all numbered headings + 1 (a
 import re
 
 from guildcore.records import markers
-from guildcore.records.redact import redact
 
 NAME = "loopback"
 CAP = 2  # H§H verify row: "this row defines the cap; every other file says <cap>"
@@ -98,21 +97,22 @@ def render_block(n, from_, at, branch, reason, signature, decided=None, override
     if from_ not in FROM_VALUES:
         raise ValueError("from must be one of %s" % (FROM_VALUES,))
     sig = signature if isinstance(signature, str) else ",".join(sorted(signature))
-    lines = ["### loopback %d" % n, "from: %s" % from_, "at: %s" % at, "branch: %s" % branch,
-             "reason: %s" % redact(" ".join((reason or "").split())), "signature: %s" % sig]
+    lines = ["### loopback %d" % n, "from: %s" % from_, "at: %s" % at,
+             "branch: %s" % " ".join((branch or "").split()),
+             "reason: %s" % " ".join((reason or "").split()), "signature: %s" % " ".join(sig.split())]
     if decided:
         lines.append("decided: %s" % decided)
     if override:
         lines.append("override: %s" % override)
-    return "\n".join(lines)
+    return markers.assert_own_markers(markers.finish("\n".join(lines)))
 
 
 def render_reset(at, by="human"):
-    return "\n".join(["### loopback-reset", "at: %s" % at, "by: %s" % by])
+    return markers.assert_own_markers(markers.finish("\n".join(["### loopback-reset", "at: %s" % at, "by: %s" % by])))
 
 
 def render_new_record(block_text):
-    return "\n".join([markers.open_tag(NAME), block_text, markers.close_tag(NAME)])
+    return markers.assert_own_markers("\n".join([markers.open_tag(NAME), block_text, markers.close_tag(NAME)]), NAME)
 
 
 def append(body, block_text):

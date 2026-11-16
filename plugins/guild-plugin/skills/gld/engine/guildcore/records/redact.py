@@ -8,6 +8,7 @@ an error, never "nothing to redact".
 
 import importlib.util
 import os
+import re
 
 REPLACEMENT = "[REDACTED]"
 _GATE = os.path.join(os.path.dirname(__file__), "..", "..", "..", "gates", "gate_precommit.py")
@@ -26,8 +27,18 @@ def patterns():
     return _PATTERNS
 
 
+# Redaction-only extensions (the gate's patterns detect; these also SPAN what must go). A PEM
+# private key: the gate matches its BEGIN line, redaction must take the body to its END line (or
+# the end of the text when the END line is missing) — K0-M1.
+REDACT_EXTRA = [
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)"),
+]
+
+
 def redact(text):
     out = text or ""
+    for rx in REDACT_EXTRA:
+        out = rx.sub(REPLACEMENT, out)
     for rx in patterns():
         out = rx.sub(REPLACEMENT, out)
     return out

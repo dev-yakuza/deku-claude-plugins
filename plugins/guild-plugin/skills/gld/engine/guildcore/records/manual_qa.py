@@ -13,7 +13,6 @@ Spliced into the PR body in place (INV4 — everything outside the marker pair i
 import re
 
 from guildcore.records import markers
-from guildcore.records.redact import redact
 
 NAME = "manual-qa"
 HEADING = "## 사람 QA 체크리스트 (Manual Test Checklist)"
@@ -37,14 +36,11 @@ class Checklist(object):
 def from_pr_body(body):
     """The full marker block (markers included) of a PR body, or None."""
     body = body or ""
-    o, c = markers.open_tag(NAME), markers.close_tag(NAME)
-    i = body.find(o)
-    if i < 0:
+    try:
+        sp = markers.marker_span(body, NAME)          # whole-line markers only (K0-M2)
+    except ValueError:
         return None
-    j = body.find(c, i)
-    if j < 0:
-        return None
-    return Checklist(body[i:j + len(c)])
+    return Checklist(body[sp[0]:sp[1]]) if sp else None
 
 
 def render(items, none_line=None):
@@ -53,7 +49,8 @@ def render(items, none_line=None):
     lines = [HEADING, INTRO] + ["- [ ] " + " ".join(i.split()) for i in items]
     if none_line:
         lines.append(none_line)
-    return "\n".join([markers.open_tag(NAME), redact("\n".join(lines)), markers.close_tag(NAME)])
+    return markers.assert_own_markers("\n".join([markers.open_tag(NAME), markers.finish("\n".join(lines)),
+                                                  markers.close_tag(NAME)]), NAME)
 
 
 def splice(pr_body, block):

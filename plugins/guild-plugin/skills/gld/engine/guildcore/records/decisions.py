@@ -21,21 +21,31 @@ redacted (INV5). This module is grammar only — semantics (pending, live, numbe
 import re
 
 from guildcore.records import markers
-from guildcore.records.redact import redact
 
 NAME = "decisions"
 SUMMARY = "<details><summary>Guild 결정 기록</summary>"
-HEADING_RE = re.compile(r"^### decision ([0-9]+)$")
+HEADING_RE = re.compile(r"^### decision ([0-9]+)[ \t]*$")   # a human's trailing blank must not hide a block (K0-m3)
 TAIL_RE = re.compile(r"^</details>$")
 CONTINUED_RE = re.compile(r"^continued-from: ([0-9]+)$")
 ROLLOVER_CHARS = 60000
 # render order; unknown keys a later engine adds are kept on parse and rendered after these
 KEY_ORDER = ("id", "point", "kind", "refs", "stage", "by", "at", "at_server", "inputs", "choice",
              "unsure", "coerced", "coerced_by", "raw_choice", "reason", "recommended",
-             "recommended_by", "recommended_sha", "nonce", "status", "question", "options",
+             "recommended_by", "recommended_sha", "nonce", "stakes", "status", "question", "options",
              "resolves", "answered_by", "answer_comment", "pause_comment", "started_at_stage",
              "plugin", "arm", "experiment_id")
-REDACTED_KEYS = ("reason", "question", "text")
+VALUE_CAP = 2000                 # per value — a block must fit far under GitHub's 65,536 (K0-m3)
+TRUNCATED = "…(truncated)"
+TOKEN_RE = re.compile(r"^[a-z0-9:_-]+$")   # the guild-answer token grammar
+# §2.6 — the closed set of ask kinds; a pending-human block must name one (K0-M3)
+ASK_KINDS = ("readiness", "premise", "close-decided", "interpretation-surface", "design-block",
+             "leaf-split", "branch-ambiguous", "branch-blocked", "base-unusable", "loopback",
+             "stagnation", "visual-env", "pending-regeneration", "pr-body-unreadable",
+             "record-unreadable", "needs-context-producer-ran", "directive-out-of-scope",
+             "restore-failed", "local-dev-files", "gate-inv2", "disputed-blocker",
+             "dismiss-blocker", "auditor-violation", "auditor-scan-failed", "role-result-invalid",
+             "diverged", "integration-gap", "integration-fix-child", "followups", "arch-drift",
+             "escalation", "permission", "budget")
 BY_RE = re.compile(r"^(code|human|judge:[a-z0-9.-]+|leader:[a-z0-9.-]+)$")
 
 
@@ -83,7 +93,9 @@ def _value(key, value):
     elif isinstance(value, (list, tuple)):
         value = ("|" if key == "options" else ",").join(str(x) for x in value)
     value = " ".join(str(value).split())
-    return redact(value) if key in REDACTED_KEYS else value
+    if len(value) > VALUE_CAP:
+        value = value[:VALUE_CAP - len(TRUNCATED)] + TRUNCATED
+    return value
 
 
 def render_block(n, fields):
@@ -93,14 +105,23 @@ def render_block(n, fields):
     items = [(k, v) for k, v in items if v is not None]
     if not any(k == "id" for k, _ in items):
         items.insert(0, ("id", "D%d" % n))
-    by = dict(items).get("by")
+    d = dict(items)
+    by = d.get("by")
     if by is not None and not BY_RE.match(str(by)):
         raise ValueError("by: must be code | human | judge:<tier> | leader:<tier>")
+    opts = d.get("options")
+    if opts is not None:
+        toks = list(opts) if isinstance(opts, (list, tuple)) else str(opts).split("|")
+        if not toks or not all(TOKEN_RE.match(str(t).strip()) for t in toks):
+            raise ValueError("options must be guild-answer tokens [a-z0-9:_-]+")
+    if d.get("status") == "pending-human" and d.get("kind") not in ASK_KINDS:
+        raise ValueError("a pending-human block needs kind: from the closed ask set (§2.6)")
     rank = {k: i for i, k in enumerate(KEY_ORDER)}
     known = sorted([kv for kv in items if kv[0] in rank], key=lambda kv: rank[kv[0]])
     extra = [kv for kv in items if kv[0] not in rank]
-    lines = ["### decision %d" % n] + ["%s: %s" % (k, _value(k, v)) for k, v in known + extra]
-    return "\n".join(lines + [""])
+    body = "\n".join("%s: %s" % (k, _value(k, v)) for k, v in known + extra)
+    # INV5 over the WHOLE block — unknown and raw keys included (K0-M1) — then K0-B1
+    return markers.assert_own_markers("### decision %d\n%s\n" % (n, markers.finish(body)))
 
 
 def render_comment(block_texts=(), continued_from=None):
@@ -108,7 +129,8 @@ def render_comment(block_texts=(), continued_from=None):
     if continued_from is not None:
         head.append("continued-from: %d" % int(continued_from))
     head += [SUMMARY, ""]
-    return "\n".join(head + list(block_texts) + ["</details>", markers.close_tag(NAME)])
+    return markers.assert_own_markers(
+        "\n".join(head + list(block_texts) + ["</details>", markers.close_tag(NAME)]), NAME)
 
 
 def insert(body, block_text):

@@ -16,7 +16,6 @@ or the settled line `후속 Issue: 처리됨 — #<N>의 후속 기록 참조`.
 import re
 
 from guildcore.records import markers
-from guildcore.records.redact import redact
 
 NAME = "followups"
 ITEM_RE = re.compile(r"^- (unfiled|declined|filed #(\d+)) — (.*)$")
@@ -68,9 +67,8 @@ def from_comments(comments):
 
 
 def render(heading, items):
-    lines = [markers.open_tag(NAME), "### " + heading] + [redact(i.render()) for i in items]
-    lines.append(markers.close_tag(NAME))
-    return "\n".join(lines)
+    inner = markers.finish("\n".join(["### " + " ".join(heading.split())] + [i.render() for i in items]))
+    return markers.assert_own_markers("\n".join([markers.open_tag(NAME), inner, markers.close_tag(NAME)]), NAME)
 
 
 class PrNotice(object):
@@ -103,4 +101,5 @@ def render_pr_notice(issue, unfiled_titles):
                 ["- " + t for t in unfiled_titles]
     else:
         lines = [PR_SETTLED_T.format(n=issue)]
-    return "\n".join([markers.open_tag(name), redact("\n".join(lines)), markers.close_tag(name)])
+    return markers.assert_own_markers("\n".join([markers.open_tag(name), markers.finish("\n".join(lines)),
+                                                  markers.close_tag(name)]), name)

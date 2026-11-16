@@ -10,7 +10,6 @@ lines 1–2 only, so it is unaffected). One comment per pause, never PATCHed.
 import re
 
 from guildcore.records import markers
-from guildcore.records.redact import redact
 
 NAME = "needs-human"
 ENV_KEYS = ("ci-blocked", "base-red", "credential", "service", "other")
@@ -97,7 +96,7 @@ def render(cause, prose="", directive_line=None, answer=None):
     if prose:
         lines.append("")
         lines.append(prose.rstrip("\n"))
-    out = markers.open_tag(NAME) + "\n" + redact("\n".join(lines))
+    out = markers.open_tag(NAME) + "\n" + markers.finish("\n".join(lines))
     if not Pause(out).cause_check_ok():
         raise ValueError("rendered pause fails the cause-line check")
-    return out
+    return markers.assert_own_markers(out, NAME)
