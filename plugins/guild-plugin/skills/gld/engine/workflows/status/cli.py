@@ -1,0 +1,96 @@
+"""workflows.status.cli — `gld_engine.py status <show|route|board|running|directives> …`."""
+
+import argparse
+import os
+import sys
+
+from guildcore import config as cfgmod
+from guildcore import emit
+from guildcore.adapters.clock import Clock
+from guildcore.adapters.gh import FakeGh, GhCli, GhError
+from workflows.status import board, route, running, show
+
+
+def make_gh(repo=None):
+    """`GLD_ENGINE_GH_FIXTURE=<json>` serves a fake GitHub (tests, offline demos)."""
+    fx = os.environ.get("GLD_ENGINE_GH_FIXTURE")
+    return FakeGh(fx) if fx else GhCli(repo)
+
+
+def parser():
+    ap = argparse.ArgumentParser(prog="gld_engine.py status")
+    sub = ap.add_subparsers(dest="cmd")
+    for name in ("show", "route"):
+        p = sub.add_parser(name)
+        p.add_argument("--issue", type=int, required=True)
+        p.add_argument("--repo")
+        p.add_argument("--json", action="store_true")
+        p.add_argument("--root", default=".")
+    p = sub.add_parser("board")
+    p.add_argument("section", nargs="?")
+    p.add_argument("--html", action="store_true")
+    p.add_argument("--repo")
+    p.add_argument("--root", default=".")
+    p = sub.add_parser("running")
+    p.add_argument("--all-repos", action="store_true")
+    p.add_argument("--root", default=".")
+    p = sub.add_parser("directives")
+    p.add_argument("--open", action="store_true")
+    p.add_argument("--repo")
+    return ap
+
+
+def main(argv, out=None, err=None, clock=None, ledger=None):
+    out = out or sys.stdout
+    err = err or sys.stderr
+    a = parser().parse_args(argv)
+    if not a.cmd:
+        parser().print_usage(err)
+        return 64
+    try:
+        if a.cmd == "show":
+            gh = make_gh(a.repo)
+            text = show.show(gh, a.issue)
+            if a.json:
+                emit.engine({"issue": a.issue, "text": text}, out)
+            else:
+                out.write(text)
+            return 0
+        if a.cmd == "route":
+            r = route.route(make_gh(a.repo), a.issue, a.root,
+                            unattended=os.environ.get("GLD_UNATTENDED") == "1")
+            if a.json:
+                emit.engine(r.as_dict(), out)
+            else:
+                out.write(r.text())
+            return 0 if r.action != "fail" else 1
+        if a.cmd == "board":
+            cfg = cfgmod.load(a.root)
+            invalid = a.section if a.section and a.section not in board.R.SECTIONS else None
+            section = None if invalid else a.section
+            data = board.gather(a.root, cfg, make_gh(a.repo), section,
+                                ledger=ledger or board.run_ledger)
+            text = board.render_text(data, cfg.language, (clock or Clock()).now(), section, invalid)
+            out.write(text)
+            if a.html:
+                p = board.html_path(a.root)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w", encoding="utf-8") as fh:
+                    fh.write(board.render_html(text, board.R.board_text(cfg.language)["title"]))
+                out.write("HTML: %s\n" % p)
+            return 0
+        if a.cmd == "running":
+            dirs = running.registry() if a.all_repos else [running.git_common_dir(a.root)]
+            rows, missing = running.running([d for d in dirs if d])
+            out.write(running.render_running(rows, missing))
+            return 0
+        if a.cmd == "directives":
+            out.write(running.render_directives(running.directives(make_gh(a.repo), a.open or True)))
+            return 0
+    except cfgmod.ConfigError as e:
+        out.write("%s\n" % e)
+        return 1
+    except GhError as e:
+        emit.warn("Issue not readable: %s" % e, err)
+        return 1
+    return 64
