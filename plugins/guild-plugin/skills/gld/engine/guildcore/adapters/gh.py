@@ -1,7 +1,8 @@
 """guildcore.adapters.gh — the gh reads the read-only platform needs, real and fake.
 
-K0 owns READS only. `GhCli` refuses any argv that is not one of the read forms below, so the
-engine cannot write to GitHub before K1's verified write path exists (§2.7). `FakeGh` serves a
+`GhCli` owns READS only and refuses any argv that is not one of the read forms below. Writes go
+through the separate `GhWriteCli` (K1), whose argv must be one of the WRITE forms, and only ever
+through `guildcore.records.write.GhWriter`, which re-reads every write (§2.7, Section F). `FakeGh` serves a
 JSON fixture (`tests/fixtures/engine/gh/*.json`) and counts calls so tests can assert the
 "≤ 3 gh reads per Issue" budget of `guildcore.state.snapshot`.
 
@@ -29,6 +30,7 @@ _READ_FORMS = (
     re.compile(r"^gh pr list "),
     re.compile(r"^gh repo view "),
     re.compile(r"^gh api (--paginate )?repos/[^/ ]+/[^/ ]+/issues/\d+/(comments|timeline)( |$)"),
+    re.compile(r"^gh pr view \d+ "),
 )
 _WRITE_FLAGS = re.compile(r"(^| )(-X|--method|-f|-F|--field|--raw-field|--input|"
                           r"--add-label|--remove-label|--body|--body-file)( |=|$)")
@@ -101,6 +103,16 @@ class GhCli(object):
                         "--json", "number,url,state,title,body"] + self._repo_args())
         return json.loads(out or "[]")
 
+    def pr(self, n):
+        return json.loads(self._gh(["gh", "pr", "view", str(n), "--json",
+                                    "number,url,state,title,body,headRefName"] + self._repo_args()))
+
+    def issue_search(self, text, limit=50):
+        out = self._gh(["gh", "issue", "list", "--state", "all", "--limit", str(limit),
+                        "--search", text, "--json", "number,title,body,state,labels"]
+                       + self._repo_args())
+        return json.loads(out or "[]")
+
     def issue_list(self, state="open", label=None, limit=200):
         argv = ["gh", "issue", "list", "--state", state, "--limit", str(limit),
                 "--json", "number,title,body,labels,state,stateReason"]
@@ -149,6 +161,23 @@ class FakeGh(object):
         needle = "#%d" % int(n)
         return [p for p in self.fx.get("prs", []) if needle in (p.get("body") or "")]
 
+    def pr(self, n):
+        self.calls.append(("pr", n))
+        for p in self.fx.get("prs", []):
+            if int(p.get("number")) == int(n):
+                return dict(p)
+        raise GhError("no pull request %s" % n)
+
+    def issue_search(self, text, limit=50):
+        self.calls.append(("issue_search", text))
+        out = []
+        for k in sorted(self.fx.get("issues", {}), key=int):
+            it = self.fx["issues"][k]
+            if text in (it.get("body") or "") or text in (it.get("title") or ""):
+                out.append({"number": int(k), "title": it.get("title"), "body": it.get("body"),
+                            "state": it.get("state", "OPEN"), "labels": it.get("labels", [])})
+        return out[:limit]
+
     def issue_list(self, state="open", label=None, limit=200):
         self.calls.append(("issue_list", state, label))
         rows = []
@@ -168,3 +197,204 @@ class FakeGh(object):
             row.setdefault("number", int(k))
             rows.append(row)
         return rows[:limit]
+
+
+# ---- write side (K1) ------------------------------------------------------------------------------
+
+class GhWriteError(Exception):
+    """A failed state mutation (Section F). `kind` = auth | terminal | transient."""
+
+    def __init__(self, op, message, kind):
+        Exception.__init__(self, "gh %s failed — %s" % (op, message))
+        self.op = op
+        self.message = message
+        self.kind = kind
+
+    @property
+    def terminal(self):
+        return self.kind != "transient"
+
+
+_AUTH = re.compile(r"\b(401|403)\b|gh auth login|authentication|Bad credentials|not logged", re.I)
+_TERMINAL = re.compile(r"\b(404|422)\b|Not Found|Validation Failed|could not add label|"
+                       r"does not exist|Could not resolve", re.I)
+_TRANSIENT = re.compile(r"\b(429|500|502|503|504)\b|rate limit|timed? ?out|timeout|connection|"
+                        r"network|EOF|TLS|temporar|reset by peer|no such host|server error", re.I)
+
+
+def classify_error(text):
+    t = text or ""
+    if _AUTH.search(t):
+        return "auth"
+    if _TERMINAL.search(t):
+        return "terminal"
+    if _TRANSIENT.search(t):
+        return "transient"
+    return "terminal"
+
+
+_WRITE_FORMS = (
+    re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/issues/\d+/comments -X POST --input -$"),
+    re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/issues/comments/\d+ -X PATCH --input -$"),
+    re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/issues -X POST --input -$"),
+    re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/pulls/\d+ -X PATCH --input -$"),
+    re.compile(r"^gh issue edit \d+( --(add|remove)-label [^ ]+)+( --repo [^ ]+)?$"),
+)
+
+
+def assert_write_form(argv):
+    line = " ".join(argv)
+    if not any(rx.match(line) for rx in _WRITE_FORMS):
+        raise GhError("refused gh write outside the engine's write forms: %s" % line)
+
+
+class GhWriteCli(object):
+    """Raw writes through `gh` — the engine's ONLY write path, used solely by records.write."""
+
+    def __init__(self, repo, runner=None):
+        if not repo:
+            raise GhError("GhWriteCli needs owner/repo (Section F)")
+        self.repo = repo
+        self.runner = runner or self._run
+        self.calls = 0
+
+    @staticmethod
+    def _run(argv, stdin=None):
+        p = subprocess.run(argv, input=(stdin or "").encode("utf-8"), stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+        if p.returncode != 0:
+            raise GhError((p.stderr.decode("utf-8", "replace").strip().splitlines() or ["gh failed"])[-1])
+        return p.stdout.decode("utf-8", "replace")
+
+    def _gh(self, argv, payload=None):
+        assert_write_form(argv)
+        self.calls += 1
+        return self.runner(argv, json.dumps(payload) if payload is not None else None)
+
+    def create_comment(self, n, body):
+        return json.loads(self._gh(["gh", "api", "repos/%s/issues/%d/comments" % (self.repo, int(n)),
+                                    "-X", "POST", "--input", "-"], {"body": body}))
+
+    def patch_comment(self, cid, body):
+        return json.loads(self._gh(["gh", "api", "repos/%s/issues/comments/%d" % (self.repo, int(cid)),
+                                    "-X", "PATCH", "--input", "-"], {"body": body}))
+
+    def create_issue(self, title, body, labels=()):
+        return json.loads(self._gh(["gh", "api", "repos/%s/issues" % self.repo, "-X", "POST",
+                                    "--input", "-"], {"title": title, "body": body,
+                                                      "labels": list(labels)}))
+
+    def patch_pr_body(self, n, body):
+        return json.loads(self._gh(["gh", "api", "repos/%s/pulls/%d" % (self.repo, int(n)), "-X",
+                                    "PATCH", "--input", "-"], {"body": body}))
+
+    def edit_labels(self, n, add=(), remove=()):
+        argv = ["gh", "issue", "edit", str(int(n))]
+        for a in add:
+            argv += ["--add-label", a]
+        for r in remove:
+            argv += ["--remove-label", r]
+        self._gh(argv + ["--repo", self.repo])
+        return True
+
+
+class FakeGhWrite(object):
+    """Writes into a FakeGh's fixture (same object), with server ids/timestamps and timeline
+    events, and fault injection: `fail_next(kind, n=1)` raises before the write; `lose_next(n)`
+    returns success WITHOUT landing (the re-read verification must catch it)."""
+
+    def __init__(self, fake, clock=None, actor="guild-bot"):
+        self.fake = fake
+        self.clock = clock
+        self.actor = actor
+        self.calls = []
+        self._fail = []
+        self._lose = 0
+        self._next_id = 9000
+
+    def fail_next(self, kind, n=1, message=None):
+        msg = message or {"transient": "HTTP 502: Bad Gateway", "auth": "HTTP 401: Bad credentials",
+                          "terminal": "HTTP 422: Validation Failed"}[kind]
+        self._fail += [msg] * n
+
+    def lose_next(self, n=1):
+        self._lose += n
+
+    def _now(self):
+        return self.clock.now() if self.clock else "2026-11-16T00:00:00Z"
+
+    def _gate(self, op):
+        self.calls.append(op)
+        if self._fail:
+            raise GhError(self._fail.pop(0))
+        if self._lose:
+            self._lose -= 1
+            return False
+        return True
+
+    def _id(self):
+        self._next_id += 1
+        return self._next_id
+
+    def _issue(self, n):
+        return self.fake.fx.setdefault("issues", {}).setdefault(str(int(n)), {"labels": [], "comments": []})
+
+    def create_comment(self, n, body):
+        cid, now = self._id(), self._now()
+        c = {"id": cid, "body": body, "created_at": now, "updated_at": now,
+             "author_association": "OWNER", "user": {"login": self.actor}}
+        if self._gate(("create_comment", n)):
+            self._issue(n).setdefault("comments", []).append(c)
+        return dict(c)
+
+    def patch_comment(self, cid, body):
+        now = self._now()
+        land = self._gate(("patch_comment", cid))
+        for it in self.fake.fx.get("issues", {}).values():
+            for c in it.get("comments", []):
+                if c.get("id") == cid:
+                    if land:
+                        c["body"] = body
+                        c["updated_at"] = now
+                    return dict(c, body=body, updated_at=now)
+        raise GhError("HTTP 404: Not Found")
+
+    def create_issue(self, title, body, labels=()):
+        nums = [int(k) for k in self.fake.fx.get("issues", {})] or [0]
+        n = max(nums) + 1
+        if self._gate(("create_issue", title)):
+            self.fake.fx.setdefault("issues", {})[str(n)] = {
+                "number": n, "title": title, "body": body, "state": "OPEN",
+                "labels": [{"name": l} for l in labels], "comments": [], "timeline": []}
+        return {"number": n, "html_url": "https://github.com/%s/issues/%d" % (self.fake.repo, n)}
+
+    def patch_pr_body(self, n, body):
+        land = self._gate(("patch_pr_body", n))
+        for p in self.fake.fx.get("prs", []):
+            if int(p.get("number")) == int(n):
+                if land:
+                    p["body"] = body
+                return dict(p, body=body)
+        raise GhError("HTTP 404: Not Found")
+
+    def edit_labels(self, n, add=(), remove=()):
+        it = self._issue(n)
+        names = [l["name"] if isinstance(l, dict) else l for l in it.get("labels", [])]
+        for r in remove:
+            if r not in names:
+                raise GhError("HTTP 422: label %s not on issue" % r)
+        if not self._gate(("edit_labels", n, tuple(add), tuple(remove))):
+            return True
+        now = self._now()
+        tl = it.setdefault("timeline", [])
+        for a in add:
+            if a not in names:
+                names.append(a)
+                tl.append({"id": self._id(), "event": "labeled", "label": {"name": a},
+                           "created_at": now, "actor": {"login": self.actor}})
+        for r in remove:
+            names.remove(r)
+            tl.append({"id": self._id(), "event": "unlabeled", "label": {"name": r},
+                       "created_at": now, "actor": {"login": self.actor}})
+        it["labels"] = [{"name": x} for x in names]
+        return True

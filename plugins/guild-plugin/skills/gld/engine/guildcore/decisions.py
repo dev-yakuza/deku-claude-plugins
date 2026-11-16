@@ -1,8 +1,15 @@
 """guildcore.decisions — decision-log semantics shared by writers (K1+) and readers (K0).
 
-K0 implements the read half: `DecisionLog.load`, `pending_human`, `live` (§2.5 rule 1b — the ONE
-predicate both the writer and the read-only consumers use, R5C-m3), `accepted_answer` (§2.5
-answer channel 1), `engine_start`, `directives`. `record/resolve` (writes) arrive in K1.
+Read half (K0): `DecisionLog.load`, `pending_human`, `live` (§2.5 rule 1b — the ONE predicate
+both the writer and the read-only consumers use, R5C-m3), `accepted_answer` (§2.5 answer channel
+1), `engine_start`, `directives`.
+
+Write half (K1): `DecisionWriter.record/resolve/amend`. Numbering = re-read right before the
+write → `max(n)+1` → write → re-read: my `id:` is there exactly once (a racing writer that took
+the same number → renumber and retry once). A body past 60,000 chars opens a rollover comment
+(line 1 marker, line 2 `continued-from: <id>`). Blocks are inserted into the LAST decision
+comment (highest id). After a `pending-human` block lands, its comment's server `updated_at` is
+added to it as `at_server:` (§2.5 시계, R3C-n6) — answers are compared against that.
 """
 
 from guildcore.records import answer as answer_rec
@@ -147,3 +154,120 @@ def accepted_answer(block, comments, timeline, unattended=True, associations=DEF
     if len(authors) > 1 and len(tokens) > 1:
         return "conflict", None, rejected + [(a, "conflicting answers") for a in passed]
     return "answered", passed[-1], rejected + [(a, "superseded by a later answer") for a in passed[:-1]]
+
+
+class DecisionWriter(object):
+    """Writes decision blocks through a `records.write.GhWriter`."""
+
+    def __init__(self, writer, issue, clock):
+        self.w = writer
+        self.issue = issue
+        self.clock = clock
+
+    def _comments(self):
+        return self.w.read.comments(self.issue)
+
+    def _log(self):
+        return DecisionLog.load(self._comments())
+
+    def _last(self, log):
+        return log.comments[-1] if log.comments else None
+
+    def record(self, fields, _retry=True):
+        """Write one block; returns its id `D<n>`. `fields` without `at` get the clock's now."""
+        log = self._log()
+        n = log.next_n()
+        f = dict(fields)
+        f.setdefault("at", self.clock.now())
+        f["id"] = "D%d" % n
+        block = fmt.render_block(n, f)
+        last = self._last(log)
+        did = "D%d" % n
+
+        def mine(body):
+            return sum(1 for b in fmt.DecisionComment(body).blocks if b.id == did) >= 1
+        if last is None:
+            self.w.create_comment(self.issue, fmt.render_comment([block]))
+        else:
+            try:
+                fmt.insert(last.body, block)
+            except ValueError as e:
+                if str(e) != "rollover":
+                    raise
+                self.w.create_comment(self.issue, fmt.render_comment([block], continued_from=last.comment_id))
+            else:
+                try:
+                    self._append(last.comment_id, block, mine, len(last.blocks))
+                except ValueError:
+                    if not _retry:
+                        raise
+                    return self.record(fields, _retry=False)      # renumber once (§2.5)
+        # verify: exactly one block with my number across the log
+        after = self._log()
+        dup = [b for b in after.blocks if b.n == n]
+        if len(dup) != 1 or after.by_id(did) is None:
+            if _retry:
+                return self.record(fields, _retry=False)
+            raise ValueError("decision %s did not land uniquely" % did)
+        return did
+
+    def _append(self, cid, block, mine, n_blocks):
+        from guildcore.adapters.gh import GhWriteError
+
+        def body_now():
+            for c in self._comments():
+                if c.get("id") == cid:
+                    return markers.body_of(c)
+            raise GhWriteError("decisions:append", "decision comment %s vanished" % cid, "terminal")
+        cur = body_now()
+        if mine(cur):
+            return
+        if len(fmt.DecisionComment(cur).blocks) != n_blocks:
+            raise ValueError("decision log moved during the write")   # caller renumbers
+        new = fmt.insert(cur, block)
+        self.w._perform("decisions:append", cid, lambda: self.w.write.patch_comment(cid, new),
+                        lambda r: mine(body_now()))
+
+    def amend(self, did, key, value):
+        """Add `key: value` to block `did` (at_server, pause_comment …) — a PATCH verified by
+        re-read. The key must not exist yet (blocks are append-only otherwise)."""
+        log = self._log()
+        b = log.by_id(did)
+        if b is None:
+            raise ValueError("no decision %s" % did)
+        if b.get(key) is not None:
+            return False
+        cid = b.comment_id
+        body = [c for c in self._comments() if c.get("id") == cid][0]["body"]
+        dc = fmt.DecisionComment(body)
+        target = [x for x in dc.blocks if x.id == did][0]
+        lines = target.block.lines
+        # insert before the trailing blank line(s) of the block
+        i = len(lines)
+        while i > 0 and not markers.clean(lines[i - 1]).strip():
+            i -= 1
+        lines.insert(i, "%s: %s" % (key, fmt._value(key, value)))
+        new = dc.render()
+
+        def landed(_r):
+            again = DecisionLog.load(self._comments()).by_id(did)
+            return again is not None and again.get(key) == fmt._value(key, value)
+        self.w._perform("decisions:amend", "%s:%s" % (did, key),
+                        lambda: self.w.write.patch_comment(cid, new), landed)
+        return True
+
+    def stamp_server_time(self, did):
+        b = self._log().by_id(did)
+        for c in self._comments():
+            if c.get("id") == b.comment_id:
+                return self.amend(did, "at_server", c.get("updated_at") or c.get("created_at"))
+        return False
+
+    def resolve(self, did, fields):
+        """A block that `resolves: <did>` (answer, superseded, re-judgment …)."""
+        log = self._log()
+        if did in log.resolved_ids():
+            raise ValueError("%s is already resolved" % did)
+        f = dict(fields)
+        f["resolves"] = did
+        return self.record(f)
