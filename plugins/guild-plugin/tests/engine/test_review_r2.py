@@ -29,7 +29,7 @@ class B2PemKeepsStructure(unittest.TestCase):
         blk = D.render_block(1, pending(reason=UNTERMINATED))
         dc = D.DecisionComment(D.render_comment([blk]))
         b = dc.blocks[0]
-        self.assertEqual(b.get("reason"), "config/dev.pem starts with [REDACTED]")
+        self.assertEqual(b.get("reason"), "[REDACTED]")          # r3: whole value
         self.assertEqual((b.get("status"), b.get("question"), b.options()), ("pending-human", "q", ["loop-back", "stop"]))
         self.assertEqual(len(dec.DecisionLog.load([_util.comment(dc.render())]).pending_human()), 1)
 
@@ -51,19 +51,15 @@ class B2PemKeepsStructure(unittest.TestCase):
         key = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(["QUJD" * 16] * 3) + "\nQUJDRA=="
         out = needs_human.render(needs_human.cause_line("defect", "key leaked"), prose="before\n" + key + "\nafter text here")
         self.assertNotIn("QUJD", out)
-        self.assertIn("after text here", out)
+        self.assertNotIn("after text here", out)                # r3: the one prose value goes whole
+        self.assertTrue(out.startswith("<!-- guild:needs-human -->\ndefect: key leaked\n"))
         self.assertFalse(redact.has_secret(out))
 
     def test_structural_check_guards(self):
         # a redaction pattern that would eat a record line is refused by finish()
         import re
-        old = list(redact.REDACT_EXTRA)
-        redact.REDACT_EXTRA.append(re.compile(r"SWALLOW[\s\S]*"))
-        try:
-            with self.assertRaises(ValueError):
-                markers.finish("reason: SWALLOW\nstatus: pending-human")
-        finally:
-            redact.REDACT_EXTRA[:] = old
+        with self.assertRaises(ValueError):       # a whole multi-field block holding a key
+            markers.finish("reason: -----BEGIN PRIVATE KEY-----\nstatus: pending-human")
 
 
 class M14MarkerLineWhitespace(unittest.TestCase):

@@ -93,7 +93,8 @@ class M1Redaction(unittest.TestCase):
 
     def test_pem_body(self):
         self.assertEqual(redact.redact(self.PEM), "[REDACTED]")
-        self.assertEqual(redact.redact("a\n-----BEGIN PRIVATE KEY-----\nMIIsecret"), "a\n[REDACTED]")
+        # r3 rule: a key anywhere in a value replaces the whole value
+        self.assertEqual(redact.redact("a\n-----BEGIN PRIVATE KEY-----\nMIIsecret"), "[REDACTED]")
 
     def test_every_decision_field(self):
         blk = D.render_block(3, {"point": "EX-ARB", "by": "judge:opus", "raw_choice": "use ghp_" + "a" * 36,
@@ -123,7 +124,8 @@ class M2LineAnchoredSplice(unittest.TestCase):
                 "<!-- guild:manual-qa -->\nold2\n<!-- /guild:manual-qa -->")
         with self.assertRaises(ValueError):
             markers.splice(body, "manual-qa", "B")
-        self.assertIsNone(manual_qa.from_pr_body(body))
+        with self.assertRaises(ValueError):          # the same verdict as splice (K0-m20)
+            manual_qa.from_pr_body(body)
 
     def test_crlf_marker_lines(self):
         body = "a\r\n<!-- guild:manual-qa -->\r\nold\r\n<!-- /guild:manual-qa -->\r\nz"

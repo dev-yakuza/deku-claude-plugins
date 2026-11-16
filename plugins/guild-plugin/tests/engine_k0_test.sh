@@ -42,7 +42,7 @@ fi
 echo "engine K0: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when tests are added on purpose. A
 #   test module that fails to import is reported as one ERROR, not as its N missing tests.
-ENGINE_K0_MIN_TESTS=146
+ENGINE_K0_MIN_TESTS=153
 if [ "$((PASS + FAIL))" -lt "$ENGINE_K0_MIN_TESTS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${ENGINE_K0_MIN_TESTS}건)."
   exit 1
