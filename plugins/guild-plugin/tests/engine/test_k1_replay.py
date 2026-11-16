@@ -176,6 +176,29 @@ class Reclassifier(unittest.TestCase):
         self.assertFalse(PC.rule_matches("Bash(env)", "env -u X"))
 
 
+class Q22Calibration(unittest.TestCase):
+    """The Q22 predictor (current rules) against real CLI decisions recorded under Q22."""
+
+    def test_agreement_and_bypasses(self):
+        from guildcore.roles import permissions as P
+        with open(os.path.join(_k1.K1FX, "calibration-q22.json"), encoding="utf-8") as fh:
+            rows = json.load(fh)["rows"]
+        by = {}
+        for r in rows:
+            role, task = PC.engine_role(r["role"]) if r["role"] != "reviewer" else ("reviewer", None)
+            a, d = P.role_rules(role, task)
+            v, _ = PC.predict(r["command"], a, d)
+            ok, n = by.get(r["set"], (0, 0))
+            by[r["set"]] = (ok + (v == r["outcome"]), n + 1)
+        for s_, (ok, n) in by.items():
+            self.assertGreaterEqual(100.0 * ok / n, 98.0 if s_ != "bypass" else 96.0, (s_, ok, n))
+        # every always-deny bypass the CLI let through is one of the documented residuals
+        leaked = sorted(r["command"] for r in rows if r["set"] == "bypass" and r["outcome"] == "allow")
+        self.assertEqual(leaked, sorted(['git p"ush"', "git p", "make push", "npx git-push",
+                                         "perl -e 'system(\"git push\")'",
+                                         "python3 -c \"import subprocess; subprocess.run(['git','push'])\""]))
+
+
 LOG = [
     {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "A1", "name": "Agent",
                                                    "input": {"description": "developer implement #5"}}]}},

@@ -228,6 +228,56 @@ class Permissions(unittest.TestCase):
         self.assertIn("Read, Grep and Glob", P.summary("auditor"))
 
 
+class Q22Rules(unittest.TestCase):
+    """User decision Q22: bare `Bash` + always-deny + read-only denies + post-role checks."""
+
+    def test_bare_bash_for_shell_roles_only(self):
+        for role, task in (("developer", "implement"), ("tester", "verify"), ("explorer", None), ("qa", None)):
+            self.assertEqual(P.role_rules(role, task)[0][0], "Bash")
+        self.assertNotIn("Bash", P.role_rules("auditor")[0])
+        self.assertFalse([a for a in P.role_rules("developer", "implement")[0] if a.startswith("Bash(")])
+
+    def test_always_deny_superset_and_readonly(self):
+        _, dev = P.role_rules("developer", "implement")
+        _, rd = P.role_rules("tester", "verify")
+        for d in P.ALWAYS_DENY + P.ALWAYS_DENY_Q22:
+            self.assertIn(d, dev)
+            self.assertIn(d, rd)
+        for d in P.READONLY_DENY:
+            self.assertIn(d, rd)
+        self.assertNotIn("Bash(git commit:*)", dev)
+        for want in ("Bash(gh pr review:*)", "Bash(gh pr ready:*)", "Bash(gh release:*)",
+                     "Bash(gh workflow run:*)", "Bash(gh api -X*)", "Bash(gh api * --method*)",
+                     "Bash(gh -R *)", "Bash(bash -c:*)", "Bash(eval:*)"):
+            self.assertIn(want, dev)
+
+    def test_allowlist_model_kept_for_the_record(self):
+        allow, _ = P.role_rules("developer", "implement", allowlist=True)
+        self.assertIn("Bash(ls:*)", allow)
+        self.assertNotIn("Bash", allow)
+
+    def test_bypass_predictions(self):
+        from workflows.dev.replay import permissions_check as PC
+        a, d = P.role_rules("developer", "implement")
+        for c in ("git push", "env -u X git push", "GIT_X=1 git push", "echo $(git push)", "echo `git push`",
+                  "command git push", "/usr/bin/git push", "timeout 5 git push", "{ git push; }",
+                  "git -C . push", "bash -c 'git push'", "gh api -XPOST r", "gh api r --method=PATCH",
+                  "gh api r -fa=b", "gh -R o/r pr merge 1", "\\git push"):
+            self.assertEqual(PC.predict(c, a, d)[0], "deny", c)
+        for c in ("echo $(ls) > out.txt", "cd lib && ls | head", "X=1 flutter test", "git log | xargs git show",
+                  "gh api repos/o/r/pulls/1", "cat /etc/hosts"):
+            self.assertEqual(PC.predict(c, a, d)[0], "allow", c)
+        a, d = P.role_rules("tester", "verify")
+        self.assertEqual(PC.predict("git -C . commit -m x", a, d)[0], "deny")
+        self.assertEqual(PC.predict("git log --oneline", a, d)[0], "allow")
+
+    def test_summary_names_the_limits(self):
+        s = P.summary("tester", "verify")
+        self.assertIn("Do not commit", s)
+        self.assertIn("bash -c", s)
+        self.assertNotIn("Do not commit", P.summary("developer", "implement"))
+
+
 class DenialLearning(unittest.TestCase):
     def test_suggestion_needs_two_issues_three_times(self):
         ds = [{"issue": 1, "role": "tester-verify", "command": "make check x", "cls": "other"},
@@ -393,6 +443,27 @@ class Scope(unittest.TestCase):
         git(self.r, "commit", "-q", "--amend", "-m", "rewritten")
         v = SC.check(self.r, b, self.snap(), ["developer"], branch="feat")
         self.assertTrue(any("non-fast-forward" in x for x in v))
+
+    def test_remote_push_tripwire(self):
+        bare = tmpdir(self)
+        git(bare, "init", "-q", "--bare")
+        git(self.r, "remote", "add", "origin", bare)
+        git(self.r, "push", "-q", "origin", "feat")
+        b = SC.snapshot(self.r, remote=True)
+        self.write("lib/a.dart")
+        git(self.r, "commit", "-qam", "x")
+        git(self.r, "push", "-q", bare, "feat")               # explicit-URL push: no tracking ref moves
+        v = SC.check(self.r, b, SC.snapshot(self.r, remote=True), ["developer"], branch="feat")
+        self.assertTrue(any("remote refs/heads/feat moved to a local commit" in x for x in v), v)
+
+    def test_remote_tracking_ref_push(self):
+        bare = tmpdir(self)
+        git(bare, "init", "-q", "--bare")
+        git(self.r, "remote", "add", "origin", bare)
+        b = SC.snapshot(self.r)
+        git(self.r, "push", "-q", "origin", "feat")
+        v = SC.check(self.r, b, SC.snapshot(self.r), ["reviewer"])
+        self.assertTrue(any("refs/remotes/origin/feat moved to a local commit" in x for x in v), v)
 
     def test_pause_line(self):
         self.assertTrue(SC.render_pause_line("qa", ["qa wrote lib/a.dart"]).startswith("qa wrote outside its scope — "))

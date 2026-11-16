@@ -70,7 +70,7 @@ class RoleSpec(object):
                  result_schema=None, allowed_status=R.STATUSES, cache="5m", language="en",
                  tier=None, toolchain=(), extra_allow=(), effort=None, agent=None, who=None,
                  unattended=False, kind="score", arm=None, experiment_id=None, scope_check=True,
-                 hooks=True):
+                 hooks=True, remote_check=True):
         self.role, self.task, self.template = role, task, template
         self.issue, self.stage, self.step = issue, stage, step
         self.worktree, self.model, self.persona = worktree, model, persona
@@ -87,6 +87,7 @@ class RoleSpec(object):
         self.unattended = unattended
         self.kind, self.arm, self.experiment_id = kind, arm, experiment_id
         self.scope_check, self.hooks = scope_check, hooks
+        self.remote_check = remote_check        # Q22 push tripwire (git ls-remote before/after)
 
 
 class RoleResult(object):
@@ -271,7 +272,7 @@ class Runner(object):
         task = render_task(spec, run_dir, staged)
         with open(os.path.join(run_dir, "in", "task.md"), "w", encoding="utf-8") as fh:
             fh.write(task)
-        before = SC.snapshot(spec.worktree) if spec.scope_check else None
+        before = SC.snapshot(spec.worktree, remote=spec.remote_check) if spec.scope_check else None
         sid = str(uuid.uuid4())
         notes, denials, costs, rls = [], [], 0.0, []
         proc, st = self._session(spec, run_dir, rendered, env, task, "s1", session_id=sid)
@@ -330,7 +331,7 @@ class Runner(object):
                               extras={"errors": errs})
         violations = []
         if spec.scope_check:
-            after = SC.snapshot(spec.worktree)
+            after = SC.snapshot(spec.worktree, remote=spec.remote_check)
             violations = SC.check(spec.worktree, before, after, [P.role_key(spec.role, spec.task)],
                                   issue=spec.issue, branch=spec.branch)
             if violations:

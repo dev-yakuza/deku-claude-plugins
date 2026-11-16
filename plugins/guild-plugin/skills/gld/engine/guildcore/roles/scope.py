@@ -60,7 +60,23 @@ def _hash(path):
         return None
 
 
-def snapshot(worktree):
+def remote_heads(worktree, remote="origin"):
+    """{ref: sha} of the remote's branches (`git ls-remote --heads`) — the push tripwire that
+    does not depend on remote-tracking refs (an explicit-URL or aliased push bypassing the deny
+    rules still changes the remote). None when the remote cannot be read."""
+    p = subprocess.run(["git", "ls-remote", "--heads", remote], cwd=worktree, stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL, timeout=60)
+    if p.returncode != 0:
+        return None
+    out = {}
+    for ln in p.stdout.decode().splitlines():
+        if "\t" in ln:
+            sha, ref = ln.split("\t", 1)
+            out[ref] = sha
+    return out
+
+
+def snapshot(worktree, remote=False):
     raw = _git(worktree, "status", "--porcelain", "-uall", "-z").decode("utf-8", "replace")
     entries = {}
     parts = raw.split("\0")
@@ -81,11 +97,19 @@ def snapshot(worktree):
         sym = None
     refs = {}
     for ln in _git(worktree, "for-each-ref", "--format=%(refname) %(objectname)",
-                   "refs/heads", "refs/tags").decode().splitlines():
+                   "refs/heads", "refs/tags", "refs/remotes").decode().splitlines():
         if " " in ln:
             r, sha = ln.split(" ", 1)
             refs[r] = sha
-    return {"status": entries, "head": head, "symref": sym, "refs": refs}
+    snap = {"status": entries, "head": head, "symref": sym, "refs": refs}
+    if remote:
+        snap["remote"] = remote_heads(worktree)
+    return snap
+
+
+def _local_object(worktree, sha):
+    return subprocess.run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=worktree,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
 
 def _match(path, globs):
@@ -120,6 +144,14 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
     for ref in sorted(set(rb) | set(ra)):
         if rb.get(ref) == ra.get(ref):
             continue
+        if ref.startswith("refs/remotes/"):
+            # a remote-tracking ref only moves on fetch or PUSH; fetch is allowed, so only a
+            # move to a commit that exists solely because of this session (= was a local
+            # head/HEAD after the role) is reported — a push that got past the deny rules (Q22)
+            local = set(ra[r] for r in ra if r.startswith("refs/heads/")) | {after["head"]}
+            if ra.get(ref) in local:
+                viol.append("%s moved to a local commit (push?)" % ref)
+            continue
         if ref == branch_ref and movers and ref in rb and ref in ra:
             if subprocess.run(["git", "merge-base", "--is-ancestor", rb[ref], ra[ref]],
                               cwd=worktree).returncode != 0:
@@ -129,6 +161,13 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
             paths = sorted(set(paths) | set(committed))
             continue
         viol.append("ref %s %s" % (ref, "created" if ref not in rb else "deleted" if ref not in ra else "moved"))
+    # remote push tripwire (Q22): a remote head that moved to a commit this clone has — i.e. a
+    # push from here; a human's concurrent push to another branch is not in local objects
+    rmb, rma = before.get("remote"), after.get("remote")
+    if rmb is not None and rma is not None:
+        for ref in sorted(set(rmb) | set(rma)):
+            if rmb.get(ref) != rma.get(ref) and rma.get(ref) and _local_object(worktree, rma[ref]):
+                viol.append("remote %s moved to a local commit during the role (push)" % ref)
     if movers:
         if branch_ref and after.get("symref") != branch_ref:
             viol.append("HEAD is %s after the role, not %s" % (after.get("symref") or after["head"][:12], branch_ref))

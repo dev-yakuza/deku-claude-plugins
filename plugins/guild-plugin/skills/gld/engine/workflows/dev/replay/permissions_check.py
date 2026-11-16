@@ -284,7 +284,7 @@ def _expansion(uq):
     return None
 
 
-def predict(command, allow, deny, has_c3=None, cwd=None, dirs=(), home=None):
+def predict_v2(command, allow, deny, has_c3=None, cwd=None, dirs=(), home=None):
     """v1 — ('allow'|'deny', reason) under the rules a session runs with; `cwd` and `dirs`
     (`--add-dir`) are the working directories."""
     roots = [os.path.normpath(d) for d in ([cwd] if cwd else []) + list(dirs or ())]
@@ -352,6 +352,91 @@ def predict(command, allow, deny, has_c3=None, cwd=None, dirs=(), home=None):
         if not any(rule_matches(r, s_) for r in allow):
             return "deny", "no-allow %s" % s_[:60]
     return "allow", "all-allowed"
+
+
+_WRAPPERS = ("env", "command", "builtin", "exec", "time", "nohup", "nice", "timeout", "xargs")
+
+
+def _inner_commands(text):
+    """Commands inside `$(…)` and backticks (one level per call, applied recursively)."""
+    out = []
+    i = 0
+    while i < len(text):
+        if text.startswith("$(", i):
+            d, j = 1, i + 2
+            while j < len(text) and d:
+                d += {"(": 1, ")": -1}.get(text[j], 0)
+                j += 1
+            out.append(text[i + 2:j - 1])
+            i = j
+        elif text[i] == "`":
+            j = text.find("`", i + 1)
+            if j < 0:
+                break
+            out.append(text[i + 1:j])
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def _normalize(sub):
+    """Strip wrappers the CLI looks through (env [-u X] [VAR=…], command, exec, time, nohup,
+    timeout N, a leading backslash, an absolute path, double quotes on the command name)."""
+    ws = sub.split()
+    changed = True
+    while ws and changed:
+        changed = False
+        w0 = ws[0].lstrip("\\")
+        if w0.startswith('"') and w0.endswith('"') and len(w0) > 1:
+            w0 = w0[1:-1]
+        if "/" in w0 and not w0.startswith("./"):
+            w0 = w0.rsplit("/", 1)[1]
+        if w0 != ws[0]:
+            ws[0], changed = w0, True
+        if ws and _ASSIGN.match(ws[0]):
+            ws, changed = ws[1:], True
+        elif ws and ws[0] in ("env", "command", "builtin", "exec", "time", "nohup", "nice") and len(ws) > 1:
+            ws = ws[1:]
+            while ws and (ws[0].startswith("-") or _ASSIGN.match(ws[0])):
+                ws = ws[2:] if ws[0] == "-u" else ws[1:]
+            changed = True
+        elif ws and ws[0] == "timeout" and len(ws) > 2:
+            ws, changed = ws[2:], True
+    return " ".join(ws)
+
+
+def predict_q22(command, allow, deny, **_kw):
+    """Q22 model (bare `Bash` + deny lists): allowed unless a sub-command — including those inside
+    `$(…)`/backticks and after the wrappers above — matches a deny rule; `env` alone, `{ }`, `( )`
+    groups are looked through. Path, expansion and redirect rules no longer apply (calibrated)."""
+    todo, subs = [command], []
+    while todo:
+        c = todo.pop()
+        todo += _inner_commands(c)
+        subs += [s_ for s_, _w in parse_commands(c)]
+    for s_ in subs:
+        for cand in (s_, _normalize(s_), re.sub(r"^git -C \S+ ", "git ", _normalize(s_))):
+            for r in deny:
+                if rule_matches(r, cand):
+                    return "deny", "deny-rule %s" % r
+    # calibrated: a mid-wildcard rule is also matched against a whole pipeline
+    # (`gh api x | grep -f y` hits `gh api * -f*`)
+    mids = [r for r in deny if " * " in (_rule_body(r) or "")]
+    for pipe in re.split(r"&&|\|\||;|\n", command):
+        p_ = " ".join(pipe.split())
+        if "|" in p_:
+            for r in mids:
+                if rule_matches(r, p_):
+                    return "deny", "pipeline %s" % r
+    return "allow", "q22"
+
+
+def predict(command, allow, deny, has_c3=None, cwd=None, dirs=(), home=None):
+    """Dispatch: bare `Bash` in the allow list → the Q22 model, else the allow-list model (v2)."""
+    if "Bash" in allow:
+        return predict_q22(command, allow, deny)
+    return predict_v2(command, allow, deny, has_c3, cwd, dirs, home)
 
 
 # ---- log extraction (allow3's reader) -----------------------------------------------------------

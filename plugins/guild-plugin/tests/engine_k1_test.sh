@@ -49,7 +49,7 @@ if [ "$RC" -ne 0 ]; then
 fi
 echo "engine K1: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when tests are added on purpose.
-ENGINE_K1_MIN_TESTS=171
+ENGINE_K1_MIN_TESTS=179
 if [ "$((PASS + FAIL))" -lt "$ENGINE_K1_MIN_TESTS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${ENGINE_K1_MIN_TESTS}건)."
   exit 1

@@ -87,6 +87,69 @@ ALWAYS_DENY = (
 # Tools the CLI would otherwise offer a role session; never part of a role's job.
 DISALLOWED_TOOLS = ("Agent", "Task", "AskUserQuestion")
 
+# ---- Q22 (user decision, design §11): bare `Bash` + deny lists + post-role checks ------------
+# The K1 calibration showed per-role allow lists refuse 55–78 % of real role calls under dontAsk
+# (expansions, `cd … |`, redirects need approval regardless of prefix rules). Every role with a
+# shell now gets bare `Bash`; what must never run is a DENY rule (checked per sub-command by the
+# CLI, also with bare `Bash` — calibrated), and file/ref writes outside scope are caught by the
+# after-role scope check. Mid-wildcard forms leak when the flag comes first or uses `=`
+# (`gh api -X POST …`, `--method=POST`, `-fa=b`) — both positions and the glued forms are listed.
+def _both(prefix, flags):
+    out = []
+    for f in flags:
+        out += ["Bash(%s %s*)" % (prefix, f), "Bash(%s * %s*)" % (prefix, f)]
+    return out
+
+
+GH_API_WRITE_FLAGS = ("-X", "--method", "-f", "-F", "--field", "--raw-field", "--input")
+ALWAYS_DENY_Q22 = (
+    # git: anything that leaves the machine or destroys history
+    "Bash(git push:*)", "Bash(git -C * push*)", "Bash(git -c * push*)", "Bash(git reset --hard:*)", "Bash(git rebase:*)",
+    "Bash(git filter-branch:*)", "Bash(git filter-repo:*)", "Bash(git checkout -B:*)",
+    "Bash(git checkout -- .:*)", "Bash(git restore .:*)", "Bash(git branch -D:*)",
+    "Bash(git clean -f:*)", "Bash(git clean -d:*)", "Bash(git clean -x:*)",
+    "Bash(git stash drop:*)", "Bash(git stash clear:*)", "Bash(git update-ref:*)",
+    "Bash(git remote add:*)", "Bash(git remote set-url:*)", "Bash(git config alias.*)",
+    "Bash(git config --global:*)",
+    # gh: every state change on GitHub is the engine's
+    "Bash(gh pr merge:*)", "Bash(gh pr close:*)", "Bash(gh pr create:*)", "Bash(gh pr edit:*)",
+    "Bash(gh pr comment:*)", "Bash(gh pr review:*)", "Bash(gh pr ready:*)", "Bash(gh pr reopen:*)",
+    "Bash(gh pr lock:*)", "Bash(gh pr unlock:*)", "Bash(gh issue close:*)", "Bash(gh issue edit:*)",
+    "Bash(gh issue comment:*)", "Bash(gh issue create:*)", "Bash(gh issue reopen:*)",
+    "Bash(gh issue delete:*)", "Bash(gh issue transfer:*)", "Bash(gh issue lock:*)",
+    "Bash(gh issue pin:*)", "Bash(gh issue develop:*)", "Bash(gh release:*)",
+    "Bash(gh workflow run:*)", "Bash(gh workflow enable:*)", "Bash(gh workflow disable:*)",
+    "Bash(gh run rerun:*)", "Bash(gh run cancel:*)", "Bash(gh run delete:*)",
+    "Bash(gh label create:*)", "Bash(gh label edit:*)", "Bash(gh label delete:*)",
+    "Bash(gh repo:*)", "Bash(gh secret:*)", "Bash(gh variable:*)", "Bash(gh auth:*)",
+    "Bash(gh gist:*)", "Bash(gh api graphql:*)", "Bash(gh alias:*)", "Bash(gh extension:*)",
+) + tuple(_both("gh api", GH_API_WRITE_FLAGS)) + (
+    # shells / wrappers that would hide a command from per-sub-command matching
+    # bypass probes (K1, Q22): global flags before the subcommand, quoted command names, xargs
+    "Bash(gh -R *)", "Bash(gh --repo *)", "Bash(gh --repo=*)", "Bash('gh'*)", "Bash('git'*)",
+    # xargs: only the write verbs (`xargs git grep` is a common read); `echo push | xargs git`
+    # still gets through the rules and is left to the remote push tripwire (scope.remote_heads)
+    "Bash(xargs git push*)", "Bash(xargs * git push*)", "Bash(xargs gh *)", "Bash(xargs * gh *)",
+    "Bash(xargs sh *)", "Bash(xargs bash *)", "Bash(xargs * sh -c*)", "Bash(xargs * bash -c*)",
+    "Bash(bash -c:*)", "Bash(sh -c:*)", "Bash(zsh -c:*)", "Bash(eval:*)",
+    "Bash(exec git*)", "Bash(exec gh*)", "Bash(exec sh*)", "Bash(exec bash*)",
+    "Bash(env)", "Bash(printenv:*)", "Bash(sudo:*)", "Bash(rm -rf /:*)", "Bash(rm -rf ~:*)",
+    "Agent", "Task", "AskUserQuestion",
+)
+# read-only roles: no local git/gh writes either (files are the scope check's)
+READONLY_DENY = (
+    "Bash(git commit:*)", "Bash(git -C * commit*)", "Bash(git -c * commit*)", "Bash(git tag:*)", "Bash(git reset:*)",
+    "Bash(git checkout -b:*)", "Bash(git switch -c:*)", "Bash(git switch -C:*)",
+    "Bash(git branch -d:*)", "Bash(git branch -m:*)", "Bash(git branch -M:*)",
+    "Bash(git branch -c:*)", "Bash(git merge:*)", "Bash(git cherry-pick:*)", "Bash(git revert:*)",
+    "Bash(git am:*)", "Bash(git apply:*)", "Bash(git add:*)", "Bash(git rm:*)", "Bash(git mv:*)",
+    "Bash(git restore:*)", "Bash(git stash:*)", "Bash(git notes:*)", "Bash(git worktree add:*)",
+    "Bash(git worktree remove:*)", "Bash(sed -i:*)",
+)
+# (no `sed * -i *`: the CLI also matches mid-wildcard rules against a whole PIPELINE, so it
+#  refused `sed -n … | grep -i …` — calibration; an in-place edit by a reader is the scope
+#  check's to catch)
+
 # ---- §5.1 역할별 허용 -------------------------------------------------------------------------
 # (classes, file-tool write scope kind, may run C4 for investigation)
 ROLE_CLASSES = {
@@ -193,19 +256,24 @@ def bash_prefixes(classes, toolchain=()):
 
 
 def role_rules(role, task=None, run_dir=None, worktree=None, issue=None, toolchain=(),
-               extra_allow=()):
+               extra_allow=(), allowlist=False):
     """(allow, deny) rule lists for one role session (§5.1). `extra_allow` =
     `config.engine.role_allow.<role>` patterns a human approved."""
     key = role_key(role, task)
     classes = ROLE_CLASSES[key]
-    allow = [_bash(p) for p in bash_prefixes(classes, toolchain)]
+    if not allowlist:
+        allow = ["Bash"] if classes else []            # Q22: bare Bash for every shell role
+        deny = list(ALWAYS_DENY_Q22) + [d for d in ALWAYS_DENY if d not in ALWAYS_DENY_Q22]
+        if "C3" not in classes:
+            deny += [d for d in READONLY_DENY if d not in deny]
+    else:                                              # pre-Q22 allow-list model (K1 record)
+        allow = [_bash(p) for p in bash_prefixes(classes, toolchain)]
+        deny = list(ALWAYS_DENY) + [d for d in GH_API_DENY_EXTRA if d not in ALWAYS_DENY]
+        if "C0" in classes:
+            deny += list(C0_DENY)
+        if "C3" not in classes:
+            deny += ["Bash(sed -i:*)", "Bash(sed * -i *)", "Bash(sed * -i)"]
     allow += list(READ_TOOLS)
-    deny = list(ALWAYS_DENY) + [d for d in GH_API_DENY_EXTRA if d not in ALWAYS_DENY]
-    if "C0" in classes:
-        deny += list(C0_DENY)
-    if "C3" not in classes:
-        # a reader's `sed` must not edit in place (C0 excludes -i)
-        deny += ["Bash(sed -i:*)", "Bash(sed * -i *)", "Bash(sed * -i)"]
     if key == "developer":
         # path-scoped, not bare: the CLI checks a shell redirect target against Edit/Write PATH
         # rules (K1 calibration — a bare `Write` did not allow `echo x > f`), and a developer
@@ -237,11 +305,22 @@ def _abs(p):
     return os.path.abspath(p).lstrip("/")
 
 
-def summary(role, task=None, toolchain=()):
+def summary(role, task=None, toolchain=(), allowlist=False):
     """The one-paragraph "allowed commands" summary every task.md carries (§5.1 task.md), so the
     role works inside its list from the start."""
     key = role_key(role, task)
     classes = ROLE_CLASSES[key]
+    if classes and not allowlist:
+        writes = ("You may write files only inside your scope (%s); a write elsewhere discards "
+                  "your result." % {"developer": "the worktree", "qa": "test directories and run out/"}
+                  .get(key, "your run directory's out/"))
+        ro = "" if "C3" in classes else " Do not commit, tag, reset, stash or change branches."
+        return ("You may run shell commands with the Bash tool (work in the current directory; "
+                "use your run directory's out/ for scratch files, not /tmp). Never push, merge, "
+                "create/edit/comment/close PRs or Issues, call `gh api` with a write method or "
+                "fields, run `bash -c`/`sh -c`/`eval`, print the environment, or start sub-agents "
+                "— the engine does those and such commands are refused.%s %s If a command you "
+                "need is refused, return BLOCKED: permission — <command>." % (ro, writes))
     if not classes:
         return ("You may use only the Read, Grep and Glob tools; no shell commands are available. "
                 "Your inputs are files under your run directory's in/.")
