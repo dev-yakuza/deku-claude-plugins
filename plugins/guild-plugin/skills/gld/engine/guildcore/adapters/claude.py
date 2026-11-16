@@ -23,6 +23,7 @@ and only after re-checking that pid's start time and that its cmdline carries th
 """
 
 import json
+import re
 import os
 import signal
 import shutil
@@ -67,6 +68,8 @@ def _norm_url(u):
 # env instead of halting the engine (K1-m1)
 MODEL_KEYS = tuple(k for k in ROUTING_KEYS if k.endswith("_MODEL"))
 # Q23 defence in depth: a role's env carries no GitHub credential and no agent socket
+_SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|CREDENTIAL|PRIVATE_KEY", re.I)
+CLI_AUTH_KEYS = ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
 CREDENTIAL_KEYS = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
                    "SSH_AUTH_SOCK", "GIT_ASKPASS", "SSH_ASKPASS")
 
@@ -106,8 +109,15 @@ def child_env(parent_env, settings_env=None, cache="5m", judge=False, suite_ceil
     for k in _CACHE_KEYS + MODEL_KEYS:
         env.pop(k, None)
     if role_dir:
-        for k in CREDENTIAL_KEYS:
-            env.pop(k, None)
+        for k in list(env):
+            if k in CREDENTIAL_KEYS or k.startswith("GH_") or (
+                    _SECRET_NAME.search(k) and k not in CLI_AUTH_KEYS):
+                env.pop(k, None)
+        # the CLI keeps its own auth, its Bash subprocesses get a scrubbed env (K1r2-M1)
+        env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "1"
+        tmp = os.path.join(role_dir, "tmp")
+        os.makedirs(tmp, exist_ok=True)
+        env["TMPDIR"] = tmp                  # a private TMPDIR, not /tmp/claude-<uid> (K1r2-M2)
         ghd = os.path.join(role_dir, "in", "gh-config-empty")
         os.makedirs(ghd, exist_ok=True)
         env["GH_CONFIG_DIR"] = ghd
@@ -365,7 +375,7 @@ class Stream(object):
 
 def parse_stream(text):
     s = Stream()
-    seen_msgs = set()
+    seen_msgs, out_chars = {}, {}
     for ln in (text or "").split("\n"):
         ln = ln.strip()
         if not ln:
@@ -388,9 +398,21 @@ def parse_stream(text):
         elif t == "assistant":
             u = (e.get("message") or {}).get("usage")
             mid = (e.get("message") or {}).get("id")
-            if isinstance(u, dict) and (mid is None or mid not in seen_msgs):
-                s.usages.append(u)
-                seen_msgs.add(mid)
+            if isinstance(u, dict):
+                # stream-json re-sends a message per content block with the message_start usage
+                # (output ≈ 0 — the final count is in a message_delta stream-json never shows,
+                # verified on a real stream, K1r2-M6): keep the LAST usage per id and estimate
+                # output from the content actually produced (≈ 3.5 chars/token)
+                key = mid if mid is not None else "_%d" % len(seen_msgs)
+                chars = out_chars.get(key, 0) + sum(
+                    len(c.get("text") or "") + (len(json.dumps(c.get("input") or {}))
+                                                if c.get("type") == "tool_use" else 0)
+                    for c in (e.get("message") or {}).get("content") or [])
+                out_chars[key] = chars
+                u2 = dict(u)
+                u2["output_tokens"] = max(int(u.get("output_tokens") or 0), int(chars / 3.5))
+                seen_msgs[key] = u2
+                s.usages = list(seen_msgs.values())
             for c in (e.get("message") or {}).get("content") or []:
                 if c.get("type") == "text":
                     s.assistant_texts.append(c.get("text") or "")
@@ -470,15 +492,25 @@ def stray_pids(roots, since_s, exclude=()):
     return young
 
 
-def reap_strays(roots, since_s, sleep=time.sleep):
-    """Kill the stray processes (TERM, then KILL). Returns the pids found."""
-    pids = stray_pids(roots, since_s, exclude=(os.getppid(),))
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        for pid in pids:
-            try:
-                os.kill(pid, sig)
-            except OSError:
-                pass
-        if pids and sig == signal.SIGTERM:
-            sleep(1)
-    return pids
+def reap_strays(roots, since_s, sleep=time.sleep, rounds=6):
+    """Kill the stray processes (TERM, then KILL), then LOOK AGAIN until a pass finds none —
+    killing an outer subshell orphans its inner job, which only then has ppid 1 (K1r2-B3).
+    Returns every pid killed. Strays that left the roots (`cd /`) are not found here; the
+    between-roles drift check catches what they write."""
+    found = []
+    for _ in range(rounds):
+        pids = [p for p in stray_pids(roots, since_s + 5 * len(found), exclude=(os.getppid(),))
+                if p not in found]
+        if not pids:
+            break
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            for pid in pids:
+                try:
+                    os.kill(pid, sig)
+                except OSError:
+                    pass
+            if sig == signal.SIGTERM:
+                sleep(0.5)
+        found += pids
+        sleep(0.3)
+    return found

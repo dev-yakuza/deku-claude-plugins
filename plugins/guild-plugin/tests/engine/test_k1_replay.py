@@ -204,6 +204,11 @@ class Q23Calibration(unittest.TestCase):
         loose = sorted(r["command"] for r in self.rows if r["set"].startswith("r1-")
                        and r["stopped_by"] == "NOT STOPPED")
         self.assertEqual(loose, ["git push-x", "git stash-x"])
+        layer = dict((r["command"], r["stopped_by"]) for r in self.rows if r["set"] == "r1-probes")
+        # K1r2-m4: which layer stops the rows the rules let through
+        self.assertEqual(layer["echo hi > ../outside-probe.txt"], "sandbox")
+        self.assertEqual(layer["cp README.md ../outside-probe2.txt"], "sandbox")
+        self.assertEqual(layer["git branch -f main HEAD"], "post-check")
         self.assertTrue(all(r["stopped_by"] in ("rule", "sandbox", "post-check", "NOT STOPPED")
                             for r in self.rows if r["set"].startswith("r1-")))
 

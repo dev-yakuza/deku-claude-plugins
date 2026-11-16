@@ -24,20 +24,36 @@ def path(common_dir):
     return os.path.join(J.engine_dir(common_dir), "cost.jsonl")
 
 
-# $/Mtok (input, output) for estimating a session that died without a `result` (K1-M3) —
-# list prices by family; flagged `estimated`
-PRICE = {"opus": (15.0, 75.0), "sonnet": (3.0, 15.0), "haiku": (1.0, 5.0)}
+# $/Mtok by family for ESTIMATING a session that died without a `result` (K1-M3, K1r2-M6):
+# base input, output, cache write 5m (1.25×), cache write 1h (2×), cache read (0.1×) — Anthropic
+# list prices; override with `config.engine.prices` ({family: {input, output, …}}).
+PRICE = {
+    "opus": {"input": 15.0, "output": 75.0, "cache_5m": 18.75, "cache_1h": 30.0, "cache_read": 1.5},
+    "sonnet": {"input": 3.0, "output": 15.0, "cache_5m": 3.75, "cache_1h": 6.0, "cache_read": 0.3},
+    "haiku": {"input": 1.0, "output": 5.0, "cache_5m": 1.25, "cache_1h": 2.0, "cache_read": 0.1},
+}
 
 
-def estimate(stream, model):
-    """(usd, input_tokens, output_tokens) summed from the assistant messages' usage."""
-    fam = next((f for f in PRICE if f in (model or "")), "sonnet")
-    tin = tout = 0
+def estimate(stream, model, prices=None):
+    """(usd, input_tokens, output_tokens) from each message's FINAL usage, every token class
+    priced separately."""
+    table = dict(PRICE, **(prices or {}))
+    fam = next((f for f in table if f in (model or "")), "sonnet")
+    pr = table[fam]
+    tin = tout = cw5 = cw1 = cr = 0
     for u in getattr(stream, "usages", []) or []:
-        tin += int(u.get("input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0)
+        tin += int(u.get("input_tokens") or 0)
         tout += int(u.get("output_tokens") or 0)
-    pi, po = PRICE[fam]
-    return round(tin / 1e6 * pi + tout / 1e6 * po, 6), tin, tout
+        cc = u.get("cache_creation") or {}
+        if cc:
+            cw5 += int(cc.get("ephemeral_5m_input_tokens") or 0)
+            cw1 += int(cc.get("ephemeral_1h_input_tokens") or 0)
+        else:
+            cw5 += int(u.get("cache_creation_input_tokens") or 0)
+        cr += int(u.get("cache_read_input_tokens") or 0)
+    usd = (tin * pr["input"] + tout * pr["output"] + cw5 * pr["cache_5m"] + cw1 * pr["cache_1h"]
+           + cr * pr["cache_read"]) / 1e6
+    return round(usd, 6), tin + cw5 + cw1 + cr, tout
 
 
 def from_result(result, **attrib):

@@ -36,7 +36,7 @@ gld_skip() { echo "SKIP: $1" >&2; [ "${GLD_ALLOW_SKIP:-0}" = 1 ] && exit 0; \
 command -v git >/dev/null 2>&1 || gld_skip "git is not installed"
 
 WORK="$(mktemp -d)" || { echo "mktemp -d failed" >&2; exit 1; }
-trap 'rm -rf "$WORK"' EXIT
+trap 'chmod -R u+w "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT
 OUT="$WORK/unittest.out"
 ( cd "$HERE/engine" && PYTHONDONTWRITEBYTECODE=1 TMPDIR="$WORK" "$PY" -W ignore::ResourceWarning \
     -m unittest discover -s . -p 'test_k1_*.py' -v ) >"$OUT" 2>&1
@@ -49,7 +49,7 @@ if [ "$RC" -ne 0 ]; then
 fi
 echo "engine K1: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when tests are added on purpose.
-ENGINE_K1_MIN_TESTS=218
+ENGINE_K1_MIN_TESTS=236
 if [ "$((PASS + FAIL))" -lt "$ENGINE_K1_MIN_TESTS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${ENGINE_K1_MIN_TESTS}건)."
   exit 1

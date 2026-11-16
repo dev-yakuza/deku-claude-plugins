@@ -13,9 +13,18 @@ from guildcore.adapters.claude import ProcResult
 K1FX = os.path.join(_util.FX, "k1")
 
 
+def _rm(d):
+    for base, dirs, files in os.walk(d):          # exported gate copies are read-only (0555)
+        try:
+            os.chmod(base, 0o755)
+        except OSError:
+            pass
+    shutil.rmtree(d, True)
+
+
 def tmpdir(case):
     d = tempfile.mkdtemp(prefix="gld-k1-")
-    case.addCleanup(shutil.rmtree, d, True)
+    case.addCleanup(_rm, d)
     return os.path.realpath(d)
 
 

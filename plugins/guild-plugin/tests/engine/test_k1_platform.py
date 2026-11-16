@@ -351,21 +351,44 @@ class RenderedSettings(unittest.TestCase):
         on_disk = json.load(open(os.path.join(run, "in", "settings.json")))
         self.assertNotIn("env", on_disk)
 
-    def test_role_sandbox_forced(self):                       # Q23
+    def test_role_sandbox_forced(self):                       # Q23 + K1r2-B2/M1
         rd, run = self.render()
         sb = rd.settings["sandbox"]
+        fs = sb["filesystem"]
         self.assertEqual((sb["enabled"], sb["allowUnsandboxedCommands"], sb["excludedCommands"]), (True, False, []))
-        self.assertIn(self.r + "/**", sb["filesystem"]["allowWrite"])
-        self.assertIn(run + "/**", sb["filesystem"]["allowWrite"])
-        self.assertNotIn("/a/**", sb["filesystem"]["allowWrite"])            # user/local cannot widen
-        for want in (self.r + "/.git/hooks/**", self.r + "/.git/config", self.r + "/.claude/**"):
-            self.assertIn(want, sb["filesystem"]["denyWrite"])
+        self.assertIn(self.r + "/**", fs["allowWrite"])
+        self.assertIn(run + "/out/**", fs["allowWrite"])
+        self.assertNotIn(run + "/**", fs["allowWrite"])
+        self.assertNotIn("/a/**", fs["allowWrite"])            # user/local cannot widen
+        common = os.path.join(self.r, ".git")
+        self.assertNotIn(common + "/**", fs["allowWrite"])
+        self.assertFalse([a for a in fs["allowWrite"] if a.startswith(common + "/guild")])
+        for want in (common + "/hooks/**", common + "/config", self.r + "/.claude/**",
+                     common + "/guild/engine/**", common + "/guild/**"):
+            self.assertIn(want, fs["denyWrite"])
+        home = os.path.expanduser("~")
+        for want in (".ssh", ".config/gh", ".claude", "Library/Keychains", ".aws"):
+            self.assertIn(os.path.join(home, want), fs["denyRead"])
         self.assertFalse([d for d in sb["network"]["allowedDomains"] if "github" in d])
 
     def test_reader_sandbox_writes_run_dir_only(self):
         run = os.path.join(tmpdir(self), "run")
+        rd = S.render("reviewer", None, worktree=self.r, base=self.base, run_dir=run, user_settings=self.user)
+        fs = rd.settings["sandbox"]["filesystem"]
+        self.assertEqual(fs["allowWrite"][:2], [run + "/out/**", run + "/tmp/**"])
+        self.assertFalse([a for a in fs["allowWrite"] if a.startswith(self.r)])
+        for top in (self.r + "/.claude/**", self.r + "/.claude/**"):
+            self.assertIn(top, fs["denyWrite"])         # every tracked top-level path
+        self.assertEqual(rd.settings["sandbox"]["network"]["allowedDomains"], [])
+
+    def test_toolchain_reader_gets_build_dirs_not_sources(self):   # K1r2-M3
+        run = os.path.join(tmpdir(self), "run")
         rd = S.render("tester", "verify", worktree=self.r, base=self.base, run_dir=run, user_settings=self.user)
-        self.assertEqual(rd.settings["sandbox"]["filesystem"]["allowWrite"], [run + "/**"])
+        fs = rd.settings["sandbox"]["filesystem"]
+        self.assertIn(self.r + "/.dart_tool/**", fs["allowWrite"])
+        self.assertIn(self.r + "/build/**", fs["allowWrite"])
+        self.assertIn(self.r + "/.claude/**", fs["denyWrite"])
+        self.assertNotIn(self.r + "/**", fs["denyWrite"])      # the cwd root itself: heredocs need it
 
     def test_registries_from_manifests(self):
         with open(os.path.join(self.r, "pubspec.yaml"), "w") as fh:
@@ -398,11 +421,37 @@ class RenderedSettings(unittest.TestCase):
         git(self.r, "commit", "-qam", "branch hook")
         rd, run = self.render()
         cmd = rd.settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        self.assertIn(os.path.join(run, "in", "gates") + "/scripts/g.py", cmd)
+        gdir = rd.meta["gates_dir"]
+        self.assertTrue(gdir.startswith(os.path.join(self.r, ".git", "guild", "engine", "gates", self.base)))
+        self.assertIn(gdir + "/scripts/g.py", cmd)
         self.assertNotIn("CLAUDE_PROJECT_DIR", cmd)
-        self.assertTrue(os.path.isfile(os.path.join(run, "in", "gates", "scripts", "g.py")))
+        self.assertFalse(os.access(os.path.join(gdir, "scripts", "g.py"), os.W_OK))      # read-only
+        self.assertTrue(S.verify_gates(gdir, rd.meta["gates_digest"]))
         self.assertNotIn("Stop", rd.settings["hooks"])        # user hooks are never carried
         self.assertEqual(rd.meta["project_base_sha"], self.base)
+
+    def test_hook_scripts_outside_every_allow_write(self):     # K1r2-B1
+        rd, run = self.render()
+        sb = rd.settings["sandbox"]["filesystem"]
+        cmd = rd.settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        script = cmd.split('"')[1]
+        import fnmatch
+        allowed = [a for a in sb["allowWrite"] if fnmatch.fnmatch(script, a) or script.startswith(a.rstrip("*").rstrip("/") + "/")]
+        denied = [d for d in sb["denyWrite"] if script.startswith(d.rstrip("*").rstrip("/") + "/")]
+        self.assertTrue(denied, "gate script must be under a denyWrite")
+        # an allowWrite match (the developer's worktree glob is not one: .git/guild is outside it)
+        self.assertFalse([a for a in allowed if not a.startswith(self.r + "/**")], allowed)
+        self.assertIn(run + "/in/**", sb["denyWrite"])
+
+    def test_tampered_gates_are_detected(self):
+        rd, _ = self.render()
+        g = os.path.join(rd.meta["gates_dir"], "scripts", "g.py")
+        os.chmod(g, 0o644)
+        with open(g, "w") as fh:
+            fh.write("evil")
+        self.assertFalse(S.verify_gates(rd.meta["gates_dir"], rd.meta["gates_digest"]))
+        rd2, _ = self.render()                                  # re-export restores the base bytes
+        self.assertTrue(S.verify_gates(rd2.meta["gates_dir"], rd2.meta["gates_digest"]))
 
     def test_no_hooks_for_judges(self):
         rd, _ = self.render(hooks=False)

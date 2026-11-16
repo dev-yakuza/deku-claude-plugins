@@ -23,6 +23,8 @@ import hashlib
 import os
 import subprocess
 
+from guildcore.adapters import git as G
+
 PROTECTED = (".claude/settings.json", ".claude/settings.local.json", ".claude/settings*.json",
              ".claude/guild/gates/**")
 TEST_DIRS = ("test/**", "tests/**", "integration_test/**", "e2e/**", "__tests__/**",
@@ -74,15 +76,11 @@ def remote_heads(worktree, url):
     if not url:
         return None
     try:
-        p = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "ls-remote", "--refs", url],
-                           cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60,
-                           env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
-    except subprocess.TimeoutExpired:
-        return None
-    if p.returncode != 0:
+        raw = G.run(worktree, "ls-remote", "--refs", url, timeout=60)
+    except (subprocess.TimeoutExpired, G.GitError):
         return None
     out = {}
-    for ln in p.stdout.decode().splitlines():
+    for ln in raw.decode().splitlines():
         if "\t" in ln:
             sha, ref = ln.split("\t", 1)
             out[ref] = sha
@@ -278,6 +276,37 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
     for p, who in bad:
         viol.append("%s wrote %s" % (who, p) if who != "protected" else "protected path %s changed" % p)
     return viol
+
+
+def drift(baseline, now):
+    """Changes between the end of the previous role (its after-snapshot, or the engine's own
+    re-baseline) and now — what an escaped orphan wrote late (K1r2-B3). Remote-tracking refs
+    are ignored (the engine fetches); everything else is compared."""
+    out = []
+    for p in changed_paths(baseline, now):
+        out.append("path %s" % p)
+    rb = {k: v for k, v in baseline["refs"].items() if not k.startswith("refs/remotes/")}
+    ra = {k: v for k, v in now["refs"].items() if not k.startswith("refs/remotes/")}
+    for ref in sorted(set(rb) | set(ra)):
+        if rb.get(ref) != ra.get(ref):
+            out.append("ref %s" % ref)
+    if baseline["head"] != now["head"] or baseline.get("symref") != now.get("symref"):
+        out.append("HEAD")
+    ib, ia = baseline.get("integrity") or {}, now.get("integrity") or {}
+    for k in sorted(set(ib) | set(ia)):
+        if ib.get(k) != ia.get(k):
+            out.append(k)
+    return out
+
+
+def remote_warnings(before, after):
+    """K1r2-m1: any remote ref that moved during the role without being attributable to this
+    clone (e.g. objects garbage-collected after a push) — logged, not a violation."""
+    rmb, rma = before.get("remote"), after.get("remote")
+    if rmb is None or rma is None:
+        return []
+    return ["remote %s moved during the role" % r for r in sorted(set(rmb) | set(rma))
+            if rmb.get(r) != rma.get(r)]
 
 
 def render_pause_line(role, violations):

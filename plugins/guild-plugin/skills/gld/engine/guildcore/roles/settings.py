@@ -177,36 +177,167 @@ def git_dirs(worktree):
     return a.decode().strip(), b.decode().strip()
 
 
-def role_sandbox(role_key, worktree, run_dir, issue=None):
+SECRET_READ_PATHS = (".ssh", ".config/gh", ".claude", ".claude-personal", ".aws", ".netrc",
+                     ".git-credentials", ".config/git/credentials", "Library/Keychains", ".gnupg",
+                     ".docker/config.json", ".pub-cache/credentials.json", ".config/gcloud",
+                     ".kube", ".npmrc", ".pypirc")
+BUILD_DIRS = (".dart_tool", "build", "coverage", ".pytest_cache", "node_modules/.cache", "target",
+              ".gradle", "__pycache__")
+WRITER_ROLES = ("developer", "qa")
+SCOPED_WRITERS = ("tester-cases", "tech-writer")
+
+
+def claude_tmp_root():
+    """The TMPDIR the CLI sandbox gives every Bash command (shared by ALL of this user's Claude
+    Code sessions — K1r2-M2)."""
+    return os.path.join("/private/tmp", "claude-%d" % os.getuid())
+
+
+def engine_home(common_dir):
+    """Engine-owned state: `<git-common-dir>/guild/engine` — never writable by a role (K1r2-B2)."""
+    return os.path.join(common_dir, "guild", "engine")
+
+
+def tracked_top_level(worktree):
+    rc, out = _git(worktree, "ls-files", "-z")
+    tops = set()
+    for f in out.decode("utf-8", "replace").split("\0"):
+        if f:
+            tops.add(f.split("/", 1)[0] + ("/" if "/" in f else ""))
+    return sorted(tops)
+
+
+def role_sandbox(role_key, worktree, run_dir, issue=None, homes=(), config_dir=None,
+                 toolchain=False):
     """The Q23 sandbox block, forced AFTER the merge (a user/local `enabled:false`,
-    `excludedCommands` or `allowUnsandboxedCommands` cannot weaken it)."""
-    allow_w = []
+    `excludedCommands` or `allowUnsandboxedCommands` cannot weaken it). denyWrite beats
+    allowWrite in the CLI sandbox (verified), which every rule below relies on.
+
+    * writes: `<run>/out/**` and the role's private `<run>/tmp/**` only; developer/qa the
+      worktree and exactly the git internals a commit touches (never `<common>/guild/**`,
+      hooks/config/info, other worktrees — K1r2-B2); readers with the toolchain class get the
+      gitignored build dirs (`.dart_tool`, `build`, …) and nothing tracked (K1r2-M3);
+    * `<run>/in/**`, the engine home (gates, journal, runs) and every other Claude session's
+      TMPDIR subtree are denyWrite (K1r2-B1, M2);
+    * reads: secrets under every HOME (gh/ssh/claude/aws/keychains/…) are denyRead (K1r2-M1);
+    * network: package registries for writers only; readers get none."""
+    allow_w, deny_w, deny_r = [], [], []
     if run_dir:
-        allow_w.append(os.path.abspath(run_dir) + "/**")
-    deny_w = []
+        r = os.path.abspath(run_dir)
+        allow_w += [r + "/out/**", r + "/tmp/**"]
+        deny_w += [r + "/in/**"]
     if worktree:
         wt = os.path.abspath(worktree)
         gitdir, common = git_dirs(worktree)
-        if role_key in ("developer", "qa"):
+        if role_key in WRITER_ROLES:
             allow_w.append(wt + "/**")
-            # commits write objects/refs/index — in the common dir (and the linked gitdir)
-            allow_w += [common + "/**"] + ([gitdir + "/**"] if gitdir != common else [])
+            # exactly what `git commit` / `git switch` on the own branch write
+            allow_w += [common + "/objects/**", common + "/refs/heads/**", common + "/logs/**",
+                        common + "/packed-refs", common + "/packed-refs.lock"]
+            if gitdir == common:
+                allow_w += [common + x for x in ("/index", "/index.lock", "/HEAD", "/HEAD.lock",
+                                                 "/ORIG_HEAD", "/COMMIT_EDITMSG", "/FETCH_HEAD")]
+            else:
+                allow_w.append(gitdir + "/**")
+            wts = os.path.join(common, "worktrees")
+            if os.path.isdir(wts):
+                for d in sorted(os.listdir(wts)):
+                    if os.path.join(wts, d) != gitdir:
+                        deny_w.append(os.path.join(wts, d) + "/**")
         elif role_key == "tester-cases" and issue is not None:
             allow_w.append(os.path.join(wt, "docs", "specs", str(issue)) + "/**")
         elif role_key == "tech-writer":
             allow_w.append(os.path.join(wt, "docs") + "/**")
-        if role_key not in ("developer", "qa", "tester-cases", "tech-writer"):
-            # the CLI sandbox lets a command write its cwd by default — a reader must not
-            # (verified with the real CLI: without this a reader's write to the worktree landed)
-            deny_w.append(wt + "/**")
+        if role_key not in WRITER_ROLES + SCOPED_WRITERS:
+            # the sandbox lets a command write its cwd by default — a reader must not; with the
+            # toolchain it may write gitignored build output, never a tracked path
+            # Every tracked top-level path is denyWrite (not the worktree root itself: a deny on
+            # the cwd breaks bash heredocs in the sandbox — verified); a new untracked file is the
+            # post-role check's. With the toolchain, gitignored build dirs are writable.
+            if toolchain:
+                allow_w += [os.path.join(wt, d) + "/**" for d in BUILD_DIRS]
+            for top in tracked_top_level(worktree):
+                deny_w.append(os.path.join(wt, top.rstrip("/")) + ("/**" if top.endswith("/") else ""))
         for g in sorted(set([gitdir, common])):
             deny_w += [g + "/hooks/**", g + "/config", g + "/config.worktree", g + "/info/**"]
-        deny_w += [wt + "/.claude/**", os.path.join(main_checkout(worktree), ".claude") + "/**"]
+        deny_w += [engine_home(common) + "/**", common + "/guild/**",
+                   wt + "/.claude/**", os.path.join(main_checkout(worktree), ".claude") + "/**"]
+    # other Claude Code sessions' TMPDIR subtrees (scratchpads, tasks/*.output): denyWrite —
+    # except the one holding this worktree/run (a harness; production keeps worktrees outside)
+    tmp = claude_tmp_root()
+    # the sandbox forces TMPDIR=/tmp/claude-<uid> for Bash (setting TMPDIR does not change it —
+    # verified); heredocs need it writable, so allow it and deny every session subtree in it
+    allow_w.append(tmp + "/**")
+    keep = [os.path.realpath(x) for x in (worktree, run_dir) if x]
+    if os.path.isdir(tmp):
+        for d in sorted(os.listdir(tmp)):
+            full = os.path.join(tmp, d)
+            if d.startswith("-") and not any(k.startswith(full + "/") for k in keep):
+                deny_w.append(full + "/**")
+    for h in [os.path.expanduser("~")] + list(homes):
+        for rel in SECRET_READ_PATHS:
+            deny_r.append(os.path.join(h, rel))
+    if config_dir:
+        deny_r.append(os.path.abspath(config_dir))
     deny_w = list(dict.fromkeys(deny_w))
+    deny_r = list(dict.fromkeys(deny_r))
     return {"enabled": True, "allowUnsandboxedCommands": False, "autoAllowBashIfSandboxed": False,
             "excludedCommands": [],
-            "filesystem": {"allowWrite": allow_w, "denyWrite": deny_w},
-            "network": {"allowedDomains": registry_domains(worktree)}}
+            "filesystem": {"allowWrite": allow_w, "denyWrite": deny_w, "denyRead": deny_r},
+            "network": {"allowedDomains": registry_domains(worktree) if role_key in WRITER_ROLES else []}}
+
+
+def gates_home(common_dir, base_sha):
+    return os.path.join(engine_home(common_dir), "gates", base_sha)
+
+
+def tree_digest(root):
+    import hashlib
+    h = hashlib.sha256()
+    for base, dirs, files in sorted(os.walk(root)):
+        dirs.sort()
+        for f in sorted(files):
+            fp = os.path.join(base, f)
+            h.update(os.path.relpath(fp, root).encode())
+            with open(fp, "rb") as fh:
+                h.update(hashlib.sha256(fh.read()).digest())
+    return h.hexdigest()
+
+
+def export_gates_readonly(worktree, base_sha):
+    """Export `<base>:.claude/guild/gates` ONCE per base into the engine home (outside every
+    role's allowWrite, and denyWrite), make it read-only, and return (dir, digest) — or
+    (None, None) when the base has no gates (K1r2-B1). An existing export is re-verified."""
+    _gitdir, common = git_dirs(worktree)
+    dest = gates_home(common, base_sha)
+    stamp = dest + ".sha256"
+    if os.path.isdir(dest) and os.path.exists(stamp):
+        with open(stamp) as fh:
+            want = fh.read().strip()
+        if tree_digest(dest) == want:
+            return dest, want
+        import shutil
+        for base, dirs, files in os.walk(dest):
+            os.chmod(base, 0o755)
+        shutil.rmtree(dest)
+    tmp = dest + ".tmp%d" % os.getpid()
+    if not export_gates(worktree, base_sha, tmp):
+        return None, None
+    digest = tree_digest(tmp)
+    for base, dirs, files in os.walk(tmp, topdown=False):
+        for f in files:
+            os.chmod(os.path.join(base, f), 0o444 if not os.access(os.path.join(base, f), os.X_OK) else 0o555)
+        os.chmod(base, 0o555)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    os.replace(tmp, dest)
+    with open(stamp, "w") as fh:
+        fh.write(digest + "\n")
+    return dest, digest
+
+
+def verify_gates(gates_dir, digest):
+    """Before each session: the hook scripts are still the exported bytes."""
+    return bool(gates_dir) and os.path.isdir(gates_dir) and tree_digest(gates_dir) == digest
 
 
 class Sources(object):
@@ -256,16 +387,21 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
     if sandbox is None:
         sandbox = permissions.ROLE_CLASSES.get(rk) not in (None, ()) and role != "judge"
     if sandbox:
-        forced = role_sandbox(rk, worktree, run_dir, issue)
+        e = env or os.environ
+        homes = [x for x in (e.get("HOME"),) if x]
+        forced = role_sandbox(rk, worktree, run_dir, issue, homes=homes,
+                              config_dir=e.get("CLAUDE_CONFIG_DIR"),
+                              toolchain="C4" in (permissions.ROLE_CLASSES.get(rk) or ()))
         out["sandbox"] = forced      # Q23: the role sandbox is the engine's, not merged
     elif merged_sandbox is not None:
         out["sandbox"] = merged_sandbox
-    gates_dir = None
+    gates_dir, gates_digest = None, None
     if hooks and project.get("hooks"):
         h = project["hooks"]
-        if run_dir and base_sha and export_gates(worktree, base_sha, os.path.join(run_dir, "in", "gates")):
-            gates_dir = os.path.join(run_dir, "in", "gates")
-            h = rewrite_hook_commands(h, gates_dir)
+        if base_sha:
+            gates_dir, gates_digest = export_gates_readonly(worktree, base_sha)
+            if gates_dir:
+                h = rewrite_hook_commands(h, gates_dir)
         out["hooks"] = copy.deepcopy(h)
     if extra_hooks:
         hk = out.setdefault("hooks", {})
@@ -274,6 +410,7 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
             hk[ev] = list(hk[ev]) + list(groups)
     meta = {"user_settings": user_p, "project_base": base, "project_base_sha": base_sha,
             "local_settings": local_p, "main_checkout": main, "gates_dir": gates_dir,
+            "gates_digest": gates_digest,
             "routing_in_settings_env": sorted(k for k in merged_env if k in ROUTING_KEYS)}
     path = None
     if run_dir:
