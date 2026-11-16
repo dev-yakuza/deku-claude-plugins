@@ -92,7 +92,7 @@ def _value(key, value):
         value = "true" if value else "false"
     elif isinstance(value, (list, tuple)):
         value = ("|" if key == "options" else ",").join(str(x) for x in value)
-    value = markers.finish(" ".join(str(value).split()))   # redact BEFORE capping (K0-m16)
+    value = markers.value(str(value))   # one value: redact (a key → whole value) BEFORE capping (K0-m16)
     if len(value) > VALUE_CAP:
         value = value[:VALUE_CAP - len(TRUNCATED)] + TRUNCATED
     return value

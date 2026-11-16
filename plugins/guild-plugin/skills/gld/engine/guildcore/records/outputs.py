@@ -70,10 +70,10 @@ def qa_last_ran(comments):
 def render_loopback_lines(reason, signature):
     sig = signature if isinstance(signature, str) else ",".join(sorted(signature))
     return markers.assert_own_markers(markers.finish(
-        "loopback-reason: %s\nloopback-signature: %s" % (" ".join(reason.split()), " ".join(sig.split()))))
+        "loopback-reason: %s\nloopback-signature: %s" % (markers.value(reason), markers.value(sig))))
 
 
 def render_recheck_note(ts, green, summary):
     """C12: `/gld test N` on done records only this note (no test:output, label or loopback)."""
     return markers.assert_own_markers("%s\n%s" % (markers.open_tag("note"), markers.finish(
-        "recheck test %s: %s — %s" % (ts, "green" if green else "red", " ".join(summary.split())))), "note")
+        "recheck test %s: %s — %s" % (ts, "green" if green else "red", markers.value(summary)))), "note")

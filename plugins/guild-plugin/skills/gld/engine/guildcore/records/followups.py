@@ -34,7 +34,7 @@ class Item(object):
 
     def render(self):
         tok = "filed #%d" % self.filed if self.status == "filed" else self.status
-        parts = [tok, self.title] + ([self.rationale] if self.rationale else [])
+        parts = [tok, markers.value(self.title)] + ([markers.value(self.rationale)] if self.rationale else [])
         return "- " + " — ".join(parts)
 
 
@@ -67,7 +67,7 @@ def from_comments(comments):
 
 
 def render(heading, items):
-    inner = markers.finish("\n".join(["### " + " ".join(heading.split())] + [i.render() for i in items]))
+    inner = markers.finish("\n".join(["### " + markers.value(heading)] + [i.render() for i in items]))
     return markers.assert_own_markers("\n".join([markers.open_tag(NAME), inner, markers.close_tag(NAME)]), NAME)
 
 
@@ -98,7 +98,7 @@ def render_pr_notice(issue, unfiled_titles):
     name = pr_notice_name(issue)
     if unfiled_titles:
         lines = [PR_PENDING_T.format(k=len(unfiled_titles), n=issue)] + \
-                ["- " + t for t in unfiled_titles]
+                ["- " + markers.value(t) for t in unfiled_titles]
     else:
         lines = [PR_SETTLED_T.format(n=issue)]
     return markers.assert_own_markers("\n".join([markers.open_tag(name), markers.finish("\n".join(lines)),

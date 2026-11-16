@@ -62,7 +62,7 @@ def migrate_unattended(body):
 
 def render_unattended(entries):
     """`entries` = [str] one line each (interpretation · rationale · "사람 확인 요")."""
-    lines = [UNATTENDED_HEADING] + ["- " + " ".join(e.split()) for e in entries]
+    lines = [UNATTENDED_HEADING] + ["- " + markers.value(e) for e in entries]
     return markers.assert_own_markers("\n".join([markers.open_tag(UNATTENDED), markers.finish("\n".join(lines)),
                                                   markers.close_tag(UNATTENDED)]), UNATTENDED)
 

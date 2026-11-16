@@ -71,7 +71,7 @@ def from_comments(comments):
 
 
 def cause_line(kind, text, env_key=None):
-    text = " ".join((text or "").split())
+    text = markers.value(text)
     if kind == "env":
         if env_key not in ENV_KEYS:
             raise ValueError("env key must be one of %s" % (ENV_KEYS,))
@@ -90,12 +90,12 @@ def render(cause, prose="", directive_line=None, answer=None):
     Redaction is the last step (INV5) and runs over everything below the marker."""
     lines = [cause]
     if directive_line:
-        lines.append(directive_line)
+        lines.append(markers.value(directive_line))
     if answer:
         lines.append(answer_hint(answer[0], answer[1]))
     if prose:
         lines.append("")
-        lines.append(prose.rstrip("\n"))
+        lines.append(markers.value(prose.rstrip("\n"), one_line=False))   # one prose value
     head = markers.finish("\n".join(lines[:len(lines) - (2 if prose else 0)]))
     tail = markers.finish("\n".join(lines[len(lines) - 2:]), structural=False) if prose else None
     out = markers.open_tag(NAME) + "\n" + head + ("\n" + tail if tail is not None else "")

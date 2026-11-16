@@ -36,17 +36,14 @@ class Checklist(object):
 def from_pr_body(body):
     """The full marker block (markers included) of a PR body, or None."""
     body = body or ""
-    try:
-        sp = markers.marker_span(body, NAME)          # whole-line markers only (K0-M2)
-    except ValueError:
-        return None
-    return Checklist(body[sp[0]:sp[1]]) if sp else None
+    sp = markers.marker_span(body, NAME)   # whole-line markers only (K0-M2); the SAME anchor
+    return Checklist(body[sp[0]:sp[1]]) if sp else None   # rule and errors as splice (K0-m20)
 
 
 def render(items, none_line=None):
     """`items` = [str] (each `<what> — <where/how>`); `none_line` = the explicit "나머지는 자동
     테스트로 검증됨 — 사람 확인 불필요" statement qa.md requires when nothing is left out."""
-    lines = [HEADING, INTRO] + ["- [ ] " + " ".join(i.split()) for i in items]
+    lines = [HEADING, INTRO] + ["- [ ] " + markers.value(i) for i in items]
     if none_line:
         lines.append(none_line)
     return markers.assert_own_markers("\n".join([markers.open_tag(NAME), markers.finish("\n".join(lines)),

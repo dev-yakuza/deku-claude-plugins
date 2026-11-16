@@ -94,6 +94,14 @@ def finish(text, structural=True):
     return out
 
 
+def value(text, one_line=True):
+    """One rendered VALUE: whitespace-folded (one_line), redacted as a unit, neutralized. Every
+    renderer passes each free-text field through here before assembling its block."""
+    from guildcore.records.redact import redact
+    t = " ".join((text or "").split()) if one_line else (text or "")
+    return neutralize(redact(t))
+
+
 def unescape(text):
     """Undo `neutralize` for comparisons of machine tokens (K0-m17)."""
     return (text or "").replace(ZWSP, "")
@@ -125,9 +133,10 @@ def _line_spans(body, line):
         c = clean(ln)
         if c.rstrip() == line:                          # trailing blanks tolerated (K0-m14)
             out.append((pos, pos + len(c)))             # a CRLF line's \r stays outside
-        elif c.lstrip().startswith(line):
-            # a line that STARTS with the marker but carries more (e.g. open+close on one line):
-            # neither a block nor a mere mention — never guess, never append a second block
+        elif c.startswith(line):
+            # a line that STARTS at column 0 with the marker but carries more (e.g. open+close on
+            # one line): neither a block nor a mention — never guess, never append a second
+            # block. An indented or `>`-quoted occurrence is a mention and is ignored (K0-m20).
             raise ValueError("marker line %r carries extra text" % line)
         pos += len(ln) + 1
     return out

@@ -27,26 +27,26 @@ def patterns():
     return _PATTERNS
 
 
-# Redaction-only extensions (the gate's patterns detect; these also SPAN what must go). A PEM
-# private key: the gate matches its BEGIN line; redaction takes the body too (K0-M1) — but never
-# more than key material (K0-B2): either the rest of the SAME line up to an END marker, or the
-# rest of the BEGIN line plus following base64-shaped lines and an optional END line. A missing
-# END therefore never swallows the record lines after it.
-REDACT_EXTRA = [
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
-               r"(?:[^\n]*?-----END [A-Z ]*PRIVATE KEY-----"
-               r"|[^\n]*(?:\n[A-Za-z0-9+/=]{4,}\r?(?=\n|$))*(?:\n-----END [A-Z ]*PRIVATE KEY-----)?)"),
-]
+# A private key is never pattern-matched body by body (K0-M1/B2/M7 flip-flopped between leaking
+# and over-erasing). The rule: redaction runs PER VALUE, and a value that contains a private-key
+# header anywhere — PEM in any flavor (RSA/EC/DSA/OPENSSH/ENCRYPTED, indented, quoted, with
+# headers or blank lines) or a PuTTY key file — is replaced WHOLE by the token. Record structure
+# survives because every other field is a separate value; a renderer whose only free text is one
+# prose value (a pause body) loses that whole prose — a pasted key must not be posted.
+KEY_VALUE_RE = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|PuTTY-User-Key-File-\d+:")
 
 
 def redact(text):
+    """Redact ONE value (a field, an item, or one prose body). Callers never pass a whole
+    multi-field block: a key anywhere replaces everything they passed."""
     out = text or ""
-    for rx in REDACT_EXTRA:
-        out = rx.sub(REPLACEMENT, out)
+    if KEY_VALUE_RE.search(out):
+        return REPLACEMENT
     for rx in patterns():
         out = rx.sub(REPLACEMENT, out)
     return out
 
 
 def has_secret(text):
-    return any(rx.search(text or "") for rx in patterns())
+    t = text or ""
+    return bool(KEY_VALUE_RE.search(t)) or any(rx.search(t) for rx in patterns())

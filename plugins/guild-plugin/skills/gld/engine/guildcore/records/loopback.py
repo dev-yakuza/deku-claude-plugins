@@ -102,8 +102,8 @@ def render_block(n, from_, at, branch, reason, signature, decided=None, override
     if markers.has_marker_text(branch):          # a machine field read back by execute (K0-m17)
         raise ValueError("branch carries Guild marker text")
     lines = ["### loopback %d" % n, "from: %s" % from_, "at: %s" % at,
-             "branch: %s" % " ".join((branch or "").split()),
-             "reason: %s" % " ".join((reason or "").split()), "signature: %s" % " ".join(sig.split())]
+             "branch: %s" % markers.value(branch), "reason: %s" % markers.value(reason),
+             "signature: %s" % markers.value(sig)]
     if decided:
         lines.append("decided: %s" % decided)
     if override:

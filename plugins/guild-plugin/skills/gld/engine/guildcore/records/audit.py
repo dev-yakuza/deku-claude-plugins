@@ -132,9 +132,9 @@ def from_comments(comments):
 def render_finding(token, severity, axis, location, text, reason=None, fid=None):
     if token not in TOKENS:
         raise ValueError("token must be one of %s" % (TOKENS,))
-    s = "- %s · %s · %s · %s — %s" % (token, severity, axis, location, " ".join(text.split()))
+    s = "- %s · %s · %s · %s — %s" % (token, severity, axis, markers.value(location), markers.value(text))
     if reason:
-        s += " — " + " ".join(reason.split())
+        s += " — " + markers.value(reason)
     if fid:
         s += " [id:%s]" % fid
     return s
@@ -154,7 +154,9 @@ def render_block(n, invocation, head, findings=(), role_axis=(), local_pass=None
     elif not findings:
         lines.append("findings: none")
     lines.extend(findings)
-    lines.extend(role_axis)
+    for ra in role_axis:                          # keep the line head, redact the value
+        head, sep, rest = ra.partition(": ")
+        lines.append(head + sep + markers.value(rest) if sep else markers.value(ra))
     return markers.assert_own_markers(markers.finish("\n".join(lines)))
 
 
