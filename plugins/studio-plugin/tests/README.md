@@ -514,3 +514,23 @@ Review 2: the overlay's internal source pages match by a normalized prefix (quer
 `index.html`, letter case and pages under it) at begin, source, recheck and check_scope; a second `## Ruby pairs`
 heading is refused; a restore needs the prev's recorded content hash and capture record; a page picture's floor and
 host come from its whole address.
+
+**0.2.5** (`SCRIPTS_VERSION` 33, m2-plan M2f): `test_m2f.py` — board captures with the fake s2v capture (no network;
+the fake's `png_hex` gives a shot other bytes). Floors (`shots.judge`): own host public, another host's page
+third-party, a third-party picture inside the area (one outside does not count), a picture without a host unknown, a
+frame inside unknown (third-party still wins); internal: a picture from an internal host, an internal source page (or
+under one), a term in the final address, the page's title, text or an alt text inside the area. capture.py shot:
+an internal source page refused before running, a final address on one or with a term not usable, a left `.tmp-*`
+folder removed, the `floor:` and `credit:` lines. The script check takes a usable capture; the board check: no
+credit, a third-party page without `public_ok`, a picture changed by hand or removed by an unusable run, an internal
+capture in a public video and a missing overlay (closed side). credit-preview: ten lines with the capture's `source`
+and `captured_at`, a draft with another source refused, a question without `captured_at` → 6; a shot taken again
+(other bytes; the same bytes later) asks the credit again. ③: the `화면 캡처` line in the question (with the warning
+and blocked hosts), approve refuses a question without it (6), the record binds the bytes, a shot taken again after
+`shown` sends the work back to board. The board and script checks' inputs gain captures.json and public_domains only
+when a capture exists. The commit stages the shown capture only (not an unused one, nothing under `work/`) and
+refuses a capture other than ③'s.
+Review 1: a commit through a clean filter (a fake git-lfs pointer in the index) stages the pictures; a host leaving
+`public_domains` asks a capture's credit again at board and is refused at the commit (③ binds the floor); a term
+with a soft hyphen or zero-width space in the page's text, title or alt is found; bidi controls are dropped from the
+③ line.

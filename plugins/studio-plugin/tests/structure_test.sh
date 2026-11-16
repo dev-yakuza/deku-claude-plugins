@@ -428,11 +428,14 @@ LEGACY_DEPS_HEAD = {
 # commit/video.py lazily, and video.py loads credits.py; the closure test below runs them). Intended changes since
 # d2028cc, each with a one-line reason:
 LEGACY_DEPS_CHANGED = {
-    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26 · 0.1.2: SCRIPTS_VERSION 27 · 0.2.0: SCRIPTS_VERSION 28 · 0.2.1: 29 · 0.2.2: 30 · 0.2.3: 31 · 0.2.4: 32",
+    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26 · 0.1.2: SCRIPTS_VERSION 27 · 0.2.0: SCRIPTS_VERSION 28 · 0.2.1: 29 · 0.2.2: 30 · 0.2.3: 31 · 0.2.4: 32 · 0.2.5: 33",
     "stdo/commit/approvals.py": "0.2.0: light_check(local_done=True) for a local video's done (the default unchanged)",
     "stdo/commit/video.py": "0.2.0: the copy path through stdo/vpaths.py (unchanged for a public video); a public "
                             "video's assets.json from a check_scope without the internal flag is not checked · 0.2.4: "
-                            "a URL source's recheck rule at --stage only (the hook and allowed() unchanged)",
+                            "a URL source's recheck rule at --stage only (the hook and allowed() unchanged) · 0.2.5: at --stage "
+                            "only, a board capture the script uses must be the bytes and floor ③ bound and every staged "
+                            "picture the bytes its credit approved, compared through git's object id of the work "
+                            "tree's bytes (clean filters such as git-lfs) (the hook and allowed() unchanged)",
     "stdo/hooks/templates.py": "0.1.1 (fix-0029 §2): the shim's hint names hooks.py install only",
     "stdo/state/labels.py": "0.1.1 (fix-0029 §3): no milestone names in messages · 0.2.1: the 플랫폼 <h12> label · "
                             "0.2.4: a URL source's capture line among ①'s source lines (none for repository Markdown)",
@@ -491,7 +494,9 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "32", "SCRIPTS_VERSION is 32 (0.2.4: URL sources — capture.py source and recheck, "
+check(sv and sv.group(1) == "33", "SCRIPTS_VERSION is 33 (0.2.5: board captures as pictures — stdo/capture/shots.py, "
+      "capture.py shot's internal-page and final-address rules, board.py, claims/ check and cli, state/ credit, gates, "
+      "shown and stagechecks, commit/video.py's ③ binding; 0.2.4: URL sources — capture.py source and recheck, "
       "stdo/capture/files.py, source/page.py, state/urlsource.py, flow.py begin --url and record-source, collect.py, "
       "commands.py record-recheck, labels.py's capture line, source/ assets, scope and cli, claims/cli.py's ruby "
       "check, commit/video.py's recheck rule; 0.2.3: capture.py and stdo/capture/ — the URL and "

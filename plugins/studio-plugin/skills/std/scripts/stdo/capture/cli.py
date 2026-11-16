@@ -19,9 +19,12 @@ content hash) leaves `work/source/` as it was. `state.py record-source` records 
 be read: the result is still written and is recorded the same way).
 
 `shot` writes `<video>/assets/capture-<name>.png` and s2v's JSON as `work/captures/<name>.json`, and records the
-result in `work/captures.json` (P-STATE) under `shots.<name>`: the asked URL, the selector and size, `status` (ok or
-unusable) and `reason`, `idle`, the hosts s2v blocked, the files and their sha256. A run that is not usable removes the
-name's earlier picture and JSON. Nothing is recorded when the run was interrupted or Studio's call was refused.
+result in `work/captures.json` (P-STATE) under `shots.<name>`: the asked URL and the final one, the selector and size,
+`status` (ok or unusable) and `reason`, `idle`, the hosts s2v blocked, the files and their sha256. A run that is not
+usable (also a final address with an internal host or term, or on an internal source page) removes the name's earlier
+picture and JSON. Nothing is recorded when the run was interrupted or Studio's call was refused. An address that is one
+of the overlay's internal source pages (or under one) is refused before the run. The picture's floor and the credit
+fields are stdo/capture/shots.py's (printed after a usable shot); the board check and gate ③ read them from there.
 
 One capture.py per video at a time (exit 5). No machine lock: capture runs no model.
 Exit: 0 ok · 1 not usable (recorded) or interrupted (nothing recorded) · 2 usage, setup or a Studio defect ·
@@ -37,7 +40,7 @@ import sys
 from .. import machine, paths, writes
 from ..source import page as cpage
 from ..state import cli as scli, commands as C, schema, store
-from . import files, rules, run as crun
+from . import files, rules, run as crun, shots
 
 SHOT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 SHOT_VALUES = ("--url", "--selector", "--width", "--height")
@@ -157,6 +160,10 @@ def main(argv, env=None, cwd=None, runner=None):
         if problem:
             raise problem
         url, host = rules.shot_url(o["--url"], cfg, items, state.get("scope") != "internal")
+        internal_urls = rules.source_urls(repo, cfg, env)
+        if any(rules.same_or_under(url, u) for u in internal_urls):
+            raise rules.CaptureError(rules.REFUSED, "--url is an internal source of the overlay (or a page under "
+                                                    "one) — not a picture for a video")
         sel = rules.selector(o.get("--selector"), items)
         width, height = rules.size("--width", o.get("--width")), rules.size("--height", o.get("--height"))
         allow = rules.allow_hosts(cfg, items)
@@ -165,7 +172,9 @@ def main(argv, env=None, cwd=None, runner=None):
             raise Usage(machine.HINT)
         work = _real_dir(vdir, "work")
         with store.Lock(os.path.join(work, ".capture.lock"), wait=0.0):
-            return _shot(repo, vdir, name, url, host, sel, width, height, allow, s2v_path, env, runner)
+            final_check = (lambda final: rules.shot_final_problem(final, cfg, items, internal_urls))
+            return _shot(repo, vdir, state, name, url, host, sel, width, height, allow, s2v_path, env, runner,
+                         final_check)
     except Usage as e:
         _err(str(e))
         return C.USAGE
@@ -186,15 +195,17 @@ def main(argv, env=None, cwd=None, runner=None):
         return C.USAGE
 
 
-def _shot(repo, vdir, name, url, host, sel, width, height, allow, s2v_path, env, runner):
+def _shot(repo, vdir, state, name, url, host, sel, width, height, allow, s2v_path, env, runner, final_check):
     writes.check("a video's captures")
     data = read_captures(vdir)  # an unreadable record stops before the run, not after it
     caps = _real_dir(vdir, "work/captures")
     _real_dir(vdir, "assets")
-    png_rel, json_rel = "assets/capture-%s.png" % name, "work/captures/%s.json" % name
+    for x in sorted(os.listdir(caps)):  # an earlier run's temporary folder, left by a kill (the lock is ours)
+        if x.startswith(".tmp-"):
+            _remove(os.path.join(caps, x))
+    png_rel, json_rel = shots.script_src(name), "work/captures/%s.json" % name
     png, js = os.path.join(vdir, png_rel), os.path.join(vdir, json_rel)
     tmp = os.path.join(caps, ".tmp-%s-%d" % (name, os.getpid()))
-    shutil.rmtree(tmp, ignore_errors=True)
     os.mkdir(tmp)
     try:
         t_png, t_json = os.path.join(tmp, "shot.png"), os.path.join(tmp, "shot.json")
@@ -203,11 +214,17 @@ def _shot(repo, vdir, name, url, host, sel, width, height, allow, s2v_path, env,
         if res["status"] in ("interrupted", "defect"):
             _err("%s — nothing recorded" % res["reason"])
             return C.FAIL if res["status"] == "interrupted" else C.USAGE
-        rec = {"url": url, "selector": sel, "width": width, "height": height, "status": res["status"],
-               "reason": res["reason"], "idle": (res["data"] or {}).get("idle"),
-               "blocked": [h for h, _r in res["blocked"]], "warnings": res["warnings"], "at": schema.now()}
+        final = (res["data"] or {}).get("url")
+        rec = {"url": url, "final": final if isinstance(final, str) else None, "selector": sel, "width": width,
+               "height": height, "status": res["status"], "reason": res["reason"],
+               "idle": (res["data"] or {}).get("idle"), "blocked": [h for h, _r in res["blocked"]],
+               "warnings": res["warnings"], "at": schema.now()}
         if res["status"] == "ok" and not os.path.isfile(t_png):
             rec.update(status="unusable", reason="s2v capture wrote no picture")
+        if rec["status"] == "ok":  # a redirect on the same host must not land on what the asked address may not name
+            why = final_check(final)
+            if why:
+                rec.update(status="unusable", reason=why)
         for p in (png, js):
             if os.path.lexists(p) and (os.path.islink(p) or not os.path.isfile(p)):
                 raise Usage("%s is not a plain file — Studio does not write over it" % os.path.relpath(p, repo))
@@ -233,6 +250,12 @@ def _shot(repo, vdir, name, url, host, sel, width, height, allow, s2v_path, env,
     for w in rec["warnings"]:
         _out("warning: %s" % w)
     _out("captured %s: %s/%s (%s)" % (name, rel, png_rel, host))
+    e = shots.for_repo(repo, vdir, state, env).get(png_rel) or {}
+    if e.get("status") == "ok":
+        _out("floor: %s%s" % (e["floor_text"], " — internal (%s): a public video cannot show it"
+                              % e["internal_reason"] if e.get("internal") and state.get("scope") != "internal" else ""))
+        _out("credit: the CREDITS.draft.yaml item's path is %s and its floor %s; state.py credit-preview adds source "
+             "and captured_at from this capture" % (png_rel, e["floor_text"]))
     return C.OK
 
 

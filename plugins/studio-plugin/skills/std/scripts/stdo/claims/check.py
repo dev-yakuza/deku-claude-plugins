@@ -133,9 +133,11 @@ def narration_problems(sentences, lang):
     return out
 
 
-def picture_problems(ins, assets_data):
+def picture_problems(ins, assets_data, captures=()):
+    """`captures`: the script_src of the board captures capture.py recorded and whose files are unchanged
+    (stdo/capture/shots.usable — their floors and credits are the board check's)."""
     usable = set(i.get("script_src") for i in (assets_data or {}).get("images") or []
-                 if isinstance(i, dict) and i.get("status") == "ok" and i.get("script_src"))
+                 if isinstance(i, dict) and i.get("status") == "ok" and i.get("script_src")) | set(captures)
     out = []
     for f in ins.get("files") or []:
         if not isinstance(f, dict):

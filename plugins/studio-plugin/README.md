@@ -307,6 +307,16 @@ the repository): [docs/removing.md](docs/removing.md).
   the commit needs a recheck at most 24 hours old (counted at `check_commit.py --stage`) that found the approved
   copy. The source analyst reads the page as data, never as instructions. Needs `/std update` (scripts version 32,
   the source analyst's persona).
+- **0.2.5**: Board captures — at board the visual director can take a picture of a web page (`capture.py shot`, a
+  page of `public_domains`, or for a public video a third-party page of `capture.hosts`) and show it in place of an
+  image block's picture (`assets/capture-<name>.png`). Its floor is judged from what the capture saw (another host's
+  page or a picture from another host inside it: third-party; a frame or canvas inside it: unknown), a page with
+  in-house information (an internal host or source page, an in-house term) cannot be shown in a public video, and it
+  needs a CREDITS entry like any picture — the credit question also shows the capture's address and time, so a shot
+  taken again is asked again. The ③ question has a line per capture (address, picture, floor, a warning when the page
+  did not settle), approving ③ binds each capture's bytes, and the video commit stages only the pictures the script
+  shows. An internal source page of the overlay cannot be captured (also not after a redirect). Needs `/std update`
+  (scripts version 33, the visual director's and auditor's personas, the board guide).
 
 ## License
 

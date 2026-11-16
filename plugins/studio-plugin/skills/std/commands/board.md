@@ -19,14 +19,30 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
    `.claude/studio/brand.json`. It changes only how the script looks — the frontmatter's `theme`, `logo`,
    `outputs.youtube.layout` and `transition`, and the attributes of the blocks already there — and writes
    `work/<lang>/board.md` (ending with `## Applied`) and `CREDITS.draft.yaml` (JSON). The spawn prompt gives it two
-   exact commands, which it runs itself: `python3 "<<SKILL_DIR>>/scripts/setup.py" doc s2v-syntax` (s2v's script
-   syntax) and `python3 .claude/studio/scripts/check_assets.py <video> --look --output youtube` (the brand's lines to
+   exact commands (a third for board captures, below), which it runs itself:
+   `python3 "<<SKILL_DIR>>/scripts/setup.py" doc s2v-syntax` (s2v's script syntax) and `python3 .claude/studio/scripts/check_assets.py <video> --look --output youtube` (the brand's lines to
    apply: the accent, the brand logo, the layout). `--look` exit 1: brand.json or its logo is not usable or not
    committed — tell the person (a brand change is a harness commit: `/std config`).
+   - **Board captures** (optional): a picture of a web page may take the place of the picture of an `::image` block
+     already there (its `src` only — never a new block). The spawn prompt gives the director a third exact command
+     form, `python3 .claude/studio/scripts/capture.py shot <video> <name> --url <https url>` (optionally
+     `--selector <css>` for one element of the page and `--width`/`--height` from 320 to 4096), which it runs once per
+     picture with literal values: `<name>` is lowercase letters, digits and `-`, and the picture is
+     `assets/capture-<name>.png` (the `src` to use). The page must be on one of `public_domains` (a public video may
+     also use the third-party pages of `capture.hosts`); the address has no query or fragment and is the final one (a
+     redirect to another host, even `www.`, is not usable). Exit 1: not usable (the reason is printed; an earlier
+     picture of that name is gone, so the block keeps its old `src`); exit 3: refused by the host lists or the
+     internal overlay — leave that picture as it was; exit 4: the internal overlay is missing (tell the person:
+     `/std config`). The director lists each capture in `board.md` under
+     `## Captures` (name, address, scene, why) and reports the `blocked: <host>` lines: ask the person whether to add
+     each host to `capture.allow_hosts` (`/std config`), then the director captures again. A `warning:` line (the page
+     did not settle) and the `floor:` line come back in the ③ question.
 3. **Credits** — for every picture the script shows, the brand logo included:
-   - `python3 .claude/studio/scripts/state.py credit-preview <video> <script_src>` prints eight `key=value` lines,
-     `label 출처 <video> <h12>` and the `question` block (`[<video>] 출처 — <script_src> · hash <h12>` and the eight
-     lines, up to `end of question`) (exit 1: fix the draft as it says).
+   - `python3 .claude/studio/scripts/state.py credit-preview <video> <script_src>` prints eight `key=value` lines
+     (ten for a board capture: its `source` and `captured_at` come from the capture, never from the draft),
+     `label 출처 <video> <h12>` and the `question` block (`[<video>] 출처 — <script_src> · hash <h12>` and those
+     lines, up to `end of question`) (exit 1: fix the draft as it says). A capture taken again is a new picture: its
+     credit is asked again.
    - Ask with AskUserQuestion (at most 4 pictures per call, one question each): the question is **the block pasted
      unchanged** — never retype a line (the guard compares each character); options `출처 <video> <h12>` and
      "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer — do not wait for the
@@ -59,17 +75,21 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
 ## Gate ③
 
 1. External audit (public videos — `scope: public` in `state.py next`; none for `scope: internal`): as in
-   `setup.py doc verify` step 5, with the contact sheet and the stills.
+   `setup.py doc verify` step 5, with the contact sheet, the stills and every board capture the script uses
+   (`assets/capture-<name>.png`).
 2. Open the contact sheet and the stills (`open <path>`); the last `shown 3 … --end` (printed by the snapshot) printed
-   `hash12 <h12>` and the `question` block: `[<video>] ③ 정지 화면 — <stills folder> · hash <h12>`, up to
-   `end of question`.
+   `hash12 <h12>` and the `question` block: `[<video>] ③ 정지 화면 — <stills folder> · hash <h12>`, then one
+   `화면 캡처 <name>: <address> · png <sha12> · <floor>` line per board capture the script uses (with a warning when
+   the page did not settle and the count of blocked hosts), up to `end of question`. `approve` refuses an answer
+   whose question lacks one of those lines (`gate-lines-not-shown`: paste the block again).
 3. Ask with AskUserQuestion: the question is **the block pasted unchanged**, then the auditor's findings (quote file
    paths rather than retyping long Japanese terms); options `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer —
    do not wait for the person; never in the same assistant message as the question — run
    `python3 .claude/studio/scripts/state.py approve <video> 3 --expect <h12> --output youtube`.
 4. "고칠 곳이 있다": back to board with the person's notes.
 
-Replacing an image after ③ sends the work back to board (② stays: the audio did not change).
+Replacing an image after ③ sends the work back to board (② stays: the audio did not change); so does taking a board
+capture the script uses again, and the video commit refuses a capture whose bytes ③ did not approve.
 
 <!-- studio:guard-refusal -->
 > **When the guard refuses something (INV9)**: stop. Do not reach the same effect another way

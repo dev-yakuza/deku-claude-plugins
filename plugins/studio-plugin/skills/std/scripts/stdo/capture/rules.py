@@ -180,6 +180,19 @@ def final_problem(final, cfg, items, internal_urls, what="the page's final addre
     return None
 
 
+def shot_final_problem(final, cfg, items, internal_urls, what="the page's final address"):
+    """None, or why a board picture's final address (run.judge already found it on the asked host) may not be shown:
+    an internal host or an in-house term (as the asked address), or one of the overlay's internal source pages."""
+    try:
+        _u, host = _split(final, what)
+        _check_host_and_terms(final, host, cfg, items, what)
+    except CaptureError as e:
+        return str(e)
+    if any(same_or_under(final, u) for u in internal_urls):
+        return "%s is an internal source of the overlay" % what
+    return None
+
+
 def host_hit(host, hosts):
     host = (host or "").lower().rstrip(".")
     return any(host == h or host.endswith("." + h) for h in hosts)

@@ -12,6 +12,9 @@ ones, and every picture the script shows (inspect's files of kind image · video
   `see README` only with `license_checked: true`), and an internal image (check_scope's flag) is refused whatever its
   credit; in an internal video only third-party needs a license and nothing needs `public_ok` (every picture still
   needs the person's CREDITS entry, J131);
+- a board capture (`assets/capture-<name>.png`, stdo/capture/shots.py) is a picture like the others: its record and
+  files as capture.py wrote them, its floor judged now (`scope`), never internal in a public video, and a CREDITS entry
+  whose `source` and `captured_at` are the capture's;
 - the brand's look (0.0.26, stdo/look.py): brand.json committed, the theme's accent, the brand logo (a picture too: its
   CREDITS entry has the floor `public/brand.json logo (committed in the harness)`) and no presenter layout without
   character art."""
@@ -19,6 +22,7 @@ ones, and every picture the script shows (inspect's files of kind image · video
 import os
 
 from . import credits, look, s2vlint, sandbox
+from .capture import shots
 from .claims.brief import assets_problem
 from .source import assets as assets_mod, imgformat
 from .state import schema, stagechecks
@@ -34,13 +38,14 @@ def is_picture(kind):
     return not kinds or any(k not in NOT_PICTURES for k in kinds)
 
 
-def picture_problems(repo, vdir, state, ins, proxy=False):
+def picture_problems(repo, vdir, state, ins, proxy=False, env=None):
     """Problems of every picture the script shows. `proxy`: this is the sandbox proxy session (a credit approved by
-    proxy counts only there — M1g review X2)."""
+    proxy counts only there — M1g review X2). `env`: the environment the overlay is found with (this process's)."""
     out = []
     bl = look.brand_logo(repo, vdir)
     data = assets_mod.read(vdir)
     usable = credits.assets_by_src(data, bl)
+    shots_ = shots.for_repo(repo, vdir, state, env)  # board captures (assets/capture-<name>.png): never a source's
     public = state.get("scope") != "internal"  # the closed side: anything but internal is checked as public
     internal = {i.get("script_src") for i in (data or {}).get("images") or []
                 if isinstance(i, dict) and i.get("internal") is True and i.get("script_src")}
@@ -57,6 +62,16 @@ def picture_problems(repo, vdir, state, ins, proxy=False):
             continue
         p = f.get("path")
         a = usable.get(p)
+        cap = shots_.get(p) if a is None else None
+        if cap is not None:
+            if cap["status"] != "ok":
+                out.append("%s: the board capture %s is not usable (%s) — run capture.py shot %s %s again"
+                           % (p, cap["capture"], cap["reason"], state.get("video"), cap["capture"]))
+                continue
+            if public and cap["internal"]:
+                out.append("%s is an internal picture (%s): a public video cannot show it" % (p, cap["internal_reason"]))
+                continue
+            a = cap
         if public and p in internal:
             out.append("%s is an internal image (made inside the organization): a public video cannot show it" % p)
             continue
@@ -99,6 +114,12 @@ def picture_problems(repo, vdir, state, ins, proxy=False):
                        "again (credit-preview, ask, credit)" % p)
         if e.get("sha256") != sha:
             out.append("%s: the file is not the one its CREDITS entry was approved for" % p)
+        if cap is not None and e.get("floor") != cap["floor_text"]:  # judged now: a settings change moves it
+            out.append("%s: its CREDITS entry's floor %s is not the capture's floor now (%s) — credit-preview, ask, "
+                       "credit" % (p, e.get("floor"), cap["floor_text"]))
+        if cap is not None and any(e.get(k) != v for k, v in shots.credit_fields(cap).items()):
+            out.append("%s: its CREDITS entry is not of this capture (source and captured_at) — credit-preview, ask, "
+                       "credit" % p)
         u = credits.unsupported(e)
         if u:
             out.append("%s: %s" % (p, u))
@@ -133,7 +154,7 @@ def check(repo, vdir, state, lang, ctx, output, providers, env, runner):
     why = assets_problem(vdir, state)
     if why:
         problems.append(why)
-    problems += picture_problems(repo, vdir, state, ins, proxy=sandbox.active(env or {}, repo))
+    problems += picture_problems(repo, vdir, state, ins, proxy=sandbox.active(env or {}, repo), env=env)
     try:
         with open(ctx["script"], encoding="utf-8") as f:
             text = f.read()

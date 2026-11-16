@@ -135,7 +135,8 @@ def script_check(repo, vdir, state, lang, ctx, providers, env, runner):
     except criteria.Missing as e:
         problems.append("the format's criteria cannot be read (%s)" % e)
     assets_data = assets_mod.read(vdir)
-    problems += check.picture_problems(ins, assets_data)
+    from ..capture import shots
+    problems += check.picture_problems(ins, assets_data, shots.usable(vdir))
     # 0.0.26 (pilot-2 P16 · P17): the post's images, the title scene, no presenter layout without character art
     problems += check.unused_problems(ins, assets_data, cm)
     problems += check.title_scene_problems(text)
