@@ -28,10 +28,14 @@ def patterns():
 
 
 # Redaction-only extensions (the gate's patterns detect; these also SPAN what must go). A PEM
-# private key: the gate matches its BEGIN line, redaction must take the body to its END line (or
-# the end of the text when the END line is missing) — K0-M1.
+# private key: the gate matches its BEGIN line; redaction takes the body too (K0-M1) — but never
+# more than key material (K0-B2): either the rest of the SAME line up to an END marker, or the
+# rest of the BEGIN line plus following base64-shaped lines and an optional END line. A missing
+# END therefore never swallows the record lines after it.
 REDACT_EXTRA = [
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
+               r"(?:[^\n]*?-----END [A-Z ]*PRIVATE KEY-----"
+               r"|[^\n]*(?:\n[A-Za-z0-9+/=]{4,}\r?(?=\n|$))*(?:\n-----END [A-Z ]*PRIVATE KEY-----)?)"),
 ]
 
 

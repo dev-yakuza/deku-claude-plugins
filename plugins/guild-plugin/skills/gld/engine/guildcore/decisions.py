@@ -103,7 +103,9 @@ def live(block, state, timeline, own_writes=()):
 
 def accepted_answer(block, comments, timeline, unattended=True, associations=DEFAULT_ASSOCIATIONS,
                     kind=None):
-    """§2.5 channel 1. Returns (answer|None, rejected[(answer, why)]).
+    """§2.5 channel 1. Returns (status, answer|None, rejected[(answer, why)]) with status
+    `answered` | `none` | `conflict` (K0-m15). A `conflict` is NOT "no valid answer": rule 2(d)
+    must not re-judge it — the block stays pending for a human to settle.
 
     Several answers can pass every check (K0-M4 — §2.5 sets no order). Then: all from ONE author
     → that author's latest answer wins (a correction), the earlier ones are rejected as
@@ -138,10 +140,10 @@ def accepted_answer(block, comments, timeline, unattended=True, associations=DEF
             continue
         passed.append(a)
     if not passed:
-        return None, rejected
+        return "none", None, rejected
     passed.sort(key=lambda a: (a.created_at, a.comment_id or 0))
     authors = set(a.author for a in passed)
     tokens = set(a.token for a in passed)
     if len(authors) > 1 and len(tokens) > 1:
-        return None, rejected + [(a, "conflicting answers") for a in passed]
-    return passed[-1], rejected + [(a, "superseded by a later answer") for a in passed[:-1]]
+        return "conflict", None, rejected + [(a, "conflicting answers") for a in passed]
+    return "answered", passed[-1], rejected + [(a, "superseded by a later answer") for a in passed[:-1]]

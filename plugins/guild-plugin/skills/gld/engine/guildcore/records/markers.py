@@ -72,11 +72,35 @@ def neutralize(text):
     return _BARE_RE.sub("guild" + ZWSP + ":", text)
 
 
-def finish(text):
+_SHAPE_RE = re.compile(r"^(### [a-z-]+|[a-z_][a-z0-9_-]*:|- |role-axis)")
+
+
+def _shape(line):
+    m = _SHAPE_RE.match(line)
+    return m.group(1) if m else None
+
+
+def finish(text, structural=True):
     """The last step of every engine renderer over the text it fills in: redact (INV5), then
-    neutralize (K0-B1)."""
+    neutralize (K0-B1). `structural` (default) asserts the result has the same lines with the
+    same key/heading/item prefixes — redaction may blank a VALUE, never a record line (K0-B2).
+    Only free multi-line prose (a pause's body) passes structural=False."""
     from guildcore.records.redact import redact
-    return neutralize(redact(text))
+    out = neutralize(redact(text))
+    if structural:
+        a, b = text.split("\n"), out.split("\n")
+        if len(a) != len(b) or [_shape(x) for x in a] != [_shape(y) for y in b]:
+            raise ValueError("redaction changed the record's line structure")
+    return out
+
+
+def unescape(text):
+    """Undo `neutralize` for comparisons of machine tokens (K0-m17)."""
+    return (text or "").replace(ZWSP, "")
+
+
+def has_marker_text(text):
+    return bool(_NEUTRAL_RE.search(text or "") or _BARE_RE.search(text or ""))
 
 
 def assert_own_markers(out, name=None):
@@ -98,8 +122,13 @@ def _line_spans(body, line):
     """(start, end) offsets of every line equal to `line` (a trailing \r tolerated)."""
     out, pos = [], 0
     for ln in body.split("\n"):
-        if clean(ln) == line:
-            out.append((pos, pos + len(clean(ln))))     # a CRLF line's \r stays outside
+        c = clean(ln)
+        if c.rstrip() == line:                          # trailing blanks tolerated (K0-m14)
+            out.append((pos, pos + len(c)))             # a CRLF line's \r stays outside
+        elif c.lstrip().startswith(line):
+            # a line that STARTS with the marker but carries more (e.g. open+close on one line):
+            # neither a block nor a mere mention — never guess, never append a second block
+            raise ValueError("marker line %r carries extra text" % line)
         pos += len(ln) + 1
     return out
 

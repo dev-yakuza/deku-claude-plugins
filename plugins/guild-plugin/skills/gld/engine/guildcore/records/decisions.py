@@ -25,7 +25,7 @@ from guildcore.records import markers
 NAME = "decisions"
 SUMMARY = "<details><summary>Guild 결정 기록</summary>"
 HEADING_RE = re.compile(r"^### decision ([0-9]+)[ \t]*$")   # a human's trailing blank must not hide a block (K0-m3)
-TAIL_RE = re.compile(r"^</details>$")
+TAIL_RE = re.compile(r"^</details>[ \t]*$")   # K0-m19
 CONTINUED_RE = re.compile(r"^continued-from: ([0-9]+)$")
 ROLLOVER_CHARS = 60000
 # render order; unknown keys a later engine adds are kept on parse and rendered after these
@@ -92,7 +92,7 @@ def _value(key, value):
         value = "true" if value else "false"
     elif isinstance(value, (list, tuple)):
         value = ("|" if key == "options" else ",").join(str(x) for x in value)
-    value = " ".join(str(value).split())
+    value = markers.finish(" ".join(str(value).split()))   # redact BEFORE capping (K0-m16)
     if len(value) > VALUE_CAP:
         value = value[:VALUE_CAP - len(TRUNCATED)] + TRUNCATED
     return value
@@ -112,16 +112,23 @@ def render_block(n, fields):
     opts = d.get("options")
     if opts is not None:
         toks = list(opts) if isinstance(opts, (list, tuple)) else str(opts).split("|")
-        if not toks or not all(TOKEN_RE.match(str(t).strip()) for t in toks):
-            raise ValueError("options must be guild-answer tokens [a-z0-9:_-]+")
+        if not toks or not all(TOKEN_RE.match(str(t).strip()) and not markers.has_marker_text(str(t))
+                               for t in toks):
+            raise ValueError("options must be guild-answer tokens [a-z0-9:_-]+ without marker text")
     if d.get("status") == "pending-human" and d.get("kind") not in ASK_KINDS:
         raise ValueError("a pending-human block needs kind: from the closed ask set (§2.6)")
     rank = {k: i for i, k in enumerate(KEY_ORDER)}
     known = sorted([kv for kv in items if kv[0] in rank], key=lambda kv: rank[kv[0]])
     extra = [kv for kv in items if kv[0] not in rank]
-    body = "\n".join("%s: %s" % (k, _value(k, v)) for k, v in known + extra)
-    # INV5 over the WHOLE block — unknown and raw keys included (K0-M1) — then K0-B1
-    return markers.assert_own_markers("### decision %d\n%s\n" % (n, markers.finish(body)))
+    keys = [k for k, _ in known + extra]
+    # every value redacted+neutralized on its own, then capped (K0-M1, B1, B2, m16); the whole
+    # block is checked once more and must keep every key line (K0-B2)
+    body = markers.finish("\n".join("%s: %s" % (k, _value(k, v)) for k, v in known + extra))
+    out = "### decision %d\n%s\n" % (n, body)
+    got = [k for k, _ in markers.BlockDoc.parse(out, HEADING_RE, TAIL_RE).blocks[0].fields()]
+    if got != keys:
+        raise ValueError("decision block lost key lines: %s" % sorted(set(keys) - set(got)))
+    return markers.assert_own_markers(out)
 
 
 def render_comment(block_texts=(), continued_from=None):

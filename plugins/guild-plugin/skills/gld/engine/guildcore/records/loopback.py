@@ -20,7 +20,9 @@ FROM_VALUES = ("test", "qa", "leader")
 
 
 def signature_set(sig):
-    return frozenset(s.strip() for s in (sig or "").split(",") if s.strip())
+    """Compared on the UNESCAPED form: a stored signature had its marker text neutralized at
+    render, the caller's raw one did not (K0-m17)."""
+    return frozenset(s.strip() for s in markers.unescape(sig).split(",") if s.strip())
 
 
 class LoopbackRecord(object):
@@ -97,6 +99,8 @@ def render_block(n, from_, at, branch, reason, signature, decided=None, override
     if from_ not in FROM_VALUES:
         raise ValueError("from must be one of %s" % (FROM_VALUES,))
     sig = signature if isinstance(signature, str) else ",".join(sorted(signature))
+    if markers.has_marker_text(branch):          # a machine field read back by execute (K0-m17)
+        raise ValueError("branch carries Guild marker text")
     lines = ["### loopback %d" % n, "from: %s" % from_, "at: %s" % at,
              "branch: %s" % " ".join((branch or "").split()),
              "reason: %s" % " ".join((reason or "").split()), "signature: %s" % " ".join(sig.split())]

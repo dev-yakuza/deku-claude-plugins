@@ -96,7 +96,11 @@ def render(cause, prose="", directive_line=None, answer=None):
     if prose:
         lines.append("")
         lines.append(prose.rstrip("\n"))
-    out = markers.open_tag(NAME) + "\n" + markers.finish("\n".join(lines))
+    head = markers.finish("\n".join(lines[:len(lines) - (2 if prose else 0)]))
+    tail = markers.finish("\n".join(lines[len(lines) - 2:]), structural=False) if prose else None
+    out = markers.open_tag(NAME) + "\n" + head + ("\n" + tail if tail is not None else "")
     if not Pause(out).cause_check_ok():
         raise ValueError("rendered pause fails the cause-line check")
+    if answer and answer_hint(answer[0], answer[1]) not in out:
+        raise ValueError("rendered pause lost its answer line")
     return markers.assert_own_markers(out, NAME)
