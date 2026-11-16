@@ -253,6 +253,11 @@ class Inert(unittest.TestCase):
                     src = _util.read(os.path.join(base, fn))
                     with self.subTest(fn=fn):
                         self.assertNotRegex(src, r"(?m)^\s*(from|import) workflows")
+                        # K1r4: the ONE exception — the deps step's loopback-bound host-allowlist
+                        # proxy (checks/netproxy.py); it makes no request of its own
+                        if os.path.join(base, fn).endswith(os.path.join("checks", "netproxy.py")):
+                            self.assertIn('("127.0.0.1", 0)', src)
+                            continue
                         self.assertNotRegex(src, r"(?m)^\s*(from|import) (urllib|socket|http|requests)")
 
     def test_fake_gh_counts(self):
