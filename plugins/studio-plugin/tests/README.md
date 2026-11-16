@@ -457,3 +457,27 @@ and 1:1. `--full`: real s2v, mock voice, fonts copied from the person's cache (a
 downloads) — a 9:16 `shorts` snapshot equals `fullscreen` + `subtitles: word` and differs from plain `fullscreen`.
 `state_fixtures.write_platforms` files declare outputs (`youtube` 16:9, `shorts` 9:16, one named after the
 platform).
+
+**0.2.3** (`SCRIPTS_VERSION` 31, m2-plan M2d): `test_m2d.py` — capture.py's rules (`stdo/capture/rules.py`): a
+picture's host in `public_domains` or, for a public video, `capture.hosts`; https, no user, port, IP literal, query or
+fragment, a path of at most 200 characters; the internal overlay's hosts and terms in the URL (percent-decoded too)
+and the selector, read as `guard/web.py` reads them (compared), a missing overlay → 4; selector characters and size
+bounds; the `capture` setting (host names only, protected: `설정 <h12>`, also in a config without the key). With the
+fake s2v's new `capture` command (no network, no browser; scenario per URL and per attempt, a tiny PNG, image files
+as `<sha>.<ext>`, exit codes and a signal): the command line capture.py builds, the files and `work/captures.json`, a
+redirect to another host (apex → www, http, another domain) not usable, s2v exit 1 (the earlier picture removed),
+exit 2 (a defect) and a signal (nothing recorded), `idle: false` kept with a warning, blocked hosts listed,
+`S2V_CAPTURE_NO_SANDBOX` refused, one capture per video, links not followed, `source`/`recheck` refused (no URL
+sources yet), and the source rules of `run.capture` (one retry with `--timeout 60`, unreachable twice or without a
+contentHash). The fake's JSON keys, nested ones included, are a subset of s2v's `CaptureJson` (extract.ts:194-214,
+kept in the test). `helpers.run_s2v` refuses `capture`. `test_guard_m2.py` — `s2v capture` in each accepted s2v form
+(G-WRAP), `S2V_CAPTURE_NO_SANDBOX` set on s2v, lock.py and capture.py calls (G-ENV), writes and deletions of a video's
+`assets/`, `work/captures/`, `work/captures.json`, `work/source-diff.txt` (and their `$X` twins, Write and Edit), each
+also after a `source`; capture.py's own calls pass. `test_guard_autoallow.py` — capture.py `source | recheck | shot`
+allowed without a prompt in the literal forms; a variable URL, an unknown option, `--url=`, a pipe prompt.
+`test_m1b` NIT b copies a picture folder into `studio/videos/v/pics` (its `assets/` is protected now).
+Review 1: build folders named `assets`/`captures` outside a video pass as at HEAD (`$OUT/assets`, `build/$N/assets`,
+a loop, `/tmp/*/assets`) while `$X/videos/v/assets` is refused; an overlay subdomain of a public domain, terms
+behind repeated percent-encoding or a zero-width space, encoded `?`/`#`, a selector starting with `-` and a final
+address with a port or user are refused.
+Review 2: a video id from `$(…)` or backticks before `assets`/`work/captures` is refused (`build/$(echo x)/assets` passes); a URL still encoded after three decoding rounds is refused.

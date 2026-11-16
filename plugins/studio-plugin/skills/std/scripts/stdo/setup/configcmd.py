@@ -72,6 +72,13 @@ def _old_new(top, cfg, key, raw):
         raise SetupError(USAGE, "%s is not a Studio setting (config.json keys: %s)"
                          % (top_key, ", ".join(sorted(_known_top(cfg)))))
     present, old = L.lookup(cfg, key)
+    if top_key == "capture":  # the host lists capture.py reads: host names only (a bad value would stop every capture)
+        from ..capture.rules import config_problem
+        cand = copy.deepcopy(cfg)
+        _set_dotted(cand, key, new)
+        problem = config_problem(cand.get("capture"))
+        if problem:
+            raise SetupError(USAGE, problem)
     return present, old, new
 
 

@@ -283,6 +283,15 @@ python3 .claude/studio/scripts/hooks.py install
   以前にブリーフを記録した動画は `next --enter script` や台本チェックで出力のメッセージで止まることがあります:
   ブリーフを記録し直すか(`/std brief`)、その出力がすでに承認済みなら `exclude-output` を使います。
   `/std update` が必要です(スクリプトのバージョン 30)。
+- **0.2.3**: Studio のキャプチャスクリプト `capture.py`(`s2v capture` でウェブページを撮ります)とそのガード規則 —
+  次のバージョンの URL 原本とボードキャプチャが使う土台です。Studio のリポジトリでは `s2v capture` は `capture.py`
+  からだけ実行されます。`capture.py` はページのホストをホストの一覧と照合し、画像のアドレスのクエリ・フラグメント・
+  長いパスを拒否し、アドレスと CSS セレクタを内部オーバーレイのホストと用語と照合し(オーバーレイがなければ止まります)、
+  別のホストへのリダイレクト(`example.com` → `www.example.com` も含みます: 最終的なアドレスを渡してください)と
+  `S2V_CAPTURE_NO_SANDBOX` を拒否します。新しい保護設定 `capture`(`hosts`: 公開動画がキャプチャできる第三者のページ、
+  `allow_hosts`: キャプチャしたページがさらに読み込めるホスト)は `/std config` と人の `설정` の回答で変えます。
+  エージェントは動画の `assets/`、`work/captures/`、`work/captures.json`、`work/source-diff.txt` を書けなくなりました
+  (`assets/` の画像はご自身で置いてください)。`/std update` が必要です(スクリプトバージョン 31)。
 
 ## ライセンス
 

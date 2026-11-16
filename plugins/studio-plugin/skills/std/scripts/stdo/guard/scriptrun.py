@@ -21,7 +21,7 @@ from . import cmdopts, version
 from .allowrule import PY_NAME
 
 AUTO_SCRIPTS = ("state.py", "check_assets.py", "check_claims.py", "check_scope.py", "check_tts.py",
-                "resolve_assets.py", "validate_copy.py", "audition.py")
+                "resolve_assets.py", "validate_copy.py", "audition.py", "capture.py")
 # evidence-free state.py subcommands that still prompt: a pause request is the person's (plan §13)
 NO_AUTO = frozenset(["ask-before"])
 # = state/flow.VIDEO_ID (not imported: flow loads the state writers; test_guard_autoallow checks they are equal)
@@ -35,7 +35,12 @@ OPTIONS = {
     "check_tts.py": (("--lang",), ()),
     "audition.py": (("--lang",), ()),
     "validate_copy.py": (("--platform", "--lang"), ()),
+    # m2-plan §5.2 (decided Q4): the URL and selector rules are capture.py's own, so no config is read here
+    "capture.py": (("--url", "--selector", "--width", "--height"), ()),
 }
+# capture.py's subcommands and how many words follow each (the video; shot: the video and the picture's name)
+CAPTURE_SUBS = {"source": 1, "recheck": 1, "shot": 2}
+SHOT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")  # = capture/cli.SHOT_NAME
 SUFFIX = "/.claude/studio/scripts/"
 # what the scripts run from PATH, and the real file's name each must have (no asdf, pyenv, mise or volta shim: they
 # choose what runs from repository files such as .tool-versions or mise.toml)
@@ -78,7 +83,13 @@ def shape(name, argv):
         return (pos[0], sub) if VIDEO_ID.match(pos[0]) else None
     if name not in OPTIONS:
         return None
-    values, flags = OPTIONS[name]
+    sub = None
+    if name == "capture.py":
+        sub = argv[0] if argv else None
+        if sub not in CAPTURE_SUBS:
+            return None
+        argv = argv[1:]
+    values, flags = OPTIONS[name] if sub in (None, "shot") else ((), ())
     pos = []
     i = 0
     while i < len(argv):
@@ -96,6 +107,11 @@ def shape(name, argv):
         else:
             pos.append(a)
             i += 1
+    if sub is not None:
+        if len(pos) != CAPTURE_SUBS[sub] or not VIDEO_ID.match(pos[0]) or \
+                (sub == "shot" and not SHOT_NAME.match(pos[1])):
+            return None
+        return pos[0], sub
     if len(pos) != 1 or not VIDEO_ID.match(pos[0]):
         return None
     return pos[0], None
@@ -574,6 +590,9 @@ def _trusted(ctx, cmd, worktree, studio_root, video, sub):
 
 
 def describe(name, sub, video):
+    if name == "capture.py":
+        return "runs Studio's capture.py %s for %s (repository copy, intact; a page of the person's host lists)" % (
+            sub, video)
     what = "state.py %s" % sub if name == "state.py" else name
     return "runs Studio's %s%s (repository copy, intact; read and record only)" % (
         what, " for %s" % video if video else "")

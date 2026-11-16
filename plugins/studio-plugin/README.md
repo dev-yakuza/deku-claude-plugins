@@ -286,6 +286,16 @@ the repository): [docs/removing.md](docs/removing.md).
   per aspect (safe area, pictures, no thumbnail or chapters for vertical). A video whose brief was recorded earlier
   may now stop at `next --enter script` or the script check with an output message: record the brief again
   (`/std brief`), or `exclude-output` when that output is already approved. Needs `/std update` (scripts version 30).
+- **0.2.3**: Studio's capture script, `capture.py` (a web page through `s2v capture`), and its guard rules — the
+  groundwork for URL sources and board captures, which use it in later versions. In a Studio repository `s2v capture`
+  runs only through `capture.py`, which checks the page's host against the host lists, refuses a query, a fragment or
+  a long path in a picture's address, checks the address and the CSS selector against the internal overlay's hosts and
+  terms (and stops while the overlay is missing), refuses a redirect to any other host (even `example.com` →
+  `www.example.com`: give the final address) and refuses `S2V_CAPTURE_NO_SANDBOX`. A new protected setting `capture`
+  (`hosts`: third-party pages a public video may capture; `allow_hosts`: hosts a captured page may also load from)
+  is changed with `/std config` and the person's `설정` answer. Agents can no longer write a video's `assets/`,
+  `work/captures/`, `work/captures.json` or `work/source-diff.txt` (put a picture in `assets/` yourself). Needs
+  `/std update` (scripts version 31).
 
 ## License
 

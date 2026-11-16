@@ -13,7 +13,7 @@ from . import okfile, spaths
 
 # protected keys of config.json (00-plan §3.4 설정 행; the guard's RepoInfo.protected_keys has the same list)
 FIXED_PROTECTED = ("visibility", "internal_overlay", "public_domains", "web_roots", "allow_internal_commits", "s2v",
-                   "models", "gates", "roles", "studio_root", "protected_keys")
+                   "models", "gates", "roles", "studio_root", "protected_keys", "capture")
 AGENT_PREFIX = ".claude/agents/"
 
 

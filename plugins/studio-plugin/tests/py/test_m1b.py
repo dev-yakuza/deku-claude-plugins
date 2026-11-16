@@ -1173,9 +1173,12 @@ class GuardM1b(JudgeCase):
         os.makedirs(os.path.join(self.tmp, "imgs"))
         with open(os.path.join(self.tmp, "imgs", "a.png"), "w") as f:
             f.write("png")
-        d = self.assertDeny("cp -R %s studio/videos/v/assets" % os.path.join(self.tmp, "imgs"), "G-PROT")
+        d = self.assertDeny("cp -R %s studio/videos/v/pics" % os.path.join(self.tmp, "imgs"), "G-PROT")
         self.assertIn("copy them one at a time", d.message())
         self.assertIn("Studio script", d.message())
+        # 0.2.3: a video's assets/ is capture.py's (P-STATE) — refused as a protected folder
+        d = self.assertDeny("cp -R %s studio/videos/v/assets" % os.path.join(self.tmp, "imgs"), "G-PROT")
+        self.assertIn("capture.py", d.message())
         self.assertPass("cp %s studio/videos/v/a.png" % os.path.join(self.tmp, "imgs", "a.png"))
 
     def test_y1_render_and_snapshot_only_through_run_s2v(self):

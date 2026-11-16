@@ -226,6 +226,11 @@ person's gates stay behind everything listed here.
     `resolve_assets.py`, `validate_copy.py` and `audition.py`. The call must be that script alone (optionally after
     `cd <repo> &&`), with literal arguments and a valid video id. `run_s2v.py`, `lock.py`, `check_commit.py`,
     `hooks.py` and `setup.py` (other than `doc`) keep their prompt.
+  - From 0.2.3, Studio's `capture.py` (`source | recheck <video>`, `shot <video> <name> --url <https url>` with
+    `--selector`, `--width`, `--height`), the same way. It loads a web page: it captures only hosts of `public_domains`
+    and `capture.hosts` (both changed only with your `설정` answer), refuses a query, a fragment or a long path in a
+    picture's address and any address or selector that names a host or term of the internal overlay (and stops while
+    the overlay is missing), and never turns the browser sandbox off.
   - A Studio role's Write or Edit of its own output files: the source analyst's `work/source.md`, the strategist's
     `work/brief.json` and `work/brief.md`, the writer's `script.<lang>.md` and `work/<lang>/claims-map.json`, the
     translator's `script.<lang>.md` for another language than the source, the visual director's script edits,
@@ -274,6 +279,8 @@ person's gates stay behind everything listed here.
   …). No list is complete.
 - awk programs and vim, ex or ed scripts; `parallel` and the commands it feeds.
 - What a package runner runs in turn (`npx sh -c …`, `npx git stash -a`, `npm exec -- chronic rm …`).
+  s2v run through `npm exec` or `npm x` (`npm exec s2v -- capture …`, `… s2v render …`) is not read as s2v: the
+  rules for `s2v capture`, `render` and the other wrapped commands do not apply to it.
 - Settings other tools keep outside the repository and read later: a `LESSOPEN` already in your environment,
   `~/.npmrc`, shell start-up files, vim's `~/.vimrc`, `~/.exrc` and `~/.vim/`, `~/.ExifTool_config`. Git's and ssh's
   user config files are guarded, but not the files they pull in (`[include]`, `Include`).

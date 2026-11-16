@@ -128,6 +128,11 @@ ALLOWED = (
     S + "audition.py v",
     S + "validate_copy.py v --platform youtube",
     S + "check_tts.py w",
+    # m2-plan §5.2 (decided Q4): capture.py without a prompt; its URL and selector rules are its own
+    S + "capture.py source v",
+    S + "capture.py recheck w",
+    S + "capture.py shot v hero --url https://example.com/a",
+    S + "capture.py shot w hero-2 --url https://example.com/a --selector main --width 1080 --height 1920",
 )
 
 
@@ -162,6 +167,19 @@ class ScriptAllow(AllowCase):
                      "validate_copy.py v --platform", "check_claims.py ../v --narration", "check_scope.py v --lang ko",
                      "state.py next nosuch", "check_tts.py nosuch"):
             self.assertNoAllow("python3 " + S + tail)
+
+    def test_capture_shapes(self):  # m2-plan §5.2: any other form prompts
+        for tail in ("capture.py shot v hero --url $U", "capture.py shot v hero --url https://example.com/a --x 1",
+                     "capture.py shot v hero --url=https://example.com/a", "capture.py shot v Hero --url https://a.com/",
+                     "capture.py shot v --url https://example.com/a", "capture.py shot v hero x --url https://a.com/",
+                     "capture.py source v --url https://example.com/a", "capture.py source v w", "capture.py source",
+                     "capture.py fetch v", "capture.py", "capture.py shot nosuch hero --url https://example.com/a",
+                     "capture.py shot v hero --url https://example.com/a | head",
+                     "capture.py shot v hero --url https://example.com/a --selector"):
+            self.assertPrompt("python3 " + S + tail)
+        self.assertPrompt("U=https://example.com/a; python3 %scapture.py shot v hero --url $U" % S)
+        ctx = self.assertAllow("python3 %scapture.py shot v hero --url https://example.com/a" % S)
+        self.assertIn("capture.py shot for v", ctx.allow)
 
     def test_call_shape(self):
         for cmd in ("python3 %sstate.py next $V" % S, "python3 %sstate.py next v | head" % S,

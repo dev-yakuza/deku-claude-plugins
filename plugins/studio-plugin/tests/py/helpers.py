@@ -214,7 +214,10 @@ def s2v_env(root, base=None):
 
 
 def run_s2v(case, args, cwd=None, timeout=300):
-    """Run s2v under the case's isolated s2v environment."""
+    """Run s2v under the case's isolated s2v environment. Never `capture` (it reaches the network): the tests use the
+    fake s2v's capture."""
+    if "capture" in [str(a) for a in args]:
+        raise AssertionError("tests never run the real s2v capture (network): use the fake s2v CLI")
     path = s2v_path(case)
     return subprocess.run(
         ["node", s2v_main(path)] + list(args),

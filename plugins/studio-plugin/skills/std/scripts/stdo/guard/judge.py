@@ -1644,7 +1644,8 @@ def cand_word(word, v):
 def loose_cands(word, infos):
     """review 9: the words of a command whose output a value is (`X=$(ls studio)`) that name a protected thing or may
     name a repository (an absolute path): judged as values the word may have."""
-    names = protect.UNKNOWN_FOLDER_NAMES | protect.TAIL_NAMES | {ri.studio_root for ri in infos or ()}
+    names = (protect.UNKNOWN_FOLDER_NAMES - set(protect.TAIL_PARENT)) | protect.TAIL_NAMES | \
+        {ri.studio_root for ri in infos or ()}
     out = []
     for v in getattr(word, "cand_loose", ()):
         segs = [x for x in v.split("/") if x not in ("", ".", "..")]
@@ -1802,7 +1803,8 @@ def judge_unknown_folder(ctx, cmd, value, ri, op, s2v, word=None):
     if o == "write" and effective(cmd)[0] == "ln" and segs:
         # review 11 (a HEAD regression after `eval`, `source` or a hook): a link whose path names one of Studio's
         # folders may be one under the studio root, which Studio does not follow (judge_parts) — as in a known folder
-        names = {n.casefold() for n in protect.UNKNOWN_FOLDER_NAMES | {os.path.basename(ri.studio_root.rstrip("/"))}}
+        names = {n.casefold() for n in (protect.UNKNOWN_FOLDER_NAMES - set(protect.TAIL_PARENT)) |
+                 {os.path.basename(ri.studio_root.rstrip("/"))}}
         if any(x.casefold() in names for x in segs):
             ctx.deny("G-PROT", "ln %s in a folder the guard cannot tell may make a link under %s/ (or its own "
                                "folders), which Studio does not follow — cd to a literal folder first, in a separate "
@@ -2715,6 +2717,10 @@ def check_env(ctx, cmd):
                             continue
                 ctx.deny("G-ENV", "%s changes %s for an %s call — that bypasses the machine lock (S2V_STATE_DIR "
                                   "must be the guard's own)." % (cmd.prog or what, name, what))
+    if (cmd.s2v is not None or cmd.lock is not None or studio_script(ctx, cmd, "capture.py")) and \
+            NO_SANDBOX in v.set:
+        ctx.deny("G-ENV", "%s is never set for an s2v, lock.py or capture.py call — Studio does not capture "
+                          "without the browser sandbox." % NO_SANDBOX)
     if studio_script(ctx, cmd):
         # Studio's scripts find the repository (and its used-answer record) through git: a redirected git folder
         # would make them use a copy (m1-plan §3.2 review U2)
@@ -2737,6 +2743,11 @@ def check_env(ctx, cmd):
 # M1b review Y1) — it picks the watermark from the state and records the result. The wrapper's own child process is
 # not a Bash command the guard sees.
 WRAPPED_S2V = (("render",), ("snapshot",), ("dev",))  # dev runs snapshot / render --draft and keeps servers up
+# capture reaches a web page: in a Studio repository only capture.py runs it, with its host, URL and selector rules
+# (m2-plan §5.1 — capture runs without a prompt, decided Q4)
+CAPTURE_S2V = ("capture",)
+# turns the capturing browser's sandbox off (s2v capture/index.ts): never on an s2v, lock.py or capture.py call
+NO_SANDBOX = "S2V_CAPTURE_NO_SANDBOX"
 # pages written into a folder of the agent's choosing: refused with --out-dir (their default place is s2v's own)
 OUT_DIR_S2V = (("takes",), ("direct",))
 # s2v commands that change a video's audio lock: only under lock.py (M1f; `audio prune` deletes takes — review V5).
@@ -2760,6 +2771,11 @@ def check_s2v_results(ctx, cmd):
                                "a busy machine as held:lock — use \"python3 .claude/studio/scripts/lock.py run --kind "
                                "tts -- <the same s2v command>\"." % " ".join(words[:2]))
             return
+    if words == CAPTURE_S2V:
+        ctx.deny("G-WRAP", "s2v capture in a Studio repository runs only through Studio's wrapper, which checks the "
+                           "page's host, address and selector — use \"python3 .claude/studio/scripts/capture.py "
+                           "shot <video> <name> --url <https url>\" (or capture.py source|recheck <video>).")
+        return
     if words in WRAPPED_S2V or (any(x is None for x in vals[:1])):
         ctx.deny("G-WRAP", "s2v %s in a Studio repository runs only through Studio's wrapper, which sets the proxy "
                            "watermark from the approvals and records the result — use \"python3 "
@@ -3938,7 +3954,7 @@ def check_version(ctx, cmd):
     from . import version
     real = None
     for name in ("state.py", "check_commit.py", "hooks.py", "lock.py", "run_s2v.py", "resolve_assets.py",
-                 "check_scope.py"):
+                 "check_scope.py", "capture.py"):
         real = studio_script(ctx, cmd, name)
         if real is not None:
             break

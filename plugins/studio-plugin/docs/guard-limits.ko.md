@@ -213,6 +213,11 @@ README에는 요약이 있고, 이 파일에는 자세한 내용이 있습니다
     `validate_copy.py`, `audition.py`. 호출은 그 스크립트 하나뿐이어야 하고(앞에 `cd <repo> &&`는 있어도 됨), 인자는
     리터럴, 비디오 ID는 올바른 형식이어야 합니다. `run_s2v.py`, `lock.py`, `check_commit.py`, `hooks.py`,
     `setup.py`(`doc` 외)는 지금처럼 프롬프트가 뜹니다.
+  - 0.2.3부터 Studio의 `capture.py`(`source | recheck <video>`, `shot <video> <name> --url <https url>`과
+    `--selector`, `--width`, `--height`)도 같은 방식으로. 웹 페이지를 불러오는 스크립트입니다: `public_domains`와
+    `capture.hosts`(둘 다 사용자의 `설정` 답으로만 바뀜)의 호스트만 캡처하고, 그림 주소의 쿼리·프래그먼트·긴 경로와
+    내부 오버레이의 호스트나 용어를 담은 주소·선택자를 거부하며(오버레이가 없으면 멈춤), 브라우저 샌드박스를 끄지
+    않습니다.
   - Studio 역할이 자기 출력 파일에 하는 Write와 Edit: source analyst의 `work/source.md`, strategist의
     `work/brief.json`과 `work/brief.md`, writer의 `script.<lang>.md`와 `work/<lang>/claims-map.json`, translator의 원문
     외 언어 `script.<lang>.md`, visual director의 대본 편집·`CREDITS.draft.yaml`·`work/<lang>/board.md`, distributor의
@@ -256,6 +261,8 @@ README에는 요약이 있고, 이 파일에는 자세한 내용이 있습니다
   tmux 등)와 명령 값 옵션(`git -c core.editor`, `ssh -o ProxyCommand` 등)을 거부합니다. 어떤 목록도 완전하지 않습니다.
 - awk 프로그램과 vim · ex · ed 스크립트, `parallel`과 그것이 넘겨주는 명령.
 - 패키지 실행기가 다시 실행하는 것(`npx sh -c …`, `npx git stash -a`, `npm exec -- chronic rm …`).
+  `npm exec`나 `npm x`로 실행한 s2v(`npm exec s2v -- capture …`, `… s2v render …`)는 s2v로 읽지 않습니다:
+  `s2v capture`, `render` 등 래퍼를 거쳐야 하는 명령의 규칙이 적용되지 않습니다.
 - 다른 도구가 레포 밖에 두었다가 나중에 읽는 설정: 환경에 이미 있는 `LESSOPEN`, `~/.npmrc`, 셸 시작 파일, vim의
   `~/.vimrc` · `~/.exrc` · `~/.vim/`, `~/.ExifTool_config`. git과 ssh의 사용자 설정 파일은 가드가 지키지만, 그 설정이
   끌어오는 파일(`[include]`, `Include`)은 보지 못합니다.

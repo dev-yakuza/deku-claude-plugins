@@ -261,6 +261,15 @@ python3 .claude/studio/scripts/hooks.py install
   그려짐). 보드 지침에 화면비별 절(안전 영역, 그림, 세로 영상의 썸네일·챕터 없음)이 생겼습니다. `/std update`가
   필요합니다(스크립트 버전 30). 이전에 브리프를 기록한 영상은 `next --enter script`나 대본 검사에서 출력 메시지로
   멈출 수 있습니다: 브리프를 다시 기록하거나(`/std brief`), 그 출력이 이미 승인됐다면 `exclude-output`을 씁니다.
+- **0.2.3**: Studio의 캡처 스크립트 `capture.py`(`s2v capture`로 웹 페이지를 찍음)와 그 가드 규칙 — 다음 버전의 URL
+  원본과 보드 캡처가 쓸 바탕입니다. Studio 저장소에서 `s2v capture`는 `capture.py`로만 실행됩니다. `capture.py`는
+  페이지의 호스트를 호스트 목록과 대조하고, 그림 주소의 쿼리·프래그먼트·긴 경로를 거부하며, 주소와 CSS 선택자를 내부
+  오버레이의 호스트·용어와 대조하고(오버레이가 없으면 멈춤), 다른 호스트로의 리다이렉트(`example.com` →
+  `www.example.com`도 포함: 최종 주소를 주세요)와 `S2V_CAPTURE_NO_SANDBOX`를 거부합니다. 새 보호 설정 `capture`
+  (`hosts`: 공개 영상이 캡처할 수 있는 제3자 페이지, `allow_hosts`: 캡처한 페이지가 더 불러올 수 있는 호스트)는
+  `/std config`와 사람의 `설정` 답으로 바꿉니다. 에이전트는 이제 영상의 `assets/`, `work/captures/`,
+  `work/captures.json`, `work/source-diff.txt`를 쓸 수 없습니다(`assets/`의 그림은 직접 넣으세요). `/std update`가
+  필요합니다(스크립트 버전 31).
 
 ## 라이선스
 

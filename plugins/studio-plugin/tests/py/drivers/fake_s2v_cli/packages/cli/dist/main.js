@@ -57,6 +57,7 @@ function logCall(argv) {
       argv,
       heavy_token: !!process.env.S2V_HEAVY_LOCK_TOKEN,
       no_open: process.env.S2V_NO_OPEN ?? null,
+      no_sandbox: process.env.S2V_CAPTURE_NO_SANDBOX ?? null,
       cwd: process.cwd(),
     })}\n`,
   );
@@ -84,6 +85,17 @@ const FLAGS = {
     workers: 'value',
   },
   'services status': { json: 'bool' },
+  // s2v args.ts FLAGS.capture
+  capture: {
+    out: 'value',
+    text: 'value',
+    'assets-dir': 'value',
+    width: 'value',
+    height: 'value',
+    selector: 'value',
+    'allow-host': 'multi',
+    timeout: 'value',
+  },
 };
 
 function parseFlags(key, args) {
@@ -1053,6 +1065,98 @@ function render(script, values) {
   if (r.exit_after_write) process.exit(Number(r.exit_after_write));
 }
 
+// ---------- capture (no network, no browser) ----------
+// SCENARIO.capture = { "<url>": result | [result per attempt], "*": the default }; a result is
+// { url (the final address), status, title, lang, idle, text: [{kind, text, ruby}], images: [{src, kind, alt, inCapture,
+// bytes (the file's text; written to --assets-dir as <sha>.<ext>), ext}], opaque, notShown, blocked: [{url, reason}],
+// websockets, contentHash (null allowed; absent: computed), exit, signal, stderr }. Unknown result keys are ignored.
+// A 67-byte PNG (1×1, grey) is the picture.
+const TINY_PNG = Buffer.from(
+  '89504e470d0a1a0a0000000d4948445200000001000000010800000000' + '3a7e9b550000000a4944415478da6368000000820081da45083b0000000049454e44ae426082',
+  'hex',
+);
+const IP_HOST = /^(\d{1,3}(\.\d{1,3}){3}|\[.*\])$/;
+
+function writeAtomicFile(file, data) {
+  const tmp = `${file}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, data);
+  fs.renameSync(tmp, file);
+}
+
+function captureAttempt(url) {
+  const all = SCENARIO.capture || {};
+  let r = url in all ? all[url] : all['*'];
+  if (Array.isArray(r)) {
+    let n = 0;
+    try {
+      const log = SCENARIO.log || path.join(path.dirname(SCENARIO_FILE), 'calls.log');
+      for (const line of fs.readFileSync(log, 'utf8').split('\n'))
+        if (line && JSON.parse(line).argv[0] === 'capture' && JSON.parse(line).argv[1] === url) n++;
+    } catch {
+      n = 1;
+    }
+    r = r[Math.min(n, r.length) - 1];
+  }
+  return r || {};
+}
+
+function capture(positionals, values) {
+  const input = positionals[0];
+  if (!input || positionals.length !== 1) throw new UsageError('s2v capture: which URL?');
+  let url;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new UsageError(`not a URL: ${input}`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new UsageError(`capture takes http or https URLs, not ${url.protocol}`);
+  if (url.username || url.password) throw new UsageError('the URL may not carry a user or password');
+  if (IP_HOST.test(url.hostname)) throw new UsageError(`the URL must name a host, not an IP address (${url.hostname})`);
+  if (!values.out) throw new UsageError('s2v capture: --out <png> is required');
+  for (const f of ['width', 'height', 'timeout'])
+    if (values[f] !== undefined && !/^\d+$/.test(values[f])) throw new UsageError(`--${f} must be a whole number`);
+  if (values.selector === '') throw new UsageError('--selector is empty');
+  const r = captureAttempt(input);
+  const out = path.resolve(values.out);
+  const text = values.text === undefined ? undefined : path.resolve(values.text);
+  for (const f of [out, text]) if (f) fs.rmSync(f, { force: true });
+  if (r.signal) process.kill(process.pid, r.signal);
+  const images = [];
+  for (const im of r.images || []) {
+    const bytes = im.bytes === undefined ? null : Buffer.from(String(im.bytes));
+    const sha = bytes ? sha256(bytes) : null;
+    if (bytes && values['assets-dir']) {
+      fs.mkdirSync(values['assets-dir'], { recursive: true });
+      fs.writeFileSync(path.join(values['assets-dir'], `${sha}.${im.ext || 'png'}`), bytes);
+    }
+    images.push({ src: im.src || '', kind: im.kind || 'img', bbox: im.bbox || [0, 0, 10, 10], alt: im.alt || '', inCapture: im.inCapture !== false, sha256: sha });
+  }
+  const json = {
+    url: r.url || url.href,
+    status: r.status === undefined ? 200 : r.status,
+    title: r.title || '',
+    lang: r.lang || '',
+    idle: r.idle !== false,
+    text: (r.text || [{ kind: 'paragraph', text: `fake page ${url.href}`, ruby: [] }]).map((t) => ({ kind: t.kind || 'paragraph', text: t.text || '', ruby: t.ruby || [] })),
+    images,
+    opaque: r.opaque || [],
+    notShown: r.notShown || [],
+    blocked: r.blocked || [],
+    websockets: r.websockets || [],
+    contentHash: null,
+  };
+  json.contentHash = 'contentHash' in r ? r.contentHash : hashOf({ title: json.title, lang: json.lang, text: json.text, images: images.map((i) => i.sha256) });
+  if (text) {
+    fs.mkdirSync(path.dirname(text), { recursive: true });
+    writeAtomicFile(text, `${JSON.stringify(json, null, 2)}\n`);
+  }
+  if (r.stderr) err(r.stderr);
+  const code = r.exit === undefined ? 0 : Number(r.exit);
+  if (code !== 0) process.exit(code);
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  writeAtomicFile(out, TINY_PNG);
+}
+
 // ---------- main ----------
 function main() {
   const argv = process.argv.slice(2);
@@ -1085,6 +1189,7 @@ function main() {
   }
   if (!(command in FLAGS)) throw new UsageError(`unknown command: ${command ?? '(none)'}`);
   const { values, positionals } = parseFlags(command, rest);
+  if (command === 'capture') return capture(positionals, values);
   const file = positionals[0];
   if (!file || positionals.length !== 1) throw new UsageError(`s2v ${command} <script.md>`);
   const abs = path.resolve(file);

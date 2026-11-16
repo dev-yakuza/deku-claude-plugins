@@ -17,6 +17,9 @@ TABLE = [
                  "<sr>/**/videos/*/work/**/checks/**",
                  "<sr>/**/videos/*/work/assets.json", "<sr>/**/videos/*/work/commit-ok.json",
                  "<sr>/**/videos/*/work/source/**",
+                 # capture.py's results (m2-plan §5.2): the board pictures and s2v's JSON, the promoted source's diff
+                 "<sr>/**/videos/*/work/captures.json", "<sr>/**/videos/*/work/captures/**",
+                 "<sr>/**/videos/*/work/source-diff.txt", "<sr>/**/videos/*/assets/**",
                  "<sr>/**/videos/*/work/**/pronounce-approved.json", "<sr>/**/videos/*/work/**/exemptions.json",
                  "<sr>/**/videos/*/work/**/gate2-lines.txt", "<sr>/**/videos/*/work/**/gate4b-lines.*.txt",
                  "<sr>/**/cast/*/status.json", "<sr>/**/cast/*/approvals.json",
@@ -25,7 +28,7 @@ TABLE = [
                  ".claude/studio/local/guard-ran.lock", ".claude/studio/local/consumed-answers.jsonl",
                  ".claude/studio/local/consumed-answers.lock", ".claude/studio/local/last-checked.json",
                  ".claude/studio/local/commit-summary-*.txt"),
-     "state", "state.py, the Studio check scripts (run_s2v.py, …), check_commit.py and the guard"),
+     "state", "state.py, the Studio check scripts (run_s2v.py, capture.py, …), check_commit.py and the guard"),
     ("P-CRIT", (".claude/studio/charter.md", ".claude/studio/formats/**", ".claude/studio/platforms/**"),
      "criteria", "the person"),
     ("P-PERS", (".claude/agents/std-fact-checker.md", ".claude/agents/std-source-analyst.md",
@@ -49,7 +52,18 @@ DRAFT_OK = {"P-CHAR": "character.yaml.draft"}
 TAIL_NAMES = {"local", "character", "voices", "audio", "consent", "state.json", "approvals.jsonl", "shown.json",
               "verify.json", "verify.md", "CREDITS.yaml", "status.json", "approvals.json", "charter.md", "config.json",
               "commit-ok.json", "pending-approval.json", "guard-ran.json", "last-checked.json", "assets.json",
-              "pronounce-approved.json", "installed.json", "exemptions.json", "gate2-lines.txt"}
+              "pronounce-approved.json", "installed.json", "exemptions.json", "gate2-lines.txt",
+              "captures.json", "source-diff.txt"}
+# common folder names that are protected only below a video (capture.py's results, m2-plan §5.2): a tail or an unknown
+# folder's path names them only with these parents (`$OUT/assets`, `build/$N/assets` stay a build's own folders)
+TAIL_PARENT = {"assets": ("videos", "*"), "captures": ("videos", "*", "work")}
+
+
+def _with_parent(segs, k, par, fold=False):
+    """segs[k] has the parents `par` just before it; a dynamic segment (holding \\0) matches only `*`."""
+    before = segs[max(0, k - len(par)):k]
+    return len(before) == len(par) and all(q == "*" or ("\0" not in b and (b.casefold() == q if fold else b == q))
+                                           for b, q in zip(before, par))
 
 READ_ALLOW = {"cat", "head", "tail", "less", "more", "ls", "stat", "file", "du", "wc", "shasum", "sha256sum",
               "sha1sum", "md5", "md5sum", "cmp", "diff", "grep", "egrep", "fgrep", "rg", "ag", "jq", "ffprobe",
@@ -196,7 +210,13 @@ def tail_hits(skeleton):
     """A dynamic word whose literal tail names a protected thing (`\\0/local`, `\\0/character/x`)."""
     tail = skeleton.split("\0")[-1]
     segs = [s for s in tail.split("/") if s]
-    return any(s in TAIL_NAMES for s in segs)
+    if any(s in TAIL_NAMES for s in segs):
+        return True
+    # a parent-qualified name in the tail: its parents are read over the whole word, a dynamic part standing for the
+    # video id (`studio/videos/$(echo v)/assets`)
+    whole = [s for s in skeleton.split("/") if s]
+    lit = len(whole) - len(segs)
+    return any(s in TAIL_PARENT and _with_parent(whole, lit + k, TAIL_PARENT[s]) for k, s in enumerate(segs))
 
 
 def protected_names():
@@ -582,8 +602,8 @@ def glob_may_match(gparts, pat, fold, prefix=False, anchors=None, extglob=False)
 
 # names one of which a relative path under an unknown folder must hold (G1 §1.7a); the values need that parent
 UNKNOWN_FOLDER_NAMES = {".claude", "studio", "local", "voices", "audio", "character", "work", "videos", "cast",
-                        "source", "checks", "consent"} | TAIL_NAMES
-NEEDS_PARENT = {"config.json": ("studio",), "status.json": ("cast", "*"), "source": ("work",)}
+                        "source", "checks", "consent"} | TAIL_NAMES | set(TAIL_PARENT)
+NEEDS_PARENT = dict({"config.json": ("studio",), "status.json": ("cast", "*"), "source": ("work",)}, **TAIL_PARENT)
 
 
 def unknown_folder_anchors(rel, sr, fold, extglob=False):

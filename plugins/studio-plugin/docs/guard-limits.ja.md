@@ -223,6 +223,11 @@ README には要約があり、このファイルには詳細があります。�
     `validate_copy.py`、`audition.py`。呼び出しはそのスクリプトだけ(前に `cd <repo> &&` があってもよい)で、引数は
     リテラル、動画 ID は正しい形である必要があります。`run_s2v.py`、`lock.py`、`check_commit.py`、`hooks.py`、
     `setup.py`(`doc` 以外)はこれまでどおりプロンプトが出ます。
+  - 0.2.3 からは Studio の `capture.py`(`source | recheck <video>`、`shot <video> <name> --url <https url>` と
+    `--selector`、`--width`、`--height`)も同じように。ウェブページを読み込むスクリプトです: `public_domains` と
+    `capture.hosts`(どちらもあなたの `설정` の回答でだけ変わります)のホストだけをキャプチャし、画像のアドレスの
+    クエリ・フラグメント・長いパスと、内部オーバーレイのホストや用語を含むアドレス・セレクタを拒否し(オーバーレイが
+    なければ止まります)、ブラウザのサンドボックスを切りません。
   - Studio のロールが自分の出力ファイルに行う Write と Edit: source analyst の `work/source.md`、strategist の
     `work/brief.json` と `work/brief.md`、writer の `script.<lang>.md` と `work/<lang>/claims-map.json`、translator の
     ソース以外の言語の `script.<lang>.md`、visual director の台本の編集・`CREDITS.draft.yaml`・`work/<lang>/board.md`、
@@ -271,6 +276,8 @@ README には要約があり、このファイルには詳細があります。�
   します。どの一覧も完全ではありません。
 - awk のプログラムと vim・ex・ed のスクリプト、`parallel` とそれが渡すコマンド。
 - パッケージ実行ツールがさらに実行するもの(`npx sh -c …`、`npx git stash -a`、`npm exec -- chronic rm …`)。
+  `npm exec` や `npm x` で実行した s2v(`npm exec s2v -- capture …`、`… s2v render …`)は s2v として読みません:
+  `s2v capture`、`render` などラッパーを通すべきコマンドの規則が当てはまりません。
 - 他のツールがリポジトリ外に置いて後で読む設定: 環境にすでにある `LESSOPEN`、`~/.npmrc`、シェルの起動ファイル、vim の
   `~/.vimrc`・`~/.exrc`・`~/.vim/`、`~/.ExifTool_config`。git と ssh のユーザー設定ファイルはガードが守りますが、
   その設定が取り込むファイル(`[include]`、`Include`)は見ません。
