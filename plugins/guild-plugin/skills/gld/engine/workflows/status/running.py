@@ -102,7 +102,12 @@ def probe(lock):
             age = 0
         mode = "stale-unknown" if age > STALE_S else "unknown-holder"
         return True, dict(info, mode=info.get("mode") or mode)
-    return pid_alive(info["pid"]), info
+    alive = pid_alive(info["pid"])
+    if alive and info.get("pstart"):
+        # K1 lock holders record their process start time: a reused pid is not a live engine
+        from guildcore.adapters.claude import process_start
+        alive = process_start(info["pid"]) == info["pstart"]
+    return alive, info
 
 
 def running(common_dirs):
