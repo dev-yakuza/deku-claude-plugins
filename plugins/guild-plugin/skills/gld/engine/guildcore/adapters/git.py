@@ -9,6 +9,7 @@ spawns a mutating git command.
 """
 
 import os
+import re
 import subprocess
 
 SAFE_ARGS = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
@@ -35,9 +36,23 @@ def run(cwd, *args, check=True, input=None, timeout=None):
     return p.stdout
 
 
+def remote_names(cwd):
+    return [x for x in run(cwd, "remote", check=False).decode().split() if x]
+
+
+def is_fixed_url(cwd, url):
+    """A URL, an absolute path or an scp-style `[user@]host:path` (git@github.com:o/r.git,
+    git@personal:o/r.git — K1r3-M4) — never the NAME of a configured remote."""
+    if not url or url in remote_names(cwd):
+        return False
+    if "://" in url or os.path.isabs(url):
+        return True
+    return bool(re.match(r"^(?:[^@/\s]+@)?[^:/\s]+:[^\s]+$", url))
+
+
 def push(cwd, url, refspec, force=False):
-    """The engine's push: to a fixed URL, hooks off."""
-    if not url or "://" not in url and not os.path.isabs(url):
+    """The engine's push: to a fixed URL (resolved before any role ran), hooks off."""
+    if not is_fixed_url(cwd, url):
         raise GitError("push needs a fixed URL, not a remote name: %r" % url)
     return run(cwd, "push", *(["--force-with-lease"] if force else []), url, refspec)
 

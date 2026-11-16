@@ -24,6 +24,7 @@ checkout. Base sha and every source path are recorded in the returned meta (→ 
 import copy
 import json
 import os
+import re
 import subprocess
 
 from guildcore.roles import permissions
@@ -180,7 +181,13 @@ def git_dirs(worktree):
 SECRET_READ_PATHS = (".ssh", ".config/gh", ".claude", ".claude-personal", ".aws", ".netrc",
                      ".git-credentials", ".config/git/credentials", "Library/Keychains", ".gnupg",
                      ".docker/config.json", ".pub-cache/credentials.json", ".config/gcloud",
-                     ".kube", ".npmrc", ".pypirc")
+                     ".kube", ".npmrc", ".pypirc",
+                     # K1r3-M5: shell history/rc files (exported tokens), git config, app stores
+                     ".zsh_history", ".bash_history", ".python_history", ".node_repl_history",
+                     ".psql_history", ".mysql_history", ".lesshst", ".zshrc", ".zprofile",
+                     ".zshenv", ".bashrc", ".bash_profile", ".profile", ".gitconfig",
+                     ".config/git/config", ".config/hub", ".config/op", ".config/configstore",
+                     "Library/Application Support", "Library/Cookies", ".env", ".envrc")
 BUILD_DIRS = (".dart_tool", "build", "coverage", ".pytest_cache", "node_modules/.cache", "target",
               ".gradle", "__pycache__")
 WRITER_ROLES = ("developer", "qa")
@@ -269,6 +276,10 @@ def role_sandbox(role_key, worktree, run_dir, issue=None, homes=(), config_dir=N
     # verified); heredocs need it writable, so allow it and deny every session subtree in it
     allow_w.append(tmp + "/**")
     keep = [os.path.realpath(x) for x in (worktree, run_dir) if x]
+    # a glob for session dirs created AFTER this render (K1r3-m1) — kept alongside the
+    # enumerated ones; whether the CLI honours a mid-path glob is recorded in k1-notes
+    if not any(k.startswith(tmp + "/-") for k in keep):
+        deny_w.append(tmp + "/-*/**")
     if os.path.isdir(tmp):
         for d in sorted(os.listdir(tmp)):
             full = os.path.join(tmp, d)
@@ -285,6 +296,94 @@ def role_sandbox(role_key, worktree, run_dir, issue=None, homes=(), config_dir=N
             "excludedCommands": [],
             "filesystem": {"allowWrite": allow_w, "denyWrite": deny_w, "denyRead": deny_r},
             "network": {"allowedDomains": registry_domains(worktree) if role_key in WRITER_ROLES else []}}
+
+
+HOOK_RUNNERS = ("python3", "python", "sh", "bash", "node", "ruby", "perl")
+_PROJ_REF = re.compile(r"\$\{?CLAUDE_PROJECT_DIR\}?/([^\s\"']+)")
+
+
+def base_only_hooks(worktree, base_sha, hooks):
+    """Every project hook must execute ONLY bytes from the base snapshot (K1r3-B2: hooks run
+    outside the sandbox). A command's `${CLAUDE_PROJECT_DIR}/<path>` references are exported
+    from `<base>` (the referenced file's directory) into the read-only engine home and
+    rewritten there. A hook that would still run something from the worktree — no project
+    reference at all (`npx prettier`, `npm run x`), a launcher outside HOOK_RUNNERS, a
+    reference left unrewritten — is DROPPED and reported. Returns (hooks, [(dir, digest)],
+    [dropped command])."""
+    _gitdir, common = git_dirs(worktree)
+    out, files, dropped = {}, [], []
+    for event, groups in (hooks or {}).items():
+        keep_groups = []
+        for g in groups or []:
+            keep = []
+            for hk in g.get("hooks") or []:
+                cmd = hk.get("command")
+                if not isinstance(cmd, str):
+                    dropped.append(json.dumps(hk))
+                    continue
+                gates_root = os.path.join(engine_home(common), "gates")
+                ok = True
+                for rel in sorted(set(_PROJ_REF.findall(cmd))):
+                    d = os.path.dirname(rel) or "."
+                    dest, digest = export_tree_readonly(worktree, base_sha, d,
+                                                        os.path.join(engine_home(common), "hooks", base_sha, d))
+                    if not dest:
+                        ok = False
+                        break
+                    files.append((dest, digest))
+                    cmd = re.sub(r"\$\{?CLAUDE_PROJECT_DIR\}?/" + re.escape(rel),
+                                 os.path.join(dest, os.path.basename(rel)), cmd)
+                words = cmd.split()
+                first = words[0].strip("\"'") if words else ""
+                launcher_ok = os.path.basename(first) in HOOK_RUNNERS or first.startswith(engine_home(common))
+                refs_engine = engine_home(common) in cmd or gates_root in cmd
+                if not ok or "CLAUDE_PROJECT_DIR" in cmd or not launcher_ok or not refs_engine:
+                    dropped.append(hk.get("command"))
+                    continue
+                keep.append(dict(hk, command=cmd))
+            if keep:
+                keep_groups.append(dict(g, hooks=keep))
+        if keep_groups:
+            out[event] = keep_groups
+    return out, files, dropped
+
+
+def export_tree_readonly(worktree, base_sha, rel_dir, dest):
+    """`git archive <base>:<rel_dir>` into dest once, read-only, digest-stamped; (dest, digest)
+    or (None, None) when the base has no such tree."""
+    stamp = dest + ".sha256"
+    if os.path.isdir(dest) and os.path.exists(stamp):
+        with open(stamp) as fh:
+            want = fh.read().strip()
+        if tree_digest(dest) == want:
+            return dest, want
+        import shutil
+        for base, _d, _f in os.walk(dest):
+            os.chmod(base, 0o755)
+        shutil.rmtree(dest)
+    rc, _ = _git(worktree, "cat-file", "-e", "%s:%s" % (base_sha, rel_dir if rel_dir != "." else ""))
+    if rc != 0:
+        return None, None
+    tmp = dest + ".tmp%d" % os.getpid()
+    os.makedirs(tmp, exist_ok=True)
+    tree = "%s:%s" % (base_sha, rel_dir) if rel_dir != "." else base_sha
+    arch = subprocess.Popen(["git", "archive", "--format=tar", tree], cwd=worktree,
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    tar = subprocess.run(["tar", "-x", "-C", tmp], stdin=arch.stdout, stderr=subprocess.PIPE)
+    arch.stdout.close()
+    if arch.wait() != 0 or tar.returncode != 0:
+        return None, None
+    digest = tree_digest(tmp)
+    for base, _dirs, fs in os.walk(tmp, topdown=False):
+        for f in fs:
+            fp = os.path.join(base, f)
+            os.chmod(fp, 0o555 if os.access(fp, os.X_OK) else 0o444)
+        os.chmod(base, 0o555)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    os.replace(tmp, dest)
+    with open(stamp, "w") as fh:
+        fh.write(digest + "\n")
+    return dest, digest
 
 
 def gates_home(common_dir, base_sha):
@@ -395,14 +494,19 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
         out["sandbox"] = forced      # Q23: the role sandbox is the engine's, not merged
     elif merged_sandbox is not None:
         out["sandbox"] = merged_sandbox
-    gates_dir, gates_digest = None, None
+    gates_dir, gates_digest, hook_files, dropped = None, None, [], []
     if hooks and project.get("hooks"):
         h = project["hooks"]
         if base_sha:
             gates_dir, gates_digest = export_gates_readonly(worktree, base_sha)
             if gates_dir:
                 h = rewrite_hook_commands(h, gates_dir)
-        out["hooks"] = copy.deepcopy(h)
+            h, hook_files, dropped = base_only_hooks(worktree, base_sha, h)
+        else:
+            dropped = ["(no base snapshot) every project hook"]
+            h = {}
+        if h:
+            out["hooks"] = copy.deepcopy(h)
     if extra_hooks:
         hk = out.setdefault("hooks", {})
         for ev, groups in extra_hooks.items():
@@ -410,7 +514,7 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
             hk[ev] = list(hk[ev]) + list(groups)
     meta = {"user_settings": user_p, "project_base": base, "project_base_sha": base_sha,
             "local_settings": local_p, "main_checkout": main, "gates_dir": gates_dir,
-            "gates_digest": gates_digest,
+            "gates_digest": gates_digest, "hook_files": hook_files, "hooks_dropped": dropped,
             "routing_in_settings_env": sorted(k for k in merged_env if k in ROUTING_KEYS)}
     path = None
     if run_dir:

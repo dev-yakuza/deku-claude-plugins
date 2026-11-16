@@ -14,6 +14,14 @@
 * `branch_candidates(n, branches)` — J-B1's token rule `(?<![0-9.])N(?![0-9])`, release-shaped
   names excluded.
 `visual_ledger` (H§L) is K2's (k1-notes).
+
+K1r3-B1: the engine's own checks run the code roles wrote (tests, caches), so they run under
+the SAME rendered sandbox block as the role that owns them — on macOS through `sandbox-exec`
+with a profile built from it (writes only where the role could write, denyWrite and denyRead as
+rendered, no network but loopback; package registries are not reachable from checks — dependency
+fetching is a role's or the engine's explicit step). Python bytecode caches in the worktree are
+never executed (`PYTHONPYCACHEPREFIX` → a fresh dir) nor written (`PYTHONDONTWRITEBYTECODE`).
+The env is the role's scrubbed env (no tokens, no GH_*).
 """
 
 import os
@@ -62,9 +70,79 @@ def last_running(raw):
     return None
 
 
+SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+
+
+def _sb_str(p):
+    return '"%s"' % p.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _sb_target(entry):
+    e = entry
+    if e.endswith("/**"):
+        base = e[:-3]
+        real = os.path.realpath(base) if os.path.exists(base) else base
+        return "(subpath %s)" % _sb_str(real)
+    real = os.path.realpath(e) if os.path.exists(os.path.dirname(e) or "/") else e
+    return "(literal %s)" % _sb_str(real)
+
+
+def sandbox_profile(block, extra_write=()):
+    """An SBPL profile from a rendered `sandbox` block (last matching rule wins)."""
+    fs = (block or {}).get("filesystem") or {}
+    lines = ["(version 1)", "(allow default)", "(deny file-write*)",
+             "(allow file-write* (literal \"/dev/null\") (literal \"/dev/tty\") (subpath \"/dev/fd\"))"]
+    for a in list(fs.get("allowWrite") or []) + [x.rstrip("/") + "/**" for x in extra_write]:
+        lines.append("(allow file-write* %s)" % _sb_target(a))
+    for d in fs.get("denyWrite") or []:
+        lines.append("(deny file-write* %s)" % _sb_target(d if d.endswith("/**") or not os.path.isdir(d) else d + "/**"))
+    for r in fs.get("denyRead") or []:
+        tgt = r if not os.path.isdir(r) else r.rstrip("/") + "/**"
+        lines.append("(deny file-read* %s)" % _sb_target(tgt))
+    # bash/sh here-document temp files (`sh-thd*`) land wherever the shell finds a writable
+    # spot, not necessarily TMPDIR (verified) — allowed by NAME, after the denies (last wins)
+    lines.append("(allow file-write* (regex #\"/sh-thd[^/]*$\"))")
+    lines += ["(deny network-outbound)",
+              "(allow network-outbound (remote ip \"localhost:*\"))",
+              "(allow network-outbound (remote unix-socket))"]
+    return "\n".join(lines) + "\n"
+
+
+def check_env(role_env, tmp):
+    """The checks env: the role's scrubbed env + no bytecode reuse/writes + a private TMPDIR."""
+    e = dict(role_env or os.environ)
+    os.makedirs(tmp, exist_ok=True)
+    pyc = os.path.join(tmp, "pycache")
+    os.makedirs(pyc, exist_ok=True)
+    e.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": pyc, "TMPDIR": tmp})
+    return e
+
+
+def sandboxed(cmd, block, tmp):
+    """`cmd` (a shell string) wrapped in sandbox-exec with the profile; raises when the host has
+    no sandbox-exec (the engine must not run role-written code unconfined)."""
+    if not os.path.exists(SANDBOX_EXEC):
+        raise RuntimeError("no sandbox-exec on this host — checks refuse to run unconfined")
+    prof = os.path.join(tmp, "checks.sb")
+    with open(prof, "w") as fh:
+        fh.write(sandbox_profile(block, extra_write=[tmp]))
+    return "%s -f %s /bin/sh -c %s" % (SANDBOX_EXEC, _shq(prof), _shq(cmd))
+
+
+def _shq(s):
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
 def run_command(cmd, timeout_s=UNATTENDED_CEILING_S, cwd=".", env=None, journal=None,
-                who="checks", poll_s=0.5):
+                who="checks", poll_s=0.5, sandbox=None, tmp=None):
+    """`sandbox` = the owning role's rendered sandbox block (required for code a role wrote);
+    `tmp` = a private temp dir (the run dir's tmp/)."""
     cmds = list(cmd) if isinstance(cmd, (list, tuple)) else [cmd]
+    if sandbox is not None:
+        if not tmp:
+            raise ValueError("a sandboxed check needs a private tmp dir outside the worktree")
+        env = check_env(env, tmp)
+        cmds = [sandboxed(c, sandbox, tmp) for c in cmds]
     raw, steps, t0 = [], [], time.time()
     rc, timed_out = 0, False
     for c in cmds:

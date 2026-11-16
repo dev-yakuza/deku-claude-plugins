@@ -89,9 +89,9 @@ class B3Drift(unittest.TestCase):
         r.run_role(self.spec())
         with open(os.path.join(self.wt, "lib", "eng.txt"), "w") as fh:
             fh.write("engine's own step")
-        self.assertEqual(r.drift_check(self.wt), ["path lib/eng.txt"])
-        r.rebaseline(self.wt)
-        self.assertEqual(r.drift_check(self.wt), [])
+        self.assertEqual(r.drift_check(self.wt, 1), ["path lib/eng.txt"])
+        r.rebaseline(self.wt, 1)
+        self.assertEqual(r.drift_check(self.wt, 1), [])
         self.assertEqual(r.run_role(self.spec("reviewer", None)).status, "DONE")
 
     def test_tampered_gate_fails_closed(self):

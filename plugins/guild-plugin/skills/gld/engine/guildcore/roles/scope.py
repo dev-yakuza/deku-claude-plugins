@@ -146,7 +146,7 @@ def snapshot(worktree, remote=None, watch_files=()):
         st, p = e[:2], e[3:]
         if st[0] in "RC":          # rename/copy: the next field is the source
             i += 1
-        entries[p] = (st, _hash(os.path.join(worktree, p)))
+        entries[p] = [st, _hash(os.path.join(worktree, p))]
     head = _git(worktree, "rev-parse", "HEAD").decode().strip()
     try:
         sym = _git(worktree, "symbolic-ref", "-q", "HEAD").decode().strip()
@@ -253,7 +253,10 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
                     viol.append("remote %s moved to a local commit during the role (push)" % ref)
     ib, ia = before.get("integrity") or {}, after.get("integrity") or {}
     for k in sorted(set(ib) | set(ia)):
-        if ib.get(k) != ia.get(k):
+        # watched settings FILES are a human's to edit while a role runs ("always allow" in
+        # Claude Code writes settings.local.json) — a role cannot (denyWrite); not a violation
+        # (K1r3-M2), see watch_warnings
+        if ib.get(k) != ia.get(k) and not k.startswith("file "):
             viol.append("%s changed during the role" % k)
     if movers:
         if branch_ref and after.get("symref") != branch_ref:
@@ -294,9 +297,15 @@ def drift(baseline, now):
         out.append("HEAD")
     ib, ia = baseline.get("integrity") or {}, now.get("integrity") or {}
     for k in sorted(set(ib) | set(ia)):
-        if ib.get(k) != ia.get(k):
+        if ib.get(k) != ia.get(k) and not k.startswith("file "):
             out.append(k)
     return out
+
+
+def watch_warnings(before, after):
+    ib, ia = before.get("integrity") or {}, after.get("integrity") or {}
+    return ["%s changed (a human's edit — not the role's: denyWrite)" % k
+            for k in sorted(set(ib) | set(ia)) if k.startswith("file ") and ib.get(k) != ia.get(k)]
 
 
 def remote_warnings(before, after):

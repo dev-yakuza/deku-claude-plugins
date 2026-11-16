@@ -608,7 +608,8 @@ class Scope(unittest.TestCase):
         v = SC.check(self.r, b, SC.snapshot(self.r, watch_files=[watch]), ["reviewer"])
         self.assertTrue(any(x.startswith("hooks ") for x in v), v)
         self.assertTrue(any("git config --local changed" in x for x in v), v)
-        self.assertTrue(any(x.startswith("file " + watch) for x in v), v)
+        self.assertFalse(any(x.startswith("file " + watch) for x in v), v)     # K1r3-M2: a human's edit
+        self.assertTrue(SC.watch_warnings(b, SC.snapshot(self.r, watch_files=[watch])))
 
     def test_paths_with_spaces(self):                         # K1-m7
         b = self.snap()
