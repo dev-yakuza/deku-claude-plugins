@@ -115,6 +115,9 @@ def check_env(role_env, tmp):
     pyc = os.path.join(tmp, "pycache")
     os.makedirs(pyc, exist_ok=True)
     e.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": pyc, "TMPDIR": tmp})
+    tools = process_tools_dir()
+    if tools:
+        e["PATH"] = tools + os.pathsep + e.get("PATH", "")
     return e
 
 
@@ -348,3 +351,41 @@ def deps_step(cmds, worktree, sandbox, tmp, env=None, hosts=None, timeout_s=1800
         e.update(px.env())
         r = run_command(cmds, timeout_s, cwd=worktree, env=e, sandbox=sandbox, tmp=tmp)
         return r, px.summary()
+
+
+# Process lookups inside the sandboxes (user decision, K1r5): macOS refuses to exec SETUID
+# binaries from any sandboxed process — `/bin/ps` fails with EPERM under both the CLI sandbox
+# and sandbox-exec (measured), which broke word_app's process-tree test. The engine provides an
+# ad-hoc-signed, NON-setuid copy of ps that sees this user's processes (as far as the sandbox's
+# process-info rule allows: same-sandbox for the CLI, all of the user's for checks) and puts it
+# first on PATH. pgrep/pkill are not setuid and work unchanged.
+SETUID_TOOLS = ("/bin/ps",)
+
+
+def process_tools_dir(home=None):
+    """`~/.cache/guild-engine/bin` with the non-setuid tool copies (created once, re-made when the
+    system binary changes). Returns the dir, or None when it cannot be prepared."""
+    import hashlib
+    import shutil as _sh
+    base = os.path.join(home or os.path.expanduser("~"), ".cache", "guild-engine", "bin")
+    os.makedirs(base, exist_ok=True)
+    for src in SETUID_TOOLS:
+        if not os.path.exists(src):
+            continue
+        dst = os.path.join(base, os.path.basename(src))
+        stamp = dst + ".src-sha256"
+        with open(src, "rb") as fh:
+            want = hashlib.sha256(fh.read()).hexdigest()
+        have = open(stamp).read().strip() if os.path.exists(stamp) else None
+        if have != want or not os.path.exists(dst):
+            tmp = dst + ".tmp"
+            _sh.copyfile(src, tmp)
+            os.chmod(tmp, 0o755)
+            p = subprocess.run(["codesign", "-s", "-", "--force", tmp], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+            if p.returncode != 0:
+                return None
+            os.replace(tmp, dst)
+            with open(stamp, "w") as fh:
+                fh.write(want + "\n")
+    return base

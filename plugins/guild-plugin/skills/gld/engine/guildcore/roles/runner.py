@@ -35,6 +35,7 @@ from guildcore import cost as COST
 from guildcore import ratelimit as RL
 from guildcore.adapters import claude as C
 from guildcore.adapters import git as G
+from guildcore import checks as CH
 from guildcore.roles import permissions as P
 from guildcore.roles import result as R
 from guildcore.roles import scope as SC
@@ -439,6 +440,10 @@ class Runner(object):
         gitenv = dict(git_identity(spec.worktree))
         gitenv.update(S.render_gitconfig(spec.worktree, os.path.join(run_dir, "in", "gitconfig")))
         env.update(gitenv)
+        tools = CH.process_tools_dir()
+        if tools:
+            # non-setuid ps first on PATH — setuid binaries cannot run in the sandbox (K1r5)
+            gitenv["PATH"] = tools + os.pathsep + env.get("PATH", "")
         env["CLAUDE_ENV_FILE"] = write_env_file(os.path.join(run_dir, "in", "env.sh"), gitenv)
         hook_notes = (["hook runs in the role sandbox: %s" % c for c in rendered.meta.get("hooks_sandboxed") or []] +
                       ["hook SKIPPED (shown to the human): %s" % c for c in rendered.meta.get("hooks_skipped") or []])

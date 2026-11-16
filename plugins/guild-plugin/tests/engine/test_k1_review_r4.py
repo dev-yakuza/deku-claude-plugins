@@ -190,3 +190,44 @@ class GroupCauseLine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProcessLookups(unittest.TestCase):
+    """User decision K1r5: process-info lookups allowed inside role and checks sandboxes."""
+
+    def test_role_sandbox_allows_sysmond_only(self):
+        sb = S.role_sandbox("reviewer", None, "/r")
+        self.assertEqual(sb["network"]["allowMachLookup"], ["com.apple.sysmond"])
+
+    def test_non_setuid_ps_works_in_sandbox_exec(self):
+        if not os.path.exists(CH.SANDBOX_EXEC) or not os.path.exists("/bin/ps"):
+            self.skipTest("no sandbox-exec")
+        tools = CH.process_tools_dir()
+        self.assertIsNotNone(tools)
+        ps = os.path.join(tools, "ps")
+        self.assertFalse(os.stat(ps).st_mode & 0o4000)          # not setuid
+        d = home_dir(self)
+        p = subprocess.Popen(["sleep", "30.919"])
+        self.addCleanup(lambda: (p.kill(), p.wait()))
+        r = CH.run_command("ps -o command= -p %d; echo rc=$?; /bin/ps -p %d >/dev/null 2>&1; echo setuid-rc=$?" % (p.pid, p.pid),
+                           60, cwd=d, sandbox={"filesystem": {}}, tmp=os.path.join(d, "tmp"))
+        self.assertIn("sleep 30.919", r.raw)
+        self.assertIn("rc=0", r.raw)
+        self.assertNotIn("setuid-rc=0", r.raw)                  # the system ps cannot run sandboxed
+
+    def test_user_temp_dir_writable_for_tool_roles(self):
+        ut = subprocess.run(["getconf", "DARWIN_USER_TEMP_DIR"], stdout=subprocess.PIPE).stdout.decode().strip()
+        if not ut:
+            self.skipTest("not macOS")
+        self.assertIn(os.path.realpath(ut).rstrip("/") + "/**", S.toolchain_writes(None))
+
+    def test_runner_puts_tools_first_on_path(self):
+        wt = repo(self)
+        spawn = FakeSpawn([{"stream": stream_lines(texts=[DONE])}])
+        r = RR.Runner(journal=RecJournal(), parent_env={"PATH": "/usr/bin:/bin"}, spawn=spawn,
+                      user_settings=os.path.join(tmpdir(self), "u"), run_root_dir=os.path.join(tmpdir(self), "runs"),
+                      claude="claude", clock=Clock())
+        r.run_role(RR.RoleSpec("reviewer", None, "t", issue=1, stage="s", step="x", worktree=wt, model="m",
+                               base="HEAD", remote_check=False))
+        text = open(spawn.calls[0]["env"]["CLAUDE_ENV_FILE"]).read()
+        self.assertIn("guild-engine/bin:/usr/bin:/bin", text)

@@ -306,7 +306,11 @@ def role_sandbox(role_key, worktree, run_dir, issue=None, homes=(), config_dir=N
             # loopback binding: test runners (flutter_tester, jest workers) serve on localhost —
             # measured: `flutter test` fails at HttpServer.bind without it (K1r4-M2)
             "network": {"allowedDomains": registry_domains(worktree) if role_key in WRITER_ROLES else [],
-                        "allowLocalBinding": True}}
+                        "allowLocalBinding": True,
+                        # process listing (pgrep/ps-style lookups; user decision K1r5): the
+                        # narrowest switch — the one mach service pgrep needs (measured:
+                        # "sysmond service not found" without it). No signalling rights.
+                        "allowMachLookup": ["com.apple.sysmond"]}}
 
 
 HOOK_RUNNERS = ("python3", "python", "sh", "bash", "node", "ruby", "perl")
@@ -478,6 +482,16 @@ def toolchain_writes(worktree, user_sandbox=None, home=None):
     cocoapods for exactly this reason). Never anything under SECRET_READ_PATHS."""
     home = home or os.path.expanduser("~")
     out = []
+    # the per-user system temp dir (`mktemp -t` falls back to it — word_app's
+    # verify_test_coverage.sh, measured EPERM): private to this user, not shared with other
+    # Claude sessions
+    try:
+        ut = subprocess.run(["getconf", "DARWIN_USER_TEMP_DIR"], stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL).stdout.decode().strip()
+        if ut:
+            out.append(os.path.realpath(ut).rstrip("/") + "/**")
+    except OSError:
+        pass
     sdk = flutter_sdk(worktree)
     if sdk:
         out.append(sdk + "/**")
