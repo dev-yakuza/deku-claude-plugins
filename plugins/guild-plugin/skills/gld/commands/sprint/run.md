@@ -742,6 +742,8 @@ nothing. Match on the wildcard and name the action for each:
 | `halted:sigTERM` / `halted:sigHUP` | Someone stopped it. The member that was running finished first; re-run to continue |
 | `halted:interrupted` | An abnormal exit that named no reason (SIGKILL cannot; power loss, battery, a forced reboot). ⚠ **A card may be stuck on `In progress`** — say so |
 | `halted:plan-hash-mismatch` | The tracker body changed. Re-plan or accept, per Phase 1 step 4 |
+| `halted:plugin-version-changed` / `halted:engine-kill-switch` | Written by a 0.102+ supervisor: the installed Guild version changed under the run, or a human set the engine's kill switch. Recreate the supervisor with `/gld sprint run` to continue |
+| `halted:engine-env-<reason>` | Written by a 0.102+ supervisor: the engine's environment check failed (`endpoint` · `python` · `uninitialized` · `plugin-not-listed`). Fix the environment, then `/gld sprint run` again |
 
 ⚠ **Never report a `halted:*` run with the normal counts alone.** `done 0 / failed 0` over a
 run that refused to start is the class of report this arm exists to remove.

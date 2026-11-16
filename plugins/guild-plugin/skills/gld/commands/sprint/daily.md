@@ -200,6 +200,9 @@ The classes the supervisor writes — **this list is the code's, verbatim**:
 | `branch-assumed` | **정보** — 실패도 차단도 아니다. 이슈 번호가 맞는 브랜치가 하나뿐이어서 그것으로 재개했다는 기록. 소유를 증명한 것은 아니므로 사람이 확인할 수 있게 남긴다 |
 | `split-stalled` | **미완**(실패로 집계) — 분할 부모의 자식 오케스트레이션이 전진을 멈췄다 |
 
+이 목록 밖의 class 두 개는 더 새 Guild(0.102+)의 감독기가 쓴다 — 버전을 내린 레포의 로그에 남아 있을 수 있다:
+`busy`·`busy-skipped` = **미처리**(그 이슈를 다른 실행이 잡고 있어 건너뜀). 실패로 렌더하지 말 것 — 다음 실행에서 이어진다.
+
 ⚠ `base-decision-failed`와 `base-unresolved`는 **다른 일**이다. 앞은 base 결정 자체가 실패한
 것(입력이 깨졌거나 출력을 파싱할 수 없다 — 의존에 대해 아는 것이 없으므로 하류가 추측 위에
 쌓이면 안 된다), 뒤는 base 이름은 알지만 그 ref가 로컬에도 원격에도 없는 것(의존이 아직 랜딩되지
@@ -437,7 +440,8 @@ Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limi
   `waiting-for-window-2200` becomes *"창 밖 대기 중 — 22:00에 재개"* (the `HHMM` in the token
   **is** the next window opening); do **not** invent a shape the supervisor never writes.
   ⚠ **`halted:<reason>`**: `interrupted` · `window-invalid` · `marker-unwritable` ·
-  `container-lost` · `sigTERM` · `sigHUP` · `plan-hash-mismatch`. `halted:marker-unwritable`
+  `container-lost` · `sigTERM` · `sigHUP` · `plan-hash-mismatch` · `plugin-version-changed` ·
+  `engine-kill-switch` · `engine-env-<reason>` (the last three from a 0.102+ supervisor). `halted:marker-unwritable`
   is the one whose reason may exist **only** in `.sprint-logs/<tracker>/dag/ledger.json` —
   the marker write is what failed.
 - **How to stop it.** ⚠ For any live state, print the marker's `pid` with the command:
