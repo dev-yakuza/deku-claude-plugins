@@ -7,8 +7,12 @@ Design: `design/guild/23-engine/design.md` §2.0. Rules every module here keeps:
 * Every module that touches the outside world takes an adapter (gh, clock, filesystem root) so
   tests run against fakes — no network, no `claude`.
 
-Milestone K0 is READ-ONLY: parsers/renderers, state derivation, config, emit. Nothing in this
-package writes to GitHub or spawns a role; the renderers produce text that K1+ writers will post.
+Milestone K0: parsers/renderers, state derivation, config, emit (read-only).
+Milestone K1: the executor — `adapters.claude` (every `claude -p`), `roles` (settings render,
+permission rules, runner, scope check), `judges`, `ask`, `pause`, `journal` (write side),
+`worker`, `ratelimit`, `cost`, `capture`, `checks`, and the verified write path
+`records.write` + `adapters.gh.GhWriteCli`. Still inert: no command of the plugin calls the
+engine, and `gld_engine.py` exposes no `dev` workflow yet (K5 wires the drivers).
 """
 
-ENGINE_MILESTONE = "K0"
+ENGINE_MILESTONE = "K1"

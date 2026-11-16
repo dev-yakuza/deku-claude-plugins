@@ -8,8 +8,9 @@
     gld_engine.py status directives --open             human directive blocks (runbook ①b)
     gld_engine.py version
 
-Milestone K0: read-only. No command writes GitHub state, spawns a role or calls `claude`; the
-`dev` workflow arrives in later milestones. Nothing in the plugin invokes this file yet.
+Milestones K0–K1: the CLI exposes only the read-only `status` workflow. K1's executor
+(`guildcore.roles/judges/…`, verified GitHub writes) has no CLI entry yet — the `dev` workflow and
+its drivers arrive in K2–K5. Nothing in the plugin invokes this file.
 
 This shim uses only Python 3.6 syntax up to the version check (R6C-m4): an interpreter the
 engine cannot run on exits 6 with `halted: env python` before any engine module is imported.
