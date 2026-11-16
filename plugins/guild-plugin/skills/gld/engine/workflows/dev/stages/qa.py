@@ -52,6 +52,12 @@ DESIGN_ARTIFACTS = ("skeleton.md", "ux.md", "design.md", "notes.md", "leader-arb
 UI_GLOBS = ("lib/*/widgets/*", "lib/*widgets*", "lib/*screen*", "lib/*page*", "lib/*view*", "lib/ui/*",
             "*.tsx", "*.jsx", "*.vue", "*.svelte", "*.css", "*.scss", "*.html", "*.storyboard", "*.xib")
 IMAGES_CAP = 12
+_S = {"type": "string"}
+# K2-M6: qa:output renders what the role RAN and did NOT run — required, not folded prose
+QA_RUN_SCHEMA = {"type": "object", "required": ["plan", "plan_summary", "ran", "not_run", "human_items"],
+                 "properties": {"plan": _S, "plan_summary": {"type": "array", "items": _S},
+                                "ran": {"type": "array", "items": _S}, "not_run": {"type": "array", "items": _S},
+                                "human_items": {"type": "array"}, "followups_path": {"type": ["string", "null"]}}}
 
 
 def find_pr(p):
@@ -114,10 +120,14 @@ def run(p, only=None, config_present=True, diff_paths=None):
     e = B.enter(p, STAGE, config_present, only)
     if isinstance(e, B.StageResult):
         return e
-    comments = p.gh.comments(p.issue)
+    B.note_untrusted(p, STAGE)
+    comments = B.records(p)
     cfg = cfg_dict(p)
     blk = LP.interrupted(comments, "guild:qa", e.labels)
     if blk is not None:
+        q0, r0 = B.pending_answer(p, STAGE, "loopback", comments)
+        if r0 is not None and (blk.get("decided") or "") == "human":
+            B.mark_applied(p, STAGE, r0)                  # the answer's block landed before a crash
         return LP.finish_interrupted(p, STAGE, blk)
     q, res = B.pending_answer(p, STAGE, "loopback", comments)
     if res is not None:
@@ -136,13 +146,16 @@ def run(p, only=None, config_present=True, diff_paths=None):
               "e2e.txt": str((cfg.get("commands") or {}).get("e2e")),
               "visual-available.txt": "yes" if V.visual_available(cfg) else "no",
               "unattended.txt": "yes — never run a real-dependency smoke" if p.unattended else "no"}
-    qres = p.run_role(B.RoleCall("qa", "run", STAGE, "Q1", inputs=inputs))
+    qres = p.run_role(B.RoleCall("qa", "run", STAGE, "Q1", inputs=inputs, schema=QA_RUN_SCHEMA))
     o = B.role_outcome(p, STAGE, "qa", qres)
     if o is not None:
         return o
     pushed_sha = None
     if p.push is not None and qres.status in ("DONE", "DONE_WITH_CONCERNS"):
-        pushed = p.push()                                                  # §5.5: qa's test commits
+        try:
+            pushed = p.push()                                              # §5.5: qa's test commits
+        except Exception as ex:                                            # K2-M4: drift / push failure
+            return B.fail(p, STAGE, "engine push after qa failed — %s" % B.one_line(str(ex), 160))
         pushed_sha = pushed if isinstance(pushed, str) else None
 
     convene, why = ui_convene(p, cfg, comments, diff)                      # Q1.5
@@ -158,10 +171,10 @@ def run(p, only=None, config_present=True, diff_paths=None):
         "designer: %s" % (dres.line or dres.status)
 
     ci = CI.record(p.gh, pr, head=pushed_sha)                              # Q2.2
-    if ci.is_red and p.engine_cfg("qa", {}).get("stop_on_ci_red") is True:   # Q2.3 habit stop
-        return _ci_stop(p, ci)
+    habit_stop = ci.is_red and (p.engine_cfg("qa", {}) or {}).get("stop_on_ci_red") is True
 
-    d, checklist = _judge(p, cfg, qres, dres, test_out, issue, diff)       # Q2.5
+    prev_qa = _prev_qa(comments)
+    d, checklist = _judge(p, cfg, qres, dres, test_out, issue, diff, prev_qa)  # Q2.5
     defects = [x for x in d.fields.get("defects") or [] if x.get("blocking")]
     if dres is not None and dres.status == "BLOCKED" and not any(
             "designer" in (x.get("line") or "") or x.get("id", "").startswith("UX") for x in defects):
@@ -173,12 +186,13 @@ def run(p, only=None, config_present=True, diff_paths=None):
     items = [JG.strip_hedges(i) for i in items]
 
     plan_lines = _plan_lines(qres)
-    honesty = ["자동·에이전트 확인: test 단계 원문 + qa 실행 항목(위)",
-               "사람 확인 필요: %d건" % len(items) if items else "사람 확인 필요: 없음 — " + NONE_LEFT]
+    honesty = honesty_lines(p, cfg, qres, items)
     fu = _followups(p, cfg, qres, comments, pr)                            # computed before the post
     body = R.qa_output(p.issue, plan_lines, ui_line, honesty, ci.line, p.now(), items if pr is None else [],
                        pr.get("number") if pr else None, followups_line=fu["line"])
     p.writer.upsert_comment(p.issue, R.QA, body)                           # Q2.4
+    if habit_stop:                                                         # Q2.3 — after the record (K2-m3)
+        return _ci_stop(p, ci)
     for x in defects:
         p.capture("correction", STAGE, "designer" if x.get("id", "").startswith("UX") else "qa",
                   x.get("line") or x.get("id"), x.get("evidence") or x.get("line"), "#%d" % p.issue, True)
@@ -197,7 +211,7 @@ def run(p, only=None, config_present=True, diff_paths=None):
             return _unreadable(p, pr["number"])
 
     if blocking:                                                           # Q3
-        sig = sorted(set(x.get("id") for x in defects if x.get("id"))) or ["qa:block"]
+        sig = qa_signature(defects, prev_qa) or ["qa:block"]
         line = B.one_line("; ".join(x.get("line") or x.get("id") for x in defects) or
                           d.fields.get("reason") or "quality bar not met", 200)
         if not p.unattended:
@@ -210,13 +224,11 @@ def run(p, only=None, config_present=True, diff_paths=None):
 
 
 def _plan_lines(qres):
-    out = []
+    out = ["계획: %s" % x for x in qres.extras.get("plan_summary") or []]
     plan = qres.extras.get("plan")
     if isinstance(plan, str) and plan.strip():
         txt = _read_any(plan)
         out.append("계획·결과: %s" % (plan if txt is None else B.one_line(txt, 400)))
-    for h in qres.extras.get("ran") or []:
-        out.append("실행: %s" % h)
     if qres.line:
         out.append("qa 결과: %s" % qres.line)
     return out
@@ -232,31 +244,100 @@ def _read_any(path):
     return None
 
 
-def _judge(p, cfg, qres, dres, test_out, issue, diff):
-    qb = p.read_file("docs/standards/quality-bar.md") or "(no quality-bar.md)"
+def _prev_qa(comments):
+    """Earlier active `from: qa` loop-back blocks: [(reason, {signature elements})]."""
+    from guildcore.records import loopback as LBR
+    rec = LBR.from_comments(comments)
+    if rec is None:
+        return []
+    return [(markers.unescape(b.get("reason") or ""), LBR.signature_set(b.get("signature") or ""))
+            for b in rec.active() if b.get("from") == "qa"]
+
+
+PATH_TOK = re.compile(r"[\w./-]+\.(?:dart|py|go|[jt]sx?|kt|swift|rb|java|md|ya?ml|json|png)\b")
+AC_TOK = re.compile(r"\b(?:AC ?#?\d+|TC-?[A-Z]{0,3}\d+)\b")
+
+
+def qa_signature(defects, prev):
+    """K2-M1: content-based, stable across SJ-QA calls. Per defect: a `same_as` that names an
+    element of an earlier qa loop-back's signature (the judge saw them in its brief) is reused;
+    else the evidence's file paths / AC ids; else `qa:<sha8(normalised line)>`."""
+    import hashlib
+    known = set().union(*[s for _r, s in prev]) if prev else set()
+    out = set()
+    for d in defects:
+        same = (d.get("same_as") or "").strip()
+        if same and same in known:
+            out.add(same)
+            continue
+        text = " ".join([d.get("evidence") or "", d.get("line") or ""])
+        toks = sorted(set(PATH_TOK.findall(text)) | set(" ".join(a.split()) for a in AC_TOK.findall(text)))
+        if toks:
+            out.add("+".join(toks))
+        else:
+            norm = " ".join((d.get("line") or d.get("id") or "").lower().split())
+            out.add("qa:" + hashlib.sha256(norm.encode("utf-8")).hexdigest()[:8])
+    return sorted(out)
+
+
+def honesty_lines(p, cfg, qres, items):
+    """K2-M6: (a) what ran (the qa role's `ran[]`), (b) what did NOT — the role's `not_run[]` plus
+    code-known facts: `commands.e2e` when qa did not run it, the real-dependency smoke when
+    unattended, the human's visual judgment; then the human-QA count."""
+    ran = [str(x) for x in qres.extras.get("ran") or []]
+    not_run = [str(x) for x in qres.extras.get("not_run") or []]
+    e2e = (cfg.get("commands") or {}).get("e2e")
+    if e2e and not any(str(e2e) in r for r in ran):
+        not_run.append("`commands.e2e`(%s)" % e2e)
+    if p.unattended:
+        not_run.append("실의존 스모크 — 무인 실행이라 수행 안 함")
+    not_run.append("사람의 시각 판단")
+    out = ["(a) 실행함(증거 있음): %s" % ("; ".join(ran) if ran else "qa 실행 항목 없음 — test 단계 원문에 의존"),
+           "(b) 실행 안 함: %s" % "; ".join(dict.fromkeys(not_run))]
+    out.append("사람 확인 필요: %d건" % len(items) if items else "사람 확인 필요: 없음 — " + NONE_LEFT)
+    return out
+
+
+def _judge(p, cfg, qres, dres, test_out, issue, diff, prev_qa=()):
+    qb_text = p.read_file("docs/standards/quality-bar.md")
+    qb = qb_text if qb_text is not None else "(no quality-bar.md — no bar: treat it as met)"
     brief = [("qa", "QA report:\nRESULT: %s\n%s" % (qres.line or qres.status, json.dumps(qres.extras, ensure_ascii=False)[:6000])),
              ("designer", "Designer: %s" % ((dres.line or dres.status) if dres else "not convened")),
              ("bar", "Quality bar:\n" + qb[:4000]),
              ("issue", "Issue:\n%s\n%s" % (issue.get("title") or "", (issue.get("body") or "")[:4000])),
              ("test", "test:output:\n" + ((test_out.body if test_out else "")[:5000])),
              ("diff", "Changed files:\n" + "\n".join(diff or ["(unknown)"])),
-             ("candidates", "Human-QA candidates from qa:\n" + "\n".join(str(x) for x in qres.extras.get("human_items") or []))]
+             ("candidates", "Human-QA candidates from qa:\n" + "\n".join(str(x) for x in qres.extras.get("human_items") or [])),
+             ("prior", "Earlier QA loop-backs on this Issue (set `same_as` to one of these signature elements "
+                       "when a defect is the SAME one):\n" + ("\n".join("- %s — signature: %s" % (r, ",".join(sorted(s)))
+                                                               for r, s in prev_qa) or "none"))]
     d = p.judge(JG.spec(p, "QA", brief, STAGE, "Q2.5"))
-    bad = JG.hedged(d.fields.get("checklist"))
-    if bad:
-        brief.append(("lint", "Your checklist used banned hedge words in: %s. Rephrase each as an "
-                              "instruction (no 권장/가능하면/여유되면/미검증(참고))." % "; ".join(bad)))
-        d = p.judge(JG.spec(p, "QA", brief, STAGE, "Q2.5", point="QA:relint"))
+    extra = {}
+    if qb_text is None and d.fields.get("verdict") == "block" and not any(
+            x.get("blocking") for x in d.fields.get("defects") or []):
+        d.fields["verdict"], d.choice = "pass", "pass"                  # K2-m9: no bar file = bar met
+        d.coerced, d.coerced_by = True, "rule"
+        extra["quality_bar"] = "absent"
     B.record_judgment(p, STAGE, "QA", "Q-DEFECT,Q-FIXABLE,Q-PASS,Q-CHECKLIST", d,
                       reason=d.fields.get("reason"),
-                      extra={"defects": ",".join("%s:%s" % (x.get("id"), x.get("fixable_in_code"))
-                                                 for x in d.fields.get("defects") or [] if x.get("blocking")) or None})
-    return d, [x for x in d.fields.get("checklist") or [] if x.strip()]
+                      extra=dict(extra, defects=",".join("%s:%s" % (x.get("id"), x.get("fixable_in_code"))
+                                                         for x in d.fields.get("defects") or [] if x.get("blocking")) or None))
+    checklist = [x for x in d.fields.get("checklist") or [] if x.strip()]
+    if JG.hedged(checklist):                                           # K2-M3: re-ask the WORDING only
+        brief.append(("lint", "Your checklist used banned hedge words in: %s. Rephrase each as an "
+                              "instruction (no 권장/가능하면/여유되면/미검증(참고))." % "; ".join(JG.hedged(checklist))))
+        d2 = p.judge(JG.spec(p, "QA", brief, STAGE, "Q2.5", point="QA:relint"))
+        B.record_judgment(p, STAGE, "QA:relint", "Q-CHECKLIST", d2, choice="checklist",
+                          reason="wording only — verdict and defects stay with the first decision")
+        checklist = [x for x in d2.fields.get("checklist") or [] if x.strip()]
+    return d, checklist
 
 
 def _ci_stop(p, ci):
     g = DR.gather(p.gh, p.issue)
-    kind, dline, _d = DR.judge(p, STAGE, g, ci.line, "Q2.3")
+    kind, dline, dd = DR.judge(p, STAGE, g, ci.line, "Q2.3")
+    if dd is not None:
+        B.record_judgment(p, STAGE, "DIRECTIVE", "J-H1,Q-DIRECTIVE,Q-CI-HABIT", dd, reason=dline)
     if ci.never_started and not ci.red:
         return B.pause(p, STAGE, "env", "PR CI 시작되지 않음 %s" % " ".join(ci.never_started),
                        "PR CI not started", env_key="ci-blocked", directive_line=dline)

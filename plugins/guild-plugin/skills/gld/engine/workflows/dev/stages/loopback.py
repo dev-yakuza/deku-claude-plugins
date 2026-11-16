@@ -20,11 +20,12 @@ STAG-REASON judgment is reached only by a `from: leader` caller with an empty se
 from guildcore.adapters import git as G
 from guildcore.records import audit as AU
 from guildcore.records import loopback as LB
-from workflows.dev.stages.base import NEEDS_HUMAN, StageResult, fail, pause
+from guildcore.records import markers
+from workflows.dev.stages.base import NEEDS_HUMAN, StageResult, fail, pause, records
 
 
 def _record(p, comments=None):
-    return LB.from_comments(comments if comments is not None else p.gh.comments(p.issue))
+    return LB.from_comments(comments if comments is not None else records(p))
 
 
 def _sig(signature):
@@ -101,7 +102,7 @@ def run(p, stage, from_, reason, signature, decided_human=False, current_label=N
     try:                                                                   # step 5
         p.writer.append_block(
             p.issue, LB.NAME, insert=lambda body: LB.append(body, block),
-            present=lambda body: block in body,
+            present=lambda body: block in body or _same_pending(body, from_, reason, sig, decided_human),
             new_comment=lambda: LB.render_new_record(block),
             count=lambda body: len(LB.LoopbackRecord.parse(body).numbered()))
     except GhWriteError as e:
@@ -109,6 +110,20 @@ def run(p, stage, from_, reason, signature, decided_human=False, current_label=N
             raise
         return fail(p, stage, "loop-back record not written", "defect")
     return move_label(p, label, decided_human)                             # steps 6–7
+
+
+def _same_pending(body, from_, reason, sig, decided_human):
+    """K2-m5: a resumed write must not append a twin — the latest active block, unconsumed, with
+    the same from/reason/signature/decided IS this loop-back (its `at:` differs)."""
+    try:
+        b = LB.LoopbackRecord.parse(body).latest_active()
+    except ValueError:
+        return False
+    if b is None or b.has("consumed"):
+        return False
+    return (b.get("from") == from_ and markers.unescape(b.get("reason") or "") == " ".join(reason.split()) and
+            LB.signature_set(b.get("signature") or "") == LB.signature_set(sig) and
+            (b.get("decided") == "human") == bool(decided_human))
 
 
 def move_label(p, label, decided_human):

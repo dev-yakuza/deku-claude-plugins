@@ -165,7 +165,7 @@ class DecisionWriter(object):
         self.clock = clock
 
     def _comments(self):
-        return self.w.read.comments(self.issue)
+        return markers.trusted(self.w.read.comments(self.issue))
 
     def _log(self):
         return DecisionLog.load(self._comments())

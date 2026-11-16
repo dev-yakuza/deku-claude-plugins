@@ -39,7 +39,7 @@ def role_spec(call, issue, worktree, config, base=None, branch=None, unattended=
     return RR.RoleSpec(call.role, call.task, prompt(call, issue), issue, call.stage, call.step, worktree,
                        model, persona=(per.body if per else ""), inputs=call.inputs, base=base,
                        branch=branch, attempt=call.attempt,
-                       result_schema=RESULT_SCHEMAS.get(call.schema_role) if call.role != "designer" else None,
+                       result_schema=call.schema or (RESULT_SCHEMAS.get(call.schema_role) if call.role != "designer" else None),
                        allowed_status=call.allowed_status or RR.R.STATUSES,
                        language=getattr(config, "language", "en"), unattended=unattended,
                        toolchain=("test",) if call.role in ("tester", "qa") else ())
@@ -57,8 +57,12 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         sb = S.role_sandbox(owner if owner in S.WRITER_ROLES else "%s-verify" % owner, worktree, run_dir,
                             issue, toolchain=True)
         if extra_write:
-            sb = dict(sb, filesystem=dict(sb.get("filesystem") or {}, allowWrite=list(
-                (sb.get("filesystem") or {}).get("allowWrite") or []) + [x.rstrip("/") + "/**" for x in extra_write]))
+            fs = dict(sb.get("filesystem") or {})
+            fs["allowWrite"] = list(fs.get("allowWrite") or []) + [x.rstrip("/") + "/**" for x in extra_write]
+            if os.path.realpath(cwd) != os.path.realpath(worktree):
+                # K2-B4: the temp tree symlinks ignored dirs of the MAIN worktree — read-only here
+                fs["denyWrite"] = list(fs.get("denyWrite") or []) + [os.path.abspath(worktree) + "/**"]
+            sb = dict(sb, filesystem=fs)
         env = C.child_env(root_env, {}, role_dir=run_dir)
         r = CH.run_command(cmds, timeout_s, cwd=cwd, env=env, journal=journal, who="check-%s" % owner,
                            sandbox=sb, tmp=os.path.join(run_dir, "tmp"))

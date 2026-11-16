@@ -134,6 +134,11 @@ class GhWriter(object):
             return bool(tag) and any(tag in (x.get("body") or "") for x in self.read.issue_search(tag))
         return False
 
+    def _records(self, issue):
+        """Record candidates only (K2-M5): never PATCH a stranger's comment that carries a marker."""
+        own = self.journal.own_comment_ids() if self.journal is not None else ()
+        return markers.trusted(self.read.comments(issue), own)
+
     def _find_comment(self, issue, marker, sha):
         for c in self.read.comments(issue):
             b = markers.body_of(c)
@@ -169,7 +174,7 @@ class GhWriter(object):
         body → no write. Returns (comment_id, changed)."""
         if markers.first_line_marker(body) is None:
             raise ValueError("an engine comment's first line must be a Guild marker (CR-m2)")
-        cur = markers.find(self.read.comments(issue), name, pick=pick)
+        cur = markers.find(self._records(issue), name, pick=pick)
         if cur is None:
             return self.create_comment(issue, body)["id"], True
         if markers.body_of(cur) == body:
@@ -186,7 +191,7 @@ class GhWriter(object):
         write (re-checked right before the PATCH; moved → recompute, retry once);
         `new_comment() -> body` when no comment exists yet. Returns comment id."""
         for attempt in (1, 2):
-            comments = self.read.comments(issue)
+            comments = self._records(issue)
             cur = markers.find(comments, name, pick="lowest")
             if cur is None:
                 if new_comment is None:

@@ -37,6 +37,12 @@
      },
      "evidence": {
       "type": "string"
+     },
+     "same_as": {
+      "type": [
+       "string",
+       "null"
+      ]
      }
     }
    }

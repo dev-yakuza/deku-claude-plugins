@@ -16,7 +16,7 @@
 #   • the procedure replay's comparison harness on recorded fixtures.
 # No test calls `claude`, a model or GitHub (a failing `gh` is first on PATH).
 #
-# Usage: bash plugins/guild-plugin/tests/engine_k1_test.sh
+# Usage: bash plugins/guild-plugin/tests/engine_k2_test.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ENGINE="$HERE/../skills/gld/engine/gld_engine.py"
@@ -43,7 +43,7 @@ if [ "$RC" -ne 0 ]; then
 fi
 echo "engine K2: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when tests are added on purpose.
-ENGINE_K2_MIN_TESTS=91
+ENGINE_K2_MIN_TESTS=127
 if [ "$((PASS + FAIL))" -lt "$ENGINE_K2_MIN_TESTS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${ENGINE_K2_MIN_TESTS}건)."
   exit 1

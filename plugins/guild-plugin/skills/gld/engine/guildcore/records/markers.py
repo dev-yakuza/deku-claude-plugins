@@ -46,6 +46,28 @@ def find(comments, name, pick="lowest"):
     return sorted(hits, key=lambda c: c.get("id") or 0)[0]
 
 
+TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")
+
+
+def trusted(comments, own_ids=(), associations=TRUSTED):
+    """K2-M5: the comments a RECORD may come from — written by the engine (journaled id), or by
+    someone with write access (`author_association` OWNER/MEMBER/COLLABORATOR). A marker in a
+    drive-by comment (NONE, CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR …) is not a record. A comment
+    without the field (fixtures, legacy reads) is kept."""
+    own = set(str(x) for x in own_ids or ())
+    out = []
+    for c in comments or []:
+        a = c.get("author_association")
+        if a is None or a in associations or str(c.get("id")) in own:
+            out.append(c)
+    return out
+
+
+def untrusted_markers(comments, own_ids=(), associations=TRUSTED):
+    keep = set(id(c) for c in trusted(comments, own_ids, associations))
+    return [c for c in comments or [] if id(c) not in keep and "<!-- guild:" in body_of(c)]
+
+
 def first_line_marker(body):
     """The marker name on line 1 (`needs-human`, `note`, …) or None."""
     m = _FIRST.match(clean((body or "").split("\n", 1)[0]))

@@ -40,13 +40,14 @@ class RoleCall(object):
     """What a stage asks of a role. The real port builds a guildcore.roles.runner.RoleSpec."""
 
     def __init__(self, role, task, stage, step, inputs=None, addendum=None, schema_role=None,
-                 allowed_status=None, attempt=1):
+                 allowed_status=None, attempt=1, schema=None):
         self.role, self.task, self.stage, self.step = role, task, stage, step
         self.inputs = inputs or {}
         self.addendum = addendum
         self.schema_role = schema_role or role
         self.allowed_status = allowed_status
         self.attempt = attempt
+        self.schema = schema              # a task-narrowed result.json schema (else the §5.2 role's)
 
 
 class StageResult(object):
@@ -200,6 +201,31 @@ def transition(p, entry, to, extra_add=()):
     p.writer.labels_apply(p.issue, add=["guild:" + to] + list(extra_add), remove=remove)
 
 
+# ---- records (K2-M5) ----------------------------------------------------------------------------
+
+def records(p, issue=None):
+    """The comments records may come from: engine-written or by write-access authors."""
+    own = p.journal.own_comment_ids() if p.journal is not None else ()
+    return markers.trusted(p.gh.comments(issue or p.issue), own)
+
+
+def note_untrusted(p, stage):
+    """Each marker-carrying comment by a non-member is ignored as a record — noted once."""
+    own = p.journal.own_comment_ids() if p.journal is not None else ()
+    raw = p.gh.comments(p.issue)
+    bad = markers.untrusted_markers(raw, own)
+    if not bad:
+        return []
+    noted = set(b.get("refs") for b in DecisionLog.load(markers.trusted(raw, own)).blocks
+                if b.get("point") == "ignored_marker_comment")
+    for c in bad:
+        if str(c.get("id")) not in noted:
+            record_code(p, stage, "ignored_marker_comment", "ignored", refs=str(c.get("id")),
+                        reason="marker comment by %s (%s) is not a record" % (
+                            (c.get("user") or {}).get("login"), c.get("author_association")))
+    return bad
+
+
 # ---- decisions ------------------------------------------------------------------------------
 
 def digest(*parts):
@@ -238,7 +264,7 @@ def pending_answer(p, stage, kind, comments=None):
     """A human answer to this stage's `kind` question that has not been applied yet:
     (pending_block, resolution_block) or (None, None). Applied = a later `point: applied`
     block whose `refs` names the resolution (durable, survives a lost journal)."""
-    log = DecisionLog.load(comments if comments is not None else p.gh.comments(p.issue))
+    log = DecisionLog.load(comments if comments is not None else records(p))
     applied = set(b.get("refs") for b in log.blocks if b.get("point") == "applied")
     for blk in reversed(log.blocks):
         if blk.get("kind") != kind or blk.get("stage") != stage or blk.get("status") != "pending-human":

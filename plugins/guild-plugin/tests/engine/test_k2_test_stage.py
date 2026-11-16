@@ -248,14 +248,13 @@ class Coverage(unittest.TestCase):
         self.assertEqual(r.kind, "LOOPBACK")
         self.assertEqual(h.captures, [])                       # unsure-derived uncovered: no capture
         out = h.body_with("test:output")
-        self.assertIn("no non-trivial assertion", out)
+        self.assertIn("no reachable non-trivial assertion", out)
 
-    def test_no_ac_ids_is_an_upstream_defect_pause(self):
+    def test_no_ac_ids_uses_tester_covers_not_a_pause(self):
         h = green_harness(self)
         h.write_file("docs/specs/7/test-cases.md", "nothing here\n")
         r = T.run(h.p)
-        self.assertEqual(r.kind, "PAUSE")
-        self.assertIn("no AC / test-case ids", r.token())
+        self.assertEqual(r.kind, "ADVANCE")
 
     def test_case_ids(self):
         self.assertEqual(T.case_ids("| C1 | a |\n- **C2** b\n### AC #3 x\n| TC-4 | y\n| foo |\n"),

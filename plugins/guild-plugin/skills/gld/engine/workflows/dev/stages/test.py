@@ -27,6 +27,7 @@ from guildcore import checks as CH
 from guildcore.checks import visual as V
 from guildcore.records import markers
 from guildcore.records import outputs as OUT
+from workflows.dev import cases as CS
 from workflows.dev import effective as EFF
 from workflows.dev import handoff as HO
 from workflows.dev import judging as JG
@@ -37,7 +38,6 @@ from workflows.dev.stages import render as R
 STAGE = "test"
 EVIDENCE = "test-evidence:step-1"
 CEILING_S = 3600
-CASE_RE = re.compile(r"^(?:\s*[|#*\-]+\s*)*(?:\*\*)?\b(AC ?#?\d+|TC-?\d+|C\d+)\b")
 # H§C:292 keyword pre-filter (MJ-DWC only when an input-reading word is near a partial word)
 DWC_RE = re.compile(r"(읽|read|load|열).{0,24}(일부|부분|part|잘|truncat|cut)|(일부|부분|part(ial)?ly?|truncat|잘린).{0,24}(읽|read|load)", re.I)
 RUNNER_PAUSE = "테스트 요약 형식을 읽지 못함 — commands.test_summary 를 설정하세요"
@@ -55,16 +55,7 @@ def commands_list(v):
 
 
 def case_ids(text):
-    """AC / test-case ids of test-cases.md (`AC #n`, `TC-n`, `C<n>` at a row/bullet/heading
-    start), in order, distinct; `(safety net)` cases included."""
-    out = []
-    for ln in (text or "").split("\n"):
-        m = CASE_RE.match(ln)
-        if m:
-            k = re.sub(r"\s+", " ", m.group(1))
-            if k not in out:
-                out.append(k)
-    return out
+    return CS.case_ids(text)
 
 
 def deferred_cases(evidence_body):
@@ -98,12 +89,16 @@ def run(p, only=None, config_present=True):
     e = B.enter(p, STAGE, config_present, only)
     if isinstance(e, B.StageResult):
         return e
-    comments = p.gh.comments(p.issue)
+    B.note_untrusted(p, STAGE)
+    comments = B.records(p)
     cfg = cfg_dict(p)
     if e.recheck:
         return _recheck(p, cfg)
     blk = LP.interrupted(comments, "guild:test", e.labels)                 # T0.9
     if blk is not None:
+        q0, r0 = B.pending_answer(p, STAGE, "loopback", comments)
+        if r0 is not None and (blk.get("decided") or "") == "human":
+            B.mark_applied(p, STAGE, r0)                  # the answer's block landed before a crash
         return LP.finish_interrupted(p, STAGE, blk)
     q, res = B.pending_answer(p, STAGE, "loopback", comments)
     if res is not None:
@@ -192,7 +187,7 @@ def run(p, only=None, config_present=True):
     if env_suspect:
         return _env_pause(p, cfg, images)
     if passed:
-        bad = HO.test_to_qa(p.gh.comments(p.issue), cfg)
+        bad = HO.test_to_qa(B.records(p), cfg)
         if bad:
             return B.fail(p, STAGE, "test→qa handoff check failed on the engine's own output — %s" % "; ".join(bad))
         B.transition(p, e, "qa")
@@ -246,39 +241,76 @@ def _tester(p, cfg, tc_rel, r, s_line, deferred, visual_cases, vrun, addendum=No
     return res
 
 
-def _excerpts(p, covers):
+def _excerpts(p, covers, cfg, tool_mode=False):
+    """The cited tests' OWN blocks (no-elide) — or, in tool mode (K2-M4: the blocks do not fit the
+    brief), `path:line` pointers the judge reads with Read/Grep."""
+    runner = EFF.runner_of(cfg)
     parts = []
     for c in covers:
         path, name = EFF.parse_test_ref(c.get("test"))
         txt = p.read_file(path) if path else None
-        if txt is not None:
-            parts.append("### %s (AC %s)\n%s" % (c.get("test"), c.get("ac"), EFF.excerpt(txt, name)))
+        tb = EFF.test_body(txt, name, runner) if txt is not None else None
+        if tb is None:
+            parts.append("### %s (AC %s)\n(body not found)" % (c.get("test"), c.get("ac")))
+        elif tool_mode:
+            parts.append("- %s (AC %s): %s:%d-%d" % (c.get("test"), c.get("ac"), path, tb[1],
+                                                     tb[1] + tb[0].count("\n")))
+        else:
+            parts.append("### %s (AC %s) — %s:%d\n%s" % (c.get("test"), c.get("ac"), path, tb[1],
+                                                         "\n".join(tb[0].split("\n")[:EFF.EXCERPT_CAP])))
     return "\n\n".join(parts) or "(no excerpt — cited test files not found)"
 
 
-def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_rel, deferred):
-    acs = [a for a in case_ids(test_cases) if a not in deferred]
-    if not acs:                 # an upstream gap (design→execute handoff), not a test failure
-        line = "%s has no AC / test-case ids — coverage cannot be judged" % tc_rel
-        return B.pause(p, STAGE, "defect", line, line)
-    attempt = 0
-    while True:
-        attempt += 1
+def merge_covers(old, new, weak):
+    """K2-M2: a repair answers for the WEAK ids only — their entries are replaced, every other
+    AC keeps the first mapping (a repair that touches a non-weak AC is ignored)."""
+    keep = [c for c in old if c.get("ac") not in weak]
+    return keep + [c for c in (new or []) if c.get("ac") in weak]
+
+
+def _judge_once(p, cfg, tc_rel, test_cases, covers, ledger, raw, attempt):
+    from guildcore.judges.runner import BriefTooLarge
+    for tool_mode in (False, True):
         brief = [("ac", "AC / test cases (%s):\n%s" % (tc_rel, test_cases or "(test-cases.md missing)")),
                  ("covers", "Tester covers:\n" + "\n".join("- %s ← %s (%s)" % (c.get("ac"), c.get("test"), c.get("kind"))
                                                            for c in covers)),
-                 ("excerpts", _excerpts(p, covers)),
+                 ("excerpts", ("Read these test blocks with the Read tool:\n" if tool_mode else "") +
+                  _excerpts(p, covers, cfg, tool_mode)),
                  ("visual", "Visual ledger:\n%s" % (ledger.text if ledger else "none")),
                  ("raw", "Raw run tail:\n" + "\n".join((raw or "").split("\n")[-80:]))]
-        d = p.judge(JG.spec(p, "TEST", brief, STAGE, "T3.4", cwd=p.root))
+        try:
+            return p.judge(JG.spec(p, "TEST", brief, STAGE, "T3.4", cwd=p.root,
+                                   point="TEST" if attempt == 1 else "TEST:repair")), tool_mode
+        except BriefTooLarge:
+            continue
+    return None, True
+
+
+def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_rel, deferred):
+    acs = [a for a in CS.case_ids(test_cases) if a not in deferred]
+    ac_source = "test-cases"
+    if not acs:                 # B2: legacy proceeds; the design→execute gap is recorded, not a stop
+        acs = sorted(set(c.get("ac") for c in covers if c.get("ac")) - set(deferred))
+        ac_source = "tester" if acs else "none"
+    if not acs:
+        B.record_code(p, STAGE, "TEST", "unjudged", reason="%s has no case ids and the tester mapped none" % tc_rel,
+                      refs="T-AC-COVER", extra={"ac_source": "none", "grade": "trigger"})
+        return [], [], [], [], "", {"unsure_acs": []}
+    attempt, weak, outcomes, meta, d = 0, [], {}, {}, None
+    while True:
+        attempt += 1
+        d, tool_mode = _judge_once(p, cfg, tc_rel, test_cases, covers, ledger, raw, attempt)
+        if d is None:
+            return B.fail(p, STAGE, "brief too large for TEST")
         per = {a.get("id"): a for a in d.fields.get("ac") or []}
         verdicts = {ac: (per.get(ac) or {}).get("verdict", "unsure") for ac in acs}
         eff = [ac for ac, v in verdicts.items() if v == "effective"]
-        outcomes, src = EFF.run(p, cfg, eff, _covers_by_ac(covers), p.base, p.impl_files)
+        outcomes, meta = EFF.run(p, cfg, eff, _covers_by_ac(covers), p.base, p.impl_files)
         for ac, oc in outcomes.items():
-            if oc.result != "pass":
+            if oc.result in ("fail", "unsure"):
                 verdicts[ac] = "unsure"
         weak = [ac for ac, v in verdicts.items() if v in ("not_covering", "unsure")]
+        _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_mode)
         if weak and attempt == 1:
             rep = p.run_role(B.RoleCall("tester", "repair-mapping", STAGE, "T3.4", attempt=2,
                                         inputs={"weak-acs.txt": "\n".join(weak)},
@@ -287,7 +319,7 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
             o = B.role_outcome(p, STAGE, "tester", rep)
             if o is not None:
                 return o
-            covers = rep.extras.get("covers") or covers
+            covers = merge_covers(covers, rep.extras.get("covers"), set(weak))
             continue
         break
     vac = [ac for ac, v in verdicts.items() if v == "vacuous"]
@@ -295,16 +327,33 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
     uncovered = sorted(ac for ac, v in verdicts.items() if v != "effective")
     rows_unc = [r_.get("row") for r_ in d.fields.get("visual_rows") or [] if r_.get("verdict") != "covered"] \
         if visual_cases else []
-    coverage = [(ac, verdicts[ac], [c.get("test") for c in _covers_by_ac(covers).get(ac, [])],
+    coverage = [(ac, verdicts[ac] if not (ac in outcomes and outcomes[ac].result == "unverified")
+                 else "effective (unverified)",
+                 [c.get("test") for c in _covers_by_ac(covers).get(ac, [])],
                  (outcomes[ac].why if ac in outcomes else (per.get(ac) or {}).get("why")))
                 for ac in acs]
     checks_field = ",".join(o_.as_field() for o_ in outcomes.values())
-    choice = "effective:%s;uncovered:%s" % (",".join(sorted(eff)) or "none", ",".join(uncovered) or "none")
-    B.record_judgment(p, STAGE, "TEST", "T-AC-COVER,T-VACUOUS,T-VISUAL-COV", d, choice=choice,
-                      reason=d.fields.get("reason"),
-                      extra={"checks": checks_field or None, "impl_source": src,
-                             "unsure_acs": ",".join(unsure_acs) or None})
     return uncovered, vac, coverage, [x for x in rows_unc if x], checks_field, {"unsure_acs": unsure_acs}
+
+
+def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_mode):
+    """K2-M3: every SJ-TEST call is a decision block; per AC the cited test, its assertion line,
+    the re-run command and class (§9.5 citation material); `unverified` checks flag the
+    decision for the human sample (`grade: trigger` — K2-B3)."""
+    eff = sorted(ac for ac, v in verdicts.items() if v == "effective")
+    unc = sorted(ac for ac, v in verdicts.items() if v != "effective")
+    unver = [o for o in outcomes.values() if o.result == "unverified"]
+    detail = ";".join("%s|%s|%s|%s|%s" % (o.ac, o.test, o.line, o.cmd, o.kind) for o in outcomes.values())
+    B.record_judgment(p, STAGE, "TEST" if attempt == 1 else "TEST:repair", "T-AC-COVER,T-VACUOUS,T-VISUAL-COV", d,
+                      choice="effective:%s;uncovered:%s" % (",".join(eff) or "none", ",".join(unc) or "none"),
+                      reason=d.fields.get("reason"),
+                      extra={"attempt": attempt, "checks": ",".join(o.as_field() for o in outcomes.values()) or None,
+                             "check_detail": detail or None, "impl_source": meta.get("impl_source"),
+                             "impl_rejected": ",".join(meta.get("rejected") or []) or None,
+                             "base_source": meta.get("base_source"), "ac_source": ac_source,
+                             "brief": "tool" if tool_mode else None,
+                             "unsure_acs": ",".join(ac for ac, v in verdicts.items() if v == "unsure") or None,
+                             "grade": "trigger" if unver or ac_source != "test-cases" else None})
 
 
 def _vis_env(p, cfg, images):
@@ -338,10 +387,11 @@ def _env_pause(p, cfg, images):
     env = (cfg.get("visual") or {}).get("env") or "visual.env"
     text = "visual failures look environmental — %s vs %s; %d images" % (env, p.host or "this host", len(images))
     g = DR.gather(p.gh, p.issue)
-    kind, dline, _d = DR.judge(p, STAGE, g, text, "T3.3")
+    kind, dline, dd = DR.judge(p, STAGE, g, text, "T3.3")
+    if dd is not None:
+        B.record_judgment(p, STAGE, "DIRECTIVE", "J-H1,Q-DIRECTIVE", dd, reason=dline)
     if not p.unattended:
-        q = ASK.Question("visual-env", text, [{"token": "loop-back", "label": "loop back"},
-                                              {"token": "stop", "label": "stop"}])
+        q = ASK.Question("visual-env", text, [{"token": "ok", "label": "ok — I will look"}])
         return B.ask(p, STAGE, q, text)
     return B.pause(p, STAGE, "env", text, "visual environment", env_key="other", directive_line=dline)
 
@@ -350,7 +400,7 @@ def ask_loopback(p, stage, output_name, reason, sig, prefix):
     """Attended asking-first: readings only, `loopback-*` lines into the stage output, then the
     `loopback` question (the human decides — no recommendation)."""
     rd = LP.readings(p, stage, sig)
-    cur = OUT.find(p.gh.comments(p.issue), output_name)
+    cur = OUT.find(B.records(p), output_name)
     if cur is not None:
         p.writer.upsert_comment(p.issue, output_name, R.add_loopback_lines(cur.body, output_name, reason, sig))
     line = LP.ask_line(prefix, rd)
@@ -362,15 +412,18 @@ def ask_loopback(p, stage, output_name, reason, sig, prefix):
 def apply_answer(p, stage, output_name, q, res, comments):
     """The human's loop-back answer: `loop-back` → procedure steps 1, 4–7 with `decided: human`
     (reason/signature from the output's `loopback-*` lines); `stop` → PAUSE. Owes no captures."""
-    B.mark_applied(p, stage, res)
     if res.get("choice") != "loop-back":
+        B.mark_applied(p, stage, res)
         return B.StageResult(B.StageResult.PAUSE, cause="stopped by the human (%s)" % q.id)
     so = OUT.find(comments, output_name)
     reason = markers.unescape(so.loopback_reason or "") if so else ""
     sig = markers.unescape(so.loopback_signature or "") if so else ""
     if not reason or not sig:
         return B.fail(p, stage, "loop-back answer without loopback-reason/-signature lines in %s" % output_name)
-    return LP.run(p, stage, stage, reason, sig, decided_human=True)
+    out = LP.run(p, stage, stage, reason, sig, decided_human=True)
+    if out.kind == B.StageResult.LOOPBACK:              # K2-m5: marked only after the block landed
+        B.mark_applied(p, stage, res)
+    return out
 
 
 def _recheck(p, cfg):

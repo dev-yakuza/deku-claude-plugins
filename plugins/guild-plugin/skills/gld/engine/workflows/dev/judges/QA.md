@@ -12,3 +12,5 @@ From the qa report, the designer verdict, the quality bar, the AC and the test o
   test-writable gaps.
 - `quality_bar_met`: `yes` | `no` | `unsure` against the quality bar excerpt.
 - `verdict`: `pass` (no blocking defect, quality bar met) | `block` | `unsure`.
+- `same_as`: when a defect is the SAME defect an earlier QA loop-back recorded (listed in the brief
+  with its signature elements), copy that element here; otherwise leave it null.

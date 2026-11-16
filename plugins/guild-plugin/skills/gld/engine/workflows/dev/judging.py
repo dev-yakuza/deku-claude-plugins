@@ -16,6 +16,7 @@ System = `judges/leader-core.md` + the repo leader's `## 프로젝트 특화`/`[
 
 import json
 import os
+import re
 
 from guildcore.judges.runner import JudgeSpec
 
@@ -29,7 +30,11 @@ UNSURE = {"TEST": "gap", "QA": "block", "VIS-ENV": "env_suspect", "DIRECTIVE": "
 BUDGET = {"SJ": 0.5, "MJ": 0.05}
 CAPS = {"SJ": 25000, "MJ": 6000}
 NO_ELIDE = {"TEST": ("excerpts",), "DIRECTIVE": ("comments",)}
-HEDGES = ("권장", "가능하면", "여유되면", "미검증(참고)", "if possible", "recommended", "optional")
+HEDGES = ("권장", "가능하면", "여유되면", "미검증(참고)")
+# K2-m1: removal only where the hedge is a FRAME — parenthesised, or leading the item — never a
+# substring of a meaningful word ("권장 설정이 표시되는지" stays; the lint re-ask handles wording)
+_HEDGE_PAREN = re.compile(r"\s*\((?:%s|optional|if possible)\)" % "|".join(re.escape(h) for h in HEDGES))
+_HEDGE_LEAD = re.compile(r"^(?:%s)\s*[:：]?\s+" % "|".join(re.escape(h) for h in HEDGES))
 
 
 def _read(name):
@@ -76,9 +81,7 @@ def hedged(items):
 
 
 def strip_hedges(item):
-    out = item
-    for h in HEDGES:
-        out = out.replace("(%s)" % h, "").replace(h, "")
+    out = _HEDGE_LEAD.sub("", _HEDGE_PAREN.sub("", item))
     return " ".join(out.split())
 
 

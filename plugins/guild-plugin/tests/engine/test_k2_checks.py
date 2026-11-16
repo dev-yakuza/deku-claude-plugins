@@ -44,14 +44,16 @@ class Effective(unittest.TestCase):
 
     def test_reacting_assertion_passes(self):
         h, base = self.mk(IMPL_BASE, TEST_OK)
-        oc, src = self.run_check(h, base)
-        self.assertEqual((oc.result, src), ("pass", "derived"), oc.why)
+        oc, meta = self.run_check(h, base)
+        self.assertEqual((oc.result, meta["impl_source"]), ("pass", "derived"), oc.why)
+        self.assertEqual(oc.cmd, "python3 -m unittest -v test_calc.T.test_add")
+        self.assertEqual(oc.line, "test_calc.py:6")
         self.assertEqual(git(h.p.root, "worktree", "list").count("\n"), 0)     # temp tree removed
 
-    def test_import_error_after_revert_is_unsure_not_pass(self):
+    def test_import_error_after_revert_is_unverified_not_pass(self):
         h, base = self.mk(None, TEST_OK)                                       # calc.py is new → removed
         oc, _ = self.run_check(h, base)
-        self.assertEqual((oc.result, oc.kind), ("unsure", "load_error"), oc.why)
+        self.assertEqual((oc.result, oc.kind), ("unverified", "load_error"), oc.why)
 
     def test_still_passing_after_revert_is_unsure(self):
         h, base = self.mk(IMPL_BASE, TEST_WEAK)
@@ -72,8 +74,8 @@ class Effective(unittest.TestCase):
 
     def test_given_impl_files_used(self):
         h, base = self.mk(IMPL_BASE, TEST_OK)
-        oc, src = self.run_check(h, base, impl=["calc.py"])
-        self.assertEqual((oc.result, src), ("pass", "result"))
+        oc, meta = self.run_check(h, base, impl=["calc.py"])
+        self.assertEqual((oc.result, meta["impl_source"]), ("pass", "result"))
 
     def test_ignored_build_dirs_linked_into_temp_tree(self):
         h, base = self.mk(IMPL_BASE, TEST_OK)
@@ -88,10 +90,9 @@ class Effective(unittest.TestCase):
         self.assertEqual(EFF.parse_test_ref("test/a_test.dart::shows title"), ("test/a_test.dart", "shows title"))
         self.assertEqual(EFF.parse_test_ref("«shows» (test/a_test.dart)"), ("test/a_test.dart", "shows"))
         self.assertEqual(EFF.single_command(CFG, "flutter", "test/a_test.dart", "x y"),
-                         "flutter test test/a_test.dart --plain-name 'x y'")
-        self.assertTrue(EFF.has_assertion("expect(find.text('a'), findsOneWidget);", "flutter"))
-        self.assertFalse(EFF.has_assertion("expect(true, isTrue);", "flutter"))
-        self.assertFalse(EFF.has_assertion("expect(x).toBeTruthy();", "jest"))
+                         "flutter test test/a_test.dart --name '(^| )x\\ y$'")
+        self.assertTrue(EFF.has_assertion("expect(find.text('a'), findsOneWidget);", "flutter")[0])
+        self.assertFalse(EFF.has_assertion("expect(true, isTrue);", "flutter")[0])
 
 
 class Parsers(unittest.TestCase):

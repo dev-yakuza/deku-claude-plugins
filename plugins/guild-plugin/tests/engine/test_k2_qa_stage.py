@@ -138,7 +138,8 @@ class QaDefects(unittest.TestCase):
         r = Q.run(h.p, diff_paths=[])
         self.assertEqual(r.token(), "OK LOOPBACK: execute")
         b = LB.from_comments(h.gh.comments(7)).latest_active()
-        self.assertEqual((b.get("from"), b.get("signature")), ("qa", "D1"))
+        self.assertEqual(b.get("from"), "qa")
+        self.assertEqual(b.get("signature"), ",".join(Q.qa_signature([{"line": "저장 후 목록이 갱신되지 않음"}], [])))
         self.assertEqual(h.labels(), ["guild:execute"])
         self.assertIn(("correction", "qa", "qa", "저장 후 목록이 갱신되지 않음", True), h.captures)
 
@@ -162,7 +163,7 @@ class QaDefects(unittest.TestCase):
         self.assertEqual(r.kind, "ASK")
         self.assertTrue(r.line.startswith("QA found 저장 후 목록이 갱신되지 않음; loop back to execute?"))
         so = OUT.find(h.gh.comments(7), "qa:output")
-        self.assertEqual(so.loopback_signature, "D1")
+        self.assertTrue(so.loopback_signature.startswith("qa:"))
 
     def test_designer_blocked_is_a_blocking_defect(self):
         h = qa_harness(self)

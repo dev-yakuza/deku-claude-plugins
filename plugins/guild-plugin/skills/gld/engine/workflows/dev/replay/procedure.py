@@ -530,7 +530,7 @@ def build(ep, leg, cfg, work):
     tout = leg.writes.get("test:output") or ep.state["issue"].get("test:output") or ""
     acs = _ac_ids(tout)
     _write(root, "docs/specs/%d/test-cases.md" % n, "\n".join("| %s | case |" % a for a in acs) + "\n")
-    _write(root, "test/replay_test.dart", "void main() { test('t', () { expect(1, 1); }); }\n")
+    _write(root, "test/replay_test.dart", "void main() { test('t', () { expect(subject(), 1); }); }\n")
     if "followups" in leg.writes or ep.state["issue"].get("followups"):
         _write(root, "docs/specs/%d/skeleton.md" % n, "# skeleton\n")
     sig = markers.unescape(lb_blk.get("signature") or "") if lb_blk else None
