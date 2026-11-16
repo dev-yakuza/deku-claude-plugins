@@ -247,15 +247,19 @@ class GhWriter(object):
     def pr_body_splice(self, pr, name, block):
         """Splice one marker block of a PR body; bytes outside the markers are preserved. An
         unreadable body (two blocks, unclosed marker) raises ValueError — never written back."""
+        return self.pr_body_edit(pr, lambda body: markers.splice(body, name, block))
+
+    def pr_body_edit(self, pr, fn):
+        """`fn(current body) -> new body`, re-applied to the CURRENT body on every try (a human
+        edit between tries survives — INV4, K1-M1). No change → no write. Returns changed."""
         body = self.read.pr(pr).get("body") or ""
-        new = markers.splice(body, name, block)
+        new = fn(body)
         if new == body:
             return False
         want = {"body": new}
 
         def do():
-            # re-splice into the CURRENT body: a human edit between tries survives (INV4, M1)
-            want["body"] = markers.splice(self.read.pr(pr).get("body") or "", name, block)
+            want["body"] = fn(self.read.pr(pr).get("body") or "")
             return self.write.patch_pr_body(pr, want["body"])
         self._perform("pr:body", pr, do,
                       lambda r: (self.read.pr(pr).get("body") or "") == want["body"],

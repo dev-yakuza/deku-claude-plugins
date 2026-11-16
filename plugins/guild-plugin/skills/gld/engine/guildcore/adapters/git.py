@@ -36,6 +36,13 @@ def run(cwd, *args, check=True, input=None, timeout=None):
     return p.stdout
 
 
+def ok(cwd, *args):
+    """True when `git <SAFE_ARGS> <args>` exits 0 (an existence probe: `cat-file -e rev:path`)."""
+    p = subprocess.run(["git"] + list(SAFE_ARGS) + list(args), cwd=cwd, env=env(),
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return p.returncode == 0
+
+
 def remote_names(cwd):
     return [x for x in run(cwd, "remote", check=False).decode().split() if x]
 

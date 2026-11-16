@@ -268,8 +268,61 @@ def _go(raw):
     return Summary("go", passed, len(names) or len(fails), 0, names)
 
 
+def _unittest(raw):
+    """python -m unittest (K2: the TEST effective check's own fixtures, and stdlib projects)."""
+    m = re.search(r"^Ran (\d+) tests? in [\d.]+s\s*$", raw, re.M)
+    if not m:
+        return None
+    total = int(m.group(1))
+    f = re.search(r"^FAILED \(([^)]*)\)\s*$", raw, re.M)
+    failures = errors = 0
+    if f:
+        x = re.search(r"failures=(\d+)", f.group(1))
+        y = re.search(r"errors=(\d+)", f.group(1))
+        failures, errors = int(x.group(1)) if x else 0, int(y.group(1)) if y else 0
+    sk = re.search(r"skipped=(\d+)", raw)
+    names = re.findall(r"^(?:FAIL|ERROR): (\S+)", raw, re.M)
+    s = Summary("unittest", total - failures - errors, failures + errors, int(sk.group(1)) if sk else 0, names)
+    s.errors = errors
+    return s
+
+
 PARSERS = (("flutter", _flutter), ("dart", _flutter), ("jest", _jest), ("vitest", _vitest),
-           ("pytest", _pytest), ("go", _go))
+           ("pytest", _pytest), ("go", _go), ("unittest", _unittest))
+
+
+# K2 — R7J-m1: a failing re-run counts for the TEST `effective` check only when the runner
+# reports an ASSERTION / test failure; a collection, compile or import error is no evidence
+# that the assertion reacts to the code (it would fail with any edit) → `unsure`.
+LOAD_ERROR_RES = {
+    "flutter": (r"Failed to load", r"Compilation failed", r"\.dart:\d+:\d+: Error:", r"^Error: ",
+                r"Error: Couldn't resolve", r"Undefined name", r"isn't defined for the (class|type)"),
+    "jest": (r"Test suite failed to run", r"Cannot find module", r"SyntaxError", r"ReferenceError",
+             r"is not a function", r"is not a constructor", r"Failed to load url"),
+    "pytest": (r"ERROR collecting", r"errors? during collection", r"ImportError", r"ModuleNotFoundError",
+               r"SyntaxError", r"NameError", r"AttributeError: module"),
+    "go": (r"\[build failed\]", r"\[setup failed\]", r"undefined: ", r"cannot use ", r"no non-test Go files"),
+    "unittest": (r"ImportError", r"ModuleNotFoundError", r"SyntaxError", r"NameError",
+                 r"AttributeError: module", r"^ERROR: "),
+}
+LOAD_ERROR_RES["dart"] = LOAD_ERROR_RES["flutter"]
+LOAD_ERROR_RES["vitest"] = LOAD_ERROR_RES["jest"]
+
+
+def failure_kind(raw, runner=None, passed=None):
+    """`passed` | `assertion` | `load_error` | `unknown` for one (re-)run's raw output."""
+    s = parse_summary(raw, runner)
+    if s is None:
+        return "passed" if passed else "unknown"
+    rn = runner or s.runner
+    if s.failed == 0:
+        return "passed" if (s.passed > 0 or passed) else "unknown"
+    if getattr(s, "errors", 0) and s.failed == s.errors:
+        return "load_error"
+    for rx in LOAD_ERROR_RES.get(rn, ()):
+        if re.search(rx, raw or "", re.M):
+            return "load_error"
+    return "assertion"
 
 
 def parse_summary(raw, runner=None, config=None):
@@ -389,3 +442,6 @@ def process_tools_dir(home=None):
             with open(stamp, "w") as fh:
                 fh.write(want + "\n")
     return base
+
+
+from guildcore.checks.visual import visual_ledger  # noqa: E402,F401  (§2.0 interface: checks.visual_ledger)

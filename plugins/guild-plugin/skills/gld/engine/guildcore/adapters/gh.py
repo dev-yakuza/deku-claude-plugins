@@ -31,6 +31,9 @@ _READ_FORMS = (
     re.compile(r"^gh repo view "),
     re.compile(r"^gh api (--paginate )?repos/[^/ ]+/[^/ ]+/issues/\d+/(comments|timeline)( |$)"),
     re.compile(r"^gh pr view \d+ "),
+    # K2 (qa Step 2 `### PR CI`): the head commit's check-runs and a failed run's annotations
+    re.compile(r"^gh api (--paginate )?repos/[^/ ]+/[^/ ]+/commits/[0-9a-f]{7,40}/check-runs( |$)"),
+    re.compile(r"^gh api (--paginate )?repos/[^/ ]+/[^/ ]+/check-runs/\d+/annotations( |$)"),
 )
 _WRITE_FLAGS = re.compile(r"(^| )(-X|--method|-f|-F|--field|--raw-field|--input|"
                           r"--add-label|--remove-label|--body|--body-file)( |=|$)")
@@ -105,7 +108,18 @@ class GhCli(object):
 
     def pr(self, n):
         return json.loads(self._gh(["gh", "pr", "view", str(n), "--json",
-                                    "number,url,state,title,body,headRefName"] + self._repo_args()))
+                                    "number,url,state,title,body,headRefName,headRefOid"] + self._repo_args()))
+
+    def check_runs(self, sha):
+        """qa Step 2 step 2: `{id, name, conclusion, annotations}` per check-run of `sha`."""
+        out = self._gh(["gh", "api", "--paginate", "repos/%s/commits/%s/check-runs" % (self.owner_repo(), sha),
+                        "--jq", ".check_runs[] | {id, name, conclusion, annotations: .output.annotations_count}"])
+        return [json.loads(ln) for ln in out.split("\n") if ln.strip()]
+
+    def annotations(self, run_id):
+        out = self._gh(["gh", "api", "repos/%s/check-runs/%d/annotations" % (self.owner_repo(), int(run_id)),
+                        "--jq", ".[] | .message"])
+        return [ln for ln in out.split("\n") if ln.strip()]
 
     def issue_search(self, text, limit=50):
         out = self._gh(["gh", "issue", "list", "--state", "all", "--limit", str(limit),
@@ -174,6 +188,14 @@ class FakeGh(object):
             if int(p.get("number")) == int(n):
                 return dict(p)
         raise GhError("no pull request %s" % n)
+
+    def check_runs(self, sha):
+        self.calls.append(("check_runs", sha))
+        return list(self.fx.get("check_runs", {}).get(sha, []))
+
+    def annotations(self, run_id):
+        self.calls.append(("annotations", run_id))
+        return list(self.fx.get("annotations", {}).get(str(run_id), []))
 
     def issue_search(self, text, limit=50):
         self.calls.append(("issue_search", text))
