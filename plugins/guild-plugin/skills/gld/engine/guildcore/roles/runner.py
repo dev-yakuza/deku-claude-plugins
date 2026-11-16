@@ -27,6 +27,7 @@ repair or retry (§2.4 valve --now).
 import hashlib
 import os
 import shutil
+import time
 import uuid
 
 from guildcore import cost as COST
@@ -185,9 +186,12 @@ def _rule_matches(rule, sub):
     return sub == body
 
 
-def denial_class(cmd):
+def denial_class(cmd, deny=None):
+    """`forbidden` when the command matches a deny rule of the session (Q22/READONLY included —
+    K1-m3), else its §5.1 class."""
     c = " ".join((cmd or "").split())
-    if any(_rule_matches(r, c) for r in P.ALWAYS_DENY + P.GH_API_DENY_EXTRA):
+    rules = list(deny) if deny else list(P.ALWAYS_DENY + P.GH_API_DENY_EXTRA + P.ALWAYS_DENY_Q22)
+    if any(_rule_matches(r, c) for r in rules):
         return "forbidden"
     first = c.split(" ", 1)[0] if c else ""
     if first in P.C0_READ_SHELL:
@@ -201,11 +205,13 @@ def denial_class(cmd):
 
 class Runner(object):
     """Holds the adapters: `spawn(argv, env, cwd, stdin, stream_path, stderr_path, timeout_s,
-    on_start, halt_check) -> ProcResult` (default: adapters.claude.run_process) and the journal."""
+    on_start, halt_check) -> ProcResult` (default: adapters.claude.run_process) and the journal.
+    User and local settings are read ONCE here (`settings.Sources`, K1-B2)."""
 
     def __init__(self, journal=None, common_dir=None, parent_env=None, allow_local=False,
                  allowed_endpoints=(), spawn=None, halt_check=None, user_settings=None,
-                 claude=None, run_root_dir=None, version=None):
+                 claude=None, run_root_dir=None, version=None, clock=None, now=time.time,
+                 reap_strays=None):
         self.journal = journal
         self.common_dir = common_dir
         self.parent_env = dict(os.environ if parent_env is None else parent_env)
@@ -217,9 +223,27 @@ class Runner(object):
         self.claude = claude or C.claude_binary(self.parent_env)
         self.run_root_dir = run_root_dir
         self.version = version
+        self.clock = clock
+        self.now = now
+        self._sources = {}
+        # real runs reap strays by cwd; injected spawns (tests) do not unless given one
+        self.reap_strays = reap_strays if reap_strays is not None else (
+            C.reap_strays if spawn is None else None)
+
+    def sources(self, worktree):
+        if worktree not in self._sources:
+            self._sources[worktree] = S.Sources(self.user_settings, worktree, self.parent_env)
+        return self._sources[worktree]
+
+    def _iso(self):
+        if self.clock is not None:
+            return self.clock.now()
+        from guildcore.adapters.clock import Clock
+        return Clock().now()
 
     # -- one session ----------------------------------------------------------------------
-    def _session(self, spec, run_dir, rendered, env, stdin_text, tag, resume=None, session_id=None):
+    def _session(self, spec, run_dir, rendered, env, stdin_text, tag, timeout_s, resume=None,
+                 session_id=None):
         allow = rendered.settings["permissions"]["allow"]
         deny = rendered.settings["permissions"]["deny"]
         argv = C.role_argv(spec.model, spec.persona, allow, deny, run_dir, rendered.path,
@@ -231,25 +255,31 @@ class Runner(object):
             if self.journal is not None:
                 self.journal.record_pid(spec.who, rec["pid"], rec["pgid"], rec["start_time"],
                                         session_id=resume or session_id)
+        t0 = self.now()
         proc = self.spawn(argv, env, spec.worktree, stdin_text, stream_p, stream_p + ".stderr",
-                          spec.timeout_s, on_start, self.halt_check)
+                          max(1, timeout_s), on_start, self.halt_check)
+        if self.reap_strays:
+            # children the CLI's Bash tool detached from our group (K1-B5, real CLI) — before
+            # any post-role check reads the worktree
+            proc.strays = self.reap_strays([spec.worktree, run_dir], self.now() - t0 + 5)
         st = C.read_stream(stream_p)
         return proc, st
 
-    def _cost(self, spec, st, endpoint, persona_chars, brief_chars):
+    def _cost(self, spec, st, endpoint, persona_chars, brief_chars, session_kind):
         row = COST.from_result(st.result, issue=spec.issue, stage=spec.stage, step=spec.step,
                                who=spec.who, model=spec.model, tier=spec.tier, local=False,
                                attempt=spec.attempt, arm=spec.arm, experiment_id=spec.experiment_id,
                                kind=spec.kind, persona_chars=persona_chars, brief_chars=brief_chars,
-                               endpoint=endpoint, version=self.version)
+                               endpoint=endpoint, version=self.version, t=self._iso(),
+                               session_kind=session_kind, stream=st)
         if self.common_dir:
             COST.record(self.common_dir, row)
         return row
 
-    def _denials(self, spec, st):
+    def _denials(self, spec, st, deny):
         out = []
         for d in st.denial_records():
-            cls = denial_class(d.get("command")) if d.get("tool") == "Bash" else "tool:%s" % d.get("tool")
+            cls = denial_class(d.get("command"), deny) if d.get("tool") == "Bash" else "tool:%s" % d.get("tool")
             rec = {"role": spec.who, "command": d.get("command") or d.get("tool"), "class": cls,
                    "reason_type": d.get("reason_type")}
             out.append(rec)
@@ -259,85 +289,125 @@ class Runner(object):
 
     # -- the contract -------------------------------------------------------------------------
     def run_role(self, spec):
+        self._run(spec)
+        return self._last
+
+    def _run(self, spec):
         root = self.run_root_dir or run_root(spec.worktree, spec.issue, self.parent_env)
         run_dir = new_run_dir(root, spec.stage, spec.who)
         staged = stage_inputs(run_dir, spec.inputs)
+        src = self.sources(spec.worktree)
         rendered = S.render(spec.role, spec.task, worktree=spec.worktree, base=spec.base,
                             run_dir=run_dir, issue=spec.issue, toolchain=spec.toolchain,
-                            extra_allow=spec.extra_allow, user_settings=self.user_settings,
-                            hooks=spec.hooks, env=self.parent_env)
+                            extra_allow=spec.extra_allow, hooks=spec.hooks, env=self.parent_env,
+                            sources=src)
         endpoint = C.endpoint_guard(self.parent_env, rendered.env, self.allow_local,
                                     self.allowed_endpoints)
-        env = C.child_env(self.parent_env, rendered.env, cache=spec.cache)
+        env = C.child_env(self.parent_env, rendered.env, cache=spec.cache, role_dir=run_dir)
         task = render_task(spec, run_dir, staged)
         with open(os.path.join(run_dir, "in", "task.md"), "w", encoding="utf-8") as fh:
             fh.write(task)
-        before = SC.snapshot(spec.worktree, remote=spec.remote_check) if spec.scope_check else None
-        sid = str(uuid.uuid4())
-        notes, denials, costs, rls = [], [], 0.0, []
-        proc, st = self._session(spec, run_dir, rendered, env, task, "s1", session_id=sid)
-        sid = st.session_id or sid
+        watch = [f for f in (src.local_p, src.user_p) if f]
+        url = None
+        if spec.scope_check and spec.remote_check:
+            url = SC.remote_url(spec.worktree) or "unresolved:origin"
+        before = SC.snapshot(spec.worktree, remote=url, watch_files=watch) if spec.scope_check else None
+        deadline = self.now() + spec.timeout_s          # ONE budget for every session (K1-M4)
+        deny = rendered.settings["permissions"]["deny"]
+        st_ = {"sid": str(uuid.uuid4()), "notes": [], "denials": [], "cost": 0.0, "rls": [],
+               "timed_out": False, "halted": False}
 
-        def account(st_):
-            row = self._cost(spec, st_, endpoint, len(spec.persona or ""), len(task))
-            rls.append(RL.observe(st_))
-            denials.extend(self._denials(spec, st_))
-            return row["total_cost_usd"]
-        costs += account(st)
+        def session(stdin, tag, kind, resume=None, session_id=None):
+            proc, st = self._session(spec, run_dir, rendered, env, stdin, tag,
+                                     deadline - self.now(), resume=resume, session_id=session_id)
+            row = self._cost(spec, st, endpoint, len(spec.persona or ""), len(stdin), kind)
+            st_["cost"] += row["total_cost_usd"]
+            st_["rls"].append(RL.observe(st))
+            st_["denials"].extend(self._denials(spec, st, deny))
+            st_["timed_out"] = st_["timed_out"] or proc.timed_out
+            st_["halted"] = st_["halted"] or proc.killed_by == "halt"
+            return proc, st
 
-        def finish(status, line=None, extras=None, pres=None, violations=()):
-            return RoleResult(status, line, extras, session_id=sid, cost=costs, denials=denials,
-                              violations=violations, rl=RL.verdict(rls), run_dir=run_dir,
-                              notes=notes, pres=pres)
-        if proc.killed_by == "halt":
-            return finish("HALTED", "halted at the kill switch")
-        if RL.verdict(rls).rejected():
-            return finish("RATE_LIMITED", "rate limit")
-        if proc.timed_out:
-            return finish("TIMEOUT", "%s exceeded %d s" % (spec.who, spec.timeout_s))
-        pres, obj, errs = self._judge_reply(spec, run_dir, st)
-        # §5.1 permission: BLOCKED: permission — … or a denial followed by a non-DONE end
-        perm_blocked = pres.ok and pres.status == "BLOCKED" and (pres.text or "").startswith("permission")
-        if (perm_blocked or (denials and not (pres.ok and pres.status.startswith("DONE")))):
-            cmd = (denials[-1]["command"] if denials else (pres.text or "").split("—", 1)[-1].strip())
-            forb = denials and denials[-1]["class"] == "forbidden"
-            brief = PERMISSION_BRIEF.format(cmd=cmd, allowed=P.summary(spec.role, spec.task, spec.toolchain),
-                                            engine_does=ENGINE_DOES if forb else "")
-            notes.append("permission-resume")
-            proc, st = self._session(spec, run_dir, rendered, env, brief, "s2-permission", resume=sid)
-            costs += account(st)
-            if proc.killed_by == "halt":
-                return finish("HALTED", "halted at the kill switch")
+        def stop():
+            """The terminal statuses that end the role at once — checked after EVERY session,
+            before any parsing (K1-B6, M4)."""
+            if st_["halted"]:
+                return "HALTED", "halted at the kill switch"
+            if RL.verdict(st_["rls"]).rejected():
+                return "RATE_LIMITED", "rate limit"
+            if st_["timed_out"] or self.now() >= deadline:
+                return "TIMEOUT", "%s exceeded %d s" % (spec.who, spec.timeout_s)
+            return None
+        status, line, obj, pres = None, None, None, None
+        try:
+            proc, st = session(task, "s1", "main", session_id=st_["sid"])
+            st_["sid"] = st.session_id or st_["sid"]
+            hit = stop()
+            if hit:
+                status, line = hit
+                return None
             pres, obj, errs = self._judge_reply(spec, run_dir, st)
-            if pres.ok and pres.status == "BLOCKED" and (pres.text or "").startswith("permission"):
-                return finish("PERMISSION", pres.line, pres=pres)
-        # §5.4 format repair: same session once, else a fresh spawn once
-        if not pres.ok or errs:
-            notes.append("repair-resume")
-            instr = R.repair_instruction(pres, errs)
-            proc, st = self._session(spec, run_dir, rendered, env, instr, "s3-repair", resume=sid)
-            costs += account(st)
-            if proc.killed_by == "halt":
-                return finish("HALTED", "halted at the kill switch")
-            if proc.rc != 0 and not st.result:
-                notes.append("repair-fresh")
-                sid = str(uuid.uuid4())
-                proc, st = self._session(spec, run_dir, rendered, env, task + "\n" + instr,
-                                         "s4-fresh", session_id=sid)
-                costs += account(st)
-            pres, obj, errs = self._judge_reply(spec, run_dir, st)
+            perm_blocked = pres.ok and pres.status == "BLOCKED" and (pres.text or "").startswith("permission")
+            denials = st_["denials"]
+            if perm_blocked or (denials and not (pres.ok and pres.status.startswith("DONE"))):
+                cmd = (denials[-1]["command"] if denials else (pres.text or "").split("—", 1)[-1].strip())
+                forb = denials and denials[-1]["class"] == "forbidden"
+                brief = PERMISSION_BRIEF.format(cmd=cmd, allowed=P.summary(spec.role, spec.task, spec.toolchain),
+                                                engine_does=ENGINE_DOES if forb else "")
+                st_["notes"].append("permission-resume")
+                proc, st = session(brief, "s2-permission", "permission", resume=st_["sid"])
+                hit = stop()
+                if hit:
+                    status, line = hit
+                    return None
+                pres, obj, errs = self._judge_reply(spec, run_dir, st)
+                if pres.ok and pres.status == "BLOCKED" and (pres.text or "").startswith("permission"):
+                    status, line = "PERMISSION", pres.line
+                    return None
             if not pres.ok or errs:
-                return finish("INVALID", "%s returned no valid RESULT line" % spec.role, pres=pres,
-                              extras={"errors": errs})
-        violations = []
-        if spec.scope_check:
-            after = SC.snapshot(spec.worktree, remote=spec.remote_check)
-            violations = SC.check(spec.worktree, before, after, [P.role_key(spec.role, spec.task)],
-                                  issue=spec.issue, branch=spec.branch)
+                st_["notes"].append("repair-resume")
+                instr = R.repair_instruction(pres, errs)
+                proc, st = session(instr, "s3-repair", "repair", resume=st_["sid"])
+                hit = stop()
+                if hit:
+                    status, line = hit
+                    return None
+                if proc.rc != 0 and not st.result:
+                    st_["notes"].append("repair-fresh")
+                    st_["sid"] = str(uuid.uuid4())
+                    R.retire_result_json(run_dir, "s1")          # K1-m2: never re-read s1's file
+                    proc, st = session(task + "\n" + instr, "s4-fresh", "fresh", session_id=st_["sid"])
+                    hit = stop()
+                    if hit:
+                        status, line = hit
+                        return None
+                pres, obj, errs = self._judge_reply(spec, run_dir, st)
+                if not pres.ok or errs:
+                    status, line = "INVALID", "%s returned no valid RESULT line" % spec.role
+                    obj = {"errors": errs}
+                    return None
+            status, line = pres.status, pres.line
+            return None
+        finally:
+            # every exit path: the process groups are already reaped by run_process; now the
+            # after-snapshot and the checks (K1-B4) — a violation outranks every other status
+            violations = []
+            if spec.scope_check:
+                try:
+                    after = SC.snapshot(spec.worktree, remote=url, watch_files=watch)
+                    violations = SC.check(spec.worktree, before, after,
+                                          [P.role_key(spec.role, spec.task)], issue=spec.issue,
+                                          branch=spec.branch)
+                except Exception as e:           # a check that cannot run is a violation
+                    violations = ["post-role check failed: %s" % e]
             if violations:
-                return finish("SCOPE", SC.render_pause_line(spec.role, violations), obj, pres,
-                              violations)
-        return finish(pres.status, pres.line, obj, pres)
+                if status:
+                    st_["notes"].append("was %s" % status)
+                status, line = "SCOPE", SC.render_pause_line(spec.role, violations)
+            self._last = RoleResult(status or "INVALID", line, obj, session_id=st_["sid"],
+                                    cost=st_["cost"], denials=st_["denials"], violations=violations,
+                                    rl=RL.verdict(st_["rls"]), run_dir=run_dir, notes=st_["notes"],
+                                    pres=pres)
 
     def _judge_reply(self, spec, run_dir, st):
         pres = R.parse_pres(st.last_text, spec.allowed_status)

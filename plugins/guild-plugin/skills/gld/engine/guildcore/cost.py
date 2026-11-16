@@ -24,8 +24,30 @@ def path(common_dir):
     return os.path.join(J.engine_dir(common_dir), "cost.jsonl")
 
 
+# $/Mtok (input, output) for estimating a session that died without a `result` (K1-M3) —
+# list prices by family; flagged `estimated`
+PRICE = {"opus": (15.0, 75.0), "sonnet": (3.0, 15.0), "haiku": (1.0, 5.0)}
+
+
+def estimate(stream, model):
+    """(usd, input_tokens, output_tokens) summed from the assistant messages' usage."""
+    fam = next((f for f in PRICE if f in (model or "")), "sonnet")
+    tin = tout = 0
+    for u in getattr(stream, "usages", []) or []:
+        tin += int(u.get("input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0)
+        tout += int(u.get("output_tokens") or 0)
+    pi, po = PRICE[fam]
+    return round(tin / 1e6 * pi + tout / 1e6 * po, 6), tin, tout
+
+
 def from_result(result, **attrib):
-    """A cost row from one session's `result` event + attribution."""
+    """A cost row from one session's `result` event + attribution. Without a `result` (killed,
+    timed out) the cost is ESTIMATED from the stream's per-message usage (`stream=`)."""
+    stream = attrib.pop("stream", None)
+    if not result and stream is not None and getattr(stream, "usages", None):
+        usd, tin, tout = estimate(stream, attrib.get("model"))
+        result = {"total_cost_usd": usd, "usage": {"input_tokens": tin, "output_tokens": tout}}
+        attrib["estimated"] = True
     result = result or {}
     usage = result.get("usage") or {}
     cc = usage.get("cache_creation") or {}
@@ -49,7 +71,7 @@ def from_result(result, **attrib):
         "session_id": result.get("session_id"),
         "is_error": bool(result.get("is_error")),
     })
-    for k in ("version", "t", "active_s"):
+    for k in ("version", "t", "active_s", "session_kind", "estimated"):
         if attrib.get(k) is not None:
             row[k] = attrib[k]
     return row

@@ -97,3 +97,26 @@ def final_event(v, out=None):
     if v.rejected():
         return emit.rate_limit_event("rejected", v.resets_at, out=out)
     return emit.rate_limit_event("allowed", out=out)
+
+
+EXIT_GH_AUTH = 3
+EXIT_ENV_HALT = 6
+
+
+def exit_code_for(exc):
+    """The engine exit code for a terminal exception (§2.4): a GitHub rate limit (incl. the
+    secondary-limit 403) or a rate-limited judge → 75; gh auth → 3; env halt → 6 (K1-B6)."""
+    kind = getattr(exc, "kind", None)
+    if kind == "ratelimit" or type(exc).__name__ == "RateLimited":
+        return EXIT_RATE_LIMIT
+    if kind == "auth":
+        return EXIT_GH_AUTH
+    if type(exc).__name__ == "EnvHalt":
+        return EXIT_ENV_HALT
+    return 1
+
+
+def verdict_for_gh(exc, now=None):
+    """A rejected verdict for a GitHub rate limit (Retry-After unknown → now + 15 min)."""
+    now = int(time.time() if now is None else now)
+    return Verdict("rejected", now + DEFAULT_WAIT_S)

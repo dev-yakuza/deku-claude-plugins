@@ -215,3 +215,17 @@ def attach(common_dir, issue, want_control):
 
 def python():
     return sys.executable or "python3"
+
+
+def reap_journaled(journal):
+    """Restart (K1-B5): kill every process group the journal recorded that is still alive (safe
+    kill — start time / live group check). Returns [(pgid, outcome)]."""
+    from guildcore.adapters.claude import safe_kill_group
+    out = []
+    seen = set()
+    for rec in reversed(journal.pids()):
+        if rec.get("pgid") in seen:
+            continue
+        seen.add(rec.get("pgid"))
+        out.append((rec.get("pgid"), safe_kill_group(rec, grace_s=3)))
+    return out

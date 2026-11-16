@@ -185,7 +185,8 @@ class DecisionWriter(object):
         did = "D%d" % n
 
         def mine(body):
-            return sum(1 for b in fmt.DecisionComment(body).blocks if b.id == did) >= 1
+            # MY block, not just my number: a racer may have taken D<n> with other content
+            return block.rstrip("\n") in body
         if last is None:
             self.w.create_comment(self.issue, fmt.render_comment([block]))
         else:
@@ -206,9 +207,15 @@ class DecisionWriter(object):
         after = self._log()
         dup = [b for b in after.blocks if b.n == n]
         if len(dup) != 1 or after.by_id(did) is None:
-            if _retry:
-                return self.record(fields, _retry=False)
-            raise ValueError("decision %s did not land uniquely" % did)
+            if not _retry:
+                raise ValueError("decision %s did not land uniquely" % did)
+            new_id = self.record(fields, _retry=False)
+            # K1-m9: my block that collided keeps its number but is marked superseded
+            mine_dups = [b for b in dup if b.get("point") == f.get("point") and b.get("at") == f.get("at")]
+            if mine_dups and len(dup) > 1:
+                self.record({"point": "renumbered", "by": "code", "resolves": did,
+                             "status": "superseded", "reason": "number race — re-recorded as %s" % new_id})
+            return new_id
         return did
 
     def _append(self, cid, block, mine, n_blocks):
@@ -224,9 +231,17 @@ class DecisionWriter(object):
             return
         if len(fmt.DecisionComment(cur).blocks) != n_blocks:
             raise ValueError("decision log moved during the write")   # caller renumbers
-        new = fmt.insert(cur, block)
-        self.w._perform("decisions:append", cid, lambda: self.w.write.patch_comment(cid, new),
-                        lambda r: mine(body_now()))
+        n = len(fmt.DecisionComment(cur).blocks)
+
+        def do():
+            fresh = body_now()
+            if mine(fresh):
+                return {"id": cid}
+            if len(fmt.DecisionComment(fresh).blocks) != n:
+                raise ValueError("decision log moved during the write")
+            return self.w.write.patch_comment(cid, fmt.insert(fresh, block))
+        self.w._perform("decisions:append", cid, do, lambda r: mine(body_now()),
+                        issue_n=self.issue, present=block.rstrip("\n"))
 
     def amend(self, did, key, value):
         """Add `key: value` to block `did` (at_server, pause_comment …) — a PATCH verified by
@@ -252,8 +267,20 @@ class DecisionWriter(object):
         def landed(_r):
             again = DecisionLog.load(self._comments()).by_id(did)
             return again is not None and again.get(key) == fmt._value(key, value)
-        self.w._perform("decisions:amend", "%s:%s" % (did, key),
-                        lambda: self.w.write.patch_comment(cid, new), landed)
+        def do():
+            cur = [c for c in self._comments() if c.get("id") == cid][0]["body"]
+            dc2 = fmt.DecisionComment(cur)
+            t2 = [x for x in dc2.blocks if x.id == did][0]
+            if t2.get(key) is not None:
+                return {"id": cid}
+            ls = t2.block.lines
+            j = len(ls)
+            while j > 0 and not markers.clean(ls[j - 1]).strip():
+                j -= 1
+            ls.insert(j, "%s: %s" % (key, fmt._value(key, value)))
+            return self.w.write.patch_comment(cid, dc2.render())
+        self.w._perform("decisions:amend", "%s:%s" % (did, key), do, landed, issue_n=self.issue,
+                        did=did)
         return True
 
     def stamp_server_time(self, did):

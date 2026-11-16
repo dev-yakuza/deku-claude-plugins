@@ -70,6 +70,7 @@ class RoleRunner(unittest.TestCase):
 
     def spec(self, role="reviewer", task=None, **kw):
         kw.setdefault("issue", 7)
+        kw.setdefault("remote_check", False)       # temp repos have no origin (fail-closed otherwise)
         return RR.RoleSpec(role, task, "Do the task.", stage="test", step="T2", worktree=self.wt,
                            model="sonnet", base="HEAD", branch="feat", **kw)
 

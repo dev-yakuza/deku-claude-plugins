@@ -27,6 +27,7 @@ import uuid
 
 from guildcore import cost as COST
 from guildcore import journal as J
+from guildcore import ratelimit as RL
 from guildcore import schema as SCH
 from guildcore.adapters import claude as C
 from guildcore.roles import settings as S
@@ -38,6 +39,18 @@ ELISION = "\n…[elided %d chars]…\n"
 
 
 class BriefTooLarge(Exception):
+    pass
+
+
+class RateLimited(Exception):
+    """A judge session ended rate-limited: no retry, no tier-up — the engine stops with 75."""
+
+    def __init__(self, verdict):
+        Exception.__init__(self, "judge rate-limited")
+        self.verdict = verdict
+
+
+class Halted(Exception):
     pass
 
 
@@ -145,7 +158,8 @@ def _set(fields, dotted, value):
 class JudgeRunner(object):
     def __init__(self, journal=None, common_dir=None, parent_env=None, allow_local=False,
                  allowed_endpoints=(), spawn=None, run_root_dir=None, user_settings=None,
-                 claude=None, version=None):
+                 claude=None, version=None, halt_check=None):
+        self.halt_check = halt_check
         self.journal = journal
         self.common_dir = common_dir
         self.parent_env = dict(os.environ if parent_env is None else parent_env)
@@ -164,7 +178,7 @@ class JudgeRunner(object):
             os.makedirs(os.path.join(d, sub), exist_ok=True)
         return d
 
-    def _call(self, spec, model, system, brief, run_dir, tag):
+    def _call(self, spec, model, system, brief, run_dir, tag, attempt=1):
         allow = ["Read", "Grep", "Glob"] if spec.tools else []
         settings = {"permissions": {"allow": allow, "deny": []}}
         rendered = S.render("judge", None, run_dir=None, user_settings=self.user_settings,
@@ -189,11 +203,11 @@ class JudgeRunner(object):
         def on_start(rec):
             if self.journal is not None:
                 self.journal.record_pid("J:%s" % spec.group, rec["pid"], rec["pgid"], rec["start_time"])
-        proc = self.spawn(argv, env, cwd, brief, out, out + ".stderr", 600, on_start, None)
+        proc = self.spawn(argv, env, cwd, brief, out, out + ".stderr", 600, on_start, self.halt_check)
         st = C.read_stream(out)
         row = COST.from_result(st.result, issue=spec.issue, stage=spec.stage, step=spec.step,
                                who="J:%s" % spec.group, model=model, tier=model, local=False,
-                               attempt=1, kind=spec.kind, persona_chars=len(system),
+                               attempt=attempt, kind=spec.kind, stream=st, session_kind=tag, persona_chars=len(system),
                                brief_chars=len(brief), endpoint=endpoint, version=self.version,
                                arm=spec.arm, experiment_id=spec.experiment_id)
         if self.common_dir:
@@ -211,13 +225,19 @@ class JudgeRunner(object):
                 return Decision.from_dict(hit)
         run_dir = self._run_dir(spec)
         model, cost, used_more = spec.model, 0.0, False
-        attempt, fields, errs = 0, None, None
+        attempt, calls, fields, errs = 0, 0, None, None
         while True:
             attempt += 1
+            calls += 1
             b = brief if not errs else brief + "\n\nYour previous output violated the schema: %s. " \
                 "Return output that satisfies it." % "; ".join(errs[:5])
-            proc, st, c = self._call(spec, model, system, b, run_dir, "call%d" % attempt)
+            proc, st, c = self._call(spec, model, system, b, run_dir, "call%d" % calls, attempt)
             cost += c
+            if getattr(proc, "killed_by", None) == "halt":
+                raise Halted("judge %s halted" % spec.group)
+            v = RL.verdict([RL.observe(st)])
+            if v.rejected():                     # K1-B6: never a "schema violation"
+                raise RateLimited(v)
             fields = st.structured
             if fields is None and isinstance(st.last_text, str):
                 try:
@@ -229,6 +249,7 @@ class JudgeRunner(object):
                 used_more = True
                 brief = brief + "\n\n" + spec.needs_more_fn(fields["needs_more"])
                 errs = None
+                attempt -= 1                     # K1-m10: needs_more does not use up an attempt
                 continue
             if not errs:
                 break

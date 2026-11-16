@@ -144,7 +144,9 @@ class Writer(unittest.TestCase):
 
     def test_classify(self):
         self.assertEqual(G.classify_error("HTTP 503"), "transient")
-        self.assertEqual(G.classify_error("API rate limit exceeded"), "transient")
+        self.assertEqual(G.classify_error("API rate limit exceeded"), "ratelimit")
+        self.assertEqual(G.classify_error("HTTP 403: You have exceeded a secondary rate limit"), "ratelimit")
+        self.assertEqual(G.classify_error("dial tcp: lookup api.github.com: could not resolve host"), "transient")
         self.assertEqual(G.classify_error("HTTP 403: forbidden"), "auth")
         self.assertEqual(G.classify_error("HTTP 404: Not Found"), "terminal")
 

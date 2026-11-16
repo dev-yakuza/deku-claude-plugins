@@ -63,17 +63,29 @@ def _norm_url(u):
     return (u or "").strip().rstrip("/")
 
 
+# model-id keys are not routing (every session passes --model); they are stripped from the child
+# env instead of halting the engine (K1-m1)
+MODEL_KEYS = tuple(k for k in ROUTING_KEYS if k.endswith("_MODEL"))
+# Q23 defence in depth: a role's env carries no GitHub credential and no agent socket
+CREDENTIAL_KEYS = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+                   "SSH_AUTH_SOCK", "GIT_ASKPASS", "SSH_ASKPASS")
+
+
 def endpoint_guard(parent_env, settings_env=None, allow_local=False, allowed_endpoints=()):
-    """The effective endpoint; raises EnvHalt('endpoint') for an unapproved routing override."""
+    """The effective endpoint; raises EnvHalt('endpoint') for an unapproved routing override.
+    A key whose value is the default endpoint, and the `*_MODEL` keys, are not overrides."""
     found = {}
     for src, env in (("env", parent_env or {}), ("settings", settings_env or {})):
         for k in ROUTING_KEYS:
             v = env.get(k)
-            if v not in (None, ""):
-                found["%s:%s" % (src, k)] = v
+            if v in (None, "") or k in MODEL_KEYS:
+                continue
+            if k == "ANTHROPIC_BASE_URL" and _norm_url(v) == DEFAULT_ENDPOINT:
+                continue
+            found["%s:%s" % (src, k)] = v
     base = _norm_url((settings_env or {}).get("ANTHROPIC_BASE_URL") or
                      (parent_env or {}).get("ANTHROPIC_BASE_URL")) or DEFAULT_ENDPOINT
-    if not found or (len(found) == 1 and _norm_url(list(found.values())[0]) == DEFAULT_ENDPOINT):
+    if not found:
         return DEFAULT_ENDPOINT
     allowed = set(_norm_url(x) for x in allowed_endpoints or ())
     if allow_local:
@@ -86,11 +98,21 @@ def endpoint_guard(parent_env, settings_env=None, allow_local=False, allowed_end
 
 
 def child_env(parent_env, settings_env=None, cache="5m", judge=False, suite_ceiling_ms=None,
-              extra=None):
+              extra=None, role_dir=None):
+    """`role_dir` (a role's run dir) → GitHub credentials removed and `GH_CONFIG_DIR` pointed at
+    an empty dir inside it (Q23 defence in depth; the sandbox's network list is the guard)."""
     env = dict(parent_env or {})
     env.update(settings_env or {})
-    for k in _CACHE_KEYS:
+    for k in _CACHE_KEYS + MODEL_KEYS:
         env.pop(k, None)
+    if role_dir:
+        for k in CREDENTIAL_KEYS:
+            env.pop(k, None)
+        ghd = os.path.join(role_dir, "in", "gh-config-empty")
+        os.makedirs(ghd, exist_ok=True)
+        env["GH_CONFIG_DIR"] = ghd
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_CONFIG_NOSYSTEM"] = "1"
     env.update(ENV_CONTRACT)
     if suite_ceiling_ms:
         env["BASH_MAX_TIMEOUT_MS"] = str(int(suite_ceiling_ms))
@@ -192,28 +214,54 @@ def safe_kill_group(rec, grace_s=KILL_GRACE_S, sleep=time.sleep):
         return "gone"
     st = process_start(pid)
     if st is None:
-        return "gone"
+        # the leader is gone but members may live on (K1-B5): a pgid cannot be reused while any
+        # member is alive, so a live group with this id is still ours
+        try:
+            os.killpg(int(pgid), 0)
+        except OSError:
+            return "gone"
+        return _kill_group(int(pgid), grace_s, sleep)
     if rec.get("start_time") and st != rec["start_time"]:
         return "mismatch"
     sid = rec.get("session_id")
     if sid and sid not in process_cmdline(pid):
         return "mismatch"
+    return _kill_group(int(pgid), grace_s, sleep)
+
+
+def _kill_group(pgid, grace_s=KILL_GRACE_S, sleep=time.sleep):
     try:
-        os.killpg(int(pgid), signal.SIGTERM)
+        os.killpg(pgid, signal.SIGTERM)
     except OSError:
         return "gone"
     deadline = time.time() + grace_s
     while time.time() < deadline:
         try:
-            os.killpg(int(pgid), 0)
+            os.killpg(pgid, 0)
         except OSError:
             return "killed"
         sleep(0.2)
     try:
-        os.killpg(int(pgid), signal.SIGKILL)
+        os.killpg(pgid, signal.SIGKILL)
     except OSError:
         pass
+    for _ in range(50):                      # wait until the group is really gone
+        try:
+            os.killpg(pgid, 0)
+        except OSError:
+            break
+        sleep(0.1)
     return "killed"
+
+
+def reap_group(pgid, grace_s=2, sleep=time.sleep):
+    """After a session ends: kill whatever is left in its process group (backgrounded children,
+    `&` jobs) and wait — the post-role checks run only after this (K1-B5)."""
+    try:
+        os.killpg(int(pgid), 0)
+    except OSError:
+        return "gone"
+    return _kill_group(int(pgid), grace_s, sleep)
 
 
 class ProcResult(object):
@@ -260,7 +308,10 @@ def run_process(argv, env, cwd, stdin_text, stdout_path, stderr_path, timeout_s,
                 safe_kill_group({"pid": p.pid, "pgid": pgid, "start_time": st})
                 rc = p.wait()
                 break
-    return ProcResult(rc, timed_out, p.pid, pgid, st, time.time() - t0, killed_by)
+    reaped = reap_group(pgid)
+    res = ProcResult(rc, timed_out, p.pid, pgid, st, time.time() - t0, killed_by)
+    res.reaped = reaped
+    return res
 
 
 # ---- stream-json --------------------------------------------------------------------------------
@@ -276,6 +327,7 @@ class Stream(object):
         self.tool_results = {}            # id → {is_error, content}
         self.denials = []                 # system/permission_denied events
         self.decisions = {}               # tool_use_id → tool_result_meta.permission_decision
+        self.usages = []                  # per assistant message usage (cost of a dead session)
         self.rate_limit_events = []       # [{status, resetsAt, …}]
         self.result = None                # the final `result` event
         self.torn = 0
@@ -313,6 +365,7 @@ class Stream(object):
 
 def parse_stream(text):
     s = Stream()
+    seen_msgs = set()
     for ln in (text or "").split("\n"):
         ln = ln.strip()
         if not ln:
@@ -333,6 +386,11 @@ def parse_stream(text):
         elif t == "system" and e.get("subtype") == "permission_denied":
             s.denials.append(e)
         elif t == "assistant":
+            u = (e.get("message") or {}).get("usage")
+            mid = (e.get("message") or {}).get("id")
+            if isinstance(u, dict) and (mid is None or mid not in seen_msgs):
+                s.usages.append(u)
+                seen_msgs.add(mid)
             for c in (e.get("message") or {}).get("content") or []:
                 if c.get("type") == "text":
                     s.assistant_texts.append(c.get("text") or "")
@@ -363,3 +421,64 @@ def read_stream(path):
             return parse_stream(fh.read())
     except (IOError, OSError):
         return parse_stream("")
+
+
+def _etime_s(text):
+    """`ps -o etime=` ([[dd-]hh:]mm:ss) → seconds."""
+    t = (text or "").strip()
+    days = 0
+    if "-" in t:
+        d, t = t.split("-", 1)
+        days = int(d)
+    parts = [int(x) for x in t.split(":") if x.isdigit()]
+    while len(parts) < 3:
+        parts.insert(0, 0)
+    h, m, s = parts[-3:]
+    return days * 86400 + h * 3600 + m * 60 + s
+
+
+def stray_pids(roots, since_s, exclude=()):
+    """Processes of this user whose cwd is inside `roots` and that started within the last
+    `since_s` seconds — a role's backgrounded children after the CLI's Bash tool detached them
+    from our process group (real CLI: `(sleep 8; echo late > f) &` survived the group kill).
+    The Bash tool runs commands from the worktree, so their cwd gives them away."""
+    try:
+        p = subprocess.run(["lsof", "-nP", "-a", "-d", "cwd", "-u", str(os.getuid()), "-Fpn"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    roots = [os.path.realpath(r).rstrip("/") + "/" for r in roots if r]
+    out, pid = [], None
+    for ln in p.stdout.decode("utf-8", "replace").splitlines():
+        if ln.startswith("p"):
+            pid = int(ln[1:])
+        elif ln.startswith("n") and pid:
+            cwd = os.path.realpath(ln[1:]).rstrip("/") + "/"
+            if pid not in exclude and pid != os.getpid() and any(cwd.startswith(r) for r in roots):
+                out.append(pid)
+    young = []
+    for pid in out:
+        try:
+            e = subprocess.run(["ps", "-o", "ppid=,etime=", "-p", str(pid)], stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, timeout=10).stdout.decode().split()
+        except (OSError, subprocess.SubprocessError):
+            continue
+        # only ORPHANS (reparented to launchd/init): a live peer role's children in a parallel
+        # group still have their shell as parent and are never touched
+        if len(e) == 2 and e[0] == "1" and _etime_s(e[1]) <= since_s + 2:
+            young.append(pid)
+    return young
+
+
+def reap_strays(roots, since_s, sleep=time.sleep):
+    """Kill the stray processes (TERM, then KILL). Returns the pids found."""
+    pids = stray_pids(roots, since_s, exclude=(os.getppid(),))
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        if pids and sig == signal.SIGTERM:
+            sleep(1)
+    return pids

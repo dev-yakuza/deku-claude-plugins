@@ -150,7 +150,14 @@ class FakeGh(object):
 
     def comments(self, n):
         self.calls.append(("comments", n))
-        return list(self._issue(n).get("comments", []))
+        lag = getattr(self, "lagging", {})
+        out = []
+        for c in self._issue(n).get("comments", []):
+            if lag.get(c.get("id")):
+                lag[c["id"]] -= 1
+                continue
+            out.append(c)
+        return out
 
     def timeline(self, n):
         self.calls.append(("timeline", n))
@@ -217,13 +224,22 @@ class GhWriteError(Exception):
 
 _AUTH = re.compile(r"\b(401|403)\b|gh auth login|authentication|Bad credentials|not logged", re.I)
 _TERMINAL = re.compile(r"\b(404|422)\b|Not Found|Validation Failed|could not add label|"
-                       r"does not exist|Could not resolve", re.I)
-_TRANSIENT = re.compile(r"\b(429|500|502|503|504)\b|rate limit|timed? ?out|timeout|connection|"
+                       r"does not exist|Could not resolve to", re.I)
+_TRANSIENT = re.compile(r"\b(500|502|503|504)\b|timed? ?out|timeout|connection|"
                         r"network|EOF|TLS|temporar|reset by peer|no such host|server error", re.I)
 
 
+_RATELIMIT = re.compile(r"rate limit|secondary rate|abuse detection|\b429\b|Retry-After", re.I)
+
+
 def classify_error(text):
+    """auth | ratelimit | terminal | transient. Rate limits are checked FIRST: GitHub answers a
+    secondary limit with 403, which must not read as an auth failure (K1-B6)."""
     t = text or ""
+    if _RATELIMIT.search(t):
+        return "ratelimit"
+    if re.search(r"could not resolve host|resolve host", t, re.I):
+        return "transient"                    # K1-m6: DNS is a network hiccup, not a 404
     if _AUTH.search(t):
         return "auth"
     if _TERMINAL.search(t):
@@ -263,7 +279,7 @@ class GhWriteCli(object):
         p = subprocess.run(argv, input=(stdin or "").encode("utf-8"), stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE)
         if p.returncode != 0:
-            raise GhError((p.stderr.decode("utf-8", "replace").strip().splitlines() or ["gh failed"])[-1])
+            raise GhError(p.stderr.decode("utf-8", "replace").strip() or "gh failed")
         return p.stdout.decode("utf-8", "replace")
 
     def _gh(self, argv, payload=None):
@@ -314,11 +330,21 @@ class FakeGhWrite(object):
 
     def fail_next(self, kind, n=1, message=None):
         msg = message or {"transient": "HTTP 502: Bad Gateway", "auth": "HTTP 401: Bad credentials",
-                          "terminal": "HTTP 422: Validation Failed"}[kind]
+                          "terminal": "HTTP 422: Validation Failed",
+                          "ratelimit": "HTTP 403: You have exceeded a secondary rate limit"}[kind]
         self._fail += [msg] * n
 
     def lose_next(self, n=1):
         self._lose += n
+
+    def ack_lost_next(self, n=1):
+        """The write LANDS but the client gets a 502 (K1-M1)."""
+        self._acklost = getattr(self, "_acklost", 0) + n
+
+    def lag_next(self, reads=1):
+        """The next created comment stays invisible to `reads` comment reads (eventual
+        consistency, K1-M1)."""
+        self._lag = reads
 
     def _now(self):
         return self.clock.now() if self.clock else "2026-11-16T00:00:00Z"
@@ -345,6 +371,13 @@ class FakeGhWrite(object):
              "author_association": "OWNER", "user": {"login": self.actor}}
         if self._gate(("create_comment", n)):
             self._issue(n).setdefault("comments", []).append(c)
+            if getattr(self, "_lag", 0):
+                self.fake.lagging = getattr(self.fake, "lagging", {})
+                self.fake.lagging[cid] = self._lag
+                self._lag = 0
+            if getattr(self, "_acklost", 0):
+                self._acklost -= 1
+                raise GhError("HTTP 502: Bad Gateway")
         return dict(c)
 
     def patch_comment(self, cid, body):

@@ -176,27 +176,36 @@ class Reclassifier(unittest.TestCase):
         self.assertFalse(PC.rule_matches("Bash(env)", "env -u X"))
 
 
-class Q22Calibration(unittest.TestCase):
-    """The Q22 predictor (current rules) against real CLI decisions recorded under Q22."""
+class Q23Calibration(unittest.TestCase):
+    """The predictor (current rules) against real CLI decisions recorded under Q23, and the
+    review-r1 probes: each must be stopped by a rule, the sandbox or the post-role check."""
 
-    def test_agreement_and_bypasses(self):
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(_k1.K1FX, "calibration-q23.json"), encoding="utf-8") as fh:
+            cls.rows = json.load(fh)["rows"]
+
+    def predict(self, r):
         from guildcore.roles import permissions as P
-        with open(os.path.join(_k1.K1FX, "calibration-q22.json"), encoding="utf-8") as fh:
-            rows = json.load(fh)["rows"]
+        role, task = PC.engine_role(r["role"]) if r["role"] not in ("reviewer",) else ("reviewer", None)
+        a, d = P.role_rules(role, task)
+        return PC.predict(r["command"], a, d)[0]
+
+    def test_agreement(self):
         by = {}
-        for r in rows:
-            role, task = PC.engine_role(r["role"]) if r["role"] != "reviewer" else ("reviewer", None)
-            a, d = P.role_rules(role, task)
-            v, _ = PC.predict(r["command"], a, d)
+        for r in self.rows:
             ok, n = by.get(r["set"], (0, 0))
-            by[r["set"]] = (ok + (v == r["outcome"]), n + 1)
+            by[r["set"]] = (ok + (self.predict(r) == r["outcome"]), n + 1)
         for s_, (ok, n) in by.items():
-            self.assertGreaterEqual(100.0 * ok / n, 98.0 if s_ != "bypass" else 96.0, (s_, ok, n))
-        # every always-deny bypass the CLI let through is one of the documented residuals
-        leaked = sorted(r["command"] for r in rows if r["set"] == "bypass" and r["outcome"] == "allow")
-        self.assertEqual(leaked, sorted(['git p"ush"', "git p", "make push", "npx git-push",
-                                         "perl -e 'system(\"git push\")'",
-                                         "python3 -c \"import subprocess; subprocess.run(['git','push'])\""]))
+            self.assertGreaterEqual(100.0 * ok / n, 98.0, (s_, ok, n))
+
+    def test_every_probe_is_stopped(self):
+        # the only rows the real run did not stop are git commands that do not exist
+        loose = sorted(r["command"] for r in self.rows if r["set"].startswith("r1-")
+                       and r["stopped_by"] == "NOT STOPPED")
+        self.assertEqual(loose, ["git push-x", "git stash-x"])
+        self.assertTrue(all(r["stopped_by"] in ("rule", "sandbox", "post-check", "NOT STOPPED")
+                            for r in self.rows if r["set"].startswith("r1-")))
 
 
 LOG = [

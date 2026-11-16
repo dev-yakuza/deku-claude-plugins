@@ -125,6 +125,14 @@ ALWAYS_DENY_Q22 = (
     "Bash(gh gist:*)", "Bash(gh api graphql:*)", "Bash(gh alias:*)", "Bash(gh extension:*)",
 ) + tuple(_both("gh api", GH_API_WRITE_FLAGS)) + (
     # shells / wrappers that would hide a command from per-sub-command matching
+    # K1 review r1 (B1): roles never touch GitHub (Q23) — every gh call is refused; git global
+    # options before push, send-pack, config writes that create aliases/remotes/hooks paths
+    "Bash(gh:*)", "Bash(gh)", "Bash(git -* push*)", "Bash(git --* push*)", "Bash(git send-pack:*)",
+    "Bash(git fetch:*)", "Bash(git pull:*)", "Bash(git ls-remote:*)",
+    "Bash(git config * alias.*)", "Bash(git config alias*)", "Bash(git config set *)",
+    "Bash(git config * remote.*)", "Bash(git config remote.*)", "Bash(git config * core.hooksPath*)",
+    "Bash(git config core.hooksPath*)", "Bash(git config * credential*)", "Bash(git config credential*)",
+    "Bash(git -c *)", "Bash(git remote rename:*)", "Bash(git remote remove:*)", "Bash(git remote rm:*)",
     # bypass probes (K1, Q22): global flags before the subcommand, quoted command names, xargs
     "Bash(gh -R *)", "Bash(gh --repo *)", "Bash(gh --repo=*)", "Bash('gh'*)", "Bash('git'*)",
     # xargs: only the write verbs (`xargs git grep` is a common read); `echo push | xargs git`
@@ -145,6 +153,10 @@ READONLY_DENY = (
     "Bash(git am:*)", "Bash(git apply:*)", "Bash(git add:*)", "Bash(git rm:*)", "Bash(git mv:*)",
     "Bash(git restore:*)", "Bash(git stash:*)", "Bash(git notes:*)", "Bash(git worktree add:*)",
     "Bash(git worktree remove:*)", "Bash(sed -i:*)",
+    # review r1 B1: global options before the verb, ref/HEAD movers, index flags
+    "Bash(git -* commit*)", "Bash(git --* commit*)", "Bash(git -* tag *)", "Bash(git --* tag *)",
+    "Bash(git branch -f*)", "Bash(git branch * -f*)", "Bash(git checkout:*)", "Bash(git switch:*)",
+    "Bash(git symbolic-ref:*)", "Bash(git update-index:*)", "Bash(git config:*)",
 )
 # (no `sed * -i *`: the CLI also matches mid-wildcard rules against a whole PIPELINE, so it
 #  refused `sed -n … | grep -i …` — calibration; an in-place edit by a reader is the scope

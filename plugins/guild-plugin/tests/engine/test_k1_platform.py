@@ -37,9 +37,24 @@ class EndpointGuard(unittest.TestCase):
             C.endpoint_guard({}, {"ANTHROPIC_BASE_URL": "http://10.0.0.1"})
 
     def test_other_routing_keys_halt(self):
-        for k in ("CLAUDE_CODE_USE_BEDROCK", "ANTHROPIC_MODEL", "CLAUDE_CODE_USE_VERTEX"):
+        for k in ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_BEDROCK_BASE_URL"):
             with self.assertRaises(C.EnvHalt):
                 C.endpoint_guard({k: "1"})
+
+    def test_model_keys_and_default_url_do_not_halt(self):      # K1-m1
+        self.assertEqual(C.endpoint_guard({"ANTHROPIC_MODEL": "x", "ANTHROPIC_BASE_URL": C.DEFAULT_ENDPOINT},
+                                          {"ANTHROPIC_BASE_URL": C.DEFAULT_ENDPOINT + "/"}), C.DEFAULT_ENDPOINT)
+        e = C.child_env({"ANTHROPIC_MODEL": "x", "ANTHROPIC_SMALL_FAST_MODEL": "y"})
+        self.assertNotIn("ANTHROPIC_MODEL", e)
+        self.assertNotIn("ANTHROPIC_SMALL_FAST_MODEL", e)
+
+    def test_role_env_has_no_github_credentials(self):        # Q23 defence in depth
+        d = tmpdir(self)
+        e = C.child_env({"GH_TOKEN": "t", "GITHUB_TOKEN": "t", "SSH_AUTH_SOCK": "/s"}, role_dir=d)
+        for k in ("GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK"):
+            self.assertNotIn(k, e)
+        self.assertTrue(e["GH_CONFIG_DIR"].startswith(d))
+        self.assertEqual(os.listdir(e["GH_CONFIG_DIR"]), [])
 
     def test_allow_local_flag(self):
         self.assertEqual(C.endpoint_guard({"ANTHROPIC_BASE_URL": "http://127.0.0.1:11434"}, allow_local=True),
@@ -50,7 +65,7 @@ class EndpointGuard(unittest.TestCase):
         self.assertEqual(C.endpoint_guard(e, allowed_endpoints=["https://gw.example.invalid"]),
                          "https://gw.example.invalid")
         with self.assertRaises(C.EnvHalt):
-            C.endpoint_guard(dict(e, ANTHROPIC_MODEL="x"), allowed_endpoints=["https://gw.example.invalid"])
+            C.endpoint_guard(dict(e, CLAUDE_CODE_USE_BEDROCK="1"), allowed_endpoints=["https://gw.example.invalid"])
 
 
 class EnvContract(unittest.TestCase):
@@ -262,14 +277,20 @@ class Q22Rules(unittest.TestCase):
         for c in ("git push", "env -u X git push", "GIT_X=1 git push", "echo $(git push)", "echo `git push`",
                   "command git push", "/usr/bin/git push", "timeout 5 git push", "{ git push; }",
                   "git -C . push", "bash -c 'git push'", "gh api -XPOST r", "gh api r --method=PATCH",
-                  "gh api r -fa=b", "gh -R o/r pr merge 1", "\\git push"):
+                  "gh api r -fa=b", "gh -R o/r pr merge 1", "\\git push", "gh pr -R o/r merge 1",
+                  "gh api x -iX PUT", "gh pr update-branch 1", "git --no-pager push", "git -P push origin HEAD",
+                  "git send-pack origin x", "git config --local alias.p push", "git config set alias.q push",
+                  "git -c alias.z=push z", "git config core.hooksPath /tmp", "git fetch origin"):
             self.assertEqual(PC.predict(c, a, d)[0], "deny", c)
         for c in ("echo $(ls) > out.txt", "cd lib && ls | head", "X=1 flutter test", "git log | xargs git show",
-                  "gh api repos/o/r/pulls/1", "cat /etc/hosts"):
+                  "cat /etc/hosts"):
             self.assertEqual(PC.predict(c, a, d)[0], "allow", c)
         a, d = P.role_rules("tester", "verify")
         self.assertEqual(PC.predict("git -C . commit -m x", a, d)[0], "deny")
         self.assertEqual(PC.predict("git log --oneline", a, d)[0], "allow")
+        for c in ("git --no-pager commit -m x", "git -P tag v9", "git branch -f p HEAD", "git checkout HEAD~1",
+                  "git symbolic-ref HEAD refs/heads/x", "git update-index --assume-unchanged f", "gh pr view 1"):
+            self.assertEqual(PC.predict(c, a, d)[0], "deny", c)
 
     def test_summary_names_the_limits(self):
         s = P.summary("tester", "verify")
@@ -330,9 +351,43 @@ class RenderedSettings(unittest.TestCase):
         on_disk = json.load(open(os.path.join(run, "in", "settings.json")))
         self.assertNotIn("env", on_disk)
 
-    def test_sandbox_merged(self):
+    def test_role_sandbox_forced(self):                       # Q23
+        rd, run = self.render()
+        sb = rd.settings["sandbox"]
+        self.assertEqual((sb["enabled"], sb["allowUnsandboxedCommands"], sb["excludedCommands"]), (True, False, []))
+        self.assertIn(self.r + "/**", sb["filesystem"]["allowWrite"])
+        self.assertIn(run + "/**", sb["filesystem"]["allowWrite"])
+        self.assertNotIn("/a/**", sb["filesystem"]["allowWrite"])            # user/local cannot widen
+        for want in (self.r + "/.git/hooks/**", self.r + "/.git/config", self.r + "/.claude/**"):
+            self.assertIn(want, sb["filesystem"]["denyWrite"])
+        self.assertFalse([d for d in sb["network"]["allowedDomains"] if "github" in d])
+
+    def test_reader_sandbox_writes_run_dir_only(self):
+        run = os.path.join(tmpdir(self), "run")
+        rd = S.render("tester", "verify", worktree=self.r, base=self.base, run_dir=run, user_settings=self.user)
+        self.assertEqual(rd.settings["sandbox"]["filesystem"]["allowWrite"], [run + "/**"])
+
+    def test_registries_from_manifests(self):
+        with open(os.path.join(self.r, "pubspec.yaml"), "w") as fh:
+            fh.write("name: x\n")
+        self.assertIn("pub.dev", S.registry_domains(self.r))
+
+    def test_judge_keeps_merged_sandbox(self):
+        rd = S.render("judge", None, user_settings=self.user, hooks=False)
+        self.assertEqual(rd.settings["sandbox"], {"filesystem": {"allowWrite": ["/a/**"]}})
+
+    def test_ask_rules_become_denies(self):                   # K1-M5
+        with open(self.user, "w") as fh:
+            json.dump({"permissions": {"ask": ["Bash(git clean:*)"]}}, fh)
         rd, _ = self.render()
-        self.assertEqual(rd.settings["sandbox"], {"filesystem": {"allowWrite": ["/a/**", "/b/**"]}, "enabled": False})
+        self.assertIn("Bash(git clean:*)", rd.settings["permissions"]["deny"])
+
+    def test_sources_read_once(self):                         # K1-B2
+        src = S.Sources(self.user, self.r)
+        with open(os.path.join(self.r, ".claude", "settings.local.json"), "w") as fh:
+            json.dump({"env": {"NODE_OPTIONS": "--require /evil.js"}}, fh)
+        rd = S.render("developer", "implement", worktree=self.r, base=self.base, sources=src)
+        self.assertNotIn("NODE_OPTIONS", rd.env)
 
     def test_hooks_from_base_with_exported_gates(self):
         # a branch commit that changes the hook must not reach the rendered settings
@@ -449,12 +504,69 @@ class Scope(unittest.TestCase):
         git(bare, "init", "-q", "--bare")
         git(self.r, "remote", "add", "origin", bare)
         git(self.r, "push", "-q", "origin", "feat")
-        b = SC.snapshot(self.r, remote=True)
+        url = SC.remote_url(self.r)
+        b = SC.snapshot(self.r, remote=url)
         self.write("lib/a.dart")
         git(self.r, "commit", "-qam", "x")
         git(self.r, "push", "-q", bare, "feat")               # explicit-URL push: no tracking ref moves
-        v = SC.check(self.r, b, SC.snapshot(self.r, remote=True), ["developer"], branch="feat")
+        git(self.r, "config", "remote.origin.url", "/nonexistent")     # B3: redirecting the remote
+        v = SC.check(self.r, b, SC.snapshot(self.r, remote=url), ["developer"], branch="feat")
         self.assertTrue(any("remote refs/heads/feat moved to a local commit" in x for x in v), v)
+        self.assertTrue(any("git config --local changed" in x for x in v), v)
+
+    def test_remote_fail_closed_and_deletion(self):            # K1-B3
+        bare = tmpdir(self)
+        git(bare, "init", "-q", "--bare")
+        git(self.r, "remote", "add", "origin", bare)
+        git(self.r, "push", "-q", "origin", "feat", "feat:other")
+        url = SC.remote_url(self.r)
+        b = SC.snapshot(self.r, remote=url)
+        git(self.r, "push", "-q", "origin", ":other")
+        v = SC.check(self.r, b, SC.snapshot(self.r, remote=url), ["reviewer"])
+        self.assertTrue(any("remote refs/heads/other deleted" in x for x in v), v)
+        gone = dict(b, remote=None)
+        self.assertTrue(any("remote unverifiable" in x for x in SC.check(self.r, gone, b, ["reviewer"])))
+
+    def test_fetched_human_push_is_not_a_violation(self):      # K1-M6
+        bare = tmpdir(self)
+        git(bare, "init", "-q", "--bare")
+        git(self.r, "remote", "add", "origin", bare)
+        git(self.r, "push", "-q", "origin", "feat")
+        other = tmpdir(self)
+        git(other, "clone", "-q", bare, "c")
+        c = os.path.join(other, "c")
+        git(c, "config", "user.name", "h"); git(c, "config", "user.email", "h@example.invalid")
+        git(c, "switch", "-q", "-c", "feature-x")
+        with open(os.path.join(c, "h.txt"), "w") as fh:
+            fh.write("h")
+        git(c, "add", "h.txt"); git(c, "commit", "-qm", "h")
+        url = SC.remote_url(self.r)
+        b = SC.snapshot(self.r, remote=url)
+        git(c, "push", "-q", "origin", "feature-x")
+        git(self.r, "fetch", "-q", "origin")
+        self.assertEqual(SC.check(self.r, b, SC.snapshot(self.r, remote=url), ["reviewer"]), [])
+
+    def test_hooks_and_watched_files(self):                   # K1-B2
+        watch = os.path.join(tmpdir(self), "settings.local.json")
+        with open(watch, "w") as fh:
+            fh.write("{}")
+        b = SC.snapshot(self.r, watch_files=[watch])
+        with open(os.path.join(self.r, ".git", "hooks", "pre-push"), "w") as fh:
+            fh.write("#!/bin/sh\n")
+        git(self.r, "config", "core.hooksPath", "/tmp")
+        with open(watch, "w") as fh:
+            fh.write('{"env": {"PATH": "/evil"}}')
+        v = SC.check(self.r, b, SC.snapshot(self.r, watch_files=[watch]), ["reviewer"])
+        self.assertTrue(any(x.startswith("hooks ") for x in v), v)
+        self.assertTrue(any("git config --local changed" in x for x in v), v)
+        self.assertTrue(any(x.startswith("file " + watch) for x in v), v)
+
+    def test_paths_with_spaces(self):                         # K1-m7
+        b = self.snap()
+        self.write("lib/a b.dart")
+        git(self.r, "add", "-A"); git(self.r, "commit", "-qm", "sp")
+        v = SC.check(self.r, b, self.snap(), ["qa"], branch="feat")
+        self.assertTrue(any("lib/a b.dart" in x for x in v), v)
 
     def test_remote_tracking_ref_push(self):
         bare = tmpdir(self)

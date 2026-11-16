@@ -60,12 +60,25 @@ def _hash(path):
         return None
 
 
-def remote_heads(worktree, remote="origin"):
-    """{ref: sha} of the remote's branches (`git ls-remote --heads`) — the push tripwire that
-    does not depend on remote-tracking refs (an explicit-URL or aliased push bypassing the deny
-    rules still changes the remote). None when the remote cannot be read."""
-    p = subprocess.run(["git", "ls-remote", "--heads", remote], cwd=worktree, stdout=subprocess.PIPE,
-                       stderr=subprocess.DEVNULL, timeout=60)
+def remote_url(worktree, remote="origin"):
+    """The push URL of `remote`, resolved BEFORE a role runs and reused for the after-snapshot
+    (K1-B3: a role that rewrites `remote.origin.url` must not redirect the tripwire)."""
+    p = subprocess.run(["git", "remote", "get-url", "--push", remote], cwd=worktree,
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return p.stdout.decode().strip() or None if p.returncode == 0 else None
+
+
+def remote_heads(worktree, url):
+    """{ref: sha} of every branch and tag at `url` (`git ls-remote --refs`), or None when it
+    cannot be read — which the check treats as a violation (fail closed, K1-B3)."""
+    if not url:
+        return None
+    try:
+        p = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "ls-remote", "--refs", url],
+                           cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60,
+                           env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+    except subprocess.TimeoutExpired:
+        return None
     if p.returncode != 0:
         return None
     out = {}
@@ -76,7 +89,53 @@ def remote_heads(worktree, remote="origin"):
     return out
 
 
-def snapshot(worktree, remote=False):
+def _git_paths(worktree):
+    out = {}
+    for k, arg in (("gitdir", "--git-dir"), ("common", "--git-common-dir")):
+        p = subprocess.run(["git", "rev-parse", "--path-format=absolute", arg], cwd=worktree,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        out[k] = p.stdout.decode().strip()
+    return out
+
+
+def _tree_hash(root):
+    h = hashlib.sha1()
+    if not root or not os.path.isdir(root):
+        return None
+    for base, dirs, files in sorted(os.walk(root)):
+        dirs.sort()
+        for f in sorted(files):
+            fp = os.path.join(base, f)
+            h.update(os.path.relpath(fp, root).encode())
+            h.update((_hash(fp) or "").encode())
+            try:
+                h.update(oct(os.stat(fp).st_mode).encode())
+            except OSError:
+                pass
+    return h.hexdigest()
+
+
+def integrity(worktree, watch_files=()):
+    """Hashes of what no role may change and porcelain cannot see (K1-B2): local/worktree git
+    config, the hooks and info dirs of the git dir and common dir, and `watch_files` (the main
+    checkout's `.claude/settings.local.json`, the user settings)."""
+    gp = _git_paths(worktree)
+    out = {}
+    for scope in ("--local", "--worktree"):
+        p = subprocess.run(["git", "config", "--list", scope], cwd=worktree, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL)
+        out["git config " + scope] = hashlib.sha1(p.stdout).hexdigest() if p.returncode == 0 else None
+    for k in sorted(set(gp.values())):
+        out["hooks " + k] = _tree_hash(os.path.join(k, "hooks"))
+        out["info " + k] = _tree_hash(os.path.join(k, "info"))
+        out["config file " + k] = _hash(os.path.join(k, "config"))
+    for f in watch_files or ():
+        out["file " + f] = _hash(f)
+    return out
+
+
+def snapshot(worktree, remote=None, watch_files=()):
+    """`remote` = the push URL fixed before the role (see remote_url) or None (no remote check)."""
     raw = _git(worktree, "status", "--porcelain", "-uall", "-z").decode("utf-8", "replace")
     entries = {}
     parts = raw.split("\0")
@@ -101,15 +160,32 @@ def snapshot(worktree, remote=False):
         if " " in ln:
             r, sha = ln.split(" ", 1)
             refs[r] = sha
-    snap = {"status": entries, "head": head, "symref": sym, "refs": refs}
+    snap = {"status": entries, "head": head, "symref": sym, "refs": refs,
+            "integrity": integrity(worktree, watch_files)}
     if remote:
-        snap["remote"] = remote_heads(worktree)
+        snap["remote_url"] = remote
+        snap["remote"] = remote_heads(worktree, remote)
     return snap
 
 
-def _local_object(worktree, sha):
-    return subprocess.run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=worktree,
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+def group_snapshot(worktree, watch_files=(), remote="origin"):
+    """Snapshot for a parallel group — the remote tripwire is ON by default (K1-m8)."""
+    url = remote_url(worktree, remote) if remote else None
+    return snapshot(worktree, remote=url or "unresolved:%s" % remote, watch_files=watch_files)
+
+
+def _reachable_from_local(worktree, sha, after):
+    """Is `sha` reachable from a local branch or HEAD? (a fetched human commit only sits under
+    refs/remotes — K1-M6)"""
+    if subprocess.run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=worktree,
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+        return False
+    tips = set(v for r, v in after["refs"].items() if r.startswith("refs/heads/")) | {after["head"]}
+    for t in tips:
+        if subprocess.run(["git", "merge-base", "--is-ancestor", sha, t], cwd=worktree,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            return True
+    return False
 
 
 def _match(path, globs):
@@ -148,8 +224,9 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
             # a remote-tracking ref only moves on fetch or PUSH; fetch is allowed, so only a
             # move to a commit that exists solely because of this session (= was a local
             # head/HEAD after the role) is reported — a push that got past the deny rules (Q22)
-            local = set(ra[r] for r in ra if r.startswith("refs/heads/")) | {after["head"]}
-            if ra.get(ref) in local:
+            if ra.get(ref) and _reachable_from_local(worktree, ra[ref], after) and ref in rb:
+                viol.append("%s moved to a local commit (push?)" % ref)
+            elif ra.get(ref) and ref not in rb and _reachable_from_local(worktree, ra[ref], after):
                 viol.append("%s moved to a local commit (push?)" % ref)
             continue
         if ref == branch_ref and movers and ref in rb and ref in ra:
@@ -157,17 +234,29 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
                               cwd=worktree).returncode != 0:
                 viol.append("%s moved by a non-fast-forward change" % ref)
                 continue
-            committed = _git(worktree, "diff", "--name-only", "%s..%s" % (rb[ref], ra[ref])).decode().split()
+            committed = [x for x in _git(worktree, "diff", "--name-only", "-z", "%s..%s" % (rb[ref], ra[ref]))
+                         .decode("utf-8", "replace").split("\0") if x]
             paths = sorted(set(paths) | set(committed))
             continue
         viol.append("ref %s %s" % (ref, "created" if ref not in rb else "deleted" if ref not in ra else "moved"))
     # remote push tripwire (Q22): a remote head that moved to a commit this clone has — i.e. a
     # push from here; a human's concurrent push to another branch is not in local objects
-    rmb, rma = before.get("remote"), after.get("remote")
-    if rmb is not None and rma is not None:
-        for ref in sorted(set(rmb) | set(rma)):
-            if rmb.get(ref) != rma.get(ref) and rma.get(ref) and _local_object(worktree, rma[ref]):
-                viol.append("remote %s moved to a local commit during the role (push)" % ref)
+    if "remote_url" in before or "remote_url" in after:
+        rmb, rma = before.get("remote"), after.get("remote")
+        if rmb is None or rma is None:
+            viol.append("remote unverifiable (%s) — cannot rule out a push" % (before.get("remote_url") or after.get("remote_url")))
+        else:
+            for ref in sorted(set(rmb) | set(rma)):
+                if rmb.get(ref) == rma.get(ref):
+                    continue
+                if ref not in rma:
+                    viol.append("remote %s deleted during the role" % ref)
+                elif _reachable_from_local(worktree, rma[ref], after):
+                    viol.append("remote %s moved to a local commit during the role (push)" % ref)
+    ib, ia = before.get("integrity") or {}, after.get("integrity") or {}
+    for k in sorted(set(ib) | set(ia)):
+        if ib.get(k) != ia.get(k):
+            viol.append("%s changed during the role" % k)
     if movers:
         if branch_ref and after.get("symref") != branch_ref:
             viol.append("HEAD is %s after the role, not %s" % (after.get("symref") or after["head"][:12], branch_ref))

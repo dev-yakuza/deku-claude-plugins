@@ -142,3 +142,10 @@ def missing_artifacts(obj, worktree, run_dir, keys=("skeleton", "split_path", "p
         if not any(os.path.exists(c) for c in cands):
             out.append("%s=%s" % (k, v))
     return out
+
+
+def retire_result_json(run_dir, tag):
+    """Move an earlier session's out/result.json aside before a fresh spawn (K1-m2)."""
+    p = os.path.join(run_dir, "out", "result.json")
+    if os.path.exists(p):
+        os.replace(p, p + "." + tag)

@@ -145,37 +145,121 @@ class Rendered(object):
         self.path = path
 
 
+# Q23: package registries a role may reach from the OS sandbox (GitHub is never listed — roles
+# get Issue/PR content as in/ files and the engine does every GitHub write)
+REGISTRY_DOMAINS = {
+    "pubspec.yaml": ("pub.dev", "pub.dartlang.org", "storage.googleapis.com"),
+    "package.json": ("registry.npmjs.org", "registry.yarnpkg.com"),
+    "pyproject.toml": ("pypi.org", "files.pythonhosted.org"),
+    "setup.cfg": ("pypi.org", "files.pythonhosted.org"),
+    "requirements.txt": ("pypi.org", "files.pythonhosted.org"),
+    "go.mod": ("proxy.golang.org", "sum.golang.org"),
+    "Cargo.toml": ("crates.io", "static.crates.io", "index.crates.io"),
+}
+GITHUB_DOMAINS = ("github.com", "api.github.com", "codeload.github.com", "uploads.github.com",
+                  "objects.githubusercontent.com", "raw.githubusercontent.com")
+
+
+def registry_domains(worktree):
+    out = []
+    for f, doms in REGISTRY_DOMAINS.items():
+        if worktree and os.path.exists(os.path.join(worktree, f)):
+            out += [d for d in doms if d not in out]
+    return out
+
+
+def git_dirs(worktree):
+    """(gitdir, common_dir) of a worktree, absolute."""
+    rc, a = _git(worktree, "rev-parse", "--path-format=absolute", "--git-dir")
+    rc2, b = _git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if rc or rc2:
+        raise SettingsError("not a git repository: %s" % worktree)
+    return a.decode().strip(), b.decode().strip()
+
+
+def role_sandbox(role_key, worktree, run_dir, issue=None):
+    """The Q23 sandbox block, forced AFTER the merge (a user/local `enabled:false`,
+    `excludedCommands` or `allowUnsandboxedCommands` cannot weaken it)."""
+    allow_w = []
+    if run_dir:
+        allow_w.append(os.path.abspath(run_dir) + "/**")
+    deny_w = []
+    if worktree:
+        wt = os.path.abspath(worktree)
+        gitdir, common = git_dirs(worktree)
+        if role_key in ("developer", "qa"):
+            allow_w.append(wt + "/**")
+            # commits write objects/refs/index — in the common dir (and the linked gitdir)
+            allow_w += [common + "/**"] + ([gitdir + "/**"] if gitdir != common else [])
+        elif role_key == "tester-cases" and issue is not None:
+            allow_w.append(os.path.join(wt, "docs", "specs", str(issue)) + "/**")
+        elif role_key == "tech-writer":
+            allow_w.append(os.path.join(wt, "docs") + "/**")
+        if role_key not in ("developer", "qa", "tester-cases", "tech-writer"):
+            # the CLI sandbox lets a command write its cwd by default — a reader must not
+            # (verified with the real CLI: without this a reader's write to the worktree landed)
+            deny_w.append(wt + "/**")
+        for g in sorted(set([gitdir, common])):
+            deny_w += [g + "/hooks/**", g + "/config", g + "/config.worktree", g + "/info/**"]
+        deny_w += [wt + "/.claude/**", os.path.join(main_checkout(worktree), ".claude") + "/**"]
+    deny_w = list(dict.fromkeys(deny_w))
+    return {"enabled": True, "allowUnsandboxedCommands": False, "autoAllowBashIfSandboxed": False,
+            "excludedCommands": [],
+            "filesystem": {"allowWrite": allow_w, "denyWrite": deny_w},
+            "network": {"allowedDomains": registry_domains(worktree)}}
+
+
+class Sources(object):
+    """User and local settings read ONCE at engine start (K1-B2: a role must not change what a
+    later session is rendered from). Project settings come from the base snapshot per render."""
+
+    def __init__(self, user_settings=None, worktree=None, env=None):
+        self.user_p = user_settings or user_settings_path(env)
+        self.user = _load(self.user_p) or {}
+        self.local_p = os.path.join(main_checkout(worktree), LOCAL_REL) if worktree else None
+        self.local = (_load(self.local_p) or {}) if self.local_p else {}
+
+
 def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, toolchain=(),
-           extra_allow=(), user_settings=None, hooks=True, extra_hooks=None, env=None):
+           extra_allow=(), user_settings=None, hooks=True, extra_hooks=None, env=None,
+           sources=None, sandbox=None):
     """Render the settings for one session. `role="judge"` (and explorer/auditor callers that pass
     hooks=False) get no hooks. `user_settings` = path override (tests); default is the running
     session's config dir. Writes `<run_dir>/in/settings.json` when run_dir is given."""
-    user_p = user_settings or user_settings_path(env)
-    user = _load(user_p) or {}
-    project, base_sha, local, local_p, main = None, None, {}, None, None
+    src = sources or Sources(user_settings, worktree, env)
+    user_p, user, local_p, local = src.user_p, src.user, src.local_p, src.local
+    project, base_sha, main = None, None, None
     if worktree:
         if base:
             project, base_sha = base_project_settings(worktree, base)
         main = main_checkout(worktree)
-        local_p = os.path.join(main, LOCAL_REL)
-        local = _load(local_p) or {}
     project = project or {}
     sources = [("user", user), ("project", project), ("local", local)]
     allow, deny = permissions.role_rules(role, task, run_dir=run_dir, worktree=worktree,
                                          issue=issue, toolchain=toolchain, extra_allow=extra_allow)
     for _, s in sources:
-        for d in ((s.get("permissions") or {}).get("deny") or []):
+        perms = s.get("permissions") or {}
+        # `ask` too (K1-M5): under dontAsk an ask is a refusal; dropping it would turn it into an
+        # allow once the allow list is bare `Bash`
+        for d in list(perms.get("deny") or []) + list(perms.get("ask") or []):
             if isinstance(d, str) and d not in deny:
                 deny.append(d)
-    merged_env, sandbox = {}, None
+    merged_env, merged_sandbox = {}, None
     for _, s in sources:
         if isinstance(s.get("env"), dict):
             merged_env.update({str(k): str(v) for k, v in s["env"].items()})
         if isinstance(s.get("sandbox"), dict):
-            sandbox = merge_values(sandbox, s["sandbox"]) if sandbox is not None else copy.deepcopy(s["sandbox"])
+            merged_sandbox = (merge_values(merged_sandbox, s["sandbox"]) if merged_sandbox is not None
+                              else copy.deepcopy(s["sandbox"]))
     out = {"permissions": {"allow": allow, "deny": deny}}
-    if sandbox is not None:
-        out["sandbox"] = sandbox
+    rk = permissions.role_key(role, task)
+    if sandbox is None:
+        sandbox = permissions.ROLE_CLASSES.get(rk) not in (None, ()) and role != "judge"
+    if sandbox:
+        forced = role_sandbox(rk, worktree, run_dir, issue)
+        out["sandbox"] = forced      # Q23: the role sandbox is the engine's, not merged
+    elif merged_sandbox is not None:
+        out["sandbox"] = merged_sandbox
     gates_dir = None
     if hooks and project.get("hooks"):
         h = project["hooks"]

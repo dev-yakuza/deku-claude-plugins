@@ -75,28 +75,35 @@ class Question(object):
 def surface(question, attended, decisions, events=None, clock=None, writer=None, issue=None,
             stage=None, pause_line=None, journal=None):
     """Attended → pending block + `ask` event; unattended → pause. Returns the qid."""
+    fields = question.pending_fields(stage=stage)
+    token = os.urandom(6).hex()
+    if journal is not None and question.nonce:
+        # K1-m4: the nonce is journaled BEFORE the commitment is written (crash-safe reveal);
+        # the block is found again by this local token
+        journal.append("event", what="predict-first-nonce", token=token, nonce=question.nonce,
+                       recommended=question.recommended)
     if attended:
-        qid = decisions.record(question.pending_fields(stage=stage))
+        qid = decisions.record(fields)
         decisions.stamp_server_time(qid)
         if journal is not None and question.nonce:
-            journal.append("event", what="predict-first-nonce", qid=qid, nonce=question.nonce,
-                           recommended=question.recommended)
+            journal.append("event", what="predict-first-qid", token=token, qid=qid)
         if events is not None:
             events.emit("ask", clock.now(), **question.event(qid))
         return qid
     from guildcore import pause as P
     res = P.pause(writer, decisions, issue, pause_line, question=question, stage=stage)
     if journal is not None and question.nonce:
-        journal.append("event", what="predict-first-nonce", qid=res["did"], nonce=question.nonce,
-                       recommended=question.recommended)
+        journal.append("event", what="predict-first-qid", token=token, qid=res["did"])
     return res["did"]
 
 
 def _reveal(journal, qid):
     if journal is None:
         return {}
+    tokens = [e.get("token") for e in journal.entries
+              if e.get("kind") == "event" and e.get("what") == "predict-first-qid" and e.get("qid") == qid]
     for e in reversed(journal.entries):
-        if e.get("kind") == "event" and e.get("what") == "predict-first-nonce" and e.get("qid") == qid:
+        if e.get("kind") == "event" and e.get("what") == "predict-first-nonce" and e.get("token") in tokens:
             return {"recommended": e.get("recommended"), "nonce": e.get("nonce")}
     return {}
 
