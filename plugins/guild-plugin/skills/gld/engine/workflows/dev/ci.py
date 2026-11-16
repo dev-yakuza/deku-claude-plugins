@@ -30,11 +30,13 @@ class CiRecord(object):
         return bool(self.red or self.never_started)
 
 
-def record(gh, pr):
-    """`pr` = the PR dict from Step 2.5's lookup (or None)."""
+def record(gh, pr, head=None):
+    """`pr` = the PR dict from Step 2.5's lookup (or None). `head` = the sha the ENGINE just pushed
+    (qa committed tests) — GitHub's `headRefOid` can lag a fresh push (replay #1799), so the
+    pushed sha wins over a re-read."""
     if not pr:
         return CiRecord("none", "PR CI: 없음")
-    head = pr.get("headRefOid")
+    head = head or pr.get("headRefOid")
     if not head:
         head = (gh.pr(pr["number"]) or {}).get("headRefOid")
     runs = gh.check_runs(head) if head else []

@@ -88,7 +88,7 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         if bad:
             raise RuntimeError("drift before the engine push: %s" % bad)
         G.push(worktree, push_url, "refs/heads/%s:refs/heads/%s" % (branch, branch))
-        return True
+        return local                    # the pushed sha (qa's PR CI reads its check-runs)
 
     return Ports(issue, gh, writer, decisions, clock, config, worktree, unattended=unattended,
                  run_role=run_role, judge=judge_runner.judge, suite=suite, check=check, capture=capture,

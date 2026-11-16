@@ -38,6 +38,8 @@ STAGE = "test"
 EVIDENCE = "test-evidence:step-1"
 CEILING_S = 3600
 CASE_RE = re.compile(r"^(?:\s*[|#*\-]+\s*)*(?:\*\*)?\b(AC ?#?\d+|TC-?\d+|C\d+)\b")
+# H§C:292 keyword pre-filter (MJ-DWC only when an input-reading word is near a partial word)
+DWC_RE = re.compile(r"(읽|read|load|열).{0,24}(일부|부분|part|잘|truncat|cut)|(일부|부분|part(ial)?ly?|truncat|잘린).{0,24}(읽|read|load)", re.I)
 RUNNER_PAUSE = "테스트 요약 형식을 읽지 못함 — commands.test_summary 를 설정하세요"
 
 
@@ -234,7 +236,8 @@ def _tester(p, cfg, tc_rel, r, s_line, deferred, visual_cases, vrun, addendum=No
     o = B.role_outcome(p, STAGE, "tester", res)
     if o is not None:
         return o
-    if res.status == "DONE_WITH_CONCERNS" and re.search(r"part|일부|부분", res.line or "", re.I) and task == "verify":
+    if res.status == "DONE_WITH_CONCERNS" and task == "verify" and DWC_RE.search(res.line or "") and \
+            p.judge(JG.spec(p, "DWC", [("concern", res.line or "")], STAGE, "T1")).choice == "partial_read":
         res2 = p.run_role(B.RoleCall("tester", task, STAGE, "T1", inputs=inputs, attempt=2,
                                      addendum="Your report said you read an input only in part. Read every "
                                               "input file whole and redo the mapping."))

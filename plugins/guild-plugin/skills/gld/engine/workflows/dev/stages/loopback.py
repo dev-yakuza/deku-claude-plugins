@@ -68,6 +68,9 @@ def run(p, stage, from_, reason, signature, decided_human=False, current_label=N
         capture_role=None):
     """The procedure. `stage` = the stage running it (test|qa); `current_label` = the stage
     label the Issue carries now (defaults to guild:<stage>)."""
+    inj = (getattr(p, "inject", None) or {}).get("loopback")
+    if inj:                                         # replay only (§10.2-2 injection list)
+        reason, signature = inj.get("reason") or reason, inj.get("signature") or signature
     sig = _sig(signature)
     if not sig:
         raise ValueError("a loop-back signature is never empty (C-F-7)")

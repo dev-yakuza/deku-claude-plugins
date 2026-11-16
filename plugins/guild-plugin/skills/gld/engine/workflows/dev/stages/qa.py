@@ -140,8 +140,10 @@ def run(p, only=None, config_present=True, diff_paths=None):
     o = B.role_outcome(p, STAGE, "qa", qres)
     if o is not None:
         return o
+    pushed_sha = None
     if p.push is not None and qres.status in ("DONE", "DONE_WITH_CONCERNS"):
-        p.push()                                                           # §5.5: qa's test commits
+        pushed = p.push()                                                  # §5.5: qa's test commits
+        pushed_sha = pushed if isinstance(pushed, str) else None
 
     convene, why = ui_convene(p, cfg, comments, diff)                      # Q1.5
     dres = None
@@ -155,7 +157,7 @@ def run(p, only=None, config_present=True, diff_paths=None):
     ui_line = ("해당 없음 — %s" % why) if dres is None else \
         "designer: %s" % (dres.line or dres.status)
 
-    ci = CI.record(p.gh, pr)                                               # Q2.2
+    ci = CI.record(p.gh, pr, head=pushed_sha)                              # Q2.2
     if ci.is_red and p.engine_cfg("qa", {}).get("stop_on_ci_red") is True:   # Q2.3 habit stop
         return _ci_stop(p, ci)
 

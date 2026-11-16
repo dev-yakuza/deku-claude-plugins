@@ -99,6 +99,9 @@ class Ports(object):
         self.branch, self.base = branch, base
         self.impl_files = impl_files      # developer result.json `impl_files` (execute's ctx)
         self.git_dir = git_dir
+        # the procedure replay's injection list (§10.2-2): legacy values that are not the
+        # engine's to decide (loop-back reason/signature …). Empty in every live run.
+        self.inject = {}
 
     # -- config ---------------------------------------------------------------------------
     def cfg(self, dotted, default=None):

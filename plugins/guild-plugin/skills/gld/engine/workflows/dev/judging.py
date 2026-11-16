@@ -9,6 +9,7 @@
 | RUNNER    | haiku  | —              | stays unsure (env pause, §2.8)   | —                             |
 | PRMATCH   | haiku  | —              | → none                           | match without a pr → none     |
 | FOLLOWUP  | haiku  | —              | → needs_filing                   | covered without an issue → needs_filing |
+| DWC       | haiku  | —              | → partial_read (one re-dispatch) | —                             |
 System = `judges/leader-core.md` + the repo leader's `## 프로젝트 특화`/`[J:<group>]` habits (SJ only,
 §8.1) + `judges/<group>.md`. Generated decisions go to the decision log (SJ) or the journal (MJ).
 """
@@ -20,11 +21,11 @@ from guildcore.judges.runner import JudgeSpec
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "judges")
 TIERS = {"TEST": "sonnet", "QA": "sonnet", "VIS-ENV": "sonnet", "DIRECTIVE": "sonnet",
-         "RUNNER": "haiku", "PRMATCH": "haiku", "FOLLOWUP": "haiku"}
-LAYER = {"RUNNER": "MJ", "PRMATCH": "MJ", "FOLLOWUP": "MJ"}
+         "RUNNER": "haiku", "PRMATCH": "haiku", "FOLLOWUP": "haiku", "DWC": "haiku"}
+LAYER = {"RUNNER": "MJ", "PRMATCH": "MJ", "FOLLOWUP": "MJ", "DWC": "MJ"}
 CHOICE = {"TEST": "overall"}
 UNSURE = {"TEST": "gap", "QA": "block", "VIS-ENV": "env_suspect", "DIRECTIVE": "out_of_scope",
-          "RUNNER": None, "PRMATCH": "none", "FOLLOWUP": "needs_filing"}
+          "RUNNER": None, "PRMATCH": "none", "FOLLOWUP": "needs_filing", "DWC": "partial_read"}
 BUDGET = {"SJ": 0.5, "MJ": 0.05}
 CAPS = {"SJ": 25000, "MJ": 6000}
 NO_ELIDE = {"TEST": ("excerpts",), "DIRECTIVE": ("comments",)}
