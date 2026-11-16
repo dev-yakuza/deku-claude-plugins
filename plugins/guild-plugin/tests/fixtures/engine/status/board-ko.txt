@@ -1,0 +1,11 @@
+Guild 모니터링 스냅샷
+▲ 2개 이슈 사람 대기 중 — #102, #106
+▲ 게이트: 열린 위반 1건
+조직 ③ — 역할 2개 설치 · 기본 문구 그대로: qa
+지식 ⑥ / 기억 ④ — 지식 색인 1줄 · 기억 2건 (ground-truth.jsonl)
+진화 이력 ⑤ — ledger: runs=2 next=3
+게이트 — 게이트 켜짐 · 열린 위반 1건 · 수용된 위험 2건
+표준 ② — draft 1 · confirmed 1
+활성 작업 — analyze 1 · execute 4 · test 2 · qa 1 · done 1 · children 1 · none 3
+  활성 스프린트 1건 (#109) — /gld sprint daily
+읽은 시각 2026-11-16T00:00:00Z 기준 스냅샷 — 실시간 아님

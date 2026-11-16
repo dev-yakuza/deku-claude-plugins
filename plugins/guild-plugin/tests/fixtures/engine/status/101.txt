@@ -1,0 +1,9 @@
+Issue #101: Add login form
+Stage: execute
+- [x] Analyze: completed
+- [x] Design: completed
+- [x] Execute: completed
+- [ ] Test: not started
+- [ ] QA: not started
+PR: https://github.com/acme/app/pull/201 (open)
+Mode: legacy-started

@@ -1,0 +1,10 @@
+Issue #117: Done via qa
+Stage: done
+- [x] Analyze: completed
+- [x] Design: completed
+- [x] Execute: completed
+- [x] Test: completed
+- [x] QA: completed
+Loop-backs: 2/2 — latest from qa: PR CI 가가가 가가 red — a4acb24e가 dispatcher 가가가가 가가 manual-checklist.md 8가가 가가가 STALE (not yet handled)
+PR: https://github.com/acme/app/pull/205 (open)
+Mode: legacy-started

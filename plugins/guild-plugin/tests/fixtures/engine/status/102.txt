@@ -1,0 +1,12 @@
+Issue #102: Fix sync race
+⏸ PAUSED — needs a human decision (see the <!-- guild:needs-human --> comment)
+Stage: execute (paused here)
+- [x] Analyze: completed
+- [x] Design: completed
+- [ ] Execute: in progress (paused)
+- [ ] Test: not started
+- [ ] QA: not started
+Loop-backs: 1/2 — latest from test: 가가 가가가 VC-01·02·03·05·06 가 가가가 가가 TC-03·08·28 가 가가 가가가 가가 AC 가가가가가 가가가가 (not yet handled)
+PR: none
+PR candidates (no closing reference — unconfirmed): #203 related to sync (open)
+Mode: legacy-started

@@ -1,0 +1,10 @@
+Issue #118: Loop-back already consumed by a run
+Stage: test
+- [x] Analyze: completed
+- [x] Design: completed
+- [x] Execute: completed
+- [ ] Test: in progress
+- [ ] QA: not started
+Loop-backs: 1/2 — latest from test: 가가 가가가 VC-01·02·03·05·06 가 가가가 가가 TC-03·08·28 가 가가 가가가 가가 AC 가가가가가 가가가가 (not yet handled)
+PR: none
+Mode: legacy-started

@@ -1,0 +1,9 @@
+Issue #105: Word detail screen  (split parent)
+Stage: orchestrating (split parent)
+Children: 1/4 done
+- [x] #104 Child merged by hand — done
+- [ ] #106 detail view slice — execute (paused)
+- [ ] #107 entry-point slice — not started
+- [ ] #113 QA paused by engine — qa
+Integration: pending
+Mode: legacy-started

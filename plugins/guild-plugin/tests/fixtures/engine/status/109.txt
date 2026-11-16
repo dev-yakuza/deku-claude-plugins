@@ -1,0 +1,3 @@
+Issue #109: Sprint 3
+Stage: sprint (tracking Issue)
+Next: /gld sprint daily (never /gld dev — that develops the container)

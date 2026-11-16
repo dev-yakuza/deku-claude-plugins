@@ -1,0 +1,9 @@
+Issue #110: Harness gap: lint
+Stage: harness remediation — not started
+Next: /gld dev 110 to start it
+- [ ] Analyze: not started
+- [ ] Design: not started
+- [ ] Execute: not started
+- [ ] Test: not started
+- [ ] QA: not started
+PR: none

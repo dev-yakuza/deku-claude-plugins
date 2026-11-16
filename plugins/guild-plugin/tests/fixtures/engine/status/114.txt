@@ -1,0 +1,10 @@
+Issue #114: Rolled back while pending
+Stage: execute
+- [x] Analyze: completed
+- [x] Design: completed
+- [ ] Execute: in progress
+- [ ] Test: not started
+- [ ] QA: not started
+PR: none
+Decisions: 2 (pending-human 0, superseded (퇴역 대기) 1)
+Mode: engine (since analyze, plugin 0.102.0)
