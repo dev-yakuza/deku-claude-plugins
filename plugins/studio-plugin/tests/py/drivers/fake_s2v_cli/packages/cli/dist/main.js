@@ -1068,7 +1068,8 @@ function render(script, values) {
 // ---------- capture (no network, no browser) ----------
 // SCENARIO.capture = { "<url>": result | [result per attempt], "*": the default }; a result is
 // { url (the final address), status, title, lang, idle, text: [{kind, text, ruby}], images: [{src, kind, alt, inCapture,
-// bytes (the file's text; written to --assets-dir as <sha>.<ext>), ext}], opaque, notShown, blocked: [{url, reason}],
+// bytes (the file's text; or hex: the bytes in hex; written to --assets-dir as <sha>.<ext>), ext}], opaque, notShown,
+// blocked: [{url, reason}],
 // websockets, contentHash (null allowed; absent: computed), exit, signal, stderr }. Unknown result keys are ignored.
 // A 67-byte PNG (1×1, grey) is the picture.
 const TINY_PNG = Buffer.from(
@@ -1123,7 +1124,7 @@ function capture(positionals, values) {
   if (r.signal) process.kill(process.pid, r.signal);
   const images = [];
   for (const im of r.images || []) {
-    const bytes = im.bytes === undefined ? null : Buffer.from(String(im.bytes));
+    const bytes = im.hex !== undefined ? Buffer.from(String(im.hex), 'hex') : im.bytes === undefined ? null : Buffer.from(String(im.bytes));
     const sha = bytes ? sha256(bytes) : null;
     if (bytes && values['assets-dir']) {
       fs.mkdirSync(values['assets-dir'], { recursive: true });

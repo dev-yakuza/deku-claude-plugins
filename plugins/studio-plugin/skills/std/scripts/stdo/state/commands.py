@@ -7,7 +7,9 @@ evidence-free needs a person's answer (closed side)."""
 EVIDENCE_FREE = frozenset(["next", "record-brief", "loop", "status", "sync", "shown", "stage-done", "credit-preview",
                            "begin", "record-source", "hold", "release-lock", "record-render", "done",
                            # 0.0.28 §13: a person's later pause request; the guard's allow skips it (NO_AUTO)
-                           "ask-before"])
+                           "ask-before",
+                           # 0.2.4: records capture.py recheck's result (a URL source), like record-source
+                           "record-recheck"])
 # M0b-2: these record a person's decision and consume the guard's evidence (exit 6 without it)
 APPROVAL = frozenset(["approve", "reject-source-diff", "repin", "exclude-output", "unlock", "abandon", "overlay",
                       "credit"])
@@ -21,7 +23,9 @@ IMPLEMENTED = frozenset(["next", "record-brief", "loop", "status", "sync", "stag
                          # M1g
                          "credit", "credit-preview",
                          # 0.0.28
-                         "ask-before"])
+                         "ask-before",
+                         # 0.2.4
+                         "record-recheck"])
 
 
 def needs_evidence(name):

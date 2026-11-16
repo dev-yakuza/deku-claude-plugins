@@ -125,11 +125,15 @@ def _part(obj, key, kind, what):
 
 
 def source_commit_lines(state):
-    """The lines the ① question must show (M1e review S5): one per commit to the source after begin. Raises
-    ValueError on a record that is there but malformed."""
+    """The lines the ① question must show (M1e review S5): one per commit to the source after begin; for a URL
+    source, the capture its copy came from (when, which address, how many hosts s2v blocked and how many frames or
+    canvases in the picture it could not read). Raises ValueError on a record that is there but malformed."""
     src = _part(state, "source", dict, "source")
     commits = _part(src, "commits_since_begin", list, "source.commits_since_begin") if src else None
     out = []
+    cap = _part(src, "capture", dict, "source.capture") if src and src.get("kind") == "url" else None
+    if cap is not None:
+        out.append(capture_line(cap))
     for c in commits or []:
         if not isinstance(c, dict) or not isinstance(c.get("sha", ""), str) or \
                 not isinstance(c.get("subject", ""), str):
@@ -137,6 +141,14 @@ def source_commit_lines(state):
         out.append("원본이 begin 뒤에 커밋됨: %s %s (%s)%s" % (c.get("sha", "")[:12], c.get("subject", ""),
                                                          c.get("stat") or "—", " (merge)" if c.get("merge") else ""))
     return out
+
+
+def capture_line(cap):
+    """The ① line of a URL source's capture (one line: no control characters)."""
+    def one(v):
+        return re.sub(r"[\x00-\x1f\x7f]", " ", str(v))[:300]
+    return "원본 페이지 캡처: %s · %s · 막힌 요청의 호스트 %s개 · 그림 안에서 읽지 못한 영역 %s개" % (
+        one(cap.get("url")), one(cap.get("at")), one(cap.get("blocked")), one(cap.get("opaque_in_capture")))
 
 
 def gate2_lines(state, lang=None, gate="2", scope="-"):

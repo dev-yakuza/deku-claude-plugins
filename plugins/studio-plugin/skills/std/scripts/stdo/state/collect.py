@@ -163,8 +163,24 @@ def proxy_credits(state, repo, env=None):
 
 
 def default_source(ctx, state):
-    """(live source_hash, the frozen copy's text) for a repository Markdown source."""
+    """(live source_hash, the frozen copy's text) for a repository Markdown source. A URL source is never fetched here
+    (m2-plan §6.3): its live hash is the frozen one — a changed page comes in only through a recorded recheck and its
+    promotion — and its copy must be the one record-source recorded (`copy_sha`)."""
     src = state["source"]
+    if src.get("kind") == "url":
+        if not src.get("frozen_hash"):
+            return None, None  # no copy yet: the router sends the work to `source`
+        copy = frozen_copy_path(ctx["vdir"], src)
+        try:
+            with open(copy, "rb") as f:
+                raw = f.read()
+        except OSError as e:
+            raise CollectError("the frozen source copy is missing: %s (%s)" % (copy, e.strerror))
+        if src.get("copy_sha") and hashes.sha(raw) != src["copy_sha"]:
+            raise CollectError("work/source/page.md is not the copy record-source recorded: run state.py "
+                               "record-source %s again (after gate ① it puts the recorded copy back when a promotion "
+                               "was cut short)" % state.get("video"))
+        return src["frozen_hash"], raw.decode("utf-8", "replace")
     if src.get("kind") != "repo-md":
         raise CollectError("source kind %r is not supported yet" % src.get("kind"))
     live = hashes.source_hash_repo_md(ctx["repo"], src["path"], src.get("images", []))
@@ -181,5 +197,8 @@ def default_source(ctx, state):
 
 def frozen_copy_path(vdir, src):
     """00-plan §3.5 `work/source/` (the source's pinned copy, never edited): the copied file keeps
-    the source's file name. (`work/source.md` is the analysis, not the copy.)"""
+    the source's file name; a URL source's copy is the page's text `page.md`. (`work/source.md` is the analysis, not
+    the copy.)"""
+    if src.get("kind") == "url":
+        return os.path.join(vdir, "work", "source", "page.md")
     return os.path.join(vdir, "work", "source", os.path.basename(src["path"]))

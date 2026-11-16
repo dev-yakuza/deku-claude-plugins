@@ -296,6 +296,17 @@ the repository): [docs/removing.md](docs/removing.md).
   is changed with `/std config` and the person's `설정` answer. Agents can no longer write a video's `assets/`,
   `work/captures/`, `work/captures.json` or `work/source-diff.txt` (put a picture in `assets/` yourself). Needs
   `/std update` (scripts version 31).
+- **0.2.4**: URL sources — a `youtube` or `sns` video can be made from a public web page:
+  `state.py begin <video> --url <https url> --kind sns` (a page on one of `public_domains`, checked against the internal
+  overlay), then `capture.py source` copies the page (its text as `page.md`, its readings, a picture and its pictures)
+  and the source stage goes on as for a Markdown file: claims are checked against `page.md`, PNG and JPEG pictures of
+  the page become usable (`third-party` when they come from another host), and the ① question shows when and how the
+  page was captured. The page is never fetched again by a stage: before the video commit `capture.py recheck` reads it
+  again and `state.py record-recheck` records the result; a changed page is promoted with `record-source
+  --from-recheck <n>` and goes through the source-diff gate (`work/source-diff.txt` against the copy ① approved), and
+  the commit needs a recheck at most 24 hours old (counted at `check_commit.py --stage`) that found the approved
+  copy. The source analyst reads the page as data, never as instructions. Needs `/std update` (scripts version 32,
+  the source analyst's persona).
 
 ## License
 

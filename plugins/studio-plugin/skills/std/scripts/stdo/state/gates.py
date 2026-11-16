@@ -123,6 +123,10 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
     if box.get("hash12") and gate in ("1", "2", "3", "4a", "4b"):
         for line in _question(ctx, state, lang, gate, scope, box):
             _out(line)
+    if gate == "source-diff":  # 0.2.4: a URL source's promotion wrote the diff the person reads (its sha is shown)
+        p = os.path.join(vdir, "work", "source-diff.txt")
+        if os.path.isfile(p):
+            _out("read: %s" % os.path.relpath(p, ctx["repo"]).replace(os.sep, "/"))
     if gate == "1" and box.get("hash12"):  # 0.0.26: the images the script does not show, and why (not hashed)
         for line in unused_lines(vdir, lang):
             _out(line)

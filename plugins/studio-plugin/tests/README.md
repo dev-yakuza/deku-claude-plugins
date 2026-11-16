@@ -481,3 +481,36 @@ a loop, `/tmp/*/assets`) while `$X/videos/v/assets` is refused; an overlay subdo
 behind repeated percent-encoding or a zero-width space, encoded `?`/`#`, a selector starting with `-` and a final
 address with a port or user are refused.
 Review 2: a video id from `$(…)` or backticks before `assets`/`work/captures` is refused (`build/$(echo x)/assets` passes); a URL still encoded after three decoding rounds is refused.
+
+**0.2.4** (`SCRIPTS_VERSION` 32, m2-plan M2e): `test_m2e.py` — URL sources with the fake s2v capture (no network).
+`page.md` (`stdo/source/page.py`): golden bytes, every TextKind's prefix, each escape, the url comment and ruby moved
+to `page-ruby.json`. `begin --url`: the source record; a host outside `public_domains`, an overlay term (also
+percent-encoded), `--url` with `--source`, an internal kind, a fragment, a credential-like query key → 2, a missing
+overlay → 4. `capture.py source`: the copy's files and `capture-files.json`; s2v exit 1, unsettled twice, no
+contentHash, a redirect, a signal and exit 2 leave `work/source/` empty; blocked hosts and opaque frames reach the ①
+line; refused after ①. record-source's URL branch: `frozen_hash` = contentHash, `copy_sha`, `capture`; a changed or
+unlisted file and a missing record refused; `--url` refused; `collect.default_source` reads the copy without fetching
+and refuses a copy that is not the recorded one. resolve_assets/check_scope: `img-<sha12>` ids, identical bytes
+merged into `refs`, floors by host (public, third-party, unknown for `data:`), WebP and no bytes not usable, the
+`src-<sha12>` copies, an overlay host's picture internal, an overlay source page or term refused, a missing overlay
+→ 4. check_claims `--source`: ruby pairs against `page-ruby.json`. record-recheck: recorded, an old number refused, a
+changed file → 1, unreachable recorded without a hash, the promotion line. The promotion: prev-1 and
+`source-diff.txt`, nothing to promote twice, unknown/unreachable rechecks refused, a tampered recheck refused, a
+promotion cut short (before the event; while moving the old copy) refused by `next`'s collect and plain record-source
+and finished by a rerun, two promotions before an approval diff against ①'s copy (same bytes when written again),
+analyst classes kept across a reordered page (and a new picture named). The folders kept (last three rechecks and
+the promoted one; ①'s prev and the newest). The commit rule: no recheck, 23 h 59 min passes, 24 h 1 min refused,
+unreachable, a changed page, approved after a promotion without another recheck; only in `--stage`, not the hook.
+The source-diff gate prints `read: work/source-diff.txt` and its hash12 changes with the file. `test_guard_autoallow`
+— `state.py record-recheck`, `record-source --from-recheck` and `begin --url` allowed without a prompt.
+Review 1: a promotion cut short and then a same-hash recheck (the promoted recheck deleted by the folders kept) puts
+the recorded copy back (also a plain record-source after ①); a same-host redirect to the overlay's internal source or
+to a path with a term is not usable (source), unreachable (recheck) and refused by check_scope from the recorded final
+address; a recheck dated in the future; U+2028/U+2029/U+0085 as line breaks and bidi controls dropped in page.md (no
+forged claim line), `_` and `[` escaped; every line of a URL source's `## Ruby pairs` must be a page pair; page
+pictures over the byte cap not usable, long data: addresses and alts cut; prevs of every language's ① kept;
+`promoted_from` cleared by a new capture; `work/source/last-attempt.json` for an unusable source capture.
+Review 2: the overlay's internal source pages match by a normalized prefix (query, fragment, `;params`, repeated `/`,
+`index.html`, letter case and pages under it) at begin, source, recheck and check_scope; a second `## Ruby pairs`
+heading is refused; a restore needs the prev's recorded content hash and capture record; a page picture's floor and
+host come from its whole address.

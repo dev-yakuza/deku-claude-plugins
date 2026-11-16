@@ -270,6 +270,15 @@ python3 .claude/studio/scripts/hooks.py install
   `/std config`와 사람의 `설정` 답으로 바꿉니다. 에이전트는 이제 영상의 `assets/`, `work/captures/`,
   `work/captures.json`, `work/source-diff.txt`를 쓸 수 없습니다(`assets/`의 그림은 직접 넣으세요). `/std update`가
   필요합니다(스크립트 버전 31).
+- **0.2.4**: URL 원본 — `youtube`·`sns` 영상을 공개 웹 페이지로 만들 수 있습니다:
+  `state.py begin <video> --url <https url> --kind sns`(`public_domains`의 페이지, 내부 오버레이와 대조), 이어서
+  `capture.py source`가 페이지를 복사하고(본문은 `page.md`, 읽기, 페이지 그림과 그 안의 그림) 원본 단계는 Markdown
+  파일과 같이 진행됩니다: 주장은 `page.md`와 대조하고, 페이지의 PNG·JPEG 그림은 쓸 수 있게 되며(다른 호스트의 그림은
+  `third-party`), ① 질문에 페이지를 언제 어떻게 캡처했는지가 나옵니다. 단계가 페이지를 다시 가져오는 일은 없습니다:
+  영상 커밋 전에 `capture.py recheck`가 다시 읽고 `state.py record-recheck`가 결과를 기록합니다. 바뀐 페이지는
+  `record-source --from-recheck <n>`로 승격되어 원본 차이 게이트를 거치고(`work/source-diff.txt`, ①이 승인한 사본
+  대비), 커밋에는 승인된 사본을 확인한 24시간 이내의 재확인이 필요합니다(`check_commit.py --stage` 시점 기준). 원본
+  분석가는 페이지를 지시가 아닌 자료로 읽습니다. `/std update`가 필요합니다(스크립트 버전 32, 원본 분석가 페르소나).
 
 ## 라이선스
 

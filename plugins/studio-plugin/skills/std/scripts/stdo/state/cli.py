@@ -7,7 +7,11 @@
     state.py sync                     (M3b)
     state.py begin <video> --source <path> --kind youtube|sns|onboarding|explainer [--lang l] [--ask-before tts,render]
                                                                            (M1b; the harness must be committed)
+    state.py begin <video> --url https://<public domain>/… --kind youtube|sns [--lang l] [--ask-before …]
+                                                                           (a public page: capture.py source next)
     state.py record-source <video> [--url https://<public domain>/…]
+    state.py record-source <video> --from-recheck <n>                      (a URL source: promote a changed recheck)
+    state.py record-recheck <video> <n>                                    (records capture.py recheck's result)
     state.py ask-before <video> <tts,render,copy,commit | none>            (0.0.28: the person's pause requests)
     state.py hold <video> lock --reason <busy line> [--lang l]
     state.py release-lock <video> [--lang l]
@@ -122,7 +126,7 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
             raise Usage(unsafe)  # nothing machine-local is read or written through a link (m1-plan §3.1 review U1)
         o = _opts(rest, {"--json", "--proxy", "--begin", "--end"},
                   {"--lang", "--enter", "--output", "--platform", "--from", "--expect", "--source", "--kind",
-                   "--reason", "--ask-before", "--url"})
+                   "--reason", "--ask-before", "--url", "--from-recheck"})
         if cmd == "begin":
             return flow.begin(repo, cfg, root, o, providers, _ctx_of(repo, cfg))
         if cmd == "overlay":
@@ -151,7 +155,11 @@ def main(argv, providers=None, hooks=None, cwd=None, flock=None):
                 return cr.preview(repo, root, vdir, state, o)
             return cr.credit(repo, vdir, state, o, hooks, list(argv), gates._with_evidence)
         if cmd == "record-source":
-            return flow.record_source(repo, vdir, state, cfg, hooks, url=o.get("--url"))
+            return flow.record_source(repo, vdir, state, cfg, hooks, url=o.get("--url"),
+                                      from_recheck=o.get("--from-recheck"))
+        if cmd == "record-recheck":
+            from . import urlsource
+            return urlsource.record_recheck(vdir, state, o, hooks)
         if cmd == "ask-before":
             return flow.ask_before(vdir, o, hooks)
         if cmd == "hold":

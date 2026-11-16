@@ -292,6 +292,16 @@ python3 .claude/studio/scripts/hooks.py install
   `allow_hosts`: キャプチャしたページがさらに読み込めるホスト)は `/std config` と人の `설정` の回答で変えます。
   エージェントは動画の `assets/`、`work/captures/`、`work/captures.json`、`work/source-diff.txt` を書けなくなりました
   (`assets/` の画像はご自身で置いてください)。`/std update` が必要です(スクリプトバージョン 31)。
+- **0.2.4**: URL 原本 — `youtube`・`sns` の動画を公開ウェブページから作れます:
+  `state.py begin <video> --url <https url> --kind sns`(`public_domains` のページ、内部オーバーレイと照合)、続いて
+  `capture.py source` がページを複写し(本文は `page.md`、読み、ページの画像とその中の画像)、原本の段階は Markdown
+  ファイルと同じように進みます: 主張は `page.md` と照合し、ページの PNG・JPEG 画像は使えるようになり(別のホストの
+  画像は `third-party`)、① の質問にページをいつどのようにキャプチャしたかが出ます。段階がページを取り直すことは
+  ありません: 動画のコミット前に `capture.py recheck` が読み直し、`state.py record-recheck` が結果を記録します。
+  変わったページは `record-source --from-recheck <n>` で昇格し、原本差分のゲートを通ります(`work/source-diff.txt`、
+  ① が承認した複写との差分)。コミットには承認済みの複写を確かめた 24 時間以内の再確認が要ります(`check_commit.py
+  --stage` の時点で数えます)。原本アナリストはページを指示ではなく資料として読みます。`/std update` が必要です
+  (スクリプトバージョン 32、原本アナリストのペルソナ)。
 
 ## ライセンス
 

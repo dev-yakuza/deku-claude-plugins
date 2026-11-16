@@ -7,9 +7,10 @@ files are staged.
 
 Before staging (s2v runs here, never in the hook): the light check (approvals, held, proxy approvals and proxy credits
 — J131), the router's full check per active language (nothing to redo: a ② rework stales the render, J116), the source
-stage's check again (assets.json and the scope check still the recorded ones), check_assets and validate_copy again
-(J142), the files the script refers to present, no machine-only path, no orphan base voice, no committed picture whose
-CREDITS entry forbids redistribution (every remote counts as public: Studio cannot ask it — J150), no home path or
+stage's check again (assets.json and the scope check still the recorded ones; a URL source's latest recheck read the
+page at most 24 hours before staging and found the approved copy — urlsource.recheck_problem), check_assets and
+validate_copy again (J142), the files the script refers to present, no machine-only path, no orphan base voice, no
+committed picture whose CREDITS entry forbids redistribution (every remote counts as public: Studio cannot ask it — J150), no home path or
 in-house term in the committed text.
 
 The pronounce merge: HEAD's object in its own order and format, the video's approved readings (the valid
@@ -254,6 +255,11 @@ class VideoKind(object):
         if note or state["source"].get("assets_sha") is None:
             out.append(Problem(1, "video %s: the source's images are not checked as recorded (%s) — run the source "
                                   "stage again" % (video, note or "no assets_sha")))
+        if state["source"].get("kind") == "url":  # 0.2.4: the page read again, at most 24 hours ago, as approved
+            from ..state import urlsource
+            why = urlsource.recheck_problem(state)
+            if why:
+                out.append(Problem(1, "video %s: %s" % (video, why)))
         for lang in langs:
             sctx = scli._ctx(ctx.top, cfg, vdir, lang)
             try:

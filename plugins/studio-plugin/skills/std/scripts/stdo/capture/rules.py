@@ -17,6 +17,7 @@ is missing."""
 import hashlib
 import json
 import os
+import posixpath
 import re
 import unicodedata
 from urllib.parse import unquote, urlsplit
@@ -93,6 +94,11 @@ def overlay_items(top, cfg, env):
         data = json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         return "missing", set(), []
+    return items_of(data)
+
+
+def items_of(data):
+    """("ok", hosts, terms) of an overlay object read and matched already (check_scope has it)."""
     inner = data.get("internal") if isinstance(data, dict) else None
     if not isinstance(inner, dict):
         return "ok", set(), []
@@ -113,6 +119,65 @@ def overlay_items(top, cfg, env):
     terms = [t for t in (inner.get("terms") or []) if isinstance(t, str) and len(t.strip()) >= MIN_TERM]
     terms += [t for t in ids if len(t) >= MIN_TERM]
     return "ok", hosts, sorted(set(t.strip() for t in terms))
+
+
+def source_urls(top, cfg, env):
+    """The overlay's internal source addresses (`internal.sources[].url`; empty without an overlay or a matching one)."""
+    if overlay_items(top, cfg, env)[0] != "ok":
+        return []
+    try:
+        with open(os.path.join(top, ".claude", "studio", "local", "config.internal.json"), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    return urls_of(data)
+
+
+def urls_of(data):
+    inner = data.get("internal") if isinstance(data, dict) else None
+    return [s["url"] for s in (inner or {}).get("sources") or [] if isinstance(s, dict) and isinstance(s.get("url"), str)]
+
+
+INDEX_NAMES = ("index.html", "index.htm")
+
+
+def page_key(url):
+    """(host, path) of an address as Studio compares pages with the overlay's internal sources: no query, fragment or
+    `;params`, percent-decoded (as `decoded`), dot segments resolved, repeated `/` collapsed, a trailing index.html /
+    index.htm and `/` dropped, case-folded. None when it is not an address."""
+    try:
+        x = urlsplit(url.strip())
+    except (ValueError, AttributeError):
+        return None
+    path = decoded(x.path)[-1] if x.path else ""
+    path = "/".join(seg.split(";", 1)[0] for seg in path.split("/"))
+    path = posixpath.normpath("/" + re.sub(r"/+", "/", path)) if path else "/"
+    low = _fold(path)
+    for name in INDEX_NAMES:
+        if low.endswith("/" + name):
+            low = low[:-len(name)]
+    return (x.hostname or "").lower().rstrip("."), low.rstrip("/")
+
+
+def same_or_under(url, source):
+    """Whether `url` is the overlay source page `source` or a page under it (its path a prefix, by page_key)."""
+    a, b = page_key(url), page_key(source)
+    if a is None or b is None or not b[0] or a[0] != b[0]:
+        return False
+    return a[1] == b[1] or a[1].startswith(b[1] + "/")
+
+
+def final_problem(final, cfg, items, internal_urls, what="the page's final address"):
+    """None, or why a page's final address (after redirects on the same host) may not be the source: the host and term
+    rules of page_host, and not one of the overlay's internal source pages."""
+    try:
+        page_host(final, cfg, items, what)
+    except CaptureError as e:
+        return str(e)
+    hit = next((u for u in internal_urls if same_or_under(final, u)), None)
+    if hit:
+        return "%s is an internal source of the overlay" % what
+    return None
 
 
 def host_hit(host, hosts):

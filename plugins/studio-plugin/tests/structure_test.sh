@@ -428,18 +428,21 @@ LEGACY_DEPS_HEAD = {
 # commit/video.py lazily, and video.py loads credits.py; the closure test below runs them). Intended changes since
 # d2028cc, each with a one-line reason:
 LEGACY_DEPS_CHANGED = {
-    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26 · 0.1.2: SCRIPTS_VERSION 27 · 0.2.0: SCRIPTS_VERSION 28 · 0.2.1: 29 · 0.2.2: 30 · 0.2.3: 31",
+    "stdo/__init__.py": "0.1.1: SCRIPTS_VERSION 26 · 0.1.2: SCRIPTS_VERSION 27 · 0.2.0: SCRIPTS_VERSION 28 · 0.2.1: 29 · 0.2.2: 30 · 0.2.3: 31 · 0.2.4: 32",
     "stdo/commit/approvals.py": "0.2.0: light_check(local_done=True) for a local video's done (the default unchanged)",
     "stdo/commit/video.py": "0.2.0: the copy path through stdo/vpaths.py (unchanged for a public video); a public "
-                            "video's assets.json from a check_scope without the internal flag is not checked",
+                            "video's assets.json from a check_scope without the internal flag is not checked · 0.2.4: "
+                            "a URL source's recheck rule at --stage only (the hook and allowed() unchanged)",
     "stdo/hooks/templates.py": "0.1.1 (fix-0029 §2): the shim's hint names hooks.py install only",
-    "stdo/state/labels.py": "0.1.1 (fix-0029 §3): no milestone names in messages · 0.2.1: the 플랫폼 <h12> label",
+    "stdo/state/labels.py": "0.1.1 (fix-0029 §3): no milestone names in messages · 0.2.1: the 플랫폼 <h12> label · "
+                            "0.2.4: a URL source's capture line among ①'s source lines (none for repository Markdown)",
     "stdo/commit/kinds.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
     "stdo/commit/harness.py": "0.1.1 (fix-0029 §3): no milestone names in messages · 0.1.2 (fix-0102 §2.4): "
                               "std-auditor.md is a protected persona",
     "stdo/credits.py": "0.1.1 (fix-0029 §3): no milestone names in messages",
     "stdo/state/argv.py": "0.0.28 (fix-0028 §1): --since-last is a flag (status takes no value for it)",
-    "stdo/state/commands.py": "0.0.28 (fix-0028 §13): ask-before is evidence-free and implemented (no deny)",
+    "stdo/state/commands.py": "0.0.28 (fix-0028 §13): ask-before is evidence-free and implemented (no deny) · "
+                              "0.2.4: record-recheck is evidence-free and implemented (no deny)",
     "stdo/commit/summary.py": "0.0.28 (fix-0028 §11) · 0.1.2 (fix-0102 §2.4): the value block shows brand.json's "
                               "name, accent and logo, and role model changes · 0.2.3: `capture` is a protected key",
     "stdo/state/tuples.py": "0.1.2 (fix-0102 §1.6): ① binds the teaching notes",
@@ -488,7 +491,10 @@ for d in ("commit", "hooks"):
 _bg = open(os.path.join(skill, "templates", "guides", "board.md")).read()
 check("otherwise a text card" not in _bg,
       "guides/board.md does not send board to a text card (blocks are in the content hash: script stage, 0.0.22)")
-check(sv and sv.group(1) == "31", "SCRIPTS_VERSION is 31 (0.2.3: capture.py and stdo/capture/ — the URL and "
+check(sv and sv.group(1) == "32", "SCRIPTS_VERSION is 32 (0.2.4: URL sources — capture.py source and recheck, "
+      "stdo/capture/files.py, source/page.py, state/urlsource.py, flow.py begin --url and record-source, collect.py, "
+      "commands.py record-recheck, labels.py's capture line, source/ assets, scope and cli, claims/cli.py's ruby "
+      "check, commit/video.py's recheck rule; 0.2.3: capture.py and stdo/capture/ — the URL and "
       "selector rules, the run through s2v capture, board pictures; 0.2.2: outputs shared by name, their shapes from the "
       "platform files at record-brief and in the script lines, vertical and square look rules — state/scriptlines.py "
       "and cli.py, claims/ check and cli, look.py; 0.2.1: platform rules v2 — distribute/rules.py and check.py, "

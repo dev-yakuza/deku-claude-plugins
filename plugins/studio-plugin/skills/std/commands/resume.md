@@ -11,7 +11,8 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
 2. **held:lock** (the machine lock was busy): `python3 .claude/studio/scripts/state.py release-lock <video>` — no
    person's answer needed; exit 4 while the lock is still busy (say so and stop). Then run `next` again.
 3. **Any other held state** is the person's:
-   - `source-diff` (the source changed after ①): show the diff (`state.py shown <video> source-diff`), then ask —
+   - `source-diff` (the source changed after ①): show the diff (`state.py shown <video> source-diff`; for a page
+     source it prints `read: <work/source-diff.txt>` — open that file for the person), then ask —
      `승인 <video> <h12>` keeps the approvals (`state.py approve <video> source-diff --expect <h12>`), `거부 <video>
      <h12>` sends the work back (`state.py reject-source-diff <video> --expect <h12>`).
    - `stagnation`, `render` and the others: ask the person what to do; `해제 <video> <lang> <held>` then
