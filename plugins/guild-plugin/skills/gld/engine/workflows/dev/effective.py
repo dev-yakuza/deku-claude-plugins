@@ -37,7 +37,7 @@ ASSERT_RES["vitest"] = ASSERT_RES["jest"]
 TRIVIAL_RES = (r"\.toBeTruthy\(\s*\)", r"\.toBeDefined\(\s*\)", r"^\s*assert\s+True\b",
                r"assertTrue\(\s*True\s*\)", r"expect\(\s*true\s*,\s*(isTrue|true)\s*\)",
                r"expect\(\s*true\s*\)\.toBe\(\s*true\s*\)")
-TEST_FILE_RE = re.compile(r"[\w./-]+?(?:_test\.dart|_test\.go|\.test\.[jt]sx?|\.spec\.[jt]sx?|"
+TEST_FILE_RE = re.compile(r"[\w./-]*?(?:_test\.dart|_test\.go|\.test\.[jt]sx?|\.spec\.[jt]sx?|"
                           r"(?:^|/)test_\w+\.py|_test\.py|\.vitest\.[jt]sx?)")
 TEST_PATH_RE = re.compile(r"(^|/)(test|tests|__tests__|spec|integration_test)/|_test\.|\.test\.|\.spec\.|(^|/)test_")
 EXCERPT = 40
@@ -63,7 +63,7 @@ def parse_test_ref(ref):
         return None, ref or None
     path = m.group(0)
     rest = (ref[:m.start()] + " " + ref[m.end():]).strip()
-    rest = re.sub(r"^(::|—|-|:|\()\s*|\s*(\)|—)$", "", rest).strip().strip("'\"«»`")
+    rest = rest.strip(" \t()«»:—-'\"`")
     return path, (rest or None)
 
 
