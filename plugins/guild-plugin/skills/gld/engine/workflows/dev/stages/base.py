@@ -1,0 +1,345 @@
+"""workflows.dev.stages.base — what every stage shares: ports, results, entry, pause, FAIL (C-F-6).
+
+A stage is code over injected PORTS (design §2.0 — fakes in tests and the procedure replay):
+
+    gh        reads   issue · comments · timeline · pr · pr_search · check_runs · annotations ·
+                      issue_search
+    writer    guildcore.records.write.GhWriter (every GitHub write, verified by re-read)
+    decisions guildcore.decisions.DecisionWriter (the decision log)
+    run_role  RoleCall -> guildcore.roles.runner.RoleResult (the role runner; the engine hands the
+              role its Issue/PR/comment content as `in/` files — roles never touch GitHub, Q23)
+    judge     guildcore.judges.runner.JudgeSpec -> Decision
+    suite     (cmd, owner_role, timeout_s) -> guildcore.checks.CheckResult — the engine runs the
+              suite itself (§2.8) under the owning role's sandbox (K1r3-B1 contract)
+    check     (cmd, cwd, owner_role, timeout_s, write_dirs) -> CheckResult (TEST `effective`)
+    capture   (kind, stage, role, summary, evidence, area, surprise) -> row|None (ground truth —
+              captured AT the decision, C-F-22; `--mark` is kept for 0.101.x `--count`)
+    mark      (stage) -> ISO stamp
+Return tokens (C §1.3) are rendered by `StageResult.token()` — the supervisor judges by labels,
+the tokens are for the human report and logs.
+"""
+
+import hashlib
+import os
+
+from guildcore import ask as ASK
+from guildcore import pause as PAUSE
+from guildcore import state as ST
+from guildcore.decisions import DecisionLog
+from guildcore.judges.runner import Halted, RateLimited
+from guildcore.records import markers
+
+NEEDS_HUMAN = "guild:needs-human"
+
+
+class StageError(Exception):
+    """A defect in the engine's own stage code path (caller: FAIL defect)."""
+
+
+class RoleCall(object):
+    """What a stage asks of a role. The real port builds a guildcore.roles.runner.RoleSpec."""
+
+    def __init__(self, role, task, stage, step, inputs=None, addendum=None, schema_role=None,
+                 allowed_status=None, attempt=1):
+        self.role, self.task, self.stage, self.step = role, task, stage, step
+        self.inputs = inputs or {}
+        self.addendum = addendum
+        self.schema_role = schema_role or role
+        self.allowed_status = allowed_status
+        self.attempt = attempt
+
+
+class StageResult(object):
+    ADVANCE, DONE, LOOPBACK, PAUSE, ASK, FAIL = "ADVANCE", "DONE", "LOOPBACK", "PAUSE", "ASK", "FAIL"
+
+    def __init__(self, kind, nxt=None, cause=None, line=None, qid=None, fail_class=None, notes=()):
+        self.kind = kind
+        self.nxt = nxt
+        self.cause = cause            # PAUSE: the text after `needs-human — `
+        self.line = line              # ASK: the NEEDS_HUMAN line; FAIL: the reason
+        self.qid = qid
+        self.fail_class = fail_class  # prevalidate | prevalidate_env | gh_auth | transient | defect
+        self.notes = list(notes)
+
+    def token(self):
+        if self.kind == self.ADVANCE:
+            return "OK ADVANCE: %s" % self.nxt
+        if self.kind == self.DONE:
+            return "OK DONE"
+        if self.kind == self.LOOPBACK:
+            return "OK LOOPBACK: execute"
+        if self.kind == self.PAUSE:
+            return "OK PAUSE: needs-human — %s" % self.cause
+        if self.kind == self.ASK:
+            return "NEEDS_HUMAN: %s" % self.line
+        return "FAIL: %s" % self.line
+
+    def __repr__(self):
+        return "<StageResult %s>" % self.token()
+
+
+class Ports(object):
+    def __init__(self, issue, gh, writer, decisions, clock, config, root, unattended=True,
+                 run_role=None, judge=None, suite=None, check=None, capture=None, mark=None,
+                 journal=None, events=None, push=None, host=None, plugin=None, branch=None,
+                 base=None, impl_files=None, git_dir=None):
+        self.issue = int(issue)
+        self.gh, self.writer, self.decisions, self.clock = gh, writer, decisions, clock
+        self.config = config
+        self.root = root
+        self.unattended = unattended
+        self.run_role, self.judge = run_role, judge
+        self.suite, self.check = suite, check
+        self.capture = capture or (lambda *a, **k: None)
+        self.mark = mark or (lambda stage: None)
+        self.journal, self.events = journal, events
+        self.push = push                  # () -> None: the engine's push (qa committed tests)
+        self.host = host                  # "macOS arm64" etc. (VIS-ENV pre-filter)
+        self.plugin = plugin
+        self.branch, self.base = branch, base
+        self.impl_files = impl_files      # developer result.json `impl_files` (execute's ctx)
+        self.git_dir = git_dir
+
+    # -- config ---------------------------------------------------------------------------
+    def cfg(self, dotted, default=None):
+        c = self.config
+        if c is None:
+            return default
+        if hasattr(c, "get") and not isinstance(c, dict):
+            return c.get(dotted, default)
+        cur = c
+        for part in dotted.split("."):
+            if not isinstance(cur, dict) or part not in cur:
+                return default
+            cur = cur[part]
+        return cur
+
+    @property
+    def language(self):
+        return self.cfg("language", "en") or "en"
+
+    def engine_cfg(self, key, default=None):
+        eng = getattr(self.config, "engine", None)
+        if isinstance(eng, dict) and key in eng:
+            return eng[key]
+        return self.cfg("engine." + key, default)
+
+    # -- repo files -----------------------------------------------------------------------
+    def read_file(self, rel):
+        try:
+            with open(os.path.join(self.root, rel), encoding="utf-8", errors="replace") as fh:
+                return fh.read()
+        except (IOError, OSError, TypeError):
+            return None
+
+    def exists(self, rel):
+        return bool(self.root) and os.path.exists(os.path.join(self.root, rel))
+
+    def now(self):
+        return self.clock.now()
+
+
+class Entry(object):
+    def __init__(self, labels, state, found_stage, recheck=False, stage=None):
+        self.stage = stage
+        self.labels = labels          # every label name at Step 0 (FOUND_LABELS ∪ others)
+        self.state = state            # guildcore.state.IssueState
+        self.found_stage = found_stage  # the stage label Step 0 found (None when it was empty)
+        self.recheck = recheck        # `--only test` on `done` (C12)
+
+    @property
+    def paused(self):
+        return NEEDS_HUMAN in self.labels
+
+
+# ---- entry (T0.1–T0.7 / Q0.1–Q0.7) ------------------------------------------------------------
+
+def enter(p, stage, config_present=True, only=None):
+    """Preflight → Issue validation → label read → `--mark` → split-parent guard → stage
+    precondition (C-F-1) → entry label. Returns Entry or a FAIL StageResult (no label written)."""
+    if not config_present:
+        return StageResult(StageResult.FAIL, line="Guild not initialized (run /gld init)",
+                           fail_class="prevalidate_env", notes=["halted: env uninitialized"])
+    issue = p.gh.issue(p.issue)
+    if "/pull/" in (issue.get("url") or ""):
+        return StageResult(StageResult.FAIL, line="#%d is a pull request, not an Issue" % p.issue,
+                           fail_class="prevalidate")
+    labels = ST.label_names(issue.get("labels"))
+    state = ST.derive(labels)
+    if state.sprint:
+        return StageResult(StageResult.FAIL, fail_class="prevalidate",
+                           line="#%d is a sprint tracking Issue — use /gld sprint daily" % p.issue)
+    p.mark(stage)                                    # after init + validation (T0.5)
+    if "guild:children" in labels:
+        return StageResult(StageResult.FAIL, fail_class="prevalidate", line=(
+            "#%d is a split parent (guild:children) — its work is its children's, not its own. "
+            "Run `/gld dev %d` (or `/gld resume %d`) to drive the children." % (p.issue, p.issue, p.issue)))
+    found = state.stage if state.stage != "none" else None
+    recheck = False
+    if found not in (None, stage):
+        if stage == "test" and found == "done" and only == "test":
+            recheck = True                           # C12 — a re-verification only
+        else:
+            return StageResult(StageResult.FAIL, fail_class="prevalidate", line=(
+                "#%d is at guild:%s — /gld %s runs only at guild:%s (use /gld rollback stage to "
+                "move back)" % (p.issue, found, stage, stage)))
+    if found is None:
+        p.writer.labels_apply(p.issue, add=["guild:" + stage])
+    return Entry(labels, state, found, recheck, stage)
+
+
+def transition(p, entry, to, extra_add=()):
+    """Remove the stage label Step 0 found (never guild:child), add `to`, and remove
+    guild:needs-human only when Step 0 saw it (H§A). Verified by GhWriter."""
+    remove = ["guild:" + (entry.found_stage or entry.stage)]
+    if entry.paused:
+        remove.append(NEEDS_HUMAN)
+    p.writer.labels_apply(p.issue, add=["guild:" + to] + list(extra_add), remove=remove)
+
+
+# ---- decisions ------------------------------------------------------------------------------
+
+def digest(*parts):
+    h = hashlib.sha256()
+    for x in parts:
+        h.update((x if isinstance(x, str) else repr(x)).encode("utf-8"))
+        h.update(b"\0")
+    return h.hexdigest()[:12]
+
+
+def record_judgment(p, stage, point, refs, dec, choice=None, reason=None, extra=None):
+    """One decision-log block per SJ decision (§2.5 — every L0/SJ decision is logged; §9.5 grades
+    from these fields). Returns D<n>."""
+    f = {"point": point, "refs": refs, "stage": stage, "by": dec.by, "inputs": dec.digest[:12],
+         "choice": choice if choice is not None else dec.choice,
+         "unsure": "true" if dec.unsure else "false",
+         "coerced": "true" if dec.coerced else "false"}
+    if dec.coerced:
+        f["coerced_by"] = dec.coerced_by or "rule"
+        f["raw_choice"] = dec.raw_choice
+    if reason:
+        f["reason"] = reason
+    f.update(extra or {})
+    return p.decisions.record(f)
+
+
+def record_code(p, stage, point, choice, reason=None, refs=None, extra=None):
+    f = {"point": point, "stage": stage, "by": "code", "choice": choice, "refs": refs}
+    if reason:
+        f["reason"] = reason
+    f.update(extra or {})
+    return p.decisions.record(f)
+
+
+def pending_answer(p, stage, kind, comments=None):
+    """A human answer to this stage's `kind` question that has not been applied yet:
+    (pending_block, resolution_block) or (None, None). Applied = a later `point: applied`
+    block whose `refs` names the resolution (durable, survives a lost journal)."""
+    log = DecisionLog.load(comments if comments is not None else p.gh.comments(p.issue))
+    applied = set(b.get("refs") for b in log.blocks if b.get("point") == "applied")
+    for blk in reversed(log.blocks):
+        if blk.get("kind") != kind or blk.get("stage") != stage or blk.get("status") != "pending-human":
+            continue
+        res = [b for b in log.blocks if b.get("resolves") == blk.id and b.get("by") == "human"
+               and b.get("choice")]
+        if res and res[-1].id not in applied:
+            return blk, res[-1]
+        return None, None
+    return None, None
+
+
+def mark_applied(p, stage, resolution):
+    return record_code(p, stage, "applied", resolution.get("choice"), refs=resolution.id)
+
+
+# ---- pause / ask / FAIL ---------------------------------------------------------------------
+
+def pause(p, stage, cause_kind, line, token_cause, prose="", env_key=None, question=None,
+          directive_line=None, extra_labels=(), remove_labels=()):
+    """Unattended pause (guildcore.pause order: decision block → needs-human comment → label).
+    `extra_labels`/`remove_labels` ride in the SAME label write (test's pending regeneration
+    moves guild:test → guild:execute together with guild:needs-human)."""
+    pz = PAUSE.Pause(cause_kind, line, prose, env_key, directive_line)
+    if extra_labels or remove_labels:
+        did = None
+        if question is not None:
+            did = p.decisions.record(question.pending_fields(stage=stage))
+            p.decisions.stamp_server_time(did)
+        from guildcore.records import needs_human
+        cause = needs_human.cause_line(cause_kind, line, env_key)
+        answer = (int(did[1:]), [o["token"] for o in question.options]) if did else None
+        c = p.writer.create_comment(p.issue, needs_human.render(cause, prose, directive_line, answer))
+        if did:
+            p.decisions.amend(did, "pause_comment", c["id"])
+        p.writer.labels_apply(p.issue, add=[NEEDS_HUMAN] + list(extra_labels), remove=list(remove_labels))
+        return StageResult(StageResult.PAUSE, cause=token_cause, qid=did)
+    res = PAUSE.pause(p.writer, p.decisions, p.issue, pz, question=question, stage=stage)
+    return StageResult(StageResult.PAUSE, cause=token_cause, qid=res["did"])
+
+
+def ask(p, stage, question, needs_human_line, pause_args=None):
+    """Attended → pending block + `ask` event (StageResult ASK); unattended → pause with the
+    question (`pause_args` = kwargs of `pause`)."""
+    if not p.unattended:
+        qid = ASK.surface(question, True, p.decisions, events=p.events, clock=p.clock,
+                          stage=stage, journal=p.journal)
+        return StageResult(StageResult.ASK, line=needs_human_line, qid=qid)
+    return pause(p, stage, question=question, **(pause_args or {}))
+
+
+def fail(p, stage, reason, cls="defect", env_key="service"):
+    """C-F-6 / C6: an unattended FAIL is never a silent exit 0. defect → needs-human +
+    `defect: engine FAIL — <reason>`; transient → `env: service — …`; gh_auth → exit 3 (no
+    write: the needs-human write would fail too); prevalidate → no label (the caller exits 0/6)."""
+    if cls in ("prevalidate", "prevalidate_env", "gh_auth") or not p.unattended:
+        return StageResult(StageResult.FAIL, line=reason, fail_class=cls)
+    if cls == "transient":
+        r = pause(p, stage, "env", reason, "service unavailable — %s" % reason, env_key=env_key)
+    else:
+        r = pause(p, stage, "defect", "engine FAIL — %s" % reason, "engine FAIL — %s" % reason)
+    r.fail_class = cls
+    r.line = reason
+    return r
+
+
+def role_outcome(p, stage, role, res):
+    """RoleResult statuses outside the P-RES five (K1 A9) → the stage's answer, or None when the
+    status is one of DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT / FAIL (caller's)."""
+    st = res.status
+    if st == "HALTED":
+        raise Halted()
+    if st == "RATE_LIMITED":
+        raise RateLimited(res.rl)
+    if st == "INVALID":
+        line = "%s returned no valid RESULT line" % role
+        q = ASK.Question("role-result-invalid", "%s returned no valid RESULT line for #%d" % (role, p.issue),
+                         [{"token": "retry", "label": "retry"}, {"token": "stop", "label": "stop"}])
+        return ask(p, stage, q, "%s returned no valid RESULT line for #%d" % (role, p.issue),
+                   {"cause_kind": "defect", "line": line, "token_cause": line})
+    if st == "PERMISSION":
+        cmd = (res.denials[-1].get("command") if res.denials else None) or (res.line or "?")
+        line = "역할 권한 거부: %s" % cmd
+        q = ASK.Question("permission", "%s was refused `%s`" % (role, cmd),
+                         [{"token": "once", "label": "allow once"}, {"token": "stop", "label": "stop"}])
+        return ask(p, stage, q, "%s was refused a command — %s" % (role, cmd), {
+            "cause_kind": "env", "env_key": "other", "line": line, "token_cause": line,
+            "prose": 'config.engine.role_allow.%s 에 "<pattern>" 을 추가하면 다음부터 허용' % role})
+    if st in ("SCOPE", "DRIFT"):
+        paths = ", ".join(str(v) for v in res.violations[:5]) or (res.line or "")
+        line = "%s wrote outside its scope — %s" % (role, paths)
+        return pause(p, stage, "defect", line, line) if p.unattended else \
+            StageResult(StageResult.FAIL, line=line, fail_class="defect")
+    if st == "TIMEOUT":
+        line = "%s timed out" % role
+        return pause(p, stage, "defect", line, line) if p.unattended else \
+            StageResult(StageResult.FAIL, line=line, fail_class="defect")
+    return None
+
+
+def one_line(text, cap=300):
+    t = " ".join((text or "").split())
+    return t if len(t) <= cap else t[:cap - 1] + "…"
+
+
+def neutral(text):
+    return markers.value(text)

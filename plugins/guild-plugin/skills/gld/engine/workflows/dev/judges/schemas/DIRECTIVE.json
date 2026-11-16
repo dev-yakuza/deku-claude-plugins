@@ -1,0 +1,55 @@
+{
+ "type": "object",
+ "required": [
+  "verdict",
+  "applies",
+  "out_of_scope"
+ ],
+ "properties": {
+  "applies": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "comment",
+     "line"
+    ],
+    "properties": {
+     "comment": {
+      "type": "string"
+     },
+     "line": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "out_of_scope": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "comment",
+     "line"
+    ],
+    "properties": {
+     "comment": {
+      "type": "string"
+     },
+     "line": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "verdict": {
+   "type": "string",
+   "enum": [
+    "applies",
+    "none",
+    "out_of_scope",
+    "unsure"
+   ]
+  }
+ }
+}

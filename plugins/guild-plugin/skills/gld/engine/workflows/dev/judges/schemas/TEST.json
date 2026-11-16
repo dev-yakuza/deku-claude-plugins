@@ -1,0 +1,81 @@
+{
+ "type": "object",
+ "required": [
+  "ac",
+  "overall"
+ ],
+ "properties": {
+  "ac": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "covered_by",
+     "verdict",
+     "why"
+    ],
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "covered_by": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "verdict": {
+      "type": "string",
+      "enum": [
+       "effective",
+       "vacuous",
+       "not_covering",
+       "unsure"
+      ]
+     },
+     "why": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "visual_rows": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "row",
+     "verdict"
+    ],
+    "properties": {
+     "row": {
+      "type": "string"
+     },
+     "verdict": {
+      "type": "string",
+      "enum": [
+       "covered",
+       "uncovered",
+       "unsure"
+      ]
+     }
+    }
+   }
+  },
+  "overall": {
+   "type": "string",
+   "enum": [
+    "all_effective",
+    "gap",
+    "unsure"
+   ]
+  },
+  "needs_more": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  }
+ }
+}

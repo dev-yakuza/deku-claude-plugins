@@ -1,0 +1,22 @@
+{
+ "type": "object",
+ "required": [
+  "verdict"
+ ],
+ "properties": {
+  "verdict": {
+   "type": "string",
+   "enum": [
+    "covered",
+    "needs_filing",
+    "unsure"
+   ]
+  },
+  "issue": {
+   "type": [
+    "integer",
+    "null"
+   ]
+  }
+ }
+}

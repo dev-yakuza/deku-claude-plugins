@@ -1,0 +1,22 @@
+{
+ "type": "object",
+ "required": [
+  "verdict"
+ ],
+ "properties": {
+  "verdict": {
+   "type": "string",
+   "enum": [
+    "match",
+    "none",
+    "unsure"
+   ]
+  },
+  "pr": {
+   "type": [
+    "integer",
+    "null"
+   ]
+  }
+ }
+}
