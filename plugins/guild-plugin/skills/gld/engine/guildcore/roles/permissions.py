@@ -262,3 +262,30 @@ def summary(role, task=None, toolchain=()):
             "rebase, reset --hard, print the environment, or start sub-agents — the engine does "
             "those. A command outside this list is refused without a prompt; if you need one, "
             "return BLOCKED: permission — <command>." % "; ".join(parts))
+
+
+def normalized_prefix(command, words=2):
+    """The first `words` words of a denied command — the unit `dev denials` counts (§5.1 4)."""
+    ws = (command or "").split()
+    while ws and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", ws[0]):
+        ws = ws[1:]
+    return " ".join(ws[:words])
+
+
+def suggest_role_allow(denials, min_issues=2, min_count=3):
+    """§5.1 거부 4 (학습): `denials` = [{issue, role, command, cls}] from the journals. A normalized
+    prefix outside the forbidden class denied ≥3 times across ≥2 Issues becomes a
+    `config.engine.role_allow.<role>` SUGGESTION (a human approves; never applied here)."""
+    agg = {}
+    for d in denials:
+        if d.get("cls") == "forbidden":
+            continue
+        key = (d.get("role"), normalized_prefix(d.get("command")))
+        n, issues = agg.get(key, (0, set()))
+        issues.add(d.get("issue"))
+        agg[key] = (n + 1, issues)
+    out = []
+    for (role, pfx), (n, issues) in sorted(agg.items()):
+        if pfx and n >= min_count and len(issues) >= min_issues:
+            out.append({"role": role, "pattern": "Bash(%s:*)" % pfx, "count": n, "issues": len(issues)})
+    return out

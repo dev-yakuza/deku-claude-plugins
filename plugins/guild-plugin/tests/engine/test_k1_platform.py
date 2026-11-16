@@ -228,6 +228,19 @@ class Permissions(unittest.TestCase):
         self.assertIn("Read, Grep and Glob", P.summary("auditor"))
 
 
+class DenialLearning(unittest.TestCase):
+    def test_suggestion_needs_two_issues_three_times(self):
+        ds = [{"issue": 1, "role": "tester-verify", "command": "make check x", "cls": "other"},
+              {"issue": 1, "role": "tester-verify", "command": "FOO=1 make check y", "cls": "other"},
+              {"issue": 2, "role": "tester-verify", "command": "make check", "cls": "other"},
+              {"issue": 2, "role": "tester-verify", "command": "git push", "cls": "forbidden"},
+              {"issue": 3, "role": "tester-verify", "command": "git push", "cls": "forbidden"},
+              {"issue": 4, "role": "tester-verify", "command": "git push", "cls": "forbidden"}]
+        self.assertEqual(P.suggest_role_allow(ds), [{"role": "tester-verify", "pattern": "Bash(make check:*)",
+                                                     "count": 3, "issues": 2}])
+        self.assertEqual(P.suggest_role_allow(ds[:2]), [])
+
+
 class RenderedSettings(unittest.TestCase):
     def setUp(self):
         self.r = repo(self, {".claude/settings.json": {
