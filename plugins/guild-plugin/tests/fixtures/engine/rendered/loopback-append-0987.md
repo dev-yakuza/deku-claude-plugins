@@ -1,0 +1,24 @@
+<!-- guild:loopback -->
+## 루프백 기록
+
+### loopback 1
+from: qa
+at: 2026-11-12T12:02:17Z
+branch: feature/511-os-notification-unification
+reason: UX-OS-10 가가가 — 가가 가가 가가가 가가 가가 가 §3.3 가가 가가가 가가가 가가 가가, 가가가 가가
+signature: UX-OS-10
+consumed: 2026-11-12T14:39:06Z
+
+### loopback 2
+from: qa
+at: 2026-11-12T14:52:58Z
+branch: feature/511-os-notification-unification
+reason: PR CI 가가가 가가 red — a4acb24e가 dispatcher 가가가가 가가 manual-checklist.md 8가가 가가가 STALE
+signature: ci:verify-freshness:manual-checklist-stale
+### loopback 3
+from: test
+at: 2026-11-16T01:02:03Z
+branch: feature/511-x
+reason: 가가 가가 가가 [REDACTED]
+signature: TC-1,TC-2
+<!-- /guild:loopback -->
