@@ -57,16 +57,20 @@ class Route(object):
 
 
 def interrupted(snap):
-    """H§B: latest active block unhandled, no audit `invocation:` ≥ its `at:`, label test/qa."""
+    """H§B: latest active block unhandled, no audit `invocation:` ≥ its `at:`, label test/qa.
+    Invocations are read from EVERY auditor:execute comment (K0-m6): a stray duplicate record
+    must not make an execute run invisible — a false "interrupted" moves the label without
+    re-running anything."""
+    from guildcore.records import audit
     rec = snap.loopback
     if rec is None or snap.state.stage not in ("test", "qa") or not rec.not_yet_handled():
         return False
     at = rec.latest_active().get("at") or ""
-    invs = snap.audit.invocations() if snap.audit else []
+    invs = [i for r in audit.all_from_comments(snap.comments) for i in r.invocations()]
     return not any(i >= at for i in invs)
 
 
-def route(gh, number, root=".", unattended=False):
+def route(gh, number, root=".", unattended=False, own_writes=()):
     issue = gh.issue(number)
     if "/pull/" in (issue.get("url") or ""):
         return Route(number, "fail", "not_issue", R.ROUTE["not_issue"].format(n=number))
@@ -74,12 +78,15 @@ def route(gh, number, root=".", unattended=False):
         return Route(number, "stop", "uninitialized", R.ROUTE["uninitialized"])
     cfg = cfgmod.load(root)
     snap = IssueSnapshot(number, issue, gh.comments(number), gh.pr_search(number))
-    return route_snapshot(gh, snap, cfg, unattended)
+    return route_snapshot(gh, snap, cfg, unattended, own_writes)
 
 
-def route_snapshot(gh, snap, cfg=None, unattended=False):
+def route_snapshot(gh, snap, cfg=None, unattended=False, own_writes=()):
     st, n = snap.state, snap.number
-    if st.stage == "done":
+    if st.stage == "done" and snap.issue_state.upper() == "OPEN" and snap.markers.get("closed-as-decided"):
+        # §2.2: the engine (K4) finishes T3 ④ here; until then resume.md's stop (K0-m13)
+        r = Route(n, "stop", "done_open_decided", R.ROUTE["done_open_decided"].format(n=n), "done")
+    elif st.stage == "done":
         r = Route(n, "stop", "done", R.ROUTE["done"].format(n=n), "done")
     elif st.stage == "children":
         r = Route(n, "dev", "children", R.ROUTE["children"].format(n=n), "children")
@@ -87,6 +94,8 @@ def route_snapshot(gh, snap, cfg=None, unattended=False):
         r = Route(n, "dev", "spine", R.ROUTE["spine"].format(n=n, stage=st.stage), st.stage)
     elif st.sprint:
         return Route(n, "fail", "sprint", R.ROUTE["sprint"].format(n=n), "none")
+    elif st.stage != "none":
+        return Route(n, "stop", "unknown", R.ROUTE["unknown"].format(n=n, label=st.label), st.stage)
     elif st.harness:
         r = Route(n, "dev", "harness", R.ROUTE["harness"].format(n=n), "none")
     else:
@@ -103,7 +112,7 @@ def route_snapshot(gh, snap, cfg=None, unattended=False):
         assoc = tuple((cfg.engine if cfg else {}).get("answer_associations")
                       or dec.DEFAULT_ASSOCIATIONS)
         for b in pend:
-            alive, _why = dec.live(b, st, timeline)
+            alive, _why = dec.live(b, st, timeline, own_writes)
             if not alive:
                 continue
             ans, _rej = dec.accepted_answer(b, snap.comments, timeline, unattended, assoc)

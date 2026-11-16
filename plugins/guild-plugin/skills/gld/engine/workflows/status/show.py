@@ -82,10 +82,10 @@ def decision_summary(gh, snap, own_writes=()):
     return alive, dead
 
 
-def decisions_lines(gh, snap):
+def decisions_lines(gh, snap, own_writes=()):
     out = []
     if snap.decisions:
-        alive, dead = decision_summary(gh, snap)
+        alive, dead = decision_summary(gh, snap, own_writes)
         line = "Decisions: %d (pending-human %d" % (len(snap.decisions.blocks), len(alive))
         if dead:
             line += ", %s %d" % (R.SUPERSEDED, len(dead))
@@ -106,7 +106,8 @@ def stage_text(st):
         if st.sprint:
             return R.SPRINT
         return R.HARNESS_NONE if st.harness else R.NOT_STARTED
-    return R.STAGE_RENDER[st.stage]
+    # an unknown `guild:*` label is what Section A's `.[0]` yields too: report it as-is (K0-M5)
+    return R.STAGE_RENDER.get(st.stage, R.UNKNOWN_STAGE.format(label=st.label))
 
 
 def render_children(gh, snap):
@@ -121,12 +122,12 @@ def render_children(gh, snap):
     return lines
 
 
-def show(gh, number):
+def show(gh, number, own_writes=()):
     issue = gh.issue(number)
     if "/pull/" in (issue.get("url") or ""):
         return R.ROUTE["not_issue"].format(n=number) + "\n"
     snap = snapshot_from(gh, number, issue)
-    return render_snapshot(gh, snap)
+    return render_snapshot(gh, snap, own_writes)
 
 
 def snapshot_from(gh, number, issue):
@@ -134,7 +135,7 @@ def snapshot_from(gh, number, issue):
     return IssueSnapshot(number, issue, gh.comments(number), gh.pr_search(number))
 
 
-def render_snapshot(gh, snap):
+def render_snapshot(gh, snap, own_writes=()):
     st = snap.state
     ann = ""
     if st.children:
@@ -167,7 +168,7 @@ def render_snapshot(gh, snap):
         if lb:
             lines.append(lb)
         lines.extend(pr_lines(snap))
-    lines.extend(decisions_lines(gh, snap))
+    lines.extend(decisions_lines(gh, snap, own_writes))
     return "\n".join(lines) + "\n"
 
 

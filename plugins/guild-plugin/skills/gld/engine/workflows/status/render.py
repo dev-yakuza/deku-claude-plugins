@@ -11,6 +11,7 @@ STAGE_RENDER = {
     "children": "orchestrating (split parent)", "done": "done",
 }
 NOT_STARTED = "not started"
+UNKNOWN_STAGE = "{label} (unknown stage label — reported as-is)"
 HARNESS_NONE = "harness remediation — not started"
 SPRINT = "sprint (tracking Issue)"
 PAUSED_LINE = "⏸ PAUSED — needs a human decision (see the <!-- guild:needs-human --> comment)"
@@ -30,6 +31,8 @@ ROUTE = {
     "spine": "Resume at {stage} — hand off to /gld dev {n}",
     "harness": "Harness remediation not started — hand off to /gld dev {n} to start it fresh",
     "none": "Nothing to resume — no guild:* stage label; start fresh with /gld dev {n}",
+    "unknown": "#{n} carries {label}, which is not a Guild stage label — not routed (fix or remove the label)",
+    "done_open_decided": "Issue #{n} is already done. (closed-as-decided is recorded but the Issue is still OPEN — the close was not finished; resume stops here as resume.md does)",
 }
 
 BOARD = {

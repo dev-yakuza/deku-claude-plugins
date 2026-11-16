@@ -18,7 +18,8 @@ from workflows.status import render as R
 
 LEDGER = os.path.join(os.path.dirname(__file__), "..", "..", "..", "commands", "atoms", "ledger.py")
 BOILERPLATE_RE = re.compile(r"\((미정 — 추후 확정|TBD)\)")
-BUCKET_ORDER = ("analyze", "design", "execute", "test", "qa", "done", "children", "none")
+BUCKET_ORDER = ("analyze", "design", "execute", "test", "qa", "done", "children", "none", "other")
+KNOWN = set(BUCKET_ORDER) - {"other"}
 
 
 def _read(path):
@@ -93,9 +94,9 @@ def gather_work(gh):
     paused = []
     for r in rows:
         st = r["derived"]
-        if st.sprint:
-            continue
-        key = st.stage if st.stage != "done" else "done"
+        # monitoring.md's list-form jq counts a sprint tracker under "none" (its stage); the
+        # 활성 스프린트 line names it separately (K0-m11). An unknown guild:* label → "other".
+        key = st.stage if st.stage in KNOWN else "other"
         buckets[key] = buckets.get(key, 0) + 1
         if st.paused:
             paused.append(r["number"])

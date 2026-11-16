@@ -72,12 +72,19 @@ class GhCli(object):
     def issue(self, n):
         out = self._gh(["gh", "issue", "view", str(n)] + ["--json",
                         "number,title,body,url,state,stateReason,labels"] + self._repo_args())
-        return json.loads(out)
+        it = json.loads(out)
+        if not self.repo:
+            # owner/repo from the URL we already have — no extra `gh repo view` (K0-m2)
+            m = re.match(r"^https://[^/]+/([^/]+/[^/]+)/(?:issues|pull)/\d+", it.get("url") or "")
+            if m:
+                self.repo = m.group(1)
+        return it
 
     def _paged(self, path):
         out = self._gh(["gh", "api", "--paginate", path, "--jq", ".[]"])
         rows = []
-        for ln in out.splitlines():
+        # "\n" only: jq prints U+2028/U+0085 raw inside strings, and splitlines() cuts there (K0-m1)
+        for ln in out.split("\n"):
             ln = ln.strip()
             if ln:
                 rows.append(json.loads(ln))

@@ -5,16 +5,28 @@ import os
 import sys
 
 from guildcore import config as cfgmod
-from guildcore import emit
+from guildcore import emit, journal
 from guildcore.adapters.clock import Clock
 from guildcore.adapters.gh import FakeGh, GhCli, GhError
 from workflows.status import board, route, running, show
 
 
 def make_gh(repo=None):
-    """`GLD_ENGINE_GH_FIXTURE=<json>` serves a fake GitHub (tests, offline demos)."""
+    """A fake GitHub only when BOTH `GLD_ENGINE_TEST=1` and `GLD_ENGINE_GH_FIXTURE=<json>` are
+    set (K0-m12 — one stray variable must not make /gld status show a fake repo)."""
     fx = os.environ.get("GLD_ENGINE_GH_FIXTURE")
-    return FakeGh(fx) if fx else GhCli(repo)
+    if fx and os.environ.get("GLD_ENGINE_TEST") == "1":
+        return FakeGh(fx)
+    return GhCli(repo)
+
+
+def own_writes(issue, root="."):
+    """The engine's own label-write event ids from this clone's journal (K0-m10) — the same
+    input the writer gives `decisions.live`. No git / no journal → none."""
+    try:
+        return journal.JournalView.read(running.git_common_dir(root), issue).own_label_writes()
+    except running.RunningError:
+        return []
 
 
 def parser():
@@ -35,7 +47,7 @@ def parser():
     p.add_argument("--all-repos", action="store_true")
     p.add_argument("--root", default=".")
     p = sub.add_parser("directives")
-    p.add_argument("--open", action="store_true")
+    p.add_argument("--open", action="store_true", help="open Issues only (default: all states)")
     p.add_argument("--repo")
     return ap
 
@@ -50,7 +62,7 @@ def main(argv, out=None, err=None, clock=None, ledger=None):
     try:
         if a.cmd == "show":
             gh = make_gh(a.repo)
-            text = show.show(gh, a.issue)
+            text = show.show(gh, a.issue, own_writes(a.issue, a.root))
             if a.json:
                 emit.engine({"issue": a.issue, "text": text}, out)
             else:
@@ -58,7 +70,8 @@ def main(argv, out=None, err=None, clock=None, ledger=None):
             return 0
         if a.cmd == "route":
             r = route.route(make_gh(a.repo), a.issue, a.root,
-                            unattended=os.environ.get("GLD_UNATTENDED") == "1")
+                            unattended=os.environ.get("GLD_UNATTENDED") == "1",
+                            own_writes=own_writes(a.issue, a.root))
             if a.json:
                 emit.engine(r.as_dict(), out)
             else:
@@ -81,12 +94,15 @@ def main(argv, out=None, err=None, clock=None, ledger=None):
             return 0
         if a.cmd == "running":
             dirs = running.registry() if a.all_repos else [running.git_common_dir(a.root)]
-            rows, missing = running.running([d for d in dirs if d])
+            rows, missing = running.running(dirs)
             out.write(running.render_running(rows, missing))
             return 0
         if a.cmd == "directives":
-            out.write(running.render_directives(running.directives(make_gh(a.repo), a.open or True)))
+            out.write(running.render_directives(running.directives(make_gh(a.repo), a.open)))
             return 0
+    except running.RunningError as e:
+        err.write("%s\n" % e)
+        return 1
     except cfgmod.ConfigError as e:
         out.write("%s\n" % e)
         return 1

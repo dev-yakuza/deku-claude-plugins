@@ -1,14 +1,19 @@
 """workflows.status.running — `status running` and `status directives` (§2.10; downgrade runbook
 ①/①b, §10.5). Both read only.
 
-running: each `<git-common-dir>/guild/engine/<N>.lock` is probed with a non-blocking flock on a
-READ-ONLY descriptor (nothing is created or written); a lock someone holds is a live engine. The
-lock file's JSON (`mode`, `pid`, `pgid`, `started`) is K1's format — read tolerantly here.
+running: each `<git-common-dir>/guild/engine/<N>.lock` is judged WITHOUT touching the lock
+(K0-m5 — taking the flock even briefly made a real start see "busy"): the lock file's JSON
+(`mode`, `pid`, `pgid`, `started`) names the holder, and the holder is live when that pid
+exists. Format decision for K1: the lock holder writes that JSON (pid + its start time) right
+after taking the flock and keeps the flock for its lifetime; a pid-less lock file reads as
+"unknown holder", never as "not running".
+A git common dir that cannot be resolved is an ERROR, never "no engine running" (K0-M6 — this is
+the downgrade runbook's safety check).
 `--all-repos` walks the config-dir registry `${CLAUDE_CONFIG_DIR:-~/.claude}/guild-engine/repos.json`
 (keys = absolute git common dirs); a missing entry is skipped and reported.
 """
 
-import fcntl
+import errno
 import glob
 import json
 import os
@@ -20,12 +25,29 @@ from guildcore.decisions import DecisionLog
 from guildcore.state import list_snapshots
 
 
+class RunningError(Exception):
+    pass
+
+
 def git_common_dir(cwd="."):
-    p = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                       cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if p.returncode != 0:
-        return None
-    return p.stdout.decode("utf-8", "replace").strip()
+    """Absolute git common dir. `--path-format=absolute` needs git ≥ 2.31; older git falls back
+    to the plain form resolved against `cwd`. Unresolvable → RunningError."""
+    def rp(args):
+        try:
+            p = subprocess.run(["git", "rev-parse"] + args, cwd=cwd,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError:
+            return None
+        out = p.stdout.decode("utf-8", "replace").strip()
+        return out if p.returncode == 0 and out and not out.startswith("--") else None
+    cd = rp(["--path-format=absolute", "--git-common-dir"])
+    if cd is None:
+        cd = rp(["--git-common-dir"])
+        if cd is not None:
+            cd = os.path.abspath(os.path.join(cwd, cd))
+    if cd is None or not os.path.isdir(cd):
+        raise RunningError("cannot resolve git common dir — not a git repo, or git failed")
+    return cd
 
 
 def registry_path(env=None):
@@ -43,26 +65,33 @@ def registry(env=None):
     return sorted(data.keys()) if isinstance(data, dict) else []
 
 
-def probe(lock):
-    """(held, info) — held=True when another process holds the flock."""
+def pid_alive(pid):
     try:
-        fd = os.open(lock, os.O_RDONLY)
-    except OSError:
+        os.kill(int(pid), 0)
+    except (ValueError, TypeError):
+        return False
+    except OSError as e:
+        return e.errno == errno.EPERM          # exists, owned by someone else
+    return True
+
+
+def probe(lock):
+    """(held, info) without taking the lock: held = the recorded pid is alive; a lock file with
+    no readable pid is reported as held by an unknown holder (fail toward "running")."""
+    try:
+        with open(lock, encoding="utf-8") as fh:
+            raw = fh.read()
+    except (IOError, UnicodeDecodeError):
         return False, {}
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            held = False
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        except OSError:
-            held = True
-        try:
-            info = json.loads(os.read(fd, 65536).decode("utf-8", "replace") or "{}")
-        except ValueError:
-            info = {}
-        return held, info if isinstance(info, dict) else {}
-    finally:
-        os.close(fd)
+        info = json.loads(raw or "{}")
+    except ValueError:
+        info = {}
+    if not isinstance(info, dict):
+        info = {}
+    if info.get("pid") is None:
+        return True, dict(info, mode=info.get("mode") or "unknown-holder")
+    return pid_alive(info["pid"]), info
 
 
 def running(common_dirs):
