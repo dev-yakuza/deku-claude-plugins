@@ -31,6 +31,7 @@ denies writes to the main worktree — ports.py).
 
 import os
 import re
+import contextlib
 import shlex
 import shutil
 import tempfile
@@ -372,7 +373,41 @@ def loop_family(raw, runner, name, executed=None):
         (executed is None or lines >= executed)
 
 
-def rerun_kind(raw, runner, name, passed):
+LOOP_HEAD_RE = re.compile(r"\bfor\s*\(|\.forEach\s*\(|\.map\s*\(|\bwhile\s*\(")
+
+
+def loop_site(text, name):
+    """K2r5-m1: a loop family is allowed only when the cited literal appears in exactly ONE
+    `test(`/`testWidgets(` call in the file and that call sits inside a loop (`for`, `forEach`,
+    `map`, `while` — an enclosing block's header). Two separate tests sharing a name are not a
+    family."""
+    if not text or not name:
+        return False
+    short = name.split(" › ")[-1]
+    hits = [m.start() for q in ("'", '"') for m in re.finditer(
+        r"\b(?:test|testWidgets)\s*\(\s*%s" % re.escape(q + short + q), text)]
+    if len(hits) != 1:
+        return False
+    stack = []
+    for i, ch in enumerate(text[:hits[0]]):
+        if ch == "{":
+            stack.append(i)
+        elif ch == "}" and stack:
+            stack.pop()
+    for b in stack:
+        seg = text[max(text.rfind("}", 0, b), text.rfind("{", 0, b)) + 1:b + 1]
+        depth, cut = 0, 0                          # the last statement only (`;` at paren depth 0)
+        for i, ch in enumerate(seg):
+            depth += ch == "("
+            depth -= ch == ")"
+            if ch == ";" and depth == 0:
+                cut = i + 1
+        if LOOP_HEAD_RE.search(seg[cut:]):
+            return True
+    return False
+
+
+def rerun_kind(raw, runner, name, passed, family=True):
     """assertion | passed | runtime | load_error | none_ran | ambiguous | unknown (K2-B1, r2-B1)."""
     raw = raw or ""
     for rx in CH.LOAD_ERROR_RES.get(runner, ()):            # collection / compile stage only
@@ -381,7 +416,7 @@ def rerun_kind(raw, runner, name, passed):
     c = counts(raw, runner)
     if c is not None and c[0] == 0:
         return "none_ran"
-    if c is not None and c[0] != 1 and not loop_family(raw, runner, name, c[0]):
+    if c is not None and c[0] != 1 and not (family and loop_family(raw, runner, name, c[0])):
         return "ambiguous"
     short = (name or "").split(" › ")[-1].split("::")[-1].split(".")[-1]
     s = CH.parse_summary(raw, runner)
@@ -474,20 +509,36 @@ def is_impl(f):
     return bool(f) and not TEST_PATH_RE.search(f) and not NON_IMPL_RE.search(f)
 
 
+def impl_detail(root, base, given=None):
+    """K2r5-M2: the revert scope and `n/a(test-only)` come from the ACTUAL diff `base...HEAD`
+    (changed files minus tests/docs/assets — `is_impl`), never from the developer's `impl_files`.
+    The developer's list is only compared: unsafe entries are rejected (K2-B4), and a list that
+    disagrees with the diff is recorded (`mismatch`: given-only and diff-only files)."""
+    out = G.run(root, "diff", "--name-only", "%s...HEAD" % base, check=False).decode()
+    derived = []
+    for f in [x for x in out.split("\n") if x]:
+        s_ = safe_rel(root, f, ("HEAD", base))
+        if s_ and is_impl(s_):
+            derived.append(s_)
+    bad, given_ok = [], []
+    for f in list(given or []):
+        s_ = safe_rel(root, f, ("HEAD", base))
+        if not s_:
+            bad.append(f)
+        elif is_impl(s_):
+            given_ok.append(s_)
+    mismatch = None
+    if given is not None and given and set(given_ok) != set(derived):
+        mismatch = {"given_only": sorted(set(given_ok) - set(derived)),
+                    "diff_only": sorted(set(derived) - set(given_ok))}
+    src = "derived" if not given else ("result" if mismatch is None else "derived(impl_files mismatch)")
+    return {"files": derived, "source": src, "rejected": bad, "mismatch": mismatch}
+
+
 def impl_files(root, base, given=None):
-    """(files, source, rejected): the developer's `impl_files` (execute's result.json) or, when
-    absent, files changed since `base` (`derived`) — in BOTH cases only implementation files
-    (`is_impl`, K2r4-M3). Unsafe entries are rejected (K2-B4) and returned for the decision log."""
-    if given:
-        raw, src = list(given), "result"
-    else:
-        out = G.run(root, "diff", "--name-only", "%s...HEAD" % base, check=False).decode()
-        raw, src = [f for f in out.split("\n") if f], "derived"
-    ok, bad = [], []
-    for f in raw:
-        s = safe_rel(root, f, ("HEAD", base))
-        (ok if s else bad).append(s or f)
-    return [f for f in ok if is_impl(f)], src, bad
+    """(files, source, rejected) — see `impl_detail`."""
+    d = impl_detail(root, base, given)
+    return d["files"], d["source"], d["rejected"]
 
 
 DEP_DIRS = ("node_modules", ".venv", "venv", "vendor", "Pods")
@@ -538,6 +589,7 @@ class TempTree(object):
         self.copied = []
         self.refused = []
         self.linked = []
+        self.warm = None
 
     def copy_listed(self, paths):
         """The repo's opt-in `engine.effective.copy_ignored` (K2 r3): explicit relative paths of
@@ -592,8 +644,6 @@ class TempTree(object):
         self.path = d
         try:
             materialize(self.root, self.rev, d)
-            if self.overlay:
-                self._overlay()
             if not self.defer_ignored:
                 self.finish_ignored()
             for f in self.files:
@@ -621,6 +671,9 @@ class TempTree(object):
                 self._put("HEAD", f, dst)
 
     def finish_ignored(self):
+        """After the tree reached HEAD: the worktree overlay (suite trees) and the ignored entries."""
+        if self.overlay:
+            self._overlay()
         self._ignored()
         _LINKED[os.path.realpath(self.path)] = list(self.linked)
 
@@ -710,6 +763,41 @@ class TempTree(object):
         return False
 
 
+def warm_status(r):
+    """`ok | failed(<line>) | skipped(<why>)` of a warm-up result (K2r5-m3)."""
+    if r is None:
+        return "skipped(no flutter package or a root flutter_test_config.dart)"
+    if not hasattr(r, "passed"):
+        return "ok"
+    if r.passed:
+        return "ok"
+    line = (r.red_line() if hasattr(r, "red_line") else None) or \
+        ([x for x in (r.raw or "").split("\n") if x.strip()] or ["?"])[-1]
+    return "failed(%s)" % CH.redact_lines(" ".join(line.split()))[:160]
+
+
+@contextlib.contextmanager
+def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False):
+    """The ONE preparation of every temp tree that runs role-written code (K2r5-B1): with a
+    warm-up and unchanged build inputs, a pristine <base> warmed IN PLACE under the network, then
+    `advance(HEAD)` (+ the worktree overlay for the suite) and the ignored entries, then the
+    opt-in `copy_ignored` — offline from there on. Yields (tree, info{warm, build_hook_changed})."""
+    info = {"warm": None, "build_hook_changed": []}
+    if warm is not None:
+        info["build_hook_changed"] = hook_changes(root, base)
+    do_warm = warm is not None and not info["build_hook_changed"]
+    if warm is not None and not do_warm:
+        info["warm"] = "skipped(build-hook-changed: %s)" % ", ".join(info["build_hook_changed"][:3])
+    with TempTree(root, base, files, overlay=overlay, rev=base if do_warm else "HEAD",
+                  defer_ignored=do_warm) as tt:
+        if do_warm:
+            info["warm"] = warm_status(warm(base, tt.path))
+            tt.advance("HEAD")
+            tt.finish_ignored()
+        tt.copy_listed(copy_list or [])
+        yield tt, info
+
+
 # ---- per AC ------------------------------------------------------------------------------------
 
 class CheckOutcome(object):
@@ -760,6 +848,8 @@ def _verdict_head(kind, tree, raw=""):
         return ("unsure", "the cited test did not run at HEAD (skipped or filtered out) — covers nothing")
     if kind == "ambiguous":
         return ("unverified", "filter ran more than one test")
+    if (getattr(tree, "warm", None) or "").startswith("failed") and kind in ("load_error", "runtime", "unknown"):
+        return ("unverified", "warm-up failed: %s" % tree.warm[len("failed("):-1])     # K2r5-m3
     if tree.skipped_ignored and kind in ("load_error", "runtime", "unknown"):
         named = [x for x in tree.skipped_ignored if x.rstrip("/") and x.rstrip("/") in (raw or "")]
         return ("unverified", "secret-required: the test needs git-ignored files the engine does not copy (%s)"
@@ -800,8 +890,11 @@ def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=90
         for ac, rows in pending.items():
             out[ac] = CheckOutcome(ac, rows[0][0].get("test"), "unverified", "not a git worktree", line=rows[0][3])
         return out, meta
-    impl, src, bad = impl_files(p.root, base, given_impl) if base else ([], None, [])
-    meta.update(impl_source=src, rejected=bad, test_only=bool(base) and not impl and not bad)
+    det = impl_detail(p.root, base, given_impl) if base else {"files": [], "source": None, "rejected": [],
+                                                              "mismatch": None}
+    impl, src, bad = det["files"], det["source"], det["rejected"]
+    meta.update(impl_source=src, rejected=bad, test_only=bool(base) and not impl,
+                impl_given_mismatch=det["mismatch"])
     warm = getattr(p, "warm", None)
     if warm is not None:
         # K2r3-M1: the networked warm-up runs dependency build hooks — the ROOT package's and path
@@ -817,16 +910,13 @@ def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=90
     try:
         # K2r4-M1: with a warm-up, the tree starts as a PRISTINE checkout of <base> (reviewed code,
         # no ignored file); the networked warm-up runs there, in place (hook caches keep their
-        # paths); only then does the tree move to HEAD and get its ignored entries — offline
-        with TempTree(p.root, base, impl, rev=base if warm is not None else "HEAD",
-                      defer_ignored=warm is not None) as tt:
-            if warm is not None:
-                p.warm(base, tt.path)
-                tt.advance("HEAD")
-                tt.finish_ignored()
+        # paths); only then does the tree move to HEAD and get its ignored entries, then the
+        # opt-in copy_ignored files — offline from there on (`prepared_tree`)
+        copy_list = ((cfg.get("engine") or {}).get("effective") or {}).get("copy_ignored")
+        with prepared_tree(p.root, base, impl, warm, copy_list) as (tt, info):
+            meta["warm"] = info["warm"]
+            tt.warm = info["warm"]
             meta["skipped_ignored"] = tt.skipped_ignored
-            # opt-in ignored files AFTER the networked warm-up: offline re-runs only (K2 r3)
-            tt.copy_listed(((cfg.get("engine") or {}).get("effective") or {}).get("copy_ignored"))
             meta.update(ignored_copied=tt.copied, ignored_refused=tt.refused)
             _phases(p, runner, pending, tt, base, impl, out, timeout_s)
     except Exception as e:                          # a failed temp tree is "could not check"
@@ -843,7 +933,8 @@ def _phases(p, runner, pending, tt, base, impl, out, timeout_s):
     for ac, rows in pending.items():                 # HEAD run (r2-B1)
         for cv, path, name, line, cmd in rows:
             r = p.check(cmd, tt.path, "tester", timeout_s, [tt.path])
-            kind = "timeout" if r.timed_out else rerun_kind(r.raw, runner, name, r.passed)
+            kind = "timeout" if r.timed_out else rerun_kind(r.raw, runner, name, r.passed,
+                                                             loop_site(p.read_file(path), name))
             v = _verdict_head(kind, tt, r.raw)
             if v:
                 out[ac] = CheckOutcome(ac, cv.get("test"), v[0], v[1], "head:" + kind, line, cmd)
@@ -881,7 +972,8 @@ def _phases(p, runner, pending, tt, base, impl, out, timeout_s):
 def _rerun(p, runner, tt, rows, timeout_s):
     for cv, path, name, line, cmd in rows:
         r = p.check(cmd, tt.path, "tester", timeout_s, [tt.path])
-        kind = "timeout" if r.timed_out else rerun_kind(r.raw, runner, name, r.passed)
+        kind = "timeout" if r.timed_out else rerun_kind(r.raw, runner, name, r.passed,
+                                                         loop_site(p.read_file(path), name))
         if kind != "assertion":
             return kind, cv, line, cmd
     return "assertion", rows[0][0], rows[0][3], rows[0][4]

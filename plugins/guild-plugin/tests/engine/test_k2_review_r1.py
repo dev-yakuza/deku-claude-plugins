@@ -230,6 +230,9 @@ class B4TempTreeContainment(unittest.TestCase):
         os.makedirs(os.path.join(r, "gen"))
         open(os.path.join(r, "gen", "api.dart"), "w").write("generated")
         base = git(r, "rev-parse", "HEAD")
+        with open(os.path.join(r, "calc.py"), "w") as fh:
+            fh.write("x=2\n")
+        git(r, "commit", "-qam", "impl")                 # r5-M2: the revert scope is the actual diff
         files, _src, bad = EFF.impl_files(r, base, [victim, "../victim_rel.txt", "gen/api.dart", "calc.py"])
         self.assertEqual(files, ["calc.py"])
         self.assertEqual(sorted(bad), sorted([victim, "../victim_rel.txt", "gen/api.dart"]))
@@ -905,6 +908,8 @@ class R4M1WarmUp(unittest.TestCase):
                 os.makedirs(os.path.join(tree, ".dart_tool", "hooks_runner"))
                 return _CR(False, 1, False, "No file or variants found for asset: assets/data.db.\n", [], 60), {"a": 1}
             seen["placeholder"] = os.path.getsize(os.path.join(tree, "assets", "data.db"))
+            os.makedirs(os.path.join(tree, "build", "unit_test_assets", "assets"))     # bundle with the placeholder
+            os.makedirs(os.path.join(tree, "build", "native_assets"))
             return _CR(True, 0, False, "00:00 +1: All tests passed!\n", [], 60), {"a": 1}
         orig = PT.CH.deps_step
         PT.CH.deps_step = fake_deps
@@ -935,7 +940,9 @@ class R4M1WarmUp(unittest.TestCase):
                                 old=os.path.exists(os.path.join(cwd, "lib", "old.dart")),
                                 hooks=os.path.isdir(os.path.join(cwd, ".dart_tool", "hooks_runner")),
                                 warmdir=os.path.exists(os.path.join(cwd, "guild_engine_warmup")),
-                                db=os.path.exists(os.path.join(cwd, "assets", "data.db")))
+                                db=os.path.exists(os.path.join(cwd, "assets", "data.db")),
+                                bundle=os.path.exists(os.path.join(cwd, "build", "unit_test_assets")),
+                                native=os.path.exists(os.path.join(cwd, "build", "native_assets")))
                 return orig_check(cmd, cwd, owner, timeout_s, write_dirs)
             h.p.check = check
             out, meta = EFF.run(h.p, {"commands": {"test": "flutter test"}}, ["C1"],
@@ -950,7 +957,7 @@ class R4M1WarmUp(unittest.TestCase):
         self.assertEqual(seen["placeholder"], 0)                       # an EMPTY engine-written placeholder
         self.assertEqual(seen["px"]["placeholders"], ["assets/data.db"])
         self.assertEqual(snap, {"a": "int f() => 2; // developer code\n", "new": True, "old": False, "hooks": True,
-                                "warmdir": False, "db": False})        # HEAD, warm artifacts kept, no leftovers
+                                "warmdir": False, "db": False, "bundle": False, "native": True})   # r5: stale bundle dropped        # HEAD, warm artifacts kept, no leftovers
         self.assertEqual(out["C1"].result, "pass")
 
     def test_root_test_config_at_base_skips(self):
@@ -1141,3 +1148,183 @@ class R4LoopFamilies(unittest.TestCase):
     def test_other_tests_in_the_run_stay_ambiguous(self):
         raw = "00:01 +0: ko 세 키\n00:01 +1: 다른 테스트\n00:01 +2: All tests passed!\n"
         self.assertEqual(EFF.rerun_kind(raw, "flutter", "세 키", True), "ambiguous")
+
+
+# ---- review r5 (review-k2-r5.md) -------------------------------------------------------------------
+
+from workflows.dev import preflight as PF  # noqa: E402
+from workflows.dev.stages import base as SB  # noqa: E402
+
+
+class R5M2ImplFromDiff(unittest.TestCase):
+    def _repo(self):
+        r = repo(self, {"calc.py": "x=1\n", "README.md": "a\n", "test_calc.py": "t\n"})
+        base = git(r, "rev-parse", "HEAD")
+        _commit(r, {"calc.py": "x=2\n", "README.md": "b\n"})
+        return r, base
+
+    def test_docs_only_impl_files_do_not_switch_the_check_off(self):
+        r, base = self._repo()
+        d = EFF.impl_detail(r, base, ["README.md"])          # the reviewer's probe
+        self.assertEqual(d["files"], ["calc.py"])
+        self.assertEqual(d["mismatch"], {"given_only": [], "diff_only": ["calc.py"]})
+        self.assertEqual(d["source"], "derived(impl_files mismatch)")
+        h = Harness(self, fixture(), root=r, base=base)
+        h.checks = [_CR(True, 0, False, "test_x (test_calc.T.test_x) ... ok\n\nRan 1 test in 0.0s\n\nOK\n", [], 60),
+                    _CR(True, 0, False, "test_x (test_calc.T.test_x) ... ok\n\nRan 1 test in 0.0s\n\nOK\n", [], 60)]
+        h.write_file("test_calc.py", "import unittest\n\nclass T(unittest.TestCase):\n    def test_x(self):\n        self.assertEqual(f(), 2)\n")
+        out, meta = EFF.run(h.p, {"commands": {"test": "python3 -m unittest"}}, ["C1"],
+                            {"C1": [{"test": "test_calc.py::T.test_x", "ac": "C1", "kind": "new"}]}, base, ["README.md"])
+        self.assertFalse(meta["test_only"])
+        self.assertNotEqual(out["C1"].result, "n/a")
+        self.assertEqual(out["C1"].result, "unsure")               # reverted calc.py, still passes
+        self.assertEqual(meta["impl_given_mismatch"]["diff_only"], ["calc.py"])
+
+    def test_agreeing_list_is_the_result(self):
+        r, base = self._repo()
+        self.assertEqual(EFF.impl_detail(r, base, ["calc.py", "README.md"])["source"], "result")
+        self.assertIsNone(EFF.impl_detail(r, base, ["calc.py"])["mismatch"])
+
+    def test_mismatch_field(self):
+        self.assertEqual(T._mismatch_field({"given_only": ["a.py"], "diff_only": []}), "given_only=a.py;diff_only=none")
+        self.assertIsNone(T._mismatch_field(None))
+
+
+class R5M1AllListeners(unittest.TestCase):
+    NETSTAT = ("Active Internet connections (including servers)\n"
+               "Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)      rhiwat\n"
+               "tcp4       0      0  127.0.0.1.8021         *.*                    LISTEN       0 0 131072 131072 x:1\n"
+               "tcp6       0      0  ::1.8021               *.*                    LISTEN       0 0 131072 131072 x:1\n"
+               "tcp46      0      0  *.21300                *.*                    LISTEN       0 0 131072 131072 y:2\n"
+               "tcp4       0      0  127.0.0.1.31026        *.*                    LISTEN       0 0 131072 131072 z:3\n"
+               "tcp4       0      0  127.0.0.1.50000        127.0.0.1.31027        ESTABLISHED  0 0 1 1 q:4\n")
+
+    def test_netstat_parser(self):
+        self.assertEqual(sorted(CH.parse_netstat(self.NETSTAT)), [8021, 21300, 31026])
+
+    def test_union_and_fail_closed(self):
+        orig = CH._cmd
+        try:
+            CH._cmd = lambda argv: self.NETSTAT if "netstat" in argv[0] else "p1\nf3\nn127.0.0.1:16105\n"
+            self.assertEqual(CH.listening_ports(), [8021, 16105, 21300, 31026])
+            CH._cmd = lambda argv: None
+            with self.assertRaises(CH.PortsUnreadable):
+                CH.listening_ports()
+        finally:
+            CH._cmd = orig
+
+    def test_live_ports_include_other_users_listeners(self):
+        if not os.path.exists("/usr/sbin/netstat"):
+            self.skipTest("netstat")
+        ns = CH.parse_netstat(CH._cmd(["/usr/sbin/netstat", "-anv", "-p", "tcp"]))
+        self.assertTrue(ns <= set(CH.listening_ports()))
+
+
+class R5B1Suite(unittest.TestCase):
+    def _dart_repo(self):
+        return repo(self, {"pubspec.yaml": "name: app\nflutter:\n  assets:\n    - assets/data.db\n    - assets/images/\n",
+                           ".gitignore": "lib/env/\nassets/data.db\nlib/fb.dart\n",
+                           "lib/a.dart": "import 'package:app/env/env.dart';\nint f() => k;\n",
+                           "lib/main.dart": "import 'fb.dart';\nimport 'a.dart';\n",
+                           "test/a_test.dart": "import 'package:app/a.dart';\nvoid main(){}\n",
+                           "integration_test/app_test.dart": "import 'package:app/main.dart';\n",
+                           "assets/images/x.png": "p"})
+
+    def test_preflight_finds_what_the_tests_need(self):
+        r = self._dart_repo()
+        self.assertEqual(PF.ignored_needed(r), ["assets/data.db", "lib/env/env.dart"])   # not lib/fb.dart (main/e2e only)
+        self.assertEqual(PF.ignored_needed(r, ["lib/env", "assets/data.db"]), [])
+        self.assertEqual(PF.ignored_needed(repo(self, {"a.py": "x\n"})), [])
+
+    def test_stage_halts_at_preflight_without_running_anything(self):
+        r = self._dart_repo()
+        h = Harness(self, fixture(), root=r, roles=[], suites=[])
+        h.write_file("docs/specs/7/test-cases.md", "| C1 | a |\n")
+        res = T.run(h.p)
+        self.assertEqual(res.kind, res.FAIL)
+        self.assertEqual(res.fail_class, "prevalidate_env")
+        self.assertTrue(res.notes[0].startswith("halted: env ignored-missing — assets/data.db, lib/env/env.dart"))
+        self.assertIn("engine.effective.copy_ignored", res.line)
+        self.assertEqual(h.calls["suites"], [])
+        self.assertNotIn("guild:needs-human", h.labels())
+        self.assertIn("ignored-missing", SB.ENV_HALT_REASONS)
+
+    def test_red_suite_naming_an_ignored_path_halts_not_loops(self):
+        red = suite("00:01 +0: loading x\nlib/a.dart:1:8: Error: Error when reading 'lib/env/env.dart': No such file\n"
+                    "00:01 +0 -1: Some tests failed.\n", passed=False, rc=1)
+        red.missing_ignored = ["lib/env/env.dart"]
+        h = Harness(self, fixture(), roles=[], suites=[red])
+        res = T.run(h.p)
+        self.assertEqual((res.kind, res.fail_class), (res.FAIL, "prevalidate_env"))
+        self.assertIn("halted: env ignored-missing — lib/env/env.dart", res.notes[0])
+        self.assertIsNone(h.body_with("test:output"))
+        self.assertNotIn("guild:needs-human", h.labels())
+
+    def test_missing_ignored_classifier(self):
+        r = self._dart_repo()
+        raw = ("/tmp/T/lib/a.dart:1:8: Error: Error when reading '/tmp/T/lib/env/env.dart': No such file or directory\n"
+               "No file or variants found for asset: assets/data.db.\nlib/real.dart:3: Error: x\n")
+        self.assertEqual(PF.missing_ignored(raw, r, [], "/tmp/T"), ["assets/data.db", "lib/env/env.dart"])
+        self.assertEqual(PF.missing_ignored("Expected: 1\n  Actual: 2\n", r, ["lib/env/"], "/tmp/T"), [])
+        self.assertEqual(PF.missing_ignored("cannot open 'lib/env/env.dart'", r, ["lib/env/"], None), ["lib/env"])
+        self.assertEqual(PF.missing_ignored("environment ok", r, [".env"], None), [])
+
+    @unittest.skipUnless(os.path.exists(CH.SANDBOX_EXEC), "sandbox-exec only on macOS")
+    def test_suite_in_tree_cannot_read_the_checkout(self):
+        from workflows.dev import ports as PT
+        r = repo(self, {"a.txt": "tracked\n", ".gitignore": ".env\n"})
+        open(os.path.join(r, ".env"), "w").write("SECRET=AIzaSy-very-secret-000\n")
+        open(os.path.join(r, "b.txt"), "w").write("untracked\n")
+        run_dir = tmpdir(self)
+        for d in ("in", "out", "tmp"):
+            os.makedirs(os.path.join(run_dir, d))
+        res = PT.suite_in_tree(r, None, ["pwd; cat a.txt b.txt; cat %s/.env; cat .env" % r], "tester", 60, run_dir,
+                               dict(os.environ))
+        self.assertFalse(res.passed)
+        self.assertIn("tracked", res.raw)
+        self.assertIn("untracked", res.raw)                                # the overlay
+        self.assertNotIn("AIzaSy", res.raw)                                # neither the tree copy nor the original
+        self.assertIn(".env", res.missing_ignored)
+        self.assertEqual(res.warm, "skipped(no base)")
+        self.assertIn(r, res.raw)                                          # temp paths shown as the worktree
+
+
+class R5Minors(unittest.TestCase):
+    def test_family_needs_one_call_site_inside_a_loop(self):
+        loop = "void main(){ for (final l in ['ko','ja']) { group(l, () { test('세 키', () { expect(1, 2); }); }); } }"
+        two = "void main(){ group('a', (){ test('세 키', (){}); }); group('b', (){ test('세 키', (){ expect(1, 2); }); }); }"
+        cfor = "void main(){ for (var i = 0; i < 2; i++) { test('n', (){}); } }"
+        self.assertTrue(EFF.loop_site(loop, "세 키"))
+        self.assertFalse(EFF.loop_site(two, "세 키"))
+        self.assertTrue(EFF.loop_site(cfor, "n"))
+        self.assertFalse(EFF.loop_site("x.forEach(print); group('a', (){ test('n', (){}); });", "n"))
+        raw = "00:01 +0: a 세 키\n00:01 +1: b 세 키\n00:01 +2: All tests passed!\n"
+        self.assertEqual(EFF.rerun_kind(raw, "flutter", "세 키", True, family=False), "ambiguous")
+        self.assertEqual(EFF.rerun_kind(raw, "flutter", "세 키", True, family=True), "passed")
+
+    def test_warm_status_and_warm_failed_reason(self):
+        self.assertEqual(EFF.warm_status(None)[:7], "skipped")
+        self.assertEqual(EFF.warm_status(_CR(True, 0, False, "", [], 60)), "ok")
+        self.assertTrue(EFF.warm_status(_CR(False, 1, False, "x\nBuilding native assets failed.\n", [], 60))
+                        .startswith("failed(Building native assets failed."))
+        r = repo(self, {"pubspec.yaml": "name: x\n", "lib/a.dart": "int f() => 1;\n",
+                        "test/a_test.dart": "void main(){ test('t', (){ expect(f(), 2); }); }\n"})
+        base = git(r, "rev-parse", "HEAD")
+        _commit(r, {"lib/a.dart": "int f() => 2;\n"})
+        h = Harness(self, fixture(), root=r, base=base)
+        h.p.warm = lambda b, t: _CR(False, 1, False, "Building native assets failed.\n", [], 60)
+        h.checks = [_CR(False, 1, False, "Building native assets failed.\n00:01 +0 -1: Some tests failed.\n", [], 60)]
+        out, meta = EFF.run(h.p, {"commands": {"test": "flutter test"}}, ["C1"],
+                            {"C1": [{"test": "test/a_test.dart::t", "ac": "C1", "kind": "new"}]}, base)
+        self.assertTrue(meta["warm"].startswith("failed("))
+        self.assertEqual(out["C1"].why, "warm-up failed: Building native assets failed.")
+
+
+class R5OfflineSuiteCommand(unittest.TestCase):
+    def test_flutter_test_gets_no_pub(self):
+        from workflows.dev.ports import offline_cmd
+        self.assertEqual(offline_cmd("flutter test --fail-fast --concurrency=12"),
+                         "flutter test --no-pub --fail-fast --concurrency=12")
+        self.assertEqual(offline_cmd("fvm flutter test"), "fvm flutter test --no-pub")
+        for same in ("flutter test --no-pub x", "scripts/verify_test_coverage.sh r.json", "npm test", "flutter testx"):
+            self.assertEqual(offline_cmd(same), same)

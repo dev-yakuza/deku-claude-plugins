@@ -30,6 +30,7 @@ from guildcore.records import outputs as OUT
 from workflows.dev import cases as CS
 from workflows.dev import effective as EFF
 from workflows.dev import handoff as HO
+from workflows.dev import preflight as PF
 from workflows.dev import judging as JG
 from workflows.dev.stages import base as B
 from workflows.dev.stages import loopback as LP
@@ -172,8 +173,18 @@ def run(p, only=None, config_present=True):
     if copy_list:                     # K2r3-M2: secrets known by value are redacted by value
         RD.register_exact_from_files(p.root, copy_list)
 
+    # K2r5-B1 preflight: tracked tests needing git-ignored files copy_ignored does not list → an
+    # environment halt before anything runs (never a red suite, a loop-back or stagnation)
+    need = PF.ignored_needed(p.root, copy_list) if p.root and os.path.isdir(p.root) else []
+    if need:
+        return B.ignored_missing(need, "preflight")
+
     # T1 — the engine runs the suite (§2.8)
     r = p.suite(cmds, "tester", CEILING_S)
+    p.suite_warm = getattr(r, "warm", None)          # K2r5-m3: recorded with the TEST decision
+    miss = getattr(r, "missing_ignored", None)
+    if not r.passed and miss:                        # the same halt, found by the run itself
+        return B.ignored_missing(miss, "suite")
     summ = CH.parse_summary(r.raw, runner, (cfg.get("commands") or {}).get("test_summary"))
     if summ is None and not r.timed_out:
         d = p.judge(JG.spec(p, "RUNNER", [("raw", r.raw[-4000:])], STAGE, "T2.3"))
@@ -422,6 +433,13 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
     return uncovered, vac, coverage, [x for x in rows_unc if x], checks_field, {"unsure_acs": unsure_acs}
 
 
+def _mismatch_field(m):
+    if not m:
+        return None
+    return "given_only=%s;diff_only=%s" % (",".join(m.get("given_only") or []) or "none",
+                                            ",".join(m.get("diff_only") or []) or "none")
+
+
 def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_mode):
     """K2-M3: every SJ-TEST call is a decision block; per AC the cited test, its assertion line,
     the re-run command and class (§9.5 citation material); `unverified` checks flag the
@@ -442,6 +460,8 @@ def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_m
                              "effective_check": "bypassed" if meta.get("bypassed") else
                              ("n/a(test-only)" if meta.get("test_only") else None),
                              "ignored_copied": ",".join(meta.get("ignored_copied") or []) or None,
+                             "warm": meta.get("warm"), "suite_warm": getattr(p, "suite_warm", None),
+                             "impl_given_mismatch": _mismatch_field(meta.get("impl_given_mismatch")),
                              "ignored_refused": ",".join(meta.get("ignored_refused") or []) or None,
                              "grade": "trigger" if unver or ac_source != "test-cases" else None})
 
@@ -519,6 +539,8 @@ def apply_answer(p, stage, output_name, q, res, comments):
 def _recheck(p, cfg):
     cmds = commands_list((cfg.get("commands") or {}).get("test"))
     r = p.suite(cmds, "tester", CEILING_S)
+    if not r.passed and getattr(r, "missing_ignored", None):
+        return B.ignored_missing(r.missing_ignored, "suite")
     summ = CH.parse_summary(r.raw, EFF.runner_of(cfg))
     green = bool(r.passed and (summ is None or summ.green))
     p.writer.create_comment(p.issue, OUT.render_recheck_note(p.now(), green, r.red_line() or summary_line(r.raw, summ)))

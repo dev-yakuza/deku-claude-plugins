@@ -103,7 +103,8 @@ class Ports(object):
         # the procedure replay's injection list (§10.2-2): legacy values that are not the
         # engine's to decide (loop-back reason/signature …). Empty in every live run.
         self.inject = {}
-        self.warm = None                  # (tree) → None: the engine's dependency warm-up in a temp tree
+        self.warm = None                  # (base, tree) → CheckResult|None: the engine warm-up, in place on pristine <base>
+        self.suite_warm = None            # the last suite run's warm-up status (K2r5-m3)
 
     # -- config ---------------------------------------------------------------------------
     def cfg(self, dotted, default=None):
@@ -159,12 +160,31 @@ class Entry(object):
 
 # ---- entry (T0.1–T0.7 / Q0.1–Q0.7) ------------------------------------------------------------
 
+# §2.2 environment-level halts (exit 6, `halted: env <reason>` → supervisor `halted:engine-env-<reason>`):
+# the closed set. `ignored-missing` (K2r5-B1): tracked tests need git-ignored files the engine's temp
+# tree does not have and `engine.effective.copy_ignored` does not list — no code change can fix it.
+ENV_HALT_REASONS = ("endpoint", "python", "uninitialized", "plugin-not-listed", "ignored-missing")
+
+
+def env_halt(reason, line, detail=""):
+    assert reason in ENV_HALT_REASONS, reason
+    return StageResult(StageResult.FAIL, line=line, fail_class="prevalidate_env",
+                       notes=["halted: env %s%s" % (reason, (" — " + detail) if detail else "")])
+
+
+def ignored_missing(paths, where):
+    """The `ignored-missing` halt with the missing paths and the config hint."""
+    lst = ", ".join(paths[:6]) + (" …" if len(paths) > 6 else "")
+    hint = "list them in .claude/guild/config.json `engine.effective.copy_ignored` (explicit relative paths)"
+    return env_halt("ignored-missing", "%s: the tests need git-ignored files the engine's temp tree does not have "
+                    "(%s) — %s" % (where, lst, hint), "%s; %s" % (lst, hint))
+
+
 def enter(p, stage, config_present=True, only=None):
     """Preflight → Issue validation → label read → `--mark` → split-parent guard → stage
     precondition (C-F-1) → entry label. Returns Entry or a FAIL StageResult (no label written)."""
     if not config_present:
-        return StageResult(StageResult.FAIL, line="Guild not initialized (run /gld init)",
-                           fail_class="prevalidate_env", notes=["halted: env uninitialized"])
+        return env_halt("uninitialized", "Guild not initialized (run /gld init)")
     issue = p.gh.issue(p.issue)
     if "/pull/" in (issue.get("url") or ""):
         return StageResult(StageResult.FAIL, line="#%d is a pull request, not an Issue" % p.issue,

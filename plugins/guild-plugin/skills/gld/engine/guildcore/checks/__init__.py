@@ -109,19 +109,49 @@ DENY_EXEC = ("/usr/bin/open", "/usr/bin/osascript", "/usr/bin/lsappinfo", "/usr/
              "/usr/bin/pbpaste", "/usr/bin/say", "/usr/bin/automator", "/usr/bin/shortcuts")
 
 
-def listening_ports():
-    """TCP ports in LISTEN state right now (any address), via `lsof`; [] when unreadable."""
-    try:
-        out = subprocess.run(["/usr/sbin/lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-Fn"], stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, timeout=20).stdout.decode("utf-8", "replace")
-    except (OSError, subprocess.SubprocessError):
-        return []
-    ports = set()
-    for ln in out.split("\n"):
+NETSTAT_LISTEN_RE = re.compile(r"^tcp[46]{0,2}\s+\d+\s+\d+\s+(\S+)\.(\d+)\s+\S+\s+LISTEN\b")
+
+
+def parse_netstat(text):
+    """LISTEN ports from `netstat -anv -p tcp` (macOS: `addr.port` local addresses)."""
+    out = set()
+    for ln in (text or "").split("\n"):
+        m = NETSTAT_LISTEN_RE.match(ln.strip())
+        if m:
+            out.add(int(m.group(2)))
+    return out
+
+
+def parse_lsof(text):
+    out = set()
+    for ln in (text or "").split("\n"):
         m = re.match(r"^n.*:(\d+)$", ln.strip())
         if m:
-            ports.add(int(m.group(1)))
-    return sorted(ports)
+            out.add(int(m.group(1)))
+    return out
+
+
+def _cmd(argv):
+    try:
+        p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=20)
+        return p.stdout.decode("utf-8", "replace") if p.returncode == 0 or p.stdout else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+class PortsUnreadable(RuntimeError):
+    pass
+
+
+def listening_ports():
+    """TCP ports in LISTEN state right now — EVERY user's, root daemons included (K2r5-M1):
+    `netstat -anv -p tcp` (all sockets, no owner filter) ∪ `lsof` (this user's). Fails CLOSED:
+    when neither can be read the check refuses to run (`PortsUnreadable`)."""
+    ns = _cmd(["/usr/sbin/netstat", "-anv", "-p", "tcp"])
+    ls = _cmd(["/usr/sbin/lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-Fn"])
+    if ns is None and ls is None:
+        raise PortsUnreadable("cannot list listening ports (netstat and lsof both failed)")
+    return sorted(parse_netstat(ns) | parse_lsof(ls))
 
 
 def sandbox_profile(block, extra_write=(), loopback=True, unix_sockets=UNIX_SOCKETS_ALLOWED,

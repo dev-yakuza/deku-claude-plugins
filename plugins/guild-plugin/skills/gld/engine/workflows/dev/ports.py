@@ -13,6 +13,7 @@ kept from K1:
 
 import os
 import re
+import subprocess
 
 from guildcore import capture as CAP
 from guildcore import checks as CH
@@ -129,11 +130,70 @@ def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_
         return r, px
     finally:
         shutil.rmtree(wdir, True)
+        if placeholders:
+            # the test asset bundle built during the warm-up holds the EMPTY placeholders — drop it
+            # so the offline run rebuilds it from the real files (measured, word_app: a stale bundle
+            # with an empty assets/data.db → `no such table: words` in db_helper_test)
+            shutil.rmtree(os.path.join(tree, "build", "unit_test_assets"), True)
         for n in placeholders:
             try:
                 os.remove(os.path.join(tree, n))
             except OSError:
                 pass
+
+
+FLUTTER_TEST_RE = re.compile(r"^(\s*(?:fvm\s+)?flutter\s+test)(?=\s|$)")
+
+
+def offline_cmd(cmd):
+    """The suite is OFFLINE; `flutter test` runs an implicit `pub get` that contacts pub.dev even
+    when everything is resolved (measured, word_app: `dart pub get --example` → advisories fetch →
+    `Failed host lookup: 'pub.dev'`, rc 69). Dependencies come from the engine's deps step and
+    warm-up, so the engine adds `--no-pub` to a `flutter test` command that lacks it."""
+    if "--no-pub" in cmd or "--pub" in cmd.split():
+        return cmd
+    return FLUTTER_TEST_RE.sub(r"\1 --no-pub", cmd, count=1)
+
+
+def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_list=(), issue=None,
+                  extra_roots=(), journal=None, warm=True):
+    """K2r4-M2 / K2r5-B1: the main suite in a temp tree prepared exactly like the effective re-runs
+    (`effective.prepared_tree`): pristine <base> warmed in place under the deps proxy (unless the
+    build inputs changed or there is no base) → HEAD + the worktree's uncommitted non-ignored files
+    → ignored entries → `copy_ignored`; then the suite offline in `tree_sandbox`. Golden failure
+    images come back to the worktree. The result carries `warm`, `skipped_ignored`,
+    `ignored_copied` and — when red — `missing_ignored` (the git-ignored paths the output names)."""
+    import shutil
+    from workflows.dev import preflight as PF
+
+    def _warm(b, tree):
+        r, _px = warm_in_place(worktree, tree, run_dir, env, issue, extra_roots=extra_roots)
+        return r
+    use_warm = _warm if (warm and base) else None
+    cmds = [offline_cmd(c) for c in cmds]
+    with EFF.prepared_tree(worktree, base, [], use_warm, copy_list, overlay=True) as (tt, info):
+        sb = tree_sandbox(tt.path, run_dir, worktree, issue, extra_roots)
+        r = CH.run_command(cmds, timeout_s, cwd=tt.path, env=env, journal=journal, who="check-%s" % owner,
+                           sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
+        for img in V.failing_images(r.raw):
+            rel = os.path.relpath(img, tt.path) if os.path.isabs(img) else img
+            src = tt._inside(os.path.normpath(rel)) if not rel.startswith("..") else None
+            if src and os.path.isfile(src) and not os.path.islink(src) and rel.endswith(".png"):
+                dst = os.path.join(worktree, rel)
+                if os.path.realpath(dst).startswith(os.path.realpath(worktree) + os.sep):
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copyfile(src, dst)
+        r.missing_ignored = [] if r.passed else PF.missing_ignored(r.raw, worktree, tt.skipped_ignored, tt.path)
+        try:                                       # K2r5-m2: the per-run cost, on record
+            du = subprocess.run(["du", "-sk", tt.path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=120)
+            r.tree_kb = int(du.stdout.split()[0]) if du.stdout else None
+        except (OSError, subprocess.SubprocessError, ValueError):
+            r.tree_kb = None
+        r.raw = r.raw.replace(os.path.realpath(tt.path), worktree).replace(tt.path, worktree)
+        r.warm = info["warm"] or ("skipped(no base)" if not base else None)
+        r.skipped_ignored = list(tt.skipped_ignored)
+        r.ignored_copied = list(tt.copied)
+        return r
 
 
 def role_spec(call, issue, worktree, config, base=None, branch=None, unattended=True):
@@ -169,23 +229,12 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         return ((raw.get("engine") or {}).get("effective") or {}).get("copy_ignored") or []
 
     def suite(cmds, owner, timeout_s):
-        """K2r4-M2: the suite runs in a temp tree (HEAD + the worktree's uncommitted non-ignored
-        files + the repo's opt-in `copy_ignored`), never in the checkout: with the default config
-        no git-ignored original (secrets) is reachable. Failure images come back to the worktree."""
-        with EFF.TempTree(worktree, None, [], overlay=True) as tt:
-            tt.copy_listed(_copy_list())
-            r = _tree_run(cmds, tt.path, owner, timeout_s)
-            for img in V.failing_images(r.raw):
-                rel = os.path.relpath(img, tt.path) if os.path.isabs(img) else img
-                src = tt._inside(os.path.normpath(rel)) if not rel.startswith("..") else None
-                if src and os.path.isfile(src) and not os.path.islink(src) and rel.endswith(".png"):
-                    dst = os.path.join(worktree, rel)
-                    if os.path.realpath(dst).startswith(os.path.realpath(worktree) + os.sep):
-                        os.makedirs(os.path.dirname(dst), exist_ok=True)
-                        import shutil
-                        shutil.copyfile(src, dst)
-            r.raw = r.raw.replace(os.path.realpath(tt.path), worktree).replace(tt.path, worktree)
-            return r
+        """K2r5-B1: `suite_in_tree` — never in the checkout (no ignored original is reachable)."""
+        run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", owner)
+        r = suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, C.child_env(root_env, {}, role_dir=run_dir),
+                          _copy_list(), issue, journal=journal)
+        runner.rebaseline(worktree, issue)
+        return r
 
     def check(cmd, cwd, owner, timeout_s, write_dirs):
         # OFFLINE (K2r2-M1): the role-written test and the reverted impl get no network at all;
