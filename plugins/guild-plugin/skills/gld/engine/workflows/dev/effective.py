@@ -456,6 +456,44 @@ class TempTree(object):
         self.parent = parent
         self.path = None
         self.skipped_ignored = []
+        self.copied = []
+        self.refused = []
+
+    def copy_listed(self, paths):
+        """The repo's opt-in `engine.effective.copy_ignored` (K2 r3): explicit relative paths of
+        git-IGNORED files/dirs, copied for the OFFLINE re-runs only — call it AFTER the networked
+        warm-up. Same containment as B4: normalised, relative, no `..`, no symlink anywhere in the
+        source or destination path, the source's realpath inside the repo, git-ignored there."""
+        real_root = os.path.realpath(self.root)
+        for raw in paths or []:
+            rel = os.path.normpath(raw or "")
+            bad = (not raw or os.path.isabs(raw) or rel.startswith("..") or rel == "." or any(c in raw for c in "*?[")
+                   or not G.ok(self.root, "check-ignore", "-q", "--", rel))
+            src = os.path.join(self.root, rel)
+            if not bad:
+                cur = self.root
+                for part in rel.split(os.sep):
+                    cur = os.path.join(cur, part)
+                    if os.path.islink(cur):
+                        bad = True
+                        break
+            if not bad and (not os.path.exists(src) or not os.path.realpath(src).startswith(real_root + os.sep)):
+                bad = True
+            dst = None if bad else self._inside(rel)
+            if bad or dst is None:
+                self.refused.append(raw)
+                continue
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if os.path.lexists(dst):
+                shutil.rmtree(dst, True) if os.path.isdir(dst) and not os.path.islink(dst) else os.remove(dst)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, symlinks=True,
+                                ignore=lambda d, names: [n for n in names if os.path.islink(os.path.join(d, n))])
+            else:
+                shutil.copy2(src, dst)
+            self.copied.append(rel)
+            self.skipped_ignored = [x for x in self.skipped_ignored
+                                    if x.rstrip("/") != rel and not rel.startswith(x.rstrip("/") + "/")]
 
     def _inside(self, rel):
         real_root = os.path.realpath(self.path)
@@ -632,6 +670,9 @@ def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=90
             meta["skipped_ignored"] = tt.skipped_ignored
             if getattr(p, "warm", None) is not None:
                 p.warm(tt.path)                     # engine-written empty test, deps hosts only
+            # opt-in ignored files AFTER the networked warm-up: offline re-runs only (K2 r3)
+            tt.copy_listed(((cfg.get("engine") or {}).get("effective") or {}).get("copy_ignored"))
+            meta.update(ignored_copied=tt.copied, ignored_refused=tt.refused)
             _phases(p, runner, pending, tt, base, impl, out, timeout_s)
     except Exception as e:                          # a failed temp tree is "could not check"
         for ac, rows in pending.items():

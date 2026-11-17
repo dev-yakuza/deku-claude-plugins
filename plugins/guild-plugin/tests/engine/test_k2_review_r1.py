@@ -652,3 +652,67 @@ class R2Minors(unittest.TestCase):
         h.decisions.record({"point": "TEST", "stage": "test", "by": "judge:sonnet", "choice": "effective:C1",
                             "unsure": "false", "coerced": "false", "effective_check": "bypassed"})
         self.assertIn("effective_check: bypassed", UL.entries(h.gh.comments(7))[0])
+
+
+# ---- K2 r3 decision: engine.effective.copy_ignored -----------------------------------------------
+
+class R3CopyIgnored(unittest.TestCase):
+    def mk(self):
+        r = repo(self, {"lib/a.dart": "x\n", ".gitignore": "lib/env/\nassets/data.db\n.env\n"})
+        os.makedirs(os.path.join(r, "lib", "env"))
+        open(os.path.join(r, "lib", "env", "env.dart"), "w").write("const k = 1;")
+        os.makedirs(os.path.join(r, "assets"))
+        open(os.path.join(r, "assets", "data.db"), "w").write("db")
+        open(os.path.join(r, ".env"), "w").write("TOKEN=x")
+        return r
+
+    def test_default_copies_nothing(self):
+        r = self.mk()
+        with EFF.TempTree(r, git(r, "rev-parse", "HEAD"), []) as tt:
+            tt.copy_listed([])
+            self.assertFalse(os.path.exists(os.path.join(tt.path, "assets", "data.db")))
+            self.assertEqual(tt.copied, [])
+
+    def test_listed_paths_copied_and_contained(self):
+        r = self.mk()
+        out = tmpdir(self)
+        open(os.path.join(out, "secret"), "w").write("s")
+        os.symlink(os.path.join(out, "secret"), os.path.join(r, "assets", "link.db"))
+        with open(os.path.join(r, ".gitignore"), "a") as fh:
+            fh.write("assets/link.db\n")
+        with EFF.TempTree(r, git(r, "rev-parse", "HEAD"), []) as tt:
+            tt.copy_listed(["assets/data.db", "lib/env/env.dart", "lib/a.dart", "../x", "/etc/hosts",
+                            "lib/env/*.dart", "assets/link.db", "missing.txt"])
+            self.assertEqual(tt.copied, ["assets/data.db", "lib/env/env.dart"])
+            self.assertEqual(sorted(tt.refused), sorted(["lib/a.dart", "../x", "/etc/hosts", "lib/env/*.dart",
+                                                         "assets/link.db", "missing.txt"]))
+            self.assertTrue(os.path.exists(os.path.join(tt.path, "lib", "env", "env.dart")))
+            self.assertFalse(os.path.exists(os.path.join(tt.path, ".env")))       # unlisted: still never copied
+
+    def test_copied_only_after_the_networked_warm_up_and_logged(self):
+        r = self.mk()
+        with open(os.path.join(r, "calc_test.py"), "w") as fh:
+            fh.write("import unittest\n\nclass T(unittest.TestCase):\n    def test_x(self):\n        self.assertEqual(f(), 1)\n")
+        git(r, "add", "-A")
+        git(r, "commit", "-qm", "t")
+        h = Harness(self, fixture(), root=r, base=git(r, "rev-parse", "HEAD"))
+        seen = []
+        h.p.warm = lambda tree: seen.append(os.path.exists(os.path.join(tree, "assets", "data.db")))
+        cfg = {"commands": {"test": "python3 -m unittest"}, "engine": {"effective": {"copy_ignored": ["assets/data.db"]}}}
+        from guildcore.checks import CheckResult as CR
+        h.checks = [CR(True, 0, False, "test_x (calc_test.T.test_x) ... ok\n\nRan 1 test in 0.0s\n\nOK\n", [], 60)]
+        out, meta = EFF.run(h.p, cfg, ["C1"], {"C1": [{"test": "calc_test.py::T.test_x", "ac": "C1", "kind": "guard"}]},
+                            h.p.base)
+        self.assertEqual(seen, [False])                       # absent while the network is up
+        self.assertEqual(meta["ignored_copied"], ["assets/data.db"])
+        self.assertEqual(out["C1"].result, "pass")
+
+    def test_engine_default_is_empty(self):
+        from guildcore.config import ENGINE_DEFAULTS
+        self.assertEqual(ENGINE_DEFAULTS["effective"], {"copy_ignored": []})
+
+    def test_stored_rerun_output_is_redacted(self):
+        src = open(os.path.join(_util.ENGINE, "workflows", "dev", "replay", "revert_subset.py"), encoding="utf-8").read()
+        self.assertIn('CH.redact_lines(r.raw[-1500:])', src)
+        o = EFF.CheckOutcome("C1", "t", "unverified", "secret-required: x")
+        self.assertNotIn("raw", o.detail())                  # outcomes never carry run output

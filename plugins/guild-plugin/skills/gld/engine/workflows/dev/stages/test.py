@@ -384,6 +384,8 @@ def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_m
                              "brief": "tool" if tool_mode else None,
                              "unsure_acs": ",".join(ac for ac, v in verdicts.items() if v == "unsure") or None,
                              "effective_check": "bypassed" if meta.get("bypassed") else None,
+                             "ignored_copied": ",".join(meta.get("ignored_copied") or []) or None,
+                             "ignored_refused": ",".join(meta.get("ignored_refused") or []) or None,
                              "grade": "trigger" if unver or ac_source != "test-cases" else None})
 
 

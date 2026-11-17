@@ -38,6 +38,11 @@ ENGINE_DEFAULTS = {
     "role_allow": {},
     "roles": {},
     "judges": {},
+    # K2 r3 (user decision): git-ignored paths an OFFLINE TEST `effective` re-run may copy into its
+    # temp tree — explicit relative paths (no globs), realpath-contained, never present during a
+    # networked step; default empty = `unverified(secret-required)` when a test needs them.
+    #   "effective": {"copy_ignored": ["assets/data.db", "lib/env/env.dart"]}
+    "effective": {"copy_ignored": []},
 }
 ENUMS = {"first_sprint_mode": ("auto", "on", "off"), "handoff_judge": ("default", "always")}
 _TYPES = {bool: (bool,), float: (int, float), int: (int,), list: (list,), dict: (dict,),

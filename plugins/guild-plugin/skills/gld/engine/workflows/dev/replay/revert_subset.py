@@ -62,7 +62,7 @@ class Port(object):
             t0 = time.time()
             r, px = CH.deps_step(["flutter test --no-pub %s" % rel], tree, sb, os.path.join(self.run_dir, "tmp"), env=self.env)
             self.calls.append({"cmd": "warm-up", "rc": r.rc, "secs": round(time.time() - t0, 1), "proxy": px,
-                               "tail": r.raw[-600:]})
+                               "tail": CH.redact_lines(r.raw[-600:])})
         finally:
             os.remove(os.path.join(tree, rel))
 
@@ -75,7 +75,9 @@ class Port(object):
         t0 = time.time()
         r = CH.run_command([cmd], timeout_s, cwd=cwd, env=self.env, sandbox=dict(sb, filesystem=fs),
                            tmp=os.path.join(self.run_dir, "tmp"))             # OFFLINE (K2r2-M1)
-        self.calls.append({"cmd": cmd, "rc": r.rc, "secs": round(time.time() - t0, 1), "tail": r.raw[-1500:]})
+        # re-run output is redacted before it is stored anywhere (K2 r3)
+        self.calls.append({"cmd": cmd, "rc": r.rc, "secs": round(time.time() - t0, 1),
+                           "tail": CH.redact_lines(r.raw[-1500:])})
         return r
 
 
@@ -86,6 +88,7 @@ def main(argv=None):
     ap.add_argument("--issues", required=True)
     ap.add_argument("--flutter-bin", default=os.path.expanduser("~/fvm/default/bin"))
     ap.add_argument("--out", required=True)
+    ap.add_argument("--copy-ignored", default="", help="comma list → engine.effective.copy_ignored")
     a = ap.parse_args(argv)
     os.makedirs(a.work, exist_ok=True)
     clone = os.path.join(a.work, "clone")
@@ -136,9 +139,11 @@ def main(argv=None):
         dr, px = CH.deps_step(["flutter pub get", warm], clone, dev_sb, os.path.join(run_dir, "tmp"), env=env)
         row["deps"] = {"rc": dr.rc, "secs": round(time.time() - t0, 1)}
         p = Port(clone, env, run_dir)
-        cfg = {"commands": {"test": "flutter test"}}
+        cfg = {"commands": {"test": "flutter test"},
+               "engine": {"effective": {"copy_ignored": [x for x in a.copy_ignored.split(",") if x]}}}
         out, meta = EFF.run(p, cfg, [c["ac"] for c in covers], {c["ac"]: [c] for c in covers}, base, None, timeout_s=900)
-        row.update(sha=sha, base=base, covers=covers, meta={k: v for k, v in meta.items() if k != "rejected"},
+        row.update(sha=sha, base=base, covers=covers,
+                   meta={k: v for k, v in meta.items() if k not in ("rejected", "skipped_ignored")},
                    rejected=meta.get("rejected"), outcomes=[o.detail() for o in out.values()], calls=p.calls)
         results.append(row)
         print(json.dumps({"issue": n, "results": [(o.ac, o.result, o.why) for o in out.values()]}, ensure_ascii=False),
