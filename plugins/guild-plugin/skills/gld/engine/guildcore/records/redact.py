@@ -36,12 +36,73 @@ def patterns():
 KEY_VALUE_RE = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|PuTTY-User-Key-File-\d+:")
 
 
+# K2r3-M2: EXACT-value redaction for secrets the engine knows by value — the string literals of
+# the git-ignored files a repo lets the TEST effective re-run copy (`copy_ignored`), with their
+# base64 (standard and url-safe, all three byte alignments) and hex forms. Registered once per
+# engine process; every `redact()` after that removes them, whatever the surrounding text.
+_EXACT = set()
+LITERAL_RE = re.compile(r"\"([^\"\\\n]{16,})\"|'([^'\\\n]{16,})'|`([^`\n]{16,})`")
+EXACT_MIN = 16
+
+
+def encodings(value):
+    import base64
+    import binascii
+    b = value.encode("utf-8")
+    out = {value, binascii.hexlify(b).decode(), binascii.hexlify(b).decode().upper()}
+    for pad in (0, 1, 2):                 # the value at any byte offset inside a larger b64 blob
+        for enc in (base64.b64encode, base64.urlsafe_b64encode):
+            e = enc(b"\0" * pad + b).decode().rstrip("=")
+            head = (pad * 8 + 5) // 6 if pad else 0      # chars touched by the padding bytes
+            core = e[head:len(e) - 3] if len(e) - head > 3 else ""
+            if len(core) >= EXACT_MIN:
+                out.add(core)
+    return out
+
+
+def literals(text):
+    return [next(g for g in m.groups() if g) for m in LITERAL_RE.finditer(text or "")]
+
+
+def register_exact_from_files(root, rels):
+    """Read each listed file under `root` (text only — a binary file is skipped), collect its
+    string literals of ≥ 16 chars and register them and their encodings. Returns the count."""
+    n = 0
+    for rel in rels or []:
+        try:
+            with open(os.path.join(root, rel), "rb") as fh:
+                data = fh.read(2 * 1024 * 1024)
+        except (IOError, OSError):
+            continue
+        if b"\0" in data:
+            continue
+        for v in literals(data.decode("utf-8", "replace")):
+            for e in encodings(v):
+                if len(e) >= EXACT_MIN and e not in _EXACT:
+                    _EXACT.add(e)
+                    n += 1
+    return n
+
+
+def clear_exact():
+    _EXACT.clear()
+
+
+def _exact(out):
+    for v in sorted(_EXACT, key=len, reverse=True):
+        if v in out:
+            out = out.replace(v, REPLACEMENT)
+    return out
+
+
 def redact(text):
     """Redact ONE value (a field, an item, or one prose body). Callers never pass a whole
     multi-field block: a key anywhere replaces everything they passed."""
     out = text or ""
     if KEY_VALUE_RE.search(out):
         return REPLACEMENT
+    if _EXACT:
+        out = _exact(out)
     for rx in patterns():
         out = rx.sub(REPLACEMENT, out)
     return out
@@ -49,4 +110,5 @@ def redact(text):
 
 def has_secret(text):
     t = text or ""
-    return bool(KEY_VALUE_RE.search(t)) or any(rx.search(t) for rx in patterns())
+    return (bool(KEY_VALUE_RE.search(t)) or any(rx.search(t) for rx in patterns())
+            or any(v in t for v in _EXACT))

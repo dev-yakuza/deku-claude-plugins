@@ -58,7 +58,8 @@ class Port(object):
         with open(os.path.join(tree, rel), "w", encoding="utf-8") as fh:
             fh.write("import 'package:flutter_test/flutter_test.dart';\n\nvoid main() {\n  test('guild engine warm-up', () {});\n}\n")
         try:
-            sb = S.role_sandbox("developer", tree, self.run_dir, toolchain=True, tool_writes=S.toolchain_writes(tree))
+            from workflows.dev.ports import warm_sandbox
+            sb = warm_sandbox(tree, self.run_dir, self.root)
             t0 = time.time()
             r, px = CH.deps_step(["flutter test --no-pub %s" % rel], tree, sb, os.path.join(self.run_dir, "tmp"), env=self.env)
             self.calls.append({"cmd": "warm-up", "rc": r.rc, "secs": round(time.time() - t0, 1), "proxy": px,
@@ -106,12 +107,7 @@ def main(argv=None):
             results.append(dict(row, skipped="no squash commit"))
             continue
         sh(clone, "git", "checkout", "-q", "--detach", sha)
-        sh(clone, "git", "clean", "-qfdx", "-e", ".dart_tool")
-        for g in GENERATED:
-            src = os.path.join(a.repo, g)
-            if os.path.exists(src):
-                os.makedirs(os.path.dirname(os.path.join(clone, g)), exist_ok=True)
-                shutil.copy2(src, os.path.join(clone, g))
+        sh(clone, "git", "clean", "-qfdx", "-e", ".dart_tool")       # no ignored originals yet
         base = sh(clone, "git", "rev-parse", sha + "^").strip()
         touched = [f for f in sh(clone, "git", "diff", "--name-only", "--diff-filter=AM", base, sha).split("\n")
                    if f.endswith("_test.dart")]
@@ -135,9 +131,22 @@ def main(argv=None):
         env["GIT_CONFIG_NOSYSTEM"] = "1"
         dev_sb = S.role_sandbox("developer", clone, run_dir, toolchain=True, tool_writes=S.toolchain_writes(clone))
         t0 = time.time()
-        warm = "flutter test --no-pub %s" % covers[0]["test"].split("::")[0]      # native assets (K1r4-M2)
-        dr, px = CH.deps_step(["flutter pub get", warm], clone, dev_sb, os.path.join(run_dir, "tmp"), env=env)
-        row["deps"] = {"rc": dr.rc, "secs": round(time.time() - t0, 1)}
+        # K2r3-M1: the networked deps step runs BEFORE any git-ignored original exists in the clone,
+        # and warms with an ENGINE-written empty test, never a role's test
+        wrel = os.path.join("test", "guild_engine_warmup_test.dart")
+        with open(os.path.join(clone, wrel), "w", encoding="utf-8") as fh:
+            fh.write("import 'package:flutter_test/flutter_test.dart';\n\nvoid main() {\n  test('guild engine warm-up', () {});\n}\n")
+        try:
+            dr, px = CH.deps_step(["flutter pub get", "flutter test --no-pub %s" % wrel], clone, dev_sb,
+                                  os.path.join(run_dir, "tmp"), env=env)
+        finally:
+            os.remove(os.path.join(clone, wrel))
+        row["deps"] = {"rc": dr.rc, "secs": round(time.time() - t0, 1), "proxy": px}
+        for g in GENERATED:                                  # the developer checkout's ignored files — offline from here on
+            src = os.path.join(a.repo, g)
+            if os.path.exists(src):
+                os.makedirs(os.path.dirname(os.path.join(clone, g)), exist_ok=True)
+                shutil.copy2(src, os.path.join(clone, g))
         p = Port(clone, env, run_dir)
         cfg = {"commands": {"test": "flutter test"},
                "engine": {"effective": {"copy_ignored": [x for x in a.copy_ignored.split(",") if x]}}}

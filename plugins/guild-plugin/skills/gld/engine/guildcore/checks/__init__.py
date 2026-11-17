@@ -87,7 +87,16 @@ def _sb_target(entry):
     return "(literal %s)" % _sb_str(real)
 
 
-def sandbox_profile(block, extra_write=()):
+# K2r3-M2: the checks profile's network, MEASURED with word_app `flutter test` under sandbox-exec
+# (k2-notes): loopback TCP is required (the flutter tool and flutter_tester talk over a random
+# loopback port — without it the test fails at load); NO unix socket is required → none allowed
+# (docker.sock, the ssh agent, local proxies on unix sockets are unreachable). The usual local
+# forward-proxy ports are denied explicitly after the loopback allow (last rule wins).
+UNIX_SOCKETS_ALLOWED = ()
+LOOPBACK_PROXY_PORTS = (1080, 1081, 3128, 7890, 7891, 8118, 8888, 9050, 9150)
+
+
+def sandbox_profile(block, extra_write=(), loopback=True, unix_sockets=UNIX_SOCKETS_ALLOWED):
     """An SBPL profile from a rendered `sandbox` block (last matching rule wins)."""
     fs = (block or {}).get("filesystem") or {}
     lines = ["(version 1)", "(allow default)", "(deny file-write*)",
@@ -102,9 +111,13 @@ def sandbox_profile(block, extra_write=()):
     # bash/sh here-document temp files (`sh-thd*`) land wherever the shell finds a writable
     # spot, not necessarily TMPDIR (verified) — allowed by NAME, after the denies (last wins)
     lines.append("(allow file-write* (regex #\"/sh-thd[^/]*$\"))")
-    lines += ["(deny network-outbound)",
-              "(allow network-outbound (remote ip \"localhost:*\"))",
-              "(allow network-outbound (remote unix-socket))"]
+    lines += ["(deny network-outbound)"]
+    if loopback:
+        lines.append("(allow network-outbound (remote ip \"localhost:*\"))")
+        for port in LOOPBACK_PROXY_PORTS:
+            lines.append("(deny network-outbound (remote ip \"localhost:%d\"))" % port)
+    for u in unix_sockets or ():
+        lines.append("(allow network-outbound (remote unix-socket (path-literal %s)))" % _sb_str(u))
     return "\n".join(lines) + "\n"
 
 

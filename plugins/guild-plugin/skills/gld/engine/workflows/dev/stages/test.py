@@ -58,6 +58,31 @@ def case_ids(text):
     return CS.case_ids(text)
 
 
+FL_TEST_RE = re.compile(r"^\d\d:\d\d \+\d+(?: ~\d+)?(?: -\d+)?: (.+?)( \[E\])?\s*$")
+
+
+def structured_summary(r, summ, runner):
+    """runner · exit class · per-test name and pass/fail — no other runner text (K2r3-M2)."""
+    exit_cls = "timeout" if r.timed_out else ("green" if r.passed and (summ is None or summ.green) else "red")
+    lines = ["runner: %s" % (runner or (summ.runner if summ else "unknown")), "exit: %s" % exit_cls]
+    if summ is not None:
+        lines.append("tests: %d passed, %d failed, %d skipped" % (summ.passed, summ.failed, summ.skipped))
+    per = []
+    if runner in ("flutter", "dart") or (summ and summ.runner in ("flutter", "dart")):
+        seen = {}
+        for ln in (r.raw or "").split("\n"):
+            m = FL_TEST_RE.match(ln)
+            if m and not m.group(1).startswith(("loading ", "(setUpAll)", "(tearDownAll)", "All tests", "Some tests")):
+                seen[m.group(1)] = "fail" if m.group(2) else seen.get(m.group(1), "pass")
+        per = ["%s: %s" % (v, k) for k, v in seen.items()]
+    elif summ is not None:
+        per = ["fail: %s" % n for n in summ.failed_names]
+    return "\n".join(lines + per[-RAW_TESTS:])
+
+
+RAW_TESTS = 60
+
+
 def deferred_cases(evidence_body):
     blk = V.block_text(evidence_body, V.SAFETY_NET) or ""
     out = []
@@ -118,6 +143,10 @@ def run(p, only=None, config_present=True):
     if vrun:
         cmds += commands_list((cfg.get("commands") or {}).get("vrt"))
     runner = EFF.runner_of(cfg)
+    copy_list = ((cfg.get("engine") or {}).get("effective") or {}).get("copy_ignored") or []
+    if copy_list:                     # K2r3-M2: secrets known by value are redacted by value
+        from guildcore.records import redact as RD
+        RD.register_exact_from_files(p.root, copy_list)
 
     # T1 — the engine runs the suite (§2.8)
     r = p.suite(cmds, "tester", CEILING_S)
@@ -159,7 +188,8 @@ def run(p, only=None, config_present=True):
     uncovered, vac, coverage, rows_unc, checks_field, tdec = [], [], [], [], "", None
     pending, env_suspect, images = False, None, []
     if raw_green:
-        out = _judge_coverage(p, cfg, test_cases, covers, r.raw, ledger, visual_cases, tc_rel, deferred)
+        shown = structured_summary(r, summ, runner) if copy_list else r.raw
+        out = _judge_coverage(p, cfg, test_cases, covers, shown, ledger, visual_cases, tc_rel, deferred)
         if isinstance(out, B.StageResult):
             return out
         uncovered, vac, coverage, rows_unc, checks_field, tdec = out
@@ -187,7 +217,9 @@ def run(p, only=None, config_present=True):
     steps = [(st["cmd"].split(" -c ")[-1].strip("'") if "sandbox-exec" in st["cmd"] else st["cmd"],
               st["rc"], s_line if i == len(r.steps) - 1 else "") for i, st in enumerate(r.steps)] or \
         [(" && ".join(cmds), r.rc, s_line)]
-    body = R.test_output(p.issue, steps, r.raw, verify_line, claim_line, coverage, ran, not_run,
+    # with copy_ignored set, the raw tail is never posted — only a structured summary (K2r3-M2)
+    posted = structured_summary(r, summ, runner) if copy_list else r.raw
+    body = R.test_output(p.issue, steps, posted, verify_line, claim_line, coverage, ran, not_run,
                          verbatim, [x for x in images if p.exists(x)], e2e)
     p.writer.upsert_comment(p.issue, R.TEST, body)
 

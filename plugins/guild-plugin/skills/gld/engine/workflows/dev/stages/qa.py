@@ -133,6 +133,10 @@ def run(p, only=None, config_present=True, diff_paths=None):
     if res is not None:
         return apply_answer(p, STAGE, R.QA, q, res, comments)
 
+    copy_list = ((cfg.get("engine") or {}).get("effective") or {}).get("copy_ignored") or []
+    if copy_list:                     # K2r3-M2: the same exact-value redaction as the test stage
+        from guildcore.records import redact as RD
+        RD.register_exact_from_files(p.root, copy_list)
     issue = p.gh.issue(p.issue)
     test_out = OUT.find(comments, "test:output")
     ledger = V.visual_ledger(test_out.body) if test_out else None

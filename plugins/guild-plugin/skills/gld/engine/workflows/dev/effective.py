@@ -410,6 +410,19 @@ def safe_rel(root, f, revs):
     return n
 
 
+HOOK_RE = re.compile(r"(^|/)hook/|(^|/)pubspec(_overrides)?\.(yaml|lock)$")
+
+
+def hook_changes(root, base):
+    """Files the change touched that decide which build hooks run (K2r3-M1): any `hook/` dir,
+    `pubspec.yaml`, `pubspec.lock`, `pubspec_overrides.yaml` (path dependencies live there). An
+    unknown base counts as changed (fail closed)."""
+    if not base:
+        return ["(no base)"]
+    out = G.run(root, "diff", "--name-only", "%s...HEAD" % base, check=False).decode()
+    return [f for f in out.split("\n") if f and HOOK_RE.search(f)]
+
+
 def default_base(root):
     """`git merge-base <origin default> HEAD` when the caller has no base (K2-B3)."""
     ref = G.run(root, "symbolic-ref", "-q", "refs/remotes/origin/HEAD", check=False).decode().strip()
@@ -508,7 +521,7 @@ class TempTree(object):
         return dst
 
     def __enter__(self):
-        d = tempfile.mkdtemp(prefix="gld-eff-", dir=self.parent)
+        d = tempfile.mkdtemp(dir=self.parent)            # no fixed prefix (K2r3-m3)
         os.rmdir(d)
         self.path = d
         try:
@@ -665,6 +678,18 @@ def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=90
         return out, meta
     impl, src, bad = impl_files(p.root, base, given_impl) if base else ([], None, [])
     meta.update(impl_source=src, rejected=bad)
+    warm = getattr(p, "warm", None)
+    if warm is not None:
+        # K2r3-M1: the networked warm-up runs dependency build hooks — the ROOT package's and path
+        # dependencies' too. If this change touches any of them, no hook it wrote may run with the
+        # network: no warm-up, and the offline re-run cannot be trusted to build → unverified.
+        changed = hook_changes(p.root, base)
+        if changed:
+            for ac, rows in pending.items():
+                out[ac] = CheckOutcome(ac, rows[0][0].get("test"), "unverified",
+                                       "build-hook-changed: %s" % ", ".join(changed[:3]), line=rows[0][3])
+            meta["build_hook_changed"] = changed
+            return out, meta
     try:
         with TempTree(p.root, base, impl) as tt:
             meta["skipped_ignored"] = tt.skipped_ignored

@@ -72,7 +72,9 @@ def _table(lines, i, add):
             p = "TC" if f.startswith("TC") else m.group(2)
             prefixes[p] = prefixes.get(p, 0) + 1
         real_table = j > i + 1 and SEP.match(lines[i + 1].strip()) is not None
-        if firsts and (max(prefixes.values()) >= 2 or not real_table):
+        # K2r3-m1: a header-row table's first cells count only when its header names cases
+        case_head = any(re.search(r"AC|TC|케이스|[Cc]ase|시나리오|테스트", h) for h in head) if real_table else True
+        if firsts and case_head and (max(prefixes.values()) >= 2 or not real_table):
             for f in firsts:
                 add(f)
         else:
@@ -127,7 +129,9 @@ def case_ids(text, dropped=None):
             add(m.group(1))
         else:
             b = BULLET_ID.match(ln)
-            if b:
+            # K2r3-m1: a bullet id only below a case / AC section (`- V2: API 버전` under
+            # "공통 전제" is prose); a document with no headings at all is one case list
+            if b and (not section or any(CASE_SECTION.search(t) or AC_ANY.search(t) for _l, t in section)):
                 add(b.group(1))
         i += 1
     return out

@@ -159,7 +159,7 @@ class B2CaseIds(unittest.TestCase):
             table_nums = set("#" + m.group(1) for m in re.finditer(r"(?m)^\|\s*(\d+)\s*\|", v["text"]))
             self.assertFalse((tops - table_nums) & set(ids), n)
         self.assertEqual(golden, 20)
-        self.assertEqual(sorted(zero), ["1791", "961"])
+        self.assertEqual(sorted(zero), ["1640", "1791", "961"])   # r3-m1: #1640's bullets are regex notes
 
     def test_section_headings_are_not_cases(self):
         self.assertEqual(CS.case_ids("## 1. 범위\n## 2. 기존 테스트 현황\n## 3. 테스트 케이스\n### 항목1 — a\n### 항목2 — b\n"),
@@ -716,3 +716,125 @@ class R3CopyIgnored(unittest.TestCase):
         self.assertIn('CH.redact_lines(r.raw[-1500:])', src)
         o = EFF.CheckOutcome("C1", "t", "unverified", "secret-required: x")
         self.assertNotIn("raw", o.detail())                  # outcomes never carry run output
+
+
+# ---- review r3 (review-k2-r3.md) -------------------------------------------------------------------
+
+import base64  # noqa: E402
+
+from guildcore.records import redact as RD  # noqa: E402
+
+
+class R3M1WarmUp(unittest.TestCase):
+    def test_hook_or_pubspec_change_skips_the_warm_up(self):
+        r = repo(self, {"pubspec.yaml": "name: x\n", "lib/a.dart": "int f() => 1;\n",
+                        "test/a_test.dart": "void main(){ test('t', (){ expect(f(), 1); }); }\n"})
+        base = git(r, "rev-parse", "HEAD")
+        os.makedirs(os.path.join(r, "hook"))
+        with open(os.path.join(r, "hook", "build.dart"), "w") as fh:
+            fh.write("void main(){}\n")
+        with open(os.path.join(r, "lib", "a.dart"), "w") as fh:
+            fh.write("int f() => 2;\n")
+        git(r, "add", "-A")
+        git(r, "commit", "-qm", "hook")
+        h = Harness(self, fixture(), root=r, base=base)
+        warmed = []
+        h.p.warm = warmed.append
+        out, meta = EFF.run(h.p, {"commands": {"test": "flutter test"}}, ["C1"],
+                            {"C1": [{"test": "test/a_test.dart::t", "ac": "C1", "kind": "new"}]}, base)
+        self.assertEqual(warmed, [])
+        self.assertEqual(out["C1"].result, "unverified")
+        self.assertTrue(out["C1"].why.startswith("build-hook-changed: hook/build.dart"))
+        self.assertEqual(EFF.hook_changes(r, base), ["hook/build.dart"])
+
+    def test_pubspec_paths_count(self):
+        for f in ("pubspec.yaml", "pubspec.lock", "pubspec_overrides.yaml", "packages/x/hook/build.dart"):
+            self.assertTrue(EFF.HOOK_RE.search(f), f)
+        self.assertFalse(EFF.HOOK_RE.search("lib/hooks.dart"))
+
+    def test_warm_sandbox_cannot_touch_the_main_worktree(self):
+        from workflows.dev.ports import warm_sandbox
+        main = repo(self, {"a.txt": "x\n"})
+        tree = repo(self, {"b.txt": "y\n"})
+        run = tmpdir(self)
+        sb = warm_sandbox(tree, run, main)
+        real = os.path.realpath(main)
+        self.assertIn(real + "/**", sb["filesystem"]["denyRead"])
+        self.assertIn(real + "/**", sb["filesystem"]["denyWrite"])
+        self.assertFalse([a for a in sb["filesystem"]["allowWrite"] if a.startswith(real + "/")])
+
+    def test_harness_networked_step_has_no_secret_copies(self):
+        src = open(os.path.join(_util.ENGINE, "workflows", "dev", "replay", "revert_subset.py"), encoding="utf-8").read()
+        deps = src.index("CH.deps_step(")
+        self.assertLess(deps, src.index("for g in GENERATED:"))       # ignored originals only after
+        self.assertIn("guild_engine_warmup_test.dart", src[deps - 900:deps])
+
+
+class R3M2Leakage(unittest.TestCase):
+    SECRET = "AIzaSyD-not-a-real-key-0123456789"
+
+    def setUp(self):
+        RD.clear_exact()
+        self.addCleanup(RD.clear_exact)
+
+    def test_reviewer_base64_probe_and_hex(self):
+        d = tmpdir(self)
+        with open(os.path.join(d, "env.dart"), "w") as fh:
+            fh.write('const apiKey = "%s";\nconst short = "abc";\n' % self.SECRET)
+        self.assertGreater(RD.register_exact_from_files(d, ["env.dart"]), 0)
+        line = 'apiKey = "%s"' % self.SECRET
+        for leak in (self.SECRET, base64.b64encode(line.encode()).decode(), base64.b64encode(self.SECRET.encode()).decode(),
+                     base64.urlsafe_b64encode(("ab" + self.SECRET).encode()).decode(), self.SECRET.encode().hex(),
+                     self.SECRET.encode().hex().upper()):
+            with self.subTest(leak=leak[:20]):
+                self.assertIn("[REDACTED]", RD.redact("out: " + leak))
+                self.assertTrue(RD.has_secret("out: " + leak))
+        self.assertEqual(RD.redact("abc"), "abc")                    # short literals are not secrets
+
+    def test_binary_files_are_skipped(self):
+        d = tmpdir(self)
+        with open(os.path.join(d, "data.db"), "wb") as fh:
+            fh.write(b"SQLite format 3\0\"%s\"" % self.SECRET.encode())
+        self.assertEqual(RD.register_exact_from_files(d, ["data.db"]), 0)
+
+    def test_copy_list_posts_only_a_structured_summary(self):
+        raw = ("00:01 +1: adds tax\n" + "secret line %s\n" % base64.b64encode(b"x" * 30).decode() +
+               "00:02 +1 -1: rounds [E]\n00:02 +1 -1: Some tests failed.\n")
+        h = Harness(self, fixture(), roles=[role("DONE", covers=[], e2e="E2E 불요: x")],
+                    suites=[suite(raw, passed=False, rc=1)],
+                    config=dict(CFG, engine={"effective": {"copy_ignored": ["lib/env/env.dart"]}}))
+        T.run(h.p)
+        out = h.body_with("test:output")
+        self.assertNotIn("secret line", out)
+        self.assertIn("exit: red", out)
+        self.assertIn("pass: adds tax", out)
+        self.assertIn("fail: rounds", out)
+
+    def test_without_copy_list_the_tail_is_posted(self):
+        raw = "00:01 +1: adds tax\nnote: hello\n00:02 +2: All tests passed!\n"
+        h = Harness(self, fixture(), roles=[role("DONE", covers=[], e2e="E2E 불요: x")],
+                    suites=[suite(raw, passed=False, rc=1)])
+        T.run(h.p)
+        self.assertIn("note: hello", h.body_with("test:output"))
+
+    def test_checks_profile_network(self):
+        from guildcore import checks as CHK
+        prof = CHK.sandbox_profile({"filesystem": {}})
+        self.assertIn('(allow network-outbound (remote ip "localhost:*"))', prof)
+        self.assertNotIn("unix-socket", prof)                       # measured: flutter needs none
+        self.assertIn('(deny network-outbound (remote ip "localhost:1080"))', prof)
+        self.assertLess(prof.index('localhost:*'), prof.index('localhost:1080'))   # last rule wins
+
+
+class R3Minors(unittest.TestCase):
+    def test_m1_prose_bullets_and_non_case_tables(self):
+        self.assertEqual(CS.case_ids("## 1. 개요\n## 2. 공통 전제\n- V2: API 버전\n| 코덱 | 비고 |\n|---|---|\n"
+                                     "| H264 | x |\n| H265 | y |\n"), [])
+        self.assertEqual(CS.case_ids("## 테스트 케이스\n- C1: a\n- C2: b\n"), ["C1", "C2"])
+
+    def test_m3_temp_tree_prefix_is_not_fixed(self):
+        r = repo(self, {"a.txt": "x\n"})
+        with EFF.TempTree(r, git(r, "rev-parse", "HEAD"), []) as tt:
+            self.assertNotIn("gld-eff", tt.path)
+        src = open(os.path.join(_util.ENGINE, "workflows", "dev", "judges", "TEST.md"), encoding="utf-8").read()
+        self.assertIn("existsSync", src)

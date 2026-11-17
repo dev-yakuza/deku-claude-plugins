@@ -35,6 +35,18 @@ def prompt(call, issue):
     return text
 
 
+def warm_sandbox(tree, run_dir, main_worktree, issue=None):
+    """K2r3-M1: reader-grade (tester-verify + toolchain) over the TEMP tree, plus denyRead and
+    denyWrite of the whole main worktree (its `.git` objects/refs included)."""
+    sb = S.role_sandbox("tester-verify", tree, run_dir, issue, toolchain=True, tool_writes=S.toolchain_writes(tree))
+    fs = dict(sb["filesystem"])
+    main = os.path.realpath(main_worktree) + "/**"
+    fs["denyRead"] = list(fs.get("denyRead") or []) + [main]
+    fs["denyWrite"] = list(fs.get("denyWrite") or []) + [main]
+    fs["allowWrite"] = [a for a in fs.get("allowWrite") or [] if not a.startswith(os.path.realpath(main_worktree) + "/")]
+    return dict(sb, filesystem=fs)
+
+
 def role_spec(call, issue, worktree, config, base=None, branch=None, unattended=True):
     per = config.persona(call.role) if hasattr(config, "persona") else None
     model = (per.model if per else None) or "sonnet"
@@ -89,7 +101,7 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
             fh.write(WARMUP_DART)
         try:
             run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", "warmup")
-            sb = S.role_sandbox("developer", tree, run_dir, issue, toolchain=True, tool_writes=S.toolchain_writes(tree))
+            sb = warm_sandbox(tree, run_dir, worktree, issue)
             r, _px = CH.deps_step(["flutter test --no-pub %s" % rel], tree, sb, os.path.join(run_dir, "tmp"),
                                   env=C.child_env(root_env, {}, role_dir=run_dir))
             return r

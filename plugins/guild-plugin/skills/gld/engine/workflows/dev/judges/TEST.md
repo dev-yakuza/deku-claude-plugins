@@ -12,3 +12,6 @@ Your `effective` is re-checked by code (an assertion line must exist, and for ne
 test must fail with the implementation reverted) — do not call a test effective on its name alone.
 `overall` = `all_effective` only when every AC is `effective`.
 Use the Read/Grep tools on the repository when an excerpt is cut short.
+An assertion about the SOURCE itself — a file or symbol exists (`File('lib/x.dart').existsSync()`),
+a whole-module snapshot equals itself — is `vacuous`: it reacts to deleting code, not to the AC's
+behaviour breaking.
