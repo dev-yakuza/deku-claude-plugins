@@ -109,7 +109,7 @@ class GhCli(object):
     def pr_for_head(self, branch):
         """execute Step 5 (P5.11): the open PR whose head is the Issue branch."""
         out = self._gh(["gh", "pr", "list", "--head", branch, "--state", "open", "--json",
-                        "number,url,state,title,body,headRefName,baseRefName"] + self._repo_args())
+                        "number,url,state,title,body,headRefName,baseRefName,isCrossRepository,headRefOid"] + self._repo_args())
         return json.loads(out or "[]")
 
     def pr(self, n):

@@ -170,15 +170,27 @@ def new_blocks(ep):
 # ---- loose reading of legacy blocks (replay only — the engine parser stays strict) -------------------
 
 TOK = r"(looped-back|fixed|recorded|dismissed)"
-SEV_FIRST = re.compile(r"^[-*]\s+\**(BLOCKER|MAJOR|MINOR)\**\s*[·/|,]\s*\**(spec|standards)?\**\s*[·/|,]?\s*(`?[^\s`—]+`?)?\s*[—-]+\s*(.*)$")
-TABLE = re.compile(r"^\|\s*[^|]*\|\s*\**(BLOCKER|MAJOR|MINOR)\**\s*\|\s*(spec|standards)?\s*\|\s*([^|]*)\|\s*([^|]*)\|\s*([^|]*)\|")
-ROLE_LOOSE = re.compile(r"(role[- ]axis|역할 ?축)", re.I)
+SEV = re.compile(r"\b(BLOCKER|MAJOR|MINOR)\b")
+TOKS = re.compile(r"(?<![\w-])" + TOK + r"(?![\w-])")
+LOC = re.compile(r"`?([\w./-]+\.[A-Za-z]{1,6}(?::\d+(?:[-–]\d+)?)?)`?")
+AXIS = re.compile(r"\b(spec|standards)\b")
+ROLES = ("tech-lead", "security", "infra", "i18n", "dba", "analytics", "performance", "tech-writer", "designer",
+         "developer", "verify")
+ROLE_LOOSE = re.compile(r"(role[- ]axis|역할 ?축|role ?축)", re.I)
 
 
 class LooseF(object):
     def __init__(self, token, severity, axis, location, text, reason=None, strict=False):
         self.token, self.severity, self.axis = token, severity, axis or "spec"
         self.location, self.text, self.reason, self.strict = location, text, reason, strict
+
+
+def candidate(ln):
+    """A legacy finding line in ANY shape: a severity word and a disposition token on one line
+    (token first, token last, `disposition:`, bold, backticks, parenthesized axis, 4/5-column tables)."""
+    # a location (file path) is required: a summary sentence ("미기각 BLOCKER 0건 … recorded") is no finding
+    return bool(SEV.search(ln)) and bool(TOKS.search(ln)) and bool(LOC.search(ln)) and \
+        not AU.ROLE_AXIS_RE.match(ln.lstrip("- "))
 
 
 def loose_findings(block):
@@ -189,33 +201,56 @@ def loose_findings(block):
         if f.token and f.severity:
             out.append(LooseF(f.token, f.severity, f.axis, f.location, f.text, f.reason, True))
             continue
-        m = SEV_FIRST.match(ln) or None
-        t = TABLE.match(ln) if m is None else None
-        if m:
-            toks = re.findall(TOK, m.group(4))
-            if toks:
-                out.append(LooseF(toks[-1], m.group(1), m.group(2), (m.group(3) or "-").strip("`"), m.group(4)[:200]))
-        elif t:
-            toks = re.findall(TOK, t.group(5)) or re.findall(TOK, ln)
-            if toks:
-                out.append(LooseF(toks[-1], t.group(1), t.group(2), t.group(3).strip().strip("`"), t.group(4).strip()[:200]))
+        if not candidate(ln):
+            continue
+        sev = SEV.search(ln).group(1)
+        tok = TOKS.findall(ln)[-1]
+        loc = LOC.search(ln)
+        ax = AXIS.search(ln)
+        text = re.sub(r"[`*|]", " ", ln)
+        out.append(LooseF(tok, sev, ax.group(1) if ax else "spec", loc.group(1) if loc else "-",
+                          " ".join(text.split())[:200]))
+    return out
+
+
+def blocked_lines(block):
+    """Lines that state a role BLOCKED (any shape) — not a resolved/earlier one, not a DONE verdict."""
+    out = []
+    for raw in block.block.lines:
+        ln = markers.clean(raw).strip()
+        if not re.search(r"\bBLOCKED\b", ln) or candidate(ln):
+            continue
+        if re.search(r"해소|이전 BLOCKED|was BLOCKED|previous|BLOCKED`?\**\s*0\s*건|no BLOCKED|BLOCKED`? 없", ln):
+            continue
+        if re.search(r"(?<![\w_])DONE(?![\w_])", ln.replace("DONE_WITH_CONCERNS", "")):
+            continue
+        out.append(ln)
     return out
 
 
 def loose_roles(block):
-    """role-axis triggers: strict `role-axis:` lines, or a legacy role-axis line naming BLOCKED/red."""
+    """role-axis triggers: strict `role-axis: <role> <BLOCKED|…>` lines, or any BLOCKED statement."""
     out = []
     for raw in block.block.lines:
-        ln = markers.clean(raw).strip()
-        st = ln.lstrip("- ")
+        st = markers.clean(raw).strip().lstrip("- ")
         m = re.match(r"^role-axis:\s*(\S+)\s+`?([A-Za-z_-]+)`?", st)
         if m:
             if m.group(2) in ("BLOCKED", "NEEDS_CONTEXT", "FAIL", "not-green", "red"):
                 out.append(st)
-            continue
-        if ROLE_LOOSE.search(ln) and re.search(r"\bBLOCKED\b", ln) and not re.search(r"\bDONE\b|해소|루프백 사유가 아니|not a loop", ln):
-            out.append(ln)
+    if out:
+        return out
+    for ln in blocked_lines(block):
+        role = next((r for r in ROLES if r in ln), "role")
+        out.append("role-axis: %s BLOCKED — %s" % (role, ln[:200]))
     return out
+
+
+def reader_complete(block):
+    """K3r1-M7: a block is machine-readable for the derived mode only when every candidate finding
+    line was read AND every BLOCKED statement became a role trigger (an empty block is complete)."""
+    lines = [markers.clean(x).strip() for x in block.block.lines]
+    cands = sum(1 for ln in lines if candidate(ln) or (AU.Finding(ln).token and AU.Finding(ln).severity))
+    return cands == len(loose_findings(block)) and (not blocked_lines(block) or bool(loose_roles(block)))
 
 
 # ---- by construction ---------------------------------------------------------------------------
@@ -358,26 +393,30 @@ def legacy_next(blocks_all, k, ep):
 
 
 def why_mismatch(blk, nxt, ekind, ep):
-    """Classify a derived decision mismatch (none of these are judged engine defects without a look)."""
+    """Classify a derived decision mismatch: READER (the replay could not read the legacy block),
+    LEGACY (the legacy session broke a spine rule or wrote no reason), ENGINE (everything else)."""
     lines = [markers.clean(x) for x in blk.block.lines]
+    if not reader_complete(blk):
+        return "READER: legacy finding/BLOCKED line the replay reader did not read"
     dwc = any("DONE_WITH_CONCERNS" in x for x in lines)
     if nxt == "retry" and ekind == "advance":
         if dwc:
-            return "legacy leader looped back on a DONE_WITH_CONCERNS (spine: DWC never blocks)"
-        return "legacy loop-back reason not on the record (role-axis rule not followed — B-F-18)"
+            return "LEGACY: leader looped back on a DONE_WITH_CONCERNS (spine: DWC never blocks; user decision: now EX-DWC)"
+        return "LEGACY: loop-back reason not on the record (role-axis rule not followed — B-F-18)"
     if nxt == "exit" and ekind == "advance":
         causes = [(markers.clean(b.split("\n")[1]) if len(b.split("\n")) > 1 else "") for b in ep.pauses]
-        return "legacy exited after the block for a non-Step-4 reason (%s)" % (
+        return "LEGACY: exited after the block for a non-Step-4 reason (%s)" % (
             ", ".join(sorted(set(c.split(" — ")[0][:40] for c in causes if c))) or "no needs-human comment in the log")
     if nxt == "advance" and ekind == "retry" and any(f.token == "looped-back" for f in loose_findings(blk)):
-        return "legacy wrote looped-back but no retry block followed in the session (legacy inconsistency)"
+        return "LEGACY: wrote looped-back but no retry block followed in the session"
     if nxt == "advance" and ekind == "retry":
-        return "engine blocks where legacy advanced (finding/role read as blocking)"
-    return "%s vs %s" % (nxt, ekind)
+        return "ENGINE: blocks where legacy advanced"
+    return "ENGINE: %s vs %s" % (nxt, ekind)
 
 
 def before_unreadable(rec, k):
-    """Pending legacy findings the strict parser cannot see in the blocks before k."""
+    """Pending legacy findings the ENGINE's strict parser cannot see in the blocks before k (the
+    engine reads the live record with that parser — retro too)."""
     n = 0
     for b in rec.blocks[:k]:
         n += sum(1 for f in loose_findings(b) if not f.strict and f.token == "looped-back")
@@ -389,13 +428,15 @@ def token_mismatch(ltoks, etoks, unreadable_prior):
     lc, ec = collections.Counter(ltoks), collections.Counter(etoks)
     for (tok, sev), n in (lc - ec).items():
         if tok == "looped-back" and sev == "MINOR":
-            out += ["legacy looped back on a MINOR (spine: MINOR never blocks)"] * n
+            out += ["LEGACY: looped back on a MINOR (spine: MINOR never blocks)"] * n
+        elif tok == "dismissed" and sev == "MINOR":
+            out += ["LEGACY: dismissed a MINOR (spine: MINOR is recorded verbatim)"] * n
         elif tok == "fixed" and unreadable_prior:
-            out += ["legacy prior pending line not machine-readable (retro cannot count it either)"] * n
+            out += ["LEGACY: prior pending line in a non-canonical shape (the engine and retro cannot read it)"] * n
         elif tok == "fixed":
-            out += ["fixed re-statement not reproduced"] * n
+            out += ["ENGINE: fixed re-statement not reproduced"] * n
         else:
-            out += ["legacy %s/%s not reproduced" % (tok, sev)] * n
+            out += ["ENGINE: legacy %s/%s not reproduced" % (tok, sev)] * n
     return out
 
 
@@ -440,9 +481,12 @@ def run(paths, out_dir, limit=None):
             a = derive(rec, k0 + i, blk)
             lf = loose_findings(blk)
             ltoks = [(f.token, f.severity) for f in lf]
-            readable = all(f.strict for f in lf) and not any(
-                ROLE_LOOSE.search(markers.clean(x)) and not AU.ROLE_AXIS_RE.match(markers.clean(x).lstrip("- "))
+            complete = reader_complete(blk)
+            readable = complete and all(f.strict for f in lf) and all(
+                AU.ROLE_AXIS_RE.match(markers.clean(x).strip().lstrip("- ")) or "BLOCKED" not in x
                 for x in blk.block.lines)
+            if not complete:
+                agg["derived"]["blocks_reader_incomplete"] += 1
             agg["derived"]["blocks_machine_readable" if readable else "blocks_loose_read"] += 1
             etoks = [(x.token, x.severity) for x in a.lines]
             nxt = legacy_next(allb, k0 + i, ep)

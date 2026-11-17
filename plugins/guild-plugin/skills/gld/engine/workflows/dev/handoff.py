@@ -62,3 +62,30 @@ def test_to_qa(comments, cfg=None):
             if src is not None and src not in so.body:
                 bad.append("%s block not copied verbatim" % name)
     return bad
+
+
+HANDOFF_POINT = "execute-handoff"
+
+
+def fill_from_execute(p):
+    """K3r1-M2: the execute→test hand-over is DURABLE — execute's `point: execute-handoff` decision
+    block carries impl_files, base, branch, head and the push target's host; test fills whatever its
+    Ports lack (a fresh process after a restart included). Returns the block's fields or None."""
+    from guildcore.decisions import DecisionLog
+    from workflows.dev.stages import base as B
+    blk = None
+    for b in DecisionLog.load(B.records(p)).blocks:
+        if b.get("point") == HANDOFF_POINT and b.get("stage") == "execute":
+            blk = b
+    if blk is None:
+        return None
+    impl = [x for x in (blk.get("impl_files") or "").split(",") if x and x != "-"]
+    if p.impl_files is None:
+        p.impl_files = impl
+    if not p.base and blk.get("base"):
+        p.base = blk.get("base")
+    if not p.branch and blk.get("branch"):
+        p.branch = blk.get("branch")
+    p.pushed_head = blk.get("head")
+    return {"impl_files": impl, "base": blk.get("base"), "branch": blk.get("branch"),
+            "head": blk.get("head"), "push": blk.get("push")}

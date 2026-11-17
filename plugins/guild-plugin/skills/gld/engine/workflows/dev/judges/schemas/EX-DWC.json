@@ -1,0 +1,19 @@
+{
+ "type": "object",
+ "required": [
+  "verdict"
+ ],
+ "properties": {
+  "verdict": {
+   "type": "string",
+   "enum": [
+    "loop_back",
+    "proceed",
+    "unsure"
+   ]
+  },
+  "reason": {
+   "type": "string"
+  }
+ }
+}

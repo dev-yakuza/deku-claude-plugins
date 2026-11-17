@@ -13,6 +13,7 @@ kept from K1:
 
 import os
 import re
+import shlex
 import subprocess
 
 from guildcore import capture as CAP
@@ -418,7 +419,8 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
 # ---- K3: the execute stage's live ports ------------------------------------------------------------
 
 def live_execute(issue, main, variant, config, clock, gh, writer, decisions, runner, judge_runner,
-                 push_url, journal=None, unattended=True, host=None, plugin=None, env=None):
+                 push_url, journal=None, unattended=True, host=None, plugin=None, env=None, local_dev_py=None,
+                 worktree_path=None):
     """Resolve base/branch/worktree FIRST (the role/suite closures of `live()` bind the worktree),
     then the shared ports plus the execute ones: vcs, deps (K1 deps step in the worktree before
     every suite), push_branch (drift check → fixed URL → hooks off; never force), remote_has_branch,
@@ -456,7 +458,7 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
         if fresh:
             tpl = (raw.get("engine") or {}).get("branch_template")
             branch = VR.branch_name(variant, issue, gh.issue(issue).get("title"), tpl)
-        path = BR.worktree_path(main, issue)
+        path = worktree_path or BR.worktree_path(main, issue)
         got = BR.prepare(main, path, branch, base, fresh, copy_list)
         prepared = dict(got, branch=branch, base=base, fresh=fresh)
     except BR.BranchProblem as bp:
@@ -522,36 +524,78 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
             return None
     p.remote_has_branch = remote_has_branch
 
-    ld_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "commands", "atoms", "local_dev.py")
+    ld_py = local_dev_py or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "commands",
+                                         "atoms", "local_dev.py")
 
     def local_dev(args):
-        r = subprocess.run(["python3", os.path.abspath(ld_py)] + list(args), cwd=worktree, stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, timeout=7200)
-        out = r.stdout.decode("utf-8", "replace")
-        if r.returncode != 0 or ">>> LOCAL-DEV <<<" not in out:
-            raise RuntimeError((r.stderr.decode("utf-8", "replace").strip().split("\n") or ["?"])[-1])
+        """K3r1-B3 (P1): local_dev.py runs model-written code (`test_cmd`, `lint_cmd` over the local
+        model's impl and the role's tests) — so it runs in the check sandbox with the scrubbed role
+        env; the only network is the local model's loopback port."""
+        rd = run_tmp("local-dev")
+        env = C.child_env(root_env, {}, role_dir=rd)
+        env.update(S.render_gitconfig(worktree, os.path.join(rd, "in", "gitconfig")))
+        port = ollama_port(raw)
+        cmd = " ".join(shlex.quote(x) for x in ["python3", os.path.abspath(ld_py)] + list(args))
+        r = CH.run_command([cmd], 7200, cwd=worktree, env=env, sandbox=local_sandbox(worktree, rd, issue),
+                           tmp=os.path.join(rd, "tmp"), allow_ports=(port,) if port else ())
+        out = r.raw or ""
+        if r.rc != 0 or ">>> LOCAL-DEV <<<" not in out:
+            raise RuntimeError((out.strip().split("\n") or ["?"])[-1])
         return _json.loads(out.split(">>> LOCAL-DEV <<<", 1)[1].strip().split("\n", 1)[0])
     p.local_dev = local_dev
 
-    def commit_local(files, tests):
-        """1L-5: the base's commit gate over the staged change, sandboxed, then the engine commit
-        (hooks off — the gate already ran from <base> bytes; the suite runs right after)."""
+    def commit_local(files, tests, variant="implement"):
+        """1L-5 (K3r1-B4 + user decision 2): the BASE gate in `--git-hook` mode over the staged
+        change (rc ≠ 0 refuses), then the repo's configured checks (`commands.lint`, `commands.
+        typecheck`) — all in the sandbox with the scrubbed env — then the engine commit, hooks off."""
         paths = list(dict.fromkeys(list(files) + list(tests)))
         G.run(worktree, "add", "--", *paths)
-        gates = S.export_gates_readonly(worktree, G.run(worktree, "rev-parse", p.base).decode().strip())[0]
-        if gates:
-            gate = os.path.join(gates, "scripts", "gate_precommit.py")
-            if os.path.exists(gate):
-                rd = run_tmp("gate")
-                sb = S.role_sandbox("developer", worktree, rd, issue, toolchain=True,
-                                    tool_writes=S.toolchain_writes(worktree))
-                r = CH.run_command(["python3 %s" % gate], 600, cwd=worktree,
-                                   env=C.child_env(root_env, {"GUILD_GATE_CONFIG": os.path.join(gates, ".config.json")},
-                                                   role_dir=rd), sandbox=sb, tmp=os.path.join(rd, "tmp"))
+        rd = run_tmp("gate")
+        sb = local_sandbox(worktree, rd, issue)
+        base_sha = G.run(worktree, "rev-parse", p.base).decode().strip()
+        gates = S.export_gates_readonly(worktree, base_sha)[0]
+        gate = os.path.join(gates, "scripts", "gate_precommit.py") if gates else None
+        if gate and not os.path.exists(gate):
+            gate = os.path.join(gates, "gate_precommit.py")
+        if gate and os.path.exists(gate):
+            env = C.child_env(root_env, {"GUILD_GATE_CONFIG": S.gate_config_path(gates)}, role_dir=rd)
+            env.update(S.render_gitconfig(worktree, os.path.join(rd, "in", "gitconfig")))
+            r = CH.run_command(["python3 %s --git-hook </dev/null" % shlex.quote(gate)], 600, cwd=worktree, env=env,
+                               sandbox=sb, tmp=os.path.join(rd, "tmp"))
+            if not r.passed:
+                return False, "gate: " + CH.redact_lines((r.raw.strip().split("\n") or ["gate refused"])[0])
+        for key in ("lint", "typecheck"):
+            cmds = (raw.get("commands") or {}).get(key)
+            for c in ([cmds] if isinstance(cmds, str) else list(cmds or [])):
+                r = CH.run_command([c], 1800, cwd=worktree, env=C.child_env(root_env, {}, role_dir=rd), sandbox=sb,
+                                   tmp=os.path.join(rd, "tmp"))
                 if not r.passed:
-                    return False, (r.raw.strip().split("\n") or ["gate refused"])[0]
-        G.commit(worktree, "feat(#%d): local model implementation" % issue)
+                    return False, "%s `%s`: %s" % (key, c, CH.redact_lines((r.raw.strip().split("\n") or ["failed"])[-1]))
+        kind = {"debug": "fix", "refactor": "refactor"}.get(variant, "feat")
+        G.commit(worktree, "%s(#%d): local model implementation" % (kind, issue))
         runner.rebaseline(worktree, issue)
         return True, None
     p.commit_local = commit_local
     return p
+
+
+def ollama_port(raw):
+    import re as _re
+    url = ((raw or {}).get("local_developer") or {}).get("ollama_url") or "http://127.0.0.1:11434"
+    m = _re.match(r"^https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::(\d+))?", url)
+    return int(m.group(1) or 80) if m else None
+
+
+def local_sandbox(worktree, run_dir, issue=None):
+    """The developer's check sandbox for engine-run, model-written code (1L): worktree writes, the
+    Guild memory dir writable (local_dev's job state), but the harness files stay denied — the gate,
+    its config, settings, agents."""
+    sb = S.role_sandbox("developer", worktree, run_dir, issue, toolchain=True, tool_writes=S.toolchain_writes(worktree))
+    fs = dict(sb["filesystem"])
+    wt = os.path.realpath(worktree)
+    cl = os.path.join(wt, ".claude")
+    fs["denyWrite"] = [d for d in fs.get("denyWrite") or [] if os.path.realpath(d.rstrip("*").rstrip("/")) != cl] + \
+        [os.path.join(cl, x) for x in ("settings.json", "settings.local.json", "agents/**", "guild/gates/**",
+                                       "guild/config.json", "guild/knowledge/**", "commands/**", "skills/**")]
+    fs["allowWrite"] = list(fs.get("allowWrite") or []) + [os.path.join(cl, "guild", "memory") + "/**"]
+    return dict(sb, filesystem=fs)

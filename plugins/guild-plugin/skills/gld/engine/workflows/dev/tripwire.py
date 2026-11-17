@@ -56,12 +56,16 @@ def _content(root, paths):
             if os.path.islink(fp) or not os.path.isfile(fp):
                 out[p] = None
                 continue
+            hs = hashlib.sha1()
             with open(fp, "rb") as fh:
                 data = fh.read(MAX_ONE + 1)
+                hs.update(data)
+                for chunk in iter(lambda: fh.read(1 << 20), b""):     # K3r1-m14: the WHOLE file's hash
+                    hs.update(chunk)
         except OSError:
             out[p] = None
             continue
-        h = hashlib.sha1(data).hexdigest()
+        h = hs.hexdigest()
         keep = None
         if len(data) <= MAX_ONE and total + len(data) <= MAX_ALL:
             keep = data.decode("utf-8", "replace")
@@ -109,7 +113,8 @@ def compare(before, after, root=None):
     # `1 1`) — the legacy D-M2 compared counts only; the engine also compares the bytes it read
     bc, ac = before.get("content") or {}, after.get("content") or {}
     edited = sorted(p for p in set(bc) & set(ac) if (bc[p] or {}).get("sha1") != (ac[p] or {}).get("sha1"))
-    if bn == an and bu == au and not edited:
+    head_moved = before.get("head") != after.get("head")      # K3r1-m14: a hook commit during the scan
+    if bn == an and bu == au and not edited and not head_moved:
         return {"verdict": "clean", "paths": [], "formatter": [], "artifacts": [], "residue": []}
     vanished_u = bu - au
     new_triples = an - bn
@@ -118,7 +123,8 @@ def compare(before, after, root=None):
     benign, mutation = [], []
     for p in sorted(vanished_u):
         (benign if p in new_paths else mutation).append(p)            # D-M3 / D-M4
-    residue = sorted((new_paths | gone_paths | (au - bu) | set(edited)) - set(benign))
+    residue = sorted((new_paths | gone_paths | (au - bu) | set(edited)) - set(benign)) + \
+        (["(HEAD moved %s→%s)" % ((before.get("head") or "")[:8], (after.get("head") or "")[:8])] if head_moved else [])
     if mutation:
         return {"verdict": "mutation", "paths": sorted(mutation) + residue, "formatter": [],
                 "artifacts": [], "residue": residue}

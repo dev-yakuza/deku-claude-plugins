@@ -46,7 +46,19 @@ CEILING_S = 3600
 TIERS = ("haiku", "sonnet", "opus")
 GATE_ROLES = ("security", "infra", "designer")
 PARTICIPATION = ("i18n", "dba", "analytics", "performance", "tech-writer")
-SECURITY_WORDS = re.compile(r"auth|session|token|secret|password|permission|credential", re.I)
+SECURITY_WORDS = frozenset(("auth", "oauth", "session", "sessions", "token", "tokens", "secret", "secrets",
+                            "password", "passwords", "permission", "permissions", "credential", "credentials",
+                            "jwt", "apikey", "login", "signin"))
+
+
+def security_hit(text):
+    """K3r1-m9: whole identifier words only (`fooSession`, `auth_token`, `api-key` split), never a
+    substring (`authorName`, `tokenizer`)."""
+    for word in re.findall(r"[A-Za-z][A-Za-z0-9]*", text or ""):
+        for part in re.findall(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])", word):
+            if part.lower() in SECURITY_WORDS:
+                return True
+    return False
 DEFAULT_TRIGGERS = {"infra": (".github/**", "**/Dockerfile", "**/*.tf", "fastlane/**", "**/Fastfile",
                               "ios/Podfile", "android/**/build.gradle*", "codemagic.yaml"),
                     "i18n": ("lib/l10n/**", "**/*.arb", "**/locales/**", "**/i18n/**"),
@@ -104,6 +116,10 @@ def run(p, variant):
         return e
     cx = Ctx(variant)
     cx.stage_start = getattr(p, "stage_start", None) or p.now()
+    from guildcore.records import redact as RD
+    RD.clear_exact()                      # K3r1-M4: exact values of copy_ignored files, scoped to this run
+    if copy_ignored_list(p) and p.root:
+        RD.register_exact_from_files(p.root, copy_ignored_list(p))
     comments = B.records(p)
     B.note_untrusted(p, STAGE)
     nc = VR.design_input(p, variant, comments)                                  # P0.2
@@ -173,6 +189,7 @@ def attempts(p, e, cx):
     record0 = AU.from_comments(B.records(p))
     attempt = 1
     retry_note = None
+    restore_invocation_state(p, cx)                                             # m4
     while True:
         dev, local_pass = developer_step(p, cx, attempt, retry_note)            # X1
         if isinstance(dev, B.StageResult):
@@ -182,29 +199,37 @@ def attempts(p, e, cx):
         m = INV2_RE.match(dev.line or "") if dev.status == "BLOCKED" else None
         if m:
             return gate_inv2(p, cx, m.group(1), m.group(2))
+        x = dev.extras or {}
+        cx.dev_tests = list(x.get("tests") or []) + list(x.get("impl_files") or [])        # m6
+        cx.impl_files = list(x.get("impl_files") or [])
         ev = evidence_step(p, cx, dev, attempt)                                 # X2
         if isinstance(ev, B.StageResult):
             return ev
         green, reason = ev
+        dev_ok = dev.status in ("DONE", "DONE_WITH_CONCERNS")
         role_triggers, scan, scan_ran, mb, head, untracked = [], [], False, None, None, ()
+        dwc_now = []                                                            # m13: per attempt
+        reviewed = {"tech-lead": False, "auditor": False}
         dev_route = None
-        if dev.status in ("BLOCKED", "NEEDS_CONTEXT") and not TIMEOUT_RE.search(dev.line or ""):
+        if not dev_ok and not TIMEOUT_RE.search(dev.line or ""):
             dev_route = (dev.status, dev.line)
-        if green and dev_route is None:
+            role_triggers.append(("developer", dev.status, dev.line or ""))     # K3r1-B2: never advances
+        if green and dev_ok:
             tl = conformance_step(p, cx, attempt)                               # X3
             if isinstance(tl, B.StageResult):
                 return tl
+            reviewed["tech-lead"] = True
             if tl.status == "FAIL":
                 return B.fail(p, STAGE, "tech-lead FAIL — %s" % (tl.line or ""), "defect")
             if tl.status == "BLOCKED":
                 role_triggers.append(("tech-lead", "BLOCKED", tl.line or ""))
             elif tl.status == "DONE_WITH_CONCERNS":
-                cx.dwc.append("tech-lead: %s" % (tl.line or ""))
+                dwc_now.append(("tech-lead", tl.line or ""))
             au = auditor_step(p, cx, attempt)                                   # X3.5a
             if isinstance(au, B.StageResult):
                 return au
             scan, mb, head, untracked = au
-            scan_ran = True
+            scan_ran = reviewed["auditor"] = True
             for role, res in gates_step(p, cx, attempt, mb):                    # X3.5b
                 if isinstance(res, B.StageResult):
                     return res
@@ -213,25 +238,25 @@ def attempts(p, e, cx):
                 if res.status == "BLOCKED":
                     role_triggers.append((role, "BLOCKED", res.line or ""))
                 elif res.status == "DONE_WITH_CONCERNS":
-                    cx.dwc.append("%s: %s" % (role, res.line or ""))
-        elif dev_route is not None:
-            role_triggers.append(("developer", dev_route[0], dev_route[1] or ""))
+                    dwc_now.append((role, res.line or ""))
         if dev.status == "DONE_WITH_CONCERNS":
-            cx.dwc.append("developer: %s" % (dev.line or ""))
-        sp = (dev.extras or {}).get("pr_summary_path")
-        if sp:
-            rd = getattr(dev, "run_dir", None)
-            cands = [sp] if os.path.isabs(sp) else \
-                (([os.path.join(rd, "out", sp), os.path.join(rd, sp)] if rd else []) + [os.path.join(p.root, sp)])
-            for cand in cands:
-                if cand and os.path.exists(cand):
-                    cx.pr_summary_path = cand
-                    break
+            dwc_now.insert(0, ("developer", dev.line or ""))
+        if getattr(cx, "evidence_concern", None):
+            dwc_now.append(("developer", cx.evidence_concern))
+            cx.evidence_concern = None
+        if green and dev_ok and dwc_now and not role_triggers:                  # user decision 1
+            role_triggers += dwc_judgment(p, cx, attempt, dwc_now)
+        cx.dwc = ["%s: %s" % (r, t) for r, t in dwc_now]
+        cx.pr_summary_path = safe_role_path(p, dev, (dev.extras or {}).get("pr_summary_path"))   # K3r1-B1
         out = arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_triggers,
                              None if green else reason, local_pass, dev_route, record0)   # X4
         if isinstance(out, B.StageResult):
             return out
         if out == "advance":
+            # K3r1-B2 invariant: no PR / advance unless the developer is done, the engine's suite is
+            # green and the tech-lead AND the auditor ran on this attempt
+            if not (dev_ok and green and reviewed["tech-lead"] and reviewed["auditor"]):
+                raise B.StageError("advance without review (dev=%s green=%s reviewed=%s)" % (dev.status, green, reviewed))
             return pr_step(p, e, cx)                                            # X5–X6
         if out == "reinvoke":
             retry_note = cx.reinvoke_addendum
@@ -239,6 +264,66 @@ def attempts(p, e, cx):
         if not local_pass:
             attempt += 1
         retry_note = cx.retry_reason
+
+
+def safe_role_path(p, res, rel):
+    """P1: a role-supplied path is read only when it is relative, has no `..`, is no symlink on the
+    way, and its realpath is inside that role run's `out/`. Anything else → None + decision log."""
+    rd = getattr(res, "run_dir", None)
+    if not rel:
+        return None
+    bad = None
+    norm = os.path.normpath(rel)
+    if os.path.isabs(rel) or norm.startswith("..") or not rd:
+        bad = "not a relative path inside the role's out/"
+    else:
+        out_dir = os.path.realpath(os.path.join(rd, "out"))
+        cand = os.path.join(rd, "out", norm[4:] if norm.startswith("out" + os.sep) else norm)
+        cur = os.path.join(rd, "out")
+        for part in os.path.relpath(cand, os.path.join(rd, "out")).split(os.sep):
+            cur = os.path.join(cur, part)
+            if os.path.islink(cur):
+                bad = "symlink"
+                break
+        if not bad and not (os.path.realpath(cand).startswith(out_dir + os.sep) and os.path.isfile(cand)):
+            bad = "outside the role's out/ or missing"
+        if not bad:
+            return cand
+    B.record_code(p, STAGE, "role-path-refused", "refused", reason="pr_summary_path %s — %s" % (
+        markers.value(str(rel))[:200], bad))
+    return None
+
+
+def dwc_judgment(p, cx, attempt, dwc_now):
+    """User decision (K3r1 Q1): concerns go to a short SJ call — loop back or proceed. Concerns only
+    cost when they exist; unsure → proceed (the concern stays on the PR)."""
+    if p.judge is None:
+        return []
+    from guildcore.records import redact as RD
+    parts = [("concerns", "\n".join("%s: %s" % (r, RD.redact(t)) for r, t in dwc_now)),
+             ("issue", (p.gh.issue(p.issue).get("title") or "")),
+             ("test_cases", (p.read_file("docs/specs/%d/test-cases.md" % p.issue) or "")[:6000])]
+    d = p.judge(JG.spec(p, "EX-DWC", parts, STAGE, "X4"))
+    B.record_judgment(p, STAGE, "EX-DWC", ",".join(r for r, _t in dwc_now), d, reason=d.fields.get("reason"))
+    if d.choice != "loop_back":
+        return []
+    return [(r, "DWC", t) for r, t in dwc_now]
+
+
+def restore_invocation_state(p, cx):
+    """K3r1-m4: the MAJOR budget and the one reinvoke are restored from the record of THIS invocation
+    (a crash inside the invocation must not hand them out again)."""
+    rec = AU.from_comments(B.records(p))
+    for b in (rec.blocks if rec else []):
+        if b.invocation != cx.stage_start or b.local_pass:
+            continue
+        lb = [f for f in b.findings if f.token == "looped-back"]
+        if lb and all(f.severity == "MAJOR" for f in lb) and not b.role_axis:
+            cx.major_spent = True
+    from guildcore.decisions import DecisionLog
+    for blk in DecisionLog.load(B.records(p)).blocks:
+        if blk.get("stage") == STAGE and blk.get("point") == "reinvoke" and blk.get("refs") == cx.stage_start:
+            cx.reinvoked = True
 
 
 # ---- X0 helpers -----------------------------------------------------------------------------------
@@ -325,6 +410,8 @@ def developer_step(p, cx, attempt, retry_note):
     if attempt == 1 and not cx.ran_1l and local_eligible(p, cx):
         cx.ran_1l = True
         r = local_step(p, cx)
+        if isinstance(r, B.StageResult):
+            return r, False
         if r is not None:
             return r
     model = None
@@ -432,7 +519,7 @@ def local_step(p, cx):
     if state == "local_pass":                                               # 1L-5
         cx.local_job = st.get("job_id")
         if st.get("tree") == "uncommitted":
-            ok, line = p.commit_local(st.get("files") or [], cx.staged_tests)
+            ok, line = p.commit_local(st.get("files") or [], cx.staged_tests, cx.variant)
             if not ok:
                 rv = _ld(p, ["revert", "--issue", str(p.issue)])
                 if (rv or {}).get("reason") == "restore_failed":
@@ -471,11 +558,16 @@ def evidence_step(p, cx, dev, attempt):
     if not cmds:
         return B.fail(p, STAGE, "commands.test is not configured", "defect")
     deps = getattr(p, "deps", None)
+    dep_reason = None
     if deps is not None:                                                    # K3 carry-over 3
         d = deps()
         if d is not None and not d.passed:
-            return B.build_inputs_changed(["(dependency step in the worktree)"], "execute",
-                                          getattr(d, "warm", None), CH.redact_lines("\n".join((d.raw or "").split("\n")[-4:])))
+            tail = CH.redact_lines("\n".join((d.raw or "").split("\n")[-4:]))
+            kind = deps_failure_kind(p, d)
+            if kind == "env":
+                return B.build_inputs_changed(["(dependency step: registry unreachable or base fails)"], "execute",
+                                              None, tail)
+            dep_reason = "dependency step failed — %s" % B.one_line(tail, 240)     # K3r1-M3: the Issue's
     r = p.suite(cmds, "developer", CEILING_S)
     if getattr(r, "missing_ignored", None):
         return B.ignored_missing(r.missing_ignored, "execute")
@@ -493,14 +585,19 @@ def evidence_step(p, cx, dev, attempt):
     else:
         green = bool(r.passed and summ.green)
         if not green:
-            reason = "suite red — %s" % (r.red_line() or "failed")
+            reason = ("suite red — %d failed" % summ.failed) if copy_ignored_list(p) else \
+                "suite red — %s" % (r.red_line() or "failed")
+    if dep_reason:
+        green, reason = False, dep_reason
     claimed = dev.status in ("DONE", "DONE_WITH_CONCERNS")
     if claimed and not green and not r.timed_out:                           # J-E1 verify gap
         p.capture("verify-gap", STAGE, "developer", "developer reported done; the engine's run is red",
                   CH.redact_lines(r.red_line() or ""), VR.CAPTURE_AREA[cx.variant], True)
     if dev.status in ("BLOCKED", "NEEDS_CONTEXT") and green:
+        # K3r1-B2: the engine's green never overrides a developer BLOCKED — a reported timeout is an
+        # evidence failure on the verify axis (stagnation compares timeouts), the rest goes to EX-ARB
         green = False
-        reason = None
+        reason = dev.line if TIMEOUT_RE.search(dev.line or "") else None
     rows, run, notes = [], False, []
     if V.ledger_expected(cfg_dict(p)):
         ev = markers.find(B.records(p), EVIDENCE)
@@ -518,19 +615,37 @@ def evidence_step(p, cx, dev, attempt):
                                              getattr(cx, "red", None))
         if not met:
             green, reason = False, why
-        if concern:
-            cx.dwc.append("developer: %s" % concern)
+        cx.evidence_concern = concern
     net_block = None
     if cx.variant == "refactor" and cx.net_mode != "none":
         nb = net_from_result(p, cx, dev)
         net_block = RN.render_block(nb)
         cx.net_now = nb
-        if green and (cx.net_prev or {}).get("verified") != "yes":
+        if green:
+            # K3r1-m12: a VERIFIED net is frozen — its D-R checks still run on every re-entry
             bad = RN.checks(p.root, p.base, p.branch, nb, net_mode=cx.net_mode)
             if bad:
-                green, reason = False, "re-prove the net — %s" % bad[0]
+                verified = (cx.net_prev or {}).get("verified") == "yes"
+                green, reason = False, ("the verified safety net changed — %s" if verified
+                                        else "re-prove the net — %s") % bad[0]
     write_evidence(p, cx, dev, r, summ, green, reason, rows, run, notes, net_block)
     return green, reason
+
+
+MANIFESTS = ("pubspec.yaml", "pubspec.lock", "package.json", "package-lock.json", "yarn.lock",
+             "pubspec_overrides.yaml")
+
+
+def deps_failure_kind(p, d):
+    """K3r1-M3: `env` (sprint-wide halt) only when the registry is unreachable or <base> itself fails
+    (the Issue did not touch a manifest); a failing resolution on manifests the branch changed is the
+    developer's mistake → a loop-back for this Issue."""
+    mb = p.vcs.merge_base(p.base)
+    changed = set(p.vcs.names("%s..HEAD" % mb) if mb else []) | set(
+        ln[3:] for ln in (p.vcs.status() or "").split("\n") if len(ln) > 3)
+    if any(os.path.basename(f) in MANIFESTS for f in changed):
+        return "issue"          # even a host the proxy refused: the branch asked for it (a retry that
+    return "env"                # still fails goes to stagnation → a person, never a sprint-wide halt)
 
 
 def net_from_result(p, cx, dev):
@@ -550,10 +665,18 @@ def write_evidence(p, cx, dev, r, summ, green, reason, rows, run, notes, net_blo
     lines = [markers.open_tag(EVIDENCE), "## execute 증거 (%s) — #%d" % (cx.variant, p.issue), "",
              "브랜치 `%s` · 커밋 `%s`" % (markers.value(p.branch), (p.vcs.head() or "")[:9]), "",
              "**전체 스위트 — 엔진 직접 실행 원문**"]
-    lines += R.raw_block(r.raw)
+    copy_list = copy_ignored_list(p)
+    if copy_list:
+        # K3r1-M4 (= K2r3-M2): with copy_ignored the raw tail is never posted — a structured summary
+        from workflows.dev.stages import test as T
+        lines += R.raw_block(T.structured_summary(r, summ, summ.runner if summ else None))
+    else:
+        lines += R.raw_block(r.raw)
     lines.append("판정: %s%s" % ("green" if green else "not green", (" — " + markers.value(reason)) if reason else ""))
     red = (dev.extras or {}).get("red") or getattr(cx, "red", None)
-    if red:
+    if red and copy_list:
+        lines += ["", "**재현(red, 수정 전)**: %d줄 (copy_ignored 실행 — 원문 비게시)" % len(red)]
+    elif red:
         lines += ["", "**재현(red, 수정 전)**"] + R.raw_block("\n".join(red))
     if (dev.extras or {}).get("local_author"):
         lines += ["", "작성: %s" % markers.value(dev.extras["local_author"])]
@@ -566,6 +689,10 @@ def write_evidence(p, cx, dev, r, summ, green, reason, rows, run, notes, net_blo
         body += "\n\n" + net_block
     body += "\n" + markers.close_tag(EVIDENCE)
     p.writer.upsert_comment(p.issue, EVIDENCE, body)
+
+
+def copy_ignored_list(p):
+    return ((cfg_dict(p).get("engine") or {}).get("effective") or {}).get("copy_ignored") or []
 
 
 def net_verify(p, cx, tl_line, findings):
@@ -693,7 +820,7 @@ def gate_cast(p, mb):
             classified.update(hit)
     residue = [n for n in names if n not in classified]
     added = "\n".join(l[1:] for l in p.vcs.diff("%s..HEAD" % mb, ".").split("\n") if l.startswith("+") and not l.startswith("+++")) if mb else ""
-    if any(SECURITY_WORDS.search(n) for n in residue) or SECURITY_WORDS.search(added or ""):
+    if any(security_hit(n) for n in residue) or security_hit(added or ""):
         roles.append("security")
     avail = [r for r in GATE_ROLES + PARTICIPATION if p.exists(".claude/agents/%s.md" % r)]
     roles = [r for r in dict.fromkeys(roles) if r in avail]
@@ -740,6 +867,11 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
     if (new_bm or dev_route) and p.judge is not None:
         d = ex_arb(p, cx, new_bm, dev_route, role_triggers, scan)
         ex, coerced = XA.coerce_ex_arb(d.fields, p.read_file)
+        asked = set(k for k, _c in new_bm)
+        for k in sorted(set(ex) - asked):                           # K3r1-M5: only what was asked
+            B.record_code(p, STAGE, "ignored_verdict", (ex[k] or {}).get("verdict"), refs=str(k)[:20],
+                          reason="EX-ARB judged an id it was not asked about")
+        ex = {k: v for k, v in ex.items() if k in asked}
         route = d.fields.get("developer_route") if dev_route else None
         addendum = d.fields.get("addendum")
         B.record_judgment(p, STAGE, "EX-ARB", ",".join(k for k, _c in new_bm) or "developer", d,
@@ -749,6 +881,7 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
     if dev_route is not None:
         if route == "reinvoke" and not cx.reinvoked:
             cx.reinvoked = True
+            B.record_code(p, STAGE, "reinvoke", "developer", refs=cx.stage_start)
             cx.reinvoke_addendum = "context the engine adds: %s" % (addendum or "(none given)")
             return "reinvoke"
         if route not in ("loop_back", "reinvoke"):
@@ -857,7 +990,8 @@ def _samecause(p):
 def ex_arb(p, cx, new_bm, dev_route, role_triggers, scan):
     mb = p.vcs.merge_base(p.base)
     findings = json.dumps([dict(c.as_dict(), id=k) for k, c in new_bm], ensure_ascii=False, indent=1)
-    hunks = "\n".join("### %s\n%s" % (c.location, p.vcs.hunk(mb, c.file, c.line)) for _k, c in new_bm[:8]) if mb else ""
+    from guildcore.records import redact as RD
+    hunks = "\n".join("### %s\n%s" % (c.location, RD.redact(p.vcs.hunk(mb, c.file, c.line))) for _k, c in new_bm[:8]) if mb else ""
     parts = [("findings", findings), ("hunks", hunks),
              ("design", (p.read_file("docs/specs/%d/skeleton.md" % p.issue) or "")[:6000]),
              ("test_cases", (p.read_file("docs/specs/%d/test-cases.md" % p.issue) or "")[:6000]),
@@ -889,7 +1023,12 @@ def pr_step(p, e, cx):
         return B.fail(p, STAGE, "no git remote — the PR step requires one; the work is committed on branch %s"
                       % p.branch, "defect")
     try:
-        push()
+        try:
+            push()
+        except PushProblem as pp0:
+            if pp0.kind != "transient":
+                raise
+            push()                                                  # K3r1-m7: P5.2 one retry
     except PushProblem as pp:
         if pp.kind == "diverged":
             return nh(p, cx, "branch %s diverged from origin — resolve before the PR" % p.branch,
@@ -905,7 +1044,8 @@ def pr_step(p, e, cx):
             base_note = "base `%s` 가 원격에 없어 기본 브랜치 `%s` 로 열었습니다" % (base_name, pr_base)
     sections = pr_sections(p, cx)
     issue = p.gh.issue(p.issue)
-    hits = p.gh.pr_for_head(p.branch)
+    # K3r1-m2: never a fork's PR that happens to use the same head name
+    hits = [h for h in p.gh.pr_for_head(p.branch) if not h.get("isCrossRepository")]
     if hits:
         prn = int(hits[0]["number"])
         try:
@@ -928,8 +1068,24 @@ def pr_step(p, e, cx):
         r = consume(p, cx)
         if r is not None:
             return r
+    ho = {"impl_files": ",".join(getattr(cx, "impl_files", None) or []) or "-", "base": p.base, "branch": p.branch,
+          "head": p.vcs.head() or "-", "push": push_kind(getattr(p, "remote_url", None))}
+    B.record_code(p, STAGE, "execute-handoff", "advance", refs="#%d" % p.issue, extra=ho)   # K3r1-M2
     B.transition(p, e, "test")
-    return B.StageResult(B.StageResult.ADVANCE, nxt="test")
+    r = B.StageResult(B.StageResult.ADVANCE, nxt="test")
+    r.handoff = dict(ho, impl_files=getattr(cx, "impl_files", None) or [], push_url=getattr(p, "remote_url", None))
+    return r
+
+
+def push_kind(url):
+    """The push target on record: scheme and host only (a URL may embed a credential)."""
+    if not url:
+        return "-"
+    m = re.match(r"^([a-z+]+)://(?:[^@/]*@)?([^/:]+)", url)
+    if m:
+        return "%s:%s" % (m.group(1), m.group(2))
+    m = re.match(r"^(?:[^@/\s]+@)?([^:/\s]+):", url)
+    return "ssh:%s" % m.group(1) if m else "path"
 
 
 class PushProblem(Exception):
@@ -994,11 +1150,12 @@ def pr_body(p, cx, sections, base_note):
     if sp and os.path.exists(sp):
         with open(sp, encoding="utf-8", errors="replace") as fh:
             summ = fh.read().strip()
-    lines = ["Closes #%d" % p.issue, "", VR.SUMMARY_HEAD[cx.variant], markers.neutralize(summ) or "(developer summary missing)"]
+    lines = ["Closes #%d" % p.issue, "", VR.SUMMARY_HEAD[cx.variant],
+             role_text(summ, one_line=False) or "(developer summary missing)"]
     if base_note:
         lines += ["", base_note]
     if cx.dwc:
-        lines += ["", "## 리뷰 우려 (DONE_WITH_CONCERNS)"] + ["- %s" % markers.value(x) for x in cx.dwc]
+        lines += ["", "## 리뷰 우려 (DONE_WITH_CONCERNS)"] + ["- %s" % role_text(x) for x in cx.dwc]
     body = "\n".join(lines)
     for name, blk in sections:
         if blk:
@@ -1006,15 +1163,28 @@ def pr_body(p, cx, sections, base_note):
     return body + "\n"
 
 
+CLOSING_RE = re.compile(r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(\s*:?\s+)(#|[\w.-]+/[\w.-]+#)(\d+)", re.I)
+
+
+def role_text(text, one_line=True):
+    """P1 / K3r1-B1·m3: every role-produced text the engine posts — redact (incl. exact copy_ignored
+    values) + marker neutralization, and closing keywords defused (only the engine's own first
+    `Closes #N` line may close an Issue)."""
+    v = markers.value(text or "", one_line=one_line)
+    return CLOSING_RE.sub(lambda m: "%s%s%s\u200b%s" % (m.group(1), m.group(2), m.group(3), m.group(4)), v)
+
+
 def consume(p, cx):
     """P6.2 / D-6.2: the latest active block without `consumed:` whose `at:` ≤ stage-start gets
     `consumed: <ts>`; verified by re-read, one retry (GhWriter), else NH `defect:`."""
     comments = B.records(p)
     lb = LB.from_comments(comments)
-    if lb is None or not lb.not_yet_handled():
+    if lb is None:
         return None
-    blk = lb.latest_active()
-    if (blk.get("at") or "") > cx.stage_start:
+    # K3r1-m5: the block X0 found (by its number) — never a re-pick by the clock at X6
+    want = "### loopback %d" % cx.loopback_n
+    blk = next((b for b in lb.active() if markers.clean(b.heading) == want), None)
+    if blk is None or blk.has("consumed"):
         return None
     ts = p.now()
     heading = markers.clean(blk.heading)

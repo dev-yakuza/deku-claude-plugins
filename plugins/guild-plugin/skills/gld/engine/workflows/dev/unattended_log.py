@@ -19,7 +19,7 @@ from guildcore.records import outputs as OUT
 from guildcore.records import prbody as PB
 
 ASSUMPTION_RE = re.compile(r"^\s*(?:[-*]\s*)?(?:\*\*)?(가정|assumption)s?(?:\*\*)?\s*[:：]\s*(.+)$", re.I)
-SJ_POINTS = ("TEST", "QA", "VIS-ENV", "DIRECTIVE", "HANDOFF", "EX-ARB", "DE-ARB", "AN-PO", "STAKES",
+SJ_POINTS = ("TEST", "QA", "VIS-ENV", "DIRECTIVE", "HANDOFF", "EX-ARB", "EX-DWC", "DE-ARB", "AN-PO", "STAKES",
              "KICKOFF", "ESCALATE", "SPLIT", "INTEGRATE")
 
 
@@ -70,5 +70,5 @@ def splice(writer, gh, issue_n, pr_n):
     block = render(gh.comments(issue_n))
 
     def fn(body):
-        return PB.splice(PB.migrate_unattended(body), PB.UNATTENDED, block)
+        return PB.splice_unattended(body, block)
     return writer.pr_body_edit(pr_n, fn)

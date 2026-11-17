@@ -139,6 +139,7 @@ def run(p, only=None, config_present=True):
     if isinstance(e, B.StageResult):
         return e
     B.note_untrusted(p, STAGE)
+    HO.fill_from_execute(p)                       # K3r1-M2: impl_files/base/branch from execute's record
     comments = B.records(p)
     cfg = cfg_dict(p)
     if e.recheck:

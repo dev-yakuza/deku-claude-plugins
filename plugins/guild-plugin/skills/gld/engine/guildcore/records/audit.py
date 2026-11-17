@@ -27,7 +27,8 @@ TOKENS = ("looped-back", "fixed", "recorded", "dismissed")
 HEADING_RE = re.compile(r"^### audit-record ([0-9]+)")
 TAIL_RE = re.compile(r"^" + re.escape(markers.close_tag(NAME)))
 SHA_RE = re.compile(r"^(?:(head|HEAD): )?([0-9a-f]{40})$")  # legacy: bare or `HEAD:` (0.98–0.99)
-ID_RE = re.compile(r"\[id:(F[0-9]+)\]")
+ID_RE = re.compile(r"\[id:(F[0-9]+)\]\s*$")   # K3r1-m1: the engine's line-end id …
+ID_MID_RE = re.compile(r"\[id:(F[0-9]+)\](?= — )")   # … or a legacy re-statement's `[id:Fk] — <reason>` (CR-m12)
 _W = "[`*]{0,2}"
 TOKEN_RE = re.compile(r"^- " + _W + r"(looped-back|fixed|recorded|dismissed)" + _W + r"([^-A-Za-z0-9_]|$)")
 DISP_RE = re.compile(r"disposition: " + _W + r"(looped-back|fixed|recorded|dismissed)" + _W + r"([^-A-Za-z0-9_]|$)")
@@ -40,12 +41,13 @@ class Finding(object):
     def __init__(self, line):
         self.line = line
         c = markers.clean(line)
-        self.fid = (ID_RE.search(c).group(1) if ID_RE.search(c) else None)
+        m_id = ID_RE.search(c) or ID_MID_RE.search(c)
+        self.fid = m_id.group(1) if m_id else None
         m = TOKEN_RE.match(c)
         d = None if ROLE_AXIS_RE.match(c) else DISP_RE.search(c)
         self.token = m.group(1) if m else (d.group(1) if d else None)
         self.legacy = bool(d and not m)
-        f = FINDING_RE.match(ID_RE.sub("", c).rstrip())
+        f = FINDING_RE.match(ID_MID_RE.sub("", ID_RE.sub("", c)).rstrip())
         self.severity = f.group(2) if f else None
         self.axis = f.group(3) if f else None
         self.location = f.group(4) if f else None
@@ -133,9 +135,11 @@ def from_comments(comments):
 def render_finding(token, severity, axis, location, text, reason=None, fid=None):
     if token not in TOKENS:
         raise ValueError("token must be one of %s" % (TOKENS,))
-    s = "- %s · %s · %s · %s — %s" % (token, severity, axis, markers.value(location), markers.value(text))
+    def v(t):                                  # K3r1-m1: a quoted `[id:` cannot hijack identity
+        return markers.value(t).replace("[id:", "[id\u200b:")
+    s = "- %s · %s · %s · %s — %s" % (token, severity, axis, v(location), v(text))
     if reason:
-        s += " — " + markers.value(reason)
+        s += " — " + v(reason)
     if fid:
         s += " [id:%s]" % fid
     return s

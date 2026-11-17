@@ -26,14 +26,14 @@ TIERS = {"TEST": "sonnet", "QA": "sonnet", "VIS-ENV": "sonnet", "DIRECTIVE": "so
          # K3 execute (§3.3 EX-ARB — opus when a BLOCKER/MAJOR is in the brief, chosen by the caller;
          # §3.4 IDENT/SAMECAUSE/BRANCH haiku, GATECAST/MUTATION sonnet "MJ+")
          "EX-ARB": "sonnet", "IDENT": "haiku", "SAMECAUSE": "haiku", "BRANCH": "haiku",
-         "GATECAST": "sonnet", "MUTATION": "sonnet"}
+         "GATECAST": "sonnet", "MUTATION": "sonnet", "EX-DWC": "sonnet"}
 LAYER = {"RUNNER": "MJ", "PRMATCH": "MJ", "FOLLOWUP": "MJ", "DWC": "MJ", "IDENT": "MJ", "SAMECAUSE": "MJ",
          "BRANCH": "MJ", "GATECAST": "MJ+", "MUTATION": "MJ+"}
 CHOICE = {"TEST": "overall", "EX-ARB": "summary"}
 UNSURE = {"TEST": "gap", "QA": "block", "VIS-ENV": "env_suspect", "DIRECTIVE": "out_of_scope",
           "RUNNER": None, "PRMATCH": "none", "FOLLOWUP": "needs_filing", "DWC": "partial_read",
           "EX-ARB": "accept", "IDENT": "different", "SAMECAUSE": "different", "BRANCH": "unrelated",
-          "GATECAST": "convene", "MUTATION": "mutation"}
+          "GATECAST": "convene", "MUTATION": "mutation", "EX-DWC": "proceed"}
 BUDGET = {"SJ": 0.5, "MJ": 0.05, "MJ+": 0.3}
 CAPS = {"SJ": 25000, "MJ": 6000, "MJ+": 12000}
 NO_ELIDE = {"TEST": ("excerpts",), "DIRECTIVE": ("comments",), "EX-ARB": ("findings", "hunks")}

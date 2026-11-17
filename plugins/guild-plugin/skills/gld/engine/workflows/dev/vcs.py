@@ -100,22 +100,32 @@ class Vcs(object):
         return self._g("show", spec)
 
     def gates_config_changed(self, base):
-        """K3 carry-over 2 (k1 발견): the gate's off-switch lives in `.claude/guild/config.json`
-        `gates`. Any difference from <base> — committed or not — is a protected-path violation."""
+        """K3 carry-over 2 / K3r1-M6: did THIS BRANCH change the gate's config (`.claude/guild/
+        config.json` `gates`)? Every commit in `<merge-base>..HEAD` touching the file is compared
+        with its parent (a change reverted later still counts), and the worktree with HEAD. A
+        difference only between <base>'s tip and the branch (a `/gld update` on base) is not the
+        developer's."""
+        rel = ".claude/guild/config.json"
+
         def gates(text):
+            if text is None:
+                return "absent"
             try:
                 return json.dumps((json.loads(text or "{}") or {}).get("gates"), sort_keys=True)
             except ValueError:
                 return "unparseable"
-        wt = None
+        mb = self.merge_base(base)
+        if mb:
+            for c in [x for x in self._g("rev-list", "%s..HEAD" % mb, "--", rel).split("\n") if x]:
+                parent = self._g("rev-parse", "%s^" % c).strip()
+                if gates(self.show(c, rel)) != gates(self.show(parent, rel) if parent else None):
+                    return True
         try:
-            with open(self.root + "/.claude/guild/config.json", encoding="utf-8") as fh:
+            with open(self.root + "/" + rel, encoding="utf-8") as fh:
                 wt = fh.read()
         except (IOError, OSError):
             wt = None
-        head = self.show("HEAD", ".claude/guild/config.json")
-        b = self.show(base, ".claude/guild/config.json")
-        return gates(wt) != gates(b) or gates(head) != gates(b)
+        return gates(wt) != gates(self.show("HEAD", rel))
 
     def central_owned(self, mb):
         return self.names("%s..HEAD" % mb, CENTRAL) if mb else None

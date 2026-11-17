@@ -30,6 +30,11 @@ RETRY_DELAY_S = 2
 VERIFY_READS = 3
 
 
+def _final_redact(text):
+    from guildcore.records.redact import redact
+    return "\n".join(redact(ln) for ln in (text or "").split("\n"))
+
+
 def _sha(text):
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
@@ -256,8 +261,11 @@ class GhWriter(object):
 
     def pr_body_edit(self, pr, fn):
         """`fn(current body) -> new body`, re-applied to the CURRENT body on every try (a human
-        edit between tries survives — INV4, K1-M1). No change → no write. Returns changed."""
+        edit between tries survives — INV4, K1-M1). No change → no write. Returns changed. The new
+        body gets a last per-line INV5 pass (K3r1-B1 — renderers already redact per value)."""
         body = self.read.pr(pr).get("body") or ""
+        raw_fn = fn
+        fn = lambda b: _final_redact(raw_fn(b))                     # noqa: E731
         new = fn(body)
         if new == body:
             return False
@@ -273,11 +281,12 @@ class GhWriter(object):
 
     # -- PR create (K3 execute Step 5) -------------------------------------------------------------
     def pr_create(self, head, base, title, body, draft=False):
+        body, title = _final_redact(body), _final_redact(title)
         """Open the Issue's PR once: an open PR whose head is `head` is returned instead (a resumed
         write). Draft unsupported (422 naming draft) → once more without draft (D-5.3). Returns
         {number, url, created, draft}."""
         def find():
-            hits = self.read.pr_for_head(head)
+            hits = [h for h in self.read.pr_for_head(head) if not h.get("isCrossRepository")]
             return {"number": hits[0]["number"], "url": hits[0].get("url"), "found": True} if hits else None
         hit = self._call("pr:find", find)
         if hit:

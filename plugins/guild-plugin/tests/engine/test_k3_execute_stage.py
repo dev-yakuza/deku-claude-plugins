@@ -324,7 +324,7 @@ class LocalAndGates(unittest.TestCase):
                      roles=[dev(tests=["test/a_test.dart"], impl_files=["lib/a.dart"], red=["00:01 +0 -1: x"]),
                             dev(), TL_DONE, auditor()])
         h.p.local_dev = ld
-        h.p.commit_local = lambda files, tests: (True, None)
+        h.p.commit_local = lambda files, tests, variant="implement": (True, None)
         r = X.run(h.p, "implement")
         self.assertEqual(r.kind, "ADVANCE")
         self.assertEqual([c.task for c in h.calls["roles"] if c.role == "developer"], ["tests", "implement"])

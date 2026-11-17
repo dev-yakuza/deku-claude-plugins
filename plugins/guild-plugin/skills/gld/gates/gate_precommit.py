@@ -299,7 +299,7 @@ SECRET_PATH_ALLOW_RE = re.compile(
     r")$", re.IGNORECASE)
 # high-signal inline secrets (value never printed)
 INLINE_SECRET_RES = [
-    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----"),  # PEM + PGP (`… PRIVATE KEY BLOCK-----`)
+    re.compile(r"-----BEGIN [A-Z0-9 ]*(?:PRIVATE|SECRET) KEY(?: BLOCK)?-----"),  # PEM + PGP (`… PRIVATE KEY BLOCK-----`)
     re.compile(r"AKIA[0-9A-Z]{16}"),          # AWS long-term access key
     re.compile(r"ASIA[0-9A-Z]{16}"),          # AWS STS temporary credential
     re.compile(r"AIza[0-9A-Za-z_\-]{35}"),    # Google API key

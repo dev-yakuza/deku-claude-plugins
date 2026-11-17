@@ -148,8 +148,12 @@ def prepare(main, path, branch, base, fresh, copy_list=()):
                 G.run(main, "worktree", "add", path, branch)
         except G.GitError as e:
             if BLOCKED_RE.search(str(e)):
-                raise BranchProblem("blocked", "cannot %s branch %s — %s" % (
-                    "create the" if fresh else "switch to the", branch, str(e).split("\n")[0]))
+                hint = ""
+                if "already checked out" in str(e) or "already used by worktree" in str(e):
+                    hint = (" — the branch is checked out in another checkout (often the main one): switch "
+                            "that checkout to another branch (e.g. the base) and run again")      # K3r1-m11
+                raise BranchProblem("blocked", "cannot %s branch %s — %s%s" % (
+                    "create the" if fresh else "switch to the", branch, str(e).split("\n")[0], hint))
             raise
         created = True
     copied, refused = copy_ignored(main, path, copy_list)

@@ -67,6 +67,35 @@ def render_unattended(entries):
                                                   markers.close_tag(UNATTENDED)]), UNATTENDED)
 
 
+LEGACY = "unattended-log:legacy"
+
+
+def splice_unattended(body, block):
+    """K3r1-M1: the engine's block replaces its own section, but the legacy (0.101.x) entries a bare
+    heading carried are kept BYTE-FOR-BYTE in a nested `<!-- guild:unattended-log:legacy -->` part —
+    captured once at migration, carried on every later splice."""
+    had_marker = markers.marker_span(body or "", UNATTENDED) is not None
+    mig = migrate_unattended(body)
+    inner = markers.inner(mig, UNATTENDED)
+    legacy = None
+    if inner is not None:
+        lines = inner.split("\n")
+        o, c = markers.open_tag(LEGACY), markers.close_tag(LEGACY)
+        if o in lines and c in lines:
+            legacy = lines[lines.index(o) + 1:lines.index(c)]
+        elif not had_marker:
+            rest = [l for l in lines if markers.clean(l) != UNATTENDED_HEADING]
+            while rest and not rest[0].strip():
+                rest.pop(0)
+            while rest and not rest[-1].strip():
+                rest.pop()
+            legacy = rest or None
+    if legacy:
+        b = block.split("\n")
+        block = "\n".join(b[:-1] + [markers.open_tag(LEGACY)] + legacy + [markers.close_tag(LEGACY), b[-1]])
+    return splice(mig, UNATTENDED, block)
+
+
 def unattended_entries(body):
     inner = markers.inner(body or "", UNATTENDED)
     if inner is None:
