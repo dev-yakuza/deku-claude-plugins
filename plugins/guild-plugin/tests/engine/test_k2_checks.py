@@ -50,10 +50,18 @@ class Effective(unittest.TestCase):
         self.assertEqual(oc.line, "test_calc.py:6")
         self.assertEqual(git(h.p.root, "worktree", "list").count("\n"), 0)     # temp tree removed
 
-    def test_import_error_after_revert_is_unverified_not_pass(self):
-        h, base = self.mk(None, TEST_OK)                                       # calc.py is new → removed
+    def test_new_file_impl_second_step_keeps_added_files(self):
+        """r2 (a): full revert removes the NEW calc.py → import error → second step keeps added
+        files → nothing left to revert → still passes → unsure (a new-file bypass is closed)."""
+        h, base = self.mk(None, TEST_OK)
         oc, _ = self.run_check(h, base)
+        self.assertEqual((oc.result, oc.kind), ("unsure", "passed"), oc.why)
+
+    def test_compile_error_in_existing_file_is_unverified_and_bypassed(self):
+        h, base = self.mk("def other():\n    return 0\n", TEST_OK)               # base has no `add`
+        oc, meta = self.run_check(h, base)
         self.assertEqual((oc.result, oc.kind), ("unverified", "load_error"), oc.why)
+        self.assertTrue(meta["bypassed"])
 
     def test_still_passing_after_revert_is_unsure(self):
         h, base = self.mk(IMPL_BASE, TEST_WEAK)
@@ -70,7 +78,7 @@ class Effective(unittest.TestCase):
         h, base = self.mk(IMPL_BASE, TEST_WEAK)
         oc, _ = self.run_check(h, base, kind="guard")
         self.assertEqual(oc.result, "pass")
-        self.assertEqual(h.calls["checks"], [])
+        self.assertEqual(len(h.calls["checks"]), 1)                 # the HEAD run only (r2-B1)
 
     def test_given_impl_files_used(self):
         h, base = self.mk(IMPL_BASE, TEST_OK)
@@ -83,14 +91,16 @@ class Effective(unittest.TestCase):
             fh.write("gen/\n")
         os.makedirs(os.path.join(h.p.root, "gen"))
         with EFF.TempTree(h.p.root, base, ["calc.py"]) as t:
-            self.assertTrue(os.path.islink(os.path.join(t, "gen")))
-            self.assertEqual(open(os.path.join(t, "calc.py")).read(), IMPL_BASE)
+            self.assertFalse(os.path.lexists(os.path.join(t.path, "gen")))      # not a dependency dir
+            t.revert()
+            with open(os.path.join(t.path, "calc.py")) as fh:
+                self.assertEqual(fh.read(), IMPL_BASE)
 
     def test_parse_refs_and_commands(self):
         self.assertEqual(EFF.parse_test_ref("test/a_test.dart::shows title"), ("test/a_test.dart", "shows title"))
         self.assertEqual(EFF.parse_test_ref("«shows» (test/a_test.dart)"), ("test/a_test.dart", "shows"))
         self.assertEqual(EFF.single_command(CFG, "flutter", "test/a_test.dart", "x y"),
-                         "flutter test test/a_test.dart --no-pub --name '(^| )x\\ y$'")
+                         "flutter test test/a_test.dart --no-pub --name '(^| )x y$'")
         self.assertTrue(EFF.has_assertion("expect(find.text('a'), findsOneWidget);", "flutter")[0])
         self.assertFalse(EFF.has_assertion("expect(true, isTrue);", "flutter")[0])
 

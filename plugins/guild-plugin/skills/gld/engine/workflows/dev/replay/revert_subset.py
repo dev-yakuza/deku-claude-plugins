@@ -28,6 +28,9 @@ from guildcore import checks as CH                        # noqa: E402
 from guildcore.roles import settings as S                 # noqa: E402
 from workflows.dev import effective as EFF                # noqa: E402
 
+# gitignored files the repo's code needs; copied into the CLONE (like a developer's checkout) —
+# the engine's temp tree never copies ignored files (K2r2-M1), so a test that needs them is
+# `unverified(secret-required)` there
 GENERATED = ("lib/env/env.dart", "lib/firebase_options.dart", "lib/controller/tts_controller/wrong_words.dart",
              "assets/data.db")
 TEST_NAME_RE = re.compile(r"\b(?:test|testWidgets)\s*\(\s*'([^'$]+)'")
@@ -49,6 +52,20 @@ class Port(object):
         except (IOError, OSError):
             return None
 
+    def warm(self, tree):
+        """ports.live's warm-up: an engine-written empty test under the deps proxy."""
+        rel = os.path.join("test", "guild_engine_warmup_test.dart")
+        with open(os.path.join(tree, rel), "w", encoding="utf-8") as fh:
+            fh.write("import 'package:flutter_test/flutter_test.dart';\n\nvoid main() {\n  test('guild engine warm-up', () {});\n}\n")
+        try:
+            sb = S.role_sandbox("developer", tree, self.run_dir, toolchain=True, tool_writes=S.toolchain_writes(tree))
+            t0 = time.time()
+            r, px = CH.deps_step(["flutter test --no-pub %s" % rel], tree, sb, os.path.join(self.run_dir, "tmp"), env=self.env)
+            self.calls.append({"cmd": "warm-up", "rc": r.rc, "secs": round(time.time() - t0, 1), "proxy": px,
+                               "tail": r.raw[-600:]})
+        finally:
+            os.remove(os.path.join(tree, rel))
+
     def check(self, cmd, cwd, owner, timeout_s, write_dirs):
         sb = S.role_sandbox("tester-verify", self.root, self.run_dir, toolchain=True,
                             tool_writes=S.toolchain_writes(self.root))
@@ -56,14 +73,8 @@ class Port(object):
         fs["allowWrite"] = list(fs.get("allowWrite") or []) + [d.rstrip("/") + "/**" for d in write_dirs]
         fs["denyWrite"] = list(fs.get("denyWrite") or []) + [self.root + "/**"]
         t0 = time.time()
-        from guildcore.checks.netproxy import AllowlistProxy
-        # build hooks of dependencies (sqlite3 native assets) re-run in the temp tree: the same
-        # host allowlist as the deps step, nothing else (ports.check does the same)
-        with AllowlistProxy(CH.deps_hosts(self.root)) as px:
-            e = dict(self.env)
-            e.update(px.env())
-            r = CH.run_command([cmd], timeout_s, cwd=cwd, env=e, sandbox=dict(sb, filesystem=fs),
-                               tmp=os.path.join(self.run_dir, "tmp"))
+        r = CH.run_command([cmd], timeout_s, cwd=cwd, env=self.env, sandbox=dict(sb, filesystem=fs),
+                           tmp=os.path.join(self.run_dir, "tmp"))             # OFFLINE (K2r2-M1)
         self.calls.append({"cmd": cmd, "rc": r.rc, "secs": round(time.time() - t0, 1), "tail": r.raw[-1500:]})
         return r
 

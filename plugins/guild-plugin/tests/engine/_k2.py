@@ -57,7 +57,8 @@ def suite(raw, passed=True, rc=0, timed_out=False):
 
 class Harness(object):
     def __init__(self, case, fx, roles=(), judges=None, suites=(), unattended=True, root=None,
-                 config=None, host="macOS arm64", base=None, impl_files=None, checks=None, n=7):
+                 config=None, host="macOS arm64", base=None, impl_files=None, checks=None, n=7,
+                 test_cases="| C1 | a |\n| C2 | b |\n"):
         self.case = case
         self.gh = FakeGh(fx)
         self.clock = Clock()
@@ -78,6 +79,8 @@ class Harness(object):
                        host=host, base=base, impl_files=impl_files, branch="feature/7-x",
                        push=lambda: self.pushed.append(1))
         self.n = n
+        if test_cases is not None and root is None:
+            self.write_file("docs/specs/%d/test-cases.md" % n, test_cases)
 
     def _role(self, call):
         self.calls["roles"].append(call)

@@ -103,6 +103,7 @@ class Ports(object):
         # the procedure replay's injection list (§10.2-2): legacy values that are not the
         # engine's to decide (loop-back reason/signature …). Empty in every live run.
         self.inject = {}
+        self.warm = None                  # (tree) → None: the engine's dependency warm-up in a temp tree
 
     # -- config ---------------------------------------------------------------------------
     def cfg(self, dotted, default=None):

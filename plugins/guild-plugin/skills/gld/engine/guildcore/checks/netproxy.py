@@ -22,9 +22,11 @@ class _H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def _allowed(self, host):
+    def _allowed(self, host, port=443):
+        """EXACT host and port 443 only (K2r2-M1: a suffix match let api./uploads./gist.github.com
+        and any *.storage.googleapis.com bucket through)."""
         h = (host or "").lower().rstrip(".")
-        return any(h == a or h.endswith("." + a) for a in self.server.allow)
+        return port == 443 and h in self.server.allow
 
     def _log(self, host, port, ok):
         self.server.log.append({"t": time.time(), "host": host, "port": port, "allowed": ok,
@@ -33,7 +35,7 @@ class _H(http.server.BaseHTTPRequestHandler):
     def do_CONNECT(self):
         host, _, port = self.path.partition(":")
         port = int(port or 443)
-        ok = self._allowed(host)
+        ok = self._allowed(host, port)
         self._log(host, port, ok)
         if not ok:
             self.send_response(403, "host not allowed")
@@ -65,7 +67,7 @@ class _H(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
-        ok = bool(u.hostname) and self._allowed(u.hostname)
+        ok = False                      # plain-HTTP absolute GETs are never proxied
         self._log(u.hostname, u.port or 80, ok)
         self.send_response(403 if not ok else 501)
         self.send_header("content-length", "0")

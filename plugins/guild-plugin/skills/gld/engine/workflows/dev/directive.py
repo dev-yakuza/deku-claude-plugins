@@ -19,8 +19,13 @@ from workflows.dev import judging
 SPRINT_RE = re.compile(r"^Sprint: #(\d+)\s*$", re.M)
 
 
+DIRECTIVE_EXCLUDED = ("NONE", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "MANNEQUIN")
+
+
 def _unmarked(comments):
-    return [c for c in comments if not markers.is_guild_comment(markers.body_of(c))]
+    """Human directives: unmarked comments — never from a drive-by author (K2r2-m2)."""
+    return [c for c in comments if not markers.is_guild_comment(markers.body_of(c))
+            and c.get("author_association") not in DIRECTIVE_EXCLUDED]
 
 
 def gather(gh, issue_n, issue=None):

@@ -186,7 +186,7 @@ def run(p, only=None, config_present=True, diff_paths=None):
     items = [JG.strip_hedges(i) for i in items]
 
     plan_lines = _plan_lines(qres)
-    honesty = honesty_lines(p, cfg, qres, items)
+    honesty = honesty_lines(p, cfg, qres, items, ui=convene)
     fu = _followups(p, cfg, qres, comments, pr)                            # computed before the post
     body = R.qa_output(p.issue, plan_lines, ui_line, honesty, ci.line, p.now(), items if pr is None else [],
                        pr.get("number") if pr else None, followups_line=fu["line"])
@@ -272,7 +272,13 @@ def qa_signature(defects, prev):
             continue
         text = " ".join([d.get("evidence") or "", d.get("line") or ""])
         toks = sorted(set(PATH_TOK.findall(text)) | set(" ".join(a.split()) for a in AC_TOK.findall(text)))
-        if toks:
+        acs = [t for t in toks if AC_TOK.fullmatch(t)]
+        if toks and not acs:
+            # a file path alone is shared by different defects of one screen (K2r2-m1): the
+            # normalised defect sentence's hash rides along
+            norm = " ".join((d.get("line") or "").lower().split())
+            out.add("+".join(toks) + "#" + hashlib.sha256(norm.encode("utf-8")).hexdigest()[:6])
+        elif toks:
             out.add("+".join(toks))
         else:
             norm = " ".join((d.get("line") or d.get("id") or "").lower().split())
@@ -280,7 +286,7 @@ def qa_signature(defects, prev):
     return sorted(out)
 
 
-def honesty_lines(p, cfg, qres, items):
+def honesty_lines(p, cfg, qres, items, ui=True):
     """K2-M6: (a) what ran (the qa role's `ran[]`), (b) what did NOT — the role's `not_run[]` plus
     code-known facts: `commands.e2e` when qa did not run it, the real-dependency smoke when
     unattended, the human's visual judgment; then the human-QA count."""
@@ -291,7 +297,8 @@ def honesty_lines(p, cfg, qres, items):
         not_run.append("`commands.e2e`(%s)" % e2e)
     if p.unattended:
         not_run.append("실의존 스모크 — 무인 실행이라 수행 안 함")
-    not_run.append("사람의 시각 판단")
+    if ui:
+        not_run.append("사람의 시각 판단")
     out = ["(a) 실행함(증거 있음): %s" % ("; ".join(ran) if ran else "qa 실행 항목 없음 — test 단계 원문에 의존"),
            "(b) 실행 안 함: %s" % "; ".join(dict.fromkeys(not_run))]
     out.append("사람 확인 필요: %d건" % len(items) if items else "사람 확인 필요: 없음 — " + NONE_LEFT)
@@ -427,7 +434,7 @@ def _write_followups(p, fu, pr):
     if pr is None:
         return
     name = FU.pr_notice_name(p.issue)
-    have = markers.find(p.gh.comments(pr["number"]), name)
+    have = markers.find(B.records(p, pr["number"]), name)
     if fu["items"] or have is not None:
         notice = FU.render_pr_notice(p.issue, [i.title for i in fu["items"]])
         p.writer.upsert_comment(pr["number"], name, notice)

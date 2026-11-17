@@ -155,6 +155,18 @@ def code_only(text, runner):
     return "".join(chars)
 
 
+def masked(text, runner):
+    """`code_only` with string CONTENTS replaced by `x` (quotes kept): an `expect(` inside a
+    string literal is no assertion (K2r2-B1), and a masked literal is still a constant."""
+    last, chars = 0, []
+    for i, c, s in _scan(text, runner):
+        if i != last:
+            chars.append("\n" * text.count("\n", last, i))
+        chars.append("x" if s and c not in "'\"`\n" else c)
+        last = i + 1
+    return "".join(chars)
+
+
 def _balanced_end(text, start, runner):
     """Index after the bracket that closes the first `(`/`{` at or after `start`."""
     depth, opened = 0, False
@@ -251,7 +263,7 @@ def has_assertion(snippet, runner):
     rx = ASSERT_RES.get(runner)
     if not rx or not snippet:
         return False, None
-    code = _drop_unreachable(code_only(snippet, runner), runner)
+    code = _drop_unreachable(masked(snippet, runner), runner)
     if runner == "go":
         for m in re.finditer(rx, code):
             line = code.count("\n", 0, m.start())
@@ -285,6 +297,12 @@ def has_assertion(snippet, runner):
 
 # ---- the exact single-test command and its verdict -----------------------------------------------
 
+def rx_escape(s):
+    """Escape only regex SYNTAX characters (K2r2-m4): Python's `re.escape` also escapes spaces,
+    which a unicode-mode JS RegExp (`-t` in newer jest/vitest) rejects; Dart and JS accept this."""
+    return re.sub(r"([.*+?^${}()|\[\]\\/])", r"\\\1", s)
+
+
 def single_command(cfg, runner, path, name):
     tmpl = (cfg.get("commands") or {}).get("test_one")
     q = shlex.quote
@@ -292,7 +310,7 @@ def single_command(cfg, runner, path, name):
         return tmpl.replace("{file}", q(path)).replace("{name}", q(name or ""))
     if not name:
         return None
-    exact = "(^| )%s$" % re.escape(name.split(" › ")[-1] if " › " in name else name)
+    exact = "(^| )%s$" % rx_escape(name.split(" › ")[-1] if " › " in name else name)
     if runner in ("flutter", "dart"):
         # --no-pub: checks have no network; dependencies are the engine deps step (K1r4-M2)
         return "%s test %s%s --name %s" % ("flutter" if runner == "flutter" else "dart", q(path),
@@ -302,36 +320,52 @@ def single_command(cfg, runner, path, name):
     if runner == "vitest":
         return "npx vitest run %s -t %s" % (q(path), q(exact))
     if runner == "pytest":
-        return "python3 -m pytest %s" % q("%s::%s" % (path, name.replace(".", "::")))
+        return "python3 -m pytest -v -rs %s" % q("%s::%s" % (path, name.replace(".", "::")))
     if runner == "unittest":
         mod = path[:-3].replace("/", ".") if path.endswith(".py") else path
         return "python3 -m unittest -v %s" % q(mod + "." + name.replace("::", "."))
     if runner == "go":
         d = os.path.dirname(path) or "."
-        return "go test -v ./%s -run %s" % (d, q("^%s$" % re.escape(name)))
+        return "go test -v ./%s -run %s" % (d, q("^%s$" % rx_escape(name)))
     return None
 
 
-def _executed(raw, runner):
+def counts(raw, runner):
+    """(executed, skipped) of one run — sub-tests and parametrised cases count as their ONE
+    parent (go top-level `=== RUN Name`, pytest `path::name[…]` grouped). None when unreadable."""
+    raw = raw or ""
     if runner == "go":
-        return len(set(re.findall(r"(?m)^=== RUN\s+(\S+)$", raw or "")))
+        top = set(x for x in re.findall(r"(?m)^=== RUN\s+(\S+)$", raw) if "/" not in x)
+        skipped = set(re.findall(r"(?m)^--- SKIP: (\S+)", raw))
+        return len(top - skipped), len(skipped)
     s = CH.parse_summary(raw, runner)
-    return (s.passed + s.failed) if s is not None else None
+    if runner == "pytest":
+        nodes = re.findall(r"(?m)^\S+::(\S+?)(?:\[[^\]]*\])? (PASSED|FAILED|SKIPPED|ERROR)", raw)
+        if nodes:
+            ran = set(n for n, st in nodes if st != "SKIPPED")
+            sk = set(n for n, st in nodes if st == "SKIPPED") - ran
+            return len(ran), len(sk)
+    if s is None:
+        return None
+    return s.passed + s.failed, s.skipped
 
 
 def rerun_kind(raw, runner, name, passed):
-    """assertion | passed | runtime | load_error | ambiguous | unknown (K2-B1)."""
+    """assertion | passed | runtime | load_error | none_ran | ambiguous | unknown (K2-B1, r2-B1)."""
     raw = raw or ""
-    n = _executed(raw, runner)
-    if n is not None and n != 1:
+    for rx in CH.LOAD_ERROR_RES.get(runner, ()):            # collection / compile stage only
+        if re.search(rx, raw, re.M):
+            return "load_error"
+    c = counts(raw, runner)
+    if c is not None and c[0] == 0:
+        return "none_ran"
+    if c is not None and c[0] != 1:
         return "ambiguous"
     short = (name or "").split(" › ")[-1].split("::")[-1].split(".")[-1]
     s = CH.parse_summary(raw, runner)
     if runner == "go":
-        if passed or re.search(r"(?m)^--- PASS: ", raw) and not re.search(r"(?m)^--- FAIL: ", raw):
-            return "passed"
         if not re.search(r"(?m)^--- FAIL: %s\b" % re.escape(name or ""), raw):
-            return "load_error" if re.search(r"\[build failed\]|\[setup failed\]", raw) else "unknown"
+            return "passed" if (passed or re.search(r"(?m)^--- PASS: ", raw)) else "unknown"
         if "panic:" in raw:
             return "runtime"
         return "assertion" if re.search(r"(?m)^\s+\w+_test\.go:\d+: ", raw) else "runtime"
@@ -339,9 +373,6 @@ def rerun_kind(raw, runner, name, passed):
         return "passed" if passed else "unknown"
     if s.failed == 0:
         return "passed"
-    for rx in CH.LOAD_ERROR_RES.get(runner, ()):
-        if re.search(rx, raw, re.M) and runner != "unittest":
-            return "load_error"
     if runner in ("flutter", "dart"):
         if not re.search(r"(?m)^\d\d:\d\d \+\d+(?: ~\d+)? -\d+: .*%s.* \[E\]\s*$" % re.escape(short), raw):
             return "unknown"
@@ -360,8 +391,7 @@ def rerun_kind(raw, runner, name, passed):
         return "assertion" if re.search(r"(?m)^E\s+assert\b", raw) or "AssertionError" in raw else "runtime"
     if runner == "unittest":
         if re.search(r"(?m)^ERROR: ", raw):
-            ie = re.search(r"ImportError|ModuleNotFoundError|SyntaxError|_FailedTest", raw)
-            return "load_error" if ie else "runtime"
+            return "runtime"
         return "assertion" if re.search(r"(?m)^FAIL: %s\b" % re.escape(short), raw) and "AssertionError" in raw else "runtime"
     return "unknown"
 
@@ -408,15 +438,24 @@ def impl_files(root, base, given=None):
     return ok, src, bad
 
 
+DEP_DIRS = ("node_modules", ".venv", "venv", "vendor", "Pods")
+
+
 class TempTree(object):
-    """`git worktree add --detach` at HEAD with impl files reverted to `base`; removed on exit
-    (also when entering fails half way — K2-m6). Every path operated on must resolve inside the
-    temp tree with no symlink component (K2-B4)."""
+    """`git worktree add --detach` at HEAD; `revert(full)` puts the impl files back to `base`
+    (full: base-absent files removed; partial: ADDED files kept — the r2 second step for a
+    compile error). Removed on exit, also when entering fails (K2-m6). Every path operated on
+    must resolve inside the temp tree with no symlink component (K2-B4).
+    Ignored entries (K2r2-M1): NO ignored FILE is ever copied (generated secrets like
+    `lib/env/env.dart` stay out); `.dart_tool` is copied without compile caches; tool-output
+    dirs are fresh; dependency dirs (`node_modules` …) are symlinked read-only; everything else
+    is left out and named in `skipped_ignored`."""
 
     def __init__(self, root, base, files, parent=None):
         self.root, self.base, self.files = root, base, files
         self.parent = parent
         self.path = None
+        self.skipped_ignored = []
 
     def _inside(self, rel):
         real_root = os.path.realpath(self.path)
@@ -438,17 +477,28 @@ class TempTree(object):
             G.run(self.root, "worktree", "add", "--detach", "--quiet", d, "HEAD")
             self._ignored()
             for f in self.files:
-                dst = self._inside(f)
-                if dst is None:
+                if self._inside(f) is None:
                     raise ValueError("impl path escapes the temp tree: %s" % f)
-                if G.ok(self.root, "cat-file", "-e", "%s:%s" % (self.base, f)):
-                    G.run(d, "checkout", self.base, "--", f)
-                elif os.path.lexists(dst):
-                    os.remove(dst)
         except Exception:
             self.__exit__(None, None, None)
             raise
-        return d
+        return self
+
+    def revert(self, full=True):
+        """full → every impl file to base (absent at base → removed); partial → only the files
+        that EXIST at base go back, files the change added are restored from HEAD."""
+        for f in self.files:
+            dst = self._inside(f)
+            if dst is None:
+                raise ValueError("impl path escapes the temp tree: %s" % f)
+            at_base = G.ok(self.root, "cat-file", "-e", "%s:%s" % (self.base, f))
+            if at_base:
+                G.run(self.path, "checkout", self.base, "--", f)
+            elif full:
+                if os.path.lexists(dst):
+                    os.remove(dst)
+            else:
+                G.run(self.path, "checkout", "HEAD", "--", f)
 
     def _ignored(self):
         lines = G.run(self.root, "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
@@ -461,19 +511,21 @@ class TempTree(object):
             dst = self._inside(rel)
             if dst is None or os.path.lexists(dst) or not os.path.exists(src) or os.path.islink(src):
                 continue
+            base = os.path.basename(rel)
+            if not os.path.isdir(src):
+                self.skipped_ignored.append(rel)        # never copy an ignored file (secrets)
+                continue
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            if os.path.isdir(src):
-                if os.path.basename(rel) == ".dart_tool":
-                    # its own copy (writes stay in the temp tree): package config + built native
-                    # assets (hooks); compile caches are left out (large, rebuilt as needed)
-                    shutil.copytree(src, dst, symlinks=True,
-                                    ignore=shutil.ignore_patterns("build", "flutter_build", "build_resolvers"))
-                elif os.path.basename(rel) in FRESH_DIRS:
-                    os.makedirs(dst)                   # tool output: the re-run writes its own
-                else:
-                    os.symlink(src, dst)               # read-only use: writes denied by the check sandbox
+            if base == ".dart_tool":
+                shutil.copytree(src, dst, symlinks=True,
+                                ignore=shutil.ignore_patterns("build", "flutter_build", "build_resolvers",
+                                                              "flutterfire"))
+            elif base in FRESH_DIRS:
+                os.makedirs(dst)
+            elif base in DEP_DIRS:
+                os.symlink(src, dst)                   # read-only: the check sandbox denies main writes
             else:
-                shutil.copy2(src, dst)
+                self.skipped_ignored.append(rel + "/")
 
     def __exit__(self, *exc):
         if self.path:
@@ -502,74 +554,149 @@ class CheckOutcome(object):
                 "rerun": self.kind, "result": self.result, "why": self.why}
 
 
-def check_ac(p, cfg, ac, covers, base, tree=None, timeout_s=900, tree_error=None):
+def static_check(p, cfg, ac, covers):
+    """① for every cover → (outcome|None, [(cover, path, name, line)])."""
     if not covers:
-        return CheckOutcome(ac, None, "unsure", "no covering test named by the tester")
+        return CheckOutcome(ac, None, "unsure", "no covering test named by the tester"), []
     runner = runner_of(cfg)
     if runner is None or runner not in ASSERT_RES:
-        return CheckOutcome(ac, covers[0].get("test"), "unverified", "runner not drivable by the engine")
-    first_line, last_cmd = None, None
+        return CheckOutcome(ac, covers[0].get("test"), "unverified", "runner not drivable by the engine"), []
+    items = []
     for cv in covers:
         path, name = parse_test_ref(cv.get("test"))
         text = p.read_file(path) if path else None
         if text is None:
-            return CheckOutcome(ac, cv.get("test"), "unsure", "cited test file not found")
+            return CheckOutcome(ac, cv.get("test"), "unsure", "cited test file not found"), []
         tb = test_body(text, name, runner)
         if tb is None:
-            return CheckOutcome(ac, cv.get("test"), "unsure", "cited test body not found (name required)")
+            return CheckOutcome(ac, cv.get("test"), "unsure", "cited test body not found (name required)"), []
         ok, off = has_assertion(tb[0], runner)
         if not ok:
-            return CheckOutcome(ac, cv.get("test"), "fail", "no reachable non-trivial assertion in the cited test")
-        first_line = first_line or "%s:%d" % (path, tb[1] + off)
-        if cv.get("kind") != "new":
-            continue
-        if not base:
-            return CheckOutcome(ac, cv.get("test"), "unverified", "no base", line=first_line)
-        if tree is None:
-            return CheckOutcome(ac, cv.get("test"), "unverified", "temp tree: %s" % (tree_error or "unavailable"),
-                                line=first_line)
-        cmd = single_command(cfg, runner, path, name)
-        if not cmd:
-            return CheckOutcome(ac, cv.get("test"), "unverified", "no exact single-test command", line=first_line)
-        last_cmd = cmd
-        r = p.check(cmd, tree, "tester", timeout_s, [tree])
-        kind = "timeout" if r.timed_out else rerun_kind(r.raw, runner, name, r.passed)
-        if kind == "assertion":
-            continue
-        if kind in ("passed", "runtime"):
-            why = {"passed": "test still passes with the impl reverted",
-                   "runtime": "re-run failed with a non-assertion error"}[kind]
-            return CheckOutcome(ac, cv.get("test"), "unsure", why, kind, first_line, cmd)
-        why = {"load_error": "compile/import error after the revert", "ambiguous": "filter did not run exactly one test",
-               "unknown": "re-run output unreadable", "timeout": "re-run timed out"}[kind]
-        return CheckOutcome(ac, cv.get("test"), "unverified", why, kind, first_line, cmd)
-    return CheckOutcome(ac, covers[0].get("test"), "pass", "assertion present; reacts to the reverted impl",
-                        "assertion" if last_cmd else None, first_line, last_cmd)
+            return CheckOutcome(ac, cv.get("test"), "fail", "no reachable non-trivial assertion in the cited test"), []
+        items.append((cv, path, name, "%s:%d" % (path, tb[1] + off)))
+    return None, items
+
+
+def _verdict_head(kind, tree):
+    """The HEAD run must execute exactly the cited test and pass (r2-B1)."""
+    if kind == "passed":
+        return None
+    if kind == "none_ran":
+        return ("unsure", "the cited test did not run at HEAD (skipped or filtered out) — covers nothing")
+    if kind == "ambiguous":
+        return ("unverified", "filter ran more than one test")
+    if tree.skipped_ignored and kind in ("load_error", "runtime", "unknown"):
+        return ("unverified", "secret-required: the test needs git-ignored files the engine does not copy (%s)"
+                % ", ".join(tree.skipped_ignored[:3]))
+    return ("unverified", "the cited test does not pass at HEAD in the temp tree (%s)" % kind)
 
 
 def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=900):
-    """Check every AC the judge called effective. Returns ({ac: CheckOutcome}, meta)."""
-    out, meta = {}, {"impl_source": None, "rejected": [], "base": base}
+    """Check every AC the judge called effective. Returns ({ac: CheckOutcome}, meta).
+    Order (design §3.3 as revised by K2 r2): ① static → temp tree at HEAD (engine warm-up) →
+    HEAD run of each cited test (exactly one ran and passed) → full revert → re-run → for a
+    compile/collection error: partial revert (added files kept) → re-run → classify."""
+    out, meta = {}, {"impl_source": None, "rejected": [], "base": base, "bypassed": False}
     if not effective_acs:
         return out, meta
     if not base and p.root and os.path.isdir(p.root) and G.ok(p.root, "rev-parse", "--git-dir"):
         base = default_base(p.root)
         meta.update(base=base, base_source="merge-base" if base else None)
-    needs_tree = any(cv.get("kind") == "new" for ac in effective_acs for cv in covers_by_ac.get(ac, []))
-    tree_err = None
-    if needs_tree and base:
-        impl, src, bad = impl_files(p.root, base, given_impl)
-        meta.update(impl_source=src, rejected=bad)
-        if impl:
-            try:
-                with TempTree(p.root, base, impl) as tree:
-                    for ac in effective_acs:
-                        out[ac] = check_ac(p, cfg, ac, covers_by_ac.get(ac, []), base, tree, timeout_s)
-                return out, meta
-            except Exception as e:                  # a failed temp tree is "could not check"
-                tree_err = "%s" % e
-        else:
-            tree_err = "no impl files to revert"
+    runner = runner_of(cfg)
+    pending = {}                      # ac → [(cv, path, name, line, cmd)]
     for ac in effective_acs:
-        out[ac] = check_ac(p, cfg, ac, covers_by_ac.get(ac, []), base, None, timeout_s, tree_err)
+        o, items = static_check(p, cfg, ac, covers_by_ac.get(ac, []))
+        if o is not None:
+            out[ac] = o
+            continue
+        rows = []
+        for cv, path, name, line in items:
+            cmd = single_command(cfg, runner, path, name)
+            if not cmd:
+                out[ac] = CheckOutcome(ac, cv.get("test"), "unverified", "no exact single-test command", line=line)
+                break
+            rows.append((cv, path, name, line, cmd))
+        else:
+            pending[ac] = rows
+    if not pending:
+        return out, meta
+    if not (p.root and os.path.isdir(p.root) and G.ok(p.root, "rev-parse", "--git-dir")):
+        for ac, rows in pending.items():
+            out[ac] = CheckOutcome(ac, rows[0][0].get("test"), "unverified", "not a git worktree", line=rows[0][3])
+        return out, meta
+    impl, src, bad = impl_files(p.root, base, given_impl) if base else ([], None, [])
+    meta.update(impl_source=src, rejected=bad)
+    try:
+        with TempTree(p.root, base, impl) as tt:
+            meta["skipped_ignored"] = tt.skipped_ignored
+            if getattr(p, "warm", None) is not None:
+                p.warm(tt.path)                     # engine-written empty test, deps hosts only
+            _phases(p, runner, pending, tt, base, impl, out, timeout_s)
+    except Exception as e:                          # a failed temp tree is "could not check"
+        for ac, rows in pending.items():
+            out.setdefault(ac, CheckOutcome(ac, rows[0][0].get("test"), "unverified", "temp tree: %s" % e,
+                                            line=rows[0][3]))
+    news = [o for ac, o in out.items() if any(r[0].get("kind") == "new" for r in pending.get(ac, []))]
+    meta["bypassed"] = bool(news) and all(o.result == "unverified" and o.kind == "load_error" for o in news)
     return out, meta
+
+
+def _phases(p, runner, pending, tt, base, impl, out, timeout_s):
+    live = {}
+    for ac, rows in pending.items():                 # HEAD run (r2-B1)
+        for cv, path, name, line, cmd in rows:
+            r = p.check(cmd, tt.path, "tester", timeout_s, [tt.path])
+            kind = "timeout" if r.timed_out else rerun_kind(r.raw, runner, name, r.passed)
+            v = _verdict_head(kind, tt)
+            if v:
+                out[ac] = CheckOutcome(ac, cv.get("test"), v[0], v[1], "head:" + kind, line, cmd)
+                break
+        else:
+            news = [x for x in rows if x[0].get("kind") == "new"]
+            if not news:
+                out[ac] = CheckOutcome(ac, rows[0][0].get("test"), "pass", "assertion present; runs and passes at HEAD",
+                                       None, rows[0][3], rows[0][4])
+            elif not base or not impl:
+                out[ac] = CheckOutcome(ac, news[0][0].get("test"), "unverified",
+                                       "no base" if not base else "no impl files to revert", line=news[0][3])
+            else:
+                live[ac] = news
+    if not live:
+        return
+    tt.revert(full=True)
+    retry = {}
+    for ac, rows in live.items():
+        res = _rerun(p, runner, tt, rows, timeout_s)
+        if res[0] == "load_error":
+            retry[ac] = rows
+        else:
+            out[ac] = _outcome(ac, rows, res)
+    if retry:
+        tt.revert(full=False)                        # second step: added files kept
+        for ac, rows in retry.items():
+            out[ac] = _outcome(ac, rows, _rerun(p, runner, tt, rows, timeout_s), second=True)
+
+
+def _rerun(p, runner, tt, rows, timeout_s):
+    for cv, path, name, line, cmd in rows:
+        r = p.check(cmd, tt.path, "tester", timeout_s, [tt.path])
+        kind = "timeout" if r.timed_out else rerun_kind(r.raw, runner, name, r.passed)
+        if kind != "assertion":
+            return kind, cv, line, cmd
+    return "assertion", rows[0][0], rows[0][3], rows[0][4]
+
+
+def _outcome(ac, rows, res, second=False):
+    kind, cv, line, cmd = res
+    t = cv.get("test")
+    if kind == "assertion":
+        return CheckOutcome(ac, t, "pass", "assertion present; reacts to the reverted impl", kind, line, cmd)
+    if kind in ("passed", "runtime", "none_ran"):
+        why = {"passed": "test still passes with the impl reverted",
+               "runtime": "re-run failed with a non-assertion error",
+               "none_ran": "the test did not run after the revert"}[kind]
+        return CheckOutcome(ac, t, "unsure", why, kind, line, cmd)
+    why = {"load_error": "compile/collection error after the revert%s" % (" (added files kept, too)" if second else ""),
+           "ambiguous": "filter did not run exactly one test", "unknown": "re-run output unreadable",
+           "timeout": "re-run timed out"}[kind]
+    return CheckOutcome(ac, t, "unverified", why, kind, line, cmd)

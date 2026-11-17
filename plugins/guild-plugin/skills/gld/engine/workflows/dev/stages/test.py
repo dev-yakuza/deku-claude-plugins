@@ -107,7 +107,10 @@ def run(p, only=None, config_present=True):
     ev_body = markers.body_of(markers.find(comments, EVIDENCE))
     ledger = V.visual_ledger(ev_body)
     tc_rel = "docs/specs/%d/test-cases.md" % p.issue
-    test_cases = p.read_file(tc_rel) or ""
+    test_cases = p.read_file(tc_rel)
+    if test_cases is None:                        # r2-B3: a design→execute handoff gap — never advance
+        line = "%s is missing — the AC coverage cannot be judged" % tc_rel
+        return B.pause(p, STAGE, "defect", line, line)
     visual_cases = "<!-- guild:visual-cases -->" in test_cases
     vrun = V.visual_run(cfg, visual_cases, ledger)
     deferred = deferred_cases(ev_body)
@@ -132,6 +135,15 @@ def run(p, only=None, config_present=True):
     if isinstance(t, B.StageResult):
         return t
     tres = t
+    if raw_green and tres.status in ("BLOCKED", "NEEDS_CONTEXT", "FAIL"):      # r2-B3: no mapping
+        t2 = _tester(p, cfg, tc_rel, r, s_line, deferred, visual_cases, vrun, task="verify",
+                     addendum="Your previous report ended %s: %s. The suite is green; map every case id to "
+                              "its covering test (covers) or say which ids no test covers." % (tres.status, tres.line or ""))
+        if isinstance(t2, B.StageResult):
+            return t2
+        tres = t2
+        if tres.status in ("BLOCKED", "NEEDS_CONTEXT", "FAIL"):
+            return _no_mapping(p, "tester %s: %s" % (tres.status, B.one_line(tres.line or "", 160)))
     covers = tres.extras.get("covers") or []
     e2e, e2e_ok = R.e2e_line(tres.extras.get("e2e") if isinstance(tres.extras.get("e2e"), str) else "")
     claim_pass = tres.status in ("DONE", "DONE_WITH_CONCERNS")
@@ -261,6 +273,16 @@ def _excerpts(p, covers, cfg, tool_mode=False):
     return "\n\n".join(parts) or "(no excerpt — cited test files not found)"
 
 
+def _no_mapping(p, why):
+    """r2-B3: coverage could not be established at all → AC gap (`ac:none`) through the
+    loop-back procedure (attended: asked) — never ADVANCE without a coverage judgment."""
+    B.record_code(p, STAGE, "TEST", "unjudged", reason=why, refs="T-AC-COVER", extra={"grade": "trigger"})
+    reason = "AC gap — %s" % why
+    if not p.unattended:
+        return ask_loopback(p, STAGE, R.TEST, reason, ["ac:none"], "tests not green / AC gap — %s" % reason)
+    return LP.run(p, STAGE, "test", reason, ["ac:none"])
+
+
 def merge_covers(old, new, weak):
     """K2-M2: a repair answers for the WEAK ids only — their entries are replaced, every other
     AC keeps the first mapping (a repair that touches a non-weak AC is ignored)."""
@@ -292,10 +314,18 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
     if not acs:                 # B2: legacy proceeds; the design→execute gap is recorded, not a stop
         acs = sorted(set(c.get("ac") for c in covers if c.get("ac")) - set(deferred))
         ac_source = "tester" if acs else "none"
-    if not acs:
-        B.record_code(p, STAGE, "TEST", "unjudged", reason="%s has no case ids and the tester mapped none" % tc_rel,
-                      refs="T-AC-COVER", extra={"ac_source": "none", "grade": "trigger"})
-        return [], [], [], [], "", {"unsure_acs": []}
+    if not acs:                 # r2-B3: nothing to judge is not a pass — repair once, then AC gap
+        rep = p.run_role(B.RoleCall("tester", "repair-mapping", STAGE, "T3.4", attempt=2,
+                                    inputs={"weak-acs.txt": "(no case ids in %s)" % tc_rel},
+                                    addendum="%s has no case ids and you mapped none. Map each acceptance "
+                                             "criterion (AC) to its covering test in covers." % tc_rel))
+        o = B.role_outcome(p, STAGE, "tester", rep)
+        if o is not None:
+            return o
+        covers = rep.extras.get("covers") or []
+        acs = sorted(set(c.get("ac") for c in covers if c.get("ac")) - set(deferred))
+        if not acs:
+            return _no_mapping(p, "%s has no case ids and the tester mapped none" % tc_rel)
     attempt, weak, outcomes, meta, d = 0, [], {}, {}, None
     while True:
         attempt += 1
@@ -353,6 +383,7 @@ def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_m
                              "base_source": meta.get("base_source"), "ac_source": ac_source,
                              "brief": "tool" if tool_mode else None,
                              "unsure_acs": ",".join(ac for ac, v in verdicts.items() if v == "unsure") or None,
+                             "effective_check": "bypassed" if meta.get("bypassed") else None,
                              "grade": "trigger" if unver or ac_source != "test-cases" else None})
 
 

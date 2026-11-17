@@ -25,7 +25,7 @@ SJ_POINTS = ("TEST", "QA", "VIS-ENV", "DIRECTIVE", "HANDOFF", "EX-ARB", "DE-ARB"
 
 def _worthy(b):
     ch = b.get("choice") or ""
-    if b.get("assumption"):
+    if b.get("assumption") or b.get("effective_check") == "bypassed":
         return True
     if "ok_with_assumption" in ch or ch.startswith("decide") or ch.startswith("escalate"):
         return True
@@ -36,10 +36,12 @@ def _worthy(b):
 
 def entries(comments):
     out = []
-    for b in DecisionLog.load(comments).blocks:
+    for b in DecisionLog.load(markers.trusted(comments)).blocks:
         if b.get("by") == "human" or not _worthy(b):
             continue
         why = b.get("assumption") or b.get("reason") or ""
+        if b.get("effective_check") == "bypassed":
+            why = "effective_check: bypassed — every new-behaviour AC was unverified (compile error after the revert)"
         flag = []
         if b.get("unsure") == "true":
             flag.append("unsure")
@@ -49,7 +51,7 @@ def entries(comments):
             b.id, b.get("point"), markers.unescape(b.get("choice") or ""),
             (" (%s)" % ", ".join(flag)) if flag else "", (" — " + markers.unescape(why)) if why else ""))
     for name in ("analyze:output", "design:output"):
-        so = OUT.find(comments, name)
+        so = OUT.find(markers.trusted(comments), name)
         if so is None:
             continue
         for ln in so.body.split("\n"):

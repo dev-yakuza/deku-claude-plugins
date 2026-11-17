@@ -22,6 +22,8 @@ from guildcore.roles import settings as S
 from guildcore.roles.result import RESULT_SCHEMAS
 from workflows.dev.stages.base import Ports
 
+WARMUP_DART = ("import 'package:flutter_test/flutter_test.dart';\n\n"
+               "void main() {\n  test('guild engine warm-up', () {});\n}\n")
 PROMPTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "roles", "prompts")
 
 
@@ -73,16 +75,26 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         return _sandboxed(cmds, worktree, owner, timeout_s)
 
     def check(cmd, cwd, owner, timeout_s, write_dirs):
-        # the TEST `effective` re-run in the temp tree re-runs dependency build hooks (word_app:
-        # sqlite3 native assets from GitHub releases — measured): the deps step's host allowlist
-        from guildcore.checks.netproxy import AllowlistProxy
-        with AllowlistProxy(CH.deps_hosts(worktree)) as px:
-            root_env.update(px.env())
-            try:
-                return _sandboxed([cmd], cwd, owner, timeout_s, write_dirs)
-            finally:
-                for k in px.env():
-                    root_env.pop(k, None)
+        # OFFLINE (K2r2-M1): the role-written test and the reverted impl get no network at all
+        return _sandboxed([cmd], cwd, owner, timeout_s, write_dirs)
+
+    def warm(tree):
+        """The engine's own warm-up in the temp tree (K2r2-M1): an ENGINE-written empty test run
+        under the deps step's exact-host proxy builds dependency hooks (word_app: sqlite3 native
+        assets) — the same trust scope as K1's deps step; then the file is removed."""
+        if not os.path.exists(os.path.join(tree, "pubspec.yaml")):
+            return None
+        rel = os.path.join("test", "guild_engine_warmup_test.dart")
+        with open(os.path.join(tree, rel), "w", encoding="utf-8") as fh:
+            fh.write(WARMUP_DART)
+        try:
+            run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", "warmup")
+            sb = S.role_sandbox("developer", tree, run_dir, issue, toolchain=True, tool_writes=S.toolchain_writes(tree))
+            r, _px = CH.deps_step(["flutter test --no-pub %s" % rel], tree, sb, os.path.join(run_dir, "tmp"),
+                                  env=C.child_env(root_env, {}, role_dir=run_dir))
+            return r
+        finally:
+            os.remove(os.path.join(tree, rel))
 
     def capture(kind, stage, role, summary, evidence, area, surprise):
         return CAP.capture(worktree, kind, issue, stage, role, summary, evidence, area, surprise, clock=clock)
@@ -103,7 +115,9 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         G.push(worktree, push_url, "refs/heads/%s:refs/heads/%s" % (branch, branch))
         return local                    # the pushed sha (qa's PR CI reads its check-runs)
 
-    return Ports(issue, gh, writer, decisions, clock, config, worktree, unattended=unattended,
+    ports = Ports(issue, gh, writer, decisions, clock, config, worktree, unattended=unattended,
                  run_role=run_role, judge=judge_runner.judge, suite=suite, check=check, capture=capture,
                  mark=mark, journal=journal, push=push, host=host, plugin=plugin, branch=branch,
                  base=base, impl_files=impl_files)
+    ports.warm = warm
+    return ports

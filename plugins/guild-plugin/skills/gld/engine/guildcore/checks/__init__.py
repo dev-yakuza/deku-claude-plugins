@@ -295,15 +295,13 @@ PARSERS = (("flutter", _flutter), ("dart", _flutter), ("jest", _jest), ("vitest"
 # reports an ASSERTION / test failure; a collection, compile or import error is no evidence
 # that the assertion reacts to the code (it would fail with any edit) → `unsure`.
 LOAD_ERROR_RES = {
-    "flutter": (r"Failed to load", r"Compilation failed", r"\.dart:\d+:\d+: Error:", r"^Error: ",
-                r"Error: Couldn't resolve", r"Undefined name", r"isn't defined for the (class|type)"),
-    "jest": (r"Test suite failed to run", r"Cannot find module", r"SyntaxError", r"ReferenceError",
-             r"is not a function", r"is not a constructor", r"Failed to load url"),
-    "pytest": (r"ERROR collecting", r"errors? during collection", r"ImportError", r"ModuleNotFoundError",
-               r"SyntaxError", r"NameError", r"AttributeError: module"),
-    "go": (r"\[build failed\]", r"\[setup failed\]", r"undefined: ", r"cannot use ", r"no non-test Go files"),
-    "unittest": (r"ImportError", r"ModuleNotFoundError", r"SyntaxError", r"NameError",
-                 r"AttributeError: module", r"^ERROR: "),
+    # COLLECTION / COMPILE stage only (K2r2-B1) — a runtime error (`is not a function`,
+    # ReferenceError, NameError, a runtime `Error:` log line) is an assertion-less FAILURE
+    "flutter": (r"Failed to load \"", r"Compilation failed", r"(?m)^\S+\.dart:\d+:\d+: Error: "),
+    "jest": (r"Test suite failed to run", r"Failed to load url"),
+    "pytest": (r"ERROR collecting", r"errors? during collection", r"ImportError while importing test module"),
+    "go": (r"\[build failed\]", r"\[setup failed\]"),
+    "unittest": (r"unittest\.loader\._FailedTest", r"(?s)^ERROR: .*?(?:ImportError|ModuleNotFoundError|SyntaxError)"),
 }
 LOAD_ERROR_RES["dart"] = LOAD_ERROR_RES["flutter"]
 LOAD_ERROR_RES["vitest"] = LOAD_ERROR_RES["jest"]
@@ -317,11 +315,11 @@ def failure_kind(raw, runner=None, passed=None):
     rn = runner or s.runner
     if s.failed == 0:
         return "passed" if (s.passed > 0 or passed) else "unknown"
-    if getattr(s, "errors", 0) and s.failed == s.errors:
-        return "load_error"
     for rx in LOAD_ERROR_RES.get(rn, ()):
         if re.search(rx, raw or "", re.M):
             return "load_error"
+    if getattr(s, "errors", 0) and s.failed == s.errors:
+        return "runtime"
     return "assertion"
 
 

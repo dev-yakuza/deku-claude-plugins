@@ -103,7 +103,7 @@ class TestPass(unittest.TestCase):
         self.assertLess(ops.index("create_comment"), max(i for i, o in enumerate(ops) if o == "edit_labels"))
         blk = [b for b in DecisionLog.load(h.gh.comments(7)).blocks if b.get("point") == "TEST"][0]
         self.assertEqual(blk.get("choice"), "effective:C1,C2;uncovered:none")
-        self.assertEqual(blk.get("checks"), "C1=pass,C2=pass")
+        self.assertEqual(blk.get("checks"), "C1=unverified(not a git worktree),C2=unverified(not a git worktree)")
         self.assertEqual(h.captures, [])
 
     def test_hedged_e2e_becomes_run_needed(self):
