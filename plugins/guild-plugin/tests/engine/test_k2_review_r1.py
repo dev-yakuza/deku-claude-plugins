@@ -88,6 +88,13 @@ class B1AssertionScope(unittest.TestCase):
         two = "00:01 +1 -1: a [E]\n  Expected: 1\n  Actual: 0\n00:01 +1 -1: Some tests failed.\n"
         self.assertEqual(EFF.rerun_kind(two, "flutter", "a", False), "ambiguous")      # the filter ran 2 tests
 
+    def test_names_with_inner_quotes_survive(self):
+        """real word_app #1886: a test name with backticks inside"""
+        self.assertEqual(EFF.parse_test_ref("test/b_test.dart::`banner`가 `null`이면 x"),
+                         ("test/b_test.dart", "`banner`가 `null`이면 x"))
+        src = "void main(){ testWidgets('`banner`가 `null`이면 x', (t) async { expect(find.text('a'), findsOneWidget); }); }"
+        self.assertIsNotNone(EFF.test_body(src, "`banner`가 `null`이면 x", "flutter"))
+
     def test_exact_filters(self):
         self.assertIn("--no-pub --name '(^| )totals$'", EFF.single_command(CFG, "flutter", "test/a_test.dart", "totals"))
         self.assertIn("-t '(^| )totals$'", EFF.single_command({}, "jest", "a.test.ts", "totals"))

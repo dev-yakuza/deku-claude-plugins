@@ -86,7 +86,12 @@ def parse_test_ref(ref):
         return None, ref or None
     path = m.group(0)
     rest = (ref[:m.start()] + " " + ref[m.end():]).strip()
-    rest = rest.strip(" \t()«»:—-'\"`")
+    rest = re.sub(r"^(?:::|—|-|:)\s*", "", rest.strip()).strip()
+    rest = re.sub(r"\s*\(\s*\)$|^\(\s*|\s*\)$", "", rest).strip()      # `name (path)` leftovers
+    pairs = {"'": "'", '"': '"', "`": "`", "«": "»"}
+    if len(rest) > 1 and rest[0] in pairs and rest[-1] == pairs[rest[0]] and rest.count(rest[0]) == 1 + (
+            rest[0] == pairs[rest[0]]):
+        rest = rest[1:-1]                               # one wrapping pair only — inner quotes stay
     return path, (rest or None)
 
 
