@@ -299,7 +299,7 @@ SECRET_PATH_ALLOW_RE = re.compile(
     r")$", re.IGNORECASE)
 # high-signal inline secrets (value never printed)
 INLINE_SECRET_RES = [
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----"),  # PEM + PGP (`… PRIVATE KEY BLOCK-----`)
     re.compile(r"AKIA[0-9A-Z]{16}"),          # AWS long-term access key
     re.compile(r"ASIA[0-9A-Z]{16}"),          # AWS STS temporary credential
     re.compile(r"AIza[0-9A-Za-z_\-]{35}"),    # Google API key
@@ -400,10 +400,21 @@ def is_git_repo(root):
         return False
 
 
+def config_path(root):
+    """The config the gate obeys. `GUILD_GATE_CONFIG` (an absolute file, set by the Guild engine
+    for its role sessions) wins over the checkout's own `.claude/guild/config.json`: the engine
+    exports the BASE branch's config next to the base's gate scripts, so a branch cannot switch
+    its own gate off. Unset → the checkout's file (interactive use, unchanged)."""
+    p = os.environ.get("GUILD_GATE_CONFIG")
+    if p and os.path.isabs(p):
+        return p
+    return os.path.join(root, ".claude", "guild", "config.json")
+
+
 def gates_enabled(root):
     """Off-switch: config.gates.enabled == false → gate disabled. Default enabled."""
     try:
-        with open(os.path.join(root, ".claude", "guild", "config.json"), encoding="utf-8") as fh:
+        with open(config_path(root), encoding="utf-8") as fh:
             cfg = json.load(fh)
         g = cfg.get("gates") or {}
         return g.get("enabled", True) is not False
@@ -916,7 +927,7 @@ _VISUAL_DROP = []          # B4 warnings, collected by check_verification, emitt
 
 def _visual_cfg(root):
     try:
-        with open(os.path.join(root, ".claude", "guild", "config.json"), encoding="utf-8") as fh:
+        with open(config_path(root), encoding="utf-8") as fh:
             cfg = json.load(fh)
         v = cfg.get("visual") if isinstance(cfg, dict) else None
         return v if isinstance(v, dict) else {}

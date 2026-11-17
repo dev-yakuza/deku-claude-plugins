@@ -110,7 +110,7 @@ class RoleSpec(object):
                  result_schema=None, allowed_status=R.STATUSES, cache="5m", language="en",
                  tier=None, toolchain=(), extra_allow=(), effort=None, agent=None, who=None,
                  unattended=False, kind="score", arm=None, experiment_id=None, scope_check=True,
-                 hooks=True, remote_check=True):
+                 hooks=True, remote_check=True, pre_check=None):
         self.role, self.task, self.template = role, task, template
         self.issue, self.stage, self.step = issue, stage, step
         self.worktree, self.model, self.persona = worktree, model, persona
@@ -128,6 +128,10 @@ class RoleSpec(object):
         self.kind, self.arm, self.experiment_id = kind, arm, experiment_id
         self.scope_check, self.hooks = scope_check, hooks
         self.remote_check = remote_check        # Q22 push tripwire (git ls-remote before/after)
+        # K3 (§5.1 순서, R7C-M1): run after the role ends and BEFORE the scope check — the refactor
+        # net's proof-residue cleanup. Returns None, or the P0.R2 needs-human reason: the result is
+        # then status BRANCH (a branch-state stop, never a scope `defect:`) and no scope check runs.
+        self.pre_check = pre_check
 
 
 class RoleResult(object):
@@ -444,6 +448,10 @@ class Runner(object):
         if tools:
             # non-setuid ps first on PATH — setuid binaries cannot run in the sandbox (K1r5)
             gitenv["PATH"] = tools + os.pathsep + env.get("PATH", "")
+        if rendered.meta.get("gates_dir"):
+            # K3: a hook manager's gate (lefthook `guild-gate`) reads the BASE config too
+            gitenv["GUILD_GATE_CONFIG"] = S.gate_config_path(rendered.meta["gates_dir"])
+            env["GUILD_GATE_CONFIG"] = gitenv["GUILD_GATE_CONFIG"]
         env["CLAUDE_ENV_FILE"] = write_env_file(os.path.join(run_dir, "in", "env.sh"), gitenv)
         hook_notes = (["hook runs in the role sandbox: %s" % c for c in rendered.meta.get("hooks_sandboxed") or []] +
                       ["hook SKIPPED (shown to the human): %s" % c for c in rendered.meta.get("hooks_skipped") or []])
@@ -552,7 +560,15 @@ class Runner(object):
             # every exit path: the process groups are already reaped by run_process; now the
             # after-snapshot and the checks (K1-B4) — a violation outranks every other status
             violations = []
-            if spec.scope_check:
+            blocked = None
+            if spec.pre_check is not None:
+                try:
+                    blocked = spec.pre_check(spec.worktree)
+                except Exception as e:           # a cleanup that cannot run is a branch stop
+                    blocked = "proof-residue cleanup failed: %s" % e
+            if blocked:
+                status, line = "BRANCH", blocked
+            if spec.scope_check and not blocked:
                 try:
                     after = SC.snapshot(spec.worktree, remote=url, watch_files=watch)
                     violations = SC.check(spec.worktree, before, after,
@@ -564,13 +580,13 @@ class Runner(object):
                 if status:
                     st_["notes"].append("was %s" % status)
                 status, line = "SCOPE", SC.render_pause_line(spec.role, violations)
-            if spec.scope_check:
+            if spec.scope_check and not blocked:
                 try:
                     st_["notes"] += SC.remote_warnings(before, after) + SC.watch_warnings(before, after)
                     self._set_baseline(spec.worktree, spec.issue, after)
                 except Exception:
                     pass
-            elif not getattr(spec, "_in_group", False):
+            elif blocked or not getattr(spec, "_in_group", False):
                 # no after-snapshot: the next step must not trust an old baseline (K1r3-M1)
                 self._unbaselined.add((os.path.abspath(spec.worktree), spec.issue))
             self._last = RoleResult(status or "INVALID", line, obj, session_id=st_["sid"],

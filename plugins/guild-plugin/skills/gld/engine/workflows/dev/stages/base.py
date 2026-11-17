@@ -40,7 +40,7 @@ class RoleCall(object):
     """What a stage asks of a role. The real port builds a guildcore.roles.runner.RoleSpec."""
 
     def __init__(self, role, task, stage, step, inputs=None, addendum=None, schema_role=None,
-                 allowed_status=None, attempt=1, schema=None):
+                 allowed_status=None, attempt=1, schema=None, model=None, pre_check=None):
         self.role, self.task, self.stage, self.step = role, task, stage, step
         self.inputs = inputs or {}
         self.addendum = addendum
@@ -48,6 +48,8 @@ class RoleCall(object):
         self.allowed_status = allowed_status
         self.attempt = attempt
         self.schema = schema              # a task-narrowed result.json schema (else the §5.2 role's)
+        self.model = model                # a tier override (execute attempt 2: +1 rung, MT §A)
+        self.pre_check = pre_check        # K3: runs before the scope check (refactor net cleanup)
 
 
 class StageResult(object):
@@ -73,6 +75,8 @@ class StageResult(object):
             return "OK PAUSE: needs-human — %s" % self.cause
         if self.kind == self.ASK:
             return "NEEDS_HUMAN: %s" % self.line
+        if self.fail_class == "needs_context":
+            return "NEEDS_CONTEXT: %s" % self.line
         return "FAIL: %s" % self.line
 
     def __repr__(self):

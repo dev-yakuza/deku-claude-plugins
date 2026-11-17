@@ -95,6 +95,7 @@ def _sb_target(entry):
 # flutter's own ports open after the profile is rendered), and a static list of common local
 # service/proxy ports is denied as well, in case one starts during the check.
 UNIX_SOCKETS_ALLOWED = ()
+READ_DENY_ROOTS = ("/Users", "/Volumes", "/private/tmp", "/private/var/folders")
 LOOPBACK_DENY_PORTS = (80, 443, 1080, 1081, 1086, 1087, 2375, 2376, 3000, 3128, 3306, 4444, 5000, 5432,
                        5672, 6152, 6153, 6379, 7890, 7891, 7897, 8000, 8001, 8080, 8081, 8118, 8443, 8888,
                        9000, 9050, 9090, 9150, 9200, 9229, 10808, 10809, 11211, 11434, 15672, 27017)
@@ -173,6 +174,23 @@ def sandbox_profile(block, extra_write=(), loopback=True, unix_sockets=UNIX_SOCK
     for r in fs.get("allowRead") or []:
         tgt = r if not os.path.isdir(r) else r.rstrip("/") + "/**"
         lines.append("(allow file-read* %s)" % _sb_target(tgt))
+    # K3 (K2r4/r7 carry-over): a networked step (K1 deps, warm-up) READS only an allowlist — the
+    # tree, the toolchain caches, the SDK, the run dir. Everything under the user areas (`/Users`,
+    # `/Volumes`, the shared temp roots) is denied first, then the allowlist re-opened (last match
+    # wins); system paths stay readable (the tools' own binaries and libraries). Metadata stays
+    # readable (path resolution); denyRead entries are re-applied last so an original inside the
+    # tree (a `copy_ignored` secret) stays unreadable.
+    ro = fs.get("readOnlyAllow")
+    if ro is not None:
+        for root in READ_DENY_ROOTS:
+            lines.append("(deny file-read* (subpath %s))" % _sb_str(os.path.realpath(root) if os.path.exists(root) else root))
+        lines.append("(allow file-read-metadata)")
+        for r in ro:
+            tgt = r if r.endswith("/**") or not os.path.isdir(r) else r.rstrip("/") + "/**"
+            lines.append("(allow file-read* %s)" % _sb_target(tgt))
+        for r in fs.get("denyRead") or []:
+            tgt = r if not os.path.isdir(r) else r.rstrip("/") + "/**"
+            lines.append("(deny file-read* %s)" % _sb_target(tgt))
     # bash/sh here-document temp files (`sh-thd*`) land wherever the shell finds a writable
     # spot, not necessarily TMPDIR (verified) — allowed by NAME, after the denies (last wins)
     lines.append("(allow file-write* (regex #\"/sh-thd[^/]*$\"))")

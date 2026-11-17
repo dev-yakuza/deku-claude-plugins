@@ -173,8 +173,55 @@ def load_phase_text(raw):
     return "\n".join(out)
 
 
-def dependency_failure(raw, rc=None, load_only=False):
+def json_load_errors(report):
+    """K3 (K2r8-m1): the LOADING failures from flutter's machine reporter (`--file-reporter json:`),
+    which a test body cannot forge (it writes stdout, not the report file): `error` events whose
+    test is a loader pseudo-test — `testStart` named `loading <file>` with no source location
+    (`line`/`url` null; a user test named "loading x" carries its line). Returns the joined error
+    texts, "" when there was no load failure, None when the report is absent/unreadable."""
+    import json as _json
+    if not report:
+        return None
+    loaders, out, ok = set(), [], False
+    for ln in report.split("\n"):
+        ln = ln.strip()
+        if not ln.startswith("{"):
+            continue
+        try:
+            e = _json.loads(ln)
+        except ValueError:
+            continue
+        ok = True
+        if e.get("type") == "testStart":
+            t = e.get("test") or {}
+            if str(t.get("name") or "").startswith("loading ") and t.get("line") is None and t.get("url") is None:
+                loaders.add(t.get("id"))
+        elif e.get("type") == "error" and e.get("testID") in loaders:
+            out.append("%s\n%s" % (e.get("error") or "", e.get("stackTrace") or ""))
+    return "\n".join(out) if ok else None
+
+
+def pre_progress_text(raw):
+    out = []
+    for ln in (raw or "").split("\n"):
+        if PROGRESS_RE.match(ln):
+            break
+        out.append(ln)
+    return "\n".join(out)
+
+
+def dependency_failure(raw, rc=None, load_only=False, report=None, expect_report=False):
     """True when a red run's output carries a dependency-resolution/download signature — with
-    `load_only`, only in the loading/compiling phase (K2r7-M2)."""
+    `load_only`, only in the loading/compiling phase (K2r7-M2): from the machine report when there
+    is one (K2r8-m1 — a fake `loading … [E]` line in stdout no longer counts), else the text."""
+    if load_only and report is not None:
+        txt = json_load_errors(report)
+        if txt is not None:
+            return any(rx.search(txt) for rx in DEP_FAILURE_RES)
+    if load_only and expect_report:
+        # the run was given a machine report but it is missing/unreadable: only the text BEFORE any
+        # test progress counts (no test body has run there); the forgeable `loading … [E]` blocks do not
+        raw = pre_progress_text(raw)
+        return any(rx.search(raw) for rx in DEP_FAILURE_RES)
     raw = load_phase_text(raw) if load_only else (raw or "")
     return any(rx.search(raw) for rx in DEP_FAILURE_RES)

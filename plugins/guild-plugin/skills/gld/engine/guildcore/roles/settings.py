@@ -104,7 +104,35 @@ def export_gates(worktree, base_sha, dest):
     arch.stdout.close()
     if arch.wait() != 0 or tar.returncode != 0:
         raise SettingsError("could not export gates from %s" % base_sha[:12])
+    # K3 (k1-notes 발견): the gate's config — its `gates` off-switch above all — comes from <base>
+    # too. The gate reads `GUILD_GATE_CONFIG` when set (hooks and the role env carry it); a branch
+    # that edits `.claude/guild/config.json` cannot turn the gate off for its own commits.
+    rc, cfg = _git(worktree, "show", "%s:.claude/guild/config.json" % base_sha)
+    with open(os.path.join(dest, GATE_CONFIG_NAME), "w", encoding="utf-8") as fh:
+        fh.write(cfg.decode("utf-8", "replace") if rc == 0 else "{}\n")
     return True
+
+
+GATE_CONFIG_NAME = ".config.json"
+
+
+def gate_config_path(gates_dir):
+    return os.path.join(gates_dir, GATE_CONFIG_NAME) if gates_dir else None
+
+
+def with_gate_config(hooks, gates_dir):
+    """Prefix every hook command that runs an exported gate script with the base config path."""
+    if not gates_dir:
+        return hooks
+    hooks = copy.deepcopy(hooks or {})
+    path = gate_config_path(gates_dir)
+    for _event, groups in hooks.items():
+        for g in groups or []:
+            for h in g.get("hooks") or []:
+                cmd = h.get("command")
+                if isinstance(cmd, str) and gates_dir in cmd and "GUILD_GATE_CONFIG=" not in cmd:
+                    h["command"] = "GUILD_GATE_CONFIG='%s' %s" % (path, cmd)
+    return hooks
 
 
 def merge_values(a, b):
@@ -624,6 +652,7 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
             if gates_dir:
                 h = rewrite_hook_commands(h, gates_dir)
             h, hook_files, dropped = base_only_hooks(worktree, base_sha, h)
+            h = with_gate_config(h, gates_dir)
         else:
             dropped = ["(no base snapshot) every project hook"]
             h = {}

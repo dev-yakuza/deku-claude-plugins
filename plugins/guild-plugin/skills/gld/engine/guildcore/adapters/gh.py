@@ -106,6 +106,12 @@ class GhCli(object):
                         "--json", "number,url,state,title,body"] + self._repo_args())
         return json.loads(out or "[]")
 
+    def pr_for_head(self, branch):
+        """execute Step 5 (P5.11): the open PR whose head is the Issue branch."""
+        out = self._gh(["gh", "pr", "list", "--head", branch, "--state", "open", "--json",
+                        "number,url,state,title,body,headRefName,baseRefName"] + self._repo_args())
+        return json.loads(out or "[]")
+
     def pr(self, n):
         return json.loads(self._gh(["gh", "pr", "view", str(n), "--json",
                                     "number,url,state,title,body,headRefName,headRefOid"] + self._repo_args()))
@@ -181,6 +187,11 @@ class FakeGh(object):
         self.calls.append(("pr_search", n))
         needle = "#%d" % int(n)
         return [p for p in self.fx.get("prs", []) if needle in (p.get("body") or "")]
+
+    def pr_for_head(self, branch):
+        self.calls.append(("pr_for_head", branch))
+        return [dict(p) for p in self.fx.get("prs", []) if p.get("headRefName") == branch
+                and (p.get("state") or "OPEN").upper() == "OPEN"]
 
     def pr(self, n):
         self.calls.append(("pr", n))
@@ -277,6 +288,8 @@ _WRITE_FORMS = (
     re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/issues -X POST --input -$"),
     re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/pulls/\d+ -X PATCH --input -$"),
     re.compile(r"^gh issue edit \d+( --(add|remove)-label [^ ]+)+( --repo [^ ]+)?$"),
+    # K3 execute Step 5: the engine opens the PR (roles never touch GitHub, Q23)
+    re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/pulls -X POST --input -$"),
 )
 
 
@@ -325,6 +338,11 @@ class GhWriteCli(object):
     def patch_pr_body(self, n, body):
         return json.loads(self._gh(["gh", "api", "repos/%s/pulls/%d" % (self.repo, int(n)), "-X",
                                     "PATCH", "--input", "-"], {"body": body}))
+
+    def create_pr(self, head, base, title, body, draft=False):
+        r = json.loads(self._gh(["gh", "api", "repos/%s/pulls" % self.repo, "-X", "POST", "--input", "-"],
+                                {"head": head, "base": base, "title": title, "body": body, "draft": bool(draft)}))
+        return {"number": r.get("number"), "url": r.get("html_url") or r.get("url")}
 
     def edit_labels(self, n, add=(), remove=()):
         argv = ["gh", "issue", "edit", str(int(n))]
@@ -431,6 +449,21 @@ class FakeGhWrite(object):
                     p["body"] = body
                 return dict(p, body=body)
         raise GhError("HTTP 404: Not Found")
+
+    def create_pr(self, head, base, title, body, draft=False):
+        if getattr(self, "draft_unsupported", False) and draft:
+            self._gate(("create_pr", head))
+            raise GhError("HTTP 422: Draft pull requests are not supported in this repository")
+        nums = [int(k) for k in self.fake.fx.get("issues", {})] + [int(p.get("number")) for p in self.fake.fx.get("prs", [])]
+        n = max(nums or [0]) + 1
+        pr = {"number": n, "url": "https://github.com/%s/pull/%d" % (self.fake.repo, n), "state": "OPEN",
+              "title": title, "body": body, "headRefName": head, "baseRefName": base, "isDraft": bool(draft),
+              "headRefOid": None}
+        if self._gate(("create_pr", head, base, bool(draft))):
+            self.fake.fx.setdefault("prs", []).append(pr)
+            self.fake.fx.setdefault("issues", {})[str(n)] = {"number": n, "labels": [], "comments": [],
+                                                             "url": pr["url"]}
+        return {"number": n, "url": pr["url"]}
 
     def edit_labels(self, n, add=(), remove=()):
         it = self._issue(n)

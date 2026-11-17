@@ -473,17 +473,27 @@ def safe_rel(root, f, revs):
 # subtree, the warm-up's included). `analysis_options*` and `build*.yaml` are NOT build inputs of the
 # warm-up (r6: neither changes the hook or dependency state).
 HOOK_RE = re.compile(r"(^|/)hook/|(^|/)pubspec(_overrides)?\.(yaml|lock)$|(^|/)flutter_test_config\.dart$")
-def hook_changes(root, base, extra=()):
-    """Files the change touched that are build inputs of the warm-up (HOOK_RE) — `base...HEAD`
-    plus `extra` (the suite's uncommitted overlay). An unknown base counts as changed."""
+# K3 (K2r6 carry-over): when `commands.test` runs build_runner, the build_runner configuration is a
+# build input again — `build.yaml` / `build.<target>.yaml` decide which builders (code) run
+BUILD_YAML_RE = re.compile(r"(^|/)build(\.[A-Za-z0-9_-]+)?\.yaml$")
+
+
+def uses_build_runner(cmds):
+    return any("build_runner" in (c or "") for c in (cmds if isinstance(cmds, (list, tuple)) else [cmds]))
+
+
+def hook_changes(root, base, extra=(), build_runner=False):
+    """Files the change touched that are build inputs of the warm-up (HOOK_RE, + `build*.yaml` when
+    the suite runs build_runner) — `base...HEAD` plus `extra` (the suite's uncommitted overlay).
+    An unknown base counts as changed."""
     if not base:
         return ["(no base)"]
     out = G.run(root, "diff", "--name-only", "%s...HEAD" % base, check=False).decode()
     names = [f for f in out.split("\n") if f] + list(extra or [])
-    return sorted(set(f for f in names if HOOK_RE.search(f)))
+    return sorted(set(f for f in names if HOOK_RE.search(f) or (build_runner and BUILD_YAML_RE.search(f))))
 
 
-def build_inputs(root, base, extra=()):
+def build_inputs(root, base, extra=(), build_runner=False):
     """(kind, files) of the change's build inputs (K2r6-B1, K2r7-M1):
     `none` — nothing changed → warm a pristine <base>, then advance to HEAD;
     `deps` — ONLY the root `pubspec.yaml`/`pubspec.lock` changed and the HEAD root has no `hook/`
@@ -494,7 +504,7 @@ def build_inputs(root, base, extra=()):
              config before any hook or test runs;
     `other` — anything else (own hooks, a test config, overrides file, no base) →
               `halted: env build-inputs-changed`."""
-    files = hook_changes(root, base, extra)
+    files = hook_changes(root, base, extra, build_runner)
     if not files:
         return "none", []
     if not base or any(f not in ("pubspec.yaml", "pubspec.lock") for f in files):
@@ -907,7 +917,7 @@ def warm_status(r):
 
 
 @contextlib.contextmanager
-def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False):
+def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False, build_runner=False):
     """The ONE preparation of every temp tree that runs role-written code (K2r5-B1, K2r6-B1).
     By the change's build inputs (`build_inputs`):
       none        — a pristine <base> warmed IN PLACE under the network, then `advance(HEAD)`;
@@ -923,7 +933,7 @@ def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False):
         extra = []
         if overlay:
             extra = [x for x in G.run(root, "ls-files", "-m", check=False).decode("utf-8", "replace").split("\n") if x]
-        kind, bfiles = build_inputs(root, base, extra)
+        kind, bfiles = build_inputs(root, base, extra, build_runner)
         info.update(build_inputs=kind, build_files=bfiles, build_hook_changed=bfiles)
         if kind == "other":
             info["halt"] = "build-inputs-changed"

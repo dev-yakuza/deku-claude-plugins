@@ -68,6 +68,7 @@ class AuditBlock(object):
                 self.head_key = m.group(1)          # "head" (C1) | "HEAD" | None (bare)
                 break
         self.local_pass = block.get("local-pass")
+        self.loopback = block.get("loopback")      # K3 (K2r1-m7): the loop-back number this invocation consumed
         cl = [markers.clean(x) for x in block.lines]
         self.scan_none = "scan: none" in cl
         self.findings_none = "findings: none" in cl
@@ -141,12 +142,14 @@ def render_finding(token, severity, axis, location, text, reason=None, fid=None)
 
 
 def render_block(n, invocation, head, findings=(), role_axis=(), local_pass=None,
-                 scan_none=False):
+                 scan_none=False, loopback=None):
     """A new block. `findings` are rendered lines (`render_finding`); none and not scan_none →
     `findings: none`. Redacted last (INV5)."""
     if not re.match(r"^[0-9a-f]{40}$", head or ""):
         raise ValueError("head must be a full 40-hex SHA")
     lines = ["### audit-record %d" % n, "invocation: %s" % invocation, "head: %s" % head]
+    if loopback is not None:
+        lines.append("loopback: %d" % int(loopback))
     if local_pass:
         lines.append("local-pass: %s" % local_pass)
     if scan_none:

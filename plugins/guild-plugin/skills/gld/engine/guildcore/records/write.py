@@ -271,6 +271,32 @@ class GhWriter(object):
                       body_sha256=_sha(new))
         return True
 
+    # -- PR create (K3 execute Step 5) -------------------------------------------------------------
+    def pr_create(self, head, base, title, body, draft=False):
+        """Open the Issue's PR once: an open PR whose head is `head` is returned instead (a resumed
+        write). Draft unsupported (422 naming draft) → once more without draft (D-5.3). Returns
+        {number, url, created, draft}."""
+        def find():
+            hits = self.read.pr_for_head(head)
+            return {"number": hits[0]["number"], "url": hits[0].get("url"), "found": True} if hits else None
+        hit = self._call("pr:find", find)
+        if hit:
+            return dict(hit, created=False, draft=None)
+        from guildcore.adapters.gh import GhError
+        for d in ([True, False] if draft else [False]):
+            try:
+                res = self._perform("pr:create", head, lambda: self.write.create_pr(head, base, title, body, d),
+                                    lambda r: bool(r and r.get("number")) and
+                                    (self.read.pr(r["number"]).get("body") or "") == body,
+                                    find=find, body_sha256=_sha(body), base=base, draft=d)
+                return {"number": int(res["number"]), "url": res.get("url"), "created": not res.get("found"),
+                        "draft": d}
+            except (GhError, GhWriteError) as e:
+                if d and "draft" in str(e).lower():
+                    continue
+                raise
+        raise GhWriteError("pr:create", "unreachable", "terminal")
+
     # -- Issues --------------------------------------------------------------------------------
     def issue_create(self, title, body, labels=(), key=None, key_kind="slice-key"):
         """Create once: the body carries `<!-- guild:<key_kind> <key> -->`; an existing Issue

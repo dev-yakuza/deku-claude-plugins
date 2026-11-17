@@ -145,6 +145,11 @@ def interrupted(comments, stage_label, labels):
         return None
     blk = rec.latest_active()
     at = blk.get("at") or ""
+    num = LB.NUMBERED_RE.match(markers.clean(blk.heading)).group(1)
+    for ar in AU.all_from_comments(comments):
+        # K3 (K2r1-m7): the number an execute consumed outranks the time comparison
+        if any(b.loopback == num for b in ar.blocks):
+            return None
     for ar in AU.all_from_comments(comments):
         for inv in ar.invocations():
             if inv and inv >= at:
